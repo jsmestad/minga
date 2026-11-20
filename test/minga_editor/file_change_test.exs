@@ -149,8 +149,8 @@ defmodule MingaEditor.FileChangeTest do
 
     watcher_state = :sys.get_state(watcher)
     assert watcher_state.subscriber == self()
-    assert watcher_state.watched_files == MapSet.new([file])
-    assert watcher_state.watched_project_dirs == MapSet.new([project])
+    assert watcher_state.intent.files == MapSet.new([file])
+    assert watcher_state.intent.project_dirs == MapSet.new([project])
 
     send(watcher, {:file_event, nil, {project_file, [:created]}})
     :sys.get_state(watcher)

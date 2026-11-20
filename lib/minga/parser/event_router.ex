@@ -2,31 +2,25 @@ defmodule Minga.Parser.EventRouter do
   @moduledoc """
   Parser event decoding, snippet correlation, and editor-buffer event routing.
 
-  The manager supplies relevant aggregates and installs the typed values returned
-  here. Parser buffer IDs never escape to editor presentation.
+  The manager supplies synchronization work and installs the returned values.
+  Parser buffer IDs never escape to editor presentation.
   """
 
   alias Minga.Language.Grammar
   alias Minga.Parser.BufferRegistration
   alias Minga.Parser.BufferRegistry
   alias Minga.Parser.EventCorrelation
-  alias Minga.Parser.ParseScheduler
   alias Minga.Parser.ParseSync
   alias Minga.Parser.PortLifecycle
   alias Minga.Parser.Protocol
   alias Minga.Parser.RequestHandler
-  alias Minga.Parser.RequestState
   alias Minga.Parser.SnippetState
 
   @snippet_buffer_id_start 4_000_000_000
 
-  @type route_result ::
-          {:noreply, BufferRegistry.t(), ParseScheduler.t(), RequestState.t(), SnippetState.t()}
+  @type route_result :: {ParseSync.t(), SnippetState.t()}
   @type highlight_start_result ::
           {:noreply, SnippetState.t()} | {:reply, :unsupported, SnippetState.t()}
-  @type route_context ::
-          {port() | nil, BufferRegistry.t(), ParseScheduler.t(), RequestState.t(),
-           SnippetState.t(), %{pid() => reference()}}
   @type highlight_source_event ::
           {:highlight_names, non_neg_integer(), [String.t()]}
           | {:highlight_spans, non_neg_integer(), non_neg_integer(),
@@ -52,96 +46,40 @@ defmodule Minga.Parser.EventRouter do
   end
 
   @doc "Routes one encoded parser frame to a synchronous requester or subscriber."
-  @spec route(
-          binary(),
-          port() | nil,
-          BufferRegistry.t(),
-          ParseScheduler.t(),
-          RequestState.t(),
-          SnippetState.t(),
-          %{pid() => reference()}
-        ) :: route_result()
-  def route(data, port, buffers, scheduler, requests, snippets, subscribers) do
+  @spec route(binary(), port() | nil, ParseSync.t(), SnippetState.t(), %{pid() => reference()}) ::
+          route_result()
+  def route(data, port, work, snippets, subscribers) do
     case Protocol.decode_event(data) do
       {:ok, {:indent_result, request_id, _line, indent_level}} ->
-        install_request_reply(
-          RequestHandler.reply(requests, request_id, indent_level),
-          buffers,
-          scheduler,
-          snippets
-        )
+        {reply_request(work, request_id, indent_level), snippets}
 
-      {:ok, {:textobject_result, request_id, result}} ->
-        install_request_reply(
-          RequestHandler.reply(requests, request_id, result),
-          buffers,
-          scheduler,
-          snippets
-        )
-
-      {:ok, {:match_item_result, request_id, result}} ->
-        install_request_reply(
-          RequestHandler.reply(requests, request_id, result),
-          buffers,
-          scheduler,
-          snippets
-        )
-
-      {:ok, {:node_info, request_id, result}} ->
-        install_request_reply(
-          RequestHandler.reply(requests, request_id, result),
-          buffers,
-          scheduler,
-          snippets
-        )
+      {:ok, {kind, request_id, result}}
+      when kind in [:textobject_result, :match_item_result, :node_info] ->
+        {reply_request(work, request_id, result), snippets}
 
       {:ok, {:highlight_names, _buffer_id, _names} = event} ->
-        handle_highlight_or_broadcast(
-          event,
-          port,
-          buffers,
-          scheduler,
-          requests,
-          snippets,
-          subscribers
-        )
+        handle_highlight_or_broadcast(event, port, work, snippets, subscribers)
 
       {:ok, {:highlight_spans, _buffer_id, _version, _spans} = event} ->
-        handle_highlight_or_broadcast(
-          event,
-          port,
-          buffers,
-          scheduler,
-          requests,
-          snippets,
-          subscribers
-        )
+        handle_highlight_or_broadcast(event, port, work, snippets, subscribers)
 
       {:ok, {:request_reparse, buffer_id}} ->
-        recover_parser_buffer(port, buffers, scheduler, requests, snippets, buffer_id)
+        {recover_parser_buffer(work, port, buffer_id), snippets}
 
       {:ok, {:log_message, _level, _text} = event} ->
         broadcast(subscribers, {:minga_highlight, event})
-        noreply(buffers, scheduler, requests, snippets)
+        {work, snippets}
 
       {:ok, event} ->
-        broadcast_or_drop_snippet_event(
-          event,
-          port,
-          buffers,
-          scheduler,
-          requests,
-          snippets,
-          subscribers
-        )
+        broadcast_or_drop_snippet_event(event, port, work, snippets, subscribers)
 
       :unknown ->
         Minga.Log.warning(:port, "Parser: received unknown opcode")
-        noreply(buffers, scheduler, requests, snippets)
+        {work, snippets}
 
       {:error, reason} ->
         Minga.Log.warning(:port, "Parser: failed to decode event: #{inspect(reason)}")
-        noreply(buffers, scheduler, requests, snippets)
+        {work, snippets}
     end
   end
 
@@ -188,35 +126,17 @@ defmodule Minga.Parser.EventRouter do
   @spec handle_highlight_or_broadcast(
           highlight_source_event(),
           port() | nil,
-          BufferRegistry.t(),
-          ParseScheduler.t(),
-          RequestState.t(),
+          ParseSync.t(),
           SnippetState.t(),
           %{pid() => reference()}
         ) :: route_result()
-  defp handle_highlight_or_broadcast(
-         event,
-         port,
-         buffers,
-         scheduler,
-         requests,
-         snippets,
-         subscribers
-       ) do
+  defp handle_highlight_or_broadcast(event, port, work, snippets, subscribers) do
     case handle_highlight_event(event, port, snippets) do
       {:handled, snippets} ->
-        noreply(buffers, scheduler, requests, snippets)
+        {work, snippets}
 
       :miss ->
-        broadcast_or_drop_snippet_event(
-          event,
-          port,
-          buffers,
-          scheduler,
-          requests,
-          snippets,
-          subscribers
-        )
+        broadcast_or_drop_snippet_event(event, port, work, snippets, subscribers)
     end
   end
 
@@ -231,91 +151,53 @@ defmodule Minga.Parser.EventRouter do
   @spec broadcast_or_drop_snippet_event(
           term(),
           port() | nil,
-          BufferRegistry.t(),
-          ParseScheduler.t(),
-          RequestState.t(),
+          ParseSync.t(),
           SnippetState.t(),
           %{pid() => reference()}
         ) :: route_result()
-  defp broadcast_or_drop_snippet_event(
-         event,
-         port,
-         buffers,
-         scheduler,
-         requests,
-         snippets,
-         subscribers
-       ) do
+  defp broadcast_or_drop_snippet_event(event, port, work, snippets, subscribers) do
     if snippet_buffer_event?(event) do
       Minga.Log.debug(:port, "Parser: dropping late snippet event #{inspect(event_name(event))}")
-      noreply(buffers, scheduler, requests, snippets)
+      {work, snippets}
     else
-      broadcast_editor_event(event, port, buffers, scheduler, requests, snippets, subscribers)
+      {broadcast_editor_event(event, work, port, subscribers), snippets}
     end
   end
 
   @spec broadcast_editor_event(
           term(),
+          ParseSync.t(),
           port() | nil,
-          BufferRegistry.t(),
-          ParseScheduler.t(),
-          RequestState.t(),
-          SnippetState.t(),
           %{pid() => reference()}
-        ) :: route_result()
+        ) :: ParseSync.t()
   defp broadcast_editor_event(
          {:highlight_spans, buffer_id, version, _spans} = event,
+         work,
          port,
-         buffers,
-         scheduler,
-         requests,
-         snippets,
          subscribers
        ) do
-    case BufferRegistry.resolve(buffers, buffer_id) do
-      nil ->
-        noreply(buffers, scheduler, requests, snippets)
-
-      buffer_pid ->
-        context = {port, buffers, scheduler, requests, snippets, subscribers}
-        complete_editor_parse(event, context, buffer_pid, version)
+    with buffer_pid when is_pid(buffer_pid) <- BufferRegistry.resolve(work.buffers, buffer_id),
+         {:ok, next_work, completed} <- ParseSync.complete_parse(work, port, buffer_pid, version) do
+      broadcast(subscribers, {:minga_highlight, tag_editor_buffer(event, buffer_pid, completed)})
+      next_work
+    else
+      _stale_or_missing -> work
     end
   end
 
-  defp broadcast_editor_event(event, _port, buffers, scheduler, requests, snippets, subscribers) do
+  defp broadcast_editor_event(event, work, _port, subscribers) do
     case editor_event_identity(event) do
       {:versioned, buffer_id, version} ->
-        broadcast_versioned(buffers, buffer_id, version, event, subscribers)
+        broadcast_versioned(work.buffers, buffer_id, version, event, subscribers)
 
       {:unversioned, buffer_id} ->
-        broadcast_registered(buffers, buffer_id, event, subscribers)
+        broadcast_registered(work.buffers, buffer_id, event, subscribers)
 
       :global ->
         broadcast(subscribers, {:minga_highlight, event})
     end
 
-    noreply(buffers, scheduler, requests, snippets)
-  end
-
-  @spec complete_editor_parse(term(), route_context(), pid(), pos_integer()) :: route_result()
-  defp complete_editor_parse(
-         event,
-         {port, buffers, scheduler, requests, snippets, subscribers},
-         buffer_pid,
-         version
-       ) do
-    case ParseSync.complete_parse(port, buffers, scheduler, requests, buffer_pid, version) do
-      {:ok, buffers, scheduler, requests, completed} ->
-        broadcast(
-          subscribers,
-          {:minga_highlight, tag_editor_buffer(event, buffer_pid, completed)}
-        )
-
-        noreply(buffers, scheduler, requests, snippets)
-
-      :stale ->
-        noreply(buffers, scheduler, requests, snippets)
-    end
+    work
   end
 
   @spec editor_event_identity(term()) ::
@@ -447,24 +329,11 @@ defmodule Minga.Parser.EventRouter do
   defp maybe_complete_highlight(buffer_id, pending, _port, snippets),
     do: {:handled, SnippetState.put(snippets, buffer_id, pending)}
 
-  @spec recover_parser_buffer(
-          port() | nil,
-          BufferRegistry.t(),
-          ParseScheduler.t(),
-          RequestState.t(),
-          SnippetState.t(),
-          non_neg_integer()
-        ) :: route_result()
-  defp recover_parser_buffer(port, buffers, scheduler, requests, snippets, buffer_id) do
-    case BufferRegistry.resolve(buffers, buffer_id) do
-      buffer_pid when is_pid(buffer_pid) ->
-        {:ok, buffers, scheduler, requests} =
-          ParseSync.force_parse(port, buffers, scheduler, requests, buffer_pid)
-
-        noreply(buffers, scheduler, requests, snippets)
-
-      nil ->
-        noreply(buffers, scheduler, requests, snippets)
+  @spec recover_parser_buffer(ParseSync.t(), port() | nil, non_neg_integer()) :: ParseSync.t()
+  defp recover_parser_buffer(work, port, buffer_id) do
+    case BufferRegistry.resolve(work.buffers, buffer_id) do
+      buffer_pid when is_pid(buffer_pid) -> ParseSync.force_parse(work, port, buffer_pid)
+      nil -> work
     end
   end
 
@@ -488,19 +357,11 @@ defmodule Minga.Parser.EventRouter do
   @spec event_name(tuple()) :: atom()
   defp event_name(event), do: elem(event, 0)
 
-  @spec install_request_reply(
-          {:noreply, RequestState.t()},
-          BufferRegistry.t(),
-          ParseScheduler.t(),
-          SnippetState.t()
-        ) :: route_result()
-  defp install_request_reply({:noreply, requests}, buffers, scheduler, snippets),
-    do: noreply(buffers, scheduler, requests, snippets)
-
-  @spec noreply(BufferRegistry.t(), ParseScheduler.t(), RequestState.t(), SnippetState.t()) ::
-          route_result()
-  defp noreply(buffers, scheduler, requests, snippets),
-    do: {:noreply, buffers, scheduler, requests, snippets}
+  @spec reply_request(ParseSync.t(), non_neg_integer(), term()) :: ParseSync.t()
+  defp reply_request(work, request_id, result) do
+    {:noreply, requests} = RequestHandler.reply(work.requests, request_id, result)
+    ParseSync.put_requests(work, requests)
+  end
 
   @spec broadcast(%{pid() => reference()}, term()) :: :ok
   defp broadcast(subscribers, message) do

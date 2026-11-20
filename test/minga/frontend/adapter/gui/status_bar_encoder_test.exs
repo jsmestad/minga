@@ -65,9 +65,10 @@ defmodule Minga.Frontend.Adapter.GUI.StatusBarEncoderTest do
       model = %StatusBar{content_kind: :buffer, data: data}
 
       {cmd, _caches} = StatusBarEncoder.encode(model, Caches.new())
-      sections = decode_sections(cmd)
+      entries = decode_section_entries(cmd)
+      assert Enum.map(entries, &elem(&1, 0)) == [1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 9]
 
-      <<2::8, 1::16, 1::16, segments::binary>> = sections[0x0B]
+      <<2::8, 1::16, 1::16, segments::binary>> = entries |> Map.new() |> Map.fetch!(0x0B)
       {left, rest} = take_modeline_segment(segments)
       {right, ""} = take_modeline_segment(rest)
 
@@ -312,6 +313,7 @@ defmodule Minga.Frontend.Adapter.GUI.StatusBarEncoderTest do
       assert %{
                command: :gui_status_bar,
                field: :section_payload,
+               actual: 76_005,
                min: 0,
                max: 65_535
              } =
@@ -321,6 +323,27 @@ defmodule Minga.Frontend.Adapter.GUI.StatusBarEncoderTest do
                    Caches.new()
                  )
                end)
+    end
+
+    test "validates segment fields before checking the combined modeline section length" do
+      segment = {:custom, String.duplicate("x", 65_535), 0xBBC2CF, 0x51AFEF, [], nil}
+      invalid = {:custom, "x", 0x1000000, 0x51AFEF, [], nil}
+
+      data = %{
+        status_data()
+        | modeline_segments: %{left: [segment], right: [invalid]}
+      }
+
+      model = %StatusBar{content_kind: :buffer, data: data}
+
+      assert %{
+               command: :gui_status_bar,
+               field: :modeline_segment_fg,
+               actual: 0x1000000,
+               min: 0,
+               max: 0xFFFFFF
+             } =
+               assert_raise(EncodingError, fn -> StatusBarEncoder.encode(model, Caches.new()) end)
     end
 
     test "rejects an out-of-range indent size instead of clamping it" do
@@ -437,9 +460,12 @@ defmodule Minga.Frontend.Adapter.GUI.StatusBarEncoderTest do
   end
 
   @spec decode_sections(binary()) :: %{non_neg_integer() => binary()}
-  defp decode_sections(<<@op_gui_status_bar, count::8, rest::binary>>) do
+  defp decode_sections(command), do: command |> decode_section_entries() |> Map.new()
+
+  @spec decode_section_entries(binary()) :: [{non_neg_integer(), binary()}]
+  defp decode_section_entries(<<@op_gui_status_bar, count::8, rest::binary>>) do
     {sections, <<>>} = Enum.map_reduce(1..count, rest, fn _index, acc -> decode_section(acc) end)
-    Map.new(sections)
+    sections
   end
 
   @spec decode_section(binary()) :: {{non_neg_integer(), binary()}, binary()}

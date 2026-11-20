@@ -11,9 +11,10 @@ defmodule Minga.FileWatcher do
 
   Rather than watching the entire project root (which would include `.git`,
   `_build`, `node_modules`, etc.), we watch only the parent directories of
-  files that are actually open in the editor. The set of OS directories is
-  derived from declarative file and project watch intent, so repeating the
-  same registration is idempotent.
+  files that are actually open in the editor and the directories registered
+  for project surfaces. Native watcher directories are derived from those
+  registrations, but event coverage also distinguishes explicit files from
+  project subtrees. Repeating the same registration is idempotent.
 
   Events are debounced per-path with a configurable window (default 100ms)
   to coalesce rapid writes (e.g., `git checkout` touching many files).
@@ -21,14 +22,15 @@ defmodule Minga.FileWatcher do
 
   use GenServer
 
+  alias Minga.FileWatcher.Intent
+
   @enforce_keys [:subscriber, :debounce_ms]
   defstruct subscriber: nil,
             subscriber_monitor: nil,
             debounce_ms: nil,
             watcher: nil,
             watched_dirs: MapSet.new(),
-            watched_files: MapSet.new(),
-            watched_project_dirs: MapSet.new(),
+            intent: %Intent{},
             pending: %{},
             events_registry: Minga.Events.default_registry()
 
@@ -37,8 +39,7 @@ defmodule Minga.FileWatcher do
            subscriber_monitor: reference() | nil,
            watcher: pid() | nil,
            watched_dirs: MapSet.t(String.t()),
-           watched_files: MapSet.t(String.t()),
-           watched_project_dirs: MapSet.t(String.t()),
+           intent: Intent.t(),
            pending: %{String.t() => reference()},
            debounce_ms: pos_integer(),
            events_registry: Minga.Events.registry()
@@ -68,7 +69,7 @@ defmodule Minga.FileWatcher do
     GenServer.call(server, {:watch_directory, Path.expand(path)}, @call_timeout_ms)
   end
 
-  @doc "Unregisters a file path. Stops watching the directory when no files remain in it."
+  @doc "Unregisters a file path. Stops watching the parent directory if nothing else needs it."
   @spec unwatch_path(GenServer.server(), String.t()) :: :ok
   def unwatch_path(server \\ __MODULE__, path) when is_binary(path) do
     GenServer.call(server, {:unwatch_path, Path.expand(path)}, @call_timeout_ms)
@@ -152,30 +153,29 @@ defmodule Minga.FileWatcher do
         %__MODULE__{} = state
       ) do
     state = monitor_subscriber(state, subscriber)
-    {:reply, :ok, replace_watch_intent(state, watched_files, watched_project_dirs)}
+    intent = Intent.new(watched_files, watched_project_dirs)
+    {:reply, :ok, reconcile_watch_intent(state, intent)}
   end
 
   def handle_call({:watch_path, path}, _from, %__MODULE__{} = state) do
-    {:reply, :ok, do_watch_path(state, path)}
+    {:reply, :ok, reconcile_watch_intent(state, Intent.watch_path(state.intent, path))}
   end
 
   def handle_call({:watch_directory, path}, _from, %__MODULE__{} = state) do
-    {:reply, :ok, do_watch_directory(state, path)}
+    {:reply, :ok, reconcile_watch_intent(state, Intent.watch_directory(state.intent, path))}
   end
 
   def handle_call({:unwatch_path, path}, _from, %__MODULE__{} = state) do
-    new_files = MapSet.delete(state.watched_files, path)
-    {:reply, :ok, reconcile_watch_intent(state, new_files, state.watched_project_dirs)}
+    {:reply, :ok, reconcile_watch_intent(state, Intent.unwatch_path(state.intent, path))}
   end
 
   def handle_call({:unwatch_directory, path}, _from, %__MODULE__{} = state) do
-    {:reply, :ok, unwatch_project_dirs(state, [Path.expand(path)])}
+    {:reply, :ok, reconcile_watch_intent(state, Intent.unwatch_directory(state.intent, path))}
   end
 
   def handle_call({:unwatch_directory_tree, root}, _from, %__MODULE__{} = state) do
-    root = Path.expand(root)
-    dirs = Enum.filter(state.watched_project_dirs, &path_under_root?(&1, root))
-    {:reply, :ok, unwatch_project_dirs(state, dirs)}
+    intent = Intent.unwatch_directory_tree(state.intent, root)
+    {:reply, :ok, reconcile_watch_intent(state, intent)}
   end
 
   @impl true
@@ -191,7 +191,7 @@ defmodule Minga.FileWatcher do
   def handle_info({:file_event, _watcher_pid, {path, _events}}, %__MODULE__{} = state) do
     path = Path.expand(to_string(path))
 
-    if watched_path_event?(state, path) do
+    if Intent.covers?(state.intent, path) do
       {:noreply, schedule_debounce(state, path)}
     else
       {:noreply, state}
@@ -227,80 +227,20 @@ defmodule Minga.FileWatcher do
 
   # ── Private helpers ─────────────────────────────────────────────────────────
 
-  @spec do_watch_path(state(), String.t()) :: state()
-  defp do_watch_path(%__MODULE__{} = state, path) do
-    new_files = MapSet.put(state.watched_files, path)
-    reconcile_watch_intent(state, new_files, state.watched_project_dirs)
-  end
-
-  @spec do_watch_directory(state(), String.t()) :: state()
-  defp do_watch_directory(%__MODULE__{} = state, path) do
-    dir = Path.expand(path)
-
-    new_project_dirs = MapSet.put(state.watched_project_dirs, dir)
-    reconcile_watch_intent(state, state.watched_files, new_project_dirs)
-  end
-
-  @spec unwatch_project_dirs(state(), [String.t()]) :: state()
-  defp unwatch_project_dirs(%__MODULE__{} = state, dirs) when is_list(dirs) do
-    dirs_to_remove = Enum.filter(dirs, &MapSet.member?(state.watched_project_dirs, &1))
-
-    new_project_dirs =
-      Enum.reduce(dirs_to_remove, state.watched_project_dirs, &MapSet.delete(&2, &1))
-
-    reconcile_watch_intent(state, state.watched_files, new_project_dirs)
-  end
-
-  @spec replace_watch_intent(state(), [String.t()], [String.t()]) :: state()
-  defp replace_watch_intent(%__MODULE__{} = state, watched_files, watched_project_dirs) do
-    reconcile_watch_intent(
-      state,
-      MapSet.new(watched_files),
-      MapSet.new(watched_project_dirs)
-    )
-  end
-
-  @spec reconcile_watch_intent(state(), MapSet.t(String.t()), MapSet.t(String.t())) :: state()
-  defp reconcile_watch_intent(%__MODULE__{} = state, watched_files, watched_project_dirs) do
-    watched_dirs = desired_dirs(watched_files, watched_project_dirs)
+  @spec reconcile_watch_intent(state(), Intent.t()) :: state()
+  defp reconcile_watch_intent(%__MODULE__{} = state, intent) do
+    watched_dirs = Intent.native_dirs(intent)
     watcher = reconcile_watcher(state.watcher, state.watched_dirs, watched_dirs)
-    pending = retain_watched_pending(state.pending, watched_files, watched_project_dirs)
+    pending = retain_watched_pending(state.pending, intent)
 
     %__MODULE__{
       state
       | watched_dirs: watched_dirs,
-        watched_files: watched_files,
-        watched_project_dirs: watched_project_dirs,
+        intent: intent,
         watcher: watcher,
         pending: pending
     }
   end
-
-  @spec desired_dirs(MapSet.t(String.t()), MapSet.t(String.t())) :: MapSet.t(String.t())
-  defp desired_dirs(watched_files, watched_project_dirs) do
-    file_dirs = MapSet.new(watched_files, &Path.dirname/1)
-    MapSet.union(file_dirs, watched_project_dirs)
-  end
-
-  @spec watched_path_event?(state(), String.t()) :: boolean()
-  defp watched_path_event?(%__MODULE__{} = state, path) do
-    MapSet.member?(state.watched_files, path) or
-      watched_project_child?(state.watched_project_dirs, path)
-  end
-
-  @spec watched_project_child?(MapSet.t(String.t()), String.t()) :: boolean()
-  defp watched_project_child?(watched_project_dirs, path) do
-    Enum.any?(watched_project_dirs, fn dir -> path_under_root?(path, dir) end)
-  end
-
-  @spec path_under_root?(String.t(), String.t()) :: boolean()
-  defp path_under_root?(path, root) do
-    path == root or String.starts_with?(path, path_prefix(root))
-  end
-
-  @spec path_prefix(String.t()) :: String.t()
-  defp path_prefix("/"), do: "/"
-  defp path_prefix(root), do: root <> "/"
 
   @spec reconcile_watcher(pid() | nil, MapSet.t(String.t()), MapSet.t(String.t())) :: pid() | nil
   defp reconcile_watcher(existing_watcher, old_dirs, new_dirs) do
@@ -392,18 +332,15 @@ defmodule Minga.FileWatcher do
     :ok
   end
 
-  @spec retain_watched_pending(
-          %{String.t() => reference()},
-          MapSet.t(String.t()),
-          MapSet.t(String.t())
-        ) :: %{String.t() => reference()}
-  defp retain_watched_pending(pending, watched_files, watched_project_dirs) do
-    Enum.reduce(pending, %{}, fn {path, ref}, kept ->
-      if MapSet.member?(watched_files, path) or watched_project_child?(watched_project_dirs, path) do
-        Map.put(kept, path, ref)
+  @spec retain_watched_pending(%{String.t() => reference()}, Intent.t()) ::
+          %{String.t() => reference()}
+  defp retain_watched_pending(pending, intent) do
+    Enum.reduce(pending, pending, fn {path, ref}, kept ->
+      if Intent.covers?(intent, path) do
+        kept
       else
         Process.cancel_timer(ref)
-        kept
+        Map.delete(kept, path)
       end
     end)
   end
@@ -439,14 +376,14 @@ defmodule Minga.FileWatcher do
 
   @spec notify_all_watched(state()) :: :ok
   defp notify_all_watched(%__MODULE__{} = state) do
-    Enum.each(state.watched_files, fn path ->
+    Enum.each(state.intent.files, fn path ->
       notify_subscriber(state.subscriber, path)
     end)
   end
 
   @spec notify_all_watched_project_dirs(state()) :: :ok
   defp notify_all_watched_project_dirs(%__MODULE__{} = state) do
-    Enum.each(state.watched_project_dirs, fn path ->
+    Enum.each(state.intent.project_dirs, fn path ->
       notify_subscriber(state.subscriber, path)
     end)
   end

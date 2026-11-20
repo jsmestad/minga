@@ -418,14 +418,12 @@ defmodule MingaAgent.ToolRouter do
     _ -> File.read(path)
   end
 
-  @spec fork_store_available(pid()) :: :ok | {:error, {:fork_unavailable, term()}}
-  defp fork_store_available(fork_store) do
-    try do
-      _ = BufferForkStore.all(fork_store)
-      :ok
-    catch
-      :exit, reason -> {:error, {:fork_unavailable, reason}}
-    end
+  @spec fetch_command_forks(pid()) ::
+          {:ok, %{String.t() => pid()}} | {:error, {:fork_unavailable, term()}}
+  defp fetch_command_forks(fork_store) do
+    {:ok, BufferForkStore.all(fork_store)}
+  catch
+    :exit, reason -> {:error, {:fork_unavailable, reason}}
   end
 
   @spec changeset_available(pid()) :: :ok | {:error, {:changeset_unavailable, term()}}
@@ -443,9 +441,8 @@ defmodule MingaAgent.ToolRouter do
 
   defp materialize_forks_for_command(%Context{fork_store: fs, changeset: cs})
        when fs != nil and cs != nil do
-    case fork_store_available(fs) do
-      :ok -> materialize_command_forks(BufferForkStore.all(fs), cs)
-      {:error, _reason} = error -> error
+    with {:ok, forks} <- fetch_command_forks(fs) do
+      materialize_command_forks(forks, cs)
     end
   end
 

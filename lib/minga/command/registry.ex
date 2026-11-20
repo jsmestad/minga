@@ -2,7 +2,7 @@ defmodule Minga.Command.Registry do
   @moduledoc """
   ETS-backed registry for named editor commands.
 
-  Commands are stored by name (atom) in an ETS table with `read_concurrency: true` for lock-free lookups on the hot path. A companion ETS table stores the source that contributed each command so config reloads and extension unloads can remove everything owned by one source without touching other contributions.
+  Commands and their contribution sources share one ETS row keyed by command name. Lookups read the table directly; the registry process serializes writes and source removal.
 
   ## Sources
 
@@ -60,7 +60,7 @@ defmodule Minga.Command.Registry do
 
   # ── Client API ──────────────────────────────────────────────────────────────
 
-  @doc "Starts the command registry as a named GenServer that owns ETS tables."
+  @doc "Starts the command registry as a named GenServer that owns the ETS table."
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts \\ []) do
     {name, _opts} = Keyword.pop(opts, :name, __MODULE__)
@@ -126,9 +126,9 @@ defmodule Minga.Command.Registry do
   def lookup(server, name) when is_atom(name) do
     table = ets_table_name(server)
 
-    case :ets.lookup(table, name) do
-      [{^name, cmd}] -> {:ok, cmd}
-      [] -> :error
+    case :ets.lookup_element(table, name, 3, nil) do
+      nil -> :error
+      cmd -> {:ok, cmd}
     end
   rescue
     ArgumentError -> :error
@@ -139,8 +139,7 @@ defmodule Minga.Command.Registry do
   def all(server) do
     server
     |> ets_table_name()
-    |> :ets.tab2list()
-    |> Enum.map(fn {_name, cmd} -> cmd end)
+    |> :ets.select([{{:_, :_, :"$1"}, [], [:"$1"]}])
   rescue
     ArgumentError -> []
   end
@@ -160,46 +159,36 @@ defmodule Minga.Command.Registry do
   @spec init(atom()) :: {:ok, atom(), {:continue, :populate}}
   def init(name) do
     table = ets_table_name(name)
-    sources = source_table_for_table(table)
     :ets.new(table, [:named_table, :set, :protected, read_concurrency: true])
-    :ets.new(sources, [:named_table, :set, :protected, read_concurrency: true])
     {:ok, table, {:continue, :populate}}
   end
 
   @impl true
   def handle_continue(:populate, table) do
-    sources = source_table_for_table(table)
-    populate_from_providers(table, sources)
+    populate_from_providers(table)
     {:noreply, table}
   end
 
   @impl true
   def handle_call({:register_commands, source, commands}, _from, table) do
-    sources = source_table_for_table(table)
-
-    reply = insert_commands(table, sources, source, commands)
+    reply = insert_commands(table, source, commands)
     {:reply, reply, table}
   end
 
   @impl true
   def handle_call({:unregister, name}, _from, table) do
-    sources = source_table_for_table(table)
     :ets.delete(table, name)
-    :ets.delete(sources, name)
     {:reply, :ok, table}
   end
 
   def handle_call({:unregister_source, source}, _from, table) do
-    sources = source_table_for_table(table)
-    unregister_source_entries(table, sources, source)
+    :ets.select_delete(table, [{{:_, :"$1", :_}, [{:"=:=", :"$1", {:const, source}}], [true]}])
     {:reply, :ok, table}
   end
 
   def handle_call(:reset, _from, table) do
-    sources = source_table_for_table(table)
     :ets.delete_all_objects(table)
-    :ets.delete_all_objects(sources)
-    populate_from_providers(table, sources)
+    populate_from_providers(table)
     {:reply, :ok, table}
   end
 
@@ -215,32 +204,26 @@ defmodule Minga.Command.Registry do
     end
   end
 
-  @spec source_table_for_table(atom()) :: atom()
-  defp source_table_for_table(table), do: :"#{table}_sources"
+  @spec populate_from_providers(atom()) :: :ok
+  defp populate_from_providers(table) do
+    commands = Enum.flat_map(@command_modules, & &1.__commands__())
 
-  @spec populate_from_providers(atom(), atom()) :: :ok
-  defp populate_from_providers(table, sources) do
-    @command_modules
-    |> Enum.flat_map(& &1.__commands__())
-    |> then(fn commands ->
-      case insert_commands(table, sources, :builtin, commands) do
-        :ok ->
-          :ok
+    case insert_commands(table, :builtin, commands) do
+      :ok ->
+        :ok
 
-        {:error, reason} ->
-          raise CompileError, description: "Invalid built-in commands: #{inspect(reason)}"
-      end
-    end)
+      {:error, reason} ->
+        raise CompileError, description: "Invalid built-in commands: #{inspect(reason)}"
+    end
   end
 
-  @spec insert_commands(atom(), atom(), contribution_source(), [Command.t()]) ::
+  @spec insert_commands(atom(), contribution_source(), [Command.t()]) ::
           :ok | {:error, register_error()}
-  defp insert_commands(table, sources, source, commands) do
+  defp insert_commands(table, source, commands) do
     with :ok <- validate_command_names(commands),
-         :ok <- validate_no_foreign_duplicates(sources, source, commands) do
+         :ok <- validate_no_foreign_duplicates(table, source, commands) do
       Enum.each(commands, fn %Command{name: name} = cmd ->
-        :ets.insert(table, {name, cmd})
-        :ets.insert(sources, {name, source})
+        :ets.insert(table, {name, source, cmd})
       end)
 
       :ok
@@ -260,34 +243,13 @@ defmodule Minga.Command.Registry do
 
   @spec validate_no_foreign_duplicates(atom(), contribution_source(), [Command.t()]) ::
           :ok | {:error, register_error()}
-  defp validate_no_foreign_duplicates(sources, source, commands) do
+  defp validate_no_foreign_duplicates(table, source, commands) do
     Enum.reduce_while(commands, :ok, fn %Command{name: name}, :ok ->
-      case :ets.lookup(sources, name) do
-        [{^name, ^source}] ->
-          {:cont, :ok}
-
-        [{^name, existing_source}] ->
-          {:halt, {:error, {:duplicate_name, name, existing_source, source}}}
-
-        [] ->
-          {:cont, :ok}
+      case :ets.lookup_element(table, name, 2, nil) do
+        nil -> {:cont, :ok}
+        ^source -> {:cont, :ok}
+        existing_source -> {:halt, {:error, {:duplicate_name, name, existing_source, source}}}
       end
     end)
-  end
-
-  @spec unregister_source_entries(atom(), atom(), contribution_source()) :: :ok
-  defp unregister_source_entries(table, sources, source) do
-    sources
-    |> :ets.tab2list()
-    |> Enum.each(fn
-      {name, ^source} ->
-        :ets.delete(table, name)
-        :ets.delete(sources, name)
-
-      _entry ->
-        :ok
-    end)
-
-    :ok
   end
 end
