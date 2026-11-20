@@ -174,7 +174,7 @@ defmodule MingaAgent.Changeset.Server do
 
   def handle_call({:stage_fork_content, relative_path, content}, _from, state) do
     with {:ok, path} <- normalize_path(state, relative_path),
-         :ok <- require_publication_baseline(state, path),
+         true <- Map.has_key?(state.originals, path),
          :ok <- Overlay.commit_file(state.overlay, path, content) do
       state =
         state
@@ -184,6 +184,7 @@ defmodule MingaAgent.Changeset.Server do
 
       {:reply, :ok, state}
     else
+      false -> {:reply, {:error, :publication_baseline_unavailable}, state}
       {:error, reason} -> {:reply, {:error, reason}, state}
     end
   end
@@ -199,7 +200,7 @@ defmodule MingaAgent.Changeset.Server do
 
   def handle_call({:publish_deletion, relative_path}, _from, state) do
     with {:ok, path} <- normalize_path(state, relative_path),
-         :ok <- require_publication_baseline(state, path) do
+         true <- Map.has_key?(state.originals, path) do
       case plan_one_deletion(state, path) do
         {{:ok, _, _} = result, action} ->
           case apply_merge_action(action, state.publication) do
@@ -215,6 +216,7 @@ defmodule MingaAgent.Changeset.Server do
           {:reply, {:conflict, %{conflicts: [result], results: [result]}}, state}
       end
     else
+      false -> {:reply, {:error, :publication_baseline_unavailable}, state}
       {:error, reason} -> {:reply, {:error, reason}, state}
     end
   rescue
