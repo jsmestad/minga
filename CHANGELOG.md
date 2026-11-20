@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- `/model` can select Apple Intelligence without credentials on eligible macOS 27+ devices in builds that include the inference helper. It runs on device with a compact file tool set and keeps normal approvals.
 - `SPC h a` searches command names and descriptions and opens the selected command's help without running it.
 - Agent workspaces have a **Tasks** inspector. The checklist, blockers, and retained results survive restart and follow the selected conversation branch.
 - `SPC a F` attaches saved text from a selected project file to a local Agent draft. The attachment retains what was read, even if the file changes before sending.

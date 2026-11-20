@@ -27,7 +27,7 @@ defmodule MingaAgent.ModelSelection do
   @type capability :: Policy.capability()
   @type image_tool_result_delivery ::
           :supported | {:unsupported, :model_image_input | :tool_result_transport}
-  @type credential_ref :: ApiKey.t() | OAuth.t()
+  @type credential_ref :: ApiKey.t() | OAuth.t() | :none
   @type t :: %__MODULE__{
           backend_id: String.t(),
           backend_module: module(),
@@ -55,7 +55,7 @@ defmodule MingaAgent.ModelSelection do
       when is_map(provider_spec) do
     with backend_id when is_binary(backend_id) and backend_id != "" <- Map.get(provider_spec, :id),
          backend_module when is_atom(backend_module) <- Map.get(provider_spec, :module),
-         :ok <- validate_credential(credential, route),
+         :ok <- validate_credential(credential, route, backend_id),
          {:ok, request_model} <- Route.materialize(route) do
       {:ok,
        %__MODULE__{
@@ -81,7 +81,7 @@ defmodule MingaAgent.ModelSelection do
          {:ok, credential} <- decode_credential(Map.get(data, "credential", %{})),
          {:ok, policy} <- decode_policy(Map.get(data, "policy", %{}), version, route),
          {:ok, evidence} <- decode_evidence(Map.get(data, "evidence", %{})),
-         :ok <- validate_credential(credential, route) do
+         :ok <- validate_credential(credential, route, backend_id) do
       {:ok, Stored.new(backend_id, route, credential, policy, evidence)}
     else
       {:error, _reason} = error -> error
@@ -117,7 +117,12 @@ defmodule MingaAgent.ModelSelection do
 
   @doc "Returns an opaque stable hash of the exact route and credential identity."
   @spec id(t() | Stored.t()) :: String.t()
-  def id(%{backend_id: backend_id, route: route, credential: credential}) do
+  def id(%{backend_id: backend_id, route: route, credential: credential}),
+    do: id(backend_id, route, credential)
+
+  @doc "Returns the stable identity of a route before materialization."
+  @spec id(String.t(), Route.t(), credential_ref()) :: String.t()
+  def id(backend_id, route, credential) do
     identity = %{
       version: @identity_version,
       backend_id: backend_id,
@@ -162,6 +167,7 @@ defmodule MingaAgent.ModelSelection do
   @doc "Returns a human-readable, secret-free credential identity."
   @spec credential_id(credential_ref()) :: String.t()
   def credential_id(%ApiKey{provider: provider, source: source}), do: "#{provider}:#{source}"
+  def credential_id(:none), do: "No credentials"
 
   def credential_id(%OAuth{provider_key: provider_key, account_id: account_id}),
     do: "#{provider_key}:#{account_id}"
@@ -210,13 +216,37 @@ defmodule MingaAgent.ModelSelection do
     end
   end
 
-  @spec validate_credential(credential_ref(), Route.t()) :: :ok | {:error, :invalid_credential}
+  @spec validate_credential(credential_ref(), Route.t(), String.t()) ::
+          :ok | {:error, :invalid_credential}
   defp validate_credential(
          %ApiKey{provider: owner, source: source},
-         %Route{origin: {:catalog, owner, _model}, request_provider: request_provider}
+         %Route{origin: {:catalog, owner, _model}, request_provider: request_provider},
+         _backend_id
        )
        when is_binary(owner) and owner != "" and source in [:env, :file] and
-              request_provider != :openai_codex,
+              request_provider not in [:openai_codex, :apple],
+       do: :ok
+
+  defp validate_credential(
+         :none,
+         %Route{
+           origin: {:local, "apple", "system"},
+           request_provider: :apple,
+           id: "apple/system",
+           model_provider: "apple",
+           model_id: "system",
+           execution: %{
+             supported: true,
+             family: "apple_foundation_models",
+             wire_protocol: "apple_foundation_models",
+             transport: "in_process",
+             provider_model_id: "system",
+             base_url: nil,
+             path: nil
+           }
+         },
+         "native"
+       ),
        do: :ok
 
   defp validate_credential(
@@ -226,15 +256,18 @@ defmodule MingaAgent.ModelSelection do
            account_id: account_id,
            source_id: source_id
          },
-         %Route{request_provider: :openai_codex, origin: {:catalog, "openai", _model}}
+         %Route{request_provider: :openai_codex, origin: {:catalog, "openai", _model}},
+         _backend_id
        )
        when is_binary(account_id) and account_id != "" and is_binary(source_id) and
               byte_size(source_id) == 64,
        do: :ok
 
-  defp validate_credential(_credential, _route), do: {:error, :invalid_credential}
+  defp validate_credential(_credential, _route, _backend_id), do: {:error, :invalid_credential}
 
   @spec encode_credential(credential_ref()) :: map()
+  defp encode_credential(:none), do: %{"kind" => "none"}
+
   defp encode_credential(%ApiKey{} = credential) do
     %{
       "kind" => "api_key",
@@ -254,6 +287,8 @@ defmodule MingaAgent.ModelSelection do
   end
 
   @spec decode_credential(map()) :: {:ok, credential_ref()} | {:error, :invalid_credential}
+  defp decode_credential(%{"kind" => "none"} = data) when map_size(data) == 1, do: {:ok, :none}
+
   defp decode_credential(%{"kind" => "api_key", "provider" => provider, "source" => "env"})
        when is_binary(provider) and provider != "" do
     {:ok, ApiKey.new(provider, :env)}
@@ -358,6 +393,8 @@ defmodule MingaAgent.ModelSelection do
   end
 
   @spec credential_identity(credential_ref()) :: map()
+  defp credential_identity(:none), do: %{kind: :none}
+
   defp credential_identity(%ApiKey{} = credential) do
     %{kind: :api_key, provider: credential.provider, source: credential.source}
   end

@@ -3,6 +3,7 @@ defmodule MingaAgent.ModelResolverTest do
 
   alias MingaAgent.CodexModels
   alias MingaAgent.Config
+  alias MingaAgent.Credentials
   alias MingaAgent.Credentials.Snapshot
   alias MingaAgent.ModelResolver
   alias MingaAgent.ModelSelection
@@ -67,6 +68,82 @@ defmodule MingaAgent.ModelResolverTest do
     ]
 
     assert ModelResolver.candidates(opts) == []
+  end
+
+  test "an explicitly configured Apple route persists its exact local identity without probing" do
+    opts = resolver_opts(Snapshot.new(%{}, nil))
+
+    opts =
+      Keyword.put(opts, :apple_availability_fn, fn -> flunk("unexpected readiness probe") end)
+
+    assert {:ok, selection} = ModelResolver.resolve("apple:system", opts)
+    assert selection.route.display_name == "Apple Intelligence (On Device)"
+    assert selection.route.origin == {:local, "apple", "system"}
+    assert %LLMDB.Model{provider: :apple, id: "system", base_url: nil} = selection.request_model
+    assert selection.credential == :none
+    assert selection.policy.limits.context == nil
+    assert selection.policy.limits.request_output == 512
+    assert selection.policy.capabilities.tools == true
+    assert selection.policy.capabilities.images == false
+    assert {:ok, []} = Credentials.request_options(selection.credential, [])
+
+    assert {:ok, %{material: [], identity: %{kind: :none}}} =
+             Credentials.bind_request(selection.credential, nil, [])
+
+    encoded = selection |> ModelSelection.encode() |> JSON.encode!() |> JSON.decode!()
+    assert encoded["credential"] == %{"kind" => "none"}
+    assert encoded["route"]["execution"]["transport"] == "in_process"
+    assert encoded["route"]["execution"]["base_url"] == nil
+    assert encoded["route"]["execution"]["path"] == nil
+
+    assert {:ok, ^selection} = ModelResolver.restore(encoded, opts)
+    assert {:ok, ^selection} = ModelResolver.resolve(ModelSelection.id(selection), opts)
+    assert {:error, :no_available_model} = ModelResolver.resolve(nil, opts)
+
+    assert {:error, :invalid_route} =
+             encoded
+             |> put_in(["route", "execution", "base_url"], "https://proxy.example/v1")
+             |> ModelSelection.decode()
+
+    assert {:error, :invalid_credential} =
+             encoded
+             |> Map.put("credential", %{
+               "kind" => "api_key",
+               "provider" => "apple",
+               "source" => "env"
+             })
+             |> ModelSelection.decode()
+
+    hosted = ModelSelectionFixture.selection() |> ModelSelection.encode()
+
+    assert {:error, :invalid_credential} =
+             hosted |> Map.put("credential", encoded["credential"]) |> ModelSelection.decode()
+  end
+
+  test "Apple discovery needs readiness and activation checks again without falling back" do
+    opts = resolver_opts(Snapshot.new(%{"openai" => :env}, nil))
+    opts = Keyword.put(opts, :apple_discovery, {:ok, 4_096})
+
+    assert [apple, hosted] = ModelResolver.candidates(opts)
+    assert apple.selection.route.request_provider == :apple
+    assert apple.selection.policy.limits.context == 4_096
+    assert hosted.selection.route.request_provider == :openai
+
+    opts =
+      Keyword.merge(opts,
+        apple_availability_fn: fn -> {:error, :disabled} end,
+        apple_discovery: {:error, :disabled},
+        require_apple_ready: true
+      )
+
+    assert [^hosted] = ModelResolver.candidates(opts)
+
+    assert {:error, {:selection_correction_required, message}} =
+             ModelResolver.resolve(apple.selection, opts)
+
+    assert message =~ "Enable it in System Settings"
+    assert {:error, {:route_unavailable, ^message}} = ModelResolver.resolve("apple:system", opts)
+    assert {:error, {:route_unavailable, _message}} = ModelResolver.resolve("apple:other", opts)
   end
 
   test "keeps catalog routes unverified without exact model evidence" do

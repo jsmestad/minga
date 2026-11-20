@@ -73,15 +73,7 @@ defmodule MingaEditor.Agent.SlashCommandTest do
     end
   end
 
-  defp start_session(opts \\ []) do
-    dir =
-      Path.join(
-        System.tmp_dir!(),
-        "minga-slash-#{Base.url_encode64(:crypto.strong_rand_bytes(9), padding: false)}"
-      )
-
-    on_exit(fn -> File.rm_rf!(dir) end)
-
+  defp start_session(dir, opts \\ []) do
     event_log =
       start_supervised!(
         Supervisor.child_spec(
@@ -231,9 +223,9 @@ defmodule MingaEditor.Agent.SlashCommandTest do
       refute "help" in labels
     end
 
-    test "returns exact model route candidates after model and a space" do
+    test "returns exact model route candidates after model and a space", %{tmp_dir: dir} do
       candidate = model_candidate("gpt-4o", "GPT-4o")
-      session = start_session(provider_opts: [candidates: [candidate]])
+      session = start_session(dir, provider_opts: [candidates: [candidate]])
 
       assert [completion] =
                SlashCommand.completion_candidates(mock_state(session: session), "model gpt")
@@ -246,7 +238,7 @@ defmodule MingaEditor.Agent.SlashCommandTest do
       assert completion.description =~ "tools yes, images yes, streaming yes"
     end
 
-    test "renders every exact route when many are available" do
+    test "renders every exact route when many are available", %{tmp_dir: dir} do
       candidates =
         Enum.map(1..25, fn index ->
           model_id =
@@ -258,7 +250,7 @@ defmodule MingaEditor.Agent.SlashCommandTest do
           model_candidate(model_id)
         end)
 
-      session = start_session(provider_opts: [candidates: candidates])
+      session = start_session(dir, provider_opts: [candidates: candidates])
 
       labels =
         SlashCommand.completion_candidates(mock_state(session: session), "model zz")
@@ -345,8 +337,8 @@ defmodule MingaEditor.Agent.SlashCommandTest do
       assert state.shell_runtime.state.notice.message == "No agent session"
     end
 
-    test "/model without a name loads choices from the owning connection" do
-      session = start_session()
+    test "/model without a name loads choices from the owning connection", %{tmp_dir: dir} do
+      session = start_session(dir)
       connection = Session.editor_snapshot(session).connection
       state = mock_state(session: session)
       ui = UIState.project_connection(state.workspace.agent_ui, connection)
@@ -396,7 +388,7 @@ defmodule MingaEditor.Agent.SlashCommandTest do
         dir
       )
 
-      session = start_session()
+      session = start_session(dir)
       {:ok, state} = SlashCommand.execute(mock_state(session: session), "/resume", dir)
 
       assert {:picker, %{picker_ui: picker_ui}} = state.shell_runtime.state.modal
@@ -404,16 +396,16 @@ defmodule MingaEditor.Agent.SlashCommandTest do
       assert picker_ui.context.persisted_only == true
     end
 
-    test "/sessions opens the same agent session picker" do
-      session = start_session()
+    test "/sessions opens the same agent session picker", %{tmp_dir: dir} do
+      session = start_session(dir)
       {:ok, state} = SlashCommand.execute(mock_state(session: session), "/sessions")
 
       assert {:picker, %{picker_ui: picker_ui}} = state.shell_runtime.state.modal
       assert picker_ui.source == MingaEditor.UI.Picker.AgentSessionSource
     end
 
-    test "/auth publishes hosted credential status synchronously" do
-      session = start_session()
+    test "/auth publishes hosted credential status synchronously", %{tmp_dir: dir} do
+      session = start_session(dir)
       snapshot = MingaAgent.Credentials.Snapshot.new(%{"openai" => :env}, nil)
 
       state = SlashCommand.auth_status(mock_state(session: session), snapshot: snapshot)
@@ -429,8 +421,8 @@ defmodule MingaEditor.Agent.SlashCommandTest do
              end)
     end
 
-    test "/plan enters plan mode for the active session" do
-      session = start_session()
+    test "/plan enters plan mode for the active session", %{tmp_dir: dir} do
+      session = start_session(dir)
       {:ok, state} = SlashCommand.execute(mock_state(session: session), "/plan")
 
       assert Session.status(session) == :plan
@@ -445,8 +437,8 @@ defmodule MingaEditor.Agent.SlashCommandTest do
              end)
     end
 
-    test "/exec leaves plan mode for the active session" do
-      session = start_session()
+    test "/exec leaves plan mode for the active session", %{tmp_dir: dir} do
+      session = start_session(dir)
       :ok = Session.enter_plan(session)
       {:ok, state} = SlashCommand.execute(mock_state(session: session), "/exec")
 
@@ -462,21 +454,21 @@ defmodule MingaEditor.Agent.SlashCommandTest do
              end)
     end
 
-    test "/skill:plan is rewritten to enter real plan mode" do
-      session = start_session()
+    test "/skill:plan is rewritten to enter real plan mode", %{tmp_dir: dir} do
+      session = start_session(dir)
       {:ok, _state} = SlashCommand.execute(mock_state(session: session), "/skill:plan")
       assert Session.status(session) == :plan
     end
 
-    test "/skill:off:plan leaves plan mode" do
-      session = start_session()
+    test "/skill:off:plan leaves plan mode", %{tmp_dir: dir} do
+      session = start_session(dir)
       :ok = Session.enter_plan(session)
       {:ok, _state} = SlashCommand.execute(mock_state(session: session), "/skill:off:plan")
       assert Session.status(session) == :idle
     end
 
-    test "/trust list summarizes trusted tools" do
-      session = start_session()
+    test "/trust list summarizes trusted tools", %{tmp_dir: dir} do
+      session = start_session(dir)
       :ok = Session.set_tool_trust(session, "shell", :session)
       :ok = Session.set_tool_trust(session, "write_file", :turn)
 
@@ -487,8 +479,8 @@ defmodule MingaEditor.Agent.SlashCommandTest do
       assert Enum.any?(messages, &match?({:system, "Trusted tools:" <> _, :info}, &1))
     end
 
-    test "/trust revoke removes one trusted tool" do
-      session = start_session()
+    test "/trust revoke removes one trusted tool", %{tmp_dir: dir} do
+      session = start_session(dir)
       :ok = Session.set_tool_trust(session, "shell", :session)
       :ok = Session.set_tool_trust(session, "write_file", :turn)
 
@@ -498,8 +490,8 @@ defmodule MingaEditor.Agent.SlashCommandTest do
       assert Session.list_tool_trust(session) == %{"write_file" => :turn}
     end
 
-    test "/trust clear removes all trusted tools" do
-      session = start_session()
+    test "/trust clear removes all trusted tools", %{tmp_dir: dir} do
+      session = start_session(dir)
       :ok = Session.set_tool_trust(session, "shell", :session)
       :ok = Session.set_tool_trust(session, "write_file", :turn)
 
@@ -514,9 +506,9 @@ defmodule MingaEditor.Agent.SlashCommandTest do
                SlashCommand.execute(mock_state(), "/trust list")
     end
 
-    test "/trust usage errors clearly" do
+    test "/trust usage errors clearly", %{tmp_dir: dir} do
       assert {:error, "Usage: /trust list|revoke <tool-name>|clear"} =
-               SlashCommand.execute(mock_state(session: start_session()), "/trust revoke")
+               SlashCommand.execute(mock_state(session: start_session(dir)), "/trust revoke")
     end
 
     test "/memory add and clear replace /remember and /forget", %{tmp_dir: dir} do

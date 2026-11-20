@@ -269,7 +269,7 @@ defmodule MingaEditor.Agent.SlashCommand do
                 "name" => route.display_name,
                 "provider" => route.model_provider,
                 "protocol" => route.execution.wire_protocol,
-                "endpoint" => route.execution.base_url <> route.execution.path,
+                "endpoint" => route_endpoint(route.execution),
                 "credential" => ModelSelection.credential_id(selection.credential),
                 "support" => :unverified,
                 "favorite" => favorite,
@@ -308,6 +308,10 @@ defmodule MingaEditor.Agent.SlashCommand do
 
       []
   end
+
+  @spec route_endpoint(ModelSelection.TextExecution.t()) :: String.t()
+  defp route_endpoint(%{transport: "in_process"}), do: "On device"
+  defp route_endpoint(%{base_url: base_url, path: path}), do: base_url <> path
 
   @spec filter_model_entries([map()], String.t()) :: [map()]
   defp filter_model_entries(entries, ""), do: entries

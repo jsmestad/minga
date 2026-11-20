@@ -317,6 +317,8 @@ defmodule MingaAgent.Session.PrefixStore do
   defp valid_identity?(_identity), do: false
 
   @spec valid_authentication?(term()) :: boolean()
+  defp valid_authentication?(%{kind: :none} = authentication), do: map_size(authentication) == 1
+
   defp valid_authentication?(%{kind: :api_key, runtime_binding: binding} = authentication)
        when map_size(authentication) == 2 and is_binary(binding) and byte_size(binding) == 32,
        do: valid_url_identity?(binding, 24)

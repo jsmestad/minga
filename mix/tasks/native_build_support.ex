@@ -16,5 +16,7 @@ defmodule Mix.Tasks.Native.Build.Support do
       Mix.Tasks.Compile.MingaZig.run([]),
       "native support build failed"
     )
+
+    Mix.Task.run("native.build.apple")
   end
 end

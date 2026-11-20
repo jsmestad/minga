@@ -18,12 +18,15 @@ defmodule MingaAgent.ModelSelection.TextExecution do
           wire_protocol: String.t(),
           transport: String.t(),
           provider_model_id: String.t(),
-          base_url: String.t(),
-          path: String.t()
+          base_url: String.t() | nil,
+          path: String.t() | nil
         }
 
   @doc "Builds and validates a complete text execution contract."
   @spec new(map()) :: {:ok, t()} | {:error, :invalid_text_execution | :invalid_base_url}
+  def new(%{transport: "in_process"} = attrs), do: new_in_process(attrs)
+  def new(%{"transport" => "in_process"} = attrs), do: new_in_process(attrs)
+
   def new(attrs) when is_map(attrs) do
     with true <- field(attrs, :supported) == true,
          family when is_binary(family) and family != "" <- field(attrs, :family),
@@ -51,6 +54,29 @@ defmodule MingaAgent.ModelSelection.TextExecution do
   end
 
   def new(_attrs), do: {:error, :invalid_text_execution}
+
+  @spec new_in_process(map()) :: {:ok, t()} | {:error, :invalid_text_execution}
+  defp new_in_process(attrs) do
+    with true <- field(attrs, :supported) == true,
+         "apple_foundation_models" = protocol <- field(attrs, :family),
+         ^protocol <- field(attrs, :wire_protocol),
+         "system" = model_id <- field(attrs, :provider_model_id),
+         nil <- field(attrs, :base_url),
+         nil <- field(attrs, :path) do
+      {:ok,
+       %__MODULE__{
+         supported: true,
+         family: protocol,
+         wire_protocol: protocol,
+         transport: "in_process",
+         provider_model_id: model_id,
+         base_url: nil,
+         path: nil
+       }}
+    else
+      _invalid -> {:error, :invalid_text_execution}
+    end
+  end
 
   @doc "Encodes the execution contract for secret-free persistence."
   @spec encode(t()) :: map()
