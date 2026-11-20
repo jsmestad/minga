@@ -137,6 +137,7 @@ jobs:
           if [ "$TARGET_OS" = macos ]; then test "$(uname -s)" = Darwin; else test "$(uname -s)" = Linux; fi
           root="$RUNNER_TEMP/candidate-$PAYLOAD"
           mkdir -p "$root"/{home,config,data,cache,tmp,mix,hex,rebar,zig,go-build,go-mod,out}
+          printf 'CANDIDATE_RUNNER_HOME=%s\n' "$HOME" >> "$GITHUB_ENV"
           for entry in "HOME=home" "XDG_CONFIG_HOME=config" "XDG_DATA_HOME=data" "XDG_CACHE_HOME=cache" "TMPDIR=tmp" "MIX_HOME=mix" "HEX_HOME=hex" "REBAR_CACHE_DIR=rebar" "ZIG_GLOBAL_CACHE_DIR=zig" "GOCACHE=go-build" "GOMODCACHE=go-mod"; do
             printf '%s=%s/%s\n' "${entry%%=*}" "$root" "${entry#*=}" >> "$GITHUB_ENV"
           done
@@ -283,6 +284,8 @@ jobs:
           DEVELOPER_ID_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
         run: |
           set -euo pipefail
+          # macOS resolves user keychain preferences through HOME.
+          export HOME="$CANDIDATE_RUNNER_HOME"
           test -n "$DEVELOPER_ID_CERT"
           test -n "$DEVELOPER_ID_PASSWORD"
           keychain="$RUNNER_TEMP/candidate-signing.keychain-db"
@@ -300,22 +303,26 @@ jobs:
         if: matrix.gui
         run: |
           set -euo pipefail
+          export HOME="$CANDIDATE_RUNNER_HOME"
           IFS= read -r app < "$CANDIDATE_ROOT/app-path"
           keychain="$RUNNER_TEMP/candidate-signing.keychain-db"
           identity=$(security find-identity -v -p codesigning "$keychain" | ruby -e 'STDIN.each_line { |line| match = /\b([0-9A-F]{40})\s+"Developer ID Application/.match(line); puts match[1] if match }')
-          [[ "$identity" =~ ^[0-9A-F]{40}$ ]]
+          if [[ ! "$identity" =~ ^[0-9A-F]{40}$ ]]; then
+            echo "Expected exactly one valid Developer ID Application identity in the temporary keychain" >&2
+            exit 1
+          fi
           entitlements="$GITHUB_WORKSPACE/source/macos/Entitlements.plist"
           while IFS= read -r -d '' file; do
             if file -b "$file" | grep -q 'Mach-O'; then
-              codesign --force --options runtime --entitlements "$entitlements" --sign "$identity" "$file"
+              codesign --force --keychain "$keychain" --options runtime --entitlements "$entitlements" --sign "$identity" "$file"
               codesign --verify --strict "$file"
             fi
           done < <(find "$app/Contents" -type f -print0)
-          codesign --force --options runtime --entitlements "$entitlements" --sign "$identity" "$app"
+          codesign --force --keychain "$keychain" --options runtime --entitlements "$entitlements" --sign "$identity" "$app"
           codesign --verify --deep --strict "$app"
           codesign -dv --verbose=4 "$app" 2>&1 | grep -F 'Authority=Developer ID Application'
           hdiutil create -volname Minga -srcfolder "$app" -ov -format UDZO "$CANDIDATE_ROOT/out/Minga.dmg"
-          codesign --force --sign "$identity" "$CANDIDATE_ROOT/out/Minga.dmg"
+          codesign --force --keychain "$keychain" --sign "$identity" "$CANDIDATE_ROOT/out/Minga.dmg"
           codesign --verify --strict "$CANDIDATE_ROOT/out/Minga.dmg"
       - name: Notarize and staple final DMG
         if: matrix.gui
@@ -396,6 +403,7 @@ jobs:
         if: always() && matrix.gui
         run: |
           set -euo pipefail
+          export HOME="${CANDIDATE_RUNNER_HOME:-$HOME}"
           keychain="$RUNNER_TEMP/candidate-signing.keychain-db"
           if [ -f "$keychain" ]; then security delete-keychain "$keychain"; fi
           rm -f "$RUNNER_TEMP/candidate-certificate.p12"
