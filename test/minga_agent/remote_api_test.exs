@@ -165,6 +165,19 @@ defmodule MingaAgent.RemoteAPITest do
 
     newer = %{draft | text: "Keep the new draft"}
     assert {:ok, 3} = RemoteAPI.composer(id, token, session, latest, {:save, 2, newer})
+    read = {:read_queued_input_text, {sequence, 1}}
+    replacement = "Corrected first line\nWith another line"
+    edit = {:edit_queued_input, {sequence, 1}, replacement}
+    assert {:error, :not_driver} = RemoteAPI.composer(id, token, session, first, edit)
+    assert {:ok, ^text} = RemoteAPI.composer(id, token, session, latest, read)
+    assert :ok = RemoteAPI.composer(id, token, session, latest, edit)
+    assert {:error, :stale_queue_revision} = RemoteAPI.composer(id, token, session, latest, read)
+    assert {[], [^replacement]} = Session.get_queued_messages(session)
+
+    assert {:error, :stale_queue_revision} =
+             RemoteAPI.composer(id, token, session, latest, withdraw)
+
+    withdraw = {:withdraw_queued_input, {sequence, 2}}
     assert :ok = RemoteAPI.composer(id, token, session, latest, withdraw)
     assert {:ok, []} = RemoteAPI.composer(id, token, session, latest, :read_queue)
     assert {:error, :already_consumed} = RemoteAPI.composer(id, token, session, latest, withdraw)

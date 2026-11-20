@@ -5,7 +5,8 @@ defmodule MingaEditor.UI.Picker.AgentQueuedInputSource do
 
   alias MingaAgent.Session
   alias MingaAgent.Session.QueuedInputSummary
-  alias MingaEditor.Agent.{PromptInput, QuestionResponse}
+  alias MingaAgent.FileMention
+  alias MingaEditor.Agent.{PromptInput, QuestionResponse, QueuedInputEdit}
   alias MingaEditor.PickerUI
   alias MingaEditor.Remote.SessionClient
   alias MingaEditor.Shell.Runtime
@@ -14,7 +15,11 @@ defmodule MingaEditor.UI.Picker.AgentQueuedInputSource do
   alias MingaEditor.UI.Picker.{AgentQueuedInputWithdrawal, Context, Item, Source}
 
   @type origin :: PromptInput.submission_owner()
-  @typep operation :: :read_queue | {:withdraw_queued_input, QueuedInputSummary.identity()}
+  @typep operation ::
+           :read_queue
+           | {:withdraw_queued_input, QueuedInputSummary.identity()}
+           | {:read_queued_input_text, QueuedInputSummary.identity()}
+           | {:edit_queued_input, QueuedInputSummary.identity(), String.t()}
   @typep request :: (operation() -> Session.composer_result())
 
   @doc "Opens the queue inspector without modifying the current composer."
@@ -61,6 +66,12 @@ defmodule MingaEditor.UI.Picker.AgentQueuedInputSource do
      [
        %Item{id: {:keep, origin}, label: "Keep queued input"},
        %Item{
+         id: {:edit, origin, entry.identity},
+         label: "Edit queued input",
+         description: entry_label(entry),
+         two_line: true
+       },
+       %Item{
          id: {:withdraw, origin, entry.identity},
          label: "Withdraw queued input",
          description: entry_label(entry),
@@ -76,7 +87,7 @@ defmodule MingaEditor.UI.Picker.AgentQueuedInputSource do
 
       {:ok, entries} when is_list(entries) ->
         items = Enum.map(entries, &item(&1, origin))
-        {:ok, items, %{status: "Select an input to review withdrawal."}}
+        {:ok, items, %{status: "Select a queued input to edit or withdraw."}}
 
       {:error, _reason} ->
         {:error, "Queue unavailable. Reconnect to the original Agent conversation."}
@@ -112,10 +123,24 @@ defmodule MingaEditor.UI.Picker.AgentQueuedInputSource do
     end
   end
 
+  def on_select(%Item{id: {:edit, origin, identity}}, state) do
+    with ^origin <- current_origin(state),
+         {:ok, request} <- request(state, origin) do
+      QueuedInputEdit.open(state, origin, identity, fn
+        current_identity, :read -> request.({:read_queued_input_text, current_identity})
+        current_identity, {:save, text} -> request.({:edit_queued_input, current_identity, text})
+      end)
+    else
+      _changed -> stale(state)
+    end
+  end
+
   def on_select(_item, state), do: state
 
   @spec request(State.t(), origin()) :: {:ok, request()} | :unavailable
   defp request(_state, {_workspace, session, record}) when node(session) == node() do
+    root = Minga.Project.workspace_root()
+
     {:ok,
      fn
        :read_queue ->
@@ -123,6 +148,22 @@ defmodule MingaEditor.UI.Picker.AgentQueuedInputSource do
 
        {:withdraw_queued_input, identity} ->
          Session.change_queued_input(session, record, identity, :remove)
+
+       {:read_queued_input_text, identity} ->
+         Session.queued_input_text(session, record, identity)
+
+       {:edit_queued_input, identity, text} ->
+         selection = Session.model_selection(session)
+
+         with {:ok, resolved} <-
+                FileMention.resolve_prompt(text, root, model_selection: selection) do
+           Session.change_queued_input(
+             session,
+             record,
+             identity,
+             {:replace_prompt, text, resolved}
+           )
+         end
      end}
   end
 

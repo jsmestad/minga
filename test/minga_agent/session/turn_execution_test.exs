@@ -335,6 +335,62 @@ defmodule MingaAgent.Session.TurnExecutionTest do
     end
   end
 
+  test "editing replaces the whole resolved prompt but preserves the captured attachment suffix" do
+    alias MingaAgent.Tool.Output.Reference
+    alias ReqLLM.Message.ContentPart
+
+    bytes = "Immutable attachment"
+    {:ok, token} = Reference.token("session", String.duplicate("a", 32))
+
+    {:ok, reference} =
+      Reference.new(
+        token: token,
+        media_type: "text/plain",
+        bytes: byte_size(bytes),
+        sha256: Reference.digest(bytes)
+      )
+
+    attachments = [{:file, "note.txt", "note.txt", "saved", {:snapshot, reference}}]
+    captured = ContentPart.text(bytes)
+
+    parts = [
+      ContentPart.text("Old text"),
+      ContentPart.image_url("https://example.test/a.png"),
+      ContentPart.text("Old tail"),
+      captured
+    ]
+
+    request = "Look at @a.png then continue"
+
+    assert {:ok, _, queued} =
+             TurnExecution.admit_queued_submission(
+               state(:exec, :thinking),
+               :follow_up,
+               parts,
+               1,
+               {"edit", 1},
+               attachments,
+               request
+             )
+
+    assert {:ok, ^request} = TurnExecution.queued_editable_text(queued, 1, 1)
+
+    assert {:ok, edited} =
+             TurnExecution.change_queued_input(
+               queued,
+               1,
+               1,
+               {:replace_prompt, "New prompt", "New prompt"}
+             )
+
+    assert TurnExecution.queues(edited) == {[], [[ContentPart.text("New prompt"), captured]]}
+    assert {:error, :stale_queue_revision} = TurnExecution.queued_editable_text(edited, 1, 1)
+    assert {:ok, "New prompt"} = TurnExecution.queued_editable_text(edited, 1, 2)
+    assert {:ok, recalled, _} = TurnExecution.recall_draft(edited, nil)
+    assert recalled.text == "New prompt"
+    assert recalled.attachments == attachments
+  end
+
   test "a restored receipt admits identical text only under a new submission identity" do
     source = state(:exec, :thinking)
     first = "same-text-submission-001"
