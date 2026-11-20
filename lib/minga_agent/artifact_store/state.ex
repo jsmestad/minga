@@ -193,11 +193,9 @@ defmodule MingaAgent.ArtifactStore.State do
   @spec fetch(t(), Reference.t(), Range.t()) ::
           {{:ok, Fetched.t()} | {:error, term()}, t()}
   def fetch(%__MODULE__{} = state, %Reference{} = reference, %Range{} = range) do
-    with {:ok, id} <- authorize_reference(state, reference),
-         {:ok, row} <- fetch_terminal_row(state, id),
-         :ok <- verify_reference(reference, row),
-         {:ok, selection, _total} <- validate_range(range, row),
-         {:ok, paths} <- Paths.new(state.directory, id),
+    with {:ok, row} <- verified_terminal_row(state, reference),
+         {:ok, selection} <- validate_range(range, row),
+         {:ok, paths} <- Paths.new(state.directory, row.id),
          {:ok, bytes} <- read_range(state, paths, selection, row) do
       fetched = Fetched.new(bytes, selection, reference, row.capture)
       {{:ok, fetched}, state}
@@ -211,8 +209,7 @@ defmodule MingaAgent.ArtifactStore.State do
   @doc "Reads canonical reference metadata without reading retained bytes."
   @spec reference(t(), String.t()) :: {:ok, Reference.t()} | {:error, term()}
   def reference(%__MODULE__{} = state, token) do
-    with {:ok, id} <- authorize_token(state, token),
-         {:ok, row} <- fetch_terminal_row(state, id),
+    with {:ok, row} <- authorized_terminal_row(state, token),
          {:ok, %Stored{reference: reference}} <- stored(state, row) do
       {:ok, reference}
     end
@@ -997,7 +994,7 @@ defmodule MingaAgent.ArtifactStore.State do
   defp validate_requested_status(_status), do: {:error, :invalid_capture_status}
 
   @spec validate_range(Range.t(), Metadata.row()) ::
-          {:ok, Range.t(), non_neg_integer()} | {:error, :invalid_range}
+          {:ok, Range.t()} | {:error, :invalid_range}
   defp validate_range(%Range{unit: :bytes} = range, row) do
     validate_known_range(range, row.bytes)
   end
@@ -1009,14 +1006,13 @@ defmodule MingaAgent.ArtifactStore.State do
   defp validate_range(_range, _row), do: {:error, :invalid_range}
 
   @spec validate_known_range(Range.t(), non_neg_integer()) ::
-          {:ok, Range.t(), non_neg_integer()} | {:error, :invalid_range}
+          {:ok, Range.t()} | {:error, :invalid_range}
   defp validate_known_range(range, total) do
     valid_total = range.total == :unknown or range.total == total
 
     with true <- valid_total,
-         true <- range.start + range.count <= total,
-         {:ok, selection} <- Range.new(range.kind, range.unit, range.start, range.count, total) do
-      {:ok, selection, total}
+         true <- range.start + range.count <= total do
+      Range.new(range.kind, range.unit, range.start, range.count, total)
     else
       _ -> {:error, :invalid_range}
     end
@@ -1078,13 +1074,22 @@ defmodule MingaAgent.ArtifactStore.State do
     if namespace == state.namespace, do: :ok, else: {:error, :unauthorized}
   end
 
-  @spec authorize_reference(t(), Reference.t()) :: {:ok, String.t()} | {:error, term()}
-  defp authorize_reference(state, %Reference{token: token}), do: authorize_token(state, token)
+  @spec verified_terminal_row(t(), term()) :: {:ok, Metadata.row()} | {:error, term()}
+  defp verified_terminal_row(state, %Reference{token: token} = reference) do
+    with {:ok, row} <- authorized_terminal_row(state, token),
+         :ok <- verify_reference(reference, row) do
+      {:ok, row}
+    end
+  end
 
-  @spec authorize_token(t(), String.t()) :: {:ok, String.t()} | {:error, term()}
-  defp authorize_token(state, token) do
+  defp verified_terminal_row(_state, _reference), do: {:error, :invalid_reference}
+
+  @spec authorized_terminal_row(t(), String.t()) :: {:ok, Metadata.row()} | {:error, term()}
+  defp authorized_terminal_row(state, token) do
+    %{namespace: namespace} = state
+
     case Reference.parse(token) do
-      {:ok, namespace, id} when namespace == state.namespace -> {:ok, id}
+      {:ok, ^namespace, id} -> fetch_terminal_row(state, id)
       {:ok, _foreign, _id} -> {:error, :unauthorized}
       {:error, _reason} -> {:error, :invalid_reference}
     end
@@ -1122,14 +1127,9 @@ defmodule MingaAgent.ArtifactStore.State do
   @spec validate_pin_references(t(), [Reference.t()]) :: {:ok, [String.t()]} | {:error, term()}
   defp validate_pin_references(state, references) do
     Enum.reduce_while(references, {:ok, []}, fn reference, {:ok, ids} ->
-      with %Reference{} <- reference,
-           {:ok, id} <- authorize_reference(state, reference),
-           {:ok, row} <- fetch_terminal_row(state, id),
-           :ok <- verify_reference(reference, row) do
-        {:cont, {:ok, [id | ids]}}
-      else
+      case verified_terminal_row(state, reference) do
+        {:ok, row} -> {:cont, {:ok, [row.id | ids]}}
         {:error, _reason} = error -> {:halt, error}
-        _ -> {:halt, {:error, :invalid_reference}}
       end
     end)
     |> case do

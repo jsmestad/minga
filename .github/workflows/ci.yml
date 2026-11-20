@@ -497,6 +497,9 @@ jobs:
 
       - run: mix deps.get
       - run: mix dialyzer
+        env:
+          # Dialyzer sizes its worker pool from the online BEAM schedulers.
+          ERL_FLAGS: "+S 2:2"
 
   release-prerequisites:
     name: Native release prerequisites (${{ matrix.runner }})

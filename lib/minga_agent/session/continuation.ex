@@ -47,6 +47,8 @@ defmodule MingaAgent.Session.Continuation do
           optional(:steering) => [Message.t()]
         }
 
+  @typep checkpoint_selection :: {tool_checkpoint(), non_neg_integer(), checkpoint_call()}
+
   @typedoc "Completed model boundary correlated to the last display entry it produced."
   @type boundary :: %{
           transcript_id: pos_integer(),
@@ -974,26 +976,20 @@ defmodule MingaAgent.Session.Continuation do
         tool_call_id,
         name,
         arguments
-      )
-      when is_map(checkpoint) do
-    with true <- checkpoint.request_id == request_id or {:error, :stale_request},
-         true <- checkpoint.checkpoint_id == checkpoint_id or {:error, :stale_checkpoint},
-         {:ok, call_index, call} <- find_checkpoint_call(checkpoint.calls, tool_call_id),
+      ) do
+    with {:ok, {_, _, call} = selection} <-
+           select_checkpoint_call(checkpoint, request_id, checkpoint_id, tool_call_id),
          true <-
            (call.name == name and call.arguments == arguments) or
              {:error, :tool_call_identity_mismatch},
          :pending <- call.status do
-      calls = List.replace_at(checkpoint.calls, call_index, %{call | status: :admitted})
-      {:ok, %{continuation | tool_checkpoint: %{checkpoint | calls: calls}}}
+      {:ok, replace_checkpoint_status(continuation, selection, :admitted)}
     else
       :admitted -> {:error, :duplicate_admission}
       {:completed, _message} -> {:error, :duplicate_admission}
       {:error, _reason} = error -> error
     end
   end
-
-  def admit_tool_effect(%__MODULE__{}, _request_id, _checkpoint_id, _tool_call_id, _name, _args),
-    do: {:error, :missing_tool_checkpoint}
 
   @doc "Records the exact terminal tool-result message against its original call identity."
   @spec complete_tool_effect(t(), String.t(), String.t(), String.t(), Message.t()) ::
@@ -1004,41 +1000,29 @@ defmodule MingaAgent.Session.Continuation do
         checkpoint_id,
         tool_call_id,
         %Message{} = result_message
-      )
-      when is_map(checkpoint) do
-    with true <- checkpoint.request_id == request_id or {:error, :stale_request},
-         true <- checkpoint.checkpoint_id == checkpoint_id or {:error, :stale_checkpoint},
-         {:ok, call_index, call} <- find_checkpoint_call(checkpoint.calls, tool_call_id),
-         :ok <- validate_tool_result_identity(call, tool_call_id, result_message) do
+      ) do
+    with {:ok, selection} <-
+           select_checkpoint_call(checkpoint, request_id, checkpoint_id, tool_call_id) do
+      complete_checkpoint_call(continuation, selection, tool_call_id, result_message)
+    end
+  end
+
+  @spec complete_checkpoint_call(t(), checkpoint_selection(), String.t(), Message.t()) ::
+          {:ok, t()} | {:error, :tool_result_identity_mismatch | :conflicting_tool_outcome}
+  defp complete_checkpoint_call(continuation, {_, _, call} = selection, tool_call_id, result) do
+    with :ok <- validate_tool_result_identity(call, tool_call_id, result) do
       case call.status do
-        {:completed, ^result_message} ->
+        {:completed, ^result} ->
           {:ok, continuation}
 
         {:completed, _different_message} ->
           {:error, :conflicting_tool_outcome}
 
         status when status in [:pending, :admitted] ->
-          calls =
-            List.replace_at(checkpoint.calls, call_index, %{
-              call
-              | status: {:completed, result_message}
-            })
-
-          {:ok, %{continuation | tool_checkpoint: %{checkpoint | calls: calls}}}
+          {:ok, replace_checkpoint_status(continuation, selection, {:completed, result})}
       end
-    else
-      {:error, _reason} = error -> error
     end
   end
-
-  def complete_tool_effect(
-        %__MODULE__{},
-        _request_id,
-        _checkpoint_id,
-        _tool_call_id,
-        %Message{}
-      ),
-      do: {:error, :missing_tool_checkpoint}
 
   @doc "Records explicit Stop only for the exact still-unadmitted checkpoint call."
   @spec cancel_unadmitted_tool(t(), String.t(), String.t(), String.t()) ::
@@ -1052,15 +1036,17 @@ defmodule MingaAgent.Session.Continuation do
         checkpoint_id,
         tool_call_id
       ) do
-    with {:ok, _index, call} <- find_checkpoint_call(checkpoint.calls, tool_call_id) do
-      cancel_checkpoint_call(continuation, checkpoint, call)
+    with {:ok, selection} <- select_checkpoint_call(checkpoint, tool_call_id) do
+      cancel_checkpoint_call(continuation, selection)
     end
   end
 
   def cancel_unadmitted_tool(%__MODULE__{}, _request, _checkpoint, _tool),
     do: {:error, :stale_checkpoint}
 
-  defp cancel_checkpoint_call(continuation, checkpoint, %{status: :pending} = call) do
+  @spec cancel_checkpoint_call(t(), checkpoint_selection()) ::
+          {:ok, t()} | {:already_completed, Message.t()} | {:error, term()}
+  defp cancel_checkpoint_call(continuation, {_, _, %{status: :pending} = call} = selection) do
     result =
       Context.tool_result_message(call.name, call.tool_call_id, "Cancelled before approval", %{
         tool_outcome: :cancelled,
@@ -1068,20 +1054,20 @@ defmodule MingaAgent.Session.Continuation do
         minga_effect_status: :not_executed
       })
 
-    complete_tool_effect(
-      continuation,
-      checkpoint.request_id,
-      checkpoint.checkpoint_id,
-      call.tool_call_id,
-      result
-    )
+    complete_checkpoint_call(continuation, selection, call.tool_call_id, result)
   end
 
-  defp cancel_checkpoint_call(_continuation, _checkpoint, %{status: :admitted}),
+  defp cancel_checkpoint_call(_continuation, {_, _, %{status: :admitted}}),
     do: {:error, :effect_already_admitted}
 
-  defp cancel_checkpoint_call(_continuation, _checkpoint, %{status: {:completed, result}}),
+  defp cancel_checkpoint_call(_continuation, {_, _, %{status: {:completed, result}}}),
     do: {:already_completed, result}
+
+  @spec replace_checkpoint_status(t(), checkpoint_selection(), tool_call_status()) :: t()
+  defp replace_checkpoint_status(continuation, {checkpoint, index, call}, status) do
+    calls = List.replace_at(checkpoint.calls, index, %{call | status: status})
+    %{continuation | tool_checkpoint: %{checkpoint | calls: calls}}
+  end
 
   @doc "Finds terminal calls in the active Request without treating historical results as current approvals."
   @spec tool_call_completed?(t(), String.t()) :: boolean()
@@ -1549,14 +1535,42 @@ defmodule MingaAgent.Session.Continuation do
     request_id <> ":" <> digest
   end
 
-  @spec find_checkpoint_call([checkpoint_call()], String.t()) ::
-          {:ok, non_neg_integer(), checkpoint_call()} | {:error, :unknown_tool_call}
-  defp find_checkpoint_call(calls, tool_call_id) do
-    case Enum.find_index(calls, &(&1.tool_call_id == tool_call_id)) do
-      nil -> {:error, :unknown_tool_call}
-      index -> {:ok, index, Enum.at(calls, index)}
+  @spec select_checkpoint_call(tool_checkpoint() | nil, String.t(), String.t(), String.t()) ::
+          {:ok, checkpoint_selection()}
+          | {:error,
+             :missing_tool_checkpoint | :stale_request | :stale_checkpoint | :unknown_tool_call}
+  defp select_checkpoint_call(checkpoint, request_id, checkpoint_id, tool_call_id)
+       when is_map(checkpoint) do
+    with true <- checkpoint.request_id == request_id or {:error, :stale_request},
+         true <- checkpoint.checkpoint_id == checkpoint_id or {:error, :stale_checkpoint} do
+      select_checkpoint_call(checkpoint, tool_call_id)
     end
   end
+
+  defp select_checkpoint_call(_checkpoint, _request_id, _checkpoint_id, _tool_call_id),
+    do: {:error, :missing_tool_checkpoint}
+
+  @spec select_checkpoint_call(tool_checkpoint(), String.t()) ::
+          {:ok, checkpoint_selection()} | {:error, :unknown_tool_call}
+  defp select_checkpoint_call(checkpoint, tool_call_id),
+    do: find_checkpoint_call(checkpoint.calls, tool_call_id, 0, checkpoint)
+
+  @spec find_checkpoint_call(
+          [checkpoint_call()],
+          String.t(),
+          non_neg_integer(),
+          tool_checkpoint()
+        ) ::
+          {:ok, checkpoint_selection()} | {:error, :unknown_tool_call}
+  defp find_checkpoint_call([%{tool_call_id: id} = call | _rest], tool_call_id, index, checkpoint)
+       when id == tool_call_id,
+       do: {:ok, {checkpoint, index, call}}
+
+  defp find_checkpoint_call([_call | rest], tool_call_id, index, checkpoint),
+    do: find_checkpoint_call(rest, tool_call_id, index + 1, checkpoint)
+
+  defp find_checkpoint_call([], _tool_call_id, _index, _checkpoint),
+    do: {:error, :unknown_tool_call}
 
   @spec reconciliation_result(checkpoint_call(), term()) :: {Message.t(), atom()}
   defp reconciliation_result(%{status: {:completed, %Message{} = message}}, _output),

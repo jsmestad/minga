@@ -105,16 +105,34 @@ defmodule Minga.Extension.JsonLoaderTest do
     dir: dir,
     admission: admission
   } do
-    extension_name = String.to_atom("json_generation_#{System.unique_integer([:positive])}")
-    write_manifest(dir, Jason.encode!(%{"name" => "generation", "version" => "1"}))
+    extension_name = unique_json_name("generation")
+
+    manifest = %{
+      "name" => "generation",
+      "version" => "1",
+      "description" => "${MINGA_PLUGIN_ROOT}"
+    }
+
+    write_manifest(dir, Jason.encode!(manifest))
 
     assert {:ok, module} =
              JsonLoader.load(dir, extension_name, artifact_admission: admission)
 
     assert module.version() == "1"
 
+    payload = {Atom.to_string(module), Path.expand(dir), %{manifest | "description" => dir}}
+    fingerprint = :crypto.hash(:sha256, :erlang.term_to_binary(payload, [:deterministic]))
+
+    assert {:ok, ^fingerprint} =
+             ArtifactAdmission.source_fingerprint({:extension, extension_name}, server: admission)
+
+    unexpected_creator = fn _, _, _ -> flunk("an admitted module must not be recreated") end
+
     assert {:ok, ^module} =
-             JsonLoader.load(dir, extension_name, artifact_admission: admission)
+             JsonLoader.load(dir, extension_name,
+               artifact_admission: admission,
+               module_creator: unexpected_creator
+             )
 
     write_manifest(dir, Jason.encode!(%{"name" => "generation", "version" => "2"}))
 
@@ -198,6 +216,24 @@ defmodule Minga.Extension.JsonLoaderTest do
 
       assert_receive {:race_finished, ^racer}, 5_000
     end)
+  end
+
+  test "a failed module creator releases the claim for a retry", %{dir: dir, admission: admission} do
+    name = unique_json_name("creation_retry")
+    write_manifest(dir, Jason.encode!(%{"name" => "retry"}))
+
+    creators = [
+      {fn _, _, _ -> {:error, :creation_denied} end, "{:error, :creation_denied}"},
+      {fn _, _, _ -> raise "creation crashed" end, "creation crashed"}
+    ]
+
+    for {creator, reason} <- creators do
+      assert JsonLoader.load(dir, name, artifact_admission: admission, module_creator: creator) ==
+               {:error, "plugin module creation failed: #{reason}"}
+    end
+
+    assert {:ok, module} = JsonLoader.load(dir, name, artifact_admission: admission)
+    assert module.name() == name
   end
 
   test "removes the created module when admission stops before commit", context do

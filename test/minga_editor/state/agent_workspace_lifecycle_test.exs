@@ -463,6 +463,7 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
   end
 
   test "restarting an active agent workspace reuses the workspace and preserves files and UI" do
+    _providers = LLMDB.providers()
     {:ok, _session_id, old_session} = SessionManager.start_session([])
     on_exit(fn -> stop_session(old_session) end)
     old_ref = Process.monitor(old_session)
@@ -493,6 +494,7 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
   end
 
   test "restarting from a file tab reuses the active agent workspace" do
+    _providers = LLMDB.providers()
     {:ok, _session_id, old_session} = SessionManager.start_session([])
     on_exit(fn -> stop_session(old_session) end)
     old_ref = Process.monitor(old_session)
