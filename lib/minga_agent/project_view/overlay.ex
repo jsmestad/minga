@@ -81,7 +81,7 @@ defmodule MingaAgent.ProjectView.Overlay do
           String.t(),
           Minga.Buffer.FileMutation.expectation(),
           Minga.Buffer.FileMutation.operation()
-        ) :: :ok | {:error, term()}
+        ) :: {:ok, Minga.Buffer.FileMutation.Receipt.t()} | {:error, term()}
   def conditional_mutate(%ProjectView{} = view, relative_path, expected, operation) do
     with :ok <- ensure_changeset_available(view),
          :ok <- fork_store_available(fork_store(view)),
@@ -94,7 +94,7 @@ defmodule MingaAgent.ProjectView.Overlay do
           Source.t(),
           Minga.Buffer.FileMutation.expectation(),
           Minga.Buffer.FileMutation.operation()
-        ) :: :ok | {:error, term()}
+        ) :: {:ok, Minga.Buffer.FileMutation.Receipt.t()} | {:error, term()}
   defp mutate_source(%Source{source_id: id, owner: {:changeset, cs, path}}, expected, operation) do
     Changeset.conditional_mutate(cs, path, expected, operation, {:project_view, id})
   end

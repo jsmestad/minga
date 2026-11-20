@@ -140,7 +140,7 @@ defmodule Minga.Buffer.ConditionalMutationTest do
         identity = {:project_view, "project/source"}
         expected = FileMutation.revision(Buffer.content(ctx.server), nil, identity)
 
-        assert :ok =
+        assert {:ok, %FileMutation.Receipt{after: "view"}} =
                  ctx.api.conditional_mutate(ctx.server, expected, {:replace, "view"}, identity)
 
         assert Buffer.content_with_version(ctx.server) == {"view", 1}
@@ -559,7 +559,9 @@ defmodule Minga.Buffer.ConditionalMutationTest do
                :ok
              end)
 
-    assert_receive {^mutation_tag, :ok}
+    assert_receive {^mutation_tag,
+                    {:ok, %FileMutation.Receipt{before: "original", after: "agent"}}}
+
     assert_receive {:staged_pending_edit, "agent"}
     assert Fork.published?(fork)
     assert Fork.dirty?(fork)
@@ -572,6 +574,9 @@ defmodule Minga.Buffer.ConditionalMutationTest do
   end
 
   defp mutate(ctx, expected, operation) do
-    ctx.api.conditional_mutate(ctx.server, expected, operation, ctx.identity)
+    case ctx.api.conditional_mutate(ctx.server, expected, operation, ctx.identity) do
+      {:ok, %FileMutation.Receipt{}} -> :ok
+      {:error, _reason} = error -> error
+    end
   end
 end

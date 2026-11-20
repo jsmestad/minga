@@ -56,7 +56,7 @@ defmodule MingaAgent.ProjectView do
           String.t(),
           Minga.Buffer.FileMutation.expectation(),
           Minga.Buffer.FileMutation.operation()
-        ) :: :ok | {:error, term()}
+        ) :: {:ok, Minga.Buffer.FileMutation.Receipt.t()} | {:error, term()}
   def conditional_mutate(%__MODULE__{} = view, relative_path, expected, operation)
       when is_binary(relative_path) do
     with {:ok, path} <- normalize_relative_path(relative_path),

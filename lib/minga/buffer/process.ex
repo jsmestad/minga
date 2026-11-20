@@ -258,7 +258,7 @@ defmodule Minga.Buffer.Process do
           FileMutation.expectation(),
           FileMutation.operation(),
           FileMutation.identity()
-        ) :: :ok | {:error, term()}
+        ) :: {:ok, FileMutation.Receipt.t()} | {:error, term()}
   def conditional_mutate(server, expected, operation, identity) do
     GenServer.call(server, {:conditional_mutate, expected, operation, identity}, :infinity)
   end
@@ -1385,7 +1385,10 @@ defmodule Minga.Buffer.Process do
 
     case FileMutation.prepare({:ok, content}, generation, identity, expected, operation) do
       {:ok, new_content} when is_binary(new_content) ->
-        {:reply, :ok, replace_content_preserving_cursor_state(state, new_content, :agent)}
+        receipt = FileMutation.Receipt.committed({:ok, content}, new_content)
+
+        {:reply, {:ok, receipt},
+         replace_content_preserving_cursor_state(state, new_content, :agent)}
 
       {:error, _} = error ->
         {:reply, error, state}

@@ -154,7 +154,7 @@ defmodule MingaAgent.Changeset.Server do
         |> install_mutation(path, prepared)
         |> bump_revision()
 
-      {:reply, :ok, state}
+      {:reply, {:ok, FileMutation.Receipt.committed(source, prepared)}, state}
     else
       {:error, reason} -> {:reply, {:error, reason}, state}
     end

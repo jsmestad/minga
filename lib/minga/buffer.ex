@@ -395,7 +395,7 @@ defmodule Minga.Buffer do
           FileMutation.expectation(),
           FileMutation.operation(),
           FileMutation.identity()
-        ) :: :ok | {:error, term()}
+        ) :: {:ok, FileMutation.Receipt.t()} | {:error, term()}
   defdelegate conditional_mutate(server, expected, operation, identity), to: BufferProcess
 
   @doc "Publishes a fork deletion only while its original parent content is current, retaining the open buffer."

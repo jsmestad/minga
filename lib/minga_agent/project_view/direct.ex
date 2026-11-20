@@ -61,7 +61,7 @@ defmodule MingaAgent.ProjectView.Direct do
           String.t(),
           Minga.Buffer.FileMutation.expectation(),
           Minga.Buffer.FileMutation.operation()
-        ) :: :ok | {:error, term()}
+        ) :: {:ok, Minga.Buffer.FileMutation.Receipt.t()} | {:error, term()}
   def conditional_mutate(%ProjectView{} = view, relative_path, expected, operation) do
     with {:ok, owned} <- owned_view(view) do
       Overlay.conditional_mutate(owned, relative_path, expected, operation)

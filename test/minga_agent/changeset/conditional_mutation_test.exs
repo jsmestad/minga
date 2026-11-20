@@ -18,7 +18,7 @@ defmodule MingaAgent.Changeset.ConditionalMutationTest do
     {:ok, bytes, version} = Changeset.read_file_with_version(cs, "file.txt")
     expected = FileMutation.revision(bytes, version, identity)
 
-    assert :ok =
+    assert {:ok, %FileMutation.Receipt{before: ^bytes, after: "ONE two THREE\n"}} =
              Changeset.conditional_mutate(
                cs,
                "file.txt",
@@ -72,8 +72,13 @@ defmodule MingaAgent.Changeset.ConditionalMutationTest do
       end
       |> Enum.map(&Task.await/1)
 
-    assert Enum.sort(results) == Enum.sort([:ok, {:error, :stale_revision}])
-    assert {:ok, _, next} = Changeset.read_file_with_version(cs, "file.txt")
+    assert [
+             {:error, :stale_revision},
+             {:ok, %FileMutation.Receipt{before: ^bytes, after: winner}}
+           ] =
+             Enum.sort(results)
+
+    assert {:ok, ^winner, next} = Changeset.read_file_with_version(cs, "file.txt")
     assert next == version + 1
     assert :ok = Changeset.undo(cs, "file.txt")
     assert {:ok, ^bytes} = Changeset.read_file(cs, "file.txt")
@@ -92,7 +97,7 @@ defmodule MingaAgent.Changeset.ConditionalMutationTest do
 
     assert :sys.get_state(cs) == before
 
-    assert :ok =
+    assert {:ok, %FileMutation.Receipt{before: :absent, after: "new"}} =
              Changeset.conditional_mutate(cs, "other.txt", :absent, {:create, "new"}, identity)
 
     assert {:ok, "new"} = Changeset.read_file(cs, "other.txt")
@@ -124,7 +129,7 @@ defmodule MingaAgent.Changeset.ConditionalMutationTest do
     {:ok, bytes, version} = Changeset.read_file_with_version(cs, "file.txt")
     expected = FileMutation.revision(bytes, version, identity)
 
-    assert :ok =
+    assert {:ok, _receipt} =
              Changeset.conditional_mutate(
                cs,
                "file.txt",
@@ -170,7 +175,7 @@ defmodule MingaAgent.Changeset.ConditionalMutationTest do
       {:ok, ^original, version} = Changeset.read_file_with_version(cs, "file.txt")
       expected = FileMutation.revision(original, version, identity)
 
-      assert :ok =
+      assert {:ok, _receipt} =
                Changeset.conditional_mutate(
                  cs,
                  "file.txt",
@@ -198,7 +203,7 @@ defmodule MingaAgent.Changeset.ConditionalMutationTest do
     {:ok, original, version} = Changeset.read_file_with_version(cs, "file.txt")
     expected = FileMutation.revision(original, version, identity)
 
-    assert :ok =
+    assert {:ok, _receipt} =
              Changeset.conditional_mutate(
                cs,
                "file.txt",
