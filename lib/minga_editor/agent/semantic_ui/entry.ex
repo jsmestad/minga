@@ -60,15 +60,16 @@ defmodule MingaEditor.Agent.SemanticUI.Entry do
          {:ok, payload} <- payload(surface, Map.get(attrs, :payload)),
          {:ok, actions} <- actions(Map.get(attrs, :actions, [])),
          {:ok, priority} <- priority(Map.get(attrs, :priority, 100)) do
-      validate(%__MODULE__{
-        source: source,
-        id: id,
-        surface: surface,
-        target: Map.get(attrs, :target, :default),
-        priority: priority,
-        payload: payload,
-        actions: actions
-      })
+      {:ok,
+       %__MODULE__{
+         source: source,
+         id: id,
+         surface: surface,
+         target: Map.get(attrs, :target, :default),
+         priority: priority,
+         payload: payload,
+         actions: actions
+       }}
     end
   end
 

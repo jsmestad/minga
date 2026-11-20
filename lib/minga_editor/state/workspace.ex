@@ -142,11 +142,16 @@ defmodule MingaEditor.State.Workspace do
 
   @doc "Clears the live agent session pid and returns the workspace to idle lifecycle status. Durable remote identity is preserved."
   @spec clear_session(t()) :: t()
-  def clear_session(%__MODULE__{} = workspace) do
-    workspace
-    |> set_session(nil)
-    |> set_agent_status(:idle)
+  def clear_session(%__MODULE__{} = workspace), do: session_ended(workspace, :idle)
+
+  @doc "Clears the live session PID while recording its final lifecycle status."
+  @spec session_ended(t(), :idle | :error) :: t()
+  def session_ended(%__MODULE__{payload: %Agent{} = payload} = workspace, status)
+      when status in [:idle, :error] do
+    %{workspace | payload: %Agent{payload | session: nil, agent_status: status}}
   end
+
+  def session_ended(%__MODULE__{payload: %Manual{}} = workspace, _status), do: workspace
 
   @doc "Sets durable remote metadata on the workspace."
   @spec set_remote_session(t(), RemoteSession.t() | nil) :: t()

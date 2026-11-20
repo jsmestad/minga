@@ -137,23 +137,27 @@ defmodule MingaEditor.EffectScheduler.Lane do
 
   @spec admit_fifo(t(), Request.t(), boolean()) :: {admission(), t(), [action()]}
   defp admit_fifo(%__MODULE__{} = lane, request, capacity?) do
-    cond do
-      :queue.len(lane.queue) >= lane.policy.max_queued -> {{:error, :queue_full}, lane, []}
-      not capacity? -> {{:error, :scheduler_full}, lane, []}
-      true -> enqueue(lane, request)
+    full? = :queue.len(lane.queue) >= lane.policy.max_queued
+
+    case {full?, capacity?} do
+      {true, _capacity?} -> {{:error, :queue_full}, lane, []}
+      {false, false} -> {{:error, :scheduler_full}, lane, []}
+      {false, true} -> enqueue(lane, request)
     end
   end
 
   @spec admit_coalescing(t(), Request.t(), boolean()) :: {admission(), t(), [action()]}
   defp admit_coalescing(%__MODULE__{} = lane, request, capacity?) do
-    cond do
-      :queue.len(lane.queue) < lane.policy.max_queued and not capacity? ->
+    full? = :queue.len(lane.queue) >= lane.policy.max_queued
+
+    case {full?, capacity?} do
+      {false, false} ->
         {{:error, :scheduler_full}, lane, []}
 
-      :queue.len(lane.queue) < lane.policy.max_queued ->
+      {false, true} ->
         enqueue(lane, request)
 
-      true ->
+      {true, _capacity?} ->
         older = :queue.get_r(lane.queue)
         request = Request.coalesce(older, request)
 

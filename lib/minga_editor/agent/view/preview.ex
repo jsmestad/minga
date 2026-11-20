@@ -16,7 +16,6 @@ defmodule MingaEditor.Agent.View.Preview do
   """
 
   alias MingaEditor.Agent.DiffReview
-  alias MingaEditor.Agent.EditTimeline
   alias Minga.Editing.Scroll
 
   @typedoc "Shell activity and terminal outcomes."
@@ -114,25 +113,14 @@ defmodule MingaEditor.Agent.View.Preview do
 
   The current preview has no source-bound reading anchor, so an integer offset cannot safely follow inserted or removed rows. Keep the exact last-good presentation and disable decisions until explicit Review acquires the current cumulative revision. Unrelated writes leave every field unchanged.
   """
-  @spec refresh_after_write(t(), String.t(), String.t(), EditTimeline.t()) :: t()
-  def refresh_after_write(
-        %__MODULE__{content: {:diff, %DiffReview{path: path}}} = preview,
-        path,
-        _after_content,
-        _timeline
-      ),
-      do: %{preview | freshness: :stale}
+  @spec refresh_after_write(t(), String.t()) :: t()
+  def refresh_after_write(%__MODULE__{content: {:diff, %DiffReview{path: path}}} = preview, path),
+    do: %{preview | freshness: :stale}
 
-  def refresh_after_write(
-        %__MODULE__{content: {:file, path, _content}} = preview,
-        path,
-        _after_content,
-        _timeline
-      ),
-      do: %{preview | freshness: :stale}
+  def refresh_after_write(%__MODULE__{content: {:file, path, _content}} = preview, path),
+    do: %{preview | freshness: :stale}
 
-  def refresh_after_write(%__MODULE__{} = preview, _path, _after_content, _timeline),
-    do: preview
+  def refresh_after_write(%__MODULE__{} = preview, _path), do: preview
 
   @doc "Updates the diff review within the preview."
   @spec update_diff(t(), (DiffReview.t() -> DiffReview.t())) :: t()

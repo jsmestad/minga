@@ -6,7 +6,6 @@ defmodule MingaEditor.RenderModel.Window.ReviewProjectionTest do
   alias Minga.RenderModel.Window.RowDelta
   alias Minga.RenderModel.Window.RowSlotAllocator
   alias MingaEditor.Agent.DiffReview
-  alias MingaEditor.Agent.EditTimeline
   alias MingaEditor.Agent.View.Preview
   alias MingaEditor.RenderModel.Window.ReviewLayout
   alias MingaEditor.RenderModel.Window.ReviewProjection
@@ -83,8 +82,8 @@ defmodule MingaEditor.RenderModel.Window.ReviewProjectionTest do
     inputs = [
       Preview.scroll_down(preview, 4),
       Preview.navigate_hunk(preview, :next),
-      Preview.refresh_after_write(preview, "selected.ex", "later", EditTimeline.new()),
-      Preview.refresh_after_write(preview, "other.ex", "unrelated", EditTimeline.new())
+      Preview.refresh_after_write(preview, "selected.ex"),
+      Preview.refresh_after_write(preview, "other.ex")
     ]
 
     for input <- inputs do

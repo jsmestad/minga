@@ -1702,15 +1702,20 @@ defmodule MingaEditor.Commands.BufferManagement do
           reason
         )
 
-      %WorkspaceModel{} = workspace ->
-        handle_standard_workspace_session_down(state, tb, workspace, session_pid, reason)
-
-      nil ->
-        handle_tab_only_session_down(state, tb, session_pid, reason)
+      workspace ->
+        if workspace || TabBar.find_by_session(tb, session_pid) do
+          finish_standard_session_down(state, session_pid, reason)
+        else
+          ignore_unowned_session_down(state, session_pid)
+        end
     end
   end
 
-  defp handle_agent_session_down_for_tabs(state, session_pid, _reason) do
+  defp handle_agent_session_down_for_tabs(state, session_pid, _reason),
+    do: ignore_unowned_session_down(state, session_pid)
+
+  @spec ignore_unowned_session_down(state(), pid()) :: state()
+  defp ignore_unowned_session_down(state, session_pid) do
     Minga.Log.debug(
       :agent,
       "ignoring session-down for non-owned pid #{inspect(session_pid)}"
@@ -1719,46 +1724,18 @@ defmodule MingaEditor.Commands.BufferManagement do
     state
   end
 
-  @spec workspace_session?(WorkspaceModel.t(), pid()) :: boolean()
-  defp workspace_session?(%WorkspaceModel{payload: %WorkspaceAgent{session: pid}}, pid), do: true
-  defp workspace_session?(%WorkspaceModel{}, _pid), do: false
+  @spec finish_standard_session_down(state(), pid(), term()) :: state()
+  defp finish_standard_session_down(state, session_pid, reason) do
+    {status, message} =
+      if reason in [:normal, :shutdown],
+        do: {:idle, "Agent session ended"},
+        else: {:error, "Agent session crashed (SPC a n to restart)"}
 
-  @spec handle_standard_workspace_session_down(
-          state(),
-          TabBar.t(),
-          WorkspaceModel.t(),
-          pid(),
-          term()
-        ) :: state()
-  defp handle_standard_workspace_session_down(state, tb, workspace, session_pid, reason) do
-    owned? =
-      Enum.any?(tb.tabs, &tab_session?(&1, session_pid)) or
-        workspace_session?(workspace, session_pid)
-
-    if owned? do
-      tab_status = if reason in [:normal, :shutdown], do: :idle, else: :error
-
-      state =
-        state
-        |> TraditionalWorkflow.install_agent_spinner_stop()
-        |> TraditionalWorkflow.install_agent_cache_reset()
-        |> clear_session_from_tabs(session_pid, tab_status)
-        |> clear_session_from_workspace(workspace.id, tab_status)
-
-      msg =
-        if reason in [:normal, :shutdown],
-          do: "Agent session ended",
-          else: "Agent session crashed (SPC a n to restart)"
-
-      NoticeWorkflow.publish(state, msg)
-    else
-      Minga.Log.debug(
-        :agent,
-        "ignoring session-down for non-owned pid #{inspect(session_pid)}"
-      )
-
-      state
-    end
+    state
+    |> TraditionalWorkflow.install_agent_spinner_stop()
+    |> TraditionalWorkflow.install_agent_cache_reset()
+    |> install_ended_session(session_pid, status)
+    |> NoticeWorkflow.publish(message)
   end
 
   @spec handle_project_view_workspace_session_down(
@@ -1834,7 +1811,7 @@ defmodule MingaEditor.Commands.BufferManagement do
       state
       |> TraditionalWorkflow.install_agent_spinner_stop()
       |> TraditionalWorkflow.install_agent_cache_reset()
-      |> clear_session_from_tabs(session_pid, tab_status)
+      |> install_ended_session(session_pid, tab_status)
 
     state =
       state
@@ -1869,7 +1846,7 @@ defmodule MingaEditor.Commands.BufferManagement do
 
     state =
       if is_pid(session_pid) do
-        clear_session_from_tabs(state, session_pid, :error)
+        install_ended_session(state, session_pid, :error)
       else
         state
       end
@@ -1882,8 +1859,7 @@ defmodule MingaEditor.Commands.BufferManagement do
 
     updated_workspace =
       workspace
-      |> WorkspaceModel.clear_session()
-      |> WorkspaceModel.set_agent_status(:error)
+      |> WorkspaceModel.session_ended(:error)
       |> WorkspaceModel.set_review(review)
 
     tb =
@@ -1903,30 +1879,6 @@ defmodule MingaEditor.Commands.BufferManagement do
       end
 
     NoticeWorkflow.publish(state, msg)
-  end
-
-  @spec handle_tab_only_session_down(state(), TabBar.t(), pid(), term()) :: state()
-  defp handle_tab_only_session_down(state, tb, session_pid, reason) do
-    owned? = Enum.any?(tb.tabs, &tab_session?(&1, session_pid))
-
-    if owned? do
-      tab_status = if reason in [:normal, :shutdown], do: :idle, else: :error
-      state = scrub_agent_tab_state(state, session_pid, tab_status)
-
-      msg =
-        if reason in [:normal, :shutdown],
-          do: "Agent session ended",
-          else: "Agent session crashed (SPC a n to restart)"
-
-      NoticeWorkflow.publish(state, msg)
-    else
-      Minga.Log.debug(
-        :agent,
-        "ignoring session-down for non-owned pid #{inspect(session_pid)}"
-      )
-
-      state
-    end
   end
 
   @spec project_view_changed_files(WorkspaceModel.t()) ::
@@ -2102,114 +2054,13 @@ defmodule MingaEditor.Commands.BufferManagement do
       else: shell_state
   end
 
-  # Shared state cleanup for agent sessions: stops spinner, clears Workspace-owned session
-  # state, clears orphan tab projections, and removes the agent workspace.
-  @spec scrub_agent_tab_state(state(), pid(), Tab.agent_status()) :: state()
-  defp scrub_agent_tab_state(state, session, tab_status) do
-    state = TraditionalWorkflow.install_agent_spinner_stop(state)
-    state = TraditionalWorkflow.install_agent_cache_reset(state)
-
-    # Clear session and status on any tab that referenced this session.
-    state = clear_session_from_tabs(state, session, tab_status)
-
-    case TabBar.find_workspace_by_session(state.shell_runtime.state.tab_bar, session) do
-      %{id: workspace_id} ->
-        WorkspaceWorkflow.install_tab_bar(
-          state,
-          MingaEditor.State.TabBar.remove_workspace(
-            state.shell_runtime.state.tab_bar,
-            workspace_id
-          )
-        )
-
-      _ ->
-        state
-    end
-  end
-
-  # Clears the workspace-owned session and marks orphan tabs that still reference
-  # the given session pid.
-  @spec clear_session_from_tabs(state(), pid(), Tab.agent_status()) :: state()
-  defp clear_session_from_tabs(
-         %{shell_runtime: %{state: %{tab_bar: tb}}} = state,
-         session_pid,
-         status
-       ) do
-    owned_workspace_ids =
-      Enum.flat_map(tb.workspaces, fn
-        %WorkspaceModel{id: workspace_id, payload: %WorkspaceModel.Agent{session: ^session_pid}} ->
-          [workspace_id]
-
-        _workspace ->
-          []
-      end)
-
-    updated_tb =
-      Enum.reduce(owned_workspace_ids, tb, fn workspace_id, acc ->
-        acc
-        |> TabBar.clear_workspace_session(workspace_id)
-        |> TabBar.set_workspace_agent_status(workspace_id, status)
-      end)
-      |> mark_orphan_session_down(session_pid, status, owned_workspace_ids)
-
-    shell_state =
-      MingaEditor.Shell.Traditional.State.install_tab_bar(
-        MingaEditor.Shell.Runtime.state(state.shell_runtime),
-        updated_tb
-      )
-
-    %{
-      state
-      | shell_runtime:
-          MingaEditor.Shell.Runtime.install_traditional_state(state.shell_runtime, shell_state)
-    }
-  end
-
-  @spec mark_orphan_session_down(TabBar.t(), pid(), Tab.agent_status(), [non_neg_integer()]) ::
-          TabBar.t()
-  defp mark_orphan_session_down(
-         %TabBar{tabs: tabs} = tb,
-         session_pid,
-         status,
-         owned_workspace_ids
-       ) do
-    Enum.reduce(tabs, tb, fn
-      %Tab{kind: :agent, group_id: workspace_id, payload: %Agent{session: ^session_pid}} = tab,
-      acc ->
-        if workspace_id in owned_workspace_ids do
-          acc
-        else
-          TabBar.accept_tab(acc, Tab.mark_orphan_session_down(tab, status))
-        end
-
-      _tab, acc ->
-        acc
-    end)
-  end
-
-  @spec tab_session?(Tab.t(), pid()) :: boolean()
-  defp tab_session?(%Tab{kind: :agent, payload: %Agent{session: pid}}, pid), do: true
-  defp tab_session?(%Tab{}, _pid), do: false
-
-  @spec clear_session_from_workspace(state(), non_neg_integer(), Tab.agent_status()) :: state()
-  defp clear_session_from_workspace(
+  @spec install_ended_session(state(), pid(), :idle | :error) :: state()
+  defp install_ended_session(
          %{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state,
-         workspace_id,
+         session_pid,
          status
        ) do
-    updated_tb =
-      case TabBar.get_workspace(tb, workspace_id) do
-        %WorkspaceModel{} = workspace ->
-          workspace =
-            workspace
-            |> WorkspaceModel.clear_session()
-            |> WorkspaceModel.set_agent_status(status)
-
-          TabBar.accept_workspace(tb, workspace)
-
-        nil ->
-          tb
-      end
+    updated_tb = TabBar.session_ended(tb, session_pid, status)
 
     shell_state =
       MingaEditor.Shell.Traditional.State.install_tab_bar(

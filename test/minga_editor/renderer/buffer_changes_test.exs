@@ -43,6 +43,24 @@ defmodule MingaEditor.Renderer.BufferChangesTest do
     assert {:ok, []} = Minga.Buffer.consume_edit_deltas(buffer, :renderer)
   end
 
+  test "windowed build completion consumes pending edit and hydration inputs" do
+    buffer = start_supervised!({Minga.Buffer, content: "one"})
+    snapshot = Minga.Buffer.render_snapshot(buffer, 0, 1)
+    delta = Minga.Buffer.EditDelta.insertion(0, {0, 0}, "o", {0, 1})
+
+    cache = WindowCache.reset() |> WindowCache.apply_edit_deltas(buffer, [delta], snapshot)
+
+    assert WindowCache.pending_edit_deltas(cache) == [delta]
+    assert WindowCache.changed_snapshot(cache) == snapshot
+    assert WindowCache.hydration_reason(cache) == :initial
+
+    completed = WindowCache.complete_resident_build(cache, nil, nil)
+
+    assert WindowCache.pending_edit_deltas(completed) == []
+    assert WindowCache.changed_snapshot(completed) == nil
+    assert WindowCache.hydration_reason(completed) == nil
+  end
+
   test "a third uncommitted consume preserves a pending range shifted by structural edits" do
     buffer = start_supervised!({Minga.Buffer, content: "zero\none\ntwo\nthree\nfour"})
     intent = intent(buffer, 0)

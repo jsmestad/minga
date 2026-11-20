@@ -868,14 +868,12 @@ defmodule MingaGitPorcelain.Commands do
          _removed_word_bg,
          _fold_fg
        ) do
-    {_id, decs} =
-      Minga.Core.Decorations.add_highlight(decs, {line_idx, 0}, {line_idx, 9999},
-        style: Face.new(bg: added_bg),
-        priority: 1,
-        group: :diff
-      )
-
-    apply_word_highlights(decs, line_idx, meta[:word_changes], added_word_bg)
+    decs
+    |> Minga.Core.Decorations.highlight_group(:diff, {line_idx, 0}, {line_idx, 9999},
+      style: Face.new(bg: added_bg),
+      priority: 1
+    )
+    |> apply_word_highlights(line_idx, meta[:word_changes], added_word_bg)
   end
 
   defp apply_line_decoration(
@@ -888,14 +886,12 @@ defmodule MingaGitPorcelain.Commands do
          removed_word_bg,
          _fold_fg
        ) do
-    {_id, decs} =
-      Minga.Core.Decorations.add_highlight(decs, {line_idx, 0}, {line_idx, 9999},
-        style: Face.new(bg: removed_bg),
-        priority: 1,
-        group: :diff
-      )
-
-    apply_word_highlights(decs, line_idx, meta[:word_changes], removed_word_bg)
+    decs
+    |> Minga.Core.Decorations.highlight_group(:diff, {line_idx, 0}, {line_idx, 9999},
+      style: Face.new(bg: removed_bg),
+      priority: 1
+    )
+    |> apply_word_highlights(line_idx, meta[:word_changes], removed_word_bg)
   end
 
   defp apply_line_decoration(
@@ -908,14 +904,10 @@ defmodule MingaGitPorcelain.Commands do
          _removed_word_bg,
          fold_fg
        ) do
-    {_id, decs} =
-      Minga.Core.Decorations.add_highlight(decs, {line_idx, 0}, {line_idx, 9999},
-        style: Face.new(fg: fold_fg, italic: true),
-        priority: 1,
-        group: :diff
-      )
-
-    decs
+    Minga.Core.Decorations.highlight_group(decs, :diff, {line_idx, 0}, {line_idx, 9999},
+      style: Face.new(fg: fold_fg, italic: true),
+      priority: 1
+    )
   end
 
   defp apply_line_decoration(
@@ -965,14 +957,14 @@ defmodule MingaGitPorcelain.Commands do
   end
 
   defp apply_side_pane_decoration(decs, :fold, line_idx, start_col, end_col, _bg, fold_fg) do
-    {_id, decs} =
-      Minga.Core.Decorations.add_highlight(decs, {line_idx, start_col}, {line_idx, end_col},
-        style: Face.new(fg: fold_fg, italic: true),
-        priority: 1,
-        group: :diff
-      )
-
-    decs
+    Minga.Core.Decorations.highlight_group(
+      decs,
+      :diff,
+      {line_idx, start_col},
+      {line_idx, end_col},
+      style: Face.new(fg: fold_fg, italic: true),
+      priority: 1
+    )
   end
 
   defp apply_side_pane_decoration(decs, _type, _line_idx, _start_col, _end_col, _bg, _fold_fg),
@@ -987,14 +979,14 @@ defmodule MingaGitPorcelain.Commands do
           atom()
         ) :: Minga.Core.Decorations.t()
   defp add_pane_highlight(decs, line_idx, start_col, end_col, bg, group) do
-    {_id, decs} =
-      Minga.Core.Decorations.add_highlight(decs, {line_idx, start_col}, {line_idx, end_col},
-        style: Face.new(bg: bg),
-        priority: 1,
-        group: group
-      )
-
-    decs
+    Minga.Core.Decorations.highlight_group(
+      decs,
+      group,
+      {line_idx, start_col},
+      {line_idx, end_col},
+      style: Face.new(bg: bg),
+      priority: 1
+    )
   end
 
   @spec apply_word_highlights(
@@ -1019,17 +1011,14 @@ defmodule MingaGitPorcelain.Commands do
 
   defp apply_word_highlights_at(decs, line_idx, word_changes, word_bg, offset) do
     Enum.reduce(word_changes, decs, fn {start_col, end_col}, acc ->
-      {_id, acc} =
-        Minga.Core.Decorations.add_highlight(
-          acc,
-          {line_idx, offset + start_col},
-          {line_idx, offset + end_col},
-          style: Face.new(bg: word_bg),
-          priority: 2,
-          group: :diff_word
-        )
-
-      acc
+      Minga.Core.Decorations.highlight_group(
+        acc,
+        :diff_word,
+        {line_idx, offset + start_col},
+        {line_idx, offset + end_col},
+        style: Face.new(bg: word_bg),
+        priority: 2
+      )
     end)
   end
 

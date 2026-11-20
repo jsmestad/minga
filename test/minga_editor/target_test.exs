@@ -6,6 +6,7 @@ defmodule MingaEditor.TargetTest do
   alias Minga.Mode.CommandState
   alias Minga.Project.FileTree
   alias MingaEditor.Agent.EditTimeline
+  alias MingaEditor.Agent.FileChange
   alias MingaEditor.Agent.UIState
   alias MingaEditor.KeyDispatch
   alias MingaEditor.RenderPipeline.TestHelpers
@@ -322,14 +323,13 @@ defmodule MingaEditor.TargetTest do
 
   defp timeline_state(state) do
     timeline =
-      EditTimeline.record_edit(
-        EditTimeline.new(),
-        "/project/named.ex",
-        "tool",
-        "edit",
-        "old",
-        "new"
-      )
+      EditTimeline.record_edit(EditTimeline.new(), %FileChange{
+        path: "/project/named.ex",
+        before_content: "old",
+        after_content: "new",
+        tool_call_id: "tool",
+        tool_name: "edit"
+      })
 
     [entry] = EditTimeline.entries_for(timeline, "/project/named.ex")
     ui = UIState.replace_edit_timeline(state.workspace.agent_ui, timeline)

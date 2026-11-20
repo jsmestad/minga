@@ -14,6 +14,7 @@ defmodule MingaEditor.Agent.FileEventWorkflow do
   alias Minga.Project.FileRef
   alias MingaEditor.Agent.Activity
   alias MingaEditor.Agent.EditTimeline
+  alias MingaEditor.Agent.FileChange
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.View.Preview
   alias MingaEditor.Shell.Runtime
@@ -33,94 +34,38 @@ defmodule MingaEditor.Agent.FileEventWorkflow do
            {:info, String.t()} | {:warning, String.t()} | {:error, String.t()}
 
   @doc "Applies a file change and composes buffer reload, UI, render, and logging actions."
-  @spec changed(EditorState.t(), String.t(), String.t(), String.t(), String.t(), String.t()) ::
-          EditorState.t()
-  def changed(
-        %EditorState{} = state,
-        path,
-        before_content,
-        after_content,
-        tool_call_id,
-        tool_name
-      ) do
-    {state, notices} =
-      transition_changed(
-        state,
-        path,
-        before_content,
-        after_content,
-        tool_call_id,
-        tool_name
-      )
+  @spec changed(EditorState.t(), FileChange.t()) :: EditorState.t()
+  def changed(%EditorState{} = state, %FileChange{path: path} = change) do
+    {state, notices} = reload_remote_buffer_if_open(state, change)
 
     state
+    |> record_file_activity(path)
+    |> record_edit(change)
+    |> track_active_shell_agent_file(path)
+    |> associate_file_with_agent_workspace(path)
+    |> add_file_changed_message(change)
+    |> refresh_selected_preview(path)
     |> MingaEditor.schedule_render(16)
     |> log_reload_notices(notices)
   end
 
-  @spec transition_changed(
-          EditorState.t(),
-          String.t(),
-          String.t(),
-          String.t(),
-          String.t(),
-          String.t()
-        ) :: {EditorState.t(), [reload_notice()]}
-  defp transition_changed(
-         state,
-         path,
-         before_content,
-         after_content,
-         tool_call_id,
-         tool_name
-       ) do
-    {state, notices} = reload_remote_buffer_if_open(state, path, after_content)
-
-    state = update_activity(state, &Activity.record_file(&1, path))
-    state = record_edit(state, path, tool_call_id, tool_name, before_content, after_content)
-    state = track_active_shell_agent_file(state, path)
-    state = associate_file_with_agent_workspace(state, path)
-    state = add_file_changed_message(state, path, tool_name)
-    state = refresh_selected_preview(state, path, after_content)
-    {state, notices}
+  @spec record_edit(EditorState.t(), FileChange.t()) :: EditorState.t()
+  defp record_edit(state, change) do
+    ui = state.workspace.agent_ui
+    timeline = EditTimeline.record_edit(ui.view.edit_timeline, change)
+    TraditionalWorkflow.install_agent_ui(state, UIState.replace_edit_timeline(ui, timeline))
   end
 
-  @spec record_edit(
-          EditorState.t(),
-          String.t(),
-          String.t(),
-          String.t(),
-          String.t(),
-          String.t()
-        ) :: EditorState.t()
-  defp record_edit(state, path, tool_call_id, tool_name, before_content, after_content) do
-    TraditionalWorkflow.install_agent_ui(
-      state,
-      (fn ui ->
-         timeline =
-           EditTimeline.record_edit(
-             ui.view.edit_timeline,
-             path,
-             tool_call_id,
-             tool_name,
-             before_content,
-             after_content
-           )
-
-         UIState.replace_edit_timeline(ui, timeline)
-       end).(state.workspace.agent_ui)
-    )
+  @spec refresh_selected_preview(EditorState.t(), String.t()) :: EditorState.t()
+  defp refresh_selected_preview(state, path) do
+    ui = state.workspace.agent_ui
+    preview = Preview.refresh_after_write(ui.view.preview, path)
+    TraditionalWorkflow.install_agent_ui(state, UIState.replace_preview(ui, preview))
   end
 
-  @spec refresh_selected_preview(EditorState.t(), String.t(), String.t()) :: EditorState.t()
-  defp refresh_selected_preview(state, path, after_content) do
-    timeline = state.workspace.agent_ui.view.edit_timeline
-    update_preview(state, &Preview.refresh_after_write(&1, path, after_content, timeline))
-  end
-
-  @spec reload_remote_buffer_if_open(EditorState.t(), String.t(), String.t()) ::
+  @spec reload_remote_buffer_if_open(EditorState.t(), FileChange.t()) ::
           {EditorState.t(), [reload_notice()]}
-  defp reload_remote_buffer_if_open(state, path, after_content) do
+  defp reload_remote_buffer_if_open(state, %FileChange{path: path, after_content: after_content}) do
     case current_remote_target(state) do
       {:ok, server_name, remote_node} ->
         reload_remote_buffer(
@@ -278,8 +223,8 @@ defmodule MingaEditor.Agent.FileEventWorkflow do
     state
   end
 
-  @spec add_file_changed_message(EditorState.t(), String.t(), String.t()) :: EditorState.t()
-  defp add_file_changed_message(state, path, tool_name) do
+  @spec add_file_changed_message(EditorState.t(), FileChange.t()) :: EditorState.t()
+  defp add_file_changed_message(state, %FileChange{path: path, tool_name: tool_name}) do
     case Runtime.active_session(state.shell_runtime) do
       pid when is_pid(pid) ->
         short_path = shorten_to_relative(state, path)
@@ -306,22 +251,11 @@ defmodule MingaEditor.Agent.FileEventWorkflow do
     end
   end
 
-  @spec update_activity(EditorState.t(), (Activity.t() -> Activity.t())) :: EditorState.t()
-  defp update_activity(state, fun) when is_function(fun, 1) do
-    TraditionalWorkflow.install_agent_ui(
-      state,
-      (fn ui -> UIState.replace_activity(ui, fun.(ui.view.activity)) end).(
-        state.workspace.agent_ui
-      )
-    )
-  end
-
-  @spec update_preview(EditorState.t(), (Preview.t() -> Preview.t())) :: EditorState.t()
-  defp update_preview(state, fun) when is_function(fun, 1) do
-    TraditionalWorkflow.install_agent_ui(
-      state,
-      (fn ui -> UIState.replace_preview(ui, fun.(ui.view.preview)) end).(state.workspace.agent_ui)
-    )
+  @spec record_file_activity(EditorState.t(), String.t()) :: EditorState.t()
+  defp record_file_activity(state, path) do
+    ui = state.workspace.agent_ui
+    activity = Activity.record_file(ui.view.activity, path)
+    TraditionalWorkflow.install_agent_ui(state, UIState.replace_activity(ui, activity))
   end
 
   @spec track_active_shell_agent_file(EditorState.t(), String.t()) :: EditorState.t()

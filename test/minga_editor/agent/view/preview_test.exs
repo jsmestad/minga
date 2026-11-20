@@ -3,6 +3,7 @@ defmodule MingaEditor.Agent.View.PreviewTest do
 
   alias MingaEditor.Agent.DiffReview
   alias MingaEditor.Agent.EditTimeline
+  alias MingaEditor.Agent.FileChange
   alias MingaEditor.Agent.View.Preview
 
   describe "new/0" do
@@ -134,7 +135,7 @@ defmodule MingaEditor.Agent.View.PreviewTest do
       stale =
         Preview.new()
         |> Preview.set_diff(DiffReview.new("selected.ex", "before", "after"))
-        |> Preview.refresh_after_write("selected.ex", "later", EditTimeline.new())
+        |> Preview.refresh_after_write("selected.ex")
 
       previews = [
         Preview.new(),
@@ -184,19 +185,15 @@ defmodule MingaEditor.Agent.View.PreviewTest do
         Preview.new() |> Preview.set_directory("lib", ["selected.ex"]),
         Preview.new()
         |> Preview.set_diff(review)
-        |> Preview.refresh_after_write("selected.ex", "later\n", EditTimeline.new()),
+        |> Preview.refresh_after_write("selected.ex"),
         Preview.new()
         |> Preview.set_file("selected.ex", "new\n")
-        |> Preview.refresh_after_write("selected.ex", "later\n", EditTimeline.new())
+        |> Preview.refresh_after_write("selected.ex")
       ]
-
-      timeline =
-        EditTimeline.new()
-        |> EditTimeline.record_edit("other.ex", "write-b", "edit", "before", "after")
 
       for preview <- previews do
         selected = Preview.scroll_down(preview, 4)
-        assert Preview.refresh_after_write(selected, "other.ex", "after", timeline) == selected
+        assert Preview.refresh_after_write(selected, "other.ex") == selected
       end
     end
 
@@ -206,9 +203,15 @@ defmodule MingaEditor.Agent.View.PreviewTest do
 
       timeline =
         EditTimeline.new()
-        |> EditTimeline.record_edit("selected.ex", "write-a", "edit", "old\n", "second\n")
+        |> EditTimeline.record_edit(%FileChange{
+          path: "selected.ex",
+          before_content: "old\n",
+          after_content: "second\n",
+          tool_call_id: "write-a",
+          tool_name: "edit"
+        })
 
-      refreshed = Preview.refresh_after_write(selected, "selected.ex", "second\n", timeline)
+      refreshed = Preview.refresh_after_write(selected, "selected.ex")
 
       assert refreshed.content == selected.content
       assert refreshed.scroll == selected.scroll
@@ -235,9 +238,15 @@ defmodule MingaEditor.Agent.View.PreviewTest do
 
       timeline =
         EditTimeline.new()
-        |> EditTimeline.record_edit("selected.ex", "revert-a", "edit", "old\n", "old\n")
+        |> EditTimeline.record_edit(%FileChange{
+          path: "selected.ex",
+          before_content: "old\n",
+          after_content: "old\n",
+          tool_call_id: "revert-a",
+          tool_name: "edit"
+        })
 
-      refreshed = Preview.refresh_after_write(selected, "selected.ex", "old\n", timeline)
+      refreshed = Preview.refresh_after_write(selected, "selected.ex")
 
       assert refreshed.content == selected.content
       assert refreshed.scroll == selected.scroll
@@ -251,8 +260,7 @@ defmodule MingaEditor.Agent.View.PreviewTest do
       selected =
         Preview.new() |> Preview.set_file("selected.ex", "old\n") |> Preview.scroll_down(4)
 
-      refreshed =
-        Preview.refresh_after_write(selected, "selected.ex", "new\n", EditTimeline.new())
+      refreshed = Preview.refresh_after_write(selected, "selected.ex")
 
       assert refreshed.content == selected.content
       assert refreshed.scroll == selected.scroll
@@ -366,7 +374,7 @@ defmodule MingaEditor.Agent.View.PreviewTest do
     source = Preview.review_source(selected)
     {:ok, selected} = Preview.observe_review(selected, source, 100, 8)
     selected = Preview.scroll_down(selected, 12)
-    stale = Preview.refresh_after_write(selected, "selected.ex", "newer", EditTimeline.new())
+    stale = Preview.refresh_after_write(selected, "selected.ex")
 
     for preview <- [selected, stale] do
       assert {:ok, observed} = Preview.observe_review(preview, source, 100, 20)

@@ -440,6 +440,27 @@ defmodule Minga.Core.Unicode do
   end
 
   @doc """
+  Splits text after the graphemes whose starting columns are before `display_col`.
+
+  A column inside a wide grapheme rounds up to its end. This uses raw grapheme
+  widths, without expanding tabs.
+  """
+  @spec split_at_display_col(String.t(), non_neg_integer()) :: {String.t(), String.t()}
+  def split_at_display_col(text, display_col) do
+    rest = rest_at_display_col(text, display_col)
+    {binary_part(text, 0, byte_size(text) - byte_size(rest)), rest}
+  end
+
+  @spec rest_at_display_col(String.t(), integer()) :: String.t()
+  defp rest_at_display_col(text, columns) when columns <= 0, do: text
+  defp rest_at_display_col("", _columns), do: ""
+
+  defp rest_at_display_col(text, columns) do
+    {grapheme, rest} = String.next_grapheme(text)
+    rest_at_display_col(rest, columns - grapheme_width(grapheme))
+  end
+
+  @doc """
   Truncates a string to fit within `max_width` display columns.
 
   The result never splits a grapheme and never exceeds the requested display width. Wide graphemes that would cross the boundary are omitted.

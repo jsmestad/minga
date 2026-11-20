@@ -6,7 +6,6 @@ defmodule MingaEditor.Renderer.ReceiptProjectionTest do
   alias MingaEditor.Renderer.WindowObservation
   alias MingaEditor.Renderer.ReviewObservation
   alias MingaEditor.Agent.DiffReview
-  alias MingaEditor.Agent.EditTimeline
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.View.Preview
   alias MingaEditor.Session.State, as: SessionState
@@ -74,7 +73,7 @@ defmodule MingaEditor.Renderer.ReceiptProjectionTest do
   test "matching review receipts update actual fit without reviving stale decisions or moving reading intent" do
     {workspace, runtime, observation} = review_context()
     selected = workspace.agent_ui.view.preview
-    stale = Preview.refresh_after_write(selected, "selected.ex", "newer", EditTimeline.new())
+    stale = Preview.refresh_after_write(selected, "selected.ex")
 
     for preview <- [selected, stale] do
       workspace =

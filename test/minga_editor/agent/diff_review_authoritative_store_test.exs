@@ -5,6 +5,7 @@ defmodule MingaEditor.Agent.DiffReviewAuthoritativeStoreTest do
   alias MingaEditor.Agent.DiffReview
   alias Minga.Git
   alias MingaEditor.Agent.EditTimeline
+  alias MingaEditor.Agent.FileChange
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.View.Preview
   alias MingaEditor.Commands.AgentSubStates
@@ -101,7 +102,13 @@ defmodule MingaEditor.Agent.DiffReviewAuthoritativeStoreTest do
 
     timeline =
       EditTimeline.new()
-      |> EditTimeline.record_edit(path, "tc1", "edit_file", before, after_edit)
+      |> EditTimeline.record_edit(%FileChange{
+        path: path,
+        before_content: before,
+        after_content: after_edit,
+        tool_call_id: "tc1",
+        tool_name: "edit_file"
+      })
 
     state = state_with_disk_diff_review(root, review, timeline)
     state = AgentSubStates.reject_hunk(state)

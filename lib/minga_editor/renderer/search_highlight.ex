@@ -141,15 +141,20 @@ defmodule MingaEditor.Renderer.SearchHighlight do
           boolean()
         ) :: {[String.t()], [search_match()]}
   defp substitute_preview_lines(lines, first_line, pattern, replacement, global?) do
-    lines
-    |> Enum.with_index(first_line)
-    |> Enum.map_reduce([], fn {line, line_num}, acc ->
-      {new_line, _count, spans} =
-        Minga.Editing.substitute_line_preview(line, pattern, replacement, global?)
+    {new_lines, {_next_line, reversed_matches}} =
+      Enum.map_reduce(lines, {first_line, []}, fn line, {line_num, matches} ->
+        {new_line, _count, spans} =
+          Minga.Editing.substitute_line_preview(line, pattern, replacement, global?)
 
-      matches = Enum.map(spans, fn {col, len} -> Match.new(line_num, col, len) end)
-      {new_line, acc ++ matches}
-    end)
+        matches =
+          Enum.reduce(spans, matches, fn {col, len}, acc ->
+            [Match.new(line_num, col, len) | acc]
+          end)
+
+        {new_line, {line_num + 1, matches}}
+      end)
+
+    {new_lines, Enum.reverse(reversed_matches)}
   end
 
   @spec substitute_has_global_flag?(String.t()) :: boolean()

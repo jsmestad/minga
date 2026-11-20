@@ -13,6 +13,7 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
   alias Minga.Extension.CodeLease
   alias Minga.RenderModel.UI.ExtensionPanel.Content.Text
   alias MingaEditor.BottomPanel
+  alias MingaEditor.Agent.FileChange
   alias MingaEditor.Agent.SemanticUI.Registry, as: SemanticUIRegistry
   alias MingaEditor.Commands
   alias MingaEditor.Editing
@@ -1180,11 +1181,13 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
     timeline =
       MingaEditor.Agent.EditTimeline.record_edit(
         MingaEditor.Agent.EditTimeline.new(),
-        path,
-        "tool",
-        "edit",
-        "before",
-        "after"
+        %FileChange{
+          path: path,
+          before_content: "before",
+          after_content: "after",
+          tool_call_id: "tool",
+          tool_name: "edit"
+        }
       )
 
     [entry] = MingaEditor.Agent.EditTimeline.entries_for(timeline, path)
@@ -1245,11 +1248,13 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
     timeline =
       MingaEditor.Agent.EditTimeline.record_edit(
         MingaEditor.Agent.EditTimeline.new(),
-        target.path,
-        "tool",
-        "edit",
-        "old",
-        "new"
+        %FileChange{
+          path: target.path,
+          before_content: "old",
+          after_content: "new",
+          tool_call_id: "tool",
+          tool_name: "edit"
+        }
       )
 
     [entry] = MingaEditor.Agent.EditTimeline.entries_for(timeline, target.path)

@@ -353,13 +353,7 @@ defmodule MingaAgent.Changeset.Server do
       {:ok, path} ->
         case {tracked_path?(state, path), discard_file_cleanup(state, path)} do
           {true, :ok} ->
-            state = %{
-              state
-              | modifications: Map.delete(state.modifications, path),
-                originals: Map.delete(state.originals, path),
-                deletions: MapSet.delete(state.deletions, path),
-                history: Map.delete(state.history, path)
-            }
+            state = forget_path(state, path)
 
             {:reply, :ok, bump_revision(state)}
 
@@ -506,15 +500,7 @@ defmodule MingaAgent.Changeset.Server do
   end
 
   @spec prune_successful_merge_result(tuple(), state()) :: state()
-  defp prune_successful_merge_result({:ok, path, _kind}, state) do
-    %{
-      state
-      | modifications: Map.delete(state.modifications, path),
-        originals: Map.delete(state.originals, path),
-        deletions: MapSet.delete(state.deletions, path),
-        history: Map.delete(state.history, path)
-    }
-  end
+  defp prune_successful_merge_result({:ok, path, _kind}, state), do: forget_path(state, path)
 
   defp prune_successful_merge_result(_result, state), do: state
 
@@ -704,19 +690,28 @@ defmodule MingaAgent.Changeset.Server do
   @spec source_descriptor(state(), String.t()) ::
           {:ok, {:memory, binary()} | {:disk, String.t()}} | {:error, :deleted}
   defp source_descriptor(state, path) do
-    case {MapSet.member?(state.deletions, path), Map.fetch(state.modifications, path)} do
-      {true, _} -> {:error, :deleted}
-      {_, {:ok, content}} -> {:ok, {:memory, content}}
-      {_, :error} -> {:ok, {:disk, Path.join(state.project_root, path)}}
+    case current_change(state, path) do
+      :deleted -> {:error, :deleted}
+      :unmodified -> {:ok, {:disk, Path.join(state.project_root, path)}}
+      content -> {:ok, {:memory, content}}
     end
   end
 
   @spec current_content(state(), String.t()) :: {:ok, binary()} | {:error, term()}
   defp current_content(state, path) do
-    case {MapSet.member?(state.deletions, path), Map.fetch(state.modifications, path)} do
-      {true, _} -> {:error, :deleted}
-      {_, {:ok, content}} -> {:ok, content}
-      {_, :error} -> File.read(Path.join(state.project_root, path))
+    case current_change(state, path) do
+      :deleted -> {:error, :deleted}
+      :unmodified -> File.read(Path.join(state.project_root, path))
+      content -> {:ok, content}
+    end
+  end
+
+  @spec current_change(state(), String.t()) :: :unmodified | :deleted | binary()
+  defp current_change(state, path) do
+    if MapSet.member?(state.deletions, path) do
+      :deleted
+    else
+      Map.get(state.modifications, path, :unmodified)
     end
   end
 
@@ -734,12 +729,7 @@ defmodule MingaAgent.Changeset.Server do
 
   @spec push_history(state(), String.t()) :: state()
   defp push_history(state, path) do
-    current =
-      case {MapSet.member?(state.deletions, path), Map.fetch(state.modifications, path)} do
-        {true, _} -> :deleted
-        {false, {:ok, content}} -> content
-        {false, :error} -> :unmodified
-      end
+    current = current_change(state, path)
 
     history = Map.get(state.history, path, [])
     put_in(state.history[path], [current | history])
@@ -975,13 +965,13 @@ defmodule MingaAgent.Changeset.Server do
 
   defp restore_all([path | rest], state) do
     case restore_original(state, path) do
-      :ok -> restore_all(rest, forget_restored_path(state, path))
+      :ok -> restore_all(rest, forget_path(state, path))
       {:error, reason} -> {:error, reason, state}
     end
   end
 
-  @spec forget_restored_path(state(), String.t()) :: state()
-  defp forget_restored_path(state, path) do
+  @spec forget_path(state(), String.t()) :: state()
+  defp forget_path(state, path) do
     %{
       state
       | modifications: Map.delete(state.modifications, path),

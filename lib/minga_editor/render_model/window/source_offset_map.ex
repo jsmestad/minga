@@ -586,7 +586,7 @@ defmodule MingaEditor.RenderModel.Window.SourceOffsetMap do
 
   @spec split_piece(piece(), non_neg_integer()) :: {piece(), piece()}
   defp split_piece({text, kind, start_byte, end_byte}, display_col) do
-    {before, after_text} = split_text_at_display_col(text, display_col)
+    {before, after_text} = Unicode.split_at_display_col(text, display_col)
 
     case kind do
       :source ->
@@ -601,24 +601,6 @@ defmodule MingaEditor.RenderModel.Window.SourceOffsetMap do
   @spec empty_source_piece?(piece()) :: boolean()
   defp empty_source_piece?({"", :source, start_byte, end_byte}), do: start_byte != end_byte
   defp empty_source_piece?(_piece), do: false
-
-  @spec split_text_at_display_col(String.t(), non_neg_integer()) :: {String.t(), String.t()}
-  defp split_text_at_display_col(text, display_col) do
-    {before, after_text, _col} =
-      text
-      |> String.graphemes()
-      |> Enum.reduce({[], [], 0}, fn grapheme, {before, after_text, col} ->
-        width = Unicode.grapheme_width(grapheme)
-
-        if col < display_col do
-          {[grapheme | before], after_text, col + width}
-        else
-          {before, [grapheme | after_text], col + width}
-        end
-      end)
-
-    {before |> Enum.reverse() |> Enum.join(), after_text |> Enum.reverse() |> Enum.join()}
-  end
 
   @spec maybe_expand_tabs([piece()], pos_integer() | nil) :: [piece()]
   defp maybe_expand_tabs(pieces, nil), do: pieces

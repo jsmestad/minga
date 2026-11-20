@@ -45,6 +45,14 @@ defmodule Minga.Editing.SearchTest do
     test "finds second occurrence when cursor is at first" do
       assert {0, 4} = Search.find_next("foo foo foo", "foo", {0, 0}, :forward)
     end
+
+    test "evaluates a start anchor against the suffix after the cursor byte" do
+      assert {0, 3} = Search.find_next("éxfoo\nfoo", "^foo", {0, 2}, :forward, regex: true)
+    end
+
+    test "skips an exhausted cursor line and empty lines even for zero-width matches" do
+      assert {2, 1} = Search.find_next("a\n\nb", "$", {0, 0}, :forward, regex: true)
+    end
   end
 
   describe "find_next/4 backward" do
@@ -62,6 +70,28 @@ defmodule Minga.Editing.SearchTest do
 
     test "returns nil when pattern not found" do
       assert nil == Search.find_next("hello world", "xyz", {0, 5}, :backward)
+    end
+
+    test "applies an exclusive byte cutoff to backward match starts, not their ends" do
+      assert {0, 0} = Search.find_next("x x x", "x", {0, 3}, :backward)
+      assert {0, 0} = Search.find_next("foo\nfoo", "^foo$", {0, 2}, :backward, regex: true)
+    end
+
+    test "wraps back to the cursor line with the full-line cutoff" do
+      assert {0, 4} = Search.find_next("foo foo\nbar", "foo", {0, 1}, :backward)
+    end
+
+    test "uses the cursor cutoff on the first line and excludes end-of-line matches elsewhere" do
+      assert {1, 2} = Search.find_next("ab\ncd", "$", {1, 4}, :backward, regex: true)
+      assert Search.find_next("ab\ncd", "$", {1, 0}, :backward, regex: true) == nil
+    end
+  end
+
+  test "a cursor line past EOF wraps forward but errors backward" do
+    assert {0, 0} = Search.find_next("foo\nbar", "foo", {2, 0}, :forward)
+
+    assert_raise ArgumentError, fn ->
+      Search.find_next("foo\nbar", "foo", {2, 0}, :backward)
     end
   end
 

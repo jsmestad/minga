@@ -1007,6 +1007,35 @@ defmodule MingaEditor.State.TabBar do
     end)
   end
 
+  @doc "Ends the matching workspace sessions and clears matching orphaned agent tabs."
+  @spec session_ended(t(), pid(), :idle | :error) :: t()
+  def session_ended(%__MODULE__{} = tab_bar, session_pid, status) when is_pid(session_pid) do
+    {workspaces, ended_workspaces} =
+      Enum.map_reduce(tab_bar.workspaces, %{}, fn
+        %Workspace{id: id, payload: %WorkspaceAgent{session: ^session_pid}} = workspace, ended ->
+          workspace = Workspace.session_ended(workspace, status)
+          {workspace, Map.put(ended, id, workspace)}
+
+        workspace, ended ->
+          {workspace, ended}
+      end)
+
+    tabs =
+      Enum.map(tab_bar.tabs, fn
+        %Tab{kind: :agent, group_id: group_id, payload: %Agent{session: pid}} = tab ->
+          case Map.fetch(ended_workspaces, group_id) do
+            {:ok, workspace} -> Tab.project_agent_lifecycle(tab, workspace)
+            :error when pid == session_pid -> Tab.mark_orphan_session_down(tab, status)
+            :error -> tab
+          end
+
+        tab ->
+          tab
+      end)
+
+    %{tab_bar | workspaces: workspaces, tabs: tabs}
+  end
+
   @spec replace_matching_workspace(t(), non_neg_integer(), (Workspace.t() -> Workspace.t())) ::
           t()
   defp replace_matching_workspace(

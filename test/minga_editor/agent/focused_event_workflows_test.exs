@@ -5,6 +5,7 @@ defmodule MingaEditor.Agent.FocusedEventWorkflowsTest do
   alias Minga.Git
   alias MingaEditor.Agent.DiffReview
   alias MingaEditor.Agent.EditTimeline
+  alias MingaEditor.Agent.FileChange
   alias MingaEditor.Agent.FileEventWorkflow
   alias MingaEditor.Agent.PendingApproval
   alias MingaEditor.Agent.PromptBuffer
@@ -216,7 +217,7 @@ defmodule MingaEditor.Agent.FocusedEventWorkflowsTest do
 
   test "background tools keep a selected current or stale review while activity still advances" do
     preview = Preview.set_diff(Preview.new(), DiffReview.new("selected.ex", "before", "after"))
-    stale = Preview.refresh_after_write(preview, "selected.ex", "newer", EditTimeline.new())
+    stale = Preview.refresh_after_write(preview, "selected.ex")
 
     for preview <- [preview, stale],
         {tool, args, result} <- [
@@ -254,7 +255,7 @@ defmodule MingaEditor.Agent.FocusedEventWorkflowsTest do
   test "file workflow records cumulative hunks and timeline without selecting a preview" do
     state = event_state()
 
-    state = FileEventWorkflow.changed(state, "/tmp/a.ex", "before", "after", "tc1", "edit")
+    state = FileEventWorkflow.changed(state, file_change("/tmp/a.ex", "before", "after", "tc1"))
     timeline = state.workspace.agent_ui.view.edit_timeline
 
     assert EditTimeline.cumulative_hunks(timeline, "/tmp/a.ex") ==
@@ -271,10 +272,10 @@ defmodule MingaEditor.Agent.FocusedEventWorkflowsTest do
   test "a selected file keeps its stale reading revision and explicit Review acquires all cumulative writes" do
     state =
       event_state()
-      |> FileEventWorkflow.changed("/tmp/a.ex", "a0", "a1", "tc1", "edit")
+      |> FileEventWorkflow.changed(file_change("/tmp/a.ex", "a0", "a1", "tc1"))
       |> select_review("/tmp/a.ex")
-      |> FileEventWorkflow.changed("/tmp/b.ex", "b0", "b1", "tc2", "edit")
-      |> FileEventWorkflow.changed("/tmp/a.ex", "a1", "a2", "tc3", "edit")
+      |> FileEventWorkflow.changed(file_change("/tmp/b.ex", "b0", "b1", "tc2"))
+      |> FileEventWorkflow.changed(file_change("/tmp/a.ex", "a1", "a2", "tc3"))
 
     assert state.workspace.agent_ui.view.preview.freshness == :stale
     assert diff_review(state) == nil
@@ -303,14 +304,14 @@ defmodule MingaEditor.Agent.FocusedEventWorkflowsTest do
 
     state =
       event_state()
-      |> FileEventWorkflow.changed(path, "a", "x\na", "tc1", "edit")
+      |> FileEventWorkflow.changed(file_change(path, "a", "x\na", "tc1"))
       |> select_review(path)
       |> AgentSubStates.reject_hunk()
 
     assert File.read!(path) == "a"
 
     File.write!(path, "a\nb")
-    state = FileEventWorkflow.changed(state, path, "a", "a\nb", "tc2", "edit")
+    state = FileEventWorkflow.changed(state, file_change(path, "a", "a\nb", "tc2"))
     state = select_review(state, path)
     review = diff_review(state)
 
@@ -335,16 +336,16 @@ defmodule MingaEditor.Agent.FocusedEventWorkflowsTest do
 
     state =
       event_state()
-      |> FileEventWorkflow.changed(path_a, "a", "x\na", "tc1", "edit")
+      |> FileEventWorkflow.changed(file_change(path_a, "a", "x\na", "tc1"))
       |> select_review(path_a)
       |> AgentSubStates.reject_hunk()
-      |> FileEventWorkflow.changed(path_b, "b0", "b1", "tc2", "edit")
+      |> FileEventWorkflow.changed(file_change(path_b, "b0", "b1", "tc2"))
 
     assert EditTimeline.cumulative_hunks(state.workspace.agent_ui.view.edit_timeline, path_b) ==
              Git.diff_lines(["b0"], ["b1"])
 
     File.write!(path_a, "a\nb")
-    state = FileEventWorkflow.changed(state, path_a, "a", "a\nb", "tc3", "edit")
+    state = FileEventWorkflow.changed(state, file_change(path_a, "a", "a\nb", "tc3"))
     state = select_review(state, path_a)
     review = diff_review(state)
 
@@ -673,6 +674,17 @@ defmodule MingaEditor.Agent.FocusedEventWorkflowsTest do
     after
       remaining -> flunk("Agent: error was not routed to the messages log")
     end
+  end
+
+  @spec file_change(String.t(), String.t(), String.t(), String.t()) :: FileChange.t()
+  defp file_change(path, before_content, after_content, tool_call_id) do
+    %FileChange{
+      path: path,
+      before_content: before_content,
+      after_content: after_content,
+      tool_call_id: tool_call_id,
+      tool_name: "edit"
+    }
   end
 
   @spec select_review(EditorState.t(), String.t()) :: EditorState.t()

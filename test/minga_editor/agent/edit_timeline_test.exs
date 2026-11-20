@@ -3,6 +3,7 @@ defmodule MingaEditor.Agent.EditTimelineTest do
 
   alias Minga.Git
   alias MingaEditor.Agent.EditTimeline
+  alias MingaEditor.Agent.FileChange
 
   describe "new/0" do
     test "creates empty timeline" do
@@ -13,14 +14,14 @@ defmodule MingaEditor.Agent.EditTimelineTest do
     end
   end
 
-  describe "record_edit/6" do
+  describe "record_edit/2" do
     test "records first edit cumulative hunks" do
       before = "before"
       after_ = "after1"
 
       timeline =
         EditTimeline.new()
-        |> EditTimeline.record_edit("lib/foo.ex", "tc1", "edit_file", before, after_)
+        |> EditTimeline.record_edit(file_change("lib/foo.ex", "tc1", before, after_))
 
       assert EditTimeline.cumulative_hunks(timeline, "lib/foo.ex") ==
                Git.diff_lines(String.split(before, "\n"), String.split(after_, "\n"))
@@ -29,8 +30,8 @@ defmodule MingaEditor.Agent.EditTimelineTest do
     test "does not overwrite the original projection on subsequent edits" do
       timeline =
         EditTimeline.new()
-        |> EditTimeline.record_edit("lib/foo.ex", "tc1", "edit_file", "before", "after1")
-        |> EditTimeline.record_edit("lib/foo.ex", "tc2", "edit_file", "after1", "after2")
+        |> EditTimeline.record_edit(file_change("lib/foo.ex", "tc1", "before", "after1"))
+        |> EditTimeline.record_edit(file_change("lib/foo.ex", "tc2", "after1", "after2"))
 
       latest_lines = String.split("after2", "\n")
       first_before_lines = String.split("before", "\n")
@@ -41,9 +42,9 @@ defmodule MingaEditor.Agent.EditTimelineTest do
     test "records entries in order" do
       timeline =
         EditTimeline.new()
-        |> EditTimeline.record_edit("lib/foo.ex", "tc1", "edit_file", "v0", "v1")
-        |> EditTimeline.record_edit("lib/foo.ex", "tc2", "write_file", "v1", "v2")
-        |> EditTimeline.record_edit("lib/foo.ex", "tc3", "edit_file", "v2", "v3")
+        |> EditTimeline.record_edit(file_change("lib/foo.ex", "tc1", "v0", "v1"))
+        |> EditTimeline.record_edit(file_change("lib/foo.ex", "tc2", "v1", "v2", "write_file"))
+        |> EditTimeline.record_edit(file_change("lib/foo.ex", "tc3", "v2", "v3"))
 
       entries = EditTimeline.entries_for(timeline, "lib/foo.ex")
       assert Enum.count(entries) == 3
@@ -55,9 +56,9 @@ defmodule MingaEditor.Agent.EditTimelineTest do
     test "tracks entries and hunk projections per file independently" do
       timeline =
         EditTimeline.new()
-        |> EditTimeline.record_edit("lib/a.ex", "tc1", "edit_file", "a0", "a1")
-        |> EditTimeline.record_edit("lib/b.ex", "tc2", "edit_file", "b0", "b1")
-        |> EditTimeline.record_edit("lib/a.ex", "tc3", "edit_file", "a1", "a2")
+        |> EditTimeline.record_edit(file_change("lib/a.ex", "tc1", "a0", "a1"))
+        |> EditTimeline.record_edit(file_change("lib/b.ex", "tc2", "b0", "b1"))
+        |> EditTimeline.record_edit(file_change("lib/a.ex", "tc3", "a1", "a2"))
 
       assert EditTimeline.entry_count(timeline, "lib/a.ex") == 2
       assert EditTimeline.entry_count(timeline, "lib/b.ex") == 1
@@ -68,9 +69,9 @@ defmodule MingaEditor.Agent.EditTimelineTest do
     test "stores empty cumulative hunks when latest content returns to baseline" do
       timeline =
         EditTimeline.new()
-        |> EditTimeline.record_edit("lib/a.ex", "tc1", "edit_file", "a0", "a1")
-        |> EditTimeline.record_edit("lib/b.ex", "tc2", "edit_file", "b0", "b1")
-        |> EditTimeline.record_edit("lib/a.ex", "tc3", "edit_file", "a1", "a0")
+        |> EditTimeline.record_edit(file_change("lib/a.ex", "tc1", "a0", "a1"))
+        |> EditTimeline.record_edit(file_change("lib/b.ex", "tc2", "b0", "b1"))
+        |> EditTimeline.record_edit(file_change("lib/a.ex", "tc3", "a1", "a0"))
 
       assert EditTimeline.cumulative_hunks(timeline, "lib/a.ex") == []
 
@@ -87,8 +88,8 @@ defmodule MingaEditor.Agent.EditTimelineTest do
 
       timeline =
         EditTimeline.new()
-        |> EditTimeline.record_edit("lib/foo.ex", "tc1", "edit_file", before, after_first)
-        |> EditTimeline.record_edit("lib/foo.ex", "tc2", "edit_file", after_first, after_second)
+        |> EditTimeline.record_edit(file_change("lib/foo.ex", "tc1", before, after_first))
+        |> EditTimeline.record_edit(file_change("lib/foo.ex", "tc2", after_first, after_second))
 
       hunks = EditTimeline.cumulative_hunks(timeline, "lib/foo.ex")
       latest_lines = String.split(after_second, "\n")
@@ -107,14 +108,14 @@ defmodule MingaEditor.Agent.EditTimelineTest do
 
       timeline =
         EditTimeline.new()
-        |> EditTimeline.record_edit("lib/a.ex", "tc1", "edit_file", "a0", after_a1)
-        |> EditTimeline.record_edit("lib/b.ex", "tc2", "edit_file", "b0", after_b1)
+        |> EditTimeline.record_edit(file_change("lib/a.ex", "tc1", "a0", after_a1))
+        |> EditTimeline.record_edit(file_change("lib/b.ex", "tc2", "b0", after_b1))
 
       [%{snapshot: {:file, path}} | _] = EditTimeline.entries_for(timeline, "lib/a.ex")
       File.rm!(path)
 
       timeline =
-        EditTimeline.record_edit(timeline, "lib/a.ex", "tc3", "edit_file", after_a1, after_a2)
+        EditTimeline.record_edit(timeline, file_change("lib/a.ex", "tc3", after_a1, after_a2))
 
       on_exit(fn -> EditTimeline.reset(timeline) end)
 
@@ -130,8 +131,8 @@ defmodule MingaEditor.Agent.EditTimelineTest do
     test "replaces only the selected path cumulative hunks" do
       timeline =
         EditTimeline.new()
-        |> EditTimeline.record_edit("lib/a.ex", "tc1", "edit_file", "a0", "a1")
-        |> EditTimeline.record_edit("lib/b.ex", "tc2", "edit_file", "b0", "b1")
+        |> EditTimeline.record_edit(file_change("lib/a.ex", "tc1", "a0", "a1"))
+        |> EditTimeline.record_edit(file_change("lib/b.ex", "tc2", "b0", "b1"))
         |> EditTimeline.set_viewing("lib/a.ex", 0)
 
       b_hunks = EditTimeline.cumulative_hunks(timeline, "lib/b.ex")
@@ -165,11 +166,7 @@ defmodule MingaEditor.Agent.EditTimelineTest do
         record_edit: fn ->
           EditTimeline.new()
           |> EditTimeline.record_edit(
-            "lib/a.ex",
-            "tc1",
-            "edit_file",
-            before_content,
-            after_content
+            file_change("lib/a.ex", "tc1", before_content, after_content)
           )
           |> EditTimeline.cumulative_hunks("lib/a.ex")
         end,
@@ -192,8 +189,8 @@ defmodule MingaEditor.Agent.EditTimelineTest do
     test "returns content at a specific index" do
       timeline =
         EditTimeline.new()
-        |> EditTimeline.record_edit("lib/foo.ex", "tc1", "edit_file", "v0", "v1")
-        |> EditTimeline.record_edit("lib/foo.ex", "tc2", "edit_file", "v1", "v2")
+        |> EditTimeline.record_edit(file_change("lib/foo.ex", "tc1", "v0", "v1"))
+        |> EditTimeline.record_edit(file_change("lib/foo.ex", "tc2", "v1", "v2"))
 
       assert {:ok, "v1"} = EditTimeline.content_at(timeline, "lib/foo.ex", 0)
       assert {:ok, "v2"} = EditTimeline.content_at(timeline, "lib/foo.ex", 1)
@@ -209,7 +206,7 @@ defmodule MingaEditor.Agent.EditTimelineTest do
     test "moves from live to live with at_end when already at end" do
       timeline =
         EditTimeline.new()
-        |> EditTimeline.record_edit("lib/foo.ex", "tc1", "edit_file", "v0", "v1")
+        |> EditTimeline.record_edit(file_change("lib/foo.ex", "tc1", "v0", "v1"))
 
       {_timeline, result} = EditTimeline.navigate_next(timeline, "lib/foo.ex")
       assert result == :at_end
@@ -218,9 +215,9 @@ defmodule MingaEditor.Agent.EditTimelineTest do
     test "moves forward through entries" do
       timeline =
         EditTimeline.new()
-        |> EditTimeline.record_edit("lib/foo.ex", "tc1", "edit_file", "v0", "v1")
-        |> EditTimeline.record_edit("lib/foo.ex", "tc2", "edit_file", "v1", "v2")
-        |> EditTimeline.record_edit("lib/foo.ex", "tc3", "edit_file", "v2", "v3")
+        |> EditTimeline.record_edit(file_change("lib/foo.ex", "tc1", "v0", "v1"))
+        |> EditTimeline.record_edit(file_change("lib/foo.ex", "tc2", "v1", "v2"))
+        |> EditTimeline.record_edit(file_change("lib/foo.ex", "tc3", "v2", "v3"))
 
       timeline = EditTimeline.set_viewing(timeline, "lib/foo.ex", 0)
 
@@ -244,8 +241,8 @@ defmodule MingaEditor.Agent.EditTimelineTest do
     test "moves from live to last entry" do
       timeline =
         EditTimeline.new()
-        |> EditTimeline.record_edit("lib/foo.ex", "tc1", "edit_file", "v0", "v1")
-        |> EditTimeline.record_edit("lib/foo.ex", "tc2", "edit_file", "v1", "v2")
+        |> EditTimeline.record_edit(file_change("lib/foo.ex", "tc1", "v0", "v1"))
+        |> EditTimeline.record_edit(file_change("lib/foo.ex", "tc2", "v1", "v2"))
 
       {timeline, :moved} = EditTimeline.navigate_prev(timeline, "lib/foo.ex")
       assert EditTimeline.viewing_index(timeline, "lib/foo.ex") == 1
@@ -254,8 +251,8 @@ defmodule MingaEditor.Agent.EditTimelineTest do
     test "moves backward through entries" do
       timeline =
         EditTimeline.new()
-        |> EditTimeline.record_edit("lib/foo.ex", "tc1", "edit_file", "v0", "v1")
-        |> EditTimeline.record_edit("lib/foo.ex", "tc2", "edit_file", "v1", "v2")
+        |> EditTimeline.record_edit(file_change("lib/foo.ex", "tc1", "v0", "v1"))
+        |> EditTimeline.record_edit(file_change("lib/foo.ex", "tc2", "v1", "v2"))
 
       timeline = EditTimeline.set_viewing(timeline, "lib/foo.ex", 1)
       {timeline, :moved} = EditTimeline.navigate_prev(timeline, "lib/foo.ex")
@@ -265,7 +262,7 @@ defmodule MingaEditor.Agent.EditTimelineTest do
     test "returns at_baseline when at first entry" do
       timeline =
         EditTimeline.new()
-        |> EditTimeline.record_edit("lib/foo.ex", "tc1", "edit_file", "v0", "v1")
+        |> EditTimeline.record_edit(file_change("lib/foo.ex", "tc1", "v0", "v1"))
 
       timeline = EditTimeline.set_viewing(timeline, "lib/foo.ex", 0)
       {_timeline, :at_baseline} = EditTimeline.navigate_prev(timeline, "lib/foo.ex")
@@ -281,7 +278,7 @@ defmodule MingaEditor.Agent.EditTimelineTest do
     test "clears viewing index" do
       timeline =
         EditTimeline.new()
-        |> EditTimeline.record_edit("lib/foo.ex", "tc1", "edit_file", "v0", "v1")
+        |> EditTimeline.record_edit(file_change("lib/foo.ex", "tc1", "v0", "v1"))
 
       timeline = EditTimeline.set_viewing(timeline, "lib/foo.ex", 0)
       timeline = EditTimeline.go_live(timeline, "lib/foo.ex")
@@ -297,7 +294,7 @@ defmodule MingaEditor.Agent.EditTimelineTest do
     test "returns true for paths with entries" do
       timeline =
         EditTimeline.new()
-        |> EditTimeline.record_edit("lib/foo.ex", "tc1", "edit_file", "v0", "v1")
+        |> EditTimeline.record_edit(file_change("lib/foo.ex", "tc1", "v0", "v1"))
 
       assert EditTimeline.has_entries?(timeline, "lib/foo.ex")
     end
@@ -307,7 +304,7 @@ defmodule MingaEditor.Agent.EditTimelineTest do
     test "offers Review for a single changed file" do
       timeline =
         EditTimeline.new()
-        |> EditTimeline.record_edit("lib/a.ex", "tc1", "edit_file", "old\n", "new\n")
+        |> EditTimeline.record_edit(file_change("lib/a.ex", "tc1", "old\n", "new\n"))
 
       assert [%{path: "lib/a.ex", entry_count: 1, lines_added: 1, lines_removed: 1}] =
                EditTimeline.file_summaries(timeline)
@@ -316,8 +313,8 @@ defmodule MingaEditor.Agent.EditTimelineTest do
     test "keeps first-seen file order and does not infer review selection from history navigation" do
       timeline =
         EditTimeline.new()
-        |> EditTimeline.record_edit("lib/b.ex", "tc1", "edit_file", "one\n", "one\ntwo\n")
-        |> EditTimeline.record_edit("lib/a.ex", "tc2", "edit_file", "old\n", "new\n")
+        |> EditTimeline.record_edit(file_change("lib/b.ex", "tc1", "one\n", "one\ntwo\n"))
+        |> EditTimeline.record_edit(file_change("lib/a.ex", "tc2", "old\n", "new\n"))
         |> EditTimeline.set_viewing("lib/a.ex", 0)
 
       assert [
@@ -343,8 +340,8 @@ defmodule MingaEditor.Agent.EditTimelineTest do
     test "cleans up memory-backed snapshots and clears timeline state" do
       timeline =
         EditTimeline.new()
-        |> EditTimeline.record_edit("lib/foo.ex", "tc1", "edit_file", "v0", "v1")
-        |> EditTimeline.record_edit("lib/foo.ex", "tc2", "edit_file", "v1", "v2")
+        |> EditTimeline.record_edit(file_change("lib/foo.ex", "tc1", "v0", "v1"))
+        |> EditTimeline.record_edit(file_change("lib/foo.ex", "tc2", "v1", "v2"))
         |> EditTimeline.set_viewing("lib/foo.ex", 0)
 
       reset = EditTimeline.reset(timeline)
@@ -358,11 +355,7 @@ defmodule MingaEditor.Agent.EditTimelineTest do
       timeline =
         EditTimeline.new()
         |> EditTimeline.record_edit(
-          "lib/foo.ex",
-          "tc1",
-          "edit_file",
-          "v0",
-          oversize_content("v1")
+          file_change("lib/foo.ex", "tc1", "v0", oversize_content("v1"))
         )
 
       [%{snapshot: {:file, path}}] = EditTimeline.entries_for(timeline, "lib/foo.ex")
@@ -380,7 +373,7 @@ defmodule MingaEditor.Agent.EditTimelineTest do
 
       timeline =
         EditTimeline.new()
-        |> EditTimeline.record_edit(path, "tc1", "edit_file", "v0", "v1")
+        |> EditTimeline.record_edit(file_change(path, "tc1", "v0", "v1"))
 
       [entry] = EditTimeline.entries_for(timeline, path)
       id = EditTimeline.entry_id(path, entry)
@@ -400,10 +393,10 @@ defmodule MingaEditor.Agent.EditTimelineTest do
     test "entry mutations and resets invalidate generations even when identities repeat" do
       path = "lib/foo.ex"
       empty = EditTimeline.new()
-      first = EditTimeline.record_edit(empty, path, "tc1", "edit_file", "v0", "v1")
-      second = EditTimeline.record_edit(first, path, "tc2", "edit_file", "v1", "v2")
+      first = EditTimeline.record_edit(empty, file_change(path, "tc1", "v0", "v1"))
+      second = EditTimeline.record_edit(first, file_change(path, "tc2", "v1", "v2"))
       reset = EditTimeline.reset(second)
-      repeated = EditTimeline.record_edit(reset, path, "tc1", "edit_file", "v0", "v1")
+      repeated = EditTimeline.record_edit(reset, file_change(path, "tc1", "v0", "v1"))
 
       generations = Enum.map([empty, first, second, reset, repeated], & &1.generation)
       assert Enum.uniq(generations) == generations
@@ -412,6 +405,16 @@ defmodule MingaEditor.Agent.EditTimelineTest do
       assert EditTimeline.entry_id(path, repeated_entry) == EditTimeline.entry_id(path, entry)
       assert hd(EditTimeline.entries_for(second, path)) == entry
     end
+  end
+
+  defp file_change(path, tool_call_id, before_content, after_content, tool_name \\ "edit_file") do
+    %FileChange{
+      path: path,
+      before_content: before_content,
+      after_content: after_content,
+      tool_call_id: tool_call_id,
+      tool_name: tool_name
+    }
   end
 
   defp reconstruct_first_before(timeline, path, latest_lines) do

@@ -4256,25 +4256,11 @@ defmodule MingaAgent.Session do
       |> record_user_message_event(user_message)
       |> notify_messages_changed()
 
-    case begin_provider_request(state, send_content) do
-      {:ok, request, request_state} ->
-        case request_state.provider.module.send_prompt(
-               ProviderLifecycle.pid(request_state.provider),
-               request
-             ) do
-          :ok ->
-            request_state = announce_display_status(request_state, execution)
-            %{request_state | turn_execution: execution}
-
-          {:error, reason} ->
-            {:error, failure_reason, failed_state} =
-              persist_provider_dispatch_failure(request_state, reason)
-
-            queued_send_failed(failed_state, execution, failure_reason)
-        end
-
-      {:error, reason, failed_state} ->
-        queued_send_failed(failed_state, execution, reason)
+    with {:ok, request, admitted} <- begin_provider_request(state, send_content),
+         {:ok, started} <- send_admitted_prompt(admitted, request, execution) do
+      started
+    else
+      {:error, reason, failed_state} -> queued_send_failed(failed_state, execution, reason)
     end
   end
 
@@ -4517,20 +4503,23 @@ defmodule MingaAgent.Session do
 
   @spec dispatch_new_turn_request(state(), Request.t(), TurnExecution.t()) ::
           {:reply, :ok | {:error, term()}, state()}
-  defp dispatch_new_turn_request(request_state, request, execution) do
-    case request_state.provider.module.send_prompt(
-           ProviderLifecycle.pid(request_state.provider),
-           request
-         ) do
+  defp dispatch_new_turn_request(state, request, execution) do
+    case send_admitted_prompt(state, request, execution) do
+      {:ok, started} -> {:reply, :ok, started}
+      {:error, reason, failed_state} -> reply_to_prompt_admission_failure(failed_state, reason)
+    end
+  end
+
+  @spec send_admitted_prompt(state(), Request.t(), TurnExecution.t()) ::
+          {:ok, state()} | {:error, term(), state()}
+  defp send_admitted_prompt(state, request, execution) do
+    case state.provider.module.send_prompt(ProviderLifecycle.pid(state.provider), request) do
       :ok ->
-        request_state = announce_display_status(request_state, execution)
-        {:reply, :ok, %{request_state | turn_execution: execution}}
+        state = announce_display_status(state, execution)
+        {:ok, %{state | turn_execution: execution}}
 
       {:error, reason} ->
-        {:error, failure_reason, failed_state} =
-          persist_provider_dispatch_failure(request_state, reason)
-
-        reply_to_prompt_admission_failure(failed_state, failure_reason)
+        persist_provider_dispatch_failure(state, reason)
     end
   end
 
