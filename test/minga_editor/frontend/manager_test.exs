@@ -4,6 +4,9 @@ defmodule MingaEditor.Frontend.ManagerTest do
 
   import ExUnit.CaptureLog
 
+  alias Minga.Config.Options
+  alias Minga.Events
+  alias Minga.Events.LogMessageEvent
   alias MingaEditor.Frontend.Manager
   alias MingaEditor.Frontend.Protocol
   alias MingaEditor.Frontend.Protocol.GUI, as: ProtocolGUI
@@ -53,6 +56,42 @@ defmodule MingaEditor.Frontend.ManagerTest do
       assert {:packet, 4} in opts
       assert {:env, [{~c"MINGA_TTY", ~c"/dev/tty"}]} in opts
     end
+  end
+
+  test "native log packets reach Messages with GUI attribution and original severity" do
+    previous_port_level = Options.get(:log_level_port)
+    previous_logger_level = Logger.level()
+    Options.set(:log_level_port, :debug)
+    Logger.configure(level: :warning)
+    Events.subscribe(:log_message)
+
+    on_exit(fn ->
+      Options.set(:log_level_port, previous_port_level)
+      Logger.configure(level: previous_logger_level)
+    end)
+
+    {pid, port} = start_connected(unique_name())
+    <<header::binary-size(7), 0, rest::binary>> = ready_packet(80, 24)
+    send_port_data(pid, port, <<header::binary, 1, rest::binary>>)
+    tag = "gui-log-#{System.unique_integer([:positive])}"
+
+    for {level, wire_level} <- Enum.with_index([:error, :warning, :info, :debug]) do
+      text = "#{tag}-#{level}"
+      expected = "[GUI/#{level}] #{text}"
+      send_port_data(pid, port, <<0x60, wire_level, byte_size(text)::16, text::binary>>)
+
+      assert_receive {:minga_event, :log_message,
+                      %LogMessageEvent{text: ^expected, level: ^level}}
+
+      assert MingaEditor.UI.Panel.MessageStore.parse_prefix(expected) == {level, :gui, text}
+    end
+
+    Options.set(:log_level_port, :warning)
+    ignored = "#{tag}-filtered"
+    send_port_data(pid, port, <<0x60, 3, byte_size(ignored)::16, ignored::binary>>)
+    assert Manager.ready?(pid)
+    filtered_entry = "[GUI/debug] #{ignored}"
+    refute_received {:minga_event, :log_message, %LogMessageEvent{text: ^filtered_entry}}
   end
 
   describe "send_commands/2" do

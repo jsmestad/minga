@@ -4,7 +4,7 @@
       name: "default",
       strict: true,
       files: %{
-        included: ["lib/", "mix/", "test/"],
+        included: ["lib/", "mix/", "test/", "sdk/lib/declarations/"],
         excluded: [~r"/_build/", ~r"/deps/", ~r"/test/support/"]
       },
       plugins: [{ExSlop, []}],
@@ -37,14 +37,23 @@
           {Minga.Credo.ExplicitTargetCheck,
            [
              identity_opcodes: [
-               gui_action_workspace_rename: "ws_id is a stable 16-bit workspace identity, not a row index.",
-               gui_action_workspace_set_icon: "ws_id is a stable 16-bit workspace identity, not a row index.",
-               gui_action_workspace_close: "ws_id is a stable 16-bit workspace identity, not a row index.",
-               gui_action_scroll_to_line: "window_id and generation address a committed editor window.",
-               gui_action_fold_toggle_at_line: "window_id and generation address a committed editor window.",
-               gui_action_focus_window: "window_id and generation address a committed editor window."
+               gui_action_workspace_rename:
+                 "ws_id is a stable 16-bit workspace identity, not a row index.",
+               gui_action_workspace_set_icon:
+                 "ws_id is a stable 16-bit workspace identity, not a row index.",
+               gui_action_workspace_close:
+                 "ws_id is a stable 16-bit workspace identity, not a row index.",
+               gui_action_scroll_to_line:
+                 "window_id and generation address a committed editor window.",
+               gui_action_fold_toggle_at_line:
+                 "window_id and generation address a committed editor window.",
+               gui_action_focus_window:
+                 "window_id and generation address a committed editor window."
              ]
            ]},
+
+          # ── Control flow ──────────────────────────────────────────────────
+          {Minga.Credo.NoTrueWithCheck, []},
 
           # ── Editor responsiveness (epic #2445) ─────────────────────────────
           {Minga.Credo.NoBlockingEditorCallCheck, []},

@@ -1,4 +1,8 @@
 # Used by "mix format"
 [
-  inputs: ["{mix,.formatter}.exs", "{config,lib,mix,test}/**/*.{ex,exs}"]
+  inputs: [
+    "{mix,.formatter}.exs",
+    "{config,lib,mix,test}/**/*.{ex,exs}",
+    "sdk/lib/declarations/**/*.ex"
+  ]
 ]

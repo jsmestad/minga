@@ -922,9 +922,9 @@ defmodule MingaEditor.Handlers.LspEventHandlerTest do
       assert %CompletionTrigger{phase: {:pending, {0, 0}}, gen: 1} = new_trigger
 
       assert {:ok,
-              {:completion_result, :primary, {:lsp_client, ^client}, ^client, ^ref, ^buffer,
-               ^version, session_id, 1, {0, 0}}} =
-               LSPState.fetch_pending_request(new_state.lsp, ref)
+              {:completion_result,
+               {^ref, :primary, {:lsp_client, ^client}, ^client, ^buffer, ^version, session_id, 1,
+                {0, 0}}}} = LSPState.fetch_pending_request(new_state.lsp, ref)
 
       assert is_reference(session_id)
     end

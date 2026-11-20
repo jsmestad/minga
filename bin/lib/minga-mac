@@ -1,0 +1,36 @@
+#!/bin/sh
+# Development launcher for Minga (native macOS GUI mode).
+#
+# Builds the Swift/Metal renderer via Xcode, then starts the editor with
+# the Metal-rendered native window instead of the terminal UI.
+#
+# Usage:
+#   bin/minga-gui README.md
+#   bin/minga-gui              # empty buffer
+
+set -e
+
+PROJECT_DIR="$(cd "$(dirname "$0")/../.." && pwd -P)"
+. "$PROJECT_DIR/bin/lib/source-cli.sh"
+if terminal_only "$@"; then
+  exec mix minga -- "$@"
+fi
+DERIVED_DATA="$PROJECT_DIR/macos/DerivedData"
+if [ "${MINGA_SKIP_NATIVE_LAUNCH_BUILD:-}" != "1" ]; then
+  command -v xcodebuild >/dev/null 2>&1 || { printf 'xcodebuild is required to build the development GUI.\n' >&2; exit 1; }
+  (cd "$PROJECT_DIR" && make xcodegen-generate native.support &&
+    mix swift.build -- -project macos/Minga.xcodeproj -scheme Minga -configuration Debug \
+      -derivedDataPath "$DERIVED_DATA" -destination "platform=macOS,arch=$(uname -m)" build)
+fi
+export MINGA_GUI_RENDERER="$DERIVED_DATA/Build/Products/Debug/Minga.app/Contents/MacOS/Minga"
+if [ ! -x "$MINGA_GUI_RENDERER" ]; then
+  printf 'Development GUI renderer not found: %s\n' "$MINGA_GUI_RENDERER" >&2
+  exit 1
+fi
+info_plist="$DERIVED_DATA/Build/Products/Debug/Minga.app/Contents/Info.plist"
+if [ "$(/usr/bin/plutil -extract CFBundleIdentifier raw -o - "$info_plist")" != "com.minga.editor.dev" ]; then
+  printf 'Development GUI renderer has the wrong bundle identity; rebuild without MINGA_SKIP_NATIVE_LAUNCH_BUILD.\n' >&2
+  exit 1
+fi
+
+exec mix minga -- "$@"

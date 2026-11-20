@@ -42,6 +42,8 @@ defmodule MingaEditor.LspActions do
   alias Minga.LSP.BufferEdit
   alias Minga.LSP.Client
   alias Minga.LSP.DocumentContext
+  alias Minga.LSP.HoverContent
+  alias Minga.LSP.Location
   alias Minga.LSP.PositionEncoding
   alias Minga.LSP.DocumentHighlight
   alias Minga.LSP.SyncServer
@@ -792,16 +794,8 @@ defmodule MingaEditor.LspActions do
     NoticeWorkflow.publish(state, "Definition request failed")
   end
 
-  def handle_definition_response(state, {:ok, nil}) do
-    NoticeWorkflow.publish(state, "No definition found")
-  end
-
-  def handle_definition_response(state, {:ok, []}) do
-    NoticeWorkflow.publish(state, "No definition found")
-  end
-
   def handle_definition_response(state, {:ok, result}) do
-    case parse_location(result) do
+    case Location.first(result) do
       nil ->
         NoticeWorkflow.publish(state, "No definition found")
 
@@ -822,16 +816,8 @@ defmodule MingaEditor.LspActions do
     NoticeWorkflow.publish(state, "Peek definition request failed")
   end
 
-  def handle_peek_definition_response(state, {:ok, nil}) do
-    NoticeWorkflow.publish(state, "No definition found")
-  end
-
-  def handle_peek_definition_response(state, {:ok, []}) do
-    NoticeWorkflow.publish(state, "No definition found")
-  end
-
   def handle_peek_definition_response(state, {:ok, result}) do
-    case parse_location(result) do
+    case Location.first(result) do
       nil ->
         NoticeWorkflow.publish(state, "No definition found")
 
@@ -858,7 +844,7 @@ defmodule MingaEditor.LspActions do
   end
 
   def handle_hover_response(state, {:ok, %{"contents" => contents}}) do
-    markdown = extract_hover_markdown(contents)
+    markdown = HoverContent.markdown(contents)
 
     case markdown do
       "" ->
@@ -937,7 +923,7 @@ defmodule MingaEditor.LspActions do
   defp handle_current_hover_mouse_response(state, {:ok, nil}, _row, _col), do: state
 
   defp handle_current_hover_mouse_response(state, {:ok, %{"contents" => contents}}, row, col) do
-    markdown = extract_hover_markdown(contents)
+    markdown = HoverContent.markdown(contents)
 
     case markdown do
       "" ->
@@ -1044,7 +1030,7 @@ defmodule MingaEditor.LspActions do
   end
 
   defp do_handle_references_response(state, {:ok, [single]}, operation_id) do
-    case parse_single_location(single) do
+    case Location.decode(single) do
       nil ->
         %{
           state
@@ -1409,16 +1395,8 @@ defmodule MingaEditor.LspActions do
     NoticeWorkflow.publish(state, "Type definition request failed")
   end
 
-  def handle_type_definition_response(state, {:ok, nil}) do
-    NoticeWorkflow.publish(state, "No type definition found")
-  end
-
-  def handle_type_definition_response(state, {:ok, []}) do
-    NoticeWorkflow.publish(state, "No type definition found")
-  end
-
   def handle_type_definition_response(state, {:ok, result}) do
-    case parse_location(result) do
+    case Location.first(result) do
       nil ->
         NoticeWorkflow.publish(state, "No type definition found")
 
@@ -1446,7 +1424,7 @@ defmodule MingaEditor.LspActions do
     # Implementation can return multiple results
     case result do
       [single] ->
-        case parse_single_location(single) do
+        case Location.decode(single) do
           nil ->
             NoticeWorkflow.publish(state, "No implementation found")
 
@@ -1459,7 +1437,7 @@ defmodule MingaEditor.LspActions do
         PickerUI.open(state, LocationSource, %{locations: items, title: "Implementations"})
 
       single when is_map(single) ->
-        case parse_single_location(single) do
+        case Location.decode(single) do
           nil ->
             NoticeWorkflow.publish(state, "No implementation found")
 
@@ -1637,7 +1615,7 @@ defmodule MingaEditor.LspActions do
         from = call["from"]
         uri = from["uri"]
         range = from["range"]
-        {line, col} = extract_position(range["start"])
+        {line, col} = Location.range_start(range["start"])
         path = SyncServer.uri_to_path(uri)
         name = from["name"]
         detail = Map.get(from, "detail", "")
@@ -1668,7 +1646,7 @@ defmodule MingaEditor.LspActions do
         to = call["to"]
         uri = to["uri"]
         range = to["range"]
-        {line, col} = extract_position(range["start"])
+        {line, col} = Location.range_start(range["start"])
         path = SyncServer.uri_to_path(uri)
         name = to["name"]
         detail = Map.get(to, "detail", "")
@@ -1705,7 +1683,7 @@ defmodule MingaEditor.LspActions do
     parsed =
       Enum.map(resolved, fn lens ->
         range = lens["range"]
-        {line, _col} = extract_position(range["start"])
+        {line, _col} = Location.range_start(range["start"])
         command = lens["command"]
         title = if command, do: command["title"], else: nil
         %{line: line, title: title, data: lens}
@@ -2059,28 +2037,6 @@ defmodule MingaEditor.LspActions do
   defp format_workspace_error(:stale_origin), do: "source document changed"
   defp format_workspace_error(reason), do: inspect(reason)
 
-  # ── Location parsing ───────────────────────────────────────────────────────
-
-  @doc """
-  Parses an LSP definition response into `{uri, line, col}`.
-
-  Handles single Location, array of Locations, and LocationLink format.
-  When multiple locations are returned, picks the first one.
-  """
-  @spec parse_location(term()) :: {String.t(), non_neg_integer(), non_neg_integer()} | nil
-  def parse_location(locations) when is_list(locations) do
-    case locations do
-      [first | _] -> parse_single_location(first)
-      [] -> nil
-    end
-  end
-
-  def parse_location(location) when is_map(location) do
-    parse_single_location(location)
-  end
-
-  def parse_location(_), do: nil
-
   # ── Hover text extraction ──────────────────────────────────────────────────
 
   @doc """
@@ -2310,28 +2266,6 @@ defmodule MingaEditor.LspActions do
     }
   end
 
-  @spec parse_single_location(map()) ::
-          {String.t(), non_neg_integer(), non_neg_integer()} | nil
-  defp parse_single_location(%{"uri" => uri, "range" => range}) do
-    {line, col} = extract_position(range)
-    {uri, line, col}
-  end
-
-  # LocationLink format
-  defp parse_single_location(%{"targetUri" => uri, "targetRange" => range}) do
-    {line, col} = extract_position(range)
-    {uri, line, col}
-  end
-
-  defp parse_single_location(_), do: nil
-
-  @spec extract_position(map()) :: {non_neg_integer(), non_neg_integer()}
-  defp extract_position(%{"start" => %{"line" => line, "character" => col}}) do
-    {line, col}
-  end
-
-  defp extract_position(_), do: {0, 0}
-
   @spec jump_to_location(state(), String.t(), non_neg_integer(), non_neg_integer()) :: state()
   defp jump_to_location(state, uri, line, col) do
     target_path = SyncServer.uri_to_path(uri)
@@ -2453,42 +2387,6 @@ defmodule MingaEditor.LspActions do
 
   defp set_jump_mark(state), do: state
 
-  @doc """
-  Extracts raw markdown text from LSP hover contents.
-
-  Preserves markdown formatting for floating window rendering.
-  Handles MarkupContent, plain strings, and MarkedString arrays.
-  """
-  @spec extract_hover_markdown(term()) :: String.t()
-  def extract_hover_markdown(%{"kind" => "markdown", "value" => value}) when is_binary(value) do
-    String.trim(value)
-  end
-
-  def extract_hover_markdown(%{"kind" => "plaintext", "value" => value}) when is_binary(value) do
-    String.trim(value)
-  end
-
-  def extract_hover_markdown(%{"kind" => _, "value" => value}) when is_binary(value) do
-    String.trim(value)
-  end
-
-  def extract_hover_markdown(text) when is_binary(text) do
-    String.trim(text)
-  end
-
-  def extract_hover_markdown(items) when is_list(items) do
-    items
-    |> Enum.map(&extract_hover_markdown/1)
-    |> Enum.reject(&(&1 == ""))
-    |> Enum.join("\n\n")
-  end
-
-  def extract_hover_markdown(%{"language" => lang, "value" => value}) when is_binary(value) do
-    "```#{lang}\n#{String.trim(value)}\n```"
-  end
-
-  def extract_hover_markdown(_), do: ""
-
   # Computes the cursor's screen position for anchoring the hover popup.
   # Uses the last rendered cursor position from the compose stage.
   @spec hover_cursor_screen_position(state()) :: {non_neg_integer(), non_neg_integer()}
@@ -2524,23 +2422,16 @@ defmodule MingaEditor.LspActions do
 
   # ── Helpers for new LSP features ──────────────────────────────────────────
 
-  @spec locations_to_picker_items([map()]) :: [
+  @spec locations_to_picker_items([term()]) :: [
           {String.t(), non_neg_integer(), non_neg_integer(), String.t()}
         ]
   defp locations_to_picker_items(locations) do
-    locations
-    |> Enum.map(fn loc ->
-      case parse_single_location(loc) do
-        nil ->
-          nil
-
-        {uri, line, col} ->
-          path = SyncServer.uri_to_path(uri)
-          label = read_line_content(path, line)
-          {path, line, col, label}
-      end
-    end)
-    |> Enum.reject(&is_nil/1)
+    for location <- locations, decoded = Location.decode(location) do
+      {uri, line, col} = decoded
+      path = SyncServer.uri_to_path(uri)
+      label = read_line_content(path, line)
+      {path, line, col, label}
+    end
   end
 
   @spec read_line_content(String.t(), non_neg_integer()) :: String.t()
@@ -2666,7 +2557,7 @@ defmodule MingaEditor.LspActions do
     case command do
       %{"title" => title} when is_binary(title) ->
         range = lens["range"]
-        {line, _col} = extract_position(range["start"])
+        {line, _col} = Location.range_start(range["start"])
         entry = %{line: line, title: title, data: lens}
 
         state =
@@ -2755,7 +2646,7 @@ defmodule MingaEditor.LspActions do
   defp flatten_document_symbols(symbols, depth) do
     Enum.flat_map(symbols, fn sym ->
       range = sym["range"] || sym["location"]["range"]
-      {line, col} = extract_position(range["start"])
+      {line, col} = Location.range_start(range["start"])
       name = sym["name"]
       kind = symbol_kind_name(sym["kind"])
       indent = String.duplicate("  ", depth)
@@ -2782,7 +2673,7 @@ defmodule MingaEditor.LspActions do
     location = sym["location"]
     uri = location["uri"]
     range = location["range"]
-    {line, col} = extract_position(range["start"])
+    {line, col} = Location.range_start(range["start"])
     path = SyncServer.uri_to_path(uri)
     kind = symbol_kind_name(sym["kind"])
     container = Map.get(sym, "containerName", "")

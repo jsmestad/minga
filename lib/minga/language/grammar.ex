@@ -84,7 +84,7 @@ defmodule Minga.Language.Grammar do
   """
   @spec query_path(language()) :: String.t() | nil
   def query_path(language) when is_binary(language) do
-    user_path = user_query_path(language)
+    user_path = user_query_path(language, "highlights.scm")
     priv_path = priv_query_path(language)
 
     cond do
@@ -117,7 +117,7 @@ defmodule Minga.Language.Grammar do
   """
   @spec injection_query_path(language()) :: String.t() | nil
   def injection_query_path(language) when is_binary(language) do
-    user_path = user_injection_query_path(language)
+    user_path = user_query_path(language, "injections.scm")
     priv_path = priv_injection_query_path(language)
 
     cond do
@@ -148,8 +148,16 @@ defmodule Minga.Language.Grammar do
   @spec dynamic_grammar_path(String.t()) :: String.t()
   def dynamic_grammar_path(name) when is_binary(name) do
     ext = if :os.type() == {:unix, :darwin}, do: "dylib", else: "so"
-    config_dir = Path.join([System.user_home!(), ".config", "minga", "grammars"])
-    Path.join(config_dir, "#{name}.#{ext}")
+    Path.join([Minga.UserPaths.config_dir!(), "grammars", "#{name}.#{ext}"])
+  end
+
+  @doc "Returns the directory for user override queries for the given language."
+  @spec user_query_dir(language()) :: String.t() | nil
+  def user_query_dir(language) when is_binary(language) do
+    case Minga.UserPaths.config_dir() do
+      nil -> nil
+      dir -> Path.join([dir, "queries", language])
+    end
   end
 
   @doc """
@@ -200,24 +208,16 @@ defmodule Minga.Language.Grammar do
     Path.join([:code.priv_dir(:minga), "queries", language, "highlights.scm"])
   end
 
-  @spec user_query_path(language()) :: String.t() | nil
-  defp user_query_path(language) do
-    case System.user_home() do
+  @spec user_query_path(language(), String.t()) :: String.t() | nil
+  defp user_query_path(language, filename) do
+    case user_query_dir(language) do
       nil -> nil
-      home -> Path.join([home, ".config", "minga", "queries", language, "highlights.scm"])
+      dir -> Path.join(dir, filename)
     end
   end
 
   @spec priv_injection_query_path(language()) :: String.t()
   defp priv_injection_query_path(language) do
     Path.join([:code.priv_dir(:minga), "queries", language, "injections.scm"])
-  end
-
-  @spec user_injection_query_path(language()) :: String.t() | nil
-  defp user_injection_query_path(language) do
-    case System.user_home() do
-      nil -> nil
-      home -> Path.join([home, ".config", "minga", "queries", language, "injections.scm"])
-    end
   end
 end

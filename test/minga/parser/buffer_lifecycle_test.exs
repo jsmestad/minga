@@ -5,7 +5,7 @@ defmodule Minga.Parser.BufferLifecycleTest do
   alias Minga.Parser.BufferConfig
   alias Minga.Parser.BufferLifecycle
   alias Minga.Parser.BufferRegistry
-  alias Minga.Parser.ParseScheduler
+  alias Minga.Parser.ParseSync
   alias Minga.Parser.RequestHandler
   alias Minga.Parser.RequestState
 
@@ -35,19 +35,12 @@ defmodule Minga.Parser.BufferLifecycleTest do
         token: make_ref()
       })
 
-    {[^buffer], {:ok, evicted_buffers, _scheduler, requests}} =
-      BufferLifecycle.evict_inactive(
-        nil,
-        buffers,
-        ParseScheduler.new(),
-        requests,
-        [],
-        0
-      )
+    work = %ParseSync{} |> ParseSync.put_buffers(buffers) |> ParseSync.put_requests(requests)
+    {[^buffer], work} = BufferLifecycle.evict_inactive(work, nil, [], 0)
 
     assert_receive {^deferred_tag, nil}
     assert_receive {^in_flight_tag, nil}
-    assert BufferRegistry.fetch(evicted_buffers, buffer) == :error
+    assert BufferRegistry.fetch(work.buffers, buffer) == :error
 
     late_snapshot = %SyncSnapshot{
       buffer: buffer,
@@ -57,8 +50,9 @@ defmodule Minga.Parser.BufferLifecycleTest do
       changes: :unchanged
     }
 
-    assert RequestHandler.handle_snapshot(requests, evicted_buffers, late_snapshot) == :unhandled
-    assert {:noreply, ^requests} = RequestHandler.reply(requests, 1, :late)
+    assert ParseSync.handle_snapshot(work, nil, late_snapshot) == work
+    assert {:noreply, requests} = RequestHandler.reply(work.requests, 1, :late)
+    assert requests == work.requests
     refute_receive {^deferred_tag, _reply}
     refute_receive {^in_flight_tag, _reply}
   end

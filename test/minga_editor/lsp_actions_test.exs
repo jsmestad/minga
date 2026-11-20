@@ -21,37 +21,6 @@ defmodule MingaEditor.LspActionsTest do
   alias MingaEditor.WindowTree
   alias MingaEditor.Session.State, as: SessionState
 
-  describe "parse_location/1" do
-    test "extracts the first target URI and start position from supported LSP shapes" do
-      cases = [
-        {location("file:///tmp/foo.ex", 10, 5), {"file:///tmp/foo.ex", 10, 5}},
-        {[location("file:///tmp/first.ex", 1, 0), location("file:///tmp/second.ex", 20, 3)],
-         {"file:///tmp/first.ex", 1, 0}},
-        {%{
-           "targetUri" => "file:///tmp/target.ex",
-           "targetRange" => %{
-             "start" => %{"line" => 42, "character" => 2},
-             "end" => %{"line" => 42, "character" => 20}
-           },
-           "originSelectionRange" => %{
-             "start" => %{"line" => 5, "character" => 0},
-             "end" => %{"line" => 5, "character" => 10}
-           }
-         }, {"file:///tmp/target.ex", 42, 2}}
-      ]
-
-      for {input, expected} <- cases do
-        assert LspActions.parse_location(input) == expected
-      end
-    end
-
-    test "returns nil for unsupported location responses" do
-      for input <- [[], nil, "garbage"] do
-        assert LspActions.parse_location(input) == nil
-      end
-    end
-  end
-
   describe "extract_hover_text/1" do
     test "normalizes hover content from supported LSP shapes" do
       cases = [
@@ -79,7 +48,8 @@ defmodule MingaEditor.LspActionsTest do
       cases = [
         {{:error, %{"message" => "fail"}}, "Definition request failed"},
         {{:ok, nil}, "No definition found"},
-        {{:ok, []}, "No definition found"}
+        {{:ok, []}, "No definition found"},
+        {{:ok, [%{}, location("file:///tmp/ignored.ex", 10, 5)]}, "No definition found"}
       ]
 
       for {response, expected_status} <- cases do

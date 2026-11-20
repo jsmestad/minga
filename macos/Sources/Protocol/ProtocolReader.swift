@@ -6,6 +6,7 @@
 
 import Foundation
 import MingaProtocol
+import MingaUI
 import os
 import Synchronization
 
@@ -108,8 +109,7 @@ final class ProtocolReader: @unchecked Sendable {
                      Int(lenData[2]) << 8 | Int(lenData[3])
 
         guard length > 0, length <= maxPayloadLength else {
-            os_log(.error, log: protocolLog, "Protocol payload length %{public}d outside valid range 1...%{public}d; disconnecting to avoid stream desync", length, maxPayloadLength)
-            return disconnect()
+            return disconnect(message: "Protocol payload length \(length) outside valid range 1...\(maxPayloadLength); disconnecting to avoid stream desync")
         }
 
         let payload: Data
@@ -146,13 +146,16 @@ final class ProtocolReader: @unchecked Sendable {
         return true
     }
 
-    private func disconnect(readError: (any Error)? = nil) -> Bool {
+    private func disconnect(message: String? = nil, readError: (any Error)? = nil) -> Bool {
         // Intentional retirement can close the descriptor while the blocking read unwinds.
-        if let readError, running.withLock({ $0 }) {
-            os_log(.error, log: protocolLog, "Protocol read failed: %{public}@", readError.localizedDescription)
-        }
+        let reportReadError = readError != nil && running.withLock { $0 }
         cancelAdmission()
         onDisconnect()
+        if let message {
+            PortLogger.report(.error, message, to: protocolLogger)
+        } else if let readError, reportReadError {
+            PortLogger.report(.error, "Protocol read failed", to: protocolLogger, privateDetail: readError.localizedDescription)
+        }
         return false
     }
 }

@@ -259,6 +259,7 @@ defmodule Minga.ConformancePixelEvidenceTest do
                 "macos/Sources/Renderer/EditorPresentation.swift", "macos/Tests/MingaTests/NewTest.swift",
                 "macos/project.yml", "macos/Minga.xcodeproj/project.pbxproj", "test/conformance/corpus/index.json",
                 "lib/mix/tasks/conformance/pixel_scenarios.ex", "mix/protocol_generator.ex",
+                "sdk/lib/declarations/minga/extension.ex",
                 "config/test.exs", "mix.exs", "mix.lock", ".tool-versions", ".gitignore",
                 "docs/protocol_schema.toml", ".github/workflows/ci.yml"]
     for path in relevant:

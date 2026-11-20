@@ -440,7 +440,7 @@ defmodule MingaEditor.CompletionAsyncTest do
   end
 
   describe "session-owned runtime path" do
-    test "provider response is accepted only by its exact live session request" do
+    test "a routed worker result is accepted only by its exact live session request" do
       ctx = start_editor("hello")
       on_exit(fn -> Minga.LSP.SyncServer.remove_buffer(ctx.buffer) end)
       state = editor_state(ctx)
@@ -475,11 +475,25 @@ defmodule MingaEditor.CompletionAsyncTest do
       fact =
         {request_ref, :primary, provider_id, self(), buffer, version, session_id, 1, {0, 0}}
 
-      returned =
-        CompletionHandling.handle_completion_result(state, fact, result)
+      state = CompletionHandling.install_completion_tracking(state, [fact])
 
-      assert_receive {:completion_processed, ^fact, batch},
-                     @sync_timeout
+      {returned, [:render_now]} =
+        MingaEditor.Handlers.LspEventHandler.handle(state, {:lsp_response, request_ref, result})
+
+      assert LSPState.fetch_pending_request(returned.lsp, request_ref) == :error
+
+      replacement_session =
+        CompletionSession.register_requests(session, [{provider_id, self(), make_ref()}])
+
+      superseded =
+        ModalWorkflow.put_completion_trigger(
+          returned,
+          CompletionTrigger.put_session(trigger, replacement_session)
+        )
+
+      assert_receive {:completion_processed, ^fact, %ProviderBatch{} = batch}, @sync_timeout
+
+      assert CompletionHandling.apply_processed(superseded, fact, batch) == superseded
 
       applied = CompletionHandling.apply_processed(returned, fact, batch)
 

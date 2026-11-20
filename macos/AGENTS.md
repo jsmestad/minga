@@ -226,7 +226,17 @@ When adding or changing opcodes, edit the schema and regenerate instead of hand-
 - **Swift 6.0+** with strict concurrency
 - **Metal 3.1+** (MSL 3.1), macOS 15.0+ deployment target
 - **Xcode 16+** for building
-- Install the version pinned in `.xcodegen-version` with `scripts/install_xcodegen` (pass the installation directory as its argument), then build via `xcodegen generate && xcodebuild -project Minga.xcodeproj -scheme Minga build`.
+- Install the version pinned in `.xcodegen-version` with `scripts/install_xcodegen` (pass the installation directory as its argument). From the repository root, run `(cd macos && xcodegen generate)` and `mix swift.build` to build the Debug frontend.
+
+## Development app identity
+
+Use `bin/minga-mac` for a source GUI launch. It builds and starts the Debug renderer, which uses `com.minga.editor.dev` as its macOS app identity. Source launches disable AppKit and SwiftUI window restoration and restore the editor window from their own worktree profile.
+
+The source renderer saves editor window geometry on normal quit, saves completed bottom-panel resizes under `$XDG_STATE_HOME`, and caches Metal pipelines under `$XDG_CACHE_HOME/com.minga.editor.dev`. Geometry is stored in the same state directory as the panel height. Resetting the worktree profile clears both and the cache. A Debug app launched outside the source profile uses its own app preference domain and `~/Library/Caches/com.minga.editor.dev` as the default cache.
+
+Source GUI launches connect over stdin/stdout. A Debug app with an embedded core refuses to start it without an explicit development profile with six private roots. It uses `com.minga.dev` under the Darwin per-user temporary directory unless an explicit IPC parent is supplied. Release keeps its existing `com.minga.editor` identity, preferences, cache, and IPC defaults.
+
+The accessibility runner supplies its per-run bundle ID, profile, and IPC parent. For an intentionally scoped helper invocation, pass `--runtime-parent /absolute/private/directory` immediately after its command, for example `minga-ipc probe --runtime-parent "$ipc_parent"`. It must match the app's `--minga-ipc-runtime-parent`. Without the option, the helper discovers the normal endpoint using Darwin's per-user temporary directory.
 
 ## Agent Chat Workflow Regression Checks
 
@@ -373,15 +383,15 @@ blinkTask = Task { @MainActor [weak self] in
 
 ## Logging
 
-Use `PortLogger` from anywhere in the Swift codebase. Messages appear in the `*Messages*` buffer prefixed with `[GUI/{level}]`:
+Use `PortLogger` for frontend diagnostics. It writes to the `com.minga.editor` unified logging subsystem and sends severity-tagged entries to the GUI subsystem in the Messages pane:
 
 ```swift
 PortLogger.info("Window resized: \(cols)x\(rows) cells")
 PortLogger.warn("Glyph atlas full, rebuilding")
-PortLogger.error("Metal pipeline creation failed: \(error)")
+PortLogger.report(.error, "Metal pipeline creation failed", to: rendererLogger, privateDetail: error.localizedDescription)
 ```
 
-`PortLogger` is thread-safe and silently drops messages before `setup(encoder:)` is called during startup. Use `NSLog` only for errors that happen before the encoder is ready (Metal device init failure, etc.).
+`PortLogger` keeps a bounded backlog while the core is unavailable and submits it after the first frame commits. Delivery to the pane is best effort; use Console if the core cannot receive logs. Use a category-specific `Logger` for diagnostics that need their own Console category. Pass sensitive details separately as `privateDetail`: unified logging redacts them, and the BEAM does not receive them. Keep signposts in unified logging only.
 
 **What to log:** startup info (font, cell dims, scale), resize events, errors/warnings, resource lifecycle (atlas rebuilds, pipeline creation).
 

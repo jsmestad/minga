@@ -10,7 +10,17 @@ defmodule MingaEditor.Frontend.Resolve do
   @type backend :: :tui | :gui
 
   @spec renderer_path(backend()) :: String.t()
-  def renderer_path(backend) do
+  def renderer_path(:gui) do
+    case System.get_env("MINGA_GUI_RENDERER") do
+      nil -> default_renderer_path(:gui)
+      path -> Path.expand(path)
+    end
+  end
+
+  def renderer_path(:tui), do: default_renderer_path(:tui)
+
+  @spec default_renderer_path(backend()) :: String.t()
+  defp default_renderer_path(backend) do
     binary_name = renderer_binary_name(backend)
 
     case find_app_bundle_binary(binary_name, backend) do

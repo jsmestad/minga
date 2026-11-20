@@ -3,9 +3,8 @@ defmodule MingaAgent.Tools.LspBridge do
   Shared LSP lookup infrastructure for agent tools.
 
   Encapsulates the file-path-to-LSP-client lookup chain that all agent
-  LSP tools need. Also provides response parsing helpers extracted from
-  `MingaEditor.LspActions` so agent tools and the editor share the same
-  logic without the agent needing access to `EditorState`.
+  LSP tools need. It projects decoded locations to paths and adds source
+  context for reference results.
 
   The lookup chain:
   ```
@@ -16,6 +15,7 @@ defmodule MingaAgent.Tools.LspBridge do
 
   alias Minga.Buffer
   alias Minga.LSP.Client
+  alias Minga.LSP.Location
   alias Minga.LSP.PositionEncoding
   alias Minga.LSP.SyncServer
   alias Minga.LSP.Supervisor, as: LSPSupervisor
@@ -164,15 +164,12 @@ defmodule MingaAgent.Tools.LspBridge do
   Returns the first location when multiple are present.
   """
   @spec parse_location(term()) :: location() | nil
-  def parse_location(locations) when is_list(locations) do
-    case locations do
-      [first | _] -> parse_single_location(first)
-      [] -> nil
+  def parse_location(response) do
+    case Location.first(response) do
+      nil -> nil
+      {uri, line, col} -> {uri_to_path(uri), line, col}
     end
   end
-
-  def parse_location(location) when is_map(location), do: parse_single_location(location)
-  def parse_location(_), do: nil
 
   @doc """
   Parses all locations from an LSP response into a list of `{path, line, col, context}` tuples.
@@ -181,57 +178,15 @@ defmodule MingaAgent.Tools.LspBridge do
           {String.t(), non_neg_integer(), non_neg_integer(), String.t()}
         ]
   def parse_all_locations(locations) when is_list(locations) do
-    locations
-    |> Enum.map(&parse_single_location/1)
-    |> Enum.reject(&is_nil/1)
-    |> Enum.map(fn {path, line, col} ->
+    for location <- locations, decoded = Location.decode(location) do
+      {uri, line, col} = decoded
+      path = uri_to_path(uri)
       context = read_line_content(path, line)
       {path, line, col, context}
-    end)
+    end
   end
 
   def parse_all_locations(_), do: []
-
-  @doc """
-  Parses a single LSP Location or LocationLink into `{path, line, col}`.
-  """
-  @spec parse_single_location(map()) :: location() | nil
-  def parse_single_location(%{"uri" => uri, "range" => range}) do
-    {line, col} = extract_position(range)
-    {uri_to_path(uri), line, col}
-  end
-
-  def parse_single_location(%{"targetUri" => uri, "targetRange" => range}) do
-    {line, col} = extract_position(range)
-    {uri_to_path(uri), line, col}
-  end
-
-  def parse_single_location(_), do: nil
-
-  @doc """
-  Extracts markdown text from LSP hover contents.
-
-  Handles MarkupContent, plain strings, MarkedString, and arrays thereof.
-  """
-  @spec extract_hover_markdown(term()) :: String.t()
-  def extract_hover_markdown(%{"kind" => _, "value" => value}) when is_binary(value) do
-    String.trim(value)
-  end
-
-  def extract_hover_markdown(text) when is_binary(text), do: String.trim(text)
-
-  def extract_hover_markdown(items) when is_list(items) do
-    items
-    |> Enum.map(&extract_hover_markdown/1)
-    |> Enum.reject(&(&1 == ""))
-    |> Enum.join("\n\n")
-  end
-
-  def extract_hover_markdown(%{"language" => lang, "value" => value}) when is_binary(value) do
-    "```#{lang}\n#{String.trim(value)}\n```"
-  end
-
-  def extract_hover_markdown(_), do: ""
 
   @doc """
   Flattens hierarchical document symbols into a flat list with indentation.
@@ -244,7 +199,7 @@ defmodule MingaAgent.Tools.LspBridge do
   def flatten_document_symbols(symbols, depth \\ 0) do
     Enum.flat_map(symbols, fn sym ->
       range = sym["range"] || get_in(sym, ["location", "range"])
-      {line, col} = extract_position(range)
+      {line, col} = Location.range_start(range)
       name = sym["name"]
       kind = symbol_kind_name(sym["kind"])
       indent = String.duplicate("  ", depth)
@@ -271,7 +226,7 @@ defmodule MingaAgent.Tools.LspBridge do
     location = sym["location"]
     uri = location["uri"]
     range = location["range"]
-    {line, col} = extract_position(range)
+    {line, col} = Location.range_start(range)
     path = uri_to_path(uri)
     kind = symbol_kind_name(sym["kind"])
     container = Map.get(sym, "containerName", "")
@@ -313,10 +268,6 @@ defmodule MingaAgent.Tools.LspBridge do
   def symbol_kind_name(_), do: "Symbol"
 
   # ── Private helpers ────────────────────────────────────────────────────────
-
-  @spec extract_position(map() | nil) :: {non_neg_integer(), non_neg_integer()}
-  defp extract_position(%{"start" => %{"line" => line, "character" => col}}), do: {line, col}
-  defp extract_position(_), do: {0, 0}
 
   @spec read_line_content(String.t(), non_neg_integer()) :: String.t()
   defp read_line_content(path, line) do

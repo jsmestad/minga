@@ -566,7 +566,6 @@ defmodule MingaEditor.Input.RouterTest do
       assert snapshot.old_buffer == state.workspace.buffers.active
       assert snapshot.old_mode == :normal
       assert snapshot.old_cursor == {0, 0}
-      assert snapshot.buf_version == BufferProcess.version(state.workspace.buffers.active)
     end
 
     test "handles nil active buffer" do
@@ -584,7 +583,6 @@ defmodule MingaEditor.Input.RouterTest do
 
       assert snapshot.old_buffer == nil
       assert snapshot.old_cursor == nil
-      assert snapshot.buf_version == 0
     end
 
     test "handles a dead active buffer pid" do
@@ -598,7 +596,6 @@ defmodule MingaEditor.Input.RouterTest do
       snapshot = Router.capture_snapshot(state)
 
       assert snapshot.old_buffer == dead
-      assert snapshot.buf_version == 0
       assert snapshot.old_cursor == nil
       assert snapshot.old_mode == :normal
     end

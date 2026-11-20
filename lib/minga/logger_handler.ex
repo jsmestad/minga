@@ -92,7 +92,7 @@ defmodule Minga.LoggerHandler do
   """
   @spec install() :: String.t()
   def install do
-    log_dir = Path.join(System.get_env("XDG_DATA_HOME") || Path.expand("~/.local/share"), "minga")
+    log_dir = Minga.UserPaths.data_dir()
     log_path = Path.join(log_dir, @log_file)
     File.mkdir_p!(log_dir)
     ensure_buffer_table()
@@ -212,6 +212,7 @@ defmodule Minga.LoggerHandler do
   @spec event_level(atom()) :: Minga.Events.LogMessageEvent.level()
   defp event_level(level) when level in [:error, :critical, :alert, :emergency], do: :error
   defp event_level(:warning), do: :warning
+  defp event_level(:debug), do: :debug
   defp event_level(_level), do: :info
 
   @spec has_subscribers?() :: boolean()
@@ -328,6 +329,10 @@ defmodule Minga.LoggerHandler do
   # ── Message formatting ─────────────────────────────────────────────────────
 
   @spec format_message(atom(), term(), map()) :: String.t()
+  defp format_message(level, {:string, msg}, %{minga_gui: true}) do
+    "[GUI/#{level}] #{IO.iodata_to_binary(msg)}"
+  end
+
   defp format_message(level, {:string, msg}, _meta) do
     "[#{level}] #{IO.iodata_to_binary(msg)}"
   end

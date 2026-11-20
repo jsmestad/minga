@@ -45,7 +45,7 @@ PIXEL_CASES = {
     "pixels_background_fill", "pixels_spaced_rows", "pixels_no_stale_glyphs_after_local_scroll",
 }
 SOURCE_PREFIXES = ("lib/", "mix/", "config/", "macos/", "test/", "scripts/",
-                   ".github/workflows/", "priv/")
+                   ".github/workflows/", "priv/", "sdk/lib/declarations/")
 SOURCE_FILES = {"mix.exs", "mix.lock", ".tool-versions", ".xcodegen-version", ".gitignore",
                 "docs/protocol_schema.toml"}
 OUTPUT_PREFIXES = ("deps/", "_build/", ".generated/", "macos/DerivedData/", "macos/.generated/",

@@ -670,16 +670,6 @@ struct GUIFrameSwiftUIInvalidationTests {
         .timeLimit(.minutes(1))
     )
     func directObservationUpdatesPresentationOwnerMatrix() async throws {
-        let bottomPanelHeightKey = "bottomPanelHeight"
-        let persistedBottomPanelHeight = UserDefaults.standard.object(forKey: bottomPanelHeightKey)
-        defer {
-            if let persistedBottomPanelHeight {
-                UserDefaults.standard.set(persistedBottomPanelHeight, forKey: bottomPanelHeightKey)
-            } else {
-                UserDefaults.standard.removeObject(forKey: bottomPanelHeightKey)
-            }
-        }
-
         let statusBar = StatusBarState()
         let bottomPanel = BottomPanelState()
         let sidebar = SidebarHostState()

@@ -1362,7 +1362,7 @@ defmodule Minga.LSP.Client do
 
   @spec child_stderr_log_path() :: String.t()
   defp child_stderr_log_path do
-    log_dir = Path.expand("~/.local/share/minga")
+    log_dir = Minga.UserPaths.data_dir()
     File.mkdir_p!(log_dir)
     Path.join(log_dir, "minga.log")
   end

@@ -178,8 +178,6 @@ defmodule Minga.Git.Repo do
   @doc "Returns cached status for the tracked repo containing `path`, without shelling out to git."
   @spec cached_status_for_path(String.t()) :: {:ok, status_snapshot()} | :not_tracked
   def cached_status_for_path(path) when is_binary(path) do
-    path = Path.expand(path)
-
     case tracked_repo_for_path(path) do
       nil -> :not_tracked
       {_git_root, pid} -> {:ok, status_snapshot(pid)}
@@ -216,6 +214,23 @@ defmodule Minga.Git.Repo do
   @spec degraded(GenServer.server()) :: {boolean(), degraded_reason() | nil}
   def degraded(server) do
     GenServer.call(server, :degraded)
+  end
+
+  @doc """
+  Returns the cached degradation flag and reason for the tracked repo containing `path`.
+
+  Does not fetch the status entries, refresh the cache, or start a repo.
+  Returns `:not_tracked` if no live repo matches or the call exits.
+  """
+  @spec cached_degraded_for_path(String.t()) ::
+          {:ok, {boolean(), degraded_reason() | nil}} | :not_tracked
+  def cached_degraded_for_path(path) when is_binary(path) do
+    case tracked_repo_for_path(path) do
+      nil -> :not_tracked
+      {_git_root, pid} -> {:ok, degraded(pid)}
+    end
+  catch
+    :exit, _ -> :not_tracked
   end
 
   @doc "Forces a status refresh. Used after staging/committing operations."
@@ -385,6 +400,8 @@ defmodule Minga.Git.Repo do
 
   @spec tracked_repo_for_path(String.t()) :: {String.t(), pid()} | nil
   defp tracked_repo_for_path(path) do
+    path = Path.expand(path)
+
     @registry
     |> Registry.select([{{:"$1", :"$2", :_}, [], [{{:"$1", :"$2"}}]}])
     |> Enum.filter(fn {git_root, pid} ->

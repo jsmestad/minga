@@ -104,6 +104,11 @@
             isEnabled = "YES">
          </EnvironmentVariable>
          <EnvironmentVariable
+            key = "MINGA_AX_TMPDIR"
+            value = "$(MINGA_AX_TMPDIR)"
+            isEnabled = "YES">
+         </EnvironmentVariable>
+         <EnvironmentVariable
             key = "MINGA_AX_VARIANT"
             value = "$(MINGA_AX_VARIANT)"
             isEnabled = "YES">
@@ -126,6 +131,11 @@
          <EnvironmentVariable
             key = "MINGA_AX_XDG_DATA_HOME"
             value = "$(MINGA_AX_XDG_DATA_HOME)"
+            isEnabled = "YES">
+         </EnvironmentVariable>
+         <EnvironmentVariable
+            key = "MINGA_AX_XDG_STATE_HOME"
+            value = "$(MINGA_AX_XDG_STATE_HOME)"
             isEnabled = "YES">
          </EnvironmentVariable>
       </EnvironmentVariables>

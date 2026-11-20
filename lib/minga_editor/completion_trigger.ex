@@ -307,53 +307,42 @@ defmodule MingaEditor.CompletionTrigger do
 
       %CursorContext{file_path: path, version: version} ->
         uri = SyncServer.path_to_uri(path)
-        {line, col} = CursorContext.position(context)
-        trigger_pos = captured_trigger_pos || {line, col}
+        cursor = CursorContext.position(context)
+        trigger_pos = captured_trigger_pos || cursor
 
-        refs =
+        requests =
           Enum.map(clients, fn client ->
-            position =
-              PositionEncoding.to_lsp(
-                {line, col},
-                context.line_text,
-                client_encoding(client)
-              )
-
+            position = PositionEncoding.to_lsp(cursor, context.line_text, client_encoding(client))
             params = completion_params(uri, position, request_context)
-            Client.request(client, "textDocument/completion", params)
+            ref = Client.request(client, "textDocument/completion", params)
+            {provider_id(client), client, ref}
           end)
 
         bridge = supersede_session(bridge)
         session = session_for_request(bridge, gen, buffer_pid, version, trigger_pos)
 
-        requests =
-          refs
-          |> Enum.zip(clients)
-          |> Enum.map(fn {ref, client} -> {provider_id(client), client, ref} end)
-
         session = Session.register_requests(session, requests)
-        facts = tracking_facts(refs, clients, buffer_pid, version, session.id, gen, trigger_pos)
+        facts = tracking_facts(requests, session)
 
         {%__MODULE__{bridge | phase: {:pending, trigger_pos}, gen: gen, session: session}, facts}
     end
   end
 
-  @spec tracking_facts(
-          [reference()],
-          [pid()],
-          pid(),
-          non_neg_integer(),
-          reference(),
-          non_neg_integer(),
-          position()
-        ) :: [tracking_fact()]
-  defp tracking_facts(refs, clients, buffer, version, session_id, gen, trigger_pos) do
-    refs
-    |> Enum.zip(clients)
-    |> Enum.with_index()
-    |> Enum.map(fn {{ref, client}, index} ->
-      role = if index == 0, do: :primary, else: :secondary
-      {ref, role, provider_id(client), client, buffer, version, session_id, gen, trigger_pos}
+  @spec tracking_facts([{Item.provider_id(), pid(), reference()}], Session.t()) ::
+          [tracking_fact()]
+  defp tracking_facts(
+         [{_, _, primary_ref} | _] = requests,
+         %Session{
+           buffer: buffer,
+           buffer_version: version,
+           id: session_id,
+           generation: gen,
+           trigger_position: trigger_pos
+         }
+       ) do
+    Enum.map(requests, fn {provider_id, client, ref} ->
+      role = if ref == primary_ref, do: :primary, else: :secondary
+      {ref, role, provider_id, client, buffer, version, session_id, gen, trigger_pos}
     end)
   end
 
@@ -462,12 +451,11 @@ defmodule MingaEditor.CompletionTrigger do
     cancel_provider_requests(session.provider_requests)
     generation = session.generation + 1
     uri = SyncServer.path_to_uri(path)
-    {line, col} = CursorContext.position(context)
+    cursor = CursorContext.position(context)
 
     requests =
       Enum.map(providers, fn {provider_id, client} ->
-        position =
-          PositionEncoding.to_lsp({line, col}, context.line_text, client_encoding(client))
+        position = PositionEncoding.to_lsp(cursor, context.line_text, client_encoding(client))
 
         params = completion_params(uri, position, %{"triggerKind" => 3})
         ref = Client.request(client, "textDocument/completion", params)
@@ -476,15 +464,7 @@ defmodule MingaEditor.CompletionTrigger do
 
     session = Session.retrigger(session, generation, context.version, requests)
 
-    facts =
-      requests
-      |> Enum.with_index()
-      |> Enum.map(fn {{provider_id, client, ref}, index} ->
-        role = if index == 0, do: :primary, else: :secondary
-
-        {ref, role, provider_id, client, session.buffer, session.buffer_version, session.id,
-         generation, session.trigger_position}
-      end)
+    facts = tracking_facts(requests, session)
 
     {%__MODULE__{
        bridge
