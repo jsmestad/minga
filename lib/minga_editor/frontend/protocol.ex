@@ -75,6 +75,7 @@ defmodule MingaEditor.Frontend.Protocol do
   @op_native_presentation_observation Opcodes.native_presentation_observation()
   @op_presentation_target Opcodes.presentation_target()
   @op_presentation_operation Opcodes.presentation_operation()
+  @op_agent_desktop_notification Opcodes.agent_desktop_notification()
   @op_editor_text_event Opcodes.editor_text_event()
   @op_text_presentation_state Opcodes.text_presentation_state()
 
@@ -352,6 +353,24 @@ defmodule MingaEditor.Frontend.Protocol do
       }) do
     <<@op_presentation_operation, operation_id::unsigned-64, target.token::unsigned-64,
       target.window_id::16, u32(revision)::32, 1::8>>
+  end
+
+  @doc "Encodes a privacy-safe agent notification or approval retirement."
+  @spec encode_agent_desktop_notification(
+          :approval | :complete | :error | :approval_cleared,
+          <<_::128>>,
+          non_neg_integer()
+        ) :: binary()
+  def encode_agent_desktop_notification(kind, <<id::128>>, debounce_ms) do
+    tag =
+      case kind do
+        :approval -> 1
+        :complete -> 2
+        :error -> 3
+        :approval_cleared -> 4
+      end
+
+    <<@op_agent_desktop_notification, tag, id::128, debounce_ms::32>>
   end
 
   @spec u32(non_neg_integer()) :: non_neg_integer()

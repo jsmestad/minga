@@ -19,6 +19,7 @@ defmodule MingaEditor.Frontend.FrameTransaction do
     Opcodes.register_font(),
     Opcodes.clipboard_write(),
     Opcodes.presentation_operation(),
+    Opcodes.agent_desktop_notification(),
     Opcodes.gui_request()
   ]
 

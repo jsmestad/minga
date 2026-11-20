@@ -270,6 +270,30 @@ struct ProtocolDecoderTests {
         }
     }
 
+    @Test("Desktop alerts distinguish approval identity, retirement, and outcome debounce")
+    func decodeDesktopApprovalLifecycle() throws {
+        let bytes: [UInt8] = Array(1...16)
+        let id = try #require(UUID(uuidString: "01020304-0506-0708-090A-0B0C0D0E0F10"))
+        let cases: [(UInt8, UInt32, AgentDesktopNotification)] = [
+            (1, 0, .approval(id)),
+            (2, 5000, .outcome(.complete, session: id, debounceMs: 5000)),
+            (3, 8500, .outcome(.failed, session: id, debounceMs: 8500)),
+            (4, 0, .approvalCleared(id)),
+        ]
+
+        for (kind, interval, expected) in cases {
+            var data = Data([OP_AGENT_DESKTOP_NOTIFICATION, kind] + bytes)
+            appendWireU32(&data, interval)
+            let (command, size) = try decodeCommand(data: data, offset: 0)
+            guard case .agentDesktopNotification(let notification) = command else {
+                Issue.record("Expected a desktop agent notification")
+                continue
+            }
+            #expect(notification == expected)
+            #expect(size == data.count)
+        }
+    }
+
     @Test("Decode correlated native Save As request")
     func decodeNativeSaveAsRequest() throws {
         let path = "/tmp/notes.txt"

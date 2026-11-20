@@ -7,7 +7,7 @@ defmodule Minga.Protocol.Opcodes do
 
   # Protocol version
   @spec protocol_version() :: non_neg_integer()
-  def protocol_version, do: 37
+  def protocol_version, do: 38
 
   # Input
   @spec key_press() :: non_neg_integer()
@@ -70,6 +70,8 @@ defmodule Minga.Protocol.Opcodes do
   def presentation_target, do: 0x1B
   @spec presentation_operation() :: non_neg_integer()
   def presentation_operation, do: 0x1C
+  @spec agent_desktop_notification() :: non_neg_integer()
+  def agent_desktop_notification, do: 0x61
   @spec protocol_error() :: non_neg_integer()
   def protocol_error, do: 0x18
 

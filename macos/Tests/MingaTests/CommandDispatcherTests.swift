@@ -3748,6 +3748,7 @@ struct CommandDispatcherStagingTests {
             case .agentChatVisibilityChanged: events.append("agent-chat")
             case .linkCursorChanged: events.append("link")
             case .focusOwnerChanged: events.append("focus-owner")
+            case .agentDesktopNotification: events.append("agent-desktop-notification")
             }
         }
         gui.frontendExtensions.register(

@@ -77,6 +77,20 @@ set :cursor_animate, false
 
 Invalid values show a clear error. Setting `:tab_width` to `-1` tells you it must be a positive integer.
 
+### Agent desktop notifications
+
+Minga can tell you when a local agent needs tool approval, finishes its queued work, or encounters an error while you use another app. The first desktop alert asks for macOS permission. Alerts use the Minga icon and omit project names, commands, and conversation details. Clicking one brings the editor forward.
+
+macOS controls whether a desktop alert is temporary or stays until you dismiss it. Set this under **System Settings → Notifications → Minga**. Dismissing a desktop alert does not approve or cancel a tool request. The approval stays in the conversation until it is resolved, and Minga then removes the corresponding desktop alert. Errors stay in the conversation even if the desktop alert disappears.
+
+To get alerted only when an agent is blocked or fails:
+
+```elixir
+set :agent_notify_on, [:approval, :error]
+```
+
+Use `set :agent_notifications, false` to turn off agent alerts. `:agent_notify_debounce` sets the minimum interval in milliseconds between repeated completions or repeated failures from the same session (default `5000`). It does not delay approvals.
+
 ## Modeline
 
 The modeline configuration builds the editor's global status line from named segments, so you can hide noisy information, move the important parts closer to the edge, or add your own project-specific status. The same segment configuration drives the semantic native GUI status bar and terminal status/modeline presentation; the GUI renders known built-ins with compact SwiftUI controls and renders custom segments as native chips instead of terminal-style color blocks.

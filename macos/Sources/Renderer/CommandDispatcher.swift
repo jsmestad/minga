@@ -74,6 +74,7 @@ enum ApplicationCommitEffect: Equatable {
     case focusOwnerChanged(Wire.FocusOwner)
     case accessibilityModeChanged(String)
     case agentChatVisibilityChanged(Bool)
+    case agentDesktopNotification(AgentDesktopNotification)
 }
 
 private enum CommitEffect {
@@ -480,7 +481,7 @@ final class CommandDispatcher {
                 applyLocal(command)
             }
 
-        case .applicationQuitResponse:
+        case .applicationQuitResponse, .agentDesktopNotification:
             applyLocal(command)
 
         case .guiRequest(let request):
@@ -1085,6 +1086,9 @@ final class CommandDispatcher {
 
         case .applicationQuitResponse(let response):
             effects.append(.applicationQuitResponse(response))
+
+        case .agentDesktopNotification(let notification):
+            effects.append(.application(.agentDesktopNotification(notification)))
 
         case .guiRequest:
             break

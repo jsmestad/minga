@@ -77,6 +77,8 @@ graph LR
 
 All frontends communicate with the BEAM over the same binary protocol on stdin/stdout. They share no memory. The BEAM is the single source of truth for all editor state; frontends are "dumb" renderers and input sources. Every internal component (each buffer, the editor, the port manager, each future plugin) runs as its own lightweight BEAM process with its own state. They can't interfere with each other because the VM enforces the boundaries.
 
+Agent desktop alerts use an out-of-band instruction with the event kind, an opaque approval or session identifier, and the configured outcome debounce interval. The BEAM decides which outcomes warrant attention and when an approval is retired. The macOS app uses its bundle identity to deliver or withdraw the matching alert. It starts the debounce interval only after posting an alert. No conversation content crosses this notification boundary.
+
 This isn't a workaround for a limitation. It's the whole point.
 
 ---

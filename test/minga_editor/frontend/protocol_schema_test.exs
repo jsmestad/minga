@@ -83,7 +83,8 @@ defmodule MingaEditor.Frontend.ProtocolSchemaTest do
       set_link_cursor: 0x19,
       application_quit_response: 0x1A,
       presentation_target: 0x1B,
-      presentation_operation: 0x1C
+      presentation_operation: 0x1C,
+      agent_desktop_notification: 0x61
     )
   end
 
