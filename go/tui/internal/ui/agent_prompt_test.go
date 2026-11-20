@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"io"
 	"strings"
 	"testing"
 
@@ -315,22 +316,125 @@ func TestPromptFitTracksResizeAndCommittedPresentationNotContentEpoch(t *testing
 	}
 }
 
+func composerTestStopTarget() protocol.AgentStopTarget {
+	return protocol.AgentStopTarget{SessionID: "displayed-session", RequestID: "displayed-request"}
+}
+
+func updateFromPublishedView(model Model, view tea.View, msg tea.Msg) (tea.Model, tea.Cmd) {
+	msg = normalizeTerminalInput(msg)
+	if mouse, ok := msg.(tea.MouseMsg); ok && view.OnMouse != nil {
+		view.OnMouse(mouse)
+	}
+	return model.Update(msg)
+}
+
+func TestStopUsesLastPublishedViewWhileReplacementIsPending(t *testing.T) {
+	out := make(chan []byte, 64)
+	model := New(80, 24, out)
+	chat := protocol.AgentChat{Visible: true, Status: 1, Prompt: "draft", PromptVisibleRows: 1, StopTarget: composerTestStopTarget()}
+	prompt := decodedPromptCommand(t, promptRows("draft"), 0, 0, 0, 0, protocol.Selection{})
+	model = commitPrompt(t, model, chat, prompt, 800)
+	x, y := renderedComposerControl(t, model, "Stop")
+	shown := model.View()
+	stopA := protocol.EncodeGUIAgentStopTurn(chat.StopTarget)
+
+	chat.StopTarget.RequestID = "replacement"
+	model = commitPrompt(t, model, chat, prompt, 801)
+	stopB := protocol.EncodeGUIAgentStopTurn(chat.StopTarget)
+	drainOutboundPackets(out)
+
+	click := tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft, X: x, Y: y})
+	next, _ := updateFromPublishedView(model, shown, click)
+	packets := drainOutboundPackets(out)
+	assertPacketCount(t, packets, stopA, 1)
+	assertPacketCount(t, packets, stopB, 0)
+
+	model = next.(Model)
+	_, _ = updateFromPublishedView(model, model.View(), click)
+	packets = drainOutboundPackets(out)
+	assertPacketCount(t, packets, stopA, 0)
+	assertPacketCount(t, packets, stopB, 1)
+}
+
+type heldTerminalWrite struct {
+	started chan struct{}
+	release chan struct{}
+}
+
+func (w heldTerminalWrite) Fd() uintptr              { return ^uintptr(0) }
+func (w heldTerminalWrite) Read([]byte) (int, error) { return 0, io.EOF }
+func (w heldTerminalWrite) Close() error             { return nil }
+
+func (w heldTerminalWrite) Write(p []byte) (int, error) {
+	close(w.started)
+	<-w.release
+	return len(p), nil
+}
+
+func TestStopDoesNotUseReplacementCallbackAcrossTerminalWrite(t *testing.T) {
+	for _, acquiredBeforeWrite := range []bool{false, true} {
+		t.Run(fmt.Sprintf("acquired-before-write=%t", acquiredBeforeWrite), func(t *testing.T) {
+			out := make(chan []byte, 64)
+			model := New(80, 24, out)
+			chat := protocol.AgentChat{Visible: true, Status: 1, Prompt: "draft", PromptVisibleRows: 1, StopTarget: composerTestStopTarget()}
+			prompt := decodedPromptCommand(t, promptRows("draft"), 0, 0, 0, 0, protocol.Selection{})
+			model = commitPrompt(t, model, chat, prompt, 810)
+			x, y := renderedComposerControl(t, model, "Stop")
+			click := tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft, X: x, Y: y})
+			chat.StopTarget.RequestID = "replacement"
+			model = commitPrompt(t, model, chat, prompt, 811)
+			replacement := model.View()
+			drainOutboundPackets(out)
+
+			filter := NewInputFilter()
+			gate := heldTerminalWrite{started: make(chan struct{}), release: make(chan struct{})}
+			writer := filter.TrackOutput(gate)
+			var input tea.Msg
+			if acquiredBeforeWrite {
+				input = filter.Filter(model, click)
+			}
+			written := make(chan struct{})
+			go func() {
+				_, _ = writer.Write([]byte(replacement.Content))
+				close(written)
+			}()
+			<-gate.started
+			if !acquiredBeforeWrite {
+				input = filter.Filter(model, click)
+			}
+			close(gate.release)
+			<-written
+			if input != nil {
+				updated, _ := updateFromPublishedView(model, replacement, input)
+				model = updated.(Model)
+			}
+			if packets := drainOutboundPackets(out); len(packets) != 0 {
+				t.Fatalf("ambiguous click dispatched %x", packets)
+			}
+
+			_, _ = updateFromPublishedView(model, replacement, filter.Filter(model, click))
+			assertPacketCount(t, drainOutboundPackets(out), protocol.EncodeGUIAgentStopTurn(chat.StopTarget), 1)
+		})
+	}
+}
+
 func TestPromptControlsUseCommandsAndNewlineRemainsKeyInput(t *testing.T) {
 	for _, status := range []byte{0, 1, 2} {
 		out := make(chan []byte, 64)
 		model := New(12, 6, out)
-		chat := protocol.AgentChat{Visible: true, Status: status, Prompt: "raw", PromptVisibleRows: 8, InputFocused: true}
+		chat := protocol.AgentChat{Visible: true, Status: status, Prompt: "raw", PromptVisibleRows: 8, InputFocused: true, StopTarget: composerTestStopTarget()}
 		model = commitPrompt(t, model, chat, decodedPromptCommand(t, promptRows("one", "two", "three"), 0, 0, 0, 0, protocol.Selection{}), 700)
 		p, _ := model.agentPromptPlacement()
 		drainOutboundPackets(out)
-		packet, handled := model.semanticMousePacket(tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft, X: model.layout.body.X + p.col - p.prefix, Y: model.layout.body.Y + p.controlsRow}))
-		command := "agent_submit_or_newline"
+		click := tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft, X: model.layout.body.X + p.col - p.prefix, Y: model.layout.body.Y + p.controlsRow})
+		afterClick, _ := updateFromPublishedView(model, model.View(), click)
+		model = afterClick.(Model)
+		want := protocol.EncodeGUIExecuteCommand("agent_submit_or_newline")
 		if status != 0 {
-			command = "agent_abort"
+			want = protocol.EncodeGUIAgentStopTurn(chat.StopTarget)
 		}
-		want := protocol.EncodeGUIExecuteCommand(command)
-		if !handled || !bytes.Equal(packet, want) {
-			t.Fatalf("status %d control = %x, want %x", status, packet, want)
+		if packets := drainOutboundPackets(out); len(packets) != 1 || !bytes.Equal(packets[0], want) {
+			t.Fatalf("status %d control = %x, want %x", status, packets, want)
 		}
 		updated, _ := model.Update(tea.KeyPressMsg(tea.Key{Code: tea.KeyEnter, Mod: tea.ModShift}))
 		model = updated.(Model)
@@ -486,14 +590,14 @@ func TestComposerControlConsumerOnlyActivatesVisibleLabel(t *testing.T) {
 			t.Run(fmt.Sprintf("width%d/status%d", width, status), func(t *testing.T) {
 				out := make(chan []byte, 64)
 				model := New(width, 16, out)
-				chat := protocol.AgentChat{Visible: true, Status: status, Prompt: "draft", PromptVisibleRows: 1, InputFocused: true, DraftAttachmentCount: 2, DraftAttachmentOffer: 0x1122334455667788}
+				chat := protocol.AgentChat{Visible: true, Status: status, Prompt: "draft", PromptVisibleRows: 1, InputFocused: true, DraftAttachmentCount: 2, DraftAttachmentOffer: 0x1122334455667788, StopTarget: composerTestStopTarget()}
 				model = commitPrompt(t, model, chat, decodedPromptCommand(t, promptRows("draft"), 0, 0, 0, 0, protocol.Selection{}), 818)
 				p, _ := model.agentPromptPlacement()
 				label := "Send"
-				command := "agent_submit_or_newline"
+				wantAction := protocol.EncodeGUIAgentComposerSubmit(chat.DraftAttachmentOffer)
 				if status == 1 || status == 2 || status == 5 {
 					label = "Stop"
-					command = "agent_abort"
+					wantAction = protocol.EncodeGUIAgentStopTurn(chat.StopTarget)
 				}
 				if p.innerWidth < 4 {
 					if label == "Send" {
@@ -523,10 +627,6 @@ func TestComposerControlConsumerOnlyActivatesVisibleLabel(t *testing.T) {
 				if attachmentStart >= 0 {
 					attachmentStart = displayWidth(body[p.controlsRow][:attachmentStart]) - controlStart
 				}
-				wantAction := protocol.EncodeGUIExecuteCommand(command)
-				if command == "agent_submit_or_newline" {
-					wantAction = protocol.EncodeGUIAgentComposerSubmit(chat.DraftAttachmentOffer)
-				}
 				wantAttachments := protocol.EncodeGUIExecuteCommand("agent_draft_attachments")
 				drainOutboundPackets(out)
 				for cell := range p.innerWidth {
@@ -538,22 +638,14 @@ func TestComposerControlConsumerOnlyActivatesVisibleLabel(t *testing.T) {
 						want = wantAttachments
 					}
 					click := tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft, X: controlStart + cell, Y: controlY})
-					packet, handled := model.semanticMousePacket(click)
-					if want != nil {
-						if !handled || !bytes.Equal(packet, want) {
-							t.Fatalf("visible label cell %d did not activate: %x handled=%v", cell, packet, handled)
-						}
-					} else if handled || packet != nil {
-						t.Fatalf("help/padding cell %d activated composer: %x handled=%v", cell, packet, handled)
-					}
-					updated, _ := model.Update(click)
+					updated, _ := updateFromPublishedView(model, model.View(), click)
 					model = updated.(Model)
 					actionPackets := 0
 					for _, outbound := range drainOutboundPackets(out) {
 						if len(outbound) != 0 && outbound[0] == generated.OPKeyPress {
 							t.Fatalf("control/help cell %d entered mode-dependent key dispatch: %x", cell, outbound)
 						}
-						if len(outbound) > 1 && outbound[0] == generated.OPGuiAction && (outbound[1] == generated.GUIActionExecuteCommand || outbound[1] == generated.GUIActionAgentComposerSubmit) {
+						if len(outbound) > 1 && outbound[0] == generated.OPGuiAction && (outbound[1] == generated.GUIActionExecuteCommand || outbound[1] == generated.GUIActionAgentComposerSubmit || outbound[1] == generated.GUIActionAgentStopTurn) {
 							actionPackets++
 							if want == nil || !bytes.Equal(outbound, want) {
 								t.Fatalf("help/padding cell %d submitted/stopped draft: %x", cell, outbound)
@@ -578,7 +670,7 @@ func TestComposerClickDispatchesCommandAcrossCommittedModesAndFocus(t *testing.T
 					model := New(80, 20, out)
 					chat := protocol.AgentChat{
 						Visible: true, Status: status, Prompt: "draft", PromptVisibleRows: 1,
-						PromptVimMode: mode, InputFocused: focused,
+						PromptVimMode: mode, InputFocused: focused, StopTarget: composerTestStopTarget(),
 					}
 					model = commitPrompt(t, model, chat, decodedPromptCommand(t, promptRows("draft"), 0, 0, 0, 0, protocol.Selection{}), 819)
 					// Publish the real agent owner while retaining the committed source.
@@ -596,7 +688,8 @@ func TestComposerClickDispatchesCommandAcrossCommittedModesAndFocus(t *testing.T
 					p, _ := model.agentPromptPlacement()
 					x := model.layout.body.X + p.col - p.prefix
 					y := model.layout.body.Y + p.controlsRow
-					before := model.View().Content
+					view := model.View()
+					before := view.Content
 					buffer := cellbuf.NewBuffer(model.width, model.height)
 					cellbuf.SetContent(buffer, before)
 					cell := buffer.Cell(x, y)
@@ -604,15 +697,15 @@ func TestComposerClickDispatchesCommandAcrossCommittedModesAndFocus(t *testing.T
 						t.Fatal("test click does not target the drawn composer control")
 					}
 					drainOutboundPackets(out)
-					updated, _ = model.Update(tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft, X: x, Y: y}))
+					updated, _ = updateFromPublishedView(model, view, tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft, X: x, Y: y}))
 					model = updated.(Model)
-					command := "agent_submit_or_newline"
+					want := protocol.EncodeGUIExecuteCommand("agent_submit_or_newline")
 					if status == 1 || status == 2 {
-						command = "agent_abort"
+						want = protocol.EncodeGUIAgentStopTurn(chat.StopTarget)
 					}
 					packets := drainOutboundPackets(out)
-					if len(packets) != 1 || !bytes.Equal(packets[0], protocol.EncodeGUIExecuteCommand(command)) {
-						t.Fatalf("drawn control did not dispatch %s directly: %x", command, packets)
+					if len(packets) != 1 || !bytes.Equal(packets[0], want) {
+						t.Fatalf("drawn control dispatched %x, want %x", packets, want)
 					}
 					after, _ := model.agentChat()
 					if after.InputFocused != focused || after.PromptVimMode != mode || model.View().Content != before {

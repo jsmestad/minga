@@ -101,6 +101,7 @@ func decodeAgentChat(payload []byte) (AgentChat, string, int) {
 		return AgentChat{Visible: true}, "", len(payload)
 	}
 	chat := AgentChat{}
+	var sawStopTarget bool
 	offset := 2
 	for i := 0; i < int(payload[1]); i++ {
 		sectionID := payload[offset]
@@ -144,6 +145,20 @@ func decodeAgentChat(payload []byte) (AgentChat, string, int) {
 					chat.QuestionOffer = offer
 					chat.QuestionPrompt = prompt
 				}
+			}
+		case 0x0C:
+			if sawStopTarget {
+				chat.StopTarget = AgentStopTarget{}
+				continue
+			}
+			sawStopTarget = true
+			sessionID, next, ok := readString16(section, 0)
+			if !ok || sessionID == "" {
+				continue
+			}
+			requestID, end, ok := readString16(section, next)
+			if ok && requestID != "" && end == len(section) {
+				chat.StopTarget = AgentStopTarget{SessionID: sessionID, RequestID: requestID}
 			}
 		}
 	}

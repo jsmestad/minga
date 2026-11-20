@@ -25,6 +25,7 @@ public struct AgentChatView: View {
         case agentReadRetainedOutput(messageID: UInt32, offer: Wire.RetainedOutputOffer)
         case composerSubmit(offer: UInt64)
         case openQuestion(offer: UInt64)
+        case stopTurn(AgentStopTarget)
         case chatScrolledAwayFromBottom
         case chatReturnedToBottom
     }
@@ -152,7 +153,7 @@ public struct AgentChatView: View {
             AgentPromptView(state: state, isInsertMode: isInsertMode, sendAction: childAction { [offer = state.draftAttachmentOffer] action in
                 switch action {
                 case .submit: offer == 0 ? .executeCommand(name: "agent_submit_or_newline") : .composerSubmit(offer: offer)
-                case .abort: .executeCommand(name: "agent_abort")
+                case .abort(let target): .stopTurn(target)
                 case .attachments: .executeCommand(name: "agent_draft_attachments")
                 }
             }, maximumHeight: max(0, availableHeight - headerHeight))

@@ -611,7 +611,12 @@ defmodule MingaAgent.Session.PrefixAuthorizationTest do
     stale_recall = make_ref()
 
     assert :ok =
-             Session.request_composer_draft(restored, record, stale_recall, {:recall, 2, newer})
+             Session.request_composer_draft(
+               restored,
+               record,
+               stale_recall,
+               {:recall, 2, newer, :keep_running}
+             )
 
     assert_receive {:composer_draft_result, ^restored, ^record, ^stale_recall,
                     {:error, {:stale_draft_revision, 3}}},
@@ -619,7 +624,14 @@ defmodule MingaAgent.Session.PrefixAuthorizationTest do
 
     current = %DraftSnapshot{newer | text: "not yet autosaved"}
     recall = make_ref()
-    assert :ok = Session.request_composer_draft(restored, record, recall, {:recall, 3, current})
+
+    assert :ok =
+             Session.request_composer_draft(
+               restored,
+               record,
+               recall,
+               {:recall, 3, current, :keep_running}
+             )
 
     assert_receive {:composer_draft_result, ^restored, ^record, ^recall, {:ok, 4, recalled}},
                    @timeout

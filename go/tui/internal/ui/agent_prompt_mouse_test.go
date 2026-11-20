@@ -50,7 +50,7 @@ func TestComposerSGRClickTargetsRenderedControlAfterResize(t *testing.T) {
 			t.Run(fmt.Sprintf("status%d/focused%t", status, focused), func(t *testing.T) {
 				out := make(chan []byte, 64)
 				model := New(80, 24, out)
-				chat := protocol.AgentChat{Visible: true, Status: status, Prompt: strings.Repeat("draft ", 100), PromptVisibleRows: 8, PromptVimMode: 0, InputFocused: focused}
+				chat := protocol.AgentChat{Visible: true, Status: status, Prompt: strings.Repeat("draft ", 100), PromptVisibleRows: 8, PromptVimMode: 0, InputFocused: focused, StopTarget: composerTestStopTarget()}
 				rows := promptRows("visible row one", "visible row two", "visible row three", "visible row four", "visible row five", "visible row six", "visible row seven", "visible row eight")
 				model = commitPrompt(t, model, chat, decodedPromptCommand(t, rows, 7, 5, 0, 0, protocol.Selection{}), 821)
 				updated, _ := model.Update(port.PacketMsg{Commands: []protocol.Command{
@@ -69,9 +69,9 @@ func TestComposerSGRClickTargetsRenderedControlAfterResize(t *testing.T) {
 				updated, _ = model.Update(tea.WindowSizeMsg{Width: 60, Height: 24})
 				model = updated.(Model)
 				model = commitPrompt(t, model, chat, decodedPromptCommand(t, rows, 7, 5, 0, 0, protocol.Selection{}), 822)
-				label, command := "Send", "agent_submit_or_newline"
+				label, want := "Send", protocol.EncodeGUIExecuteCommand("agent_submit_or_newline")
 				if status == 2 || status == 5 {
-					label, command = "Stop", "agent_abort"
+					label, want = "Stop", protocol.EncodeGUIAgentStopTurn(chat.StopTarget)
 				}
 				x, y := renderedComposerControl(t, model, label)
 				if x != 2 || y != 21 {
@@ -103,15 +103,15 @@ func TestComposerSGRClickTargetsRenderedControlAfterResize(t *testing.T) {
 						if normalized.X != x || normalized.Y != y {
 							t.Fatalf("SGR normalized to %d,%d, want %d,%d", normalized.X, normalized.Y, x, y)
 						}
-						updated, _ = model.Update(message)
+						updated, _ = updateFromPublishedView(model, model.View(), message)
 						model = updated.(Model)
 						packets := drainOutboundPackets(out)
-						if ending == 'M' && (len(packets) != 1 || !bytes.Equal(packets[0], protocol.EncodeGUIExecuteCommand(command))) {
+						if ending == 'M' && (len(packets) != 1 || !bytes.Equal(packets[0], want)) {
 							t.Fatalf("rendered %s press (fragmented=%t) bypassed authoritative action: %x", label, fragmented, packets)
 						}
 						if ending == 'm' {
 							for _, packet := range packets {
-								if bytes.Equal(packet, protocol.EncodeGUIExecuteCommand(command)) {
+								if bytes.Equal(packet, want) {
 									t.Fatal("control action duplicated on release")
 								}
 							}
@@ -129,7 +129,7 @@ func TestWorkingAgentContextCannotCoverRenderedStop(t *testing.T) {
 			t.Run(fmt.Sprintf("width%d/rows%d", width, visibleRows), func(t *testing.T) {
 				out := make(chan []byte, 64)
 				model := New(width, 24, out)
-				chat := protocol.AgentChat{Visible: true, Status: 1, Prompt: "draft", PromptVisibleRows: visibleRows, InputFocused: true}
+				chat := protocol.AgentChat{Visible: true, Status: 1, Prompt: "draft", PromptVisibleRows: visibleRows, InputFocused: true, StopTarget: composerTestStopTarget()}
 				rows := promptRows("row one", "row two", "row three", "row four", "row five", "row six", "row seven", "row eight")
 				model = commitPrompt(t, model, chat, decodedPromptCommand(t, rows[:visibleRows], 0, 0, 0, 0, protocol.Selection{}), 823)
 				context := protocol.Command{Kind: protocol.CommandChrome, Chrome: protocol.ChromePayload{Opcode: generated.OPGuiAgentContext, AgentContext: protocol.AgentContext{Visible: true, Status: 1, Task: "Thinking", Progress: protocol.AgentProgress{ActiveAction: "Thinking"}}}}
@@ -149,10 +149,10 @@ func TestWorkingAgentContextCannotCoverRenderedStop(t *testing.T) {
 					t.Fatal("compact editor context still overlays full chat")
 				}
 				drainOutboundPackets(out)
-				updated, _ = model.Update(tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft, X: x, Y: y}))
+				updated, _ = updateFromPublishedView(model, model.View(), tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft, X: x, Y: y}))
 				model = updated.(Model)
 				packets := drainOutboundPackets(out)
-				if len(packets) != 1 || !bytes.Equal(packets[0], protocol.EncodeGUIExecuteCommand("agent_abort")) {
+				if len(packets) != 1 || !bytes.Equal(packets[0], protocol.EncodeGUIAgentStopTurn(chat.StopTarget)) {
 					t.Fatalf("visible Stop did not abort: %x", packets)
 				}
 

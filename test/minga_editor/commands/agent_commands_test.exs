@@ -879,6 +879,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
       assert :ok = Session.subscribe(session)
       assert :ok = Session.send_prompt(session, "active turn")
       assert_receive {:agent_event, ^session, {:status_changed, :thinking}}, 1_000
+      assert_receive {:agent_event, ^session, {:stop_target_changed, {_, _}} = stop_event}
 
       assert {:queued, :steering} = Session.send_prompt(session, "steering note")
       assert {:queued, :follow_up} = Session.queue_follow_up(session, "follow-up note")
@@ -893,6 +894,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
             )
           )
         end)
+        |> MingaEditor.Agent.Events.dispatch(session, stop_event)
 
       new_state = AgentCommands.scope_ctrl_c(state)
 

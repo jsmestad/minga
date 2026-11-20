@@ -21,7 +21,7 @@ func TestComposerHiddenSidebarMetadataMatchesRenderedInputCoordinates(t *testing
 					out := make(chan []byte, 64)
 					model := New(80, 24, out)
 					draft := strings.Repeat("d", 555) + "\n" + strings.Repeat("t", 556)
-					chat := protocol.AgentChat{Visible: true, Status: status, Prompt: draft, PromptVisibleRows: 8, PromptVimMode: 0, InputFocused: false}
+					chat := protocol.AgentChat{Visible: true, Status: status, Prompt: draft, PromptVisibleRows: 8, PromptVimMode: 0, InputFocused: false, StopTarget: composerTestStopTarget()}
 					rows := promptRows("row-one", "row-two", "row-three", "row-four", "row-five", "row-six", "row-seven", "row-eight")
 					for i := 4; i < len(rows); i++ {
 						rows[i].BufferLine = 1
@@ -43,9 +43,9 @@ func TestComposerHiddenSidebarMetadataMatchesRenderedInputCoordinates(t *testing
 					}
 					updated, _ = model.Update(tea.WindowSizeMsg{Width: int(width), Height: 24})
 					model = updated.(Model)
-					label, command := "Send", "agent_submit_or_newline"
+					label, want := "Send", protocol.EncodeGUIExecuteCommand("agent_submit_or_newline")
 					if status == 2 || status == 5 {
-						label, command = "Stop", "agent_abort"
+						label, want = "Stop", protocol.EncodeGUIAgentStopTurn(chat.StopTarget)
 					}
 					x, y := renderedComposerControl(t, model, label)
 					wire := []byte(fmt.Sprintf("\x1b[<0;%d;%dM", x+1, y+1))
@@ -62,10 +62,10 @@ func TestComposerHiddenSidebarMetadataMatchesRenderedInputCoordinates(t *testing
 						message = tea.MouseClickMsg(click)
 					}
 					preClickPackets := drainOutboundPackets(out)
-					updated, _ = model.Update(message)
+					updated, _ = updateFromPublishedView(model, model.View(), message)
 					model = updated.(Model)
 					packets := drainOutboundPackets(out)
-					if len(packets) != 1 || !bytes.Equal(packets[0], protocol.EncodeGUIExecuteCommand(command)) {
+					if len(packets) != 1 || !bytes.Equal(packets[0], want) {
 						t.Fatalf("rendered %s press fell through to editor-relative mouse routing: %x", label, packets)
 					}
 					if model.layout.header.Height != 2 || model.layout.body.Y != 2 || model.layout.body.X != 0 || model.layout.body.Width != int(width) {

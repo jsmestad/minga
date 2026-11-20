@@ -350,7 +350,8 @@ defmodule Minga.Integration.GUIProtocolTest do
             prompt: Map.get(d, :prompt, ""),
             draft_attachment_count: Map.get(d, :draft_attachment_count, 0),
             draft_attachment_offer: Map.get(d, :draft_attachment_offer),
-            pending_question: Map.get(d, :pending_question)
+            pending_question: Map.get(d, :pending_question),
+            stop_target: Map.get(d, :stop_target)
           }
       end
 
@@ -413,6 +414,20 @@ defmodule Minga.Integration.GUIProtocolTest do
 
       assert %{"question_offer" => 0, "question_prompt" => ""} =
                round_trip(harness, plain, "gui_agent_chat")
+    end
+
+    test "Agent chat exposes the Stop identity only for the displayed turn", %{harness: harness} do
+      draft = %{visible: true, prompt: "Keep this draft"}
+      working = Map.merge(draft, %{status: :thinking, stop_target: {"session-a", "turn-b"}})
+
+      assert %{
+               "stop_session_id" => "session-a",
+               "stop_request_id" => "turn-b",
+               "prompt" => "Keep this draft"
+             } = round_trip(harness, encode_gui_agent_chat(working), "gui_agent_chat")
+
+      assert %{"stop_session_id" => "", "stop_request_id" => ""} =
+               round_trip(harness, encode_gui_agent_chat(draft), "gui_agent_chat")
     end
 
     test "gui_theme encodes and decodes correctly", %{harness: harness} do

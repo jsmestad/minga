@@ -1217,19 +1217,47 @@ defmodule MingaEditor.Commands.Agent do
   """
   @spec abort_agent(state()) :: state()
   def abort_agent(state) do
-    case Runtime.active_session(state.shell_runtime) do
-      nil ->
-        state
+    agent = MingaEditor.Shell.Traditional.State.agent(state.shell_runtime.state)
 
-      session ->
-        try do
-          Session.abort(session)
-        catch
-          :exit, _ -> :ok
-        end
-
-        recall_queued_input(state, session, &restore_queued_to_prompt/2)
+    case agent.stop_target do
+      {_session, target} -> stop_displayed_turn(state, target)
+      nil -> state
     end
+  end
+
+  @doc "Stops the turn shown on an attached Agent surface, never its replacement."
+  @spec stop_displayed_turn(state(), {String.t(), String.t()}) :: state()
+  def stop_displayed_turn(state, target) do
+    agent = MingaEditor.Shell.Traditional.State.agent(state.shell_runtime.state)
+
+    with {session, ^target} <- agent.stop_target,
+         ^session <- Runtime.active_session(state.shell_runtime) do
+      case DraftWorkflow.stop(state, session, target) do
+        {:saved, updated} -> updated
+        :direct -> stop_turn(state, session, target)
+      end
+    else
+      _ -> NoticeWorkflow.publish(state, "That Agent turn is no longer active.")
+    end
+  end
+
+  @spec stop_turn(state(), pid(), {String.t(), String.t()}) :: state()
+  defp stop_turn(state, session, target) do
+    case Session.stop_turn(session, target) do
+      {:ok, :queue_kept} ->
+        NoticeWorkflow.publish(
+          state,
+          "Stop accepted. Queued input was kept in the saved session."
+        )
+
+      {:ok, queued} ->
+        restore_queued_to_prompt(state, queued)
+
+      {:error, :stale_turn} ->
+        NoticeWorkflow.publish(state, "That Agent turn is no longer active.")
+    end
+  catch
+    :exit, _ -> NoticeWorkflow.publish(state, "Could not confirm the Agent stop request.")
   end
 
   @doc "Retries the current agent provider after a startup or crash error."

@@ -549,6 +549,8 @@ A frontend hit-tests its own rendered content and emits an intent ("activate thi
 
 Worked examples. Completion menu, notifications (dismiss and action), observatory rows, edit-timeline entries, the float popup, and picker rows are client-resolved semantic interactions. The Go TUI tracks semantic click zones and emits the matching `gui_action`, while SwiftUI uses native hit-testing and accessible buttons. For completion, picker, and file-tree items, the source emits an opaque generation and per-item ID. The frontend returns that pair unchanged with the surface and intent. The BEAM rejects stale or wrong identities, then owns selection, confirmation, preview promotion, source callbacks, command dispatch, and failure behavior.
 
+The Agent Stop control echoes the committed conversation and admitted request IDs with `agent_stop_turn`. Session checks both IDs before recalling any pending prompts or interrupting execution. The frontend and editor do not decide that an older request still owns the turn.
+
 ---
 
 ## Two-Tier Rendering

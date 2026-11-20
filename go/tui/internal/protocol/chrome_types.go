@@ -483,6 +483,12 @@ type AgentHelpBinding struct {
 	Description string
 }
 
+// AgentStopTarget identifies the exact active turn shown by the composer.
+type AgentStopTarget struct {
+	SessionID string
+	RequestID string
+}
+
 type AgentChat struct {
 	Visible           bool
 	Status            byte
@@ -502,6 +508,7 @@ type AgentChat struct {
 	DraftAttachmentOffer uint64
 	QuestionOffer        uint64
 	QuestionPrompt       string
+	StopTarget           AgentStopTarget
 	Pending              string
 	Completion           []string
 }
