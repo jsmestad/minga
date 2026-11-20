@@ -174,7 +174,7 @@ defmodule MingaAgent.Changeset.Server do
 
   def handle_call({:stage_fork_content, relative_path, content}, _from, state) do
     with {:ok, path} <- normalize_path(state, relative_path),
-         true <- Map.has_key?(state.originals, path),
+         :ok <- require_publication_baseline(state, path),
          :ok <- Overlay.commit_file(state.overlay, path, content) do
       state =
         state
@@ -184,24 +184,22 @@ defmodule MingaAgent.Changeset.Server do
 
       {:reply, :ok, state}
     else
-      false -> {:reply, {:error, :publication_baseline_unavailable}, state}
       {:error, reason} -> {:reply, {:error, reason}, state}
     end
   end
 
   def handle_call({:stage_fork_resolution, relative_path, ancestor, selected}, _from, state) do
     with {:ok, path} <- normalize_path(state, relative_path),
-         true <- Map.has_key?(state.originals, path) do
+         :ok <- require_publication_baseline(state, path) do
       stage_fork_resolution(state, path, ancestor, selected)
     else
-      false -> {:reply, {:error, :publication_baseline_unavailable}, state}
       {:error, reason} -> {:reply, {:error, reason}, state}
     end
   end
 
   def handle_call({:publish_deletion, relative_path}, _from, state) do
     with {:ok, path} <- normalize_path(state, relative_path),
-         true <- Map.has_key?(state.originals, path) do
+         :ok <- require_publication_baseline(state, path) do
       case plan_one_deletion(state, path) do
         {{:ok, _, _} = result, action} ->
           case apply_merge_action(action, state.publication) do
@@ -217,7 +215,6 @@ defmodule MingaAgent.Changeset.Server do
           {:reply, {:conflict, %{conflicts: [result], results: [result]}}, state}
       end
     else
-      false -> {:reply, {:error, :publication_baseline_unavailable}, state}
       {:error, reason} -> {:reply, {:error, reason}, state}
     end
   rescue
@@ -617,6 +614,13 @@ defmodule MingaAgent.Changeset.Server do
       {:conflict, _} -> {:reply, {:error, :publication_baseline_conflict}, state}
       {:error, reason} -> {:reply, {:error, reason}, state}
     end
+  end
+
+  @spec require_publication_baseline(state(), String.t()) :: :ok | {:error, atom()}
+  defp require_publication_baseline(state, path) do
+    if Map.has_key?(state.originals, path),
+      do: :ok,
+      else: {:error, :publication_baseline_unavailable}
   end
 
   @spec fork_staging_baseline(state(), String.t()) ::
