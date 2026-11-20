@@ -186,6 +186,8 @@ defmodule MingaEditor.Commands.AgentSplitToggleTest do
   end
 
   test "a failed first Agent startup keeps the same composer and draft when returning to the file" do
+    _providers = LLMDB.providers()
+
     {ingest, monitor} = spawn_monitor(fn -> :ok end)
     assert_receive {:DOWN, ^monitor, :process, ^ingest, :normal}
 

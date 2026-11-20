@@ -36,6 +36,7 @@ defmodule MingaEditor.Commands.Agent do
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.Agent.DraftSave
   alias MingaEditor.Agent.DraftWorkflow
+  alias MingaEditor.Agent.CatalogStartup
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.ModalOverlay
@@ -82,25 +83,44 @@ defmodule MingaEditor.Commands.Agent do
         return_to_editor(state)
 
       _ ->
-        # On file tab: ensure agent tab exists, record the return target, and switch to it.
-        state = ensure_agent_state(state)
-        return_target = build_return_target(state)
-
-        case find_agent_tab(state) do
-          %Tab{id: agent_id} ->
-            # Switch first, then ensure a session exists. Shell.Runtime.active_session/1
-            # is per-tab, so the start-if-missing check must run after the
-            # switch — otherwise it would always see nil from the file tab.
-            state
-            |> MingaEditor.TabWorkflow.switch(agent_id)
-            |> maybe_start_session()
-            |> activate_agent_view(return_target)
-
-          nil ->
-            state
-        end
+        CatalogStartup.continue(state, {:toggle, catalog_destination(state)})
     end
   end
+
+  @doc false
+  @spec catalog_destination(state()) :: CatalogStartup.destination()
+  def catalog_destination(state) do
+    case find_agent_tab(state) do
+      %Tab{id: id, group_id: workspace, payload: %Tab.Agent{session: session}} ->
+        {id, workspace, session}
+
+      nil ->
+        :absent
+    end
+  end
+
+  @doc false
+  @spec resume_catalog_action(state(), CatalogStartup.workspace_action()) :: state()
+  def resume_catalog_action(state, {:toggle, _destination}) do
+    state = ensure_agent_state(state)
+    return_target = build_return_target(state)
+
+    case find_agent_tab(state) do
+      %Tab{id: agent_id} ->
+        state
+        |> MingaEditor.TabWorkflow.switch(agent_id)
+        |> maybe_start_session()
+        |> activate_agent_view(return_target)
+
+      nil ->
+        state
+    end
+  end
+
+  def resume_catalog_action(state, {:restore, _destination, session_id, tool_call_id, origin}),
+    do: open_ready_session(state, session_id, tool_call_id, origin)
+
+  def resume_catalog_action(state, :new), do: new_ready_session(state)
 
   @doc """
   Opens the agent panel (creating it if needed) and resumes the persisted
@@ -118,6 +138,16 @@ defmodule MingaEditor.Commands.Agent do
   def open_session(state, session_id, tool_call_id \\ nil) when is_binary(session_id) do
     state = ShellWorkflow.ensure_available(state)
     origin = capture_origin(state)
+
+    CatalogStartup.continue(
+      state,
+      {:restore, catalog_destination(state), session_id, tool_call_id, origin}
+    )
+  end
+
+  @spec open_ready_session(state(), String.t(), String.t() | nil, ProvenanceJump.origin() | nil) ::
+          state()
+  defp open_ready_session(state, session_id, tool_call_id, origin) do
     state = ensure_agent_state(state)
     return_target = build_return_target(state)
 
@@ -1257,6 +1287,11 @@ defmodule MingaEditor.Commands.Agent do
   """
   @spec new_agent_session(state()) :: state()
   def new_agent_session(state) do
+    CatalogStartup.continue(state, :new)
+  end
+
+  @spec new_ready_session(state()) :: state()
+  defp new_ready_session(state) do
     thinking_level = state.workspace.agent_ui.panel.thinking_level
 
     state
