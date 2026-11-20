@@ -212,11 +212,14 @@ fn runHook(alloc: std.mem.Allocator, command: []const u8, payload: []const u8, t
             killProcessGroup(pid, posix.SIG.KILL);
         }
 
-        const wait = waitpidNonBlocking(pid);
-        if (wait.pid == pid) {
-            child_done = true;
-            status = wait.status;
-            break;
+        // Retain the leader's PID until escalation so an exited leader cannot end cancellation early or let its group ID be reused.
+        if (!timed_out or now >= deadline_ms + kill_grace_ms) {
+            const wait = waitpidNonBlocking(pid);
+            if (wait.pid == pid) {
+                child_done = true;
+                status = wait.status;
+                break;
+            }
         }
 
         var pollfds = [_]posix.pollfd{
