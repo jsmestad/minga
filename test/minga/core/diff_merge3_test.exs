@@ -85,7 +85,35 @@ defmodule Minga.Core.DiffMerge3Test do
       parent = ["1", "P", "6", "7", "8", "9"]
 
       assert {:conflict, hunks} = Diff.merge3(ancestor, fork, parent)
-      assert {:resolved, ["7", "8", "9"]} in hunks
+
+      assert hunks == [
+               {:resolved, ["1"]},
+               {:conflict, ["2", "F3", "4", "F56"], ["P", "6"]},
+               {:resolved, ["7", "8", "9"]}
+             ]
+    end
+
+    test "different insertions at the same anchor require a choice" do
+      assert Diff.merge3(["a", "b"], ["a", "fork", "b"], ["a", "parent", "b"]) ==
+               {:conflict,
+                [{:resolved, ["a"]}, {:conflict, ["fork"], ["parent"]}, {:resolved, ["b"]}]}
+    end
+
+    test "mixed decisions keep parent-only text out of the accepted fork revision" do
+      ancestor = ~w(header spacer a gap b footer)
+
+      regions =
+        Diff.merge_regions(
+          ancestor,
+          ~w(header spacer fork-a gap fork-b footer),
+          ~w(human spacer parent-a gap parent-b footer)
+        )
+
+      assert Diff.resolve_merge(ancestor, regions, [:accepted, :rejected]) ==
+               {:ok, ~w(human spacer fork-a gap parent-b footer),
+                ~w(header spacer fork-a gap b footer)}
+
+      assert Diff.resolve_merge(ancestor, regions, [:accepted]) == {:error, :invalid_decisions}
     end
   end
 

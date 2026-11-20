@@ -280,9 +280,57 @@ defmodule MingaAgent.ProjectView.Overlay do
 
   def promote(%ProjectView{}, target), do: {:error, {:unsupported_target, target}}
 
+  @doc "Reads conflict regions for the fork currently owned by this project view."
+  @spec fork_conflict_snapshot(ProjectView.t(), String.t()) ::
+          {:ok, Fork.review_revision(), [Minga.Core.Diff.merge_region()]} | {:error, term()}
+  def fork_conflict_snapshot(view, relative_path) do
+    with {:ok, _store, _path, fork} <- review_fork(view, relative_path) do
+      Fork.conflict_snapshot(fork)
+    end
+  catch
+    :exit, _ -> {:error, :fork_unavailable}
+  end
+
+  @doc "Stages a reviewed fork resolution and transfers the sealed fork to the changeset."
+  @spec resolve_fork_conflicts(ProjectView.t(), String.t(), Fork.review_revision(), [
+          :accepted | :rejected
+        ]) :: :ok | {:conflict, term()} | {:error, term()}
+  def resolve_fork_conflicts(view, relative_path, revision, decisions) do
+    cs = changeset(view)
+
+    with {:ok, store, path, fork} <- review_fork(view, relative_path) do
+      BufferForkStore.publish_reviewed_fork(store, path, fork, cs, fn ->
+        Fork.publish_resolution(fork, revision, decisions, fn ancestor, selected ->
+          Changeset.stage_fork_resolution(cs, relative_path, ancestor, selected)
+        end)
+      end)
+    end
+  catch
+    :exit, _ -> {:error, :fork_unavailable}
+  end
+
+  @spec review_fork(ProjectView.t(), String.t()) ::
+          {:ok, pid(), String.t(), pid()} | {:error, term()}
+  defp review_fork(view, relative_path) do
+    with {:ok, normalized} <- ProjectView.normalize_relative_path(relative_path),
+         store when is_pid(store) <- fork_store(view),
+         path = Path.join(view.project_root, normalized),
+         fork when is_pid(fork) <- BufferForkStore.get(store, path) do
+      {:ok, store, path, fork}
+    else
+      nil -> {:error, :fork_unavailable}
+      {:error, _} = error -> error
+    end
+  end
+
   @spec combine_publication_results([tuple()], :ok | {:conflict, map()} | {:error, term()}) ::
           :ok | {:conflict, map()} | {:error, term()}
-  defp combine_publication_results(_fork_results, :ok), do: :ok
+  defp combine_publication_results(fork_results, :ok) do
+    case publication_failures(fork_results) do
+      [] -> :ok
+      failures -> {:conflict, %{results: fork_results, conflicts: failures}}
+    end
+  end
 
   defp combine_publication_results(fork_results, {:conflict, details}) do
     results =
@@ -415,9 +463,12 @@ defmodule MingaAgent.ProjectView.Overlay do
         with :ok <- fork_store_available(fork_store) do
           fork_store
           |> BufferForkStore.all()
-          |> Enum.reduce_while(:ok, fn {path, fork_pid}, :ok ->
+          |> Enum.reduce_while(:ok, fn {path, _fork}, :ok ->
             with {:ok, relative_path} <- fork_relative_path(view, path),
-                 :ok <- materialize_fork(view, relative_path, fork_pid) do
+                 :ok <-
+                   BufferForkStore.materialize_owned_fork(fork_store, path, fn fork ->
+                     materialize_fork(view, relative_path, fork)
+                   end) do
               {:cont, :ok}
             else
               {:error, _} = error -> {:halt, error}

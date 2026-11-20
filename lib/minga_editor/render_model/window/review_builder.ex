@@ -58,7 +58,7 @@ defmodule MingaEditor.RenderModel.Window.ReviewBuilder do
         cursor_col: 0,
         cursor_shape: :block,
         cursor_visible: false,
-        accessibility_label: "Read-only review: #{projection.review.path}",
+        accessibility_label: review_label(projection.review),
         accessibility_generation: window.accessibility_generation,
         geometry: geometry,
         content_epoch: epoch,
@@ -73,6 +73,12 @@ defmodule MingaEditor.RenderModel.Window.ReviewBuilder do
       {:ok, model, window}
     end
   end
+
+  @spec review_label(MingaEditor.Agent.DiffReview.t()) :: String.t()
+  defp review_label(%{fork_revision: nil, path: path}), do: "Read-only review: #{path}"
+
+  defp review_label(%{path: path}),
+    do: "Fork conflict review: #{path}. y accepts; x keeps your version."
 
   @spec geometry(RenderWindow.id(), Layout.window_layout(), Viewport.t(), ReviewProjection.t()) ::
           PaneGeometry.t()

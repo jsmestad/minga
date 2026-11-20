@@ -105,6 +105,13 @@ defmodule MingaAgent.Changeset do
     GenServer.call(cs, {:stage_fork_content, relative_path, content}, :infinity)
   end
 
+  @doc "Stages only the accepted fork edits against the current changeset baseline."
+  @spec stage_fork_resolution(changeset(), String.t(), String.t(), String.t()) ::
+          :ok | {:error, term()}
+  def stage_fork_resolution(cs, relative_path, ancestor, selected) do
+    GenServer.call(cs, {:stage_fork_resolution, relative_path, ancestor, selected}, :infinity)
+  end
+
   @doc "Publishes one retained deletion after checking its original disk baseline."
   @spec publish_deletion(changeset(), String.t()) :: :ok | {:conflict, map()} | {:error, term()}
   def publish_deletion(cs, relative_path) when is_binary(relative_path) do

@@ -275,6 +275,107 @@ defmodule MingaAgent.ProjectViewTest do
       assert %{path: "lib/a.txt", kind: :modified} in diff
     end
 
+    test "mixed fork choices preserve the human buffer without staging human text", %{
+      tmp_dir: dir
+    } do
+      seed_project(dir)
+      path = Path.join(dir, "lib/a.txt")
+      File.write!(path, "header\nspacer\none\ngap\ntwo\n")
+
+      {:ok, parent} =
+        start_supervised({Minga.Buffer.Process, content: File.read!(path), file_path: path})
+
+      Minga.Buffer.Process.replace_content(parent, "unsaved\nspacer\none\ngap\ntwo\n")
+      {:ok, view} = ProjectView.overlay(dir)
+      assert :ok = ProjectView.write_file(view, "lib/a.txt", "unsaved\nspacer\n🍋\ngap\nfork\n")
+      Minga.Buffer.Process.replace_content(parent, "unsaved\nspacer\nparent\ngap\n人\n")
+
+      assert {:conflict, %{conflicts: [{:conflict, "lib/a.txt", [_ | _]}]}} =
+               ProjectView.promote(view, :project_root)
+
+      assert {:ok, {fork, _, _} = revision, _regions} =
+               ProjectView.Overlay.fork_conflict_snapshot(view, "lib/a.txt")
+
+      monitor = Process.monitor(fork)
+      File.write!(path, "external\nspacer\none\ngap\ntwo\n")
+
+      assert :ok =
+               ProjectView.Overlay.resolve_fork_conflicts(view, "lib/a.txt", revision, [
+                 :accepted,
+                 :rejected
+               ])
+
+      assert_receive {:DOWN, ^monitor, :process, ^fork, :normal}
+      assert Minga.Buffer.Process.dirty?(parent)
+      assert Minga.Buffer.Process.content(parent) == "unsaved\nspacer\n🍋\ngap\n人\n"
+      assert {:ok, "header\nspacer\n🍋\ngap\ntwo\n"} = ProjectView.read_file(view, "lib/a.txt")
+      assert File.read!(path) == "external\nspacer\none\ngap\ntwo\n"
+    end
+
+    test "rejecting a materialized fork removes its bytes from the next command view", %{
+      tmp_dir: dir
+    } do
+      %{view: view, parent: parent} = seed_overlay_with_open_fork(dir)
+      Minga.Buffer.Process.set_option(parent, :auto_save_delay_ms, 0)
+      Minga.Buffer.Process.replace_content(parent, "human\n")
+      assert {:ok, command_dir} = ProjectView.prepare_working_dir(view)
+      assert File.read!(Path.join(command_dir, "lib/a.txt")) == "draft\n"
+
+      assert {:ok, revision, _} = ProjectView.Overlay.fork_conflict_snapshot(view, "lib/a.txt")
+
+      assert :ok =
+               ProjectView.Overlay.resolve_fork_conflicts(view, "lib/a.txt", revision, [:rejected])
+
+      assert {:ok, ^command_dir} = ProjectView.prepare_working_dir(view)
+      assert File.read!(Path.join(command_dir, "lib/a.txt")) == "one\n"
+      assert Minga.Buffer.Process.content(parent) == "human\n"
+    end
+
+    test "accepting a conflict in a never-saved named buffer stages the selected creation", %{
+      tmp_dir: dir
+    } do
+      seed_project(dir)
+      path = Path.join(dir, "new.txt")
+
+      parent =
+        start_supervised!({Minga.Buffer.Process, content: "draft\nprivate\n", file_path: path})
+
+      Minga.Buffer.Process.set_option(parent, :auto_save_delay_ms, 0)
+      Minga.Buffer.Process.replace_content(parent, "draft\nprivate\n")
+      {:ok, view} = ProjectView.overlay(dir)
+      assert :ok = ProjectView.write_file(view, "new.txt", "fork\nprivate\n")
+      Minga.Buffer.Process.replace_content(parent, "human\nprivate\n")
+
+      assert {:ok, revision, _} = ProjectView.Overlay.fork_conflict_snapshot(view, "new.txt")
+
+      assert :ok =
+               ProjectView.Overlay.resolve_fork_conflicts(view, "new.txt", revision, [:accepted])
+
+      assert Minga.Buffer.Process.content(parent) == "fork\nprivate\n"
+      assert {:ok, "fork\n"} = ProjectView.read_file(view, "new.txt")
+      refute File.exists?(path)
+    end
+
+    test "adding a newline to the private final line does not stage it", %{tmp_dir: dir} do
+      seed_project(dir)
+      path = Path.join(dir, "new.txt")
+      parent = start_supervised!({Minga.Buffer.Process, file_path: path})
+      Minga.Buffer.Process.set_option(parent, :auto_save_delay_ms, 0)
+      Minga.Buffer.Process.replace_content(parent, "base\nprivate")
+
+      {:ok, view} = ProjectView.overlay(dir)
+      assert :ok = ProjectView.write_file(view, "new.txt", "fork\nprivate\nadded")
+      Minga.Buffer.Process.replace_content(parent, "human\nprivate")
+      assert {:ok, revision, _} = ProjectView.Overlay.fork_conflict_snapshot(view, "new.txt")
+
+      assert :ok =
+               ProjectView.Overlay.resolve_fork_conflicts(view, "new.txt", revision, [:accepted])
+
+      assert Minga.Buffer.Process.content(parent) == "fork\nprivate\nadded"
+      assert {:ok, "fork\nadded"} = ProjectView.read_file(view, "new.txt")
+      refute File.exists?(path)
+    end
+
     test "dead fork stores fail diff without losing overlay state", %{tmp_dir: dir} do
       seed_project(dir)
       {:ok, store} = start_supervised(BufferForkStore)

@@ -76,6 +76,25 @@ defmodule MingaAgent.BufferForkStore do
     )
   end
 
+  @doc "Publishes and transfers the current fork without allowing discard between those steps."
+  @spec publish_reviewed_fork(
+          GenServer.server(),
+          String.t(),
+          pid(),
+          pid(),
+          (-> {:ok, String.t()} | {:conflict, term()} | {:error, term()})
+        ) :: :ok | {:conflict, term()} | {:error, term()}
+  def publish_reviewed_fork(store, path, fork, changeset, publish) do
+    GenServer.call(store, {:publish_reviewed_fork, path, fork, changeset, publish}, :infinity)
+  end
+
+  @doc "Materializes an owned fork while serializing against reviewed publication and discard."
+  @spec materialize_owned_fork(GenServer.server(), String.t(), (pid() -> :ok | {:error, term()})) ::
+          :ok | {:error, term()}
+  def materialize_owned_fork(store, path, materialize) do
+    GenServer.call(store, {:materialize_owned_fork, path, materialize}, :infinity)
+  end
+
   @doc "Returns the fork pid for `path`, or nil if no fork exists."
   @spec get(GenServer.server(), String.t()) :: pid() | nil
   def get(store, path) do
@@ -168,6 +187,30 @@ defmodule MingaAgent.BufferForkStore do
       _other_owner ->
         {:reply, {:error, :owner_mismatch}, state}
     end
+  end
+
+  def handle_call({:publish_reviewed_fork, path, fork, changeset, publish}, _from, state) do
+    with {:fork, ^fork} <- Map.get(state.claims, path),
+         {:ok, owner} <- available_owner({:changeset, changeset}),
+         {:ok, _merged} <- publish.() do
+      state = stop_forks_for_paths(state, MapSet.new([path]))
+      {:reply, :ok, %{state | claims: Map.put(state.claims, path, owner)}}
+    else
+      {:error, _} = error -> {:reply, error, state}
+      {:conflict, _} = conflict -> {:reply, conflict, state}
+      _ -> {:reply, {:error, :owner_mismatch}, state}
+    end
+  catch
+    :exit, _ -> {:reply, {:error, :fork_unavailable}, state}
+  end
+
+  def handle_call({:materialize_owned_fork, path, materialize}, _from, state) do
+    case Map.fetch(state.forks, path) do
+      {:ok, fork} -> {:reply, materialize.(fork), state}
+      :error -> {:reply, :ok, state}
+    end
+  catch
+    :exit, _ -> {:reply, {:error, :fork_unavailable}, state}
   end
 
   # credo:disable-for-next-line ExSlop.Check.Warning.GenserverAsKvStore

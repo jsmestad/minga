@@ -481,7 +481,10 @@ defmodule MingaEditor.Commands.Workspace do
 
   @spec update_active_workspace_review(
           state(),
-          (WorkspaceModel.t() -> {:ok, WorkspaceModel.t()} | {:error, term()})
+          (WorkspaceModel.t() ->
+             {:ok, WorkspaceModel.t()}
+             | {:review_fork, WorkspaceModel.t(), String.t()}
+             | {:error, term()})
         ) :: state()
   defp update_active_workspace_review(
          %{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state,
@@ -498,7 +501,10 @@ defmodule MingaEditor.Commands.Workspace do
           TabBar.t(),
           non_neg_integer(),
           WorkspaceModel.t() | nil,
-          (WorkspaceModel.t() -> {:ok, WorkspaceModel.t()} | {:error, term()})
+          (WorkspaceModel.t() ->
+             {:ok, WorkspaceModel.t()}
+             | {:review_fork, WorkspaceModel.t(), String.t()}
+             | {:error, term()})
         ) :: state()
   defp apply_workspace_review_update(state, tb, workspace_id, %WorkspaceModel{} = workspace, fun) do
     workspace
@@ -511,11 +517,19 @@ defmodule MingaEditor.Commands.Workspace do
   end
 
   @spec put_workspace_review_result(
-          {:ok, WorkspaceModel.t()} | {:error, term()},
+          {:ok, WorkspaceModel.t()}
+          | {:review_fork, WorkspaceModel.t(), String.t()}
+          | {:error, term()},
           state(),
           TabBar.t(),
           non_neg_integer()
         ) :: state()
+  defp put_workspace_review_result({:review_fork, updated, path}, state, tb, workspace_id) do
+    {:ok, updated}
+    |> put_workspace_review_result(state, tb, workspace_id)
+    |> MingaEditor.Effects.AgentReview.schedule(path)
+  end
+
   defp put_workspace_review_result({:ok, updated}, state, tb, _workspace_id) do
     WorkspaceWorkflow.install_tab_bar(
       state,
@@ -575,7 +589,10 @@ defmodule MingaEditor.Commands.Workspace do
 
   defp project_view_changed_files(%WorkspaceModel{}), do: {:ok, []}
 
-  @spec promote_workspace(WorkspaceModel.t()) :: {:ok, WorkspaceModel.t()} | {:error, term()}
+  @spec promote_workspace(WorkspaceModel.t()) ::
+          {:ok, WorkspaceModel.t()}
+          | {:review_fork, WorkspaceModel.t(), String.t()}
+          | {:error, term()}
   defp promote_workspace(
          %WorkspaceModel{payload: %WorkspaceAgent{project_view: %ProjectView{} = view}} =
            workspace
@@ -585,11 +602,17 @@ defmodule MingaEditor.Commands.Workspace do
         WorkspaceModel.transition_review(workspace, :promote_succeeded)
 
       {:conflict, details} ->
-        WorkspaceModel.transition_review(
-          workspace,
-          :promote_found_overlaps,
-          {WorkspaceReview.conflict_file_refs(view.project_root, details), details}
-        )
+        with {:ok, updated} <-
+               WorkspaceModel.transition_review(
+                 workspace,
+                 :promote_found_overlaps,
+                 {WorkspaceReview.conflict_file_refs(view.project_root, details), details}
+               ) do
+          case Enum.find(details.conflicts, &match?({:conflict, _, [_ | _]}, &1)) do
+            {:conflict, path, _} -> {:review_fork, updated, Path.join(view.project_root, path)}
+            nil -> {:ok, updated}
+          end
+        end
 
       {:error, _reason} = error ->
         error
