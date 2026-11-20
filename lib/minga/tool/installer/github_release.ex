@@ -37,19 +37,17 @@ defmodule Minga.Tool.Installer.GitHubRelease do
     progress.(:downloading, "Fetching latest release from #{repo}...")
 
     with {:ok, release} <- fetch_latest_release(repo),
-         {:ok, asset} <- find_platform_asset(release, recipe),
-         {:ok, version} <- extract_version(release) do
-      progress.(:downloading, "Downloading #{asset["name"]}...")
-      download_url = asset["browser_download_url"]
+         {:ok, {version, asset_name, download_url}} <- select_release_asset(release, recipe) do
+      progress.(:downloading, "Downloading #{asset_name}...")
 
       bin_dir = Path.join(dest_dir, "bin")
       File.mkdir_p!(bin_dir)
 
       with {:ok, tmp_path} <- download_asset(download_url),
-           :ok <- progress.(:extracting, "Extracting #{asset["name"]}..."),
-           :ok <- extract_asset(tmp_path, asset["name"], bin_dir) do
+           :ok <- progress.(:extracting, "Extracting #{asset_name}..."),
+           :ok <- extract_asset(tmp_path, asset_name, bin_dir) do
         File.rm(tmp_path)
-        normalize_raw_binary(recipe, bin_dir, asset["name"])
+        normalize_raw_binary(recipe, bin_dir, asset_name)
 
         progress.(:verifying, "Setting permissions...")
         make_binaries_executable(bin_dir)
@@ -135,6 +133,15 @@ defmodule Minga.Tool.Installer.GitHubRelease do
 
       {:error, reason} ->
         {:error, "GitHub API request failed: #{inspect(reason)}"}
+    end
+  end
+
+  @spec select_release_asset(map(), Recipe.t()) ::
+          {:ok, {String.t(), String.t(), String.t()}} | {:error, term()}
+  defp select_release_asset(release, recipe) do
+    with {:ok, asset} <- find_platform_asset(release, recipe),
+         {:ok, version} <- extract_version(release) do
+      {:ok, {version, asset["name"], asset["browser_download_url"]}}
     end
   end
 

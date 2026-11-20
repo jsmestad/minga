@@ -216,6 +216,15 @@ defmodule Minga.Extension.ArtifactInventory do
            decompressed_bytes: non_neg_integer()
          }
 
+  @typep preflight_batch :: %{
+           candidates: [preflight_artifact()],
+           bytes: non_neg_integer(),
+           atoms: non_neg_integer(),
+           decompressed_bytes: non_neg_integer()
+         }
+
+  @typep preflight_result :: {:ok, preflight_batch()} | {:error, validation_error()}
+
   @spec validate_beams(String.t(), [String.t()], keyword()) ::
           {:ok, [Artifact.t()]} | {:error, validation_error()}
   defp validate_beams(dir, entries, opts) do
@@ -231,57 +240,64 @@ defmodule Minga.Extension.ArtifactInventory do
         limit(opts, :max_total_decompressed_bytes, @default_max_total_decompressed_bytes)
     }
 
-    with {:ok, preflight, total_bytes, total_atoms, total_decompressed} <-
-           preflight_beams(dir, entries, limits),
-         :ok <- validate_totals(total_bytes, total_atoms, total_decompressed, limits),
-         :ok <- validate_host_atom_capacity(total_atoms, limits.host_atom_reserve) do
-      materialize_artifacts(preflight)
-    end
+    entries
+    |> preflight_batch(dir, limits)
+    |> admit_batch_capacity(limits.host_atom_reserve)
+    |> materialize_artifacts()
   end
 
-  @spec preflight_beams(String.t(), [String.t()], map()) ::
-          {:ok, [preflight_artifact()], non_neg_integer(), non_neg_integer(), non_neg_integer()}
-          | {:error, validation_error()}
-  defp preflight_beams(dir, entries, limits) do
+  @spec preflight_batch([String.t()], String.t(), map()) :: preflight_result()
+  defp preflight_batch(entries, dir, limits) do
+    initial = %{candidates: [], bytes: 0, atoms: 0, decompressed_bytes: 0}
+
     entries
-    |> Enum.reduce_while({:ok, [], 0, 0, 0}, fn filename, state ->
+    |> Enum.reduce_while({:ok, initial}, fn filename, {:ok, batch} ->
       dir
       |> preflight_beam(filename, limits)
-      |> accumulate_preflight(state, limits)
+      |> accumulate_preflight(batch, limits)
     end)
     |> case do
-      {:ok, artifacts, bytes, atoms, decompressed} ->
-        {:ok, Enum.reverse(artifacts), bytes, atoms, decompressed}
-
-      {:error, _reason} = error ->
-        error
+      {:ok, batch} -> {:ok, %{batch | candidates: Enum.reverse(batch.candidates)}}
+      {:error, _reason} = error -> error
     end
   end
 
   @spec accumulate_preflight(
           {:ok, preflight_artifact()} | {:error, validation_error()},
-          {:ok, [preflight_artifact()], non_neg_integer(), non_neg_integer(), non_neg_integer()},
+          preflight_batch(),
           map()
-        ) ::
-          {:cont,
-           {:ok, [preflight_artifact()], non_neg_integer(), non_neg_integer(), non_neg_integer()}}
-          | {:halt, {:error, validation_error()}}
-  defp accumulate_preflight({:ok, artifact}, {:ok, acc, bytes, atoms, decompressed}, limits) do
-    total_bytes = bytes + artifact.byte_size
-    total_atoms = atoms + artifact.atom_count
-    total_decompressed = decompressed + artifact.decompressed_bytes
+        ) :: {:cont, {:ok, preflight_batch()}} | {:halt, {:error, validation_error()}}
+  defp accumulate_preflight({:ok, candidate}, batch, limits) do
+    bytes = batch.bytes + candidate.byte_size
+    atoms = batch.atoms + candidate.atom_count
+    decompressed_bytes = batch.decompressed_bytes + candidate.decompressed_bytes
 
-    case validate_totals(total_bytes, total_atoms, total_decompressed, limits) do
+    case validate_totals(bytes, atoms, decompressed_bytes, limits) do
       :ok ->
-        {:cont, {:ok, [artifact | acc], total_bytes, total_atoms, total_decompressed}}
+        {:cont,
+         {:ok,
+          %{
+            batch
+            | candidates: [candidate | batch.candidates],
+              bytes: bytes,
+              atoms: atoms,
+              decompressed_bytes: decompressed_bytes
+          }}}
 
       {:error, _reason} = error ->
         {:halt, error}
     end
   end
 
-  defp accumulate_preflight({:error, _reason} = error, _state, _limits),
+  defp accumulate_preflight({:error, _reason} = error, _batch, _limits),
     do: {:halt, error}
+
+  @spec admit_batch_capacity(preflight_result(), pos_integer()) :: preflight_result()
+  defp admit_batch_capacity({:ok, %{atoms: atoms}} = result, reserve) do
+    with :ok <- validate_host_atom_capacity(atoms, reserve), do: result
+  end
+
+  defp admit_batch_capacity({:error, _reason} = error, _reserve), do: error
 
   @spec preflight_beam(String.t(), String.t(), map()) ::
           {:ok, preflight_artifact()} | {:error, validation_error()}
@@ -326,10 +342,10 @@ defmodule Minga.Extension.ArtifactInventory do
     end
   end
 
-  @spec materialize_artifacts([preflight_artifact()]) ::
+  @spec materialize_artifacts(preflight_result()) ::
           {:ok, [Artifact.t()]} | {:error, validation_error()}
-  defp materialize_artifacts(preflight) do
-    Enum.reduce_while(preflight, {:ok, []}, fn candidate, {:ok, artifacts} ->
+  defp materialize_artifacts({:ok, %{candidates: candidates}}) do
+    Enum.reduce_while(candidates, {:ok, []}, fn candidate, {:ok, artifacts} ->
       case beam_module(candidate.bytecode, candidate.filename, candidate.module_name) do
         {:ok, module} ->
           fields = candidate |> Map.delete(:decompressed_bytes) |> Map.put(:module, module)
@@ -345,6 +361,8 @@ defmodule Minga.Extension.ArtifactInventory do
       {:error, _reason} = error -> error
     end
   end
+
+  defp materialize_artifacts({:error, _reason} = error), do: error
 
   @spec validate_artifact_size(String.t(), non_neg_integer(), pos_integer()) ::
           :ok | {:error, validation_error()}

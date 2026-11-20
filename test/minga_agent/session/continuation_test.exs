@@ -16,14 +16,20 @@ defmodule MingaAgent.Session.ContinuationTest do
     {:ok, request, continuation} =
       Continuation.begin_request(Continuation.new(), "stop-request", 1, "inspect")
 
-    assistant = Context.assistant("", tool_calls: [ToolCall.new("call", "shell", "{}")])
+    assistant =
+      Context.assistant("",
+        tool_calls: [ToolCall.new("first", "shell", "{}"), ToolCall.new("call", "shell", "{}")]
+      )
 
     {:ok, checkpoint_id, pending} =
       Continuation.checkpoint_tool_group(
         continuation,
         request.request_id,
         request.messages ++ [assistant],
-        [%{tool_call_id: "call", name: "shell", arguments: %{}}]
+        [
+          %{tool_call_id: "first", name: "shell", arguments: %{}},
+          %{tool_call_id: "call", name: "shell", arguments: %{}}
+        ]
       )
 
     {:ok, admitted} =
@@ -54,7 +60,9 @@ defmodule MingaAgent.Session.ContinuationTest do
                "call"
              )
 
-    [%{status: {:completed, cancellation}}] = cancelled.tool_checkpoint.calls
+    [%{tool_call_id: "first", status: :pending}, %{status: {:completed, cancellation}}] =
+      cancelled.tool_checkpoint.calls
+
     assert cancellation.metadata.tool_outcome == :cancelled
     assert cancellation.metadata.is_error
     assert cancellation.metadata.minga_effect_status == :not_executed
@@ -83,7 +91,7 @@ defmodule MingaAgent.Session.ContinuationTest do
                pending,
                request.request_id,
                checkpoint_id,
-               "other"
+               "unknown"
              )
 
     assert {:error, :stale_checkpoint} =
@@ -92,6 +100,91 @@ defmodule MingaAgent.Session.ContinuationTest do
                request.request_id,
                checkpoint_id,
                "call"
+             )
+
+    assert {:error, :stale_checkpoint} =
+             Continuation.cancel_unadmitted_tool(
+               Continuation.cancel(pending),
+               request.request_id,
+               checkpoint_id,
+               "call"
+             )
+  end
+
+  test "effect transitions reject stale identities before considering terminal status" do
+    request_id = "effect-request"
+
+    {:ok, request, continuation} =
+      Continuation.begin_request(Continuation.new(), request_id, 1, "inspect")
+
+    assistant = Context.assistant("", tool_calls: [ToolCall.new("call", "shell", "{}")])
+
+    {:ok, checkpoint_id, pending} =
+      Continuation.checkpoint_tool_group(
+        continuation,
+        request_id,
+        request.messages ++ [assistant],
+        [%{tool_call_id: "call", name: "shell", arguments: %{}}]
+      )
+
+    metadata = %{tool_outcome: :complete, is_error: false}
+    saved = Context.tool_result_message("shell", "call", "done", metadata)
+    wrong_result = Context.tool_result_message("shell", "unrelated", "done", metadata)
+    other_result = Context.tool_result_message("shell", "call", "different outcome", metadata)
+
+    assert {:ok, completed} =
+             Continuation.complete_tool_effect(pending, request_id, checkpoint_id, "call", saved)
+
+    for {state, request, checkpoint, call, rejection} <- [
+          {continuation, "stale", "stale", "unknown", :missing_tool_checkpoint},
+          {completed, "stale", "stale", "unknown", :stale_request},
+          {completed, request_id, "stale", "unknown", :stale_checkpoint},
+          {completed, request_id, checkpoint_id, "unknown", :unknown_tool_call}
+        ] do
+      assert {:error, ^rejection} =
+               Continuation.admit_tool_effect(state, request, checkpoint, call, "wrong-name", %{})
+
+      assert {:error, ^rejection} =
+               Continuation.complete_tool_effect(state, request, checkpoint, call, wrong_result)
+    end
+
+    assert {:error, :tool_call_identity_mismatch} =
+             Continuation.admit_tool_effect(
+               completed,
+               request_id,
+               checkpoint_id,
+               "call",
+               "shell",
+               %{
+                 "different" => true
+               }
+             )
+
+    assert {:error, :tool_result_identity_mismatch} =
+             Continuation.complete_tool_effect(
+               completed,
+               request_id,
+               checkpoint_id,
+               "call",
+               wrong_result
+             )
+
+    assert {:error, :conflicting_tool_outcome} =
+             Continuation.complete_tool_effect(
+               completed,
+               request_id,
+               checkpoint_id,
+               "call",
+               other_result
+             )
+
+    assert {:ok, ^completed} =
+             Continuation.complete_tool_effect(
+               completed,
+               request_id,
+               checkpoint_id,
+               "call",
+               saved
              )
   end
 

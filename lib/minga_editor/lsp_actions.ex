@@ -39,12 +39,12 @@ defmodule MingaEditor.LspActions do
   alias MingaEditor.State.Mouse
   alias MingaEditor.VimState
   alias Minga.Log
+  alias Minga.LSP.BufferEdit
   alias Minga.LSP.Client
   alias Minga.LSP.DocumentContext
   alias Minga.LSP.PositionEncoding
   alias Minga.LSP.DocumentHighlight
   alias Minga.LSP.SyncServer
-  alias Minga.LSP.TextEdit
   alias Minga.LSP.WorkspaceEdit
   alias Minga.Mode.CommandState
   alias Minga.Mode.VisualState
@@ -1990,13 +1990,11 @@ defmodule MingaEditor.LspActions do
          label,
          context
        ) do
-    {content, revision} = Buffer.content_with_version(pid)
+    {_content, revision} = snapshot = Buffer.content_with_version(pid)
     encoding = if context, do: context.encoding, else: :utf16
 
     with :ok <- validate_target_version(context, document, pid, revision),
-         {:ok, new_content} <- TextEdit.apply(content, document.edits, encoding),
-         {:ok, _new_revision} <-
-           Buffer.replace_content_if_version(pid, revision, new_content, :lsp) do
+         {:ok, _new_revision} <- BufferEdit.apply(pid, snapshot, document.edits, encoding, :lsp) do
       {state, requested, file_count + 1, edit_count + Enum.count(document.edits), errors}
     else
       {:error, reason} ->

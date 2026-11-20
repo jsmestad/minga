@@ -393,6 +393,35 @@ defmodule MingaAgent.SessionStoreTest do
       assert {:error, :expired} = ArtifactStore.fetch(store, unsent.reference, unsent.selection)
     end
 
+    test "an envelope cannot hide invalid nested conversation authority", %{tmp_dir: dir} do
+      data = sample_data("nested-conversation-authority")
+      draft = draft_snapshot("Keep this draft")
+      assert :ok = SessionStore.save(data, dir)
+      assert {:ok, 1} = SessionStore.save_presentation(data.id, 0, draft, dir)
+
+      path = Path.join(SessionStore.sessions_dir(dir), "#{data.id}.json")
+      valid = path |> File.read!() |> JSON.decode!()
+
+      bad_generation =
+        put_in(valid, ["conversation", "artifact_generation"], String.duplicate("0", 64))
+
+      misplaced_draft = put_in(valid, ["conversation", "presentation"], valid["presentation"])
+
+      for {record, reason} <- [
+            {bad_generation, :invalid_session_record},
+            {misplaced_draft, :invalid_draft_snapshot}
+          ] do
+        corrupt = JSON.encode!(record)
+        File.write!(path, corrupt)
+
+        assert {:error, ^reason} = SessionStore.load_recoverable(data.id, dir)
+        assert {:error, ^reason} = SessionStore.read_presentation(data.id, dir)
+        assert {:error, ^reason} = SessionStore.save_presentation(data.id, 1, draft, dir)
+        assert {:error, ^reason} = SessionStore.save_submitted_draft(data, 1, dir, [])
+        assert File.read!(path) == corrupt
+      end
+    end
+
     test "invalid UTF-8 coordinates and oversized pasted drafts cannot replace durable text", %{
       tmp_dir: dir
     } do
@@ -1309,6 +1338,11 @@ defmodule MingaAgent.SessionStoreTest do
       )
 
       assert {:error, :legacy_import_required} = SessionStore.load("version-one", dir)
+      assert {:ok, 0, nil} = SessionStore.read_presentation("version-one", dir)
+
+      assert {:error, :legacy_import_required} =
+               SessionStore.save_presentation("version-one", 0, draft_snapshot("Unsent"), dir)
+
       assert {:ok, imported} = SessionStore.load_legacy("version-one", dir)
       assert imported.continuation.provenance == :legacy_reconstructed
       assert {:ok, original} = JSON.decode(File.read!(path))
@@ -2169,6 +2203,26 @@ defmodule MingaAgent.SessionStoreTest do
 
         assert File.read!(path) == original
       end
+
+      generationless =
+        original
+        |> JSON.decode!()
+        |> Map.put("version", 2)
+        |> Map.delete("model_selection")
+        |> Map.delete("selection_intent")
+        |> Map.delete("artifact_generation")
+        |> Map.update!("messages", &Enum.map(&1, fn message -> Map.delete(message, "output") end))
+
+      File.write!(path, JSON.encode!(generationless))
+
+      {:ok, unavailable} =
+        MingaAgent.ArtifactStores.Runtime.new(Keyword.put(options, :registry, missing))
+
+      assert {:ok, 0, nil} =
+               SessionStore.read_presentation(id, config_dir, artifact_runtime: unavailable)
+
+      assert {:error, :artifact_runtime_unavailable} =
+               SessionStore.load_recoverable(id, config_dir, artifact_runtime: unavailable)
     end
 
     test "invalid JSON authority never reconciles snapshot pins", %{tmp_dir: dir} do
