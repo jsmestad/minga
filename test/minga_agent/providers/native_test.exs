@@ -14,6 +14,7 @@ defmodule MingaAgent.Providers.NativeTest do
   alias MingaAgent.ProjectView.RecordingBackend
   alias MingaAgent.Providers.Native
   alias MingaAgent.Session.Continuation
+  alias MingaAgent.Session.Dispatch
   alias MingaAgent.Tool.Registry, as: ToolRegistry
   alias MingaAgent.Session.Request
   alias MingaAgent.Tool.Spec
@@ -107,7 +108,7 @@ defmodule MingaAgent.Providers.NativeTest do
       Process.put({__MODULE__, pid, :active_request}, request)
       Process.put({__MODULE__, :provider_for_request, request_id}, pid)
 
-      case dispatch.(pid, request) do
+      case dispatch_registered(pid, request, dispatch) do
         :ok ->
           Process.put({__MODULE__, pid, :continuation}, admitted)
           :ok
@@ -116,6 +117,12 @@ defmodule MingaAgent.Providers.NativeTest do
           error
       end
     end
+  end
+
+  defp dispatch_registered(pid, request, dispatch) do
+    subscriber = Process.get({__MODULE__, pid, :subscriber})
+    :ok = GenServer.call(subscriber, {:register_test_request, request})
+    dispatch.(pid, request)
   end
 
   defp admitted_prefix(pid) do
@@ -280,8 +287,12 @@ defmodule MingaAgent.Providers.NativeTest do
         GenServer.reply(from, {:ok, store})
         provider_subscriber_loop(owner, owner_ref, store)
 
-      {:"$gen_call", from, {:steering_dispatch_source, request_id, checkpoint_id}} ->
-        GenServer.reply(from, checkpoint_dispatch_source(request_id, checkpoint_id))
+      {:"$gen_call", from, {:register_test_request, request}} ->
+        GenServer.reply(from, remember_request(request))
+        provider_subscriber_loop(owner, owner_ref, store)
+
+      {:"$gen_call", from, {:begin_native_dispatch, request_id, source}} ->
+        GenServer.reply(from, begin_test_dispatch(request_id, source))
         provider_subscriber_loop(owner, owner_ref, store)
 
       {:DOWN, ^owner_ref, :process, ^owner, _reason} ->
@@ -297,6 +308,24 @@ defmodule MingaAgent.Providers.NativeTest do
     key = {request_id, checkpoint_id}
     {messages, order, results} = Process.get(key)
     Process.put(key, {messages, order, Map.put(results, tool_call_id, result_message)})
+  end
+
+  defp remember_request(%Request{request_id: id} = request) do
+    Process.put({:fixture_request, id}, request)
+    :ok
+  end
+
+  defp begin_test_dispatch(id, source) do
+    request = Process.get({:fixture_request, id})
+
+    case source do
+      :initial ->
+        {:ok, Dispatch.begin(request, source), request.messages}
+
+      {:checkpoint, checkpoint_id} ->
+        {:ok, messages} = checkpoint_dispatch_source(id, checkpoint_id)
+        {:ok, Dispatch.begin(request, source), messages}
+    end
   end
 
   defp checkpoint_dispatch_source(request_id, checkpoint_id) do
@@ -508,8 +537,19 @@ defmodule MingaAgent.Providers.NativeTest do
           if(remaining_replies == [], do: [:ok], else: remaining_replies)
         )
 
-      {:"$gen_call", from, {:steering_dispatch_source, request_id, checkpoint_id}} ->
-        GenServer.reply(from, checkpoint_dispatch_source(request_id, checkpoint_id))
+      {:"$gen_call", from, {:register_test_request, request}} ->
+        GenServer.reply(from, remember_request(request))
+
+        effect_barrier_subscriber_loop(
+          owner,
+          owner_ref,
+          checkpoint_reply,
+          admission_reply,
+          terminal_replies
+        )
+
+      {:"$gen_call", from, {:begin_native_dispatch, request_id, source}} ->
+        GenServer.reply(from, begin_test_dispatch(request_id, source))
 
         effect_barrier_subscriber_loop(
           owner,
@@ -1602,8 +1642,8 @@ defmodule MingaAgent.Providers.NativeTest do
 
         {events, log} =
           with_log(fn ->
-            assert :ok =
-                     Native.continue(pid, Request.new("image-failure", 1, 0, messages, prefix))
+            request = Request.new("image-failure", 1, 0, messages, prefix)
+            assert :ok = dispatch_registered(pid, request, &Native.continue/2)
 
             collect_run_events()
           end)
@@ -3036,7 +3076,7 @@ defmodule MingaAgent.Providers.NativeTest do
 
       assert {:ok, prefix} = admitted_prefix(pid)
       request = Request.new("restored-request", 1, 0, messages, prefix)
-      assert :ok = Native.continue(pid, request)
+      assert :ok = dispatch_registered(pid, request, &Native.continue/2)
       events = collect_run_events()
 
       assert_received {:encoded_recovery, request_messages, %{"messages" => encoded}}
