@@ -4,6 +4,21 @@ defmodule MingaEditor.Agent.DiffReviewTest do
   alias Minga.Git
   alias MingaEditor.Agent.DiffReview
 
+  test "adjacent merge conflicts can be decided independently without changing resolved context" do
+    review =
+      DiffReview.from_merge_conflicts("conflict.ex", [
+        {:resolved, ["preserved"]},
+        {:conflict, ["新增"], []},
+        {:conflict, [], ["親"]},
+        {:resolved, ["tail", ""]}
+      ])
+
+    resolved = review |> DiffReview.accept_current() |> DiffReview.reject_current()
+
+    assert DiffReview.resolved?(resolved)
+    assert DiffReview.materialized_lines(resolved) == ["preserved", "新增", "親", "tail", ""]
+  end
+
   describe "new/3" do
     test "returns nil when content is identical" do
       assert DiffReview.new("foo.ex", "hello\nworld\n", "hello\nworld\n") == nil

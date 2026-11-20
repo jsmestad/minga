@@ -569,6 +569,9 @@ defmodule MingaEditor.Commands.AgentSubStates do
       {:ok, view, :no_write} ->
         MingaEditor.Shell.Traditional.Workflow.install_agent_view(state, view)
 
+      {:ok, _view, {:resolve_fork, path, revision, decisions}} ->
+        MingaEditor.Effects.AgentReview.resolve_fork(state, path, revision, decisions)
+
       {:ok, view, {:write_file, path, content}} ->
         case persist_diff_resolution(state, path, content) do
           :ok ->

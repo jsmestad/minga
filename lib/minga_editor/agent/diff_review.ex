@@ -23,7 +23,8 @@ defmodule MingaEditor.Agent.DiffReview do
           after_lines: [String.t()],
           hunks: [Diff.hunk()],
           current_hunk_index: non_neg_integer(),
-          resolutions: %{non_neg_integer() => resolution()}
+          resolutions: %{non_neg_integer() => resolution()},
+          fork_revision: Minga.Buffer.Fork.review_revision() | nil
         }
 
   @enforce_keys [:path, :after_lines, :hunks]
@@ -32,7 +33,8 @@ defmodule MingaEditor.Agent.DiffReview do
     :after_lines,
     hunks: [],
     current_hunk_index: 0,
-    resolutions: %{}
+    resolutions: %{},
+    fork_revision: nil
   ]
 
   @doc """
@@ -58,6 +60,76 @@ defmodule MingaEditor.Agent.DiffReview do
       when is_binary(path) and is_binary(after_content) and is_list(hunks) do
     build(path, String.split(after_content, "\n"), hunks)
   end
+
+  @doc "Builds a review with exactly one decision per authoritative merge conflict."
+  @spec from_merge_conflicts(String.t(), [Diff.merge_hunk()]) :: t() | nil
+  def from_merge_conflicts(path, merge_hunks) when is_binary(path) and is_list(merge_hunks) do
+    {lines, hunks, _current, _base} =
+      Enum.reduce(merge_hunks, {[], [], 0, 0}, &merge_review_hunk/2)
+
+    build(path, Enum.reverse(lines), Enum.reverse(hunks))
+  end
+
+  @doc "Builds a fork review bound to the exact source revisions."
+  @spec from_fork_snapshot(String.t(), Minga.Buffer.Fork.review_revision(), [Diff.merge_region()]) ::
+          t() | nil
+  def from_fork_snapshot(path, revision, regions) do
+    hunks =
+      Enum.map(regions, fn
+        {:fork, lines, _edit} -> {:resolved, lines}
+        {:conflict, fork, parent, _edits} -> {:conflict, fork, parent}
+        {:resolved, _lines} = region -> region
+      end)
+
+    case from_merge_conflicts(path, hunks) do
+      nil -> nil
+      review -> %{review | fork_revision: revision}
+    end
+  end
+
+  @doc "Returns ordered decisions only when every conflict is resolved."
+  @spec fork_decisions(t()) :: {:ok, [resolution()]} | :pending
+  def fork_decisions(%__MODULE__{hunks: hunks, resolutions: resolutions}) do
+    if map_size(resolutions) == length(hunks) do
+      {:ok, Enum.map(0..(length(hunks) - 1)//1, &Map.fetch!(resolutions, &1))}
+    else
+      :pending
+    end
+  end
+
+  @spec merge_review_hunk(
+          Diff.merge_hunk(),
+          {[String.t()], [Diff.hunk()], non_neg_integer(), non_neg_integer()}
+        ) ::
+          {[String.t()], [Diff.hunk()], non_neg_integer(), non_neg_integer()}
+  defp merge_review_hunk({:resolved, lines}, {after_lines, hunks, current, base}) do
+    count = length(lines)
+    {Enum.reverse(lines, after_lines), hunks, current + count, base + count}
+  end
+
+  defp merge_review_hunk({:conflict, lines, lines}, acc),
+    do: merge_review_hunk({:resolved, lines}, acc)
+
+  defp merge_review_hunk({:conflict, fork, parent}, {after_lines, hunks, current, base}) do
+    count = length(fork)
+    old_count = length(parent)
+
+    hunk = %{
+      type: merge_hunk_type(count, old_count),
+      start_line: current,
+      count: count,
+      old_start: base,
+      old_count: old_count,
+      old_lines: parent
+    }
+
+    {Enum.reverse(fork, after_lines), [hunk | hunks], current + count, base + old_count}
+  end
+
+  @spec merge_hunk_type(non_neg_integer(), non_neg_integer()) :: Diff.hunk_type()
+  defp merge_hunk_type(0, _old_count), do: :deleted
+  defp merge_hunk_type(_count, 0), do: :added
+  defp merge_hunk_type(_count, _old_count), do: :modified
 
   @doc """
   Updates the diff review with new after-content and authoritative cumulative hunks while preserving resolutions for hunks that have not changed.
