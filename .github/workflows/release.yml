@@ -296,11 +296,13 @@ jobs:
           cert="$RUNNER_TEMP/candidate-certificate.p12"
           trap 'rm -f "$cert"' EXIT
           printf '%s' "$DEVELOPER_ID_CERT" | base64 --decode > "$cert"
-          security import "$cert" -P "$DEVELOPER_ID_PASSWORD" -t cert -f pkcs12 -k "$keychain"
+          # The partition list does not grant codesign access to the private key.
+          security import "$cert" -P "$DEVELOPER_ID_PASSWORD" -t cert -f pkcs12 -k "$keychain" -T /usr/bin/codesign
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$password" "$keychain"
           security list-keychains -d user -s "$keychain"
       - name: Sign every native component and app, failing on every signing error
         if: matrix.gui
+        timeout-minutes: 20
         run: |
           set -euo pipefail
           export HOME="$CANDIDATE_RUNNER_HOME"
@@ -311,18 +313,29 @@ jobs:
             echo "Expected exactly one valid Developer ID Application identity in the temporary keychain" >&2
             exit 1
           fi
+          echo "Checking Developer ID private-key access without a timestamp request"
+          probe=$(mktemp -d "$RUNNER_TEMP/candidate-signing-probe.XXXXXX")
+          trap 'rm -rf "$probe"' EXIT
+          cp /bin/echo "$probe/echo"
+          /usr/bin/codesign --force --keychain "$keychain" --timestamp=none --sign "$identity" "$probe/echo"
+          codesign --verify --strict "$probe/echo"
+
           entitlements="$GITHUB_WORKSPACE/source/macos/Entitlements.plist"
           while IFS= read -r -d '' file; do
             if file -b "$file" | grep -q 'Mach-O'; then
-              codesign --force --keychain "$keychain" --options runtime --entitlements "$entitlements" --sign "$identity" "$file"
+              printf 'Signing native component: %s\n' "${file#"$app/"}"
+              /usr/bin/codesign --force --keychain "$keychain" --options runtime --entitlements "$entitlements" --sign "$identity" "$file"
               codesign --verify --strict "$file"
             fi
           done < <(find "$app/Contents" -type f -print0)
-          codesign --force --keychain "$keychain" --options runtime --entitlements "$entitlements" --sign "$identity" "$app"
+          echo "Signing Minga.app"
+          /usr/bin/codesign --force --keychain "$keychain" --options runtime --entitlements "$entitlements" --sign "$identity" "$app"
           codesign --verify --deep --strict "$app"
           codesign -dv --verbose=4 "$app" 2>&1 | grep -F 'Authority=Developer ID Application'
+          echo "Creating Minga.dmg"
           hdiutil create -volname Minga -srcfolder "$app" -ov -format UDZO "$CANDIDATE_ROOT/out/Minga.dmg"
-          codesign --force --keychain "$keychain" --sign "$identity" "$CANDIDATE_ROOT/out/Minga.dmg"
+          echo "Signing Minga.dmg"
+          /usr/bin/codesign --force --keychain "$keychain" --sign "$identity" "$CANDIDATE_ROOT/out/Minga.dmg"
           codesign --verify --strict "$CANDIDATE_ROOT/out/Minga.dmg"
       - name: Notarize and staple final DMG
         if: matrix.gui
