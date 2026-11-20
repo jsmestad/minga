@@ -41,13 +41,9 @@ defmodule MingaAgent.Notifier do
   @moduledoc """
   Sends OS-level notifications when the agent needs user attention.
 
-  Supports three notification channels:
-  1. **Terminal bell** — sends BEL character to trigger terminal tab flash
-  2. **OS notification** — uses `osascript` on macOS for system notifications
-  3. **Terminal title** — updates window title with attention prefix
+  The native app receives only the event kind. Terminal sessions keep the bell and, on macOS, the script notification.
 
-  Notifications are debounced (at most one every 5 seconds) and can be
-  disabled or filtered by trigger type via config options.
+  Completion and failure are debounced independently. Approval requests bypass the debounce because the agent cannot continue without an answer.
 
   ## Configuration
 
@@ -58,7 +54,7 @@ defmodule MingaAgent.Notifier do
   @typedoc "Notification trigger types."
   @type trigger :: :approval | :complete | :error
 
-  @debounce_ms 5_000
+  @triggers [:approval, :complete, :error]
 
   @os_adapter Application.compile_env(
                 :minga,
@@ -71,30 +67,31 @@ defmodule MingaAgent.Notifier do
   @doc """
   Sends a notification for the given trigger if enabled and not debounced.
 
-  `message` is a short summary shown in the OS notification body.
+  `message` is shown in the terminal backend's OS notification, not in the native app's notification.
   """
   @spec notify(trigger(), String.t(), keyword()) :: :ok
   def notify(trigger, message, opts \\ []) do
-    if enabled?() and trigger in active_triggers() and not debounced?() do
-      record_notification()
-      maybe_send_bell(Keyword.get(opts, :bell, true))
-      send_os_notification(trigger, message, Keyword.get(opts, :os_adapter, @os_adapter))
+    if trigger in @triggers and enabled?() and trigger in active_triggers() do
+      deliver(Application.get_env(:minga, :backend, :tui), trigger, message, opts)
     end
 
     :ok
   end
 
-  @doc """
-  Clears attention indicators (e.g., when user focuses the agent panel).
+  @doc "Withdraws this session's native approval notification after the request is retired."
+  @spec clear_approval() :: :ok
+  def clear_approval do
+    case Process.delete({__MODULE__, :approval_id}) do
+      nil -> :ok
+      id -> publish(:approval_cleared, id)
+    end
+  end
 
-  Tab bar badge and terminal title prefix are cleared automatically by
-  `EditorState.switch_tab/2` when the user switches to the agent tab.
-  This function resets the debounce timer so new notifications can fire
-  immediately after the user returns.
-  """
+  @doc "Resets this process's completion and failure debounce timers."
   @spec clear_attention() :: :ok
   def clear_attention do
-    Process.delete(:last_notification_at)
+    Process.delete({__MODULE__, :complete})
+    Process.delete({__MODULE__, :error})
     :ok
   end
 
@@ -112,22 +109,66 @@ defmodule MingaAgent.Notifier do
   defp active_triggers do
     case Minga.Config.get(:agent_notify_on) do
       triggers when is_list(triggers) -> triggers
-      _ -> [:approval, :complete, :error]
+      _ -> @triggers
     end
   end
 
-  @spec debounced?() :: boolean()
-  defp debounced? do
-    case Process.get(:last_notification_at) do
-      nil -> false
-      last -> System.monotonic_time(:millisecond) - last < @debounce_ms
+  @spec debounced?(trigger()) :: boolean()
+  defp debounced?(:approval), do: false
+
+  defp debounced?(trigger) do
+    now = System.monotonic_time(:millisecond)
+    debounce_ms = Minga.Config.get(:agent_notify_debounce)
+    key = {__MODULE__, trigger}
+
+    case Process.get(key) do
+      last when is_integer(last) and now - last < debounce_ms ->
+        true
+
+      _ ->
+        Process.put(key, now)
+        false
     end
   end
 
-  @spec record_notification() :: :ok
-  defp record_notification do
-    Process.put(:last_notification_at, System.monotonic_time(:millisecond))
+  @spec deliver(atom(), trigger(), String.t(), keyword()) :: :ok
+  defp deliver(:gui, :approval, _message, _opts) do
+    clear_approval()
+    id = :crypto.strong_rand_bytes(16)
+    Process.put({__MODULE__, :approval_id}, id)
+    publish(:approval, id)
+  end
+
+  defp deliver(:gui, trigger, _message, _opts) do
+    key = {__MODULE__, :session_key}
+    id = Process.get(key) || new_session_key(key)
+    publish(trigger, id, min(Minga.Config.get(:agent_notify_debounce), 0xFFFFFFFF))
+  end
+
+  defp deliver(_backend, trigger, message, opts) do
+    unless debounced?(trigger) do
+      maybe_send_bell(Keyword.get(opts, :bell, true))
+      send_os_notification(trigger, message, Keyword.get(opts, :os_adapter, @os_adapter))
+    end
+
     :ok
+  end
+
+  @spec new_session_key({module(), :session_key}) :: <<_::128>>
+  defp new_session_key(key) do
+    id = :crypto.strong_rand_bytes(16)
+    Process.put(key, id)
+    id
+  end
+
+  @spec publish(trigger() | :approval_cleared, binary(), non_neg_integer()) :: :ok
+  defp publish(kind, id, debounce_ms \\ 0) do
+    Minga.Events.broadcast(:agent_desktop_notification, %{
+      kind: kind,
+      id: id,
+      owner: self(),
+      debounce_ms: debounce_ms
+    })
   end
 
   @spec maybe_send_bell(boolean()) :: :ok

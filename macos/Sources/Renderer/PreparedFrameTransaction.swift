@@ -52,7 +52,7 @@ extension GUIFrameImpact {
              .clipboardWrite, .guiConfigState, .guiFocusOwner:
             return []
 
-        case .applicationQuitResponse, .guiRequest:
+        case .applicationQuitResponse, .agentDesktopNotification, .guiRequest:
             return []
         }
     }
@@ -595,7 +595,7 @@ struct PreparedFrameTransactionBuilder {
             )
 
         case .beginFrame, .commitFrame, .presentationOperation, .applicationQuitResponse,
-             .guiRequest:
+             .agentDesktopNotification, .guiRequest:
             break
         }
     }
@@ -1126,6 +1126,7 @@ private extension RenderCommand {
         case .guiTextPresentation: 62
         case .guiFocusOwner: 64
         case .guiAgentHelp: 65
+        case .agentDesktopNotification: 66
         }
     }
 }

@@ -59,15 +59,16 @@ var GoRequiredOpcodes = map[byte]string{
 }
 
 var GoSkippedOpcodes = map[byte]string{
-	OPSetLinkCursor:           "Terminal does not expose native pointer cursor shapes",
-	OPApplicationQuitResponse: "Native application quit negotiation is not used by the TUI",
-	OPPresentationTarget:      "Native presentation targeting is not used by the TUI",
-	OPPresentationOperation:   "Native presentation operations are not used by the TUI",
-	OPSetFont:                 "Terminal controls font selection",
-	OPSetFontFallback:         "Terminal controls font fallback",
-	OPRegisterFont:            "Terminal controls font registration",
-	OPGuiRequest:              "Native file dialogs are not used by the TUI",
-	OPGuiLineSpacing:          "Terminal controls line spacing",
-	OPGuiCursorAnimation:      "Terminal controls cursor animation",
-	OPGuiConfigState:          "Native settings state is not used by the TUI",
+	OPSetLinkCursor:            "Terminal does not expose native pointer cursor shapes",
+	OPApplicationQuitResponse:  "Native application quit negotiation is not used by the TUI",
+	OPPresentationTarget:       "Native presentation targeting is not used by the TUI",
+	OPPresentationOperation:    "Native presentation operations are not used by the TUI",
+	OPSetFont:                  "Terminal controls font selection",
+	OPSetFontFallback:          "Terminal controls font fallback",
+	OPRegisterFont:             "Terminal controls font registration",
+	OPAgentDesktopNotification: "Terminal sessions deliver notifications independently",
+	OPGuiRequest:               "Native file dialogs are not used by the TUI",
+	OPGuiLineSpacing:           "Terminal controls line spacing",
+	OPGuiCursorAnimation:       "Terminal controls cursor animation",
+	OPGuiConfigState:           "Native settings state is not used by the TUI",
 }

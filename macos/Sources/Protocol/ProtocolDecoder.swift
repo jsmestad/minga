@@ -45,6 +45,17 @@ struct NativeFileDialogRequest: Sendable, Equatable {
 
 // MARK: - Render command types
 
+enum AgentDesktopNotification: Sendable, Equatable {
+    case approval(UUID)
+    case outcome(Outcome, session: UUID, debounceMs: UInt32)
+    case approvalCleared(UUID)
+
+    enum Outcome: Sendable, Hashable {
+        case complete
+        case failed
+    }
+}
+
 /// A decoded render command from the BEAM.
 enum RenderCommand: Sendable {
     /// Opens a frame transaction (#2219): frame_seq is the strictly monotonic
@@ -78,6 +89,7 @@ enum RenderCommand: Sendable {
     /// #2237). Wire format: opcode(1) + len(u16) + UTF-8 message.
     case protocolError(message: String)
     case applicationQuitResponse(ApplicationQuitResponse)
+    case agentDesktopNotification(AgentDesktopNotification)
     case guiRequest(NativeFileDialogRequest)
     case setFont(family: String, size: UInt16, ligatures: Bool, weight: UInt8)
     case setFontFallback(families: [String])
@@ -542,6 +554,22 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             )),
             24
         )
+
+    case .agentDesktopNotification:
+        guard data.endIndex >= rest + 21 else { throw ProtocolDecodeError.malformed }
+        let id = data.withUnsafeBytes {
+            UUID(uuid: $0.loadUnaligned(fromByteOffset: rest + 1 - data.startIndex, as: uuid_t.self))
+        }
+        let debounceMs = try readU32(data, rest + 17)
+        let notification: AgentDesktopNotification
+        switch data[rest] {
+        case 1: notification = .approval(id)
+        case 2: notification = .outcome(.complete, session: id, debounceMs: debounceMs)
+        case 3: notification = .outcome(.failed, session: id, debounceMs: debounceMs)
+        case 4: notification = .approvalCleared(id)
+        default: throw ProtocolDecodeError.malformed
+        }
+        return (.agentDesktopNotification(notification), 22)
 
     case .setCursorShape:
         guard data.count >= rest + 1 else { throw ProtocolDecodeError.malformed }

@@ -178,6 +178,11 @@ defmodule MingaEditor.Frontend.Manager do
     }
 
     result = {:ok, start_port(state, port_opener)}
+
+    if Keyword.get(opts, :backend) == :gui do
+      Minga.Events.subscribe(:agent_desktop_notification)
+    end
+
     StartupTimer.mark(:frontend_port_ready)
     result
   end
@@ -288,6 +293,15 @@ defmodule MingaEditor.Frontend.Manager do
     end
   end
 
+  def handle_info({:minga_event, :agent_desktop_notification, notification}, state) do
+    {:noreply,
+     MingaEditor.Frontend.Manager.AgentNotifications.send_notification(state, notification)}
+  end
+
+  def handle_info(:retry_agent_approval_withdrawals, state) do
+    {:noreply, MingaEditor.Frontend.Manager.AgentNotifications.retry_withdrawals(state)}
+  end
+
   def handle_info({:retry_frontend_output, token}, state) do
     state
     |> OutputHandler.retry(token)
@@ -314,7 +328,8 @@ defmodule MingaEditor.Frontend.Manager do
     {:noreply, OutputHandler.disconnect(state)}
   end
 
-  def handle_info({:DOWN, _ref, :process, pid, _reason}, state) do
+  def handle_info({:DOWN, ref, :process, pid, _reason}, state) do
+    state = MingaEditor.Frontend.Manager.AgentNotifications.owner_down(state, pid, ref)
     subscribers = Enum.reject(state.subscribers, &(&1 == pid))
     {:noreply, %{state | subscribers: subscribers}}
   end

@@ -1,6 +1,34 @@
 defmodule MingaAgent.SessionQueueTest do
   use Minga.Test.SessionCase, async: true
 
+  defmodule NotificationInbox do
+    @spec notify(atom(), String.t(), pid()) :: :ok
+    def notify(trigger, _message, recipient) do
+      send(recipient, {:agent_notification, self(), trigger})
+      :ok
+    end
+  end
+
+  defmodule RejectingFollowUp do
+    alias Minga.Test.ProviderRequest
+    alias Minga.Test.SessionSlowMockProvider
+
+    defdelegate start_link(opts), to: SessionSlowMockProvider
+    defdelegate abort(pid), to: SessionSlowMockProvider
+    defdelegate new_session(pid), to: SessionSlowMockProvider
+    defdelegate get_state(pid), to: SessionSlowMockProvider
+    defdelegate set_model(pid, model), to: SessionSlowMockProvider
+
+    @spec send_prompt(pid(), MingaAgent.Session.Request.t()) ::
+            :ok | {:error, :cost_limit_reached}
+    def send_prompt(pid, request) do
+      case ProviderRequest.text(request) do
+        "second" -> {:error, :cost_limit_reached}
+        _ -> SessionSlowMockProvider.send_prompt(pid, request)
+      end
+    end
+  end
+
   describe "combine_queue_entries_to_text/1" do
     test "formats string and content-part queues" do
       text_parts = [
@@ -92,6 +120,41 @@ defmodule MingaAgent.SessionQueueTest do
   end
 
   describe "follow-up auto-send at AgentEnd" do
+    test "completion notifies only when the queued work is finished" do
+      provider = Minga.Test.SessionSlowMockProvider
+      session = start_test_session(provider: provider, notifier: {NotificationInbox, self()})
+      Session.subscribe(session)
+
+      assert :ok = Session.send_prompt(session, "first")
+      assert_receive {:agent_event, ^session, {:text_delta, "first"}}, @event_timeout
+      assert {:queued, :follow_up} = Session.queue_follow_up(session, "second")
+
+      provider.proceed(Session.get_provider(session))
+      assert_receive {:agent_event, ^session, {:text_delta, "second"}}, @event_timeout
+      refute_received {:agent_notification, ^session, :complete}
+
+      provider.proceed(Session.get_provider(session))
+      assert_receive {:agent_notification, ^session, :complete}, @event_timeout
+      assert_receive {:agent_event, ^session, {:status_changed, :idle}}, @event_timeout
+      refute_received {:agent_notification, ^session, :complete}
+    end
+
+    test "a queued turn that cannot start reports an error instead of completion" do
+      session =
+        start_test_session(provider: RejectingFollowUp, notifier: {NotificationInbox, self()})
+
+      Session.subscribe(session)
+      assert :ok = Session.send_prompt(session, "first")
+      assert_receive {:agent_event, ^session, {:text_delta, "first"}}, @event_timeout
+      assert {:queued, :follow_up} = Session.queue_follow_up(session, "second")
+
+      Minga.Test.SessionSlowMockProvider.proceed(Session.get_provider(session))
+      assert_receive {:agent_notification, ^session, :error}, @event_timeout
+      assert_receive {:agent_event, ^session, {:error, message}}, @event_timeout
+      assert message =~ "Could not start the queued turn"
+      refute_received {:agent_notification, ^session, :complete}
+    end
+
     test "queued single-message follow-ups are auto-sent when the agent finishes" do
       cases = [
         {:follow_up, "now follow up",

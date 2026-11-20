@@ -484,6 +484,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var protocolConnection: ProtocolConnection?
     private var encoder: ProtocolEncoder? { protocolConnection?.encoder }
     private var dispatcher: CommandDispatcher?
+    private var desktopAgentNotifications: DesktopAgentNotifications?
     private var applicationQuitCoordinator: ApplicationQuitCoordinator?
     private var applicationQuitAlert: NSAlert?
     private var activeFilePanel: NSSavePanel?
@@ -508,6 +509,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 #endif
         self.appState = appState
         super.init()
+    }
+
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        guard Bundle.main.bundleURL.pathExtension == "app" else { return }
+        desktopAgentNotifications = DesktopAgentNotifications {
+            NSApp.activate()
+            guard let window = NSApp.windows.first(where: { $0.identifier == EditorScene.windowIdentifier }) else { return }
+            if window.isMiniaturized { window.deminiaturize(nil) }
+            window.makeKeyAndOrderFront(nil)
+        }
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -773,6 +784,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             editorNSView?.resetScrollPresentation(windowId: windowID)
         case .titleChanged(let title):
             appState.windowTitle = title
+        case .agentDesktopNotification(let notification):
+            if coreConnectionIsLive { desktopAgentNotifications?.receive(notification) }
         case .windowBackgroundChanged(let red, let green, let blue):
             let r = CGFloat(red) / 255.0
             let g = CGFloat(green) / 255.0
@@ -1374,11 +1387,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard outboundConnectionState.isCurrent(connectionID) else { return }
         encoder.disconnect(reason: .expectedTeardown)
         coreConnectionIsLive = false
+        desktopAgentNotifications?.retireConnection()
         coreLifecycle?.readerDidClose()
     }
 
     private func retireProtocolConnection() {
         coreConnectionIsLive = false
+        desktopAgentNotifications?.retireConnection()
         outboundConnectionState.retire()
         recoveryManager?.transportDidReconnect()
         dismissInputRejection()

@@ -2238,6 +2238,7 @@ defmodule MingaAgent.Session do
 
   @spec broadcast_approval_retirement(approval_retirement()) :: state()
   defp broadcast_approval_retirement({state, approval, resolution}) do
+    Notifier.clear_approval()
     %PublicApproval{target: target} = public_pending_approval(approval, state)
     broadcast(state, {:approval_resolved, target, resolution})
   end
@@ -3454,11 +3455,20 @@ defmodule MingaAgent.Session do
     revise_tool_policy(state, execution)
   end
 
-  @spec queued_send_failed(state(), TurnExecution.t()) :: state()
-  defp queued_send_failed(state, proposed_execution) do
+  @spec queued_send_failed(state(), TurnExecution.t(), term()) :: state()
+  defp queued_send_failed(state, proposed_execution, reason) do
     {:ok, execution} = TurnExecution.queued_send_failed(proposed_execution)
-    state = announce_turn_status(state, execution)
-    %{state | turn_execution: execution}
+    state = %{state | turn_execution: execution}
+
+    case reason do
+      {:conversation_persistence_failed, _} ->
+        state = notify(state, :error, @boundary_save_failure_message)
+        {:reply, {:error, ^reason}, state} = reply_to_prompt_admission_failure(state, reason)
+        state
+
+      _ ->
+        report_turn_error(state, "Could not start the queued turn: #{format_error(reason)}")
+    end
   end
 
   @spec complete_provider_turn(state(), Event.token_usage() | nil, Outcome.t() | nil) :: state()
@@ -3479,10 +3489,7 @@ defmodule MingaAgent.Session do
 
         case {outcome_result, boundary_result} do
           {:accepted, :ok} ->
-            state
-            |> notify(:complete, completion_notification(state))
-            |> dispatch_stop()
-            |> finish_provider_turn(completing)
+            finish_provider_turn(state, completing)
 
           {:accepted, {:error, _reason}} ->
             fail_completed_turn(
@@ -3891,11 +3898,17 @@ defmodule MingaAgent.Session do
   defp finish_provider_turn(state, completing) do
     case TurnExecution.finish_completion(completing) do
       {:idle, execution} ->
-        state = announce_turn_status(state, execution)
+        state =
+          state
+          |> notify(:complete, completion_notification(state))
+          |> dispatch_stop()
+          |> announce_turn_status(execution)
+
         %{state | turn_execution: execution}
 
       {:send_next, contents, execution} ->
-        send_queued_turn(state, contents, execution)
+        dispatch_notification(state, :complete, completion_notification(state))
+        state |> dispatch_stop() |> send_queued_turn(contents, execution)
     end
   end
 
@@ -4254,14 +4267,14 @@ defmodule MingaAgent.Session do
             %{request_state | turn_execution: execution}
 
           {:error, reason} ->
-            {:error, _reason, failed_state} =
+            {:error, failure_reason, failed_state} =
               persist_provider_dispatch_failure(request_state, reason)
 
-            queued_send_failed(failed_state, execution)
+            queued_send_failed(failed_state, execution, failure_reason)
         end
 
-      {:error, _reason, failed_state} ->
-        queued_send_failed(failed_state, execution)
+      {:error, reason, failed_state} ->
+        queued_send_failed(failed_state, execution, reason)
     end
   end
 
@@ -4282,6 +4295,8 @@ defmodule MingaAgent.Session do
     with :ok <- validate_approval_liveness(state, approval_id),
          {:ok, approval, execution} <-
            TurnExecution.resolve_approval(state.turn_execution, approval_id, decision) do
+      Notifier.clear_approval()
+
       state =
         {state, approval, decision}
         |> approve_prepared_invocation()
@@ -8656,6 +8671,8 @@ defmodule MingaAgent.Session do
   @impl GenServer
   @spec terminate(term(), state()) :: :ok
   def terminate(reason, state) do
+    Notifier.clear_approval()
+
     record_critical_event(state, :session_stopped, %{
       reason: inspect(reason),
       status: TurnExecution.status(state.turn_execution)

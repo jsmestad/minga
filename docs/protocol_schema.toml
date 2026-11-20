@@ -76,7 +76,8 @@ version = "2.0.0"
 # and effective wrapped scrolling (scroll presentation flags bit 1). Pane
 # geometry uses a u32 continuation offset for oversized windowed lines.
 # protocol_version 36 adds source-presentation-bound absolute visual scroll targets.
-protocol_version = 37
+# protocol_version 38 adds the native agent desktop notification instruction.
+protocol_version = 38
 description = "Minga port protocol opcode registry"
 
 # Directions:
@@ -366,6 +367,17 @@ direction = "beam_to_frontend"
 consumers = ["swift"]
 skip = { go = "Native presentation operations are not used by the TUI" }
 framing = "fixed:24"
+
+# One native agent attention signal, emitted outside render frames. It carries
+# a u8 kind, a 16-byte opaque identity, and a u32 outcome debounce interval in ms.
+[[opcodes]]
+category = "render"
+name = "agent_desktop_notification"
+value = 0x61
+direction = "beam_to_frontend"
+consumers = ["swift"]
+skip = { go = "Terminal sessions deliver notifications independently" }
+framing = "fixed:22"
 
 # protocol_error reuses the freed cell-paradigm value 0x18. The BEAM emits it when
 # a frontend's handshake protocol_version does not match the BEAM's, carrying a

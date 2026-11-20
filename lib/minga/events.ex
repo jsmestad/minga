@@ -334,6 +334,7 @@ defmodule Minga.Events do
           | :face_overrides_changed
           | :agent_session_stopped
           | :agent_session_restarted
+          | :agent_desktop_notification
           | :agent_hook
           | :agent_tools_changed
           | :background_subagent_started
@@ -501,6 +502,12 @@ defmodule Minga.Events do
           :ok
   @spec broadcast(:agent_session_restarted, MingaAgent.SessionManager.SessionRestartedEvent.t()) ::
           :ok
+  @spec broadcast(:agent_desktop_notification, %{
+          kind: :approval | :approval_cleared | :complete | :error,
+          id: <<_::128>>,
+          owner: pid(),
+          debounce_ms: non_neg_integer()
+        }) :: :ok
   @spec broadcast(:background_subagent_started, MingaAgent.Subagent.Handle.t()) :: :ok
   @spec broadcast(:node_connected, Minga.Distribution.Events.NodeConnectedEvent.t()) :: :ok
   @spec broadcast(:node_disconnected, Minga.Distribution.Events.NodeDisconnectedEvent.t()) :: :ok
