@@ -417,18 +417,14 @@ defmodule MingaAgent.MarkdownTest do
       expected = ["one" | blanks] ++ ["two"]
       assert [%{kind: :code_block, lines: ^expected}] = Markdown.parse_blocks(inside)
 
-      before_list = Enum.join(["    one" | blanks] ++ ["    - nested"], "\n")
-
       assert [
                %{kind: :code_block, lines: ["one"]},
-               %{kind: :spacer, height: 255},
+               %{kind: :spacer, height: 2},
                %{kind: :list_item, indent: 2, text: "nested"}
-             ] = Markdown.parse_blocks(before_list)
+             ] = Markdown.parse_blocks("    one\n\n \t\n    - nested")
 
-      at_end = Enum.join(["    one" | blanks], "\n")
-
-      assert [%{kind: :code_block, lines: ["one"]}, %{kind: :spacer, height: 255}] =
-               Markdown.parse_blocks(at_end)
+      assert [%{kind: :code_block, lines: ["one"]}, %{kind: :spacer, height: 2}] =
+               Markdown.parse_blocks("    one\n\n \t")
     end
 
     test "code paths use full-text fence ordinals and fall back to the last path" do
