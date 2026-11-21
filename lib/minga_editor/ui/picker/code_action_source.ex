@@ -37,9 +37,7 @@ defmodule MingaEditor.UI.Picker.CodeActionSource do
     document_context = Map.get(picker_context, :document_context)
     generation = Map.get(picker_context, :workspace_generation)
 
-    actions
-    |> Enum.with_index()
-    |> Enum.map(fn {action, index} ->
+    Enum.with_index(actions, fn action, index ->
       title = action["title"] || "Untitled action"
       kind = action["kind"]
       kind_label = if kind, do: " [#{format_kind(kind)}]", else: ""

@@ -93,10 +93,16 @@ defmodule MingaEditor.UI.Picker.AgentSessionSourceTest do
         picker_ui: %{context: %{session_store_dir: dir}}
     }
 
-    assert Enum.any?(AgentSessionSource.candidates(context), fn item ->
-             item.id == {"legacy-remote", {:tab, 7, session}} and
-               item.label == "\u{2022} Remote task" and is_nil(item.annotation)
-           end)
+    save_session("legacy-remote", "Saved copy", dir)
+
+    copies =
+      Enum.filter(AgentSessionSource.candidates(context), fn
+        %Item{id: {"legacy-remote", _}} -> true
+        _ -> false
+      end)
+
+    assert [%Item{id: {"legacy-remote", {:tab, 7, ^session}}, annotation: nil} = live] = copies
+    assert live.label == "\u{2022} Remote task"
 
     archived = %{context | picker_ui: %{context: %{session_store_dir: dir, archive_view: true}}}
 

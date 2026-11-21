@@ -51,17 +51,13 @@ defmodule MingaEditor.UI.Picker.AgentSessionSource do
     origin = saved_origin(ctx)
 
     if archive_view?(ctx) do
-      disk = Enum.map(archived, &recovery_candidate(&1, origin))
-
       [
         archive_navigation(ctx, :recent)
-        | merge_candidates(local_candidates(ctx, tabs, :archived), disk)
+        | merge_candidates(local_candidates(ctx, tabs, :archived), archived, origin)
       ]
     else
-      disk = Enum.map(recent, &recovery_candidate(&1, origin))
-
       local_candidates(ctx, tabs, :recent)
-      |> merge_candidates(disk)
+      |> merge_candidates(recent, origin)
       |> maybe_add_archive_navigation(archived, ctx)
       |> maybe_add_archive_action(ctx, recent, archived)
     end
@@ -383,13 +379,25 @@ defmodule MingaEditor.UI.Picker.AgentSessionSource do
   defp live_candidates(tabs, :recent), do: tab_candidates(tabs, :recent) ++ remote_candidates()
   defp live_candidates(tabs, :archived), do: tab_candidates(tabs, :archived)
 
-  @spec merge_candidates([Item.t()], [Item.t()]) :: [Item.t()]
-  defp merge_candidates([], disk), do: disk
+  @spec merge_candidates([Item.t()], [SessionStore.recovery_entry()], saved_origin() | nil) ::
+          [Item.t()]
+  defp merge_candidates([], entries, origin), do: Enum.map(entries, &recovery_candidate(&1, origin))
+  defp merge_candidates(live, [], _origin), do: live
 
-  defp merge_candidates(live, disk) do
+  defp merge_candidates(live, entries, origin) do
     live_ids = MapSet.new(live, fn %Item{id: {id, _}} -> id end)
-    live ++ Enum.reject(disk, fn %Item{id: {id, _}} -> MapSet.member?(live_ids, id) end)
+
+    disk =
+      for entry <- entries, not MapSet.member?(live_ids, recovery_id(entry)) do
+        recovery_candidate(entry, origin)
+      end
+
+    live ++ disk
   end
+
+  @spec recovery_id(SessionStore.recovery_entry()) :: String.t()
+  defp recovery_id({:conversation, %{id: id}}), do: id
+  defp recovery_id({:draft_only, id, _timestamp}), do: id
 
   @spec saved_origin(Context.t()) :: saved_origin() | nil
   defp saved_origin(%Context{tab_bar: %TabBar{} = tab_bar, agent_session: session})

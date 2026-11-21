@@ -30,8 +30,7 @@ defmodule MingaEditor.UI.Picker.ProjectSource do
   @spec candidates(Context.t()) :: [Item.t()]
   def candidates(_ctx) do
     Project.known_projects()
-    |> Enum.with_index()
-    |> Enum.map(fn {root, _idx} ->
+    |> Enum.map(fn root ->
       label = Path.basename(root)
       %Item{id: root, label: label, description: root}
     end)
