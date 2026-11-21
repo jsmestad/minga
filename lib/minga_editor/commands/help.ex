@@ -30,6 +30,15 @@ defmodule MingaEditor.Commands.Help do
           optional(:display_key) => String.t()
         }
 
+  @typep binding_source :: :default | :user
+  @typep binding_row :: %{
+           key: String.t(),
+           command: String.t(),
+           description: String.t(),
+           source: binding_source()
+         }
+  @typep group_prefix :: {[Bindings.key()], String.t()}
+
   command(:describe_bindings, "Describe bindings", requires_buffer: false)
   command(:describe_command, "Describe command", requires_buffer: false)
   command(:describe_option, "Describe option", requires_buffer: false)
@@ -180,137 +189,144 @@ defmodule MingaEditor.Commands.Help do
 
   @spec leader_sections(state()) :: [String.t()]
   defp leader_sections(state) do
-    default_map = default_leader_map()
+    group_prefixes = Defaults.group_prefixes()
+    match_prefixes = Enum.sort_by(group_prefixes, fn {keys, _label} -> -length(keys) end)
+    labels = Enum.map(group_prefixes, fn {_keys, label} -> label end) ++ ["Ungrouped"]
 
     state
-    |> active_leader_entries(default_map)
-    |> Enum.group_by(&leader_group/1)
-    |> ordered_group_sections()
+    |> leader_rows(match_prefixes)
+    |> Enum.group_by(&elem(&1, 0), &elem(&1, 1))
+    |> ordered_sections(labels)
   end
 
   @spec filetype_sections(state()) :: [String.t()]
   defp filetype_sections(state) do
     filetype = current_filetype(state)
-    entries = active_filetype_entries(state, filetype)
 
-    case entries do
+    case filetype_rows(state, filetype) do
       [] -> []
-      _ -> [format_section("+filetype #{inspect(filetype)}", entries)]
+      rows -> [format_section("+filetype #{inspect(filetype)}", rows)]
     end
   end
 
   @spec normal_sections(state()) :: [String.t()]
   defp normal_sections(state) do
-    default_map = Defaults.normal_bindings()
-
-    normal_entries =
+    sections =
       state
-      |> active_normal_entries(default_map)
-      |> Enum.group_by(&normal_group/1)
+      |> normal_rows()
+      |> Enum.group_by(&elem(&1, 0), &elem(&1, 1))
       |> ordered_normal_sections()
 
-    text_objects = format_section("Text objects", text_object_entries())
-    Enum.concat(normal_entries, [text_objects])
+    text_objects = format_section("Text objects", text_object_rows())
+    sections ++ [text_objects]
   end
 
-  @spec active_leader_entries(state(), %{[Bindings.key()] => {atom() | tuple(), String.t()}}) :: [
-          binding_entry()
-        ]
-  defp active_leader_entries(state, default_map) do
+  @spec leader_rows(state(), [group_prefix()]) :: [{String.t(), binding_row()}]
+  defp leader_rows(state, match_prefixes) do
     trie = Keymap.leader_trie(state.interaction.keymap_server)
+    default_map = default_leader_map()
+    leader = Defaults.leader_key()
 
     trie
-    |> flatten_trie([])
-    |> Enum.map(fn entry ->
-      entry |> mark_entry_source(default_map) |> prefix_keys([Defaults.leader_key()])
+    |> trie_rows(fn keys, command, description ->
+      group = leader_group(keys, match_prefixes)
+      source = entry_source(Map.get(default_map, keys), command, description)
+      key = Bindings.format_sequence([leader | keys])
+      {group, binding_row(key, command, description, source)}
     end)
-    |> Enum.sort_by(&format_key_sequence(&1.keys))
+    |> Enum.sort_by(fn {_group, row} -> row.key end)
   catch
     :exit, _ ->
-      Defaults.all_bindings()
-      |> Enum.map(fn {keys, command, description} ->
-        %{
-          keys: [Defaults.leader_key() | keys],
-          command: command,
-          description: description,
-          source: :default
-        }
-      end)
+      leader = Defaults.leader_key()
+
+      # Keep the built-in declaration order when no live keymap is available.
+      for {keys, command, description} <- Defaults.all_bindings() do
+        group = leader_group(keys, match_prefixes)
+        key = Bindings.format_sequence([leader | keys])
+        {group, binding_row(key, command, description, :default)}
+      end
   end
 
-  @spec active_filetype_entries(state(), atom() | nil) :: [binding_entry()]
-  defp active_filetype_entries(_state, nil), do: []
+  @spec filetype_rows(state(), atom() | nil) :: [binding_row()]
+  defp filetype_rows(_state, nil), do: []
 
-  defp active_filetype_entries(state, filetype) do
-    default_map = default_filetype_map(filetype)
+  defp filetype_rows(state, filetype) do
     trie = Keymap.filetype_trie(state.interaction.keymap_server, filetype)
+    default_map = default_filetype_map(filetype)
+    leader = Defaults.leader_key()
 
     trie
-    |> flatten_trie([])
-    |> Enum.map(fn entry ->
-      entry
-      |> mark_entry_source(default_map)
-      |> prefix_keys([Defaults.leader_key(), {?m, 0}])
+    |> trie_rows(fn keys, command, description ->
+      source = entry_source(Map.get(default_map, keys), command, description)
+      key = Bindings.format_sequence([leader, {?m, 0} | keys])
+      binding_row(key, command, description, source)
     end)
-    |> Enum.sort_by(&format_key_sequence(&1.keys))
+    |> Enum.sort_by(& &1.key)
   catch
     :exit, _ -> []
   end
 
-  @spec active_normal_entries(state(), %{Bindings.key() => {atom(), String.t()}}) :: [
-          binding_entry()
-        ]
-  defp active_normal_entries(state, default_map) do
+  @spec normal_rows(state()) :: [{String.t(), binding_row()}]
+  defp normal_rows(state) do
+    default_map = Defaults.normal_bindings()
+
     state
-    |> normal_bindings_for_state()
+    |> normal_bindings_for_state(default_map)
     |> Enum.map(fn {key, {command, description}} ->
+      group = normal_group(command)
       source = entry_source(Map.get(default_map, key), command, description)
-      %{keys: [key], command: command, description: description, source: source}
+      {group, binding_row(Bindings.format_key(key), command, description, source)}
     end)
-    |> Enum.sort_by(&format_key_sequence(&1.keys))
+    |> Enum.sort_by(fn {_group, row} -> row.key end)
   end
 
-  @spec normal_bindings_for_state(state()) :: %{Bindings.key() => {atom(), String.t()}}
-  defp normal_bindings_for_state(state) do
+  @spec normal_bindings_for_state(state(), %{Bindings.key() => {atom(), String.t()}}) ::
+          %{Bindings.key() => {atom(), String.t()}}
+  defp normal_bindings_for_state(state, defaults) do
     Keymap.normal_bindings(state.interaction.keymap_server)
   catch
-    :exit, _ -> Defaults.normal_bindings()
+    :exit, _ -> defaults
   end
 
-  @spec flatten_trie(Bindings.node_t(), [Bindings.key()]) :: [binding_entry()]
-  defp flatten_trie(%Bindings.Node{} = node, prefix) do
-    current = current_binding(node, prefix)
-
-    children =
-      node.children
-      |> Enum.flat_map(fn {key, child} -> flatten_trie(child, Enum.concat(prefix, [key])) end)
-
-    current ++ children
+  @spec trie_rows(Bindings.node_t(), ([Bindings.key()], atom() | tuple(), String.t() -> row)) ::
+          [row]
+        when row: var
+  defp trie_rows(trie, project) do
+    # Preserve parent-first traversal order for keys that display identically.
+    trie
+    |> collect_trie_rows([], project, [])
+    |> Enum.reverse()
   end
 
-  @spec current_binding(Bindings.node_t(), [Bindings.key()]) :: [binding_entry()]
-  defp current_binding(%Bindings.Node{command: nil}, _prefix), do: []
-
-  defp current_binding(%Bindings.Node{command: command, description: description}, prefix) do
-    [%{keys: prefix, command: command, description: description || "", source: :default}]
-  end
-
-  @spec mark_entry_source(binding_entry(), %{[Bindings.key()] => {atom() | tuple(), String.t()}}) ::
-          binding_entry()
-  defp mark_entry_source(
-         %{keys: keys, command: command, description: description} = entry,
-         default_map
+  @spec collect_trie_rows(
+          Bindings.node_t(),
+          [Bindings.key()],
+          ([Bindings.key()], atom() | tuple(), String.t() -> row),
+          [row]
+        ) :: [row]
+        when row: var
+  defp collect_trie_rows(
+         %Bindings.Node{command: command, description: description, children: children},
+         path_rev,
+         project,
+         rows
        ) do
-    %{entry | source: entry_source(Map.get(default_map, keys), command, description)}
+    rows =
+      if is_nil(command) do
+        rows
+      else
+        [project.(Enum.reverse(path_rev), command, description || "") | rows]
+      end
+
+    Enum.reduce(children, rows, fn {key, child}, rows ->
+      collect_trie_rows(child, [key | path_rev], project, rows)
+    end)
   end
 
   @spec entry_source({atom() | tuple(), String.t()} | nil, atom() | tuple(), String.t()) ::
-          :default | :user
+          binding_source()
   defp entry_source({command, description}, command, description), do: :default
   defp entry_source(_default, _command, _description), do: :user
-
-  @spec prefix_keys(binding_entry(), [Bindings.key()]) :: binding_entry()
-  defp prefix_keys(%{keys: keys} = entry, prefix), do: %{entry | keys: prefix ++ keys}
 
   @spec default_leader_map() :: %{[Bindings.key()] => {atom(), String.t()}}
   defp default_leader_map do
@@ -326,20 +342,15 @@ defmodule MingaEditor.Commands.Help do
     |> Map.new(fn {_ft, keys, command, description} -> {keys, {command, description}} end)
   end
 
-  @spec leader_group(binding_entry()) :: String.t()
-  defp leader_group(%{keys: [_leader | rest]}) do
-    Defaults.group_prefixes()
-    |> Enum.sort_by(fn {keys, _label} -> -length(keys) end)
-    |> Enum.find_value("Ungrouped", fn {prefix, label} ->
-      if prefix?(prefix, rest), do: label, else: nil
+  @spec leader_group([Bindings.key()], [group_prefix()]) :: String.t()
+  defp leader_group(keys, match_prefixes) do
+    Enum.find_value(match_prefixes, "Ungrouped", fn {prefix, label} ->
+      if List.starts_with?(keys, prefix), do: label
     end)
   end
 
-  @spec prefix?([Bindings.key()], [Bindings.key()]) :: boolean()
-  defp prefix?(prefix, keys), do: Enum.take(keys, length(prefix)) == prefix
-
-  @spec normal_group(binding_entry()) :: String.t()
-  defp normal_group(%{command: command})
+  @spec normal_group(atom()) :: String.t()
+  defp normal_group(command)
        when command in [
               :move_left,
               :move_down,
@@ -366,7 +377,7 @@ defmodule MingaEditor.Commands.Help do
             ],
        do: "Movement"
 
-  defp normal_group(%{command: command})
+  defp normal_group(command)
        when command in [
               :pending_find_forward,
               :pending_find_backward,
@@ -377,7 +388,7 @@ defmodule MingaEditor.Commands.Help do
             ],
        do: "Find char"
 
-  defp normal_group(%{command: command})
+  defp normal_group(command)
        when command in [
               :operator_delete,
               :operator_change,
@@ -398,7 +409,7 @@ defmodule MingaEditor.Commands.Help do
             ],
        do: "Operators"
 
-  defp normal_group(%{command: command})
+  defp normal_group(command)
        when command in [
               :search_forward,
               :search_backward,
@@ -409,7 +420,7 @@ defmodule MingaEditor.Commands.Help do
             ],
        do: "Search"
 
-  defp normal_group(%{command: command})
+  defp normal_group(command)
        when command in [
               :enter_insert,
               :enter_insert_after,
@@ -425,14 +436,14 @@ defmodule MingaEditor.Commands.Help do
             ],
        do: "Mode transitions"
 
-  defp normal_group(%{command: command})
+  defp normal_group(command)
        when command in [:half_page_down, :half_page_up, :page_down, :page_up], do: "Scrolling"
 
-  defp normal_group(%{command: command})
+  defp normal_group(command)
        when command in [:undo, :redo, :undo_agent_session, :dot_repeat],
        do: "Undo / Redo"
 
-  defp normal_group(%{command: command})
+  defp normal_group(command)
        when command in [
               :pending_register,
               :pending_set_mark,
@@ -443,19 +454,9 @@ defmodule MingaEditor.Commands.Help do
             ],
        do: "Registers / Marks / Macros"
 
-  defp normal_group(_entry), do: "Misc"
+  defp normal_group(_command), do: "Misc"
 
-  @spec ordered_group_sections(%{String.t() => [binding_entry()]}) :: [String.t()]
-  defp ordered_group_sections(grouped) do
-    ordered_labels =
-      Enum.concat(Enum.map(Defaults.group_prefixes(), fn {_keys, label} -> label end), [
-        "Ungrouped"
-      ])
-
-    ordered_sections(grouped, ordered_labels)
-  end
-
-  @spec ordered_normal_sections(%{String.t() => [binding_entry()]}) :: [String.t()]
+  @spec ordered_normal_sections(%{String.t() => [binding_row()]}) :: [String.t()]
   defp ordered_normal_sections(grouped) do
     ordered_sections(grouped, [
       "Movement",
@@ -470,43 +471,45 @@ defmodule MingaEditor.Commands.Help do
     ])
   end
 
-  @spec ordered_sections(%{String.t() => [binding_entry()]}, [String.t()]) :: [String.t()]
+  @spec ordered_sections(%{String.t() => [binding_row()]}, [String.t()]) :: [String.t()]
   defp ordered_sections(grouped, labels) do
     labels
     |> Enum.flat_map(fn label ->
-      entries = Map.get(grouped, label, [])
-      if entries == [], do: [], else: [format_section(label, entries)]
+      case Map.get(grouped, label) do
+        nil -> []
+        rows -> [format_section(label, rows)]
+      end
     end)
   end
 
-  @spec format_section(String.t(), [binding_entry()]) :: String.t()
-  defp format_section(title, entries) do
-    key_width = entries |> Enum.map(&String.length(format_entry_key(&1))) |> Enum.max(fn -> 0 end)
+  @spec format_section(String.t(), [binding_row()]) :: String.t()
+  defp format_section(title, rows) do
+    {key_width, command_width} =
+      Enum.reduce(rows, {0, 0}, fn row, {key_width, command_width} ->
+        {max(key_width, String.length(row.key)), max(command_width, String.length(row.command))}
+      end)
 
-    command_width =
-      entries |> Enum.map(&String.length(format_command(&1.command))) |> Enum.max(fn -> 0 end)
-
-    lines = Enum.map(entries, &format_binding_line(&1, key_width, command_width))
+    lines = Enum.map(rows, &format_binding_line(&1, key_width, command_width))
     Enum.join([title, String.duplicate("-", String.length(title)) | lines], "\n")
   end
 
-  @spec format_binding_line(binding_entry(), non_neg_integer(), non_neg_integer()) :: String.t()
-  defp format_binding_line(entry, key_width, command_width) do
-    marker = if entry.source == :user, do: " *user*", else: ""
+  @spec format_binding_line(binding_row(), non_neg_integer(), non_neg_integer()) :: String.t()
+  defp format_binding_line(row, key_width, command_width) do
+    marker = if row.source == :user, do: " *user*", else: ""
 
     [
-      String.pad_trailing(format_entry_key(entry), key_width),
+      String.pad_trailing(row.key, key_width),
       "    ",
-      String.pad_trailing(format_command(entry.command), command_width),
+      String.pad_trailing(row.command, command_width),
       "    ",
-      entry.description,
+      row.description,
       marker
     ]
     |> Enum.join()
   end
 
-  @spec text_object_entries() :: [binding_entry()]
-  defp text_object_entries do
+  @spec text_object_rows() :: [binding_row()]
+  defp text_object_rows do
     [
       {"iw", :text_object_inner_word, "Inner word"},
       {"aw", :text_object_around_word, "Around word"},
@@ -526,29 +529,14 @@ defmodule MingaEditor.Commands.Help do
       {"ac", :text_object_around_class, "Around class/module"}
     ]
     |> Enum.map(fn {key, command, description} ->
-      %{
-        keys: display_keys(key),
-        command: command,
-        description: description,
-        source: :default,
-        display_key: key
-      }
+      binding_row(key, command, description, :default)
     end)
   end
 
-  @spec display_keys(String.t()) :: [Bindings.key()]
-  defp display_keys(key_string) do
-    key_string
-    |> String.to_charlist()
-    |> Enum.map(&{&1, 0})
+  @spec binding_row(String.t(), atom() | tuple(), String.t(), binding_source()) :: binding_row()
+  defp binding_row(key, command, description, source) do
+    %{key: key, command: format_command(command), description: description, source: source}
   end
-
-  @spec format_entry_key(binding_entry()) :: String.t()
-  defp format_entry_key(%{display_key: display_key}) when is_binary(display_key), do: display_key
-  defp format_entry_key(%{keys: keys}), do: format_key_sequence(keys)
-
-  @spec format_key_sequence([Bindings.key()]) :: String.t()
-  defp format_key_sequence(keys), do: Enum.map_join(keys, " ", &Bindings.format_key/1)
 
   @spec format_command(atom() | tuple()) :: String.t()
   defp format_command(command) when is_atom(command), do: Atom.to_string(command)
