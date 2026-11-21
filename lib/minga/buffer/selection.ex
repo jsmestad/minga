@@ -129,7 +129,10 @@ defmodule Minga.Buffer.Selection do
   defp linewise_stop(_line_starts, _line, _total_lines, text_size), do: text_size
 
   @spec deletion_span(Document.t(), t()) :: Span.t()
-  defp deletion_span(doc, %__MODULE__{kind: :linewise, span: %Span{start: start, stop: stop} = span})
+  defp deletion_span(doc, %__MODULE__{
+         kind: :linewise,
+         span: %Span{start: start, stop: stop} = span
+       })
        when start > 0 do
     if stop == Document.content_byte_size(doc) and Document.byte_at(doc, start - 1) == ?\n do
       Span.between(start - 1, stop)
