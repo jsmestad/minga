@@ -206,7 +206,12 @@ defmodule MingaEditor.RenderModel.Window.LazyRowTree do
 
   defp pop_greater([{key, value, open_priority, left} | rest], priority, right, summarize)
        when open_priority > priority do
-    pop_greater(rest, priority, make(key, value, open_priority, left, right, summarize), summarize)
+    pop_greater(
+      rest,
+      priority,
+      make(key, value, open_priority, left, right, summarize),
+      summarize
+    )
   end
 
   defp pop_greater(spine, _priority, right, _summarize), do: {spine, right}

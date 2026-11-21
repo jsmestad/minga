@@ -86,7 +86,13 @@ defmodule MingaEditor.RenderModel.Window.DiagnosticIndexTest do
       )
 
     assert DiagnosticIndex.to_ranges(index) == [
-             %DiagnosticRange{start_row: 1, start_col: 0, end_row: 1, end_col: 1, severity: :error}
+             %DiagnosticRange{
+               start_row: 1,
+               start_col: 0,
+               end_row: 1,
+               end_col: 1,
+               severity: :error
+             }
            ]
 
     assert DiagnosticIndex.ranges_at(index, [0]) == []
