@@ -29,6 +29,7 @@ defmodule MingaEditor.Layout.FooterBandOverlaysTest do
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.View.Preview
   alias MingaEditor.FocusTree
+  alias MingaEditor.Handlers.Notifications, as: NotificationHandlers
   alias MingaEditor.Frontend.Emit.Context
   alias MingaEditor.Input.Router
   alias MingaEditor.Layout
@@ -156,13 +157,14 @@ defmodule MingaEditor.Layout.FooterBandOverlaysTest do
       {row, col, width, height} = SurfaceRegistry.rect_for(state, :notifications)
 
       # Full width, bottom-anchored. With ONE notification item the BEAM content
-      # height is title bar (1) + 2 lines per item = 3, well under the band ceiling
-      # (24/3 = 8), so the band is content-sized (3) and hugs the status row.
-      # This is the position fix: a short notification no longer spans the full band
-      # and renders rows above the bottom (#2281).
+      # height is title bar (1) + 2 lines per item = 3, plus the terminal frontend's
+      # top and bottom border rows (2) = 5, under the band ceiling (24/3 = 8), so
+      # the band is content-sized (5) and hugs the status row. This is the position
+      # fix: a short notification no longer spans the full band and renders rows
+      # above the bottom (#2281).
       assert col == 0
       assert width == 80
-      assert height == 3
+      assert height == 5
       assert row + height == band_floor(state)
     end
 
@@ -184,8 +186,26 @@ defmodule MingaEditor.Layout.FooterBandOverlaysTest do
 
       {row, _col, _width, height} = SurfaceRegistry.rect_for(state, :notifications)
 
-      # title bar (1) + header+body (2) + actions row (1) = 4
-      assert height == 4
+      # title bar (1) + header+body (2) + actions row (1) + border frame (2) = 6
+      assert height == 6
+      assert row + height == band_floor(state)
+    end
+
+    test "the unpublished agent edits card keeps its Publish and Discard row inside the band" do
+      # The terminal frontend crops the bordered notification center to this rect.
+      # Before #3806 the rect omitted the two border rows, so the cropped frame
+      # showed the title and dismiss "x" but lost the Publish and Discard row.
+      state =
+        base_state(rows: 40, cols: 120)
+        |> NotificationHandlers.agent_edits_unpublished(1, "main", 1)
+
+      assert [%{actions: actions}] = state.feedback.notifications.items
+      assert Enum.map(actions, & &1.label) == ["Publish", "Discard"]
+
+      {row, _col, _width, height} = SurfaceRegistry.rect_for(state, :notifications)
+
+      # border (1) + title bar (1) + header + body (2) + actions (1) + border (1) = 6
+      assert height == 6
       assert row + height == band_floor(state)
     end
 
@@ -377,17 +397,17 @@ defmodule MingaEditor.Layout.FooterBandOverlaysTest do
       state = with_notifications(base_state(rows: 24, cols: 80))
       {row, _col, _w, height} = SurfaceRegistry.rect_for(state, :notifications)
 
-      # One notification: band is content-sized (3), not the :max ceiling (8), and
-      # its bottom edge sits directly above the status row and minibuffer, matching
-      # where the old footer-append put it.
-      assert height == 3
+      # One notification: band is content-sized (3 content rows + 2 border rows),
+      # not the :max ceiling (8), and its bottom edge sits directly above the
+      # status row and minibuffer, matching where the old footer-append put it.
+      assert height == 5
       assert row + height == band_floor(state)
-      assert row == band_floor(state) - 3
+      assert row == band_floor(state) - 5
     end
 
     test "a click immediately above a short notification reaches the buffer" do
-      # The notification band is the lowest 3 rows; the row directly above it (row
-      # 20) is outside the tightened rect, so a click there is NOT swallowed and
+      # The notification band is the lowest 5 rows; the row directly above it is
+      # outside the tightened rect, so a click there is NOT swallowed and
       # reaches the buffer underneath. Before the fix the rect spanned the full band
       # and this row phantom-swallowed the click.
       state =

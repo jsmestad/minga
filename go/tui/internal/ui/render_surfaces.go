@@ -654,7 +654,7 @@ func tableCellsText(cells []tableCell) string {
 // has one. The per-item base shape is a title row + a source/body row (2 lines),
 // matching the BEAM content-height model (FooterOverlays.content_height_
 // notifications = 1 + 2*items); an item with inline actions adds one actions
-// row, the documented per-item slack the band ceiling clamps.
+// row, and the border frame adds two rows, all of which the BEAM band counts.
 //
 // The content is wrapped in a rounded border with drop shadow matching the
 // picker/which-key popup styling (#2538). The border adds 2 to height and 4 to
@@ -684,10 +684,14 @@ func (m Model) renderNotifications(notes protocol.Notifications) []string {
 	}
 	lines = takeLines(lines, contentHeight)
 
-	// Wrap in rounded border matching picker/which-key popup styling.
+	// Wrap in rounded border matching picker/which-key popup styling. The style
+	// width is the outer width, border and padding included, so pass the full
+	// width: passing contentWidth leaves contentWidth-4 for rows that are already
+	// contentWidth wide, and the header row wraps its dismiss "x" onto an extra
+	// line that pushes the actions row out of the BEAM band (#3806).
 	content := strings.Join(lines, "\n")
 	bordered := lipgloss.NewStyle().
-		Width(contentWidth).
+		Width(width).
 		Padding(0, 1).
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(theme.PopupBorder()).

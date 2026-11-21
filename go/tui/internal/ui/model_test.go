@@ -2989,6 +2989,61 @@ func TestSemanticMouseRoutesNotificationDismissAndActionZones(t *testing.T) {
 	}
 }
 
+// TestUnpublishedAgentEditsCardRendersAndRoutesPublishAndDiscard covers #3806.
+// The BEAM sizes the notifications band to the bordered frame the TUI draws:
+// border + title bar + header + body + actions + border = 6 rows. Inside that
+// rect the card must show Publish and Discard, and a click on each must route
+// notification_action for that card's id.
+func TestUnpublishedAgentEditsCardRendersAndRoutesPublishAndDiscard(t *testing.T) {
+	const noteID = "agent-edits:unpublished:1"
+	notes := protocol.Notifications{
+		Visible: true,
+		Items: []protocol.Notification{{
+			ID:          noteID,
+			Level:       2,
+			Title:       "1 agent-edited file is not on disk",
+			Source:      "Agent",
+			Body:        "main: approved edits are staged. Publish writes them to disk and open buffers; Discard drops them.",
+			Dismissable: true,
+			Actions: []protocol.NotificationAction{
+				{ID: "publish", Label: "Publish"},
+				{ID: "discard", Label: "Discard"},
+			},
+		}},
+	}
+	model := New(120, 40, nil)
+	model.chrome = map[byte]protocol.ChromePayload{
+		generated.OPGuiNotifications: {Notifications: notes},
+	}
+
+	// Keep the renderer and the BEAM band height in lockstep. If the rendered
+	// frame grows past the placement height, takeLines crops the bottom rows
+	// and the action zones never register.
+	const bandHeight = 6
+	if got := len(model.renderNotifications(notes)); got != bandHeight {
+		t.Fatalf("rendered notification frame is %d rows, the BEAM band is %d", got, bandHeight)
+	}
+
+	model.surfacePlacements = []generated.SurfacePlacement{
+		{SurfaceID: surfaceIDNotifications, Rect: generated.Rect{Row: 32, Col: 0, Width: 120, Height: bandHeight}, Z: 160, HitKind: 8},
+	}
+	model.viewport.SetContent(model.content())
+	view := ansi.Strip(model.View().Content)
+	for _, label := range []string{"[Publish]", "[Discard]"} {
+		if !strings.Contains(view, label) {
+			t.Fatalf("notification card should show %s, frame:\n%s", label, view)
+		}
+	}
+
+	for _, actionID := range []string{"publish", "discard"} {
+		zone := waitForZone(t, model, zoneIDNotificationAction(noteID, actionID))
+		cmd, ok := model.semanticMousePacket(tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft, X: zone.StartX + 1, Y: zone.StartY}))
+		if !ok || !bytes.Equal(cmd, protocol.EncodeGUINotificationAction(noteID, actionID)) {
+			t.Fatalf("%s click should route notification_action, ok=%v packet=%v", actionID, ok, cmd)
+		}
+	}
+}
+
 func TestNotificationDismissZoneAbsentWhenNotDismissable(t *testing.T) {
 	model := New(60, 24, nil)
 	model.chrome = map[byte]protocol.ChromePayload{
