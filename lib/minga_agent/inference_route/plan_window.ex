@@ -26,7 +26,9 @@ defmodule MingaAgent.InferenceRoute.PlanWindow do
   def new(%__MODULE__{} = window), do: window |> Map.from_struct() |> new()
 
   def new(attrs) when is_list(attrs) do
-    if Keyword.keyword?(attrs), do: attrs |> Map.new() |> new(), else: new(:invalid)
+    if Keyword.keyword?(attrs),
+      do: attrs |> Map.new() |> new(),
+      else: {:error, {:invalid_plan_window, :attrs}}
   end
 
   def new(attrs) when is_map(attrs) do

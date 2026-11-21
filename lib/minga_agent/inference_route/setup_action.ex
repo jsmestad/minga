@@ -15,7 +15,9 @@ defmodule MingaAgent.InferenceRoute.SetupAction do
   def new(%__MODULE__{} = action), do: action |> Map.from_struct() |> new()
 
   def new(attrs) when is_list(attrs) do
-    if Keyword.keyword?(attrs), do: attrs |> Map.new() |> new(), else: new(:invalid)
+    if Keyword.keyword?(attrs),
+      do: attrs |> Map.new() |> new(),
+      else: {:error, :invalid_setup_action}
   end
 
   def new(%{label: label, description: description})
