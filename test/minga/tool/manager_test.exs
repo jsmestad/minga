@@ -177,7 +177,12 @@ defmodule Minga.Tool.ManagerTest do
             name in [:black, :gopls, :zls, :clangd],
             do: {name, status}
 
-      assert statuses == [black: :installing, gopls: :failed, zls: :installed, clangd: :not_installed]
+      assert statuses == [
+               black: :installing,
+               gopls: :failed,
+               zls: :installed,
+               clangd: :not_installed
+             ]
     end
   end
 end
