@@ -435,6 +435,22 @@ defmodule MingaEditor.RenderModel.Window.ResidentStoreTest do
              }
     end
 
+    test "replacing a multi-chunk range clamps deletion at EOF" do
+      entries = for i <- 0..199, do: make_entry(i, i)
+      start = 37
+      inserted = [make_entry(start, 999), make_entry(199, 998)]
+      expected = Enum.take(entries, start) ++ inserted
+
+      changed =
+        entries
+        |> ResidentStore.from_entries()
+        |> ResidentStore.replace_range(start, length(entries), inserted)
+
+      assert_consistent(changed, expected)
+      assert ResidentStore.size(changed) == length(expected)
+      assert %{rows_visited: 165, rows_emitted: 2} = ResidentStore.work(changed)
+    end
+
     @tag :perf
     test "a 65,536-row one-line edit has fixed row work and logarithmic chunk work" do
       small_entries = for i <- 0..255, do: make_entry(i, i)
