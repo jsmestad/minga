@@ -62,23 +62,35 @@ defmodule Minga.Project.FileFind.WorkerTest do
     tmp_dir: tmp_dir
   } do
     output = "first\nsecond\n"
-    command = {System.find_executable("sh"), ["-c", "printf 'first\\nsecond\\n'"], tmp_dir}
-    parser = fn data, status -> {data, status} end
+    shell = System.find_executable("sh")
+    script = ~S"""
+    while [ ! -f "$1" ]; do sleep 0.01; done
+    printf 'first\nsecond\n'
+    if [ "$2" = hold ]; then exec sleep 60; fi
+    """
+
     byte_limit = byte_size(output)
 
-    assert {:ok, exact} =
-             Worker.start(self(), command, parser, max_output_bytes: byte_limit, max_file_count: 2)
+    cases = [
+      {byte_limit, 2, "exit", {output, 0}},
+      {byte_limit, 1, "hold", {:error, "Project file discovery exceeded the file-count limit"}},
+      {byte_limit - 1, 1, "hold", {:error, "Project file discovery exceeded the byte limit"}}
+    ]
 
-    assert_receive {:file_find_done, ^exact, {^output, 0}}, 5_000
+    for {bytes, files, action, expected} <- cases do
+      gate = Path.join(tmp_dir, "release-#{bytes}-#{files}")
+      command = {shell, ["-c", script, "discovery", gate, action], tmp_dir}
 
-    for {bytes, files, limit} <- [{byte_limit, 1, "file-count"}, {1, 1, "byte"}] do
       assert {:ok, worker} =
-               Worker.start(self(), command, parser, max_output_bytes: bytes, max_file_count: files)
+               Worker.start(self(), command, fn data, status -> {data, status} end,
+                 max_output_bytes: bytes,
+                 max_file_count: files
+               )
 
-      assert_receive {:file_find_done, ^worker,
-                      {:error, "Project file discovery exceeded the " <> reason}}, 5_000
-
-      assert reason == "#{limit} limit"
+      monitor = Process.monitor(worker)
+      File.write!(gate, "")
+      assert_receive {:file_find_done, ^worker, ^expected}, 5_000
+      assert_receive {:DOWN, ^monitor, :process, ^worker, :normal}, 5_000
     end
   end
 

@@ -73,7 +73,9 @@ defmodule MingaEditor.FileTree.RefreshTest do
 
     on_exit(fn -> :telemetry.detach(handler_id) end)
 
-    assert %FileTree{cursor: 0, entries: [%{name: "alpha.ex"}]} = FilesystemScanner.scan(tree, nil)
+    assert %FileTree{cursor: 0, entries: [%{name: "alpha.ex"}]} =
+             FilesystemScanner.scan(tree, nil)
+
     assert File.exists?(late_file)
   end
 
