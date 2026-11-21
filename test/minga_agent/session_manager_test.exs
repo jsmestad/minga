@@ -653,40 +653,45 @@ defmodule MingaAgent.SessionManagerTest do
                  session_id: session_id,
                  provider: Minga.Test.StubProvider,
                  persist?: false,
-                 restart_backoff_base_ms: 1,
-                 restart_backoff_max_ms: 1
+                 restart_backoff_base_ms: 120_000,
+                 restart_backoff_max_ms: 120_000
                )
 
-      :ok = :sys.suspend(old_pid)
-      listing_task = Task.async(fn -> SessionManager.list_sessions(manager) end)
-      await_metadata_call(old_pid)
+      owner = self()
+      :ok = observe_restart_timer(manager, session_id, owner)
 
-      old_ref = Process.monitor(old_pid)
-      Process.exit(old_pid, :kill)
-      assert_receive {:DOWN, ^old_ref, :process, ^old_pid, :killed}, 1_000
+      # Install the crash trigger from the manager so its monitor precedes the metadata call.
+      :sys.replace_state(manager, fn state ->
+        :ok = :sys.install(old_pid, {&crash_on_metadata/3, nil})
+        state
+      end)
 
       assert %SessionListing{
                id: ^session_id,
                pid: ^old_pid,
                details: {:unavailable, :unreachable}
              } =
-               listing_task
-               |> Task.await(1_000)
+               manager
+               |> SessionManager.list_sessions()
                |> Enum.find(&(&1.id == session_id))
 
-      assert_receive {
-                       :minga_event,
-                       :agent_session_restarted,
+      token =
+        receive do
+          {:restart_timer, ^session_id, token} -> token
+        end
+
+      send(manager, {:restart_session, session_id, token})
+
+      assert {:ok, new_pid} = SessionManager.get_session(manager, session_id)
+      refute new_pid == old_pid
+
+      assert_received {:minga_event, :agent_session_restarted,
                        %SessionRestartedEvent{
                          session_id: ^session_id,
                          old_pid: ^old_pid,
-                         new_pid: new_pid,
+                         new_pid: ^new_pid,
                          reason: :killed
-                       }
-                     },
-                     1_000
-
-      assert {:ok, ^new_pid} = SessionManager.get_session(manager, session_id)
+                       }}
 
       send(manager, {:DOWN, make_ref(), :process, new_pid, :killed})
       :sys.get_state(manager)
@@ -1405,24 +1410,33 @@ defmodule MingaAgent.SessionManagerTest do
     wait_until_restarted_session(manager, session_id, pid)
   end
 
-  @spec await_metadata_call(pid(), non_neg_integer()) :: :ok
-  defp await_metadata_call(pid, attempts \\ 100)
-
-  defp await_metadata_call(pid, 0) do
-    flunk("metadata call was not queued for suspended session #{inspect(pid)}")
+  @spec crash_on_metadata(nil, term(), term()) :: nil
+  defp crash_on_metadata(state, {:in, {:"$gen_call", _from, :metadata}}, _name) do
+    Process.exit(self(), :kill)
+    state
   end
 
-  defp await_metadata_call(pid, attempts) do
-    {:messages, messages} = Process.info(pid, :messages)
+  defp crash_on_metadata(state, _event, _name), do: state
 
-    if Enum.any?(messages, &match?({:"$gen_call", _from, :metadata}, &1)) do
-      :ok
-    else
-      receive do
-      after
-        10 -> await_metadata_call(pid, attempts - 1)
-      end
+  @spec observe_restart_timer(pid(), String.t(), pid()) :: :ok
+  defp observe_restart_timer(manager, session_id, owner) do
+    hook = fn
+      acc, {:noreply, %{sessions: sessions}}, _name ->
+        case Map.fetch(sessions, session_id) do
+          {:ok, %{provider_monitor_ref: nil, restart_state: %{timer_token: token}}}
+          when is_reference(token) ->
+            send(owner, {:restart_timer, session_id, token})
+            :done
+
+          _ ->
+            acc
+        end
+
+      acc, _event, _name ->
+        acc
     end
+
+    :sys.install(manager, {hook, nil})
   end
 
   @spec wait_until_restarted_session(GenServer.server(), String.t(), pid(), non_neg_integer()) ::
