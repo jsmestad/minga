@@ -1191,19 +1191,7 @@ defmodule MingaGitPorcelain.Commands do
         MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "Git.Repo not available")
 
       repo_pid ->
-        entries = Git.repo_status(repo_pid)
-        summary = Git.repo_summary(repo_pid)
-
-        panel_data = %{
-          repo_state: :normal,
-          branch: summary.branch || "",
-          ahead: summary.ahead,
-          behind: summary.behind,
-          entries: entries,
-          entry_base_path: Minga.Project.resolve_root(),
-          last_commit_message: summary.last_commit_message,
-          stash_count: summary.stash_count
-        }
+        panel = repo_pid |> Git.repo_status_snapshot() |> GitStatusPanel.from_repo_status()
 
         # Mutual exclusivity: close file tree when opening git status
         state = close_file_tree_if_open(state)
@@ -1215,7 +1203,7 @@ defmodule MingaGitPorcelain.Commands do
           }
 
         state
-        |> SidebarWorkflow.replace_git_status(GitStatusPanel.new(panel_data))
+        |> SidebarWorkflow.replace_git_status(panel)
         |> SidebarWorkflow.select("git_status")
         |> Layout.invalidate()
     end

@@ -77,6 +77,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - LSP semantic tokens decode modifier bits in legend order without making indexed lists, and each token projects directly into one highlight span.
 - GUI search indexes now build in one linear pass when indexing into an empty tree, so initial builds and edits that remove every match no longer insert each match-bearing line persistently. Match order, counts, navigation, and incremental edits are unchanged.
 - Git conflict parsing walks lines once, and conflict resolution reads only the selected sides from the buffer snapshot’s line ranges.
+- The Git status panel opens from one cached repository snapshot. Listing paths keep the same project-relative base when status refreshes.
 - Search results preserve document order directly when walking the index. Quote text objects find only the pair around the cursor. Visual and Operator-Pending mode share the same object suffixes without sharing their transitions.
 - Sentence text objects find the requested span without building a list of every sentence. Paragraph whitespace and grapheme byte positions are unchanged.
 - Characterwise range deletion and replacement reuse their already resolved selections, avoiding a second normalization and coordinate lookup while preserving deleted and replacement bytes, cursor placement, and edit deltas.

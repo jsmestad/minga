@@ -22,6 +22,7 @@ defmodule Minga.Git.Repo do
 
   use GenServer
 
+  alias Minga.Events.GitStatusEvent
   alias Minga.Git
   alias Minga.Git.Repo.Profile
   alias Minga.Git.Repo.StatusSnapshot
@@ -104,7 +105,7 @@ defmodule Minga.Git.Repo do
           degraded_reason: degraded_reason() | nil
         }
 
-  @typedoc "Cached status entries plus the path they are relative to."
+  @typedoc "Cached status entries, their path base, and branch metadata."
   @type status_snapshot :: StatusSnapshot.t()
 
   # ── Client API ─────────────────────────────────────────────────────────
@@ -186,7 +187,7 @@ defmodule Minga.Git.Repo do
     :exit, _ -> :not_tracked
   end
 
-  @doc "Returns the cached status entries with the path they are relative to."
+  @doc "Returns cached entries, their path base, and branch metadata in one read."
   @spec status_snapshot(GenServer.server()) :: status_snapshot()
   def status_snapshot(server) do
     GenServer.call(server, :status_snapshot)
@@ -277,16 +278,7 @@ defmodule Minga.Git.Repo do
   end
 
   def handle_call(:status_snapshot, _from, state) do
-    snapshot =
-      StatusSnapshot.new(
-        state.git_root,
-        entry_base_path(state),
-        state.entries,
-        state.degraded?,
-        state.degraded_reason
-      )
-
-    {:reply, snapshot, state}
+    {:reply, StatusSnapshot.new(cached_status_fields(state)), state}
   end
 
   def handle_call(:branch, _from, state) do
@@ -424,6 +416,22 @@ defmodule Minga.Git.Repo do
   defp entry_base_path(%{project_root: root}) when is_binary(root), do: root
   defp entry_base_path(%{git_root: root}), do: root
 
+  @spec cached_status_fields(t()) :: map()
+  defp cached_status_fields(state) do
+    %{
+      git_root: state.git_root,
+      entry_base_path: entry_base_path(state),
+      entries: state.entries,
+      branch: state.branch,
+      ahead: state.ahead,
+      behind: state.behind,
+      last_commit_message: state.last_commit_message,
+      stash_count: state.stash_count,
+      degraded?: state.degraded?,
+      degraded_reason: state.degraded_reason
+    }
+  end
+
   @typep refresh_task :: %{pid: pid(), ref: reference()}
   @typep fetch_result(value) :: {:ok, value} | :error
 
@@ -553,18 +561,7 @@ defmodule Minga.Git.Repo do
     if changed do
       Minga.Events.broadcast(
         :git_status_changed,
-        %Minga.Events.GitStatusEvent{
-          git_root: state.git_root,
-          entries: state.entries,
-          branch: state.branch,
-          ahead: state.ahead,
-          behind: state.behind,
-          entry_base_path: entry_base_path(state),
-          last_commit_message: state.last_commit_message,
-          stash_count: state.stash_count,
-          degraded?: state.degraded?,
-          degraded_reason: state.degraded_reason
-        },
+        struct!(GitStatusEvent, cached_status_fields(state)),
         state.events_registry
       )
     end

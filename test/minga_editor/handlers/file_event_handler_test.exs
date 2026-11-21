@@ -4,6 +4,8 @@ defmodule MingaEditor.Handlers.FileEventHandlerTest do
   @moduletag :tmp_dir
 
   alias Minga.Buffer.Process, as: BufferProcess
+  alias Minga.Events.GitStatusEvent
+  alias Minga.Git.Repo.StatusSnapshot
   alias Minga.Git.StatusEntry
   alias Minga.Project.FileRef
   alias Minga.Project.FileTree
@@ -25,7 +27,7 @@ defmodule MingaEditor.Handlers.FileEventHandlerTest do
   import MingaEditor.RenderPipeline.TestHelpers
 
   describe "git_status_changed" do
-    test "with open git panel updates panel data and returns render" do
+    test "with an open panel projects the same nested paths and metadata as the cached read" do
       state = base_state()
 
       state =
@@ -40,25 +42,39 @@ defmodule MingaEditor.Handlers.FileEventHandlerTest do
           })
         )
 
-      event =
-        {:minga_event, :git_status_changed,
-         %Minga.Events.GitStatusEvent{
-           git_root: "/tmp/repo",
-           entries: [%{path: "foo.ex", status: :modified}],
-           branch: "develop",
-           ahead: 1,
-           behind: 0,
-           last_commit_message: "feat: previous subject",
-           stash_count: 2
-         }}
+      entry = %StatusEntry{path: "lib/foo.ex", status: :modified, staged: false}
 
-      {new_state, effects} = FileEventHandler.handle(state, event)
+      fields = %{
+        git_root: "/tmp/repo",
+        entry_base_path: "/tmp/repo/apps/myapp",
+        entries: [entry],
+        branch: "develop",
+        ahead: 1,
+        behind: 2,
+        last_commit_message: "feat: previous subject",
+        stash_count: 3
+      }
+
+      event = struct!(GitStatusEvent, fields)
+
+      {new_state, effects} =
+        FileEventHandler.handle(state, {:minga_event, :git_status_changed, event})
 
       panel = SidebarWorkflow.git_status_panel(new_state)
-      assert panel.branch == "develop"
-      assert panel.ahead == 1
-      assert panel.last_commit_message == "feat: previous subject"
-      assert panel.stash_count == 2
+
+      assert %GitStatusPanel{
+               repo_state: :normal,
+               entry_base_path: "/tmp/repo/apps/myapp",
+               entries: [^entry],
+               branch: "develop",
+               ahead: 1,
+               behind: 2,
+               last_commit_message: "feat: previous subject",
+               stash_count: 3
+             } = panel
+
+      snapshot_panel = fields |> StatusSnapshot.new() |> GitStatusPanel.from_repo_status()
+      assert panel == snapshot_panel
       assert {:render, 16} in effects
     end
 
@@ -80,7 +96,7 @@ defmodule MingaEditor.Handlers.FileEventHandlerTest do
          %Minga.Events.GitStatusEvent{
            git_root: "/tmp/repo",
            entries: [entry],
-           branch: "develop",
+           branch: nil,
            ahead: 1,
            behind: 0
          }}
@@ -88,7 +104,10 @@ defmodule MingaEditor.Handlers.FileEventHandlerTest do
       {new_state, effects} = FileEventHandler.handle(state, event)
 
       assert SidebarWorkflow.active_id(new_state) == "observatory"
-      assert SidebarWorkflow.git_status_panel(new_state).entries == [entry]
+
+      assert %GitStatusPanel{entries: [^entry], branch: "", entry_base_path: "/tmp/repo"} =
+               SidebarWorkflow.git_status_panel(new_state)
+
       assert %{visible?: true, focused?: false, badge_count: 1} = Sidebar.get(table, "git_status")
       assert Sidebar.get(table, "observatory").focused?
       assert {:render, 16} in effects
