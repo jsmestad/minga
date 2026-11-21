@@ -76,7 +76,9 @@ defmodule MingaEditor.Agent.View.PromptRenderWindow do
     panel = ctx.ui_state.panel
 
     if is_pid(panel.prompt_buffer) do
-      build_from_panel(ctx, panel, inner_width, rect, opts)
+      projection = project_prompt(ctx, panel, inner_width, opts)
+      visible = PromptProjection.visible(projection)
+      build_window(ctx, projection, visible, rect, opts)
     end
   end
 
@@ -101,18 +103,12 @@ defmodule MingaEditor.Agent.View.PromptRenderWindow do
     panel = ctx.ui_state.panel
 
     if is_pid(panel.prompt_buffer) do
-      projection =
-        Keyword.get_lazy(opts, :projection, fn ->
-          PromptProjection.build(panel, width,
-            oracle: Capabilities.width_oracle(ctx.capabilities)
-          )
-        end)
-
-      model =
-        build_from_panel(ctx, panel, width, rect, Keyword.put(opts, :projection, projection))
+      projection = project_prompt(ctx, panel, width, opts)
+      visible = PromptProjection.visible(projection)
+      model = build_window(ctx, projection, visible, rect, opts)
 
       entries =
-        Enum.zip_with(model.rows, PromptProjection.visible(projection), fn row, source ->
+        Enum.zip_with(model.rows, visible, fn row, source ->
           VisualRow.new(row, source.offset_map, source.start_col, source.end_col, 0)
         end)
         |> Enum.with_index()
@@ -151,17 +147,22 @@ defmodule MingaEditor.Agent.View.PromptRenderWindow do
 
   # ── Private ─────────────────────────────────────────────────────────────
 
-  @spec build_from_panel(ctx(), Panel.t(), pos_integer(), RenderWindow.rect() | nil, keyword()) ::
-          RenderWindow.t()
-  defp build_from_panel(ctx, panel, inner_width, rect, opts) do
-    projection =
-      Keyword.get_lazy(opts, :projection, fn ->
-        PromptProjection.build(panel, inner_width,
-          oracle: Capabilities.width_oracle(ctx.capabilities)
-        )
-      end)
+  @spec project_prompt(ctx(), Panel.t(), pos_integer(), keyword()) :: projection()
+  defp project_prompt(ctx, panel, width, opts) do
+    Keyword.get_lazy(opts, :projection, fn ->
+      PromptProjection.build(panel, width, oracle: Capabilities.width_oracle(ctx.capabilities))
+    end)
+  end
 
-    lines = projection.lines
+  @spec build_window(
+          ctx(),
+          projection(),
+          nonempty_list(PromptProjection.visual_row()),
+          RenderWindow.rect() | nil,
+          keyword()
+        ) :: RenderWindow.t()
+  defp build_window(ctx, projection, [first | _] = visible, rect, opts) do
+    panel = ctx.ui_state.panel
     cursor = projection.cursor
     inner_width = projection.columns
     mode = ctx.editing.mode
@@ -173,33 +174,7 @@ defmodule MingaEditor.Agent.View.PromptRenderWindow do
     {cursor_visual, cursor_visual_col} = PromptProjection.position(projection, cursor)
     token_context = token_context(opts)
 
-    {visual_rows, diagnostic_ranges} =
-      projection
-      |> PromptProjection.visible()
-      |> Enum.with_index()
-      |> Enum.map_reduce([], fn {vl, display_row}, acc ->
-        logical_idx = vl.logical_line
-        line_text = Enum.at(lines, logical_idx)
-
-        {row, ranges} =
-          build_visual_row(
-            vl,
-            line_text,
-            logical_idx,
-            display_row,
-            panel,
-            at,
-            inner_width,
-            token_context
-          )
-
-        {row, [ranges | acc]}
-      end)
-
-    diagnostic_ranges =
-      diagnostic_ranges
-      |> Enum.reverse()
-      |> List.flatten()
+    {visual_rows, diagnostic_ranges} = build_visual_rows(visible, at, token_context)
 
     # Cursor position relative to the visible window
     display_cursor_row = cursor_visual - scroll
@@ -233,7 +208,7 @@ defmodule MingaEditor.Agent.View.PromptRenderWindow do
       gutter: prompt_gutter(prompt_id, rect, panel.input_focused),
       scroll_seq: panel.prompt_viewport.sequence,
       indent_guides: IndentGuides.empty(prompt_id),
-      geometry: prompt_geometry(prompt_id, rect, projection),
+      geometry: prompt_geometry(prompt_id, rect, projection, first, total_visual),
       content_epoch:
         prompt_content_epoch(
           prompt_id,
@@ -283,9 +258,14 @@ defmodule MingaEditor.Agent.View.PromptRenderWindow do
     }
   end
 
-  @spec prompt_geometry(pos_integer(), RenderWindow.rect(), projection()) :: PaneGeometry.t()
-  defp prompt_geometry(window_id, rect, projection) do
-    first = Enum.at(projection.rows, projection.scroll)
+  @spec prompt_geometry(
+          pos_integer(),
+          RenderWindow.rect(),
+          projection(),
+          PromptProjection.visual_row(),
+          non_neg_integer()
+        ) :: PaneGeometry.t()
+  defp prompt_geometry(window_id, rect, projection, first, total_visual) do
     metrics = %GutterMetrics{line_number_width: 0, sign_col_width: 0}
 
     %PaneGeometry{
@@ -302,7 +282,7 @@ defmodule MingaEditor.Agent.View.PromptRenderWindow do
         cols: projection.columns,
         total_lines: length(projection.lines),
         visual_row_offset: first.visual_index,
-        total_visual_rows: length(projection.rows)
+        total_visual_rows: total_visual
       },
       gutter_metrics: metrics,
       hit_regions: [
@@ -311,32 +291,43 @@ defmodule MingaEditor.Agent.View.PromptRenderWindow do
     }
   end
 
+  @spec build_visual_rows([PromptProjection.visual_row()], Theme.Agent.t(), token_context()) ::
+          {[Row.t()], [DiagnosticRange.t()]}
+  defp build_visual_rows(visible, at, ctx) do
+    {rows, {_next_display_row, diagnostics}} =
+      visible
+      |> Enum.chunk_by(& &1.logical_line)
+      |> Enum.flat_map_reduce({0, []}, fn [first | _] = group, acc ->
+        # A continuation's source map still carries the whole logical line.
+        ranges =
+          if first.pill?,
+            do: [],
+            else: token_ranges(first.offset_map.source_text, first.logical_line, ctx)
+
+        Enum.map_reduce(group, acc, fn visual_row, {display_row, diagnostics} ->
+          {row, row_diagnostics} = build_visual_row(visual_row, display_row, at, ranges)
+          {row, {display_row + 1, Enum.reverse(row_diagnostics, diagnostics)}}
+        end)
+      end)
+
+    {rows, Enum.reverse(diagnostics)}
+  end
+
   @spec build_visual_row(
           PromptProjection.visual_row(),
-          String.t(),
           non_neg_integer(),
-          non_neg_integer(),
-          Panel.t(),
           Theme.Agent.t(),
-          pos_integer(),
-          token_context()
+          [token_range()]
         ) :: {Row.t(), [DiagnosticRange.t()]}
-  defp build_visual_row(vl, line_text, logical_idx, display_row, _panel, at, _inner_width, ctx) do
+  defp build_visual_row(vl, display_row, at, token_ranges) do
+    logical_idx = vl.logical_line
     display_text = vl.text
     fg_color = rgb_to_int(if(vl.pill?, do: at.hint_fg, else: at.text_fg))
     bg_color = if(vl.pill?, do: paste_pill_bg(at.input_bg), else: rgb_to_int(at.input_bg))
-    style_tokens? = not vl.pill?
     text_width = Unicode.display_width(display_text)
     row_start = vl.start_col
     row_end = vl.end_col
     accent_color = rgb_to_int(at.input_border)
-
-    token_ranges =
-      if style_tokens? do
-        token_ranges(line_text, logical_idx, ctx)
-      else
-        []
-      end
 
     valid_ranges = clipped_token_ranges(token_ranges, :valid, row_start, row_end)
     invalid_ranges = clipped_token_ranges(token_ranges, :invalid, row_start, row_end)
