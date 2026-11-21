@@ -497,17 +497,15 @@ defmodule MingaEditor.State.TabBar do
   end
 
   @doc """
-  Returns the most recently used tab of the given kind that is NOT the
-  active tab. Useful for "switch back to previous file/agent" commands.
-
-  Tabs are searched right-to-left from the active position (wrapping), so
-  the nearest neighbor of the requested kind is returned.
+  Returns the last tab of the given kind in storage order, excluding the
+  active tab. Returns nil if no other tab matches.
   """
   @spec most_recent_of_kind(t(), Tab.kind()) :: Tab.t() | nil
   def most_recent_of_kind(%__MODULE__{tabs: tabs, active_id: active_id}, kind) do
-    tabs
-    |> Enum.filter(&(&1.kind == kind and &1.id != active_id))
-    |> Enum.at(-1)
+    Enum.reduce(tabs, nil, fn
+      %Tab{kind: ^kind, id: id} = tab, _last when id != active_id -> tab
+      _tab, last -> last
+    end)
   end
 
   @doc """
@@ -517,26 +515,10 @@ defmodule MingaEditor.State.TabBar do
   requested kind. Returns unchanged if no tabs of that kind exist.
   """
   @spec next_of_kind(t(), Tab.kind()) :: t()
-  def next_of_kind(%__MODULE__{tabs: tabs, active_id: active_id} = tb, kind) do
-    kind_tabs = Enum.filter(tabs, &(&1.kind == kind))
-
-    case kind_tabs do
-      [] ->
-        tb
-
-      [only] ->
-        %{tb | active_id: only.id}
-
-      _ ->
-        current_idx = Enum.find_index(kind_tabs, &(&1.id == active_id))
-
-        next_tab =
-          case current_idx do
-            nil -> hd(kind_tabs)
-            idx -> Enum.at(kind_tabs, rem(idx + 1, length(kind_tabs)))
-          end
-
-        %{tb | active_id: next_tab.id}
+  def next_of_kind(%__MODULE__{active_id: active_id} = tb, kind) do
+    case filter_by_kind(tb, kind) do
+      [] -> tb
+      [_ | _] = tabs -> %{tb | active_id: cycle_neighbor(tabs, active_id, 1).id}
     end
   end
 
@@ -784,27 +766,27 @@ defmodule MingaEditor.State.TabBar do
   defp tab_file_ref(%Tab{}), do: nil
 
   @spec cycle_visible_file_tab(t(), 1 | -1) :: t()
-  defp cycle_visible_file_tab(%__MODULE__{} = tb, step) do
+  defp cycle_visible_file_tab(%__MODULE__{active_id: active_id} = tb, step) do
     case visible_file_tabs(tb) do
-      [] -> tb
-      [_single] -> tb
-      tabs -> switch_to_cycle_neighbor(tb, tabs, step)
+      [_, _ | _] = tabs -> %{tb | active_id: cycle_neighbor(tabs, active_id, step).id}
+      _ -> tb
     end
   end
 
-  @spec switch_to_cycle_neighbor(t(), [Tab.t()], 1 | -1) :: t()
-  defp switch_to_cycle_neighbor(%__MODULE__{active_id: active_id} = tb, tabs, step) do
-    idx = Enum.find_index(tabs, &(&1.id == active_id))
-    target_idx = cycle_target_index(idx, length(tabs), step)
-    %{tb | active_id: Enum.at(tabs, target_idx).id}
+  @spec cycle_neighbor(nonempty_list(Tab.t()), Tab.id() | nil, 1 | -1) :: Tab.t()
+  defp cycle_neighbor([first | _] = tabs, active_id, 1) do
+    case Enum.drop_while(tabs, &(&1.id != active_id)) do
+      [_, next | _] -> next
+      _ -> first
+    end
   end
 
-  @spec cycle_target_index(non_neg_integer() | nil, pos_integer(), 1 | -1) :: non_neg_integer()
-  defp cycle_target_index(nil, _len, 1), do: 0
-  defp cycle_target_index(nil, len, -1), do: len - 1
-  defp cycle_target_index(idx, len, 1), do: rem(idx + 1, len)
-  defp cycle_target_index(0, len, -1), do: len - 1
-  defp cycle_target_index(idx, _len, -1), do: idx - 1
+  defp cycle_neighbor([previous, %Tab{id: active_id} | _], active_id, -1), do: previous
+
+  defp cycle_neighbor([_ | [_ | _] = rest], active_id, -1),
+    do: cycle_neighbor(rest, active_id, -1)
+
+  defp cycle_neighbor([last], _active_id, -1), do: last
 
   @doc """
   Adds an agent workspace and returns `{updated_tab_bar, workspace}`.
