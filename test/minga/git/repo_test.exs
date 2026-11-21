@@ -432,6 +432,9 @@ defmodule Minga.Git.RepoTest do
 
       assert Repo.cached_degraded_for_path(parent) == {:ok, {true, :status_timeout}}
       assert Repo.cached_degraded_for_path(path) == {:ok, {false, nil}}
+
+      sibling = Path.join(parent, "apps/childish/lib/sibling.ex")
+      assert Repo.cached_degraded_for_path(sibling) == {:ok, {true, :status_timeout}}
     end
 
     test "cached reads do not start an untracked repo", %{tmp_dir: dir} do

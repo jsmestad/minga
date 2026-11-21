@@ -404,11 +404,10 @@ defmodule Minga.Git.Repo do
 
     @registry
     |> Registry.select([{{:"$1", :"$2", :_}, [], [{{:"$1", :"$2"}}]}])
-    |> Enum.filter(fn {git_root, pid} ->
+    |> Stream.filter(fn {git_root, pid} ->
       is_binary(git_root) and path_under_root?(path, git_root) and Process.alive?(pid)
     end)
-    |> Enum.sort_by(fn {git_root, _pid} -> byte_size(git_root) end, :desc)
-    |> List.first()
+    |> Enum.max_by(fn {git_root, _pid} -> byte_size(git_root) end, fn -> nil end)
   end
 
   @spec path_under_root?(String.t(), String.t()) :: boolean()
