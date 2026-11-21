@@ -159,7 +159,7 @@ defmodule MingaEditor.Agent.EditPublicationTest do
     assert {:blocked, blocked} = EditPublication.before_quit(state)
 
     assert NoticeWorkflow.message(blocked) ==
-             "1 agent-edited file is not on disk. Publish (SPC a p) or discard (SPC a P) them before quitting, or use :qa! to discard them."
+             "1 agent-edited file is not on disk. Publish (SPC a p) or discard (SPC a P) them before quitting. :qa!, :q! and :cq quit and discard them."
 
     assert notification(blocked, id).title == "1 agent-edited file is not on disk"
     assert workspace(blocked, id).review.state == :needs_review

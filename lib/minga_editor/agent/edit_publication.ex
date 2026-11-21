@@ -5,10 +5,10 @@ defmodule MingaEditor.Agent.EditPublication do
   An editor-started agent session edits files through the workspace's overlay `MingaAgent.ProjectView`. Approved edits are staged there (in a buffer fork for open files, in the changeset for other files) and stay off disk until the user publishes them. This module owns that lifecycle on the Editor side:
 
   * `record_edit/3` and `turn_finished/2` keep the workspace review state in step with agent file events. They are pure state transitions, safe on the Editor mailbox.
-  * `publish/2` and `discard/2` refresh the review from the authoritative `ProjectView.diff/1`, then promote or discard the view. A successful promote or discard stops the view's changeset, so the workspace gets a fresh overlay and a live session's provider is moved to it.
-  * `before_quit/1` blocks quitting while any workspace still holds staged edits and offers Publish or Discard.
+  * `publish/2` and `discard/2` refresh the review from the authoritative `ProjectView.diff/1`, then promote or discard the view. A successful promote or discard stops the view's changeset, so a live session's provider is first moved to a fresh overlay, and the workspace adopts it.
+  * `before_quit/1` is the editor's exit gate: it blocks while any workspace still holds staged edits and offers Publish or Discard. `discard_all/1` is the explicit discard for force and abort exits.
 
-  Publication runs while the agent is between turns. A running turn owns the view, so `publish/2` and `discard/2` refuse until it finishes.
+  Publication runs while the agent is between turns. The provider is the authority: it refuses the move to a fresh overlay while a request is active, and then nothing is published or discarded. After a failed or conflicted publication the provider returns to the original view, which still holds the staged edits.
   """
 
   alias Minga.Buffer
@@ -31,6 +31,9 @@ defmodule MingaEditor.Agent.EditPublication do
   @typedoc "Outcome of promoting one workspace's project view."
   @type promote_result ::
           {:ok, Workspace.t()} | {:review_fork, Workspace.t(), String.t()} | {:error, term()}
+
+  @typedoc "A provider moved to a fresh overlay before its view is retired."
+  @type handoff :: %{fresh: ProjectView.t() | nil, provider: pid() | nil}
 
   @busy_statuses [:thinking, :tool_executing, :approval_waiting]
 
@@ -74,25 +77,26 @@ defmodule MingaEditor.Agent.EditPublication do
   @doc "Publishes the target workspace's staged agent edits to disk and open buffers."
   @spec publish(EditorState.t(), target()) :: EditorState.t()
   def publish(%EditorState{} = state, target) do
-    with_staged_workspace(state, target, "publish", fn state, tb, workspace, count ->
+    with_staged_workspace(state, target, "publish", fn state, tb, workspace, count, handoff ->
       workspace
       |> promote()
-      |> install_publish_result(state, tb, workspace, count)
+      |> install_publish_result(state, tb, workspace, count, handoff)
     end)
   end
 
   @doc "Discards the target workspace's staged agent edits without touching disk."
   @spec discard(EditorState.t(), target()) :: EditorState.t()
   def discard(%EditorState{} = state, target) do
-    with_staged_workspace(state, target, "discard", fn state, tb, workspace, count ->
+    with_staged_workspace(state, target, "discard", fn state, tb, workspace, count, handoff ->
       case discard_view(workspace) do
         {:ok, discarded} ->
           state
-          |> install_workspace(tb, rearm(discarded))
+          |> install_workspace(tb, complete_handoff(discarded, handoff))
           |> Notifications.dismiss_agent_edits(workspace.id)
           |> NoticeWorkflow.publish("Discarded agent edits in #{files_copy(count)}")
 
         {:error, reason} ->
+          abandon_handoff(workspace, handoff)
           NoticeWorkflow.publish(state, "Discarding agent edits failed: #{inspect(reason)}")
       end
     end)
@@ -173,12 +177,12 @@ defmodule MingaEditor.Agent.EditPublication do
         {:blocked,
          NoticeWorkflow.publish(
            state,
-           "#{Notifications.agent_edits_title(total)}. Publish (SPC a p) or discard (SPC a P) them before quitting, or use :qa! to discard them."
+           "#{Notifications.agent_edits_title(total)}. Publish (SPC a p) or discard (SPC a P) them before quitting. :qa!, :q! and :cq quit and discard them."
          )}
     end
   end
 
-  @doc "Explicitly discards every workspace's staged agent edits, for `:qa!`."
+  @doc "Explicitly discards every workspace's staged agent edits, for force and abort quits (`:qa!`, `:q!`, `:cq`)."
   @spec discard_all(EditorState.t()) :: EditorState.t()
   def discard_all(%EditorState{} = state) do
     Enum.each(staged_workspaces(state), fn {workspace, _count} -> discard_view(workspace) end)
@@ -191,7 +195,8 @@ defmodule MingaEditor.Agent.EditPublication do
           EditorState.t(),
           target(),
           String.t(),
-          (EditorState.t(), TabBar.t(), Workspace.t(), pos_integer() -> EditorState.t())
+          (EditorState.t(), TabBar.t(), Workspace.t(), pos_integer(), handoff() ->
+             EditorState.t())
         ) :: EditorState.t()
   defp with_staged_workspace(state, target, verb, action) do
     with %TabBar{} = tb <- tab_bar(state),
@@ -207,7 +212,7 @@ defmodule MingaEditor.Agent.EditPublication do
 
         count ->
           state = install_workspace(state, tb, refreshed)
-          action.(state, tab_bar(state), refreshed, count)
+          handoff_then(state, refreshed, verb, &action.(&1, tab_bar(&1), refreshed, count, &2))
       end
     else
       nil ->
@@ -221,23 +226,56 @@ defmodule MingaEditor.Agent.EditPublication do
     end
   end
 
+  @spec handoff_then(
+          EditorState.t(),
+          Workspace.t(),
+          String.t(),
+          (EditorState.t(), handoff() -> EditorState.t())
+        ) :: EditorState.t()
+  defp handoff_then(state, workspace, verb, action) do
+    case prepare_handoff(workspace, verb) do
+      {:ok, handoff} -> action.(state, handoff)
+      {:refused, message} -> NoticeWorkflow.publish(state, message)
+    end
+  end
+
   @spec install_publish_result(
           promote_result(),
           EditorState.t(),
           TabBar.t(),
           Workspace.t(),
-          pos_integer()
+          pos_integer(),
+          handoff()
         ) :: EditorState.t()
-  defp install_publish_result({:ok, published}, state, tb, workspace, count) do
+  defp install_publish_result(
+         {:ok, %Workspace{review: %WorkspaceReview{state: :conflict}} = conflicted},
+         state,
+         tb,
+         workspace,
+         _count,
+         handoff
+       ) do
+    abandon_handoff(workspace, handoff)
+
+    state
+    |> install_workspace(tb, conflicted)
+    |> NoticeWorkflow.publish(
+      "Some agent edits conflict with newer changes on disk; they stay staged for review"
+    )
+  end
+
+  defp install_publish_result({:ok, published}, state, tb, workspace, count, handoff) do
     acknowledge_open_buffers(workspace.review.changed_files)
 
     state
-    |> install_workspace(tb, rearm(published))
+    |> install_workspace(tb, complete_handoff(published, handoff))
     |> Notifications.dismiss_agent_edits(workspace.id)
     |> NoticeWorkflow.publish("Published agent edits in #{files_copy(count)} to disk")
   end
 
-  defp install_publish_result({:review_fork, conflicted, path}, state, tb, _workspace, _count) do
+  defp install_publish_result({:review_fork, conflicted, path}, state, tb, workspace, _, handoff) do
+    abandon_handoff(workspace, handoff)
+
     state
     |> install_workspace(tb, conflicted)
     |> NoticeWorkflow.publish(
@@ -246,7 +284,8 @@ defmodule MingaEditor.Agent.EditPublication do
     |> MingaEditor.Effects.AgentReview.schedule(path)
   end
 
-  defp install_publish_result({:error, reason}, state, _tb, _workspace, _count) do
+  defp install_publish_result({:error, reason}, state, _tb, workspace, _count, handoff) do
+    abandon_handoff(workspace, handoff)
     NoticeWorkflow.publish(state, "Publishing agent edits failed: #{inspect(reason)}")
   end
 
@@ -334,64 +373,123 @@ defmodule MingaEditor.Agent.EditPublication do
     end
   end
 
-  # A successful promote or discard stops the view's changeset. A live session
-  # gets a fresh overlay so its next edit still has a staging area; without a
-  # session the workspace drops the dead view and the next session creates one.
-  @spec rearm(Workspace.t()) :: Workspace.t()
-  defp rearm(
+  # ── Provider handoff ────────────────────────────────────────────────────
+  #
+  # A successful promote or discard stops the view's changeset. Before touching
+  # the view, a live session's provider is moved to a fresh overlay. The provider
+  # is the authority on whether a turn is running: it refuses the move with
+  # `:request_active`, and then nothing is published or discarded. After a failed
+  # or conflicted publication the provider moves back to the original view, which
+  # still holds the staged edits.
+
+  @spec prepare_handoff(Workspace.t(), String.t()) :: {:ok, handoff()} | {:refused, String.t()}
+  defp prepare_handoff(
          %Workspace{
            payload: %WorkspaceAgent{project_view: %ProjectView{} = old, session: session}
-         } =
-           workspace
-       ) do
-    replacement = replacement_view(old, session)
-    close_view(old)
-    Workspace.set_project_view(workspace, replacement)
+         },
+         verb
+       )
+       when is_pid(session) do
+    if live_local_session?(session),
+      do: hand_off_live_session(old, session, verb),
+      else: no_handoff()
   end
 
-  defp rearm(%Workspace{} = workspace), do: workspace
+  defp prepare_handoff(%Workspace{}, _verb), do: no_handoff()
 
-  @spec replacement_view(ProjectView.t(), pid() | nil) :: ProjectView.t() | nil
-  defp replacement_view(%ProjectView{} = old, session) when is_pid(session) do
-    if live_local_session?(session), do: fresh_session_view(old, session), else: nil
-  end
+  @spec no_handoff() :: {:ok, handoff()}
+  defp no_handoff, do: {:ok, %{fresh: nil, provider: nil}}
 
-  defp replacement_view(%ProjectView{}, _session), do: nil
+  @spec hand_off_live_session(ProjectView.t(), pid(), String.t()) ::
+          {:ok, handoff()} | {:refused, String.t()}
+  defp hand_off_live_session(%ProjectView{} = old, session, verb) do
+    case ProjectView.overlay(old.project_root) do
+      {:ok, fresh} ->
+        move_provider(fresh, session_provider(session), verb)
 
-  @spec fresh_session_view(ProjectView.t(), pid()) :: ProjectView.t() | nil
-  defp fresh_session_view(%ProjectView{} = old, session) do
-    with {:ok, fresh} <- ProjectView.overlay(old.project_root),
-         :ok <- refresh_provider(session, fresh, fn -> close_view(fresh) end) do
-      fresh
-    else
-      _failed -> nil
+      {:error, reason} ->
+        {:refused,
+         "Agent edits stay staged: a new staging area could not be created (#{inspect(reason)})"}
     end
+  end
+
+  @spec move_provider(ProjectView.t(), pid() | nil, String.t()) ::
+          {:ok, handoff()} | {:refused, String.t()}
+  defp move_provider(%ProjectView{} = fresh, nil, _verb),
+    do: {:ok, %{fresh: fresh, provider: nil}}
+
+  defp move_provider(%ProjectView{} = fresh, provider, verb) do
+    case refresh_provider(provider, fresh) do
+      :ok ->
+        {:ok, %{fresh: fresh, provider: provider}}
+
+      {:error, :request_active} ->
+        close_view(fresh)
+        {:refused, "Wait for the agent turn to finish before you #{verb} its edits"}
+
+      {:error, reason} ->
+        close_view(fresh)
+
+        {:refused,
+         "Agent edits stay staged: the agent's editable view could not be renewed (#{inspect(reason)})"}
+    end
+  end
+
+  # The fresh overlay replaces the retired view; without a live session the
+  # workspace drops the dead view and the next session creates one.
+  @spec complete_handoff(Workspace.t(), handoff()) :: Workspace.t()
+  defp complete_handoff(
+         %Workspace{payload: %WorkspaceAgent{project_view: %ProjectView{} = old}} = workspace,
+         %{fresh: fresh}
+       ) do
+    close_view(old)
+    Workspace.set_project_view(workspace, fresh)
+  end
+
+  defp complete_handoff(%Workspace{} = workspace, %{fresh: fresh}),
+    do: Workspace.set_project_view(workspace, fresh)
+
+  # The workspace keeps the original view with its staged edits. The provider
+  # returns to it; if it cannot, the user is told which view the agent now uses.
+  @spec abandon_handoff(Workspace.t(), handoff()) :: :ok
+  defp abandon_handoff(_workspace, %{fresh: nil}), do: :ok
+
+  defp abandon_handoff(_workspace, %{fresh: fresh, provider: nil}), do: close_view(fresh)
+
+  defp abandon_handoff(
+         %Workspace{payload: %WorkspaceAgent{project_view: %ProjectView{} = old}},
+         %{fresh: fresh, provider: provider}
+       ) do
+    case refresh_provider(provider, old) do
+      :ok ->
+        close_view(fresh)
+
+      {:error, reason} ->
+        Minga.API.message(
+          "Agent editable view could not be restored after a failed publish (#{inspect(reason)}). The agent now edits a new staging area; earlier staged edits remain in review."
+        )
+    end
+  end
+
+  @spec session_provider(pid()) :: pid() | nil
+  defp session_provider(session) do
+    case Session.get_provider(session) do
+      provider when is_pid(provider) -> provider
+      _no_provider -> nil
+    end
+  catch
+    :exit, _ -> nil
   end
 
   @spec live_local_session?(pid()) :: boolean()
   defp live_local_session?(session) when node(session) == node(), do: Process.alive?(session)
   defp live_local_session?(_remote_session), do: false
 
-  @spec refresh_provider(pid(), ProjectView.t(), (-> term())) :: :ok | {:error, term()}
-  defp refresh_provider(session, %ProjectView{} = view, on_failure) do
-    result =
-      case Session.get_provider(session) do
-        provider when is_pid(provider) ->
-          MingaAgent.Providers.Native.refresh_project_view(provider, view)
-
-        _no_provider ->
-          {:error, :no_provider}
-      end
-
-    with {:error, reason} <- result do
-      on_failure.()
-      Minga.Log.warning(:agent, "Agent editable view was not renewed: #{inspect(reason)}")
-      {:error, reason}
-    end
+  @spec refresh_provider(pid(), ProjectView.t()) :: :ok | {:error, term()}
+  defp refresh_provider(provider, %ProjectView{} = view) do
+    MingaAgent.Providers.Native.refresh_project_view(provider, view)
   catch
-    :exit, reason ->
-      on_failure.()
-      {:error, {:provider_unavailable, reason}}
+    :exit, reason -> {:error, {:provider_unavailable, reason}}
   end
 
   @spec close_view(ProjectView.t()) :: :ok

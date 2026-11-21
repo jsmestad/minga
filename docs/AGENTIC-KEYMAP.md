@@ -91,9 +91,9 @@ When the agent finishes a turn with staged edits, a notification says, for examp
 | `SPC a p` | Publish agent edits to disk |
 | `SPC a P` | Discard unpublished agent edits |
 
-Publish writes the staged files to disk and merges them into any open buffer, then the agent keeps working in a fresh staging area. If you changed the same lines yourself in the meantime, Minga keeps both versions and opens the conflict review instead of overwriting your work. Discard drops the staged edits and leaves disk and buffers untouched. Both wait until the agent turn finishes; while it runs, Minga says so and changes nothing.
+Publish writes the staged files to disk and merges them into any open buffer, then the agent keeps working in a fresh staging area. The agent itself confirms it is between turns before anything is published or discarded; if it is still working, or its staging area cannot be renewed, nothing changes and Minga says why. If you changed the same lines yourself in the meantime, Minga keeps both versions and opens the conflict review instead of overwriting your work. Discard drops the staged edits and leaves disk and buffers untouched. Both wait until the agent turn finishes; while it runs, Minga says so and changes nothing.
 
-Staged edits are never lost silently. `:q` (when it would exit), `:qa`, and quitting the macOS app stop and show the same Publish and Discard choice. `:qa!` quits and discards them on purpose. Quitting is never blocked when nothing is staged.
+Staged edits are never lost silently. Every ordinary way out stops and shows the same Publish and Discard choice: `:q` and `:wq` when they would close the last tab, `:qa`, `:wqa`, the quit confirmation prompt, and quitting the macOS app. `:wq` and `:wqa` still save your buffers first. The force and abort quits, `:q!` (when it would exit), `:qa!` and `:cq`, quit and discard staged agent edits on purpose. Quitting is never blocked when nothing is staged.
 
 ### Input
 

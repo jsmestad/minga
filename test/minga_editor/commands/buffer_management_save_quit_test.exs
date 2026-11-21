@@ -956,7 +956,7 @@ defmodule MingaEditor.Commands.BufferManagementSaveQuitTest do
       assert {:ok, [%{path: "notes.md"}]} = ProjectView.diff(view)
 
       assert notice_message(ctx) ==
-               "1 agent-edited file is not on disk. Publish (SPC a p) or discard (SPC a P) them before quitting, or use :qa! to discard them."
+               "1 agent-edited file is not on disk. Publish (SPC a p) or discard (SPC a P) them before quitting. :qa!, :q! and :cq quit and discard them."
     end
 
     test "native application quit is cancelled while edits are staged", %{tmp_dir: root} do
@@ -977,6 +977,52 @@ defmodule MingaEditor.Commands.BufferManagementSaveQuitTest do
       send_ex_sync(ctx, "qa!")
 
       assert_received {:shutdown, 0}
+      assert_receive {:DOWN, ^monitor, :process, ^changeset, :normal}
+      assert File.read!(path) == "one\ntwo\n"
+    end
+
+    test ":wqa saves but does not quit while edits are staged", %{tmp_dir: root} do
+      {ctx, path, view} = staged_agent_edit_editor(root, stage?: true)
+
+      send_ex_sync(ctx, "wqa")
+
+      refute_received {:shutdown, 0}
+      assert File.read!(path) == "one\ntwo\n"
+      assert {:ok, [%{path: "notes.md"}]} = ProjectView.diff(view)
+      assert notice_message(ctx) =~ "1 agent-edited file is not on disk"
+    end
+
+    test ":wq on the last tab saves but does not quit while edits are staged", %{tmp_dir: root} do
+      {ctx, path, view} = staged_agent_edit_editor(root, stage?: true)
+
+      send_ex_sync(ctx, "wq")
+
+      refute_received {:shutdown, 0}
+      assert File.read!(path) == "one\ntwo\n"
+      assert {:ok, [%{path: "notes.md"}]} = ProjectView.diff(view)
+      assert notice_message(ctx) =~ "1 agent-edited file is not on disk"
+    end
+
+    test ":q! on the last tab explicitly discards staged edits and quits", %{tmp_dir: root} do
+      {ctx, path, view} = staged_agent_edit_editor(root, stage?: true)
+      changeset = view.ref.changeset
+      monitor = Process.monitor(changeset)
+
+      send_ex_sync(ctx, "q!")
+
+      assert_received {:shutdown, 0}
+      assert_receive {:DOWN, ^monitor, :process, ^changeset, :normal}
+      assert File.read!(path) == "one\ntwo\n"
+    end
+
+    test ":cq explicitly discards staged edits and aborts", %{tmp_dir: root} do
+      {ctx, path, view} = staged_agent_edit_editor(root, stage?: true)
+      changeset = view.ref.changeset
+      monitor = Process.monitor(changeset)
+
+      send_ex_sync(ctx, "cq")
+
+      assert_received {:shutdown, 1}
       assert_receive {:DOWN, ^monitor, :process, ^changeset, :normal}
       assert File.read!(path) == "one\ntwo\n"
     end

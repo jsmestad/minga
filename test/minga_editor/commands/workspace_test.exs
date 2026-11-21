@@ -835,7 +835,11 @@ defmodule MingaEditor.Commands.WorkspaceTest do
 
       provider =
         start_supervised!(
-          Supervisor.child_spec({StubServer, [refresh_to: self()]}, id: :edit_provider)
+          Supervisor.child_spec(
+            {StubServer,
+             [refresh_to: self(), refresh_reply: Keyword.get(opts, :refresh_reply, :ok)]},
+            id: :edit_provider
+          )
         )
 
       session =
@@ -945,6 +949,68 @@ defmodule MingaEditor.Commands.WorkspaceTest do
 
       assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(result) ==
                "Wait for the agent turn to finish before you publish its edits"
+    end
+
+    test "the provider's refusal leaves the staged edit and its view untouched", %{tmp_dir: dir} do
+      %{state: state, path: path, buffer: buffer, view: view, provider: provider} =
+        staged_edit_state(dir, refresh_reply: {:error, :request_active})
+
+      result = Workspace.agent_edits_publish(state)
+
+      assert_receive {:provider_project_view_refreshed, ^provider, %ProjectView{} = offered}
+      refute ProjectView.active?(offered)
+      assert File.read!(path) == "one\ntwo\n"
+      assert Minga.Buffer.content(buffer) == "one\ntwo\n"
+      assert active_project_view(result) == view
+      assert ProjectView.active?(view)
+      assert {:ok, [%{path: "notes.md"}]} = ProjectView.diff(view)
+
+      assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(result) ==
+               "Wait for the agent turn to finish before you publish its edits"
+    end
+
+    test "a provider that cannot take a new view keeps the staged edit for discard too", %{
+      tmp_dir: dir
+    } do
+      %{state: state, view: view} = staged_edit_state(dir, refresh_reply: {:error, :closed})
+
+      result = Workspace.agent_edits_discard(state)
+
+      assert active_project_view(result) == view
+      assert {:ok, [%{path: "notes.md"}]} = ProjectView.diff(view)
+
+      assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(result) ==
+               "Agent edits stay staged: the agent's editable view could not be renewed (:closed)"
+    end
+
+    test "a conflicting publish returns the provider to the view that still holds the edit", %{
+      tmp_dir: dir
+    } do
+      %{state: state, view: view, provider: provider} = staged_edit_state(dir)
+      other = Path.join(dir, "other.md")
+      File.write!(other, "alpha\n")
+      {:ok, source} = ProjectView.resolve_source(view, "other.md")
+
+      token =
+        Minga.Buffer.FileMutation.revision("alpha\n", nil, {:project_view, source.source_id})
+
+      {:ok, _} =
+        ProjectView.conditional_mutate(view, "other.md", token, {:edit, [{"alpha", "agent"}]})
+
+      File.write!(other, "human\n")
+
+      result = Workspace.agent_edits_publish(state)
+
+      assert_receive {:provider_project_view_refreshed, ^provider, %ProjectView{} = fresh}
+      assert_receive {:provider_project_view_refreshed, ^provider, ^view}
+      refute ProjectView.active?(fresh)
+      assert active_project_view(result) == view
+      assert ProjectView.active?(view)
+      assert File.read!(other) == "human\n"
+      assert TabBar.get_workspace(result.shell_runtime.state.tab_bar, 1).review.state == :conflict
+
+      assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(result) ==
+               "Some agent edits conflict with newer changes on disk; they stay staged for review"
     end
 
     test "reports when nothing is staged", %{tmp_dir: dir} do

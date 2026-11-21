@@ -64,6 +64,10 @@ defmodule MingaEditor.Commands.BufferManagement do
 
   @application_quit_retry_ms 10
 
+  # `:gated` exits only when no agent edits are staged; `:discard` is a force or
+  # abort exit that discards them explicitly.
+  @typep exit_intent :: :gated | :discard
+
   @spec execute(state(), Mode.command()) :: state()
 
   # ── Save / quit ───────────────────────────────────────────────────────────
@@ -290,7 +294,7 @@ defmodule MingaEditor.Commands.BufferManagement do
   def execute(state, :force_quit) do
     state
     |> cancel_active_wait_request("discarded without saving")
-    |> close_tab_or_quit()
+    |> close_tab_or_quit(:discard)
   end
 
   def execute(state, {:close_tab, id}) when is_integer(id) do
@@ -306,9 +310,7 @@ defmodule MingaEditor.Commands.BufferManagement do
   def execute(state, :force_quit_all) do
     if any_buffer_dirty?(state), do: WaitRequests.cancel_all("discarded without saving")
 
-    state
-    |> EditPublication.discard_all()
-    |> shutdown_editor()
+    shutdown_editor(state, :discard)
   end
 
   def execute(state, :abort_quit), do: abort_quit_editor(state)
@@ -2283,8 +2285,9 @@ defmodule MingaEditor.Commands.BufferManagement do
     end
   end
 
-  # Staged agent edits block only a quit that exits the editor; closing one tab
-  # keeps the workspace and its edits.
+  # Checked before a quit prompt so the user is not asked to confirm a quit
+  # that `shutdown_editor/2` would refuse. The exit gate stays authoritative.
+  # Closing one tab keeps the workspace and its edits.
   @spec with_published_agent_edits(state(), :active | :all, (state() -> state())) :: state()
   defp with_published_agent_edits(state, :active, continue), do: continue.(state)
 
@@ -2358,29 +2361,33 @@ defmodule MingaEditor.Commands.BufferManagement do
     ArgumentError -> {:error, "Unknown language: #{name}"}
   end
 
-  @spec close_tab_or_quit(state()) :: state()
-  defp close_tab_or_quit(state) do
+  @spec close_tab_or_quit(state(), exit_intent()) :: state()
+  defp close_tab_or_quit(state, exit \\ :gated) do
     {state, active_tab} = Workflow.resolve_active_tab(state)
 
     case active_tab do
-      %Tab{kind: :agent} -> close_agent_tab_or_quit(state)
-      %Tab{kind: :file, id: active_id} -> close_file_tab_or_quit(state, active_id)
-      _ -> shutdown_editor(state)
+      %Tab{kind: :agent} -> close_agent_tab_or_quit(state, exit)
+      %Tab{kind: :file, id: active_id} -> close_file_tab_or_quit(state, active_id, exit)
+      _ -> shutdown_editor(state, exit)
     end
   end
 
-  @spec close_agent_tab_or_quit(state()) :: state()
+  # The last agent tab passes the exit gate before its session is stopped, so a
+  # refused quit leaves the session running.
+  @spec close_agent_tab_or_quit(state(), exit_intent()) :: state()
   defp close_agent_tab_or_quit(
-         %{shell_runtime: %{state: %{tab_bar: %TabBar{tabs: [_single]}}}} = state
+         %{shell_runtime: %{state: %{tab_bar: %TabBar{tabs: [_single]}}}} = state,
+         exit
        ) do
-    state
-    |> cleanup_agent_session()
-    |> shutdown_editor()
+    case pass_exit_gate(state, exit) do
+      {:ok, state} -> state |> cleanup_agent_session() |> exit_editor(0)
+      {:blocked, state} -> state
+    end
   end
 
-  defp close_agent_tab_or_quit(state), do: close_agent_tab(state)
+  defp close_agent_tab_or_quit(state, _exit), do: close_agent_tab(state)
 
-  defp close_file_tab_or_quit(state, active_id) do
+  defp close_file_tab_or_quit(state, active_id, exit \\ :gated) do
     tb = state.shell_runtime.state.tab_bar
     preferred_replacement_id = if tb.active_id == active_id, do: nil, else: tb.active_id
 
@@ -2389,16 +2396,16 @@ defmodule MingaEditor.Commands.BufferManagement do
 
       if TabBar.count(tb) > 1,
         do: close_file_tab(state, preferred_replacement_id),
-        else: quit_last_file_tab(state)
+        else: quit_last_file_tab(state, exit)
     else
       state
     end
   end
 
-  defp quit_last_file_tab(state) do
+  defp quit_last_file_tab(state, exit) do
     case quit_last_tab_option(state) do
       :empty_state -> remove_current_buffer(state, :force)
-      _ -> shutdown_editor(state)
+      _ -> shutdown_editor(state, exit)
     end
   end
 
@@ -2942,13 +2949,26 @@ defmodule MingaEditor.Commands.BufferManagement do
 
   defp cancel_active_wait_request(state, _reason), do: state
 
-  # Exits the editor. Single exit point so shutdown cleanup (flush buffers,
-  # save session, etc.) can be added in one place.
-  #
+  # Exits the editor. Single exit decision: every ordinary exit (`:q`, `:qa`,
+  # `:wq`, `:wqa`, `ZZ`, the quit prompt, native quit) passes the staged agent
+  # edit gate here, and every force exit (`:q!`, `:qa!`) discards them
+  # explicitly. `:cq` discards in `abort_quit_editor/1`.
+  @spec shutdown_editor(state(), exit_intent()) :: state()
+  defp shutdown_editor(state, exit \\ :gated) do
+    case pass_exit_gate(state, exit) do
+      {:ok, state} -> exit_editor(state, 0)
+      {:blocked, state} -> state
+    end
+  end
+
+  @spec pass_exit_gate(state(), exit_intent()) :: {:ok, state()} | {:blocked, state()}
+  defp pass_exit_gate(state, :gated), do: EditPublication.before_quit(state)
+  defp pass_exit_gate(state, :discard), do: {:ok, EditPublication.discard_all(state)}
+
   # The shutdown function is injectable via application config so the chaos
   # fuzzer can prevent `System.stop/1` from killing the VM mid-test.
-  @spec shutdown_editor(state()) :: state()
-  defp shutdown_editor(state) do
+  @spec exit_editor(state(), 0) :: state()
+  defp exit_editor(state, 0) do
     if any_buffer_dirty?(state) do
       :ok = WaitRequests.cancel_all("editor closed with unsaved changes")
     else
@@ -2964,6 +2984,7 @@ defmodule MingaEditor.Commands.BufferManagement do
   # so external tools (like `git commit`) can detect the user cancelled.
   @spec abort_quit_editor(state()) :: state()
   defp abort_quit_editor(state) do
+    state = EditPublication.discard_all(state)
     :ok = WaitRequests.cancel_all("editor aborted")
     shutdown_fn = Application.get_env(:minga, :shutdown_fn, &System.stop/1)
     shutdown_fn.(1)
