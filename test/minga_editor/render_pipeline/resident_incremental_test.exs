@@ -1031,8 +1031,8 @@ defmodule MingaEditor.RenderPipeline.ResidentIncrementalTest do
     editor = %{editor | parser: Parser.accept_highlighting(editor.parser, highlighting)}
     state = warm(editor)
 
-    assert :ok = BufferProcess.replace_lines(buffer, 32, 32, "Ordinary line")
-    assert :ok = BufferProcess.replace_lines(buffer, 96, 96, "# TODO Keep")
+    assert :ok = BufferProcess.apply_edit(buffer, 32, 0, 32, 0, "O")
+    assert :ok = BufferProcess.apply_edit(buffer, 96, 7, 96, 7, "K")
     {model, state} = build_frame(state)
 
     assert [
