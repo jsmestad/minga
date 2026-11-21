@@ -318,6 +318,24 @@ defmodule MingaAgent.Session.TranscriptTest do
     end
   end
 
+  test "an empty active transcript ignores stray IDs but an archived snapshot still reserves them" do
+    for {branches, next_id} <- [{[], 1}, {[{"empty", [], [90], @later}], 91}] do
+      transcript =
+        Transcript.restore(
+          Transcript.new([], @now, make_ref()),
+          [],
+          [80],
+          branches,
+          TurnUsage.new(),
+          MapSet.new(),
+          @now
+        )
+
+      appended = Transcript.append(transcript, {:user, "new"})
+      assert entry_ids(appended) == [next_id]
+    end
+  end
+
   test "legacy branch IDs restart at one without rewinding the active allocator" do
     messages = [{:user, "one"}, {:assistant, "two"}]
 
