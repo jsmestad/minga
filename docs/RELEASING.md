@@ -179,8 +179,7 @@ Use the archive that matches your OS and CPU. The launcher maps `--cookie-file`,
 
 1. Start from a green `main`. The `Test (Extension SDK)` CI job must pass for the commit you release, including its docs and package build.
 2. Bump `@version` in `sdk/mix.exs` and add the matching entry to `sdk/CHANGELOG.md`. If the release needs a newer Minga, update the compatibility table in both `sdk/CHANGELOG.md` and `sdk/README.md`. Merge that change through a pull request.
-3. Tag the merged commit as `sdk-vX.Y.Z` and push the tag. HexDocs source links point at this tag.
-4. Build the package and review exactly what will ship:
+3. Build the package and review exactly what will ship:
 
    ```bash
    cd sdk
@@ -189,5 +188,5 @@ Use the archive that matches your OS and CPU. The launcher maps `--cookie-file`,
    ```
 
    The file list must contain only `lib/`, `mix.exs`, `README.md`, `CHANGELOG.md`, and `LICENSE`. Stop if anything else appears.
-5. Publish from your own account with `mix hex.publish`. Hex shows the package and docs before asking for confirmation; check the version and file list again there.
-6. Publish or update dependent extensions only after the new SDK version is visible on Hex.
+4. Publish from your own account with `mix hex.publish`. HexDocs source links point at `main`. Hex shows the package and docs before asking for confirmation; check the version and file list again there.
+5. Publish or update dependent extensions only after the new SDK version is visible on Hex.

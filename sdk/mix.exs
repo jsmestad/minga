@@ -46,7 +46,7 @@ defmodule MingaSdk.MixProject do
       licenses: ["MIT"],
       links: %{
         "GitHub" => @source_url,
-        "Changelog" => "#{@source_url}/blob/sdk-v#{@version}/sdk/CHANGELOG.md"
+        "Changelog" => "#{@source_url}/blob/main/sdk/CHANGELOG.md"
       },
       files: ["lib", "mix.exs", "README.md", "CHANGELOG.md", "LICENSE"]
     ]
@@ -55,8 +55,8 @@ defmodule MingaSdk.MixProject do
   defp docs do
     [
       main: "readme",
-      source_ref: "sdk-v#{@version}",
-      source_url_pattern: "#{@source_url}/blob/sdk-v#{@version}/sdk/%{path}#L%{line}",
+      source_ref: "main",
+      source_url_pattern: "#{@source_url}/blob/main/sdk/%{path}#L%{line}",
       extras: ["README.md", "CHANGELOG.md", "LICENSE"],
       groups_for_modules: [
         Extension: [
