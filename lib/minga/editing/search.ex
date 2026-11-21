@@ -603,7 +603,7 @@ defmodule Minga.Editing.Search do
   defp find_word_start_byte(_text, 0), do: 0
 
   defp find_word_start_byte(text, col) do
-    if col > 0 and word_char_at?(text, col - 1) do
+    if word_char_at?(text, col - 1) do
       find_word_start_byte(text, col - 1)
     else
       col
