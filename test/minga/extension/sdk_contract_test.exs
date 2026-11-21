@@ -1,7 +1,8 @@
 defmodule Minga.Extension.SdkContractTest do
   use ExUnit.Case, async: true
 
-  # Stub modules whose runtime counterpart is a large host module. The SDK exposes a deliberate subset, so only the SDK-to-runtime direction is checked for them.
+  # Stub modules whose runtime counterpart is a large host module.
+  # The SDK exposes a deliberate subset, so only SDK-to-runtime is checked.
   @subset_modules %{
     Minga.Buffer =>
       "Buffer stubs cover the read and edit calls extensions use; the host API is much larger.",
