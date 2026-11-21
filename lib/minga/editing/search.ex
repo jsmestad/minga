@@ -130,10 +130,14 @@ defmodule Minga.Editing.Search do
   def find_next(content, pattern, cursor, direction, opts \\ [])
   def find_next(_content, "", _cursor, _direction, _opts), do: nil
 
-  def find_next(content, pattern, cursor, direction, opts)
-      when direction in [:forward, :backward] do
+  def find_next(content, pattern, cursor, :forward, opts) do
     lines = :binary.split(content, "\n", [:global])
-    find_on_lines(lines, compile_matcher(pattern, opts), cursor, direction)
+    find_forward(lines, compile_matcher(pattern, opts), cursor)
+  end
+
+  def find_next(content, pattern, cursor, :backward, opts) do
+    lines = :binary.split(content, "\n", [:global])
+    find_backward(lines, compile_matcher(pattern, opts), cursor)
   end
 
   @spec find_on_lines([String.t()], matcher(), position(), direction()) :: position() | nil
