@@ -63,6 +63,7 @@ defmodule Minga.Project.FileFind.WorkerTest do
   } do
     output = "first\nsecond\n"
     shell = System.find_executable("sh")
+
     script = ~S"""
     while [ ! -f "$1" ]; do sleep 0.01; done
     printf 'first\nsecond\n'
