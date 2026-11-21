@@ -21,6 +21,11 @@ defmodule MingaAgent.ArtifactQuota.State do
           fault_injector: FaultInjector.t()
         }
 
+  @typep release_operation ::
+           :finish_capture
+           | {:cancel_capture | :release_reservation | :release_artifact, non_neg_integer(),
+              non_neg_integer()}
+
   @enforce_keys [
     :root,
     :storage,
@@ -177,11 +182,10 @@ defmodule MingaAgent.ArtifactQuota.State do
 
   def finish_capture(%__MODULE__{} = state, namespace) do
     with {:ok, row} <- fetch_row(state, namespace),
-         true <- row.open_captures > 0 do
+         :ok <- admit_release(row, :finish_capture) do
       mutation = Ledger.finish_capture(opened_db(state), namespace, fault_opts(state))
       apply_finish(state, row, mutation)
     else
-      false -> {{:error, :invalid_open_capture_release}, state}
       {:error, _reason} = error -> {error, state}
     end
   end
@@ -198,15 +202,12 @@ defmodule MingaAgent.ArtifactQuota.State do
   def cancel_capture(%__MODULE__{} = state, namespace, bytes, items)
       when is_integer(bytes) and bytes >= 0 and is_integer(items) and items >= 0 do
     with {:ok, row} <- fetch_row(state, namespace),
-         true <-
-           row.charged_bytes >= bytes and row.items >= items and row.artifacts > 0 and
-             row.open_captures > 0 do
+         :ok <- admit_release(row, {:cancel_capture, bytes, items}) do
       mutation =
         Ledger.cancel_capture(opened_db(state), namespace, bytes, items, fault_opts(state))
 
       apply_capture_cancel(state, row, bytes, items, mutation)
     else
-      false -> {{:error, :invalid_quota_release}, state}
       {:error, _reason} = error -> {error, state}
     end
   end
@@ -223,13 +224,12 @@ defmodule MingaAgent.ArtifactQuota.State do
   def release_reservation(%__MODULE__{} = state, namespace, bytes, items)
       when is_integer(bytes) and bytes >= 0 and is_integer(items) and items >= 0 do
     with {:ok, row} <- fetch_row(state, namespace),
-         true <- row.charged_bytes >= bytes and row.items >= items do
+         :ok <- admit_release(row, {:release_reservation, bytes, items}) do
       mutation =
         Ledger.release_reservation(opened_db(state), namespace, bytes, items, fault_opts(state))
 
       apply_reservation_release(state, row, bytes, items, mutation)
     else
-      false -> {{:error, :invalid_quota_release}, state}
       {:error, _reason} = error -> {error, state}
     end
   end
@@ -246,14 +246,34 @@ defmodule MingaAgent.ArtifactQuota.State do
   def release_artifact(%__MODULE__{} = state, namespace, bytes, items)
       when is_integer(bytes) and bytes >= 0 and is_integer(items) and items >= 0 do
     with {:ok, row} <- fetch_row(state, namespace),
-         true <- row.artifacts > 0 and row.charged_bytes >= bytes and row.items >= items do
+         :ok <- admit_release(row, {:release_artifact, bytes, items}) do
       mutation = Ledger.release(opened_db(state), namespace, bytes, items, 1, fault_opts(state))
       apply_release(state, row, bytes, items, mutation)
     else
-      false -> {{:error, :invalid_quota_release}, state}
       {:error, _reason} = error -> {error, state}
     end
   end
+
+  @spec admit_release(Ledger.namespace_row(), release_operation()) ::
+          :ok | {:error, :invalid_open_capture_release | :invalid_quota_release}
+  defp admit_release(%{open_captures: open}, :finish_capture) when open > 0, do: :ok
+  defp admit_release(_row, :finish_capture), do: {:error, :invalid_open_capture_release}
+
+  defp admit_release(%{charged_bytes: charged, items: reserved}, {_kind, bytes, items})
+       when charged < bytes or reserved < items,
+       do: {:error, :invalid_quota_release}
+
+  defp admit_release(_row, {:release_reservation, _bytes, _items}), do: :ok
+
+  defp admit_release(%{artifacts: artifacts, open_captures: open}, {:cancel_capture, _, _})
+       when artifacts > 0 and open > 0,
+       do: :ok
+
+  defp admit_release(%{artifacts: artifacts}, {:release_artifact, _, _}) when artifacts > 0,
+    do: :ok
+
+  defp admit_release(_row, {kind, _, _}) when kind in [:cancel_capture, :release_artifact],
+    do: {:error, :invalid_quota_release}
 
   @doc "Reconciles aggregate counters to one manifest's exact durable accounting."
   @spec reconcile_namespace(
@@ -488,19 +508,17 @@ defmodule MingaAgent.ArtifactQuota.State do
   defp admit_new_namespace(state, namespace, limits) do
     envelope = Limits.sqlite_envelope_bytes()
 
-    with true <- map_size(state.rows) < state.limits.root_namespaces,
-         true <- state.total_bytes + envelope <= state.limits.root_bytes do
-      mutation = Ledger.insert_namespace(opened_db(state), namespace, limits, fault_opts(state))
-      row = new_row(namespace, limits)
-      apply_namespace_insert(state, row, limits, mutation)
-    else
-      false ->
-        reason =
-          if map_size(state.rows) >= state.limits.root_namespaces,
-            do: :root_namespace_limit,
-            else: :root_disk_quota
+    case state do
+      %{rows: rows, limits: root_limits} when map_size(rows) >= root_limits.root_namespaces ->
+        {{:error, :root_namespace_limit}, state}
 
-        {{:error, reason}, state}
+      %{total_bytes: total, limits: root_limits} when total + envelope > root_limits.root_bytes ->
+        {{:error, :root_disk_quota}, state}
+
+      _ ->
+        mutation = Ledger.insert_namespace(opened_db(state), namespace, limits, fault_opts(state))
+        row = new_row(namespace, limits)
+        apply_namespace_insert(state, row, limits, mutation)
     end
   end
 
