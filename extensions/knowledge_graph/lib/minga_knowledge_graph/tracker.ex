@@ -33,10 +33,9 @@ defmodule MingaKnowledgeGraph.Tracker do
   @type state :: %{
           graph: %{String.t() => stats()},
           levels: %{String.t() => 0..4},
-          briefed: MapSet.t(String.t()),
           briefings: %{reference() => {String.t(), String.t()}},
           persist_timer: reference() | nil,
-          ai_client: function() | nil
+          stream_ai: ([AI.message()], AI.opts() -> {:ok, reference()})
         }
 
   @spec start_link(keyword()) :: GenServer.on_start()
@@ -76,10 +75,9 @@ defmodule MingaKnowledgeGraph.Tracker do
       %{
         graph: graph,
         levels: %{},
-        briefed: MapSet.new(),
         briefings: %{},
         persist_timer: nil,
-        ai_client: Keyword.get(opts, :ai_client)
+        stream_ai: Keyword.get(opts, :stream_ai, &AI.stream/2)
       }
       |> refresh_all_levels(now)
 
@@ -196,25 +194,18 @@ defmodule MingaKnowledgeGraph.Tracker do
         Briefing.render(path, {:generating})
 
         {:ok, ref} =
-          AI.stream(
+          state.stream_ai.(
             Briefing.messages(path, content),
-            [reply_to: self(), max_tokens: @briefing_max_tokens] ++ ai_client_opt(state)
+            reply_to: self(),
+            max_tokens: @briefing_max_tokens
           )
 
-        %{
-          state
-          | briefed: MapSet.put(state.briefed, path),
-            briefings: Map.put(state.briefings, ref, {path, ""})
-        }
+        %{state | briefings: Map.put(state.briefings, ref, {path, ""})}
 
       {:error, _reason} ->
         state
     end
   end
-
-  @spec ai_client_opt(state()) :: keyword()
-  defp ai_client_opt(%{ai_client: nil}), do: []
-  defp ai_client_opt(%{ai_client: client}), do: [client: client]
 
   @spec handle_ai_event(state(), reference(), AI.event()) :: state()
   defp handle_ai_event(state, ref, event) do

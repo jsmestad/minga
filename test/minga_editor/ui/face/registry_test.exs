@@ -3,6 +3,7 @@ defmodule MingaEditor.UI.Face.RegistryTest do
 
   alias Minga.Core.Face
   alias MingaEditor.UI.Face.Registry
+  alias MingaEditor.UI.Theme
 
   describe "new/0" do
     test "creates a registry with only the default face" do
@@ -55,7 +56,7 @@ defmodule MingaEditor.UI.Face.RegistryTest do
 
   describe "from_theme/1" do
     test "uses editor fg/bg for default face" do
-      theme = MingaEditor.UI.Theme.get!(:doom_one)
+      theme = Theme.get!(:doom_one)
       reg = Registry.from_theme(theme)
 
       default = Registry.resolve(reg, "default")
@@ -64,12 +65,21 @@ defmodule MingaEditor.UI.Face.RegistryTest do
     end
 
     test "all syntax entries become resolvable faces" do
-      theme = MingaEditor.UI.Theme.get!(:doom_one)
+      theme = Theme.get!(:doom_one)
       reg = Registry.from_theme(theme)
 
       keyword = Registry.resolve(reg, "keyword")
       assert keyword.fg != nil
       assert keyword.bold == true
+    end
+
+    test "missing parents and unknown names have distinct defaults" do
+      theme = Theme.get!(:minga_default)
+      reg = Registry.from_theme(%{theme | syntax: %{"missing.child" => []}})
+
+      assert Registry.resolve(reg, "missing.child").fg == Face.default().fg
+      assert Registry.resolve(reg, "missing.other").fg == theme.editor.fg
+      assert Registry.get(reg, "@lsp.type.class") == nil
     end
   end
 

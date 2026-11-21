@@ -109,9 +109,7 @@ defmodule Minga.Editing.Motion.VisualLine do
   @spec visual_line_start(Document.t(), position(), pos_integer(), wrap_opts()) :: position()
   def visual_line_start(doc, {line, col}, content_width, opts) do
     line_text = Document.line_at(doc, line)
-    wrap_entry = wrap_entry(line_text, content_width, opts)
-    {vrow_idx, _vrow_col} = source_byte_to_visual(wrap_entry, col, opts)
-    vrow = Enum.at(wrap_entry, vrow_idx)
+    {_index, vrow} = line_text |> wrap_entry(content_width, opts) |> WrapMap.row_at_byte(col)
     {line, vrow.byte_offset}
   end
 
@@ -127,9 +125,7 @@ defmodule Minga.Editing.Motion.VisualLine do
   @spec visual_line_end(Document.t(), position(), pos_integer(), wrap_opts()) :: position()
   def visual_line_end(doc, {line, col}, content_width, opts) do
     line_text = Document.line_at(doc, line)
-    wrap_entry = wrap_entry(line_text, content_width, opts)
-    {vrow_idx, _vrow_col} = source_byte_to_visual(wrap_entry, col, opts)
-    vrow = Enum.at(wrap_entry, vrow_idx)
+    {_index, vrow} = line_text |> wrap_entry(content_width, opts) |> WrapMap.row_at_byte(col)
     trimmed = vrow |> source_text() |> String.trim_trailing()
     end_byte = max(byte_size(trimmed) - 1, 0)
     {line, vrow.byte_offset + end_byte}
@@ -163,11 +159,7 @@ defmodule Minga.Editing.Motion.VisualLine do
   @spec source_byte_to_visual(WrapMap.wrap_entry(), non_neg_integer(), wrap_opts()) ::
           {non_neg_integer(), non_neg_integer()}
   def source_byte_to_visual(wrap_entry, source_byte, opts \\ []) do
-    {vrow, idx} =
-      wrap_entry
-      |> Enum.with_index()
-      |> Enum.filter(fn {row, _idx} -> row.byte_offset <= source_byte end)
-      |> Enum.at(-1, {hd(wrap_entry), 0})
+    {idx, vrow} = WrapMap.row_at_byte(wrap_entry, source_byte)
 
     source_byte_in_row = max(source_byte - vrow.byte_offset, 0)
     row_start_col = indent_width(vrow)

@@ -117,6 +117,81 @@ defmodule Minga.Keymap.ActiveSourceCleanupTest do
              )
   end
 
+  test "prefixed and bare multi-key filetype aliases differ when replacing defaults", %{
+    keymap: keymap
+  } do
+    rejected_source = {:extension, :active_cleanup}
+    owner = {:extension, :active_cleanup_other}
+    keys = KeyParser.parse!("t t")
+
+    for spelling <- ["SPC m t", "SPC m t t"] do
+      assert {:error, reason} =
+               Active.bind(keymap, :normal, spelling, :rejected, "Rejected",
+                 filetype: :elixir,
+                 source: rejected_source
+               )
+
+      assert reason ==
+               "key binding #{inspect(spelling)} for :normal already exists and cannot be replaced by #{inspect(rejected_source)}"
+    end
+
+    assert {:command, :test_file, _} =
+             keymap |> Active.filetype_trie(:elixir) |> Bindings.lookup_sequence(keys)
+
+    assert :ok =
+             Active.bind(keymap, :normal, "t t", :replacement, "Replacement",
+               filetype: :elixir,
+               source: owner
+             )
+
+    assert {:command, :replacement, _} =
+             keymap |> Active.filetype_trie(:elixir) |> Bindings.lookup_sequence(keys)
+
+    for spelling <- ["t t", "SPC m t t"], source <- [:config, rejected_source] do
+      assert {:error, reason} =
+               Active.bind(keymap, :normal, spelling, :rejected, "Rejected",
+                 filetype: :elixir,
+                 source: source
+               )
+
+      assert reason ==
+               "key binding #{inspect(spelling)} for :normal is already registered by #{inspect(owner)}"
+    end
+
+    assert :ok =
+             Active.bind(keymap, :normal, "SPC m t t", :rebound, "Rebound",
+               filetype: :elixir,
+               source: owner
+             )
+
+    assert {:command, :rebound, _} =
+             keymap |> Active.filetype_trie(:elixir) |> Bindings.lookup_sequence(keys)
+  end
+
+  test "filetype false writes globally but source cleanup treats it as scoped", %{keymap: keymap} do
+    source = {:extension, :active_cleanup}
+    other_source = {:extension, :active_cleanup_other}
+    [key] = KeyParser.parse!("C-j")
+
+    assert :ok =
+             Active.bind(keymap, :insert, "C-j", :source_cmd, "Source command",
+               filetype: false,
+               source: source
+             )
+
+    assert {:command, :source_cmd} = Active.resolve_mode_binding(keymap, :insert, nil, key)
+
+    assert {:error, reason} =
+             Active.bind(keymap, :insert, "C-j", :other_cmd, "Other command",
+               filetype: false,
+               source: other_source
+             )
+
+    assert reason =~ "already registered by #{inspect(source)}"
+    assert :ok = Active.unregister_source(keymap, source)
+    assert {:command, :source_cmd} = Active.resolve_mode_binding(keymap, :insert, nil, key)
+  end
+
   test "extension bindings cannot replace config-owned bindings", %{keymap: keymap} do
     source = {:extension, :active_cleanup}
 

@@ -2134,7 +2134,7 @@ defmodule MingaAgent.Session do
     snapshot = state.credentials_snapshot_fn.()
     candidates = discovered_model_candidates(state, snapshot, false)
 
-    case next_model_candidate(candidates, state.model_selection) do
+    case next_model_candidate(candidates) do
       %ModelCandidate{selection: selection} ->
         case apply_resolved_model_selection(state, selection) do
           {:ok, state} ->
@@ -7608,18 +7608,14 @@ defmodule MingaAgent.Session do
     }
   end
 
-  @spec next_model_candidate([ModelCandidate.t()], ModelSelection.t() | nil) ::
-          ModelCandidate.t() | nil
-  defp next_model_candidate([], _current), do: nil
-  defp next_model_candidate([candidate | _rest], nil), do: candidate
+  @spec next_model_candidate([ModelCandidate.t()]) :: ModelCandidate.t() | nil
+  defp next_model_candidate([]), do: nil
 
-  defp next_model_candidate(candidates, selection) do
-    current_id = ModelSelection.id(selection)
-
-    current_index =
-      Enum.find_index(candidates, &(ModelSelection.id(&1.selection) == current_id)) || -1
-
-    Enum.at(candidates, rem(current_index + 1, length(candidates)))
+  defp next_model_candidate([first | _rest] = candidates) do
+    case Enum.find_index(candidates, & &1.current) do
+      nil -> first
+      index -> Enum.at(candidates, index + 1, first)
+    end
   end
 
   @spec update_model_configuration(state(), String.t()) :: state()

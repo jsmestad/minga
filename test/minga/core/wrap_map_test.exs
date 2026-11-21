@@ -102,6 +102,23 @@ defmodule Minga.Core.WrapMapTest do
     end
   end
 
+  describe "row_at_byte/2" do
+    test "selects continuations by start byte and keeps the last row past the end" do
+      [rows] = WrapMap.compute(["éabcde"], 2)
+      [first, second, last] = rows
+
+      assert WrapMap.row_at_byte(rows, 2) == {0, first}
+      assert WrapMap.row_at_byte(rows, 3) == {1, second}
+      assert WrapMap.row_at_byte(rows, 5) == {2, last}
+      assert WrapMap.row_at_byte(rows, 99) == {2, last}
+    end
+
+    test "selects the only row of an empty logical line" do
+      [[row] = rows] = WrapMap.compute([""], 2)
+      assert WrapMap.row_at_byte(rows, 0) == {0, row}
+    end
+  end
+
   describe "visual_row_count/1" do
     test "counts total visual rows across all entries" do
       map = WrapMap.compute(["short", String.duplicate("x", 30), "also short"], 10)
