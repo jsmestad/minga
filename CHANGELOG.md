@@ -30,6 +30,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - macOS Agent elapsed-time refreshes stop when the context bar disappears and refresh immediately when a new dispatch timestamp arrives.
 - Idle Agent activity no longer appears as completed work while unfinished tasks or retained activity remain visible.
 - A timed-out Agent hook escalates termination even if its shell exits before a descendant that ignores `TERM`.
+- Agent shell operations terminate their process group on timeout or when the owning worker exits, preventing delayed writes by ordinary background children.
 - Agent transcript updates locate streaming tails and tool calls through indexed source storage. Atomic revision cursors return only current changed entries, with consistent identity, pins, usage and reset facts instead of separate full-history queries.
 - Session storage can preserve a bounded draft separately from the model conversation, even before the first turn. Draft revisions reject stale saves and protect retained attachments. This does not enable composer autosave.
 - Agent History on macOS and in the terminal opens older retained messages without moving the live transcript or changing the draft. Use History or `SPC a H`, then select Earlier retained messages to page back. Select a message to copy its retained text.
@@ -88,6 +89,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- CI can save a refreshed Dialyzer cache when `mix.exs` changes which applications the PLT includes, instead of repeating that repair on every run.
 - Adversarial diagnostics ignore replies from superseded or invalidated analyses, so an old reply cannot restore findings after an edit, close, or clear.
 - Repeated config reloads keep using the config home selected at startup.
 - Source launchers keep Minga configuration and runtime data, including project switcher history, separate from the installed editor. Run `make clean` after quitting the source editor to reset the current worktree's profile without deleting build artifacts.
