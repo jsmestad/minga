@@ -27,6 +27,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - Local ChatGPT sign-in is available from Models and connections and `/login`. Cancel stops the current authorization attempt without changing credentials or the draft. The manual fallback uses masked input.
 - On macOS, pickers open below the window toolbar so the search field and results do not overlap the window controls. The selected row uses readable text on the selection background.
 - On narrow terminals, status notices stay readable when optional file and cursor information does not fit.
+- The traditional modeline reads only placement metadata when ordering custom segments and builds status bar output without intermediate groups.
 - Native approval geometry checks bind the live host and window to their run before making one foreground request. Acceptance still requires external foreground observation, global button hits, native captures and complete child cleanup.
 - macOS Agent elapsed-time refreshes stop when the context bar disappears and refresh immediately when a new dispatch timestamp arrives.
 - On macOS, typing in the Agent composer, moving the caret and opening prompt completion no longer re-evaluate the conversation, so typing costs the same in a long session as in a new one.

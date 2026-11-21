@@ -233,11 +233,16 @@ defmodule Minga.Config.ModelineSegments do
 
   @spec names_for_side(table(), ModelineSegment.side()) :: [atom()]
   def names_for_side(table, side) when is_atom(table) and side in [:left, :right] do
-    table
-    |> list()
-    |> Enum.filter(&(&1.side == side))
-    |> Enum.sort_by(&{-&1.priority, &1.name})
-    |> Enum.map(& &1.name)
+    if table_ready?(table) do
+      pattern = {:_, %{__struct__: ModelineSegment, side: side, priority: :"$1", name: :"$2"}}
+
+      table
+      |> :ets.match(pattern)
+      |> Enum.sort_by(fn [priority, name] -> {-priority, name} end)
+      |> Enum.map(fn [_priority, name] -> name end)
+    else
+      []
+    end
   end
 
   @doc "Returns all custom modeline segments."
