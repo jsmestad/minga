@@ -704,11 +704,10 @@ defmodule MingaEditor.Commands.Editing do
           non_neg_integer()
         ) :: boolean()
   defp line_comment_scope_at_eol?(highlight, buf, content, line, col) do
-    with [line_text] <- Buffer.lines(buf, line, 1),
-         true <- col == byte_size(line_text),
-         token when is_binary(token) <- language_comment_token(Buffer.filetype(buf)),
-         true <- line_comment_token?(token) do
-      line_comment_scope_before_cursor?(highlight, buf, content, line, line_text)
+    with [line_text] when col == byte_size(line_text) <- Buffer.lines(buf, line, 1),
+         token when is_binary(token) <- language_comment_token(Buffer.filetype(buf)) do
+      line_comment_token?(token) and
+        line_comment_scope_before_cursor?(highlight, buf, content, line, line_text)
     else
       _ -> false
     end
