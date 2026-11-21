@@ -148,5 +148,41 @@ defmodule Minga.Tool.ManagerTest do
       assert clangd.status == :installed
       assert clangd.installed_version == "1.0.0"
     end
+
+    test "groups pending and failed tools first, then installed and available tools" do
+      Stub.set_install_result({:ok, "1.0.0"})
+      assert :ok = Manager.install(:zls)
+      await_install(:zls)
+
+      Stub.set_install_result({:error, "simulated failure"})
+      assert :ok = Manager.install(:gopls)
+      await_install(:gopls)
+
+      Stub.set_install_result({:ok, "1.0.0"})
+      gate_ref = Stub.block_next_install()
+      assert :ok = Manager.install(:black)
+      assert_receive {:install_blocked, ^gate_ref, install_pid, :black}, 1_000
+
+      rows =
+        try do
+          Manager.tool_status_list()
+        after
+          Stub.release_install(install_pid, gate_ref)
+        end
+
+      await_install(:black)
+
+      statuses =
+        for %{recipe: %{name: name}, status: status} <- rows,
+            name in [:black, :gopls, :zls, :clangd],
+            do: {name, status}
+
+      assert statuses == [
+               black: :installing,
+               gopls: :failed,
+               zls: :installed,
+               clangd: :not_installed
+             ]
+    end
   end
 end

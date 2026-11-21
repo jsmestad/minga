@@ -232,7 +232,7 @@ defmodule Minga.Tool.Manager do
           error_reason: error_reason
         }
       end)
-      |> Enum.sort_by(fn %{recipe: r} -> {status_sort_order(r.name, state), r.label} end)
+      |> Enum.sort_by(fn row -> {status_order(row.status), row.recipe.label} end)
 
     {:reply, statuses, state}
   end
@@ -511,12 +511,6 @@ defmodule Minga.Tool.Manager do
     end
 
     :ok
-  end
-
-  @spec status_sort_order(atom(), map()) :: non_neg_integer()
-  defp status_sort_order(name, state) do
-    {status, _, _} = tool_status(name, state)
-    status_order(status)
   end
 
   # Sort order for tool list display. :update_available will sort as :installed
