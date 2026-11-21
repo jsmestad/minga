@@ -722,13 +722,7 @@ defmodule MingaEditor.Agent.DiffReviewTest do
       {resolved, reversed_selection} =
         hunks
         |> Enum.zip(decisions)
-        |> Enum.reduce({review, []}, fn {hunk, rejected?}, {review, selected} ->
-          if rejected? do
-            {DiffReview.reject_current(review), [hunk | selected]}
-          else
-            {DiffReview.accept_current(review), selected}
-          end
-        end)
+        |> Enum.reduce({review, []}, &apply_revert_decision/2)
 
       expected = Enum.reduce(reversed_selection, after_lines, &Git.revert_hunk(&2, &1))
       assert DiffReview.materialized_lines(resolved) == expected
@@ -736,6 +730,12 @@ defmodule MingaEditor.Agent.DiffReviewTest do
 
     :ok
   end
+
+  defp apply_revert_decision({hunk, true}, {review, selected}),
+    do: {DiffReview.reject_current(review), [hunk | selected]}
+
+  defp apply_revert_decision({_hunk, false}, {review, selected}),
+    do: {DiffReview.accept_current(review), selected}
 
   defp simple_review do
     DiffReview.new("test.ex", "line1\nline2\n", "line1\nchanged\n")
