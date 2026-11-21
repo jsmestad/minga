@@ -64,6 +64,36 @@ defmodule MingaEditor.Commands.FormattingSchedulerTest do
     assert OperationFeedback.selected(state.feedback.operation_feedback).status == :running
   end
 
+  test "ordinary save stays ready when scheduler rejection fails native quit" do
+    Options.set_for_filetype(:elixir, :formatter, "cat")
+
+    on_exit(fn ->
+      Options.reset()
+      Options.set(:clipboard, :none)
+    end)
+
+    task_supervisor = start_supervised!({Task.Supervisor, []})
+    scheduler = start_supervised!({EffectScheduler, task_supervisor: task_supervisor})
+    state = TestHelpers.base_state(effect_scheduler: scheduler, rendering: :disabled)
+    buffer = state.workspace.buffers.active
+    version = Buffer.version(buffer)
+    save = {:save_after_format, buffer, version, :save}
+    quit = {:save_after_format, buffer, version, {:application_quit, 1, [], "example.ex"}}
+
+    assert {:ready, save_state} = Formatting.format_for_save(state, buffer, save)
+
+    assert {:failed, {:scheduling_rejected, :owner_unavailable}, quit_state} =
+             Formatting.format_for_application_quit(state, buffer, quit)
+
+    for result <- [save_state, quit_state] do
+      assert %{
+               kind: :external_format,
+               status: :error,
+               message: "Format not scheduled: owner_unavailable"
+             } = OperationFeedback.selected(result.feedback.operation_feedback)
+    end
+  end
+
   test "superseded mailbox candidate cannot apply an old external format" do
     task_supervisor = start_supervised!({Task.Supervisor, []})
 

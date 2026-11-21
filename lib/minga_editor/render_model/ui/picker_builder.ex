@@ -289,8 +289,7 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilder do
   @spec build_highlighted_preview(pid(), MingaEditor.UI.Highlight.t(), Context.t()) ::
           [[PickerModel.preview_segment()]] | nil
   defp build_highlighted_preview(buf_pid, highlight, ctx) do
-    content = Buffer.content(buf_pid)
-    lines = content |> String.split("\n") |> Enum.take(@preview_max_lines)
+    lines = Buffer.lines(buf_pid, 0, @preview_max_lines)
     default_fg = Map.get(ctx.intent.frame.theme, :fg, 0xCCCCCC)
 
     {line_tuples, _} =
@@ -339,7 +338,7 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilder do
 
         if text_preview?(content) do
           content
-          |> String.split("\n")
+          |> String.splitter("\n")
           |> Enum.take(@preview_max_lines)
           |> Enum.map(&[{&1, fg_color, false}])
         else

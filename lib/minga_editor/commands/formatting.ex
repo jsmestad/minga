@@ -37,8 +37,20 @@ defmodule MingaEditor.Commands.Formatting do
   @spec format_buffer(state()) :: state()
   def format_buffer(%{workspace: %{buffers: %{active: buf}}} = state) when is_pid(buf) do
     case try_lsp_format(state, buf, nil) do
-      {:ok, state} -> state
-      :not_available -> state |> try_external_format(buf, nil) |> elem(1)
+      {:ok, state} ->
+        state
+
+      :not_available ->
+        case start_external_format(state, buf, nil) do
+          {:pending, state} ->
+            state
+
+          {:not_configured, filetype} ->
+            NoticeWorkflow.publish(state, "No formatter configured for #{filetype}")
+
+          {:failed, _reason, state} ->
+            state
+        end
     end
   end
 
@@ -49,8 +61,15 @@ defmodule MingaEditor.Commands.Formatting do
           {:pending, state()} | {:ready, state()}
   def format_for_save(state, buf, continuation) when is_pid(buf) do
     case try_lsp_format(state, buf, continuation) do
-      {:ok, state} -> {:pending, state}
-      :not_available -> try_external_format(state, buf, continuation)
+      {:ok, state} ->
+        {:pending, state}
+
+      :not_available ->
+        case start_external_format(state, buf, continuation) do
+          {:pending, _state} = pending -> pending
+          {:not_configured, _filetype} -> {:ready, state}
+          {:failed, _reason, state} -> {:ready, state}
+        end
     end
   end
 
@@ -61,8 +80,15 @@ defmodule MingaEditor.Commands.Formatting do
           | {:failed, application_quit_setup_failure(), state()}
   def format_for_application_quit(state, buf, continuation) when is_pid(buf) do
     case try_lsp_format(state, buf, continuation) do
-      {:ok, state} -> {:pending, state}
-      :not_available -> try_external_format_for_application_quit(state, buf, continuation)
+      {:ok, state} ->
+        {:pending, state}
+
+      :not_available ->
+        case start_external_format(state, buf, continuation) do
+          {:pending, _state} = pending -> pending
+          {:not_configured, _filetype} -> {:not_configured, state}
+          {:failed, _reason, _state} = failure -> failure
+        end
     end
   end
 
@@ -178,77 +204,28 @@ defmodule MingaEditor.Commands.Formatting do
 
   # ── External Formatter ────────────────────────────────────────────────────
 
-  @spec try_external_format(state(), pid(), BufferManagement.save_continuation() | nil) ::
-          {:pending | :ready, state()}
-  defp try_external_format(state, buf, continuation) do
-    filetype = Buffer.filetype(buf)
-    file_path = Buffer.file_path(buf)
-    spec = Minga.Editing.resolve_formatter(filetype, file_path)
-
-    case spec do
-      nil ->
-        state =
-          if continuation,
-            do: state,
-            else: NoticeWorkflow.publish(state, "No formatter configured for #{filetype}")
-
-        {:ready, state}
-
-      _ ->
-        command = spec |> String.split() |> List.first()
-
-        if System.find_executable(command) do
-          format_and_replace(state, buf, spec, continuation)
-        else
-          {:ready, maybe_prompt_formatter_install(state, command)}
-        end
-    end
-  end
-
-  @spec try_external_format_for_application_quit(
-          state(),
-          pid(),
-          BufferManagement.save_continuation()
-        ) ::
+  @spec start_external_format(state(), pid(), BufferManagement.save_continuation() | nil) ::
           {:pending, state()}
-          | {:not_configured, state()}
+          | {:not_configured, atom()}
           | {:failed, application_quit_setup_failure(), state()}
-  defp try_external_format_for_application_quit(state, buf, continuation) do
+  defp start_external_format(state, buf, continuation) do
     filetype = Buffer.filetype(buf)
-    file_path = Buffer.file_path(buf)
 
-    case Minga.Editing.resolve_formatter(filetype, file_path) do
+    case Minga.Editing.resolve_formatter(filetype, Buffer.file_path(buf)) do
       nil ->
-        {:not_configured, state}
+        {:not_configured, filetype}
 
       spec ->
         command = spec |> String.split() |> List.first()
 
         if System.find_executable(command) do
-          format_and_replace_for_application_quit(state, buf, spec, continuation)
+          {state, operation_id} = start_external_format_operation(state, buf)
+          schedule_external_format(state, buf, spec, operation_id, continuation)
         else
           state = maybe_prompt_formatter_install(state, command)
           {:failed, {:formatter_not_found, command}, state}
         end
     end
-  end
-
-  # ── Private helpers ───────────────────────────────────────────────────────
-
-  defp format_and_replace(state, buf, spec, continuation) do
-    {state, operation_id} = start_external_format_operation(state, buf)
-    schedule_external_format(state, buf, spec, operation_id, continuation)
-  end
-
-  @spec format_and_replace_for_application_quit(
-          state(),
-          pid(),
-          Minga.Editing.Formatter.formatter_spec(),
-          BufferManagement.save_continuation()
-        ) :: {:pending, state()} | {:failed, application_quit_setup_failure(), state()}
-  defp format_and_replace_for_application_quit(state, buf, spec, continuation) do
-    {state, operation_id} = start_external_format_operation(state, buf)
-    schedule_external_format_for_application_quit(state, buf, spec, operation_id, continuation)
   end
 
   defp start_external_format_operation(state, buf) do
@@ -277,65 +254,8 @@ defmodule MingaEditor.Commands.Formatting do
           pos_integer(),
           BufferManagement.save_continuation() | nil
         ) ::
-          {:pending | :ready, state()}
+          {:pending, state()} | {:failed, application_quit_setup_failure(), state()}
   defp schedule_external_format(
-         %{effect_scheduler: nil} = state,
-         _buf,
-         _spec,
-         operation_id,
-         _continuation
-       ) do
-    state = %{
-      state
-      | feedback:
-          Feedback.accept_operation_feedback(
-            state.feedback,
-            OperationFeedback.finish(
-              state.feedback.operation_feedback,
-              operation_id,
-              :error,
-              "Formatter scheduler unavailable"
-            )
-          )
-    }
-
-    {:ready, state}
-  end
-
-  defp schedule_external_format(state, buf, spec, operation_id, continuation) do
-    request = ExternalFormat.request(buf, spec, operation_id, continuation)
-
-    case EffectScheduler.schedule(state.effect_scheduler, request) do
-      {:ok, _request_id, _disposition} ->
-        {:pending, state}
-
-      {:error, reason} ->
-        state = %{
-          state
-          | feedback:
-              Feedback.accept_operation_feedback(
-                state.feedback,
-                OperationFeedback.finish(
-                  state.feedback.operation_feedback,
-                  operation_id,
-                  :error,
-                  "Format not scheduled: #{reason}"
-                )
-              )
-        }
-
-        {:ready, state}
-    end
-  end
-
-  @spec schedule_external_format_for_application_quit(
-          state(),
-          pid(),
-          Minga.Editing.Formatter.formatter_spec(),
-          pos_integer(),
-          BufferManagement.save_continuation()
-        ) :: {:pending, state()} | {:failed, application_quit_setup_failure(), state()}
-  defp schedule_external_format_for_application_quit(
          %{effect_scheduler: nil} = state,
          _buf,
          _spec,
@@ -346,17 +266,11 @@ defmodule MingaEditor.Commands.Formatting do
     {:failed, :scheduler_unavailable, state}
   end
 
-  defp schedule_external_format_for_application_quit(
-         state,
-         buf,
-         spec,
-         operation_id,
-         continuation
-       ) do
+  defp schedule_external_format(state, buf, spec, operation_id, continuation) do
     request = ExternalFormat.request(buf, spec, operation_id, continuation)
 
     case EffectScheduler.schedule(state.effect_scheduler, request) do
-      {:ok, _request_id, _disposition} ->
+      {:ok, _request_id, disposition} when disposition in [:queued, :running] ->
         {:pending, state}
 
       {:error, reason} ->
