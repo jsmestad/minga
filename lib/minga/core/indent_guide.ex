@@ -67,15 +67,8 @@ defmodule Minga.Core.IndentGuide do
   def compute_with_levels(lines, tab_width, cursor_col)
       when is_list(lines) and is_integer(tab_width) and tab_width > 0 and
              is_integer(cursor_col) and cursor_col >= 0 do
-    indent_levels = effective_indent_levels(lines, tab_width)
-
-    max_level =
-      case indent_levels do
-        [] -> 0
-        levels -> Enum.max(levels)
-      end
-
-    {build_guides(indent_levels, max_level, tab_width, cursor_col), indent_levels}
+    {levels, max_level} = resolve_levels(lines, tab_width)
+    {build_guides(max_level, tab_width, cursor_col), levels}
   end
 
   @doc """
@@ -86,26 +79,8 @@ defmodule Minga.Core.IndentGuide do
   """
   @spec effective_indent_levels([String.t()], pos_integer()) :: [non_neg_integer()]
   def effective_indent_levels(lines, tab_width) do
-    # First pass: compute raw indent levels.
-    raw_levels = Enum.map(lines, &indent_level(&1, tab_width))
-
-    # Second pass (reverse): propagate non-blank indent through blank lines.
-    # We walk backward, carrying the "next non-blank indent" upward.
-    {resolved, _} =
-      raw_levels
-      |> Enum.zip(lines)
-      |> Enum.reverse()
-      |> Enum.map_reduce(0, fn {level, line}, next_nonblank ->
-        if blank?(line) do
-          # Blank line: use the min of surrounding indent levels.
-          # The "next non-blank below" is carried in the accumulator.
-          {next_nonblank, next_nonblank}
-        else
-          {level, level}
-        end
-      end)
-
-    Enum.reverse(resolved)
+    {levels, _max_level} = resolve_levels(lines, tab_width)
+    levels
   end
 
   @doc """
@@ -120,16 +95,36 @@ defmodule Minga.Core.IndentGuide do
     div(spaces, tab_width)
   end
 
-  @spec build_guides([non_neg_integer()], non_neg_integer(), pos_integer(), non_neg_integer()) ::
-          [guide()]
-  defp build_guides(_indent_levels, 0, _tab_width, _cursor_col), do: []
+  @spec resolve_levels([String.t()], pos_integer()) :: {[non_neg_integer()], non_neg_integer()}
+  defp resolve_levels(lines, tab_width),
+    do: resolve_levels(Enum.reverse(lines), tab_width, 0, 0, [])
 
-  defp build_guides(indent_levels, max_level, tab_width, cursor_col) do
+  @spec resolve_levels(
+          [String.t()],
+          pos_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          [non_neg_integer()]
+        ) :: {[non_neg_integer()], non_neg_integer()}
+  defp resolve_levels([], _tab_width, _next_level, max_level, levels),
+    do: {levels, max_level}
+
+  defp resolve_levels([line | rest], tab_width, next_level, max_level, levels) do
+    if blank?(line) do
+      resolve_levels(rest, tab_width, next_level, max_level, [next_level | levels])
+    else
+      level = indent_level(line, tab_width)
+      resolve_levels(rest, tab_width, level, max(max_level, level), [level | levels])
+    end
+  end
+
+  @spec build_guides(non_neg_integer(), pos_integer(), non_neg_integer()) :: [guide()]
+  defp build_guides(0, _tab_width, _cursor_col), do: []
+
+  defp build_guides(max_level, tab_width, cursor_col) do
     active_col = active_guide_col(max_level, tab_width, cursor_col)
 
-    for level <- 1..max_level,
-        col = level * tab_width,
-        Enum.any?(indent_levels, fn l -> l >= level end) do
+    for level <- 1..max_level, col = level * tab_width do
       %{col: col, active: col == active_col}
     end
   end

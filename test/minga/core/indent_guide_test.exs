@@ -84,12 +84,13 @@ defmodule Minga.Core.IndentGuideTest do
   # ── compute/3 ──
 
   describe "compute_with_levels/3" do
-    test "returns same guides as compute/3 and levels with one entry per line" do
-      lines = ["def foo", "  bar", "", "  baz", "end"]
-      {guides, levels} = IndentGuide.compute_with_levels(lines, @tw, 2)
+    test "blank lines inherit from below and every level through the maximum has a guide" do
+      lines = ["root", "\u2003", "      deep", "", "  shallow", "\t"]
 
-      assert guides == IndentGuide.compute(lines, @tw, 2)
-      assert Enum.count(levels) == Enum.count(lines)
+      assert {
+               [%{col: 2, active: false}, %{col: 4, active: true}, %{col: 6, active: false}],
+               [0, 3, 3, 1, 1, 0]
+             } = IndentGuide.compute_with_levels(lines, @tw, 5)
     end
 
     test "empty input returns empty guides and empty levels" do
