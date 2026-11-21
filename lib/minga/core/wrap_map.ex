@@ -200,8 +200,11 @@ defmodule Minga.Core.WrapMap do
           pos_integer()
   defp do_count_rows(text, width, start_col, config, count) do
     case row_rest(text, start_col, width, config) do
-      "" -> count
-      rest -> do_count_rows(rest, config.continuation_width, config.indent_width, config, count + 1)
+      "" ->
+        count
+
+      rest ->
+        do_count_rows(rest, config.continuation_width, config.indent_width, config, count + 1)
     end
   end
 
