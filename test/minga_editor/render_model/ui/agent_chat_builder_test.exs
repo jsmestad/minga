@@ -117,9 +117,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
 
     panel =
       synced_panel([{:assistant, "```elixir\nIO.puts(:hi)\n```"}],
-        styled_messages: [
-          %{styled_lines: [[{"fallback", 0xBBC2CF, 0, 0}]], markdown_blocks: blocks}
-        ],
+        styled_messages: [{:markdown_blocks, blocks}],
         styled_fingerprint:
           TranscriptProjection.styled_cache_fingerprint(Theme.Fallback.theme().syntax)
       )
@@ -138,7 +136,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
 
     panel =
       synced_panel([{:assistant, "cached answer"}],
-        styled_messages: [[{"cached answer", 0x98BE65, 0, 0}]],
+        styled_messages: [{:styled_lines, [[{"cached answer", 0x98BE65, 0, 0}]]}],
         styled_fingerprint: TranscriptProjection.styled_cache_fingerprint(old_theme.syntax)
       )
 
@@ -383,7 +381,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
     other = ToolCall.new("unrelated", "read_file", %{"path" => "README.md"})
     theme = Theme.Fallback.theme()
 
-    for styled_messages <- [nil, [%{styled_lines: [[{"cached output", 0xBBC2CF, 0, 0}]]}]] do
+    for styled_messages <- [nil, [{:styled_lines, [[{"cached output", 0xBBC2CF, 0, 0}]]}]] do
       panel =
         synced_panel([{:tool_call, tool_call}, {:tool_call, other}],
           styled_messages: styled_messages,

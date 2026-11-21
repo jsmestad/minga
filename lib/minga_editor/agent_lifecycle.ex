@@ -36,10 +36,6 @@ defmodule MingaEditor.AgentLifecycle do
   alias MingaEditor.State.Tab.Agent
   alias MingaEditor.State.TabBar
   @type state :: EditorState.t()
-  @typep style_context :: %{
-           theme_syntax: map(),
-           byte_offset_map: %{non_neg_integer() => non_neg_integer()}
-         }
 
   # Maximum characters of tool call result to send for styled rendering.
   # Matches the truncation in Transcript.message_to_markdown/1.
@@ -727,8 +723,7 @@ defmodule MingaEditor.AgentLifecycle do
     :exit, _ -> []
   end
 
-  # Computes styled runs for each message. Assistant messages and tool call results
-  # get markdown styling; other message types pass through as nil.
+  # Cache one presentation for each displayed message. Nil slots preserve message order.
   @spec compute_styled_messages(
           state(),
           [term()],
@@ -738,24 +733,13 @@ defmodule MingaEditor.AgentLifecycle do
         ) ::
           TranscriptProjection.styled_cache()
   defp compute_styled_messages(state, messages, message_ids, previous_messages, previous_styled) do
-    theme_syntax = state.appearance.theme.syntax
-
-    {full_text, line_offsets} = Transcript.messages_to_markdown_with_offsets(messages)
-    full_lines = String.split(full_text, "\n")
-    byte_offset_map = message_byte_offsets(line_offsets, full_lines)
-
-    style_context = %{
-      theme_syntax: theme_syntax,
-      byte_offset_map: byte_offset_map
-    }
-
     compute_styled_messages(
       messages,
       message_ids,
       previous_messages,
       previous_styled,
       0,
-      style_context,
+      state.appearance.theme.syntax,
       []
     )
   end
@@ -766,7 +750,7 @@ defmodule MingaEditor.AgentLifecycle do
           [term()],
           TranscriptProjection.styled_cache(),
           non_neg_integer(),
-          style_context(),
+          map(),
           [TranscriptProjection.rendered_message() | nil]
         ) :: [TranscriptProjection.rendered_message() | nil]
   defp compute_styled_messages(
@@ -775,7 +759,7 @@ defmodule MingaEditor.AgentLifecycle do
          _previous_messages,
          _previous_styled,
          _idx,
-         _style_context,
+         _theme_syntax,
          acc
        ) do
     Enum.reverse(acc)
@@ -787,7 +771,7 @@ defmodule MingaEditor.AgentLifecycle do
          previous_messages,
          previous_styled,
          idx,
-         style_context,
+         theme_syntax,
          acc
        ) do
     {next_previous_messages, next_previous_styled, cached} =
@@ -801,7 +785,7 @@ defmodule MingaEditor.AgentLifecycle do
           cached_styled
 
         :miss ->
-          style_message(message, idx, message_id, style_context)
+          style_message(message, message_id, theme_syntax)
       end
 
     compute_styled_messages(
@@ -810,7 +794,7 @@ defmodule MingaEditor.AgentLifecycle do
       next_previous_messages,
       next_previous_styled,
       idx + 1,
-      style_context,
+      theme_syntax,
       [styled | acc]
     )
   end
@@ -847,86 +831,26 @@ defmodule MingaEditor.AgentLifecycle do
   defp next_message_id([id | rest], _idx), do: {id, rest}
   defp next_message_id([], idx), do: {idx + 1, []}
 
-  @spec style_message(term(), non_neg_integer(), pos_integer(), style_context()) ::
+  @spec style_message(term(), pos_integer(), map()) ::
           TranscriptProjection.rendered_message() | nil
-  defp style_message(
-         {:assistant, text},
-         idx,
-         message_id,
-         style_context
-       ) do
-    byte_offset = Map.get(style_context.byte_offset_map, idx, 0)
-
-    %{
-      styled_lines:
-        MarkdownHighlight.stylize(
-          text,
-          nil,
-          style_context.theme_syntax,
-          byte_offset
-        ),
-      markdown_blocks:
-        MarkdownHighlight.render_blocks(
-          text,
-          nil,
-          style_context.theme_syntax,
-          message_id,
-          byte_offset
-        )
-    }
+  defp style_message({:assistant, text}, message_id, theme_syntax) do
+    case MarkdownHighlight.render_blocks(text, nil, theme_syntax, message_id) do
+      [] -> {:styled_lines, MarkdownHighlight.stylize(text, nil, theme_syntax)}
+      [_ | _] = blocks -> {:markdown_blocks, blocks}
+    end
   end
 
   defp style_message(
          {:tool_call, %MingaAgent.ToolCall{result: result}},
-         idx,
          _message_id,
-         style_context
+         theme_syntax
        )
        when is_binary(result) and result != "" do
-    byte_offset = Map.get(style_context.byte_offset_map, idx, 0)
     text = String.slice(result, 0, @max_styled_result_chars)
-
-    %{
-      styled_lines:
-        MarkdownHighlight.stylize(
-          text,
-          nil,
-          style_context.theme_syntax,
-          byte_offset
-        ),
-      markdown_blocks: nil
-    }
+    {:styled_lines, MarkdownHighlight.stylize(text, nil, theme_syntax)}
   end
 
-  defp style_message(_message, _idx, _message_id, _style_context) do
-    nil
-  end
-
-  # The transcript emits message starts in row order, so each preceding line is counted once.
-  @spec message_byte_offsets(
-          [Transcript.line_offset()],
-          [String.t()]
-        ) :: %{non_neg_integer() => non_neg_integer()}
-  defp message_byte_offsets(line_offsets, full_lines) do
-    message_byte_offsets(line_offsets, full_lines, 0, 0, %{})
-  end
-
-  @spec message_byte_offsets(
-          [Transcript.line_offset()],
-          [String.t()],
-          non_neg_integer(),
-          non_neg_integer(),
-          %{non_neg_integer() => non_neg_integer()}
-        ) :: %{non_neg_integer() => non_neg_integer()}
-  defp message_byte_offsets([], _lines, _row, _byte, offsets), do: offsets
-
-  defp message_byte_offsets([{message_index, row, _count} | messages], lines, row, byte, offsets) do
-    message_byte_offsets(messages, lines, row, byte, Map.put(offsets, message_index, byte))
-  end
-
-  defp message_byte_offsets(messages, [line | lines], row, byte, offsets) do
-    message_byte_offsets(messages, lines, row + 1, byte + byte_size(line) + 1, offsets)
-  end
+  defp style_message(_message, _message_id, _theme_syntax), do: nil
 
   @spec add_session_display_opts(keyword(), pid() | nil) :: keyword()
   defp add_session_display_opts(opts, session) when is_pid(session) do
