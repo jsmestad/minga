@@ -80,6 +80,14 @@ defmodule Minga.LSP.SemanticTokensTest do
       assert token.modifiers == ["declaration", "deprecated"]
     end
 
+    test "retains legend order and ignores modifier bits beyond the legend" do
+      data = [0, 0, 3, 0, 0b10101, 0, 4, 3, 0, 0b10000]
+      [known, unknown] = SemanticTokens.decode(data, @token_types, ["z", "a", "m"])
+
+      assert known.modifiers == ["z", "m"]
+      assert unknown.modifiers == []
+    end
+
     test "handles unknown type index gracefully" do
       data = [0, 0, 3, 99, 0]
       [token] = SemanticTokens.decode(data, @token_types, @token_modifiers)
