@@ -46,10 +46,16 @@ defmodule Minga.LSP.TextEditTest do
     assert TextEdit.apply("abcdef", edits, :utf8) == {:error, :overlapping_edits}
   end
 
-  test "preserves response order for multiple insertions at the same position" do
-    edits = [edit(0, 2, 0, 2, "first"), edit(0, 2, 0, 2, "second")]
+  test "reports an invalid range before reporting overlap elsewhere in the batch" do
+    edits = [edit(0, 0, 0, 3, "first"), edit(0, 2, 0, 4, "second"), edit(0, 3, 0, 2, "invalid")]
 
-    assert TextEdit.apply("abcdef", edits, :utf8) == {:ok, "abfirstsecondcdef"}
+    assert TextEdit.apply("abcdef", edits, :utf8) == {:error, :invalid_edit}
+  end
+
+  test "preserves response order for tied insertions before a replacement at that position" do
+    edits = [edit(0, 2, 0, 3, "X"), edit(0, 2, 0, 2, "first"), edit(0, 2, 0, 2, "second")]
+
+    assert TextEdit.apply("abcdef", edits, :utf8) == {:ok, "abfirstsecondXdef"}
   end
 
   test "preserves CRLF and lone-CR line endings while resolving logical lines" do

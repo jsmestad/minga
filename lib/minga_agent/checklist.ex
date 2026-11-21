@@ -74,11 +74,12 @@ defmodule MingaAgent.Checklist do
   defp parse_items([], _source, _remaining, _seen, parsed), do: {:ok, Enum.reverse(parsed)}
 
   defp parse_items([item | rest], source, remaining, seen, parsed) when remaining > 0 do
-    with {:ok, item} <- parse_item(item, source),
-         false <- is_map_key(seen, item.id) do
-      parse_items(rest, source, remaining - 1, Map.put(seen, item.id, true), [item | parsed])
-    else
-      _invalid_or_duplicate -> {:error, :invalid_checklist}
+    case parse_item(item, source) do
+      {:ok, %TodoItem{id: id} = parsed_item} when not is_map_key(seen, id) ->
+        parse_items(rest, source, remaining - 1, Map.put(seen, id, true), [parsed_item | parsed])
+
+      _invalid_or_duplicate ->
+        {:error, :invalid_checklist}
     end
   end
 
@@ -86,22 +87,25 @@ defmodule MingaAgent.Checklist do
 
   @spec parse_item(term(), source()) :: {:ok, TodoItem.t()} | {:error, :invalid_checklist}
   defp parse_item(%{"id" => id, "description" => description} = item, source) do
-    with true <- valid_text?(id, 64),
-         true <- valid_text?(description, 512),
-         {:ok, status} <- Map.fetch(@statuses, Map.get(item, "status", "pending")),
-         note = item["note"],
-         true <- is_nil(note) or valid_text?(note, 2_048),
-         {:ok, result_ref} <- parse_result_ref(item["result_ref"], source) do
-      {:ok,
-       %TodoItem{
-         id: id,
-         description: description,
-         status: status,
-         note: note,
-         result_ref: result_ref
-       }}
+    note = item["note"]
+
+    if valid_text?(id, 64) and valid_text?(description, 512) and
+         (is_nil(note) or valid_text?(note, 2_048)) do
+      with {:ok, status} <- Map.fetch(@statuses, Map.get(item, "status", "pending")),
+           {:ok, result_ref} <- parse_result_ref(item["result_ref"], source) do
+        {:ok,
+         %TodoItem{
+           id: id,
+           description: description,
+           status: status,
+           note: note,
+           result_ref: result_ref
+         }}
+      else
+        _invalid_item -> {:error, :invalid_checklist}
+      end
     else
-      _invalid_item -> {:error, :invalid_checklist}
+      {:error, :invalid_checklist}
     end
   end
 
