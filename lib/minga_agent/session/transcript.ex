@@ -80,7 +80,7 @@ defmodule MingaAgent.Session.Transcript do
   @spec new([Message.t()], DateTime.t(), reference()) :: t()
   def new(messages, %DateTime{} = changed_at, incarnation)
       when is_list(messages) and is_reference(incarnation) do
-    entries = identified(messages, 1)
+    entries = identified(messages)
 
     %__MODULE__{
       active: Active.new(entries, 0),
@@ -481,16 +481,9 @@ defmodule MingaAgent.Session.Transcript do
         {:error, "Branch #{branch_index} not found. Use /branches to list."}
 
       %Branch{} = branch ->
-        available_ids =
-          MapSet.new(
-            Enum.map(branch.entries, & &1.id) ++
-              Enum.flat_map(transcript.branches, fn frozen ->
-                Enum.map(frozen.entries, & &1.id)
-              end)
-          )
-
+        pins = retain_branch_pins(transcript.pinned_ids, transcript.branches)
         next = reset_active(transcript, branch.entries)
-        pins = MapSet.intersection(transcript.pinned_ids, available_ids)
+
         {:ok, %{next | pinned_ids: pins, pins_revision: next.revision}}
     end
   end
@@ -515,7 +508,7 @@ defmodule MingaAgent.Session.Transcript do
   @doc "Resets the active transcript and usage for a new logical session."
   @spec reset(t(), [Message.t()]) :: t()
   def reset(%__MODULE__{} = transcript, messages) when is_list(messages) do
-    entries = identified(messages, 1)
+    entries = identified(messages)
     next = reset_active(transcript, entries)
 
     %{
@@ -542,11 +535,9 @@ defmodule MingaAgent.Session.Transcript do
     %{transcript | last_changed_at: changed_at, revision: revision, timestamp_revision: revision}
   end
 
-  @spec identified([Message.t()], pos_integer()) :: [TranscriptEntry.t()]
-  defp identified(messages, first_id) do
-    messages
-    |> Enum.with_index(first_id)
-    |> Enum.map(fn {message, id} -> TranscriptEntry.new(id, message) end)
+  @spec identified([Message.t()]) :: [TranscriptEntry.t()]
+  defp identified(messages) do
+    Enum.with_index(messages, fn message, index -> TranscriptEntry.new(index + 1, message) end)
   end
 
   defp install_active(%{active: active} = transcript, active), do: transcript
@@ -575,41 +566,60 @@ defmodule MingaAgent.Session.Transcript do
     if MapSet.member?(set, id), do: MapSet.delete(set, id), else: MapSet.put(set, id)
   end
 
+  @spec retain_branch_pins(MapSet.t(pos_integer()), [Branch.t()]) :: MapSet.t(pos_integer())
+  defp retain_branch_pins(pins, branches) do
+    if MapSet.size(pins) == 0 do
+      pins
+    else
+      for branch <- branches,
+          entry <- branch.entries,
+          MapSet.member?(pins, entry.id),
+          reduce: MapSet.new() do
+        kept -> MapSet.put(kept, entry.id)
+      end
+    end
+  end
+
   @spec restore_legacy_message_ids([Message.t()], term()) :: [term()]
   defp restore_legacy_message_ids([], _ids), do: []
   defp restore_legacy_message_ids(_messages, ids) when is_list(ids) and ids != [], do: ids
 
-  defp restore_legacy_message_ids(messages, _ids) do
-    messages |> Enum.with_index(1) |> Enum.map(&elem(&1, 1))
-  end
+  defp restore_legacy_message_ids(messages, _ids), do: structural_ids(messages)
 
   @spec restore_legacy_branch_ids([Branch.t() | restore_branch()]) ::
           [Branch.t() | restore_branch()]
   defp restore_legacy_branch_ids(branches) do
     Enum.map(branches, fn
       {name, messages, [], created_at} ->
-        ids = messages |> Enum.with_index(1) |> Enum.map(&elem(&1, 1))
-        {name, messages, ids, created_at}
+        {name, messages, structural_ids(messages), created_at}
 
       branch ->
         branch
     end)
   end
 
+  @spec structural_ids([Message.t()]) :: [pos_integer()]
+  defp structural_ids(messages), do: Enum.with_index(messages, fn _, index -> index + 1 end)
+
   @spec highest_candidate_id([term()], [Branch.t() | restore_branch()]) ::
           non_neg_integer()
   defp highest_candidate_id(message_ids, branches) do
-    branch_ids =
-      Enum.flat_map(branches, fn
-        %Branch{} = branch -> Branch.entry_ids(branch)
-        {_name, _messages, ids, _created_at} -> ids
-      end)
-
-    message_ids
-    |> Enum.concat(branch_ids)
-    |> Enum.filter(&(is_integer(&1) and &1 > 0))
-    |> Enum.max(fn -> 0 end)
+    highest = Enum.reduce(message_ids, 0, &higher_id/2)
+    Enum.reduce(branches, highest, &highest_branch_id/2)
   end
+
+  @spec highest_branch_id(Branch.t() | restore_branch(), non_neg_integer()) :: non_neg_integer()
+  defp highest_branch_id(%Branch{entries: entries}, highest) do
+    Enum.reduce(entries, highest, fn entry, highest -> higher_id(entry.id, highest) end)
+  end
+
+  defp highest_branch_id({_name, _messages, ids, _created_at}, highest) do
+    Enum.reduce(ids, highest, &higher_id/2)
+  end
+
+  @spec higher_id(term(), non_neg_integer()) :: non_neg_integer()
+  defp higher_id(id, highest) when is_integer(id) and id > highest, do: id
+  defp higher_id(_id, highest), do: highest
 
   @spec normalize_messages([Message.t()], [term()], pos_integer()) ::
           {[TranscriptEntry.t()], pos_integer()}

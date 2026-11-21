@@ -170,6 +170,29 @@ defmodule MingaAgent.Session.TranscriptTest do
     assert entry_ids(appended) == [1, 2, 3, 4, 5]
   end
 
+  test "a branch switch retains pins from all frozen branches but not the outgoing path" do
+    shared = TranscriptEntry.new(1, {:user, "shared"})
+    first = Branch.new("first", [shared, TranscriptEntry.new(2, {:assistant, "one"})], @later)
+    second = Branch.new("second", [shared, TranscriptEntry.new(3, {:assistant, "two"})], @later)
+
+    transcript =
+      Transcript.restore(
+        Transcript.new([], @now, make_ref()),
+        [{:user, "shared"}, {:assistant, "outgoing"}],
+        [1, 4],
+        [first, second],
+        TurnUsage.new(),
+        MapSet.new([2, 3, 4, 999]),
+        @now
+      )
+
+    for {branch_index, expected_ids} <- [{0, [1, 3]}, {1, [1, 2]}] do
+      assert {:ok, switched} = Transcript.switch_branch(transcript, branch_index)
+      assert entry_ids(switched) == expected_ids
+      assert Transcript.pinned_ids(switched) == MapSet.new([2, 3])
+    end
+  end
+
   test "branch and switch reject invalid indexes without changing the value" do
     transcript = Transcript.new([{:user, "question"}], @now, make_ref())
 
@@ -271,6 +294,67 @@ defmodule MingaAgent.Session.TranscriptTest do
     appended = Transcript.append(transcript, {:assistant, "new"})
     assert entry_ids(appended) == [3, 41]
     assert Branch.entry_ids(hd(Transcript.branches(appended))) == [40]
+  end
+
+  test "unused active and branch ID tails both reserve positions before duplicate repair" do
+    for {active_tail, branch_tail} <- [{80, 90}, {90, 80}] do
+      transcript =
+        Transcript.restore(
+          Transcript.new([], @now, make_ref()),
+          [{:user, "one"}, {:assistant, "two"}, {:user, "three"}],
+          [7, 7, nil, active_tail],
+          [{"archived", [{:user, "one"}, {:assistant, "old"}], [7, 7, branch_tail], @later}],
+          TurnUsage.new(),
+          MapSet.new(),
+          @now
+        )
+
+      assert entry_ids(transcript) == [7, 91, 92]
+      assert [branch] = Transcript.branches(transcript)
+      assert Branch.entry_ids(branch) == [7, 93]
+
+      appended = Transcript.append(transcript, {:assistant, "new"})
+      assert entry_ids(appended) == [7, 91, 92, 94]
+    end
+  end
+
+  test "an empty active transcript ignores stray IDs but an archived snapshot still reserves them" do
+    for {branches, next_id} <- [{[], 1}, {[{"empty", [], [90], @later}], 91}] do
+      transcript =
+        Transcript.restore(
+          Transcript.new([], @now, make_ref()),
+          [],
+          [80],
+          branches,
+          TurnUsage.new(),
+          MapSet.new(),
+          @now
+        )
+
+      appended = Transcript.append(transcript, {:user, "new"})
+      assert entry_ids(appended) == [next_id]
+    end
+  end
+
+  test "legacy branch IDs restart at one without rewinding the active allocator" do
+    messages = [{:user, "one"}, {:assistant, "two"}]
+
+    transcript =
+      Transcript.restore(
+        Transcript.new(List.duplicate({:user, "older"}, 19), @now, make_ref()),
+        messages,
+        nil,
+        [{"legacy", messages, [], @later}, {"empty", [], [], @later}],
+        TurnUsage.new(),
+        MapSet.new(),
+        @now
+      )
+
+    assert entry_ids(transcript) == [1, 2]
+    assert [legacy, empty] = Transcript.branches(transcript)
+    assert Branch.entry_ids(legacy) == [1, 2]
+    assert Branch.entry_ids(empty) == []
+    assert transcript |> Transcript.append({:assistant, "new"}) |> entry_ids() == [1, 2, 20]
   end
 
   test "reset starts a fresh logical transcript" do
