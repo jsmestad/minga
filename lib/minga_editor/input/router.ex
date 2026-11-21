@@ -180,72 +180,38 @@ defmodule MingaEditor.Input.Router do
     |> maybe_handle_completion(was_inserting, codepoint, modifiers)
   end
 
-  # Walks overlay handlers first (ConflictPrompt, Picker, Completion).
-  # If none consume the key, delegates to surface handlers (Scoped, GlobalBindings, ModeFSM).
   @spec dispatch_split(EditorState.t(), non_neg_integer(), non_neg_integer()) :: EditorState.t()
   defp dispatch_split(%EditorState{} = state, codepoint, modifiers) do
-    state = MingaEditor.Shell.Workflow.ensure_available(state)
-
-    %{overlay: overlay_handlers, surface: _surface} =
-      MingaEditor.Shell.Runtime.module(state.shell_runtime).input_handlers(state)
-
-    case walk_handlers_until_passthrough(overlay_handlers, state, codepoint, modifiers) do
-      {:handled, new_state} ->
-        new_state
-
-      {:passthrough, state_after_overlays} ->
-        dispatch_to_surface(state_after_overlays, codepoint, modifiers)
-    end
+    dispatch_to_handlers(state, &invoke_key_handler(&1, &2, codepoint, modifiers))
   end
 
   @spec dispatch_paste_split(EditorState.t(), String.t()) :: EditorState.t()
   defp dispatch_paste_split(%EditorState{} = state, text) do
+    dispatch_to_handlers(state, &invoke_paste_handler(&1, &2, text))
+  end
+
+  @typep handler_invocation ::
+           (MingaEditor.Input.dispatch_handler(), EditorState.t() ->
+              MingaEditor.Input.Handler.result())
+
+  @spec dispatch_to_handlers(EditorState.t(), handler_invocation()) :: EditorState.t()
+  defp dispatch_to_handlers(state, invoke) do
     state = MingaEditor.Shell.Workflow.ensure_available(state)
 
-    %{overlay: overlay_handlers, surface: _surface} =
+    %{overlay: overlays} =
       MingaEditor.Shell.Runtime.module(state.shell_runtime).input_handlers(state)
 
-    case walk_paste_handlers(overlay_handlers, state, text) do
-      {:handled, new_state} ->
-        new_state
+    case walk_handlers(overlays, state, invoke) do
+      {:handled, next} ->
+        next
 
-      {:passthrough, state_after_overlays} ->
-        dispatch_paste_to_surface(state_after_overlays, text)
+      {:passthrough, next} ->
+        %{surface: surface} =
+          MingaEditor.Shell.Runtime.module(next.shell_runtime).input_handlers(next)
+
+        {_result, next} = walk_handlers(surface, next, invoke)
+        next
     end
-  end
-
-  @spec dispatch_paste_to_surface(EditorState.t(), String.t()) :: EditorState.t()
-  defp dispatch_paste_to_surface(%EditorState{} = state, text) do
-    %{surface: surface_handlers} =
-      MingaEditor.Shell.Runtime.module(state.shell_runtime).input_handlers(state)
-
-    case walk_paste_handlers(surface_handlers, state, text) do
-      {:handled, new_state} -> new_state
-      {:passthrough, new_state} -> new_state
-    end
-  end
-
-  # Delegates a key press to surface handlers.
-  #
-  # Surface handlers (Scoped, GlobalBindings, ModeFSM) operate on EditorState
-  # directly. This preserves all side effects, including notice updates and
-  # mode transitions, that handlers produce.
-  @spec dispatch_to_surface(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
-          EditorState.t()
-  defp dispatch_to_surface(
-         %EditorState{} = state,
-         codepoint,
-         modifiers
-       ) do
-    %{surface: surface_handlers} =
-      MingaEditor.Shell.Runtime.module(state.shell_runtime).input_handlers(state)
-
-    Enum.reduce_while(surface_handlers, state, fn handler, acc ->
-      case invoke_key_handler(handler, acc, codepoint, modifiers) do
-        {:handled, new_state} -> {:halt, new_state}
-        {:passthrough, new_state} -> {:cont, new_state}
-      end
-    end)
   end
 
   @doc """
@@ -501,34 +467,15 @@ defmodule MingaEditor.Input.Router do
   defp with_invocation_source(nil, fun), do: fun.()
   defp with_invocation_source(source, fun), do: InvocationContext.with_source(source, fun)
 
-  # Walks handlers and reports whether any consumed the key.
-  # Returns {:handled, state} if a handler consumed it, or
-  # {:passthrough, state} if all handlers passed through.
-  @spec walk_handlers_until_passthrough(
-          [module()],
-          EditorState.t(),
-          non_neg_integer(),
-          non_neg_integer()
-        ) ::
-          {:handled, EditorState.t()} | {:passthrough, EditorState.t()}
-  defp walk_handlers_until_passthrough(handlers, state, codepoint, modifiers) do
-    Enum.reduce_while(handlers, {:passthrough, state}, fn handler, {_status, acc} ->
-      case invoke_key_handler(handler, acc, codepoint, modifiers) do
-        {:handled, new_state} -> {:halt, {:handled, new_state}}
-        {:passthrough, new_state} -> {:cont, {:passthrough, new_state}}
-      end
-    end)
-  end
-
-  @spec walk_paste_handlers([MingaEditor.Input.dispatch_handler()], EditorState.t(), String.t()) ::
+  @spec walk_handlers([MingaEditor.Input.dispatch_handler()], EditorState.t(), handler_invocation()) ::
           MingaEditor.Input.Handler.result()
-  defp walk_paste_handlers(handlers, state, text) do
-    Enum.reduce_while(handlers, {:passthrough, state}, fn handler, {_status, acc} ->
-      case invoke_paste_handler(handler, acc, text) do
-        {:handled, new_state} -> {:halt, {:handled, new_state}}
-        {:passthrough, new_state} -> {:cont, {:passthrough, new_state}}
-      end
-    end)
+  defp walk_handlers([], state, _invoke), do: {:passthrough, state}
+
+  defp walk_handlers([handler | rest], state, invoke) do
+    case invoke.(handler, state) do
+      {:handled, _state} = result -> result
+      {:passthrough, next} -> walk_handlers(rest, next, invoke)
+    end
   end
 
   @spec invoke_paste_handler(
