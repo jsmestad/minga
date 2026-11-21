@@ -118,6 +118,33 @@ defmodule Minga.LSP.SyncServerTest do
       assert context.buffer_revision == 0
     end
 
+    test "request through a replaced client still flushes the attached client", %{tmp_dir: dir} do
+      path = Path.join(dir, "replaced.txt")
+      File.write!(path, "hello")
+      buf = start_buffer(file_path: path)
+      replaced = start_client(:full)
+      attached = start_client(:full)
+      SyncServer.put_clients(buf, [attached])
+
+      revision = BufferProcess.version(buf)
+
+      # Seed a pending full sync without a debounce timer that could flush independently.
+      :sys.replace_state(SyncServer, fn state ->
+        %{state | pending_changes: Map.put(state.pending_changes, buf, {revision, :full_sync})}
+      end)
+
+      assert {:error, :client_replaced} =
+               SyncServer.request_document(
+                 buf,
+                 replaced,
+                 revision,
+                 "textDocument/hover",
+                 %{}
+               )
+
+      assert_receive {:client_cast, ^attached, {:did_change, _uri, "hello", ^buf, ^revision}}
+    end
+
     test "a bulk event keeps a batch in full sync after a later incremental edit", %{tmp_dir: dir} do
       path = Path.join(dir, "bulk.txt")
       File.write!(path, "hello")

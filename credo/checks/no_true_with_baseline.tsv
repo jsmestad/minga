@@ -1,7 +1,5 @@
 # One allowance per row. Delete rows as clauses are removed; do not add new allowances.
 # File	SHA-256 of normalized RHS AST	RHS for review
-lib/minga/buffer/process.ex	5ed0c1fa9d8dd26002e35f80a955fc79b3647dfd5bbbbd2a9ea650320ce3428e	"origin_path_matches?(state, intent.origin_path)"
-lib/minga/buffer/process.ex	c9f38a5b41ed133ddf21bf843446a704f897966acd67faf06a76f5ead50519dd	"target_matches_expectation?(state, intent)"
 lib/minga/config.ex	0d4d20ce00c1d71fbceba7fec9c22e13b4a068cd3b61b90b8caa642e5033057f	"function_exported?(module, :name, 0)"
 lib/minga/extension/artifact_inventory.ex	6094a12f0735ed73f3bb826b1d3e9f299525fd07de3c12e7805d531db0553a32	"byte_size(after_length) >= size"
 lib/minga/extension/artifact_validator.ex	2146bd00d6c3138a94a0f2cc70977c15bbf6f9d9163e282ed1965084723f74bd	"safe_name?(module_name, 255)"
@@ -13,7 +11,6 @@ lib/minga/extension/callback_registry.ex	2f2881c808b2dc5606ed25bf9f92f500cb1e72d
 lib/minga/extension/callback_registry.ex	37ea9423168ffa1dcf2a61dc6944dfc39d028e39af542829c6e8cc9d0f24559b	"Code.ensure_loaded?(callback)"
 lib/minga/extension/compile_cache.ex	9a7e1788a0283f0e254c32b318a5c583cda2fb382b0e17a11de67c4b2629bcee	"loaded == artifact.module"
 lib/minga/extension/json_loader.ex	96c9a359a84a133c06250b577ae5c25ba25cafef50ea282e604778cfe150b635	"Code.ensure_loaded?(module_name)"
-lib/minga/lsp/sync_server.ex	e2772b531c2703a6fadbb9f6bf0fa9380517719b65d1d852bab7e1ba73c01d5f	"client in clients_for_buffer(buffer)"
 lib/minga/tool/installer/cargo.ex	490d3c24a4108e41b797bbf0c9d36f5ff26176e26a9f1126f7dc8afba8b7cd39	"File.exists?(bin_path)"
 lib/minga_agent/artifact_quota/ledger.ex	b98c3f0af2520a27e1801cb90c28ae6259530ec658db983c7de28dc0954457d7	"changes == 1"
 lib/minga_agent/artifact_quota/state.ex	0a2812284e4c29b3fa72f067d43f0f1873084d1105da7aa0be18b4629fdeb343	"row.open_captures > 0"
@@ -175,8 +172,6 @@ lib/minga_editor/agent/stream_event_workflow.ex	365bc481684d5be87c80414fecdbf2c2
 lib/minga_editor/agent_lifecycle.ex	1b2ef41a231fefae31f61dae932cfc2eb7dc52ea2d406e9f9d5a4f55a5ea80ff	"default_agent_label?(label)"
 lib/minga_editor/agent_lifecycle.ex	4eb91e4b027973bc6918d5564a881c07d125b793c27a9a1d0dbf9b7ebabe9961	"is_pid(session)"
 lib/minga_editor/agent_lifecycle.ex	4eb91e4b027973bc6918d5564a881c07d125b793c27a9a1d0dbf9b7ebabe9961	"is_pid(session)"
-lib/minga_editor/commands/editing.ex	08dbec6c7fadd9e76c28b23dc329d91df869e0d3bc392a6bd0f6bbaff207a4ab	"line_comment_token?(token)"
-lib/minga_editor/commands/editing.ex	8187a11fe90ac90e1a0a130cd1136d1fe75214053700422a6113c5bc7b7ed526	"col == byte_size(line_text)"
 lib/minga_editor/effects/agent_review.ex	d8c787bd48e279a83b1bf67c8bd3f43bfa006483adc89e0b24787986888aeb90	":crypto.hash(:sha256, content) == digest"
 lib/minga_editor/frontend/protocol/gui.ex	239b8a953ceb735d6c5f154e7354bce21eabbe4c3dd83e1fc832039fdde3a67c	"settings_option?(name)"
 lib/minga_editor/gui_search_workflow.ex	8d980ea11fb465626c77990a7b86f7f6f24ce80ae10b13598d7f1305ad7a30e2	"IndexOwner.current?(generation)"
