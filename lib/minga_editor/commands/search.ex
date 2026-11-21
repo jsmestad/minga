@@ -169,16 +169,15 @@ defmodule MingaEditor.Commands.Search do
 
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, direction)
       when direction in [:search_word_under_cursor_forward, :search_word_under_cursor_backward] do
-    doc = Buffer.snapshot(buf)
-    cursor = Document.cursor(doc)
+    {content, cursor} = Buffer.content_and_cursor(buf)
     direction = if direction == :search_word_under_cursor_forward, do: :forward, else: :backward
 
-    case Minga.Editing.word_under_cursor(doc, cursor) do
+    case Minga.Editing.search_word_next(content, cursor, direction) do
       nil ->
         MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "No word under cursor")
 
-      word ->
-        execute_word_search(state, buf, Document.content(doc), cursor, word, direction)
+      {word, position} ->
+        apply_search_result(position, state, buf, word, direction)
     end
   end
 
@@ -364,12 +363,6 @@ defmodule MingaEditor.Commands.Search do
       |> record_substitution(pattern)
       |> NoticeWorkflow.publish(msg)
     end
-  end
-
-  defp execute_word_search(state, buf, content, cursor, word, direction) do
-    content
-    |> Minga.Editing.search_next(word, cursor, direction)
-    |> apply_search_result(state, buf, word, direction)
   end
 
   @spec apply_search_result(

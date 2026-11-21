@@ -203,6 +203,14 @@ defmodule Minga.Editing.SearchTest do
     end
   end
 
+  test "word navigation uses byte columns and the requested direction" do
+    content = "é cat cat\ncat"
+
+    assert Search.find_word_next(content, {0, 4}, :forward) == {"cat", {0, 7}}
+    assert Search.find_word_next(content, {0, 3}, :backward) == {"cat", {1, 0}}
+    assert Search.find_word_next(content, {0, 2}, :forward) == nil
+  end
+
   test "accepted substitutions resolve line numbers against the edited text" do
     accepted = [Match.new(2, 0, 1), Match.new(0, 0, 1), Match.new(1, 0, 1)]
 

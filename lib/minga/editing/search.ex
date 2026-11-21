@@ -130,17 +130,15 @@ defmodule Minga.Editing.Search do
   def find_next(content, pattern, cursor, direction, opts \\ [])
   def find_next(_content, "", _cursor, _direction, _opts), do: nil
 
-  def find_next(content, pattern, cursor, :forward, opts) do
+  def find_next(content, pattern, cursor, direction, opts)
+      when direction in [:forward, :backward] do
     lines = :binary.split(content, "\n", [:global])
-    matcher = compile_matcher(pattern, opts)
-    find_forward(lines, matcher, cursor)
+    find_on_lines(lines, compile_matcher(pattern, opts), cursor, direction)
   end
 
-  def find_next(content, pattern, cursor, :backward, opts) do
-    lines = :binary.split(content, "\n", [:global])
-    matcher = compile_matcher(pattern, opts)
-    find_backward(lines, matcher, cursor)
-  end
+  @spec find_on_lines([String.t()], matcher(), position(), direction()) :: position() | nil
+  defp find_on_lines(lines, matcher, cursor, :forward), do: find_forward(lines, matcher, cursor)
+  defp find_on_lines(lines, matcher, cursor, :backward), do: find_backward(lines, matcher, cursor)
 
   @doc "Returns the exact match at `position`, including its byte length, or nil."
   @spec match_at(String.t(), String.t(), position(), search_opts()) :: match() | nil
@@ -264,21 +262,31 @@ defmodule Minga.Editing.Search do
       nil
   """
   @spec word_at_cursor(Document.t(), position()) :: String.t() | nil
-  def word_at_cursor(%Document{} = buf, {line, col}) do
-    case Document.line_at(buf, line) do
-      nil ->
-        nil
+  def word_at_cursor(%Document{} = buf, {line, col}),
+    do: word_at_byte(Document.line_at(buf, line), col)
 
-      text ->
-        if col < byte_size(text) and word_char_at?(text, col) do
-          start_byte = find_word_start_byte(text, col)
-          end_byte = find_word_end_byte(text, col)
-          binary_part(text, start_byte, end_byte - start_byte + 1)
-        else
-          nil
-        end
+  @doc "Finds the cursor word and its next position using one split of the buffer text."
+  @spec find_word_next(String.t(), position(), direction()) ::
+          {String.t(), position() | nil} | nil
+  def find_word_next(content, {line, col} = cursor, direction) do
+    lines = :binary.split(content, "\n", [:global])
+
+    case word_at_byte(Enum.at(lines, line), col) do
+      nil -> nil
+      word -> {word, find_on_lines(lines, word, cursor, direction)}
     end
   end
+
+  @spec word_at_byte(String.t() | nil, non_neg_integer()) :: String.t() | nil
+  defp word_at_byte(text, col) when col < byte_size(text) do
+    if word_char_at?(text, col) do
+      start_byte = find_word_start_byte(text, col)
+      end_byte = find_word_end_byte(text, col)
+      binary_part(text, start_byte, end_byte - start_byte + 1)
+    end
+  end
+
+  defp word_at_byte(_text, _col), do: nil
 
   # ── Substitution ──────────────────────────────────────────────────────────
 

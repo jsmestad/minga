@@ -235,6 +235,16 @@ defmodule Minga.Editing do
     to: Minga.Editing.Search,
     as: :word_at_cursor
 
+  @doc "Returns the cursor word and its next position, or nil if there is no word."
+  @spec search_word_next(
+          String.t(),
+          Minga.Editing.Search.position(),
+          Minga.Editing.Search.direction()
+        ) :: {String.t(), Minga.Editing.Search.position() | nil} | nil
+  defdelegate search_word_next(content, cursor, direction),
+    to: Minga.Editing.Search,
+    as: :find_word_next
+
   @doc "Applies accepted substitutions in the order supplied."
   @spec apply_substitutions(String.t(), [Minga.Editing.Search.match()], String.t()) :: String.t()
   defdelegate apply_substitutions(content, matches, replacement), to: Minga.Editing.Search
