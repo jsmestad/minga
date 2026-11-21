@@ -927,6 +927,7 @@ Minga.Extension.ModelRoutes.register(
   id: "claude_subscription",
   module: ClaudeBridge.Route,
   display_name: "Claude (subscription)",
+  short_name: "Claude",
   setup_action: [
     label: "Use Claude subscription (Claude Code)",
     description: "Sign in with the Claude Code CLI. Minga never sees your login."
@@ -934,7 +935,7 @@ Minga.Extension.ModelRoutes.register(
 )
 ```
 
-The row shows your route's current readiness. Selecting it runs your `availability/2` check off the editor process and shows "Checking Claude (subscription)…" while it runs. The result is your own text: `{:ready, account}` shows the account label, so put the plan in it if you know it ("me@example.com · Max plan"), and `{:unavailable, reason, remedy}` shows your remedy, so make it the exact command to run ("Not signed in. Run: claude auth login"). The row never asks for a secret.
+The row shows your route's current readiness. Selecting it runs your `availability/2` check off the editor process and shows "Checking Claude…" while it runs. Minga uses `short_name` inside sentences like this one and `display_name` for picker rows and model labels; without a `short_name`, sentences use the display name. The result is your own text: `{:ready, account}` shows the account label, so put the plan in it if you know it ("me@example.com · Max plan"), and `{:unavailable, reason, remedy}` shows your remedy, so make it the exact command to run ("Not signed in. Run: claude auth login"). The row never asks for a secret.
 
 ### Reporting plan usage
 
@@ -949,7 +950,7 @@ Minga.Extension.ModelRoutes.report_usage(reporter, [
 
 Each window has a `kind` (`"five_hour"` and `"seven_day"` read as 5h and 7d), `utilization` from 0 to 1, `resets_at` as a `DateTime` or nil, and `status`: `:allowed`, `:warning` as the limit approaches, or `:rejected` once requests are refused. Usage is kept separately from availability, so neither report erases the other. Report an empty list when you have no data; Minga then shows nothing rather than a guess.
 
-Minga uses the busiest window to show usage on your model's row in `/model`, for example "82% of 5h limit · resets 3:40 PM". When a turn fails and your `classify_error/1` returns `:rate_limited` while a window is `:rejected` with a known reset time, the chat says "Claude (subscription) plan limit reached. Resets at 3:40 PM. Switch model to continue." and the macOS app shows a "Choose another model" notification action that opens `/model` and keeps the draft. In the terminal, run `/model` to switch. Each report also publishes an `:inference_route_status_changed` event so editor chrome can update.
+Minga uses the busiest window to show usage on your model's row in `/model`, for example "82% of 5h limit · resets 3:40 PM". When a turn fails and your `classify_error/1` returns `:rate_limited` while a window is `:rejected` with a known reset time, the chat says "Claude plan limit reached. Resets at 3:40 PM. Switch model to continue." and the macOS app shows a "Choose another model" notification action that opens `/model` and keeps the draft. In the terminal, run `/model` to switch. Each report also publishes an `:inference_route_status_changed` event so editor chrome can update.
 
 ### Conversation identity
 

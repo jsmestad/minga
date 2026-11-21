@@ -29,7 +29,13 @@ defmodule MingaAgent.InferenceRouteSessionTest do
     {:ok, reporter} =
       InferenceRouteRegistry.register(
         registry,
-        [source: @source, id: route_id, module: FixtureInferenceRoute, display_name: "Fixture"],
+        [
+          source: @source,
+          id: route_id,
+          module: FixtureInferenceRoute,
+          display_name: "Fixture (subscription)",
+          short_name: "Claude"
+        ],
         config: [models: models]
       )
 
@@ -201,7 +207,7 @@ defmodule MingaAgent.InferenceRouteSessionTest do
     assert_receive {:agent_event, ^session, {:error, message}}, @event_timeout
 
     assert message =~
-             ~r/\AFixture plan limit reached\. Resets at \d{1,2}:\d{2} (AM|PM)\. Switch model to continue\.\z/
+             ~r/\AClaude plan limit reached\. Resets at \d{1,2}:\d{2} (AM|PM)\. Switch model to continue\.\z/
 
     assert_receive {:agent_event, ^session, {:model_limit_reached, ^message}}, @event_timeout
   end

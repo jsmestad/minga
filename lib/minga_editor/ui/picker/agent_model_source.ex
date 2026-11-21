@@ -19,6 +19,7 @@ defmodule MingaEditor.UI.Picker.AgentModelSource do
   alias MingaEditor.Agent.UIState
   alias MingaEditor.PickerUI
   alias MingaAgent.InferenceRoute.PlanWindow
+  alias MingaAgent.InferenceRoute.Spec, as: InferenceRouteSpec
   alias MingaEditor.Shell.Traditional.NoticeWorkflow
   alias MingaEditor.Shell.Traditional.Workflow
   alias MingaEditor.State, as: EditorState
@@ -156,7 +157,7 @@ defmodule MingaEditor.UI.Picker.AgentModelSource do
     case Session.inference_route_setups(session) do
       {:ok, entries} ->
         Enum.map(entries, fn entry ->
-          intent = {:check_route, entry.spec.id, entry.spec.display_name}
+          intent = {:check_route, entry.spec.id, InferenceRouteSpec.short_name(entry.spec)}
           with_origin(setup_item(entry), origin, intent)
         end)
 

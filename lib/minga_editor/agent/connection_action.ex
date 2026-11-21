@@ -27,7 +27,7 @@ defmodule MingaEditor.Agent.ConnectionAction do
           {:model, String.t() | ModelSelection.t()}
           | :retry
           | {:cancel, reference()}
-          | {:check_route, route_id :: String.t(), display_name :: String.t()}
+          | {:check_route, route_id :: String.t(), short_name :: String.t()}
   @type t :: %__MODULE__{
           workspace_id: non_neg_integer(),
           target: ConnectionTarget.t(),

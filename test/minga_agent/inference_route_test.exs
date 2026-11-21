@@ -303,5 +303,27 @@ defmodule MingaAgent.InferenceRouteTest do
 
       assert {:error, :invalid_setup_action} = Spec.new(Map.put(base, :setup_action, %{}))
     end
+
+    test "sentences use the short name and fall back to the display name" do
+      base = %{
+        source: {:extension, :bridge},
+        id: "bridge",
+        module: MingaAgent.Test.FixtureInferenceRoute,
+        display_name: "Claude (subscription)"
+      }
+
+      assert {:ok, %Spec{short_name: nil} = without} = Spec.new(base)
+      assert Spec.short_name(without) == "Claude (subscription)"
+
+      assert {:ok, %Spec{short_name: "Claude"} = with_short} =
+               Spec.new(Map.put(base, :short_name, " Claude "))
+
+      assert Spec.short_name(with_short) == "Claude"
+      assert with_short.display_name == "Claude (subscription)"
+
+      for invalid <- ["  ", 42] do
+        assert {:error, :invalid_short_name} = Spec.new(Map.put(base, :short_name, invalid))
+      end
+    end
   end
 end

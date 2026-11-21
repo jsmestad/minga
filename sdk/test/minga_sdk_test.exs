@@ -273,6 +273,7 @@ defmodule MingaSdkTest do
               id: "test_route",
               module: MingaSdkTest.TestRoute,
               display_name: "Test Route",
+              short_name: "Test",
               setup_action: %{label: "Use Test Route", description: "Sign in with the test CLI."}
             )
 
