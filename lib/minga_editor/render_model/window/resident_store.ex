@@ -6,6 +6,8 @@ defmodule MingaEditor.RenderModel.Window.ResidentStore do
   line starts. A continuation contributes a visual row but no source start.
   Rank split/concatenation copies only the search paths and at-most-64-row
   boundary chunks; source positions in untouched payloads are projected on read.
+  Digest updates walk removed chunk tuples directly and hash inserted rows
+  independently of boundary copies.
   """
 
   alias Minga.RenderModel.Window.ContentDigest
@@ -63,7 +65,7 @@ defmodule MingaEditor.RenderModel.Window.ResidentStore do
     %__MODULE__{
       root: root,
       size: length(entries),
-      digest: digest_of(entries),
+      digest: add_entries_digest(entries, ContentDigest.empty()),
       work: %{
         rows_visited: length(entries),
         rows_copied: length(entries),
@@ -328,14 +330,8 @@ defmodule MingaEditor.RenderModel.Window.ResidentStore do
     work = empty_work()
     {left, tail, work} = split_counted(store.root, start, work)
     {removed, right, work} = split_counted(tail, delete_count, work)
-    {removed_entries, removed_chunks} = tree_entries_counted(removed)
-
-    work = %{
-      work
-      | rows_visited: length(removed_entries) + length(inserted),
-        rows_emitted: length(inserted),
-        chunks_touched: work.chunks_touched + removed_chunks
-    }
+    {digest, removed_chunks} = remove_tree_digest(removed, {store.digest, 0})
+    digest = add_entries_digest(inserted, digest)
 
     {inserted_tree, work} =
       inserted
@@ -346,24 +342,21 @@ defmodule MingaEditor.RenderModel.Window.ResidentStore do
         merge_counted(tree, new_chunk, acc)
       end)
 
-    digest =
-      removed_entries
-      |> Enum.reduce(store.digest, fn item, acc ->
-        ContentDigest.remove(acc, item.id, item.content_hash)
-      end)
-      |> then(fn value ->
-        Enum.reduce(inserted, value, fn item, acc ->
-          ContentDigest.add(acc, item.id, item.content_hash)
-        end)
-      end)
-
+    inserted_count = tree_size(inserted_tree)
     {joined, work} = merge_counted(left, inserted_tree, work)
     {root, work} = merge_counted(joined, right, work)
+
+    work = %{
+      work
+      | rows_visited: delete_count + inserted_count,
+        rows_emitted: inserted_count,
+        chunks_touched: work.chunks_touched + removed_chunks
+    }
 
     %{
       store
       | root: root,
-        size: store.size - delete_count + length(inserted),
+        size: tree_size(root),
         digest: digest,
         work: work
     }
@@ -531,7 +524,21 @@ defmodule MingaEditor.RenderModel.Window.ResidentStore do
 
   defp tree_entries(tree, acc), do: range_entries(tree, 0, tree_size(tree), acc)
 
-  defp tree_entries_counted(tree), do: {tree_entries(tree, []), chunk_count(tree)}
+  defp remove_tree_digest(nil, acc), do: acc
+
+  defp remove_tree_digest({:chunk, _, _, _, _, left, {entries, _}, right}, acc) do
+    {digest, chunks} = remove_tree_digest(left, acc)
+    digest = remove_chunk_digest(entries, tuple_size(entries), digest)
+    remove_tree_digest(right, {digest, chunks + 1})
+  end
+
+  defp remove_chunk_digest(_entries, 0, digest), do: digest
+
+  defp remove_chunk_digest(entries, remaining, digest) do
+    index = remaining - 1
+    %{id: id, content_hash: hash} = elem(entries, index)
+    remove_chunk_digest(entries, index, ContentDigest.remove(digest, id, hash))
+  end
 
   defp empty_work,
     do: %{rows_visited: 0, rows_copied: 0, rows_emitted: 0, chunks_touched: 0}
@@ -555,8 +562,8 @@ defmodule MingaEditor.RenderModel.Window.ResidentStore do
   defp local_rank_header({:chunk, _, _, _, _, left, {_, starts}, right}),
     do: {:ok, {left, tree_size(left), tree_lines(left), starts, right}}
 
-  defp digest_of(entries) do
-    Enum.reduce(entries, ContentDigest.empty(), fn item, acc ->
+  defp add_entries_digest(entries, digest) do
+    Enum.reduce(entries, digest, fn item, acc ->
       ContentDigest.add(acc, item.id, item.content_hash)
     end)
   end
