@@ -61,20 +61,19 @@ defmodule Minga.LSP.Supervisor do
   Returns the pid of an existing Client for a server+root, or `:not_found`.
   """
   @spec find_client(GenServer.server(), {atom(), String.t()}) :: {:ok, pid()} | :not_found
-  def find_client(supervisor \\ __MODULE__, {server_name, root_path}) do
+  def find_client(supervisor \\ __MODULE__, {_server_name, _root_path} = key) do
     supervisor
     |> DynamicSupervisor.which_children()
-    |> Enum.find_value(:not_found, fn {_, pid, _, _} ->
-      if is_pid(pid) do
+    |> Enum.find_value(:not_found, fn
+      {_, pid, _, _} when is_pid(pid) ->
         try do
-          if Client.server_name(pid) == server_name and
-               GenServer.call(pid, :root_path) == root_path do
-            {:ok, pid}
-          end
+          if Client.server_key(pid) == key, do: {:ok, pid}
         catch
           :exit, _ -> nil
         end
-      end
+
+      _ ->
+        nil
     end)
   end
 
@@ -208,9 +207,7 @@ defmodule Minga.LSP.Supervisor do
 
   @spec client_key(pid()) :: [{atom(), String.t()}]
   defp client_key(pid) do
-    server_name = Client.server_name(pid)
-    root_path = GenServer.call(pid, :root_path)
-    [{server_name, root_path}]
+    [Client.server_key(pid)]
   catch
     :exit, _ -> []
   end

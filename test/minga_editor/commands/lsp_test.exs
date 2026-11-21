@@ -1,8 +1,11 @@
 defmodule MingaEditor.Commands.LspTest do
-  # Uses the global LSP supervisor to exercise command behavior with no active clients.
+  # Uses the global LSP supervisor and buffer-to-client registry.
   use ExUnit.Case, async: false
 
+  alias Minga.LSP.Supervisor, as: LSPSupervisor
+  alias Minga.LSP.SyncServer
   alias Minga.Test.LspIsolation
+  alias Minga.Test.MockLSPServer
   alias MingaEditor.Commands.Lsp, as: LspCommands
 
   import MingaEditor.RenderPipeline.TestHelpers
@@ -58,6 +61,29 @@ defmodule MingaEditor.Commands.LspTest do
       state = base_state()
       result = LspCommands.execute(state, :lsp_stop)
       assert result.shell_runtime.state.notice.message == "No LSP server for this buffer"
+    end
+
+    @tag :heavy
+    @tag :tmp_dir
+    test "stops only the attached root and skips a dead client", %{tmp_dir: root} do
+      other_root = Path.join(root, "other")
+      File.mkdir!(other_root)
+      config = MockLSPServer.server_config()
+      {:ok, target} = LSPSupervisor.ensure_client(config, root)
+      {:ok, other} = LSPSupervisor.ensure_client(config, other_root)
+      {dead, ref} = spawn_monitor(fn -> :ok end)
+      assert_receive {:DOWN, ^ref, :process, ^dead, :normal}
+
+      state = base_state()
+      buffer = state.workspace.buffers.active
+      SyncServer.put_clients(buffer, [dead, target])
+      on_exit(fn -> SyncServer.remove_buffer(buffer) end)
+
+      stopped = LspCommands.execute(state, :lsp_stop)
+
+      assert stopped.shell_runtime.state.notice.message == "Stopped mock_lsp"
+      assert LSPSupervisor.find_client({:mock_lsp, root}) == :not_found
+      assert LSPSupervisor.find_client({:mock_lsp, other_root}) == {:ok, other}
     end
   end
 

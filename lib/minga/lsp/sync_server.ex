@@ -43,14 +43,14 @@ defmodule Minga.LSP.SyncServer do
 
   @typedoc "Accumulated deltas per buffer. :full_sync means a bulk op invalidated deltas."
   @type delta_accumulator :: [Minga.Buffer.EditDelta.t()] | :full_sync
+  @typep pending_change :: {non_neg_integer(), delta_accumulator()}
 
   @typedoc "Internal state."
   @type state :: %{
           debounce_timers: %{pid() => reference()},
           client_monitors: %{reference() => {buffer_pid :: pid(), client_pid :: pid()}},
           pending_tool_buffers: %{String.t() => [pid()]},
-          delta_accumulators: %{pid() => delta_accumulator()},
-          pending_revisions: %{pid() => non_neg_integer()},
+          pending_changes: %{pid() => pending_change()},
           events_registry: Events.registry()
         }
 
@@ -160,10 +160,7 @@ defmodule Minga.LSP.SyncServer do
        debounce_timers: %{},
        client_monitors: %{},
        pending_tool_buffers: %{},
-       # Accumulated deltas per buffer pid. When a delta is nil (bulk op),
-       # the value is set to :full_sync to force full content sync.
-       delta_accumulators: %{},
-       pending_revisions: %{},
+       pending_changes: %{},
        events_registry: events_registry
      }}
   end
@@ -285,8 +282,7 @@ defmodule Minga.LSP.SyncServer do
   defp resync_buffer(state, buffer_pid) when is_pid(buffer_pid) do
     state = demonitor_clients_for_buffer(state, buffer_pid)
     state = cancel_debounce(state, buffer_pid)
-    state = %{state | delta_accumulators: Map.delete(state.delta_accumulators, buffer_pid)}
-    state = %{state | pending_revisions: Map.delete(state.pending_revisions, buffer_pid)}
+    state = %{state | pending_changes: Map.delete(state.pending_changes, buffer_pid)}
     :ets.delete(@registry_table, buffer_pid)
     do_buffer_open(state, buffer_pid)
   end
@@ -321,36 +317,7 @@ defmodule Minga.LSP.SyncServer do
 
       path ->
         configs = ServerRegistry.servers_for(filetype)
-        uri = path_to_uri(path)
-        {content, revision} = Buffer.content_with_version(buffer_pid)
-        language_id = to_string(filetype)
-
-        results =
-          Enum.map(configs, fn config ->
-            root = RootDetector.find_root(path, config.root_markers)
-            {config, LSPSupervisor.ensure_client(config, root)}
-          end)
-
-        # Broadcast :tool_missing for configs that failed and have a recipe
-        state = track_missing_tools(state, results, buffer_pid)
-
-        clients =
-          results
-          |> Enum.filter(fn
-            {_config, {:ok, _pid}} -> true
-            _ -> false
-          end)
-          |> Enum.map(fn {_config, {:ok, pid}} ->
-            Client.did_open(pid, uri, language_id, content, buffer_pid, revision)
-            pid
-          end)
-
-        if clients != [] do
-          :ets.insert(@registry_table, {buffer_pid, clients})
-          monitor_clients(state, buffer_pid, clients)
-        else
-          state
-        end
+        open_configured_buffer(state, buffer_pid, path, filetype, configs)
     end
   rescue
     exception ->
@@ -364,6 +331,43 @@ defmodule Minga.LSP.SyncServer do
     :exit, reason ->
       Minga.Log.warning(:lsp, "LSP buffer open exited: #{inspect(reason)}")
       state
+  end
+
+  @spec open_configured_buffer(state(), pid(), String.t(), atom(), [ServerRegistry.server_config()]) ::
+          state()
+  defp open_configured_buffer(state, _buffer_pid, _path, _filetype, []), do: state
+
+  defp open_configured_buffer(state, buffer_pid, path, filetype, configs) do
+    uri = path_to_uri(path)
+    {content, revision} = Buffer.content_with_version(buffer_pid)
+    language_id = to_string(filetype)
+
+    results =
+      Enum.map(configs, fn config ->
+        root = RootDetector.find_root(path, config.root_markers)
+        {config, LSPSupervisor.ensure_client(config, root)}
+      end)
+
+    state = track_missing_tools(state, results, buffer_pid)
+
+    clients =
+      Enum.flat_map(results, fn
+        {_config, {:ok, pid}} ->
+          Client.did_open(pid, uri, language_id, content, buffer_pid, revision)
+          [pid]
+
+        _ ->
+          []
+      end)
+
+    case clients do
+      [] ->
+        state
+
+      [_ | _] ->
+        :ets.insert(@registry_table, {buffer_pid, clients})
+        monitor_clients(state, buffer_pid, clients)
+    end
   end
 
   @spec lsp_auto_start?() :: boolean()
@@ -398,8 +402,7 @@ defmodule Minga.LSP.SyncServer do
 
     :ets.delete(@registry_table, buffer_pid)
     state = demonitor_clients_for_buffer(state, buffer_pid)
-    state = %{state | delta_accumulators: Map.delete(state.delta_accumulators, buffer_pid)}
-    state = %{state | pending_revisions: Map.delete(state.pending_revisions, buffer_pid)}
+    state = %{state | pending_changes: Map.delete(state.pending_changes, buffer_pid)}
     cancel_debounce(state, buffer_pid)
   catch
     :exit, _ -> state
@@ -554,22 +557,22 @@ defmodule Minga.LSP.SyncServer do
 
   @spec flush_did_change(state(), pid()) :: state()
   defp flush_did_change(state, buffer_pid) do
-    clients = clients_for_buffer(buffer_pid)
-    timers = Map.delete(state.debounce_timers, buffer_pid)
+    {change, pending_changes} = Map.pop(state.pending_changes, buffer_pid)
 
-    # Drain accumulated deltas for this buffer
-    {deltas, accumulators} = drain_deltas(state.delta_accumulators, buffer_pid)
-    {revision, pending_revisions} = Map.pop(state.pending_revisions, buffer_pid)
+    case change do
+      nil ->
+        :ok
 
-    state = %{
+      {revision, deltas} ->
+        clients = clients_for_buffer(buffer_pid)
+        notify_clients_change(clients, buffer_pid, ordered_deltas(deltas), revision)
+    end
+
+    %{
       state
-      | debounce_timers: timers,
-        delta_accumulators: accumulators,
-        pending_revisions: pending_revisions
+      | debounce_timers: Map.delete(state.debounce_timers, buffer_pid),
+        pending_changes: pending_changes
     }
-
-    if is_integer(revision), do: notify_clients_change(clients, buffer_pid, deltas, revision)
-    state
   end
 
   @spec cancel_debounce(state(), pid()) :: state()
@@ -595,55 +598,26 @@ defmodule Minga.LSP.SyncServer do
           non_neg_integer()
         ) :: state()
   defp accumulate_delta(state, buffer_pid, delta, revision) do
-    previous_revision = Map.get(state.pending_revisions, buffer_pid)
+    case Map.get(state.pending_changes, buffer_pid) do
+      {previous_revision, _} when revision <= previous_revision ->
+        state
 
-    if is_integer(previous_revision) and revision <= previous_revision do
-      state
-    else
-      state = put_accumulated_delta(state, buffer_pid, delta)
-      %{state | pending_revisions: Map.put(state.pending_revisions, buffer_pid, revision)}
+      previous ->
+        change = {revision, accumulate_deltas(previous, delta)}
+        %{state | pending_changes: Map.put(state.pending_changes, buffer_pid, change)}
     end
   end
 
-  @spec put_accumulated_delta(state(), pid(), Minga.Buffer.EditDelta.t() | nil) :: state()
-  defp put_accumulated_delta(state, buffer_pid, nil) do
-    # Bulk op (undo, redo, replace_content): discard accumulated deltas
-    # and mark as full sync needed
-    %{state | delta_accumulators: Map.put(state.delta_accumulators, buffer_pid, :full_sync)}
-  end
+  @spec accumulate_deltas(pending_change() | nil, Minga.Buffer.EditDelta.t() | nil) ::
+          delta_accumulator()
+  defp accumulate_deltas(_previous, nil), do: :full_sync
+  defp accumulate_deltas({_revision, :full_sync}, _delta), do: :full_sync
+  defp accumulate_deltas({_revision, deltas}, delta), do: [delta | deltas]
+  defp accumulate_deltas(nil, delta), do: [delta]
 
-  defp put_accumulated_delta(state, buffer_pid, delta) do
-    accumulators = state.delta_accumulators
-
-    new_acc =
-      case Map.get(accumulators, buffer_pid) do
-        # Already marked for full sync, stay that way
-        :full_sync -> :full_sync
-        # Prepend delta (newest-first); reversed at drain time for correct order
-        deltas when is_list(deltas) -> [delta | deltas]
-        # First delta for this buffer
-        nil -> [delta]
-      end
-
-    %{state | delta_accumulators: Map.put(accumulators, buffer_pid, new_acc)}
-  end
-
-  # Drains accumulated deltas for a buffer. Returns {deltas, updated_accumulators}.
-  # Returns [] when full sync is needed (the caller falls back to full content).
-  # Reverses the list to restore document order (deltas are prepended during accumulation).
-  @spec drain_deltas(map(), pid()) :: {[Minga.Buffer.EditDelta.t()], map()}
-  defp drain_deltas(accumulators, buffer_pid) do
-    {value, remaining} = Map.pop(accumulators, buffer_pid)
-
-    deltas =
-      case value do
-        :full_sync -> []
-        deltas when is_list(deltas) -> Enum.reverse(deltas)
-        nil -> []
-      end
-
-    {deltas, remaining}
-  end
+  @spec ordered_deltas(delta_accumulator()) :: [Minga.Buffer.EditDelta.t()]
+  defp ordered_deltas(:full_sync), do: []
+  defp ordered_deltas(deltas), do: Enum.reverse(deltas)
 
   # ── Private: file watcher notifications ───────────────────────────────
 

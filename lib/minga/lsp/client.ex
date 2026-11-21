@@ -77,6 +77,10 @@ defmodule Minga.LSP.Client do
     GenServer.call(server, :server_name)
   end
 
+  @doc "Returns the server name and project root used to identify this client."
+  @spec server_key(GenServer.server()) :: {atom(), String.t()}
+  def server_key(server), do: GenServer.call(server, :server_key)
+
   @doc "Returns the negotiated position encoding."
   @spec encoding(GenServer.server()) :: PositionEncoding.encoding()
   def encoding(server) do
@@ -477,6 +481,10 @@ defmodule Minga.LSP.Client do
 
   def handle_call(:server_name, _from, state) do
     {:reply, state.server_config.name, state}
+  end
+
+  def handle_call(:server_key, _from, state) do
+    {:reply, {state.server_config.name, state.root_path}, state}
   end
 
   def handle_call(:encoding, _from, state) do

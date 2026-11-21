@@ -73,6 +73,10 @@ defmodule Minga.LSP.SupervisorTest do
       {:ok, pid2} = LSPSupervisor.ensure_client(sup, config, root2)
 
       assert pid1 != pid2
+      assert Client.server_key(pid1) == {:mock_lsp, root1}
+      assert Client.server_key(pid2) == {:mock_lsp, root2}
+      assert LSPSupervisor.find_client(sup, {:mock_lsp, root1}) == {:ok, pid1}
+      assert LSPSupervisor.find_client(sup, {:mock_lsp, root2}) == {:ok, pid2}
     end
 
     test "returns error for unavailable server", %{supervisor: sup} do
