@@ -51,21 +51,21 @@ defmodule MingaEditor.RenderModel.Window.GuideIndex do
 
   defp build_rows(entries, start_row, tab_width) do
     entries
-    |> ordered_rows(start_row, tab_width)
+    |> ordered_rows(start_row, tab_width, [])
     |> LazyRowTree.from_sorted(&summarize/4)
   end
 
-  defp ordered_rows([], _rank, _tab_width), do: []
+  defp ordered_rows([], _rank, _tab_width, acc), do: Enum.reverse(acc)
 
-  defp ordered_rows([%VisualRow{} = entry | rest], rank, tab_width) do
+  defp ordered_rows([%VisualRow{} = entry | rest], rank, tab_width, acc) do
     text = VisualRow.guide_source_line(entry)
 
     if blank?(text) do
-      ordered_rows(rest, rank + 1, tab_width)
+      ordered_rows(rest, rank + 1, tab_width, acc)
     else
       level = IndentGuide.indent_level(text, tab_width)
       priority = :erlang.phash2({:resident_guide, rank})
-      [{rank, level, priority} | ordered_rows(rest, rank + 1, tab_width)]
+      ordered_rows(rest, rank + 1, tab_width, [{rank, level, priority} | acc])
     end
   end
 
