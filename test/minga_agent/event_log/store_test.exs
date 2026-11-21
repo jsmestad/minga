@@ -47,6 +47,24 @@ defmodule MingaAgent.EventLog.StoreTest do
     assert {:ok, ^live} = Store.load_touched_files(db)
   end
 
+  test "loading touched files does not retain the backing edit payload", %{db: db} do
+    path = "lib/" <> :binary.copy("nested/", 64) <> "example.ex"
+
+    event =
+      EventRecord.new("session", :file_edit_proposed, %{
+        "path" => path,
+        "before_content" => "",
+        "after_content" => :binary.copy("x", 128 * 1_024)
+      })
+
+    assert {:ok, _id} = Store.insert(db, event)
+    assert {:ok, projection} = Store.load_touched_files(db)
+
+    assert [%{path: retained, action: :created}] = TouchedFiles.list(projection, "session")
+    assert retained == path
+    assert :binary.referenced_byte_size(retained) == byte_size(retained)
+  end
+
   test "loading touched files rejects an invalid edit superseded at the same path", %{db: db} do
     assert {:ok, invalid_id} = Store.insert(db, file_edit("", 42, 10))
     assert {:ok, valid_id} = Store.insert(db, file_edit("", "created", 20))

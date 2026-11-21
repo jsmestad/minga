@@ -92,6 +92,14 @@ defmodule MingaAgent.EventLog.TouchedFiles do
         projection
 
       _current ->
+        # A decoded path can be a slice of the full edit payload.
+        path =
+          if byte_size(path) < :binary.referenced_byte_size(path) do
+            :binary.copy(path)
+          else
+            path
+          end
+
         entry = {event_id, action(event.payload), event.monotonic_ts}
 
         by_session =
