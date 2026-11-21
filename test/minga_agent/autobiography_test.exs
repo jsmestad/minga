@@ -49,6 +49,47 @@ defmodule MingaAgent.AutobiographyTest do
     assert entry.assistant_text == "Adding an auth middleware."
   end
 
+  test "for_line keeps only the most recent turn through the selected edit", %{db: db} do
+    insert(db, "s1", :user_message, %{"text" => "previous"})
+    insert(db, "s1", :thinking_delta, %{"delta" => "old reasoning"})
+    insert(db, "s1", :assistant_delta, %{"delta" => "old answer"})
+    insert(db, "s1", :user_message, %{"text" => " current "})
+    insert(db, "s1", :thinking_delta, %{"delta" => "one"})
+    insert(db, "s1", :assistant_delta, %{"delta" => "A"})
+    insert(db, "s1", :thinking_delta, %{"delta" => " "})
+    insert(db, "s1", :assistant_delta, %{"delta" => "B"})
+    insert(db, "s1", :thinking_delta, %{"delta" => "two"})
+    edit(db, "s1", "/p/a.ex", after: "  unique line  \nother text")
+    insert(db, "s1", :assistant_delta, %{"delta" => "late answer"})
+    insert(db, "s1", :user_message, %{"text" => "next"})
+
+    assert {:ok, %Entry{} = entry} = Autobiography.for_line("/p/a.ex", "unique line", db: db)
+
+    assert {entry.user_request, entry.thinking, entry.assistant_text} ==
+             {" current ", "one two", "AB"}
+  end
+
+  test "a blank user message clears earlier context without hiding later reasoning", %{db: db} do
+    insert(db, "s1", :assistant_delta, %{"delta" => "old answer"})
+    insert(db, "s1", :user_message, %{"text" => " \n"})
+    insert(db, "s1", :thinking_delta, %{"delta" => "current reasoning"})
+    edit(db, "s1", "/p/a.ex", after: "unique line")
+
+    assert {:ok, %Entry{} = entry} = Autobiography.for_line("/p/a.ex", "unique line", db: db)
+
+    assert {entry.user_request, entry.thinking, entry.assistant_text} ==
+             {nil, "current reasoning", nil}
+  end
+
+  test "an edit can retain reasoning without a visible user message", %{db: db} do
+    insert(db, "s1", :thinking_delta, %{"delta" => "reasoning"})
+    insert(db, "s1", :assistant_delta, %{"delta" => "  "})
+    edit(db, "s1", "/p/a.ex", after: "unique line")
+
+    assert {:ok, %Entry{} = entry} = Autobiography.for_line("/p/a.ex", "unique line", db: db)
+    assert {entry.user_request, entry.thinking, entry.assistant_text} == {nil, "reasoning", nil}
+  end
+
   test "for_line prefers the edit that introduced the text over one that only contains it", %{
     db: db
   } do

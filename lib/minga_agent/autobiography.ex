@@ -144,7 +144,7 @@ defmodule MingaAgent.Autobiography do
   @spec has_line?(EventRecord.t(), String.t(), String.t()) :: boolean()
   defp has_line?(edit, key, needle) do
     (payload(edit, key) || "")
-    |> String.split("\n")
+    |> String.splitter("\n")
     |> Enum.any?(&(String.trim(&1) == needle))
   end
 
@@ -174,70 +174,64 @@ defmodule MingaAgent.Autobiography do
     }
   end
 
-  @spec turn_context(Store.db(), String.t(), non_neg_integer() | nil) :: %{
-          user_request: String.t() | nil,
-          thinking: String.t() | nil,
-          assistant_text: String.t() | nil
-        }
-  defp turn_context(_db, _session_id, nil),
-    do: %{user_request: nil, thinking: nil, assistant_text: nil}
+  @typep turn_context :: %{
+           user_request: String.t() | nil,
+           thinking: String.t() | nil,
+           assistant_text: String.t() | nil
+         }
+
+  @typep turn_fragments :: {String.t() | nil, [String.t()], [String.t()]}
+
+  @spec turn_context(Store.db(), String.t(), non_neg_integer() | nil) :: turn_context()
+  defp turn_context(_db, _session_id, nil), do: format_turn({nil, [], []})
 
   defp turn_context(db, session_id, edit_id) do
     cursor = max(edit_id - @context_window, 0)
 
-    events =
-      case Store.events_after(db, session_id, cursor, @context_window + 1) do
-        {:ok, evs} ->
-          Enum.filter(evs, &(&1.id <= edit_id))
+    case Store.events_after(db, session_id, cursor, @context_window + 1) do
+      {:ok, events} ->
+        events
+        |> Enum.reduce_while({nil, [], []}, fn
+          %EventRecord{id: id}, turn when id > edit_id -> {:halt, turn}
+          event, turn -> {:cont, collect_turn_event(event, turn)}
+        end)
+        |> format_turn()
 
-        {:error, reason} ->
-          # The edit was found but its turn context could not be read; surface a
-          # breadcrumb so blank reasoning isn't mistaken for "the agent said nothing".
-          Minga.Log.warning(
-            :agent,
-            "[autobiography] turn context read failed: #{inspect(reason)}"
-          )
+      {:error, reason} ->
+        # Keep the found edit and report why its turn context is missing.
+        Minga.Log.warning(:agent, "[autobiography] turn context read failed: #{inspect(reason)}")
+        format_turn({nil, [], []})
+    end
+  end
 
-          []
-      end
+  @spec collect_turn_event(EventRecord.t(), turn_fragments()) :: turn_fragments()
+  defp collect_turn_event(%EventRecord{event_type: :user_message} = event, _turn) do
+    {payload(event, "text"), [], []}
+  end
 
-    turn = turn_slice(events)
+  defp collect_turn_event(
+         %EventRecord{event_type: :thinking_delta} = event,
+         {request, thinking, text}
+       ) do
+    {request, [payload(event, "delta") || "" | thinking], text}
+  end
 
+  defp collect_turn_event(
+         %EventRecord{event_type: :assistant_delta} = event,
+         {request, thinking, text}
+       ) do
+    {request, thinking, [payload(event, "delta") || "" | text]}
+  end
+
+  defp collect_turn_event(_event, turn), do: turn
+
+  @spec format_turn(turn_fragments()) :: turn_context()
+  defp format_turn({request, thinking, text}) do
     %{
-      user_request: last_user_request(events),
-      thinking: concat_deltas(turn, :thinking_delta),
-      assistant_text: concat_deltas(turn, :assistant_delta)
+      user_request: blank_to_nil(request),
+      thinking: thinking |> Enum.reverse() |> Enum.join() |> blank_to_nil(),
+      assistant_text: text |> Enum.reverse() |> Enum.join() |> blank_to_nil()
     }
-  end
-
-  # Events from the most recent user_message up to the edit (the turn that made it).
-  @spec turn_slice([EventRecord.t()]) :: [EventRecord.t()]
-  defp turn_slice(events) do
-    case last_event(events, :user_message) do
-      nil -> events
-      user_msg -> Enum.filter(events, &(&1.id > user_msg.id))
-    end
-  end
-
-  @spec last_user_request([EventRecord.t()]) :: String.t() | nil
-  defp last_user_request(events) do
-    case last_event(events, :user_message) do
-      nil -> nil
-      ev -> blank_to_nil(payload(ev, "text"))
-    end
-  end
-
-  @spec last_event([EventRecord.t()], EventRecord.event_type()) :: EventRecord.t() | nil
-  defp last_event(events, type) do
-    events |> Enum.filter(&(&1.event_type == type)) |> Enum.at(-1)
-  end
-
-  @spec concat_deltas([EventRecord.t()], EventRecord.event_type()) :: String.t() | nil
-  defp concat_deltas(events, type) do
-    events
-    |> Enum.filter(&(&1.event_type == type))
-    |> Enum.map_join("", &(payload(&1, "delta") || ""))
-    |> blank_to_nil()
   end
 
   @spec payload(EventRecord.t(), String.t()) :: term()
