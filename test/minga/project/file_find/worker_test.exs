@@ -58,22 +58,28 @@ defmodule Minga.Project.FileFind.WorkerTest do
     refute process_alive?(child_pid)
   end
 
-  test "output limits stop discovery and report an error", %{tmp_dir: tmp_dir} do
-    script = Path.join(tmp_dir, "oversized-discovery.sh")
-    File.write!(script, "#!/bin/sh\nprintf 'first\\nsecond\\n'\nsleep 60\n")
-    File.chmod!(script, 0o755)
-    command = {System.find_executable("sh"), [script], tmp_dir}
+  test "discovery accepts exact output limits and reports the first exceeded limit", %{
+    tmp_dir: tmp_dir
+  } do
+    output = "first\nsecond\n"
+    command = {System.find_executable("sh"), ["-c", "printf 'first\\nsecond\\n'"], tmp_dir}
+    parser = fn data, status -> {data, status} end
+    byte_limit = byte_size(output)
 
-    {:ok, worker} =
-      Worker.start(self(), command, fn output, status -> {output, status} end,
-        max_output_bytes: 1
-      )
+    assert {:ok, exact} =
+             Worker.start(self(), command, parser, max_output_bytes: byte_limit, max_file_count: 2)
 
-    ref = Process.monitor(worker)
+    assert_receive {:file_find_done, ^exact, {^output, 0}}, 5_000
 
-    assert_receive {:file_find_done, ^worker, {:error, message}}, 5_000
-    assert message =~ "byte limit"
-    assert_receive {:DOWN, ^ref, :process, ^worker, :normal}, 5_000
+    for {bytes, files, limit} <- [{byte_limit, 1, "file-count"}, {1, 1, "byte"}] do
+      assert {:ok, worker} =
+               Worker.start(self(), command, parser, max_output_bytes: bytes, max_file_count: files)
+
+      assert_receive {:file_find_done, ^worker,
+                      {:error, "Project file discovery exceeded the " <> reason}}, 5_000
+
+      assert reason == "#{limit} limit"
+    end
   end
 
   @spec await_nonempty_file(String.t(), non_neg_integer()) ::

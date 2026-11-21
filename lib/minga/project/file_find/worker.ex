@@ -110,10 +110,7 @@ defmodule Minga.Project.FileFind.Worker do
   @impl true
   @spec handle_info(term(), t()) :: {:noreply, t()} | {:stop, term(), t()}
   def handle_info({port, {:data, data}}, %__MODULE__{port: port} = state) do
-    output_bytes = state.output_bytes + byte_size(data)
-    file_count = state.file_count + newline_count(data)
-
-    handle_output_chunk(state, data, output_bytes, file_count)
+    handle_output_chunk(state, data, state.output_bytes + byte_size(data))
   end
 
   def handle_info({port, {:exit_status, status}}, %__MODULE__{port: port} = state) do
@@ -139,19 +136,25 @@ defmodule Minga.Project.FileFind.Worker do
     log_termination_error(result)
   end
 
-  @spec handle_output_chunk(t(), binary(), non_neg_integer(), non_neg_integer()) ::
+  @spec handle_output_chunk(t(), binary(), non_neg_integer()) ::
           {:noreply, t()} | {:stop, :normal, t()}
-  defp handle_output_chunk(state, _data, output_bytes, _file_count)
+  defp handle_output_chunk(state, _data, output_bytes)
        when output_bytes > state.max_output_bytes do
     stop_for_limit(state, "byte")
   end
 
-  defp handle_output_chunk(state, _data, _output_bytes, file_count)
+  defp handle_output_chunk(state, data, output_bytes) do
+    store_output_chunk(state, data, output_bytes, state.file_count + newline_count(data))
+  end
+
+  @spec store_output_chunk(t(), binary(), non_neg_integer(), non_neg_integer()) ::
+          {:noreply, t()} | {:stop, :normal, t()}
+  defp store_output_chunk(state, _data, _output_bytes, file_count)
        when file_count > state.max_file_count do
     stop_for_limit(state, "file-count")
   end
 
-  defp handle_output_chunk(state, data, output_bytes, file_count) do
+  defp store_output_chunk(state, data, output_bytes, file_count) do
     {:noreply,
      %{
        state
