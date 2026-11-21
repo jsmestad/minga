@@ -946,20 +946,20 @@ defmodule Minga.Config.Loader do
 
   @spec compile_module_files(String.t(), [String.t()]) :: {[module()], [String.t()]}
   defp compile_module_files(modules_dir, files) do
-    {mods, errs} =
+    {rev_mods, rev_errs} =
       files
       |> Enum.filter(&String.ends_with?(&1, ".ex"))
       |> Enum.sort()
-      |> Enum.reduce({[], []}, fn file, {mods_acc, errs_acc} ->
+      |> Enum.reduce({[], []}, fn file, {rev_mods, rev_errs} ->
         path = Path.join(modules_dir, file)
 
         case compile_module(path) do
-          {:ok, modules} -> {mods_acc ++ modules, errs_acc}
-          {:error, msg} -> {mods_acc, [msg | errs_acc]}
+          {:ok, modules} -> {Enum.reverse(modules, rev_mods), rev_errs}
+          {:error, msg} -> {rev_mods, [msg | rev_errs]}
         end
       end)
 
-    {mods, Enum.reverse(errs)}
+    {Enum.reverse(rev_mods), Enum.reverse(rev_errs)}
   end
 
   @spec compile_module(String.t()) :: {:ok, [module()]} | {:error, String.t()}

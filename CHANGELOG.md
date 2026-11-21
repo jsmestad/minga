@@ -95,6 +95,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - Input dispatch no longer reads the active buffer revision before each action. Agent session metadata and saves reuse one ordered transcript read per operation, and the modeline reads only the cached Git degradation flag.
 - Cached Git reads select the most specific live tracked root without sorting all matches. Path boundaries and untracked behavior are unchanged.
 - Wrapped cursor movement and rendering share one byte-to-row walk instead of building intermediate row lists. Theme loading resolves face definitions once when there are no user face overrides. Key binding registration parses each sequence once.
+- Config loading collects compiled modules without recopying previous batches. Theme loading applies editor overrides in the existing order for each theme source.
 - Language registration uses the same keys to check ownership, publish lookups, and remove old indexes when replacing a definition.
 - macOS editor command preparation reuses unscrolled rows that fit the viewport instead of rebuilding their text and highlight spans. Clipped, scrolled, and out-of-range-span rows keep the existing normalization.
 - macOS selection overlays index accessibility ranges once per pane and frame instead of rescanning every range for each visible row. Selection quad geometry, ordering, clipping and colors are unchanged.
