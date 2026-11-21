@@ -312,7 +312,9 @@ defmodule MingaAgent.Session.TranscriptTest do
       assert entry_ids(transcript) == [7, 91, 92]
       assert [branch] = Transcript.branches(transcript)
       assert Branch.entry_ids(branch) == [7, 93]
-      assert transcript |> Transcript.append({:assistant, "new"}) |> entry_ids() == [7, 91, 92, 94]
+
+      appended = Transcript.append(transcript, {:assistant, "new"})
+      assert entry_ids(appended) == [7, 91, 92, 94]
     end
   end
 
