@@ -5,26 +5,22 @@ defmodule Minga.Editing.Motion.VisualLineTest do
   alias Minga.Editing.Motion.VisualLine
 
   describe "visual_down/3" do
-    test "moves to next visual row within a wrapped line" do
-      # "hello world foo bar" at width 12 wraps to 2 visual rows
-      doc = Document.new("hello world foo bar")
-      # Cursor at start of first visual row
-      new_pos = VisualLine.visual_down(doc, {0, 0}, 12)
-      # Should move to the second visual row of the same logical line
-      assert {0, col} = new_pos
-      assert col > 0
+    test "moves from a continuation's first byte to the next visual row" do
+      doc = Document.new("abcdef")
+
+      assert VisualLine.visual_down(doc, {0, 2}, 2) == {0, 4}
     end
 
-    test "moves to next logical line when on last visual row" do
-      doc = Document.new("short\nanother line")
-      new_pos = VisualLine.visual_down(doc, {0, 0}, 40)
-      assert new_pos == {1, 0}
+    test "clamps to the next logical line when the last visual row is wider" do
+      doc = Document.new("abcdef\nx")
+
+      assert VisualLine.visual_down(doc, {0, 5}, 2) == {1, 0}
     end
 
-    test "stays at last line when at end of document" do
-      doc = Document.new("only line")
-      pos = VisualLine.visual_down(doc, {0, 0}, 40)
-      assert {0, _col} = pos
+    test "keeps the current position at the end of the document" do
+      doc = Document.new("abcdef")
+
+      assert VisualLine.visual_down(doc, {0, 5}, 2) == {0, 5}
     end
 
     test "moves within a long wrapped line" do

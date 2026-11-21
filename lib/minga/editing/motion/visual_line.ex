@@ -37,25 +37,23 @@ defmodule Minga.Editing.Motion.VisualLine do
     {vrow_idx, computed_vrow_col} = source_byte_to_visual(wrap_entry, col, opts)
     vrow_col = Keyword.get(opts, :desired_col, computed_vrow_col)
 
-    if vrow_idx < Enum.count(wrap_entry) - 1 do
-      next_vrow = Enum.at(wrap_entry, vrow_idx + 1)
-      target_col = min(vrow_col, max(visual_display_width(next_vrow, opts) - 1, 0))
-      byte_col = byte_col_in_vrow(next_vrow, target_col, opts)
-      {line, next_vrow.byte_offset + byte_col}
-    else
-      next_line = line + 1
-      max_line = Document.line_count(doc) - 1
+    case Enum.fetch(wrap_entry, vrow_idx + 1) do
+      {:ok, next_vrow} ->
+        target_col = min(vrow_col, max(visual_display_width(next_vrow, opts) - 1, 0))
+        byte_col = byte_col_in_vrow(next_vrow, target_col, opts)
+        {line, next_vrow.byte_offset + byte_col}
 
-      if next_line > max_line do
-        {line, col}
-      else
-        next_text = Document.line_at(doc, next_line)
-        next_entry = wrap_entry(next_text, content_width, opts)
-        first_vrow = hd(next_entry)
-        target_col = min(vrow_col, max(visual_display_width(first_vrow, opts) - 1, 0))
-        byte_col = byte_col_in_vrow(first_vrow, target_col, opts)
-        {next_line, byte_col}
-      end
+      :error ->
+        next_line = line + 1
+
+        if next_line >= Document.line_count(doc) do
+          {line, col}
+        else
+          [first_vrow | _] = doc |> Document.line_at(next_line) |> wrap_entry(content_width, opts)
+          target_col = min(vrow_col, max(visual_display_width(first_vrow, opts) - 1, 0))
+          byte_col = byte_col_in_vrow(first_vrow, target_col, opts)
+          {next_line, byte_col}
+        end
     end
   end
 
