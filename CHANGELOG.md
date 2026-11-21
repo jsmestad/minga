@@ -92,6 +92,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - LSP keeps pending edits and their revision together, skips reading full text for filetypes without a configured server, and resolves each running server’s name and root in one client call.
 - Input dispatch no longer reads the active buffer revision before each action. Agent session metadata and saves reuse one ordered transcript read per operation, and the modeline reads only the cached Git degradation flag.
 - Cached Git reads select the most specific live tracked root without sorting all matches. Path boundaries and untracked behavior are unchanged.
+- Diff previews pair changed lines without indexing the old side. File tree walks use the remaining siblings to set guide markers and reuse exact-path selection.
 - Wrapped cursor movement and rendering share one byte-to-row walk instead of building intermediate row lists. Theme loading resolves face definitions once when there are no user face overrides. Key binding registration parses each sequence once.
 - Language registration uses the same keys to check ownership, publish lookups, and remove old indexes when replacing a definition.
 - macOS editor command preparation reuses unscrolled rows that fit the viewport instead of rebuilding their text and highlight spans. Clipped, scrolled, and out-of-range-span rows keep the existing normalization.

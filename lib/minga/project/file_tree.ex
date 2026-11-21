@@ -145,12 +145,12 @@ defmodule Minga.Project.FileTree do
           invalidate_entries(%{cached | expanded: MapSet.delete(cached.expanded, path)})
         else
           # Already collapsed; jump to parent
-          jump_to_parent(cached, path)
+          select_path_or_keep(cached, Path.dirname(path))
         end
 
       %{path: path} when path != cached.root ->
         # File entry; jump to parent directory
-        jump_to_parent(cached, path)
+        select_path_or_keep(cached, Path.dirname(path))
 
       _ ->
         cached
@@ -412,11 +412,7 @@ defmodule Minga.Project.FileTree do
     new_expanded = Enum.reduce(ancestors, tree.expanded, &MapSet.put(&2, &1))
     tree = invalidate_entries(%{tree | expanded: new_expanded}) |> ensure_entries()
 
-    # Find the entry index and move cursor there
-    case Enum.find_index(tree.entries, fn e -> e.path == expanded_path end) do
-      nil -> tree
-      idx -> %{tree | cursor: idx}
-    end
+    select_path_or_keep(tree, expanded_path)
   end
 
   # ── Private ───────────────────────────────────────────────────────────────
@@ -551,14 +547,11 @@ defmodule Minga.Project.FileTree do
     Enum.reject(names, &String.starts_with?(&1, "."))
   end
 
-  @spec jump_to_parent(t(), String.t()) :: t()
-  defp jump_to_parent(tree, path) do
-    parent = Path.dirname(path)
-    tree = ensure_entries(tree)
-
-    case Enum.find_index(tree.entries, fn e -> e.path == parent end) do
-      nil -> tree
-      idx -> %{tree | cursor: idx}
+  @spec select_path_or_keep(t(), String.t()) :: t()
+  defp select_path_or_keep(tree, path) do
+    case select_path(tree, path) do
+      {:ok, selected} -> selected
+      :error -> tree
     end
   end
 
