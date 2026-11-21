@@ -99,6 +99,22 @@ defmodule Minga.Command.ParserTest do
     end
   end
 
+  test "live substitute parsing distinguishes an unfinished field from an empty replacement" do
+    for {input, expected} <- [
+          {"s/", nil},
+          {"s/x", {:pattern, "x"}},
+          {"s/x/", {:pattern, "x"}},
+          {"s//x", {:pattern, "/x"}},
+          {"s/x//", {:replace, "x", "", false}},
+          {"s/x/g", {:replace, "x", "g", false}},
+          {"s/x/g/c", {:replace, "x", "g", false}},
+          {"%s#x# g #gc", {:replace, "x", " g ", true}},
+          {"s|a\\|b|c\\|g|g", {:replace, "a\\|b", "c\\|g", true}}
+        ] do
+      assert Parser.substitute_preview(input) == expected, inspect(input)
+    end
+  end
+
   describe "help, agent, and parser commands" do
     test "describe, agent, and parser restart commands parse their arguments and aliases" do
       assert_parse_cases([
