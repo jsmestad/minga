@@ -940,13 +940,7 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
 
     state = MingaEditor.TabWorkflow.switch(state, 2)
     refute TabBar.active_workspace_id(state.shell_runtime.state.tab_bar) == owner
-    state = DraftWorkflow.edited(state, buffer)
-
-    assert_receive {:composer_draft_due, ^owner, token}, 1_000
-    state = DraftWorkflow.due(state, owner, token)
-    assert_receive {:composer_draft_result, ^session, ^id, {^owner, ref}, {:ok, 2}}, 1_000
-
-    state = DraftWorkflow.handle_result(state, session, id, owner, ref, {:ok, 2})
+    {state, {:ok, 2}} = save_composer_edit(state, session, owner, id, buffer)
 
     assert prompt_text(state.workspace.agent_ui) == ""
 
@@ -992,7 +986,7 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
     state = DraftWorkflow.edited(state, buffer)
     assert prompt_text(state.workspace.agent_ui) == "still kept live"
     assert {:ok, 3, ^newer} = MingaAgent.SessionStore.read_presentation(id, dir)
-    refute_receive {:composer_draft_due, ^owner, _token}, 450
+    assert state.workspace.agent_ui.draft_save.timer == nil
   end
 
   @tag :tmp_dir
@@ -1008,16 +1002,15 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
   @tag :tmp_dir
   test "a confirmed Queue Next only clears the submitted composer marker", %{tmp_dir: dir} do
     {state, session, owner, id, buffer} = saved_composer(dir, Minga.Test.SessionSlowMockProvider)
-    assert :ok = Session.subscribe(session)
     assert :ok = Session.send_prompt(session, "active turn")
-    assert_receive {:agent_event, ^session, {:status_changed, :thinking}}, 1_000
     state = MingaEditor.AgentLifecycle.rebuild_agent_from_session(state, session)
     BufferProcess.replace_content(buffer, "queued snapshot")
     assert {:saved, state} = DraftWorkflow.queue(state, :follow_up, "queued snapshot")
 
-    assert_receive {:composer_draft_result, ^session, ^id, {^owner, ref},
-                    {:ok, {1, _token, :follow_up, 2}} = result},
-                   1_000
+    :sys.get_state(session, :infinity)
+
+    assert_received {:composer_draft_result, ^session, ^id, {^owner, ref},
+                     {:ok, {1, _token, :follow_up, 2}} = result}
 
     BufferProcess.replace_content(buffer, "typing after submit")
     state = DraftWorkflow.handle_result(state, session, id, owner, ref, result)
@@ -1041,9 +1034,7 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
   defp assert_queue_restart(dir, disposition) do
     provider = Minga.Test.SessionSlowMockProvider
     {state, session, owner, id, buffer} = saved_composer(dir, provider)
-    assert :ok = Session.subscribe(session)
     assert :ok = Session.send_prompt(session, "active turn")
-    assert_receive {:agent_event, ^session, {:status_changed, :thinking}}, 1_000
     state = MingaEditor.AgentLifecycle.rebuild_agent_from_session(state, session)
     BufferProcess.replace_content(buffer, "queued snapshot")
 
@@ -1053,9 +1044,10 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
     {committed_reply, live_text, queued, saved_revision} =
       case disposition do
         :committed ->
-          assert_receive {:composer_draft_result, ^session, ^id, {^owner, _ref},
-                          {:ok, {1, _token, :follow_up, 2}} = reply},
-                         1_000
+          :sys.get_state(session, :infinity)
+
+          assert_received {:composer_draft_result, ^session, ^id, {^owner, _ref},
+                           {:ok, {1, _token, :follow_up, 2}} = reply}
 
           BufferProcess.replace_content(buffer, "newer live typing")
           {reply, "newer live typing", ["queued snapshot"], 3}
@@ -1080,20 +1072,19 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
     restored =
       BufferManagement.handle_agent_session_restarted(pending, id, session, replacement, :killed)
 
-    assert_receive {:composer_draft_result, ^replacement, ^id, {^owner, ref}, ^committed_reply},
-                   1_000
+    :sys.get_state(replacement, :infinity)
+    assert_received {:composer_draft_result, ^replacement, ^id, {^owner, ref}, ^committed_reply}
 
     reconciled =
       DraftWorkflow.handle_result(restored, replacement, id, owner, ref, committed_reply)
 
     assert prompt_text(reconciled.workspace.agent_ui) == live_text
     assert Session.get_queued_messages(replacement) == {[], queued}
-    assert_receive {:composer_draft_due, ^owner, token}, 1_000
-    DraftWorkflow.due(reconciled, owner, token)
+    fire_composer_save(reconciled, owner)
+    :sys.get_state(replacement, :infinity)
 
-    assert_receive {:composer_draft_result, ^replacement, ^id, {^owner, _ref},
-                    {:ok, ^saved_revision}},
-                   1_000
+    assert_received {:composer_draft_result, ^replacement, ^id, {^owner, _ref},
+                     {:ok, ^saved_revision}}
 
     assert {:ok, ^saved_revision, %{text: ^live_text}} =
              MingaAgent.SessionStore.read_presentation(id, dir)
@@ -1128,17 +1119,16 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
     {state, session, owner, id, buffer} =
       saved_composer(dir, Minga.Test.SessionSlowMockProvider)
 
-    assert :ok = Session.subscribe(session)
     assert :ok = Session.send_prompt(session, "active turn")
-    assert_receive {:agent_event, ^session, {:status_changed, :thinking}}, 1_000
     assert {:queued, :follow_up} = Session.queue_follow_up(session, "pending")
     BufferProcess.replace_content(buffer, "unsaved draft when recall started")
 
     state = MingaEditor.Commands.Agent.dequeue_to_editor(state)
 
-    assert_receive {:composer_draft_result, ^session, ^id, {^owner, ref},
-                    {:ok, 2, recalled} = result},
-                   1_000
+    :sys.get_state(session, :infinity)
+
+    assert_received {:composer_draft_result, ^session, ^id, {^owner, ref},
+                     {:ok, 2, recalled} = result}
 
     assert recalled.text == "pending\n\nunsaved draft when recall started"
 
@@ -1158,9 +1148,10 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
       BufferProcess.replace_content(buffer, "")
       state = AgentSessionSource.on_select(item, state)
 
-      assert_receive {:composer_draft_result, ^session, ^id, {^owner, reload_ref},
-                      {:ok, 2, ^recalled} = reload},
-                     1_000
+      :sys.get_state(session, :infinity)
+
+      assert_received {:composer_draft_result, ^session, ^id, {^owner, reload_ref},
+                       {:ok, 2, ^recalled} = reload}
 
       state = DraftWorkflow.handle_result(state, session, id, owner, reload_ref, reload)
       assert prompt_text(state.workspace.agent_ui) == recalled.text
@@ -1186,24 +1177,39 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
     {state, owner, _file_ref} = state_with_active_agent_workspace(session)
     buffer = state.workspace.agent_ui.panel.prompt_buffer
     state = MingaEditor.AgentLifecycle.rebuild_agent_from_session(state, session)
-    assert_receive {:composer_draft_result, ^session, ^id, {^owner, ref}, {:ok, 0, nil}}, 1_000
+    :sys.get_state(session, :infinity)
+    assert_received {:composer_draft_result, ^session, ^id, {^owner, ref}, {:ok, 0, nil}}
 
     state = DraftWorkflow.handle_result(state, session, id, owner, ref, {:ok, 0, nil})
 
     {state, {:ok, 1}} = save_composer_edit(state, session, owner, id, buffer)
-    assert_receive {:composer_draft_due, ^owner, token}, 1_000
-    state = DraftWorkflow.due(state, owner, token)
+    state = fire_composer_save(state, owner)
     {state, session, owner, id, buffer}
   end
 
   defp save_composer_edit(state, session, owner, id, buffer) do
     state = DraftWorkflow.edited(state, buffer)
-    assert_receive {:composer_draft_due, ^owner, token}, 1_000
-    state = DraftWorkflow.due(state, owner, token)
-    :sys.get_state(session)
+    state = fire_composer_save(state, owner)
+    :sys.get_state(session, :infinity)
     assert_received {:composer_draft_result, ^session, ^id, {^owner, ref}, result}
 
     {DraftWorkflow.handle_result(state, session, id, owner, ref, result), result}
+  end
+
+  defp fire_composer_save(state, owner) do
+    tabs = state.shell_runtime.state.tab_bar
+
+    ui =
+      if TabBar.active_workspace_id(tabs) == owner do
+        state.workspace.agent_ui
+      else
+        tabs |> TabBar.get_workspace(owner) |> workspace_payload() |> Map.fetch!(:agent_ui)
+      end
+
+    # Exercise delivery of the armed debounce event without waiting for the wall clock.
+    token = ui.draft_save.timer
+    assert is_reference(token)
+    DraftWorkflow.due(state, owner, token)
   end
 
   defp state_with_agent_workspace_tabs do
