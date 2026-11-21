@@ -6,10 +6,9 @@ All notable changes to `minga_sdk` are documented here. The SDK is versioned sep
 
 | minga_sdk | Minga |
 |-----------|-------|
-| 0.2.x | `main` from jsmestad/minga#3756 (model routes with setup rows and plan usage) onward; the first rolling build after that merge and later |
-| 0.1.x | Earlier `main` builds, without model routes |
+| 0.1.x | `main` from jsmestad/minga#3756 (model routes with setup rows and plan usage) onward; the first rolling build after that merge and later |
 
-## 0.2.0
+## 0.1.0
 
 First release published to Hex.
 
@@ -23,7 +22,7 @@ First release published to Hex.
 ### Changed
 
 - The SDK compiles no modules when it is built inside a running Minga editor, so a Hex extension installed by the editor can never replace real editor modules with stubs.
-- Declare the dependency as `{:minga_sdk, "~> 0.2", only: [:dev, :test], runtime: false}`.
+- Declare the dependency as `{:minga_sdk, "~> 0.1", only: [:dev, :test], runtime: false}`.
 - Requires Elixir 1.18 or later.
 
 ### Removed

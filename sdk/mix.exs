@@ -1,7 +1,7 @@
 defmodule MingaSdk.MixProject do
   use Mix.Project
 
-  @version "0.2.0"
+  @version "0.1.0"
   @source_url "https://github.com/jsmestad/minga"
 
   # Defined only by a running Minga editor; the SDK never defines it.

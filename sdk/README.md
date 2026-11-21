@@ -13,7 +13,7 @@ Add `minga_sdk` to your extension's dependencies exactly like this:
 ```elixir
 def deps do
   [
-    {:minga_sdk, "~> 0.2", only: [:dev, :test], runtime: false}
+    {:minga_sdk, "~> 0.1", only: [:dev, :test], runtime: false}
   ]
 end
 ```
@@ -24,8 +24,7 @@ Both options matter. The SDK only defines compile-time stubs of modules the edit
 
 | minga_sdk | Minga |
 |-----------|-------|
-| 0.2.x | `main` from jsmestad/minga#3756 (model routes with setup rows and plan usage) onward; the first rolling build after that merge and later |
-| 0.1.x | Earlier `main` builds, without model routes |
+| 0.1.x | `main` from jsmestad/minga#3756 (model routes with setup rows and plan usage) onward; the first rolling build after that merge and later |
 
 The SDK is versioned separately from Minga. A minor SDK release can add APIs that need a newer Minga; this table says which.
 
