@@ -12,7 +12,7 @@ set -euo pipefail
 side=${PWD##*/}
 case "$*" in
   deps.get) printf 'prepare %s\n' "$side" >> "$EVENTS" ;;
-  deps.compile|native.build.support) ;;
+  codegen) ;;
   compile) git rev-parse HEAD > .prepared ;;
   'run --no-compile bench/keystroke_latency_baseline.exs')
     [[ $(cat .prepared) == "$(git rev-parse HEAD)" ]]

@@ -87,9 +87,8 @@ in_revision() (
 )
 
 build_revision() {
-  # Native support also generates the protocol sources and stages priv before
-  # Mix compiles the application and establishes its runtime code paths.
-  mix deps.get && mix deps.compile && mix native.build.support && mix compile
+  # The benchmark starts an editor generation with a BEAM headless port, not the native parser or renderer.
+  mix deps.get && mix codegen && mix compile
 }
 
 prepare_revision() {

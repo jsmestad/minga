@@ -151,10 +151,6 @@ jobs:
           version-file: .tool-versions
           version-type: strict
 
-      - uses: mlugg/setup-zig@v2
-        with:
-          version: 0.16.0
-
       # Each revision owns its compiled dependencies and app. Only share Hex package downloads.
       - name: Cache Hex package downloads
         uses: actions/cache@v4

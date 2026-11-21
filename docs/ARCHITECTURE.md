@@ -681,7 +681,7 @@ These are local M1 reads. They are not a promise of a fixed ceiling, and they di
 
 **The CI gate is relative, not absolute (#2290 / #2298).** Because hosted runners vary run-to-run, an absolute ceiling calibrated on one machine can never be both tight and stable. So on every `pull_request` CI run the workflow benches the PR's merge-base *and* the PR HEAD on the same runner in the same job, then requires `head <= base * (1 + tolerance)` per scenario per metric (`bench/check_latency_budgets.exs`, tolerances in `bench/latency_budgets.json`: p50 +10%, p99 +20%, looser for tails because tails are noisier even same-runner). Runner speed cancels out. Absolute ceilings survive only as loose catastrophic sanity bounds (~2x a healthy runner read) that catch a gross regression when the base bench is unavailable; they are not the gate.
 
-`scripts/bench_keystroke_latency_ab` builds each measured revision once in a separate detached worktree. It alternates fresh BEAM instances for the samples and any confirmation rounds, checks the budgets from the prepared HEAD, and removes its worktrees without changing the caller's checkout.
+`scripts/bench_keystroke_latency_ab` generates sources and builds the BEAM app once per measured revision in separate detached worktrees. The benchmark starts an editor generation with `HeadlessPort`, without starting the native parser or renderer. It alternates fresh BEAM instances for the samples and any confirmation rounds, checks the budgets from the prepared HEAD, and removes its worktrees without changing the caller's checkout.
 
 ---
 
