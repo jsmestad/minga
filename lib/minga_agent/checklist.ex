@@ -86,7 +86,8 @@ defmodule MingaAgent.Checklist do
   defp parse_items(_items, _source, _remaining, _seen, _parsed), do: {:error, :invalid_checklist}
 
   @spec parse_item(term(), source()) :: {:ok, TodoItem.t()} | {:error, :invalid_checklist}
-  defp parse_item(%{"id" => id, "description" => description} = item, source) do
+  defp parse_item(%{"id" => id, "description" => description} = item, source)
+       when not is_struct(item) do
     note = item["note"]
 
     if valid_text?(id, 64) and valid_text?(description, 512) and

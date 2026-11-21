@@ -70,9 +70,11 @@ defmodule MingaAgent.ChecklistTest do
   test "both replacement and restoration reject duplicate identities and invalid facts" do
     task = %{"id" => "id", "description" => "Task"}
     too_many = Enum.map(1..101, &%{task | "id" => Integer.to_string(&1)})
+    malformed_struct = Checklist.new() |> Map.put("id", "") |> Map.put("description", "Task")
 
     for items <- [
           [task, task],
+          [malformed_struct],
           [Map.put(task, "status", "unknown")],
           [Map.put(task, "status", nil)],
           [Map.put(task, "description", " \t ")],
