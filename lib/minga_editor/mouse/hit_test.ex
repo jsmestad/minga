@@ -516,8 +516,8 @@ defmodule MingaEditor.Mouse.HitTest do
          ctx
        ) do
     opts = WrapLayout.options(ctx.content_w, ctx.width_oracle, snapshot.options)
-    cursor = {ctx.cursor_line || snapshot.line_count, nil}
-    entry = wrapped_first_segment(snapshot.lines, top, visual_row, {ctx, opts, cursor})
+    cursor_line = ctx.cursor_line || snapshot.line_count
+    entry = wrapped_first_segment(snapshot.lines, top, visual_row, {ctx, opts, cursor_line})
     fold_position(entry, window, true)
   end
 
@@ -526,11 +526,10 @@ defmodule MingaEditor.Mouse.HitTest do
   defp wrapped_first_segment([], _line, _visual_row, _layout), do: nil
   defp wrapped_first_segment([_ | _], line, 0, _layout), do: {line, {:wrapped, 0}}
 
-  defp wrapped_first_segment([text | rest], line, visual_row, {ctx, opts, cursor} = layout) do
-    {_, rows, _} =
-      WrapLayout.measure(text, line, ctx.decorations, opts, ctx.show_invisible, cursor)
+  defp wrapped_first_segment([text | rest], line, visual_row, {ctx, opts, cursor_line} = layout) do
+    count =
+      WrapLayout.row_count(text, line, ctx.decorations, cursor_line, opts, ctx.show_invisible)
 
-    count = length(rows)
     if visual_row >= count, do: wrapped_first_segment(rest, line + 1, visual_row - count, layout)
   end
 

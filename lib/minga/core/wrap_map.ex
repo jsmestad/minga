@@ -4,7 +4,8 @@ defmodule Minga.Core.WrapMap do
 
   Given a list of logical lines and a content width, produces a wrap map
   that tells the renderer how to split each logical line across multiple
-  screen rows. All computation is pure and stateless.
+  screen rows. Callers that only need the number of rows can use
+  `count_rows/3` instead of building a wrap map.
 
   ## Design
 
@@ -45,6 +46,13 @@ defmodule Minga.Core.WrapMap do
   @typedoc "A wrap map: one entry per logical line in the visible range."
   @type t :: [wrap_entry()]
 
+  @typep wrap_options :: %{
+           required(:breakindent) => boolean(),
+           required(:linebreak) => boolean(),
+           required(:oracle) => WidthOracle.t(),
+           required(:tab_width) => pos_integer()
+         }
+
   @typep wrap_config :: %{
            required(:continuation_width) => pos_integer(),
            required(:indent_width) => non_neg_integer(),
@@ -68,12 +76,24 @@ defmodule Minga.Core.WrapMap do
   """
   @spec compute([String.t()], pos_integer(), keyword()) :: t()
   def compute(lines, content_width, opts \\ []) do
-    breakindent = Keyword.get(opts, :breakindent, true)
-    linebreak = Keyword.get(opts, :linebreak, true)
-    oracle = Keyword.get(opts, :oracle, %Monospace{})
-    tab_width = Keyword.get(opts, :tab_width, 2)
+    options = wrap_options(opts)
+    Enum.map(lines, &wrap_line(&1, content_width, options))
+  end
 
-    Enum.map(lines, &wrap_line(&1, content_width, breakindent, linebreak, oracle, tab_width))
+  @doc """
+  Counts the rows occupied by one logical line or a list of lines without materializing the rows.
+
+  Uses the same content width and options as `compute/3`. An empty line occupies one row; an empty list occupies none.
+  """
+  @spec count_rows([String.t()], pos_integer(), keyword()) :: non_neg_integer()
+  @spec count_rows(String.t(), pos_integer(), keyword()) :: pos_integer()
+  def count_rows(lines, content_width, opts) when is_list(lines) do
+    options = wrap_options(opts)
+    Enum.reduce(lines, 0, fn line, total -> total + count_line(line, content_width, options) end)
+  end
+
+  def count_rows(text, content_width, opts) when is_binary(text) do
+    count_line(text, content_width, wrap_options(opts))
   end
 
   @doc """
@@ -90,6 +110,26 @@ defmodule Minga.Core.WrapMap do
     do: row_at_byte(rest, byte, index + 1)
 
   defp row_at_byte(rows, _byte, index), do: {index, hd(rows)}
+
+  @doc """
+  Returns the row index for a byte offset in a nonempty tuple of ordered wrap rows.
+
+  Like `row_at_byte/2`, an exact continuation start selects that continuation
+  and a byte past the end selects the last row.
+  """
+  @spec row_index_at_byte(tuple(), non_neg_integer()) :: non_neg_integer()
+  def row_index_at_byte(rows, byte) when tuple_size(rows) > 0,
+    do: row_index_at_byte(rows, byte, 0, tuple_size(rows) - 1)
+
+  defp row_index_at_byte(_rows, _byte, index, index), do: index
+
+  defp row_index_at_byte(rows, byte, first, last) do
+    middle = div(first + last + 1, 2)
+
+    if elem(rows, middle).byte_offset <= byte,
+      do: row_index_at_byte(rows, byte, middle, last),
+      else: row_index_at_byte(rows, byte, first, middle - 1)
+  end
 
   @doc """
   Returns the total number of visual rows across all entries in a wrap map.
@@ -112,29 +152,60 @@ defmodule Minga.Core.WrapMap do
 
   # ── Line wrapping ──────────────────────────────────────────────────────────
 
-  @spec wrap_line(String.t(), pos_integer(), boolean(), boolean(), WidthOracle.t(), pos_integer()) ::
-          wrap_entry()
-  defp wrap_line("", _width, _breakindent, _linebreak, _oracle, _tab_width) do
-    [%{text: "", source_text: "", byte_offset: 0, indent_width: 0}]
+  @spec wrap_options(keyword()) :: wrap_options()
+  defp wrap_options(opts) do
+    %{
+      breakindent: Keyword.get(opts, :breakindent, true),
+      linebreak: Keyword.get(opts, :linebreak, true),
+      oracle: Keyword.get(opts, :oracle, %Monospace{}),
+      tab_width: Keyword.get(opts, :tab_width, 2)
+    }
   end
 
-  defp wrap_line(text, width, breakindent, linebreak, oracle, tab_width) when width > 0 do
+  @spec wrap_line(String.t(), pos_integer(), wrap_options()) :: wrap_entry()
+  defp wrap_line("", _width, _options), do: [visual_row("", 0, 0)]
+
+  defp wrap_line(text, width, options) when width > 0 do
+    config = wrap_config(text, width, options)
+    do_wrap(text, width, 0, [], config)
+  end
+
+  @spec wrap_config(String.t(), pos_integer(), wrap_options()) :: wrap_config()
+  defp wrap_config(text, width, options) do
     indent_width =
-      if breakindent, do: leading_whitespace_width(text, oracle, tab_width), else: 0
+      if options.breakindent,
+        do: leading_whitespace_width(text, options.oracle, options.tab_width, 0),
+        else: 0
 
     # First row gets the full width; continuation rows lose indent columns.
     # Deep indentation must still leave a positive continuation width.
-    continuation_width = max(width - indent_width, 1)
-
-    config = %{
-      continuation_width: continuation_width,
+    %{
+      continuation_width: max(width - indent_width, 1),
       indent_width: indent_width,
-      linebreak: linebreak,
-      oracle: oracle,
-      tab_width: tab_width
+      linebreak: options.linebreak,
+      oracle: options.oracle,
+      tab_width: options.tab_width
     }
+  end
 
-    do_wrap(text, width, 0, [], config)
+  @spec count_line(String.t(), pos_integer(), wrap_options()) :: pos_integer()
+  defp count_line("", _width, _options), do: 1
+
+  defp count_line(text, width, options) when width > 0 do
+    config = wrap_config(text, width, options)
+    do_count_rows(text, width, 0, config, 1)
+  end
+
+  @spec do_count_rows(String.t(), pos_integer(), non_neg_integer(), wrap_config(), pos_integer()) ::
+          pos_integer()
+  defp do_count_rows(text, width, start_col, config, count) do
+    case row_rest(text, start_col, width, config) do
+      "" ->
+        count
+
+      rest ->
+        do_count_rows(rest, config.continuation_width, config.indent_width, config, count + 1)
+    end
   end
 
   @spec do_wrap(String.t(), pos_integer(), non_neg_integer(), wrap_entry(), wrap_config()) ::
@@ -142,7 +213,7 @@ defmodule Minga.Core.WrapMap do
   defp do_wrap(text, row_width, byte_off, acc, config) do
     start_col = if byte_off == 0, do: 0, else: config.indent_width
 
-    case rest_after_row(text, start_col, start_col + row_width, true, nil, config) do
+    case row_rest(text, start_col, row_width, config) do
       "" ->
         Enum.reverse([visual_row(text, byte_off, config.indent_width) | acc])
 
@@ -180,6 +251,10 @@ defmodule Minga.Core.WrapMap do
       text
     end
   end
+
+  @spec row_rest(String.t(), non_neg_integer(), pos_integer(), wrap_config()) :: String.t()
+  defp row_rest(text, start_col, width, config),
+    do: rest_after_row(text, start_col, start_col + width, true, nil, config)
 
   # A saved word break is a suffix at the end of a fitting space or tab.
   # Use it only on overflow, never when the whole suffix fits.
@@ -221,11 +296,6 @@ defmodule Minga.Core.WrapMap do
 
   defp grapheme_advance(grapheme, oracle, _col, _tab_width),
     do: WidthOracle.grapheme_width(oracle, grapheme)
-
-  @spec leading_whitespace_width(String.t(), WidthOracle.t(), pos_integer()) ::
-          non_neg_integer()
-  defp leading_whitespace_width(text, oracle, tab_width),
-    do: leading_whitespace_width(text, oracle, tab_width, 0)
 
   @spec leading_whitespace_width(String.t(), WidthOracle.t(), pos_integer(), non_neg_integer()) ::
           non_neg_integer()

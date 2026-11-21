@@ -397,12 +397,22 @@ defmodule MingaEditor.RenderPipeline.ResidentIncrementalTest do
   end
 
   defp count_wraps(session, fun) do
-    mfa = {WrapMap, :compute, 3}
-    assert 1 = :trace.function(session, mfa, true, [:call_time])
+    mfas = [{WrapMap, :compute, 3}, {WrapMap, :count_rows, 3}]
+
+    Enum.each(mfas, fn mfa ->
+      assert 1 = :trace.function(session, mfa, true, [:call_time])
+    end)
+
     result = fun.()
     pid = self()
-    {:call_time, calls} = :trace.info(session, mfa, :call_time)
-    {^pid, count, _, _} = List.keyfind(calls, pid, 0, {pid, 0, 0, 0})
+
+    count =
+      Enum.reduce(mfas, 0, fn mfa, total ->
+        {:call_time, calls} = :trace.info(session, mfa, :call_time)
+        {^pid, count, _, _} = List.keyfind(calls, pid, 0, {pid, 0, 0, 0})
+        total + count
+      end)
+
     {result, count}
   end
 

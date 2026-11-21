@@ -25,7 +25,7 @@ defmodule MingaEditor.Renderer.MixedLayout do
            wrap_options: keyword(),
            show_invisible?: boolean(),
            preview: preview(),
-           cursor: {non_neg_integer(), non_neg_integer() | nil},
+           cursor_line: non_neg_integer(),
            purpose: :page | :bounds
          }
 
@@ -47,7 +47,7 @@ defmodule MingaEditor.Renderer.MixedLayout do
         snapshot,
         {fold_map, decorations},
         viewport,
-        {width, oracle, {cursor_line, cursor_byte} = cursor} = geometry,
+        {width, oracle, {cursor_line, _} = cursor} = geometry,
         motion,
         preview,
         presentation \\ nil
@@ -57,19 +57,16 @@ defmodule MingaEditor.Renderer.MixedLayout do
     {retained, _builds} =
       TextPresentation.matching_mixed_wrap(presentation, buffer, snapshot.version, basis)
 
-    follow_line = if not is_integer(motion) and is_integer(cursor_byte), do: cursor_line
-
     {projection, request} =
       prepare(buffer, snapshot, fold_map, decorations, geometry, preview, :page)
 
     {viewport, groups} = page_groups(projection, fold_map, viewport, cursor, motion)
-    request = if is_nil(follow_line), do: %{request | cursor: {cursor_line, nil}}, else: request
 
-    {missing, sources} = partition_groups(groups, retained, follow_line)
+    {missing, sources} = partition_groups(groups, retained)
 
     case fetch_missing(Enum.reverse(missing), request, sources) do
-      {:ok, sources, cursor_segment, preview_matches} ->
-        motion = visual_motion(motion, projection, cursor, cursor_segment)
+      {:ok, sources, preview_matches} ->
+        motion = visual_motion(motion, projection, cursor, sources, request)
 
         {map, viewport, bottom?} =
           DisplayMap.visual_page(groups, fold_map, viewport, sources, motion)
@@ -121,20 +118,17 @@ defmodule MingaEditor.Renderer.MixedLayout do
     missing =
       for {line, :normal, _, _} = group <- groups, not Map.has_key?(counts, line), do: group
 
-    request = %{request | cursor: {cursor_line, nil}}
-
-    with {:ok, counts, _, _} <- fetch_missing(missing, request, counts) do
+    with {:ok, counts, _} <- fetch_missing(missing, request, counts) do
       {viewport, bottom?} = DisplayMap.visual_scroll(groups, fold_map, viewport, counts, delta)
       {:ok, viewport, bottom?}
     end
   end
 
-  defp partition_groups(groups, retained, follow_line) do
+  defp partition_groups(groups, retained) do
     Enum.reduce(groups, {[], %{}}, fn {line, kind, _, _} = group, {missing, sources} ->
       case Map.get(retained, line) do
         {_, _, _, _, count} = source
-        when (kind == :normal and count > 0 and line != follow_line) or
-               (kind != :normal and count == 0) ->
+        when (kind == :normal and count > 0) or (kind != :normal and count == 0) ->
           {missing, Map.put(sources, line, source)}
 
         _ ->
@@ -160,7 +154,8 @@ defmodule MingaEditor.Renderer.MixedLayout do
 
   defp wrap_basis(_snapshot, _decorations, _width, _oracle, _cursor_line, _preview), do: nil
 
-  defp prepare(buffer, snapshot, fold_map, decorations, {width, oracle, cursor}, preview, purpose) do
+  defp prepare(buffer, snapshot, fold_map, decorations, geometry, preview, purpose) do
+    {width, oracle, {cursor_line, _}} = geometry
     decorations = Decorations.build_vt_line_cache(decorations)
     projection = DisplayMap.project(fold_map, decorations, snapshot.line_count, width)
 
@@ -172,7 +167,7 @@ defmodule MingaEditor.Renderer.MixedLayout do
       wrap_options: WrapLayout.options(width, oracle, snapshot.options),
       show_invisible?: Map.get(snapshot.options, :show_invisible, false),
       preview: preview,
-      cursor: cursor,
+      cursor_line: cursor_line,
       purpose: purpose
     }
 
@@ -182,12 +177,12 @@ defmodule MingaEditor.Renderer.MixedLayout do
   # If every group is retained, still qualify the answer against the live version.
   defp fetch_missing([], request, sources) do
     with {:ok, _snapshot} <- fetch_source(request, 0, 0) do
-      {:ok, sources, 0, []}
+      {:ok, sources, []}
     end
   end
 
   defp fetch_missing(groups, request, sources),
-    do: fetch_runs(groups, request, sources, 0, [])
+    do: fetch_runs(groups, request, sources, [])
 
   defp page_groups(projection, fold_map, viewport, _cursor, delta) when is_integer(delta) do
     rows = Viewport.content_rows(viewport)
@@ -211,25 +206,41 @@ defmodule MingaEditor.Renderer.MixedLayout do
     end
   end
 
-  defp visual_motion(delta, _projection, _cursor, _segment) when is_integer(delta), do: delta
+  defp visual_motion(delta, _projection, _cursor, _sources, _request) when is_integer(delta),
+    do: delta
 
-  defp visual_motion({:follow, margin}, projection, {line, _byte}, segment),
-    do: {DisplayMap.visible_source(projection, line), segment, margin}
+  defp visual_motion({:follow, margin}, projection, {line, byte} = cursor, sources, request) do
+    segment =
+      case sources do
+        %{^line => {text, _, composed, rows, count}} when is_integer(byte) and count > 1 ->
+          WrapLayout.cursor_segment(
+            text,
+            composed,
+            rows,
+            request.decorations,
+            cursor,
+            Keyword.fetch!(request.wrap_options, :tab_width)
+          )
+
+        _ ->
+          0
+      end
+
+    {DisplayMap.visible_source(projection, line), segment, margin}
+  end
 
   @spec fetch_runs(
           [DisplayMap.group()],
           request(),
           DisplayMap.sources() | WrapLayout.counts(),
-          non_neg_integer(),
           [SearchHighlight.search_match()]
         ) ::
-          {:ok, DisplayMap.sources() | WrapLayout.counts(), non_neg_integer(),
-           [SearchHighlight.search_match()]}
+          {:ok, DisplayMap.sources() | WrapLayout.counts(), [SearchHighlight.search_match()]}
           | layout_result()
-  defp fetch_runs([], _request, sources, cursor_segment, matches),
-    do: {:ok, sources, cursor_segment, Enum.reverse(matches)}
+  defp fetch_runs([], _request, sources, matches),
+    do: {:ok, sources, Enum.reverse(matches)}
 
-  defp fetch_runs([{first, _, _, _} = group | rest], request, sources, cursor_segment, matches) do
+  defp fetch_runs([{first, _, _, _} = group | rest], request, sources, matches) do
     # Coalesce consecutive visible source lines. Fold interiors never cross the process boundary.
     {run, rest, count} = take_run(rest, first + 1, [group], 1)
 
@@ -237,18 +248,10 @@ defmodule MingaEditor.Renderer.MixedLayout do
       {lines, preview_matches} =
         SearchHighlight.maybe_substitute_preview(request.preview, snapshot.lines, first)
 
-      {sources, cursor_segment} =
-        measure_run(
-          run,
-          lines,
-          snapshot.lines,
-          snapshot.first_line_byte_offset,
-          request,
-          sources,
-          cursor_segment
-        )
+      sources =
+        measure_run(run, lines, snapshot.lines, snapshot.first_line_byte_offset, request, sources)
 
-      fetch_runs(rest, request, sources, cursor_segment, Enum.reverse(preview_matches, matches))
+      fetch_runs(rest, request, sources, Enum.reverse(preview_matches, matches))
     end
   end
 
@@ -272,8 +275,7 @@ defmodule MingaEditor.Renderer.MixedLayout do
 
   defp take_run(rest, _line, acc, count), do: {Enum.reverse(acc), rest, count}
 
-  defp measure_run([], [], [], _offset, _request, sources, cursor_segment),
-    do: {sources, cursor_segment}
+  defp measure_run([], [], [], _offset, _request, sources), do: sources
 
   defp measure_run(
          [{line, kind, _, _} | groups],
@@ -281,23 +283,10 @@ defmodule MingaEditor.Renderer.MixedLayout do
          [raw | raw_rest],
          offset,
          request,
-         sources,
-         cursor_segment
+         sources
        ) do
-    {composed, rows, segment} = measure_source(text, line, kind, request)
-
-    measurement =
-      case request.purpose do
-        :page ->
-          indexed = List.to_tuple(rows)
-          {text, offset, composed, indexed, tuple_size(indexed)}
-
-        :bounds ->
-          length(rows)
-      end
-
+    measurement = measure_group(text, line, kind, offset, request)
     sources = Map.put(sources, line, measurement)
-    cursor_segment = if line == elem(request.cursor, 0), do: segment, else: cursor_segment
 
     measure_run(
       groups,
@@ -305,21 +294,38 @@ defmodule MingaEditor.Renderer.MixedLayout do
       raw_rest,
       offset + byte_size(raw) + 1,
       request,
-      sources,
-      cursor_segment
+      sources
     )
   end
 
-  defp measure_source(text, line, :normal, request) do
-    WrapLayout.measure(
+  defp measure_group(text, line, :normal, _offset, %{purpose: :bounds} = request) do
+    WrapLayout.row_count(
       text,
       line,
       request.decorations,
+      request.cursor_line,
       request.wrap_options,
-      request.show_invisible?,
-      request.cursor
+      request.show_invisible?
     )
   end
 
-  defp measure_source(text, _line, _fold, _request), do: {text, [], 0}
+  defp measure_group(_text, _line, _fold, _offset, %{purpose: :bounds}), do: 0
+
+  defp measure_group(text, line, :normal, offset, %{purpose: :page} = request) do
+    {composed, rows} =
+      WrapLayout.measure(
+        text,
+        line,
+        request.decorations,
+        request.wrap_options,
+        request.show_invisible?,
+        request.cursor_line
+      )
+
+    indexed = List.to_tuple(rows)
+    {text, offset, composed, indexed, tuple_size(indexed)}
+  end
+
+  defp measure_group(text, _line, _fold, offset, %{purpose: :page}),
+    do: {text, offset, text, {}, 0}
 end

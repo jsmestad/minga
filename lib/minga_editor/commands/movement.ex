@@ -1009,8 +1009,7 @@ defmodule MingaEditor.Commands.Movement do
   defp visual_row_count_for_line(buf, line, content_w, oracle) do
     snapshot = Buffer.render_snapshot(buf, line, 1)
     text = List.first(snapshot.lines) || ""
-    [entry] = WrapMap.compute([text], content_w, wrap_opts(buf, oracle))
-    max(Enum.count(entry), 1)
+    WrapMap.count_rows(text, content_w, wrap_opts(buf, oracle))
   catch
     :exit, _ -> 1
   end
@@ -1101,8 +1100,7 @@ defmodule MingaEditor.Commands.Movement do
     snapshot = Buffer.render_snapshot(buf, start_line, fetch_count)
 
     snapshot.lines
-    |> WrapMap.compute(content_w, wrap_opts(buf, oracle))
-    |> WrapMap.visual_row_count()
+    |> WrapMap.count_rows(content_w, wrap_opts(buf, oracle))
     |> max(1)
   catch
     :exit, _ -> 1
