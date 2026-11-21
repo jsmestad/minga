@@ -15,12 +15,11 @@ defmodule Minga.Parser.RequestState do
         }
   @type in_flight_request :: %{from: GenServer.from(), buffer: pid(), token: reference()}
 
-  defstruct next_id: 1, deferred: %{}, fences: %{}, in_flight: %{}
+  defstruct next_id: 1, deferred: %{}, in_flight: %{}
 
   @type t :: %__MODULE__{
           next_id: pos_integer(),
           deferred: %{reference() => deferred_request()},
-          fences: %{reference() => pid()},
           in_flight: %{non_neg_integer() => in_flight_request()}
         }
 
@@ -28,28 +27,22 @@ defmodule Minga.Parser.RequestState do
   @spec new() :: t()
   def new, do: %__MODULE__{}
 
-  @doc "Adds a deferred request and its buffer fence."
+  @doc "Defers a request until its first matching buffer snapshot."
   @spec defer(t(), reference(), deferred_request()) :: t()
-  def defer(%__MODULE__{} = state, token, request) when is_reference(token) do
-    %{
-      state
-      | deferred: Map.put(state.deferred, token, request),
-        fences: Map.put(state.fences, token, request.buffer)
-    }
+  def defer(%__MODULE__{} = state, token, %{required_sequence: nil} = request)
+      when is_reference(token) do
+    %{state | deferred: Map.put(state.deferred, token, request)}
   end
 
   @doc "Consumes a matching fence and records the snapshot sequence."
   @spec satisfy_fence(t(), reference(), pid(), non_neg_integer()) :: {:ok, t()} | :stale
   def satisfy_fence(%__MODULE__{} = state, token, buffer, sequence) do
-    case Map.pop(state.fences, token) do
-      {^buffer, fences} ->
-        deferred =
-          Map.update(state.deferred, token, nil, &Map.put(&1, :required_sequence, sequence))
-          |> Map.reject(fn {_token, request} -> is_nil(request) end)
+    case Map.get(state.deferred, token) do
+      %{buffer: ^buffer, required_sequence: nil} = request ->
+        request = %{request | required_sequence: sequence}
+        {:ok, %{state | deferred: Map.put(state.deferred, token, request)}}
 
-        {:ok, %{state | fences: fences, deferred: deferred}}
-
-      {_other, _fences} ->
+      _ ->
         :stale
     end
   end
@@ -84,11 +77,6 @@ defmodule Minga.Parser.RequestState do
     {request, %{state | deferred: deferred}}
   end
 
-  @doc "Removes a fence by token."
-  @spec drop_fence(t(), reference()) :: t()
-  def drop_fence(%__MODULE__{} = state, token),
-    do: %{state | fences: Map.delete(state.fences, token)}
-
   @doc "Removes an in-flight request by parser request ID."
   @spec pop_in_flight(t(), non_neg_integer()) :: {in_flight_request() | nil, t()}
   def pop_in_flight(%__MODULE__{} = state, id) do
@@ -105,21 +93,14 @@ defmodule Minga.Parser.RequestState do
     end
   end
 
-  @doc "Removes every deferred, fenced, and in-flight request for one buffer."
+  @doc "Removes every deferred and in-flight request for one buffer."
   @spec take_buffer(t(), pid()) :: {[GenServer.from()], t()}
   def take_buffer(%__MODULE__{} = state, buffer) do
     {failed_deferred, kept_deferred} =
       Enum.split_with(state.deferred, fn {_token, request} -> request.buffer == buffer end)
 
-    failed_tokens = MapSet.new(failed_deferred, &elem(&1, 0))
-
     {failed_in_flight, kept_in_flight} =
       Enum.split_with(state.in_flight, fn {_id, request} -> request.buffer == buffer end)
-
-    fences =
-      Map.reject(state.fences, fn {token, pid} ->
-        pid == buffer or MapSet.member?(failed_tokens, token)
-      end)
 
     replies =
       Enum.map(failed_deferred, fn {_token, request} -> request.from end) ++
@@ -129,18 +110,17 @@ defmodule Minga.Parser.RequestState do
      %{
        state
        | deferred: Map.new(kept_deferred),
-         fences: fences,
          in_flight: Map.new(kept_in_flight)
      }}
   end
 
-  @doc "Removes every deferred, fenced, and in-flight request."
+  @doc "Removes every deferred and in-flight request."
   @spec take_all(t()) :: {[GenServer.from()], t()}
   def take_all(%__MODULE__{} = state) do
     replies =
       Enum.map(state.deferred, fn {_token, request} -> request.from end) ++
         Enum.map(state.in_flight, fn {_id, request} -> request.from end)
 
-    {replies, %{state | deferred: %{}, fences: %{}, in_flight: %{}}}
+    {replies, %{state | deferred: %{}, in_flight: %{}}}
   end
 end
