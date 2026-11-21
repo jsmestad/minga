@@ -5,7 +5,9 @@ defmodule Minga.LSP.SyncServerTest do
   alias Minga.Buffer.EditDelta
   alias Minga.Buffer.EditSource
   alias Minga.Buffer.Process, as: BufferProcess
+  alias Minga.Config.Options
   alias Minga.Events
+  alias Minga.LSP.ServerRegistry
   alias Minga.LSP.SyncServer
 
   @moduletag :tmp_dir
@@ -22,6 +24,34 @@ defmodule Minga.LSP.SyncServerTest do
   end
 
   describe "event bus integration" do
+    test "opening a file with no configured server does not read its content", %{tmp_dir: dir} do
+      path = Path.join(dir, "no-server.txt")
+      File.write!(path, "hello")
+      buf = start_buffer(file_path: path, filetype: :text)
+      assert ServerRegistry.servers_for(BufferProcess.filetype(buf)) == []
+      previous = Options.get(:lsp_auto_start)
+
+      :ok = :sys.install(buf, {:open_reads, &observe_buffer_call/3, self()})
+
+      try do
+        assert {:ok, true} = Options.set(:lsp_auto_start, true)
+
+        send(
+          SyncServer,
+          {:minga_event, :buffer_opened, %Events.BufferEvent{buffer: buf, path: path}}
+        )
+
+        sync_server()
+      after
+        Options.set(:lsp_auto_start, previous)
+        :sys.remove(buf, :open_reads)
+      end
+
+      assert_received {:observed_buffer_call, :filetype}
+      assert_received {:observed_buffer_call, :file_path}
+      refute_received {:observed_buffer_call, :content_with_version}
+    end
+
     test "buffer_closed removes clients from the registry", %{tmp_dir: dir} do
       path = Path.join(dir, "cleanup.txt")
       buf = start_buffer(content: "hello", file_path: path)
@@ -37,7 +67,7 @@ defmodule Minga.LSP.SyncServerTest do
   end
 
   describe "buffer_changed event" do
-    test "sends accumulated deltas incrementally in document order", %{tmp_dir: dir} do
+    test "sends ordered incremental deltas and ignores stale bulk events", %{tmp_dir: dir} do
       path = Path.join(dir, "incremental.txt")
       File.write!(path, "hello")
       buf = start_buffer(file_path: path)
@@ -46,10 +76,14 @@ defmodule Minga.LSP.SyncServerTest do
       second = EditDelta.insertion(1, {0, 1}, "y", {0, 2})
       SyncServer.put_clients(buf, [client])
 
-      Events.broadcast(:buffer_changed, changed_event(buf, first, EditSource.user(), 1))
-      Events.broadcast(:buffer_changed, changed_event(buf, second, EditSource.user(), 2))
+      flush_batch(buf, [
+        changed_event(buf, first, EditSource.user(), 2),
+        changed_event(buf, nil, EditSource.unknown(), 2),
+        changed_event(buf, nil, EditSource.unknown(), 1),
+        changed_event(buf, second, EditSource.user(), 3)
+      ])
 
-      assert_receive {:client_cast, ^client, {:did_change_incremental, uri, changes, ^buf, 2}},
+      assert_receive {:client_cast, ^client, {:did_change_incremental, uri, changes, ^buf, 3}},
                      1_000
 
       assert uri == SyncServer.path_to_uri(path)
@@ -84,7 +118,7 @@ defmodule Minga.LSP.SyncServerTest do
       assert context.buffer_revision == 0
     end
 
-    test "nil delta falls back to full sync even for incremental clients", %{tmp_dir: dir} do
+    test "a bulk event keeps a batch in full sync after a later incremental edit", %{tmp_dir: dir} do
       path = Path.join(dir, "bulk.txt")
       File.write!(path, "hello")
       buf = start_buffer(file_path: path)
@@ -92,12 +126,14 @@ defmodule Minga.LSP.SyncServerTest do
       delta = EditDelta.insertion(0, {0, 0}, "x", {0, 1})
       SyncServer.put_clients(buf, [client])
 
-      Events.broadcast(:buffer_changed, changed_event(buf, delta, EditSource.user(), 1))
-      Events.broadcast(:buffer_changed, changed_event(buf, nil, EditSource.unknown(), 2))
+      flush_batch(buf, [
+        changed_event(buf, delta, EditSource.user(), 1),
+        changed_event(buf, nil, EditSource.unknown(), 2),
+        changed_event(buf, delta, EditSource.user(), 3)
+      ])
 
-      assert_receive {:client_cast, ^client, {:did_change, uri, "hello", ^buf, 0}}, 1_000
-      assert uri == SyncServer.path_to_uri(path)
-      refute_receive {:client_cast, ^client, {:did_change_incremental, _, _}}, 50
+      assert_receive {:client_cast, ^client, message}, 1_000
+      assert message == {:did_change, SyncServer.path_to_uri(path), "hello", buf, 0}
     end
 
     test "UTF-16 and UTF-32 clients receive exact full content before request admission", %{
@@ -231,7 +267,7 @@ defmodule Minga.LSP.SyncServerTest do
       :ok = stop_supervised!(:closing_buffer)
 
       refute_receive {:client_cast, _client, _message}, 400
-      refute Map.has_key?(:sys.get_state(SyncServer).pending_revisions, buf)
+      refute Map.has_key?(:sys.get_state(SyncServer).pending_changes, buf)
     end
   end
 
@@ -265,6 +301,24 @@ defmodule Minga.LSP.SyncServerTest do
       version: version
     }
   end
+
+  defp flush_batch(buf, events) do
+    :ok = :sys.suspend(SyncServer)
+
+    try do
+      Enum.each(events, &send(SyncServer, {:minga_event, :buffer_changed, &1}))
+      send(SyncServer, {:flush_did_change, buf})
+    after
+      :sys.resume(SyncServer)
+    end
+  end
+
+  defp observe_buffer_call(parent, {:in, {:"$gen_call", _from, request}}, _state) do
+    send(parent, {:observed_buffer_call, request})
+    parent
+  end
+
+  defp observe_buffer_call(parent, _event, _state), do: parent
 
   defp start_client(sync_kind \\ :full, encoding \\ :utf8) do
     parent = self()
@@ -341,8 +395,7 @@ defmodule Minga.LSP.SyncServerTest do
         state
         | debounce_timers: %{},
           client_monitors: %{},
-          delta_accumulators: %{},
-          pending_revisions: %{},
+          pending_changes: %{},
           pending_tool_buffers: %{}
       }
     end)

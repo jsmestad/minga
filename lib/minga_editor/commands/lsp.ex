@@ -59,7 +59,7 @@ defmodule MingaEditor.Commands.Lsp do
   end
 
   def execute(state, :lsp_restart) do
-    case clients_and_keys_for_active(state) do
+    case client_keys_for_active(state) do
       [] ->
         MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
           state,
@@ -79,7 +79,7 @@ defmodule MingaEditor.Commands.Lsp do
   end
 
   def execute(state, :lsp_stop) do
-    case clients_and_keys_for_active(state) do
+    case client_keys_for_active(state) do
       [] ->
         MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
           state,
@@ -121,8 +121,8 @@ defmodule MingaEditor.Commands.Lsp do
 
   # ── Private: per-client operations ────────────────────────────────────────
 
-  @spec restart_one({atom(), {atom(), String.t()}}) :: {:ok, atom()} | {:error, atom(), term()}
-  defp restart_one({name, key}) do
+  @spec restart_one({atom(), String.t()}) :: {:ok, atom()} | {:error, atom(), term()}
+  defp restart_one({name, _root} = key) do
     case LSPSupervisor.restart_client(key) do
       {:ok, _pid} ->
         Minga.Log.info(:lsp, "Restarted LSP server #{name}")
@@ -134,8 +134,8 @@ defmodule MingaEditor.Commands.Lsp do
     end
   end
 
-  @spec stop_one({atom(), {atom(), String.t()}}) :: {:ok, atom()} | {:error, atom(), term()}
-  defp stop_one({name, key}) do
+  @spec stop_one({atom(), String.t()}) :: {:ok, atom()} | {:error, atom(), term()}
+  defp stop_one({name, _root} = key) do
     case LSPSupervisor.stop_client(key) do
       :ok ->
         Minga.Log.info(:lsp, "Stopped LSP server #{name}")
@@ -182,17 +182,16 @@ defmodule MingaEditor.Commands.Lsp do
     :ok
   end
 
-  @spec clients_and_keys_for_active(state()) :: [{atom(), {atom(), String.t()}}]
-  defp clients_and_keys_for_active(%{workspace: %{buffers: %{active: buf}}} = _state) do
-    clients = SyncServer.clients_for_buffer(buf)
-    Enum.flat_map(clients, &client_name_and_key/1)
+  @spec client_keys_for_active(state()) :: [{atom(), String.t()}]
+  defp client_keys_for_active(%{workspace: %{buffers: %{active: buf}}}) do
+    buf
+    |> SyncServer.clients_for_buffer()
+    |> Enum.flat_map(&client_key/1)
   end
 
-  @spec client_name_and_key(pid()) :: [{atom(), {atom(), String.t()}}]
-  defp client_name_and_key(pid) do
-    name = Client.server_name(pid)
-    root = Client.root_path(pid)
-    [{name, {name, root}}]
+  @spec client_key(pid()) :: [{atom(), String.t()}]
+  defp client_key(pid) do
+    [Client.server_key(pid)]
   catch
     :exit, _ -> []
   end
