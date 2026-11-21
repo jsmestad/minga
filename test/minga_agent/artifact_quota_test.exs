@@ -213,6 +213,36 @@ defmodule MingaAgent.ArtifactQuotaTest do
     assert %{namespaces: 2} = ArtifactQuota.usage(first)
   end
 
+  test "namespace registration distinguishes exhausted slots from exhausted disk quota",
+       %{tmp_dir: root} do
+    envelope = Limits.sqlite_envelope_bytes()
+    first = Reference.namespace("first")
+    second = Reference.namespace("second")
+
+    for {slots, rejection} <- [{1, :root_namespace_limit}, {2, :root_disk_quota}] do
+      directory = Path.join(root, Integer.to_string(slots))
+
+      quota =
+        start_quota(directory, {:quota, slots},
+          limits: [
+            root_namespaces: slots,
+            root_bytes: 2 * envelope,
+            session_bytes: envelope,
+            capture_bytes: 64,
+            append_bytes: 64,
+            image_bytes: 64
+          ]
+        )
+
+      assert {:ok, _limits} = ArtifactQuota.register_namespace(quota, directory, first)
+      before = ArtifactQuota.usage(quota)
+      assert before.bytes == 2 * envelope
+      assert {:error, ^rejection} = ArtifactQuota.register_namespace(quota, directory, second)
+      assert {:ok, _limits} = ArtifactQuota.register_namespace(quota, directory, first)
+      assert ArtifactQuota.usage(quota) == before
+    end
+  end
+
   test "cold reserve and release operations fail without opening storage", %{tmp_dir: root} do
     quota = start_quota(root, {:quota, make_ref()})
     namespace = Reference.namespace("cold-record")
@@ -226,6 +256,46 @@ defmodule MingaAgent.ArtifactQuotaTest do
     assert %{bytes: 0, limit_bytes: limit} = ArtifactQuota.usage(quota)
     assert limit == MingaAgent.Config.artifact_limits().root_bytes
     assert {:error, :enoent} = File.lstat(Path.join(root, "artifact_quota.sqlite3"))
+  end
+
+  test "release admission distinguishes missing rows and insufficient reservations",
+       %{tmp_dir: root} do
+    quota = start_quota(root, {:quota, make_ref()})
+    namespace = Reference.namespace("registered")
+    missing = Reference.namespace("missing")
+    assert {:ok, _limits} = ArtifactQuota.register_namespace(quota, root, namespace)
+
+    assert {:error, :unknown_namespace} = ArtifactQuota.finish_capture(quota, missing)
+    assert {:error, :unknown_namespace} = ArtifactQuota.cancel_capture(quota, missing, 0, 0)
+    assert {:error, :unknown_namespace} = ArtifactQuota.release_reservation(quota, missing, 0, 0)
+    assert {:error, :unknown_namespace} = ArtifactQuota.release_artifact(quota, missing, 0, 0)
+
+    assert {:error, :invalid_open_capture_release} =
+             ArtifactQuota.finish_capture(quota, namespace)
+
+    assert {:error, :invalid_quota_release} =
+             ArtifactQuota.release_artifact(quota, namespace, 0, 0)
+
+    assert :ok = ArtifactQuota.release_reservation(quota, namespace, 0, 0)
+
+    assert :ok = ArtifactQuota.reserve_capture(quota, namespace, 32)
+    assert :ok = ArtifactQuota.reserve_append(quota, namespace, 5, 1)
+    assert :ok = ArtifactQuota.finish_capture(quota, namespace)
+    before = ArtifactQuota.usage(quota)
+
+    assert {:error, :invalid_quota_release} =
+             ArtifactQuota.cancel_capture(quota, namespace, 32, 0)
+
+    assert {:error, :invalid_quota_release} =
+             ArtifactQuota.release_reservation(quota, namespace, before.bytes, 1)
+
+    assert {:error, :invalid_quota_release} =
+             ArtifactQuota.release_artifact(quota, namespace, 37, 2)
+
+    assert ArtifactQuota.usage(quota) == before
+
+    assert :ok = ArtifactQuota.release_artifact(quota, namespace, 37, 1)
+    assert %{items: 0, artifacts: 0, open_captures: 0} = ArtifactQuota.usage(quota)
   end
 
   test "failed WAL checkpoint blocks writes while retaining committed conservative charge", %{
@@ -251,6 +321,33 @@ defmodule MingaAgent.ArtifactQuotaTest do
                root,
                Reference.namespace("blocked-session")
              )
+  end
+
+  test "a finish committed before a checkpoint failure still releases the open count",
+       %{tmp_dir: root} do
+    armed = :atomics.new(1, [])
+
+    checkpoint = fn ->
+      if :atomics.get(armed, 1) == 1, do: {:error, :checkpoint_busy}, else: :ok
+    end
+
+    quota =
+      start_quota(root, {:quota, make_ref()},
+        fault_injector: %{before_quota_checkpoint: checkpoint}
+      )
+
+    namespace = Reference.namespace("registered")
+
+    assert {:ok, _limits} = ArtifactQuota.register_namespace(quota, root, namespace)
+    assert :ok = ArtifactQuota.reserve_capture(quota, namespace, 32)
+    assert %{open_captures: 1} = before = ArtifactQuota.usage(quota)
+    :ok = :atomics.put(armed, 1, 1)
+
+    assert {:error, :storage_unavailable} = ArtifactQuota.finish_capture(quota, namespace)
+    assert ArtifactQuota.usage(quota) == %{before | open_captures: 0}
+
+    assert {:error, :storage_unavailable} =
+             ArtifactQuota.release_artifact(quota, namespace, 32, 0)
   end
 
   test "artifact directories and every materialized owned file remain private and regular", %{
