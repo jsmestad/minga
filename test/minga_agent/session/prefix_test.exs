@@ -381,6 +381,21 @@ defmodule MingaAgent.Session.PrefixTest do
              PrefixStore.restore(%{data | instructions: %{id => "tampered"}})
   end
 
+  test "restore rejects out-of-order schema names even when the stored digest matches" do
+    data = PrefixStore.dump(PrefixStore.new())
+    alpha = schema("alpha")
+    zeta = schema("zeta")
+
+    restore = fn schemas ->
+      encoded = :erlang.term_to_binary({1, :schemas, schemas}, [:deterministic])
+      id = "px1_" <> Base.url_encode64(:crypto.hash(:sha256, encoded), padding: false)
+      PrefixStore.restore(%{data | schemas: %{id => schemas}})
+    end
+
+    assert {:ok, _store} = restore.([alpha, zeta])
+    assert {:error, :invalid_prefix_store} = restore.([zeta, alpha])
+  end
+
   test "empty native windows retain historical identity and cannot acquire a replacement prefix" do
     prefix = candidate()
     {_request, history} = completed(prefix)
