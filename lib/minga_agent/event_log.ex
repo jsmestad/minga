@@ -226,10 +226,11 @@ defmodule MingaAgent.EventLog do
   @impl GenServer
   @spec handle_info(term(), State.t()) :: {:noreply, State.t()}
   def handle_info(
-        {:event_log_writer_ready, writer, events},
+        {:event_log_writer_ready, writer, touched_files},
         %State{writer: {:opening, writer, _ref}} = state
       ) do
-    {:noreply, complete_writer_start(state, events)}
+    Minga.Log.info(:agent, "[AgentEventLog] started, logging to #{state.path}")
+    {:noreply, state |> State.writer_ready(touched_files) |> dispatch_next()}
   end
 
   def handle_info(
@@ -440,19 +441,6 @@ defmodule MingaAgent.EventLog do
     :ok
   end
 
-  @spec complete_writer_start(State.t(), [EventRecord.t()]) :: State.t()
-  defp complete_writer_start(state, events) do
-    case State.rebuild_touched_files(state, events) do
-      {:ok, state} ->
-        Minga.Log.info(:agent, "[AgentEventLog] started, logging to #{state.path}")
-        state |> State.writer_ready() |> dispatch_next()
-
-      {:error, reason} ->
-        stop_writer(State.writer_pid(state))
-        mark_writer_unavailable(state, {:reconstruction_failed, reason})
-    end
-  end
-
   @spec mark_writer_unavailable(State.t(), term()) :: State.t()
   defp mark_writer_unavailable(%State{writer: {phase, _writer, writer_ref}} = state, reason)
        when phase in [:opening, :ready] do
@@ -488,13 +476,10 @@ defmodule MingaAgent.EventLog do
   end
 
   @spec finish_retention(State.t(), term()) :: State.t()
-  defp finish_retention(state, {:ok, deleted_count, events}) do
+  defp finish_retention(state, {:ok, deleted_count, touched_files}) do
     log_retention_result({:ok, deleted_count})
 
-    case State.rebuild_touched_files(state, events) do
-      {:ok, state} -> complete_retention(state)
-      {:error, reason} -> fail_retention_projection(state, {:rebuild_failed, reason})
-    end
+    state |> State.install_touched_files(touched_files) |> complete_retention()
   end
 
   defp finish_retention(state, {:error, {:delete_failed, reason}}) do
@@ -502,8 +487,9 @@ defmodule MingaAgent.EventLog do
     complete_retention(state)
   end
 
-  defp finish_retention(state, {:error, {:reload_failed, reason}}) do
-    fail_retention_projection(state, {:reload_failed, reason})
+  defp finish_retention(state, {:error, {kind, _reason} = failure})
+       when kind in [:reload_failed, :rebuild_failed] do
+    fail_retention_projection(state, failure)
   end
 
   @spec complete_retention(State.t()) :: State.t()

@@ -3,6 +3,7 @@ defmodule MingaAgent.EventLog.StoreTest do
 
   alias MingaAgent.EventLog.EventRecord
   alias MingaAgent.EventLog.Store
+  alias MingaAgent.EventLog.TouchedFiles
 
   import Bitwise, only: [band: 2]
 
@@ -32,6 +33,64 @@ defmodule MingaAgent.EventLog.StoreTest do
     assert Enum.map([first, second], & &1.event_type) == [:session_started, :assistant_delta]
     assert {:ok, [^second]} = Store.events_after(db, "session-a", first_id, 10)
     assert {:ok, []} = Store.events_after(db, "session-a", second_id, 10)
+  end
+
+  test "loading touched files matches recording the same durable edits live", %{db: db} do
+    first = file_edit("", "created", 20)
+    second = file_edit("created", "", 10)
+    assert {:ok, first_id} = Store.insert(db, first)
+    assert {:ok, second_id} = Store.insert(db, second)
+    assert first_id < second_id
+
+    assert {:ok, live} = TouchedFiles.record(TouchedFiles.new(), first, first_id)
+    assert {:ok, live} = TouchedFiles.record(live, second, second_id)
+    assert {:ok, ^live} = Store.load_touched_files(db)
+  end
+
+  test "loading touched files does not retain the backing edit payload", %{db: db} do
+    path = "lib/" <> :binary.copy("nested/", 64) <> "example.ex"
+
+    event =
+      EventRecord.new("session", :file_edit_proposed, %{
+        "path" => path,
+        "before_content" => "",
+        "after_content" => :binary.copy("x", 128 * 1_024)
+      })
+
+    assert {:ok, _id} = Store.insert(db, event)
+    assert {:ok, projection} = Store.load_touched_files(db)
+
+    assert [%{path: retained, action: :created}] = TouchedFiles.list(projection, "session")
+    assert retained == path
+    assert :binary.referenced_byte_size(retained) == byte_size(retained)
+  end
+
+  test "loading touched files rejects an invalid edit superseded at the same path", %{db: db} do
+    assert {:ok, invalid_id} = Store.insert(db, file_edit("", 42, 10))
+    assert {:ok, valid_id} = Store.insert(db, file_edit("", "created", 20))
+    assert invalid_id < valid_id
+
+    assert {:error, {:validation_failed, {:invalid_file_edit, :after_content}}} =
+             Store.load_touched_files(db)
+  end
+
+  test "query preparation failure is a touched-file read failure", %{db: db} do
+    assert :ok = Exqlite.Sqlite3.execute(db, "DROP TABLE events")
+    assert {:error, {:read_failed, _reason}} = Store.load_touched_files(db)
+  end
+
+  test "malformed rows still raise even after an earlier validation rejection", %{db: db} do
+    assert {:ok, 1} = Store.insert(db, file_edit("", 42, 10))
+    assert {:ok, 2} = Store.insert(db, file_edit("", "created", 20))
+
+    assert :ok = Exqlite.Sqlite3.execute(db, "UPDATE events SET payload = '{' WHERE id = 2")
+
+    assert_raise JSON.DecodeError, fn -> Store.load_touched_files(db) end
+
+    assert :ok =
+             Exqlite.Sqlite3.execute(db, "UPDATE events SET wall_clock = 'invalid' WHERE id = 2")
+
+    assert_raise MatchError, fn -> Store.load_touched_files(db) end
   end
 
   test "repeated insertion of one event key returns the committed id without duplication", %{
@@ -191,6 +250,20 @@ defmodule MingaAgent.EventLog.StoreTest do
              Store.events_after(reopened, "stable-session", 0, 10)
 
     :ok = Store.close(reopened)
+  end
+
+  @spec file_edit(String.t(), String.t() | integer(), integer()) :: EventRecord.t()
+  defp file_edit(before_content, after_content, timestamp) do
+    EventRecord.new(
+      "session",
+      :file_edit_proposed,
+      %{
+        "path" => "lib/a.ex",
+        "before_content" => before_content,
+        "after_content" => after_content
+      },
+      monotonic_ts: timestamp
+    )
   end
 
   @spec file_mode(String.t()) :: non_neg_integer()

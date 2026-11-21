@@ -62,17 +62,6 @@ defmodule MingaAgent.EventLog.TouchedFiles do
 
   def record(%__MODULE__{} = projection, %EventRecord{}, _event_id), do: {:ok, projection}
 
-  @doc "Rebuilds the projection from persisted events in durable order."
-  @spec rebuild([EventRecord.t()]) :: {:ok, t()} | {:error, rejection()}
-  def rebuild(events) when is_list(events) do
-    Enum.reduce_while(events, {:ok, new()}, fn event, {:ok, projection} ->
-      case record(projection, event, event.id) do
-        {:ok, next} -> {:cont, {:ok, next}}
-        {:error, _reason} = error -> {:halt, error}
-      end
-    end)
-  end
-
   @doc "Lists one session's latest file touches, most recent first."
   @spec list(t(), String.t()) :: [touch()]
   def list(%__MODULE__{} = projection, session_id) when is_binary(session_id) do
@@ -103,6 +92,14 @@ defmodule MingaAgent.EventLog.TouchedFiles do
         projection
 
       _current ->
+        # A decoded path can be a slice of the full edit payload.
+        path =
+          if byte_size(path) < :binary.referenced_byte_size(path) do
+            :binary.copy(path)
+          else
+            path
+          end
+
         entry = {event_id, action(event.payload), event.monotonic_ts}
 
         by_session =

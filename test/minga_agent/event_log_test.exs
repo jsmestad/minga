@@ -5,6 +5,7 @@ defmodule MingaAgent.EventLogTest do
   alias MingaAgent.EventLog.ControllableStore
   alias MingaAgent.EventLog.EventRecord
   alias MingaAgent.EventLog.Store
+  alias MingaAgent.EventLog.TouchedFiles
 
   @moduletag :tmp_dir
   @event_timeout 2_000
@@ -494,55 +495,82 @@ defmodule MingaAgent.EventLogTest do
     assert EventLog.touched_files("session", name) == {:ok, []}
   end
 
-  test "retention reload failure makes the projection unavailable" do
-    name = unique_name("failed-retention-reload-log")
+  for {load_kind, retention_kind, reason} <- [
+        {:read_failed, :reload_failed, :disk_read_failed},
+        {:validation_failed, :rebuild_failed, {:invalid_file_edit, :after_content}}
+      ] do
+    @tag load_failure: {load_kind, reason}
+    test "startup #{load_kind} closes the connection and fails the queued receipt", %{
+      load_failure: {_kind, reason} = load_failure
+    } do
+      name = unique_name("failed-reconstruction-log")
+      writer = open_projection_controlled_writer(name)
+      assert EventLog.touched_files("session", name) == {:error, :unavailable}
 
-    start_event_log(name,
-      store_backend: ControllableStore,
-      store_backend_opts: [
-        controller: self(),
-        reconstruction_result: :controlled
-      ],
-      writer_restart_delay_ms: 60_000
-    )
+      assert {:queued, receipt} = EventLog.record("session", :session_started, %{}, name)
 
-    writer = open_controlled_writer()
-    assert_receive {:event_log_store_file_edit_events, ^writer}
-    send(writer, {:event_log_store_file_edit_events_result, {:ok, []}})
-    :sys.get_state(writer)
-    assert %{writer: {:ready, ^writer, _ref}} = :sys.get_state(name)
+      send(writer, {:event_log_store_load_touched_files_result, {:error, load_failure}})
 
-    send(name, :retention_sweep)
-    assert_receive {:event_log_store_delete_before, ^writer, _cutoff}
-    send(writer, {:event_log_store_delete_before_result, {:ok, 0}})
-    assert_receive {:event_log_store_file_edit_events, ^writer}
+      assert_receive {:event_log_store_closed, ^writer}, @event_timeout
 
-    writer_ref = Process.monitor(writer)
-    send(writer, {:event_log_store_file_edit_events_result, {:error, :disk_read_failed}})
+      failure = {:writer_start_failed, {:reconstruction_failed, reason}}
 
-    assert_receive {:DOWN, ^writer_ref, :process, ^writer, _reason}, @event_timeout
-    assert %{writer: :unavailable} = :sys.get_state(name)
-    assert EventLog.touched_files("session", name) == {:error, :unavailable}
+      assert_receive {:event_log_commit, ^receipt, :session_started,
+                      {:error, {:persistence_failed, ^failure}}},
+                     @event_timeout
+
+      assert EventLog.touched_files("session", name) == {:error, :unavailable}
+    end
+
+    @tag load_failure: {load_kind, reason}, retention_failure: {retention_kind, reason}
+    test "retention #{retention_kind} after zero deletes fails the queued receipt", %{
+      load_failure: load_failure,
+      retention_failure: retention_failure
+    } do
+      name = unique_name("failed-retention-projection-log")
+      writer = open_projection_controlled_writer(name)
+      send(writer, {:event_log_store_load_touched_files_result, {:ok, TouchedFiles.new()}})
+
+      send(name, :retention_sweep)
+      assert_receive {:event_log_store_delete_before, ^writer, _cutoff}, @event_timeout
+      send(writer, {:event_log_store_delete_before_result, {:ok, 0}})
+      assert_receive {:event_log_store_load_touched_files, ^writer}, @event_timeout
+
+      assert EventLog.touched_files("session", name) == {:ok, []}
+      assert {:queued, receipt} = EventLog.record("session", :session_started, %{}, name)
+
+      send(writer, {:event_log_store_load_touched_files_result, {:error, load_failure}})
+
+      failure = {:writer_start_failed, {:retention_projection_failed, retention_failure}}
+
+      assert_receive {:event_log_commit, ^receipt, :session_started,
+                      {:error, {:persistence_failed, ^failure}}},
+                     @event_timeout
+
+      assert EventLog.touched_files("session", name) == {:error, :unavailable}
+    end
   end
 
-  test "reconstruction failure leaves touched-file queries explicitly unavailable" do
-    name = unique_name("failed-reconstruction-log")
+  test "retention delete failure preserves the installed projection and resumes queued work" do
+    name = unique_name("failed-retention-delete-log")
+    writer = open_projection_controlled_writer(name)
+    send(writer, {:event_log_store_load_touched_files_result, {:ok, TouchedFiles.new()}})
 
-    start_event_log(name,
-      store_backend: ControllableStore,
-      store_backend_opts: [
-        controller: self(),
-        reconstruction_result: {:error, :corrupt_projection_event}
-      ],
-      writer_restart_delay_ms: 60_000
-    )
+    edit_receipt = record_file_edit(name, "session", "lib/a.ex", "", "created")
+    assert_receive {:event_log_store_insert, ^writer, _record}, @event_timeout
+    send(writer, {:event_log_store_insert_result, {:ok, 1}})
+    assert {:persisted, 1} = EventLog.await(edit_receipt)
+    assert {:ok, [%{path: "lib/a.ex"}] = installed} = EventLog.touched_files("session", name)
 
-    writer = open_controlled_writer()
-    writer_ref = Process.monitor(writer)
-    assert_receive {:DOWN, ^writer_ref, :process, ^writer, _reason}, @event_timeout
-    :sys.get_state(name)
+    send(name, :retention_sweep)
+    assert_receive {:event_log_store_delete_before, ^writer, _cutoff}, @event_timeout
+    assert {:queued, receipt} = EventLog.record("session", :session_started, %{}, name)
+    send(writer, {:event_log_store_delete_before_result, {:error, :delete_blocked}})
 
-    assert EventLog.touched_files("session", name) == {:error, :unavailable}
+    assert_receive {:event_log_store_insert, ^writer, _record}, @event_timeout
+    assert EventLog.touched_files("session", name) == {:ok, installed}
+    send(writer, {:event_log_store_insert_result, {:ok, 2}})
+    assert {:persisted, 2} = EventLog.await(receipt)
   end
 
   @spec record_file_edit(atom(), String.t(), String.t(), String.t(), String.t()) ::
@@ -592,6 +620,19 @@ defmodule MingaAgent.EventLogTest do
       ] ++ opts,
       child_id
     )
+  end
+
+  @spec open_projection_controlled_writer(atom()) :: pid()
+  defp open_projection_controlled_writer(name) do
+    start_event_log(name,
+      store_backend: ControllableStore,
+      store_backend_opts: [controller: self(), reconstruction_result: :controlled],
+      writer_restart_delay_ms: 60_000
+    )
+
+    writer = open_controlled_writer()
+    assert_receive {:event_log_store_load_touched_files, ^writer}, @event_timeout
+    writer
   end
 
   @spec open_controlled_writer() :: pid()

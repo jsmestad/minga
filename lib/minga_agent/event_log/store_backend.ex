@@ -6,8 +6,13 @@ defmodule MingaAgent.EventLog.StoreBackend do
   """
 
   alias MingaAgent.EventLog.EventRecord
+  alias MingaAgent.EventLog.TouchedFiles
 
   @type db :: term()
+
+  @type load_touched_files_result ::
+          {:ok, TouchedFiles.t()}
+          | {:error, {:read_failed, term()} | {:validation_failed, TouchedFiles.rejection()}}
 
   @doc "Opens the writer-owned database connection."
   @callback open_writer(String.t(), keyword()) :: {:ok, db()} | {:error, term()}
@@ -15,8 +20,8 @@ defmodule MingaAgent.EventLog.StoreBackend do
   @doc "Closes the writer-owned database connection."
   @callback close(db()) :: :ok | {:error, term()}
 
-  @doc "Loads persisted file-edit events in durable order for projection reconstruction."
-  @callback file_edit_events(db()) :: {:ok, [EventRecord.t()]} | {:error, term()}
+  @doc "Loads a complete touched-file projection from persisted edits in durable order."
+  @callback load_touched_files(db()) :: load_touched_files_result()
 
   @doc "Inserts one event and returns its committed id."
   @callback insert(db(), EventRecord.t()) :: {:ok, pos_integer()} | {:error, term()}
