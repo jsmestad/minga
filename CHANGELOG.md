@@ -96,6 +96,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - Language registration uses the same keys to check ownership, publish lookups, and remove old indexes when replacing a definition.
 - macOS editor command preparation reuses unscrolled rows that fit the viewport instead of rebuilding their text and highlight spans. Clipped, scrolled, and out-of-range-span rows keep the existing normalization.
 - macOS selection overlays index accessibility ranges once per pane and frame instead of rescanning every range for each visible row. Selection quad geometry, ordering, clipping and colors are unchanged.
+- Live substitute previews share the command parser's escaped-delimiter scanner and read the replacement and flags in one pass.
 - Full-content undo commits now find the changed byte range with native binary prefix and suffix comparison over bounded 4 KiB chunks instead of a per-byte Elixir scan, without copying either whole document. Patch contents, apply/invert behavior, and cursor restoration are unchanged.
 - Opening or reloading a buffer in which no line starts with a merge conflict marker no longer splits every line or copies the document to build the conflict index. On a 60,000-line, 3.9 MB ASCII document, building the index drops from about 8 ms to 0.3 ms (median) wherever the edit gap sits. Documents with any marker line, including orphan markers, are indexed as before.
 - Session pickers skip formatting saved records already represented by live rows, and project and code-action pickers avoid intermediate indexed lists.
