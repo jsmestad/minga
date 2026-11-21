@@ -93,6 +93,7 @@ defmodule Minga.Editing.Completion.IndexTest do
     index = Index.from_items([item(:provider, "İx")])
 
     assert [%{match_ranges: [{0, 1}]}] = Index.snapshot(index, "i").items
+    assert [%{match_ranges: [{0, 1}]}] = Index.snapshot(index, "i\u0307").items
     assert [%{match_ranges: [{1, 1}]}] = Index.snapshot(index, "x").items
   end
 

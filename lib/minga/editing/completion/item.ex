@@ -233,30 +233,39 @@ defmodule Minga.Editing.Completion.Item do
   @spec filter_to_label_mapping(String.t(), String.t(), String.t(), String.t()) ::
           [non_neg_integer()] | nil
   defp filter_to_label_mapping(label, label, normalized, normalized) do
-    {parts, offsets, _next_offset} =
-      label
-      |> String.to_charlist()
-      |> Enum.reduce({[], [], 0}, fn codepoint, {parts, offsets, label_offset} ->
-        normalized_part = normalize(List.to_string([codepoint]))
-        normalized_codepoints = String.to_charlist(normalized_part)
-
-        mapped_offsets =
-          Enum.reduce(normalized_codepoints, offsets, fn _codepoint, acc ->
-            [label_offset | acc]
-          end)
-
-        {[normalized_part | parts], mapped_offsets, label_offset + 1}
-      end)
-
-    if parts |> Enum.reverse() |> IO.iodata_to_binary() == normalized do
-      Enum.reverse(offsets)
-    else
-      nil
-    end
+    label
+    |> String.to_charlist()
+    |> map_normalized_prefix(normalized, 0, [])
   end
 
   defp filter_to_label_mapping(_label, _filter_text, _normalized_label, _normalized_filter_text),
     do: nil
+
+  @spec map_normalized_prefix([char()], binary(), non_neg_integer(), [non_neg_integer()]) ::
+          [non_neg_integer()] | nil
+  defp map_normalized_prefix([], "", _offset, offsets), do: Enum.reverse(offsets)
+  defp map_normalized_prefix([], _suffix, _offset, _offsets), do: nil
+
+  defp map_normalized_prefix([codepoint | rest], normalized, offset, offsets) do
+    part = normalize(<<codepoint::utf8>>)
+    size = byte_size(part)
+
+    case normalized do
+      <<^part::binary-size(^size), suffix::binary>> ->
+        offsets = prepend_normalized_offsets(part, offset, offsets)
+        map_normalized_prefix(rest, suffix, offset + 1, offsets)
+
+      _ ->
+        nil
+    end
+  end
+
+  @spec prepend_normalized_offsets(binary(), non_neg_integer(), [non_neg_integer()]) ::
+          [non_neg_integer()]
+  defp prepend_normalized_offsets("", _offset, offsets), do: offsets
+
+  defp prepend_normalized_offsets(<<_codepoint::utf8, rest::binary>>, offset, offsets),
+    do: prepend_normalized_offsets(rest, offset, [offset | offsets])
 
   @spec map_ranges_to_label([non_neg_integer()] | nil, [match_range()]) :: [match_range()]
   defp map_ranges_to_label(nil, _ranges), do: []
