@@ -78,6 +78,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - Git conflict parsing walks lines once, and conflict resolution reads only the selected sides from the buffer snapshot’s line ranges.
 - Search results preserve document order directly when walking the index. Quote text objects find only the pair around the cursor. Visual and Operator-Pending mode share the same object suffixes without sharing their transitions.
 - Sentence text objects find the requested span without building a list of every sentence. Paragraph whitespace and grapheme byte positions are unchanged.
+- Forward word motions `w` and `W` stop at the next word boundary without building grapheme indexes for whole lines.
 - Characterwise range deletion and replacement reuse their already resolved selections, avoiding a second normalization and coordinate lookup while preserving deleted and replacement bytes, cursor placement, and edit deltas.
 - Byte-range edits validate the prefix and removed bytes separately without flattening the document for admission. Auto-pairing asks for syntax scope only when it has a candidate pair. Rendering retains its full-invalidation flag without enumerating edited line numbers.
 - Unified and side-by-side Git diffs now walk unchanged lines and hunks in order instead of rescanning from the start of the file. Rows, folds, and hunk positions are unchanged.

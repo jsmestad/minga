@@ -6,6 +6,63 @@ defmodule Minga.Editing.Motion.WordTest do
 
   defp buf(text), do: Document.new(text)
 
+  describe "forward word starts" do
+    test "uses the whole grapheme when the byte column falls inside it" do
+      b = buf("ae\u0301!b c")
+
+      for col <- [2, 3] do
+        assert Motion.word_forward(b, {0, col}) == {0, 4}
+        assert Motion.word_forward_big(b, {0, col}) == {0, 7}
+      end
+    end
+
+    test "keeps byte columns aligned after a malformed byte before the cursor" do
+      b = buf(<<0xFF, "a b">>)
+
+      assert Motion.word_forward(b, {0, 1}) == {0, 3}
+      assert Motion.word_forward_big(b, {0, 1}) == {0, 3}
+    end
+
+    test "finds the first boundary before a long suffix on either line" do
+      suffix = String.duplicate("👩‍💻", 10_000)
+      same_line = buf("a b " <> suffix)
+      next_line = buf("a\n  b " <> suffix)
+
+      for forward <- [&Motion.word_forward/2, &Motion.word_forward_big/2] do
+        assert forward.(same_line, {0, 0}) == {0, 2}
+        assert forward.(next_line, {0, 0}) == {1, 2}
+      end
+    end
+
+    test "stops at a punctuation run for w but skips it within a WORD for W" do
+      b = buf("foo::bar baz")
+
+      assert Motion.word_forward(b, {0, 0}) == {0, 3}
+      assert Motion.word_forward(b, {0, 3}) == {0, 5}
+      assert Motion.word_forward_big(b, {0, 0}) == {0, 9}
+      assert Motion.word_forward_big(b, {0, 3}) == {0, 9}
+    end
+
+    test "clamps a column past the end of a line to its last grapheme" do
+      b = buf("ae\u0301\n\n  next")
+
+      for forward <- [&Motion.word_forward/2, &Motion.word_forward_big/2] do
+        assert forward.(b, {0, 40}) == {2, 2}
+        assert forward.(b, {3, 40}) == {3, 40}
+      end
+    end
+
+    test "keeps an empty start but falls back to the last grapheme from a nonempty start" do
+      b = buf("word\n\n\t \u0301\n\n")
+
+      for forward <- [&Motion.word_forward/2, &Motion.word_forward_big/2] do
+        assert forward.(b, {1, 0}) == {1, 0}
+        assert forward.(b, {0, 0}) == {2, 1}
+        assert forward.(b, {2, 0}) == {2, 1}
+      end
+    end
+  end
+
   describe "word_forward/2" do
     test "moves from start of word to start of next word" do
       b = buf("hello world")

@@ -5,11 +5,9 @@ defmodule Minga.Editing.Motion.Word do
   Implements Vim's `w`/`b`/`e` (word-boundary) and `W`/`B`/`E`
   (whitespace-only boundary) motions.
 
-  Motions scan line-by-line using `Readable.line_at/2` to avoid
-  materializing the full document content. Typically only 1-3 lines
-  are fetched per motion, making these O(k) where k is the number of
-  lines between the cursor and the next word boundary, instead of the
-  previous O(n) full-content materialization on every keystroke.
+  Motions fetch lines on demand through `Readable.line_at/2` without
+  materializing the full document. `w` and `W` scan graphemes only as far
+  as the next word start or the end of the document.
   """
 
   alias Minga.Editing.Motion.Helpers
@@ -17,6 +15,10 @@ defmodule Minga.Editing.Motion.Word do
 
   @typedoc "A zero-indexed {line, byte_col} cursor position."
   @type position :: {non_neg_integer(), non_neg_integer()}
+
+  @typep forward_policy :: :word | :big_word
+  @typep forward_class :: :word | :punctuation | :whitespace
+  @typep forward_scan :: {:found, non_neg_integer()} | {:line_end, non_neg_integer()}
 
   # ── Line-level grapheme helpers ──────────────────────────────────────────
 
@@ -39,34 +41,6 @@ defmodule Minga.Editing.Motion.Word do
 
   # ── Scanning primitives (line-local, returns index up to `total`) ────────
 
-  @spec skip_class(
-          tuple(),
-          non_neg_integer(),
-          non_neg_integer(),
-          :word | :whitespace | :punctuation
-        ) :: non_neg_integer()
-  defp skip_class(_gs, idx, total, _class) when idx >= total, do: total
-
-  defp skip_class(gs, idx, total, :word) do
-    if Helpers.word_char?(elem(gs, idx)),
-      do: skip_class(gs, idx + 1, total, :word),
-      else: idx
-  end
-
-  defp skip_class(gs, idx, total, :whitespace) do
-    if Helpers.whitespace?(elem(gs, idx)),
-      do: skip_class(gs, idx + 1, total, :whitespace),
-      else: idx
-  end
-
-  defp skip_class(gs, idx, total, :punctuation) do
-    g = elem(gs, idx)
-
-    if not Helpers.word_char?(g) and not Helpers.whitespace?(g),
-      do: skip_class(gs, idx + 1, total, :punctuation),
-      else: idx
-  end
-
   @spec skip_ws(tuple(), non_neg_integer(), non_neg_integer()) :: non_neg_integer()
   defp skip_ws(_gs, idx, total) when idx >= total, do: total
 
@@ -74,15 +48,6 @@ defmodule Minga.Editing.Motion.Word do
     if Helpers.whitespace?(elem(gs, idx)),
       do: skip_ws(gs, idx + 1, total),
       else: idx
-  end
-
-  @spec skip_non_ws(tuple(), non_neg_integer(), non_neg_integer()) :: non_neg_integer()
-  defp skip_non_ws(_gs, idx, total) when idx >= total, do: total
-
-  defp skip_non_ws(gs, idx, total) do
-    if Helpers.whitespace?(elem(gs, idx)),
-      do: idx,
-      else: skip_non_ws(gs, idx + 1, total)
   end
 
   @spec run_end(tuple(), non_neg_integer(), non_neg_integer(), :word | :punctuation) ::
@@ -163,76 +128,97 @@ defmodule Minga.Editing.Motion.Word do
       else: idx
   end
 
-  # Skip current class then whitespace (for forward motions).
-  @spec forward_skip_class_and_ws(tuple(), non_neg_integer(), non_neg_integer()) ::
-          non_neg_integer()
-  defp forward_skip_class_and_ws(gs, g_idx, total) do
-    current_class = Helpers.classify_char(elem(gs, g_idx))
-    after_class = skip_class(gs, g_idx + 1, total, current_class)
+  # ── Forward word starts ──────────────────────────────────────────────────
 
-    case current_class do
-      :whitespace -> after_class
-      _ -> skip_ws(gs, after_class, total)
+  @spec move_forward(Readable.t(), position(), forward_policy()) :: position()
+  defp move_forward(buf, {line, col} = pos, policy) do
+    case Readable.line_at(buf, line) do
+      nil ->
+        pos
+
+      "" ->
+        # An empty starting line stays put if there is no following word.
+        scan_next_lines(buf, line + 1, nil, 0) || pos
+
+      text ->
+        target = min(col, byte_size(text) - 1)
+
+        case scan_from_cursor(text, 0, target, policy) do
+          {:found, next_col} -> {line, next_col}
+          {:line_end, last_col} -> scan_next_lines(buf, line + 1, line, last_col)
+        end
     end
   end
 
-  # Skip non-ws (or ws) then trailing ws (for W motion).
-  @spec forward_skip_big_and_ws(tuple(), non_neg_integer(), non_neg_integer()) ::
-          non_neg_integer()
-  defp forward_skip_big_and_ws(gs, g_idx, total) do
-    if Helpers.whitespace?(elem(gs, g_idx)) do
-      skip_ws(gs, g_idx + 1, total)
+  # Walk from the start so a byte inside a grapheme still uses that whole grapheme.
+  @spec scan_from_cursor(String.t(), non_neg_integer(), non_neg_integer(), forward_policy()) ::
+          forward_scan()
+  defp scan_from_cursor(text, col, target, policy) do
+    {grapheme, rest} = String.next_grapheme(text)
+    next_col = col + byte_size(grapheme)
+
+    if next_col <= target do
+      scan_from_cursor(rest, next_col, target, policy)
     else
-      after_non_ws = skip_non_ws(gs, g_idx + 1, total)
-      skip_ws(gs, after_non_ws, total)
+      scan_forward_line(rest, next_col, col, policy, forward_class(grapheme, policy))
+    end
+  end
+
+  @spec scan_forward_line(
+          String.t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          forward_policy(),
+          forward_class()
+        ) :: forward_scan()
+  defp scan_forward_line("", _col, last_col, _policy, _run), do: {:line_end, last_col}
+
+  defp scan_forward_line(text, col, _last_col, policy, run) do
+    {grapheme, rest} = String.next_grapheme(text)
+    class = forward_class(grapheme, policy)
+
+    if class == run or class == :whitespace do
+      scan_forward_line(rest, col + byte_size(grapheme), col, policy, class)
+    else
+      {:found, col}
+    end
+  end
+
+  @spec forward_class(String.t(), forward_policy()) :: forward_class()
+  defp forward_class(grapheme, :word), do: Helpers.classify_char(grapheme)
+
+  defp forward_class(grapheme, :big_word) do
+    if Helpers.whitespace?(grapheme), do: :whitespace, else: :word
+  end
+
+  # A nonempty starting line falls back to the last grapheme seen, even whitespace.
+  @spec scan_next_lines(
+          Readable.t(),
+          non_neg_integer(),
+          non_neg_integer() | nil,
+          non_neg_integer()
+        ) :: position() | nil
+  defp scan_next_lines(buf, line, last_line, last_col) do
+    case Readable.line_at(buf, line) do
+      nil when is_nil(last_line) ->
+        nil
+
+      nil ->
+        {last_line, last_col}
+
+      "" ->
+        scan_next_lines(buf, line + 1, last_line, last_col)
+
+      text ->
+        case scan_forward_line(text, 0, 0, :big_word, :whitespace) do
+          {:found, col} -> {line, col}
+          {:line_end, _col} when is_nil(last_line) -> scan_next_lines(buf, line + 1, nil, 0)
+          {:line_end, col} -> scan_next_lines(buf, line + 1, line, col)
+        end
     end
   end
 
   # ── Cross-line helpers ───────────────────────────────────────────────────
-
-  @spec find_next_word_start(Readable.t(), non_neg_integer()) :: position() | nil
-  defp find_next_word_start(buf, line_num) do
-    case Readable.line_at(buf, line_num) do
-      nil -> nil
-      line_text -> first_non_ws_on_line(buf, line_num, line_text)
-    end
-  end
-
-  @spec first_non_ws_on_line(Readable.t(), non_neg_integer(), String.t()) :: position() | nil
-  defp first_non_ws_on_line(buf, line_num, line_text) do
-    {gs, bos} = line_graphemes(line_text)
-    total = tuple_size(gs)
-    first = skip_ws(gs, 0, total)
-
-    if first < total,
-      do: pos_at(line_num, bos, first, byte_size(line_text)),
-      else: find_next_word_start(buf, line_num + 1)
-  end
-
-  @spec last_char_position(Readable.t()) :: position()
-  defp last_char_position(buf) do
-    find_last_char_from(buf, Readable.line_count(buf) - 1)
-  end
-
-  @spec find_last_char_from(Readable.t(), integer()) :: position()
-  defp find_last_char_from(_buf, line_num) when line_num < 0, do: {0, 0}
-
-  defp find_last_char_from(buf, line_num) do
-    case Readable.line_at(buf, line_num) do
-      nil -> {0, 0}
-      line_text -> last_char_on_line(buf, line_num, line_text)
-    end
-  end
-
-  @spec last_char_on_line(Readable.t(), non_neg_integer(), String.t()) :: position()
-  defp last_char_on_line(buf, line_num, line_text) do
-    {gs, bos} = line_graphemes(line_text)
-    total = tuple_size(gs)
-
-    if total == 0,
-      do: find_last_char_from(buf, line_num - 1),
-      else: pos_at(line_num, bos, total - 1, byte_size(line_text))
-  end
 
   @spec find_prev_word_start(Readable.t(), integer()) :: position()
   defp find_prev_word_start(_buf, line_num) when line_num < 0, do: {0, 0}
@@ -343,48 +329,7 @@ defmodule Minga.Editing.Motion.Word do
       {0, 6}
   """
   @spec word_forward(Readable.t(), position()) :: position()
-  def word_forward(buf, {line, col} = pos) do
-    case Readable.line_at(buf, line) do
-      nil -> pos
-      line_text -> do_word_forward(buf, line, col, pos, line_text)
-    end
-  end
-
-  @spec do_word_forward(
-          Readable.t(),
-          non_neg_integer(),
-          non_neg_integer(),
-          position(),
-          String.t()
-        ) :: position()
-  defp do_word_forward(buf, line, col, pos, line_text) do
-    {gs, bos} = line_graphemes(line_text)
-    total = tuple_size(gs)
-
-    if total == 0 do
-      find_next_word_start(buf, line + 1) || pos
-    else
-      after_ws = forward_skip_class_and_ws(gs, clamped_gidx(bos, col, total), total)
-      resolve_forward(buf, line, bos, after_ws, total, byte_size(line_text))
-    end
-  end
-
-  # Resolve a forward scan: either return position on line or cross to next line.
-  @spec resolve_forward(
-          Readable.t(),
-          non_neg_integer(),
-          tuple(),
-          non_neg_integer(),
-          non_neg_integer(),
-          non_neg_integer()
-        ) :: position()
-  defp resolve_forward(_buf, line, bos, after_ws, total, lbs) when after_ws < total do
-    pos_at(line, bos, after_ws, lbs)
-  end
-
-  defp resolve_forward(buf, line, _bos, _after_ws, _total, _lbs) do
-    find_next_word_start(buf, line + 1) || last_char_position(buf)
-  end
+  def word_forward(buf, pos), do: move_forward(buf, pos, :word)
 
   # ── word_backward (b) ─────────────────────────────────────────────────────
 
@@ -512,31 +457,7 @@ defmodule Minga.Editing.Motion.Word do
       {0, 8}
   """
   @spec word_forward_big(Readable.t(), position()) :: position()
-  def word_forward_big(buf, {line, col} = pos) do
-    case Readable.line_at(buf, line) do
-      nil -> pos
-      line_text -> do_word_forward_big(buf, line, col, pos, line_text)
-    end
-  end
-
-  @spec do_word_forward_big(
-          Readable.t(),
-          non_neg_integer(),
-          non_neg_integer(),
-          position(),
-          String.t()
-        ) :: position()
-  defp do_word_forward_big(buf, line, col, pos, line_text) do
-    {gs, bos} = line_graphemes(line_text)
-    total = tuple_size(gs)
-
-    if total == 0 do
-      find_next_word_start(buf, line + 1) || pos
-    else
-      after_ws = forward_skip_big_and_ws(gs, clamped_gidx(bos, col, total), total)
-      resolve_forward(buf, line, bos, after_ws, total, byte_size(line_text))
-    end
-  end
+  def word_forward_big(buf, pos), do: move_forward(buf, pos, :big_word)
 
   # ── word_backward_big (B) ─────────────────────────────────────────────────
 
