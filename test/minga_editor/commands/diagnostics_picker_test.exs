@@ -9,6 +9,7 @@ defmodule MingaEditor.Commands.DiagnosticsPickerTest do
   alias Minga.Diagnostics.Diagnostic
   alias Minga.LSP.SyncServer
   alias MingaEditor.RenderPipeline.TestHelpers
+  alias MingaEditor.UI.Picker.Context
   alias MingaEditor.UI.Picker.Item
   alias MingaEditor.UI.Picker.Sources.Diagnostics, as: DiagnosticsSource
 
@@ -71,6 +72,36 @@ defmodule MingaEditor.Commands.DiagnosticsPickerTest do
   end
 
   @tag :tmp_dir
+  test "reads just the distinct lines that need encoding conversion", %{tmp_dir: tmp_dir} do
+    {state, uri} = state_for_path(tmp_dir)
+    buffer = state.workspace.buffers.active
+    context = Context.from_editor_state(state)
+
+    utf8 = picker_diagnostic(0, :utf8)
+    Diagnostics.publish(:expert, uri, [utf8])
+    on_exit(fn -> Diagnostics.clear(:expert, uri) end)
+
+    :erlang.trace(buffer, true, [:receive, {:tracer, self()}])
+
+    try do
+      assert [%Item{id: {0, 0}}] = DiagnosticsSource.candidates(context)
+      assert_line_reads(buffer, [])
+
+      Diagnostics.publish(:expert, uri, [
+        utf8,
+        picker_diagnostic(1, :utf16),
+        picker_diagnostic(1, :utf32),
+        picker_diagnostic(2, :utf16)
+      ])
+
+      assert [%Item{}, %Item{}, %Item{}, %Item{}] = DiagnosticsSource.candidates(context)
+      assert_line_reads(buffer, [[1, 2]])
+    after
+      :erlang.trace(buffer, false, [:receive])
+    end
+  end
+
+  @tag :tmp_dir
   test "registered diagnostics picker remains closed for an empty current diagnostics store", %{
     tmp_dir: tmp_dir
   } do
@@ -78,6 +109,28 @@ defmodule MingaEditor.Commands.DiagnosticsPickerTest do
     Diagnostics.clear(:expert, uri)
 
     assert execute_registered(:diagnostic_list, state) == state
+  end
+
+  defp picker_diagnostic(line, encoding) do
+    %Diagnostic{
+      range: %{start_line: line, start_col: 0, end_line: line, end_col: 1},
+      severity: :info,
+      message: Atom.to_string(encoding),
+      encoding: encoding
+    }
+  end
+
+  defp assert_line_reads(buffer, batches) do
+    delivery_ref = :erlang.trace_delivered(buffer)
+    assert_receive {:trace_delivered, ^buffer, ^delivery_ref}
+
+    for expected <- batches do
+      assert_received {:trace, ^buffer, :receive, {:"$gen_call", _, {:lines_at, actual}}}
+      assert Enum.sort(actual) == expected
+    end
+
+    refute_received {:trace, ^buffer, :receive, {:"$gen_call", _, {:lines_at, _}}}
+    refute_received {:trace, ^buffer, :receive, {:"$gen_call", _, {:lines, _, _}}}
   end
 
   defp execute_registered(command, state) do

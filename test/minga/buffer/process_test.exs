@@ -443,6 +443,16 @@ defmodule Minga.Buffer.ProcessTest do
       assert :ok = BufferProcess.insert_text(pid, "é")
       assert Buffer.lines_at(pid, requested) == %{0 => "éa", 4 => "e", 5 => ""}
     end
+
+    test "invalid sparse line indices raise in the caller without stopping the buffer" do
+      pid = start_supervised!({BufferProcess, content: "first\nsecond"})
+
+      for invalid <- [-1, 0.5] do
+        assert_raise ArgumentError, fn -> Buffer.lines_at(pid, [0, invalid]) end
+      end
+
+      assert Buffer.lines_at(pid, [1]) == %{1 => "second"}
+    end
   end
 
   describe "save/1" do
