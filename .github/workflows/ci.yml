@@ -128,8 +128,19 @@ jobs:
       - name: Compile and test the standalone SDK
         working-directory: sdk-checkout/sdk
         run: |
+          mix deps.get
           mix compile --warnings-as-errors
           mix test --warnings-as-errors
+
+      - name: Build SDK docs without warnings
+        working-directory: sdk-checkout/sdk
+        env:
+          MIX_ENV: dev
+        run: mix docs --warnings-as-errors
+
+      - name: Build the SDK Hex package
+        working-directory: sdk-checkout/sdk
+        run: mix hex.build
 
   keystroke-latency-baseline:
     name: Keystroke Latency Baseline

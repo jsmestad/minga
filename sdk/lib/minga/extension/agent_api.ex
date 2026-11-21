@@ -31,11 +31,12 @@ defmodule Minga.Extension.AgentAPI do
           files_touched: [String.t()]
         }
 
-  @spec list_sessions() :: [session_summary()]
-  def list_sessions, do: raise("minga_sdk is compile-time only")
+  @spec list_sessions(keyword()) :: [session_summary()]
+  def list_sessions(_opts \\ []), do: raise("minga_sdk is compile-time only")
 
-  @spec session_info(pid()) :: {:ok, session_info()} | {:error, :not_found | :unavailable}
-  def session_info(_pid), do: raise("minga_sdk is compile-time only")
+  @spec session_info(pid(), keyword()) ::
+          {:ok, session_info()} | {:error, :not_found | :unavailable}
+  def session_info(_pid, _opts \\ []), do: raise("minga_sdk is compile-time only")
 
   @spec subscribe() :: :ok
   def subscribe, do: raise("minga_sdk is compile-time only")

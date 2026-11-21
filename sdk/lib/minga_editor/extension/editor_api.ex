@@ -20,9 +20,10 @@ defmodule MingaEditor.Extension.EditorAPI do
   @spec navigate_to(state(), String.t(), non_neg_integer(), non_neg_integer()) :: state()
   def navigate_to(_state, _path, _line, _col \\ 0), do: raise("minga_sdk is compile-time only")
 
-  @spec set_status(state(), String.t()) :: state()
-  def set_status(_state, _message), do: raise("minga_sdk is compile-time only")
-
   @spec active_path(state()) :: String.t() | nil
   def active_path(_state), do: raise("minga_sdk is compile-time only")
+
+  @doc "Returns the active buffer pid, or nil. Read its unsaved text with `Minga.Buffer.content/1`."
+  @spec active_buffer(state()) :: pid() | nil
+  def active_buffer(_state), do: raise("minga_sdk is compile-time only")
 end
