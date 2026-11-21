@@ -62,7 +62,10 @@ defmodule MingaAgent.ChecklistTest do
     assert {:ok, checklist} = Checklist.replace(Checklist.new(), 0, tasks)
     assert {:ok, restored} = Checklist.decode(Checklist.encode(checklist))
     assert {1, [first, second]} = Checklist.snapshot(restored)
-    assert {first.id, first.description, first.status, first.note} == {"id", "Task", :pending, nil}
+
+    assert {first.id, first.description, first.status, first.note} ==
+             {"id", "Task", :pending, nil}
+
     assert {second.id, second.description, second.status, second.note} ==
              {" id ", " Task ", :pending, note}
   end
