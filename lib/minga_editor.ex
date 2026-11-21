@@ -363,6 +363,7 @@ defmodule MingaEditor do
     EventBus.subscribe(:load_user_themes, events_registry)
     EventBus.subscribe(:option_changed, events_registry)
     EventBus.subscribe(:extension_updates_available, events_registry)
+    EventBus.subscribe(:inference_route_status_changed, events_registry)
 
     # Monitor all initial buffers so we get :DOWN when they die.
     all_initial_pids =

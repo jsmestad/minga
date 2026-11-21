@@ -42,7 +42,7 @@ defmodule Minga.Events do
   | `:log_message`     | `LogMessageEvent`     | `text: String.t(), level: :debug \| :info \| :warning \| :error` |
   | `:agent_hook`      | `AgentHookEvent`        | `event, phase, tool_name, tool_call_id, tool_pattern` |
   | `:agent_tools_changed` | `AgentToolsChangedEvent` | `source: term()` |
-  | `:inference_route_status_changed` | `MingaAgent.InferenceRoute.StatusChangedEvent` | `route_id: String.t(), status: Status.t()` |
+  | `:inference_route_status_changed` | `MingaAgent.InferenceRoute.StatusChangedEvent` | `route_id: String.t(), short_name: String.t(), status: Status.t()` |
   | `:face_overrides_changed` | `FaceOverridesChangedEvent` | `buffer: pid(), overrides: map()` |
   | `:agent_session_restarted` | `MingaAgent.SessionManager.SessionRestartedEvent` | `session_id, old_pid, new_pid, reason` |
   | `:background_subagent_started` | `MingaAgent.Subagent.Handle` | `session_id: String.t(), pid: pid(), task: String.t()` |

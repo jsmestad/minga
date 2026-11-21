@@ -11,6 +11,7 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
   alias Minga.Config.ModelineSegments
   alias Minga.Mode
   alias Minga.Language.Devicon
+  alias MingaEditor.StatusBar.PlanLimit
   alias MingaEditor.UI.Theme
 
   @typedoc "A clickable region: column range mapping to a command."
@@ -61,7 +62,8 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
           optional(:selection_info) =>
             {:chars, non_neg_integer()} | {:lines, pos_integer()} | nil,
           optional(:background_subagent_count) => non_neg_integer(),
-          optional(:active_background_subagent_label) => String.t() | nil
+          optional(:active_background_subagent_label) => String.t() | nil,
+          optional(:plan_limit) => MingaEditor.StatusBar.PlanLimit.t() | nil
         }
 
   @type render_segment :: ModelineSegment.render_segment()
@@ -339,6 +341,9 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
   defp render_segment(:background_agent, ctx, _table),
     do: build_background_agent_segments(ctx.data, ctx.bar_bg, ctx.theme.modeline)
 
+  defp render_segment(:plan_limit, ctx, _table),
+    do: build_plan_limit_segments(Map.get(ctx.data, :plan_limit), ctx.bar_bg, ctx.theme)
+
   defp render_segment(:diagnostics, ctx, _table),
     do: build_diagnostic_segments(ctx.data, ctx.bar_bg, ctx.theme)
 
@@ -585,6 +590,17 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
       []
     end
   end
+
+  # A click opens the model picker: the limit notification's "Choose another model" action.
+  @spec build_plan_limit_segments(PlanLimit.t() | nil, non_neg_integer(), Theme.t()) ::
+          [render_segment()]
+  defp build_plan_limit_segments(nil, _bar_bg, _theme), do: []
+
+  defp build_plan_limit_segments(%PlanLimit{level: :warning, text: text}, bar_bg, theme),
+    do: [{" #{text} ", theme.gutter.warning_fg, bar_bg, [], :agent_pick_model}]
+
+  defp build_plan_limit_segments(%PlanLimit{level: :rejected, text: text}, bar_bg, theme),
+    do: [{" #{text} ", theme.gutter.error_fg, bar_bg, [bold: true], :agent_pick_model}]
 
   @spec build_diagnostic_segments(modeline_data(), non_neg_integer(), Theme.t()) :: [
           render_segment()

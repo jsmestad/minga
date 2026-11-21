@@ -252,6 +252,7 @@ defmodule MingaAgent.InferenceRouteRegistryTest do
       assert_receive {:minga_event, :inference_route_status_changed,
                       %StatusChangedEvent{
                         route_id: "fixture",
+                        short_name: "Fixture Route",
                         status: %Status{plan_usage: [usage]}
                       }}
 

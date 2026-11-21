@@ -163,6 +163,14 @@ defmodule MingaEditor.State do
     %{state | agent_connection: connection}
   end
 
+  @doc "Records a contributed model route's reported status from its change event."
+  @spec record_inference_route_status(t(), MingaAgent.InferenceRoute.StatusChangedEvent.t()) ::
+          t()
+  def record_inference_route_status(%__MODULE__{} = state, event) do
+    connection = AgentConnection.record_route_status(state.agent_connection, event)
+    %{state | agent_connection: connection}
+  end
+
   @doc "Commits an extension snapshot transition unless semantic Editor state superseded it."
   @spec accept_extension_event_result(t(), t(), t()) :: {:ok, t()} | :stale
   def accept_extension_event_result(

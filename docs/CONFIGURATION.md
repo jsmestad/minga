@@ -106,6 +106,7 @@ The modeline configuration builds the editor's global status line from named seg
 | `:git` | Git branch and diff counts when the buffer is in a Git repository |
 | `:agent` | Foreground agent status, such as plan, thinking, tool, or error |
 | `:background_agent` | Running background subagent count and active background task label |
+| `:plan_limit` | Subscription plan usage for the active agent model, only at 80% or more of a limit window (`Claude 82% · 5h`) or once the limit is reached (`Claude limit · resets 3:40 PM`). Click it to choose another model. Hidden under normal usage and when the route reports no usage. |
 | `:diagnostics` | Error, warning, and info diagnostic counts |
 | `:parser` | Tree-sitter parser restart or unavailable indicator |
 | `:lsp` | LSP connection status |
@@ -119,7 +120,7 @@ The modeline configuration builds the editor's global status line from named seg
 Use `:modeline_left_segments` and `:modeline_right_segments` to choose which segments appear. Omitting a segment hides it. The list order is the render order for that side.
 
 ```elixir
-set :modeline_left_segments, [:mode, :filename, :git, :agent, :background_agent]
+set :modeline_left_segments, [:mode, :filename, :git, :agent, :background_agent, :plan_limit]
 set :modeline_right_segments, [:diagnostics, :parser, :lsp, :filetype, :position, :percent]
 ```
 

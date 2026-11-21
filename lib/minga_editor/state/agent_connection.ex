@@ -3,21 +3,27 @@ defmodule MingaEditor.State.AgentConnection do
   Agent provider configuration and live editor ingest connection.
 
   Provider configuration is immutable after startup; the ingest process may be
-  replaced as the editor's supervised agent integration restarts.
+  replaced as the editor's supervised agent integration restarts. `route_usage`
+  holds the plan usage contributed model routes last reported.
   """
+
+  alias MingaAgent.InferenceRoute.StatusChangedEvent
+  alias MingaEditor.State.RouteUsage
 
   @type t :: %__MODULE__{
           agent_ingest: pid() | nil,
           agent_provider_module: module() | nil,
           agent_provider_opts: keyword(),
-          question_receipts: %{pid() => binary()}
+          question_receipts: %{pid() => binary()},
+          route_usage: RouteUsage.t()
         }
 
   @derive {Inspect, except: [:question_receipts]}
   defstruct agent_ingest: nil,
             agent_provider_module: nil,
             agent_provider_opts: [],
-            question_receipts: %{}
+            question_receipts: %{},
+            route_usage: %RouteUsage{}
 
   @doc "Creates agent connection state from startup provider configuration."
   @spec new(module() | nil, keyword()) :: t()
@@ -45,4 +51,9 @@ defmodule MingaEditor.State.AgentConnection do
   @spec forget_question_receipt(t(), pid()) :: t()
   def forget_question_receipt(%__MODULE__{} = connection, session) when is_pid(session),
     do: %{connection | question_receipts: Map.delete(connection.question_receipts, session)}
+
+  @doc "Records a contributed route's reported status for the modeline."
+  @spec record_route_status(t(), StatusChangedEvent.t()) :: t()
+  def record_route_status(%__MODULE__{} = connection, %StatusChangedEvent{} = event),
+    do: %{connection | route_usage: RouteUsage.record(connection.route_usage, event)}
 end

@@ -13,6 +13,7 @@ defmodule MingaEditor.Handlers.EventDispatcher do
   alias Minga.Events
   alias Minga.FileWatcher.ReadyEvent
   alias Minga.Mode.ExtensionConfirmState
+  alias MingaAgent.InferenceRoute.StatusChangedEvent
   alias MingaAgent.Session.ConnectionSnapshot
   alias MingaEditor.Agent.UIState
   alias MingaEditor.AgentLifecycle
@@ -112,6 +113,15 @@ defmodule MingaEditor.Handlers.EventDispatcher do
     state
     |> MessageLog.append_to_store(text, level)
     |> MingaEditor.schedule_render(16)
+  end
+
+  # The modeline reads route usage from this record; re-render only when it changed.
+  def dispatch(state, :inference_route_status_changed, %StatusChangedEvent{} = event, _msg) do
+    next = EditorState.record_inference_route_status(state, event)
+
+    if next.agent_connection.route_usage == state.agent_connection.route_usage,
+      do: next,
+      else: MingaEditor.schedule_render(next, 16)
   end
 
   def dispatch(

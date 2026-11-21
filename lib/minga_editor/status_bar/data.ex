@@ -25,6 +25,7 @@ defmodule MingaEditor.StatusBar.Data do
   alias Minga.RenderModel.UI.StatusBar.Selection, as: StatusSelection
   alias Minga.RenderModel.UI.StatusBar.Workspace, as: StatusWorkspace
   alias MingaAgent.StatusCommand
+  alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.UIState.Panel
   alias MingaEditor.Editing
   alias MingaEditor.Session.ChromeState
@@ -34,6 +35,7 @@ defmodule MingaEditor.StatusBar.Data do
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.OperationFeedback
+  alias MingaEditor.State.RouteUsage
   alias MingaEditor.State.Tab
   alias MingaEditor.State.Tab.Agent, as: TabAgent
   alias MingaEditor.StatusBar.Data.Agent, as: StatusAgent
@@ -168,9 +170,23 @@ defmodule MingaEditor.StatusBar.Data do
         if(agent.runtime.status, do: Theme.agent_theme(theme(state)), else: nil),
       git_degraded: git_degraded?,
       workspace: workspace,
-      merge_conflict_count: merge_conflict_count(buf)
+      merge_conflict_count: merge_conflict_count(buf),
+      plan_limit: plan_limit(state)
     }
   end
+
+  # Reads only route usage the Editor already recorded from events; no registry call on render.
+  @spec plan_limit(EditorState.t() | map()) :: MingaEditor.StatusBar.PlanLimit.t() | nil
+  defp plan_limit(%EditorState{agent_connection: connection, workspace: workspace}) do
+    RouteUsage.plan_limit(
+      connection.route_usage,
+      UIState.contributed_route_id(workspace.agent_ui),
+      DateTime.utc_now(),
+      &MingaAgent.InferenceRouteRegistry.local_time/1
+    )
+  end
+
+  defp plan_limit(_state), do: nil
 
   @spec notice_message(EditorState.t() | map()) :: String.t() | nil
   defp notice_message(%{
@@ -595,7 +611,8 @@ defmodule MingaEditor.StatusBar.Data do
       workspace_label: workspace.label,
       workspace_draft_count: workspace.draft_count,
       workspace_conflict_count: workspace.conflict_count,
-      merge_conflict_count: common.merge_conflict_count
+      merge_conflict_count: common.merge_conflict_count,
+      plan_limit: common.plan_limit
     }
   end
 
