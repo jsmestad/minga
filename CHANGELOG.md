@@ -148,6 +148,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- Approved edits from an agent session started in the editor no longer vanish. They are staged until you publish them: when the turn ends, a notification offers **Publish** and **Discard** (clickable on macOS and in the terminal), `SPC a p` publishes and `SPC a P` discards, and publishing updates the file on disk and any open buffer. `:q`, `:wq`, `:qa`, `:wqa`, and quitting the macOS app stop while edits are staged; `:q!`, `:qa!` and `:cq` discard them on purpose.
 - CI can save a refreshed Dialyzer cache when `mix.exs` changes which applications the PLT includes, instead of repeating that repair on every run.
 - Adversarial diagnostics ignore replies from superseded or invalidated analyses, so an old reply cannot restore findings after an edit, close, or clear.
 - Repeated config reloads keep using the config home selected at startup.

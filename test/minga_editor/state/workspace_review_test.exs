@@ -194,6 +194,65 @@ defmodule MingaEditor.State.WorkspaceReviewTest do
              WorkspaceReview.agent_completed(conflict, [file_ref_a])
   end
 
+  describe "agent_edited/2 across every stable state" do
+    test "records the file and drafts from each source tag", %{
+      file_ref_a: file_ref_a,
+      file_ref_b: file_ref_b
+    } do
+      table = [
+        {:clean, [], [], [file_ref_b], []},
+        {:draft, [file_ref_a], [], [file_ref_a, file_ref_b], []},
+        {:draft, [file_ref_b], [], [file_ref_b], []},
+        {:needs_review, [file_ref_a], [], [file_ref_a, file_ref_b], []},
+        {:conflict, [file_ref_a], [file_ref_a], [file_ref_a, file_ref_b], [file_ref_a]}
+      ]
+
+      for {from, changed, conflicts, expected_changed, expected_conflicts} <- table do
+        review = %WorkspaceReview{
+          state: from,
+          changed_files: changed,
+          conflict_files: conflicts,
+          last_error: if(from == :clean, do: nil, else: :old_error)
+        }
+
+        assert {:ok, edited} = WorkspaceReview.agent_edited(review, file_ref_b),
+               "agent_edited from #{from}"
+
+        assert edited.state == :draft, "agent_edited from #{from}"
+        assert edited.changed_files == expected_changed, "agent_edited from #{from}"
+        assert edited.conflict_files == expected_conflicts, "agent_edited from #{from}"
+        assert edited.last_error == nil, "agent_edited from #{from}"
+        assert WorkspaceReview.pending?(edited)
+      end
+    end
+
+    test "workspace routes the agent_edited transition", %{file_ref_a: file_ref_a} do
+      workspace = Workspace.new_agent(1, "Agent")
+
+      assert {:ok, workspace} = Workspace.transition_review(workspace, :agent_edited, file_ref_a)
+      assert workspace.review.state == :draft
+      assert workspace.review.changed_files == [file_ref_a]
+    end
+  end
+
+  describe "promote_succeeded/1 across every stable state" do
+    test "a successful promote always ends clean", %{file_ref_a: file_ref_a} do
+      for from <- [:clean, :draft, :needs_review, :conflict] do
+        review = %WorkspaceReview{
+          state: from,
+          changed_files: [file_ref_a],
+          conflict_files: [file_ref_a],
+          last_error: :boom,
+          in_progress?: true
+        }
+
+        assert {:ok, %WorkspaceReview{state: :clean, changed_files: [], conflict_files: []}} =
+                 WorkspaceReview.promote_succeeded(review),
+               "promote_succeeded from #{from}"
+      end
+    end
+  end
+
   test "workspace owns review transitions", %{file_ref_a: file_ref_a} do
     workspace = Workspace.new_agent(1, "Agent")
 

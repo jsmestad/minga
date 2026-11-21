@@ -490,6 +490,17 @@ defmodule Minga.Buffer.Process do
     GenServer.call(server, {:accept_saved_content, new_content}, @file_io_call_timeout)
   end
 
+  @doc """
+  Marks the buffer saved when its content already equals the file on disk.
+
+  Used after another owner (for example, an agent edit publication) wrote the buffer's exact content to its file. Content, cursor, and undo history are untouched. Returns `{:error, :content_differs}` and leaves the buffer dirty when disk and buffer disagree, so unsaved user edits are never hidden.
+  """
+  @spec mark_saved_if_disk_matches(GenServer.server()) ::
+          :ok | {:error, :content_differs | :no_file_path | term()}
+  def mark_saved_if_disk_matches(server) do
+    GenServer.call(server, :mark_saved_if_disk_matches, @file_io_call_timeout)
+  end
+
   @doc "Acknowledges the current disk metadata after the user chooses to keep local edits."
   @spec acknowledge_disk_change(GenServer.server()) :: :ok
   def acknowledge_disk_change(server) do
@@ -1733,6 +1744,25 @@ defmodule Minga.Buffer.Process do
 
     defer_content_replaced(new_state)
     {:reply, :ok, new_state}
+  end
+
+  def handle_call(:mark_saved_if_disk_matches, _from, %{file_path: nil} = state),
+    do: {:reply, {:error, :no_file_path}, state}
+
+  def handle_call(:mark_saved_if_disk_matches, _from, state) do
+    content = Document.content(state.document)
+
+    case Persistence.read_content(state, state.file_path) do
+      {:ok, ^content} ->
+        metadata = Persistence.file_metadata(state, state.file_path)
+        {:reply, :ok, mark_saved(state, metadata, content)}
+
+      {:ok, _other} ->
+        {:reply, {:error, :content_differs}, state}
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
   end
 
   def handle_call(:acknowledge_disk_change, _from, %{file_path: nil} = state) do

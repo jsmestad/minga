@@ -156,6 +156,8 @@ defmodule Minga.Keymap.Defaults do
     {~k(a F), :agent_attach_file, "Attach project file to Agent"},
     {~k(a D), :agent_attach_diagnostics, "Attach file diagnostics to Agent"},
     {~k(a r), :workspace_pending_reviews, "Pending reviews"},
+    {~k(a p), :agent_edits_publish, "Publish agent edits to disk"},
+    {~k(a P), :agent_edits_discard, "Discard unpublished agent edits"},
     {~k(a o), :remote_find_file, "Open remote file"},
     {~k(a T), :agent_pick_thinking, "Pick thinking level"},
     {~k(a q), :agent_dequeue, "Dequeue queued messages to editor"},

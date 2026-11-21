@@ -110,6 +110,32 @@ defmodule MingaEditor.State.WorkspaceReview do
 
   def agent_made_more_edits(%__MODULE__{state: from}, _files), do: invalid(from, :draft)
 
+  @doc """
+  Records one agent-edited file from any stable state.
+
+  A clean workspace starts drafting. A drafting workspace adds the file. A workspace awaiting review or holding conflicts returns to drafting because the agent changed it again; recorded conflicts stay until they are resolved or discarded.
+  """
+  @spec agent_edited(t(), FileRef.t()) :: {:ok, t()}
+  def agent_edited(%__MODULE__{state: :clean} = review, %FileRef{} = file_ref),
+    do: agent_started_editing(review, [file_ref])
+
+  def agent_edited(%__MODULE__{state: :draft} = review, %FileRef{} = file_ref),
+    do:
+      {:ok,
+       %{review | changed_files: add_file_ref(review.changed_files, file_ref), last_error: nil}}
+
+  def agent_edited(%__MODULE__{state: state} = review, %FileRef{} = file_ref)
+      when state in [:needs_review, :conflict] do
+    {:ok,
+     %{
+       review
+       | state: :draft,
+         changed_files: add_file_ref(review.changed_files, file_ref),
+         last_error: nil,
+         in_progress?: false
+     }}
+  end
+
   @doc "Marks draft work as ready for review, or clean when no drafts exist."
   @spec agent_completed(t(), [FileRef.t()]) :: {:ok, t()} | {:error, term()}
   def agent_completed(%__MODULE__{state: :draft} = review, []) do
@@ -132,14 +158,16 @@ defmodule MingaEditor.State.WorkspaceReview do
 
   def agent_resumed(%__MODULE__{state: from}), do: invalid(from, :draft)
 
-  @doc "Marks a successful promote as clean."
-  @spec promote_succeeded(t()) :: {:ok, t()} | {:error, term()}
+  @doc """
+  Marks a successful promote as clean.
+
+  A promote publishes everything the project view holds, so it is valid from every stable state. The recorded review state can lag the view (for example, a promote before the agent turn finished), and a successful publication must never be reported as a failed transition.
+  """
+  @spec promote_succeeded(t()) :: {:ok, t()}
   def promote_succeeded(%__MODULE__{state: state} = review)
-      when state in [:needs_review, :conflict] do
+      when state in [:clean, :draft, :needs_review, :conflict] do
     {:ok, clean(review)}
   end
-
-  def promote_succeeded(%__MODULE__{state: from}), do: invalid(from, :clean)
 
   @doc "Marks an overlap detected during promote."
   @spec promote_found_overlaps(t(), [FileRef.t()], term()) :: {:ok, t()} | {:error, term()}
@@ -176,6 +204,11 @@ defmodule MingaEditor.State.WorkspaceReview do
   @spec resolved_and_promoted(t()) :: {:ok, t()} | {:error, term()}
   def resolved_and_promoted(%__MODULE__{state: :conflict} = review), do: {:ok, clean(review)}
   def resolved_and_promoted(%__MODULE__{state: from}), do: invalid(from, :clean)
+
+  @spec add_file_ref([FileRef.t()], FileRef.t()) :: [FileRef.t()]
+  defp add_file_ref(files, %FileRef{} = file_ref) do
+    if Enum.any?(files, &FileRef.equal?(&1, file_ref)), do: files, else: files ++ [file_ref]
+  end
 
   @spec normalize_state_after_file_discard(t()) :: t()
   defp normalize_state_after_file_discard(%__MODULE__{conflict_files: [_ | _]} = review) do

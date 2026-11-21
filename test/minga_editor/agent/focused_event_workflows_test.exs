@@ -678,6 +678,35 @@ defmodule MingaEditor.Agent.FocusedEventWorkflowsTest do
     end
   end
 
+  @tag :tmp_dir
+  test "agent file events draft an editor-owned workspace and the idle turn offers publication",
+       %{tmp_dir: dir} do
+    {:ok, view} = MingaAgent.ProjectView.overlay(dir)
+    state = owned_event_state(view)
+    workspace_id = TabBar.active_workspace(Runtime.state(state.shell_runtime).tab_bar).id
+    path = Path.join(dir, "notes.md")
+
+    state = FileEventWorkflow.changed(state, file_change(path, "one\n", "TWO\n", "tc1"))
+    review = TabBar.get_workspace(Runtime.state(state.shell_runtime).tab_bar, workspace_id).review
+    assert review.state == :draft
+    assert [%{relative_path: "notes.md"}] = review.changed_files
+
+    busy = StatusEventWorkflow.display_status_changed(state, self(), :tool_executing)
+
+    assert TabBar.get_workspace(Runtime.state(busy.shell_runtime).tab_bar, workspace_id).review.state ==
+             :draft
+
+    state = StatusEventWorkflow.display_status_changed(busy, self(), :idle)
+    review = TabBar.get_workspace(Runtime.state(state.shell_runtime).tab_bar, workspace_id).review
+    assert review.state == :needs_review
+
+    assert %{title: "1 agent-edited file is not on disk"} =
+             MingaEditor.UI.NotificationCenter.find(
+               state.feedback.notifications,
+               "agent:unpublished_edits:#{workspace_id}"
+             )
+  end
+
   @spec file_change(String.t(), String.t(), String.t(), String.t()) :: FileChange.t()
   defp file_change(path, before_content, after_content, tool_call_id) do
     %FileChange{

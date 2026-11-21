@@ -466,6 +466,9 @@ defmodule MingaEditor.State.Workspace do
   defp apply_review_transition(%WorkspaceReview{} = review, :agent_started_editing, files),
     do: WorkspaceReview.agent_started_editing(review, files || [])
 
+  defp apply_review_transition(%WorkspaceReview{} = review, :agent_edited, %FileRef{} = file),
+    do: WorkspaceReview.agent_edited(review, file)
+
   defp apply_review_transition(%WorkspaceReview{} = review, :agent_made_more_edits, files),
     do: WorkspaceReview.agent_made_more_edits(review, files || [])
 

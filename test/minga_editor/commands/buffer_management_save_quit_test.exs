@@ -9,6 +9,7 @@ defmodule MingaEditor.Commands.BufferManagementSaveQuitTest do
   alias Minga.Config.Options
   alias Minga.Frontend.WaitRequestCompletion
   alias Minga.Frontend.WaitRequests
+  alias MingaAgent.ProjectView
   alias MingaEditor.Commands.BufferManagement
   alias MingaEditor.Frontend.Protocol
   alias MingaEditor.State, as: EditorState
@@ -942,6 +943,120 @@ defmodule MingaEditor.Commands.BufferManagementSaveQuitTest do
 
     assert %EditorState{} = result
     refute_received {:shutdown, 0}
+  end
+
+  describe "staged agent edits quit guard" do
+    test ":qa is blocked while an agent workspace holds staged edits", %{tmp_dir: root} do
+      {ctx, path, view} = staged_agent_edit_editor(root, stage?: true)
+
+      send_ex_sync(ctx, "qa")
+
+      refute_received {:shutdown, 0}
+      assert File.read!(path) == "one\ntwo\n"
+      assert {:ok, [%{path: "notes.md"}]} = ProjectView.diff(view)
+
+      assert notice_message(ctx) ==
+               "1 agent-edited file is not on disk. Publish (SPC a p) or discard (SPC a P) them before quitting. :qa!, :q! and :cq quit and discard them."
+    end
+
+    test "native application quit is cancelled while edits are staged", %{tmp_dir: root} do
+      {ctx, _path, _view} = staged_agent_edit_editor(root, stage?: true)
+
+      state = BufferManagement.handle_application_quit_request(editor_state(ctx), 21)
+
+      assert state.session.application_quit == :idle
+      refute_received {:shutdown, 0}
+      assert state_notice_message(state) =~ "1 agent-edited file is not on disk"
+    end
+
+    test ":qa! explicitly discards staged edits and quits", %{tmp_dir: root} do
+      {ctx, path, view} = staged_agent_edit_editor(root, stage?: true)
+      changeset = view.ref.changeset
+      monitor = Process.monitor(changeset)
+
+      send_ex_sync(ctx, "qa!")
+
+      assert_received {:shutdown, 0}
+      assert_receive {:DOWN, ^monitor, :process, ^changeset, :normal}
+      assert File.read!(path) == "one\ntwo\n"
+    end
+
+    test ":wqa saves but does not quit while edits are staged", %{tmp_dir: root} do
+      {ctx, path, view} = staged_agent_edit_editor(root, stage?: true)
+
+      send_ex_sync(ctx, "wqa")
+
+      refute_received {:shutdown, 0}
+      assert File.read!(path) == "one\ntwo\n"
+      assert {:ok, [%{path: "notes.md"}]} = ProjectView.diff(view)
+      assert notice_message(ctx) =~ "1 agent-edited file is not on disk"
+    end
+
+    test ":wq on the last tab saves but does not quit while edits are staged", %{tmp_dir: root} do
+      {ctx, path, view} = staged_agent_edit_editor(root, stage?: true)
+
+      send_ex_sync(ctx, "wq")
+
+      refute_received {:shutdown, 0}
+      assert File.read!(path) == "one\ntwo\n"
+      assert {:ok, [%{path: "notes.md"}]} = ProjectView.diff(view)
+      assert notice_message(ctx) =~ "1 agent-edited file is not on disk"
+    end
+
+    test ":q! on the last tab explicitly discards staged edits and quits", %{tmp_dir: root} do
+      {ctx, path, view} = staged_agent_edit_editor(root, stage?: true)
+      changeset = view.ref.changeset
+      monitor = Process.monitor(changeset)
+
+      send_ex_sync(ctx, "q!")
+
+      assert_received {:shutdown, 0}
+      assert_receive {:DOWN, ^monitor, :process, ^changeset, :normal}
+      assert File.read!(path) == "one\ntwo\n"
+    end
+
+    test ":cq explicitly discards staged edits and aborts", %{tmp_dir: root} do
+      {ctx, path, view} = staged_agent_edit_editor(root, stage?: true)
+      changeset = view.ref.changeset
+      monitor = Process.monitor(changeset)
+
+      send_ex_sync(ctx, "cq")
+
+      assert_received {:shutdown, 1}
+      assert_receive {:DOWN, ^monitor, :process, ^changeset, :normal}
+      assert File.read!(path) == "one\ntwo\n"
+    end
+
+    test ":qa quits when the agent workspace has nothing staged", %{tmp_dir: root} do
+      {ctx, _path, _view} = staged_agent_edit_editor(root, stage?: false)
+
+      send_ex_sync(ctx, "qa")
+
+      assert_received {:shutdown, 0}
+    end
+  end
+
+  defp staged_agent_edit_editor(root, opts) do
+    path = Path.join(root, "notes.md")
+    File.write!(path, "one\ntwo\n")
+    ctx = start_editor("one\ntwo\n", file_path: path)
+    {:ok, view} = ProjectView.overlay(root)
+
+    if Keyword.fetch!(opts, :stage?) do
+      {:ok, source} = ProjectView.resolve_source(view, "notes.md")
+      {:ok, content} = ProjectView.read_file(view, "notes.md")
+      token = Minga.Buffer.FileMutation.revision(content, nil, {:project_view, source.source_id})
+
+      {:ok, _receipt} =
+        ProjectView.conditional_mutate(view, "notes.md", token, {:edit, [{"two", "TWO"}]})
+    end
+
+    :sys.replace_state(ctx.editor, fn state ->
+      {tb, workspace} = TabBar.add_workspace(state.shell_runtime.state.tab_bar, "Agent")
+      install_tab_bar(state, TabBar.set_workspace_project_view(tb, workspace.id, view))
+    end)
+
+    {ctx, path, view}
   end
 
   defp put_inactive_file_tab(ctx, buffer, label) do
