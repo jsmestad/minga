@@ -132,7 +132,9 @@ defmodule Minga.Git.MergeConflictTest do
       entry = Entry.new(1, 3, 5, 7, "ours", "base", "theirs")
 
       assert MergeConflict.replace_region(content, entry, :current) == "before\ncurrent\nafter\n"
-      assert MergeConflict.replace_region(content, entry, :incoming) == "before\nincoming\nafter\n"
+
+      assert MergeConflict.replace_region(content, entry, :incoming) ==
+               "before\nincoming\nafter\n"
 
       assert MergeConflict.replace_region(content, entry, :both) ==
                "before\ncurrent\nincoming\nafter\n"

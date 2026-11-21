@@ -381,7 +381,9 @@ defmodule MingaEditor.UI.Picker.AgentSessionSource do
 
   @spec merge_candidates([Item.t()], [SessionStore.recovery_entry()], saved_origin() | nil) ::
           [Item.t()]
-  defp merge_candidates([], entries, origin), do: Enum.map(entries, &recovery_candidate(&1, origin))
+  defp merge_candidates([], entries, origin),
+    do: Enum.map(entries, &recovery_candidate(&1, origin))
+
   defp merge_candidates(live, [], _origin), do: live
 
   defp merge_candidates(live, entries, origin) do
