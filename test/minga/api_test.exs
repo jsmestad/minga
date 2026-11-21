@@ -4,6 +4,8 @@ defmodule Minga.APITest do
 
   alias Minga.API
   alias Minga.Buffer.Process, as: BufferProcess
+  alias Minga.Events
+  alias Minga.Events.LogMessageEvent
 
   # ── Test helpers ──────────────────────────────────────────────────────────────
 
@@ -173,16 +175,12 @@ defmodule Minga.APITest do
   end
 
   describe "message/2" do
-    test "logs message and returns :ok" do
-      buf = start_buffer()
-      editor = start_fake_editor(buf)
+    test "publishes a message for the log and returns :ok" do
+      message = "test message #{System.unique_integer([:positive])}"
+      assert :ok = Events.subscribe(:log_message)
 
-      assert :ok = API.message("test message", editor)
-
-      Logger.flush()
-      Process.sleep(10)
-      content = Minga.Buffer.content(Minga.Log.MessagesBuffer.pid())
-      assert content =~ "test message"
+      assert :ok = API.message(message, start_fake_editor(nil))
+      assert_receive {:minga_event, :log_message, %LogMessageEvent{text: ^message, level: :info}}
     end
   end
 

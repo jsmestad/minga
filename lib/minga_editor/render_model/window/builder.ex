@@ -911,13 +911,16 @@ defmodule MingaEditor.RenderModel.Window.Builder do
 
   @spec dirty_line_offsets([String.t()], non_neg_integer(), MapSet.t(non_neg_integer())) ::
           %{non_neg_integer() => {String.t(), non_neg_integer()}}
-  defp dirty_line_offsets(lines, first_byte_off, dirty) do
-    lines
-    |> build_lines_with_offsets(first_byte_off)
-    |> Enum.with_index()
-    |> Enum.reduce(%{}, fn {{line, off}, index}, acc ->
-      if MapSet.member?(dirty, index), do: Map.put(acc, index, {line, off}), else: acc
-    end)
+  defp dirty_line_offsets(lines, first_byte_off, dirty),
+    do: dirty_line_offsets(lines, 0, first_byte_off, dirty, %{})
+
+  defp dirty_line_offsets([], _index, _offset, _dirty, offsets), do: offsets
+
+  defp dirty_line_offsets([line | rest], index, offset, dirty, offsets) do
+    offsets =
+      if MapSet.member?(dirty, index), do: Map.put(offsets, index, {line, offset}), else: offsets
+
+    dirty_line_offsets(rest, index + 1, offset + byte_size(line) + 1, dirty, offsets)
   end
 
   # Masked highlight segments for exactly the dirty lines, keyed by index. With no
