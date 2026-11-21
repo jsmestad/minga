@@ -19,7 +19,7 @@ defmodule MingaEditor.RenderModel.Window.GuideIndex do
 
   @spec build([VisualRow.t()], pos_integer()) :: t()
   def build(entries, tab_width) when is_list(entries) and tab_width > 0 do
-    root = insert_rows(entries, 0, tab_width)
+    root = build_rows(entries, 0, tab_width)
 
     %__MODULE__{root: root, row_count: length(entries)}
   end
@@ -35,7 +35,7 @@ defmodule MingaEditor.RenderModel.Window.GuideIndex do
     shift = length(inserted) - delete_count
     right = LazyRowTree.shift(right, shift, &shift_summary/2)
 
-    inserted_tree = insert_rows(inserted, start_row, tab_width)
+    inserted_tree = build_rows(inserted, start_row, tab_width)
 
     %__MODULE__{
       root:
@@ -49,27 +49,24 @@ defmodule MingaEditor.RenderModel.Window.GuideIndex do
     }
   end
 
-  defp insert_rows(entries, start_row, tab_width) do
-    {tree, _} =
-      Enum.reduce(entries, {nil, start_row}, fn %VisualRow{} = entry, {tree, rank} ->
-        text = VisualRow.guide_source_line(entry)
+  defp build_rows(entries, start_row, tab_width) do
+    entries
+    |> ordered_rows(start_row, tab_width, [])
+    |> LazyRowTree.from_sorted(&summarize/4)
+  end
 
-        tree =
-          if blank?(text) do
-            tree
-          else
-            LazyRowTree.insert(
-              tree,
-              leaf(rank, IndentGuide.indent_level(text, tab_width)),
-              &summarize/4,
-              &shift_summary/2
-            )
-          end
+  defp ordered_rows([], _rank, _tab_width, acc), do: Enum.reverse(acc)
 
-        {tree, rank + 1}
-      end)
+  defp ordered_rows([%VisualRow{} = entry | rest], rank, tab_width, acc) do
+    text = VisualRow.guide_source_line(entry)
 
-    tree
+    if blank?(text) do
+      ordered_rows(rest, rank + 1, tab_width, acc)
+    else
+      level = IndentGuide.indent_level(text, tab_width)
+      priority = :erlang.phash2({:resident_guide, rank})
+      ordered_rows(rest, rank + 1, tab_width, [{rank, level, priority} | acc])
+    end
   end
 
   @doc "Returns the smallest final half-open range whose blank continuity can change at a splice."
@@ -141,10 +138,6 @@ defmodule MingaEditor.RenderModel.Window.GuideIndex do
   defp merge_adjacent([run | rest], acc), do: merge_adjacent(rest, [run | acc])
 
   defp blank?(text), do: text == "" or String.trim(text) == ""
-
-  defp leaf(line, level) do
-    LazyRowTree.leaf(line, level, :erlang.phash2({:resident_guide, line}), &summarize/4)
-  end
 
   defp summarize(_line, level, left, right),
     do: max(level, max(left || 0, right || 0))

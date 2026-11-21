@@ -33,6 +33,71 @@ defmodule MingaEditor.RenderModel.Window.DiagnosticIndexTest do
            ]
   end
 
+  test "selects wrapped start ranks once and keeps input order when continuations collapse" do
+    head = entry(0, "abcd")
+    tail = entry(1, "tail")
+    [first, continuation] = wrap_ascii(head, 2)
+    wrapped = resident_entries([first, continuation, tail], 2, 1)
+
+    diagnostics = [
+      diagnostic(0, 3, 4, :utf8),
+      diagnostic(1, 0, 1, :utf8),
+      diagnostic(0, 0, 1, :utf8),
+      diagnostic(0, 2, 3, :utf8),
+      diagnostic(1, 0, 1, :utf8)
+    ]
+
+    index = DiagnosticIndex.build(diagnostics, wrapped, true)
+
+    a = %DiagnosticRange{start_row: 1, start_col: 1, end_row: 1, end_col: 2, severity: :error}
+    b = %DiagnosticRange{start_row: 0, start_col: 0, end_row: 0, end_col: 1, severity: :error}
+    c = %DiagnosticRange{start_row: 1, start_col: 0, end_row: 1, end_col: 1, severity: :error}
+    d = %DiagnosticRange{start_row: 2, start_col: 0, end_row: 2, end_col: 1, severity: :error}
+
+    assert DiagnosticIndex.to_ranges(index) == [b, a, c, d, d]
+    assert DiagnosticIndex.ranges_at(index, [1, 1]) == [a, c]
+    assert DiagnosticIndex.ranges_at(index, [2, 1, 1]) == [a, c, d, d]
+    assert DiagnosticIndex.ranges_at(index, [2, 1, 0, 1]) == [b, a, c, d, d]
+
+    unwrapped = resident_entries([head, tail], 2, 2)
+    {updated, starts, work} = DiagnosticIndex.apply_splices(index, [{0, 1, 1}], unwrapped)
+
+    assert starts == [0]
+    assert work == %{groups_reprojected: 1, suffix_shifts: 0}
+
+    assert DiagnosticIndex.to_ranges(updated) == [
+             %DiagnosticRange{a | start_row: 0, start_col: 3, end_row: 0, end_col: 4},
+             b,
+             %DiagnosticRange{c | start_row: 0, start_col: 2, end_row: 0, end_col: 3},
+             %DiagnosticRange{d | start_row: 1, end_row: 1},
+             %DiagnosticRange{d | start_row: 1, end_row: 1}
+           ]
+  end
+
+  test "omits diagnostics with either endpoint outside the resident store" do
+    index =
+      DiagnosticIndex.build(
+        [
+          diagnostic(0, 0, 1, :utf8, 2),
+          diagnostic(2, 0, 1, :utf8),
+          diagnostic(1, 0, 1, :utf8)
+        ],
+        resident(["zero", "one"])
+      )
+
+    assert DiagnosticIndex.to_ranges(index) == [
+             %DiagnosticRange{
+               start_row: 1,
+               start_col: 0,
+               end_row: 1,
+               end_col: 1,
+               severity: :error
+             }
+           ]
+
+    assert DiagnosticIndex.ranges_at(index, [0]) == []
+  end
+
   test "unrelated dense diagnostics stay retained with constant splice work" do
     lines = Enum.map(0..9_999, &"line #{&1}")
     resident = resident(lines)
@@ -68,36 +133,38 @@ defmodule MingaEditor.RenderModel.Window.DiagnosticIndexTest do
   end
 
   test "structural edits lazily shift suffix diagnostics and adjust multiline crossings" do
-    resident = resident(["zero", "one", "two", "three"])
+    resident = resident(["zero", "one", "two", "three", "four", "five", "six"])
 
     index =
       DiagnosticIndex.build(
-        [diagnostic(0, 0, 1, :utf8, 2), diagnostic(3, 0, 1, :utf8)],
+        [
+          diagnostic(2, 0, 2, :utf8, 4),
+          diagnostic(0, 2, 1, :utf8, 4),
+          diagnostic(6, 0, 1, :utf8),
+          diagnostic(1, 0, 1, :utf8, 5),
+          diagnostic(0, 0, 2, :utf8, 3)
+        ],
         resident
       )
 
-    edited = resident(["zero", "two", "three"], 2)
-    {updated, starts, work} = DiagnosticIndex.apply_splices(index, [{1, 1, 0}], edited)
+    edited = resident(["zero", "one", "two", "new", "five", "six"], 2)
+    {updated, starts, work} = DiagnosticIndex.apply_splices(index, [{3, 2, 1}], edited)
 
-    assert starts == []
-    assert work == %{groups_reprojected: 1, suffix_shifts: 1}
+    assert starts == [0, 2]
+    assert work == %{groups_reprojected: 3, suffix_shifts: 1}
 
-    assert DiagnosticIndex.to_ranges(updated) == [
-             %DiagnosticRange{
-               start_row: 0,
-               start_col: 0,
-               end_row: 1,
-               end_col: 1,
-               severity: :error
-             },
-             %DiagnosticRange{
-               start_row: 2,
-               start_col: 0,
-               end_row: 2,
-               end_col: 1,
-               severity: :error
-             }
-           ]
+    expected = [
+      %DiagnosticRange{start_row: 0, start_col: 2, end_row: 3, end_col: 1, severity: :error},
+      %DiagnosticRange{start_row: 0, start_col: 0, end_row: 3, end_col: 2, severity: :error},
+      %DiagnosticRange{start_row: 1, start_col: 0, end_row: 4, end_col: 1, severity: :error},
+      %DiagnosticRange{start_row: 2, start_col: 0, end_row: 3, end_col: 2, severity: :error},
+      %DiagnosticRange{start_row: 5, start_col: 0, end_row: 5, end_col: 1, severity: :error}
+    ]
+
+    assert DiagnosticIndex.to_ranges(updated) == expected
+
+    assert DiagnosticIndex.ranges_at(updated, starts) ==
+             Enum.filter(expected, &(&1.start_row in [0, 2]))
   end
 
   test "deleting a diagnostic start removes stale diagnostics" do

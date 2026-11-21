@@ -38,6 +38,19 @@ defmodule MingaEditor.RenderModel.Window.GuideIndexTest do
            ]
   end
 
+  test "inserted blank rows keep their ranks between nonblank guide rows" do
+    index = GuideIndex.build([entry(0, "root"), entry(1, "  tail")], 2)
+    inserted = [entry(1, "    one"), entry(2, " "), entry(3, "      two")]
+    updated = GuideIndex.splice(index, 1, 0, inserted, 2)
+
+    assert GuideIndex.all_runs(updated) == [
+             %GuideRun{start_row: 0, end_row: 1, level: 0},
+             %GuideRun{start_row: 1, end_row: 2, level: 2},
+             %GuideRun{start_row: 2, end_row: 4, level: 3},
+             %GuideRun{start_row: 4, end_row: 5, level: 1}
+           ]
+  end
+
   defp entry(line, text) do
     map = SourceOffsetMap.new(text, text, Decorations.new(), line)
 
