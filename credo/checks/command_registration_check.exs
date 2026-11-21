@@ -15,7 +15,7 @@ defmodule Minga.Credo.CommandRegistrationCheck do
       """
     ]
 
-  @non_command_parser_atoms ~w(absolute current_line last_line no_range visual whole_buffer)a
+  @non_command_parser_atoms ~w(absolute current_line last_line no_range preview_pattern preview_replacement visual whole_buffer)a
 
   @impl Credo.Check
   @spec run(Credo.SourceFile.t(), keyword()) :: [Credo.Issue.t()]

@@ -34,7 +34,7 @@ defmodule MingaEditor.Renderer.SearchHighlight do
         first_line
       ) do
     case Parser.substitute_preview(input) do
-      {:replace, pattern, replacement, global?} ->
+      {:preview_replacement, pattern, replacement, global?} ->
         substitute_preview_lines(lines, first_line, pattern, replacement, global?)
 
       _ ->
@@ -52,7 +52,7 @@ defmodule MingaEditor.Renderer.SearchHighlight do
         false
 
       input ->
-        match?({:replace, _, _, _}, Parser.substitute_preview(input))
+        match?({:preview_replacement, _, _, _}, Parser.substitute_preview(input))
     end
   end
 
@@ -171,8 +171,8 @@ defmodule MingaEditor.Renderer.SearchHighlight do
          }
        }) do
     case Parser.substitute_preview(input) do
-      {:pattern, pattern} -> pattern
-      {:replace, pattern, _replacement, _global?} -> pattern
+      {:preview_pattern, pattern} -> pattern
+      {:preview_replacement, pattern, _replacement, _global?} -> pattern
       nil -> nil
     end
   end

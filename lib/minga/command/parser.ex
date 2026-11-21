@@ -150,6 +150,10 @@ defmodule Minga.Command.Parser do
   @typedoc "Flags for :sort command (reverse, numeric, unique)."
   @type sort_flag :: :reverse | :numeric | :unique
 
+  @typep preview ::
+           {:preview_pattern, String.t()}
+           | {:preview_replacement, String.t(), String.t(), boolean()}
+
   @spec parse_range(String.t()) :: {range() | :no_range, String.t()}
   defp parse_range(input) do
     case input do
@@ -454,8 +458,7 @@ defmodule Minga.Command.Parser do
   end
 
   @doc "Parses an unfinished substitute for highlighting or live replacement, without trimming input."
-  @spec substitute_preview(String.t()) ::
-          {:pattern, String.t()} | {:replace, String.t(), String.t(), boolean()} | nil
+  @spec substitute_preview(String.t()) :: preview() | nil
   def substitute_preview(input) when is_binary(input) do
     case String.trim_leading(input, "%") do
       <<"s", delimiter, rest::binary>> when delimiter in [?/, ?#, ?|] ->
@@ -466,8 +469,7 @@ defmodule Minga.Command.Parser do
     end
   end
 
-  @spec preview_fields(String.t(), String.t()) ::
-          {:pattern, String.t()} | {:replace, String.t(), String.t(), boolean()} | nil
+  @spec preview_fields(String.t(), String.t()) :: preview() | nil
   defp preview_fields("", _delimiter), do: nil
 
   defp preview_fields(input, delimiter) do
@@ -476,18 +478,20 @@ defmodule Minga.Command.Parser do
         preview_replacement(pattern, replacement, delimiter)
 
       _ ->
-        {:pattern, input}
+        {:preview_pattern, input}
     end
   end
 
-  @spec preview_replacement(String.t(), String.t(), String.t()) ::
-          {:pattern, String.t()} | {:replace, String.t(), String.t(), boolean()}
-  defp preview_replacement(pattern, "", _delimiter), do: {:pattern, pattern}
+  @spec preview_replacement(String.t(), String.t(), String.t()) :: preview()
+  defp preview_replacement(pattern, "", _delimiter), do: {:preview_pattern, pattern}
 
   defp preview_replacement(pattern, input, delimiter) do
     case split_on_unescaped(input, delimiter) do
-      {replacement, flags} -> {:replace, pattern, replacement, String.contains?(flags, "g")}
-      :no_match -> {:replace, pattern, input, false}
+      {replacement, flags} ->
+        {:preview_replacement, pattern, replacement, String.contains?(flags, "g")}
+
+      :no_match ->
+        {:preview_replacement, pattern, input, false}
     end
   end
 

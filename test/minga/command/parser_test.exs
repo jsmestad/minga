@@ -102,14 +102,14 @@ defmodule Minga.Command.ParserTest do
   test "live substitute parsing distinguishes an unfinished field from an empty replacement" do
     for {input, expected} <- [
           {"s/", nil},
-          {"s/x", {:pattern, "x"}},
-          {"s/x/", {:pattern, "x"}},
-          {"s//x", {:pattern, "/x"}},
-          {"s/x//", {:replace, "x", "", false}},
-          {"s/x/g", {:replace, "x", "g", false}},
-          {"s/x/g/c", {:replace, "x", "g", false}},
-          {"%s#x# g #gc", {:replace, "x", " g ", true}},
-          {"s|a\\|b|c\\|g|g", {:replace, "a\\|b", "c\\|g", true}}
+          {"s/x", {:preview_pattern, "x"}},
+          {"s/x/", {:preview_pattern, "x"}},
+          {"s//x", {:preview_pattern, "/x"}},
+          {"s/x//", {:preview_replacement, "x", "", false}},
+          {"s/x/g", {:preview_replacement, "x", "g", false}},
+          {"s/x/g/c", {:preview_replacement, "x", "g", false}},
+          {"%s#x# g #gc", {:preview_replacement, "x", " g ", true}},
+          {"s|a\\|b|c\\|g|g", {:preview_replacement, "a\\|b", "c\\|g", true}}
         ] do
       assert Parser.substitute_preview(input) == expected, inspect(input)
     end
