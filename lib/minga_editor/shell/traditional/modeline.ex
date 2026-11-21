@@ -198,7 +198,7 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
   defp collect_segments(_name, [], acc), do: acc
 
   defp collect_segments(name, segments, acc) when is_list(segments) do
-    Enum.reduce(segments, acc, &collect_segments(name, &1, &2))
+    collect_segment_list(segments, name, acc)
   end
 
   defp collect_segments(name, {text, fg, bg, opts, target}, acc)
@@ -216,6 +216,13 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
   defp collect_segments(name, invalid, acc) do
     invalid_segment_output(name, invalid)
     acc
+  end
+
+  @spec collect_segment_list([term()], atom(), [gui_segment()]) :: [gui_segment()]
+  defp collect_segment_list([], _name, acc), do: acc
+
+  defp collect_segment_list([segment | rest], name, acc) do
+    collect_segment_list(rest, name, collect_segments(name, segment, acc))
   end
 
   @spec validate_segment_text(atom(), binary()) :: :ok | :error
