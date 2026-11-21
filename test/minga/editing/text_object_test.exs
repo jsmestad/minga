@@ -374,6 +374,28 @@ defmodule Minga.Editing.TextObjectTest do
 
   # ── inner_sentence/2 ──────────────────────────────────────────────────────────
 
+  test "sentence spans distinguish opening, inner, and inter-sentence whitespace" do
+    buffer = buf("\tA.)x?]  B!\n\tC  ")
+
+    for {cursor, inner, around} <- [
+          {{0, 0}, {{0, 0}, {0, 6}}, {{0, 0}, {0, 8}}},
+          {{0, 2}, {{0, 1}, {0, 6}}, {{0, 1}, {0, 8}}},
+          {{0, 8}, {{0, 7}, {0, 8}}, {{0, 7}, {1, 0}}},
+          {{0, 11}, {{0, 11}, {1, 0}}, {{0, 11}, {1, 3}}}
+        ] do
+      assert TextObject.inner_sentence(buffer, cursor) == inner
+      assert TextObject.a_sentence(buffer, cursor) == around
+    end
+  end
+
+  test "sentence selection advances past a cursor inside a multiline grapheme" do
+    buffer = buf("A.\n👩‍💻  ")
+    assert TextObject.inner_sentence(buffer, {1, 0}) == {{1, 0}, {1, 0}}
+    assert TextObject.a_sentence(buffer, {1, 0}) == {{1, 0}, {1, 12}}
+    assert TextObject.inner_sentence(buffer, {1, 4}) == {{1, 11}, {1, 12}}
+    assert TextObject.a_sentence(buffer, {1, 4}) == nil
+  end
+
   describe "inner_sentence/2 (is)" do
     test "selects the current sentence on a multi-sentence line" do
       b = buf("First sentence. Second sentence!")
