@@ -88,11 +88,11 @@ defmodule MingaEditor.RenderModel.Window.Builder do
            decoration_slots: %{optional(term()) => Row.row_slot()}
          }
 
+  @typep folded_source :: {String.t(), non_neg_integer(), [Highlight.styled_segment()] | nil}
+
   @typep folded_source_ctx :: %{
            source: (non_neg_integer() -> {String.t(), non_neg_integer()}),
-           highlight_segments_by_line: %{non_neg_integer() => [Highlight.styled_segment()]},
-           line_identity: LineIdentity.t() | nil,
-           decoration_slots: %{optional(term()) => Row.row_slot()}
+           highlighted_by_line: %{non_neg_integer() => folded_source()}
          }
 
   @doc """
@@ -1832,14 +1832,6 @@ defmodule MingaEditor.RenderModel.Window.Builder do
     )
   end
 
-  @spec source_text_for_entry(Row.t(), (non_neg_integer() -> {String.t(), non_neg_integer()})) ::
-          String.t()
-  defp source_text_for_entry(%Row{row_type: row_type, buf_line: buf_line}, source)
-       when row_type in [:normal, :fold_start],
-       do: elem(source.(buf_line), 0)
-
-  defp source_text_for_entry(%Row{text: text}, _source), do: text
-
   @spec composition_decorations(Context.t(), non_neg_integer()) :: Decorations.t()
   defp composition_decorations(%Context{} = ctx, buf_line) do
     ctx
@@ -1905,10 +1897,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
   defp build_folded_entries(entries, source, page, ctx, retain_ctx, registry, builds) do
     source_ctx = %{
       source: source,
-      highlight_segments_by_line:
-        build_highlight_segments_by_line(entries, source, ctx.highlight),
-      line_identity: retain_ctx.line_identity,
-      decoration_slots: retain_ctx.decoration_slots
+      highlighted_by_line: build_highlighted_source_by_line(entries, source, ctx.highlight)
     }
 
     style_key = mixed_style_key(page, ctx)
@@ -1979,19 +1968,20 @@ defmodule MingaEditor.RenderModel.Window.Builder do
          {style_key, builds, counters, registry, acc}
        ) do
     {index, counters} = next_visual_identity(line, kind, counters)
+    row_source = folded_row_source({line, kind}, source_ctx)
 
     {row, input_hash, reused?, registry} =
-      build_visual_row_entry_retained(line, kind, ctx, source_ctx, index, retain, registry)
+      build_visual_row_entry_retained(line, kind, ctx, row_source, index, retain, registry)
+
+    source_text =
+      case row_source do
+        {text, _, _} -> text
+        nil -> row.text
+      end
 
     entry =
       row
-      |> visual_entry(
-        source_text_for_entry(row, source_ctx.source),
-        ctx,
-        0,
-        Unicode.display_width(row.text),
-        0
-      )
+      |> visual_entry(source_text, ctx, 0, Unicode.display_width(row.text), 0)
       |> VisualRow.with_retention(input_hash, reused?)
 
     build_folded_rows(
@@ -2126,32 +2116,51 @@ defmodule MingaEditor.RenderModel.Window.Builder do
 
   defp take_wrap_run(rest, _line, count), do: {rest, count}
 
-  @spec build_highlight_segments_by_line(
+  @spec build_highlighted_source_by_line(
           [DisplayMap.entry()],
           (non_neg_integer() -> {String.t(), non_neg_integer()}),
           Highlight.t() | nil
-        ) :: %{non_neg_integer() => [Highlight.styled_segment()]}
-  defp build_highlight_segments_by_line(_entries, _source, nil), do: %{}
+        ) :: %{non_neg_integer() => folded_source()}
+  defp build_highlighted_source_by_line(_entries, _source, nil), do: %{}
 
-  defp build_highlight_segments_by_line(entries, source, %Highlight{} = hl) do
+  defp build_highlighted_source_by_line(entries, source, %Highlight{} = hl) do
+    # The display maps emit at most one normal or window-fold row per source line,
+    # in source order. Mixed wrapped runs are styled separately.
     source_lines =
-      entries
-      |> Enum.map(&source_highlight_line/1)
-      |> Enum.reject(&is_nil/1)
-      |> Enum.uniq()
-      |> Enum.map(fn line -> {line, source.(line)} end)
+      for {line, kind} <- entries, kind == :normal or match?({:fold_start, _}, kind) do
+        {line, source.(line)}
+      end
 
-    source_lines
-    |> Enum.map(fn {_buf_line, line_with_offset} -> line_with_offset end)
-    |> then(&Highlight.styles_for_visible_lines(hl, &1))
-    |> then(fn highlight_segments -> Enum.zip(source_lines, highlight_segments) end)
-    |> Map.new(fn {{buf_line, _line_with_offset}, segments} -> {buf_line, segments} end)
+    highlights = Highlight.styles_for_visible_lines(hl, Enum.map(source_lines, &elem(&1, 1)))
+
+    Enum.zip_reduce(source_lines, highlights, %{}, fn {line, {text, offset}}, segments, acc ->
+      Map.put(acc, line, {text, offset, segments})
+    end)
   end
 
-  @spec source_highlight_line(DisplayMap.entry()) :: non_neg_integer() | nil
-  defp source_highlight_line({buf_line, :normal}), do: buf_line
-  defp source_highlight_line({buf_line, {:fold_start, _hidden_count}}), do: buf_line
-  defp source_highlight_line(_entry), do: nil
+  @spec folded_row_source(DisplayMap.entry(), folded_source_ctx()) :: folded_source() | nil
+  defp folded_row_source({line, kind}, %{source: source, highlighted_by_line: highlighted})
+       when kind == :normal or elem(kind, 0) == :fold_start do
+    case highlighted do
+      %{^line => row_source} -> row_source
+      %{} -> unstyled_folded_source(line, source)
+    end
+  end
+
+  # The decoration summary is unstyled, but its hit map still uses source text.
+  defp folded_row_source({line, {:decoration_fold, _fold}}, %{source: source}),
+    do: unstyled_folded_source(line, source)
+
+  defp folded_row_source(_entry, _source_ctx), do: nil
+
+  @spec unstyled_folded_source(
+          non_neg_integer(),
+          (non_neg_integer() -> {String.t(), non_neg_integer()})
+        ) :: folded_source()
+  defp unstyled_folded_source(line, source) do
+    {text, offset} = source.(line)
+    {text, offset, nil}
+  end
 
   # Reuse only plain folded `:normal` rows; decoration-driven rows (folds,
   # virtual lines, blocks) recompose every frame to stay conservative (#2287).
@@ -2159,7 +2168,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
           non_neg_integer(),
           term(),
           Context.t(),
-          folded_source_ctx(),
+          folded_source() | nil,
           non_neg_integer(),
           retain_ctx(),
           FontRegistry.t()
@@ -2168,13 +2177,11 @@ defmodule MingaEditor.RenderModel.Window.Builder do
          buf_line,
          :normal,
          ctx,
-         source_ctx,
-         index,
+         {line_text, _offset, hl_segments} = row_source,
+         _index,
          retain_ctx,
          font_registry
        ) do
-    {line_text, _offset} = source_ctx.source.(buf_line)
-    hl_segments = Map.get(source_ctx.highlight_segments_by_line, buf_line)
     row_id = Row.stable_id(:normal, durable_source_id(retain_ctx, buf_line))
 
     {row, input_hash, reused?, font_registry} =
@@ -2183,16 +2190,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
         row_id,
         {:fold_normal, line_text, hl_segments},
         font_registry,
-        fn registry ->
-          build_visual_row_entry(
-            buf_line,
-            :normal,
-            ctx,
-            source_ctx,
-            index,
-            registry
-          )
-        end
+        &compose_folded_normal_row(row_id, buf_line, row_source, ctx, &1)
       )
 
     {Row.reposition(row, buf_line), input_hash, reused?, font_registry}
@@ -2202,7 +2200,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
          buf_line,
          entry_type,
          ctx,
-         source_ctx,
+         row_source,
          index,
          retain_ctx,
          font_registry
@@ -2212,8 +2210,9 @@ defmodule MingaEditor.RenderModel.Window.Builder do
         buf_line,
         entry_type,
         ctx,
-        source_ctx,
+        row_source,
         index,
+        retain_ctx,
         font_registry
       )
 
@@ -2238,30 +2237,25 @@ defmodule MingaEditor.RenderModel.Window.Builder do
   defp visual_identity_key(buf_line, {:block, _block, _line_idx}), do: {buf_line, :block}
   defp visual_identity_key(_buf_line, _entry_type), do: nil
 
-  @spec build_visual_row_entry(
+  @spec compose_folded_normal_row(
           non_neg_integer(),
-          term(),
+          non_neg_integer(),
+          folded_source(),
           Context.t(),
-          folded_source_ctx(),
-          non_neg_integer(),
           FontRegistry.t()
         ) :: {Row.t(), FontRegistry.t()}
-  defp build_visual_row_entry(
+  defp compose_folded_normal_row(
+         row_id,
          buf_line,
-         :normal,
+         {line_text, line_byte_offset, hl_segments},
          ctx,
-         source_ctx,
-         _index,
          font_registry
        ) do
-    {line_text, line_byte_offset} = source_ctx.source.(buf_line)
-    hl_segments = Map.get(source_ctx.highlight_segments_by_line, buf_line)
-
     {composed, spans, font_registry} =
       compose_line(line_text, hl_segments, ctx, buf_line, line_byte_offset, font_registry)
 
     {%Row{
-       row_id: Row.stable_id(:normal, durable_source_id(source_ctx, buf_line)),
+       row_id: row_id,
        row_type: :normal,
        buf_line: buf_line,
        text: composed,
@@ -2270,24 +2264,31 @@ defmodule MingaEditor.RenderModel.Window.Builder do
      }, font_registry}
   end
 
+  @spec build_visual_row_entry(
+          non_neg_integer(),
+          term(),
+          Context.t(),
+          folded_source() | nil,
+          non_neg_integer(),
+          retain_ctx(),
+          FontRegistry.t()
+        ) :: {Row.t(), FontRegistry.t()}
   defp build_visual_row_entry(
          buf_line,
          {:fold_start, hidden_count},
          ctx,
-         source_ctx,
+         {line_text, line_byte_offset, hl_segments},
          _index,
+         retain_ctx,
          font_registry
        ) do
-    {line_text, line_byte_offset} = source_ctx.source.(buf_line)
-    hl_segments = Map.get(source_ctx.highlight_segments_by_line, buf_line)
-
     {composed, spans, font_registry} =
       compose_line(line_text, hl_segments, ctx, buf_line, line_byte_offset, font_registry)
 
     {composed, spans} = append_fold_summary(composed, spans, hidden_count, ctx)
 
     {%Row{
-       row_id: Row.stable_id(:fold_start, durable_source_id(source_ctx, buf_line)),
+       row_id: Row.stable_id(:fold_start, durable_source_id(retain_ctx, buf_line)),
        row_type: :fold_start,
        buf_line: buf_line,
        text: composed,
@@ -2300,8 +2301,9 @@ defmodule MingaEditor.RenderModel.Window.Builder do
          buf_line,
          {:virtual_line, vt},
          _ctx,
-         source_ctx,
+         _row_source,
          visual_identity_index,
+         retain_ctx,
          font_registry
        ) do
     text = virtual_text_to_string(vt)
@@ -2312,8 +2314,8 @@ defmodule MingaEditor.RenderModel.Window.Builder do
        row_id:
          Row.stable_decoration_id(
            :virtual_line,
-           durable_source_id(source_ctx, buf_line),
-           decoration_slot(source_ctx, buf_line, :virtual_line, vt.id)
+           durable_source_id(retain_ctx, buf_line),
+           decoration_slot(retain_ctx, buf_line, :virtual_line, vt.id)
          ),
        row_type: :virtual_line,
        buf_line: buf_line,
@@ -2328,8 +2330,9 @@ defmodule MingaEditor.RenderModel.Window.Builder do
          buf_line,
          {:block, block, line_idx},
          ctx,
-         source_ctx,
+         _row_source,
          visual_identity_index,
+         retain_ctx,
          font_registry
        ) do
     # Block decorations render via callback; capture the rendered text using the same text width as the draw path.
@@ -2343,8 +2346,8 @@ defmodule MingaEditor.RenderModel.Window.Builder do
        row_id:
          Row.stable_decoration_id(
            :block,
-           durable_source_id(source_ctx, buf_line),
-           decoration_slot(source_ctx, buf_line, :block, {block.id, line_idx})
+           durable_source_id(retain_ctx, buf_line),
+           decoration_slot(retain_ctx, buf_line, :block, {block.id, line_idx})
          ),
        row_type: :block,
        buf_line: buf_line,
@@ -2359,8 +2362,9 @@ defmodule MingaEditor.RenderModel.Window.Builder do
          buf_line,
          {:decoration_fold, fold},
          _ctx,
-         source_ctx,
+         _row_source,
          _index,
+         retain_ctx,
          font_registry
        ) do
     hidden = FoldRegion.hidden_count(fold)
@@ -2370,8 +2374,8 @@ defmodule MingaEditor.RenderModel.Window.Builder do
        row_id:
          Row.stable_decoration_id(
            :fold_start,
-           durable_source_id(source_ctx, buf_line),
-           decoration_slot(source_ctx, buf_line, :decoration_fold, fold.id)
+           durable_source_id(retain_ctx, buf_line),
+           decoration_slot(retain_ctx, buf_line, :decoration_fold, fold.id)
          ),
        row_type: :fold_start,
        buf_line: buf_line,
