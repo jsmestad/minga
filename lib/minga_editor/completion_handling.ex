@@ -791,14 +791,17 @@ defmodule MingaEditor.CompletionHandling do
           EditorState.t()
   def handle_completion_result(
         state,
-        {_request_ref, role, _provider_id, _client, buffer, version, _session_id, _gen,
-         _trigger_pos} = fact,
+        {_request_ref, role, _provider_id, client, buffer, version, session_id, gen, _trigger_pos} =
+          fact,
         result
       ) do
     with ^version <- buffer_value(buffer, &Buffer.version/1),
-         true <- completion_result_current?(state, fact) do
-      mode = if role == :primary, do: :primary, else: :merge
-      start_completion_task(self(), mode, result, fact)
+         %Session{} = session <- completion_response_session(state) do
+      if Session.current?(session, session_id, gen, buffer, version) and
+           state.workspace.buffers.active == buffer and
+           client in SyncServer.clients_for_buffer(buffer) do
+        start_completion_task(self(), completion_response_mode(role), result, fact)
+      end
     end
 
     state
@@ -816,12 +819,11 @@ defmodule MingaEditor.CompletionHandling do
           term()
         ) :: EditorState.t()
   def handle_completion_result(state, role, client, buffer, version, gen, trigger_pos, result) do
-    with %CursorContext{version: ^version} = context <-
-           buffer_value(buffer, &Buffer.cursor_context/1),
-         true <- legacy_completion_result_current?(state, client, buffer, gen),
-         {:ok, prefix} <- completion_prefix_from_trigger(context, trigger_pos) do
+    with %CursorContext{} = context <-
+           legacy_response_context(state, client, buffer, version, gen) do
+      prefix = CompletionTrigger.get_typed_since_trigger(context, trigger_pos)
       editor = self()
-      mode = if role == :primary, do: :primary, else: :merge
+      mode = completion_response_mode(role)
 
       Task.Supervisor.start_child(Minga.Eval.TaskSupervisor, fn ->
         payload = legacy_processed_payload(mode, result, trigger_pos, prefix)
@@ -832,21 +834,36 @@ defmodule MingaEditor.CompletionHandling do
     state
   end
 
-  defp completion_result_current?(
-         %{shell_runtime: %{state: %ShellState{}}} = state,
-         {_ref, _role, _provider_id, client, buffer, version, session_id, gen, _position}
-       ) do
-    trigger = ModalWorkflow.completion_trigger(state)
+  @spec completion_response_mode(CompletionTrigger.response_role()) :: :primary | :merge
+  defp completion_response_mode(:primary), do: :primary
+  defp completion_response_mode(_role), do: :merge
 
-    ModalOverlay.match(state.shell_runtime.state.modal, :completion) and
-      Minga.Editing.inserting?(state) and
-      match?(%Session{}, CompletionTrigger.session(trigger)) and
-      Session.current?(CompletionTrigger.session(trigger), session_id, gen, buffer, version) and
-      state.workspace.buffers.active == buffer and
-      client in SyncServer.clients_for_buffer(buffer)
+  @spec legacy_response_context(
+          EditorState.t(),
+          pid(),
+          pid(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: CursorContext.t() | nil
+  defp legacy_response_context(state, client, buffer, version, gen) do
+    case buffer_value(buffer, &Buffer.cursor_context/1) do
+      %CursorContext{version: ^version} = context ->
+        if legacy_completion_result_current?(state, client, buffer, gen), do: context
+
+      _ ->
+        nil
+    end
   end
 
-  defp completion_result_current?(_state, _fact), do: false
+  @spec completion_response_session(EditorState.t()) :: Session.t() | nil
+  defp completion_response_session(%{shell_runtime: %{state: %ShellState{}}} = state) do
+    if ModalOverlay.match(state.shell_runtime.state.modal, :completion) and
+         Minga.Editing.inserting?(state) do
+      state |> ModalWorkflow.completion_trigger() |> CompletionTrigger.session()
+    end
+  end
+
+  defp completion_response_session(_state), do: nil
 
   @spec legacy_completion_result_current?(EditorState.t(), pid(), pid(), non_neg_integer()) ::
           boolean()
@@ -885,11 +902,6 @@ defmodule MingaEditor.CompletionHandling do
   end
 
   defp legacy_processed_payload(_mode, _result, _trigger_pos, _prefix), do: :failed
-
-  @spec completion_prefix_from_trigger(CursorContext.t(), CompletionTrigger.position()) ::
-          {:ok, String.t()} | :stale
-  defp completion_prefix_from_trigger(context, trigger_pos),
-    do: {:ok, CompletionTrigger.get_typed_since_trigger(context, trigger_pos)}
 
   @spec start_completion_task(
           pid(),

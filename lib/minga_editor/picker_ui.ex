@@ -276,14 +276,26 @@ defmodule MingaEditor.PickerUI do
 
   @spec live_fetch(state(), module(), reference(), term() | nil, Source.fetch_meta() | nil) ::
           {:ok, PickerPayload.t()} | :stale
-  defp live_fetch(state, source_module, revision, fetch_identity, meta) do
-    with {:ok, payload} <- live_picker(state, source_module, revision, fetch_identity),
-         true <- current_source_fetch?(state, payload.picker_ui, fetch_identity, meta) do
-      {:ok, payload}
-    else
-      _closed_replaced_or_changed -> :stale
+  defp live_fetch(
+         %{shell_runtime: %{state: %{modal: modal}}} = state,
+         source_module,
+         revision,
+         fetch_identity,
+         meta
+       ) do
+    case modal do
+      {:picker, %PickerPayload{picker_ui: %{source: ^source_module} = picker_ui} = payload} ->
+        if PickerState.current_fetch?(picker_ui, revision, fetch_identity) and
+             current_source_fetch?(state, picker_ui, fetch_identity, meta),
+           do: {:ok, payload},
+           else: :stale
+
+      _ ->
+        :stale
     end
   end
+
+  defp live_fetch(_state, _source_module, _revision, _fetch_identity, _meta), do: :stale
 
   @spec current_source_fetch?(state(), PickerState.t(), term() | nil, Source.fetch_meta() | nil) ::
           boolean()
@@ -300,27 +312,6 @@ defmodule MingaEditor.PickerUI do
        do: AgentRetainedOutputSource.current_fetch?(state, context)
 
   defp current_source_fetch?(_state, _picker, _fetch_identity, _meta), do: true
-
-  @spec live_picker(state(), module(), reference(), term() | nil) ::
-          {:ok, PickerPayload.t()} | :stale
-  defp live_picker(
-         %{shell_runtime: %{state: %{modal: modal}}},
-         source_module,
-         revision,
-         fetch_identity
-       ) do
-    case modal do
-      {:picker, %PickerPayload{picker_ui: %{source: ^source_module} = picker_ui} = payload} ->
-        if PickerState.current_fetch?(picker_ui, revision, fetch_identity),
-          do: {:ok, payload},
-          else: :stale
-
-      _ ->
-        :stale
-    end
-  end
-
-  defp live_picker(_state, _source_module, _revision, _fetch_identity), do: :stale
 
   defp apply_fetch_status(state, %{status: status}) when is_binary(status) do
     MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, status)
