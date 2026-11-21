@@ -7,7 +7,7 @@ public struct AgentToolCallCard: View {
         case readRetainedOutput(messageID: UInt32, offer: Wire.RetainedOutputOffer)
     }
 
-    public init(messageID: Int, name: String, summary: String, status: UInt8, isError: Bool, collapsed: Bool, autoApprovedScope: UInt8, durationMs: UInt32, result: String? = nil, resultLines: [[Wire.StyledTextRun]]? = nil, previewLines: [String], retainedOutputOffer: Wire.RetainedOutputOffer? = nil, sendAction: ViewActionHandler<Action>?, styledLineView: @escaping ([Wire.StyledTextRun], CGFloat, Bool) -> AnyView) {
+    public init(messageID: Int, name: String, summary: String, status: UInt8, isError: Bool, collapsed: Bool, autoApprovedScope: UInt8, durationMs: UInt32, result: String? = nil, resultLines: [[Wire.StyledTextRun]]? = nil, previewLines: [String], retainedOutputOffer: Wire.RetainedOutputOffer? = nil, sendAction: ViewActionHandler<Action>?) {
         self.messageID = messageID
         self.name = name
         self.summary = summary
@@ -21,7 +21,6 @@ public struct AgentToolCallCard: View {
         self.previewLines = previewLines
         self.retainedOutputOffer = retainedOutputOffer
         self.sendAction = sendAction
-        self.styledLineView = styledLineView
     }
     public let messageID: Int
     public let name: String
@@ -37,9 +36,6 @@ public struct AgentToolCallCard: View {
     public let retainedOutputOffer: Wire.RetainedOutputOffer?
     @Environment(\.themeColors) private var theme
     public let sendAction: ViewActionHandler<Action>?
-    /// Closure to render a styled line, provided by the parent since it's shared
-    /// with assistant message rendering.
-    public let styledLineView: ([Wire.StyledTextRun], CGFloat, Bool) -> AnyView
 
     private var outcome: ToolCallStatus { ToolCallStatus(rawValue: status) }
 
@@ -154,7 +150,7 @@ public struct AgentToolCallCard: View {
                         // Styled result with tree-sitter/markdown formatting
                         VStack(alignment: .leading, spacing: Spacing.hairline) {
                             ForEach(Array(lines.enumerated()), id: \.offset) { _, runs in
-                                styledLineView(runs, Typography.Step.small.rawValue, true)
+                                AgentStyledLine(runs: runs, baseFontSize: Typography.Step.small.rawValue, monospaced: true)
                             }
                         }
                         .padding(Spacing.md)
