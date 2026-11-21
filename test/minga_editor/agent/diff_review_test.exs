@@ -1,8 +1,11 @@
 defmodule MingaEditor.Agent.DiffReviewTest do
   use ExUnit.Case, async: true
 
+  alias Minga.Core.Diff
   alias Minga.Git
   alias MingaEditor.Agent.DiffReview
+  alias MingaEditor.Agent.EditTimeline
+  alias MingaEditor.Agent.FileChange
 
   test "adjacent merge conflicts can be decided independently without changing resolved context" do
     review =
@@ -89,6 +92,49 @@ defmodule MingaEditor.Agent.DiffReviewTest do
 
       assert DiffReview.materialized_lines(review) == String.split(before, "\n")
     end
+
+    test "restores tied deletions in their original order and uses original rejection indexes" do
+      review = tied_deletion_review()
+      original = ["p", "A", "B", "C", "t", ""]
+
+      assert DiffReview.original_lines(review) == original
+      assert review |> DiffReview.reject_all() |> DiffReview.materialized_lines() == original
+      assert DiffReview.materialized_lines(review) == ["p", "N", "t", ""]
+
+      second_rejected = review |> DiffReview.next_hunk() |> DiffReview.reject_current()
+      assert DiffReview.materialized_lines(second_rejected) == ["p", "B", "N", "t", ""]
+    end
+
+    test "matches reverse supplied-order reverts for every explicit rejection subset" do
+      cases = [
+        {"z", [hunk(:deleted, 1, 0, ["A"]), hunk(:deleted, 1, 0, ["B"])]},
+        {"z", [hunk(:deleted, 3, 0, ["A"]), hunk(:deleted, 3, 0, ["B"])]},
+        {"z\ny", [hunk(:deleted, 1, 0, ["A"]), hunk(:added, 0, 1, [])]},
+        {"a\nb\nc", [hunk(:modified, 0, 2, ["A"]), hunk(:modified, 1, 2, ["B"])]},
+        {"z", [hunk(:modified, 0, 2, ["A"]), hunk(:deleted, 2, 0, ["B"])]}
+      ]
+
+      for {after_content, hunks} <- cases do
+        review = DiffReview.from_hunks("f.ex", after_content, hunks)
+        assert_revert_subsets(review)
+      end
+    end
+
+    test "matches reverse-order reverts for a recorded review" do
+      change = %FileChange{
+        path: "f.ex",
+        before_content: "top\nold upper\nmiddle\nold lower\nbottom",
+        after_content: "inserted\ntop\nnew upper\nmiddle\nnew lower\nbottom",
+        tool_call_id: "tc1",
+        tool_name: "edit_file"
+      }
+
+      timeline = EditTimeline.new() |> EditTimeline.record_edit(change)
+      hunks = EditTimeline.cumulative_hunks(timeline, change.path)
+      review = DiffReview.from_hunks(change.path, change.after_content, hunks)
+
+      assert_revert_subsets(review)
+    end
   end
 
   describe "from_hunks/3" do
@@ -157,6 +203,44 @@ defmodule MingaEditor.Agent.DiffReviewTest do
       review = DiffReview.prev_hunk(review)
       assert review.current_hunk_index == Enum.count(review.hunks) - 1
     end
+  end
+
+  test "manual navigation wraps in either direction and uses the neighbor when all are resolved" do
+    review =
+      DiffReview.from_merge_conflicts(
+        "f.ex",
+        Enum.map(["A", "B", "C", "D"], &{:conflict, [&1], ["old"]})
+      )
+
+    review =
+      review
+      |> DiffReview.accept_current()
+      |> DiffReview.next_hunk()
+      |> DiffReview.reject_current()
+
+    assert review.current_hunk_index == 3
+    wrapped = DiffReview.next_hunk(review)
+    assert wrapped.current_hunk_index == 1
+    assert wrapped.resolutions == %{0 => :accepted, 2 => :rejected}
+    assert DiffReview.prev_hunk(wrapped) == review
+
+    review = DiffReview.accept_current(review)
+    assert review.current_hunk_index == 1
+    assert DiffReview.next_hunk(review) == review
+    assert DiffReview.prev_hunk(review) == review
+
+    resolved = DiffReview.reject_current(review)
+    assert DiffReview.resolved?(resolved)
+    assert resolved.current_hunk_index == 1
+    assert DiffReview.next_hunk(resolved) == %{resolved | current_hunk_index: 2}
+    assert DiffReview.prev_hunk(resolved) == %{resolved | current_hunk_index: 0}
+  end
+
+  test "navigation leaves an empty review unchanged" do
+    empty = %DiffReview{path: "f.ex", after_lines: ["a"], hunks: []}
+    assert DiffReview.next_hunk(empty) == empty
+    assert DiffReview.prev_hunk(empty) == empty
+    refute DiffReview.resolved?(empty)
   end
 
   describe "accept_current/1" do
@@ -345,6 +429,121 @@ defmodule MingaEditor.Agent.DiffReviewTest do
       assert Enum.any?(lines, &match?(%{text: "new", kind: :added, hunk_index: 0}, &1))
       refute Map.has_key?(Map.from_struct(review), :before_lines)
     end
+
+    test "preserves full row keys and order for deletions tied with a modification" do
+      review = tied_deletion_review()
+
+      rows = [
+        {:hunk_header, {:hunk_header, 0}, "@@ -2,1 +2,0 @@ (+0, -1)", 0},
+        {:context, {:baseline, 0}, "p", nil},
+        {:removed, {:baseline, 1}, "A", 0},
+        {:hunk_header, {:hunk_header, 1}, "@@ -3,1 +2,0 @@ (+0, -1)", 1},
+        {:removed, {:baseline, 2}, "B", 1},
+        {:hunk_header, {:hunk_header, 2}, "@@ -4,1 +2,1 @@ (+1, -1)", 2},
+        {:removed, {:baseline, 3}, "C", 2},
+        {:added, {:added, 2, 0}, "N", 2},
+        {:context, {:baseline, 4}, "t", nil},
+        {:context, {:baseline, 5}, "", nil}
+      ]
+
+      changed_rows = Enum.reject(rows, &match?({:context, _, _, _}, &1))
+
+      for {context, expected} <- [{2, rows}, {0, changed_rows}] do
+        actual =
+          review
+          |> DiffReview.to_display_lines(context)
+          |> Enum.map(&{&1.kind, &1.source, &1.text, &1.hunk_index})
+
+        assert actual == expected
+      end
+    end
+
+    test "renders a deletion at EOF but fails on changed spans past EOF or overlapping" do
+      eof_deletion = DiffReview.from_hunks("f.ex", "a", [hunk(:deleted, 1, 0, ["A"])])
+
+      assert [%{kind: :hunk_header}, %{kind: :removed, text: "A"}] =
+               DiffReview.to_display_lines(eof_deletion, 0)
+
+      past_eof = DiffReview.from_hunks("f.ex", "a", [hunk(:added, 1, 1, [])])
+
+      overlapping =
+        DiffReview.from_hunks("f.ex", "a\nb", [hunk(:added, 0, 2, []), hunk(:added, 1, 1, [])])
+
+      for review <- [past_eof, overlapping] do
+        assert_raise FunctionClauseError, fn -> DiffReview.to_display_lines(review, 0) end
+      end
+    end
+
+    test "a signed deletion slices context from EOF and reanchors before later hunks" do
+      deletion = %{hunk(:deleted, 0, 0, ["A"]) | count: -1}
+      review = DiffReview.from_hunks("f.ex", "a\nb\nc", [deletion])
+
+      assert [
+               %{kind: :hunk_header},
+               %{kind: :removed, text: "A", source: {:baseline, 0}},
+               %{kind: :context, text: "c", source: {:baseline, 1}}
+             ] = DiffReview.to_display_lines(review, 1)
+
+      deletion = %{deletion | count: -2}
+      addition = %{hunk(:added, 2, 1, []) | old_start: 2}
+      review = DiffReview.from_hunks("f.ex", "a\nb\nc", [deletion, addition])
+
+      assert [
+               %{kind: :hunk_header},
+               %{kind: :removed, text: "A", source: {:baseline, 0}},
+               %{kind: :context, text: "b", source: {:baseline, 1}},
+               %{kind: :hunk_header},
+               %{kind: :context, text: "b", source: {:baseline, 1}},
+               %{kind: :added, text: "c", source: {:added, 1, 0}}
+             ] = DiffReview.to_display_lines(review, 1)
+    end
+  end
+
+  describe "matching_hunks/2" do
+    test "matches clipped changed text and empty spans past EOF" do
+      clipped = DiffReview.from_hunks("f.ex", "a\nb\nX", [hunk(:modified, 2, 3, ["old"])])
+      exact = DiffReview.from_hunks("f.ex", "X", [hunk(:modified, 0, 1, ["old"])])
+      assert DiffReview.matching_hunks(clipped, exact) == %{0 => 0}
+
+      past_eof = DiffReview.from_hunks("f.ex", "a", [hunk(:added, 2, 3, [])])
+      farther_past_eof = DiffReview.from_hunks("f.ex", "b", [hunk(:added, 6, 1, [])])
+      assert DiffReview.matching_hunks(past_eof, farther_past_eof) == %{0 => 0}
+    end
+
+    test "matches changed text at negative and clipped negative starts" do
+      for {start, expected} <- [{-1, "c"}, {-5, "a"}] do
+        signed = %{hunk(:modified, 0, 1, ["old"]) | start_line: start}
+        signed_review = DiffReview.from_hunks("f.ex", "a\nb\nc", [signed])
+        exact = DiffReview.from_hunks("f.ex", expected, [hunk(:modified, 0, 1, ["old"])])
+
+        assert DiffReview.matching_hunks(signed_review, exact) == %{0 => 0}
+      end
+    end
+
+    test "a negative changed count still fails while matching" do
+      signed = %{hunk(:modified, 0, 1, ["old"]) | count: -1}
+      signed_review = DiffReview.from_hunks("f.ex", "a\nb", [signed])
+      exact = DiffReview.from_hunks("f.ex", "a", [hunk(:modified, 0, 1, ["old"])])
+
+      assert_raise FunctionClauseError, fn -> DiffReview.matching_hunks(signed_review, exact) end
+    end
+
+    test "backwards starts still match and migrate decisions in supplied order" do
+      previous_hunks = [hunk(:added, 2, 1, []), hunk(:added, 0, 1, [])]
+
+      previous =
+        DiffReview.from_hunks("f.ex", "a\nb\nc", previous_hunks)
+        |> DiffReview.accept_current()
+        |> DiffReview.reject_current()
+
+      hunks = [hunk(:added, 0, 1, []), hunk(:added, 1, 1, [])]
+      current = DiffReview.from_hunks("f.ex", "a\nc", hunks)
+      assert DiffReview.matching_hunks(previous, current) == %{0 => 1, 1 => 0}
+
+      updated = DiffReview.update_after_lines(previous, ["a", "c"], hunks)
+      assert updated.resolutions == %{0 => :rejected, 1 => :accepted}
+      assert updated.current_hunk_index == 0
+    end
   end
 
   describe "update_after/3" do
@@ -526,6 +725,59 @@ defmodule MingaEditor.Agent.DiffReviewTest do
       assert removed >= 2
     end
   end
+
+  @spec tied_deletion_review() :: DiffReview.t()
+  defp tied_deletion_review do
+    DiffReview.from_merge_conflicts("f.ex", [
+      {:resolved, ["p"]},
+      {:conflict, [], ["A"]},
+      {:conflict, [], ["B"]},
+      {:conflict, ["N"], ["C"]},
+      {:resolved, ["t", ""]}
+    ])
+  end
+
+  @spec hunk(Diff.hunk_type(), non_neg_integer(), non_neg_integer(), [String.t()]) :: Diff.hunk()
+  defp hunk(type, start, count, old_lines) do
+    %{
+      type: type,
+      start_line: start,
+      count: count,
+      old_start: 0,
+      old_count: length(old_lines),
+      old_lines: old_lines
+    }
+  end
+
+  @spec assert_revert_subsets(DiffReview.t()) :: :ok
+  defp assert_revert_subsets(review) do
+    %{hunks: hunks, after_lines: after_lines} = review
+    expected_original = Enum.reduce(Enum.reverse(hunks), after_lines, &Git.revert_hunk(&2, &1))
+    assert DiffReview.original_lines(review) == expected_original
+
+    subsets =
+      Enum.reduce(hunks, [[]], fn _hunk, acc ->
+        for reject? <- [false, true], decisions <- acc, do: [reject? | decisions]
+      end)
+
+    for decisions <- subsets do
+      {resolved, reversed_selection} =
+        hunks
+        |> Enum.zip(decisions)
+        |> Enum.reduce({review, []}, &apply_revert_decision/2)
+
+      expected = Enum.reduce(reversed_selection, after_lines, &Git.revert_hunk(&2, &1))
+      assert DiffReview.materialized_lines(resolved) == expected
+    end
+
+    :ok
+  end
+
+  defp apply_revert_decision({hunk, true}, {review, selected}),
+    do: {DiffReview.reject_current(review), [hunk | selected]}
+
+  defp apply_revert_decision({_hunk, false}, {review, selected}),
+    do: {DiffReview.accept_current(review), selected}
 
   defp simple_review do
     DiffReview.new("test.ex", "line1\nline2\n", "line1\nchanged\n")
