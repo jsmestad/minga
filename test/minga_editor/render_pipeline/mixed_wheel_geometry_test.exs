@@ -75,7 +75,7 @@ defmodule MingaEditor.RenderPipeline.MixedWheelGeometryTest do
           {editor, wheel_measurements} =
             count_measurements(session, fn -> Mouse.handle_scroll_batch(editor, id, 1, :down) end)
 
-          assert wheel_measurements == [0, 0]
+          assert wheel_measurements == [0, 0, 0]
 
           assert Viewport.vertical_anchor(editor.workspace.windows.map[id].viewport) ==
                    {0, offset}
@@ -83,7 +83,7 @@ defmodule MingaEditor.RenderPipeline.MixedWheelGeometryTest do
           {{frame, editor, renderer, presentation}, paint_measurements} =
             count_measurements(session, fn -> publish_frame(editor, renderer) end)
 
-          assert paint_measurements == [0, 0]
+          assert paint_measurements == [0, 0, 0]
           assert TextPresentation.windowed_wrap_counts(presentation) == {wide_basis, counts}
           assert_frame(frame, text, offset, wide)
           {editor, renderer}
@@ -93,12 +93,12 @@ defmodule MingaEditor.RenderPipeline.MixedWheelGeometryTest do
 
       assert {:ok, :absolute} = BufferProcess.set_option(buffer, :line_numbers, :absolute)
 
-      {editor, [wheel_wraps, _]} =
+      {editor, [0, wheel_counts, _]} =
         count_measurements(session, fn -> Mouse.handle_scroll_batch(editor, id, 1, :down) end)
 
-      assert wheel_wraps > 0
+      assert wheel_counts > 0
 
-      {{reflowed, editor, renderer, presentation}, [paint_wraps, paint_projections]} =
+      {{reflowed, editor, renderer, presentation}, [paint_wraps, _, paint_projections]} =
         count_measurements(session, fn -> publish_frame(editor, renderer) end)
 
       assert paint_wraps > 0
@@ -115,12 +115,12 @@ defmodule MingaEditor.RenderPipeline.MixedWheelGeometryTest do
       assert :ok = BufferProcess.replace_lines(buffer, 0, 0, edited_text)
       cursor_after_edit = BufferProcess.cursor(buffer)
 
-      {editor, [wheel_wraps, _]} =
+      {editor, [0, wheel_counts, _]} =
         count_measurements(session, fn -> Mouse.handle_scroll_batch(editor, id, 1, :down) end)
 
-      assert wheel_wraps > 0
+      assert wheel_counts > 0
 
-      {{edited, _editor, _renderer, presentation}, [paint_wraps, paint_projections]} =
+      {{edited, _editor, _renderer, presentation}, [paint_wraps, _, paint_projections]} =
         count_measurements(session, fn -> publish_frame(editor, renderer) end)
 
       assert paint_wraps > 0
@@ -314,13 +314,13 @@ defmodule MingaEditor.RenderPipeline.MixedWheelGeometryTest do
     result = fun.()
     pid = self()
 
-    [materialized_wraps, counted_wraps, projections] =
+    counts =
       Enum.map(@measurements, fn mfa ->
         {:call_time, calls} = :trace.info(session, mfa, :call_time)
         {^pid, count, _, _} = List.keyfind(calls, pid, 0, {pid, 0, 0, 0})
         count
       end)
 
-    {result, [materialized_wraps + counted_wraps, projections]}
+    {result, counts}
   end
 end
