@@ -2,7 +2,7 @@ defmodule Minga.Language.Registry do
   @moduledoc """
   Provides O(1) language catalog lookups for `%Minga.Language{}` definitions registered by config and extension-owned language packs.
 
-  Backed by ETS with `read_concurrency: true` for lock-free reads on every keystroke, render frame, and comment toggle. The GenServer exists only to own the ETS table lifecycle. All reads go directly to ETS.
+  Backed by ETS with `read_concurrency: true` for lock-free reads on every keystroke, render frame, and comment toggle. Each lookup key stores the language and its contribution source in the same row. The GenServer owns the table lifecycle; reads go directly to ETS.
 
   ## Lookup functions
 
@@ -21,7 +21,6 @@ defmodule Minga.Language.Registry do
   alias Minga.Language
 
   @table :minga_language_registry
-  @source_table :minga_language_registry_sources
 
   # Canonical tree-sitter grammar aliases generated from
   # `config/language_aliases.json` by `mix language_aliases.gen`.
@@ -54,14 +53,7 @@ defmodule Minga.Language.Registry do
       nil
   """
   @spec get(atom()) :: Language.t() | nil
-  def get(name) when is_atom(name) do
-    case :ets.lookup(@table, {:name, name}) do
-      [{_, lang}] -> lang
-      [] -> nil
-    end
-  rescue
-    ArgumentError -> nil
-  end
+  def get(name) when is_atom(name), do: lookup_language({:name, name})
 
   @doc """
   Returns the canonical tree-sitter grammar name for a language label.
@@ -106,14 +98,7 @@ defmodule Minga.Language.Registry do
       :elixir
   """
   @spec for_extension(String.t()) :: Language.t() | nil
-  def for_extension(ext) when is_binary(ext) do
-    case :ets.lookup(@table, {:ext, String.downcase(ext)}) do
-      [{_, lang}] -> lang
-      [] -> nil
-    end
-  rescue
-    ArgumentError -> nil
-  end
+  def for_extension(ext) when is_binary(ext), do: lookup_language({:ext, String.downcase(ext)})
 
   @doc """
   Returns the language definition for an exact filename, or `nil`.
@@ -125,14 +110,7 @@ defmodule Minga.Language.Registry do
       :make
   """
   @spec for_filename(String.t()) :: Language.t() | nil
-  def for_filename(filename) when is_binary(filename) do
-    case :ets.lookup(@table, {:filename, filename}) do
-      [{_, lang}] -> lang
-      [] -> nil
-    end
-  rescue
-    ArgumentError -> nil
-  end
+  def for_filename(filename) when is_binary(filename), do: lookup_language({:filename, filename})
 
   @doc """
   Returns the language definition for a shebang interpreter, or `nil`.
@@ -144,23 +122,15 @@ defmodule Minga.Language.Registry do
       :python
   """
   @spec for_shebang(String.t()) :: Language.t() | nil
-  def for_shebang(interpreter) when is_binary(interpreter) do
-    case :ets.lookup(@table, {:shebang, interpreter}) do
-      [{_, lang}] -> lang
-      [] -> nil
-    end
-  rescue
-    ArgumentError -> nil
-  end
+  def for_shebang(interpreter) when is_binary(interpreter),
+    do: lookup_language({:shebang, interpreter})
 
   @doc """
   Returns all registered language definitions.
   """
   @spec all() :: [Language.t()]
   def all do
-    @table
-    |> :ets.match({{:name, :_}, :"$1"})
-    |> List.flatten()
+    :ets.select(@table, [{{{:name, :_}, :"$1", :_}, [], [:"$1"]}])
   rescue
     ArgumentError -> []
   end
@@ -170,9 +140,7 @@ defmodule Minga.Language.Registry do
   """
   @spec supported_names() :: [atom()]
   def supported_names do
-    @table
-    |> :ets.match({{:name, :"$1"}, :_})
-    |> List.flatten()
+    :ets.select(@table, [{{{:name, :"$1"}, :_, :_}, [], [:"$1"]}])
   rescue
     ArgumentError -> []
   end
@@ -188,7 +156,6 @@ defmodule Minga.Language.Registry do
   @doc "Registers a language with an explicit source."
   @spec register(Language.t(), contribution_source()) :: :ok | {:error, register_error()}
   def register(%Language{} = lang, source) do
-    ensure_source_table!()
     keys = Language.identity_keys(lang)
 
     with :ok <- validate_source_keys(keys, source) do
@@ -197,19 +164,14 @@ defmodule Minga.Language.Registry do
         nil -> :ok
       end
 
-      Enum.each(keys, &insert_key(&1, lang, source))
+      Enum.each(keys, &:ets.insert(@table, {&1, lang, source}))
     end
   end
 
   @doc "Returns the contribution source for a registry key, or `nil` if the key is unknown."
   @spec source_for(term()) :: contribution_source() | nil
   def source_for(key) do
-    ensure_source_table!()
-
-    case :ets.lookup(@source_table, key) do
-      [{^key, source}] -> source
-      [] -> nil
-    end
+    :ets.lookup_element(@table, key, 3, nil)
   rescue
     ArgumentError -> nil
   end
@@ -217,20 +179,10 @@ defmodule Minga.Language.Registry do
   @doc "Removes every language and lookup index contributed by a source."
   @spec unregister_source(contribution_source()) :: :ok
   def unregister_source(source) do
-    ensure_source_table!()
-
-    @source_table
-    |> :ets.tab2list()
-    |> Enum.each(fn
-      {key, ^source} ->
-        :ets.delete(@table, key)
-        :ets.delete(@source_table, key)
-
-      _entry ->
-        :ok
-    end)
-
+    :ets.select_delete(@table, [{{:_, :_, :"$1"}, [{:"=:=", :"$1", {:const, source}}], [true]}])
     :ok
+  rescue
+    ArgumentError -> :ok
   end
 
   # ── GenServer callbacks ────────────────────────────────────────────────────
@@ -245,68 +197,32 @@ defmodule Minga.Language.Registry do
       read_concurrency: true
     ])
 
-    :ets.new(@source_table, [
-      :named_table,
-      :set,
-      :public,
-      read_concurrency: true
-    ])
-
     {:ok, :no_state}
   end
 
   # ── Private ────────────────────────────────────────────────────────────────
 
-  @spec validate_source_keys([term()], contribution_source()) ::
-          :ok | {:error, register_error()}
-  defp validate_source_keys(keys, source) do
-    Enum.reduce_while(keys, :ok, fn key, :ok -> validate_source_key(key, source) end)
+  @spec lookup_language(term()) :: Language.t() | nil
+  defp lookup_language(key) do
+    :ets.lookup_element(@table, key, 2, nil)
+  rescue
+    ArgumentError -> nil
   end
 
-  @spec validate_source_key(term(), contribution_source()) ::
-          {:cont, :ok} | {:halt, {:error, register_error()}}
-  defp validate_source_key(key, source) do
-    case :ets.lookup(@source_table, key) do
-      [{^key, ^source}] ->
-        {:cont, :ok}
-
-      [{^key, existing_source}] ->
-        {:halt, {:error, {:duplicate_key, key, existing_source, source}}}
-
-      [] ->
-        {:cont, :ok}
-    end
+  @spec validate_source_keys([term()], contribution_source()) :: :ok | {:error, register_error()}
+  defp validate_source_keys(keys, source) do
+    Enum.reduce_while(keys, :ok, fn key, :ok ->
+      case :ets.lookup_element(@table, key, 3, nil) do
+        nil -> {:cont, :ok}
+        ^source -> {:cont, :ok}
+        existing_source -> {:halt, {:error, {:duplicate_key, key, existing_source, source}}}
+      end
+    end)
   end
 
   @spec remove_index_entries(Language.t()) :: :ok
   defp remove_index_entries(%Language{} = lang) do
     [{:name, _} | secondary_keys] = Language.identity_keys(lang)
-    Enum.each(secondary_keys, &delete_key/1)
-  end
-
-  @spec insert_key(term(), Language.t(), contribution_source()) :: true
-  defp insert_key(key, lang, source) do
-    ensure_source_table!()
-    :ets.insert(@table, {key, lang})
-    :ets.insert(@source_table, {key, source})
-  end
-
-  @spec delete_key(term()) :: true
-  defp delete_key(key) do
-    ensure_source_table!()
-    :ets.delete(@table, key)
-    :ets.delete(@source_table, key)
-  end
-
-  @spec ensure_source_table!() :: :ok
-  defp ensure_source_table! do
-    case :ets.info(@source_table) do
-      :undefined ->
-        :ets.new(@source_table, [:named_table, :set, :public, read_concurrency: true])
-        :ok
-
-      _info ->
-        :ok
-    end
+    Enum.each(secondary_keys, &:ets.delete(@table, &1))
   end
 end

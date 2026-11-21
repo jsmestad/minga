@@ -261,9 +261,14 @@ defmodule Minga.Language.RegistryTest do
       assert Registry.source_for({:ext, "oldkeyorder"}) == source
     end
 
-    test "unregister_source removes language names and indexes for only that source" do
-      source = {:extension, :language_registry_test}
+    test "unregister_source removes all language keys for only the literal source" do
+      source = {:extension, :_}
       other_source = {:extension, :language_registry_other}
+
+      on_exit(fn ->
+        Registry.unregister_source(source)
+        Registry.unregister_source(other_source)
+      end)
 
       lang = %Language{
         name: :source_lang_xyz,
@@ -289,9 +294,8 @@ defmodule Minga.Language.RegistryTest do
       assert Registry.for_extension("source_xyz") == nil
       assert Registry.for_filename("Sourcefile") == nil
       assert Registry.for_shebang("sourcebang") == nil
+      assert Registry.source_for({:ext, "source_xyz"}) == nil
       assert %Language{name: :other_source_lang_xyz} = Registry.get(:other_source_lang_xyz)
-
-      Registry.unregister_source(other_source)
     end
 
     test "runtime registration rejects duplicate bundled pack definitions from another source" do
