@@ -448,14 +448,7 @@ defmodule MingaEditor.Agent.DiffReview do
           [Diff.hunk()]
         ) :: t()
   defp build_updated_review(review, path, new_after_lines, new_hunks) do
-    old_hunk_sigs = hunk_signatures(review.hunks, review.after_lines)
-    new_hunk_sigs = hunk_signatures(new_hunks, new_after_lines)
-
-    new_resolutions =
-      preserve_matching_resolutions(old_hunk_sigs, new_hunk_sigs, review.resolutions)
-
-    current_idx =
-      reproject_current_hunk_index(old_hunk_sigs, new_hunk_sigs, review.current_hunk_index)
+    {new_resolutions, current_idx} = carry_review_progress(review, new_hunks, new_after_lines)
 
     %__MODULE__{
       path: path,
@@ -473,99 +466,92 @@ defmodule MingaEditor.Agent.DiffReview do
   @typep hunk_signature :: {atom(), non_neg_integer(), [String.t()], [String.t()]}
   @typep resolution_queues :: %{hunk_signature() => [resolution()]}
 
-  @spec preserve_matching_resolutions(
-          [hunk_signature()],
-          [hunk_signature()],
-          %{non_neg_integer() => resolution()}
-        ) :: %{non_neg_integer() => resolution()}
-  defp preserve_matching_resolutions(old_sigs, new_sigs, old_resolutions) do
-    queues = resolved_signature_queues(old_sigs, old_resolutions)
+  @typep hunk_cursor :: nil | {hunk_signature(), pos_integer()} | {:found, non_neg_integer()}
 
-    {resolutions, _queues} =
-      new_sigs
-      |> Enum.with_index()
-      |> Enum.reduce({%{}, queues}, fn {sig, new_idx}, {acc, available} ->
-        case pop_resolution(available, sig) do
-          {{:ok, resolution}, updated_available} ->
-            {Map.put(acc, new_idx, resolution), updated_available}
+  @spec carry_review_progress(t(), [Diff.hunk()], [String.t()]) ::
+          {%{non_neg_integer() => resolution()}, non_neg_integer()}
+  defp carry_review_progress(review, hunks, after_lines) do
+    index = review.current_hunk_index
+    {queues, cursor} = prepare_review_progress(review, index)
 
-          {:error, updated_available} ->
-            {acc, updated_available}
+    {{resolutions, _queues, cursor}, count} =
+      fold_hunk_signatures(hunks, after_lines, {%{}, queues, cursor}, &carry_hunk_progress/3)
+
+    case cursor do
+      {:found, current} -> {resolutions, current}
+      _ -> {resolutions, min(index, count - 1)}
+    end
+  end
+
+  @spec prepare_review_progress(t(), non_neg_integer()) :: {resolution_queues(), hunk_cursor()}
+  defp prepare_review_progress(%__MODULE__{hunks: hunks, resolutions: decided} = review, index) do
+    original_lines = review.after_lines
+    selected = Enum.at(hunks, index)
+
+    cursor_signature =
+      case selected do
+        nil -> nil
+        hunk -> elem(hunk_signature(hunk, {original_lines, 0}, original_lines), 0)
+      end
+
+    collect = fn sig, idx, {queues, occurrence} ->
+      queues =
+        case Map.fetch(decided, idx) do
+          {:ok, resolution} -> Map.update(queues, sig, [resolution], &[resolution | &1])
+          :error -> queues
         end
+
+      occurrence =
+        if idx <= index and sig == cursor_signature, do: occurrence + 1, else: occurrence
+
+      {queues, occurrence}
+    end
+
+    {{reversed_queues, occurrence}, _count} =
+      fold_hunk_signatures(hunks, original_lines, {%{}, 0}, collect)
+
+    queues = Map.new(reversed_queues, fn {sig, queue} -> {sig, Enum.reverse(queue)} end)
+    {queues, if(occurrence == 0, do: nil, else: {cursor_signature, occurrence})}
+  end
+
+  @typep review_progress ::
+           {%{non_neg_integer() => resolution()}, resolution_queues(), hunk_cursor()}
+
+  # Resolutions consume only previously decided hunks. The cursor counts every identical hunk.
+  @spec carry_hunk_progress(hunk_signature(), non_neg_integer(), review_progress()) ::
+          review_progress()
+  defp carry_hunk_progress(sig, idx, {resolutions, queues, cursor}) do
+    cursor = advance_hunk_cursor(cursor, sig, idx)
+
+    case Map.get(queues, sig) do
+      [resolution | rest] ->
+        {Map.put(resolutions, idx, resolution), Map.put(queues, sig, rest), cursor}
+
+      _ ->
+        {resolutions, queues, cursor}
+    end
+  end
+
+  @spec advance_hunk_cursor(hunk_cursor(), hunk_signature(), non_neg_integer()) :: hunk_cursor()
+  defp advance_hunk_cursor({sig, 1}, sig, index), do: {:found, index}
+  defp advance_hunk_cursor({sig, left}, sig, _index), do: {sig, left - 1}
+  defp advance_hunk_cursor(cursor, _sig, _index), do: cursor
+
+  @spec fold_hunk_signatures(
+          [Diff.hunk()],
+          [String.t()],
+          acc,
+          (hunk_signature(), non_neg_integer(), acc -> acc)
+        ) :: {acc, non_neg_integer()}
+        when acc: var
+  defp fold_hunk_signatures(hunks, lines, acc, fun) do
+    {acc, _cursor, count} =
+      Enum.reduce(hunks, {acc, {lines, 0}, 0}, fn hunk, {acc, cursor, index} ->
+        {sig, cursor} = hunk_signature(hunk, cursor, lines)
+        {fun.(sig, index, acc), cursor, index + 1}
       end)
 
-    resolutions
-  end
-
-  @spec reproject_current_hunk_index(
-          [hunk_signature()],
-          [hunk_signature()],
-          non_neg_integer()
-        ) :: non_neg_integer()
-  defp reproject_current_hunk_index(_old_sigs, [], _current_idx), do: 0
-
-  defp reproject_current_hunk_index(old_sigs, new_sigs, current_idx) do
-    max_idx = Enum.count(new_sigs) - 1
-
-    case Enum.at(old_sigs, current_idx) do
-      nil ->
-        min(current_idx, max_idx)
-
-      signature ->
-        occurrence =
-          old_sigs
-          |> Enum.take(current_idx + 1)
-          |> Enum.count(&(&1 == signature))
-
-        find_signature_occurrence(new_sigs, signature, occurrence) || min(current_idx, max_idx)
-    end
-  end
-
-  @spec find_signature_occurrence([hunk_signature()], hunk_signature(), pos_integer()) ::
-          non_neg_integer() | nil
-  defp find_signature_occurrence(sigs, signature, occurrence) do
-    sigs
-    |> Enum.with_index()
-    |> Enum.reduce_while(0, fn {candidate, idx}, seen ->
-      if candidate == signature do
-        find_signature_occurrence_step(idx, seen + 1, occurrence)
-      else
-        {:cont, seen}
-      end
-    end)
-    |> case do
-      {:found, idx} -> idx
-      _seen -> nil
-    end
-  end
-
-  defp find_signature_occurrence_step(idx, occurrence, occurrence), do: {:halt, {:found, idx}}
-  defp find_signature_occurrence_step(_idx, seen, _occurrence), do: {:cont, seen}
-
-  @spec resolved_signature_queues([hunk_signature()], %{non_neg_integer() => resolution()}) ::
-          resolution_queues()
-  defp resolved_signature_queues(old_sigs, old_resolutions) do
-    old_sigs
-    |> Enum.with_index()
-    |> Enum.reduce(%{}, fn {sig, idx}, acc ->
-      case Map.fetch(old_resolutions, idx) do
-        {:ok, resolution} ->
-          Map.update(acc, sig, [resolution], fn queue -> [resolution | queue] end)
-
-        :error ->
-          acc
-      end
-    end)
-    |> Map.new(fn {sig, queue} -> {sig, Enum.reverse(queue)} end)
-  end
-
-  @spec pop_resolution(resolution_queues(), hunk_signature()) ::
-          {{:ok, resolution()}, resolution_queues()} | {:error, resolution_queues()}
-  defp pop_resolution(queues, sig) do
-    case Map.get(queues, sig, []) do
-      [resolution | rest] -> {{:ok, resolution}, Map.put(queues, sig, rest)}
-      [] -> {:error, queues}
-    end
+    {acc, count}
   end
 
   # A hunk signature captures the changed content and baseline location for matching across re-diffs.
@@ -573,12 +559,18 @@ defmodule MingaEditor.Agent.DiffReview do
   @spec hunk_signatures([Diff.hunk()], [String.t()]) :: [hunk_signature()]
   defp hunk_signatures(hunks, after_lines) do
     {signatures, _cursor} =
-      Enum.map_reduce(hunks, {after_lines, 0}, fn hunk, cursor ->
-        {changed, cursor} = signature_after_lines(hunk, cursor, after_lines)
-        {{hunk.type, hunk.old_start, hunk.old_lines, changed}, cursor}
-      end)
+      Enum.map_reduce(hunks, {after_lines, 0}, &hunk_signature(&1, &2, after_lines))
 
     signatures
+  end
+
+  @typep line_cursor :: {[String.t()], non_neg_integer()}
+
+  @spec hunk_signature(Diff.hunk(), line_cursor(), [String.t()]) ::
+          {hunk_signature(), line_cursor()}
+  defp hunk_signature(hunk, cursor, after_lines) do
+    {changed, cursor} = signature_after_lines(hunk, cursor, after_lines)
+    {{hunk.type, hunk.old_start, hunk.old_lines, changed}, cursor}
   end
 
   @spec signature_after_lines(

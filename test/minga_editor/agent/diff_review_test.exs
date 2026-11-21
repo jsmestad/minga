@@ -622,6 +622,27 @@ defmodule MingaEditor.Agent.DiffReviewTest do
       assert DiffReview.resolution_at(updated, 2) == nil
     end
 
+    test "duplicate decisions skip pending hunks but the cursor counts them" do
+      old_hunks = Enum.map(0..2, &hunk(:modified, &1, 1, ["before"]))
+
+      review =
+        "test.ex"
+        |> DiffReview.from_hunks("same\nsame\nsame", old_hunks)
+        |> DiffReview.next_hunk()
+        |> DiffReview.accept_current()
+
+      new_hunks = Enum.map(0..3, &hunk(:modified, &1, 1, ["before"]))
+      updated = DiffReview.update_after_lines(review, ["new", "same", "same", "same"], new_hunks)
+
+      assert updated.resolutions == %{1 => :accepted}
+      assert updated.current_hunk_index == 3
+
+      vanished = DiffReview.update_after_lines(review, ["same", "new", "other"], old_hunks)
+
+      assert vanished.resolutions == %{0 => :accepted}
+      assert vanished.current_hunk_index == 2
+    end
+
     test "does not reuse one resolved hunk for multiple identical new hunks" do
       before = "a\nx\nb\nc\nd\nx\ne"
       after_v1 = "a\nX\nb\nc\nd\nx\ne"
