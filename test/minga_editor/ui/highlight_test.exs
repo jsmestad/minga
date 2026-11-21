@@ -200,6 +200,17 @@ defmodule Minga.HighlightTest do
         ]
       )
     end
+
+    test "repeated semantic capture names reuse IDs without changing parser name precedence" do
+      parser = Highlight.new() |> Highlight.put_names(["keyword", "variable", "variable"])
+      names = {"function", "variable", "function", "class", "variable"}
+      spans = for id <- 0..4, do: Span.new(id, id + 1, id)
+
+      composed = Highlight.compose_semantic_layer(parser, {names, List.to_tuple(spans)})
+
+      assert composed.capture_names == {"keyword", "variable", "variable", "function", "class"}
+      assert Enum.map(Tuple.to_list(composed.spans), & &1.capture_id) == [3, 2, 3, 4, 2]
+    end
   end
 
   describe "styles_for_line/3" do

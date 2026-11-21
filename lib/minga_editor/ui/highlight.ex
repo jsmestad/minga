@@ -192,12 +192,12 @@ defmodule MingaEditor.UI.Highlight do
 
   def compose_semantic_layer(%__MODULE__{} = hl, {names, spans})
       when is_tuple(names) and is_tuple(spans) do
-    {capture_names, name_to_id} =
+    {capture_names, semantic_to_merged_ids} =
       merge_capture_names(Tuple.to_list(hl.capture_names), Tuple.to_list(names))
 
     semantic_spans =
       Enum.map(Tuple.to_list(spans), fn %Span{capture_id: id} = span ->
-        %{span | capture_id: Map.fetch!(name_to_id, elem(names, id))}
+        %{span | capture_id: elem(semantic_to_merged_ids, id)}
       end)
 
     spans =
@@ -205,29 +205,29 @@ defmodule MingaEditor.UI.Highlight do
 
     %{
       hl
-      | capture_names: List.to_tuple(capture_names),
+      | capture_names: capture_names,
         spans: spans,
         span_identity: {:composed, :erlang.phash2(spans, 4_294_967_296)}
     }
   end
 
+  @spec merge_capture_names([String.t()], [String.t()]) :: {tuple(), tuple()}
   defp merge_capture_names(parser_names, semantic_names) do
     name_to_id = parser_names |> Enum.with_index() |> Map.new()
 
-    {names, ids, _next_id} =
-      Enum.reduce(
+    {semantic_to_merged_ids, {names, _ids, _next_id}} =
+      Enum.map_reduce(
         semantic_names,
         {Enum.reverse(parser_names), name_to_id, length(parser_names)},
-        fn name, {names, ids, next_id} ->
-          if Map.has_key?(ids, name) do
-            {names, ids, next_id}
-          else
-            {[name | names], Map.put(ids, name, next_id), next_id + 1}
+        fn name, {names, ids, next_id} = acc ->
+          case Map.fetch(ids, name) do
+            {:ok, id} -> {id, acc}
+            :error -> {next_id, {[name | names], Map.put(ids, name, next_id), next_id + 1}}
           end
         end
       )
 
-    {Enum.reverse(names), ids}
+    {names |> Enum.reverse() |> List.to_tuple(), List.to_tuple(semantic_to_merged_ids)}
   end
 
   @doc """
@@ -506,9 +506,7 @@ defmodule MingaEditor.UI.Highlight do
         _resolver
       )
       when tuple_size(spans) == 0 do
-    lines
-    |> Enum.with_index()
-    |> Enum.map(fn {text, index} ->
+    Enum.with_index(lines, fn text, index ->
       if MapSet.member?(dirty_rows, index), do: [{text, Face.new()}], else: nil
     end)
   end

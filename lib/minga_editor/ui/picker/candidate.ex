@@ -35,9 +35,7 @@ defmodule MingaEditor.UI.Picker.Candidate do
   """
   @spec from_items([Item.t()]) :: [t()]
   def from_items(items) when is_list(items) do
-    items
-    |> Enum.with_index()
-    |> Enum.map(fn {item, index} -> from_item(item, index) end)
+    Enum.with_index(items, &from_item/2)
   end
 
   @doc "Builds a single candidate from an item and its index."

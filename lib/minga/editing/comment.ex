@@ -26,6 +26,8 @@ defmodule Minga.Editing.Comment do
           {:insert, non_neg_integer(), non_neg_integer(), String.t()}
           | {:delete, non_neg_integer(), non_neg_integer(), non_neg_integer()}
 
+  @typep target :: {non_neg_integer(), String.t()}
+
   @doc """
   Returns a comment prefix with a fallback default.
 
@@ -107,14 +109,13 @@ defmodule Minga.Editing.Comment do
   """
   @spec compute_toggle_edits([String.t()], String.t(), non_neg_integer()) :: [edit()]
   def compute_toggle_edits(lines, prefix, start_line) do
-    non_empty = Enum.reject(lines, &blank?/1)
+    case collect_targets(lines, start_line, [], 0) do
+      {[], _min_indent} ->
+        []
 
-    if non_empty == [] do
-      []
-    else
-      min_indent = min_indentation(non_empty)
-      direction = detect_direction(non_empty, prefix, min_indent)
-      build_edits(start_line, lines, prefix, min_indent, direction)
+      {targets, min_indent} ->
+        direction = detect_direction(targets, prefix, min_indent)
+        build_edits(targets, prefix, min_indent, direction)
     end
   end
 
@@ -130,10 +131,24 @@ defmodule Minga.Editing.Comment do
     end
   end
 
-  @spec detect_direction([String.t()], String.t(), non_neg_integer()) :: toggle_direction()
-  defp detect_direction(non_empty_lines, prefix, min_indent) do
+  @spec collect_targets([String.t()], non_neg_integer(), [target()], non_neg_integer()) ::
+          {[target()], non_neg_integer()}
+  defp collect_targets([], _line_idx, targets, min_indent), do: {targets, min_indent}
+
+  defp collect_targets([line | rest], line_idx, targets, min_indent) do
+    if blank?(line) do
+      collect_targets(rest, line_idx + 1, targets, min_indent)
+    else
+      indent = leading_whitespace_count(line)
+      min_indent = if targets == [], do: indent, else: min(min_indent, indent)
+      collect_targets(rest, line_idx + 1, [{line_idx, line} | targets], min_indent)
+    end
+  end
+
+  @spec detect_direction([target()], String.t(), non_neg_integer()) :: toggle_direction()
+  defp detect_direction(targets, prefix, min_indent) do
     all_commented =
-      Enum.all?(non_empty_lines, fn line ->
+      Enum.all?(targets, fn {_line_idx, line} ->
         trimmed = String.slice(line, min_indent, String.length(line))
         String.starts_with?(trimmed, prefix)
       end)
@@ -141,51 +156,18 @@ defmodule Minga.Editing.Comment do
     if all_commented, do: :uncomment, else: :comment
   end
 
-  @spec build_edits(
-          non_neg_integer(),
-          [String.t()],
-          String.t(),
-          non_neg_integer(),
-          toggle_direction()
-        ) :: [edit()]
-  defp build_edits(start_line, lines, prefix, min_indent, direction) do
+  @spec build_edits([target()], String.t(), non_neg_integer(), toggle_direction()) :: [edit()]
+  defp build_edits(targets, prefix, col, :comment) do
+    Enum.map(targets, fn {line_idx, _line} -> {:insert, line_idx, col, prefix} end)
+  end
+
+  defp build_edits(targets, prefix, col, :uncomment) do
     prefix_len = String.length(prefix)
-
-    lines
-    |> Enum.with_index(start_line)
-    |> Enum.reject(fn {line, _idx} -> blank?(line) end)
-    |> Enum.map(fn {_line, idx} ->
-      build_edit(idx, min_indent, prefix, prefix_len, direction)
-    end)
-    |> Enum.reverse()
-  end
-
-  @spec build_edit(
-          non_neg_integer(),
-          non_neg_integer(),
-          String.t(),
-          non_neg_integer(),
-          toggle_direction()
-        ) ::
-          {:insert, non_neg_integer(), non_neg_integer(), String.t()}
-          | {:delete, non_neg_integer(), non_neg_integer(), non_neg_integer()}
-  defp build_edit(line_idx, col, prefix, _prefix_len, :comment) do
-    {:insert, line_idx, col, prefix}
-  end
-
-  defp build_edit(line_idx, col, _prefix, prefix_len, :uncomment) do
-    {:delete, line_idx, col, prefix_len}
+    Enum.map(targets, fn {line_idx, _line} -> {:delete, line_idx, col, prefix_len} end)
   end
 
   @spec blank?(String.t()) :: boolean()
   defp blank?(line), do: String.trim(line) == ""
-
-  @spec min_indentation([String.t()]) :: non_neg_integer()
-  defp min_indentation(non_empty_lines) do
-    non_empty_lines
-    |> Enum.map(&leading_whitespace_count/1)
-    |> Enum.min()
-  end
 
   @spec leading_whitespace_count(String.t()) :: non_neg_integer()
   defp leading_whitespace_count(line) do

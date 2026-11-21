@@ -36,16 +36,14 @@ defmodule Minga.Core.WrapMapTest do
       assert WrapMap.display_text(Enum.at(entry, 1)) == "foo"
     end
 
-    test "word boundaries retain repeated whitespace and exact source byte offsets" do
-      source = "é  界  tail"
-      [entry] = WrapMap.compute([source], 4, breakindent: false)
-      assert Enum.map_join(entry, & &1.source_text) == source
+    test "rolls back to the last fitting tab but keeps the final row intact" do
+      source = "e\u0301  \t界x y"
+      [entry] = WrapMap.compute([source], 7, breakindent: false, tab_width: 4)
 
-      Enum.reduce(entry, 0, fn row, offset ->
-        assert row.byte_offset == offset
-        assert binary_part(source, offset, byte_size(row.source_text)) == row.source_text
-        offset + byte_size(row.source_text)
-      end)
+      assert Enum.map(entry, &{&1.source_text, &1.byte_offset}) == [
+               {"e\u0301  \t", 0},
+               {"界x y", 6}
+             ]
     end
 
     test "narrow continuation rows never use the old four-column minimum" do
@@ -180,6 +178,15 @@ defmodule Minga.Core.WrapMapTest do
       assert WrapMap.display_text(Enum.at(entry, 1)) =~ ~r/^ {4}/
     end
 
+    test "ignores a leading break and expands continuation tabs from the indent column" do
+      [entry] = WrapMap.compute([" abcde\tf"], 5, tab_width: 4)
+
+      assert Enum.map(entry, &{&1.source_text, &1.byte_offset, &1.indent_width}) == [
+               {" abcd", 0, 0},
+               {"e\tf", 5, 1}
+             ]
+    end
+
     test "no breakindent gives full width on continuation rows" do
       line = "    " <> String.duplicate("x", 40)
       [entry_bi] = WrapMap.compute([line], 20, breakindent: true)
@@ -198,10 +205,11 @@ defmodule Minga.Core.WrapMapTest do
     end
 
     test "always consumes an over-wide grapheme" do
-      oracle = Minga.Core.WidthOracle.Measured.new(%{"a" => 10})
-      [entry] = WrapMap.compute(["ab"], 4, oracle: oracle, linebreak: false)
+      grapheme = "e\u0301"
+      oracle = Minga.Core.WidthOracle.Measured.new(%{grapheme => 10})
+      [entry] = WrapMap.compute([grapheme <> "b"], 4, oracle: oracle, linebreak: false)
 
-      assert Enum.map(entry, & &1.text) == ["a", "b"]
+      assert Enum.map(entry, &{&1.source_text, &1.byte_offset}) == [{grapheme, 0}, {"b", 3}]
     end
   end
 
