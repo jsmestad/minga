@@ -31,6 +31,13 @@ defmodule MingaEditor.Input.AgentNav do
   alias MingaEditor.Agent.UIState
   alias MingaEditor.State, as: EditorState
 
+  @ctrl MingaEditor.Input.mod_ctrl()
+  @alt MingaEditor.Input.mod_alt()
+
+  # Normal-mode keys the chat hands to the mode FSM: leader, command line,
+  # eval line, and transcript search.
+  @mode_fsm_entry_keys [{?\s, 0}, {?:, 0}, {?:, @alt}, {?/, 0}, {?n, 0}, {?N, 0}]
+
   @impl true
   @spec handle_key(state(), non_neg_integer(), non_neg_integer()) ::
           MingaEditor.Input.Handler.result()
@@ -43,7 +50,7 @@ defmodule MingaEditor.Input.AgentNav do
       view = state.workspace.agent_ui.view
 
       case UIState.View.focus(view) do
-        :chat -> handle_chat_nav(state, cp, mods)
+        :chat -> handle_agent_chat_key(state, cp, mods)
         :file_viewer -> handle_viewer_nav(state, cp, mods)
       end
     end
@@ -57,22 +64,48 @@ defmodule MingaEditor.Input.AgentNav do
           MingaEditor.Input.Handler.result()
   def handle_chat_nav(state, cp, mods) do
     case chat_nav_command(cp, mods) do
-      {:scroll, fun} ->
-        state =
-          state
-          |> then(fn state ->
-            MingaEditor.Shell.Traditional.Workflow.install_agent_ui(
-              state,
-              fun.(state.workspace.agent_ui)
-            )
-          end)
-          |> unpin_agent_chat_window()
-
-        {:handled, state}
-
-      :passthrough ->
-        {:passthrough, state}
+      {:scroll, fun} -> {:handled, scroll_chat(state, fun)}
+      :passthrough -> {:passthrough, state}
     end
+  end
+
+  # The agent chat owns no editable buffer. A key that neither scrolls the
+  # transcript nor belongs to the mode FSM (command line, search, leader)
+  # stops here, so it cannot edit or refocus the human buffer behind the chat.
+  @spec handle_agent_chat_key(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
+          MingaEditor.Input.Handler.result()
+  defp handle_agent_chat_key(state, cp, mods) do
+    binding_state = Minga.Editing.binding_state(state)
+
+    case chat_nav_command(cp, mods) do
+      # Command line, search, and eval input belong to the mode FSM.
+      _command when binding_state not in [:normal, :cua] -> {:passthrough, state}
+      {:scroll, fun} -> {:handled, scroll_chat(state, fun)}
+      :passthrough -> unclaimed_chat_key(state, binding_state, {cp, mods})
+    end
+  end
+
+  @spec unclaimed_chat_key(
+          EditorState.t(),
+          :normal | :cua,
+          {non_neg_integer(), non_neg_integer()}
+        ) ::
+          MingaEditor.Input.Handler.result()
+  defp unclaimed_chat_key(state, :normal, key) do
+    if key in @mode_fsm_entry_keys or Minga.Editing.key_sequence_pending?(state) do
+      {:passthrough, state}
+    else
+      {:handled, state}
+    end
+  end
+
+  defp unclaimed_chat_key(state, :cua, _key), do: {:handled, state}
+
+  @spec scroll_chat(EditorState.t(), (UIState.t() -> UIState.t())) :: EditorState.t()
+  defp scroll_chat(state, fun) do
+    state
+    |> MingaEditor.Shell.Traditional.Workflow.install_agent_ui(fun.(state.workspace.agent_ui))
+    |> unpin_agent_chat_window()
   end
 
   # ── File viewer navigation ─────────────────────────────────────────────
@@ -92,8 +125,6 @@ defmodule MingaEditor.Input.AgentNav do
         {:handled, state}
     end
   end
-
-  @ctrl MingaEditor.Input.mod_ctrl()
 
   @spec viewer_nav_command(non_neg_integer(), non_neg_integer()) ::
           {:scroll, (UIState.t() -> UIState.t())} | :passthrough
