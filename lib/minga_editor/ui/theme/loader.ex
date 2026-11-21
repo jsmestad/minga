@@ -150,13 +150,7 @@ defmodule MingaEditor.UI.Theme.Loader do
     validate_theme_source!(data)
     name = data.name
 
-    theme =
-      data
-      |> resolve_base_theme()
-      |> apply_editor_overrides(data)
-      |> rename_theme(name)
-      |> apply_theme_overrides(data)
-
+    theme = build_theme_from_source(data)
     registry = FaceRegistry.from_theme_with_lsp_defaults(theme, Map.get(data, :faces))
 
     {:ok, %LoadedTheme{name: name, theme: theme, face_registry: registry, source_path: path}}
@@ -192,34 +186,29 @@ defmodule MingaEditor.UI.Theme.Loader do
 
   defp validate_theme_source!(_data), do: :ok
 
-  @spec resolve_base_theme(map()) :: Theme.t()
-  defp resolve_base_theme(%{name: name, palette: palette} = data)
-       when is_atom(name) and is_map(palette) do
-    overrides = Map.get(data, :overrides, %{})
-    Builder.from_palette(name, palette, overrides)
+  @spec build_theme_from_source(map()) :: Theme.t()
+  defp build_theme_from_source(%{name: name, palette: palette} = data) do
+    Builder.from_palette(name, palette, Map.get(data, :overrides, %{}))
+    |> apply_editor_overrides(data)
   end
 
-  defp resolve_base_theme(%{inherits: base_name}) when is_atom(base_name) do
+  defp build_theme_from_source(%{name: name} = data) do
+    data
+    |> resolve_base_theme()
+    |> apply_editor_overrides(data)
+    |> rename_theme(name)
+    |> Builder.apply_overrides(Map.get(data, :overrides, %{}))
+  end
+
+  @spec resolve_base_theme(map()) :: Theme.t()
+  defp resolve_base_theme(%{inherits: base_name}) do
     case Theme.get(base_name) do
       {:ok, theme} -> theme
       :error -> raise ArgumentError, "unknown theme in :inherits: #{inspect(base_name)}"
     end
   end
 
-  defp resolve_base_theme(%{inherits: base_name}) do
-    raise ArgumentError, "theme :inherits must be an atom, got: #{inspect(base_name)}"
-  end
-
   defp resolve_base_theme(_data), do: Theme.get!(Theme.default())
-
-  @spec apply_theme_overrides(Theme.t(), map()) :: Theme.t()
-  defp apply_theme_overrides(theme, %{palette: _palette}), do: theme
-
-  defp apply_theme_overrides(theme, %{overrides: overrides}) when is_map(overrides) do
-    Builder.apply_overrides(theme, overrides)
-  end
-
-  defp apply_theme_overrides(theme, _data), do: theme
 
   @spec rename_theme(Theme.t(), atom()) :: Theme.t()
   defp rename_theme(theme, name), do: %{theme | name: name}

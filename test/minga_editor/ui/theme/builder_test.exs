@@ -136,6 +136,26 @@ defmodule MingaEditor.UI.Theme.BuilderTest do
       end
     end
 
+    test "reports malformed override sections without treating them as unknown sections" do
+      theme = Builder.from_palette(:palette_test, sample_palette())
+
+      for section <- [:editor, :syntax, :icon, :hl_todo, :typo] do
+        message = "theme override section #{inspect(section)} must be a map"
+
+        assert_raise ArgumentError, message, fn ->
+          Builder.apply_overrides(theme, %{section => nil})
+        end
+      end
+
+      for value <- [%{}, nil] do
+        message = "theme override keys must be atoms, got: #{inspect({"editor", value})}"
+
+        assert_raise ArgumentError, message, fn ->
+          Builder.apply_overrides(theme, %{"editor" => value})
+        end
+      end
+    end
+
     test "does not admit struct metadata as an override field" do
       assert_raise ArgumentError, "unknown theme override field :popup.:__struct__", fn ->
         Builder.from_palette(:palette_test, sample_palette(), %{popup: %{__struct__: 0}})

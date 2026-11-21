@@ -6,6 +6,16 @@ defmodule MingaEditor.UI.Theme.LoaderTest do
 
   @moduletag :tmp_dir
 
+  @palette %{
+    variant: :dark,
+    bg: 0x101010,
+    fg: 0xEEEEEE,
+    surface: 0x202020,
+    overlay: 0x181818,
+    muted: 0x777777,
+    subtle: 0x303030
+  }
+
   describe "load_file/1" do
     test "loads a minimal theme file", %{tmp_dir: dir} do
       path = Path.join(dir, "minimal.exs")
@@ -60,6 +70,51 @@ defmodule MingaEditor.UI.Theme.LoaderTest do
       assert loaded.theme.editor.bg == 0x111111
       assert loaded.theme.editor.fg == 0xEEEEEE
       refute Map.has_key?(Map.from_struct(loaded.theme.editor), :tilde_fg)
+    end
+
+    test "editor override precedence depends on the theme source", %{tmp_dir: dir} do
+      path = Path.join(dir, "editor_precedence.exs")
+
+      for {source, expected_bg} <- [
+            {%{palette: @palette}, 0x111111},
+            {%{inherits: :doom_one}, 0x222222},
+            {%{}, 0x222222}
+          ] do
+        data =
+          Map.merge(source, %{
+            name: :editor_precedence,
+            editor: %{bg: 0x111111},
+            overrides: %{editor: %{bg: 0x222222}}
+          })
+
+        File.write!(path, inspect(data))
+
+        assert {:ok, %{theme: theme}} = Loader.load_file(path)
+        assert theme.name == :editor_precedence
+        assert theme.editor.bg == expected_bg
+      end
+    end
+
+    test "the first invalid editor field depends on the theme source", %{tmp_dir: dir} do
+      path = Path.join(dir, "invalid_editor_order.exs")
+
+      for {source, first_field} <- [
+            {%{palette: @palette}, :concrete_typo},
+            {%{inherits: :doom_one}, :top_level_typo},
+            {%{}, :top_level_typo}
+          ] do
+        data =
+          Map.merge(source, %{
+            name: :invalid_editor_order,
+            editor: %{top_level_typo: 0x111111},
+            overrides: %{editor: %{concrete_typo: 0x222222}}
+          })
+
+        File.write!(path, inspect(data))
+
+        assert {:error, %{path: ^path, error: error}} = Loader.load_file(path)
+        assert error == "unknown theme override field :editor.#{inspect(first_field)}"
+      end
     end
 
     test "non-map palettes return load errors", %{tmp_dir: dir} do

@@ -442,12 +442,14 @@ defmodule MingaEditor.UI.Theme.Builder do
   end
 
   defp apply_override({section, overrides}, %Theme{} = theme)
+       when section in @theme_sections and is_map(overrides) do
+    current = Map.fetch!(theme, section)
+    %{theme | section => merge_struct(section, current, overrides)}
+  end
+
+  defp apply_override({section, overrides}, %Theme{})
        when is_atom(section) and is_map(overrides) do
-    if section in @theme_sections do
-      apply_section_override(theme, section, overrides)
-    else
-      raise ArgumentError, "unknown theme override section: #{inspect(section)}"
-    end
+    raise ArgumentError, "unknown theme override section: #{inspect(section)}"
   end
 
   defp apply_override({section, _overrides}, %Theme{}) when is_atom(section) do
@@ -456,12 +458,6 @@ defmodule MingaEditor.UI.Theme.Builder do
 
   defp apply_override(override, %Theme{}) do
     raise ArgumentError, "theme override keys must be atoms, got: #{inspect(override)}"
-  end
-
-  @spec apply_section_override(Theme.t(), atom(), map()) :: Theme.t()
-  defp apply_section_override(%Theme{} = theme, section, overrides) do
-    current = Map.fetch!(theme, section)
-    %{theme | section => merge_struct(section, current, overrides)}
   end
 
   @spec merge_struct(atom(), struct(), map()) :: struct()

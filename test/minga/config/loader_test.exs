@@ -421,38 +421,61 @@ defmodule Minga.Config.LoaderTest do
       assert Loader.modules_errors(pid) == []
     end
 
-    test "a compile error in one module does not prevent others from loading" do
+    test "preserves module batch and error order while compiling past failures" do
       {minga_dir, config_home, cleanup} = make_config_dir("")
       modules_dir = Path.join(minga_dir, "modules")
       File.mkdir_p!(modules_dir)
 
-      # Bad module (sorted first alphabetically)
-      File.write!(Path.join(modules_dir, "aaa_bad.ex"), """
-      defmodule Minga.UserModules.Bad do
-        this is not valid %%%
-      end
-      """)
+      pair_path = Path.join(modules_dir, "10_pair.ex")
+      syntax_path = Path.join(modules_dir, "20_syntax.ex")
+      raise_path = Path.join(modules_dir, "30_raise.ex")
+      consumer_path = Path.join(modules_dir, "40_consumer.ex")
 
-      # Good module (sorted second)
-      File.write!(Path.join(modules_dir, "zzz_good.ex"), """
-      defmodule Minga.UserModules.Good do
-        def ok?, do: true
-      end
-      """)
+      # Code.compile_file/1 returns the two sibling modules in definition order.
+      expected_modules = [
+        Minga.UserModules.BatchZulu,
+        Minga.UserModules.BatchAlpha,
+        Minga.UserModules.BatchConsumer
+      ]
 
       on_exit(fn ->
         cleanup.()
-        :code.purge(Minga.UserModules.Good)
-        :code.delete(Minga.UserModules.Good)
+
+        for module <- expected_modules do
+          :code.purge(module)
+          :code.delete(module)
+        end
       end)
+
+      # Create the files out of order; the consumer needs the pair at compile time.
+      File.write!(consumer_path, """
+      defmodule Minga.UserModules.BatchConsumer do
+        @value Minga.UserModules.BatchZulu.value()
+        def value, do: @value
+      end
+      """)
+
+      File.write!(raise_path, "raise \"fixture failure\"\n")
+      File.write!(syntax_path, "defmodule Minga.UserModules.BatchIncomplete do\n")
+
+      File.write!(pair_path, """
+      defmodule Minga.UserModules.BatchZulu do
+        def value, do: 42
+      end
+
+      defmodule Minga.UserModules.BatchAlpha do
+      end
+      """)
 
       name = :"loader_mixed_#{System.unique_integer([:positive])}"
       {:ok, pid} = Loader.start_link(name: name, config_home: config_home)
 
-      assert Minga.UserModules.Good in Loader.loaded_modules(pid)
-      assert apply(Minga.UserModules.Good, :ok?, []) == true
-      assert Enum.count(Loader.modules_errors(pid)) == 1
-      assert hd(Loader.modules_errors(pid)) =~ "aaa_bad.ex"
+      assert Loader.loaded_modules(pid) == expected_modules
+      assert apply(Minga.UserModules.BatchConsumer, :value, []) == 42
+
+      assert [syntax_error, raise_error] = Loader.modules_errors(pid)
+      assert String.starts_with?(syntax_error, "Module compile error in #{syntax_path}: ")
+      assert raise_error == "Module error in #{raise_path}: fixture failure"
     end
 
     test "no error when modules directory does not exist" do
