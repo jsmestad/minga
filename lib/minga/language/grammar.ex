@@ -84,27 +84,18 @@ defmodule Minga.Language.Grammar do
   """
   @spec query_path(language()) :: String.t() | nil
   def query_path(language) when is_binary(language) do
-    user_path = user_query_path(language, "highlights.scm")
-    priv_path = priv_query_path(language)
-
-    cond do
-      user_path != nil and File.exists?(user_path) -> user_path
-      File.exists?(priv_path) -> priv_path
-      true -> nil
-    end
+    query_path(language, "highlights.scm")
   end
 
   @doc """
   Reads the highlight query content for a language.
 
-  Returns `{:ok, query_text}` or `{:error, reason}`.
+  Returns `{:ok, query_text}` or `{:error, reason}`. If the selected query
+  cannot be read, returns its file error without falling back.
   """
   @spec read_query(language()) :: {:ok, String.t()} | {:error, :no_query | File.posix()}
   def read_query(language) when is_binary(language) do
-    case query_path(language) do
-      nil -> {:error, :no_query}
-      path -> File.read(path)
-    end
+    read_query_file(query_path(language))
   end
 
   @doc """
@@ -117,27 +108,18 @@ defmodule Minga.Language.Grammar do
   """
   @spec injection_query_path(language()) :: String.t() | nil
   def injection_query_path(language) when is_binary(language) do
-    user_path = user_query_path(language, "injections.scm")
-    priv_path = priv_injection_query_path(language)
-
-    cond do
-      user_path != nil and File.exists?(user_path) -> user_path
-      File.exists?(priv_path) -> priv_path
-      true -> nil
-    end
+    query_path(language, "injections.scm")
   end
 
   @doc """
   Reads the injection query content for a language.
 
-  Returns `{:ok, query_text}` or `{:error, reason}`.
+  Returns `{:ok, query_text}` or `{:error, reason}`. If the selected query
+  cannot be read, returns its file error without falling back.
   """
   @spec read_injection_query(language()) :: {:ok, String.t()} | {:error, :no_query | File.posix()}
   def read_injection_query(language) when is_binary(language) do
-    case injection_query_path(language) do
-      nil -> {:error, :no_query}
-      path -> File.read(path)
-    end
+    read_query_file(injection_query_path(language))
   end
 
   @doc """
@@ -203,10 +185,15 @@ defmodule Minga.Language.Grammar do
     end
   end
 
-  @spec priv_query_path(language()) :: String.t()
-  defp priv_query_path(language) do
-    Path.join([:code.priv_dir(:minga), "queries", language, "highlights.scm"])
+  @spec query_path(language(), String.t()) :: String.t() | nil
+  defp query_path(language, filename) do
+    existing_query_path(user_query_path(language, filename)) ||
+      existing_query_path(Path.join([:code.priv_dir(:minga), "queries", language, filename]))
   end
+
+  @spec existing_query_path(String.t() | nil) :: String.t() | nil
+  defp existing_query_path(nil), do: nil
+  defp existing_query_path(path), do: if(File.exists?(path), do: path)
 
   @spec user_query_path(language(), String.t()) :: String.t() | nil
   defp user_query_path(language, filename) do
@@ -216,8 +203,8 @@ defmodule Minga.Language.Grammar do
     end
   end
 
-  @spec priv_injection_query_path(language()) :: String.t()
-  defp priv_injection_query_path(language) do
-    Path.join([:code.priv_dir(:minga), "queries", language, "injections.scm"])
-  end
+  @spec read_query_file(String.t() | nil) ::
+          {:ok, String.t()} | {:error, :no_query | File.posix()}
+  defp read_query_file(nil), do: {:error, :no_query}
+  defp read_query_file(path), do: File.read(path)
 end

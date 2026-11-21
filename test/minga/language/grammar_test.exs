@@ -97,6 +97,19 @@ defmodule Minga.Language.GrammarTest do
       assert content =~ "injection"
     end
 
+    test "does not fall back to a bundled injection query when the override cannot be read" do
+      language = "protobuf"
+      assert {:ok, _} = Grammar.read_injection_query(language)
+
+      dir = Path.join([System.fetch_env!("XDG_CONFIG_HOME"), "minga", "queries", language])
+      override = Path.join(dir, "injections.scm")
+      File.mkdir_p!(override)
+      on_exit(fn -> File.rm_rf!(dir) end)
+
+      assert Grammar.injection_query_path(language) == override
+      assert {:error, :eisdir} = Grammar.read_injection_query(language)
+    end
+
     test "returns error for language without injection query" do
       assert {:error, :no_query} = Grammar.read_injection_query("json")
     end
