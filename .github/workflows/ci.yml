@@ -322,6 +322,8 @@ jobs:
   swift-tests:
     name: Swift (macOS correctness)
     runs-on: macos-15
+    permissions:
+      contents: read
     env:
       # ViewInspector's glass-effect inspectors require the macOS 26 SDK.
       DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
@@ -416,6 +418,8 @@ jobs:
   swift-performance:
     name: Swift (macOS performance)
     runs-on: macos-15
+    permissions:
+      contents: read
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
       MINGA_REQUIRE_METAL: "1"
