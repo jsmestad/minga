@@ -105,22 +105,20 @@ defmodule MingaEditor.RenderModel.Window.DiagnosticIndex do
       end
     end)
     |> Enum.sort()
-    |> Enum.flat_map(fn {line, {base_rank, offsets}} ->
-      case fetch(root, line) do
-        nil ->
-          []
+    |> Enum.flat_map(fn {line, ranks} -> ranges_at_line(fetch(root, line), line, ranks, store) end)
+  end
 
-        entries ->
-          ranges =
-            for index <- 0..(tuple_size(entries) - 1)//1,
-                entry = elem(entries, index),
-                MapSet.member?(offsets, start_offset(entry)) do
-              compact_range(entry, line, base_rank, store)
-            end
+  defp ranges_at_line(nil, _line, _ranks, _store), do: []
 
-          Enum.sort_by(ranges, & &1.start_row)
+  defp ranges_at_line(entries, line, {base_rank, offsets}, store) do
+    ranges =
+      for index <- 0..(tuple_size(entries) - 1)//1,
+          entry = elem(entries, index),
+          MapSet.member?(offsets, start_offset(entry)) do
+        compact_range(entry, line, base_rank, store)
       end
-    end)
+
+    Enum.sort_by(ranges, & &1.start_row)
   end
 
   defp apply_splice(root, first, count, count, store, wrapped?) do
