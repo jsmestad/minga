@@ -47,6 +47,9 @@ defmodule MingaEditor.UI.Picker.AgentModelSourceTest do
     @impl GenServer
     def handle_call(:begin_model_discovery, _from, fixture), do: {:reply, :local, fixture}
 
+    def handle_call(:inference_route_context, _from, fixture),
+      do: {:reply, {:error, :unsupported}, fixture}
+
     def handle_call(:get_available_models, _from, {candidates, _message} = fixture),
       do: {:reply, {:ok, candidates}, fixture}
 
@@ -341,6 +344,186 @@ defmodule MingaEditor.UI.Picker.AgentModelSourceTest do
 
       assert state.workspace.agent_ui.panel.model_name == "Prior Model"
       assert state.shell_runtime.state.notice.message == FixtureInferenceRoute.remedy()
+    end
+  end
+
+  describe "subscription route setup and plan usage" do
+    setup do
+      suffix = System.unique_integer([:positive])
+      registry = :"picker_setup_routes_#{suffix}"
+      start_supervised!({InferenceRouteRegistry, name: registry})
+
+      routes = [
+        {"setup#{suffix}", "Setup Fixture"},
+        {"offline#{suffix}", "Offline Setup"}
+      ]
+
+      reporters =
+        Map.new(routes, fn {id, name} ->
+          {:ok, reporter} =
+            InferenceRouteRegistry.register(registry,
+              source: {:extension, :fixture_bridge},
+              id: id,
+              module: FixtureInferenceRoute,
+              display_name: name,
+              setup_action: [
+                label: "Use #{name}",
+                description: "Sign in with the fixture CLI. Minga never sees your login."
+              ]
+            )
+
+          {id, reporter}
+        end)
+
+      observer = FixtureInferenceRoute.observer_env(self())
+
+      routes_file = %{
+        "routes" => %{"setup#{suffix}" => %{"env" => %{"FIXTURE_OBSERVER" => observer}}}
+      }
+
+      session =
+        start_supervised!(
+          {Session,
+           provider: Native,
+           persist?: false,
+           hooks_enabled?: false,
+           credentials_snapshot_fn: fn -> Snapshot.new(%{}, nil) end,
+           provider_opts: [
+             mcp_enabled?: false,
+             credential_opts: [credentials_reader: fn _path -> {:ok, routes_file} end, env: %{}],
+             model_resolver_opts: [
+               models: [],
+               inference_routes: registry,
+               apple_availability_fn: fn -> {:error, :unsupported} end
+             ]
+           ]}
+        )
+
+      %{
+        registry: registry,
+        reporters: reporters,
+        session: session,
+        setup_id: "setup#{suffix}",
+        offline_id: "offline#{suffix}"
+      }
+    end
+
+    defp setup_rows(items), do: Enum.filter(items, &match?({:route_setup, _id}, &1.id))
+
+    test "setup rows show each route's readiness and never ask for a secret", ctx do
+      %{connection: connection} = Session.editor_snapshot(ctx.session)
+      items = AgentModelSource.candidates(context(connection, 1))
+      rows = setup_rows(items)
+
+      ready = Enum.find(rows, &(&1.label == "Use Setup Fixture"))
+      offline = Enum.find(rows, &(&1.label == "Use Offline Setup"))
+
+      assert ready.description =~ "Minga never sees your login."
+      assert ready.description =~ "Ready: fixture@example.com"
+      assert offline.description =~ FixtureInferenceRoute.remedy()
+      assert ready.meta.intent == {:check_route, ctx.setup_id, "Setup Fixture"}
+
+      assert Enum.all?(rows, &match?({:check_route, _id, _name}, &1.meta.intent))
+    end
+
+    test "selecting a setup row checks the route on the effect worker and reports the result",
+         ctx do
+      %{connection: connection} = Session.editor_snapshot(ctx.session)
+      task_supervisor = start_supervised!({Task.Supervisor, []})
+      scheduler = start_supervised!({EffectScheduler, task_supervisor: task_supervisor})
+      :ok = EffectScheduler.attach(scheduler, self())
+      {state, workspace_id} = editor_state(connection, "Prior Model", scheduler)
+
+      [row | _rest] =
+        context(connection, workspace_id)
+        |> AgentModelSource.candidates()
+        |> setup_rows()
+        |> Enum.filter(&(&1.label == "Use Setup Fixture"))
+
+      assert_receive {:fixture_availability_checked, _id, _discovery_caller}
+
+      state = AgentModelSource.on_select(row, state)
+      assert state.shell_runtime.state.notice.message == "Checking Setup Fixture…"
+
+      setup_id = ctx.setup_id
+      assert_receive {:fixture_availability_checked, ^setup_id, caller}, 1_000
+      assert caller not in [self(), ctx.session]
+
+      assert_receive {:effect_result, ^scheduler,
+                      %Outcome{value: {:completed, {:notice, message}}} = outcome},
+                     1_000
+
+      assert message == "Setup Fixture is ready: fixture@example.com."
+
+      assert {:noreply, state} =
+               MingaEditor.handle_info({:effect_result, scheduler, outcome}, state)
+
+      assert state.shell_runtime.state.notice.message == message
+      assert state.workspace.agent_ui.panel.model_name == "Prior Model"
+    end
+
+    test "a plan limit adds a notification whose action opens the model picker", ctx do
+      %{connection: connection} = Session.editor_snapshot(ctx.session)
+      {state, _workspace_id} = editor_state(connection, "Prior Model", nil)
+      message = "Setup Fixture plan limit reached. Resets at 3:40 PM. Switch model to continue."
+
+      state =
+        MingaEditor.Agent.Events.dispatch(state, ctx.session, {:model_limit_reached, message})
+
+      assert [notification] =
+               Enum.filter(state.feedback.notifications.items, &(&1.id == "agent:model_limit"))
+
+      assert notification.body == message
+
+      assert [%{id: "choose_model", label: "Choose another model", dispatch: action}] =
+               notification.actions
+
+      assert action == {:command, :agent_pick_model}
+
+      assert {:ok, %Minga.Command{}} =
+               Minga.Command.Registry.lookup(Minga.Command.Registry, :agent_pick_model)
+    end
+
+    test "subscription rows show reported usage and nothing without data", ctx do
+      opts = [
+        backend_spec: MingaAgent.ProviderPacks.Native.spec(),
+        credential_snapshot: Snapshot.new(%{}, nil),
+        models: [],
+        inference_routes: ctx.registry
+      ]
+
+      session =
+        start_supervised!({ModelPickerSession, ModelResolver.candidates(opts)},
+          id: :without_usage
+        )
+
+      row =
+        Enum.find(
+          model_items(context(connection(session), 1)),
+          &(&1.description =~ "Setup Fixture")
+        )
+
+      refute row.description =~ "limit"
+
+      resets_at = DateTime.add(DateTime.utc_now(), 3_600)
+
+      :ok =
+        InferenceRouteRegistry.report_usage(ctx.registry, ctx.reporters[ctx.setup_id], [
+          %{kind: "five_hour", utilization: 0.82, resets_at: resets_at, status: :warning},
+          %{kind: "seven_day", utilization: 0.31, resets_at: nil, status: :allowed}
+        ])
+
+      session =
+        start_supervised!({ModelPickerSession, ModelResolver.candidates(opts)}, id: :with_usage)
+
+      row =
+        Enum.find(
+          model_items(context(connection(session), 1)),
+          &(&1.description =~ "Setup Fixture")
+        )
+
+      assert row.description =~ ~r/82% of 5h limit · resets \d{1,2}:\d{2} (AM|PM)/
+      refute row.description =~ "7d"
     end
   end
 

@@ -4,7 +4,7 @@ defmodule MingaAgent.InferenceRouteRegistryTest do
   alias Minga.Extension.ContributionCleanup
   alias Minga.Extension.InvocationContext
   alias Minga.Extension.ModelRoutes
-  alias MingaAgent.InferenceRoute.{Reporter, Status}
+  alias MingaAgent.InferenceRoute.{PlanWindow, Reporter, Status, StatusChangedEvent}
   alias MingaAgent.InferenceRouteRegistry
   alias MingaAgent.InferenceRouteRegistry.Entry
   alias MingaAgent.Test.FixtureInferenceRoute
@@ -170,7 +170,9 @@ defmodule MingaAgent.InferenceRouteRegistryTest do
     [entry] = InferenceRouteRegistry.list(registry)
     :ok = InferenceRouteRegistry.unregister_source(registry, {:extension, :one})
 
-    assert :ok = GenServer.call(registry, {:refreshed, entry.spec, Status.unknown()})
+    assert :ok =
+             GenServer.call(registry, {:refreshed, entry.spec, Status.unknown(), {:error, :kept}})
+
     assert InferenceRouteRegistry.list(registry) == []
   end
 
@@ -212,6 +214,125 @@ defmodule MingaAgent.InferenceRouteRegistryTest do
     assert message =~ "no extension provides it"
   end
 
+  describe "plan usage, status events, and model refresh" do
+    setup do
+      events = :"route_events_#{System.unique_integer([:positive])}"
+      start_supervised!({Registry, keys: :duplicate, name: events}, id: events)
+      name = :"route_registry_events_#{System.unique_integer([:positive])}"
+      start_supervised!({InferenceRouteRegistry, name: name, events: events}, id: name)
+      :ok = Minga.Events.subscribe(:inference_route_status_changed, registry: events)
+      %{registry: name}
+    end
+
+    defp window(attrs) do
+      Keyword.merge(
+        [kind: "five_hour", utilization: 0.82, resets_at: nil, status: :warning],
+        attrs
+      )
+    end
+
+    test "usage is reported from any process, kept apart from availability, and published",
+         %{registry: registry} do
+      {:ok, reporter} = InferenceRouteRegistry.register(registry, spec({:extension, :one}))
+      parent = self()
+
+      spawn(fn ->
+        send(
+          parent,
+          {:reported, InferenceRouteRegistry.report_usage(registry, reporter, [window([])])}
+        )
+      end)
+
+      assert_receive {:reported, :ok}
+
+      assert_receive {:minga_event, :inference_route_status_changed,
+                      %StatusChangedEvent{
+                        route_id: "fixture",
+                        status: %Status{plan_usage: [usage]}
+                      }}
+
+      assert %PlanWindow{kind: "five_hour", utilization: 0.82, status: :warning} = usage
+
+      :ok = InferenceRouteRegistry.report_status(registry, reporter, {:ready, "me"})
+
+      assert {:ok, %Entry{status: %Status{availability: {:ready, "me"}, plan_usage: [^usage]}}} =
+               InferenceRouteRegistry.lookup(registry, "fixture")
+
+      InferenceRouteRegistry.refresh_availability(registry)
+
+      assert {:ok, %Entry{status: %Status{plan_usage: [^usage]}}} =
+               InferenceRouteRegistry.lookup(registry, "fixture")
+    end
+
+    test "no usage data, an unchanged report, and invalid windows publish nothing",
+         %{registry: registry} do
+      {:ok, reporter} = InferenceRouteRegistry.register(registry, spec({:extension, :one}))
+
+      assert :ok = InferenceRouteRegistry.report_usage(registry, reporter, [])
+      refute_receive {:minga_event, :inference_route_status_changed, _event}, 50
+
+      assert {:ok, %Entry{status: %Status{plan_usage: nil}}} =
+               InferenceRouteRegistry.lookup(registry, "fixture")
+
+      for {field, value} <- [
+            utilization: 1.2,
+            utilization: -0.1,
+            status: :blocked,
+            kind: "",
+            resets_at: "soon"
+          ] do
+        assert {:error, {:invalid_plan_window, ^field}} =
+                 InferenceRouteRegistry.report_usage(registry, reporter, [
+                   window([{field, value}])
+                 ])
+      end
+
+      :ok = InferenceRouteRegistry.report_usage(registry, reporter, [window([])])
+      assert_receive {:minga_event, :inference_route_status_changed, _event}
+      :ok = InferenceRouteRegistry.report_usage(registry, reporter, [window([])])
+      refute_receive {:minga_event, :inference_route_status_changed, _event}, 50
+
+      :ok = InferenceRouteRegistry.unregister_source(registry, {:extension, :one})
+
+      assert {:error, :unknown_route} =
+               InferenceRouteRegistry.report_usage(registry, reporter, [window([])])
+    end
+
+    test "refreshing a route lists its models again in the check worker", %{registry: registry} do
+      {:ok, models} = Agent.start_link(fn -> [FixtureInferenceRoute.model(id: "old")] end)
+
+      {:ok, _reporter} =
+        InferenceRouteRegistry.register(registry, spec({:extension, :one}),
+          config: [models_agent: models]
+        )
+
+      Agent.update(models, fn _old -> [FixtureInferenceRoute.model(id: "new")] end)
+      InferenceRouteRegistry.refresh_availability(registry)
+
+      assert {:ok, %Entry{models: [%{id: "new"}]}} =
+               InferenceRouteRegistry.lookup(registry, "fixture")
+
+      Agent.update(models, fn _new -> [] end)
+      InferenceRouteRegistry.refresh_availability(registry)
+
+      assert {:ok, %Entry{models: [%{id: "new"}]}} =
+               InferenceRouteRegistry.lookup(registry, "fixture")
+    end
+
+    test "a refresh can be limited to one route", %{registry: registry} do
+      for id <- ~w(first second) do
+        {:ok, _reporter} = InferenceRouteRegistry.register(registry, spec({:extension, :one}, id))
+      end
+
+      InferenceRouteRegistry.refresh_availability(registry, route_ids: ["second"])
+
+      statuses =
+        Map.new(InferenceRouteRegistry.list(registry), &{&1.spec.id, &1.status.availability})
+
+      assert statuses == %{"first" => :unknown, "second" => {:ready, "fixture@example.com"}}
+    end
+  end
+
   describe "Minga.Extension.ModelRoutes" do
     test "registers under the calling extension's invocation source and returns a reporter",
          %{registry: registry} do
@@ -230,6 +351,28 @@ defmodule MingaAgent.InferenceRouteRegistryTest do
                InferenceRouteRegistry.lookup(registry, "fixture")
 
       assert :ok = ModelRoutes.report_status(reporter, {:ready, "me"}, registry: registry)
+
+      assert :ok =
+               ModelRoutes.report_usage(
+                 reporter,
+                 [%{kind: "seven_day", utilization: 0.4, resets_at: nil, status: :allowed}],
+                 registry: registry
+               )
+
+      setup = [
+        id: "with_setup",
+        module: FixtureInferenceRoute,
+        display_name: "Setup Route",
+        setup_action: [label: "Use Setup Route", description: "Sign in with its CLI."]
+      ]
+
+      assert {:ok, _setup_reporter} =
+               InvocationContext.with_source({:extension, :bridge}, fn ->
+                 ModelRoutes.register(setup, registry: registry)
+               end)
+
+      assert {:ok, %Entry{spec: %{setup_action: %{label: "Use Setup Route"}}}} =
+               InferenceRouteRegistry.lookup(registry, "with_setup")
 
       assert {:ok, %Entry{status: %Status{availability: {:ready, "me"}}}} =
                InferenceRouteRegistry.lookup(registry, "fixture")

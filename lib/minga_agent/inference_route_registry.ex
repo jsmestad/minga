@@ -4,14 +4,15 @@ defmodule MingaAgent.InferenceRouteRegistry do
 
   The registry owns registered route declarations, their offered models, and each route's last known `Status`. A source may replace its own routes, but a route id another source owns is rejected and the first route keeps working. When a source stops, `ContributionCleanup` drops its routes through the `:inference_routes` family.
 
-  Route callbacks never run inside the registry process. `register/3` lists models in the caller, and `refresh_availability/2` checks availability in bounded worker processes spawned by the caller, so the Editor must never call it.
+  Route callbacks never run inside the registry process. `register/3` lists models in the caller, and `refresh_availability/2` checks availability and lists models again in bounded worker processes spawned by the caller, so the Editor must never call it. Every change to a route's status publishes `:inference_route_status_changed` on `Minga.Events`. A privately named registry publishes only to the event registry passed as `:events`, so tests never touch the global bus.
   """
 
   use GenServer
 
   alias MingaAgent.InferenceRoute
   alias MingaAgent.Event
-  alias MingaAgent.InferenceRoute.{Model, Reporter, Spec, Status}
+  alias MingaAgent.InferenceRoute.{Model, PlanWindow, Reporter, Spec, Status}
+  alias MingaAgent.InferenceRoute.StatusChangedEvent
   alias MingaAgent.InferenceRouteRegistry.Entry
 
   @default_availability_timeout 5_000
@@ -41,15 +42,21 @@ defmodule MingaAgent.InferenceRouteRegistry do
           | {:invalid_models, term()}
 
   @typedoc "Status report failure reason."
-  @type report_error :: :unknown_route | :stale_reporter | :invalid_status
+  @type report_error ::
+          :unknown_route | :stale_reporter | :invalid_status | PlanWindow.error()
 
-  @type state :: %{routes: %{String.t() => Entry.t()}, reporters: %{String.t() => Reporter.t()}}
+  @type state :: %{
+          routes: %{String.t() => Entry.t()},
+          reporters: %{String.t() => Reporter.t()},
+          events: Minga.Events.registry() | nil
+        }
 
   @doc "Starts the inference route registry."
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts \\ []) do
     name = Keyword.get(opts, :name, __MODULE__)
-    GenServer.start_link(__MODULE__, [name: name], name: name)
+    events = Keyword.get_lazy(opts, :events, fn -> default_events(name) end)
+    GenServer.start_link(__MODULE__, [name: name, events: events], name: name)
   end
 
   @doc false
@@ -68,9 +75,11 @@ defmodule MingaAgent.InferenceRouteRegistry do
   def register(server, spec_or_attrs, opts \\ [])
 
   def register(server, %Spec{} = spec, opts) do
+    config = Keyword.get(opts, :config, [])
+
     with :ok <- validate_module(spec.module),
-         {:ok, models} <- list_models(spec.module, Keyword.get(opts, :config, [])) do
-      GenServer.call(server, {:register, spec, models})
+         {:ok, models} <- list_models(spec.module, config) do
+      GenServer.call(server, {:register, spec, models, config})
     end
   end
 
@@ -95,6 +104,20 @@ defmodule MingaAgent.InferenceRouteRegistry do
     case Status.new(availability) do
       {:ok, status} -> GenServer.call(server, {:report_status, reporter, status})
       {:error, :invalid_status} -> {:error, :invalid_status}
+    end
+  end
+
+  @doc """
+  Records plan limit windows reported through the route's current reporter, from any process.
+
+  An empty list or nil means the route has no usage data, and Minga shows nothing. Availability is unchanged.
+  """
+  @spec report_usage(server(), Reporter.t(), [PlanWindow.t() | map() | keyword()] | nil) ::
+          :ok | {:error, report_error()}
+  def report_usage(server, %Reporter{} = reporter, windows) do
+    case PlanWindow.new_list(windows) do
+      {:ok, windows} -> GenServer.call(server, {:report_usage, reporter, windows})
+      {:error, _reason} = error -> error
     end
   end
 
@@ -133,7 +156,7 @@ defmodule MingaAgent.InferenceRouteRegistry do
   @doc """
   Checks every registered route's availability in the calling process and records the results.
 
-  Each `availability/2` call runs in its own monitored process with a deadline (`:timeout`, default 5000 ms). A route that raises, exits, returns an invalid value, or misses the deadline is recorded as unavailable, with diagnostics in `*Messages*`. `:route_credential_fn` receives a route id and returns `{:ok, credential}` for the opaque credential passed to the route, or `{:error, remedy}` to mark the route unavailable without calling it (default: `{:ok, nil}`).
+  Each route is checked in its own monitored process with a deadline (`:timeout`, default 5000 ms): the process calls `availability/2` and then `models/1` with the registration config, so a route can offer new models after the user installs or signs in to its tool. A route that raises, exits, returns an invalid value, or misses the deadline is recorded as unavailable, with diagnostics in `*Messages*`. An invalid model list keeps the previous models. `:route_ids` limits the check to those routes. `:route_credential_fn` receives a route id and returns `{:ok, credential}` for the opaque credential passed to the route, or `{:error, remedy}` to mark the route unavailable without calling it (default: `{:ok, nil}`).
   """
   @spec refresh_availability(server(), keyword()) :: [Entry.t()]
   def refresh_availability(server, opts \\ []) do
@@ -142,11 +165,17 @@ defmodule MingaAgent.InferenceRouteRegistry do
     deadline = System.monotonic_time(:millisecond) + timeout
 
     # Start every check before awaiting any, so all routes share one deadline.
-    checks = server |> list() |> Enum.map(&start_check(&1, credential_fn))
+    checks =
+      server
+      |> list()
+      |> only_routes(Keyword.get(opts, :route_ids))
+      |> Enum.map(&start_check(&1, credential_fn))
 
     checks
     |> Enum.map(&await_check(&1, deadline))
-    |> Enum.each(fn {spec, status} -> GenServer.call(server, {:refreshed, spec, status}) end)
+    |> Enum.each(fn {spec, status, models} ->
+      GenServer.call(server, {:refreshed, spec, status, models})
+    end)
 
     list(server)
   end
@@ -155,11 +184,11 @@ defmodule MingaAgent.InferenceRouteRegistry do
   @spec init(keyword()) :: {:ok, state()}
   def init(opts) do
     maybe_register_cleanup_callback(Keyword.get(opts, :name, __MODULE__))
-    {:ok, %{routes: %{}, reporters: %{}}}
+    {:ok, %{routes: %{}, reporters: %{}, events: Keyword.fetch!(opts, :events)}}
   end
 
   @impl true
-  def handle_call({:register, %Spec{} = spec, models}, _from, state) do
+  def handle_call({:register, %Spec{} = spec, models, config}, _from, state) do
     case Map.fetch(state.routes, spec.id) do
       {:ok, %Entry{spec: %Spec{source: source}}} when source != spec.source ->
         {:reply, {:error, {:duplicate_route_id, spec.id, source, spec.source}}, state}
@@ -168,8 +197,9 @@ defmodule MingaAgent.InferenceRouteRegistry do
         reporter = Reporter.issue(spec.id)
 
         state = %{
-          routes: Map.put(state.routes, spec.id, Entry.new(spec, models)),
-          reporters: Map.put(state.reporters, spec.id, reporter)
+          state
+          | routes: Map.put(state.routes, spec.id, Entry.new(spec, models, config)),
+            reporters: Map.put(state.reporters, spec.id, reporter)
         }
 
         {:reply, {:ok, reporter}, state}
@@ -197,7 +227,24 @@ defmodule MingaAgent.InferenceRouteRegistry do
       ) do
     case {Map.fetch(state.routes, route_id), Map.fetch(state.reporters, route_id)} do
       {{:ok, entry}, {:ok, ^reporter}} ->
-        {:reply, :ok, put_route(state, Entry.with_status(entry, status))}
+        {:reply, :ok, put_status(state, entry, Status.with_availability(entry.status, status))}
+
+      {{:ok, _entry}, _other_registration} ->
+        {:reply, {:error, :stale_reporter}, state}
+
+      {:error, _no_reporter} ->
+        {:reply, {:error, :unknown_route}, state}
+    end
+  end
+
+  def handle_call(
+        {:report_usage, %Reporter{route_id: route_id} = reporter, windows},
+        _from,
+        state
+      ) do
+    case {Map.fetch(state.routes, route_id), Map.fetch(state.reporters, route_id)} do
+      {{:ok, entry}, {:ok, ^reporter}} ->
+        {:reply, :ok, put_status(state, entry, Status.with_plan_usage(entry.status, windows))}
 
       {{:ok, _entry}, _other_registration} ->
         {:reply, {:error, :stale_reporter}, state}
@@ -208,10 +255,11 @@ defmodule MingaAgent.InferenceRouteRegistry do
   end
 
   # A refresh result applies only to the exact declaration that was checked.
-  def handle_call({:refreshed, %Spec{} = spec, status}, _from, state) do
+  def handle_call({:refreshed, %Spec{} = spec, status, models}, _from, state) do
     case Map.fetch(state.routes, spec.id) do
       {:ok, %Entry{spec: ^spec} = entry} ->
-        {:reply, :ok, put_route(state, Entry.with_status(entry, status))}
+        entry = refreshed_models(entry, models)
+        {:reply, :ok, put_status(state, entry, Status.with_availability(entry.status, status))}
 
       _replaced_or_removed ->
         {:reply, :ok, state}
@@ -223,8 +271,39 @@ defmodule MingaAgent.InferenceRouteRegistry do
       for {id, %Entry{spec: %Spec{source: ^source}}} <- state.routes, do: id
 
     {:reply, :ok,
-     %{routes: Map.drop(state.routes, removed), reporters: Map.drop(state.reporters, removed)}}
+     %{
+       state
+       | routes: Map.drop(state.routes, removed),
+         reporters: Map.drop(state.reporters, removed)
+     }}
   end
+
+  # Publishes only real changes, so chrome re-renders when what it shows changed.
+  @spec put_status(state(), Entry.t(), Status.t()) :: state()
+  defp put_status(state, %Entry{status: status} = entry, status), do: put_route(state, entry)
+
+  defp put_status(state, %Entry{spec: spec} = entry, status) do
+    publish_status(state.events, %StatusChangedEvent{route_id: spec.id, status: status})
+    put_route(state, Entry.with_status(entry, status))
+  end
+
+  @spec publish_status(Minga.Events.registry() | nil, StatusChangedEvent.t()) :: :ok
+  defp publish_status(nil, _event), do: :ok
+
+  defp publish_status(events, event),
+    do: Minga.Events.broadcast(:inference_route_status_changed, event, events)
+
+  @spec default_events(server()) :: Minga.Events.registry() | nil
+  defp default_events(__MODULE__), do: Minga.Events.default_registry()
+  defp default_events(_private_name), do: nil
+
+  @spec refreshed_models(Entry.t(), {:ok, [Model.t()]} | {:error, term()}) :: Entry.t()
+  defp refreshed_models(entry, {:ok, models}), do: Entry.with_models(entry, models)
+  defp refreshed_models(entry, {:error, _kept}), do: entry
+
+  @spec only_routes([Entry.t()], [String.t()] | nil) :: [Entry.t()]
+  defp only_routes(entries, nil), do: entries
+  defp only_routes(entries, ids) when is_list(ids), do: Enum.filter(entries, &(&1.spec.id in ids))
 
   @spec put_route(state(), Entry.t()) :: state()
   defp put_route(state, %Entry{spec: spec} = entry),
@@ -309,13 +388,13 @@ defmodule MingaAgent.InferenceRouteRegistry do
     end
   end
 
-  @typep check :: {Spec.t(), pid(), reference(), reference()}
+  @typep check :: {Entry.t(), pid(), reference(), reference()}
 
   @typep credential_fn ::
            (String.t() -> {:ok, InferenceRoute.route_credential()} | {:error, String.t()})
 
   @spec start_check(Entry.t(), credential_fn()) :: check()
-  defp start_check(%Entry{spec: spec}, credential_fn) do
+  defp start_check(%Entry{spec: spec} = entry, credential_fn) do
     parent = self()
     tag = make_ref()
 
@@ -323,15 +402,16 @@ defmodule MingaAgent.InferenceRouteRegistry do
       spawn_monitor(fn ->
         result =
           try do
-            check_with_credential(spec, credential_fn.(spec.id))
+            {check_with_credential(spec, credential_fn.(spec.id)),
+             list_models(spec.module, entry.config)}
           rescue
-            exception -> {:raised, Exception.message(exception)}
+            exception -> {{:raised, Exception.message(exception)}, {:error, :not_listed}}
           end
 
         send(parent, {tag, result})
       end)
 
-    {spec, pid, monitor, tag}
+    {entry, pid, monitor, tag}
   end
 
   @spec check_with_credential(Spec.t(), term()) :: {:returned, term()}
@@ -341,8 +421,9 @@ defmodule MingaAgent.InferenceRouteRegistry do
   defp check_with_credential(_spec, {:error, remedy}) when is_binary(remedy),
     do: {:returned, {:unavailable, :invalid_route_credential, remedy}}
 
-  @spec await_check(check(), integer()) :: {Spec.t(), Status.t()}
-  defp await_check({spec, pid, monitor, tag}, deadline) do
+  @spec await_check(check(), integer()) ::
+          {Spec.t(), Status.t(), {:ok, [Model.t()]} | {:error, term()}}
+  defp await_check({%Entry{spec: spec}, pid, monitor, tag}, deadline) do
     remaining = max(deadline - System.monotonic_time(:millisecond), 0)
 
     result =
@@ -352,7 +433,7 @@ defmodule MingaAgent.InferenceRouteRegistry do
           result
 
         {:DOWN, ^monitor, :process, ^pid, reason} ->
-          {:exited, reason}
+          {{:exited, reason}, {:error, :not_listed}}
       after
         remaining ->
           Process.exit(pid, :kill)
@@ -364,10 +445,24 @@ defmodule MingaAgent.InferenceRouteRegistry do
             0 -> :ok
           end
 
-          :timeout
+          {:timeout, {:error, :not_listed}}
       end
 
-    {spec, check_status(spec, result)}
+    {availability, models} = result
+    {spec, check_status(spec, availability), refreshed_model_list(spec, models)}
+  end
+
+  @spec refreshed_model_list(Spec.t(), term()) :: {:ok, [Model.t()]} | {:error, term()}
+  defp refreshed_model_list(_spec, {:ok, models}), do: {:ok, models}
+  defp refreshed_model_list(_spec, {:error, :not_listed} = kept), do: kept
+
+  defp refreshed_model_list(spec, {:error, reason} = kept) do
+    Minga.Log.warning(
+      :agent,
+      "Model route #{spec.id} returned an invalid model list; keeping its previous models: #{MingaAgent.Redaction.format_error(reason)}"
+    )
+
+    kept
   end
 
   @spec check_status(Spec.t(), term()) :: Status.t()

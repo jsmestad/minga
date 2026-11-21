@@ -888,20 +888,69 @@ defmodule MingaAgent.Session do
   # Route availability callbacks run in this calling worker, never in the Session or Editor process.
   @spec refresh_inference_routes(keyword(), keyword()) :: :ok
   defp refresh_inference_routes(resolver_opts, credential_opts) do
-    credential_fn = fn route_id ->
+    resolver_opts
+    |> inference_route_registry()
+    |> MingaAgent.InferenceRouteRegistry.refresh_availability(
+      route_credential_fn: route_credential_fn(credential_opts)
+    )
+
+    :ok
+  catch
+    :exit, _reason -> :ok
+  end
+
+  @spec inference_route_registry(keyword()) :: GenServer.server()
+  defp inference_route_registry(resolver_opts),
+    do: Keyword.get(resolver_opts, :inference_routes, MingaAgent.InferenceRouteRegistry)
+
+  @spec route_credential_fn(keyword()) ::
+          (String.t() ->
+             {:ok, MingaAgent.InferenceRoute.route_credential()} | {:error, String.t()})
+  defp route_credential_fn(credential_opts) do
+    fn route_id ->
       case MingaAgent.Credentials.route_credential(route_id, credential_opts) do
         {:ok, credential} -> {:ok, credential}
         {:error, {:route_unavailable, remedy}} -> {:error, remedy}
       end
     end
+  end
 
-    resolver_opts
-    |> Keyword.get(:inference_routes, MingaAgent.InferenceRouteRegistry)
-    |> MingaAgent.InferenceRouteRegistry.refresh_availability(route_credential_fn: credential_fn)
+  @doc """
+  Lists registered model routes that declare a setup action. Runs in the calling worker.
 
-    :ok
+  Returns `{:error, :unsupported}` when the session's backend cannot run contributed routes.
+  """
+  @spec inference_route_setups(GenServer.server()) ::
+          {:ok, [MingaAgent.InferenceRouteRegistry.Entry.t()]} | {:error, :unsupported}
+  def inference_route_setups(session) do
+    with {:ok, registry, _credential_opts} <- GenServer.call(session, :inference_route_context) do
+      {:ok,
+       registry |> MingaAgent.InferenceRouteRegistry.list() |> Enum.filter(& &1.spec.setup_action)}
+    end
   catch
-    :exit, _reason -> :ok
+    :exit, _reason -> {:ok, []}
+  end
+
+  @doc """
+  Runs one route's availability check in the calling worker, never in the Session or Editor process, and returns its refreshed registration.
+  """
+  @spec check_inference_route(GenServer.server(), String.t()) ::
+          {:ok, MingaAgent.InferenceRouteRegistry.Entry.t()} | {:error, :unsupported | :not_found}
+  def check_inference_route(session, route_id) when is_binary(route_id) do
+    with {:ok, registry, credential_opts} <- GenServer.call(session, :inference_route_context) do
+      registry
+      |> MingaAgent.InferenceRouteRegistry.refresh_availability(
+        route_ids: [route_id],
+        route_credential_fn: route_credential_fn(credential_opts)
+      )
+      |> Enum.find(&(&1.spec.id == route_id))
+      |> case do
+        nil -> {:error, :not_found}
+        entry -> {:ok, entry}
+      end
+    end
+  catch
+    :exit, _reason -> {:error, :not_found}
   end
 
   @spec fetch_codex_models(ModelSelection.Credential.OAuth.t() | nil, keyword()) ::
@@ -2111,6 +2160,16 @@ defmodule MingaAgent.Session do
   end
 
   def handle_call(:begin_model_discovery, _from, state), do: {:reply, :local, state}
+
+  def handle_call(:inference_route_context, _from, state)
+      when state.provider.module == MingaAgent.Providers.Native do
+    resolver_opts = Keyword.get(state.provider.opts, :model_resolver_opts, [])
+    credential_opts = Keyword.get(state.provider.opts, :credential_opts, [])
+    {:reply, {:ok, inference_route_registry(resolver_opts), credential_opts}, state}
+  end
+
+  def handle_call(:inference_route_context, _from, state),
+    do: {:reply, {:error, :unsupported}, state}
 
   def handle_call(
         {:finish_model_discovery, ref, credential, codex, apple},
@@ -5505,8 +5564,23 @@ defmodule MingaAgent.Session do
 
   defp handle_provider_event(%Event.Error{} = event, state) do
     state = retain_connection_error(state, event)
-    report_turn_error(state, humanize_error(event, state))
+    message = humanize_error(event, state)
+
+    state
+    |> report_turn_error(message)
+    |> announce_model_limit(event, message)
   end
+
+  # A contributed route at its plan limit offers a way to switch models; the draft stays as it is.
+  @spec announce_model_limit(state(), Event.Error.t(), String.t()) :: state()
+  defp announce_model_limit(
+         %{model_selection: %ModelSelection{route: %{request_provider: :contributed}}} = state,
+         %Event.Error{kind: :rate_limited},
+         message
+       ),
+       do: broadcast(state, {:model_limit_reached, message})
+
+  defp announce_model_limit(state, _event, _message), do: state
 
   @spec complete_provider_tool(state(), Event.ToolEnd.t(), ToolCall.t()) :: state()
   defp complete_provider_tool(

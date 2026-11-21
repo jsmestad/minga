@@ -914,6 +914,43 @@ Minga calls `availability/2` off the editor process when the user opens `/model`
 
 An unavailable route cannot become the active model. Selecting it shows your remedy text and leaves the current model unchanged. The account label you report is part of the selection's identity, so switching accounts changes which saved selection matches.
 
+### Models that change after registration
+
+Your route's model list can depend on things outside Minga. The user installs your CLI, signs in, or upgrades a plan, and new models become available. You do not need to re-register. Every time Minga checks your route's availability, for example when the user opens `/model`, it calls `models/1` again with the `:config` you registered, in the same worker and under the same deadline as `availability/2`. If the new list is invalid or the call fails, Minga keeps the previous list and writes the reason to `*Messages*`. A saved selection whose model disappears restores as unavailable instead of falling back.
+
+### A setup row in `/model`
+
+A subscription route has states an API-key model does not: the CLI might be missing, or the user might be signed out. Declare a setup action and `/model` shows a row for your route while it is registered:
+
+```elixir
+Minga.Extension.ModelRoutes.register(
+  id: "claude_subscription",
+  module: ClaudeBridge.Route,
+  display_name: "Claude (subscription)",
+  setup_action: [
+    label: "Use Claude subscription (Claude Code)",
+    description: "Sign in with the Claude Code CLI. Minga never sees your login."
+  ]
+)
+```
+
+The row shows your route's current readiness. Selecting it runs your `availability/2` check off the editor process and shows "Checking Claude (subscription)…" while it runs. The result is your own text: `{:ready, account}` shows the account label, so put the plan in it if you know it ("me@example.com · Max plan"), and `{:unavailable, reason, remedy}` shows your remedy, so make it the exact command to run ("Not signed in. Run: claude auth login"). The row never asks for a secret.
+
+### Reporting plan usage
+
+Subscription plans have limit windows, such as five hours and seven days. When your route learns how much of a window is used, report it through the reporter:
+
+```elixir
+Minga.Extension.ModelRoutes.report_usage(reporter, [
+  %{kind: "five_hour", utilization: 0.82, resets_at: ~U[2026-11-21 23:40:00Z], status: :warning},
+  %{kind: "seven_day", utilization: 0.31, resets_at: nil, status: :allowed}
+])
+```
+
+Each window has a `kind` (`"five_hour"` and `"seven_day"` read as 5h and 7d), `utilization` from 0 to 1, `resets_at` as a `DateTime` or nil, and `status`: `:allowed`, `:warning` as the limit approaches, or `:rejected` once requests are refused. Usage is kept separately from availability, so neither report erases the other. Report an empty list when you have no data; Minga then shows nothing rather than a guess.
+
+Minga uses the busiest window to show usage on your model's row in `/model`, for example "82% of 5h limit · resets 3:40 PM". When a turn fails and your `classify_error/1` returns `:rate_limited` while a window is `:rejected` with a known reset time, the chat says "Claude (subscription) plan limit reached. Resets at 3:40 PM. Switch model to continue." and the macOS app shows a "Choose another model" notification action that opens `/model` and keeps the draft. In the terminal, run `/model` to switch. Each report also publishes an `:inference_route_status_changed` event so editor chrome can update.
+
 ### Conversation identity
 
 Every request carries `Request.conversation`, a `MingaAgent.InferenceRoute.ConversationRef`. For a normal turn, `purpose` is `:turn` and `session_id`, `epoch_id`, `conversation_revision`, and `request_id` come from Minga's session. `epoch_id` changes on branch, reset, or compaction, and the revision changes when the saved history changes. Tool follow-ups inside one turn keep the same `request_id`, epoch, and revision; tell them apart by the messages you receive. Use these values to decide whether you are continuing a conversation you already know or starting fresh. Minga does not try to guess that for you.

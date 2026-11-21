@@ -42,6 +42,7 @@ defmodule Minga.Events do
   | `:log_message`     | `LogMessageEvent`     | `text: String.t(), level: :debug \| :info \| :warning \| :error` |
   | `:agent_hook`      | `AgentHookEvent`        | `event, phase, tool_name, tool_call_id, tool_pattern` |
   | `:agent_tools_changed` | `AgentToolsChangedEvent` | `source: term()` |
+  | `:inference_route_status_changed` | `MingaAgent.InferenceRoute.StatusChangedEvent` | `route_id: String.t(), status: Status.t()` |
   | `:face_overrides_changed` | `FaceOverridesChangedEvent` | `buffer: pid(), overrides: map()` |
   | `:agent_session_restarted` | `MingaAgent.SessionManager.SessionRestartedEvent` | `session_id, old_pid, new_pid, reason` |
   | `:background_subagent_started` | `MingaAgent.Subagent.Handle` | `session_id: String.t(), pid: pid(), task: String.t()` |
@@ -337,6 +338,7 @@ defmodule Minga.Events do
           | :agent_desktop_notification
           | :agent_hook
           | :agent_tools_changed
+          | :inference_route_status_changed
           | :background_subagent_started
           | :node_connected
           | :node_disconnected
@@ -527,6 +529,10 @@ defmodule Minga.Events do
         ) :: :ok
   @spec broadcast(:agent_mcp_servers_changed, map()) :: :ok
   @spec broadcast(:agent_tools_changed, AgentToolsChangedEvent.t()) :: :ok
+  @spec broadcast(
+          :inference_route_status_changed,
+          MingaAgent.InferenceRoute.StatusChangedEvent.t()
+        ) :: :ok
   def broadcast(topic, payload) when is_atom(topic) and is_map(payload) do
     broadcast(topic, payload, default_registry())
   end

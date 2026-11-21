@@ -3,10 +3,14 @@ defmodule MingaAgent.InferenceRoute.Spec do
   Source-owned declaration of one contributed model route.
 
   The route id is the prefix of every model reference the route offers (`"<route_id>:<model_id>"`). Ids use lowercase letters, digits, `_`, and `-`, and cannot reuse a built-in request provider name, so a model reference always has exactly one owner.
+
+  `setup_action` is optional. When present, `/model` shows a setup row for the route while it is registered.
   """
 
+  alias MingaAgent.InferenceRoute.SetupAction
+
   @enforce_keys [:source, :id, :module, :display_name]
-  defstruct @enforce_keys
+  defstruct [:source, :id, :module, :display_name, setup_action: nil]
 
   @typedoc "Source that owns the route declaration."
   @type source :: {:extension, atom()} | {:bundle, atom()}
@@ -15,11 +19,17 @@ defmodule MingaAgent.InferenceRoute.Spec do
           source: source(),
           id: String.t(),
           module: module(),
-          display_name: String.t()
+          display_name: String.t(),
+          setup_action: SetupAction.t() | nil
         }
 
   @type error ::
-          :invalid_source | :invalid_id | :reserved_id | :invalid_module | :invalid_display_name
+          :invalid_source
+          | :invalid_id
+          | :reserved_id
+          | :invalid_module
+          | :invalid_display_name
+          | :invalid_setup_action
 
   @id_pattern ~r/\A[a-z][a-z0-9_-]{0,63}\z/
   @reserved_ids ~w(anthropic openai openai_codex google openrouter groq mistral deepseek apple native contributed)
@@ -32,8 +42,16 @@ defmodule MingaAgent.InferenceRoute.Spec do
     with {:ok, source} <- validate_source(Map.get(attrs, :source)),
          {:ok, id} <- validate_id(Map.get(attrs, :id)),
          {:ok, module} <- validate_module(Map.get(attrs, :module)),
-         {:ok, display_name} <- validate_display_name(Map.get(attrs, :display_name)) do
-      {:ok, %__MODULE__{source: source, id: id, module: module, display_name: display_name}}
+         {:ok, display_name} <- validate_display_name(Map.get(attrs, :display_name)),
+         {:ok, setup_action} <- validate_setup_action(Map.get(attrs, :setup_action)) do
+      {:ok,
+       %__MODULE__{
+         source: source,
+         id: id,
+         module: module,
+         display_name: display_name,
+         setup_action: setup_action
+       }}
     end
   end
 
@@ -76,4 +94,9 @@ defmodule MingaAgent.InferenceRoute.Spec do
   end
 
   defp validate_display_name(_name), do: {:error, :invalid_display_name}
+
+  @spec validate_setup_action(term()) ::
+          {:ok, SetupAction.t() | nil} | {:error, :invalid_setup_action}
+  defp validate_setup_action(nil), do: {:ok, nil}
+  defp validate_setup_action(attrs), do: SetupAction.new(attrs)
 end

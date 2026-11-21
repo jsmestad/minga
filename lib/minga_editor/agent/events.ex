@@ -107,6 +107,12 @@ defmodule MingaEditor.Agent.Events do
   def dispatch(%EditorState{} = state, _session_pid, {:error, message}),
     do: SessionEventWorkflow.error(state, message)
 
+  def dispatch(%EditorState{} = state, _session_pid, {:model_limit_reached, message}),
+    do:
+      state
+      |> MingaEditor.Handlers.Notifications.model_limit_reached(message)
+      |> MingaEditor.schedule_render(16)
+
   def dispatch(
         %EditorState{} = state,
         session_pid,

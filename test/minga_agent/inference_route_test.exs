@@ -214,4 +214,94 @@ defmodule MingaAgent.InferenceRouteTest do
       end
     end
   end
+
+  describe "plan usage and setup values" do
+    alias MingaAgent.InferenceRoute.{PlanWindow, SetupAction}
+
+    defp plan_window(attrs) do
+      {:ok, window} =
+        [kind: "five_hour", utilization: 0.5, resets_at: nil, status: :allowed]
+        |> Keyword.merge(attrs)
+        |> PlanWindow.new()
+
+      window
+    end
+
+    test "windows validate every field and store utilization as a float" do
+      assert %PlanWindow{utilization: 1.0} = plan_window(utilization: 1)
+
+      for {field, value} <- [
+            kind: nil,
+            utilization: 2,
+            utilization: "0.5",
+            resets_at: 123,
+            status: :maybe
+          ] do
+        assert {:error, {:invalid_plan_window, ^field}} =
+                 PlanWindow.new(
+                   Keyword.put(
+                     [kind: "five_hour", utilization: 0.5, resets_at: nil, status: :allowed],
+                     field,
+                     value
+                   )
+                 )
+      end
+
+      assert {:ok, nil} = PlanWindow.new_list([])
+      assert {:ok, nil} = PlanWindow.new_list(nil)
+      assert {:error, {:invalid_plan_window, :list}} = PlanWindow.new_list(:all)
+    end
+
+    test "the busiest and the refusing windows are found for display" do
+      soon = DateTime.add(DateTime.utc_now(), 3_600)
+      later = DateTime.add(DateTime.utc_now(), 86_400 * 3)
+
+      five = plan_window(kind: "five_hour", utilization: 0.9, status: :rejected, resets_at: soon)
+      week = plan_window(kind: "seven_day", utilization: 1.0, status: :rejected, resets_at: later)
+
+      assert PlanWindow.busiest([five, week]) == week
+      assert PlanWindow.busiest(nil) == nil
+      assert PlanWindow.rejected([five, week]) == week
+      assert PlanWindow.rejected([plan_window([])]) == nil
+      assert PlanWindow.kind_label("five_hour") == "5h"
+      assert PlanWindow.kind_label("seven_day") == "7d"
+      assert PlanWindow.kind_label("monthly") == "monthly"
+      assert PlanWindow.percent(plan_window(utilization: 0.829)) == 82
+    end
+
+    test "reset times read as a local clock time, with the weekday when not today" do
+      now = DateTime.utc_now()
+
+      assert PlanWindow.reset_label(plan_window([])) == nil
+
+      assert PlanWindow.reset_label(plan_window(resets_at: now), now) =~
+               ~r/\A\d{1,2}:\d{2} (AM|PM)\z/
+
+      assert PlanWindow.reset_label(plan_window(resets_at: DateTime.add(now, 86_400 * 3)), now) =~
+               ~r/\A(Mon|Tue|Wed|Thu|Fri|Sat|Sun) \d{1,2}:\d{2} (AM|PM)\z/
+    end
+
+    test "a setup action needs a label and a description" do
+      assert {:ok, %SetupAction{label: "Use it", description: "No secrets."}} =
+               SetupAction.new(label: " Use it ", description: "No secrets.")
+
+      for invalid <- [[label: "", description: "x"], [label: "x"], ["x"], nil] do
+        assert {:error, :invalid_setup_action} = SetupAction.new(invalid)
+      end
+
+      base = %{
+        source: {:extension, :bridge},
+        id: "bridge",
+        module: MingaAgent.Test.FixtureInferenceRoute,
+        display_name: "Bridge"
+      }
+
+      assert {:ok, %Spec{setup_action: nil}} = Spec.new(base)
+
+      assert {:ok, %Spec{setup_action: %SetupAction{}}} =
+               Spec.new(Map.put(base, :setup_action, %{label: "Use", description: "Sign in."}))
+
+      assert {:error, :invalid_setup_action} = Spec.new(Map.put(base, :setup_action, %{}))
+    end
+  end
 end

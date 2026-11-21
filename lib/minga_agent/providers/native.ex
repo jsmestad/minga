@@ -43,6 +43,7 @@ defmodule MingaAgent.Providers.Native do
   alias MingaAgent.Event
   alias MingaAgent.Hooks.CommandRunner
   alias MingaAgent.InferenceRoute.ConversationRef
+  alias MingaAgent.InferenceRoute.PlanWindow
   alias MingaAgent.InferenceRouteRegistry
   alias MingaAgent.Hooks.Dispatcher, as: HookDispatcher
   alias MingaAgent.Hooks.PostToolUsePayload
@@ -3568,8 +3569,26 @@ defmodule MingaAgent.Providers.Native do
   defp contributed_error_event(lctx, reason) do
     {:contributed, route_id, _model_id} = lctx.selection.route.origin
     {kind, message} = contributed_error(lctx.inference_routes, route_id, route_failure(reason))
+    message = plan_limit_message(kind, message, lctx.inference_routes, route_id)
     %Event.Error{kind: kind, message: message, provider: route_id}
   end
+
+  # When a route is rate limited and has reported when its refusing window resets, say so plainly.
+  @spec plan_limit_message(Event.Error.kind(), String.t(), GenServer.server(), String.t()) ::
+          String.t()
+  defp plan_limit_message(:rate_limited, message, registry, route_id) do
+    with {:ok, entry} <- InferenceRouteRegistry.lookup(registry, route_id),
+         %PlanWindow{} = window <- PlanWindow.rejected(entry.status.plan_usage),
+         reset when is_binary(reset) <- PlanWindow.reset_label(window) do
+      "#{entry.spec.display_name} plan limit reached. Resets at #{reset}. Switch model to continue."
+    else
+      _no_reset -> message
+    end
+  catch
+    :exit, _reason -> message
+  end
+
+  defp plan_limit_message(_kind, message, _registry, _route_id), do: message
 
   @spec route_failure(term()) :: term()
   defp route_failure(%ReqLLM.Error.API.Stream{cause: nil} = reason), do: reason

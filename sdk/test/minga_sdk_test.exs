@@ -272,8 +272,19 @@ defmodule MingaSdkTest do
             Minga.Extension.ModelRoutes.register(
               id: "test_route",
               module: MingaSdkTest.TestRoute,
-              display_name: "Test Route"
+              display_name: "Test Route",
+              setup_action: %{label: "Use Test Route", description: "Sign in with the test CLI."}
             )
+
+          :ok =
+            Minga.Extension.ModelRoutes.report_usage(reporter, [
+              %MingaAgent.InferenceRoute.PlanWindow{
+                kind: "five_hour",
+                utilization: 0.5,
+                resets_at: nil,
+                status: :allowed
+              }
+            ])
 
           {:ok, %{reporter: reporter}}
         end

@@ -5,8 +5,10 @@ defmodule MingaAgent.InferenceRoute.Spec do
   This is a compile-time stub.
   """
 
+  alias MingaAgent.InferenceRoute.SetupAction
+
   @enforce_keys [:source, :id, :module, :display_name]
-  defstruct @enforce_keys
+  defstruct [:source, :id, :module, :display_name, setup_action: nil]
 
   @type source :: {:extension, atom()} | {:bundle, atom()}
 
@@ -14,6 +16,7 @@ defmodule MingaAgent.InferenceRoute.Spec do
           source: source(),
           id: String.t(),
           module: module(),
-          display_name: String.t()
+          display_name: String.t(),
+          setup_action: SetupAction.t() | nil
         }
 end

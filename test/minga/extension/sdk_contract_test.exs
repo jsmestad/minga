@@ -18,13 +18,13 @@ defmodule Minga.Extension.SdkContractTest do
              callback_signatures("sdk/lib/minga_agent/inference_route.ex")
 
     for value <-
-          ~w(model conversation_ref spec status reporter credential request response message tool_call tool_declaration options usage) do
+          ~w(model conversation_ref spec status reporter credential request response message tool_call tool_declaration options usage plan_window setup_action) do
       runtime = "lib/minga_agent/inference_route/#{value}.ex"
       sdk = "sdk/lib/minga_agent/inference_route/#{value}.ex"
       assert struct_fields(runtime) == struct_fields(sdk), "#{value} fields drifted"
     end
 
-    for {value, type} <- [{"message", :role}] do
+    for {value, type} <- [{"message", :role}, {"plan_window", :status}] do
       assert named_union_literals("lib/minga_agent/inference_route/#{value}.ex", type) ==
                named_union_literals("sdk/lib/minga_agent/inference_route/#{value}.ex", type)
     end
