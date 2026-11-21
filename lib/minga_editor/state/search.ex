@@ -39,12 +39,6 @@ defmodule MingaEditor.State.Search do
     %{s | last_pattern: pattern}
   end
 
-  @doc "Sets just the last search direction."
-  @spec set_last_direction(t(), Minga.Editing.Search.direction()) :: t()
-  def set_last_direction(%__MODULE__{} = s, direction) do
-    %{s | last_direction: direction}
-  end
-
   @doc "Stores the pending project-wide search query for the async picker source."
   @spec set_project_query(t(), String.t()) :: t()
   def set_project_query(%__MODULE__{} = s, query) when is_binary(query) do

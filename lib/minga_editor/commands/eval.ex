@@ -29,35 +29,23 @@ defmodule MingaEditor.Commands.Eval do
         fn -> eval_in_sandbox(input, editor_pid) end
       )
 
-    case Task.yield(task, timeout) || Task.shutdown(task, :brutal_kill) do
-      {:ok, {:ok, result}} ->
-        result_str = inspect(result, pretty: true, limit: 50)
-        display = truncate(result_str, @max_status_length)
+    {display, detail} =
+      case Task.yield(task, timeout) || Task.shutdown(task, :brutal_kill) do
+        {:ok, {:ok, result}} ->
+          result_str = inspect(result, pretty: true, limit: 50)
+          {truncate(result_str, @max_status_length), "Eval: #{input}\n  => #{result_str}"}
 
-        state
-        |> then(&NoticeWorkflow.publish(&1, display))
-        |> log_to_messages("Eval: #{input}\n  => #{result_str}")
+        {:ok, {:error, kind, error, stacktrace}} ->
+          display = truncate(format_error_oneline(kind, error), @max_status_length)
+          {display, "Eval error: #{input}\n#{Exception.format(kind, error, stacktrace)}"}
 
-      {:ok, {:error, kind, error, stacktrace}} ->
-        formatted = Exception.format(kind, error, stacktrace)
-        display = truncate(format_error_oneline(kind, error), @max_status_length)
+        nil ->
+          {"Eval timed out (#{div(timeout, 1000)}s)", "Eval timeout: #{input}"}
+      end
 
-        state
-        |> then(&NoticeWorkflow.publish(&1, display))
-        |> log_to_messages("Eval error: #{input}\n#{formatted}")
-
-      nil ->
-        timeout_display = "#{div(timeout, 1000)}s"
-
-        state
-        |> then(
-          &NoticeWorkflow.publish(
-            &1,
-            "Eval timed out (#{timeout_display})"
-          )
-        )
-        |> log_to_messages("Eval timeout: #{input}")
-    end
+    state = NoticeWorkflow.publish(state, display)
+    Minga.Log.info(:editor, detail)
+    state
   end
 
   # ── Private ──────────────────────────────────────────────────────────────────
@@ -131,11 +119,5 @@ defmodule MingaEditor.Commands.Eval do
     else
       first_line
     end
-  end
-
-  @spec log_to_messages(state(), String.t()) :: state()
-  defp log_to_messages(state, text) do
-    Minga.Log.info(:editor, text)
-    state
   end
 end

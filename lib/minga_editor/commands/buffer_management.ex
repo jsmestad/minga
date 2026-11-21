@@ -3612,36 +3612,19 @@ defmodule MingaEditor.Commands.BufferManagement do
           Minga.Command.Parser.sort_flag()
         ]) :: [String.t()]
   defp do_sort(lines, start_line, end_line, flags) do
-    before = Enum.slice(lines, 0, start_line)
-    to_sort = Enum.slice(lines, start_line, end_line - start_line + 1)
-    after_lines = Enum.slice(lines, end_line + 1, length(lines))
+    {prefix, rest} = Enum.split(lines, start_line)
+    {selected, suffix} = Enum.split(rest, end_line - start_line + 1)
 
     sorted =
-      to_sort
-      |> then(&apply_sort_flags(&1, flags))
-      |> then(&if(:unique in flags, do: Enum.uniq(&1), else: &1))
+      if :numeric in flags do
+        Enum.sort_by(selected, &numeric_sort_key/1)
+      else
+        Enum.sort(selected)
+      end
 
-    before ++ sorted ++ after_lines
-  end
-
-  @spec apply_sort_flags([String.t()], [Minga.Command.Parser.sort_flag()]) :: [String.t()]
-  defp apply_sort_flags(lines, flags) do
-    sorted = do_apply_sort_flags(lines, flags)
-
-    if :reverse in flags do
-      Enum.reverse(sorted)
-    else
-      sorted
-    end
-  end
-
-  @spec do_apply_sort_flags([String.t()], [Minga.Command.Parser.sort_flag()]) :: [String.t()]
-  defp do_apply_sort_flags(lines, flags) do
-    if :numeric in flags do
-      Enum.sort_by(lines, &numeric_sort_key/1)
-    else
-      Enum.sort(lines)
-    end
+    sorted = if :reverse in flags, do: Enum.reverse(sorted), else: sorted
+    sorted = if :unique in flags, do: Enum.uniq(sorted), else: sorted
+    prefix ++ sorted ++ suffix
   end
 
   @spec numeric_sort_key(String.t()) :: integer()
@@ -3766,30 +3749,27 @@ defmodule MingaEditor.Commands.BufferManagement do
     content = Buffer.content(buf)
     lines = String.split(content, "\n")
 
-    matching_lines =
-      lines
-      |> Enum.with_index()
-      |> Enum.filter(fn {line, _idx} ->
-        try do
-          regex = Regex.compile!(pattern)
-          Regex.match?(regex, line)
-        rescue
-          Regex.CompileError -> String.contains?(line, pattern)
-        end
-      end)
+    matches? =
+      case Regex.compile(pattern) do
+        {:ok, regex} -> &Regex.match?(regex, &1)
+        {:error, _reason} -> &String.contains?(&1, pattern)
+      end
 
-    case matching_lines do
+    matching_indexes = for {line, index} <- Stream.with_index(lines), matches?.(line), do: index
+
+    case matching_indexes do
       [] ->
         NoticeWorkflow.publish(
           state,
           "Pattern not found: #{pattern}"
         )
 
-      matches ->
-        Enum.reduce(matches, state, fn {_line_content, idx}, acc_state ->
-          Buffer.move_to(buf, {idx, 0})
-          parsed_cmd = Minga.Command.Parser.parse(command)
-          execute(acc_state, {:execute_ex_command, parsed_cmd})
+      indexes ->
+        nested_command = {:execute_ex_command, Minga.Command.Parser.parse(command)}
+
+        Enum.reduce(indexes, state, fn index, acc_state ->
+          Buffer.move_to(buf, {index, 0})
+          execute(acc_state, nested_command)
         end)
     end
   end
@@ -3807,34 +3787,27 @@ defmodule MingaEditor.Commands.BufferManagement do
         "Invalid range: #{start_line + 1},#{end_line + 1}"
       )
     else
+      key_tuples = keys |> String.graphemes() |> Enum.map(&string_to_key_tuple/1)
+
       state
-      |> feed_keys_on_range(buf, start_line, end_line, keys)
-      |> then(fn s ->
-        NoticeWorkflow.publish(
-          s,
-          "Normal executed on #{start_line + 1}-#{end_line + 1}"
-        )
-      end)
+      |> feed_keys_on_range(buf, start_line, end_line, key_tuples)
+      |> NoticeWorkflow.publish("Normal executed on #{start_line + 1}-#{end_line + 1}")
     end
   end
 
-  @spec feed_keys_on_range(state(), pid(), non_neg_integer(), non_neg_integer(), String.t()) ::
+  @spec feed_keys_on_range(state(), pid(), non_neg_integer(), non_neg_integer(), [Mode.key()]) ::
           state()
-  defp feed_keys_on_range(state, buf, start_line, end_line, keys) do
+  defp feed_keys_on_range(state, buf, start_line, end_line, key_tuples) do
     Enum.reduce(start_line..end_line, state, fn line_idx, acc_state ->
       Buffer.move_to(buf, {line_idx, 0})
-      feed_keys_to_fsm(acc_state, keys)
+      feed_keys_to_fsm(acc_state, key_tuples)
     end)
   end
 
-  @spec feed_keys_to_fsm(state(), String.t()) :: state()
-  defp feed_keys_to_fsm(%{workspace: %{editing: vim}} = state, keys) do
-    key_list = String.graphemes(keys)
-
+  @spec feed_keys_to_fsm(state(), [Mode.key()]) :: state()
+  defp feed_keys_to_fsm(%{workspace: %{editing: vim}} = state, key_tuples) do
     {final_vim, final_state} =
-      Enum.reduce(key_list, {vim, state}, fn key_str, {vim_state, acc_state} ->
-        key_tuple = string_to_key_tuple(key_str)
-
+      Enum.reduce(key_tuples, {vim, state}, fn key_tuple, {vim_state, acc_state} ->
         {new_mode, commands, new_mode_state} =
           Minga.Mode.process(vim_state.mode, key_tuple, vim_state.mode_state)
 
