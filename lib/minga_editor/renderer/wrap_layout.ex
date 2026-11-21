@@ -105,37 +105,41 @@ defmodule MingaEditor.Renderer.WrapLayout do
     WrapMap.count_rows(composed, Keyword.fetch!(options, :content_width), options)
   end
 
-  @doc "Measures a composed source line and, if requested, projects the cursor into its wrap."
+  @doc "Measures a composed source line with any conceal on the cursor line revealed."
   @spec measure(
           String.t(),
           non_neg_integer(),
           Decorations.t(),
           keyword(),
           boolean(),
-          {non_neg_integer(), non_neg_integer() | nil}
-        ) :: {String.t(), WrapMap.wrap_entry(), non_neg_integer()}
-  def measure(text, line, decorations, options, show_invisible?, {cursor_line, byte}) do
+          non_neg_integer()
+        ) :: {String.t(), WrapMap.wrap_entry()}
+  def measure(text, line, decorations, options, show_invisible?, cursor_line) do
     decorations = visible_decorations(decorations, cursor_line, line)
     tab_width = Keyword.fetch!(options, :tab_width)
     composed = compose_text(text, line, decorations, tab_width, show_invisible?)
 
-    rows = wrap_composed(composed, options)
+    {composed, wrap_composed(composed, options)}
+  end
 
-    segment =
-      if line == cursor_line and is_integer(byte) and match?([_, _ | _], rows) do
-        source = SourceOffsetMap.new(text, composed, decorations, line, tab_width: tab_width)
-        character = SourceOffsetMap.source_to_composed_utf16(source, byte, :start)
+  @doc "Projects the cursor into an already measured wrap of its revealed source line."
+  @spec cursor_segment(
+          String.t(),
+          String.t(),
+          tuple(),
+          Decorations.t(),
+          {non_neg_integer(), non_neg_integer()},
+          pos_integer()
+        ) :: non_neg_integer()
+  def cursor_segment(text, composed, rows, decorations, {line, byte}, tab_width) do
+    decorations = reveal_conceals(decorations)
+    source = SourceOffsetMap.new(text, composed, decorations, line, tab_width: tab_width)
+    character = SourceOffsetMap.source_to_composed_utf16(source, byte, :start)
 
-        {_, composed_byte} =
-          PositionEncoding.from_lsp(%{"line" => line, "character" => character}, composed, :utf16)
+    {_, composed_byte} =
+      PositionEncoding.from_lsp(%{"line" => line, "character" => character}, composed, :utf16)
 
-        {index, _row} = WrapMap.row_at_byte(rows, composed_byte)
-        index
-      else
-        0
-      end
-
-    {composed, rows, segment}
+    WrapMap.row_index_at_byte(rows, composed_byte)
   end
 
   defp compose_text(text, line, decorations, tab_width, show_invisible?) do
@@ -153,11 +157,12 @@ defmodule MingaEditor.Renderer.WrapLayout do
 
   @spec visible_decorations(Decorations.t(), non_neg_integer(), non_neg_integer()) ::
           Decorations.t()
-  defp visible_decorations(decorations, line, line) do
+  defp visible_decorations(decorations, line, line), do: reveal_conceals(decorations)
+  defp visible_decorations(decorations, _cursor_line, _line), do: decorations
+
+  defp reveal_conceals(decorations) do
     if Decorations.has_conceal_ranges?(decorations),
       do: Decorations.without_conceals(decorations),
       else: decorations
   end
-
-  defp visible_decorations(decorations, _cursor_line, _line), do: decorations
 end

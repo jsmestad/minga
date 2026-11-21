@@ -139,11 +139,19 @@ defmodule Minga.Core.WrapMapTest do
       assert WrapMap.row_at_byte(rows, 3) == {1, second}
       assert WrapMap.row_at_byte(rows, 5) == {2, last}
       assert WrapMap.row_at_byte(rows, 99) == {2, last}
+
+      indexed = List.to_tuple(rows)
+      assert WrapMap.row_index_at_byte(indexed, 2) == 0
+      assert WrapMap.row_index_at_byte(indexed, 3) == 1
+      assert WrapMap.row_index_at_byte(indexed, 4) == 1
+      assert WrapMap.row_index_at_byte(indexed, 5) == 2
+      assert WrapMap.row_index_at_byte(indexed, 99) == 2
     end
 
     test "selects the only row of an empty logical line" do
       [[row] = rows] = WrapMap.compute([""], 2)
       assert WrapMap.row_at_byte(rows, 0) == {0, row}
+      assert WrapMap.row_index_at_byte({row}, 0) == 0
     end
   end
 

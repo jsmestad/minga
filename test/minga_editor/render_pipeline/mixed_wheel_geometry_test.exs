@@ -2,10 +2,12 @@ defmodule MingaEditor.RenderPipeline.MixedWheelGeometryTest do
   use ExUnit.Case, async: true
 
   alias Minga.Buffer.Process, as: BufferProcess
+  alias Minga.Core.Decorations
   alias Minga.Core.Face
   alias Minga.Core.WrapMap
   alias Minga.Editing.Fold.Range, as: FoldRange
   alias Minga.Core.WidthOracle.Monospace
+  alias MingaEditor.DisplayMap
   alias MingaEditor.FoldMap
   alias MingaEditor.Layout
   alias MingaEditor.Mouse
@@ -198,6 +200,78 @@ defmodule MingaEditor.RenderPipeline.MixedWheelGeometryTest do
              )
 
     assert Viewport.vertical_anchor(fresh) == {3, 0}
+  end
+
+  test "following a cursor onto a continuation reuses the complete decorated source group" do
+    buffer = start_supervised!({BufferProcess, content: "éabcd"})
+
+    BufferProcess.add_virtual_text(buffer, {0, 1},
+      segments: [{"λ", Face.new()}],
+      placement: :inline
+    )
+
+    before = BufferProcess.render_snapshot(buffer, 0, 0)
+    assert {:ok, initial, viewport, _, []} = follow_page(buffer, before)
+    assert initial.source_fetch_count == 1
+    assert Viewport.vertical_anchor(viewport) == {0, 0}
+    presentation = retain_mixed_page(buffer, before, initial)
+
+    # The source cursor is still before the raw wrap edge. Its start affinity
+    # puts it after the inline text, exactly at the composed continuation start.
+    assert :ok = BufferProcess.move_to(buffer, {0, 2})
+    moved = BufferProcess.render_snapshot(buffer, 0, 0)
+    assert moved.version == before.version
+
+    assert {:ok, reused, viewport, _, []} = follow_page(buffer, moved, presentation)
+    assert reused.source_fetch_count == 0
+    assert reused.entries == [{0, {:wrapped, 1}}]
+    assert Viewport.vertical_anchor(viewport) == {0, 1}
+
+    assert :ok = BufferProcess.insert_text(buffer, "z")
+    assert :stale = follow_page(buffer, moved, presentation)
+  end
+
+  test "changing the conceal reveal line invalidates retained cursor geometry" do
+    buffer = start_supervised!({BufferProcess, content: "abcd\nz"})
+
+    BufferProcess.batch_decorations(buffer, fn decorations ->
+      {_id, decorations} = Decorations.add_conceal(decorations, {0, 0}, {0, 2})
+      decorations
+    end)
+
+    assert :ok = BufferProcess.move_to(buffer, {0, 2})
+    before = BufferProcess.render_snapshot(buffer, 0, 0)
+    assert {:ok, initial, viewport, _, []} = follow_page(buffer, before)
+    assert Viewport.vertical_anchor(viewport) == {0, 1}
+    presentation = retain_mixed_page(buffer, before, initial)
+
+    assert :ok = BufferProcess.move_to(buffer, {1, 0})
+    assert :stale = follow_page(buffer, before, presentation)
+
+    moved = BufferProcess.render_snapshot(buffer, 0, 0)
+    assert moved.version == before.version
+    assert {:ok, fresh, viewport, _, []} = follow_page(buffer, moved, presentation)
+    assert fresh.source_fetch_count == 2
+    assert DisplayMap.wrap_counts(fresh.sources) == %{0 => 1, 1 => 1}
+    assert Viewport.vertical_anchor(viewport) == {1, 0}
+  end
+
+  defp follow_page(buffer, snapshot, presentation \\ nil) do
+    MixedLayout.page(
+      buffer,
+      snapshot,
+      {FoldMap.new(), snapshot.decorations},
+      Viewport.new(1, 2, 0),
+      {2, %Monospace{}, snapshot.cursor},
+      {:follow, 0},
+      nil,
+      presentation
+    )
+  end
+
+  defp retain_mixed_page(buffer, snapshot, page) do
+    identity = TextPresentation.mixed_wrap_identity(page, %{}, :test)
+    TextPresentation.new(1, buffer, snapshot.version, identity, {:windowed, {}}, 1)
   end
 
   defp assert_frame(frame, text, offset, width) do

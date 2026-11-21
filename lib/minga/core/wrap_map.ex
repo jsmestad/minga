@@ -112,6 +112,26 @@ defmodule Minga.Core.WrapMap do
   defp row_at_byte(rows, _byte, index), do: {index, hd(rows)}
 
   @doc """
+  Returns the row index for a byte offset in a nonempty tuple of ordered wrap rows.
+
+  Like `row_at_byte/2`, an exact continuation start selects that continuation
+  and a byte past the end selects the last row.
+  """
+  @spec row_index_at_byte(tuple(), non_neg_integer()) :: non_neg_integer()
+  def row_index_at_byte(rows, byte) when tuple_size(rows) > 0,
+    do: row_index_at_byte(rows, byte, 0, tuple_size(rows) - 1)
+
+  defp row_index_at_byte(_rows, _byte, index, index), do: index
+
+  defp row_index_at_byte(rows, byte, first, last) do
+    middle = div(first + last + 1, 2)
+
+    if elem(rows, middle).byte_offset <= byte,
+      do: row_index_at_byte(rows, byte, middle, last),
+      else: row_index_at_byte(rows, byte, first, middle - 1)
+  end
+
+  @doc """
   Returns the total number of visual rows across all entries in a wrap map.
   """
   @spec visual_row_count(t()) :: non_neg_integer()
