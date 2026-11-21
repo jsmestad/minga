@@ -32,4 +32,13 @@ defmodule MingaAgent.Credentials.Binding do
       material: material
     }
   end
+
+  @doc "Binds a contributed route's request material to its route and reported account."
+  @spec route(keyword(), String.t(), String.t() | nil) :: t()
+  def route(material, route_id, account_ref) do
+    %__MODULE__{
+      identity: %{kind: :route_owned, route_id: route_id, account_ref: account_ref},
+      material: material
+    }
+  end
 end

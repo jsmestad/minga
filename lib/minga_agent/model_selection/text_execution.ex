@@ -24,6 +24,12 @@ defmodule MingaAgent.ModelSelection.TextExecution do
 
   @doc "Builds and validates a complete text execution contract."
   @spec new(map()) :: {:ok, t()} | {:error, :invalid_text_execution | :invalid_base_url}
+  def new(%{transport: "in_process", family: "inference_route"} = attrs),
+    do: new_inference_route(attrs)
+
+  def new(%{"transport" => "in_process", "family" => "inference_route"} = attrs),
+    do: new_inference_route(attrs)
+
   def new(%{transport: "in_process"} = attrs), do: new_in_process(attrs)
   def new(%{"transport" => "in_process"} = attrs), do: new_in_process(attrs)
 
@@ -54,6 +60,29 @@ defmodule MingaAgent.ModelSelection.TextExecution do
   end
 
   def new(_attrs), do: {:error, :invalid_text_execution}
+
+  # A contributed inference route runs in the BEAM through its registered route module.
+  @spec new_inference_route(map()) :: {:ok, t()} | {:error, :invalid_text_execution}
+  defp new_inference_route(attrs) do
+    case {field(attrs, :supported), field(attrs, :wire_protocol),
+          field(attrs, :provider_model_id), field(attrs, :base_url), field(attrs, :path)} do
+      {true, "inference_route" = protocol, model_id, nil, nil}
+      when is_binary(model_id) and model_id != "" ->
+        {:ok,
+         %__MODULE__{
+           supported: true,
+           family: protocol,
+           wire_protocol: protocol,
+           transport: "in_process",
+           provider_model_id: model_id,
+           base_url: nil,
+           path: nil
+         }}
+
+      _invalid ->
+        {:error, :invalid_text_execution}
+    end
+  end
 
   @spec new_in_process(map()) :: {:ok, t()} | {:error, :invalid_text_execution}
   defp new_in_process(attrs) do

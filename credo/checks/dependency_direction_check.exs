@@ -209,6 +209,7 @@ defmodule Minga.Credo.DependencyDirectionCheck do
     "MingaAgent.Hooks.SessionStartPayload",
     "MingaAgent.Hooks.StopPayload",
     "MingaAgent.Hooks.UserPromptSubmitPayload",
+    "MingaAgent.InferenceRoute",
     "MingaAgent.Instruction",
     "MingaAgent.InternalState",
     "MingaAgent.MCP.ServerConfig",

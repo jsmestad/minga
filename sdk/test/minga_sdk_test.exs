@@ -199,4 +199,110 @@ defmodule MingaSdkTest do
       end
     end
   end
+
+  describe "model route contract" do
+    test "a route extension compiles against the standalone SDK" do
+      defmodule TestRoute do
+        @behaviour MingaAgent.InferenceRoute
+
+        alias MingaAgent.InferenceRoute.{ConversationRef, Message, Model, Request, Response}
+        alias MingaAgent.InferenceRoute.{ToolCall, Usage}
+
+        @impl true
+        def models(_config) do
+          [
+            %Model{
+              id: "test-model",
+              display_name: "Test Model",
+              context_window: 100_000,
+              max_output: 8_000,
+              reasoning_levels: ["off"],
+              tools?: true,
+              images_in?: false,
+              tool_result_images?: false,
+              compaction: :native,
+              usage: :tokens,
+              cost: :subscription
+            }
+          ]
+        end
+
+        @impl true
+        def availability(_route_id, _credential), do: {:ready, "me@example.com"}
+
+        @impl true
+        def stream(%Request{conversation: %ConversationRef{purpose: purpose}} = request) do
+          reply =
+            case {purpose, request.messages} do
+              {:turn, [%Message{role: :user, content: [{:text, _prompt} | _rest]} | _history]} ->
+                [
+                  {:tool_call,
+                   %ToolCall{id: "t1", name: "read_file", arguments: %{"path" => "a"}}}
+                ]
+
+              _isolated ->
+                [{:text, "summary"}]
+            end
+
+          events =
+            reply ++ [{:usage, %Usage{input_tokens: 1}}, {:finish, :stop}]
+
+          {:ok, %Response{events: events, cancel: fn -> :ok end}}
+        end
+
+        @impl true
+        def classify_error(_reason), do: {:provider_error, "The test route failed."}
+      end
+
+      defmodule TestRouteExtension do
+        use Minga.Extension
+
+        @impl true
+        def name, do: :test_route_ext
+
+        @impl true
+        def description, do: "Test route extension"
+
+        @impl true
+        def version, do: "0.1.0"
+
+        @impl true
+        def init(_config) do
+          {:ok, reporter} =
+            Minga.Extension.ModelRoutes.register(
+              id: "test_route",
+              module: MingaSdkTest.TestRoute,
+              display_name: "Test Route"
+            )
+
+          {:ok, %{reporter: reporter}}
+        end
+      end
+
+      assert [%MingaAgent.InferenceRoute.Model{id: "test-model"}] = TestRoute.models([])
+      assert {:ready, _account} = TestRoute.availability("test_route", nil)
+
+      request = %MingaAgent.InferenceRoute.Request{
+        model: hd(TestRoute.models([])),
+        messages: [%MingaAgent.InferenceRoute.Message{role: :user, content: [{:text, "hi"}]}],
+        tools: [],
+        options: %MingaAgent.InferenceRoute.Options{max_output_tokens: 100},
+        conversation: %MingaAgent.InferenceRoute.ConversationRef{
+          session_id: "s",
+          owner: self(),
+          epoch_id: "e",
+          conversation_revision: 1,
+          request_id: "r",
+          purpose: :turn
+        }
+      }
+
+      assert {:ok, %MingaAgent.InferenceRoute.Response{events: events}} =
+               TestRoute.stream(request)
+
+      assert {:finish, :stop} = List.last(events)
+
+      assert_raise RuntimeError, ~r/compile-time only/, fn -> TestRouteExtension.init([]) end
+    end
+  end
 end

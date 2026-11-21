@@ -12,6 +12,8 @@ defmodule MingaAgent.Credentials do
 
   Keys are never logged, never included in session exports, and never
   sent to `*Messages*`.
+
+  A contributed model route may also have an entry under `routes.<route_id>.env`, a map of environment variable names to string values. Minga passes the map only to that route's requests and availability checks, and never interprets it. An empty value means "unset". `HOME`, `CLAUDE_CONFIG_DIR`, and `USERPROFILE` are rejected so a route entry cannot redirect another tool's login. Minga never reads or copies another tool's login.
   """
 
   @typedoc "A supported provider name."
@@ -22,8 +24,9 @@ defmodule MingaAgent.Credentials do
 
   alias MingaAgent.Credentials.Snapshot
   alias MingaAgent.ModelSelection
-  alias MingaAgent.ModelSelection.Credential.{ApiKey, OAuth}
+  alias MingaAgent.ModelSelection.Credential.{ApiKey, OAuth, RouteOwned}
   alias MingaAgent.Credentials.Binding
+  alias MingaAgent.InferenceRoute.Credential, as: RouteCredential
   alias MingaAgent.OAuth, as: OAuthFile
 
   @typedoc "Owner-visible credential readiness."
@@ -70,6 +73,12 @@ defmodule MingaAgent.Credentials do
 
   @known_providers Map.keys(@env_vars)
 
+  # A route entry must not redirect where another tool keeps its own login.
+  @reserved_route_env ~w(HOME CLAUDE_CONFIG_DIR USERPROFILE)
+
+  @typedoc "Opaque credential delivered to one contributed route."
+  @type route_credential :: RouteCredential.t()
+
   @doc """
   Returns the list of known provider names.
   """
@@ -99,7 +108,8 @@ defmodule MingaAgent.Credentials do
   pin before the access token is exposed to the caller.
   """
   @spec request_options(ModelSelection.credential_ref(), keyword()) ::
-          {:ok, keyword()} | {:error, {:credential_unavailable, String.t()}}
+          {:ok, keyword()}
+          | {:error, {:credential_unavailable, String.t()} | {:route_unavailable, String.t()}}
   def request_options(:none, _opts), do: {:ok, []}
 
   def request_options(%ApiKey{provider: provider, source: source} = credential, opts) do
@@ -107,6 +117,11 @@ defmodule MingaAgent.Credentials do
       {:ok, key} -> {:ok, [auth_mode: :api_key, api_key: key]}
       :error -> credential_error(credential)
     end
+  end
+
+  def request_options(%RouteOwned{route_id: route_id}, opts) do
+    with {:ok, credential} <- route_credential(route_id, opts),
+         do: {:ok, [route_credential: credential]}
   end
 
   def request_options(%OAuth{} = credential, opts) do
@@ -137,9 +152,81 @@ defmodule MingaAgent.Credentials do
          do: {:ok, Binding.api_key(material, previous)}
   end
 
+  def bind_request(%RouteOwned{} = credential, _previous, opts) do
+    with {:ok, material} <- request_options(credential, opts),
+         do: {:ok, Binding.route(material, credential.route_id, credential.account_ref)}
+  end
+
   def bind_request(%OAuth{} = credential, _previous, opts) do
     with {:ok, material} <- request_options(credential, opts),
          do: {:ok, Binding.oauth(material, credential.account_id, credential.source_id)}
+  end
+
+  @doc """
+  Resolves the `routes.<route_id>.env` entry for one contributed route.
+
+  A missing entry resolves to an empty env. Values are never logged; errors name only the route and the offending variable.
+  """
+  @spec route_credential(String.t(), keyword()) ::
+          {:ok, route_credential()} | {:error, {:route_unavailable, String.t()}}
+  def route_credential(route_id, opts \\ []) when is_binary(route_id) do
+    opts
+    |> acquire_stored_credentials()
+    |> Map.get("routes")
+    |> route_entry(route_id)
+    |> route_env(route_id)
+  end
+
+  @spec route_entry(term(), String.t()) :: term()
+  defp route_entry(routes, route_id) when is_map(routes), do: Map.get(routes, route_id)
+  defp route_entry(_routes, _route_id), do: nil
+
+  @spec route_env(term(), String.t()) ::
+          {:ok, route_credential()} | {:error, {:route_unavailable, String.t()}}
+  defp route_env(nil, _route_id), do: {:ok, RouteCredential.new(%{})}
+
+  defp route_env(%{"env" => env}, route_id) when is_map(env),
+    do: validate_route_env(env, route_id)
+
+  defp route_env(%{"env" => _invalid}, route_id), do: invalid_route_entry(route_id)
+  defp route_env(entry, _route_id) when is_map(entry), do: {:ok, RouteCredential.new(%{})}
+  defp route_env(_entry, route_id), do: invalid_route_entry(route_id)
+
+  @spec invalid_route_entry(String.t()) :: {:error, {:route_unavailable, String.t()}}
+  defp invalid_route_entry(route_id),
+    do: route_credential_error(route_id, "must be an object of string values")
+
+  @spec validate_route_env(map(), String.t()) ::
+          {:ok, route_credential()} | {:error, {:route_unavailable, String.t()}}
+  defp validate_route_env(env, route_id) do
+    Enum.reduce_while(env, {:ok, %{}}, fn
+      {name, _value}, _acc when name in @reserved_route_env ->
+        {:halt,
+         route_credential_error(
+           route_id,
+           "sets #{name}, which Minga never passes to model routes. Remove it"
+         )}
+
+      {name, ""}, {:ok, acc} when is_binary(name) and name != "" ->
+        {:cont, {:ok, acc}}
+
+      {name, value}, {:ok, acc} when is_binary(name) and name != "" and is_binary(value) ->
+        {:cont, {:ok, Map.put(acc, name, value)}}
+
+      {_name, _value}, _acc ->
+        {:halt, route_credential_error(route_id, "must map variable names to string values")}
+    end)
+    |> case do
+      {:ok, values} -> {:ok, RouteCredential.new(values)}
+      {:error, _reason} = error -> error
+    end
+  end
+
+  @spec route_credential_error(String.t(), String.t()) ::
+          {:error, {:route_unavailable, String.t()}}
+  defp route_credential_error(route_id, problem) do
+    {:error,
+     {:route_unavailable, "The routes.#{route_id}.env entry in credentials.json #{problem}."}}
   end
 
   @doc """

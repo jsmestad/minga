@@ -43,6 +43,7 @@ defmodule Minga.Application do
       │   │       ├── Minga.Extension.RuntimeSupervisor(name)
       │   │       └── Minga.Extension.Instance(name)
       │   ├── MingaAgent.ProviderRegistry
+      │   ├── MingaAgent.InferenceRouteRegistry
       │   ├── MingaAgent.ProviderPacks.Native
       │   ├── MingaAgent.Hooks.Registry
       │   ├── MingaAgent.MCP.ServerRegistry

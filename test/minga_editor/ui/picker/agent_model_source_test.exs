@@ -3,11 +3,14 @@ defmodule MingaEditor.UI.Picker.AgentModelSourceTest do
 
   alias MingaAgent.Credentials.Secret
   alias MingaAgent.Credentials.Snapshot
+  alias MingaAgent.InferenceRouteRegistry
+  alias MingaAgent.ModelResolver
   alias MingaAgent.ModelCandidate
   alias MingaAgent.ModelSelection
   alias MingaAgent.ModelSelection.Credential.OAuth
   alias MingaAgent.Providers.Native
   alias MingaAgent.Session
+  alias MingaAgent.Test.FixtureInferenceRoute
   alias MingaAgent.Test.ModelPickerSession
   alias MingaAgent.Test.ModelSelectionFixture
   alias MingaAgent.RuntimeState
@@ -222,6 +225,123 @@ defmodule MingaEditor.UI.Picker.AgentModelSourceTest do
              Session.model_selection(session)
 
     assert Session.status(session) == :idle
+  end
+
+  describe "contributed model routes" do
+    setup do
+      registry = :"picker_inference_routes_#{System.unique_integer([:positive])}"
+      start_supervised!({InferenceRouteRegistry, name: registry})
+
+      for {id, name} <- [{"fixture", "Fixture Route"}, {"offline", "Offline Route"}] do
+        {:ok, _reporter} =
+          InferenceRouteRegistry.register(registry,
+            source: {:extension, :fixture_bridge},
+            id: id,
+            module: FixtureInferenceRoute,
+            display_name: name
+          )
+      end
+
+      %{registry: registry}
+    end
+
+    test "rows show route readiness, remedy, thinking, and capabilities from the route", %{
+      registry: registry
+    } do
+      InferenceRouteRegistry.refresh_availability(registry)
+
+      candidates =
+        ModelResolver.candidates(
+          backend_spec: MingaAgent.ProviderPacks.Native.spec(),
+          credential_snapshot: Snapshot.new(%{}, nil),
+          models: [],
+          inference_routes: registry
+        )
+
+      session = start_supervised!({ModelPickerSession, candidates})
+      items = model_items(context(connection(session), 1))
+      ready = Enum.find(items, &(&1.description =~ "Fixture Route"))
+      offline = Enum.find(items, &(&1.description =~ "Offline Route"))
+
+      assert ready.label == "Fixture Model"
+      assert ready.description =~ "Ready (fixture@example.com)"
+      assert ready.description =~ "200k ctx"
+      assert ready.description =~ "thinking off (off/low/high)"
+      assert ready.description =~ "tools yes, images yes, streaming yes"
+      assert ready.description =~ "subscription"
+      refute ready.description =~ "unverified catalog route"
+
+      assert offline.description =~ "Unavailable: #{FixtureInferenceRoute.remedy()}"
+      refute offline.description =~ "unverified catalog route"
+      assert Enum.all?([ready, offline], &(request_provider(&1) == :contributed))
+    end
+
+    test "contributed rows are runtime-gated discovery that a superseded fetch drops", %{
+      registry: registry
+    } do
+      candidates =
+        ModelResolver.candidates(
+          backend_spec: MingaAgent.ProviderPacks.Native.spec(),
+          credential_snapshot: Snapshot.new(%{}, nil),
+          models: [],
+          inference_routes: registry
+        )
+
+      session = start_supervised!({ModelPickerSession, candidates})
+      items = model_items(context(connection(session), 1))
+      assert items != []
+      validity = :atomics.new(1, [])
+
+      assert {:ok, [], [], %{}} =
+               AgentModelSource.for_publication(
+                 {:ok, items, [], %{model_discovery: {session, validity}}},
+                 session
+               )
+    end
+
+    test "selecting an unavailable route keeps the active model and shows the route's remedy",
+         %{registry: registry} do
+      session =
+        start_supervised!(
+          {Session,
+           provider: Native,
+           persist?: false,
+           hooks_enabled?: false,
+           credentials_snapshot_fn: fn -> Snapshot.new(%{}, nil) end,
+           provider_opts: [
+             mcp_enabled?: false,
+             model_resolver_opts: [
+               models: [],
+               inference_routes: registry,
+               apple_availability_fn: fn -> {:error, :unsupported} end
+             ]
+           ]}
+        )
+
+      %{connection: connection} = Session.editor_snapshot(session)
+      task_supervisor = start_supervised!({Task.Supervisor, []})
+      scheduler = start_supervised!({EffectScheduler, task_supervisor: task_supervisor})
+      :ok = EffectScheduler.attach(scheduler, self())
+      {state, workspace_id} = editor_state(connection, "Prior Model", scheduler)
+
+      items = model_items(context(connection, workspace_id))
+      offline = Enum.find(items, &(&1.description =~ "Offline Route"))
+      assert offline.description =~ "Unavailable: #{FixtureInferenceRoute.remedy()}"
+
+      state = AgentModelSource.on_select(offline, state)
+
+      assert_receive {:effect_result, ^scheduler, %Outcome{value: {:failed, message}} = outcome},
+                     1_000
+
+      assert message == FixtureInferenceRoute.remedy()
+      assert Session.model_selection(session) == nil
+
+      assert {:noreply, state} =
+               MingaEditor.handle_info({:effect_result, scheduler, outcome}, state)
+
+      assert state.workspace.agent_ui.panel.model_name == "Prior Model"
+      assert state.shell_runtime.state.notice.message == FixtureInferenceRoute.remedy()
+    end
   end
 
   defp start_codex_session(plug, path \\ "/tmp/model-picker-oauth.json") do

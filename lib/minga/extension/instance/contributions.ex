@@ -8,6 +8,7 @@ defmodule Minga.Extension.Instance.Contributions do
   alias Minga.Extension.CodeLease
   alias Minga.Extension.ContributionCleanup
   alias Minga.Extension.Instance.Artifact
+  alias Minga.Extension.InvocationContext
   alias Minga.Log
 
   @type result :: :ok | {:error, term()}
@@ -16,7 +17,7 @@ defmodule Minga.Extension.Instance.Contributions do
   @spec prepare_runtime(atom(), Artifact.t(), keyword(), keyword()) :: result()
   def prepare_runtime(name, artifact, config, opts) do
     with :ok <- register_options(name, artifact.module, config),
-         {:ok, _setup} <- call_init(artifact.module, config) do
+         {:ok, _setup} <- call_init(name, artifact.module, config) do
       register_modeline_segments(artifact.module, name, opts)
     end
   end
@@ -117,9 +118,10 @@ defmodule Minga.Extension.Instance.Contributions do
     error -> {:error, "__option_schema__/0 crashed: #{Exception.message(error)}"}
   end
 
-  @spec call_init(module(), keyword()) :: {:ok, term()} | {:error, term()}
-  defp call_init(module, config) do
-    case module.init(config) do
+  # init/1 runs with the extension as invocation source, so registration APIs attribute to it.
+  @spec call_init(atom(), module(), keyword()) :: {:ok, term()} | {:error, term()}
+  defp call_init(name, module, config) do
+    case InvocationContext.with_source({:extension, name}, fn -> module.init(config) end) do
       {:ok, state} -> {:ok, state}
       {:error, reason} -> {:error, "init failed: #{inspect(reason)}"}
       other -> {:error, "init returned unexpected value: #{inspect(other)}"}

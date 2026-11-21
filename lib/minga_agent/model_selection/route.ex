@@ -3,7 +3,7 @@ defmodule MingaAgent.ModelSelection.Route do
 
   alias MingaAgent.ModelSelection.TextExecution
 
-  @providers ~w(anthropic openai openai_codex google openrouter groq mistral deepseek apple)a
+  @providers ~w(anthropic openai openai_codex google openrouter groq mistral deepseek apple contributed)a
 
   @enforce_keys [
     :origin,
@@ -17,7 +17,13 @@ defmodule MingaAgent.ModelSelection.Route do
   ]
   defstruct @enforce_keys
 
-  @type origin :: {:catalog, String.t(), String.t()} | {:local, String.t(), String.t()}
+  @typedoc """
+  Where a route came from. A contributed origin is `{:contributed, route_id, model_id}` and executes through the inference route registered under `route_id`.
+  """
+  @type origin ::
+          {:catalog, String.t(), String.t()}
+          | {:local, String.t(), String.t()}
+          | {:contributed, String.t(), String.t()}
   @type request_provider ::
           :anthropic
           | :openai
@@ -28,6 +34,7 @@ defmodule MingaAgent.ModelSelection.Route do
           | :mistral
           | :deepseek
           | :apple
+          | :contributed
   @type t :: %__MODULE__{
           origin: origin(),
           request_provider: request_provider(),
@@ -81,8 +88,17 @@ defmodule MingaAgent.ModelSelection.Route do
   @spec valid_route_identity?(request_provider(), origin(), String.t()) :: boolean()
   defp valid_route_identity?(:apple, {:local, "apple", "system"}, "apple/system"), do: true
   defp valid_route_identity?(:apple, _origin, _id), do: false
+
+  defp valid_route_identity?(:contributed, {:contributed, route_id, model_id}, id),
+    do: id == contributed_id(route_id, model_id)
+
+  defp valid_route_identity?(:contributed, _origin, _id), do: false
   defp valid_route_identity?(_provider, {:catalog, _owner, _model}, _id), do: true
   defp valid_route_identity?(_provider, _origin, _id), do: false
+
+  @doc "Returns the route id of a contributed model: `<route_id>/<model_id>`."
+  @spec contributed_id(String.t(), String.t()) :: String.t()
+  def contributed_id(route_id, model_id), do: "#{route_id}/#{model_id}"
 
   @doc "Materializes the route once into the exact inline model ReqLLM executes."
   @spec materialize(t()) :: {:ok, LLMDB.Model.t()} | {:error, term()}
@@ -102,7 +118,7 @@ defmodule MingaAgent.ModelSelection.Route do
       cost: Map.get(route.metadata, :cost),
       execution: %{text: Map.from_struct(execution)},
       catalog_only: false,
-      extra: %{wire: %{protocol: execution.wire_protocol}}
+      extra: materialized_extra(route)
     }
 
     with {:ok, %LLMDB.Model{} = model} <- ReqLLM.model(drop_nil(attrs)),
@@ -115,6 +131,17 @@ defmodule MingaAgent.ModelSelection.Route do
       {:error, _reason} = error -> error
     end
   end
+
+  @spec materialized_extra(t()) :: map()
+  defp materialized_extra(%__MODULE__{origin: {:contributed, route_id, model_id}} = route) do
+    %{
+      wire: %{protocol: route.execution.wire_protocol},
+      inference_route: %{route_id: route_id, model_id: model_id}
+    }
+  end
+
+  defp materialized_extra(%__MODULE__{} = route),
+    do: %{wire: %{protocol: route.execution.wire_protocol}}
 
   @doc "Encodes a route for secret-free persistence."
   @spec encode(t()) :: map()
@@ -165,6 +192,16 @@ defmodule MingaAgent.ModelSelection.Route do
          wire_protocol: "apple_foundation_models",
          transport: "in_process",
          provider_model_id: "system",
+         base_url: nil,
+         path: nil
+       }),
+       do: true
+
+  defp compatible?(:contributed, %TextExecution{
+         supported: true,
+         family: "inference_route",
+         wire_protocol: "inference_route",
+         transport: "in_process",
          base_url: nil,
          path: nil
        }),
@@ -221,6 +258,10 @@ defmodule MingaAgent.ModelSelection.Route do
        do: true
 
   defp valid_origin?({:local, "apple", "system"}), do: true
+
+  defp valid_origin?({:contributed, route_id, model_id})
+       when is_binary(route_id) and route_id != "" and is_binary(model_id) and model_id != "",
+       do: true
 
   defp valid_origin?(_origin), do: false
 
@@ -296,6 +337,10 @@ defmodule MingaAgent.ModelSelection.Route do
 
   defp decode_origin(%{"kind" => "local", "owner" => "apple", "model_id" => "system"}),
     do: {:ok, {:local, "apple", "system"}}
+
+  defp decode_origin(%{"kind" => "contributed", "owner" => route_id, "model_id" => model_id})
+       when is_binary(route_id) and route_id != "" and is_binary(model_id) and model_id != "",
+       do: {:ok, {:contributed, route_id, model_id}}
 
   defp decode_origin(_origin), do: {:error, :invalid_route}
 

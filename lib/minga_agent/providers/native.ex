@@ -42,6 +42,8 @@ defmodule MingaAgent.Providers.Native do
   alias MingaAgent.CostCalculator
   alias MingaAgent.Event
   alias MingaAgent.Hooks.CommandRunner
+  alias MingaAgent.InferenceRoute.ConversationRef
+  alias MingaAgent.InferenceRouteRegistry
   alias MingaAgent.Hooks.Dispatcher, as: HookDispatcher
   alias MingaAgent.Hooks.PostToolUsePayload
   alias MingaAgent.Hooks.PreCompactPayload
@@ -141,7 +143,8 @@ defmodule MingaAgent.Providers.Native do
           mcp_registry: MCPRegistry.t() | nil,
           read_only?: boolean(),
           tool_allowlist: :all | [String.t()],
-          tool_workers: MapSet.t(pid())
+          tool_workers: MapSet.t(pid()),
+          inference_routes: GenServer.server()
         }
 
   # ── Provider callbacks ──────────────────────────────────────────────────────
@@ -346,6 +349,7 @@ defmodule MingaAgent.Providers.Native do
       project_root: project_root,
       max_retries: max_retries,
       credential_opts: Keyword.get(opts, :credential_opts, []),
+      inference_routes: inference_route_registry(opts),
       authentication: nil,
       local_registration: %{base: make_ref(), mcp: make_ref()},
       registry_revision: :unknown,
@@ -1013,6 +1017,14 @@ defmodule MingaAgent.Providers.Native do
      state}
   end
 
+  def handle_call(
+        {:compact, _messages},
+        _from,
+        %{selection: %{policy: %{compaction: :unsupported}}} = state
+      ) do
+    {:reply, {:error, compaction_unsupported_message(state.selection)}, state}
+  end
+
   def handle_call({:compact, _messages}, _from, %{streaming: true} = state) do
     {:reply, {:error, "Cannot compact while streaming"}, state}
   end
@@ -1055,6 +1067,14 @@ defmodule MingaAgent.Providers.Native do
      {:error,
       "Apple Intelligence does not compact history. Start a new conversation to clear its context."},
      state}
+  end
+
+  def handle_call(
+        {:compact, _messages, _opts},
+        _from,
+        %{selection: %{policy: %{compaction: :unsupported}}} = state
+      ) do
+    {:reply, {:error, compaction_unsupported_message(state.selection)}, state}
   end
 
   def handle_call({:compact, _messages, _opts}, _from, %{streaming: true} = state) do
@@ -1213,7 +1233,8 @@ defmodule MingaAgent.Providers.Native do
       hook_runner: state.hook_runner,
       max_turns: state.max_turns,
       max_cost: state.max_cost,
-      session_cost: state.session_cost
+      session_cost: state.session_cost,
+      inference_routes: state.inference_routes
     }
 
     task = Task.async(fn -> run_agent_loop(loop_context, :initial) end)
@@ -1968,7 +1989,37 @@ defmodule MingaAgent.Providers.Native do
     opts |> Keyword.delete(:cache) |> Keyword.put(:apple_admission, admission)
   end
 
+  # A contributed route receives its registry and the Session-owned identity of this exact dispatch.
+  defp prepared_stream_opts(
+         %{selection: %{route: %{request_provider: :contributed}}} = lctx,
+         attempt,
+         opts
+       ) do
+    # validate_request_capabilities/2 admits only epoch-matched requests, so this identity is complete.
+    {:ok, conversation} =
+      ConversationRef.new(
+        session_id: session_id(lctx.session_pid),
+        owner: lctx.session_pid,
+        epoch_id: attempt.epoch_id,
+        conversation_revision: attempt.revision,
+        request_id: attempt.request_id,
+        purpose: :turn
+      )
+
+    opts
+    |> Keyword.put(:minga_conversation, conversation)
+    |> Keyword.put(:minga_reasoning, lctx.selection.policy.reasoning.effort)
+    |> Keyword.put(:inference_routes, lctx.inference_routes)
+  end
+
   defp prepared_stream_opts(_lctx, _attempt, opts), do: opts
+
+  @spec session_id(pid()) :: String.t() | nil
+  defp session_id(session) when is_pid(session) do
+    Session.session_id(session)
+  catch
+    :exit, _reason -> nil
+  end
 
   @spec authorize_prepared_dispatch(pid(), Dispatch.t(), binary(), RequestCapacity.t()) ::
           :ok | {:error, term()}
@@ -3019,7 +3070,53 @@ defmodule MingaAgent.Providers.Native do
       end
     end
 
-    ReqLLMAdapter.summary_client(state.llm_client, state.selection, state.config, authentication)
+    ReqLLMAdapter.summary_client(
+      state.llm_client,
+      state.selection,
+      state.config,
+      authentication,
+      summary_request_opts(state)
+    )
+  end
+
+  # A compaction summary is an isolated query: a contributed route gets a fresh `:summary` identity per request.
+  @spec summary_request_opts(state()) :: (-> keyword())
+  defp summary_request_opts(%{selection: %{route: %{request_provider: :contributed}}} = state) do
+    fn ->
+      {:ok, conversation} =
+        ConversationRef.new(
+          session_id: nil,
+          owner: state.subscriber,
+          epoch_id: summary_epoch(state.prefix_candidate),
+          conversation_revision: nil,
+          request_id: make_ref(),
+          purpose: :summary
+        )
+
+      [
+        minga_conversation: conversation,
+        minga_reasoning: state.selection.policy.reasoning.effort,
+        inference_routes: state.inference_routes
+      ]
+    end
+  end
+
+  defp summary_request_opts(_state), do: fn -> [] end
+
+  @spec summary_epoch(Prefix.t() | :unknown) :: String.t() | nil
+  defp summary_epoch(%Prefix{epoch_id: epoch_id}) when is_binary(epoch_id), do: epoch_id
+  defp summary_epoch(_prefix), do: nil
+
+  @spec compaction_unsupported_message(ModelSelection.t()) :: String.t()
+  defp compaction_unsupported_message(selection),
+    do:
+      "#{selection.route.display_name} does not compact history. Start a new conversation to clear its context."
+
+  @spec inference_route_registry(keyword()) :: GenServer.server()
+  defp inference_route_registry(opts) do
+    opts
+    |> Keyword.get(:model_resolver_opts, [])
+    |> Keyword.get(:inference_routes, MingaAgent.InferenceRouteRegistry)
   end
 
   @spec maybe_compact_with_opts(Context.t(), keyword()) ::
@@ -3342,7 +3439,7 @@ defmodule MingaAgent.Providers.Native do
   # surfaces exactly once in the transcript instead of twice.
   @spec reported_error(loop_ctx(), String.t(), term()) :: {:error, {:reported, term()}}
   defp reported_error(lctx, message, reason) do
-    event = error_event(message, reason, lctx.selection)
+    event = loop_error_event(lctx, message, reason)
     detail = Redaction.format_error(reason)
 
     Log.error(:agent, "[Agent.Native] agent loop detail: #{detail}")
@@ -3431,6 +3528,55 @@ defmodule MingaAgent.Providers.Native do
       provider: provider
     }
   end
+
+  # A contributed route classifies its own failures; admission and tool-state failures keep core wording.
+  @spec loop_error_event(loop_ctx(), String.t(), term()) :: Event.Error.t()
+  defp loop_error_event(
+         %{selection: %{route: %{request_provider: :contributed}}} = lctx,
+         message,
+         reason
+       ) do
+    case error_event(message, reason, lctx.selection) do
+      %Event.Error{kind: kind} = event when kind in [:tool_error, :request_admission_refused] ->
+        event
+
+      _route_failure ->
+        contributed_error_event(lctx, reason)
+    end
+  end
+
+  defp loop_error_event(lctx, message, reason), do: error_event(message, reason, lctx.selection)
+
+  @spec contributed_error_event(loop_ctx(), term()) :: Event.Error.t()
+  defp contributed_error_event(lctx, reason) do
+    {:contributed, route_id, _model_id} = lctx.selection.route.origin
+    {kind, message} = contributed_error(lctx.inference_routes, route_id, route_failure(reason))
+    %Event.Error{kind: kind, message: message, provider: route_id}
+  end
+
+  @spec route_failure(term()) :: term()
+  defp route_failure(%ReqLLM.Error.API.Stream{cause: nil} = reason), do: reason
+  defp route_failure(%ReqLLM.Error.API.Stream{cause: cause}), do: cause
+  defp route_failure(reason), do: reason
+
+  @spec contributed_error(GenServer.server(), String.t(), term()) ::
+          {Event.Error.kind(), String.t()}
+  defp contributed_error(_registry, route_id, {:inference_route_unavailable, route_id}),
+    do: {:unreachable, InferenceRouteRegistry.unregistered_message(route_id)}
+
+  defp contributed_error(_registry, route_id, {kind, _detail})
+       when kind in [:inference_route_invalid_event, :inference_route_invalid_response],
+       do:
+         {:provider_error,
+          "The #{route_id} model route sent an invalid response. Open *Messages* for details."}
+
+  defp contributed_error(_registry, route_id, {:inference_route_unsupported_content, type}),
+    do:
+      {:invalid_model,
+       "This conversation contains #{type} content that the #{route_id} model route cannot receive. Start a new conversation or choose another model."}
+
+  defp contributed_error(registry, route_id, reason),
+    do: InferenceRouteRegistry.classify_error(registry, route_id, reason)
 
   @spec error_event_message(Event.Error.kind(), String.t(), String.t() | nil, term(), String.t()) ::
           String.t()
@@ -3569,6 +3715,8 @@ defmodule MingaAgent.Providers.Native do
   @spec normalize_usage(map() | nil, ModelSelection.t()) :: Event.token_usage() | nil
   defp normalize_usage(_usage, %ModelSelection{route: %{request_provider: :apple}}), do: nil
 
+  defp normalize_usage(_usage, %ModelSelection{policy: %{usage: :none}}), do: nil
+
   defp normalize_usage(nil, _selection), do: nil
 
   defp normalize_usage(usage, %ModelSelection{} = selection) when is_map(usage) do
@@ -3590,11 +3738,16 @@ defmodule MingaAgent.Providers.Native do
       cost: usage_value(usage, [:total_cost, :cost], 0.0)
     }
 
-    CostCalculator.ensure_cost(
-      normalized,
-      selection.route.model_id,
-      selection.route.model_provider
-    )
+    priced_usage(normalized, selection)
+  end
+
+  # Subscription routes report tokens but no per-request dollar cost.
+  @spec priced_usage(MingaAgent.TurnUsage.t(), ModelSelection.t()) :: MingaAgent.TurnUsage.t()
+  defp priced_usage(usage, %ModelSelection{policy: %{cost_mode: :subscription}}),
+    do: %{usage | cost: 0.0}
+
+  defp priced_usage(usage, %ModelSelection{} = selection) do
+    CostCalculator.ensure_cost(usage, selection.route.model_id, selection.route.model_provider)
   end
 
   @spec usage_value(map(), [atom()], term()) :: term()

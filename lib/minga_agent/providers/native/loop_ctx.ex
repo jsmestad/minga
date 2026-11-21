@@ -36,6 +36,7 @@ defmodule MingaAgent.Providers.Native.LoopCtx do
     :max_turns,
     :max_cost,
     :session_pid,
+    inference_routes: MingaAgent.InferenceRouteRegistry,
     history_projection: :unchanged,
     turn_count: 0,
     session_cost: 0.0
@@ -58,6 +59,7 @@ defmodule MingaAgent.Providers.Native.LoopCtx do
           max_turns: pos_integer(),
           max_cost: float() | nil,
           session_pid: pid(),
+          inference_routes: GenServer.server(),
           history_projection:
             :unchanged | {:ok, non_neg_integer(), [ReqLLM.Message.t()]} | {:error, term()},
           turn_count: non_neg_integer(),
