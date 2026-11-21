@@ -1,0 +1,42 @@
+name: Reach smells (advisory)
+
+on:
+  schedule:
+    - cron: '43 7 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: reach-smells-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  MIX_ENV: test
+  MINGA_SKIP_GO_TUI_BUILD: "1"
+
+jobs:
+  smells:
+    name: Report Reach smells
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: erlef/setup-beam@v1
+        with:
+          version-file: .tool-versions
+          version-type: strict
+
+      - name: Restore CI deps
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            deps
+            _build
+          key: deps-${{ runner.os }}-${{ hashFiles('.tool-versions') }}-${{ hashFiles('mix.lock') }}
+          restore-keys: deps-${{ runner.os }}-${{ hashFiles('.tool-versions') }}-
+
+      - run: mix deps.get
+      - run: mix compile --warnings-as-errors
+      - run: mix reach.check --smells

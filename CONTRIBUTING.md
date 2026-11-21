@@ -63,7 +63,9 @@ make lint.full                    # Same plus full Credo, Reach smells, and clas
 mix test.llm                      # Non-heavy test suite with an LLM-friendly summary
 ```
 
-Both gates run every independent check even when one fails (Dialyzer and Reach are skipped only when compile fails) and print one status line per check followed by the logs of the failed ones. The fast gate skips compile, Dialyzer, Reach, and ExDNA on branches with no Elixir-relevant change. CI also runs full Credo, ExDNA, Reach, and classic Dialyzer before merge.
+Both gates run every independent check even when one fails (Dialyzer and Reach are skipped only when compile fails) and print one status line per check followed by the logs of the failed ones. The fast gate skips compile, Dialyzer, Reach, and ExDNA on branches with no Elixir-relevant change. CI also runs full Credo, ExDNA, Reach architecture checks, and classic Dialyzer before merge.
+
+The [Reach smells workflow](.github/workflows/reach-smells.yml) reports advisory findings weekly or on demand. It does not block PRs. The required `Swift (macOS GUI)` check passes only when both the macOS correctness and performance jobs pass.
 
 ## Project Layout
 

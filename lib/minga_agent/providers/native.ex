@@ -35,7 +35,6 @@ defmodule MingaAgent.Providers.Native do
 
   use GenServer
 
-  alias Minga.Buffer
   alias Minga.Git
   alias MingaAgent.ArtifactStore
   alias MingaAgent.Compaction
@@ -61,7 +60,6 @@ defmodule MingaAgent.Providers.Native do
   alias MingaAgent.Providers.Native.OutputHydration
   alias MingaAgent.Providers.Native.ReqLLMAdapter
   alias MingaAgent.Redaction
-  alias MingaAgent.ToolRouter
   alias MingaAgent.Retry
   alias MingaAgent.Session
   alias MingaAgent.Session.Dispatch
@@ -2260,10 +2258,10 @@ defmodule MingaAgent.Providers.Native do
           :ok | {:error, term()}
   defp execute_tools(lctx, checkpoint_id, tool_calls) do
     initial_mode = approval_mode(lctx.config)
-    baselines = capture_tool_baselines(tool_calls, lctx)
+    indexed_calls = Enum.with_index(tool_calls)
 
-    {approval_baselines, concurrent_baselines} =
-      Enum.split_with(baselines, fn {_index, tool_call, _before_content} ->
+    {approval_calls, concurrent_calls} =
+      Enum.split_with(indexed_calls, fn {tool_call, _index} ->
         tool_call.name == "ask_user" or
           tool_requires_approval?(tool_call, lctx, initial_mode)
       end)
@@ -2272,12 +2270,12 @@ defmodule MingaAgent.Providers.Native do
       start_concurrent_tool_tasks(
         lctx,
         checkpoint_id,
-        concurrent_baselines
+        concurrent_calls
       )
 
     try do
       with {:ok, sequential_results} <-
-             execute_sequential_tool_tasks(lctx, checkpoint_id, approval_baselines) do
+             execute_sequential_tool_tasks(lctx, checkpoint_id, approval_calls) do
         results =
           (sequential_results ++ await_concurrent_tool_tasks(lctx, concurrent_tasks))
           |> Enum.sort_by(fn {index, _result} -> index end)
@@ -2297,25 +2295,25 @@ defmodule MingaAgent.Providers.Native do
   @spec execute_sequential_tool_tasks(
           loop_ctx(),
           String.t(),
-          [tool_baseline()]
+          [indexed_tool_call()]
         ) :: {:ok, [{non_neg_integer(), tool_execution_result()}]} | {:error, term()}
   defp execute_sequential_tool_tasks(
          lctx,
          checkpoint_id,
-         baselines
+         calls
        ) do
-    Enum.reduce_while(baselines, {:ok, []}, fn baseline, {:ok, results} ->
-      case execute_sequential_tool_task(lctx, checkpoint_id, baseline) do
+    Enum.reduce_while(calls, {:ok, []}, fn call, {:ok, results} ->
+      case execute_sequential_tool_task(lctx, checkpoint_id, call) do
         {_index, %{persistence_error: reason}} -> {:halt, {:error, reason}}
         result -> {:cont, {:ok, [result | results]}}
       end
     end)
   end
 
-  @spec execute_sequential_tool_task(loop_ctx(), String.t(), tool_baseline()) ::
+  @spec execute_sequential_tool_task(loop_ctx(), String.t(), indexed_tool_call()) ::
           {non_neg_integer(), tool_execution_result()}
-  defp execute_sequential_tool_task(lctx, checkpoint_id, baseline) do
-    tasks = start_concurrent_tool_tasks(lctx, checkpoint_id, [baseline])
+  defp execute_sequential_tool_task(lctx, checkpoint_id, call) do
+    tasks = start_concurrent_tool_tasks(lctx, checkpoint_id, [call])
 
     try do
       [result] = await_concurrent_tool_tasks(lctx, tasks)
@@ -2326,7 +2324,7 @@ defmodule MingaAgent.Providers.Native do
   end
 
   @typep approval_mode :: :none | :ask | :ask_all
-  @typep tool_baseline :: {non_neg_integer(), map(), String.t() | nil}
+  @typep indexed_tool_call :: {ReqLLMAdapter.ToolCall.t(), non_neg_integer()}
   @typep unstarted_tool_task ::
            {non_neg_integer(), map(), pid(), reference(), reference(), reference()}
   @typep tool_task :: {non_neg_integer(), map(), pid(), reference(), reference()}
@@ -2337,32 +2335,31 @@ defmodule MingaAgent.Providers.Native do
            required(:is_error) => boolean(),
            optional(:outcome) => MingaAgent.ToolCall.outcome(),
            optional(:reason) => MingaAgent.ToolCall.terminal_reason(),
+           optional(:mutation) => MingaAgent.Tool.FileMutationResult.t() | nil,
            optional(:persistence_error) => term()
          }
 
-  @spec capture_tool_baselines([ReqLLMAdapter.ToolCall.t()], loop_ctx()) :: [tool_baseline()]
-  defp capture_tool_baselines(tool_calls, lctx) do
-    tool_calls
-    |> Enum.with_index()
-    |> Enum.map(fn {tool_call, index} ->
-      {index, tool_call, capture_file_before(lctx, tool_call)}
-    end)
-  end
+  @typep formatted_tool_result ::
+           {String.t(), MingaAgent.ToolCall.outcome(), MingaAgent.ToolCall.terminal_reason(),
+            boolean(), Output.t() | nil}
+  @typep approved_tool_result ::
+           formatted_tool_result()
+           | {formatted_tool_result(), MingaAgent.Tool.FileMutationResult.t()}
 
   @spec start_concurrent_tool_tasks(
           loop_ctx(),
           String.t(),
-          [tool_baseline()]
+          [indexed_tool_call()]
         ) :: [tool_task()]
   defp start_concurrent_tool_tasks(
          lctx,
          checkpoint_id,
-         baselines
+         calls
        ) do
     parent = self()
 
     tasks =
-      Enum.map(baselines, fn {index, tool_call, before_content} ->
+      Enum.map(calls, fn {tool_call, index} ->
         result_ref = make_ref()
         start_ref = make_ref()
 
@@ -2370,13 +2367,7 @@ defmodule MingaAgent.Providers.Native do
           spawn_link(fn ->
             receive do
               {^start_ref, :run} ->
-                result =
-                  execute_tool_call(
-                    lctx,
-                    checkpoint_id,
-                    tool_call,
-                    before_content
-                  )
+                result = execute_tool_call(lctx, checkpoint_id, tool_call)
 
                 send(parent, {result_ref, :tool_result, result})
             end
@@ -2559,15 +2550,9 @@ defmodule MingaAgent.Providers.Native do
   @spec execute_tool_call(
           loop_ctx(),
           String.t(),
-          map(),
-          String.t() | nil
+          map()
         ) :: tool_execution_result()
-  defp execute_tool_call(
-         lctx,
-         checkpoint_id,
-         tool_call,
-         before_content
-       ) do
+  defp execute_tool_call(lctx, checkpoint_id, tool_call) do
     tool_call = Map.put(tool_call, :effect_checkpoint_id, checkpoint_id)
 
     result =
@@ -2582,12 +2567,13 @@ defmodule MingaAgent.Providers.Native do
             ModelSelection.image_tool_result_delivery(lctx.selection)
           )
 
-        {result_text, outcome, reason, post_dispatched?, output} =
-          execute_with_approval(
-            lctx,
-            tool_call,
-            tool_context
-          )
+        execution = execute_with_approval(lctx, tool_call, tool_context)
+
+        {{result_text, outcome, reason, post_dispatched?, output}, mutation} =
+          case execution do
+            {formatted, %MingaAgent.Tool.FileMutationResult{} = receipt} -> {formatted, receipt}
+            formatted -> {formatted, nil}
+          end
 
         output = output || deterministic_output(result_text)
         is_error = outcome != :complete
@@ -2596,13 +2582,12 @@ defmodule MingaAgent.Providers.Native do
           dispatch_post_tool_use(tool_call, result_text, is_error, output, lctx.config)
         end
 
-        maybe_emit_file_changed(lctx, tool_call, before_content, is_error)
-
         %{
           tool_call: tool_call,
           result_text: result_text,
           output: output,
           is_error: is_error,
+          mutation: mutation,
           outcome: outcome,
           reason: reason
         }
@@ -2659,6 +2644,7 @@ defmodule MingaAgent.Providers.Native do
       %{tool_call: tool_call} ->
         case persist_tool_execution_result(lctx, checkpoint_id, result, 3) do
           :ok ->
+            emit_receipt_preview(lctx, tool_call, Map.get(result, :mutation))
             emit_tool_end(lctx, tool_call, result)
             result
 
@@ -2739,9 +2725,7 @@ defmodule MingaAgent.Providers.Native do
           loop_ctx(),
           map(),
           ToolContext.t()
-        ) ::
-          {String.t(), MingaAgent.ToolCall.outcome(), MingaAgent.ToolCall.terminal_reason(),
-           boolean(), Output.t() | nil}
+        ) :: approved_tool_result()
   defp execute_with_approval(lctx, tool_call, tool_context) do
     invocation = Invocation.new(lctx.request, tool_call.effect_checkpoint_id, tool_call)
 
@@ -2836,9 +2820,7 @@ defmodule MingaAgent.Providers.Native do
           map(),
           Invocation.t(),
           ToolContext.t()
-        ) ::
-          {String.t(), MingaAgent.ToolCall.outcome(), MingaAgent.ToolCall.terminal_reason(),
-           boolean(), Output.t() | nil}
+        ) :: approved_tool_result()
   defp request_approval(lctx, tool_call, invocation, tool_context) do
     # Send approval request through the event pipeline (Task → Provider → Session)
     send_agent_event(lctx.provider_pid, lctx.request, %Event.ToolApproval{
@@ -2867,146 +2849,46 @@ defmodule MingaAgent.Providers.Native do
   end
 
   @spec execute_live_tool(loop_ctx(), map(), Invocation.t(), ToolContext.t()) ::
-          {String.t(), MingaAgent.ToolCall.outcome(), MingaAgent.ToolCall.terminal_reason(),
-           boolean(), Output.t() | nil}
+          approved_tool_result()
   defp execute_live_tool(lctx, tool_call, invocation, tool_context) do
     tool_context =
       tool_context_with_call_metadata(tool_context, tool_call, lctx.provider_pid, lctx.request)
 
-    lctx.session_pid
-    |> ToolExecutor.execute_session(invocation,
-      config: lctx.config,
-      hook_runner: lctx.hook_runner,
-      tool_context: tool_context,
-      dispatch_post_hook: false
-    )
-    |> format_executor_result()
+    {result, mutation} =
+      ToolExecutor.execute_session(lctx.session_pid, invocation,
+        config: lctx.config,
+        hook_runner: lctx.hook_runner,
+        tool_context: tool_context,
+        dispatch_post_hook: false
+      )
+
+    formatted = format_executor_result(result)
+    if mutation, do: {formatted, mutation}, else: formatted
   end
 
-  @file_tools ~w(edit_file write_file delete_file)
-
-  @spec capture_file_before(loop_ctx(), map()) :: String.t() | nil
-  defp capture_file_before(%LoopCtx{} = lctx, %{name: name, arguments: %{"path" => path}})
-       when name in @file_tools do
-    case read_tool_file_content(lctx, path) do
-      {:ok, content} -> content
-      {:error, _} -> nil
-    end
-  end
-
-  defp capture_file_before(_lctx, _tool_call), do: nil
-
-  @spec maybe_emit_file_changed(loop_ctx(), map(), String.t() | nil, boolean()) :: :ok
-  defp maybe_emit_file_changed(
-         %LoopCtx{} = lctx,
-         %{name: "delete_file", arguments: %{"path" => path}} = tool_call,
-         before_content,
-         false
+  @spec emit_receipt_preview(loop_ctx(), map(), MingaAgent.Tool.FileMutationResult.t() | nil) ::
+          :ok
+  defp emit_receipt_preview(
+         lctx,
+         tool_call,
+         %MingaAgent.Tool.FileMutationResult{
+           path: path,
+           receipt: %{before: before_content, after: after_content}
+         }
        )
-       when is_binary(before_content) do
-    resolved_path = file_changed_path(lctx, path)
-    after_content = read_deleted_tool_content(lctx, path)
-
-    if is_binary(after_content) and after_content != before_content do
-      emit(lctx, %Event.ToolFileChanged{
-        tool_call_id: tool_call.id,
-        path: resolved_path,
-        before_content: before_content,
-        after_content: after_content
-      })
-    end
-
-    :ok
+       when before_content != after_content do
+    emit(lctx, %Event.ToolFileChanged{
+      tool_call_id: tool_call.id,
+      path: path,
+      before_content: preview_content(before_content),
+      after_content: preview_content(after_content)
+    })
   end
 
-  defp maybe_emit_file_changed(%LoopCtx{} = lctx, tool_call, before_content, false)
-       when is_binary(before_content) and tool_call.name in @file_tools do
-    path = tool_call.arguments["path"]
-    resolved_path = file_changed_path(lctx, path)
+  defp emit_receipt_preview(_lctx, _tool_call, _mutation), do: :ok
 
-    case read_tool_file_content(lctx, path) do
-      {:ok, after_content} when after_content != before_content ->
-        emit(lctx, %Event.ToolFileChanged{
-          tool_call_id: tool_call.id,
-          path: resolved_path,
-          before_content: before_content,
-          after_content: after_content
-        })
-
-      _ ->
-        :ok
-    end
-  end
-
-  defp maybe_emit_file_changed(_lctx, _tool_call, _before_content, _is_error), do: :ok
-
-  @spec tool_routing_configured?(loop_ctx()) :: boolean()
-  defp tool_routing_configured?(%LoopCtx{} = lctx),
-    do: ToolRouter.routing_configured?(tool_router_context(lctx))
-
-  @spec tool_router_context(loop_ctx()) :: ToolRouter.context()
-  defp tool_router_context(%LoopCtx{
-         project_view: project_view,
-         fork_store: fork_store,
-         changeset: changeset
-       }) do
-    ToolRouter.context(project_view, fork_store, changeset)
-  end
-
-  @spec file_changed_path(loop_ctx(), String.t()) :: String.t()
-  defp file_changed_path(%LoopCtx{} = lctx, path),
-    do: resolved_tool_path(lctx.project_root, path)
-
-  @spec read_deleted_tool_content(loop_ctx(), String.t()) :: String.t() | nil
-  defp read_deleted_tool_content(%LoopCtx{} = lctx, path) do
-    if tool_routing_configured?(lctx) do
-      absolute_path = resolved_tool_path(lctx.project_root, path)
-
-      case ToolRouter.read_file(tool_router_context(lctx), absolute_path) do
-        {:ok, content} -> content
-        {:error, _} -> ""
-      end
-    else
-      read_deleted_tool_content(Path.expand(path, lctx.project_root))
-    end
-  end
-
-  @spec read_deleted_tool_content(String.t()) :: String.t() | nil
-  defp read_deleted_tool_content(path) do
-    case File.read(path) do
-      {:ok, content} -> content
-      {:error, :enoent} -> ""
-      {:error, _} -> nil
-    end
-  end
-
-  @spec read_tool_file_content(loop_ctx(), String.t()) :: {:ok, String.t()} | {:error, term()}
-  defp read_tool_file_content(%LoopCtx{} = lctx, path) do
-    if tool_routing_configured?(lctx) do
-      absolute_path = resolved_tool_path(lctx.project_root, path)
-      ToolRouter.read_file(tool_router_context(lctx), absolute_path)
-    else
-      read_tool_file_content_direct(Path.expand(path, lctx.project_root))
-    end
-  end
-
-  @spec read_tool_file_content_direct(String.t()) :: {:ok, String.t()} | {:error, term()}
-  defp read_tool_file_content_direct(path) do
-    case Buffer.pid_for_path(path) do
-      {:ok, pid} -> {:ok, Buffer.content(pid)}
-      :not_found -> read_tool_file_content_from_disk(path)
-    end
-  catch
-    :exit, _ -> read_tool_file_content_from_disk(path)
-  end
-
-  @spec read_tool_file_content_from_disk(String.t()) :: {:ok, String.t()} | {:error, term()}
-  defp read_tool_file_content_from_disk(path) do
-    File.read(path)
-  end
-
-  @spec resolved_tool_path(String.t(), String.t()) :: String.t()
-  defp resolved_tool_path(project_root, path), do: Path.expand(path, project_root)
+  defp preview_content(:absent), do: ""
+  defp preview_content(content), do: content
 
   @spec tool_context_with_call_metadata(ToolContext.t(), map(), pid(), Request.t()) ::
           ToolContext.t()
@@ -3038,9 +2920,7 @@ defmodule MingaAgent.Providers.Native do
        ),
        do: context
 
-  @spec format_executor_result(ToolExecutor.result()) ::
-          {String.t(), MingaAgent.ToolCall.outcome(), MingaAgent.ToolCall.terminal_reason(),
-           boolean(), Output.t() | nil}
+  @spec format_executor_result(ToolExecutor.result()) :: formatted_tool_result()
   defp format_executor_result({:storage_error, reason}),
     do: throw({:tool_storage_failed, reason})
 
