@@ -66,6 +66,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - Agent guides now use verified paths and module entry points, list all fourteen custom Credo checks with unique IDs, and link focused development recipes. Regression tests keep guide references and the check inventory synchronized with the repository.
 - Production parser and hook-runner binaries now use Zig `ReleaseSafe`, with Zig's build cache selecting the correct optimization mode. Parser queries compile only for languages in use instead of prewarming every bundled language. Editor launchers retain ERTS's specialized memory allocators instead of disabling them.
 - Deferred parser requests store their synchronization sequence directly. Parser registrations use one forward lookup by buffer PID and retain the reverse lookup for parser replies.
+- Parser events carry the admitted version directly to subscribers. Text input resolution keeps stale presentations, missing rows, and unavailable renderer data distinct.
 - Removed one-off benchmark scripts and archived measurement artifacts. CI performance gates and maintained documentation remain.
 - LSP, diagnostic, and caret position conversion now walks UTF-8 text directly instead of building charlists or re-encoding each character, and UTF-32 position lookup runs in constant stack. Converted positions, clamping, and exact-column errors are unchanged.
 - LSP semantic tokens decode modifier bits in legend order without making indexed lists, and each token projects directly into one highlight span.
