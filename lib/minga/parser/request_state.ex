@@ -48,16 +48,27 @@ defmodule Minga.Parser.RequestState do
     end
   end
 
-  @doc "Splits ready deferred requests for one synchronized buffer."
+  @doc "Removes ready deferred requests for one synchronized buffer."
   @spec take_ready(t(), pid(), (deferred_request() -> boolean())) ::
           {[{reference(), deferred_request()}], t()}
   def take_ready(%__MODULE__{} = state, buffer, ready?) when is_function(ready?, 1) do
-    {ready, waiting} =
-      Enum.split_with(state.deferred, fn {_token, request} ->
+    ready =
+      Enum.filter(state.deferred, fn {_token, request} ->
         request.buffer == buffer and ready?.(request)
       end)
 
-    {ready, %{state | deferred: Map.new(waiting)}}
+    case ready do
+      [] ->
+        {[], state}
+
+      ready ->
+        deferred =
+          Enum.reduce(ready, state.deferred, fn {token, _request}, waiting ->
+            Map.delete(waiting, token)
+          end)
+
+        {ready, %{state | deferred: deferred}}
+    end
   end
 
   @doc "Allocates an ID and records an emitted request."
@@ -66,10 +77,6 @@ defmodule Minga.Parser.RequestState do
     id = state.next_id
     {id, %{state | next_id: id + 1, in_flight: Map.put(state.in_flight, id, request)}}
   end
-
-  @doc "Returns the ID that will be allocated to the next emitted request."
-  @spec next_id(t()) :: pos_integer()
-  def next_id(%__MODULE__{next_id: id}), do: id
 
   @doc "Removes a deferred request by token."
   @spec pop_deferred(t(), reference()) :: {deferred_request() | nil, t()}
