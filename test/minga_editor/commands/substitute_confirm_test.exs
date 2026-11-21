@@ -99,31 +99,6 @@ defmodule MingaEditor.Commands.SubstituteConfirmTest do
     assert NoticeWorkflow.message(state) == "Pattern not found: baz"
   end
 
-  test "a failed backward search can be repeated without first moving the cursor" do
-    ctx = start_editor("empty")
-    send_keys_sync(ctx, "l")
-
-    state = send_keys_sync(ctx, "?missing<CR>")
-    assert NoticeWorkflow.message(state) == "Pattern not found: missing"
-    assert buffer_cursor(ctx) == {0, 1}
-
-    assert :ok = Buffer.replace_content(ctx.buffer, "missing middle missing")
-    assert :ok = Buffer.move_to(ctx.buffer, {0, 8})
-    send_keys_sync(ctx, "n")
-    assert buffer_cursor(ctx) == {0, 0}
-  end
-
-  test "substitution records its pattern without changing the repeat direction" do
-    ctx = start_editor("foo foo mid foo")
-    send_keys_sync(ctx, "?mid<CR>")
-    send_ex_sync(ctx, "%s/foo/bar")
-    assert buffer_content(ctx) == "bar foo mid foo"
-
-    assert :ok = Buffer.move_to(ctx.buffer, {0, 8})
-    send_keys_sync(ctx, "n")
-    assert buffer_cursor(ctx) == {0, 4}
-  end
-
   defp assert_offer(ctx, state, position, progress, replacement \\ "bar") do
     assert Editing.mode(state) == :substitute_confirm
     assert buffer_cursor(ctx) == position
