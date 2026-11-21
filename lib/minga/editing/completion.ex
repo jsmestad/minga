@@ -159,27 +159,6 @@ defmodule Minga.Editing.Completion do
 
   # ── Selection ────────────────────────────────────────────────────────────────
 
-  @doc "Selects an item by its offset in the current visible completion window."
-  @spec select_visible(t(), non_neg_integer()) :: t()
-  def select_visible(%__MODULE__{filtered: []} = completion, _offset), do: completion
-
-  def select_visible(%__MODULE__{} = completion, offset)
-      when is_integer(offset) and offset >= 0 do
-    {visible, _selected_offset} = visible_items(completion)
-
-    if Enum.at(visible, offset) == nil do
-      completion
-    else
-      selected = visible_start(completion) + offset
-
-      %{
-        completion
-        | selected: selected,
-          selected_item_id: item_id_at(completion.filtered, selected)
-      }
-    end
-  end
-
   @doc "Returns the currently selected item, or nil if no items."
   @spec selected_item(t()) :: item() | nil
   def selected_item(%__MODULE__{filtered: []}), do: nil

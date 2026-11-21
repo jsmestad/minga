@@ -76,6 +76,9 @@ defmodule Minga.Mode.OperatorPending do
 
   alias Minga.Mode
   alias Minga.Mode.OperatorPendingState, as: OPState
+  alias Minga.Mode.TextObjectKeys
+
+  require TextObjectKeys
 
   @escape 27
   @ctrl 0x02
@@ -104,78 +107,9 @@ defmodule Minga.Mode.OperatorPending do
   #
   # These clauses match only when a text_object_modifier is pending.
 
-  # `w` — word text object.
-  def handle_key({?w, 0}, %OPState{text_object_modifier: modifier} = state)
-      when modifier in [:inner, :around] do
-    execute_text_object(state, modifier, :word)
-  end
-
-  # `p` — paragraph text object.
-  def handle_key({?p, 0}, %OPState{text_object_modifier: modifier} = state)
-      when modifier in [:inner, :around] do
-    execute_text_object(state, modifier, :paragraph)
-  end
-
-  # `s` — sentence text object.
-  def handle_key({?s, 0}, %OPState{text_object_modifier: modifier} = state)
-      when modifier in [:inner, :around] do
-    execute_text_object(state, modifier, :sentence)
-  end
-
-  # `"` — double-quoted string.
-  def handle_key({?", 0}, %OPState{text_object_modifier: modifier} = state)
-      when modifier in [:inner, :around] do
-    execute_text_object(state, modifier, {:quote, "\""})
-  end
-
-  # `'` — single-quoted string.
-  def handle_key({?', 0}, %OPState{text_object_modifier: modifier} = state)
-      when modifier in [:inner, :around] do
-    execute_text_object(state, modifier, {:quote, "'"})
-  end
-
-  # `(` or `)` — parentheses.
-  def handle_key({paren, 0}, %OPState{text_object_modifier: modifier} = state)
-      when modifier in [:inner, :around] and paren in [?(, ?)] do
-    execute_text_object(state, modifier, {:paren, "(", ")"})
-  end
-
-  # `[` or `]` — square brackets.
-  def handle_key({bracket, 0}, %OPState{text_object_modifier: modifier} = state)
-      when modifier in [:inner, :around] and bracket in [?[, ?]] do
-    execute_text_object(state, modifier, {:paren, "[", "]"})
-  end
-
-  # `{` or `}` — curly braces.
-  def handle_key({brace, 0}, %OPState{text_object_modifier: modifier} = state)
-      when modifier in [:inner, :around] and brace in [?{, ?}] do
-    execute_text_object(state, modifier, {:paren, "{", "}"})
-  end
-
-  # ── Tree-sitter structural text objects ────────────────────────────────────
-
-  # `f` — function text object.
-  def handle_key({?f, 0}, %OPState{text_object_modifier: modifier} = state)
-      when modifier in [:inner, :around] do
-    execute_text_object(state, modifier, {:structural, :function})
-  end
-
-  # `c` — class/module text object.
-  def handle_key({?c, 0}, %OPState{text_object_modifier: modifier} = state)
-      when modifier in [:inner, :around] do
-    execute_text_object(state, modifier, {:structural, :class})
-  end
-
-  # `a` — argument/parameter text object (when modifier is already set).
-  def handle_key({?a, 0}, %OPState{text_object_modifier: modifier} = state)
-      when modifier in [:inner, :around] do
-    execute_text_object(state, modifier, {:structural, :parameter})
-  end
-
-  # `b` — block text object (if/for/while/do body).
-  def handle_key({?b, 0}, %OPState{text_object_modifier: modifier} = state)
-      when modifier in [:inner, :around] do
-    execute_text_object(state, modifier, {:structural, :block})
+  def handle_key({key, 0}, %OPState{text_object_modifier: modifier} = state)
+      when modifier in [:inner, :around] and TextObjectKeys.suffix?(key) do
+    execute_text_object(state, modifier, TextObjectKeys.fetch!(key))
   end
 
   # ── Count accumulation ───────────────────────────────────────────────────

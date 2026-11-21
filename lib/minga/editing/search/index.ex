@@ -129,7 +129,7 @@ defmodule Minga.Editing.Search.Index do
       when is_integer(first_line) and first_line >= 0 and is_integer(last_line) and
              last_line >= first_line do
     {matches, _visited} = collect_range(root, first_line, last_line, [], 0)
-    Enum.reverse(matches)
+    matches
   end
 
   @doc "Returns a bounded range query with visited-node work for performance tests."
@@ -139,7 +139,6 @@ defmodule Minga.Editing.Search.Index do
       when is_integer(first_line) and first_line >= 0 and is_integer(last_line) and
              last_line >= first_line do
     {matches, visited} = collect_range(root, first_line, last_line, [], 0)
-    matches = Enum.reverse(matches)
     {matches, %{visited_nodes: visited, returned_matches: length(matches)}}
   end
 
@@ -387,8 +386,8 @@ defmodule Minga.Editing.Search.Index do
     visited = visited + 1
 
     {acc, visited} =
-      if line > first_line,
-        do: collect_range(left, first_line, last_line, acc, visited),
+      if line < last_line,
+        do: collect_range(right, first_line, last_line, acc, visited),
         else: {acc, visited}
 
     acc =
@@ -396,18 +395,23 @@ defmodule Minga.Editing.Search.Index do
         do: prepend_line_matches(matches, line, acc),
         else: acc
 
-    if line < last_line,
-      do: collect_range(right, first_line, last_line, acc, visited),
+    if line > first_line,
+      do: collect_range(left, first_line, last_line, acc, visited),
       else: {acc, visited}
   end
 
+  # Prepend this line in ascending byte-column order to an already ordered suffix.
   @spec prepend_line_matches(line_matches(), non_neg_integer(), [Match.t()]) :: [Match.t()]
-  defp prepend_line_matches(matches, line, acc) do
-    matches
-    |> Tuple.to_list()
-    |> Enum.reduce(acc, fn {col, length}, matches_acc ->
-      [%Match{line: line, col: col, length: length} | matches_acc]
-    end)
+  defp prepend_line_matches(matches, line, acc),
+    do: prepend_line_matches(matches, line, tuple_size(matches) - 1, acc)
+
+  @spec prepend_line_matches(line_matches(), non_neg_integer(), integer(), [Match.t()]) ::
+          [Match.t()]
+  defp prepend_line_matches(_matches, _line, -1, acc), do: acc
+
+  defp prepend_line_matches(matches, line, index, acc) do
+    {col, length} = elem(matches, index)
+    prepend_line_matches(matches, line, index - 1, [Match.new(line, col, length) | acc])
   end
 
   @spec first_at_or_after_with_rank(tree_node(), Search.position(), non_neg_integer()) ::
@@ -603,10 +607,7 @@ defmodule Minga.Editing.Search.Index do
     {line, matches, _priority, left, right, _lazy, _count} = push(root)
     acc = collect_matches(right, acc)
 
-    acc =
-      Enum.reduce(matches |> Tuple.to_list() |> Enum.reverse(), acc, fn {col, length}, items ->
-        [Match.new(line, col, length) | items]
-      end)
+    acc = prepend_line_matches(matches, line, acc)
 
     collect_matches(left, acc)
   end
