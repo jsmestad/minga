@@ -683,6 +683,8 @@ These are local M1 reads. They are not a promise of a fixed ceiling, and they di
 
 `scripts/bench_keystroke_latency_ab` generates sources and builds the BEAM app once per measured revision in separate detached worktrees. The benchmark starts an editor generation with `HeadlessPort`, without starting the native parser or renderer. It alternates fresh BEAM instances for the samples and any confirmation rounds, checks the budgets from the prepared HEAD, and removes its worktrees without changing the caller's checkout.
 
+When the lockfile, Mix project, toolchain pins, and configuration match, the runner copies base's compiled dependencies into HEAD. Mix validates the copy, and each revision still compiles its own Minga application.
+
 ---
 
 ## Syntax Highlighting Pipeline

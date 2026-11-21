@@ -13,9 +13,21 @@ side=${PWD##*/}
 case "$*" in
   deps.get) printf 'prepare %s\n' "$side" >> "$EVENTS" ;;
   codegen) ;;
-  compile) git rev-parse HEAD > .prepared ;;
+  compile)
+    if [[ $side == head && $MODE != changed-lock ]]; then
+      [[ $(cat _build/test/lib/example/priv/value) == base ]]
+      [[ ! -e _build/test/lib/minga ]]
+      printf 'head\n' > deps/example/priv/value
+    else
+      [[ ! -e _build/test/lib/example ]]
+      mkdir -p deps/example/priv _build/test/lib/{example,minga}
+      printf '%s\n' "$side" > deps/example/priv/value
+      ln -s ../../../../deps/example/priv _build/test/lib/example/priv
+    fi
+    git rev-parse HEAD > .prepared ;;
   'run --no-compile bench/keystroke_latency_baseline.exs')
     [[ $(cat .prepared) == "$(git rev-parse HEAD)" ]]
+    [[ $(cat _build/test/lib/example/priv/value) == "$side" ]]
     printf 'sample %s\n' "$side" >> "$EVENTS"
     if [[ $MODE == missing-head && $side == head && ! -e .first-head ]]; then
       touch .first-head
@@ -43,9 +55,13 @@ class KeystrokeLatencyRunnerTest(unittest.TestCase):
             (source / "bench/baselines").mkdir(parents=True)
             (source / "bench/keystroke_latency_baseline.exs").touch()
             (source / "bench/baselines/keystroke_latency.json").write_text('{"stale":true}')
+            (source / "mix.lock").write_text("base\n")
             self.git(source, "init", "-q")
-            self.git(source, "add", "bench")
+            self.git(source, "add", "bench", "mix.lock")
             self.git(source, "commit", "-qm", "base")
+            if mode == "changed-lock":
+                (source / "mix.lock").write_text("head\n")
+                self.git(source, "add", "mix.lock")
             self.git(source, "commit", "--allow-empty", "-qm", "head")
             binary = root / "bin"
             binary.mkdir()
@@ -68,15 +84,20 @@ class KeystrokeLatencyRunnerTest(unittest.TestCase):
         result, events, comparison = self.run_comparison("missing-head")
         self.assertNotEqual(0, result.returncode)
         self.assertIn("Could not record head latency sample for round 1", result.stderr)
-        self.assertEqual(["prepare head", "prepare base", "sample base", "sample head"], events)
+        self.assertEqual(["prepare base", "prepare head", "sample base", "sample head"], events)
         self.assertIsNone(comparison)
 
     def test_confirmation_reuses_each_build_and_preserves_order(self):
         result, events, comparison = self.run_comparison("confirm")
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
         pair = ["sample base", "sample head", "sample head", "sample base"]
-        self.assertEqual(["prepare head", "prepare base", *pair, "check 4", *pair, "check 8"], events)
+        self.assertEqual(["prepare base", "prepare head", *pair, "check 4", *pair, "check 8"], events)
         self.assertEqual({"samples": 8}, comparison)
+
+    def test_changed_lockfile_builds_dependencies_independently(self):
+        result, _, comparison = self.run_comparison("changed-lock")
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertEqual({"samples": 4}, comparison)
 
 
 if __name__ == "__main__":

@@ -91,6 +91,20 @@ build_revision() {
   mix deps.get && mix codegen && mix compile
 }
 
+seed_head_dependencies() {
+  local base="$work_dir/base" head="$work_dir/head"
+  [[ -d "$base/deps" && -d "$base/_build/test/lib" ]] || return 0
+  cmp -s "$base/mix.lock" "$head/mix.lock" || return 0
+  git diff --quiet "$base_sha" "$head_sha" -- mix.exs .tool-versions config || return 0
+
+  # Copy from base to HEAD only. Keep dependency priv links relative to each checkout,
+  # and let Mix revalidate the manifests. Never seed Minga's own compiled application.
+  echo "Seeding HEAD with compiled dependencies from base"
+  mkdir -p "$head/_build/test/lib" &&
+    rsync -a "$base/deps/" "$head/deps/" &&
+    rsync -a --exclude='/minga/' "$base/_build/test/lib/" "$head/_build/test/lib/"
+}
+
 prepare_revision() {
   local side=$1
   local revision=$2
@@ -98,6 +112,11 @@ prepare_revision() {
 
   echo "::group::Prepare keystroke latency ${side} (${revision})"
   if git worktree add --detach --quiet "$work_dir/$side" "$revision"; then
+    if [[ $side == head ]] && (( base_available )) && ! seed_head_dependencies; then
+      echo "Could not copy benchmark dependencies into HEAD" >&2
+      echo "::endgroup::"
+      return 1
+    fi
     in_revision "$side" build_revision || status=$?
   else
     status=1
@@ -193,14 +212,14 @@ preserve_head_artifact() {
   cp "${head_runs[$last_head_index]}" "$baseline_output"
 }
 
-if ! prepare_revision head "$head_sha"; then
-  echo "HEAD latency benchmark could not prepare revision $head_sha" >&2
-  exit 1
-fi
-
 if (( base_available )) && ! prepare_revision base "$base_sha"; then
   echo "::warning::base latency benchmark could not prepare revision $base_sha; falling back to one HEAD absolute-sanity run."
   base_available=0
+fi
+
+if ! prepare_revision head "$head_sha"; then
+  echo "HEAD latency benchmark could not prepare revision $head_sha" >&2
+  exit 1
 fi
 
 if (( base_available )); then
