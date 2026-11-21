@@ -22,29 +22,43 @@ defmodule MingaAgent.NotifierTest do
     %{options: options}
   end
 
-  test "repeated completions do not silence approvals or failures" do
-    Notifier.notify(:complete, "First result", @notify_opts)
-    Notifier.notify(:complete, "Repeated result", @notify_opts)
-    Notifier.notify(:approval, "Review first tool", @notify_opts)
-    Notifier.notify(:approval, "Review second tool", @notify_opts)
-    Notifier.notify(:error, "Failed turn", @notify_opts)
+  test "external alerts keep session details private without silencing other triggers", %{
+    options: options
+  } do
+    Options.set(options, :agent_notify_debounce, 120_000)
+    private_detail = "private-project-marker"
 
-    assert_received {:notification, _, "First result"}
-    assert_received {:notification, _, "Review first tool"}
-    assert_received {:notification, _, "Review second tool"}
-    assert_received {:notification, _, "Failed turn"}
-    refute_received {:notification, _, "Repeated result"}
+    Notifier.notify(:complete, "First result: #{private_detail}", @notify_opts)
+    assert_received {:notification, "Minga: Agent Finished", body}
+    refute body =~ private_detail
+
+    Notifier.notify(:complete, "Repeated result: #{private_detail}", @notify_opts)
+    refute_received {:notification, _, _}
+
+    for summary <- ["Review first tool", "Review second tool"] do
+      Notifier.notify(:approval, "#{summary}: #{private_detail}", @notify_opts)
+      assert_received {:notification, "Minga: Approval Needed", body}
+      refute body =~ private_detail
+      refute_received {:notification, _, _}
+    end
+
+    Notifier.notify(:error, "Failed turn: #{private_detail}", @notify_opts)
+    assert_received {:notification, "Minga: Agent Error", body}
+    refute body =~ private_detail
+    refute_received {:notification, _, _}
   end
 
   test "configured trigger filters and the master switch prevent delivery", %{options: options} do
     Options.set(options, :agent_notify_on, [:approval])
     Notifier.notify(:complete, "Filtered", @notify_opts)
+    refute_received {:notification, _, _}
+
     Notifier.notify(:approval, "Allowed", @notify_opts)
+    assert_received {:notification, "Minga: Approval Needed", _}
+    refute_received {:notification, _, _}
 
     Options.set(options, :agent_notifications, false)
     Notifier.notify(:approval, "Disabled", @notify_opts)
-
-    assert_received {:notification, _, "Allowed"}
     refute_received {:notification, _, _}
   end
 end

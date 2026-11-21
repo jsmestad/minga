@@ -83,6 +83,8 @@ Minga can tell you when a local agent needs tool approval, finishes its queued w
 
 macOS controls whether a desktop alert is temporary or stays until you dismiss it. Set this under **System Settings → Notifications → Minga**. Dismissing a desktop alert does not approve or cancel a tool request. The approval stays in the conversation until it is resolved, and Minga then removes the corresponding desktop alert. Errors stay in the conversation even if the desktop alert disappears.
 
+When you use the terminal frontend on macOS, its OS alerts also use fixed messages. Open the conversation to read the tool request, result, or error.
+
 To get alerted only when an agent is blocked or fails:
 
 ```elixir
