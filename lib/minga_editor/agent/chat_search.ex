@@ -28,11 +28,14 @@ defmodule MingaEditor.Agent.ChatSearch do
     if pattern == "" do
       []
     else
+      search_pattern = normalize_case(pattern, case_sensitive)
+      pattern_len = String.length(search_pattern)
+
       messages
-      |> Enum.with_index()
+      |> Stream.with_index()
       |> Enum.flat_map(fn {msg, idx} ->
-        text = Message.text(msg)
-        find_in_text(text, pattern, idx, case_sensitive)
+        search_text = msg |> Message.text() |> normalize_case(case_sensitive)
+        find_all(search_text, search_pattern, pattern_len, idx, 0, [])
       end)
     end
   end
@@ -56,18 +59,9 @@ defmodule MingaEditor.Agent.ChatSearch do
     end
   end
 
-  @spec find_in_text(String.t(), String.t(), non_neg_integer(), boolean()) :: [match()]
-  defp find_in_text(text, pattern, msg_idx, case_sensitive) do
-    {search_text, search_pattern} =
-      if case_sensitive do
-        {text, pattern}
-      else
-        {String.downcase(text), String.downcase(pattern)}
-      end
-
-    pattern_len = String.length(search_pattern)
-    find_all(search_text, search_pattern, pattern_len, msg_idx, 0, [])
-  end
+  @spec normalize_case(String.t(), boolean()) :: String.t()
+  defp normalize_case(text, true), do: text
+  defp normalize_case(text, false), do: String.downcase(text)
 
   @spec find_all(
           String.t(),

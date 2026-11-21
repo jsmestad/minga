@@ -246,6 +246,21 @@ defmodule MingaEditor.Agent.MarkdownHighlightTest do
       assert Bitwise.band(flags, 0x10) != 0
     end
 
+    test "mixed code cards keep their inferred paths and all rendered block IDs use block order" do
+      text = "`lib/first.ex`\n    indented\n```\nfenced\n```\n`lib/fallback.ex`"
+      blocks = MarkdownHighlight.render_blocks(text, nil, @theme_syntax, 42)
+
+      assert [
+               %{kind: :paragraph},
+               %{kind: :code_block, target_path: "lib/first.ex"},
+               %{kind: :code_block, target_path: "lib/fallback.ex"},
+               %{kind: :paragraph}
+             ] = blocks
+
+      expected_ids = Enum.map(0..3, &:erlang.phash2({42, &1}, 4_294_967_296))
+      assert Enum.map(blocks, & &1.id) == expected_ids
+    end
+
     test "unclosed fenced code block is semantic streaming code" do
       [code] = MarkdownHighlight.render_blocks("```python\nprint('hi')", nil, @theme_syntax, 99)
 
