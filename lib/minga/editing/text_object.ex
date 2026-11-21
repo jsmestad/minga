@@ -55,7 +55,6 @@ defmodule Minga.Editing.TextObject do
   @type range :: {position(), position()} | nil
 
   @typep sentence_tokens :: tuple()
-  @typep sentence_span :: {non_neg_integer(), non_neg_integer(), non_neg_integer()}
   @typep delimiter_open :: {position(), non_neg_integer()}
   @typep delimiter_open_scan ::
            {:found, position(), non_neg_integer()} | {:miss, non_neg_integer()}
@@ -537,45 +536,9 @@ defmodule Minga.Editing.TextObject do
         nil
 
       {tokens, cursor_idx} ->
-        spans = sentence_spans(tokens)
-        sentence_range_for_tokens(tokens, spans, cursor_idx, kind)
+        start = next_non_whitespace_index(tokens, 0)
+        select_sentence(tokens, start, cursor_idx, kind)
     end
-  end
-
-  @spec sentence_range_for_tokens(
-          sentence_tokens(),
-          [sentence_span()],
-          non_neg_integer(),
-          :inner | :around
-        ) :: range()
-  defp sentence_range_for_tokens(tokens, spans, cursor_idx, kind) do
-    case elem(tokens, cursor_idx) do
-      {" ", _pos} -> sentence_range_for_whitespace(tokens, spans, cursor_idx, kind)
-      {"\t", _pos} -> sentence_range_for_whitespace(tokens, spans, cursor_idx, kind)
-      {"\n", _pos} -> sentence_range_for_whitespace(tokens, spans, cursor_idx, kind)
-      {_char, _pos} -> sentence_span_for(spans, tokens, cursor_idx, kind)
-    end
-  end
-
-  @spec sentence_range_for_whitespace(
-          sentence_tokens(),
-          [sentence_span()],
-          non_neg_integer(),
-          :inner | :around
-        ) :: range()
-  defp sentence_range_for_whitespace(tokens, spans, cursor_idx, kind) do
-    if cursor_idx_within_sentence_inner?(spans, cursor_idx) do
-      sentence_span_for(spans, tokens, cursor_idx, kind)
-    else
-      sentence_gap_range(tokens, spans, cursor_idx, kind)
-    end
-  end
-
-  @spec cursor_idx_within_sentence_inner?([sentence_span()], non_neg_integer()) :: boolean()
-  defp cursor_idx_within_sentence_inner?(spans, cursor_idx) do
-    Enum.any?(spans, fn {start_idx, end_idx, _trailing_end_idx} ->
-      cursor_idx >= start_idx and cursor_idx <= end_idx
-    end)
   end
 
   @spec sentence_context(Readable.t(), position()) :: {sentence_tokens(), non_neg_integer()} | nil
@@ -606,43 +569,38 @@ defmodule Minga.Editing.TextObject do
   @spec sentence_tokens(Readable.t(), non_neg_integer(), non_neg_integer()) :: sentence_tokens()
   defp sentence_tokens(buffer, first_line, last_line) do
     first_line..last_line
-    |> Enum.flat_map(&sentence_tokens_for_line(buffer, &1, last_line))
+    |> Enum.reduce([], fn line, acc -> prepend_sentence_line(buffer, line, last_line, acc) end)
+    |> Enum.reverse()
     |> List.to_tuple()
   end
 
-  @spec sentence_tokens_for_line(Readable.t(), non_neg_integer(), non_neg_integer()) :: [
-          {String.t(), position()}
-        ]
-  defp sentence_tokens_for_line(buffer, line, last_line) do
+  @spec prepend_sentence_line(
+          Readable.t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          [{String.t(), position()}]
+        ) :: [{String.t(), position()}]
+  defp prepend_sentence_line(buffer, line, last_line, acc) do
     text = Readable.line_at(buffer, line) || ""
-    tokens = graphemes_with_byte_cols(text, line)
+    acc = prepend_graphemes(text, line, 0, acc)
 
-    if line < last_line do
-      Enum.concat(tokens, [{"\n", {line, byte_size(text)}}])
-    else
-      tokens
-    end
+    if line < last_line, do: [{"\n", {line, byte_size(text)}} | acc], else: acc
   end
 
-  @spec graphemes_with_byte_cols(String.t(), non_neg_integer()) :: [{String.t(), position()}]
-  defp graphemes_with_byte_cols(text, line_idx) do
-    do_graphemes_with_byte_cols(text, line_idx, 0, [])
-  end
-
-  @spec do_graphemes_with_byte_cols(String.t(), non_neg_integer(), non_neg_integer(), [
+  @spec prepend_graphemes(String.t(), non_neg_integer(), non_neg_integer(), [
           {String.t(), position()}
         ]) :: [{String.t(), position()}]
-  defp do_graphemes_with_byte_cols(text, line_idx, byte_pos, acc) do
+  defp prepend_graphemes(text, line_idx, byte_pos, acc) do
     case String.next_grapheme(text) do
       {g, rest} ->
         g_size = byte_size(text) - byte_size(rest)
 
-        do_graphemes_with_byte_cols(rest, line_idx, byte_pos + g_size, [
+        prepend_graphemes(rest, line_idx, byte_pos + g_size, [
           {g, {line_idx, byte_pos}} | acc
         ])
 
       nil ->
-        Enum.reverse(acc)
+        acc
     end
   end
 
@@ -672,27 +630,58 @@ defmodule Minga.Editing.TextObject do
     end
   end
 
-  @spec sentence_spans(sentence_tokens()) :: [sentence_span()]
-  defp sentence_spans(tokens) do
-    case next_non_whitespace_index(tokens, 0) do
-      nil -> []
-      start_idx -> build_sentence_spans(tokens, start_idx, [])
-    end
+  @spec select_sentence(
+          sentence_tokens(),
+          non_neg_integer() | nil,
+          non_neg_integer(),
+          :inner | :around
+        ) :: range()
+  defp select_sentence(_tokens, nil, _cursor, _kind), do: nil
+
+  defp select_sentence(tokens, start, cursor, kind) do
+    inner_end = sentence_end_or_paragraph_end(tokens, start)
+    trailing_end = trailing_whitespace_end(tokens, inner_end + 1)
+    select_sentence_span(tokens, {start, inner_end, trailing_end}, cursor, kind)
   end
 
-  @spec build_sentence_spans(sentence_tokens(), non_neg_integer(), [sentence_span()]) :: [
-          sentence_span()
-        ]
-  defp build_sentence_spans(tokens, start_idx, acc) do
-    end_idx = sentence_end_or_paragraph_end(tokens, start_idx)
-    trailing_end_idx = trailing_whitespace_end(tokens, end_idx + 1)
-    span = {start_idx, end_idx, trailing_end_idx}
-
-    case next_non_whitespace_index(tokens, trailing_end_idx + 1) do
-      nil -> Enum.reverse([span | acc])
-      next_start_idx -> build_sentence_spans(tokens, next_start_idx, [span | acc])
-    end
+  @spec select_sentence_span(
+          sentence_tokens(),
+          {non_neg_integer(), non_neg_integer(), non_neg_integer()},
+          non_neg_integer(),
+          :inner | :around
+        ) :: range()
+  defp select_sentence_span(tokens, {start, inner_end, _trailing}, cursor, :inner)
+       when cursor <= inner_end do
+    range_from_token_indices(tokens, leading_start(start, cursor), inner_end)
   end
+
+  defp select_sentence_span(tokens, {start, inner_end, trailing}, cursor, :around)
+       when cursor <= inner_end do
+    range_from_token_indices(tokens, leading_start(start, cursor), trailing)
+  end
+
+  defp select_sentence_span(tokens, {_start, inner_end, trailing}, cursor, :inner)
+       when cursor <= trailing do
+    range_from_token_indices(tokens, inner_end + 1, trailing)
+  end
+
+  defp select_sentence_span(tokens, {_start, inner_end, trailing}, cursor, :around)
+       when cursor <= trailing and trailing + 1 < tuple_size(tokens) do
+    next_end = sentence_end_or_paragraph_end(tokens, trailing + 1)
+    next_trailing = trailing_whitespace_end(tokens, next_end + 1)
+    range_from_token_indices(tokens, inner_end + 1, next_trailing)
+  end
+
+  defp select_sentence_span(tokens, {_start, _inner_end, trailing}, cursor, kind)
+       when trailing + 1 < tuple_size(tokens) do
+    select_sentence(tokens, trailing + 1, cursor, kind)
+  end
+
+  defp select_sentence_span(_tokens, _span, _cursor, _kind), do: nil
+
+  @spec leading_start(non_neg_integer(), non_neg_integer()) :: non_neg_integer()
+  defp leading_start(start, cursor) when cursor < start, do: 0
+  defp leading_start(start, _cursor), do: start
 
   @spec sentence_end_or_paragraph_end(sentence_tokens(), non_neg_integer()) :: non_neg_integer()
   defp sentence_end_or_paragraph_end(tokens, start_idx) do
@@ -784,104 +773,6 @@ defmodule Minga.Editing.TextObject do
     else
       idx
     end
-  end
-
-  @spec sentence_gap_range(
-          sentence_tokens(),
-          [sentence_span()],
-          non_neg_integer(),
-          :inner | :around
-        ) :: range()
-  defp sentence_gap_range(tokens, spans, cursor_idx, :inner) do
-    {gap_start_idx, gap_end_idx} = whitespace_run_indices(tokens, cursor_idx)
-
-    case {previous_sentence_span(spans, cursor_idx), next_sentence_span(spans, cursor_idx)} do
-      {nil, nil} ->
-        nil
-
-      {nil, {_next_start_idx, next_end_idx, _next_trailing_end_idx}} ->
-        range_from_token_indices(tokens, gap_start_idx, next_end_idx)
-
-      {_prev_span, _next_span} ->
-        range_from_token_indices(tokens, gap_start_idx, gap_end_idx)
-    end
-  end
-
-  defp sentence_gap_range(tokens, spans, cursor_idx, :around) do
-    {gap_start_idx, _gap_end_idx} = whitespace_run_indices(tokens, cursor_idx)
-
-    case next_sentence_span(spans, cursor_idx) do
-      nil ->
-        nil
-
-      {_next_start_idx, _next_end_idx, next_trailing_end_idx} ->
-        {_gap_char, gap_start_pos} = elem(tokens, gap_start_idx)
-        {_next_char, next_end_pos} = elem(tokens, next_trailing_end_idx)
-        {gap_start_pos, next_end_pos}
-    end
-  end
-
-  @spec next_sentence_span([sentence_span()], non_neg_integer()) :: sentence_span() | nil
-  defp next_sentence_span(spans, cursor_idx) do
-    Enum.find(spans, fn {start_idx, _end_idx, _trailing_end_idx} -> cursor_idx < start_idx end)
-  end
-
-  @spec previous_sentence_span([sentence_span()], non_neg_integer()) :: sentence_span() | nil
-  defp previous_sentence_span(spans, cursor_idx) do
-    spans
-    |> Enum.reverse()
-    |> Enum.find(fn {start_idx, _end_idx, _trailing_end_idx} -> cursor_idx >= start_idx end)
-  end
-
-  @spec whitespace_run_indices(sentence_tokens(), non_neg_integer()) ::
-          {non_neg_integer(), non_neg_integer()}
-  defp whitespace_run_indices(tokens, idx) do
-    start_idx = scan_left_tuple(tokens, idx, &sentence_whitespace_token?/1)
-    end_idx = scan_right_tuple(tokens, idx, &sentence_whitespace_token?/1)
-    {start_idx, end_idx}
-  end
-
-  @spec sentence_whitespace_token?({String.t(), position()}) :: boolean()
-  defp sentence_whitespace_token?({char, _pos}), do: sentence_whitespace?(char)
-
-  @spec sentence_span_for(
-          [sentence_span()],
-          sentence_tokens(),
-          non_neg_integer(),
-          :inner | :around
-        ) ::
-          range()
-  defp sentence_span_for(spans, tokens, cursor_idx, :inner) do
-    span =
-      Enum.find(spans, fn {start_idx, _end_idx, trailing_end_idx} ->
-        cursor_idx >= start_idx and cursor_idx <= trailing_end_idx
-      end) ||
-        Enum.find(spans, fn {start_idx, _end_idx, _trailing_end_idx} -> cursor_idx < start_idx end)
-
-    sentence_span_to_range(span, tokens, :inner)
-  end
-
-  defp sentence_span_for(spans, tokens, cursor_idx, :around) do
-    span =
-      Enum.find(spans, fn {start_idx, end_idx, _trailing_end_idx} ->
-        cursor_idx >= start_idx and cursor_idx <= end_idx
-      end) ||
-        Enum.find(spans, fn {start_idx, _end_idx, _trailing_end_idx} -> cursor_idx < start_idx end) ||
-        Enum.at(spans, -1)
-
-    sentence_span_to_range(span, tokens, :around)
-  end
-
-  @spec sentence_span_to_range(sentence_span() | nil, sentence_tokens(), :inner | :around) ::
-          range()
-  defp sentence_span_to_range(nil, _tokens, _kind), do: nil
-
-  defp sentence_span_to_range({start_idx, end_idx, _trailing_end_idx}, tokens, :inner) do
-    range_from_token_indices(tokens, start_idx, end_idx)
-  end
-
-  defp sentence_span_to_range({start_idx, _end_idx, trailing_end_idx}, tokens, :around) do
-    range_from_token_indices(tokens, start_idx, trailing_end_idx)
   end
 
   @spec range_from_token_indices(sentence_tokens(), non_neg_integer(), non_neg_integer()) ::
