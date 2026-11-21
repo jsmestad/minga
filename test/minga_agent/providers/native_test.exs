@@ -693,6 +693,13 @@ defmodule MingaAgent.Providers.NativeTest do
     end
 
     test "falls back to the process working directory when no project is active" do
+      if previous_root = Minga.Project.workspace_root() do
+        on_exit(fn -> assert {:ok, _snapshot} = Minga.Project.activate(previous_root) end)
+      end
+
+      Minga.Project.close()
+      assert Minga.Project.root() == nil
+
       {:ok, pid} = start_provider(project_root: nil)
 
       assert {:ok, session_state} = Native.get_state(pid)
