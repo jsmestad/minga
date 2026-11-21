@@ -2,9 +2,7 @@ defmodule Minga.Extension.Git do
   @moduledoc """
   Resolves git-sourced extensions by cloning and updating repos.
 
-  Extensions declared with `git:` are cloned under `$XDG_DATA_HOME/minga/extensions/`
-  (default: `~/.local/share/minga/extensions/`). On subsequent boots, the cached
-  checkout is used as-is. Explicit updates via `SPC h e u` fetch and fast-forward.
+  New `git:` checkouts live under `$XDG_DATA_HOME/minga/extension_sources/`, separate from extension data. Existing checkouts under `extensions/` stay in place. Subsequent boots reuse the checkout without fetching; explicit updates via `SPC h e u` fetch and fast-forward.
   """
 
   @typedoc "Summary of available updates for a git extension."
@@ -101,7 +99,15 @@ defmodule Minga.Extension.Git do
   @doc "Returns the local cache path for a named extension."
   @spec extension_path(atom()) :: String.t()
   def extension_path(name) do
-    Path.join([Minga.UserPaths.data_dir(), "extensions", Atom.to_string(name)])
+    data_dir = Minga.UserPaths.data_dir()
+    id = Atom.to_string(name)
+    legacy_path = Path.join([data_dir, "extensions", id])
+
+    if File.dir?(Path.join(legacy_path, ".git")) do
+      legacy_path
+    else
+      Path.join([data_dir, "extension_sources", id])
+    end
   end
 
   # ── Private ─────────────────────────────────────────────────────────────────

@@ -85,6 +85,30 @@ defmodule Minga.Config.LoaderTest do
       assert Options.get(test_options_server(), :line_numbers) == :relative
     end
 
+    test "saved bindings get one install notice per missing extracted extension" do
+      ExtRegistry.reset()
+      on_exit(&ExtRegistry.reset/0)
+
+      {_dir, config_home, cleanup} =
+        make_config_dir("""
+        use Minga.Config
+
+        bind :normal, "SPC k f", :knowledge_map, "Familiarity"
+        bind :normal, "SPC k c", :knowledge_briefing, "Briefing"
+        bind :normal, "SPC a z", :adversarial_analyze, "Challenge"
+        extension :minga_adversarial, git: "https://github.com/jsmestad/minga-adverserial"
+        raise "later config error"
+        """)
+
+      on_exit(cleanup)
+      pid = start_supervised!({Loader, name: nil, config_home: config_home})
+
+      assert Loader.load_error(pid) =~ "later config error"
+
+      assert Loader.migration_notice(pid) ==
+               ~s(Some configured keybindings need optional extensions. Add to config.exs and restart: extension :minga_knowledge_graph, git: "https://github.com/jsmestad/minga-knowledge-graph")
+    end
+
     test "loads the built-in MCP extension and mcp_server DSL" do
       {_dir, config_home, cleanup} =
         make_config_dir("""

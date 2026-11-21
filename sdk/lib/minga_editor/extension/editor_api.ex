@@ -11,6 +11,10 @@ defmodule MingaEditor.Extension.EditorAPI do
 
   @type state :: term()
 
+  @doc "Displays a transient editor notice and returns the updated command state."
+  @spec notice(state(), String.t()) :: state()
+  def notice(_state, _message), do: raise("minga_sdk is compile-time only")
+
   @spec open_file(state(), String.t()) :: state()
   def open_file(_state, _path), do: raise("minga_sdk is compile-time only")
 

@@ -1149,6 +1149,18 @@ Minga loads config in this order. Each stage can override the previous one:
 
 Extensions are reusable, self-contained editor plugins. Each extension runs under its own supervisor, so a crash in one extension never affects others or the editor.
 
+### Optional extensions
+
+Adversarial, Knowledge Graph, and Ghost Cursors install only when you opt in. Add the lines you want to `config.exs` and restart Minga:
+
+```elixir
+extension :minga_adversarial, git: "https://github.com/jsmestad/minga-adverserial"
+extension :minga_knowledge_graph, git: "https://github.com/jsmestad/minga-knowledge-graph"
+extension :minga_ghost_cursors, git: "https://github.com/jsmestad/minga-ghost-cursors"
+```
+
+If you used Knowledge Graph before this change, keep the name `:minga_knowledge_graph` to continue using your saved graph. The Git checkout is separate from its data.
+
 ### Writing an extension
 
 An extension is a directory containing `.ex` files, with one module that implements the `Minga.Extension` behaviour:
@@ -1184,7 +1196,7 @@ defmodule MingaTodo do
 end
 ```
 
-Options declared with `option/3` are validated against their type when the extension loads. Users configure them directly in the extension declaration (see [Loading extensions](#loading-extensions) below). At runtime, read them with `Minga.Config.Options.get_extension_option(:minga_todo, :keyword)`.
+Options declared with `option/3` are validated against their type when the extension loads. Users configure them directly in the extension declaration (see [Loading extensions](#loading-extensions) below). At runtime, read them with `Minga.Config.get_extension_option(:minga_todo, :keyword)`.
 
 The `use Minga.Extension` macro also gives you a default `child_spec/1` that starts a simple Agent holding your config. Override `child_spec/1` if your extension needs a GenServer or a full supervision tree:
 
@@ -1264,7 +1276,7 @@ Path extensions don't have an update mechanism. You manage the directory yoursel
 
 ### Git extensions
 
-Git extensions are cloned to `~/.local/share/minga/extensions/{name}/` on first load. Subsequent startups use the cached checkout without touching the network, so the editor boots reliably even when GitHub is down.
+New Git checkouts live in `~/.local/share/minga/extension_sources/{name}/`, separate from extension data. Existing checkouts under `~/.local/share/minga/extensions/` stay in place. Subsequent startups use the cached checkout without a network request.
 
 ```elixir
 # Track the default branch (main). Stays on last-fetched commit until you update.

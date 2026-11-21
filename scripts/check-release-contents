@@ -124,7 +124,7 @@ def single(paths, description):
     return paths[0]
 
 
-def check(release, target, app=None, *, rolling_version=None):
+def check(release, target, app=None, *, rolling_version=None, source_tree=None):
     release = release.resolve(strict=True)
     if not release.is_dir():
         raise ValueError(f"Not a release directory: {release}")
@@ -162,9 +162,18 @@ def check(release, target, app=None, *, rolling_version=None):
     require_file(priv / "tree_sitter/parser.h")
     if not list((priv / "queries").rglob("*.scm")):
         raise ValueError("Missing packaged tree-sitter queries")
-    for extension in ("git_porcelain", "knowledge_graph", "adversarial"):
-        if not list((priv / "extensions" / extension / "lib").rglob("*.ex")):
+    extensions = priv / "extensions"
+    source_tree = source_tree or Path(__file__).resolve().parents[1]
+    source_extensions = source_tree / "extensions"
+    expected = {name for name in ("git_extended", "git_porcelain", "knowledge_graph", "adversarial")
+                if (source_extensions / name / "lib" / f"minga_{name}.ex").is_file()}
+    if len(expected & {"git_extended", "git_porcelain"}) != 1:
+        raise ValueError("Selected source must contain one bundled Git extension")
+    for extension in sorted(expected):
+        if not list((extensions / extension / "lib").rglob("*.ex")):
             raise ValueError(f"Missing bundled extension source: {extension}")
+    if {entry.name for entry in extensions.iterdir()} != expected:
+        raise ValueError("Unexpected source in packaged extensions")
     required_native = [erts / "bin/beam.smp"]
     for name in ("minga-renderer-go", "minga-parser", "minga-hook-runner", "minga-shell-output-reader"):
         path = priv / name
@@ -379,12 +388,13 @@ def main():
     parser.add_argument("--app", type=Path)
     parser.add_argument("--rolling-version")
     parser.add_argument("--runtime-receipt", type=Path)
+    parser.add_argument("--source-tree", type=Path)
     args = parser.parse_args()
     try:
         if args.target not in TARGETS:
             raise ValueError("Unsupported native host; pass an explicit supported --target")
         release, erts, native = check(Path(args.release_dir), args.target, args.app,
-                                      rolling_version=args.rolling_version)
+                                      rolling_version=args.rolling_version, source_tree=args.source_tree)
         if args.runtime_receipt is not None:
             _check_runtime_abi(release, erts, native, args.target, args.runtime_receipt)
     except (OSError, ValueError) as error:

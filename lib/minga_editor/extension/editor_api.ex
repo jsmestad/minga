@@ -19,12 +19,17 @@ defmodule MingaEditor.Extension.EditorAPI do
   """
 
   alias MingaEditor.Handlers.BufferRegistry
+  alias MingaEditor.Shell.Traditional.NoticeWorkflow
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Windows
   alias Minga.Buffer
 
   @typedoc "Editor state (opaque to extensions)."
   @type state :: EditorState.t()
+
+  @doc "Displays a transient editor notice and returns the updated command state."
+  @spec notice(state(), String.t()) :: state()
+  def notice(state, message) when is_binary(message), do: NoticeWorkflow.publish(state, message)
 
   @doc """
   Opens a file by path in the current window.

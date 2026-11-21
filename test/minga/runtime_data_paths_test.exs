@@ -33,10 +33,37 @@ defmodule Minga.RuntimeDataPathsTest do
              Path.join(tmp_dir, "minga/swap"),
              Path.join(tmp_dir, "minga/events.db"),
              Path.join(tmp_dir, "minga/agent_events.db"),
-             Path.join(tmp_dir, "minga/extensions/example"),
+             Path.join(tmp_dir, "minga/extension_sources/example"),
              Path.join(tmp_dir, "minga/extensions/example/data"),
              Path.join(tmp_dir, "minga/minga.log")
            ]
+  end
+
+  test "new Git checkouts do not replace existing extension data or legacy checkouts", %{
+    tmp_dir: tmp_dir
+  } do
+    data_only = Path.join(tmp_dir, "minga/extensions/data_only/data")
+    legacy_checkout = Path.join(tmp_dir, "minga/extensions/legacy")
+    File.mkdir_p!(data_only)
+    File.write!(Path.join(data_only, "graph.json"), "saved graph")
+    File.mkdir_p!(Path.join(legacy_checkout, ".git"))
+
+    code = """
+    IO.puts(Minga.Extension.Git.extension_path(:data_only))
+    IO.puts(Minga.Extension.Git.extension_path(:legacy))
+    """
+
+    {output, status} =
+      ElixirSubprocess.eval(code, [], env: [{"XDG_DATA_HOME", tmp_dir}], stderr_to_stdout: true)
+
+    assert status == 0, output
+
+    assert String.split(output, "\n", trim: true) == [
+             Path.join(tmp_dir, "minga/extension_sources/data_only"),
+             legacy_checkout
+           ]
+
+    assert File.read!(Path.join(data_only, "graph.json")) == "saved graph"
   end
 
   test "relative, empty, and unset XDG roots use the normal home defaults", %{tmp_dir: tmp_dir} do

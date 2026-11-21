@@ -6,11 +6,11 @@ defmodule MingaEditor.Extension.EditorAPITest do
   alias MingaEditor.Extension.EditorAPI
   alias MingaEditor.State, as: EditorState
 
-  test "set_status/2 sets a transient status message" do
+  test "notice/2 makes an extension message visible as the current editor notice" do
     state = base_state(content: "hello world")
 
     assert state
-           |> MingaEditor.Shell.Traditional.NoticeWorkflow.publish("Test status message")
+           |> EditorAPI.notice("Test status message")
            |> MingaEditor.Shell.Traditional.NoticeWorkflow.message() ==
              "Test status message"
   end
