@@ -295,14 +295,13 @@ defmodule Minga.Core.Decorations do
 
   @spec without_annotation_group([LineAnnotation.t()], term()) ::
           :unchanged | [LineAnnotation.t()]
-  defp without_annotation_group([], _group), do: :unchanged
+  defp without_annotation_group(annotations, group) do
+    matches? = &(&1.group == group)
 
-  defp without_annotation_group([%LineAnnotation{group: ann_group} = ann | rest], group) do
-    case without_annotation_group(rest, group) do
-      :unchanged when ann_group == group -> rest
-      :unchanged -> :unchanged
-      remaining when ann_group == group -> remaining
-      remaining -> [ann | remaining]
+    if Enum.any?(annotations, matches?) do
+      Enum.reject(annotations, matches?)
+    else
+      :unchanged
     end
   end
 
