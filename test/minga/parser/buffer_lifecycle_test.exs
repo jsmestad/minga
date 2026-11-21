@@ -9,7 +9,7 @@ defmodule Minga.Parser.BufferLifecycleTest do
   alias Minga.Parser.RequestHandler
   alias Minga.Parser.RequestState
 
-  test "eviction fails deferred, fenced, and in-flight requests and ignores late results" do
+  test "eviction fails deferred and in-flight requests and ignores late results" do
     buffer = start_supervised!({Minga.Buffer, content: "value", filetype: :elixir})
     config = %BufferConfig{language: "elixir"}
     stale_at = System.monotonic_time(:millisecond) - 1_000

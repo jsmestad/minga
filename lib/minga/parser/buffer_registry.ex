@@ -10,7 +10,6 @@ defmodule Minga.Parser.BufferRegistry do
   @type register_status :: :new | :existing | {:replaced, pos_integer()}
   @type t :: %__MODULE__{
           entries: %{pid() => meta()},
-          ids: %{pid() => pos_integer()},
           pids: %{pos_integer() => pid()},
           next_id: pos_integer(),
           parse_version: non_neg_integer(),
@@ -19,7 +18,6 @@ defmodule Minga.Parser.BufferRegistry do
         }
 
   defstruct entries: %{},
-            ids: %{},
             pids: %{},
             next_id: 1,
             parse_version: 0,
@@ -62,19 +60,30 @@ defmodule Minga.Parser.BufferRegistry do
   @spec fetch(t(), pid()) :: {:ok, meta()} | :error
   def fetch(%__MODULE__{entries: entries}, buffer_pid), do: Map.fetch(entries, buffer_pid)
 
-  @doc "Replaces an existing registration; unknown PIDs are ignored."
+  @doc "Installs synchronization state only for the current registration identity."
   @spec put(t(), pid(), meta()) :: t()
-  def put(%__MODULE__{} = registry, buffer_pid, %BufferRegistration{} = registration) do
-    if Map.has_key?(registry.entries, buffer_pid) do
-      %{registry | entries: Map.put(registry.entries, buffer_pid, registration)}
-    else
-      registry
+  def put(
+        %__MODULE__{entries: entries} = registry,
+        buffer_pid,
+        %BufferRegistration{id: id, generation: generation, config: config} = registration
+      ) do
+    case entries do
+      %{^buffer_pid => %BufferRegistration{id: ^id, generation: ^generation, config: ^config}} ->
+        %{registry | entries: %{entries | buffer_pid => registration}}
+
+      _ ->
+        registry
     end
   end
 
   @doc "Returns the parser ID for a buffer PID."
   @spec buffer_id(t(), pid()) :: pos_integer() | nil
-  def buffer_id(%__MODULE__{ids: ids}, buffer_pid), do: Map.get(ids, buffer_pid)
+  def buffer_id(%__MODULE__{entries: entries}, buffer_pid) do
+    case entries do
+      %{^buffer_pid => %BufferRegistration{id: id}} -> id
+      _ -> nil
+    end
+  end
 
   @doc "Returns the buffer PID for a parser ID."
   @spec resolve(t(), non_neg_integer()) :: pid() | nil
@@ -94,7 +103,7 @@ defmodule Minga.Parser.BufferRegistry do
   @doc "Refreshes activity for a registered buffer."
   @spec touch(t(), pid(), integer()) :: t()
   def touch(%__MODULE__{} = registry, buffer_pid, now) do
-    if Map.has_key?(registry.ids, buffer_pid) do
+    if Map.has_key?(registry.entries, buffer_pid) do
       %{registry | last_active_at: Map.put(registry.last_active_at, buffer_pid, now)}
     else
       registry
@@ -104,13 +113,13 @@ defmodule Minga.Parser.BufferRegistry do
   @doc "Unregisters a buffer and returns its former parser ID and monitor."
   @spec unregister(t(), pid()) :: {pos_integer() | nil, reference() | nil, t()}
   def unregister(%__MODULE__{} = registry, buffer_pid) do
-    {buffer_id, ids} = Map.pop(registry.ids, buffer_pid)
+    {registration, entries} = Map.pop(registry.entries, buffer_pid)
+    buffer_id = registration_id(registration)
     {monitor_ref, monitors} = Map.pop(registry.monitors, buffer_pid)
 
     updated = %{
       registry
-      | entries: Map.delete(registry.entries, buffer_pid),
-        ids: ids,
+      | entries: entries,
         pids: delete_reverse_id(registry.pids, buffer_id),
         last_active_at: Map.delete(registry.last_active_at, buffer_pid),
         monitors: monitors
@@ -158,6 +167,10 @@ defmodule Minga.Parser.BufferRegistry do
     %{registry | entries: entries, parse_version: 0}
   end
 
+  @spec registration_id(meta() | nil) :: pos_integer() | nil
+  defp registration_id(%BufferRegistration{id: id}), do: id
+  defp registration_id(nil), do: nil
+
   @spec delete_reverse_id(%{pos_integer() => pid()}, pos_integer() | nil) :: %{
           pos_integer() => pid()
         }
@@ -173,7 +186,6 @@ defmodule Minga.Parser.BufferRegistry do
     updated = %{
       registry
       | entries: Map.put(registry.entries, buffer_pid, registration),
-        ids: Map.put(registry.ids, buffer_pid, buffer_id),
         pids: Map.put(registry.pids, buffer_id, buffer_pid),
         next_id: buffer_id + 1,
         last_active_at: Map.put(registry.last_active_at, buffer_pid, now)
@@ -191,7 +203,6 @@ defmodule Minga.Parser.BufferRegistry do
     updated = %{
       registry
       | entries: Map.put(registry.entries, buffer_pid, registration),
-        ids: Map.put(registry.ids, buffer_pid, buffer_id),
         pids: registry.pids |> Map.delete(old_id) |> Map.put(buffer_id, buffer_pid),
         next_id: buffer_id + 1,
         last_active_at: Map.put(registry.last_active_at, buffer_pid, now)

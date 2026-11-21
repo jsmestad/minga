@@ -103,7 +103,7 @@ defmodule Minga.Parser.RequestHandler do
 
       {request, requests} ->
         GenServer.reply(request.from, nil)
-        RequestState.drop_fence(requests, token)
+        requests
     end
   end
 
@@ -120,7 +120,7 @@ defmodule Minga.Parser.RequestHandler do
     end
   end
 
-  @doc "Fails deferred, fenced, and in-flight requests associated with one buffer."
+  @doc "Fails deferred and in-flight requests associated with one buffer."
   @spec fail_buffer(RequestState.t(), pid()) :: RequestState.t()
   def fail_buffer(requests, buffer_pid) do
     {replies, requests} = RequestState.take_buffer(requests, buffer_pid)
