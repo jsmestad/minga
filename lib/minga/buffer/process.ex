@@ -581,6 +581,16 @@ defmodule Minga.Buffer.Process do
     GenServer.call(server, {:lines, start, count})
   end
 
+  @doc "Fetches a sparse set of lines from one document state. Invalid indices raise in the caller."
+  @spec lines_at(GenServer.server(), [non_neg_integer()]) :: %{non_neg_integer() => String.t()}
+  def lines_at(server, line_numbers) when is_list(line_numbers) do
+    unless Enum.all?(line_numbers, &(is_integer(&1) and &1 >= 0)) do
+      raise ArgumentError, "expected non-negative integer line numbers"
+    end
+
+    GenServer.call(server, {:lines_at, line_numbers})
+  end
+
   @doc "Returns the current cursor position."
   @spec cursor(GenServer.server()) :: Document.position()
   def cursor(server) do
@@ -1803,6 +1813,10 @@ defmodule Minga.Buffer.Process do
 
   def handle_call({:lines, start, count}, _from, state) do
     {:reply, Lines.slice(state.document, start, count), state}
+  end
+
+  def handle_call({:lines_at, line_numbers}, _from, state) do
+    {:reply, Lines.fetch_many(state.document, line_numbers), state}
   end
 
   def handle_call(:cursor, _from, state) do

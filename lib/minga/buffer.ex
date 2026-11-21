@@ -169,6 +169,10 @@ defmodule Minga.Buffer do
   @spec lines(t(), non_neg_integer(), non_neg_integer()) :: [String.t()]
   defdelegate lines(server, start, count), to: BufferProcess
 
+  @doc "Returns existing requested lines from one buffer revision. Invalid indices raise `ArgumentError`."
+  @spec lines_at(t(), [non_neg_integer()]) :: %{non_neg_integer() => String.t()}
+  defdelegate lines_at(server, line_numbers), to: BufferProcess
+
   @doc "Content of lines from `start_line` to `end_line` (inclusive, 0-indexed)."
   @spec content_on_lines(t(), non_neg_integer(), non_neg_integer()) :: String.t()
   defdelegate content_on_lines(server, start_line, end_line), to: BufferProcess
