@@ -107,6 +107,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - Native agent reads, discovery, searches, shell results, and tool results now distinguish visible truncation from bounded durable capture, support binary-safe exact record-scoped retrieval across restart, preserve source revisions and timeout prefixes, reconcile interrupted delivery outputs without replay, and explicitly refuse retention quota failures. Image reads deliver retained bytes through exact model and protocol support or return a visible limitation before full capture. Combined snapshots preserve output ownership and migrate separate model-selection and retained-output records safely.
 - Attach the current file selection to a local Agent draft. Both frontends show saved snapshots before sending and let you inspect or remove them. Restart restores the snapshot with its original draft.
 - Attach the current editor buffer to a local Agent draft, including unsaved edits. The draft keeps those exact bytes after the source changes or Minga restarts.
+- File-tab moves by keyboard and drag resolve the reorder once. Cycling and tab-kind fallback preserve their existing order and selection rules.
 - Rename a local saved Agent session from the shared command palette or with `SPC a R`. Its name stays searchable in Sessions after restart without changing the transcript or draft.
 - Archive or unarchive a local saved Agent session from **Sessions**. **Browse archived sessions** recovers it with its original draft, and archiving does not stop open work.
 

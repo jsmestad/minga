@@ -214,19 +214,40 @@ defmodule MingaEditor.State.TabBarTest do
       assert Enum.map(TabBar.visible_file_tabs(unpinned, 0), & &1.label) == ["c", "b", "a"]
     end
 
-    test "moving left from the first visible slot does not wrap to the last tab" do
-      tb = tab_bar(file: "a", file: "b")
-      assert TabBar.move_tab_left(tb, 1) == tb
+    test "relative moves and drags within the pinned bucket preserve interleaved slots" do
+      tb = tab_bar(file: "a", agent: "Agent", file: "foreign", file: "b")
+      {tb, workspace} = TabBar.add_workspace(tb, "Agent")
+
+      tb =
+        tb
+        |> TabBar.move_tab_to_workspace(2, workspace.id)
+        |> TabBar.move_tab_to_workspace(3, workspace.id)
+        |> TabBar.pin_tab(1)
+        |> TabBar.pin_tab(4)
+        |> TabBar.switch_to(2)
+
+      moved = TabBar.move_tab_right(tb, 1)
+
+      assert moved == TabBar.reorder_tab(tb, 1, 1)
+      assert labels(moved) == ["b", "Agent", "foreign", "a"]
+      assert moved.active_id == 2
     end
 
     test "dropping a pinned tab in its current slot preserves that order after unpinning" do
-      tb =
-        tab_bar(file: "a", file: "b", file: "c")
-        |> TabBar.pin_tab(3)
-        |> TabBar.reorder_tab(3, 0)
-        |> TabBar.unpin_tab(3)
+      tb = tab_bar(file: "a", file: "b", file: "c") |> TabBar.pin_tab(3) |> TabBar.switch_to(2)
+      reordered = TabBar.reorder_tab(tb, 3, 0)
+      unpinned = TabBar.unpin_tab(reordered, 3)
 
-      assert Enum.map(TabBar.visible_file_tabs(tb), & &1.label) == ["c", "a", "b"]
+      assert reordered.active_id == tb.active_id
+      assert Enum.map(TabBar.visible_file_tabs(unpinned), & &1.label) == ["c", "a", "b"]
+    end
+
+    test "moves or drags outside the visible file list do not wrap" do
+      tb = tab_bar(file: "a", file: "b", file: "c")
+
+      assert TabBar.move_tab_left(tb, 1) == tb
+      assert TabBar.move_tab_right(tb, 3) == tb
+      assert TabBar.reorder_tab(tb, 3, 3) == tb
     end
 
     test "does not move the last pinned tab right across the pinned boundary" do
@@ -382,6 +403,30 @@ defmodule MingaEditor.State.TabBarTest do
       assert TabBar.prev(single) == single
     end
 
+    test "a sole file can be selected by kind but not by file cycling" do
+      tb = tab_bar(file: "a", agent: "Agent")
+
+      assert TabBar.next(tb) == tb
+      assert TabBar.prev(tb) == tb
+      assert TabBar.next_of_kind(tb, :file).active_id == 1
+    end
+
+    test "file cycling from an agent uses pinned-first workspace order, unlike kind cycling" do
+      tb = tab_bar(file: "foreign", file: "a", file: "b", agent: "Agent")
+      {tb, workspace} = TabBar.add_workspace(tb, "Agent")
+
+      tb =
+        tb
+        |> TabBar.move_tab_to_workspace(2, workspace.id)
+        |> TabBar.move_tab_to_workspace(3, workspace.id)
+        |> TabBar.move_tab_to_workspace(4, workspace.id)
+        |> TabBar.pin_tab(3)
+
+      assert TabBar.next(tb).active_id == 3
+      assert TabBar.prev(tb).active_id == 2
+      assert TabBar.next_of_kind(tb, :file).active_id == 1
+    end
+
     test "cycles only within the active workspace" do
       tb =
         tab_bar(
@@ -507,6 +552,13 @@ defmodule MingaEditor.State.TabBarTest do
       tb = TabBar.switch_to(tb, 1)
       assert TabBar.most_recent_of_kind(tb, :file).label == "b"
       assert TabBar.most_recent_of_kind(TabBar.new(file_tab(1)), :file) == nil
+    end
+
+    test "uses storage order rather than visible order or the active tab's position" do
+      tb = tab_bar(file: "a", file: "b", file: "c") |> TabBar.pin_tab(3) |> TabBar.switch_to(2)
+
+      assert TabBar.most_recent_of_kind(tb, :file).label == "c"
+      assert TabBar.most_recent_of_kind(TabBar.switch_to(tb, 3), :file).label == "b"
     end
   end
 
