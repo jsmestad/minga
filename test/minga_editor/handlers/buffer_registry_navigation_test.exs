@@ -50,7 +50,12 @@ defmodule MingaEditor.Handlers.BufferRegistryNavigationTest do
     target_path = write_file!(tmp_dir, "target.txt")
     active = file_buffer!(active_path)
     target = file_buffer!(target_path)
-    {:ok, tree} = tmp_dir |> FileTree.new() |> FileTree.select_path(target_path)
+
+    {:ok, tree} =
+      tmp_dir
+      |> FileTree.new()
+      |> FileTree.ensure_entries()
+      |> FileTree.select_path(target_path)
 
     state = [active, target] |> state_with_buffers(0) |> with_active_tab(active, "active.txt")
     file_tree = FileTreeState.set_tree(state.workspace.file_tree, tree)
