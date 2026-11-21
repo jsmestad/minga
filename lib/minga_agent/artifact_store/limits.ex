@@ -38,17 +38,22 @@ defmodule MingaAgent.ArtifactStore.Limits do
   ]
   defstruct @enforce_keys
 
+  @limit_key_count length(@enforce_keys)
+
   @doc "Builds limits from an owner-supplied complete policy plus bounded overrides."
   @spec new(keyword() | map(), keyword() | map()) :: {:ok, t()} | {:error, :invalid_limits}
   def new(overrides, defaults \\ %{}) do
-    with {:ok, default_values} <- override_map(defaults),
-         true <- Enum.sort(Map.keys(default_values)) == Enum.sort(@enforce_keys),
-         {:ok, values} <- override_map(overrides),
-         true <- Map.keys(values) -- @enforce_keys == [],
-         merged = Map.merge(default_values, values),
-         true <- Enum.all?(merged, fn {_key, value} -> is_integer(value) and value > 0 end),
-         true <- coherent?(merged) do
-      {:ok, struct!(__MODULE__, merged)}
+    with {:ok, default_values} when map_size(default_values) == @limit_key_count <-
+           admit_limit_map(defaults),
+         {:ok, values} <- admit_limit_map(overrides) do
+      merged = Map.merge(default_values, values)
+
+      if Enum.all?(merged, fn {_key, value} -> is_integer(value) and value > 0 end) and
+           coherent?(merged) do
+        {:ok, struct!(__MODULE__, merged)}
+      else
+        {:error, :invalid_limits}
+      end
     else
       _ -> {:error, :invalid_limits}
     end
@@ -57,17 +62,10 @@ defmodule MingaAgent.ArtifactStore.Limits do
   @doc "Applies namespace limits without allowing any root policy limit to increase."
   @spec restrict(t(), keyword() | map()) :: {:ok, t()} | {:error, :invalid_limits}
   def restrict(%__MODULE__{} = ceiling, overrides) do
-    with {:ok, values} <- override_map(overrides),
-         true <- Map.keys(values) -- @enforce_keys == [],
-         true <-
-           Enum.all?(values, fn {key, value} ->
-             is_integer(value) and value > 0 and value <= Map.fetch!(ceiling, key)
-           end),
-         restricted = Map.merge(Map.from_struct(ceiling), values),
-         true <- coherent?(restricted) do
-      {:ok, struct!(__MODULE__, restricted)}
-    else
-      _ -> {:error, :invalid_limits}
+    with {:ok, values} <- admit_limit_map(overrides),
+         :ok <- check_ceiling(values, ceiling) do
+      restricted = Map.merge(ceiling, values)
+      if coherent?(restricted), do: {:ok, restricted}, else: {:error, :invalid_limits}
     end
   end
 
@@ -103,13 +101,31 @@ defmodule MingaAgent.ArtifactStore.Limits do
   @spec integrity_block_bytes() :: pos_integer()
   def integrity_block_bytes, do: 64 * 1024
 
-  @spec override_map(keyword() | map()) :: {:ok, map()} | {:error, :invalid_limits}
-  defp override_map(values) when is_list(values) do
-    if Keyword.keyword?(values), do: {:ok, Map.new(values)}, else: {:error, :invalid_limits}
+  @spec admit_limit_map(term()) :: {:ok, map()} | {:error, :invalid_limits}
+  defp admit_limit_map(values) when is_list(values) do
+    if Keyword.keyword?(values),
+      do: values |> Map.new() |> admit_limit_map(),
+      else: {:error, :invalid_limits}
   end
 
-  defp override_map(values) when is_map(values), do: {:ok, values}
-  defp override_map(_values), do: {:error, :invalid_limits}
+  defp admit_limit_map(%{__struct__: _}), do: {:error, :invalid_limits}
+
+  defp admit_limit_map(values) when is_map(values) do
+    if Enum.all?(values, fn {key, _value} -> key in @enforce_keys end),
+      do: {:ok, values},
+      else: {:error, :invalid_limits}
+  end
+
+  defp admit_limit_map(_values), do: {:error, :invalid_limits}
+
+  @spec check_ceiling(map(), t()) :: :ok | {:error, :invalid_limits}
+  defp check_ceiling(values, ceiling) do
+    if Enum.all?(values, fn {key, value} ->
+         is_integer(value) and value > 0 and value <= Map.fetch!(ceiling, key)
+       end),
+       do: :ok,
+       else: {:error, :invalid_limits}
+  end
 
   @spec coherent?(map()) :: boolean()
   defp coherent?(values) do
