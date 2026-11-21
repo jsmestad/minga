@@ -4,7 +4,9 @@ set -euo pipefail
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 project="$repo_root/macos/Minga.xcodeproj"
 
-if [[ $# -eq 1 ]]; then
+if [[ "${1:-}" == "--print-build-settings" ]]; then
+  settings="$(xcodebuild "${@:2}" -showBuildSettings)"
+elif [[ $# -eq 1 ]]; then
   settings="$(cat "$1")"
 else
   settings="$(xcodebuild -project "$project" -scheme Minga -configuration Release -showBuildSettings)"
@@ -19,4 +21,8 @@ if [[ "$target_count" != "1" || "$optimization_count" != "1" ]]; then
   exit 1
 fi
 
-echo "Minga Release optimization: -O"
+if [[ "${1:-}" == "--print-build-settings" ]]; then
+  printf '%s\n' "$settings"
+else
+  echo "Minga Release optimization: -O"
+fi
