@@ -134,7 +134,7 @@ defmodule MingaEditor.Handlers.BufferRegistry do
 
       case find_buffer_by_path(state, abs_path) do
         nil -> open_new_path_buffer(state, abs_path, options_server, start_opts)
-        idx -> activate_path_buffer(state, idx, existing_target)
+        pid -> activate_path_buffer(state, pid, existing_target)
       end
     end
   end
@@ -175,10 +175,10 @@ defmodule MingaEditor.Handlers.BufferRegistry do
 
   def file_tab_for_path_in_active_workspace(_state, _path), do: nil
 
-  @doc "Returns the index of the live buffer whose canonical path matches."
-  @spec find_buffer_by_path(state() | map(), String.t()) :: non_neg_integer() | nil
+  @doc "Returns the first live buffer whose path matches."
+  @spec find_buffer_by_path(state() | map(), String.t()) :: pid() | nil
   def find_buffer_by_path(%{workspace: %{buffers: %{list: buffers}}}, file_path) do
-    Enum.find_index(buffers, &buffer_path_matches?(&1, file_path))
+    Enum.find(buffers, &buffer_path_matches?(&1, file_path))
   end
 
   @doc "Creates one Editor-owned monitor and records its correlation reference."
@@ -268,10 +268,8 @@ defmodule MingaEditor.Handlers.BufferRegistry do
     end
   end
 
-  @spec activate_path_buffer(state(), non_neg_integer(), :buffer | :tab) ::
-          open_or_activate_result()
-  defp activate_path_buffer(state, idx, :tab) do
-    pid = Enum.at(state.workspace.buffers.list, idx)
+  @spec activate_path_buffer(state(), pid(), :buffer | :tab) :: open_or_activate_result()
+  defp activate_path_buffer(state, pid, :tab) do
     {state, tab} = ShellWorkflow.resolve_tab_by_buffer(state, pid)
 
     case tab do
@@ -280,9 +278,9 @@ defmodule MingaEditor.Handlers.BufferRegistry do
     end
   end
 
-  defp activate_path_buffer(state, idx, :buffer) do
-    pid = Enum.at(state.workspace.buffers.list, idx)
-    {:ok, MingaEditor.BufferActivation.activate(state, idx), pid, :activated}
+  defp activate_path_buffer(state, pid, :buffer) do
+    buffers = Buffers.switch_to_pid(state.workspace.buffers, pid)
+    {:ok, MingaEditor.BufferActivation.activate(state, buffers), pid, :activated}
   end
 
   @spec validate_open_or_activate_options(list()) ::

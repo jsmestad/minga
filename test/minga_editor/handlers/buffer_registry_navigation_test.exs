@@ -5,11 +5,14 @@ defmodule MingaEditor.Handlers.BufferRegistryNavigationTest do
 
   alias Minga.Buffer
   alias Minga.Buffer.Process, as: BufferProcess
+  alias Minga.Project.FileTree
+  alias MingaEditor.Commands.FileTree, as: FileTreeCommands
   alias MingaEditor.Handlers.BufferRegistry
   alias MingaEditor.Session.State, as: SessionState
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.Shell.Traditional.State, as: ShellState
   alias MingaEditor.State.Buffers
+  alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.Tab
   alias MingaEditor.State.Tab.Context, as: TabContext
   alias MingaEditor.State.TabBar
@@ -40,6 +43,33 @@ defmodule MingaEditor.Handlers.BufferRegistryNavigationTest do
     assert new_state.workspace.buffers.list == [first, second]
     assert new_state.workspace.buffers.active == first
     assert new_state.workspace.buffers.active_index == 0
+  end
+
+  test "opening a listed buffer from the tree keeps the current tab", %{tmp_dir: tmp_dir} do
+    active_path = write_file!(tmp_dir, "active.txt")
+    target_path = write_file!(tmp_dir, "target.txt")
+    active = file_buffer!(active_path)
+    target = file_buffer!(target_path)
+
+    {:ok, tree} =
+      tmp_dir
+      |> FileTree.new()
+      |> FileTree.ensure_entries()
+      |> FileTree.select_path(target_path)
+
+    state = [active, target] |> state_with_buffers(0) |> with_active_tab(active, "active.txt")
+    file_tree = FileTreeState.set_tree(state.workspace.file_tree, tree)
+    workspace = SessionState.set_file_tree(state.workspace, file_tree)
+    opened = FileTreeCommands.open_or_toggle(%{state | workspace: workspace})
+
+    assert TabBar.active(opened.shell_runtime.state.tab_bar).id == 1
+    assert TabBar.count(opened.shell_runtime.state.tab_bar) == 1
+    assert opened.workspace.buffers.list == [active, target]
+    assert opened.workspace.buffers.active == target
+    assert opened.workspace.buffers.active_index == 1
+
+    revealed = FileTreeState.tree(opened.workspace.file_tree)
+    assert %{path: ^target_path} = FileTree.selected_entry(revealed)
   end
 
   test "switches to an existing tab when requested and a tab exists", %{tmp_dir: tmp_dir} do

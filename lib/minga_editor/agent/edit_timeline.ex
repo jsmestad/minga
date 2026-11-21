@@ -275,6 +275,26 @@ defmodule MingaEditor.Agent.EditTimeline do
   @spec recovered_file?(t(), String.t()) :: boolean()
   def recovered_file?(%__MODULE__{recovered_files: files}, path), do: Map.has_key?(files, path)
 
+  @doc "Selects the adjacent Changes file, wrapping at either end."
+  @spec adjacent_path(t(), String.t() | nil, :next | :previous) :: String.t() | nil
+  def adjacent_path(%__MODULE__{} = timeline, selected, direction) do
+    recovered = for {path, _count} <- recovered_only_files(timeline), do: path
+
+    case timeline.file_order ++ recovered do
+      [] ->
+        nil
+
+      [first | _] when is_nil(selected) and direction == :next ->
+        first
+
+      [first | _] = paths when direction == :next ->
+        next_path(paths, selected, first)
+
+      [_ | _] = paths when direction == :previous ->
+        previous_path(paths, selected)
+    end
+  end
+
   @spec file_summaries(t()) :: [file_summary()]
   def file_summaries(%__MODULE__{} = timeline) do
     live =
@@ -283,8 +303,7 @@ defmodule MingaEditor.Agent.EditTimeline do
       end)
 
     recovered =
-      for {path, count} <- Enum.sort(timeline.recovered_files),
-          not Map.has_key?(timeline.entries, path) do
+      for {path, count} <- recovered_only_files(timeline) do
         %{
           path: path,
           entry_count: count,
@@ -297,11 +316,28 @@ defmodule MingaEditor.Agent.EditTimeline do
     live ++ recovered
   end
 
+  @spec recovered_only_files(t()) :: [{String.t(), pos_integer()}]
+  defp recovered_only_files(%__MODULE__{recovered_files: recovered, entries: entries}) do
+    recovered
+    |> Enum.reject(fn {path, _count} -> Map.has_key?(entries, path) end)
+    |> Enum.sort()
+  end
+
   @spec reset(t()) :: t()
   def reset(%__MODULE__{} = timeline) do
     cleanup_snapshots(timeline)
     %__MODULE__{generation: next_generation()}
   end
+
+  @spec next_path([String.t()], String.t() | nil, String.t()) :: String.t()
+  defp next_path([selected, next | _], selected, _first), do: next
+  defp next_path([_ | rest], selected, first), do: next_path(rest, selected, first)
+  defp next_path([], _selected, first), do: first
+
+  @spec previous_path(nonempty_list(String.t()), String.t() | nil) :: String.t()
+  defp previous_path([previous, selected | _], selected), do: previous
+  defp previous_path([_ | [_ | _] = rest], selected), do: previous_path(rest, selected)
+  defp previous_path([last], _selected), do: last
 
   @spec next_generation() :: pos_integer()
   defp next_generation,

@@ -17,6 +17,7 @@ defmodule MingaEditor.Commands.FileTree do
   alias MingaEditor.Shell.Workflow, as: ShellWorkflow
   alias MingaEditor.Session.State
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.Buffers
   alias MingaEditor.State.FileTree, as: FileTreeState
   alias Minga.Mode.DeleteConfirmState
   alias Minga.Project.FileTree
@@ -1073,7 +1074,7 @@ defmodule MingaEditor.Commands.FileTree do
   # to the new buffer (garbled text on first render).
   @spec open_file_from_tree(state(), String.t(), FileTree.t()) :: state()
   defp open_file_from_tree(state, path, tree) do
-    case MingaEditor.Handlers.BufferRegistry.find_buffer_by_path(state, path) do
+    case BufferRegistry.find_buffer_by_path(state, path) do
       nil ->
         case Commands.start_buffer(path, state.interaction.options_server,
                events_registry: state.extension_surfaces.events_registry
@@ -1094,17 +1095,17 @@ defmodule MingaEditor.Commands.FileTree do
             )
         end
 
-      idx ->
+      pid ->
         # If the buffer already has a tab, switch to that tab (correctly
         # leaves agent view if needed). Otherwise fall back to buffer switch.
-        pid = Enum.at(state.workspace.buffers.list, idx)
         {state, tab} = ShellWorkflow.resolve_tab_by_buffer(state, pid)
 
         state =
           if tab do
             MingaEditor.TabWorkflow.switch(state, tab.id)
           else
-            MingaEditor.BufferActivation.activate(state, idx)
+            buffers = Buffers.switch_to_pid(state.workspace.buffers, pid)
+            MingaEditor.BufferActivation.activate(state, buffers)
           end
 
         update_file_tree(state, &FileTreeState.set_tree(&1, FileTree.reveal(tree, path)))
