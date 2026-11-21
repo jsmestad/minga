@@ -1416,9 +1416,10 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
                TextPresentation.resolve(presentation, 0, fold_row.row_id, 8)
     end
 
-    test "decoration fold rows use stable decoration ids" do
+    test "decoration fold rows keep stable ids and map summary hits to the source line" do
       state = gui_state(content: "line 1\nline 2\nline 3")
       buffer = state.workspace.buffers.active
+      assert {:ok, false} = BufferProcess.set_option(buffer, :wrap, false)
 
       :ok =
         BufferProcess.batch_decorations(buffer, fn decs ->
@@ -1426,12 +1427,20 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
           decs
         end)
 
-      {[wf], _cursor, _state} = build_content(state)
+      {[wf], _cursor, input} = build_content(state)
 
       [fold_row] = Enum.filter(wf.window_model.rows, &(&1.row_type == :fold_start))
       [fold_gutter] = Enum.filter(wf.window_model.gutter.entries, &(&1.buf_line == 0))
       assert fold_row.row_id == Row.stable_id(:decoration_fold, 0, 0)
+      assert fold_row.text == " ··· 2 lines"
+      assert fold_row.spans == []
       assert fold_gutter.display_type == :fold_start
+
+      win_id = state.workspace.windows.active
+      presentation = RenderWindow.text_presentation(Map.fetch!(input.windows.map, win_id))
+
+      assert {:ok, %{line: 0, byte: 6}} =
+               TextPresentation.resolve(presentation, 0, fold_row.row_id, 8)
     end
 
     test "first windowed wrapped paint does not advertise an exact document extent" do
