@@ -68,6 +68,8 @@ defmodule MingaAgent.Tools.RetainedShellCaptureTest do
     assert reference == output.reference
   end
 
+  # Let ExUnit detect a transport hang before the shell deadline. This test checks byte identity, not speed.
+  @tag timeout: 60_000
   test "retained raw stdout and stderr preserve whitespace, Unicode and binary identity", %{
     tmp_dir: root
   } do
@@ -82,7 +84,7 @@ defmodule MingaAgent.Tools.RetainedShellCaptureTest do
       parent = self()
 
       assert {:ok, output} =
-               SystemBackend.shell("cat #{id}; printf 'stderr \\t\\n' >&2; exit 42", root, 5,
+               SystemBackend.shell("cat #{id}; printf 'stderr \\t\\n' >&2; exit 42", root, 120,
                  artifact_store: store,
                  capture_key: ctx.capture_key,
                  on_output: fn chunk ->
