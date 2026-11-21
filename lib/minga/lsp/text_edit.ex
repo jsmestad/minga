@@ -27,29 +27,22 @@ defmodule Minga.LSP.TextEdit do
       when is_binary(content) and is_list(edits) and encoding in [:utf8, :utf16, :utf32] do
     lines = index_lines(content)
 
-    with {:ok, normalized} <- normalize_all(edits, lines, encoding),
+    with {:ok, normalized} <- normalize_all(edits, lines, encoding, 0, []),
          :ok <- validate_non_overlapping(normalized) do
       {:ok, assemble(content, normalized)}
     end
   end
 
-  @spec normalize_all([map()], tuple(), PositionEncoding.encoding()) ::
+  @spec normalize_all([map()], tuple(), PositionEncoding.encoding(), non_neg_integer(), [t()]) ::
           {:ok, [t()]} | {:error, :invalid_edit}
-  defp normalize_all(edits, lines, encoding) do
-    edits
-    |> Enum.with_index()
-    |> Enum.reduce_while({:ok, []}, fn {edit, response_index}, {:ok, normalized} ->
-      case normalize(edit, response_index, lines, encoding) do
-        {:ok, value} -> {:cont, {:ok, [value | normalized]}}
-        {:error, :invalid_edit} = error -> {:halt, error}
-      end
-    end)
-    |> case do
-      {:ok, normalized} ->
-        {:ok, Enum.sort_by(normalized, &{&1.start_offset, &1.end_offset, &1.response_index})}
+  defp normalize_all([], _lines, _encoding, _index, normalized) do
+    {:ok, Enum.sort_by(normalized, &{&1.start_offset, &1.end_offset, &1.response_index})}
+  end
 
-      error ->
-        error
+  defp normalize_all([edit | rest], lines, encoding, index, normalized) do
+    case normalize(edit, index, lines, encoding) do
+      {:ok, value} -> normalize_all(rest, lines, encoding, index + 1, [value | normalized])
+      {:error, :invalid_edit} = error -> error
     end
   end
 
@@ -71,8 +64,8 @@ defmodule Minga.LSP.TextEdit do
               start_character >= 0 and is_integer(end_line) and end_line >= 0 and
               is_integer(end_character) and end_character >= 0 and is_binary(new_text) do
     with {:ok, start_offset} <- absolute_offset(lines, start_line, start_character, encoding),
-         {:ok, end_offset} <- absolute_offset(lines, end_line, end_character, encoding),
-         true <- start_offset <= end_offset do
+         {:ok, end_offset} when start_offset <= end_offset <-
+           absolute_offset(lines, end_line, end_character, encoding) do
       {:ok,
        %__MODULE__{
          start_offset: start_offset,
@@ -177,22 +170,12 @@ defmodule Minga.LSP.TextEdit do
   end
 
   @spec validate_non_overlapping([t()]) :: :ok | {:error, :overlapping_edits}
+  defp validate_non_overlapping([%{end_offset: left_end}, %{start_offset: right_start} | _])
+       when right_start < left_end,
+       do: {:error, :overlapping_edits}
+
+  defp validate_non_overlapping([_ | rest]), do: validate_non_overlapping(rest)
   defp validate_non_overlapping([]), do: :ok
-  defp validate_non_overlapping([_edit]), do: :ok
-
-  defp validate_non_overlapping([left, right | rest]) do
-    if overlaps?(left, right) do
-      {:error, :overlapping_edits}
-    else
-      validate_non_overlapping([right | rest])
-    end
-  end
-
-  @spec overlaps?(t(), t()) :: boolean()
-  defp overlaps?(%__MODULE__{} = left, %__MODULE__{} = right) do
-    right.start_offset < left.end_offset or
-      (right.start_offset == left.start_offset and left.end_offset > left.start_offset)
-  end
 
   @spec assemble(String.t(), [t()]) :: String.t()
   defp assemble(content, edits) do
