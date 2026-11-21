@@ -67,6 +67,8 @@ Both gates run every independent check even when one fails (Dialyzer and Reach a
 
 The [Reach smells workflow](.github/workflows/reach-smells.yml) reports advisory findings weekly or on demand. It does not block PRs. The required `Swift (macOS GUI)` check passes only when both the macOS correctness and performance jobs pass.
 
+Swift correctness CI restores only Xcode's compilation cache. It builds fresh app and test bundles and records native build and test time separately in `macos-unit-evidence/results.json`. The [scheduled Swift evidence workflow](.github/workflows/swift-evidence.yml) still starts with a cold build.
+
 ## Project Layout
 
 See `AGENTS.md` (in the repo root) for the full project structure, coding standards, and conventions. The highlights:
