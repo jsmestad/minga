@@ -541,7 +541,8 @@ defmodule MingaEditor.UI.Picker.AgentModelSourceTest do
           &(&1.description =~ "Setup Fixture")
         )
 
-      assert row.description =~ ~r/82% of 5h limit · resets \d{1,2}:\d{2} (AM|PM)/
+      # A reset after midnight local time carries a weekday ("Sun 12:32 AM").
+      assert row.description =~ ~r/82% of 5h limit · resets (\w{3} )?\d{1,2}:\d{2} (AM|PM)/
       refute row.description =~ "7d"
     end
   end
