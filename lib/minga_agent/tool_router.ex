@@ -261,13 +261,10 @@ defmodule MingaAgent.ToolRouter do
   def command_env_result(%Context{} = ctx), do: resolve_command_env(ctx)
 
   @spec resolve_filesystem_path(context(), String.t()) :: route_result(String.t())
-  defp resolve_filesystem_path(%Context{project_view: %ProjectView{} = view}, path) do
-    with {:ok, logical_path} <- ProjectView.logical_path(view, path) do
-      case project_view_result(fn -> ProjectView.prepare_working_dir(view) end) do
-        {:ok, cwd} -> {:ok, Path.expand(logical_path, cwd)}
-        {:error, {:project_view_unavailable, _}} = error -> error
-        {:error, reason} -> {:error, {:project_view_unavailable, {:working_dir_failed, reason}}}
-      end
+  defp resolve_filesystem_path(%Context{project_view: %ProjectView{} = view} = ctx, path) do
+    with {:ok, logical_path} <- ProjectView.logical_path(view, path),
+         {:ok, cwd} <- resolve_working_dir(ctx) do
+      {:ok, Path.expand(logical_path, cwd)}
     end
   end
 
