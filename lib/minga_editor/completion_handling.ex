@@ -819,7 +819,8 @@ defmodule MingaEditor.CompletionHandling do
           term()
         ) :: EditorState.t()
   def handle_completion_result(state, role, client, buffer, version, gen, trigger_pos, result) do
-    with %CursorContext{} = context <- legacy_response_context(state, client, buffer, version, gen) do
+    with %CursorContext{} = context <-
+           legacy_response_context(state, client, buffer, version, gen) do
       prefix = CompletionTrigger.get_typed_since_trigger(context, trigger_pos)
       editor = self()
       mode = completion_response_mode(role)
@@ -837,8 +838,13 @@ defmodule MingaEditor.CompletionHandling do
   defp completion_response_mode(:primary), do: :primary
   defp completion_response_mode(_role), do: :merge
 
-  @spec legacy_response_context(EditorState.t(), pid(), pid(), non_neg_integer(), non_neg_integer()) ::
-          CursorContext.t() | nil
+  @spec legacy_response_context(
+          EditorState.t(),
+          pid(),
+          pid(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: CursorContext.t() | nil
   defp legacy_response_context(state, client, buffer, version, gen) do
     case buffer_value(buffer, &Buffer.cursor_context/1) do
       %CursorContext{version: ^version} = context ->
