@@ -403,6 +403,17 @@ defmodule Minga.Editing.SearchTest do
       assert [] = Search.find_all_in_range(["ab"], "", 0, regex: true)
       assert {"-a-b-", 3} = Search.substitute("ab", "", "-", true, regex: true)
       assert {"-ab", 1} = Search.substitute("ab", "", "-", false, regex: true)
+
+      assert {"-a-b-", 3, [{0, 1}, {2, 1}, {4, 1}]} =
+               Search.substitute_line_with_spans("ab", "", "-", true, regex: true)
+
+      assert {"-ab", 1, [{0, 1}]} =
+               Search.substitute_line_with_spans("ab", "", "-", false, regex: true)
+    end
+
+    test "deletions can share the same output byte offset" do
+      assert {"α", 2, [{2, 0}, {2, 0}]} =
+               Search.substitute_line_with_spans("αxx", "x", "", true)
     end
   end
 

@@ -340,10 +340,8 @@ defmodule Minga.Editing.Search do
         nil ->
           {line, 0}
 
-        {pos, len} ->
-          before = binary_part(line, 0, pos)
-          after_match = binary_part(line, pos + len, byte_size(line) - pos - len)
-          {before <> replacement <> after_match, 1}
+        match ->
+          {splice_match(line, match, replacement), 1}
       end
     end
   end
@@ -354,11 +352,10 @@ defmodule Minga.Editing.Search do
           String.t(),
           non_neg_integer(),
           non_neg_integer(),
-          iolist()
+          [binary()]
         ) :: {String.t(), non_neg_integer()}
   defp do_substitute_all(line, [], _rep, prev_end, count, acc) do
-    final = [binary_part(line, prev_end, byte_size(line) - prev_end) | acc]
-    {final |> Enum.reverse() |> :binary.list_to_bin(), count}
+    {finish_substitution(line, prev_end, acc), count}
   end
 
   defp do_substitute_all(line, [{pos, len} | rest], rep, prev_end, count, acc) do
@@ -405,10 +402,8 @@ defmodule Minga.Editing.Search do
         nil ->
           {line, 0, []}
 
-        {pos, len} ->
-          before = binary_part(line, 0, pos)
-          after_match = binary_part(line, pos + len, byte_size(line) - pos - len)
-          {before <> replacement <> after_match, 1, [{pos, rep_len}]}
+        {pos, _len} = match ->
+          {splice_match(line, match, replacement), 1, [{pos, rep_len}]}
       end
     end
   end
@@ -418,7 +413,7 @@ defmodule Minga.Editing.Search do
            rep_len: non_neg_integer(),
            prev_end: non_neg_integer(),
            count: non_neg_integer(),
-           output: iolist(),
+           output: [binary()],
            output_size: non_neg_integer(),
            spans: [replacement_span()]
          }
@@ -426,8 +421,7 @@ defmodule Minga.Editing.Search do
   @spec do_sub_spans_all(String.t(), [{non_neg_integer(), non_neg_integer()}], sub_acc()) ::
           {String.t(), non_neg_integer(), [replacement_span()]}
   defp do_sub_spans_all(line, [], acc) do
-    final = [binary_part(line, acc.prev_end, byte_size(line) - acc.prev_end) | acc.output]
-    {final |> Enum.reverse() |> :binary.list_to_bin(), acc.count, Enum.reverse(acc.spans)}
+    {finish_substitution(line, acc.prev_end, acc.output), acc.count, Enum.reverse(acc.spans)}
   end
 
   defp do_sub_spans_all(line, [{pos, len} | rest], acc) do
@@ -446,6 +440,22 @@ defmodule Minga.Editing.Search do
     }
 
     do_sub_spans_all(line, rest, new_acc)
+  end
+
+  @spec splice_match(binary(), {non_neg_integer(), non_neg_integer()}, binary()) :: binary()
+  defp splice_match(line, {pos, len}, replacement) do
+    before = binary_part(line, 0, pos)
+    after_match = binary_part(line, pos + len, byte_size(line) - pos - len)
+    before <> replacement <> after_match
+  end
+
+  @spec finish_substitution(binary(), non_neg_integer(), [binary()]) :: binary()
+  defp finish_substitution(line, 0, []), do: line
+
+  defp finish_substitution(line, prev_end, reversed_parts) do
+    [binary_part(line, prev_end, byte_size(line) - prev_end) | reversed_parts]
+    |> Enum.reverse()
+    |> :binary.list_to_bin()
   end
 
   # ── Private helpers ────────────────────────────────────────────────────────
