@@ -3585,7 +3585,7 @@ defmodule MingaAgent.Providers.Native do
     end
   end
 
-  # When a route is rate limited and has reported when its refusing window resets, say so plainly and offer a model switch.
+  # A rate-limited route with a refusing window and a known reset gets the plan-limit sentence.
   @spec plan_limit_message(Event.Error.kind(), GenServer.server(), String.t()) ::
           {:ok, String.t()} | :none
   defp plan_limit_message(:rate_limited, registry, route_id) do

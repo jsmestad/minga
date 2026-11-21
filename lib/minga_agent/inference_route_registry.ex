@@ -278,7 +278,7 @@ defmodule MingaAgent.InferenceRouteRegistry do
     end
   end
 
-  # A refresh result applies only to the registration it checked; its availability applies only if nothing newer was recorded during the check.
+  # A refresh result applies only to the registration it checked, and only if no newer availability arrived.
   def handle_call({:refreshed, id, registration, version, status, models}, _from, state) do
     case Map.fetch(state.routes, id) do
       {:ok, %Entry{registration: ^registration, availability_version: ^version} = entry} ->
