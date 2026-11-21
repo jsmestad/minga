@@ -163,44 +163,16 @@ defmodule MingaEditor.Agent.DiffReview do
         hunks: hunks,
         resolutions: resolutions
       }) do
-    rejected_hunks =
-      hunks
-      |> Enum.with_index()
-      |> Enum.filter(fn {_hunk, idx} -> Map.get(resolutions, idx) == :rejected end)
-      |> Enum.map(fn {hunk, _idx} -> hunk end)
-
-    revert_hunks(after_lines, rejected_hunks)
+    revert_hunks(after_lines, rejected_hunks(hunks, resolutions, 0))
   end
 
   @doc "Moves to the next unresolved hunk. Wraps around to the first."
   @spec next_hunk(t()) :: t()
-  def next_hunk(%__MODULE__{hunks: hunks, current_hunk_index: idx} = review) do
-    count = Enum.count(hunks)
-
-    case count do
-      0 ->
-        review
-
-      _ ->
-        next = find_next_unresolved(review, idx + 1, count)
-        %{review | current_hunk_index: next}
-    end
-  end
+  def next_hunk(%__MODULE__{hunks: hunks} = review), do: move_hunk(review, length(hunks), 1)
 
   @doc "Moves to the previous unresolved hunk. Wraps around to the last."
   @spec prev_hunk(t()) :: t()
-  def prev_hunk(%__MODULE__{hunks: hunks, current_hunk_index: idx} = review) do
-    count = Enum.count(hunks)
-
-    case count do
-      0 ->
-        review
-
-      _ ->
-        prev = find_prev_unresolved(review, idx - 1, count)
-        %{review | current_hunk_index: prev}
-    end
-  end
+  def prev_hunk(%__MODULE__{hunks: hunks} = review), do: move_hunk(review, length(hunks), -1)
 
   @doc "Marks the current hunk as accepted and advances to the next unresolved."
   @spec accept_current(t()) :: t()
@@ -357,10 +329,62 @@ defmodule MingaEditor.Agent.DiffReview do
 
   @spec revert_hunks([String.t()], [Diff.hunk()]) :: [String.t()]
   defp revert_hunks(lines, hunks) do
-    hunks
-    |> Enum.reverse()
-    |> Enum.reduce(lines, &Git.revert_hunk(&2, &1))
+    case splice_hunks(lines, hunks, 0, []) do
+      :unspliceable ->
+        # Supplied coordinates can depend on the result of reverting later hunks.
+        hunks
+        |> Enum.reverse()
+        |> Enum.reduce(lines, &Git.revert_hunk(&2, &1))
+
+      restored ->
+        restored
+    end
   end
+
+  @spec rejected_hunks([Diff.hunk()], %{non_neg_integer() => resolution()}, non_neg_integer()) ::
+          [Diff.hunk()]
+  defp rejected_hunks([], _resolutions, _index), do: []
+
+  defp rejected_hunks([hunk | rest], resolutions, index) do
+    if Map.get(resolutions, index) == :rejected do
+      [hunk | rejected_hunks(rest, resolutions, index + 1)]
+    else
+      rejected_hunks(rest, resolutions, index + 1)
+    end
+  end
+
+  @spec splice_hunks([String.t()], [Diff.hunk()], non_neg_integer(), [String.t()]) ::
+          [String.t()] | :unspliceable
+  defp splice_hunks(lines, [], _offset, acc), do: Enum.reverse(acc, lines)
+
+  defp splice_hunks(lines, [%{start_line: offset} = hunk | rest], offset, acc) do
+    {count, replacement} = revert_span(hunk)
+
+    case skip_splice_span(lines, count) do
+      :unspliceable -> :unspliceable
+      tail -> splice_hunks(tail, rest, offset + count, Enum.reverse(replacement, acc))
+    end
+  end
+
+  defp splice_hunks([line | tail], [%{start_line: start} | _] = hunks, offset, acc)
+       when start > offset do
+    splice_hunks(tail, hunks, offset + 1, [line | acc])
+  end
+
+  defp splice_hunks(_lines, _hunks, _offset, _acc), do: :unspliceable
+
+  @spec revert_span(Diff.hunk()) :: {non_neg_integer(), [String.t()]}
+  defp revert_span(%{type: :added, count: count}), do: {count, []}
+  defp revert_span(%{type: :modified, count: count, old_lines: old_lines}), do: {count, old_lines}
+  defp revert_span(%{type: :deleted, old_lines: old_lines}), do: {0, old_lines}
+
+  @spec skip_splice_span([String.t()], non_neg_integer()) :: [String.t()] | :unspliceable
+  defp skip_splice_span(lines, 0), do: lines
+
+  defp skip_splice_span([_line | tail], count) when count > 0,
+    do: skip_splice_span(tail, count - 1)
+
+  defp skip_splice_span(_lines, _count), do: :unspliceable
 
   @spec detach_hunk_old_lines([Diff.hunk()]) :: [Diff.hunk()]
   defp detach_hunk_old_lines(hunks) do
@@ -501,16 +525,32 @@ defmodule MingaEditor.Agent.DiffReview do
   # After-content line numbers are intentionally excluded so resolved hunks survive edits above them.
   @spec hunk_signatures([Diff.hunk()], [String.t()]) :: [hunk_signature()]
   defp hunk_signatures(hunks, after_lines) do
-    Enum.map(hunks, fn hunk ->
-      {hunk.type, hunk.old_start, hunk.old_lines, after_hunk_lines(hunk, after_lines)}
-    end)
+    {signatures, _cursor} =
+      Enum.map_reduce(hunks, {after_lines, 0}, fn hunk, cursor ->
+        {changed, cursor} = signature_after_lines(hunk, cursor, after_lines)
+        {{hunk.type, hunk.old_start, hunk.old_lines, changed}, cursor}
+      end)
+
+    signatures
   end
 
-  @spec after_hunk_lines(Diff.hunk(), [String.t()]) :: [String.t()]
-  defp after_hunk_lines(%{type: :deleted}, _after_lines), do: []
+  @spec signature_after_lines(
+          Diff.hunk(),
+          {[String.t()], non_neg_integer()},
+          [String.t()]
+        ) :: {[String.t()], {[String.t()], non_neg_integer()}}
+  defp signature_after_lines(%{type: :deleted}, cursor, _after_lines), do: {[], cursor}
 
-  defp after_hunk_lines(hunk, after_lines) do
-    Enum.slice(after_lines, hunk.start_line, hunk.count)
+  defp signature_after_lines(%{start_line: start, count: count}, {tail, offset}, after_lines) do
+    start_tail =
+      if start >= offset do
+        Enum.drop(tail, start - offset)
+      else
+        Enum.drop(after_lines, start)
+      end
+
+    {changed, tail} = Enum.split(start_tail, count)
+    {changed, {tail, start + count}}
   end
 
   @spec put_resolution(t(), non_neg_integer(), resolution()) :: t()
@@ -519,29 +559,30 @@ defmodule MingaEditor.Agent.DiffReview do
   end
 
   @spec advance_after_resolve(t()) :: t()
-  defp advance_after_resolve(%__MODULE__{} = review) do
-    if resolved?(review) do
+  defp advance_after_resolve(%__MODULE__{hunks: hunks, resolutions: resolutions} = review) do
+    count = length(hunks)
+
+    if map_size(resolutions) == count do
       review
     else
-      next_hunk(review)
+      move_hunk(review, count, 1)
     end
   end
 
-  @spec find_next_unresolved(t(), non_neg_integer(), non_neg_integer()) :: non_neg_integer()
-  defp find_next_unresolved(%__MODULE__{resolutions: resolutions}, start, count) do
-    0..(count - 1)
-    |> Enum.map(fn offset -> rem(start + offset, count) end)
-    |> Enum.find(start, fn idx -> not Map.has_key?(resolutions, idx) end)
-    |> then(fn idx -> rem(idx, count) end)
-  end
+  @spec move_hunk(t(), non_neg_integer(), -1 | 1) :: t()
+  defp move_hunk(review, 0, _step), do: review
 
-  @spec find_prev_unresolved(t(), integer(), non_neg_integer()) :: non_neg_integer()
-  defp find_prev_unresolved(%__MODULE__{resolutions: resolutions}, start, count) do
-    normalized = rem(start + count, count)
+  defp move_hunk(review, count, step) do
+    %{current_hunk_index: index, resolutions: resolutions} = review
+    neighbor = Integer.mod(index + step, count)
 
-    0..(count - 1)
-    |> Enum.map(fn offset -> rem(normalized - offset + count, count) end)
-    |> Enum.find(normalized, fn idx -> not Map.has_key?(resolutions, idx) end)
+    next =
+      Enum.find_value(0..(count - 1), neighbor, fn offset ->
+        candidate = Integer.mod(neighbor + step * offset, count)
+        unless Map.has_key?(resolutions, candidate), do: candidate
+      end)
+
+    %{review | current_hunk_index: next}
   end
 
   @spec build_display([String.t()], [Diff.hunk()], non_neg_integer()) :: [
@@ -550,89 +591,49 @@ defmodule MingaEditor.Agent.DiffReview do
   defp build_display(_after, [], _ctx), do: []
 
   defp build_display(after_lines, hunks, ctx) do
-    after_lines
-    |> do_build_display(hunks, ctx, 0, 0, [])
+    hunks
+    |> do_build_display({after_lines, 0}, length(after_lines), ctx, 0, [])
     |> Enum.reverse()
   end
 
   @spec do_build_display(
-          [String.t()],
           [Diff.hunk()],
+          {[String.t()], non_neg_integer()},
           non_neg_integer(),
           non_neg_integer(),
           non_neg_integer(),
           [diff_line()]
         ) :: [diff_line()]
-  defp do_build_display(_after_lines, [], _ctx, _idx, _displayed_until, acc), do: acc
+  defp do_build_display([], _cursor, _file_length, _ctx, _idx, acc), do: acc
 
-  defp do_build_display(after_lines, [hunk | rest], ctx, idx, displayed_until, acc) do
-    next_hunk = List.first(rest)
+  defp do_build_display([hunk | rest], {tail, offset}, file_length, ctx, idx, acc) do
+    {added, removed} = hunk_counts(hunk)
 
-    {lines, new_displayed_until} =
-      hunk_display_lines(after_lines, hunk, idx, ctx, displayed_until, next_hunk)
+    header =
+      DisplayLine.new(
+        {:hunk_header, idx},
+        "@@ -#{hunk.old_start + 1},#{hunk.old_count} +#{hunk.start_line + 1},#{hunk.count} @@ (+#{added}, -#{removed})",
+        :hunk_header,
+        idx
+      )
 
-    do_build_display(
-      after_lines,
-      rest,
-      ctx,
-      idx + 1,
-      new_displayed_until,
-      Enum.reverse(lines, acc)
-    )
-  end
-
-  @spec hunk_display_lines(
-          [String.t()],
-          Diff.hunk(),
-          non_neg_integer(),
-          non_neg_integer(),
-          non_neg_integer(),
-          Diff.hunk() | nil
-        ) :: {[diff_line()], non_neg_integer()}
-  defp hunk_display_lines(after_lines, hunk, hunk_idx, ctx, displayed_until, next_hunk) do
-    before_ctx_start = max(max(0, hunk.start_line - ctx), displayed_until)
-
-    before_ctx_lines =
-      Enum.slice(after_lines, before_ctx_start, hunk.start_line - before_ctx_start)
-
-    before_ctx =
-      before_ctx_lines
-      |> Enum.with_index(before_ctx_start)
-      |> Enum.map(fn {line, after_index} ->
-        baseline_index = hunk.old_start - (hunk.start_line - after_index)
-        DisplayLine.new({:baseline, baseline_index}, line, :context)
-      end)
-
-    hunk_lines = render_hunk_lines(after_lines, hunk, hunk_idx)
+    before_start = max(offset, max(0, hunk.start_line - ctx))
+    before_count = hunk.start_line - before_start
+    tail = Enum.drop(tail, before_start - offset)
+    before_baseline = hunk.old_start - before_count
+    {tail, acc} = prepend_context(tail, before_count, before_baseline, [header | acc])
+    {tail, acc} = prepend_changed(tail, hunk, idx, acc)
 
     after_start = hunk.start_line + hunk.count
 
     after_end =
       (after_start + ctx)
-      |> min(Enum.count(after_lines))
-      |> cap_context_before_next_hunk(next_hunk)
+      |> min(file_length)
+      |> cap_context_before_next_hunk(List.first(rest))
 
-    after_ctx_lines = Enum.slice(after_lines, after_start, after_end - after_start)
-
-    after_ctx =
-      after_ctx_lines
-      |> Enum.with_index(after_start)
-      |> Enum.map(fn {line, after_index} ->
-        baseline_index = hunk.old_start + hunk.old_count + after_index - after_start
-        DisplayLine.new({:baseline, baseline_index}, line, :context)
-      end)
-
-    {added, removed} = hunk_counts(hunk)
-
-    header =
-      DisplayLine.new(
-        {:hunk_header, hunk_idx},
-        "@@ -#{hunk.old_start + 1},#{hunk.old_count} +#{hunk.start_line + 1},#{hunk.count} @@ (+#{added}, -#{removed})",
-        :hunk_header,
-        hunk_idx
-      )
-
-    {[header | before_ctx] ++ hunk_lines ++ after_ctx, after_end}
+    after_baseline = hunk.old_start + hunk.old_count
+    {tail, acc} = prepend_context(tail, after_end - after_start, after_baseline, acc)
+    do_build_display(rest, {tail, after_end}, file_length, ctx, idx + 1, acc)
   end
 
   @spec cap_context_before_next_hunk(non_neg_integer(), Diff.hunk() | nil) :: non_neg_integer()
@@ -641,38 +642,54 @@ defmodule MingaEditor.Agent.DiffReview do
   defp cap_context_before_next_hunk(after_end, next_hunk),
     do: min(after_end, next_hunk.start_line)
 
-  @spec render_hunk_lines([String.t()], Diff.hunk(), non_neg_integer()) :: [
-          diff_line()
-        ]
-  defp render_hunk_lines(after_lines, %{type: :added} = hunk, hunk_idx) do
-    added_display_lines(after_lines, hunk, hunk_idx)
+  # A negative span still raises for a changed interval crossing the next hunk or EOF.
+  @spec prepend_context([String.t()], integer(), integer(), [diff_line()]) ::
+          {[String.t()], [diff_line()]}
+  defp prepend_context(lines, 0, _baseline, acc), do: {lines, acc}
+  defp prepend_context([], count, _baseline, acc) when count > 0, do: {[], acc}
+
+  defp prepend_context([line | tail], count, baseline, acc) when count > 0 do
+    row = DisplayLine.new({:baseline, baseline}, line, :context)
+    prepend_context(tail, count - 1, baseline + 1, [row | acc])
   end
 
-  defp render_hunk_lines(_after, %{type: :deleted} = hunk, hunk_idx) do
-    removed_display_lines(hunk, hunk_idx)
+  @spec prepend_changed([String.t()], Diff.hunk(), non_neg_integer(), [diff_line()]) ::
+          {[String.t()], [diff_line()]}
+  defp prepend_changed(lines, %{type: :added, count: count}, idx, acc) do
+    prepend_added(lines, count, idx, 0, acc)
   end
 
-  defp render_hunk_lines(after_lines, %{type: :modified} = hunk, hunk_idx) do
-    removed_display_lines(hunk, hunk_idx) ++ added_display_lines(after_lines, hunk, hunk_idx)
+  defp prepend_changed(lines, %{type: :deleted} = hunk, idx, acc) do
+    {Enum.drop(lines, hunk.count), prepend_removed(hunk.old_lines, hunk.old_start, idx, acc)}
   end
 
-  @spec removed_display_lines(Diff.hunk(), non_neg_integer()) :: [diff_line()]
-  defp removed_display_lines(hunk, hunk_idx) do
-    hunk.old_lines
-    |> Enum.with_index(hunk.old_start)
-    |> Enum.map(fn {line, baseline_index} ->
-      DisplayLine.new({:baseline, baseline_index}, line, :removed, hunk_idx)
-    end)
+  defp prepend_changed(lines, %{type: :modified} = hunk, idx, acc) do
+    acc = prepend_removed(hunk.old_lines, hunk.old_start, idx, acc)
+    prepend_added(lines, hunk.count, idx, 0, acc)
   end
 
-  @spec added_display_lines([String.t()], Diff.hunk(), non_neg_integer()) :: [diff_line()]
-  defp added_display_lines(after_lines, hunk, hunk_idx) do
-    after_lines
-    |> Enum.slice(hunk.start_line, hunk.count)
-    |> Enum.with_index()
-    |> Enum.map(fn {line, offset} ->
-      DisplayLine.new({:added, hunk_idx, offset}, line, :added, hunk_idx)
-    end)
+  @spec prepend_removed([String.t()], non_neg_integer(), non_neg_integer(), [diff_line()]) ::
+          [diff_line()]
+  defp prepend_removed([], _baseline, _idx, acc), do: acc
+
+  defp prepend_removed([line | tail], baseline, idx, acc) do
+    row = DisplayLine.new({:baseline, baseline}, line, :removed, idx)
+    prepend_removed(tail, baseline + 1, idx, [row | acc])
+  end
+
+  @spec prepend_added(
+          [String.t()],
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer(),
+          [diff_line()]
+        ) :: {[String.t()], [diff_line()]}
+  defp prepend_added(lines, 0, _idx, _offset, acc), do: {lines, acc}
+  defp prepend_added([], count, _idx, _offset, acc) when count > 0, do: {[], acc}
+
+  defp prepend_added([line | tail], count, idx, offset, acc) when count > 0 do
+    row = DisplayLine.new({:added, idx, offset}, line, :added, idx)
+    prepend_added(tail, count - 1, idx, offset + 1, [row | acc])
   end
 
   @spec hunk_counts(Diff.hunk()) :: {non_neg_integer(), non_neg_integer()}
