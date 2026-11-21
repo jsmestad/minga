@@ -488,10 +488,12 @@ defmodule Minga.Core.DiffView do
     {[], at_start, start}
   end
 
-  defp split_hunk(%{start_line: start, count: 0}, at_start, current_lines) do
-    # At offset zero, the old range ends at -1 and renders the entire file.
-    {Enum.slice(current_lines, start..(start - 1)), at_start, start}
-  end
+  # Preserve the explicit-hunk contract of the former 0..-1 slice.
+  defp split_hunk(%{start_line: 0, count: 0}, at_start, current_lines),
+    do: {current_lines, at_start, 0}
+
+  defp split_hunk(%{start_line: start, count: 0}, at_start, _current_lines),
+    do: {[], at_start, start}
 
   defp split_hunk(%{start_line: start, count: count}, at_start, _current_lines) do
     {new_lines, after_hunk} = Enum.split(at_start, count)
