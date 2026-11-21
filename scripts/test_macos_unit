@@ -271,9 +271,10 @@ def capture_build_settings(common, overrides, destination, cwd):
 
 def prepare_hosted_policy(common, products, run, cwd):
     before = snapshot_plans(products, run / "policy-plans-before")
-    command = ["xcodebuild", "build-for-testing", *common, "-destination", "platform=macOS"]
+    command = ["xcodebuild", "build-for-testing", *common, "-destination", "platform=macOS", "-showBuildTimingSummary"]
     log = run / "focus-policy.build.log"
     execution_error = None
+    build_started = time.monotonic()
     with log.open("w") as stream:
         try:
             exit_code = subprocess.run(command, cwd=cwd, stdout=stream, stderr=subprocess.STDOUT, check=False).returncode
@@ -281,11 +282,13 @@ def prepare_hosted_policy(common, products, run, cwd):
             execution_error = str(error)
             stream.write(execution_error + "\n")
             exit_code = 127
+    build_seconds = time.monotonic() - build_started
     after = snapshot_plans(products, run / "policy-plans-after")
     settings_path = run / "focus-policy.build-settings.json"
     probe, settings = capture_build_settings(common, [], settings_path, cwd)
     receipt = {
         "build": {"command": command, "log": str(log.relative_to(run.parent)), "executed": True, "exit_code": exit_code, "execution_error": execution_error},
+        "build_seconds": build_seconds,
         "settings": str(settings_path.relative_to(run.parent)), "settings_command": probe["command"], "settings_probe": probe,
         "plans_before": str((run / "policy-plans-before/receipts.json").relative_to(run.parent)),
         "plans_after": str((run / "policy-plans-after/receipts.json").relative_to(run.parent)),
@@ -734,6 +737,24 @@ def save_results(output, actions, started):
     return result
 
 
+def ordinary_phase_timings(bundle, summary):
+    """Read Xcode's build interval and the remaining test-action wall time."""
+    try:
+        result = subprocess.run(
+            ["xcrun", "xcresulttool", "get", "log", "--type", "build", "--compact", "--path", str(bundle)],
+            capture_output=True, check=True,
+        )
+        build = json.loads(result.stdout)
+        build_seconds = build["duration"]
+        test_seconds = summary["finishTime"] - (build["startTime"] + build_seconds)
+        if build_seconds < 0 or test_seconds < 0:
+            raise ValueError("build and test intervals are not ordered")
+        return {"build_seconds": build_seconds, "post_build_test_seconds": test_seconds}
+    except (OSError, subprocess.CalledProcessError, KeyError, TypeError, ValueError) as error:
+        print(f"Could not read ordinary build/test timing from {bundle}: {error}", file=sys.stderr)
+        return None
+
+
 def main():
     root = Path(__file__).resolve().parents[1]
     parser = argparse.ArgumentParser(description=__doc__)
@@ -761,7 +782,7 @@ def main():
             bundle = run / f"{name}.xcresult"
             log = run / f"{name}.log"
             overrides = ["TEST_HOST=", "BUNDLE_LOADER="] if name == "ordinary" else []
-            command = ["xcodebuild", operation, *common, *overrides, *selectors, "-resultBundlePath", str(bundle)]
+            command = ["xcodebuild", operation, *common, *overrides, *selectors, "-showBuildTimingSummary", "-resultBundlePath", str(bundle)]
             if name != "ordinary":
                 input_plan = run / f"{name}.xctestrun"
                 command = ["xcodebuild", operation, "-xctestrun", str(input_plan), "-destination", "platform=macOS", *selectors, "-resultBundlePath", str(bundle)]
@@ -796,6 +817,11 @@ def main():
             if not executed:
                 errors.append(f"{name} dependency failed: no verified current successful hosted {'build' if name == 'focus-policy' else 'policy execution'}")
             if name == "ordinary":
+                if summary:
+                    action["phase_timings"] = ordinary_phase_timings(bundle, summary)
+                    if action["phase_timings"]:
+                        timing = action["phase_timings"]
+                        print(f"Ordinary native unit timing: build {timing['build_seconds']:.1f}s; test and result handling {timing['post_build_test_seconds']:.1f}s")
                 settings_path = run / f"{name}.build-settings.json"
                 probe, settings = capture_build_settings(common, overrides, settings_path, root / "macos")
                 receipt.update({"settings": str(settings_path.relative_to(output)), "settings_command": probe["command"], "settings_probe": probe})
