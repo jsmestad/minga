@@ -33,6 +33,15 @@ defmodule MingaEditor.FeatureStateTest do
     assert FeatureState.empty?(state)
   end
 
+  test "stored nil is distinct from missing feature state" do
+    state = FeatureState.put(FeatureState.new(), @source, @feature, nil)
+
+    assert FeatureState.fetch(state, @source, @feature) == {:ok, nil}
+    assert FeatureState.get(state, @source, @feature, :default) == nil
+    assert FeatureState.member?(state, @source, @feature)
+    assert FeatureState.get(state, @source, :missing, :default) == :default
+  end
+
   test "source cleanup removes only matching source entries" do
     state =
       FeatureState.new()
