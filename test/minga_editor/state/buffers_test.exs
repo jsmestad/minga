@@ -85,6 +85,28 @@ defmodule MingaEditor.State.BuffersTest do
       assert result.active == :b
       assert result.active_index == 1
     end
+
+    test "reselects the saved slot when the active override is not listed" do
+      buffers =
+        %Buffers{list: [:a, :b], active: :b, active_index: 1, help: :help}
+        |> Buffers.set_active_override(:outside)
+
+      result = Buffers.remove(buffers, :help)
+
+      assert %Buffers{list: [:a, :b], active: :b, active_index: 1, help: nil} = result
+    end
+
+    test "removes every matching entry and keeps the first surviving active match" do
+      buffers = %Buffers{list: [:x, :a, :x, :a], active: :a, active_index: 3}
+
+      assert %Buffers{list: [:a, :a], active: :a, active_index: 0} = Buffers.remove(buffers, :x)
+    end
+
+    test "preserves a negative selection index installed by replace_list" do
+      buffers = Buffers.replace_list(%Buffers{}, [:a, :b, :c], -2)
+
+      assert %Buffers{list: [:a, :c], active: :a, active_index: -2} = Buffers.remove(buffers, :b)
+    end
   end
 
   describe "add_background/2" do
