@@ -296,17 +296,18 @@ defmodule Minga.Project.FileTree do
   defp build_cache_entries(files, %__MODULE__{filter: filter, root: root} = tree) do
     needle = String.downcase(filter)
 
-    matches =
-      files
-      |> Enum.filter(&cache_path_matches?(&1, needle))
-      |> maybe_filter_hidden_paths(tree.show_hidden)
-      |> Enum.sort()
+    files
+    |> Enum.filter(&cache_path_matches?(&1, needle))
+    |> maybe_filter_hidden_paths(tree.show_hidden)
+    |> Enum.sort()
+    |> cache_entries(root)
+  end
 
-    last_idx = Enum.count(matches) - 1
+  @spec cache_entries([String.t()], String.t()) :: [entry()]
+  defp cache_entries([], _root), do: []
 
-    matches
-    |> Enum.with_index()
-    |> Enum.map(fn {rel_path, idx} -> cache_entry(rel_path, root, idx == last_idx) end)
+  defp cache_entries([path | rest], root) do
+    [cache_entry(path, root, rest == []) | cache_entries(rest, root)]
   end
 
   @spec cache_path_matches?(String.t(), String.t()) :: boolean()
@@ -346,7 +347,7 @@ defmodule Minga.Project.FileTree do
   """
   @spec filtered_walk_entries(t()) :: [entry()]
   def filtered_walk_entries(%__MODULE__{} = tree) do
-    tree.root |> walk(0, tree, []) |> filter_entries(tree)
+    tree.root |> walk(0, tree, [], []) |> Enum.reverse() |> filter_entries(tree)
   end
 
   @doc "Replaces the cached visible entries with a precomputed list (clamps the cursor)."
@@ -429,8 +430,8 @@ defmodule Minga.Project.FileTree do
   @typep stat_child ::
            {name :: String.t(), full :: String.t(), dir? :: boolean(), symlink? :: boolean()}
 
-  @spec walk(String.t(), non_neg_integer(), t(), [boolean()]) :: [entry()]
-  defp walk(dir_path, depth, tree, parent_guides) do
+  @spec walk(String.t(), non_neg_integer(), t(), [boolean()], [entry()]) :: [entry()]
+  defp walk(dir_path, depth, tree, parent_guides, entries) do
     case File.ls(dir_path) do
       {:ok, names} ->
         sorted =
@@ -442,17 +443,19 @@ defmodule Minga.Project.FileTree do
             {if(dir?, do: 0, else: 1), String.downcase(name)}
           end)
 
-        last_idx = Enum.count(sorted) - 1
-
-        sorted
-        |> Enum.with_index()
-        |> Enum.flat_map(fn {child, idx} ->
-          walk_entry(child, depth, tree, parent_guides, idx == last_idx)
-        end)
+        walk_siblings(sorted, depth, tree, parent_guides, entries)
 
       {:error, _} ->
-        []
+        entries
     end
+  end
+
+  @spec walk_siblings([stat_child()], non_neg_integer(), t(), [boolean()], [entry()]) :: [entry()]
+  defp walk_siblings([], _depth, _tree, _guides, entries), do: entries
+
+  defp walk_siblings([child | rest], depth, tree, guides, entries) do
+    entries = walk_entry(child, depth, tree, guides, rest == [], entries)
+    walk_siblings(rest, depth, tree, guides, entries)
   end
 
   # Stats a child exactly once (plus a single follow-stat only for symlinks),
@@ -487,8 +490,9 @@ defmodule Minga.Project.FileTree do
     end
   end
 
-  @spec walk_entry(stat_child(), non_neg_integer(), t(), [boolean()], boolean()) :: [entry()]
-  defp walk_entry({name, full, dir?, symlink?}, depth, tree, parent_guides, is_last) do
+  @spec walk_entry(stat_child(), non_neg_integer(), t(), [boolean()], boolean(), [entry()]) ::
+          [entry()]
+  defp walk_entry({name, full, dir?, symlink?}, depth, tree, parent_guides, is_last, entries) do
     entry = %{
       path: full,
       name: name,
@@ -498,14 +502,16 @@ defmodule Minga.Project.FileTree do
       guides: parent_guides
     }
 
+    entries = [entry | entries]
+
     # Show symlinked directories, but never descend into them (cycle safety).
     if dir? and not symlink? and descend_into_directory?(tree, full) do
       # Children need to know: at this entry's depth, are there more siblings?
       # If this entry is NOT the last child, its depth column should draw │.
       child_guides = Enum.concat(parent_guides, [not is_last])
-      [entry | walk(full, depth + 1, tree, child_guides)]
+      walk(full, depth + 1, tree, child_guides, entries)
     else
-      [entry]
+      entries
     end
   end
 

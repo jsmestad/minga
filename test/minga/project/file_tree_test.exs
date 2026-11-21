@@ -343,14 +343,17 @@ defmodule Minga.Project.FileTreeTest do
       assert tree |> FileTree.refresh() |> names() == ["target.ex"]
     end
 
-    test "cache filtering presents matches flat at depth 0" do
+    test "marks the final visible cached match after sorting and excluding hidden paths" do
       tree =
         "/root"
         |> FileTree.new()
-        |> FileTree.put_cached_files(["a/b/c/deep.ex"])
+        |> FileTree.put_cached_files(["z/deep.ex", ".hidden/deep.ex", "a/deep.ex"])
         |> FileTree.set_filter("deep")
 
-      assert [%{depth: 0, dir?: false, guides: []}] = FileTree.visible_entries(tree)
+      assert [
+               %{path: "/root/a/deep.ex", depth: 0, dir?: false, guides: [], last_child?: false},
+               %{path: "/root/z/deep.ex", depth: 0, dir?: false, guides: [], last_child?: true}
+             ] = FileTree.visible_entries(tree)
     end
 
     test "an empty cache yields no matches and does not walk the filesystem" do
