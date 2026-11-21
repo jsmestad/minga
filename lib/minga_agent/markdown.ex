@@ -65,28 +65,28 @@ defmodule MingaAgent.Markdown do
   @type code_block :: %{language: String.t(), content: String.t()}
 
   @typep prose_block ::
-          %{
-            kind: :paragraph,
-            lines: [String.t()]
-          }
-          | %{
-              kind: :heading,
-              level: 1..3,
-              text: String.t()
-            }
-          | %{
-              kind: :list_item,
-              indent: non_neg_integer(),
-              ordered: boolean(),
-              ordinal: non_neg_integer(),
-              text: String.t()
-            }
-          | %{
-              kind: :blockquote,
-              lines: [String.t()]
-            }
-          | %{kind: :rule}
-          | %{kind: :spacer, height: pos_integer()}
+           %{
+             kind: :paragraph,
+             lines: [String.t()]
+           }
+           | %{
+               kind: :heading,
+               level: 1..3,
+               text: String.t()
+             }
+           | %{
+               kind: :list_item,
+               indent: non_neg_integer(),
+               ordered: boolean(),
+               ordinal: non_neg_integer(),
+               text: String.t()
+             }
+           | %{
+               kind: :blockquote,
+               lines: [String.t()]
+             }
+           | %{kind: :rule}
+           | %{kind: :spacer, height: pos_integer()}
 
   @typedoc "Semantic markdown block used by agent chat renderers before styling."
   @type block ::
