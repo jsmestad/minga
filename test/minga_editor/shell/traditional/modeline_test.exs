@@ -1,6 +1,8 @@
 defmodule MingaEditor.Shell.Traditional.ModelineTest do
   use ExUnit.Case, async: true
 
+  import ExUnit.CaptureLog
+
   alias Minga.Config.ModelineSegments
   alias Minga.Config.Options
   alias Minga.Mode
@@ -293,31 +295,148 @@ defmodule MingaEditor.Shell.Traditional.ModelineTest do
       end
     end
 
-    test "explicit configured side overrides custom default side without duplication" do
-      segment_name = :gui_override_side_modeline_test
-      ModelineSegments.unregister(segment_name)
+    test "explicit segments retain side, order and duplicates ahead of ordered defaults" do
+      table = start_segment_registry()
 
-      try do
-        assert :ok =
-                 ModelineSegments.register(segment_name, [side: :left, priority: 50], fn ctx ->
-                   {" MOVED ", ctx.info_fg, ctx.bar_bg, [], nil}
-                 end)
-
-        with_options(fn options ->
-          Options.set(options, :modeline_left_segments, [])
-          Options.set(options, :modeline_right_segments, [segment_name])
-
-          segments = Modeline.gui_segments(@base_data)
-          left_text = segment_text(segments.left)
-          right_text = segment_text(segments.right)
-
-          refute String.contains?(left_text, "MOVED")
-          assert String.contains?(right_text, "MOVED")
-          assert right_text |> String.split("MOVED") |> Enum.count() == 2
+      for {name, side, priority} <- [
+            {:beta, :left, 10},
+            {:alpha, :left, 10},
+            {:high_priority, :left, 20},
+            {:moved, :left, 30},
+            {:right_default, :right, 40}
+          ] do
+        register_segment(table, name, [side: side, priority: priority], fn _ctx ->
+          {Atom.to_string(name), 0, 0, [], nil}
         end)
-      after
-        ModelineSegments.unregister(segment_name)
       end
+
+      with_options(fn options ->
+        Options.set(options, :modeline_left_segments, [])
+        Options.set(options, :modeline_right_segments, [:moved, :filename, :moved])
+
+        assert %{left: left, right: right} = registry_segments(table)
+        assert Enum.map(left, &elem(&1, 0)) == [:high_priority, :alpha, :beta]
+        assert Enum.map(right, &elem(&1, 0)) == [:moved, :filename, :moved, :right_default]
+      end)
+    end
+
+    test "both sides keep their names while each occurrence resolves the latest callback" do
+      table = start_segment_registry()
+
+      register_segment(table, :later, [side: :right], fn _ctx ->
+        flunk("the replaced callback should not run")
+      end)
+
+      register_segment(table, :changing, [side: :left], fn _ctx ->
+        register_segment(table, :changing, [side: :left], fn _ctx ->
+          {"second", 0, 0, [], nil}
+        end)
+
+        register_segment(table, :later, [side: :left], fn _ctx ->
+          {"replacement", 0, 0, [], nil}
+        end)
+
+        {"first", 0, 0, [], nil}
+      end)
+
+      with_options(fn options ->
+        Options.set(options, :modeline_left_segments, [:changing, :changing])
+        Options.set(options, :modeline_right_segments, [])
+
+        assert registry_segments(table) == %{
+                 left: [{:changing, "first", 0, 0, [], nil}, {:changing, "second", 0, 0, [], nil}],
+                 right: [{:later, "replacement", 0, 0, [], nil}]
+               }
+      end)
+    end
+
+    test "nested output is validated depth first and preserves surviving tuples and targets" do
+      table = start_segment_registry()
+
+      register_segment(table, :nested_modeline_test, [side: :left], fn _ctx ->
+        [
+          {"first", 1, 2, [], :workspace_list},
+          [nil, [:first_bad_leaf, {"second", 3, 4, [], nil}]],
+          :later_bad_leaf,
+          [],
+          {"third", 5, 6, [], :indent_picker}
+        ]
+      end)
+
+      register_segment(table, :after_nested, [side: :left], fn _ctx ->
+        Minga.Log.warning(:config, "After nested modeline callback")
+        []
+      end)
+
+      with_options(fn options ->
+        Options.set(options, :modeline_left_segments, [:nested_modeline_test, :after_nested])
+        Options.set(options, :modeline_right_segments, [])
+
+        {segments, log} = with_log(fn -> registry_segments(table) end)
+
+        assert segments == %{
+                 left: [
+                   {:nested_modeline_test, "first", 1, 2, [], :workspace_list},
+                   {:nested_modeline_test, "second", 3, 4, [], nil},
+                   {:nested_modeline_test, "third", 5, 6, [], :indent_picker}
+                 ],
+                 right: []
+               }
+
+        assert {warning_offset, _} =
+                 :binary.match(
+                   log,
+                   "Invalid modeline segment :nested_modeline_test output ignored: :first_bad_leaf"
+                 )
+
+        assert {callback_offset, _} = :binary.match(log, "After nested modeline callback")
+        assert warning_offset < callback_offset
+        refute log =~ ":later_bad_leaf"
+      end)
+    end
+
+    test "accepted options retain order and duplicates; rejected lists warn at the first failure" do
+      table = start_segment_registry()
+
+      opts = [
+        italic: false,
+        underline_style: :curl,
+        blend: 0,
+        bold: true,
+        underline_color: 0xFF_FFFF,
+        blend: 100,
+        font_family: "Monospace",
+        font_weight: :semibold,
+        font_slant: :oblique,
+        font_features: %{"kern" => true, "liga" => false},
+        bold: false
+      ]
+
+      register_segment(table, :compatible_opts_modeline_test, [side: :left], fn _ctx ->
+        [
+          {"valid", 0, 0, opts, nil},
+          {"malformed", 0, 0, [{:bold, :invalid}, :not_a_pair], nil},
+          {"invalid", 0, 0, [blend: 0, blend: 101, italic: :invalid], nil}
+        ]
+      end)
+
+      with_options(fn options ->
+        Options.set(options, :modeline_left_segments, [])
+        Options.set(options, :modeline_right_segments, [])
+
+        {segments, log} = with_log(fn -> registry_segments(table) end)
+
+        assert segments == %{
+                 left: [{:compatible_opts_modeline_test, "valid", 0, 0, opts, nil}],
+                 right: []
+               }
+
+        warning = "Invalid modeline segment :compatible_opts_modeline_test"
+        assert log =~ "#{warning} options ignored: expected a keyword list"
+        assert log =~ "#{warning} option ignored: :blend=101"
+        refute log =~ "#{warning} option ignored: :bold="
+        refute log =~ "#{warning} option ignored: :italic="
+      end)
     end
 
     test "registry rejects duplicate segment names from different sources" do
@@ -623,6 +742,26 @@ defmodule MingaEditor.Shell.Traditional.ModelineTest do
       end
     end
 
+    test "indent stays builtin and selection emits no standalone segment" do
+      table = start_segment_registry()
+
+      register_segment(table, :indent, [side: :left], fn _ctx ->
+        flunk("the custom indent callback should not run")
+      end)
+
+      with_options(fn options ->
+        Options.set(options, :modeline_left_segments, [:selection, :indent])
+        Options.set(options, :modeline_right_segments, [])
+        data = Map.merge(@base_data, %{indent_type: :spaces, indent_size: 2})
+
+        {segments, log} = with_log(fn -> registry_segments(table, data) end)
+
+        assert %{left: [{:indent, text, _, _, _, :indent_picker}], right: []} = segments
+        assert text =~ "Spaces:2"
+        refute log =~ "Unknown modeline segment :selection"
+      end)
+    end
+
     test "selection info replaces cursor position" do
       data = Map.merge(@base_data, %{selection_info: {:chars, 42}})
       text = segments_text(data)
@@ -648,6 +787,20 @@ defmodule MingaEditor.Shell.Traditional.ModelineTest do
 
   defp restore_options_server(nil), do: Process.delete(:minga_config_options)
   defp restore_options_server(previous), do: Process.put(:minga_config_options, previous)
+
+  defp start_segment_registry do
+    table = :"modeline_segments_#{System.unique_integer([:positive])}"
+    start_supervised!({ModelineSegments, name: table})
+    table
+  end
+
+  defp register_segment(table, name, opts, render) do
+    assert :ok = ModelineSegments.register(table, name, opts, render, :config)
+  end
+
+  defp registry_segments(table, data \\ @base_data) do
+    Modeline.gui_segments(data, MingaEditor.UI.Theme.get!(:doom_one), table)
+  end
 
   defp gui_segments(data, nil), do: Modeline.gui_segments(data)
   defp gui_segments(data, theme), do: Modeline.gui_segments(data, theme)
