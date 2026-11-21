@@ -655,9 +655,9 @@ defmodule MingaEditor.Agent.DiffReview do
           [String.t()],
           [diff_line()]
         ) :: {[String.t()], non_neg_integer(), [diff_line()]}
-  defp prepend_trailing_context(_tail, %{count: count} = hunk, start, stop, lines, acc)
-       when count < 0 do
-    # A signed deletion can move the context backward or address it from EOF.
+  defp prepend_trailing_context(_tail, %{start_line: hunk_start} = hunk, start, stop, lines, acc)
+       when start < hunk_start do
+    # The remaining tail cannot address trailing context that moved backward.
     amount = stop - start
     context = Enum.slice(lines, start, amount)
     {_rest, acc} = prepend_context(context, amount, hunk.old_start + hunk.old_count, acc)
