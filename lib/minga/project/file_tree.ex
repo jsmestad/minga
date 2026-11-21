@@ -246,16 +246,16 @@ defmodule Minga.Project.FileTree do
     %{tree | entries: fresh_entries(tree)}
   end
 
-  @spec fresh_entries(t()) :: [entry()]
-  defp fresh_entries(tree) do
+  @spec fresh_entries(t(), [String.t()] | nil) :: [entry()]
+  defp fresh_entries(tree, root_names \\ nil) do
     case cache_filter_entries(tree) do
       entries when is_list(entries) -> entries
-      :no_cache -> walk_entries(tree)
+      :no_cache -> walk_entries(tree, root_names)
     end
   end
 
-  @spec walk_entries(t()) :: [entry()]
-  defp walk_entries(%__MODULE__{} = tree) do
+  @spec walk_entries(t(), [String.t()] | nil) :: [entry()]
+  defp walk_entries(%__MODULE__{} = tree, root_names) do
     # Span only the actual filesystem walk (the memoized path above returns
     # early), so `[:minga, :file_tree, :walk]` records real walk cost — its
     # entry count and duration — for spotting large-repo overages (#2367).
@@ -263,7 +263,7 @@ defmodule Minga.Project.FileTree do
       [:minga, :file_tree, :walk],
       %{root: tree.root},
       fn ->
-        entries = filtered_walk_entries(tree)
+        entries = filtered_walk_entries(tree, root_names)
         {entries, %{entry_count: length(entries)}}
       end
     )
@@ -347,7 +347,7 @@ defmodule Minga.Project.FileTree do
   """
   @spec filtered_walk_entries(t()) :: [entry()]
   def filtered_walk_entries(%__MODULE__{} = tree) do
-    tree.root |> walk(0, tree, [], []) |> Enum.reverse() |> filter_entries(tree)
+    filtered_walk_entries(tree, nil)
   end
 
   @doc "Replaces the cached visible entries with a precomputed list (clamps the cursor)."
@@ -361,6 +361,18 @@ defmodule Minga.Project.FileTree do
   @spec refresh(t()) :: t()
   def refresh(%__MODULE__{} = tree) do
     put_entries(tree, fresh_entries(tree))
+  end
+
+  @doc """
+  Refreshes the tree and clamps its cursor, returning a root listing error unchanged.
+
+  Requires a readable root even when the active filter can use cached paths.
+  """
+  @spec refresh_checked(t()) :: {:ok, t()} | {:error, File.posix()}
+  def refresh_checked(%__MODULE__{} = tree) do
+    with {:ok, root_names} <- File.ls(tree.root) do
+      {:ok, put_entries(tree, fresh_entries(tree, root_names))}
+    end
   end
 
   @doc "Re-roots the tree while preserving display options."
@@ -420,38 +432,81 @@ defmodule Minga.Project.FileTree do
   @spec invalidate_entries(t()) :: t()
   defp invalidate_entries(%__MODULE__{} = tree), do: %{tree | entries: nil}
 
+  @typep walk_context :: %{
+           root: String.t(),
+           expanded: MapSet.t(String.t()),
+           show_hidden: boolean(),
+           excludes: MapSet.t(String.t()),
+           needle: String.t() | nil
+         }
+
+  @spec filtered_walk_entries(t(), [String.t()] | nil) :: [entry()]
+  defp filtered_walk_entries(tree, nil) do
+    case File.ls(tree.root) do
+      {:ok, names} -> filtered_walk_entries(tree, names)
+      {:error, _reason} -> []
+    end
+  end
+
+  defp filtered_walk_entries(tree, root_names) do
+    context = %{
+      root: tree.root,
+      expanded: tree.expanded,
+      show_hidden: tree.show_hidden,
+      excludes: MapSet.new(Minga.Config.get(:file_find_excludes)),
+      needle: if(active_filter?(tree), do: String.downcase(tree.filter))
+    }
+
+    root_names
+    |> walk_listed(tree.root, 0, context, [], [])
+    |> Enum.reverse()
+  end
+
   # A child after a single stat pass: its name, absolute path, whether it is a
   # directory (following symlinks, so a symlink-to-dir counts), and whether it
   # is itself a symlink (so the walk shows it but never descends into it).
   @typep stat_child ::
            {name :: String.t(), full :: String.t(), dir? :: boolean(), symlink? :: boolean()}
 
-  @spec walk(String.t(), non_neg_integer(), t(), [boolean()], [entry()]) :: [entry()]
-  defp walk(dir_path, depth, tree, parent_guides, entries) do
+  @spec walk(String.t(), non_neg_integer(), walk_context(), [boolean()], [entry()]) :: [entry()]
+  defp walk(dir_path, depth, context, guides, entries) do
     case File.ls(dir_path) do
-      {:ok, names} ->
-        sorted =
-          names
-          |> Enum.reject(&ignored?/1)
-          |> maybe_filter_hidden(tree.show_hidden)
-          |> Enum.map(&stat_child(dir_path, &1))
-          |> Enum.sort_by(fn {name, _full, dir?, _symlink?} ->
-            {if(dir?, do: 0, else: 1), String.downcase(name)}
-          end)
-
-        walk_siblings(sorted, depth, tree, parent_guides, entries)
-
-      {:error, _} ->
-        entries
+      {:ok, names} -> walk_listed(names, dir_path, depth, context, guides, entries)
+      {:error, _reason} -> entries
     end
   end
 
-  @spec walk_siblings([stat_child()], non_neg_integer(), t(), [boolean()], [entry()]) :: [entry()]
-  defp walk_siblings([], _depth, _tree, _guides, entries), do: entries
+  @spec walk_listed(
+          [String.t()],
+          String.t(),
+          non_neg_integer(),
+          walk_context(),
+          [boolean()],
+          [entry()]
+        ) :: [entry()]
+  defp walk_listed(names, dir_path, depth, context, guides, entries) do
+    children =
+      for name <- names,
+          not MapSet.member?(context.excludes, name),
+          context.show_hidden or not String.starts_with?(name, ".") do
+        stat_child(dir_path, name)
+      end
 
-  defp walk_siblings([child | rest], depth, tree, guides, entries) do
-    entries = walk_entry(child, depth, tree, guides, rest == [], entries)
-    walk_siblings(rest, depth, tree, guides, entries)
+    sorted =
+      Enum.sort_by(children, fn {name, _full, dir?, _symlink?} ->
+        {if(dir?, do: 0, else: 1), String.downcase(name)}
+      end)
+
+    walk_siblings(sorted, depth, context, guides, entries)
+  end
+
+  @spec walk_siblings([stat_child()], non_neg_integer(), walk_context(), [boolean()], [entry()]) ::
+          [entry()]
+  defp walk_siblings([], _depth, _context, _guides, entries), do: entries
+
+  defp walk_siblings([child | rest], depth, context, guides, entries) do
+    entries = walk_entry(child, depth, context, guides, rest == [], entries)
+    walk_siblings(rest, depth, context, guides, entries)
   end
 
   # Stats a child exactly once (plus a single follow-stat only for symlinks),
@@ -486,66 +541,54 @@ defmodule Minga.Project.FileTree do
     end
   end
 
-  @spec walk_entry(stat_child(), non_neg_integer(), t(), [boolean()], boolean(), [entry()]) ::
+  @spec walk_entry(
+          stat_child(),
+          non_neg_integer(),
+          walk_context(),
+          [boolean()],
+          boolean(),
           [entry()]
-  defp walk_entry({name, full, dir?, symlink?}, depth, tree, parent_guides, is_last, entries) do
-    entry = %{
-      path: full,
-      name: name,
-      dir?: dir?,
-      depth: depth,
-      last_child?: is_last,
-      guides: parent_guides
-    }
+        ) :: [entry()]
+  defp walk_entry({name, full, dir?, symlink?}, depth, context, parent_guides, is_last, entries) do
+    entries =
+      if filter_match?(name, full, context) do
+        entry = %{
+          path: full,
+          name: name,
+          dir?: dir?,
+          depth: depth,
+          last_child?: is_last,
+          guides: parent_guides
+        }
 
-    entries = [entry | entries]
+        [entry | entries]
+      else
+        entries
+      end
 
-    # Show symlinked directories, but never descend into them (cycle safety).
-    if dir? and not symlink? and descend_into_directory?(tree, full) do
+    # Descend even when the directory did not match, but never follow symlinks.
+    if dir? and not symlink? and
+         (context.needle != nil or MapSet.member?(context.expanded, full)) do
       # Children need to know: at this entry's depth, are there more siblings?
       # If this entry is NOT the last child, its depth column should draw │.
       child_guides = Enum.concat(parent_guides, [not is_last])
-      walk(full, depth + 1, tree, child_guides, entries)
+      walk(full, depth + 1, context, child_guides, entries)
     else
       entries
     end
   end
 
-  @spec descend_into_directory?(t(), String.t()) :: boolean()
-  defp descend_into_directory?(%__MODULE__{} = tree, path) do
-    MapSet.member?(tree.expanded, path) or active_filter?(tree)
-  end
+  @spec filter_match?(String.t(), String.t(), walk_context()) :: boolean()
+  defp filter_match?(_name, _full, %{needle: nil}), do: true
 
-  @spec filter_entries([entry()], t()) :: [entry()]
-  defp filter_entries(entries, %__MODULE__{filter: nil}), do: entries
-  defp filter_entries(entries, %__MODULE__{filter: ""}), do: entries
-
-  defp filter_entries(entries, %__MODULE__{filter: filter, root: root}) do
-    needle = String.downcase(filter)
-    Enum.filter(entries, &filter_match?(&1, needle, root))
-  end
-
-  @spec filter_match?(entry(), String.t(), String.t()) :: boolean()
-  defp filter_match?(entry, needle, root) do
-    relative_path = Path.relative_to(entry.path, root)
-
-    entry.name |> String.downcase() |> String.contains?(needle) or
-      relative_path |> String.downcase() |> String.contains?(needle)
+  defp filter_match?(name, full, %{needle: needle, root: root}) do
+    String.contains?(String.downcase(name), needle) or
+      full |> Path.relative_to(root) |> String.downcase() |> String.contains?(needle)
   end
 
   @spec active_filter?(t()) :: boolean()
   defp active_filter?(%__MODULE__{filter: filter}) when is_binary(filter), do: filter != ""
   defp active_filter?(%__MODULE__{}), do: false
-
-  @spec ignored?(String.t()) :: boolean()
-  defp ignored?(name), do: name in Minga.Config.get(:file_find_excludes)
-
-  @spec maybe_filter_hidden([String.t()], boolean()) :: [String.t()]
-  defp maybe_filter_hidden(names, true), do: names
-
-  defp maybe_filter_hidden(names, false) do
-    Enum.reject(names, &String.starts_with?(&1, "."))
-  end
 
   @spec select_path_or_keep(t(), String.t()) :: t()
   defp select_path_or_keep(tree, path) do
