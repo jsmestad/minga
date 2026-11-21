@@ -105,7 +105,9 @@ defmodule MingaEditor.RenderModel.Window.DiagnosticIndex do
       end
     end)
     |> Enum.sort()
-    |> Enum.flat_map(fn {line, ranks} -> ranges_at_line(fetch(root, line), line, ranks, store) end)
+    |> Enum.flat_map(fn {line, ranks} ->
+      ranges_at_line(fetch(root, line), line, ranks, store)
+    end)
   end
 
   defp ranges_at_line(nil, _line, _ranks, _store), do: []
