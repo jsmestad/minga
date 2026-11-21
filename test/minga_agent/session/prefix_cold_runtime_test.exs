@@ -28,7 +28,7 @@ defmodule MingaAgent.Session.PrefixColdRuntimeTest do
         callback: fn _args -> {:ok, "fixture"} end
       )
 
-    tool = MingaAgent.Providers.Native.ReqLLMAdapter.tool(spec, nil, %{minga_tool_spec: spec})
+    tool = MingaAgent.Providers.Native.ReqLLMAdapter.tool(spec, :registry)
     declaration = MingaAgent.Providers.Native.ReqLLMAdapter.declaration(tool)
     assert declaration.source == {:extension, owner_name}
     continuation = completed_candidate(declaration)
@@ -99,7 +99,7 @@ defmodule MingaAgent.Session.PrefixColdRuntimeTest do
     true = owner == fixture["absent_owner"]
     adapter = MingaAgent.Providers.Native.ReqLLMAdapter
     schemas = MingaAgent.Tool.Registry.all()
-      |> Enum.map(fn spec -> adapter.tool(spec, nil, %{minga_tool_spec: spec}) end)
+      |> Enum.map(&adapter.tool(&1, :registry))
       |> adapter.declarations()
     {:ok, changed} = MingaAgent.Session.PrefixStore.candidate(prefix, prefix.instructions,
       schemas, prefix.identity, prefix.skills)

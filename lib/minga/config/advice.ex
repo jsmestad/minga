@@ -17,13 +17,13 @@ defmodule Minga.Config.Advice do
 
   ## Composition
 
-  Multiple advice functions for the same phase and command run in
-  registration order. For `:around`, they nest: the outermost advice
+  Multiple before, after, and around advice functions for the same command run
+  in registration order. For `:around`, they nest: the outermost advice
   wraps the next one, which wraps the next, with the original command
   at the center.
 
   If an `:override` is registered, it replaces the command entirely.
-  Multiple overrides chain (last registered wins as the innermost).
+  The last registered override wins.
   `:before` and `:after` still run around an overridden command.
 
   Result-returning tool execution uses `invoke/3`. Its around and override
@@ -150,10 +150,10 @@ defmodule Minga.Config.Advice do
   @spec wrap(atom(), atom(), (map() -> map())) :: (map() -> map())
   def wrap(table, command, execute)
       when is_atom(table) and is_atom(command) and is_function(execute, 1) do
-    befores = lookup_funs(table, :before, command)
-    afters = lookup_funs(table, :after, command)
-    arounds = lookup_funs(table, :around, command)
-    overrides = lookup_funs(table, :override, command)
+    befores = lookup_oldest_first(table, :before, command)
+    afters = lookup_oldest_first(table, :after, command)
+    arounds = lookup_newest_first(table, :around, command)
+    overrides = lookup_newest_first(table, :override, command)
 
     # If no advice at all, return the original function unchanged
     if befores == [] and afters == [] and arounds == [] and overrides == [] do
@@ -188,10 +188,10 @@ defmodule Minga.Config.Advice do
   def invoke(table, command, advice_state, core)
       when is_atom(table) and is_atom(command) and is_map(advice_state) and
              is_function(core, 0) do
-    befores = lookup_funs(table, :before, command)
-    afters = lookup_funs(table, :after, command)
-    arounds = lookup_funs(table, :around, command)
-    overrides = lookup_funs(table, :override, command)
+    befores = lookup_oldest_first(table, :before, command)
+    afters = lookup_oldest_first(table, :after, command)
+    arounds = lookup_oldest_first(table, :around, command)
+    overrides = lookup_newest_first(table, :override, command)
 
     advice_state
     |> run_invocation_state_chain(table, befores, :before, command)
@@ -240,10 +240,15 @@ defmodule Minga.Config.Advice do
 
   # ── Private ─────────────────────────────────────────────────────────────────
 
-  @spec lookup_funs(atom(), phase(), atom()) :: [function()]
-  defp lookup_funs(table, phase, command) do
+  @spec lookup_oldest_first(atom(), phase(), atom()) :: [function()]
+  defp lookup_oldest_first(table, phase, command) do
+    Enum.reverse(lookup_newest_first(table, phase, command))
+  end
+
+  @spec lookup_newest_first(atom(), phase(), atom()) :: [function()]
+  defp lookup_newest_first(table, phase, command) do
     case :ets.lookup(table, {phase, command}) do
-      [{_, funs}] -> Enum.reverse(funs)
+      [{_, funs}] -> funs
       [] -> []
     end
   end
@@ -253,6 +258,7 @@ defmodule Minga.Config.Advice do
   defp build_invocation_core(table, command, core, overrides, arounds) do
     base = build_invocation_base(table, command, core, overrides)
 
+    # Check live breaker flags oldest-first before composing the wrappers.
     arounds
     |> Enum.reject(&cb_disabled?(table, {:cb_disabled, :around, command, &1}))
     |> Enum.reverse()
@@ -276,7 +282,7 @@ defmodule Minga.Config.Advice do
   @spec build_invocation_base(atom(), atom(), (-> term()), [state_fun()]) ::
           (map() -> invocation_outcome())
   defp build_invocation_base(table, command, core, overrides) do
-    case last_enabled_override(table, command, overrides) do
+    case first_enabled_override(table, command, overrides) do
       nil ->
         fn state -> return_invocation_core(core, state) end
 
@@ -285,11 +291,9 @@ defmodule Minga.Config.Advice do
     end
   end
 
-  @spec last_enabled_override(atom(), atom(), [state_fun()]) :: state_fun() | nil
-  defp last_enabled_override(table, command, overrides) do
-    overrides
-    |> Enum.reverse()
-    |> Enum.find(&(not cb_disabled?(table, {:cb_disabled, :override, command, &1})))
+  @spec first_enabled_override(atom(), atom(), [state_fun()]) :: state_fun() | nil
+  defp first_enabled_override(table, command, overrides) do
+    Enum.find(overrides, &(not cb_disabled?(table, {:cb_disabled, :override, command, &1})))
   end
 
   @spec return_invocation_core((-> term()), map()) :: invocation_outcome()
@@ -420,20 +424,17 @@ defmodule Minga.Config.Advice do
   @spec build_core((map() -> map()), [state_fun()], [around_fun()]) :: (map() -> map())
   defp build_core(execute, [], []), do: execute
 
-  defp build_core(_execute, overrides, []) do
-    # Last override wins (innermost)
-    Enum.at(overrides, -1)
-  end
+  defp build_core(_execute, [override | _], []), do: override
 
   defp build_core(execute, overrides, arounds) do
     base =
       case overrides do
         [] -> execute
-        _ -> Enum.at(overrides, -1)
+        [override | _] -> override
       end
 
     # Arounds nest: first registered is outermost
-    Enum.reduce(Enum.reverse(arounds), base, fn around_fn, inner ->
+    Enum.reduce(arounds, base, fn around_fn, inner ->
       fn state -> around_fn.(inner, state) end
     end)
   end

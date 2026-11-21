@@ -87,18 +87,29 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapter do
      :invalid_selection}
   end
 
-  @doc "Builds the provider-specific tool value for a canonical tool declaration."
-  @spec tool(ToolSpec.t(), ToolSpec.callback() | nil, map()) :: Tool.t()
-  def tool(%ToolSpec{} = spec, callback, provider_options \\ %{})
-      when (is_function(callback, 1) or is_nil(callback)) and is_map(provider_options) do
-    {strict, provider_options} = spec_wire_options(spec, provider_options)
+  @doc "Builds a callback-free provider tool from a spec and its declaration origin."
+  @spec tool(ToolSpec.t(), :local | :registry) :: Tool.t()
+  def tool(%ToolSpec{} = spec, origin) do
+    options = %{
+      minga_registry_tool: true,
+      minga_tool_spec: spec,
+      source: inspect(spec.source)
+    }
+
+    options =
+      case origin do
+        :local -> Map.put(options, :minga_local_tool, true)
+        :registry -> options
+      end
+
+    {strict, provider_options} = spec_wire_options(spec, options)
 
     %Tool{
       name: spec.name,
       description: spec.description,
       parameter_schema: spec.parameter_schema,
       provider_options: provider_options,
-      callback: callback,
+      callback: nil,
       compiled: nil,
       strict: strict
     }
@@ -145,18 +156,6 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapter do
         callback: nil,
         compiled: nil
       }
-    end)
-  end
-
-  @doc "Marks explicit session-local Spec declarations without registering PID closures globally."
-  @spec local_declarations([Tool.t()]) :: [Tool.t()]
-  def local_declarations(tools) do
-    Enum.map(tools, fn
-      %Tool{provider_options: %{minga_tool_spec: _spec} = options} = tool ->
-        %{tool | provider_options: Map.put(options, :minga_local_tool, true)}
-
-      tool ->
-        tool
     end)
   end
 

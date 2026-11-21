@@ -13,6 +13,8 @@ defmodule Minga.Project.FileFind do
   @typedoc "A file discovery strategy."
   @type strategy :: :fd | :git | :find | :none
 
+  @typep selection :: {:git | :fd | :find, String.t()} | :none
+
   @typedoc "Result of file discovery."
   @type result :: {:ok, [String.t()]} | {:error, String.t()}
 
@@ -46,7 +48,7 @@ defmodule Minga.Project.FileFind do
 
   def start(%Root{} = root, owner, opts) when is_pid(owner) and is_list(opts) do
     with {:ok, path} <- inventory_path(root),
-         {:ok, command, strategy} <- command(path) do
+         {:ok, command, strategy} <- command(select_executable(path), path) do
       worker_opts = Keyword.take(opts, [:max_output_bytes, :max_file_count])
 
       Worker.start(
@@ -68,11 +70,14 @@ defmodule Minga.Project.FileFind do
   @doc "Detects the file-finding strategy for a directory path without starting inventory."
   @spec detect_strategy(String.t()) :: strategy()
   def detect_strategy(root) when is_binary(root) do
-    detect_strategy(git_strategy_available?(root), root)
+    case select_executable(root) do
+      {strategy, _executable} -> strategy
+      :none -> :none
+    end
   end
 
   @spec fd_args([String.t()]) :: [String.t()]
-  def fd_args(exclude_list \\ excludes()) do
+  def fd_args(exclude_list) do
     exclude_args = Enum.flat_map(exclude_list, &["--exclude", &1])
     ["--type", "f", "--hidden"] ++ Enum.concat(exclude_args, ["."])
   end
@@ -116,26 +121,21 @@ defmodule Minga.Project.FileFind do
   @spec inventory_path(Root.t()) :: {:ok, String.t()} | {:error, Root.error()}
   defp inventory_path(root), do: Root.inventory_path(root)
 
-  @spec command(String.t()) :: {:ok, Worker.command(), strategy()} | {:error, String.t()}
-  defp command(root) do
-    command(detect_strategy(root), root)
-  end
-
-  @spec command(strategy(), String.t()) ::
+  @spec command(selection(), String.t()) ::
           {:ok, Worker.command(), strategy()} | {:error, String.t()}
-  defp command(:git, root) do
+  defp command({:git, executable}, root) do
     args = ["ls-files", "--cached", "--others", "--exclude-standard"]
-    {:ok, {System.find_executable("git"), args, root}, :git}
+    {:ok, {executable, args, root}, :git}
   end
 
-  defp command(:fd, root) do
-    {:ok, {fd_executable(), fd_args(), root}, :fd}
+  defp command({:fd, executable}, root) do
+    {:ok, {executable, fd_args(excludes()), root}, :fd}
   end
 
-  defp command(:find, root) do
+  defp command({:find, executable}, root) do
     exclude_args = Enum.flat_map(excludes(), &["-not", "-path", "*/#{&1}/*", "-not", "-name", &1])
     args = [".", "-type", "f"] ++ exclude_args
-    {:ok, {System.find_executable("find"), args, root}, :find}
+    {:ok, {executable, args, root}, :find}
   end
 
   defp command(:none, _root) do
@@ -158,21 +158,14 @@ defmodule Minga.Project.FileFind do
 
   defp parse_result(:find, output, _status), do: {:error, "find failed: #{output}"}
 
-  @spec detect_strategy(boolean(), String.t()) :: strategy()
-  defp detect_strategy(true, _root), do: :git
-  defp detect_strategy(false, root), do: detect_strategy_without_git(root)
-
-  @spec detect_strategy_without_git(String.t()) :: strategy()
-  defp detect_strategy_without_git(_root) do
-    case fd_executable() do
-      fd when is_binary(fd) -> :fd
-      nil -> detect_find_strategy()
+  @spec select_executable(String.t()) :: selection()
+  defp select_executable(root) do
+    cond do
+      executable = git_executable(root) -> {:git, executable}
+      executable = fd_executable() -> {:fd, executable}
+      executable = System.find_executable("find") -> {:find, executable}
+      true -> :none
     end
-  end
-
-  @spec detect_find_strategy() :: strategy()
-  defp detect_find_strategy do
-    if executable_available?("find"), do: :find, else: :none
   end
 
   @spec excludes() :: [String.t()]
@@ -201,19 +194,13 @@ defmodule Minga.Project.FileFind do
   defp normalize_path("./" <> rest), do: rest
   defp normalize_path(path), do: path
 
-  @spec executable_available?(String.t()) :: boolean()
-  defp executable_available?(name), do: System.find_executable(name) != nil
-
   @spec fd_executable() :: String.t() | nil
   defp fd_executable, do: System.find_executable("fd") || System.find_executable("fdfind")
 
-  @spec git_strategy_available?(String.t()) :: boolean()
-  defp git_strategy_available?(root) do
-    executable_available?("git") and git_repo_root?(root)
+  @spec git_executable(String.t()) :: String.t() | nil
+  defp git_executable(root) do
+    if File.exists?(Path.join(root, ".git")), do: System.find_executable("git")
   end
-
-  @spec git_repo_root?(String.t()) :: boolean()
-  defp git_repo_root?(root), do: File.exists?(Path.join(root, ".git"))
 
   @spec root_error(Root.error(), String.t()) :: String.t()
   defp root_error(:not_a_directory, path), do: "Directory not found: #{path}"

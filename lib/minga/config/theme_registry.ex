@@ -4,14 +4,15 @@ defmodule Minga.Config.ThemeRegistry do
 
   Stores theme data (opaque to this module) with source ownership tracking so that disabling or reloading an extension pack cleanly removes only that pack's themes. The core minimal theme (`:minga_default`) is always present in the name list but not stored here; it lives in `MingaEditor.UI.Theme.Fallback` and is only used when selected explicitly.
 
+  Theme data, ownership, and available names are published in a single snapshot.
+  Publication does not serialize concurrent writers or pin separate reads to one snapshot.
+
   Config.Options and Config.Completion query `available/0` for validation and tab-completion without importing from MingaEditor.*.
   """
 
-  @persistent_key :minga_theme_registry
-  @themes_key {__MODULE__, :themes}
-  @sources_key {__MODULE__, :sources}
-
-  @fallback [:minga_default]
+  @persistent_key {__MODULE__, :snapshot}
+  @fallback :minga_default
+  @empty_snapshot %{entries: %{}, names: [@fallback]}
 
   @typedoc "Source that contributed registry entries."
   @type contribution_source :: :builtin | :config | {:extension, atom()}
@@ -21,16 +22,22 @@ defmodule Minga.Config.ThemeRegistry do
           {:duplicate_name, atom(), existing_source :: contribution_source(),
            attempted_source :: contribution_source()}
 
+  @typep entries :: %{atom() => {contribution_source(), term()}}
+  @typep snapshot :: %{entries: entries(), names: [atom()]}
+
   @doc "Returns the sorted list of available theme name atoms."
   @spec available() :: [atom()]
   def available do
-    :persistent_term.get(@persistent_key, @fallback)
+    snapshot().names
   end
 
   @doc "Seeds the registry with the core fallback theme. Called at application start."
   @spec seed_builtin() :: :ok
   def seed_builtin do
-    update_name_list()
+    case :persistent_term.get(@persistent_key, nil) do
+      nil -> :persistent_term.put(@persistent_key, @empty_snapshot)
+      _snapshot -> :ok
+    end
   end
 
   @doc "Registers themes with explicit source ownership. Theme data is opaque to this module."
@@ -38,24 +45,17 @@ defmodule Minga.Config.ThemeRegistry do
           :ok | {:error, register_error()}
   def register_themes(themes, source) when is_map(themes) do
     Minga.Extension.ContributionCleanup.register(:themes, &__MODULE__.unregister_source/1)
-    current = stored_themes()
-    current_sources = stored_sources()
+    current = snapshot().entries
 
-    with :ok <- validate_sources(themes, current_sources, source) do
-      owned_names = owned_names(current_sources, source)
-      remaining_themes = Map.drop(current, owned_names)
-      remaining_sources = Map.drop(current_sources, owned_names)
+    with :ok <- validate_sources(themes, current, source) do
+      remaining = remove_owned(current, source)
 
-      {new_themes, new_sources} =
-        Enum.reduce(themes, {remaining_themes, remaining_sources}, fn {name, data},
-                                                                      {theme_acc, source_acc} ->
-          {Map.put(theme_acc, name, data), Map.put(source_acc, name, source)}
+      entries =
+        Enum.reduce(themes, remaining, fn {name, data}, acc ->
+          Map.put(acc, name, {source, data})
         end)
 
-      :persistent_term.put(@themes_key, new_themes)
-      :persistent_term.put(@sources_key, new_sources)
-      update_name_list()
-      :ok
+      publish(entries)
     end
   end
 
@@ -64,74 +64,73 @@ defmodule Minga.Config.ThemeRegistry do
   def unregister_source(:builtin), do: :ok
 
   def unregister_source(source) do
-    sources = stored_sources()
-
-    names =
-      sources
-      |> Enum.filter(fn {_name, entry_source} -> entry_source == source end)
-      |> Enum.map(fn {name, _entry_source} -> name end)
-
-    :persistent_term.put(@themes_key, Map.drop(stored_themes(), names))
-    :persistent_term.put(@sources_key, Map.drop(sources, names))
-    update_name_list()
-    :ok
+    snapshot().entries
+    |> remove_owned(source)
+    |> publish()
   end
 
   @doc "Returns the map of all registered theme data (opaque to callers in this layer)."
   @spec stored_themes() :: %{atom() => term()}
   def stored_themes do
-    :persistent_term.get(@themes_key, %{})
+    Map.new(snapshot().entries, fn {name, {_source, data}} -> {name, data} end)
   end
 
   @doc "Returns source ownership metadata."
   @spec stored_sources() :: %{atom() => contribution_source()}
   def stored_sources do
-    :persistent_term.get(@sources_key, %{})
+    Map.new(snapshot().entries, fn {name, {source, _data}} -> {name, source} end)
   end
 
   @doc "Looks up theme data by name."
   @spec get_theme(atom()) :: {:ok, term()} | :error
   def get_theme(name) when is_atom(name) do
-    Map.fetch(stored_themes(), name)
+    case Map.fetch(snapshot().entries, name) do
+      {:ok, {_source, data}} -> {:ok, data}
+      :error -> :error
+    end
   end
 
-  @spec update_name_list() :: :ok
-  defp update_name_list do
-    registered = Map.keys(stored_themes())
-    themes = Enum.uniq(@fallback ++ registered) |> Enum.sort()
-    :persistent_term.put(@persistent_key, themes)
-    :ok
+  @spec snapshot() :: snapshot()
+  defp snapshot, do: :persistent_term.get(@persistent_key, @empty_snapshot)
+
+  @spec publish(entries()) :: :ok
+  defp publish(entries) do
+    registered = Map.keys(entries)
+    names = if Map.has_key?(entries, @fallback), do: registered, else: [@fallback | registered]
+    :persistent_term.put(@persistent_key, %{entries: entries, names: Enum.sort(names)})
   end
 
-  @spec owned_names(%{atom() => contribution_source()}, contribution_source()) :: [atom()]
-  defp owned_names(current_sources, source) do
-    current_sources
-    |> Enum.filter(fn {_name, entry_source} -> entry_source == source end)
-    |> Enum.map(fn {name, _entry_source} -> name end)
+  @spec remove_owned(entries(), contribution_source()) :: entries()
+  defp remove_owned(entries, source) do
+    :maps.fold(
+      fn
+        name, {^source, _data}, acc -> Map.delete(acc, name)
+        _name, _entry, acc -> acc
+      end,
+      entries,
+      entries
+    )
   end
 
-  @spec validate_sources(
-          %{atom() => term()},
-          %{atom() => contribution_source()},
-          contribution_source()
-        ) :: :ok | {:error, register_error()}
-  defp validate_sources(themes, current_sources, source) do
+  @spec validate_sources(%{atom() => term()}, entries(), contribution_source()) ::
+          :ok | {:error, register_error()}
+  defp validate_sources(themes, entries, source) do
     Enum.reduce_while(themes, :ok, fn {name, _data}, :ok ->
-      validate_source(name, current_sources, source)
+      validate_source(name, entries, source)
     end)
   end
 
-  @spec validate_source(atom(), %{atom() => contribution_source()}, contribution_source()) ::
+  @spec validate_source(atom(), entries(), contribution_source()) ::
           {:cont, :ok} | {:halt, {:error, register_error()}}
-  defp validate_source(name, current_sources, source) do
-    case Map.get(current_sources, name) do
-      nil ->
+  defp validate_source(name, entries, source) do
+    case Map.fetch(entries, name) do
+      :error ->
         {:cont, :ok}
 
-      ^source ->
+      {:ok, {^source, _data}} ->
         {:cont, :ok}
 
-      existing ->
+      {:ok, {existing, _data}} ->
         if source_overrides?(source, existing),
           do: {:cont, :ok},
           else: {:halt, {:error, {:duplicate_name, name, existing, source}}}

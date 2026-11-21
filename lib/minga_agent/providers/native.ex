@@ -224,7 +224,7 @@ defmodule MingaAgent.Providers.Native do
     GenServer.call(pid, {:continue, request})
   end
 
-  @doc "Refreshes the project view and rebuilds file tools around the new overlay."
+  @doc "Refreshes the project view used for tool execution."
   @spec refresh_project_view(GenServer.server(), ProjectView.t() | nil) :: :ok | {:error, term()}
   def refresh_project_view(pid, project_view) do
     GenServer.call(pid, {:refresh_project_view, project_view})
@@ -296,27 +296,19 @@ defmodule MingaAgent.Providers.Native do
       tool_registry: Keyword.get(opts, :tool_registry, ToolRegistry)
     }
 
-    tool_context =
-      native_tool_context(project_root, project_view, fork_store, changeset, tool_metadata)
-
-    custom_tools? = explicit_tool_declarations?(opts)
+    custom_tools = Keyword.get(opts, :tools)
+    custom_tools? = is_list(custom_tools)
 
     custom_tool_declarations =
       if custom_tools?,
-        do: Enum.map(Keyword.fetch!(opts, :tools), &normalize_tool_declaration/1),
+        do: Enum.map(custom_tools, &normalize_tool_declaration/1),
         else: []
 
     base_tools =
       if custom_tools? do
-        provider_tools(
-          custom_tool_declarations,
-          tool_context,
-          config,
-          hook_runner
-        )
-        |> ReqLLMAdapter.local_declarations()
+        Enum.map(custom_tool_declarations, &ReqLLMAdapter.tool(&1, :local))
       else
-        registry_tools(tool_context, config, hook_runner)
+        registry_tools(project_root, tool_metadata)
       end
 
     base_tools = filter_base_tools_for_read_only(base_tools, read_only?)
@@ -402,24 +394,6 @@ defmodule MingaAgent.Providers.Native do
           ProjectView.t() | nil,
           pid() | nil,
           pid() | nil,
-          map()
-        ) :: ToolContext.t()
-  defp native_tool_context(project_root, project_view, fork_store, changeset, metadata) do
-    native_tool_context(
-      project_root,
-      project_view,
-      fork_store,
-      changeset,
-      metadata,
-      {:unsupported, :tool_result_transport}
-    )
-  end
-
-  @spec native_tool_context(
-          String.t(),
-          ProjectView.t() | nil,
-          pid() | nil,
-          pid() | nil,
           map(),
           ModelSelection.image_tool_result_delivery()
         ) :: ToolContext.t()
@@ -441,24 +415,23 @@ defmodule MingaAgent.Providers.Native do
     )
   end
 
-  @spec explicit_tool_declarations?(keyword()) :: boolean()
-  defp explicit_tool_declarations?(opts) do
-    case Keyword.fetch(opts, :tools) do
-      {:ok, tools} when is_list(tools) -> true
-      _missing_or_default -> false
-    end
-  end
-
   @spec normalize_tool_declaration(Tool.t() | ToolSpec.t()) :: ToolSpec.t()
   defp normalize_tool_declaration(%ToolSpec{} = spec), do: spec
   defp normalize_tool_declaration(%Tool{} = tool), do: ToolRegistry.from_req_tool(tool)
 
-  @spec registry_tools(ToolContext.t(), AgentConfig.t(), hook_runner()) :: [Tool.t()]
-  defp registry_tools(%ToolContext{} = tool_context, %AgentConfig{} = config, hook_runner) do
-    ToolRegistry.all(Map.get(tool_context.metadata, :tool_registry, ToolRegistry))
-    |> filter_session_tools(tool_context.metadata)
-    |> filter_git_tools(tool_context.project_root)
-    |> provider_tools(tool_context, config, hook_runner)
+  @spec registry_tools(String.t(), map()) :: [Tool.t()]
+  defp registry_tools(project_root, %{tool_registry: table} = metadata) do
+    table
+    |> ToolRegistry.all()
+    |> registry_tool_declarations(project_root, metadata)
+  end
+
+  @spec registry_tool_declarations([ToolSpec.t()], String.t(), map()) :: [Tool.t()]
+  defp registry_tool_declarations(specs, project_root, metadata) do
+    specs
+    |> filter_session_tools(metadata)
+    |> filter_git_tools(project_root)
+    |> Enum.map(&ReqLLMAdapter.tool(&1, :registry))
   end
 
   @spec filter_session_tools([ToolSpec.t()], map()) :: [ToolSpec.t()]
@@ -467,34 +440,12 @@ defmodule MingaAgent.Providers.Native do
   defp filter_session_tools(specs, _metadata),
     do: Enum.reject(specs, &(&1.name in ["todo_read", "todo_write"]))
 
-  @spec filter_git_tools([Tool.t() | ToolSpec.t()], String.t()) :: [Tool.t() | ToolSpec.t()]
+  @spec filter_git_tools([ToolSpec.t()], String.t()) :: [ToolSpec.t()]
   defp filter_git_tools(specs, project_root) do
     case Git.root_for(project_root) do
       {:ok, _git_root} -> specs
-      :not_git -> Enum.reject(specs, &git_tool_spec?/1)
+      :not_git -> Enum.reject(specs, &(&1.category == :git))
     end
-  end
-
-  @spec git_tool_spec?(Tool.t() | ToolSpec.t()) :: boolean()
-  defp git_tool_spec?(%ToolSpec{category: :git}), do: true
-  defp git_tool_spec?(_tool), do: false
-
-  @spec provider_tools([Tool.t() | ToolSpec.t()], ToolContext.t(), AgentConfig.t(), hook_runner()) ::
-          [Tool.t()]
-  defp provider_tools(tools, %ToolContext{} = tool_context, config, hook_runner) do
-    Enum.map(tools, &provider_tool(&1, tool_context, config, hook_runner))
-  end
-
-  @spec provider_tool(Tool.t() | ToolSpec.t(), ToolContext.t(), AgentConfig.t(), hook_runner()) ::
-          Tool.t()
-  defp provider_tool(%Tool{} = tool, _tool_context, _config, _hook_runner), do: tool
-
-  defp provider_tool(%ToolSpec{} = spec, %ToolContext{}, _config, _hook_runner) do
-    ReqLLMAdapter.tool(spec, nil, %{
-      minga_registry_tool: true,
-      minga_tool_spec: spec,
-      source: inspect(spec.source)
-    })
   end
 
   @spec disable_hooks_for_read_only(AgentConfig.t(), boolean()) :: AgentConfig.t()
@@ -1754,7 +1705,7 @@ defmodule MingaAgent.Providers.Native do
   defp rebuild_tools(state) do
     base_tools =
       state
-      |> refresh_base_tools(state.project_view)
+      |> refresh_base_tools()
       |> filter_base_tools_for_read_only(state.read_only?)
 
     tools =
@@ -1834,7 +1785,7 @@ defmodule MingaAgent.Providers.Native do
   defp install_refreshed_view(state) do
     base_tools =
       state
-      |> refresh_base_tools(state.project_view)
+      |> refresh_base_tools()
       |> filter_base_tools_for_read_only(state.read_only?)
 
     tools =
@@ -3096,20 +3047,9 @@ defmodule MingaAgent.Providers.Native do
 
       _changed ->
         with {:ok, revision, specs} <- ToolRegistry.snapshot(table) do
-          context =
-            native_tool_context(
-              state.project_root,
-              state.project_view,
-              state.fork_store,
-              state.changeset,
-              state.tool_metadata
-            )
-
           base_tools =
             specs
-            |> filter_session_tools(state.tool_metadata)
-            |> filter_git_tools(state.project_root)
-            |> provider_tools(context, state.config, state.hook_runner)
+            |> registry_tool_declarations(state.project_root, state.tool_metadata)
             |> filter_base_tools_for_read_only(state.read_only?)
 
           tools =
@@ -3145,42 +3085,12 @@ defmodule MingaAgent.Providers.Native do
   defp question_schemas(schemas, true), do: schemas
   defp question_schemas(schemas, false), do: Enum.reject(schemas, &(&1.name == "ask_user"))
 
-  @spec refresh_base_tools(state(), ProjectView.t() | nil) :: [Tool.t()]
-  defp refresh_base_tools(
-         %{
-           custom_tools?: true,
-           custom_tool_declarations: declarations,
-           project_root: project_root,
-           fork_store: fork_store,
-           changeset: changeset,
-           tool_metadata: tool_metadata,
-           config: config,
-           hook_runner: hook_runner
-         },
-         project_view
-       ) do
-    tool_context =
-      native_tool_context(project_root, project_view, fork_store, changeset, tool_metadata)
-
-    provider_tools(declarations, tool_context, config, hook_runner)
-    |> ReqLLMAdapter.local_declarations()
+  @spec refresh_base_tools(state()) :: [Tool.t()]
+  defp refresh_base_tools(%{custom_tools?: true, custom_tool_declarations: declarations}) do
+    Enum.map(declarations, &ReqLLMAdapter.tool(&1, :local))
   end
 
-  defp refresh_base_tools(
-         %{
-           project_root: project_root,
-           fork_store: fork_store,
-           changeset: changeset,
-           tool_metadata: tool_metadata,
-           config: config,
-           hook_runner: hook_runner
-         },
-         project_view
-       ) do
-    project_root
-    |> native_tool_context(project_view, fork_store, changeset, tool_metadata)
-    |> registry_tools(config, hook_runner)
-  end
+  defp refresh_base_tools(state), do: registry_tools(state.project_root, state.tool_metadata)
 
   @spec load_active_skills(String.t(), [String.t()]) :: [Skills.skill()]
   defp load_active_skills(_project_root, []), do: []

@@ -235,7 +235,7 @@ defmodule MingaGitPorcelain.Commands do
 
   def execute(state, :git_diff_file) do
     with_git_buffer(state, fn git_pid, buf ->
-      open_diff_view(state, git_pid, buf)
+      open_diff_view(state, git_pid, buf, false, :unified)
     end)
   end
 
@@ -623,67 +623,22 @@ defmodule MingaGitPorcelain.Commands do
   Opens a diff view for a file specified by path.
 
   Used by the git status panel when opening diffs for files that may not
-  have an open buffer. Creates a temporary buffer for the current content
-  and opens a diff view against HEAD.
+  have an open buffer. Shows the supplied content against HEAD in a
+  temporary diff buffer.
   """
   @spec open_diff_for_path(state(), String.t(), String.t(), String.t(), String.t(), keyword()) ::
           state()
   def open_diff_for_path(state, git_root, rel_path, _abs_path, current_content, opts \\ []) do
     base_content = head_content(git_root, rel_path)
     staged = Keyword.get(opts, :staged, false)
-    label = if staged, do: "staged", else: "unstaged"
 
-    diff_result = build_diff_result(base_content, current_content, state, :unified)
-    filename = Path.basename(rel_path)
-    filetype = Language.detect_filetype(filename)
-
-    case Buffer.start_link(
-           content: diff_result.text,
-           buffer_type: :nofile,
-           read_only: true,
-           buffer_name: "#{filename} [diff:#{label}]",
-           filetype: filetype,
-           options_server: state.interaction.options_server
-         ) do
-      {:ok, diff_buf} ->
-        apply_diff_decorations(diff_buf, diff_result.line_metadata, state.appearance.theme)
-
-        diff_info = %{
-          source_buf: nil,
-          git_root: git_root,
-          rel_path: rel_path,
-          staged: staged,
-          line_metadata: diff_result.line_metadata,
-          hunk_lines: diff_result.hunk_lines,
-          view_mode: :unified,
-          pane_width: diff_pane_width(state)
-        }
-
-        git = MingaEditor.State.Git.register_diff_view(state.git, diff_buf, diff_info)
-        state = %{state | git: git}
-
-        state
-        |> Commands.add_buffer(diff_buf)
-        |> MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
-          "Diff (#{label}): #{filename} (#{length(diff_result.hunk_lines)} hunks)"
-        )
-
-      {:error, reason} ->
-        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
-          state,
-          "Failed to open diff: #{inspect(reason)}"
-        )
-    end
-  end
-
-  @spec open_diff_view(state(), pid(), pid()) :: state()
-  defp open_diff_view(state, git_pid, buf) do
-    open_diff_view(state, git_pid, buf, _staged = false)
-  end
-
-  @spec open_diff_view(state(), pid(), pid(), boolean()) :: state()
-  defp open_diff_view(state, git_pid, buf, staged) do
-    open_diff_view(state, git_pid, buf, staged, :unified)
+    open_diff_buffer(state, {base_content, current_content}, %{
+      source_buf: nil,
+      git_root: git_root,
+      rel_path: rel_path,
+      staged: staged,
+      view_mode: :unified
+    })
   end
 
   @spec open_diff_view(state(), pid(), pid(), boolean(), :unified | :side_by_side) :: state()
@@ -691,8 +646,31 @@ defmodule MingaGitPorcelain.Commands do
     git_root = Git.Buffer.git_root(git_pid)
     rel_path = Git.Buffer.relative_path(git_pid)
 
-    {base_content, current_content} = diff_contents(git_root, rel_path, buf, staged)
+    contents = diff_contents(git_root, rel_path, buf, staged)
 
+    open_diff_buffer(state, contents, %{
+      source_buf: buf,
+      git_root: git_root,
+      rel_path: rel_path,
+      staged: staged,
+      view_mode: view_mode
+    })
+  end
+
+  @spec open_diff_buffer(state(), {String.t(), String.t()}, %{
+          source_buf: pid() | nil,
+          git_root: String.t(),
+          rel_path: String.t(),
+          staged: boolean(),
+          view_mode: :unified | :side_by_side
+        }) :: state()
+  defp open_diff_buffer(state, {base_content, current_content}, %{
+         source_buf: source_buf,
+         git_root: git_root,
+         rel_path: rel_path,
+         staged: staged,
+         view_mode: view_mode
+       }) do
     diff_result = build_diff_result(base_content, current_content, state, view_mode)
     filename = Path.basename(rel_path)
     filetype = Language.detect_filetype(filename)
@@ -710,7 +688,7 @@ defmodule MingaGitPorcelain.Commands do
         apply_diff_decorations(diff_buf, diff_result.line_metadata, state.appearance.theme)
 
         diff_info = %{
-          source_buf: buf,
+          source_buf: source_buf,
           git_root: git_root,
           rel_path: rel_path,
           staged: staged,

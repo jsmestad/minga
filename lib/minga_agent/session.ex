@@ -3028,7 +3028,7 @@ defmodule MingaAgent.Session do
   defp resolve_invocation(state, _declaration, name) do
     with {:ok, spec, registration} <-
            ToolRegistry.resolve_execution(state.tool_authority.registry, name) do
-      tool = ReqLLMAdapter.tool(spec, nil, %{minga_tool_spec: spec})
+      tool = ReqLLMAdapter.tool(spec, :registry)
       {:ok, spec, registration, ReqLLMAdapter.declaration(tool)}
     end
   end

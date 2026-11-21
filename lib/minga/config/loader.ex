@@ -319,28 +319,29 @@ defmodule Minga.Config.Loader do
   defp extension_declarations(path, source) do
     case Code.string_to_quoted(source, file: path) do
       {:ok, ast} ->
-        {_ast, {declarations, dynamic?}} =
-          Macro.prewalk(ast, {[], false}, fn
-            {:extension, _meta, [name, opts]} = node, acc ->
-              {node, collect_extension_declaration(path, name, opts, acc)}
+        declarations =
+          ast
+          |> Macro.prewalker()
+          |> Enum.reduce_while([], fn
+            {:extension, _meta, [name, opts]}, acc ->
+              collect_extension_declaration(path, name, opts, acc)
 
-            {:extension, _meta, [module]} = node, acc ->
-              {node, collect_extension_declaration(path, module, [], acc)}
+            {:extension, _meta, [module]}, acc ->
+              collect_extension_declaration(path, module, [], acc)
 
-            {{:., _dot_meta, [_module, :extension]}, _meta, [name, opts]} = node, acc ->
-              {node, collect_extension_declaration(path, name, opts, acc)}
+            {{:., _dot_meta, [_receiver, :extension]}, _meta, [name, opts]}, acc ->
+              collect_extension_declaration(path, name, opts, acc)
 
-            {{:., _dot_meta, [_module, :extension]}, _meta, [module]} = node, acc ->
-              {node, collect_extension_declaration(path, module, [], acc)}
+            {{:., _dot_meta, [_receiver, :extension]}, _meta, [module]}, acc ->
+              collect_extension_declaration(path, module, [], acc)
 
-            node, acc ->
-              {node, acc}
+            _node, acc ->
+              {:cont, acc}
           end)
 
-        if dynamic? do
-          [{path, {:dynamic_source_file, :crypto.hash(:sha256, source)}}]
-        else
-          Enum.reverse(declarations)
+        case declarations do
+          :dynamic -> [{path, {:dynamic_source_file, :crypto.hash(:sha256, source)}}]
+          literals -> Enum.reverse(literals)
         end
 
       {:error, _reason} ->
@@ -348,30 +349,25 @@ defmodule Minga.Config.Loader do
     end
   end
 
-  @spec collect_extension_declaration(
-          String.t(),
-          Macro.t(),
-          Macro.t(),
-          {[term()], boolean()}
-        ) :: {[term()], boolean()}
-  defp collect_extension_declaration(path, name, opts, {declarations, dynamic?}) do
+  @spec collect_extension_declaration(String.t(), Macro.t(), Macro.t(), [term()]) ::
+          {:cont, [term()]} | {:halt, :dynamic}
+  defp collect_extension_declaration(path, name, opts, declarations) do
     case extension_source_identity(name, opts) do
-      {:ok, identity} -> {[{path, identity} | declarations], dynamic?}
-      :dynamic -> {declarations, true}
+      {:ok, identity} -> {:cont, [{path, identity} | declarations]}
+      :dynamic -> {:halt, :dynamic}
     end
   end
 
   @spec extension_source_identity(Macro.t(), Macro.t()) :: {:ok, term()} | :dynamic
-  defp extension_source_identity(name_ast, opts) when is_list(opts) do
-    with true <- Keyword.keyword?(opts),
-         {:ok, name} <- extension_name_identity(name_ast) do
-      source_identity(name, opts)
+  defp extension_source_identity(name_ast, opts) do
+    if Keyword.keyword?(opts) do
+      with {:ok, name} <- extension_name_identity(name_ast) do
+        source_identity(name, opts)
+      end
     else
-      _invalid -> :dynamic
+      :dynamic
     end
   end
-
-  defp extension_source_identity(_name_ast, _opts), do: :dynamic
 
   @spec extension_name_identity(Macro.t()) :: {:ok, term()} | :dynamic
   defp extension_name_identity(name) when is_atom(name), do: {:ok, name}
