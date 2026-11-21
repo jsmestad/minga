@@ -125,6 +125,29 @@ defmodule Minga.Git.MergeConflictTest do
   end
 
   describe "replacement helpers" do
+    test "resolves a diff3 entry from its coordinates and preserves surrounding text" do
+      content =
+        "before\n<<<<<<< ours\ncurrent\n||||||| base\nbase\n=======\nincoming\n>>>>>>> theirs\nafter\n"
+
+      entry = Entry.new(1, 3, 5, 7, "ours", "base", "theirs")
+
+      assert MergeConflict.replace_region(content, entry, :current) == "before\ncurrent\nafter\n"
+
+      assert MergeConflict.replace_region(content, entry, :incoming) ==
+               "before\nincoming\nafter\n"
+
+      assert MergeConflict.replace_region(content, entry, :both) ==
+               "before\ncurrent\nincoming\nafter\n"
+    end
+
+    test "does not copy a marker when the selected indexed side is empty" do
+      content = "before\n<<<<<<< ours\n=======\nincoming\n>>>>>>> theirs"
+      entry = Entry.new(1, nil, 2, 4, "ours", nil, "theirs")
+
+      assert MergeConflict.replace_region(content, entry, :current) == "before"
+      assert MergeConflict.replace_region(content, entry, :both) == "before\nincoming"
+    end
+
     test "replaces current, incoming, or both sides in diff3 conflicts" do
       content =
         "before\n<<<<<<< ours\ncurrent\n||||||| base\nbase\n=======\nincoming\n>>>>>>> theirs\nafter"
