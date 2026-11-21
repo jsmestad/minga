@@ -220,6 +220,9 @@ defmodule MingaAgent.InferenceRouteSessionTest do
 
     assert_receive {:agent_event, ^session, {:error, message}}, @event_timeout
     assert message == "Fixture route is rate limited."
+
+    # Without a refusing window and its reset time there is no plan limit to announce.
+    refute_receive {:agent_event, ^session, {:model_limit_reached, _message}}, 200
   end
 
   test "an invalid route event fails the turn with a clear message instead of crashing", ctx do

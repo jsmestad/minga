@@ -251,12 +251,16 @@ defmodule MingaAgent.Event do
             | :unknown
 
     @enforce_keys [:message]
-    defstruct [:message, kind: :unknown, provider: nil]
+    defstruct [:message, kind: :unknown, provider: nil, recovery: nil]
+
+    @typedoc "A recovery the user is offered alongside the message: `:choose_model` when switching models is the way forward."
+    @type recovery :: :choose_model | nil
 
     @type t :: %__MODULE__{
             message: String.t(),
             kind: kind(),
-            provider: String.t() | nil
+            provider: String.t() | nil,
+            recovery: recovery()
           }
 
     @doc "Returns safe next actions when retained native context cannot continue."

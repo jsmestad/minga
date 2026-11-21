@@ -460,7 +460,7 @@ defmodule MingaEditor.UI.Picker.AgentModelSource do
   defp plan_usage_label(%{plan_usage: windows}) do
     case PlanWindow.busiest(windows) do
       nil -> ""
-      window -> usage_text(window, PlanWindow.reset_label(window))
+      window -> usage_text(window, MingaAgent.InferenceRouteRegistry.reset_label(window))
     end
   end
 

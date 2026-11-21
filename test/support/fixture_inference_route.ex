@@ -59,7 +59,7 @@ defmodule MingaAgent.Test.FixtureInferenceRoute do
   @spec models(keyword()) :: [Model.t()]
   def models(config) do
     case Keyword.get(config, :models_agent) do
-      agent when is_pid(agent) -> Agent.get(agent, & &1)
+      agent when is_pid(agent) -> agent |> Agent.get(& &1) |> listed_models()
       nil -> Keyword.get_lazy(config, :models, fn -> [model()] end)
     end
   end
@@ -166,6 +166,11 @@ defmodule MingaAgent.Test.FixtureInferenceRoute do
   @doc "Returns the route credential env value that makes availability checks report to `pid`."
   @spec observer_env(pid()) :: String.t()
   def observer_env(pid) when is_pid(pid), do: pid |> :erlang.pid_to_list() |> List.to_string()
+
+  # An agent holding `:block` makes `models/1` hang, to test the listing deadline.
+  @spec listed_models([Model.t()] | :block) :: [Model.t()]
+  defp listed_models(:block), do: receive(do: (:fixture_route_never -> []))
+  defp listed_models(models), do: models
 
   @spec credential_env(MingaAgent.InferenceRoute.route_credential()) :: map()
   defp credential_env(%{env: env}) when is_map(env), do: env

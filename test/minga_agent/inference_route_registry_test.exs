@@ -171,7 +171,11 @@ defmodule MingaAgent.InferenceRouteRegistryTest do
     :ok = InferenceRouteRegistry.unregister_source(registry, {:extension, :one})
 
     assert :ok =
-             GenServer.call(registry, {:refreshed, entry.spec, Status.unknown(), {:error, :kept}})
+             GenServer.call(
+               registry,
+               {:refreshed, "fixture", entry.registration, entry.availability_version,
+                Status.unknown(), {:error, :kept}}
+             )
 
     assert InferenceRouteRegistry.list(registry) == []
   end
@@ -316,6 +320,68 @@ defmodule MingaAgent.InferenceRouteRegistryTest do
       InferenceRouteRegistry.refresh_availability(registry)
 
       assert {:ok, %Entry{models: [%{id: "new"}]}} =
+               InferenceRouteRegistry.lookup(registry, "fixture")
+    end
+
+    test "a slow model listing keeps the previous models and never changes availability",
+         %{registry: registry} do
+      {:ok, models} = Agent.start_link(fn -> [FixtureInferenceRoute.model(id: "kept")] end)
+
+      {:ok, _reporter} =
+        InferenceRouteRegistry.register(registry, spec({:extension, :one}),
+          config: [models_agent: models]
+        )
+
+      Agent.update(models, fn _models -> :block end)
+      InferenceRouteRegistry.refresh_availability(registry, timeout: 1_000, models_timeout: 100)
+
+      assert {:ok,
+              %Entry{
+                models: [%{id: "kept"}],
+                status: %Status{availability: {:ready, "fixture@example.com"}}
+              }} = InferenceRouteRegistry.lookup(registry, "fixture")
+    end
+
+    test "a refresh started before a re-register is discarded, even for the same spec",
+         %{registry: registry} do
+      {:ok, _reporter} = InferenceRouteRegistry.register(registry, spec({:extension, :one}))
+      {:ok, old} = InferenceRouteRegistry.lookup(registry, "fixture")
+
+      {:ok, _reporter} =
+        InferenceRouteRegistry.register(registry, spec({:extension, :one}),
+          config: [models: [FixtureInferenceRoute.model(id: "fresh")]]
+        )
+
+      {:ok, unavailable} = Status.new({:unavailable, :stale, "Stale check."})
+
+      :ok =
+        GenServer.call(
+          registry,
+          {:refreshed, "fixture", old.registration, old.availability_version, unavailable,
+           {:ok, [FixtureInferenceRoute.model(id: "stale")]}}
+        )
+
+      assert {:ok, %Entry{models: [%{id: "fresh"}], status: %Status{availability: :unknown}}} =
+               InferenceRouteRegistry.lookup(registry, "fixture")
+    end
+
+    test "a refresh that finishes after a newer report keeps the newer availability",
+         %{registry: registry} do
+      {:ok, reporter} = InferenceRouteRegistry.register(registry, spec({:extension, :one}))
+      {:ok, before_report} = InferenceRouteRegistry.lookup(registry, "fixture")
+
+      :ok = InferenceRouteRegistry.report_status(registry, reporter, {:ready, "newer"})
+      {:ok, unavailable} = Status.new({:unavailable, :stale, "Stale check."})
+
+      :ok =
+        GenServer.call(
+          registry,
+          {:refreshed, "fixture", before_report.registration, before_report.availability_version,
+           unavailable, {:ok, [FixtureInferenceRoute.model(id: "listed")]}}
+        )
+
+      assert {:ok,
+              %Entry{models: [%{id: "listed"}], status: %Status{availability: {:ready, "newer"}}}} =
                InferenceRouteRegistry.lookup(registry, "fixture")
     end
 

@@ -480,6 +480,25 @@ defmodule MingaEditor.UI.Picker.AgentModelSourceTest do
 
       assert action == {:command, :agent_pick_model}
 
+      # The action runs the same command the GUI dispatches; the draft must survive it.
+      ui =
+        state.workspace.agent_ui
+        |> MingaEditor.Agent.PromptBuffer.ensure()
+        |> MingaEditor.Agent.PromptBuffer.insert_char("keep my draft")
+
+      state = MingaEditor.Shell.Traditional.Workflow.install_agent_ui(state, ui)
+
+      assert MingaEditor.Agent.PromptBuffer.prompt_text(state.workspace.agent_ui) ==
+               "keep my draft"
+
+      opened = MingaEditor.Commands.execute(state, :agent_pick_model)
+
+      assert MingaEditor.Agent.PromptBuffer.prompt_text(opened.workspace.agent_ui) ==
+               "keep my draft"
+
+      assert {:picker, %{picker_ui: %{source: AgentModelSource}}} =
+               opened.shell_runtime.state.modal
+
       assert {:ok, %Minga.Command{}} =
                Minga.Command.Registry.lookup(Minga.Command.Registry, :agent_pick_model)
     end

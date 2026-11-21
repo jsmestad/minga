@@ -136,6 +136,20 @@ defmodule MingaAgent.InferenceRouteRegistry do
     :exit, _reason -> {:unreachable, unregistered_message(route_id)}
   end
 
+  @doc "Formats when a plan window resets in this machine's local time, such as `3:40 PM`."
+  @spec reset_label(PlanWindow.t()) :: String.t() | nil
+  def reset_label(%PlanWindow{} = window),
+    do: PlanWindow.reset_label(window, DateTime.utc_now(), &local_time/1)
+
+  @spec local_time(DateTime.t()) :: :calendar.datetime()
+  defp local_time(%DateTime{} = at) do
+    at
+    |> DateTime.shift_zone!("Etc/UTC")
+    |> DateTime.to_naive()
+    |> NaiveDateTime.to_erl()
+    |> :calendar.universal_time_to_local_time()
+  end
+
   @doc "Returns the sentence shown when no extension provides a route."
   @spec unregistered_message(String.t()) :: String.t()
   def unregistered_message(route_id) when is_binary(route_id) do
@@ -156,25 +170,34 @@ defmodule MingaAgent.InferenceRouteRegistry do
   @doc """
   Checks every registered route's availability in the calling process and records the results.
 
-  Each route is checked in its own monitored process with a deadline (`:timeout`, default 5000 ms): the process calls `availability/2` and then `models/1` with the registration config, so a route can offer new models after the user installs or signs in to its tool. A route that raises, exits, returns an invalid value, or misses the deadline is recorded as unavailable, with diagnostics in `*Messages*`. An invalid model list keeps the previous models. `:route_ids` limits the check to those routes. `:route_credential_fn` receives a route id and returns `{:ok, credential}` for the opaque credential passed to the route, or `{:error, remedy}` to mark the route unavailable without calling it (default: `{:ok, nil}`).
+  Each route is checked in its own monitored process: it calls `availability/2` under `:timeout` (default 5000 ms), and then `models/1` with the registration config under its own `:models_timeout` (default `:timeout`), so a route can offer new models after the user installs or signs in to its tool. A route whose availability check raises, exits, returns an invalid value, or misses its deadline is recorded as unavailable, with diagnostics in `*Messages*`. A model listing that fails, is invalid, or misses its deadline keeps the previous models and never changes availability. A result is discarded when the route was registered again meanwhile, and its availability is skipped when a newer report arrived during the check. `:route_ids` limits the check to those routes. `:route_credential_fn` receives a route id and returns `{:ok, credential}` for the opaque credential passed to the route, or `{:error, remedy}` to mark the route unavailable without calling it (default: `{:ok, nil}`).
   """
   @spec refresh_availability(server(), keyword()) :: [Entry.t()]
   def refresh_availability(server, opts \\ []) do
     timeout = Keyword.get(opts, :timeout, @default_availability_timeout)
+    models_timeout = Keyword.get(opts, :models_timeout, timeout)
     credential_fn = Keyword.get(opts, :route_credential_fn, fn _route_id -> {:ok, nil} end)
     deadline = System.monotonic_time(:millisecond) + timeout
 
-    # Start every check before awaiting any, so all routes share one deadline.
+    # Start every check before awaiting any, so all routes share one deadline per phase.
     checks =
       server
       |> list()
       |> only_routes(Keyword.get(opts, :route_ids))
       |> Enum.map(&start_check(&1, credential_fn))
 
-    checks
-    |> Enum.map(&await_check(&1, deadline))
-    |> Enum.each(fn {spec, status, models} ->
-      GenServer.call(server, {:refreshed, spec, status, models})
+    # Availability is recorded on its own result before any model listing is awaited.
+    checked = Enum.map(checks, &await_availability(&1, deadline))
+    models_deadline = System.monotonic_time(:millisecond) + models_timeout
+
+    checked
+    |> Enum.map(&await_models(&1, models_deadline))
+    |> Enum.each(fn {entry, status, models} ->
+      GenServer.call(
+        server,
+        {:refreshed, entry.spec.id, entry.registration, entry.availability_version, status,
+         models}
+      )
     end)
 
     list(server)
@@ -227,6 +250,7 @@ defmodule MingaAgent.InferenceRouteRegistry do
       ) do
     case {Map.fetch(state.routes, route_id), Map.fetch(state.reporters, route_id)} do
       {{:ok, entry}, {:ok, ^reporter}} ->
+        entry = Entry.availability_updated(entry)
         {:reply, :ok, put_status(state, entry, Status.with_availability(entry.status, status))}
 
       {{:ok, _entry}, _other_registration} ->
@@ -254,12 +278,15 @@ defmodule MingaAgent.InferenceRouteRegistry do
     end
   end
 
-  # A refresh result applies only to the exact declaration that was checked.
-  def handle_call({:refreshed, %Spec{} = spec, status, models}, _from, state) do
-    case Map.fetch(state.routes, spec.id) do
-      {:ok, %Entry{spec: ^spec} = entry} ->
-        entry = refreshed_models(entry, models)
+  # A refresh result applies only to the registration it checked; its availability applies only if nothing newer was recorded during the check.
+  def handle_call({:refreshed, id, registration, version, status, models}, _from, state) do
+    case Map.fetch(state.routes, id) do
+      {:ok, %Entry{registration: ^registration, availability_version: ^version} = entry} ->
+        entry = entry |> refreshed_models(models) |> Entry.availability_updated()
         {:reply, :ok, put_status(state, entry, Status.with_availability(entry.status, status))}
+
+      {:ok, %Entry{registration: ^registration} = entry} ->
+        {:reply, :ok, put_route(state, refreshed_models(entry, models))}
 
       _replaced_or_removed ->
         {:reply, :ok, state}
@@ -389,10 +416,12 @@ defmodule MingaAgent.InferenceRouteRegistry do
   end
 
   @typep check :: {Entry.t(), pid(), reference(), reference()}
+  @typep models_result :: {:ok, [Model.t()]} | {:error, term()}
 
   @typep credential_fn ::
            (String.t() -> {:ok, InferenceRoute.route_credential()} | {:error, String.t()})
 
+  # The worker reports availability first, then lists models, so the two never share a fate.
   @spec start_check(Entry.t(), credential_fn()) :: check()
   defp start_check(%Entry{spec: spec} = entry, credential_fn) do
     parent = self()
@@ -400,15 +429,23 @@ defmodule MingaAgent.InferenceRouteRegistry do
 
     {pid, monitor} =
       spawn_monitor(fn ->
-        result =
+        availability =
           try do
-            {check_with_credential(spec, credential_fn.(spec.id)),
-             list_models(spec.module, entry.config)}
+            check_with_credential(spec, credential_fn.(spec.id))
           rescue
-            exception -> {{:raised, Exception.message(exception)}, {:error, :not_listed}}
+            exception -> {:raised, Exception.message(exception)}
           end
 
-        send(parent, {tag, result})
+        send(parent, {tag, :availability, availability})
+
+        models =
+          try do
+            list_models(spec.module, entry.config)
+          rescue
+            exception -> {:error, {:exception, Exception.message(exception)}}
+          end
+
+        send(parent, {tag, :models, models})
       end)
 
     {entry, pid, monitor, tag}
@@ -421,35 +458,60 @@ defmodule MingaAgent.InferenceRouteRegistry do
   defp check_with_credential(_spec, {:error, remedy}) when is_binary(remedy),
     do: {:returned, {:unavailable, :invalid_route_credential, remedy}}
 
-  @spec await_check(check(), integer()) ::
-          {Spec.t(), Status.t(), {:ok, [Model.t()]} | {:error, term()}}
-  defp await_check({%Entry{spec: spec}, pid, monitor, tag}, deadline) do
-    remaining = max(deadline - System.monotonic_time(:millisecond), 0)
+  @spec await_availability(check(), integer()) :: {check(), Status.t(), :listing | :stopped}
+  defp await_availability({%Entry{spec: spec}, pid, monitor, tag} = check, deadline) do
+    receive do
+      {^tag, :availability, result} ->
+        {check, check_status(spec, result), :listing}
 
-    result =
-      receive do
-        {^tag, result} ->
-          Process.demonitor(monitor, [:flush])
-          result
+      {:DOWN, ^monitor, :process, ^pid, reason} ->
+        {check, check_status(spec, {:exited, reason}), :stopped}
+    after
+      remaining(deadline) ->
+        stop_check(check)
+        {check, check_status(spec, :timeout), :stopped}
+    end
+  end
 
-        {:DOWN, ^monitor, :process, ^pid, reason} ->
-          {{:exited, reason}, {:error, :not_listed}}
-      after
-        remaining ->
-          Process.exit(pid, :kill)
-          Process.demonitor(monitor, [:flush])
+  @spec await_models({check(), Status.t(), :listing | :stopped}, integer()) ::
+          {Entry.t(), Status.t(), models_result()}
+  defp await_models({{entry, _pid, _monitor, _tag}, status, :stopped}, _deadline),
+    do: {entry, status, {:error, :not_listed}}
 
-          receive do
-            {^tag, _late} -> :ok
-          after
-            0 -> :ok
-          end
+  defp await_models({{entry, pid, monitor, tag} = check, status, :listing}, deadline) do
+    receive do
+      {^tag, :models, result} ->
+        Process.demonitor(monitor, [:flush])
+        {entry, status, refreshed_model_list(entry.spec, result)}
 
-          {:timeout, {:error, :not_listed}}
-      end
+      {:DOWN, ^monitor, :process, ^pid, reason} ->
+        {entry, status, refreshed_model_list(entry.spec, {:error, {:exited, reason}})}
+    after
+      remaining(deadline) ->
+        stop_check(check)
+        {entry, status, refreshed_model_list(entry.spec, {:error, :timeout})}
+    end
+  end
 
-    {availability, models} = result
-    {spec, check_status(spec, availability), refreshed_model_list(spec, models)}
+  @spec remaining(integer()) :: non_neg_integer()
+  defp remaining(deadline), do: max(deadline - System.monotonic_time(:millisecond), 0)
+
+  @spec stop_check(check()) :: :ok
+  defp stop_check({_entry, pid, monitor, tag}) do
+    Process.exit(pid, :kill)
+    Process.demonitor(monitor, [:flush])
+
+    receive do
+      {^tag, _phase, _late} -> :ok
+    after
+      0 -> :ok
+    end
+
+    receive do
+      {^tag, _phase, _late} -> :ok
+    after
+      0 -> :ok
+    end
   end
 
   @spec refreshed_model_list(Spec.t(), term()) :: {:ok, [Model.t()]} | {:error, term()}

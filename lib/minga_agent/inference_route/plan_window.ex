@@ -86,30 +86,24 @@ defmodule MingaAgent.InferenceRoute.PlanWindow do
   @spec percent(t()) :: non_neg_integer()
   def percent(%__MODULE__{utilization: utilization}), do: trunc(utilization * 100)
 
-  @doc """
-  Formats when a window resets in the machine's local time, such as `3:40 PM`, with the weekday when the reset is not today. Returns nil when the reset time is unknown.
-  """
-  @spec reset_label(t(), DateTime.t()) :: String.t() | nil
-  def reset_label(window, now \\ DateTime.utc_now())
-  def reset_label(%__MODULE__{resets_at: nil}, _now), do: nil
+  @typedoc "Converts a UTC `DateTime` to the local calendar date and time the user reads."
+  @type to_local :: (DateTime.t() -> :calendar.datetime())
 
-  def reset_label(%__MODULE__{resets_at: at}, %DateTime{} = now) do
-    {reset_date, {hour, minute, _second}} = local(at)
-    {today, _time} = local(now)
+  @doc """
+  Formats when a window resets as a local clock time, such as `3:40 PM`, with the weekday when the reset is not on the same local day as `now`. Returns nil when the reset time is unknown. The caller supplies `now` and the local-time conversion, so this value never reads the clock.
+  """
+  @spec reset_label(t(), DateTime.t(), to_local()) :: String.t() | nil
+  def reset_label(%__MODULE__{resets_at: nil}, _now, _to_local), do: nil
+
+  def reset_label(%__MODULE__{resets_at: at}, %DateTime{} = now, to_local)
+      when is_function(to_local, 1) do
+    {reset_date, {hour, minute, _second}} = to_local.(at)
+    {today, _time} = to_local.(now)
 
     time =
       "#{rem(hour + 11, 12) + 1}:#{String.pad_leading(Integer.to_string(minute), 2, "0")} #{meridiem(hour)}"
 
     if reset_date == today, do: time, else: "#{weekday(reset_date)} #{time}"
-  end
-
-  @spec local(DateTime.t()) :: :calendar.datetime()
-  defp local(%DateTime{} = at) do
-    at
-    |> DateTime.shift_zone!("Etc/UTC")
-    |> DateTime.to_naive()
-    |> NaiveDateTime.to_erl()
-    |> :calendar.universal_time_to_local_time()
   end
 
   @spec meridiem(0..23) :: String.t()

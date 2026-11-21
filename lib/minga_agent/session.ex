@@ -5571,14 +5571,10 @@ defmodule MingaAgent.Session do
     |> announce_model_limit(event, message)
   end
 
-  # A contributed route at its plan limit offers a way to switch models; the draft stays as it is.
+  # Only an error that names a plan limit and its reset offers a model switch; the draft stays as it is.
   @spec announce_model_limit(state(), Event.Error.t(), String.t()) :: state()
-  defp announce_model_limit(
-         %{model_selection: %ModelSelection{route: %{request_provider: :contributed}}} = state,
-         %Event.Error{kind: :rate_limited},
-         message
-       ),
-       do: broadcast(state, {:model_limit_reached, message})
+  defp announce_model_limit(state, %Event.Error{recovery: :choose_model}, message),
+    do: broadcast(state, {:model_limit_reached, message})
 
   defp announce_model_limit(state, _event, _message), do: state
 

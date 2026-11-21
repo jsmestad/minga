@@ -3570,26 +3570,38 @@ defmodule MingaAgent.Providers.Native do
   defp contributed_error_event(lctx, reason) do
     {:contributed, route_id, _model_id} = lctx.selection.route.origin
     {kind, message} = contributed_error(lctx.inference_routes, route_id, route_failure(reason))
-    message = plan_limit_message(kind, message, lctx.inference_routes, route_id)
-    %Event.Error{kind: kind, message: message, provider: route_id}
+
+    case plan_limit_message(kind, lctx.inference_routes, route_id) do
+      {:ok, limit_message} ->
+        %Event.Error{
+          kind: kind,
+          message: limit_message,
+          provider: route_id,
+          recovery: :choose_model
+        }
+
+      :none ->
+        %Event.Error{kind: kind, message: message, provider: route_id}
+    end
   end
 
-  # When a route is rate limited and has reported when its refusing window resets, say so plainly.
-  @spec plan_limit_message(Event.Error.kind(), String.t(), GenServer.server(), String.t()) ::
-          String.t()
-  defp plan_limit_message(:rate_limited, message, registry, route_id) do
+  # When a route is rate limited and has reported when its refusing window resets, say so plainly and offer a model switch.
+  @spec plan_limit_message(Event.Error.kind(), GenServer.server(), String.t()) ::
+          {:ok, String.t()} | :none
+  defp plan_limit_message(:rate_limited, registry, route_id) do
     with {:ok, entry} <- InferenceRouteRegistry.lookup(registry, route_id),
          %PlanWindow{} = window <- PlanWindow.rejected(entry.status.plan_usage),
-         reset when is_binary(reset) <- PlanWindow.reset_label(window) do
-      "#{InferenceRouteSpec.short_name(entry.spec)} plan limit reached. Resets at #{reset}. Switch model to continue."
+         reset when is_binary(reset) <- InferenceRouteRegistry.reset_label(window) do
+      {:ok,
+       "#{InferenceRouteSpec.short_name(entry.spec)} plan limit reached. Resets at #{reset}. Switch model to continue."}
     else
-      _no_reset -> message
+      _no_reset -> :none
     end
   catch
-    :exit, _reason -> message
+    :exit, _reason -> :none
   end
 
-  defp plan_limit_message(_kind, message, _registry, _route_id), do: message
+  defp plan_limit_message(_kind, _registry, _route_id), do: :none
 
   @spec route_failure(term()) :: term()
   defp route_failure(%ReqLLM.Error.API.Stream{cause: nil} = reason), do: reason

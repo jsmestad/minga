@@ -269,16 +269,33 @@ defmodule MingaAgent.InferenceRouteTest do
       assert PlanWindow.percent(plan_window(utilization: 0.829)) == 82
     end
 
-    test "reset times read as a local clock time, with the weekday when not today" do
-      now = DateTime.utc_now()
+    test "reset times read as a clock time in the caller's zone, with the weekday on other days" do
+      utc = fn at -> at |> DateTime.to_naive() |> NaiveDateTime.to_erl() end
+      now = ~U[2026-11-21 09:00:00Z]
 
-      assert PlanWindow.reset_label(plan_window([])) == nil
+      cases = [
+        {nil, nil},
+        {~U[2026-11-21 15:40:00Z], "3:40 PM"},
+        {~U[2026-11-21 00:05:00Z], "12:05 AM"},
+        {~U[2026-11-21 12:00:00Z], "12:00 PM"},
+        {~U[2026-11-24 09:15:00Z], "Tue 9:15 AM"}
+      ]
 
-      assert PlanWindow.reset_label(plan_window(resets_at: now), now) =~
-               ~r/\A\d{1,2}:\d{2} (AM|PM)\z/
+      for {resets_at, expected} <- cases do
+        assert PlanWindow.reset_label(plan_window(resets_at: resets_at), now, utc) == expected
+      end
 
-      assert PlanWindow.reset_label(plan_window(resets_at: DateTime.add(now, 86_400 * 3)), now) =~
-               ~r/\A(Mon|Tue|Wed|Thu|Fri|Sat|Sun) \d{1,2}:\d{2} (AM|PM)\z/
+      # A zone ahead of UTC moves the same instant onto the next local day.
+      ahead = fn at -> at |> DateTime.add(16 * 3_600) |> utc.() end
+
+      evening = ~U[2026-11-21 05:00:00Z]
+
+      assert PlanWindow.reset_label(
+               plan_window(resets_at: ~U[2026-11-21 15:40:00Z]),
+               evening,
+               ahead
+             ) ==
+               "Sun 7:40 AM"
     end
 
     test "a setup action needs a label and a description" do
