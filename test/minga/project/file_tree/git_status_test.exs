@@ -46,6 +46,22 @@ defmodule Minga.Project.FileTree.GitStatusTest do
       assert Map.get(status, Path.join(dir, "src")) == :modified
     end
 
+    test "merges staged and unstaged duplicates for files and ancestors", %{tmp_dir: dir} do
+      root = Path.join(dir, "app")
+      path = "app/lib/nested/tracked.ex"
+      staged = %StatusEntry{path: path, status: :modified, staged: true}
+      unstaged = %StatusEntry{path: path, status: :modified, staged: false}
+
+      expected = %{
+        Path.join(dir, path) => :modified,
+        Path.join(root, "lib/nested") => :modified,
+        Path.join(root, "lib") => :modified
+      }
+
+      assert GitStatus.from_entries([staged, unstaged], dir, root) == expected
+      assert GitStatus.from_entries([unstaged, staged], dir, root) == expected
+    end
+
     test "filters repo status to the requested root path", %{tmp_dir: dir} do
       root_path = Path.join(dir, "app")
       File.mkdir_p!(root_path)
