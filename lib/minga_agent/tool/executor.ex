@@ -8,6 +8,7 @@ defmodule MingaAgent.Tool.Executor do
   alias MingaAgent.Hooks.PreToolUsePayload
   alias MingaAgent.Hooks.Result, as: HookResult
   alias MingaAgent.Tool.Context
+  alias MingaAgent.Tool.FileMutationResult
   alias MingaAgent.Tool.Invocation
   alias MingaAgent.Tool.Limitation
   alias MingaAgent.Tool.Output
@@ -46,8 +47,11 @@ defmodule MingaAgent.Tool.Executor do
   end
 
   @doc "Executes a correlated Session invocation through its one-shot final-start owner."
-  @spec execute_session(GenServer.server(), Invocation.t(), keyword()) :: result()
+  @spec execute_session(GenServer.server(), Invocation.t(), keyword()) ::
+          {result(), FileMutationResult.t() | nil}
   def execute_session(session, %Invocation{} = invocation, opts) do
+    receipt_key = make_ref()
+
     start = fn ->
       case GenServer.call(session, {:start_tool_invocation, invocation}, 30_000) do
         {:ok, spec, store} ->
@@ -60,8 +64,9 @@ defmodule MingaAgent.Tool.Executor do
             )
             |> Context.bind_session_invocation(session, invocation)
 
-          execute_current(spec, invocation.arguments, context)
-          |> retain_session_result(context, session, invocation)
+          spec
+          |> execute_current(invocation.arguments, context)
+          |> retain_invocation_result(context, session, invocation, receipt_key)
 
         {:refused, reason} ->
           {:error, {:tool_refused, reason}}
@@ -71,12 +76,19 @@ defmodule MingaAgent.Tool.Executor do
       end
     end
 
-    run(
-      invocation.name,
-      invocation.arguments,
-      start,
-      Keyword.put(opts, :tool_call_id, invocation.call_id)
-    )
+    try do
+      result =
+        run(
+          invocation.name,
+          invocation.arguments,
+          start,
+          Keyword.put(opts, :tool_call_id, invocation.call_id)
+        )
+
+      {result, Process.get(receipt_key)}
+    after
+      Process.delete(receipt_key)
+    end
   end
 
   @spec direct_start(
@@ -196,8 +208,31 @@ defmodule MingaAgent.Tool.Executor do
       {:error, {:crashed, {kind, reason}}}
   end
 
+  @spec retain_invocation_result(
+          result(),
+          Context.t(),
+          GenServer.server(),
+          Invocation.t(),
+          reference()
+        ) ::
+          result()
+  defp retain_invocation_result(
+         {:ok, %FileMutationResult{} = mutation},
+         context,
+         session,
+         invocation,
+         receipt_key
+       ) do
+    Process.put(receipt_key, mutation)
+    retain_session_result({:ok, mutation.text}, context, session, invocation)
+  end
+
+  defp retain_invocation_result(result, context, session, invocation, _receipt_key),
+    do: retain_session_result(result, context, session, invocation)
+
   @spec retain_session_result(result(), Context.t(), GenServer.server(), Invocation.t()) ::
           result()
+
   defp retain_session_result({status, %Output{}} = result, _context, _session, _invocation)
        when status in [:ok, :error], do: result
 

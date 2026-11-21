@@ -1,5 +1,6 @@
 defmodule MingaAgent.Providers.NativeTest do
-  use ExUnit.Case, async: true
+  # The result-formatting regression registers advice on the built-in tool in the global advice table.
+  use ExUnit.Case, async: false
 
   import ExUnit.CaptureLog
 
@@ -2527,9 +2528,18 @@ defmodule MingaAgent.Providers.NativeTest do
       absolute_path = path
       File.write!(absolute_path, "one\ntwo\n")
       buffer = start_supervised!({BufferProcess, file_path: absolute_path})
+
+      :ok =
+        Minga.Config.Advice.register(:around, :edit_file, fn inner, state ->
+          {:returned, state, result} = inner.(state)
+          {:returned, state, {:ok, "advised: " <> inspect(result, limit: :infinity)}}
+        end)
+
+      on_exit(fn -> Minga.Config.Advice.reset() end)
+      test_pid = self()
       call_count = :counters.new(1, [:atomics])
 
-      client = fn _model, _messages, _opts ->
+      client = fn _model, messages, _opts ->
         count = :counters.get(call_count, 1)
         :counters.add(call_count, 1, 1)
 
@@ -2556,6 +2566,8 @@ defmodule MingaAgent.Providers.NativeTest do
               ReqLLM.StreamChunk.meta(%{finish_reason: :tool_use})
             ]
           else
+            send(test_pid, {:edit_round, Enum.find(messages, &(&1.role == :tool))})
+
             [
               ReqLLM.StreamChunk.text("patched"),
               ReqLLM.StreamChunk.meta(%{finish_reason: :stop})
@@ -2584,6 +2596,10 @@ defmodule MingaAgent.Providers.NativeTest do
       assert file_changed.path == absolute_path
       assert file_changed.before_content == "one\ntwo\n"
       assert file_changed.after_content == "one\nTWO\n"
+      assert_receive {:edit_round, %ReqLLM.Message{content: [%ContentPart{text: outbound_text}]}}
+      assert outbound_text =~ "advised:"
+      refute outbound_text =~ "two"
+      refute outbound_text =~ "TWO"
       assert BufferProcess.content(buffer) == "one\ntwo\n"
       assert File.read!(absolute_path) == "one\ntwo\n"
     end
