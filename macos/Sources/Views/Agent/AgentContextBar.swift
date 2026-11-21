@@ -63,22 +63,23 @@ public struct AgentContextBar: View {
 
                 Spacer()
 
-                // Elapsed time (right-aligned, monospaced)
-                Text(elapsedDisplay)
-                    .font(Typography.font(.small, design: .monospaced))
-                    .foregroundStyle(theme.breadcrumbFg.opacity(0.6))
-                    .task(id: state.dispatchTimestamp) {
-                        updateElapsedDisplay()
-                        while !Task.isCancelled {
-                            do {
-                                try await Task.sleep(for: .seconds(1))
-                            } catch {
-                                return
-                            }
-                            guard !Task.isCancelled else { return }
+                if state.dispatchTimestamp.timeIntervalSince1970 > 0 {
+                    Text(elapsedDisplay)
+                        .font(Typography.font(.small, design: .monospaced))
+                        .foregroundStyle(theme.breadcrumbFg.opacity(0.6))
+                        .task(id: state.dispatchTimestamp) {
                             updateElapsedDisplay()
+                            while !Task.isCancelled {
+                                do {
+                                    try await Task.sleep(for: .seconds(1))
+                                } catch {
+                                    return
+                                }
+                                guard !Task.isCancelled else { return }
+                                updateElapsedDisplay()
+                            }
                         }
-                    }
+                }
 
                 // Action buttons (right-aligned)
                 if state.canApprove {

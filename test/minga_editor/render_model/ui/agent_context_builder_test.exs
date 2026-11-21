@@ -1,6 +1,7 @@
 defmodule MingaEditor.RenderModel.UI.AgentContextBuilderTest do
   use ExUnit.Case, async: true
 
+  alias Minga.Frontend.Adapter.GUI.{AgentContextEncoder, Caches}
   alias Minga.RenderModel.UI.AgentContext
   alias Minga.RenderModel.UI.AgentContext.Todo
   alias MingaAgent.TodoItem
@@ -78,6 +79,20 @@ defmodule MingaEditor.RenderModel.UI.AgentContextBuilderTest do
                status: :idle,
                todos: [%Todo{status: :in_progress}]
              } = AgentContextBuilder.build(ctx)
+    end
+
+    test "an error without recorded activity has no elapsed time and is sent only once" do
+      agent = AgentState.set_status(%AgentState{}, :error)
+      ctx = context(UIState.new(), TraditionalState.replace_agent(%TraditionalState{}, agent))
+
+      assert %AgentContext{visible: true, status: :errored, dispatch_timestamp: nil} =
+               first = AgentContextBuilder.build(ctx)
+
+      assert {<<0x88, _size::16, 1, task_size::16, _task::binary-size(task_size), 0::64, 5,
+                _rest::binary>>, caches} = AgentContextEncoder.encode(first, Caches.new())
+
+      assert {nil, ^caches} =
+               ctx |> AgentContextBuilder.build() |> AgentContextEncoder.encode(caches)
     end
 
     test "approval-only visible context keeps the dispatch timestamp stable" do

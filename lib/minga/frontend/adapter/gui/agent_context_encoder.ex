@@ -41,7 +41,7 @@ defmodule Minga.Frontend.Adapter.GUI.AgentContextEncoder do
       Writer.new(@command)
       |> Writer.uint8(:visible, 1)
       |> Writer.string16(:task, model.task)
-      |> Writer.uint64(:dispatch_timestamp, DateTime.to_unix(model.dispatch_timestamp))
+      |> Writer.uint64(:dispatch_timestamp, dispatch_seconds(model.dispatch_timestamp))
       |> Writer.uint8(:status, status_to_byte(model.status))
       |> Writer.uint8(:can_approve, if(model.can_approve, do: 1, else: 0))
       |> Writer.append(encode_progress(model))
@@ -50,6 +50,10 @@ defmodule Minga.Frontend.Adapter.GUI.AgentContextEncoder do
 
     encode_command(payload)
   end
+
+  @spec dispatch_seconds(DateTime.t() | nil) :: integer()
+  defp dispatch_seconds(nil), do: 0
+  defp dispatch_seconds(timestamp), do: DateTime.to_unix(timestamp)
 
   @spec encode_command(binary()) :: binary()
   defp encode_command(payload) do

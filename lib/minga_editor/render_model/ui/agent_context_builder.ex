@@ -17,7 +17,7 @@ defmodule MingaEditor.RenderModel.UI.AgentContextBuilder do
       %AgentContext{
         visible: true,
         task: task(activity, status, action),
-        dispatch_timestamp: activity.started_at || DateTime.utc_now(),
+        dispatch_timestamp: activity.started_at,
         status: status,
         can_approve: false,
         todos: todos(activity),
@@ -93,7 +93,8 @@ defmodule MingaEditor.RenderModel.UI.AgentContextBuilder do
     do: {:idle, active_action(activity, nil)}
 
   @spec visible?(Activity.t(), AgentContext.status()) :: boolean()
-  defp visible?(%Activity{}, status) when status in [:needs_you, :working, :iterating], do: true
+  defp visible?(%Activity{}, status) when status in [:needs_you, :working, :iterating, :errored],
+    do: true
 
   defp visible?(%Activity{todos: todos} = activity, _status) do
     todos != [] or activity.tool_count > 0 or Activity.file_count(activity) > 0
