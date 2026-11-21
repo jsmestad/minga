@@ -104,12 +104,15 @@ defmodule Minga.Parser.ParseSyncTest do
 
   test "a failed request write replies once and leaves its wire ID available" do
     buffer = self()
-    {_id, work} = register_buffer(buffer)
+    {id, work} = register_buffer(buffer)
     failed_token = make_ref()
     failed_tag = make_ref()
     requests = fenced_request(work.requests, buffer, failed_token, failed_tag)
 
-    requests = RequestHandler.flush_buffer(nil, requests, work.buffers, buffer)
+    closed_port = open_port()
+    Port.close(closed_port)
+
+    requests = RequestHandler.flush_buffer(closed_port, requests, work.buffers, buffer)
     assert_receive {^failed_tag, nil}
     requests = RequestHandler.timeout(requests, failed_token)
     refute_received {^failed_tag, _}
@@ -118,6 +121,9 @@ defmodule Minga.Parser.ParseSyncTest do
     tag = make_ref()
     requests = fenced_request(requests, buffer, make_ref(), tag)
     requests = RequestHandler.flush_buffer(port, requests, work.buffers, buffer)
+
+    expected = Protocol.encode_request_indent(id, 1, 0)
+    assert_receive {^port, {:data, ^expected}}
 
     assert {:noreply, _} = RequestHandler.reply(requests, 1, :answer)
     assert_receive {^tag, :answer}
