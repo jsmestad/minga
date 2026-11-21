@@ -19,7 +19,6 @@ defmodule Minga.Buffer.SpanTest do
       span = Span.characterwise(text, 1, 3)
 
       assert span == %Span{start: 1, stop: 4}
-      assert Span.slice(text, span) == "bcd"
     end
 
     test "normalises reversed points while keeping the final character inclusive" do
@@ -27,14 +26,13 @@ defmodule Minga.Buffer.SpanTest do
       span = Span.characterwise(text, 3, 1)
 
       assert span == %Span{start: 1, stop: 4}
-      assert Span.slice(text, span) == "bcd"
     end
 
     test "includes a full multi-byte character" do
       text = "a🥨b"
       span = Span.characterwise(text, 1, 1)
 
-      assert Span.slice(text, span) == "🥨"
+      assert span == %Span{start: 1, stop: 5}
     end
 
     test "returns an empty span at the end of the text" do
@@ -42,13 +40,6 @@ defmodule Minga.Buffer.SpanTest do
       span = Span.characterwise(text, 2, 2)
 
       assert span == %Span{start: 2, stop: 2}
-      assert Span.slice(text, span) == ""
-    end
-  end
-
-  describe "slice/2" do
-    test "returns the text covered by a half-open span" do
-      assert Span.slice("abcdef", %Span{start: 2, stop: 5}) == "cde"
     end
   end
 

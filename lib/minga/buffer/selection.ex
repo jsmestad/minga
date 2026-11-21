@@ -52,15 +52,14 @@ defmodule Minga.Buffer.Selection do
 
   @doc "Returns the selected text."
   @spec contents(Document.t(), t()) :: String.t()
-  def contents(%Document{} = doc, %__MODULE__{span: span}) do
-    doc |> Document.content() |> Span.slice(span)
+  def contents(%Document{} = doc, %__MODULE__{span: %Span{start: start_point, stop: stop_point}}) do
+    Document.slice_byte_range(doc, start_point, stop_point - start_point)
   end
 
-  @doc "Returns the grapheme length of the selected text without constructing a new string."
+  @doc "Returns the grapheme length of the selected text."
   @spec length(Document.t(), t()) :: non_neg_integer()
-  def length(%Document{} = doc, %__MODULE__{span: %Span{start: start_point, stop: stop_point}}) do
-    text = Document.content(doc)
-    text |> binary_part(start_point, stop_point - start_point) |> String.length()
+  def length(%Document{} = doc, %__MODULE__{} = selection) do
+    doc |> contents(selection) |> String.length()
   end
 
   @doc "Returns the joined text for a linewise selection, without a trailing newline."

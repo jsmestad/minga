@@ -23,6 +23,16 @@ defmodule Minga.Buffer.SelectionTest do
       assert Selection.contents(doc, selection) == "bc\nde"
     end
 
+    test "reads the same graphemes on either side of and across the gap" do
+      for gap <- [0, 3, 7] do
+        doc = "aé🙂z" |> Document.new() |> Document.move_to({0, gap})
+        selection = Selection.characterwise(doc, {0, 1}, {0, 3})
+
+        assert Selection.contents(doc, selection) == "é🙂"
+        assert Selection.length(doc, selection) == 2
+      end
+    end
+
     test "clamps stale coordinates without crashing" do
       doc = Document.new("hello\n\nworld")
       selection = Selection.characterwise(doc, {1, 43}, {0, 0})
