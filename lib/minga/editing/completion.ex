@@ -116,7 +116,7 @@ defmodule Minga.Editing.Completion do
   Filters completion items by the text typed since the trigger position.
 
   Items whose `filter_text` starts with `prefix` (case-insensitive) are kept.
-  Resets selection to the top.
+  Retains the selected item if it still matches. Otherwise selects the first result.
   """
   @spec filter(t(), String.t()) :: t()
   def filter(%__MODULE__{} = completion, prefix) when is_binary(prefix) do
@@ -247,17 +247,24 @@ defmodule Minga.Editing.Completion do
   @doc "Selects an item by its stable wire identifier. Unknown or stale identifiers are ignored."
   @spec select_wire_id(t(), String.t()) :: {:ok, t()} | :stale
   def select_wire_id(%__MODULE__{} = completion, wire_id) when is_binary(wire_id) do
-    case Enum.find_index(completion.filtered, &(Item.wire_id(&1) == wire_id)) do
+    case find_wire_item(completion.filtered, wire_id, 0) do
+      {%Item{id: id}, index} ->
+        {:ok, %{completion | selected: index, selected_item_id: id}}
+
       nil ->
         :stale
+    end
+  end
 
-      selected ->
-        {:ok,
-         %{
-           completion
-           | selected: selected,
-             selected_item_id: item_id_at(completion.filtered, selected)
-         }}
+  @spec find_wire_item([item()], String.t(), non_neg_integer()) ::
+          {item(), non_neg_integer()} | nil
+  defp find_wire_item([], _wire_id, _index), do: nil
+
+  defp find_wire_item([item | rest], wire_id, index) do
+    if Item.wire_id(item) == wire_id do
+      {item, index}
+    else
+      find_wire_item(rest, wire_id, index + 1)
     end
   end
 

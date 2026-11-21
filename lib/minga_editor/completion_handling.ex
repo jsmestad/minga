@@ -1165,7 +1165,6 @@ defmodule MingaEditor.CompletionHandling do
       completion =
         Completion.new(index, trigger_pos, session.selected_item_id)
         |> Completion.filter(prefix)
-        |> Completion.select_item(session.selected_item_id)
 
       state = ModalWorkflow.put_completion_trigger(state, trigger)
       ModalWorkflow.update_completion(state, fn _ -> completion end)
