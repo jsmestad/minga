@@ -85,13 +85,10 @@ defmodule MingaAgent.EventLog.State do
     }
   end
 
-  @doc "Rebuilds the canonical touched-file projection from persisted events."
-  @spec rebuild_touched_files(t(), [EventRecord.t()]) ::
-          {:ok, t()} | {:error, TouchedFiles.rejection()}
-  def rebuild_touched_files(state, events) do
-    with {:ok, touched_files} <- TouchedFiles.rebuild(events) do
-      {:ok, %{state | touched_files: touched_files}}
-    end
+  @doc "Installs the completed touched-file projection after retention."
+  @spec install_touched_files(t(), TouchedFiles.t()) :: t()
+  def install_touched_files(state, %TouchedFiles{} = touched_files) do
+    %{state | touched_files: touched_files}
   end
 
   @doc "Projects one event after its durable insert succeeds."
@@ -113,10 +110,13 @@ defmodule MingaAgent.EventLog.State do
     %{state | writer: {:opening, writer, writer_ref}}
   end
 
-  @doc "Marks the opening writer as ready."
-  @spec writer_ready(t()) :: t()
-  def writer_ready(%__MODULE__{writer: {:opening, writer, writer_ref}} = state) do
-    %{state | writer: {:ready, writer, writer_ref}}
+  @doc "Installs the opening writer's projection and marks the writer as ready."
+  @spec writer_ready(t(), TouchedFiles.t()) :: t()
+  def writer_ready(
+        %__MODULE__{writer: {:opening, writer, writer_ref}} = state,
+        %TouchedFiles{} = touched_files
+      ) do
+    %{state | writer: {:ready, writer, writer_ref}, touched_files: touched_files}
   end
 
   @doc "Transitions writer lifecycle into a fresh start attempt."

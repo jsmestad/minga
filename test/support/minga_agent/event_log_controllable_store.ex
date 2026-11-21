@@ -4,6 +4,8 @@ defmodule MingaAgent.EventLog.ControllableStore do
   @behaviour MingaAgent.EventLog.StoreBackend
 
   alias MingaAgent.EventLog.EventRecord
+  alias MingaAgent.EventLog.StoreBackend
+  alias MingaAgent.EventLog.TouchedFiles
 
   @doc "Requests an open result from the configured test controller."
   @impl MingaAgent.EventLog.StoreBackend
@@ -17,18 +19,18 @@ defmodule MingaAgent.EventLog.ControllableStore do
     end
   end
 
-  @doc "Returns the configured reconstruction result without another synchronization exchange."
-  @impl MingaAgent.EventLog.StoreBackend
-  @spec file_edit_events(map()) :: {:ok, [EventRecord.t()]} | {:error, term()}
-  def file_edit_events(%{controller: controller, reconstruction_result: :controlled}) do
-    send(controller, {:event_log_store_file_edit_events, self()})
+  @doc "Returns the configured projection load result, optionally pausing for the test."
+  @impl StoreBackend
+  @spec load_touched_files(map()) :: StoreBackend.load_touched_files_result()
+  def load_touched_files(%{controller: controller, reconstruction_result: :controlled}) do
+    send(controller, {:event_log_store_load_touched_files, self()})
 
     receive do
-      {:event_log_store_file_edit_events_result, result} -> result
+      {:event_log_store_load_touched_files_result, result} -> result
     end
   end
 
-  def file_edit_events(%{reconstruction_result: result}), do: result
+  def load_touched_files(%{reconstruction_result: result}), do: result
 
   @doc "Reports that the controlled connection closed."
   @impl MingaAgent.EventLog.StoreBackend
@@ -80,7 +82,7 @@ defmodule MingaAgent.EventLog.ControllableStore do
     {:ok,
      %{
        controller: controller,
-       reconstruction_result: Keyword.get(opts, :reconstruction_result, {:ok, []})
+       reconstruction_result: Keyword.get(opts, :reconstruction_result, {:ok, TouchedFiles.new()})
      }}
   end
 

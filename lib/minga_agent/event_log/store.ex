@@ -4,7 +4,9 @@ defmodule MingaAgent.EventLog.Store do
   @behaviour MingaAgent.EventLog.StoreBackend
 
   alias MingaAgent.EventLog.EventRecord
+  alias MingaAgent.EventLog.StoreBackend
   alias MingaAgent.EventLog.Taxonomy
+  alias MingaAgent.EventLog.TouchedFiles
   alias Exqlite.Sqlite3
 
   @type db :: Sqlite3.db()
@@ -76,10 +78,10 @@ defmodule MingaAgent.EventLog.Store do
     query_events(db, sql, [session_id, last_id, limit])
   end
 
-  @doc "Returns every persisted file-edit event in durable order."
+  @doc "Loads a complete touched-file projection from persisted edits in durable order."
   @impl MingaAgent.EventLog.StoreBackend
-  @spec file_edit_events(db()) :: {:ok, [EventRecord.t()]} | {:error, term()}
-  def file_edit_events(db) do
+  @spec load_touched_files(db()) :: StoreBackend.load_touched_files_result()
+  def load_touched_files(db) do
     sql = """
     SELECT id, event_key, session_id, event_type, payload, wall_clock, monotonic_ts
     FROM events
@@ -87,7 +89,17 @@ defmodule MingaAgent.EventLog.Store do
     ORDER BY id ASC
     """
 
-    query_events(db, sql, [])
+    case Sqlite3.prepare(db, sql) do
+      {:ok, stmt} ->
+        try do
+          step_touched_files(db, stmt, {:ok, TouchedFiles.new()})
+        after
+          Sqlite3.release(db, stmt)
+        end
+
+      {:error, reason} ->
+        {:error, {:read_failed, reason}}
+    end
   end
 
   @doc "Returns the latest event id for a session, or 0 when it has no events."
@@ -522,6 +534,37 @@ defmodule MingaAgent.EventLog.Store do
       {:error, reason} -> {:error, reason}
     end
   end
+
+  @spec step_touched_files(db(), Sqlite3.statement(), StoreBackend.load_touched_files_result()) ::
+          StoreBackend.load_touched_files_result()
+  defp step_touched_files(db, stmt, result) do
+    case Sqlite3.step(db, stmt) do
+      {:row, row} ->
+        next = record_touched_file(result, row_to_record(row))
+        step_touched_files(db, stmt, next)
+
+      :done ->
+        result
+
+      :busy ->
+        {:error, {:read_failed, :busy}}
+
+      {:error, reason} ->
+        {:error, {:read_failed, reason}}
+    end
+  end
+
+  @spec record_touched_file(StoreBackend.load_touched_files_result(), EventRecord.t() | nil) ::
+          StoreBackend.load_touched_files_result()
+  defp record_touched_file({:ok, projection}, %EventRecord{} = event) do
+    case TouchedFiles.record(projection, event, event.id) do
+      {:ok, _projection} = result -> result
+      {:error, reason} -> {:error, {:validation_failed, reason}}
+    end
+  end
+
+  # Preserve decoder raises after the first validation rejection. Unknown rows decode to nil.
+  defp record_touched_file(result, _event), do: result
 
   @spec query_events(db(), String.t(), [term()]) :: {:ok, [EventRecord.t()]} | {:error, term()}
   defp query_events(db, sql, params) do

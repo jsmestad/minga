@@ -58,17 +58,6 @@ defmodule MingaAgent.EventLog.TouchedFilesTest do
            ]
   end
 
-  test "rebuild uses the same transition as live admission" do
-    first = %{file_event("session", "lib/a.ex", "", "one", 10, @earlier) | id: 1}
-    second = %{file_event("session", "lib/a.ex", "one", "two", 20, @later) | id: 2}
-
-    assert {:ok, rebuilt} = TouchedFiles.rebuild([first, second, first])
-
-    assert TouchedFiles.list(rebuilt, "session") == [
-             %{path: "lib/a.ex", action: :modified, timestamp: 20}
-           ]
-  end
-
   test "malformed file-edit events return a typed rejection" do
     event = EventRecord.new("session", :file_edit_proposed, %{"path" => "lib/a.ex"})
 
