@@ -2,6 +2,8 @@ defmodule MingaEditor.Commands.LspTest do
   # Uses the global LSP supervisor and buffer-to-client registry.
   use ExUnit.Case, async: false
 
+  @moduletag timeout: 30_000
+
   alias Minga.LSP.Supervisor, as: LSPSupervisor
   alias Minga.LSP.SyncServer
   alias Minga.Test.LspIsolation

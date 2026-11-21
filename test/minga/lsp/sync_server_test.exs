@@ -35,7 +35,12 @@ defmodule Minga.LSP.SyncServerTest do
 
       try do
         assert {:ok, true} = Options.set(:lsp_auto_start, true)
-        send(SyncServer, {:minga_event, :buffer_opened, %Events.BufferEvent{buffer: buf, path: path}})
+
+        send(
+          SyncServer,
+          {:minga_event, :buffer_opened, %Events.BufferEvent{buffer: buf, path: path}}
+        )
+
         sync_server()
       after
         Options.set(:lsp_auto_start, previous)

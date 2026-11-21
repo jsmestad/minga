@@ -333,7 +333,9 @@ defmodule Minga.LSP.SyncServer do
       state
   end
 
-  @spec open_configured_buffer(state(), pid(), String.t(), atom(), [ServerRegistry.server_config()]) ::
+  @spec open_configured_buffer(state(), pid(), String.t(), atom(), [
+          ServerRegistry.server_config()
+        ]) ::
           state()
   defp open_configured_buffer(state, _buffer_pid, _path, _filetype, []), do: state
 
