@@ -1,6 +1,7 @@
 defmodule MingaEditor.UI.Theme.LoaderTest do
   use ExUnit.Case, async: true
 
+  alias MingaEditor.UI.Face.Registry, as: FaceRegistry
   alias MingaEditor.UI.Theme.Loader
 
   @moduletag :tmp_dir
@@ -40,7 +41,7 @@ defmodule MingaEditor.UI.Theme.LoaderTest do
       """)
 
       {:ok, loaded} = Loader.load_file(path)
-      face = MingaEditor.UI.Face.Registry.style_for(loaded.face_registry, "keyword")
+      face = FaceRegistry.style_for(loaded.face_registry, "keyword")
       assert face.fg == 0xFF0000
     end
 
@@ -341,21 +342,67 @@ defmodule MingaEditor.UI.Theme.LoaderTest do
       assert {:error, %{path: ^path}} = Loader.load_file(path)
     end
 
-    test "LSP defaults are included", %{tmp_dir: dir} do
+    test "LSP defaults are included without face overrides", %{tmp_dir: dir} do
       path = Path.join(dir, "lsp.exs")
+
+      File.write!(path, "%{name: :lsp_test, inherits: :minga_default}")
+
+      assert {:ok, %{face_registry: registry}} = Loader.load_file(path)
+      type_fg = FaceRegistry.resolve(registry, "type").fg
+
+      assert %{inherit: "type", fg: ^type_fg} = FaceRegistry.resolve(registry, "@lsp.type.class")
+    end
+
+    test "LSP defaults inherit overridden parents without replacing explicit faces", %{
+      tmp_dir: dir
+    } do
+      path = Path.join(dir, "lsp_overrides.exs")
 
       File.write!(path, """
       %{
-        name: :lsp_test,
-        inherits: :doom_one,
-        faces: %{"function" => [fg: 0x51AFEF]}
+        name: :lsp_overrides_test,
+        inherits: :minga_default,
+        overrides: %{syntax: %{"type.child" => [bold: true]}},
+        faces: %{
+          "type" => [fg: 0x112233],
+          "@lsp.type.class" => [fg: 0x445566]
+        }
       }
       """)
 
-      {:ok, loaded} = Loader.load_file(path)
-      # @lsp.type.function should inherit from function
-      face = MingaEditor.UI.Face.Registry.resolve(loaded.face_registry, "@lsp.type.function")
-      assert face.fg == 0x51AFEF
+      assert {:ok, %{face_registry: registry}} = Loader.load_file(path)
+      assert %{fg: 0x112233, bold: true} = FaceRegistry.resolve(registry, "type.child")
+
+      assert %{inherit: "type", fg: 0x112233} =
+               FaceRegistry.resolve(registry, "@lsp.type.interface")
+
+      assert %{inherit: "@lsp.type", fg: 0x445566} =
+               FaceRegistry.resolve(registry, "@lsp.type.class")
+    end
+
+    test "reports the override cycle before LSP defaults can introduce another", %{tmp_dir: dir} do
+      path = Path.join(dir, "lsp_cycle.exs")
+
+      # Swap which branch already cycles so the regression does not depend
+      # on the traversal order of the final registry map.
+      for {loop, parent, lsp} <- [
+            {"type", "constant", "@lsp.type.enumMember"},
+            {"constant", "type", "@lsp.type.class"}
+          ] do
+        File.write!(path, """
+        %{
+          name: :lsp_cycle_test,
+          inherits: :minga_default,
+          faces: %{
+            #{inspect(loop)} => [inherit: #{inspect(loop)}],
+            #{inspect(parent)} => [inherit: #{inspect(lsp)}]
+          }
+        }
+        """)
+
+        assert {:error, %{path: ^path, error: error}} = Loader.load_file(path)
+        assert error == "circular face inheritance detected: #{loop} -> #{loop}"
+      end
     end
   end
 

@@ -289,7 +289,7 @@ defmodule MingaAgent.ModelResolver do
     matches =
       candidate_opts
       |> candidates()
-      |> Enum.filter(&(ModelSelection.id(&1.selection) == id))
+      |> Enum.filter(& &1.current)
 
     case matches do
       [%ModelCandidate{selection: selection}] ->
@@ -317,7 +317,7 @@ defmodule MingaAgent.ModelResolver do
          :ok <- credential_available(stored.credential, snapshot, opts),
          :ok <- validate_stored_source(stored, snapshot, spec, opts),
          {:ok, selection} <- materialize_stored(stored, spec, snapshot),
-         :ok <- validate_backend_capabilities(selection, spec) do
+         :ok <- validate_streaming(selection) do
       {:ok, selection}
     else
       {:error, {:selection_correction_required, _message}} = error ->
@@ -500,7 +500,7 @@ defmodule MingaAgent.ModelResolver do
          evidence = Evidence.new(),
          {:ok, selection} <-
            ModelSelection.build(context.spec, route, credential, policy, evidence),
-         :ok <- validate_backend_capabilities(selection, context.spec) do
+         :ok <- validate_streaming(selection) do
       {:ok, selection}
     else
       {:error, reason} = error when is_tuple(reason) ->
@@ -894,24 +894,16 @@ defmodule MingaAgent.ModelResolver do
     end
   end
 
-  @spec validate_backend_capabilities(ModelSelection.t(), Spec.t()) ::
-          :ok | {:error, resolution_error()}
-  defp validate_backend_capabilities(selection, spec) do
-    streaming = selection.policy.capabilities.streaming
-
-    case {selection.backend_id == spec.id, streaming} do
-      {false, _streaming} ->
-        {:error, {:backend_unavailable, selection.backend_id}}
-
-      {true, false} ->
-        {:error,
-         {:incompatible_selection,
-          "#{selection.route.display_name} does not support streaming text responses."}}
-
-      {true, _supported_or_unknown} ->
-        :ok
-    end
+  @spec validate_streaming(ModelSelection.t()) :: :ok | {:error, resolution_error()}
+  defp validate_streaming(
+         %ModelSelection{policy: %{capabilities: %{streaming: false}}} = selection
+       ) do
+    {:error,
+     {:incompatible_selection,
+      "#{selection.route.display_name} does not support streaming text responses."}}
   end
+
+  defp validate_streaming(_selection), do: :ok
 
   @spec build_candidates(map()) :: [ModelCandidate.t()]
   defp build_candidates(context) do

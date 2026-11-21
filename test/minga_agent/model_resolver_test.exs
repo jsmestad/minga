@@ -266,10 +266,8 @@ defmodule MingaAgent.ModelResolverTest do
         OAuth.new("account-123", "/tmp/minga-resolver-oauth.json")
       )
 
-    candidates =
-      snapshot
-      |> resolver_opts()
-      |> ModelResolver.candidates()
+    opts = resolver_opts(snapshot)
+    candidates = ModelResolver.candidates(opts)
 
     assert [_, _] = candidates
 
@@ -287,7 +285,21 @@ defmodule MingaAgent.ModelResolverTest do
 
     assert oauth.selection.route.execution.wire_protocol == "openai_codex_responses"
     assert oauth.selection.route.execution.base_url == "https://chatgpt.com/backend-api"
-    refute ModelSelection.id(api_key.selection) == ModelSelection.id(oauth.selection)
+    api_key_id = ModelSelection.id(api_key.selection)
+    refute api_key_id == ModelSelection.id(oauth.selection)
+
+    assert {:ok, selection} = ModelResolver.resolve(api_key_id, opts)
+    assert selection == api_key.selection
+
+    oauth_only =
+      Keyword.put(opts, :credential_snapshot, Snapshot.new(%{}, oauth.selection.credential))
+
+    assert [^oauth] = ModelResolver.candidates(oauth_only)
+
+    assert {:error, {:selection_correction_required, message}} =
+             ModelResolver.resolve(api_key_id, oauth_only)
+
+    assert message =~ "The exact saved route is no longer available"
   end
 
   test "account discovery exposes only listed wire IDs without hiding API-key routes" do
@@ -345,14 +357,21 @@ defmodule MingaAgent.ModelResolverTest do
       {["route", "execution", "base_url"], "https://attacker.example/v1"},
       {["route", "execution", "path"], "/collect"},
       {["route", "execution", "provider_model_id"], "different-model"},
-      {["credential", "provider"], "anthropic"},
-      {["backend_id"], "different-backend"}
+      {["credential", "provider"], "anthropic"}
     ]
 
     for {path, replacement} <- changes do
       assert {:error, {:selection_correction_required, _message}} =
                encoded |> put_in(path, replacement) |> ModelResolver.restore(opts)
     end
+
+    unavailable = Keyword.merge(opts, credential_snapshot: Snapshot.new(%{}, nil), models: [])
+    wrong_backend = Map.put(encoded, "backend_id", "different-backend")
+
+    assert {:error, {:selection_correction_required, message}} =
+             ModelResolver.restore(wrong_backend, unavailable)
+
+    assert message =~ "The saved model selection belongs to a different backend"
   end
 
   test "display-name changes preserve the executable selection identity" do
@@ -506,11 +525,11 @@ defmodule MingaAgent.ModelResolverTest do
     assert ModelSelection.id(stored) == ModelSelection.id(selection)
   end
 
-  test "JSON restoration preserves unknown limits and explicitly unsupported tools" do
+  test "JSON restoration preserves unknown limits and streaming alongside explicitly unsupported tools" do
     model = %{
       @catalog_model
       | limits: %{context: nil, input: nil, output: nil},
-        capabilities: %{tools: %{enabled: false}, streaming: %{text: true}}
+        capabilities: %{tools: %{enabled: false}}
     }
 
     opts =
@@ -524,6 +543,7 @@ defmodule MingaAgent.ModelResolverTest do
     assert {:ok, restored} = ModelResolver.restore(record, opts)
     assert restored.policy.limits.context == nil
     assert restored.policy.capabilities.tools == false
+    assert restored.policy.capabilities.streaming == :unknown
     assert restored.request_model == selection.request_model
     assert ModelSelection.id(restored) == ModelSelection.id(selection)
   end
@@ -557,16 +577,27 @@ defmodule MingaAgent.ModelResolverTest do
              ModelResolver.resolve("openai:not-a-codex-name", Keyword.put(opts, :models, [model]))
   end
 
-  test "rejects explicit false streaming capability rather than treating it as unknown" do
-    model = %{
-      @catalog_model
-      | capabilities: %{streaming: %{text: false}, tools: %{enabled: false}}
-    }
-
+  test "rejects explicit false streaming in fresh and restored hosted selections" do
     opts = resolver_opts(Snapshot.new(%{"openai" => :env}, nil))
+    intent = "openai:not-a-codex-name"
+    model = put_in(@catalog_model, [:capabilities, "streaming", "text"], false)
+    no_streaming = Keyword.put(opts, :models, [model])
 
-    assert {:error, {:incompatible_selection, _}} =
-             ModelResolver.resolve("openai:not-a-codex-name", Keyword.put(opts, :models, [model]))
+    assert {:error, {:incompatible_selection, message}} =
+             ModelResolver.resolve(intent, no_streaming)
+
+    assert message =~ "Exact Catalog Model does not support streaming text responses"
+
+    assert {:ok, selection} = ModelResolver.resolve(intent, opts)
+
+    encoded =
+      selection
+      |> ModelSelection.encode()
+      |> put_in(["route", "metadata", "capabilities", "streaming", "text"], false)
+      |> put_in(["policy", "capabilities", "streaming"], false)
+
+    assert {:error, {:selection_correction_required, ^message}} =
+             ModelResolver.restore(encoded, no_streaming)
   end
 
   test "extracts supported reasoning values from catalog effort metadata" do

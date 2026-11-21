@@ -32,7 +32,7 @@ defmodule MingaEditor.UI.Theme.Loader do
   - `:palette` (optional) — semantic palette map passed to `Theme.Builder.from_palette/3`. When present, the palette produces a complete theme cascade. Mutually exclusive with `:inherits`.
   - `:overrides` (optional) — map of concrete theme section overrides applied after palette derivation, such as `%{popup: %{title_fg: 0x89B4FA}}`. Invalid sections or fields fail the theme load instead of being ignored.
   - `:faces` (optional) — map of face name strings to style keyword
-    lists. Merged via `Face.Registry.with_overrides/2`.
+    lists. Explicit faces take precedence over LSP defaults.
   - `:editor` (optional) — map of editor chrome color overrides (`:bg`, `:fg`, `:split_border_fg`, etc.). Deprecated `:tilde_fg` values are validated and ignored.
 
   ## Discovery
@@ -157,16 +157,7 @@ defmodule MingaEditor.UI.Theme.Loader do
       |> rename_theme(name)
       |> apply_theme_overrides(data)
 
-    # Build face registry from the theme, then apply face overrides
-    registry = FaceRegistry.from_theme(theme)
-
-    registry =
-      case Map.get(data, :faces) do
-        nil -> registry
-        faces when is_map(faces) -> FaceRegistry.with_overrides(registry, faces)
-      end
-
-    registry = FaceRegistry.with_lsp_defaults(registry)
+    registry = FaceRegistry.from_theme_with_lsp_defaults(theme, Map.get(data, :faces))
 
     {:ok, %LoadedTheme{name: name, theme: theme, face_registry: registry, source_path: path}}
   rescue

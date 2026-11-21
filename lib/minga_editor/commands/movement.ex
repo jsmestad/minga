@@ -1033,12 +1033,8 @@ defmodule MingaEditor.Commands.Movement do
     else
       wrap_map = WrapMap.compute(lines, content_w, wrap_opts(buf, oracle))
 
-      cursor_entry =
-        Enum.at(wrap_map, line_idx, [
-          %{byte_offset: 0, text: "", source_text: "", indent_width: 0}
-        ])
-
-      visual_row_idx = visual_row_index(cursor_entry, cursor_col)
+      cursor_entry = Enum.at(wrap_map, line_idx)
+      {visual_row_idx, _row} = WrapMap.row_at_byte(cursor_entry, cursor_col)
       rows_before = wrap_map |> Enum.take(line_idx) |> WrapMap.visual_row_count()
       rows_before + visual_row_idx - vp.visual_row_offset
     end
@@ -1069,7 +1065,7 @@ defmodule MingaEditor.Commands.Movement do
     snapshot = Buffer.render_snapshot(buf, cursor_line, 1)
     text = List.first(snapshot.lines) || ""
     [entry] = WrapMap.compute([text], content_w, wrap_opts(buf, oracle))
-    cursor_visual_row = visual_row_index(entry, cursor_col)
+    {cursor_visual_row, _row} = WrapMap.row_at_byte(entry, cursor_col)
     visible = Viewport.content_rows(vp)
     target_offset = wrapped_target_offset(cursor_visual_row, visible, position)
     total_visual_rows_to_eof = visual_rows_to_eof(buf, cursor_line, content_w, oracle)
@@ -1110,15 +1106,6 @@ defmodule MingaEditor.Commands.Movement do
     |> max(1)
   catch
     :exit, _ -> 1
-  end
-
-  @spec visual_row_index(WrapMap.wrap_entry(), non_neg_integer()) :: non_neg_integer()
-  defp visual_row_index(wrap_entry, cursor_col) do
-    wrap_entry
-    |> Enum.with_index()
-    |> Enum.filter(fn {row, _idx} -> row.byte_offset <= cursor_col end)
-    |> Enum.at(-1, {%{byte_offset: 0}, 0})
-    |> elem(1)
   end
 
   @spec wrap_opts(pid(), Minga.Core.WidthOracle.t()) :: keyword()

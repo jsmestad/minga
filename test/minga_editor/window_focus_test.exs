@@ -307,6 +307,7 @@ defmodule MingaEditor.WindowFocusTest do
 
   test "cursor-source mismatch returns a focused failure and leaves state unchanged" do
     {state, _first_buffer, second_buffer} = split_state()
+    :ok = BufferProcess.move_to(second_buffer, {0, 3})
 
     mismatched = %{
       state
@@ -322,7 +323,7 @@ defmodule MingaEditor.WindowFocusTest do
     assert WindowFocus.remember_active_cursor_result(mismatched) ==
              {:error, :cursor_source_mismatch}
 
-    assert BufferProcess.cursor(second_buffer) == {0, 1}
+    assert BufferProcess.cursor(second_buffer) == {0, 3}
   end
 
   test "active cursor snapshots require a matching live buffer window" do

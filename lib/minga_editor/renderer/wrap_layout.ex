@@ -128,7 +128,8 @@ defmodule MingaEditor.Renderer.WrapLayout do
         {_, composed_byte} =
           PositionEncoding.from_lsp(%{"line" => line, "character" => character}, composed, :utf16)
 
-        wrapped_segment(rows, composed_byte, 0)
+        {index, _row} = WrapMap.row_at_byte(rows, composed_byte)
+        index
       else
         0
       end
@@ -148,11 +149,6 @@ defmodule MingaEditor.Renderer.WrapLayout do
     [rows] = WrapMap.compute([text], Keyword.fetch!(options, :content_width), options)
     rows
   end
-
-  defp wrapped_segment([_ | [%{byte_offset: start} | _] = rest], byte, index) when start <= byte,
-    do: wrapped_segment(rest, byte, index + 1)
-
-  defp wrapped_segment(_rows, _byte, index), do: index
 
   @spec visible_decorations(Decorations.t(), non_neg_integer(), non_neg_integer()) ::
           Decorations.t()
