@@ -170,15 +170,14 @@ defmodule MingaEditor.Commands.Search do
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, direction)
       when direction in [:search_word_under_cursor_forward, :search_word_under_cursor_backward] do
     {content, cursor} = Buffer.content_and_cursor(buf)
-    tmp_buf = Document.new(content)
     direction = if direction == :search_word_under_cursor_forward, do: :forward, else: :backward
 
-    case Minga.Editing.word_under_cursor(tmp_buf, cursor) do
+    case Minga.Editing.search_word_next(content, cursor, direction) do
       nil ->
         MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "No word under cursor")
 
-      word ->
-        execute_word_search(state, buf, content, cursor, word, direction)
+      {word, position} ->
+        apply_search_result(position, state, buf, word, direction)
     end
   end
 
@@ -242,12 +241,8 @@ defmodule MingaEditor.Commands.Search do
         MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "No substitutions made")
 
       accepted ->
-        # Apply in reverse offered order; overlapping matches use the changed text.
         new_content =
-          Enum.reduce(accepted, ms.original_content, fn match, content ->
-            %Match{line: line, col: col, length: len} = match
-            replace_match(content, line, col, len, ms.replacement)
-          end)
+          Minga.Editing.apply_substitutions(ms.original_content, accepted, ms.replacement)
 
         Buffer.replace_content(buf, new_content)
 
@@ -370,12 +365,6 @@ defmodule MingaEditor.Commands.Search do
     end
   end
 
-  defp execute_word_search(state, buf, content, cursor, word, direction) do
-    content
-    |> Minga.Editing.search_next(word, cursor, direction)
-    |> apply_search_result(state, buf, word, direction)
-  end
-
   @spec apply_search_result(
           Buffer.position() | nil,
           state(),
@@ -414,31 +403,6 @@ defmodule MingaEditor.Commands.Search do
   defp record_substitution(%{workspace: workspace} = state, pattern) do
     search = SearchData.record_pattern(workspace.search, pattern)
     %{state | workspace: MingaEditor.Session.State.set_search(workspace, search)}
-  end
-
-  # Replace a match at a specific line/col/length in content string.
-  @spec replace_match(
-          String.t(),
-          non_neg_integer(),
-          non_neg_integer(),
-          non_neg_integer(),
-          String.t()
-        ) ::
-          String.t()
-  defp replace_match(content, match_line, match_col, match_len, replacement) do
-    lines = String.split(content, "\n")
-
-    new_lines =
-      List.update_at(lines, match_line, fn line ->
-        before = binary_part(line, 0, match_col)
-
-        after_match =
-          binary_part(line, match_col + match_len, byte_size(line) - match_col - match_len)
-
-        before <> replacement <> after_match
-      end)
-
-    Enum.join(new_lines, "\n")
   end
 
   @spec project_root() :: term()

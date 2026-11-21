@@ -133,15 +133,17 @@ defmodule Minga.Editing.Search do
 
   def find_next(content, pattern, cursor, :forward, opts) do
     lines = :binary.split(content, "\n", [:global])
-    matcher = compile_matcher(pattern, opts)
-    find_forward(lines, matcher, cursor)
+    find_forward(lines, compile_matcher(pattern, opts), cursor)
   end
 
   def find_next(content, pattern, cursor, :backward, opts) do
     lines = :binary.split(content, "\n", [:global])
-    matcher = compile_matcher(pattern, opts)
-    find_backward(lines, matcher, cursor)
+    find_backward(lines, compile_matcher(pattern, opts), cursor)
   end
+
+  @spec find_on_lines([String.t()], matcher(), position(), direction()) :: position() | nil
+  defp find_on_lines(lines, matcher, cursor, :forward), do: find_forward(lines, matcher, cursor)
+  defp find_on_lines(lines, matcher, cursor, :backward), do: find_backward(lines, matcher, cursor)
 
   @doc "Returns the exact match at `position`, including its byte length, or nil."
   @spec match_at(String.t(), String.t(), position(), search_opts()) :: match() | nil
@@ -285,25 +287,75 @@ defmodule Minga.Editing.Search do
       nil
   """
   @spec word_at_cursor(Document.t(), position()) :: String.t() | nil
-  def word_at_cursor(%Document{} = buf, {line, col}) do
-    lines = :binary.split(Document.content(buf), "\n", [:global])
+  def word_at_cursor(%Document{} = buf, {line, col}),
+    do: word_at_byte(Document.line_at(buf, line), col)
 
-    case Enum.at(lines, line) do
-      nil ->
-        nil
+  @doc "Finds the cursor word and its next position using one split of the buffer text."
+  @spec find_word_next(String.t(), position(), direction()) ::
+          {String.t(), position() | nil} | nil
+  def find_word_next(content, {line, col} = cursor, direction) do
+    lines = :binary.split(content, "\n", [:global])
 
-      text ->
-        if col < byte_size(text) and word_char_at?(text, col) do
-          start_byte = find_word_start_byte(text, col)
-          end_byte = find_word_end_byte(text, col)
-          binary_part(text, start_byte, end_byte - start_byte + 1)
-        else
-          nil
-        end
+    case word_at_byte(Enum.at(lines, line), col) do
+      nil -> nil
+      word -> {word, find_on_lines(lines, word, cursor, direction)}
     end
   end
 
+  @spec word_at_byte(String.t() | nil, non_neg_integer()) :: String.t() | nil
+  defp word_at_byte(text, col) when col < byte_size(text) do
+    if word_char_at?(text, col) do
+      start_byte = find_word_start_byte(text, col)
+      end_byte = find_word_end_byte(text, col)
+      binary_part(text, start_byte, end_byte - start_byte + 1)
+    end
+  end
+
+  defp word_at_byte(_text, _col), do: nil
+
   # ── Substitution ──────────────────────────────────────────────────────────
+
+  @typep line_focus :: {non_neg_integer(), [String.t()], [String.t()]}
+
+  @doc "Applies accepted matches in the supplied order, using the text left by each previous edit."
+  @spec apply_substitutions(String.t(), [match()], String.t()) :: String.t()
+  def apply_substitutions(content, [], _replacement), do: content
+
+  def apply_substitutions(content, matches, replacement) do
+    lines = :binary.split(content, "\n", [:global])
+    multiline? = :binary.match(replacement, "\n") != :nomatch
+
+    {_line, before, remaining} =
+      Enum.reduce(matches, {0, [], lines}, fn %Match{line: line} = match, focus ->
+        focus
+        |> seek_line(line)
+        |> apply_focused_match(match, replacement, multiline?)
+      end)
+
+    before |> Enum.reverse(remaining) |> Enum.join("\n")
+  end
+
+  # The prefix is reversed so both neighboring lines are available without starting over.
+  @spec seek_line(line_focus(), non_neg_integer()) :: line_focus()
+  defp seek_line({line, before, [text | rest]}, target) when line < target,
+    do: seek_line({line + 1, [text | before], rest}, target)
+
+  defp seek_line({line, [text | before], rest}, target) when line > target,
+    do: seek_line({line - 1, before, [text | rest]}, target)
+
+  defp seek_line(focus, _target), do: focus
+
+  @spec apply_focused_match(line_focus(), match(), String.t(), boolean()) :: line_focus()
+  defp apply_focused_match({_, _, []} = focus, _match, _replacement, _multiline?), do: focus
+
+  defp apply_focused_match({line, before, [text | rest]}, match, replacement, multiline?) do
+    edited = splice_match(text, {match.col, match.length}, replacement)
+
+    rest =
+      if multiline?, do: :binary.split(edited, "\n", [:global]) ++ rest, else: [edited | rest]
+
+    {line, before, rest}
+  end
 
   @typedoc "Result of a substitution: new content and count of replacements."
   @type substitute_result :: {String.t(), non_neg_integer()}
@@ -572,7 +624,7 @@ defmodule Minga.Editing.Search do
   defp find_word_start_byte(_text, 0), do: 0
 
   defp find_word_start_byte(text, col) do
-    if col > 0 and word_char_at?(text, col - 1) do
+    if word_char_at?(text, col - 1) do
       find_word_start_byte(text, col - 1)
     else
       col
