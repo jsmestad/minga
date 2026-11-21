@@ -299,7 +299,12 @@ defmodule Minga.Core.Decorations do
     matches? = &(&1.group == group)
 
     if Enum.any?(annotations, matches?) do
-      Enum.reject(annotations, matches?)
+      annotations
+      |> Enum.reduce([], fn
+        %{group: candidate}, remaining when candidate == group -> remaining
+        annotation, remaining -> [annotation | remaining]
+      end)
+      |> Enum.reverse()
     else
       :unchanged
     end
