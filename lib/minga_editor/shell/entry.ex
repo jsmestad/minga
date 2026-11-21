@@ -112,23 +112,20 @@ defmodule MingaEditor.Shell.Entry do
 
   @spec validate_shell_module(module()) :: {:ok, module()} | {:error, term()}
   defp validate_shell_module(module) do
-    with true <- Code.ensure_loaded?(module),
-         :ok <- validate_callbacks(module) do
-      {:ok, module}
-    else
-      false -> {:error, {:module_not_loaded, module}}
-      {:error, reason} -> {:error, reason}
+    case Code.ensure_loaded(module) do
+      {:module, ^module} -> validate_callbacks(module)
+      {:error, _loader_reason} -> {:error, {:module_not_loaded, module}}
     end
   end
 
-  @spec validate_callbacks(module()) :: :ok | {:error, term()}
+  @spec validate_callbacks(module()) :: {:ok, module()} | {:error, term()}
   defp validate_callbacks(module) do
     missing =
       required_callbacks()
       |> Enum.reject(fn {name, arity} -> function_exported?(module, name, arity) end)
 
     case missing do
-      [] -> :ok
+      [] -> {:ok, module}
       callbacks -> {:error, {:missing_callbacks, module, callbacks}}
     end
   end

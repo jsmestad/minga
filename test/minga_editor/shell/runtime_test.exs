@@ -186,13 +186,15 @@ defmodule MingaEditor.Shell.RuntimeTest do
     assert Runtime.owns_agent_session?(installed, [extension], self())
   end
 
-  test "rejected stashed callbacks leave runtime state unchanged" do
+  test "rejected callbacks install active state without persisting it and leave stashed state unchanged" do
     stashed_entry = entry(:fake, FakeShell, 1)
 
-    runtime =
-      stashed_entry
-      |> Runtime.new(%{mutate_rejected_callback?: true})
-      |> Runtime.activate(entry(:active, FakeShellAlt, 2), %{})
+    active = Runtime.new(stashed_entry, %{mutate_rejected_callback?: true})
+
+    assert {rejected, false, nil} = Runtime.route_session_down(active, self(), :foreign)
+    assert Runtime.state(rejected).foreign_mutation
+
+    runtime = Runtime.activate(active, entry(:active, FakeShellAlt, 2), %{})
 
     assert {^runtime, false, []} =
              Runtime.route_stashed_session_down(runtime, [stashed_entry], self(), :foreign)

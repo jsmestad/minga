@@ -515,13 +515,16 @@ defmodule MingaEditor.Shell.Runtime do
   defp route_active_boolean_callback(%__MODULE__{} = runtime, callback, args) do
     module = runtime.entry.module
 
-    if function_exported?(module, callback, length(args) + 1) do
-      old_state = runtime.state
-      {new_state, handled?} = apply(module, callback, [old_state | args])
-      change = if handled?, do: persistence_change(runtime.entry, old_state, new_state), else: nil
-      {%__MODULE__{runtime | state: new_state}, handled?, change}
-    else
-      {runtime, false, nil}
+    old_state = runtime.state
+
+    case invoke_optional(module, callback, [old_state | args]) do
+      {:called, result} ->
+        {new_state, handled?} = result
+        change = if handled?, do: persistence_change(runtime.entry, old_state, new_state), else: nil
+        {%__MODULE__{runtime | state: new_state}, handled?, change}
+
+      :not_exported ->
+        {runtime, false, nil}
     end
   end
 
@@ -563,27 +566,9 @@ defmodule MingaEditor.Shell.Runtime do
          callback,
          args
        ) do
-    case Map.get(runtime.stash, Identity.new(entry)) do
-      %StateStash{} = stashed ->
-        route_matching_stashed_boolean_callback(runtime, stashed, entry, callback, args)
-
-      nil ->
-        {runtime, false, nil}
-    end
-  end
-
-  @spec route_matching_stashed_boolean_callback(t(), StateStash.t(), Entry.t(), atom(), [term()]) ::
-          {t(), boolean(), persistence_change() | nil}
-  defp route_matching_stashed_boolean_callback(
-         %__MODULE__{} = runtime,
-         %StateStash{} = stashed,
-         %Entry{} = entry,
-         callback,
-         args
-       ) do
-    with {:ok, old_state} <- StateStash.restore(stashed, entry),
-         true <- function_exported?(entry.module, callback, length(args) + 1) do
-      case apply(entry.module, callback, [old_state | args]) do
+    with {:ok, old_state} <- fetch_stashed_state(runtime.stash, entry),
+         {:called, result} <- invoke_optional(entry.module, callback, [old_state | args]) do
+      case result do
         {new_state, true} ->
           updated = StateStash.new(entry, new_state)
 
@@ -599,7 +584,7 @@ defmodule MingaEditor.Shell.Runtime do
           {runtime, false, nil}
       end
     else
-      _ -> {runtime, false, nil}
+      skip when skip in [:skip, :not_exported] -> {runtime, false, nil}
     end
   end
 
@@ -648,11 +633,9 @@ defmodule MingaEditor.Shell.Runtime do
 
   @spec route_active_optional_state_update(t(), atom(), [term()]) :: t()
   defp route_active_optional_state_update(%__MODULE__{} = runtime, callback, args) do
-    if function_exported?(runtime.entry.module, callback, length(args) + 1) do
-      state = apply(runtime.entry.module, callback, [runtime.state | args])
-      %__MODULE__{runtime | state: state}
-    else
-      runtime
+    case invoke_optional(runtime.entry.module, callback, [runtime.state | args]) do
+      {:called, state} -> %__MODULE__{runtime | state: state}
+      :not_exported -> runtime
     end
   end
 
@@ -663,19 +646,31 @@ defmodule MingaEditor.Shell.Runtime do
          callback,
          args
        ) do
-    case Map.get(runtime.stash, Identity.new(entry)) do
-      %StateStash{} = stashed ->
-        with {:ok, old_state} <- StateStash.restore(stashed, entry),
-             true <- function_exported?(entry.module, callback, length(args) + 1) do
-          new_state = apply(entry.module, callback, [old_state | args])
-          updated = StateStash.new(entry, new_state)
-          %__MODULE__{runtime | stash: Map.put(runtime.stash, updated.identity, updated)}
-        else
-          _ -> runtime
-        end
+    with {:ok, old_state} <- fetch_stashed_state(runtime.stash, entry),
+         {:called, new_state} <- invoke_optional(entry.module, callback, [old_state | args]) do
+      updated = StateStash.new(entry, new_state)
+      %__MODULE__{runtime | stash: Map.put(runtime.stash, updated.identity, updated)}
+    else
+      skip when skip in [:skip, :not_exported] -> runtime
+    end
+  end
 
-      nil ->
-        runtime
+  @spec fetch_stashed_state(stash(), Entry.t()) :: {:ok, shell_state()} | :skip
+  defp fetch_stashed_state(stash, %Entry{} = entry) do
+    with %StateStash{} = stashed <- Map.get(stash, Identity.new(entry)),
+         {:ok, _state} = restored <- StateStash.restore(stashed, entry) do
+      restored
+    else
+      miss when miss in [nil, :mismatch] -> :skip
+    end
+  end
+
+  @spec invoke_optional(module(), atom(), [term()]) :: {:called, term()} | :not_exported
+  defp invoke_optional(module, callback, args) do
+    if function_exported?(module, callback, length(args)) do
+      {:called, apply(module, callback, args)}
+    else
+      :not_exported
     end
   end
 

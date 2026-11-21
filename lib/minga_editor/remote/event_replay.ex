@@ -178,38 +178,38 @@ defmodule MingaEditor.Remote.EventReplay do
 
   @spec todo_items_from_payload(term()) :: [MingaAgent.TodoItem.t()]
   defp todo_items_from_payload(items) when is_list(items) do
-    Enum.flat_map(items, fn
-      %{} = item ->
-        case todo_item_from_payload(item) do
-          nil -> []
-          todo -> [todo]
-        end
-
-      _ ->
-        []
-    end)
+    Enum.flat_map(items, &todo_item_from_payload/1)
   end
 
   defp todo_items_from_payload(_items), do: []
 
-  @spec todo_item_from_payload(map()) :: MingaAgent.TodoItem.t() | nil
-  defp todo_item_from_payload(item) do
+  @spec todo_item_from_payload(term()) :: [MingaAgent.TodoItem.t()]
+  defp todo_item_from_payload(%{} = item) do
     id = string_payload(item, "id")
     description = string_payload(item, "description")
 
-    with true <- id != "" and description != "",
-         {:ok, reference} <- OutputCodec.decode_reference(payload_value(item, "result_ref")) do
-      %MingaAgent.TodoItem{
-        id: id,
-        description: description,
-        status: todo_status_payload(item),
-        note: payload_value(item, "note"),
-        result_ref: reference
-      }
+    if id != "" and description != "" do
+      case OutputCodec.decode_reference(payload_value(item, "result_ref")) do
+        {:ok, reference} ->
+          [
+            %MingaAgent.TodoItem{
+              id: id,
+              description: description,
+              status: todo_status_payload(item),
+              note: payload_value(item, "note"),
+              result_ref: reference
+            }
+          ]
+
+        {:error, _reason} ->
+          []
+      end
     else
-      _invalid -> nil
+      []
     end
   end
+
+  defp todo_item_from_payload(_item), do: []
 
   @spec todo_status_payload(map()) :: MingaAgent.TodoItem.status()
   defp todo_status_payload(item) do

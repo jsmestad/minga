@@ -18,6 +18,7 @@ defmodule MingaEditor.Remote.EventReplayTest do
   alias MingaAgent.ToolApproval.Target, as: ApprovalTarget
   alias MingaAgent.Tool.Output.Codec, as: OutputCodec
   alias MingaAgent.Tool.Output.Range
+  alias MingaAgent.Tool.Output.Reference
 
   test "tool completion replay carries typed retained output facts" do
     {:ok, range} = Range.new(:full, :bytes, 0, 2, 2)
@@ -123,6 +124,46 @@ defmodule MingaEditor.Remote.EventReplayTest do
            ) ==
              {:todo_plan_updated,
               [%TodoItem{id: "1", description: "Inspect files", status: :in_progress}]}
+  end
+
+  test "todo replay skips only the row with an invalid result reference" do
+    {:ok, token} = Reference.token("session", String.duplicate("a", 32))
+
+    {:ok, reference} =
+      Reference.new(
+        token: token,
+        media_type: "text/plain",
+        bytes: 2,
+        sha256: Reference.digest("ok")
+      )
+
+    record =
+      record(:todo_plan_updated, %{
+        "todos" => [
+          %{id: 1, description: "Inspect files", status: :unknown},
+          %{"id" => "2", "description" => "Broken output", "result_ref" => %{"token" => "bad"}},
+          %{
+            "id" => "3",
+            "description" => "Run build",
+            "status" => "done",
+            "note" => "Build passed",
+            "result_ref" => OutputCodec.encode_reference(reference)
+          }
+        ]
+      })
+
+    assert EventReplay.to_agent_event(record) ==
+             {:todo_plan_updated,
+              [
+                %TodoItem{id: "1", description: "Inspect files", status: :pending},
+                %TodoItem{
+                  id: "3",
+                  description: "Run build",
+                  status: :done,
+                  note: "Build passed",
+                  result_ref: reference
+                }
+              ]}
   end
 
   test "durable approval previews cannot recreate live controls, even when complete" do
