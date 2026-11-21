@@ -67,12 +67,12 @@ defmodule MingaAgent.Notifier do
   @doc """
   Sends a notification for the given trigger if enabled and not debounced.
 
-  `message` is shown in the terminal backend's OS notification, not in the native app's notification.
+  External notifications use fixed text for each trigger. Session details stay in the editor.
   """
   @spec notify(trigger(), String.t(), keyword()) :: :ok
-  def notify(trigger, message, opts \\ []) do
+  def notify(trigger, _message, opts \\ []) do
     if trigger in @triggers and enabled?() and trigger in active_triggers() do
-      deliver(Application.get_env(:minga, :backend, :tui), trigger, message, opts)
+      deliver(Application.get_env(:minga, :backend, :tui), trigger, opts)
     end
 
     :ok
@@ -131,24 +131,24 @@ defmodule MingaAgent.Notifier do
     end
   end
 
-  @spec deliver(atom(), trigger(), String.t(), keyword()) :: :ok
-  defp deliver(:gui, :approval, _message, _opts) do
+  @spec deliver(atom(), trigger(), keyword()) :: :ok
+  defp deliver(:gui, :approval, _opts) do
     clear_approval()
     id = :crypto.strong_rand_bytes(16)
     Process.put({__MODULE__, :approval_id}, id)
     publish(:approval, id)
   end
 
-  defp deliver(:gui, trigger, _message, _opts) do
+  defp deliver(:gui, trigger, _opts) do
     key = {__MODULE__, :session_key}
     id = Process.get(key) || new_session_key(key)
     publish(trigger, id, min(Minga.Config.get(:agent_notify_debounce), 0xFFFFFFFF))
   end
 
-  defp deliver(_backend, trigger, message, opts) do
+  defp deliver(_backend, trigger, opts) do
     unless debounced?(trigger) do
       maybe_send_bell(Keyword.get(opts, :bell, true))
-      send_os_notification(trigger, message, Keyword.get(opts, :os_adapter, @os_adapter))
+      send_os_notification(trigger, Keyword.get(opts, :os_adapter, @os_adapter))
     end
 
     :ok
@@ -186,18 +186,13 @@ defmodule MingaAgent.Notifier do
       :ok
   end
 
-  @spec send_os_notification(trigger(), String.t(), module()) :: :ok
-  defp send_os_notification(trigger, message, os_adapter) do
-    title = title_for(trigger)
-    os_adapter.send_notification(title, message)
-  end
+  @spec send_os_notification(trigger(), module()) :: :ok
+  defp send_os_notification(:approval, adapter),
+    do: adapter.send_notification("Minga: Approval Needed", "Review the tool request in Minga.")
 
-  @spec title_for(trigger()) :: String.t()
-  defp title_for(trigger) do
-    case trigger do
-      :approval -> "Minga: Approval Needed"
-      :complete -> "Minga: Agent Finished"
-      :error -> "Minga: Agent Error"
-    end
-  end
+  defp send_os_notification(:complete, adapter),
+    do: adapter.send_notification("Minga: Agent Finished", "Review the result in Minga.")
+
+  defp send_os_notification(:error, adapter),
+    do: adapter.send_notification("Minga: Agent Error", "Open the conversation for details.")
 end
