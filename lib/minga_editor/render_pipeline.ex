@@ -100,7 +100,7 @@ defmodule MingaEditor.RenderPipeline do
     {prefetched_scrolls, input} = BufferPrefetch.prefetch_scrolls(input, layout)
 
     # Classify the frame's render path now that prefetch has resolved per-window
-    # invalidation (dirty lines, viewport, line count, epoch resets). Stashed
+    # invalidation (full-dirty flag, viewport, line count, epoch resets). Stashed
     # transiently so the pipeline span can tag it; classification labels the
     # frame, it never skips work the row-level content hashing decides
     # independently (#2287).

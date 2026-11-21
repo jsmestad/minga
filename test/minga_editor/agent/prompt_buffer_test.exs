@@ -131,6 +131,74 @@ defmodule MingaEditor.Agent.PromptBufferTest do
     end
   end
 
+  describe "paste toggles" do
+    test "round-trips paste text with empty lines and collapses from an interior byte cursor" do
+      paste = "first\ncafé text\n\nlast"
+      ui = focused_panel("before\n\nafter")
+      buffer = ui.panel.prompt_buffer
+      BufferProcess.move_to(buffer, {1, 0})
+      ui = PromptBuffer.insert_paste(ui, paste)
+      compact = "before\n\0PASTE:0\nafter"
+      submitted = "before\n#{paste}\nafter"
+
+      assert BufferProcess.content_and_cursor(buffer) == {compact, {2, 0}}
+      assert PromptBuffer.prompt_text(ui) == submitted
+      assert [%{text: ^paste, expanded: false}] = ui.panel.pasted_blocks
+
+      BufferProcess.move_to(buffer, {1, 3})
+      expanded = PromptBuffer.toggle_paste_expand(ui)
+
+      assert BufferProcess.content_and_cursor(buffer) == {submitted, {1, 0}}
+      assert PromptBuffer.prompt_text(expanded) == submitted
+      assert [%{text: ^paste, expanded: true}] = expanded.panel.pasted_blocks
+
+      BufferProcess.move_to(buffer, {2, 5})
+      assert {:handled, collapsed} = PromptBuffer.toggle_paste_at_cursor(expanded)
+
+      assert BufferProcess.content_and_cursor(buffer) == {compact, {1, 0}}
+      assert PromptBuffer.prompt_text(collapsed) == submitted
+      assert [%{text: ^paste, expanded: false}] = collapsed.panel.pasted_blocks
+    end
+
+    test "a duplicate compact token expands the first canonical token and shifts the cursor" do
+      paste = "first\n\nlast"
+      ui = focused_panel("before\n\0PASTE:0\nbetween\n\0PASTE:0\nafter")
+      ui = UIState.append_paste_block(ui, paste)
+      buffer = ui.panel.prompt_buffer
+      BufferProcess.move_to(buffer, {3, 4})
+
+      assert {:handled, expanded} = PromptBuffer.toggle_paste_at_cursor(ui)
+
+      assert BufferProcess.content_and_cursor(buffer) ==
+               {"before\n#{paste}\nbetween\n\0PASTE:0\nafter", {5, 0}}
+
+      assert PromptBuffer.prompt_text(expanded) == "before\n#{paste}\nbetween\n#{paste}\nafter"
+      assert [%{text: ^paste, expanded: true}] = expanded.panel.pasted_blocks
+    end
+
+    test "a later expanded duplicate does not prevent another block's first match from collapsing" do
+      first = "aa\nbb\ncc"
+      second = "divider\naa\nbb"
+
+      ui =
+        focused_panel("#{first}\ndivider\n#{first}")
+        |> UIState.append_paste_block(first)
+        |> UIState.mark_paste_expanded(0, true)
+        |> UIState.append_paste_block(second)
+        |> UIState.mark_paste_expanded(1, true)
+
+      buffer = ui.panel.prompt_buffer
+      BufferProcess.move_to(buffer, {5, 1})
+
+      assert {:handled, collapsed} = PromptBuffer.toggle_paste_at_cursor(ui)
+      assert BufferProcess.content_and_cursor(buffer) == {"#{first}\n\0PASTE:1\ncc", {3, 0}}
+      assert PromptBuffer.prompt_text(collapsed) == "#{first}\ndivider\n#{first}"
+
+      assert [%{text: ^first, expanded: true}, %{text: ^second, expanded: false}] =
+               collapsed.panel.pasted_blocks
+    end
+  end
+
   describe "draft capture" do
     test "keeps Unicode cursor bytes, leading whitespace, and live pasted content" do
       draft = focused_panel("  café界\n")

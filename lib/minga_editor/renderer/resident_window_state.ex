@@ -88,11 +88,9 @@ defmodule MingaEditor.Renderer.ResidentWindowState do
         changed_snapshot
       )
 
-    dirty = dirty_lines(deltas)
-
     %{
       state
-      | render_cache: RenderCache.mark_dirty(cache, dirty),
+      | render_cache: cache,
         last_version: version,
         line_count: line_count,
         change_sequence: change_sequence,
@@ -121,14 +119,5 @@ defmodule MingaEditor.Renderer.ResidentWindowState do
         change_sequence: sequence,
         hydration: reason
     }
-  end
-
-  @spec dirty_lines([EditDelta.t()]) :: [non_neg_integer()]
-  defp dirty_lines(deltas) do
-    deltas
-    |> Enum.flat_map(fn %EditDelta{start_position: {start_line, _}, new_end_position: {last, _}} ->
-      Enum.to_list(start_line..max(start_line, last))
-    end)
-    |> Enum.uniq()
   end
 end

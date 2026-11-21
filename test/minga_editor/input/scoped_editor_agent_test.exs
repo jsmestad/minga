@@ -6,7 +6,10 @@ defmodule MingaEditor.Input.ScopedEditorAgentTest do
 
   import Minga.Test.ScopedInputHelpers
 
+  alias Minga.Buffer
+  alias Minga.Keymap.Bindings
   alias MingaEditor.Agent.DiffReview
+  alias MingaEditor.Agent.PromptBuffer
   alias MingaEditor.Agent.View.Preview
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.UIState.View
@@ -15,6 +18,7 @@ defmodule MingaEditor.Input.ScopedEditorAgentTest do
   alias MingaEditor.State.TabBar
   alias MingaEditor.Input.AgentPanel
   alias MingaEditor.Input.Scoped
+  alias MingaEditor.Shell.Traditional.Workflow, as: TraditionalWorkflow
 
   describe "editor scope (no panel)" do
     test "all keys pass through" do
@@ -261,6 +265,104 @@ defmodule MingaEditor.Input.ScopedEditorAgentTest do
         assert MingaEditor.Agent.PromptBuffer.prompt_text(updated.workspace.agent_ui) ==
                  "Retained draft"
       end
+    end
+
+    test "Normal Tab toggles hidden paste but the visible focused panel opens Review", %{
+      state: state
+    } do
+      state = focus_prompt(state, "")
+      paste = "first\nsecond\nthird"
+      review = Preview.set_diff(Preview.new(), DiffReview.new("checkout.ex", "before", "after"))
+
+      ui =
+        state.workspace.agent_ui
+        |> PromptBuffer.insert_paste(paste)
+        |> UIState.replace_preview(review)
+
+      buffer = ui.panel.prompt_buffer
+      Buffer.move_to(buffer, {0, 3})
+      version = Buffer.version(buffer)
+      state = TraditionalWorkflow.install_agent_ui(state, ui)
+      visible = TraditionalWorkflow.install_agent_panel(state, %{ui.panel | visible: true})
+
+      assert {:handled, reviewed} = walk_surface_handlers(visible, 9, 0)
+      assert View.focus(reviewed.workspace.agent_ui.view) == :file_viewer
+      assert Buffer.content_and_cursor(buffer) == {"\0PASTE:0", {0, 3}}
+      assert Buffer.version(buffer) == version
+      assert [%{expanded: false}] = reviewed.workspace.agent_ui.panel.pasted_blocks
+
+      assert {:handled, toggled} = walk_surface_handlers(state, 9, 0)
+
+      assert View.focus(toggled.workspace.agent_ui.view) == :chat
+      assert Buffer.content_and_cursor(buffer) == {paste, {0, 0}}
+      assert [%{expanded: true}] = toggled.workspace.agent_ui.panel.pasted_blocks
+    end
+
+    test "a later expanded duplicate claims Tab without editing or opening Review", %{
+      state: state
+    } do
+      paste = "one\ntwo\nthree"
+      raw = "#{paste}\nseparator\n#{paste}"
+      state = focus_prompt(state, raw)
+      review = Preview.set_diff(Preview.new(), DiffReview.new("checkout.ex", "before", "after"))
+
+      ui =
+        state.workspace.agent_ui
+        |> UIState.append_paste_block(paste)
+        |> UIState.mark_paste_expanded(0, true)
+        |> UIState.replace_preview(review)
+
+      buffer = ui.panel.prompt_buffer
+      Buffer.move_to(buffer, {5, 1})
+      version = Buffer.version(buffer)
+      state = TraditionalWorkflow.install_agent_ui(state, ui)
+
+      assert {:handled, updated} = walk_surface_handlers(state, 9, 0)
+      assert View.focus(updated.workspace.agent_ui.view) == :chat
+      assert Buffer.content_and_cursor(buffer) == {raw, {5, 1}}
+      assert Buffer.version(buffer) == version
+      assert [%{text: ^paste, expanded: true}] = updated.workspace.agent_ui.panel.pasted_blocks
+    end
+
+    test "malformed and unknown paste tokens claim Tab even without paste metadata", %{
+      state: state
+    } do
+      review = Preview.set_diff(Preview.new(), DiffReview.new("checkout.ex", "before", "after"))
+
+      for token <- ["\0PASTE:", "\0PASTE:malformed", "\0PASTE:42"] do
+        current = focus_prompt(state, token)
+        ui = UIState.replace_preview(current.workspace.agent_ui, review)
+        buffer = ui.panel.prompt_buffer
+        Buffer.move_to(buffer, {0, 2})
+        version = Buffer.version(buffer)
+        current = TraditionalWorkflow.install_agent_ui(current, ui)
+
+        assert {:handled, updated} = walk_surface_handlers(current, 9, 0)
+        assert View.focus(updated.workspace.agent_ui.view) == :chat
+        assert Buffer.content_and_cursor(buffer) == {token, {0, 2}}
+        assert Buffer.version(buffer) == version
+        assert updated.workspace.agent_ui.panel.pasted_blocks == []
+      end
+    end
+
+    test "Tab outside a paste continues the pending agent trie sequence", %{state: state} do
+      paste = "one\ntwo\nthree"
+      state = focus_prompt(state, "#{paste}\nRetained draft")
+      prefix = Bindings.bind(Bindings.new(), [{9, 0}], :agent_toggle_help, "Toggle help")
+
+      ui =
+        state.workspace.agent_ui
+        |> UIState.append_paste_block(paste)
+        |> UIState.mark_paste_expanded(0, true)
+        |> UIState.set_prefix(prefix)
+
+      Buffer.move_to(ui.panel.prompt_buffer, {3, 1})
+      state = TraditionalWorkflow.install_agent_ui(state, ui)
+
+      assert {:handled, updated} = walk_surface_handlers(state, 9, 0)
+      assert updated.workspace.agent_ui.view.help_visible
+      assert View.pending_prefix(updated.workspace.agent_ui.view) == nil
+      assert PromptBuffer.input_text(updated.workspace.agent_ui) == "#{paste}\nRetained draft"
     end
 
     test "i focuses input", %{state: state} do

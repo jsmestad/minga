@@ -23,7 +23,7 @@ defmodule MingaEditor.WindowTest do
                buffer_version: 0
              } = window.render_cache
 
-      refute Map.has_key?(window.render_cache, :dirty_lines)
+      refute Map.has_key?(window.render_cache, :fully_dirty?)
       refute Map.has_key?(window.render_cache, :retained_rows)
       refute Map.has_key?(window.render_cache, :resident_build)
       refute Map.has_key?(window.render_cache, :line_identity)

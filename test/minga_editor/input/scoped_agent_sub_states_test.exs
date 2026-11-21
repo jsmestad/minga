@@ -10,6 +10,7 @@ defmodule MingaEditor.Input.ScopedAgentSubStatesTest do
   alias MingaAgent.ToolApproval.Public
   alias MingaAgent.ToolApproval.Target
   alias MingaEditor.Agent.PendingApproval
+  alias MingaEditor.Agent.PromptBuffer
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.Agent.DiffReview
   alias MingaEditor.Agent.View.Preview
@@ -255,9 +256,14 @@ defmodule MingaEditor.Input.ScopedAgentSubStatesTest do
       {:ok, state: state}
     end
 
-    test "Tab moves to next candidate", %{state: state} do
-      {:handled, new_state} = walk_surface_handlers(state, 9, 0)
-      assert new_state.workspace.agent_ui.panel.mention_completion.selected == 1
+    test "Tab moves to the next candidate before toggling a paste token", %{state: state} do
+      ui = PromptBuffer.insert_paste(state.workspace.agent_ui, "one\ntwo\nthree")
+      state = MingaEditor.Shell.Traditional.Workflow.install_agent_ui(state, ui)
+
+      assert {:handled, updated} = walk_surface_handlers(state, 9, 0)
+      assert updated.workspace.agent_ui.panel.mention_completion.selected == 1
+      assert PromptBuffer.input_text(updated.workspace.agent_ui) == "\0PASTE:0"
+      assert [%{expanded: false}] = updated.workspace.agent_ui.panel.pasted_blocks
     end
 
     test "Enter and Escape clear mention completion", %{state: state} do

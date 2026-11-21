@@ -5,9 +5,8 @@ defmodule MingaEditor.RenderPipeline.Classifier do
   The classification is a telemetry and observability tag: both paths run the
   same seven stages and emit the same `begin_frame`/`commit_frame` transaction
   with the same `gui_window_content`/delta encodings. There are no new opcodes.
-  What differs is the work the Content stage actually does: on the `:patch`
-  path, the upstream row-retention cache lets unchanged rows skip composition,
-  so a patch frame rasterizes only the rows that changed.
+  Content decides how many rows to rasterize independently, using retained
+  rows and their input fingerprints.
 
   ## Path meaning
 
@@ -16,8 +15,9 @@ defmodule MingaEditor.RenderPipeline.Classifier do
     (pure cursor motion) or only the affected rows (a single-line edit).
   - `:full` — anything structural: a window split/open/close, a resize, a
     theme change, chrome state changes, a forced keyframe, the first frame, a
-    content-epoch reset, or a viewport scroll. Multi-window frames are
-    always `:full`.
+    content-epoch reset, or a viewport scroll. Full invalidation without
+    retained rows also classifies as `:full`, even for cursor motion. Multi-window
+    frames are always `:full`.
 
   ## Conservative by construction
 
@@ -39,7 +39,7 @@ defmodule MingaEditor.RenderPipeline.Classifier do
   Classifies a render frame as `:patch` or `:full`.
 
   Consumes the prefetched per-window scroll snapshots, which already carry the
-  resolved per-window invalidation (dirty lines, viewport, line count, epoch
+  resolved per-window invalidation (full-dirty flag, viewport, line count, epoch
   reset). Returns `:full` whenever a structural trigger is present or the state
   is ambiguous; otherwise `:patch`.
   """
@@ -83,10 +83,8 @@ defmodule MingaEditor.RenderPipeline.Classifier do
   # reset — into this flag. So theme changes classify as `:full` per the
   # moduledoc contract without a separate check here.
   #
-  # A single-line edit also marks every line dirty (the buffer version bumped)
-  # but does not scroll, change the line count, or reset the epoch, so it stays
-  # a patch: the row-level content hashing reuses untouched rows and composes
-  # only the changed one. Targeted-dirty cursor motion is likewise a patch.
+  # A single-line edit can mark the window fully dirty on a version change
+  # without a pending delta. Retained rows still make that window patchable.
   @spec structural_change?(WindowScroll.t()) :: boolean()
   defp structural_change?(%WindowScroll{} = scroll) do
     scroll.full_refresh or
@@ -115,9 +113,6 @@ defmodule MingaEditor.RenderPipeline.Classifier do
   # is nothing to diff against, so fall back to full.
   @spec full_dirty_without_retention?(Window.t()) :: boolean()
   defp full_dirty_without_retention?(%Window{} = window) do
-    case window.render_cache.dirty_lines do
-      :all -> map_size(Window.retained_rows(window)) == 0
-      _ -> false
-    end
+    window.render_cache.fully_dirty? and map_size(Window.retained_rows(window)) == 0
   end
 end

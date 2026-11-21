@@ -314,6 +314,26 @@ defmodule MingaAgent.Changeset.ServerTest do
       assert [%{path: "hello.txt", kind: :deleted, size: 0}] = GenServer.call(server, :summary)
     end
 
+    test "undoing a deletion restores staged empty content", %{project: project} do
+      File.write!(Path.join(project, "empty.txt"), "")
+      server = start_server(project)
+      overlay = Changeset.overlay_path(server)
+
+      Enum.each(["empty.txt", "new.txt"], fn path ->
+        assert :ok = Changeset.write_file(server, path, "")
+        assert :ok = Changeset.delete_file(server, path)
+        assert {:error, :deleted} = Changeset.read_file(server, path)
+        assert :ok = Changeset.undo(server, path)
+        assert {:ok, ""} = Changeset.read_file(server, path)
+        assert {:ok, ""} = File.read(Path.join(overlay, path))
+      end)
+
+      assert [
+               %{path: "empty.txt", kind: :modified, size: 0},
+               %{path: "new.txt", kind: :new, size: 0}
+             ] = Changeset.summary(server)
+    end
+
     test "returns error when nothing to undo", %{project: project} do
       server = start_server(project)
 
@@ -433,6 +453,23 @@ defmodule MingaAgent.Changeset.ServerTest do
 
       # Original content is readable again
       assert {:ok, "original content"} = GenServer.call(server, {:read_file, "hello.txt"})
+    end
+
+    test "reset retains a baseline-only path until explicitly discarded", %{project: project} do
+      server = start_server(project)
+      path = "absent.txt"
+
+      assert :ok = Changeset.capture_original(server, path)
+      assert :ok = Changeset.write_file(server, "hello.txt", "changed")
+      assert :ok = Changeset.reset(server)
+
+      assert :ok = Changeset.stage_fork_resolution(server, path, "", "")
+      assert [] = Changeset.summary(server)
+
+      assert :ok = Changeset.discard_file(server, path)
+
+      assert {:error, :publication_baseline_unavailable} =
+               Changeset.stage_fork_content(server, path, "draft")
     end
 
     test "returns an error when backup cleanup fails before reset clears state", %{
@@ -606,6 +643,27 @@ defmodule MingaAgent.Changeset.ServerTest do
       # The concurrent edit is preserved: preflight wrote nothing.
       assert File.read!(Path.join(project, "hello.txt")) == "human version"
       assert Process.alive?(server)
+    end
+
+    test "plans modifications first but sorts summary by path", %{project: project} do
+      server = start_server(project)
+
+      assert :ok = Changeset.delete_file(server, "hello.txt")
+      assert :ok = Changeset.write_file(server, "lib/foo.ex", "changed")
+      File.write!(Path.join(project, "hello.txt"), "external edit")
+
+      assert [
+               %{path: "hello.txt", kind: :deleted, size: 0},
+               %{path: "lib/foo.ex", kind: :modified, size: 7}
+             ] = Changeset.summary(server)
+
+      conflict = {:conflict, "hello.txt", :modified_before_delete}
+      details = %{conflicts: [conflict], results: [{:ok, "lib/foo.ex", :applied}, conflict]}
+
+      assert {:conflict, ^details} = Changeset.preflight_merge(server)
+      assert {:conflict, ^details} = Changeset.merge(server)
+      assert %{modified: [], deleted: ["hello.txt"]} = Changeset.modified_files(server)
+      assert File.read!(Path.join(project, "lib/foo.ex")) == "changed"
     end
   end
 

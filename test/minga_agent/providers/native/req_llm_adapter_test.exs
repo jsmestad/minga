@@ -300,25 +300,43 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapterTest do
     assert {:ok, ^json} = summary.(nil, [], max_tokens: 100)
   end
 
-  test "stops the stream accumulator when a callback raises" do
+  test "returns only consumed raw text and stops the accumulator when a callback raises" do
     parent = self()
 
     stream_response =
       build_stream_response([
-        ReqLLM.StreamChunk.text("boom"),
+        ReqLLM.StreamChunk.text("a"),
+        ReqLLM.StreamChunk.text("b"),
+        ReqLLM.StreamChunk.thinking("thinking"),
+        ReqLLM.StreamChunk.content_part(ReqLLM.Message.ContentPart.text("provider text")),
+        ReqLLM.StreamChunk.text("preview", %{stream_only?: true}),
+        ReqLLM.StreamChunk.text("c"),
+        ReqLLM.StreamChunk.text("unread"),
         ReqLLM.StreamChunk.meta(%{finish_reason: :stop})
       ])
 
     {:links, links_before} = Process.info(self(), :links)
 
-    assert {:error, %RuntimeError{message: "callback failed"}, "boom"} =
+    assert {:error, %RuntimeError{message: "callback failed"}, "abc"} =
              ReqLLMAdapter.process_stream(stream_response,
-               on_text: fn _text ->
-                 {:links, links_during} = Process.info(self(), :links)
-                 send(parent, {:new_links, links_during -- links_before})
-                 raise "callback failed"
-               end
+               on_text: fn text ->
+                 send(parent, {:callback, {:text, text}})
+
+                 if text == "c" do
+                   {:links, links_during} = Process.info(self(), :links)
+                   send(parent, {:new_links, links_during -- links_before})
+                   raise "callback failed"
+                 end
+               end,
+               on_thinking: fn text -> send(parent, {:callback, {:thinking, text}}) end
              )
+
+    for expected <- [text: "a", text: "b", thinking: "thinking", text: "preview", text: "c"] do
+      assert_received {:callback, actual}
+      assert actual == expected
+    end
+
+    refute_received {:callback, _event}
 
     assert_received {:new_links, [accumulator]}
     ref = Process.monitor(accumulator)

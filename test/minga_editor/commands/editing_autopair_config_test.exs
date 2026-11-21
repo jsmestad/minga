@@ -3,6 +3,7 @@ defmodule MingaEditor.Commands.EditingAutopairConfigTest do
 
   alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Config.Options
+  alias Minga.Language.Highlight.Span
   alias MingaEditor
   alias MingaEditor.Commands.Editing
   alias MingaEditor.State.Highlighting
@@ -64,5 +65,54 @@ defmodule MingaEditor.Commands.EditingAutopairConfigTest do
 
     assert BufferProcess.get_option(buffer, :autopair_block) == false
     assert BufferProcess.content(buffer) == "def run do\n"
+  end
+
+  test "inside a multibyte document comment, a closer skips and an opener inserts once", %{
+    options_server: options_server
+  } do
+    assert {:ok, true} = Options.set(options_server, :autopair, true)
+    content = "é\n# )"
+
+    buffer =
+      start_supervised!(
+        {BufferProcess, content: content, filetype: :elixir, options_server: options_server}
+      )
+
+    highlight =
+      Highlight.new()
+      |> Highlight.put_names(["comment"])
+      |> Highlight.put_spans(1, [Span.new(byte_size("é\n"), byte_size(content), 0)])
+
+    state = command_state(buffer, highlight)
+    BufferProcess.move_to(buffer, {1, 2})
+    Editing.execute(state, {:insert_char, ")"})
+    assert BufferProcess.content(buffer) == content
+    assert BufferProcess.cursor(buffer) == {1, 3}
+
+    BufferProcess.move_to(buffer, {1, 0})
+    Editing.execute(state, {:insert_char, "("})
+    assert BufferProcess.content(buffer) == "é\n(# )"
+    assert BufferProcess.cursor(buffer) == {1, 1}
+  end
+
+  test "Enter before whitespace checks the opener byte, not the cursor byte", %{
+    options_server: options_server
+  } do
+    assert {:ok, true} = Options.set(options_server, :autopair_block, true)
+
+    buffer =
+      start_supervised!(
+        {BufferProcess, content: "# do ", filetype: :elixir, options_server: options_server}
+      )
+
+    highlight =
+      Highlight.new()
+      |> Highlight.put_names(["comment"])
+      |> Highlight.put_spans(1, [Span.new(0, byte_size("# do"), 0)])
+
+    BufferProcess.move_to(buffer, {0, 4})
+    Editing.execute(command_state(buffer, highlight), :insert_newline)
+    assert BufferProcess.content(buffer) == "# do\n "
+    assert BufferProcess.cursor(buffer) == {1, 0}
   end
 end

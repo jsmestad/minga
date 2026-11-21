@@ -25,6 +25,7 @@ defmodule MingaEditor.Input.Scoped do
 
   import Bitwise
 
+  alias MingaEditor.Agent.PromptBuffer
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.UIState.Panel
   alias MingaEditor.Commands
@@ -144,27 +145,23 @@ defmodule MingaEditor.Input.Scoped do
   # Vim-mode agent key dispatch. Split out so CUA path stays clean.
   @spec dispatch_agent_key_vim(EditorState.t(), Panel.t(), non_neg_integer(), non_neg_integer()) ::
           MingaEditor.Input.Handler.result()
-  defp dispatch_agent_key_vim(state, panel, cp, mods) do
-    # Tab on a paste placeholder line: toggle expand/collapse
-    if cp == @tab and mods == 0 and panel.input_focused do
-      {cursor_line, _} = MingaEditor.Agent.PromptBuffer.input_cursor(panel)
-      current_line = Enum.at(MingaEditor.Agent.PromptBuffer.input_lines(panel), cursor_line)
+  defp dispatch_agent_key_vim(state, %Panel{input_focused: true}, @tab, 0) do
+    case PromptBuffer.toggle_paste_at_cursor(state.workspace.agent_ui) do
+      {:handled, ui} ->
+        {:handled, TraditionalWorkflow.install_agent_ui(state, ui)}
 
-      if UIState.paste_placeholder?(current_line) or cursor_on_expanded_block?(panel) do
-        {:handled, AgentCommands.toggle_paste_expand(state)}
-      else
+      :not_applicable ->
         resolve_agent_key(state, Minga.Editing.binding_state(state), @tab, 0)
-      end
-    else
-      if panel.input_focused do
-        handle_focused_input(state, panel, cp, mods)
-      else
-        resolve_agent_key(state, :normal, cp, mods)
-      end
     end
   end
 
-  defp handle_focused_input(state, _panel, cp, mods) do
+  defp dispatch_agent_key_vim(state, %Panel{input_focused: true}, cp, mods),
+    do: handle_focused_input(state, cp, mods)
+
+  defp dispatch_agent_key_vim(state, %Panel{}, cp, mods),
+    do: resolve_agent_key(state, :normal, cp, mods)
+
+  defp handle_focused_input(state, cp, mods) do
     if Minga.Editing.inserting?(state) do
       # In insert mode, fall through to scope trie for self-insert,
       # Enter, Backspace, Ctrl combos, etc.
@@ -323,30 +320,4 @@ defmodule MingaEditor.Input.Scoped do
 
   # Mouse handling and file tree mouse helpers extracted to
   # MingaEditor.Input.FileTreeHandler.
-
-  # Checks if the cursor is within the lines of an expanded paste block.
-  # Used by handle_agent_key for Tab handling on paste placeholder lines.
-  @spec cursor_on_expanded_block?(Panel.t()) :: boolean()
-  defp cursor_on_expanded_block?(%Panel{pasted_blocks: blocks} = panel) do
-    {cursor_line, _} = MingaEditor.Agent.PromptBuffer.input_cursor(panel)
-    lines = MingaEditor.Agent.PromptBuffer.input_lines(panel)
-
-    blocks
-    |> Enum.filter(& &1.expanded)
-    |> Enum.any?(&expanded_block_spans_cursor?(&1, lines, cursor_line))
-  end
-
-  @spec expanded_block_spans_cursor?(Panel.paste_block(), [String.t()], non_neg_integer()) ::
-          boolean()
-  defp expanded_block_spans_cursor?(block, lines, cursor_line) do
-    text_lines = String.split(block.text, "\n")
-    text_len = Enum.count(text_lines)
-    max_start = Enum.count(lines) - text_len
-
-    max_start >= 0 and
-      Enum.any?(0..max_start//1, fn start ->
-        Enum.slice(lines, start, text_len) == text_lines and
-          cursor_line >= start and cursor_line < start + text_len
-      end)
-  end
 end
