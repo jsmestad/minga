@@ -86,6 +86,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - Search substitution and preview share byte-splicing helpers, while completion activation resolves the selected item and its position in one pass through the current candidates.
 - Picker and completion callbacks keep the values they admit. Mouse hit testing checks the content rectangle and buffer identity on their matches, and Replace All matches content against the captured buffer version.
 - Window source maps for unchanged, undecorated lines without expanded tabs now skip the composition pipeline and count UTF-16 once. Decorated lines measure source display width at most once and query conceals and inline virtual text once.
+- Sparse resident row updates compute byte offsets for dirty lines without building an indexed list of every fetched line.
 - Line wrapping slices the source at byte boundaries instead of rebuilding grapheme lists. Comment toggles reuse numbered nonblank targets, and semantic highlighting resolves capture IDs before remapping spans.
 - Agent diff reviews reuse the remaining file lines when rendering and matching hunks, splice ordered rejections in one pass, and stop navigation at the first unresolved hunk. Display row identities and the behavior of explicitly supplied hunks are unchanged.
 - Agent prompt rendering walks ordered rows for cursor and scroll positions, and resolves tokens once per visible logical line even when it wraps across several rows.
