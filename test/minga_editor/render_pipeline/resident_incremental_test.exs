@@ -7,7 +7,6 @@ defmodule MingaEditor.RenderPipeline.ResidentIncrementalTest do
   alias Minga.Buffer.EditDelta
   alias Minga.Editing.Search.Index
   alias Minga.Events.BufferChangedEvent
-  alias Minga.Language.Highlight
   alias Minga.Language.Highlight.Span, as: HighlightSpan
   alias Minga.Search.IndexOwner
   alias MingaEditor.Handlers.GuiActionHandler
@@ -43,6 +42,7 @@ defmodule MingaEditor.RenderPipeline.ResidentIncrementalTest do
   alias MingaEditor.Renderer.Gutter
   alias MingaEditor.Renderer.TextInteractionIndex.Reader
   alias MingaEditor.Renderer.WrapLayout
+  alias MingaEditor.UI.Highlight
   alias MingaEditor.UI.Theme
 
   import MingaEditor.RenderPipeline.TestHelpers
