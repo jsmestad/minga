@@ -520,7 +520,10 @@ defmodule MingaEditor.Shell.Runtime do
     case invoke_optional(module, callback, [old_state | args]) do
       {:called, result} ->
         {new_state, handled?} = result
-        change = if handled?, do: persistence_change(runtime.entry, old_state, new_state), else: nil
+
+        change =
+          if handled?, do: persistence_change(runtime.entry, old_state, new_state), else: nil
+
         {%__MODULE__{runtime | state: new_state}, handled?, change}
 
       :not_exported ->
