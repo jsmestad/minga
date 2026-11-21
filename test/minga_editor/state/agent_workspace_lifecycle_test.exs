@@ -1099,20 +1099,42 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
 
     assert :ok = Session.subscribe(session)
     assert :ok = Session.send_prompt(session, "active turn")
-    assert_receive {:agent_event, ^session, {:status_changed, :thinking}}, 1_000
+
+    receive do
+      {:agent_event, ^session, {:text_delta, "active turn"}} -> :ok
+    end
+
     state = MingaEditor.AgentLifecycle.rebuild_agent_from_session(state, session)
 
-    Minga.Test.SessionSlowMockProvider.proceed(Session.get_provider(session))
-    assert_receive {:agent_event, ^session, {:queue_target_changed, nil}}, 1_000
-    assert_receive {:agent_event, ^session, {:status_changed, :idle}}, 1_000
+    assert %{runtime: %{status: :thinking}, queue_target: {^session, {_, _, _}}} =
+             Traditional.State.agent(state.shell_runtime.state)
 
-    state = MingaEditor.Agent.StatusEventWorkflow.queue_target_changed(state, session, nil)
+    Minga.Test.SessionSlowMockProvider.proceed(Session.get_provider(session))
+
+    state =
+      receive do
+        {:agent_event, ^session, {:queue_target_changed, nil} = event} ->
+          MingaEditor.Agent.Events.dispatch(state, session, event)
+
+        {:agent_event, ^session, {:status_changed, :idle}} ->
+          flunk("turn became idle before clearing its queue target")
+      end
+
+    assert %{runtime: %{status: :thinking}, queue_target: nil} =
+             Traditional.State.agent(state.shell_runtime.state)
+
+    receive do
+      {:agent_event, ^session, {:status_changed, :idle}} -> :ok
+    end
+
+    messages = Session.messages(session)
     BufferProcess.replace_content(buffer, "keep this draft")
     state = MingaEditor.Commands.Agent.scope_queue_follow_up(state)
 
     assert prompt_text(state.workspace.agent_ui) == "keep this draft"
     assert Session.get_queued_messages(session) == {[], []}
-    refute_receive {:agent_event, ^session, {:status_changed, :thinking}}, 20
+    assert Session.messages(session) == messages
+    assert Session.status(session) == :idle
   end
 
   defp assert_saved_recall(dir, later_edit?) do

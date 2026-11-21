@@ -11,30 +11,22 @@ defmodule Minga.Extension.CoreDecouplingGuardrailTest do
   @concrete_namespace "MingaGitPorcelain"
   @extension_registry_key :minga_git_porcelain
 
-  test "core contains no concrete bundled extension namespaces or optional probes" do
-    violations =
-      Enum.flat_map(@core_files, fn file ->
-        file
-        |> File.read!()
-        |> Code.string_to_quoted!(file: file, columns: true)
-        |> collect_namespace_violations(file)
-      end)
+  for {files, batch} <- @core_files |> Enum.sort() |> Enum.chunk_every(160) |> Enum.with_index(1) do
+    test "core respects bundled extension boundaries in source batch #{batch}" do
+      violations =
+        Enum.flat_map(unquote(files), fn file ->
+          ast = file |> File.read!() |> Code.string_to_quoted!(file: file, columns: true)
+          namespace = collect_namespace_violations(ast, file)
 
-    assert violations == [], format_violations(violations)
-  end
+          if file in @registry_key_allowlist do
+            namespace
+          else
+            namespace ++ collect_registry_key_violations(ast, file)
+          end
+        end)
 
-  test "only bundled extension composition roots name the extension registry key" do
-    violations =
-      @core_files
-      |> Enum.reject(&(&1 in @registry_key_allowlist))
-      |> Enum.flat_map(fn file ->
-        file
-        |> File.read!()
-        |> Code.string_to_quoted!(file: file, columns: true)
-        |> collect_registry_key_violations(file)
-      end)
-
-    assert violations == [], format_violations(violations)
+      assert violations == [], format_violations(violations)
+    end
   end
 
   @spec collect_namespace_violations(Macro.t(), String.t()) :: [tuple()]
