@@ -141,6 +141,29 @@ defmodule MingaEditor.TargetTest do
     end
   end
 
+  test "recovered file opens review but its target is invalid after a session reset" do
+    state = TestHelpers.base_state()
+    path = "/project/recovered.ex"
+    timeline = EditTimeline.recover_files(EditTimeline.new(), %{path => 2})
+    ui = UIState.replace_edit_timeline(state.workspace.agent_ui, timeline)
+    state = MingaEditor.Shell.Traditional.Workflow.install_agent_ui(state, ui)
+
+    target = %Target{
+      surface: :timeline,
+      intent: :review_file,
+      generation: timeline.generation,
+      item_id: path
+    }
+
+    generation = timeline.generation
+
+    assert {:ok, {:timeline_file, ^generation, ^path}} = Target.resolve(state, target)
+
+    ui = UIState.replace_edit_timeline(ui, EditTimeline.reset(timeline))
+    state = MingaEditor.Shell.Traditional.Workflow.install_agent_ui(state, ui)
+    assert {:error, :stale_generation} = Target.resolve(state, target)
+  end
+
   test "missing, stale, and mismatched targets return typed errors without fallback" do
     state = TestHelpers.base_state()
     window = state.workspace.windows.map[1]

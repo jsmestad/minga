@@ -74,6 +74,38 @@ defmodule MingaAgent.ArtifactStoreTest do
     assert {:ok, 1} = ArtifactStore.cleanup_unreferenced(store)
   end
 
+  test "cumulative attribution refuses an intervening edit", %{tmp_dir: root} do
+    alias Minga.Buffer.FileMutation.Receipt
+    alias MingaAgent.Session.FileChange
+    alias MingaAgent.Tool.FileMutationResult
+
+    {_quota, store} = start_pair(root, "cumulative-lineage")
+    path = "/file"
+
+    capture = fn call, before_bytes, after_bytes ->
+      mutation =
+        FileMutationResult.new(path, Receipt.committed({:ok, before_bytes}, after_bytes), "")
+
+      FileChange.capture(store, {"request", "checkpoint", call}, mutation)
+    end
+
+    first = capture.("first", "original", "first edit")
+    second = capture.("second", "first edit", "second edit")
+    changed = capture.("third", "human edit", "third edit")
+
+    assert {:ok, before_side, after_side} = FileChange.cumulative_sides([second, first], path)
+    assert {:ok, "original"} = FileChange.read_side(store, before_side)
+    assert {:ok, "second edit"} = FileChange.read_side(store, after_side)
+
+    assert {:error, :discontinuous_file_change} =
+             FileChange.cumulative_sides([changed, second, first], path)
+
+    deletion = capture.("delete", "second edit", :deleted)
+    assert {:ok, baseline, :absent} = FileChange.cumulative_sides([deletion, second, first], path)
+    assert {:ok, "original"} = FileChange.read_side(store, baseline)
+    assert {:ok, :absent} = FileChange.read_side(store, :absent)
+  end
+
   test "checkpoint recovery reclaims snapshots abandoned by a dead worker", %{tmp_dir: root} do
     alias Minga.Buffer.FileMutation.Receipt
     alias MingaAgent.Session.FileChange

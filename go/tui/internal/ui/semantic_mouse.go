@@ -486,6 +486,8 @@ func (m Model) observatoryMousePacket(msg tea.MouseMsg) ([]byte, bool) {
 	return nil, false
 }
 
+const timelineBrowseZone = "timeline-browse-files"
+
 // editTimelineMousePacket preserves historical entry navigation (intent 1) and exposes explicit cumulative file Review (intent 2).
 // Only rendered exact identities may activate; blank chrome is contained by spatial dispatch.
 func (m Model) editTimelineMousePacket(msg tea.MouseMsg) ([]byte, bool) {
@@ -496,6 +498,9 @@ func (m Model) editTimelineMousePacket(msg tea.MouseMsg) ([]byte, bool) {
 	timeline, ok := m.editTimeline()
 	if !ok || !timeline.Visible {
 		return nil, false
+	}
+	if zone := m.zones.Get(timelineBrowseZone); timeline.Generation != 0 && zone != nil && zone.InBounds(msg) {
+		return protocol.EncodeGUIExecuteCommand("timeline_browse_files"), true
 	}
 	if len(timeline.Files) > 0 {
 		if timeline.Generation == 0 {

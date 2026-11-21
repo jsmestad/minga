@@ -2902,15 +2902,12 @@ defmodule MingaAgent.Providers.Native do
     emit(lctx, %Event.ToolFileChanged{
       tool_call_id: tool_call.id,
       path: path,
-      before_content: preview_content(before_content),
-      after_content: preview_content(after_content)
+      before_content: before_content,
+      after_content: after_content
     })
   end
 
   defp emit_receipt_preview(_lctx, _tool_call, _mutation), do: :ok
-
-  defp preview_content(:absent), do: ""
-  defp preview_content(content), do: content
 
   @spec tool_context_with_call_metadata(ToolContext.t(), map(), pid(), Request.t()) ::
           ToolContext.t()

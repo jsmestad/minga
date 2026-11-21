@@ -183,10 +183,9 @@ defmodule MingaEditor.Target do
     timeline = state.workspace.agent_ui.view.edit_timeline
 
     with :ok <- generation(timeline.generation, requested_generation) do
-      case EditTimeline.entries_for(timeline, path) do
-        [_entry | _rest] -> {:ok, {:timeline_file, requested_generation, path}}
-        [] -> {:error, :not_found}
-      end
+      if EditTimeline.changed_file?(timeline, path),
+        do: {:ok, {:timeline_file, requested_generation, path}},
+        else: {:error, :not_found}
     end
   end
 

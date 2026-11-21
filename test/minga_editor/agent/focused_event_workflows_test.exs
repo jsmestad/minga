@@ -301,18 +301,19 @@ defmodule MingaEditor.Agent.FocusedEventWorkflowsTest do
        } do
     path = Path.join(dir, "a.ex")
     File.write!(path, "x\na")
+    {:ok, view} = MingaAgent.ProjectView.overlay(dir)
 
     state =
-      event_state()
+      owned_event_state(view)
       |> FileEventWorkflow.changed(file_change(path, "a", "x\na", "tc1"))
-      |> select_review(path)
+      |> select_review(path, view)
       |> AgentSubStates.reject_hunk()
 
-    assert File.read!(path) == "a"
+    assert {:ok, "a"} = MingaAgent.ProjectView.read_file(view, "a.ex")
 
-    File.write!(path, "a\nb")
+    assert :ok = MingaAgent.ProjectView.write_file(view, "a.ex", "a\nb")
     state = FileEventWorkflow.changed(state, file_change(path, "a", "a\nb", "tc2"))
-    state = select_review(state, path)
+    state = select_review(state, path, view)
     review = diff_review(state)
 
     assert DiffReview.summary(review) == {1, 0}
@@ -322,7 +323,7 @@ defmodule MingaEditor.Agent.FocusedEventWorkflowsTest do
     refute Enum.any?(display_lines, &match?(%{text: "a", kind: :removed}, &1))
 
     state = AgentSubStates.reject_hunk(state)
-    assert File.read!(path) == "a"
+    assert {:ok, "a"} = MingaAgent.ProjectView.read_file(view, "a.ex")
     refute diff_review(state)
   end
 
@@ -333,20 +334,21 @@ defmodule MingaEditor.Agent.FocusedEventWorkflowsTest do
     path_a = Path.join(dir, "a.ex")
     path_b = Path.join(dir, "b.ex")
     File.write!(path_a, "x\na")
+    {:ok, view} = MingaAgent.ProjectView.overlay(dir)
 
     state =
-      event_state()
+      owned_event_state(view)
       |> FileEventWorkflow.changed(file_change(path_a, "a", "x\na", "tc1"))
-      |> select_review(path_a)
+      |> select_review(path_a, view)
       |> AgentSubStates.reject_hunk()
       |> FileEventWorkflow.changed(file_change(path_b, "b0", "b1", "tc2"))
 
     assert EditTimeline.cumulative_hunks(state.workspace.agent_ui.view.edit_timeline, path_b) ==
              Git.diff_lines(["b0"], ["b1"])
 
-    File.write!(path_a, "a\nb")
+    assert :ok = MingaAgent.ProjectView.write_file(view, "a.ex", "a\nb")
     state = FileEventWorkflow.changed(state, file_change(path_a, "a", "a\nb", "tc3"))
-    state = select_review(state, path_a)
+    state = select_review(state, path_a, view)
     review = diff_review(state)
 
     assert %DiffReview{path: ^path_a} = review
@@ -356,7 +358,7 @@ defmodule MingaEditor.Agent.FocusedEventWorkflowsTest do
     refute Enum.any?(display_lines, &match?(%{text: "a", kind: :added}, &1))
 
     _state = AgentSubStates.reject_hunk(state)
-    assert File.read!(path_a) == "a"
+    assert {:ok, "a"} = MingaAgent.ProjectView.read_file(view, "a.ex")
   end
 
   test "spinner ticks advance only while the foreground agent is busy" do
@@ -687,12 +689,28 @@ defmodule MingaEditor.Agent.FocusedEventWorkflowsTest do
     }
   end
 
-  @spec select_review(EditorState.t(), String.t()) :: EditorState.t()
-  defp select_review(state, path) do
+  @spec select_review(EditorState.t(), String.t(), MingaAgent.ProjectView.t() | nil) ::
+          EditorState.t()
+  defp select_review(state, path, project_view \\ nil) do
     timeline = state.workspace.agent_ui.view.edit_timeline
     index = EditTimeline.entry_count(timeline, path) - 1
     {:ok, content} = EditTimeline.content_at(timeline, path, index)
     review = DiffReview.from_hunks(path, content, EditTimeline.cumulative_hunks(timeline, path))
+
+    review =
+      case project_view do
+        nil ->
+          review
+
+        %MingaAgent.ProjectView{project_root: root} ->
+          {:ok, source} =
+            MingaAgent.ProjectView.resolve_source(project_view, Path.relative_to(path, root))
+
+          session = start_subscribed_session()
+          %{connection: %{target: target}} = Session.editor_snapshot(session)
+          DiffReview.bind_source(review, source, target)
+      end
+
     preview = Preview.set_diff(Preview.new(), review)
 
     TraditionalWorkflow.install_agent_ui(
@@ -723,6 +741,16 @@ defmodule MingaEditor.Agent.FocusedEventWorkflowsTest do
           )
         )
     }
+  end
+
+  @spec owned_event_state(MingaAgent.ProjectView.t()) :: EditorState.t()
+  defp owned_event_state(view) do
+    state = event_state(self())
+    shell = Runtime.state(state.shell_runtime)
+    workspace = TabBar.active_workspace(shell.tab_bar)
+    tabs = TabBar.set_workspace_project_view(shell.tab_bar, workspace.id, view)
+    shell = TraditionalState.install_tab_bar(shell, tabs)
+    %{state | shell_runtime: Runtime.new(Runtime.default_entry(), shell)}
   end
 
   @spec tab_bar(pid() | nil) :: TabBar.t()

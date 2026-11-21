@@ -2792,7 +2792,48 @@ defmodule MingaAgent.Session.PrefixAuthorizationTest do
              SessionStore.load(record_id, context.store_dir, artifact_runtime: context.runtime)
 
     reopened = start_session(%{context | suffix: {context.suffix, :reopened}})
+    :ok = Session.subscribe(reopened)
+    assert_receive {:agent_event, ^reopened, {:connection_changed, _initial}}
+    %{connection: %{target: previous_target}} = Session.editor_snapshot(reopened)
     assert :ok = Session.load_session(reopened, record_id)
+
+    receive do
+      {:agent_event, ^reopened, {:connection_changed, %{target: %{session_id: ^record_id}}}} ->
+        :ok
+
+      {:agent_event, ^reopened, :messages_changed} ->
+        flunk("restored transcript was published before its connection target")
+    after
+      @timeout -> flunk("restored connection target was not published")
+    end
+
+    assert {:ok, source} = ProjectView.resolve_source(view, "buffer.txt")
+
+    revision =
+      Minga.Buffer.FileMutation.revision("draft\n", nil, {:project_view, source.source_id})
+
+    assert {:error, :stale_target} =
+             Session.apply_review_mutation(
+               previous_target,
+               view,
+               "buffer.txt",
+               source,
+               revision,
+               {:replace, "original\n"}
+             )
+
+    assert {:ok, "draft\n"} = ProjectView.read_file(view, "buffer.txt")
+
+    %{connection: %{target: target}} = Session.editor_snapshot(reopened)
+    assert {:ok, %{^path => 1}} = Session.changed_file_counts(target)
+    assert {:ok, {"original\n", "draft\n"}} = Session.read_cumulative_file_change(target, path)
+
+    assert {:error, :no_file_change} =
+             Session.read_cumulative_file_change(target, path <> ".other")
+
+    assert :ok = Session.load_session(reopened, record_id)
+    assert {:error, :stale_target} = Session.read_cumulative_file_change(target, path)
+    assert {:error, :stale_target} = Session.changed_file_counts(target)
     assert {:ok, artifacts} = Session.artifact_store(reopened)
 
     for {reference, expected} <- [{before, "original\n"}, {after_content, "draft\n"}] do

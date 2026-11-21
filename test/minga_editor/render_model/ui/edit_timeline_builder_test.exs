@@ -53,6 +53,39 @@ defmodule MingaEditor.RenderModel.UI.EditTimelineBuilderTest do
       assert EditTimelineBuilder.build(ctx).generation == timeline.generation
     end
 
+    test "long recovered paths fit the wire frame without removing files from browsing" do
+      common = String.duplicate("directory/", 40)
+      counts = Map.new(1..300, &{"lib/#{common}file-#{&1}.ex", 1})
+      timeline = EditTimelineState.recover_files(EditTimelineState.new(), counts)
+      model = EditTimelineBuilder.build(context(timeline))
+
+      assert {<<0x9B, size::16, payload::binary>>, _caches} =
+               Minga.Frontend.Adapter.GUI.EditTimelineEncoder.encode(
+                 model,
+                 Minga.Frontend.Adapter.GUI.Caches.new()
+               )
+
+      assert byte_size(payload) == size
+      assert length(model.files) < 255
+      files = EditTimelineState.file_summaries(timeline)
+      shown = MapSet.new(model.files, & &1.path)
+      %{path: omitted_path} = Enum.find(files, &(not MapSet.member?(shown, &1.path)))
+
+      picker_context =
+        MingaEditor.UI.Picker.Context.from_editor_state(TestHelpers.base_state(), %{
+          files: files,
+          origin: :fixture
+        })
+
+      picker =
+        picker_context
+        |> MingaEditor.UI.Picker.AgentChangesSource.candidates()
+        |> MingaEditor.UI.Picker.new()
+        |> MingaEditor.UI.Picker.filter(omitted_path)
+
+      assert %{id: ^omitted_path} = MingaEditor.UI.Picker.selected_item(picker)
+    end
+
     @tag :tmp_dir
     test "projects path-bound entry ids and preserves generation while navigating", %{
       tmp_dir: tmp_dir

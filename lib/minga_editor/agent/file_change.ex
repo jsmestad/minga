@@ -6,8 +6,8 @@ defmodule MingaEditor.Agent.FileChange do
 
   @type t :: %__MODULE__{
           path: String.t(),
-          before_content: String.t(),
-          after_content: String.t(),
+          before_content: String.t() | :absent,
+          after_content: String.t() | :absent,
           tool_call_id: String.t(),
           tool_name: String.t()
         }

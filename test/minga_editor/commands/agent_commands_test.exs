@@ -594,7 +594,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
                "draft prompt"
     end
 
-    test "ready provider still sends and clears a normal prompt" do
+    test "ready provider clears the prompt without discarding earlier Changes" do
       {:ok, session} = ReadinessSession.start_link(provider: self(), notify: self())
 
       state =
@@ -607,6 +607,12 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
                BufferProcess.replace_content(ui.panel.prompt_buffer, "ready prompt")
                ui
              end).(state.workspace.agent_ui)
+            |> MingaEditor.Agent.UIState.replace_edit_timeline(
+              MingaEditor.Agent.EditTimeline.recover_files(
+                MingaEditor.Agent.EditTimeline.new(),
+                %{"first-turn.ex" => 1}
+              )
+            )
           )
         end)
         |> replace_panel(fn panel ->
@@ -620,6 +626,11 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
 
       assert_receive {:readiness_session_prompt, "ready prompt"}
       assert MingaEditor.Agent.PromptBuffer.prompt_text(new_state.workspace.agent_ui.panel) == ""
+
+      assert [%{path: "first-turn.ex"}] =
+               MingaEditor.Agent.EditTimeline.file_summaries(
+                 new_state.workspace.agent_ui.view.edit_timeline
+               )
     end
 
     test "unresolved file mention preserves the prompt and does not send" do
@@ -1022,14 +1033,38 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
 
       {:ok, session} = RestorableModelSession.start_link(selection)
 
+      original = base_state(session: session)
+      ui = original.workspace.agent_ui
+
+      timeline =
+        MingaEditor.Agent.EditTimeline.recover_files(ui.view.edit_timeline, %{"old.ex" => 1})
+
+      review = MingaEditor.Agent.DiffReview.new("old.ex", "before", "after")
+      preview = MingaEditor.Agent.View.Preview.set_diff(ui.view.preview, review)
+
+      ui =
+        ui
+        |> MingaEditor.Agent.UIState.replace_edit_timeline(timeline)
+        |> MingaEditor.Agent.UIState.replace_preview(preview)
+
+      original = MingaEditor.Shell.Traditional.Workflow.install_agent_ui(original, ui)
+
       state =
-        base_state(session: session)
+        original
         |> with_model_name("Previous Model")
         |> AgentCommands.open_session("saved-session")
 
       assert state.workspace.agent_ui.panel.model_name == "Restored Model"
       assert state.workspace.agent_ui.panel.provider_name == "anthropic"
       assert state.workspace.agent_ui.panel.thinking_level == "low"
+
+      refute MingaEditor.Agent.EditTimeline.changed_file?(
+               state.workspace.agent_ui.view.edit_timeline,
+               "old.ex"
+             )
+
+      assert MingaEditor.Agent.View.Preview.diff_review(state.workspace.agent_ui.view.preview) ==
+               nil
     end
 
     test "preserves actionable model correction details after restore rejection" do

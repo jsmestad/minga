@@ -2557,7 +2557,7 @@ defmodule MingaAgent.Providers.NativeTest do
       assert file_changed != nil
       assert file_changed.path == absolute_path
       assert file_changed.before_content == "delete me"
-      assert file_changed.after_content == ""
+      assert file_changed.after_content == :absent
       assert File.read!(absolute_path) == "delete me"
       GenServer.stop(pid, :normal)
       refute File.exists?(absolute_path)

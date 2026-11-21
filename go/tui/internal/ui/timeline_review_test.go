@@ -52,6 +52,12 @@ func TestTimelineReviewButtonsActivateExactOfferedPaths(t *testing.T) {
 	model.viewport.SetContent(model.content())
 	_ = model.View()
 
+	browse := waitForZone(t, model, timelineBrowseZone)
+	browseClick := tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft, X: browse.StartX, Y: browse.StartY})
+	if packet, ok := model.semanticMousePacket(browseClick); !ok || !bytes.Equal(packet, protocol.EncodeGUIExecuteCommand("timeline_browse_files")) {
+		t.Fatalf("All Changes must open the searchable list, ok=%v packet=%v", ok, packet)
+	}
+
 	var previousY int
 	for index, path := range paths {
 		button := waitForZone(t, model, zoneIDTimelineReview(37, path))

@@ -1,5 +1,5 @@
 defmodule MingaEditor.Agent.DiffReviewAuthoritativeStoreTest do
-  use ExUnit.Case, async: true
+  use Minga.Test.SessionCase, async: true
 
   alias MingaAgent.ProjectView
   alias MingaEditor.Agent.DiffReview
@@ -20,6 +20,12 @@ defmodule MingaEditor.Agent.DiffReviewAuthoritativeStoreTest do
 
   @moduletag :tmp_dir
 
+  defp bind_live_source(review, source) do
+    session = start_subscribed_session()
+    assert_receive {:agent_event, ^session, {:connection_changed, %{target: target}}}
+    DiffReview.bind_source(review, source, target)
+  end
+
   test "rejecting a closed-file hunk updates project view before read and promote", %{
     tmp_dir: root
   } do
@@ -34,7 +40,8 @@ defmodule MingaEditor.Agent.DiffReviewAuthoritativeStoreTest do
     {:ok, project_view} = ProjectView.overlay(root)
     assert :ok = ProjectView.write_file(project_view, path, after_edit)
 
-    review = DiffReview.new(absolute_path, before, after_edit)
+    {:ok, source} = ProjectView.resolve_source(project_view, path)
+    review = absolute_path |> DiffReview.new(before, after_edit) |> bind_live_source(source)
     state = state_with_diff_review(root, project_view, review)
 
     _state = AgentSubStates.reject_hunk(state)
@@ -44,11 +51,106 @@ defmodule MingaEditor.Agent.DiffReviewAuthoritativeStoreTest do
     assert File.read!(absolute_path) == before
   end
 
+  test "rejecting a stale hunk preserves intervening project-view edits", %{tmp_dir: root} do
+    path = "file.txt"
+    absolute_path = Path.join(root, path)
+    File.write!(absolute_path, "original\n")
+    {:ok, project_view} = ProjectView.overlay(root)
+    assert :ok = ProjectView.write_file(project_view, path, "agent\n")
+    {:ok, source} = ProjectView.resolve_source(project_view, path)
+
+    review =
+      absolute_path |> DiffReview.new("original\n", "agent\n") |> bind_live_source(source)
+
+    state = state_with_diff_review(root, project_view, review)
+    assert :ok = ProjectView.write_file(project_view, path, "human\n")
+
+    state = AgentSubStates.reject_hunk(state)
+
+    assert {:ok, "human\n"} = ProjectView.read_file(project_view, path)
+    assert Preview.diff_review(state.workspace.agent_ui.view.preview) == review
+  end
+
+  test "empty creation and deletion remain visible as distinct saved changes", %{tmp_dir: root} do
+    path = Path.join(root, "empty.txt")
+
+    assert %DiffReview{} = creation = DiffReview.new(path, :absent, "")
+    assert {1, 0} = DiffReview.summary(creation)
+    assert %DiffReview{} = deletion = DiffReview.new(path, "", :absent)
+    assert {0, 1} = DiffReview.summary(deletion)
+    assert DiffReview.new(path, :absent, :absent) == nil
+  end
+
+  test "rejecting a saved comparison cannot mutate even matching live bytes", %{tmp_dir: root} do
+    path = Path.join(root, "file.txt")
+    File.write!(path, "agent\n")
+    {:ok, project_view} = ProjectView.overlay(root)
+    review = path |> DiffReview.new("original\n", "agent\n") |> DiffReview.as_retained()
+    state = state_with_diff_review(root, project_view, review)
+
+    state = AgentSubStates.reject_all_hunks(state)
+
+    assert {:ok, "agent\n"} = ProjectView.read_file(project_view, "file.txt")
+    assert Preview.diff_review(state.workspace.agent_ui.view.preview) == review
+  end
+
+  test "rejecting an unapplied proposal dismisses it without touching the project", %{
+    tmp_dir: root
+  } do
+    path = Path.join(root, "file.txt")
+    File.write!(path, "original\n")
+    {:ok, project_view} = ProjectView.overlay(root)
+    review = path |> DiffReview.new("original\n", "proposal\n") |> DiffReview.as_proposal()
+    state = state_with_diff_review(root, project_view, review)
+
+    state = AgentSubStates.reject_hunk(state)
+
+    assert Preview.diff_review(state.workspace.agent_ui.view.preview) == nil
+    assert {:ok, "original\n"} = ProjectView.read_file(project_view, "file.txt")
+  end
+
+  test "rejecting a hunk cannot write into a replacement overlay with matching bytes", %{
+    tmp_dir: root
+  } do
+    path = Path.join(root, "file.txt")
+    File.write!(path, "agent\n")
+    {:ok, original} = ProjectView.overlay(root)
+    {:ok, source} = ProjectView.resolve_source(original, "file.txt")
+    review = path |> DiffReview.new("original\n", "agent\n") |> bind_live_source(source)
+    {:ok, replacement} = ProjectView.overlay(root)
+    state = state_with_diff_review(root, replacement, review)
+
+    state = AgentSubStates.reject_all_hunks(state)
+
+    assert {:ok, "agent\n"} = ProjectView.read_file(replacement, "file.txt")
+    assert Preview.diff_review(state.workspace.agent_ui.view.preview) == review
+  end
+
+  test "rejecting a stale deletion does not replace a recreated file", %{tmp_dir: root} do
+    path = "recreated.txt"
+    absolute_path = Path.join(root, path)
+    File.write!(absolute_path, "original\n")
+    {:ok, project_view} = ProjectView.overlay(root)
+    assert :ok = ProjectView.delete_file(project_view, path)
+    {:ok, source} = ProjectView.resolve_source(project_view, path)
+
+    review =
+      absolute_path |> DiffReview.new("original\n", :absent) |> bind_live_source(source)
+
+    state = state_with_diff_review(root, project_view, review)
+    assert :ok = ProjectView.write_file(project_view, path, "recreated\n")
+
+    state = AgentSubStates.reject_hunk(state)
+
+    assert {:ok, "recreated\n"} = ProjectView.read_file(project_view, path)
+    assert Preview.diff_review(state.workspace.agent_ui.view.preview) == review
+  end
+
   test "rejecting a deletion restores the project view before promote", %{tmp_dir: root} do
     path = "lib/deleted.ex"
     absolute_path = Path.join(root, path)
     before = "one\ntwo\n"
-    after_delete = ""
+    after_delete = :absent
 
     File.mkdir_p!(Path.dirname(absolute_path))
     File.write!(absolute_path, before)
@@ -56,7 +158,11 @@ defmodule MingaEditor.Agent.DiffReviewAuthoritativeStoreTest do
     {:ok, project_view} = ProjectView.overlay(root)
     assert :ok = ProjectView.delete_file(project_view, path)
 
-    review = DiffReview.new(absolute_path, before, after_delete)
+    {:ok, source} = ProjectView.resolve_source(project_view, path)
+
+    review =
+      absolute_path |> DiffReview.new(before, after_delete) |> bind_live_source(source)
+
     state = state_with_diff_review(root, project_view, review)
 
     _state = AgentSubStates.reject_hunk(state)
@@ -82,7 +188,8 @@ defmodule MingaEditor.Agent.DiffReviewAuthoritativeStoreTest do
     assert :ok = ProjectView.write_file(project_view, path, after_edit)
     assert {:ok, ^after_edit} = ProjectView.read_file(project_view, path)
 
-    review = DiffReview.new(absolute_path, before, after_edit)
+    {:ok, source} = ProjectView.resolve_source(project_view, path)
+    review = absolute_path |> DiffReview.new(before, after_edit) |> bind_live_source(source)
     state = state_with_diff_review(root, project_view, review)
 
     _state = AgentSubStates.reject_hunk(state)
@@ -120,7 +227,7 @@ defmodule MingaEditor.Agent.DiffReviewAuthoritativeStoreTest do
              review.hunks
 
     assert NoticeWorkflow.message(state) =~ "Could not reject hunk"
-    assert NoticeWorkflow.message(state) =~ ":eisdir"
+    assert NoticeWorkflow.message(state) =~ ":editable_view_unavailable"
     assert File.dir?(path)
   end
 
@@ -138,7 +245,8 @@ defmodule MingaEditor.Agent.DiffReviewAuthoritativeStoreTest do
     {:ok, project_view} = ProjectView.overlay(root)
     assert :ok = ProjectView.write_file(project_view, path, after_edit)
 
-    review = DiffReview.new(absolute_path, before, after_edit)
+    {:ok, source} = ProjectView.resolve_source(project_view, path)
+    review = absolute_path |> DiffReview.new(before, after_edit) |> bind_live_source(source)
     state = state_with_diff_review(root, project_view, review)
 
     state =

@@ -206,6 +206,7 @@ defmodule MingaEditor.Commands.Agent do
     with :ok <- DraftWorkflow.before_reopen(state, session_id),
          :ok <- load_persisted_session(session_pid, session_id) do
       state
+      |> update_agent_ui(&UIState.reset_edit_timeline/1)
       |> DraftWorkflow.after_reopen(session_pid, session_id)
       |> sync_restored_model_selection(session_pid)
       |> arm_provenance_jump(session_pid, tool_call_id, origin)
@@ -774,16 +775,9 @@ defmodule MingaEditor.Commands.Agent do
     end
   end
 
-  # Clears the input and resets the edit timeline after a prompt is submitted.
   @spec clear_input_after_submit(state()) :: state()
-  defp clear_input_after_submit(state) do
-    state = update_agent_ui(state, &PromptBuffer.clear_input_and_scroll/1)
-
-    TraditionalWorkflow.install_agent_ui(
-      state,
-      UIState.reset_edit_timeline(state.workspace.agent_ui)
-    )
-  end
+  defp clear_input_after_submit(state),
+    do: update_agent_ui(state, &PromptBuffer.clear_input_and_scroll/1)
 
   # Sends the resolved content to the LLM and handles steering queue feedback.
   @spec deliver_prompt(state(), String.t() | [ReqLLM.Message.ContentPart.t()]) :: state()
@@ -1882,7 +1876,7 @@ defmodule MingaEditor.Commands.Agent do
         )
 
       review ->
-        state = update_preview(state, &Preview.set_diff(&1, review))
+        state = update_preview(state, &Preview.set_diff(&1, DiffReview.as_proposal(review)))
         state = update_agent_ui(state, &UIState.set_focus(&1, :file_viewer))
         log_system_message(state, "Applying code block to #{display_path}")
 

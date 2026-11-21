@@ -65,6 +65,8 @@ defmodule MingaEditor.Agent.FileEventWorkflow do
 
   @spec reload_remote_buffer_if_open(EditorState.t(), FileChange.t()) ::
           {EditorState.t(), [reload_notice()]}
+  defp reload_remote_buffer_if_open(state, %FileChange{after_content: :absent}), do: {state, []}
+
   defp reload_remote_buffer_if_open(state, %FileChange{path: path, after_content: after_content}) do
     case current_remote_target(state) do
       {:ok, server_name, remote_node} ->

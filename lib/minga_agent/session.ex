@@ -593,6 +593,53 @@ defmodule MingaAgent.Session do
   def read_retained_output(_target, _id, _reference, _range),
     do: {:error, :invalid_range}
 
+  @doc "Reads the original and latest retained sides for a file in the targeted session."
+  @spec read_cumulative_file_change(ConnectionTarget.t(), String.t()) ::
+          {:ok, {binary() | :absent, binary() | :absent}} | {:error, term()}
+  def read_cumulative_file_change(%ConnectionTarget{session: session} = target, path)
+      when is_binary(path) do
+    with {:ok, store, before_side, after_side} <-
+           GenServer.call(session, {:cumulative_file_change, target, path}),
+         {:ok, before_bytes} <- FileChange.read_side(store, before_side),
+         {:ok, after_bytes} <- FileChange.read_side(store, after_side),
+         {:ok, ^store, ^before_side, ^after_side} <-
+           GenServer.call(session, {:cumulative_file_change, target, path}) do
+      {:ok, {before_bytes, after_bytes}}
+    else
+      {:ok, _store, _before_side, _after_side} -> {:error, :file_change_changed}
+      {:error, _reason} = error -> error
+    end
+  end
+
+  @doc "Applies a conditional review mutation only while the displayed Session target is current."
+  @spec apply_review_mutation(
+          ConnectionTarget.t(),
+          MingaAgent.ProjectView.t(),
+          String.t(),
+          MingaAgent.ProjectView.Source.t(),
+          Minga.Buffer.FileMutation.expectation(),
+          Minga.Buffer.FileMutation.operation()
+        ) :: :ok | {:error, term()}
+  def apply_review_mutation(
+        %ConnectionTarget{session: session} = target,
+        view,
+        path,
+        source,
+        revision,
+        operation
+      ) do
+    GenServer.call(
+      session,
+      {:apply_review_mutation, target, view, path, source, revision, operation}
+    )
+  end
+
+  @doc "Returns attributed mutation counts per changed file in the targeted session."
+  @spec changed_file_counts(ConnectionTarget.t()) ::
+          {:ok, %{String.t() => pos_integer()}} | {:error, :stale_target}
+  def changed_file_counts(%ConnectionTarget{session: session} = target),
+    do: GenServer.call(session, {:changed_file_counts, target})
+
   @doc "Reads a bounded history page for an exact conversation target or transcript cursor."
   @spec transcript_history_before(
           GenServer.server(),
@@ -1681,6 +1728,45 @@ defmodule MingaAgent.Session do
            do: ensure_artifact_store(state)
 
     {:reply, result, state}
+  end
+
+  def handle_call({:cumulative_file_change, target, path}, _from, state) do
+    result =
+      with :ok <- validate_connection_target(state, target),
+           {:ok, before_side, after_side} <- FileChange.cumulative_sides(state.file_changes, path),
+           {:ok, store} <- ensure_artifact_store(state) do
+        {:ok, store, before_side, after_side}
+      end
+
+    {:reply, result, state}
+  end
+
+  def handle_call(
+        {:apply_review_mutation, target, view, path, source, revision, operation},
+        _from,
+        state
+      ) do
+    result =
+      with :ok <- validate_connection_target(state, target),
+           {:ok, _receipt} <-
+             MingaAgent.ProjectView.Overlay.conditional_review_mutate(
+               view,
+               path,
+               source,
+               revision,
+               operation
+             ) do
+        :ok
+      end
+
+    {:reply, result, state}
+  end
+
+  def handle_call({:changed_file_counts, target}, _from, state) do
+    case validate_connection_target(state, target) do
+      :ok -> {:reply, {:ok, FileChange.changed_file_counts(state.file_changes)}, state}
+      {:error, :stale_target} = error -> {:reply, error, state}
+    end
   end
 
   def handle_call(
@@ -5456,8 +5542,8 @@ defmodule MingaAgent.Session do
   defp handle_tool_file_changed(event, tool_name, state) do
     state
     |> broadcast(
-      {:file_changed, event.path, event.before_content, event.after_content, event.tool_call_id,
-       tool_name}
+      {:file_changed, state.connection.conversation, event.path, event.before_content,
+       event.after_content, event.tool_call_id, tool_name}
     )
     |> record_tool_file_preview(event)
     |> notify_messages_changed()
@@ -5622,7 +5708,11 @@ defmodule MingaAgent.Session do
   @spec record_tool_file_preview(state(), Event.ToolFileChanged.t()) :: state()
   defp record_tool_file_preview(state, %Event.ToolFileChanged{} = event) do
     preview =
-      ToolApproval.build_file_diff_preview(event.path, event.before_content, event.after_content)
+      ToolApproval.build_file_diff_preview(
+        event.path,
+        if(event.before_content == :absent, do: "", else: event.before_content),
+        if(event.after_content == :absent, do: "", else: event.after_content)
+      )
 
     transcript =
       Transcript.update_tool_call(state.transcript, event.tool_call_id, fn tool_call ->
@@ -5928,6 +6018,7 @@ defmodule MingaAgent.Session do
       Connection.activity(state.connection),
       Connection.problem(state.connection)
     )
+    |> ConnectionSnapshot.project_conversation(state.connection.conversation)
     |> ConnectionSnapshot.project_draft_persistence(Persistence.enabled?(state.persistence))
   end
 
@@ -6713,7 +6804,8 @@ defmodule MingaAgent.Session do
   defp event_log_entry({:tool_ended, %Event.ToolEnd{}}), do: nil
 
   defp event_log_entry(
-         {:file_changed, path, before_content, after_content, tool_call_id, tool_name}
+         {:file_changed, _session_id, path, before_content, after_content, tool_call_id,
+          tool_name}
        ),
        do:
          {:file_edit_proposed,
@@ -9435,6 +9527,7 @@ defmodule MingaAgent.Session do
 
   @spec finish_loaded_session_restore(state()) :: {:ok, state()}
   defp finish_loaded_session_restore(state) do
+    state = publish_connection(state)
     broadcast(state, {:status_changed, :idle})
     broadcast(state, :messages_changed)
     {:ok, publish_checklist(state)}

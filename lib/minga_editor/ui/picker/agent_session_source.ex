@@ -127,7 +127,11 @@ defmodule MingaEditor.UI.Picker.AgentSessionSource do
   defp reopen_saved(state, session, origin_id, id, kind) do
     case restore_saved(session, id, origin_id, kind) do
       :ok ->
-        DraftWorkflow.after_reopen(state, session, id)
+        ui = MingaEditor.Agent.UIState.reset_edit_timeline(state.workspace.agent_ui)
+
+        state
+        |> MingaEditor.Shell.Traditional.Workflow.install_agent_ui(ui)
+        |> DraftWorkflow.after_reopen(session, id)
 
       {:error, :stale_session} ->
         NoticeWorkflow.publish(state, "Session changed. Reopen Sessions.")

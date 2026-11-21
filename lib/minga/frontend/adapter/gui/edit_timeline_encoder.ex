@@ -93,4 +93,6 @@ defmodule Minga.Frontend.Adapter.GUI.EditTimelineEncoder do
   @spec review_status_to_byte(FileEntry.review_status()) :: non_neg_integer()
   defp review_status_to_byte(:pending), do: 0
   defp review_status_to_byte(:reviewing), do: 1
+  defp review_status_to_byte(:counts_unavailable), do: 2
+  defp review_status_to_byte(:reviewing_counts_unavailable), do: 3
 end
