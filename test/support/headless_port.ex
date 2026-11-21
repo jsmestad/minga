@@ -213,6 +213,9 @@ defmodule Minga.Test.HeadlessPort do
     GenServer.call(server, :get_screen)
   end
 
+  @doc "Returns the decoded Agent chat from the latest committed frame."
+  @spec agent_chat(GenServer.server()) :: map() | nil
+  def agent_chat(server), do: GenServer.call(server, :agent_chat)
   @doc "Returns just the text of a specific row."
   @spec get_row_text(GenServer.server(), non_neg_integer()) :: String.t()
   def get_row_text(server, row) do
@@ -374,6 +377,8 @@ defmodule Minga.Test.HeadlessPort do
 
     {:reply, screen, state}
   end
+
+  def handle_call(:agent_chat, _from, state), do: {:reply, state.agent_chat, state}
 
   def handle_call({:get_row_text, row}, _from, state) do
     text =
@@ -1594,15 +1599,19 @@ defmodule Minga.Test.HeadlessPort do
   defp decode_agent_chat_section(
          0x03,
          <<prompt_len::16, prompt::binary-size(prompt_len), _line_count::8,
-           prompt_cursor_line::16, prompt_cursor_col::16, _vim_mode::8, _visible_rows::8>>,
+           prompt_cursor_line::16, prompt_cursor_col::16, vim_mode::8, _visible_rows::8>>,
          result
-       ),
-       do: %{
-         result
-         | prompt: prompt,
-           prompt_cursor_line: prompt_cursor_line,
-           prompt_cursor_col: prompt_cursor_col
-       }
+       ) do
+    Map.merge(result, %{
+      prompt: prompt,
+      prompt_cursor_line: prompt_cursor_line,
+      prompt_cursor_col: prompt_cursor_col,
+      prompt_vim_mode: vim_mode
+    })
+  end
+
+  defp decode_agent_chat_section(0x09, <<focused::8>>, result),
+    do: Map.put(result, :input_focused?, focused == 1)
 
   defp decode_agent_chat_section(_section_id, _payload, result), do: result
 
