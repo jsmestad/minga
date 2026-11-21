@@ -47,7 +47,7 @@ defmodule MingaAgent.CredentialsRouteTest do
   end
 
   test "variables that redirect another tool's login are rejected without echoing values" do
-    for name <- ~w(HOME CLAUDE_CONFIG_DIR USERPROFILE) do
+    for name <- ~w(HOME CLAUDE_CONFIG_DIR USERPROFILE Home userprofile claude_config_dir) do
       opts = opts_with(%{"routes" => %{"bridge" => %{"env" => %{name => @secret}}}})
 
       assert {:error, {:route_unavailable, message}} =

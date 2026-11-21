@@ -4,6 +4,14 @@ defmodule MingaAgent.RedactionTest do
   alias MingaAgent.MCP.ServerConfig
   alias MingaAgent.Redaction
 
+  test "a route credential is redacted completely, wherever it appears" do
+    credential = MingaAgent.InferenceRoute.Credential.new(%{"PROXY_URL" => "https://plain-value"})
+
+    assert Redaction.redact_term(credential) == "[REDACTED]"
+    refute Redaction.format_error({:failed, credential}) =~ "plain-value"
+    refute Redaction.format_error(route_credential: credential) =~ "plain-value"
+  end
+
   test "redacts secret-key tuples of any arity" do
     redacted = Redaction.redact_term({:API_TOKEN, "plain-secret", :metadata})
 

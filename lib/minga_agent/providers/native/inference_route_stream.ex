@@ -2,13 +2,15 @@ defmodule MingaAgent.Providers.Native.InferenceRouteStream do
   @moduledoc """
   Starts one model stream through a contributed inference route.
 
-  The route is looked up in the registry at request time, so a route removed after selection fails the request instead of falling back to another model. The calling process holds a `Minga.Extension.CodeLease` lease on the route's module for the whole stream: the lease is released when the stream finishes, halts, raises, or is cancelled, and when the consuming process exits. An extension that stops during a stream therefore keeps its code loaded until the stream ends.
+  The route is looked up in the registry at request time, so a route removed after selection fails the request instead of falling back to another model. The calling process holds a `Minga.Extension.CodeLease` lease on the route's module for the whole stream: the lease is released when the stream finishes, halts, raises, or is cancelled, and when the consuming process exits. An extension that stops during a stream therefore keeps its code loaded until the stream ends. `InferenceRouteCancel` runs the route's own cancel once when Minga abandons the stream or its consumer exits early.
   """
 
   alias Minga.Extension.CodeLease
   alias MingaAgent.InferenceRouteRegistry
   alias MingaAgent.InferenceRouteRegistry.Entry
-  alias MingaAgent.Providers.Native.{InferenceRouteRequest, InferenceRouteResponse}
+  alias MingaAgent.InferenceRoute.Response
+  alias MingaAgent.Providers.Native.{InferenceRouteCancel, InferenceRouteRequest}
+  alias MingaAgent.Providers.Native.InferenceRouteResponse
   alias ReqLLM.StreamResponse
 
   @typedoc "Failure before any stream exists."
@@ -37,6 +39,7 @@ defmodule MingaAgent.Providers.Native.InferenceRouteStream do
          {:ok, lease} <- lease(entry) do
       entry
       |> call_route(request)
+      |> watch_cancel(route_id)
       |> translate(llm_model, messages)
       |> hold_lease(lease, route_id)
     end
@@ -79,7 +82,22 @@ defmodule MingaAgent.Providers.Native.InferenceRouteStream do
     :exit, reason -> {:error, {:exit, reason}}
   end
 
+  # The calling process consumes the stream, so its exit before the stream finishes cancels the route.
+  @spec watch_cancel(term(), String.t()) :: term()
+  defp watch_cancel({:ok, %Response{cancel: cancel} = response}, route_id)
+       when is_function(cancel, 0) do
+    watcher = InferenceRouteCancel.start(self(), cancel, route_id)
+
+    {:ok, %{response | cancel: fn -> InferenceRouteCancel.cancel(watcher) end},
+     fn -> InferenceRouteCancel.disarm(watcher) end}
+  end
+
+  defp watch_cancel(other, _route_id), do: other
+
   @spec translate(term(), LLMDB.Model.t(), [ReqLLM.Message.t()]) :: term()
+  defp translate({:ok, response, finished}, llm_model, messages),
+    do: InferenceRouteResponse.to_stream_response(response, llm_model, messages, finished)
+
   defp translate({:ok, response}, llm_model, messages),
     do: InferenceRouteResponse.to_stream_response(response, llm_model, messages)
 

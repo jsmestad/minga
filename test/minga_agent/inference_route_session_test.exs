@@ -207,6 +207,33 @@ defmodule MingaAgent.InferenceRouteSessionTest do
     assert is_binary(Session.session_id(session))
   end
 
+  test "stopping a turn keeps the partial reply and cancels the route", ctx do
+    model_id = ctx.model_id
+
+    {:ok, _script} =
+      FixtureInferenceRoute.script(ctx.model_id, [
+        {:block_after, [{:text, "Partial answer before stop"}]}
+      ])
+
+    session = start_route_session(ctx)
+    assert :ok = Session.send_prompt(session, "start then stop")
+    _request = assert_request(ctx.model_id)
+
+    assert_receive {:agent_event, ^session, {:text_delta, "Partial answer before stop"}},
+                   @event_timeout
+
+    assert_receive {:fixture_route_blocked, ^model_id}, @event_timeout
+    assert :ok = Session.abort(session)
+
+    assert_receive {:fixture_route_cancelled, ^model_id}, @event_timeout
+    refute_receive {:fixture_route_cancelled, ^model_id}, 200
+
+    assert Enum.any?(Session.messages(session), fn
+             {:assistant, text} when is_binary(text) -> text =~ "Partial answer before stop"
+             _other -> false
+           end)
+  end
+
   test "a route removed while idle fails the next send without falling back", ctx do
     {:ok, _script} = FixtureInferenceRoute.script(ctx.model_id, [text("first")])
 

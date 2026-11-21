@@ -61,6 +61,9 @@ defmodule MingaAgent.Redaction do
     |> redact_map()
   end
 
+  # A route credential is secret by construction: none of its env values are ever shown.
+  def redact_term(%{__struct__: MingaAgent.InferenceRoute.Credential}), do: @redacted
+
   def redact_term(%_struct{} = struct) do
     struct
     |> Map.from_struct()

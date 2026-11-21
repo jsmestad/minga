@@ -199,28 +199,42 @@ defmodule MingaAgent.Credentials do
   @spec validate_route_env(map(), String.t()) ::
           {:ok, route_credential()} | {:error, {:route_unavailable, String.t()}}
   defp validate_route_env(env, route_id) do
-    Enum.reduce_while(env, {:ok, %{}}, fn
-      {name, _value}, _acc when name in @reserved_route_env ->
-        {:halt,
-         route_credential_error(
-           route_id,
-           "sets #{name}, which Minga never passes to model routes. Remove it"
-         )}
+    Enum.reduce_while(env, {:ok, %{}}, fn {name, value}, {:ok, acc} ->
+      case route_env_entry(name, value) do
+        {:keep, entry} ->
+          {:cont, {:ok, Map.put(acc, name, entry)}}
 
-      {name, ""}, {:ok, acc} when is_binary(name) and name != "" ->
-        {:cont, {:ok, acc}}
+        :unset ->
+          {:cont, {:ok, acc}}
 
-      {name, value}, {:ok, acc} when is_binary(name) and name != "" and is_binary(value) ->
-        {:cont, {:ok, Map.put(acc, name, value)}}
+        :reserved ->
+          {:halt,
+           route_credential_error(
+             route_id,
+             "sets #{name}, which Minga never passes to model routes. Remove it"
+           )}
 
-      {_name, _value}, _acc ->
-        {:halt, route_credential_error(route_id, "must map variable names to string values")}
+        :invalid ->
+          {:halt, route_credential_error(route_id, "must map variable names to string values")}
+      end
     end)
     |> case do
       {:ok, values} -> {:ok, RouteCredential.new(values)}
       {:error, _reason} = error -> error
     end
   end
+
+  # Reserved names are matched case-insensitively, so `Home` or `userprofile` cannot slip through.
+  @spec route_env_entry(term(), term()) :: {:keep, String.t()} | :unset | :reserved | :invalid
+  defp route_env_entry(name, value) when is_binary(name) and name != "" and is_binary(value) do
+    cond do
+      String.upcase(name) in @reserved_route_env -> :reserved
+      value == "" -> :unset
+      true -> {:keep, value}
+    end
+  end
+
+  defp route_env_entry(_name, _value), do: :invalid
 
   @spec route_credential_error(String.t(), String.t()) ::
           {:error, {:route_unavailable, String.t()}}
