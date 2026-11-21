@@ -7,6 +7,7 @@ defmodule MingaEditor.Renderer.SearchHighlight do
   in `ContentHelpers.maybe_update_search_decorations/4`.
   """
 
+  alias Minga.Command.Parser
   alias Minga.Editing.Search.Match
   alias Minga.Mode.SubstituteConfirmState
   alias Minga.Search.IndexGeneration
@@ -32,9 +33,8 @@ defmodule MingaEditor.Renderer.SearchHighlight do
         lines,
         first_line
       ) do
-    case extract_substitute_parts(input) do
-      {pattern, replacement} when is_binary(replacement) ->
-        global? = substitute_has_global_flag?(input)
+    case Parser.substitute_preview(input) do
+      {:preview_replacement, pattern, replacement, global?} ->
         substitute_preview_lines(lines, first_line, pattern, replacement, global?)
 
       _ ->
@@ -52,10 +52,7 @@ defmodule MingaEditor.Renderer.SearchHighlight do
         false
 
       input ->
-        match?(
-          {_pattern, replacement} when is_binary(replacement),
-          extract_substitute_parts(input)
-        )
+        match?({:preview_replacement, _, _, _}, Parser.substitute_preview(input))
     end
   end
 
@@ -158,40 +155,6 @@ defmodule MingaEditor.Renderer.SearchHighlight do
     {new_lines, Enum.reverse(reversed_matches)}
   end
 
-  @spec substitute_has_global_flag?(String.t()) :: boolean()
-  defp substitute_has_global_flag?(input) do
-    trimmed = String.trim_leading(input, "%")
-
-    case trimmed do
-      <<"s", delimiter, rest::binary>> when delimiter in [?/, ?#, ?|] ->
-        delim = <<delimiter>>
-        flags_str = extract_flags_after_replacement(rest, delim, 0)
-        String.contains?(flags_str, "g")
-
-      _ ->
-        false
-    end
-  end
-
-  @spec extract_flags_after_replacement(String.t(), String.t(), non_neg_integer()) :: String.t()
-  defp extract_flags_after_replacement("", _delim, _count), do: ""
-
-  defp extract_flags_after_replacement("\\" <> <<_c::utf8, rest::binary>>, delim, count) do
-    extract_flags_after_replacement(rest, delim, count)
-  end
-
-  defp extract_flags_after_replacement(<<c::utf8, rest::binary>>, delim, 0) do
-    if <<c::utf8>> == delim do
-      extract_flags_after_replacement(rest, delim, 1)
-    else
-      extract_flags_after_replacement(rest, delim, 0)
-    end
-  end
-
-  defp extract_flags_after_replacement(<<c::utf8, rest::binary>>, delim, 1) do
-    if <<c::utf8>> == delim, do: rest, else: extract_flags_after_replacement(rest, delim, 1)
-  end
-
   @spec active_search_pattern(state()) :: String.t() | nil
   defp active_search_pattern(%{
          workspace: %{
@@ -207,7 +170,11 @@ defmodule MingaEditor.Renderer.SearchHighlight do
            editing: %{mode: :command, mode_state: %Minga.Mode.CommandState{input: input}}
          }
        }) do
-    extract_substitute_pattern(input)
+    case Parser.substitute_preview(input) do
+      {:preview_pattern, pattern} -> pattern
+      {:preview_replacement, pattern, _replacement, _global?} -> pattern
+      nil -> nil
+    end
   end
 
   defp active_search_pattern(%{
@@ -243,78 +210,4 @@ defmodule MingaEditor.Renderer.SearchHighlight do
   end
 
   def current_confirm_match(_state), do: nil
-
-  @spec extract_substitute_pattern(String.t()) :: String.t() | nil
-  defp extract_substitute_pattern(input) do
-    case extract_substitute_parts(input) do
-      {pattern, _replacement} -> pattern
-      nil -> nil
-    end
-  end
-
-  @spec extract_substitute_parts(String.t()) :: {String.t(), String.t() | nil} | nil
-  defp extract_substitute_parts(input) do
-    trimmed = String.trim_leading(input, "%")
-
-    case trimmed do
-      <<"s", delimiter, rest::binary>> when delimiter in [?/, ?#, ?|] ->
-        split_substitute_input(rest, <<delimiter>>)
-
-      _ ->
-        nil
-    end
-  end
-
-  @spec split_substitute_input(String.t(), String.t()) :: {String.t(), String.t() | nil} | nil
-  defp split_substitute_input(rest, delim) do
-    case extract_until_delimiter(rest, delim, []) do
-      {pattern, after_pattern} ->
-        replacement = extract_replacement(after_pattern, delim)
-        {pattern, replacement}
-
-      nil ->
-        if rest == "", do: nil, else: {rest, nil}
-    end
-  end
-
-  @spec extract_until_delimiter(String.t(), String.t(), [String.t()]) ::
-          {String.t(), String.t()} | nil
-  defp extract_until_delimiter("", _delimiter, _acc), do: nil
-
-  defp extract_until_delimiter("\\" <> <<c::utf8, rest::binary>>, delimiter, acc) do
-    extract_until_delimiter(rest, delimiter, [<<c::utf8>>, "\\" | acc])
-  end
-
-  defp extract_until_delimiter(<<c::utf8, rest::binary>>, delimiter, acc) do
-    if <<c::utf8>> == delimiter do
-      pattern = acc |> Enum.reverse() |> Enum.join()
-      if pattern == "", do: nil, else: {pattern, rest}
-    else
-      extract_until_delimiter(rest, delimiter, [<<c::utf8>> | acc])
-    end
-  end
-
-  @spec extract_replacement(String.t(), String.t()) :: String.t() | nil
-  defp extract_replacement("", _delimiter), do: nil
-
-  defp extract_replacement(input, delimiter) do
-    do_extract_replacement(input, delimiter, [])
-  end
-
-  @spec do_extract_replacement(String.t(), String.t(), [String.t()]) :: String.t()
-  defp do_extract_replacement("", _delimiter, acc) do
-    acc |> Enum.reverse() |> Enum.join()
-  end
-
-  defp do_extract_replacement("\\" <> <<c::utf8, rest::binary>>, delimiter, acc) do
-    do_extract_replacement(rest, delimiter, [<<c::utf8>>, "\\" | acc])
-  end
-
-  defp do_extract_replacement(<<c::utf8, rest::binary>>, delimiter, acc) do
-    if <<c::utf8>> == delimiter do
-      acc |> Enum.reverse() |> Enum.join()
-    else
-      do_extract_replacement(rest, delimiter, [<<c::utf8>> | acc])
-    end
-  end
 end
