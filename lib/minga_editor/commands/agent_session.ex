@@ -788,12 +788,27 @@ defmodule MingaEditor.Commands.AgentSession do
 
   @spec provider_opts(state(), Panel.t(), ProjectView.t() | nil) :: keyword()
   defp provider_opts(state, panel, project_view) do
-    Keyword.merge(state.agent_connection.agent_provider_opts,
+    state.agent_connection.agent_provider_opts
+    |> Keyword.merge(
       provider: panel.provider_name,
       model: panel.model_name,
       project_view: project_view
     )
+    |> put_session_project_root(session_project_root(state, project_view))
   end
+
+  # The session works on the project the editor shows, never the launch
+  # directory. A project view already carries that root; without one, the
+  # editor's project root is passed explicitly.
+  @spec session_project_root(state(), ProjectView.t() | nil) :: String.t() | nil
+  defp session_project_root(_state, %ProjectView{project_root: root}), do: root
+  defp session_project_root(state, nil), do: state.workspace.file_tree.project_root
+
+  @spec put_session_project_root(keyword(), String.t() | nil) :: keyword()
+  defp put_session_project_root(opts, root) when is_binary(root),
+    do: Keyword.put(opts, :project_root, root)
+
+  defp put_session_project_root(opts, nil), do: opts
 
   @spec maybe_put_provider_module(keyword(), module() | nil) :: keyword()
   defp maybe_put_provider_module(opts, provider_module)

@@ -1,6 +1,53 @@
 defmodule MingaAgent.ProjectView.PathResolver do
   @moduledoc false
 
+  alias Minga.Project.Root
+
+  @doc """
+  Maps a tool path to a path relative to `project_root`.
+
+  A relative path is already relative to the root and is returned unchanged; the consumer validates its components. An absolute path is accepted only when it names the root or a path inside it, compared against the root as written and then against its symlink-resolved form. Any other absolute path returns `{:error, :path_traversal}`. An absolute path is never joined under the root.
+  """
+  @spec logical_path(String.t(), String.t()) :: {:ok, String.t()} | {:error, :path_traversal}
+  def logical_path(project_root, path) when is_binary(project_root) and is_binary(path) do
+    case Path.type(path) do
+      :absolute -> absolute_logical_path(Path.expand(project_root), Path.expand(path))
+      _relative -> {:ok, path}
+    end
+  end
+
+  @spec absolute_logical_path(String.t(), String.t()) ::
+          {:ok, String.t()} | {:error, :path_traversal}
+  defp absolute_logical_path(root, path) do
+    case relative_inside(path, root) do
+      {:ok, relative} -> {:ok, relative}
+      :error -> canonical_logical_path(root, path)
+    end
+  end
+
+  # Tool paths are symlink-resolved before routing, so a root written through a
+  # symlink (for example `/tmp` on macOS) must also match its resolved form.
+  @spec canonical_logical_path(String.t(), String.t()) ::
+          {:ok, String.t()} | {:error, :path_traversal}
+  defp canonical_logical_path(root, path) do
+    with {:ok, canonical_root} <- Root.canonical_path(root),
+         {:ok, relative} <- relative_inside(path, canonical_root) do
+      {:ok, relative}
+    else
+      _outside_or_unresolvable -> {:error, :path_traversal}
+    end
+  end
+
+  @spec relative_inside(String.t(), String.t()) :: {:ok, String.t()} | :error
+  defp relative_inside(root, root), do: {:ok, "."}
+  defp relative_inside(path, "/"), do: {:ok, Path.relative_to(path, "/")}
+
+  defp relative_inside(path, root) do
+    if String.starts_with?(path, root <> "/"),
+      do: {:ok, Path.relative_to(path, root)},
+      else: :error
+  end
+
   @spec resolve(String.t(), String.t(), keyword()) ::
           {:ok, String.t()} | {:error, :invalid_path | :path_traversal | :symlink_traversal}
   def resolve(project_root, relative_path, opts \\ [])

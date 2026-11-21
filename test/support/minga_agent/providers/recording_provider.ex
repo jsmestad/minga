@@ -58,7 +58,15 @@ defmodule MingaAgent.Providers.RecordingProvider do
     subscriber = Keyword.get(opts, :subscriber)
 
     if is_pid(subscriber), do: Process.monitor(subscriber)
-    {:ok, %{test_pid: test_pid, project_root: project_root, refreshes: [], seeded_messages: []}}
+
+    {:ok,
+     %{
+       test_pid: test_pid,
+       project_root: project_root,
+       project_view: Keyword.get(opts, :project_view),
+       refreshes: [],
+       seeded_messages: []
+     }}
   end
 
   @impl GenServer
@@ -78,7 +86,9 @@ defmodule MingaAgent.Providers.RecordingProvider do
         model: %{id: "test-model", name: "Test Model", provider: "test"},
         is_streaming: false,
         token_usage: nil,
-        seeded_messages: state.seeded_messages
+        seeded_messages: state.seeded_messages,
+        project_root: state.project_root,
+        project_view: state.project_view
       }}, state}
   end
 
