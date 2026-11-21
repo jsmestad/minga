@@ -23,6 +23,7 @@ defmodule MingaAgent.SessionStore do
   alias MingaAgent.Session.ChecklistArchive
   alias MingaAgent.Session.Continuation
   alias MingaAgent.Session.ContinuationCodec
+  alias MingaAgent.Session.FileChange
   alias MingaAgent.Session.Transcript
   alias MingaAgent.Session.TurnExecution
   alias MingaAgent.ToolApproval.Preview
@@ -91,6 +92,7 @@ defmodule MingaAgent.SessionStore do
           optional(:memory) => String.t() | nil,
           optional(:checklist) => Checklist.t(),
           optional(:checklist_archive) => ChecklistArchive.t(),
+          optional(:file_changes) => [FileChange.t()],
           optional(:pending_inputs) => TurnExecution.pending_inputs()
         }
 
@@ -1031,7 +1033,16 @@ defmodule MingaAgent.SessionStore do
       ContinuationCodec.references(candidate["continuation"]) ++
       ContinuationCodec.pending_input_references(candidate["pending_inputs"]) ++
       checklist_references(candidate["checklist"]) ++
-      checklist_archive_references(candidate["checklist_archive"])
+      checklist_archive_references(candidate["checklist_archive"]) ++
+      file_change_references(candidate["file_changes"])
+  end
+
+  @spec file_change_references(term()) :: [Reference.t()]
+  defp file_change_references(encoded) do
+    case decode_file_changes(encoded) do
+      {:ok, changes} -> Enum.flat_map(changes, &FileChange.references/1)
+      {:error, :invalid_file_change} -> []
+    end
   end
 
   @spec checklist_references(term()) :: [Reference.t()]
@@ -2040,8 +2051,15 @@ defmodule MingaAgent.SessionStore do
     }
     |> put_checklist(Map.get(data, :checklist))
     |> put_checklist_archive(Map.get(data, :checklist_archive))
+    |> put_file_changes(Map.get(data, :file_changes, []))
     |> put_pending_inputs(Map.get(data, :pending_inputs))
   end
+
+  @spec put_file_changes(map(), [FileChange.t()]) :: map()
+  defp put_file_changes(data, []), do: data
+
+  defp put_file_changes(data, changes),
+    do: Map.put(data, "file_changes", Enum.map(changes, &FileChange.encode/1))
 
   @spec put_pending_inputs(map(), TurnExecution.pending_inputs() | nil) :: map()
   defp put_pending_inputs(data, nil), do: data
@@ -2143,10 +2161,31 @@ defmodule MingaAgent.SessionStore do
            Continuation.restore_tool_outcomes(continuation, data["version"], transcript),
          session = data |> deserialize_legacy(transcript) |> Map.put(:continuation, continuation),
          {:ok, session} <- restore_checklist(session, data),
-         {:ok, session} <- restore_checklist_archive(session, data) do
-      restore_pending_inputs(session, data)
+         {:ok, session} <- restore_checklist_archive(session, data),
+         {:ok, changes} <- decode_file_changes(data["file_changes"]) do
+      restore_pending_inputs(Map.put(session, :file_changes, changes), data)
     end
   end
+
+  @spec decode_file_changes(term()) :: {:ok, [FileChange.t()]} | {:error, :invalid_file_change}
+  defp decode_file_changes(nil), do: {:ok, []}
+
+  defp decode_file_changes(encoded) when is_list(encoded) do
+    result =
+      Enum.reduce_while(encoded, {:ok, []}, fn entry, {:ok, changes} ->
+        case FileChange.decode(entry) do
+          {:ok, change} -> {:cont, {:ok, [change | changes]}}
+          {:error, :invalid_file_change} = error -> {:halt, error}
+        end
+      end)
+
+    case result do
+      {:ok, changes} -> {:ok, Enum.reverse(changes)}
+      error -> error
+    end
+  end
+
+  defp decode_file_changes(_invalid), do: {:error, :invalid_file_change}
 
   @spec restore_pending_inputs(session_data(), map()) :: {:ok, session_data()} | {:error, term()}
   defp restore_pending_inputs(session, %{"pending_inputs" => encoded}) do

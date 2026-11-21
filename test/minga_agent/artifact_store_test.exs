@@ -35,6 +35,165 @@ defmodule MingaAgent.ArtifactStoreTest do
              )
   end
 
+  test "a committed binary creation retains exact bytes without inventing a baseline", %{
+    tmp_dir: root
+  } do
+    alias Minga.Buffer.FileMutation.Receipt
+    alias MingaAgent.Session.FileChange
+    alias MingaAgent.Tool.FileMutationResult
+
+    {_quota, store} = start_pair(root, "file-change")
+    bytes = <<0, 255, 10>>
+
+    mutation =
+      FileMutationResult.new(
+        "/fixture.bin",
+        Receipt.committed({:error, :enoent}, bytes),
+        "created"
+      )
+
+    change = FileChange.capture(store, {"request", "checkpoint", "call"}, mutation)
+
+    assert {:ok,
+            %FileChange{
+              identity: {"request", "checkpoint", "call"},
+              before: :absent,
+              after: reference
+            }} =
+             change |> FileChange.encode() |> FileChange.decode()
+
+    candidate = {:snapshot, "candidate"}
+    assert :ok = ArtifactStore.pin(store, candidate, [reference])
+    assert :ok = FileChange.release_delivery(store, change)
+
+    assert {:ok, range} = Range.new(:full, :bytes, 0, 3, 3)
+    assert {:ok, %{bytes: ^bytes}} = ArtifactStore.fetch(store, reference, range)
+
+    assert {:ok, 0} = ArtifactStore.cleanup_unreferenced(store)
+    assert :ok = ArtifactStore.release(store, candidate)
+    assert {:ok, 1} = ArtifactStore.cleanup_unreferenced(store)
+  end
+
+  test "checkpoint recovery reclaims snapshots abandoned by a dead worker", %{tmp_dir: root} do
+    alias Minga.Buffer.FileMutation.Receipt
+    alias MingaAgent.Session.FileChange
+    alias MingaAgent.Tool.FileMutationResult
+
+    {_quota, store} = start_pair(root, "abandoned-change")
+    identity = {"request", "checkpoint", "call"}
+    mutation = FileMutationResult.new("/file", Receipt.committed({:error, :enoent}, "new"), "")
+    owner = self()
+
+    {worker, monitor} =
+      spawn_monitor(fn ->
+        send(owner, {:captured, FileChange.capture(store, identity, mutation)})
+      end)
+
+    assert_receive {:captured, %FileChange{after: %Reference{}}}, 5_000
+    assert_receive {:DOWN, ^monitor, :process, ^worker, :normal}, 5_000
+    assert {:ok, 0} = ArtifactStore.cleanup_unreferenced(store)
+    assert :ok = FileChange.reconcile_delivery(store, identity)
+    assert {:ok, 1} = ArtifactStore.cleanup_unreferenced(store)
+  end
+
+  test "an interrupted file capture does not pin the discarded partial snapshot", %{tmp_dir: root} do
+    alias Minga.Buffer.FileMutation.Receipt
+    alias MingaAgent.Session.FileChange
+    alias MingaAgent.Tool.FileMutationResult
+
+    writes = :atomics.new(1, [])
+
+    injector = fn
+      :before_blob_write ->
+        if :atomics.add_get(writes, 1, 1) == 2, do: {:error, :enospc}, else: :ok
+
+      _point ->
+        :ok
+    end
+
+    {_quota, store} =
+      start_pair_with_store_opts(root, "interrupted-change", fault_injector: injector)
+
+    bytes = :binary.copy("a", 131_072)
+    mutation = FileMutationResult.new("/large", Receipt.committed({:error, :enoent}, bytes), "")
+
+    assert %FileChange{before: :absent, after: :unavailable} =
+             FileChange.capture(store, {"request", "checkpoint", "call"}, mutation)
+
+    assert {:ok, 1} = ArtifactStore.cleanup_unreferenced(store)
+  end
+
+  test "failed optional finalization does not leave an artifact after reopen", %{tmp_dir: root} do
+    alias Minga.Buffer.FileMutation.Receipt
+    alias MingaAgent.Session.FileChange
+    alias MingaAgent.Tool.FileMutationResult
+
+    injector = fn
+      :before_blob_rename -> {:error, :enospc}
+      _point -> :ok
+    end
+
+    quota = start_quota(root, {:quota, make_ref()})
+    store_id = {:store, make_ref()}
+    store = start_store(root, quota, "failed-finish", store_id, fault_injector: injector)
+    mutation = FileMutationResult.new("/file", Receipt.committed({:error, :enoent}, "new"), "")
+
+    assert %FileChange{after: :unavailable} =
+             FileChange.capture(store, {"request", "checkpoint", "call"}, mutation)
+
+    assert :ok = stop_supervised(store_id)
+    _reopened = start_store(root, quota, "failed-finish", store_id)
+    assert ArtifactQuota.usage(quota).artifacts == 0
+  end
+
+  test "an optional file snapshot leaves the last slot for a tool result", %{tmp_dir: root} do
+    alias Minga.Buffer.FileMutation.Receipt
+    alias MingaAgent.Session.FileChange
+    alias MingaAgent.Tool.FileMutationResult
+    alias MingaAgent.Tools.OutputCapture
+
+    {_quota, store} =
+      start_pair_with_store_opts(root, "limited-changes", limits: [session_artifacts: 1])
+
+    mutation = FileMutationResult.new("/file", Receipt.committed({:error, :enoent}, "new"), "")
+
+    assert %FileChange{before: :absent, after: :unavailable} =
+             FileChange.capture(store, {"request", "checkpoint", "write"}, mutation)
+
+    assert {:ok, %{capture: :complete, reference: reference}} =
+             OutputCapture.bytes(store, {:delivery, "next-checkpoint", "result"}, "done", [])
+
+    assert {:ok, %{bytes: "done"}} = ArtifactStore.fetch(store, reference, byte_range(4))
+  end
+
+  test "an open optional snapshot leaves an open slot for a tool result", %{tmp_dir: root} do
+    {_quota, store} =
+      start_pair_with_store_opts(root, "open-capture-headroom",
+        limits: [session_open_captures: 2]
+      )
+
+    optional_capture = fn call ->
+      {:ok, spec} =
+        CaptureSpec.new(
+          media_type: "application/octet-stream",
+          mode: :bytes,
+          expected_bytes: 3,
+          optional?: true,
+          owner_pid: self(),
+          delivery_key: {:delivery, "optional", call}
+        )
+
+      ArtifactStore.begin(store, spec)
+    end
+
+    assert {:ok, _open} = optional_capture.("first")
+    assert {:error, :session_open_capture_limit} = optional_capture.("second")
+    required = begin_capture(store, "required", :bytes, "text/plain")
+    assert {:ok, _progress} = ArtifactStore.append(store, required, "done")
+    assert {:ok, %{reference: reference}} = ArtifactStore.finish(store, required, :complete)
+    assert {:ok, %{bytes: "done"}} = ArtifactStore.fetch(store, reference, byte_range(4))
+  end
+
   test "fetches exact binary, Unicode byte slices, and indexed item pages", %{tmp_dir: root} do
     {_quota, store} = start_pair(root, "exact-session")
     bytes = <<0, 255, "αβ"::binary, 10>>

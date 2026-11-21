@@ -9,11 +9,12 @@ defmodule MingaAgent.ArtifactStore.CaptureSpec do
           mode: mode(),
           expected_bytes: non_neg_integer() | nil,
           owner_pid: pid(),
-          delivery_key: PinKey.t()
+          delivery_key: PinKey.t(),
+          optional?: boolean()
         }
 
   @enforce_keys [:media_type, :mode, :owner_pid, :delivery_key]
-  defstruct [:media_type, :mode, :expected_bytes, :owner_pid, :delivery_key]
+  defstruct [:media_type, :mode, :expected_bytes, :owner_pid, :delivery_key, optional?: false]
 
   @doc "Builds a capture specification; delivery keys identify an admitted checkpoint and call."
   @spec new(keyword()) :: {:ok, t()} | {:error, :invalid_capture_spec | :invalid_pin_key}
@@ -24,13 +25,15 @@ defmodule MingaAgent.ArtifactStore.CaptureSpec do
   def new(_attrs), do: {:error, :invalid_capture_spec}
 
   @spec build(keyword()) :: {:ok, t()} | {:error, :invalid_capture_spec | :invalid_pin_key}
-  defp build(attrs) do
+  defp build(options) do
+    {optional?, attrs} = Keyword.pop_first(options, :optional?, false)
     media_type = Keyword.get(attrs, :media_type)
     mode = Keyword.get(attrs, :mode)
     expected_bytes = Keyword.get(attrs, :expected_bytes)
     owner_pid = Keyword.get(attrs, :owner_pid)
 
-    with true <-
+    with :ok <- validate_optional(optional?, mode, expected_bytes),
+         true <-
            Keyword.keys(attrs) --
              [:media_type, :mode, :expected_bytes, :owner_pid, :delivery_key] == [],
          true <-
@@ -46,13 +49,19 @@ defmodule MingaAgent.ArtifactStore.CaptureSpec do
          mode: mode,
          expected_bytes: expected_bytes,
          owner_pid: owner_pid,
-         delivery_key: delivery_key
+         delivery_key: delivery_key,
+         optional?: optional?
        }}
     else
       {:error, :invalid_pin_key} = error -> error
       _ -> {:error, :invalid_capture_spec}
     end
   end
+
+  @spec validate_optional(term(), term(), term()) :: :ok | {:error, :invalid_capture_spec}
+  defp validate_optional(false, _mode, _bytes), do: :ok
+  defp validate_optional(true, :bytes, bytes) when is_integer(bytes), do: :ok
+  defp validate_optional(_optional, _mode, _bytes), do: {:error, :invalid_capture_spec}
 
   @spec normalize_delivery_key(term()) :: {:ok, PinKey.t()} | {:error, :invalid_pin_key}
   defp normalize_delivery_key(%PinKey{} = key), do: PinKey.new(key)

@@ -62,6 +62,7 @@ defmodule MingaAgent.Session do
   alias MingaAgent.Session.ConnectionTarget
   alias MingaAgent.Session.Continuation
   alias MingaAgent.Session.Dispatch
+  alias MingaAgent.Session.FileChange
   alias MingaAgent.Session.Outcome
   alias MingaAgent.Session.Prefix
   alias MingaAgent.Session.PrefixStore
@@ -138,6 +139,7 @@ defmodule MingaAgent.Session do
           continuation: Continuation.t(),
           checklist: Checklist.t(),
           checklist_archive: ChecklistArchive.t(),
+          file_changes: [FileChange.t()],
           subscriber_lifecycle: SubscriberLifecycle.t(),
           tool_approval_policy: tool_approval_policy(),
           tool_authority: map(),
@@ -1298,6 +1300,7 @@ defmodule MingaAgent.Session do
       continuation: Continuation.new(),
       checklist: Checklist.new(),
       checklist_archive: ChecklistArchive.new(),
+      file_changes: [],
       subscriber_lifecycle: SubscriberLifecycle.new(),
       tool_approval_policy: Keyword.get(opts, :tool_approval_policy, :interactive),
       tool_authority: %{
@@ -2373,12 +2376,15 @@ defmodule MingaAgent.Session do
   end
 
   def handle_call(
-        {:complete_tool_effect, request_id, checkpoint_id, tool_call_id, result_message},
+        {:complete_tool_effect, request_id, checkpoint_id, tool_call_id, result_message, change},
         _from,
         state
       )
       when is_binary(request_id) and is_binary(checkpoint_id) and is_binary(tool_call_id) do
-    with :ok <- invocation_storage_outcome(state, {request_id, checkpoint_id, tool_call_id}),
+    identity = {request_id, checkpoint_id, tool_call_id}
+
+    with :ok <- invocation_storage_outcome(state, identity),
+         {:ok, changes} <- retain_file_change(state.file_changes, identity, change),
          {:ok, _outcome, _reason} <- ToolCall.saved_outcome(result_message.metadata),
          {:ok, continuation} <-
            Continuation.complete_tool_effect(
@@ -2388,39 +2394,76 @@ defmodule MingaAgent.Session do
              tool_call_id,
              result_message
            ) do
-      candidate =
-        %{state | continuation: continuation}
-        |> install_saved_tool_result(tool_call_id, result_message)
-
-      case commit_effect_snapshot(state, candidate) do
-        {:ok, committed} ->
-          committed =
-            retire_completed_approval(committed, request_id, tool_call_id, result_message, :saved)
-
-          entries =
-            Map.delete(
-              committed.tool_authority.invocations,
-              {request_id, checkpoint_id, tool_call_id}
-            )
-
-          authority = %{committed.tool_authority | invocations: entries}
-          {:reply, :ok, %{committed | tool_authority: authority}}
-
-        {:error, reason} ->
-          failed =
-            mark_tool_outcome_persistence_failed(
-              state,
-              {request_id, checkpoint_id, tool_call_id},
-              reason,
-              result_message
-            )
-            |> retire_completed_approval(request_id, tool_call_id, result_message, :uncertain)
-
-          {:reply, {:error, {:tool_outcome_persistence_failed, reason}}, failed}
-      end
+      reply_completed_effect(state, continuation, changes, identity, result_message)
     else
       {:error, reason} ->
         {:reply, {:error, {:tool_outcome_persistence_failed, reason}}, state}
+    end
+  end
+
+  @spec reply_completed_effect(
+          state(),
+          Continuation.t(),
+          [FileChange.t()],
+          FileChange.identity(),
+          ReqLLM.Message.t()
+        ) ::
+          {:reply, :ok | {:error, term()}, state()}
+  defp reply_completed_effect(
+         %{continuation: continuation, file_changes: changes} = state,
+         continuation,
+         changes,
+         _identity,
+         _message
+       ),
+       do: {:reply, :ok, state}
+
+  defp reply_completed_effect(
+         state,
+         continuation,
+         changes,
+         {request_id, _, tool_call_id} = identity,
+         result_message
+       ) do
+    candidate =
+      %{state | continuation: continuation, file_changes: changes}
+      |> install_saved_tool_result(tool_call_id, result_message)
+
+    case commit_effect_snapshot(state, candidate) do
+      {:ok, committed} ->
+        committed =
+          retire_completed_approval(committed, request_id, tool_call_id, result_message, :saved)
+
+        entries =
+          Map.delete(
+            committed.tool_authority.invocations,
+            identity
+          )
+
+        authority = %{committed.tool_authority | invocations: entries}
+        {:reply, :ok, %{committed | tool_authority: authority}}
+
+      {:error, reason} ->
+        failed =
+          mark_tool_outcome_persistence_failed(
+            state,
+            identity,
+            reason,
+            result_message
+          )
+          |> retire_completed_approval(request_id, tool_call_id, result_message, :uncertain)
+
+        {:reply, {:error, {:tool_outcome_persistence_failed, reason}}, failed}
+    end
+  end
+
+  @spec retain_file_change([FileChange.t()], FileChange.identity(), FileChange.t() | nil) ::
+          {:ok, [FileChange.t()]} | {:error, :file_change_identity_conflict}
+  defp retain_file_change(changes, identity, change) do
+    case {Enum.find(changes, &(&1.identity == identity)), change} do
+      {same, same} -> {:ok, changes}
+      {nil, %FileChange{identity: ^identity}} -> {:ok, [change | changes]}
+      _ -> {:error, :file_change_identity_conflict}
     end
   end
 
@@ -3393,6 +3436,7 @@ defmodule MingaAgent.Session do
         continuation: Continuation.reset(state.continuation),
         checklist: Checklist.new(),
         checklist_archive: ChecklistArchive.new(),
+        file_changes: [],
         tool_authority: %{state.tool_authority | revision: make_ref(), invocations: %{}}
     }
 
@@ -4125,13 +4169,24 @@ defmodule MingaAgent.Session do
   defp reconciliation_outputs(%{continuation: %Continuation{tool_checkpoint: checkpoint}} = state) do
     with {:ok, store} <- ensure_artifact_store(state) do
       Enum.reduce_while(checkpoint.calls, {:ok, %{}}, fn call, acc ->
-        reconcile_delivery_output(call, acc, store, checkpoint.checkpoint_id)
+        reconcile_checkpoint_call(store, checkpoint, call, acc)
       end)
     end
   rescue
     ArgumentError -> {:error, :artifact_runtime_unavailable}
   catch
     :exit, reason -> {:error, {:artifact_runtime_unavailable, reason}}
+  end
+
+  @spec reconcile_checkpoint_call(GenServer.server(), map(), map(), {:ok, map()}) ::
+          {:cont, {:ok, map()}} | {:halt, {:error, term()}}
+  defp reconcile_checkpoint_call(store, checkpoint, call, acc) do
+    identity = {checkpoint.request_id, checkpoint.checkpoint_id, call.tool_call_id}
+
+    case FileChange.reconcile_delivery(store, identity) do
+      :ok -> reconcile_delivery_output(call, acc, store, checkpoint.checkpoint_id)
+      {:error, _reason} = error -> {:halt, error}
+    end
   end
 
   @spec reconcile_delivery_output(map(), {:ok, map()}, GenServer.server(), String.t()) ::
@@ -8660,6 +8715,7 @@ defmodule MingaAgent.Session do
         memory: Memory.read(state.session_store_dir),
         checklist: state.checklist,
         checklist_archive: state.checklist_archive,
+        file_changes: state.file_changes,
         pending_inputs: TurnExecution.pending_inputs(state.turn_execution),
         continuation: state.continuation
       }
@@ -8967,7 +9023,8 @@ defmodule MingaAgent.Session do
               transcript: state.transcript |> Transcript.reset([]) |> Transcript.touch(now),
               continuation: Continuation.reset(state.continuation),
               checklist: Checklist.new(),
-              checklist_archive: ChecklistArchive.new()
+              checklist_archive: ChecklistArchive.new(),
+              file_changes: []
           }
 
           {:ok, restored} = install_loaded_session_state(state, staged, execution, now)
@@ -9165,6 +9222,7 @@ defmodule MingaAgent.Session do
           continuation: data.continuation,
           checklist: Map.get(data, :checklist, Checklist.new()),
           checklist_archive: Map.get(data, :checklist_archive, ChecklistArchive.new()),
+          file_changes: Map.get(data, :file_changes, []),
           provider: lifecycle,
           credential_readiness: credential_readiness,
           credentials_configured: credentials_configured,
@@ -9319,6 +9377,7 @@ defmodule MingaAgent.Session do
         continuation: staged.continuation,
         checklist: staged.checklist,
         checklist_archive: staged.checklist_archive,
+        file_changes: staged.file_changes,
         persistence: persistence,
         provider: staged.provider,
         credential_readiness: staged.credential_readiness,

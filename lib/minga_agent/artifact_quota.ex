@@ -40,10 +40,10 @@ defmodule MingaAgent.ArtifactQuota do
   end
 
   @doc "Reserves an artifact, open capture, headers, and any expected data bytes."
-  @spec reserve_capture(server(), String.t(), non_neg_integer()) ::
+  @spec reserve_capture(server(), String.t(), non_neg_integer(), non_neg_integer() | nil) ::
           :ok | {:error, error_reason()}
-  def reserve_capture(server, namespace, bytes) do
-    GenServer.call(server, {:reserve_capture, namespace, bytes})
+  def reserve_capture(server, namespace, bytes, headroom \\ nil) do
+    GenServer.call(server, {:reserve_capture, namespace, bytes, headroom})
   end
 
   @doc "Reserves logical blob and index bytes before an append writes either file."
@@ -142,8 +142,8 @@ defmodule MingaAgent.ArtifactQuota do
     {:reply, reply, next_state}
   end
 
-  def handle_call({:reserve_capture, namespace, bytes}, _from, state) do
-    {reply, next_state} = State.reserve_capture(state, namespace, bytes)
+  def handle_call({:reserve_capture, namespace, bytes, headroom}, _from, state) do
+    {reply, next_state} = State.reserve_capture(state, namespace, bytes, headroom)
     {:reply, reply, next_state}
   end
 

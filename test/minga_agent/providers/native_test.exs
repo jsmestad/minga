@@ -279,7 +279,7 @@ defmodule MingaAgent.Providers.NativeTest do
         provider_subscriber_loop(owner, owner_ref, store)
 
       {:"$gen_call", from,
-       {:complete_tool_effect, request_id, checkpoint_id, tool_call_id, result_message}} ->
+       {:complete_tool_effect, request_id, checkpoint_id, tool_call_id, result_message, _change}} ->
         remember_completed_result(request_id, checkpoint_id, tool_call_id, result_message)
         GenServer.reply(from, :ok)
         provider_subscriber_loop(owner, owner_ref, store)
@@ -517,7 +517,7 @@ defmodule MingaAgent.Providers.NativeTest do
         )
 
       {:"$gen_call", from,
-       {:complete_tool_effect, request_id, checkpoint_id, tool_call_id, result_message}} ->
+       {:complete_tool_effect, request_id, checkpoint_id, tool_call_id, result_message, _change}} ->
         send(
           owner,
           {:terminal_persistence_attempt, request_id, checkpoint_id, tool_call_id, result_message}

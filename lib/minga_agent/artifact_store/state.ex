@@ -366,7 +366,9 @@ defmodule MingaAgent.ArtifactStore.State do
     with :ok <- validate_expected(spec, state.limits),
          id = random_id(),
          initial_charge = Limits.capture_header_bytes() + (spec.expected_bytes || 0),
-         :ok <- ArtifactQuota.reserve_capture(state.quota, state.namespace, initial_charge) do
+         headroom = required_capture_headroom(state.limits, spec.optional?),
+         :ok <-
+           ArtifactQuota.reserve_capture(state.quota, state.namespace, initial_charge, headroom) do
       row = new_open_row(id, delivery_key, spec, initial_charge)
       begin_reserved_capture(state, spec, row)
     else
@@ -374,6 +376,12 @@ defmodule MingaAgent.ArtifactStore.State do
         {{:error, normalize_write_error(reason)}, state}
     end
   end
+
+  @spec required_capture_headroom(Limits.t(), boolean()) :: non_neg_integer() | nil
+  defp required_capture_headroom(_limits, false), do: nil
+
+  defp required_capture_headroom(limits, true),
+    do: Limits.capture_header_bytes() + limits.capture_bytes + limits.capture_items * 8
 
   @spec begin_reserved_capture(t(), CaptureSpec.t(), Metadata.row()) ::
           {{:ok, Capture.t()} | {:error, term()}, t()}
