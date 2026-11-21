@@ -160,47 +160,39 @@ defmodule Minga.Frontend.Adapter.GUI.AgentTranscriptEncoder do
     end
   end
 
-  # Aligns the previously-sent keys against the new resident keys. The new head
-  # id is located in the previous keys; everything before it was removed from the
-  # store front (`trim_front`). The remainder must be an id-prefix of the new keys
-  # (pure forward growth); otherwise the transcript diverged (reorder/compaction)
-  # and a full_replace is required. Returns the strict `{id, hash}` prefix length
-  # of the remainder as `base_count`.
-  @spec align([key()], [key()]) :: :diverged | {non_neg_integer(), non_neg_integer()}
-  defp align(prev_keys, [{head_id, _} | _] = keys) do
-    case Enum.find_index(prev_keys, fn {id, _} -> id == head_id end) do
-      nil ->
-        :diverged
+  @typep alignment :: :diverged | {non_neg_integer(), non_neg_integer()}
 
-      trim_front ->
-        remainder = Enum.drop(prev_keys, trim_front)
+  # Count leading evictions by id, then count the unchanged keys of the
+  # retained prefix. After a body changes, the rest of the old ids must still
+  # match in order: a revision changes what we resend, not what can align.
+  @spec align([key()], [key()]) :: alignment()
+  defp align(prev_keys, keys), do: align_head(prev_keys, keys, 0)
 
-        if id_prefix?(remainder, keys) do
-          {trim_front, strict_prefix_len(remainder, keys)}
-        else
-          :diverged
-        end
-    end
-  end
+  @spec align_head([key()], [key()], non_neg_integer()) :: alignment()
+  defp align_head([{id, _} | _] = prev_keys, [{id, _} | _] = keys, trim_front),
+    do: align_keys(prev_keys, keys, trim_front, 0)
 
-  # True when `current` extends `previous` by id: at least as long, ids matching
-  # positionally over the previous range. Hashes may differ (last-message patch).
-  @spec id_prefix?([key()], [key()]) :: boolean()
-  defp id_prefix?(previous, current) do
-    length(current) >= length(previous) and
-      previous
-      |> Enum.zip(current)
-      |> Enum.all?(fn {{prev_id, _}, {cur_id, _}} -> prev_id == cur_id end)
-  end
+  defp align_head([_ | prev_keys], keys, trim_front),
+    do: align_head(prev_keys, keys, trim_front + 1)
 
-  # Number of leading entries identical in both id and content hash.
-  @spec strict_prefix_len([key()], [key()]) :: non_neg_integer()
-  defp strict_prefix_len(previous, current) do
-    previous
-    |> Enum.zip(current)
-    |> Enum.take_while(fn {p, c} -> p == c end)
-    |> length()
-  end
+  defp align_head([], _keys, _trim_front), do: :diverged
+
+  @spec align_keys([key()], [key()], non_neg_integer(), non_neg_integer()) :: alignment()
+  defp align_keys([key | prev_keys], [key | keys], trim_front, base_count),
+    do: align_keys(prev_keys, keys, trim_front, base_count + 1)
+
+  defp align_keys([{id, _} | prev_keys], [{id, _} | keys], trim_front, base_count),
+    do: align_ids(prev_keys, keys, trim_front, base_count)
+
+  defp align_keys([], _keys, trim_front, base_count), do: {trim_front, base_count}
+  defp align_keys(_prev_keys, _keys, _trim_front, _base_count), do: :diverged
+
+  @spec align_ids([key()], [key()], non_neg_integer(), non_neg_integer()) :: alignment()
+  defp align_ids([{id, _} | prev_keys], [{id, _} | keys], trim_front, base_count),
+    do: align_ids(prev_keys, keys, trim_front, base_count)
+
+  defp align_ids([], _keys, trim_front, base_count), do: {trim_front, base_count}
+  defp align_ids(_prev_keys, _keys, _trim_front, _base_count), do: :diverged
 
   # ── Frame building ──
 

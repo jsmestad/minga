@@ -23,6 +23,8 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
   alias MingaEditor.RenderPipeline.Input
   alias MingaEditor.RenderPipeline.Scroll
   alias MingaEditor.Renderer.Context
+  alias MingaEditor.Renderer.RenderWindow
+  alias MingaEditor.Renderer.TextPresentation
   alias MingaEditor.Renderer.WindowCache
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Highlighting
@@ -121,11 +123,6 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
   defp add_conceal(decs, start_pos, end_pos) do
     {_id, decs} = Decorations.add_conceal(decs, start_pos, end_pos, group: :test)
     decs
-  end
-
-  defp highlight_span(lines, line, start_col, width, capture_id) do
-    start_byte = Highlight.byte_offset_for_line(lines, line) + start_col
-    HighlightSpan.new(start_byte, start_byte + width, capture_id)
   end
 
   defp has_span?(%Row{spans: spans}, start_col, end_col) do
@@ -1351,19 +1348,20 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
              ]
     end
 
-    test "folded window rows preserve syntax highlight spans" do
-      content = "def folded\n  :ok\nend\nclass Visible\nend"
-      lines = String.split(content, "\n")
+    test "scrolled unwrapped fold rows preserve absolute syntax offsets and source hits" do
+      content = "é\ndef f\n🙂\nx\nclass X\n"
       state = gui_state(content: content)
       buffer = state.workspace.buffers.active
+      assert {:ok, false} = BufferProcess.set_option(buffer, :wrap, false)
+      assert :ok = BufferProcess.move_to(buffer, {1, 0})
 
       highlight =
         state.appearance.theme
         |> Highlight.from_theme()
         |> Highlight.put_names(["keyword"])
         |> Highlight.put_spans(1, [
-          highlight_span(lines, 0, 0, 3, 0),
-          highlight_span(lines, 3, 0, 5, 0)
+          HighlightSpan.new(3, 6, 0),
+          HighlightSpan.new(16, 21, 0)
         ])
 
       state =
@@ -1376,27 +1374,46 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
               )
         }
 
-      window = Map.fetch!(state.workspace.windows.map, state.workspace.windows.active)
-      window = EditorWindow.set_fold_ranges(window, [FoldRange.new!(0, 2)])
-      window = EditorWindow.fold_at(window, 0)
+      win_id = state.workspace.windows.active
+      window = Map.fetch!(state.workspace.windows.map, win_id)
+      window = EditorWindow.set_fold_ranges(window, [FoldRange.new!(1, 3)])
+      window = EditorWindow.fold_at(window, 1)
 
       windows =
         Windows.set_map(
           state.workspace.windows,
-          Map.put(state.workspace.windows.map, state.workspace.windows.active, window)
+          Map.put(state.workspace.windows.map, win_id, window)
         )
 
-      state = %{state | workspace: %{state.workspace | windows: windows}}
+      state =
+        %{state | workspace: SessionState.set_windows(state.workspace, windows)}
+        |> detach_scroll(1)
+        |> MingaEditor.WindowFocus.remember_active_cursor()
+        |> MingaEditor.RenderPipeline.compute_layout()
 
-      {[wf], _cursor, _state} = build_content(state)
+      {scrolls, input} = run_scroll_stage(state, Layout.get(state))
+
+      assert %{first_line: 1, wrap_on: false, snapshot: %{first_line_byte_offset: 3}} =
+               Map.fetch!(scrolls, win_id)
+
+      {[wf], _cursor, input} = finish_content(input, scrolls)
 
       [fold_row, visible_row | _rest] = wf.window_model.rows
       assert fold_row.row_type == :fold_start
-      assert fold_row.text == "def folded ··· 2 lines"
+      assert fold_row.buf_line == 1
+      assert fold_row.row_id == Row.stable_id(:fold_start, 1)
+      assert fold_row.text == "def f ··· 2 lines"
       assert has_span?(fold_row, 0, 3)
 
-      assert visible_row.text == "class Visible"
+      assert visible_row.buf_line == 4
+      assert visible_row.row_id == Row.stable_id(:normal, 4)
+      assert visible_row.text == "class X"
       assert has_span?(visible_row, 0, 5)
+
+      presentation = RenderWindow.text_presentation(Map.fetch!(input.windows.map, win_id))
+
+      assert {:ok, %{line: 1, byte: 5}} =
+               TextPresentation.resolve(presentation, 0, fold_row.row_id, 8)
     end
 
     test "decoration fold rows use stable decoration ids" do

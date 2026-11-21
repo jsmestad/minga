@@ -111,9 +111,12 @@ defmodule Minga.Frontend.Adapter.GUI.AgentTranscriptEncoderTest do
 
     test "keeps bare ID0 and elides user attachments at the 0x86 boundary" do
       messages = [{:user, "hi", [%{name: "ignored"}]}]
-      {frame, _} = Encoder.encode(model(1, messages), Caches.new())
+      {frame, caches} = Encoder.encode(model(1, messages), Caches.new())
 
       assert [{0, <<0x01, 2::32, "hi">>}] = decode(frame).entries
+
+      updated = [{:user, "hi", [%{name: "also ignored"}]}]
+      assert {nil, _caches} = Encoder.encode(model(1, updated), caches)
     end
 
     test "encodes every live body kind with retained kind bytes and key fields" do
@@ -451,6 +454,39 @@ defmodule Minga.Frontend.Adapter.GUI.AgentTranscriptEncoderTest do
       assert decoded.mode == @mode_full_replace
       assert ids(decoded) == [9, 2, 3]
     end
+
+    test "a body revision followed by a different id forces a full_replace" do
+      initial = [user(1, "a"), user(2, "b"), user(3, "c")]
+      {_frame, caches} = Encoder.encode(model(1, initial), Caches.new())
+
+      updated = [user(1, "a"), user(2, "revised"), user(4, "d")]
+      {frame, _} = Encoder.encode(model(1, updated), caches)
+
+      assert %{
+               mode: @mode_full_replace,
+               truncated: false,
+               count: 3,
+               entries: [
+                 {1, <<0x01, 1::32, "a">>},
+                 {2, <<0x01, 7::32, "revised">>},
+                 {4, <<0x01, 1::32, "d">>}
+               ]
+             } = decode(frame)
+    end
+
+    test "removing the last message forces a full_replace despite a matching prefix" do
+      initial = [user(1, "a"), user(2, "b"), user(3, "c")]
+      {_frame, caches} = Encoder.encode(model(1, initial), Caches.new())
+
+      {frame, _} = Encoder.encode(model(1, [user(1, "a"), user(2, "b")]), caches)
+
+      assert %{
+               mode: @mode_full_replace,
+               truncated: false,
+               count: 2,
+               entries: [{1, <<0x01, 1::32, "a">>}, {2, <<0x01, 1::32, "b">>}]
+             } = decode(frame)
+    end
   end
 
   describe "resident selection" do
@@ -481,6 +517,7 @@ defmodule Minga.Frontend.Adapter.GUI.AgentTranscriptEncoderTest do
       decoded = decode(frame)
 
       assert decoded.mode == @mode_append
+      assert decoded.trim_front == 0
       assert decoded.base == 2
       assert decoded.count == 0
       assert decoded.truncated
@@ -499,6 +536,43 @@ defmodule Minga.Frontend.Adapter.GUI.AgentTranscriptEncoderTest do
       assert decoded.base == 2
       assert decoded.truncated
       assert ids(decoded) == [5, 6]
+    end
+
+    test "eviction aligns a revised head by id and resends the remaining bodies" do
+      initial = [user(1, "a"), user(2, "b"), user(3, "c")]
+      {_frame, caches} = Encoder.encode(model(1, initial), Caches.new())
+
+      updated = [user(2, "revised"), user(3, "c"), user(4, "d")]
+      {frame, _} = Encoder.encode(model(1, updated, resident_truncated?: true), caches)
+
+      assert %{
+               mode: @mode_append,
+               truncated: true,
+               trim_front: 1,
+               base: 0,
+               count: 3,
+               entries: [
+                 {2, <<0x01, 7::32, "revised">>},
+                 {3, <<0x01, 1::32, "c">>},
+                 {4, <<0x01, 1::32, "d">>}
+               ]
+             } = decode(frame)
+    end
+
+    test "eviction without new or revised messages emits a trim-only append" do
+      kept = [user(2, "b"), user(3, "c")]
+      {_frame, caches} = Encoder.encode(model(1, [user(1, "a") | kept]), Caches.new())
+
+      {frame, _} = Encoder.encode(model(1, kept), caches)
+
+      assert %{
+               mode: @mode_append,
+               truncated: false,
+               trim_front: 1,
+               base: 2,
+               count: 0,
+               entries: []
+             } = decode(frame)
     end
   end
 
