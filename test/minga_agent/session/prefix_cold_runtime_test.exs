@@ -75,8 +75,6 @@ defmodule MingaAgent.Session.PrefixColdRuntimeTest do
     )
 
     script = """
-    Application.put_all_env(Config.Reader.read!("config/config.exs", env: :test))
-    {:ok, _} = Application.ensure_all_started(:minga)
     fixture = JSON.decode!(File.read!(hd(System.argv())))
     owner_absent? = fn ->
       try do
@@ -88,6 +86,8 @@ defmodule MingaAgent.Session.PrefixColdRuntimeTest do
     end
     true = owner_absent?.()
     {:ok, _} = MingaAgent.Tool.Output.Codec.decode(fixture["output"])
+    Code.ensure_loaded!(ReqLLM.Message)
+    Code.ensure_loaded!(ReqLLM.Message.ContentPart)
     {:ok, restored} = MingaAgent.Session.ContinuationCodec.decode(fixture["continuation"])
     true = map_size(restored.prefixes.epochs) == 1
     expected_epoch = fixture["epoch_id"]
@@ -98,7 +98,11 @@ defmodule MingaAgent.Session.PrefixColdRuntimeTest do
     [%{source: {:extension, owner}}] = prefix.schemas
     true = owner == fixture["absent_owner"]
     adapter = MingaAgent.Providers.Native.ReqLLMAdapter
-    schemas = MingaAgent.Tool.Registry.all()
+    registry = :cold_prefix_registry
+    {:ok, _} = MingaAgent.Tool.Registry.start_link(name: registry)
+    :ok = MingaAgent.ToolPacks.ReadOnly.register(registry)
+    :ok = MingaAgent.ToolPacks.LSP.register(registry)
+    schemas = MingaAgent.Tool.Registry.all(registry)
       |> Enum.map(&adapter.tool(&1, :registry))
       |> adapter.declarations()
     {:ok, changed} = MingaAgent.Session.PrefixStore.candidate(prefix, prefix.instructions,

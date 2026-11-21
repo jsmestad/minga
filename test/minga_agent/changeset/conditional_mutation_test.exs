@@ -212,34 +212,32 @@ defmodule MingaAgent.Changeset.ConditionalMutationTest do
                identity
              )
 
-    :ok = :sys.suspend(cs)
-    caller = self()
+    trace = :trace.session_create(:publication_wait, self(), [])
+    assert 1 = :trace.function(trace, {GenServer, :call, 3}, true, [:local])
+    :ok = :sys.suspend(cs, :infinity)
 
     task =
       Task.async(fn ->
-        send(caller, :publication_started)
-
-        result =
-          try do
-            Changeset.merge(cs)
-          catch
-            :exit, reason -> {:error, reason}
-          end
-
-        send(caller, {:publication_completed, result})
-        result
+        assert 1 = :trace.process(trace, self(), true, [:call])
+        Changeset.merge(cs)
       end)
 
     try do
-      assert_receive :publication_started
-      refute_receive {:publication_completed, _}, 5_100
+      # Observe the actual call deadline instead of waiting out the default timeout.
+      pid = task.pid
+
+      receive do
+        {:trace, ^pid, :call, {GenServer, :call, [^cs, :merge, timeout]}} ->
+          assert timeout == :infinity
+      end
+
       assert File.read!(Path.join(root, "file.txt")) == original
     after
-      :sys.resume(cs)
+      :sys.resume(cs, :infinity)
+      :trace.session_destroy(trace)
     end
 
-    assert_receive {:publication_completed, :ok}, 1_000
-    assert Task.await(task) == :ok
+    assert Task.await(task, :infinity) == :ok
     assert File.read!(Path.join(root, "file.txt")) == "published"
   end
 
