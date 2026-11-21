@@ -411,9 +411,20 @@ defmodule MingaAgent.MarkdownTest do
                Markdown.parse_blocks("    def hello\n    :world")
     end
 
-    test "preserves internal blank lines inside standalone indented code blocks" do
-      assert [%{kind: :code_block, lines: ["one", "", "two"]}] =
-               Markdown.parse_blocks("    one\n\n    two")
+    test "indented code keeps internal blank runs but leaves trailing runs to the spacer parser" do
+      blanks = ["", " \t" | List.duplicate("", 256)]
+      inside = Enum.join(["    one" | blanks] ++ ["    two"], "\n")
+      expected = ["one" | blanks] ++ ["two"]
+      assert [%{kind: :code_block, lines: ^expected}] = Markdown.parse_blocks(inside)
+
+      assert [
+               %{kind: :code_block, lines: ["one"]},
+               %{kind: :spacer, height: 2},
+               %{kind: :list_item, indent: 2, text: "nested"}
+             ] = Markdown.parse_blocks("    one\n\n \t\n    - nested")
+
+      assert [%{kind: :code_block, lines: ["one"]}, %{kind: :spacer, height: 2}] =
+               Markdown.parse_blocks("    one\n\n \t")
     end
 
     test "code paths use full-text fence ordinals and fall back to the last path" do
@@ -474,9 +485,12 @@ defmodule MingaAgent.MarkdownTest do
     test "unindented paragraph after list does not keep later indented code in the list" do
       assert [
                %{kind: :list_item, text: "item"},
-               %{kind: :paragraph, lines: ["outside list"]},
+               %{kind: :paragraph, lines: ["  continued", "outside list", "  still outside"]},
                %{kind: :code_block, lines: ["code"]}
-             ] = Markdown.parse_blocks("- item\noutside list\n    code")
+             ] =
+               Markdown.parse_blocks(
+                 "- item\n  continued\noutside list\n  still outside\n    code"
+               )
     end
 
     test "marks unclosed fenced code blocks incomplete for streaming" do
