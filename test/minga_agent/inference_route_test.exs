@@ -214,4 +214,133 @@ defmodule MingaAgent.InferenceRouteTest do
       end
     end
   end
+
+  describe "plan usage and setup values" do
+    alias MingaAgent.InferenceRoute.{PlanWindow, SetupAction}
+
+    defp plan_window(attrs) do
+      {:ok, window} =
+        [kind: "five_hour", utilization: 0.5, resets_at: nil, status: :allowed]
+        |> Keyword.merge(attrs)
+        |> PlanWindow.new()
+
+      window
+    end
+
+    test "windows validate every field and store utilization as a float" do
+      assert %PlanWindow{utilization: 1.0} = plan_window(utilization: 1)
+
+      for {field, value} <- [
+            kind: nil,
+            utilization: 2,
+            utilization: "0.5",
+            resets_at: 123,
+            status: :maybe
+          ] do
+        assert {:error, {:invalid_plan_window, ^field}} =
+                 PlanWindow.new(
+                   Keyword.put(
+                     [kind: "five_hour", utilization: 0.5, resets_at: nil, status: :allowed],
+                     field,
+                     value
+                   )
+                 )
+      end
+
+      assert {:ok, nil} = PlanWindow.new_list([])
+      assert {:ok, nil} = PlanWindow.new_list(nil)
+      assert {:error, {:invalid_plan_window, :list}} = PlanWindow.new_list(:all)
+    end
+
+    test "the busiest and the refusing windows are found for display" do
+      soon = DateTime.add(DateTime.utc_now(), 3_600)
+      later = DateTime.add(DateTime.utc_now(), 86_400 * 3)
+
+      five = plan_window(kind: "five_hour", utilization: 0.9, status: :rejected, resets_at: soon)
+      week = plan_window(kind: "seven_day", utilization: 1.0, status: :rejected, resets_at: later)
+
+      assert PlanWindow.busiest([five, week]) == week
+      assert PlanWindow.busiest(nil) == nil
+      assert PlanWindow.rejected([five, week]) == week
+      assert PlanWindow.rejected([plan_window([])]) == nil
+      assert PlanWindow.kind_label("five_hour") == "5h"
+      assert PlanWindow.kind_label("seven_day") == "7d"
+      assert PlanWindow.kind_label("monthly") == "monthly"
+      assert PlanWindow.percent(plan_window(utilization: 0.829)) == 82
+    end
+
+    test "reset times read as a clock time in the caller's zone, with the weekday on other days" do
+      utc = fn at -> at |> DateTime.to_naive() |> NaiveDateTime.to_erl() end
+      now = ~U[2026-11-21 09:00:00Z]
+
+      cases = [
+        {nil, nil},
+        {~U[2026-11-21 15:40:00Z], "3:40 PM"},
+        {~U[2026-11-21 00:05:00Z], "12:05 AM"},
+        {~U[2026-11-21 12:00:00Z], "12:00 PM"},
+        {~U[2026-11-24 09:15:00Z], "Tue 9:15 AM"}
+      ]
+
+      for {resets_at, expected} <- cases do
+        assert PlanWindow.reset_label(plan_window(resets_at: resets_at), now, utc) == expected
+      end
+
+      # A zone ahead of UTC moves the same instant onto the next local day.
+      ahead = fn at -> at |> DateTime.add(16 * 3_600) |> utc.() end
+
+      evening = ~U[2026-11-21 05:00:00Z]
+
+      assert PlanWindow.reset_label(
+               plan_window(resets_at: ~U[2026-11-21 15:40:00Z]),
+               evening,
+               ahead
+             ) ==
+               "Sun 7:40 AM"
+    end
+
+    test "a setup action needs a label and a description" do
+      assert {:ok, %SetupAction{label: "Use it", description: "No secrets."}} =
+               SetupAction.new(label: " Use it ", description: "No secrets.")
+
+      for invalid <- [[label: "", description: "x"], [label: "x"], ["x"], nil] do
+        assert {:error, :invalid_setup_action} = SetupAction.new(invalid)
+      end
+
+      base = %{
+        source: {:extension, :bridge},
+        id: "bridge",
+        module: MingaAgent.Test.FixtureInferenceRoute,
+        display_name: "Bridge"
+      }
+
+      assert {:ok, %Spec{setup_action: nil}} = Spec.new(base)
+
+      assert {:ok, %Spec{setup_action: %SetupAction{}}} =
+               Spec.new(Map.put(base, :setup_action, %{label: "Use", description: "Sign in."}))
+
+      assert {:error, :invalid_setup_action} = Spec.new(Map.put(base, :setup_action, %{}))
+    end
+
+    test "sentences use the short name and fall back to the display name" do
+      base = %{
+        source: {:extension, :bridge},
+        id: "bridge",
+        module: MingaAgent.Test.FixtureInferenceRoute,
+        display_name: "Claude (subscription)"
+      }
+
+      assert {:ok, %Spec{short_name: nil} = without} = Spec.new(base)
+      assert Spec.short_name(without) == "Claude (subscription)"
+
+      assert {:ok, %Spec{short_name: "Claude"} = with_short} =
+               Spec.new(Map.put(base, :short_name, " Claude "))
+
+      assert Spec.short_name(with_short) == "Claude"
+      assert with_short.display_name == "Claude (subscription)"
+
+      for invalid <- ["  ", 42] do
+        assert {:error, :invalid_short_name} = Spec.new(Map.put(base, :short_name, invalid))
+      end
+    end
+  end
 end

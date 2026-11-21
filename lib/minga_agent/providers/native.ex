@@ -43,6 +43,8 @@ defmodule MingaAgent.Providers.Native do
   alias MingaAgent.Event
   alias MingaAgent.Hooks.CommandRunner
   alias MingaAgent.InferenceRoute.ConversationRef
+  alias MingaAgent.InferenceRoute.PlanWindow
+  alias MingaAgent.InferenceRoute.Spec, as: InferenceRouteSpec
   alias MingaAgent.InferenceRouteRegistry
   alias MingaAgent.Hooks.Dispatcher, as: HookDispatcher
   alias MingaAgent.Hooks.PostToolUsePayload
@@ -3568,8 +3570,38 @@ defmodule MingaAgent.Providers.Native do
   defp contributed_error_event(lctx, reason) do
     {:contributed, route_id, _model_id} = lctx.selection.route.origin
     {kind, message} = contributed_error(lctx.inference_routes, route_id, route_failure(reason))
-    %Event.Error{kind: kind, message: message, provider: route_id}
+
+    case plan_limit_message(kind, lctx.inference_routes, route_id) do
+      {:ok, limit_message} ->
+        %Event.Error{
+          kind: kind,
+          message: limit_message,
+          provider: route_id,
+          recovery: :choose_model
+        }
+
+      :none ->
+        %Event.Error{kind: kind, message: message, provider: route_id}
+    end
   end
+
+  # A rate-limited route with a refusing window and a known reset gets the plan-limit sentence.
+  @spec plan_limit_message(Event.Error.kind(), GenServer.server(), String.t()) ::
+          {:ok, String.t()} | :none
+  defp plan_limit_message(:rate_limited, registry, route_id) do
+    with {:ok, entry} <- InferenceRouteRegistry.lookup(registry, route_id),
+         %PlanWindow{} = window <- PlanWindow.rejected(entry.status.plan_usage),
+         reset when is_binary(reset) <- InferenceRouteRegistry.reset_label(window) do
+      {:ok,
+       "#{InferenceRouteSpec.short_name(entry.spec)} plan limit reached. Resets at #{reset}. Switch model to continue."}
+    else
+      _no_reset -> :none
+    end
+  catch
+    :exit, _reason -> :none
+  end
+
+  defp plan_limit_message(_kind, _registry, _route_id), do: :none
 
   @spec route_failure(term()) :: term()
   defp route_failure(%ReqLLM.Error.API.Stream{cause: nil} = reason), do: reason

@@ -21,6 +21,10 @@ defmodule Minga.Extension.ModelRoutes do
   @spec register(map() | keyword(), keyword()) :: {:ok, Reporter.t()} | {:error, register_error()}
   def register(_attrs, _opts \\ []), do: raise("minga_sdk is compile-time only")
 
+  @spec report_usage(Reporter.t(), [MingaAgent.InferenceRoute.PlanWindow.t() | map()], keyword()) ::
+          :ok | {:error, report_error() | {:invalid_plan_window, atom()}}
+  def report_usage(_reporter, _windows, _opts \\ []), do: raise("minga_sdk is compile-time only")
+
   @spec report_status(Reporter.t(), term(), keyword()) :: :ok | {:error, report_error()}
   def report_status(_reporter, _availability, _opts \\ []),
     do: raise("minga_sdk is compile-time only")

@@ -30,7 +30,7 @@ defmodule Minga.Extension.ModelRoutes do
   @doc """
   Registers a model route owned by the calling extension.
 
-  Accepts `:id`, `:module`, and `:display_name`, plus an optional `:config` keyword passed to the route's `models/1` callback. Options may include `:registry` to target a private registry.
+  Accepts `:id`, `:module`, and `:display_name`, plus an optional `:short_name` used inside sentences (for example "Claude" in "Claude plan limit reached."; defaults to `:display_name`), an optional `:setup_action` (`label` and `description`) shown as a setup row in `/model`, and an optional `:config` keyword passed to the route's `models/1` callback whenever Minga lists its models. Options may include `:registry` to target a private registry.
   """
   @spec register(map() | keyword(), keyword()) ::
           {:ok, Reporter.t()} | {:error, register_error()}
@@ -38,7 +38,10 @@ defmodule Minga.Extension.ModelRoutes do
     attrs = Map.new(attrs)
 
     with {:ok, source} <- extension_source() do
-      spec_attrs = attrs |> Map.take([:id, :module, :display_name]) |> Map.put(:source, source)
+      spec_attrs =
+        attrs
+        |> Map.take([:id, :module, :display_name, :short_name, :setup_action])
+        |> Map.put(:source, source)
 
       InferenceRouteRegistry.register(registry(opts), spec_attrs,
         config: Map.get(attrs, :config, [])
@@ -55,6 +58,21 @@ defmodule Minga.Extension.ModelRoutes do
           :ok | {:error, InferenceRouteRegistry.report_error()}
   def report_status(%Reporter{} = reporter, availability, opts \\ []) do
     InferenceRouteRegistry.report_status(registry(opts), reporter, availability)
+  end
+
+  @doc """
+  Reports subscription limit windows through a reporter returned by `register/2`. Works from any process.
+
+  Each window has `kind` (for example `"five_hour"`), `utilization` from 0 to 1, `resets_at` (a `DateTime` or nil), and `status` (`:allowed`, `:warning`, or `:rejected`). Report an empty list when you have no usage data; Minga then shows nothing. Usage is kept separately from availability, so either report leaves the other unchanged.
+  """
+  @spec report_usage(
+          Reporter.t(),
+          [MingaAgent.InferenceRoute.PlanWindow.t() | map() | keyword()],
+          keyword()
+        ) ::
+          :ok | {:error, InferenceRouteRegistry.report_error()}
+  def report_usage(%Reporter{} = reporter, windows, opts \\ []) when is_list(windows) do
+    InferenceRouteRegistry.report_usage(registry(opts), reporter, windows)
   end
 
   @spec extension_source() :: {:ok, {:extension, atom()}} | {:error, :no_extension_context}

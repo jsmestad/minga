@@ -18,6 +18,9 @@ defmodule MingaEditor.UI.Picker.AgentModelSource do
   alias MingaEditor.Agent.ConnectionSetup
   alias MingaEditor.Agent.UIState
   alias MingaEditor.PickerUI
+  alias MingaAgent.InferenceRoute.PlanWindow
+  alias MingaAgent.InferenceRoute.Spec, as: InferenceRouteSpec
+  alias MingaEditor.Shell.Traditional.NoticeWorkflow
   alias MingaEditor.Shell.Traditional.Workflow
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.UI.Picker.Candidate
@@ -81,7 +84,7 @@ defmodule MingaEditor.UI.Picker.AgentModelSource do
         items =
           Enum.map(models, &with_origin(format_candidate(&1), origin, {:model, &1.selection}))
 
-        {:ok, items ++ actions,
+        {:ok, route_setup_items(origin) ++ items ++ actions,
          discovery_meta(target.session, notice, validity, origin.connection)}
 
       {:error, _reason} ->
@@ -129,8 +132,58 @@ defmodule MingaEditor.UI.Picker.AgentModelSource do
   def on_select(%Item{meta: %{intent: {:resume, %ConnectionPrompt{} = prompt}}}, state),
     do: ConnectionSetup.resume(state, prompt)
 
+  # The route check runs on the connection effect worker; the notice shows it is in progress.
+  def on_select(
+        %Item{
+          meta: %{
+            workspace_id: id,
+            target: target,
+            intent: {:check_route, _route_id, name} = intent
+          }
+        },
+        state
+      ) do
+    state
+    |> NoticeWorkflow.publish("Checking #{name}…")
+    |> ConnectionAction.schedule(id, target, intent)
+  end
+
   def on_select(%Item{meta: %{workspace_id: id, target: target, intent: intent}}, state),
     do: ConnectionAction.schedule(state, id, target, intent)
+
+  # Setup rows come from the registry in this fetch worker, after discovery refreshed route availability.
+  @spec route_setup_items(map()) :: [Item.t()]
+  defp route_setup_items(%{target: %{session: session}} = origin) when node(session) == node() do
+    case Session.inference_route_setups(session) do
+      {:ok, entries} ->
+        Enum.map(entries, fn entry ->
+          intent = {:check_route, entry.spec.id, InferenceRouteSpec.short_name(entry.spec)}
+          with_origin(setup_item(entry), origin, intent)
+        end)
+
+      {:error, :unsupported} ->
+        []
+    end
+  end
+
+  defp route_setup_items(_remote), do: []
+
+  @spec setup_item(MingaAgent.InferenceRouteRegistry.Entry.t()) :: Item.t()
+  defp setup_item(%{spec: %{setup_action: action} = spec, status: status}) do
+    %Item{
+      id: {:route_setup, spec.id},
+      label: action.label,
+      description: "#{action.description} · #{setup_readiness(status)}",
+      search_text: "#{action.label} #{spec.display_name} setup",
+      two_line: true
+    }
+  end
+
+  @doc "Describes a route's readiness for its setup row, using the route's own account and remedy text."
+  @spec setup_readiness(MingaAgent.InferenceRoute.Status.t()) :: String.t()
+  def setup_readiness(%{availability: {:ready, account}}), do: "Ready: #{account}"
+  def setup_readiness(%{availability: {:unavailable, _reason, remedy}}), do: remedy
+  def setup_readiness(%{availability: :unknown}), do: "Select to check"
 
   @spec discovery_meta(
           pid(),
@@ -302,6 +355,7 @@ defmodule MingaEditor.UI.Picker.AgentModelSource do
       [
         route_name,
         readiness_label(status),
+        plan_usage_label(status),
         format_context(selection.policy.limits.context),
         format_thinking(selection),
         format_capabilities(selection),
@@ -400,6 +454,21 @@ defmodule MingaEditor.UI.Picker.AgentModelSource do
     do: "Unavailable: #{remedy}"
 
   defp readiness_label(%{availability: :unknown}), do: "Availability not checked"
+
+  # The busiest reported window, such as "82% of 5h limit · resets 3:40 PM"; nothing without data.
+  @spec plan_usage_label(MingaAgent.InferenceRoute.Status.t()) :: String.t()
+  defp plan_usage_label(%{plan_usage: windows}) do
+    case PlanWindow.busiest(windows) do
+      nil -> ""
+      window -> usage_text(window, MingaAgent.InferenceRouteRegistry.reset_label(window))
+    end
+  end
+
+  @spec usage_text(PlanWindow.t(), String.t() | nil) :: String.t()
+  defp usage_text(window, nil),
+    do: "#{PlanWindow.percent(window)}% of #{PlanWindow.kind_label(window.kind)} limit"
+
+  defp usage_text(window, reset), do: "#{usage_text(window, nil)} · resets #{reset}"
 
   @spec cost_mode_label(ModelSelection.Policy.t()) :: String.t()
   defp cost_mode_label(%{cost_mode: :subscription}), do: "subscription"

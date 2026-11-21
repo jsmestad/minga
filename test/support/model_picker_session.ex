@@ -13,12 +13,15 @@ defmodule MingaAgent.Test.ModelPickerSession do
 
   @impl true
   @spec handle_call(
-          :begin_model_discovery | :get_available_models,
+          :begin_model_discovery | :get_available_models | :inference_route_context,
           GenServer.from(),
           candidates()
         ) ::
-          {:reply, :local | {:ok, candidates()}, candidates()}
+          {:reply, :local | {:ok, candidates()} | {:error, :unsupported}, candidates()}
   def handle_call(:begin_model_discovery, _from, candidates), do: {:reply, :local, candidates}
+
+  def handle_call(:inference_route_context, _from, candidates),
+    do: {:reply, {:error, :unsupported}, candidates}
 
   def handle_call(:get_available_models, _from, candidates),
     do: {:reply, {:ok, candidates}, candidates}

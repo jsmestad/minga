@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- Subscription model routes can show a setup row in `/model` that checks the route's sign-in off the editor and reports the exact command to run, show their plan usage and reset time on model rows, and refresh their model list whenever Minga checks them. Routes can declare a `short_name` such as "Claude" for these sentences. When a plan limit is reached, the chat says when it resets and, on macOS, offers a "Choose another model" action that keeps the draft.
 - Extensions can add model routes with `Minga.Extension.ModelRoutes.register/2`. Their models appear in `/model` with the route's own readiness, limits, and thinking levels, and they run inside Minga's normal agent turn: tools, approvals, retries, compaction, and history stay in Minga. An unavailable or removed route never becomes the active model, and Minga never falls back to another model. Route-only settings go in `routes.<route_id>.env` in `credentials.json`. The route contract uses only Minga-owned values, so routes keep working across Minga's internal model-library changes.
 - `/model` can select Apple Intelligence without credentials on eligible macOS 27+ devices in builds that include the inference helper. It runs on device with a compact file tool set and keeps normal approvals.
 - `SPC h a` searches command names and descriptions and opens the selected command's help without running it.

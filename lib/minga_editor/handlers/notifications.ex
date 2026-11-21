@@ -44,6 +44,32 @@ defmodule MingaEditor.Handlers.Notifications do
     )
   end
 
+  @doc """
+  Shows a model's plan limit with a "Choose another model" action that opens `/model`.
+
+  The chat transcript already carries the same sentence; this adds the action. Opening the picker keeps the draft.
+  """
+  @spec model_limit_reached(state(), String.t()) :: state()
+  def model_limit_reached(state, message) when is_binary(message) do
+    put_notification(
+      state,
+      Notification.new(
+        id: "agent:model_limit",
+        level: :warning,
+        title: "Plan limit reached",
+        body: message,
+        source: "Agent",
+        actions: [
+          %{
+            id: "choose_model",
+            label: "Choose another model",
+            dispatch: {:command, :agent_pick_model}
+          }
+        ]
+      )
+    )
+  end
+
   # ── Private helpers ──────────────────────────────────────────────────
 
   @spec put_notification(state(), Notification.t()) :: state()

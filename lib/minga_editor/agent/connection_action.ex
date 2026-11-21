@@ -1,6 +1,6 @@
 defmodule MingaEditor.Agent.ConnectionAction do
   @moduledoc """
-  Executes model selection, connection retry and exact cancellation outside the Editor.
+  Executes model selection, connection retry, exact cancellation, and model route checks outside the Editor.
 
   Every request retains the offered workspace and Session target. Session validates the target at the mutation boundary; canonical connection events update presentation. Results never optimistically install a model or restore focus to a workspace the user left.
   """
@@ -23,7 +23,11 @@ defmodule MingaEditor.Agent.ConnectionAction do
   alias MingaEditor.State.Workspace
   alias MingaEditor.State.Workspace.Agent, as: WorkspaceAgent
 
-  @type intent :: {:model, String.t() | ModelSelection.t()} | :retry | {:cancel, reference()}
+  @type intent ::
+          {:model, String.t() | ModelSelection.t()}
+          | :retry
+          | {:cancel, reference()}
+          | {:check_route, route_id :: String.t(), short_name :: String.t()}
   @type t :: %__MODULE__{
           workspace_id: non_neg_integer(),
           target: ConnectionTarget.t(),
@@ -91,10 +95,11 @@ defmodule MingaEditor.Agent.ConnectionAction do
   end
 
   @impl true
-  @spec run(t()) :: {:ok, :applied} | {:error, term()}
+  @spec run(t()) :: {:ok, :applied | {:notice, String.t()}} | {:error, term()}
   def run(%__MODULE__{target: target, intent: intent}) do
     case execute(target, intent) do
       :ok -> {:ok, :applied}
+      {:notice, message} -> {:ok, {:notice, message}}
       {:error, reason} -> {:error, reason}
     end
   catch
@@ -113,13 +118,30 @@ defmodule MingaEditor.Agent.ConnectionAction do
   @impl true
   @spec render?(Outcome.t()) :: boolean()
   def render?(%Outcome{value: {:failed, _reason}}), do: true
+  def render?(%Outcome{value: {:completed, {:notice, _message}}}), do: true
   def render?(%Outcome{}), do: false
 
-  @spec execute(ConnectionTarget.t(), intent()) :: :ok | {:error, term()}
+  @spec execute(ConnectionTarget.t(), intent()) ::
+          :ok | {:notice, String.t()} | {:error, term()}
   defp execute(target, {:model, selection}),
     do: Session.set_model_for_target(target.session, target, selection)
 
   defp execute(target, :retry), do: Session.retry_connection(target.session, target)
+
+  defp execute(target, {:check_route, route_id, name}) do
+    case Session.check_inference_route(target.session, route_id) do
+      {:ok, entry} -> {:notice, route_check_message(name, entry.status)}
+      {:error, :not_found} -> {:error, "#{name} is no longer available. Reopen /model."}
+      {:error, :unsupported} -> {:error, "#{name} needs the Native agent backend."}
+    end
+  end
+
+  @spec route_check_message(String.t(), MingaAgent.InferenceRoute.Status.t()) :: String.t()
+  defp route_check_message(name, %{availability: {:ready, account}}),
+    do: "#{name} is ready: #{account}."
+
+  defp route_check_message(_name, status),
+    do: MingaEditor.UI.Picker.AgentModelSource.setup_readiness(status)
 
   @spec resource(t()) :: term()
   defp resource(%__MODULE__{target: target}), do: {:agent_connection, target.session}
@@ -166,6 +188,24 @@ defmodule MingaEditor.Agent.ConnectionAction do
     else
       ui = workspace.payload.agent_ui
       workspace = Workspace.set_agent_ui(workspace, failure_notice(ui, effect.target, reason))
+      tab_bar = TabBar.accept_workspace(tab_bar, workspace)
+      shell_state = ShellState.install_tab_bar(Runtime.state(state.shell_runtime), tab_bar)
+
+      {%{
+         state
+         | shell_runtime: Runtime.install_traditional_state(state.shell_runtime, shell_state)
+       }, outcome}
+    end
+  end
+
+  defp apply_owned(state, workspace, %Outcome{value: {:completed, {:notice, message}}} = outcome) do
+    tab_bar = state.shell_runtime.state.tab_bar
+
+    if TabBar.active_workspace_id(tab_bar) == workspace.id do
+      {NoticeWorkflow.publish(state, message), outcome}
+    else
+      ui = UIState.push_toast(workspace.payload.agent_ui, message, :info)
+      workspace = Workspace.set_agent_ui(workspace, ui)
       tab_bar = TabBar.accept_workspace(tab_bar, workspace)
       shell_state = ShellState.install_tab_bar(Runtime.state(state.shell_runtime), tab_bar)
 
