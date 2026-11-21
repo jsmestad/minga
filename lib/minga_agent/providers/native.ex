@@ -278,8 +278,8 @@ defmodule MingaAgent.Providers.Native do
     model = Keyword.get(opts, :model, config.model)
     requested_thinking = Keyword.get(opts, :thinking_level)
     selection = initial_selection!(opts, config, model, requested_thinking)
-    project_root = Keyword.get(opts, :project_root) || detect_project_root() || File.cwd!()
     requested_view = Keyword.get(opts, :project_view)
+    project_root = session_project_root(requested_view, opts)
 
     max_retries = Keyword.get(opts, :max_retries, config.max_retries)
     max_turns = Keyword.get(opts, :max_turns, config.max_turns)
@@ -559,6 +559,16 @@ defmodule MingaAgent.Providers.Native do
 
   @spec configured_mcp_servers_from_state(map()) :: [MCPServerConfig.t()]
   defp configured_mcp_servers_from_state(state), do: state.configured_mcp_configs
+
+  # A supplied project view is the session's file owner, so its root is the
+  # single root every tool resolves against. Without a view, the caller's
+  # explicit root wins over the global project and the launch directory.
+  @spec session_project_root(ProjectView.t() | nil, keyword()) :: String.t()
+  defp session_project_root(%ProjectView{project_root: root}, _opts), do: root
+
+  defp session_project_root(nil, opts) do
+    Keyword.get(opts, :project_root) || detect_project_root() || File.cwd!()
+  end
 
   @spec init_edit_view(ProjectView.t() | nil, String.t()) ::
           {ProjectView.t(), pid() | nil, pid() | nil}

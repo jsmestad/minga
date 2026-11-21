@@ -54,9 +54,9 @@ defmodule MingaAgent.ToolRouter do
   """
   @spec read_file(context(), String.t()) :: {:ok, binary()} | {:error, term()}
   def read_file(%Context{project_view: %ProjectView{} = view}, path) do
-    project_view_result(fn ->
-      ProjectView.read_file(view, project_view_relative_path(view, path))
-    end)
+    with {:ok, logical_path} <- ProjectView.logical_path(view, path) do
+      project_view_result(fn -> ProjectView.read_file(view, logical_path) end)
+    end
   end
 
   def read_file(%Context{fork_store: store} = context, path) when is_pid(store) do
@@ -65,7 +65,9 @@ defmodule MingaAgent.ToolRouter do
         Minga.Buffer.Fork.read_file(fork)
 
       {:ok, {:changeset, changeset}} ->
-        Changeset.read_file(changeset, normalize_path(changeset, path))
+        with {:ok, relative} <- normalize_changeset_path(changeset, path, false) do
+          Changeset.read_file(changeset, relative)
+        end
 
       :not_found ->
         read_file_changeset_or_passthrough(context, path)
@@ -116,14 +118,11 @@ defmodule MingaAgent.ToolRouter do
           Minga.Buffer.FileMutation.operation()
         ) :: {:ok, Minga.Buffer.FileMutation.Receipt.t()} | {:error, term()}
   def conditional_mutate(%Context{project_view: %ProjectView{} = view}, path, expected, operation) do
-    project_view_result(fn ->
-      ProjectView.conditional_mutate(
-        view,
-        project_view_relative_path(view, path),
-        expected,
-        operation
-      )
-    end)
+    with {:ok, logical_path} <- ProjectView.logical_path(view, path) do
+      project_view_result(fn ->
+        ProjectView.conditional_mutate(view, logical_path, expected, operation)
+      end)
+    end
   end
 
   def conditional_mutate(%Context{fork_store: store} = context, path, expected, operation)
@@ -191,9 +190,9 @@ defmodule MingaAgent.ToolRouter do
   @spec list_directory(context(), String.t()) ::
           {:ok, [ProjectView.Backend.directory_entry()]} | :passthrough | {:error, term()}
   def list_directory(%Context{project_view: %ProjectView{} = view}, path) do
-    project_view_result(fn ->
-      ProjectView.list_directory(view, project_view_relative_path(view, path))
-    end)
+    with {:ok, logical_path} <- ProjectView.logical_path(view, path) do
+      project_view_result(fn -> ProjectView.list_directory(view, logical_path) end)
+    end
   end
 
   def list_directory(%Context{changeset: cs}, path) when cs != nil and is_pid(cs) do
@@ -262,11 +261,10 @@ defmodule MingaAgent.ToolRouter do
   def command_env_result(%Context{} = ctx), do: resolve_command_env(ctx)
 
   @spec resolve_filesystem_path(context(), String.t()) :: route_result(String.t())
-  defp resolve_filesystem_path(%Context{project_view: %ProjectView{} = view}, path) do
-    case project_view_result(fn -> ProjectView.prepare_working_dir(view) end) do
-      {:ok, cwd} -> {:ok, Path.expand(project_view_relative_path(view, path), cwd)}
-      {:error, {:project_view_unavailable, _}} = error -> error
-      {:error, reason} -> {:error, {:project_view_unavailable, {:working_dir_failed, reason}}}
+  defp resolve_filesystem_path(%Context{project_view: %ProjectView{} = view} = ctx, path) do
+    with {:ok, logical_path} <- ProjectView.logical_path(view, path),
+         {:ok, cwd} <- resolve_working_dir(ctx) do
+      {:ok, Path.expand(logical_path, cwd)}
     end
   end
 
@@ -402,8 +400,8 @@ defmodule MingaAgent.ToolRouter do
           {:ok, binary()} | {:error, term()} | :passthrough
   defp read_file_changeset_or_passthrough(%Context{changeset: cs}, path)
        when cs != nil and is_pid(cs) do
-    with :ok <- changeset_available(cs) do
-      relative = normalize_path(cs, path)
+    with :ok <- changeset_available(cs),
+         {:ok, relative} <- normalize_changeset_path(cs, path, false) do
       Changeset.read_file(cs, relative)
     end
   end
@@ -469,14 +467,6 @@ defmodule MingaAgent.ToolRouter do
 
   # ── Private: path normalization ─────────────────────────────────────────────
 
-  @spec project_view_relative_path(ProjectView.t(), String.t()) :: String.t()
-  defp project_view_relative_path(%ProjectView{} = view, path) do
-    path
-    |> Path.relative_to(view.project_root)
-    |> String.trim_leading("/")
-    |> String.trim_leading("./")
-  end
-
   @spec normalize_changeset_path(pid(), String.t(), boolean()) ::
           {:ok, String.t()} | {:error, :invalid_path | :path_traversal}
   defp normalize_changeset_path(cs, path, allow_root?) do
@@ -495,14 +485,6 @@ defmodule MingaAgent.ToolRouter do
       {:ok, Path.relative_to(target, root)}
     else
       {:error, :path_traversal}
-    end
-  end
-
-  @spec normalize_path(pid(), String.t()) :: String.t()
-  defp normalize_path(cs, path) do
-    case normalize_changeset_path(cs, path, false) do
-      {:ok, relative_path} -> relative_path
-      {:error, _reason} -> Path.relative_to(path, Changeset.project_root(cs))
     end
   end
 end

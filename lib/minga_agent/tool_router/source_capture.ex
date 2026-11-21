@@ -14,6 +14,7 @@ defmodule MingaAgent.ToolRouter.SourceCapture do
   alias Minga.Buffer.Fork
   alias MingaAgent.Changeset
   alias MingaAgent.ProjectView
+  alias MingaAgent.ProjectView.PathResolver
   alias MingaAgent.ProjectView.Source
   alias MingaAgent.Tool.Output
   alias MingaAgent.Tool.Limitation
@@ -125,7 +126,8 @@ defmodule MingaAgent.ToolRouter.SourceCapture do
 
   @spec snapshot(Context.t(), String.t(), capture_opts()) :: snapshot_result()
   defp snapshot(%Context{project_view: %ProjectView{} = view}, path, opts) do
-    with {:ok, source} <- ProjectView.resolve_source(view, project_view_relative_path(view, path)) do
+    with {:ok, logical_path} <- ProjectView.logical_path(view, path),
+         {:ok, source} <- ProjectView.resolve_source(view, logical_path) do
       owner_snapshot(source.owner, :project_view, source.source_id, opts)
     end
   catch
@@ -138,12 +140,7 @@ defmodule MingaAgent.ToolRouter.SourceCapture do
         owner_snapshot({:fork, fork}, :fork, path, opts)
 
       {:ok, {:changeset, changeset}} ->
-        owner_snapshot(
-          {:changeset, changeset, normalize_changeset_path(changeset, path)},
-          :changeset,
-          path,
-          opts
-        )
+        changeset_snapshot(changeset, path, opts)
 
       :not_found ->
         snapshot_changeset_or_direct(context, path, opts)
@@ -161,12 +158,7 @@ defmodule MingaAgent.ToolRouter.SourceCapture do
   @spec snapshot_changeset_or_direct(Context.t(), String.t(), capture_opts()) :: snapshot_result()
   defp snapshot_changeset_or_direct(%Context{changeset: changeset}, path, opts)
        when is_pid(changeset) do
-    owner_snapshot(
-      {:changeset, changeset, normalize_changeset_path(changeset, path)},
-      :changeset,
-      path,
-      opts
-    )
+    changeset_snapshot(changeset, path, opts)
   catch
     :exit, reason -> {:error, {:changeset_unavailable, reason}}
   end
@@ -178,6 +170,13 @@ defmodule MingaAgent.ToolRouter.SourceCapture do
     end
   catch
     :exit, reason -> {:error, {:buffer_lookup_failed, reason}}
+  end
+
+  @spec changeset_snapshot(pid(), String.t(), capture_opts()) :: snapshot_result()
+  defp changeset_snapshot(changeset, path, opts) do
+    with {:ok, relative_path} <- normalize_changeset_path(changeset, path) do
+      owner_snapshot({:changeset, changeset, relative_path}, :changeset, path, opts)
+    end
   end
 
   @spec owner_snapshot(owner(), Revision.source_kind(), String.t(), capture_opts()) ::
@@ -1172,17 +1171,12 @@ defmodule MingaAgent.ToolRouter.SourceCapture do
     range
   end
 
-  @spec project_view_relative_path(ProjectView.t(), String.t()) :: String.t()
-  defp project_view_relative_path(%ProjectView{} = view, path) do
-    path
-    |> Path.relative_to(view.project_root)
-    |> String.trim_leading("/")
-    |> String.trim_leading("./")
-  end
-
-  @spec normalize_changeset_path(pid(), String.t()) :: String.t()
+  @spec normalize_changeset_path(pid(), String.t()) ::
+          {:ok, String.t()} | {:error, :path_traversal}
   defp normalize_changeset_path(changeset, path) do
-    Path.relative_to(path, Changeset.project_root(changeset))
+    changeset
+    |> Changeset.project_root()
+    |> PathResolver.logical_path(path)
   end
 
   @spec disk_error(String.t(), term()) :: String.t()

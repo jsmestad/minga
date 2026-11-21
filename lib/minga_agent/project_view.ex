@@ -8,6 +8,7 @@ defmodule MingaAgent.ProjectView do
   alias MingaAgent.ProjectView
   alias MingaAgent.ProjectView.Direct
   alias MingaAgent.ProjectView.Overlay
+  alias MingaAgent.ProjectView.PathResolver
   alias MingaAgent.ProjectView.Source
 
   @typedoc "Project view handle."
@@ -32,6 +33,16 @@ defmodule MingaAgent.ProjectView do
   @spec overlay(String.t(), keyword()) :: {:ok, t()} | {:error, term()}
   def overlay(project_root, opts \\ []) when is_binary(project_root) do
     Overlay.create(project_root, opts)
+  end
+
+  @doc """
+  Maps a tool path to this view's logical path.
+
+  Relative paths are already logical. An absolute path is accepted only when it is `project_root` or inside it; any other absolute path returns `{:error, :path_traversal}`.
+  """
+  @spec logical_path(t(), String.t()) :: {:ok, String.t()} | {:error, :path_traversal}
+  def logical_path(%__MODULE__{project_root: root}, path) when is_binary(path) do
+    PathResolver.logical_path(root, path)
   end
 
   @doc "Reads a file from the view."

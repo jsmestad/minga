@@ -105,6 +105,56 @@ defmodule MingaAgent.ToolRouterTest do
     end
   end
 
+  describe "ProjectView path resolution against a single root" do
+    @describetag :tmp_dir
+
+    setup %{tmp_dir: dir} do
+      dir = Path.expand(dir)
+      project = Path.join(dir, "project")
+      launch_dir = Path.join(dir, "launch")
+      File.mkdir_p!(project)
+      File.mkdir_p!(launch_dir)
+      File.write!(Path.join(project, "notes.md"), "project notes\n")
+      File.write!(Path.join(launch_dir, "notes.md"), "launch notes\n")
+
+      # The location the old resolver produced by joining the absolute launch
+      # path under the project root. It must never be read.
+      mangled = Path.join(project, Path.relative_to(Path.join(launch_dir, "notes.md"), "/"))
+      File.mkdir_p!(Path.dirname(mangled))
+      File.write!(mangled, "mangled notes\n")
+
+      {:ok, view} = ProjectView.direct(project)
+      on_exit(fn -> ProjectView.close(view) end)
+
+      %{ctx: ToolRouter.context(view, nil, nil), project: project, launch_dir: launch_dir}
+    end
+
+    test "a relative path resolves against the view root", %{ctx: ctx} do
+      assert ToolRouter.read_file(ctx, "notes.md") == {:ok, "project notes\n"}
+    end
+
+    test "an absolute path inside the view root is accepted", %{ctx: ctx, project: project} do
+      assert ToolRouter.read_file(ctx, Path.join(project, "notes.md")) == {:ok, "project notes\n"}
+    end
+
+    test "an absolute path under another root is rejected instead of joined under the view root",
+         %{ctx: ctx, launch_dir: launch_dir} do
+      path = Path.join(launch_dir, "notes.md")
+
+      assert ToolRouter.read_file(ctx, path) == {:error, :path_traversal}
+      assert ToolRouter.list_directory(ctx, launch_dir) == {:error, :path_traversal}
+
+      assert ToolRouter.conditional_mutate(ctx, path, :absent, {:create, "x"}) ==
+               {:error, :path_traversal}
+
+      assert File.read!(path) == "launch notes\n"
+    end
+
+    test "a relative .. escape is rejected", %{ctx: ctx} do
+      assert ToolRouter.read_file(ctx, "../launch/notes.md") == {:error, :path_traversal}
+    end
+  end
+
   describe "conditional_mutate/4" do
     test "the routed read creates an isolated fork whose revision authorizes mutation", %{
       store: store,
