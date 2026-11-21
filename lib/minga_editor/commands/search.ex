@@ -322,7 +322,7 @@ defmodule MingaEditor.Commands.Search do
 
         ms = SubstituteConfirmState.new(matches, pattern, replacement, content)
 
-        state = put_in_search(state, :last_pattern, pattern)
+        state = record_substitution(state, pattern)
 
         %{
           state
