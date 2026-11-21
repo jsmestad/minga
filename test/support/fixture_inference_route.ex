@@ -6,7 +6,7 @@ defmodule MingaAgent.Test.FixtureInferenceRoute do
 
   `availability/2` reads the opaque route credential, so tests choose readiness without global state: `%{env: %{"FIXTURE_AVAILABILITY" => mode}}` where mode is `"ready"` (the default), `"unavailable"`, `"raise"`, `"hang"`, or `"invalid"`, and `"FIXTURE_ACCOUNT"` names the reported account. A route registered with an id starting with `offline` is always unavailable, for tests that cannot supply a credential.
 
-  `stream/1` plays a script started with `script/3` for the model's id. Each request pops one step and sends `{:fixture_route_request, model_id, request}` to the observer. Steps are `{:events, events}`, which may include invalid events on purpose; `{:block_after, events}`, which emits the events, sends `{:fixture_route_blocked, model_id}`, and then blocks until cancelled; `{:raise_after, events}`, which raises after the events; or `{:error, reason}`. Cancelling a response sends `{:fixture_route_cancelled, model_id}`. Use a unique model id per test so scripts never collide. The fixture uses only Minga-owned route values.
+  `stream/1` plays a script started with `script/3` for the model's id. Each request pops one step and sends `{:fixture_route_request, model_id, request}` to the observer. Steps are `{:events, events}`, which may include invalid events on purpose; `{:block_after, events}`, which emits the events, sends `{:fixture_route_blocked, model_id}`, and then blocks until cancelled; `{:raise_after, events}`, which raises after the events; `{:error, reason}`; or `{:respond, fun}`, where `fun` receives the request and returns one of the other steps, for scripts that answer with a value the turn produced, such as a read revision. Cancelling a response sends `{:fixture_route_cancelled, model_id}`. Use a unique model id per test so scripts never collide. The fixture uses only Minga-owned route values.
   """
 
   @behaviour MingaAgent.InferenceRoute
@@ -21,6 +21,7 @@ defmodule MingaAgent.Test.FixtureInferenceRoute do
           | {:block_after, [term()]}
           | {:raise_after, [term()]}
           | {:error, term()}
+          | {:respond, (Request.t() -> step())}
 
   @doc "Returns the remedy reported while the fixture is unavailable."
   @spec remedy() :: String.t()
@@ -88,7 +89,7 @@ defmodule MingaAgent.Test.FixtureInferenceRoute do
   def stream(%Request{model: %Model{id: model_id}} = request) do
     case GenServer.whereis(script_name(model_id)) do
       nil -> {:error, :fixture_stream_not_configured}
-      script -> script |> next_step(model_id, request) |> respond(model_id)
+      script -> script |> next_step(model_id, request) |> build_step(request) |> respond(model_id)
     end
   end
 
@@ -108,6 +109,12 @@ defmodule MingaAgent.Test.FixtureInferenceRoute do
         {{:exhausted, observer}, {[], observer}}
     end)
   end
+
+  @spec build_step({step() | :exhausted, pid()}, Request.t()) :: {step() | :exhausted, pid()}
+  defp build_step({{:respond, build}, observer}, request) when is_function(build, 1),
+    do: {build.(request), observer}
+
+  defp build_step(step, _request), do: step
 
   @spec respond({step() | :exhausted, pid()}, String.t()) ::
           {:ok, Response.t()} | {:error, term()}
