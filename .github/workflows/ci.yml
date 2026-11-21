@@ -155,14 +155,16 @@ jobs:
         with:
           version: 0.16.0
 
-      - name: Cache deps
+      # Each revision owns its compiled dependencies and app. Only share Hex package downloads.
+      - name: Cache Hex package downloads
         uses: actions/cache@v4
         with:
-          path: |
-            deps
-            _build
-          key: deps-${{ runner.os }}-${{ hashFiles('.tool-versions') }}-${{ hashFiles('mix.lock') }}
-          restore-keys: deps-${{ runner.os }}-${{ hashFiles('.tool-versions') }}-
+          path: ~/.hex/packages
+          key: keystroke-hex-${{ hashFiles('mix.lock') }}
+          restore-keys: keystroke-hex-
+
+      - name: Test keystroke benchmark orchestration
+        run: python3 -m unittest discover -s test/scripts -p keystroke_latency_runner_test.py
 
       - name: Record and compare keystroke latency rounds
         run: |
