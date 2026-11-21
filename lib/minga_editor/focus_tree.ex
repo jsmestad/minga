@@ -381,11 +381,15 @@ defmodule MingaEditor.FocusTree do
   # must not see.
 
   @spec add_footer_band_overlays(t(), map(), Layout.t()) :: t()
-  defp add_footer_band_overlays(%TreeNode{} = root, state, %Layout{editor_area: area}) do
+  defp add_footer_band_overlays(
+         %TreeNode{} = root,
+         state,
+         %Layout{editor_area: area, terminal: {_row, _col, _width, terminal_rows}}
+       ) do
     state
     |> FooterOverlays.visible()
     |> Enum.reduce(root, fn {surface_id, content_height}, acc ->
-      case OverlayBand.rect(area, content_height) do
+      case OverlayBand.rect(area, content_height, terminal_rows) do
         nil -> acc
         rect -> append_root_child(acc, footer_overlay_node(surface_id, rect))
       end

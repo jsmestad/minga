@@ -99,6 +99,18 @@ defmodule MingaEditor.Layout.FooterBandOverlaysTest do
     |> SidebarWorkflow.replace_observatory_data(ObservatoryData.visible(tree, []))
   end
 
+  describe "OverlayBand.rect/3" do
+    test "clamps from the full terminal rows, as the Go TUI does, while anchoring in the editor area" do
+      # 24-row terminal, editor area is 22 rows (status row + minibuffer below).
+      # Go's maxOverlayHeight() gives 24/3 = 8, so a full band keeps 8 rows instead of 22/3 = 7.
+      assert OverlayBand.rect({0, 0, 80, 22}, :max, 24) == {14, 0, 80, 8}
+      # Content shorter than the clamp still hugs the bottom of the editor area.
+      assert OverlayBand.rect({0, 0, 80, 22}, 3, 24) == {19, 0, 80, 3}
+      # The band never grows past the area it is anchored in.
+      assert OverlayBand.rect({0, 0, 80, 5}, :max, 24) == {0, 0, 80, 5}
+    end
+  end
+
   describe "OverlayBand.rect/2" do
     test "clamps band height to the Go maxOverlayHeight floor/ceiling and bottom-anchors" do
       # 24 rows: 24/3 = 8, within [4, 12]. Content asks for max (clamp ceiling).

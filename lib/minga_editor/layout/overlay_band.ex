@@ -5,7 +5,7 @@ defmodule MingaEditor.Layout.OverlayBand do
   Float popups, compact agent context, extension panels, observatory, notifications and extension overlays share this band.
   The edit timeline is persistent chrome with its own `Layout.edit_timeline` rectangle and does not compete for this band.
 
-  `rect/2` preserves the historical Go `maxOverlayHeight()` clamp and caps it to the available rows.
+  `rect/3` computes the Go `maxOverlayHeight()` clamp from the full terminal row count, exactly as the Go TUI does, and caps it to the rows of the area the band may occupy.
   Callers pass the editor area, so the rectangle spans the full width and is bottom-anchored directly above the terminal status row and minibuffer.
   Anchoring to the whole terminal grid would cover that footer chrome and hide the command line while an overlay is visible.
   `content_height` is the surface's BEAM-derived line count, or `:max` when wrapping determines the final height.
@@ -50,8 +50,16 @@ defmodule MingaEditor.Layout.OverlayBand do
   when the band is empty.
   """
   @spec rect(Layout.rect(), non_neg_integer() | :max) :: Layout.rect() | nil
-  def rect({row, col, width, rows}, content_height) do
-    height = band_height(rows, content_height)
+  def rect({_row, _col, _width, rows} = area, content_height),
+    do: rect(area, content_height, rows)
+
+  @doc """
+  Like `rect/2`, but computes the height clamp from `clamp_rows` (the full terminal row count, as the Go TUI's `maxOverlayHeight()` does) while still anchoring the band inside `area` and never exceeding its rows.
+  """
+  @spec rect(Layout.rect(), non_neg_integer() | :max, non_neg_integer()) :: Layout.rect() | nil
+  def rect({row, col, width, rows}, content_height, clamp_rows)
+      when is_integer(clamp_rows) and clamp_rows >= 0 do
+    height = clamp_rows |> band_height(content_height) |> min(rows)
 
     if height <= 0 do
       nil
