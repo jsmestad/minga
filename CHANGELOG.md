@@ -27,6 +27,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - Models and connections opens a separate masked API key prompt from the Agent workspace. Saving or canceling does not send or replace the draft. `/auth <provider>` opens the same prompt and no longer accepts a key on the command line.
 - Local ChatGPT sign-in is available from Models and connections and `/login`. Cancel stops the current authorization attempt without changing credentials or the draft. The manual fallback uses masked input.
 - On macOS, pickers open below the window toolbar so the search field and results do not overlap the window controls. The selected row uses readable text on the selection background.
+- **All Changes** omits the directory shared by the results, so files with the same name show their distinguishing directory sooner. Search still accepts full paths.
 - On narrow terminals, status notices stay readable when optional file and cursor information does not fit.
 - The traditional modeline reads only placement metadata when ordering custom segments and builds status bar output without intermediate groups.
 - Native approval geometry checks bind the live host and window to their run before making one foreground request. Acceptance still requires external foreground observation, global button hits, native captures and complete child cleanup.

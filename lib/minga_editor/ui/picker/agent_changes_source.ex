@@ -38,16 +38,36 @@ defmodule MingaEditor.UI.Picker.AgentChangesSource do
   @impl true
   @spec candidates(Context.t()) :: [Item.t()]
   def candidates(%Context{picker_ui: %{context: %{files: files, origin: origin}}}) do
+    base = shared_directory(files)
+
     Enum.map(files, fn %{path: path, entry_count: count} ->
       %Item{
         id: path,
-        label: path_label(path),
+        label: path_label(Path.relative_to(path, base)),
         search_text: path,
         description: "Edits: #{count}",
         meta: %{origin: origin}
       }
     end)
   end
+
+  @spec shared_directory([%{required(:path) => String.t(), optional(atom()) => term()}]) ::
+          String.t()
+  defp shared_directory([]), do: "."
+
+  defp shared_directory(files) do
+    {first, last} = Enum.min_max_by(files, & &1.path)
+    first_directory = first.path |> Path.dirname() |> Path.split()
+    last_directory = last.path |> Path.dirname() |> Path.split()
+    shared_directory(first_directory, last_directory, [])
+  end
+
+  @spec shared_directory([String.t()], [String.t()], [String.t()]) :: String.t()
+  defp shared_directory([part | left], [part | right], shared),
+    do: shared_directory(left, right, [part | shared])
+
+  defp shared_directory(_left, _right, []), do: "."
+  defp shared_directory(_left, _right, shared), do: shared |> Enum.reverse() |> Path.join()
 
   @spec path_label(String.t()) :: String.t()
   defp path_label(path) when byte_size(path) <= 180, do: path

@@ -66,9 +66,9 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilderTest do
   test "Changes encodes a full long-path offer and retains exact activation identity" do
     source = MingaEditor.UI.Picker.AgentChangesSource
     offer = MingaEditor.State.Picker.ActivationOffer
-    prefix = String.duplicate("folder/", 100)
-    files = Enum.map(1..100, &%{path: "#{prefix}file-#{&1}.ex", entry_count: 1})
-    path = "#{prefix}file-100.ex"
+    folders = String.duplicate("folder/", 100)
+    files = Enum.map(1..100, &%{path: "component-#{&1}/#{folders}file.ex", entry_count: 1})
+    path = "component-100/#{folders}file.ex"
 
     items =
       TestHelpers.base_state()
@@ -91,6 +91,28 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilderTest do
 
     assert {:ok, _, %Item{id: ^path}} =
              offer.resolve_item(ui.activation_offer, model.activation_generation, id)
+  end
+
+  test "Changes shows the distinguishing directory for files with the same name" do
+    source = MingaEditor.UI.Picker.AgentChangesSource
+    root = "/Users/agent/projects/a-long-path/with-the-same-prefix"
+    suffix = "shared/nested/deep/identity.txt"
+    first = Path.join(root, "component-a/#{suffix}")
+    second = Path.join(root, "component-b/#{suffix}")
+    files = [%{path: first, entry_count: 1}, %{path: second, entry_count: 1}]
+
+    items =
+      TestHelpers.base_state()
+      |> PickerContext.from_editor_state(%{files: files, origin: :fixture})
+      |> source.candidates()
+
+    assert [
+             %Item{id: ^first, label: "component-a/" <> ^suffix},
+             %Item{id: ^second, label: "component-b/" <> ^suffix}
+           ] = items
+
+    picker = items |> PickerState.new() |> PickerState.filter(second)
+    assert %Item{id: ^second} = PickerState.selected_item(picker)
   end
 
   describe "build/1" do

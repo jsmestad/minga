@@ -728,7 +728,7 @@ defmodule MingaEditor.PickerUITest do
   describe "semantic picker activation" do
     test "command palette dispatch executes the exact nonselected command" do
       first = %Item{id: :new_tab, label: "New tab"}
-      second = %Item{id: :toggle_file_tree, label: "Toggle file tree"}
+      second = %Item{id: :split_vertical, label: "Split window vertically"}
       picker = Picker.new([first, second], title: "Commands")
 
       picker_state =
@@ -743,12 +743,12 @@ defmodule MingaEditor.PickerUITest do
         TestHelpers.base_state(content: "initial")
         |> ModalWorkflow.open({:picker, PickerPayload.new(picker_state)})
 
-      assert MingaEditor.Shell.Traditional.SidebarWorkflow.active_id(state) == nil
+      assert WindowTree.count(state.workspace.windows.tree) == 1
       generation = picker_state.activation_offer.generation
       result = GuiActionHandler.dispatch(state, {:picker_item_activate, generation, 2})
 
       assert result.shell_runtime.state.modal == :none
-      assert MingaEditor.Shell.Traditional.SidebarWorkflow.active_id(result) == "file_tree"
+      assert WindowTree.count(result.workspace.windows.tree) == 2
     end
 
     @tag :tmp_dir
