@@ -241,12 +241,20 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
   @spec validate_segment_opts(atom(), term()) :: :ok | :error
   defp validate_segment_opts(name, opts) do
     if Keyword.keyword?(opts) do
-      case Enum.find(opts, fn {key, value} -> not valid_segment_opt?(key, value) end) do
-        nil -> :ok
-        {key, value} -> invalid_segment_opt(name, key, value)
-      end
+      validate_keyword_opts(name, opts)
     else
       invalid_segment_opts(name, opts)
+    end
+  end
+
+  @spec validate_keyword_opts(atom(), keyword()) :: :ok | :error
+  defp validate_keyword_opts(_name, []), do: :ok
+
+  defp validate_keyword_opts(name, [{key, value} | rest]) do
+    if valid_segment_opt?(key, value) do
+      validate_keyword_opts(name, rest)
+    else
+      invalid_segment_opt(name, key, value)
     end
   end
 
