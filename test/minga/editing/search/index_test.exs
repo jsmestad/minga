@@ -20,6 +20,23 @@ defmodule Minga.Editing.Search.IndexTest do
       end
     end
 
+    test "preserves suffix anchors, zero-width hits, and original byte columns" do
+      cases = [
+        {["aaa", ""], "^a", [regex: true], [{0, 0, 1}, {0, 1, 1}, {0, 2, 1}]},
+        {["ab", ""], "$", [regex: true], [{0, 2, 0}]},
+        {["İ FOO"], "foo", [case_sensitive: false], [{0, 3, 3}]},
+        {["ab"], "", [regex: true, case_sensitive: false], []}
+      ]
+
+      for {lines, query, options, spans} <- cases do
+        expected =
+          Enum.map(spans, fn {line, col, length} -> Search.Match.new(line, col, length) end)
+
+        assert Search.find_all_in_range(lines, query, 0, options) == expected
+        assert Index.to_matches(Index.build(lines, query, options)) == expected
+      end
+    end
+
     test "counts beyond the old u16 wire limit exactly" do
       index = Index.build(List.duplicate("x", 70_000), "x")
       assert Index.count(index) == 70_000
@@ -155,14 +172,15 @@ defmodule Minga.Editing.Search.IndexTest do
 
     test "a batch agrees with a fresh search" do
       original = ["foo", "bar", "foo", "tail"]
-      index = Index.build(original, "foo")
+      options = [case_sensitive: false]
+      index = Index.build(original, "foo", options)
 
-      first = EditDelta.insertion(3, {0, 3}, "\nfoo", {1, 3})
+      first = EditDelta.insertion(3, {0, 3}, "\nFOO", {1, 3})
       second = EditDelta.replacement(8, 11, {2, 0}, {2, 3}, "none", {2, 4})
-      current = ["foo", "foo", "bar", "none", "tail"]
+      current = ["foo", "FOO", "bar", "none", "tail"]
       updated = Index.apply_edits(index, [first, second], 0, current)
 
-      assert Index.to_matches(updated) == Search.find_all_in_range(current, "foo", 0)
+      assert Index.to_matches(updated) == Search.find_all_in_range(current, "foo", 0, options)
     end
   end
 

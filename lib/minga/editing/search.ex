@@ -38,10 +38,11 @@ defmodule Minga.Editing.Search do
 
   # ── Matcher compilation ──────────────────────────────────────────────────
 
+  @doc "Prepares the matcher for a query that will be applied repeatedly."
   @spec compile_matcher(String.t(), search_opts()) :: matcher()
-  defp compile_matcher(pattern, []), do: pattern
+  def compile_matcher(pattern, []), do: pattern
 
-  defp compile_matcher(pattern, opts) do
+  def compile_matcher(pattern, opts) do
     use_regex = Keyword.get(opts, :regex, false)
     case_sensitive = Keyword.get(opts, :case_sensitive, true)
     whole_word = Keyword.get(opts, :whole_word, false)
@@ -174,35 +175,55 @@ defmodule Minga.Editing.Search do
   def find_all_in_range(_lines, "", _first_line, _opts), do: []
 
   def find_all_in_range(lines, pattern, first_line, opts) do
-    matcher = compile_matcher(pattern, opts)
-
-    lines
-    |> Enum.with_index(first_line)
-    |> Enum.flat_map(fn {line_text, line_num} ->
-      find_all_overlapping(line_text, matcher, line_num, 0, [])
-    end)
+    range_matches(lines, compile_matcher(pattern, opts), first_line, [])
   end
 
-  @spec find_all_overlapping(String.t(), matcher(), non_neg_integer(), non_neg_integer(), [
-          match()
-        ]) :: [match()]
-  defp find_all_overlapping(line, matcher, line_num, start, acc) do
-    if start >= byte_size(line) do
-      Enum.reverse(acc)
-    else
-      searchable = binary_part(line, start, byte_size(line) - start)
+  @spec range_matches([String.t()], matcher(), non_neg_integer(), [match()]) :: [match()]
+  defp range_matches([], _matcher, _line, matches), do: Enum.reverse(matches)
 
-      case match_in(searchable, matcher) do
-        nil ->
-          Enum.reverse(acc)
+  defp range_matches([text | rest], matcher, line, matches) do
+    matches =
+      reduce_line_matches(text, matcher, matches, fn col, length, acc ->
+        [Match.new(line, col, length) | acc]
+      end)
 
-        {pos, match_len} ->
-          abs_pos = start + pos
+    range_matches(rest, matcher, line + 1, matches)
+  end
 
-          find_all_overlapping(line, matcher, line_num, abs_pos + 1, [
-            Match.new(line_num, abs_pos, match_len) | acc
-          ])
-      end
+  @doc "Folds overlapping matches on one line in ascending byte-column order."
+  @spec reduce_line_matches(
+          String.t(),
+          matcher(),
+          acc,
+          (non_neg_integer(), non_neg_integer(), acc -> acc)
+        ) :: acc
+        when acc: var
+  def reduce_line_matches(_line, "", acc, _fun), do: acc
+
+  def reduce_line_matches(line, matcher, acc, fun),
+    do: reduce_line_matches(line, matcher, 0, acc, fun)
+
+  @spec reduce_line_matches(
+          String.t(),
+          matcher(),
+          non_neg_integer(),
+          acc,
+          (non_neg_integer(), non_neg_integer(), acc -> acc)
+        ) :: acc
+        when acc: var
+  defp reduce_line_matches(line, _matcher, start, acc, _fun) when start >= byte_size(line),
+    do: acc
+
+  defp reduce_line_matches(line, matcher, start, acc, fun) do
+    searchable = binary_part(line, start, byte_size(line) - start)
+
+    case match_in(searchable, matcher) do
+      nil ->
+        acc
+
+      {pos, match_len} ->
+        col = start + pos
+        reduce_line_matches(line, matcher, col + 1, fun.(col, match_len, acc), fun)
     end
   end
 
