@@ -155,13 +155,12 @@ defmodule Minga.Parser.RequestHandler do
           RequestState.t()
         ) :: RequestState.t()
   defp emit_request(port, registration, {token, request}, requests) do
-    request_id = RequestState.next_id(requests)
+    pending = %{from: request.from, buffer: request.buffer, token: token}
+    {request_id, sent_requests} = RequestState.emit(requests, pending)
     command = request.command_builder.(registration.id, request_id)
 
     if send_command(port, command) do
-      pending = %{from: request.from, buffer: request.buffer, token: token}
-      {_id, requests} = RequestState.emit(requests, pending)
-      requests
+      sent_requests
     else
       GenServer.reply(request.from, nil)
       requests

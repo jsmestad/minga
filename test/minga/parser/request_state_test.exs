@@ -30,8 +30,36 @@ defmodule Minga.Parser.RequestStateTest do
     refute_received {^tag, _}
   end
 
+  test "draining ready requests leaves unready fences and other buffers waiting" do
+    buffer = self()
+    other = start_supervised!({Agent, fn -> nil end})
+    ready = make_ref()
+    waiting = make_ref()
+    elsewhere = make_ref()
+
+    requests =
+      RequestState.new()
+      |> defer(buffer, ready, make_ref())
+      |> defer(buffer, waiting, make_ref())
+      |> defer(other, elsewhere, make_ref())
+
+    assert {:ok, requests} = RequestState.satisfy_fence(requests, ready, buffer, 2)
+    assert {:ok, requests} = RequestState.satisfy_fence(requests, waiting, buffer, 3)
+    assert {:ok, requests} = RequestState.satisfy_fence(requests, elsewhere, other, 1)
+    ready_at_two? = &(&1.required_sequence <= 2)
+
+    assert {[{^ready, _}], requests} = RequestState.take_ready(requests, buffer, ready_at_two?)
+    assert {[], ^requests} = RequestState.take_ready(requests, buffer, ready_at_two?)
+    assert {[{^elsewhere, _}], requests} = RequestState.take_ready(requests, other, ready_at_two?)
+    assert {[{^waiting, _}], _} = RequestState.take_ready(requests, buffer, fn _ -> true end)
+  end
+
   defp defer(buffer, token, tag) do
-    RequestState.defer(RequestState.new(), token, %{
+    defer(RequestState.new(), buffer, token, tag)
+  end
+
+  defp defer(requests, buffer, token, tag) do
+    RequestState.defer(requests, token, %{
       from: {self(), tag},
       buffer: buffer,
       command_builder: fn _buffer_id, _request_id -> <<>> end,

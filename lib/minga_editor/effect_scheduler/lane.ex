@@ -124,7 +124,7 @@ defmodule MingaEditor.EffectScheduler.Lane do
   @doc "Returns true when a running or queued request matches."
   @spec active?(t(), (Request.t() -> boolean())) :: boolean()
   def active?(%__MODULE__{} = lane, match?),
-    do: running_matches?(lane.running, match?) or queued_matches?(lane.queue, match?)
+    do: running_matches?(lane.running, match?) or :queue.any(match?, lane.queue)
 
   @doc "Finds the request id for a semantic operation id."
   @spec request_id_for_operation(t(), MingaEditor.State.Operation.id()) :: Request.id() | nil
@@ -233,9 +233,6 @@ defmodule MingaEditor.EffectScheduler.Lane do
   @spec running_matches?(Request.t() | nil, (Request.t() -> boolean())) :: boolean()
   defp running_matches?(%Request{} = request, match?), do: match?.(request)
   defp running_matches?(nil, _match?), do: false
-
-  @spec queued_matches?(:queue.queue(Request.t()), (Request.t() -> boolean())) :: boolean()
-  defp queued_matches?(queue, match?), do: queue |> :queue.to_list() |> Enum.any?(match?)
 
   @spec queued_request_id_for_operation(
           :queue.queue(Request.t()),

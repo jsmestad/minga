@@ -102,6 +102,41 @@ defmodule Minga.Parser.ParseSyncTest do
     Port.close(port)
   end
 
+  test "a failed request write replies once and leaves its wire ID available" do
+    buffer = self()
+    {_id, work} = register_buffer(buffer)
+    failed_token = make_ref()
+    failed_tag = make_ref()
+    requests = fenced_request(work.requests, buffer, failed_token, failed_tag)
+
+    requests = RequestHandler.flush_buffer(nil, requests, work.buffers, buffer)
+    assert_receive {^failed_tag, nil}
+    requests = RequestHandler.timeout(requests, failed_token)
+    refute_received {^failed_tag, _}
+
+    port = open_port()
+    tag = make_ref()
+    requests = fenced_request(requests, buffer, make_ref(), tag)
+    requests = RequestHandler.flush_buffer(port, requests, work.buffers, buffer)
+
+    assert {:noreply, _} = RequestHandler.reply(requests, 1, :answer)
+    assert_receive {^tag, :answer}
+    Port.close(port)
+  end
+
+  defp fenced_request(requests, buffer, token, tag) do
+    requests =
+      RequestState.defer(requests, token, %{
+        from: {buffer, tag},
+        buffer: buffer,
+        command_builder: &Protocol.encode_request_indent(&1, &2, 0),
+        required_sequence: nil
+      })
+
+    {:ok, requests} = RequestState.satisfy_fence(requests, token, buffer, 0)
+    requests
+  end
+
   defp register_buffer(buffer) do
     work = %ParseSync{}
     config = %BufferConfig{language: "elixir"}

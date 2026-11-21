@@ -70,6 +70,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - Production parser and hook-runner binaries now use Zig `ReleaseSafe`, with Zig's build cache selecting the correct optimization mode. Parser queries compile only for languages in use instead of prewarming every bundled language. Editor launchers retain ERTS's specialized memory allocators instead of disabling them.
 - Wrap bounds count rows without building display text or row maps. Following the cursor within an unchanged wrapped line reuses the page's retained geometry.
 - Deferred parser requests store their synchronization sequence directly. Parser registrations use one forward lookup by buffer PID and retain the reverse lookup for parser replies.
+- Parser dispatch removes only ready requests and uses the ID from the send transition. Effect activity checks query the queue without first building a list.
 - Parser events carry the admitted version directly to subscribers. Text input resolution keeps stale presentations, missing rows, and unavailable renderer data distinct.
 - Removed one-off benchmark scripts and archived measurement artifacts. CI performance gates and maintained documentation remain.
 - LSP, diagnostic, and caret position conversion now walks UTF-8 text directly instead of building charlists or re-encoding each character, and UTF-32 position lookup runs in constant stack. Converted positions, clamping, and exact-column errors are unchanged.
