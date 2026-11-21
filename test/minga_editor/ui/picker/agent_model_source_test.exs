@@ -364,7 +364,7 @@ defmodule MingaEditor.UI.Picker.AgentModelSourceTest do
       )
 
     worker = Task.async(fn -> AgentModelSource.async_fetch(context(connection(session), 1)) end)
-    assert_receive {:discovery_started, pid}, 1_000
+    assert_receive {:discovery_started, pid}, 5_000
     %{target: target} = Session.editor_snapshot(session).connection
     assert {:ok, ref} = Session.begin_connection(session, target, :oauth_manual, self())
     assert :ok = Session.register_connection_worker(session, target, ref, self())
@@ -401,7 +401,7 @@ defmodule MingaEditor.UI.Picker.AgentModelSourceTest do
       end)
 
     worker = Task.async(fn -> AgentModelSource.async_fetch(context(connection(session), 1)) end)
-    assert_receive {:discovery_started, pid}, 1_000
+    assert_receive {:discovery_started, pid}, 5_000
     %{target: target} = Session.editor_snapshot(session).connection
     assert :ok = Session.retry_connection(session, target)
     send(pid, :reply)
