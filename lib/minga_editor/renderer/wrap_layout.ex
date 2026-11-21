@@ -89,6 +89,7 @@ defmodule MingaEditor.Renderer.WrapLayout do
     counts
   end
 
+  @doc "Counts the rows of a single composed source line without materializing them."
   @spec row_count(
           String.t(),
           non_neg_integer(),
@@ -97,11 +98,11 @@ defmodule MingaEditor.Renderer.WrapLayout do
           keyword(),
           boolean()
         ) :: pos_integer()
-  defp row_count(text, line, decorations, cursor_line, options, show_invisible?) do
+  def row_count(text, line, decorations, cursor_line, options, show_invisible?) do
     decorations = visible_decorations(decorations, cursor_line, line)
     tab_width = Keyword.fetch!(options, :tab_width)
     composed = compose_text(text, line, decorations, tab_width, show_invisible?)
-    composed |> wrap_composed(options) |> length()
+    WrapMap.count_rows(composed, Keyword.fetch!(options, :content_width), options)
   end
 
   @doc "Measures a composed source line and, if requested, projects the cursor into its wrap."

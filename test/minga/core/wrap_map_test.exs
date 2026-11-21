@@ -1,6 +1,7 @@
 defmodule Minga.Core.WrapMapTest do
   use ExUnit.Case, async: true
 
+  alias Minga.Core.WidthOracle.Measured
   alias Minga.Core.WrapMap
 
   describe "compute/3 with no wrapping needed" do
@@ -90,6 +91,35 @@ defmodule Minga.Core.WrapMapTest do
 
       assert Enum.map(entry, & &1.source_text) == ["abcd", "\t"]
     end
+  end
+
+  test "count_rows matches materialized rows at wrap boundaries" do
+    oracle = Measured.new(%{"a" => 2, "界" => 8, "e\u0301" => 0, "b" => 2})
+
+    cases = [
+      {"", 1, [], [""]},
+      {"a b", 3, [], ["a b"]},
+      {" abcd", 3, [breakindent: false], [" ab", "cd"]},
+      {"hello world foobar", 10, [], ["hello ", "world ", "foobar"]},
+      {"hello world foobar", 10, [linebreak: false], ["hello worl", "d foobar"]},
+      {"  abcdef", 4, [linebreak: false], ["  ab", "cd", "ef"]},
+      {"  abcdef", 4, [breakindent: false, linebreak: false], ["  ab", "cdef"]},
+      {"    界x", 2, [], ["  ", " ", " ", "界", "x"]},
+      {"ab\tcde", 6, [tab_width: 4], ["ab\t", "cde"]},
+      {"\t abcd\txy", 8, [tab_width: 4, linebreak: false], ["\t abc", "d\t", "xy"]},
+      {"a界e\u0301b", 2, [oracle: oracle], ["a", "界", "e\u0301b"]}
+    ]
+
+    for {text, width, opts, expected} <- cases do
+      [rows] = WrapMap.compute([text], width, opts)
+      assert Enum.map(rows, & &1.source_text) == expected
+      assert WrapMap.count_rows(text, width, opts) == length(rows)
+    end
+  end
+
+  test "counts a batch of logical lines, including empty lines" do
+    assert WrapMap.count_rows([], 4, []) == 0
+    assert WrapMap.count_rows(["", "abc def", "abcdefghi"], 4, []) == 6
   end
 
   describe "byte_offset tracking" do

@@ -33,7 +33,7 @@ defmodule MingaEditor.RenderPipeline.MixedWheelGeometryTest do
 
   import MingaEditor.RenderPipeline.TestHelpers, only: [gui_state: 1]
 
-  @measurements [{WrapMap, :compute, 3}, {SourceOffsetMap, :new, 5}]
+  @measurements [{WrapMap, :compute, 3}, {WrapMap, :count_rows, 3}, {SourceOffsetMap, :new, 5}]
 
   test "wheel and render reuse an oversized line's exact geometry with a closed fold offscreen" do
     text = String.duplicate("0123456789ABC", 769)
@@ -240,13 +240,13 @@ defmodule MingaEditor.RenderPipeline.MixedWheelGeometryTest do
     result = fun.()
     pid = self()
 
-    counts =
+    [materialized_wraps, counted_wraps, projections] =
       Enum.map(@measurements, fn mfa ->
         {:call_time, calls} = :trace.info(session, mfa, :call_time)
         {^pid, count, _, _} = List.keyfind(calls, pid, 0, {pid, 0, 0, 0})
         count
       end)
 
-    {result, counts}
+    {result, [materialized_wraps + counted_wraps, projections]}
   end
 end

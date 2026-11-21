@@ -1208,13 +1208,15 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
     fetch_count = max(total_lines - start_line, 1)
     snapshot = fetch_at_version!(buf, expected_version, start_line, fetch_count)
 
-    WrapMap.compute(snapshot.lines, content_w,
+    opts = [
       breakindent: wrap_option(buf, :breakindent),
       linebreak: wrap_option(buf, :linebreak),
       oracle: oracle,
       tab_width: tab_width(buf)
-    )
-    |> WrapMap.visual_row_count()
+    ]
+
+    snapshot.lines
+    |> WrapMap.count_rows(content_w, opts)
     |> max(1)
   catch
     :exit, _ -> 1
