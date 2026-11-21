@@ -40,9 +40,11 @@ final class BEAMProcessManager {
     /// The running BEAM child process.
     private var process: Process?
     private var pendingStartupRetry: StartupRetry?
+    private(set) var isSafeMode = false
 
     private struct StartupRetry {
         let deadline: DispatchTime
+        let inSafeMode: Bool
         let onFailure: (StartupFailure) -> Void
     }
 
@@ -58,6 +60,9 @@ final class BEAMProcessManager {
     /// Called each time the BEAM process starts (initial or restart).
     /// Provides the new read/write handles for protocol communication.
     var onBEAMReady: (@MainActor (_ readHandle: FileHandle, _ writeHandle: FileHandle) -> Void)?
+
+    /// Updates or clears the compilation status of the current owned startup.
+    var onStartupCompile: (@MainActor (String?) -> Void)?
 
     // Restart backoff tracking (OTP-style: max restarts in a time window).
     private var restartTimestamps: [Date] = []
@@ -129,6 +134,8 @@ final class BEAMProcessManager {
     func start(configuration: BEAMLaunchConfiguration, onStartupFailure: ((StartupFailure) -> Void)? = nil) {
         guard exitIntent != .appShutdown, process == nil else { return }
         exitIntent = .running
+        let safeMode = configuration.environment["MINGA_SAFE_MODE"]
+        isSafeMode = safeMode == "1" || safeMode == "true"
 
         // Prevent App Nap / automatic + sudden termination while the BEAM lives.
         beginBackgroundActivityIfNeeded()
@@ -145,10 +152,12 @@ final class BEAMProcessManager {
         proc.standardInput = stdinPipe
         proc.standardOutput = stdoutPipe
 
-        // Pass stderr through to the app's stderr for logging.
-        // The BEAM writes log messages to stderr; they'll appear in
-        // Console.app and Xcode's debug output.
-        proc.standardError = FileHandle.standardError
+        let stderrPipe = configuration.environment["MINGA_BOOT_PROGRESS"] == "native" ? Pipe() : nil
+        if let stderrPipe {
+            proc.standardError = stderrPipe
+        } else {
+            proc.standardError = FileHandle.standardError
+        }
 
         proc.terminationHandler = { [weak self] process in
             MainRunLoopAction {
@@ -168,6 +177,10 @@ final class BEAMProcessManager {
                            stdoutPipe.fileHandleForReading, stdoutPipe.fileHandleForWriting] {
                 closeLaunchHandle(handle)
             }
+            if let stderrPipe {
+                closeLaunchHandle(stderrPipe.fileHandleForReading)
+                closeLaunchHandle(stderrPipe.fileHandleForWriting)
+            }
             endBackgroundActivity()
             if let onStartupFailure {
                 onStartupFailure(.launch(error.localizedDescription))
@@ -180,6 +193,15 @@ final class BEAMProcessManager {
         self.process = proc
         self.readHandle = stdoutPipe.fileHandleForReading
         self.writeHandle = stdinPipe.fileHandleForWriting
+
+        if let stderrPipe {
+            StartupCompileRecords.relay(stderrPipe.fileHandleForReading) { [weak self, weak proc] name in
+                MainRunLoopAction {
+                    guard let self, let proc, self.process === proc, self.exitIntent == .running else { return }
+                    self.onStartupCompile?(name)
+                }.enqueue()
+            }
+        }
 
         PortLogger.report(.info, "BEAM started (pid \(proc.processIdentifier))", to: beamLog)
 
@@ -228,17 +250,21 @@ final class BEAMProcessManager {
     }
 
     /// Replaces the startup core only after its termination callback. A slow stop never starts a second child.
-    func retryStartup(stopTimeout: TimeInterval = 3, onFailure: @escaping (StartupFailure) -> Void) {
+    func retryStartup(
+        inSafeMode: Bool = false,
+        stopTimeout: TimeInterval = 3,
+        onFailure: @escaping (StartupFailure) -> Void
+    ) {
         guard exitIntent != .appShutdown, pendingStartupRetry == nil else { return }
         restartTimestamps.removeAll()
         guard let stopping = process else {
-            start(onStartupFailure: onFailure)
+            startStartupReplacement(inSafeMode: inSafeMode, onFailure: onFailure)
             return
         }
 
         exitIntent = .startupFailed
         let deadline = DispatchTime.now() + stopTimeout
-        pendingStartupRetry = StartupRetry(deadline: deadline, onFailure: onFailure)
+        pendingStartupRetry = StartupRetry(deadline: deadline, inSafeMode: inSafeMode, onFailure: onFailure)
         if stopping.isRunning { stopping.terminate() }
         DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: deadline) { [weak self] in
             MainRunLoopAction {
@@ -247,6 +273,11 @@ final class BEAMProcessManager {
                 retry.onFailure(.previousCoreStopTimedOut)
             }.enqueue()
         }
+    }
+
+    private func startStartupReplacement(inSafeMode: Bool, onFailure: @escaping (StartupFailure) -> Void) {
+        isSafeMode = isSafeMode || inSafeMode
+        start(onStartupFailure: onFailure)
     }
 
     func beginAppShutdown() {
@@ -383,7 +414,7 @@ final class BEAMProcessManager {
             environment: environment
         ) else { return nil }
 
-        return BEAMLaunchConfiguration.build(from: inputs)
+        return BEAMLaunchConfiguration.build(from: inputs, forceSafeMode: isSafeMode)
     }
 
     /// Handles BEAM exit. Kept non-`private` so the termination path can be
@@ -400,7 +431,7 @@ final class BEAMProcessManager {
             PortLogger.report(level, message, to: beamLog)
             pendingStartupRetry = nil
             if DispatchTime.now() < retry.deadline {
-                start(onStartupFailure: retry.onFailure)
+                startStartupReplacement(inSafeMode: retry.inSafeMode, onFailure: retry.onFailure)
             } else {
                 retry.onFailure(.previousCoreStopTimedOut)
             }
@@ -473,5 +504,55 @@ final class BEAMProcessManager {
     func primeRestartHistoryForTesting(count: Int) {
         let now = Date()
         restartTimestamps = Array(repeating: now, count: count)
+    }
+}
+
+/// Bounded line decoder for compile status records mixed with the core's ordinary stderr.
+struct StartupCompileRecords {
+    private static let prefix = Data("MINGA_STARTUP_COMPILE\t".utf8)
+    private var line = Data()
+    private var skipLine = false
+
+    private struct Record: Decodable {
+        let name: String?
+    }
+
+    mutating func consume(_ data: Data, deliver: (String?) -> Void) {
+        for byte in data {
+            if byte == 10 {
+                if !skipLine, line.starts(with: Self.prefix),
+                   let record = try? JSONDecoder().decode(Record.self, from: line.dropFirst(Self.prefix.count)) {
+                    deliver(record.name)
+                }
+                line.removeAll(keepingCapacity: true)
+                skipLine = false
+            } else if !skipLine {
+                if line.count == 1024 {
+                    skipLine = true
+                } else {
+                    line.append(byte)
+                }
+            }
+        }
+    }
+
+    /// Drains stderr off the main actor, preserving the original diagnostic stream.
+    static func relay(_ handle: FileHandle, deliver: @escaping @Sendable (String?) -> Void) {
+        Thread.detachNewThread {
+            defer { try? handle.close() }
+            var decoder = Self()
+            var buffer = Data(count: 4096)
+            while true {
+                // A pipe read must return as soon as bytes arrive, not wait for a full buffer.
+                let count = buffer.withUnsafeMutableBytes {
+                    Darwin.read(handle.fileDescriptor, $0.baseAddress, $0.count)
+                }
+                if count < 0 && errno == EINTR { continue }
+                guard count > 0 else { return }
+                let data = buffer.prefix(count)
+                decoder.consume(data, deliver: deliver)
+                try? FileHandle.standardError.write(contentsOf: data)
+            }
+        }
     }
 }

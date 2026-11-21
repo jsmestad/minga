@@ -74,8 +74,10 @@ struct MingaApp: App {
                     if let startup = appDelegate.appState.startup {
                         StartupOverlay(
                             startup: startup,
+                            compilingExtension: appDelegate.appState.compilingExtension,
+                            canRestartInSafeMode: appDelegate.canRestartInSafeMode,
                             onKeepWaiting: { appDelegate.keepWaitingForStartup() },
-                            onRetry: { appDelegate.retryStartup() },
+                            onRetry: { appDelegate.retryStartup(inSafeMode: $0) },
                             onQuit: { appDelegate.quitDuringStartup() }
                         )
                         .transition(.opacity)
@@ -110,14 +112,38 @@ struct MingaApp: App {
 
 private struct StartupOverlay: View {
     let startup: StartupPresentation
+    let compilingExtension: String?
+    let canRestartInSafeMode: Bool
     let onKeepWaiting: () -> Void
-    let onRetry: () -> Void
+    let onRetry: (Bool) -> Void
     let onQuit: () -> Void
+
+    private static let quips = [
+        "Reticulating splines…",
+        "Warming up the BEAM…",
+        "Spawning processes…",
+        "Consulting the oracle…",
+        "Aligning the gap buffer…",
+        "Negotiating with tree-sitter…",
+        "Calibrating modal flux…",
+        "Herding supervisors…",
+        "Entering god mode…",
+        "The cake is a lie…",
+        "It's dangerous to go alone…",
+        "Kept you waiting, huh?",
+        "Calibrating…",
+        "Preparing emotional states…",
+        "Escaping to normal mode…",
+        "M-x start-editor",
+    ]
+
+    @State private var quip = StartupOverlay.quips.randomElement() ?? "Starting Minga…"
+    @State private var showsQuit = false
 
     private var title: String {
         switch startup {
-        case .starting: "Starting Minga…"
-        case .waiting, .waitingLonger: "Waiting for the editor…"
+        case .starting, .waiting: quip
+        case .waitingLonger: "Waiting for the editor…"
         case .slow: "Minga is taking longer than expected"
         case .retrying: "Restarting the editor core…"
         case .failed: "Minga Could Not Start"
@@ -142,21 +168,29 @@ private struct StartupOverlay: View {
         GeometryReader { geometry in
             ScrollView {
                 VStack(spacing: Spacing.lg) {
+                    Image("MingaLogo")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 96, height: 96)
+                        .accessibilityHidden(true)
                     if showsProgress {
-                        ProgressView().controlSize(.small).accessibilityHidden(true)
-                    } else {
-                        Image(systemName: "exclamationmark.triangle")
-                            .font(.title2)
-                            .foregroundStyle(.secondary)
-                            .accessibilityHidden(true)
+                        ProgressView().controlSize(.small).accessibilityLabel("Loading the editor")
                     }
                     Text(title).font(.headline).accessibilityAddTraits(.isHeader)
+                    if let compilingExtension {
+                        Text("Compiling extension \(compilingExtension)…")
+                            .foregroundStyle(.secondary)
+                    }
                     if case .failed(let message, _) = startup {
                         Text(message).foregroundStyle(.secondary)
                     }
                     if canRetry {
-                        Text("Retry replaces the editor core. Changes not saved or recovered may be lost.")
+                        Text("Restarting replaces the editor core. Changes not saved or recovered may be lost.")
                             .foregroundStyle(.secondary)
+                        if canRestartInSafeMode {
+                            Text("Safe mode skips user configuration and extensions for this launch.")
+                                .foregroundStyle(.secondary)
+                        }
                     } else if case .slow = startup {
                         Text("You can keep waiting or quit and relaunch Minga from your terminal.")
                             .foregroundStyle(.secondary)
@@ -175,6 +209,14 @@ private struct StartupOverlay: View {
             .scrollBounceBehavior(.basedOnSize)
         }
         .background(.background)
+        .task {
+            do {
+                try await Task.sleep(for: .seconds(10))
+                showsQuit = true
+            } catch {
+                return
+            }
+        }
     }
 
     @ViewBuilder private var actions: some View {
@@ -182,9 +224,14 @@ private struct StartupOverlay: View {
             Button("Keep Waiting", action: onKeepWaiting)
         }
         if canRetry {
-            Button("Retry Startup", action: onRetry)
+            Button("Retry Startup") { onRetry(false) }
+            if canRestartInSafeMode {
+                Button("Restart in Safe Mode") { onRetry(true) }
+            }
         }
-        Button("Quit Minga", action: onQuit)
+        if showsQuit {
+            Button("Quit Minga", action: onQuit)
+        }
     }
 }
 
@@ -562,6 +609,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if BEAMProcessManager.isBundleMode {
             let manager = BEAMProcessManager()
             self.beamManager = manager
+            manager.onStartupCompile = { [weak self] name in
+                guard let self, !self.appState.hasReceivedFirstFrame else { return }
+                self.appState.compilingExtension = name
+            }
 
             manager.onTermination = { [weak self] _ in
                 guard let self else { return false }
@@ -1438,13 +1489,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         appState.startup = .waitingLonger(canRetry: canRetry)
     }
 
-    func retryStartup() {
-        guard let manager = beamManager else { return }
+    var canRestartInSafeMode: Bool { beamManager?.isSafeMode == false }
+
+    func retryStartup(inSafeMode: Bool) {
+        guard let manager = beamManager, !inSafeMode || canRestartInSafeMode else { return }
         switch appState.startup {
         case .slow(true), .waitingLonger(true), .failed(_, true):
             appState.startup = .retrying
+            appState.compilingExtension = nil
             coreLifecycle?.abandonStartup()
-            manager.retryStartup { [weak self] in self?.presentStartupProcessFailure($0) }
+            manager.retryStartup(inSafeMode: inSafeMode) { [weak self] in self?.presentStartupProcessFailure($0) }
         default:
             break
         }
@@ -1471,6 +1525,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func presentStartupFailure(_ message: String, canRetry: Bool) {
         PortLogger.report(.error, "Minga startup failed", to: appStartupLogger, privateDetail: message)
+        appState.compilingExtension = nil
         appState.startup = .failed(message: message, canRetry: canRetry)
     }
 

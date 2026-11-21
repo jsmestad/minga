@@ -121,6 +121,11 @@ export MINGA_STANDALONE_TUI=1
 export MINGA_STANDALONE_EDITOR=$start_editor
 export RELEASE_DISTRIBUTION=none
 
+unset MINGA_BOOT_PROGRESS
+if [ "$start_editor" = 1 ] && [ -t 2 ]; then
+  export MINGA_BOOT_PROGRESS=terminal
+fi
+
 # Every bundled TUI VM starts local. Distribution requested by attach/session
 # commands is enabled dynamically after application boot, never by inherited VM
 # arguments or a caller-selected vm.args file.

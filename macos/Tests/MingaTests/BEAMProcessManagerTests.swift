@@ -30,6 +30,7 @@ struct BEAMLaunchConfigurationTests {
                 "MINGA_APP_EUID": "501",
                 "MINGA_APP_INSTANCE_ID": "instance-123",
                 "MINGA_APP_PID": "1234",
+                "MINGA_BOOT_PROGRESS": "native",
                 "MINGA_CLI_ARGS_B64": "LS1lZGl0b3I,L3RtcC9wYXRoIHdpdGggc3BhY2U",
                 "MINGA_EXPECT_DISTRIBUTION": "0",
                 "MINGA_IPC_RUNTIME_PARENT": "/private/tmp/user",
@@ -68,6 +69,21 @@ struct BEAMLaunchConfigurationTests {
             "--config", "/tmp/minga.exs", "one.ex",
             "--debug-log", "/tmp/minga.log", "two.ex",
             "-D", "/tmp/minga-short.log", "three.ex"
+        ]))
+        #expect(configuration.environment["MINGA_SAFE_MODE"] == "1")
+        #expect(configuration.environment["MINGA_LAUNCH_NONCE"] == "nonce-123")
+    }
+
+    @Test("a safe-mode restart preserves the startup file, config argument, and launch nonce")
+    func buildsForcedSafeConfiguration() {
+        let configuration = makeConfiguration(
+            appArguments: ["Minga", "--config", "/tmp/custom.exs", "/tmp/file.ex"],
+            launchNonce: "nonce-123",
+            forceSafeMode: true
+        )
+
+        #expect(configuration.environment["MINGA_CLI_ARGS_B64"] == encoded([
+            "--safe", "--config", "/tmp/custom.exs", "/tmp/file.ex"
         ]))
         #expect(configuration.environment["MINGA_SAFE_MODE"] == "1")
         #expect(configuration.environment["MINGA_LAUNCH_NONCE"] == "nonce-123")
@@ -201,7 +217,8 @@ struct BEAMLaunchConfigurationTests {
         usesDevelopmentIPC: Bool = false,
         validHomeDirectoryURL: URL? = URL(fileURLWithPath: "/Users/alice"),
         launchNonce: String? = nil,
-        releaseCookie: String = "cookie-1"
+        releaseCookie: String = "cookie-1",
+        forceSafeMode: Bool = false
     ) -> BEAMLaunchConfiguration {
         BEAMLaunchConfiguration.build(from: BEAMLaunchInputs(
             executableURL: URL(fileURLWithPath: "/Applications/Minga.app/Contents/Resources/release/bin/minga_macos"),
@@ -217,7 +234,7 @@ struct BEAMLaunchConfigurationTests {
             appInstanceID: "instance-123",
             launchNonce: launchNonce,
             releaseCookie: releaseCookie
-        ))
+        ), forceSafeMode: forceSafeMode)
     }
 
     private func encoded(_ arguments: [String]) -> String {
@@ -228,6 +245,22 @@ struct BEAMLaunchConfigurationTests {
                 .replacingOccurrences(of: "/", with: "_")
                 .replacingOccurrences(of: "=", with: "")
         }.joined(separator: ",")
+    }
+}
+
+@Suite("Startup compile progress")
+struct StartupCompileRecordsTests {
+    @Test("fragmented progress survives ordinary and oversized stderr lines")
+    func readsOnlyCompleteProgressRecords() {
+        var decoder = StartupCompileRecords()
+        var received: [String?] = []
+        let deliver: (String?) -> Void = { received.append($0) }
+        decoder.consume(Data("diagnostic\nMINGA_STARTUP_COMP".utf8), deliver: deliver)
+        #expect(received.isEmpty)
+        decoder.consume(Data("ILE\t{\"name\":\"local_extension\"}\n".utf8), deliver: deliver)
+        decoder.consume(Data(("MINGA_STARTUP_COMPILE\t" + String(repeating: "x", count: 2048) + "\n").utf8), deliver: deliver)
+        decoder.consume(Data("MINGA_STARTUP_COMPILE\t{\"name\":null}\n".utf8), deliver: deliver)
+        #expect(received == ["local_extension", nil])
     }
 }
 
