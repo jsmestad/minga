@@ -239,7 +239,9 @@ defmodule MingaEditor.RenderModel.Window.ReviewProjectionTest do
     do: ReviewLayout.new(width, %Monospace{}, Theme.get!(:minga_default), 4)
 
   defp recolored_layout do
-    theme = ThemeBuilder.apply_overrides(Theme.get!(:minga_default), %{git: %{added_fg: 0x123456}})
+    theme =
+      ThemeBuilder.apply_overrides(Theme.get!(:minga_default), %{git: %{added_fg: 0x123456}})
+
     ReviewLayout.new(80, %Monospace{}, theme, 4)
   end
 
