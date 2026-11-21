@@ -64,7 +64,9 @@ defmodule MingaAgent.AutobiographyTest do
     insert(db, "s1", :user_message, %{"text" => "next"})
 
     assert {:ok, %Entry{} = entry} = Autobiography.for_line("/p/a.ex", "unique line", db: db)
-    assert {entry.user_request, entry.thinking, entry.assistant_text} == {" current ", "one two", "AB"}
+
+    assert {entry.user_request, entry.thinking, entry.assistant_text} ==
+             {" current ", "one two", "AB"}
   end
 
   test "a blank user message clears earlier context without hiding later reasoning", %{db: db} do
@@ -74,7 +76,9 @@ defmodule MingaAgent.AutobiographyTest do
     edit(db, "s1", "/p/a.ex", after: "unique line")
 
     assert {:ok, %Entry{} = entry} = Autobiography.for_line("/p/a.ex", "unique line", db: db)
-    assert {entry.user_request, entry.thinking, entry.assistant_text} == {nil, "current reasoning", nil}
+
+    assert {entry.user_request, entry.thinking, entry.assistant_text} ==
+             {nil, "current reasoning", nil}
   end
 
   test "an edit can retain reasoning without a visible user message", %{db: db} do

@@ -209,11 +209,17 @@ defmodule MingaAgent.Autobiography do
     {payload(event, "text"), [], []}
   end
 
-  defp collect_turn_event(%EventRecord{event_type: :thinking_delta} = event, {request, thinking, text}) do
+  defp collect_turn_event(
+         %EventRecord{event_type: :thinking_delta} = event,
+         {request, thinking, text}
+       ) do
     {request, [payload(event, "delta") || "" | thinking], text}
   end
 
-  defp collect_turn_event(%EventRecord{event_type: :assistant_delta} = event, {request, thinking, text}) do
+  defp collect_turn_event(
+         %EventRecord{event_type: :assistant_delta} = event,
+         {request, thinking, text}
+       ) do
     {request, thinking, [payload(event, "delta") || "" | text]}
   end
 
