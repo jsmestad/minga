@@ -206,6 +206,17 @@ defmodule Minga.Project.FileTreeTest do
     end
 
     @tag :tmp_dir
+    test "revealing a missing file still expands its existing parent", %{tmp_dir: tmp_dir} do
+      mkdir(Path.join(tmp_dir, "lib"))
+      touch(Path.join([tmp_dir, "lib", "app.ex"]))
+
+      tree = FileTree.new(tmp_dir) |> FileTree.reveal(Path.join([tmp_dir, "lib", "missing.ex"]))
+
+      assert names(tree) == ["lib", "app.ex"]
+      assert selected_name(tree) == "lib"
+    end
+
+    @tag :tmp_dir
     test "visible entries expose renderer guide metadata", %{tmp_dir: tmp_dir} do
       mkdir(Path.join([tmp_dir, "lib", "nested"]))
       touch(Path.join([tmp_dir, "lib", "app.ex"]))

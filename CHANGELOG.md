@@ -96,6 +96,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - Input dispatch no longer reads the active buffer revision before each action. Agent session metadata and saves reuse one ordered transcript read per operation, and the modeline reads only the cached Git degradation flag.
 - Agent chat search prepares its query once instead of normalizing it for every message. Markdown rendering resolves code-card paths in source order instead of rescanning the message for each card.
 - Cached Git reads select the most specific live tracked root without sorting all matches. Path boundaries and untracked behavior are unchanged.
+- Diff previews pair changed lines without indexing the old side. File tree walks use the remaining siblings to set guide markers and reuse exact-path selection.
 - Wrapped cursor movement and rendering share one byte-to-row walk instead of building intermediate row lists. Theme loading resolves face definitions once when there are no user face overrides. Key binding registration parses each sequence once.
 - Config loading collects compiled modules without recopying previous batches. Theme loading applies editor overrides in the existing order for each theme source.
 - Language registration uses the same keys to check ownership, publish lookups, and remove old indexes when replacing a definition.
