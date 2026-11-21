@@ -58,12 +58,13 @@ defmodule MingaEditor.FeatureState do
   @doc "Fetches a source-owned feature value."
   @spec fetch(t(), source(), feature_id()) :: {:ok, value()} | :error
   def fetch(%__MODULE__{entries: entries}, source, feature_id) do
-    with true <- valid_source?(source),
-         true <- valid_feature_id?(feature_id),
-         %{^feature_id => value} <- Map.get(entries, source, %{}) do
-      {:ok, value}
+    if valid_source?(source) and valid_feature_id?(feature_id) do
+      case entries do
+        %{^source => %{^feature_id => value}} -> {:ok, value}
+        _ -> :error
+      end
     else
-      _ -> :error
+      :error
     end
   end
 
