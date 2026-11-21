@@ -58,16 +58,15 @@ defmodule MingaAgent.Session.PrefixStore do
 
   def candidate(previous, instructions, schemas, identity, skills)
       when is_binary(instructions) and is_list(schemas) and is_map(identity) do
-    with true <- Enum.all?(schemas, &valid_schema?/1),
-         true <- valid_identity?(identity),
-         true <- valid_skills?(skills),
-         schemas = Enum.sort_by(schemas, & &1.name),
-         names = Enum.map(schemas, & &1.name),
-         true <- length(Enum.uniq(names)) == length(names),
-         true <- data?(schemas) do
-      build_candidate(previous, instructions, schemas, identity, skills)
+    if Enum.all?(schemas, &valid_schema?/1) and valid_identity?(identity) and
+         valid_skills?(skills) do
+      schemas = Enum.sort_by(schemas, & &1.name)
+
+      if ordered_schema_names?(schemas),
+        do: build_candidate(previous, instructions, schemas, identity, skills),
+        else: {:error, :invalid_prefix_candidate}
     else
-      false -> {:error, :invalid_prefix_candidate}
+      {:error, :invalid_prefix_candidate}
     end
   end
 
@@ -166,7 +165,10 @@ defmodule MingaAgent.Session.PrefixStore do
   @spec dump(t()) :: map()
   def dump(%__MODULE__{} = store), do: Map.put(Map.from_struct(store), :version, 1)
 
-  @doc "Validates all digests and references before accepting current-format storage."
+  @doc """
+  Validates all digests and references before accepting current-format storage.
+  Stored schema lists must already be in strict name order.
+  """
   @spec restore(term()) :: {:ok, t()} | {:error, :invalid_prefix_store}
   def restore(
         %{
@@ -266,10 +268,11 @@ defmodule MingaAgent.Session.PrefixStore do
   defp valid_skills?(_invalid), do: false
 
   @spec ordered_schema_names?([map()]) :: boolean()
-  defp ordered_schema_names?(schemas) do
-    names = Enum.map(schemas, & &1.name)
-    names == Enum.sort(Enum.uniq(names))
-  end
+  defp ordered_schema_names?([%{name: left} | [%{name: right} | _] = rest]),
+    do: left < right and ordered_schema_names?(rest)
+
+  defp ordered_schema_names?([]), do: true
+  defp ordered_schema_names?([_schema]), do: true
 
   @spec valid_schema?(term()) :: boolean()
   defp valid_schema?(
