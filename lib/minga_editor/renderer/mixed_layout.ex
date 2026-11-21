@@ -285,18 +285,7 @@ defmodule MingaEditor.Renderer.MixedLayout do
          request,
          sources
        ) do
-    {composed, rows} = measure_source(text, line, kind, request)
-
-    measurement =
-      case request.purpose do
-        :page ->
-          indexed = List.to_tuple(rows)
-          {text, offset, composed, indexed, tuple_size(indexed)}
-
-        :bounds ->
-          length(rows)
-      end
-
+    measurement = measure_group(text, line, kind, offset, request)
     sources = Map.put(sources, line, measurement)
 
     measure_run(
@@ -309,16 +298,34 @@ defmodule MingaEditor.Renderer.MixedLayout do
     )
   end
 
-  defp measure_source(text, line, :normal, request) do
-    WrapLayout.measure(
+  defp measure_group(text, line, :normal, _offset, %{purpose: :bounds} = request) do
+    WrapLayout.row_count(
       text,
       line,
       request.decorations,
+      request.cursor_line,
       request.wrap_options,
-      request.show_invisible?,
-      request.cursor_line
+      request.show_invisible?
     )
   end
 
-  defp measure_source(text, _line, _fold, _request), do: {text, []}
+  defp measure_group(_text, _line, _fold, _offset, %{purpose: :bounds}), do: 0
+
+  defp measure_group(text, line, :normal, offset, %{purpose: :page} = request) do
+    {composed, rows} =
+      WrapLayout.measure(
+        text,
+        line,
+        request.decorations,
+        request.wrap_options,
+        request.show_invisible?,
+        request.cursor_line
+      )
+
+    indexed = List.to_tuple(rows)
+    {text, offset, composed, indexed, tuple_size(indexed)}
+  end
+
+  defp measure_group(text, _line, _fold, offset, %{purpose: :page}),
+    do: {text, offset, text, {}, 0}
 end
