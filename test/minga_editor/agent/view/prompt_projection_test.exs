@@ -57,6 +57,17 @@ defmodule MingaEditor.Agent.View.PromptProjectionTest do
     end
   end
 
+  test "a wrap inside an expanded tab keeps distinct source boundaries for each row" do
+    projection = PromptProjection.build(panel("abcde\nab\tc"), 3)
+    assert [_, _, first, continuation] = projection.rows
+    assert first.text == "ab "
+    assert continuation.text == " c"
+    assert first.offset_map.source_end_byte == 3
+    assert continuation.offset_map.source_start_byte == 2
+    assert PromptProjection.position(projection, {1, 2}) == {2, 2}
+    assert PromptProjection.position(projection, {1, 3}) == {3, 1}
+  end
+
   test "explicit and trailing newlines retain empty source-backed rows" do
     panel = panel("a\n\n")
     Buffer.move_to(panel.prompt_buffer, {2, 0})
@@ -300,6 +311,24 @@ defmodule MingaEditor.Agent.View.PromptProjectionTest do
     Buffer.insert_text(panel.prompt_buffer, "!")
     assert PromptProjection.build(reading, 80).scroll > 0
     assert PromptProjection.build(reading, 80).columns == 4
+  end
+
+  test "rewrapping a reading viewport uses the last surviving continuation and clamps to the bottom" do
+    panel = panel("a\nabcdefghijkl\nb\nc") |> Panel.fit_prompt(3, 2)
+    projection = PromptProjection.build(panel, 80)
+    anchor = PromptProjection.anchor(projection, 4)
+    assert anchor == {1, 3}
+
+    reading = Panel.scroll_prompt(panel, {projection.version, projection.cursor}, anchor)
+    assert PromptProjection.build(reading, 80).scroll == 4
+
+    widened = reading |> Panel.fit_prompt(6, 2) |> PromptProjection.build(80)
+    assert widened.scroll == 2
+    assert PromptProjection.anchor(widened, widened.scroll) == {1, 1}
+
+    taller = reading |> Panel.fit_prompt(6, 4) |> PromptProjection.build(80)
+    assert taller.scroll == 1
+    assert PromptProjection.anchor(taller, taller.scroll) == {1, 0}
   end
 
   test "selections crossing a wrapped viewport clip to display rows and preserve Unicode byte anchors" do

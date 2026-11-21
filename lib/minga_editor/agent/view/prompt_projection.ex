@@ -73,13 +73,11 @@ defmodule MingaEditor.Agent.View.PromptProjection do
             else: wrapped
 
         {segments, _end_position} =
-          wrapped
-          |> Enum.with_index()
-          |> Enum.map_reduce({0, 0}, fn {row, visual_index}, {utf16, column} ->
+          Enum.map_reduce(wrapped, {0, 0, 0}, fn row, {visual_index, utf16, column} ->
             end_utf16 = utf16 + utf16_length(row.source_text)
             end_col = column + WidthOracle.display_width(oracle, row.source_text)
             segment = {row.source_text, visual_index, utf16, end_utf16, column, end_col}
-            {segment, {end_utf16, end_col}}
+            {segment, {visual_index + 1, end_utf16, end_col}}
           end)
 
         boundaries =
@@ -107,7 +105,8 @@ defmodule MingaEditor.Agent.View.PromptProjection do
         end)
       end)
 
-    visible = max(1, min(length(rows), min(capacity, 8)))
+    row_count = length(rows)
+    visible = max(1, min(row_count, min(capacity, 8)))
 
     projection = %__MODULE__{
       buffer: panel.prompt_buffer,
@@ -121,15 +120,9 @@ defmodule MingaEditor.Agent.View.PromptProjection do
       oracle: oracle
     }
 
-    {cursor_row, _column} = position(projection, snapshot.cursor)
     marker = {snapshot.version, snapshot.cursor}
-
-    scroll =
-      scroll_top(
-        projection,
-        PromptViewport.reading_anchor(panel.prompt_viewport, marker),
-        cursor_row
-      )
+    reading_anchor = PromptViewport.reading_anchor(panel.prompt_viewport, marker)
+    scroll = min(scroll_top(projection, reading_anchor), max(row_count - visible, 0))
 
     %{projection | scroll: scroll}
   end
@@ -146,51 +139,66 @@ defmodule MingaEditor.Agent.View.PromptProjection do
 
   @spec position(t(), position()) :: {non_neg_integer(), non_neg_integer()}
   def position(%__MODULE__{} = projection, {line, byte}) do
-    candidates =
-      projection.rows
-      |> Enum.with_index()
-      |> Enum.filter(fn {row, _index} -> row.logical_line == line end)
+    {[%{offset_map: offset_map} | _] = line_rows, index} =
+      rows_from_line(projection.rows, line, 0)
 
-    {first, _index} = hd(candidates)
-    composed = SourceOffsetMap.source_to_composed_utf16(first.offset_map, byte, :start)
-
-    {row, index} =
-      candidates
-      |> Enum.filter(fn {row, _index} -> row.offset_map.composed_start_utf16 <= composed end)
-      |> List.last()
-      |> position_candidate(candidates)
+    composed = SourceOffsetMap.source_to_composed_utf16(offset_map, byte, :start)
+    {row, index} = row_at_composed_utf16(line_rows, line, composed, index)
 
     local = max(composed - row.offset_map.composed_start_utf16, 0)
     prefix = utf16_prefix(row.text, local)
     {index, WidthOracle.display_width(projection.oracle, prefix)}
   end
 
-  @spec position_candidate({visual_row(), non_neg_integer()} | nil, [
-          {visual_row(), non_neg_integer()}
-        ]) ::
-          {visual_row(), non_neg_integer()}
-  defp position_candidate(nil, [first | _]), do: first
-  defp position_candidate(candidate, _candidates), do: candidate
+  @spec rows_from_line([visual_row()], non_neg_integer(), non_neg_integer()) ::
+          {nonempty_list(visual_row()), non_neg_integer()}
+  defp rows_from_line([%{logical_line: line} | _] = rows, line, index), do: {rows, index}
 
-  @spec scroll_top(t(), PromptViewport.anchor() | nil, non_neg_integer()) :: non_neg_integer()
-  defp scroll_top(projection, nil, cursor_row),
-    do:
-      min(
-        max(cursor_row - projection.visible_rows + 1, 0),
-        max(length(projection.rows) - projection.visible_rows, 0)
-      )
+  defp rows_from_line([%{logical_line: current} | rest], line, index) when current < line,
+    do: rows_from_line(rest, line, index + 1)
 
-  defp scroll_top(projection, {line, continuation}, _cursor_row) do
-    {_row, index} =
-      projection.rows
-      |> Enum.with_index()
-      |> Enum.filter(fn {row, _index} ->
-        row.logical_line < line or (row.logical_line == line and row.visual_index <= continuation)
-      end)
-      |> List.last()
+  defp rows_from_line(_rows, line, _index),
+    do: raise(ArgumentError, "prompt projection has no logical line #{line}")
 
-    min(index, max(length(projection.rows) - projection.visible_rows, 0))
+  @spec row_at_composed_utf16(
+          nonempty_list(visual_row()),
+          non_neg_integer(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: {visual_row(), non_neg_integer()}
+  defp row_at_composed_utf16(
+         [_ | [%{logical_line: line, offset_map: %{composed_start_utf16: start}} | _] = rest],
+         line,
+         composed,
+         index
+       )
+       when start <= composed,
+       do: row_at_composed_utf16(rest, line, composed, index + 1)
+
+  defp row_at_composed_utf16([row | _], _line, _composed, index), do: {row, index}
+
+  @spec scroll_top(t(), PromptViewport.anchor() | nil) :: non_neg_integer()
+  defp scroll_top(projection, nil) do
+    {cursor_row, _column} = position(projection, projection.cursor)
+    max(cursor_row - projection.visible_rows + 1, 0)
   end
+
+  defp scroll_top(projection, anchor) do
+    # The anchored continuation may no longer exist after rewrapping.
+    anchor_predecessor(projection.rows, anchor, 0)
+  end
+
+  @spec anchor_predecessor([visual_row()], PromptViewport.anchor(), non_neg_integer()) ::
+          non_neg_integer()
+  defp anchor_predecessor(
+         [_ | [%{logical_line: line, visual_index: visual_index} | _] = rest],
+         {anchor_line, anchor_continuation} = anchor,
+         row_index
+       )
+       when line < anchor_line or (line == anchor_line and visual_index <= anchor_continuation),
+       do: anchor_predecessor(rest, anchor, row_index + 1)
+
+  defp anchor_predecessor(_rows, _anchor, row_index), do: row_index
 
   @spec compose_line(String.t(), non_neg_integer(), Panel.t()) ::
           {String.t(), SourceOffsetMap.t(), boolean()}

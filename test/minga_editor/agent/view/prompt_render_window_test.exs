@@ -7,6 +7,7 @@ defmodule MingaEditor.Agent.View.PromptRenderWindowTest do
   alias Minga.Buffer
   alias Minga.RenderModel.Window.Row
   alias MingaEditor.Frontend.Capabilities
+  alias MingaEditor.Renderer.TextPresentation
   alias MingaEditor.UI.Theme
   alias MingaEditor.VimState
 
@@ -262,6 +263,51 @@ defmodule MingaEditor.Agent.View.PromptRenderWindowTest do
       assert model.selection.start_col == 4
       assert model.selection.end_row == 0
       assert model.selection.end_col == 18
+    end
+  end
+
+  describe "build_presented/4" do
+    test "styles a scrolled mention continuation and leases each visible row in display order" do
+      ctx = prompt_ctx("hey\n@lib/minga.ex ok\n@bad.ex", cursor: {2, 6})
+      panel = UIState.Panel.fit_prompt(ctx.ui_state.panel, 4, 5)
+      ctx = %{ctx | ui_state: UIState.replace_panel(ctx.ui_state, panel)}
+      opts = [project_files: ["lib/minga.ex"], project_root: nil, presentation_id: 101]
+
+      {model, lease} = PromptRenderWindow.build_presented(ctx, 4, nil, opts)
+
+      assert Enum.map(model.rows, & &1.text) == ["/min", "ga.e", "x ok", "@bad", ".ex"]
+      assert %{top: 1, visual_row_offset: 1, rows: 5} = model.geometry.viewport
+
+      accent = Theme.agent_theme(ctx.theme).input_border
+
+      for {row, end_col} <- Enum.zip(Enum.take(model.rows, 3), [4, 4, 1]) do
+        assert [%{start_col: 0, end_col: ^end_col, fg: ^accent} | _] = row.spans
+      end
+
+      assert Enum.map(model.diagnostic_ranges, fn range ->
+               {range.start_row, range.start_col, range.end_row, range.end_col, range.severity}
+             end) == [
+               {3, 0, 3, 4, :error},
+               {4, 0, 4, 3, :error}
+             ]
+
+      positions = Enum.zip(model.rows, [{1, 4}, {1, 8}, {1, 12}, {2, 0}, {2, 4}])
+
+      for {{row, position}, display_row} <- Enum.with_index(positions) do
+        assert {:ok, target} = TextPresentation.resolve(lease, display_row, row.row_id, 0)
+        assert {target.line, target.byte} == position
+      end
+
+      {next_model, retained} =
+        PromptRenderWindow.build_presented(
+          ctx,
+          4,
+          nil,
+          Keyword.merge(opts, previous_presentation: lease, presentation_id: 102)
+        )
+
+      assert retained == lease
+      assert next_model.text_presentation_id == lease.presentation_id
     end
   end
 
