@@ -32,6 +32,8 @@ defmodule MingaEditor.RenderModel.Window.ReviewProjection do
 
   @typep fragment :: {RowSlotAllocator.key(), Row.t()}
   @typep line_cache :: %{term() => {DisplayLine.kind(), String.t(), [fragment()]}}
+  @typep lineage_state :: {%{non_neg_integer() => non_neg_integer()}, non_neg_integer()}
+  @typep source_inputs :: {[String.t()], lineage_state()}
   @typep build_context :: {
            [Row.t()],
            line_cache(),
@@ -130,35 +132,60 @@ defmodule MingaEditor.RenderModel.Window.ReviewProjection do
        do: :reset_required
 
   defp reconcile(previous, review, compatibility, revision, layout, allocator, epoch) do
-    baseline = DiffReview.original_lines(review)
-    rebuild(previous, review, baseline, compatibility, revision, layout, allocator, epoch)
+    case reconcile_source(previous, review, revision) do
+      :reset_required ->
+        :reset_required
+
+      source ->
+        compose(previous, review, source, compatibility, revision, layout, allocator, epoch)
+    end
   end
 
-  @spec rebuild(
+  # Fresh previews can reuse revision numbers, so compare the source values too.
+  @spec reconcile_source(t() | nil, DiffReview.t(), {non_neg_integer(), tuple()}) ::
+          source_inputs() | :reset_required
+  defp reconcile_source(
+         %__MODULE__{
+           rows_revision: {rows, _style},
+           review: %DiffReview{after_lines: lines, hunks: hunks},
+           baseline: baseline,
+           hunk_lineages: lineages,
+           next_lineage: next
+         },
+         %DiffReview{after_lines: lines, hunks: hunks},
+         {rows, _new_style}
+       ),
+       do: {baseline, {lineages, next}}
+
+  defp reconcile_source(previous, review, _revision) do
+    baseline = DiffReview.original_lines(review)
+
+    case previous do
+      %__MODULE__{baseline: retained} when retained != baseline -> :reset_required
+      _ -> {baseline, carry_lineages(previous, review)}
+    end
+  end
+
+  @spec compose(
           t() | nil,
           DiffReview.t(),
-          [String.t()],
+          source_inputs(),
           term(),
           {non_neg_integer(), tuple()},
           ReviewLayout.t(),
           RowSlotAllocator.t(),
           non_neg_integer()
         ) :: result()
-  defp rebuild(
-         %__MODULE__{baseline: previous},
-         _review,
-         baseline,
-         _compatibility,
-         _revision,
-         _layout,
-         _allocator,
-         _epoch
-       )
-       when previous != baseline,
-       do: :reset_required
-
-  defp rebuild(previous, review, baseline, compatibility, revision, layout, allocator, epoch) do
-    {lineages, next_lineage} = carry_lineages(previous, review)
+  defp compose(
+         previous,
+         review,
+         {baseline, {lineages, _next} = lineage_state},
+         compatibility,
+         revision,
+         layout,
+         allocator,
+         epoch
+       ) do
     {old_lines, baseline_keys} = retained_inputs(previous, revision)
     initial = {[], %{}, allocator, baseline_keys, MapSet.new(), %{}, 0, ContentDigest.empty()}
     scope = {epoch, 0, :normal}
@@ -185,7 +212,7 @@ defmodule MingaEditor.RenderModel.Window.ReviewProjection do
       baseline,
       compatibility,
       revision,
-      {lineages, next_lineage},
+      lineage_state,
       scope
     )
   end
@@ -205,7 +232,7 @@ defmodule MingaEditor.RenderModel.Window.ReviewProjection do
 
   defp retained_inputs(%__MODULE__{baseline_keys: keys}, _revision), do: {%{}, keys}
 
-  @spec carry_lineages(t() | nil, DiffReview.t()) :: {map(), non_neg_integer()}
+  @spec carry_lineages(t() | nil, DiffReview.t()) :: lineage_state()
   defp carry_lineages(nil, review), do: allocate_lineages(review, %{}, %{}, 0)
 
   defp carry_lineages(%__MODULE__{} = previous, review) do
@@ -398,7 +425,7 @@ defmodule MingaEditor.RenderModel.Window.ReviewProjection do
           [String.t()],
           term(),
           {non_neg_integer(), tuple()},
-          {map(), non_neg_integer()},
+          lineage_state(),
           RowSlotAllocator.scope()
         ) :: result()
   defp finish(
