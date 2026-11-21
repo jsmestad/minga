@@ -33,9 +33,8 @@ defmodule Minga.Core.DecorationsTest do
   end
 
   defp add_annotations(specs) do
-    Enum.reduce(specs, Decorations.new(), fn
-      {line, text}, decs -> add_annotation(decs, line, text)
-      {line, text, opts}, decs -> add_annotation(decs, line, text, opts)
+    Enum.reduce(specs, Decorations.new(), fn {line, text, opts}, decs ->
+      add_annotation(decs, line, text, opts)
     end)
   end
 
@@ -65,9 +64,6 @@ defmodule Minga.Core.DecorationsTest do
   end
 
   defp annotation_lines(decs), do: Enum.map(decs.annotations, & &1.line)
-
-  defp annotation_texts(decs, line),
-    do: decs |> Decorations.annotations_for_line(line) |> Enum.map(& &1.text)
 
   describe "highlight storage" do
     test "new decorations are empty" do
@@ -375,11 +371,10 @@ defmodule Minga.Core.DecorationsTest do
 
   describe "annotations" do
     test "adds annotations with ids, options, version bumps, and cache maintenance" do
-      decs = Decorations.new()
-      version = decs.version
+      empty = Decorations.new()
 
       {id, decs} =
-        Decorations.add_annotation(decs, 3, "urgent",
+        Decorations.add_annotation(empty, 3, "urgent",
           kind: :inline_text,
           fg: 0xFF0000,
           bg: 0x00FF00,
@@ -389,7 +384,8 @@ defmodule Minga.Core.DecorationsTest do
 
       assert is_reference(id)
       assert Decorations.has_annotations?(decs)
-      assert decs.version == version + 1
+      assert decs.version == empty.version + 1
+      assert decs.annotation_version == empty.annotation_version + 1
 
       decs = Decorations.build_ann_line_cache(decs)
       assert decs.ann_line_cache != nil
@@ -404,56 +400,122 @@ defmodule Minga.Core.DecorationsTest do
       assert ann.priority == 10
     end
 
-    test "removes annotations by id and ignores missing ids" do
-      decs = Decorations.new()
-      {id1, decs} = Decorations.add_annotation(decs, 5, "first")
-      {_id2, decs} = Decorations.add_annotation(decs, 10, "second")
+    test "removing an id preserves survivor order and drops an emptied line bucket" do
+      {high, decs} = Decorations.add_annotation(Decorations.new(), 5, "high", priority: 20)
+      {other, decs} = Decorations.add_annotation(decs, 6, "other")
+      {mid, decs} = Decorations.add_annotation(decs, 5, "mid", priority: 10)
+      {low, decs} = Decorations.add_annotation(decs, 5, "low", priority: 5)
 
-      decs = Decorations.remove_annotation(decs, id1)
-      assert Decorations.annotations_for_line(decs, 5) == []
-      assert annotation_texts(decs, 10) == ["second"]
+      removed = Decorations.remove_annotation(decs, mid)
+      assert Enum.map(removed.annotations, & &1.id) == [low, other, high]
+      assert Enum.map(Decorations.annotations_for_line(removed, 5), & &1.id) == [low, high]
+      assert removed.ann_line_cache[6] == decs.ann_line_cache[6]
+      assert removed.version == decs.version + 1
+      assert removed.annotation_version == decs.annotation_version + 1
 
-      version = decs.version
-      assert Decorations.remove_annotation(decs, make_ref()).version == version
+      emptied =
+        removed
+        |> Decorations.remove_annotation(high)
+        |> Decorations.remove_annotation(low)
+
+      assert emptied.ann_line_cache == %{6 => decs.ann_line_cache[6]}
+      assert Decorations.annotations_for_line(emptied, 5) == []
+      assert Decorations.remove_annotation(decs, make_ref()) == decs
+
+      uncached = %{decs | ann_line_cache: nil}
+      assert Decorations.remove_annotation(uncached, make_ref()) == uncached
+      assert Decorations.remove_annotation(uncached, mid) == removed
     end
 
-    test "queries annotations by line with priority ordering and cache support" do
-      decs =
-        add_annotations([
-          {5, "high", [priority: 20]},
-          {5, "low", [priority: 5]},
-          {5, "mid", [priority: 10]},
-          {0, "other"}
-        ])
+    test "adding with a nil cache leaves it unbuilt but removing the last id builds it" do
+      empty = %{Decorations.new() | ann_line_cache: nil}
+      {id, added} = Decorations.add_annotation(empty, 5, "only")
+      assert added.ann_line_cache == nil
+      assert [%{id: ^id}] = Decorations.annotations_for_line(added, 5)
 
-      assert annotation_texts(decs, 5) == ["low", "mid", "high"]
-      assert Decorations.annotations_for_line(decs, 10) == []
-      assert Enum.count(Decorations.annotations_for_line(decs, 0)) == 1
-
-      cached = Decorations.build_ann_line_cache(decs)
-      assert cached.ann_line_cache != nil
-      assert annotation_texts(cached, 5) == ["low", "mid", "high"]
-      assert Decorations.annotations_for_line(cached, 3) == []
-      assert Decorations.build_ann_line_cache(cached) == cached
-      assert Decorations.build_ann_line_cache(Decorations.new()).ann_line_cache == %{}
+      removed = Decorations.remove_annotation(added, id)
+      assert removed.ann_line_cache == %{}
+      assert removed.annotations == []
+      assert removed.version == added.version + 1
+      assert removed.annotation_version == added.annotation_version + 1
     end
 
-    test "removes annotation groups and ignores missing groups" do
+    test "line and range queries order equal priorities newest first with or without a cache" do
+      empty = Decorations.new()
+      {old, decs} = Decorations.add_annotation(empty, 5, "old", priority: 10)
+      {high, decs} = Decorations.add_annotation(decs, 5, "high", priority: 20)
+      {low, decs} = Decorations.add_annotation(decs, 5, "low", priority: 5)
+      {other, decs} = Decorations.add_annotation(decs, 6, "other")
+      {new, decs} = Decorations.add_annotation(decs, 5, "new", priority: 10)
+
+      assert Enum.map(decs.annotations, & &1.id) == [new, other, low, high, old]
+
+      uncached = %{decs | ann_line_cache: nil}
+      rebuilt = Decorations.build_ann_line_cache(uncached)
+      line_ids = [low, new, old, high]
+
+      for current <- [decs, uncached, rebuilt] do
+        assert Enum.map(Decorations.annotations_for_line(current, 5), & &1.id) == line_ids
+        assert Enum.map(Decorations.annotations_for_range(current, 5, 6), & &1.id) == line_ids
+
+        assert Enum.map(Decorations.annotations_for_range(current, 5, 7), & &1.id) ==
+                 line_ids ++ [other]
+
+        assert Decorations.annotations_for_line(current, 10) == []
+      end
+
+      assert rebuilt == decs
+      assert Decorations.build_ann_line_cache(decs) == decs
+      assert Decorations.build_ann_line_cache(%{empty | ann_line_cache: nil}) == empty
+    end
+
+    test "group removal updates annotation buckets immediately and defers the batch version" do
       decs =
         add_annotations([
-          {5, "lsp1", [group: :lsp]},
-          {10, "lsp2", [group: :lsp]},
-          {15, "agent", [group: :agent]}
+          {5, "old", [group: :keep, priority: 10]},
+          {5, "drop here", [group: :drop, priority: 5]},
+          {8, "drop entire line", [group: :drop]},
+          {6, "other", [group: :keep]},
+          {5, "high", [group: :keep, priority: 20]},
+          {5, "new", [group: :keep, priority: 10]}
         ])
 
-      decs = Decorations.remove_group(decs, :lsp)
-      assert Decorations.annotations_for_line(decs, 5) == []
-      assert Decorations.annotations_for_line(decs, 10) == []
-      assert annotation_texts(decs, 15) == ["agent"]
+      {_search, decs} = add_hl(decs, {5, 0}, {5, 1}, group: :search)
+      [new, high, other, _drop_line, _drop_here, old] = decs.annotations
+      expected_cache = %{5 => [new, old, high], 6 => [other]}
 
-      assert Decorations.remove_group(decs, :missing)
-             |> Decorations.annotations_for_line(15)
-             |> Enum.count() == 1
+      remove_groups = fn current, version_step ->
+        unrelated = Decorations.remove_group(current, :search)
+        assert unrelated.annotations == decs.annotations
+        assert unrelated.ann_line_cache == decs.ann_line_cache
+        assert unrelated.annotation_version == decs.annotation_version
+        assert unrelated.version == decs.version + version_step
+
+        matching = Decorations.remove_group(unrelated, :drop)
+        assert matching.annotations == [new, high, other, old]
+        assert matching.ann_line_cache == expected_cache
+        assert Decorations.annotations_for_range(matching, 5, 9) == [new, old, high, other]
+        assert matching.annotation_version == decs.annotation_version + 1
+        assert matching.version == unrelated.version + version_step
+        matching
+      end
+
+      for current <- [decs, %{decs | ann_line_cache: nil}] do
+        direct = remove_groups.(current, 1)
+        assert Decorations.highlight_count(direct) == 0
+
+        batched =
+          Decorations.batch(current, fn batching ->
+            matching = remove_groups.(batching, 0)
+            assert Decorations.highlight_count(matching) == 1
+            matching
+          end)
+
+        assert Decorations.highlight_count(batched) == 0
+        assert batched.ann_line_cache == expected_cache
+        assert batched.annotation_version == decs.annotation_version + 1
+        assert batched.version == decs.version + 1
+      end
     end
   end
 

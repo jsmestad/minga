@@ -222,8 +222,8 @@ defmodule Minga.Core.Decorations do
   @doc """
   Removes all decorations belonging to the given group across all types.
 
-  Clears highlight ranges, virtual texts, block decorations, fold regions,
-  and conceal ranges that have a matching `:group` field. This is the
+  Clears highlight ranges, virtual texts, line annotations, block decorations,
+  fold regions, and conceal ranges that have a matching `:group` field. This is the
   correct way for a decoration consumer (e.g., agent chat, search, LSP)
   to clear its own decorations without affecting other consumers.
 
@@ -235,20 +235,16 @@ defmodule Minga.Core.Decorations do
     # During a batch, defer highlight removal to pending (processed by apply_pending).
     # But immediately remove non-highlight types since they don't participate
     # in the pending queue system.
-    new_annotations = Enum.reject(decs.annotations, &(&1.group == group))
+    decs = remove_annotation_group(decs, group)
 
     %{
       decs
       | pending: [{:remove_group, group} | pending],
         virtual_texts: Enum.reject(decs.virtual_texts, &(&1.group == group)),
-        annotations: new_annotations,
-        annotation_version:
-          bump_if_changed(decs.annotation_version, decs.annotations, new_annotations),
         block_decorations: Enum.reject(decs.block_decorations, &(&1.group == group)),
         fold_regions: Enum.reject(decs.fold_regions, &(&1.group == group)),
         conceal_ranges: Enum.reject(decs.conceal_ranges, &(&1.group == group)),
-        vt_line_cache: nil,
-        ann_line_cache: annotation_cache(new_annotations)
+        vt_line_cache: nil
     }
   end
 
@@ -257,24 +253,21 @@ defmodule Minga.Core.Decorations do
       IntervalTree.map_filter(decs.highlights, &filter_group(&1, group))
 
     new_virtual_texts = Enum.reject(decs.virtual_texts, &(&1.group == group))
-    new_annotations = Enum.reject(decs.annotations, &(&1.group == group))
     new_blocks = Enum.reject(decs.block_decorations, &(&1.group == group))
     new_folds = Enum.reject(decs.fold_regions, &(&1.group == group))
     new_conceals = Enum.reject(decs.conceal_ranges, &(&1.group == group))
+
+    decs = remove_annotation_group(decs, group)
 
     %{
       decs
       | highlights: new_highlights,
         virtual_texts: new_virtual_texts,
-        annotations: new_annotations,
-        annotation_version:
-          bump_if_changed(decs.annotation_version, decs.annotations, new_annotations),
         block_decorations: new_blocks,
         fold_regions: new_folds,
         conceal_ranges: new_conceals,
         version: decs.version + 1,
-        vt_line_cache: nil,
-        ann_line_cache: annotation_cache(new_annotations)
+        vt_line_cache: nil
     }
   end
 
@@ -284,9 +277,34 @@ defmodule Minga.Core.Decorations do
     if interval.value.group == group, do: :remove, else: {:keep, interval}
   end
 
-  @spec bump_if_changed(non_neg_integer(), term(), term()) :: non_neg_integer()
-  defp bump_if_changed(version, value, value), do: version
-  defp bump_if_changed(version, _before, _after), do: version + 1
+  @spec remove_annotation_group(t(), term()) :: t()
+  defp remove_annotation_group(decs, group) do
+    case without_annotation_group(decs.annotations, group) do
+      :unchanged ->
+        build_ann_line_cache(decs)
+
+      remaining ->
+        %{
+          decs
+          | annotations: remaining,
+            annotation_version: decs.annotation_version + 1,
+            ann_line_cache: annotation_cache(remaining)
+        }
+    end
+  end
+
+  @spec without_annotation_group([LineAnnotation.t()], term()) ::
+          :unchanged | [LineAnnotation.t()]
+  defp without_annotation_group([], _group), do: :unchanged
+
+  defp without_annotation_group([%LineAnnotation{group: ann_group} = ann | rest], group) do
+    case without_annotation_group(rest, group) do
+      :unchanged when ann_group == group -> rest
+      :unchanged -> :unchanged
+      remaining when ann_group == group -> remaining
+      remaining -> [ann | remaining]
+    end
+  end
 
   @doc """
   Removes all decorations. Returns a fresh empty store with bumped version.
@@ -812,22 +830,32 @@ defmodule Minga.Core.Decorations do
   @doc "Removes a line annotation by ID."
   @spec remove_annotation(t(), reference()) :: t()
   def remove_annotation(%__MODULE__{} = decs, id) do
-    case Enum.split_with(decs.annotations, fn ann -> ann.id == id end) do
-      {[], _} ->
+    case take_annotation(decs.annotations, id) do
+      :not_found ->
         decs
 
-      {_, remaining} ->
+      {annotation, remaining} ->
         %{
           decs
           | annotations: remaining,
             version: decs.version + 1,
             annotation_version: decs.annotation_version + 1,
-            ann_line_cache: annotation_cache(remaining)
+            ann_line_cache: delete_annotation_cache(decs.ann_line_cache, annotation, remaining)
         }
     end
   end
 
-  # ── Line annotation queries ──────────────────────────────────────────────
+  @spec take_annotation([LineAnnotation.t()], reference()) ::
+          :not_found | {LineAnnotation.t(), [LineAnnotation.t()]}
+  defp take_annotation([], _id), do: :not_found
+  defp take_annotation([%LineAnnotation{id: id} = annotation | rest], id), do: {annotation, rest}
+
+  defp take_annotation([annotation | rest], id) do
+    case take_annotation(rest, id) do
+      :not_found -> :not_found
+      {taken, remaining} -> {taken, [annotation | remaining]}
+    end
+  end
 
   @spec put_annotation_cache(
           %{non_neg_integer() => [LineAnnotation.t()]} | nil,
@@ -835,10 +863,38 @@ defmodule Minga.Core.Decorations do
         ) :: %{non_neg_integer() => [LineAnnotation.t()]} | nil
   defp put_annotation_cache(nil, _annotation), do: nil
 
-  defp put_annotation_cache(cache, %LineAnnotation{} = annotation) do
-    Map.update(cache, annotation.line, [annotation], fn line_annotations ->
-      Enum.sort_by([annotation | line_annotations], & &1.priority)
-    end)
+  defp put_annotation_cache(cache, %LineAnnotation{line: line} = annotation) do
+    line_annotations = Map.get(cache, line, [])
+    Map.put(cache, line, insert_sorted_annotation(line_annotations, annotation))
+  end
+
+  @spec insert_sorted_annotation([LineAnnotation.t()], LineAnnotation.t()) ::
+          [LineAnnotation.t()]
+  defp insert_sorted_annotation(
+         [%LineAnnotation{priority: existing} = head | rest],
+         %LineAnnotation{priority: priority} = annotation
+       )
+       when existing < priority do
+    [head | insert_sorted_annotation(rest, annotation)]
+  end
+
+  # The source list is newest first, so the newest annotation wins priority ties.
+  defp insert_sorted_annotation(line_annotations, annotation), do: [annotation | line_annotations]
+
+  @spec delete_annotation_cache(
+          %{non_neg_integer() => [LineAnnotation.t()]} | nil,
+          LineAnnotation.t(),
+          [LineAnnotation.t()]
+        ) :: %{non_neg_integer() => [LineAnnotation.t()]}
+  defp delete_annotation_cache(nil, _annotation, remaining), do: annotation_cache(remaining)
+
+  defp delete_annotation_cache(cache, %LineAnnotation{id: id, line: line}, _remaining) do
+    {_annotation, line_annotations} = cache |> Map.fetch!(line) |> take_annotation(id)
+
+    case line_annotations do
+      [] -> Map.delete(cache, line)
+      [_ | _] -> Map.put(cache, line, line_annotations)
+    end
   end
 
   @spec annotation_cache([LineAnnotation.t()]) :: %{
@@ -851,6 +907,8 @@ defmodule Minga.Core.Decorations do
       {line, Enum.sort_by(line_annotations, & &1.priority)}
     end)
   end
+
+  # ── Line annotation queries ──────────────────────────────────────────────
 
   @doc """
   Returns all annotations for a specific line, sorted by priority.
@@ -886,26 +944,14 @@ defmodule Minga.Core.Decorations do
   @doc """
   Builds the annotation line cache for O(1) per-line lookups.
 
-  Call once before a render pass. The cache is invalidated on any
-  annotation mutation.
+  Call before a render pass if the cache has not been built. Annotation
+  mutations keep a built cache up to date.
   """
   @spec build_ann_line_cache(t()) :: t()
   def build_ann_line_cache(%__MODULE__{ann_line_cache: cache} = decs) when cache != nil, do: decs
 
-  def build_ann_line_cache(%__MODULE__{annotations: []} = decs) do
-    %{decs | ann_line_cache: %{}}
-  end
-
   def build_ann_line_cache(%__MODULE__{annotations: anns} = decs) do
-    cache =
-      anns
-      |> Enum.group_by(fn %LineAnnotation{line: l} -> l end)
-      |> Map.new(fn {line, line_anns} ->
-        sorted = Enum.sort_by(line_anns, fn %LineAnnotation{priority: p} -> p end)
-        {line, sorted}
-      end)
-
-    %{decs | ann_line_cache: cache}
+    %{decs | ann_line_cache: annotation_cache(anns)}
   end
 
   @doc "Returns true if there are any annotations."
