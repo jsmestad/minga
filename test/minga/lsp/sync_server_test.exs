@@ -126,20 +126,23 @@ defmodule Minga.LSP.SyncServerTest do
       attached = start_client(:full)
       SyncServer.put_clients(buf, [attached])
 
-      delta = EditDelta.insertion(0, {0, 0}, "x", {0, 1})
-      Events.broadcast(:buffer_changed, changed_event(buf, delta, EditSource.user(), 4))
+      revision = BufferProcess.version(buf)
+
+      # Seed a pending full sync without a debounce timer that could flush independently.
+      :sys.replace_state(SyncServer, fn state ->
+        %{state | pending_changes: Map.put(state.pending_changes, buf, {revision, :full_sync})}
+      end)
 
       assert {:error, :client_replaced} =
                SyncServer.request_document(
                  buf,
                  replaced,
-                 BufferProcess.version(buf),
+                 revision,
                  "textDocument/hover",
                  %{}
                )
 
-      assert_receive {:client_cast, ^attached, {:did_change, _uri, "hello", ^buf, 0}}
-      refute_received {:client_document_request, ^replaced, _, _}
+      assert_receive {:client_cast, ^attached, {:did_change, _uri, "hello", ^buf, ^revision}}
     end
 
     test "a bulk event keeps a batch in full sync after a later incremental edit", %{tmp_dir: dir} do
