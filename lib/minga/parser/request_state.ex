@@ -7,12 +7,13 @@ defmodule Minga.Parser.RequestState do
   """
 
   @type command_builder :: (pos_integer(), non_neg_integer() -> binary())
-  @type deferred_request :: %{
+  @type deferred_request(sequence) :: %{
           from: GenServer.from(),
           buffer: pid(),
           command_builder: command_builder(),
-          required_sequence: non_neg_integer() | nil
+          required_sequence: sequence
         }
+  @type deferred_request :: deferred_request(non_neg_integer() | nil)
   @type in_flight_request :: %{from: GenServer.from(), buffer: pid(), token: reference()}
 
   defstruct next_id: 1, deferred: %{}, in_flight: %{}
@@ -28,7 +29,7 @@ defmodule Minga.Parser.RequestState do
   def new, do: %__MODULE__{}
 
   @doc "Defers a request until its first matching buffer snapshot."
-  @spec defer(t(), reference(), deferred_request()) :: t()
+  @spec defer(t(), reference(), deferred_request(nil)) :: t()
   def defer(%__MODULE__{} = state, token, %{required_sequence: nil} = request)
       when is_reference(token) do
     %{state | deferred: Map.put(state.deferred, token, request)}

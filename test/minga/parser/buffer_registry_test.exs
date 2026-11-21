@@ -20,12 +20,18 @@ defmodule Minga.Parser.BufferRegistryTest do
     {:ok, current} = BufferRegistry.fetch(registry, buffer)
     updated = BufferRegistration.mark_dirty(current, 7)
 
-    registry =
-      registry
-      |> BufferRegistry.put(buffer, updated)
-      |> BufferRegistry.put(buffer, stale)
+    registry = BufferRegistry.put(registry, buffer, updated)
 
-    assert {:ok, ^updated} = BufferRegistry.fetch(registry, buffer)
+    for mismatched <- [
+          stale,
+          %{updated | id: first_id},
+          %{updated | generation: stale.generation},
+          %{updated | config: config}
+        ] do
+      result = registry |> BufferRegistry.put(buffer, mismatched) |> BufferRegistry.fetch(buffer)
+      assert {:ok, ^updated} = result
+    end
+
     assert BufferRegistry.buffer_id(registry, buffer) == new_id
     assert BufferRegistry.resolve(registry, first_id) == nil
     assert BufferRegistry.resolve(registry, new_id) == buffer
