@@ -32,6 +32,10 @@ defmodule Minga.Core.DiffView do
           hunk_lines: [non_neg_integer()]
         }
 
+  @typep region ::
+           {:context, non_neg_integer(), [String.t()]}
+           | {:hunk, Diff.hunk(), [String.t()]}
+
   @typep display_acc :: %{
            reversed_text: [String.t()],
            reversed_metadata: [line_meta()],
@@ -96,17 +100,15 @@ defmodule Minga.Core.DiffView do
     }
   end
 
-  def build_from_hunks(base_lines, current_lines, hunks) do
-    # Build regions: alternating context and hunk sections
-    regions = build_regions(base_lines, current_lines, hunks)
-
-    regions
+  def build_from_hunks(_base_lines, current_lines, hunks) do
+    current_lines
+    |> build_regions(hunks)
     |> Enum.reduce(@empty_display, fn
-      {:context, ctx_lines, start_orig}, acc ->
-        add_context_with_folding(acc, ctx_lines, start_orig)
+      {:context, start, lines}, acc ->
+        add_context_with_folding(acc, lines, start)
 
-      {:hunk, hunk_rows}, acc ->
-        add_hunk_lines(acc, hunk_rows)
+      {:hunk, hunk, new_lines}, acc ->
+        add_hunk_lines(acc, build_hunk_display(hunk, new_lines))
     end)
     |> finish_display()
   end
@@ -144,16 +146,15 @@ defmodule Minga.Core.DiffView do
     }
   end
 
-  def build_side_by_side_from_hunks(base_lines, current_lines, hunks, pane_width) do
-    regions = build_side_by_side_regions(base_lines, current_lines, hunks)
-
-    regions
+  def build_side_by_side_from_hunks(_base_lines, current_lines, hunks, pane_width) do
+    current_lines
+    |> build_regions(hunks)
     |> Enum.reduce(@empty_display, fn
-      {:context, ctx_lines, start_orig}, acc ->
-        add_context_side_by_side(acc, ctx_lines, start_orig, pane_width)
+      {:context, start, lines}, acc ->
+        add_context_side_by_side(acc, lines, start, pane_width)
 
-      {:hunk, hunk}, acc ->
-        add_hunk_side_by_side(acc, hunk, current_lines, pane_width)
+      {:hunk, hunk, new_lines}, acc ->
+        add_hunk_side_by_side(acc, hunk, new_lines, pane_width)
     end)
     |> finish_display()
   end
@@ -187,9 +188,9 @@ defmodule Minga.Core.DiffView do
 
   @spec add_hunk_side_by_side(display_acc(), Diff.hunk(), [String.t()], pos_integer()) ::
           display_acc()
-  defp add_hunk_side_by_side(acc, hunk, current_lines, pane_width) do
+  defp add_hunk_side_by_side(acc, hunk, new_lines, pane_width) do
     hunk
-    |> build_hunk_side_by_side(current_lines)
+    |> build_hunk_side_by_side(new_lines)
     |> Enum.reduce(acc, &append_side_by_side_row(&2, &1, pane_width))
     |> record_hunk_end()
   end
@@ -277,9 +278,8 @@ defmodule Minga.Core.DiffView do
   end
 
   @spec build_hunk_side_by_side(Diff.hunk(), [String.t()]) :: [side_by_side_line()]
-  defp build_hunk_side_by_side(%{type: :added} = hunk, current_lines) do
-    current_lines
-    |> Enum.slice(hunk.start_line..(hunk.start_line + hunk.count - 1))
+  defp build_hunk_side_by_side(%{type: :added} = hunk, new_lines) do
+    new_lines
     |> Enum.with_index(hunk.start_line)
     |> Enum.map(fn {line, idx} ->
       %{
@@ -295,7 +295,7 @@ defmodule Minga.Core.DiffView do
     end)
   end
 
-  defp build_hunk_side_by_side(%{type: :deleted} = hunk, _current_lines) do
+  defp build_hunk_side_by_side(%{type: :deleted} = hunk, _new_lines) do
     Enum.map(hunk.old_lines, fn line ->
       %{
         left: line,
@@ -310,9 +310,7 @@ defmodule Minga.Core.DiffView do
     end)
   end
 
-  defp build_hunk_side_by_side(%{type: :modified} = hunk, current_lines) do
-    new_lines = Enum.slice(current_lines, hunk.start_line..(hunk.start_line + hunk.count - 1))
-
+  defp build_hunk_side_by_side(%{type: :modified} = hunk, new_lines) do
     hunk.old_lines
     |> pair_modified_lines(new_lines)
     |> Enum.map(&modified_pair_side_by_side_line(&1, hunk.start_line))
@@ -443,76 +441,76 @@ defmodule Minga.Core.DiffView do
     |> record_hunk_end()
   end
 
-  @spec build_regions([String.t()], [String.t()], [Diff.hunk()]) :: [term()]
-  defp build_regions(base_lines, current_lines, hunks) do
-    build_regions(base_lines, current_lines, hunks, &build_hunk_display/3)
+  @spec build_regions([String.t()], [Diff.hunk()]) :: [region()]
+  defp build_regions(current_lines, hunks) do
+    hunks
+    |> Enum.sort_by(& &1.start_line)
+    |> collect_regions(current_lines, current_lines, 0, [])
   end
 
-  @spec build_side_by_side_regions([String.t()], [String.t()], [Diff.hunk()]) :: [term()]
-  defp build_side_by_side_regions(base_lines, current_lines, hunks) do
-    build_regions(base_lines, current_lines, hunks, fn hunk, _base_lines, _current_lines ->
-      hunk
-    end)
+  @spec collect_regions(
+          [Diff.hunk()],
+          [String.t()],
+          [String.t()],
+          non_neg_integer(),
+          [region()]
+        ) :: [region()]
+  defp collect_regions([], _current_lines, remaining, offset, regions) do
+    regions
+    |> prepend_context(offset, remaining)
+    |> Enum.reverse()
   end
 
-  @spec build_regions([String.t()], [String.t()], [Diff.hunk()], (Diff.hunk(),
-                                                                  [String.t()],
-                                                                  [String.t()] ->
-                                                                    term())) :: [term()]
-  defp build_regions(base_lines, current_lines, hunks, build_hunk) do
-    sorted_hunks = Enum.sort_by(hunks, & &1.start_line)
+  defp collect_regions([hunk | hunks], current_lines, remaining, offset, regions) do
+    start = hunk.start_line
+    {context, at_start} = Enum.split(remaining, start - offset)
+    {new_lines, after_hunk, hunk_end} = split_hunk(hunk, at_start, current_lines)
+    regions = [{:hunk, hunk, new_lines} | prepend_context(regions, offset, context)]
 
-    {regions_reversed, last_end} =
-      Enum.reduce(sorted_hunks, {[], 0}, fn hunk, {regions_acc, prev_end} ->
-        ctx_start = prev_end
-        ctx_end = hunk.start_line
+    case hunks do
+      [%{start_line: next_start} | _] when next_start < hunk_end ->
+        # Sorted starts cannot move backward, even when hunk ends do.
+        next_lines = Enum.drop(at_start, next_start - start)
+        collect_regions(hunks, current_lines, next_lines, next_start, regions)
 
-        regions_acc =
-          if ctx_end > ctx_start do
-            ctx = Enum.slice(current_lines, ctx_start..(ctx_end - 1))
-            [{:context, ctx, ctx_start} | regions_acc]
-          else
-            regions_acc
-          end
-
-        hunk_display = build_hunk.(hunk, base_lines, current_lines)
-
-        hunk_end =
-          case hunk.type do
-            :deleted -> hunk.start_line
-            _ -> hunk.start_line + hunk.count
-          end
-
-        {[{:hunk, hunk_display} | regions_acc], hunk_end}
-      end)
-
-    regions = Enum.reverse(regions_reversed)
-
-    if last_end < Enum.count(current_lines) do
-      ctx = Enum.slice(current_lines, last_end..(Enum.count(current_lines) - 1))
-      Enum.concat(regions, [{:context, ctx, last_end}])
-    else
-      regions
+      _ ->
+        collect_regions(hunks, current_lines, after_hunk, hunk_end, regions)
     end
   end
 
-  @spec build_hunk_display(Diff.hunk(), [String.t()], [String.t()]) :: [unified_hunk_row()]
-  defp build_hunk_display(%{type: :added} = hunk, _base_lines, current_lines) do
-    current_lines
-    |> Enum.slice(hunk.start_line..(hunk.start_line + hunk.count - 1))
+  @spec prepend_context([region()], non_neg_integer(), [String.t()]) :: [region()]
+  defp prepend_context(regions, _start, []), do: regions
+  defp prepend_context(regions, start, lines), do: [{:context, start, lines} | regions]
+
+  @spec split_hunk(Diff.hunk(), [String.t()], [String.t()]) ::
+          {[String.t()], [String.t()], non_neg_integer()}
+  defp split_hunk(%{type: :deleted, start_line: start}, at_start, _current_lines) do
+    {[], at_start, start}
+  end
+
+  defp split_hunk(%{start_line: start, count: 0}, at_start, current_lines) do
+    # At offset zero, the old range ends at -1 and renders the entire file.
+    {Enum.slice(current_lines, start..(start - 1)), at_start, start}
+  end
+
+  defp split_hunk(%{start_line: start, count: count}, at_start, _current_lines) do
+    {new_lines, after_hunk} = Enum.split(at_start, count)
+    {new_lines, after_hunk, start + count}
+  end
+
+  @spec build_hunk_display(Diff.hunk(), [String.t()]) :: [unified_hunk_row()]
+  defp build_hunk_display(%{type: :added} = hunk, new_lines) do
+    new_lines
     |> Enum.with_index(hunk.start_line)
     |> Enum.map(fn {line, idx} -> {line, :added, idx, nil} end)
   end
 
-  defp build_hunk_display(%{type: :deleted} = hunk, _base_lines, _current_lines) do
+  defp build_hunk_display(%{type: :deleted} = hunk, _new_lines) do
     hunk.old_lines
     |> Enum.map(fn line -> {line, :removed, nil, nil} end)
   end
 
-  defp build_hunk_display(%{type: :modified} = hunk, _base_lines, current_lines) do
-    new_lines =
-      Enum.slice(current_lines, hunk.start_line..(hunk.start_line + hunk.count - 1))
-
+  defp build_hunk_display(%{type: :modified} = hunk, new_lines) do
     paired = pair_modified_lines(hunk.old_lines, new_lines)
 
     {removed_entries, added_entries} =

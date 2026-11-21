@@ -2,6 +2,7 @@ defmodule Minga.Core.DiffViewTest do
   @moduledoc "Tests for Minga.Core.DiffView: unified diff view builder."
   use ExUnit.Case, async: true
 
+  alias Minga.Core.Diff
   alias Minga.Core.DiffView
 
   describe "build/2" do
@@ -191,6 +192,119 @@ defmodule Minga.Core.DiffViewTest do
     assert DiffView.build_side_by_side(base, current).hunk_lines == [0, 8]
   end
 
+  describe "explicit hunk layouts" do
+    test "resumes context at the last hunk end after an overlap" do
+      deletion = %{
+        type: :deleted,
+        start_line: 2,
+        count: 0,
+        old_start: 2,
+        old_count: 1,
+        old_lines: ["X"]
+      }
+
+      added = %{type: :added, start_line: 1, count: 3, old_start: 1, old_count: 0, old_lines: []}
+
+      rows = [
+        {"a", :context, 0},
+        {"b", :added, 1},
+        {"c", :added, 2},
+        {"d", :added, 3},
+        {"X", :removed, nil},
+        {"c", :context, 2},
+        {"d", :context, 3},
+        {"e", :context, 4}
+      ]
+
+      assert_explicit_hunk_layouts(~w(a b c d e), [deletion, added], rows, [3, 4])
+    end
+
+    test "preserves input order for additions and deletions at the same start" do
+      deletion = %{
+        type: :deleted,
+        start_line: 1,
+        count: 0,
+        old_start: 1,
+        old_count: 1,
+        old_lines: ["X"]
+      }
+
+      added = %{type: :added, start_line: 1, count: 1, old_start: 1, old_count: 0, old_lines: []}
+
+      delete_first = [
+        {"a", :context, 0},
+        {"X", :removed, nil},
+        {"b", :added, 1},
+        {"c", :context, 2}
+      ]
+
+      add_first = [
+        {"a", :context, 0},
+        {"b", :added, 1},
+        {"X", :removed, nil},
+        {"b", :context, 1},
+        {"c", :context, 2}
+      ]
+
+      assert_explicit_hunk_layouts(~w(a b c), [deletion, added], delete_first, [1, 2])
+      assert_explicit_hunk_layouts(~w(a b c), [added, deletion], add_first, [1, 2])
+    end
+
+    test "clips explicit additions at and beyond the end of the file" do
+      crossing = %{
+        type: :added,
+        start_line: 1,
+        count: 4,
+        old_start: 1,
+        old_count: 0,
+        old_lines: []
+      }
+
+      past_end = %{crossing | start_line: 5}
+
+      assert_explicit_hunk_layouts(
+        ~w(a b c),
+        [crossing],
+        [{"a", :context, 0}, {"b", :added, 1}, {"c", :added, 2}],
+        [2]
+      )
+
+      assert_explicit_hunk_layouts(
+        ~w(a b c),
+        [past_end],
+        [{"a", :context, 0}, {"b", :context, 1}, {"c", :context, 2}],
+        [2]
+      )
+    end
+
+    test "preserves the explicit zero-count range at the start and inside the file" do
+      at_start = %{
+        type: :added,
+        start_line: 0,
+        count: 0,
+        old_start: 0,
+        old_count: 0,
+        old_lines: []
+      }
+
+      inside = %{at_start | start_line: 1}
+
+      assert_explicit_hunk_layouts(
+        ~w(a b),
+        [at_start],
+        [{"a", :added, 0}, {"b", :added, 1}, {"a", :context, 0}, {"b", :context, 1}],
+        [1]
+      )
+
+      assert_explicit_hunk_layouts(
+        ~w(a b),
+        [inside],
+        [{"a", :context, 0}, {"b", :context, 1}],
+        [0]
+      )
+    end
+  end
+
   describe "word_changes in metadata" do
     test "modified lines carry word_changes in metadata" do
       base = "line1\nhello world\nline3\n"
@@ -337,5 +451,32 @@ defmodule Minga.Core.DiffViewTest do
         assert Map.has_key?(m, :word_changes)
       end)
     end
+  end
+
+  @spec assert_explicit_hunk_layouts(
+          [String.t()],
+          [Diff.hunk()],
+          [{String.t(), :context | :added | :removed, non_neg_integer() | nil}],
+          [non_neg_integer()]
+        ) :: :ok
+  defp assert_explicit_hunk_layouts(current, hunks, rows, hunk_ends) do
+    unified = DiffView.build_from_hunks([], current, hunks)
+    side_by_side = DiffView.build_side_by_side_from_hunks([], current, hunks, 1)
+
+    assert unified.text == Enum.map_join(rows, "\n", &elem(&1, 0))
+
+    assert side_by_side.text ==
+             Enum.map_join(rows, "\n", fn
+               {line, :added, _} -> "  │ #{line}"
+               {line, :removed, _} -> "#{line} │ "
+               {line, :context, _} -> "#{line} │ #{line}"
+             end)
+
+    expected_metadata = Enum.map(rows, fn {_line, type, original} -> {type, original} end)
+
+    Enum.each([unified, side_by_side], fn layout ->
+      assert Enum.map(layout.line_metadata, &{&1.type, &1.original_line}) == expected_metadata
+      assert layout.hunk_lines == hunk_ends
+    end)
   end
 end

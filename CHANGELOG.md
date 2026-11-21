@@ -77,6 +77,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - Sentence text objects find the requested span without building a list of every sentence. Paragraph whitespace and grapheme byte positions are unchanged.
 - Characterwise range deletion and replacement reuse their already resolved selections, avoiding a second normalization and coordinate lookup while preserving deleted and replacement bytes, cursor placement, and edit deltas.
 - Byte-range edits validate the prefix and removed bytes separately without flattening the document for admission. Auto-pairing asks for syntax scope only when it has a candidate pair. Rendering retains its full-invalidation flag without enumerating edited line numbers.
+- Unified and side-by-side Git diffs now walk unchanged lines and hunks in order instead of rescanning from the start of the file. Rows, folds, and hunk positions are unchanged.
 - Substitute confirmation advances through matches without repeatedly indexing or sorting them. The buffer picker reads each candidate's listing metadata in one call, and a bounded buffer read now adjusts only the line offsets it needs.
 - Search substitution and preview share byte-splicing helpers, while completion activation resolves the selected item and its position in one pass through the current candidates.
 - Window source maps for unchanged, undecorated lines without expanded tabs now skip the composition pipeline and count UTF-16 once. Decorated lines measure source display width at most once and query conceals and inline virtual text once.
