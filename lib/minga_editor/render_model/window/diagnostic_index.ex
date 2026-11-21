@@ -29,19 +29,26 @@ defmodule MingaEditor.RenderModel.Window.DiagnosticIndex do
 
   @spec build([Diagnostic.t()], ResidentBuild.t(), boolean()) :: t()
   def build(diagnostics, %ResidentBuild{store: store}, wrapped? \\ false) do
+    line_count = ResidentStore.line_count(store)
+
     root =
       diagnostics
-      |> Enum.flat_map(&compact_diagnostic(&1, store, wrapped?))
-      |> Enum.group_by(fn {line, _entry} -> line end, fn {_line, entry} -> entry end)
-      |> Enum.sort_by(&elem(&1, 0))
-      |> Enum.reduce(nil, fn {line, entries}, tree ->
-        LazyRowTree.insert(
-          tree,
-          leaf(line, List.to_tuple(entries)),
-          &summarize/4,
-          &shift_summary/2
-        )
+      |> Enum.reduce(%{}, fn diagnostic, groups ->
+        %{start_line: first, end_line: last} = diagnostic.range
+
+        if first < line_count and last < line_count do
+          entry = project_diagnostic(diagnostic, store, wrapped?)
+          Map.put(groups, first, [entry | Map.get(groups, first, [])])
+        else
+          groups
+        end
       end)
+      |> Enum.sort()
+      |> Enum.map(fn {line, entries} ->
+        entries = entries |> Enum.reverse() |> List.to_tuple()
+        {line, entries, :erlang.phash2({:resident_diagnostic, line})}
+      end)
+      |> LazyRowTree.from_sorted(&summarize/4)
 
     %__MODULE__{root: root, store: store, wrapped?: wrapped?}
   end
@@ -72,13 +79,12 @@ defmodule MingaEditor.RenderModel.Window.DiagnosticIndex do
 
     ranks =
       starts
-      |> Enum.flat_map(fn line ->
+      |> Enum.reduce(MapSet.new(), fn line, ranks ->
         case fetch(root, line) do
-          nil -> []
-          entries -> entries |> compact_ranges(line, store) |> Enum.map(& &1.start_row)
+          nil -> ranks
+          entries -> put_start_ranks(entries, ResidentStore.visual_rank(store, line), ranks)
         end
       end)
-      |> Enum.uniq()
       |> Enum.sort()
 
     {updated, ranks, work}
@@ -87,23 +93,32 @@ defmodule MingaEditor.RenderModel.Window.DiagnosticIndex do
   @spec ranges_at(t(), [non_neg_integer()]) :: [DiagnosticRange.t()]
   def ranges_at(%__MODULE__{root: root, store: store}, starts) do
     starts
-    |> Enum.group_by(fn rank ->
-      {line, _offset} = ResidentStore.anchor_at(store, rank)
-      line
-    end)
-    |> Enum.sort_by(&elem(&1, 0))
-    |> Enum.flat_map(fn {line, ranks} ->
-      selected = MapSet.new(ranks)
+    |> Enum.reduce(%{}, fn rank, groups ->
+      {line, offset} = ResidentStore.anchor_at(store, rank)
 
+      case groups do
+        %{^line => {base_rank, offsets}} ->
+          Map.put(groups, line, {base_rank, MapSet.put(offsets, offset)})
+
+        %{} ->
+          Map.put(groups, line, {rank - offset, MapSet.new([offset])})
+      end
+    end)
+    |> Enum.sort()
+    |> Enum.flat_map(fn {line, {base_rank, offsets}} ->
       case fetch(root, line) do
         nil ->
           []
 
         entries ->
-          Enum.filter(
-            compact_ranges(entries, line, store),
-            &MapSet.member?(selected, &1.start_row)
-          )
+          ranges =
+            for index <- 0..(tuple_size(entries) - 1)//1,
+                entry = elem(entries, index),
+                MapSet.member?(offsets, start_offset(entry)) do
+              compact_range(entry, line, base_rank, store)
+            end
+
+          Enum.sort_by(ranges, & &1.start_row)
       end
     end)
   end
@@ -192,14 +207,6 @@ defmodule MingaEditor.RenderModel.Window.DiagnosticIndex do
   defp map_deleted_end(_line, first, 0), do: max(first - 1, 0)
   defp map_deleted_end(line, first, inserted), do: min(line, first + inserted - 1)
 
-  defp compact_diagnostic(diagnostic, store, wrapped?) do
-    [first, last] = [diagnostic.range.start_line, diagnostic.range.end_line]
-
-    if first < ResidentStore.line_count(store) and last < ResidentStore.line_count(store),
-      do: [{first, project_diagnostic(diagnostic, store, wrapped?)}],
-      else: []
-  end
-
   defp project_diagnostic(diagnostic, store, wrapped?) do
     %{range: range, encoding: encoding, severity: severity} = diagnostic
     start_line = range.start_line
@@ -275,15 +282,13 @@ defmodule MingaEditor.RenderModel.Window.DiagnosticIndex do
   defp affected_starts(root, start_row, end_row) do
     root
     |> collect_overlaps(start_row, end_row, [])
-    |> Enum.uniq()
-    |> Enum.sort()
+    |> Enum.reverse()
   end
 
   defp crossing_starts(root, start_row) do
     root
     |> collect_crossing(start_row, [])
-    |> Enum.uniq()
-    |> Enum.sort()
+    |> Enum.reverse()
   end
 
   defp collect_overlaps(nil, _start_row, _end_row, acc), do: acc
@@ -321,22 +326,38 @@ defmodule MingaEditor.RenderModel.Window.DiagnosticIndex do
     end
   end
 
-  defp compact_ranges(entries, start_line, store) do
-    start_rank = ResidentStore.visual_rank(store, start_line)
-
-    entries
-    |> Tuple.to_list()
-    |> Enum.map(fn {end_line_offset, _, _, _, severity, {start_offset, start_col},
-                    {end_offset, end_col}} ->
-      %DiagnosticRange{
-        start_row: start_rank + start_offset,
-        start_col: start_col,
-        end_row: ResidentStore.visual_rank(store, start_line + end_line_offset) + end_offset,
-        end_col: end_col,
-        severity: severity
-      }
+  defp put_start_ranks(entries, base_rank, ranks) do
+    Enum.reduce(0..(tuple_size(entries) - 1)//1, ranks, fn index, ranks ->
+      MapSet.put(ranks, base_rank + start_offset(elem(entries, index)))
     end)
-    |> Enum.sort_by(& &1.start_row)
+  end
+
+  defp start_offset({_, _, _, _, _, {offset, _}, _}), do: offset
+
+  defp compact_ranges(entries, start_line, store) do
+    base_rank = ResidentStore.visual_rank(store, start_line)
+
+    ranges =
+      for index <- 0..(tuple_size(entries) - 1)//1 do
+        compact_range(elem(entries, index), start_line, base_rank, store)
+      end
+
+    Enum.sort_by(ranges, & &1.start_row)
+  end
+
+  defp compact_range(
+         {end_line_offset, _, _, _, severity, {start_offset, start_col}, {end_offset, end_col}},
+         start_line,
+         base_rank,
+         store
+       ) do
+    %DiagnosticRange{
+      start_row: base_rank + start_offset,
+      start_col: start_col,
+      end_row: ResidentStore.visual_rank(store, start_line + end_line_offset) + end_offset,
+      end_col: end_col,
+      severity: severity
+    }
   end
 
   defp collect_ranges(nil, _store, acc), do: acc
@@ -346,7 +367,7 @@ defmodule MingaEditor.RenderModel.Window.DiagnosticIndex do
       LazyRowTree.view(root, &shift_summary/2)
 
     acc = collect_ranges(right, store, acc)
-    acc = Enum.reduce(Enum.reverse(compact_ranges(entries, line, store)), acc, &[&1 | &2])
+    acc = compact_ranges(entries, line, store) ++ acc
     collect_ranges(left, store, acc)
   end
 
@@ -375,15 +396,6 @@ defmodule MingaEditor.RenderModel.Window.DiagnosticIndex do
 
   defp replacement({}), do: :delete
   defp replacement(entries), do: {:replace, entries}
-
-  defp leaf(line, entries) do
-    LazyRowTree.leaf(
-      line,
-      entries,
-      :erlang.phash2({:resident_diagnostic, line}),
-      &summarize/4
-    )
-  end
 
   defp summarize(line, entries, left, right),
     do: max(group_max_end(line, entries), max(left || 0, right || 0))

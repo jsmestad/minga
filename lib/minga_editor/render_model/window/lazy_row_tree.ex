@@ -48,6 +48,16 @@ defmodule MingaEditor.RenderModel.Window.LazyRowTree do
     make(key, value, priority, nil, nil, summarize)
   end
 
+  @doc """
+  Builds a fresh tree from `{key, value, priority}` entries with strictly ascending keys.
+
+  Each node is summarized once. Equal priorities keep the earlier key above the later one.
+  """
+  @spec from_sorted([{non_neg_integer(), value, non_neg_integer()}], summarize(value, summary)) ::
+          t(value, summary)
+        when value: var, summary: var
+  def from_sorted(entries, summarize), do: build_spine(entries, [], summarize)
+
   @spec view(t(value, summary), shift_summary(summary)) :: View.t(value, summary) | nil
         when value: var, summary: var
   def view(nil, _shift_summary), do: nil
@@ -184,6 +194,27 @@ defmodule MingaEditor.RenderModel.Window.LazyRowTree do
 
   defp count(nil), do: 0
   defp count(%__MODULE__{count: count}), do: count
+
+  # Open nodes are deepest first. A node's right subtree is complete when a
+  # smaller priority arrives or the input ends.
+  defp build_spine([], spine, summarize), do: close_spine(spine, nil, summarize)
+
+  defp build_spine([{key, value, priority} | rest], spine, summarize) do
+    {spine, left} = pop_greater(spine, priority, nil, summarize)
+    build_spine(rest, [{key, value, priority, left} | spine], summarize)
+  end
+
+  defp pop_greater([{key, value, open_priority, left} | rest], priority, right, summarize)
+       when open_priority > priority do
+    pop_greater(rest, priority, make(key, value, open_priority, left, right, summarize), summarize)
+  end
+
+  defp pop_greater(spine, _priority, right, _summarize), do: {spine, right}
+
+  defp close_spine([], right, _summarize), do: right
+
+  defp close_spine([{key, value, priority, left} | rest], right, summarize),
+    do: close_spine(rest, make(key, value, priority, left, right, summarize), summarize)
 
   defp update_root(root, key, fun, summarize, shift_summary) when key < root.key do
     left = update(root.left, key, fun, summarize, shift_summary)
