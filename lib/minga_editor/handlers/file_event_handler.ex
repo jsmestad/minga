@@ -107,16 +107,7 @@ defmodule MingaEditor.Handlers.FileEventHandler do
 
   @spec handle_git_status_changed(EditorState.t(), Minga.Events.GitStatusEvent.t()) ::
           {EditorState.t(), [file_effect()]}
-  defp handle_git_status_changed(
-         state,
-         %Minga.Events.GitStatusEvent{
-           git_root: git_root,
-           entries: entries,
-           branch: branch,
-           ahead: ahead,
-           behind: behind
-         } = event
-       ) do
+  defp handle_git_status_changed(state, %Minga.Events.GitStatusEvent{entries: entries} = event) do
     state = FileTreeFreshness.refresh_git_status(state, event)
 
     case SidebarWorkflow.git_status_panel(state) do
@@ -124,20 +115,9 @@ defmodule MingaEditor.Handlers.FileEventHandler do
         if FileTreeFreshness.open?(state), do: {state, [{:render, 16}]}, else: {state, []}
 
       _panel ->
-        git_status_data = %{
-          repo_state: :normal,
-          branch: branch || "",
-          ahead: ahead,
-          behind: behind,
-          entries: entries,
-          entry_base_path: git_root,
-          last_commit_message: event.last_commit_message,
-          stash_count: event.stash_count
-        }
-
         state =
           state
-          |> SidebarWorkflow.replace_git_status(GitStatusPanel.new(git_status_data))
+          |> SidebarWorkflow.replace_git_status(GitStatusPanel.from_repo_status(event))
           |> Workflow.ensure_available()
 
         {runtime, workspace} =

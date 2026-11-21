@@ -269,6 +269,10 @@ defmodule Minga.Git do
   @spec repo_status(pid()) :: [status_entry()]
   defdelegate repo_status(repo_pid), to: Minga.Git.Repo, as: :status
 
+  @doc "Returns cached entries, their path base, and branch metadata from a Repo."
+  @spec repo_status_snapshot(pid()) :: Minga.Git.Repo.status_snapshot()
+  defdelegate repo_status_snapshot(repo_pid), to: Minga.Git.Repo, as: :status_snapshot
+
   @doc "Returns a summary map (branch, ahead/behind, file counts) from a Repo."
   @spec repo_summary(pid()) :: map()
   defdelegate repo_summary(repo_pid), to: Minga.Git.Repo, as: :summary

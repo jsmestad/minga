@@ -5,6 +5,8 @@ defmodule MingaEditor.GitStatus.Panel do
   The Git porcelain extension owns the commands and rendering, but core shell state still needs a stable shape for GUI emission, dirty tracking, and disabled-extension fallbacks.
   """
 
+  alias Minga.Events.GitStatusEvent
+  alias Minga.Git.Repo.StatusSnapshot
   alias Minga.Git.StatusEntry
 
   @enforce_keys [:repo_state, :branch, :ahead, :behind, :entries]
@@ -46,6 +48,22 @@ defmodule MingaEditor.GitStatus.Panel do
       last_commit_message: Map.get(attrs, :last_commit_message),
       stash_count: Map.get(attrs, :stash_count)
     })
+  end
+
+  @doc "Projects a cached repository snapshot or status event into panel data."
+  @spec from_repo_status(StatusSnapshot.t() | GitStatusEvent.t()) :: t()
+  def from_repo_status(status)
+      when is_struct(status, StatusSnapshot) or is_struct(status, GitStatusEvent) do
+    %__MODULE__{
+      repo_state: :normal,
+      branch: status.branch || "",
+      ahead: status.ahead,
+      behind: status.behind,
+      entries: status.entries,
+      entry_base_path: status.entry_base_path || status.git_root,
+      last_commit_message: status.last_commit_message,
+      stash_count: status.stash_count
+    }
   end
 
   @spec normalize_repo_state(term()) :: repo_state()

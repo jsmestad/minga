@@ -324,8 +324,9 @@ defmodule Minga.Git.RepoTest do
   end
 
   describe "path relativization" do
-    test "relativizes paths when project_root differs from git_root", %{tmp_dir: dir} do
+    test "snapshot and event agree on entries and their nested project base", %{tmp_dir: dir} do
       events_registry = start_events_registry()
+      Events.subscribe(:git_status_changed, events_registry)
       git_root = dir
       project_root = Path.join(dir, "apps/myapp")
 
@@ -336,14 +337,39 @@ defmodule Minga.Git.RepoTest do
         %StatusEntry{path: "apps/other/lib/bar.ex", status: :modified, staged: false}
       ])
 
+      GitStub.set_branch(git_root, "feature/nested")
+      GitStub.set_ahead_behind(git_root, 3, 1)
+      GitStub.set_last_commit_message(git_root, "feat: nested project")
+
+      GitStub.set_stashes(git_root, [
+        %StashEntry{index: 0, ref: "stash@{0}", date: "1 minute ago", message: "WIP"}
+      ])
+
       on_exit(fn -> GitStub.clear(git_root) end)
 
       repo = start_repo(git_root, project_root: project_root, events_registry: events_registry)
       Repo.await_refresh(repo)
 
-      entries = Repo.status(repo)
-      assert Enum.count(entries) == 1
-      assert hd(entries).path == "lib/foo.ex"
+      entry = %StatusEntry{path: "lib/foo.ex", status: :modified, staged: false}
+      assert [^entry] = Repo.status(repo)
+
+      assert %StatusSnapshot{
+               git_root: ^git_root,
+               entry_base_path: ^project_root,
+               entries: [^entry],
+               branch: "feature/nested",
+               ahead: 3,
+               behind: 1,
+               last_commit_message: "feat: nested project",
+               stash_count: 1
+             } = Repo.status_snapshot(repo)
+
+      assert_receive {:minga_event, :git_status_changed,
+                      %Events.GitStatusEvent{
+                        git_root: ^git_root,
+                        entry_base_path: ^project_root,
+                        entries: [^entry]
+                      }}
     end
 
     test "paths unchanged when project_root equals git_root", %{tmp_dir: dir} do
