@@ -11,12 +11,16 @@ defmodule Minga.Project.FileFindTest do
       assert strategy in [:fd, :git, :find, :none]
     end
 
-    test "prefers git inside a git work tree" do
+    test "prefers git only at the supplied repository root" do
       tmp_dir = make_tmp_dir("minga_file_find_git")
       on_exit(fn -> File.rm_rf!(tmp_dir) end)
       {_out, 0} = System.cmd("git", ["init"], cd: tmp_dir, stderr_to_stdout: true)
 
       assert FileFind.detect_strategy(tmp_dir) == :git
+
+      child = Path.join(tmp_dir, "subdir")
+      File.mkdir!(child)
+      assert FileFind.detect_strategy(child) in [:fd, :find, :none]
     end
 
     test "uses fd or find outside a git repo, never git" do
@@ -182,6 +186,17 @@ defmodule Minga.Project.FileFindTest do
       refute ".DS_Store" in files
       refute "lib/.DS_Store" in files
       assert "README.md" in files
+    end
+
+    test "uses git's tracked and unignored file inventory at a repository root",
+         %{tmp_dir: tmp_dir} do
+      {_, 0} = System.cmd("git", ["init"], cd: tmp_dir, stderr_to_stdout: true)
+      File.write!(Path.join(tmp_dir, ".gitignore"), "README.md\ndraft.txt\n")
+      File.write!(Path.join(tmp_dir, "draft.txt"), "")
+      {_, 0} = System.cmd("git", ["add", "-f", "README.md"], cd: tmp_dir)
+
+      assert FileFind.list_files(directory_root!(tmp_dir)) ==
+               {:ok, [".gitignore", "README.md", "lib/app.ex", "lib/sub/deep.ex"]}
     end
   end
 

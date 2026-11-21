@@ -58,9 +58,9 @@ defmodule Minga.Project.ProjectSearch do
   def search("", _root), do: {:error, "Empty search query"}
 
   def search(query, root) do
-    case detect_strategy() do
-      :rg -> search_with_rg(query, root)
-      :grep -> search_with_grep(query, root)
+    case select_executable() do
+      {:rg, executable} -> search_with_rg(executable, query, root)
+      {:grep, executable} -> search_with_grep(executable, query, root)
       :none -> {:error, "No search tool available. Install `ripgrep` (rg) for best results."}
     end
   end
@@ -74,13 +74,20 @@ defmodule Minga.Project.ProjectSearch do
   """
   @spec detect_strategy() :: strategy()
   def detect_strategy do
-    detect_strategy(System.find_executable("rg"), System.find_executable("grep"))
+    case select_executable() do
+      {strategy, _executable} -> strategy
+      :none -> :none
+    end
   end
 
-  @spec detect_strategy(String.t() | nil, String.t() | nil) :: strategy()
-  defp detect_strategy(rg, _grep) when is_binary(rg), do: :rg
-  defp detect_strategy(_rg, grep) when is_binary(grep), do: :grep
-  defp detect_strategy(_rg, _grep), do: :none
+  @spec select_executable() :: {:rg | :grep, String.t()} | :none
+  defp select_executable do
+    cond do
+      executable = System.find_executable("rg") -> {:rg, executable}
+      executable = System.find_executable("grep") -> {:grep, executable}
+      true -> :none
+    end
+  end
 
   @doc """
   Parses a single ripgrep JSON line into a match map.
@@ -161,18 +168,18 @@ defmodule Minga.Project.ProjectSearch do
 
   # ── Ripgrep ──────────────────────────────────────────────────────────────
 
-  @spec search_with_rg(String.t(), String.t()) :: result()
-  defp search_with_rg(query, root) do
+  @spec search_with_rg(String.t(), String.t(), String.t()) :: result()
+  defp search_with_rg(executable, query, root) do
     args = ["--json", "--line-number", "--column", "--", query, "."]
-    run_capped("rg", args, root, &parse_rg_json_line/1, "ripgrep")
+    run_capped(executable, args, root, &parse_rg_json_line/1, "ripgrep")
   end
 
   # ── Grep fallback ────────────────────────────────────────────────────────
 
-  @spec search_with_grep(String.t(), String.t()) :: result()
-  defp search_with_grep(query, root) do
+  @spec search_with_grep(String.t(), String.t(), String.t()) :: result()
+  defp search_with_grep(executable, query, root) do
     args = ["-rn", "-I", "--", query, "."]
-    run_capped("grep", args, root, &parse_grep_line/1, "grep")
+    run_capped(executable, args, root, &parse_grep_line/1, "grep")
   end
 
   # ── Capped, incremental subprocess collection ──────────────────────────────
@@ -182,20 +189,7 @@ defmodule Minga.Project.ProjectSearch do
   # which terminates the still-running scan — the cap is enforced *while*
   # collecting, not after the full output has been buffered.
   @spec run_capped(String.t(), [String.t()], String.t(), parser(), String.t()) :: result()
-  defp run_capped(tool, args, root, parser, label) do
-    case System.find_executable(tool) do
-      nil ->
-        {:error, "#{label} not found"}
-
-      executable ->
-        open_and_collect(executable, args, root, parser, label)
-    end
-  rescue
-    e -> {:error, "#{label} failed: #{Exception.message(e)}"}
-  end
-
-  @spec open_and_collect(String.t(), [String.t()], String.t(), parser(), String.t()) :: result()
-  defp open_and_collect(executable, args, root, parser, label) do
+  defp run_capped(executable, args, root, parser, label) do
     port =
       Port.open({:spawn_executable, executable}, [
         :binary,
@@ -207,6 +201,8 @@ defmodule Minga.Project.ProjectSearch do
       ])
 
     collect(port, parser, [], 0, "", label)
+  rescue
+    e -> {:error, "#{label} failed: #{Exception.message(e)}"}
   end
 
   # Drains the port. `acc` holds matches newest-first, `count` tracks how many we

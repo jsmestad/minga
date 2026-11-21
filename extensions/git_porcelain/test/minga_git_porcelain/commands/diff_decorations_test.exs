@@ -579,7 +579,7 @@ defmodule MingaGitPorcelain.CommandsDiffDecorationsTest do
                "Diff layout: side-by-side"
     end
 
-    test "staged diff toggle treats staged deletions as empty index content" do
+    test "staged diff toggle keeps side-by-side layout and shows staged deletions" do
       git_root = unique_git_root()
       rel_path = "deleted.txt"
       abs_path = Path.join(git_root, rel_path)
@@ -592,8 +592,7 @@ defmodule MingaGitPorcelain.CommandsDiffDecorationsTest do
 
       on_exit(fn -> GitStub.clear(git_root) end)
 
-      {:ok, source_buf} = Buffer.start_link(content: "old contents\n")
-      {:ok, diff_buf} = Buffer.start_link(content: "placeholder")
+      {:ok, source_buf} = Buffer.start_link(content: "unsaved changes\n")
 
       {:ok, git_buf} =
         Minga.Git.Buffer.start_link(
@@ -606,28 +605,29 @@ defmodule MingaGitPorcelain.CommandsDiffDecorationsTest do
 
       state =
         build_state()
-        |> MingaEditor.Handlers.BufferRegistry.add_buffer(diff_buf)
-        |> then(fn state ->
-          %{
-            state
-            | git:
-                MingaEditor.State.Git.register_diff_view(state.git, diff_buf, %{
-                  source_buf: source_buf,
-                  git_root: git_root,
-                  rel_path: rel_path,
-                  staged: false,
-                  line_metadata: [],
-                  hunk_lines: []
-                })
-          }
-        end)
+        |> set_frontend_capabilities(:native_gui)
+        |> MingaEditor.Handlers.BufferRegistry.add_buffer(source_buf)
+        |> GitCommands.execute(:git_diff_file)
+
+      diff_buf = state.workspace.buffers.active
+      assert Buffer.buffer_name(diff_buf) == "deleted.txt [diff:unstaged]"
+      unstaged_content = buffer_content(diff_buf)
+      assert unstaged_content =~ "unsaved changes"
+      refute unstaged_content =~ " │ "
+
+      state = GitCommands.execute(state, :git_diff_toggle_layout)
+      assert buffer_content(diff_buf) =~ " │ "
 
       state = GitCommands.execute(state, :git_diff_toggle_staged)
       active_buf = state.workspace.buffers.active
 
       assert active_buf != diff_buf
-      assert buffer_content(active_buf) =~ "old contents"
-      refute buffer_content(active_buf) =~ "No changes"
+      assert Buffer.buffer_name(active_buf) == "deleted.txt [diff:staged]"
+      staged_content = buffer_content(active_buf)
+      assert staged_content =~ "old contents"
+      assert staged_content =~ " │ "
+      refute staged_content =~ "unsaved changes"
+      refute staged_content =~ "No changes"
       assert state.git.diff_views[active_buf].staged == true
     end
   end

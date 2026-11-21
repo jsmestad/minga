@@ -7,6 +7,8 @@ defmodule MingaAgent.Tools.PathIgnore do
   tools that cannot evaluate ignore files themselves.
   """
 
+  @typep git_root_result :: {:ok, String.t()} | :error
+
   @ignored_names MapSet.new([
                    ".build",
                    ".elixir_ls",
@@ -52,31 +54,21 @@ defmodule MingaAgent.Tools.PathIgnore do
   def ignored_path?(path) when is_binary(path) do
     path = Path.expand(path)
 
-    ignored_static_path?(path) or ignored_directory?(path)
+    ignored_path?(path, git_root(path))
   end
 
-  @doc "Returns true when a directory itself is ignored by project rules."
-  @spec ignored_directory?(String.t()) :: boolean()
-  def ignored_directory?(dir) when is_binary(dir) do
+  @doc "Filters a successful directory listing by basename, preserving the original entries."
+  @spec filter_listing(String.t(), [entry], (entry -> String.t())) :: [entry] when entry: var
+  def filter_listing(dir, [], _entry_name) when is_binary(dir), do: []
+
+  def filter_listing(dir, entries, entry_name) when is_binary(dir) and is_list(entries) do
     dir = Path.expand(dir)
+    root = git_root(dir)
 
-    case git_root(dir) do
-      {:ok, root} -> git_ignored_path?(root, dir)
-      :error -> false
-    end
-  end
-
-  @doc "Filters child entry names under `dir` using static and project ignore rules."
-  @spec filter_child_names(String.t(), [String.t()]) :: [String.t()]
-  def filter_child_names(dir, names) when is_binary(dir) and is_list(names) do
-    dir = Path.expand(dir)
-
-    if ignored_directory?(dir) do
+    if ignored_path?(dir, root) do
       []
     else
-      names
-      |> Enum.reject(&ignored_name?/1)
-      |> reject_gitignored_children(dir)
+      filter_listing_children(dir, root, entries, entry_name)
     end
   end
 
@@ -134,30 +126,25 @@ defmodule MingaAgent.Tools.PathIgnore do
     end
   end
 
-  @spec reject_gitignored_children([String.t()], String.t()) :: [String.t()]
-  defp reject_gitignored_children([], _dir), do: []
-
-  defp reject_gitignored_children(names, dir) do
-    case git_root(dir) do
-      {:ok, root} ->
-        names_with_rel_paths =
-          Enum.map(names, fn name ->
-            rel_path = dir |> Path.join(name) |> Path.relative_to(root)
-            {name, rel_path}
-          end)
-
-        ignored = git_ignored_relative_paths(root, Enum.map(names_with_rel_paths, &elem(&1, 1)))
-
-        names_with_rel_paths
-        |> Enum.reject(fn {_name, rel_path} -> MapSet.member?(ignored, rel_path) end)
-        |> Enum.map(&elem(&1, 0))
-
-      :error ->
-        names
-    end
+  @spec filter_listing_children(String.t(), git_root_result(), [entry], (entry -> String.t())) ::
+          [entry]
+        when entry: var
+  defp filter_listing_children(_dir, :error, entries, entry_name) do
+    Enum.reject(entries, &ignored_name?(entry_name.(&1)))
   end
 
-  @spec git_root(String.t()) :: {:ok, String.t()} | :error
+  defp filter_listing_children(dir, {:ok, root}, entries, entry_name) do
+    candidates =
+      for entry <- entries, name = entry_name.(entry), not ignored_name?(name) do
+        {entry, dir |> Path.join(name) |> Path.relative_to(root)}
+      end
+
+    ignored = git_ignored_relative_paths(root, Enum.map(candidates, &elem(&1, 1)))
+
+    for {entry, rel_path} <- candidates, not MapSet.member?(ignored, rel_path), do: entry
+  end
+
+  @spec git_root(String.t()) :: git_root_result()
   defp git_root(path) do
     case nearest_existing_dir(path) do
       nil ->
@@ -177,8 +164,6 @@ defmodule MingaAgent.Tools.PathIgnore do
 
   @spec nearest_existing_dir(String.t()) :: String.t() | nil
   defp nearest_existing_dir(path) do
-    path = Path.expand(path)
-
     if File.dir?(path) do
       path
     else
@@ -189,14 +174,6 @@ defmodule MingaAgent.Tools.PathIgnore do
   @spec nearest_existing_parent(String.t(), String.t()) :: String.t() | nil
   defp nearest_existing_parent(path, path), do: nil
   defp nearest_existing_parent(_path, parent), do: nearest_existing_dir(parent)
-
-  @spec git_ignored_path?(String.t(), String.t()) :: boolean()
-  defp git_ignored_path?(root, dir) do
-    case Path.relative_to(dir, root) do
-      "." -> false
-      rel_path -> git_ignored_relative_path?(root, rel_path)
-    end
-  end
 
   @spec git_ignored_relative_path?(String.t(), String.t()) :: boolean()
   defp git_ignored_relative_path?(root, rel_path) do
@@ -257,12 +234,16 @@ defmodule MingaAgent.Tools.PathIgnore do
     |> Path.relative_to(repo_root)
   end
 
-  @spec ignored_static_path?(String.t()) :: boolean()
-  defp ignored_static_path?(path) do
-    case git_root(path) do
-      {:ok, root} -> path |> Path.relative_to(root) |> ignored_path_name?()
-      :error -> path |> Path.relative_to(System.tmp_dir!()) |> ignored_path_name?()
-    end
+  @spec ignored_path?(String.t(), git_root_result()) :: boolean()
+  defp ignored_path?(path, {:ok, root}) do
+    relative_path = Path.relative_to(path, root)
+
+    ignored_path_name?(relative_path) or
+      (relative_path != "." and git_ignored_relative_path?(root, relative_path))
+  end
+
+  defp ignored_path?(path, :error) do
+    path |> Path.relative_to(System.tmp_dir!()) |> ignored_path_name?()
   end
 
   @spec ignored_path_name?(String.t() | nil) :: boolean()

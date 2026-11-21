@@ -14,6 +14,7 @@ defmodule MingaAgent.Providers.NativeTest do
   alias MingaAgent.TurnUsage
   alias MingaAgent.ProjectView.RecordingBackend
   alias MingaAgent.Providers.Native
+  alias MingaAgent.Providers.Native.ReqLLMAdapter
   alias MingaAgent.Session.Continuation
   alias MingaAgent.Session.Dispatch
   alias MingaAgent.Tool.Registry, as: ToolRegistry
@@ -733,6 +734,41 @@ defmodule MingaAgent.Providers.NativeTest do
       git_status = Enum.find(Tools.specs(), &(&1.name == "git_status"))
       GitStub.clear(dir)
       assert "git_status" in tool_names_for.([git_status])
+    end
+
+    test "the same config spec is local only when supplied explicitly", %{tmp_dir: dir} do
+      registry = :native_declaration_test_registry
+      start_supervised!({ToolRegistry, name: registry})
+
+      name = "declaration_origin"
+
+      spec =
+        Spec.new!(
+          source: :config,
+          name: name,
+          description: "Report declaration origin",
+          parameter_schema: %{},
+          callback: fn _args -> {:ok, "ok"} end
+        )
+
+      assert :ok = ToolRegistry.register(registry, spec)
+
+      opts = [tmp_dir: dir, tool_registry: registry, tool_allowlist: [name]]
+      assert {:ok, local} = start_provider(Keyword.put(opts, :tools, [spec]))
+      assert {:ok, registered} = start_provider(Keyword.put(opts, :tools, nil))
+
+      assert [%ReqLLM.Tool{callback: nil}] = Native.tools(local)
+
+      assert {:ok, ^spec, {registration, ^name}, %{source: {:local, ^name}}} =
+               GenServer.call(local, {:resolve_local_tool, name})
+
+      assert is_reference(registration)
+
+      assert [%ReqLLM.Tool{callback: nil} = tool] = Native.tools(registered)
+      assert %{source: :config} = ReqLLMAdapter.declaration(tool)
+
+      assert {:error, {:tool_not_local, ^name}} =
+               GenServer.call(registered, {:resolve_local_tool, name})
     end
 
     test "provider compaction honors configured threshold", %{tmp_dir: dir} do

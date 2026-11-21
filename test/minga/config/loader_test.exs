@@ -1190,6 +1190,31 @@ defmodule Minga.Config.LoaderTest do
       assert {:ok, %{module: Minga.Extensions.MCP}} = ExtRegistry.get(:minga_mcp)
     end
 
+    test "reload detects byte changes after a dynamic declaration in quoted syntax" do
+      source = """
+      use Minga.Config
+
+      _ =
+        quote do
+          OtherConfig.extension(name, options)
+        end
+
+      set :tab_width, 4
+      """
+
+      {minga_dir, config_home, cleanup} = make_config_dir(source <> "# original suffix\n")
+      on_exit(cleanup)
+
+      name = :"loader_dynamic_declaration_#{System.unique_integer([:positive])}"
+      loader = start_supervised!({Loader, name: name, config_home: config_home})
+      assert Loader.load_error(loader) == nil
+
+      File.write!(Path.join(minga_dir, "config.exs"), source <> "# changed suffix\n")
+
+      assert {:error, message} = Loader.reload(loader)
+      assert message == "Extension declarations changed; restart Minga before config reload"
+    end
+
     test "reload detects a newly created project extension declaration" do
       {_minga_dir, config_home, cleanup_config} = make_config_dir("use Minga.Config\n")
       previous_cwd = File.cwd!()
