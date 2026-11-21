@@ -249,6 +249,44 @@ defmodule Minga.Core.DiffViewTest do
       assert_explicit_hunk_layouts(~w(a b c), [deletion, added], delete_first, [1, 2])
       assert_explicit_hunk_layouts(~w(a b c), [added, deletion], add_first, [1, 2])
     end
+
+    test "clips explicit additions at and beyond the end of the file" do
+      crossing = %{type: :added, start_line: 1, count: 4, old_start: 1, old_count: 0, old_lines: []}
+      past_end = %{crossing | start_line: 5}
+
+      assert_explicit_hunk_layouts(
+        ~w(a b c),
+        [crossing],
+        [{"a", :context, 0}, {"b", :added, 1}, {"c", :added, 2}],
+        [2]
+      )
+
+      assert_explicit_hunk_layouts(
+        ~w(a b c),
+        [past_end],
+        [{"a", :context, 0}, {"b", :context, 1}, {"c", :context, 2}],
+        [2]
+      )
+    end
+
+    test "preserves the explicit zero-count range at the start and inside the file" do
+      at_start = %{type: :added, start_line: 0, count: 0, old_start: 0, old_count: 0, old_lines: []}
+      inside = %{at_start | start_line: 1}
+
+      assert_explicit_hunk_layouts(
+        ~w(a b),
+        [at_start],
+        [{"a", :added, 0}, {"b", :added, 1}, {"a", :context, 0}, {"b", :context, 1}],
+        [1]
+      )
+
+      assert_explicit_hunk_layouts(
+        ~w(a b),
+        [inside],
+        [{"a", :context, 0}, {"b", :context, 1}],
+        [0]
+      )
+    end
   end
 
   describe "word_changes in metadata" do
