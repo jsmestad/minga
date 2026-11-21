@@ -416,6 +416,45 @@ defmodule MingaAgent.MarkdownTest do
                Markdown.parse_blocks("    one\n\n    two")
     end
 
+    test "code paths use full-text fence ordinals and fall back to the last path" do
+      text = """
+      Update `lib/earlier.ex` then `lib/first.ex`lib/not_a_match.ex`
+          indented
+      ```text `lib/opening.ex`
+      first fenced block
+      ``` `lib/closing.ex`
+      Ignore `lib/cross_line.
+      ex`
+      ```text
+      second fenced block
+      ```
+      After both fences: `lib/fallback.ex`
+      """
+
+      blocks = Markdown.parse_blocks(text)
+      paths = for %{kind: :code_block, target_path: path} <- blocks, do: path
+
+      assert paths == ["lib/first.ex", "lib/closing.ex", "lib/fallback.ex"]
+      assert paths == Enum.map(0..2, &Markdown.infer_target_path(text, &1))
+    end
+
+    test "raw fence markers count even when parsed as part of indented code" do
+      text = """
+          ``` `lib/indented.ex`
+          ```
+      ```
+      `lib/body.ex`
+      """
+
+      assert [
+               %{kind: :code_block, complete?: true, target_path: first},
+               %{kind: :code_block, complete?: false, target_path: second}
+             ] = Markdown.parse_blocks(text)
+
+      assert [first, second] == [nil, "lib/indented.ex"]
+      assert [first, second] == Enum.map(0..1, &Markdown.infer_target_path(text, &1))
+    end
+
     test "keeps four-space list continuations as semantic prose" do
       assert [
                %{kind: :list_item, text: "item"},

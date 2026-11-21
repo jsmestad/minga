@@ -64,30 +64,33 @@ defmodule MingaAgent.Markdown do
   @typedoc "Extracted code block with language and content."
   @type code_block :: %{language: String.t(), content: String.t()}
 
+  @typep prose_block ::
+           %{
+             kind: :paragraph,
+             lines: [String.t()]
+           }
+           | %{
+               kind: :heading,
+               level: 1..3,
+               text: String.t()
+             }
+           | %{
+               kind: :list_item,
+               indent: non_neg_integer(),
+               ordered: boolean(),
+               ordinal: non_neg_integer(),
+               text: String.t()
+             }
+           | %{
+               kind: :blockquote,
+               lines: [String.t()]
+             }
+           | %{kind: :rule}
+           | %{kind: :spacer, height: pos_integer()}
+
   @typedoc "Semantic markdown block used by agent chat renderers before styling."
   @type block ::
-          %{
-            kind: :paragraph,
-            lines: [String.t()]
-          }
-          | %{
-              kind: :heading,
-              level: 1..3,
-              text: String.t()
-            }
-          | %{
-              kind: :list_item,
-              indent: non_neg_integer(),
-              ordered: boolean(),
-              ordinal: non_neg_integer(),
-              text: String.t()
-            }
-          | %{
-              kind: :blockquote,
-              lines: [String.t()]
-            }
-          | %{kind: :rule}
-          | %{kind: :spacer, height: pos_integer()}
+          prose_block()
           | %{
               kind: :code_block,
               language: String.t(),
@@ -96,6 +99,8 @@ defmodule MingaAgent.Markdown do
               target_path: String.t() | nil
             }
 
+  @typep pending_block :: prose_block() | {:code_block, String.t(), [String.t()], boolean()}
+
   @doc """
   Parses markdown into semantic blocks without decorative rendering glyphs.
 
@@ -103,45 +108,51 @@ defmodule MingaAgent.Markdown do
   but returns structure that frontends can render directly. Fenced code blocks
   preserve blank lines and indentation, and an unclosed fence is returned as an
   incomplete code block for streaming output.
+
+  Code block target paths use `infer_target_path/2` semantics, with ordinals
+  counting both fenced and indented blocks.
   """
   @spec parse_blocks(String.t()) :: [block()]
   def parse_blocks(text) when is_binary(text) do
-    text
-    |> String.split("\n")
-    |> parse_block_lines([], [], nil, 0)
-    |> finish_paragraph()
-    |> Enum.reverse()
+    lines = String.split(text, "\n")
+    {blocks, code_count} = parse_block_lines(lines, [], [], nil, 0)
+    paths = infer_target_paths(lines, code_count, true, nil, [])
+    reverse_blocks_with_paths(blocks, paths, [])
   end
 
-  @spec parse_block_lines([String.t()], [block()], [String.t()], map() | nil, non_neg_integer()) ::
-          [block()]
-  defp parse_block_lines([], acc, paragraph, nil, _code_index) do
-    finish_paragraph(acc, paragraph)
+  @spec parse_block_lines(
+          [String.t()],
+          [pending_block()],
+          [String.t()],
+          map() | nil,
+          non_neg_integer()
+        ) :: {[pending_block()], non_neg_integer()}
+  defp parse_block_lines([], acc, paragraph, nil, code_count) do
+    {finish_paragraph(acc, paragraph), code_count}
   end
 
   defp parse_block_lines(
          [],
          acc,
          paragraph,
-         %{language: language, lines: lines, target_path: target_path},
-         _code_index
+         %{language: language, lines: lines},
+         code_count
        ) do
-    acc
-    |> finish_paragraph(paragraph)
-    |> prepend_code_block(language, lines, false, target_path)
+    blocks = acc |> finish_paragraph(paragraph) |> prepend_code_block(language, lines, false)
+    {blocks, code_count + 1}
   end
 
   defp parse_block_lines(
          [line | rest],
          acc,
          paragraph,
-         %{language: language, lines: lines, target_path: target_path} = code,
+         %{language: language, lines: lines} = code,
          code_index
        ) do
     if fence_line?(line) do
       acc
       |> finish_paragraph(paragraph)
-      |> prepend_code_block(language, lines, true, target_path)
+      |> prepend_code_block(language, lines, true)
       |> then(&parse_block_lines(rest, &1, [], nil, code_index + 1))
     else
       parse_block_lines(rest, acc, paragraph, %{code | lines: [line | lines]}, code_index)
@@ -160,7 +171,7 @@ defmodule MingaAgent.Markdown do
             rest,
             &1,
             [],
-            %{language: language, lines: [], target_path: nil},
+            %{language: language, lines: []},
             code_index
           )
         )
@@ -223,7 +234,7 @@ defmodule MingaAgent.Markdown do
 
         acc
         |> finish_paragraph(paragraph)
-        |> prepend_code_block("", code_lines, true, nil)
+        |> prepend_code_block("", code_lines, true)
         |> then(&parse_block_lines(rest, &1, [], nil, code_index + 1))
 
       :paragraph ->
@@ -231,38 +242,47 @@ defmodule MingaAgent.Markdown do
     end
   end
 
-  @spec finish_paragraph([block()], [String.t()]) :: [block()]
+  @spec finish_paragraph([pending_block()], [String.t()]) :: [pending_block()]
   defp finish_paragraph(acc, []), do: acc
 
   defp finish_paragraph(acc, paragraph),
     do: [%{kind: :paragraph, lines: Enum.reverse(paragraph)} | acc]
 
-  @spec finish_paragraph([block()]) :: [block()]
-  defp finish_paragraph(acc), do: acc
+  @spec prepend_code_block([pending_block()], String.t(), [String.t()], boolean()) ::
+          [pending_block()]
+  defp prepend_code_block(acc, language, lines, complete?),
+    do: [{:code_block, language, Enum.reverse(lines), complete?} | acc]
 
-  @spec prepend_code_block([block()], String.t(), [String.t()], boolean(), String.t() | nil) :: [
-          block()
-        ]
-  defp prepend_code_block(acc, language, lines, complete?, target_path) do
-    [
-      %{
-        kind: :code_block,
-        language: language,
-        lines: Enum.reverse(lines),
-        complete?: complete?,
-        target_path: target_path
-      }
-      | acc
-    ]
+  @spec reverse_blocks_with_paths([pending_block()], [String.t() | nil], [block()]) :: [block()]
+  # Once every code path is assigned, the remaining blocks are already prose maps.
+  defp reverse_blocks_with_paths(blocks, [], acc), do: Enum.reverse(blocks, acc)
+
+  defp reverse_blocks_with_paths(
+         [{:code_block, language, lines, complete?} | rest],
+         [path | paths],
+         acc
+       ) do
+    block = %{
+      kind: :code_block,
+      language: language,
+      lines: lines,
+      complete?: complete?,
+      target_path: path
+    }
+
+    reverse_blocks_with_paths(rest, paths, [block | acc])
   end
 
-  @spec prepend_spacer([block()]) :: [block()]
+  defp reverse_blocks_with_paths([block | rest], paths, acc) when is_map(block),
+    do: reverse_blocks_with_paths(rest, paths, [block | acc])
+
+  @spec prepend_spacer([pending_block()]) :: [pending_block()]
   defp prepend_spacer([%{kind: :spacer, height: height} = spacer | rest]),
     do: [%{spacer | height: min(height + 1, 255)} | rest]
 
   defp prepend_spacer(acc), do: [%{kind: :spacer, height: 1} | acc]
 
-  @spec block_line_kind(String.t(), String.t(), [block()], [String.t()]) ::
+  @spec block_line_kind(String.t(), String.t(), [pending_block()], [String.t()]) ::
           :paragraph
           | :rule
           | :spacer
@@ -343,7 +363,7 @@ defmodule MingaAgent.Markdown do
     indent_width(line) >= 4 and not markdown_list_line?(trimmed)
   end
 
-  @spec semantic_indented_code_line?(String.t(), [block()], [String.t()]) :: boolean()
+  @spec semantic_indented_code_line?(String.t(), [pending_block()], [String.t()]) :: boolean()
   defp semantic_indented_code_line?(line, acc, paragraph) do
     trimmed = String.trim(line)
 
@@ -351,7 +371,7 @@ defmodule MingaAgent.Markdown do
       not semantic_list_continuation?(acc, paragraph)
   end
 
-  @spec semantic_list_continuation?([block()], [String.t()]) :: boolean()
+  @spec semantic_list_continuation?([pending_block()], [String.t()]) :: boolean()
   defp semantic_list_continuation?([%{kind: :list_item} | _rest], []), do: true
 
   defp semantic_list_continuation?([%{kind: :list_item} | _rest], paragraph) do
@@ -459,8 +479,8 @@ defmodule MingaAgent.Markdown do
   @doc """
   Infers the target file path for a code block from surrounding markdown text.
 
-  Scans the text preceding the nth code block (0-indexed) for backtick-wrapped
-  file paths. Returns the last match (closest to the code block), or nil.
+  Scans the text before the nth opening fence (0-indexed), or the entire text
+  if that fence is absent. Returns the last backtick-wrapped file path, or nil.
 
   ## Examples
 
@@ -483,8 +503,7 @@ defmodule MingaAgent.Markdown do
 
     {before_lines, _} =
       Enum.reduce_while(lines, {[], 0}, fn line, {acc, fence_count} ->
-        is_fence = String.starts_with?(String.trim_leading(line), "```")
-        accumulate_before_fence(is_fence, line, acc, fence_count, target_fence)
+        accumulate_before_fence(fence_line?(line), line, acc, fence_count, target_fence)
       end)
 
     before_lines |> Enum.reverse() |> Enum.join("\n")
@@ -509,6 +528,42 @@ defmodule MingaAgent.Markdown do
     do: {:cont, {[line | acc], fence_count}}
 
   @file_path_pattern ~r/`([a-zA-Z0-9_\-\.\/]+\.[a-zA-Z0-9]+)`/
+
+  # A path match cannot cross a newline, so scanning each line preserves the
+  # prefix regex's non-overlapping matches. Count raw fence lines, independent
+  # of how the semantic parser classifies them, and keep paths in reverse order
+  # to align with the pending blocks.
+  @spec infer_target_paths(
+          [String.t()],
+          non_neg_integer(),
+          boolean(),
+          String.t() | nil,
+          [String.t() | nil]
+        ) :: [String.t() | nil]
+  defp infer_target_paths(_lines, 0, _opening?, _last_path, paths), do: paths
+
+  defp infer_target_paths([], remaining, _opening?, last_path, paths) do
+    Enum.reduce(1..remaining, paths, fn _, acc -> [last_path | acc] end)
+  end
+
+  defp infer_target_paths([line | rest], remaining, opening?, last_path, paths) do
+    case fence_line?(line) do
+      true when opening? and remaining == 1 ->
+        [last_path | paths]
+
+      true when opening? ->
+        next_path = extract_last_file_path(line) || last_path
+        infer_target_paths(rest, remaining - 1, false, next_path, [last_path | paths])
+
+      true ->
+        next_path = extract_last_file_path(line) || last_path
+        infer_target_paths(rest, remaining, true, next_path, paths)
+
+      false ->
+        next_path = extract_last_file_path(line) || last_path
+        infer_target_paths(rest, remaining, opening?, next_path, paths)
+    end
+  end
 
   @spec extract_last_file_path(String.t()) :: String.t() | nil
   defp extract_last_file_path(text) do

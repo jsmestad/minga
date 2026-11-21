@@ -98,21 +98,22 @@ defmodule MingaEditor.Agent.MarkdownHighlight do
       highlighter: highlighter
     }
 
-    text |> Markdown.parse_blocks() |> Enum.with_index() |> render_parsed_blocks(context, 0, [])
+    text |> Markdown.parse_blocks() |> render_parsed_blocks(context, 0, 0, [])
   end
 
   @spec render_parsed_blocks(
-          [{Markdown.block(), non_neg_integer()}],
+          [Markdown.block()],
           render_context(),
+          non_neg_integer(),
           non_neg_integer(),
           [MarkdownBlock.t()]
         ) :: [MarkdownBlock.t()]
-  defp render_parsed_blocks([], _context, _code_index, acc) do
+  defp render_parsed_blocks([], _context, _block_index, _code_index, acc) do
     Enum.reverse(acc)
   end
 
-  defp render_parsed_blocks([{block, index} | rest], context, code_index, acc) do
-    id = block_id(context.message_id, index)
+  defp render_parsed_blocks([block | rest], context, block_index, code_index, acc) do
+    id = block_id(context.message_id, block_index)
 
     {rendered, next_code_index} =
       render_block(
@@ -122,7 +123,7 @@ defmodule MingaEditor.Agent.MarkdownHighlight do
         code_index
       )
 
-    render_parsed_blocks(rest, context, next_code_index, [rendered | acc])
+    render_parsed_blocks(rest, context, block_index + 1, next_code_index, [rendered | acc])
   end
 
   @spec render_block(
@@ -179,13 +180,18 @@ defmodule MingaEditor.Agent.MarkdownHighlight do
   end
 
   defp render_block(
-         %{kind: :code_block, language: language, lines: lines, complete?: complete?},
+         %{
+           kind: :code_block,
+           language: language,
+           lines: lines,
+           complete?: complete?,
+           target_path: target_path
+         },
          id,
          context,
          code_index
        ) do
     text = context.text
-    target_path = Markdown.infer_target_path(text, code_index)
     label = code_label(language)
 
     rendered_lines =

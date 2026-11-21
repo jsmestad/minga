@@ -93,6 +93,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - LSP change flushes share the first successful full-content snapshot across full-sync clients instead of flattening the document once per client. UTF-8 incremental clients with available deltas keep their range-only path, and failed reads still retry for later clients.
 - LSP keeps pending edits and their revision together, skips reading full text for filetypes without a configured server, and resolves each running server’s name and root in one client call.
 - Input dispatch no longer reads the active buffer revision before each action. Agent session metadata and saves reuse one ordered transcript read per operation, and the modeline reads only the cached Git degradation flag.
+- Agent chat search prepares its query once instead of normalizing it for every message. Markdown rendering resolves code-card paths in source order instead of rescanning the message for each card.
 - Cached Git reads select the most specific live tracked root without sorting all matches. Path boundaries and untracked behavior are unchanged.
 - Wrapped cursor movement and rendering share one byte-to-row walk instead of building intermediate row lists. Theme loading resolves face definitions once when there are no user face overrides. Key binding registration parses each sequence once.
 - Config loading collects compiled modules without recopying previous batches. Theme loading applies editor overrides in the existing order for each theme source.
