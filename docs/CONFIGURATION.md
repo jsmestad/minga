@@ -222,6 +222,27 @@ Set `:agent_model` to a provider/model intent such as `"anthropic:claude-sonnet-
 
 Minga supports named hosted providers from its pinned catalog and `apple:system` on eligible Macs with the bundled inference helper. Custom local servers, endpoints, and provider endpoint overrides are not configurable. Minga rejects unavailable routes instead of silently falling back. See [Agent model selection](AGENT-MODEL-SELECTION.md) for runtime requirements and the model's compact tool set.
 
+Extensions can add their own model routes, such as a subscription bridge or a company proxy. Their models appear in `/model` with the route's own readiness text, and they are reached as `"<route_id>:<model_id>"`. See [Model routes](EXTENSION_API.md#model-routes).
+
+### Route credentials
+
+Some routes need configuration you would rather not put in `config.exs`, such as a proxy token. Put it in `~/.config/minga/credentials.json` under `routes.<route_id>.env`:
+
+```json
+{
+  "routes": {
+    "company_proxy": {
+      "env": {
+        "COMPANY_PROXY_TOKEN": "replace-me",
+        "COMPANY_PROXY_REGION": ""
+      }
+    }
+  }
+}
+```
+
+Minga passes this map only to that route's requests and availability checks, and never interprets it. An empty value means "unset". Values never appear in logs, `*Messages*`, session exports, or error text. `HOME`, `CLAUDE_CONFIG_DIR`, and `USERPROFILE` are rejected, so a route entry cannot point Minga at another tool's login. A route that signs in through its own tool keeps that login itself; Minga never reads or copies it.
+
 ## Agent reactive diagnostics
 
 Minga can post a quiet agent-chat suggestion when saving a file introduces a new LSP error. This is off by default so the editor never talks over you unless you ask it to.

@@ -330,6 +330,13 @@ defmodule MingaAgent.Session.PrefixStore do
               is_binary(source) and byte_size(source) == 64,
        do: match?({:ok, _}, Base.decode16(source, case: :lower))
 
+  defp valid_authentication?(
+         %{kind: :route_owned, route_id: route_id, account_ref: account} = authentication
+       )
+       when map_size(authentication) == 3 and is_binary(route_id) and route_id != "" and
+              (is_nil(account) or (is_binary(account) and account != "")),
+       do: true
+
   defp valid_authentication?(_authentication), do: false
 
   @spec valid_url_identity?(String.t(), pos_integer()) :: boolean()

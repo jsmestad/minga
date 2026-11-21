@@ -768,6 +768,168 @@ For more detail on what `Minga.Language.register/3` does under the hood, see the
 
 ---
 
+## Model routes
+
+Your company runs an LLM gateway, or you already pay for a model subscription that has its own sign-in tool. You want that model in `/model` without giving up what Minga's agent does well: tool approvals, retries, compaction, changesets, and saved history. A model route is the seam for that. Your extension supplies model replies; Minga keeps running the turn.
+
+### What a route does, and what it never does
+
+A route answers one question: given these messages and tools, what does the model say next? It receives a `MingaAgent.InferenceRoute.Request` and streams back `MingaAgent.InferenceRoute.Event` values: text, thinking, complete tool calls, usage, and a finish reason. It never runs a tool. When the model asks for a tool, Minga executes it through its normal executor and approval flow, then sends the result back to your route in the next request. A denied tool reaches your route as an error tool result. This holds for every route, so trusting a route is trusting it with the conversation text, not with your machine.
+
+The route contract is Minga's own. Every value a route sees or returns lives under `MingaAgent.InferenceRoute.*`, so your route keeps working when Minga changes the model library it uses internally.
+
+### A complete example
+
+This route forwards requests to a company proxy. It reads its token from the route credential Minga passes in, turns Minga's messages into the proxy's wire format, and turns the proxy's replies back into Minga events.
+
+```elixir
+defmodule CompanyProxy.Route do
+  @behaviour MingaAgent.InferenceRoute
+
+  alias MingaAgent.InferenceRoute.{Credential, Model, Request, Response, ToolCall, Usage}
+
+  @impl true
+  def models(_config) do
+    {:ok, model} =
+      Model.new(
+        id: "fast",
+        display_name: "Company Proxy (fast)",
+        context_window: 128_000,
+        max_output: 8_192,
+        reasoning_levels: ["off", "low", "high"],
+        tools?: true,
+        images_in?: false,
+        tool_result_images?: false,
+        compaction: :native,
+        usage: :tokens,
+        cost: :subscription
+      )
+
+    [model]
+  end
+
+  @impl true
+  def availability(_route_id, %Credential{env: %{"COMPANY_PROXY_TOKEN" => _token}}),
+    do: {:ready, "company proxy"}
+
+  def availability(_route_id, _credential),
+    do:
+      {:unavailable, :missing_token,
+       "No proxy token. Add routes.company_proxy.env.COMPANY_PROXY_TOKEN to credentials.json."}
+
+  @impl true
+  def stream(%Request{} = request) do
+    token = request.credential && request.credential.env["COMPANY_PROXY_TOKEN"]
+
+    body = %{
+      model: request.model.id,
+      system: request.system,
+      messages: Enum.map(request.messages, &CompanyProxy.Wire.message/1),
+      tools: Enum.map(request.tools, &%{name: &1.name, description: &1.description, schema: &1.input_schema}),
+      max_tokens: request.options.max_output_tokens,
+      reasoning: request.options.reasoning
+    }
+
+    with {:ok, connection} <- CompanyProxy.Client.open(token, body) do
+      events =
+        connection
+        |> CompanyProxy.Client.chunks()
+        |> Stream.map(fn
+          %{"type" => "text", "text" => text} -> {:text, text}
+          %{"type" => "thinking", "text" => text} -> {:thinking, text}
+          %{"type" => "tool", "id" => id, "name" => name, "input" => input} ->
+            {:ok, call} = ToolCall.new(id: id, name: name, arguments: input)
+            {:tool_call, call}
+          %{"type" => "usage", "in" => input, "out" => output} ->
+            {:ok, usage} = Usage.new(input_tokens: input, output_tokens: output)
+            {:usage, usage}
+          %{"type" => "done", "reason" => "tool_use"} -> {:finish, :tool_calls}
+          %{"type" => "done"} -> {:finish, :stop}
+          %{"type" => "error", "status" => status} -> {:finish, {:error, {:http, status}}}
+        end)
+
+      {:ok, %Response{events: events, cancel: fn -> CompanyProxy.Client.close(connection) end}}
+    end
+  end
+
+  @impl true
+  def classify_error({:http, 429}), do: {:rate_limited, "The company proxy is busy. Wait a moment, then try again."}
+  def classify_error({:http, 401}), do: {:auth_failed, "The proxy token was rejected. Update routes.company_proxy.env in credentials.json."}
+  def classify_error(_reason), do: {:provider_error, "The company proxy failed. Open *Messages* for details."}
+end
+
+defmodule CompanyProxy do
+  use Minga.Extension
+
+  @impl true
+  def name, do: :company_proxy
+
+  @impl true
+  def description, do: "Company LLM proxy as a Minga model route"
+
+  @impl true
+  def version, do: "0.1.0"
+
+  @impl true
+  def init(_config) do
+    {:ok, reporter} =
+      Minga.Extension.ModelRoutes.register(
+        id: "company_proxy",
+        module: CompanyProxy.Route,
+        display_name: "Company Proxy"
+      )
+
+    {:ok, %{reporter: reporter}}
+  end
+end
+```
+
+After the extension loads, `/model` lists **Company Proxy (fast)** with the route's readiness text, context size, thinking levels, and tool support, all taken from the `Model` you declared. Users can also select it with `/model company_proxy:fast`.
+
+### What a request contains
+
+`Request.messages` holds `MingaAgent.InferenceRoute.Message` values with role `:user`, `:assistant`, or `:tool`, and content parts that are plain tagged tuples:
+
+- `{:text, text}`
+- `{:image, media_type, data}` with raw bytes
+- `{:thinking, text, signature}`, where `signature` is nil unless your route supplied one
+- `{:tool_call, %ToolCall{}}` on assistant messages, with decoded `arguments`
+- `{:tool_result, tool_call_id, parts, is_error}` on tool messages; a tool the user denied arrives with `is_error: true`
+
+The system prompt is in `Request.system`. `Request.tools` lists `ToolDeclaration` values with a JSON Schema `input_schema` that uses string keys. `Request.options` carries `max_output_tokens` and the selected `reasoning` level from your `Model.reasoning_levels`. Content your route cannot receive, such as video or file attachments, never reaches it: Minga rejects the request with a clear message instead.
+
+### What a response contains
+
+`stream/1` returns `{:ok, %Response{events: events, cancel: cancel}}`. `events` is a lazy enumerable that Minga consumes once. Emit `{:text, text}` and `{:thinking, text}` as they arrive, `{:tool_call, call}` once a call's arguments are final, `{:usage, usage}` when you know token counts, and finally `{:finish, reason}` with `:stop`, `:tool_calls`, `:length`, `:refusal`, or `{:error, term}`. Minga passes the `term` of an error finish to your `classify_error/1`. If the stream ends without a finish event, Minga treats it as `:stop`. An event that is not one of these shapes stops the turn with a clear "invalid response" error. `cancel` must stop the work behind the stream. Minga calls it exactly once whenever it stops reading before your events end: the user stops the turn, the process reading your events exits or crashes, or Minga ends the stream early because of an invalid event or a failure while reading. Minga does not call it after your events end, including when they end with `{:finish, {:error, term}}`. In the example above, that is what closes the proxy connection when the user presses Stop. If `cancel` raises, Minga logs the failure to `*Messages*` and carries on.
+
+If enumerating your `events` raises, exits, or throws, Minga ends the turn instead of crashing. When the reply has not started, Minga passes `{:inference_route_failed, route_id, failure}` to your `classify_error/1` and shows its sentence; when a partial reply is already on screen, Minga keeps it and marks the stream as interrupted.
+
+### Registration and ownership
+
+`Minga.Extension.ModelRoutes.register/2` takes the route id, the module, and a display name, plus an optional `:config` keyword passed to `models/1`. Call it from `init/1`: Minga takes the owning extension from the call context, not from your arguments. Route ids use lowercase letters, digits, `_`, and `-`, and cannot reuse a built-in provider name. If another extension already owns the id, registration returns `{:error, {:duplicate_route_id, ...}}` and the first route keeps working. When your extension stops, its routes disappear from `/model`, and the next send on a removed route reports it as unavailable.
+
+### Reporting status with a reporter
+
+Minga calls `availability/2` off the editor process when the user opens `/model`, with a deadline. A route that raises or times out shows as unavailable with diagnostics in `*Messages*`. To push a change yourself, for example right after the user signs in, keep the `MingaAgent.InferenceRoute.Reporter` that `register/2` returned and call `Minga.Extension.ModelRoutes.report_status(reporter, {:ready, "me@example.com"})` from any process. A reporter from an earlier registration, or for a removed route, is rejected with `{:error, :stale_reporter}` or `{:error, :unknown_route}`.
+
+An unavailable route cannot become the active model. Selecting it shows your remedy text and leaves the current model unchanged. The account label you report is part of the selection's identity, so switching accounts changes which saved selection matches.
+
+### Conversation identity
+
+Every request carries `Request.conversation`, a `MingaAgent.InferenceRoute.ConversationRef`. For a normal turn, `purpose` is `:turn` and `session_id`, `epoch_id`, `conversation_revision`, and `request_id` come from Minga's session. `epoch_id` changes on branch, reset, or compaction, and the revision changes when the saved history changes. Tool follow-ups inside one turn keep the same `request_id`, epoch, and revision; tell them apart by the messages you receive. Use these values to decide whether you are continuing a conversation you already know or starting fresh. Minga does not try to guess that for you.
+
+Compaction sends a request with `purpose: :summary` and no tools. Treat `:summary` and `:title` requests as isolated queries: do not continue or record a session from them. If you declare `compaction: :unsupported`, Minga refuses to compact for your route instead.
+
+### Credentials
+
+Minga passes a `MingaAgent.InferenceRoute.Credential` holding the `routes.<route_id>.env` map from `credentials.json` as `Request.credential` and as the second argument of `availability/2`. Core never interprets it and never logs its values. See [Configuration](CONFIGURATION.md#route-credentials) for the file format. If your route signs in through its own tool, keep that login in the tool; Minga never reads or copies another tool's login.
+
+### Usage and cost
+
+With `usage: :tokens`, the counts in your `{:usage, usage}` event appear in Minga's usage totals. The last usage event in a stream wins. With `cost: :subscription`, Minga shows no per-request dollar cost.
+
+---
+
 ## Editor Utilities
 
 ```elixir

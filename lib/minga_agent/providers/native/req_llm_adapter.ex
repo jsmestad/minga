@@ -6,7 +6,9 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapter do
   """
 
   alias MingaAgent.Config, as: AgentConfig
+  alias MingaAgent.InferenceRouteRegistry
   alias MingaAgent.Providers.Apple
+  alias MingaAgent.Providers.Native.InferenceRouteStream
   alias MingaAgent.Providers.Native.ReqLLMAdapter.ToolCall
   alias MingaAgent.ModelSelection
   alias MingaAgent.ModelSelection.Credential.OAuth
@@ -225,6 +227,20 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapter do
   def stream(_llm_client, %LLMDB.Model{provider: :apple}, _messages, _opts),
     do: {:error, :invalid_apple_route}
 
+  # Contributed routes run through their registered module and receive only Minga-owned values.
+  def stream(
+        _llm_client,
+        %LLMDB.Model{
+          provider: :contributed,
+          extra: %{inference_route: %{route_id: route_id, model_id: model_id}}
+        } = model,
+        messages,
+        opts
+      ) do
+    {registry, opts} = Keyword.pop(opts, :inference_routes, InferenceRouteRegistry)
+    InferenceRouteStream.start(registry, route_id, model_id, model, messages, opts)
+  end
+
   def stream(llm_client, %LLMDB.Model{} = model, messages, opts)
       when is_function(llm_client, 3) do
     llm_client.(model, messages, opts)
@@ -432,15 +448,24 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapter do
 
   defp content_event_to_part({:content_part, part}), do: part
 
-  @doc "Builds the summary callback expected by the compaction subsystem."
-  @spec summary_client(llm_client(), ModelSelection.t(), AgentConfig.t(), (-> {:ok, keyword()}
-                                                                              | {:error, term()})) ::
-          MingaAgent.Compaction.summary_fn()
+  @doc """
+  Builds the summary callback expected by the compaction subsystem.
+
+  `summary_opts` runs once per summary request and its options are added to that request; contributed routes receive their registry and a fresh `:summary` conversation identity this way.
+  """
+  @spec summary_client(
+          llm_client(),
+          ModelSelection.t(),
+          AgentConfig.t(),
+          (-> {:ok, keyword()} | {:error, term()}),
+          (-> keyword())
+        ) :: MingaAgent.Compaction.summary_fn()
   def summary_client(
         llm_client,
         %ModelSelection{} = selection,
         %AgentConfig{} = config,
-        authentication
+        authentication,
+        summary_opts \\ fn -> [] end
       ) do
     fn _model, messages, opts ->
       with {:ok, auth_opts} <- authentication.(),
@@ -451,7 +476,8 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapter do
              |> Keyword.merge(auth_opts)
              |> Keyword.put(:max_retries, 0)
              |> maybe_add_prompt_cache(selection.route.request_provider, config)
-             |> maybe_add_codex_originator(selection),
+             |> maybe_add_codex_originator(selection)
+             |> Keyword.merge(summary_opts.()),
            {:ok, stream_response} <-
              stream(llm_client, selection.request_model, messages, request_opts),
            {:ok, response} <- StreamResponse.process_stream(stream_response) do

@@ -150,7 +150,7 @@ defmodule MingaEditor.UI.Picker.AgentModelSource do
   defp discovered_item?(%Item{
          meta: %{intent: {:model, %ModelSelection{route: %{request_provider: provider}}}}
        }),
-       do: provider in [:apple, :openai_codex]
+       do: provider in [:apple, :openai_codex, :contributed]
 
   defp discovered_item?(%Item{}), do: false
 
@@ -290,6 +290,37 @@ defmodule MingaEditor.UI.Picker.AgentModelSource do
   defp status_label(_status), do: "Connection needs attention. Connect a provider or retry."
 
   @spec format_candidate(ModelCandidate.t()) :: Item.t()
+  defp format_candidate(
+         %ModelCandidate{
+           selection: %ModelSelection{route: %{request_provider: :contributed}} = selection,
+           inference_route: %{display_name: route_name, status: status}
+         } = candidate
+       ) do
+    route = selection.route
+
+    description =
+      [
+        route_name,
+        readiness_label(status),
+        format_context(selection.policy.limits.context),
+        format_thinking(selection),
+        format_capabilities(selection),
+        cost_mode_label(selection.policy)
+      ]
+      |> Enum.reject(&(&1 in [nil, ""]))
+      |> Enum.join(" · ")
+
+    %Item{
+      id: ModelSelection.id(selection),
+      label: route.display_name,
+      description: description,
+      annotation: if(candidate.favorite, do: "★ favorite", else: nil),
+      search_text: "#{route_name} #{route.model_provider} #{route.model_id}",
+      two_line: true,
+      active: candidate.current
+    }
+  end
+
   defp format_candidate(%ModelCandidate{selection: selection} = candidate) do
     route = selection.route
 
@@ -361,6 +392,18 @@ defmodule MingaEditor.UI.Picker.AgentModelSource do
   end
 
   defp format_context(_), do: ""
+
+  @spec readiness_label(MingaAgent.InferenceRoute.Status.t()) :: String.t()
+  defp readiness_label(%{availability: {:ready, account}}), do: "Ready (#{account})"
+
+  defp readiness_label(%{availability: {:unavailable, _reason, remedy}}),
+    do: "Unavailable: #{remedy}"
+
+  defp readiness_label(%{availability: :unknown}), do: "Availability not checked"
+
+  @spec cost_mode_label(ModelSelection.Policy.t()) :: String.t()
+  defp cost_mode_label(%{cost_mode: :subscription}), do: "subscription"
+  defp cost_mode_label(%{cost: cost}), do: format_cost(cost)
 
   @spec evidence_label(ModelSelection.Route.request_provider()) :: String.t()
   defp evidence_label(:apple), do: "Ready on this device"

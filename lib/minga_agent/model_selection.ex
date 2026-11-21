@@ -10,7 +10,7 @@ defmodule MingaAgent.ModelSelection do
   @version 3
   @identity_version 2
 
-  alias __MODULE__.Credential.{ApiKey, OAuth}
+  alias __MODULE__.Credential.{ApiKey, OAuth, RouteOwned}
   alias __MODULE__.{Evidence, Policy, Route, Stored}
 
   @enforce_keys [
@@ -27,7 +27,7 @@ defmodule MingaAgent.ModelSelection do
   @type capability :: Policy.capability()
   @type image_tool_result_delivery ::
           :supported | {:unsupported, :model_image_input | :tool_result_transport}
-  @type credential_ref :: ApiKey.t() | OAuth.t() | :none
+  @type credential_ref :: ApiKey.t() | OAuth.t() | RouteOwned.t() | :none
   @type t :: %__MODULE__{
           backend_id: String.t(),
           backend_module: module(),
@@ -172,6 +172,11 @@ defmodule MingaAgent.ModelSelection do
   def credential_id(%OAuth{provider_key: provider_key, account_id: account_id}),
     do: "#{provider_key}:#{account_id}"
 
+  def credential_id(%RouteOwned{route_id: route_id, account_ref: nil}), do: route_id
+
+  def credential_id(%RouteOwned{route_id: route_id, account_ref: account_ref}),
+    do: "#{route_id}:#{account_ref}"
+
   @doc "Returns true only when tool use is explicitly supported."
   @spec tools?(t()) :: boolean()
   def tools?(%__MODULE__{policy: %Policy{capabilities: %{tools: true}}}), do: true
@@ -263,6 +268,14 @@ defmodule MingaAgent.ModelSelection do
               byte_size(source_id) == 64,
        do: :ok
 
+  # Registration is checked by the resolver; this value-level check binds the credential to its route.
+  defp validate_credential(
+         %RouteOwned{route_id: route_id},
+         %Route{origin: {:contributed, route_id, _model_id}, request_provider: :contributed},
+         "native"
+       ),
+       do: :ok
+
   defp validate_credential(_credential, _route, _backend_id), do: {:error, :invalid_credential}
 
   @spec encode_credential(credential_ref()) :: map()
@@ -283,6 +296,14 @@ defmodule MingaAgent.ModelSelection do
       "provider_key" => credential.provider_key,
       "account_id" => credential.account_id,
       "source_id" => credential.source_id
+    }
+  end
+
+  defp encode_credential(%RouteOwned{} = credential) do
+    %{
+      "kind" => "route_owned",
+      "route_id" => credential.route_id,
+      "account_ref" => credential.account_ref
     }
   end
 
@@ -311,6 +332,16 @@ defmodule MingaAgent.ModelSelection do
     {:ok, OAuth.restore(account_id, source_id)}
   end
 
+  defp decode_credential(%{
+         "kind" => "route_owned",
+         "route_id" => route_id,
+         "account_ref" => account_ref
+       })
+       when is_binary(route_id) and route_id != "" and
+              (is_nil(account_ref) or (is_binary(account_ref) and account_ref != "")) do
+    {:ok, RouteOwned.new(route_id, account_ref)}
+  end
+
   defp decode_credential(_data), do: {:error, :invalid_credential}
 
   @spec encode_policy(Policy.t()) :: map()
@@ -322,7 +353,10 @@ defmodule MingaAgent.ModelSelection do
       },
       "limits" => MingaAgent.ModelSelection.Encoding.stringify(Map.from_struct(policy.limits)),
       "capabilities" => stringify_capabilities(Map.from_struct(policy.capabilities)),
-      "cost" => MingaAgent.ModelSelection.Encoding.stringify(policy.cost)
+      "cost" => MingaAgent.ModelSelection.Encoding.stringify(policy.cost),
+      "compaction" => Atom.to_string(policy.compaction),
+      "usage" => Atom.to_string(policy.usage),
+      "cost_mode" => Atom.to_string(policy.cost_mode)
     }
   end
 
@@ -350,11 +384,24 @@ defmodule MingaAgent.ModelSelection do
         tool_result_images: decode_tool_result_images(version, capabilities, route),
         streaming: decode_capability(Map.get(capabilities, "streaming"))
       },
-      cost: Map.get(data, "cost", %{})
+      cost: Map.get(data, "cost", %{}),
+      compaction: decode_mode(Map.get(data, "compaction"), ~w(native unsupported)a, :native),
+      usage: decode_mode(Map.get(data, "usage"), ~w(tokens none)a, :tokens),
+      cost_mode: decode_mode(Map.get(data, "cost_mode"), ~w(metered subscription)a, :metered)
     })
   end
 
   defp decode_policy(_data, _version, _route), do: {:error, :invalid_policy}
+
+  # Selections saved before route behavior modes existed decode to the catalog defaults.
+  @spec decode_mode(term(), [atom()], atom()) :: atom() | :invalid
+  defp decode_mode(nil, _allowed, default), do: default
+
+  defp decode_mode(value, allowed, _default) when is_binary(value) do
+    Enum.find(allowed, :invalid, &(Atom.to_string(&1) == value))
+  end
+
+  defp decode_mode(_value, _allowed, _default), do: :invalid
 
   @spec decode_tool_result_images(pos_integer(), map(), Route.t()) :: capability() | :invalid
   defp decode_tool_result_images(@version, capabilities, _route),
@@ -407,5 +454,9 @@ defmodule MingaAgent.ModelSelection do
       account_id: credential.account_id,
       source_id: credential.source_id
     }
+  end
+
+  defp credential_identity(%RouteOwned{} = credential) do
+    %{kind: :route_owned, route_id: credential.route_id, account_ref: credential.account_ref}
   end
 end

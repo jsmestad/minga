@@ -821,13 +821,14 @@ defmodule MingaAgent.Session do
     GenServer.call(session, :get_available_models, 10_000)
   end
 
-  @doc "Refreshes model availability in the calling worker and lists available routes."
+  @doc "Refreshes model and contributed route availability in the calling worker and lists available routes."
   @spec discover_available_models(GenServer.server()) ::
           {:ok, term(), String.t() | :superseded | nil, :atomics.atomics_ref() | nil}
           | {:error, term()}
   def discover_available_models(session) do
     case GenServer.call(session, :begin_model_discovery) do
       {:native, ref, credential, credential_opts, resolver_opts} ->
+        refresh_inference_routes(resolver_opts, credential_opts)
         apple = ModelResolver.apple_availability(resolver_opts)
         codex = fetch_codex_models(credential, credential_opts)
         GenServer.call(session, {:finish_model_discovery, ref, credential, codex, apple})
@@ -835,6 +836,25 @@ defmodule MingaAgent.Session do
       :local ->
         with {:ok, candidates} <- get_available_models(session), do: {:ok, candidates, nil, nil}
     end
+  end
+
+  # Route availability callbacks run in this calling worker, never in the Session or Editor process.
+  @spec refresh_inference_routes(keyword(), keyword()) :: :ok
+  defp refresh_inference_routes(resolver_opts, credential_opts) do
+    credential_fn = fn route_id ->
+      case MingaAgent.Credentials.route_credential(route_id, credential_opts) do
+        {:ok, credential} -> {:ok, credential}
+        {:error, {:route_unavailable, remedy}} -> {:error, remedy}
+      end
+    end
+
+    resolver_opts
+    |> Keyword.get(:inference_routes, MingaAgent.InferenceRouteRegistry)
+    |> MingaAgent.InferenceRouteRegistry.refresh_availability(route_credential_fn: credential_fn)
+
+    :ok
+  catch
+    :exit, _reason -> :ok
   end
 
   @spec fetch_codex_models(ModelSelection.Credential.OAuth.t() | nil, keyword()) ::
@@ -8043,6 +8063,13 @@ defmodule MingaAgent.Session do
   defp humanize_error(%Event.Error{kind: :unknown, message: message, provider: provider}, state) do
     humanize_legacy_error(message, provider || provider_slug(state))
   end
+
+  # A contributed route already turned its failure into one actionable sentence.
+  defp humanize_error(%Event.Error{kind: kind, message: message}, %{
+         model_selection: %ModelSelection{route: %{request_provider: :contributed}}
+       })
+       when kind != :context_transition_required and is_binary(message) and message != "",
+       do: message
 
   defp humanize_error(%Event.Error{kind: kind, message: message, provider: provider}, state) do
     humanize_error_kind(kind, message, provider || provider_slug(state))

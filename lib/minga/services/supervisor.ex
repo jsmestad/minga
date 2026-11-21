@@ -38,6 +38,7 @@ defmodule Minga.Services.Supervisor do
       ├── Minga.Extension.InstanceRegistry   Unique per-extension process names
       ├── Minga.Extension.RootSupervisor     Dynamic owner of ordered extension roots
       ├── MingaAgent.ProviderRegistry        Source-owned provider declarations
+      ├── MingaAgent.InferenceRouteRegistry  Source-owned contributed model routes
       ├── MingaAgent.ProviderPacks.Native    Bundled native provider declaration
       ├── MingaAgent.Hooks.Registry          Source-owned agent hook declarations
       ├── MingaAgent.MCP.ServerRegistry      Source-owned MCP server declarations
@@ -92,6 +93,10 @@ defmodule Minga.Services.Supervisor do
       StartupTimer.timed_child_spec(:svc_instance_registry, Minga.Extension.InstanceRegistry),
       StartupTimer.timed_child_spec(:svc_ext_root_supervisor, Minga.Extension.RootSupervisor),
       StartupTimer.timed_child_spec(:svc_provider_registry, MingaAgent.ProviderRegistry),
+      StartupTimer.timed_child_spec(
+        :svc_inference_route_registry,
+        MingaAgent.InferenceRouteRegistry
+      ),
       StartupTimer.timed_child_spec(:svc_provider_packs, MingaAgent.ProviderPacks.Native),
       StartupTimer.timed_child_spec(:svc_hooks_registry, MingaAgent.Hooks.Registry),
       StartupTimer.timed_child_spec(:svc_mcp_registry, MingaAgent.MCP.ServerRegistry),

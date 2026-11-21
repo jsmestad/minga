@@ -1,0 +1,238 @@
+defmodule MingaAgent.InferenceRouteRegistryTest do
+  use ExUnit.Case, async: true
+
+  alias Minga.Extension.ContributionCleanup
+  alias Minga.Extension.InvocationContext
+  alias Minga.Extension.ModelRoutes
+  alias MingaAgent.InferenceRoute.{Reporter, Status}
+  alias MingaAgent.InferenceRouteRegistry
+  alias MingaAgent.InferenceRouteRegistry.Entry
+  alias MingaAgent.Test.FixtureInferenceRoute
+
+  setup do
+    name = :"inference_route_registry_#{System.unique_integer([:positive])}"
+    start_supervised!({InferenceRouteRegistry, name: name})
+    %{registry: name}
+  end
+
+  defp spec(source, id \\ "fixture"),
+    do: [source: source, id: id, module: FixtureInferenceRoute, display_name: "Fixture Route"]
+
+  test "registers a route with its models and an unknown status", %{registry: registry} do
+    assert {:ok, _reporter} = InferenceRouteRegistry.register(registry, spec({:extension, :one}))
+
+    assert {:ok, %Entry{spec: spec, models: [model], status: status}} =
+             InferenceRouteRegistry.lookup(registry, "fixture")
+
+    assert spec.source == {:extension, :one}
+    assert model.id == "fixture-model"
+    assert status == Status.unknown()
+    assert [%Entry{}] = InferenceRouteRegistry.list(registry)
+  end
+
+  test "a second source cannot take a route id and the first route keeps working",
+       %{registry: registry} do
+    {:ok, _reporter} = InferenceRouteRegistry.register(registry, spec({:extension, :one}))
+
+    assert {:error, {:duplicate_route_id, "fixture", {:extension, :one}, {:extension, :two}}} =
+             InferenceRouteRegistry.register(registry, spec({:extension, :two}))
+
+    assert {:ok, %Entry{spec: %{source: {:extension, :one}}}} =
+             InferenceRouteRegistry.lookup(registry, "fixture")
+  end
+
+  test "the owning source can replace its route, which retires the old reporter",
+       %{registry: registry} do
+    {:ok, old} = InferenceRouteRegistry.register(registry, spec({:extension, :one}))
+    :ok = InferenceRouteRegistry.report_status(registry, old, {:ready, "a"})
+    replacement = FixtureInferenceRoute.model(id: "other-model")
+
+    assert {:ok, new} =
+             InferenceRouteRegistry.register(registry, spec({:extension, :one}),
+               config: [models: [replacement]]
+             )
+
+    assert {:ok, %Entry{models: [%{id: "other-model"}], status: status}} =
+             InferenceRouteRegistry.lookup(registry, "fixture")
+
+    assert status == Status.unknown()
+
+    assert {:error, :stale_reporter} =
+             InferenceRouteRegistry.report_status(registry, old, {:ready, "a"})
+
+    assert :ok = InferenceRouteRegistry.report_status(registry, new, {:ready, "b"})
+  end
+
+  test "rejects invalid specs, modules that miss callbacks, and invalid model lists",
+       %{registry: registry} do
+    assert {:error, {:invalid_spec, :reserved_id}} =
+             InferenceRouteRegistry.register(registry, spec({:extension, :one}, "anthropic"))
+
+    assert {:error, {:invalid_route_module, Enum}} =
+             InferenceRouteRegistry.register(
+               registry,
+               Keyword.put(spec({:extension, :one}), :module, Enum)
+             )
+
+    model = FixtureInferenceRoute.model()
+
+    for {models, reason} <- [
+          {[], {:expected_non_empty_list, []}},
+          {[model, model], :duplicate_model_id},
+          {[%{id: "map"}], {:invalid_model_field, :struct}}
+        ] do
+      assert {:error, {:invalid_models, ^reason}} =
+               InferenceRouteRegistry.register(registry, spec({:extension, :one}),
+                 config: [models: models]
+               )
+    end
+
+    assert InferenceRouteRegistry.list(registry) == []
+  end
+
+  test "a reporter works from any process and is rejected once its route is removed",
+       %{registry: registry} do
+    {:ok, reporter} = InferenceRouteRegistry.register(registry, spec({:extension, :one}))
+    remedy = "Not signed in. Run: login"
+    parent = self()
+
+    spawn(fn ->
+      send(
+        parent,
+        {:reported,
+         InferenceRouteRegistry.report_status(
+           registry,
+           reporter,
+           {:unavailable, :not_signed_in, remedy}
+         )}
+      )
+    end)
+
+    assert_receive {:reported, :ok}
+
+    assert {:ok, %Entry{status: %Status{availability: {:unavailable, :not_signed_in, ^remedy}}}} =
+             InferenceRouteRegistry.lookup(registry, "fixture")
+
+    assert {:error, :invalid_status} =
+             InferenceRouteRegistry.report_status(registry, reporter, :ready)
+
+    forged = %{reporter | token: make_ref()}
+
+    assert {:error, :stale_reporter} =
+             InferenceRouteRegistry.report_status(registry, forged, {:ready, "x"})
+
+    :ok = InferenceRouteRegistry.unregister_source(registry, {:extension, :one})
+
+    assert {:error, :unknown_route} =
+             InferenceRouteRegistry.report_status(registry, reporter, {:ready, "x"})
+  end
+
+  test "refresh records ready, unavailable, failing, and slow routes without blocking",
+       %{registry: registry} do
+    for id <- ~w(ready offline raises hangs invalid badcred) do
+      {:ok, _reporter} = InferenceRouteRegistry.register(registry, spec({:extension, :one}, id))
+    end
+
+    modes = %{"raises" => "raise", "hangs" => "hang", "invalid" => "invalid"}
+
+    credential_fn = fn
+      "badcred" ->
+        {:error, "Fix routes.badcred.env in credentials.json."}
+
+      route_id ->
+        {:ok, %{env: %{"FIXTURE_AVAILABILITY" => Map.get(modes, route_id, "ready")}}}
+    end
+
+    entries =
+      InferenceRouteRegistry.refresh_availability(registry,
+        timeout: 200,
+        route_credential_fn: credential_fn
+      )
+
+    statuses = Map.new(entries, &{&1.spec.id, &1.status.availability})
+
+    assert statuses["ready"] == {:ready, "fixture@example.com"}
+    assert statuses["offline"] == {:unavailable, :not_signed_in, FixtureInferenceRoute.remedy()}
+
+    assert statuses["badcred"] ==
+             {:unavailable, :invalid_route_credential,
+              "Fix routes.badcred.env in credentials.json."}
+
+    for id <- ~w(raises hangs invalid) do
+      assert {:unavailable, :availability_check_failed, remedy} = statuses[id]
+      assert remedy =~ "Could not check Fixture Route"
+    end
+  end
+
+  test "refresh results do not overwrite a route that was replaced meanwhile",
+       %{registry: registry} do
+    {:ok, _reporter} = InferenceRouteRegistry.register(registry, spec({:extension, :one}))
+    [entry] = InferenceRouteRegistry.list(registry)
+    :ok = InferenceRouteRegistry.unregister_source(registry, {:extension, :one})
+
+    assert :ok = GenServer.call(registry, {:refreshed, entry.spec, Status.unknown()})
+    assert InferenceRouteRegistry.list(registry) == []
+  end
+
+  test "source cleanup removes only that source's routes", %{registry: registry} do
+    {:ok, _reporter} =
+      InferenceRouteRegistry.register(registry, spec({:extension, :one}, "first"))
+
+    {:ok, _reporter} =
+      InferenceRouteRegistry.register(registry, spec({:extension, :two}, "second"))
+
+    callbacks = %{
+      inference_routes: &InferenceRouteRegistry.unregister_source(registry, &1)
+    }
+
+    assert :ok =
+             ContributionCleanup.finalize_source({:extension, :one}, :inference_routes,
+               callbacks: callbacks
+             )
+
+    assert [%Entry{spec: %{id: "second"}}] = InferenceRouteRegistry.list(registry)
+  end
+
+  test "the application registry participates in source cleanup" do
+    assert Map.has_key?(ContributionCleanup.merge_callbacks(%{}), :inference_routes)
+  end
+
+  test "route errors are classified by the route, with a safe fallback", %{registry: registry} do
+    {:ok, _reporter} = InferenceRouteRegistry.register(registry, spec({:extension, :one}))
+
+    assert {:rate_limited, "Fixture route is rate limited."} =
+             InferenceRouteRegistry.classify_error(registry, "fixture", :rate_limited)
+
+    assert {:provider_error, "The fixture route failed."} =
+             InferenceRouteRegistry.classify_error(registry, "fixture", :anything)
+
+    assert {:unreachable, message} =
+             InferenceRouteRegistry.classify_error(registry, "missing", :anything)
+
+    assert message =~ "no extension provides it"
+  end
+
+  describe "Minga.Extension.ModelRoutes" do
+    test "registers under the calling extension's invocation source and returns a reporter",
+         %{registry: registry} do
+      attrs = [id: "fixture", module: FixtureInferenceRoute, display_name: "Fixture Route"]
+
+      assert {:error, :no_extension_context} = ModelRoutes.register(attrs, registry: registry)
+
+      assert {:ok, %Reporter{} = reporter} =
+               InvocationContext.with_source({:extension, :bridge}, fn ->
+                 ModelRoutes.register(Keyword.put(attrs, :source, {:extension, :spoofed}),
+                   registry: registry
+                 )
+               end)
+
+      assert {:ok, %Entry{spec: %{source: {:extension, :bridge}}}} =
+               InferenceRouteRegistry.lookup(registry, "fixture")
+
+      assert :ok = ModelRoutes.report_status(reporter, {:ready, "me"}, registry: registry)
+
+      assert {:ok, %Entry{status: %Status{availability: {:ready, "me"}}}} =
+               InferenceRouteRegistry.lookup(registry, "fixture")
+    end
+  end
+end

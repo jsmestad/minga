@@ -10,9 +10,13 @@ defmodule MingaAgent.ModelResolver do
   alias MingaAgent.Config
   alias MingaAgent.Credentials
   alias MingaAgent.Credentials.Snapshot
+  alias MingaAgent.InferenceRoute.Model, as: RouteModel
+  alias MingaAgent.InferenceRoute.Status, as: RouteStatus
+  alias MingaAgent.InferenceRouteRegistry
+  alias MingaAgent.InferenceRouteRegistry.Entry, as: RouteEntry
   alias MingaAgent.ModelCandidate
   alias MingaAgent.ModelSelection
-  alias MingaAgent.ModelSelection.Credential.{ApiKey, OAuth}
+  alias MingaAgent.ModelSelection.Credential.{ApiKey, OAuth, RouteOwned}
   alias MingaAgent.ModelSelection.{Evidence, Policy, Route, Stored, TextExecution}
   alias MingaAgent.Provider.Spec
   alias MingaAgent.ProviderRegistry
@@ -323,6 +327,9 @@ defmodule MingaAgent.ModelResolver do
       {:error, {:selection_correction_required, _message}} = error ->
         error
 
+      {:error, {:route_unavailable, message}} when is_struct(stored.credential, RouteOwned) ->
+        route_error(message)
+
       {:error, reason} ->
         correction(message(reason))
 
@@ -377,6 +384,29 @@ defmodule MingaAgent.ModelResolver do
     end
   end
 
+  defp validate_stored_source(
+         %Stored{route: %Route{origin: {:contributed, route_id, model_id}}} = stored,
+         _snapshot,
+         spec,
+         opts
+       ) do
+    with :ok <- contributed_backend(spec),
+         {:ok, entry} <- fetch_route(route_id, opts),
+         {:ok, model} <- RouteEntry.model(entry, model_id),
+         {:ok, expected} <- contributed_route(entry.spec, model),
+         :ok <- contributed_declaration_unchanged(stored, expected, model) do
+      :ok
+    else
+      {:error, {:route_unavailable, _message}} = error ->
+        error
+
+      _changed ->
+        correction(
+          "The saved #{route_id} model route or its model declaration changed. Choose it again in /model."
+        )
+    end
+  end
+
   defp validate_stored_source(stored, snapshot, spec, opts) do
     {:catalog, provider, model_id} = stored.route.origin
     context = %{config: %Config{}, snapshot: snapshot, spec: spec, opts: opts}
@@ -402,6 +432,15 @@ defmodule MingaAgent.ModelResolver do
         )
     end
   end
+
+  @spec contributed_declaration_unchanged(Stored.t(), Route.t(), RouteModel.t()) ::
+          :ok | {:error, :declaration_changed}
+  defp contributed_declaration_unchanged(%Stored{route: route, policy: policy}, route, model) do
+    if contributed_policy_matches?(policy, model), do: :ok, else: {:error, :declaration_changed}
+  end
+
+  defp contributed_declaration_unchanged(_stored, _expected, _model),
+    do: {:error, :declaration_changed}
 
   @spec stored_source(Stored.t(), keyword()) ::
           {:ok, source()} | {:error, term()}
@@ -443,7 +482,7 @@ defmodule MingaAgent.ModelResolver do
       |> Keyword.delete(:apple_discovery)
       |> Keyword.put_new(:codex_models, {:error, :not_loaded})
 
-    case candidates(candidate_opts) do
+    case Enum.filter(candidates(candidate_opts), &ModelCandidate.selectable_by_default?/1) do
       [%ModelCandidate{selection: selection} | _rest] ->
         {:ok, selection}
 
@@ -473,11 +512,197 @@ defmodule MingaAgent.ModelResolver do
     exact_model = apply_legacy_provider_hint(requested_model, Map.get(intent, "provider"))
 
     case split_model_spec(exact_model) do
-      {:ok, "apple", "system"} -> resolve_apple(intent, context)
-      {:ok, "apple", _other} -> route_error("The only on-device Apple route is apple:system.")
-      _hosted -> resolve_hosted(exact_model, intent, context)
+      {:ok, "apple", "system"} ->
+        resolve_apple(intent, context)
+
+      {:ok, "apple", _other} ->
+        route_error("The only on-device Apple route is apple:system.")
+
+      # Built-in provider names are reserved, so catalog references never consult the route registry.
+      {:ok, prefix, model_id} when prefix not in @request_provider_names ->
+        case fetch_route(prefix, context.opts) do
+          {:ok, entry} -> resolve_contributed(entry, model_id, intent, context)
+          {:error, _not_registered} -> resolve_hosted(exact_model, intent, context)
+        end
+
+      _hosted ->
+        resolve_hosted(exact_model, intent, context)
     end
   end
+
+  # Contributed routes resolve only through the registry; an unavailable route never becomes active.
+  @spec resolve_contributed(RouteEntry.t(), String.t(), map(), context()) ::
+          {:ok, ModelSelection.t()} | {:error, resolution_error()}
+  defp resolve_contributed(entry, model_id, intent, context) do
+    with :ok <- contributed_backend(context.spec),
+         {:ok, model} <- contributed_model(entry, model_id),
+         :ok <- contributed_status_permits_selection(entry.status) do
+      build_contributed_selection(entry, model, intent, context)
+    end
+  end
+
+  @spec contributed_model(RouteEntry.t(), String.t()) ::
+          {:ok, RouteModel.t()} | {:error, resolution_error()}
+  defp contributed_model(entry, model_id) do
+    case RouteEntry.model(entry, model_id) do
+      {:ok, model} -> {:ok, model}
+      {:error, :model_not_found} -> {:error, {:model_not_found, "#{entry.spec.id}:#{model_id}"}}
+    end
+  end
+
+  @spec contributed_status_permits_selection(RouteStatus.t()) ::
+          :ok | {:error, resolution_error()}
+  defp contributed_status_permits_selection(%RouteStatus{
+         availability: {:unavailable, _reason, remedy}
+       }),
+       do: route_error(remedy)
+
+  defp contributed_status_permits_selection(%RouteStatus{}), do: :ok
+
+  @spec build_contributed_selection(RouteEntry.t(), RouteModel.t(), map(), context()) ::
+          {:ok, ModelSelection.t()} | {:error, resolution_error()}
+  defp build_contributed_selection(entry, model, intent, context) do
+    credential = RouteOwned.new(entry.spec.id, RouteStatus.account_label(entry.status))
+
+    with {:ok, route} <- contributed_route(entry.spec, model),
+         {:ok, policy} <- contributed_policy(model, intent, context.config.max_tokens),
+         {:ok, selection} <-
+           ModelSelection.build(context.spec, route, credential, policy, Evidence.new()) do
+      {:ok, selection}
+    else
+      {:error, reason} when is_tuple(reason) ->
+        {:error, reason}
+
+      {:error, reason} ->
+        route_error(
+          "The #{entry.spec.display_name} model route cannot be executed: #{MingaAgent.Redaction.format_error(reason)}."
+        )
+    end
+  end
+
+  @spec contributed_backend(Spec.t()) :: :ok | {:error, resolution_error()}
+  defp contributed_backend(%Spec{id: "native", module: MingaAgent.Providers.Native}), do: :ok
+
+  defp contributed_backend(_spec),
+    do: route_error("Extension model routes require the Native agent backend.")
+
+  @spec contributed_route(MingaAgent.InferenceRoute.Spec.t(), RouteModel.t()) ::
+          {:ok, Route.t()} | {:error, term()}
+  defp contributed_route(route_spec, %RouteModel{} = model) do
+    with {:ok, execution} <-
+           TextExecution.new(%{
+             supported: true,
+             family: "inference_route",
+             wire_protocol: "inference_route",
+             transport: "in_process",
+             provider_model_id: model.id
+           }) do
+      Route.new(%{
+        origin: {:contributed, route_spec.id, model.id},
+        request_provider: :contributed,
+        id: Route.contributed_id(route_spec.id, model.id),
+        model_provider: route_spec.id,
+        model_id: model.id,
+        display_name: model.display_name,
+        execution: execution,
+        metadata: contributed_metadata(model)
+      })
+    end
+  end
+
+  @spec contributed_metadata(RouteModel.t()) :: map()
+  defp contributed_metadata(%RouteModel{} = model) do
+    input = if model.images_in?, do: [:text, :image], else: [:text]
+
+    %{
+      limits: %{context: model.context_window, output: model.max_output},
+      modalities: %{input: input, output: [:text]},
+      capabilities: %{tools: %{enabled: model.tools?}, streaming: %{text: true}}
+    }
+  end
+
+  @spec contributed_policy(RouteModel.t(), map(), pos_integer()) ::
+          {:ok, Policy.t()} | {:error, resolution_error()}
+  defp contributed_policy(%RouteModel{} = model, intent, max_tokens) do
+    options = model.reasoning_levels
+
+    requested =
+      Map.get(intent, "reasoning_effort") || Map.get(intent, "thinking") || List.first(options)
+
+    if requested in options do
+      %{
+        reasoning: %{effort: requested, options: options},
+        limits: %{
+          context: model.context_window,
+          input: nil,
+          output: model.max_output,
+          request_output: request_output_limit(max_tokens, model.max_output)
+        },
+        capabilities: contributed_capabilities(model),
+        cost: %{},
+        compaction: model.compaction,
+        usage: model.usage,
+        cost_mode: model.cost
+      }
+      |> Policy.new()
+      |> case do
+        {:ok, policy} ->
+          {:ok, policy}
+
+        {:error, _reason} ->
+          {:error, {:incompatible_selection, "The selected model has invalid policy metadata."}}
+      end
+    else
+      {:error,
+       {:incompatible_selection,
+        "Thinking level #{inspect(requested)} is unavailable for #{model.display_name}. Available: #{Enum.join(options, ", ")}."}}
+    end
+  end
+
+  @spec contributed_capabilities(RouteModel.t()) :: map()
+  defp contributed_capabilities(%RouteModel{} = model) do
+    %{
+      tools: model.tools?,
+      images: model.images_in?,
+      tool_result_images: model.tool_result_images?,
+      streaming: true
+    }
+  end
+
+  @spec contributed_policy_matches?(Policy.t(), RouteModel.t()) :: boolean()
+  defp contributed_policy_matches?(%Policy{} = policy, %RouteModel{} = model) do
+    policy.reasoning.options == model.reasoning_levels and
+      policy.limits.context == model.context_window and
+      policy.limits.output == model.max_output and
+      policy.limits.request_output <= model.max_output and
+      Map.from_struct(policy.capabilities) == contributed_capabilities(model) and
+      policy.compaction == model.compaction and policy.usage == model.usage and
+      policy.cost_mode == model.cost
+  end
+
+  @spec fetch_route(String.t(), keyword()) :: {:ok, RouteEntry.t()} | {:error, resolution_error()}
+  defp fetch_route(route_id, opts) do
+    case InferenceRouteRegistry.lookup(route_registry(opts), route_id) do
+      {:ok, entry} -> {:ok, entry}
+      {:error, :not_found} -> route_not_registered(route_id)
+    end
+  catch
+    :exit, _reason -> route_not_registered(route_id)
+  end
+
+  @spec route_not_registered(String.t()) :: {:error, resolution_error()}
+  defp route_not_registered(route_id),
+    do: route_error(InferenceRouteRegistry.unregistered_message(route_id))
+
+  @spec registered_routes(keyword()) :: [RouteEntry.t()]
+  defp registered_routes(opts) do
+    InferenceRouteRegistry.list(route_registry(opts))
+  catch
+    :exit, _reason -> []
+  end
+
+  @spec route_registry(keyword()) :: GenServer.server()
+  defp route_registry(opts), do: Keyword.get(opts, :inference_routes, InferenceRouteRegistry)
 
   @spec resolve_hosted(String.t(), map(), context()) ::
           {:ok, ModelSelection.t()} | {:error, resolution_error()}
@@ -703,6 +928,39 @@ defmodule MingaAgent.ModelResolver do
     do: validate_current_oauth(credential, Snapshot.oauth_ref(snapshot), opts)
 
   defp credential_available(:none, _snapshot, _opts), do: :ok
+
+  defp credential_available(%RouteOwned{route_id: route_id} = credential, _snapshot, opts) do
+    with {:ok, entry} <- fetch_route(route_id, opts) do
+      route_owned_available(credential, entry)
+    end
+  end
+
+  # An unchecked route keeps its saved account until a check reports otherwise.
+  @spec route_owned_available(RouteOwned.t(), RouteEntry.t()) ::
+          :ok | {:error, resolution_error()}
+  defp route_owned_available(_credential, %RouteEntry{
+         status: %RouteStatus{availability: {:unavailable, _reason, remedy}}
+       }),
+       do: route_error(remedy)
+
+  defp route_owned_available(%RouteOwned{account_ref: account}, %RouteEntry{
+         status: %RouteStatus{availability: {:ready, account}}
+       }),
+       do: :ok
+
+  defp route_owned_available(_credential, %RouteEntry{
+         spec: route_spec,
+         status: %RouteStatus{availability: {:ready, _other_account}}
+       }),
+       do:
+         correction(
+           "#{route_spec.display_name} is signed in to a different account. Choose the model again in /model."
+         )
+
+  defp route_owned_available(_credential, %RouteEntry{
+         status: %RouteStatus{availability: :unknown}
+       }),
+       do: :ok
 
   @spec validate_current_oauth(OAuth.t(), OAuth.t() | nil, keyword()) ::
           :ok | {:error, resolution_error()}
@@ -934,9 +1192,46 @@ defmodule MingaAgent.ModelResolver do
         _unavailable -> selections
       end
     end)
-    |> Enum.uniq_by(&ModelSelection.id/1)
-    |> Enum.map(&ModelCandidate.new(&1, context.favorites, context.current_id))
+    |> Enum.map(&{&1, nil})
+    |> Kernel.++(contributed_candidates(resolution_context))
+    |> Enum.uniq_by(fn {selection, _route} -> ModelSelection.id(selection) end)
+    |> Enum.map(fn {selection, route} ->
+      ModelCandidate.new(selection, context.favorites, context.current_id, route)
+    end)
     |> Enum.sort_by(&candidate_sort_key/1)
+  end
+
+  # Unavailable route models are listed too, so the picker can show the route's own remedy.
+  @spec contributed_candidates(context()) :: [
+          {ModelSelection.t(), ModelCandidate.inference_route()}
+        ]
+  defp contributed_candidates(context) do
+    case contributed_backend(context.spec) do
+      :ok -> Enum.flat_map(registered_routes(context.opts), &route_candidates(&1, context))
+      {:error, _reason} -> []
+    end
+  end
+
+  @spec route_candidates(RouteEntry.t(), context()) :: [
+          {ModelSelection.t(), ModelCandidate.inference_route()}
+        ]
+  defp route_candidates(entry, context) do
+    route = %{display_name: entry.spec.display_name, status: entry.status}
+
+    Enum.flat_map(entry.models, fn model ->
+      case build_contributed_selection(entry, model, %{}, context) do
+        {:ok, selection} ->
+          [{selection, route}]
+
+        {:error, reason} ->
+          Minga.Log.warning(
+            :agent,
+            "Model route #{entry.spec.id}:#{model.id} is not selectable: #{MingaAgent.Redaction.format_error(reason)}"
+          )
+
+          []
+      end
+    end)
   end
 
   @spec apple_candidates(context()) :: [ModelSelection.t()]
