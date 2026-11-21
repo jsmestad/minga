@@ -25,8 +25,7 @@ defmodule MingaEditor.Renderer.TextInteractionIndex.Reader do
              | :not_source_backed
              | :unavailable}
   def resolve(%__MODULE__{table: table}, %TextEvent{} = event) do
-    with {:ok, active_id} <- read(table, {:active, event.window_id}),
-         true <- active_id == event.presentation_id,
+    with :ok <- active_still_exact(table, event.window_id, event.presentation_id),
          {:ok, {buffer, source_version, rows, _scroll_request, _settled_scroll_seq}} <-
            read(table, {:lease, event.window_id, event.presentation_id}),
          {:ok, row} <- row_at(table, rows, event.row_index),
@@ -42,13 +41,8 @@ defmodule MingaEditor.Renderer.TextInteractionIndex.Reader do
          :ok <- active_still_exact(table, event.window_id, event.presentation_id) do
       {:ok, target}
     else
-      false -> {:error, :inactive}
       :error -> {:error, :inactive}
-      {:error, :inactive} -> {:error, :inactive}
-      {:error, :row_not_found} -> {:error, :row_not_found}
-      {:error, :row_id_mismatch} -> {:error, :row_id_mismatch}
-      {:error, :not_source_backed} -> {:error, :not_source_backed}
-      {:error, :unavailable} -> {:error, :unavailable}
+      {:error, _reason} = error -> error
     end
   end
 
@@ -215,14 +209,15 @@ defmodule MingaEditor.Renderer.TextInteractionIndex.Reader do
   defp row_at(_table, {:resident, nil}, _row_index), do: {:error, :row_not_found}
 
   defp row_at(table, {:resident, root}, row_index) do
-    with {:ok, {size, _, _, _, _, _, _}} <- read(table, {:node_header, root}),
-         true <- row_index >= 0 and row_index < size,
+    with {:ok, {size, _, _, _, _, _, _}} when row_index >= 0 and row_index < size <-
+           read(table, {:node_header, root}),
          {:ok, node, offset, line} <-
            ResidentStore.locate_rank(root, row_index, &rank_header(table, &1)),
          {:ok, entries} <- read(table, {:node_entries, node}),
          %{payload: payload} <- elem(entries, offset) do
       {:ok, ResidentStore.project_payload(payload, line)}
     else
+      {:ok, {_, _, _, _, _, _, _}} -> {:error, :row_not_found}
       false -> {:error, :row_not_found}
       :error -> {:error, :unavailable}
       {:error, :unavailable} -> {:error, :unavailable}

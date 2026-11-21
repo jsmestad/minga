@@ -178,7 +178,8 @@ defmodule Minga.Parser.EventRouter do
        ) do
     with buffer_pid when is_pid(buffer_pid) <- BufferRegistry.resolve(work.buffers, buffer_id),
          {:ok, next_work, completed} <- ParseSync.complete_parse(work, port, buffer_pid, version) do
-      broadcast(subscribers, {:minga_highlight, tag_editor_buffer(event, buffer_pid, completed)})
+      correlation = EventCorrelation.new(completed.generation, version)
+      broadcast_buffer_event(subscribers, event, buffer_pid, correlation)
       next_work
     else
       _stale_or_missing -> work
@@ -187,11 +188,8 @@ defmodule Minga.Parser.EventRouter do
 
   defp broadcast_editor_event(event, work, _port, subscribers) do
     case editor_event_identity(event) do
-      {:versioned, buffer_id, version} ->
-        broadcast_versioned(work.buffers, buffer_id, version, event, subscribers)
-
-      {:unversioned, buffer_id} ->
-        broadcast_registered(work.buffers, buffer_id, event, subscribers)
+      {buffer_id, version} ->
+        broadcast_registered(work.buffers, buffer_id, version, event, subscribers)
 
       :global ->
         broadcast(subscribers, {:minga_highlight, event})
@@ -201,73 +199,41 @@ defmodule Minga.Parser.EventRouter do
   end
 
   @spec editor_event_identity(term()) ::
-          {:versioned, non_neg_integer(), pos_integer()}
-          | {:unversioned, non_neg_integer()}
+          {non_neg_integer(), pos_integer() | :unversioned}
           | :global
-  defp editor_event_identity({:conceal_spans, id, version, _}), do: {:versioned, id, version}
-  defp editor_event_identity({:fold_ranges, id, version, _}), do: {:versioned, id, version}
-
-  defp editor_event_identity({:textobject_positions, id, version, _}),
-    do: {:versioned, id, version}
-
-  defp editor_event_identity({:document_symbols, id, version, _}), do: {:versioned, id, version}
-  defp editor_event_identity({:highlight_names, id, _}), do: {:unversioned, id}
-  defp editor_event_identity({:injection_ranges, id, _}), do: {:unversioned, id}
+  defp editor_event_identity({:conceal_spans, id, version, _}), do: {id, version}
+  defp editor_event_identity({:fold_ranges, id, version, _}), do: {id, version}
+  defp editor_event_identity({:textobject_positions, id, version, _}), do: {id, version}
+  defp editor_event_identity({:document_symbols, id, version, _}), do: {id, version}
+  defp editor_event_identity({:highlight_names, id, _}), do: {id, :unversioned}
+  defp editor_event_identity({:injection_ranges, id, _}), do: {id, :unversioned}
   defp editor_event_identity(_event), do: :global
 
-  @spec broadcast_versioned(BufferRegistry.t(), non_neg_integer(), pos_integer(), term(), %{
-          pid() => reference()
-        }) :: :ok
-  defp broadcast_versioned(buffers, buffer_id, version, event, subscribers) do
+  @spec broadcast_registered(
+          BufferRegistry.t(),
+          non_neg_integer(),
+          pos_integer() | :unversioned,
+          term(),
+          %{pid() => reference()}
+        ) :: :ok
+  defp broadcast_registered(buffers, buffer_id, version, event, subscribers) do
     with buffer_pid when is_pid(buffer_pid) <- BufferRegistry.resolve(buffers, buffer_id),
          {:ok, registration} <- BufferRegistry.fetch(buffers, buffer_pid),
-         true <- BufferRegistration.accepts_version?(registration, version) do
-      broadcast(
-        subscribers,
-        {:minga_highlight, tag_editor_buffer(event, buffer_pid, registration)}
-      )
+         {:ok, correlation} <- BufferRegistration.correlation_for(registration, version) do
+      broadcast_buffer_event(subscribers, event, buffer_pid, correlation)
     end
 
     :ok
   end
 
-  @spec broadcast_registered(BufferRegistry.t(), non_neg_integer(), term(), %{
-          pid() => reference()
-        }) :: :ok
-  defp broadcast_registered(buffers, buffer_id, event, subscribers) do
-    with buffer_pid when is_pid(buffer_pid) <- BufferRegistry.resolve(buffers, buffer_id),
-         {:ok, registration} <- BufferRegistry.fetch(buffers, buffer_pid) do
-      broadcast(
-        subscribers,
-        {:minga_highlight, tag_editor_buffer(event, buffer_pid, registration)}
-      )
-    end
-
-    :ok
+  @spec broadcast_buffer_event(%{pid() => reference()}, term(), pid(), EventCorrelation.t()) ::
+          :ok
+  defp broadcast_buffer_event(subscribers, event, buffer_pid, correlation) do
+    broadcast(
+      subscribers,
+      {:minga_highlight, {:buffer_event, buffer_pid, correlation, strip_editor_identity(event)}}
+    )
   end
-
-  @spec tag_editor_buffer(term(), pid(), BufferRegistration.t()) :: term()
-  defp tag_editor_buffer(event, buffer_pid, registration) do
-    correlation =
-      EventCorrelation.new(registration.generation, event_parse_version(event, registration))
-
-    {:buffer_event, buffer_pid, correlation, strip_editor_identity(event)}
-  end
-
-  @spec event_parse_version(term(), BufferRegistration.t()) :: non_neg_integer()
-  defp event_parse_version(event, registration) do
-    case editor_event_identity(event) do
-      {:versioned, _buffer_id, version} -> version
-      _other -> registration_parse_version(registration)
-    end
-  end
-
-  @spec registration_parse_version(BufferRegistration.t()) :: non_neg_integer()
-  defp registration_parse_version(%BufferRegistration{phase: {:parsing, version, _target}}),
-    do: version
-
-  defp registration_parse_version(%BufferRegistration{last_completed_version: version}),
-    do: version
 
   @spec strip_editor_identity(term()) :: term()
   defp strip_editor_identity({:highlight_names, _id, value}), do: {:highlight_names, value}

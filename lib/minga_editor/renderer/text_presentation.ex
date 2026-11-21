@@ -171,19 +171,23 @@ defmodule MingaEditor.Renderer.TextPresentation do
         row_id,
         utf16_offset
       ) do
-    with true <- stored_row_id == row_id,
-         {:ok, {line, byte}} <- VisualRow.source_character_position(row, utf16_offset) do
-      {:ok,
-       TextTarget.new(%{
-         window_id: window_id,
-         buffer: buffer,
-         source_version: source_version,
-         line: line,
-         byte: byte
-       })}
+    if stored_row_id != row_id do
+      {:error, :row_id_mismatch}
     else
-      false -> {:error, :row_id_mismatch}
-      :not_source_backed -> {:error, :not_source_backed}
+      case VisualRow.source_character_position(row, utf16_offset) do
+        {:ok, {line, byte}} ->
+          {:ok,
+           TextTarget.new(%{
+             window_id: window_id,
+             buffer: buffer,
+             source_version: source_version,
+             line: line,
+             byte: byte
+           })}
+
+        :not_source_backed ->
+          {:error, :not_source_backed}
+      end
     end
   end
 

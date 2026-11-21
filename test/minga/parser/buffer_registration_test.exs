@@ -3,6 +3,7 @@ defmodule Minga.Parser.BufferRegistrationTest do
 
   alias Minga.Parser.BufferConfig
   alias Minga.Parser.BufferRegistration
+  alias Minga.Parser.EventCorrelation
 
   test "coalesces changes during one parse into a trailing pump" do
     registration = BufferRegistration.new(1, %BufferConfig{language: "elixir"}, make_ref())
@@ -37,6 +38,33 @@ defmodule Minga.Parser.BufferRegistrationTest do
     assert {:ok, completed} = BufferRegistration.complete_parse(registration, 4)
     assert completed.synced_sequence == 7
     refute BufferRegistration.pumpable?(completed)
+  end
+
+  test "correlates an admitted event with the version that produced it" do
+    generation = make_ref()
+    initial = BufferRegistration.new(1, %BufferConfig{language: "elixir"}, generation)
+
+    assert {:ok, %EventCorrelation{generation: ^generation, version: 0}} =
+             BufferRegistration.correlation_for(initial, :unversioned)
+
+    parsing =
+      initial
+      |> BufferRegistration.await_snapshot(make_ref())
+      |> BufferRegistration.begin_parse(3, 7, true)
+
+    assert {:ok, completed} = BufferRegistration.complete_parse(parsing, 3)
+
+    next =
+      completed
+      |> BufferRegistration.await_snapshot(make_ref())
+      |> BufferRegistration.begin_parse(4, 8, true)
+
+    for {version, expected} <- [{3, 3}, {4, 4}, {:unversioned, 4}] do
+      assert {:ok, %EventCorrelation{generation: ^generation, version: ^expected}} =
+               BufferRegistration.correlation_for(next, version)
+    end
+
+    assert :stale = BufferRegistration.correlation_for(next, 2)
   end
 
   test "restart discards in-flight work and requires a full snapshot" do
