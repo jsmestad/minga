@@ -5,6 +5,7 @@ defmodule MingaEditor.UI.Picker.BufferSourceTest do
 
   alias Minga.Buffer
   alias Minga.Buffer.Process, as: BufferProcess
+  alias Minga.Language.Devicon
   alias MingaEditor.RenderPipeline.TestHelpers
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Search
@@ -69,49 +70,93 @@ defmodule MingaEditor.UI.Picker.BufferSourceTest do
     end)
   end
 
-  describe "special?/1" do
-    test "returns true for *Messages* style names" do
-      buf = start_buffer(content: "", buffer_name: "*Messages*")
-      assert BufferSource.special?(buf)
-    end
-
-    test "returns true for *scratch*" do
-      buf = start_buffer(content: "", buffer_name: "*scratch*")
-      assert BufferSource.special?(buf)
-    end
-
-    test "returns false for file-backed buffers (nil name)" do
-      buf = start_buffer(content: "hello")
-      refute BufferSource.special?(buf)
-    end
-
-    test "returns false for named buffers without star pattern" do
-      buf = start_buffer(content: "", buffer_name: "Untitled-1")
-      refute BufferSource.special?(buf)
-    end
-
-    test "returns false for single-star names" do
-      buf = start_buffer(content: "", buffer_name: "*oops")
-      refute BufferSource.special?(buf)
-    end
-  end
-
   describe "candidates/1 (SPC b b)" do
-    test "excludes special buffers by default" do
-      file_buf = start_buffer(content: "code")
-      special_buf = start_buffer(content: "", buffer_name: "*Messages*")
+    test "hides star-wrapped names but keeps ordinary names and single-star names" do
+      unnamed = start_buffer(content: "code")
+      ordinary = start_buffer(content: "", buffer_name: "Untitled-1")
+      single_star = start_buffer(content: "", buffer_name: "*oops")
+      messages = start_buffer(content: "", buffer_name: "*Messages*")
+      scratch = start_buffer(content: "", buffer_name: "*scratch*")
 
-      candidates = BufferSource.candidates(fake_state([file_buf, special_buf]))
-      labels = Enum.map(candidates, fn %Item{label: label} -> label end)
+      ctx = fake_state([unnamed, messages, ordinary, scratch, single_star])
 
-      refute Enum.any?(labels, &String.contains?(&1, "*Messages*"))
+      assert Enum.map(BufferSource.candidates(ctx), & &1.id) ==
+               [{:buffer, unnamed}, {:buffer, ordinary}, {:buffer, single_star}]
     end
 
-    test "includes regular named buffers" do
-      buf = start_buffer(content: "", buffer_name: "Untitled-1")
+    test "skips a stopped registered buffer without reordering live candidates" do
+      first = start_buffer(content: "first")
+      stopped = start_buffer(content: "gone")
+      last = start_buffer(content: "last")
+      assert :ok = GenServer.stop(stopped)
 
-      candidates = BufferSource.candidates(fake_state([buf]))
-      assert Enum.count(candidates) == 1
+      assert [
+               %Item{id: {:buffer, ^first}, description: "first"},
+               %Item{id: {:buffer, ^last}, description: "last"}
+             ] = BufferSource.candidates(fake_state([first, stopped, last]))
+    end
+
+    @tag :tmp_dir
+    test "a named file buffer uses its name, its file path, and ordered status suffixes", %{
+      tmp_dir: dir
+    } do
+      path = Path.join(dir, "example.ex")
+      File.write!(path, "code")
+      buf = start_buffer(file_path: path, buffer_name: "Logical name", filetype: :elixir)
+      assert :ok = Buffer.insert_text(buf, "# ")
+      assert :ok = Buffer.set_read_only(buf, true)
+
+      assert Buffer.listing_info(buf) == %{
+               name: "Logical name",
+               file_path: path,
+               filetype: :elixir,
+               unlisted: false,
+               read_only: true,
+               dirty: true
+             }
+
+      {icon, color} = Devicon.icon_and_color(:elixir)
+      label = "#{icon} Logical name [+] [RO]"
+
+      assert [%Item{id: {:buffer, ^buf}, label: ^label, description: ^path, icon_color: ^color}] =
+               BufferSource.candidates(fake_state([buf]))
+    end
+
+    @tag :tmp_dir
+    test "reads listing info once per buffer and previews only admitted pathless buffers", %{
+      tmp_dir: dir
+    } do
+      path = Path.join(dir, "unnamed.ex")
+      File.write!(path, "code")
+      file = start_buffer(file_path: path, filetype: :elixir)
+      hidden = start_buffer(content: "excluded preview", unlisted: true)
+      scratch = start_buffer(content: "visible preview")
+      buffers = [file, hidden, scratch]
+      {icon, _color} = Devicon.icon_and_color(:elixir)
+      file_label = "#{icon} unnamed.ex"
+
+      for pid <- buffers, do: :erlang.trace(pid, true, [:receive, {:tracer, self()}])
+
+      try do
+        assert [
+                 %Item{id: {:buffer, ^file}, label: ^file_label, description: ^path},
+                 %Item{id: {:buffer, ^scratch}, description: "visible preview"}
+               ] = BufferSource.candidates(fake_state(buffers))
+
+        for pid <- buffers do
+          delivery_ref = :erlang.trace_delivered(pid)
+          assert_receive {:trace_delivered, ^pid, ^delivery_ref}
+          assert_received {:trace, ^pid, :receive, {:"$gen_call", _from, :listing_info}}
+
+          if pid == scratch do
+            assert_received {:trace, ^pid, :receive, {:"$gen_call", _from, {:lines, 0, _count}}}
+          end
+
+          refute_received {:trace, ^pid, :receive, {:"$gen_call", _from, _message}}
+        end
+      after
+        for pid <- buffers, do: :erlang.trace(pid, false, [:receive])
+      end
     end
 
     test "untitled buffers show a first-line content preview as description" do
@@ -232,17 +277,20 @@ defmodule MingaEditor.UI.Picker.BufferSourceTest do
       assert Enum.any?(labels, &String.contains?(&1, "*scratch*"))
     end
 
-    test "still excludes unlisted buffers even with include_special" do
-      unlisted = start_buffer(content: "", buffer_name: "internal", unlisted: true)
-      special = start_buffer(content: "", buffer_name: "*Messages*")
+    test "includes unlisted special buffers but not unlisted ordinary buffers" do
+      ordinary = start_buffer(content: "code")
+      hidden = start_buffer(content: "", buffer_name: "internal", unlisted: true)
+      special = start_buffer(content: "", buffer_name: "*scratch*", unlisted: true)
+      singleton = Minga.Log.MessagesBuffer.pid()
+      ctx = fake_state([ordinary, hidden, special])
 
-      candidates =
-        BufferSource.build_candidates(fake_state([unlisted, special]), include_special: true)
+      assert [%Item{id: {:buffer, ^ordinary}}] = BufferSource.candidates(ctx)
 
-      labels = Enum.map(candidates, fn %Item{label: label} -> label end)
-
-      refute Enum.any?(labels, &String.contains?(&1, "internal"))
-      assert Enum.any?(labels, &String.contains?(&1, "*Messages*"))
+      assert [
+               %Item{id: {:buffer, ^ordinary}},
+               %Item{id: {:buffer, ^special}},
+               %Item{id: {:pid, ^singleton}}
+             ] = BufferSource.build_candidates(ctx, include_special: true)
     end
   end
 
@@ -291,8 +339,8 @@ defmodule MingaEditor.UI.Picker.BufferSourceTest do
     test "does not duplicate singleton already in the list" do
       singleton = Minga.Log.MessagesBuffer.pid()
 
-      candidates = BufferAllSource.candidates(fake_state([singleton]))
-      assert Enum.count(candidates) == 1
+      assert [%Item{id: {:buffer, ^singleton}}] =
+               BufferAllSource.candidates(fake_state([singleton]))
     end
 
     test "SPC b b does not include extra special buffers" do

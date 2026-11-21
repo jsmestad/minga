@@ -18,6 +18,7 @@ defmodule MingaEditor.Commands.Search do
   alias Minga.Buffer.Document
   alias Minga.Core.Decorations
   alias Minga.Core.Unicode
+  alias Minga.Editing.Search.Match
   alias MingaEditor.PickerUI
   alias MingaEditor.Shell.Traditional.TodoSearchWorkflow
   alias MingaEditor.State, as: EditorState
@@ -26,6 +27,7 @@ defmodule MingaEditor.Commands.Search do
   alias Minga.Mode
   alias Minga.Mode.CommandState
   alias Minga.Mode.SearchState
+  alias Minga.Mode.SubstituteConfirmState
 
   @type state :: EditorState.t()
 
@@ -230,15 +232,15 @@ defmodule MingaEditor.Commands.Search do
         %{
           workspace: %{
             buffers: %{active: buf},
-            editing: %{mode_state: %Minga.Mode.SubstituteConfirmState{} = ms}
+            editing: %{mode_state: %SubstituteConfirmState{} = ms}
           }
         } =
           state,
         :substitute_confirm_advance
       ) do
-    case Enum.at(ms.matches, ms.current) do
-      %Minga.Editing.Search.Match{line: line, col: col} -> Buffer.move_to(buf, {line, col})
-      _ -> :ok
+    case SubstituteConfirmState.current_match(ms) do
+      %Match{line: line, col: col} -> Buffer.move_to(buf, {line, col})
+      nil -> :ok
     end
 
     state
@@ -246,53 +248,47 @@ defmodule MingaEditor.Commands.Search do
 
   def execute(state, :substitute_confirm_advance), do: state
 
-  # Apply accepted substitutions from confirm mode
+  # Apply accepted substitutions from the leaving mode state, already in :normal.
   def execute(
         %{
           workspace: %{
             buffers: %{active: buf},
-            editing: %{mode_state: %Minga.Mode.SubstituteConfirmState{} = ms}
+            editing: %{mode_state: %SubstituteConfirmState{} = ms}
           }
         } =
           state,
         :apply_substitute_confirm
       ) do
-    accepted_set = MapSet.new(ms.accepted)
-    accepted_count = MapSet.size(accepted_set)
-    total = Enum.count(ms.matches)
+    case SubstituteConfirmState.accepted_matches(ms) do
+      [] ->
+        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "No substitutions made")
 
-    if accepted_count == 0 do
-      MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, "No substitutions made")
-    else
-      # Apply replacements in reverse order to preserve positions
-      sorted_indices =
-        ms.accepted
-        |> Enum.sort(:desc)
+      accepted ->
+        # Apply in reverse offered order; overlapping matches use the changed text.
+        new_content =
+          Enum.reduce(accepted, ms.original_content, fn match, content ->
+            %Match{line: line, col: col, length: len} = match
+            replace_match(content, line, col, len, ms.replacement)
+          end)
 
-      new_content =
-        Enum.reduce(sorted_indices, ms.original_content, fn idx, content ->
-          %Minga.Editing.Search.Match{line: line, col: col, length: len} =
-            Enum.at(ms.matches, idx)
+        Buffer.replace_content(buf, new_content)
 
-          replace_match(content, line, col, len, ms.replacement)
-        end)
+        cursor_line = SubstituteConfirmState.first_offered_line(ms)
+        total_lines = Buffer.line_count(buf)
+        safe_line = min(cursor_line, max(0, total_lines - 1))
+        Buffer.move_to(buf, {safe_line, 0})
 
-      Buffer.replace_content(buf, new_content)
+        {_ordinal, total} = SubstituteConfirmState.progress(ms)
 
-      # Restore cursor to a safe position
-      cursor_line = hd(ms.matches).line
-      total_lines = Buffer.line_count(buf)
-      safe_line = min(cursor_line, max(0, total_lines - 1))
-      Buffer.move_to(buf, {safe_line, 0})
+        msg =
+          case length(accepted) do
+            1 -> "1 substitution"
+            count -> "#{count} of #{total} substitutions"
+          end
 
-      msg =
-        if accepted_count == 1,
-          do: "1 substitution",
-          else: "#{accepted_count} of #{total} substitutions"
-
-      state
-      |> put_in_search(:last_pattern, ms.pattern)
-      |> then(&MingaEditor.Shell.Traditional.NoticeWorkflow.publish(&1, msg))
+        state
+        |> put_in_search(:last_pattern, ms.pattern)
+        |> then(&MingaEditor.Shell.Traditional.NoticeWorkflow.publish(&1, msg))
     end
   end
 
@@ -340,7 +336,7 @@ defmodule MingaEditor.Commands.Search do
         all_matches
       else
         all_matches
-        |> Enum.group_by(fn %Minga.Editing.Search.Match{line: line} -> line end)
+        |> Enum.group_by(fn %Match{line: line} -> line end)
         |> Enum.flat_map(fn {_line, line_matches} -> [hd(line_matches)] end)
         |> Enum.sort()
       end
@@ -352,16 +348,10 @@ defmodule MingaEditor.Commands.Search do
           "Pattern not found: #{pattern}"
         )
 
-      _ ->
-        %Minga.Editing.Search.Match{line: first_line, col: first_col} = hd(matches)
+      [%Match{line: first_line, col: first_col} | _] ->
         Buffer.move_to(buf, {first_line, first_col})
 
-        ms = %Minga.Mode.SubstituteConfirmState{
-          matches: matches,
-          pattern: pattern,
-          replacement: replacement,
-          original_content: content
-        }
+        ms = SubstituteConfirmState.new(matches, pattern, replacement, content)
 
         state = put_in_search(state, :last_pattern, pattern)
 

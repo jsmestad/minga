@@ -562,6 +562,8 @@ defmodule Minga.Buffer.ProcessTest do
     test "read-only buffers reject mutating APIs except append" do
       cases = [
         {"insert_char", "hello", fn pid -> BufferProcess.insert_char(pid, "x") end},
+        {"apply_edit", "hello", fn pid -> BufferProcess.apply_edit(pid, 0, 0, 0, 0, "x") end},
+        {"replace_lines", "hello", fn pid -> BufferProcess.replace_lines(pid, 0, 0, "x") end},
         {"delete_before", "hello",
          fn pid ->
            BufferProcess.move(pid, :right)

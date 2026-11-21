@@ -79,6 +79,54 @@ defmodule Minga.Buffer.LinesTest do
     end
   end
 
+  describe "bounded_contents/4" do
+    test "shifts the following endpoint but not the edited line's start" do
+      document =
+        "ab\ncd\nef" |> Document.new() |> Document.move_to({1, 1}) |> Document.insert_text("é")
+
+      assert {:pending, _starts, 1, 2} = document.line_offsets
+      assert Lines.bounded_contents(document, 1, 1, 10) == {"céd", 1, 3, true}
+      assert Lines.bounded_contents(document, 2, 1, 10) == {"ef", 1, 3, true}
+    end
+
+    test "keeps the final empty line and its preceding newline when selected" do
+      document = Document.new("a\n")
+
+      assert Lines.bounded_contents(document, 0, 2, 2) == {"a\n", 2, 2, true}
+      assert Lines.bounded_contents(document, 0, 1, 2) == {"a", 1, 2, true}
+      assert Lines.bounded_contents(document, 1, 1, 0) == {"", 1, 2, true}
+      assert Lines.bounded_contents(document, 2, 1, 2) == {"", 0, 2, true}
+      assert Lines.bounded_contents(document, 0, 0, 2) == {"", 0, 2, true}
+    end
+
+    test "caps raw bytes without reducing the selected-line count" do
+      document = Document.new("é\nx")
+
+      assert Lines.bounded_contents(document, 0, 2, 1) == {<<0xC3>>, 2, 2, false}
+    end
+  end
+
+  property "bounded_contents/4 matches a byte prefix of sliced lines in every index state" do
+    check all(
+            {document, state} <- Generators.indexed_document(),
+            lines = document |> Document.content() |> String.split("\n"),
+            total = length(lines),
+            first_line <- integer(0..(total + 1)),
+            count <- integer(0..(total + 1)),
+            selected = Enum.slice(lines, first_line, count),
+            joined = Enum.join(selected, "\n"),
+            size = byte_size(joined),
+            max_bytes <- integer(0..(size + 1))
+          ) do
+      assert index_state(document) == state
+
+      prefix = binary_part(joined, 0, min(size, max_bytes))
+
+      assert Lines.bounded_contents(document, first_line, count, max_bytes) ==
+               {prefix, length(selected), total, size <= max_bytes}
+    end
+  end
+
   describe "containing/2" do
     test "an empty document has one line starting at zero" do
       document = Document.new("")

@@ -646,44 +646,31 @@ defmodule Minga.Editing.TextObject do
     end
   end
 
+  # Token positions are ordered by line and byte column; the last token is the fallback.
   @spec sentence_cursor_index(sentence_tokens(), position()) :: non_neg_integer() | nil
+  defp sentence_cursor_index({}, _position), do: nil
+
   defp sentence_cursor_index(tokens, position) do
-    list = Tuple.to_list(tokens)
-    exact = Enum.find_index(list, fn {_g, token_pos} -> token_pos == position end)
+    sentence_cursor_index(tokens, position, 0, tuple_size(tokens) - 1)
+  end
 
-    case exact do
-      nil -> nearest_sentence_cursor_index(list, position)
-      idx -> idx
+  @spec sentence_cursor_index(
+          sentence_tokens(),
+          position(),
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: non_neg_integer()
+  defp sentence_cursor_index(_tokens, _position, last_idx, last_idx), do: last_idx
+
+  defp sentence_cursor_index(tokens, position, idx, last_idx) do
+    {_char, token_pos} = elem(tokens, idx)
+
+    if token_pos >= position do
+      idx
+    else
+      sentence_cursor_index(tokens, position, idx + 1, last_idx)
     end
   end
-
-  @spec nearest_sentence_cursor_index([{String.t(), position()}], position()) ::
-          non_neg_integer() | nil
-  defp nearest_sentence_cursor_index(tokens, position) do
-    after_idx =
-      Enum.find_index(tokens, fn {_g, token_pos} ->
-        compare_position(token_pos, position) == :gt
-      end)
-
-    case after_idx do
-      nil -> index_before_position(tokens, position)
-      idx -> idx
-    end
-  end
-
-  @spec index_before_position([{String.t(), position()}], position()) :: non_neg_integer() | nil
-  defp index_before_position(tokens, position) do
-    tokens
-    |> Enum.with_index()
-    |> Enum.filter(fn {{_g, token_pos}, _idx} -> compare_position(token_pos, position) == :lt end)
-    |> Enum.at(-1)
-    |> index_from_position_result()
-  end
-
-  @spec index_from_position_result({{String.t(), position()}, non_neg_integer()} | nil) ::
-          non_neg_integer() | nil
-  defp index_from_position_result(nil), do: nil
-  defp index_from_position_result({_token, idx}), do: idx
 
   @spec sentence_spans(sentence_tokens()) :: [sentence_span()]
   defp sentence_spans(tokens) do
@@ -906,12 +893,6 @@ defmodule Minga.Editing.TextObject do
   end
 
   defp range_from_token_indices(_tokens, _start_idx, _end_idx), do: nil
-  @spec compare_position(position(), position()) :: :lt | :eq | :gt
-  defp compare_position(pos, pos), do: :eq
-  defp compare_position({line_a, _col_a}, {line_b, _col_b}) when line_a < line_b, do: :lt
-  defp compare_position({line_a, _col_a}, {line_b, _col_b}) when line_a > line_b, do: :gt
-  defp compare_position({line, col_a}, {line, col_b}) when col_a < col_b, do: :lt
-  defp compare_position(_pos_a, _pos_b), do: :gt
 
   @spec sentence_terminal?(String.t()) :: boolean()
   defp sentence_terminal?(char), do: char in [".", "!", "?"]
