@@ -13,7 +13,6 @@ defmodule Minga.Editing.Search.Index do
   alias Minga.Editing.Search
   alias Minga.Editing.Search.Match
 
-  @type option :: {:case_sensitive, boolean()} | {:whole_word, boolean()} | {:regex, boolean()}
   @type line_matches :: tuple()
   @type tree_node ::
           nil
@@ -22,6 +21,10 @@ defmodule Minga.Editing.Search.Index do
 
   # A right-spine node awaiting its right subtree during bulk construction.
   @typep open_node :: {non_neg_integer(), line_matches(), non_neg_integer(), tree_node()}
+  @typep line_builder :: {:spine, [open_node()]} | {:tree, tree_node()}
+  @typep line_scan ::
+           {line_builder(), non_neg_integer(), pos_integer(), non_neg_integer(),
+            non_neg_integer()}
 
   @type metrics :: %{
           scanned_lines: non_neg_integer(),
@@ -31,12 +34,11 @@ defmodule Minga.Editing.Search.Index do
           suffix_shifts: non_neg_integer()
         }
 
-  @enforce_keys [:query, :options, :root, :next_priority, :metrics]
-  defstruct [:query, :options, :root, :next_priority, :metrics]
+  @enforce_keys [:matcher, :root, :next_priority, :metrics]
+  defstruct @enforce_keys
 
   @type t :: %__MODULE__{
-          query: String.t(),
-          options: [option()],
+          matcher: Search.matcher(),
           root: tree_node(),
           next_priority: pos_integer(),
           metrics: metrics()
@@ -45,14 +47,13 @@ defmodule Minga.Editing.Search.Index do
   @doc "Builds an index by scanning each supplied line exactly once."
   @spec build([String.t()], String.t(), Search.search_opts()) :: t()
   def build(lines, query, options \\ []) when is_list(lines) and is_binary(query) do
-    normalized_options = normalize_options(options)
+    matcher = if query == "", do: "", else: Search.compile_matcher(query, options)
 
     {root, next_priority, match_count, byte_count} =
-      index_lines(nil, 1, lines, 0, query, normalized_options)
+      index_lines(nil, 1, lines, 0, matcher)
 
     %__MODULE__{
-      query: query,
-      options: normalized_options,
+      matcher: matcher,
       root: root,
       next_priority: next_priority,
       metrics: %{
@@ -70,20 +71,21 @@ defmodule Minga.Editing.Search.Index do
   def apply_edits(%__MODULE__{} = index, deltas, first_line, lines)
       when is_list(deltas) and is_integer(first_line) and first_line >= 0 and is_list(lines) do
     shifted_root = Enum.reduce(deltas, index.root, &apply_delta/2)
-    last_line = first_line + max(length(lines) - 1, 0)
+    line_count = length(lines)
+    last_line = first_line + max(line_count - 1, 0)
 
     root =
       if lines == [], do: shifted_root, else: remove_range(shifted_root, first_line, last_line)
 
     {root, next_priority, match_count, byte_count} =
-      index_lines(root, index.next_priority, lines, first_line, index.query, index.options)
+      index_lines(root, index.next_priority, lines, first_line, index.matcher)
 
     metrics = %{
       index.metrics
-      | scanned_lines: index.metrics.scanned_lines + length(lines),
+      | scanned_lines: index.metrics.scanned_lines + line_count,
         scanned_bytes: index.metrics.scanned_bytes + byte_count,
         allocated_matches: index.metrics.allocated_matches + match_count,
-        updated_lines: index.metrics.updated_lines + length(lines),
+        updated_lines: index.metrics.updated_lines + line_count,
         suffix_shifts: index.metrics.suffix_shifts + Enum.count(deltas, &line_shift?/1)
     }
 
@@ -146,70 +148,56 @@ defmodule Minga.Editing.Search.Index do
   @spec metrics(t()) :: metrics()
   def metrics(%__MODULE__{metrics: metrics}), do: metrics
 
-  @spec normalize_options(Search.search_opts()) :: [option()]
-  defp normalize_options(options) do
-    [
-      case_sensitive: Keyword.get(options, :case_sensitive, true),
-      whole_word: Keyword.get(options, :whole_word, false),
-      regex: Keyword.get(options, :regex, false)
-    ]
-  end
-
   @spec index_lines(
           tree_node(),
           pos_integer(),
           [String.t()],
           non_neg_integer(),
-          String.t(),
-          Search.search_opts()
+          Search.matcher()
         ) :: {tree_node(), pos_integer(), non_neg_integer(), non_neg_integer()}
-  defp index_lines(root, priority, lines, first_line, query, options) do
-    matches = Search.find_all_in_range(lines, query, first_line, options)
-    line_groups = Enum.chunk_by(matches, & &1.line)
-    {root, next_priority} = add_line_groups(root, priority, line_groups)
-    scanned_bytes = Enum.reduce(lines, 0, &(byte_size(&1) + &2))
-    {root, next_priority, length(matches), scanned_bytes}
+  defp index_lines(root, priority, lines, first_line, matcher) do
+    builder = if is_nil(root), do: {:spine, []}, else: {:tree, root}
+
+    {builder, _line, priority, count, bytes} =
+      Enum.reduce(lines, {builder, first_line, priority, 0, 0}, fn text, scan ->
+        scan_index_line(scan, text, matcher)
+      end)
+
+    {finish_lines(builder), priority, count, bytes}
   end
 
-  # Line groups arrive sorted by line, and each consumes the next priority
-  # counter. An empty tree is built in one linear pass over a right-spine stack;
-  # a populated tree takes one persistent insertion per group. Both paths yield
-  # the same treap because sorted insertion only ever descends the right spine.
-  @spec add_line_groups(tree_node(), pos_integer(), [[Match.t()]]) ::
-          {tree_node(), pos_integer()}
-  defp add_line_groups(nil, priority, line_groups), do: build_spine(line_groups, priority, [])
+  @spec scan_index_line(line_scan(), String.t(), Search.matcher()) :: line_scan()
+  defp scan_index_line({builder, line, priority, count, bytes}, text, matcher) do
+    bytes = bytes + byte_size(text)
 
-  defp add_line_groups(root, priority, line_groups) do
-    Enum.reduce(line_groups, {root, priority}, fn line_matches, {tree, next_priority} ->
-      {line, compact_matches} = compact_line(line_matches)
-      tree = insert(tree, leaf(line, compact_matches, mixed_priority(next_priority)))
-      {tree, next_priority + 1}
-    end)
+    case Search.reduce_line_matches(text, matcher, [], fn col, length, spans ->
+           [{col, length} | spans]
+         end) do
+      [] ->
+        {builder, line + 1, priority, count, bytes}
+
+      spans ->
+        matches = spans |> Enum.reverse() |> List.to_tuple()
+        builder = add_indexed_line(builder, line, matches, mixed_priority(priority))
+        {builder, line + 1, priority + 1, count + tuple_size(matches), bytes}
+    end
   end
 
-  @spec compact_line([Match.t(), ...]) :: {non_neg_integer(), line_matches()}
-  defp compact_line([%Match{line: line} | _rest] = line_matches) do
-    compact_matches =
-      line_matches
-      |> Enum.map(fn %Match{col: col, length: length} -> {col, length} end)
-      |> List.to_tuple()
-
-    {line, compact_matches}
+  # Sorted lines build an empty treap in one pass. A populated tree still takes persistent inserts.
+  @spec add_indexed_line(line_builder(), non_neg_integer(), line_matches(), non_neg_integer()) ::
+          line_builder()
+  defp add_indexed_line({:spine, spine}, line, matches, priority) do
+    {spine, left} = pop_greater(spine, priority, nil)
+    {:spine, [{line, matches, priority, left} | spine]}
   end
 
-  # The spine holds open right-spine nodes as `{line, matches, priority, left}`,
-  # deepest first. Their right subtrees are only known once a lower-priority
-  # line arrives or the input ends, so each node is finalized exactly once.
-  @spec build_spine([[Match.t()]], pos_integer(), [open_node()]) ::
-          {tree_node(), pos_integer()}
-  defp build_spine([], priority, spine), do: {close_spine(spine, nil), priority}
-
-  defp build_spine([line_matches | rest], priority, spine) do
-    {line, compact_matches} = compact_line(line_matches)
-    node_priority = mixed_priority(priority)
-    {spine, left} = pop_greater(spine, node_priority, nil)
-    build_spine(rest, priority + 1, [{line, compact_matches, node_priority, left} | spine])
+  defp add_indexed_line({:tree, tree}, line, matches, priority) do
+    {:tree, insert(tree, leaf(line, matches, priority))}
   end
+
+  @spec finish_lines(line_builder()) :: tree_node()
+  defp finish_lines({:spine, spine}), do: close_spine(spine, nil)
+  defp finish_lines({:tree, tree}), do: tree
 
   # Strictly greater: an equal-priority older line stays above the newer one,
   # matching `insert/2`, which only rotates a node up past a greater priority.
