@@ -449,7 +449,10 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
                    message_ids: [{7, {:assistant, "stale answer"}}]
                  )
 
-               Panel.cache_transcript_display(panel, display, [{:styled_lines, [[{"stale", 0, 0, 0}]]}],
+               Panel.cache_transcript_display(
+                 panel,
+                 display,
+                 [{:styled_lines, [[{"stale", 0, 0, 0}]]}],
                  provenance_jump: MingaEditor.Agent.ProvenanceJump.request(7),
                  styled_fingerprint: TranscriptProjection.styled_cache_fingerprint(%{})
                )
