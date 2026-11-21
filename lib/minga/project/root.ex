@@ -65,10 +65,6 @@ defmodule Minga.Project.Root do
          path: canonical,
          broad_root_confirmed?: confirmed?
        }}
-    else
-      {:error, :invalid_broad_root_confirmation} = error -> error
-      {:error, :broad_root_confirmation_required} = error -> error
-      {:error, _reason} -> {:error, :not_a_directory}
     end
   end
 
@@ -80,11 +76,6 @@ defmodule Minga.Project.Root do
          :ok <- unchanged_root(path, canonical),
          :ok <- authorize_broad_root(canonical, valid_confirmation?) do
       {:ok, canonical}
-    else
-      {:error, :invalid_broad_root_confirmation} = error -> error
-      {:error, :root_changed} = error -> error
-      {:error, :broad_root_confirmation_required} = error -> error
-      {:error, _reason} -> {:error, :not_a_directory}
     end
   end
 
@@ -127,18 +118,20 @@ defmodule Minga.Project.Root do
     end
   end
 
-  @spec canonical_directory(String.t()) :: {:ok, String.t()} | {:error, canonical_error()}
+  @spec canonical_directory(String.t()) :: {:ok, String.t()} | {:error, :not_a_directory}
   defp canonical_directory(path) do
-    case canonical_path(path) do
-      {:ok, canonical} -> existing_directory(canonical, File.dir?(canonical))
-      {:error, reason} -> {:error, reason}
+    with {:ok, canonical} <- canonical_path(path),
+         :ok <- require_directory(canonical) do
+      {:ok, canonical}
+    else
+      {:error, _reason} -> {:error, :not_a_directory}
     end
   end
 
-  @spec existing_directory(String.t(), boolean()) ::
-          {:ok, String.t()} | {:error, :enotdir}
-  defp existing_directory(path, true), do: {:ok, path}
-  defp existing_directory(_path, false), do: {:error, :enotdir}
+  @spec require_directory(String.t()) :: :ok | {:error, :enotdir}
+  defp require_directory(path) do
+    if File.dir?(path), do: :ok, else: {:error, :enotdir}
+  end
 
   @spec require_relative_path(String.t()) :: :ok | {:error, :absolute_path}
   defp require_relative_path(path) do

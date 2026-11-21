@@ -200,6 +200,36 @@ defmodule Minga.Project.FileFindTest do
     end
   end
 
+  describe "Root.directory/2 and Root.inventory_path/1" do
+    @tag :tmp_dir
+    test "reject a directory path that now names a file or is missing", %{tmp_dir: tmp_dir} do
+      workspace = Path.join(tmp_dir, "workspace")
+      File.mkdir!(workspace)
+      root = directory_root!(workspace)
+
+      File.rmdir!(workspace)
+      File.write!(workspace, "")
+      assert Root.directory(workspace) == {:error, :not_a_directory}
+      assert Root.inventory_path(root) == {:error, :not_a_directory}
+
+      File.rm!(workspace)
+      assert Root.directory(workspace) == {:error, :not_a_directory}
+      assert Root.inventory_path(root) == {:error, :not_a_directory}
+      assert Root.canonical_path(workspace) == {:error, :enoent}
+    end
+
+    @tag :tmp_dir
+    test "reject invalid confirmation before checking the directory", %{tmp_dir: tmp_dir} do
+      missing = Path.join(tmp_dir, "missing")
+      invalid_root = %Root{kind: :directory, path: missing, broad_root_confirmed?: nil}
+
+      assert Root.directory(missing, broad_root_confirmed: nil) ==
+               {:error, :invalid_broad_root_confirmation}
+
+      assert Root.inventory_path(invalid_root) == {:error, :invalid_broad_root_confirmation}
+    end
+  end
+
   describe "Root.resolve_file/2" do
     setup do
       tmp_dir = make_tmp_dir("minga_root_resolve_file")
@@ -232,13 +262,15 @@ defmodule Minga.Project.FileFindTest do
       assert Root.resolve_file(root, "inside-link.txt") == {:ok, canonical_inside_path}
     end
 
-    test "rejects a symlink loop", %{tmp_dir: tmp_dir} do
+    test "keeps symlink-loop errors for file paths", %{tmp_dir: tmp_dir, root: root} do
       first = Path.join(tmp_dir, "first-link")
       second = Path.join(tmp_dir, "second-link")
       File.ln_s!(second, first)
       File.ln_s!(first, second)
 
       assert Root.canonical_path(first) == {:error, :too_many_symlinks}
+      assert Root.resolve_file(root, "first-link") == {:error, :too_many_symlinks}
+      assert Root.directory(first) == {:error, :not_a_directory}
     end
 
     test "returns the filesystem error when the target is missing", %{root: root} do
@@ -295,24 +327,21 @@ defmodule Minga.Project.FileFindTest do
                {:error, :not_a_directory_root}
     end
 
-    test "rejects a root whose canonical target changed after authorization", %{
+    test "rejects a changed root before broad-root authorization or file path checks", %{
       tmp_dir: tmp_dir,
       root: root
     } do
       original_workspace = Path.join(Path.dirname(tmp_dir), "original-#{Path.basename(tmp_dir)}")
-      replacement = Path.join(Path.dirname(tmp_dir), "replacement-#{Path.basename(tmp_dir)}")
 
       File.rename!(tmp_dir, original_workspace)
-      File.mkdir_p!(replacement)
-      File.ln_s!(replacement, tmp_dir)
+      File.ln_s!("/", tmp_dir)
 
       on_exit(fn ->
         File.rm(tmp_dir)
         File.rm_rf!(original_workspace)
-        File.rm_rf!(replacement)
       end)
 
-      assert Root.resolve_file(root, "inside.txt") == {:error, :root_changed}
+      assert Root.resolve_file(root, "/inside.txt") == {:error, :root_changed}
     end
   end
 

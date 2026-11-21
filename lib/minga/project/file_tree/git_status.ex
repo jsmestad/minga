@@ -92,25 +92,19 @@ defmodule Minga.Project.FileTree.GitStatus do
     expanded_root = Path.expand(root_path)
 
     Enum.reduce(file_statuses, file_statuses, fn {file_path, status}, acc ->
-      file_path
-      |> ancestor_dirs(expanded_root)
-      |> Enum.reduce(acc, fn dir, inner_acc ->
-        merge_status(inner_acc, dir, status)
-      end)
+      merge_ancestor_statuses(acc, Path.dirname(file_path), expanded_root, status)
     end)
   end
 
-  @spec ancestor_dirs(String.t(), String.t()) :: [String.t()]
-  defp ancestor_dirs(path, root) do
-    do_ancestor_dirs(Path.dirname(path), root, [])
-  end
+  @spec merge_ancestor_statuses(status_map(), String.t(), String.t(), file_status()) ::
+          status_map()
+  defp merge_ancestor_statuses(acc, dir, root, _status) when dir == root, do: acc
 
-  @spec do_ancestor_dirs(String.t(), String.t(), [String.t()]) :: [String.t()]
-  defp do_ancestor_dirs(dir, root, acc) when dir == root, do: acc
-
-  defp do_ancestor_dirs(dir, root, acc) do
+  defp merge_ancestor_statuses(acc, dir, root, status) do
     if path_under_root?(dir, root) do
-      do_ancestor_dirs(Path.dirname(dir), root, [dir | acc])
+      acc
+      |> merge_status(dir, status)
+      |> merge_ancestor_statuses(Path.dirname(dir), root, status)
     else
       acc
     end
