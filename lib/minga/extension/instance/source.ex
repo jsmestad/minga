@@ -320,8 +320,7 @@ defmodule Minga.Extension.Instance.Source do
   end
 
   @spec source_files(String.t()) :: [String.t()]
-  defp source_files(expanded),
-    do: expanded |> Path.join("**/*.ex") |> Path.wildcard() |> Enum.sort()
+  defp source_files(expanded), do: Minga.Extension.SourceFiles.list(expanded)
 
   @spec report_staged_source_change(atom(), String.t(), [String.t()], term(), keyword()) ::
           boolean()
