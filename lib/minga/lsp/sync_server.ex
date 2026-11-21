@@ -175,7 +175,7 @@ defmodule Minga.LSP.SyncServer do
     state = flush_did_change(state, buffer)
 
     reply =
-      with true <- client in clients_for_buffer(buffer),
+      with :ok <- require_attached_client(buffer, client),
            path when is_binary(path) <- safe_file_path(buffer),
            uri = path_to_uri(path),
            {content, ^expected_revision} <- safe_content_with_version(buffer) do
@@ -190,7 +190,7 @@ defmodule Minga.LSP.SyncServer do
           response_to
         )
       else
-        false -> {:error, :client_replaced}
+        {:error, :client_replaced} = error -> error
         nil -> {:error, :unknown_document}
         :stale -> {:error, :stale_document}
         {_content, _revision} -> {:error, :stale_document}
@@ -199,6 +199,11 @@ defmodule Minga.LSP.SyncServer do
     {:reply, reply, state}
   catch
     :exit, _ -> {:reply, {:error, :client_unavailable}, state}
+  end
+
+  @spec require_attached_client(pid(), pid()) :: :ok | {:error, :client_replaced}
+  defp require_attached_client(buffer, client) do
+    if client in clients_for_buffer(buffer), do: :ok, else: {:error, :client_replaced}
   end
 
   @impl true
