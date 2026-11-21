@@ -85,8 +85,8 @@ defmodule MingaEditor.Commands.EditTimeline do
     end)
   end
 
-  def execute(state, :timeline_next_file), do: navigate_file(state, 1)
-  def execute(state, :timeline_prev_file), do: navigate_file(state, -1)
+  def execute(state, :timeline_next_file), do: navigate_file(state, :next)
+  def execute(state, :timeline_prev_file), do: navigate_file(state, :previous)
 
   def execute(state, :timeline_browse_files),
     do: MingaEditor.UI.Picker.AgentChangesSource.open(state)
@@ -133,31 +133,14 @@ defmodule MingaEditor.Commands.EditTimeline do
     end
   end
 
-  @spec navigate_file(EditorState.t(), 1 | -1) :: EditorState.t()
+  @spec navigate_file(EditorState.t(), :next | :previous) :: EditorState.t()
   defp navigate_file(state, direction) do
-    timeline = state.workspace.agent_ui.view.edit_timeline
-    paths = timeline |> EditTimeline.file_summaries() |> Enum.map(& &1.path)
+    view = state.workspace.agent_ui.view
+    selected = Preview.selected_path(view.preview)
 
-    case paths do
-      [] ->
-        NoticeWorkflow.publish(state, "No agent-changed files")
-
-      _ ->
-        current_path = Preview.selected_path(state.workspace.agent_ui.view.preview)
-        review_file(state, next_path(paths, current_path, direction))
-    end
-  end
-
-  @spec next_path([String.t()], String.t() | nil, 1 | -1) :: String.t()
-  defp next_path(paths, nil, 1), do: hd(paths)
-  defp next_path(paths, nil, -1), do: Enum.at(paths, -1)
-
-  defp next_path(paths, current_path, direction) do
-    count = length(paths)
-
-    case Enum.find_index(paths, &(&1 == current_path)) do
-      nil -> next_path(paths, nil, direction)
-      index -> Enum.at(paths, rem(index + direction + count, count))
+    case EditTimeline.adjacent_path(view.edit_timeline, selected, direction) do
+      nil -> NoticeWorkflow.publish(state, "No agent-changed files")
+      path -> review_file(state, path)
     end
   end
 

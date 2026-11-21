@@ -326,6 +326,68 @@ defmodule MingaEditor.Agent.EditTimelineTest do
     end
   end
 
+  describe "adjacent_path/3" do
+    test "wraps in first-seen order even if a file returns to its baseline" do
+      timeline =
+        EditTimeline.new()
+        |> EditTimeline.record_edit(file_change("b", "tc1", "before", "after"))
+        |> EditTimeline.record_edit(file_change("a", "tc2", "before", "after"))
+        |> EditTimeline.record_edit(file_change("c", "tc3", "before", "after"))
+        |> EditTimeline.record_edit(file_change("b", "tc4", "after", "before"))
+        |> EditTimeline.reproject("unrecorded", ["before"], ["after"])
+
+      for {selected, next, previous} <- [
+            {"b", "a", "c"},
+            {"a", "c", "b"},
+            {"c", "b", "a"},
+            {nil, "b", "c"},
+            {"unrecorded", "b", "c"}
+          ] do
+        assert EditTimeline.adjacent_path(timeline, selected, :next) == next
+        assert EditTimeline.adjacent_path(timeline, selected, :previous) == previous
+      end
+    end
+
+    test "cycles first-seen live files and then sorted recovered-only files without duplicates" do
+      timeline =
+        EditTimeline.new()
+        |> EditTimeline.recover_files(%{"a" => 2, "d" => 1, "z" => 3})
+        |> EditTimeline.record_edit(file_change("z", "tc1", "before", "after"))
+        |> EditTimeline.record_edit(file_change("b", "tc2", "before", "after"))
+
+      for {selected, next, previous} <- [
+            {nil, "z", "d"},
+            {"z", "b", "d"},
+            {"b", "a", "z"},
+            {"a", "d", "b"},
+            {"d", "z", "a"},
+            {"stale", "z", "d"}
+          ] do
+        assert EditTimeline.adjacent_path(timeline, selected, :next) == next
+        assert EditTimeline.adjacent_path(timeline, selected, :previous) == previous
+      end
+    end
+
+    test "cycles recovered files when there are no live entries" do
+      timeline = EditTimeline.recover_files(EditTimeline.new(), %{"d" => 1, "a" => 2})
+
+      assert EditTimeline.adjacent_path(timeline, nil, :next) == "a"
+      assert EditTimeline.adjacent_path(timeline, nil, :previous) == "d"
+      assert EditTimeline.adjacent_path(timeline, "d", :next) == "a"
+      assert EditTimeline.adjacent_path(timeline, "a", :previous) == "d"
+    end
+
+    test "wraps to the same file until the timeline is reset" do
+      timeline = EditTimeline.record_edit(EditTimeline.new(), file_change("a", "tc1", "0", "1"))
+      cleared = EditTimeline.reset(timeline)
+
+      for direction <- [:next, :previous] do
+        assert EditTimeline.adjacent_path(timeline, "a", direction) == "a"
+        assert EditTimeline.adjacent_path(cleared, "a", direction) == nil
+      end
+    end
+  end
+
   describe "file_summaries/1" do
     test "offers Review for a single changed file" do
       timeline =
