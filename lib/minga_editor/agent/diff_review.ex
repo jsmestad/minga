@@ -611,7 +611,14 @@ defmodule MingaEditor.Agent.DiffReview do
         ) :: [diff_line()]
   defp do_build_display([], _cursor, _source, _ctx, _idx, acc), do: acc
 
-  defp do_build_display([hunk | rest], {tail, offset}, {lines, file_length} = source, ctx, idx, acc) do
+  defp do_build_display(
+         [hunk | rest],
+         {tail, offset},
+         {lines, file_length} = source,
+         ctx,
+         idx,
+         acc
+       ) do
     {added, removed} = hunk_counts(hunk)
 
     header =
@@ -687,7 +694,8 @@ defmodule MingaEditor.Agent.DiffReview do
   end
 
   defp prepend_changed(lines, %{type: :deleted} = hunk, idx, acc) do
-    {Enum.drop(lines, max(hunk.count, 0)), prepend_removed(hunk.old_lines, hunk.old_start, idx, acc)}
+    {Enum.drop(lines, max(hunk.count, 0)),
+     prepend_removed(hunk.old_lines, hunk.old_start, idx, acc)}
   end
 
   defp prepend_changed(lines, %{type: :modified} = hunk, idx, acc) do
