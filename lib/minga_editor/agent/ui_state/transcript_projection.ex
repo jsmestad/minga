@@ -18,10 +18,9 @@ defmodule MingaEditor.Agent.UIState.TranscriptProjection do
           first_run: first_run() | nil
         }
 
-  @type rendered_message :: %{
-          styled_lines: MingaEditor.Agent.MarkdownHighlight.styled_lines() | nil,
-          markdown_blocks: [Minga.RenderModel.UI.AgentChat.MarkdownBlock.t()] | nil
-        }
+  @type rendered_message ::
+          {:markdown_blocks, nonempty_list(Minga.RenderModel.UI.AgentChat.MarkdownBlock.t())}
+          | {:styled_lines, MingaEditor.Agent.MarkdownHighlight.styled_lines()}
 
   @type styled_cache :: [rendered_message() | nil] | nil
   @type first_run :: {[term()], keyword(), Transcript.empty_state()}

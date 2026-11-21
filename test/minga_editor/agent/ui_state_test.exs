@@ -331,7 +331,7 @@ defmodule MingaEditor.Agent.UIStateTest do
     test "cache_display installs correlated fields atomically" do
       old = TranscriptProjection.new()
       display = Transcript.display([{:assistant, "answer"}])
-      styled = [%{styled_lines: [[{"answer", 1, 0, 0}]], markdown_blocks: []}]
+      styled = [{:styled_lines, [[{"answer", 1, 0, 0}]]}]
       jump = MingaEditor.Agent.ProvenanceJump.request(1)
 
       projection =
@@ -356,8 +356,10 @@ defmodule MingaEditor.Agent.UIStateTest do
 
       projection =
         TranscriptProjection.new()
-        |> TranscriptProjection.cache_display(display, [:styled], styled_fingerprint: 1)
-        |> TranscriptProjection.cache_display(display, [:restyled])
+        |> TranscriptProjection.cache_display(display, [{:styled_lines, [[{"answer", 1, 0, 0}]]}],
+          styled_fingerprint: 1
+        )
+        |> TranscriptProjection.cache_display(display, [{:styled_lines, [[{"answer", 2, 0, 0}]]}])
 
       assert projection.styled_fingerprint == nil
       assert TranscriptProjection.styled_for(projection, 1) == :stale

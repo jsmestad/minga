@@ -272,27 +272,17 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
 
   @spec maybe_style_message({{pos_integer(), term()}, term()}, approval() | nil) ::
           {pos_integer(), term()}
-  defp maybe_style_message({{id, {:assistant, _text} = msg}, nil}, _pending_approval),
-    do: {id, msg}
-
   defp maybe_style_message(
-         {{id, {:assistant, _text}}, %{markdown_blocks: blocks}},
+         {{id, {:assistant, _text}}, {:markdown_blocks, blocks}},
          _pending_approval
-       )
-       when is_list(blocks) and blocks != [] do
+       ) do
     {id, {:assistant_markdown, blocks}}
   end
 
   defp maybe_style_message(
-         {{id, {:assistant, _text}}, %{styled_lines: styled_lines}},
+         {{id, {:assistant, _text}}, {:styled_lines, styled_lines}},
          _pending_approval
-       )
-       when is_list(styled_lines) do
-    {id, {:styled_assistant, styled_lines}}
-  end
-
-  defp maybe_style_message({{id, {:assistant, _text}}, styled_lines}, _pending_approval)
-       when is_list(styled_lines) do
+       ) do
     {id, {:styled_assistant, styled_lines}}
   end
 
@@ -313,12 +303,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
 
   @spec maybe_styled_tool_call(pos_integer(), ToolCall.t(), term(), term()) ::
           {pos_integer(), term()}
-  defp maybe_styled_tool_call(id, tc, %{styled_lines: styled_lines}, _fallback)
-       when is_list(styled_lines) do
-    {id, {:styled_tool_call, tc, styled_lines}}
-  end
-
-  defp maybe_styled_tool_call(id, tc, styled_lines, _fallback) when is_list(styled_lines) do
+  defp maybe_styled_tool_call(id, tc, {:styled_lines, styled_lines}, _fallback) do
     {id, {:styled_tool_call, tc, styled_lines}}
   end
 

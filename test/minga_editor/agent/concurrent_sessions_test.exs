@@ -449,7 +449,10 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
                    message_ids: [{7, {:assistant, "stale answer"}}]
                  )
 
-               Panel.cache_transcript_display(panel, display, [[[{"stale", 0, 0, 0}]]],
+               Panel.cache_transcript_display(
+                 panel,
+                 display,
+                 [{:styled_lines, [[{"stale", 0, 0, 0}]]}],
                  provenance_jump: MingaEditor.Agent.ProvenanceJump.request(7),
                  styled_fingerprint: TranscriptProjection.styled_cache_fingerprint(%{})
                )
@@ -470,7 +473,7 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
 
     test "update_styled_cache reuses unchanged displayed message styles" do
       message = {:assistant, "unchanged answer"}
-      cached = [[{"cached styled answer", 0x98BE65, 0x21242B, 0x10}]]
+      cached = [{:styled_lines, [[{"cached styled answer", 0x98BE65, 0x21242B, 0x10}]]}]
 
       {:ok, session} = StubServer.start_link(messages: [message])
 
@@ -502,7 +505,7 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
 
     test "update_styled_cache invalidates stale styles when the theme syntax changes" do
       message = {:assistant, "plain answer"}
-      cached = [[{"plain answer", 0xBBC2CF, 0, 0}]]
+      cached = [{:styled_lines, [[{"plain answer", 0xBBC2CF, 0, 0}]]}]
 
       {:ok, session} = StubServer.start_link(messages: [message])
 
@@ -532,11 +535,8 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
 
       updated = AgentLifecycle.update_styled_cache(state)
 
-      assert [%{styled_lines: [[{"plain answer", fg, 0, 0}]], markdown_blocks: [block]}] =
+      assert [{:markdown_blocks, [%{lines: [[{"plain answer", 0x123456, 0, 0}]]}]}] =
                updated.workspace.agent_ui.panel.transcript.styled
-
-      assert fg == 0x123456
-      assert [[{"plain answer", ^fg, 0, 0}]] = block.lines
     end
 
     test "update_styled_cache restyles unchanged displayed messages when style cache is missing" do
@@ -558,10 +558,18 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
 
       updated = AgentLifecycle.update_styled_cache(state)
 
-      assert [%{styled_lines: [[{"unchanged answer", _fg, 0, 0}]], markdown_blocks: [block]}] =
+      assert [{:markdown_blocks, [%{kind: :paragraph, lines: [[{"unchanged answer", _, 0, 0}]]}]}] =
                updated.workspace.agent_ui.panel.transcript.styled
+    end
 
-      assert block.kind == :paragraph
+    test "an empty assistant message keeps its semantic spacer" do
+      {:ok, session} = StubServer.start_link(messages: [{:assistant, ""}])
+      state = base_state([agent_tab(1, "Agent", session)], 1)
+
+      updated = AgentLifecycle.update_styled_cache(state)
+
+      assert [{:markdown_blocks, [%{kind: :spacer}]}] =
+               updated.workspace.agent_ui.panel.transcript.styled
     end
 
     test "tab workflow orders restored replay modal spinner and incoming session presentation" do
