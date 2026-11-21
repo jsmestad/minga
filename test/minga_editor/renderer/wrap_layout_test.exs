@@ -11,8 +11,11 @@ defmodule MingaEditor.Renderer.WrapLayoutTest do
     options = WrapLayout.options(2, %Monospace{}, %{})
     cursor = {0, 1}
 
-    assert {"abcd", [_, _], 0} =
-             WrapLayout.measure("abcd", 0, decorations, options, false, cursor)
+    assert {"abcd" = composed, [_, _] = rows} =
+             WrapLayout.measure("abcd", 0, decorations, options, false, 0)
+
+    indexed = List.to_tuple(rows)
+    assert WrapLayout.cursor_segment("abcd", composed, indexed, decorations, cursor, 2) == 0
 
     {_id, decorations} =
       Decorations.add_virtual_text(decorations, {0, 1},
@@ -20,7 +23,10 @@ defmodule MingaEditor.Renderer.WrapLayoutTest do
         placement: :inline
       )
 
-    assert {"aXYbcd", [%{text: "aX"}, %{text: "Yb"}, %{text: "cd"}], 1} =
-             WrapLayout.measure("abcd", 0, decorations, options, false, cursor)
+    assert {"aXYbcd" = composed, [%{text: "aX"}, %{text: "Yb"}, %{text: "cd"}] = rows} =
+             WrapLayout.measure("abcd", 0, decorations, options, false, 0)
+
+    indexed = List.to_tuple(rows)
+    assert WrapLayout.cursor_segment("abcd", composed, indexed, decorations, cursor, 2) == 1
   end
 end

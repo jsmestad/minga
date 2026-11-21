@@ -120,8 +120,7 @@ defmodule MingaEditor.Agent.View.PromptRenderer do
   def compute_input_height(input_lines, inner_width) do
     visible =
       input_lines
-      |> WrapMap.compute(inner_width, breakindent: false)
-      |> WrapMap.visual_row_count()
+      |> WrapMap.count_rows(inner_width, breakindent: false)
       |> min(@max_input_lines)
       |> max(1)
 
