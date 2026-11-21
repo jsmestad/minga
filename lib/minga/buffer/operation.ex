@@ -283,40 +283,24 @@ defmodule Minga.Buffer.Operation do
   @doc "Deletes a characterwise range and returns a deletion delta."
   @spec delete_range(Document.t(), Document.position(), Document.position()) :: result()
   def delete_range(%Document{} = doc, from_pos, to_pos) do
-    selection = Selection.characterwise(doc, from_pos, to_pos)
-    %Span{start: start_byte, stop: old_end_byte} = selection.span
-    new_doc = Selection.delete(doc, selection)
-
-    if new_doc == doc do
-      :unchanged
-    else
-      delta =
-        EditDelta.deletion(
-          start_byte,
-          old_end_byte,
-          Position.from_point(doc, start_byte),
-          Position.from_point(doc, old_end_byte)
-        )
-
-      {:edited, new_doc, delta}
-    end
+    delete_selection(doc, Selection.characterwise(doc, from_pos, to_pos))
   end
 
   @doc "Deletes a linewise range and returns a deletion delta."
   @spec delete_lines(Document.t(), non_neg_integer(), non_neg_integer()) :: result()
   def delete_lines(%Document{} = doc, start_line, end_line)
       when start_line >= 0 and end_line >= 0 do
-    selection = Selection.linewise(doc, start_line, end_line)
-    %Span{stop: old_end_byte} = selection.span
-    new_doc = Selection.delete(doc, selection)
+    delete_selection(doc, Selection.linewise(doc, start_line, end_line))
+  end
+
+  @spec delete_selection(Document.t(), Selection.t()) :: result()
+  defp delete_selection(doc, selection) do
+    {new_doc, %Span{start: start_byte, stop: old_end_byte}} =
+      Selection.delete_with_span(doc, selection)
 
     if new_doc == doc do
       :unchanged
     else
-      # Linewise deletion at EOF can also remove the LF before the selection.
-      removed = Document.content_byte_size(doc) - Document.content_byte_size(new_doc)
-      start_byte = old_end_byte - removed
-
       delta =
         EditDelta.deletion(
           start_byte,

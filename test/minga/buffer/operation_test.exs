@@ -193,12 +193,24 @@ defmodule Minga.Buffer.OperationTest do
     end
   end
 
+  describe "delete_range/3" do
+    test "reports an empty deletion when moving the cursor to an empty selection" do
+      doc = Document.new("abc") |> Document.move_to({0, 1})
+
+      assert {:edited, new_doc, delta} = Operation.delete_range(doc, {0, 3}, {0, 3})
+      assert Document.cursor(new_doc) == {0, 3}
+      assert_deletion("abc", new_doc, delta, {3, 3}, {{0, 3}, {0, 3}})
+      assert :unchanged = Operation.delete_range(new_doc, {0, 3}, {0, 3})
+    end
+  end
+
   describe "delete_lines/3" do
     test "reports the removed bytes and old positions independently of the resulting cursor" do
       cases = [
         {"same\nsame\nsame", {1, 2}, "same\nsame", {1, 0}, {5, 10}, {{1, 0}, {2, 0}}},
         {"alpha\nbeta", {1, 2}, "alpha", {0, 0}, {5, 10}, {{0, 5}, {1, 4}}},
         {"a\n", {1, 0}, "a", {0, 0}, {1, 2}, {{0, 1}, {1, 0}}},
+        {"a\nb\n", {1, 0}, "a", {0, 0}, {1, 4}, {{0, 1}, {2, 0}}},
         {"a\r\nb", {1, 0}, "a\r", {0, 0}, {2, 4}, {{0, 2}, {1, 1}}},
         {"élan", {0, 2}, "", {0, 0}, {0, 5}, {{0, 0}, {0, 5}}}
       ]

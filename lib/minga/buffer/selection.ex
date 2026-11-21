@@ -74,12 +74,28 @@ defmodule Minga.Buffer.Selection do
   @doc "Deletes a selection and places the cursor where that selection began."
   @spec delete(Document.t(), t()) :: Document.t()
   def delete(%Document{} = doc, %__MODULE__{} = selection) do
-    text = Document.content(doc)
+    {new_doc, _span} = delete_with_span(doc, selection)
+    new_doc
+  end
 
-    new_text =
-      text |> Span.delete(selection.span) |> trim_deleted_final_line(selection, byte_size(text))
+  @doc """
+  Deletes a selection and returns the updated document and the removed byte span.
 
-    new_text |> Document.new() |> Document.move_to(selection.cursor)
+  A linewise deletion ending at EOF also removes the preceding LF, if present.
+  The returned span uses points in the original document.
+  """
+  @spec delete_with_span(Document.t(), t()) :: {Document.t(), Span.t()}
+  def delete_with_span(%Document{} = doc, %__MODULE__{} = selection) do
+    span = deletion_span(doc, selection)
+
+    new_doc =
+      doc
+      |> Document.content()
+      |> Span.delete(span)
+      |> Document.new()
+      |> Document.move_to(selection.cursor)
+
+    {new_doc, span}
   end
 
   @doc "Clears one line and leaves an empty line behind."
@@ -112,21 +128,15 @@ defmodule Minga.Buffer.Selection do
 
   defp linewise_stop(_line_starts, _line, _total_lines, text_size), do: text_size
 
-  @spec trim_deleted_final_line(String.t(), t(), non_neg_integer()) :: String.t()
-  defp trim_deleted_final_line("", %__MODULE__{kind: :linewise}, _original_size), do: ""
-
-  defp trim_deleted_final_line(
-         text,
-         %__MODULE__{kind: :linewise, span: %Span{stop: stop}},
-         original_size
-       )
-       when stop == original_size do
-    if :binary.last(text) == ?\n do
-      binary_part(text, 0, byte_size(text) - 1)
+  @spec deletion_span(Document.t(), t()) :: Span.t()
+  defp deletion_span(doc, %__MODULE__{kind: :linewise, span: %Span{start: start, stop: stop} = span})
+       when start > 0 do
+    if stop == Document.content_byte_size(doc) and Document.byte_at(doc, start - 1) == ?\n do
+      Span.between(start - 1, stop)
     else
-      text
+      span
     end
   end
 
-  defp trim_deleted_final_line(text, %__MODULE__{}, _original_size), do: text
+  defp deletion_span(_doc, %__MODULE__{span: span}), do: span
 end

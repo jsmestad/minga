@@ -132,6 +132,20 @@ defmodule Minga.Buffer.SelectionTest do
     end
   end
 
+  describe "delete_with_span/2" do
+    test "widens the deletion but not the selection when a trailing LF follows the last selected line" do
+      doc = Document.new("a\nb\n") |> Document.move_to({1, 0})
+      selection = Selection.linewise(doc, 1, 1)
+
+      assert selection.span == Span.between(2, 4)
+      assert Selection.contents(doc, selection) == "b\n"
+
+      assert {updated, %Span{start: 1, stop: 4}} = Selection.delete_with_span(doc, selection)
+      assert Document.content(updated) == "a"
+      assert Document.cursor(updated) == {0, 0}
+    end
+  end
+
   describe "clear_line/2" do
     test "returns the cleared text and leaves an empty line" do
       doc = Document.new("one\ntwo\nthree")
