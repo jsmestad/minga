@@ -61,6 +61,7 @@ defmodule MingaEditor.Handlers.FileEventHandlerTest do
         FileEventHandler.handle(state, {:minga_event, :git_status_changed, event})
 
       panel = SidebarWorkflow.git_status_panel(new_state)
+
       assert %GitStatusPanel{
                repo_state: :normal,
                entry_base_path: "/tmp/repo/apps/myapp",
@@ -103,8 +104,10 @@ defmodule MingaEditor.Handlers.FileEventHandlerTest do
       {new_state, effects} = FileEventHandler.handle(state, event)
 
       assert SidebarWorkflow.active_id(new_state) == "observatory"
+
       assert %GitStatusPanel{entries: [^entry], branch: "", entry_base_path: "/tmp/repo"} =
                SidebarWorkflow.git_status_panel(new_state)
+
       assert %{visible?: true, focused?: false, badge_count: 1} = Sidebar.get(table, "git_status")
       assert Sidebar.get(table, "observatory").focused?
       assert {:render, 16} in effects
