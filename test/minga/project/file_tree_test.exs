@@ -1,6 +1,7 @@
 defmodule Minga.Project.FileTreeTest do
   use ExUnit.Case, async: true
 
+  alias Minga.Config.Options
   alias Minga.Project.FileTree
 
   defp touch(path), do: File.write!(path, "")
@@ -57,17 +58,28 @@ defmodule Minga.Project.FileTreeTest do
     end
 
     @tag :tmp_dir
-    test "ignores directories from the configured file_find_excludes list", %{tmp_dir: tmp_dir} do
-      # "vendor" is in :file_find_excludes but was never in the old hardcoded
-      # @default_ignore, so this proves the tree reads the shared config.
-      assert "vendor" in Minga.Config.get(:file_find_excludes)
-      mkdir(Path.join(tmp_dir, "vendor"))
-      mkdir(Path.join(tmp_dir, "src"))
+    test "each walk uses the current exact exclusions at every depth", %{tmp_dir: tmp_dir} do
+      excluded_child = Path.join([tmp_dir, "src", "skip-me"])
+      excluded_file = Path.join(tmp_dir, "skip-me")
+      similar_dir = Path.join(tmp_dir, "skip-me-also")
+      mkdir(excluded_child)
+      mkdir(similar_dir)
+      touch(excluded_file)
 
-      names = tmp_dir |> FileTree.new() |> names()
+      tree = tmp_dir |> FileTree.new() |> expand_path(["src"])
+      events = :"file_tree_options_events_#{System.unique_integer([:positive])}"
+      start_supervised!({Registry, keys: :duplicate, name: events})
+      options_server = start_supervised!({Options, name: nil, events_registry: events})
+      Process.put(:minga_config_options, options_server)
+      assert {:ok, ["skip-me"]} = Options.set(options_server, :file_find_excludes, ["skip-me"])
 
-      assert "src" in names
-      refute "vendor" in names
+      walked = FileTree.ensure_entries(tree)
+      visible_paths = [similar_dir, Path.dirname(excluded_child)]
+      assert paths(walked) == visible_paths
+
+      assert {:ok, []} = Options.set(options_server, :file_find_excludes, [])
+      assert paths(walked) == visible_paths
+      assert paths(FileTree.refresh(walked)) == visible_paths ++ [excluded_child, excluded_file]
     end
 
     @tag :tmp_dir
@@ -286,15 +298,21 @@ defmodule Minga.Project.FileTreeTest do
 
   describe "filtering and re-rooting" do
     @tag :tmp_dir
-    test "set_filter matches descendants without requiring expansion", %{tmp_dir: tmp_dir} do
-      mkdir(Path.join(tmp_dir, "lib"))
-      touch(Path.join([tmp_dir, "lib", "target.ex"]))
+    test "filtered descendants retain their guides and position among original siblings", %{
+      tmp_dir: tmp_dir
+    } do
+      nested = Path.join([tmp_dir, "lib", "nested"])
+      target = Path.join(nested, "target.ex")
+      mkdir(nested)
+      touch(target)
+      touch(Path.join(nested, "z.txt"))
+      touch(Path.join([tmp_dir, "lib", "sibling.txt"]))
       touch(Path.join(tmp_dir, "other.txt"))
 
-      tree = FileTree.new(tmp_dir) |> FileTree.set_filter("target")
+      tree = FileTree.new(tmp_dir) |> FileTree.set_filter("NESTED/Target")
 
-      assert names(tree) == ["target.ex"]
-      assert FileTree.selected_entry(tree).depth == 1
+      assert [%{path: ^target, depth: 2, last_child?: false, guides: [true, true]}] =
+               FileTree.visible_entries(tree)
     end
 
     @tag :tmp_dir

@@ -9,6 +9,7 @@ defmodule MingaEditor.FileTree.RefreshTest do
   alias MingaEditor.EffectScheduler
   alias MingaEditor.FileTree.Freshness
   alias MingaEditor.FileTree.Refresh
+  alias MingaEditor.FileTree.Refresh.FilesystemScanner
   alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.OperationQueue
 
@@ -49,6 +50,53 @@ defmodule MingaEditor.FileTree.RefreshTest do
     request = Refresh.request(tree(missing_root), Minga.Events.default_registry())
 
     assert Refresh.run(request.effect) == {:error, {:root_unavailable, :enoent}}
+  end
+
+  test "filesystem scanner reuses the checked listing and clamps selection", %{tmp_dir: root} do
+    File.write!(Path.join(root, "alpha.ex"), "")
+    tree = root |> tree(["alpha.ex", "stale.ex"]) |> FileTree.select(1)
+    expanded_root = tree.root
+    late_file = Path.join(root, "late.ex")
+    handler_id = {__MODULE__, make_ref()}
+
+    # A second root listing during the walk would incorrectly see this file.
+    :ok =
+      :telemetry.attach(
+        handler_id,
+        [:minga, :file_tree, :walk, :start],
+        fn
+          _event, _measurements, %{root: ^expanded_root}, _ -> File.write!(late_file, "")
+          _event, _measurements, _metadata, _ -> :ok
+        end,
+        nil
+      )
+
+    on_exit(fn -> :telemetry.detach(handler_id) end)
+
+    assert %FileTree{cursor: 0, entries: [%{name: "alpha.ex"}]} =
+             FilesystemScanner.scan(tree, nil)
+
+    assert File.exists?(late_file)
+  end
+
+  test "filesystem scanner checks the root even when an active filter has cached matches", %{
+    tmp_dir: root
+  } do
+    project = Path.join(root, "project")
+    cached_file = Path.join(project, "lib/cached.ex")
+    File.mkdir!(project)
+
+    filtered =
+      project
+      |> FileTree.new()
+      |> FileTree.put_cached_files(["lib/cached.ex"])
+      |> FileTree.set_filter("cached")
+
+    assert %FileTree{entries: [%{path: ^cached_file}]} = FilesystemScanner.scan(filtered, nil)
+
+    File.rmdir!(project)
+    assert [%{path: ^cached_file}] = FileTree.visible_entries(filtered)
+    assert FilesystemScanner.scan(filtered, nil) == {:error, {:root_unavailable, :enoent}}
   end
 
   test "scheduler exposes running, queued, and exactly one coalesced follow-up", %{tmp_dir: root} do

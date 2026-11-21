@@ -124,6 +124,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - Shell dispatch reuses the restored state for optional callbacks. Feature lookups distinguish stored nil from missing keys, and remote checklist replay skips malformed rows without dropping valid neighbors.
 - Native tool declarations no longer build an execution context. Project searches and listings reuse the executable or Git root they selected. Theme registration publishes ownership with theme data, extension reload stops inspecting declarations once a file is dynamic, and both Git diff entry points share the buffer opening sequence.
 - File tree rows derive their last-sibling flag without building a separate list of positions. The tool list sorts by the same status it displays rather than looking each status up twice.
+- File tree refresh reuses the checked root listing, reads exclusions once per walk, and only builds rows that match the filter. File discovery rejects over-byte-limit output before counting its lines.
 - Keyboard and drag tab moves use the same workspace order. Explicit buffer removal and dead-buffer cleanup share the rule for selecting a neighbor.
 - New Agent requests no longer offer the hidden notebook tools. Existing todo tools and saved conversation history remain readable.
 - Native agent tool effects now require a durable provider-continuation checkpoint and single-attempt admission; interrupted admitted calls recover as explicit indeterminate results without replay.

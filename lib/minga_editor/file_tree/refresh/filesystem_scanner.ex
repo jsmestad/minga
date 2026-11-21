@@ -7,9 +7,9 @@ defmodule MingaEditor.FileTree.Refresh.FilesystemScanner do
 
   @impl true
   @spec scan(FileTree.t(), term()) :: FileTree.t() | {:error, {:root_unavailable, File.posix()}}
-  def scan(%FileTree{root: root} = tree, _context) do
-    case File.ls(root) do
-      {:ok, _entries} -> FileTree.refresh(tree)
+  def scan(%FileTree{} = tree, _context) do
+    case FileTree.refresh_checked(tree) do
+      {:ok, refreshed} -> refreshed
       {:error, reason} -> {:error, {:root_unavailable, reason}}
     end
   end

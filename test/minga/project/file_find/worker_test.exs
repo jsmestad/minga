@@ -58,22 +58,41 @@ defmodule Minga.Project.FileFind.WorkerTest do
     refute process_alive?(child_pid)
   end
 
-  test "output limits stop discovery and report an error", %{tmp_dir: tmp_dir} do
-    script = Path.join(tmp_dir, "oversized-discovery.sh")
-    File.write!(script, "#!/bin/sh\nprintf 'first\\nsecond\\n'\nsleep 60\n")
-    File.chmod!(script, 0o755)
-    command = {System.find_executable("sh"), [script], tmp_dir}
+  test "discovery accepts exact output limits and reports the first exceeded limit", %{
+    tmp_dir: tmp_dir
+  } do
+    output = "first\nsecond\n"
+    shell = System.find_executable("sh")
 
-    {:ok, worker} =
-      Worker.start(self(), command, fn output, status -> {output, status} end,
-        max_output_bytes: 1
-      )
+    script = ~S"""
+    while [ ! -f "$1" ]; do sleep 0.01; done
+    printf 'first\nsecond\n'
+    if [ "$2" = hold ]; then exec sleep 60; fi
+    """
 
-    ref = Process.monitor(worker)
+    byte_limit = byte_size(output)
 
-    assert_receive {:file_find_done, ^worker, {:error, message}}, 5_000
-    assert message =~ "byte limit"
-    assert_receive {:DOWN, ^ref, :process, ^worker, :normal}, 5_000
+    cases = [
+      {byte_limit, 2, "exit", {output, 0}},
+      {byte_limit, 1, "hold", {:error, "Project file discovery exceeded the file-count limit"}},
+      {byte_limit - 1, 1, "hold", {:error, "Project file discovery exceeded the byte limit"}}
+    ]
+
+    for {bytes, files, action, expected} <- cases do
+      gate = Path.join(tmp_dir, "release-#{bytes}-#{files}")
+      command = {shell, ["-c", script, "discovery", gate, action], tmp_dir}
+
+      assert {:ok, worker} =
+               Worker.start(self(), command, fn data, status -> {data, status} end,
+                 max_output_bytes: bytes,
+                 max_file_count: files
+               )
+
+      monitor = Process.monitor(worker)
+      File.write!(gate, "")
+      assert_receive {:file_find_done, ^worker, ^expected}, 5_000
+      assert_receive {:DOWN, ^monitor, :process, ^worker, :normal}, 5_000
+    end
   end
 
   @spec await_nonempty_file(String.t(), non_neg_integer()) ::
