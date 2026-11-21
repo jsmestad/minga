@@ -156,6 +156,27 @@ defmodule MingaEditor.Renderer.StateTest do
     assert {:error, :inactive} = Reader.resolve(reader, event(replacement))
   end
 
+  test "resident input distinguishes out-of-bounds rows from unavailable row data" do
+    table = :ets.new(:resident_input, [:set])
+    event = event(presentation(1, 101, 3, "text"))
+    reader = Reader.new(table)
+    root = make_ref()
+    active_key = {:active, event.window_id}
+    lease_key = {:lease, event.window_id, event.presentation_id}
+
+    :ets.insert(table, {active_key, event.presentation_id + 1})
+    assert {:error, :inactive} = Reader.resolve(reader, event)
+
+    :ets.insert(table, {active_key, event.presentation_id})
+    assert {:error, :inactive} = Reader.resolve(reader, event)
+
+    :ets.insert(table, {lease_key, {self(), 0, {:resident, root}, nil, 0}})
+    assert {:error, :unavailable} = Reader.resolve(reader, %{event | row_index: 1})
+
+    :ets.insert(table, {{:node_header, root}, {1, nil, nil, nil, nil, nil, nil}})
+    assert {:error, :row_not_found} = Reader.resolve(reader, %{event | row_index: 1})
+  end
+
   test "review rows survive frame materialization and recovery without creating buffer authority" do
     {editor, preview} = review_editor()
     input = Input.from_editor_state(editor)

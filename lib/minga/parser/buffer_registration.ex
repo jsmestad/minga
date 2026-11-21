@@ -7,6 +7,7 @@ defmodule Minga.Parser.BufferRegistration do
 
   alias Minga.Buffer.ChangeLog
   alias Minga.Parser.BufferConfig
+  alias Minga.Parser.EventCorrelation
 
   @type phase ::
           :idle
@@ -116,6 +117,24 @@ defmodule Minga.Parser.BufferRegistration do
     do: true
 
   def accepts_version?(%__MODULE__{}, _version), do: false
+
+  @doc "Returns the correlation to publish for an admitted parser event."
+  @spec correlation_for(t(), pos_integer() | :unversioned) :: {:ok, EventCorrelation.t()} | :stale
+  def correlation_for(%__MODULE__{phase: {:parsing, version, _}, generation: gen}, :unversioned) do
+    {:ok, EventCorrelation.new(gen, version)}
+  end
+
+  def correlation_for(%__MODULE__{} = registration, :unversioned) do
+    {:ok, EventCorrelation.new(registration.generation, registration.last_completed_version)}
+  end
+
+  def correlation_for(%__MODULE__{} = registration, version) do
+    if accepts_version?(registration, version) do
+      {:ok, EventCorrelation.new(registration.generation, version)}
+    else
+      :stale
+    end
+  end
 
   @doc "Resets volatile parser state and requires a fresh full snapshot."
   @spec restart(t()) :: t()
