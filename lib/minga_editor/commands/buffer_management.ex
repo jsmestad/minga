@@ -17,6 +17,7 @@ defmodule MingaEditor.Commands.BufferManagement do
   alias Minga.Config
 
   alias MingaEditor.Agent.DraftWorkflow
+  alias MingaEditor.Agent.EditPublication
   alias MingaEditor.BottomPanel
   alias MingaEditor.Commands
   alias MingaEditor.Commands.Helpers
@@ -75,15 +76,15 @@ defmodule MingaEditor.Commands.BufferManagement do
       {:started, session} ->
         state = EditorState.accept_application_quit_transition(state, session)
 
-        case DraftWorkflow.before_close(state, :all) do
-          {:ok, state} ->
-            begin_application_quit_resolution(
-              state,
-              request_id,
-              dirty_application_quit_buffers(state)
-            )
-
-          {:error, state} ->
+        with {:ok, state} <- DraftWorkflow.before_close(state, :all),
+             {:ok, state} <- EditPublication.before_quit(state) do
+          begin_application_quit_resolution(
+            state,
+            request_id,
+            dirty_application_quit_buffers(state)
+          )
+        else
+          {_refused, state} ->
             prepare_application_quit_response(
               state,
               request_id,
@@ -304,7 +305,10 @@ defmodule MingaEditor.Commands.BufferManagement do
 
   def execute(state, :force_quit_all) do
     if any_buffer_dirty?(state), do: WaitRequests.cancel_all("discarded without saving")
-    shutdown_editor(state)
+
+    state
+    |> EditPublication.discard_all()
+    |> shutdown_editor()
   end
 
   def execute(state, :abort_quit), do: abort_quit_editor(state)
@@ -314,7 +318,9 @@ defmodule MingaEditor.Commands.BufferManagement do
     state = %{state | session: MingaEditor.State.Session.clear_quit_request(state.session)}
     scope = if kind == :quit_all or quit_would_exit_editor?(state), do: :all, else: :active
 
-    with_durable_drafts(state, scope, &confirm_quit(&1, kind))
+    with_durable_drafts(state, scope, fn state ->
+      with_published_agent_edits(state, scope, &confirm_quit(&1, kind))
+    end)
   end
 
   def execute(state, :confirm_quit_no) do
@@ -2243,9 +2249,33 @@ defmodule MingaEditor.Commands.BufferManagement do
   @spec maybe_confirm_quit(state(), :quit | :quit_all) :: state()
   defp maybe_confirm_quit(%MingaEditor.State{} = state, :quit) do
     state = Workflow.ensure_available(state)
+    exits? = quit_would_exit_editor?(state)
+
+    with_published_agent_edits(state, if(exits?, do: :all, else: :active), fn state ->
+      ask_or_quit(state, exits?)
+    end)
+  end
+
+  defp maybe_confirm_quit(%MingaEditor.State{} = state, :quit_all) do
+    with_published_agent_edits(state, :all, fn state ->
+      if dirty_quit_confirmation_needed?(state) do
+        state = %{
+          state
+          | session: MingaEditor.State.Session.request_quit(state.session, :quit_all)
+        }
+
+        NoticeWorkflow.publish(state, "Modified buffers exist. Really quit? (y/n)")
+      else
+        with_durable_drafts(state, :all, &shutdown_editor/1)
+      end
+    end)
+  end
+
+  @spec ask_or_quit(state(), boolean()) :: state()
+  defp ask_or_quit(state, exits?) do
     dirty? = dirty_quit_confirmation_needed?(state)
 
-    if dirty? or quit_would_exit_editor?(state) do
+    if dirty? or exits? do
       state = %{state | session: MingaEditor.State.Session.request_quit(state.session, :quit)}
       NoticeWorkflow.publish(state, quit_confirmation_message(dirty?))
     else
@@ -2253,12 +2283,15 @@ defmodule MingaEditor.Commands.BufferManagement do
     end
   end
 
-  defp maybe_confirm_quit(%MingaEditor.State{} = state, :quit_all) do
-    if dirty_quit_confirmation_needed?(state) do
-      state = %{state | session: MingaEditor.State.Session.request_quit(state.session, :quit_all)}
-      NoticeWorkflow.publish(state, "Modified buffers exist. Really quit? (y/n)")
-    else
-      with_durable_drafts(state, :all, &shutdown_editor/1)
+  # Staged agent edits block only a quit that exits the editor; closing one tab
+  # keeps the workspace and its edits.
+  @spec with_published_agent_edits(state(), :active | :all, (state() -> state())) :: state()
+  defp with_published_agent_edits(state, :active, continue), do: continue.(state)
+
+  defp with_published_agent_edits(state, :all, continue) do
+    case EditPublication.before_quit(state) do
+      {:ok, state} -> continue.(state)
+      {:blocked, state} -> state
     end
   end
 

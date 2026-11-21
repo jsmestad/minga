@@ -17,6 +17,7 @@ defmodule MingaEditor.Commands.Workspace do
   alias Minga.Project.FileRef
   alias MingaAgent.ProjectView
   alias MingaEditor.Agent.DraftWorkflow
+  alias MingaEditor.Agent.EditPublication
   alias MingaEditor.Commands.AgentSession
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Tab.File, as: TabFile
@@ -120,6 +121,14 @@ defmodule MingaEditor.Commands.Workspace do
   def workspace_promote(state) do
     update_active_workspace_review(state, &promote_workspace/1)
   end
+
+  @doc "Publishes the staged agent edits of the active (or only staged) agent workspace to disk."
+  @spec agent_edits_publish(state()) :: state()
+  def agent_edits_publish(state), do: EditPublication.publish(state, :active)
+
+  @doc "Discards the staged agent edits of the active (or only staged) agent workspace."
+  @spec agent_edits_discard(state()) :: state()
+  def agent_edits_discard(state), do: EditPublication.discard(state, :active)
 
   @doc "Discards workspace drafts and conflicts."
   @spec workspace_discard(state()) :: state()
@@ -546,36 +555,8 @@ defmodule MingaEditor.Commands.Workspace do
 
   @spec review_drafts_workspace(WorkspaceModel.t()) ::
           {:ok, WorkspaceModel.t()} | {:error, term()}
-  defp review_drafts_workspace(%WorkspaceModel{} = workspace) do
-    with {:ok, files} <- project_view_changed_files(workspace) do
-      review_drafts_workspace(workspace, files, workspace.review.state)
-    end
-  end
-
-  @spec review_drafts_workspace(WorkspaceModel.t(), [FileRef.t()], WorkspaceReview.state()) ::
-          {:ok, WorkspaceModel.t()} | {:error, term()}
-  defp review_drafts_workspace(%WorkspaceModel{} = workspace, [], _state) do
-    {:ok, WorkspaceModel.set_review(workspace, WorkspaceReview.clean(workspace.review))}
-  end
-
-  defp review_drafts_workspace(%WorkspaceModel{} = workspace, files, :clean) do
-    with {:ok, workspace} <-
-           WorkspaceModel.transition_review(workspace, :agent_started_editing, files) do
-      WorkspaceModel.transition_review(workspace, :agent_completed, files)
-    end
-  end
-
-  defp review_drafts_workspace(%WorkspaceModel{} = workspace, files, :draft) do
-    WorkspaceModel.transition_review(workspace, :agent_completed, files)
-  end
-
-  defp review_drafts_workspace(%WorkspaceModel{} = workspace, files, _state) do
-    {:ok,
-     WorkspaceModel.set_review(
-       workspace,
-       WorkspaceReview.set_changed_files(workspace.review, files)
-     )}
-  end
+  defp review_drafts_workspace(%WorkspaceModel{} = workspace),
+    do: EditPublication.refresh_review(workspace)
 
   @spec project_view_changed_files(WorkspaceModel.t()) ::
           {:ok, [FileRef.t()]} | {:error, term()}
@@ -589,37 +570,8 @@ defmodule MingaEditor.Commands.Workspace do
 
   defp project_view_changed_files(%WorkspaceModel{}), do: {:ok, []}
 
-  @spec promote_workspace(WorkspaceModel.t()) ::
-          {:ok, WorkspaceModel.t()}
-          | {:review_fork, WorkspaceModel.t(), String.t()}
-          | {:error, term()}
-  defp promote_workspace(
-         %WorkspaceModel{payload: %WorkspaceAgent{project_view: %ProjectView{} = view}} =
-           workspace
-       ) do
-    case ProjectView.promote(view, :project_root) do
-      :ok ->
-        WorkspaceModel.transition_review(workspace, :promote_succeeded)
-
-      {:conflict, details} ->
-        with {:ok, updated} <-
-               WorkspaceModel.transition_review(
-                 workspace,
-                 :promote_found_overlaps,
-                 {WorkspaceReview.conflict_file_refs(view.project_root, details), details}
-               ) do
-          case Enum.find(details.conflicts, &match?({:conflict, _, [_ | _]}, &1)) do
-            {:conflict, path, _} -> {:review_fork, updated, Path.join(view.project_root, path)}
-            nil -> {:ok, updated}
-          end
-        end
-
-      {:error, _reason} = error ->
-        error
-    end
-  end
-
-  defp promote_workspace(%WorkspaceModel{}), do: {:error, :missing_project_view}
+  @spec promote_workspace(WorkspaceModel.t()) :: EditPublication.promote_result()
+  defp promote_workspace(%WorkspaceModel{} = workspace), do: EditPublication.promote(workspace)
 
   @spec discard_workspace(WorkspaceModel.t()) :: {:ok, WorkspaceModel.t()} | {:error, term()}
   defp discard_workspace(
@@ -696,6 +648,12 @@ defmodule MingaEditor.Commands.Workspace do
 
   command(:workspace_promote, "Promote workspace drafts", execute: &workspace_promote/1)
   command(:workspace_discard, "Discard workspace drafts", execute: &workspace_discard/1)
+
+  command(:agent_edits_publish, "Publish agent edits to disk", execute: &agent_edits_publish/1)
+
+  command(:agent_edits_discard, "Discard unpublished agent edits",
+    execute: &agent_edits_discard/1
+  )
 
   command(:workspace_resolve_conflicts, "Resolve workspace conflicts",
     execute: &workspace_resolve_conflicts/1

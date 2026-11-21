@@ -156,11 +156,17 @@ defmodule MingaAgent.ProjectView do
   @spec capabilities(t()) :: ProjectView.Backend.capabilities()
   def capabilities(%__MODULE__{} = view), do: view.backend.capabilities(view)
 
-  @doc "Returns true when the underlying backend is still available."
+  @doc """
+  Returns true when the underlying backend is still available.
+
+  Backends may report an unavailable owner either by exiting or by returning `{:error, reason}` from `working_dir/1` (the overlay backend does the latter after a successful promote stops its changeset). Both mean the view can no longer be handed to a session.
+  """
   @spec active?(t()) :: boolean()
   def active?(%__MODULE__{} = view) do
-    _ = working_dir(view)
-    true
+    case working_dir(view) do
+      {:error, _reason} -> false
+      _dir -> true
+    end
   catch
     :exit, _ -> false
   end

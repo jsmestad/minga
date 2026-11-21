@@ -377,6 +377,10 @@ defmodule Minga.Buffer do
   @spec accept_saved_content(t(), String.t()) :: :ok
   defdelegate accept_saved_content(server, new_content), to: BufferProcess
 
+  @doc "Marks the buffer saved when its content already equals the file on disk."
+  @spec mark_saved_if_disk_matches(t()) :: :ok | {:error, term()}
+  defdelegate mark_saved_if_disk_matches(server), to: BufferProcess
+
   @doc "Marks an unchanged fileless scratch buffer clean after its owner saves the text."
   @spec confirm_scratch_save(t(), non_neg_integer()) :: :ok | :stale
   defdelegate confirm_scratch_save(server, version), to: BufferProcess

@@ -25,6 +25,22 @@ defmodule MingaAgent.ProjectViewTest do
     end
   end
 
+  describe "active?/1" do
+    test "reports an overlay inactive after a promote stops its changeset", %{tmp_dir: dir} do
+      seed_project(dir)
+      {:ok, view} = ProjectView.overlay(dir)
+      assert ProjectView.active?(view)
+
+      :ok = ProjectView.write_file(view, "lib/a.txt", "draft\n")
+      changeset = view.ref.changeset
+      monitor = Process.monitor(changeset)
+      assert :ok = ProjectView.promote(view, :project_root)
+      assert_receive {:DOWN, ^monitor, :process, ^changeset, :normal}
+
+      refute ProjectView.active?(view)
+    end
+  end
+
   describe "direct backend contract" do
     test "read/write/edit/delete/list/diff/discard use logical relative paths", %{tmp_dir: dir} do
       seed_project(dir)

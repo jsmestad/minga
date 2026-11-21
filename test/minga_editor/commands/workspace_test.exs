@@ -225,7 +225,9 @@ defmodule MingaEditor.Commands.WorkspaceTest do
             :workspace_copy_file,
             :workspace_rename,
             :workspace_set_icon,
-            :workspace_next_agent
+            :workspace_next_agent,
+            :agent_edits_publish,
+            :agent_edits_discard
           ] do
         assert Enum.any?(commands, &(&1.name == name))
       end
@@ -814,6 +816,149 @@ defmodule MingaEditor.Commands.WorkspaceTest do
 
       assert Workspace.workspace_goto(state, 1).shell_runtime.state.tab_bar.active_id == 2
       assert Workspace.workspace_goto(state, 2).shell_runtime.state.tab_bar.active_id == 3
+    end
+  end
+
+  describe "agent_edits_publish/1 and agent_edits_discard/1" do
+    # An editor-started session: the editor owns the overlay view, the file is
+    # open in a buffer, and the approved edit lives in that buffer's fork.
+    defp staged_edit_state(dir, opts \\ []) do
+      path = Path.join(dir, "notes.md")
+      File.write!(path, "one\ntwo\n")
+
+      buffer =
+        start_supervised!(
+          Supervisor.child_spec({BufferProcess, content: File.read!(path), file_path: path},
+            id: {:notes_buffer, path}
+          )
+        )
+
+      provider =
+        start_supervised!(
+          Supervisor.child_spec({StubServer, [refresh_to: self()]}, id: :edit_provider)
+        )
+
+      session =
+        start_supervised!(
+          Supervisor.child_spec({StubServer, [provider: provider]}, id: :edit_session)
+        )
+
+      {:ok, view} = ProjectView.overlay(dir)
+      :ok = stage_edit(view, "two", "TWO")
+
+      state =
+        make_state(dir)
+        |> Workspace.workspace_next()
+        |> put_active_workspace_project_view(view)
+        |> put_active_workspace_session(session)
+        |> put_active_workspace_status(Keyword.get(opts, :status, :idle))
+
+      %{state: state, path: path, buffer: buffer, view: view, provider: provider}
+    end
+
+    defp stage_edit(view, from, to) do
+      {:ok, source} = ProjectView.resolve_source(view, "notes.md")
+      {:ok, content} = ProjectView.read_file(view, "notes.md")
+      token = Minga.Buffer.FileMutation.revision(content, nil, {:project_view, source.source_id})
+
+      {:ok, _receipt} =
+        ProjectView.conditional_mutate(view, "notes.md", token, {:edit, [{from, to}]})
+
+      :ok
+    end
+
+    defp put_active_workspace_status(state, status) do
+      tb = state.shell_runtime.state.tab_bar
+      workspace_id = TabBar.active_workspace_id(tb)
+      tb = TabBar.set_workspace_agent_status(tb, workspace_id, status)
+      shell_state = TraditionalState.install_tab_bar(Runtime.state(state.shell_runtime), tb)
+
+      %{
+        state
+        | shell_runtime: Runtime.install_traditional_state(state.shell_runtime, shell_state)
+      }
+    end
+
+    defp active_project_view(state) do
+      %WorkspaceAgent{project_view: view} =
+        TabBar.get_workspace(state.shell_runtime.state.tab_bar, 1).payload
+
+      view
+    end
+
+    test "publishes an editor-started session's approved edit to disk and the open buffer, and keeps the session editable",
+         %{tmp_dir: dir} do
+      %{state: state, path: path, buffer: buffer, view: old_view, provider: provider} =
+        staged_edit_state(dir)
+
+      assert File.read!(path) == "one\ntwo\n"
+
+      published = Workspace.agent_edits_publish(state)
+
+      assert File.read!(path) == "one\nTWO\n"
+      assert Minga.Buffer.content(buffer) == "one\nTWO\n"
+      refute Minga.Buffer.dirty?(buffer)
+
+      assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(published) ==
+               "Published agent edits in 1 file to disk"
+
+      assert TabBar.get_workspace(published.shell_runtime.state.tab_bar, 1).review.state == :clean
+
+      new_view = active_project_view(published)
+      assert %ProjectView{} = new_view
+      assert new_view.id != old_view.id
+      refute ProjectView.active?(old_view)
+      assert_receive {:provider_project_view_refreshed, ^provider, ^new_view}
+
+      :ok = stage_edit(new_view, "one", "ONE")
+      assert File.read!(path) == "one\nTWO\n"
+
+      published_again = Workspace.agent_edits_publish(published)
+      assert File.read!(path) == "ONE\nTWO\n"
+      assert Minga.Buffer.content(buffer) == "ONE\nTWO\n"
+      assert ProjectView.active?(active_project_view(published_again))
+    end
+
+    test "discard drops the staged edit without touching disk or the buffer", %{tmp_dir: dir} do
+      %{state: state, path: path, buffer: buffer, provider: provider} = staged_edit_state(dir)
+
+      discarded = Workspace.agent_edits_discard(state)
+
+      assert File.read!(path) == "one\ntwo\n"
+      assert Minga.Buffer.content(buffer) == "one\ntwo\n"
+
+      assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(discarded) ==
+               "Discarded agent edits in 1 file"
+
+      assert_receive {:provider_project_view_refreshed, ^provider, %ProjectView{} = new_view}
+      assert active_project_view(discarded) == new_view
+      assert {:ok, []} = ProjectView.diff(new_view)
+    end
+
+    test "refuses to publish while the agent turn is running", %{tmp_dir: dir} do
+      %{state: state, path: path, view: view} = staged_edit_state(dir, status: :tool_executing)
+
+      result = Workspace.agent_edits_publish(state)
+
+      assert File.read!(path) == "one\ntwo\n"
+      assert active_project_view(result) == view
+
+      assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(result) ==
+               "Wait for the agent turn to finish before you publish its edits"
+    end
+
+    test "reports when nothing is staged", %{tmp_dir: dir} do
+      {:ok, view} = ProjectView.overlay(dir)
+
+      state =
+        make_state(dir)
+        |> Workspace.workspace_next()
+        |> put_active_workspace_project_view(view)
+
+      result = Workspace.agent_edits_publish(state)
+
+      assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(result) ==
+               "No unpublished agent edits"
     end
   end
 end

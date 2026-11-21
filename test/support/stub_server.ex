@@ -102,6 +102,17 @@ defmodule Minga.Test.StubServer do
     end
   end
 
+  # Opt-in provider fixtures: `provider:` answers Session.get_provider/1, and
+  # `refresh_to:` makes this stub act as a provider that reports each refreshed
+  # project view to the given pid.
+  def handle_call(:get_provider, _from, %{provider: provider} = state),
+    do: {:reply, provider, state}
+
+  def handle_call({:refresh_project_view, view}, _from, %{refresh_to: pid} = state) do
+    send(pid, {:provider_project_view_refreshed, self(), view})
+    {:reply, Map.get(state, :refresh_reply, :ok), state}
+  end
+
   def handle_call(_msg, _from, state), do: {:reply, :ok, state}
 
   @spec toggle_pinned_id(MapSet.t(pos_integer()), pos_integer()) :: MapSet.t(pos_integer())

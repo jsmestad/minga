@@ -80,6 +80,21 @@ While the current review is selected, these keys apply:
 
 When all hunks are resolved (accepted or rejected), the viewer returns to normal file view.
 
+### Publishing Approved Edits
+
+Approving an edit lets the agent make it, but it does not write the file yet. An agent session you start from the editor works in an isolated copy of the project, so an approved edit is staged: the agent sees it, **Review files** lists it, and the file on disk and your open buffer still show the old text. You decide when staged edits land.
+
+When the agent finishes a turn with staged edits, a notification says, for example, "1 agent-edited file is not on disk" and offers **Publish** and **Discard**. Click either one, or use the keys below from the editor or the agent view.
+
+| Key | Action |
+|-----|--------|
+| `SPC a p` | Publish agent edits to disk |
+| `SPC a P` | Discard unpublished agent edits |
+
+Publish writes the staged files to disk and merges them into any open buffer, then the agent keeps working in a fresh staging area. If you changed the same lines yourself in the meantime, Minga keeps both versions and opens the conflict review instead of overwriting your work. Discard drops the staged edits and leaves disk and buffers untouched. Both wait until the agent turn finishes; while it runs, Minga says so and changes nothing.
+
+Staged edits are never lost silently. `:q` (when it would exit), `:qa`, and quitting the macOS app stop and show the same Publish and Discard choice. `:qa!` quits and discards them on purpose. Quitting is never blocked when nothing is staged.
+
 ### Input
 
 | Key | Action |
@@ -135,6 +150,8 @@ See [Agent tool approval](CONFIGURATION.md#agent-tool-approval) for how to confi
 | `s` | Open session switcher |
 | `SPC a h` | Browse session history (load past conversations) |
 | `SPC a r` | Pending reviews |
+| `SPC a p` | Publish agent edits to disk |
+| `SPC a P` | Discard unpublished agent edits |
 | `SPC a ?` | Ask about the current line or visual selection inline |
 | `SPC a e` | Rewrite the visual selection inline |
 | `SPC a z` | Summarize the current agent session to an artifact |

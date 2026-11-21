@@ -37,6 +37,7 @@ defmodule MingaEditor.Agent.StatusEventWorkflow do
     state = update_tab_agent_status(state, status, session, traditional_tab_bar(state))
 
     state
+    |> finish_turn_edits(session, status)
     |> apply_spinner_status(status)
     |> MingaEditor.schedule_render(16)
   end
@@ -280,6 +281,15 @@ defmodule MingaEditor.Agent.StatusEventWorkflow do
 
     install_tab_bar(state, tab_bar)
   end
+
+  # A turn that leaves the busy statuses hands its staged edits to review.
+  @spec finish_turn_edits(EditorState.t(), pid(), Tab.agent_status()) :: EditorState.t()
+  defp finish_turn_edits(state, _session, status)
+       when status in [:thinking, :tool_executing, :approval_waiting],
+       do: state
+
+  defp finish_turn_edits(state, session, _status),
+    do: MingaEditor.Agent.EditPublication.turn_finished(state, session)
 
   @spec traditional_tab_bar(EditorState.t()) :: TabBar.t() | nil
   defp traditional_tab_bar(state), do: Runtime.traditional_tab_bar(state.shell_runtime)

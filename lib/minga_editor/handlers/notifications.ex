@@ -70,6 +70,61 @@ defmodule MingaEditor.Handlers.Notifications do
     )
   end
 
+  @doc """
+  Tells the user that a workspace holds approved agent edits that are not on disk.
+
+  The Publish and Discard actions carry the workspace id, so a click acts on this workspace even when another one is active. The card stays until the edits are published or discarded.
+  """
+  @spec agent_edits_unpublished(state(), pos_integer(), String.t(), pos_integer()) :: state()
+  def agent_edits_unpublished(state, workspace_id, workspace_label, file_count)
+      when is_integer(workspace_id) and is_binary(workspace_label) and is_integer(file_count) and
+             file_count > 0 do
+    put_notification(
+      state,
+      Notification.new(
+        id: agent_edits_notification_id(workspace_id),
+        level: :warning,
+        title: agent_edits_title(file_count),
+        body:
+          "#{workspace_label}: approved edits are staged. Publish writes them to disk and open buffers; Discard drops them. Keys: SPC a p publish, SPC a P discard.",
+        source: "Agent",
+        actions: [
+          %{
+            id: "publish",
+            label: "Publish",
+            dispatch: {:command, {:agent_edits_publish, workspace_id}}
+          },
+          %{
+            id: "discard",
+            label: "Discard",
+            dispatch: {:command, {:agent_edits_discard, workspace_id}}
+          }
+        ]
+      )
+    )
+  end
+
+  @doc "Removes a workspace's unpublished-agent-edits card after its edits are published or discarded."
+  @spec dismiss_agent_edits(state(), pos_integer()) :: state()
+  def dismiss_agent_edits(state, workspace_id) when is_integer(workspace_id) do
+    %{
+      state
+      | feedback:
+          MingaEditor.State.Feedback.dismiss_notification(
+            state.feedback,
+            agent_edits_notification_id(workspace_id)
+          )
+    }
+  end
+
+  @doc "Returns the user-visible title for unpublished agent edits."
+  @spec agent_edits_title(pos_integer()) :: String.t()
+  def agent_edits_title(1), do: "1 agent-edited file is not on disk"
+  def agent_edits_title(count), do: "#{count} agent-edited files are not on disk"
+
+  @spec agent_edits_notification_id(pos_integer()) :: String.t()
+  defp agent_edits_notification_id(workspace_id), do: "agent:unpublished_edits:#{workspace_id}"
+
   # ── Private helpers ──────────────────────────────────────────────────
 
   @spec put_notification(state(), Notification.t()) :: state()

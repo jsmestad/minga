@@ -15,6 +15,31 @@ defmodule Minga.Buffer.ProcessTest do
     end
   end
 
+  describe "mark_saved_if_disk_matches/1" do
+    test "clears the modified flag only when disk already holds the buffer content", %{
+      tmp_dir: dir
+    } do
+      path = Path.join(dir, "notes.md")
+      File.write!(path, "one\n")
+      buffer = start_supervised!({BufferProcess, file_path: path})
+      :ok = Buffer.replace_content(buffer, "ONE\n", :user)
+      assert Buffer.dirty?(buffer)
+
+      assert {:error, :content_differs} = Buffer.mark_saved_if_disk_matches(buffer)
+      assert Buffer.dirty?(buffer)
+
+      File.write!(path, "ONE\n")
+      assert :ok = Buffer.mark_saved_if_disk_matches(buffer)
+      refute Buffer.dirty?(buffer)
+      assert Buffer.content(buffer) == "ONE\n"
+    end
+
+    test "rejects a buffer without a file" do
+      buffer = start_supervised!({BufferProcess, content: "scratch"})
+      assert {:error, :no_file_path} = Buffer.mark_saved_if_disk_matches(buffer)
+    end
+  end
+
   test "whole content read never returns a truncated buffer", %{tmp_dir: dir} do
     path = Path.join(dir, "source.txt")
     File.write!(path, "")

@@ -164,6 +164,16 @@ defmodule MingaEditor.Commands do
     MingaEditor.TabWorkflow.switch(state, tab_id)
   end
 
+  # Notification actions carry the workspace they describe, so a click acts on
+  # that workspace even when another one is active.
+  def execute(state, {:agent_edits_publish, workspace_id})
+      when is_integer(workspace_id) and workspace_id > 0,
+      do: MingaEditor.Agent.EditPublication.publish(state, workspace_id)
+
+  def execute(state, {:agent_edits_discard, workspace_id})
+      when is_integer(workspace_id) and workspace_id > 0,
+      do: MingaEditor.Agent.EditPublication.discard(state, workspace_id)
+
   # ── Leader / which-key (return action tuples) ─────────────────────────────
 
   def execute(state, {:leader_start, node}) do

@@ -218,6 +218,13 @@ defmodule Minga.Keymap.DefaultsTest do
       assert {:command, :workspace_pending_reviews} = Bindings.lookup(a_node, {?r, 0})
     end
 
+    test "SPC a p publishes and SPC a P discards staged agent edits" do
+      trie = Defaults.leader_trie()
+      {:prefix, a_node} = Bindings.lookup(trie, {?a, 0})
+      assert {:command, :agent_edits_publish} = Bindings.lookup(a_node, {?p, 0})
+      assert {:command, :agent_edits_discard} = Bindings.lookup(a_node, {?P, 0})
+    end
+
     test "SPC a m → :agent_pick_model" do
       trie = Defaults.leader_trie()
       {:prefix, a_node} = Bindings.lookup(trie, {?a, 0})

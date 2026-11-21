@@ -13,6 +13,7 @@ defmodule MingaEditor.Agent.FileEventWorkflow do
   alias Minga.Distribution.ConnectionManager
   alias Minga.Project.FileRef
   alias MingaEditor.Agent.Activity
+  alias MingaEditor.Agent.EditPublication
   alias MingaEditor.Agent.EditTimeline
   alias MingaEditor.Agent.FileChange
   alias MingaEditor.Agent.UIState
@@ -43,6 +44,7 @@ defmodule MingaEditor.Agent.FileEventWorkflow do
     |> record_edit(change)
     |> track_active_shell_agent_file(path)
     |> associate_file_with_agent_workspace(path)
+    |> EditPublication.record_edit(Runtime.active_session(state.shell_runtime), path)
     |> add_file_changed_message(change)
     |> refresh_selected_preview(path)
     |> MingaEditor.schedule_render(16)
