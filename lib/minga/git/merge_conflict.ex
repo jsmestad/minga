@@ -10,6 +10,14 @@ defmodule Minga.Git.MergeConflict do
 
   @type choice :: :current | :incoming | :both
 
+  @typep marker_position :: {non_neg_integer(), String.t()}
+  @typep side :: {marker_position(), [String.t()]}
+  @typep phase ::
+           :outside
+           | {:current, marker_position()}
+           | {:base, side(), marker_position()}
+           | {:incoming, side(), side() | nil, non_neg_integer()}
+
   @doc "Parses merge conflict regions from full buffer content."
   @spec parse(String.t()) :: [Region.t()]
   def parse(content) when is_binary(content) do
@@ -22,8 +30,7 @@ defmodule Minga.Git.MergeConflict do
   @spec parse_lines([String.t()]) :: [Region.t()]
   def parse_lines(lines) when is_list(lines) do
     lines
-    |> Enum.with_index()
-    |> do_parse_lines(lines, [])
+    |> scan(0, :outside, [], [])
     |> Enum.reverse()
   end
 
@@ -65,6 +72,16 @@ defmodule Minga.Git.MergeConflict do
   def region_from_entry(content, %Entry{} = entry) when is_binary(content) do
     lines = String.split(content, "\n", trim: false)
 
+    region_with_lines(
+      entry,
+      slice_range(lines, entry.current_range),
+      optional_slice_range(lines, entry.base_range),
+      slice_range(lines, entry.incoming_range)
+    )
+  end
+
+  @spec region_with_lines(Entry.t(), [String.t()], [String.t()] | nil, [String.t()]) :: Region.t()
+  defp region_with_lines(entry, current, base, incoming) do
     %Region{
       start_line: entry.start_line,
       separator_line: entry.separator_line,
@@ -76,9 +93,9 @@ defmodule Minga.Git.MergeConflict do
       current_label: entry.current_label,
       base_label: entry.base_label,
       incoming_label: entry.incoming_label,
-      current_lines: slice_range(lines, entry.current_range),
-      base_lines: optional_slice_range(lines, entry.base_range),
-      incoming_lines: slice_range(lines, entry.incoming_range)
+      current_lines: current,
+      base_lines: base,
+      incoming_lines: incoming
     }
   end
 
@@ -87,13 +104,22 @@ defmodule Minga.Git.MergeConflict do
   def replacement(%Region{} = region, choice),
     do: region |> replacement_lines(choice) |> Enum.join("\n")
 
-  @doc "Replaces the given region in `content` with the selected side."
-  @spec replace_region(String.t(), Region.t(), choice()) :: String.t()
+  @doc "Replaces a materialized region or a lightweight entry from the given content snapshot."
+  @spec replace_region(String.t(), Region.t() | Entry.t(), choice()) :: String.t()
   def replace_region(content, %Region{} = region, choice) when is_binary(content) do
     content
     |> String.split("\n", trim: false)
     |> replace_region_lines(region, choice)
     |> Enum.join("\n")
+  end
+
+  def replace_region(content, %Entry{} = entry, choice) when is_binary(content) do
+    lines = String.split(content, "\n", trim: false)
+    {prefix, conflict_and_suffix} = Enum.split(lines, entry.start_line)
+    replacement = entry_replacement(conflict_and_suffix, entry, choice)
+    suffix = Enum.drop(conflict_and_suffix, entry.end_line - entry.start_line + 1)
+
+    Enum.join(prefix ++ replacement ++ suffix, "\n")
   end
 
   @doc "Replaces the conflict containing `line` in `content` with the selected side."
@@ -108,165 +134,81 @@ defmodule Minga.Git.MergeConflict do
     end
   end
 
-  @spec do_parse_lines([{String.t(), non_neg_integer()}], [String.t()], [Region.t()]) :: [
-          Region.t()
-        ]
-  defp do_parse_lines([], _lines, acc), do: acc
+  @spec scan([String.t()], non_neg_integer(), phase(), [String.t()], [Region.t()]) :: [Region.t()]
+  defp scan([], _line, _phase, _side, regions), do: regions
 
-  defp do_parse_lines([{line, idx} | rest], lines, acc) do
-    if marker?(line, "<<<<<<<") do
-      parse_conflict_at(lines, idx, line)
-      |> continue_after_conflict(rest, lines, acc)
-    else
-      do_parse_lines(rest, lines, acc)
-    end
+  defp scan(["<<<<<<<" <> label | rest], line, :outside, [], regions) do
+    scan(rest, line + 1, {:current, {line, label}}, [], regions)
   end
 
-  @spec continue_after_conflict(
-          {:ok, Region.t()} | :error,
-          [{String.t(), non_neg_integer()}],
-          [String.t()],
-          [Region.t()]
-        ) :: [Region.t()]
-  defp continue_after_conflict({:ok, %Region{} = region}, rest, lines, acc) do
-    remaining = Enum.drop_while(rest, fn {_line, idx} -> idx <= region.end_line end)
-    do_parse_lines(remaining, lines, [region | acc])
+  defp scan([_ | rest], line, :outside, [], regions), do: scan(rest, line + 1, :outside, [], regions)
+
+  defp scan(["|||||||" <> label | rest], line, {:current, start}, current, regions) do
+    scan(rest, line + 1, {:base, {start, current}, {line, label}}, [], regions)
   end
 
-  defp continue_after_conflict(:error, rest, lines, acc), do: do_parse_lines(rest, lines, acc)
-
-  @spec parse_conflict_at([String.t()], non_neg_integer(), String.t()) ::
-          {:ok, Region.t()} | :error
-  defp parse_conflict_at(lines, start_idx, start_marker) do
-    tail = Enum.drop(lines, start_idx + 1)
-
-    with {:ok, separator_idx, base_marker_idx, base_marker} <-
-           find_separator(tail, start_idx + 1, nil, nil),
-         {:ok, end_idx, end_marker} <- find_end_marker(lines, separator_idx + 1) do
-      {:ok,
-       build_region(
-         lines,
-         start_idx,
-         start_marker,
-         base_marker_idx,
-         base_marker,
-         separator_idx,
-         end_idx,
-         end_marker
-       )}
-    end
+  defp scan(["=======" <> _ | rest], line, {:current, start}, current, regions) do
+    scan(rest, line + 1, {:incoming, {start, current}, nil, line}, [], regions)
   end
 
-  @spec find_separator([String.t()], non_neg_integer(), non_neg_integer() | nil, String.t() | nil) ::
-          {:ok, non_neg_integer(), non_neg_integer() | nil, String.t() | nil} | :error
-  defp find_separator([], _idx, _base_idx, _base_marker), do: :error
-
-  defp find_separator([line | rest], idx, base_idx, base_marker) do
-    parse_separator_line(line, rest, idx, base_idx, base_marker)
+  defp scan(["=======" <> _ | rest], line, {:base, current, marker}, base, regions) do
+    scan(rest, line + 1, {:incoming, current, {marker, base}, line}, [], regions)
   end
 
-  @spec parse_separator_line(
-          String.t(),
-          [String.t()],
-          non_neg_integer(),
-          non_neg_integer() | nil,
-          String.t() | nil
-        ) ::
-          {:ok, non_neg_integer(), non_neg_integer() | nil, String.t() | nil} | :error
-  defp parse_separator_line(line, rest, idx, base_idx, base_marker) do
-    if marker?(line, "=======") do
-      {:ok, idx, base_idx, base_marker}
-    else
-      parse_base_line(line, rest, idx, base_idx, base_marker)
-    end
-  end
-
-  @spec parse_base_line(
-          String.t(),
-          [String.t()],
-          non_neg_integer(),
-          non_neg_integer() | nil,
-          String.t() | nil
-        ) ::
-          {:ok, non_neg_integer(), non_neg_integer() | nil, String.t() | nil} | :error
-  defp parse_base_line(line, rest, idx, nil, _base_marker) do
-    if marker?(line, "|||||||") do
-      find_separator(rest, idx + 1, idx, marker_label(line, "|||||||"))
-    else
-      find_separator(rest, idx + 1, nil, nil)
-    end
-  end
-
-  defp parse_base_line(_line, rest, idx, base_idx, base_marker) do
-    find_separator(rest, idx + 1, base_idx, base_marker)
-  end
-
-  @spec find_end_marker([String.t()], non_neg_integer()) ::
-          {:ok, non_neg_integer(), String.t()} | :error
-  defp find_end_marker(lines, start_idx) do
-    lines
-    |> Enum.drop(start_idx)
-    |> Enum.with_index(start_idx)
-    |> Enum.find(fn {line, _idx} -> marker?(line, ">>>>>>>") end)
-    |> end_marker_result()
-  end
-
-  @spec end_marker_result({String.t(), non_neg_integer()} | nil) ::
-          {:ok, non_neg_integer(), String.t()} | :error
-  defp end_marker_result(nil), do: :error
-  defp end_marker_result({line, idx}), do: {:ok, idx, line}
-
-  @spec build_region(
-          [String.t()],
-          non_neg_integer(),
-          String.t(),
-          non_neg_integer() | nil,
-          String.t() | nil,
-          non_neg_integer(),
-          non_neg_integer(),
-          String.t()
-        ) :: Region.t()
-  defp build_region(lines, start_idx, start_marker, nil, nil, separator_idx, end_idx, end_marker) do
-    %Region{
-      start_line: start_idx,
-      current_range: {start_idx + 1, separator_idx - 1},
-      separator_line: separator_idx,
-      incoming_range: {separator_idx + 1, end_idx - 1},
-      end_line: end_idx,
-      current_label: marker_label(start_marker, "<<<<<<<"),
-      incoming_label: marker_label(end_marker, ">>>>>>>"),
-      current_lines: slice_lines(lines, start_idx + 1, separator_idx - 1),
-      incoming_lines: slice_lines(lines, separator_idx + 1, end_idx - 1),
-      base_lines: nil
-    }
-  end
-
-  defp build_region(
-         lines,
-         start_idx,
-         start_marker,
-         base_idx,
-         base_marker,
-         separator_idx,
-         end_idx,
-         end_marker
+  defp scan(
+         [">>>>>>>" <> label | rest],
+         line,
+         {:incoming, current, base, separator},
+         incoming,
+         regions
        ) do
-    %Region{
-      start_line: start_idx,
-      current_range: {start_idx + 1, base_idx - 1},
-      base_marker_line: base_idx,
-      base_range: {base_idx + 1, separator_idx - 1},
-      separator_line: separator_idx,
-      incoming_range: {separator_idx + 1, end_idx - 1},
-      end_line: end_idx,
-      current_label: marker_label(start_marker, "<<<<<<<"),
-      base_label: base_marker,
-      incoming_label: marker_label(end_marker, ">>>>>>>"),
-      current_lines: slice_lines(lines, start_idx + 1, base_idx - 1),
-      base_lines: slice_lines(lines, base_idx + 1, separator_idx - 1),
-      incoming_lines: slice_lines(lines, separator_idx + 1, end_idx - 1)
-    }
+    region = complete_region(current, base, separator, {{line, label}, incoming})
+    scan(rest, line + 1, :outside, [], [region | regions])
   end
+
+  # A prefix that does not end the active section is ordinary body text.
+  defp scan([text | rest], line, phase, side, regions) do
+    scan(rest, line + 1, phase, [text | side], regions)
+  end
+
+  @spec complete_region(side(), side() | nil, non_neg_integer(), side()) :: Region.t()
+  defp complete_region({{start, current_label}, current}, base, separator, incoming) do
+    {{ending, label}, lines} = incoming
+    {base_line, base_label, base_lines} = complete_base(base)
+
+    entry =
+      Entry.new(
+        start,
+        base_line,
+        separator,
+        ending,
+        String.trim(current_label),
+        base_label,
+        String.trim(label)
+      )
+
+    region_with_lines(entry, Enum.reverse(current), base_lines, Enum.reverse(lines))
+  end
+
+  @spec complete_base(side() | nil) :: {non_neg_integer() | nil, String.t() | nil, [String.t()] | nil}
+  defp complete_base(nil), do: {nil, nil, nil}
+
+  defp complete_base({{line, label}, reversed}),
+    do: {line, String.trim(label), Enum.reverse(reversed)}
+
+  @spec entry_replacement([String.t()], Entry.t(), choice()) :: [String.t()]
+  defp entry_replacement(lines, %Entry{start_line: start, current_range: range}, :current),
+    do: slice_relative_range(lines, range, start)
+
+  defp entry_replacement(lines, %Entry{start_line: start, incoming_range: range}, :incoming),
+    do: slice_relative_range(lines, range, start)
+
+  defp entry_replacement(lines, entry, :both),
+    do: entry_replacement(lines, entry, :current) ++ entry_replacement(lines, entry, :incoming)
+
+  @spec slice_relative_range([String.t()], Entry.line_range(), non_neg_integer()) :: [String.t()]
+  defp slice_relative_range(lines, {first, last}, start),
+    do: slice_lines(lines, first - start, last - start)
 
   @spec replace_region_lines([String.t()], Region.t(), choice()) :: [String.t()]
   defp replace_region_lines(lines, %Region{} = region, choice) do
@@ -287,16 +229,6 @@ defmodule Minga.Git.MergeConflict do
   @spec optional_slice_range([String.t()], Entry.line_range() | nil) :: [String.t()] | nil
   defp optional_slice_range(_lines, nil), do: nil
   defp optional_slice_range(lines, range), do: slice_range(lines, range)
-
-  @spec marker?(String.t(), String.t()) :: boolean()
-  defp marker?(line, prefix), do: String.starts_with?(line, prefix)
-
-  @spec marker_label(String.t(), String.t()) :: String.t()
-  defp marker_label(line, prefix) do
-    line
-    |> String.replace_prefix(prefix, "")
-    |> String.trim()
-  end
 
   @spec previous_or_last(Region.t() | Entry.t() | nil, [Region.t() | Entry.t()]) ::
           Region.t() | Entry.t() | nil

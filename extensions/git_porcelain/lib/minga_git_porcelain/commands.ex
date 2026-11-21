@@ -486,8 +486,7 @@ defmodule MingaGitPorcelain.Commands do
 
     case MergeConflict.at_line(entries, cursor_line) do
       %Entry{} = entry ->
-        region = MergeConflict.region_from_entry(content, entry)
-        new_content = MergeConflict.replace_region(content, region, choice)
+        new_content = MergeConflict.replace_region(content, entry, choice)
         apply_conflict_resolution(state, buf, new_content, cursor_line)
 
       nil ->
@@ -515,12 +514,10 @@ defmodule MingaGitPorcelain.Commands do
         )
 
       %Entry{} = entry ->
-        region = MergeConflict.region_from_entry(content, entry)
-
         apply_conflict_resolution(
           state,
           buf,
-          MergeConflict.replace_region(content, region, choice),
+          MergeConflict.replace_region(content, entry, choice),
           start_line
         )
     end
