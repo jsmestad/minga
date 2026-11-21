@@ -76,20 +76,35 @@ defmodule MingaAgent.Tools.RetainedShellStreamTest do
     key = {:delivery, "checkpoint", "interrupted"}
 
     owner =
-      spawn(fn ->
-        {:ok, capture} = OutputCapture.begin_stream(store, key)
-        :ok = OutputCapture.append_stream(store, capture, bytes)
-        send(parent, :prefix_stored)
+      start_supervised!(
+        {Task,
+         fn ->
+           {:ok, capture} = OutputCapture.begin_stream(store, key)
+           :ok = OutputCapture.append_stream(store, capture, bytes)
+           send(parent, {:prefix_stored, self()})
 
-        receive do
-          :finish -> :ok
-        end
-      end)
+           receive do
+             :finish -> :ok
+           end
+         end},
+        restart: :temporary
+      )
 
     monitor = Process.monitor(owner)
-    assert_receive :prefix_stored
+
+    receive do
+      {:prefix_stored, ^owner} ->
+        :ok
+
+      {:DOWN, ^monitor, :process, ^owner, reason} ->
+        flunk("capture owner exited before append: #{inspect(reason)}")
+    end
+
     Process.exit(owner, :kill)
-    assert_receive {:DOWN, ^monitor, :process, ^owner, :killed}
+
+    receive do
+      {:DOWN, ^monitor, :process, ^owner, reason} -> assert reason == :killed
+    end
 
     assert {:ok, %{reference: reference, capture: {:incomplete, :interrupted}}} =
              ArtifactStore.lookup_delivery(store, key)

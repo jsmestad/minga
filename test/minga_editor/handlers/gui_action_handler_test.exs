@@ -1586,8 +1586,8 @@ defmodule MingaEditor.Handlers.GuiActionHandlerPublicTargetTest do
       File.write!(target_path, "target")
       File.write!(active_path, "active")
       ctx = start_editor("first", file_path: first_path)
-      send_ex_sync(ctx, "e #{target_path}")
-      send_ex_sync(ctx, "e #{active_path}")
+      assert :ok = MingaEditor.open_file(ctx.editor, target_path)
+      assert :ok = MingaEditor.open_file(ctx.editor, active_path)
       workspace = active_workspace_id(ctx)
       tabs = visible_file_tabs(ctx, workspace)
       target = Enum.find(tabs, &(&1.label == "target.txt"))
@@ -1595,7 +1595,10 @@ defmodule MingaEditor.Handlers.GuiActionHandlerPublicTargetTest do
       active = active_buffer(ctx)
       before = Enum.map(tabs, & &1.id)
 
-      if @operation == :tab_unpin, do: send_gui_action(ctx, {:tab_pin, target.id})
+      if @operation == :tab_unpin do
+        send_gui_action(ctx, {:tab_pin, target.id})
+        assert Enum.find(visible_file_tabs(ctx, workspace), &(&1.id == target.id)).pinned?
+      end
 
       action =
         if @operation == :tab_reorder,
