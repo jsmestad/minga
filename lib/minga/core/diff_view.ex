@@ -48,7 +48,7 @@ defmodule Minga.Core.DiffView do
             [Diff.char_range()] | nil}
 
   @typep modified_line_pair ::
-           {:paired, String.t(), String.t(), non_neg_integer(), non_neg_integer()}
+           {:paired, String.t(), String.t(), non_neg_integer()}
            | {:unpaired_old, String.t()}
            | {:unpaired_new, String.t(), non_neg_integer()}
 
@@ -319,7 +319,7 @@ defmodule Minga.Core.DiffView do
   @spec modified_pair_side_by_side_line(modified_line_pair(), non_neg_integer()) ::
           side_by_side_line()
   defp modified_pair_side_by_side_line(
-         {:paired, old_line, new_line, _old_idx, new_idx},
+         {:paired, old_line, new_line, new_idx},
          start_line
        ) do
     {del_ranges, ins_ranges} = Diff.word_diff_ranges(old_line, new_line)
@@ -515,7 +515,7 @@ defmodule Minga.Core.DiffView do
 
     {removed_entries, added_entries} =
       Enum.reduce(paired, {[], []}, fn
-        {:paired, old_line, new_line, _old_idx, new_idx}, {rem_acc, add_acc} ->
+        {:paired, old_line, new_line, new_idx}, {rem_acc, add_acc} ->
           {del_ranges, ins_ranges} = Diff.word_diff_ranges(old_line, new_line)
           rem_entry = {old_line, :removed, nil, del_ranges}
           add_entry = {new_line, :added, hunk.start_line + new_idx, ins_ranges}
@@ -528,7 +528,7 @@ defmodule Minga.Core.DiffView do
           {rem_acc, [{new_line, :added, hunk.start_line + new_idx, nil} | add_acc]}
       end)
 
-    Enum.reverse(removed_entries) ++ Enum.reverse(added_entries)
+    Enum.reverse(removed_entries, Enum.reverse(added_entries))
   end
 
   @spec pair_modified_lines([String.t()], [String.t()]) :: [modified_line_pair()]
@@ -540,78 +540,64 @@ defmodule Minga.Core.DiffView do
           modified_line_pair()
         ]
   defp pair_modified_lines(old_lines, new_lines, count, count) do
-    old_lines
-    |> Enum.with_index()
-    |> Enum.zip(Enum.with_index(new_lines))
-    |> Enum.map(fn {{old, old_idx}, {new, new_idx}} ->
-      {:paired, old, new, old_idx, new_idx}
-    end)
+    pair_by_position(old_lines, new_lines, 0, [])
   end
 
   defp pair_modified_lines(old_lines, new_lines, old_count, new_count)
        when old_count * new_count > @max_line_pair_similarity_attempts do
     unpaired_old = Enum.map(old_lines, fn line -> {:unpaired_old, line} end)
 
-    unpaired_new =
-      new_lines
-      |> Enum.with_index()
-      |> Enum.map(fn {line, idx} -> {:unpaired_new, line, idx} end)
+    unpaired_new = Enum.with_index(new_lines, fn line, idx -> {:unpaired_new, line, idx} end)
 
     unpaired_old ++ unpaired_new
   end
 
   defp pair_modified_lines(old_lines, new_lines, _old_count, _new_count) do
-    pair_lines_by_similarity(Enum.with_index(old_lines), Enum.with_index(new_lines), [])
+    pair_lines_by_similarity(old_lines, Enum.with_index(new_lines), [])
   end
 
-  @spec pair_lines_by_similarity([indexed_line()], [indexed_line()], [modified_line_pair()]) :: [
+  @spec pair_by_position(
+          [String.t()],
+          [String.t()],
+          non_neg_integer(),
+          [modified_line_pair()]
+        ) :: [modified_line_pair()]
+  defp pair_by_position([], [], _index, acc), do: Enum.reverse(acc)
+
+  defp pair_by_position([old | olds], [new | news], index, acc) do
+    pair_by_position(olds, news, index + 1, [{:paired, old, new, index} | acc])
+  end
+
+  @spec pair_lines_by_similarity([String.t()], [indexed_line()], [modified_line_pair()]) :: [
           modified_line_pair()
         ]
   defp pair_lines_by_similarity([], new_indexed, acc) do
-    unpaired_new = Enum.map(new_indexed, fn {line, idx} -> {:unpaired_new, line, idx} end)
-    Enum.reverse(acc) ++ unpaired_new
+    Enum.reverse(acc, Enum.map(new_indexed, fn {line, idx} -> {:unpaired_new, line, idx} end))
   end
 
-  defp pair_lines_by_similarity(old_indexed, [], acc) do
-    unpaired_old = Enum.map(old_indexed, fn {line, _idx} -> {:unpaired_old, line} end)
-    Enum.reverse(acc) ++ unpaired_old
+  defp pair_lines_by_similarity(old_lines, [], acc) do
+    Enum.reverse(acc, Enum.map(old_lines, &{:unpaired_old, &1}))
   end
 
-  defp pair_lines_by_similarity([{old, old_idx} | old_rest], [{new, new_idx} | new_rest], acc) do
-    if similar_line?(old, new) do
-      pair_lines_by_similarity(old_rest, new_rest, [{:paired, old, new, old_idx, new_idx} | acc])
-    else
-      pair_unmatched_line(old, old_idx, old_rest, [{new, new_idx} | new_rest], acc)
-    end
-  end
-
-  @spec pair_unmatched_line(String.t(), non_neg_integer(), [indexed_line()], [indexed_line()], [
-          modified_line_pair()
-        ]) :: [modified_line_pair()]
-  defp pair_unmatched_line(old, old_idx, old_rest, new_indexed, acc) do
-    case split_at_similar_line(old, new_indexed, []) do
-      nil ->
+  defp pair_lines_by_similarity([old | old_rest], new_indexed, acc) do
+    case pair_with_first_similar(old, new_indexed, acc) do
+      :no_match ->
         pair_lines_by_similarity(old_rest, new_indexed, [{:unpaired_old, old} | acc])
 
-      {prefix, {new, new_idx}, suffix} ->
-        acc =
-          Enum.reduce(prefix, acc, fn {line, idx}, inner ->
-            [{:unpaired_new, line, idx} | inner]
-          end)
-
-        pair_lines_by_similarity(old_rest, suffix, [{:paired, old, new, old_idx, new_idx} | acc])
+      {:paired, new_rest, next_acc} ->
+        pair_lines_by_similarity(old_rest, new_rest, next_acc)
     end
   end
 
-  @spec split_at_similar_line(String.t(), [indexed_line()], [indexed_line()]) ::
-          {[indexed_line()], indexed_line(), [indexed_line()]} | nil
-  defp split_at_similar_line(_line, [], _prefix), do: nil
+  @spec pair_with_first_similar(String.t(), [indexed_line()], [modified_line_pair()]) ::
+          {:paired, [indexed_line()], [modified_line_pair()]} | :no_match
+  defp pair_with_first_similar(_old, [], _acc), do: :no_match
 
-  defp split_at_similar_line(line, [{candidate, _idx} = entry | rest], prefix) do
-    if similar_line?(line, candidate) do
-      {Enum.reverse(prefix), entry, rest}
+  defp pair_with_first_similar(old, [{new, idx} | rest], acc) do
+    if similar_line?(old, new) do
+      {:paired, rest, [{:paired, old, new, idx} | acc]}
     else
-      split_at_similar_line(line, rest, [entry | prefix])
+      pair_with_first_similar(old, rest, [{:unpaired_new, new, idx} | acc])
     end
   end
 

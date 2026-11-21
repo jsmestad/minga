@@ -160,6 +160,40 @@ defmodule Minga.Core.DiffViewTest do
              end)
     end
 
+    test "ordered pairing commits skipped new lines only when a later match is found" do
+      old = ["aa0", "XXXX", "bb0"]
+      new = ["aa1", "11", "22", "bb1", "bb2"]
+      base = ["context" | old]
+      current = ["context" | new]
+
+      hunk = %{
+        type: :modified,
+        start_line: 1,
+        count: 5,
+        old_start: 1,
+        old_count: 3,
+        old_lines: old
+      }
+
+      side = DiffView.build_side_by_side_from_hunks(base, current, [hunk], 12)
+
+      assert Enum.map(side.line_metadata, &{&1.left_type, &1.right_type, &1.original_line}) == [
+               {:context, :context, 0},
+               {:removed, :added, 1},
+               {:removed, :blank, nil},
+               {:blank, :added, 2},
+               {:blank, :added, 3},
+               {:removed, :added, 4},
+               {:blank, :added, 5}
+             ]
+
+      unified = DiffView.build_from_hunks(base, current, [hunk])
+      assert String.split(unified.text, "\n") == ["context" | old ++ new]
+
+      assert Enum.map(unified.line_metadata, & &1.original_line) ==
+               [0, nil, nil, nil, 1, 2, 3, 4, 5]
+    end
+
     test "clips pane-local word ranges to the visible pane width" do
       result =
         DiffView.build_side_by_side(
