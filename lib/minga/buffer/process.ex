@@ -2498,7 +2498,8 @@ defmodule Minga.Buffer.Process do
           :ok | {:error, :invalid_save_intent | :stale}
   defp validate_save_intent(state, intent) do
     with :ok <- SaveIntent.validate(intent, self()) do
-      if origin_path_matches?(state, intent.origin_path) and target_matches_expectation?(state, intent) do
+      if origin_path_matches?(state, intent.origin_path) and
+           target_matches_expectation?(state, intent) do
         :ok
       else
         {:error, :stale}
