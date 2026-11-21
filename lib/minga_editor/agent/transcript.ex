@@ -150,43 +150,37 @@ defmodule MingaEditor.Agent.Transcript do
   defp build_line_index(_messages, [], _line_offsets), do: []
 
   defp build_line_index(messages, text_lines, line_offsets) do
-    total_lines = Enum.count(text_lines)
-
-    line_to_msg =
-      line_offsets
-      |> Enum.flat_map(fn {msg_idx, start, count} ->
-        for offset <- 0..(count - 1), do: {start + offset, {msg_idx, start, count}}
-      end)
-      |> Map.new()
-
+    messages = List.to_tuple(messages)
     fence_map = build_fence_map(messages, text_lines, line_offsets)
 
-    for line_num <- 0..(total_lines - 1) do
-      case Map.get(line_to_msg, line_num) do
-        {msg_idx, _start_line, _count} ->
-          msg = Enum.at(messages, msg_idx)
-          {msg_idx, classify_line(msg, line_num, fence_map)}
+    {index, _remaining} =
+      Enum.map_reduce(0..(length(text_lines) - 1), {line_offsets, 0}, fn line, cursor ->
+        index_line(line, cursor, messages, fence_map)
+      end)
 
-        nil ->
-          {prev_message_idx(line_offsets, line_num), :empty}
-      end
-    end
+    index
   end
 
-  @spec prev_message_idx([line_offset()], non_neg_integer()) :: non_neg_integer()
-  defp prev_message_idx(line_offsets, line_num) do
-    line_offsets
-    |> Enum.filter(fn {_idx, start, count} -> start + count <= line_num end)
-    |> Enum.max_by(fn {_idx, start, _count} -> start end, fn -> {0, 0, 0} end)
-    |> elem(0)
+  @spec index_line(non_neg_integer(), {[line_offset()], non_neg_integer()}, tuple(), map()) ::
+          {{non_neg_integer(), line_type()}, {[line_offset()], non_neg_integer()}}
+  defp index_line(line, {[{idx, start, count} | rest], _previous}, messages, fences)
+       when line >= start + count,
+       do: index_line(line, {rest, idx}, messages, fences)
+
+  defp index_line(line, {[{idx, start, _count} | _], _previous} = cursor, messages, fences)
+       when line >= start,
+       do: {{idx, classify_line(elem(messages, idx), line, fences)}, cursor}
+
+  defp index_line(_line, {_offsets, previous} = cursor, _messages, _fences) do
+    {{previous, :empty}, cursor}
   end
 
-  @spec build_fence_map([term()], [String.t()], [line_offset()]) ::
+  @spec build_fence_map(tuple(), [String.t()], [line_offset()]) ::
           %{non_neg_integer() => :code | :text}
   defp build_fence_map(messages, text_lines, line_offsets) do
     line_offsets
     |> Enum.filter(fn {idx, _start, _count} ->
-      match?({:assistant, _}, Enum.at(messages, idx))
+      match?({:assistant, _}, elem(messages, idx))
     end)
     |> Enum.flat_map(fn {_idx, start, count} ->
       classify_assistant_fences(text_lines, start, count)

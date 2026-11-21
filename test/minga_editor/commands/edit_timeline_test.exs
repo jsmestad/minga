@@ -204,6 +204,25 @@ defmodule MingaEditor.Commands.EditTimelineTest do
     assert NoticeWorkflow.message(failed) =~ "Review again"
   end
 
+  test "deletion cannot pair its live offer with a recreated empty file", %{state: state, a: path} do
+    File.write!(path, "")
+
+    state =
+      FileEventWorkflow.changed(state, %FileChange{
+        path: path,
+        before_content: "a2",
+        after_content: :absent,
+        tool_call_id: "delete",
+        tool_name: "delete_file"
+      })
+
+    {updated, outcome} = state |> EditTimelineCommands.review_file(path) |> apply_candidate()
+
+    assert outcome.value == {:failed, :snapshot_unavailable}
+    assert updated.workspace.agent_ui.view.preview == state.workspace.agent_ui.view.preview
+    assert File.read!(path) == ""
+  end
+
   test "review acquisition follows human-reprojected post-images rather than historical snapshots",
        %{
          state: state,

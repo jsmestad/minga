@@ -323,6 +323,21 @@ defmodule MingaEditor.Agent.UIState.View do
     end
   end
 
+  defp resolve_review(view, action, %DiffReview{proposal?: true}, _resolved)
+       when action in [:reject_current, :reject_all] do
+    view = view |> replace_preview(Preview.clear(view.preview)) |> set_focus(:chat)
+    {:ok, view, :no_write}
+  end
+
+  defp resolve_review(view, _action, %DiffReview{proposal?: true}, resolved) do
+    if DiffReview.resolved?(resolved) do
+      view = view |> replace_preview(Preview.clear(view.preview)) |> set_focus(:chat)
+      {:ok, view, :no_write}
+    else
+      {:ok, replace_preview(view, Preview.replace_diff(view.preview, resolved)), :no_write}
+    end
+  end
+
   defp resolve_review(view, action, review, resolved_review) do
     original_lines = DiffReview.original_lines(review)
     materialized_lines = DiffReview.materialized_lines(resolved_review)
@@ -495,6 +510,8 @@ defmodule MingaEditor.Agent.UIState.View do
 
   @spec resolve_review_action(DiffReview.t(), diff_resolution_action()) ::
           {:ok, DiffReview.t()} | :no_hunk
+  defp resolve_review_action(%DiffReview{retained?: true}, _action), do: :no_hunk
+
   defp resolve_review_action(%DiffReview{} = review, :accept_current) do
     if DiffReview.current_hunk(review),
       do: {:ok, DiffReview.accept_current(review)},
@@ -538,6 +555,10 @@ defmodule MingaEditor.Agent.UIState.View do
   @doc "Resets the edit timeline and cleans up file-backed entry snapshots."
   @spec reset_edit_timeline(t()) :: t()
   def reset_edit_timeline(%__MODULE__{} = view) do
-    %{view | edit_timeline: EditTimeline.reset(view.edit_timeline)}
+    %{
+      view
+      | edit_timeline: EditTimeline.reset(view.edit_timeline),
+        preview: Preview.clear(view.preview)
+    }
   end
 end

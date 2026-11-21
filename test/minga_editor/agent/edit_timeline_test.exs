@@ -39,6 +39,32 @@ defmodule MingaEditor.Agent.EditTimelineTest do
       assert reconstruct_first_before(timeline, "lib/foo.ex", latest_lines) == first_before_lines
     end
 
+    test "an intervening human edit disables cumulative rollback without dropping entries" do
+      path = "lib/foo.ex"
+
+      timeline =
+        EditTimeline.new()
+        |> EditTimeline.record_edit(file_change(path, "tc1", "before\n", "agent\n"))
+        |> EditTimeline.record_edit(file_change(path, "tc2", "human\nagent\n", "human\nnew\n"))
+        |> EditTimeline.record_edit(file_change(path, "tc3", "human\nnew\n", "human\nlatest\n"))
+
+      assert EditTimeline.discontinuous?(timeline, path)
+      assert EditTimeline.cumulative_hunks(timeline, path) == []
+      assert {:ok, "human\nlatest\n"} = EditTimeline.content_at(timeline, path, 2)
+    end
+
+    test "an edit to a recovered file keeps one row without claiming partial line totals" do
+      path = "lib/recovered.ex"
+
+      timeline =
+        EditTimeline.new()
+        |> EditTimeline.recover_files(%{path => 3})
+        |> EditTimeline.record_edit(file_change(path, "tc4", "restored\n", "new edit\n"))
+
+      assert [%{path: ^path, review_status: :counts_unavailable}] =
+               EditTimeline.file_summaries(timeline)
+    end
+
     test "records entries in order" do
       timeline =
         EditTimeline.new()

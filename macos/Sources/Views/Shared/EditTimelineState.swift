@@ -49,6 +49,8 @@ public final class EditTimelineState {
 
         public var id: String { path }
         public var name: String { URL(fileURLWithPath: path).lastPathComponent }
+        var isReviewing: Bool { reviewStatus == 1 || reviewStatus == 3 }
+        var hasLineCounts: Bool { reviewStatus == 0 || reviewStatus == 1 }
     }
 
     public func update(visible: Bool, viewingIndex: UInt16, wireEntries: [Wire.TimelineEntry], wireFiles: [Wire.TimelineFile], generation: UInt32) {

@@ -24,7 +24,12 @@ defmodule MingaEditor.Agent.DiffReview do
           hunks: [Diff.hunk()],
           current_hunk_index: non_neg_integer(),
           resolutions: %{non_neg_integer() => resolution()},
-          fork_revision: Minga.Buffer.Fork.review_revision() | nil
+          fork_revision: Minga.Buffer.Fork.review_revision() | nil,
+          after_absent?: boolean(),
+          retained?: boolean(),
+          proposal?: boolean(),
+          reviewed_source: MingaAgent.ProjectView.Source.t() | nil,
+          review_target: MingaAgent.Session.ConnectionTarget.t() | nil
         }
 
   @enforce_keys [:path, :after_lines, :hunks]
@@ -34,7 +39,12 @@ defmodule MingaEditor.Agent.DiffReview do
     hunks: [],
     current_hunk_index: 0,
     resolutions: %{},
-    fork_revision: nil
+    fork_revision: nil,
+    after_absent?: false,
+    retained?: false,
+    proposal?: false,
+    reviewed_source: nil,
+    review_target: nil
   ]
 
   @doc """
@@ -44,7 +54,23 @@ defmodule MingaEditor.Agent.DiffReview do
   and initializes with no resolutions and the cursor on the first hunk.
   Returns `nil` if there are no hunks (no changes detected).
   """
-  @spec new(String.t(), String.t(), String.t()) :: t() | nil
+  @spec new(String.t(), String.t() | :absent, String.t() | :absent) :: t() | nil
+  def new(_path, :absent, :absent), do: nil
+
+  def new(path, :absent, after_content) when is_binary(path) and is_binary(after_content) do
+    after_lines = String.split(after_content, "\n")
+    build(path, after_lines, Git.diff_lines([], after_lines))
+  end
+
+  def new(path, before_content, :absent) when is_binary(path) and is_binary(before_content) do
+    hunks = before_content |> String.split("\n") |> Git.diff_lines([]) |> detach_hunk_old_lines()
+
+    case build(path, [], hunks) do
+      nil -> nil
+      review -> %{review | after_absent?: true}
+    end
+  end
+
   def new(path, before_content, after_content)
       when is_binary(path) and is_binary(before_content) and is_binary(after_content) do
     before_lines = String.split(before_content, "\n")
@@ -53,6 +79,23 @@ defmodule MingaEditor.Agent.DiffReview do
 
     build(path, after_lines, hunks)
   end
+
+  @doc "Marks an immutable saved comparison as inspection-only."
+  @spec as_retained(t()) :: t()
+  def as_retained(%__MODULE__{} = review), do: %{review | retained?: true}
+
+  @doc "Marks a proposed edit that has not been written."
+  @spec as_proposal(t()) :: t()
+  def as_proposal(%__MODULE__{} = review), do: %{review | proposal?: true}
+
+  @doc "Binds decisions to the project view owner that supplied the compared bytes."
+  @spec bind_source(
+          t(),
+          MingaAgent.ProjectView.Source.t(),
+          MingaAgent.Session.ConnectionTarget.t()
+        ) :: t()
+  def bind_source(%__MODULE__{} = review, %MingaAgent.ProjectView.Source{} = source, target),
+    do: %{review | reviewed_source: source, review_target: target}
 
   @doc "Creates a DiffReview from authoritative precomputed cumulative hunks."
   @spec from_hunks(String.t(), String.t(), [Diff.hunk()]) :: t() | nil
@@ -395,7 +438,11 @@ defmodule MingaEditor.Agent.DiffReview do
       after_lines: new_after_lines,
       hunks: new_hunks,
       current_hunk_index: current_idx,
-      resolutions: new_resolutions
+      resolutions: new_resolutions,
+      reviewed_source: review.reviewed_source,
+      review_target: review.review_target,
+      retained?: review.retained?,
+      after_absent?: review.after_absent? and new_after_lines == []
     }
   end
 

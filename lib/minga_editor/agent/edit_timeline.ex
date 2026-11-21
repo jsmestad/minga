@@ -40,12 +40,15 @@ defmodule MingaEditor.Agent.EditTimeline do
           generation: non_neg_integer(),
           entries: %{String.t() => [Entry.t()]},
           file_order: [String.t()],
-          cumulative_hunks: %{String.t() => [Minga.Core.Diff.hunk()]},
+          recovered_files: %{String.t() => pos_integer()},
+          cumulative_hunks: %{
+            String.t() => [Minga.Core.Diff.hunk()] | :discontinuous | :presence_change
+          },
           postimage_digests: %{String.t() => postimage_digest()},
           viewing: %{String.t() => non_neg_integer() | nil}
         }
 
-  @type review_status :: :pending | :reviewing
+  @type review_status :: :pending | :counts_unavailable
 
   @type file_summary :: %{
           path: String.t(),
@@ -58,6 +61,7 @@ defmodule MingaEditor.Agent.EditTimeline do
   defstruct generation: 0,
             entries: %{},
             file_order: [],
+            recovered_files: %{},
             cumulative_hunks: %{},
             postimage_digests: %{},
             viewing: %{}
@@ -73,14 +77,8 @@ defmodule MingaEditor.Agent.EditTimeline do
         tool_call_id: tool_call_id,
         tool_name: tool_name
       }) do
-    before_lines = String.split(before_content, "\n")
-    after_lines = String.split(after_content, "\n")
-
-    hunks =
-      original_lines(timeline, path, before_lines)
-      |> Git.diff_lines(after_lines)
-      |> detach_hunk_old_lines()
-
+    hunks = edit_hunks(timeline, path, before_content, after_content)
+    snapshot = if after_content == :absent, do: "", else: after_content
     existing = Map.get(timeline.entries, path, [])
     index = Enum.count(existing)
 
@@ -89,7 +87,7 @@ defmodule MingaEditor.Agent.EditTimeline do
       tool_call_id: tool_call_id,
       tool_name: tool_name,
       timestamp: System.monotonic_time(:millisecond),
-      snapshot: DiffSnapshot.from_content(after_content)
+      snapshot: DiffSnapshot.from_content(snapshot)
     }
 
     file_order =
@@ -105,8 +103,55 @@ defmodule MingaEditor.Agent.EditTimeline do
         generation: next_generation(),
         cumulative_hunks: Map.put(timeline.cumulative_hunks, path, hunks),
         postimage_digests:
-          Map.put(timeline.postimage_digests, path, :crypto.hash(:sha256, after_content))
+          Map.put(timeline.postimage_digests, path, :crypto.hash(:sha256, snapshot))
     }
+  end
+
+  @spec edit_hunks(t(), String.t(), binary() | :absent, binary() | :absent) ::
+          [Minga.Core.Diff.hunk()] | :discontinuous | :presence_change
+  defp edit_hunks(_timeline, _path, :absent, _after_content), do: :presence_change
+  defp edit_hunks(_timeline, _path, _before_content, :absent), do: :presence_change
+
+  defp edit_hunks(timeline, path, before_content, after_content) do
+    case Map.get(timeline.cumulative_hunks, path) do
+      :presence_change ->
+        :presence_change
+
+      _ ->
+        cumulative_edit(
+          timeline,
+          path,
+          before_content,
+          String.split(before_content, "\n"),
+          String.split(after_content, "\n")
+        )
+    end
+  end
+
+  @doc "Reports when exact saved file presence is required to review a path."
+  @spec presence_change?(t(), String.t()) :: boolean()
+  def presence_change?(%__MODULE__{cumulative_hunks: hunks}, path),
+    do: Map.get(hunks, path) == :presence_change
+
+  @spec cumulative_edit(t(), String.t(), binary(), [String.t()], [String.t()]) ::
+          [Minga.Core.Diff.hunk()] | :discontinuous
+  defp cumulative_edit(timeline, path, before_content, before_lines, after_lines) do
+    previous_digest = postimage_digest(timeline, path)
+
+    case Map.get(timeline.cumulative_hunks, path) do
+      :discontinuous ->
+        :discontinuous
+
+      _hunks ->
+        if previous_digest == nil or previous_digest == :crypto.hash(:sha256, before_content) do
+          timeline
+          |> original_lines(path, before_lines)
+          |> Git.diff_lines(after_lines)
+          |> detach_hunk_old_lines()
+        else
+          :discontinuous
+        end
+    end
   end
 
   @spec reproject(t(), String.t(), [String.t()], [String.t()]) :: t()
@@ -212,11 +257,44 @@ defmodule MingaEditor.Agent.EditTimeline do
     entries |> Map.get(path, []) |> Enum.count()
   end
 
+  @doc "Installs recovered file membership without changing selection or live entries."
+  @spec recover_files(t(), %{String.t() => pos_integer()}) :: t()
+  def recover_files(%__MODULE__{recovered_files: files} = timeline, files), do: timeline
+
+  def recover_files(%__MODULE__{} = timeline, files) do
+    %{timeline | recovered_files: files, generation: next_generation()}
+  end
+
+  @doc "Checks whether a visible Changes file can be activated."
+  @spec changed_file?(t(), String.t()) :: boolean()
+  def changed_file?(%__MODULE__{} = timeline, path) do
+    Map.has_key?(timeline.entries, path) or Map.has_key?(timeline.recovered_files, path)
+  end
+
+  @doc "Checks whether review must start from the saved task history."
+  @spec recovered_file?(t(), String.t()) :: boolean()
+  def recovered_file?(%__MODULE__{recovered_files: files}, path), do: Map.has_key?(files, path)
+
   @spec file_summaries(t()) :: [file_summary()]
   def file_summaries(%__MODULE__{} = timeline) do
-    Enum.flat_map(timeline.file_order, fn path ->
-      file_summary(timeline, {path, Map.fetch!(timeline.entries, path)})
-    end)
+    live =
+      Enum.flat_map(timeline.file_order, fn path ->
+        file_summary(timeline, {path, Map.fetch!(timeline.entries, path)})
+      end)
+
+    recovered =
+      for {path, count} <- Enum.sort(timeline.recovered_files),
+          not Map.has_key?(timeline.entries, path) do
+        %{
+          path: path,
+          entry_count: count,
+          lines_added: 0,
+          lines_removed: 0,
+          review_status: :counts_unavailable
+        }
+      end
+
+    live ++ recovered
   end
 
   @spec reset(t()) :: t()
@@ -242,8 +320,16 @@ defmodule MingaEditor.Agent.EditTimeline do
 
   @spec cumulative_hunks(t(), String.t()) :: [Minga.Core.Diff.hunk()]
   def cumulative_hunks(%__MODULE__{cumulative_hunks: hunks}, path) do
-    Map.get(hunks, path, [])
+    case Map.get(hunks, path) do
+      hunks when is_list(hunks) -> hunks
+      _unknown -> []
+    end
   end
+
+  @doc "Reports whether the attributed edits are separated by an unknown change."
+  @spec discontinuous?(t(), String.t()) :: boolean()
+  def discontinuous?(%__MODULE__{cumulative_hunks: hunks}, path),
+    do: Map.get(hunks, path) == :discontinuous
 
   @doc "Returns the latest cumulative post-image fingerprint, including human reprojection."
   @spec postimage_digest(t(), String.t()) :: postimage_digest() | nil
@@ -279,10 +365,16 @@ defmodule MingaEditor.Agent.EditTimeline do
     [
       %{
         path: path,
-        entry_count: Enum.count(entries),
+        entry_count: max(Enum.count(entries), Map.get(timeline.recovered_files, path, 0)),
         lines_added: added,
         lines_removed: removed,
-        review_status: :pending
+        review_status:
+          if(
+            recovered_file?(timeline, path) or discontinuous?(timeline, path) or
+              presence_change?(timeline, path),
+            do: :counts_unavailable,
+            else: :pending
+          )
       }
     ]
   end

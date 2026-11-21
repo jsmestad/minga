@@ -499,7 +499,7 @@ func (m Model) renderEditTimeline(timeline protocol.EditTimeline) []string {
 		toolWidth := max(width-idxWidth-ageWidth, 1)
 		lines = append(lines, tableHeaderRow(theme, width, []tableCell{
 			{text: "󰋚 #", width: idxWidth},
-			{text: "Tool", width: toolWidth},
+			{text: "Tool  " + m.timelineBrowseLabel(timeline.Generation), width: toolWidth},
 			{text: "Age", width: ageWidth},
 		}))
 		for _, entry := range timeline.Entries[:min(len(timeline.Entries), m.timelineFileRows())] {
@@ -534,9 +534,18 @@ func (m Model) timelineFileStart(timeline protocol.EditTimeline) int {
 	return 0
 }
 
+func (m Model) timelineBrowseLabel(generation uint32) string {
+	const label = "[All Changes]"
+	if generation != 0 {
+		return m.zones.Mark(timelineBrowseZone, label)
+	}
+	return label
+}
+
 func (m Model) renderEditTimelineFiles(timeline protocol.EditTimeline, theme palette, width int) []string {
+	browse := m.timelineBrowseLabel(timeline.Generation)
 	header := tableHeaderRow(theme, width, []tableCell{
-		{text: fmt.Sprintf("Review files (%d)  [e prev  ]e next  wheel", len(timeline.Files)), width: width},
+		{text: fmt.Sprintf("Review files (%d)  %s  ]F  wheel", len(timeline.Files), browse), width: width},
 	})
 	rows := m.timelineFileRows()
 	start := m.timelineFileStart(timeline)
@@ -548,7 +557,7 @@ func (m Model) renderEditTimelineFiles(timeline protocol.EditTimeline, theme pal
 		lines = append(lines, renderPadded(style, "No changed files", width))
 	}
 	for _, file := range timeline.Files[start:end] {
-		selected := file.ReviewStatus == 1
+		selected := file.ReviewStatus == 1 || file.ReviewStatus == 3
 		rowStyle := lipgloss.NewStyle().Foreground(theme.PopupText()).Background(theme.PopupSurface()).ColorWhitespace(true)
 		actionStyle := rowStyle.Bold(true).Foreground(theme.Accent())
 		if selected {
@@ -573,10 +582,14 @@ func (m Model) renderEditTimelineFiles(timeline protocol.EditTimeline, theme pal
 		}
 		var detail string
 		if withStats {
+			stats := "No stats"
+			if file.ReviewStatus == 0 || file.ReviewStatus == 1 {
+				stats = fmt.Sprintf("+%d/-%d", file.LinesAdded, file.LinesRemoved)
+			}
 			detail = tableCellsText([]tableCell{
 				{text: pathLabel, width: detailWidth - 18},
 				{text: fmt.Sprintf("%d", file.EntryCount), width: 6},
-				{text: fmt.Sprintf("+%d/-%d", file.LinesAdded, file.LinesRemoved), width: 12},
+				{text: stats, width: 12},
 			})
 		} else {
 			detail = fit(pathLabel, detailWidth)

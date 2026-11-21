@@ -90,6 +90,38 @@ defmodule MingaAgent.ProjectView.Overlay do
     end
   end
 
+  @doc "Reads the content from the exact overlay owner returned with it."
+  @spec review_source(ProjectView.t(), String.t()) ::
+          {:ok, Source.t(), binary()} | {:error, term()}
+  def review_source(%ProjectView{backend: __MODULE__} = view, relative_path) do
+    with {:ok, source} <- ProjectView.resolve_source(view, relative_path),
+         {:ok, content} <- read_source(source) do
+      {:ok, source, content}
+    end
+  end
+
+  @doc "Mutates only if the currently selected overlay owner matches the reviewed source."
+  @spec conditional_review_mutate(
+          ProjectView.t(),
+          String.t(),
+          Source.t(),
+          Minga.Buffer.FileMutation.expectation(),
+          Minga.Buffer.FileMutation.operation()
+        ) :: {:ok, Minga.Buffer.FileMutation.Receipt.t()} | {:error, term()}
+  def conditional_review_mutate(
+        %ProjectView{backend: __MODULE__} = view,
+        relative_path,
+        reviewed,
+        expected,
+        operation
+      ) do
+    case ProjectView.resolve_source(view, relative_path) do
+      {:ok, ^reviewed} -> mutate_source(reviewed, expected, operation)
+      {:ok, %Source{}} -> {:error, :review_source_changed}
+      {:error, _reason} = error -> error
+    end
+  end
+
   @spec mutate_source(
           Source.t(),
           Minga.Buffer.FileMutation.expectation(),

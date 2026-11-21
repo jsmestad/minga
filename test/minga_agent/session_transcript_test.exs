@@ -155,8 +155,8 @@ defmodule MingaAgent.SessionTranscriptTest do
       send_provider_event(session, event)
 
       assert_receive {:agent_event, _,
-                      {:file_changed, "lib/foo.ex", "old content", "new content", "tc1",
-                       _tool_name}},
+                      {:file_changed, _session_id, "lib/foo.ex", "old content", "new content",
+                       "tc1", _tool_name}},
                      200
     end
 
@@ -196,8 +196,8 @@ defmodule MingaAgent.SessionTranscriptTest do
       :sys.get_state(session)
 
       assert_receive {:agent_event, _,
-                      {:file_changed, "lib/foo.ex", "old content", "new content", "tc1",
-                       _tool_name}},
+                      {:file_changed, _session_id, "lib/foo.ex", "old content", "new content",
+                       "tc1", _tool_name}},
                      200
 
       tool_call =

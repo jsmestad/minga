@@ -3,6 +3,7 @@ defmodule MingaAgent.Session.FileChange do
 
   alias MingaAgent.ArtifactStore
   alias MingaAgent.Tool.Output.Codec
+  alias MingaAgent.Tool.Output.Range
   alias MingaAgent.Tool.Output.Reference
   alias MingaAgent.Tool.FileMutationResult
   alias MingaAgent.Tool.Output
@@ -135,6 +136,49 @@ defmodule MingaAgent.Session.FileChange do
   def references(%__MODULE__{before: before_side, after: after_side}) do
     for %Reference{} = reference <- [before_side, after_side], do: reference
   end
+
+  @doc "Counts attributed mutations by path without reading artifact bytes."
+  @spec changed_file_counts([t()]) :: %{String.t() => pos_integer()}
+  def changed_file_counts(changes), do: Enum.frequencies_by(changes, & &1.path)
+
+  @doc "Finds the endpoints of an uninterrupted attributed lineage, newest change first."
+  @spec cumulative_sides([t()], String.t()) ::
+          {:ok, side(), side()} | {:error, :no_file_change | :discontinuous_file_change}
+  def cumulative_sides(changes, path) do
+    Enum.reduce_while(changes, {:error, :no_file_change}, fn
+      %__MODULE__{path: ^path, before: before_side, after: after_side},
+      {:error, :no_file_change} ->
+        {:cont, {:ok, before_side, after_side}}
+
+      %__MODULE__{path: ^path, before: before_side, after: after_side},
+      {:ok, next_before, latest} ->
+        if same_content?(after_side, next_before),
+          do: {:cont, {:ok, before_side, latest}},
+          else: {:halt, {:error, :discontinuous_file_change}}
+
+      _unrelated, acc ->
+        {:cont, acc}
+    end)
+  end
+
+  @spec same_content?(side(), side()) :: boolean()
+  defp same_content?(:absent, :absent), do: true
+  defp same_content?(%Reference{sha256: hash}, %Reference{sha256: hash}), do: true
+  defp same_content?(_first, _second), do: false
+
+  @doc "Fetches a complete bounded review side. Missing content never becomes an empty file."
+  @spec read_side(GenServer.server(), side()) :: {:ok, binary() | :absent} | {:error, term()}
+  def read_side(_store, :absent), do: {:ok, :absent}
+  def read_side(_store, :unavailable), do: {:error, :snapshot_unavailable}
+
+  def read_side(store, %Reference{bytes: size} = reference) when size <= 65_536 do
+    with {:ok, range} <- Range.new(:full, :bytes, 0, size, size),
+         {:ok, %{bytes: bytes}} <- ArtifactStore.fetch(store, reference, range) do
+      {:ok, bytes}
+    end
+  end
+
+  def read_side(_store, %Reference{}), do: {:error, :snapshot_too_large}
 
   defp encode_side(:absent), do: "absent"
   defp encode_side(:unavailable), do: "unavailable"

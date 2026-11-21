@@ -60,6 +60,25 @@ defmodule MingaEditor.Agent.Events do
 
   def dispatch(
         %EditorState{} = state,
+        pid,
+        {:file_changed, conversation, path, before_content, after_content, tool_call_id,
+         tool_name}
+      ) do
+    case state.workspace.agent_ui.connection do
+      %{target: %{session: ^pid}, conversation: ^conversation} when is_reference(conversation) ->
+        dispatch(
+          state,
+          pid,
+          {:file_changed, path, before_content, after_content, tool_call_id, tool_name}
+        )
+
+      _other ->
+        state
+    end
+  end
+
+  def dispatch(
+        %EditorState{} = state,
         _session_pid,
         {:file_changed, path, before_content, after_content, tool_call_id, tool_name}
       ) do

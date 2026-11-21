@@ -1,7 +1,8 @@
 defmodule Minga.RenderModel.UI.EditTimeline.FileEntry do
   @moduledoc false
 
-  @type review_status :: :pending | :reviewing
+  @type review_status ::
+          :pending | :reviewing | :counts_unavailable | :reviewing_counts_unavailable
 
   @type t :: %__MODULE__{
           path: String.t(),

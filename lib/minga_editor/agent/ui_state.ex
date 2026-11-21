@@ -60,9 +60,22 @@ defmodule MingaEditor.Agent.UIState do
       |> Panel.set_credential_readiness(connection.credential_readiness)
       |> Panel.project_model_selection(connection.model_selection)
 
+    state = retire_previous_changes(state, connection)
+
     prompt = current_connection_prompt(state.connection_prompt, connection)
     %{state | connection: connection, panel: panel, connection_prompt: prompt}
   end
+
+  @spec retire_previous_changes(t(), ConnectionSnapshot.t()) :: t()
+  defp retire_previous_changes(
+         %{connection: %ConnectionSnapshot{target: %{session: pid}, conversation: previous}} =
+           state,
+         %ConnectionSnapshot{target: %{session: pid}, conversation: current}
+       )
+       when is_reference(current) and previous != current,
+       do: reset_edit_timeline(state)
+
+  defp retire_previous_changes(state, _connection), do: state
 
   @doc "Installs acknowledgement metadata without changing the live prompt buffer."
   @spec project_draft_save(t(), MingaEditor.Agent.DraftSave.t() | nil) :: t()

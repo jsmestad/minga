@@ -11,6 +11,8 @@ defmodule MingaEditor.Commands.AgentSubStates do
   alias MingaEditor.Agent.ChatSearch
   alias MingaAgent.FileMention
   alias MingaAgent.ProjectView
+  alias MingaAgent.ProjectView.Overlay
+  alias MingaAgent.ProjectView.Source
   alias MingaAgent.Session
   alias MingaAgent.ToolApproval.Public, as: PublicApproval
   alias MingaAgent.ToolApproval.Target, as: ApprovalTarget
@@ -580,7 +582,7 @@ defmodule MingaEditor.Commands.AgentSubStates do
           {:error, reason} ->
             MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
               state,
-              "Could not reject hunk in #{path}: #{inspect(reason)}"
+              rejection_failure(path, reason)
             )
         end
 
@@ -592,25 +594,81 @@ defmodule MingaEditor.Commands.AgentSubStates do
     end
   end
 
+  @spec rejection_failure(String.t(), term()) :: String.t()
+  defp rejection_failure(path, reason)
+       when reason in [
+              :stale_target,
+              :stale_revision,
+              :review_source_changed,
+              :already_exists,
+              :not_found
+            ] do
+    "Could not reject hunk in #{path}: the file or its editor changed. Open Review again. No changes were written."
+  end
+
+  defp rejection_failure(path, reason), do: "Could not reject hunk in #{path}: #{inspect(reason)}"
+
   @spec persist_diff_resolution(state(), String.t(), String.t()) :: :ok | {:error, term()}
   defp persist_diff_resolution(state, path, content) do
     case active_project_view(state) do
       %ProjectView{} = project_view ->
-        persist_project_view_resolution(project_view, path, content)
+        review = MingaEditor.Agent.View.Preview.diff_review(state.workspace.agent_ui.view.preview)
+        persist_project_view_resolution(project_view, path, review, content)
 
       nil ->
-        File.write(path, content)
+        {:error, :editable_view_unavailable}
     end
   end
 
-  @spec persist_project_view_resolution(ProjectView.t(), String.t(), String.t()) ::
+  @spec persist_project_view_resolution(
+          ProjectView.t(),
+          String.t(),
+          MingaEditor.Agent.DiffReview.t(),
+          String.t()
+        ) ::
           :ok | {:error, term()}
-  defp persist_project_view_resolution(%ProjectView{} = project_view, path, content) do
+  defp persist_project_view_resolution(
+         %ProjectView{backend: Overlay} = project_view,
+         path,
+         %{
+           reviewed_source: %Source{} = source,
+           review_target: %Session.ConnectionTarget{} = target
+         } = review,
+         content
+       ) do
     case review_relative_path(project_view, path) do
-      {:ok, relative_path} -> ProjectView.write_file(project_view, relative_path, content)
-      :outside_project -> File.write(path, content)
-      {:error, reason} -> {:error, reason}
+      {:ok, relative_path} ->
+        {revision, operation} = review_mutation(review, source.source_id, content)
+
+        Session.apply_review_mutation(
+          target,
+          project_view,
+          relative_path,
+          source,
+          revision,
+          operation
+        )
+
+      :outside_project ->
+        {:error, :outside_project}
+
+      {:error, _reason} = error ->
+        error
     end
+  end
+
+  defp persist_project_view_resolution(_view, _path, _review, _content),
+    do: {:error, :review_source_unavailable}
+
+  @spec review_mutation(MingaEditor.Agent.DiffReview.t(), String.t(), String.t()) ::
+          {Minga.Buffer.FileMutation.expectation(), Minga.Buffer.FileMutation.operation()}
+  defp review_mutation(%{after_absent?: true}, _source_id, content),
+    do: {:absent, {:create, content}}
+
+  defp review_mutation(%{after_lines: lines}, source_id, content) do
+    previous = Enum.join(lines, "\n")
+    revision = Minga.Buffer.FileMutation.revision(previous, nil, {:project_view, source_id})
+    {revision, {:replace, content}}
   end
 
   @spec active_project_view(state()) :: ProjectView.t() | nil

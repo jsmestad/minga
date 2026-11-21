@@ -34,35 +34,48 @@ defmodule MingaAgent.Session.Connection do
 
   @type t :: %__MODULE__{
           epoch: reference(),
+          conversation: reference(),
           operation: operation(),
           resolver_problem: ModelResolver.resolution_error() | nil,
           provider_problem: Event.Error.kind() | :startup_failed | nil,
           published: ConnectionSnapshot.t() | nil
         }
 
-  @enforce_keys [:epoch]
-  defstruct [:epoch, :resolver_problem, :provider_problem, :published, operation: :none]
+  @enforce_keys [:epoch, :conversation]
+  defstruct [
+    :epoch,
+    :conversation,
+    :resolver_problem,
+    :provider_problem,
+    :published,
+    operation: :none
+  ]
 
   @doc "Creates an isolated live target generation."
   @spec new(ModelResolver.resolution_error() | nil) :: t()
-  def new(problem \\ nil), do: %__MODULE__{epoch: make_ref(), resolver_problem: problem}
+  def new(problem \\ nil),
+    do: %__MODULE__{epoch: make_ref(), conversation: make_ref(), resolver_problem: problem}
 
   @doc "Invalidates a committed conversation replacement, including old commit receipts."
   @spec invalidate(t()) :: t()
-  def invalidate(%__MODULE__{operation: {:pending, ref, target, _, _, _}} = connection),
+  def invalidate(%__MODULE__{} = connection),
+    do: invalidate_epoch(%{connection | conversation: make_ref()})
+
+  @spec invalidate_epoch(t()) :: t()
+  defp invalidate_epoch(%__MODULE__{operation: {:pending, ref, target, _, _, _}} = connection),
     do: %{connection | epoch: make_ref(), operation: {:cancelled, ref, target}}
 
-  def invalidate(%__MODULE__{operation: {:committed, _, _}} = connection),
+  defp invalidate_epoch(%__MODULE__{operation: {:committed, _, _}} = connection),
     do: %{connection | epoch: make_ref(), operation: :none}
 
-  def invalidate(%__MODULE__{} = connection), do: %{connection | epoch: make_ref()}
+  defp invalidate_epoch(%__MODULE__{} = connection), do: %{connection | epoch: make_ref()}
 
   @doc "Changes selection generation without losing a successful writer receipt."
   @spec selection_changed(t()) :: t()
   def selection_changed(%__MODULE__{operation: {:committed, _, _}} = connection),
     do: %{connection | epoch: make_ref()}
 
-  def selection_changed(%__MODULE__{} = connection), do: invalidate(connection)
+  def selection_changed(%__MODULE__{} = connection), do: invalidate_epoch(connection)
 
   @doc "Admits a new operation after the caller has validated its method and target."
   @spec begin(t(), ConnectionTarget.t(), method(), dependency(), notification()) ::

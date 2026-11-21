@@ -516,6 +516,44 @@ defmodule MingaEditor.Agent.EventRoutingTest do
       end
     end
 
+    test "same-process conversation restore clears the old review and ignores a queued file change" do
+      pid = self()
+      path = "/tmp/agent-a.ex"
+
+      connection = %MingaAgent.Session.ConnectionSnapshot{
+        target: MingaAgent.Session.ConnectionTarget.new(pid, "conversation-a", nil, make_ref()),
+        conversation: make_ref(),
+        credential_readiness: :checking,
+        model_selection: nil,
+        provider_phase: :stopped,
+        operation: :idle,
+        problem: nil
+      }
+
+      state = background_input_state(keymap_scope: :agent, agentic_active: true)
+      ui = UIState.project_connection(state.workspace.agent_ui, connection)
+      stale = {:file_changed, connection.conversation, path, "a0", "a1", "a1", "edit"}
+
+      state =
+        state
+        |> TraditionalWorkflow.install_agent_ui(ui)
+        |> Events.dispatch(pid, stale)
+        |> select_retained_review(path)
+
+      assert_retained_review(state, path, "a0", "a1")
+
+      restored = %{
+        connection
+        | target: MingaAgent.Session.ConnectionTarget.new(pid, "conversation-a", nil, make_ref()),
+          conversation: make_ref()
+      }
+
+      ui = UIState.project_connection(state.workspace.agent_ui, restored)
+      state = state |> TraditionalWorkflow.install_agent_ui(ui) |> Events.dispatch(pid, stale)
+      assert EditTimeline.file_summaries(state.workspace.agent_ui.view.edit_timeline) == []
+      assert Preview.diff_review(state.workspace.agent_ui.view.preview) == nil
+    end
+
     test "another file's revisions leave the selected diff and its reading anchor intact" do
       state =
         background_input_state(

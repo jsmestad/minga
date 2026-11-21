@@ -6,6 +6,7 @@ public struct EditTimelineView: View {
         case navigate(generation: UInt32, entryID: String)
         /// Requests the cumulative review for the exact path in this timeline offer.
         case reviewFile(generation: UInt32, path: String)
+        case browseFiles
     }
 
     public init(state: EditTimelineState, sendAction: ViewActionHandler<Action>?) {
@@ -22,6 +23,22 @@ public struct EditTimelineView: View {
     private let summaryWidth: CGFloat = 100
 
     public var body: some View {
+        HStack(spacing: 0) {
+            if state.visible {
+                Button("All Changes") { sendAction?(.browseFiles) }
+                    .buttonStyle(.plain)
+                    .font(Typography.font(.small, weight: .semibold))
+                    .foregroundStyle(themeColors.accent)
+                    .accessibilityLabel("All Changes")
+                    .padding(.horizontal, Spacing.md)
+                    .disabled(sendAction == nil || state.generation == 0)
+                    .help("Search all Agent changed files")
+            }
+            timelineBody
+        }
+    }
+
+    @ViewBuilder private var timelineBody: some View {
         if state.visible && !state.files.isEmpty {
             let generation = state.generation
             // Stable widths keep count updates and appended files from moving controls. The scroll view retains the reader's position; new offers never scroll it.
@@ -33,7 +50,7 @@ public struct EditTimelineView: View {
                         } label: {
                             HStack(spacing: Spacing.sm) {
                                 Circle()
-                                    .fill(file.reviewStatus == 1 ? themeColors.accent : themeColors.editorFg.opacity(0.35))
+                                    .fill(file.isReviewing ? themeColors.accent : themeColors.editorFg.opacity(0.35))
                                     .frame(width: 6, height: 6)
 
                                 Text("Review")
@@ -48,7 +65,9 @@ public struct EditTimelineView: View {
                                     .truncationMode(.middle)
                                     .frame(maxWidth: .infinity, alignment: .leading)
 
-                                Text("\(file.entryCount) +\(file.linesAdded)/-\(file.linesRemoved)")
+                                Text(file.hasLineCounts
+                                     ? "\(file.entryCount) +\(file.linesAdded)/-\(file.linesRemoved)"
+                                     : "\(file.entryCount) edits")
                                     .font(Typography.font(.caption, design: .monospaced))
                                     .foregroundStyle(themeColors.editorFg.opacity(0.65))
                                     .lineLimit(1)
@@ -64,7 +83,9 @@ public struct EditTimelineView: View {
                         .buttonStyle(.plain)
                         .disabled(sendAction == nil || generation == 0)
                         .accessibilityLabel("Review \(file.path)")
-                        .accessibilityValue("\(file.entryCount) edits, \(file.linesAdded) lines added, \(file.linesRemoved) lines removed")
+                        .accessibilityValue(file.hasLineCounts
+                                            ? "\(file.entryCount) edits, \(file.linesAdded) lines added, \(file.linesRemoved) lines removed"
+                                            : "\(file.entryCount) edits, line counts unavailable")
                         .accessibilityHint("Opens cumulative changes for this file")
                         .help("Review cumulative changes in \(file.path)")
                     }

@@ -110,6 +110,7 @@ public enum FrontendActionComposition {
         switch action {
         case .navigate(let generation, let entryID): .semanticItemActivate(surface: .timeline, intent: 1, generation: generation, itemID: Data(entryID.utf8))
         case .reviewFile(let generation, let path): .semanticItemActivate(surface: .timeline, intent: 2, generation: generation, itemID: Data(path.utf8))
+        case .browseFiles: .executeCommand(name: "timeline_browse_files")
         }
     }
 

@@ -28,6 +28,7 @@ defmodule MingaAgent.Session.ConnectionSnapshot do
           | :provider_failure
   @type t :: %__MODULE__{
           target: ConnectionTarget.t(),
+          conversation: reference() | nil,
           credential_readiness: Credentials.readiness(),
           model_selection: ModelSelection.t() | nil,
           provider_phase: :stopped | :starting | :running | :retrying | :terminal_failure,
@@ -47,6 +48,7 @@ defmodule MingaAgent.Session.ConnectionSnapshot do
   ]
   defstruct [
     :target,
+    :conversation,
     :credential_readiness,
     :model_selection,
     :provider_phase,
@@ -55,6 +57,11 @@ defmodule MingaAgent.Session.ConnectionSnapshot do
     persistent_drafts?: false,
     remote_composer_drafts?: false
   ]
+
+  @doc "Identifies this live conversation instance independently of model selection."
+  @spec project_conversation(t(), reference()) :: t()
+  def project_conversation(%__MODULE__{} = snapshot, conversation),
+    do: %{snapshot | conversation: conversation}
 
   @doc "Projects already-owned facts without discovery or credential acquisition."
   @spec new(

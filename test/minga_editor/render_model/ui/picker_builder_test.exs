@@ -63,6 +63,36 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilderTest do
     assert :binary.match(packet, notice) != :nomatch
   end
 
+  test "Changes encodes a full long-path offer and retains exact activation identity" do
+    source = MingaEditor.UI.Picker.AgentChangesSource
+    offer = MingaEditor.State.Picker.ActivationOffer
+    prefix = String.duplicate("folder/", 100)
+    files = Enum.map(1..100, &%{path: "#{prefix}file-#{&1}.ex", entry_count: 1})
+    path = "#{prefix}file-100.ex"
+
+    items =
+      TestHelpers.base_state()
+      |> PickerContext.from_editor_state(%{files: files, origin: :fixture})
+      |> source.candidates()
+
+    picker = PickerState.new(items, title: source.title(), max_visible: 100)
+
+    model =
+      picker |> picker_modal(source, nil, "", :ready) |> build_context() |> PickerBuilder.build()
+
+    assert length(model.items) == 100
+    assert is_binary(PickerEncoder.encode_command(model))
+
+    searched = PickerState.filter(picker, path)
+    modal = {:picker, %{picker_ui: ui}} = picker_modal(searched, source, nil, "", :ready)
+    model = modal |> build_context() |> PickerBuilder.build()
+    assert is_binary(PickerEncoder.encode_command(model))
+    assert [%{activation_id: id} | _] = model.items
+
+    assert {:ok, _, %Item{id: ^path}} =
+             offer.resolve_item(ui.activation_offer, model.activation_generation, id)
+  end
+
   describe "build/1" do
     test "returns hidden picker when modal is not a picker" do
       model = PickerBuilder.build(build_context(nil))

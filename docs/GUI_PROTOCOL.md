@@ -1199,11 +1199,13 @@ Per entry ID (same order as entries):
 ```
 
 `viewing_index` is `0xFFFF` when the timeline is live at the latest state. When `file_count` is greater than zero, frontends should show the aggregate changed-file view and use the per-file rows for navigation and review status.
-`review_status`: 0 = pending, 1 = reviewing.
+`review_status`: 0 = pending, 1 = reviewing, 2 = pending with line counts unavailable, 3 = reviewing with line counts unavailable. Ignore both line count fields for statuses 2 and 3.
 
 The opaque entry ID binds the entry to its file. The timeline owner advances `generation` when entries change or the timeline resets. Activate with `semantic_item_activate` surface 5, intent 1. Navigation uses the resolved file and entry, never the active buffer or a list offset. Hidden timelines retain the existing header and empty-list fields and omit the identity trailer.
 
 An active Agent chat or Review body keeps the timeline visible even when both lists are empty. Surface 24 has its own persistent placement, outside the floating-overlay winner. The terminal receives a fixed three-row band above status and any visible minibuffer, with one locally scrollable file row; file count does not move the composer or footer actions. Native chrome keeps a fixed height outside its reported content grid. Outside Agent bodies the timeline is hidden without discarding retained changes.
+
+The inline file list is bounded by this frame's row and byte limits. **All Changes** opens a searchable list of all attributed files, including files omitted from the inline strip. The picker binds each activation to the displayed conversation, Changes generation, and exact file path.
 
 ## GUI Action Input Opcode (Frontend → BEAM)
 

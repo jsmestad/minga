@@ -11,6 +11,8 @@ defmodule MingaEditor.AgentLifecycle do
 
   alias MingaAgent.Checklist
   alias MingaEditor.Agent.Activity
+  alias MingaEditor.Agent.ConnectionAction
+  alias MingaEditor.Agent.EditTimeline
   alias MingaEditor.Agent.MarkdownHighlight
   alias MingaEditor.Agent.PromptBuffer
   alias MingaEditor.Agent.ProvenanceJump
@@ -20,6 +22,7 @@ defmodule MingaEditor.AgentLifecycle do
   alias MingaAgent.Config, as: AgentConfig
   alias MingaAgent.Session, as: AgentSession
   alias MingaAgent.Session.ConnectionSnapshot
+  alias MingaAgent.Session.ConnectionTarget
   alias MingaAgent.Session.Transcript.{Changes, Cursor, Snapshot}
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.View.Preview
@@ -199,10 +202,14 @@ defmodule MingaEditor.AgentLifecycle do
         install_transcript_snapshot(state, snapshot, :changed, length(entries))
 
       {:snapshot, snapshot} ->
-        install_transcript_snapshot(state, snapshot, :changed, 0)
+        state
+        |> recover_changed_files(session)
+        |> install_transcript_snapshot(snapshot, :changed, 0)
 
       {:reset, _reason, snapshot} ->
-        install_transcript_snapshot(state, snapshot, :reset, 0)
+        state
+        |> recover_changed_files(session)
+        |> install_transcript_snapshot(snapshot, :reset, 0)
 
       {:error, :invalid_cursor} ->
         Minga.Log.warning(
@@ -225,6 +232,20 @@ defmodule MingaEditor.AgentLifecycle do
   end
 
   defp sync_session_transcript(state, nil), do: state
+
+  @spec recover_changed_files(state(), pid()) :: state()
+  defp recover_changed_files(state, session) do
+    with {:ok, _tab, %{target: %ConnectionTarget{session: ^session} = target}} <-
+           ConnectionAction.origin(state),
+         {:ok, files} <- AgentSession.changed_file_counts(target) do
+      ui = state.workspace.agent_ui
+      timeline = EditTimeline.recover_files(ui.view.edit_timeline, files)
+      ui = UIState.replace_edit_timeline(ui, timeline)
+      MingaEditor.Shell.Traditional.Workflow.install_agent_ui(state, ui)
+    else
+      _unavailable -> state
+    end
+  end
 
   @spec install_transcript_snapshot(state(), Snapshot.t(), :changed | :reset, non_neg_integer()) ::
           state()

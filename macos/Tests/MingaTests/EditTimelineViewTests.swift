@@ -21,11 +21,11 @@ struct EditTimelineViewTests {
         }).environment(\.themeColors, ThemeColors())
         let buttons = try sut.inspect().findAll(ViewType.Button.self)
 
-        #expect(try buttons.map { try $0.accessibilityLabel().string() } == paths.map { "Review \($0)" })
+        #expect(try buttons.map { try $0.accessibilityLabel().string() } == ["All Changes"] + paths.map { "Review \($0)" })
         for button in buttons {
             try button.tap()
         }
-        #expect(spy.actions == paths.map {
+        #expect(spy.actions == [.executeCommand(name: "timeline_browse_files")] + paths.map {
             .semanticItemActivate(surface: .timeline, intent: 2, generation: 0x0102_0304, itemID: Data($0.utf8))
         })
     }
@@ -38,7 +38,9 @@ struct EditTimelineViewTests {
         let sut = EditTimelineView(state: state, sendAction: { action in
             _ = spy.send(FrontendActionComposition.outbound(action))
         }).environment(\.themeColors, ThemeColors())
-        let retained = try #require(sut.inspect().findAll(ViewType.Button.self).first)
+        let retained = try #require(sut.inspect().findAll(ViewType.Button.self).first {
+            (try? $0.accessibilityLabel().string()) == "Review \(path)"
+        })
 
         state.generation = 42
         state.files = [file("Tests/replacement.swift")]
@@ -60,7 +62,9 @@ struct EditTimelineViewTests {
         )
         let sut = EditTimelineView(state: state, sendAction: missingHandler ? nil : recorder.handler)
             .environment(\.themeColors, ThemeColors())
-        let button = try #require(sut.inspect().findAll(ViewType.Button.self).first)
+        let button = try #require(sut.inspect().findAll(ViewType.Button.self).first {
+            (try? $0.accessibilityLabel().string()) == "Review Sources/single.swift"
+        })
 
         #expect(try button.isDisabled())
         #expect(throws: (any Error).self) { try button.tap() }
@@ -78,7 +82,9 @@ struct EditTimelineViewTests {
         let sut = EditTimelineView(state: state, sendAction: { action in
             _ = spy.send(FrontendActionComposition.outbound(action))
         }).environment(\.themeColors, ThemeColors())
-        let retained = try #require(sut.inspect().findAll(ViewType.Button.self).first)
+        let retained = try #require(sut.inspect().findAll(ViewType.Button.self).first {
+            (try? $0.accessibilityLabel().string()) == "View edit_file edit 1 of 1"
+        })
         #expect(try retained.accessibilityLabel().string() == "View edit_file edit 1 of 1")
 
         state.generation = 54
@@ -100,7 +106,9 @@ struct EditTimelineViewTests {
             let host = NSHostingView(rootView: view.frame(width: 640))
             #expect(host.fittingSize.height == 24)
             if count == 0 {
-                #expect(try view.inspect().findAll(ViewType.Button.self).isEmpty)
+                let buttons = try view.inspect().findAll(ViewType.Button.self)
+                #expect(try buttons.map { try $0.accessibilityLabel().string() } == ["All Changes"])
+                #expect(try buttons[0].isDisabled())
                 #expect(try view.inspect().find(text: "No changed files").string() == "No changed files")
             }
         }

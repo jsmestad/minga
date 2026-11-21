@@ -98,6 +98,7 @@ defmodule Minga.Keymap.Scope.Agent do
     # ]-prefix: semantic navigation (domain-specific)
     |> Bindings.bind(~k(] c), :agent_next_code_block, "Next code block/hunk")
     |> Bindings.bind(~k(] f), :timeline_next_file, "Next changed file")
+    |> Bindings.bind(~k(] F), :timeline_browse_files, "Browse all changed files")
     # [-prefix: semantic navigation (domain-specific)
     |> Bindings.bind(~k([ c), :agent_prev_code_block, "Previous code block/hunk")
     |> Bindings.bind(~k([ f), :timeline_prev_file, "Previous changed file")

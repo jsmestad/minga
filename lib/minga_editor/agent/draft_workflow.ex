@@ -1173,7 +1173,7 @@ defmodule MingaEditor.Agent.DraftWorkflow do
        )
        when revision == previous + 1 do
     if Buffer.inspection_marker(buffer) == initial do
-      cleared = ui |> PromptBuffer.clear_input_and_scroll() |> UIState.reset_edit_timeline()
+      cleared = PromptBuffer.clear_input_and_scroll(ui)
       updated = DraftSave.queue_saved(save, ref, revision, Buffer.inspection_marker(buffer))
       {{:queued, kind}, UIState.project_draft_save(cleared, updated)}
     else

@@ -3105,7 +3105,10 @@ func TestTimelineChromeRendersEditTimelineFiles(t *testing.T) {
 	model.chrome = map[byte]protocol.ChromePayload{generated.OPGuiEditTimeline: {Timeline: protocol.EditTimeline{
 		Visible:      true,
 		ViewingIndex: 0xFFFF,
-		Files:        []protocol.TimelineFile{{Path: "lib/a.ex", EntryCount: 2, LinesAdded: 10, LinesRemoved: 3, ReviewStatus: 1}},
+		Files: []protocol.TimelineFile{
+			{Path: "lib/a.ex", EntryCount: 2, LinesAdded: 10, LinesRemoved: 3, ReviewStatus: 1},
+			{Path: "lib/saved.ex", EntryCount: 1, ReviewStatus: 2},
+		},
 	}}}
 	model.surfacePlacements = []generated.SurfacePlacement{{SurfaceID: surfaceIDEditTimeline, Rect: generated.Rect{Row: 7, Width: 60, Height: 3}, Z: 170, HitKind: 8}}
 	model.layout = model.computeLayout()
@@ -3113,6 +3116,10 @@ func TestTimelineChromeRendersEditTimelineFiles(t *testing.T) {
 	timeline, _ := model.editTimeline()
 	if got := strings.Join(model.renderEditTimeline(timeline), "\n"); !strings.Contains(got, "lib/a.ex") || !strings.Contains(got, "+10/-3") {
 		t.Fatalf("edit timeline file summary chrome missing content: %q", got)
+	}
+	timeline.Files = timeline.Files[1:]
+	if got := strings.Join(model.renderEditTimeline(timeline), "\n"); !strings.Contains(got, "lib/saved.ex") || !strings.Contains(got, "No stats") || strings.Contains(got, "+0/-0") {
+		t.Fatalf("recovered file should remain discoverable without false line counts: %q", got)
 	}
 }
 

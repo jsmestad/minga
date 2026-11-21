@@ -23,6 +23,7 @@ defmodule MingaEditor.Commands.EditTimeline do
     {:timeline_next_file, "Next agent-changed file", false},
     {:timeline_prev_file, "Previous agent-changed file", false},
     {:timeline_toggle, "Toggle edit timeline visibility", false},
+    {:timeline_browse_files, "Browse Agent changed files", false},
     {:timeline_go_live, "Return to current file state", true}
   ]
 
@@ -86,6 +87,9 @@ defmodule MingaEditor.Commands.EditTimeline do
 
   def execute(state, :timeline_next_file), do: navigate_file(state, 1)
   def execute(state, :timeline_prev_file), do: navigate_file(state, -1)
+
+  def execute(state, :timeline_browse_files),
+    do: MingaEditor.UI.Picker.AgentChangesSource.open(state)
 
   def execute(state, :timeline_toggle) do
     NoticeWorkflow.publish(state, "Edit timeline toggled")

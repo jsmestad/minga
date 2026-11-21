@@ -4,6 +4,11 @@ defmodule MingaEditor.Effects.AgentReview do
   @behaviour MingaEditor.Effect
 
   alias MingaAgent.ProjectView
+  alias MingaAgent.ProjectView.Overlay
+  alias MingaAgent.ProjectView.Source
+  alias MingaAgent.Session
+  alias MingaAgent.Session.ConnectionTarget
+  alias MingaEditor.Agent.ConnectionAction
   alias MingaEditor.Agent.DiffReview
   alias MingaEditor.Agent.EditTimeline
   alias MingaEditor.Agent.UIState
@@ -45,7 +50,7 @@ defmodule MingaEditor.Effects.AgentReview do
     :hunks,
     :postimage_digest
   ]
-  defstruct [{:resolution, nil} | @enforce_keys]
+  defstruct [{:resolution, nil}, {:connection_target, nil} | @enforce_keys]
 
   @type t :: %__MODULE__{
           workspace_id: non_neg_integer(),
@@ -60,8 +65,9 @@ defmodule MingaEditor.Effects.AgentReview do
           generation: non_neg_integer(),
           path: String.t(),
           source: source(),
-          hunks: [Minga.Core.Diff.hunk()],
+          hunks: [Minga.Core.Diff.hunk()] | :discontinuous | :presence_change,
           postimage_digest: EditTimeline.postimage_digest() | nil,
+          connection_target: ConnectionTarget.t() | nil,
           resolution: {Minga.Buffer.Fork.review_revision(), [DiffReview.resolution()]} | nil
         }
 
@@ -151,19 +157,70 @@ defmodule MingaEditor.Effects.AgentReview do
   def run(%__MODULE__{} = effect), do: run_cumulative(effect)
 
   @spec run_cumulative(t()) :: {:ok, DiffReview.t() | :no_changes} | {:error, term()}
-  defp run_cumulative(%__MODULE__{hunks: []}), do: {:ok, :no_changes}
+  defp run_cumulative(%__MODULE__{hunks: :presence_change} = effect),
+    do: run_retained_cumulative(effect, {:error, :snapshot_unavailable})
 
-  defp run_cumulative(%__MODULE__{
+  defp run_cumulative(%__MODULE__{hunks: [_ | _]} = effect) do
+    case run_live_cumulative(effect) do
+      {:error, reason} when reason in [:enoent, :review_source_changed] ->
+        run_retained_cumulative(effect, {:error, reason})
+
+      result ->
+        result
+    end
+  end
+
+  defp run_cumulative(%__MODULE__{hunks: :discontinuous}),
+    do: {:error, :discontinuous_file_change}
+
+  defp run_cumulative(effect), do: run_retained_cumulative(effect, {:ok, :no_changes})
+
+  @spec run_retained_cumulative(t(), {:ok, :no_changes} | {:error, term()}) ::
+          {:ok, DiffReview.t() | :no_changes} | {:error, term()}
+
+  defp run_retained_cumulative(
+         %__MODULE__{connection_target: %ConnectionTarget{} = target, path: path},
+         fallback
+       ) do
+    case Session.read_cumulative_file_change(target, path) do
+      {:ok, {before_side, after_side}} -> retained_diff(path, before_side, after_side)
+      {:error, :no_file_change} -> fallback
+      {:error, _reason} = error -> error
+    end
+  end
+
+  defp run_retained_cumulative(_effect, fallback), do: fallback
+
+  @spec retained_diff(String.t(), binary() | :absent, binary() | :absent) ::
+          {:ok, DiffReview.t() | :no_changes} | {:error, :binary_snapshot}
+  defp retained_diff(path, before_side, after_side) do
+    if snapshot_text?(before_side) and snapshot_text?(after_side) do
+      case DiffReview.new(path, before_side, after_side) do
+        nil -> {:ok, :no_changes}
+        review -> {:ok, DiffReview.as_retained(review)}
+      end
+    else
+      {:error, :binary_snapshot}
+    end
+  end
+
+  @spec snapshot_text?(binary() | :absent) :: boolean()
+  defp snapshot_text?(:absent), do: true
+  defp snapshot_text?(bytes), do: String.valid?(bytes) and :binary.match(bytes, <<0>>) == :nomatch
+
+  @spec run_live_cumulative(t()) :: {:ok, DiffReview.t() | :no_changes} | {:error, term()}
+  defp run_live_cumulative(%__MODULE__{
          path: path,
          source: source,
          hunks: hunks,
-         postimage_digest: digest
+         postimage_digest: digest,
+         connection_target: target
        }) do
-    with {:ok, content} <- read_source(source),
+    with {:ok, owner, content} <- read_source(source),
          true <- :crypto.hash(:sha256, content) == digest do
       case DiffReview.from_hunks(path, content, hunks) do
         nil -> {:ok, :no_changes}
-        %DiffReview{} = review -> {:ok, review}
+        %DiffReview{} = review -> {:ok, bind_review_source(review, owner, target)}
       end
     else
       false -> {:error, :review_source_changed}
@@ -217,7 +274,16 @@ defmodule MingaEditor.Effects.AgentReview do
   defp capture(state, path) do
     tab_bar = Runtime.state(state.shell_runtime).tab_bar
     timeline = state.workspace.agent_ui.view.edit_timeline
-    hunks = EditTimeline.cumulative_hunks(timeline, path)
+
+    hunks =
+      case {EditTimeline.discontinuous?(timeline, path),
+            EditTimeline.presence_change?(timeline, path),
+            EditTimeline.recovered_file?(timeline, path)} do
+        {true, _, _} -> :discontinuous
+        {false, true, _} -> :presence_change
+        {false, false, true} -> []
+        {false, false, false} -> EditTimeline.cumulative_hunks(timeline, path)
+      end
 
     with %TabBar{} <- tab_bar,
          %Workspace{payload: %WorkspaceAgent{} = payload} = workspace <-
@@ -243,6 +309,7 @@ defmodule MingaEditor.Effects.AgentReview do
          generation: timeline.generation,
          path: path,
          source: source,
+         connection_target: review_connection_target(state, payload.session),
          hunks: hunks,
          postimage_digest: digest
        }}
@@ -250,6 +317,14 @@ defmodule MingaEditor.Effects.AgentReview do
       [] -> {:error, :no_changes}
       {:error, _reason} = error -> error
       _unavailable -> {:error, :review_workspace_unavailable}
+    end
+  end
+
+  @spec review_connection_target(EditorState.t(), pid() | nil) :: ConnectionTarget.t() | nil
+  defp review_connection_target(state, session) do
+    case ConnectionAction.origin(state) do
+      {:ok, _tab, %{target: %ConnectionTarget{session: ^session} = target}} -> target
+      _ -> nil
     end
   end
 
@@ -286,9 +361,25 @@ defmodule MingaEditor.Effects.AgentReview do
     end
   end
 
-  @spec read_source(source()) :: {:ok, binary()} | {:error, term()}
-  defp read_source({:project_view, view, path}), do: ProjectView.read_file(view, path)
-  defp read_source({:file, path}), do: File.read(path)
+  @spec read_source(source()) :: {:ok, Source.t() | nil, binary()} | {:error, term()}
+  defp read_source({:project_view, %ProjectView{backend: Overlay} = view, path}) do
+    Overlay.review_source(view, path)
+  end
+
+  defp read_source({:project_view, view, path}) do
+    with {:ok, content} <- ProjectView.read_file(view, path), do: {:ok, nil, content}
+  end
+
+  defp read_source({:file, path}) do
+    with {:ok, content} <- File.read(path), do: {:ok, nil, content}
+  end
+
+  @spec bind_review_source(DiffReview.t(), Source.t() | nil, ConnectionTarget.t() | nil) ::
+          DiffReview.t()
+  defp bind_review_source(review, %Source{} = source, %ConnectionTarget{} = target),
+    do: DiffReview.bind_source(review, source, target)
+
+  defp bind_review_source(review, _source, _target), do: review
 
   @spec current?(EditorState.t(), t()) :: boolean()
   defp current?(state, effect) do
@@ -339,6 +430,19 @@ defmodule MingaEditor.Effects.AgentReview do
   defp failure_message(path, :publication_baseline_conflict),
     do: "Conflict choices were not applied: the staging baseline for #{path} changed."
 
+  defp failure_message(path, :discontinuous_file_change),
+    do:
+      "Cannot compare #{path}: retained edits do not form a continuous change. No file was modified."
+
+  defp failure_message(path, :binary_snapshot),
+    do: "Cannot show a text diff for #{path}: a saved version is binary."
+
+  defp failure_message(path, :snapshot_too_large),
+    do: "Cannot show a saved diff for #{path}: a version exceeds the 64 KiB review limit."
+
+  defp failure_message(path, :snapshot_unavailable),
+    do: "Cannot show a saved diff for #{path}: a version was not retained."
+
   defp failure_message(path, reason), do: "Could not review #{path}: #{inspect(reason)}"
 
   @spec install_result(EditorState.t(), t(), DiffReview.t() | :no_changes | :fork_resolved) ::
@@ -366,13 +470,19 @@ defmodule MingaEditor.Effects.AgentReview do
       preview = Preview.set_diff(ui.view.preview, review)
       ui = ui |> UIState.replace_preview(preview) |> UIState.set_focus(:file_viewer)
       focused = Workflow.install_agent_ui(focused, ui)
-      label = if review.fork_revision, do: "Resolve fork conflicts", else: "Read-only review"
+      label = review_label(review)
       {:ok, NoticeWorkflow.publish(focused, "#{label}: #{effect.path}")}
     else
       nil -> {:error, :review_pane_unavailable}
       {:error, _reason} = error -> error
     end
   end
+
+  @spec review_label(DiffReview.t()) :: String.t()
+  defp review_label(%DiffReview{retained?: true}), do: "Saved comparison (read-only)"
+  defp review_label(%DiffReview{fork_revision: {_, _, _}}), do: "Resolve fork conflicts"
+  defp review_label(%DiffReview{reviewed_source: nil}), do: "Read-only review"
+  defp review_label(%DiffReview{}), do: "Live review (Reject changes file contents)"
 
   @spec leave_resolved_review(UIState.t(), atom()) :: UIState.t()
   defp leave_resolved_review(ui, :file_viewer), do: UIState.set_focus(ui, :chat)
