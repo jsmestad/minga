@@ -93,10 +93,9 @@ defmodule MingaEditor.State.Buffers do
     do: Enum.find_index(list, &(&1 == active))
 
   @spec select_neighbor(t(), [pid()]) :: t()
-  defp select_neighbor(bs, []), do: replace_list(bs, [], 0)
-
   defp select_neighbor(bs, list) do
-    replace_list(bs, list, min(bs.active_index, length(list) - 1))
+    {active, index} = neighbor_at(list, bs.active_index, 0)
+    %{bs | list: list, active_index: index, active: active}
   end
 
   @doc "Sets the help buffer pid."
@@ -113,4 +112,13 @@ defmodule MingaEditor.State.Buffers do
     active = Enum.at(list, idx)
     %{bs | list: list, active_index: idx, active: active}
   end
+
+  @spec neighbor_at([pid()], integer(), non_neg_integer()) :: {pid() | nil, integer()}
+  defp neighbor_at([], _wanted, _index), do: {nil, 0}
+  defp neighbor_at(buffers, wanted, 0) when wanted < 0, do: {Enum.at(buffers, wanted), wanted}
+
+  defp neighbor_at([pid | rest], wanted, index) when index == wanted or rest == [],
+    do: {pid, index}
+
+  defp neighbor_at([_pid | rest], wanted, index), do: neighbor_at(rest, wanted, index + 1)
 end
