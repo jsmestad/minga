@@ -46,14 +46,9 @@ defmodule MingaAgent.ArtifactStore.Limits do
     with {:ok, default_values} when map_size(default_values) == @limit_key_count <-
            admit_limit_map(defaults),
          {:ok, values} <- admit_limit_map(overrides) do
-      merged = Map.merge(default_values, values)
-
-      if Enum.all?(merged, fn {_key, value} -> is_integer(value) and value > 0 end) and
-           coherent?(merged) do
-        {:ok, struct!(__MODULE__, merged)}
-      else
-        {:error, :invalid_limits}
-      end
+      default_values
+      |> Map.merge(values)
+      |> build_limits()
     else
       _ -> {:error, :invalid_limits}
     end
@@ -100,6 +95,16 @@ defmodule MingaAgent.ArtifactStore.Limits do
   @doc "Returns the fixed persisted integrity block size."
   @spec integrity_block_bytes() :: pos_integer()
   def integrity_block_bytes, do: 64 * 1024
+
+  @spec build_limits(map()) :: {:ok, t()} | {:error, :invalid_limits}
+  defp build_limits(values) do
+    if Enum.all?(values, fn {_key, value} -> is_integer(value) and value > 0 end) and
+         coherent?(values) do
+      {:ok, struct!(__MODULE__, values)}
+    else
+      {:error, :invalid_limits}
+    end
+  end
 
   @spec admit_limit_map(term()) :: {:ok, map()} | {:error, :invalid_limits}
   defp admit_limit_map(values) when is_list(values) do
