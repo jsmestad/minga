@@ -26,7 +26,7 @@ defmodule MingaGitPorcelain.MixProject do
 
   defp deps do
     [
-      {:minga_sdk, path: "../../sdk", runtime: false},
+      {:minga_sdk, path: "../../sdk", only: [:dev, :test], runtime: false},
       {:minga, path: "../../", only: :test},
       {:hammox, "~> 0.7", only: :test}
     ]

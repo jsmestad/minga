@@ -193,9 +193,9 @@ defmodule MingaSdkTest do
       end
     end
 
-    test "EditorAPI.set_status/2 raises at runtime" do
+    test "EditorAPI.active_buffer/1 raises at runtime" do
       assert_raise RuntimeError, ~r/compile-time only/, fn ->
-        MingaEditor.Extension.EditorAPI.set_status(%{}, "test")
+        MingaEditor.Extension.EditorAPI.active_buffer(%{})
       end
     end
   end

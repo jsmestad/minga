@@ -172,3 +172,22 @@ tar -xzf minga_macos_aarch64.tar.gz
 ```
 
 Use the archive that matches your OS and CPU. The launcher maps `--cookie-file`, `MINGA_COOKIE` and `RELEASE_COOKIE` in that order. It clears inherited VM flags, supplies a random fallback cookie, and starts the VM with distribution off.
+
+## SDK
+
+`minga_sdk` is the compile-time package extension authors depend on. It is versioned and published separately from Minga, from the `sdk/` directory, and only a maintainer publishes it from their own Hex account. Publish a new SDK version before any extension that depends on it, so that extension can resolve its dependency.
+
+1. Start from a green `main`. The `Test (Extension SDK)` CI job must pass for the commit you release, including its docs and package build.
+2. Bump `@version` in `sdk/mix.exs` and add the matching entry to `sdk/CHANGELOG.md`. If the release needs a newer Minga, update the compatibility table in both `sdk/CHANGELOG.md` and `sdk/README.md`. Merge that change through a pull request.
+3. Tag the merged commit as `sdk-vX.Y.Z` and push the tag. HexDocs source links point at this tag.
+4. Build the package and review exactly what will ship:
+
+   ```bash
+   cd sdk
+   mix deps.get
+   mix hex.build
+   ```
+
+   The file list must contain only `lib/`, `mix.exs`, `README.md`, `CHANGELOG.md`, and `LICENSE`. Stop if anything else appears.
+5. Publish from your own account with `mix hex.publish`. Hex shows the package and docs before asking for confirmation; check the version and file list again there.
+6. Publish or update dependent extensions only after the new SDK version is visible on Hex.

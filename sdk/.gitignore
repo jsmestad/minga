@@ -1,5 +1,6 @@
+*.beam
 /_build/
 /deps/
 /doc/
-*.beam
+/minga_sdk-*.tar
 mix.lock
