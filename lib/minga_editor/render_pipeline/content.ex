@@ -227,9 +227,7 @@ defmodule MingaEditor.RenderPipeline.Content do
 
     {row_off, col_off, _content_width, _content_height} = win_layout.content
 
-    # Compute context fingerprint and check for context changes.
-    # If any context input (visual selection, search, highlights, signs,
-    # or active status) changed, all lines are dirty.
+    # Context invalidation is detected after frame classification.
     ctx_fp = ContentHelpers.context_fingerprint(render_ctx, is_active)
     window = Window.detect_context_change(window, ctx_fp)
 

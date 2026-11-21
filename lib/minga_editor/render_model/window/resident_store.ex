@@ -488,10 +488,9 @@ defmodule MingaEditor.RenderModel.Window.ResidentStore do
     {node(priority, left, chunk, a), b, work}
   end
 
-  defp split_counted_chunk(priority, left, {entries, _}, right, rank, left_size, own, work) do
+  defp split_counted_chunk(priority, left, {entries, _}, right, rank, left_size, _own, work) do
     within = rank - left_size
-    before = entries |> tuple_slice(0, within) |> Tuple.to_list()
-    after_entries = entries |> tuple_slice(within, own - within) |> Tuple.to_list()
+    {before, after_entries} = Enum.split(Tuple.to_list(entries), within)
     {before_chunk, work} = chunk_node_counted(before, {priority, :left, within}, work)
     {after_chunk, work} = chunk_node_counted(after_entries, {priority, :right, within}, work)
     {left_tree, work} = merge_counted(left, before_chunk, work)
@@ -555,11 +554,6 @@ defmodule MingaEditor.RenderModel.Window.ResidentStore do
 
   defp local_rank_header({:chunk, _, _, _, _, left, {_, starts}, right}),
     do: {:ok, {left, tree_size(left), tree_lines(left), starts, right}}
-
-  defp tuple_slice(_tuple, _start, 0), do: {}
-
-  defp tuple_slice(tuple, start, count),
-    do: tuple |> Tuple.to_list() |> Enum.slice(start, count) |> List.to_tuple()
 
   defp digest_of(entries) do
     Enum.reduce(entries, ContentDigest.empty(), fn item, acc ->

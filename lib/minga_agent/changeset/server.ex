@@ -5,8 +5,8 @@ defmodule MingaAgent.Changeset.Server do
   @moduledoc """
   GenServer managing a single changeset's lifecycle.
 
-  Holds modified file contents in memory and keeps the overlay directory
-  in sync. Maintains an edit history per file for undo support.
+  Tracks pending file contents and deletions in memory and keeps the overlay
+  directory in sync. Maintains an edit history per file for undo support.
   Integrates three-way merge via `Minga.Core.Diff.merge3/3`.
   """
 
@@ -23,14 +23,16 @@ defmodule MingaAgent.Changeset.Server do
 
   @tombstone_suffix ".__changeset_deleted__"
 
+  @typep pending_change :: binary() | :deleted
+  @typep change :: pending_change() | :unmodified
+
   @typedoc "Internal server state."
   @type state :: %{
           project_root: String.t(),
           overlay: Overlay.t(),
-          modifications: %{String.t() => binary()},
+          changes: %{String.t() => pending_change()},
           originals: %{String.t() => binary() | nil},
-          deletions: MapSet.t(String.t()),
-          history: %{String.t() => [binary() | :unmodified | :deleted]},
+          history: %{String.t() => [change()]},
           budget: pos_integer() | :unlimited,
           attempts: non_neg_integer(),
           revision: non_neg_integer(),
@@ -53,9 +55,8 @@ defmodule MingaAgent.Changeset.Server do
         state = %{
           project_root: project_root,
           overlay: overlay,
-          modifications: %{},
+          changes: %{},
           originals: %{},
-          deletions: MapSet.new(),
           history: %{},
           budget: budget,
           attempts: 0,
@@ -79,14 +80,11 @@ defmodule MingaAgent.Changeset.Server do
   def handle_call({:write_file, relative_path, content}, _from, state) do
     case normalize_path(state, relative_path) do
       {:ok, path} ->
-        was_deleted = MapSet.member?(state.deletions, path)
-
-        with :ok <- clear_deleted_marker(state, path, was_deleted),
+        with :ok <- clear_deleted_marker(state, path, current_change(state, path)),
              :ok <- Overlay.materialize_file(state.overlay, path, content) do
           state = capture_original(state, path)
           state = push_history(state, path)
-          state = put_in(state.modifications[path], content)
-          state = %{state | deletions: MapSet.delete(state.deletions, path)}
+          state = install_mutation(state, path, content)
           {:reply, :ok, bump_revision(state)}
         else
           {:error, reason} ->
@@ -118,8 +116,7 @@ defmodule MingaAgent.Changeset.Server do
           :ok ->
             state = capture_original(state, path)
             state = push_history(state, path)
-            state = %{state | deletions: MapSet.put(state.deletions, path)}
-            state = %{state | modifications: Map.delete(state.modifications, path)}
+            state = install_mutation(state, path, :deleted)
             {:reply, :ok, bump_revision(state)}
 
           {:error, reason} ->
@@ -308,24 +305,22 @@ defmodule MingaAgent.Changeset.Server do
   end
 
   def handle_call(:modified_files, _from, state) do
-    modified = state.modifications |> Map.keys() |> Enum.sort()
-    deleted = state.deletions |> MapSet.to_list() |> Enum.sort()
+    {modified, deleted} = changed_paths(state.changes)
     {:reply, %{modified: modified, deleted: deleted}, state}
   end
 
   def handle_call(:summary, _from, state) do
-    modified =
-      Enum.map(state.modifications, fn {path, content} ->
-        kind = if is_binary(Map.get(state.originals, path)), do: :modified, else: :new
-        %{path: path, kind: kind, size: byte_size(content)}
+    summary =
+      Enum.map(state.changes, fn
+        {path, :deleted} ->
+          %{path: path, kind: :deleted, size: 0}
+
+        {path, content} ->
+          kind = if is_binary(Map.get(state.originals, path)), do: :modified, else: :new
+          %{path: path, kind: kind, size: byte_size(content)}
       end)
 
-    deleted =
-      Enum.map(state.deletions, fn path ->
-        %{path: path, kind: :deleted, size: 0}
-      end)
-
-    {:reply, Enum.sort_by(modified ++ deleted, & &1.path), state}
+    {:reply, Enum.sort_by(summary, & &1.path), state}
   end
 
   def handle_call(:record_attempt, _from, state) do
@@ -442,15 +437,16 @@ defmodule MingaAgent.Changeset.Server do
   # (`:preflight_merge`). Planning is fully write-free so both paths can share it.
   @spec plan_merge(state()) :: [merge_plan()]
   defp plan_merge(state) do
+    # Plan modifications first so their disk reads precede deletion planning.
     modification_plans =
-      Enum.map(state.modifications, fn {path, changeset_content} ->
-        plan_one_file(state, path, changeset_content)
-      end)
+      for {path, content} <- state.changes, is_binary(content) do
+        plan_one_file(state, path, content)
+      end
 
     deletion_plans =
-      Enum.map(state.deletions, fn path ->
+      for {path, :deleted} <- state.changes do
         plan_one_deletion(state, path)
-      end)
+      end
 
     modification_plans ++ deletion_plans
   end
@@ -699,63 +695,27 @@ defmodule MingaAgent.Changeset.Server do
     %{state | originals: Map.put_new(state.originals, path, nil)}
   end
 
-  @spec install_mutation(state(), String.t(), binary() | :deleted) :: state()
-  defp install_mutation(state, path, :deleted) do
-    %{
-      state
-      | modifications: Map.delete(state.modifications, path),
-        deletions: MapSet.put(state.deletions, path)
-    }
+  @spec install_mutation(state(), String.t(), change()) :: state()
+  defp install_mutation(state, path, :unmodified) do
+    %{state | changes: Map.delete(state.changes, path)}
   end
 
-  defp install_mutation(state, path, content) do
-    %{
-      state
-      | modifications: Map.put(state.modifications, path, content),
-        deletions: MapSet.delete(state.deletions, path)
-    }
+  defp install_mutation(state, path, change) do
+    %{state | changes: Map.put(state.changes, path, change)}
   end
 
   @spec undo_path(String.t(), state()) :: {:reply, :ok | {:error, term()}, state()}
   defp undo_path(path, state) do
     case Map.get(state.history, path) do
-      [prev | rest] ->
-        case prev do
-          :unmodified ->
-            case restore_original(state, path) do
-              :ok ->
-                state = put_in(state.history[path], rest)
-                state = %{state | modifications: Map.delete(state.modifications, path)}
-                state = %{state | deletions: MapSet.delete(state.deletions, path)}
-                {:reply, :ok, bump_revision(state)}
+      [previous | rest] ->
+        case restore_undo_overlay(state, path, previous) do
+          :ok ->
+            state = put_in(state.history[path], rest)
+            state = install_mutation(state, path, previous)
+            {:reply, :ok, bump_revision(state)}
 
-              {:error, reason} ->
-                {:reply, {:error, reason}, state}
-            end
-
-          :deleted ->
-            case restore_deleted_overlay(state, path) do
-              :ok ->
-                state = put_in(state.history[path], rest)
-                state = %{state | modifications: Map.delete(state.modifications, path)}
-                state = %{state | deletions: MapSet.put(state.deletions, path)}
-                {:reply, :ok, bump_revision(state)}
-
-              {:error, reason} ->
-                {:reply, {:error, reason}, state}
-            end
-
-          prev ->
-            case Overlay.materialize_file(state.overlay, path, prev) do
-              :ok ->
-                state = put_in(state.history[path], rest)
-                state = put_in(state.modifications[path], prev)
-                state = %{state | deletions: MapSet.delete(state.deletions, path)}
-                {:reply, :ok, bump_revision(state)}
-
-              {:error, reason} ->
-                {:reply, {:error, reason}, state}
-            end
+          {:error, reason} ->
+            {:reply, {:error, reason}, state}
         end
 
       _ ->
@@ -763,16 +723,22 @@ defmodule MingaAgent.Changeset.Server do
     end
   end
 
+  @spec restore_undo_overlay(state(), String.t(), change()) :: :ok | {:error, term()}
+  defp restore_undo_overlay(state, path, :unmodified), do: restore_original(state, path)
+  defp restore_undo_overlay(state, path, :deleted), do: restore_deleted_overlay(state, path)
+
+  defp restore_undo_overlay(state, path, content) when is_binary(content),
+    do: Overlay.materialize_file(state.overlay, path, content)
+
   @spec bump_revision(state()) :: state()
   defp bump_revision(state), do: %{state | revision: state.revision + 1}
 
   @spec bump_if_sources_changed(state(), state()) :: state()
   defp bump_if_sources_changed(new_state, previous_state) do
-    changed? =
-      new_state.modifications != previous_state.modifications or
-        new_state.deletions != previous_state.deletions
-
-    if changed?, do: bump_revision(new_state), else: new_state
+    # A failed reset or partial merge can only remove pending changes.
+    if map_size(new_state.changes) != map_size(previous_state.changes),
+      do: bump_revision(new_state),
+      else: new_state
   end
 
   @spec apply_edit(state(), String.t(), String.t(), String.t()) ::
@@ -785,7 +751,7 @@ defmodule MingaAgent.Changeset.Server do
       state = push_history(state, path)
 
       case Overlay.materialize_file(state.overlay, path, new_content) do
-        :ok -> {:ok, put_in(state.modifications[path], new_content)}
+        :ok -> {:ok, install_mutation(state, path, new_content)}
         {:error, reason} -> {:error, reason}
       end
     end
@@ -810,14 +776,8 @@ defmodule MingaAgent.Changeset.Server do
     end
   end
 
-  @spec current_change(state(), String.t()) :: :unmodified | :deleted | binary()
-  defp current_change(state, path) do
-    if MapSet.member?(state.deletions, path) do
-      :deleted
-    else
-      Map.get(state.modifications, path, :unmodified)
-    end
-  end
+  @spec current_change(state(), String.t()) :: change()
+  defp current_change(state, path), do: Map.get(state.changes, path, :unmodified)
 
   @spec capture_original(state(), String.t()) :: state()
   defp capture_original(state, path) do
@@ -839,14 +799,14 @@ defmodule MingaAgent.Changeset.Server do
     put_in(state.history[path], [current | history])
   end
 
-  @spec clear_deleted_marker(state(), String.t(), boolean()) :: :ok | {:error, term()}
-  defp clear_deleted_marker(_state, _path, false), do: :ok
-
-  defp clear_deleted_marker(state, path, true) do
+  @spec clear_deleted_marker(state(), String.t(), change()) :: :ok | {:error, term()}
+  defp clear_deleted_marker(state, path, :deleted) do
     remove_overlay_artifact(
       Path.join(state.overlay.overlay_dir, path) <> ".__changeset_deleted__"
     )
   end
+
+  defp clear_deleted_marker(_state, _path, _change), do: :ok
 
   @spec restore_deleted_overlay(state(), String.t()) :: :ok | {:error, term()}
   defp restore_deleted_overlay(state, path) do
@@ -910,41 +870,23 @@ defmodule MingaAgent.Changeset.Server do
 
   @spec restore_discarded_overlay(state(), String.t(), String.t()) :: :ok | {:error, term()}
   defp restore_discarded_overlay(state, path, tombstone_path) do
-    case restore_discarded_overlay_content(state, path) do
-      :ok -> restore_discarded_tombstone(state, path, tombstone_path)
-      {:error, reason} -> {:error, reason}
-    end
-  end
-
-  @spec restore_discarded_overlay_content(state(), String.t()) :: :ok | {:error, term()}
-  defp restore_discarded_overlay_content(state, path) do
-    if Map.has_key?(state.modifications, path) do
-      case Map.fetch(state.modifications, path) do
-        {:ok, content} ->
-          case Overlay.materialize_file(state.overlay, path, content) do
-            :ok -> :ok
-            {:error, reason} -> {:error, {:materialize_failed, reason}}
-          end
-
-        :error ->
-          :ok
-      end
-    else
-      :ok
-    end
-  end
-
-  @spec restore_discarded_tombstone(state(), String.t(), String.t()) :: :ok | {:error, term()}
-  defp restore_discarded_tombstone(state, path, tombstone_path) do
-    if MapSet.member?(state.deletions, path) do
-      with :ok <- File.mkdir_p(Path.dirname(tombstone_path)),
-           :ok <- File.write(tombstone_path, "") do
+    case current_change(state, path) do
+      :unmodified ->
         :ok
-      else
-        {:error, reason} -> {:error, {:tombstone_restore_failed, reason}}
-      end
-    else
-      :ok
+
+      :deleted ->
+        with :ok <- File.mkdir_p(Path.dirname(tombstone_path)),
+             :ok <- File.write(tombstone_path, "") do
+          :ok
+        else
+          {:error, reason} -> {:error, {:tombstone_restore_failed, reason}}
+        end
+
+      content ->
+        case Overlay.materialize_file(state.overlay, path, content) do
+          :ok -> :ok
+          {:error, reason} -> {:error, {:materialize_failed, reason}}
+        end
     end
   end
 
@@ -1054,12 +996,7 @@ defmodule MingaAgent.Changeset.Server do
 
   @spec restore_all(state()) :: {:ok, state()} | {:error, term(), state()}
   defp restore_all(state) do
-    paths =
-      state.modifications
-      |> Map.keys()
-      |> Kernel.++(MapSet.to_list(state.deletions))
-      |> Enum.uniq()
-      |> Enum.sort()
+    paths = state.changes |> Map.keys() |> Enum.sort()
 
     restore_all(paths, state)
   end
@@ -1078,17 +1015,16 @@ defmodule MingaAgent.Changeset.Server do
   defp forget_path(state, path) do
     %{
       state
-      | modifications: Map.delete(state.modifications, path),
+      | changes: Map.delete(state.changes, path),
         originals: Map.delete(state.originals, path),
-        deletions: MapSet.delete(state.deletions, path),
         history: Map.delete(state.history, path)
     }
   end
 
   @spec tracked_path?(state(), String.t()) :: boolean()
   defp tracked_path?(state, path) do
-    Map.has_key?(state.modifications, path) or Map.has_key?(state.originals, path) or
-      MapSet.member?(state.deletions, path) or Map.has_key?(state.history, path)
+    Map.has_key?(state.changes, path) or Map.has_key?(state.originals, path) or
+      Map.has_key?(state.history, path)
   end
 
   @spec normalize_path(state(), String.t()) ::
@@ -1147,10 +1083,20 @@ defmodule MingaAgent.Changeset.Server do
     Enum.any?(components, &String.ends_with?(&1, @tombstone_suffix))
   end
 
+  @spec changed_paths(%{String.t() => pending_change()}) :: {[String.t()], [String.t()]}
+  defp changed_paths(changes) do
+    {modified, deleted} =
+      Enum.reduce(changes, {[], []}, fn
+        {path, :deleted}, {modified, deleted} -> {modified, [path | deleted]}
+        {path, _content}, {modified, deleted} -> {[path | modified], deleted}
+      end)
+
+    {Enum.sort(modified), Enum.sort(deleted)}
+  end
+
   @spec broadcast_merged(state()) :: :ok
   defp broadcast_merged(state) do
-    modified = state.modifications |> Map.keys() |> Enum.sort()
-    deleted = state.deletions |> MapSet.to_list() |> Enum.sort()
+    {modified, deleted} = changed_paths(state.changes)
 
     Minga.Events.broadcast(
       :changeset_merged,

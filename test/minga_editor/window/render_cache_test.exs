@@ -2,6 +2,7 @@ defmodule MingaEditor.Window.RenderCacheTest do
   use ExUnit.Case, async: true
 
   alias Minga.Buffer
+  alias Minga.Buffer.EditDelta
   alias Minga.RenderModel.Window.LineIdentity
   alias MingaEditor.Renderer.WindowCache, as: RenderCache
   alias Minga.Core.WidthOracle.Monospace
@@ -12,39 +13,54 @@ defmodule MingaEditor.Window.RenderCacheTest do
   alias MingaEditor.UI.Theme
 
   describe "detect_invalidation/6" do
-    test "marks all lines dirty when buffer version changes with the same line count" do
+    test "marks the cache fully dirty when buffer version changes with the same line count" do
       cache =
         RenderCache.reset()
         |> RenderCache.snapshot(0, 0, 4, 3, 2, 1, :ctx)
 
       cache = RenderCache.detect_invalidation(cache, 0, 4, 3, 2, 2)
 
-      assert cache.dirty_lines == :all
+      assert cache.fully_dirty?
     end
 
-    test "does not mark all lines dirty for cursor-only movement" do
+    test "a version change with pending deltas preserves the prior full-invalidation flag" do
+      cache = RenderCache.snapshot(%RenderCache{}, 0, 0, 4, 3, 1, 1, :ctx)
+      delta = EditDelta.insertion(0, {1, 0}, "Z", {1, 1})
+
+      for cache <- [cache, RenderCache.mark_fully_dirty(cache)] do
+        updated =
+          cache
+          |> RenderCache.apply_edit_deltas(self(), [delta], nil)
+          |> RenderCache.detect_invalidation(0, 4, 3, 2, 1)
+
+        assert updated.fully_dirty? == cache.fully_dirty?
+        assert RenderCache.pending_edit_deltas(updated) == [delta]
+      end
+    end
+
+    test "does not mark the cache fully dirty for cursor-only movement" do
       cache =
         RenderCache.reset()
         |> RenderCache.snapshot(0, 0, 4, 3, 1, 1, :ctx)
 
       cache = RenderCache.detect_invalidation(cache, 0, 4, 3, 1, 2)
 
-      assert cache.dirty_lines == %{}
+      refute cache.fully_dirty?
     end
   end
 
   describe "detect_invalidation/7" do
-    test "marks dirty when the viewport cache key changes without moving the logical top" do
+    test "marks the cache fully dirty when the viewport key changes without moving the logical top" do
       cache =
         RenderCache.reset()
         |> RenderCache.snapshot(0, 0, 4, 3, 1, 1, :ctx)
 
       cache = RenderCache.detect_invalidation(cache, 0, 1, 4, 3, 1, 1)
 
-      assert cache.dirty_lines == :all
+      assert cache.fully_dirty?
     end
 
-    test "line count changes dirty rows without requesting retained epoch reset" do
+    test "line count changes mark full invalidation without requesting an epoch reset" do
       {cache, epoch, _full_refresh?} =
         RenderCache.reset()
         |> RenderCache.prepare_epoch({:window, 1, :geometry})
@@ -54,7 +70,7 @@ defmodule MingaEditor.Window.RenderCacheTest do
         |> RenderCache.snapshot(0, 0, 4, 3, 1, 1, :ctx)
         |> RenderCache.detect_invalidation(0, 0, 4, 4, 2, 1)
 
-      assert cache.dirty_lines == :all
+      assert cache.fully_dirty?
 
       {_cache, next_epoch, full_refresh?} =
         RenderCache.prepare_epoch(cache, {:window, 1, :geometry})

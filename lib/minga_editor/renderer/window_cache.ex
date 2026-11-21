@@ -2,20 +2,9 @@ defmodule MingaEditor.Renderer.WindowCache do
   @moduledoc """
   Per-window render state for incremental rendering.
 
-  Tracks which buffer lines need re-rendering and stores last-frame comparison
-  values so the render pipeline can detect when a full redraw is needed. The
-  semantic `RenderModel.Window.Builder` reuses retained composed rows (see the
-  `retained_rows`/`retained_wrap_lines` fields) for unchanged lines.
-
-  ## Dirty-line tracking
-
-  The dirty set uses two representations:
-
-  - `:all` means every line needs re-rendering (scroll, resize, theme
-    change, highlight update, fold toggle, or any other wholesale
-    invalidation)
-  - A map of specific buffer line numbers (`%{line => true}`) for targeted
-    invalidation (edits that touch a few lines)
+  `fully_dirty?` records full invalidation for frame classification, independently
+  of an epoch reset. The semantic `RenderModel.Window.Builder` decides what to
+  recompose from retained rows, input fingerprints, and ordered edit deltas.
 
   ## Tracking fields
 
@@ -24,11 +13,8 @@ defmodule MingaEditor.Renderer.WindowCache do
   from the previous frame. The Scroll stage compares current values against
   these to detect full-invalidation triggers. `last_context_fingerprint`
   captures all per-frame render context inputs (visual selection, search
-  matches, syntax highlights, signs, etc.) so context changes trigger full
-  redraws.
+  matches, syntax highlights, signs, etc.) for detecting context invalidation.
   """
-
-  @compile {:inline, dirty?: 2}
 
   @typedoc """
   A retained composed row plus the cheap input fingerprint that produced it.
@@ -57,7 +43,7 @@ defmodule MingaEditor.Renderer.WindowCache do
   @typedoc """
   Context fingerprint: a term derived from the render context that
   captures all per-frame inputs affecting every visible line. When
-  the fingerprint changes between frames, all lines are re-rendered.
+  the fingerprint changes between frames, the cache is marked fully dirty.
 
   Built from: visual selection, search matches, highlight version,
   diagnostic signs, git signs, viewport left scroll, active status,
@@ -77,7 +63,7 @@ defmodule MingaEditor.Renderer.WindowCache do
   alias MingaEditor.RenderModel.Window.ResidentSemanticState
 
   @type t :: %__MODULE__{
-          dirty_lines: :all | %{optional(non_neg_integer()) => true},
+          fully_dirty?: boolean(),
           last_viewport_top: integer(),
           last_viewport_cache_key: integer(),
           last_gutter_w: integer(),
@@ -116,7 +102,7 @@ defmodule MingaEditor.Renderer.WindowCache do
           {:ok, ReviewProjection.t(), RowDelta.t() | nil, t()}
           | {:error, :review_unavailable | :row_slot_capacity}
 
-  defstruct dirty_lines: %{},
+  defstruct fully_dirty?: false,
             last_viewport_top: -1,
             last_viewport_cache_key: -1,
             last_gutter_w: -1,
@@ -149,7 +135,7 @@ defmodule MingaEditor.Renderer.WindowCache do
             scroll_seq_last_authoritative: 0
 
   @doc """
-  Returns a fresh cache with all lines dirty.
+  Returns a fresh, fully dirty cache with a new content epoch.
 
   Use after any event that invalidates render state: buffer switch,
   resize, theme change, etc.
@@ -157,7 +143,7 @@ defmodule MingaEditor.Renderer.WindowCache do
   @spec reset() :: t()
   def reset do
     %__MODULE__{
-      dirty_lines: :all,
+      fully_dirty?: true,
       content_epoch: ContentEpoch.next(),
       hydration_reason: :initial,
       reset_pending: true,
@@ -171,7 +157,7 @@ defmodule MingaEditor.Renderer.WindowCache do
   def reset(%__MODULE__{} = cache) do
     %{
       cache
-      | dirty_lines: :all,
+      | fully_dirty?: true,
         last_viewport_top: -1,
         last_viewport_cache_key: -1,
         last_gutter_w: -1,
@@ -192,24 +178,9 @@ defmodule MingaEditor.Renderer.WindowCache do
     }
   end
 
-  @doc """
-  Marks specific buffer lines as needing re-render.
-
-  Pass `:all` to force a complete redraw. Pass a list of buffer line
-  numbers for targeted invalidation. If already fully dirty, adding
-  specific lines is a no-op.
-  """
-  @spec mark_dirty(t(), [non_neg_integer()] | :all) :: t()
-  def mark_dirty(%__MODULE__{} = cache, :all) do
-    %{cache | dirty_lines: :all}
-  end
-
-  def mark_dirty(%__MODULE__{dirty_lines: :all} = cache, _lines), do: cache
-
-  def mark_dirty(%__MODULE__{dirty_lines: existing} = cache, lines) when is_list(lines) do
-    new_dirty = Enum.reduce(lines, existing, fn line, acc -> Map.put(acc, line, true) end)
-    %{cache | dirty_lines: new_dirty}
-  end
+  @doc "Marks the cache fully dirty without discarding retained rows or requesting a reset."
+  @spec mark_fully_dirty(t()) :: t()
+  def mark_fully_dirty(%__MODULE__{} = cache), do: %{cache | fully_dirty?: true}
 
   @doc "Pins bounded line fetches to the version atomically consumed by the renderer."
   @spec with_fetch_version(t(), non_neg_integer() | nil) :: t()
@@ -219,14 +190,9 @@ defmodule MingaEditor.Renderer.WindowCache do
   @spec fetch_version(t()) :: non_neg_integer() | nil
   def fetch_version(%__MODULE__{fetch_version: version}), do: version
 
-  @doc "Returns true if the given buffer line needs re-rendering."
-  @spec dirty?(t(), non_neg_integer()) :: boolean()
-  def dirty?(%__MODULE__{dirty_lines: :all}, _line), do: true
-  def dirty?(%__MODULE__{dirty_lines: dirty}, line), do: Map.has_key?(dirty, line)
-
   @doc """
   Checks current frame parameters against last-frame tracking fields
-  and marks all lines dirty if anything requiring a full redraw has changed.
+  and marks the cache fully dirty if any structural input changed.
 
   Structural redraw triggers: viewport scroll, gutter width, line count, buffer
   version, first frame (sentinel values). Only first frame and gutter-width
@@ -307,7 +273,7 @@ defmodule MingaEditor.Renderer.WindowCache do
         cache.last_viewport_cache_key != viewport_cache_key or
         cache.last_line_count != line_count
 
-    cache = if needs_full, do: %{cache | dirty_lines: :all}, else: cache
+    cache = if needs_full, do: mark_fully_dirty(cache), else: cache
     cache = if geometry_reset, do: %{cache | reset_pending: true}, else: cache
 
     apply_version_invalidation(cache, buf_version)
@@ -325,22 +291,21 @@ defmodule MingaEditor.Renderer.WindowCache do
          buf_version
        )
        when previous >= 0 and previous != buf_version,
-       do: %{cache | dirty_lines: :all}
+       do: mark_fully_dirty(cache)
 
   defp apply_version_invalidation(cache, _buf_version), do: cache
 
   @doc """
   Compares the current render context fingerprint against the last frame's.
 
-  If the fingerprint changed, marks all lines dirty. Catches changes to
-  visual selection, search matches, syntax highlights, diagnostic signs,
-  git signs, active/inactive status, and theme colors.
+  Marks the cache fully dirty when visual selection, search matches, syntax
+  highlights, diagnostic signs, git signs, active status, or theme colors change.
   """
   @spec detect_context_change(t(), context_fingerprint()) :: t()
   def detect_context_change(%__MODULE__{} = cache, fingerprint) do
     if cache.last_context_fingerprint != nil and
          cache.last_context_fingerprint != fingerprint do
-      %{cache | dirty_lines: :all}
+      mark_fully_dirty(cache)
     else
       cache
     end
@@ -464,7 +429,7 @@ defmodule MingaEditor.Renderer.WindowCache do
     |> then(fn reset ->
       %{
         reset
-        | dirty_lines: :all,
+        | fully_dirty?: true,
           retained_rows: %{},
           retained_wrap_lines: %{},
           total_visual_rows_cache: nil,
@@ -613,7 +578,7 @@ defmodule MingaEditor.Renderer.WindowCache do
   @doc """
   Snapshots tracking fields after a successful render pass.
 
-  Clears the dirty set and records the current frame's parameters so the
+  Clears full invalidation and records the current frame's parameters so the
   next frame can detect what changed.
   """
   @spec snapshot(
@@ -668,7 +633,7 @@ defmodule MingaEditor.Renderer.WindowCache do
       ) do
     %{
       cache
-      | dirty_lines: %{},
+      | fully_dirty?: false,
         last_viewport_top: viewport_top,
         last_viewport_cache_key: viewport_cache_key,
         last_gutter_w: gutter_w,

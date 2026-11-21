@@ -6,17 +6,10 @@ defmodule MingaEditor.Renderer.RenderWindow do
   textobject, and viewport gesture mutations. This carrier keeps only the
   per-frame fields and cache-facing operations the render pipeline needs.
 
-  ## Render cache and dirty-line tracking
+  ## Render cache and full invalidation
 
-  Windows carry per-frame render state that enables incremental rendering.
-  The semantic `RenderModel.Window.Builder` reuses retained composed rows for
-  lines whose inputs are unchanged and only recomposes lines marked as dirty.
-
-  The dirty set uses two representations:
-  - `:all` means every line needs re-rendering (used for scroll, resize,
-    theme change, highlight update, and other wholesale invalidation)
-  - A map of specific buffer line numbers (`%{line => true}`) that need re-rendering
-    (used for edits that touch a few lines)
+  The cache tracks full invalidation for frame classification. The semantic
+  `RenderModel.Window.Builder` decides row reuse independently.
 
   Tracking fields (`last_viewport_top`, `last_viewport_cache_key`,
   `last_gutter_w`, `last_line_count`, `last_cursor_line`, `last_buf_version`)
@@ -33,8 +26,6 @@ defmodule MingaEditor.Renderer.RenderWindow do
   alias MingaEditor.Renderer.WindowCache, as: RenderCache
   alias MingaEditor.Window.ScrollVelocity
   alias MingaEditor.UI.Popup.Active, as: PopupActive
-
-  @compile {:inline, dirty?: 2}
 
   @typedoc "Unique identifier for a window."
   @type id :: pos_integer()
@@ -219,22 +210,16 @@ defmodule MingaEditor.Renderer.RenderWindow do
 
   defp resolve_scroll_follow(window, _cursor_pos, nil, :idle), do: {window, true}
 
-  # ── Dirty-line tracking ───────────────────────────────────────────────────
+  # ── Full invalidation ─────────────────────────────────────────────────────
 
-  @doc """
-  Marks specific buffer lines as needing re-render.
-
-  Pass `:all` to force a complete redraw (scroll, resize, theme change, etc.).
-  Pass a list of buffer line numbers for targeted invalidation (edits).
-  If the window is already fully dirty, adding specific lines is a no-op.
-  """
-  @spec mark_dirty(t(), [non_neg_integer()] | :all) :: t()
-  def mark_dirty(%__MODULE__{render_cache: cache} = window, lines) do
-    %{window | render_cache: RenderCache.mark_dirty(cache, lines)}
+  @doc "Marks the window fully dirty without discarding retained rows or requesting a reset."
+  @spec mark_fully_dirty(t()) :: t()
+  def mark_fully_dirty(%__MODULE__{render_cache: cache} = window) do
+    %{window | render_cache: RenderCache.mark_fully_dirty(cache)}
   end
 
   @doc """
-  Marks all lines dirty (full redraw needed).
+  Fully invalidates the window's render cache.
 
   Clears all caches and resets tracking fields to sentinels so the next
   render pass starts from scratch. Use this when the window's buffer
@@ -245,14 +230,6 @@ defmodule MingaEditor.Renderer.RenderWindow do
   def invalidate(%__MODULE__{render_cache: cache} = window) do
     %{window | render_cache: RenderCache.reset(cache)}
   end
-
-  @doc """
-  Returns true if the given buffer line needs re-rendering.
-
-  Always true when `dirty_lines` is `:all`.
-  """
-  @spec dirty?(t(), non_neg_integer()) :: boolean()
-  def dirty?(%__MODULE__{render_cache: cache}, line), do: RenderCache.dirty?(cache, line)
 
   @doc "Returns the retained composed rows from the previous semantic content build (#2287)."
   @spec retained_rows(t()) :: %{optional(non_neg_integer()) => RenderCache.retained_row()}
@@ -391,8 +368,7 @@ defmodule MingaEditor.Renderer.RenderWindow do
 
   @doc """
   Checks current frame parameters against last-frame tracking fields
-  and returns the window with `dirty_lines: :all` if anything that
-  requires a full redraw has changed.
+  and marks the cache fully dirty if any structural input changed.
 
   Structural triggers (checked here): viewport scroll, gutter width,
   line count, buffer version, first frame (sentinel values).
@@ -489,10 +465,9 @@ defmodule MingaEditor.Renderer.RenderWindow do
   @doc """
   Compares the current render context fingerprint against the last frame's.
 
-  If the fingerprint changed, marks all lines dirty. This catches changes
-  to visual selection, search matches, syntax highlights, diagnostic signs,
-  git signs, horizontal scroll, active/inactive status, and theme colors,
-  all of which affect every visible line's draw output.
+  Marks the cache fully dirty when visual selection, search matches, syntax
+  highlights, diagnostic signs, git signs, horizontal scroll, active status,
+  or theme colors change.
   """
   @spec detect_context_change(t(), RenderCache.context_fingerprint()) :: t()
   def detect_context_change(%__MODULE__{render_cache: cache} = window, fingerprint) do
@@ -547,10 +522,8 @@ defmodule MingaEditor.Renderer.RenderWindow do
   @doc """
   Snapshots tracking fields after a successful render pass.
 
-  Clears the dirty set and records the current frame's parameters so the
-  next frame can detect what changed. The context fingerprint captures
-  all per-frame render context inputs (visual selection, search matches,
-  syntax highlights, signs, etc.) so context changes trigger full redraws.
+  Clears full invalidation and records the current frame's parameters so the
+  next frame can detect what changed, including changes to its render context.
   """
   @spec snapshot_after_render(
           t(),

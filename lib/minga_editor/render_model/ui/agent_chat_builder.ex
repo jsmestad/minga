@@ -242,10 +242,8 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
        when is_list(styled_cache) do
     padded = pad_cache(styled_cache, length(messages_with_ids))
 
-    messages_with_ids
-    |> Enum.zip(padded)
-    |> Enum.map(fn message ->
-      message |> maybe_style_message(nil) |> to_core_message(scope)
+    Enum.zip_with(messages_with_ids, padded, fn message, style ->
+      {message, style} |> maybe_style_message(nil) |> to_core_message(scope)
     end)
   end
 

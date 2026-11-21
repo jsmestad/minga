@@ -17,6 +17,9 @@ defmodule MingaEditor.Agent.PromptBuffer do
   @paste_placeholder_prefix "\0PASTE:"
   @paste_collapse_threshold 3
 
+  @typep expanded_match ::
+           {index :: non_neg_integer(), start_line :: non_neg_integer(), count :: pos_integer()}
+
   @doc "Ensures the prompt buffer is alive and attached to the UI metadata."
   @spec ensure(UIState.t()) :: UIState.t()
   def ensure(%UIState{panel: %Panel{prompt_buffer: pid}} = state) when is_pid(pid) do
@@ -266,22 +269,48 @@ defmodule MingaEditor.Agent.PromptBuffer do
     end
   end
 
-  @doc "Toggles the collapsed paste block at the current prompt line."
+  @doc "Toggles the paste block at the cursor, leaving the UI unchanged on a miss."
   @spec toggle_paste_expand(UIState.t()) :: UIState.t()
-  def toggle_paste_expand(%UIState{panel: %Panel{prompt_buffer: pid}} = state) when is_pid(pid) do
-    {cursor_line, _col} = Buffer.cursor(pid)
-    current_line = state |> input_lines() |> Enum.at(cursor_line)
-
-    case parse_placeholder(current_line) do
-      {:ok, index} ->
-        if Enum.at(state.panel.pasted_blocks, index), do: expand_block(state, index), else: state
-
-      :not_placeholder ->
-        toggle_expanded_block(state, cursor_line)
+  def toggle_paste_expand(%UIState{} = state) do
+    case toggle_paste_at_cursor(state) do
+      {:handled, updated} -> updated
+      :not_applicable -> state
     end
   end
 
-  def toggle_paste_expand(%UIState{} = state), do: state
+  @doc "Toggles a paste block and reports whether it claims the key, even if no edit occurs."
+  @spec toggle_paste_at_cursor(UIState.t()) :: :not_applicable | {:handled, UIState.t()}
+  def toggle_paste_at_cursor(%UIState{panel: %Panel{prompt_buffer: pid}} = state)
+      when is_pid(pid) do
+    {content, {cursor_line, _col}} = Buffer.content_and_cursor(pid)
+    lines = String.split(content, "\n")
+    current_line = Enum.at(lines, cursor_line)
+
+    case parse_placeholder(current_line) do
+      {:ok, index} ->
+        {:handled, expand_block(state, lines, cursor_line, index)}
+
+      :not_placeholder ->
+        fallback =
+          if match?(<<@paste_placeholder_prefix, _::binary>>, current_line),
+            do: :handled,
+            else: :not_applicable
+
+        case find_expanded_block_at_cursor(
+               state.panel.pasted_blocks,
+               lines,
+               cursor_line,
+               0,
+               fallback
+             ) do
+          {_index, _start_line, _count} = match -> {:handled, collapse_block(state, lines, match)}
+          :handled -> {:handled, state}
+          :not_applicable -> :not_applicable
+        end
+    end
+  end
+
+  def toggle_paste_at_cursor(%UIState{}), do: :not_applicable
 
   @doc "Saves non-blank prompt text to history."
   @spec save_to_history(UIState.t()) :: UIState.t()
@@ -382,112 +411,103 @@ defmodule MingaEditor.Agent.PromptBuffer do
       Enum.take(lines, cursor_line) ++
         [before, placeholder, after_cursor] ++ Enum.drop(lines, cursor_line + 1)
 
-  @spec toggle_expanded_block(UIState.t(), non_neg_integer()) :: UIState.t()
-  defp toggle_expanded_block(%UIState{} = state, cursor_line) do
-    case find_expanded_block_at_cursor(state, cursor_line) do
-      {:ok, index} -> collapse_block(state, index)
-      :not_found -> state
-    end
-  end
-
-  @spec expand_block(UIState.t(), non_neg_integer()) :: UIState.t()
-  defp expand_block(%UIState{panel: panel} = state, index) do
-    pid = panel.prompt_buffer
-    {cursor_line, _col} = Buffer.cursor(pid)
-    lines = input_lines(state)
-    block = Enum.at(panel.pasted_blocks, index)
-    placeholder = @paste_placeholder_prefix <> Integer.to_string(index)
-    placeholder_line = Enum.find_index(lines, &(&1 == placeholder))
-
-    if placeholder_line do
-      text_lines = String.split(block.text, "\n")
-
-      new_lines =
-        Enum.take(lines, placeholder_line) ++ text_lines ++ Enum.drop(lines, placeholder_line + 1)
-
-      expansion = Enum.count(text_lines) - 1
+  @spec expand_block(UIState.t(), [String.t()], non_neg_integer(), non_neg_integer()) ::
+          UIState.t()
+  defp expand_block(%UIState{panel: panel} = state, lines, cursor_line, index) do
+    with %{text: text} <- Enum.at(panel.pasted_blocks, index),
+         placeholder = @paste_placeholder_prefix <> Integer.to_string(index),
+         start_line when is_integer(start_line) <- Enum.find_index(lines, &(&1 == placeholder)) do
+      {before, [_token | after_token]} = Enum.split(lines, start_line)
 
       next_cursor =
-        if cursor_line > placeholder_line, do: cursor_line + expansion, else: cursor_line
+        if cursor_line > start_line,
+          do: cursor_line + length(:binary.matches(text, "\n")),
+          else: cursor_line
 
-      Buffer.replace_content(pid, Enum.join(new_lines, "\n"))
-      Buffer.move_to(pid, {next_cursor, 0})
+      Buffer.replace_content(panel.prompt_buffer, Enum.join(before ++ [text | after_token], "\n"))
+      Buffer.move_to(panel.prompt_buffer, {next_cursor, 0})
       UIState.mark_paste_expanded(state, index, true)
     else
-      state
+      nil -> state
     end
   end
 
-  @spec collapse_block(UIState.t(), non_neg_integer()) :: UIState.t()
-  defp collapse_block(%UIState{panel: panel} = state, index) do
-    pid = panel.prompt_buffer
-    {cursor_line, _col} = Buffer.cursor(pid)
-    lines = input_lines(state)
-    text_lines = panel.pasted_blocks |> Enum.at(index) |> Map.fetch!(:text) |> String.split("\n")
-    start_index = find_expanded_block_start(lines, text_lines)
+  @spec collapse_block(UIState.t(), [String.t()], expanded_match()) :: UIState.t()
+  defp collapse_block(%UIState{panel: panel} = state, lines, {index, start_line, count}) do
+    placeholder = @paste_placeholder_prefix <> Integer.to_string(index)
+    {before, rest} = Enum.split(lines, start_line)
+    new_lines = before ++ [placeholder | Enum.drop(rest, count)]
 
-    if start_index do
-      placeholder = @paste_placeholder_prefix <> Integer.to_string(index)
-
-      new_lines =
-        Enum.take(lines, start_index) ++
-          [placeholder] ++ Enum.drop(lines, start_index + Enum.count(text_lines))
-
-      next_cursor = collapse_cursor_line(cursor_line, start_index, Enum.count(text_lines))
-      Buffer.replace_content(pid, Enum.join(new_lines, "\n"))
-      Buffer.move_to(pid, {next_cursor, 0})
-      UIState.mark_paste_expanded(state, index, false)
-    else
-      state
-    end
+    Buffer.replace_content(panel.prompt_buffer, Enum.join(new_lines, "\n"))
+    Buffer.move_to(panel.prompt_buffer, {start_line, 0})
+    UIState.mark_paste_expanded(state, index, false)
   end
 
-  @spec collapse_cursor_line(non_neg_integer(), non_neg_integer(), pos_integer()) ::
-          non_neg_integer()
-  defp collapse_cursor_line(cursor, start_index, count)
-       when cursor >= start_index and cursor < start_index + count,
-       do: start_index
-
-  defp collapse_cursor_line(cursor, start_index, count) when cursor >= start_index + count,
-    do: cursor - count + 1
-
-  defp collapse_cursor_line(cursor, _start_index, _count), do: cursor
-
-  @spec find_expanded_block_at_cursor(UIState.t(), non_neg_integer()) ::
-          {:ok, non_neg_integer()} | :not_found
-  defp find_expanded_block_at_cursor(%UIState{} = state, cursor_line) do
-    lines = input_lines(state)
-
-    state.panel.pasted_blocks
-    |> Enum.with_index()
-    |> Enum.find_value(:not_found, &expanded_block_at_cursor(&1, lines, cursor_line))
-  end
-
-  @spec expanded_block_at_cursor(
-          {Panel.paste_block(), non_neg_integer()},
+  @spec find_expanded_block_at_cursor(
+          [Panel.paste_block()],
           [String.t()],
-          non_neg_integer()
-        ) :: {:ok, non_neg_integer()} | nil
-  defp expanded_block_at_cursor({%{expanded: false}, _index}, _lines, _cursor_line), do: nil
+          non_neg_integer(),
+          non_neg_integer(),
+          :handled | :not_applicable
+        ) :: expanded_match() | :handled | :not_applicable
+  defp find_expanded_block_at_cursor([], _lines, _cursor_line, _index, fallback), do: fallback
 
-  defp expanded_block_at_cursor({block, index}, lines, cursor_line) do
-    text_lines = String.split(block.text, "\n")
-    start_index = find_expanded_block_start(lines, text_lines)
-    count = Enum.count(text_lines)
+  defp find_expanded_block_at_cursor(
+         [%{expanded: false} | blocks],
+         lines,
+         cursor_line,
+         index,
+         fallback
+       ) do
+    find_expanded_block_at_cursor(blocks, lines, cursor_line, index + 1, fallback)
+  end
 
-    if start_index && cursor_line >= start_index && cursor_line < start_index + count,
-      do: {:ok, index}
+  defp find_expanded_block_at_cursor(
+         [%{expanded: true, text: text} | blocks],
+         lines,
+         cursor_line,
+         index,
+         fallback
+       ) do
+    text_lines = String.split(text, "\n")
+    count = length(text_lines)
+
+    case find_expanded_block_start(lines, text_lines, 0, cursor_line) do
+      start_line when is_integer(start_line) and cursor_line < start_line + count ->
+        {index, start_line, count}
+
+      start_line when is_integer(start_line) and fallback == :not_applicable ->
+        # Only the first occurrence can collapse. A later occurrence can claim Tab,
+        # but another block's first occurrence can still win.
+        first_candidate = cursor_line - count + 1
+        candidates = Enum.drop(lines, first_candidate)
+
+        fallback =
+          if find_expanded_block_start(candidates, text_lines, first_candidate, cursor_line),
+            do: :handled,
+            else: :not_applicable
+
+        find_expanded_block_at_cursor(blocks, lines, cursor_line, index + 1, fallback)
+
+      _other ->
+        find_expanded_block_at_cursor(blocks, lines, cursor_line, index + 1, fallback)
+    end
   end
 
   @spec find_expanded_block_start([String.t()], [String.t()]) :: non_neg_integer() | nil
-  defp find_expanded_block_start(lines, text_lines) do
-    max_start = Enum.count(lines) - Enum.count(text_lines)
+  defp find_expanded_block_start(lines, text_lines),
+    do: find_expanded_block_start(lines, text_lines, 0, length(lines) - 1)
 
-    if max_start < 0,
-      do: nil,
-      else:
-        Enum.find(0..max_start, &(Enum.slice(lines, &1, Enum.count(text_lines)) == text_lines))
+  @spec find_expanded_block_start([String.t()], [String.t()], non_neg_integer(), integer()) ::
+          non_neg_integer() | nil
+  defp find_expanded_block_start([_ | rest] = lines, text_lines, start_line, last_start)
+       when start_line <= last_start do
+    if List.starts_with?(lines, text_lines),
+      do: start_line,
+      else: find_expanded_block_start(rest, text_lines, start_line + 1, last_start)
   end
+
+  defp find_expanded_block_start(_lines, _text_lines, _start_line, _last_start), do: nil
 
   @spec parse_placeholder(String.t() | nil) :: {:ok, non_neg_integer()} | :not_placeholder
   defp parse_placeholder(<<@paste_placeholder_prefix, rest::binary>>) when byte_size(rest) > 0 do

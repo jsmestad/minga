@@ -20,6 +20,35 @@ defmodule Minga.Buffer.OperationTest do
     end
   end
 
+  describe "replace_byte_range/4" do
+    test "validates the prefix and removed bytes but leaves suffix validation to reconstruction" do
+      invalid_prefix = Document.new(<<0xFF, "ab">>)
+
+      assert {:error, :invalid_range} =
+               Operation.replace_byte_range(invalid_prefix, {0, 1}, 1, "X")
+
+      invalid_removed = Document.new(<<"a", 0xFF, "b">>)
+
+      assert {:error, :invalid_range} =
+               Operation.replace_byte_range(invalid_removed, {0, 1}, 1, "X")
+
+      assert :unchanged = Operation.replace_byte_range(invalid_removed, {0, 1}, 0, "")
+
+      assert_raise ArgumentError, "byte range replacement produced invalid UTF-8 content", fn ->
+        Operation.replace_byte_range(invalid_removed, {0, 1}, 0, "X")
+      end
+    end
+
+    test "replaces a valid span across the gap with byte-accurate positions" do
+      doc = Document.new("aé\n日z") |> Document.move_to({1, 0})
+      assert {:edited, updated, delta} = Operation.replace_byte_range(doc, {0, 1}, 6, "X")
+      assert Document.content(updated) == "aXz"
+      assert Document.cursor(updated) == {0, 2}
+      assert delta.old_end_byte == 7
+      assert delta.old_end_position == {1, 3}
+    end
+  end
+
   describe "replace_range/4" do
     test "returns exclusive old end byte and position for a multi-byte grapheme" do
       doc = Document.new("aébc")

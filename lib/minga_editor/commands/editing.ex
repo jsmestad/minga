@@ -599,15 +599,14 @@ defmodule MingaEditor.Commands.Editing do
   @spec block_closing_for_enter(state(), pid(), non_neg_integer(), non_neg_integer()) ::
           block_closing() | nil
   defp block_closing_for_enter(state, buf, line, col) do
-    with true <- Buffer.get_option(buf, :autopair_block),
-         [line_text] <- Buffer.lines(buf, line, 1),
-         true <- block_suffix_allowed?(line_text, col),
-         :code <- scope_at_position(state, buf, {line, block_scope_col(col)}),
-         line_prefix <- line_prefix(line_text, col),
-         closing when is_binary(closing) <- block_closing_keyword(buf, line_prefix) do
-      {Indent.extract_leading_ws(line_text), closing}
-    else
-      _ -> nil
+    if Buffer.get_option(buf, :autopair_block) == true do
+      with [line_text] <- Buffer.lines(buf, line, 1),
+           closing when is_binary(closing) <- block_closing_keyword(buf, line_text, col),
+           :code <- scope_at_position(state, buf, {line, block_scope_col(col)}) do
+        {Indent.extract_leading_ws(line_text), closing}
+      else
+        _ -> nil
+      end
     end
   end
 
@@ -627,12 +626,14 @@ defmodule MingaEditor.Commands.Editing do
     String.trim(suffix) == ""
   end
 
-  @spec block_closing_keyword(pid(), String.t()) :: String.t() | nil
-  defp block_closing_keyword(buf, line_prefix) do
-    buf
-    |> Buffer.filetype()
-    |> Language.block_pairs()
-    |> Minga.Editing.block_closing_for(line_prefix)
+  @spec block_closing_keyword(pid(), String.t(), non_neg_integer()) :: String.t() | nil
+  defp block_closing_keyword(buf, line_text, col) do
+    if block_suffix_allowed?(line_text, col) do
+      buf
+      |> Buffer.filetype()
+      |> Language.block_pairs()
+      |> Minga.Editing.block_closing_for(line_prefix(line_text, col))
+    end
   end
 
   @spec block_inner_indent(pid(), String.t(), block_closing() | nil) :: String.t()
@@ -783,44 +784,21 @@ defmodule MingaEditor.Commands.Editing do
 
   @spec execute_autopair_insert(state(), pid(), String.t()) :: :ok
   defp execute_autopair_insert(state, buf, char) do
-    gb = Buffer.snapshot(buf)
-    cursor = Document.cursor(gb)
+    doc = Buffer.snapshot(buf)
+    cursor = Document.cursor(doc)
 
-    case scope_at_position(state, buf, cursor) do
-      :code -> apply_autopair_insert(buf, gb, cursor, char)
-      _scope -> apply_non_code_autopair_insert(buf, gb, cursor, char)
-    end
-
-    :ok
-  end
-
-  @spec apply_autopair_insert(pid(), Document.t(), Document.position(), String.t()) :: :ok
-  defp apply_autopair_insert(buf, gb, cursor, char) do
-    case Minga.Editing.insert_with_pairs(gb, cursor, char) do
+    case Minga.Editing.insert_with_pairs(doc, cursor, char) do
       {:pair, open, close} ->
-        Buffer.insert_char(buf, open)
-        Buffer.insert_char(buf, close)
-        Buffer.move(buf, :left)
+        if scope_at_position(state, buf, cursor) == :code do
+          Buffer.insert_char(buf, open)
+          Buffer.insert_char(buf, close)
+          Buffer.move(buf, :left)
+        else
+          Buffer.insert_char(buf, char)
+        end
 
       {:skip, _char} ->
         Buffer.move(buf, :right)
-
-      {:passthrough, char} ->
-        Buffer.insert_char(buf, char)
-    end
-
-    :ok
-  end
-
-  @spec apply_non_code_autopair_insert(pid(), Document.t(), Document.position(), String.t()) ::
-          :ok
-  defp apply_non_code_autopair_insert(buf, gb, cursor, char) do
-    case Minga.Editing.insert_with_pairs(gb, cursor, char) do
-      {:skip, _char} ->
-        Buffer.move(buf, :right)
-
-      {:pair, _open, _close} ->
-        Buffer.insert_char(buf, char)
 
       {:passthrough, char} ->
         Buffer.insert_char(buf, char)

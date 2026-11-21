@@ -1,10 +1,5 @@
 # One allowance per row. Delete rows as clauses are removed; do not add new allowances.
 # File	SHA-256 of normalized RHS AST	RHS for review
-lib/minga/buffer/operation.ex	08501738a6f28b19e9ef06a7b53bc17ea92eb6ddc2f9b7189c3f6654a0a889f2	"valid_utf8_boundary?(content, old_end_byte)"
-lib/minga/buffer/operation.ex	363326a82432f038be63820e6b957a6995de25b57aa3c7cbac8069468efd57ac	"old_end_byte <= byte_size(content)"
-lib/minga/buffer/operation.ex	5efb001fb1d0bd425cfa1b772b5aef689b4afdf9cbc70c5dabdd0f75c0909b33	"valid_utf8_boundary?(content, start_byte)"
-lib/minga/buffer/operation.ex	6d3f615e2ec3d95f3d7fa7256176844dbdd1be2c9fd93803e23e0756ec847e19	"Unicode.valid_utf8?(replacement)"
-lib/minga/buffer/operation.ex	e8c27ece61e94d0a5f100915f2e554d4cdbddcf129e564f9e48f0066725548c2	"col <= byte_size(line_text)"
 lib/minga/buffer/process.ex	5ed0c1fa9d8dd26002e35f80a955fc79b3647dfd5bbbbd2a9ea650320ce3428e	"origin_path_matches?(state, intent.origin_path)"
 lib/minga/buffer/process.ex	c9f38a5b41ed133ddf21bf843446a704f897966acd67faf06a76f5ead50519dd	"target_matches_expectation?(state, intent)"
 lib/minga/config.ex	0d4d20ce00c1d71fbceba7fec9c22e13b4a068cd3b61b90b8caa642e5033057f	"function_exported?(module, :name, 0)"
@@ -188,8 +183,6 @@ lib/minga_editor/agent_lifecycle.ex	1b2ef41a231fefae31f61dae932cfc2eb7dc52ea2d40
 lib/minga_editor/agent_lifecycle.ex	4eb91e4b027973bc6918d5564a881c07d125b793c27a9a1d0dbf9b7ebabe9961	"is_pid(session)"
 lib/minga_editor/agent_lifecycle.ex	4eb91e4b027973bc6918d5564a881c07d125b793c27a9a1d0dbf9b7ebabe9961	"is_pid(session)"
 lib/minga_editor/commands/editing.ex	08dbec6c7fadd9e76c28b23dc329d91df869e0d3bc392a6bd0f6bbaff207a4ab	"line_comment_token?(token)"
-lib/minga_editor/commands/editing.ex	44165c0da37673291a79d2e24ba3b2c993e9677b97a755d66b89f9758db23f40	"block_suffix_allowed?(line_text, col)"
-lib/minga_editor/commands/editing.ex	61db1814214190b58a6287f2cb6d4ad95c068441246562f7327a50b28953d514	"Buffer.get_option(buf, :autopair_block)"
 lib/minga_editor/commands/editing.ex	8187a11fe90ac90e1a0a130cd1136d1fe75214053700422a6113c5bc7b7ed526	"col == byte_size(line_text)"
 lib/minga_editor/completion_handling.ex	8046152bb4d22fd4fac98d93d831b54a6c689a103a29b43f6ee779ad6705aa88	"legacy_completion_result_current?(state, client, buffer, gen)"
 lib/minga_editor/completion_handling.ex	a25e671d7fd34b81dd45463c618f5f0b049c63269ad40154528fd02a108cde18	"completion_result_current?(state, fact)"

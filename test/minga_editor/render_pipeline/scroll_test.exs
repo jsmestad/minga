@@ -420,13 +420,12 @@ defmodule MingaEditor.RenderPipeline.ScrollTest do
       assert scroll.snapshot.version >= 0
     end
 
-    test "first frame marks all lines dirty on the window" do
+    test "first frame marks the window fully dirty" do
       state = base_state()
       {_scrolls, state, _layout} = run_through_scroll(state)
       [{_win_id, window}] = Map.to_list(state.windows.map)
 
-      # First frame: sentinel values trigger full invalidation
-      assert window.render_cache.dirty_lines == :all
+      assert window.render_cache.fully_dirty?
     end
 
     test "resets horizontal scroll when cursor fits on screen" do

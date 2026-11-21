@@ -54,7 +54,7 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapter do
 
   @typep content_event ::
            {:text | :thinking, [String.t()], map()} | {:content_part, ContentPart.t()}
-  @typep stream_accumulator :: {[String.t()], [content_event()]}
+  @typep stream_accumulator :: [content_event()]
 
   @typedoc "Decoded result from one provider response."
   @type turn_result :: TurnResult.t()
@@ -264,7 +264,7 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapter do
   @spec process_stream(StreamResponse.t(), stream_callbacks()) ::
           {:ok, turn_result()} | {:error, term(), String.t()}
   def process_stream(%StreamResponse{} = stream_response, callbacks \\ []) do
-    {:ok, accumulator} = Agent.start_link(fn -> {[], []} end)
+    {:ok, accumulator} = Agent.start_link(fn -> [] end)
 
     try do
       result =
@@ -291,17 +291,17 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapter do
           end
         )
 
-      {partial_text_parts, content_events} = Agent.get(accumulator, & &1)
+      content_events = Agent.get(accumulator, & &1)
 
       case result do
         {:ok, response} ->
           case response_to_turn_result(response, content_events) do
             {:ok, turn_result} -> {:ok, turn_result}
-            {:error, reason} -> {:error, reason, partial_text(partial_text_parts)}
+            {:error, reason} -> {:error, reason, partial_text(content_events)}
           end
 
         {:error, reason} ->
-          {:error, reason, partial_text(partial_text_parts)}
+          {:error, reason, partial_text(content_events)}
       end
     after
       if Process.alive?(accumulator) do
@@ -313,11 +313,11 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapter do
   @spec accumulate_content_chunk(stream_accumulator(), ReqLLM.StreamChunk.t()) ::
           stream_accumulator()
   defp accumulate_content_chunk(
-         {partial_text, content_events},
+         content_events,
          %ReqLLM.StreamChunk{type: :content, text: text, metadata: metadata}
        )
        when is_binary(text) do
-    append_ordered_content({[text | partial_text], content_events}, {:text, text, metadata})
+    append_ordered_content(content_events, {:text, text, metadata})
   end
 
   defp accumulate_content_chunk(
@@ -329,10 +329,10 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapter do
   end
 
   defp accumulate_content_chunk(
-         {partial_text, content_events},
+         content_events,
          %ReqLLM.StreamChunk{type: :content_part, content_part: %ContentPart{} = part}
        ) do
-    {partial_text, [{:content_part, part} | content_events]}
+    [{:content_part, part} | content_events]
   end
 
   defp accumulate_content_chunk(accumulator, _chunk), do: accumulator
@@ -341,14 +341,14 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapter do
           stream_accumulator(),
           {:text | :thinking, String.t(), map()}
         ) :: stream_accumulator()
-  defp append_ordered_content({partial_text, events}, {type, text, metadata}) do
+  defp append_ordered_content(events, {type, text, metadata}) do
     case events do
       [{event_type, texts, event_metadata} | rest]
       when event_type == type and event_metadata == metadata ->
-        {partial_text, [{type, [text | texts], metadata} | rest]}
+        [{type, [text | texts], metadata} | rest]
 
       _other ->
-        {partial_text, [{type, [text], metadata} | events]}
+        [{type, [text], metadata} | events]
     end
   end
 
@@ -527,8 +527,15 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapter do
 
   defp extract_tool_calls(_response), do: {:error, :invalid_tool_call_list}
 
-  @spec partial_text([String.t()]) :: String.t()
-  defp partial_text(parts), do: parts |> Enum.reverse() |> IO.iodata_to_binary()
+  @spec partial_text([content_event()]) :: String.t()
+  defp partial_text(events) do
+    events
+    |> Enum.reduce([], fn
+      {:text, reversed_chunks, _metadata}, acc -> Enum.reverse(reversed_chunks, acc)
+      _event, acc -> acc
+    end)
+    |> IO.iodata_to_binary()
+  end
 
   @spec extract_usage(Response.t()) :: raw_usage() | nil
   defp extract_usage(%{usage: usage}) when is_map(usage), do: usage

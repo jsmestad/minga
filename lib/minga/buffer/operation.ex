@@ -121,31 +121,47 @@ defmodule Minga.Buffer.Operation do
   def replace_byte_range(%Document{} = doc, {line, col} = position, byte_length, replacement)
       when is_integer(line) and line >= 0 and is_integer(col) and col >= 0 and
              is_integer(byte_length) and byte_length >= 0 and is_binary(replacement) do
-    with line_text when is_binary(line_text) <- Lines.fetch(doc, line),
-         true <- col <= byte_size(line_text),
-         content = Document.content(doc),
-         start_byte = Position.point_for(doc, position),
-         old_end_byte = start_byte + byte_length,
-         true <- old_end_byte <= byte_size(content),
-         true <- valid_utf8_boundary?(content, start_byte),
-         true <- valid_utf8_boundary?(content, old_end_byte),
-         true <- Unicode.valid_utf8?(replacement) do
-      replace_valid_byte_range(
-        doc,
-        position,
-        start_byte,
-        old_end_byte,
-        byte_length,
-        replacement
-      )
-    else
-      _invalid -> {:error, :invalid_range}
+    with {:ok, start_byte, old_end_byte} <- resolve_byte_range(doc, position, byte_length) do
+      if Unicode.valid_utf8?(replacement) do
+        replace_valid_byte_range(
+          doc,
+          position,
+          start_byte,
+          old_end_byte,
+          byte_length,
+          replacement
+        )
+      else
+        {:error, :invalid_range}
+      end
     end
   end
 
   def replace_byte_range(%Document{}, _position, byte_length, replacement)
       when is_integer(byte_length) and byte_length >= 0 and is_binary(replacement),
       do: {:error, :invalid_range}
+
+  @spec resolve_byte_range(Document.t(), Document.position(), non_neg_integer()) ::
+          {:ok, non_neg_integer(), non_neg_integer()} | {:error, :invalid_range}
+  defp resolve_byte_range(doc, {line, col} = position, byte_length) do
+    case Lines.fetch(doc, line) do
+      text when is_binary(text) and col <= byte_size(text) ->
+        start_byte = Position.point_for(doc, position)
+        end_byte = start_byte + byte_length
+
+        # A valid prefix ends at a code point, so validate the removed bytes separately.
+        if end_byte <= Document.content_byte_size(doc) and
+             Unicode.valid_utf8?(Document.slice_byte_range(doc, 0, start_byte)) and
+             Unicode.valid_utf8?(Document.slice_byte_range(doc, start_byte, byte_length)) do
+          {:ok, start_byte, end_byte}
+        else
+          {:error, :invalid_range}
+        end
+
+      _missing_or_short ->
+        {:error, :invalid_range}
+    end
+  end
 
   @spec replace_valid_byte_range(
           Document.t(),
@@ -182,13 +198,6 @@ defmodule Minga.Buffer.Operation do
       )
 
     {:edited, new_doc, delta}
-  end
-
-  @spec valid_utf8_boundary?(String.t(), non_neg_integer()) :: boolean()
-  defp valid_utf8_boundary?(content, point) do
-    content
-    |> binary_part(0, point)
-    |> Unicode.valid_utf8?()
   end
 
   @doc "Applies multiple range replacements from the end of the document toward the start."

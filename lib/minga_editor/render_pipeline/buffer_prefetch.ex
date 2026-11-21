@@ -1342,30 +1342,15 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
     {Enum.min(lines), Enum.max(lines)}
   end
 
-  # When cursor line changes with relative or hybrid numbering, every
-  # gutter entry shows a different number. Mark all lines dirty for
-  # re-render. With absolute numbering, cursor movement doesn't affect
-  # gutter content so we only mark the old and new cursor lines.
+  # Relative and hybrid numbers depend on the cursor line. Mark full
+  # invalidation for classification, but keep the retained content.
   @spec detect_gutter_invalidation(Window.t(), non_neg_integer(), atom()) :: Window.t()
   defp detect_gutter_invalidation(window, cursor_line, line_number_style) do
     old_cursor = window.render_cache.last_cursor_line
 
-    if old_cursor == cursor_line or old_cursor < 0 do
-      # Cursor didn't move or first frame (already :all dirty)
-      window
-    else
-      case line_number_style do
-        style when style in [:relative, :hybrid] ->
-          # Every visible line number changes. Use mark_dirty (not
-          # invalidate) because the content draws are still valid;
-          # only gutter numbers change.
-          Window.mark_dirty(window, :all)
-
-        _ ->
-          # Only the old and new cursor lines need gutter + cursor highlight update
-          Window.mark_dirty(window, [old_cursor, cursor_line])
-      end
-    end
+    if old_cursor >= 0 and old_cursor != cursor_line and line_number_style in [:relative, :hybrid],
+      do: Window.mark_fully_dirty(window),
+      else: window
   end
 
   @spec buffer_pid(Window.t()) :: pid()

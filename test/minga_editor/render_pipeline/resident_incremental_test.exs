@@ -19,7 +19,9 @@ defmodule MingaEditor.RenderPipeline.ResidentIncrementalTest do
   alias MingaEditor.RenderModel.Window.VisualRow
   alias MingaEditor.RenderPipeline
   alias MingaEditor.RenderPipeline.BufferPrefetch
+  alias MingaEditor.RenderPipeline.Classifier
   alias MingaEditor.RenderPipeline.Content
+  alias MingaEditor.RenderPipeline.Input
   alias MingaEditor.RenderPipeline.Intent
   alias MingaEditor.RenderPipeline.Scroll
   alias MingaEditor.Renderer.BufferChanges
@@ -42,6 +44,7 @@ defmodule MingaEditor.RenderPipeline.ResidentIncrementalTest do
 
   defp scroll_input(input, layout) do
     {prefetched, input} = BufferPrefetch.prefetch_scrolls(input, layout)
+    input = Input.record_frame_render_path(input, Classifier.classify(input, prefetched))
     Scroll.scroll_windows(input, layout, prefetched)
   end
 
@@ -193,11 +196,16 @@ defmodule MingaEditor.RenderPipeline.ResidentIncrementalTest do
     assert %{top: 0, visual_row_offset: 1} = advanced.geometry.viewport
     assert advanced.scroll_seq == promoted.scroll_seq
     assert %{splices: []} = advanced.row_delta
+    assert state.output.caches.frame_render_path == :patch
+    assert state.output.caches.frame_rows_rasterized == 0
 
     editor = Mouse.handle_scroll_batch(state.editor, id, 100, :down)
     {bottom, state} = build_frame(%{state | editor: editor})
-    assert bottom.geometry.viewport.visual_row_offset == total_rows - fitted
+    assert %{top: 0, visual_row_offset: offset} = bottom.geometry.viewport
+    assert offset == total_rows - fitted
     assert %{splices: []} = bottom.row_delta
+    assert state.output.caches.frame_render_path == :full
+    assert state.output.caches.frame_rows_rasterized == 0
 
     editor = Mouse.handle_scroll_batch(state.editor, id, -1, :up)
     {reversed, _state} = build_frame(%{state | editor: editor})
@@ -417,6 +425,42 @@ defmodule MingaEditor.RenderPipeline.ResidentIncrementalTest do
     assert edited.row_delta.result_row_count == 2 + length(inserted)
     {recovered, _state} = build_frame(Map.put(state, :keyframe?, true))
     assert Enum.any?(recovered.rows, &match?(%{row_id: ^tail_id, text: "tail"}, &1))
+  end
+
+  describe "cursor motion classification" do
+    for {style, without_retained_rows} <- [absolute: :patch, relative: :full, hybrid: :full] do
+      test "#{style} line numbers preserve the frame path and zero-row reuse" do
+        editor = resident_state(30)
+        buffer = editor.workspace.buffers.active
+        id = editor.workspace.windows.active
+        style = unquote(style)
+        assert {:ok, ^style} = BufferProcess.set_option(buffer, :line_numbers, style)
+        assert {:ok, 0} = BufferProcess.set_option(buffer, :scroll_margin, 0)
+        assert :ok = BufferProcess.move_to(buffer, {1, 0})
+
+        {_first, state} = build_frame(editor)
+        {promoted, state} = build_frame(state)
+        assert promoted.row_store_mode == {:resident, 30}
+        assert map_size(state.output.windows.map[id].render_cache.retained_rows) > 0
+
+        assert :ok = BufferProcess.move_to(buffer, {2, 0})
+        {stepped, state} = build_frame(state)
+        assert stepped.geometry.viewport.top == promoted.geometry.viewport.top
+        assert stepped.gutter.cursor_line == 2
+        refute stepped.full_refresh
+        assert state.output.caches.frame_render_path == :patch
+        assert state.output.caches.frame_rows_rasterized == 0
+        assert state.output.windows.map[id].render_cache.retained_rows == %{}
+
+        assert :ok = BufferProcess.move_to(buffer, {3, 0})
+        {stepped, state} = build_frame(state)
+        assert stepped.geometry.viewport.top == promoted.geometry.viewport.top
+        assert stepped.gutter.cursor_line == 3
+        refute stepped.full_refresh
+        assert state.output.caches.frame_render_path == unquote(without_retained_rows)
+        assert state.output.caches.frame_rows_rasterized == 0
+      end
+    end
   end
 
   describe "digest consistency" do
