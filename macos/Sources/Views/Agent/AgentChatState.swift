@@ -350,7 +350,9 @@ public struct AgentTranscriptSnapshot {
     let epoch: UInt32
     let hasTranscript: Bool
     let truncated: Bool
-    let promptVersion: Int
+    /// Identity of this transcript value. Advances, with wrapping, each time the
+    /// stored snapshot is replaced, and never for chrome or composer updates.
+    let revision: UInt64
     /// Work performed to prepare the operation that created this snapshot.
     public let accountingCounters: AgentTranscriptAccountingCounters
 
@@ -365,14 +367,14 @@ public struct AgentTranscriptSnapshot {
         epoch: UInt32,
         hasTranscript: Bool,
         truncated: Bool,
-        promptVersion: Int,
+        revision: UInt64,
         accountingCounters: AgentTranscriptAccountingCounters
     ) {
         self.store = store
         self.epoch = epoch
         self.hasTranscript = hasTranscript
         self.truncated = truncated
-        self.promptVersion = promptVersion
+        self.revision = revision
         self.accountingCounters = accountingCounters
     }
 
@@ -381,7 +383,7 @@ public struct AgentTranscriptSnapshot {
         epoch: UInt32 = 0,
         hasTranscript: Bool = false,
         truncated: Bool = false,
-        promptVersion: Int = 0
+        revision: UInt64
     ) throws -> AgentTranscriptSnapshot {
         var counters = AgentTranscriptAccountingCounters()
         let store = try AgentTranscriptStore.replacingAll(messages, counters: &counters)
@@ -390,19 +392,8 @@ public struct AgentTranscriptSnapshot {
             epoch: epoch,
             hasTranscript: hasTranscript,
             truncated: truncated,
-            promptVersion: promptVersion,
+            revision: revision,
             accountingCounters: counters
-        )
-    }
-
-    fileprivate func withPromptVersion(_ promptVersion: Int) -> AgentTranscriptSnapshot {
-        AgentTranscriptSnapshot(
-            store: store,
-            epoch: epoch,
-            hasTranscript: hasTranscript,
-            truncated: truncated,
-            promptVersion: promptVersion,
-            accountingCounters: accountingCounters
         )
     }
 }
@@ -418,7 +409,7 @@ public enum AgentTranscriptPreparationFailure: Error, Equatable {
 @MainActor
 @Observable
 public final class AgentChatState {
-    public init(visible: Bool = false, status: AgentStatus = .idle, model: String = "", thinkingLevel: String = "medium", prompt: String = "", messages: [ChatMessageEntry] = [], promptVersion: Int = 0, promptLineCount: UInt8 = 1, promptCursorLine: UInt16 = 0, promptCursorCol: UInt16 = 0, promptMode: PromptMode = .normal, promptVisibleRows: UInt8 = 1, promptCompletion: Wire.PromptCompletion? = nil) {
+    public init(visible: Bool = false, status: AgentStatus = .idle, model: String = "", thinkingLevel: String = "medium", prompt: String = "", messages: [ChatMessageEntry] = [], promptLineCount: UInt8 = 1, promptCursorLine: UInt16 = 0, promptCursorCol: UInt16 = 0, promptMode: PromptMode = .normal, promptVisibleRows: UInt8 = 1, promptCompletion: Wire.PromptCompletion? = nil) {
         self.visible = visible
         self.status = status
         self.model = model
@@ -427,12 +418,11 @@ public final class AgentChatState {
         do {
             transcriptSnapshotStorage = try AgentTranscriptSnapshot.seeded(
                 messages: messages,
-                promptVersion: promptVersion
+                revision: 0
             )
         } catch {
             preconditionFailure("preview transcript resource accounting overflowed")
         }
-        self.promptVersion = promptVersion
         self.promptLineCount = promptLineCount
         self.promptCursorLine = promptCursorLine
         self.promptCursorCol = promptCursorCol
@@ -459,7 +449,7 @@ public final class AgentChatState {
         do {
             transcriptSnapshotStorage = try AgentTranscriptSnapshot.seeded(
                 messages: messages,
-                promptVersion: promptVersion
+                revision: transcriptRevision &+ 1
             )
         } catch {
             preconditionFailure("preview transcript resource accounting overflowed")
@@ -481,9 +471,10 @@ public final class AgentChatState {
     /// `truncated` flag). A UI hint that the visible history is not the full session.
     public var transcriptTruncated: Bool { transcriptSnapshotStorage.truncated }
 
-    /// Monotonically increasing counter for change detection.
-    /// Increments on every update() so SwiftUI observers detect frame changes.
-    public var promptVersion: Int = 0
+    /// The single authority for "the transcript changed". It advances only when
+    /// the stored snapshot is replaced (prepare and publish, hide, seed), so
+    /// chrome and composer updates never invalidate transcript readers.
+    public var transcriptRevision: UInt64 { transcriptSnapshotStorage.revision }
 
     // ── Prompt cell-grid metadata (for Metal rendering) ──
 
@@ -578,7 +569,6 @@ public final class AgentChatState {
         self.stopTarget = stopTarget
         self.promptPresentation = promptPresentation
         self.queueTarget = queueTarget
-        self.promptVersion += 1
     }
 
     /// Applies a resident transcript frame (0x86, #2654 slice 2).
@@ -649,7 +639,7 @@ public final class AgentChatState {
 
     /// Captures the resident transcript as a value for frame-level validation.
     public var transcriptSnapshot: AgentTranscriptSnapshot {
-        transcriptSnapshotStorage.withPromptVersion(promptVersion)
+        transcriptSnapshotStorage
     }
 
     /// Validates and applies one full or append transcript operation without mutating presented state.
@@ -672,7 +662,7 @@ public final class AgentChatState {
                     epoch: epoch,
                     hasTranscript: true,
                     truncated: truncated,
-                    promptVersion: current.promptVersion + 1,
+                    revision: current.revision &+ 1,
                     accountingCounters: counters
                 ))
             } catch {
@@ -699,7 +689,7 @@ public final class AgentChatState {
                 epoch: current.epoch,
                 hasTranscript: true,
                 truncated: truncated,
-                promptVersion: current.promptVersion + 1,
+                revision: current.revision &+ 1,
                 accountingCounters: counters
             ))
         } catch {
@@ -710,7 +700,6 @@ public final class AgentChatState {
     /// Installs a transcript snapshot that was fully validated before frame publication.
     public func publishTranscript(_ snapshot: AgentTranscriptSnapshot) {
         transcriptSnapshotStorage = snapshot
-        promptVersion = snapshot.promptVersion
     }
 
     /// Maps a decoded wire message onto its displayable `ChatMessageEntry`.
@@ -752,7 +741,7 @@ public final class AgentChatState {
         do {
             transcriptSnapshotStorage = try AgentTranscriptSnapshot.seeded(
                 messages: [],
-                promptVersion: promptVersion
+                revision: transcriptRevision &+ 1
             )
         } catch {
             preconditionFailure("empty transcript resource accounting overflowed")
