@@ -171,13 +171,12 @@ defmodule MingaEditor.GuiSearchWorkflow do
   @spec replace_all(state(), String.t()) :: state()
   def replace_all(%EditorState{workspace: %{buffers: %{active: buffer}}} = state, replacement)
       when is_pid(buffer) and is_binary(replacement) do
-    with revision when revision != :unavailable <- current_revision(buffer),
+    with {version, _sequence} = revision <- current_revision(buffer),
          {:ok, generation} <-
            Search.ready_gui_generation(state.workspace.search, buffer, revision),
          true <- IndexOwner.current?(generation),
          %Session{query: query} when query != "" <- state.workspace.search.gui_search,
-         {content, version} <- Buffer.content_with_version(buffer),
-         {^version, _sequence} <- revision do
+         {content, ^version} <- Buffer.content_with_version(buffer) do
       {new_content, count} =
         Minga.Editing.substitute(
           content,

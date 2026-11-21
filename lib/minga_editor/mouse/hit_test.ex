@@ -276,19 +276,15 @@ defmodule MingaEditor.Mouse.HitTest do
   end
 
   defp context_from_window(state, layout, id, row, col) do
-    with %{content: content} <- Map.get(layout.window_layouts, id),
-         true <- point_in_rect?(row, col, content),
-         %Window{content: {:buffer, buffer}} = window <-
-           Map.get(state.workspace.windows.map, id),
-         true <- is_pid(buffer) do
+    with %{content: {r, c, w, h} = content}
+         when row >= r and row < r + h and col >= c and col < c + w <-
+           Map.get(layout.window_layouts, id),
+         %Window{content: {:buffer, buffer}} = window when is_pid(buffer) <-
+           Map.get(state.workspace.windows.map, id) do
       %{id: id, window: window, buffer: buffer, content: content}
     else
       _ -> nil
     end
-  end
-
-  defp point_in_rect?(row, col, {rect_row, rect_col, width, height}) do
-    row >= rect_row and row < rect_row + height and col >= rect_col and col < rect_col + width
   end
 
   defp display_map_scroll_top(%FoldMap{folds: []}, scroll_top), do: scroll_top
