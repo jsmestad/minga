@@ -1456,7 +1456,8 @@ defmodule MingaAgent.SessionPersistenceTest do
     assert :ok =
              GenServer.call(
                session,
-               {:complete_tool_effect, request.request_id, checkpoint_id, "expiry-call", result}
+               {:complete_tool_effect, request.request_id, checkpoint_id, "expiry-call", result,
+                nil}
              )
 
     send_provider_event(session, %Event.ToolEnd{
@@ -1818,7 +1819,7 @@ defmodule MingaAgent.SessionPersistenceTest do
                GenServer.call(
                  session,
                  {:complete_tool_effect, request.request_id, checkpoint_id, "saved-stop",
-                  saved_result}
+                  saved_result, nil}
                )
 
       message_ids =
@@ -2320,7 +2321,8 @@ defmodule MingaAgent.SessionPersistenceTest do
           :expire ->
             GenServer.call(
               session,
-              {:complete_tool_effect, request.request_id, checkpoint_id, "expiry-call", result}
+              {:complete_tool_effect, request.request_id, checkpoint_id, "expiry-call", result,
+               nil}
             )
         end
       end)

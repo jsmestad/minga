@@ -138,7 +138,7 @@ defmodule MingaAgent.Providers.NativeMCPTest do
         provider_subscriber_loop(owner, owner_ref, store)
 
       {:"$gen_call", from,
-       {:complete_tool_effect, request_id, checkpoint_id, _tool_call_id, result_message}} ->
+       {:complete_tool_effect, request_id, checkpoint_id, _tool_call_id, result_message, nil}} ->
         key = {request_id, checkpoint_id}
         Process.put(key, [result_message | Process.get(key)])
         GenServer.reply(from, :ok)

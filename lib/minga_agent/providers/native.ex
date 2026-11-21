@@ -2642,49 +2642,69 @@ defmodule MingaAgent.Providers.Native do
         result
 
       %{tool_call: tool_call} ->
-        case persist_tool_execution_result(lctx, checkpoint_id, result, 3) do
+        {store, change} =
+          capture_file_change(lctx, checkpoint_id, tool_call, Map.get(result, :mutation))
+
+        message = tool_result_message(result)
+
+        completion =
+          {:complete_tool_effect, lctx.request.request_id, checkpoint_id, to_string(tool_call.id),
+           message, change}
+
+        case persist_tool_execution_result(lctx, completion, 3) do
           :ok ->
             emit_receipt_preview(lctx, tool_call, Map.get(result, :mutation))
             emit_tool_end(lctx, tool_call, result)
             result
 
+          {:error, {:tool_outcome_call_failed, _reason} = reason} ->
+            Map.put(result, :persistence_error, reason)
+
           {:error, reason} ->
+            MingaAgent.Session.FileChange.release_delivery(store, change)
             Map.put(result, :persistence_error, reason)
         end
     end
   end
 
-  @spec persist_tool_execution_result(
+  @spec capture_file_change(
           loop_ctx(),
           String.t(),
-          tool_execution_result(),
-          pos_integer()
+          map(),
+          MingaAgent.Tool.FileMutationResult.t() | nil
         ) ::
-          :ok | {:error, term()}
-  defp persist_tool_execution_result(lctx, checkpoint_id, result, attempts_left) do
-    result_message = tool_result_message(result)
+          {GenServer.server() | nil, MingaAgent.Session.FileChange.t() | nil}
+  defp capture_file_change(_lctx, _checkpoint, _tool_call, nil), do: {nil, nil}
 
-    response =
-      GenServer.call(
-        lctx.session_pid,
-        {:complete_tool_effect, lctx.request.request_id, checkpoint_id,
-         to_string(result.tool_call.id), result_message},
-        30_000
-      )
+  defp capture_file_change(lctx, checkpoint, tool_call, mutation) do
+    store =
+      case Session.artifact_store(lctx.session_pid) do
+        {:ok, store} -> store
+        {:error, _reason} -> nil
+      end
+
+    identity = {lctx.request.request_id, checkpoint, to_string(tool_call.id)}
+    {store, MingaAgent.Session.FileChange.capture(store, identity, mutation)}
+  end
+
+  @spec persist_tool_execution_result(loop_ctx(), tuple(), pos_integer()) ::
+          :ok | {:error, term()}
+  defp persist_tool_execution_result(lctx, completion, attempts_left) do
+    response = GenServer.call(lctx.session_pid, completion, 30_000)
 
     case response do
       :ok ->
         :ok
 
       {:error, _reason} when attempts_left > 1 ->
-        persist_tool_execution_result(lctx, checkpoint_id, result, attempts_left - 1)
+        persist_tool_execution_result(lctx, completion, attempts_left - 1)
 
       {:error, reason} ->
         {:error, reason}
     end
   catch
     :exit, _reason when attempts_left > 1 ->
-      persist_tool_execution_result(lctx, checkpoint_id, result, attempts_left - 1)
+      persist_tool_execution_result(lctx, completion, attempts_left - 1)
 
     :exit, reason ->
       {:error, {:tool_outcome_call_failed, reason}}

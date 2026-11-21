@@ -100,23 +100,47 @@ defmodule MingaAgent.ArtifactQuota.State do
   end
 
   @doc "Reserves artifact/open counts and fixed or expected bytes before capture files exist."
-  @spec reserve_capture(t(), String.t(), non_neg_integer()) ::
+  @spec reserve_capture(t(), String.t(), non_neg_integer(), non_neg_integer() | nil) ::
           {:ok | {:error, term()}, t()}
-  def reserve_capture(%__MODULE__{storage: :cold} = state, _namespace, _bytes),
+  def reserve_capture(%__MODULE__{storage: :cold} = state, _namespace, _bytes, _headroom),
     do: {{:error, :storage_unavailable}, state}
 
-  def reserve_capture(%__MODULE__{blocked: true} = state, _namespace, _bytes),
+  def reserve_capture(%__MODULE__{blocked: true} = state, _namespace, _bytes, _headroom),
     do: {{:error, :storage_unavailable}, state}
 
-  def reserve_capture(%__MODULE__{} = state, namespace, bytes)
+  def reserve_capture(%__MODULE__{} = state, namespace, bytes, headroom)
       when is_integer(bytes) and bytes >= 0 do
     with {:ok, row} <- fetch_row(state, namespace),
          :ok <- check_capture_counts(state, row),
+         :ok <- check_capture_headroom(state, row, bytes, headroom),
          :ok <- check_bytes(state, row, bytes) do
       mutation = Ledger.reserve(opened_db(state), namespace, bytes, 0, 1, 1, fault_opts(state))
       apply_reservation(state, row, bytes, 0, 1, 1, mutation)
     else
       {:error, _reason} = error -> {error, state}
+    end
+  end
+
+  @spec check_capture_headroom(
+          t(),
+          Ledger.namespace_row(),
+          non_neg_integer(),
+          non_neg_integer() | nil
+        ) ::
+          :ok | {:error, atom()}
+  defp check_capture_headroom(_state, _row, _bytes, nil), do: :ok
+
+  defp check_capture_headroom(state, row, bytes, headroom)
+       when is_integer(headroom) and headroom >= 0 do
+    with :ok <-
+           first_failed_check([
+             {row.artifacts + 1 < row.session_artifacts, :session_artifact_limit},
+             {state.total_artifacts + 1 < state.limits.root_artifacts, :root_artifact_limit},
+             {row.open_captures + 1 < row.session_open_captures, :session_open_capture_limit},
+             {state.total_open_captures + 1 < state.limits.root_open_captures,
+              :root_open_capture_limit}
+           ]) do
+      check_bytes(state, row, bytes + headroom)
     end
   end
 

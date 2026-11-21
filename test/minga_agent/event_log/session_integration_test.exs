@@ -140,7 +140,8 @@ defmodule MingaAgent.EventLog.SessionIntegrationTest do
       :ok =
         GenServer.call(
           state.subscriber,
-          {:complete_tool_effect, request.request_id, checkpoint_id, "tool-1", result_message}
+          {:complete_tool_effect, request.request_id, checkpoint_id, "tool-1", result_message,
+           nil}
         )
 
       ProviderRequest.emit(

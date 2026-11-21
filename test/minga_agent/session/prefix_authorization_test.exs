@@ -2464,7 +2464,8 @@ defmodule MingaAgent.Session.PrefixAuthorizationTest do
     debug = fn
       count,
       {:in,
-       {:"$gen_call", _from, {:complete_tool_effect, request_id, checkpoint_id, call_id, result}}},
+       {:"$gen_call", _from,
+        {:complete_tool_effect, request_id, checkpoint_id, call_id, result, _change}}},
       _extra ->
         next = count + 1
 
@@ -2721,16 +2722,93 @@ defmodule MingaAgent.Session.PrefixAuthorizationTest do
     File.write!(path, "original\n")
     {:ok, buffer} = start_supervised({BufferProcess, content: "original\n", file_path: path})
     {:ok, view} = ProjectView.overlay(context.project)
+    owner = self()
+    writer = file_writer_client("buffer.txt")
+
+    client = fn model, messages, options ->
+      case Enum.reverse(messages) do
+        [%{role: :tool, name: "write_file"} | _] ->
+          send(owner, :file_written_round_waiting)
+          receive do: (:continue -> :ok)
+
+        _ ->
+          :ok
+      end
+
+      writer.(model, messages, options)
+    end
+
+    debug = fn
+      acc,
+      {:in, {:"$gen_call", _, {:complete_tool_effect, _, _, _, _, %{path: ^path}} = call}},
+      _ ->
+        send(owner, {:mutation_completion, call})
+        acc
+
+      acc, _, _ ->
+        acc
+    end
 
     session =
       start_session(context,
-        provider_opts: [project_view: view, llm_client: file_writer_client("buffer.txt")]
+        provider_opts: [project_view: view, llm_client: client]
       )
 
+    assert :ok = :sys.install(session, {debug, nil})
+
     assert :ok = Session.send_prompt(session, "draft\n")
-    await_done(session, "write_file")
+
+    assert_receive {:agent_event, ^session,
+                    {:tool_ended, %Event.ToolEnd{name: "write_file", is_error: false}}},
+                   15_000
+
+    assert_receive :file_written_round_waiting, @timeout
+    assert_receive {:mutation_completion, completion}, @timeout
+    backup = context.store_dir <> ".replay-backup"
+    File.rename!(context.store_dir, backup)
+
+    try do
+      File.write!(context.store_dir, "snapshot writes are unavailable")
+      assert :ok = GenServer.call(session, completion)
+    after
+      File.rm!(context.store_dir)
+      File.rename!(backup, context.store_dir)
+    end
+
+    {:complete_tool_effect, request, checkpoint, call_id, message, change} = completion
+    conflicting = %{change | path: path <> ".other"}
+
+    assert {:error, {:tool_outcome_persistence_failed, :file_change_identity_conflict}} =
+             GenServer.call(
+               session,
+               {:complete_tool_effect, request, checkpoint, call_id, message, conflicting}
+             )
+
+    record_id = Session.session_id(session)
     assert {:ok, "draft\n"} = ProjectView.read_file(view, "buffer.txt")
     assert :ok = stop_supervised({:session, context.suffix})
+
+    assert {:ok, %{file_changes: [%{path: ^path, before: before, after: after_content}]}} =
+             SessionStore.load(record_id, context.store_dir, artifact_runtime: context.runtime)
+
+    reopened = start_session(%{context | suffix: {context.suffix, :reopened}})
+    assert :ok = Session.load_session(reopened, record_id)
+    assert {:ok, artifacts} = Session.artifact_store(reopened)
+
+    for {reference, expected} <- [{before, "original\n"}, {after_content, "draft\n"}] do
+      assert {:ok, range} =
+               MingaAgent.Tool.Output.Range.new(
+                 :full,
+                 :bytes,
+                 0,
+                 byte_size(expected),
+                 byte_size(expected)
+               )
+
+      assert {:ok, %{bytes: ^expected}} =
+               MingaAgent.ArtifactStore.fetch(artifacts, reference, range)
+    end
+
     assert {:ok, "draft\n"} = ProjectView.read_file(view, "buffer.txt")
     assert {:ok, diff} = ProjectView.diff(view)
     assert %{path: "buffer.txt", kind: :modified} in diff

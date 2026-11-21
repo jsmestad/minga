@@ -24,6 +24,7 @@ defmodule MingaAgent.Tools.OutputCapture do
   @type capture_opts :: [
           media_type: String.t(),
           expected_bytes: non_neg_integer(),
+          optional?: boolean(),
           selection: Range.t(),
           revision: Revision.t(),
           query_identity: String.t(),
@@ -46,13 +47,21 @@ defmodule MingaAgent.Tools.OutputCapture do
            CaptureSpec.new(
              media_type: media_type,
              mode: :bytes,
-             expected_bytes: Keyword.get(opts, :expected_bytes, byte_size(bytes)),
+             expected_bytes: expected_capture_bytes(bytes, opts),
+             optional?: Keyword.get(opts, :optional?, false),
              owner_pid: self(),
              delivery_key: delivery_key
            ),
          {:ok, capture} <- ArtifactStore.begin(store, spec) do
       append_bytes(store, capture, bytes, 0, opts)
     end
+  end
+
+  @spec expected_capture_bytes(binary(), capture_opts()) :: non_neg_integer()
+  defp expected_capture_bytes(bytes, opts) do
+    if Keyword.get(opts, :optional?, false),
+      do: byte_size(bytes),
+      else: Keyword.get(opts, :expected_bytes, byte_size(bytes))
   end
 
   @doc "Admits a streamed byte capture before starting its producer."
@@ -311,8 +320,12 @@ defmodule MingaAgent.Tools.OutputCapture do
         ) :: {:ok, Output.t()} | {:error, Output.t() | term()}
   defp finish_bytes(store, capture, bytes, status, opts) do
     case ArtifactStore.finish(store, capture, status) do
-      {:ok, stored} -> build_bytes_output(bytes, stored, opts)
-      {:error, reason} -> {:error, reason}
+      {:ok, stored} ->
+        build_bytes_output(bytes, stored, opts)
+
+      {:error, reason} ->
+        if Keyword.get(opts, :optional?, false), do: ArtifactStore.cancel(store, capture)
+        {:error, reason}
     end
   end
 
