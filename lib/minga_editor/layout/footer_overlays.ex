@@ -28,18 +28,32 @@ defmodule MingaEditor.Layout.FooterOverlays do
     |> Enum.map(fn {id, _visible?, height} -> {id, height} end)
   end
 
+  # The terminal frontend draws the notification center inside a rounded border
+  # (#2617): one top and one bottom frame row around the content rows. The band
+  # must contain the frame, or the bottom rows (each item's actions row and the
+  # bottom border) fall outside the rect and the frontend crops them away.
+  @notification_frame_rows 2
+
   @spec content_height_notifications(map()) :: non_neg_integer()
   defp content_height_notifications(%Input{intent: %{frame: %{notifications: %{items: items}}}})
        when is_list(items) do
-    1 + 2 * Enum.count(items) + Enum.count(items, &notification_actions?/1)
+    notification_rows(items)
   end
 
   defp content_height_notifications(%{feedback: %{notifications: %{items: items}}})
        when is_list(items) do
-    1 + 2 * Enum.count(items) + Enum.count(items, &notification_actions?/1)
+    notification_rows(items)
   end
 
-  defp content_height_notifications(_state), do: 1
+  defp content_height_notifications(_state), do: 1 + @notification_frame_rows
+
+  # Title bar, then a header and a body row per item, then an actions row for
+  # each item with inline actions, all inside the frame.
+  @spec notification_rows([map()]) :: non_neg_integer()
+  defp notification_rows(items) do
+    1 + 2 * Enum.count(items) + Enum.count(items, &notification_actions?/1) +
+      @notification_frame_rows
+  end
 
   @spec notification_actions?(map() | struct()) :: boolean()
   defp notification_actions?(%{actions: [_ | _]}), do: true

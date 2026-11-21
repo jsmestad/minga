@@ -207,7 +207,7 @@ defmodule MingaAgent.InferenceRouteSessionTest do
     assert_receive {:agent_event, ^session, {:error, message}}, @event_timeout
 
     assert message =~
-             ~r/\AClaude plan limit reached\. Resets at \d{1,2}:\d{2} (AM|PM)\. Switch model to continue\.\z/
+             ~r/\AClaude plan limit reached\. Resets at (\w{3} )?\d{1,2}:\d{2} (AM|PM)\. Switch model to continue\.\z/
 
     assert_receive {:agent_event, ^session, {:model_limit_reached, ^message}}, @event_timeout
   end
