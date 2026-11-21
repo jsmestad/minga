@@ -103,6 +103,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.validate.outputs.matrix) }}
+    # Only new pushes compete, one group per payload. Never cancel publication here.
+    concurrency:
+      group: release-candidate-build-${{ github.event_name == 'push' && github.run_attempt == '1' && github.ref || github.run_id }}-${{ matrix.filename }}
+      cancel-in-progress: true
     defaults:
       run:
         shell: bash

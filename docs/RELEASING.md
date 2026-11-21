@@ -8,6 +8,8 @@ Stable preparation and independent verification only upload GitHub Actions artif
 
 Each push to protected `main` prepares the Apple Silicon macOS TUI archive and signed, notarized GUI DMG. The workflow builds the pushed commit, assigns version `0.1.0-dev.N` (where `N` is the workflow run number), and uploads an immutable candidate handle and a separate `homebrew-recipes` artifact. A rerun has a distinct attempt but retains the same version. It must never replace an already published set of bytes.
 
+When a new `main` push reaches the build stage, it can cancel the previous push's queued or running job for the same package. This keeps superseded builds from using macOS runners. Manual candidates and reruns do not compete with new pushes, and a newer push does not interrupt a publication already in progress.
+
 `minga --version` reports `0.1.0-dev.N`. Homebrew recipes use `0.1.0betaN` so Homebrew orders successive builds correctly and upgrades to the first `0.1.0` stable release. The formula installs `minga`; the cask installs `Minga.app` without adding a second shell command. Recipes point to versioned release filenames, such as `minga_0.1.0-dev.123_macos_aarch64.tar.gz` and `Minga_0.1.0-dev.123.dmg`. Candidate files keep the unversioned names in their manifest; rename only the files that an approved publisher uploads, not the tested contents.
 
 To rehearse an upgrade without publishing, independently verify two completed candidates using the exact run/attempt and manifest handles. On a clean Mac with Homebrew 7 or newer and `jq`, put each candidate's verified payloads (under their manifest names), generated recipes and the independent verifier's `receipt.json` (named `verification-receipt.json`) in a separate directory.
