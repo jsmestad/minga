@@ -251,7 +251,15 @@ defmodule Minga.Core.DiffViewTest do
     end
 
     test "clips explicit additions at and beyond the end of the file" do
-      crossing = %{type: :added, start_line: 1, count: 4, old_start: 1, old_count: 0, old_lines: []}
+      crossing = %{
+        type: :added,
+        start_line: 1,
+        count: 4,
+        old_start: 1,
+        old_count: 0,
+        old_lines: []
+      }
+
       past_end = %{crossing | start_line: 5}
 
       assert_explicit_hunk_layouts(
@@ -270,7 +278,15 @@ defmodule Minga.Core.DiffViewTest do
     end
 
     test "preserves the explicit zero-count range at the start and inside the file" do
-      at_start = %{type: :added, start_line: 0, count: 0, old_start: 0, old_count: 0, old_lines: []}
+      at_start = %{
+        type: :added,
+        start_line: 0,
+        count: 0,
+        old_start: 0,
+        old_count: 0,
+        old_lines: []
+      }
+
       inside = %{at_start | start_line: 1}
 
       assert_explicit_hunk_layouts(
