@@ -168,6 +168,11 @@ defmodule MingaEditor.Session.AgentPresentationTest do
     repeated = TabWorkflow.sync_active_workspace_agent_ui(restored)
     assert repeated.workspace.windows == restored.workspace.windows
     assert repeated.workspace.agent_ui == restored.workspace.agent_ui
+
+    incoming = %{restored | workspace: State.replace_window(restored.workspace, 1, chat)}
+    normalized = TabWorkflow.sync_active_workspace_agent_ui(incoming)
+    assert normalized.workspace.agent_ui == restored.workspace.agent_ui
+    assert normalized.workspace.windows.map[1].content == {:agent_review, :semantic}
   end
 
   test "focus switching reports a missing review without creating a blank viewer" do

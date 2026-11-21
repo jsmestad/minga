@@ -659,14 +659,7 @@ defmodule MingaEditor.Session.State do
   @spec set_agent_ui(t(), UIState.t()) :: t()
   def set_agent_ui(%__MODULE__{windows: windows} = wspace, %UIState{} = agent_ui) do
     body = UIState.View.agent_body(agent_ui.view)
-
-    windows =
-      Enum.reduce(windows.map, windows, fn {id, window}, windows ->
-        case Window.show_agent_body(window, body) do
-          ^window -> windows
-          changed -> Windows.replace_window(windows, id, changed)
-        end
-      end)
+    windows = Windows.show_agent_body(windows, body)
 
     %{wspace | agent_ui: agent_ui, windows: windows}
   end
