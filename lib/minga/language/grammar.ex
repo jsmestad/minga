@@ -203,7 +203,8 @@ defmodule Minga.Language.Grammar do
     end
   end
 
-  @spec read_query_file(String.t() | nil) :: {:ok, String.t()} | {:error, :no_query | File.posix()}
+  @spec read_query_file(String.t() | nil) ::
+          {:ok, String.t()} | {:error, :no_query | File.posix()}
   defp read_query_file(nil), do: {:error, :no_query}
   defp read_query_file(path), do: File.read(path)
 end
