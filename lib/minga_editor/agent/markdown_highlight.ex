@@ -445,124 +445,70 @@ defmodule MingaEditor.Agent.MarkdownHighlight do
   @spec stylize(String.t(), Highlight.t() | nil, map(), non_neg_integer()) :: styled_lines()
   def stylize(text, highlight, theme_syntax, buffer_byte_offset \\ 0)
       when is_binary(text) do
-    # Always parse with regex for clean structure rendering
     parsed = Markdown.parse(text)
 
-    base_lines =
-      Enum.map(parsed, fn {segments, _line_type} ->
-        Enum.map(segments, fn {seg_text, style_atom} ->
-          style_to_run(seg_text, style_atom, theme_syntax)
-        end)
-      end)
-
-    # Overlay tree-sitter highlights on code block content lines. While a
-    # streamed fence is still open, keep the block plain monospaced so syntax
-    # colors do not churn token-by-token.
-    if has_spans?(highlight) and not open_fence?(text) do
-      overlay_code_blocks(base_lines, parsed, text, highlight, theme_syntax, buffer_byte_offset)
+    if has_spans?(highlight) do
+      text
+      |> String.split("\n")
+      |> stylize_with_highlight(parsed, buffer_byte_offset, highlight, theme_syntax)
     else
-      base_lines
+      Enum.map(parsed, &style_parsed_line(&1, theme_syntax))
     end
   end
 
   # ── Tree-sitter overlay for code blocks ────────────────────────────────────
 
-  # Walks the parsed lines. For code content lines (inside fenced blocks),
-  # replaces the regex-styled run with tree-sitter highlighted segments
-  # using the correct byte offset into the full buffer.
-  #
-  # Markdown.parse/1 produces exactly one output entry per input line, so
-  # the enumeration index IS the original line index. We use this directly
-  # for O(1) byte offset lookups instead of content-based search (which
-  # would break on duplicate lines like `end`, empty lines, etc.).
-  @spec overlay_code_blocks(
-          [styled_line()],
+  @spec stylize_with_highlight(
+          [String.t()],
           [Markdown.parsed_line()],
-          String.t(),
+          non_neg_integer(),
           Highlight.t(),
-          map(),
-          non_neg_integer()
-        ) :: [styled_line()]
-  defp overlay_code_blocks(
-         base_lines,
-         parsed,
-         original_text,
-         highlight,
-         theme_syntax,
-         buffer_byte_offset
-       ) do
-    original_lines = String.split(original_text, "\n")
-    line_byte_offsets = compute_line_byte_offsets(original_lines)
-
-    base_lines
-    |> Enum.zip(parsed)
-    |> Enum.with_index()
-    |> Enum.map(fn {{base_runs, {_segments, line_type}}, line_idx} ->
-      overlay_line(
-        base_runs,
-        line_type,
-        line_idx,
-        original_lines,
-        line_byte_offsets,
-        highlight,
-        theme_syntax,
-        buffer_byte_offset
-      )
-    end)
+          map()
+        ) :: styled_lines()
+  defp stylize_with_highlight(source, parsed, offset, highlight, theme) do
+    # An open fence keeps the entire streaming message on Markdown styling.
+    if open_fence?(source) do
+      Enum.map(parsed, &style_parsed_line(&1, theme))
+    else
+      overlay_lines(source, parsed, offset, highlight, theme, [])
+    end
   end
 
-  # Only overlay code content lines. Everything else keeps the regex
-  # parser's output. Fence lines (``` markers) are :code type but contain
-  # syntax markers that the regex parser renders as decorative borders;
-  # skip those to keep the clean rendering.
-  @spec overlay_line(
-          styled_line(),
-          Markdown.line_type(),
-          non_neg_integer(),
+  # Markdown.parse/1 emits one entry per LF-delimited source line. Advance in source bytes, not rendered text.
+  @spec overlay_lines(
           [String.t()],
-          %{non_neg_integer() => non_neg_integer()},
+          [Markdown.parsed_line()],
+          non_neg_integer(),
           Highlight.t(),
           map(),
-          non_neg_integer()
-        ) :: styled_line()
-  defp overlay_line(
-         base_runs,
-         :code,
-         line_idx,
-         original_lines,
-         line_byte_offsets,
-         highlight,
-         theme_syntax,
-         buffer_byte_offset
-       ) do
-    original_line = Enum.at(original_lines, line_idx, "")
+          styled_lines()
+        ) :: styled_lines()
+  defp overlay_lines([], [], _offset, _highlight, _theme, acc), do: Enum.reverse(acc)
 
-    # Skip fence lines (``` markers): they should keep the regex parser's
-    # decorative rendering, not raw markdown syntax.
-    if String.starts_with?(String.trim_leading(original_line), "```") do
-      base_runs
+  defp overlay_lines([line | source], [parsed_line | parsed], offset, highlight, theme, acc) do
+    runs = overlay_line(parsed_line, line, offset, highlight, theme)
+    overlay_lines(source, parsed, offset + byte_size(line) + 1, highlight, theme, [runs | acc])
+  end
+
+  @spec overlay_line(Markdown.parsed_line(), String.t(), non_neg_integer(), Highlight.t(), map()) ::
+          styled_line()
+  defp overlay_line({_segments, :code} = parsed, line, offset, highlight, theme) do
+    if fence_line?(line) do
+      style_parsed_line(parsed, theme)
     else
-      line_start_byte = buffer_byte_offset + Map.get(line_byte_offsets, line_idx, 0)
-      segments = Highlight.styles_for_line(highlight, original_line, line_start_byte)
-
-      case segments do
-        [{^original_line, %Minga.Core.Face{fg: nil}}] -> base_runs
-        _ -> Enum.map(segments, &segment_to_run(&1, code_bg(theme_syntax)))
+      case Highlight.styles_for_line(highlight, line, offset) do
+        [{^line, %Minga.Core.Face{fg: nil}}] -> style_parsed_line(parsed, theme)
+        segments -> Enum.map(segments, &segment_to_run(&1, code_bg(theme)))
       end
     end
   end
 
-  defp overlay_line(
-         base_runs,
-         _line_type,
-         _idx,
-         _orig,
-         _offsets,
-         _hl,
-         _theme_syntax,
-         _byte_offset
-       ) do
-    base_runs
+  defp overlay_line(parsed, _line, _offset, _highlight, theme),
+    do: style_parsed_line(parsed, theme)
+
+  @spec style_parsed_line(Markdown.parsed_line(), map()) :: styled_line()
+  defp style_parsed_line({segments, _line_type}, theme) do
+    Enum.map(segments, fn {text, style} -> style_to_run(text, style, theme) end)
   end
 
   @spec compute_line_byte_offsets([String.t()]) :: %{non_neg_integer() => non_neg_integer()}
@@ -665,12 +611,6 @@ defmodule MingaEditor.Agent.MarkdownHighlight do
   @spec fence_line?(String.t()) :: boolean()
   defp fence_line?(line), do: String.starts_with?(String.trim_leading(line), "```")
 
-  @spec open_fence?(String.t()) :: boolean()
-  defp open_fence?(text) do
-    text
-    |> String.split("\n")
-    |> Enum.count(&String.starts_with?(String.trim_leading(&1), "```"))
-    |> rem(2)
-    |> Kernel.==(1)
-  end
+  @spec open_fence?([String.t()]) :: boolean()
+  defp open_fence?(lines), do: rem(Enum.count(lines, &fence_line?/1), 2) == 1
 end
