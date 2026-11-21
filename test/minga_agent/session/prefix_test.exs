@@ -431,13 +431,47 @@ defmodule MingaAgent.Session.PrefixTest do
     assert branch.messages == branches["saved"].messages
   end
 
-  test "malformed current branch structures and extra prefix store fields reject without raising" do
-    {_request, history} = completed(candidate())
-    encoded = ContinuationCodec.encode(history)
+  test "current epoch preflight checks top-level shape and epoch fields before the prefix store" do
+    encoded = Continuation.new() |> ContinuationCodec.encode() |> Map.put("prefixes", nil)
+    assert {:error, :invalid_prefix_store} = ContinuationCodec.decode(encoded)
 
-    for branches <- [nil, [], %{"bad" => nil}, %{"bad" => %{"boundaries" => :invalid}}] do
-      assert {:error, _reason} = ContinuationCodec.decode(Map.put(encoded, "branches", branches))
+    for {field, value} <- [{"boundaries", nil}, {"branches", nil}, {"branches", []}] do
+      malformed = encoded |> Map.put(field, value) |> Map.put("active_request", %{})
+      assert {:error, :invalid_prefix_epoch_structure} = ContinuationCodec.decode(malformed)
     end
+
+    branch = %{"epoch_id" => nil, "boundaries" => []}
+
+    for {field, value} <- [
+          {"active_request", %{}},
+          {"tool_checkpoint", %{}},
+          {"boundaries", [%{}]},
+          {"branches", %{"bad" => nil}},
+          {"branches", %{"bad" => Map.put(branch, "boundaries", nil)}},
+          {"branches", %{"bad" => Map.delete(branch, "epoch_id")}},
+          {"branches", %{"bad" => Map.put(branch, "boundaries", [%{}])}}
+        ] do
+      assert {:error, :missing_prefix_epoch} =
+               encoded |> Map.put(field, value) |> ContinuationCodec.decode()
+    end
+  end
+
+  test "nil boundaries pass the epoch preflight and fail boundary decoding" do
+    encoded = ContinuationCodec.encode(Continuation.new())
+    branch = %{"messages" => [], "boundaries" => [nil], "epoch_id" => nil}
+
+    for {field, value} <- [{"boundaries", [nil]}, {"branches", %{"saved" => branch}}] do
+      malformed = Map.put(encoded, field, value)
+
+      assert {:error, :invalid_prefix_store} =
+               malformed |> Map.put("prefixes", nil) |> ContinuationCodec.decode()
+
+      assert {:error, :invalid_continuation_boundary} = ContinuationCodec.decode(malformed)
+    end
+  end
+
+  test "extra prefix store fields reject without raising" do
+    {_request, history} = completed(candidate())
 
     assert {:error, :invalid_prefix_store} =
              history.prefixes
