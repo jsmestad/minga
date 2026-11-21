@@ -188,14 +188,16 @@ defmodule Minga.Language.Registry do
   @doc "Registers a language with an explicit source."
   @spec register(Language.t(), contribution_source()) :: :ok | {:error, register_error()}
   def register(%Language{} = lang, source) do
-    with :ok <- validate_source_keys(lang, source) do
+    ensure_source_table!()
+    keys = Language.identity_keys(lang)
+
+    with :ok <- validate_source_keys(keys, source) do
       case get(lang.name) do
         %Language{} = old -> remove_index_entries(old)
         nil -> :ok
       end
 
-      insert_language(lang, source)
-      :ok
+      Enum.each(keys, &insert_key(&1, lang, source))
     end
   end
 
@@ -255,14 +257,10 @@ defmodule Minga.Language.Registry do
 
   # ── Private ────────────────────────────────────────────────────────────────
 
-  @spec validate_source_keys(Language.t(), contribution_source()) ::
+  @spec validate_source_keys([term()], contribution_source()) ::
           :ok | {:error, register_error()}
-  defp validate_source_keys(%Language{} = lang, source) do
-    ensure_source_table!()
-
-    lang
-    |> Language.identity_keys()
-    |> Enum.reduce_while(:ok, fn key, :ok -> validate_source_key(key, source) end)
+  defp validate_source_keys(keys, source) do
+    Enum.reduce_while(keys, :ok, fn key, :ok -> validate_source_key(key, source) end)
   end
 
   @spec validate_source_key(term(), contribution_source()) ::
@@ -282,29 +280,8 @@ defmodule Minga.Language.Registry do
 
   @spec remove_index_entries(Language.t()) :: :ok
   defp remove_index_entries(%Language{} = lang) do
-    for ext <- lang.extensions, do: delete_key({:ext, String.downcase(ext)})
-    for filename <- lang.filenames, do: delete_key({:filename, filename})
-    for interpreter <- lang.shebangs, do: delete_key({:shebang, interpreter})
-    :ok
-  end
-
-  @spec insert_language(Language.t(), contribution_source()) :: :ok
-  defp insert_language(%Language{} = lang, source) do
-    insert_key({:name, lang.name}, lang, source)
-
-    for ext <- lang.extensions do
-      insert_key({:ext, String.downcase(ext)}, lang, source)
-    end
-
-    for filename <- lang.filenames do
-      insert_key({:filename, filename}, lang, source)
-    end
-
-    for interpreter <- lang.shebangs do
-      insert_key({:shebang, interpreter}, lang, source)
-    end
-
-    :ok
+    [{:name, _} | secondary_keys] = Language.identity_keys(lang)
+    Enum.each(secondary_keys, &delete_key/1)
   end
 
   @spec insert_key(term(), Language.t(), contribution_source()) :: true

@@ -223,6 +223,44 @@ defmodule Minga.Language.RegistryTest do
                Registry.for_shebang("replace_new_shebang")
     end
 
+    test "normalized duplicate extensions keep the old language on the first replacement collision" do
+      source = {:extension, :language_registry_key_order}
+      foreign_source = {:extension, :language_registry_foreign_keys}
+
+      on_exit(fn ->
+        Registry.unregister_source(source)
+        Registry.unregister_source(foreign_source)
+      end)
+
+      lang = %Language{
+        name: :key_order_lang,
+        label: "Key order",
+        comment_token: "# ",
+        extensions: ["OldKeyOrder", "oldkeyorder"]
+      }
+
+      other = %Language{
+        name: :foreign_keys_lang,
+        label: "Foreign keys",
+        comment_token: "# ",
+        extensions: ["akeyorder", "zkeyorder"]
+      }
+
+      assert :ok = Registry.register(lang, source)
+      assert :ok = Registry.register(other, foreign_source)
+      assert Registry.for_extension("OLDKEYORDER") == lang
+      assert Registry.source_for({:ext, "oldkeyorder"}) == source
+
+      replacement = %{lang | extensions: ["ZKeyOrder", "AKeyOrder"]}
+
+      assert {:error, {:duplicate_key, {:ext, "zkeyorder"}, ^foreign_source, ^source}} =
+               Registry.register(replacement, source)
+
+      assert Registry.get(lang.name) == lang
+      assert Registry.for_extension("oldkeyorder") == lang
+      assert Registry.source_for({:ext, "oldkeyorder"}) == source
+    end
+
     test "unregister_source removes language names and indexes for only that source" do
       source = {:extension, :language_registry_test}
       other_source = {:extension, :language_registry_other}
