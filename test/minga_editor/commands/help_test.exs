@@ -5,6 +5,7 @@ defmodule MingaEditor.Commands.HelpTest do
   alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Config.Options
   alias Minga.Keymap.Active, as: ActiveKeymap
+  alias Minga.Keymap.Bindings
   alias MingaEditor.Commands.Help
   alias MingaEditor.KeystrokeHistory
   alias MingaEditor.KeystrokeHistory.Entry
@@ -78,37 +79,118 @@ defmodule MingaEditor.Commands.HelpTest do
   end
 
   describe "bindings help" do
-    test "bindings content includes built-in, text-object, filetype, and user bindings" do
+    test "the longest leader prefix groups both the exact binding and its descendants" do
+      state = build_state()
+      keymap = state.interaction.keymap_server
+      assert :ok = ActiveKeymap.bind(keymap, :normal, "SPC c l", :inspect_lsp, "Inspect LSP")
+
+      sections = state |> Help.bindings_content() |> binding_sections()
+      headings = for {title, _rows} <- sections, title in ["+code", "+LSP"], do: title
+      assert headings == ["+code", "+LSP"]
+
+      lsp_bindings =
+        for {title, rows} <- sections,
+            row <- rows,
+            [key | _] = columns = binding_columns(row),
+            key in ["SPC c l", "SPC c l i"] do
+          {title, columns}
+        end
+
+      assert lsp_bindings == [
+               {"+LSP", ["SPC c l", "inspect_lsp", "Inspect LSP *user*"]},
+               {"+LSP", ["SPC c l i", "lsp_info", "LSP info"]}
+             ]
+    end
+
+    test "leader bindings with identical displayed keys retain trie child order" do
+      state = build_state()
+      keymap = state.interaction.keymap_server
+
+      assert :ok = ActiveKeymap.bind(keymap, :normal, "SPC x C-x", :z_plain, "Plain control")
+
+      assert :ok =
+               ActiveKeymap.bind(keymap, :normal, "SPC x C-S-x", :a_shifted, "Shifted control")
+
+      assert {:prefix, branch} = Bindings.lookup(ActiveKeymap.leader_trie(keymap), {?x, 0})
+
+      expected =
+        for {key, description} <- Bindings.children(branch) do
+          assert {:command, command} = Bindings.lookup(branch, key)
+          ["SPC x C-x", Atom.to_string(command), description <> " *user*"]
+        end
+
+      sections = state |> Help.bindings_content() |> binding_sections()
+
+      rows =
+        for row <- binding_rows(sections, "Ungrouped"), String.starts_with?(row, "SPC x C-x ") do
+          binding_columns(row)
+        end
+
+      assert length(rows) == 2
+      assert rows == expected
+    end
+
+    test "an unavailable keymap retains declaration order for leader defaults only" do
       state = build_state()
       BufferProcess.set_filetype(state.workspace.buffers.active, :elixir)
 
-      ActiveKeymap.bind(
-        state.interaction.keymap_server,
-        :normal,
-        "SPC x y",
-        :custom_command,
-        "Custom command"
-      )
+      live = state |> Help.bindings_content() |> binding_sections()
+      assert binding_keys(live, "+file") == ["SPC f F", "SPC f f", "SPC f p", "SPC f s"]
+      file_rows = binding_rows(live, "+file")
+      assert ["SPC f s", "save", "Save file"] in Enum.map(file_rows, &binding_columns/1)
+
+      page_sections = ["Ungrouped", "+filetype :elixir", "Movement", "Text objects"]
+      headings = for {title, _rows} <- live, title in page_sections, do: title
+      assert headings == page_sections
+      refute List.keymember?(live, "+filetype", 0)
+
+      :ok = GenServer.stop(state.interaction.keymap_server)
+      fallback = state |> Help.bindings_content() |> binding_sections()
+
+      assert binding_keys(fallback, "+file") == ["SPC f f", "SPC f F", "SPC f s", "SPC f p"]
+      refute List.keymember?(fallback, "+filetype :elixir", 0)
+
+      movement = binding_rows(fallback, "Movement")
+      assert movement == binding_rows(live, "Movement")
+      assert Enum.any?(movement, &match?(["w", "word_forward", _], binding_columns(&1)))
+
+      movement_keys = binding_keys(fallback, "Movement")
+      assert movement_keys == Enum.sort(movement_keys)
+      assert binding_rows(fallback, "Text objects") == binding_rows(live, "Text objects")
+    end
+
+    test "filetype overrides retain padding and provenance without sorting text objects" do
+      state = build_state()
+      BufferProcess.set_filetype(state.workspace.buffers.active, :elixir)
+
+      assert :ok =
+               ActiveKeymap.bind(
+                 state.interaction.keymap_server,
+                 :normal,
+                 "SPC m t t",
+                 :test_file,
+                 "Run this test file",
+                 filetype: :elixir
+               )
 
       content = Help.bindings_content(state)
+      sections = binding_sections(content)
 
-      for expected <- [
-            "+file",
-            "SPC f s",
-            "save",
-            "Movement",
-            "w",
-            "word_forward",
-            "Text objects",
-            "iw",
-            "+filetype :elixir",
-            "SPC m t t",
-            "SPC x y",
-            "custom_command",
-            "*user*"
-          ] do
-        assert content =~ expected
-      end
+      test_rows =
+        Enum.filter(
+          binding_rows(sections, "+filetype :elixir"),
+          &String.starts_with?(&1, ["SPC m t a ", "SPC m t t "])
+        )
+
+      assert test_rows == [
+               "SPC m t a    test_all          Test all",
+               "SPC m t t    test_file         Run this test file *user*"
+             ]
+
+      assert {"Text objects", [inner_word, around_word | _]} = List.last(sections)
+      assert binding_columns(inner_word) == ["iw", "text_object_inner_word", "Inner word"]
+      assert binding_columns(around_word) == ["aw", "text_object_around_word", "Around word"]
+      assert String.ends_with?(content, "\n")
     end
 
     test "describe_bindings opens a read-only *Bindings* buffer" do
@@ -368,6 +450,26 @@ defmodule MingaEditor.Commands.HelpTest do
   end
 
   defp help_content(state), do: BufferProcess.content(state.workspace.buffers.help)
+
+  defp binding_sections(content) do
+    [_header | sections] = String.split(content, ~r/\n(?=[^\n]+\n-+\n)/)
+
+    Enum.map(sections, fn section ->
+      [title, _underline | rows] = String.split(section, "\n", trim: true)
+      {title, rows}
+    end)
+  end
+
+  defp binding_rows(sections, title) do
+    {^title, rows} = List.keyfind(sections, title, 0)
+    rows
+  end
+
+  defp binding_keys(sections, title) do
+    Enum.map(binding_rows(sections, title), fn row -> hd(binding_columns(row)) end)
+  end
+
+  defp binding_columns(row), do: String.split(row, ~r/ {4,}/, parts: 3)
 
   defp option_item(state, option_name) do
     state
