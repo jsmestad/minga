@@ -143,7 +143,7 @@ defmodule Minga.LSP.SemanticTokens do
   def to_spans(tokens, line_byte_offsets, capture_name_to_id, line_text_fn, encoding \\ :utf16)
       when is_list(tokens) and is_map(line_byte_offsets) and is_function(capture_name_to_id, 1) and
              is_function(line_text_fn, 1) do
-    Enum.flat_map(tokens, fn token ->
+    Enum.map(tokens, fn token ->
       line_offset = Map.get(line_byte_offsets, token.line, 0)
       line_text = line_text_fn.(token.line)
 
@@ -171,15 +171,13 @@ defmodule Minga.LSP.SemanticTokens do
       capture_name = composite_capture_name(token.type, token.modifiers)
       capture_id = capture_name_to_id.(capture_name)
 
-      [
-        %Minga.Language.Highlight.Span{
-          start_byte: start_byte,
-          end_byte: end_byte,
-          capture_id: capture_id,
-          pattern_index: 0,
-          layer: @semantic_layer
-        }
-      ]
+      %Minga.Language.Highlight.Span{
+        start_byte: start_byte,
+        end_byte: end_byte,
+        capture_id: capture_id,
+        pattern_index: 0,
+        layer: @semantic_layer
+      }
     end)
   end
 
@@ -307,12 +305,15 @@ defmodule Minga.LSP.SemanticTokens do
   @spec decode_modifiers(non_neg_integer(), [String.t()]) :: [String.t()]
   defp decode_modifiers(0, _mods), do: []
 
-  defp decode_modifiers(bits, mods) do
-    import Bitwise
+  defp decode_modifiers(_bits, []), do: []
 
-    mods
-    |> Enum.with_index()
-    |> Enum.filter(fn {_mod, idx} -> (bits >>> idx &&& 1) == 1 end)
-    |> Enum.map(fn {mod, _idx} -> mod end)
+  defp decode_modifiers(bits, [name | rest]) do
+    tail = Bitwise.bsr(bits, 1)
+
+    if Bitwise.band(bits, 1) == 1 do
+      [name | decode_modifiers(tail, rest)]
+    else
+      decode_modifiers(tail, rest)
+    end
   end
 end

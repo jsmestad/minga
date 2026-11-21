@@ -66,6 +66,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - Deferred parser requests store their synchronization sequence directly. Parser registrations use one forward lookup by buffer PID and retain the reverse lookup for parser replies.
 - Removed one-off benchmark scripts and archived measurement artifacts. CI performance gates and maintained documentation remain.
 - LSP, diagnostic, and caret position conversion now walks UTF-8 text directly instead of building charlists or re-encoding each character, and UTF-32 position lookup runs in constant stack. Converted positions, clamping, and exact-column errors are unchanged.
+- LSP semantic tokens decode modifier bits in legend order without making indexed lists, and each token projects directly into one highlight span.
 - GUI search indexes now build in one linear pass when indexing into an empty tree, so initial builds and edits that remove every match no longer insert each match-bearing line persistently. Match order, counts, navigation, and incremental edits are unchanged.
 - Search results preserve document order directly when walking the index. Quote text objects find only the pair around the cursor. Visual and Operator-Pending mode share the same object suffixes without sharing their transitions.
 - Characterwise range deletion and replacement reuse their already resolved selections, avoiding a second normalization and coordinate lookup while preserving deleted and replacement bytes, cursor placement, and edit deltas.
