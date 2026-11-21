@@ -251,7 +251,7 @@ defmodule Minga.Editing.Completion.Item do
     size = byte_size(part)
 
     case normalized do
-      <<^part::binary-size(size), suffix::binary>> ->
+      <<^part::binary-size(^size), suffix::binary>> ->
         offsets = prepend_normalized_offsets(part, offset, offsets)
         map_normalized_prefix(rest, suffix, offset + 1, offsets)
 
