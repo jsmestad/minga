@@ -235,6 +235,10 @@ defmodule Minga.Editing do
     to: Minga.Editing.Search,
     as: :word_at_cursor
 
+  @doc "Applies accepted substitutions in the order supplied."
+  @spec apply_substitutions(String.t(), [Minga.Editing.Search.match()], String.t()) :: String.t()
+  defdelegate apply_substitutions(content, matches, replacement), to: Minga.Editing.Search
+
   @doc "Substitute matches in a single line, returning styled spans for preview."
   @spec substitute_line_preview(
           String.t(),

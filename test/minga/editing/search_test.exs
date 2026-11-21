@@ -203,6 +203,13 @@ defmodule Minga.Editing.SearchTest do
     end
   end
 
+  test "accepted substitutions resolve line numbers against the edited text" do
+    accepted = [Match.new(2, 0, 1), Match.new(0, 0, 1), Match.new(1, 0, 1)]
+
+    assert Search.apply_substitutions("a0\na1\na2", accepted, "X\nY") ==
+             "X\nX\nY0\na1\nX\nY2"
+  end
+
   # ── substitute/4 ──────────────────────────────────────────────────────────
 
   describe "substitute/4 global" do

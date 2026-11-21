@@ -265,9 +265,7 @@ defmodule Minga.Editing.Search do
   """
   @spec word_at_cursor(Document.t(), position()) :: String.t() | nil
   def word_at_cursor(%Document{} = buf, {line, col}) do
-    lines = :binary.split(Document.content(buf), "\n", [:global])
-
-    case Enum.at(lines, line) do
+    case Document.line_at(buf, line) do
       nil ->
         nil
 
@@ -283,6 +281,48 @@ defmodule Minga.Editing.Search do
   end
 
   # ── Substitution ──────────────────────────────────────────────────────────
+
+  @typep line_focus :: {non_neg_integer(), [String.t()], [String.t()]}
+
+  @doc "Applies accepted matches in the supplied order, using the text left by each previous edit."
+  @spec apply_substitutions(String.t(), [match()], String.t()) :: String.t()
+  def apply_substitutions(content, [], _replacement), do: content
+
+  def apply_substitutions(content, matches, replacement) do
+    lines = :binary.split(content, "\n", [:global])
+    multiline? = :binary.match(replacement, "\n") != :nomatch
+
+    {_line, before, remaining} =
+      Enum.reduce(matches, {0, [], lines}, fn %Match{line: line} = match, focus ->
+        focus
+        |> seek_line(line)
+        |> apply_focused_match(match, replacement, multiline?)
+      end)
+
+    before |> Enum.reverse(remaining) |> Enum.join("\n")
+  end
+
+  # The prefix is reversed so both neighboring lines are available without starting over.
+  @spec seek_line(line_focus(), non_neg_integer()) :: line_focus()
+  defp seek_line({line, before, [text | rest]}, target) when line < target,
+    do: seek_line({line + 1, [text | before], rest}, target)
+
+  defp seek_line({line, [text | before], rest}, target) when line > target,
+    do: seek_line({line - 1, before, [text | rest]}, target)
+
+  defp seek_line(focus, _target), do: focus
+
+  @spec apply_focused_match(line_focus(), match(), String.t(), boolean()) :: line_focus()
+  defp apply_focused_match({_, _, []} = focus, _match, _replacement, _multiline?), do: focus
+
+  defp apply_focused_match({line, before, [text | rest]}, match, replacement, multiline?) do
+    edited = splice_match(text, {match.col, match.length}, replacement)
+
+    rest =
+      if multiline?, do: :binary.split(edited, "\n", [:global]) ++ rest, else: [edited | rest]
+
+    {line, before, rest}
+  end
 
   @typedoc "Result of a substitution: new content and count of replacements."
   @type substitute_result :: {String.t(), non_neg_integer()}
