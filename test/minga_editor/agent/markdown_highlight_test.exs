@@ -170,6 +170,28 @@ defmodule MingaEditor.Agent.MarkdownHighlightTest do
       assert fg == 0xFF0000
     end
 
+    test "aligns highlights to the second identical code line after multibyte CRLF text" do
+      prefix = "# λ\r\n```ex\r\nend\r\n\r\n"
+      text = prefix <> "end\r\n```\r\n"
+      base = 100
+      target = base + byte_size(prefix)
+
+      highlight =
+        make_highlight(
+          spans: [Span.new(target, target + 3, 0)],
+          capture_names: ["keyword"],
+          theme: %{"keyword" => [fg: 0xFF0000]}
+        )
+
+      [heading, header, first, blank, _, footer, trailing] =
+        MarkdownHighlight.stylize(text, nil, @theme_syntax)
+
+      assert [^heading, ^header, ^first, ^blank, second, ^footer, ^trailing] =
+               MarkdownHighlight.stylize(text, highlight, @theme_syntax, base)
+
+      assert [{"end", 0xFF0000, _, _}, {"\r", _, _, _}] = second
+    end
+
     test "non-code lines keep regex parser styling even with highlights" do
       # A header line should NOT be overridden by tree-sitter
       text = "# My Header"
