@@ -181,15 +181,16 @@ defmodule Minga.Buffer.ConflictIndex do
   defp optional_marker_label(document, line, prefix), do: marker_label(document, line, prefix)
 
   @spec marker_lines([String.t()], non_neg_integer()) :: [marker()]
-  defp marker_lines(lines, offset) do
-    lines
-    |> Enum.with_index(offset)
-    |> Enum.flat_map(fn {line, index} ->
-      case marker_kind(line) do
-        nil -> []
-        kind -> [{index, kind}]
-      end
-    end)
+  defp marker_lines(lines, offset), do: marker_lines(lines, offset, [])
+
+  @spec marker_lines([String.t()], non_neg_integer(), [marker()]) :: [marker()]
+  defp marker_lines([], _index, markers), do: Enum.reverse(markers)
+
+  defp marker_lines([line | rest], index, markers) do
+    case marker_kind(line) do
+      nil -> marker_lines(rest, index + 1, markers)
+      kind -> marker_lines(rest, index + 1, [{index, kind} | markers])
+    end
   end
 
   @spec marker_kind(String.t()) :: marker_kind() | nil
