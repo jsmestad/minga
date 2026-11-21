@@ -253,29 +253,40 @@ defmodule MingaAgent.Session.ContinuationCodec do
          @version
        )
        when is_list(boundaries) and is_map(branches) do
-    branch_subjects =
-      Enum.flat_map(branches, fn
-        {_name, %{"boundaries" => branch_boundaries} = branch}
-        when is_list(branch_boundaries) ->
-          [branch | branch_boundaries]
-
-        {_name, invalid} ->
-          [invalid, :invalid_branch]
-      end)
-
-    subjects =
-      [encoded["active_request"], encoded["tool_checkpoint"]] ++
-        boundaries ++ branch_subjects
-
-    if Enum.all?(subjects, &(is_nil(&1) or (is_map(&1) and Map.has_key?(&1, "epoch_id")))),
-      do: :ok,
-      else: {:error, :missing_prefix_epoch}
+    if epoch_field_present?(encoded["active_request"]) and
+         epoch_field_present?(encoded["tool_checkpoint"]) and
+         Enum.all?(boundaries, &epoch_field_present?/1) and
+         branch_epoch_fields_present?(:maps.iterator(branches)) do
+      :ok
+    else
+      {:error, :missing_prefix_epoch}
+    end
   end
 
   defp validate_current_epoch_fields(_encoded, @version),
     do: {:error, :invalid_prefix_epoch_structure}
 
   defp validate_current_epoch_fields(_encoded, _legacy), do: :ok
+
+  @spec epoch_field_present?(term()) :: boolean()
+  defp epoch_field_present?(nil), do: true
+  defp epoch_field_present?(%{"epoch_id" => _}), do: true
+  defp epoch_field_present?(_subject), do: false
+
+  # Use the iterator so a failed check can stop without materializing the map entries.
+  @spec branch_epoch_fields_present?(:maps.iterator()) :: boolean()
+  defp branch_epoch_fields_present?(iterator) do
+    case :maps.next(iterator) do
+      :none ->
+        true
+
+      {_name, %{"epoch_id" => _, "boundaries" => boundaries}, rest} when is_list(boundaries) ->
+        Enum.all?(boundaries, &epoch_field_present?/1) and branch_epoch_fields_present?(rest)
+
+      _invalid ->
+        false
+    end
+  end
 
   @spec decode_epoch(map()) :: {:ok, PrefixStore.epoch_ref()} | {:error, term()}
   defp decode_epoch(encoded) do
