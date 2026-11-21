@@ -76,6 +76,8 @@ macOS runtime components can be universal Mach-O images. The checker validates t
 MIX_ENV=prod mix app.assemble --output-path-file /tmp/minga-app-path
 ```
 
+Assembly generates shared protocol sources first, then runs the BEAM and native release build alongside the Xcode Release build. It reports elapsed time for protocol generation, both builds and final bundle assembly. Xcode uses worktree-local DerivedData at `macos/.build/app-assembly` and checks the generated project's Release optimization settings before compiling. `--no-build` reuses an existing BEAM release and an existing Xcode product without regenerating or compiling either one. It looks for the ordinary Xcode product first, then for the isolated assembly product.
+
 A failed rerun clears an old handoff file and exits without reporting a successful app. Signing failures are errors, not warnings. GUI preparation finishes Developer ID signing, notarization and stapling before hashing the final DMG.
 
 ### Signing credentials

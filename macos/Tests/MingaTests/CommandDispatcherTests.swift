@@ -64,7 +64,6 @@ struct CommandDispatcherRoutingTests {
             prompt: "retained draft 👩‍💻", promptLineCount: 3, promptCursorLine: 1,
             promptCursorCol: 5, promptMode: .insert, promptVisibleRows: 3, promptCompletion: nil
         )
-        let promptVersion = gui.agentChatState.promptVersion
         let focus = Wire.FocusOwner(responder: 0, surface: 7, windowID: 1, generation: 9)
         let groups = [Wire.HelpGroup(title: "Review", bindings: [(key: "Tab", description: "Back to chat")])]
         dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
@@ -77,7 +76,6 @@ struct CommandDispatcherRoutingTests {
         #expect(gui.agentHelpState.groups.first?.title == "Review")
         #expect(!gui.agentChatState.visible)
         #expect(gui.agentChatState.prompt == "retained draft 👩‍💻")
-        #expect(gui.agentChatState.promptVersion == promptVersion)
         #expect(gui.agentChatState.promptCursorLine == 1)
         #expect(gui.agentChatState.promptCursorCol == 5)
         #expect(gui.agentChatState.promptMode == .insert)
@@ -98,7 +96,10 @@ struct CommandDispatcherRoutingTests {
         #expect(!gui.agentHelpState.visible)
         #expect(gui.agentHelpState.groups.isEmpty)
         #expect(gui.agentChatState.prompt == "retained draft 👩‍💻")
-        #expect(gui.agentChatState.promptVersion == promptVersion)
+        #expect(gui.agentChatState.promptCursorLine == 1)
+        #expect(gui.agentChatState.promptCursorCol == 5)
+        #expect(gui.agentChatState.promptMode == .insert)
+        #expect(gui.agentChatState.promptVisibleRows == 3)
     }
 
     @Test("Chat hiding cannot dismiss independent Help and connection reset clears it")
@@ -3966,7 +3967,10 @@ struct CommandDispatcherStagingTests {
         let baseline = gui.agentChatState.transcriptSnapshot
         let baselineEpoch = gui.agentChatState.transcriptEpoch
         let baselineTruncated = gui.agentChatState.transcriptTruncated
-        let baselinePromptVersion = gui.agentChatState.promptVersion
+        let baselineRevision = gui.agentChatState.transcriptRevision
+        let baselinePrompt = gui.agentChatState.prompt
+        let baselineModel = gui.agentChatState.model
+        let baselineStatus = gui.agentChatState.status
 
         dispatcher.dispatch(.beginFrame(frameSeq: 2, baseFrameSeq: 1, generation: 1))
         dispatcher.dispatch(.guiAgentTranscript(
@@ -3984,7 +3988,10 @@ struct CommandDispatcherStagingTests {
         #expect(gui.agentChatState.messages.map(\.id) == [1])
         #expect(gui.agentChatState.transcriptEpoch == baselineEpoch)
         #expect(gui.agentChatState.transcriptTruncated == baselineTruncated)
-        #expect(gui.agentChatState.promptVersion == baselinePromptVersion)
+        #expect(gui.agentChatState.transcriptRevision == baselineRevision)
+        #expect(gui.agentChatState.prompt == baselinePrompt)
+        #expect(gui.agentChatState.model == baselineModel)
+        #expect(gui.agentChatState.status == baselineStatus)
         #expect(gui.agentChatState.transcriptSnapshot.resourceWeight == baseline.resourceWeight)
         #expect(results.last == .rejected(
             generation: 1, frameSeq: 2, lastAppliedFrameSeq: 1,
@@ -4356,12 +4363,21 @@ struct CommandDispatcherStagingTests {
             let baselineTranscript = gui.agentChatState.transcriptSnapshot
             let baselineEpoch = gui.agentChatState.transcriptEpoch
             let baselineTruncated = gui.agentChatState.transcriptTruncated
-            let baselinePromptVersion = gui.agentChatState.promptVersion
+            let baselineRevision = gui.agentChatState.transcriptRevision
+            let baselinePrompt = gui.agentChatState.prompt
+            let baselineModel = gui.agentChatState.model
+            let baselineStatus = gui.agentChatState.status
             let frameSeq = UInt32(index > 0 ? 2 : 1)
             let baseSeq = UInt32(index > 0 ? 1 : 0)
             dispatcher.dispatch(.beginFrame(frameSeq: frameSeq, baseFrameSeq: baseSeq, generation: 1))
             if baseSeq == 0 { dispatcher.dispatch(.guiTheme(slots: completeThemeSlots())) }
             dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: [tab("must-not-publish.ex")]))
+            dispatcher.dispatch(.guiAgentChat(
+                visible: true, status: .thinking, model: "would-publish", thinkingLevel: "high",
+                prompt: "would-publish", promptLineCount: 1, promptCursorLine: 0,
+                promptCursorCol: 0, promptMode: .normal, promptVisibleRows: 1,
+                promptCompletion: nil, pendingToolName: nil, pendingToolSummary: ""
+            ))
             dispatcher.dispatch(invalid.0)
             dispatcher.dispatch(.commitFrame(frameSeq: frameSeq, seq: 0))
 
@@ -4371,7 +4387,10 @@ struct CommandDispatcherStagingTests {
             #expect(gui.agentChatState.messages.map(\.id) == (index > 0 ? [1] : []))
             #expect(gui.agentChatState.transcriptEpoch == baselineEpoch)
             #expect(gui.agentChatState.transcriptTruncated == baselineTruncated)
-            #expect(gui.agentChatState.promptVersion == baselinePromptVersion)
+            #expect(gui.agentChatState.transcriptRevision == baselineRevision)
+            #expect(gui.agentChatState.prompt == baselinePrompt)
+            #expect(gui.agentChatState.model == baselineModel)
+            #expect(gui.agentChatState.status == baselineStatus)
             #expect(gui.agentChatState.transcriptSnapshot.resourceWeight == baselineTranscript.resourceWeight)
         }
     }

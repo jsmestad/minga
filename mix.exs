@@ -424,6 +424,7 @@ defmodule Minga.MixProject do
     dialyzer = ~w(mix/tasks/dialyzer.incremental.runner.ex mix/tasks/dialyzer.incremental.ex)
 
     [
+      "app.assemble": build_task(Mix.Tasks.App.Assemble, ~w(mix/tasks/app.assemble.ex)),
       codegen: [
         "deps.loadpaths",
         build_task(Mix.Tasks.Codegen, protocol ++ language ++ ~w(mix/tasks/codegen.ex))

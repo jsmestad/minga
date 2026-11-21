@@ -1997,8 +1997,7 @@ struct AgentToolOutcomeViewTests {
                 messageID: 1, name: "shell", summary: "echo example", status: status,
                 isError: isError, collapsed: false, autoApprovedScope: 0, durationMs: 233_900,
                 result: styled ? nil : explanation, resultLines: styled ? [[run]] : nil,
-                previewLines: ["echo example"], sendAction: nil,
-                styledLineView: { runs, _, _ in AnyView(Text(runs.map(\.text).joined())) }
+                previewLines: ["echo example"], sendAction: nil
             ).environment(\.themeColors, ThemeColors())
             let body = try card.inspect()
             let strings = body.findAll(ViewType.Text.self).compactMap { try? $0.string() }

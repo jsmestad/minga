@@ -92,6 +92,7 @@
 		2D620B13E447C0DCE40A9635 /* UniformTypeIdentifiers.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 54D8A3B2592F34452B8151C0 /* UniformTypeIdentifiers.framework */; };
 		2DC7C337561B2DD304BD22D0 /* EditorPresentation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1DD617770357D4F3C286BBFF /* EditorPresentation.swift */; };
 		2DFDA6E32CE61E6D89341423 /* AppearanceSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 912C5F808709BABFF3126DEE /* AppearanceSettingsView.swift */; };
+		2E00561707D62983F26641EC /* AgentStyledLine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A72AC156EC2485DDBA79B7C /* AgentStyledLine.swift */; };
 		2E26B3C8E2C5BAB1D954F2DF /* AccessibilityTestSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 29B1B8E7DB6EBD5518F1CE39 /* AccessibilityTestSupport.swift */; };
 		2EA3B51D77C5AD5079A8510F /* ProtocolConnection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 56C04E36E000E9D7450F374B /* ProtocolConnection.swift */; };
 		2F0A0D75FA309989C48B32EF /* WindowContent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 790F7E20F30FEEFC552B3685 /* WindowContent.swift */; };
@@ -469,6 +470,7 @@
 		ED38366E0817156651AC8EA6 /* ProtocolConnection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 56C04E36E000E9D7450F374B /* ProtocolConnection.swift */; };
 		ED8592B57E8A2A3EAAE24295 /* EditorNSView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 98DB822E0C8D06C7B45D329F /* EditorNSView.swift */; };
 		EE84DA1BF4952359DD0DC343 /* LineTextureAtlas.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4742DDE225F256A140177301 /* LineTextureAtlas.swift */; };
+		EEABA900F172178DB4469465 /* AgentConversationListInvalidationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F5AA77E363715007C43B18F /* AgentConversationListInvalidationTests.swift */; };
 		EFB02B33864584C42AD0038E /* MingaUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 7D941F158B53B4D4CF4AAA4F /* MingaUI.framework */; };
 		F07A71D61F5E19EF77AD31D2 /* TabBarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CDC572B6F7D2CD90E07CA61 /* TabBarView.swift */; };
 		F0A2BCCA095F1CA4FBE9BE3F /* ProtocolSchemaTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3DC281B7F9F7E4C0BA793B1E /* ProtocolSchemaTests.swift */; };
@@ -819,12 +821,14 @@
 		7863B32F1CFA231CFB9F509B /* RendererResidentSliceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RendererResidentSliceTests.swift; sourceTree = "<group>"; };
 		790F7E20F30FEEFC552B3685 /* WindowContent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowContent.swift; sourceTree = "<group>"; };
 		79F5D551302873BE8F7240ED /* FontManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FontManager.swift; sourceTree = "<group>"; };
+		7A72AC156EC2485DDBA79B7C /* AgentStyledLine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentStyledLine.swift; sourceTree = "<group>"; };
 		7CDC524DEAE5431F6B18A31B /* ProtocolEncoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProtocolEncoder.swift; sourceTree = "<group>"; };
 		7D941F158B53B4D4CF4AAA4F /* MingaUI.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = MingaUI.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		7E044272E18086A0797FABC0 /* FocusWriterGuardrailTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FocusWriterGuardrailTests.swift; sourceTree = "<group>"; };
 		7E4E980D53CCCE228BA59BD5 /* KeyboardInputTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyboardInputTests.swift; sourceTree = "<group>"; };
 		7E7030A2FA3FDC2E1BF30D7C /* PresentedTextLayoutTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PresentedTextLayoutTests.swift; sourceTree = "<group>"; };
 		7F42C05E1FECBE9422C61790 /* DecodedFrame.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DecodedFrame.swift; sourceTree = "<group>"; };
+		7F5AA77E363715007C43B18F /* AgentConversationListInvalidationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentConversationListInvalidationTests.swift; sourceTree = "<group>"; };
 		7F60610CCB4E603ACBA360C1 /* LiveResizeDebounce.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveResizeDebounce.swift; sourceTree = "<group>"; };
 		801F49D62225A511B8510EAA /* ConformanceTranscriptTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConformanceTranscriptTests.swift; sourceTree = "<group>"; };
 		80EA8C68F821B15E3CC4A419 /* ChromeTokenGuardrailTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChromeTokenGuardrailTests.swift; sourceTree = "<group>"; };
@@ -1197,7 +1201,6 @@
 			isa = PBXGroup;
 			children = (
 				F119F1E4F466F0C6DAFB1758 /* MingaAccessibilityTests */,
-				9154A9ED920FE34E4821C8E5 /* MingaApprovalGeometryTests */,
 				EF010AC81BF7F66D126A242B /* MingaTests */,
 				E21EB402C3CF337C600FBBEC /* NativePerformance */,
 			);
@@ -1249,13 +1252,6 @@
 				147C554D76D3182F66885B3D /* ApprovalGeometryMain.swift */,
 			);
 			path = MingaApprovalGeometry;
-			sourceTree = "<group>";
-		};
-		9154A9ED920FE34E4821C8E5 /* MingaApprovalGeometryTests */ = {
-			isa = PBXGroup;
-			children = (
-			);
-			path = MingaApprovalGeometryTests;
 			sourceTree = "<group>";
 		};
 		9BCB98982A500071F16A8FC7 /* MingaTestHost */ = {
@@ -1407,6 +1403,7 @@
 				B6747C277D1DC7E7DDBB9F95 /* AgentHelpState.swift */,
 				DADCE05A60C5F3E6D0AD4F74 /* AgentHelpView.swift */,
 				46CACE8313B301092C88666E /* AgentPromptView.swift */,
+				7A72AC156EC2485DDBA79B7C /* AgentStyledLine.swift */,
 				D1EBF8F752B40004FCD33C6F /* AgentToolCallCard.swift */,
 			);
 			path = Agent;
@@ -1481,6 +1478,7 @@
 		EF010AC81BF7F66D126A242B /* MingaTests */ = {
 			isa = PBXGroup;
 			children = (
+				7F5AA77E363715007C43B18F /* AgentConversationListInvalidationTests.swift */,
 				EE2D4BF845A8C876DB44357E /* AgentPromptPresentationTests.swift */,
 				5751DCC6A640CE7D5C5364D6 /* ApplicationQuitCoordinatorTests.swift */,
 				AFED73132C30A125845E8AB0 /* BEAMLaunchIsolationTests.swift */,
@@ -1916,7 +1914,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "cd \"${SRCROOT}/..\"\nif ! command -v mix >/dev/null 2>&1; then\n  if [ -f macos/.generated/protocol/ProtocolOpcodes.generated.swift ]; then\n    echo \"warning: mix not found; reusing existing generated protocol artifacts (e.g. Xcode Preview build sandbox)\"\n    exit 0\n  fi\n  echo \"error: mix is required to generate protocol artifacts. Install Elixir, then run: mix protocol.gen\"\n  exit 1\nfi\nmix protocol.gen\n";
+			shellScript = "if [ \"${MINGA_APP_PROTOCOL_PREGENERATED:-0}\" = \"1\" ]; then\n  for file in \"$SCRIPT_OUTPUT_FILE_0\" \"$SCRIPT_OUTPUT_FILE_1\" \\\n              \"$SCRIPT_OUTPUT_FILE_2\" \"$SCRIPT_OUTPUT_FILE_3\"; do\n    if [ ! -s \"$file\" ]; then\n      echo \"error: missing pregenerated Swift protocol artifact: $file\"\n      exit 1\n    fi\n  done\n  exit 0\nfi\ncd \"${SRCROOT}/..\"\nif ! command -v mix >/dev/null 2>&1; then\n  if [ -f macos/.generated/protocol/ProtocolOpcodes.generated.swift ]; then\n    echo \"warning: mix not found; reusing existing generated protocol artifacts (e.g. Xcode Preview build sandbox)\"\n    exit 0\n  fi\n  echo \"error: mix is required to generate protocol artifacts. Install Elixir, then run: mix protocol.gen\"\n  exit 1\nfi\nmix protocol.gen\n";
 		};
 		77AE57735A00C26BF1B3675A /* Generate protocol opcodes */ = {
 			isa = PBXShellScriptBuildPhase;
@@ -2283,6 +2281,7 @@
 				2D2DD893601A7398104B2889 /* AgentHelpState.swift in Sources */,
 				C98720A0BB76B598D18B8D4B /* AgentHelpView.swift in Sources */,
 				2850DD6D3A2061ECEE89C81F /* AgentPromptView.swift in Sources */,
+				2E00561707D62983F26641EC /* AgentStyledLine.swift in Sources */,
 				121E3F11034FFD88D07A62E9 /* AgentToolCallCard.swift in Sources */,
 				2DFDA6E32CE61E6D89341423 /* AppearanceSettingsView.swift in Sources */,
 				5BDFA810F3F8E12C3B476F0E /* BlinkingCursor.swift in Sources */,
@@ -2388,6 +2387,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				EEABA900F172178DB4469465 /* AgentConversationListInvalidationTests.swift in Sources */,
 				3A7AFBDD9B50086C47D27F8B /* AgentPromptAperture.swift in Sources */,
 				18100CA9081C957AA0EA19BF /* AgentPromptPresentationTests.swift in Sources */,
 				F12D6284209D6D32037E6644 /* AppState.swift in Sources */,
