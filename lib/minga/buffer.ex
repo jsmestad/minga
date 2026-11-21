@@ -27,6 +27,7 @@ defmodule Minga.Buffer do
   @type text_edit :: BufferProcess.text_edit()
   @type boundary :: BufferProcess.boundary()
   @type save_intent :: SaveIntent.t()
+  @type listing_info :: BufferProcess.listing_info()
 
   # ── Lifecycle ──────────────────────────────────────────────────────
 
@@ -501,6 +502,10 @@ defmodule Minga.Buffer do
   defdelegate retarget_path(server, file_path), to: BufferProcess
 
   # ── Identity and metadata ──────────────────────────────────────────
+
+  @doc "Returns the metadata needed to list this buffer in one call, without reading content."
+  @spec listing_info(t()) :: listing_info()
+  defdelegate listing_info(server), to: BufferProcess
 
   @doc "File path of the buffer, or nil for scratch buffers."
   @spec file_path(t()) :: String.t() | nil

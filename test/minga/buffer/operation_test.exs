@@ -117,19 +117,20 @@ defmodule Minga.Buffer.OperationTest do
   end
 
   describe "delete_forward/1" do
-    test "returns exclusive old end byte and position for a multi-byte grapheme" do
-      doc = Document.new("aébc") |> Document.move_to({0, 1})
+    test "reports the removed bytes and old positions for a grapheme or CRLF at the gap" do
+      cases = [
+        {"xe\u0301y", "xy", 4, {0, 4}},
+        {"a\r\nb", "ab", 3, {1, 0}}
+      ]
 
-      assert {:edited, new_doc, delta} = Operation.delete_forward(doc)
-      assert Document.content(new_doc) == "abc"
-      assert Document.cursor(new_doc) == {0, 1}
-      assert delta.start_byte == 1
-      assert delta.old_end_byte == 3
-      assert delta.new_end_byte == 1
-      assert delta.start_position == {0, 1}
-      assert delta.old_end_position == {0, 3}
-      assert delta.new_end_position == {0, 1}
-      assert delta.inserted_text == ""
+      for {original, expected, old_end, old_end_position} <- cases do
+        doc = original |> Document.new() |> Document.move_to({0, 1})
+
+        assert {:edited, new_doc, delta} = Operation.delete_forward(doc)
+        assert Document.content(new_doc) == expected
+        assert Document.cursor(new_doc) == {0, 1}
+        assert_deletion(original, new_doc, delta, {1, old_end}, {{0, 1}, old_end_position})
+      end
     end
 
     test "joins lines when deleting a CRLF and keeps later positions on the joined index" do
@@ -164,18 +165,27 @@ defmodule Minga.Buffer.OperationTest do
   end
 
   describe "delete_lines/3" do
-    test "returns a delta for the actual bytes removed when deleting the final line" do
-      doc = Document.new("alpha\nbeta")
+    test "reports the removed bytes and old positions independently of the resulting cursor" do
+      cases = [
+        {"same\nsame\nsame", {1, 2}, "same\nsame", {1, 0}, {5, 10}, {{1, 0}, {2, 0}}},
+        {"alpha\nbeta", {1, 2}, "alpha", {0, 0}, {5, 10}, {{0, 5}, {1, 4}}},
+        {"a\n", {1, 0}, "a", {0, 0}, {1, 2}, {{0, 1}, {1, 0}}},
+        {"a\r\nb", {1, 0}, "a\r", {0, 0}, {2, 4}, {{0, 2}, {1, 1}}},
+        {"élan", {0, 2}, "", {0, 0}, {0, 5}, {{0, 0}, {0, 5}}}
+      ]
 
-      assert {:edited, new_doc, delta} = Operation.delete_lines(doc, 1, 1)
-      assert Document.content(new_doc) == "alpha"
-      assert delta.start_byte == 5
-      assert delta.old_end_byte == 10
-      assert delta.new_end_byte == 5
-      assert delta.start_position == {0, 5}
-      assert delta.old_end_position == {1, 4}
-      assert delta.new_end_position == {0, 5}
-      assert delta.inserted_text == ""
+      for {original, {line, _col} = gap, expected, cursor, offsets, positions} <- cases do
+        doc = original |> Document.new() |> Document.move_to(gap)
+
+        assert {:edited, new_doc, delta} = Operation.delete_lines(doc, line, line)
+        assert Document.content(new_doc) == expected
+        assert Document.cursor(new_doc) == cursor
+        assert_deletion(original, new_doc, delta, offsets, positions)
+      end
+    end
+
+    test "deleting the only line of an already empty document is unchanged" do
+      assert :unchanged = Operation.delete_lines(Document.new(""), 0, 0)
     end
   end
 
@@ -194,5 +204,21 @@ defmodule Minga.Buffer.OperationTest do
       assert delta.new_end_position == {1, 0}
       assert delta.inserted_text == ""
     end
+  end
+
+  defp assert_deletion(original, new_doc, delta, {start, stop}, {start_position, stop_position}) do
+    assert {delta.start_byte, delta.old_end_byte, delta.new_end_byte} == {start, stop, start}
+
+    assert {delta.start_position, delta.old_end_position, delta.new_end_position} ==
+             {start_position, stop_position, start_position}
+
+    assert delta.inserted_text == ""
+
+    replayed =
+      binary_part(original, 0, delta.start_byte) <>
+        delta.inserted_text <>
+        binary_part(original, delta.old_end_byte, byte_size(original) - delta.old_end_byte)
+
+    assert replayed == Document.content(new_doc)
   end
 end

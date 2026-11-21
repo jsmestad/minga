@@ -40,7 +40,8 @@ defmodule MingaEditor.UI.Picker.BufferSource do
   ## Options
 
   * `:include_special` — when `true`, includes special buffers (`*Messages*`,
-    `*Warnings*`, etc.) in the results. Defaults to `false`.
+    `*Warnings*`, etc.), even when unlisted. Ordinary unlisted buffers stay hidden.
+    Defaults to `false`.
   """
   @spec build_candidates(Context.t(), keyword()) :: [Item.t()]
   def build_candidates(%Context{buffers: buffers_state}, opts \\ []) do
@@ -48,36 +49,36 @@ defmodule MingaEditor.UI.Picker.BufferSource do
     include_special = Keyword.get(opts, :include_special, false)
 
     listed =
-      buffers
-      |> Enum.reject(&reject_buffer?(&1, include_special))
-      |> Enum.map(&format_candidate(&1, {:buffer, &1}))
+      for pid <- buffers,
+          info = read_listing_info(pid),
+          listed?(info, include_special) do
+        format_candidate(pid, {:buffer, pid}, info)
+      end
 
     if include_special do
-      extra = extra_special_buffers(buffers_state)
-      listed ++ extra
+      listed ++ extra_special_buffers(buffers_state)
     else
       listed
     end
   end
 
   @doc """
-  Returns candidate entries for special buffers (messages) that are
-  alive but not currently in the buffer list. Uses `{:pid, pid}` as the item
-  key so `on_select` can distinguish extra buffers from registered `{:buffer, pid}` items.
+  Returns an entry for the messages singleton when it is not already listed and
+  its listing metadata can be read. The `{:pid, pid}` key distinguishes it from
+  registered `{:buffer, pid}` items.
   """
   @spec extra_special_buffers(Buffers.t()) :: [Item.t()]
   def extra_special_buffers(%Buffers{list: list}) do
-    special_fields = [Minga.Log.MessagesBuffer.pid()]
+    pid = Minga.Log.MessagesBuffer.pid()
 
-    special_fields
-    |> Enum.reject(fn pid -> is_nil(pid) or Enum.member?(list, pid) end)
-    |> Enum.flat_map(fn pid ->
-      try do
-        [format_candidate(pid, {:pid, pid})]
-      catch
-        :exit, _ -> []
+    if is_pid(pid) and not Enum.member?(list, pid) do
+      case read_listing_info(pid) do
+        nil -> []
+        info -> [format_candidate(pid, {:pid, pid}, info)]
       end
-    end)
+    else
+      []
+    end
   end
 
   @impl true
@@ -124,38 +125,6 @@ defmodule MingaEditor.UI.Picker.BufferSource do
   @spec on_bulk_action(term(), [Item.t()], term()) :: term()
   def on_bulk_action(:kill_marked, items, state), do: kill_items(items, state)
   def on_bulk_action(_action, _items, state), do: state
-
-  @doc """
-  Returns `true` if the buffer is a special buffer (name matches `*...*` pattern).
-  """
-  @spec special?(pid()) :: boolean()
-  def special?(buf) do
-    case Buffer.buffer_name(buf) do
-      nil -> false
-      name -> String.match?(name, ~r/^\*.+\*$/)
-    end
-  end
-
-  # Returns true if a buffer should be excluded from the picker.
-  # Special buffers (like *Messages*) are unlisted by default but should
-  # appear when include_special is true.
-  @spec reject_buffer?(pid(), boolean()) :: boolean()
-  defp reject_buffer?(buf, include_special) do
-    do_reject?(buf, include_special)
-  catch
-    :exit, _ -> true
-  end
-
-  @spec do_reject?(pid(), boolean()) :: boolean()
-  defp do_reject?(buf, true = _include_special) do
-    # When showing all: only reject unlisted non-special buffers
-    Buffer.unlisted?(buf) and not special?(buf)
-  end
-
-  defp do_reject?(buf, false = _include_special) do
-    # Default: reject unlisted buffers and special buffers
-    Buffer.unlisted?(buf) or special?(buf)
-  end
 
   @spec kill_items([Item.t()], term()) :: term()
   defp kill_items(items, %{workspace: %{buffers: %Buffers{} = bs}} = state) do
@@ -206,14 +175,28 @@ defmodule MingaEditor.UI.Picker.BufferSource do
 
   # ── Private ─────────────────────────────────────────────────────────────────
 
-  @spec format_candidate(pid(), term()) :: Item.t()
-  defp format_candidate(buf, key) do
-    name = display_name(buf)
-    ft = Buffer.filetype(buf)
-    {icon, color} = Devicon.icon_and_color(ft)
-    desc = Buffer.file_path(buf) || content_preview(buf)
-    dirty = if Buffer.dirty?(buf), do: " [+]", else: ""
-    ro = if Buffer.read_only?(buf), do: " [RO]", else: ""
+  @spec read_listing_info(pid()) :: Buffer.listing_info() | nil
+  defp read_listing_info(pid) do
+    Buffer.listing_info(pid)
+  catch
+    :exit, _ -> nil
+  end
+
+  @spec listed?(Buffer.listing_info(), boolean()) :: boolean()
+  defp listed?(info, true), do: not info.unlisted or special_name?(info.name)
+  defp listed?(info, false), do: not info.unlisted and not special_name?(info.name)
+
+  @spec special_name?(String.t() | nil) :: boolean()
+  defp special_name?(nil), do: false
+  defp special_name?(name), do: String.match?(name, ~r/^\*.+\*$/)
+
+  @spec format_candidate(pid(), term(), Buffer.listing_info()) :: Item.t()
+  defp format_candidate(pid, key, info) do
+    name = info.name || Path.basename(info.file_path || "[no file]")
+    {icon, color} = Devicon.icon_and_color(info.filetype)
+    desc = info.file_path || content_preview(pid)
+    dirty = if info.dirty, do: " [+]", else: ""
+    ro = if info.read_only, do: " [RO]", else: ""
 
     %Item{
       id: key,
@@ -231,22 +214,18 @@ defmodule MingaEditor.UI.Picker.BufferSource do
 
   @spec content_preview(pid()) :: String.t()
   defp content_preview(buf) do
-    buf
-    |> Buffer.lines(0, @preview_scan_lines)
+    lines =
+      try do
+        Buffer.lines(buf, 0, @preview_scan_lines)
+      catch
+        :exit, _ -> []
+      end
+
+    lines
     # Cap before trimming so a pathologically long first line doesn't get
     # fully traversed on every picker rebuild.
     |> Enum.map(&(&1 |> String.slice(0, 200) |> String.trim()))
     |> Enum.find("", &(&1 != ""))
     |> String.slice(0, @preview_max_chars)
-  catch
-    :exit, _ -> ""
-  end
-
-  @spec display_name(pid()) :: String.t()
-  defp display_name(buf) do
-    case Buffer.buffer_name(buf) do
-      nil -> Path.basename(Buffer.file_path(buf) || "[no file]")
-      name -> name
-    end
   end
 end

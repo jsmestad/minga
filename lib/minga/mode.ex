@@ -166,9 +166,8 @@ defmodule Minga.Mode do
   end
 
   def display(:substitute_confirm, %Minga.Mode.SubstituteConfirmState{} = s) do
-    current = s.current + 1
-    total = Enum.count(s.matches)
-    "replace with #{s.replacement}? [y/n/a/q] (#{current} of #{total})"
+    {ordinal, total} = Minga.Mode.SubstituteConfirmState.progress(s)
+    "replace with #{s.replacement}? [y/n/a/q] (#{ordinal} of #{total})"
   end
 
   def display(:extension_confirm, %Minga.Mode.ExtensionConfirmState{} = s) do

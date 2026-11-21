@@ -435,4 +435,41 @@ defmodule Minga.Editing.TextObjectTest do
       assert nil == TextObject.a_sentence(buf("Hello.\n\nBye."), {1, 0})
     end
   end
+
+  describe "sentence cursor positions" do
+    test "a byte inside a grapheme resolves forward to trailing whitespace" do
+      b = buf("é   ")
+
+      assert {{0, 2}, {0, 4}} = TextObject.inner_sentence(b, {0, 1})
+      assert nil == TextObject.a_sentence(b, {0, 1})
+    end
+
+    test "selects an exact newline but resolves a later column to the next line" do
+      b = buf("One.\nTwo.")
+
+      assert {{0, 4}, {0, 4}} = TextObject.inner_sentence(b, {0, 4})
+      assert {{0, 4}, {1, 3}} = TextObject.a_sentence(b, {0, 4})
+
+      assert {{1, 0}, {1, 3}} = TextObject.inner_sentence(b, {0, 5})
+      assert {{1, 0}, {1, 3}} = TextObject.a_sentence(b, {0, 5})
+    end
+
+    test "a column beyond the final token resolves to that token" do
+      b = buf("One.\nTwo.")
+
+      assert {{1, 0}, {1, 3}} = TextObject.inner_sentence(b, {1, 10})
+      assert {{1, 0}, {1, 3}} = TextObject.a_sentence(b, {1, 10})
+
+      trailing = buf("One.\nTwo.  ")
+      assert {{1, 4}, {1, 5}} = TextObject.inner_sentence(trailing, {1, 10})
+      assert nil == TextObject.a_sentence(trailing, {1, 10})
+    end
+
+    test "a nonexistent line does not resolve to the final sentence" do
+      b = buf("One.\nTwo.")
+
+      assert nil == TextObject.inner_sentence(b, {2, 0})
+      assert nil == TextObject.a_sentence(b, {2, 0})
+    end
+  end
 end

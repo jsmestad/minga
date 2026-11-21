@@ -11,7 +11,9 @@ defmodule MingaEditor.MinibufferDataTest do
 
   use ExUnit.Case, async: true
 
+  alias Minga.Editing.Search.Match
   alias Minga.Mode.CommandState
+  alias Minga.Mode.SubstituteConfirmState
   alias MingaEditor.MinibufferData
   alias MingaEditor.PromptUI
   alias MingaEditor.RenderPipeline.Input
@@ -297,11 +299,18 @@ defmodule MingaEditor.MinibufferDataTest do
 
   describe "from_state/1 substitute confirm" do
     test "formats prompt and context from mode_state" do
+      matches = [Match.new(0, 0, 1), Match.new(0, 2, 1), Match.new(0, 4, 1)]
+
+      mode_state =
+        matches
+        |> SubstituteConfirmState.new("x", "foo", "x x x")
+        |> SubstituteConfirmState.skip()
+
       state = %{
         workspace: %{
           editing: %{
             mode: :substitute_confirm,
-            mode_state: %{matches: [1, 2, 3], current: 1, replacement: "foo"}
+            mode_state: mode_state
           }
         }
       }
@@ -312,6 +321,7 @@ defmodule MingaEditor.MinibufferDataTest do
       assert result.mode == 5
       assert result.cursor_pos == 0xFFFF
       assert result.prompt == "replace with foo?"
+      assert result.input == ""
       assert result.context == "y/n/a/q (2 of 3)"
       assert result.candidates == []
     end

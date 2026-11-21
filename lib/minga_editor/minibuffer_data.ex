@@ -17,6 +17,7 @@ defmodule MingaEditor.MinibufferData do
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Prompt, as: PromptState
   alias Minga.Keymap
+  alias Minga.Mode.SubstituteConfirmState
   alias MingaEditor.UI.WhichKey
 
   # ── Types ──────────────────────────────────────────────────────────────────
@@ -240,9 +241,12 @@ defmodule MingaEditor.MinibufferData do
     }
   end
 
-  def from_state(%{workspace: %{editing: %{mode: :substitute_confirm, mode_state: ms}}}) do
-    current = ms.current + 1
-    total = Enum.count(ms.matches)
+  def from_state(%{
+        workspace: %{
+          editing: %{mode: :substitute_confirm, mode_state: %SubstituteConfirmState{} = ms}
+        }
+      }) do
+    {ordinal, total} = SubstituteConfirmState.progress(ms)
 
     %__MODULE__{
       visible: true,
@@ -250,7 +254,7 @@ defmodule MingaEditor.MinibufferData do
       cursor_pos: 0xFFFF,
       prompt: "replace with #{ms.replacement}?",
       input: "",
-      context: "y/n/a/q (#{current} of #{total})",
+      context: "y/n/a/q (#{ordinal} of #{total})",
       selected_index: 0,
       candidates: []
     }

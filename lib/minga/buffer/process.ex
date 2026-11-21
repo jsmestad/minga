@@ -75,11 +75,19 @@ defmodule Minga.Buffer.Process do
   @type state :: BufState.t()
   @type edit_delta_update :: {:ok, [EditDelta.t()]} | :reset_required
   @type motion_fun :: (Document.t(), Document.position() -> Document.position())
+  @type listing_info :: %{
+          name: String.t() | nil,
+          file_path: String.t() | nil,
+          filetype: atom(),
+          unlisted: boolean(),
+          read_only: boolean(),
+          dirty: boolean()
+        }
   @typep operation_result ::
            {:delta, Document.t(), EditDelta.t()}
            | {:full, Document.t()}
            | {:batch, Document.t(), [UndoPatch.t()]}
-  @typep operation_undo :: :delta | :full | :batch | :force_delta | :force_full
+  @typep operation_undo :: :full | :batch | :force_delta | :force_full
   @typep operation_sync :: :record_delta | :clear
   @typep operation_opts :: {operation_undo(), BufState.edit_source(), operation_sync()}
 
@@ -689,6 +697,10 @@ defmodule Minga.Buffer.Process do
     end
   end
 
+  @doc "Returns the metadata needed to list this buffer, without reading its content."
+  @spec listing_info(GenServer.server()) :: listing_info()
+  def listing_info(server), do: GenServer.call(server, :listing_info)
+
   @doc "Returns the file path associated with this buffer, if any."
   @spec file_path(GenServer.server()) :: String.t() | nil
   def file_path(server) do
@@ -1239,18 +1251,8 @@ defmodule Minga.Buffer.Process do
   end
 
   def handle_call({:insert_text, text, source}, _from, state) do
-    {:edited, new_doc, delta} = Operation.insert_at_cursor(state.document, text)
-    undo_source = EditSource.to_undo_source(source)
-
-    state =
-      apply_operation(
-        state,
-        {:delta, new_doc, delta},
-        source,
-        {:delta, undo_source, :record_delta}
-      )
-
-    {:reply, :ok, state}
+    result = Operation.insert_at_cursor(state.document, text)
+    {:reply, :ok, record_operation(state, result, source)}
   end
 
   def handle_call(
@@ -1262,20 +1264,8 @@ defmodule Minga.Buffer.Process do
   end
 
   def handle_call({:apply_edit, from_pos, to_pos, new_text, source}, _from, state) do
-    {:edited, new_doc, delta} =
-      Operation.replace_range(state.document, from_pos, to_pos, new_text)
-
-    undo_source = EditSource.to_undo_source(source)
-
-    state =
-      apply_operation(
-        state,
-        {:delta, new_doc, delta},
-        source,
-        {:delta, undo_source, :record_delta}
-      )
-
-    {:reply, :ok, state}
+    result = Operation.replace_range(state.document, from_pos, to_pos, new_text)
+    {:reply, :ok, record_operation(state, result, source)}
   end
 
   def handle_call(
@@ -1287,20 +1277,8 @@ defmodule Minga.Buffer.Process do
   end
 
   def handle_call({:replace_lines, start_line, end_line, new_text, source}, _from, state) do
-    {:edited, new_doc, delta} =
-      Operation.replace_lines(state.document, start_line, end_line, new_text)
-
-    undo_source = EditSource.to_undo_source(source)
-
-    state =
-      apply_operation(
-        state,
-        {:delta, new_doc, delta},
-        source,
-        {:delta, undo_source, :record_delta}
-      )
-
-    {:reply, :ok, state}
+    result = Operation.replace_lines(state.document, start_line, end_line, new_text)
+    {:reply, :ok, record_operation(state, result, source)}
   end
 
   def handle_call(
@@ -1493,21 +1471,8 @@ defmodule Minga.Buffer.Process do
   end
 
   def handle_call(:delete_before, _from, state) do
-    case Operation.backspace(state.document) do
-      :unchanged ->
-        {:reply, :ok, state}
-
-      {:edited, new_doc, delta} ->
-        state =
-          apply_operation(
-            state,
-            {:delta, new_doc, delta},
-            EditSource.user(),
-            {:delta, :user, :record_delta}
-          )
-
-        {:reply, :ok, state}
-    end
+    result = Operation.backspace(state.document)
+    {:reply, :ok, record_operation(state, result, EditSource.user())}
   end
 
   def handle_call(:delete_at, _from, %{read_only: true} = state) do
@@ -1515,21 +1480,8 @@ defmodule Minga.Buffer.Process do
   end
 
   def handle_call(:delete_at, _from, state) do
-    case Operation.delete_forward(state.document) do
-      :unchanged ->
-        {:reply, :ok, state}
-
-      {:edited, new_doc, delta} ->
-        state =
-          apply_operation(
-            state,
-            {:delta, new_doc, delta},
-            EditSource.user(),
-            {:delta, :user, :record_delta}
-          )
-
-        {:reply, :ok, state}
-    end
+    result = Operation.delete_forward(state.document)
+    {:reply, :ok, record_operation(state, result, EditSource.user())}
   end
 
   def handle_call({:move, direction}, _from, state) do
@@ -1944,6 +1896,19 @@ defmodule Minga.Buffer.Process do
     {:reply, BufState.version(state), state}
   end
 
+  def handle_call(:listing_info, _from, state) do
+    info = %{
+      name: state.name,
+      file_path: state.file_path,
+      filetype: state.filetype,
+      unlisted: state.unlisted,
+      read_only: state.read_only,
+      dirty: BufState.dirty?(state)
+    }
+
+    {:reply, info, state}
+  end
+
   def handle_call(:file_path, _from, state) do
     {:reply, state.file_path, state}
   end
@@ -2081,21 +2046,8 @@ defmodule Minga.Buffer.Process do
   end
 
   def handle_call({:delete_range, from_pos, to_pos}, _from, state) do
-    case Operation.delete_range(state.document, from_pos, to_pos) do
-      :unchanged ->
-        {:reply, :ok, state}
-
-      {:edited, new_doc, delta} ->
-        state =
-          apply_operation(
-            state,
-            {:delta, new_doc, delta},
-            EditSource.user(),
-            {:delta, :user, :record_delta}
-          )
-
-        {:reply, :ok, state}
-    end
+    result = Operation.delete_range(state.document, from_pos, to_pos)
+    {:reply, :ok, record_operation(state, result, EditSource.user())}
   end
 
   def handle_call({:text_between_inclusive, start_pos, end_pos}, _from, state) do
@@ -2129,21 +2081,8 @@ defmodule Minga.Buffer.Process do
   end
 
   def handle_call({:delete_lines, start_line, end_line}, _from, state) do
-    case Operation.delete_lines(state.document, start_line, end_line) do
-      :unchanged ->
-        {:reply, :ok, state}
-
-      {:edited, new_doc, delta} ->
-        state =
-          apply_operation(
-            state,
-            {:delta, new_doc, delta},
-            EditSource.user(),
-            {:delta, :user, :record_delta}
-          )
-
-        {:reply, :ok, state}
-    end
+    result = Operation.delete_lines(state.document, start_line, end_line)
+    {:reply, :ok, record_operation(state, result, EditSource.user())}
   end
 
   def handle_call(:content_and_cursor, _from, state) do
@@ -2175,13 +2114,7 @@ defmodule Minga.Buffer.Process do
         {:reply, {:ok, ""}, state}
 
       {:edited, yanked, new_doc, delta} ->
-        state =
-          apply_operation(
-            state,
-            {:delta, new_doc, delta},
-            EditSource.user(),
-            {:delta, :user, :record_delta}
-          )
+        state = record_operation(state, {:edited, new_doc, delta}, EditSource.user())
 
         {:reply, {:ok, yanked}, state}
     end
@@ -2958,19 +2891,17 @@ defmodule Minga.Buffer.Process do
     apply_operation(state, {:full, new_document}, event_source, {:force_full, source, :clear})
   end
 
-  @spec apply_operation(state(), operation_result(), EditSource.t(), operation_opts()) :: state()
-  defp apply_operation(
-         state,
-         {:delta, new_buf, delta},
-         source,
-         {:delta, undo_source, :record_delta}
-       ) do
+  @spec record_operation(state(), Operation.result(), EditSource.t()) :: state()
+  defp record_operation(state, :unchanged, _event_source), do: state
+
+  defp record_operation(state, {:edited, doc, delta}, event_source) do
     state
-    |> push_undo(new_buf, undo_source, delta)
+    |> push_undo(doc, EditSource.to_undo_source(event_source), delta)
     |> mark_dirty()
-    |> record_edit(delta, source)
+    |> record_edit(delta, event_source)
   end
 
+  @spec apply_operation(state(), operation_result(), EditSource.t(), operation_opts()) :: state()
   defp apply_operation(
          state,
          {:delta, new_buf, delta},
