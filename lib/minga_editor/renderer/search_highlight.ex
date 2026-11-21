@@ -8,6 +8,7 @@ defmodule MingaEditor.Renderer.SearchHighlight do
   """
 
   alias Minga.Editing.Search.Match
+  alias Minga.Mode.SubstituteConfirmState
   alias Minga.Search.IndexGeneration
   alias Minga.Search.IndexOwner
   alias MingaEditor.Renderer.StaleSearchError
@@ -213,7 +214,7 @@ defmodule MingaEditor.Renderer.SearchHighlight do
          workspace: %{
            editing: %{
              mode: :substitute_confirm,
-             mode_state: %Minga.Mode.SubstituteConfirmState{pattern: pattern}
+             mode_state: %SubstituteConfirmState{pattern: pattern}
            }
          }
        })
@@ -234,11 +235,11 @@ defmodule MingaEditor.Renderer.SearchHighlight do
         workspace: %{
           editing: %{
             mode: :substitute_confirm,
-            mode_state: %Minga.Mode.SubstituteConfirmState{} = ms
+            mode_state: %SubstituteConfirmState{} = ms
           }
         }
       }) do
-    Enum.at(ms.matches, ms.current)
+    SubstituteConfirmState.current_match(ms)
   end
 
   def current_confirm_match(_state), do: nil

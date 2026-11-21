@@ -1070,12 +1070,12 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
     wrap_map = compute_wrap_map(buf, lines, content_w, oracle)
     cursor_idx = cursor_line - first_line
 
-    cursor_entry =
-      Enum.at(wrap_map, cursor_idx, [
-        %{byte_offset: 0, text: "", source_text: "", indent_width: 0}
-      ])
+    cursor_visual_row =
+      case Enum.at(wrap_map, cursor_idx) do
+        nil -> 0
+        entry -> entry |> WrapMap.row_at_byte(cursor_byte_col) |> elem(0)
+      end
 
-    cursor_visual_row = visual_row_index(cursor_entry, cursor_byte_col)
     rows_before_cursor = wrap_map |> Enum.take(cursor_idx) |> WrapMap.visual_row_count()
     cursor_abs = rows_before_cursor + cursor_visual_row
     effective_margin = min(scroll_margin, div(visible_rows - 1, 2))
@@ -1229,15 +1229,6 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
       oracle: oracle,
       tab_width: tab_width(buf)
     )
-  end
-
-  @spec visual_row_index(WrapMap.wrap_entry(), non_neg_integer()) :: non_neg_integer()
-  defp visual_row_index(wrap_entry, cursor_byte_col) do
-    wrap_entry
-    |> Enum.with_index()
-    |> Enum.filter(fn {row, _idx} -> row.byte_offset <= cursor_byte_col end)
-    |> Enum.at(-1, {%{byte_offset: 0}, 0})
-    |> elem(1)
   end
 
   @spec wrap_option(pid(), atom()) :: boolean()

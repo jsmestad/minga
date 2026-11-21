@@ -27,28 +27,23 @@ defmodule Minga.Mode.SubstituteConfirm do
 
   # y → accept current, advance
   def handle_key({?y, _mods}, %SubstituteConfirmState{} = state) do
-    new_accepted = [state.current | state.accepted]
-    advance(%{state | accepted: new_accepted})
+    state |> SubstituteConfirmState.accept() |> advance_or_finish()
   end
 
   # n → skip current, advance
   def handle_key({?n, _mods}, %SubstituteConfirmState{} = state) do
-    advance(state)
+    state |> SubstituteConfirmState.skip() |> advance_or_finish()
   end
 
   # a → accept all remaining, finish
   def handle_key({?a, _mods}, %SubstituteConfirmState{} = state) do
-    remaining = Enum.to_list(state.current..(Enum.count(state.matches) - 1)//1)
-    new_accepted = remaining ++ state.accepted
-
-    {:execute_then_transition, [:apply_substitute_confirm], :normal,
-     %{state | accepted: new_accepted}}
+    state |> SubstituteConfirmState.accept_remaining() |> finish()
   end
 
   # q or Escape → finish with current decisions
   def handle_key({cp, _mods}, %SubstituteConfirmState{} = state)
       when cp == ?q or cp == @escape do
-    {:execute_then_transition, [:apply_substitute_confirm], :normal, state}
+    finish(state)
   end
 
   # Ignore all other keys
@@ -58,15 +53,14 @@ defmodule Minga.Mode.SubstituteConfirm do
 
   # ── Private ─────────────────────────────────────────────────────────────────
 
-  @spec advance(SubstituteConfirmState.t()) :: Mode.result()
-  defp advance(%SubstituteConfirmState{current: current, matches: matches} = state) do
-    next = current + 1
-
-    if next >= Enum.count(matches) do
-      # Last match — finish
-      {:execute_then_transition, [:apply_substitute_confirm], :normal, state}
-    else
-      {:execute, :substitute_confirm_advance, %{state | current: next}}
+  @spec advance_or_finish(SubstituteConfirmState.t()) :: Mode.result()
+  defp advance_or_finish(state) do
+    case SubstituteConfirmState.current_match(state) do
+      nil -> finish(state)
+      _match -> {:execute, :substitute_confirm_advance, state}
     end
   end
+
+  @spec finish(SubstituteConfirmState.t()) :: Mode.result()
+  defp finish(state), do: {:execute_then_transition, [:apply_substitute_confirm], :normal, state}
 end

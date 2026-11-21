@@ -51,6 +51,15 @@ defmodule MingaEditor.UI.Theme.BuilderTest do
       assert theme.syntax["string"] == [fg: 0xA6E3A1]
     end
 
+    test "accumulates mode colors from all overrides of the same field" do
+      modeline =
+        MapSet.new([{:mode_colors, %{normal: {1, 2}}}, {:mode_colors, %{insert: {3, 4}}}])
+
+      theme = Builder.from_palette(:palette_test, sample_palette(), %{modeline: modeline})
+
+      assert %{normal: {1, 2}, insert: {3, 4}} = theme.modeline.mode_colors
+    end
+
     test "accepts deprecated nested concrete field overrides and ignores them" do
       theme =
         Builder.from_palette(:palette_test, sample_palette(), %{
@@ -125,6 +134,31 @@ defmodule MingaEditor.UI.Theme.BuilderTest do
       assert_raise ArgumentError, ~r/unknown theme override field :popup.:titel_fg/, fn ->
         Builder.from_palette(:palette_test, sample_palette(), %{popup: %{titel_fg: 0x123456}})
       end
+    end
+
+    test "does not admit struct metadata as an override field" do
+      assert_raise ArgumentError, "unknown theme override field :popup.:__struct__", fn ->
+        Builder.from_palette(:palette_test, sample_palette(), %{popup: %{__struct__: 0}})
+      end
+    end
+
+    test "nullable fields still require explicit overrides to be colors" do
+      theme = Builder.from_palette(:palette_test, sample_palette())
+      assert theme.gutter.advisory_fg == nil
+
+      assert_raise ArgumentError,
+                   "theme override gutter.advisory_fg must be a color, got: nil",
+                   fn ->
+                     Builder.apply_overrides(theme, %{gutter: %{advisory_fg: nil}})
+                   end
+    end
+  end
+
+  test "empty concrete overrides still require a struct section" do
+    theme = Builder.from_palette(:palette_test, sample_palette())
+
+    assert_raise FunctionClauseError, fn ->
+      Builder.apply_overrides(%{theme | dashboard: %{}}, %{dashboard: %{}})
     end
   end
 

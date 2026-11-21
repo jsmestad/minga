@@ -3,7 +3,6 @@
 lib/minga/buffer/process.ex	5ed0c1fa9d8dd26002e35f80a955fc79b3647dfd5bbbbd2a9ea650320ce3428e	"origin_path_matches?(state, intent.origin_path)"
 lib/minga/buffer/process.ex	c9f38a5b41ed133ddf21bf843446a704f897966acd67faf06a76f5ead50519dd	"target_matches_expectation?(state, intent)"
 lib/minga/config.ex	0d4d20ce00c1d71fbceba7fec9c22e13b4a068cd3b61b90b8caa642e5033057f	"function_exported?(module, :name, 0)"
-lib/minga/config/loader.ex	03eaca7e5842fb0ed1ee5e3071bab835a968c13f8ddfc44decadd73798fa366a	"Keyword.keyword?(opts)"
 lib/minga/extension/artifact_inventory.ex	6094a12f0735ed73f3bb826b1d3e9f299525fd07de3c12e7805d531db0553a32	"byte_size(after_length) >= size"
 lib/minga/extension/artifact_validator.ex	2146bd00d6c3138a94a0f2cc70977c15bbf6f9d9163e282ed1965084723f74bd	"safe_name?(module_name, 255)"
 lib/minga/extension/artifact_validator.ex	3617c83c34991cb84dbbc3041d384590a15d567390e02288e96a5b86c3ee625f	":crypto.hash(:sha256, bytecode) == digest"

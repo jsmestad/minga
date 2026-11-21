@@ -72,18 +72,9 @@ defmodule MingaEditor.UI.Face.Registry do
   """
   @spec from_syntax(MingaEditor.UI.Theme.syntax()) :: t()
   def from_syntax(syntax) when is_map(syntax) do
-    default = Face.default()
-
-    faces =
-      syntax
-      |> Enum.reduce(%{"default" => default}, fn {name, style}, acc ->
-        parent = Face.infer_parent(name)
-        face = Face.from_style(name, style, inherit: parent)
-        Map.put(acc, name, face)
-      end)
-
-    %__MODULE__{faces: faces, resolved: %{}}
-    |> resolve_all()
+    syntax
+    |> syntax_faces(Face.default())
+    |> from_faces()
   end
 
   @doc """
@@ -94,19 +85,63 @@ defmodule MingaEditor.UI.Face.Registry do
   """
   @spec from_theme(MingaEditor.UI.Theme.t()) :: t()
   def from_theme(%MingaEditor.UI.Theme{} = theme) do
-    default =
-      %{Face.default() | fg: theme.editor.fg, bg: theme.editor.bg}
+    theme
+    |> theme_faces()
+    |> from_faces()
+  end
+
+  @doc """
+  Builds a theme registry with optional face overrides and LSP defaults.
+
+  Override inheritance is checked before adding missing LSP faces, so an
+  invalid override reports its original cycle even if defaults would add
+  another one. Explicit definitions take precedence over LSP defaults.
+  """
+  @spec from_theme_with_lsp_defaults(MingaEditor.UI.Theme.t(), %{String.t() => keyword()} | nil) ::
+          t()
+  def from_theme_with_lsp_defaults(%MingaEditor.UI.Theme{} = theme, overrides) do
+    faces = theme_faces(theme)
 
     faces =
-      theme.syntax
-      |> Enum.reduce(%{"default" => default}, fn {name, style}, acc ->
-        parent = Face.infer_parent(name)
-        face = Face.from_style(name, style, inherit: parent)
-        Map.put(acc, name, face)
-      end)
+      case overrides do
+        nil ->
+          faces
 
-    %__MODULE__{faces: faces, resolved: %{}}
-    |> resolve_all()
+        overrides when map_size(overrides) == 0 ->
+          faces
+
+        overrides when is_map(overrides) ->
+          updated = merge_overrides(faces, overrides)
+
+          # Walk in the same map iterator order as Map.new/2 in resolve_faces/1,
+          # without building a cache that LSP defaults would make obsolete.
+          lookup = fn name -> Map.get(updated, name) end
+          :maps.foreach(fn _name, face -> Face.resolve(face, lookup) end, updated)
+          updated
+      end
+
+    faces
+    |> add_lsp_defaults()
+    |> from_faces()
+  end
+
+  @spec theme_faces(MingaEditor.UI.Theme.t()) :: face_map()
+  defp theme_faces(theme) do
+    default = %{Face.default() | fg: theme.editor.fg, bg: theme.editor.bg}
+    syntax_faces(theme.syntax, default)
+  end
+
+  @spec syntax_faces(MingaEditor.UI.Theme.syntax(), Face.t()) :: face_map()
+  defp syntax_faces(syntax, default) do
+    Enum.reduce(syntax, %{"default" => default}, fn {name, style}, faces ->
+      face = Face.from_style(name, style, inherit: Face.infer_parent(name))
+      Map.put(faces, name, face)
+    end)
+  end
+
+  @spec from_faces(face_map()) :: t()
+  defp from_faces(faces) do
+    %__MODULE__{faces: faces, resolved: resolve_faces(faces)}
   end
 
   @doc """
@@ -199,16 +234,22 @@ defmodule MingaEditor.UI.Face.Registry do
   @face_fields MapSet.new(Map.keys(%Face{name: ""}) -- [:__struct__])
 
   @spec with_overrides(t(), %{String.t() => keyword()}) :: t()
-  def with_overrides(%__MODULE__{} = reg, overrides) when is_map(overrides) do
-    updated =
-      Enum.reduce(overrides, reg.faces, fn {name, attrs}, faces ->
-        base = Map.get(faces, name, %Face{name: name, inherit: Face.infer_parent(name)})
-        merged = merge_face_attrs(base, name, attrs)
-        Map.put(faces, name, merged)
-      end)
+  def with_overrides(%__MODULE__{faces: faces} = reg, overrides) when is_map(overrides) do
+    faces = merge_overrides(faces, overrides)
+    %{reg | faces: faces, resolved: resolve_faces(faces)}
+  end
 
-    %{reg | faces: updated, resolved: %{}}
-    |> resolve_all()
+  @spec merge_overrides(face_map(), %{String.t() => keyword()}) :: face_map()
+  defp merge_overrides(faces, overrides) do
+    Enum.reduce(overrides, faces, fn {name, attrs}, acc ->
+      base =
+        case Map.fetch(acc, name) do
+          {:ok, face} -> face
+          :error -> %Face{name: name, inherit: Face.infer_parent(name)}
+        end
+
+      Map.put(acc, name, merge_face_attrs(base, name, attrs))
+    end)
   end
 
   @spec merge_face_attrs(Face.t(), String.t(), keyword()) :: Face.t()
@@ -228,11 +269,13 @@ defmodule MingaEditor.UI.Face.Registry do
   """
   @spec resolve_all(t()) :: t()
   def resolve_all(%__MODULE__{faces: faces} = reg) do
+    %{reg | resolved: resolve_faces(faces)}
+  end
+
+  @spec resolve_faces(face_map()) :: face_map()
+  defp resolve_faces(faces) do
     lookup = fn name -> Map.get(faces, name) end
-
-    resolved = Map.new(faces, fn {name, face} -> {name, Face.resolve(face, lookup)} end)
-
-    %{reg | resolved: resolved}
+    Map.new(faces, fn {name, face} -> {name, Face.resolve(face, lookup)} end)
   end
 
   @doc """
@@ -256,7 +299,13 @@ defmodule MingaEditor.UI.Face.Registry do
   - `@lsp.mod.readonly` inherits from the type face (no visual change by default)
   """
   @spec with_lsp_defaults(t()) :: t()
-  def with_lsp_defaults(%__MODULE__{} = reg) do
+  def with_lsp_defaults(%__MODULE__{faces: faces} = reg) do
+    faces = add_lsp_defaults(faces)
+    %{reg | faces: faces, resolved: resolve_faces(faces)}
+  end
+
+  @spec add_lsp_defaults(face_map()) :: face_map()
+  defp add_lsp_defaults(faces) do
     # Map LSP types to tree-sitter equivalents for fallback styling
     lsp_type_mappings = %{
       "@lsp.type.namespace" => "type",
@@ -286,12 +335,12 @@ defmodule MingaEditor.UI.Face.Registry do
 
     # Add type faces that inherit from their tree-sitter equivalent,
     # but don't overwrite faces the theme already defines.
-    reg =
-      Enum.reduce(lsp_type_mappings, reg, fn {lsp_name, ts_name}, acc ->
-        if get(acc, lsp_name) do
+    faces =
+      Enum.reduce(lsp_type_mappings, faces, fn {lsp_name, ts_name}, acc ->
+        if Map.get(acc, lsp_name) do
           acc
         else
-          put(acc, %Face{name: lsp_name, inherit: ts_name})
+          Map.put(acc, lsp_name, %Face{name: lsp_name, inherit: ts_name})
         end
       end)
 
@@ -301,12 +350,9 @@ defmodule MingaEditor.UI.Face.Registry do
       %Face{name: "@lsp.mod.readonly", inherit: "default"}
     ]
 
-    reg =
-      Enum.reduce(modifier_defaults, reg, fn face, acc ->
-        if get(acc, face.name), do: acc, else: put(acc, face)
-      end)
-
-    resolve_all(reg)
+    Enum.reduce(modifier_defaults, faces, fn face, acc ->
+      if Map.get(acc, face.name), do: acc, else: Map.put(acc, face.name, face)
+    end)
   end
 
   @doc """

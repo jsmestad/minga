@@ -110,18 +110,28 @@ defmodule Minga.Project.ProjectSearchTest do
       assert strategy in [:rg, :grep, :none]
     end
 
-    test "searches the current project for a known term" do
-      case ProjectSearch.search("defmodule", File.cwd!()) do
-        {:ok, matches, _truncated?} ->
-          assert matches != []
-          first = hd(matches)
-          assert is_binary(first.file)
-          assert is_integer(first.line)
-          assert first.line > 0
-          assert is_binary(first.text)
+    test "returns the selected tool's parsed matches" do
+      root =
+        Path.join(System.tmp_dir!(), "minga-search-tool-#{System.unique_integer([:positive])}")
 
-        {:error, _msg} ->
-          :ok
+      File.mkdir_p!(root)
+      on_exit(fn -> File.rm_rf!(root) end)
+
+      File.write!(Path.join(root, "haystack.txt"), "skip\nbefore NEEDLE after\n")
+      result = ProjectSearch.search("NEEDLE", root)
+
+      case ProjectSearch.detect_strategy() do
+        :rg ->
+          assert {:ok, [%{file: "haystack.txt", line: 2, col: 7, text: "before NEEDLE after"}],
+                  false} = result
+
+        :grep ->
+          assert {:ok, [%{file: "haystack.txt", line: 2, col: 0, text: "before NEEDLE after"}],
+                  false} = result
+
+        :none ->
+          assert {:error, "No search tool available. Install `ripgrep` (rg) for best results."} =
+                   result
       end
     end
 

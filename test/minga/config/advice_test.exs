@@ -140,7 +140,8 @@ defmodule Minga.Config.AdviceTest do
   end
 
   describe "wrap/3 with override" do
-    test "override replaces the original command", %{table: table} do
+    test "the newest override replaces the command and earlier override", %{table: table} do
+      Advice.register(table, :override, :save, fn s -> Map.put(s, :earlier_save, true) end)
       Advice.register(table, :override, :save, fn s -> Map.put(s, :custom_save, true) end)
 
       execute = fn s -> Map.put(s, :original_save, true) end
@@ -313,6 +314,42 @@ defmodule Minga.Config.AdviceTest do
                Advice.invoke(table, :tool, %{input: true}, fn -> send(parent, :core_ran) end)
 
       refute_received :core_ran
+    end
+
+    test "failed override skips the call and only later invocations use an older override", %{
+      table: table
+    } do
+      parent = self()
+
+      earlier = fn state ->
+        send(parent, :earlier_override_ran)
+        {:returned, state, :earlier}
+      end
+
+      newest = fn
+        %{fail?: true} -> raise "override failed"
+        state -> Map.put(state, :replacement, :newest)
+      end
+
+      Advice.register(table, :override, :tool, earlier)
+      Advice.register(table, :override, :tool, newest)
+
+      core = fn -> send(parent, :core_ran) end
+      state = %{fail?: true}
+
+      for _ <- 1..5 do
+        assert {:skipped, ^state} = Advice.invoke(table, :tool, state, core)
+      end
+
+      refute_received :earlier_override_ran
+      refute_received :core_ran
+      assert Advice.disabled?(table, :override, :tool, newest)
+      assert {:returned, ^state, :earlier} = Advice.invoke(table, :tool, state, core)
+      assert_received :earlier_override_ran
+      refute_received :core_ran
+
+      execute = fn state -> Map.put(state, :replacement, :core) end
+      assert Advice.wrap(table, :tool, execute).(%{}) == %{replacement: :newest}
     end
 
     test "around failure after the core does not retry or retain its result", %{table: table} do

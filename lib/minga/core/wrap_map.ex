@@ -77,6 +77,21 @@ defmodule Minga.Core.WrapMap do
   end
 
   @doc """
+  Returns the zero-based index and row for a byte offset in the wrapped text.
+
+  Rows must be nonempty and ordered by byte offset. An exact continuation
+  start selects that continuation, and a byte past the end selects the last row.
+  """
+  @spec row_at_byte(nonempty_list(visual_row()), non_neg_integer()) ::
+          {non_neg_integer(), visual_row()}
+  def row_at_byte(rows, byte), do: row_at_byte(rows, byte, 0)
+
+  defp row_at_byte([_ | [%{byte_offset: start} | _] = rest], byte, index) when start <= byte,
+    do: row_at_byte(rest, byte, index + 1)
+
+  defp row_at_byte(rows, _byte, index), do: {index, hd(rows)}
+
+  @doc """
   Returns the total number of visual rows across all entries in a wrap map.
   """
   @spec visual_row_count(t()) :: non_neg_integer()

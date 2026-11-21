@@ -81,17 +81,17 @@ defmodule Mix.Tasks.App.Assemble do
       end
     end
 
-    release_path = build_beam_release(no_build)
+    {release_path, app_bundle_path} = build_inputs(no_build)
 
-    app_bundle_path = build_xcode_project(no_build)
+    timed("Final assembly", fn ->
+      embed_release(app_bundle_path, release_path)
+      install_cli_launchers(app_bundle_path)
 
-    embed_release(app_bundle_path, release_path)
-    install_cli_launchers(app_bundle_path)
+      codesign_bundle(app_bundle_path)
+      verify_bundle_linkage!(app_bundle_path)
 
-    codesign_bundle(app_bundle_path)
-    verify_bundle_linkage!(app_bundle_path)
-
-    report_size(app_bundle_path)
+      report_size(app_bundle_path)
+    end)
 
     if output_path_file do
       File.write!(output_path_file, Path.expand(app_bundle_path) <> "\n")
@@ -104,8 +104,47 @@ defmodule Mix.Tasks.App.Assemble do
     """)
   end
 
-  @spec build_beam_release(boolean()) :: String.t()
-  defp build_beam_release(true) do
+  @spec build_inputs(boolean()) :: {String.t(), String.t()}
+  defp build_inputs(true), do: {existing_beam_release!(), existing_xcode_app!()}
+
+  defp build_inputs(false) do
+    # The native tasks also request protocol.gen. Mix runs the alias once, here,
+    # before either branch starts reading its Swift, Elixir, Go or Zig outputs.
+    timed("Protocol generation", fn -> Mix.Task.run("protocol.gen", []) end)
+
+    xcode = Task.async(fn -> build_branch("Xcode", &build_xcode_project/0) end)
+    beam = build_branch("BEAM/native", &build_beam_release/0)
+    app = Task.await(xcode, :infinity)
+
+    {branch_result!(beam), branch_result!(app)}
+  end
+
+  # Join both branches even when a build fails, so a failed Mix command cannot
+  # leave xcodebuild running against the DerivedData used by a later rerun.
+  @typep branch_result(value) ::
+           {:ok, value} | {:error, Exception.kind(), term(), Exception.stacktrace()}
+  @spec build_branch(String.t(), (-> String.t())) :: branch_result(String.t())
+  defp build_branch(label, build) do
+    {:ok, timed(label, build)}
+  catch
+    kind, reason -> {:error, kind, reason, __STACKTRACE__}
+  end
+
+  @spec branch_result!(branch_result(String.t())) :: String.t()
+  defp branch_result!({:ok, path}), do: path
+
+  defp branch_result!({:error, kind, reason, stacktrace}),
+    do: :erlang.raise(kind, reason, stacktrace)
+
+  @spec timed(String.t(), (-> value)) :: value when value: var
+  defp timed(label, operation) do
+    {elapsed, result} = :timer.tc(operation, :millisecond)
+    Mix.shell().info("#{label} took #{elapsed} ms")
+    result
+  end
+
+  @spec existing_beam_release!() :: String.t()
+  defp existing_beam_release! do
     release_path = Path.join([Mix.Project.build_path(), "rel", "minga_macos"])
 
     unless File.dir?(release_path) do
@@ -119,7 +158,8 @@ defmodule Mix.Tasks.App.Assemble do
     release_path
   end
 
-  defp build_beam_release(false) do
+  @spec build_beam_release() :: String.t()
+  defp build_beam_release do
     Mix.shell().info("Building native support and TUI binaries for the macOS release...")
     Mix.Task.run("native.build.tui", [])
     Mix.shell().info("Building BEAM release (minga_macos)...")
@@ -147,9 +187,11 @@ defmodule Mix.Tasks.App.Assemble do
       Mix.raise("XcodeGen is required; run scripts/install_xcodegen <dir>")
   end
 
-  @spec build_xcode_project(boolean()) :: String.t()
-  defp build_xcode_project(true) do
-    app_path = find_xcode_app_bundle()
+  @spec existing_xcode_app!() :: String.t()
+  defp existing_xcode_app! do
+    app_path =
+      find_xcode_app_bundle(xcode_build_args()) ||
+        find_xcode_app_bundle(assembly_xcode_build_args())
 
     unless app_path do
       Mix.raise("""
@@ -161,10 +203,9 @@ defmodule Mix.Tasks.App.Assemble do
     app_path
   end
 
-  defp build_xcode_project(false) do
-    verify_release_optimization!()
-    macos_dir = Path.join(File.cwd!(), "macos")
-    project_path = Path.join(macos_dir, "#{@app_name}.xcodeproj")
+  @spec build_xcode_project() :: String.t()
+  defp build_xcode_project do
+    macos_dir = Path.expand("macos")
 
     # Always regenerate from project.yml with the repository-pinned generator.
     # Reusing a checked-out project can silently omit newly declared targets.
@@ -176,21 +217,15 @@ defmodule Mix.Tasks.App.Assemble do
       {output, _} -> Mix.raise("XcodeGen failed:\n#{output}")
     end
 
+    # The app pre-build phase only consumes the validated Swift outputs in this
+    # mode. A second Mix invocation would also share MIX_BUILD_PATH and its
+    # dependency compilation with the BEAM branch.
+    build_args = assembly_xcode_build_args() ++ ["MINGA_APP_PROTOCOL_PREGENERATED=1"]
+    settings = verified_release_build_settings!(build_args)
+
     Mix.shell().info("Building Xcode project (Release configuration)...")
 
-    case System.cmd(
-           "xcodebuild",
-           [
-             "-project",
-             project_path,
-             "-scheme",
-             @app_name,
-             "-configuration",
-             "Release",
-             "build"
-           ],
-           stderr_to_stdout: true
-         ) do
+    case System.cmd("xcodebuild", build_args ++ ["build"], stderr_to_stdout: true) do
       {_output, 0} ->
         :ok
 
@@ -198,21 +233,18 @@ defmodule Mix.Tasks.App.Assemble do
         Mix.raise("Xcode build failed:\n#{output}")
     end
 
-    app_path = find_xcode_app_bundle()
-
-    unless app_path do
-      Mix.raise("Xcode build succeeded but #{@app_name}.app not found in DerivedData")
+    case resolve_app_path(settings) do
+      {:ok, app_path} -> app_path
+      :error -> Mix.raise("Xcode build succeeded but #{@app_name}.app not found in DerivedData")
     end
-
-    app_path
   end
 
-  @spec verify_release_optimization!() :: :ok
-  defp verify_release_optimization! do
+  @spec verified_release_build_settings!([String.t()]) :: String.t()
+  defp verified_release_build_settings!(build_args) do
     script = Path.join([File.cwd!(), "scripts", "check_macos_release_optimization"])
 
-    case System.cmd(script, [], stderr_to_stdout: true) do
-      {_output, 0} -> :ok
+    case System.cmd(script, ["--print-build-settings" | build_args], stderr_to_stdout: true) do
+      {settings, 0} -> settings
       {output, _code} -> Mix.raise("Release optimization verification failed:\n#{output}")
     end
   end
@@ -318,11 +350,10 @@ defmodule Mix.Tasks.App.Assemble do
     """)
   end
 
-  @spec find_xcode_app_bundle() :: String.t() | nil
-  defp find_xcode_app_bundle do
-    project_path = Path.join([File.cwd!(), "macos", "#{@app_name}.xcodeproj"])
-
-    with {output, 0} <- xcodebuild_show_settings(project_path),
+  @spec find_xcode_app_bundle([String.t()]) :: String.t() | nil
+  defp find_xcode_app_bundle(build_args) do
+    with {output, 0} <-
+           System.cmd("xcodebuild", build_args ++ ["-showBuildSettings"], stderr_to_stdout: true),
          {:ok, path} <- resolve_app_path(output) do
       path
     else
@@ -330,21 +361,21 @@ defmodule Mix.Tasks.App.Assemble do
     end
   end
 
-  @spec xcodebuild_show_settings(String.t()) :: {String.t(), non_neg_integer()}
-  defp xcodebuild_show_settings(project_path) do
-    System.cmd(
-      "xcodebuild",
-      [
-        "-project",
-        project_path,
-        "-scheme",
-        @app_name,
-        "-configuration",
-        "Release",
-        "-showBuildSettings"
-      ],
-      stderr_to_stdout: true
-    )
+  @spec xcode_build_args() :: [String.t()]
+  defp xcode_build_args do
+    [
+      "-project",
+      Path.expand("macos/#{@app_name}.xcodeproj"),
+      "-scheme",
+      @app_name,
+      "-configuration",
+      "Release"
+    ]
+  end
+
+  @spec assembly_xcode_build_args() :: [String.t()]
+  defp assembly_xcode_build_args do
+    xcode_build_args() ++ ["-derivedDataPath", Path.expand("macos/.build/app-assembly")]
   end
 
   @spec resolve_app_path(String.t()) :: {:ok, String.t()} | :error

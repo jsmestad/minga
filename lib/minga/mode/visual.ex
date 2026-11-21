@@ -54,7 +54,10 @@ defmodule Minga.Mode.Visual do
 
   alias Minga.Keymap.Bindings
   alias Minga.Mode
+  alias Minga.Mode.TextObjectKeys
   alias Minga.Mode.VisualState
+
+  require TextObjectKeys
 
   # Special codepoints
   @escape 27
@@ -278,79 +281,9 @@ defmodule Minga.Mode.Visual do
     {:continue, %{state | text_object_modifier: :around}}
   end
 
-  # Word text object
-  def handle_key({?w, 0}, %VisualState{text_object_modifier: modifier} = state)
-      when modifier in [:inner, :around] do
-    {:execute, [{:visual_text_object, modifier, :word}], %{state | text_object_modifier: nil}}
-  end
-
-  # Paragraph text object
-  def handle_key({?p, 0}, %VisualState{text_object_modifier: modifier} = state)
-      when modifier in [:inner, :around] do
-    {:execute, [{:visual_text_object, modifier, :paragraph}],
-     %{state | text_object_modifier: nil}}
-  end
-
-  # Sentence text object
-  def handle_key({?s, 0}, %VisualState{text_object_modifier: modifier} = state)
-      when modifier in [:inner, :around] do
-    {:execute, [{:visual_text_object, modifier, :sentence}], %{state | text_object_modifier: nil}}
-  end
-
-  # Quote text objects
-  def handle_key({?", 0}, %VisualState{text_object_modifier: modifier} = state)
-      when modifier in [:inner, :around] do
-    {:execute, [{:visual_text_object, modifier, {:quote, "\""}}],
-     %{state | text_object_modifier: nil}}
-  end
-
-  def handle_key({?', 0}, %VisualState{text_object_modifier: modifier} = state)
-      when modifier in [:inner, :around] do
-    {:execute, [{:visual_text_object, modifier, {:quote, "'"}}],
-     %{state | text_object_modifier: nil}}
-  end
-
-  # Paren text objects
-  def handle_key({paren, 0}, %VisualState{text_object_modifier: modifier} = state)
-      when modifier in [:inner, :around] and paren in [?(, ?)] do
-    {:execute, [{:visual_text_object, modifier, {:paren, "(", ")"}}],
-     %{state | text_object_modifier: nil}}
-  end
-
-  def handle_key({bracket, 0}, %VisualState{text_object_modifier: modifier} = state)
-      when modifier in [:inner, :around] and bracket in [?[, ?]] do
-    {:execute, [{:visual_text_object, modifier, {:paren, "[", "]"}}],
-     %{state | text_object_modifier: nil}}
-  end
-
-  def handle_key({brace, 0}, %VisualState{text_object_modifier: modifier} = state)
-      when modifier in [:inner, :around] and brace in [?{, ?}] do
-    {:execute, [{:visual_text_object, modifier, {:paren, "{", "}"}}],
-     %{state | text_object_modifier: nil}}
-  end
-
-  # Structural text objects (tree-sitter)
-  def handle_key({?f, 0}, %VisualState{text_object_modifier: modifier} = state)
-      when modifier in [:inner, :around] do
-    {:execute, [{:visual_text_object, modifier, {:structural, :function}}],
-     %{state | text_object_modifier: nil}}
-  end
-
-  def handle_key({?c, 0}, %VisualState{text_object_modifier: modifier} = state)
-      when modifier in [:inner, :around] do
-    {:execute, [{:visual_text_object, modifier, {:structural, :class}}],
-     %{state | text_object_modifier: nil}}
-  end
-
-  def handle_key({?a, 0}, %VisualState{text_object_modifier: modifier} = state)
-      when modifier in [:inner, :around] do
-    {:execute, [{:visual_text_object, modifier, {:structural, :parameter}}],
-     %{state | text_object_modifier: nil}}
-  end
-
-  def handle_key({?b, 0}, %VisualState{text_object_modifier: modifier} = state)
-      when modifier in [:inner, :around] do
-    {:execute, [{:visual_text_object, modifier, {:structural, :block}}],
+  def handle_key({key, 0}, %VisualState{text_object_modifier: modifier} = state)
+      when modifier in [:inner, :around] and TextObjectKeys.suffix?(key) do
+    {:execute, [{:visual_text_object, modifier, TextObjectKeys.fetch!(key)}],
      %{state | text_object_modifier: nil}}
   end
 

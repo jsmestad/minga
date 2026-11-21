@@ -262,6 +262,14 @@ defmodule Minga.Project.FileTreeTest do
       File.rm!(Path.join(tmp_dir, "b.txt"))
 
       assert tree |> FileTree.refresh() |> selected_name() == "a.txt"
+
+      File.rm!(Path.join(tmp_dir, "a.txt"))
+      empty_tree = FileTree.refresh(tree)
+      assert FileTree.selected_entry(empty_tree) == nil
+
+      touch(Path.join(tmp_dir, "c.txt"))
+      touch(Path.join(tmp_dir, "d.txt"))
+      assert empty_tree |> FileTree.refresh() |> selected_name() == "c.txt"
     end
   end
 
@@ -332,6 +340,7 @@ defmodule Minga.Project.FileTreeTest do
 
       assert names(tree) == ["target.ex"]
       assert paths(tree) == ["/nonexistent_project_root/lib/target.ex"]
+      assert tree |> FileTree.refresh() |> names() == ["target.ex"]
     end
 
     test "cache filtering presents matches flat at depth 0" do

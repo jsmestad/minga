@@ -168,12 +168,26 @@ defmodule Minga.Keymap.ActiveTest do
   end
 
   describe "bind/5 error handling" do
-    test "returns error for invalid key string", %{store: s} do
-      assert {:error, _} = Active.bind(s, :normal, "", :noop, "noop")
+    test "returns the parse error before classifying an unsupported mode", %{store: s} do
+      assert {:error, "empty key sequence"} = Active.bind(s, :bogus, "", :noop, "noop")
     end
 
     test "returns error for unsupported mode atom", %{store: s} do
       assert {:error, _} = Active.bind(s, :bogus, "j", :noop, "noop")
+    end
+  end
+
+  test "filetype false preserves normal-mode write errors without reserving the binding", %{
+    store: s
+  } do
+    for source <- [{:extension, :first}, {:extension, :second}] do
+      log =
+        capture_log(fn ->
+          assert {:error, "unsupported key sequence for normal mode"} =
+                   Active.bind(s, :normal, "t t", :noop, "noop", filetype: false, source: source)
+        end)
+
+      assert log =~ "Unsupported key sequence for normal mode:"
     end
   end
 
@@ -199,6 +213,13 @@ defmodule Minga.Keymap.ActiveTest do
       trie = Active.filetype_trie(s, :elixir)
       # Should be stored as just "f", not "SPC m f"
       assert {:command, :mix_format} = Bindings.lookup(trie, {?f, 0})
+    end
+
+    test "does not strip SPC m when there are no subkeys", %{store: s} do
+      assert :ok = Active.bind(s, :normal, "SPC m", :literal, "Literal", filetype: :rust)
+
+      assert {:command, :literal, "Literal"} =
+               s |> Active.filetype_trie(:rust) |> Bindings.lookup_sequence([{32, 0}, {?m, 0}])
     end
 
     test "different filetypes have independent tries", %{store: s} do

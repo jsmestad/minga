@@ -493,15 +493,11 @@ defmodule Minga.Keymap.Active do
           contribution_source()
         ) :: :ok | {:error, String.t()}
   defp bind_and_track(server, mode, key_str, command, description, opts, source) do
-    with {:ok, identity} <- binding_identity(mode, key_str, opts),
-         :ok <- validate_binding_source(server, source, identity, mode, key_str, opts) do
-      result = do_bind_with_opts(server, mode, key_str, command, description, opts)
-
-      if result == :ok do
-        remember_source_binding(server, source, identity)
-      end
-
-      result
+    with {:ok, keys} <- KeyParser.parse(key_str),
+         {:ok, identity} <- binding_identity_from_keys(mode, keys, opts),
+         :ok <- validate_binding_source(server, source, identity, mode, key_str, keys, opts),
+         :ok <- do_bind_with_opts(server, mode, keys, command, description, opts) do
+      remember_source_binding(server, source, identity)
     end
   end
 
@@ -511,15 +507,16 @@ defmodule Minga.Keymap.Active do
           binding_identity(),
           atom() | {atom(), atom()},
           String.t(),
+          [Bindings.key()],
           keyword()
         ) :: :ok | {:error, String.t()}
-  defp validate_binding_source(server, source, identity, mode, key_str, opts) do
+  defp validate_binding_source(server, source, identity, mode, key_str, keys, opts) do
     case source_binding_source(server, identity) do
       ^source ->
         :ok
 
       nil ->
-        validate_untracked_binding_source(server, source, mode, key_str, opts)
+        validate_untracked_binding_source(server, source, mode, key_str, keys, opts)
 
       existing_source ->
         {:error,
@@ -532,12 +529,13 @@ defmodule Minga.Keymap.Active do
           contribution_source(),
           atom() | {atom(), atom()},
           String.t(),
+          [Bindings.key()],
           keyword()
         ) :: :ok | {:error, String.t()}
-  defp validate_untracked_binding_source(_server, :config, _mode, _key_str, _opts), do: :ok
+  defp validate_untracked_binding_source(_server, :config, _mode, _key_str, _keys, _opts), do: :ok
 
-  defp validate_untracked_binding_source(server, source, mode, key_str, opts) do
-    if binding_resolves?(server, mode, key_str, opts) do
+  defp validate_untracked_binding_source(server, source, mode, key_str, keys, opts) do
+    if binding_resolves_keys?(server, mode, keys, opts) do
       {:error,
        "key binding #{inspect(key_str)} for #{inspect(mode)} already exists and cannot be replaced by #{inspect(source)}"}
     else
@@ -548,25 +546,19 @@ defmodule Minga.Keymap.Active do
   @spec do_bind_with_opts(
           GenServer.server(),
           atom() | {atom(), atom()},
-          String.t(),
+          [Bindings.key()],
           atom(),
           String.t(),
           keyword()
         ) :: :ok | {:error, String.t()}
-  defp do_bind_with_opts(server, mode, key_str, command, description, opts) do
+  defp do_bind_with_opts(server, mode, keys, command, description, opts) do
     filetype = Keyword.get(opts, :filetype)
 
+    # A false filetype is tracked as scoped but written globally.
     if filetype && is_atom(mode) do
-      bind_filetype(server, mode, filetype, key_str, command, description)
+      bind_filetype(server, mode, filetype, keys, command, description)
     else
-      case KeyParser.parse(key_str) do
-        {:ok, keys} ->
-          do_bind(server, mode, keys, command, description)
-
-        {:error, reason} ->
-          Minga.Log.warning(:config, "Invalid key binding #{inspect(key_str)}: #{reason}")
-          {:error, reason}
-      end
+      do_bind(server, mode, keys, command, description)
     end
   end
 
@@ -599,28 +591,19 @@ defmodule Minga.Keymap.Active do
     end)
   end
 
-  @spec binding_identity(atom() | {atom(), atom()}, String.t(), keyword()) ::
-          {:ok, binding_identity()} | {:error, String.t()}
-  defp binding_identity(mode, key_str, opts) do
-    case KeyParser.parse(key_str) do
-      {:ok, keys} -> binding_identity_from_keys(mode, keys, opts)
-      {:error, reason} -> {:error, reason}
-    end
-  end
-
   @spec binding_identity_from_keys(atom() | {atom(), atom()}, [Bindings.key()], keyword()) ::
           {:ok, binding_identity()} | {:error, String.t()}
-  defp binding_identity_from_keys(:normal, [{32, 0} | rest], opts) when rest != [] do
+  defp binding_identity_from_keys(:normal, [{32, 0} | rest] = keys, opts) when rest != [] do
     case Keyword.get(opts, :filetype) do
       nil -> {:ok, {:normal_leader, rest}}
-      filetype -> {:ok, {:filetype_normal, filetype, strip_spc_m_prefix([{32, 0} | rest])}}
+      filetype -> {:ok, {:filetype_normal, filetype, strip_spc_m_prefix(keys)}}
     end
   end
 
-  defp binding_identity_from_keys(:normal, [single_key], opts) do
+  defp binding_identity_from_keys(:normal, [single_key] = keys, opts) do
     case Keyword.get(opts, :filetype) do
       nil -> {:ok, {:normal_single, single_key}}
-      filetype -> {:ok, {:filetype_normal, filetype, [single_key]}}
+      filetype -> {:ok, {:filetype_normal, filetype, keys}}
     end
   end
 
@@ -657,7 +640,8 @@ defmodule Minga.Keymap.Active do
   @spec unbind_binding(GenServer.server(), atom() | {atom(), atom()}, String.t(), keyword()) ::
           :ok | {:error, String.t()}
   defp unbind_binding(server, mode, key_str, opts) do
-    with {:ok, identity} <- binding_identity(mode, key_str, opts),
+    with {:ok, keys} <- KeyParser.parse(key_str),
+         {:ok, identity} <- binding_identity_from_keys(mode, keys, opts),
          :ok <- do_unbind_identity(server, identity) do
       forget_source_binding(server, identity)
     end
@@ -701,15 +685,6 @@ defmodule Minga.Keymap.Active do
     {:error, "unsupported binding identity"}
   end
 
-  @spec binding_resolves?(GenServer.server(), atom() | {atom(), atom()}, String.t(), keyword()) ::
-          boolean()
-  defp binding_resolves?(server, mode, key_str, opts) do
-    case KeyParser.parse(key_str) do
-      {:ok, keys} -> binding_resolves_keys?(server, mode, keys, opts)
-      {:error, _reason} -> false
-    end
-  end
-
   @spec binding_resolves_keys?(
           GenServer.server(),
           atom() | {atom(), atom()},
@@ -717,20 +692,20 @@ defmodule Minga.Keymap.Active do
           keyword()
         ) ::
           boolean()
-  defp binding_resolves_keys?(server, :normal, [{32, 0} | rest], opts) when rest != [] do
+  defp binding_resolves_keys?(server, :normal, [{32, 0} | rest] = keys, opts) when rest != [] do
     case Keyword.get(opts, :filetype) do
       nil ->
         sequence_bound?(leader_trie(server), rest)
 
       filetype ->
-        sequence_bound?(filetype_trie(server, filetype), strip_spc_m_prefix([{32, 0} | rest]))
+        sequence_bound?(filetype_trie(server, filetype), strip_spc_m_prefix(keys))
     end
   end
 
-  defp binding_resolves_keys?(server, :normal, [single_key], opts) do
+  defp binding_resolves_keys?(server, :normal, [single_key] = keys, opts) do
     case Keyword.get(opts, :filetype) do
       nil -> Map.has_key?(normal_bindings(server), single_key)
-      filetype -> sequence_bound?(filetype_trie(server, filetype), [single_key])
+      filetype -> sequence_bound?(filetype_trie(server, filetype), keys)
     end
   end
 
@@ -751,6 +726,7 @@ defmodule Minga.Keymap.Active do
     sequence_bound?(scope_trie(server, scope, vim_state), keys)
   end
 
+  # Bare multi-key normal bindings skip the untracked filetype probe.
   defp binding_resolves_keys?(_server, _mode, _keys, _opts), do: false
 
   @spec sequence_bound?(Bindings.node_t(), [Bindings.key()]) :: boolean()
@@ -839,52 +815,28 @@ defmodule Minga.Keymap.Active do
 
   # ── Private: filetype bind ─────────────────────────────────────────────────
 
-  @spec bind_filetype(GenServer.server(), atom(), atom(), String.t(), atom(), String.t()) ::
-          :ok | {:error, String.t()}
-  defp bind_filetype(server, :normal, filetype, key_str, command, description) do
+  @spec bind_filetype(GenServer.server(), atom(), atom(), [Bindings.key()], atom(), String.t()) ::
+          :ok
+  defp bind_filetype(server, :normal, filetype, keys, command, description) do
     # Normal mode: SPC m prefix goes into the existing filetype trie (leader substitution).
     # Non-SPC-m normal bindings also go into the filetype trie (stripped as-is).
-    case KeyParser.parse(key_str) do
-      {:ok, keys} ->
-        sub_keys = strip_spc_m_prefix(keys)
+    sub_keys = strip_spc_m_prefix(keys)
 
-        ets_update(server, @filetype_tries_key, %{}, fn tries ->
-          trie = Map.get(tries, filetype, Bindings.new())
-          updated = bind_configured(trie, sub_keys, command, description)
-          Map.put(tries, filetype, updated)
-        end)
-
-      {:error, reason} ->
-        Minga.Log.warning(:config, "Invalid key binding #{inspect(key_str)}: #{reason}")
-        {:error, reason}
-    end
+    ets_update(server, @filetype_tries_key, %{}, fn tries ->
+      trie = Map.get(tries, filetype, Bindings.new())
+      updated = bind_configured(trie, sub_keys, command, description)
+      Map.put(tries, filetype, updated)
+    end)
   end
 
-  defp bind_filetype(server, mode, filetype, key_str, command, description)
+  defp bind_filetype(server, mode, filetype, keys, command, description)
        when mode in [:insert, :visual] do
     # Non-normal modes: store in the filetype-mode trie keyed by {filetype, mode}.
-    case KeyParser.parse(key_str) do
-      {:ok, keys} ->
-        ets_update(server, @filetype_mode_tries_key, %{}, fn tries ->
-          trie = Map.get(tries, {filetype, mode}, Bindings.new())
-          updated = bind_configured(trie, keys, command, description)
-          Map.put(tries, {filetype, mode}, updated)
-        end)
-
-      {:error, reason} ->
-        Minga.Log.warning(:config, "Invalid key binding #{inspect(key_str)}: #{reason}")
-        {:error, reason}
-    end
-  end
-
-  defp bind_filetype(_server, mode, filetype, key_str, _command, _description) do
-    Minga.Log.warning(
-      :config,
-      "Filetype-scoped bindings not yet supported for #{mode} mode " <>
-        "(key: #{inspect(key_str)}, filetype: #{filetype})"
-    )
-
-    {:error, "filetype-scoped bindings not supported for #{mode} mode"}
+    ets_update(server, @filetype_mode_tries_key, %{}, fn tries ->
+      trie = Map.get(tries, {filetype, mode}, Bindings.new())
+      updated = bind_configured(trie, keys, command, description)
+      Map.put(tries, {filetype, mode}, updated)
+    end)
   end
 
   # Strip "SPC m" prefix from key sequences so filetype tries store only

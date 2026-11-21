@@ -135,7 +135,7 @@ defmodule Minga.Editing.TextObjectTest do
       assert {{0, 1}, {0, 0}} = result
     end
 
-    test "selects innermost pair with multiple quote pairs on line" do
+    test "selects the enclosing pair after an earlier pair" do
       b = buf(~s("outer" and "inner"))
       # cursor on 'i' in "inner" — the second quote pair is at positions 12..18
       # so inner content is positions 13..17
@@ -164,6 +164,44 @@ defmodule Minga.Editing.TextObjectTest do
     test "returns nil when not inside quotes" do
       b = buf("no quotes here")
       assert nil == TextObject.a_quotes(b, {0, 0}, "\"")
+    end
+  end
+
+  describe "quote pairing" do
+    test "escapes quotes after one or three backslashes but not after two" do
+      for {slash_count, inner_end, around_end} <- [{1, 4, 5}, {2, 3, 4}, {3, 6, 7}] do
+        b = buf("\"a" <> String.duplicate("\\", slash_count) <> "\"b\"")
+        cursor = {0, slash_count + 2}
+
+        assert {{0, 1}, {0, ^inner_end}} = TextObject.inner_quotes(b, cursor, "\"")
+        assert {{0, 0}, {0, ^around_end}} = TextObject.a_quotes(b, cursor, "\"")
+      end
+    end
+
+    test "only a standalone backslash grapheme escapes a quote" do
+      b = buf("\"a\\\\" <> "\u0301\"b\"")
+
+      assert {{0, 1}, {0, 3}} = TextObject.inner_quotes(b, {0, 6}, "\"")
+      assert {{0, 0}, {0, 6}} = TextObject.a_quotes(b, {0, 6}, "\"")
+    end
+
+    test "returns byte columns for a cursor inside a decomposed grapheme" do
+      b = buf("日\"e\u0301\"")
+
+      assert {{0, 4}, {0, 4}} = TextObject.inner_quotes(b, {0, 6}, "\"")
+      assert {{0, 3}, {0, 7}} = TextObject.a_quotes(b, {0, 6}, "\"")
+    end
+
+    test "retains complete pairs but ignores gaps and an unmatched trailing quote" do
+      b = buf(~s("a" "b" "))
+
+      assert {{0, 5}, {0, 5}} = TextObject.inner_quotes(b, {0, 5}, "\"")
+      assert {{0, 4}, {0, 6}} = TextObject.a_quotes(b, {0, 5}, "\"")
+
+      for col <- [3, 8] do
+        assert nil == TextObject.inner_quotes(b, {0, col}, "\"")
+        assert nil == TextObject.a_quotes(b, {0, col}, "\"")
+      end
     end
   end
 
@@ -433,6 +471,43 @@ defmodule Minga.Editing.TextObjectTest do
     test "returns nil for empty buffer and blank lines" do
       assert nil == TextObject.a_sentence(buf(""), {0, 0})
       assert nil == TextObject.a_sentence(buf("Hello.\n\nBye."), {1, 0})
+    end
+  end
+
+  describe "sentence cursor positions" do
+    test "a byte inside a grapheme resolves forward to trailing whitespace" do
+      b = buf("é   ")
+
+      assert {{0, 2}, {0, 4}} = TextObject.inner_sentence(b, {0, 1})
+      assert nil == TextObject.a_sentence(b, {0, 1})
+    end
+
+    test "selects an exact newline but resolves a later column to the next line" do
+      b = buf("One.\nTwo.")
+
+      assert {{0, 4}, {0, 4}} = TextObject.inner_sentence(b, {0, 4})
+      assert {{0, 4}, {1, 3}} = TextObject.a_sentence(b, {0, 4})
+
+      assert {{1, 0}, {1, 3}} = TextObject.inner_sentence(b, {0, 5})
+      assert {{1, 0}, {1, 3}} = TextObject.a_sentence(b, {0, 5})
+    end
+
+    test "a column beyond the final token resolves to that token" do
+      b = buf("One.\nTwo.")
+
+      assert {{1, 0}, {1, 3}} = TextObject.inner_sentence(b, {1, 10})
+      assert {{1, 0}, {1, 3}} = TextObject.a_sentence(b, {1, 10})
+
+      trailing = buf("One.\nTwo.  ")
+      assert {{1, 4}, {1, 5}} = TextObject.inner_sentence(trailing, {1, 10})
+      assert nil == TextObject.a_sentence(trailing, {1, 10})
+    end
+
+    test "a nonexistent line does not resolve to the final sentence" do
+      b = buf("One.\nTwo.")
+
+      assert nil == TextObject.inner_sentence(b, {2, 0})
+      assert nil == TextObject.a_sentence(b, {2, 0})
     end
   end
 end

@@ -1886,11 +1886,11 @@ defmodule MingaEditor.RenderModel.Window.Builder do
          retain_ctx,
          font_registry
        ) do
-    line_byte_offsets =
-      build_line_byte_offsets(lines, first_line, snapshot.first_line_byte_offset)
+    pairs = lines |> build_lines_with_offsets(snapshot.first_line_byte_offset) |> List.to_tuple()
 
     source = fn buf_line ->
-      {line_at(lines, buf_line, first_line), Map.get(line_byte_offsets, buf_line, 0)}
+      index = buf_line - first_line
+      if index >= 0 and index < tuple_size(pairs), do: elem(pairs, index), else: {"", 0}
     end
 
     {entries, _, registry} =
@@ -4095,18 +4095,6 @@ defmodule MingaEditor.RenderModel.Window.Builder do
       end)
 
     Enum.reverse(pairs_rev)
-  end
-
-  @spec build_line_byte_offsets([String.t()], non_neg_integer(), non_neg_integer()) :: %{
-          non_neg_integer() => non_neg_integer()
-        }
-  defp build_line_byte_offsets(lines, first_line, first_byte_off) do
-    lines
-    |> build_lines_with_offsets(first_byte_off)
-    |> Enum.with_index(first_line)
-    |> Map.new(fn {{_line_text, line_byte_offset}, buf_line} ->
-      {buf_line, line_byte_offset}
-    end)
   end
 
   @spec virtual_text_to_string(Decorations.VirtualText.t()) :: String.t()

@@ -195,11 +195,7 @@ defmodule Minga.Project.FileTree do
   @doc "Toggles visibility of hidden files (dotfiles)."
   @spec toggle_hidden(t()) :: t()
   def toggle_hidden(%__MODULE__{} = tree) do
-    new_tree = invalidate_entries(%{tree | show_hidden: not tree.show_hidden})
-    new_tree = ensure_entries(new_tree)
-    # Clamp cursor to valid range after toggling
-    max_idx = max(Enum.count(new_tree.entries) - 1, 0)
-    %{new_tree | cursor: min(new_tree.cursor, max_idx)}
+    refresh(%{tree | show_hidden: not tree.show_hidden})
   end
 
   # ── Queries ───────────────────────────────────────────────────────────────
@@ -247,28 +243,30 @@ defmodule Minga.Project.FileTree do
   def ensure_entries(%__MODULE__{entries: entries} = tree) when is_list(entries), do: tree
 
   def ensure_entries(%__MODULE__{} = tree) do
+    %{tree | entries: fresh_entries(tree)}
+  end
+
+  @spec fresh_entries(t()) :: [entry()]
+  defp fresh_entries(tree) do
     case cache_filter_entries(tree) do
-      entries when is_list(entries) -> %{tree | entries: entries}
+      entries when is_list(entries) -> entries
       :no_cache -> walk_entries(tree)
     end
   end
 
-  @spec walk_entries(t()) :: t()
+  @spec walk_entries(t()) :: [entry()]
   defp walk_entries(%__MODULE__{} = tree) do
     # Span only the actual filesystem walk (the memoized path above returns
     # early), so `[:minga, :file_tree, :walk]` records real walk cost — its
     # entry count and duration — for spotting large-repo overages (#2367).
-    entries =
-      Minga.Telemetry.span_with_stop_metadata(
-        [:minga, :file_tree, :walk],
-        %{root: tree.root},
-        fn ->
-          entries = tree.root |> walk(0, tree, []) |> filter_entries(tree)
-          {entries, %{entry_count: Enum.count(entries)}}
-        end
-      )
-
-    %{tree | entries: entries}
+    Minga.Telemetry.span_with_stop_metadata(
+      [:minga, :file_tree, :walk],
+      %{root: tree.root},
+      fn ->
+        entries = filtered_walk_entries(tree)
+        {entries, %{entry_count: length(entries)}}
+      end
+    )
   end
 
   @doc """
@@ -354,16 +352,14 @@ defmodule Minga.Project.FileTree do
   @doc "Replaces the cached visible entries with a precomputed list (clamps the cursor)."
   @spec put_entries(t(), [entry()]) :: t()
   def put_entries(%__MODULE__{} = tree, entries) when is_list(entries) do
-    max_idx = max(Enum.count(entries) - 1, 0)
+    max_idx = max(length(entries) - 1, 0)
     %{tree | entries: entries, cursor: min(tree.cursor, max_idx)}
   end
 
-  @doc "Refreshes the tree by rescanning the filesystem (clamps cursor)."
+  @doc "Rebuilds the visible entries from current inputs and clamps the cursor."
   @spec refresh(t()) :: t()
   def refresh(%__MODULE__{} = tree) do
-    tree = invalidate_entries(tree) |> ensure_entries()
-    max_idx = max(Enum.count(tree.entries) - 1, 0)
-    %{tree | cursor: min(tree.cursor, max_idx)}
+    put_entries(tree, fresh_entries(tree))
   end
 
   @doc "Re-roots the tree while preserving display options."

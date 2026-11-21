@@ -10,6 +10,7 @@ defmodule Minga.Mode.PropertiesTest do
   use ExUnit.Case, async: true
   use ExUnitProperties
 
+  alias Minga.Editing.Search.Match
   alias Minga.Keymap.Defaults
   alias Minga.Mode
 
@@ -92,12 +93,7 @@ defmodule Minga.Mode.PropertiesTest do
   defp default_mode_state(:search_prompt), do: %SearchPromptState{}
 
   defp default_mode_state(:substitute_confirm) do
-    %SubstituteConfirmState{
-      matches: [{0, 0, 1}],
-      pattern: "x",
-      replacement: "y",
-      original_content: "x"
-    }
+    SubstituteConfirmState.new([Match.new(0, 0, 1)], "x", "y", "x")
   end
 
   defp default_mode_state(:extension_confirm) do

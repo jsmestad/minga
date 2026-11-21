@@ -247,6 +247,16 @@ targets:
     preBuildScripts:
       - name: Generate protocol opcodes
         script: |
+          if [ "${MINGA_APP_PROTOCOL_PREGENERATED:-0}" = "1" ]; then
+            for file in "$SCRIPT_OUTPUT_FILE_0" "$SCRIPT_OUTPUT_FILE_1" \
+                        "$SCRIPT_OUTPUT_FILE_2" "$SCRIPT_OUTPUT_FILE_3"; do
+              if [ ! -s "$file" ]; then
+                echo "error: missing pregenerated Swift protocol artifact: $file"
+                exit 1
+              fi
+            done
+            exit 0
+          fi
           cd "${SRCROOT}/.."
           if ! command -v mix >/dev/null 2>&1; then
             if [ -f macos/.generated/protocol/ProtocolOpcodes.generated.swift ]; then

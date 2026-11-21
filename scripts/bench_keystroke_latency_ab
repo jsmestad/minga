@@ -4,24 +4,27 @@
 # Usage: scripts/bench_keystroke_latency_ab BASE_SHA HEAD_SHA
 #        scripts/bench_keystroke_latency_ab --head-only HEAD_SHA
 #
-# Each round warms and measures both revisions through
-# bench/keystroke_latency_baseline.exs. Revision order alternates to cancel
-# thermal/cache/order drift. On a breach, a confirmation re-runs BOTH revisions
-# as an alternating pair before deciding the result.
+# Each revision is built once in its own detached worktree. Every measurement
+# starts a fresh VM and warms the same benchmark path. Revision order alternates
+# to cancel thermal/cache/order drift, including in any confirmation rounds.
 set -uo pipefail
 
-if [[ $# -eq 2 && $1 == "--head-only" ]]; then
-  base_available=0
-  base_sha=""
-  head_sha=$(git rev-parse "$2")
-elif [[ $# -eq 2 ]]; then
-  base_available=1
-  base_sha=$1
-  head_sha=$(git rev-parse "$2")
-else
+if [[ $# -ne 2 ]]; then
   echo "usage: $0 BASE_SHA HEAD_SHA | --head-only HEAD_SHA" >&2
   exit 2
 fi
+
+base_available=1
+base_sha=$1
+if [[ $base_sha == "--head-only" ]]; then
+  base_available=0
+  base_sha=""
+fi
+if ! head_sha=$(git rev-parse --verify --end-of-options "$2^{commit}"); then
+  echo "HEAD latency benchmark could not prepare revision '$2'" >&2
+  exit 2
+fi
+
 rounds=${MINGA_LATENCY_AB_ROUNDS:-4}
 confirmation_rounds=${MINGA_LATENCY_AB_CONFIRMATION_ROUNDS:-2}
 
@@ -31,54 +34,126 @@ if (( rounds < 2 || rounds % 2 != 0 || confirmation_rounds < 2 || confirmation_r
 fi
 
 artifact_dir="${GITHUB_WORKSPACE:-$PWD}"
+[[ $artifact_dir == /* ]] || artifact_dir="$PWD/$artifact_dir"
 metrics_file="$artifact_dir/keystroke_latency_metrics.txt"
 baseline_output="$artifact_dir/keystroke_latency.json"
 comparison_output="$artifact_dir/keystroke_latency_comparison.json"
-work_dir=$(mktemp -d "${TMPDIR:-/tmp}/minga-keystroke-latency.XXXXXX")
+tmp_root=${TMPDIR:-/tmp}
+[[ $tmp_root == /* ]] || tmp_root="$PWD/$tmp_root"
+work_dir=$(mktemp -d "$tmp_root/minga-keystroke-latency.XXXXXX") || exit 1
 base_runs=()
 head_runs=()
 
 cleanup() {
-  git checkout -f --quiet "$head_sha" || true
-  rm -rf "$work_dir"
+  local source status=0
+  for source in "$work_dir"/{base,head}; do
+    if [[ -f "$source/.git" ]]; then
+      git worktree remove --force "$source" || status=1
+    fi
+  done
+  if (( status == 0 )); then
+    rm -rf -- "$work_dir"
+  fi
 }
 trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
-: > "$metrics_file"
+: > "$metrics_file" || exit 1
+rm -f -- "$baseline_output" "$comparison_output" || exit 1
 
 echo "Keystroke latency A/B: base=$base_sha head=$head_sha rounds=$rounds"
 
-if (( base_available )) && ! git cat-file -e "$base_sha:bench/keystroke_latency_baseline.exs" 2>/dev/null; then
-  echo "::warning::bench/keystroke_latency_baseline.exs is missing at merge-base $base_sha; relative gate will be skipped (absolute sanity only)."
-  base_available=0
-elif (( base_available )) && ! git diff --quiet "$base_sha" "$head_sha" -- bench/keystroke_latency_baseline.exs; then
-  echo "::warning::bench/keystroke_latency_baseline.exs changed between base and HEAD; relative gate will be skipped because the benchmark ruler differs."
-  base_available=0
+if (( base_available )); then
+  if ! base_revision=$(git rev-parse --verify --end-of-options "$base_sha^{commit}" 2>/dev/null) ||
+     ! git cat-file -e "$base_revision:bench/keystroke_latency_baseline.exs" 2>/dev/null; then
+    echo "::warning::bench/keystroke_latency_baseline.exs is missing at merge-base $base_sha; relative gate will be skipped (absolute sanity only)."
+    base_available=0
+  elif ! git diff --quiet "$base_revision" "$head_sha" -- bench/keystroke_latency_baseline.exs; then
+    echo "::warning::bench/keystroke_latency_baseline.exs changed between base and HEAD; relative gate will be skipped because the benchmark ruler differs."
+    base_available=0
+  else
+    base_sha=$base_revision
+  fi
 fi
+
+in_revision() (
+  cd "$work_dir/$1" || return 1
+  shift
+  # Do not let caller build paths share dependency code or priv across revisions.
+  unset MIX_BUILD_PATH MIX_BUILD_ROOT MIX_DEPS_PATH
+  export MIX_ENV=test
+  "$@"
+)
+
+build_revision() {
+  # The benchmark starts an editor generation with a BEAM headless port, not the native parser or renderer.
+  mix deps.get && mix codegen && mix compile
+}
+
+seed_head_dependencies() {
+  local base="$work_dir/base" head="$work_dir/head"
+  [[ -d "$base/deps" && -d "$base/_build/test/lib" ]] || return 0
+  cmp -s "$base/mix.lock" "$head/mix.lock" || return 0
+  git diff --quiet "$base_sha" "$head_sha" -- mix.exs .tool-versions config || return 0
+
+  # Copy from base to HEAD only. Keep dependency priv links relative to each checkout,
+  # and let Mix revalidate the manifests. Never seed Minga's own compiled application.
+  echo "Seeding HEAD with compiled dependencies from base"
+  mkdir -p "$head/_build/test/lib" &&
+    rsync -a "$base/deps/" "$head/deps/" &&
+    rsync -a --exclude='/minga/' "$base/_build/test/lib/" "$head/_build/test/lib/"
+}
+
+prepare_revision() {
+  local side=$1
+  local revision=$2
+  local status=0
+
+  echo "::group::Prepare keystroke latency ${side} (${revision})"
+  if git worktree add --detach --quiet "$work_dir/$side" "$revision"; then
+    if [[ $side == head ]] && (( base_available )) && ! seed_head_dependencies; then
+      echo "Could not copy benchmark dependencies into HEAD" >&2
+      echo "::endgroup::"
+      return 1
+    fi
+    in_revision "$side" build_revision || status=$?
+  else
+    status=1
+  fi
+  echo "::endgroup::"
+  return "$status"
+}
 
 run_revision() {
   local revision=$1
   local side=$2
   local round=$3
   local output="$work_dir/${side}-${round}.json"
+  local sample="$work_dir/$side/bench/baselines/keystroke_latency.json"
 
   echo "::group::Keystroke latency ${side}, round ${round} (${revision})"
-  if ! git checkout -f --quiet "$revision"; then
+  local -a statuses
+  if ! rm -f -- "$sample"; then
+    echo "::endgroup::"
+    return 2
+  fi
+
+  in_revision "$side" mix run --no-compile bench/keystroke_latency_baseline.exs | tee -a "$metrics_file"
+  statuses=("${PIPESTATUS[@]}")
+  if (( statuses[1] != 0 )); then
+    echo "::endgroup::"
+    return 2
+  fi
+  if (( statuses[0] != 0 )); then
     echo "::endgroup::"
     return 1
   fi
-
-  if ! mix deps.get || ! mix deps.compile || ! mix protocol.gen || ! mix native.build.support; then
+  if [[ ! -s "$sample" ]] || ! cp "$sample" "$output"; then
     echo "::endgroup::"
-    return 1
+    return 2
   fi
 
-  if ! MIX_ENV=test mix run bench/keystroke_latency_baseline.exs | tee -a "$metrics_file"; then
-    echo "::endgroup::"
-    return 1
-  fi
-
-  cp bench/baselines/keystroke_latency.json "$output"
   echo "::endgroup::"
 
   if [[ "$side" == "base" ]]; then
@@ -91,26 +166,29 @@ run_revision() {
 run_rounds() {
   local first_round=$1
   local count=$2
-  local round side_first side_second revision_var
+  local round side status revision_var
+  local -a sides
 
   for ((round = first_round; round < first_round + count; round++)); do
     if (( round % 2 == 1 )); then
-      side_first=base
-      side_second=head
+      sides=(base head)
     else
-      side_first=head
-      side_second=base
+      sides=(head base)
     fi
 
-    revision_var="${side_first}_sha"
-    if ! run_revision "${!revision_var}" "$side_first" "$round"; then
-      return 1
-    fi
-
-    revision_var="${side_second}_sha"
-    if ! run_revision "${!revision_var}" "$side_second" "$round"; then
-      return 1
-    fi
+    for side in "${sides[@]}"; do
+      revision_var="${side}_sha"
+      status=0
+      run_revision "${!revision_var}" "$side" "$round" || status=$?
+      if (( status != 0 )); then
+        # Only a failed base benchmark permits the absolute-sanity fallback.
+        if [[ $side == base ]] && (( status == 1 )); then
+          return 1
+        fi
+        echo "Could not record $side latency sample for round $round" >&2
+        return 2
+      fi
+    done
   done
 }
 
@@ -118,7 +196,7 @@ run_check() {
   local args=(--comparison-output "$comparison_output")
   local path
 
-  for path in "${base_runs[@]}"; do
+  for path in ${base_runs[@]+"${base_runs[@]}"}; do
     args+=(--base "$path")
   done
 
@@ -126,13 +204,7 @@ run_check() {
     args+=(--head "$path")
   done
 
-  git checkout -f --quiet "$head_sha"
-
-  if ! mix deps.get || ! mix deps.compile; then
-    return 1
-  fi
-
-  MIX_ENV=test mix run bench/check_latency_budgets.exs "${args[@]}"
+  in_revision head mix run --no-compile bench/check_latency_budgets.exs "${args[@]}"
 }
 
 preserve_head_artifact() {
@@ -140,13 +212,28 @@ preserve_head_artifact() {
   cp "${head_runs[$last_head_index]}" "$baseline_output"
 }
 
+if (( base_available )) && ! prepare_revision base "$base_sha"; then
+  echo "::warning::base latency benchmark could not prepare revision $base_sha; falling back to one HEAD absolute-sanity run."
+  base_available=0
+fi
+
+if ! prepare_revision head "$head_sha"; then
+  echo "HEAD latency benchmark could not prepare revision $head_sha" >&2
+  exit 1
+fi
+
 if (( base_available )); then
-  if ! run_rounds 1 "$rounds"; then
-    echo "::warning::base/HEAD paired benchmark could not complete; falling back to one HEAD absolute-sanity run."
-    base_available=0
-    base_runs=()
-    head_runs=()
-  fi
+  status=0
+  run_rounds 1 "$rounds" || status=$?
+  case $status in
+    1)
+      echo "::warning::base benchmark failed; falling back to one HEAD absolute-sanity run."
+      base_available=0
+      base_runs=()
+      head_runs=()
+      ;;
+    2) exit 1 ;;
+  esac
 fi
 
 if (( ! base_available )); then
@@ -155,14 +242,13 @@ if (( ! base_available )); then
     exit 1
   fi
 
-  preserve_head_artifact
+  preserve_head_artifact || exit 1
   run_check
   exit $?
 fi
 
-# Preserve measured artifacts outside tracked paths so revision checkouts cannot
-# replace them with committed baselines before upload.
-preserve_head_artifact
+# Preserve the last HEAD sample outside the disposable worktree for upload.
+preserve_head_artifact || exit 1
 
 if run_check; then
   exit 0
@@ -177,5 +263,6 @@ if ! run_rounds "$((rounds + 1))" "$confirmation_rounds"; then
   exit 1
 fi
 
-preserve_head_artifact
+preserve_head_artifact || exit 1
 run_check
+exit $?

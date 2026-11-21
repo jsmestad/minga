@@ -83,6 +83,16 @@ defmodule Minga.Editing.Search.IndexTest do
              ]
     end
 
+    test "returns and counts multiple ordered matches from one line" do
+      index = Index.build(["foo", "foo foo", "foo"], "foo")
+
+      {matches, metrics} = Index.matches_in_range_with_metrics(index, 1, 1)
+
+      assert [%{line: 1, col: 0}, %{line: 1, col: 4}] = matches
+      assert matches == Index.matches_in_range(index, 1, 1)
+      assert metrics.returned_matches == 2
+    end
+
     test "visits logarithmic nodes plus the dense requested result" do
       index = Index.build(List.duplicate("foo", 10_000), "foo")
 

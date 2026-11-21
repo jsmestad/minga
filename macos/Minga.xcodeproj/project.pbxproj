@@ -1914,7 +1914,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "cd \"${SRCROOT}/..\"\nif ! command -v mix >/dev/null 2>&1; then\n  if [ -f macos/.generated/protocol/ProtocolOpcodes.generated.swift ]; then\n    echo \"warning: mix not found; reusing existing generated protocol artifacts (e.g. Xcode Preview build sandbox)\"\n    exit 0\n  fi\n  echo \"error: mix is required to generate protocol artifacts. Install Elixir, then run: mix protocol.gen\"\n  exit 1\nfi\nmix protocol.gen\n";
+			shellScript = "if [ \"${MINGA_APP_PROTOCOL_PREGENERATED:-0}\" = \"1\" ]; then\n  for file in \"$SCRIPT_OUTPUT_FILE_0\" \"$SCRIPT_OUTPUT_FILE_1\" \\\n              \"$SCRIPT_OUTPUT_FILE_2\" \"$SCRIPT_OUTPUT_FILE_3\"; do\n    if [ ! -s \"$file\" ]; then\n      echo \"error: missing pregenerated Swift protocol artifact: $file\"\n      exit 1\n    fi\n  done\n  exit 0\nfi\ncd \"${SRCROOT}/..\"\nif ! command -v mix >/dev/null 2>&1; then\n  if [ -f macos/.generated/protocol/ProtocolOpcodes.generated.swift ]; then\n    echo \"warning: mix not found; reusing existing generated protocol artifacts (e.g. Xcode Preview build sandbox)\"\n    exit 0\n  fi\n  echo \"error: mix is required to generate protocol artifacts. Install Elixir, then run: mix protocol.gen\"\n  exit 1\nfi\nmix protocol.gen\n";
 		};
 		77AE57735A00C26BF1B3675A /* Generate protocol opcodes */ = {
 			isa = PBXShellScriptBuildPhase;

@@ -4,9 +4,9 @@ defmodule MingaEditor.Input.Completion do
 
   When a completion popup is visible and the editor is in insert mode,
   intercepts navigation keys (C-n, C-p, arrows), accept keys (Tab, Enter),
-  and Escape. Mouse clicks on candidates select and confirm them; scroll
-  wheel scrolls the candidate list. Other keys pass through to the mode
-  FSM for normal insert handling.
+  and Escape. The wheel navigates the list and a backdrop click dismisses
+  the popup. Candidate activation uses the displayed item's identity,
+  not raw mouse coordinates. Other keys pass through to insert mode.
   """
 
   @behaviour MingaEditor.Input.Handler
@@ -67,7 +67,7 @@ defmodule MingaEditor.Input.Completion do
   def handle_mouse_at_node(
         %{workspace: %{editing: %{mode: :insert}}} = state,
         %FocusNode{} = node,
-        row,
+        _row,
         _col,
         button,
         _mods,
@@ -75,8 +75,8 @@ defmodule MingaEditor.Input.Completion do
         _cc
       ) do
     case MingaEditor.Shell.Traditional.ModalWorkflow.completion(state) do
-      %Completion{} = completion ->
-        do_handle_mouse(state, node, completion, row, button)
+      %Completion{} ->
+        do_handle_mouse(state, node, button)
 
       _ ->
         {:passthrough, state}
@@ -87,9 +87,9 @@ defmodule MingaEditor.Input.Completion do
     {:passthrough, state}
   end
 
-  @spec do_handle_mouse(EditorState.t(), FocusNode.t(), Completion.t(), integer(), atom()) ::
+  @spec do_handle_mouse(EditorState.t(), FocusNode.t(), atom()) ::
           MingaEditor.Input.Handler.result()
-  defp do_handle_mouse(state, _node, _completion, _row, :wheel_down) do
+  defp do_handle_mouse(state, _node, :wheel_down) do
     {:handled,
      MingaEditor.Shell.Traditional.ModalWorkflow.navigate_completion(
        state,
@@ -97,55 +97,20 @@ defmodule MingaEditor.Input.Completion do
      )}
   end
 
-  defp do_handle_mouse(state, _node, _completion, _row, :wheel_up) do
+  defp do_handle_mouse(state, _node, :wheel_up) do
     {:handled,
      MingaEditor.Shell.Traditional.ModalWorkflow.navigate_completion(state, &Completion.move_up/1)}
   end
 
-  defp do_handle_mouse(state, node, completion, row, :left) do
-    handle_completion_click(state, node, completion, row)
-  end
-
-  defp do_handle_mouse(state, _node, _completion, _row, _button) do
-    {:passthrough, state}
-  end
-
-  # ── Completion click ─────────────────────────────────────────────────────
-
-  @spec handle_completion_click(EditorState.t(), FocusNode.t(), Completion.t(), integer()) ::
-          MingaEditor.Input.Handler.result()
-  defp handle_completion_click(
-         state,
-         %FocusNode{content_type: :completion_backdrop},
-         _completion,
-         _row
-       ) do
+  defp do_handle_mouse(state, %FocusNode{content_type: :completion_backdrop}, :left) do
     {:handled, MingaEditor.do_dismiss_completion(state)}
   end
 
-  defp handle_completion_click(
-         state,
-         %FocusNode{rect: {start_row, _start_col, _width, _item_count}},
-         completion,
-         row
-       ) do
-    clicked_idx = row - start_row
-    target_item = completion |> Completion.visible_items() |> elem(0) |> Enum.at(clicked_idx)
-
-    case target_item do
-      nil ->
-        {:handled, state}
-
-      _item ->
-        adjusted = set_completion_selected(completion, clicked_idx)
-        {:handled, MingaEditor.do_accept_completion(state, adjusted)}
-    end
+  defp do_handle_mouse(state, %FocusNode{content_type: :completion_menu}, :left) do
+    {:handled, state}
   end
 
-  @spec set_completion_selected(Completion.t(), non_neg_integer()) :: Completion.t()
-  defp set_completion_selected(%Completion{} = completion, idx) do
-    Completion.select_visible(completion, idx)
-  end
+  defp do_handle_mouse(state, _node, _button), do: {:passthrough, state}
 
   # ── Key handling ─────────────────────────────────────────────────────────
 

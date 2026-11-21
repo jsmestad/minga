@@ -4,11 +4,25 @@ defmodule MingaEditor.NativeOpenTest do
 
   @moduletag :tmp_dir
 
+  alias Minga.Project
   alias MingaEditor.UI.Picker.FileSource
 
   test "a native directory open uses the Finder project-switch and file-picker behavior", %{
     tmp_dir: tmp_dir
   } do
+    previous_root = Project.workspace_root()
+
+    on_exit(fn ->
+      case previous_root do
+        nil ->
+          Project.close()
+          assert Project.root() == nil
+
+        root ->
+          assert {:ok, _snapshot} = Project.activate(root)
+      end
+    end)
+
     project = Path.join(tmp_dir, "project")
     File.mkdir!(project)
     ctx = start_editor("initial")
@@ -18,6 +32,6 @@ defmodule MingaEditor.NativeOpenTest do
     state = editor_state(ctx)
     assert {:picker, %{picker_ui: picker_ui}} = state.shell_runtime.state.modal
     assert picker_ui.source == FileSource
-    assert Minga.Project.root() == project
+    assert Project.root() == project
   end
 end

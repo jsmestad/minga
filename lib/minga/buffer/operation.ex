@@ -265,7 +265,8 @@ defmodule Minga.Buffer.Operation do
       :unchanged
     else
       start_byte = Document.cursor_offset(doc)
-      old_end_byte = Position.after_character_at(Document.content(doc), start_byte)
+      removed = Document.content_byte_size(doc) - Document.content_byte_size(new_doc)
+      old_end_byte = start_byte + removed
 
       delta =
         EditDelta.deletion(
@@ -306,13 +307,16 @@ defmodule Minga.Buffer.Operation do
   def delete_lines(%Document{} = doc, start_line, end_line)
       when start_line >= 0 and end_line >= 0 do
     selection = Selection.linewise(doc, start_line, end_line)
-    %Span{start: raw_start_byte, stop: old_end_byte} = selection.span
-    start_byte = effective_linewise_delete_start(doc, raw_start_byte, old_end_byte)
+    %Span{stop: old_end_byte} = selection.span
     new_doc = Selection.delete(doc, selection)
 
     if new_doc == doc do
       :unchanged
     else
+      # Linewise deletion at EOF can also remove the LF before the selection.
+      removed = Document.content_byte_size(doc) - Document.content_byte_size(new_doc)
+      start_byte = old_end_byte - removed
+
       delta =
         EditDelta.deletion(
           start_byte,
@@ -357,27 +361,5 @@ defmodule Minga.Buffer.Operation do
       )
 
     {:edited, yanked, new_doc, delta}
-  end
-
-  @spec effective_linewise_delete_start(Document.t(), non_neg_integer(), non_neg_integer()) ::
-          non_neg_integer()
-  defp effective_linewise_delete_start(%Document{} = doc, start_byte, old_end_byte)
-       when start_byte > 0 do
-    do_effective_linewise_delete_start(start_byte, old_end_byte, Document.content_byte_size(doc))
-  end
-
-  defp effective_linewise_delete_start(%Document{}, start_byte, _old_end_byte), do: start_byte
-
-  @spec do_effective_linewise_delete_start(
-          non_neg_integer(),
-          non_neg_integer(),
-          non_neg_integer()
-        ) :: non_neg_integer()
-  defp do_effective_linewise_delete_start(start_byte, document_size, document_size) do
-    start_byte - 1
-  end
-
-  defp do_effective_linewise_delete_start(start_byte, _old_end_byte, _document_size) do
-    start_byte
   end
 end

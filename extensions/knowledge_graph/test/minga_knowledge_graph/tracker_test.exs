@@ -79,7 +79,7 @@ defmodule MingaKnowledgeGraph.TrackerTest do
     deliver(
       server,
       {:minga_event, :buffer_changed,
-       %BufferChangedEvent{source: :user, buffer: buffer, delta: nil, version: 1}}
+       %BufferChangedEvent{source: :user, buffer: buffer, delta: nil, version: 1, sequence: 1}}
     )
 
     assert Tracker.familiarity(server, path) =~ "edited 1"
@@ -94,7 +94,13 @@ defmodule MingaKnowledgeGraph.TrackerTest do
     deliver(
       server,
       {:minga_event, :buffer_changed,
-       %BufferChangedEvent{source: {:agent, self(), nil}, buffer: self(), delta: nil, version: 1}}
+       %BufferChangedEvent{
+         source: {:agent, self(), nil},
+         buffer: self(),
+         delta: nil,
+         version: 1,
+         sequence: 1
+       }}
     )
 
     assert Tracker.familiarity(server, path) =~ "edited 0"
@@ -108,38 +114,44 @@ defmodule MingaKnowledgeGraph.TrackerTest do
   test "opening a real unfamiliar file records familiarity without auto-briefing" do
     test_pid = self()
 
-    client = fn _model, messages, _opts ->
-      send(test_pid, {:ai_called, messages})
-      {:error, :unexpected_auto_briefing}
+    stream_ai = fn messages, _opts ->
+      send(test_pid, {:briefing_started, messages})
+      {:ok, make_ref()}
     end
 
-    server = start_tracker(:no_auto_briefing, ai_client: client)
+    server = start_tracker(:no_auto_briefing, stream_ai: stream_ai)
     path = real_file_path("no-auto")
 
     open(server, path)
 
     assert Tracker.familiarity(server, path) =~ "opened 1"
-    refute_receive {:ai_called, _messages}, 100
+    refute_received {:briefing_started, _messages}
     assert Panel.visible() |> Enum.filter(&(&1.extension == @ext)) == []
   end
 
-  test "explicit briefing request starts the AI path without a network call" do
+  test "each explicit briefing request for the same file starts an AI call" do
     test_pid = self()
 
-    client = fn _model, messages, _opts ->
-      send(test_pid, {:ai_called, messages})
-      {:error, :stubbed}
+    stream_ai = fn messages, opts ->
+      ref = make_ref()
+      send(test_pid, {:briefing_started, ref, messages})
+      send(Keyword.fetch!(opts, :reply_to), {:minga_ai, ref, {:done, "Briefing complete"}})
+      {:ok, ref}
     end
 
-    server = start_tracker(:explicit_briefing, ai_client: client)
+    server = start_tracker(:explicit_briefing, stream_ai: stream_ai)
     path = real_file_path("explicit")
 
     Tracker.request_briefing(server, path)
 
-    assert_receive {:ai_called, messages}, 2_000
+    assert_receive {:briefing_started, first_ref, messages}, 2_000
     assert [%{role: "system"}, %{role: "user", content: content}] = messages
     assert content =~ path
     assert content =~ "defmodule Explicit"
+
+    Tracker.request_briefing(server, path)
+    assert_receive {:briefing_started, second_ref, ^messages}, 2_000
+    assert first_ref != second_ref
   end
 
   test "the graph persists across a tracker restart" do

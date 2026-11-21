@@ -26,144 +26,18 @@ defmodule MingaEditor.UI.Theme.Builder do
           optional(:dashboard) => section_overrides()
         }
 
-  @theme_sections %{
-    editor: Theme.Editor,
-    gutter: Theme.Gutter,
-    git: Theme.Git,
-    modeline: Theme.Modeline,
-    search: Theme.Search,
-    popup: Theme.Popup,
-    tree: Theme.Tree,
-    agent: Theme.Agent,
-    tab_bar: Theme.TabBar,
-    dashboard: Theme.Dashboard
-  }
-
-  @color_fields %{
-    editor: [
-      :bg,
-      :fg,
-      :split_border_fg,
-      :cursorline_bg,
-      :nav_flash_bg,
-      :yank_flash_bg,
-      :highlight_read_bg,
-      :highlight_write_bg,
-      :selection_bg,
-      :whitespace_fg,
-      :indent_guide_fg,
-      :indent_guide_active_fg,
-      :link_fg
-    ],
-    gutter: [
-      :fg,
-      :current_fg,
-      :error_fg,
-      :warning_fg,
-      :info_fg,
-      :hint_fg,
-      :fold_fg,
-      :separator_fg,
-      :advisory_fg
-    ],
-    git: [:added_fg, :modified_fg, :deleted_fg],
-    modeline: [
-      :bar_fg,
-      :bar_bg,
-      :info_fg,
-      :info_bg,
-      :filetype_fg,
-      :lsp_ready,
-      :lsp_initializing,
-      :lsp_starting,
-      :lsp_error
-    ],
-    search: [:highlight_fg, :highlight_bg, :current_bg],
-    popup: [
-      :fg,
-      :bg,
-      :border_fg,
-      :sel_fg,
-      :sel_bg,
-      :title_fg,
-      :key_fg,
-      :separator_fg,
-      :group_fg
-    ],
-    tree: [
-      :bg,
-      :fg,
-      :dir_fg,
-      :active_fg,
-      :cursor_bg,
-      :header_fg,
-      :header_bg,
-      :separator_fg,
-      :git_modified_fg,
-      :git_staged_fg,
-      :git_untracked_fg
-    ],
-    agent: [
-      :panel_bg,
-      :panel_border,
-      :header_fg,
-      :header_bg,
-      :user_border,
-      :user_label,
-      :assistant_border,
-      :assistant_label,
-      :tool_border,
-      :tool_header,
-      :code_bg,
-      :code_border,
-      :input_border,
-      :input_bg,
-      :input_placeholder,
-      :thinking_fg,
-      :status_thinking,
-      :status_tool,
-      :status_error,
-      :status_idle,
-      :text_fg,
-      :context_low,
-      :context_mid,
-      :context_high,
-      :usage_fg,
-      :toast_bg,
-      :toast_fg,
-      :toast_border,
-      :system_fg,
-      :search_match_bg,
-      :search_current_bg,
-      :heading1_fg,
-      :heading2_fg,
-      :heading3_fg,
-      :hint_fg,
-      :dashboard_label,
-      :delimiter_dim,
-      :link_fg
-    ],
-    tab_bar: [
-      :active_fg,
-      :active_bg,
-      :inactive_fg,
-      :inactive_bg,
-      :separator_fg,
-      :modified_fg,
-      :attention_fg,
-      :close_hover_fg,
-      :bg
-    ],
-    dashboard: [
-      :bg,
-      :logo_fg,
-      :heading_fg,
-      :item_fg,
-      :item_active_bg,
-      :shortcut_fg,
-      :muted_fg
-    ]
-  }
+  @theme_sections [
+    :editor,
+    :gutter,
+    :git,
+    :modeline,
+    :search,
+    :popup,
+    :tree,
+    :agent,
+    :tab_bar,
+    :dashboard
+  ]
 
   @doc "Builds a complete theme from a semantic palette."
   @spec from_palette(atom(), Palette.t() | map(), overrides()) :: Theme.t()
@@ -569,9 +443,10 @@ defmodule MingaEditor.UI.Theme.Builder do
 
   defp apply_override({section, overrides}, %Theme{} = theme)
        when is_atom(section) and is_map(overrides) do
-    case Map.fetch(@theme_sections, section) do
-      {:ok, _module} -> apply_section_override(theme, section, overrides)
-      :error -> raise ArgumentError, "unknown theme override section: #{inspect(section)}"
+    if section in @theme_sections do
+      apply_section_override(theme, section, overrides)
+    else
+      raise ArgumentError, "unknown theme override section: #{inspect(section)}"
     end
   end
 
@@ -591,11 +466,11 @@ defmodule MingaEditor.UI.Theme.Builder do
 
   @spec merge_struct(atom(), struct(), map()) :: struct()
   defp merge_struct(section, struct, overrides) when is_map(overrides) do
-    fields = struct |> Map.from_struct() |> Map.keys() |> MapSet.new()
+    fields = Map.from_struct(struct)
 
     Enum.reduce(overrides, struct, fn {key, value}, acc ->
-      if MapSet.member?(fields, key) do
-        %{acc | key => validate_override_value(section, key, Map.get(acc, key), value)}
+      if Map.has_key?(fields, key) do
+        %{acc | key => validate_override_value(section, key, Map.fetch!(acc, key), value)}
       else
         accept_deprecated_override(section, key, value)
         acc
@@ -618,46 +493,40 @@ defmodule MingaEditor.UI.Theme.Builder do
   end
 
   @spec validate_override_value(atom(), atom(), term(), term()) :: term()
-  defp validate_override_value(section, :mode_colors, current, value)
+  defp validate_override_value(:modeline, :mode_colors, current, value)
        when is_map(current) and is_map(value) do
-    merge_mode_colors(section, current, value)
+    merge_mode_colors(current, value)
   end
 
-  defp validate_override_value(section, :mode_colors, _current, value) do
+  defp validate_override_value(:modeline, :mode_colors, _current, value) do
     raise ArgumentError,
-          "theme override #{Atom.to_string(section)}.mode_colors must be a map of {fg, bg} tuples, got: #{inspect(value)}"
+          "theme override modeline.mode_colors must be a map of {fg, bg} tuples, got: #{inspect(value)}"
   end
 
   defp validate_override_value(section, field, _current, value) do
-    if color_field?(section, field) do
-      validate_color_override(section, field, value)
-    else
-      value
-    end
+    validate_color_override(section, field, value)
   end
 
-  @spec merge_mode_colors(atom(), map(), map()) :: map()
-  defp merge_mode_colors(section, current, overrides) do
-    allowed_modes = current |> Map.keys() |> MapSet.new()
-
+  @spec merge_mode_colors(map(), map()) :: map()
+  defp merge_mode_colors(current, overrides) do
     Enum.reduce(overrides, current, fn {mode, value}, acc ->
-      if MapSet.member?(allowed_modes, mode) do
-        Map.put(acc, mode, validate_mode_color(section, mode, value))
+      if Map.has_key?(current, mode) do
+        Map.put(acc, mode, validate_mode_color(mode, value))
       else
         raise ArgumentError,
-              "unknown theme override #{Atom.to_string(section)}.mode_colors key: #{format_key(mode)}"
+              "unknown theme override modeline.mode_colors key: #{format_key(mode)}"
       end
     end)
   end
 
-  @spec validate_mode_color(atom(), term(), term()) :: {Theme.color(), Theme.color()}
-  defp validate_mode_color(_section, _mode, {fg, bg})
+  @spec validate_mode_color(term(), term()) :: {Theme.color(), Theme.color()}
+  defp validate_mode_color(_mode, {fg, bg})
        when is_integer(fg) and fg >= 0 and is_integer(bg) and bg >= 0,
        do: {fg, bg}
 
-  defp validate_mode_color(section, mode, value) do
+  defp validate_mode_color(mode, value) do
     raise ArgumentError,
-          "theme override #{Atom.to_string(section)}.mode_colors.#{format_key(mode)} must be a {fg, bg} color tuple, got: #{inspect(value)}"
+          "theme override modeline.mode_colors.#{format_key(mode)} must be a {fg, bg} color tuple, got: #{inspect(value)}"
   end
 
   @spec format_key(term()) :: String.t()
@@ -671,10 +540,5 @@ defmodule MingaEditor.UI.Theme.Builder do
   defp validate_color_override(section, field, value) do
     raise ArgumentError,
           "theme override #{Atom.to_string(section)}.#{Atom.to_string(field)} must be a color, got: #{inspect(value)}"
-  end
-
-  @spec color_field?(atom(), atom()) :: boolean()
-  defp color_field?(section, field) do
-    field in Map.get(@color_fields, section, [])
   end
 end

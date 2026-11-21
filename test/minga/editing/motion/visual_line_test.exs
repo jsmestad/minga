@@ -113,6 +113,17 @@ defmodule Minga.Editing.Motion.VisualLineTest do
     end
   end
 
+  test "row start and end motions use the continuation at an exact row boundary" do
+    doc = Document.new("abcdef")
+
+    assert VisualLine.visual_line_start(doc, {0, 2}, 2) == {0, 2}
+    assert VisualLine.visual_line_end(doc, {0, 2}, 2) == {0, 3}
+  end
+
+  test "projecting a source byte without visual rows raises" do
+    assert_raise ArgumentError, fn -> VisualLine.source_byte_to_visual([], 0) end
+  end
+
   describe "round-trip consistency" do
     test "down then up returns to same logical line" do
       doc = Document.new("hello world foo bar baz\nsecond line")

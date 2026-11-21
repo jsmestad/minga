@@ -1,19 +1,29 @@
 defmodule MingaEditor.RenderModel.UI.PickerBuilderTest do
   use ExUnit.Case, async: true
 
+  alias Minga.Buffer
   alias Minga.Frontend.Adapter.GUI.PickerEncoder
+  alias Minga.Language.Highlight.Span
   alias Minga.Project.Root
   alias Minga.RenderModel.UI.Picker
   alias MingaAgent.Session
   alias MingaEditor.Frontend.Emit.Context
   alias MingaEditor.RenderPipeline.TestHelpers
   alias MingaEditor.RenderModel.UI.PickerBuilder
+  alias MingaEditor.Session.State, as: SessionState
+  alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.Buffers
+  alias MingaEditor.State.Highlighting
+  alias MingaEditor.State.Parser
   alias MingaEditor.State.Picker, as: PickerUIState
+  alias MingaEditor.UI.Highlight
+  alias MingaEditor.UI.Picker.AgentDraftAttachmentSource
   alias MingaEditor.UI.Picker.AgentHistorySource
   alias MingaEditor.UI.Picker.Context, as: PickerContext
   alias MingaEditor.UI.Picker, as: PickerState
   alias MingaEditor.UI.Picker.Item
   alias MingaEditor.UI.Picker.ProjectFileCandidate
+  alias MingaEditor.UI.Picker.RecentFileSource
 
   test "Unicode-heavy retained history and its selected preview fit the shared wire frame" do
     session =
@@ -186,16 +196,64 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilderTest do
       assert Enum.count(positions) == 255
     end
 
-    test "falls back to file preview when source has GUI preview but no preview callback" do
-      path = temp_file!("alpha\nbeta")
-      item = %Item{id: path, label: Path.basename(path)}
-      picker = %PickerState{items: [item], filtered: [item], title: "Files", selected: 0}
-      modal = picker_modal(picker, MingaEditor.UI.Picker.RecentFileSource, nil, "", :ready)
+    test "disk preview preserves CRLF text and the empty 50th row" do
+      rows = ["é\r" | List.duplicate("middle", 48)] ++ [""]
+      path = temp_file!(Enum.join(rows ++ ["not previewed"], "\n"))
 
-      model = PickerBuilder.build(build_context(modal))
+      model = path |> file_picker_modal() |> build_context() |> PickerBuilder.build()
 
       assert model.has_preview?
-      assert model.preview_lines == [[{"alpha", 0xCCCCCC, false}], [{"beta", 0xCCCCCC, false}]]
+      assert model.preview_lines == Enum.map(rows, &[{&1, 0xCCCCCC, false}])
+    end
+
+    test "disk preview preserves the empty line after a final newline and in an empty file" do
+      for {content, rows} <- [{"", [""]}, {"x\n", ["x", ""]}] do
+        path = temp_file!(content)
+        model = path |> file_picker_modal() |> build_context() |> PickerBuilder.build()
+
+        assert model.preview_lines == Enum.map(rows, &[{&1, 0xCCCCCC, false}])
+      end
+    end
+
+    test "highlighted live preview uses the parent buffer's first 50 lines and byte offsets" do
+      path = temp_file!("stale disk text")
+      buffer = start_supervised!({Buffer, file_path: path})
+      long_line = String.duplicate("a", 16_384)
+      lines = ["é\r", "x", long_line] ++ List.duplicate("middle", 46) ++ ["", "not previewed"]
+      assert :ok = Buffer.replace_content(buffer, Enum.join(lines, "\n"))
+
+      highlight =
+        Highlight.new(%{"keyword" => [fg: 0x123456, bold: true]})
+        |> Highlight.put_names(["keyword"])
+        |> Highlight.put_spans(1, [Span.new(4, 5, 0)])
+
+      state = TestHelpers.base_state(port_manager: nil)
+      buffers = Buffers.add_background(state.workspace.buffers, buffer)
+      highlighting = Highlighting.set_highlights(%Highlighting{}, %{buffer => highlight})
+
+      state = %{
+        state
+        | workspace: SessionState.set_buffers(state.workspace, buffers),
+          parser: Parser.accept_highlighting(state.parser, highlighting)
+      }
+
+      model = path |> file_picker_modal() |> build_context(state) |> PickerBuilder.build()
+
+      assert length(model.preview_lines) == 50
+
+      assert [[{"é\r", 0xCCCCCC, false}], [{"x", 0x123456, true}], [{^long_line, _, false}] | _] =
+               model.preview_lines
+
+      assert List.last(model.preview_lines) == [{"", 0xCCCCCC, false}]
+    end
+
+    test "an empty source preview does not fall back to disk" do
+      path = temp_file!("not previewed")
+      item = %Item{id: path, label: "Empty preview", meta: %{rows: []}}
+      picker = PickerState.new([item], title: "Files")
+      modal = picker_modal(picker, AgentDraftAttachmentSource, nil, "", :ready)
+
+      assert PickerBuilder.build(build_context(modal)).preview_lines == []
     end
 
     test "relative file preview uses the candidate workspace root" do
@@ -218,15 +276,13 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilderTest do
       assert model.preview_lines == [[{"captured root", 0xCCCCCC, false}]]
     end
 
-    test "binary file preview shows a safe placeholder" do
-      path = temp_file!(<<0, 1, 2, "BEAM">>)
-      item = %Item{id: path, label: Path.basename(path)}
-      picker = %PickerState{items: [item], filtered: [item], title: "Files", selected: 0}
-      modal = picker_modal(picker, MingaEditor.UI.Picker.RecentFileSource, nil, "", :ready)
+    test "NUL or invalid UTF-8 after the 50th row still yields the binary placeholder" do
+      for binary_tail <- [<<0>>, <<255>>] do
+        path = temp_file!(String.duplicate("text\n", 50) <> binary_tail)
+        model = path |> file_picker_modal() |> build_context() |> PickerBuilder.build()
 
-      model = PickerBuilder.build(build_context(modal))
-
-      assert model.preview_lines == [[{"Binary file preview unavailable", 0xCCCCCC, true}]]
+        assert model.preview_lines == [[{"Binary file preview unavailable", 0xCCCCCC, true}]]
+      end
     end
   end
 
@@ -254,17 +310,20 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilderTest do
   defp source_switch("", _source), do: :original
   defp source_switch(prefix, source), do: {:switched, source, prefix}
 
-  @spec build_context(term()) :: MingaEditor.Frontend.Emit.Context.t()
-  defp build_context(modal) do
-    ctx =
-      TestHelpers.base_state(port_manager: nil)
-      |> Context.from_editor_state()
+  @spec file_picker_modal(String.t()) :: term()
+  defp file_picker_modal(path) do
+    picker = PickerState.new([%Item{id: path, label: Path.basename(path)}], title: "Files")
+    picker_modal(picker, RecentFileSource, nil, "", :ready)
+  end
 
+  @spec build_context(term(), EditorState.t()) :: Context.t()
+  defp build_context(modal, state \\ TestHelpers.base_state(port_manager: nil)) do
+    ctx = Context.from_editor_state(state)
     frame = %{ctx.intent.frame | shell_state: %{modal: modal}}
     %{ctx | intent: %{ctx.intent | frame: frame}}
   end
 
-  @spec temp_file!(String.t()) :: String.t()
+  @spec temp_file!(binary()) :: String.t()
   defp temp_file!(content) do
     path = Path.join(System.tmp_dir!(), "minga-picker-#{System.unique_integer([:positive])}.txt")
     File.write!(path, content)

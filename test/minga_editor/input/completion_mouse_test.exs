@@ -2,8 +2,12 @@ defmodule MingaEditor.Input.CompletionMouseTest do
   @moduledoc "Tests for mouse interaction with the completion popup."
   use ExUnit.Case, async: true
 
+  alias Minga.Buffer
   alias Minga.Editing.Completion
+  alias MingaEditor.FocusTree
+  alias MingaEditor.Shell.Traditional.ModalWorkflow
   alias MingaEditor.Shell.Runtime
+  alias MingaEditor.State.Buffers
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.ModalOverlay.Completion, as: CompletionPayload
   alias MingaEditor.State.WhichKey
@@ -27,6 +31,7 @@ defmodule MingaEditor.Input.CompletionMouseTest do
           }
         ),
       workspace: %MingaEditor.Session.State{
+        buffers: Keyword.get(opts, :buffers, %Buffers{}),
         editing: %VimState{mode: mode, mode_state: Mode.initial_state()}
       }
     }
@@ -38,6 +43,33 @@ defmodule MingaEditor.Input.CompletionMouseTest do
       %{label: "apply", insert_text: "apply", kind: :function, sort_text: "apply"},
       %{label: "assert", insert_text: "assert", kind: :function, sort_text: "assert"}
     ]
+  end
+
+  test "raw presses in the menu cannot accept a candidate; a backdrop press dismisses it" do
+    buffer = start_supervised!({Buffer, content: "ap"})
+    Buffer.move_to(buffer, {0, 2})
+    [first | rest] = sample_items()
+    items = [Map.put(first, :documentation, "Appends an item.") | rest]
+    state = completion_state(items, buffers: Buffers.add(%Buffers{}, buffer))
+    tree = FocusTree.from_state(state)
+    backdrop = Enum.find(tree.children, &(&1.content_type == :completion_backdrop))
+    [menu] = backdrop.children
+    {row, col, _width, height} = menu.rect
+    assert height > length(items)
+
+    for click_row <- [row + 1, row + length(items)] do
+      assert %{content_type: :completion_menu} = FocusTree.hit_test(tree, click_row, col)
+      pressed = Router.dispatch_mouse(state, click_row, col, :left, 0, :press, 1)
+      assert Completion.selected_item(ModalWorkflow.completion(pressed)).label == "append"
+      assert Buffer.content(buffer) == "ap"
+      assert Buffer.cursor(buffer) == {0, 2}
+    end
+
+    assert %{content_type: :completion_backdrop} = FocusTree.hit_test(tree, row, col - 1)
+    dismissed = Router.dispatch_mouse(state, row, col - 1, :left, 0, :press, 1)
+    assert ModalWorkflow.completion(dismissed) == nil
+    assert Buffer.content(buffer) == "ap"
+    assert Buffer.cursor(buffer) == {0, 2}
   end
 
   describe "scroll wheel" do

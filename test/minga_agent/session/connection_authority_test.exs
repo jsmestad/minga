@@ -563,8 +563,48 @@ defmodule MingaAgent.Session.ConnectionAuthorityTest do
     assert {:resolution, _typed_problem} = connection.problem
     assert ConnectionSnapshot.status(connection) != :ready
     previous = connection.target
+    assert {:error, :no_available_model} = Session.cycle_model(session)
     assert {:error, _reason} = Session.set_model(session, "openai:model-not-in-fixture")
     assert target(session) == previous
+  end
+
+  test "native model cycling starts at the first candidate when the active route is not listed",
+       context do
+    assert :ok = Credentials.store("openai", "synthetic-key", context.credential_opts)
+    resolver = resolver_opts()
+    [first] = resolver[:models]
+    [hidden] = ModelSelectionFixture.resolver_opts(model_id: "hidden-model")[:models]
+
+    [second] =
+      [model_id: "second-model", display_name: "Z Model"]
+      |> ModelSelectionFixture.resolver_opts()
+      |> Keyword.fetch!(:models)
+
+    routes = [
+      {[first], ["Test Model", "Test Model"]},
+      {[second, first], ["Test Model", "Z Model", "Test Model"]}
+    ]
+
+    for {listed, rotation} <- routes do
+      models = [%{hidden | catalog_only: true} | listed]
+
+      session =
+        start_session(context,
+          provider: MingaAgent.Providers.Native,
+          provider_opts: [
+            model: "openai:hidden-model",
+            config: %MingaAgent.Config{},
+            credential_opts: context.credential_opts,
+            model_resolver_opts: Keyword.put(resolver, :models, models)
+          ]
+        )
+
+      assert Session.model_selection(session).route.model_id == "hidden-model"
+
+      for name <- rotation do
+        assert {:ok, %{"model" => ^name}} = Session.cycle_model(session)
+      end
+    end
   end
 
   test "a first native model activation retires setup for the unconfigured target", context do
