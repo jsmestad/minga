@@ -15,21 +15,28 @@ defmodule MingaAgent.InferenceRouteSourceGuardTest do
      "a literal contributed route owner"}
   ]
 
-  test "no core module matches on a specific contributed route id or module" do
-    # Compile each pattern once: regexes stored in module attributes are recompiled on every use.
+  setup_all do
     patterns =
       Enum.map(@patterns, fn {source, description} -> {Regex.compile!(source), description} end)
 
-    violations =
-      for path <- Path.wildcard("lib/**/*.ex"),
-          path not in @allowed,
-          source = File.read!(path),
-          String.contains?(source, ["contributed", "route_id", "FixtureInferenceRoute"]),
-          {pattern, description} <- patterns,
-          Regex.match?(pattern, source),
-          do: "#{path}: #{description}"
+    {:ok, patterns: patterns}
+  end
 
-    assert violations == []
+  @core_files Path.wildcard("lib/**/*.ex") -- @allowed
+
+  for {files, batch} <- @core_files |> Enum.sort() |> Enum.chunk_every(160) |> Enum.with_index(1) do
+    test "core does not match on a contributed route id or module in source batch #{batch}",
+         %{patterns: patterns} do
+      violations =
+        for path <- unquote(files),
+            source = File.read!(path),
+            String.contains?(source, ["contributed", "route_id", "FixtureInferenceRoute"]),
+            {pattern, description} <- patterns,
+            Regex.match?(pattern, source),
+            do: "#{path}: #{description}"
+
+      assert violations == []
+    end
   end
 
   test "the route contract, extension API, fixture, and SDK never mention the model library" do
