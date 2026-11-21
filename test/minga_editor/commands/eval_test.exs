@@ -88,9 +88,11 @@ defmodule MingaEditor.Commands.EvalTest do
 
   describe "timeout handling" do
     test "long-running eval times out gracefully" do
+      :ok = Events.subscribe(:log_message)
       state = build_state()
       result = Eval.execute(state, {:eval_expression, ":timer.sleep(10_000)"}, timeout: 100)
       assert result.shell_runtime.state.notice.message == "Eval timed out (0s)"
+      assert_eval_message("Eval timeout: :timer.sleep(10_000)")
     end
   end
 

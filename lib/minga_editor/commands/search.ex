@@ -20,6 +20,7 @@ defmodule MingaEditor.Commands.Search do
   alias Minga.Core.Unicode
   alias Minga.Editing.Search.Match
   alias MingaEditor.PickerUI
+  alias MingaEditor.Shell.Traditional.NoticeWorkflow
   alias MingaEditor.Shell.Traditional.TodoSearchWorkflow
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Search, as: SearchData
@@ -78,33 +79,10 @@ defmodule MingaEditor.Commands.Search do
           state,
         :confirm_search
       ) do
-    content = Buffer.content(buf)
-
-    case Minga.Editing.search_next(content, ms.input, ms.original_cursor, ms.direction) do
-      nil ->
-        state
-        |> put_in_search(:last_pattern, ms.input)
-        |> put_in_search(:last_direction, ms.direction)
-        |> then(
-          &MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
-            &1,
-            "Pattern not found: #{ms.input}"
-          )
-        )
-
-      {line, col} ->
-        Buffer.move_to(buf, {line, col})
-
-        state = %{
-          state
-          | workspace: MingaEditor.Session.State.mark_authoritative_scroll(state.workspace)
-        }
-
-        state
-        |> auto_unfold_at(line)
-        |> put_in_search(:last_pattern, ms.input)
-        |> put_in_search(:last_direction, ms.direction)
-    end
+    buf
+    |> Buffer.content()
+    |> Minga.Editing.search_next(ms.input, ms.original_cursor, ms.direction)
+    |> apply_search_result(state, buf, ms.input, ms.direction)
   end
 
   def execute(
@@ -287,8 +265,8 @@ defmodule MingaEditor.Commands.Search do
           end
 
         state
-        |> put_in_search(:last_pattern, ms.pattern)
-        |> then(&MingaEditor.Shell.Traditional.NoticeWorkflow.publish(&1, msg))
+        |> record_substitution(ms.pattern)
+        |> NoticeWorkflow.publish(msg)
     end
   end
 
@@ -303,15 +281,7 @@ defmodule MingaEditor.Commands.Search do
     text = word_at_cursor(gb, cursor)
 
     if text != "" do
-      state =
-        %{
-          state
-          | workspace:
-              MingaEditor.Session.State.set_search(
-                state.workspace,
-                (&SearchData.record(&1, text, :forward)).(state.workspace.search)
-              )
-        }
+      state = record_search(state, text, :forward)
 
       if state.frontend.backend in [:gui, :native_gui] and state.frontend.port_manager do
         MingaEditor.Frontend.clipboard_write(state.frontend.port_manager, text, :find)
@@ -336,8 +306,7 @@ defmodule MingaEditor.Commands.Search do
         all_matches
       else
         all_matches
-        |> Enum.group_by(fn %Match{line: line} -> line end)
-        |> Enum.flat_map(fn {_line, line_matches} -> [hd(line_matches)] end)
+        |> Enum.dedup_by(& &1.line)
         |> Enum.sort()
       end
 
@@ -396,33 +365,31 @@ defmodule MingaEditor.Commands.Search do
       msg = if count == 1, do: "1 substitution", else: "#{count} substitutions"
 
       state
-      |> put_in_search(:last_pattern, pattern)
-      |> then(&MingaEditor.Shell.Traditional.NoticeWorkflow.publish(&1, msg))
+      |> record_substitution(pattern)
+      |> NoticeWorkflow.publish(msg)
     end
   end
 
   defp execute_word_search(state, buf, content, cursor, word, direction) do
     content
     |> Minga.Editing.search_next(word, cursor, direction)
-    |> apply_word_search(state, buf, word, direction)
+    |> apply_search_result(state, buf, word, direction)
   end
 
-  defp apply_word_search(nil, state, _buf, word, direction),
-    do: word_search_not_found(state, word, direction)
-
-  defp apply_word_search({line, col}, state, buf, word, direction),
-    do: word_search_found(state, buf, word, direction, line, col)
-
-  defp word_search_not_found(state, word, direction) do
+  @spec apply_search_result(
+          Buffer.position() | nil,
+          state(),
+          pid(),
+          String.t(),
+          Minga.Editing.Search.direction()
+        ) :: state()
+  defp apply_search_result(nil, state, _buf, pattern, direction) do
     state
-    |> put_in_search(:last_pattern, word)
-    |> put_in_search(:last_direction, direction)
-    |> then(
-      &MingaEditor.Shell.Traditional.NoticeWorkflow.publish(&1, "Pattern not found: #{word}")
-    )
+    |> record_search(pattern, direction)
+    |> NoticeWorkflow.publish("Pattern not found: #{pattern}")
   end
 
-  defp word_search_found(state, buf, word, direction, line, col) do
+  defp apply_search_result({line, col}, state, buf, pattern, direction) do
     Buffer.move_to(buf, {line, col})
 
     state = %{
@@ -432,33 +399,21 @@ defmodule MingaEditor.Commands.Search do
 
     state
     |> auto_unfold_at(line)
-    |> put_in_search(:last_pattern, word)
-    |> put_in_search(:last_direction, direction)
+    |> record_search(pattern, direction)
   end
 
   # ── Private helpers ────────────────────────────────────────────────────────
 
-  @spec put_in_search(state(), atom(), term()) :: state()
-  defp put_in_search(state, :last_pattern, value) do
-    %{
-      state
-      | workspace:
-          MingaEditor.Session.State.set_search(
-            state.workspace,
-            (&SearchData.record_pattern(&1, value)).(state.workspace.search)
-          )
-    }
+  @spec record_search(state(), String.t(), Minga.Editing.Search.direction()) :: state()
+  defp record_search(%{workspace: workspace} = state, pattern, direction) do
+    search = SearchData.record(workspace.search, pattern, direction)
+    %{state | workspace: MingaEditor.Session.State.set_search(workspace, search)}
   end
 
-  defp put_in_search(state, :last_direction, value) do
-    %{
-      state
-      | workspace:
-          MingaEditor.Session.State.set_search(
-            state.workspace,
-            (&SearchData.set_last_direction(&1, value)).(state.workspace.search)
-          )
-    }
+  @spec record_substitution(state(), String.t()) :: state()
+  defp record_substitution(%{workspace: workspace} = state, pattern) do
+    search = SearchData.record_pattern(workspace.search, pattern)
+    %{state | workspace: MingaEditor.Session.State.set_search(workspace, search)}
   end
 
   # Replace a match at a specific line/col/length in content string.
