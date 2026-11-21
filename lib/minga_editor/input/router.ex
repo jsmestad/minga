@@ -467,7 +467,11 @@ defmodule MingaEditor.Input.Router do
   defp with_invocation_source(nil, fun), do: fun.()
   defp with_invocation_source(source, fun), do: InvocationContext.with_source(source, fun)
 
-  @spec walk_handlers([MingaEditor.Input.dispatch_handler()], EditorState.t(), handler_invocation()) ::
+  @spec walk_handlers(
+          [MingaEditor.Input.dispatch_handler()],
+          EditorState.t(),
+          handler_invocation()
+        ) ::
           MingaEditor.Input.Handler.result()
   defp walk_handlers([], state, _invoke), do: {:passthrough, state}
 
