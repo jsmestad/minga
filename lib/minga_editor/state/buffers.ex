@@ -68,19 +68,7 @@ defmodule MingaEditor.State.Buffers do
     if Process.alive?(active) do
       bs
     else
-      live_list = Enum.filter(bs.list, &Process.alive?/1)
-
-      {new_active, new_index} =
-        case live_list do
-          [] ->
-            {nil, 0}
-
-          _ ->
-            idx = min(bs.active_index, Enum.count(live_list) - 1)
-            {Enum.at(live_list, idx), idx}
-        end
-
-      %{bs | list: live_list, active: new_active, active_index: new_index}
+      select_neighbor(bs, Enum.filter(bs.list, &Process.alive?/1))
     end
   end
 
@@ -90,26 +78,25 @@ defmodule MingaEditor.State.Buffers do
     new_list = Enum.reject(bs.list, &(&1 == pid))
     help = if bs.help == pid, do: nil, else: bs.help
 
-    {new_active, new_index} =
-      case {new_list, bs.active == pid, Enum.find_index(new_list, &(&1 == bs.active))} do
-        {[], _, _} ->
-          {nil, 0}
+    bs = %{bs | help: help}
 
-        {_, false, idx} when is_integer(idx) ->
-          {bs.active, idx}
+    case retained_active_index(bs, pid, new_list) do
+      nil -> select_neighbor(bs, new_list)
+      index -> %{bs | list: new_list, active_index: index}
+    end
+  end
 
-        _ ->
-          idx = min(bs.active_index, Enum.count(new_list) - 1)
-          {Enum.at(new_list, idx), idx}
-      end
+  @spec retained_active_index(t(), pid(), [pid()]) :: non_neg_integer() | nil
+  defp retained_active_index(%__MODULE__{active: removed}, removed, _list), do: nil
 
-    %__MODULE__{
-      bs
-      | list: new_list,
-        active: new_active,
-        active_index: new_index,
-        help: help
-    }
+  defp retained_active_index(%__MODULE__{active: active}, _removed, list),
+    do: Enum.find_index(list, &(&1 == active))
+
+  @spec select_neighbor(t(), [pid()]) :: t()
+  defp select_neighbor(bs, []), do: replace_list(bs, [], 0)
+
+  defp select_neighbor(bs, list) do
+    replace_list(bs, list, min(bs.active_index, length(list) - 1))
   end
 
   @doc "Sets the help buffer pid."

@@ -70,6 +70,13 @@ defmodule MingaEditor.State.BuffersTest do
       assert result == bs
     end
 
+    test "removing an absent buffer replaces an unlisted active override with its neighbor" do
+      buffers = %Buffers{list: [:a, :b], active: :b, active_index: 1}
+      overridden = Buffers.set_active_override(buffers, :unlisted)
+
+      assert Buffers.remove(overridden, :absent) == buffers
+    end
+
     test "clamps active_index when last element is removed" do
       bs = %Buffers{list: [:a, :b, :c], active: :c, active_index: 2}
       result = Buffers.remove(bs, :c)

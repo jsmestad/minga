@@ -383,7 +383,7 @@ defmodule MingaEditor.State.SnapshotTest do
       GenServer.stop(buf_c)
 
       scrubbed = Buffers.scrub_dead_active(bs)
-      assert scrubbed.active in [buf_a, buf_b]
+      assert scrubbed.active == buf_b
       assert scrubbed.list == [buf_a, buf_b]
       assert scrubbed.active_index == 1
     end

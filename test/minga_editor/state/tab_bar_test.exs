@@ -195,6 +195,40 @@ defmodule MingaEditor.State.TabBarTest do
       assert Enum.map(TabBar.visible_file_tabs(tb), & &1.label) == ["c", "a", "b"]
     end
 
+    test "keyboard move and drag keep other tab slots in place and agree after unpinning" do
+      tb = tab_bar(file: "a", agent: "agent", file: "b", file: "other", file: "c")
+      {tb, workspace} = TabBar.add_workspace(tb, "Other workspace")
+
+      tb =
+        tb
+        |> TabBar.move_tab_to_workspace(4, workspace.id)
+        |> TabBar.pin_tab(5)
+        |> TabBar.switch_to(1)
+
+      moved = TabBar.move_tab_left(tb, 3)
+      assert TabBar.reorder_tab(tb, 3, 1) == moved
+      assert labels(moved) == ["c", "agent", "b", "other", "a"]
+      assert active_label(moved) == "a"
+
+      unpinned = TabBar.unpin_tab(moved, 5)
+      assert Enum.map(TabBar.visible_file_tabs(unpinned, 0), & &1.label) == ["c", "b", "a"]
+    end
+
+    test "moving left from the first visible slot does not wrap to the last tab" do
+      tb = tab_bar(file: "a", file: "b")
+      assert TabBar.move_tab_left(tb, 1) == tb
+    end
+
+    test "dropping a pinned tab in its current slot preserves that order after unpinning" do
+      tb =
+        tab_bar(file: "a", file: "b", file: "c")
+        |> TabBar.pin_tab(3)
+        |> TabBar.reorder_tab(3, 0)
+        |> TabBar.unpin_tab(3)
+
+      assert Enum.map(TabBar.visible_file_tabs(tb), & &1.label) == ["c", "a", "b"]
+    end
+
     test "does not move the last pinned tab right across the pinned boundary" do
       tb = tab_bar(file: "a", file: "b", file: "c")
       tb = TabBar.pin_tab(tb, 3) |> TabBar.switch_to(3)
