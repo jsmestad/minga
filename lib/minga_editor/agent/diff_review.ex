@@ -541,6 +541,11 @@ defmodule MingaEditor.Agent.DiffReview do
         ) :: {[String.t()], {[String.t()], non_neg_integer()}}
   defp signature_after_lines(%{type: :deleted}, cursor, _after_lines), do: {[], cursor}
 
+  defp signature_after_lines(%{start_line: start, count: count}, cursor, after_lines)
+       when start < 0 or count < 0 do
+    {Enum.slice(after_lines, start, count), cursor}
+  end
+
   defp signature_after_lines(%{start_line: start, count: count}, {tail, offset}, after_lines) do
     start_tail =
       if start >= offset do
@@ -592,21 +597,21 @@ defmodule MingaEditor.Agent.DiffReview do
 
   defp build_display(after_lines, hunks, ctx) do
     hunks
-    |> do_build_display({after_lines, 0}, length(after_lines), ctx, 0, [])
+    |> do_build_display({after_lines, 0}, {after_lines, length(after_lines)}, ctx, 0, [])
     |> Enum.reverse()
   end
 
   @spec do_build_display(
           [Diff.hunk()],
           {[String.t()], non_neg_integer()},
-          non_neg_integer(),
+          {[String.t()], non_neg_integer()},
           non_neg_integer(),
           non_neg_integer(),
           [diff_line()]
         ) :: [diff_line()]
-  defp do_build_display([], _cursor, _file_length, _ctx, _idx, acc), do: acc
+  defp do_build_display([], _cursor, _source, _ctx, _idx, acc), do: acc
 
-  defp do_build_display([hunk | rest], {tail, offset}, file_length, ctx, idx, acc) do
+  defp do_build_display([hunk | rest], {tail, offset}, {lines, file_length} = source, ctx, idx, acc) do
     {added, removed} = hunk_counts(hunk)
 
     header =
@@ -631,12 +636,34 @@ defmodule MingaEditor.Agent.DiffReview do
       |> min(file_length)
       |> cap_context_before_next_hunk(List.first(rest))
 
-    after_baseline = hunk.old_start + hunk.old_count
-    {tail, acc} = prepend_context(tail, after_end - after_start, after_baseline, acc)
-    do_build_display(rest, {tail, after_end}, file_length, ctx, idx + 1, acc)
+    {tail, offset, acc} = prepend_trailing_context(tail, hunk, after_start, after_end, lines, acc)
+    do_build_display(rest, {tail, offset}, source, ctx, idx + 1, acc)
   end
 
-  @spec cap_context_before_next_hunk(non_neg_integer(), Diff.hunk() | nil) :: non_neg_integer()
+  @spec prepend_trailing_context(
+          [String.t()],
+          Diff.hunk(),
+          integer(),
+          integer(),
+          [String.t()],
+          [diff_line()]
+        ) :: {[String.t()], non_neg_integer(), [diff_line()]}
+  defp prepend_trailing_context(_tail, %{count: count} = hunk, start, stop, lines, acc)
+       when count < 0 do
+    # A signed deletion can move the context backward or address it from EOF.
+    amount = stop - start
+    context = Enum.slice(lines, start, amount)
+    {_rest, acc} = prepend_context(context, amount, hunk.old_start + hunk.old_count, acc)
+    offset = max(stop, 0)
+    {Enum.drop(lines, offset), offset, acc}
+  end
+
+  defp prepend_trailing_context(tail, hunk, start, stop, _lines, acc) when stop >= 0 do
+    {tail, acc} = prepend_context(tail, stop - start, hunk.old_start + hunk.old_count, acc)
+    {tail, stop, acc}
+  end
+
+  @spec cap_context_before_next_hunk(integer(), Diff.hunk() | nil) :: integer()
   defp cap_context_before_next_hunk(after_end, nil), do: after_end
 
   defp cap_context_before_next_hunk(after_end, next_hunk),
@@ -660,7 +687,7 @@ defmodule MingaEditor.Agent.DiffReview do
   end
 
   defp prepend_changed(lines, %{type: :deleted} = hunk, idx, acc) do
-    {Enum.drop(lines, hunk.count), prepend_removed(hunk.old_lines, hunk.old_start, idx, acc)}
+    {Enum.drop(lines, max(hunk.count, 0)), prepend_removed(hunk.old_lines, hunk.old_start, idx, acc)}
   end
 
   defp prepend_changed(lines, %{type: :modified} = hunk, idx, acc) do

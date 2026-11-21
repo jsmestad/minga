@@ -473,6 +473,30 @@ defmodule MingaEditor.Agent.DiffReviewTest do
         assert_raise FunctionClauseError, fn -> DiffReview.to_display_lines(review, 0) end
       end
     end
+
+    test "a signed deletion slices context from EOF and reanchors before later hunks" do
+      deletion = %{hunk(:deleted, 0, 0, ["A"]) | count: -1}
+      review = DiffReview.from_hunks("f.ex", "a\nb\nc", [deletion])
+
+      assert [
+               %{kind: :hunk_header},
+               %{kind: :removed, text: "A", source: {:baseline, 0}},
+               %{kind: :context, text: "c", source: {:baseline, 1}}
+             ] = DiffReview.to_display_lines(review, 1)
+
+      deletion = %{deletion | count: -2}
+      addition = %{hunk(:added, 2, 1, []) | old_start: 2}
+      review = DiffReview.from_hunks("f.ex", "a\nb\nc", [deletion, addition])
+
+      assert [
+               %{kind: :hunk_header},
+               %{kind: :removed, text: "A", source: {:baseline, 0}},
+               %{kind: :context, text: "b", source: {:baseline, 1}},
+               %{kind: :hunk_header},
+               %{kind: :context, text: "b", source: {:baseline, 1}},
+               %{kind: :added, text: "c", source: {:added, 1, 0}}
+             ] = DiffReview.to_display_lines(review, 1)
+    end
   end
 
   describe "matching_hunks/2" do
@@ -484,6 +508,24 @@ defmodule MingaEditor.Agent.DiffReviewTest do
       past_eof = DiffReview.from_hunks("f.ex", "a", [hunk(:added, 2, 3, [])])
       farther_past_eof = DiffReview.from_hunks("f.ex", "b", [hunk(:added, 6, 1, [])])
       assert DiffReview.matching_hunks(past_eof, farther_past_eof) == %{0 => 0}
+    end
+
+    test "matches changed text at negative and clipped negative starts" do
+      for {start, expected} <- [{-1, "c"}, {-5, "a"}] do
+        signed = %{hunk(:modified, 0, 1, ["old"]) | start_line: start}
+        signed_review = DiffReview.from_hunks("f.ex", "a\nb\nc", [signed])
+        exact = DiffReview.from_hunks("f.ex", expected, [hunk(:modified, 0, 1, ["old"])])
+
+        assert DiffReview.matching_hunks(signed_review, exact) == %{0 => 0}
+      end
+    end
+
+    test "a negative changed count still fails while matching" do
+      signed = %{hunk(:modified, 0, 1, ["old"]) | count: -1}
+      signed_review = DiffReview.from_hunks("f.ex", "a\nb", [signed])
+      exact = DiffReview.from_hunks("f.ex", "a", [hunk(:modified, 0, 1, ["old"])])
+
+      assert_raise FunctionClauseError, fn -> DiffReview.matching_hunks(signed_review, exact) end
     end
 
     test "backwards starts still match and migrate decisions in supplied order" do
