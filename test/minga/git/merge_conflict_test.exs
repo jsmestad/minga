@@ -72,7 +72,16 @@ defmodule Minga.Git.MergeConflictTest do
     end
 
     test "keeps adjacent completed conflicts and drops the last unfinished side" do
-      completed = ["<<<<<<<", "=======", ">>>>>>>", "<<<<<<<", "|||||||", "=======", "", ">>>>>>>"]
+      completed = [
+        "<<<<<<<",
+        "=======",
+        ">>>>>>>",
+        "<<<<<<<",
+        "|||||||",
+        "=======",
+        "",
+        ">>>>>>>"
+      ]
 
       for unfinished <- [["<<<<<<<"], ["<<<<<<<", "|||||||"], ["<<<<<<<", "======="]] do
         assert [

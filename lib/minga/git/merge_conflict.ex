@@ -141,7 +141,8 @@ defmodule Minga.Git.MergeConflict do
     scan(rest, line + 1, {:current, {line, label}}, [], regions)
   end
 
-  defp scan([_ | rest], line, :outside, [], regions), do: scan(rest, line + 1, :outside, [], regions)
+  defp scan([_ | rest], line, :outside, [], regions),
+    do: scan(rest, line + 1, :outside, [], regions)
 
   defp scan(["|||||||" <> label | rest], line, {:current, start}, current, regions) do
     scan(rest, line + 1, {:base, {start, current}, {line, label}}, [], regions)
@@ -190,7 +191,8 @@ defmodule Minga.Git.MergeConflict do
     region_with_lines(entry, Enum.reverse(current), base_lines, Enum.reverse(lines))
   end
 
-  @spec complete_base(side() | nil) :: {non_neg_integer() | nil, String.t() | nil, [String.t()] | nil}
+  @spec complete_base(side() | nil) ::
+          {non_neg_integer() | nil, String.t() | nil, [String.t()] | nil}
   defp complete_base(nil), do: {nil, nil, nil}
 
   defp complete_base({{line, label}, reversed}),
