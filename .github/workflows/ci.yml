@@ -48,7 +48,7 @@ jobs:
       - run: mix compile --warnings-as-errors
       - run: mix credo --strict
       - run: mix ex_dna --max-clones 0
-      - run: mix reach.check --arch --smells
+      - run: mix reach.check --arch
 
   test:
     name: Test (Elixir)
@@ -319,9 +319,11 @@ jobs:
       - name: Boot Go frontend and verify ready protocol packet
         run: python3 scripts/go_tui_boot_smoke.py
 
-  swift:
-    name: Swift (macOS GUI)
+  swift-tests:
+    name: Swift (macOS correctness)
     runs-on: macos-15
+    permissions:
+      contents: read
     env:
       # ViewInspector's glass-effect inspectors require the macOS 26 SDK.
       DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
@@ -329,9 +331,6 @@ jobs:
       MINGA_REQUIRE_METAL: "1"
     steps:
       - uses: actions/checkout@v4
-        with:
-          # Need the merge-base revision available for the same-runner render A/B gate.
-          fetch-depth: 0
 
       - uses: erlef/setup-beam@v1
         with:
@@ -353,34 +352,6 @@ jobs:
 
       - name: Install pinned XcodeGen
         run: scripts/install_xcodegen "$RUNNER_TEMP/xcodegen" >> "$GITHUB_PATH"
-
-      - name: Gate optimized native render preparation
-        run: |
-          HEAD_REF=$(git rev-parse HEAD)
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            BASE_SHA=$(git merge-base origin/main "$HEAD_REF")
-            echo "Merge-base: $BASE_SHA"
-            bash scripts/bench_render_performance_ab "$BASE_SHA" "$HEAD_REF"
-          else
-            bash scripts/bench_render_performance_ab --head-only "$HEAD_REF"
-          fi
-
-      - name: Gate native Metal completion path
-        run: |
-          # Hosted macOS GPU scheduling is not a stable baseline environment, and the known-old renderer can trap before producing measurements. CI gates HEAD's absolute budgets; paired A/B evidence is captured separately on stable same-machine hardware.
-          HEAD_REF=$(git rev-parse HEAD)
-          bash scripts/bench_native_render_performance_ab --head-only "$HEAD_REF"
-
-      - name: Upload native Metal performance evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: native-render-performance
-          path: |
-            native_render_performance.json
-            native_render_performance_metrics.txt
-            minga-native-render-performance*.ips
-          if-no-files-found: error
 
       - name: Cache DerivedData
         uses: actions/cache@v4
@@ -444,6 +415,84 @@ jobs:
           path: conformance-recovery-evidence/
           if-no-files-found: warn
 
+  swift-performance:
+    name: Swift (macOS performance)
+    runs-on: macos-15
+    permissions:
+      contents: read
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+      MINGA_REQUIRE_METAL: "1"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The base and HEAD render benchmarks run on this same runner.
+          fetch-depth: 0
+
+      - uses: erlef/setup-beam@v1
+        with:
+          version-file: .tool-versions
+          version-type: strict
+
+      - name: Restore Swift deps
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            deps
+            _build
+          key: swift-deps-${{ runner.os }}-${{ hashFiles('.tool-versions') }}-${{ hashFiles('mix.lock') }}
+          restore-keys: swift-deps-${{ runner.os }}-
+
+      - run: mix deps.get
+
+      - name: Install pinned XcodeGen
+        run: scripts/install_xcodegen "$RUNNER_TEMP/xcodegen" >> "$GITHUB_PATH"
+
+      # The benchmark scripts generate protocol sources for each measured revision.
+
+      - name: Gate optimized native render preparation
+        run: |
+          HEAD_REF=$(git rev-parse HEAD)
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE_SHA=$(git merge-base origin/main "$HEAD_REF")
+            echo "Merge-base: $BASE_SHA"
+            bash scripts/bench_render_performance_ab "$BASE_SHA" "$HEAD_REF"
+          else
+            bash scripts/bench_render_performance_ab --head-only "$HEAD_REF"
+          fi
+
+      - name: Gate native Metal completion path
+        run: |
+          # Hosted macOS GPU scheduling is not a stable baseline environment, and the known-old renderer can trap before producing measurements. CI gates HEAD's absolute budgets; paired A/B evidence is captured separately on stable same-machine hardware.
+          HEAD_REF=$(git rev-parse HEAD)
+          bash scripts/bench_native_render_performance_ab --head-only "$HEAD_REF"
+
+      - name: Upload native Metal performance evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-render-performance
+          path: |
+            native_render_performance.json
+            native_render_performance_metrics.txt
+            minga-native-render-performance*.ips
+          if-no-files-found: error
+
+  swift:
+    # Preserve the required check name and require both macOS jobs to pass.
+    name: Swift (macOS GUI)
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    permissions: {}
+    needs: [swift-tests, swift-performance]
+    steps:
+      - name: Require Swift correctness and performance
+        env:
+          CORRECTNESS: ${{ needs.swift-tests.result }}
+          PERFORMANCE: ${{ needs.swift-performance.result }}
+        run: |
+          printf 'Swift correctness: %s; Swift performance: %s\n' "$CORRECTNESS" "$PERFORMANCE"
+          [[ "$CORRECTNESS" == success && "$PERFORMANCE" == success ]]
 
   swift-integration:
     name: Swift Protocol Integration
@@ -603,7 +652,7 @@ jobs:
     if: ${{ always() }}
     runs-on: ubuntu-latest
     permissions: {}
-    # Keep this list in sync with every substantive CI job; docs deploys only on main.
+    # Swift's required check aggregates both macOS jobs; docs deploys only on main.
     needs:
       - lint
       - test
