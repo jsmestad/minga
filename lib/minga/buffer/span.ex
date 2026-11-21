@@ -33,12 +33,6 @@ defmodule Minga.Buffer.Span do
     %__MODULE__{start: stop_point, stop: Position.after_character_at(text, start_point)}
   end
 
-  @doc "Returns the text covered by a span."
-  @spec slice(String.t(), t()) :: String.t()
-  def slice(text, %__MODULE__{start: start_point, stop: stop_point}) do
-    binary_part(text, start_point, stop_point - start_point)
-  end
-
   @doc "Removes the text covered by a span."
   @spec delete(String.t(), t()) :: String.t()
   def delete(text, %__MODULE__{start: start_point, stop: stop_point}) do
