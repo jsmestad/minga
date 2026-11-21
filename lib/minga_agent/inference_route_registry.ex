@@ -141,8 +141,9 @@ defmodule MingaAgent.InferenceRouteRegistry do
   def reset_label(%PlanWindow{} = window),
     do: PlanWindow.reset_label(window, DateTime.utc_now(), &local_time/1)
 
+  @doc "Converts a UTC time to this machine's local calendar time, the clock `PlanWindow.reset_label/3` formats."
   @spec local_time(DateTime.t()) :: :calendar.datetime()
-  defp local_time(%DateTime{} = at) do
+  def local_time(%DateTime{} = at) do
     at
     |> DateTime.shift_zone!("Etc/UTC")
     |> DateTime.to_naive()
@@ -310,7 +311,12 @@ defmodule MingaAgent.InferenceRouteRegistry do
   defp put_status(state, %Entry{status: status} = entry, status), do: put_route(state, entry)
 
   defp put_status(state, %Entry{spec: spec} = entry, status) do
-    publish_status(state.events, %StatusChangedEvent{route_id: spec.id, status: status})
+    publish_status(state.events, %StatusChangedEvent{
+      route_id: spec.id,
+      short_name: Spec.short_name(spec),
+      status: status
+    })
+
     put_route(state, Entry.with_status(entry, status))
   end
 

@@ -19,6 +19,8 @@ extension PreviewRegistry {
             Wire.StatusBarSegment(id: 0, kind: "mode", text: " NORMAL ", fgColor: 0x000000, bgColor: 0x7AA2F7, attrs: 1, command: ""),
             Wire.StatusBarSegment(id: 1, kind: "git", text: " main ", fgColor: 0xBB9AF7, bgColor: 0x000000, attrs: 0, command: "git_branch_picker"),
             Wire.StatusBarSegment(id: 2, kind: "filename", text: " editor.ex [+] ", fgColor: 0xC0CAF5, bgColor: 0x000000, attrs: 0, command: "buffer_list"),
+            // Near-limit subscription usage: the BEAM sends this generic chip only at 80% or more.
+            Wire.StatusBarSegment(id: 3, kind: "plan_limit", text: " Claude 82% · 5h ", fgColor: 0xE0AF68, bgColor: 0x000000, attrs: 0, command: "agent_pick_model"),
         ]
         let rightSegments = [
             Wire.StatusBarSegment(id: 0, kind: "diagnostics", text: " 0 ", fgColor: 0xF7768E, bgColor: 0x000000, attrs: 0, command: "diagnostic_list"),

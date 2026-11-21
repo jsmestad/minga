@@ -18,6 +18,7 @@ defmodule Minga.Config.ModelineSegments do
     :git,
     :agent,
     :background_agent,
+    :plan_limit,
     :diagnostics,
     :parser,
     :lsp,

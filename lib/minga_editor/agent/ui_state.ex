@@ -371,6 +371,21 @@ defmodule MingaEditor.Agent.UIState do
     %{state | panel: Panel.project_model_selection(panel, selection)}
   end
 
+  @doc """
+  Returns the contributed route id the attached session's model runs through, or nil for a built-in provider or before a connection is attached.
+  """
+  @spec contributed_route_id(t()) :: String.t() | nil
+  def contributed_route_id(%__MODULE__{
+        connection: %ConnectionSnapshot{
+          model_selection: %MingaAgent.ModelSelection{
+            route: %MingaAgent.ModelSelection.Route{origin: {:contributed, route_id, _model}}
+          }
+        }
+      }),
+      do: route_id
+
+  def contributed_route_id(%__MODULE__{}), do: nil
+
   @doc "Sets the thinking level."
   @spec set_thinking_level(t(), String.t() | nil) :: t()
   def set_thinking_level(%__MODULE__{panel: panel} = state, level) do

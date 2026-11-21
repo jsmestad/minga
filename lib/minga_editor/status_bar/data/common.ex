@@ -5,6 +5,7 @@ defmodule MingaEditor.StatusBar.Data.Common do
   alias Minga.RenderModel.UI.StatusBar.Diagnostics
   alias Minga.RenderModel.UI.StatusBar.Workspace
   alias MingaEditor.State.Operation
+  alias MingaEditor.StatusBar.PlanLimit
   alias MingaEditor.UI.Theme
 
   @type t :: %__MODULE__{
@@ -19,7 +20,8 @@ defmodule MingaEditor.StatusBar.Data.Common do
           agent_theme_colors: Theme.Agent.t() | nil,
           git_degraded: boolean(),
           workspace: Workspace.t() | nil,
-          merge_conflict_count: non_neg_integer()
+          merge_conflict_count: non_neg_integer(),
+          plan_limit: PlanLimit.t() | nil
         }
 
   @enforce_keys [
@@ -36,5 +38,5 @@ defmodule MingaEditor.StatusBar.Data.Common do
     :workspace,
     :merge_conflict_count
   ]
-  defstruct @enforce_keys
+  defstruct [plan_limit: nil] ++ @enforce_keys
 end

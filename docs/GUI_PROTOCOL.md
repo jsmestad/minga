@@ -381,6 +381,8 @@ Macro recording: 0=not recording, 1-26=recording register a-z
 
 `ModelineSegments` is the named GUI projection of the configurable modeline. The BEAM resolves built-in and custom segment names, side placement, explicit ordering, and click targets, then sends named styled segments to the frontend. Native frontends should use `name` to render known built-ins with platform-native controls (`mode` as a badge, `position` as compact text, `filetype` with the devicon, and so on) instead of drawing terminal-style full-height color blocks. Unknown or custom names can use `text`, `fg`, `bg`, and `attrs` as a native chip fallback. `attrs` uses the same low bits as `draw_text`: bit 0 bold, bit 1 underline, bit 2 italic. `target` is empty for non-clickable segments; otherwise it is a command name to send through the existing `execute_command` GUI action.
 
+The `plan_limit` built-in deliberately has no native control: frontends render it through the generic chip fallback. The BEAM decides whether it appears (80% or more of a subscription limit window, or a reached limit), its complete text (`Claude 82% · 5h`, `Claude limit · resets 3:40 PM`), and its color, and sets its target to `agent_pick_model` so a click opens the model picker. Frontends apply no threshold or formatting of their own.
+
 Section `0x0B` is omitted when the BEAM has no GUI modeline data for this frame. A present section with zero left and right segments is explicit and tells the frontend not to synthesize fallback built-ins.
 
 `PendingKeys` (`0x0E`) is vim's `showcmd`: the pending key sequence typed in normal/operator-pending mode that has not yet resolved into a command (an accumulated count, a register prefix like `"a`, an operator like `d`, or a pending single-key op like `f`/`r`/`m`). The frontend renders it as a dim, right-aligned status-bar segment so every keypress is acknowledged instantly, underneath the delayed which-key popup. The section is omitted when the string is empty, so it clears automatically when the sequence resolves, is aborted (Esc), or which-key opens (the BEAM derives an empty string, and this section specifically omits empty payloads — unlike e.g. `Message` 0x07, which is always emitted). It renders purely from BEAM FSM state per frame with no frontend timers.
@@ -1175,7 +1177,7 @@ Per action:
 
 `version` is currently 1. `level`: 0 = info, 1 = warning, 2 = error, 3 = success, 4 = progress. Flags: bit 0 = dismissable. `created_at` and `updated_at` are Unix seconds. `auto_dismiss_ms` uses `0xFFFFFFFF` for no auto-dismiss. Errors and progress notifications should normally use no auto-dismiss. Informational and success notifications may auto-dismiss after a short delay.
 
-TUI frontends do not render this opcode. The BEAM should also log important notifications to `*Messages*` so terminal users get the same information.
+The Go TUI renders this opcode at its registry placement, with each inline action as a clickable `[Label]` that sends the same `notification_action` as the macOS button. The BEAM should also log important notifications to `*Messages*` so the information survives after a notification is dismissed.
 
 ### 0x9B — gui_edit_timeline
 
