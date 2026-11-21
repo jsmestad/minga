@@ -75,6 +75,22 @@ defmodule Minga.Buffer.Lines do
     end
   end
 
+  @doc "Fetches existing lines by number without materializing unrequested lines."
+  @spec fetch_many(Document.t(), [line_index()]) :: %{line_index() => String.t()}
+  def fetch_many(%Document{}, []), do: %{}
+
+  def fetch_many(%Document{before: before, after: after_} = doc, line_numbers) do
+    {starts, adjust_after, delta} = index_view(doc)
+    text_size = byte_size(before) + byte_size(after_)
+
+    Enum.reduce(line_numbers, %{}, fn line, lines ->
+      case adjusted_span(starts, line, text_size, adjust_after, delta) do
+        nil -> lines
+        {start, length} -> Map.put(lines, line, extract_from_gap(before, after_, start, length))
+      end
+    end)
+  end
+
   @doc "Returns up to `count` editor lines starting at `first_line`."
   @spec slice(Document.t(), line_index(), non_neg_integer()) :: [String.t()]
 

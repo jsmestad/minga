@@ -38,12 +38,26 @@ defmodule MingaEditor.UI.Picker.Sources.Diagnostics do
     path
     |> SyncServer.path_to_uri()
     |> Diagnostics.for_uri()
-    |> Enum.map(&format_candidate(&1, buf))
+    |> format_candidates(buf)
   end
 
-  @spec format_candidate(Diagnostic.t(), pid()) :: Item.t()
-  defp format_candidate(diag, buf) do
-    {line, byte_col} = start_position(diag, buf)
+  @spec format_candidates([Diagnostic.t()], pid()) :: [Item.t()]
+  defp format_candidates(diagnostics, buf) do
+    needed =
+      for %Diagnostic{encoding: encoding, range: %{start_line: line}} <- diagnostics,
+          encoding != :utf8,
+          into: MapSet.new(),
+          do: line
+
+    lines =
+      if MapSet.size(needed) == 0, do: %{}, else: Buffer.lines_at(buf, MapSet.to_list(needed))
+
+    Enum.map(diagnostics, &format_candidate(&1, lines))
+  end
+
+  @spec format_candidate(Diagnostic.t(), %{non_neg_integer() => String.t()}) :: Item.t()
+  defp format_candidate(diag, lines) do
+    {line, byte_col} = Diagnostic.start_position(diag, Map.get(lines, diag.range.start_line, ""))
     icon = severity_icon(diag.severity)
     display_line = line + 1
     display_col = byte_col + 1
@@ -51,21 +65,6 @@ defmodule MingaEditor.UI.Picker.Sources.Diagnostics do
     label = "#{icon} #{display_line}:#{display_col}  #{diag.message}#{source_tag}"
 
     %Item{id: {line, byte_col}, label: label}
-  end
-
-  @spec start_position(Diagnostic.t(), pid()) :: Diagnostic.position()
-  defp start_position(%Diagnostic{} = diag, buf) do
-    diag
-    |> start_line_text(buf)
-    |> then(&Diagnostic.start_position(diag, &1))
-  end
-
-  @spec start_line_text(Diagnostic.t(), pid()) :: String.t()
-  defp start_line_text(%Diagnostic{} = diag, buf) do
-    case Buffer.lines(buf, diag.range.start_line, 1) do
-      [text] -> text
-      _ -> ""
-    end
   end
 
   @impl true

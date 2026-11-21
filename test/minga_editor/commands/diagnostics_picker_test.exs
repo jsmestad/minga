@@ -22,10 +22,33 @@ defmodule MingaEditor.Commands.DiagnosticsPickerTest do
 
     Diagnostics.publish(:expert, uri, [
       %Diagnostic{
-        range: %{start_line: 1, start_col: 2, end_line: 1, end_col: 6},
+        range: %{start_line: 1, start_col: 1, end_line: 1, end_col: 2},
+        encoding: :utf32,
+        severity: :info,
+        message: "code point"
+      },
+      %Diagnostic{
+        range: %{start_line: 1, start_col: 2, end_line: 1, end_col: 3},
+        encoding: :utf16,
         severity: :warning,
-        message: "unused variable",
+        message: "code units"
+      },
+      %Diagnostic{
+        range: %{start_line: 1, start_col: 4, end_line: 1, end_col: 5},
+        severity: :error,
+        message: "bytes",
         source: "expert"
+      },
+      %Diagnostic{
+        range: %{start_line: 5, start_col: 2, end_line: 5, end_col: 3},
+        encoding: :utf16,
+        severity: :hint,
+        message: "no line text"
+      },
+      %Diagnostic{
+        range: %{start_line: 5, start_col: 3, end_line: 5, end_col: 4},
+        severity: :info,
+        message: "raw byte column"
       }
     ])
 
@@ -38,7 +61,11 @@ defmodule MingaEditor.Commands.DiagnosticsPickerTest do
       assert picker_ui.source == DiagnosticsSource
 
       assert picker_ui.picker.items == [
-               %Item{id: {1, 2}, label: "W 2:3  unused variable (expert)"}
+               %Item{id: {1, 4}, label: "I 2:5  code point"},
+               %Item{id: {1, 4}, label: "W 2:5  code units"},
+               %Item{id: {1, 4}, label: "E 2:5  bytes (expert)"},
+               %Item{id: {5, 0}, label: "H 6:1  no line text"},
+               %Item{id: {5, 3}, label: "I 6:4  raw byte column"}
              ]
     end
   end
@@ -60,7 +87,7 @@ defmodule MingaEditor.Commands.DiagnosticsPickerTest do
 
   defp state_for_path(tmp_dir) do
     path = Path.join(tmp_dir, "current.ex")
-    state = TestHelpers.base_state(content: "alpha\nabcdef\nomega")
+    state = TestHelpers.base_state(content: "alpha\n🙂abcdef\nomega")
     :ok = Buffer.save_as(state.workspace.buffers.active, path)
     {state, SyncServer.path_to_uri(path)}
   end

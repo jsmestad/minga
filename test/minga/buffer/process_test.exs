@@ -434,6 +434,15 @@ defmodule Minga.Buffer.ProcessTest do
       assert BufferProcess.lines(pid, 1, 3) == ["b", "c", "d"]
       assert BufferProcess.line_count(pid) == 5
     end
+
+    test "sparse line reads omit missing lines and follow edits that shift later offsets" do
+      pid = start_supervised!({BufferProcess, content: "a\nb\nc\nd\ne\n"})
+      requested = [5, 9, 0, 4, 4]
+
+      assert Buffer.lines_at(pid, requested) == %{0 => "a", 4 => "e", 5 => ""}
+      assert :ok = BufferProcess.insert_text(pid, "é")
+      assert Buffer.lines_at(pid, requested) == %{0 => "éa", 4 => "e", 5 => ""}
+    end
   end
 
   describe "save/1" do
