@@ -7,6 +7,8 @@ defmodule MingaEditor.RenderPipeline.ResidentIncrementalTest do
   alias Minga.Buffer.EditDelta
   alias Minga.Editing.Search.Index
   alias Minga.Events.BufferChangedEvent
+  alias Minga.Language.Highlight
+  alias Minga.Language.Highlight.Span, as: HighlightSpan
   alias Minga.Search.IndexOwner
   alias MingaEditor.Handlers.GuiActionHandler
   alias MingaEditor.Layout
@@ -30,6 +32,8 @@ defmodule MingaEditor.RenderPipeline.ResidentIncrementalTest do
   alias MingaEditor.Renderer.Submission
   alias MingaEditor.Renderer.State, as: RendererState
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.Highlighting
+  alias MingaEditor.State.Parser
   alias MingaEditor.State.Render, as: EditorRender
   alias MingaEditor.GuiSearchWorkflow
   alias MingaEditor.Session.State, as: SessionState
@@ -39,6 +43,7 @@ defmodule MingaEditor.RenderPipeline.ResidentIncrementalTest do
   alias MingaEditor.Renderer.Gutter
   alias MingaEditor.Renderer.TextInteractionIndex.Reader
   alias MingaEditor.Renderer.WrapLayout
+  alias MingaEditor.UI.Theme
 
   import MingaEditor.RenderPipeline.TestHelpers
 
@@ -999,6 +1004,48 @@ defmodule MingaEditor.RenderPipeline.ResidentIncrementalTest do
 
     {presentation.anchor_top, presentation.visible_start_line, presentation.visible_end_line,
      presentation.overscan_start_line, presentation.overscan_end_line}
+  end
+
+  test "sparse edits preserve comment scope after clean multibyte source" do
+    lines =
+      for index <- 0..299 do
+        case index do
+          64 -> "é🙂"
+          96 -> "# TODO keep"
+          _ -> "ordinary line"
+        end
+      end
+
+    offset = lines |> Enum.take(96) |> Enum.reduce(0, &(byte_size(&1) + 1 + &2))
+    editor = gui_state(content: Enum.join(lines, "\n"), rows: 12, cols: 60, filetype: :text)
+    buffer = editor.workspace.buffers.active
+    assert {:ok, false} = BufferProcess.set_option(buffer, :wrap, false)
+
+    syntax =
+      editor.appearance.theme
+      |> Highlight.from_theme()
+      |> Highlight.put_names(["comment"])
+      |> Highlight.put_spans(1, [HighlightSpan.new(offset, offset + 11, 0)])
+
+    highlighting = Highlighting.put_highlight(editor.parser.highlighting, buffer, syntax)
+    editor = %{editor | parser: Parser.accept_highlighting(editor.parser, highlighting)}
+    state = warm(editor)
+
+    assert :ok = BufferProcess.apply_edit(buffer, 32, 0, 32, 1, "O")
+    assert :ok = BufferProcess.apply_edit(buffer, 96, 7, 96, 8, "K")
+    {model, state} = build_frame(state)
+
+    assert [
+             %{start_index: 32, insert_rows: [_]},
+             %{start_index: 96, insert_rows: [row]}
+           ] = model.row_delta.splices
+
+    assert row.text == "# TODO Keep"
+    fresh_row = state.editor |> fresh_resident_frame() |> Map.fetch!(:rows) |> Enum.at(96)
+    assert row.spans == fresh_row.spans
+
+    todo_fg = Theme.hl_todo_faces(editor.appearance.theme).todo.fg
+    assert Enum.any?(row.spans, &match?(%{start_col: 2, end_col: 6, fg: ^todo_fg}, &1))
   end
 
   describe "uncommitted consume retry" do
