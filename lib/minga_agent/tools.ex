@@ -441,7 +441,7 @@ defmodule MingaAgent.Tools do
       {:error, "stale revision: explicit create/replace mode and expected_revision are required"}
 
   @spec mutate_file(Context.t(), map(), Minga.Buffer.FileMutation.operation()) ::
-          {:ok, String.t()} | {:error, String.t()}
+          {:ok, String.t() | MingaAgent.Tool.FileMutationResult.t()} | {:error, String.t()}
   defp mutate_file(context, args, operation) do
     path = resolve_and_validate_path!(context.project_root, args["path"])
 
@@ -449,15 +449,23 @@ defmodule MingaAgent.Tools do
       if args["expected_revision"] == "absent", do: :absent, else: args["expected_revision"]
 
     case ToolRouter.conditional_mutate(context.router_context, path, expected, operation) do
-      {:ok, %Minga.Buffer.FileMutation.Receipt{}} ->
-        {:ok,
-         maybe_append_diagnostics(
-           path,
-           append_workspace_context(
-             context.router_context,
-             "committed one atomic file mutation to #{path}"
-           )
-         )}
+      {:ok, %Minga.Buffer.FileMutation.Receipt{} = receipt} ->
+        text =
+          maybe_append_diagnostics(
+            path,
+            append_workspace_context(
+              context.router_context,
+              "committed one atomic file mutation to #{path}"
+            )
+          )
+
+        case context.session_invocation do
+          nil ->
+            {:ok, text}
+
+          {_session, _invocation} ->
+            {:ok, MingaAgent.Tool.FileMutationResult.new(path, receipt, text)}
+        end
 
       {:error, :stale_revision} ->
         {:error, "stale revision for #{path}; read the file again"}
