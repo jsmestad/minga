@@ -15,6 +15,7 @@ defmodule Minga.Editing.Completion do
   5. `accept/1` — returns the text/edit to insert for the selected item
   """
 
+  alias Minga.Core.SelectionWindow
   alias Minga.Editing.Completion.Item
   alias Minga.Editing.Completion.Index
 
@@ -208,28 +209,9 @@ defmodule Minga.Editing.Completion do
   item within that window.
   """
   @spec visible_items(t()) :: {[item()], non_neg_integer()}
-  def visible_items(%__MODULE__{filtered: []}), do: {[], 0}
-
-  def visible_items(%__MODULE__{filtered: filtered, selected: sel, max_visible: max_vis} = c) do
-    start = visible_start(c)
-    visible = Enum.slice(filtered, start, min(length(filtered), max_vis))
-    {visible, sel - start}
+  def visible_items(%__MODULE__{filtered: filtered, selected: selected, max_visible: capacity}) do
+    SelectionWindow.visible(filtered, selected, capacity)
   end
-
-  @spec visible_start(t()) :: non_neg_integer()
-  defp visible_start(%__MODULE__{filtered: filtered, selected: sel, max_visible: max_vis}) do
-    visible_start(length(filtered), sel, max_vis)
-  end
-
-  @spec visible_start(non_neg_integer(), non_neg_integer(), pos_integer()) :: non_neg_integer()
-  defp visible_start(total, _sel, max_vis) when total <= max_vis, do: 0
-  defp visible_start(_total, sel, max_vis) when sel < div(max_vis, 2), do: 0
-
-  defp visible_start(total, sel, max_vis) when sel >= total - div(max_vis, 2) do
-    total - max_vis
-  end
-
-  defp visible_start(_total, sel, max_vis), do: sel - div(max_vis, 2)
 
   @doc "Returns true if there are any filtered items to show."
   @spec active?(t()) :: boolean()

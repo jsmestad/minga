@@ -46,6 +46,7 @@ defmodule MingaEditor.UI.Picker do
             title: "",
             marked: %{}
 
+  alias Minga.Core.SelectionWindow
   alias MingaEditor.UI.Picker.Candidate
   alias MingaEditor.UI.Picker.Item
   alias MingaEditor.UI.Picker.Scorer
@@ -228,25 +229,8 @@ defmodule MingaEditor.UI.Picker do
 
   @doc "Returns the visible slice using an explicit maximum item count."
   @spec visible_items(t(), non_neg_integer()) :: {[item()], non_neg_integer()}
-  def visible_items(%__MODULE__{}, 0), do: {[], 0}
-
-  def visible_items(%__MODULE__{filtered: []}, _max) do
-    {[], 0}
-  end
-
-  def visible_items(%__MODULE__{filtered: filtered, selected: sel}, max) do
-    total = length(filtered)
-
-    if total <= max do
-      {filtered, sel}
-    else
-      # Scroll the window to keep the selection visible
-      half = div(max, 2)
-      start = max(0, min(sel - half, total - max))
-      visible = Enum.slice(filtered, start, max)
-      offset = sel - start
-      {visible, offset}
-    end
+  def visible_items(%__MODULE__{filtered: filtered, selected: selected}, capacity) do
+    SelectionWindow.visible(filtered, selected, capacity)
   end
 
   @doc "Returns the number of filtered items."
