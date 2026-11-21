@@ -12,9 +12,7 @@ import (
 func (m Model) floatingOverlayLayers() []*lipgloss.Layer {
 	var layers []*lipgloss.Layer
 	if overlay := m.overlayLayer(); overlay != nil {
-		if winner, ok := m.overlayWinner(); ok && winner.surfaceID == surfaceIDAgentHelp {
-			// Help fills its exact authored containment, including its header.
-			// Do not paint a shadow outside that rect.
+		if winner, ok := m.overlayWinner(); ok && !castsShadow(winner.surfaceID) {
 			layers = append(layers, overlay)
 		} else {
 			layers = append(layers, popupShadow(overlay)...)
@@ -27,6 +25,20 @@ func (m Model) floatingOverlayLayers() []*lipgloss.Layer {
 		layers = append(layers, popupShadow(picker)...)
 	}
 	return layers
+}
+
+// castsShadow reports whether the winning secondary overlay paints a drop shadow.
+// Help fills its exact authored containment, including its header. Footer bands
+// sit directly above the status row and command line, so a shadow one row below
+// would paint over them. Cursor-anchored popups keep their shadow.
+func castsShadow(surfaceID uint16) bool {
+	switch surfaceID {
+	case surfaceIDAgentHelp, surfaceIDFloatPopup, surfaceIDAgentContext, surfaceIDExtensionPanel,
+		surfaceIDObservatory, surfaceIDNotifications, surfaceIDExtensionOverlay:
+		return false
+	default:
+		return true
+	}
 }
 
 // popupShadow returns the popup layer preceded by a dark shadow layer offset

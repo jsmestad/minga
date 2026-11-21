@@ -18,6 +18,7 @@ defmodule MingaEditor.Layout.FooterBandOverlaysTest do
   import MingaEditor.RenderPipeline.TestHelpers
 
   alias Minga.Buffer.Process, as: BufferProcess
+  alias Minga.Mode.CommandState
   alias Minga.SystemObserver.ProcessSnapshot
   alias Minga.SystemObserver.TreeNode
   alias MingaEditor.Agent.DiffReview
@@ -73,6 +74,13 @@ defmodule MingaEditor.Layout.FooterBandOverlaysTest do
     |> AgentEvents.dispatch(self(), {:approval_pending, approval})
   end
 
+  # The last row a footer band may cover: the editor area ends directly above the
+  # terminal status row and minibuffer, which every band must leave visible.
+  defp band_floor(state) do
+    {row, _col, _width, height} = Layout.get(state).editor_area
+    row + height
+  end
+
   # Builds an observatory tree with `count` nodes (one root plus count-1 direct
   # children) so content_height_observatory counts a real flattened node list,
   # not the empty-state fallback. Snapshots carry only the metrics the count needs.
@@ -89,6 +97,18 @@ defmodule MingaEditor.Layout.FooterBandOverlaysTest do
     state
     |> with_observatory()
     |> SidebarWorkflow.replace_observatory_data(ObservatoryData.visible(tree, []))
+  end
+
+  describe "OverlayBand.rect/3" do
+    test "clamps from the full terminal rows, as the Go TUI does, while anchoring in the editor area" do
+      # 24-row terminal, editor area is 22 rows (status row + minibuffer below).
+      # Go's maxOverlayHeight() gives 24/3 = 8, so a full band keeps 8 rows instead of 22/3 = 7.
+      assert OverlayBand.rect({0, 0, 80, 22}, :max, 24) == {14, 0, 80, 8}
+      # Content shorter than the clamp still hugs the bottom of the editor area.
+      assert OverlayBand.rect({0, 0, 80, 22}, 3, 24) == {19, 0, 80, 3}
+      # The band never grows past the area it is anchored in.
+      assert OverlayBand.rect({0, 0, 80, 5}, :max, 24) == {0, 0, 80, 5}
+    end
   end
 
   describe "OverlayBand.rect/2" do
@@ -137,13 +157,13 @@ defmodule MingaEditor.Layout.FooterBandOverlaysTest do
 
       # Full width, bottom-anchored. With ONE notification item the BEAM content
       # height is title bar (1) + 2 lines per item = 3, well under the band ceiling
-      # (24/3 = 8), so the band is content-sized (3) and hugs the screen bottom.
+      # (24/3 = 8), so the band is content-sized (3) and hugs the status row.
       # This is the position fix: a short notification no longer spans the full band
       # and renders rows above the bottom (#2281).
       assert col == 0
       assert width == 80
       assert height == 3
-      assert row + height == 24
+      assert row + height == band_floor(state)
     end
 
     test "an item with inline actions adds one row to the notifications band" do
@@ -166,7 +186,7 @@ defmodule MingaEditor.Layout.FooterBandOverlaysTest do
 
       # title bar (1) + header+body (2) + actions row (1) = 4
       assert height == 4
-      assert row + height == 24
+      assert row + height == band_floor(state)
     end
 
     test "the observatory band height is one header plus one row per node" do
@@ -175,13 +195,13 @@ defmodule MingaEditor.Layout.FooterBandOverlaysTest do
       # equal 1 + node_count, or takeLines clips the trailing node rows out of the
       # band and their zones become unreachable (the #2333 height lesson). With 3
       # nodes the content height is 1 (header) + 3 = 4, under the band ceiling
-      # (24/3 = 8), so the band is content-sized and hugs the screen bottom.
+      # (24/3 = 8), so the band is content-sized and hugs the status row.
       state = with_observatory_nodes(base_state(rows: 24, cols: 80), 3)
 
       {row, _col, _width, height} = SurfaceRegistry.rect_for(state, :observatory)
 
       assert height == 4
-      assert row + height == 24
+      assert row + height == band_floor(state)
 
       render_input = Input.from_editor_state(state)
 
@@ -202,7 +222,30 @@ defmodule MingaEditor.Layout.FooterBandOverlaysTest do
 
       assert :agent_context in ids
       assert height > 0
-      assert row + height == 24
+      assert row + height == band_floor(state)
+    end
+
+    test "the agent context band leaves the terminal status row and command line visible" do
+      normal = with_agent_context(base_state(rows: 24, cols: 80))
+
+      command = %{
+        normal
+        | workspace:
+            SessionState.transition_mode(normal.workspace, :command, CommandState.new(""))
+      }
+
+      for state <- [normal, command] do
+        {minibuffer_row, _col, _width, _height} = Layout.get(state).minibuffer
+        status_row = band_floor(state)
+        {row, _col, _width, height} = SurfaceRegistry.rect_for(state, :agent_context)
+
+        assert row + height == status_row
+        refute SurfaceRegistry.within?(state, :agent_context, status_row, 0)
+        refute SurfaceRegistry.within?(state, :agent_context, minibuffer_row, 0)
+      end
+
+      # The visible command line takes its own row below the status row.
+      assert band_floor(command) == band_floor(normal) - 1
     end
 
     test "full Agent bodies retain activity data without a compact context overlay covering their controls" do
@@ -330,16 +373,16 @@ defmodule MingaEditor.Layout.FooterBandOverlaysTest do
   end
 
   describe "short-overlay position pinning (#2281)" do
-    test "the short notifications band hugs the screen bottom, not the full band" do
+    test "the short notifications band hugs the status row, not the full band" do
       state = with_notifications(base_state(rows: 24, cols: 80))
       {row, _col, _w, height} = SurfaceRegistry.rect_for(state, :notifications)
 
       # One notification: band is content-sized (3), not the :max ceiling (8), and
-      # its bottom edge is the screen bottom (above the minibuffer), matching where
-      # the old footer-append put it.
+      # its bottom edge sits directly above the status row and minibuffer, matching
+      # where the old footer-append put it.
       assert height == 3
-      assert row + height == 24
-      assert row == 21
+      assert row + height == band_floor(state)
+      assert row == band_floor(state) - 3
     end
 
     test "a click immediately above a short notification reaches the buffer" do
@@ -417,7 +460,7 @@ defmodule MingaEditor.Layout.FooterBandOverlaysTest do
       # The band's top row, in the content area, is where the overlay would have
       # sat: the only difference from the visible case is the overlay's presence.
       layout = Layout.get(state)
-      {row, col, _w, _h} = OverlayBand.rect(layout.terminal, :max)
+      {row, col, _w, _h} = OverlayBand.rect(layout.editor_area, :max)
 
       new_state = Router.dispatch_mouse(state, row, col, :left, 0, :press, 1)
       {cur_line, _cur_col} = BufferProcess.cursor(new_state.workspace.buffers.active)

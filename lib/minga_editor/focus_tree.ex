@@ -364,11 +364,12 @@ defmodule MingaEditor.FocusTree do
   # the owner ruled mouse-driven (#2330). `FooterOverlays.visible/1`
   # decides which are live this frame (single-active model still holds, but the
   # tree expresses each visible one so the registry/emitter carry their rect/z;
-  # Go composites the single highest-z winner). Each gets a bottom-anchored band
-  # rect from `OverlayBand` and the `Input.OverlaySink` handler so a click or
-  # scroll over a visible overlay is swallowed instead of bubbling to the buffer
-  # (AC-2). Per-surface activation semantics replace the sink via epic #2330
-  # children.
+  # Go composites the single highest-z winner). Each gets a band rect from
+  # `OverlayBand`, bottom-anchored to the editor area so it never covers the
+  # terminal status row or minibuffer, and the `Input.OverlaySink` handler so a
+  # click or scroll over a visible overlay is swallowed instead of bubbling to the
+  # buffer (AC-2). Per-surface activation semantics replace the sink via epic
+  # #2330 children.
   #
   # Ordering matters for the hit-test. `FooterOverlays.visible/1` returns entries
   # in ASCENDING z (back-to-front); this reduce appends them as root children in
@@ -380,11 +381,15 @@ defmodule MingaEditor.FocusTree do
   # must not see.
 
   @spec add_footer_band_overlays(t(), map(), Layout.t()) :: t()
-  defp add_footer_band_overlays(%TreeNode{} = root, state, %Layout{terminal: terminal}) do
+  defp add_footer_band_overlays(
+         %TreeNode{} = root,
+         state,
+         %Layout{editor_area: area, terminal: {_row, _col, _width, terminal_rows}}
+       ) do
     state
     |> FooterOverlays.visible()
     |> Enum.reduce(root, fn {surface_id, content_height}, acc ->
-      case OverlayBand.rect(terminal, content_height) do
+      case OverlayBand.rect(area, content_height, terminal_rows) do
         nil -> acc
         rect -> append_root_child(acc, footer_overlay_node(surface_id, rect))
       end
