@@ -128,6 +128,20 @@ defmodule MingaEditor.State.Windows do
     set_map(state, map)
   end
 
+  @doc "Shows the given body in every existing Agent pane."
+  @spec show_agent_body(t(), :chat | :review) :: t()
+  def show_agent_body(%__MODULE__{map: windows} = state, body) do
+    map =
+      Enum.reduce(windows, windows, fn {id, window}, acc ->
+        case Window.show_agent_body(window, body) do
+          ^window -> acc
+          changed -> Map.put(acc, id, changed)
+        end
+      end)
+
+    set_map(state, map)
+  end
+
   @doc "Sets a window's pinned state."
   @spec set_pinned(t(), Window.id(), boolean()) :: t()
   def set_pinned(%__MODULE__{} = state, id, pinned?) when is_boolean(pinned?) do
