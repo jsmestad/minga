@@ -37,6 +37,8 @@ defmodule Minga.Bench.KeystrokeLatencyBaseline do
   key follows one forwarded text batch. This limits backlog without skipping
   active projection. The original `agent_stream` measures free-running
   background contention. The active fixture makes no provider HTTP requests.
+
+  Set `MINGA_BENCH_TRANSCRIPT_WORK=1` to collect work counts instead of timing.
   """
 
   alias Minga.Buffer.Process, as: BufferProcess
@@ -59,6 +61,9 @@ defmodule Minga.Bench.KeystrokeLatencyBaseline do
 
   Code.require_file("fixtures/active_session_provider.exs", __DIR__)
 
+  Code.require_file("fixtures/transcript_work_probe.exs", __DIR__)
+  Code.require_file("fixtures/transcript_work_scenario.exs", __DIR__)
+
   @warmup_keys 20
   @measured_keys 120
   @baseline_path Path.join([__DIR__, "baselines", "keystroke_latency.json"])
@@ -68,6 +73,15 @@ defmodule Minga.Bench.KeystrokeLatencyBaseline do
     float_support: :native,
     image_support: :native
   }
+
+  @spec transcript_work() :: :ok
+  def transcript_work do
+    Minga.Bench.TranscriptWorkScenario.run(
+      [width: 220, height: 60, capabilities: %{@gui_caps | semantic_ui: true}],
+      &with_editor/2,
+      &open_active_agent/1
+    )
+  end
 
   @spec run() :: :ok
   def run do
@@ -636,4 +650,7 @@ defmodule Minga.Bench.KeystrokeLatencyBaseline do
   defp stop_if_alive(_), do: :ok
 end
 
-Minga.Bench.KeystrokeLatencyBaseline.run()
+case System.get_env("MINGA_BENCH_TRANSCRIPT_WORK") do
+  "1" -> Minga.Bench.KeystrokeLatencyBaseline.transcript_work()
+  _ -> Minga.Bench.KeystrokeLatencyBaseline.run()
+end
