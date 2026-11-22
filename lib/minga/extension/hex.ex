@@ -18,6 +18,7 @@ defmodule Minga.Extension.Hex do
   alias Minga.Extension.Entry
   alias Minga.Extension.Registry, as: ExtRegistry
   alias Minga.Log
+  alias Minga.Telemetry.StartupProgress
 
   @typedoc "A Mix dep tuple ready for Mix.install/2."
   @type mix_dep :: {atom(), String.t()} | {atom(), String.t(), keyword()}
@@ -33,7 +34,7 @@ defmodule Minga.Extension.Hex do
   fails (network error, resolution failure, compile error).
 
   After a successful install, extension modules are on the code path
-  and can be loaded with `Code.ensure_loaded?/1`.
+  and can be loaded with `Code.ensure_loaded?/1`. Source admission starts each application.
   """
   @spec install_all() :: :ok | {:error, String.t()}
   @spec install_all(GenServer.server()) :: :ok | {:error, String.t()}
@@ -93,7 +94,10 @@ defmodule Minga.Extension.Hex do
   defp do_install(deps, opts \\ []) do
     Log.info(:config, "Installing #{Enum.count(deps)} hex extension(s)...")
 
-    Mix.install(deps, opts)
+    applications = Enum.map(deps, &elem(&1, 0))
+    # Source admission starts OTP applications after the compiler status has cleared.
+    opts = Keyword.put(opts, :start_applications, false)
+    StartupProgress.during_hex_install(applications, fn -> Mix.install(deps, opts) end)
     :ok
   rescue
     e in [Mix.Error] ->

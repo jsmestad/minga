@@ -19,6 +19,7 @@ defmodule Minga.Extension.CompileCache do
   alias Minga.Extension.ArtifactInventory
   alias Minga.Extension.IsolatedCompiler
   alias Minga.Extension.SourceSnapshot
+  alias Minga.Telemetry
 
   @type result ::
           {:ok, %{modules: [module()], diagnostics: [map()], source: :cache | :compiled}}
@@ -199,10 +200,12 @@ defmodule Minga.Extension.CompileCache do
   @spec compile_isolated([String.t()], String.t(), keyword()) ::
           {:ok, IsolatedCompiler.report()} | {:error, term()}
   defp compile_isolated(files, staging, opts) do
-    case Keyword.get(opts, :compiler, IsolatedCompiler) do
-      compiler when is_function(compiler, 3) -> compiler.(files, staging, opts)
-      compiler when is_atom(compiler) -> compiler.compile(files, staging, opts)
-    end
+    Telemetry.span([:minga, :extension, :compile], %{source: Keyword.fetch!(opts, :source)}, fn ->
+      case Keyword.get(opts, :compiler, IsolatedCompiler) do
+        compiler when is_function(compiler, 3) -> compiler.(files, staging, opts)
+        compiler when is_atom(compiler) -> compiler.compile(files, staging, opts)
+      end
+    end)
   end
 
   @spec claim_compiled_inventory(term(), ArtifactInventory.t(), keyword()) ::

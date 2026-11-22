@@ -39,6 +39,7 @@ defmodule Minga.Config.Loader do
   alias Minga.Keymap
   alias Minga.Popup.Registry, as: PopupRegistry
   alias Minga.Log
+  alias Minga.Telemetry.StartupProgress
 
   @type keymap_server :: Keymap.server()
   @type options_server :: Options.server()
@@ -111,7 +112,10 @@ defmodule Minga.Config.Loader do
 
     Agent.start_link(
       fn ->
-        report = load_all(inputs, Minga.SafeMode.active?(), :compile)
+        report =
+          StartupProgress.during_config_load(fn ->
+            load_all(inputs, Minga.SafeMode.active?(), :compile)
+          end)
 
         :ok =
           maybe_seal_artifact_generation(

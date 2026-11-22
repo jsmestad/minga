@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- If startup stalls on macOS, choose **Restart in Safe Mode** to replace the editor core without loading user configuration or extensions.
+- macOS and terminal startup show the extension name when Minga needs to compile it.
 - Subscription model routes can show a setup row in `/model` that checks the route's sign-in off the editor and reports the exact command to run, show their plan usage and reset time on model rows, and refresh their model list whenever Minga checks them. Routes can declare a `short_name` such as "Claude" for these sentences. When a plan limit is reached, the chat says when it resets and, on macOS, offers a "Choose another model" action that keeps the draft.
 - Extensions can add model routes with `Minga.Extension.ModelRoutes.register/2`. Their models appear in `/model` with the route's own readiness, limits, and thinking levels, and they run inside Minga's normal agent turn: tools, approvals, retries, compaction, and history stay in Minga. An unavailable or removed route never becomes the active model, and Minga never falls back to another model. Route-only settings go in `routes.<route_id>.env` in `credentials.json`. The route contract uses only Minga-owned values, so routes keep working across Minga's internal model-library changes.
 - `/model` can select Apple Intelligence without credentials on eligible macOS 27+ devices in builds that include the inference helper. It runs on device with a compact file tool set and keeps normal approvals.
@@ -150,6 +152,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 ### Fixed
 
 - Approved edits from an agent session started in the editor no longer vanish. They are staged until you publish them: when the turn ends, a notification offers **Publish** and **Discard** (clickable on macOS and in the terminal), `SPC a p` publishes and `SPC a P` discards, and publishing updates the file on disk and any open buffer. `:q`, `:wq`, `:qa`, `:wqa`, and quitting the macOS app stop while edits are staged; `:q!`, `:qa!` and `:cq` discard them on purpose.
+- The macOS startup screen shows the Minga logo and loading phrases again. **Quit Minga** appears after ten seconds.
 - CI can save a refreshed Dialyzer cache when `mix.exs` changes which applications the PLT includes, instead of repeating that repair on every run.
 - Adversarial diagnostics ignore replies from superseded or invalidated analyses, so an old reply cannot restore findings after an edit, close, or clear.
 - Repeated config reloads keep using the config home selected at startup.

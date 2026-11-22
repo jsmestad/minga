@@ -17,6 +17,7 @@ final class AppState {
     var trafficLightMidY: CGFloat = 14
     /// Native startup presentation. A committed editor replaces it.
     var startup: StartupPresentation? = .starting
+    var compilingExtension: String?
     var hasReceivedFirstFrame: Bool { startup == nil }
     /// All GUI chrome sub-states in a single container.
     let gui: GUIState

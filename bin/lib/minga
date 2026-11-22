@@ -29,6 +29,10 @@ if [ -z "${MINGA_TTY:-}" ] && command -v tty >/dev/null 2>&1; then
   fi
 fi
 
+if [ -t 2 ]; then
+  export MINGA_BOOT_PROGRESS=terminal
+fi
+
 if [ "${MINGA_SKIP_NATIVE_LAUNCH_BUILD:-}" != "1" ]; then
   (cd "$PROJECT_DIR" && mix native.build.tui)
 fi

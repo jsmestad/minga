@@ -141,8 +141,12 @@ struct BEAMLaunchConfiguration: Equatable, Sendable {
     let workingDirectoryURL: URL
 
     /// Builds one complete launch configuration from resolved inputs.
-    static func build(from inputs: BEAMLaunchInputs) -> BEAMLaunchConfiguration {
-        let cliArguments = forwardedCLIArguments(from: inputs.appArguments)
+    static func build(from inputs: BEAMLaunchInputs, forceSafeMode: Bool = false) -> BEAMLaunchConfiguration {
+        var cliArguments = forwardedCLIArguments(from: inputs.appArguments)
+        let hasSafeModeFlag = cliArguments.contains("--safe") || cliArguments.contains("-Q")
+        if forceSafeMode && !hasSafeModeFlag {
+            cliArguments.insert("--safe", at: 0)
+        }
         let workingDirectoryURL = workingDirectoryURL(
             currentDirectoryURL: inputs.currentDirectoryURL,
             bundleURL: inputs.bundleURL,
@@ -150,6 +154,7 @@ struct BEAMLaunchConfiguration: Equatable, Sendable {
         )
         var environment = sanitizedPreVMEnvironment(inputs.inheritedEnvironment)
         environment["MINGA_PORT_MODE"] = "connected"
+        environment["MINGA_BOOT_PROGRESS"] = "native"
         environment["MINGA_CLI_ARGS_B64"] = encodedCLIArguments(cliArguments)
         environment["MINGA_APP_INSTANCE_ID"] = inputs.appInstanceID
         environment["MINGA_APP_PID"] = String(inputs.appPID)
@@ -166,7 +171,7 @@ struct BEAMLaunchConfiguration: Equatable, Sendable {
             environment.removeValue(forKey: "MINGA_LAUNCH_NONCE")
         }
 
-        if cliArguments.contains("--safe") || cliArguments.contains("-Q") {
+        if forceSafeMode || hasSafeModeFlag {
             environment["MINGA_SAFE_MODE"] = "1"
         }
 
