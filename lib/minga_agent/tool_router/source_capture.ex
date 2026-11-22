@@ -164,7 +164,7 @@ defmodule MingaAgent.ToolRouter.SourceCapture do
   end
 
   defp snapshot_changeset_or_direct(%Context{}, path, opts) do
-    case Buffer.pid_for_path(path) do
+    case Buffer.pid_for_file(path) do
       {:ok, buffer} -> owner_snapshot({:buffer, buffer}, :buffer, path, opts)
       :not_found -> disk_snapshot(path, opts)
     end

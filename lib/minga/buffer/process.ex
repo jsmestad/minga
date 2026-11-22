@@ -718,6 +718,19 @@ defmodule Minga.Buffer.Process do
     end
   end
 
+  @doc """
+  Looks up the buffer visiting the same file as `path` via `Minga.Buffer.FileRegistry`.
+
+  Both the buffer's registered path and `path` are resolved through every symlink, so a buffer opened as `lib/link.ex` is found by the path of the file the link names, and the reverse. A path whose tail does not exist yet resolves its existing parent directories. When several buffers visit the same file, every caller selects the same one (the lowest pid). Returns `:not_found` if no buffer visits the file.
+  """
+  @spec pid_for_file(String.t()) :: {:ok, pid()} | :not_found
+  def pid_for_file(path) do
+    case Registry.lookup(Minga.Buffer.FileRegistry, file_key(path)) do
+      [] -> :not_found
+      entries -> {:ok, entries |> Enum.map(&elem(&1, 0)) |> Enum.min()}
+    end
+  end
+
   @doc "Returns the metadata needed to list this buffer, without reading its content."
   @spec listing_info(GenServer.server()) :: listing_info()
   def listing_info(server), do: GenServer.call(server, :listing_info)
@@ -2728,15 +2741,45 @@ defmodule Minga.Buffer.Process do
       {:ok, _} -> :ok
       {:error, {:already_registered, _}} -> :ok
     end
+
+    {:ok, _} = Registry.register(Minga.Buffer.FileRegistry, file_key(abs_path), nil)
+    :ok
   end
 
+  # The file key is computed when the path is registered, so it may differ from
+  # a key computed now if a symlink changed since; remove every key this buffer
+  # holds instead of recomputing the old one.
   @spec unregister_path(String.t() | nil) :: :ok
   defp unregister_path(nil), do: :ok
 
   defp unregister_path(path) do
     abs_path = Path.expand(path)
     Registry.unregister(Minga.Buffer.Registry, abs_path)
-    :ok
+
+    Minga.Buffer.FileRegistry
+    |> Registry.keys(self())
+    |> Enum.each(&Registry.unregister(Minga.Buffer.FileRegistry, &1))
+  end
+
+  # Names the file a path visits: the path with every symlink followed. A
+  # missing tail (a new file not yet saved) keeps its names under the resolved
+  # existing parent, so the key does not change when the file is created.
+  @spec file_key(String.t()) :: String.t()
+  defp file_key(path) do
+    expanded = Path.expand(path)
+
+    case Minga.Project.Root.canonical_path(expanded) do
+      {:ok, real_path} -> real_path
+      {:error, _reason} -> missing_tail_file_key(expanded)
+    end
+  end
+
+  @spec missing_tail_file_key(String.t()) :: String.t()
+  defp missing_tail_file_key(path) do
+    case Path.dirname(path) do
+      ^path -> path
+      parent -> Path.join(file_key(parent), Path.basename(path))
+    end
   end
 
   # ── Private ──
