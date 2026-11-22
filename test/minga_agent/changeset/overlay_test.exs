@@ -348,6 +348,26 @@ defmodule MingaAgent.Changeset.OverlayTest do
       Overlay.cleanup(overlay)
     end
 
+    test "does not compare against content behind a symlink that leaves the project", %{
+      project: project
+    } do
+      outside = project <> "-outside"
+      File.mkdir_p!(outside)
+      on_exit(fn -> File.rm_rf!(outside) end)
+      File.write!(Path.join(outside, "secret.txt"), "outside")
+      File.ln_s!(Path.join(outside, "secret.txt"), Path.join(project, "link.txt"))
+      {:ok, overlay} = Overlay.create(project)
+
+      :ok = Overlay.materialize_file(overlay, "link.txt", "outside")
+
+      assert Overlay.modified?(overlay, "link.txt")
+
+      assert Overlay.read_project_file(overlay, "link.txt") ==
+               {:error, {:outside_project_root, "link.txt"}}
+
+      Overlay.cleanup(overlay)
+    end
+
     test "raises for traversal that escapes the overlay", %{project: project} do
       {:ok, overlay} = Overlay.create(project)
 

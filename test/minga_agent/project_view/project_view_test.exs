@@ -47,6 +47,46 @@ defmodule MingaAgent.ProjectViewTest do
     end
   end
 
+  describe "overlay reads through symlinks" do
+    setup %{tmp_dir: dir} do
+      project = Path.join(dir, "project")
+      outside = Path.join(dir, "outside")
+      seed_project(project)
+      File.mkdir_p!(outside)
+      File.write!(Path.join(outside, "secret.txt"), "outside\n")
+      {:ok, view} = ProjectView.overlay(project)
+      on_exit(fn -> ProjectView.close(view) end)
+      %{project: project, outside: outside, view: view}
+    end
+
+    test "refuses to read an unstaged file through a symlink that leaves the project", %{
+      project: project,
+      outside: outside,
+      view: view
+    } do
+      File.ln_s!(outside, Path.join(project, "vendor"))
+      File.ln_s!(Path.join(outside, "secret.txt"), Path.join(project, "secret.txt"))
+
+      assert ProjectView.read_file(view, "vendor/secret.txt") ==
+               {:error, {:outside_project_root, "vendor/secret.txt"}}
+
+      assert ProjectView.read_file(view, "secret.txt") ==
+               {:error, {:outside_project_root, "secret.txt"}}
+    end
+
+    test "reads an unstaged file through a symlink that stays inside the project", %{
+      project: project,
+      view: view
+    } do
+      File.ln_s!(Path.join(project, "lib"), Path.join(project, "alias"))
+
+      assert ProjectView.read_file(view, "alias/a.txt") ==
+               ProjectView.read_file(view, "lib/a.txt")
+
+      assert {:ok, _content} = ProjectView.read_file(view, "alias/a.txt")
+    end
+  end
+
   describe "direct writes through symlinks" do
     setup %{tmp_dir: dir} do
       project = Path.join(dir, "project")
