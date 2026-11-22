@@ -9,6 +9,7 @@ defmodule MingaEditor.Shell.Traditional.SidebarsTest do
   alias MingaEditor.Shell.Traditional.Observatory
   alias MingaEditor.Shell.Traditional.SidebarWorkflow
   alias MingaEditor.Shell.Traditional.Sidebars
+  alias MingaEditor.Sidebar.BuiltinSurfaces
   alias MingaEditor.State, as: EditorState
 
   test "Git status close clears its selected surface and paired TUI state" do
@@ -26,12 +27,16 @@ defmodule MingaEditor.Shell.Traditional.SidebarsTest do
   end
 
   test "Git status workflow close clears shell state and registered visibility" do
+    base = MingaEditor.RenderPipeline.TestHelpers.base_state()
+    table = base.extension_surfaces.sidebar_registry
+    # Git porcelain declared: startup registers the Git Status surface.
+    :ok = BuiltinSurfaces.register_contributions(table, true)
+
     state =
-      MingaEditor.RenderPipeline.TestHelpers.base_state()
+      base
       |> SidebarWorkflow.replace_git_status(Panel.new(%{entries: []}))
       |> SidebarWorkflow.select("git_status")
 
-    table = state.extension_surfaces.sidebar_registry
     assert %{visible?: true, focused?: true} = Sidebar.get(table, "git_status")
 
     closed = SidebarWorkflow.close_git_status(state)
@@ -39,6 +44,21 @@ defmodule MingaEditor.Shell.Traditional.SidebarsTest do
     assert SidebarWorkflow.git_status_panel(closed) == nil
     assert SidebarWorkflow.active_id(closed) == nil
     assert %{visible?: false, focused?: false, badge_count: 0} = Sidebar.get(table, "git_status")
+  end
+
+  test "without git porcelain, Git status panel changes never create a sidebar entry" do
+    base = MingaEditor.RenderPipeline.TestHelpers.base_state()
+    table = base.extension_surfaces.sidebar_registry
+    :ok = BuiltinSurfaces.register_contributions(table, false)
+
+    assert Sidebar.get(table, "git_status") == nil
+    assert %{id: "observatory"} = Sidebar.get(table, "observatory")
+
+    state = SidebarWorkflow.replace_git_status(base, Panel.new(%{entries: []}))
+    assert Sidebar.get(table, "git_status") == nil
+
+    _closed = SidebarWorkflow.close_git_status(state)
+    assert Sidebar.get(table, "git_status") == nil
   end
 
   test "Git status replacement rejects legacy map-shaped panel and TUI state" do

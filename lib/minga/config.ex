@@ -40,6 +40,7 @@ defmodule Minga.Config do
   alias Minga.Config.Loader
   alias Minga.Config.ModelineSegments
   alias Minga.Config.Options
+  alias Minga.Extension.Bundled, as: BundledExtensions
   alias Minga.Extension.Registry, as: ExtRegistry
   alias Minga.Keymap
   alias Minga.LSP.ServerConfig
@@ -672,13 +673,14 @@ defmodule Minga.Config do
   end
 
   @doc """
-  Declares a built-in extension module to load.
+  Declares a built-in or Minga-shipped extension to load.
 
-  Built-in optional extensions are already on Minga's code path and do not need a path, git URL, or Hex package.
+  Built-in optional extensions are already on Minga's code path, and Minga-shipped extensions are named by `Minga.Extension.Bundled.names/0`. Neither needs a path, git URL, or Hex package.
 
   ## Examples
 
       extension Minga.Extensions.MCP
+      extension :git_porcelain
   """
   @spec extension(module()) :: :ok
   def extension(module) when is_atom(module), do: extension(module, [])
@@ -686,7 +688,7 @@ defmodule Minga.Config do
   @doc """
   Declares an extension to load.
 
-  Exactly one source must be provided: `path:`, `git:`, or `hex:`. Built-in extension modules may omit a source.
+  Exactly one source must be provided: `path:`, `git:`, or `hex:`. Built-in extension modules and Minga-shipped extension names such as `:git_porcelain` omit the source.
   Extra keyword options (beyond the source and its options) are passed
   to the extension's `init/1` callback as config.
 
@@ -721,20 +723,28 @@ defmodule Minga.Config do
     end
 
     case source_count do
-      0 -> register_module_extension(name, opts)
+      0 -> register_sourceless_extension(name, opts)
       1 -> register_extension_source(name, opts, {has_path, has_git, has_hex})
+    end
+  end
+
+  @spec register_sourceless_extension(atom(), keyword()) :: :ok
+  defp register_sourceless_extension(name, opts) when is_atom(name) and is_list(opts) do
+    case BundledExtensions.fetch(name) do
+      {:ok, spec} -> BundledExtensions.register(spec, opts)
+      :error -> register_module_extension(name, opts)
     end
   end
 
   @spec register_module_extension(module(), keyword()) :: :ok
   defp register_module_extension(module, opts) when is_atom(module) and is_list(opts) do
-    with {:module, ^module} <- Code.ensure_loaded(module),
-         true <- function_exported?(module, :name, 0) do
+    if Code.ensure_loaded?(module) and function_exported?(module, :name, 0) do
       ExtRegistry.register_module(module.name(), module, opts)
     else
-      _other ->
-        raise ArgumentError,
-              "extension #{inspect(module)}: one of :path, :git, or :hex is required unless the argument is a loaded Minga.Extension module"
+      shipped = Enum.map_join(BundledExtensions.names(), ", ", &inspect/1)
+
+      raise ArgumentError,
+            "extension #{inspect(module)}: one of :path, :git, or :hex is required unless the argument is a Minga-shipped extension name (#{shipped}) or a loaded Minga.Extension module"
     end
   end
 

@@ -1151,6 +1151,26 @@ Extensions are reusable, self-contained editor plugins. Each extension runs unde
 
 ### Optional extensions
 
+Some extensions are useful to a lot of people but not to everyone, so Minga leaves them off until you ask for them.
+
+#### Git porcelain
+
+Minga always shows git awareness: the branch in the modeline, change signs in the gutter, and file status in the file tree. The Magit-style workflows on top of that are a separate extension called git porcelain. It adds the Git status panel and its actions, staging and unstaging, commit, branch, stash, push and pull, the git pickers, conflict resolution, and the `SPC g` keybindings for all of them.
+
+Git porcelain ships inside Minga, so turning it on needs no download. Add one line to `config.exs` and restart Minga:
+
+```elixir
+extension :git_porcelain
+```
+
+To turn it off, remove the line and restart. Its commands, keybindings, and panel go away; the core git awareness stays.
+
+Releases before this change loaded git porcelain for everyone. If you open a git project without it, Minga writes one line to `*Messages*` (`SPC b m`) at startup that tells you how to turn it back on.
+
+Shipped extensions are named by a bare atom with no `path:`, `git:`, or `hex:` option. Today `:git_porcelain` is the only one. Any other bare name is rejected with an error that lists the shipped names.
+
+#### Extensions from Git
+
 Adversarial, Knowledge Graph, and Ghost Cursors install only when you opt in. Add the lines you want to `config.exs` and restart Minga:
 
 ```elixir
@@ -1253,7 +1273,7 @@ extension :minga_snippets, git: "https://github.com/user/minga-snippets"
 extension :minga_tools, hex: "minga_tools", version: "~> 0.3"
 ```
 
-Exactly one of `path:`, `git:`, or `hex:` is required. Extra keyword options (everything except the source and its sub-options like `branch:`, `app:`, or `version:`) are passed to the extension as config. If the extension declares typed options with `option/3`, these values are validated at load time:
+Exactly one of `path:`, `git:`, or `hex:` is required, unless you are turning on an extension that ships with Minga, such as `extension :git_porcelain` (see [Optional extensions](#optional-extensions)). Extra keyword options (everything except the source and its sub-options like `branch:`, `app:`, or `version:`) are passed to the extension as config. If the extension declares typed options with `option/3`, these values are validated at load time:
 
 ```elixir
 # Config options are grouped right in the extension declaration

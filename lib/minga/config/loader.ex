@@ -580,9 +580,8 @@ defmodule Minga.Config.Loader do
 
         StartupTimer.mark(:config_after_and_settings)
 
-        # 8. Register bundled extensions, then discover plugins, then start extensions only after all
-        # config sources have had a chance to declare them.
-        register_bundled_extensions()
+        # 8. Discover plugins, then start extensions only after all config sources have had a
+        # chance to declare them. Minga-shipped extensions load only from a config declaration.
         plugin_error = discover_and_register_plugins(inputs.config_home)
 
         start_all_error =
@@ -668,47 +667,6 @@ defmodule Minga.Config.Loader do
       _ ->
         "Some configured keybindings need optional extensions. Add to config.exs and restart: #{Enum.join(installs, "; ")}"
     end
-  end
-
-  @spec register_bundled_extensions() :: :ok
-  defp register_bundled_extensions do
-    ExtRegistry.register(
-      :minga_git_porcelain,
-      bundled_extension_path("git_porcelain"),
-      load_policy: :deferred
-    )
-  end
-
-  @spec bundled_extension_path(String.t()) :: String.t()
-  defp bundled_extension_path(name) do
-    priv_path = Application.app_dir(:minga, Path.join(["priv", "extensions", name, "lib"]))
-
-    if File.dir?(priv_path) do
-      priv_path
-    else
-      bundled_extension_fallback_path(name, priv_path)
-    end
-  end
-
-  @spec bundled_extension_fallback_path(String.t(), String.t()) :: String.t()
-  defp bundled_extension_fallback_path(name, priv_path) do
-    source_path = Path.expand("../../../extensions/#{name}/lib", __DIR__)
-
-    if source_extension_fallback_allowed?() and File.dir?(source_path) do
-      source_path
-    else
-      Log.warning(
-        :config,
-        "Bundled extension #{name} is missing at #{priv_path}; source-tree fallback is disabled"
-      )
-
-      priv_path
-    end
-  end
-
-  @spec source_extension_fallback_allowed?() :: boolean()
-  defp source_extension_fallback_allowed? do
-    Application.get_env(:minga, :allow_source_extension_fallback, false)
   end
 
   # ── Plugin Discovery ──────────────────────────────────────────────────────────

@@ -136,6 +136,73 @@ defmodule Minga.Config.LoaderTest do
     end
   end
 
+  describe "shipped git porcelain" do
+    setup do
+      previous_load_extensions = Application.get_env(:minga, :load_extensions)
+      # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
+      Application.put_env(:minga, :load_extensions, true)
+      ensure_extension_runtime()
+
+      on_exit(fn ->
+        ExtSupervisor.stop_all()
+        ExtRegistry.reset()
+        restore_application_env(:load_extensions, previous_load_extensions)
+      end)
+
+      :ok
+    end
+
+    test "a default config declares, starts, and schedules nothing for git porcelain" do
+      {_dir, config_home, cleanup} = make_config_dir("use Minga.Config\n")
+      on_exit(cleanup)
+      Minga.Events.subscribe(:extension_deferred_batch_complete)
+
+      pid = start_supervised!({Loader, name: nil, config_home: config_home})
+
+      assert Loader.load_error(pid) == nil
+      assert ExtRegistry.get(:minga_git_porcelain) == :error
+      assert ExtRegistry.all() == []
+      assert CommandRegistry.lookup(CommandRegistry, :git_status_toggle) == :error
+      refute_receive {:minga_event, :extension_deferred_batch_complete, _event}, 500
+    end
+
+    @tag :heavy
+    test "declaring git porcelain starts the shipped extension and dropping the line removes it" do
+      {minga_dir, config_home, cleanup} =
+        make_config_dir("""
+        use Minga.Config
+        extension :git_porcelain
+        """)
+
+      on_exit(cleanup)
+      Minga.Events.subscribe(:extension_deferred_batch_complete)
+
+      first = start_supervised!({Loader, name: nil, config_home: config_home}, id: :first_loader)
+      await_deferred_extension_batch()
+
+      assert Loader.load_error(first) == nil
+      assert {:ok, entry} = ExtRegistry.get(:minga_git_porcelain)
+      assert entry.source_type == :path
+      assert String.ends_with?(entry.path, Path.join(["git_porcelain", "lib"]))
+      assert entry.status == :running
+      assert {:ok, _command} = CommandRegistry.lookup(CommandRegistry, :git_status_toggle)
+
+      # A restart begins from a fresh extension runtime and a config without the declaration.
+      :ok = stop_supervised(:first_loader)
+      ExtSupervisor.stop_all()
+      ExtRegistry.reset()
+      File.write!(Path.join(minga_dir, "config.exs"), "use Minga.Config\n")
+
+      second =
+        start_supervised!({Loader, name: nil, config_home: config_home}, id: :second_loader)
+
+      assert Loader.load_error(second) == nil
+      assert ExtRegistry.get(:minga_git_porcelain) == :error
+      assert CommandRegistry.lookup(CommandRegistry, :git_status_toggle) == :error
+      refute_receive {:minga_event, :extension_deferred_batch_complete, _event}, 500
+    end
+  end
+
   @tag :heavy
   test "starts extensions declared in project and after config after all config sources load" do
     {minga_dir, config_home, cleanup} =
@@ -240,10 +307,8 @@ defmodule Minga.Config.LoaderTest do
       :code.delete(Minga.TestExtensions.AfterConfigExt)
     end)
 
-    Minga.Events.subscribe(:extension_deferred_batch_complete)
     name = :"loader_project_after_ext_#{System.unique_integer([:positive])}"
     {:ok, pid} = Loader.start_link(name: name, config_home: config_home)
-    await_deferred_extension_batch()
 
     assert Loader.load_error(pid) == nil
     assert {:ok, project_entry} = ExtRegistry.get(:project_config_ext)
@@ -1205,7 +1270,6 @@ defmodule Minga.Config.LoaderTest do
       assert Loader.load_error(pid) == nil
       # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
       Application.put_env(:minga, :load_extensions, true)
-      Minga.Events.subscribe(:extension_deferred_batch_complete)
 
       on_exit(fn ->
         ExtSupervisor.stop_all()
@@ -1213,7 +1277,6 @@ defmodule Minga.Config.LoaderTest do
       end)
 
       assert {:error, msg} = Loader.reload(pid)
-      await_deferred_extension_batch()
       assert msg =~ "Extension start_all failed"
       assert msg =~ Atom.to_string(extension_name)
       assert msg =~ "cleanup_failed"
@@ -2073,12 +2136,13 @@ defmodule Minga.Config.LoaderTest do
   # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
   defp restore_application_env(key, value), do: Application.put_env(:minga, key, value)
 
-  # Loading config with extensions enabled declares the bundled git porcelain
-  # extension as deferred, and `Minga.Extension.Lazy` starts it from an
-  # unsupervised task about 100ms later. Without this wait, that start registers
-  # its keymap scope and publishes its lifecycle projection while a later test
-  # reloads config against the same global registries (#3785). The caller must
-  # subscribe before the load that schedules the batch.
+  # Declaring `extension :git_porcelain` with extensions enabled schedules a
+  # deferred batch, and `Minga.Extension.Lazy` starts it from an unsupervised
+  # task about 100ms later. Without this wait, that start registers its keymap
+  # scope and publishes its lifecycle projection while a later test reloads
+  # config against the same global registries (#3785). The caller must
+  # subscribe before the load that schedules the batch. A load that declares no
+  # deferred extension schedules no batch, so it must not wait.
   @spec await_deferred_extension_batch() :: :ok
   defp await_deferred_extension_batch do
     assert_receive {:minga_event, :extension_deferred_batch_complete,

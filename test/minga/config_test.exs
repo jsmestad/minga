@@ -433,6 +433,38 @@ defmodule Minga.ConfigTest do
       end
     end
 
+    test "a shipped extension name with no source declares the shipped deferred extension" do
+      Minga.Config.extension(:git_porcelain)
+
+      assert {:ok, %Entry{} = entry} = ExtRegistry.get(:minga_git_porcelain)
+      assert entry.source_type == :path
+      assert File.dir?(entry.path)
+      assert entry.path |> Path.split() |> Enum.take(-2) == ["git_porcelain", "lib"]
+      assert entry.load_policy == :deferred
+      assert entry.config == []
+      assert ExtRegistry.get(:git_porcelain) == :error
+    end
+
+    test "a shipped extension declaration passes extra options as config" do
+      Minga.Config.extension(:git_porcelain, load_policy: :eager, auto_fetch: false)
+
+      assert {:ok, entry} = ExtRegistry.get(:minga_git_porcelain)
+      assert entry.load_policy == :eager
+      assert entry.config == [auto_fetch: false]
+    end
+
+    test "an unknown bare name lists the shipped extension names" do
+      error =
+        assert_raise ArgumentError, fn ->
+          Minga.Config.extension(:not_shipped)
+        end
+
+      assert error.message =~ "extension :not_shipped"
+      assert error.message =~ "one of :path, :git, or :hex is required"
+      assert error.message =~ "Minga-shipped extension name (:git_porcelain)"
+      assert ExtRegistry.all() == []
+    end
+
     test "raises when multiple sources are provided" do
       assert_raise ArgumentError, ~r/only one of :path, :git, or :hex/, fn ->
         Minga.Config.extension(:bad, path: "/tmp/ext", git: "https://example.com/repo")
