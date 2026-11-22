@@ -24,7 +24,6 @@ public struct FloatPopupContent {
     public let lines: [String]
 }
 
-@MainActor
 @Observable
 public final class FloatPopupState {
     public init() {}

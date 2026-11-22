@@ -594,7 +594,6 @@ struct AgentConversationList: View {
 
 // MARK: - Previews
 
-@MainActor
 private func agentChatPreviewState() -> AgentChatState {
     let state = AgentChatState()
     PreviewFixtures.populateAgentChat(state)

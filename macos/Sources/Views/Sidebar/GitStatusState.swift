@@ -313,7 +313,6 @@ public struct GitStatusSession: Sendable, Equatable {
 }
 
 /// Stable presentation owner for BEAM-published Git status and the local Git sidebar session.
-@MainActor
 @Observable
 public final class GitStatusState {
     public init(snapshot: GitStatusSnapshot = GitStatusSnapshot(), session: GitStatusSession = GitStatusSession()) {

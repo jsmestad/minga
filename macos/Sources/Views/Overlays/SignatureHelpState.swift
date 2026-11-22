@@ -46,7 +46,6 @@ public struct SignatureHelpContent {
     public let signatures: [SignatureInfo]
 }
 
-@MainActor
 @Observable
 public final class SignatureHelpState {
     public init() {}

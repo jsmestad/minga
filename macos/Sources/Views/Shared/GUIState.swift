@@ -2,13 +2,11 @@
 import MingaProtocol
 import Observation
 
-@MainActor
 @Observable
 fileprivate final class GUIThemeBacking {
     var current = ThemeColors()
 }
 
-@MainActor
 @Observable
 fileprivate final class GUIWindowContentBacking {
     var current: [UInt16: GUIWindowContent]
@@ -18,7 +16,6 @@ fileprivate final class GUIWindowContentBacking {
     }
 }
 
-@MainActor
 @Observable
 public final class GUIState {
     @ObservationIgnored private let themeBacking = GUIThemeBacking()
@@ -234,7 +231,6 @@ public final class GUIState {
 }
 
 /// Stable explicit references used only by shell consumers.
-@MainActor
 public final class ShellHostInput {
     fileprivate let theme: GUIThemeBacking
     public let tabBarState: TabBarState
@@ -291,7 +287,6 @@ public final class ShellHostInput {
 }
 
 /// Stable explicit references used only by the resident editor surface.
-@MainActor
 public final class EditorHostInput {
     fileprivate let theme: GUIThemeBacking
     fileprivate let windows: GUIWindowContentBacking
@@ -322,7 +317,6 @@ public final class EditorHostInput {
 }
 
 /// Stable explicit references used only by editor-anchored overlays.
-@MainActor
 public final class EditorOverlayHostInput {
     fileprivate let theme: GUIThemeBacking
     fileprivate let windows: GUIWindowContentBacking
@@ -349,7 +343,6 @@ public final class EditorOverlayHostInput {
 }
 
 /// Stable explicit references used only by whole-window overlays.
-@MainActor
 public final class WindowOverlayHostInput {
     fileprivate let theme: GUIThemeBacking
     public let notificationCenterState: NotificationCenterState

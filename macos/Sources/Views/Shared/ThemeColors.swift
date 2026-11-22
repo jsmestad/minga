@@ -35,7 +35,6 @@ public extension EnvironmentValues {
 }
 
 /// Thread-safe observable theme colors for SwiftUI chrome.
-@MainActor
 @Observable
 public final class ThemeColors {
     public init() {}
@@ -313,8 +312,8 @@ public final class ThemeColors {
 
 }
 
-private struct ThemeColorsEnvironmentKey: @preconcurrency EnvironmentKey {
-    @MainActor static let defaultValue = ThemeColors()
+private struct ThemeColorsEnvironmentKey: @MainActor EnvironmentKey {
+    static let defaultValue = ThemeColors()
 }
 
 extension EnvironmentValues {

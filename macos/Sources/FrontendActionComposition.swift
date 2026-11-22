@@ -1,7 +1,7 @@
 import Foundation
 
 /// Translates consumer-owned view actions into the canonical outbound protocol action.
-public enum FrontendActionComposition {
+nonisolated public enum FrontendActionComposition {
     @MainActor
     public static func settingsHandler(encoder: OutboundActionEncoding?) -> ViewActionHandler<SettingsView.Action>? {
         translatedHandler(encoder: encoder, translate: outbound)
@@ -252,7 +252,7 @@ public enum FrontendActionComposition {
 }
 
 private extension UInt32 {
-    var bigEndianData: Data {
+    nonisolated var bigEndianData: Data {
         Data([
             UInt8((self >> 24) & 0xFF),
             UInt8((self >> 16) & 0xFF),

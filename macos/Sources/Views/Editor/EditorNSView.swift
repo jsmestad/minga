@@ -3866,7 +3866,7 @@ private func modifierBits(from flags: NSEvent.ModifierFlags) -> UInt8 {
 // MARK: - NSTextInputClient (IME support)
 
 @MainActor
-extension EditorNSView: @preconcurrency NSTextInputClient {
+extension EditorNSView: @MainActor NSTextInputClient {
     /// Called when the input method commits text (final result of composition).
     func insertText(_ string: Any, replacementRange: NSRange) {
         let text: String

@@ -209,7 +209,6 @@ public struct HoverPopupOverlay: View {
 
 // MARK: - Previews
 
-@MainActor
 private func hoverPopupPreviewState() -> HoverPopupState {
     let state = HoverPopupState()
     state.update(

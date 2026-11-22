@@ -1004,7 +1004,9 @@ struct GUIFrameSwiftUIInvalidationTests {
 
         for owner in owners {
             let source = try #require(sources[owner.path])
-            #expect(source.contains("@MainActor\n@Observable\npublic final class \(owner.name)"))
+            #expect(source.contains("\n@Observable\npublic final class \(owner.name)"))
+            // MingaUI is main-actor isolated by default; an owner must not opt out.
+            #expect(!source.contains("nonisolated\n@Observable"))
             let ignoredLines = Set(source.split(separator: "\n").compactMap { line -> String? in
                 let trimmed = line.trimmingCharacters(in: .whitespaces)
                 return trimmed.contains("@ObservationIgnored") ? trimmed : nil
@@ -1017,9 +1019,9 @@ struct GUIFrameSwiftUIInvalidationTests {
 
         let feedbackState = try #require(sources["Sources/Views/EditorChrome/FeedbackState.swift"])
         let guiState = try #require(sources["Sources/Views/Shared/GUIState.swift"])
-        let themeBackingDeclaration = "@MainActor\n@Observable\nfileprivate final class GUIThemeBacking"
-        let windowBackingDeclaration = "@MainActor\n@Observable\nfileprivate final class GUIWindowContentBacking"
-        let guiStateDeclaration = "@MainActor\n@Observable\npublic final class GUIState"
+        let themeBackingDeclaration = "\n@Observable\nfileprivate final class GUIThemeBacking"
+        let windowBackingDeclaration = "\n@Observable\nfileprivate final class GUIWindowContentBacking"
+        let guiStateDeclaration = "\n@Observable\npublic final class GUIState"
         let themeBackingStart = try #require(guiState.range(of: themeBackingDeclaration))
         let windowBackingStart = try #require(guiState.range(of: windowBackingDeclaration))
         let guiStateStart = try #require(guiState.range(of: guiStateDeclaration))
@@ -1037,8 +1039,8 @@ struct GUIFrameSwiftUIInvalidationTests {
         let tabView = try #require(sources["Sources/Views/EditorChrome/TabBarView.swift"])
         let treeState = try #require(sources["Sources/Views/Sidebar/FileTreeState.swift"])
         let treeView = try #require(sources["Sources/Views/Sidebar/FileTreeView.swift"])
-        #expect(tabState.contains("@MainActor\n@Observable\npublic final class TabBarState"))
-        #expect(treeState.contains("@MainActor\n@Observable\npublic final class FileTreeState"))
+        #expect(tabState.contains("\n@Observable\npublic final class TabBarState"))
+        #expect(treeState.contains("\n@Observable\npublic final class FileTreeState"))
         #expect(!tabView.contains(".id(tabBarState"))
         #expect(!treeView.contains(".id(fileTreeState"))
     }

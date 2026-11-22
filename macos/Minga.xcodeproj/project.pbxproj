@@ -2973,6 +2973,8 @@
 				PRODUCT_NAME = MingaUI;
 				SDKROOT = macosx;
 				SKIP_INSTALL = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_UPCOMING_FEATURE_INFER_ISOLATED_CONFORMANCES = YES;
 				VERSIONING_SYSTEM = "apple-generic";
 			};
 			name = Debug;
@@ -2997,6 +2999,8 @@
 				PRODUCT_NAME = MingaUI;
 				SDKROOT = macosx;
 				SKIP_INSTALL = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_UPCOMING_FEATURE_INFER_ISOLATED_CONFORMANCES = YES;
 				VERSIONING_SYSTEM = "apple-generic";
 			};
 			name = Release;

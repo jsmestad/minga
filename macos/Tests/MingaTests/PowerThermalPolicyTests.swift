@@ -39,7 +39,7 @@ struct PowerThermalPolicyTests {
     }
 
     @Test("blink timings scale with saturation")
-    func blinkTimingScales() {
+    @MainActor func blinkTimingScales() {
         let timing = SystemBlinkTiming(onDuration: 10, offDuration: 20)
         let scaled = timing.scaled(by: 3)
 

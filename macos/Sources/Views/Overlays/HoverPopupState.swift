@@ -54,7 +54,6 @@ public struct HoverPopupContent {
     }
 }
 
-@MainActor
 @Observable
 public final class HoverPopupState {
     public init() {}

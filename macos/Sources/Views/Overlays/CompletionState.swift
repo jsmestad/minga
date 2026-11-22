@@ -69,7 +69,6 @@ public struct CompletionContent {
     }
 }
 
-@MainActor
 @Observable
 public final class CompletionState {
     public init(localPresentationStore: LocalPresentationStore = LocalPresentationStore()) {

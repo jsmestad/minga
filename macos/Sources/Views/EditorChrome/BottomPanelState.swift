@@ -19,7 +19,6 @@ public struct BottomPanelTab: Identifiable, Equatable {
     public let name: String
 }
 
-@MainActor
 @Observable
 public final class BottomPanelState {
     /// Persistence for the frontend's locally resized panel height.

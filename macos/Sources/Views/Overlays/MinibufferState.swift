@@ -28,7 +28,6 @@ public struct MinibufferCandidate: Identifiable {
     public let matchPositions: Set<Int>
 }
 
-@MainActor
 @Observable
 public final class MinibufferState {
     public init(visible: Bool = false, mode: MinibufferMode = .command, cursorPos: UInt16 = 0xFFFF, prompt: String = "", input: String = "", context: String = "", selectedIndex: UInt16 = 0, candidates: [MinibufferCandidate] = [], totalCandidates: UInt16 = 0, inputVersion: Int = 0, generation: UInt32 = 0) {

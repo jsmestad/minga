@@ -406,7 +406,6 @@ public enum AgentTranscriptPreparationFailure: Error, Equatable {
     case resourcePolicy
 }
 
-@MainActor
 @Observable
 public final class AgentChatState {
     public init(visible: Bool = false, status: AgentStatus = .idle, model: String = "", thinkingLevel: String = "medium", prompt: String = "", messages: [ChatMessageEntry] = [], promptLineCount: UInt8 = 1, promptCursorLine: UInt16 = 0, promptCursorCol: UInt16 = 0, promptMode: PromptMode = .normal, promptVisibleRows: UInt8 = 1, promptCompletion: Wire.PromptCompletion? = nil) {

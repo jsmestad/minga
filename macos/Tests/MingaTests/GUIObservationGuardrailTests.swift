@@ -333,8 +333,9 @@ struct GUIObservationGuardrailTests {
     @Test("presentation metrics remain passive frame-correlated telemetry")
     func metricsSourcePolicy() throws {
         let source = try source(at: "Sources/Views/Shared/GUIFramePresentationMetrics.swift")
-        #expect(source.sanitized.contains("@MainActor\npublic final class GUIFramePresentationMetrics"))
+        #expect(source.sanitized.contains("\npublic final class GUIFramePresentationMetrics"))
         #expect(!source.sanitized.contains("@Observable\npublic final class GUIFramePresentationMetrics"))
+        #expect(!source.sanitized.contains("nonisolated\npublic final class GUIFramePresentationMetrics"))
         #expect(source.sanitized.contains("private var pending: [GUIFrameImpact: Pending] = [:]"))
         #expect(source.sanitized.contains("expectedFrame: metrics.expectedNativeDrawFrame(domain: domain)"))
         #expect(source.sanitized.contains("func frameNativeDrawProbe("))

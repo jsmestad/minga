@@ -812,7 +812,6 @@ private struct GitEntryAccessibilityActions: ViewModifier {
 
 // MARK: - Previews
 
-@MainActor
 private func gitStatusPreviewState() -> GitStatusState {
     let state = GitStatusState()
     PreviewFixtures.populateGitStatus(state)

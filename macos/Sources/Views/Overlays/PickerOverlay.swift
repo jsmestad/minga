@@ -571,7 +571,6 @@ private struct PickerItemRow: View {
     }
 }
 
-@MainActor
 private func pickerPreviewState() -> PickerState {
     let state = PickerState()
     state.update(

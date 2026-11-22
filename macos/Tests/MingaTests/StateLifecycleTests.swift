@@ -559,7 +559,7 @@ struct AgentChatTranscriptTests {
         Wire.ChatMessage(beamId: id, content: .assistant(text: text))
     }
 
-    private func exactTranscriptWeightOracle(
+    @MainActor private func exactTranscriptWeightOracle(
         _ snapshot: AgentTranscriptSnapshot
     ) throws -> FrameResourceWeight {
         var weight = FrameResourceWeight(arrayEntries: snapshot.messages.count)

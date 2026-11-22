@@ -49,7 +49,6 @@ public extension PreviewTrait where T == Preview.ViewTraits {
     }
 }
 
-@MainActor
 public enum PreviewFixtures {
 
     /// Vim mode used for preview fixture state.
