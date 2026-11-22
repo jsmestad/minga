@@ -645,11 +645,12 @@ jobs:
           ERL_FLAGS: "+S 2:2"
 
       - name: Run Dialyzer
-        timeout-minutes: 20
+        timeout-minutes: 15
         run: .github/scripts/run-with-memory-guard.sh mix dialyzer
         env:
-          # Dialyzer's regulator allows one active typesig or dataflow job per online scheduler, so peak memory is the shared analysis state plus every concurrently active job. With two schedulers, analysis of identical code sometimes passed and sometimes used about 14.8 GB of the 16 GB runner, which points to large jobs overlapping (#3869). One scheduler makes the peak deterministic at the shared state plus the largest single job, at the cost of a slower analysis.
-          ERL_FLAGS: "+S 1:1"
+          ERL_FLAGS: "+S 2:2"
+          # Analysis peaks near the 16 GB runner limit even on one scheduler, so the memory comes from a single large job (#3869); the root fix is splitting MingaAgent.Session. The guard only intervenes near real starvation, so runs that fit still pass and a starved run fails with a labeled error instead of a lost runner.
+          MEMORY_GUARD_MIN_AVAILABLE_MB: "128"
 
   release-prerequisites:
     name: Native release prerequisites (${{ matrix.runner }})
