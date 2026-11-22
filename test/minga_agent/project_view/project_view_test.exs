@@ -95,6 +95,20 @@ defmodule MingaAgent.ProjectViewTest do
       assert {:ok, %File.Stat{type: :symlink}} = File.lstat(link)
     end
 
+    test "replaces a hard-linked file instead of writing through to the outside file", %{
+      project: project,
+      outside: outside,
+      view: view
+    } do
+      linked = Path.join(project, "linked.txt")
+      File.ln!(Path.join(outside, "secret.txt"), linked)
+
+      assert :ok = ProjectView.write_file(view, "linked.txt", "agent\n")
+
+      assert File.read!(linked) == "agent\n"
+      assert File.read!(Path.join(outside, "secret.txt")) == "outside\n"
+    end
+
     test "writes and deletes through symlinks that stay inside the project", %{
       project: project,
       view: view

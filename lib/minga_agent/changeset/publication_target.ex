@@ -15,7 +15,7 @@ defmodule MingaAgent.Changeset.PublicationTarget do
   @type publication :: {module(), keyword()}
 
   @typedoc "Why a publication target was refused or could not be resolved."
-  @type error :: :outside_project_root | :eloop | term()
+  @type error :: :outside_project_root | :invalid_path | :eloop | term()
 
   @doc """
   Returns the real path that a write to `relative_path` must replace.
@@ -34,15 +34,24 @@ defmodule MingaAgent.Changeset.PublicationTarget do
   @doc """
   Returns the directory entry that deleting `relative_path` must unlink.
 
-  The parent directory is fully resolved and the final component is kept, so deleting an in-root symlink removes the link rather than its target. The final component's own resolution must also stay inside the project root.
+  The parent directory is fully resolved and the final component is kept, so deleting an in-root symlink removes the link rather than its target. The final component's own resolution must also stay inside the project root. A final name of `.`, `..`, or an empty path names no entry and is refused with `:invalid_path`.
   """
   @spec remove_path(String.t(), String.t(), publication()) ::
           {:ok, String.t()} | {:error, error()}
-  def remove_path(project_root, relative_path, {file_system, opts})
+  def remove_path(project_root, relative_path, publication)
       when is_binary(project_root) and is_binary(relative_path) do
-    parent = Path.dirname(relative_path)
-    name = Path.basename(relative_path)
+    case Path.basename(relative_path) do
+      name when name in ["", ".", ".."] ->
+        {:error, :invalid_path}
 
+      name ->
+        remove_entry(project_root, Path.dirname(relative_path), name, publication)
+    end
+  end
+
+  @spec remove_entry(String.t(), String.t(), String.t(), publication()) ::
+          {:ok, String.t()} | {:error, error()}
+  defp remove_entry(project_root, parent, name, {file_system, opts}) do
     with {:ok, real_root} <- real_root(file_system, project_root, opts),
          {:ok, real_parent} <- resolve_relative(file_system, real_root, parent, opts),
          {:ok, target} <- walk(file_system, [name], real_parent, 0, opts),

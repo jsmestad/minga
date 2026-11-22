@@ -395,7 +395,7 @@ defmodule MingaEditor.Agent.EditPublication do
 
     state
     |> install_workspace(tb, conflicted)
-    |> NoticeWorkflow.publish(conflict_notice(outside_root_paths(review.last_error)))
+    |> NoticeWorkflow.publish(conflict_notice(refused_symlink_paths(review.last_error)))
   end
 
   defp install_publish_result({:ok, published}, state, tb, workspace, count, handoff) do
@@ -428,15 +428,20 @@ defmodule MingaEditor.Agent.EditPublication do
     do: "Some agent edits conflict with newer changes on disk; they stay staged for review"
 
   defp conflict_notice(paths) do
-    "Refused to publish agent edits to #{Enum.join(paths, ", ")}: the path leads outside the project root through a symlink. Those edits, and any conflicting ones, stay staged for review"
+    "Refused to publish agent edits to #{Enum.join(paths, ", ")}: a symlink on the path leads outside the project root or changed during publishing. Those edits, and any conflicting ones, stay staged for review"
   end
 
-  @spec outside_root_paths(term()) :: [String.t()]
-  defp outside_root_paths(%{conflicts: conflicts}) when is_list(conflicts) do
-    for {:error, path, :outside_project_root} <- conflicts, is_binary(path), do: path
+  # Publication refuses a file when its target resolves outside the project
+  # root, or when its resolution changed between planning and the write.
+  @spec refused_symlink_paths(term()) :: [String.t()]
+  defp refused_symlink_paths(%{conflicts: conflicts}) when is_list(conflicts) do
+    for {:error, path, reason} <- conflicts,
+        is_binary(path),
+        reason in [:outside_project_root, :publication_target_changed],
+        do: path
   end
 
-  defp outside_root_paths(_details), do: []
+  defp refused_symlink_paths(_details), do: []
 
   # Publication merged each open buffer and wrote the same text to disk. The
   # buffer owner clears its modified flag only when disk and buffer match.

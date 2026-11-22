@@ -699,6 +699,26 @@ defmodule MingaAgent.Changeset.ServerTest do
       assert {:ok, %File.Stat{type: :symlink}} = File.lstat(Path.join(project, "hello_link.txt"))
     end
 
+    test "refuses a write whose target resolves differently at apply time than when planned", %{
+      project: project
+    } do
+      counter = start_supervised!({Agent, fn -> 0 end})
+
+      server =
+        start_server(project,
+          publication_file_system: MingaAgent.Changeset.RelinkingFileSystem,
+          publication_opts: [relink: {counter, "hello.txt", "lib/foo.ex"}]
+        )
+
+      assert :ok = Changeset.write_file(server, "hello.txt", "agent version")
+
+      assert {:conflict, %{conflicts: [{:error, "hello.txt", :publication_target_changed}]}} =
+               Changeset.merge(server)
+
+      assert File.read!(Path.join(project, "hello.txt")) == "original content"
+      assert File.read!(Path.join(project, "lib/foo.ex")) =~ "defmodule Foo"
+    end
+
     test "deleting an in-project symlink removes the link, not its target", %{project: project} do
       File.ln_s!("hello.txt", Path.join(project, "hello_link.txt"))
       server = start_server(project)

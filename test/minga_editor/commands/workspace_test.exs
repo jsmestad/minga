@@ -1032,7 +1032,7 @@ defmodule MingaEditor.Commands.WorkspaceTest do
       assert Enum.map(review.conflict_files, & &1.relative_path) == ["vendor/secret.md"]
 
       assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(result) ==
-               "Refused to publish agent edits to vendor/secret.md: the path leads outside the project root through a symlink. Those edits, and any conflicting ones, stay staged for review"
+               "Refused to publish agent edits to vendor/secret.md: a symlink on the path leads outside the project root or changed during publishing. Those edits, and any conflicting ones, stay staged for review"
     end
 
     test "reports when nothing is staged", %{tmp_dir: dir} do
