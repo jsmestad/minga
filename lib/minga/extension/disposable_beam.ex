@@ -4,6 +4,7 @@ defmodule Minga.Extension.DisposableBeam do
   alias Minga.Extension.ArtifactValidator
   alias Minga.Extension.HexIsolatedInstall
   alias Minga.Extension.IsolatedCompiler
+  alias Minga.Extension.OSProcessTree
   alias Minga.SecureFile
 
   @max_request_bytes 256 * 1024
@@ -225,10 +226,11 @@ defmodule Minga.Extension.DisposableBeam do
   defp output_size(binary) when is_binary(binary), do: byte_size(binary)
   defp output_size({_line_status, binary}), do: byte_size(binary)
 
+  # Stops the worker and the build tools it started; see OSProcessTree for why a process-group signal is not enough.
   @spec kill(port()) :: :ok
   defp kill(port) do
     case Port.info(port, :os_pid) do
-      {:os_pid, pid} -> kill_os_pid(pid)
+      {:os_pid, pid} -> OSProcessTree.kill(pid)
       nil -> :ok
     end
 
@@ -240,20 +242,6 @@ defmodule Minga.Extension.DisposableBeam do
   defp safe_close(port) do
     if Port.info(port) != nil, do: Port.close(port)
     :ok
-  rescue
-    _error -> :ok
-  end
-
-  @spec kill_os_pid(non_neg_integer()) :: :ok
-  defp kill_os_pid(pid) do
-    case System.find_executable("kill") do
-      nil ->
-        :ok
-
-      executable ->
-        _ = System.cmd(executable, ["-KILL", Integer.to_string(pid)], stderr_to_stdout: true)
-        :ok
-    end
   rescue
     _error -> :ok
   end
