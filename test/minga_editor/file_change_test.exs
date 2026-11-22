@@ -28,6 +28,27 @@ defmodule MingaEditor.FileChangeTest do
     assert notice_message(ctx) =~ "reloaded"
   end
 
+  # Regression for #3886: a reload that changed the line count left the
+  # renderer without line identity, and every later frame was dropped.
+  @tag :tmp_dir
+  test "a silent reload that changes the line count renders the new lines and undo keeps rendering",
+       %{tmp_dir: tmp_dir} do
+    path = Path.join(tmp_dir, "notes.md")
+    File.write!(path, "alpha\nbeta\n")
+    ctx = start_editor("alpha\nbeta\n", file_path: path, rendering: :enabled)
+    assert_row_contains(ctx, 1, "alpha")
+
+    File.write!(path, "gamma\ndelta\nepsilon\nzeta\n")
+    notify_file_changed(ctx, path)
+
+    send_keys_sync(ctx, "u")
+    assert_row_contains(ctx, 1, "gamma")
+    assert_row_contains(ctx, 4, "zeta")
+
+    send_keys_sync(ctx, "Oinserted<Esc>u")
+    assert_row_contains(ctx, 1, "gamma")
+  end
+
   @tag :tmp_dir
   test "modified buffer shows conflict prompt on file change", %{tmp_dir: tmp_dir} do
     path = Path.join(tmp_dir, "conflict.txt")

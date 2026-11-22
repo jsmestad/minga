@@ -99,6 +99,29 @@ defmodule MingaEditor.Window.RenderCacheTest do
       assert LineIdentity.content_epoch(RenderCache.line_identity(second_cache)) ==
                RenderCache.content_epoch(second_cache)
     end
+
+    test "lineage that disagrees with the snapshot is rebuilt in a fresh epoch in the same frame" do
+      buffer = start_supervised!({Buffer, content: "one\ntwo"})
+      snapshot = Buffer.render_snapshot(buffer, 0, 0)
+      cache = RenderCache.sync_line_identity(RenderCache.reset(), buffer, snapshot)
+
+      disagreeing = [
+        line_count: %{snapshot | line_count: snapshot.line_count + 3},
+        change_sequence: %{snapshot | change_sequence: snapshot.change_sequence + 1}
+      ]
+
+      for {field, observed} <- disagreeing do
+        synced = RenderCache.sync_line_identity(cache, buffer, observed)
+        identity = RenderCache.line_identity(synced)
+
+        refute is_nil(identity), "#{field} mismatch left no line identity"
+        assert LineIdentity.line_count(identity) == observed.line_count
+        assert RenderCache.content_epoch(synced) > RenderCache.content_epoch(cache)
+        assert LineIdentity.content_epoch(identity) == RenderCache.content_epoch(synced)
+        assert RenderCache.applied_change_sequence(synced) == observed.change_sequence
+        assert synced.reset_pending
+      end
+    end
   end
 
   describe "prepare_epoch/2" do

@@ -346,19 +346,39 @@ defmodule MingaEditor.Renderer.WindowCache do
 
   def sync_line_identity(
         %__MODULE__{applied_change_sequence: sequence} = cache,
-        _buffer,
-        %RenderSnapshot{change_sequence: sequence, line_count: line_count}
+        buffer,
+        %RenderSnapshot{change_sequence: sequence, line_count: line_count} = snapshot
       ) do
     if LineIdentity.line_count(cache.line_identity) == line_count,
       do: cache,
-      else: mark_identity_reset(cache)
+      else: rehydrate_line_identity(cache, buffer, snapshot, :line_count)
   end
 
-  def sync_line_identity(%__MODULE__{} = cache, _buffer, %RenderSnapshot{}) do
+  def sync_line_identity(%__MODULE__{} = cache, buffer, %RenderSnapshot{} = snapshot) do
     # ChangeLog interpretation is renderer-owned and happens before fetching.
-    # A sequence mismatch here means consume/fetch reconciliation must retry;
-    # never apply a non-mutating snapshot delta.
-    mark_identity_reset(cache)
+    # A sequence mismatch here means the consumed lineage cannot describe this
+    # snapshot; never apply a non-mutating snapshot delta.
+    rehydrate_line_identity(cache, buffer, snapshot, :sequence)
+  end
+
+  # Lineage that disagrees with the atomic snapshot cannot be repaired by
+  # deltas. Discard it and derive fresh identity from the snapshot in a new
+  # epoch, in the same frame. Leaving identity unset would fail this frame's
+  # build, and because a failed frame never commits, every later frame would
+  # observe the same disagreement and fail again.
+  # Recovery is automatic, but a disagreement means some producer broke lineage, so it is logged.
+  @spec rehydrate_line_identity(t(), pid(), RenderSnapshot.t(), :line_count | :sequence) :: t()
+  defp rehydrate_line_identity(cache, buffer, snapshot, reason) do
+    Minga.Log.warning(
+      :render,
+      "Rebuilt line identity for buffer #{inspect(buffer)} (#{reason} mismatch: " <>
+        "cache sequence #{cache.applied_change_sequence}, snapshot sequence #{snapshot.change_sequence}, " <>
+        "snapshot lines #{snapshot.line_count})"
+    )
+
+    cache
+    |> mark_identity_reset()
+    |> sync_line_identity(buffer, snapshot)
   end
 
   @doc "Overlays renderer-owned committed lineage onto a stale editor snapshot."

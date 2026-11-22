@@ -96,4 +96,37 @@ defmodule Minga.Buffer.RendererAPITest do
     :ok = Buffer.insert_text(buffer, "changed")
     assert :stale = Buffer.render_lines(buffer, consume.version, 1, 2)
   end
+
+  # Replacing the whole document from a file records no deltas, so the
+  # renderer must be told to rebuild its line lineage instead of being handed
+  # an empty change list for content it has never seen.
+  @tag :tmp_dir
+  test "replacing content from disk requires the renderer to rebuild its lineage",
+       %{tmp_dir: dir} do
+    path = Path.join(dir, "notes.md")
+    other = Path.join(dir, "other.md")
+    File.write!(path, "one\ntwo\n")
+    File.write!(other, "a\nb\nc\nd\ne\n")
+
+    replacements = [
+      reload: fn buffer ->
+        File.write!(path, "one\ntwo\nthree\nfour\n")
+        Buffer.reload(buffer)
+      end,
+      open: fn buffer -> Buffer.open(buffer, other) end
+    ]
+
+    for {operation, replace} <- replacements do
+      buffer = start_supervised!({Buffer, file_path: path}, id: operation)
+      before = Buffer.renderer_consume(buffer)
+
+      assert :ok = replace.(buffer)
+
+      assert %RendererConsume{changes: :reset_required} =
+               consumed = Buffer.renderer_consume(buffer)
+
+      assert consumed.change_sequence > before.change_sequence, "#{operation} kept the sequence"
+      assert consumed.line_count != before.line_count
+    end
+  end
 end

@@ -412,7 +412,12 @@ struct PreparedFrameTransactionBuilder {
         self.generation = generation
         self.workingWindows = baseFrameSeq == 0 ? [:] : committedWindows
         self.workingResidentSemantics = baseFrameSeq == 0 ? [:] : committedResidentSemantics
-        self.initializedResidentSemanticWindowIds = Set(committedResidentSemantics.keys)
+        // A keyframe replaces every window, so semantics committed for content it
+        // replaces impose no obligation on it. Carrying them over made every
+        // recovery keyframe invalid once a window id changed to content without
+        // semantics, such as a review (#3886). The Go TUI resets the same way.
+        self.initializedResidentSemanticWindowIds =
+            baseFrameSeq == 0 ? [] : Set(committedResidentSemantics.keys)
         self.committedGutters = committedGutters
         self.workingGutters = baseFrameSeq == 0 ? [:] : committedGutters
         self.workingIndentGuides = baseFrameSeq == 0 ? [:] : committedIndentGuides
