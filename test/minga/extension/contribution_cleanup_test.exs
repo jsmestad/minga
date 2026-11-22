@@ -147,4 +147,54 @@ defmodule Minga.Extension.ContributionCleanupTest do
     assert_receive {:cleanup_followup, ^source}
     assert LanguageRegistry.get(:cleanup_test_language) == nil
   end
+
+  test "concurrent callback registrations and removals from many processes never lose an update" do
+    for round <- 1..5 do
+      prefix = "cleanup_conc_#{System.unique_integer([:positive])}_#{round}_"
+      families = for i <- 1..64, do: {i, String.to_atom(prefix <> Integer.to_string(i))}
+
+      on_exit(fn ->
+        Enum.each(families, fn {_i, family} -> ContributionCleanup.unregister(family) end)
+      end)
+
+      run_concurrently(families, fn {i, family} ->
+        :ok =
+          if rem(i, 3) == 0,
+            do: ContributionCleanup.register_contextual(family, fn _source, _context -> :ok end),
+            else: ContributionCleanup.register(family, fn _source -> :ok end)
+
+        if rem(i, 2) == 1, do: :ok = ContributionCleanup.unregister(family), else: :ok
+      end)
+
+      expected = for {i, family} <- families, rem(i, 2) == 0, into: MapSet.new(), do: family
+
+      registered =
+        ContributionCleanup.merge_callbacks(%{})
+        |> Map.keys()
+        |> Enum.filter(&String.starts_with?(Atom.to_string(&1), prefix))
+        |> MapSet.new()
+
+      assert registered == expected
+    end
+  end
+
+  @spec run_concurrently([term()], (term() -> :ok)) :: :ok
+  defp run_concurrently(items, fun) do
+    parent = self()
+
+    tasks =
+      Enum.map(items, fn item ->
+        Task.async(fn ->
+          send(parent, {:ready, self()})
+
+          receive do
+            :go -> fun.(item)
+          end
+        end)
+      end)
+
+    Enum.each(tasks, fn %Task{pid: pid} -> assert_receive {:ready, ^pid} end)
+    Enum.each(tasks, fn %Task{pid: pid} -> send(pid, :go) end)
+    Enum.each(tasks, &Task.await(&1, 10_000))
+  end
 end
