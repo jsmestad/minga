@@ -189,7 +189,8 @@ struct FocusLifecycleConformanceTests {
         let text = policySource as NSString
         let methods = Set(pattern.matches(in: policySource, range: NSRange(location: 0, length: text.length)).map { text.substring(with: $0.range(at: 1)) })
         // Queries, attachment lifetime, key routing, and committed-frame input have separate contracts.
-        let excluded: Set<String> = ["nativeTextEditingIsActive", "presentationFocusReady", "requestAccessibilityFocus", "requestPresentationFocus", "routeAgentOverlayEvent", "attach", "detach", "focusOwnerDidChange", "shouldYieldSystemCommandShortcut"]
+        // `deferredReclaimSettled` only observes completion of work that a lifecycle entry point already scheduled.
+        let excluded: Set<String> = ["nativeTextEditingIsActive", "presentationFocusReady", "requestAccessibilityFocus", "requestPresentationFocus", "routeAgentOverlayEvent", "attach", "detach", "focusOwnerDidChange", "shouldYieldSystemCommandShortcut", "deferredReclaimSettled"]
         let mapped = Set(FocusConformanceHarness.eventMethods.values)
         #expect(methods.subtracting(excluded) == mapped, "unmapped lifecycle methods: \(methods.subtracting(excluded).subtracting(mapped)); obsolete mappings: \(mapped.subtracting(methods))")
         var recorded: Set<String> = []
