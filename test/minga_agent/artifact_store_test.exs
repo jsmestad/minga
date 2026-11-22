@@ -13,6 +13,10 @@ defmodule MingaAgent.ArtifactStoreTest do
 
   @moduletag :tmp_dir
 
+  # Bound for the stalled-call tests. Only the deliberately stalled call may exceed it.
+  # Unstalled calls in those tests skip fsync and get room for a loaded CI runner.
+  @stall_bound 500
+
   test "a composer selection reads its exact retained text only with the captured revision and owner",
        %{tmp_dir: root} do
     {quota, store} = start_pair(root, "composer-selection")
@@ -892,10 +896,17 @@ defmodule MingaAgent.ArtifactStoreTest do
         _point -> :ok
       end
 
-      quota = start_quota(root, {:quota, make_ref()}, fault_injector: quota_injector)
+      quota =
+        start_quota(root, {:quota, make_ref()},
+          fault_injector: quota_injector,
+          synchronous: :off
+        )
 
       store =
-        start_store(root, quota, "stalled-quota", {:store, make_ref()}, call_timeout: 50)
+        start_store(root, quota, "stalled-quota", {:store, make_ref()},
+          call_timeout: @stall_bound,
+          synchronous: :off
+        )
 
       baseline = ArtifactQuota.usage(quota)
       capture = begin_capture(store, "stalled-append", :bytes, "text/plain")
@@ -929,7 +940,8 @@ defmodule MingaAgent.ArtifactStoreTest do
       {quota, store} =
         start_pair_with_store_opts(root, "stalled-finish",
           fault_injector: injector,
-          call_timeout: 50
+          call_timeout: @stall_bound,
+          synchronous: :off
         )
 
       capture = begin_capture(store, "stalled-finish", :bytes, "text/plain")
@@ -962,7 +974,8 @@ defmodule MingaAgent.ArtifactStoreTest do
     {quota, store} =
       start_pair_with_store_opts(root, "stalled-draft",
         fault_injector: injector,
-        call_timeout: 50
+        call_timeout: @stall_bound,
+        synchronous: :off
       )
 
     baseline = ArtifactQuota.usage(quota)
@@ -1008,7 +1021,7 @@ defmodule MingaAgent.ArtifactStoreTest do
   end
 
   defp start_pair_with_store_opts(root, session_id, opts) do
-    quota = start_quota(root, {:quota, make_ref()})
+    quota = start_quota(root, {:quota, make_ref()}, Keyword.take(opts, [:synchronous]))
     store = start_store(root, quota, session_id, {:store, make_ref()}, opts)
     {quota, store}
   end
