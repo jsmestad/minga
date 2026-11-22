@@ -167,9 +167,9 @@ defmodule MingaEditor.Agent.IngestTest do
       assert_receive {:agent_stream_batch, ^session, [{:text_delta, "a"}]}
 
       send(ingest, {:agent_event, session, {:text_delta, "b"}})
-      send(ingest, {:agent_event, session, {:tool_started, "shell", %{}}})
+      send(ingest, {:agent_event, session, {:tool_started, "call-1", "shell", %{}}})
       assert_receive {:agent_stream_batch, ^session, [{:text_delta, "b"}]}
-      assert_receive {:agent_event, ^session, {:tool_started, "shell", %{}}}
+      assert_receive {:agent_event, ^session, {:tool_started, "call-1", "shell", %{}}}
 
       # Idle again: the next delta is a fresh leading edge, forwarded at once.
       send(ingest, {:agent_event, session, {:text_delta, "c"}})
