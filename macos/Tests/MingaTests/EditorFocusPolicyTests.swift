@@ -18,7 +18,7 @@ struct EditorFocusPolicyTests {
         fixture.policy.register(fixture.picker, as: .pickerQuery)
         fixture.window.makeKey()
         fixture.policy.windowDidBecomeKey()
-        await fixture.settle()
+        try await fixture.settle()
         #expect(fixture.hasFocus(fixture.picker))
         #expect(!fixture.hasFocus(fixture.editor))
     }
@@ -53,7 +53,7 @@ struct EditorFocusPolicyTests {
         try #require(fixture.window.makeFirstResponder(nil))
         fixture.inline.removeFromSuperview()
         fixture.policy.swiftUIUpdateDidOccur()
-        await fixture.settle()
+        try await fixture.settle()
         #expect(fixture.hasFocus(replacement))
         #expect(!fixture.policy.pendingOwnerApply)
     }
@@ -87,7 +87,7 @@ struct EditorFocusPolicyTests {
         fixture.window.endEditing(for: fixture.picker)
         try #require(fixture.window.makeFirstResponder(nil))
         fixture.policy.nativeTextEditingDidEnd()
-        await fixture.settle()
+        try await fixture.settle()
         #expect(
             fixture.hasFocus(fixture.search),
             "pending=\(fixture.policy.pendingOwnerApply) firstResponder=\(String(describing: fixture.window.firstResponder))"
@@ -116,7 +116,7 @@ struct EditorFocusPolicyTests {
             fixture.window.endEditing(for: field)
             field.removeFromSuperview()
             fixture.policy.nativeTextEditingDidEnd()
-            await fixture.settle()
+            try await fixture.settle()
             // No test-only responder write: the production dismantle sequence must suffice.
             #expect(fixture.hasFocus(fixture.editor))
             #expect(!fixture.policy.pendingOwnerApply)
@@ -137,12 +137,12 @@ struct EditorFocusPolicyTests {
         #expect(fieldEditor.hasMarkedText())
         fieldEditor.unmarkText()
         fixture.policy.swiftUIUpdateDidOccur()
-        await fixture.settle()
+        try await fixture.settle()
         #expect(fixture.window.firstResponder === fieldEditor)
         fixture.window.endEditing(for: fixture.picker)
         try #require(fixture.window.makeFirstResponder(nil))
         fixture.policy.nativeTextEditingDidEnd()
-        await fixture.settle()
+        try await fixture.settle()
         #expect(fixture.hasFocus(fixture.editor))
     }
 
@@ -164,7 +164,7 @@ struct EditorFocusPolicyTests {
             fixture.window.endEditing(for: fixture.picker)
             try #require(fixture.window.makeFirstResponder(nil))
             fixture.policy.endLocalTextEditing(lease)
-            await fixture.settle()
+            try await fixture.settle()
             #expect(fixture.state.localTextEditing == nil)
             #expect(fixture.hasFocus(fixture.search))
             #expect(fixture.state.decodedOwner?.generation == 9)
@@ -183,7 +183,10 @@ struct EditorFocusPolicyTests {
         host.frame = NSRect(x: 0, y: 0, width: 300, height: 320)
         fixture.container.addSubview(host)
         host.layoutSubtreeIfNeeded()
-        await fixture.settle()
+        try await FocusWait.until("the icon search field to take its lease and become first responder") {
+            fixture.state.localTextEditing == .workspaceIconSearch && fixture.window.firstResponder is NSText
+        }
+        try await fixture.settle()
         #expect(fixture.state.localTextEditing == .workspaceIconSearch)
         #expect(fixture.window.firstResponder is NSText)
         let firstResponder = fixture.window.firstResponder
@@ -194,7 +197,7 @@ struct EditorFocusPolicyTests {
         fixture.policy.endLocalTextEditing(.workspaceIconSearch)
         try #require(fixture.window.makeFirstResponder(nil))
         fixture.policy.nativeTextEditingDidEnd()
-        await fixture.settle()
+        try await fixture.settle()
         #expect(fixture.hasFocus(fixture.editor))
     }
 
@@ -229,7 +232,7 @@ struct EditorFocusPolicyTests {
         fixture.policy.agentOverlayVisibilityDidChange(false)
         fixture.policy.fileDropDidComplete()
         fixture.policy.pointerReturnedToEditor()
-        await fixture.settle()
+        try await fixture.settle()
         #expect(fixture.hasFocus(fixture.inline))
     }
 
@@ -286,7 +289,8 @@ struct EditorFocusPolicyTests {
             isARepeat: false, keyCode: 36
         ))
         fixture.window.sendEvent(enter)
-        await fixture.settle()
+        try await FocusWait.until("Return to record an inline commit") { !recorder.commits.isEmpty }
+        try await fixture.settle()
         #expect(recorder.commits == [editedText])
         #expect(recorder.cancellations == 0)
     }
@@ -439,11 +443,9 @@ struct EditorFocusPolicyTests {
             policy.attach(to: window)
         }
 
-        /// Yields so AppKit and SwiftUI can enqueue follow-up work, then awaits the policy's deferred reclaim itself.
-        /// A fixed yield count alone does not guarantee that the reclaim task has run on a loaded runner.
-        func settle() async {
-            for _ in 0..<20 { await Task.yield() }
-            await policy.deferredReclaimSettled()
+        /// Awaits deferred reclaims, including any that SwiftUI work schedules while settling, rather than counting scheduler turns.
+        func settle() async throws {
+            try await FocusWait.settle(policy)
         }
 
         func hasFocus(_ view: NSView) -> Bool {

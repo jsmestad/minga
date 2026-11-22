@@ -32,6 +32,8 @@ final class EditorFocusPolicy: EditorFocusControlling {
     private var applyingOwner = false
 
     private(set) var agentOverlayVisible = false
+    /// Counts deferred reclaims ever scheduled, so a waiter can tell whether new reclaim work arrived while it was settling.
+    private(set) var deferredReclaimsScheduled = 0
 
     convenience init(editorView: EditorNSView) {
         self.init(editorView: editorView, focusOwnerState: editorView.dispatcher.guiState.focusOwnerState)
@@ -350,6 +352,7 @@ final class EditorFocusPolicy: EditorFocusControlling {
     private func scheduleDeferredReclaim() {
         guard nativeModalDepth == 0 else { return }
         deferredReclaimTask?.cancel()
+        deferredReclaimsScheduled += 1
         deferredReclaimTask = Task { @MainActor [weak self] in
             await Task.yield()
             guard !Task.isCancelled, let self else { return }
