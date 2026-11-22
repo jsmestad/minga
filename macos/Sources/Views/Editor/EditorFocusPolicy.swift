@@ -338,6 +338,15 @@ final class EditorFocusPolicy: EditorFocusControlling {
         return false
     }
 
+    /// Suspends until every queued deferred reclaim has run or been cancelled.
+    /// A reclaim scheduled while waiting is awaited too, so callers observe the retry causally rather than by counting scheduler turns.
+    func deferredReclaimSettled() async {
+        while let task = deferredReclaimTask {
+            await task.value
+            if deferredReclaimTask == task { return }
+        }
+    }
+
     private func scheduleDeferredReclaim() {
         guard nativeModalDepth == 0 else { return }
         deferredReclaimTask?.cancel()
