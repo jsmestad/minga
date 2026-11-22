@@ -9,16 +9,21 @@ defmodule MingaEditor.RenderModel.UI.AgentChatResidentTest do
   defp identity, do: :presentation_identity
 
   describe "admission continuity" do
-    test "a noncontiguous, foreign or baseless update leaves the last good root untouched" do
+    test "a revision gap keeps the last good root; a foreign or baseless update installs none" do
       root = seed(rows(1..5), max_bytes: 10_000)
 
       for update <- [
             {:changes, identity(), 2, 3, 0, [{:put, {3, 9}, row(9)}]},
-            {:changes, make_ref(), 1, 2, 0, [{:put, {3, 9}, row(9)}]},
-            {:unchanged, identity(), 7, 0},
-            {:unchanged, make_ref(), 1, 0}
+            {:unchanged, identity(), 7, 0}
           ] do
         assert {:reseed, ^root} = AgentChatResident.admit(root, update, context())
+      end
+
+      for update <- [
+            {:changes, make_ref(), 1, 2, 0, [{:put, {3, 9}, row(9)}]},
+            {:unchanged, make_ref(), 1, 0}
+          ] do
+        assert {:reseed, nil} = AgentChatResident.admit(root, update, context())
       end
 
       assert {:reseed, nil} =

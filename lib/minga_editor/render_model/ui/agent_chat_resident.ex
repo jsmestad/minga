@@ -28,7 +28,8 @@ defmodule MingaEditor.RenderModel.UI.AgentChatResident do
           max_bytes: pos_integer(),
           derive: (Index.item(), term() | nil -> AgentChat.message()),
           measure: (AgentChat.message() ->
-                      {:ok, pos_integer()} | {:fallback, AgentChat.message(), pos_integer()}),
+                      {:ok, pos_integer()}
+                      | {:fallback, AgentChat.message(), pos_integer(), atom()}),
           tool_id: (Index.item() -> String.t() | nil),
           decoratable?: (Index.item() -> boolean())
         }
@@ -56,7 +57,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatResident do
             scope: nil,
             approval: nil,
             decorated: nil,
-            fallbacks: MapSet.new(),
+            fallbacks: %{},
             selection: nil
 
   @type t :: %__MODULE__{
@@ -75,7 +76,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatResident do
           scope: term(),
           approval: {String.t(), term()} | nil,
           decorated: {key(), term()} | nil,
-          fallbacks: MapSet.t(key()),
+          fallbacks: %{optional(key()) => atom()},
           selection: {pos_integer(), selection(), boolean()} | nil
         }
 
@@ -85,7 +86,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatResident do
   @doc """
   Applies one Editor update to the last admitted root.
 
-  A seed always replaces the root. An unchanged marker or change list applies only on the exact identity and revision; anything else returns `{:reseed, root}` without mutation.
+  A seed always replaces the root. An unchanged marker or change list applies only on the exact identity and revision. A revision gap in the same presentation returns `{:reseed, root}` and keeps the last good root; an update for another presentation returns `{:reseed, nil}` so no other presentation's rows or controls stay visible.
   """
   @spec admit(t() | nil, TranscriptUpdate.t(), context()) :: admission()
   def admit(_root, {:seed, identity, revision, epoch, entries}, context),
@@ -105,7 +106,15 @@ defmodule MingaEditor.RenderModel.UI.AgentChatResident do
       ),
       do: {:ok, advance(root, to, epoch, changes, context)}
 
-  def admit(root, _noncontiguous, _context), do: {:reseed, root}
+  # A revision gap within one presentation keeps the last good root visible.
+  def admit(%__MODULE__{identity: identity} = root, {:unchanged, identity, _, _}, _context),
+    do: {:reseed, root}
+
+  def admit(%__MODULE__{identity: identity} = root, {:changes, identity, _, _, _, _}, _context),
+    do: {:reseed, root}
+
+  # Another presentation's root must never stay under this presentation's chrome.
+  def admit(_root, _foreign, _context), do: {:reseed, nil}
 
   @doc "Returns the semantic messages inside the byte-capped resident suffix and whether older entries were omitted."
   @spec resident_messages(t()) :: {[AgentChat.message()], boolean()}
@@ -126,16 +135,16 @@ defmodule MingaEditor.RenderModel.UI.AgentChatResident do
   end
 
   @doc """
-  Returns the display keys that show a fallback notice in `root` but did not in `previous`.
+  Returns `{key, field}` for each display key that shows a fallback notice in `root` but did not in `previous`; `field` is the codec field that exceeded its limit.
 
   A different presentation reports all of its fallback keys. Callers use this to report each unencodable entry once instead of on every frame.
   """
-  @spec new_fallbacks(t() | nil, t() | nil) :: [key()]
+  @spec new_fallbacks(t() | nil, t() | nil) :: [{key(), atom()}]
   def new_fallbacks(
         %__MODULE__{identity: identity} = previous,
         %__MODULE__{identity: identity} = root
       ),
-      do: root.fallbacks |> MapSet.difference(previous.fallbacks) |> Enum.sort()
+      do: root.fallbacks |> Map.drop(Map.keys(previous.fallbacks)) |> Enum.sort()
 
   def new_fallbacks(_previous, %__MODULE__{fallbacks: fallbacks}), do: Enum.sort(fallbacks)
   def new_fallbacks(_previous, nil), do: []
@@ -166,7 +175,8 @@ defmodule MingaEditor.RenderModel.UI.AgentChatResident do
       Enum.map(entries, fn {key, item} -> {key, derive(key, item, decorated, context)} end)
 
     root = %__MODULE__{
-      fallbacks: for({key, %Entry{fallback?: true}} <- derived, into: MapSet.new(), do: key),
+      fallbacks:
+        for({key, %Entry{fallback: field}} <- derived, field != nil, into: %{}, do: {key, field}),
       identity: identity,
       revision: revision,
       epoch: epoch,
@@ -329,7 +339,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatResident do
   defp weigh(item, message, context) do
     case context.measure.(message) do
       {:ok, weight} -> Entry.new(item, message, weight)
-      {:fallback, fallback, weight} -> Entry.fallback(item, fallback, weight)
+      {:fallback, fallback, weight, field} -> Entry.fallback(item, fallback, weight, field)
     end
   end
 
@@ -376,14 +386,14 @@ defmodule MingaEditor.RenderModel.UI.AgentChatResident do
 
   defp place_entry(root, {4, 0}, entry), do: %{root | empty: entry}
 
-  defp track_fallback(root, key, %Entry{fallback?: true}),
-    do: %{root | fallbacks: MapSet.put(root.fallbacks, key)}
+  defp track_fallback(root, key, %Entry{fallback: nil}),
+    do: %{root | fallbacks: Map.delete(root.fallbacks, key)}
 
-  defp track_fallback(root, key, _entry),
-    do: %{root | fallbacks: MapSet.delete(root.fallbacks, key)}
+  defp track_fallback(root, key, %Entry{fallback: field}),
+    do: %{root | fallbacks: Map.put(root.fallbacks, key, field)}
 
   defp remove(root, key),
-    do: %{remove_entry(root, key) | fallbacks: MapSet.delete(root.fallbacks, key)}
+    do: %{remove_entry(root, key) | fallbacks: Map.delete(root.fallbacks, key)}
 
   defp remove_entry(root, {0, ordinal}), do: %{root | pinned: Trie.delete(root.pinned, ordinal)}
   defp remove_entry(root, {1, 0}), do: %{root | pinned_separator: nil}

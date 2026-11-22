@@ -153,15 +153,13 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
   # bounded notice under the same message ID keeps admission total, so Editor
   # and renderer bases stay aligned and no other presentation is shown.
   @spec measure_entry(AgentChat.message()) ::
-          {:ok, pos_integer()} | {:fallback, AgentChat.message(), pos_integer()}
+          {:ok, pos_integer()} | {:fallback, AgentChat.message(), pos_integer(), atom()}
   defp measure_entry({id, _body} = message) do
     {:ok, AgentChatMessageCodec.resident_entry_size(message)}
   rescue
     error in EncodingError ->
-      fallback =
-        {id, {:system, "Message too large to display (#{error.field} exceeds its limit)", :error}}
-
-      {:fallback, fallback, AgentChatMessageCodec.resident_entry_size(fallback)}
+      fallback = {id, {:system, "Message too large to display", :error}}
+      {:fallback, fallback, AgentChatMessageCodec.resident_entry_size(fallback), error.field}
   end
 
   # A missing composer or a non-conversation lifecycle presents no Session

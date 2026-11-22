@@ -167,15 +167,23 @@ defmodule MingaEditor.Renderer.TranscriptAdmissionTest do
     assert fresh.agent_transcript == nil
     assert Intent.agent_transcript(fresh_intent) == nil
 
-    # A cross-generation update is rejected and the last good root stays installed.
+    # A same-presentation revision gap keeps the last good root.
     assert {:changes, _identity, 1, 2, _epoch, _changes} = frame_b.transcript
-    foreign_frame = %{frame_b | transcript: put_elem(frame_b.transcript, 1, make_ref())}
+    gap_frame = %{frame_b | transcript: put_elem(frame_b.transcript, 2, 5)}
 
-    {kept, kept_intent, :reseed_required} =
-      RendererState.receive_submission(receiver, foreign_frame)
+    {kept, kept_intent, :reseed_required} = RendererState.receive_submission(receiver, gap_frame)
 
     assert kept.agent_transcript === root
     assert Intent.agent_transcript(kept_intent) === root
+
+    # A cross-generation update installs no root, never the other presentation's.
+    foreign_frame = %{frame_b | transcript: put_elem(frame_b.transcript, 1, make_ref())}
+
+    {cleared, cleared_intent, :reseed_required} =
+      RendererState.receive_submission(receiver, foreign_frame)
+
+    assert cleared.agent_transcript == nil
+    assert Intent.agent_transcript(cleared_intent) == nil
 
     # The Editor answers a reseed request for its connected renderer with a seed.
     reseeded = Render.require_transcript_seed(render, self())
@@ -229,7 +237,7 @@ defmodule MingaEditor.Renderer.TranscriptAdmissionTest do
     assert [{1, {:user, "other tab"}}, {2, {:system, fallback, :error}} | _footer] =
              root |> AgentChatResident.resident_messages() |> elem(0)
 
-    assert fallback =~ "too large to display"
+    assert fallback == "Message too large to display"
     refute Enum.any?(summary_of(root), &match?({_, :approval}, &1))
     refute {3, :assistant} in summary_of(root)
   end
@@ -296,7 +304,7 @@ defmodule MingaEditor.Renderer.TranscriptAdmissionTest do
     editor_b = with_transcript(ctx.editor, ctx.session, projection)
     {render, invalid} = submit(render, editor_b)
     {receiver, _, first} = RendererState.receive_submission(receiver, invalid)
-    assert {:admitted, [{3, 1}]} = normalize(first)
+    assert {:admitted, [{{3, 1}, :tool_name}]} = normalize(first)
 
     Enum.reduce(1..3, {render, receiver}, fn _frame, {render, receiver} ->
       {render, unchanged} = submit(render, editor_b)

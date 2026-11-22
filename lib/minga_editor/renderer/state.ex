@@ -139,11 +139,11 @@ defmodule MingaEditor.Renderer.State do
   @typedoc """
   Outcome of admitting one transcript update.
 
-  `{:admitted, keys}` names entries that newly show a fallback notice because their body exceeded a codec limit. `:reseed_required` means the update did not match the resident base. `{:failed, error}` is defense in depth: no root from another presentation is ever kept.
+  `{:admitted, fallbacks}` names entries, with the codec field that exceeded its limit, that newly show a fallback notice. `:reseed_required` means the update did not match the resident base. `{:failed, error}` is defense in depth: no root from another presentation is ever kept.
   """
   @type transcript_admission ::
           :admitted
-          | {:admitted, nonempty_list(AgentChatResident.key())}
+          | {:admitted, nonempty_list({AgentChatResident.key(), atom()})}
           | :reseed_required
           | {:failed, Minga.Frontend.Adapter.GUI.EncodingError.t()}
 
