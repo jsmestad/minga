@@ -15,7 +15,8 @@ defmodule MingaEditor.Agent.UIState.TranscriptProjection do
           provenance_jump: MingaEditor.Agent.ProvenanceJump.t() | nil,
           version: non_neg_integer(),
           source_cursor: Cursor.t() | nil,
-          first_run: first_run() | nil
+          first_run: first_run() | nil,
+          turn_count: non_neg_integer()
         }
 
   @type rendered_message ::
@@ -34,7 +35,8 @@ defmodule MingaEditor.Agent.UIState.TranscriptProjection do
             provenance_jump: nil,
             version: 0,
             source_cursor: nil,
-            first_run: nil
+            first_run: nil,
+            turn_count: 0
 
   @spec new() :: t()
   def new, do: %__MODULE__{}
@@ -51,7 +53,8 @@ defmodule MingaEditor.Agent.UIState.TranscriptProjection do
         display_start: Keyword.get(opts, :display_start, projection.display_start),
         provenance_jump: Keyword.get(opts, :provenance_jump, projection.provenance_jump),
         source_cursor: Keyword.get(opts, :source_cursor),
-        first_run: Keyword.get(opts, :first_run)
+        first_run: Keyword.get(opts, :first_run),
+        turn_count: Keyword.get(opts, :turn_count, 0)
     }
   end
 

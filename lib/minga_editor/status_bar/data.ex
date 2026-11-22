@@ -24,6 +24,8 @@ defmodule MingaEditor.StatusBar.Data do
   alias Minga.RenderModel.UI.StatusBar.Language, as: StatusLanguage
   alias Minga.RenderModel.UI.StatusBar.Selection, as: StatusSelection
   alias Minga.RenderModel.UI.StatusBar.Workspace, as: StatusWorkspace
+  alias MingaAgent.Session.ConnectionSnapshot
+  alias MingaAgent.Session.ConnectionTarget
   alias MingaAgent.StatusCommand
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.UIState.Panel
@@ -351,18 +353,20 @@ defmodule MingaEditor.StatusBar.Data do
 
   # ── Agent variant ──────────────────────────────────────────────────────────
 
+  # Every agent field comes from projections the Editor already holds; render
+  # never asks the session process for anything, so a busy or stopped session
+  # cannot stall the frame.
   @spec build_agent_data(EditorState.t() | map()) :: t()
   defp build_agent_data(state) do
     agent = agent_state(state)
     panel = state.workspace.agent_ui.panel
-    session = agent_session(state)
 
     %__MODULE__{
       common: state |> build_common_data("[no file]") |> apply_agent_modeline_theme(state),
       content: %StatusAgent{
         model_name: if(panel.model_name != "", do: panel.model_name, else: "Agent"),
         session_status: AgentState.display_status(agent),
-        message_count: agent_message_count(session)
+        message_count: panel.transcript.turn_count
       }
     }
   end
@@ -371,19 +375,6 @@ defmodule MingaEditor.StatusBar.Data do
   defp apply_agent_modeline_theme(%Common{} = common, state) do
     %{common | agent_theme_colors: Theme.agent_theme(theme(state))}
   end
-
-  @spec agent_message_count(pid() | nil) :: non_neg_integer()
-  defp agent_message_count(session) when is_pid(session) do
-    case safe_session_metadata(session) do
-      %MingaAgent.SessionMetadata{turn_count: count} when is_integer(count) and count >= 0 ->
-        count
-
-      _other ->
-        0
-    end
-  end
-
-  defp agent_message_count(_session), do: 0
 
   @spec agent_status_command_content(EditorState.t() | map(), AgentState.t()) :: String.t() | nil
   defp agent_status_command_content(
@@ -399,47 +390,27 @@ defmodule MingaEditor.StatusBar.Data do
   @spec agent_status_command_context(EditorState.t() | map(), AgentState.t()) ::
           StatusCommand.context()
   defp agent_status_command_context(state, agent) do
-    session = MingaEditor.Shell.Runtime.active_session(state.shell_runtime)
-    {session_id, session_model, workdir} = session_context(session)
-    panel = state.workspace.agent_ui.panel
+    agent_ui = state.workspace.agent_ui
 
     %{
-      session_id: session_id,
-      model: model_name(panel, session_model),
+      session_id: connected_session_id(agent_ui.connection, agent_session(state)),
+      model: Panel.model_label(agent_ui.panel),
       status: agent.runtime.status,
-      workdir: workdir || File.cwd!()
+      workdir: File.cwd!()
     }
   end
 
-  @spec session_context(pid() | nil) :: {String.t() | nil, String.t() | nil, String.t() | nil}
-  defp session_context(session) when is_pid(session) do
-    case safe_session_metadata(session) do
-      %MingaAgent.SessionMetadata{} = metadata ->
-        {metadata.id, metadata.model_name, metadata.workdir}
+  # The cached connection names the session it describes. A connection left
+  # over from a stopped or replaced session must not lend its id to the next one.
+  @spec connected_session_id(ConnectionSnapshot.t() | nil, pid() | nil) :: String.t() | nil
+  defp connected_session_id(
+         %ConnectionSnapshot{target: %ConnectionTarget{session: session, session_id: id}},
+         session
+       )
+       when is_pid(session),
+       do: id
 
-      _other ->
-        {nil, nil, nil}
-    end
-  end
-
-  defp session_context(_session), do: {nil, nil, nil}
-
-  @spec safe_session_metadata(pid()) :: term()
-  defp safe_session_metadata(session) do
-    GenServer.call(session, :metadata)
-  catch
-    :exit, _ -> nil
-  end
-
-  @spec model_name(Panel.t(), String.t() | nil) :: String.t()
-  defp model_name(%Panel{model_name: model}, _session_model) when model not in ["", "unknown"],
-    do: model
-
-  defp model_name(_panel, session_model)
-       when is_binary(session_model) and session_model not in ["", "unknown"],
-       do: session_model
-
-  defp model_name(panel, _session_model), do: Panel.model_label(panel)
+  defp connected_session_id(_connection, _session), do: nil
 
   # ── Git helpers ────────────────────────────────────────────────────────────
 

@@ -662,6 +662,10 @@ defmodule MingaAgent.SessionManager do
 
     case find_session_by_ref(state.sessions, ref) do
       {session_id, %{stop_pending?: true} = entry} ->
+        # An explicit stop ends the session as surely as an exit does. Pid
+        # holders such as the Editor's tab bar learn about it only through this
+        # event, so it fires here too.
+        broadcast_session_stopped(session_id, pid, reason)
         entry = reset_startup_delivery_after_down(entry, ref)
         entry = %{entry | pid: nil, monitor_ref: nil}
         {:noreply, finish_pending_stop(state, session_id, entry)}

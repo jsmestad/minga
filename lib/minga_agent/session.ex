@@ -1953,7 +1953,7 @@ defmodule MingaAgent.Session do
       created_at: state.created_at,
       last_message_at: Transcript.last_changed_at(state.transcript),
       message_count: length(messages),
-      turn_count: count_user_turns(messages),
+      turn_count: SessionMetadata.turn_count(messages),
       first_prompt: first_prompt,
       cost: Transcript.usage(state.transcript).cost,
       status: TurnExecution.status(state.turn_execution),
@@ -9863,15 +9863,6 @@ defmodule MingaAgent.Session do
       {:ok, dt, _offset} -> dt
       _ -> nil
     end
-  end
-
-  @spec count_user_turns([Message.t()]) :: non_neg_integer()
-  defp count_user_turns(messages) do
-    Enum.count(messages, fn
-      {:user, _} -> true
-      {:user, _, _attachments} -> true
-      _ -> false
-    end)
   end
 
   @spec readable_title(String.t() | nil) :: String.t() | nil

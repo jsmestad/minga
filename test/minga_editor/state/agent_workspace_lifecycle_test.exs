@@ -16,6 +16,7 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
   alias MingaEditor.Commands.AgentSession
   alias MingaEditor.Commands.BufferManagement
   alias MingaEditor.Effect.{Outcome, Policy, Request}
+  alias MingaEditor.Handlers.EventDispatcher
   alias MingaEditor.Handlers.GuiActionHandler
   alias MingaEditor.PickerUI
   alias MingaEditor.UI.Picker.{AgentRetainedOutputCopy, AgentRetainedOutputSource}
@@ -931,6 +932,28 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
     assert workspace_payload(workspace).session == nil
     assert workspace.files == [file_ref]
     assert workspace_payload(workspace).agent_ui == nil
+  end
+
+  test "SPC a S drops the stopped session through the stop event, so later paths see no pid" do
+    Minga.Events.subscribe(:agent_session_stopped)
+    {:ok, session_id, session} = SessionManager.start_session(persist?: false)
+    {state, workspace_id, _file_ref} = state_with_active_agent_workspace(session)
+    assert Runtime.active_session(state.shell_runtime) == session
+
+    state = AgentSession.stop_current_session(state)
+
+    assert_receive {:minga_event, :agent_session_stopped,
+                    %SessionManager.SessionStoppedEvent{session_id: ^session_id, pid: ^session} =
+                      event} = message,
+                   1_000
+
+    state = EventDispatcher.dispatch(state, :agent_session_stopped, event, message)
+
+    assert Runtime.active_session(state.shell_runtime) == nil
+
+    workspace = TabBar.get_workspace(state.shell_runtime.state.tab_bar, workspace_id)
+    assert workspace_payload(workspace).session == nil
+    assert workspace_payload(workspace).agent_status == :idle
   end
 
   @tag :tmp_dir
