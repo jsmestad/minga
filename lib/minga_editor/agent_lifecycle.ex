@@ -142,6 +142,7 @@ defmodule MingaEditor.AgentLifecycle do
 
   @spec safe_editor_snapshot(pid()) :: map() | nil
   defp safe_editor_snapshot(session_pid) do
+    # minga:allow-blocking — Editor, on Agent tab switch, open and draft reopen; the switch read kept by #3643
     AgentSession.editor_snapshot(session_pid)
   catch
     :exit, _ -> nil
@@ -230,6 +231,7 @@ defmodule MingaEditor.AgentLifecycle do
        when is_pid(session) and node(session) == node() do
     projection = state.workspace.agent_ui.panel.transcript
 
+    # minga:allow-blocking — Editor, incremental sync per stream batch and tab switch (#3611, #3613)
     case AgentSession.transcript_since(session, projection.source_cursor || :snapshot) do
       {:unchanged, cursor} ->
         reuse_transcript(state, cursor)
@@ -256,6 +258,7 @@ defmodule MingaEditor.AgentLifecycle do
           "Agent transcript cursor was invalid; reading an atomic snapshot."
         )
 
+        # minga:allow-blocking — Editor, atomic snapshot fallback inside the incremental sync after an invalid cursor
         {:snapshot, snapshot} = AgentSession.transcript_since(session, :snapshot)
         install_transcript_snapshot(state, snapshot, :reset, 2)
     end
@@ -305,6 +308,7 @@ defmodule MingaEditor.AgentLifecycle do
   defp recover_changed_files(state, session) do
     with {:ok, _tab, %{target: %ConnectionTarget{session: ^session} = target}} <-
            ConnectionAction.origin(state),
+         # minga:allow-blocking — Editor, only after a transcript snapshot or reset; recovers changed-file counts once
          {:ok, files} <- AgentSession.changed_file_counts(target) do
       apply_changed_file_counts(state, files)
     else
@@ -504,9 +508,14 @@ defmodule MingaEditor.AgentLifecycle do
 
   defp remote_transcript_pairs(messages, session)
        when is_pid(session) and node(session) != node() do
+    # minga:allow-blocking — Editor, remote sessions only; no transcript cursor over distribution
     case AgentSession.messages_with_ids(session) do
-      [] -> numbered_messages(messages)
-      pairs -> {pairs, AgentSession.pinned_ids(session)}
+      [] ->
+        numbered_messages(messages)
+
+      pairs ->
+        # minga:allow-blocking — Editor, remote sessions only; pins for the pairs read above
+        {pairs, AgentSession.pinned_ids(session)}
     end
   end
 
@@ -517,6 +526,7 @@ defmodule MingaEditor.AgentLifecycle do
 
   @spec safe_session_messages(pid()) :: {:ok, [term()]} | :dead_session
   defp safe_session_messages(session) do
+    # minga:allow-blocking — Editor, remote sessions only; no transcript cursor over distribution
     {:ok, AgentSession.messages(session)}
   catch
     :exit, _ -> :dead_session

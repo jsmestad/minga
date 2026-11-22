@@ -129,6 +129,7 @@ defmodule MingaEditor.Agent.ConnectionAction do
   defp execute(target, :retry), do: Session.retry_connection(target.session, target)
 
   defp execute(target, {:check_route, route_id, name}) do
+    # minga:allow-blocking — runs in ConnectionAction.run/1 under EffectScheduler, not in the Editor
     case Session.check_inference_route(target.session, route_id) do
       {:ok, entry} -> {:notice, route_check_message(name, entry.status)}
       {:error, :not_found} -> {:error, "#{name} is no longer available. Reopen /model."}

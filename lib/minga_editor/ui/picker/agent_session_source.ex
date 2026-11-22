@@ -152,7 +152,9 @@ defmodule MingaEditor.UI.Picker.AgentSessionSource do
   @spec restore_saved(pid(), String.t(), String.t(), saved_kind()) :: :ok | {:error, term()}
   defp restore_saved(session, id, origin_id, kind) do
     case kind do
+      # minga:allow-blocking — Editor, user picks a legacy session; one-shot import (#2450)
       :legacy_import -> Session.import_legacy_session(session, id, origin_id)
+      # minga:allow-blocking — Editor, user picks a saved session; one-shot restore (#2450)
       _saved -> Session.load_session(session, id, origin_id)
     end
   catch
@@ -166,6 +168,7 @@ defmodule MingaEditor.UI.Picker.AgentSessionSource do
   defp current_tab_session?(tab_id, tab_id, nil), do: true
 
   defp current_tab_session?(id, _tab_id, pid) when is_binary(id) and is_pid(pid) do
+    # minga:allow-blocking — Editor, Sessions picker selection; confirms the tab still holds the chosen session
     Session.session_id(pid) == id
   catch
     :exit, _reason -> false
@@ -220,6 +223,7 @@ defmodule MingaEditor.UI.Picker.AgentSessionSource do
 
   defp session_metadata(pid) do
     # An attached daemon can predate the archive field in SessionMetadata.
+    # minga:allow-blocking — Editor, sync Sessions candidates, one read per Agent tab (#2450)
     {:ok, Map.put_new(Session.metadata(pid), :archived?, false)}
   catch
     :exit, _ -> :error
@@ -405,6 +409,7 @@ defmodule MingaEditor.UI.Picker.AgentSessionSource do
   @spec saved_origin(Context.t()) :: saved_origin() | nil
   defp saved_origin(%Context{tab_bar: %TabBar{} = tab_bar, agent_session: session})
        when is_pid(session) do
+    # minga:allow-blocking — Editor, Sessions picker candidates run synchronously on open (#2450 inventory)
     {TabBar.active_workspace_id(tab_bar), session, Session.session_id(session)}
   catch
     :exit, _reason -> nil

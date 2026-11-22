@@ -239,6 +239,7 @@ defmodule MingaEditor.Commands.Agent do
   @spec load_persisted_session(pid(), String.t()) ::
           :ok | {:error, atom() | {:model_selection_correction_required, String.t()}}
   defp load_persisted_session(session_pid, session_id) do
+    # minga:allow-blocking — Editor, user-initiated resume of a persisted session; one-shot restore (#2450 inventory)
     case Session.load_session(session_pid, session_id) do
       :ok ->
         :ok
@@ -1170,6 +1171,7 @@ defmodule MingaEditor.Commands.Agent do
     if remote_session?(state) do
       {:ok, text}
     else
+      # minga:allow-blocking — Editor, once per local prompt submit to resolve file mentions for the active model
       selection = Session.model_selection(Runtime.active_session(state.shell_runtime))
       resolve_mentions(text, model_selection: selection)
     end
@@ -1676,6 +1678,7 @@ defmodule MingaEditor.Commands.Agent do
 
   @spec sync_restored_model_selection(state(), pid()) :: state()
   defp sync_restored_model_selection(state, session) do
+    # minga:allow-blocking — Editor, once after a user-initiated session resume
     case Session.model_selection(session) do
       %ModelSelection{} = selection ->
         apply_model_selection_to_ui(state, selection)

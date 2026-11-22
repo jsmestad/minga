@@ -42,7 +42,7 @@ defmodule MingaEditor.UI.Picker.WorkspaceSymbolSource do
         []
 
       client ->
-        # credo:disable-for-next-line Minga.Credo.NoBlockingEditorCallCheck
+        # minga:allow-blocking — candidates/1 runs in the picker fetch worker (async?/0 is true)
         case Client.request_sync(client, "workspace/symbol", %{"query" => ""}, 5_000) do
           {:ok, symbols} when is_list(symbols) ->
             Enum.map(symbols, &format_symbol/1)

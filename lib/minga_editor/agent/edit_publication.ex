@@ -627,6 +627,7 @@ defmodule MingaEditor.Agent.EditPublication do
 
   @spec session_provider(pid()) :: pid() | nil
   defp session_provider(session) do
+    # minga:allow-blocking — Editor, once per user publish or discard of agent edits
     case Session.get_provider(session) do
       provider when is_pid(provider) -> provider
       _no_provider -> nil

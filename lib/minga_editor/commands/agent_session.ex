@@ -534,6 +534,7 @@ defmodule MingaEditor.Commands.AgentSession do
         MingaEditor.Agent.Ingest.subscribe_session(ingest, pid, questions?: true)
 
       _ ->
+        # minga:allow-blocking — Editor, only when Ingest is down at session start
         Session.subscribe(pid, self(), questions?: true)
     end
   end
@@ -1113,6 +1114,7 @@ defmodule MingaEditor.Commands.AgentSession do
   @spec maybe_refresh_provider_project_view(pid() | nil, ProjectView.t() | nil) ::
           :ok | {:error, term()}
   defp maybe_refresh_provider_project_view(session, project_view) when is_pid(session) do
+    # minga:allow-blocking — Editor, once per agent workspace setup to refresh the provider project view
     case Session.get_provider(session) do
       nil -> :ok
       provider -> MingaAgent.Providers.Native.refresh_project_view(provider, project_view)
