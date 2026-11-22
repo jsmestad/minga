@@ -10,6 +10,10 @@ All notable changes to `minga_sdk` are documented here. The SDK is versioned sep
 | 0.1.1 | Minga builds with the extension notice API and optional extension support (#3764) |
 | 0.1.0 | `main` from jsmestad/minga#3756 (model routes with setup rows and plan usage) onward; the first rolling build after that merge and later |
 
+## Unreleased
+
+- `MingaAgent.InferenceRoute.Status.plan_usage` is `:unreported` until the route's first usage report, then the reported windows or nil. `/model` shows a ready subscription route's plan usage as being checked until that first report, so a route should report an empty list when its usage check finds no data or fails.
+
 ## 0.1.2
 
 - Open pickers and prompts from extension commands with captured arguments and source-owned callbacks. The editor handles presentation, pagination, dismissal, and unload.

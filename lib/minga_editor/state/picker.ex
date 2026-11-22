@@ -50,6 +50,9 @@ defmodule MingaEditor.State.Picker do
   @type fetch_revision :: reference() | nil
   @type fetch_identity :: term() | nil
 
+  @typedoc "Where a landing fetch leaves the selection: at the same position, or on the same item."
+  @type fetch_selection :: :position | :item
+
   @type t :: %__MODULE__{
           picker: MingaEditor.UI.Picker.t() | nil,
           source: module() | nil,
@@ -64,6 +67,7 @@ defmodule MingaEditor.State.Picker do
           load_status: load_status(),
           fetch_revision: fetch_revision(),
           fetch_identity: fetch_identity(),
+          fetch_selection: fetch_selection(),
           query_generation: query_generation(),
           acknowledged_query_edit_seq: query_edit_seq(),
           activation_offer: ActivationOffer.t()
@@ -82,6 +86,7 @@ defmodule MingaEditor.State.Picker do
             load_status: :ready,
             fetch_revision: nil,
             fetch_identity: nil,
+            fetch_selection: :position,
             query_generation: 0,
             acknowledged_query_edit_seq: 0,
             activation_offer: %ActivationOffer{generation: 1}
@@ -329,18 +334,39 @@ defmodule MingaEditor.State.Picker do
     revision = make_ref()
 
     state =
-      %{ps | fetch_revision: revision, fetch_identity: identity, load_status: :loading}
+      %{
+        ps
+        | fetch_revision: revision,
+          fetch_identity: identity,
+          fetch_selection: :position,
+          load_status: :loading
+      }
       |> refresh_activation_offer()
 
     {state, revision}
   end
 
+  @doc """
+  Starts a fetch that reloads the same rows, like `begin_fetch/2`, but keeps the item that is selected when the result lands, wherever it moves.
+  """
+  @spec begin_refresh(t(), fetch_identity()) :: {t(), reference()}
+  def begin_refresh(%__MODULE__{} = ps, identity \\ nil) do
+    {state, revision} = begin_fetch(ps, identity)
+    {%{state | fetch_selection: :item}, revision}
+  end
+
   @doc "Accepts normalized candidates for the current asynchronous fetch."
   @spec complete_fetch(t(), MingaEditor.UI.Picker.t()) :: t()
   def complete_fetch(%__MODULE__{} = ps, picker) do
-    %{ps | picker: picker, load_status: :ready}
+    %{ps | picker: place_selection(ps, picker), load_status: :ready}
     |> refresh_activation_offer()
   end
+
+  @spec place_selection(t(), MingaEditor.UI.Picker.t()) :: MingaEditor.UI.Picker.t()
+  defp place_selection(%__MODULE__{fetch_selection: :item, picker: %Picker{} = previous}, picker),
+    do: Picker.select_id(picker, Picker.selected_id(previous))
+
+  defp place_selection(%__MODULE__{}, picker), do: picker
 
   @doc "Commits a page, replacing only the previous continuation row."
   @spec commit_extension_page(t(), [Item.t()], [Candidate.t()], PublicSource.page()) :: t()

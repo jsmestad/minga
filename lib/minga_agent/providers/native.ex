@@ -44,6 +44,7 @@ defmodule MingaAgent.Providers.Native do
   alias MingaAgent.Hooks.CommandRunner
   alias MingaAgent.InferenceRoute.ConversationRef
   alias MingaAgent.InferenceRoute.PlanWindow
+  alias MingaAgent.InferenceRoute.Status, as: InferenceRouteStatus
   alias MingaAgent.InferenceRoute.Spec, as: InferenceRouteSpec
   alias MingaAgent.InferenceRouteRegistry
   alias MingaAgent.Hooks.Dispatcher, as: HookDispatcher
@@ -3600,7 +3601,8 @@ defmodule MingaAgent.Providers.Native do
           {:ok, String.t()} | :none
   defp plan_limit_message(:rate_limited, registry, route_id) do
     with {:ok, entry} <- InferenceRouteRegistry.lookup(registry, route_id),
-         %PlanWindow{} = window <- PlanWindow.rejected(entry.status.plan_usage),
+         %PlanWindow{} = window <-
+           PlanWindow.rejected(InferenceRouteStatus.plan_windows(entry.status)),
          reset when is_binary(reset) <- InferenceRouteRegistry.reset_label(window) do
       {:ok,
        "#{InferenceRouteSpec.short_name(entry.spec)} plan limit reached. Resets at #{reset}. Switch model to continue."}

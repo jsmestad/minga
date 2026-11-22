@@ -1,12 +1,12 @@
 defmodule MingaAgent.InferenceRoute.Status do
   @moduledoc """
-  Last known readiness and plan usage of one contributed route. `plan_usage` is nil when the route has reported no usage.
+  Last known readiness and plan usage of one contributed route. `plan_usage` is `:unreported` before the route's first usage report and nil when the route reported no usage.
 
   This is a compile-time stub.
   """
 
   @enforce_keys [:availability]
-  defstruct availability: :unknown, plan_usage: nil
+  defstruct availability: :unknown, plan_usage: :unreported
 
   @type availability ::
           :unknown
@@ -15,6 +15,6 @@ defmodule MingaAgent.InferenceRoute.Status do
 
   @type t :: %__MODULE__{
           availability: availability(),
-          plan_usage: [MingaAgent.InferenceRoute.PlanWindow.t()] | nil
+          plan_usage: :unreported | [MingaAgent.InferenceRoute.PlanWindow.t()] | nil
         }
 end

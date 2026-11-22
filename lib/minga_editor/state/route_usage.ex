@@ -19,18 +19,17 @@ defmodule MingaEditor.State.RouteUsage do
   @spec record(t(), StatusChangedEvent.t()) :: t()
   def record(%__MODULE__{} = usage, %StatusChangedEvent{
         route_id: route_id,
-        status: %Status{plan_usage: nil}
-      }),
-      do: %{usage | routes: Map.delete(usage.routes, route_id)}
-
-  def record(%__MODULE__{} = usage, %StatusChangedEvent{
-        route_id: route_id,
         short_name: short_name,
-        status: %Status{plan_usage: windows}
-      })
-      when is_list(windows) do
-    entry = %{short_name: short_name, plan_usage: windows}
-    %{usage | routes: Map.put(usage.routes, route_id, entry)}
+        status: status
+      }) do
+    case Status.plan_windows(status) do
+      nil ->
+        %{usage | routes: Map.delete(usage.routes, route_id)}
+
+      windows ->
+        entry = %{short_name: short_name, plan_usage: windows}
+        %{usage | routes: Map.put(usage.routes, route_id, entry)}
+    end
   end
 
   @doc """

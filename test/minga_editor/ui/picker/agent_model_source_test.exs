@@ -3,6 +3,8 @@ defmodule MingaEditor.UI.Picker.AgentModelSourceTest do
 
   alias MingaAgent.Credentials.Secret
   alias MingaAgent.Credentials.Snapshot
+  alias MingaAgent.InferenceRoute.Status
+  alias MingaAgent.InferenceRoute.StatusChangedEvent
   alias MingaAgent.InferenceRouteRegistry
   alias MingaAgent.ModelResolver
   alias MingaAgent.ModelCandidate
@@ -25,9 +27,11 @@ defmodule MingaEditor.UI.Picker.AgentModelSourceTest do
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.Buffers
+  alias MingaEditor.State.Picker, as: PickerState
   alias MingaEditor.State.Search
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
+  alias MingaEditor.UI.Picker
   alias MingaEditor.UI.Picker.AgentModelSource
   alias MingaEditor.UI.Picker.Candidate
   alias MingaEditor.UI.Picker.Context
@@ -350,8 +354,10 @@ defmodule MingaEditor.UI.Picker.AgentModelSourceTest do
   describe "subscription route setup and plan usage" do
     setup do
       suffix = System.unique_integer([:positive])
+      events = :"picker_route_events_#{suffix}"
+      start_supervised!({Registry, keys: :duplicate, name: events}, id: events)
       registry = :"picker_setup_routes_#{suffix}"
-      start_supervised!({InferenceRouteRegistry, name: registry})
+      start_supervised!({InferenceRouteRegistry, name: registry, events: events})
 
       routes = [
         {"setup#{suffix}", "Setup Fixture"},
@@ -400,6 +406,7 @@ defmodule MingaEditor.UI.Picker.AgentModelSourceTest do
         )
 
       %{
+        events: events,
         registry: registry,
         reporters: reporters,
         session: session,
@@ -554,6 +561,139 @@ defmodule MingaEditor.UI.Picker.AgentModelSourceTest do
       assert readiness == "Availability not checked"
       assert usage == "82% of 5h limit"
     end
+
+    test "a ready subscription route says it is checking plan usage until its first report",
+         ctx do
+      {:ok, _reporter} =
+        InferenceRouteRegistry.register(
+          ctx.registry,
+          [
+            source: {:extension, :fixture_bridge},
+            id: "metered#{ctx.setup_id}",
+            module: FixtureInferenceRoute,
+            display_name: "Metered Fixture"
+          ],
+          config: [models: [FixtureInferenceRoute.model(id: "metered-model", cost: :metered)]]
+        )
+
+      :ok =
+        InferenceRouteRegistry.report_status(
+          ctx.registry,
+          ctx.reporters[ctx.setup_id],
+          {:ready, "me"}
+        )
+
+      rows = route_rows(ctx.registry)
+
+      # Usage follows readiness; the metered and the unavailable routes have no plan to wait for.
+      assert rows["Setup Fixture"] =~ "Ready (me) · Checking plan usage…"
+      refute rows["Offline Setup"] =~ "Checking"
+      refute rows["Metered Fixture"] =~ "Checking"
+
+      :ok = InferenceRouteRegistry.report_usage(ctx.registry, ctx.reporters[ctx.setup_id], [])
+
+      rows = route_rows(ctx.registry)
+      refute rows["Setup Fixture"] =~ "Checking"
+      refute rows["Setup Fixture"] =~ "limit"
+    end
+
+    test "an open chooser lists usage as soon as a route reports it and keeps query and selection",
+         ctx do
+      :ok = Minga.Events.subscribe(:inference_route_status_changed, registry: ctx.events)
+      %{connection: connection} = Session.editor_snapshot(ctx.session)
+      task_supervisor = start_supervised!({Task.Supervisor, []})
+      scheduler = start_supervised!({EffectScheduler, task_supervisor: task_supervisor})
+      :ok = EffectScheduler.attach(scheduler, self())
+      {state, _workspace_id} = editor_state(connection, "Prior Model", scheduler)
+      assert {:ok, state} = SlashCommand.execute(state, "/model")
+
+      # Discovery checks the route and publishes its readiness while the first fetch is in flight.
+      setup_id = ctx.setup_id
+      assert_receive {:fixture_availability_checked, ^setup_id, _worker}, 1_000
+
+      assert_receive {:minga_event, :inference_route_status_changed,
+                      %StatusChangedEvent{route_id: ^setup_id}} = ready_event,
+                     1_000
+
+      assert {:noreply, state} = MingaEditor.handle_info(ready_event, state)
+      assert {:ok, state} = land_fetch(state, scheduler)
+
+      # A change that arrived during the fetch is listed again after it lands, without a new check.
+      assert picker_ui(state).load_status == :loading
+      assert {:ok, state} = land_fetch(state, scheduler)
+      refute_received {:fixture_availability_checked, _id, _caller}
+
+      assert row_description(state, "Setup Fixture") =~
+               "Ready (fixture@example.com) · Checking plan usage…"
+
+      state =
+        PickerUI.update_picker(state, fn ps ->
+          filtered = Picker.filter(ps.picker, "fixture model")
+          model = Enum.find(filtered.filtered, &(&1.description =~ "Setup Fixture"))
+          PickerState.update_picker(ps, Picker.select_id(filtered, model.id))
+        end)
+
+      selected = Picker.selected_id(picker_ui(state).picker)
+      refute selected == Picker.selected_id(Picker.select_index(picker_ui(state).picker, 0))
+
+      :ok =
+        InferenceRouteRegistry.report_usage(ctx.registry, ctx.reporters[setup_id], [
+          %{kind: "five_hour", utilization: 0.45, resets_at: nil, status: :allowed}
+        ])
+
+      assert_receive {:minga_event, :inference_route_status_changed,
+                      %StatusChangedEvent{status: %Status{plan_usage: [_window]}}} = usage_event,
+                     1_000
+
+      assert {:noreply, state} = MingaEditor.handle_info(usage_event, state)
+      assert {:ok, state} = land_fetch(state, scheduler)
+      refute_received {:fixture_availability_checked, _id, _caller}
+
+      assert row_description(state, "Setup Fixture") =~
+               "Ready (fixture@example.com) · 45% of 5h limit"
+
+      assert picker_ui(state).picker.query == "fixture model"
+      assert Picker.selected_id(picker_ui(state).picker) == selected
+    end
+  end
+
+  # Model rows by route display name, from a session that lists the registry's current routes.
+  defp route_rows(registry) do
+    opts = [
+      backend_spec: MingaAgent.ProviderPacks.Native.spec(),
+      credential_snapshot: Snapshot.new(%{}, nil),
+      models: [],
+      inference_routes: registry
+    ]
+
+    session =
+      start_supervised!({ModelPickerSession, ModelResolver.candidates(opts)},
+        id: make_ref()
+      )
+
+    context(connection(session), 1)
+    |> model_items()
+    |> Map.new(fn item -> {item.description |> String.split(" · ") |> hd(), item.description} end)
+  end
+
+  defp land_fetch(state, scheduler) do
+    assert_receive {:effect_result, ^scheduler,
+                    %Outcome{value: {:completed, {:ok, _items, _candidates, _meta}}} = fetched},
+                   1_000
+
+    {:noreply, state} = MingaEditor.handle_info({:effect_result, scheduler, fetched}, state)
+    {:ok, state}
+  end
+
+  defp picker_ui(state) do
+    {:picker, %{picker_ui: picker_ui}} = state.shell_runtime.state.modal
+    picker_ui
+  end
+
+  defp row_description(state, route_name) do
+    picker_ui(state).picker.items
+    |> Enum.find(&(model_choice?(&1) and &1.description =~ route_name))
+    |> Map.fetch!(:description)
   end
 
   defp start_codex_session(plug, path \\ "/tmp/model-picker-oauth.json") do

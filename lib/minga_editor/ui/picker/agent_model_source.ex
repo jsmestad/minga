@@ -20,6 +20,7 @@ defmodule MingaEditor.UI.Picker.AgentModelSource do
   alias MingaEditor.PickerUI
   alias MingaAgent.InferenceRoute.PlanWindow
   alias MingaAgent.InferenceRoute.Spec, as: InferenceRouteSpec
+  alias MingaAgent.InferenceRoute.Status, as: InferenceRouteStatus
   alias MingaEditor.Shell.Traditional.NoticeWorkflow
   alias MingaEditor.Shell.Traditional.Workflow
   alias MingaEditor.State, as: EditorState
@@ -44,7 +45,9 @@ defmodule MingaEditor.UI.Picker.AgentModelSource do
           workspace_id: workspace_id,
           target: connection.target,
           connection: connection,
-          connection_prompt: state.workspace.agent_ui.connection_prompt
+          connection_prompt: state.workspace.agent_ui.connection_prompt,
+          catalog: :discover,
+          route_status: :current
         })
 
       {:error, :connection_unavailable} ->
@@ -58,6 +61,61 @@ defmodule MingaEditor.UI.Picker.AgentModelSource do
         Workflow.install_agent_ui(state, ui)
     end
   end
+
+  @doc """
+  Lists the open chooser's rows again after a contributed route's status or plan usage changed.
+
+  The new fetch reads the registry and the Session's last discovery without checking any route again, so a usage report never starts another availability probe. A change that arrives while a fetch is in flight is listed after that fetch lands, because the fetch may have read its rows before the change. The query and the selected item stay.
+  """
+  @spec route_status_changed(EditorState.t()) :: EditorState.t()
+  def route_status_changed(state) do
+    case open_origin(state) do
+      {:ok, origin, :loading} ->
+        put_origin(state, %{origin | route_status: :changed})
+
+      {:ok, origin, _settled} ->
+        state
+        |> put_origin(%{origin | catalog: :listed, route_status: :current})
+        |> PickerUI.refresh_items()
+
+      :closed ->
+        state
+    end
+  end
+
+  @doc "Lists the rows again when a route status change arrived while the fetch that just landed was running."
+  @spec relist_after_fetch(EditorState.t()) :: EditorState.t()
+  def relist_after_fetch(state) do
+    case open_origin(state) do
+      {:ok, %{route_status: :changed}, _load_status} -> route_status_changed(state)
+      _current_or_closed -> state
+    end
+  end
+
+  @spec open_origin(EditorState.t()) ::
+          {:ok, map(), MingaEditor.State.Picker.load_status()} | :closed
+  defp open_origin(%{
+         shell_runtime: %{
+           state: %{
+             modal:
+               {:picker,
+                %{
+                  picker_ui: %{
+                    source: __MODULE__,
+                    context: %{catalog: _catalog, route_status: _status} = origin,
+                    load_status: load_status
+                  }
+                }}
+           }
+         }
+       }),
+       do: {:ok, origin, load_status}
+
+  defp open_origin(_state), do: :closed
+
+  @spec put_origin(EditorState.t(), map()) :: EditorState.t()
+  defp put_origin(state, origin),
+    do: PickerUI.update_picker(state, &MingaEditor.State.Picker.put_context(&1, origin))
 
   @impl true
   @spec async?() :: boolean()
@@ -79,7 +137,7 @@ defmodule MingaEditor.UI.Picker.AgentModelSource do
       }) do
     actions = connection_actions(origin)
 
-    case fetch_models(target.session) do
+    case fetch_models(Map.get(origin, :catalog, :discover), target.session) do
       {:ok, models, notice, validity} when is_list(models) ->
         items =
           Enum.map(models, &with_origin(format_candidate(&1), origin, {:model, &1.selection}))
@@ -189,12 +247,15 @@ defmodule MingaEditor.UI.Picker.AgentModelSource do
 
   @spec discovery_meta(
           pid(),
-          String.t() | :superseded | nil,
+          String.t() | :superseded | :listed | nil,
           :atomics.atomics_ref() | nil,
           ConnectionSnapshot.t()
         ) ::
           Source.fetch_meta()
   defp discovery_meta(_session, :superseded, nil, _connection), do: %{}
+
+  # A relisting keeps the notice of the discovery that opened the chooser.
+  defp discovery_meta(_session, :listed, nil, _connection), do: %{}
 
   defp discovery_meta(_session, nil, nil, connection), do: %{status: connection_label(connection)}
 
@@ -209,17 +270,25 @@ defmodule MingaEditor.UI.Picker.AgentModelSource do
 
   defp discovered_item?(%Item{}), do: false
 
-  @spec fetch_models(pid()) ::
-          {:ok, term(), String.t() | :superseded | nil, :atomics.atomics_ref() | nil}
+  @spec fetch_models(:discover | :listed, pid()) ::
+          {:ok, term(), String.t() | :superseded | :listed | nil, :atomics.atomics_ref() | nil}
           | {:error, term()}
-  defp fetch_models(session) when node(session) == node() do
+  defp fetch_models(:discover, session) when node(session) == node() do
     # minga:allow-blocking — only async_fetch/1 calls this, in the picker fetch worker (async?/0 is true)
     Session.discover_available_models(session)
   catch
     :exit, _reason -> {:error, :session_unavailable}
   end
 
-  defp fetch_models(session) do
+  # Relisting reads the last discovery and the registry's current route status; no route is checked.
+  defp fetch_models(:listed, session) do
+    # minga:allow-blocking — only async_fetch/1 calls this, in the picker fetch worker (async?/0 is true)
+    with {:ok, models} <- Session.get_available_models(session), do: {:ok, models, :listed, nil}
+  catch
+    :exit, _reason -> {:error, :session_unavailable}
+  end
+
+  defp fetch_models(:discover, session) do
     # minga:allow-blocking — only async_fetch/1 calls this, in the picker fetch worker (async?/0 is true)
     with {:ok, models} <- Session.get_available_models(session), do: {:ok, models, nil, nil}
   catch
@@ -359,7 +428,7 @@ defmodule MingaEditor.UI.Picker.AgentModelSource do
       [
         route_name,
         readiness_label(status),
-        plan_usage_label(status),
+        plan_usage_label(status, selection.policy),
         format_context(selection.policy.limits.context),
         format_thinking(selection),
         format_capabilities(selection),
@@ -462,8 +531,24 @@ defmodule MingaEditor.UI.Picker.AgentModelSource do
   defp readiness_label(%{availability: :unknown}), do: "Availability not checked"
 
   # The busiest reported window, such as "82% of 5h limit · resets 3:40 PM"; nothing without data.
-  @spec plan_usage_label(MingaAgent.InferenceRoute.Status.t()) :: String.t()
-  defp plan_usage_label(%{plan_usage: windows}) do
+  # A ready subscription route measures its plan beside the availability check, so until its first
+  # usage report the row says the check is under way. Metered routes have no plan to report.
+  @spec plan_usage_label(InferenceRouteStatus.t(), ModelSelection.Policy.t()) :: String.t()
+  defp plan_usage_label(%InferenceRouteStatus{plan_usage: :unreported} = status, policy) do
+    if awaits_plan_usage?(status, policy), do: "Checking plan usage…", else: ""
+  end
+
+  defp plan_usage_label(status, _policy),
+    do: reported_usage_label(InferenceRouteStatus.plan_windows(status))
+
+  @spec awaits_plan_usage?(InferenceRouteStatus.t(), ModelSelection.Policy.t()) :: boolean()
+  defp awaits_plan_usage?(status, %{cost_mode: :subscription}),
+    do: InferenceRouteStatus.ready?(status)
+
+  defp awaits_plan_usage?(_status, _policy), do: false
+
+  @spec reported_usage_label([PlanWindow.t()] | nil) :: String.t()
+  defp reported_usage_label(windows) do
     case PlanWindow.busiest(windows) do
       nil -> ""
       window -> usage_text(window, MingaAgent.InferenceRouteRegistry.reset_label(window))

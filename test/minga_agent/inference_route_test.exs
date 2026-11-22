@@ -93,7 +93,9 @@ defmodule MingaAgent.InferenceRouteTest do
 
   describe "Status.new/1" do
     test "accepts unknown, ready with an account, and unavailable with a remedy" do
-      assert {:ok, %Status{availability: :unknown, plan_usage: nil}} = Status.new(:unknown)
+      assert {:ok, %Status{availability: :unknown, plan_usage: :unreported}} =
+               Status.new(:unknown)
+
       assert {:ok, ready} = Status.new({:ready, "me@example.com"})
       assert Status.ready?(ready)
       assert Status.account_label(ready) == "me@example.com"

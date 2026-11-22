@@ -301,6 +301,7 @@ defmodule MingaEditor.PickerUI do
           )
           |> maybe_request_extension_preview()
           |> apply_fetch_status(meta)
+          |> after_fetch(source_module)
 
         {:ok, new_state}
 
@@ -360,6 +361,11 @@ defmodule MingaEditor.PickerUI do
   end
 
   defp project_fetch_result(_source, _state, result), do: result
+
+  # A route status change that arrived while this fetch ran may postdate the rows it read.
+  @spec after_fetch(state(), module()) :: state()
+  defp after_fetch(state, AgentModelSource), do: AgentModelSource.relist_after_fetch(state)
+  defp after_fetch(state, _source), do: state
 
   @spec live_fetch(state(), module(), reference(), term() | nil, Source.fetch_meta() | nil) ::
           {:ok, PickerPayload.t()} | :stale
@@ -1650,8 +1656,9 @@ defmodule MingaEditor.PickerUI do
 
   @doc """
   Refreshes the picker items from the source while preserving the query
-  and selection position. Used by keep-open pickers (e.g., tool manager)
-  to update item status after an action.
+  and selection. A synchronous source keeps the selection position; an
+  asynchronous source keeps the selected item when its result lands. Used by
+  keep-open pickers (e.g., tool manager) and live sources to update item status.
   """
   @spec refresh_items(state()) :: state()
   def refresh_items(
@@ -1699,7 +1706,7 @@ defmodule MingaEditor.PickerUI do
     state = cancel_current_fetch(state)
     current = picker_state(state)
     context = Context.from_editor_state(state)
-    {loading, revision} = PickerState.begin_fetch(current, fetch_identity(source, context))
+    {loading, revision} = PickerState.begin_refresh(current, fetch_identity(source, context))
     loading_state = update_picker(state, fn _current -> loading end)
     request = FetchEffect.request(source, callback_source, context, revision)
     schedule_fetch(loading_state, request, source, revision)

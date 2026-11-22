@@ -63,7 +63,7 @@ defmodule Minga.Extension.ModelRoutes do
   @doc """
   Reports subscription limit windows through a reporter returned by `register/2`. Works from any process.
 
-  Each window has `kind` (for example `"five_hour"`), `utilization` from 0 to 1, `resets_at` (a `DateTime` or nil), and `status` (`:allowed`, `:warning`, or `:rejected`). Report an empty list when you have no usage data; Minga then shows nothing. Usage is kept separately from availability, so either report leaves the other unchanged.
+  Each window has `kind` (for example `"five_hour"`), `utilization` from 0 to 1, `resets_at` (a `DateTime` or nil), and `status` (`:allowed`, `:warning`, or `:rejected`). Report an empty list when you have no usage data; Minga then shows nothing. Until a ready route that offers subscription models makes its first report, `/model` says its plan usage is being checked, so report an empty list when a usage check fails too. Usage is kept separately from availability, so either report leaves the other unchanged.
   """
   @spec report_usage(
           Reporter.t(),

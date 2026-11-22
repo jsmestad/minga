@@ -121,7 +121,8 @@ defmodule Minga.Extension.SdkContractTest do
       {:ready?, 1} => :host_construction,
       {:account_label, 1} => :host_construction,
       {:with_availability, 2} => :host_construction,
-      {:with_plan_usage, 2} => :host_construction
+      {:with_plan_usage, 2} => :host_construction,
+      {:plan_windows, 1} => :render_read
     },
     MingaAgent.InferenceRoute.PlanWindow => %{
       {:new_list, 1} => :host_construction,
