@@ -65,6 +65,30 @@ defmodule MingaEditor.Agent.UIStateTest do
       assert Panel.model_label(selected) == "openai:selected"
     end
 
+    test "a route's provider label names the chat model until another model replaces it" do
+      selection =
+        MingaAgent.Test.ModelSelectionFixture.selection(
+          request_provider: :contributed,
+          origin: {:contributed, "claude_bridge", "haiku"},
+          model_provider: "claude_bridge",
+          model_id: "haiku",
+          route_id: "claude_bridge/haiku",
+          display_name: "Claude Haiku",
+          provider_label: "Claude (subscription)"
+        )
+
+      projected = Panel.project_model_selection(Panel.new(), selection)
+      assert Panel.chat_model_label(projected) == "Claude (subscription):Claude Haiku"
+      assert Panel.model_label(projected) == "Claude Haiku"
+      assert projected.provider_name == "claude_bridge"
+
+      assert projected |> Panel.set_model_name("openai:gpt") |> Panel.chat_model_label() ==
+               "openai:gpt"
+
+      assert projected |> Panel.project_model_selection(nil) |> Panel.chat_model_label() ==
+               Panel.model_label(Panel.project_model_selection(projected, nil))
+    end
+
     test "activation preserves an existing qualified or exact route selection" do
       options = start_supervised!({Minga.Config.Options, name: nil})
       assert {:ok, _} = Minga.Config.Options.set(options, :agent_model, "openai:replacement")

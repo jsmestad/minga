@@ -60,7 +60,6 @@ lib/minga_agent/model_resolver.ex	272d0b691386192772c5a17a0fcc38c6e2f7814a370a93
 lib/minga_agent/model_resolver.ex	32a1e04bc18ea87180b3e946ad44c45a578edd8329734470f3ea0c400b2b1b49	"id == ModelSelection.id(context.spec.id, route, :none)"
 lib/minga_agent/model_resolver.ex	43d429a8971eb2f595b59242a53fc3c0de54d7c614c2f52086eb6bd82eada49c	"spec.id == stored.backend_id"
 lib/minga_agent/model_resolver.ex	44ede7917812e06d8a68532c2cdb862d79747e3157674b6cbc9ef30d86602153	"expected.metadata == stored.route.metadata"
-lib/minga_agent/model_resolver.ex	4df0acd71d8df4d46620ef305359871fc26337246f2595dc2d656ddb6c6199f5	"expected == stored.route"
 lib/minga_agent/model_resolver.ex	624ba46418d025de65ef106071fb336829d4021c0a28640b869779d6a62ed4bd	"is_nil(saved_limit) or limit == saved_limit"
 lib/minga_agent/model_resolver.ex	b935a4ecad6e2fd814f9ad9ab8e1c303afd0d86124210a061e99e96b4e97f7f1	"stored.policy.limits.request_output <= @apple_request_output"
 lib/minga_agent/model_resolver.ex	bb578551ca8519df04e46bbe37845463e6433bbe763a3ee5964e0a715defd2a6	"stored_policy_matches?(stored.policy, source)"

@@ -1,5 +1,9 @@
 defmodule MingaAgent.ModelSelection.Route do
-  @moduledoc "Persistable exact route authority for a text model."
+  @moduledoc """
+  Persistable exact route authority for a text model.
+
+  `provider_label` names the provider that serves the route, such as "Anthropic" or "Claude (subscription)". It is presentation copied from the route's current source declaration, so it is not persisted: restoring a saved route reads it again from that declaration.
+  """
 
   alias MingaAgent.ModelSelection.TextExecution
 
@@ -15,7 +19,17 @@ defmodule MingaAgent.ModelSelection.Route do
     :execution,
     :metadata
   ]
-  defstruct @enforce_keys
+  defstruct [
+    :origin,
+    :request_provider,
+    :id,
+    :model_provider,
+    :model_id,
+    :display_name,
+    :execution,
+    :metadata,
+    provider_label: nil
+  ]
 
   @typedoc """
   Where a route came from. A contributed origin is `{:contributed, route_id, model_id}` and executes through the inference route registered under `route_id`.
@@ -43,7 +57,8 @@ defmodule MingaAgent.ModelSelection.Route do
           model_id: String.t(),
           display_name: String.t(),
           execution: TextExecution.t(),
-          metadata: map()
+          metadata: map(),
+          provider_label: String.t() | nil
         }
 
   @doc "Builds a route using only installed, allowlisted request providers."
@@ -62,7 +77,8 @@ defmodule MingaAgent.ModelSelection.Route do
          %TextExecution{} = execution <- Map.get(attrs, :execution),
          true <- valid_route_identity?(provider, origin, id),
          true <- compatible?(provider, execution),
-         metadata when is_map(metadata) <- Map.get(attrs, :metadata, %{}) do
+         metadata when is_map(metadata) <- Map.get(attrs, :metadata, %{}),
+         {:ok, provider_label} <- provider_label(Map.get(attrs, :provider_label)) do
       {:ok,
        %__MODULE__{
          origin: origin,
@@ -72,7 +88,8 @@ defmodule MingaAgent.ModelSelection.Route do
          model_id: model_id,
          display_name: display_name,
          execution: execution,
-         metadata: metadata |> safe_metadata() |> normalize_metadata() |> normalize_modalities()
+         metadata: metadata |> safe_metadata() |> normalize_metadata() |> normalize_modalities(),
+         provider_label: provider_label
        }}
     else
       _invalid -> {:error, :invalid_route}
@@ -80,6 +97,21 @@ defmodule MingaAgent.ModelSelection.Route do
   end
 
   def new(_attrs), do: {:error, :invalid_route}
+
+  @doc "Returns whether two routes declare the same execution, ignoring presentation that is not persisted."
+  @spec same_declaration?(t(), t()) :: boolean()
+  def same_declaration?(%__MODULE__{} = left, %__MODULE__{} = right),
+    do: %{left | provider_label: nil} == %{right | provider_label: nil}
+
+  @doc "Names the provider that serves this route, from its source's current declaration."
+  @spec with_provider_label(t(), String.t() | nil) :: t()
+  def with_provider_label(%__MODULE__{} = route, label) when is_nil(label) or is_binary(label),
+    do: %{route | provider_label: label}
+
+  @spec provider_label(term()) :: {:ok, String.t() | nil} | {:error, :invalid_route}
+  defp provider_label(nil), do: {:ok, nil}
+  defp provider_label(label) when is_binary(label) and label != "", do: {:ok, label}
+  defp provider_label(_label), do: {:error, :invalid_route}
 
   @spec origin_matches_model?(origin(), String.t(), String.t()) :: boolean()
   defp origin_matches_model?({_kind, provider, id}, provider, id), do: true

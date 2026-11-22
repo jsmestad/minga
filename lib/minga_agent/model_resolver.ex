@@ -24,6 +24,7 @@ defmodule MingaAgent.ModelResolver do
 
   @request_providers ~w(anthropic openai openai_codex google openrouter groq mistral deepseek)a
   @request_provider_names Enum.map(@request_providers, &Atom.to_string/1)
+  @codex_provider_label "OpenAI (ChatGPT subscription)"
   @reasoning_efforts ~w(off none minimal low medium high xhigh max)
   @apple_request_output 512
 
@@ -319,8 +320,8 @@ defmodule MingaAgent.ModelResolver do
     with {:ok, spec} <- backend_spec(Keyword.put(opts, :backend_id, stored.backend_id)),
          true <- spec.id == stored.backend_id,
          :ok <- credential_available(stored.credential, snapshot, opts),
-         :ok <- validate_stored_source(stored, snapshot, spec, opts),
-         {:ok, selection} <- materialize_stored(stored, spec, snapshot),
+         {:ok, route} <- validate_stored_source(stored, snapshot, spec, opts),
+         {:ok, selection} <- materialize_stored(stored, route, spec, snapshot),
          :ok <- validate_streaming(selection) do
       {:ok, selection}
     else
@@ -340,16 +341,16 @@ defmodule MingaAgent.ModelResolver do
     end
   end
 
-  @spec materialize_stored(Stored.t(), Spec.t(), Snapshot.t()) ::
+  @spec materialize_stored(Stored.t(), Route.t(), Spec.t(), Snapshot.t()) ::
           {:ok, ModelSelection.t()} | {:error, resolution_error()}
-  defp materialize_stored(stored, spec, snapshot) do
+  defp materialize_stored(stored, route, spec, snapshot) do
     credential =
       case stored.credential do
         %OAuth{} -> Snapshot.oauth_ref(snapshot)
         credential -> credential
       end
 
-    case ModelSelection.build(spec, stored.route, credential, stored.policy, stored.evidence) do
+    case ModelSelection.build(spec, route, credential, stored.policy, stored.evidence) do
       {:ok, selection} ->
         {:ok, selection}
 
@@ -360,8 +361,9 @@ defmodule MingaAgent.ModelResolver do
     end
   end
 
+  # Returns the route to materialize; a contributed route takes its source's current presentation.
   @spec validate_stored_source(Stored.t(), Snapshot.t(), Spec.t(), keyword()) ::
-          :ok | {:error, resolution_error()}
+          {:ok, Route.t()} | {:error, resolution_error()}
   defp validate_stored_source(%Stored{credential: :none} = stored, _snapshot, spec, opts) do
     saved_limit = stored.policy.limits.context
 
@@ -370,11 +372,11 @@ defmodule MingaAgent.ModelResolver do
          true <- is_nil(saved_limit) or limit == saved_limit,
          source = apple_source(saved_limit),
          {:ok, expected} <- apple_route(source),
-         true <- expected == stored.route,
+         :ok <- route_declaration_unchanged(expected, stored.route),
          true <- stored_policy_matches?(stored.policy, source),
          true <- stored.policy.limits.request_output <= @apple_request_output,
          true <- stored.policy.cost == %{} do
-      :ok
+      {:ok, expected}
     else
       {:error, {:route_unavailable, _message}} = error ->
         error
@@ -395,7 +397,7 @@ defmodule MingaAgent.ModelResolver do
          {:ok, model} <- RouteEntry.model(entry, model_id),
          {:ok, expected} <- contributed_route(entry.spec, model),
          :ok <- contributed_declaration_unchanged(stored, expected, model) do
-      :ok
+      {:ok, expected}
     else
       {:error, {:route_unavailable, _message}} = error ->
         error
@@ -424,7 +426,7 @@ defmodule MingaAgent.ModelResolver do
          true <- expected.id == stored.route.id,
          true <- expected.metadata == stored.route.metadata,
          true <- stored_policy_matches?(stored.policy, source) do
-      :ok
+      {:ok, Route.with_provider_label(stored.route, expected.provider_label)}
     else
       _changed ->
         correction(
@@ -435,12 +437,18 @@ defmodule MingaAgent.ModelResolver do
 
   @spec contributed_declaration_unchanged(Stored.t(), Route.t(), RouteModel.t()) ::
           :ok | {:error, :declaration_changed}
-  defp contributed_declaration_unchanged(%Stored{route: route, policy: policy}, route, model) do
-    if contributed_policy_matches?(policy, model), do: :ok, else: {:error, :declaration_changed}
+  defp contributed_declaration_unchanged(%Stored{route: route, policy: policy}, expected, model) do
+    with :ok <- route_declaration_unchanged(expected, route) do
+      if contributed_policy_matches?(policy, model), do: :ok, else: {:error, :declaration_changed}
+    end
   end
 
-  defp contributed_declaration_unchanged(_stored, _expected, _model),
-    do: {:error, :declaration_changed}
+  @spec route_declaration_unchanged(Route.t(), Route.t()) :: :ok | {:error, :declaration_changed}
+  defp route_declaration_unchanged(expected, stored_route) do
+    if Route.same_declaration?(expected, stored_route),
+      do: :ok,
+      else: {:error, :declaration_changed}
+  end
 
   @spec stored_source(Stored.t(), keyword()) ::
           {:ok, source()} | {:error, term()}
@@ -605,7 +613,8 @@ defmodule MingaAgent.ModelResolver do
         model_id: model.id,
         display_name: model.display_name,
         execution: execution,
-        metadata: contributed_metadata(model)
+        metadata: contributed_metadata(model),
+        provider_label: route_spec.display_name
       })
     end
   end
@@ -821,7 +830,8 @@ defmodule MingaAgent.ModelResolver do
         model_id: "system",
         display_name: "Apple Intelligence (On Device)",
         execution: execution,
-        metadata: source_metadata(source)
+        metadata: source_metadata(source),
+        provider_label: "Apple"
       })
     end
   end
@@ -1020,6 +1030,7 @@ defmodule MingaAgent.ModelResolver do
           provider: provider,
           model_id: model_id,
           request_provider: :openai_codex,
+          provider_label: @codex_provider_label,
           execution: execution
         })
 
@@ -1038,6 +1049,7 @@ defmodule MingaAgent.ModelResolver do
         provider: provider,
         model_id: model_id,
         request_provider: request_provider,
+        provider_label: catalog_provider_label(provider, context.opts),
         execution: execution
       })
     end
@@ -1056,7 +1068,8 @@ defmodule MingaAgent.ModelResolver do
       model_id: model_id,
       display_name: display_name(source, model_id),
       execution: route_data.execution,
-      metadata: source_metadata(source)
+      metadata: source_metadata(source),
+      provider_label: route_data.provider_label
     }
 
     case Route.new(attrs) do
@@ -1621,26 +1634,34 @@ defmodule MingaAgent.ModelResolver do
   defp models(opts), do: Keyword.get_lazy(opts, :models, &LLMDB.models/0)
 
   @spec provider_endpoint(String.t(), keyword()) :: String.t() | nil
-  defp provider_endpoint(provider, opts) do
-    providers = Keyword.get(opts, :providers)
+  defp provider_endpoint(provider, opts),
+    do: provider |> catalog_provider(opts) |> provider_base_url()
 
-    case providers do
-      providers when is_list(providers) ->
-        providers
-        |> Enum.find(&(provider_string(&1) == provider))
-        |> provider_base_url()
-
-      _runtime ->
-        case existing_provider_atom(provider) do
-          nil -> nil
-          provider_atom -> provider_atom |> LLMDB.provider() |> provider_result_base_url()
-        end
+  # The catalog's human name for a provider, such as "Anthropic"; the provider id when the catalog has none.
+  @spec catalog_provider_label(String.t(), keyword()) :: String.t()
+  defp catalog_provider_label(provider, opts) do
+    case provider |> catalog_provider(opts) |> value("name") do
+      name when is_binary(name) and name != "" -> name
+      _missing -> provider
     end
   end
 
-  @spec provider_result_base_url({:ok, term()} | term()) :: String.t() | nil
-  defp provider_result_base_url({:ok, provider}), do: provider_base_url(provider)
-  defp provider_result_base_url(_result), do: nil
+  @spec catalog_provider(String.t(), keyword()) :: term()
+  defp catalog_provider(provider, opts) do
+    case Keyword.get(opts, :providers) do
+      providers when is_list(providers) ->
+        Enum.find(providers, &(provider_string(&1) == provider))
+
+      _runtime ->
+        with provider_atom when is_atom(provider_atom) and not is_nil(provider_atom) <-
+               existing_provider_atom(provider),
+             {:ok, catalog_provider} <- LLMDB.provider(provider_atom) do
+          catalog_provider
+        else
+          _missing -> nil
+        end
+    end
+  end
 
   @spec provider_base_url(term()) :: String.t() | nil
   defp provider_base_url(nil), do: nil

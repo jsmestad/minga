@@ -33,6 +33,7 @@ defmodule MingaEditor.Agent.UIState.Panel do
           history_index: integer(),
           spinner_frame: non_neg_integer(),
           provider_name: String.t(),
+          provider_label: String.t() | nil,
           model_name: String.t(),
           thinking_level: String.t() | nil,
           input_focused: boolean(),
@@ -51,6 +52,7 @@ defmodule MingaEditor.Agent.UIState.Panel do
             history_index: -1,
             spinner_frame: 0,
             provider_name: "",
+            provider_label: nil,
             model_name: "unknown",
             thinking_level: nil,
             input_focused: false,
@@ -117,6 +119,7 @@ defmodule MingaEditor.Agent.UIState.Panel do
       %{
         panel
         | provider_name: AgentConfig.extract_provider_prefix(default_model),
+          provider_label: nil,
           model_name: default_model
       }
     else
@@ -148,16 +151,37 @@ defmodule MingaEditor.Agent.UIState.Panel do
   def model_label(%__MODULE__{credential_readiness: :unconfigured}), do: "No model configured"
   def model_label(%__MODULE__{}), do: "Model not resolved"
 
+  @doc """
+  Projects the agent chat model identity as `provider:model` when the selected route names its provider, otherwise as `model_label/1`.
+
+  Frontends split this value at its first `:`, so a provider label that contains `:` is omitted rather than split in the wrong place.
+  """
+  @spec chat_model_label(t()) :: String.t()
+  def chat_model_label(%__MODULE__{provider_label: label} = panel) when is_binary(label) do
+    if String.contains?(label, ":"),
+      do: model_label(panel),
+      else: label <> ":" <> model_label(panel)
+  end
+
+  def chat_model_label(%__MODULE__{} = panel), do: model_label(panel)
+
   @doc "Projects authoritative model display facts without discovering models or changing readiness."
   @spec project_model_selection(t(), ModelSelection.t() | nil) :: t()
   def project_model_selection(%__MODULE__{} = panel, nil),
-    do: %{panel | model_name: "unknown", provider_name: "", thinking_level: nil}
+    do: %{
+      panel
+      | model_name: "unknown",
+        provider_name: "",
+        provider_label: nil,
+        thinking_level: nil
+    }
 
   def project_model_selection(%__MODULE__{} = panel, %ModelSelection{} = selection) do
     %{
       panel
       | model_name: selection.route.display_name,
         provider_name: selection.route.model_provider,
+        provider_label: selection.route.provider_label,
         thinking_level: selection.policy.reasoning.effort
     }
   end
@@ -171,7 +195,7 @@ defmodule MingaEditor.Agent.UIState.Panel do
   @doc "Sets the active model name."
   @spec set_model_name(t(), String.t()) :: t()
   def set_model_name(%__MODULE__{} = panel, model) when is_binary(model) do
-    %{panel | model_name: model}
+    %{panel | model_name: model, provider_label: nil}
   end
 
   @spec cache_transcript_display(
