@@ -214,12 +214,18 @@ defmodule MingaEditor.AgentLifecycle do
   @doc "Refreshes the transcript for a render or a committed message change."
   @spec sync_transcript(state(), :refresh | :messages_changed) :: state()
   def sync_transcript(state, trigger) do
-    session = MingaEditor.Shell.Runtime.active_session(state.shell_runtime)
+    case Runtime.active_session(state.shell_runtime) do
+      nil ->
+        state
 
-    sync_session_transcript(state, session, trigger)
+      session ->
+        if MingaEditor.Agent.Arrival.pending?(state, session),
+          do: state,
+          else: sync_session_transcript(state, session, trigger)
+    end
   end
 
-  @spec sync_session_transcript(state(), pid() | nil, :refresh | :messages_changed) :: state()
+  @spec sync_session_transcript(state(), pid(), :refresh | :messages_changed) :: state()
   defp sync_session_transcript(state, session, _trigger)
        when is_pid(session) and node(session) == node() do
     projection = state.workspace.agent_ui.panel.transcript
@@ -273,25 +279,60 @@ defmodule MingaEditor.AgentLifecycle do
     end
   end
 
-  defp sync_session_transcript(state, nil, _trigger), do: state
+  @doc "Installs an ordered Session arrival without querying that Session again."
+  @spec apply_editor_arrival(state(), pid(), AgentSession.editor_arrival()) :: state()
+  def apply_editor_arrival(state, session, {snapshot, transcript}) do
+    state
+    |> apply_session_snapshot(session, snapshot)
+    |> apply_arrival_transcript(transcript)
+  end
+
+  @spec apply_arrival_transcript(state(), AgentSession.editor_arrival_transcript()) :: state()
+  defp apply_arrival_transcript(state, {:unchanged, cursor}) do
+    reuse_transcript(state, state.workspace.agent_ui.panel.transcript, cursor, 2)
+  end
+
+  defp apply_arrival_transcript(state, {:replace, outcome, snapshot, previously_read, files}) do
+    state
+    |> apply_changed_file_counts(files)
+    |> install_transcript_snapshot(snapshot, outcome, previously_read, 2)
+  end
 
   @spec recover_changed_files(state(), pid()) :: state()
   defp recover_changed_files(state, session) do
     with {:ok, _tab, %{target: %ConnectionTarget{session: ^session} = target}} <-
            ConnectionAction.origin(state),
          {:ok, files} <- AgentSession.changed_file_counts(target) do
-      ui = state.workspace.agent_ui
-      timeline = EditTimeline.recover_files(ui.view.edit_timeline, files)
-      ui = UIState.replace_edit_timeline(ui, timeline)
-      MingaEditor.Shell.Traditional.Workflow.install_agent_ui(state, ui)
+      apply_changed_file_counts(state, files)
     else
       _unavailable -> state
     end
   end
 
-  @spec install_transcript_snapshot(state(), Snapshot.t(), :changed | :reset, non_neg_integer()) ::
-          state()
-  defp install_transcript_snapshot(state, snapshot, outcome, previously_read) do
+  @spec apply_changed_file_counts(state(), %{String.t() => pos_integer()} | nil) :: state()
+  defp apply_changed_file_counts(state, nil), do: state
+
+  defp apply_changed_file_counts(state, files) do
+    ui = state.workspace.agent_ui
+    timeline = EditTimeline.recover_files(ui.view.edit_timeline, files)
+    ui = UIState.replace_edit_timeline(ui, timeline)
+    MingaEditor.Shell.Traditional.Workflow.install_agent_ui(state, ui)
+  end
+
+  @spec install_transcript_snapshot(
+          state(),
+          Snapshot.t(),
+          :changed | :reset,
+          non_neg_integer(),
+          pos_integer() | nil
+        ) :: state()
+  defp install_transcript_snapshot(
+         state,
+         snapshot,
+         outcome,
+         previously_read,
+         session_calls \\ nil
+       ) do
     {messages, pairs} =
       Enum.map_reduce(snapshot.entries, [], fn %{id: id, message: message}, pairs ->
         {message, [{id, message} | pairs]}
@@ -319,20 +360,21 @@ defmodule MingaEditor.AgentLifecycle do
 
     synced
     |> apply_transcript_names(messages)
-    |> report_transcript_sync(outcome, previously_read + snapshot.count)
+    |> report_transcript_sync(outcome, previously_read + snapshot.count, session_calls)
   end
 
-  @spec reuse_transcript(state(), TranscriptProjection.t(), Cursor.t()) :: state()
-  defp reuse_transcript(state, projection, cursor) do
+  @spec reuse_transcript(state(), TranscriptProjection.t(), Cursor.t(), pos_integer() | nil) ::
+          state()
+  defp reuse_transcript(state, projection, cursor, session_calls \\ nil) do
     case refresh_first_run(state, projection.first_run, cursor) do
       {:rebuilt, synced} ->
-        report_transcript_sync(synced, :unchanged, 0)
+        report_transcript_sync(synced, :unchanged, 0, session_calls)
 
       :unchanged ->
         state
         |> maybe_restyle_retained_transcript(projection)
         |> advance_transcript_cursor(cursor)
-        |> report_transcript_sync(:unchanged, 0)
+        |> report_transcript_sync(:unchanged, 0, session_calls)
     end
   end
 
@@ -385,12 +427,26 @@ defmodule MingaEditor.AgentLifecycle do
     )
   end
 
-  @spec report_transcript_sync(state(), :unchanged | :changed | :reset, non_neg_integer()) ::
-          state()
-  defp report_transcript_sync(state, outcome, entries_read) do
-    Minga.Telemetry.execute([:minga, :agent, :transcript_sync], %{entries_read: entries_read}, %{
-      outcome: outcome
-    })
+  @doc "Records a switch whose Session could not provide a transcript."
+  @spec report_unavailable_arrival(state(), 1 | 2) :: state()
+  def report_unavailable_arrival(state, calls),
+    do: report_transcript_sync(state, :unavailable, 0, calls)
+
+  @spec report_transcript_sync(
+          state(),
+          :unchanged | :changed | :reset | :unavailable,
+          non_neg_integer(),
+          pos_integer() | nil
+        ) :: state()
+  defp report_transcript_sync(state, outcome, entries_read, session_calls) do
+    measurements = %{entries_read: entries_read}
+
+    measurements =
+      if session_calls,
+        do: Map.put(measurements, :session_calls, session_calls),
+        else: measurements
+
+    Minga.Telemetry.execute([:minga, :agent, :transcript_sync], measurements, %{outcome: outcome})
 
     state
   end

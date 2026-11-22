@@ -163,6 +163,12 @@ defmodule MingaEditor.State do
     %{state | agent_connection: connection}
   end
 
+  @doc "Installs the Editor-owned local Agent arrival correlation."
+  @spec install_agent_arrival(t(), MingaEditor.Agent.Arrival.t() | nil) :: t()
+  def install_agent_arrival(%__MODULE__{} = state, arrival) do
+    %{state | agent_connection: AgentConnection.install_arrival(state.agent_connection, arrival)}
+  end
+
   @doc "Records a contributed model route's reported status from its change event."
   @spec record_inference_route_status(t(), MingaAgent.InferenceRoute.StatusChangedEvent.t()) ::
           t()

@@ -13,6 +13,7 @@ defmodule MingaEditor do
 
   use GenServer
 
+  alias MingaEditor.Agent.Arrival
   alias MingaEditor.Agent.Events
   alias MingaEditor.Agent.UIState
   alias Minga.Buffer
@@ -1354,6 +1355,25 @@ defmodule MingaEditor do
   # Agent events are handled directly via Agent.Events, which reads and
   # writes agent/agentic fields on EditorState directly.
 
+  def handle_info({:agent_event, session, {:editor_arrival_ready, token, capture}}, state) do
+    {:noreply, Arrival.ready(state, session, token, capture)}
+  end
+
+  def handle_info({:agent_arrival_deadline, token}, state) do
+    {:noreply, Arrival.presentation_deadline(state, token)}
+  end
+
+  def handle_info({:volatile_queue_recalled, session, conversation, workspace, queued}, state) do
+    {:noreply,
+     MingaEditor.Agent.DraftWorkflow.apply_volatile_recall(
+       state,
+       session,
+       conversation,
+       workspace,
+       queued
+     )}
+  end
+
   def handle_info({:agent_event, session_pid, event}, state) do
     Log.debug(:agent, "[event] #{inspect(event)}")
     route_agent_event(state, session_pid, event)
@@ -1402,14 +1422,10 @@ defmodule MingaEditor do
 
   # Process died. Check buffer monitors and git remote tasks.
   # Agent session deaths are handled via :agent_session_stopped events from SessionManager.
-  def handle_info({:DOWN, ref, :process, pid, reason}, state) do
-    case classify_down(state, ref, pid, reason) do
-      :buffer ->
-        state = MingaEditor.Handlers.BufferRegistry.retire_dead_buffer(state, pid)
-        {:noreply, Renderer.render_or_async(state)}
-
-      :unknown ->
-        {:noreply, state}
+  def handle_info({:DOWN, ref, :process, pid, reason} = message, state) do
+    case Arrival.response(state, message) do
+      {:handled, updated} -> {:noreply, updated}
+      :unrelated -> handle_dependency_down(state, ref, pid, reason)
     end
   end
 
@@ -1493,8 +1509,11 @@ defmodule MingaEditor do
      MingaEditor.Agent.SessionOrganization.receive_result(state, origin, change, result)}
   end
 
-  def handle_info(_msg, state) do
-    {:noreply, state}
+  def handle_info(message, state) do
+    case Arrival.response(state, message) do
+      {:handled, updated} -> {:noreply, updated}
+      :unrelated -> {:noreply, state}
+    end
   end
 
   @spec apply_current_scheduler_result(state(), pid(), Outcome.t()) :: {:noreply, state()}
@@ -1583,6 +1602,19 @@ defmodule MingaEditor do
   end
 
   # ── :DOWN classifier ────────────────────────────────────────────────────────
+
+  @spec handle_dependency_down(EditorState.t(), reference(), pid(), term()) ::
+          {:noreply, EditorState.t()}
+  defp handle_dependency_down(state, ref, pid, reason) do
+    case classify_down(state, ref, pid, reason) do
+      :buffer ->
+        state = MingaEditor.Handlers.BufferRegistry.retire_dead_buffer(state, pid)
+        {:noreply, Renderer.render_or_async(state)}
+
+      :unknown ->
+        {:noreply, state}
+    end
+  end
 
   @spec classify_down(EditorState.t(), reference(), pid(), term()) :: :buffer | :unknown
   defp classify_down(state, _ref, pid, _reason) do
@@ -1754,8 +1786,9 @@ defmodule MingaEditor do
   end
 
   defp route_agent_event(state, session_pid, event, :active_agent) do
-    state = Events.dispatch(state, session_pid, event)
-    {:noreply, state}
+    if Arrival.pending?(state, session_pid),
+      do: {:noreply, Arrival.dispatch_before_capture(state, session_pid, event)},
+      else: {:noreply, Events.dispatch(state, session_pid, event)}
   end
 
   defp route_agent_event(state, _session_pid, _event, :unreachable), do: {:noreply, state}

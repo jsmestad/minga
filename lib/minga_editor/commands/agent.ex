@@ -208,6 +208,7 @@ defmodule MingaEditor.Commands.Agent do
     with :ok <- DraftWorkflow.before_reopen(state, session_id),
          :ok <- load_persisted_session(session_pid, session_id) do
       state
+      |> MingaEditor.Agent.Arrival.retire(session_pid)
       |> update_agent_ui(&UIState.reset_edit_timeline/1)
       |> DraftWorkflow.after_reopen(session_pid, session_id)
       |> sync_restored_model_selection(session_pid)

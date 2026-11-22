@@ -90,13 +90,13 @@ defmodule MingaEditor.Agent.SessionEventWorkflow do
   end
 
   @doc "Restores queued prompts after an agent error and installs the visible error state."
-  @spec error(EditorState.t(), String.t()) :: EditorState.t()
-  def error(%EditorState{} = state, message) when is_binary(message) do
+  @spec error(EditorState.t(), String.t(), :regular | :arrival) :: EditorState.t()
+  def error(%EditorState{} = state, message, mode \\ :regular) when is_binary(message) do
     state
     |> TraditionalWorkflow.install_agent_ui(
       UIState.report_chat_start_failure(state.workspace.agent_ui, message)
     )
-    |> restore_queued_prompts_after_error()
+    |> restore_queued_prompts_after_error(mode)
     |> TraditionalWorkflow.install_agent_error(message)
     |> MingaEditor.schedule_render(16)
   end
@@ -201,13 +201,17 @@ defmodule MingaEditor.Agent.SessionEventWorkflow do
   @spec queues_recalled(EditorState.t()) :: EditorState.t()
   def queues_recalled(%EditorState{} = state), do: MingaEditor.schedule_render(state, 16)
 
-  @spec restore_queued_prompts_after_error(EditorState.t()) :: EditorState.t()
-  defp restore_queued_prompts_after_error(state) do
+  @spec restore_queued_prompts_after_error(EditorState.t(), :regular | :arrival) ::
+          EditorState.t()
+  defp restore_queued_prompts_after_error(state, mode) do
     case Runtime.active_session(state.shell_runtime) do
       session when is_pid(session) ->
         case DraftWorkflow.recall(state, session) do
           {:saved, updated} ->
             updated
+
+          :volatile when mode == :arrival ->
+            DraftWorkflow.recall_volatile(state, session)
 
           :volatile ->
             restore_volatile_queue(state, safe_recall_queues(session))

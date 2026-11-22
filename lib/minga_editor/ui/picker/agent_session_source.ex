@@ -126,6 +126,7 @@ defmodule MingaEditor.UI.Picker.AgentSessionSource do
         ui = MingaEditor.Agent.UIState.reset_edit_timeline(state.workspace.agent_ui)
 
         state
+        |> MingaEditor.Agent.Arrival.retire(session)
         |> MingaEditor.Shell.Traditional.Workflow.install_agent_ui(ui)
         |> DraftWorkflow.after_reopen(session, id)
 

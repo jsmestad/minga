@@ -39,6 +39,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - Native approval geometry checks bind the live host and window to their run before making one foreground request. Acceptance still requires external foreground observation, global button hits, native captures and complete child cleanup.
 - macOS Agent elapsed-time refreshes stop when the context bar disappears and refresh immediately when a new dispatch timestamp arrives.
 - Agent tab and workspace names use the transcript already read by the editor instead of requesting the same conversation again.
+- Switching to a busy local Agent session stops waiting after 250 ms. Your draft and transcript position are retained, and live controls return automatically when the session answers.
 - On macOS, typing in the Agent composer, moving the caret and opening prompt completion no longer re-evaluate the conversation, so typing costs the same in a long session as in a new one.
 - Idle Agent activity no longer appears as completed work while unfinished tasks or retained activity remain visible.
 - Agent activity keeps showing the remaining tool when another concurrent call finishes. Tool updates no longer read the Session to choose an active tool.

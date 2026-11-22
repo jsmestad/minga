@@ -57,6 +57,7 @@ defmodule Minga.Test.HeadlessPort do
 
   @typedoc "Screen snapshot with grid and cursor position."
   @type screen :: %{
+          optional(:agent_chat) => map() | nil,
           grid: grid(),
           cursor: {non_neg_integer(), non_neg_integer()},
           cursor_shape: Protocol.cursor_shape(),
@@ -694,6 +695,7 @@ defmodule Minga.Test.HeadlessPort do
       cursor_shape: state.cursor_shape,
       width: state.width,
       height: state.height,
+      agent_chat: state.agent_chat,
       input_seq: input_seq
     }
 

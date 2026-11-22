@@ -18,6 +18,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
   alias MingaAgent.Test.ModelSelectionFixture
   alias Minga.Editing.Scroll
   alias MingaEditor.Agent.CatalogStartup
+  alias MingaEditor.Agent.Ingest
   alias MingaEditor.Agent.Transcript
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.UIState.Panel
@@ -33,6 +34,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
   alias MingaEditor.Shell.Traditional.Workflow
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
+  alias MingaEditor.State.AgentConnection
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Frontend
   alias MingaEditor.State.Interaction
@@ -1236,6 +1238,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
             Runtime.new(Runtime.default_entry(), %MingaEditor.Shell.Traditional.State{})
         }
         |> install_tab_bar(tab_bar)
+        |> with_agent_ingest()
 
       state_a = MingaEditor.Commands.execute(state, :agent_new_session)
       tab_a = Runtime.active_tab(state_a.shell_runtime)
@@ -1318,6 +1321,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
 
       active_a = MingaEditor.TabWorkflow.switch(placeholder, tab_a.id)
       assert Runtime.active_session(active_a.shell_runtime) == session_a
+      active_a = collect_arrival(active_a, session_a)
 
       assert MingaEditor.Agent.PromptBuffer.prompt_text(active_a.workspace.agent_ui) ==
                "keyboard draft"
@@ -1357,6 +1361,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
 
       active_b = MingaEditor.TabWorkflow.switch(active_a, tab_b.id)
       assert Runtime.active_session(active_b.shell_runtime) == session_b
+      active_b = collect_arrival(active_b, session_b)
 
       assert :stale =
                PickerUI.apply_fetch_result(
@@ -1402,7 +1407,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
     end
 
     test "a deferred Agent start finishes in its departed workspace without taking focus" do
-      state = with_catalog_scheduler(source_workspace_state())
+      state = source_workspace_state() |> with_catalog_scheduler() |> with_agent_ingest()
       tabs = state.shell_runtime.state.tab_bar
       source_id = tabs.active_id
 
@@ -1462,6 +1467,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
       session = Runtime.active_session(returned.shell_runtime)
       assert is_pid(session)
       on_exit(fn -> MingaAgent.SessionManager.stop_session_by_pid(session) end)
+      returned = collect_arrival(returned, session)
 
       assert %{visible?: true, lifecycle: :conversation, prompt: "draft before leaving"} =
                Minga.Test.AgentWorkflowDriver.chat_model(returned)
@@ -1741,6 +1747,17 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
       agent_tabs = TabBar.filter_by_kind(new_state.shell_runtime.state.tab_bar, :agent)
       assert agent_tabs != []
     end
+  end
+
+  defp with_agent_ingest(state) do
+    ingest = start_supervised!({Ingest, editor: self()})
+    %{state | agent_connection: AgentConnection.connect_ingest(state.agent_connection, ingest)}
+  end
+
+  defp collect_arrival(state, session) do
+    assert_receive {:agent_event, ^session, {:editor_arrival_ready, _, _}} = capture, 5_000
+    {:noreply, state} = MingaEditor.handle_info(capture, state)
+    state
   end
 
   defp replace_panel(state, transition) do
