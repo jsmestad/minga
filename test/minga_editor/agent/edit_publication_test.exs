@@ -215,7 +215,16 @@ defmodule MingaEditor.Agent.EditPublicationTest do
          %{state: state, workspace_id: id, root: root, tmp_dir: dir} do
       scope = :"publication_views_#{System.unique_integer([:positive])}"
       start_supervised!(%{id: scope, start: {:pg, :start_link, [scope]}})
-      store = [staged_drafts_dir: Path.join(dir, "store"), scope: scope]
+      # One simulated Minga instance: finding the real identity runs `ps`.
+      instance = %{os_pid: 101, started: "Sun Nov 22 09:00:00 2026"}
+
+      store = [
+        staged_drafts_dir: Path.join(dir, "store"),
+        scope: scope,
+        instance: instance,
+        instance_alive?: fn _owner -> false end
+      ]
+
       File.write!(Path.join(root, "todo.md"), "a\nb\n")
       keeper = start_supervised!({StagedDraftKeeper, [name: nil] ++ store}, id: :before)
 

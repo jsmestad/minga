@@ -1,7 +1,10 @@
 defmodule MingaAgent.StagedDraftKeeperTest do
   use ExUnit.Case, async: true
 
+  import ExUnit.CaptureLog
+
   alias Minga.Buffer.Process, as: BufferProcess
+  alias Minga.Session.StagedDraft
   alias Minga.Session.StagedDrafts
   alias MingaAgent.ProjectView
   alias MingaAgent.ProjectView.Overlay
@@ -23,12 +26,15 @@ defmodule MingaAgent.StagedDraftKeeperTest do
     %{root: root, store: store, keeper: start_keeper(store, :first)}
   end
 
+  # One simulated Minga instance, unless a test names another: finding the
+  # real identity runs `ps`, an OS process.
+  @instance %{os_pid: 101, started: "Sun Nov 22 09:00:00 2026"}
+
   defp start_keeper(store, id) do
+    opts = [name: nil] ++ store ++ [instance: @instance, instance_alive?: fn _owner -> false end]
+
     start_supervised!(
-      Supervisor.child_spec({StagedDraftKeeper, [name: nil] ++ store},
-        id: id,
-        restart: :temporary
-      )
+      Supervisor.child_spec({StagedDraftKeeper, opts}, id: id, restart: :temporary)
     )
   end
 
@@ -404,6 +410,191 @@ defmodule MingaAgent.StagedDraftKeeperTest do
       send(keeper, {:retry_snapshot, view.id})
 
       eventually(keeper, fn -> match?(%{{1, "lib/a.ex"} => _}, stored(root, store)) end)
+    end
+  end
+
+  describe "failed cleanup after a publish" do
+    # A view directory without write permission makes the deletion fail.
+    defp block_cleanup(root, view, store) do
+      dir = StagedDrafts.view_dir(root, view.id, store)
+      File.chmod!(dir, 0o500)
+      on_exit(fn -> File.chmod(dir, 0o700) end)
+      dir
+    end
+
+    defp publish_and_wait_for_retirement(keeper, root, store, view) do
+      ref = Process.monitor(Overlay.changeset_pid(view))
+      assert ProjectView.promote(view, :project_root) == :ok
+      assert_receive {:DOWN, ^ref, :process, _, :normal}, 2_000
+
+      eventually(keeper, fn ->
+        match?({:ok, [%{retired: true}]}, StagedDrafts.load(root, store))
+      end)
+    end
+
+    test "is retried until it succeeds, warning once, and the view is not offered meanwhile",
+         %{root: root, store: store} do
+      keeper = start_keeper(Keyword.put(store, :retry_ms, 60_000), :retrying)
+      {:ok, view} = ProjectView.overlay(root)
+      StagedDraftKeeper.persist(keeper, view, 1)
+      :ok = ProjectView.write_file(view, "lib/a.ex", "ONE\ntwo\nthree\n")
+      eventually(keeper, fn -> map_size(stored(root, store)) == 1 end)
+      dir = block_cleanup(root, view, store)
+
+      log =
+        capture_log(fn ->
+          publish_and_wait_for_retirement(keeper, root, store, view)
+
+          # The retry timer's message, delivered instead of waited for, fails
+          # again without a second warning.
+          send(keeper, {:retry_delete, dir})
+          :sys.get_state(keeper)
+        end)
+
+      assert log |> String.split("could not be cleaned up") |> length() == 2
+
+      :ok = StagedDraftKeeper.recover(keeper, root, self())
+      :sys.get_state(keeper)
+      refute_received {:staged_drafts_recovered, _, _}
+
+      File.chmod!(dir, 0o700)
+      send(keeper, {:retry_delete, dir})
+
+      eventually(keeper, fn -> StagedDrafts.load(root, store) == {:ok, []} end)
+      refute File.exists?(dir)
+    end
+
+    test "is not offered at the next start, which finishes the cleanup",
+         %{root: root, store: store, keeper: keeper} do
+      {:ok, view} = ProjectView.overlay(root)
+      StagedDraftKeeper.persist(keeper, view, 1)
+      stage(view)
+      eventually(keeper, fn -> map_size(stored(root, store)) == 3 end)
+      dir = block_cleanup(root, view, store)
+
+      publish_and_wait_for_retirement(keeper, root, store, view)
+      stop_supervised!(:first)
+      File.chmod!(dir, 0o700)
+
+      fresh = start_keeper(store, :second)
+      :ok = StagedDraftKeeper.recover(fresh, root, self())
+      :sys.get_state(fresh)
+
+      refute_received {:staged_drafts_recovered, _, _}
+      assert StagedDrafts.load(root, store) == {:ok, []}
+      refute File.exists?(dir)
+    end
+  end
+
+  describe "two Minga instances on one project" do
+    test "a running instance's staged views are left to it, and recovered once it exits without publishing",
+         %{root: root, store: store} do
+      first = %{os_pid: 201, started: "Sun Nov 22 10:00:00 2026"}
+      second = %{os_pid: 202, started: "Sun Nov 22 10:05:00 2026"}
+      running = start_supervised!({Agent, fn -> MapSet.new([first, second]) end})
+      alive? = fn owner -> Agent.get(running, &MapSet.member?(&1, owner)) end
+
+      # Each instance has its own BEAM, so its own scope of live views.
+      other_scope = :"staged_views_#{System.unique_integer([:positive])}"
+      start_supervised!(%{id: other_scope, start: {:pg, :start_link, [other_scope]}})
+
+      first_keeper = start_keeper([instance: first, instance_alive?: alive?] ++ store, :one)
+      {:ok, view} = ProjectView.overlay(root)
+      StagedDraftKeeper.persist(first_keeper, view, 1)
+      stage(view)
+      eventually(first_keeper, fn -> map_size(stored(root, store)) == 3 end)
+
+      second_store = Keyword.put(store, :scope, other_scope)
+
+      second_keeper =
+        start_keeper([instance: second, instance_alive?: alive?] ++ second_store, :two)
+
+      :ok = StagedDraftKeeper.recover(second_keeper, root, self())
+      :sys.get_state(second_keeper)
+      refute_received {:staged_drafts_recovered, _, _}
+
+      # The first instance still saves its view.
+      :ok = ProjectView.write_file(view, "lib/b.ex", "alpha\nBETA\n")
+      eventually(first_keeper, fn -> map_size(stored(root, store)) == 4 end)
+
+      # The first instance exits without publishing.
+      changeset = Overlay.changeset_pid(view)
+      ref = Process.monitor(changeset)
+      stop_supervised!(:one)
+      Process.exit(changeset, :shutdown)
+      assert_receive {:DOWN, ^ref, :process, _, :shutdown}
+      Agent.update(running, &MapSet.delete(&1, first))
+
+      :ok = StagedDraftKeeper.recover(second_keeper, root, self())
+
+      assert_receive {:staged_drafts_recovered, ^root,
+                      [%Recovery{source: :disk, workspace_id: 1} = recovery]},
+                     2_000
+
+      assert recovery.changes |> Enum.map(& &1.path) |> Enum.sort() ==
+               ["lib/a.ex", "lib/b.ex", "lib/new.ex", "old.txt"]
+    end
+  end
+
+  describe "a view another instance took over" do
+    # This instance (`first`) is still running, but the other instance judged
+    # it gone and claimed its view.
+    setup %{root: root, store: store} do
+      first = %{os_pid: 301, started: "Sun Nov 22 11:00:00 2026"}
+      second = %{os_pid: 302, started: "Sun Nov 22 11:05:00 2026"}
+      running = start_supervised!({Agent, fn -> MapSet.new([first, second]) end})
+      alive? = fn owner -> Agent.get(running, &MapSet.member?(&1, owner)) end
+
+      keeper = start_keeper([instance: first, instance_alive?: alive?] ++ store, :took_over)
+      {:ok, view} = ProjectView.overlay(root)
+      StagedDraftKeeper.persist(keeper, view, 1)
+      :ok = ProjectView.write_file(view, "lib/a.ex", "ONE\ntwo\nthree\n")
+      eventually(keeper, fn -> map_size(stored(root, store)) == 1 end)
+
+      dir = StagedDrafts.view_dir(root, view.id, store)
+      :ok = StagedDrafts.claim_view_dir(dir, second, fn _owner -> false end, store)
+      theirs = StagedDraft.new("lib/theirs.ex", nil, "theirs\n")
+      :ok = StagedDrafts.write(root, view.id, 1, theirs, store)
+
+      %{took_over_keeper: keeper, view: view, dir: dir, second: second}
+    end
+
+    # Whether the keeper still tracks the view is the behavior under test.
+    defp tracks?(keeper, view), do: Map.has_key?(:sys.get_state(keeper).tracked, view.id)
+
+    test "is neither saved into nor pruned, and the loss is logged once",
+         %{root: root, store: store, took_over_keeper: keeper, view: view, dir: dir} = context do
+      log =
+        capture_log(fn ->
+          :ok = ProjectView.write_file(view, "lib/b.ex", "alpha\nBETA\n")
+          eventually(keeper, fn -> not tracks?(keeper, view) end)
+          :ok = ProjectView.write_file(view, "lib/b.ex", "alpha\nBETA!\n")
+          :sys.get_state(keeper)
+        end)
+
+      assert log |> String.split("kept by another Minga instance") |> length() == 2
+
+      assert Map.keys(stored(root, store)) |> Enum.sort() == [
+               {1, "lib/a.ex"},
+               {1, "lib/theirs.ex"}
+             ]
+
+      assert StagedDrafts.check_view_claim(dir, context.second, fn _ -> true end) == :ok
+    end
+
+    test "is not deleted when this instance publishes it",
+         %{root: root, store: store, took_over_keeper: keeper, view: view, dir: dir} do
+      ref = Process.monitor(Overlay.changeset_pid(view))
+      assert ProjectView.promote(view, :project_root) == :ok
+      assert_receive {:DOWN, ^ref, :process, _, :normal}, 2_000
+      eventually(keeper, fn -> not tracks?(keeper, view) end)
+
+      assert File.dir?(dir)
+
+      assert Map.keys(stored(root, store)) |> Enum.sort() == [
+               {1, "lib/a.ex"},
+               {1, "lib/theirs.ex"}
+             ]
     end
   end
 end

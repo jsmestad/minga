@@ -6,11 +6,13 @@ defmodule Minga.Session.StagedDrafts do
 
       $XDG_DATA_HOME/minga/staged_drafts/<project key>/<view key>/<path key>.json
 
-  The keys are SHA-256 hashes, so file names never reveal project paths. Files are grouped by the identity of the staging view (`MingaAgent.ProjectView` id), not by workspace: two views that claim the same workspace never overwrite or delete each other's drafts. The workspace id is an attribute stored in each draft.
+  The keys are SHA-256 hashes, so file names never reveal project paths. Files are grouped by the identity of the staging view (`MingaAgent.ProjectView` id), not by workspace: two views that claim the same workspace never overwrite or delete each other's drafts. The workspace id is an attribute stored in each draft. A published or discarded view is retired: a content-free `<view key>.retired` tombstone beside its directory marks it until the deletion finishes, so a failed deletion never brings its drafts back.
 
   Each draft is one JSON file, written atomically (temporary file, then rename), so a crash leaves either the previous complete draft or the new one. The file carries a `version` field. The project root, view id, and path are Base64-encoded, because names can be arbitrary bytes that JSON cannot hold, and so are the base and staged bytes. A `base_sha256` fingerprint guards the base against corruption.
 
   The drafts are user file content. Every store directory must be a real directory (not a symlink) owned by the current user and not writable by group or others; it is created with mode `0700`, and a directory that fails the check is refused for both writing and loading. Draft files get mode `0600` before they become visible under their final name. Reads accept regular files only and are bounded by `max_draft_bytes/1`. A draft above `max_file_bytes/1` is never saved; `write_lost/6` replaces its stored copy with a content-free marker, so the next start reports it as lost instead of restoring an older version.
+
+  Several Minga instances can share the store. Each view directory holds an owner record naming the instance that saves it (`claim_view_dir/4`): its OS process id and that process's start time, so a reused process id never looks like the old owner. An instance only writes, restores, or deletes a view it has claimed; a view whose owner is still running is left alone, and the claim of an owner that is gone is taken over.
 
   This module only reads and writes files. `MingaAgent.StagedDraftKeeper` decides when to write and delete them.
   """
@@ -23,6 +25,12 @@ defmodule Minga.Session.StagedDrafts do
   @format "minga-staged-draft"
   @current_version 1
   @extension ".json"
+  @retired ".retired"
+  @owner_file "owner"
+  @aside ".aside"
+  @owner_format "minga-staged-draft-owner"
+  @max_owner_bytes 4096
+  @claim_attempts 3
 
   # The editor refuses to open files above 10 MiB by default; agent changesets
   # stage files without that limit. 64 MiB of base plus 64 MiB of content is
@@ -49,13 +57,24 @@ defmodule Minga.Session.StagedDrafts do
           | {:lost, String.t(), String.t(), lost_reason()}
           | {:retained, String.t(), String.t(), retained_reason()}
 
-  @typedoc "The stored drafts of one staging view."
+  @typedoc """
+  The stored drafts of one staging view.
+
+  A retired view (`retired: true`) was published or discarded, and its deletion has not finished. It has no entries and must never be offered again; its directory is removed with `retire_view_dir/1`.
+  """
   @type stored_view :: %{
           dir: String.t(),
           view_id: String.t(),
           workspace_id: non_neg_integer() | nil,
-          entries: [entry()]
+          entries: [entry()],
+          retired: boolean()
         }
+
+  @typedoc "The Minga instance that saves a view: its OS process id and that process's start time."
+  @type owner :: %{os_pid: pos_integer(), started: String.t()}
+
+  @typedoc "Answers whether another instance's owner record names a process that is still running."
+  @type owner_alive? :: (owner() -> boolean())
 
   @doc "Largest base or staged content, in bytes, that is persisted (`opts[:max_file_bytes]`, default 64 MiB)."
   @spec max_file_bytes(keyword()) :: pos_integer()
@@ -195,10 +214,281 @@ defmodule Minga.Session.StagedDrafts do
 
   @doc "Deletes a loaded view's directory, for a view none of whose drafts can be restored."
   @spec remove_view_dir(stored_view()) :: :ok | {:error, term()}
-  def remove_view_dir(%{dir: dir}) do
-    case File.rm_rf(dir) do
-      {:ok, _removed} -> :ok
-      {:error, reason, _path} -> {:error, reason}
+  def remove_view_dir(%{dir: dir}), do: remove_dir(dir)
+
+  @doc """
+  Claims the view stored in `dir` (from `view_dir/3`, or a loaded view) for `owner`.
+
+  Returns `:ok` when `owner` already holds the claim, when the view has no owner, or when its owner is gone (`alive?` returns `false`, or the record is unreadable). Returns `{:error, :owned}` while another instance that is still running holds it. The record is created atomically (hard link of a complete file), and a stale record is moved aside (`owner.<n>.aside`, a name `prune/4` never removes) before it is replaced, so two instances that take over the same stale view never both succeed. A moved record that turns out to be another instance's fresh claim is put back; if that fails, it stays aside, and every later claim yields to it while its owner runs.
+
+  `opts[:link]` replaces `File.ln/2`, for tests.
+  """
+  @spec claim_view_dir(String.t(), owner(), owner_alive?(), keyword()) ::
+          :ok | {:error, :owned | term()}
+  def claim_view_dir(dir, %{os_pid: _, started: _} = owner, alive?, opts \\ [])
+      when is_binary(dir) and is_function(alive?, 1) do
+    with {:ok, uid} <- owner_uid(opts),
+         :ok <- File.mkdir_p(Path.dirname(dir(opts))),
+         :ok <- all_ok([dir(opts), Path.dirname(dir), dir], &create_private(&1, uid)) do
+      context = %{
+        dir: dir,
+        file: Path.join(dir, @owner_file),
+        owner: owner,
+        alive?: alive?,
+        link: Keyword.get(opts, :link, &File.ln/2)
+      }
+
+      claim(context, @claim_attempts)
+    end
+  end
+
+  @doc """
+  Checks, without creating anything, that `owner` may still change the view stored in `dir`.
+
+  Returns `:ok` when `owner` holds the claim, when the view has no owner record, or when its recorded owner is gone; `{:error, :owned}` when another instance that is still running holds it. Call it before deleting files of a view claimed earlier: another instance may have taken the view over since.
+  """
+  @spec check_view_claim(String.t(), owner(), owner_alive?()) :: :ok | {:error, :owned | term()}
+  def check_view_claim(dir, %{os_pid: _, started: _} = owner, alive?)
+      when is_binary(dir) and is_function(alive?, 1) do
+    case read_owner(Path.join(dir, @owner_file)) do
+      {:ok, {:owner, ^owner, _bytes}} -> :ok
+      {:ok, {:owner, other, _bytes}} -> if alive?.(other), do: {:error, :owned}, else: :ok
+      {:ok, {:invalid, _content}} -> :ok
+      {:error, :enoent} -> :ok
+      {:error, _reason} = error -> error
+    end
+  end
+
+  @doc "Gives up `owner`'s claim on the view stored in `dir`, leaving another owner's claim alone."
+  @spec release_view_dir(String.t(), owner()) :: :ok | {:error, term()}
+  def release_view_dir(dir, %{os_pid: _, started: _} = owner) when is_binary(dir) do
+    file = Path.join(dir, @owner_file)
+
+    case read_owner(file) do
+      {:ok, {:owner, ^owner, _bytes}} -> remove_file(file)
+      {:ok, _other} -> :ok
+      {:error, :enoent} -> :ok
+      {:error, _reason} = error -> error
+    end
+  end
+
+  @typep claim_context :: %{
+           dir: String.t(),
+           file: String.t(),
+           owner: owner(),
+           alive?: owner_alive?(),
+           link: (String.t(), String.t() -> :ok | {:error, term()})
+         }
+
+  @spec claim(claim_context(), non_neg_integer()) :: :ok | {:error, :owned | term()}
+  defp claim(_context, 0), do: {:error, :claim_contended}
+
+  defp claim(context, attempts) do
+    case create_owner(context) do
+      :ok -> settle_asides(context)
+      {:error, :eexist} -> claim_existing(context, attempts)
+      {:error, :enoent} -> claim(context, attempts - 1)
+      {:error, _reason} = error -> error
+    end
+  end
+
+  @spec claim_existing(claim_context(), pos_integer()) :: :ok | {:error, :owned | term()}
+  defp claim_existing(%{owner: owner} = context, attempts) do
+    case read_owner(context.file) do
+      {:ok, {:owner, ^owner, _bytes}} ->
+        :ok
+
+      {:ok, {:owner, other, _bytes} = record} ->
+        if context.alive?.(other),
+          do: {:error, :owned},
+          else: take_over(context, record, attempts)
+
+      {:ok, {:invalid, _content} = record} ->
+        take_over(context, record, attempts)
+
+      {:error, :enoent} ->
+        claim(context, attempts - 1)
+
+      {:error, _reason} = error ->
+        error
+    end
+  end
+
+  # Moves the stale record aside, then claims again. If another instance
+  # replaced the stale record first, the moved file is that instance's fresh
+  # claim: it is put back, and the view stays theirs. A record that cannot be
+  # put back is never deleted; it stays aside for `settle_asides/1`.
+  @spec take_over(claim_context(), owner_record(), pos_integer()) ::
+          :ok | {:error, :owned | term()}
+  defp take_over(%{file: file} = context, stale, attempts) do
+    aside = "#{file}.#{System.unique_integer([:positive, :monotonic])}#{@aside}"
+
+    case File.rename(file, aside) do
+      :ok ->
+        if read_owner(aside) == {:ok, stale} do
+          _ = File.rm(aside)
+          claim(context, attempts - 1)
+        else
+          put_back(context, aside)
+        end
+
+      {:error, :enoent} ->
+        claim(context, attempts - 1)
+
+      {:error, _reason} = error ->
+        error
+    end
+  end
+
+  @spec put_back(claim_context(), String.t()) :: {:error, :owned}
+  defp put_back(context, aside) do
+    case context.link.(aside, context.file) do
+      :ok -> _ = File.rm(aside)
+      {:error, _reason} -> :ok
+    end
+
+    {:error, :owned}
+  end
+
+  # A new claim yields to a record left aside by a failed put-back while that
+  # record's owner runs. Aside records that are this owner's, unreadable, or
+  # of an owner that is gone are removed.
+  @spec settle_asides(claim_context()) :: :ok | {:error, :owned}
+  defp settle_asides(%{dir: dir} = context) do
+    names =
+      case File.ls(dir) do
+        {:ok, names} -> Enum.filter(names, &String.ends_with?(&1, @aside))
+        {:error, _reason} -> []
+      end
+
+    Enum.reduce_while(names, :ok, fn name, :ok ->
+      case settle_aside(context, Path.join(dir, name)) do
+        :ok -> {:cont, :ok}
+        {:error, :owned} = owned -> {:halt, owned}
+      end
+    end)
+  end
+
+  @spec settle_aside(claim_context(), String.t()) :: :ok | {:error, :owned}
+  defp settle_aside(%{owner: owner} = context, aside) do
+    case read_owner(aside) do
+      {:ok, {:owner, ^owner, _bytes}} ->
+        _ = File.rm(aside)
+        :ok
+
+      {:ok, {:owner, other, _bytes}} ->
+        if context.alive?.(other), do: yield(context, aside), else: remove_aside(aside)
+
+      {:ok, {:invalid, _content}} ->
+        remove_aside(aside)
+
+      {:error, _reason} ->
+        :ok
+    end
+  end
+
+  @spec remove_aside(String.t()) :: :ok
+  defp remove_aside(aside) do
+    _ = File.rm(aside)
+    :ok
+  end
+
+  # Gives the just-created claim back to the running owner of `aside`.
+  @spec yield(claim_context(), String.t()) :: {:error, :owned}
+  defp yield(context, aside) do
+    _ = File.rm(context.file)
+    put_back(context, aside)
+  end
+
+  # A hard link publishes a complete record and fails when one exists.
+  @spec create_owner(claim_context()) :: :ok | {:error, term()}
+  defp create_owner(%{file: file, owner: %{os_pid: os_pid, started: started}} = context) do
+    tmp = "#{file}.#{System.unique_integer([:positive, :monotonic])}.tmp"
+
+    json =
+      JSON.encode!(%{
+        "format" => @owner_format,
+        "version" => @current_version,
+        "os_pid" => os_pid,
+        "started" => started
+      })
+
+    result =
+      with :ok <- write_private(tmp, json) do
+        context.link.(tmp, file)
+      end
+
+    _ = File.rm(tmp)
+    result
+  end
+
+  # An owner record as found on disk. Its bytes (or why it is unusable)
+  # identify it when it is moved aside during a takeover.
+  @typep owner_record :: {:owner, owner(), binary()} | {:invalid, binary() | atom()}
+
+  @spec read_owner(String.t()) :: {:ok, owner_record()} | {:error, term()}
+  defp read_owner(file) do
+    case SecureFile.read(file, @max_owner_bytes) do
+      {:ok, bytes} -> {:ok, decode_owner_record(bytes)}
+      {:error, {:file_read_failed, _path, reason}} -> {:error, reason}
+      # The reason without the path, which changes when the file is moved.
+      {:error, unusable} -> {:ok, {:invalid, elem(unusable, 0)}}
+    end
+  end
+
+  @spec decode_owner_record(binary()) :: owner_record()
+  defp decode_owner_record(bytes) do
+    case JSON.decode(bytes) do
+      {:ok,
+       %{
+         "format" => @owner_format,
+         "version" => @current_version,
+         "os_pid" => os_pid,
+         "started" => started
+       }}
+      when is_integer(os_pid) and os_pid > 0 and is_binary(started) ->
+        {:owner, %{os_pid: os_pid, started: started}, bytes}
+
+      _invalid ->
+        {:invalid, bytes}
+    end
+  end
+
+  @doc """
+  Deletes every stored draft of a view that is published or discarded, so its drafts are never offered again.
+
+  A content-free tombstone next to the view directory (`<view key>.retired`) is written first and removed last. If the deletion fails, the tombstone survives a restart, so `load/2` reports the view as retired instead of offering its drafts. Retry with `retire_view_dir/1`.
+  """
+  @spec retire_view(String.t(), String.t(), keyword()) :: :ok | {:error, term()}
+  def retire_view(project_root, view_id, opts \\ []) do
+    project_root |> view_dir(view_id, opts) |> retire_view_dir()
+  end
+
+  @doc "Finishes retiring the view stored in `dir` (from `view_dir/3`, or a loaded view). A view that is already gone is not an error."
+  @spec retire_view_dir(String.t()) :: :ok | {:error, term()}
+  def retire_view_dir(dir) when is_binary(dir) do
+    tombstone = dir <> @retired
+
+    case File.lstat(dir) do
+      {:error, :enoent} ->
+        remove_file(tombstone)
+
+      _exists ->
+        # A failed tombstone only matters if the deletion fails too; the
+        # deletion's result decides whether the view is still pending.
+        _ = mark_retired(tombstone)
+
+        with :ok <- remove_dir(dir) do
+          remove_file(tombstone)
+        end
+    end
+  end
+
+  @spec mark_retired(String.t()) :: :ok | {:error, term()}
+  defp mark_retired(tombstone) do
+    case File.write(tombstone, "", [:exclusive]) do
+      result when result in [:ok, {:error, :eexist}] -> :ok
+      {:error, _reason} = error -> error
     end
   end
 
@@ -209,12 +499,14 @@ defmodule Minga.Session.StagedDrafts do
   """
   @spec delete_view(String.t(), String.t(), keyword()) :: :ok | {:error, term()}
   def delete_view(project_root, view_id, opts \\ []) do
-    case File.rm_rf(view_dir(project_root, view_id, opts)) do
-      {:ok, _removed} ->
-        :ok
+    project_root |> view_dir(view_id, opts) |> remove_dir()
+  end
 
-      {:error, reason, _path} ->
-        {:error, reason}
+  @spec remove_dir(String.t()) :: :ok | {:error, term()}
+  defp remove_dir(dir) do
+    case File.rm_rf(dir) do
+      {:ok, _removed} -> :ok
+      {:error, reason, _path} -> {:error, reason}
     end
   end
 
@@ -231,7 +523,7 @@ defmodule Minga.Session.StagedDrafts do
   @doc """
   Loads every stored draft of a project, grouped by staging view.
 
-  A draft that can never be restored is returned as `{:lost, file, name, reason}`; one that cannot be read now is `{:retained, file, name, reason}`. `name` is the draft's path when the file still names it. Temporary files are skipped and left alone: one may belong to a write that is still in progress (`prune/4` removes leftovers for the view's owner). Returns `{:error, reason}` without reading anything when a store directory fails the privacy check.
+  A draft that can never be restored is returned as `{:lost, file, name, reason}`; one that cannot be read now is `{:retained, file, name, reason}`. A view with a retirement tombstone is returned with `retired: true` and no entries; its drafts are not read. `name` is the draft's path when the file still names it. Temporary files are skipped and left alone: one may belong to a write that is still in progress (`prune/4` removes leftovers for the view's owner). Returns `{:error, reason}` without reading anything when a store directory fails the privacy check.
   """
   @spec load(String.t(), keyword()) :: {:ok, [stored_view()]} | {:error, term()}
   def load(project_root, opts \\ []) when is_binary(project_root) do
@@ -241,10 +533,12 @@ defmodule Minga.Session.StagedDrafts do
          :ok <- verify_existing_private(dir(opts), uid),
          :ok <- verify_existing_private(project, uid),
          {:ok, names} <- list_dir(project) do
-      dirs = names |> Enum.sort() |> Enum.map(&Path.join(project, &1))
+      {retired, live} = split_retired(names)
+      dirs = live |> Enum.sort() |> Enum.map(&Path.join(project, &1))
 
       with :ok <- all_ok(dirs, &verify_private(&1, uid)) do
-        {:ok, Enum.flat_map(dirs, &List.wrap(load_view(&1, project_root, opts)))}
+        loaded = Enum.flat_map(dirs, &List.wrap(load_view(&1, project_root, opts)))
+        {:ok, Enum.map(retired, &retired_view(Path.join(project, &1))) ++ loaded}
       end
     else
       :absent -> {:ok, []}
@@ -256,6 +550,23 @@ defmodule Minga.Session.StagedDrafts do
 
   @spec project_dir(String.t(), keyword()) :: String.t()
   defp project_dir(project_root, opts), do: Path.join(dir(opts), hash(project_root))
+
+  # Splits a project directory's names into retired view keys (with or
+  # without a remaining view directory) and the live view directories.
+  @spec split_retired([String.t()]) :: {[String.t()], [String.t()]}
+  defp split_retired(names) do
+    retired =
+      for name <- names, String.ends_with?(name, @retired), into: MapSet.new() do
+        String.replace_suffix(name, @retired, "")
+      end
+
+    live = Enum.reject(names, &(String.ends_with?(&1, @retired) or MapSet.member?(retired, &1)))
+    {retired |> MapSet.to_list() |> Enum.sort(), live}
+  end
+
+  @spec retired_view(String.t()) :: stored_view()
+  defp retired_view(dir),
+    do: %{dir: dir, view_id: "", workspace_id: nil, entries: [], retired: true}
 
   @spec list_dir(String.t()) :: {:ok, [String.t()]} | :absent | {:error, term()}
   defp list_dir(dir) do
@@ -308,7 +619,8 @@ defmodule Minga.Session.StagedDrafts do
       dir: dir,
       view_id: view_id,
       workspace_id: workspace_id,
-      entries: Enum.map(decoded, &elem(&1, 0))
+      entries: Enum.map(decoded, &elem(&1, 0)),
+      retired: false
     }
   end
 
