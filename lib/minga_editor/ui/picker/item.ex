@@ -23,7 +23,7 @@ defmodule MingaEditor.UI.Picker.Item do
     label, computed during fuzzy filtering for rendering highlights
   - `:two_line` — when true, renders description on a second line below the label
     instead of inline. Used by file/buffer pickers for path display.
-  - `:description_overflow` — which end of the description a frontend keeps when
+  - `:description_overflow`: which end of the description a frontend keeps when
     the description does not fit. `:keep_end` (the default) suits paths, where the
     file name at the end matters most. `:keep_start` suits status text that leads
     with the important facts, such as a model row's readiness and plan usage.
