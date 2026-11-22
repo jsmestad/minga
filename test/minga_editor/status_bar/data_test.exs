@@ -7,7 +7,6 @@ defmodule MingaEditor.StatusBar.DataTest do
   alias Minga.Config.ModelineSegments
   alias Minga.Config.Options
   alias Minga.Mode.VisualState
-  alias MingaAgent.SessionMetadata
   alias MingaAgent.Subagent.Handle
   alias MingaEditor.Shell.Traditional.WhichKeyWorkflow
   alias MingaEditor.StatusBar.Data
@@ -31,29 +30,21 @@ defmodule MingaEditor.StatusBar.DataTest do
   alias MingaEditor.WindowTree
   alias MingaEditor.Session.State, as: SessionState
 
-  defmodule MetadataSession do
+  # Stands in for a session that is busy for the whole render: it reports every
+  # call to the test process and never replies.
+  defmodule SilentSession do
     use GenServer
 
-    @spec start_link(keyword()) :: GenServer.on_start()
-    def start_link(opts), do: GenServer.start_link(__MODULE__, opts)
+    @spec start_link(pid()) :: GenServer.on_start()
+    def start_link(observer), do: GenServer.start_link(__MODULE__, observer)
 
     @impl GenServer
-    def init(opts), do: {:ok, Map.new(opts)}
+    def init(observer), do: {:ok, observer}
 
     @impl GenServer
-    def handle_call(:metadata, _from, state) do
-      now = DateTime.utc_now()
-
-      metadata = %SessionMetadata{
-        id: "test-session",
-        model_name: "openai_codex:gpt-5-codex",
-        created_at: now,
-        last_message_at: now,
-        message_count: Map.fetch!(state, :message_count),
-        turn_count: Map.fetch!(state, :turn_count)
-      }
-
-      {:reply, metadata, state}
+    def handle_call(request, _from, observer) do
+      send(observer, {:session_called, self(), request})
+      {:noreply, observer}
     end
   end
 
@@ -334,23 +325,32 @@ defmodule MingaEditor.StatusBar.DataTest do
     assert data.active_background_subagent_label == "session-2: tests"
   end
 
-  test "agent status message count uses user turns instead of raw transcript entries" do
-    {:ok, session} = MetadataSession.start_link(message_count: 4, turn_count: 1)
+  describe "agent session metadata" do
+    # The common data (status command context) and the agent content both
+    # used to ask the session for :metadata on every frame.
+    test "a busy session never blocks the render and the last known turn count shows" do
+      {:ok, session} = SilentSession.start_link(self())
 
-    tb = TabBar.new(Tab.new_file(1, "main.ex"))
-    {tb, workspace} = TabBar.add_workspace(tb, "Agent", session)
-    {tb, agent_tab} = TabBar.add(tb, :agent, "Agent")
+      # Project the transcript the way a session event would, then point the
+      # active workspace at the silent session for the render.
+      projected =
+        TabBar.new(Tab.new_file(1, "main.ex"))
+        |> state_with_agent_window()
+        |> MingaEditor.AgentLifecycle.cache_messages([
+          {:user, "first"},
+          {:assistant, "answer"},
+          {:user, "second", []},
+          {:assistant, "more"}
+        ])
 
-    tb =
-      tb
-      |> TabBar.accept_tab(Tab.set_group(agent_tab, workspace.id))
-      |> TabBar.switch_to(agent_tab.id)
-      |> TabBar.set_workspace_session(workspace.id, session)
+      state = %{state_with_agent_window(agent_tab_bar(session)) | workspace: projected.workspace}
 
-    state = state_with_agent_window(tb)
+      assert %Data{content: %StatusAgent{} = agent} = Data.from_state(state)
+      assert agent.message_count == 2
 
-    assert %Data{content: %StatusAgent{} = agent} = Data.from_state(state)
-    assert agent.message_count == 1
+      :sys.get_state(session)
+      refute_received {:session_called, ^session, _request}
+    end
   end
 
   test "agent status data reuses the same background buffer semantics as buffer status data" do
@@ -599,6 +599,17 @@ defmodule MingaEditor.StatusBar.DataTest do
         next_id: 2
       }
     }
+  end
+
+  defp agent_tab_bar(session) do
+    tb = TabBar.new(Tab.new_file(1, "main.ex"))
+    {tb, workspace} = TabBar.add_workspace(tb, "Agent", session)
+    {tb, agent_tab} = TabBar.add(tb, :agent, "Agent")
+
+    tb
+    |> TabBar.accept_tab(Tab.set_group(agent_tab, workspace.id))
+    |> TabBar.switch_to(agent_tab.id)
+    |> TabBar.set_workspace_session(workspace.id, session)
   end
 
   defp with_agent_chat_window(state) do

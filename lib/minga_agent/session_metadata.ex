@@ -38,4 +38,18 @@ defmodule MingaAgent.SessionMetadata do
             cost: 0.0,
             status: :idle,
             workdir: nil
+
+  @doc """
+  Counts the user turns in a transcript message list.
+
+  A user turn is one user message, with or without image attachments. The session and every transcript projection use this one definition so `turn_count` means the same thing everywhere.
+  """
+  @spec turn_count([MingaAgent.Message.t()]) :: non_neg_integer()
+  def turn_count(messages) when is_list(messages) do
+    Enum.count(messages, fn
+      {:user, _text} -> true
+      {:user, _text, _attachments} -> true
+      _message -> false
+    end)
+  end
 end

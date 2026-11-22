@@ -443,7 +443,8 @@ defmodule MingaEditor.AgentLifecycle do
            provenance_jump: advance_jump(jump),
            styled_fingerprint: styled_fingerprint,
            source_cursor: sync_opts[:source_cursor],
-           first_run: sync_opts[:first_run]
+           first_run: sync_opts[:first_run],
+           turn_count: MingaAgent.SessionMetadata.turn_count(messages)
          )
        end).(state.workspace.agent_ui.panel)
     )

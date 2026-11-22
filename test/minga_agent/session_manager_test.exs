@@ -385,6 +385,19 @@ defmodule MingaAgent.SessionManagerTest do
       assert {:error, :not_found} = SessionManager.get_session(manager, session_id)
     end
 
+    test "announces the explicit stop so pid holders can drop the dead session", %{
+      manager: manager
+    } do
+      Minga.Events.subscribe(:agent_session_stopped)
+      {:ok, session_id, pid} = SessionManager.start_session(manager, persist?: false)
+
+      assert :ok = SessionManager.stop_session_by_pid(manager, pid)
+
+      assert_receive {:minga_event, :agent_session_stopped,
+                      %SessionStoppedEvent{session_id: ^session_id, pid: ^pid, reason: :shutdown}},
+                     1_000
+    end
+
     test "stopping a live session reserves its ID until registered effects exit", %{
       manager: manager
     } do
