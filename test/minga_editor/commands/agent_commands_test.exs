@@ -284,46 +284,41 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
   defmodule ReadinessSession do
     use GenServer
 
-    @spec start_link(keyword()) :: GenServer.on_start()
-    def start_link(opts), do: GenServer.start_link(__MODULE__, opts)
+    @spec start_link(pid()) :: GenServer.on_start()
+    def start_link(owner), do: GenServer.start_link(__MODULE__, owner)
 
     @impl GenServer
-    def init(opts), do: {:ok, Map.new(opts)}
+    def init(owner), do: {:ok, owner}
 
     @impl GenServer
-    def handle_call(:get_provider, _from, state), do: {:reply, Map.get(state, :provider), state}
-
     def handle_call(:model_selection, _from, state) do
       {:reply, MingaAgent.Test.ModelSelectionFixture.selection(), state}
     end
 
-    def handle_call(:editor_snapshot, _from, state) do
-      credentials_configured = Map.get(state, :credentials_configured, true)
-
-      snapshot = %{
-        status: Map.get(state, :status, :idle),
-        pending_approval: nil,
-        error: Map.get(state, :error),
-        active_tool_name: nil,
-        credentials_configured: credentials_configured,
-        credential_readiness:
-          Map.get(
-            state,
-            :credential_readiness,
-            if(credentials_configured, do: :configured, else: :unconfigured)
-          )
-      }
-
-      {:reply, snapshot, state}
+    def handle_call({:send_prompt, content}, _from, owner) do
+      send(owner, {:readiness_session_prompt, content})
+      {:reply, :ok, owner}
     end
+  end
 
-    def handle_call({:send_prompt, content}, _from, state) do
-      if notify = Map.get(state, :notify) do
-        send(notify, {:readiness_session_prompt, content})
-      end
+  defp project_prompt_connection(state, owner, readiness, phase, error \\ nil) do
+    selection = ModelSelectionFixture.selection()
 
-      {:reply, Map.get(state, :send_prompt_result, :ok), state}
-    end
+    connection = %ConnectionSnapshot{
+      target: ConnectionTarget.new(owner, "prompt-readiness-test", selection, make_ref()),
+      credential_readiness: readiness,
+      model_selection: selection,
+      provider_phase: phase,
+      operation: :idle,
+      problem: if(error, do: {:provider, :startup_failed})
+    }
+
+    ui =
+      state.workspace.agent_ui
+      |> UIState.project_connection(connection)
+      |> UIState.report_chat_start_failure(error)
+
+    Workflow.install_agent_ui(state, ui)
   end
 
   # ── submit_prompt ────────────────────────────────────────────────────────
@@ -472,133 +467,80 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
                "hello agent"
     end
 
-    test "blocks submit as credentials missing when the local session reports credentials are not configured" do
-      {:ok, session} = ReadinessSession.start_link(provider: nil, credentials_configured: false)
+    test "uses the active Session projection for blocked prompts and keeps their draft" do
+      session = start_supervised!({ReadinessSession, self()})
 
-      state =
-        base_state(session: session)
-        |> then(fn state ->
-          MingaEditor.Shell.Traditional.Workflow.install_agent_ui(
-            state,
-            (fn ui ->
-               ui = MingaEditor.Agent.PromptBuffer.ensure(ui)
-               BufferProcess.replace_content(ui.panel.prompt_buffer, "draft prompt")
-               ui
-             end).(state.workspace.agent_ui)
-          )
-        end)
-        |> replace_panel(fn panel ->
-          panel
-          |> Panel.set_credentials_configured(true)
-          |> Panel.set_model_name("anthropic:claude-sonnet-4-20250514")
-          |> Panel.set_provider_name("anthropic")
-        end)
+      for {readiness, phase, error, expected} <- [
+            {:unconfigured, :stopped, nil,
+             "No provider credentials are configured for this model"},
+            {:checking, :stopped, nil, "Checking hosted provider credentials"},
+            {:configured, :starting, nil, "Agent provider still starting"},
+            {:configured, :terminal_failure, "boom", "Failed to start agent: boom"}
+          ] do
+        state =
+          base_state(session: session)
+          |> project_prompt_connection(session, readiness, phase, error)
+          |> AgentCommands.input_paste("draft prompt")
+          |> AgentCommands.submit_prompt()
 
-      new_state = AgentCommands.submit_prompt(state)
+        assert state.shell_runtime.state.notice.message =~ expected
 
-      assert new_state.shell_runtime.state.notice.message =~
-               "No provider credentials are configured for this model"
+        assert MingaEditor.Agent.PromptBuffer.prompt_text(state.workspace.agent_ui.panel) ==
+                 "draft prompt"
+      end
 
-      assert MingaEditor.Agent.PromptBuffer.prompt_text(new_state.workspace.agent_ui.panel) ==
-               "draft prompt"
+      refute_received {:readiness_session_prompt, _prompt}
     end
 
-    test "blocks submit and preserves the draft while hosted credential status is pending" do
-      {:ok, session} =
-        ReadinessSession.start_link(
-          provider: nil,
-          credentials_configured: false,
-          credential_readiness: :checking,
-          notify: self()
-        )
+    test "keeps a draft and reports the published provider error while the route retries" do
+      session = start_supervised!({ReadinessSession, self()})
 
       state =
         base_state(session: session)
-        |> AgentCommands.input_paste("draft prompt")
-        |> replace_panel(fn panel ->
-          panel
-          |> Panel.set_credentials_configured(true)
-          |> Panel.set_model_name("openai:gpt-4")
-          |> Panel.set_provider_name("openai")
-        end)
+        |> project_prompt_connection(session, :configured, :retrying)
+        |> Workflow.install_agent_error("Provider disconnected")
+        |> AgentCommands.input_paste("draft during retry")
+        |> AgentCommands.submit_prompt()
 
-      new_state = AgentCommands.submit_prompt(state)
+      assert state.shell_runtime.state.notice.message ==
+               "Failed to start agent: Provider disconnected. Your prompt was preserved."
 
-      assert new_state.shell_runtime.state.notice.message ==
-               "Checking hosted provider credentials. Your prompt was preserved."
+      assert MingaEditor.Agent.PromptBuffer.prompt_text(state.workspace.agent_ui.panel) ==
+               "draft during retry"
 
-      assert MingaEditor.Agent.PromptBuffer.prompt_text(new_state.workspace.agent_ui.panel) ==
-               "draft prompt"
-
-      refute_receive {:readiness_session_prompt, _prompt}
+      refute_received {:readiness_session_prompt, _prompt}
     end
 
-    test "blocks submit as starting when credentials exist but no provider is attached yet" do
-      {:ok, session} = ReadinessSession.start_link(provider: nil)
+    test "blocks a ready projection owned by another Session or superseded by unavailability" do
+      session = start_supervised!({ReadinessSession, self()})
 
-      state =
-        base_state(session: session)
-        |> then(fn state ->
-          MingaEditor.Shell.Traditional.Workflow.install_agent_ui(
-            state,
-            (fn ui ->
-               ui = MingaEditor.Agent.PromptBuffer.ensure(ui)
-               BufferProcess.replace_content(ui.panel.prompt_buffer, "draft prompt")
-               ui
-             end).(state.workspace.agent_ui)
-          )
-        end)
-        |> replace_panel(fn panel ->
-          panel
-          |> Panel.set_credentials_configured(true)
-          |> Panel.set_model_name("anthropic:claude-sonnet-4-20250514")
-          |> Panel.set_provider_name("anthropic")
-        end)
+      for {owner, lifecycle, expected} <- [
+            {self(), {:conversation, self()}, "Agent provider still starting"},
+            {session, :unavailable, "Agent session unavailable"}
+          ] do
+        state =
+          base_state(session: session)
+          |> project_prompt_connection(owner, :configured, :running)
+          |> AgentCommands.input_paste("keep me")
 
-      new_state = AgentCommands.submit_prompt(state)
+        ui = UIState.transition_chat(state.workspace.agent_ui, lifecycle)
+        state = state |> Workflow.install_agent_ui(ui) |> AgentCommands.submit_prompt()
 
-      assert new_state.shell_runtime.state.notice.message =~ "Agent provider still starting"
+        assert state.shell_runtime.state.notice.message =~ expected
 
-      assert MingaEditor.Agent.PromptBuffer.prompt_text(new_state.workspace.agent_ui.panel) ==
-               "draft prompt"
-    end
+        assert MingaEditor.Agent.PromptBuffer.prompt_text(state.workspace.agent_ui.panel) ==
+                 "keep me"
+      end
 
-    test "blocks submit with concrete startup failure when provider startup failed" do
-      {:ok, session} = ReadinessSession.start_link(provider: nil, error: "boom")
-
-      state =
-        base_state(session: session)
-        |> then(fn state ->
-          MingaEditor.Shell.Traditional.Workflow.install_agent_ui(
-            state,
-            (fn ui ->
-               ui = MingaEditor.Agent.PromptBuffer.ensure(ui)
-               BufferProcess.replace_content(ui.panel.prompt_buffer, "draft prompt")
-               ui
-             end).(state.workspace.agent_ui)
-          )
-        end)
-        |> replace_panel(fn panel ->
-          panel
-          |> Panel.set_credentials_configured(true)
-          |> Panel.set_model_name("anthropic:claude-sonnet-4-20250514")
-          |> Panel.set_provider_name("anthropic")
-        end)
-
-      new_state = AgentCommands.submit_prompt(state)
-
-      assert new_state.shell_runtime.state.notice.message ==
-               "Failed to start agent: boom. Your prompt was preserved."
-
-      assert MingaEditor.Agent.PromptBuffer.prompt_text(new_state.workspace.agent_ui.panel) ==
-               "draft prompt"
+      refute_received {:readiness_session_prompt, _prompt}
     end
 
     test "ready provider clears the prompt without discarding earlier Changes" do
-      {:ok, session} = ReadinessSession.start_link(provider: self(), notify: self())
+      session = start_supervised!({ReadinessSession, self()})
 
       state =
         base_state(session: session)
+        |> project_prompt_connection(session, :configured, :running)
         |> then(fn state ->
           MingaEditor.Shell.Traditional.Workflow.install_agent_ui(
             state,
@@ -634,10 +576,11 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
     end
 
     test "unresolved file mention preserves the prompt and does not send" do
-      {:ok, session} = ReadinessSession.start_link(provider: self(), notify: self())
+      session = start_supervised!({ReadinessSession, self()})
 
       state =
         base_state(session: session)
+        |> project_prompt_connection(session, :configured, :running)
         |> AgentCommands.input_paste("@missing.ex explain")
         |> replace_panel(fn panel ->
           panel
@@ -653,19 +596,15 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
       assert MingaEditor.Agent.PromptBuffer.prompt_text(new_state.workspace.agent_ui.panel) ==
                "@missing.ex explain"
 
-      refute_receive {:readiness_session_prompt, _prompt}
+      refute_received {:readiness_session_prompt, _prompt}
     end
 
     test "ready local provider sends even when panel credentials cache is stale" do
-      {:ok, session} =
-        ReadinessSession.start_link(
-          provider: self(),
-          notify: self(),
-          credentials_configured: true
-        )
+      session = start_supervised!({ReadinessSession, self()})
 
       state =
         base_state(session: session)
+        |> project_prompt_connection(session, :configured, :running)
         |> then(fn state ->
           MingaEditor.Shell.Traditional.Workflow.install_agent_ui(
             state,
@@ -704,10 +643,14 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
           )
 
         on_exit(fn -> Process.exit(session, :kill) end)
-        :sys.get_state(session)
+        %{connection: connection} = Session.editor_snapshot(session)
 
         state =
           base_state(session: session)
+          |> then(fn state ->
+            ui = UIState.project_connection(state.workspace.agent_ui, connection)
+            Workflow.install_agent_ui(state, ui)
+          end)
           |> replace_panel(fn panel ->
             panel
             |> Panel.set_credentials_configured(true)
