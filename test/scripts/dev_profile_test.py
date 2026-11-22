@@ -62,6 +62,16 @@ class DevProfileTest(unittest.TestCase):
         self.assertEqual(json.loads(self.call(second, "launch", "minga", "next").stdout), ["second", None])
         self.assertEqual(self.sentinel.read_text(), "installed state")
 
+    def test_launch_keeps_the_login_name_for_build_tools(self):
+        tree = self.worktree("login")
+        (tree / "bin" / "lib" / "minga").write_text(
+            f"#!{sys.executable}\n"
+            "import json, os\n"
+            "print(json.dumps([os.environ.get('USER'), os.environ.get('LOGNAME')]), flush=True)\n")
+        self.env.update(USER="synthetic-user", LOGNAME="synthetic-user")
+        result = self.call(tree, "launch", "minga")
+        self.assertEqual(json.loads(result.stdout), ["synthetic-user", "synthetic-user"])
+
     def test_clean_refuses_a_running_launcher_and_a_symlink(self):
         tree = self.worktree("source")
         with subprocess.Popen(self.cmd("launch", "minga", "live", "wait"), cwd=tree, env=self.env,
