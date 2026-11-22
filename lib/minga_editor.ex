@@ -1388,6 +1388,13 @@ defmodule MingaEditor do
     {:noreply, schedule_render(state, 16)}
   end
 
+  # Staged agent edits from before this Editor started (an Editor restart or
+  # the previous run), sent by MingaAgent.StagedDraftKeeper.
+  def handle_info({:staged_drafts_recovered, root, recoveries}, state) do
+    state = MingaEditor.Agent.EditPublication.recovered(state, root, recoveries)
+    {:noreply, schedule_render(state, 16)}
+  end
+
   def handle_info(:agent_spinner_tick, state) do
     state = MingaEditor.Agent.SessionEventWorkflow.spinner_tick(state)
     {:noreply, state}

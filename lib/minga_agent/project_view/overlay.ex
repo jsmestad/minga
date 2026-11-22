@@ -11,6 +11,7 @@ defmodule MingaAgent.ProjectView.Overlay do
   @behaviour MingaAgent.ProjectView.Backend
 
   alias Minga.Buffer.Fork
+  alias Minga.Session.StagedDraft
   alias MingaAgent.BufferForkStore
   alias MingaAgent.Changeset
   alias MingaAgent.ProjectView
@@ -42,6 +43,106 @@ defmodule MingaAgent.ProjectView.Overlay do
 
       {:error, reason} ->
         {:error, reason}
+    end
+  end
+
+  @doc """
+  Creates an overlay view that holds previously persisted drafts.
+
+  Each draft is staged in the changeset against its persisted base, and its path is claimed for the changeset so a buffer opened later cannot shadow the restored draft with a fresh fork. Returns the view with the drafts that could not be restored, named by path.
+  """
+  @spec restore(String.t(), [StagedDraft.t()], keyword()) ::
+          {:ok, ProjectView.t(), [{String.t(), term()}]} | {:error, term()}
+  def restore(project_root, drafts, opts \\ [])
+      when is_binary(project_root) and is_list(drafts) do
+    with {:ok, view} <- create(project_root, opts) do
+      {:ok, view, Enum.flat_map(drafts, &restore_draft(view, &1))}
+    end
+  end
+
+  @spec restore_draft(ProjectView.t(), StagedDraft.t()) :: [{String.t(), term()}]
+  defp restore_draft(view, %StagedDraft{} = draft) do
+    with {:ok, path} <- ProjectView.normalize_relative_path(draft.path),
+         :ok <-
+           Changeset.restore_draft(
+             changeset(view),
+             StagedDraft.new(path, draft.base, draft.content)
+           ),
+         {:ok, {:changeset, _cs}} <-
+           BufferForkStore.claim_owner(
+             fork_store(view),
+             buffer_path(view, path),
+             nil,
+             changeset(view)
+           ) do
+      []
+    else
+      {:ok, owner} -> [{draft.path, {:unexpected_owner, owner}}]
+      :not_found -> [{draft.path, :owner_unavailable}]
+      {:error, reason} -> [{draft.path, reason}]
+    end
+  catch
+    :exit, reason -> [{draft.path, {:changeset_unavailable, reason}}]
+  end
+
+  @doc """
+  Returns every staged draft of the view: fork drafts for open buffers and changeset drafts for other files, each with the base it was staged against.
+  """
+  @spec staged_drafts(ProjectView.t()) :: {:ok, [StagedDraft.t()]} | {:error, term()}
+  def staged_drafts(%ProjectView{backend: __MODULE__} = view) do
+    with :ok <- ensure_changeset_available(view),
+         {:ok, forks} <- dirty_forks(view) do
+      {changeset_drafts, baselines} =
+        Changeset.staged_drafts(changeset(view), Enum.map(forks, &elem(&1, 0)))
+
+      fork_drafts =
+        for {path, fork} <- forks,
+            do: StagedDraft.new(path, Map.get(baselines, path), fork_draft_content(fork))
+
+      # A published fork hands its draft to the changeset, which then holds the
+      # authoritative content for that path.
+      drafts =
+        (fork_drafts ++ changeset_drafts)
+        |> Map.new(&{&1.path, &1})
+        |> Map.values()
+        |> Enum.sort_by(& &1.path)
+
+      {:ok, drafts}
+    end
+  catch
+    :exit, reason -> {:error, {:staged_drafts_unavailable, reason}}
+  end
+
+  @doc "Returns the changeset process that owns the view's staged state."
+  @spec changeset_pid(ProjectView.t()) :: pid()
+  def changeset_pid(%ProjectView{backend: __MODULE__} = view), do: changeset(view)
+
+  @spec dirty_forks(ProjectView.t()) :: {:ok, [{String.t(), pid()}]} | {:error, term()}
+  defp dirty_forks(%ProjectView{} = view) do
+    case fork_store(view) do
+      nil ->
+        {:ok, []}
+
+      store ->
+        forks =
+          for {path, fork} <- BufferForkStore.all(store),
+              Fork.dirty?(fork),
+              {:ok, relative_path} <- [fork_relative_path(view, path)],
+              do: {relative_path, fork}
+
+        {:ok, forks}
+    end
+  end
+
+  @spec fork_draft_content(pid()) :: StagedDraft.content()
+  defp fork_draft_content(fork) do
+    case Fork.status(fork) do
+      :deleted ->
+        :deleted
+
+      :present ->
+        {:ok, content} = Fork.read_file(fork)
+        content
     end
   end
 

@@ -10,6 +10,7 @@ defmodule MingaEditor.Startup do
   # when flowing through bare-map pattern matches in accessor functions.
   @dialyzer {:no_opaque, build_initial_state: 1}
 
+  alias MingaEditor.Agent.EditPublication
   alias MingaEditor.Agent.UIState
   alias MingaEditor.AgentLifecycle
   alias MingaEditor.Handlers.SessionRestore
@@ -46,6 +47,7 @@ defmodule MingaEditor.Startup do
 
   def ensure_session_started(%EditorState{} = state) do
     SessionRestore.maybe_check_swap_recovery(state)
+    :ok = EditPublication.request_recovery(state)
 
     state = AgentLifecycle.maybe_start_session(state)
 

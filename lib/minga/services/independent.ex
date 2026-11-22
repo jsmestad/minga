@@ -20,6 +20,7 @@ defmodule Minga.Services.Independent do
       ├── Minga.Search.IndexOwner        Source-owned current GUI search indexes
       ├── Minga.Session.EventRecorder            Persistent editor event log (SQLite via exqlite)
       ├── MingaAgent.EventLog                    Persistent agent session event log
+      ├── MingaAgent.StagedDraftKeeper           Durable staged agent edits (survive restarts)
       └── Minga.Tool.Manager             Tool install/uninstall manager
   """
 
@@ -61,6 +62,7 @@ defmodule Minga.Services.Independent do
       StartupTimer.timed_child_spec(:ind_search_index, Minga.Search.IndexOwner),
       StartupTimer.timed_child_spec(:ind_event_recorder, Minga.Session.EventRecorder),
       StartupTimer.timed_child_spec(:ind_agent_event_log, MingaAgent.EventLog),
+      StartupTimer.timed_child_spec(:ind_staged_drafts, MingaAgent.StagedDraftKeeper),
       StartupTimer.timed_child_spec(:ind_oauth_flow, MingaAgent.OAuth.PendingFlow),
       StartupTimer.timed_child_spec(:ind_tool_manager, Minga.Tool.Manager)
     ]

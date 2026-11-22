@@ -7,6 +7,7 @@ defmodule MingaEditor.Agent.EditPublication do
   * `record_edit/3` and `turn_finished/2` keep the workspace review state in step with agent file events. They are pure state transitions, safe on the Editor mailbox.
   * `publish/2` and `discard/2` refresh the review from the authoritative `ProjectView.diff/1`, then promote or discard the view. A successful promote or discard stops the view's changeset, so a live session's provider is first moved to a fresh overlay, and the workspace adopts it.
   * `before_quit/1` is the editor's exit gate: it blocks while any workspace still holds staged edits and offers Publish or Discard. `discard_all/1` is the explicit discard for force and abort exits.
+  * `request_recovery/1` and `recovered/3` reconnect staged edits after a restart. `MingaAgent.StagedDraftKeeper` keeps every staged view durable; a starting Editor asks it for the project's staged views and installs each one in its workspace, so the edits can be published or discarded again.
 
   Publication runs while the agent is between turns. The provider is the authority: it refuses the move to a fresh overlay while a request is active, and then nothing is published or discarded. After a failed or conflicted publication the provider returns to the original view, which still holds the staged edits.
   """
@@ -15,6 +16,8 @@ defmodule MingaEditor.Agent.EditPublication do
   alias Minga.Project.FileRef
   alias MingaAgent.ProjectView
   alias MingaAgent.Session
+  alias MingaAgent.StagedDraftKeeper
+  alias MingaAgent.StagedDraftKeeper.Recovery
   alias MingaEditor.Handlers.Notifications
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.Shell.Traditional.NoticeWorkflow
@@ -46,6 +49,8 @@ defmodule MingaEditor.Agent.EditPublication do
            TabBar.find_workspace_by_session(tb, session),
          {:ok, %FileRef{} = file_ref} <- FileRef.from_path(view.project_root, path),
          {:ok, updated} <- Workspace.transition_review(workspace, :agent_edited, file_ref) do
+      # Fork drafts change without a changeset revision; save them now.
+      StagedDraftKeeper.persist(view, updated.id)
       install_workspace(state, tb, updated)
     else
       _not_staged -> state
@@ -188,6 +193,131 @@ defmodule MingaEditor.Agent.EditPublication do
     Enum.each(staged_workspaces(state), fn {workspace, _count} -> discard_view(workspace) end)
     state
   end
+
+  @doc """
+  Asks the staged draft keeper for this project's staged agent edits from before the Editor started.
+
+  The keeper replies with `{:staged_drafts_recovered, project_root, recoveries}`, which the Editor applies with `recovered/3`.
+  """
+  @spec request_recovery(EditorState.t()) :: :ok
+  def request_recovery(%EditorState{} = state) do
+    case project_root(state) do
+      root when is_binary(root) -> StagedDraftKeeper.recover(root, self())
+      nil -> :ok
+    end
+  end
+
+  @doc """
+  Installs staged agent edits that outlived the previous Editor or the previous run, and tells the user.
+
+  Each view goes back to its workspace when that workspace has no staging area of its own yet; otherwise, or when the workspace no longer exists, it gets a new "Recovered agent edits" workspace. Either way the edits are offered for Publish or Discard. Drafts that could not be restored are reported by name.
+  """
+  @spec recovered(EditorState.t(), String.t(), [Recovery.t()]) :: EditorState.t()
+  def recovered(%EditorState{} = state, root, recoveries)
+      when is_binary(root) and is_list(recoveries) do
+    if project_root(state) == root,
+      do: Enum.reduce(recoveries, state, &recover_workspace(&2, &1)),
+      else: state
+  end
+
+  @spec recover_workspace(EditorState.t(), Recovery.t()) :: EditorState.t()
+  defp recover_workspace(state, %Recovery{view: nil} = recovery) do
+    report_recovery(recovery, nil)
+    state
+  end
+
+  defp recover_workspace(state, %Recovery{view: %ProjectView{} = view} = recovery) do
+    case tab_bar(state) do
+      %TabBar{} = tb ->
+        if view_installed?(tb, view), do: state, else: install_recovery(state, tb, recovery)
+
+      nil ->
+        state
+    end
+  end
+
+  # Installing the view also hands it to the keeper under the workspace's id
+  # (see `WorkspaceWorkflow.install_tab_bar/2`).
+  @spec install_recovery(EditorState.t(), TabBar.t(), Recovery.t()) :: EditorState.t()
+  defp install_recovery(state, tb, %Recovery{view: %ProjectView{} = view} = recovery) do
+    {tb, workspace} = recovery_workspace(tb, recovery.workspace_id)
+    workspace = Workspace.set_project_view(workspace, view)
+    files = WorkspaceReview.changed_file_refs(view.project_root, recovery.changes)
+
+    workspace =
+      case refresh_review(workspace, files, workspace.review.state) do
+        {:ok, reviewed} -> reviewed
+        {:error, _reason} -> workspace
+      end
+
+    report_recovery(recovery, workspace)
+
+    state
+    |> install_workspace(tb, workspace)
+    |> notify_pending(workspace)
+  end
+
+  # The workspace takes the recovered view only while it has no staging area
+  # of its own; a session that already started there keeps its view.
+  @spec recovery_workspace(TabBar.t(), non_neg_integer()) :: {TabBar.t(), Workspace.t()}
+  defp recovery_workspace(tb, workspace_id) do
+    case TabBar.get_workspace(tb, workspace_id) do
+      %Workspace{payload: %WorkspaceAgent{project_view: nil}} = workspace -> {tb, workspace}
+      _taken_or_missing -> TabBar.add_workspace(tb, "Recovered agent edits")
+    end
+  end
+
+  @spec view_installed?(TabBar.t(), ProjectView.t()) :: boolean()
+  defp view_installed?(%TabBar{workspaces: workspaces}, %ProjectView{id: id}) do
+    Enum.any?(
+      workspaces,
+      &match?(%Workspace{payload: %WorkspaceAgent{project_view: %ProjectView{id: ^id}}}, &1)
+    )
+  end
+
+  @spec report_recovery(Recovery.t(), Workspace.t() | nil) :: :ok
+  defp report_recovery(%Recovery{} = recovery, workspace) do
+    recovery |> recovery_messages(workspace) |> Enum.each(&Minga.API.message/1)
+  end
+
+  @doc """
+  Returns the `*Messages*` lines that announce one recovered workspace.
+
+  `workspace` is the workspace that now holds the edits, or `nil` when no draft could be restored. Every draft that could not be restored is named, so nothing disappears silently.
+  """
+  @spec recovery_messages(Recovery.t(), Workspace.t() | nil) :: [String.t()]
+  def recovery_messages(%Recovery{} = recovery, workspace) do
+    headline(recovery.source, workspace) ++
+      Enum.map(recovery.base_changed, fn path ->
+        "Staged agent edit for #{path} was made against an older version of the file. Publishing merges it with the file on disk, or keeps it staged and reports a conflict."
+      end) ++
+      Enum.map(recovery.lost, fn {path, reason} ->
+        "Staged agent edit for #{path} from the previous run was lost: #{inspect(reason)}"
+      end) ++
+      Enum.map(recovery.retained, fn {path, reason} ->
+        "Staged agent edit for #{path} from the previous run could not be restored (#{inspect(reason)}). It stays saved and is offered again at the next start."
+      end)
+  end
+
+  @spec headline(:live | :disk, Workspace.t() | nil) :: [String.t()]
+  defp headline(_source, nil), do: []
+
+  defp headline(:live, %Workspace{label: label, review: review}),
+    do: [
+      "#{label}: staged agent edits in #{files_copy(WorkspaceReview.draft_count(review))} survived the editor restart. Publish (SPC a p) or discard (SPC a P) them."
+    ]
+
+  defp headline(:disk, %Workspace{label: label, review: review}),
+    do: [
+      "#{label}: restored staged agent edits in #{files_copy(WorkspaceReview.draft_count(review))} from the previous run. Publish (SPC a p) or discard (SPC a P) them."
+    ]
+
+  @spec project_root(EditorState.t()) :: String.t() | nil
+  defp project_root(%EditorState{workspace: %{file_tree: %{project_root: root}}})
+       when is_binary(root),
+       do: Path.expand(root)
+
+  defp project_root(%EditorState{}), do: nil
 
   # ── Publish/discard workflow ────────────────────────────────────────────
 
@@ -563,7 +693,7 @@ defmodule MingaEditor.Agent.EditPublication do
     end
   end
 
-  @spec files_copy(pos_integer()) :: String.t()
+  @spec files_copy(non_neg_integer()) :: String.t()
   defp files_copy(1), do: "1 file"
   defp files_copy(count), do: "#{count} files"
 

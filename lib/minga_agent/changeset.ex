@@ -319,6 +319,37 @@ defmodule MingaAgent.Changeset do
     GenServer.call(cs, :record_attempt)
   end
 
+  @doc """
+  Registers `observer` to receive `{:changeset_revised, changeset}` after every staged change.
+
+  One observer at a time; a later call replaces the earlier one.
+  """
+  @spec observe(changeset(), pid()) :: :ok
+  def observe(cs, observer) when is_pid(observer) do
+    GenServer.call(cs, {:observe, observer})
+  end
+
+  @doc """
+  Returns the staged drafts, with the base each change was staged against, plus the retained baselines of `baseline_paths`.
+
+  Callers that hold drafts elsewhere (buffer forks) read their bases from the returned baseline map. A path without a retained baseline is absent from the map.
+  """
+  @spec staged_drafts(changeset(), [String.t()]) ::
+          {[Minga.Session.StagedDraft.t()], %{String.t() => binary() | nil}}
+  def staged_drafts(cs, baseline_paths \\ []) when is_list(baseline_paths) do
+    GenServer.call(cs, {:staged_drafts, baseline_paths})
+  end
+
+  @doc """
+  Restores one persisted draft into the changeset: the base becomes the publication baseline and the content becomes the staged change.
+
+  Publication then merges against the restored base exactly as it would for a draft staged in this run.
+  """
+  @spec restore_draft(changeset(), Minga.Session.StagedDraft.t()) :: :ok | {:error, term()}
+  def restore_draft(cs, %Minga.Session.StagedDraft{} = draft) do
+    GenServer.call(cs, {:restore_draft, draft})
+  end
+
   @doc "Returns the current attempt count and budget."
   @spec attempt_info(changeset()) :: %{
           attempts: non_neg_integer(),

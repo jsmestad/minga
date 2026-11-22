@@ -17,6 +17,7 @@ defmodule MingaAgent.Changeset.Server do
   alias Minga.Buffer.Persistence.LocalWriter
   alias Minga.Buffer.Persistence.SystemFileSystem
   alias Minga.Buffer.Replace
+  alias Minga.Session.StagedDraft
   alias MingaAgent.Changeset.MergedEvent
   alias MingaAgent.Changeset.Overlay
   alias MingaAgent.Changeset.SourceRead
@@ -36,7 +37,8 @@ defmodule MingaAgent.Changeset.Server do
           budget: pos_integer() | :unlimited,
           attempts: non_neg_integer(),
           revision: non_neg_integer(),
-          publication: {module(), keyword()}
+          publication: {module(), keyword()},
+          observer: pid() | nil
         }
 
   @spec start_link(keyword()) :: GenServer.on_start()
@@ -64,7 +66,8 @@ defmodule MingaAgent.Changeset.Server do
           publication: {
             Keyword.get(opts, :publication_file_system, SystemFileSystem),
             Keyword.get(opts, :publication_opts, [])
-          }
+          },
+          observer: nil
         }
 
         {:ok, state}
@@ -272,6 +275,35 @@ defmodule MingaAgent.Changeset.Server do
       with {:ok, path} <- normalize_path(state, relative_path), do: source_descriptor(state, path)
 
     {:reply, SourceRead.lines(source, state.revision, start, count, max_bytes), state}
+  end
+
+  def handle_call({:observe, observer}, _from, state) do
+    {:reply, :ok, %{state | observer: observer}}
+  end
+
+  def handle_call({:staged_drafts, baseline_paths}, _from, state) do
+    drafts =
+      state.changes
+      |> Enum.sort_by(fn {path, _change} -> path end)
+      |> Enum.map(fn {path, change} ->
+        StagedDraft.new(path, Map.get(state.originals, path), change)
+      end)
+
+    {:reply, {drafts, Map.take(state.originals, baseline_paths)}, state}
+  end
+
+  def handle_call({:restore_draft, %StagedDraft{} = draft}, _from, state) do
+    with {:ok, path} <- normalize_path(state, draft.path),
+         :ok <- Overlay.commit_file(state.overlay, path, draft.content) do
+      state =
+        %{state | originals: Map.put(state.originals, path, draft.base)}
+        |> install_mutation(path, draft.content)
+        |> bump_revision()
+
+      {:reply, :ok, state}
+    else
+      {:error, reason} -> {:reply, {:error, reason}, state}
+    end
   end
 
   def handle_call(:overlay_path, _from, state) do
@@ -730,8 +762,22 @@ defmodule MingaAgent.Changeset.Server do
   defp restore_undo_overlay(state, path, content) when is_binary(content),
     do: Overlay.materialize_file(state.overlay, path, content)
 
+  # Every staged change bumps the revision; the observer (the staged draft
+  # keeper) learns that the staged drafts changed and persists them.
   @spec bump_revision(state()) :: state()
-  defp bump_revision(state), do: %{state | revision: state.revision + 1}
+  defp bump_revision(state) do
+    state = %{state | revision: state.revision + 1}
+    notify_observer(state)
+    state
+  end
+
+  @spec notify_observer(state()) :: :ok
+  defp notify_observer(%{observer: observer}) when is_pid(observer) do
+    send(observer, {:changeset_revised, self()})
+    :ok
+  end
+
+  defp notify_observer(_state), do: :ok
 
   @spec bump_if_sources_changed(state(), state()) :: state()
   defp bump_if_sources_changed(new_state, previous_state) do

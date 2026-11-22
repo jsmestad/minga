@@ -4,6 +4,9 @@ defmodule MingaEditor.Agent.EditPublicationTest do
   alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Test.StubServer
   alias MingaAgent.ProjectView
+  alias MingaAgent.ProjectView.Overlay
+  alias MingaAgent.StagedDraftKeeper
+  alias MingaAgent.StagedDraftKeeper.Recovery
   alias MingaEditor.Agent.EditPublication
   alias MingaEditor.Handlers.GuiActionHandler
   alias MingaEditor.Session.State, as: SessionState
@@ -12,6 +15,7 @@ defmodule MingaEditor.Agent.EditPublicationTest do
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
+  alias MingaEditor.State.FileTree
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Windows
@@ -36,6 +40,7 @@ defmodule MingaEditor.Agent.EditPublicationTest do
     state = %EditorState{
       frontend: %MingaEditor.State.Frontend{port_manager: self()},
       workspace: %SessionState{
+        file_tree: FileTree.set_project_root(%FileTree{}, dir),
         buffers: %Buffers{active: buffer, list: [buffer]},
         windows: %Windows{
           tree: {:leaf, 1},
@@ -47,7 +52,14 @@ defmodule MingaEditor.Agent.EditPublicationTest do
       shell_runtime: Runtime.new(Runtime.default_entry(), %TraditionalState{tab_bar: tb})
     }
 
-    %{state: state, session: session, view: view, path: path, workspace_id: workspace.id}
+    %{
+      state: state,
+      session: session,
+      view: view,
+      path: path,
+      workspace_id: workspace.id,
+      root: Path.expand(dir)
+    }
   end
 
   defp workspace(state, id), do: TabBar.get_workspace(state.shell_runtime.state.tab_bar, id)
@@ -163,5 +175,132 @@ defmodule MingaEditor.Agent.EditPublicationTest do
 
     assert notification(blocked, id).title == "1 agent-edited file is not on disk"
     assert workspace(blocked, id).review.state == :needs_review
+  end
+
+  describe "staged edits after a restart" do
+    # A restarted Editor restores its workspaces from disk without a staging
+    # area or session.
+    defp restarted(state, id) do
+      tb =
+        state.shell_runtime.state.tab_bar
+        |> TabBar.set_workspace_project_view(id, nil)
+        |> TabBar.clear_workspace_session(id)
+
+      %{
+        state
+        | shell_runtime: Runtime.new(Runtime.default_entry(), %TraditionalState{tab_bar: tb})
+      }
+    end
+
+    test "after an Editor restart the surviving view returns to its workspace and publishes",
+         %{state: state, view: view, path: path, workspace_id: id, root: root} do
+      :ok = stage_edit(view)
+      {:ok, changes} = ProjectView.diff(view)
+      state = restarted(state, id)
+
+      assert EditPublication.publish(state, id) |> NoticeWorkflow.message() ==
+               "No unpublished agent edits"
+
+      state = EditPublication.recovered(state, root, [Recovery.live(id, view, changes)])
+
+      assert workspace(state, id).review.state == :needs_review
+      assert notification(state, id).title == "1 agent-edited file is not on disk"
+
+      published = EditPublication.publish(state, id)
+      assert File.read!(path) == "one\nTWO\n"
+      assert NoticeWorkflow.message(published) == "Published agent edits in 1 file to disk"
+    end
+
+    test "after a full restart the saved drafts are offered and can be discarded",
+         %{state: state, workspace_id: id, root: root, tmp_dir: dir} do
+      store = [staged_drafts_dir: Path.join(dir, "store")]
+      File.write!(Path.join(root, "todo.md"), "a\nb\n")
+      keeper = start_supervised!({StagedDraftKeeper, [name: nil] ++ store}, id: :before)
+
+      {:ok, view} = ProjectView.overlay(root)
+      :ok = ProjectView.write_file(view, "todo.md", "a\nB\n")
+      StagedDraftKeeper.persist(keeper, view, id)
+      :sys.get_state(keeper)
+
+      # Shutdown order: the keeper stops first, then the agent supervisor.
+      changeset = Overlay.changeset_pid(view)
+      ref = Process.monitor(changeset)
+      stop_supervised!(:before)
+      Process.exit(changeset, :shutdown)
+      assert_receive {:DOWN, ^ref, :process, _, :shutdown}
+
+      keeper = start_supervised!({StagedDraftKeeper, [name: nil] ++ store}, id: :after)
+      :ok = StagedDraftKeeper.recover(keeper, root, self())
+      assert_receive {:staged_drafts_recovered, ^root, recoveries}, 2_000
+
+      state = EditPublication.recovered(restarted(state, id), root, recoveries)
+
+      assert [%{relative_path: "todo.md"}] = workspace(state, id).review.changed_files
+      assert notification(state, id).title == "1 agent-edited file is not on disk"
+
+      discarded =
+        GuiActionHandler.dispatch(
+          state,
+          {:notification_action, "agent:unpublished_edits:#{id}", "discard"}
+        )
+
+      assert NoticeWorkflow.message(discarded) == "Discarded agent edits in 1 file"
+      assert File.read!(Path.join(root, "todo.md")) == "a\nb\n"
+    end
+
+    test "edits for a workspace that already has a staging area get their own workspace",
+         %{state: state, workspace_id: id, root: root} do
+      {:ok, other} = ProjectView.overlay(root)
+      :ok = ProjectView.write_file(other, "other.md", "x")
+      {:ok, changes} = ProjectView.diff(other)
+
+      state = EditPublication.recovered(state, root, [Recovery.live(id, other, changes)])
+
+      assert %{label: "Recovered agent edits", id: new_id} =
+               Enum.find(
+                 state.shell_runtime.state.tab_bar.workspaces,
+                 &(&1.label == "Recovered agent edits")
+               )
+
+      assert new_id != id
+      assert notification(state, new_id).title == "1 agent-edited file is not on disk"
+      assert workspace(state, id).payload.project_view.id != other.id
+    end
+
+    test "edits for another project are ignored", %{state: state, view: view, workspace_id: id} do
+      assert EditPublication.recovered(state, "/elsewhere", [Recovery.live(id, view, [])]) ==
+               state
+    end
+
+    test "the Messages lines name the workspace, each changed base, and each lost draft",
+         %{state: state, workspace_id: id} do
+      ws = workspace(state, id)
+      review = MingaEditor.State.WorkspaceReview.set_changed_files(ws.review, [:a, :b])
+      ws = MingaEditor.State.Workspace.set_review(ws, review)
+
+      recovery =
+        Recovery.restored(id, nil,
+          base_changed: ["lib/a.ex"],
+          lost: [{"lib/gone.ex", :invalid_format}],
+          retained: [{"lib/later.ex", :enospc}]
+        )
+
+      assert EditPublication.recovery_messages(recovery, ws) == [
+               "Agent: restored staged agent edits in 2 files from the previous run. Publish (SPC a p) or discard (SPC a P) them.",
+               "Staged agent edit for lib/a.ex was made against an older version of the file. Publishing merges it with the file on disk, or keeps it staged and reports a conflict.",
+               "Staged agent edit for lib/gone.ex from the previous run was lost: :invalid_format",
+               "Staged agent edit for lib/later.ex from the previous run could not be restored (:enospc). It stays saved and is offered again at the next start."
+             ]
+
+      assert [
+               "Agent: staged agent edits in 2 files survived the editor restart." <> _
+             ] =
+               EditPublication.recovery_messages(
+                 %{recovery | source: :live, base_changed: [], lost: [], retained: []},
+                 ws
+               )
+
+      assert EditPublication.recovery_messages(recovery, nil) |> length() == 3
+    end
   end
 end
