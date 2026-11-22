@@ -109,11 +109,52 @@ defmodule MingaAgent.Tools.WorkspaceEditApplierTest do
     assert File.read!(path) == "old_name\n"
   end
 
+  test "a file URI with a host names no local path and is refused", %{
+    project: project,
+    view: view,
+    context: context
+  } do
+    write!(Path.join(project, "lib/inside.ex"), "old_name\n")
+    uri = "file://host#{project}/lib/inside.ex"
+
+    assert {0, 0, errors} = apply_edit_uris(context, [uri])
+
+    assert Enum.any?(errors, &(&1 =~ "not a file path inside the project"))
+    assert {:ok, []} = ProjectView.diff(view)
+  end
+
+  test "percent-encoded dot segments are literal names that neither escape nor decode", %{
+    project: project,
+    outside: outside,
+    view: view,
+    context: context
+  } do
+    victim = write!(Path.join(outside, "victim.ex"), "old_name\n")
+    decoded_target = write!(Path.join(project, "target.ex"), "old_name\n")
+    File.mkdir_p!(Path.join(project, "lib/%2e%2e"))
+    literal = write!(Path.join(project, "lib/%2e%2e/target.ex"), "old_name\n")
+    escaping = Path.join(project, "lib/%2e%2e/%2e%2e/%2e%2e/outside/victim.ex")
+
+    assert {1, 1, []} = apply_edit(context, [literal])
+    assert {:ok, "new_name\n"} = ProjectView.read_file(view, "lib/%2e%2e/target.ex")
+    assert {:ok, "old_name\n"} = ProjectView.read_file(view, "target.ex")
+
+    assert {0, 0, [error]} = apply_edit(context, [escaping])
+    assert error =~ "could not read"
+    assert File.read!(victim) == "old_name\n"
+    assert File.read!(decoded_target) == "old_name\n"
+    refute File.exists?(Path.join(outside, "new_name"))
+  end
+
   @spec apply_edit(ToolContext.t(), [String.t()]) :: WorkspaceEditApplier.result()
-  defp apply_edit(context, paths) do
+  defp apply_edit(context, paths),
+    do: apply_edit_uris(context, Enum.map(paths, &"file://#{&1}"))
+
+  @spec apply_edit_uris(ToolContext.t(), [String.t()]) :: WorkspaceEditApplier.result()
+  defp apply_edit_uris(context, uris) do
     changes =
-      Map.new(paths, fn path ->
-        {"file://#{path}",
+      Map.new(uris, fn uri ->
+        {uri,
          [
            %{
              "range" => %{

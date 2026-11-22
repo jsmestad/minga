@@ -106,8 +106,8 @@ defmodule MingaAgent.Changeset.PublicationTargetTest do
   end
 
   describe "relative_path/3" do
-    test "maps an absolute path to its real project-relative path, even through a symlinked root",
-         %{project: project, dir: dir} do
+    test "maps an absolute path to its real project-relative and real paths, even through a symlinked root",
+         %{project: project, real_project: real_project, dir: dir} do
       root_link = Path.join(dir, "root_link")
       File.ln_s!(project, root_link)
       File.ln_s!("file.txt", Path.join(project, "sub/alias.txt"))
@@ -118,7 +118,9 @@ defmodule MingaAgent.Changeset.PublicationTargetTest do
             Path.join(project, "sub/alias.txt"),
             Path.join(project, "sub/../sub/file.txt")
           ] do
-        assert {:ok, "sub/file.txt"} =
+        real_path = Path.join(real_project, "sub/file.txt")
+
+        assert {:ok, {"sub/file.txt", ^real_path}} =
                  PublicationTarget.relative_path(root_link, path, @publication),
                "expected #{inspect(path)} to resolve inside the project"
       end

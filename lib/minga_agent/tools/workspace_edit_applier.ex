@@ -22,8 +22,12 @@ defmodule MingaAgent.Tools.WorkspaceEditApplier do
 
   @type result :: {non_neg_integer(), non_neg_integer(), [String.t()]}
 
-  @typep contained :: {WorkspaceEdit.Document.t(), String.t()}
-  @typep target :: %{project_view: ProjectView.t() | nil, relative_path: String.t()}
+  @typep contained :: {WorkspaceEdit.Document.t(), {String.t(), String.t()}}
+  @typep target :: %{
+           project_view: ProjectView.t() | nil,
+           relative_path: String.t(),
+           real_path: String.t()
+         }
 
   @file_system {SystemFileSystem, []}
 
@@ -56,8 +60,8 @@ defmodule MingaAgent.Tools.WorkspaceEditApplier do
         ) :: result()
   defp apply_contained(contained, client, encoding, project_view) do
     {file_count, edit_count, errors} =
-      Enum.reduce(contained, {0, 0, []}, fn {document, relative_path}, counts ->
-        target = %{project_view: project_view, relative_path: relative_path}
+      Enum.reduce(contained, {0, 0, []}, fn {document, {relative_path, real_path}}, counts ->
+        target = %{project_view: project_view, relative_path: relative_path, real_path: real_path}
         accumulate_file_edit(document, target, client, encoding, counts)
       end)
 
@@ -72,8 +76,8 @@ defmodule MingaAgent.Tools.WorkspaceEditApplier do
     {contained, refusals} =
       Enum.reduce(documents, {[], []}, fn document, {contained, refusals} ->
         case PublicationTarget.relative_path(project_root, document.path, @file_system) do
-          {:ok, relative_path} ->
-            {[{document, relative_path} | contained], refusals}
+          {:ok, resolved} ->
+            {[{document, resolved} | contained], refusals}
 
           {:error, reason} ->
             {contained, [refusal(document.path, reason) | refusals]}
@@ -146,6 +150,20 @@ defmodule MingaAgent.Tools.WorkspaceEditApplier do
           Minga.LSP.PositionEncoding.encoding()
         ) :: :ok | {:error, String.t()}
   defp apply_edits_to_file(document, target, client, encoding) do
+    case apply_edits_to_open_buffer(document, client, encoding) do
+      :closed -> apply_edits_via_project_view(document, target, encoding)
+      result -> result
+    end
+  end
+
+  # A buffer that is missing or exits during the edit counts as closed, so the
+  # caller falls back to the project view exactly once.
+  @spec apply_edits_to_open_buffer(
+          WorkspaceEdit.Document.t(),
+          pid(),
+          Minga.LSP.PositionEncoding.encoding()
+        ) :: :ok | {:error, String.t()} | :closed
+  defp apply_edits_to_open_buffer(document, client, encoding) do
     case Buffer.pid_for_path(document.path) do
       {:ok, pid} ->
         {_content, revision} = snapshot = Buffer.content_with_version(pid)
@@ -159,12 +177,12 @@ defmodule MingaAgent.Tools.WorkspaceEditApplier do
         end
 
       :not_found ->
-        apply_edits_via_project_view(document, target, encoding)
+        :closed
     end
   rescue
     error -> {:error, Exception.message(error)}
   catch
-    :exit, _reason -> apply_edits_via_project_view(document, target, encoding)
+    :exit, _reason -> :closed
   end
 
   @spec validate_empty_file_edit(WorkspaceEdit.Document.t(), pid()) ::
@@ -202,17 +220,22 @@ defmodule MingaAgent.Tools.WorkspaceEditApplier do
 
   defp apply_edits_via_project_view(
          document,
-         %{project_view: view, relative_path: path},
+         %{project_view: view, relative_path: path, real_path: real_path},
          encoding
        ) do
-    with {:ok, disk_content} <- read_server_baseline(document.path),
+    with {:ok, disk_content} <- read_server_baseline(real_path),
          {:ok, new_content} <- apply_text_edits(disk_content, document.edits, encoding),
          {:ok, expected} <- view_revision(view, path, disk_content) do
       mutate_view(view, path, expected, new_content)
     end
+  rescue
+    error -> {:error, Exception.message(error)}
+  catch
+    :exit, reason -> {:error, "project view unavailable: #{inspect(reason)}"}
   end
 
   # The language server computed closed-file positions against the disk content.
+  # Read the real path that containment checked, never the server's raw path.
   @spec read_server_baseline(String.t()) :: {:ok, binary()} | {:error, String.t()}
   defp read_server_baseline(path) do
     case File.read(path) do
