@@ -26,7 +26,8 @@ defmodule MingaAgent.Changeset.ServerTest do
       assert {:ok, {:disk, disk_path}, first_revision} =
                Changeset.read_source_prefix_with_version(server, "hello.txt", 12)
 
-      assert disk_path == Path.join(project, "hello.txt")
+      assert Path.basename(disk_path) == "hello.txt"
+      assert File.read!(disk_path) == "original content"
 
       assert :ok = GenServer.call(server, {:write_file, "hello.txt", "changed"})
 
@@ -598,6 +599,87 @@ defmodule MingaAgent.Changeset.ServerTest do
       merged = File.read!(Path.join(project, "multi.txt"))
       assert merged =~ "agent_line2"
       assert merged =~ "human_line4"
+    end
+  end
+
+  describe "reads through symlinks" do
+    setup %{project: project} do
+      outside = project <> "-outside"
+      File.mkdir_p!(outside)
+      File.write!(Path.join(outside, "existing.txt"), "outside content")
+      on_exit(fn -> File.rm_rf!(outside) end)
+      %{outside: outside}
+    end
+
+    test "refuses to read through a directory symlink that leaves the project", %{
+      project: project,
+      outside: outside
+    } do
+      File.ln_s!(outside, Path.join(project, "out"))
+      server = start_server(project)
+      refusal = {:error, {:outside_project_root, "out/existing.txt"}}
+
+      assert Changeset.read_file(server, "out/existing.txt") == refusal
+      assert Changeset.read_file_with_version(server, "out/existing.txt") == refusal
+      assert Changeset.read_source_prefix_with_version(server, "out/existing.txt", 64) == refusal
+      assert Changeset.capture_original(server, "out/existing.txt") == refusal
+
+      assert Changeset.edit_file(server, "out/existing.txt", "outside", "agent") == refusal
+
+      assert Changeset.list_directory(server, "out") ==
+               {:error, {:outside_project_root, "out"}}
+
+      assert File.read!(Path.join(outside, "existing.txt")) == "outside content"
+    end
+
+    test "refuses to read through a final symlink that leaves the project", %{
+      project: project,
+      outside: outside
+    } do
+      File.ln_s!(Path.join(outside, "existing.txt"), Path.join(project, "link.txt"))
+      File.ln_s!(Path.join(outside, "missing.txt"), Path.join(project, "dangling.txt"))
+      server = start_server(project)
+
+      assert Changeset.read_file(server, "link.txt") ==
+               {:error, {:outside_project_root, "link.txt"}}
+
+      assert Changeset.read_source_lines_with_version(server, "link.txt", 0, 1, 64) ==
+               {:error, {:outside_project_root, "link.txt"}}
+
+      assert Changeset.read_file(server, "dangling.txt") ==
+               {:error, {:outside_project_root, "dangling.txt"}}
+    end
+
+    test "staging over an escaping symlink records no outside original or overlay copy", %{
+      project: project
+    } do
+      outside_file = project <> "-outside/existing.txt"
+      File.ln_s!(outside_file, Path.join(project, "link.txt"))
+      server = start_server(project)
+
+      assert :ok = Changeset.write_file(server, "link.txt", "agent version")
+      assert [%{path: "link.txt", kind: :new}] = Changeset.summary(server)
+
+      assert {:conflict, %{conflicts: [{:error, "link.txt", :outside_project_root}]}} =
+               Changeset.preflight_merge(server)
+
+      assert :ok = Changeset.discard_file(server, "link.txt")
+      refute File.exists?(Path.join(Changeset.overlay_path(server), "link.txt"))
+    end
+
+    test "reads through symlinks that stay inside the project", %{project: project} do
+      File.ln_s!(Path.join(project, "lib"), Path.join(project, "alias"))
+      File.ln_s!("hello.txt", Path.join(project, "hello_link.txt"))
+      server = start_server(project)
+
+      assert {:ok, "defmodule Foo" <> _} = Changeset.read_file(server, "alias/foo.ex")
+      assert Changeset.read_file(server, "hello_link.txt") == {:ok, "original content"}
+      assert Changeset.read_file(server, "alias/missing.ex") == {:error, :enoent}
+      assert :ok = Changeset.capture_original(server, "hello_link.txt")
+      assert {:ok, [%{name: "foo.ex"}]} = Changeset.list_directory(server, "alias")
+
+      assert :ok = Changeset.edit_file(server, "hello_link.txt", "original", "edited")
+      assert [%{path: "hello_link.txt", kind: :modified}] = Changeset.summary(server)
     end
   end
 

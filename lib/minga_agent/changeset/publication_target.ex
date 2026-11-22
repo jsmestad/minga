@@ -1,10 +1,10 @@
 defmodule MingaAgent.Changeset.PublicationTarget do
   @moduledoc """
-  Resolves where publishing a staged change touches the project, and refuses targets outside the project root.
+  Resolves where staging reads or publishing writes touch the project, and refuses targets outside the project root.
 
-  Publication must never write or delete outside the project. A project-relative path can still leave the root through a symlink, either a directory component (`vendor -> /elsewhere`) or the final component (`config.txt -> /etc/config.txt`). This module follows every symlink in the target the same way the operating system would, including dangling links, and requires the result to stay strictly under the real path of the project root. Symlinks that resolve inside the root are allowed.
+  Publication must never write or delete outside the project, and staging must never read file content from outside it. A project-relative path can still leave the root through a symlink, either a directory component (`vendor -> /elsewhere`) or the final component (`config.txt -> /etc/config.txt`). This module follows every symlink in the target the same way the operating system would, including dangling links, and requires the result to stay strictly under the real path of the project root. Symlinks that resolve inside the root are allowed.
 
-  Resolution reads the file system through the publication's `Minga.Buffer.Persistence.FileSystem` module, so the same backend that performs the write also answers the containment question.
+  Resolution reads the file system through the given `Minga.Buffer.Persistence.FileSystem` module, so the same backend that performs the read or write also answers the containment question.
 
   The check narrows but does not close a time-of-check to time-of-use window: a process that can modify the project may replace a directory with a symlink after resolution and before the write's own system calls. Closing it fully requires descriptor-relative (`openat` with `O_NOFOLLOW`) operations that the BEAM file API does not expose.
   """
@@ -23,8 +23,25 @@ defmodule MingaAgent.Changeset.PublicationTarget do
   Every symlink is followed. A missing tail is allowed, because publication may create new files and directories, but the existing part must resolve inside the project root.
   """
   @spec write_path(String.t(), String.t(), publication()) :: {:ok, String.t()} | {:error, error()}
-  def write_path(project_root, relative_path, {file_system, opts})
+  def write_path(project_root, relative_path, publication)
       when is_binary(project_root) and is_binary(relative_path) do
+    resolve_inside(project_root, relative_path, publication)
+  end
+
+  @doc """
+  Returns the real path that reading `relative_path` from the project must open.
+
+  Every symlink is followed. A missing tail resolves to the path where the file would be, so the caller's own read reports `:enoent`. The existing part must resolve inside the project root; a path that leaves it returns `{:error, :outside_project_root}` before any content is read.
+  """
+  @spec read_path(String.t(), String.t(), publication()) :: {:ok, String.t()} | {:error, error()}
+  def read_path(project_root, relative_path, file_system)
+      when is_binary(project_root) and is_binary(relative_path) do
+    resolve_inside(project_root, relative_path, file_system)
+  end
+
+  @spec resolve_inside(String.t(), String.t(), publication()) ::
+          {:ok, String.t()} | {:error, error()}
+  defp resolve_inside(project_root, relative_path, {file_system, opts}) do
     with {:ok, real_root} <- real_root(file_system, project_root, opts),
          {:ok, target} <- resolve_relative(file_system, real_root, relative_path, opts) do
       require_inside(target, real_root)

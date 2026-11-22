@@ -17,9 +17,11 @@ defmodule MingaAgent.StagedDraftKeeper do
 
   use GenServer
 
+  alias Minga.Buffer.Persistence.SystemFileSystem
   alias Minga.Session.StagedDraft
   alias Minga.Session.StagedDrafts
   alias MingaAgent.Changeset
+  alias MingaAgent.Changeset.PublicationTarget
   alias MingaAgent.ProjectView
   alias MingaAgent.ProjectView.Overlay
   alias MingaAgent.StagedDraftKeeper.Instance
@@ -871,14 +873,26 @@ defmodule MingaAgent.StagedDraftKeeper do
     max = StagedDrafts.max_file_bytes(store_opts)
 
     for draft <- drafts,
-        StagedDraft.base_changed?(draft, read_project_file(Path.join(root, draft.path), max)),
+        StagedDraft.base_changed?(draft, read_project_file(root, draft.path, max)),
         do: draft.path
   end
 
   # Regular files only, bounded: a FIFO or device in the project must not
-  # block or exhaust the keeper.
-  @spec read_project_file(String.t(), pos_integer()) :: {:ok, binary()} | {:error, term()}
-  defp read_project_file(path, max) do
+  # block or exhaust the keeper. A symlink that leaves the project root is
+  # refused before anything is read, so the draft reports a changed base.
+  @spec read_project_file(String.t(), String.t(), pos_integer()) ::
+          {:ok, binary()} | {:error, :enoent | :unreadable | {:outside_project_root, String.t()}}
+  defp read_project_file(root, relative_path, max) do
+    case PublicationTarget.read_path(root, relative_path, {SystemFileSystem, []}) do
+      {:ok, path} -> read_regular_file(path, max)
+      {:error, :outside_project_root} -> {:error, {:outside_project_root, relative_path}}
+      {:error, _reason} -> {:error, :unreadable}
+    end
+  end
+
+  @spec read_regular_file(String.t(), pos_integer()) ::
+          {:ok, binary()} | {:error, :enoent | :unreadable}
+  defp read_regular_file(path, max) do
     case Minga.SecureFile.read(path, max) do
       {:ok, bytes} -> {:ok, bytes}
       {:error, {:file_read_failed, _path, :enoent}} -> {:error, :enoent}

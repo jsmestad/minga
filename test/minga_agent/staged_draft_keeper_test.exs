@@ -214,6 +214,45 @@ defmodule MingaAgent.StagedDraftKeeperTest do
       eventually(fresh, fn -> stored(root, store) == %{} end)
     end
 
+    test "a base behind a directory symlink that leaves the project is reported as changed",
+         %{root: root, store: store, keeper: keeper, tmp_dir: dir} do
+      {:ok, view} = ProjectView.overlay(root)
+      StagedDraftKeeper.persist(keeper, view, 1)
+      :ok = ProjectView.write_file(view, "lib/a.ex", "ONE\ntwo\nthree\n")
+      eventually(keeper, fn -> map_size(stored(root, store)) == 1 end)
+      full_shutdown(view)
+
+      # The outside file matches the staged base, so reading through the
+      # directory link would wrongly report the base as unchanged.
+      outside = Path.join(dir, "outside")
+      File.mkdir_p!(outside)
+      File.write!(Path.join(outside, "a.ex"), "one\ntwo\nthree\n")
+      File.rm_rf!(Path.join(root, "lib"))
+      File.ln_s!(outside, Path.join(root, "lib"))
+
+      fresh = start_keeper(store, :second)
+      :ok = StagedDraftKeeper.recover(fresh, root, self())
+      assert_receive {:staged_drafts_recovered, ^root, [%Recovery{} = recovery]}, 2_000
+      assert recovery.base_changed == ["lib/a.ex"]
+    end
+
+    test "a base behind a symlink that stays inside the project is read through the link",
+         %{root: root, store: store, keeper: keeper} do
+      {:ok, view} = ProjectView.overlay(root)
+      StagedDraftKeeper.persist(keeper, view, 1)
+      :ok = ProjectView.write_file(view, "lib/a.ex", "ONE\ntwo\nthree\n")
+      eventually(keeper, fn -> map_size(stored(root, store)) == 1 end)
+      full_shutdown(view)
+
+      File.rename!(Path.join(root, "lib/a.ex"), Path.join(root, "lib/real_a.ex"))
+      File.ln_s!("real_a.ex", Path.join(root, "lib/a.ex"))
+
+      fresh = start_keeper(store, :second)
+      :ok = StagedDraftKeeper.recover(fresh, root, self())
+      assert_receive {:staged_drafts_recovered, ^root, [%Recovery{} = recovery]}, 2_000
+      assert recovery.base_changed == []
+    end
+
     test "a file changed on disk since staging is reported, then merged or kept as a conflict",
          %{root: root, store: store, keeper: keeper} do
       {:ok, view} = ProjectView.overlay(root)
