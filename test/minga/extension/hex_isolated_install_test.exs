@@ -170,6 +170,7 @@ defmodule Minga.Extension.HexIsolatedInstallTest do
       "OPENAI_API_KEY" => "planted-openai",
       "ANTHROPIC_PLANTED_TOKEN" => "planted-anthropic",
       "MINGA_GATEWAY_TOKEN" => "planted-gateway",
+      "RELEASE_COOKIE" => "planted-cookie",
       "HEX_PLANTED_SETTING" => "kept"
     }
 
@@ -206,7 +207,8 @@ defmodule Minga.Extension.HexIsolatedInstallTest do
              "ANTHROPIC_PLANTED_TOKEN" => nil,
              "HEX_PLANTED_SETTING" => "kept",
              "MINGA_GATEWAY_TOKEN" => nil,
-             "OPENAI_API_KEY" => nil
+             "OPENAI_API_KEY" => nil,
+             "RELEASE_COOKIE" => nil
            }
   end
 
@@ -217,7 +219,7 @@ defmodule Minga.Extension.HexIsolatedInstallTest do
     package =
       write_package(root, app, """
       defmodule HexIsoRedact do
-        raise "fetch failed for https://deploy:s3cret-token@git.example.com/repo.git"
+        raise "fetch failed for https://deploy:s3cret-token@git.example.com/repo.git and https://ci:p@ss-tail@mirror.example.com/x"
       end
       """)
 
@@ -228,6 +230,9 @@ defmodule Minga.Extension.HexIsolatedInstallTest do
 
     assert message =~ "https://[REDACTED]@git.example.com/repo.git"
     refute message =~ "s3cret-token"
+    # A raw `@` inside the password is still fully hidden.
+    assert message =~ "https://[REDACTED]@mirror.example.com/x"
+    refute message =~ "ss-tail"
   end
 
   test "a later install in this VM keeps the same version and refuses a different one",

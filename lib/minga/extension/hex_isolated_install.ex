@@ -13,7 +13,7 @@ defmodule Minga.Extension.HexIsolatedInstall do
     * Accepted paths are appended, not prepended, so host code always wins code-path lookup.
     * An accepted `ebin` must be a real directory under the install directory, with no symbolic link anywhere on its path.
 
-  The install directory must be private to the current user. The child process does not inherit Minga's provider secrets (`MingaAgent.Credentials` key variables, `MINGA_GATEWAY_TOKEN`, and `ANTHROPIC_*`), and URL credentials are redacted from the installer output Minga reports.
+  The install directory must be private to the current user. The child process does not inherit Minga's provider secrets (`MingaAgent.Credentials` key variables, `MINGA_GATEWAY_TOKEN`, the distribution cookie variables, and `ANTHROPIC_*`), and URL credentials are redacted from the installer output Minga reports.
 
   Code admitted into this VM stays resident until the OS process exits. When a later install in the same VM resolves an application to a different version, the install fails and asks for a restart instead of loading a second copy.
   """
@@ -32,7 +32,7 @@ defmodule Minga.Extension.HexIsolatedInstall do
 
   # Secrets Minga reads (MingaAgent.Credentials @env_vars and the Gateway token). Package
   # compile-time code runs in the child, so it must not see them.
-  @secret_vars ~w(OPENAI_API_KEY GOOGLE_API_KEY OPENROUTER_API_KEY GROQ_API_KEY MISTRAL_API_KEY DEEPSEEK_API_KEY MINGA_GATEWAY_TOKEN)
+  @secret_vars ~w(OPENAI_API_KEY GOOGLE_API_KEY OPENROUTER_API_KEY GROQ_API_KEY MISTRAL_API_KEY DEEPSEEK_API_KEY MINGA_GATEWAY_TOKEN MINGA_COOKIE RELEASE_COOKIE MINGA_LAUNCH_NONCE)
   @secret_prefixes ["ANTHROPIC_"]
 
   @typedoc "A Mix dependency tuple whose source is `hex:` or `path:`."
@@ -442,7 +442,7 @@ defmodule Minga.Extension.HexIsolatedInstall do
 
   @spec redact_url_credentials(String.t()) :: String.t()
   defp redact_url_credentials(text),
-    do: Regex.replace(~r{([A-Za-z][A-Za-z0-9+.\-]*://)[^\s/@]+@}, text, "\\1[REDACTED]@")
+    do: Regex.replace(~r{([A-Za-z][A-Za-z0-9+.\-]*://)[^\s/]*@}, text, "\\1[REDACTED]@")
 
   @spec existing_atom(String.t()) :: atom() | nil
   defp existing_atom(name) do
@@ -569,7 +569,11 @@ defmodule Minga.Extension.HexIsolatedInstall do
 
   defp write_report(path, {:error, message}) do
     bounded =
-      message |> String.replace_invalid() |> String.trim() |> String.slice(0, @max_message_chars)
+      message
+      |> String.replace_invalid()
+      |> redact_url_credentials()
+      |> String.trim()
+      |> String.slice(0, @max_message_chars)
 
     write_payload(path, %{"status" => "error", "message" => bounded})
   end
