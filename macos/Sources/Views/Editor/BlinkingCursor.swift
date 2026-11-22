@@ -14,7 +14,7 @@ import SwiftUI
 /// All cursor-blinking surfaces (SwiftUI BlinkingCursor, Metal editor
 /// cursor) share this single source of truth for blink timing. The
 /// system settings are NSTextInsertionPointBlinkPeriodOn/Off (milliseconds).
-public struct SystemBlinkTiming {
+nonisolated public struct SystemBlinkTiming {
     /// Nanoseconds the cursor stays visible per blink cycle.
     public let onDuration: UInt64
 
