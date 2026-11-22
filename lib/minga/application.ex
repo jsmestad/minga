@@ -25,6 +25,7 @@ defmodule Minga.Application do
       │   ├── Minga.Config.Advice
       │   └── Minga.Language.Filetype.Registry
       ├── Minga.Buffer.Registry (Registry, :unique)
+      ├── Minga.Buffer.FileRegistry (Registry, :duplicate)
       ├── Minga.Buffer.Supervisor (DynamicSupervisor, one_for_one)
       ├── Minga.Log.MessagesBuffer           (singleton *Messages* buffer owner)
       ├── Minga.Services.Supervisor (rest_for_one)
@@ -135,6 +136,7 @@ defmodule Minga.Application do
         MingaEditor.Shell.Registry,
         Minga.Foundation.Supervisor,
         {Registry, keys: :unique, name: Minga.Buffer.Registry},
+        {Registry, keys: :duplicate, name: Minga.Buffer.FileRegistry},
         {DynamicSupervisor, name: Minga.Buffer.Supervisor, strategy: :one_for_one},
         Minga.Log.MessagesBuffer
       ] ++

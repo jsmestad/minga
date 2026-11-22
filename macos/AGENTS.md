@@ -225,7 +225,7 @@ When adding or changing opcodes, edit the schema and regenerate instead of hand-
 
 - **Swift 6.0+** with strict concurrency
 - **Metal 3.1+** (MSL 3.1), macOS 15.0+ deployment target
-- **Xcode 16+** for building
+- **Xcode 26.0+** for building (Swift 6.2 or later: `MingaUI` uses default main-actor isolation and isolated conformances). The Metal shaders compile with the Metal Toolchain component that Xcode installs (Xcode Settings > Components); no `TOOLCHAINS` override is needed.
 - Install the version pinned in `.xcodegen-version` with `scripts/install_xcodegen` (pass the installation directory as its argument). From the repository root, run `(cd macos && xcodegen generate)` and `mix swift.build` to build the Debug frontend.
 
 ## Development app identity
@@ -254,7 +254,7 @@ Retain full-window screenshots and external system accessibility observations fo
 
 ### Swift
 
-- **Swift 6 concurrency model.** Use `@MainActor`, `Sendable`, and structured concurrency. No `@preconcurrency` escape hatches unless absolutely necessary. See the "Swift 6 Concurrency Patterns" section below for specific guidance.
+- **Swift 6 concurrency model.** Use `@MainActor` (implicit in `MingaUI`), `Sendable`, and structured concurrency. No `@preconcurrency` escape hatches unless absolutely necessary. See the "Swift 6 Concurrency Patterns" section below for specific guidance.
 - **camelCase** for all Swift properties and methods.
 - **No force unwraps** except `Bundle.main.executableURL!` (guaranteed by the OS).
 - **`final class`** for non-inheritable classes. Every class in this project should be `final`.
@@ -337,6 +337,10 @@ Background fill removal can legitimately survive because the production clear al
 ### Swift 6 Concurrency Patterns
 
 Swift 6 strict concurrency is enforced project-wide. The compiler must be able to prove actor isolation statically. When it can't, you have a design problem, not a compiler limitation.
+
+**`MingaUI` is main-actor isolated by default.** The `MingaUI` target sets `SWIFT_DEFAULT_ACTOR_ISOLATION: MainActor` and `SWIFT_UPCOMING_FEATURE_INFER_ISOLATED_CONFORMANCES: YES`. Do not add `@MainActor` to `MingaUI` declarations; it is already the default. Mark a `MingaUI` type `nonisolated` only when it must be usable off the main thread: outbound protocol values (`OutboundAction` and its encoder protocol), `PortLogger`, frame identity values, and pure helpers such as `TextHighlighting` and `FrontendActionComposition`. Tests that exercise main-actor `MingaUI` types mark the test or suite `@MainActor` instead of making the type `nonisolated`. The app target and `MingaProtocol` keep the nonisolated default, so the decoder, reader, and encoder stay off the main thread; annotate main-actor code there explicitly.
+
+**Isolated conformances, not `@preconcurrency`.** When a main-actor type conforms to a nonisolated protocol, write the isolation on the conformance: `extension EditorNSView: @MainActor NSTextInputClient`. Do not use `@Entry` for environment keys whose default value is main-actor isolated; declare the key with `: @MainActor EnvironmentKey`.
 
 **Never use `MainActor.assumeIsolated`.** It's a runtime assertion that bypasses the compiler's static checking. If you need it, you've chosen an API that doesn't carry isolation information in its types. Pick a different API.
 

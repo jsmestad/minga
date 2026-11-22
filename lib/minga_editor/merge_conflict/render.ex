@@ -6,6 +6,7 @@ defmodule MingaEditor.MergeConflict.Render do
   """
 
   alias Minga.Buffer
+  alias Minga.Buffer.Conflict
   alias Minga.Core.Decorations
   alias Minga.Core.Face
   alias Minga.Git.MergeConflict
@@ -33,28 +34,27 @@ defmodule MingaEditor.MergeConflict.Render do
   @doc "Merges merge conflict decorations into an existing decoration set."
   @spec merge_decorations(Decorations.t(), state(), pid()) :: Decorations.t()
   def merge_decorations(%Decorations{} = decorations, _state, buf) when is_pid(buf) do
-    buf
-    |> conflict_regions()
-    |> Enum.reduce(decorations, &decorate_region/2)
+    {version, regions} = conflict_regions(buf)
+    Enum.reduce(regions, decorations, &decorate_region(&1, &2, buf, version))
   end
 
   def merge_decorations(%Decorations{} = decorations, _state, _buf), do: decorations
 
-  @spec conflict_regions(pid()) :: [Entry.t()]
+  @spec conflict_regions(pid()) :: {non_neg_integer(), [Entry.t()]}
   defp conflict_regions(buf) do
-    Buffer.conflicts(buf)
+    Buffer.conflict_render_snapshot(buf)
   catch
-    :exit, _ -> []
+    :exit, _ -> {0, []}
   end
 
-  @spec decorate_region(Entry.t(), Decorations.t()) :: Decorations.t()
-  defp decorate_region(%Entry{} = region, decorations) do
+  @spec decorate_region(Entry.t(), Decorations.t(), pid(), non_neg_integer()) :: Decorations.t()
+  defp decorate_region(%Entry{} = region, decorations, buffer, version) do
     decorations
     |> add_marker_highlights(region)
     |> add_side_highlights(region.current_range, @current_face)
     |> add_base_highlights(region)
     |> add_side_highlights(region.incoming_range, @incoming_face)
-    |> add_action_block(region)
+    |> add_action_block(region, buffer, version)
   end
 
   @spec add_marker_highlights(Decorations.t(), Entry.t()) :: Decorations.t()
@@ -95,13 +95,15 @@ defmodule MingaEditor.MergeConflict.Render do
   defp add_line_highlight(decorations, line, face),
     do: add_side_highlights(decorations, {line, line}, face)
 
-  @spec add_action_block(Decorations.t(), Entry.t()) :: Decorations.t()
-  defp add_action_block(decorations, %Entry{} = region) do
+  @spec add_action_block(Decorations.t(), Entry.t(), pid(), non_neg_integer()) :: Decorations.t()
+  defp add_action_block(decorations, %Entry{} = region, buffer, version) do
+    target = {buffer, version, %{start_line: region.start_line, end_line: region.end_line}}
+
     {_id, decorations} =
       Decorations.add_block_decoration(decorations, region.start_line,
         placement: :above,
         render: &render_action_row/1,
-        on_click: fn _line_idx, col -> action_for_col(col, region.start_line) end,
+        on_click: fn _line_idx, col -> action_for_col(col, target) end,
         priority: @priority,
         group: @group
       )
@@ -156,12 +158,14 @@ defmodule MingaEditor.MergeConflict.Render do
     {:cont, {[{clipped, face} | acc], used + String.length(clipped)}}
   end
 
-  @spec action_for_col(non_neg_integer(), non_neg_integer()) ::
-          {:command, {:git_accept_conflict, MergeConflict.choice(), non_neg_integer()}} | :ok
-  defp action_for_col(col, start_line) do
+  @spec action_for_col(non_neg_integer(), {pid(), non_neg_integer(), Conflict.region()}) ::
+          {:command,
+           {:git_accept_conflict, pid(), non_neg_integer(), Conflict.region(), Conflict.choice()}}
+          | :ok
+  defp action_for_col(col, {buffer, version, region}) do
     case Enum.find(action_ranges(), fn {range, _choice} -> col in range end) do
       nil -> :ok
-      {_range, choice} -> {:command, {:git_accept_conflict, choice, start_line}}
+      {_range, choice} -> {:command, {:git_accept_conflict, buffer, version, region, choice}}
     end
   end
 

@@ -6,7 +6,7 @@
 
 import SwiftUI
 
-public enum TextHighlighting {
+nonisolated public enum TextHighlighting {
     public enum OffsetUnit: Sendable {
         case graphemeCluster
         case unicodeScalar
@@ -44,7 +44,8 @@ public enum TextHighlighting {
     ///
     /// Uses range overrides on a pre-built base string instead of per-character
     /// appends: O(k) allocations where k = matched positions, not O(n) where
-    /// n = text length.
+    /// n = text length. Main-actor isolated because the default fonts come from `Typography`.
+    @MainActor
     public static func attributedString(
         _ text: String,
         matchPositions: Set<Int>,

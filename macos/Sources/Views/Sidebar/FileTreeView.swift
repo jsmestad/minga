@@ -560,7 +560,6 @@ public struct FileTreeView: View {
     }
 
     /// Starts observing live macOS scrollbar-style changes.
-    @MainActor
     private func observeScrollerStyleChanges() {
         guard scrollerStyleTask == nil else { return }
         usesLegacyScrollerStyle = NSScroller.preferredScrollerStyle == .legacy
@@ -572,7 +571,6 @@ public struct FileTreeView: View {
     }
 
     /// Stops observing macOS scrollbar-style changes when the view disappears.
-    @MainActor
     private func stopObservingScrollerStyleChanges() {
         scrollerStyleTask?.cancel()
         scrollerStyleTask = nil
@@ -658,7 +656,6 @@ private struct FileTreeEntryAccessibilityActions: ViewModifier {
 
 // MARK: - Previews
 
-@MainActor
 private func fileTreePreviewState() -> FileTreeState {
     let state = FileTreeState()
     PreviewFixtures.populateFileTree(state)

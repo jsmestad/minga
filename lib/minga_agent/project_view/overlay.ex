@@ -11,6 +11,7 @@ defmodule MingaAgent.ProjectView.Overlay do
   @behaviour MingaAgent.ProjectView.Backend
 
   alias Minga.Buffer.Fork
+  alias Minga.Session.StagedDraft
   alias MingaAgent.BufferForkStore
   alias MingaAgent.Changeset
   alias MingaAgent.ProjectView
@@ -43,6 +44,132 @@ defmodule MingaAgent.ProjectView.Overlay do
       {:error, reason} ->
         {:error, reason}
     end
+  end
+
+  @doc """
+  Creates an overlay view that holds previously persisted drafts.
+
+  Each draft is staged in the changeset against its persisted base, and its path is claimed for the changeset so a buffer opened later cannot shadow the restored draft with a fresh fork. Returns the view with the drafts that could not be restored, named by path.
+  """
+  @spec restore(String.t(), [StagedDraft.t()], keyword()) ::
+          {:ok, ProjectView.t(), [{String.t(), term()}]} | {:error, term()}
+  def restore(project_root, drafts, opts \\ [])
+      when is_binary(project_root) and is_list(drafts) do
+    with {:ok, view} <- create(project_root, opts) do
+      {:ok, view, Enum.flat_map(drafts, &restore_draft(view, &1))}
+    end
+  end
+
+  @spec restore_draft(ProjectView.t(), StagedDraft.t()) :: [{String.t(), term()}]
+  defp restore_draft(view, %StagedDraft{} = draft) do
+    with {:ok, path} <- ProjectView.normalize_relative_path(draft.path),
+         :ok <-
+           Changeset.restore_draft(
+             changeset(view),
+             StagedDraft.new(path, draft.base, draft.content)
+           ),
+         {:ok, {:changeset, _cs}} <-
+           BufferForkStore.claim_owner(
+             fork_store(view),
+             buffer_path(view, path),
+             nil,
+             changeset(view)
+           ) do
+      []
+    else
+      {:ok, owner} -> [{draft.path, {:unexpected_owner, owner}}]
+      :not_found -> [{draft.path, :owner_unavailable}]
+      {:error, reason} -> [{draft.path, reason}]
+    end
+  catch
+    # An exit reason carries the call's arguments, here the draft's bytes;
+    # keep only its kind so user content never reaches messages or logs.
+    :exit, reason -> [{draft.path, {:changeset_unavailable, exit_kind(reason)}}]
+  end
+
+  @doc """
+  Returns every staged draft of the view: fork drafts for open buffers and changeset drafts for other files, each with the base it was staged against.
+  """
+  @spec staged_drafts(ProjectView.t()) :: {:ok, [StagedDraft.t()]} | {:error, term()}
+  def staged_drafts(%ProjectView{backend: __MODULE__} = view) do
+    with :ok <- ensure_changeset_available(view),
+         {:ok, forks} <- dirty_forks(view) do
+      {changeset_drafts, baselines} =
+        Changeset.staged_drafts(changeset(view), Enum.map(forks, &elem(&1, 0)))
+
+      with {:ok, fork_drafts} <- fork_drafts(forks, baselines) do
+        # A published fork hands its draft to the changeset, which then holds
+        # the authoritative content for that path.
+        drafts =
+          (fork_drafts ++ changeset_drafts)
+          |> Map.new(&{&1.path, &1})
+          |> Map.values()
+          |> Enum.sort_by(& &1.path)
+
+        {:ok, drafts}
+      end
+    end
+  catch
+    :exit, reason -> {:error, {:staged_drafts_unavailable, exit_kind(reason)}}
+  end
+
+  @spec fork_drafts([{String.t(), pid()}], %{String.t() => binary() | nil}) ::
+          {:ok, [StagedDraft.t()]} | {:error, term()}
+  defp fork_drafts(forks, baselines) do
+    Enum.reduce_while(forks, {:ok, []}, fn {path, fork}, {:ok, drafts} ->
+      case fork_draft_content(fork) do
+        {:ok, content} ->
+          {:cont, {:ok, [StagedDraft.new(path, Map.get(baselines, path), content) | drafts]}}
+
+        {:error, reason} ->
+          {:halt, {:error, {:fork_unavailable, reason}}}
+      end
+    end)
+  end
+
+  @doc """
+  Reduces an exit reason to its kind (`:noproc`, `:timeout`, `:normal`, ...).
+
+  A `GenServer.call` exit reason embeds the call's arguments, which can be file content; callers report the kind instead.
+  """
+  @spec exit_kind(term()) :: atom()
+  def exit_kind(reason) when is_atom(reason), do: reason
+  def exit_kind({kind, _call}) when is_atom(kind), do: kind
+  def exit_kind({{kind, _detail}, _call}) when is_atom(kind), do: kind
+  def exit_kind(_reason), do: :exit
+
+  @doc "Returns the changeset process that owns the view's staged state."
+  @spec changeset_pid(ProjectView.t()) :: pid()
+  def changeset_pid(%ProjectView{backend: __MODULE__} = view), do: changeset(view)
+
+  @spec dirty_forks(ProjectView.t()) :: {:ok, [{String.t(), pid()}]} | {:error, term()}
+  defp dirty_forks(%ProjectView{} = view) do
+    case fork_store(view) do
+      nil ->
+        {:ok, []}
+
+      store ->
+        forks =
+          for {path, fork} <- BufferForkStore.all(store),
+              Fork.dirty?(fork),
+              {:ok, relative_path} <- [fork_relative_path(view, path)],
+              do: {relative_path, fork}
+
+        {:ok, forks}
+    end
+  end
+
+  # One read decides presence and bytes, so a fork deleted between two calls
+  # cannot be misread. A fork process that has stopped exits the call; report
+  # only the exit kind so no content reaches the reason.
+  @spec fork_draft_content(pid()) :: {:ok, StagedDraft.content()} | {:error, atom()}
+  defp fork_draft_content(fork) do
+    case Fork.read_file(fork) do
+      {:ok, content} -> {:ok, content}
+      {:error, :enoent} -> {:ok, :deleted}
+    end
+  catch
+    :exit, reason -> {:error, exit_kind(reason)}
   end
 
   @impl true
@@ -196,10 +323,12 @@ defmodule MingaAgent.ProjectView.Overlay do
     Source.changeset(buffer_path(view, relative_path), cs, relative_path)
   end
 
+  # Selects the buffer by the file it visits, not the name it was opened with,
+  # so a buffer opened through a symlink owns the file the agent names.
   @spec open_buffer_pid(ProjectView.t(), String.t()) ::
           {:ok, pid()} | :not_found | {:error, term()}
   defp open_buffer_pid(%ProjectView{} = view, relative_path) do
-    Minga.Buffer.pid_for_path(buffer_path(view, relative_path))
+    Minga.Buffer.pid_for_file(buffer_path(view, relative_path))
   rescue
     _ -> {:error, {:buffer_lookup_failed, relative_path}}
   end

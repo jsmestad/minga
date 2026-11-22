@@ -215,8 +215,10 @@ defmodule MingaEditor.UI.Picker.AgentDraftAttachmentSource do
 
   @spec attachment_fetch(State.t(), DraftSave.target(), DraftAttachment.identity()) ::
           {:ok, (-> Session.composer_result())} | :unavailable
-  defp attachment_fetch(_state, {session, record}, identity) when node(session) == node(),
-    do: {:ok, fn -> Session.read_draft_attachment(session, record, identity) end}
+  defp attachment_fetch(_state, {session, record}, identity) when node(session) == node() do
+    # minga:allow-blocking — async_fetch/1 runs this closure in the picker fetch worker (async?/0 is true)
+    {:ok, fn -> Session.read_draft_attachment(session, record, identity) end}
+  end
 
   defp attachment_fetch(state, {session, _record} = target, identity) do
     case QuestionResponse.remote_authority(state, session, self()) do

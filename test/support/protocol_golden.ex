@@ -644,7 +644,7 @@ defmodule Minga.Test.ProtocolGolden do
   # ── Fixtures: gui_git_status (GuiGitStatusFields) ─────────────────────────
 
   # gui_git_status is custom-framed: opcode(1) then the full GuiGitStatusFields
-  # payload (header + entries + toast + base_path/last_commit/stash tail). Strip
+  # payload (header, entries, toast, and panel presentation tail). Strip
   # the opcode byte.
   @spec git_status_payload(GitStatus.t()) :: binary()
   defp git_status_payload(model) do
@@ -657,7 +657,7 @@ defmodule Minga.Test.ProtocolGolden do
   defp git_path_hash(path), do: :erlang.phash2(path, 0xFFFFFFFF)
 
   @spec absent_toast() :: map()
-  defp absent_toast, do: %{present: 0, level: 0, action: 0, message: ""}
+  defp absent_toast, do: %{present: 0, level: 0, action: 0, message: "", id: 0}
 
   @spec git_status_fixtures() :: [fixture()]
   defp git_status_fixtures do
@@ -666,7 +666,11 @@ defmodule Minga.Test.ProtocolGolden do
 
     # loading repo at the u16 ahead/behind boundary.
     loading =
-      GitStatusBuilder.build(%{repo_state: :loading, ahead: 65_535, behind: 65_535}, false, nil)
+      GitStatusBuilder.build(
+        %{id: 1, commit_target_id: 1, repo_state: :loading, ahead: 65_535, behind: 65_535},
+        false,
+        nil
+      )
 
     # Normal repo exercising the section predicate (staged/untracked/conflict/
     # other), the per-entry path_hash, and a present error toast.
@@ -680,6 +684,8 @@ defmodule Minga.Test.ProtocolGolden do
     normal =
       GitStatusBuilder.build(
         %{
+          id: 0x2_0000_002A,
+          commit_target_id: 0x3_0000_002A,
           repo_state: :normal,
           branch: "main",
           ahead: 2,
@@ -690,8 +696,9 @@ defmodule Minga.Test.ProtocolGolden do
           stash_count: 5
         },
         true,
-        %{message: "Pull failed", level: :error, action: :pull_and_retry}
+        %{message: "Pull failed", level: :error, action: :pull_and_retry, id: 0x1_0000_002A}
       )
+      |> then(&%{&1 | terminal_cursor: 3, terminal_collapsed: 8})
 
     # Boundary case: the largest valid u16 count and string remain byte-exact.
     max_message = String.duplicate("x", 65_535)
@@ -699,6 +706,8 @@ defmodule Minga.Test.ProtocolGolden do
     boundary =
       GitStatusBuilder.build(
         %{
+          id: 2,
+          commit_target_id: 2,
           repo_state: :normal,
           branch: "b",
           stash_count: 65_535,
@@ -723,7 +732,11 @@ defmodule Minga.Test.ProtocolGolden do
           toast: absent_toast(),
           entry_base_path: "",
           last_commit_message: "",
-          stash_count: 0
+          stash_count: 0,
+          terminal_cursor: 0,
+          terminal_collapsed: 0,
+          panel_id: 0,
+          commit_target_id: 0
         }
       },
       %{
@@ -740,7 +753,11 @@ defmodule Minga.Test.ProtocolGolden do
           toast: absent_toast(),
           entry_base_path: "",
           last_commit_message: "",
-          stash_count: 0
+          stash_count: 0,
+          terminal_cursor: 0,
+          terminal_collapsed: 0,
+          panel_id: 1,
+          commit_target_id: 1
         }
       },
       %{
@@ -759,10 +776,14 @@ defmodule Minga.Test.ProtocolGolden do
             %{path_hash: git_path_hash("lib/c.ex"), section: 3, status: 7, path: "lib/c.ex"},
             %{path_hash: git_path_hash("lib/d.ex"), section: 1, status: 2, path: "lib/d.ex"}
           ],
-          toast: %{present: 1, level: 1, action: 1, message: "Pull failed"},
+          toast: %{present: 1, level: 1, action: 1, message: "Pull failed", id: 0x1_0000_002A},
           entry_base_path: "/repo",
           last_commit_message: "fix: λ café→",
-          stash_count: 5
+          stash_count: 5,
+          terminal_cursor: 3,
+          terminal_collapsed: 8,
+          panel_id: 0x2_0000_002A,
+          commit_target_id: 0x3_0000_002A
         }
       },
       %{
@@ -776,10 +797,14 @@ defmodule Minga.Test.ProtocolGolden do
           behind: 0,
           branch: "b",
           entries: [],
-          toast: %{present: 1, level: 0, action: 0, message: "Done"},
+          toast: %{present: 1, level: 0, action: 0, message: "Done", id: 0},
           entry_base_path: "",
           last_commit_message: max_message,
-          stash_count: 65_535
+          stash_count: 65_535,
+          terminal_cursor: 0,
+          terminal_collapsed: 0,
+          panel_id: 2,
+          commit_target_id: 2
         }
       }
     ]

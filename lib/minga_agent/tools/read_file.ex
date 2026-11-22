@@ -74,12 +74,13 @@ defmodule MingaAgent.Tools.ReadFile do
     end
   end
 
-  # Tries the open buffer first, then falls back to disk.
+  # Tries the open buffer first, then falls back to disk. The buffer is found
+  # by the file it visits, so a buffer opened through a symlink is read too.
   # Does NOT open a buffer on demand (ReadFile should not pollute the buffer list).
   @spec read_content(String.t()) ::
           {:ok, String.t(), :buffer | :disk} | {:error, File.posix() | :eisdir}
   defp read_content(abs_path) do
-    case Buffer.pid_for_path(abs_path) do
+    case Buffer.pid_for_file(abs_path) do
       {:ok, pid} ->
         content = Buffer.content(pid)
         {:ok, content, :buffer}
@@ -91,7 +92,7 @@ defmodule MingaAgent.Tools.ReadFile do
         end
     end
   catch
-    # Buffer process died between pid_for_path and content call
+    # Buffer process died between pid_for_file and content call
     :exit, _ ->
       case File.read(abs_path) do
         {:ok, content} -> {:ok, content, :disk}

@@ -20,7 +20,7 @@ public struct PickerActivationIdentity: Equatable, Sendable {
 }
 
 public struct PickerItem: Identifiable {
-    public init(id: Int, activation: PickerActivationIdentity = PickerActivationIdentity(generation: 0, activationID: 0), iconColor: UInt32, label: String, description: String, annotation: String, matchPositions: [UInt16], isTwoLine: Bool, isMarked: Bool) {
+    public init(id: Int, activation: PickerActivationIdentity = PickerActivationIdentity(generation: 0, activationID: 0), iconColor: UInt32, label: String, description: String, annotation: String, matchPositions: [UInt16], isTwoLine: Bool, isMarked: Bool, keepsDescriptionStart: Bool = false) {
         self.id = id
         self.activation = activation
         self.iconColor = iconColor
@@ -30,6 +30,7 @@ public struct PickerItem: Identifiable {
         self.matchPositions = matchPositions
         self.isTwoLine = isTwoLine
         self.isMarked = isMarked
+        self.keepsDescriptionStart = keepsDescriptionStart
     }
     public let id: Int
     public let activation: PickerActivationIdentity
@@ -40,6 +41,13 @@ public struct PickerItem: Identifiable {
     public let matchPositions: [UInt16]
     public let isTwoLine: Bool
     public let isMarked: Bool
+    /// The BEAM marks status-like descriptions whose start carries the meaning (a model row's readiness and plan usage). Without the mark the description is path-like and keeps its end visible.
+    public let keepsDescriptionStart: Bool
+
+    /// A description whose start carries the meaning gets its own line under the label; a path stays inline and keeps its end.
+    public var stacksDescription: Bool {
+        keepsDescriptionStart && !description.isEmpty
+    }
 
     /// Whether the label starts with a separate icon glyph.
     public var hasLeadingIcon: Bool {
@@ -121,7 +129,6 @@ public struct PreviewSegment: Identifiable {
     public let bold: Bool
 }
 
-@MainActor
 @Observable
 public final class PickerState {
     public init(visible: Bool = false, selectedIndex: Int = 0, previewSelectedIndex: Int? = nil, filteredCount: Int = 0, totalCount: Int = 0, markedCount: Int = 0, title: String = "", query: String = "", modePrefix: String = "", hasPreview: Bool = false, loadStatus: Wire.PickerLoadStatus = .ready, items: [PickerItem] = [], previewLines: [PreviewLine] = [], actionMenu: PickerActionMenu? = nil, queryGeneration: UInt32 = 0, acknowledgedQueryEditSeq: UInt32 = 0, localPresentationStore: LocalPresentationStore = LocalPresentationStore()) {
@@ -195,7 +202,8 @@ public final class PickerState {
                 annotation: item.annotation,
                 matchPositions: item.matchPositions,
                 isTwoLine: item.isTwoLine,
-                isMarked: item.isMarked
+                isMarked: item.isMarked,
+                keepsDescriptionStart: item.keepsDescriptionStart
             )
         }
         self.items = nextItems

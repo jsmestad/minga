@@ -62,6 +62,30 @@ defmodule Minga.Frontend.Adapter.GUI.GitStatusEncoderTest do
       assert cmd2 != nil
     end
 
+    test "publishes distinct snapshot IDs while preserving the commit target across a refresh" do
+      target_id = 0x2_0000_002A
+
+      first =
+        GitStatusBuilder.build(
+          %{id: 0x1_0000_002A, commit_target_id: target_id, branch: "main"},
+          false,
+          nil
+        )
+
+      second = %{first | panel_id: first.panel_id + 1}
+      {first_command, caches} = GitStatusEncoder.encode(first, Caches.new())
+      {second_command, _caches} = GitStatusEncoder.encode(second, caches)
+
+      assert %{panel_id: first_id, commit_target_id: ^target_id} =
+               decode_git_status(first_command)
+
+      assert %{panel_id: second_id, commit_target_id: ^target_id} =
+               decode_git_status(second_command)
+
+      assert first_id == first.panel_id
+      assert second_id == second.panel_id
+    end
+
     # Byte-exactness against the schema-generated codec is proven by the
     # cross-language golden tests (test/support/protocol_golden.ex +
     # go/tui/internal/protocol/golden_cross_lang_test.go), which replaced the
@@ -130,7 +154,8 @@ defmodule Minga.Frontend.Adapter.GUI.GitStatusEncoderTest do
     end
 
     test "encodes a syncing not_a_repo with an error/pull_and_retry toast" do
-      toast = %{message: "Push failed!", level: :error, action: :pull_and_retry}
+      id = 0x1_0000_002A
+      toast = %{message: "Push failed!", level: :error, action: :pull_and_retry, id: id}
       model = GitStatusBuilder.build(nil, true, toast)
       {cmd, _caches} = GitStatusEncoder.encode(model, Caches.new())
 
@@ -139,7 +164,7 @@ defmodule Minga.Frontend.Adapter.GUI.GitStatusEncoderTest do
       assert decoded.repo_state == 1
       assert decoded.syncing == 1
       # error => 1, pull_and_retry => 1
-      assert decoded.toast == %{level: 1, action: 1, message: "Push failed!"}
+      assert decoded.toast == %{level: 1, action: 1, message: "Push failed!", id: id}
     end
 
     test "encodes a success/no-action toast" do
@@ -158,7 +183,7 @@ defmodule Minga.Frontend.Adapter.GUI.GitStatusEncoderTest do
       decoded = decode_git_status(cmd)
 
       # success => 0, nil action => 0
-      assert decoded.toast == %{level: 0, action: 0, message: "Pushed successfully!"}
+      assert decoded.toast == %{level: 0, action: 0, message: "Pushed successfully!", id: 0}
       assert decoded.entry_base_path == "/project"
       assert decoded.last_commit_message == "init"
     end
@@ -245,7 +270,7 @@ defmodule Minga.Frontend.Adapter.GUI.GitStatusEncoderTest do
             entry_path: %{base | entries: [%{entry | path: oversized}]},
             toast_message: %{
               base
-              | git_toast: %{present: 1, level: :error, action: :none, message: oversized}
+              | git_toast: %{present: 1, level: :error, action: :none, message: oversized, id: 0}
             },
             entry_base_path: %{base | entry_base_path: oversized},
             last_commit_message: %{base | last_commit_message: oversized}
@@ -307,7 +332,8 @@ defmodule Minga.Frontend.Adapter.GUI.GitStatusEncoderTest do
     {toast, rest} = decode_toast(rest)
 
     <<base_len::16, entry_base_path::binary-size(base_len), commit_len::16,
-      last_commit_message::binary-size(commit_len), stash_count::16>> = rest
+      last_commit_message::binary-size(commit_len), stash_count::16, terminal_cursor::32,
+      terminal_collapsed::8, panel_id::64, commit_target_id::64>> = rest
 
     %{
       repo_state: repo_state,
@@ -319,7 +345,11 @@ defmodule Minga.Frontend.Adapter.GUI.GitStatusEncoderTest do
       toast: toast,
       entry_base_path: entry_base_path,
       last_commit_message: last_commit_message,
-      stash_count: stash_count
+      stash_count: stash_count,
+      terminal_cursor: terminal_cursor,
+      terminal_collapsed: terminal_collapsed,
+      panel_id: panel_id,
+      commit_target_id: commit_target_id
     }
   end
 
@@ -338,8 +368,9 @@ defmodule Minga.Frontend.Adapter.GUI.GitStatusEncoderTest do
   defp decode_toast(<<0::8, rest::binary>>), do: {nil, rest}
 
   defp decode_toast(
-         <<1::8, level::8, action::8, msg_len::16, msg::binary-size(msg_len), rest::binary>>
+         <<1::8, level::8, action::8, msg_len::16, msg::binary-size(msg_len), id::64,
+           rest::binary>>
        ) do
-    {%{level: level, action: action, message: msg}, rest}
+    {%{level: level, action: action, message: msg, id: id}, rest}
   end
 end

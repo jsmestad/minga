@@ -1,6 +1,5 @@
 import SwiftUI
 
-@MainActor
 @Observable
 public final class FeedbackState {
     public init(showTask: Task<Void, Never>? = nil, holdTask: Task<Void, Never>? = nil, spinnerOnTime: ContinuousClock.Instant? = nil) {

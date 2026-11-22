@@ -42,7 +42,7 @@ defmodule Minga.Config.Loader do
   alias Minga.Telemetry.StartupProgress
 
   @extracted_extensions [
-    {:minga_adversarial, "minga-adverserial",
+    {:minga_adversarial, "minga-adversarial",
      [:adversarial_analyze, :adversarial_clear, :adversarial_cycle_skepticism]},
     {:minga_knowledge_graph, "minga-knowledge-graph",
      [:knowledge_briefing, :knowledge_map, :knowledge_heat_refresh]},
@@ -580,8 +580,7 @@ defmodule Minga.Config.Loader do
 
         StartupTimer.mark(:config_after_and_settings)
 
-        # 8. Discover plugins, then start extensions only after all config sources have had a
-        # chance to declare them. Minga-shipped extensions load only from a config declaration.
+        # 8. Discover plugins and start extensions after every config source has declared them.
         plugin_error = discover_and_register_plugins(inputs.config_home)
 
         start_all_error =

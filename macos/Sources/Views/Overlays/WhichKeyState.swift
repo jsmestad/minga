@@ -18,7 +18,6 @@ public struct WhichKeyBinding: Identifiable {
     public let icon: String
 }
 
-@MainActor
 @Observable
 public final class WhichKeyState {
     public init(visible: Bool = false, prefix: String = "", page: Int = 0, pageCount: Int = 0, bindings: [WhichKeyBinding] = []) {

@@ -256,6 +256,7 @@ defmodule MingaEditor.Agent.SlashCommand do
 
   @spec safe_session_models(pid()) :: [map()]
   defp safe_session_models(session) do
+    # minga:allow-blocking — Editor, on each /model argument completion refresh; should move to an effect
     case Session.get_available_models(session) do
       {:ok, candidates} when is_list(candidates) ->
         Enum.flat_map(candidates, fn
@@ -633,6 +634,7 @@ defmodule MingaEditor.Agent.SlashCommand do
   @spec active_provider_mcp_status(state()) :: {:ok, [map()]} | :error
   defp active_provider_mcp_status(state) do
     with {:ok, session} <- require_session(state),
+         # minga:allow-blocking — Editor, user-run /mcp status; one-shot provider pid read
          provider when is_pid(provider) <- Session.get_provider(session),
          {:ok, %{mcp_status: status}} <- MingaAgent.Providers.Native.get_state(provider) do
       {:ok, status}
@@ -690,6 +692,7 @@ defmodule MingaEditor.Agent.SlashCommand do
   @spec do_trust_parts([String.t()], state()) :: {:ok, state()} | {:error, String.t()}
   defp do_trust_parts(["list"], state) do
     with {:ok, session} <- require_session(state) do
+      # minga:allow-blocking — Editor, user-run /trust list; one-shot read
       trust = Session.list_tool_trust(session)
       {:ok, emit_system_message(state, trust_list_message(trust))}
     end
@@ -1075,6 +1078,7 @@ defmodule MingaEditor.Agent.SlashCommand do
     session = Runtime.active_session(state.shell_runtime)
 
     if is_pid(session) do
+      # minga:allow-blocking — Editor, user-run /export; one-shot transcript read
       messages = Session.messages(session)
       root = detect_project_root()
       model = export_model_identity(session)
@@ -1098,6 +1102,7 @@ defmodule MingaEditor.Agent.SlashCommand do
 
   @spec export_model_identity(pid()) :: String.t()
   defp export_model_identity(session) do
+    # minga:allow-blocking — Editor, user-run /export; one-shot model read
     case Session.model_selection(session) do
       %ModelSelection{} = selection ->
         route = selection.route
@@ -1234,6 +1239,7 @@ defmodule MingaEditor.Agent.SlashCommand do
     # The session stores the provider pid in its state. We need to access it.
     # Since Session doesn't expose this directly, we'll use the session's internal
     # forwarding. For now, we add a get_provider call to Session.
+    # minga:allow-blocking — Editor, user-run provider slash commands; one-shot pid read
     Session.get_provider(session_pid)
   end
 
@@ -1299,6 +1305,7 @@ defmodule MingaEditor.Agent.SlashCommand do
     session = Runtime.active_session(state.shell_runtime)
 
     if is_pid(session) do
+      # minga:allow-blocking — Editor, user-run /branches; one-shot read
       {:ok, listing} = Session.list_branches(session)
       {:ok, emit_system_message(state, "Branches:\n#{listing}")}
     else

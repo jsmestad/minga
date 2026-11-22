@@ -159,7 +159,8 @@ defmodule MingaEditor.UI.Picker.Source do
   """
   @type fetch_meta :: %{
           optional(:status) => String.t(),
-          optional(:model_discovery) => {pid(), :atomics.atomics_ref()}
+          optional(:model_discovery) => {pid(), :atomics.atomics_ref()},
+          optional(:extension_page) => MingaEditor.UI.Picker.PublicSource.page()
         }
 
   @doc """

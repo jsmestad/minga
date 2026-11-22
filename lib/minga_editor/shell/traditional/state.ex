@@ -166,9 +166,9 @@ defmodule MingaEditor.Shell.Traditional.State do
     do: %{state | flashes: Flashes.cancel_yank(state.flashes)}
 
   @doc "Publishes a protocol-independent Git toast."
-  @spec publish_git_toast(t(), String.t(), GitToast.level(), GitToast.action()) :: t()
-  def publish_git_toast(%__MODULE__{} = state, message, level, action),
-    do: %{state | git_toast: GitToast.publish(state.git_toast, message, level, action)}
+  @spec publish_git_toast(t(), String.t(), GitToast.level(), GitToast.retry()) :: t()
+  def publish_git_toast(%__MODULE__{} = state, message, level, retry),
+    do: %{state | git_toast: GitToast.publish(state.git_toast, message, level, retry)}
 
   @doc "Records a Git-toast timer for the matching identity."
   @spec record_git_toast_timer(t(), GitToast.id(), reference()) :: t()

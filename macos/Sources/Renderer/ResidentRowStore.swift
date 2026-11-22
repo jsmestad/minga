@@ -257,7 +257,7 @@ public enum ResidentSemanticStoreError: Error, Sendable, Equatable {
     case invalid
 }
 
-private final class ResidentGuideNode: @unchecked Sendable {
+private final class ResidentGuideNode: Sendable {
     let start: Int
     let end: Int
     let level: UInt16
@@ -285,7 +285,7 @@ private final class ResidentGuideNode: @unchecked Sendable {
     }
 }
 
-private final class ResidentAnnotationNode: @unchecked Sendable {
+private final class ResidentAnnotationNode: Sendable {
     let row: Int
     let values: [GUIResidentAnnotation]
     let priority: UInt64
@@ -305,7 +305,7 @@ private final class ResidentAnnotationNode: @unchecked Sendable {
     }
 }
 
-private final class ResidentDiagnosticNode: @unchecked Sendable {
+private final class ResidentDiagnosticNode: Sendable {
     let start: Int
     let values: [GUIResidentDiagnostic]
     let priority: UInt64
@@ -1003,7 +1003,7 @@ public struct ResidentRowStore: Sendable {
         }
     }
 
-    private final class Node: @unchecked Sendable {
+    private final class Node: Sendable {
         let chunk: Chunk
         let priority: UInt64
         let left: Node?
@@ -1039,7 +1039,7 @@ public struct ResidentRowStore: Sendable {
 
     /// Immutable 32-way radix node. Thirteen 5-bit steps cover all 64 row-id bits;
     /// the final step uses the low four bits, so distinct IDs never share a leaf.
-    private final class LocatorRadixNode: @unchecked Sendable {
+    private final class LocatorRadixNode: Sendable {
         let children: [LocatorRadixNode?]
         let value: Locator?
 
@@ -1049,7 +1049,7 @@ public struct ResidentRowStore: Sendable {
         }
     }
 
-    private struct LocatorTable: @unchecked Sendable {
+    private struct LocatorTable: Sendable {
         private static let levelCount = 13
         private var roots: [LocatorRadixNode?] = Array(repeating: nil, count: 32)
         private(set) var count = 0
@@ -1124,6 +1124,7 @@ public struct ResidentRowStore: Sendable {
     }
 
     private final class Storage: @unchecked Sendable {
+        // @unchecked: copy-on-write box with mutable fields; ResidentRowStore writes it only after ensureUniqueStorage() proves sole ownership.
         var root: Node?
         var locators: LocatorTable
         var nextChunkID: UInt64

@@ -330,6 +330,7 @@ type GitToast struct {
 	Level   GitToastLevel
 	Action  GitToastAction
 	Message string
+	ID      uint64
 }
 
 const (
@@ -703,6 +704,10 @@ type GuiGitStatusFields struct {
 	EntryBasePath     string
 	LastCommitMessage string
 	StashCount        uint16
+	TerminalCursor    uint32
+	TerminalCollapsed uint8
+	PanelID           uint64
+	CommitTargetID    uint64
 }
 
 type GuiBottomPanelFields struct {

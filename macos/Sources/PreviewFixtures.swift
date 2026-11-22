@@ -49,7 +49,6 @@ public extension PreviewTrait where T == Preview.ViewTraits {
     }
 }
 
-@MainActor
 public enum PreviewFixtures {
 
     /// Vim mode used for preview fixture state.
@@ -154,9 +153,11 @@ public enum PreviewFixtures {
             toast: nil,
             entryBasePath: "/Users/dev/code/minga",
             lastCommitMessage: "feat(editor): add preview host target",
-            stashCount: 1
+            stashCount: 1,
+            panelID: 1,
+            commitTargetID: 101
         )
-        state.updateDraft("feat(macos): polish preview snapshots")
+        state.updateDraft("feat(macos): polish preview snapshots", for: state.snapshot.panelID)
     }
 
     public static func populateTabBar(_ state: TabBarState) {

@@ -3,10 +3,8 @@ defmodule MingaEditor.Agent.UIStateTest do
 
   alias Minga.Buffer.Process, as: BufferProcess
   alias MingaAgent.Session.{ConnectionSnapshot, ConnectionTarget}
-  alias MingaEditor.Agent.Transcript
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.UIState.Panel
-  alias MingaEditor.Agent.UIState.TranscriptProjection
 
   defp ui_with_input(lines, cursor \\ {0, 0}) do
     ui = UIState.new() |> MingaEditor.Agent.PromptBuffer.ensure()
@@ -398,65 +396,7 @@ defmodule MingaEditor.Agent.UIStateTest do
     end
   end
 
-  describe "TranscriptProjection" do
-    test "cache_display installs correlated fields atomically" do
-      old = TranscriptProjection.new()
-      display = Transcript.display([{:assistant, "answer"}])
-      styled = [{:styled_lines, [[{"answer", 1, 0, 0}]]}]
-      jump = MingaEditor.Agent.ProvenanceJump.request(1)
-
-      projection =
-        TranscriptProjection.cache_display(old, display, styled,
-          display_start: 2,
-          provenance_jump: jump,
-          styled_fingerprint: 123
-        )
-
-      assert old == TranscriptProjection.new()
-      assert projection.line_index == display.line_index
-      assert projection.messages == display.display_messages
-      assert projection.message_pairs == display.display_message_pairs
-      assert projection.styled == styled
-      assert projection.styled_fingerprint == 123
-      assert projection.display_start == 2
-      assert projection.provenance_jump == jump
-    end
-
-    test "cache_display without a fingerprint invalidates previous styled cache" do
-      display = Transcript.display([{:assistant, "answer"}])
-
-      projection =
-        TranscriptProjection.new()
-        |> TranscriptProjection.cache_display(display, [{:styled_lines, [[{"answer", 1, 0, 0}]]}],
-          styled_fingerprint: 1
-        )
-        |> TranscriptProjection.cache_display(display, [{:styled_lines, [[{"answer", 2, 0, 0}]]}])
-
-      assert projection.styled_fingerprint == nil
-      assert TranscriptProjection.styled_for(projection, 1) == :stale
-    end
-
-    test "clear resets projection cache and preserves version" do
-      projection =
-        TranscriptProjection.new()
-        |> TranscriptProjection.bump_version()
-        |> TranscriptProjection.cache_display(Transcript.display([{:assistant, "answer"}]), [nil],
-          display_start: 1,
-          provenance_jump: MingaEditor.Agent.ProvenanceJump.request(1),
-          styled_fingerprint: 123
-        )
-        |> TranscriptProjection.clear()
-
-      assert projection.line_index == []
-      assert projection.messages == []
-      assert projection.message_pairs == []
-      assert projection.styled == nil
-      assert projection.styled_fingerprint == nil
-      assert projection.display_start == 0
-      assert projection.provenance_jump == nil
-      assert projection.version == 1
-    end
-
+  describe "transcript presentation version" do
     test "Panel.bump_message_version increments the projection counter each call" do
       panel = Panel.new()
       assert panel.transcript.version == 0

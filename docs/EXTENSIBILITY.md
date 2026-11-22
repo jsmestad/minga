@@ -440,24 +440,9 @@ Compatibility note: concrete theme fields `editor.tilde_fg`, `tree.modified_fg`,
 
 ---
 
-## Optional extensions you can install
+See [Optional extensions](CONFIGURATION.md#optional-extensions) for installation and configuration.
 
-Minga keeps its core small and ships its larger features as extensions you choose. Each of these lives in its own repository, builds against the public `minga_sdk` alone, and loads only when your config declares it, so they double as working examples of everything this page describes:
-
-```elixir
-# ~/.config/minga/config.exs
-extension :git_porcelain
-extension :minga_adversarial, git: "https://github.com/jsmestad/minga-adverserial"
-extension :minga_knowledge_graph, git: "https://github.com/jsmestad/minga-knowledge-graph"
-extension :minga_ghost_cursors, git: "https://github.com/jsmestad/minga-ghost-cursors"
-```
-
-- **Git porcelain** gives you Magit-style status, staging, commit, branch, and conflict workflows. It ships with Minga, so the bare name turns it on with no download.
-- **Adversarial** asks a model to challenge the assumptions in the current file and shows its findings as advisory `?` signs in the gutter, with hover and diagnostic navigation.
-- **Knowledge Graph** tracks how often you open and edit each file and tints the file tree by familiarity.
-- **Ghost Cursors** shows a labeled ghost cursor where an agent last edited each buffer, until the agent session ends.
-
-Restart Minga after adding or removing a line. [Optional extensions](CONFIGURATION.md#optional-extensions) in the configuration guide covers the details, including how to keep your existing familiarity data when you switch Knowledge Graph to the Git install.
+---
 
 ## Runtime grammar loading for extensions
 

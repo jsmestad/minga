@@ -1,5 +1,4 @@
 Code.require_file("mix/compiler_manifest.ex", __DIR__)
-Code.require_file("mix/compilers/minga_bundled_extensions.ex", __DIR__)
 
 defmodule Minga.MixProject do
   use Mix.Project
@@ -10,7 +9,7 @@ defmodule Minga.MixProject do
   @elixirc_paths ["generated/elixir", "lib", "sdk/lib/declarations"]
   @native_release_artifacts ~w(minga-renderer-go minga-parser minga-hook-runner minga-shell-output-reader)
   @release_priv_entries @native_release_artifacts ++
-                          ~w(extensions queries tree_sitter tutor.txt minga-apple-inference)
+                          ~w(queries tree_sitter tutor.txt minga-apple-inference)
   @tui_release_files ~w(mix/release_erts.ex mix/tasks/release.tui.ex)
 
   def project do
@@ -23,7 +22,6 @@ defmodule Minga.MixProject do
       start_permanent: Mix.env() == :prod,
       deps: deps(),
       aliases: aliases(),
-      compilers: [:minga_bundled_extensions] ++ Mix.compilers(),
       dialyzer: [
         plt_add_deps: :apps_direct,
         # Keep the PLT lean for dev/agent loops: include only direct runtime deps by default, then add transitive apps that Minga source references directly.
@@ -36,6 +34,9 @@ defmodule Minga.MixProject do
           :thousand_island,
           :websock
         ],
+        # dialyxir's :apps_direct walk includes the project app, which put Minga's own ~10K
+        # contracts (1.5 GB) into the dependency PLT. Analysis re-derives them anyway (#3869).
+        plt_ignore_apps: [:minga],
         ignore_warnings: ".dialyzer_ignore.exs"
       ],
       consolidate_protocols: Mix.env() != :prod,

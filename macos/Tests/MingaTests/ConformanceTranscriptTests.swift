@@ -182,7 +182,7 @@ struct ConformanceTranscriptTests {
                     #expect(decoded.envelope?.baseFrameSeq == UInt32(base),
                             "\(entry.name) step \(i): acknowledged wire base")
                 }
-                await focus?.settle()
+                try await focus?.settle()
                 Self.assertFocusTarget(expect, gui: gui, index: i, name: entry.name)
                 Self.assertFirstResponder(expect, harness: focus, index: i, name: entry.name)
                 try await pixelRunner?.assertPixels(
@@ -243,7 +243,7 @@ struct ConformanceTranscriptTests {
                         Issue.record("\(entry.name) step \(i): frame expected committed got \(String(describing: transactionResult))")
                     }
                 }
-                await focus?.settle()
+                try await focus?.settle()
                 if let expect = step["expect"] as? [String: Any] {
                     let windowId = commands.compactMap(Self.windowId(of:)).first ?? 1
                     Self.assertFrame(expect, gui: gui, windowId: windowId,

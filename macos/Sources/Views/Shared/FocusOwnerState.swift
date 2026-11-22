@@ -11,7 +11,6 @@ public enum LocalTextEditing: Equatable, Sendable {
 }
 
 /// Read-only SwiftUI mirror. Only EditorFocusPolicy publishes changes through its SPI.
-@MainActor
 @Observable
 public final class FocusOwnerState {
     public private(set) var decodedOwner: Wire.FocusOwner?
@@ -29,7 +28,6 @@ public final class FocusOwnerState {
 }
 
 /// Narrow focus-policy access shared by native fields and SwiftUI chrome leaves.
-@MainActor
 public protocol EditorFocusControlling: AnyObject, Sendable {
     var focusOwnerState: FocusOwnerState { get }
     func register(_ responder: NSResponder, as kind: Wire.FocusOwner.Responder)
@@ -40,7 +38,6 @@ public protocol EditorFocusControlling: AnyObject, Sendable {
 }
 
 /// Native fields may initialize their field editor after policy focus succeeds.
-@MainActor
 public protocol EditorFocusReceiving: AnyObject {
     func editorFocusDidApply()
 }

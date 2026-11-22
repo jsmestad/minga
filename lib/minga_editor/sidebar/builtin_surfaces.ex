@@ -6,9 +6,7 @@ defmodule MingaEditor.Sidebar.BuiltinSurfaces do
   """
 
   alias MingaEditor.Commands
-  alias MingaEditor.Extension.EventWorkflow
   alias MingaEditor.Extension.Sidebar
-  alias MingaEditor.GitStatus.Panel, as: GitStatusPanel
   alias MingaEditor.Layout
   alias MingaEditor.Shell.Traditional.SidebarWorkflow
   alias MingaEditor.Session.State
@@ -16,44 +14,12 @@ defmodule MingaEditor.Sidebar.BuiltinSurfaces do
   alias MingaEditor.State.FileTree, as: FileTreeState
 
   @builtin_source :builtin
-  @git_status_id "git_status"
   @observatory_id "observatory"
 
-  @doc """
-  Registers built-in sidebar surfaces that do not have their own feature adapter.
-
-  The Git Status surface opens only through git porcelain commands, so it is registered only when `git_status?` is true. Callers pass whether git porcelain is declared; the declaration cannot change without a restart.
-  """
-  @spec register_contributions(Sidebar.table(), boolean()) :: :ok | {:error, term()}
-  def register_contributions(sidebar_registry, git_status?) when is_boolean(git_status?) do
-    case register_git_status_surface(git_status?, sidebar_registry) do
-      :ok -> sync_observatory(false, sidebar_registry)
-      {:error, _reason} = error -> error
-    end
-  end
-
-  @spec register_git_status_surface(boolean(), Sidebar.table()) :: :ok | {:error, term()}
-  defp register_git_status_surface(true, sidebar_registry),
-    do: put_git_status(false, false, 0, sidebar_registry)
-
-  defp register_git_status_surface(false, _sidebar_registry), do: :ok
-
-  @doc "Synchronizes Git Status sidebar surface metadata from shell panel state. Does nothing when the surface is not registered."
-  @spec sync_git_status_panel(GitStatusPanel.t() | map() | nil, Sidebar.table(), boolean()) ::
-          :ok | {:error, term()}
-  def sync_git_status_panel(panel, sidebar_registry \\ Sidebar.default_table(), focused? \\ false)
-
-  def sync_git_status_panel(nil, sidebar_registry, focused?) when is_boolean(focused?),
-    do: register_git_status(false, false, 0, sidebar_registry)
-
-  def sync_git_status_panel(%GitStatusPanel{} = panel, sidebar_registry, focused?)
-      when is_boolean(focused?) do
-    register_git_status(true, focused?, Enum.count(panel.entries), sidebar_registry)
-  end
-
-  def sync_git_status_panel(%{} = panel, sidebar_registry, focused?) when is_boolean(focused?) do
-    panel |> GitStatusPanel.new() |> sync_git_status_panel(sidebar_registry, focused?)
-  end
+  @doc "Registers built-in sidebar surfaces that do not have their own feature adapter."
+  @spec register_contributions(Sidebar.table()) :: :ok | {:error, term()}
+  def register_contributions(sidebar_registry \\ Sidebar.default_table()),
+    do: sync_observatory(false, sidebar_registry)
 
   @doc "Synchronizes BEAM Observatory sidebar surface metadata from shell visibility state."
   @spec sync_observatory(boolean(), Sidebar.table()) :: :ok | {:error, term()}
@@ -77,22 +43,6 @@ defmodule MingaEditor.Sidebar.BuiltinSurfaces do
     focus_if_visible(result, visible?, @observatory_id, sidebar_registry)
   end
 
-  @doc "Handles native sidebar actions for the Git Status surface."
-  @spec handle_git_status_action(EditorState.t(), String.t(), map()) :: EditorState.t()
-  def handle_git_status_action(%EditorState{} = state, "toggle", _context) do
-    execute_registered_command(state, :git_status_toggle)
-  end
-
-  def handle_git_status_action(%EditorState{} = state, "activate", _context) do
-    if SidebarWorkflow.git_status_panel(state) do
-      focus_git_status(state)
-    else
-      execute_registered_command(state, :git_status_toggle)
-    end
-  end
-
-  def handle_git_status_action(%EditorState{} = state, _action, _context), do: state
-
   @doc "Handles native sidebar actions for the BEAM Observatory surface."
   @spec handle_observatory_action(EditorState.t(), String.t(), map()) :: EditorState.t()
   def handle_observatory_action(%EditorState{} = state, "toggle", _context) do
@@ -113,39 +63,6 @@ defmodule MingaEditor.Sidebar.BuiltinSurfaces do
 
   def handle_observatory_action(%EditorState{} = state, _action, _context), do: state
 
-  @spec register_git_status(boolean(), boolean(), non_neg_integer(), Sidebar.table()) ::
-          :ok | {:error, term()}
-  defp register_git_status(visible?, focused?, badge_count, sidebar_registry) do
-    case Sidebar.get(sidebar_registry, @git_status_id) do
-      nil -> :ok
-      _entry -> put_git_status(visible?, focused?, badge_count, sidebar_registry)
-    end
-  end
-
-  @spec put_git_status(boolean(), boolean(), non_neg_integer(), Sidebar.table()) ::
-          :ok | {:error, term()}
-  defp put_git_status(visible?, focused?, badge_count, sidebar_registry) do
-    focused? = visible? and focused?
-
-    result =
-      Sidebar.register(sidebar_registry, @builtin_source, %{
-        id: @git_status_id,
-        display_name: "Git Status",
-        description: "Repository changes",
-        placement: :left,
-        priority: 20,
-        preferred_width: 30,
-        visible?: visible?,
-        focused?: focused?,
-        semantic_kind: "git_status",
-        icon: "point.3.filled.connected.trianglepath.dotted",
-        badge_count: badge_count,
-        action_handler: {__MODULE__, :handle_git_status_action}
-      })
-
-    focus_if_visible(result, focused?, @git_status_id, sidebar_registry)
-  end
-
   @spec focus_if_visible(:ok | {:error, term()}, boolean(), String.t(), Sidebar.table()) ::
           :ok | {:error, term()}
   defp focus_if_visible(:ok, true, id, sidebar_registry),
@@ -153,15 +70,6 @@ defmodule MingaEditor.Sidebar.BuiltinSurfaces do
 
   defp focus_if_visible(:ok, false, _id, _sidebar_registry), do: :ok
   defp focus_if_visible({:error, _reason} = error, _visible?, _id, _sidebar_registry), do: error
-
-  @spec focus_git_status(EditorState.t()) :: EditorState.t()
-  defp focus_git_status(state) do
-    state = %{state | workspace: State.set_keymap_scope(state.workspace, :git_status)}
-
-    state
-    |> SidebarWorkflow.select(@git_status_id)
-    |> Layout.invalidate()
-  end
 
   @spec focus_observatory(EditorState.t()) :: EditorState.t()
   defp focus_observatory(state) do
@@ -177,9 +85,4 @@ defmodule MingaEditor.Sidebar.BuiltinSurfaces do
   @spec normalize_command_result(EditorState.t() | {EditorState.t(), term()}) :: EditorState.t()
   defp normalize_command_result({state, _effect}), do: state
   defp normalize_command_result(state), do: state
-
-  @spec execute_registered_command(EditorState.t(), atom()) :: EditorState.t()
-  defp execute_registered_command(state, command) do
-    EventWorkflow.dispatch(state, {:editor_action, :execute_git_command, command})
-  end
 end

@@ -100,7 +100,7 @@ defmodule MingaAgent.ToolRouter do
           {:ok, BufferForkStore.owner()} | :not_found | {:error, term()}
   def claim_owner(%Context{fork_store: store, changeset: changeset}, path) when is_pid(store) do
     buffer =
-      case Minga.Buffer.pid_for_path(path) do
+      case Minga.Buffer.pid_for_file(path) do
         {:ok, pid} -> pid
         :not_found -> nil
       end
@@ -159,7 +159,7 @@ defmodule MingaAgent.ToolRouter do
   end
 
   defp conditional_mutate_without_fork(%Context{}, path, expected, operation) do
-    case Minga.Buffer.pid_for_path(path) do
+    case Minga.Buffer.pid_for_file(path) do
       {:ok, buffer} ->
         Minga.Buffer.conditional_mutate(buffer, expected, operation, {:buffer, path})
 
@@ -408,7 +408,7 @@ defmodule MingaAgent.ToolRouter do
 
   defp read_file_changeset_or_passthrough(_ctx, path) do
     # No routing active: try buffer, then filesystem
-    case Minga.Buffer.pid_for_path(path) do
+    case Minga.Buffer.pid_for_file(path) do
       {:ok, pid} -> {:ok, Minga.Buffer.content(pid)}
       :not_found -> File.read(path)
     end

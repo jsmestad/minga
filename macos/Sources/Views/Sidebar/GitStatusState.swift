@@ -144,6 +144,10 @@ public struct GitStatusSnapshot: Sendable, Equatable {
     public init() {}
 
     public fileprivate(set) var visible: Bool = false
+    /// Identity of the exact published panel. Rendered actions carry this ID.
+    public fileprivate(set) var panelID: UInt64 = 0
+    /// Identity of the repository and branch for local drafting. Stable across status-only refreshes.
+    public private(set) var commitTargetID: UInt64 = 0
     public fileprivate(set) var repoState: GitRepoState = .notARepo
     public fileprivate(set) var syncing: Bool = false
     public fileprivate(set) var branchName: String = ""
@@ -154,6 +158,7 @@ public struct GitStatusSnapshot: Sendable, Equatable {
     public fileprivate(set) var toastMessage: String? = nil
     public fileprivate(set) var toastLevel: ToastLevel = .success
     public fileprivate(set) var toastAction: ToastAction = .none
+    public fileprivate(set) var toastID: UInt64 = 0
     public fileprivate(set) var lastCommitMessage: String = ""
     fileprivate var entryGroups = GitStatusEntriesSnapshot()
 
@@ -185,9 +190,11 @@ public struct GitStatusSnapshot: Sendable, Equatable {
         entryGroups.animationID(for: entry)
     }
 
-    fileprivate func updating(repoState: GitRepoState, branchName: String, ahead: UInt16, behind: UInt16, syncing: Bool, entries: [GitStatusEntry], toast: (String, ToastLevel, ToastAction)?, entryBasePath: String, lastCommitMessage: String, stashCount: UInt16) -> Self {
+    fileprivate func updating(repoState: GitRepoState, branchName: String, ahead: UInt16, behind: UInt16, syncing: Bool, entries: [GitStatusEntry], toast: (String, ToastLevel, ToastAction)?, entryBasePath: String, lastCommitMessage: String, stashCount: UInt16, toastID: UInt64, panelID: UInt64, commitTargetID: UInt64) -> Self {
         var updated = self
         updated.visible = true
+        updated.panelID = panelID
+        updated.commitTargetID = commitTargetID
         updated.repoState = repoState
         updated.branchName = branchName
         updated.ahead = ahead
@@ -197,29 +204,33 @@ public struct GitStatusSnapshot: Sendable, Equatable {
         updated.lastCommitMessage = lastCommitMessage
         updated.stashCount = stashCount
         updated.entryGroups = entryGroups.installing(entries)
-        updated.applyToast(toast)
+        updated.applyToast(toast, id: toastID)
         return updated
     }
 
-    fileprivate func hiding(syncing: Bool, toast: (String, ToastLevel, ToastAction)?) -> Self {
+    fileprivate func hiding(syncing: Bool, toast: (String, ToastLevel, ToastAction)?, toastID: UInt64) -> Self {
         var updated = self
         updated.visible = false
+        updated.panelID = 0
+        updated.commitTargetID = 0
         updated.syncing = syncing
         updated.entryBasePath = ""
         updated.stashCount = 0
-        updated.applyToast(toast)
+        updated.applyToast(toast, id: toastID)
         return updated
     }
 
-    private mutating func applyToast(_ toast: (String, ToastLevel, ToastAction)?) {
+    private mutating func applyToast(_ toast: (String, ToastLevel, ToastAction)?, id: UInt64) {
         if let (message, level, action) = toast {
             toastMessage = message
             toastLevel = level
             toastAction = action
+            toastID = id
         } else {
             toastMessage = nil
             toastLevel = .success
             toastAction = .none
+            toastID = 0
         }
     }
 }
@@ -232,11 +243,13 @@ public enum GitCommitAction: Sendable, Equatable {
 
 /// A complete commit request captured before the local draft resets.
 public struct GitCommitSubmission: Sendable, Equatable {
-    public init(action: GitCommitAction, message: String) {
+    public init(panelID: UInt64, action: GitCommitAction, message: String) {
+        self.panelID = panelID
         self.action = action
         self.message = message
     }
 
+    public let panelID: UInt64
     public let action: GitCommitAction
     public let message: String
 }
@@ -248,18 +261,27 @@ public struct GitStatusSession: Sendable, Equatable {
     public fileprivate(set) var draft: String = ""
     public fileprivate(set) var amendMode: Bool = false
     public fileprivate(set) var collapsedSections: Set<GitStatusSection> = []
+    fileprivate(set) var draftCommitTargetID: UInt64?
 
-    fileprivate func updatingDraft(_ draft: String) -> Self {
+    fileprivate func updatingDraft(_ draft: String, commitTargetID: UInt64) -> Self {
         var updated = self
         updated.draft = draft
+        if draft.isEmpty, draftCommitTargetID != commitTargetID {
+            // Clearing a stale draft also clears its amend selection.
+            updated.draftCommitTargetID = nil
+            updated.amendMode = false
+        } else {
+            updated.draftCommitTargetID = draft.isEmpty && !amendMode ? nil : draftCommitTargetID ?? commitTargetID
+        }
         return updated
     }
 
-    fileprivate func settingAmendMode(_ enabled: Bool, lastCommitMessage: String) -> Self {
+    fileprivate func settingAmendMode(_ enabled: Bool, commitTargetID: UInt64, lastCommitMessage: String) -> Self {
         guard amendMode != enabled else { return self }
         var updated = self
         updated.amendMode = enabled
-        if enabled && draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+        updated.draftCommitTargetID = enabled || !draft.isEmpty ? draftCommitTargetID ?? commitTargetID : nil
+        if enabled && updated.draftCommitTargetID == commitTargetID && draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             updated.draft = lastCommitMessage
         }
         return updated
@@ -275,7 +297,8 @@ public struct GitStatusSession: Sendable, Equatable {
         return updated
     }
 
-    fileprivate func takingSubmission(hasStagedChanges: Bool) -> (GitCommitSubmission?, Self) {
+    fileprivate func takingSubmission(panelID: UInt64, commitTargetID: UInt64, hasStagedChanges: Bool) -> (GitCommitSubmission?, Self) {
+        guard draftCommitTargetID == commitTargetID else { return (nil, self) }
         let message = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !message.isEmpty else { return (nil, self) }
         guard amendMode || hasStagedChanges else { return (nil, self) }
@@ -284,12 +307,12 @@ public struct GitStatusSession: Sendable, Equatable {
         var updated = self
         updated.draft = ""
         updated.amendMode = false
-        return (GitCommitSubmission(action: action, message: message), updated)
+        updated.draftCommitTargetID = nil
+        return (GitCommitSubmission(panelID: panelID, action: action, message: message), updated)
     }
 }
 
 /// Stable presentation owner for BEAM-published Git status and the local Git sidebar session.
-@MainActor
 @Observable
 public final class GitStatusState {
     public init(snapshot: GitStatusSnapshot = GitStatusSnapshot(), session: GitStatusSession = GitStatusSession()) {
@@ -315,6 +338,7 @@ public final class GitStatusState {
 
     /// Whether the commit button should be enabled.
     public var canSubmit: Bool {
+        guard snapshot.panelID != 0, session.draftCommitTargetID == snapshot.commitTargetID else { return false }
         let hasMessage = !session.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         return session.amendMode ? hasMessage : !snapshot.stagedEntries.isEmpty && hasMessage
     }
@@ -325,8 +349,8 @@ public final class GitStatusState {
     }
 
     /// Update from a decoded gui_git_status protocol message.
-    public func update(repoState: GitRepoState, branchName: String, ahead: UInt16, behind: UInt16, syncing: Bool, entries: [GitStatusEntry], toast: (String, ToastLevel, ToastAction)?, entryBasePath: String, lastCommitMessage: String, stashCount: UInt16) {
-        snapshot = snapshot.updating(repoState: repoState, branchName: branchName, ahead: ahead, behind: behind, syncing: syncing, entries: entries, toast: toast, entryBasePath: entryBasePath, lastCommitMessage: lastCommitMessage, stashCount: stashCount)
+    public func update(repoState: GitRepoState, branchName: String, ahead: UInt16, behind: UInt16, syncing: Bool, entries: [GitStatusEntry], toast: (String, ToastLevel, ToastAction)?, entryBasePath: String, lastCommitMessage: String, stashCount: UInt16, toastID: UInt64 = 0, panelID: UInt64, commitTargetID: UInt64) {
+        snapshot = snapshot.updating(repoState: repoState, branchName: branchName, ahead: ahead, behind: behind, syncing: syncing, entries: entries, toast: toast, entryBasePath: entryBasePath, lastCommitMessage: lastCommitMessage, stashCount: stashCount, toastID: toastID, panelID: panelID, commitTargetID: commitTargetID)
     }
 
     /// Matched-geometry identity for section moves. Falls back to row identity when the same path appears in multiple sections at once.
@@ -335,18 +359,20 @@ public final class GitStatusState {
     }
 
     /// Hide the git status panel (BEAM toggled sidebar off or switched tab).
-    public func hide(syncing: Bool = false, toast: (String, ToastLevel, ToastAction)? = nil) {
-        snapshot = snapshot.hiding(syncing: syncing, toast: toast)
+    public func hide(syncing: Bool = false, toast: (String, ToastLevel, ToastAction)? = nil, toastID: UInt64 = 0) {
+        snapshot = snapshot.hiding(syncing: syncing, toast: toast, toastID: toastID)
     }
 
-    /// Replace the current local commit draft.
-    public func updateDraft(_ draft: String) {
-        session = session.updatingDraft(draft)
+    /// Replace the local draft from the displayed editor, without retargeting any existing text.
+    public func updateDraft(_ draft: String, for panelID: UInt64) {
+        guard panelID != 0, panelID == snapshot.panelID else { return }
+        session = session.updatingDraft(draft, commitTargetID: snapshot.commitTargetID)
     }
 
     /// Toggle amend mode and prefill the input with the last commit message when the user has not typed a message yet.
-    public func setAmendMode(_ enabled: Bool) {
-        session = session.settingAmendMode(enabled, lastCommitMessage: snapshot.lastCommitMessage)
+    public func setAmendMode(_ enabled: Bool, for panelID: UInt64) {
+        guard panelID != 0, panelID == snapshot.panelID else { return }
+        session = session.settingAmendMode(enabled, commitTargetID: snapshot.commitTargetID, lastCommitMessage: snapshot.lastCommitMessage)
     }
 
     /// Toggle one file section's collapsed state.
@@ -354,9 +380,10 @@ public final class GitStatusState {
         session = session.togglingSection(section)
     }
 
-    /// Capture the current commit action and trimmed message, then reset the draft and amend mode immediately.
-    public func submit() -> GitCommitSubmission? {
-        let (submission, updatedSession) = session.takingSubmission(hasStagedChanges: !snapshot.stagedEntries.isEmpty)
+    /// Submit only from the current panel and only if the draft belongs to its commit target.
+    public func submit(panelID: UInt64) -> GitCommitSubmission? {
+        guard panelID != 0, panelID == snapshot.panelID else { return nil }
+        let (submission, updatedSession) = session.takingSubmission(panelID: panelID, commitTargetID: snapshot.commitTargetID, hasStagedChanges: !snapshot.stagedEntries.isEmpty)
         session = updatedSession
         return submission
     }

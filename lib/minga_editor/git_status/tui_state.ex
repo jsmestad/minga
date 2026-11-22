@@ -8,11 +8,14 @@ defmodule MingaEditor.GitStatus.TUIState do
   """
 
   alias Minga.Git.StatusEntry
+  alias Minga.Keymap.Bindings
+  alias MingaEditor.GitStatus.Panel
 
   @enforce_keys [:cursor_index, :collapsed]
   defstruct [
     :cursor_index,
     :collapsed,
+    pending_prefix: nil,
     discard_confirmation: nil
   ]
 
@@ -20,12 +23,12 @@ defmodule MingaEditor.GitStatus.TUIState do
           {:section_header, atom(), non_neg_integer()}
           | {:file, atom(), StatusEntry.t()}
 
-  @type discard_confirmation ::
-          {StatusEntry.t(), String.t()} | nil
+  @type discard_confirmation :: {Panel.id(), String.t(), 0..3} | nil
 
   @type t :: %__MODULE__{
           cursor_index: non_neg_integer(),
           collapsed: %{atom() => true},
+          pending_prefix: Bindings.node_t() | nil,
           discard_confirmation: discard_confirmation()
         }
 
@@ -77,15 +80,35 @@ defmodule MingaEditor.GitStatus.TUIState do
   end
 
   @doc "Stores the pending destructive discard confirmation."
-  @spec request_discard(t(), StatusEntry.t(), String.t()) :: t()
-  def request_discard(%__MODULE__{} = tui, %StatusEntry{} = entry, git_root)
-      when is_binary(git_root) do
-    %{tui | discard_confirmation: {entry, git_root}}
+  @spec request_discard(t(), Panel.id(), StatusEntry.t()) :: t()
+  def request_discard(%__MODULE__{} = tui, panel_id, %StatusEntry{} = entry) do
+    %{tui | discard_confirmation: {panel_id, entry.path, Panel.section(entry)}}
   end
 
   @doc "Clears pending discard confirmation state."
   @spec clear_discard_confirmation(t()) :: t()
   def clear_discard_confirmation(%__MODULE__{} = tui), do: %{tui | discard_confirmation: nil}
+
+  @doc "Stores the next trie node while a Git status key sequence is pending."
+  @spec set_prefix(t(), Bindings.node_t() | nil) :: t()
+  def set_prefix(%__MODULE__{} = tui, node), do: %{tui | pending_prefix: node}
+
+  @doc "Returns the terminal cursor rank and collapsed-section bits in wire section order."
+  @spec presentation(t()) :: {non_neg_integer(), 0..15}
+  def presentation(%__MODULE__{cursor_index: cursor, collapsed: collapsed}) do
+    mask =
+      Enum.reduce(collapsed, 0, fn {section, true}, mask ->
+        Bitwise.bor(mask, Bitwise.bsl(1, wire_section(section)))
+      end)
+
+    {cursor, mask}
+  end
+
+  @spec wire_section(atom()) :: 0..3
+  defp wire_section(:staged), do: 0
+  defp wire_section(:changes), do: 1
+  defp wire_section(:untracked), do: 2
+  defp wire_section(:conflicts), do: 3
 
   @doc "Returns the selected file entry, if the cursor is on a file row."
   @spec selected_file(t(), [StatusEntry.t()]) :: StatusEntry.t() | nil
@@ -191,16 +214,8 @@ defmodule MingaEditor.GitStatus.TUIState do
   end
 
   @spec section_entries([StatusEntry.t()], atom()) :: [StatusEntry.t()]
-  defp section_entries(entries, :conflicts), do: Enum.filter(entries, &(&1.status == :conflict))
-
-  defp section_entries(entries, :staged) do
-    Enum.filter(entries, &(&1.staged and &1.status != :conflict and &1.status != :untracked))
+  defp section_entries(entries, name) do
+    section = wire_section(name)
+    Enum.filter(entries, &(Panel.section(&1) == section))
   end
-
-  defp section_entries(entries, :changes) do
-    Enum.filter(entries, &(not &1.staged and &1.status != :conflict and &1.status != :untracked))
-  end
-
-  defp section_entries(entries, :untracked), do: Enum.filter(entries, &(&1.status == :untracked))
-  defp section_entries(_entries, _section), do: []
 end

@@ -260,7 +260,7 @@ graph TD
     SVC --> CALLBACKS["Extension.CallbackRegistry<br/><i>declarative callbacks</i>"]
     SVC --> INSTREG["Extension.InstanceRegistry<br/><i>stable process names</i>"]
     SVC --> ROOTSUP["Extension.RootSupervisor<br/><i>DynamicSupervisor</i>"]
-    ROOTSUP --> ROOT1["Extension.Root: git_porcelain (when enabled)<br/><i>rest_for_one</i>"]
+    ROOTSUP --> ROOT1["Extension.Root: minga_git_extended (when enabled)<br/><i>rest_for_one</i>"]
     ROOT1 --> RTSUP1["RuntimeSupervisor<br/><i>temporary runtime children</i>"]
     ROOT1 --> INST1["Instance<br/><i>lifecycle authority</i>"]
     RTSUP1 --> EXT1["Extension runtime child"]
@@ -468,7 +468,7 @@ Epic #2652 established resident navigable models plus discardable frontend-local
 
 #### What survives of the DisplayList
 
-`MingaEditor.DisplayList` still exists, but it is no longer "what's on screen". The cell-grid window carriers (`Frame`, `WindowFrame`) were removed in #2241, and the per-surface chrome painters (completion menu, hover/signature popups, modeline, tab bar, float popups) were deleted in #2311, because the semantic frontends render those surfaces natively. What remains is a small set of raw draw tuple types and `draw/4`, currently used by the Git Porcelain extension shell renderer. The nested `Overlay` type is a legacy carrier with no live producer; the semantic chrome path supplies an empty overlay list.
+`MingaEditor.DisplayList` still exists, but it is no longer "what's on screen". The cell-grid window carriers (`Frame`, `WindowFrame`) were removed in #2241, and the per-surface chrome painters (completion menu, hover/signature popups, modeline, tab bar, float popups) were deleted in #2311, because the semantic frontends render those surfaces natively. What remains is a small set of raw draw tuple types and `draw/4`, currently used by the GitExtended shell renderer. The nested `Overlay` type is a legacy carrier with no live producer; the semantic chrome path supplies an empty overlay list.
 
 ---
 
@@ -942,7 +942,7 @@ Agent Level 2: bundled integrations, adapters, and agent presentation surfaces
 
 `MingaAgent.Tool.Output` and its nested modules are also Agent Level 0. They represent completeness, selected ranges, source revisions, retained references, and image attachments without reading files or contacting a store. Tool calls, events, hooks, and snapshots carry these same facts.
 
-**Agent Level 1** contains core runtime services and source-owned safety boundaries. These modules may depend on Level 0, but they must not depend on bundled packs or presentation modules. Current examples: `MingaAgent.Session`, `MingaAgent.SessionManager`, `MingaAgent.SessionMetadata`, `MingaAgent.SubagentContext`, `MingaAgent.Supervisor`, `MingaAgent.Runtime`, `MingaAgent.Config`, `MingaAgent.ContextArtifact`, `MingaAgent.Retry`, `MingaAgent.ProviderRegistry`, `MingaAgent.InferenceRouteRegistry`, `MingaAgent.Providers.Native.InferenceRouteStream`, `MingaAgent.Providers.Native.InferenceRouteRequest`, `MingaAgent.Providers.Native.InferenceRouteResponse`, `MingaAgent.ProviderResolver`, `MingaAgent.Tool.BundledSources`, `MingaAgent.Tool.Context`, `MingaAgent.Tool.Registry`, `MingaAgent.Tool.Executor`, `MingaAgent.ToolRouter`, `MingaAgent.ProjectView`, `MingaAgent.Changeset`, `MingaAgent.Credentials`, `MingaAgent.Hooks.Dispatcher`, `MingaAgent.Hooks.Registry`, `MingaAgent.MCP.Registry`, `MingaAgent.MCP.ServerRegistry`, `MingaAgent.Skills.Registry`, `MingaAgent.EventLog`, `MingaAgent.Gateway.*`, `MingaAgent.RemoteAPI`, `Minga.Extension.CodeLease`, and the extension-facing runtime facade `Minga.Extension.AgentAPI`.
+**Agent Level 1** contains core runtime services and source-owned safety boundaries. These modules may depend on Level 0, but they must not depend on bundled packs or presentation modules. Current examples: `MingaAgent.Session`, `MingaAgent.SessionManager`, `MingaAgent.SessionMetadata`, `MingaAgent.SubagentContext`, `MingaAgent.Supervisor`, `MingaAgent.Runtime`, `MingaAgent.Config`, `MingaAgent.ContextArtifact`, `MingaAgent.Retry`, `MingaAgent.ProviderRegistry`, `MingaAgent.InferenceRouteRegistry`, `MingaAgent.Providers.Native.InferenceRouteStream`, `MingaAgent.Providers.Native.InferenceRouteRequest`, `MingaAgent.Providers.Native.InferenceRouteResponse`, `MingaAgent.ProviderResolver`, `MingaAgent.Tool.BundledSources`, `MingaAgent.Tool.Context`, `MingaAgent.Tool.Registry`, `MingaAgent.Tool.Executor`, `MingaAgent.ToolRouter`, `MingaAgent.ProjectView`, `MingaAgent.Changeset`, `MingaAgent.Credentials`, `MingaAgent.Hooks.Dispatcher`, `MingaAgent.Hooks.Registry`, `MingaAgent.MCP.Registry`, `MingaAgent.MCP.ServerRegistry`, `MingaAgent.Skills.Registry`, `MingaAgent.EventLog`, `MingaAgent.StagedDraftKeeper`, `MingaAgent.Gateway.*`, `MingaAgent.RemoteAPI`, `Minga.Extension.CodeLease`, and the extension-facing runtime facade `Minga.Extension.AgentAPI`.
 
 Retained output has a separate `MingaAgent.ArtifactSupervisor` subtree with a `:rest_for_one` strategy: the durable `ArtifactQuota` owner starts before the unique record registry and the dynamic store supervisor. `ArtifactStores` opens one `ArtifactStore` per durable session record on demand. Each store owns its private blobs, indexes, integrity proofs, delivery records, and pins; quota admission precedes storage growth. Session or store process exit is not data expiry. See [Session recovery](SESSION-RECOVERY.md) for retention, explicit deletion, and recovery failure semantics.
 
@@ -963,15 +963,11 @@ carries creation, content and latest-change revisions. A `:gb_trees` index store
 one latest-revision/ordinal key per live entry, with no old payload journal.
 Append, streamed-tail replacement and targeted updates use indexed paths.
 
-`Session.transcript_since/2` is one atomic source query. `:snapshot` returns an
-ordered `Transcript.Snapshot`; an equal cursor returns `:unchanged` without entry
-traversal; an older same-generation cursor returns `Transcript.Changes` containing
-only coalesced current affected entries in ordinal order. Creation revisions
-distinguish appends from existing-entry revisions. Pins, usage and timestamps
-carry separate change flags; collapse/preview changes do not advance content
-revisions. Discovery costs O(log M + K), ordering O(K log K), indexed fetches
-O(K log M), plus processing of changed payloads. Explicit snapshot/list queries
-for providers, persistence and frozen branches remain O(M).
+`Session.transcript_since/2` is one atomic source query. `:snapshot` returns ordered entries and full pin membership. An equal cursor returns `:unchanged` without entry traversal. An older same-generation cursor returns `Transcript.Changes` with coalesced current affected entries in ordinal order. Creation revisions distinguish appends from existing-entry revisions. Collapse and preview changes do not advance content revisions.
+
+The delta carries only the latest pin fact for each affected active ID. It includes unpins and a positive fact when a previously pinned ID first becomes active. A new ID without a fact starts unpinned. The revision index seeks past older pin records instead of scanning the unchanged membership. Reset drops the pin index; the replacement snapshot includes the canonical pins. Usage and timestamp retain separate change flags.
+
+Entry discovery costs O(log M + K), with O(K log K) ordering and O(K log M) indexed fetches for K changed entries in M retained entries, plus processing of changed payloads. Discovery of Q pin facts costs O(log M + Q). Explicit snapshot and list queries for providers, persistence and frozen branches remain O(M).
 
 The Session runtime supplies a nonce to the pure constructor. Structural branch,
 compaction, restore/load and clear/reset transitions advance an exact generation
@@ -980,7 +976,9 @@ return named reset outcomes with a replacement snapshot; malformed cursors are
 rejected. GenServer exits and timeouts propagate normally. Runtime cursors and
 indexes never enter durable serialization.
 
-The Editor's conversation projection records the source cursor it was built from. Local Agent tabs reuse that projection when the Session reports unchanged entries and pins. A change to either rebuilds the display from one atomic snapshot. Applying only the changed entries is still outstanding. Remote sessions keep the existing reads until their protocol can advertise cursor support.
+The Editor owns one derived transcript projection per workspace. A weighted binary tree keeps source order, visible line counts and the pinned prefix; a stable message ID locates its source ordinal. Each leaf stores its own line classification and styled content. An ordinary update copies only paths for the changed entries and pin facts. It does not classify or style unchanged entries. An unpinned reading position stays with the same entry and local line when surrounding entries change.
+
+The Editor installs `Transcript.Changes` and its cursor together without a second Session read. Ordered tab arrival uses the same update path. A reset installs one replacement and retires actions offered by the previous generation. If a Session is unavailable, the workspace continues to publish its last good transcript without live row controls. The connection notice and transcript are independent, so a reconnect to the same installed projection does not reset its presentation identity. Theme changes restyle the installed display without querying Session. Remote sessions still use explicit full reads. This index does not change the resident presentation enumeration or frontend wire format.
 
 Each branch snapshot retains both model messages and display-boundary identities. Switching branches restores both values, so later branches cannot inherit boundaries from another branch. Legacy display-only records remain unchanged until an explicit import; the importer reconstructs only portable user and assistant text, records `:legacy_reconstructed` provenance, and omits unavailable attachment data rather than fabricating it. Tool calls and system entries remain readable in the preserved display record but do not become model history.
 

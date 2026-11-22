@@ -16,6 +16,30 @@ defmodule Minga.Extension.CodeLeaseTest do
     {:ok, code_lease: lease_name}
   end
 
+  test "a deferred callback cannot borrow a lease from a later activation", %{code_lease: server} do
+    source = {:extension, :lease_test}
+    opts = [server: server]
+    :ok = CodeLease.activate_source(source, [__MODULE__], opts)
+    {:ok, first} = CodeLease.activation(source, __MODULE__, opts)
+    {:ok, token} = CodeLease.quiesce_source(source, opts)
+    :ok = CodeLease.abort_unload(token, opts)
+    assert {:ok, ^first} = CodeLease.activation(source, __MODULE__, opts)
+
+    {:ok, token} = CodeLease.quiesce_source(source, opts)
+    :ok = CodeLease.complete_unload(token, opts)
+    :ok = CodeLease.activate_source(source, [__MODULE__], opts)
+
+    assert {:error, {:source_reactivated, ^source}} =
+             CodeLease.admit_callback(source, __MODULE__, :test, [activation: first] ++ opts)
+
+    {:ok, current} = CodeLease.activation(source, __MODULE__, opts)
+
+    assert {:ok, lease} =
+             CodeLease.admit_callback(source, __MODULE__, :test, [activation: current] ++ opts)
+
+    CodeLease.release(lease)
+  end
+
   test "leases expose callback ownership until explicitly released", ctx do
     module = Minga.TestExtensions.LeasedCallback
 

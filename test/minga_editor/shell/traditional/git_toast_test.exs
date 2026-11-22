@@ -8,7 +8,7 @@ defmodule MingaEditor.Shell.Traditional.GitToastTest do
 
   test "latest toast replaces prior identity and protocol-independent content" do
     first = GitToast.publish(%GitToast{}, "Fetched", :success)
-    second = GitToast.publish(first, "Push failed", :error, :pull_and_retry)
+    second = GitToast.publish(first, "Push failed", :error)
 
     assert %GitToast{id: 1, message: "Fetched", level: :success} = first
 
@@ -16,7 +16,6 @@ defmodule MingaEditor.Shell.Traditional.GitToastTest do
              id: 2,
              message: "Push failed",
              level: :error,
-             action: :pull_and_retry,
              timer: nil
            } = second
   end

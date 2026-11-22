@@ -33,7 +33,6 @@ defmodule MingaEditor.RenderModel.UI.MinibufferBuilder do
   defp mode_model(6), do: :extension_confirm
   defp mode_model(7), do: :describe_key
   defp mode_model(8), do: :delete_confirm
-  defp mode_model(9), do: :branch_delete_confirm
   defp mode_model(10), do: :text_prompt
   defp mode_model(_mode), do: :unknown
 

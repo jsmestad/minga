@@ -1,6 +1,9 @@
 package ui
 
-import "github.com/jsmestad/minga/go/tui/internal/protocol"
+import (
+	"github.com/jsmestad/minga/go/tui/internal/generated"
+	"github.com/jsmestad/minga/go/tui/internal/protocol"
+)
 
 func (m Model) workspaceBar() (protocol.WorkspaceBar, bool) {
 	for _, payload := range m.chrome {
@@ -101,12 +104,8 @@ func (m Model) breadcrumb() (protocol.Breadcrumb, bool) {
 }
 
 func (m Model) gitStatus() (protocol.GitStatus, bool) {
-	for _, payload := range m.chrome {
-		if payload.Git.Branch != "" || len(payload.Git.Entries) > 0 {
-			return payload.Git, true
-		}
-	}
-	return protocol.GitStatus{}, false
+	payload, ok := m.chrome[generated.OPGuiGitStatus]
+	return payload.Git, ok
 }
 
 func (m Model) searchState() (protocol.SearchState, bool) {

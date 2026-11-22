@@ -8,6 +8,7 @@ defmodule MingaEditor.WorkspaceWorkflow do
   """
 
   alias MingaAgent.ProjectView
+  alias MingaAgent.StagedDraftKeeper
   alias MingaEditor.Shell.Identity
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.Shell.StateStash
@@ -62,7 +63,9 @@ defmodule MingaEditor.WorkspaceWorkflow do
     current_by_id = Map.new(current.workspaces, &{&1.id, &1})
 
     Enum.each(current.workspaces, fn workspace ->
-      persist_workspace_if_changed(Map.get(previous_by_id, workspace.id), workspace)
+      previous_workspace = Map.get(previous_by_id, workspace.id)
+      persist_workspace_if_changed(previous_workspace, workspace)
+      track_staged_view_if_changed(previous_workspace, workspace)
     end)
 
     Enum.each(previous.workspaces, fn workspace ->
@@ -141,6 +144,24 @@ defmodule MingaEditor.WorkspaceWorkflow do
 
     :ok
   end
+
+  # A workspace's staging area is handed to the staged draft keeper when it
+  # appears, so its edits stay reachable after an Editor restart and durable
+  # across a full restart.
+  @spec track_staged_view_if_changed(Workspace.t() | nil, Workspace.t()) :: :ok
+  defp track_staged_view_if_changed(previous, %Workspace{} = current) do
+    case {staged_view(previous), staged_view(current)} do
+      {_previous, nil} -> :ok
+      {%ProjectView{id: id}, %ProjectView{id: id}} -> :ok
+      {_previous, %ProjectView{} = view} -> StagedDraftKeeper.persist(view, current.id)
+    end
+  end
+
+  @spec staged_view(Workspace.t() | nil) :: ProjectView.t() | nil
+  defp staged_view(%Workspace{payload: %WorkspaceAgent{project_view: %ProjectView{} = view}}),
+    do: view
+
+  defp staged_view(_workspace), do: nil
 
   @spec traditional_tab_bars(EditorState.t()) :: %{Identity.t() => TabBar.t() | nil}
   defp traditional_tab_bars(%EditorState{shell_runtime: %Runtime{} = runtime}) do

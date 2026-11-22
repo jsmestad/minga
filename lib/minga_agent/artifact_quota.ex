@@ -7,6 +7,12 @@ defmodule MingaAgent.ArtifactQuota do
   alias MingaAgent.ArtifactQuota.Usage
   alias MingaAgent.ArtifactStore.Limits
 
+  # Each mutation commits a durable ledger transaction. A store that stopped
+  # waiting mid-commit could not tell whether its reservation landed, so stores
+  # wait for the commit; the bounded wait lives at the tool boundary in
+  # MingaAgent.ArtifactStore.
+  @commit_timeout :infinity
+
   @type server :: GenServer.server()
   @type error_reason ::
           :invalid_limits
@@ -36,48 +42,48 @@ defmodule MingaAgent.ArtifactQuota do
   @spec register_namespace(server(), String.t(), String.t(), keyword() | map()) ::
           {:ok, Limits.t()} | {:error, error_reason()}
   def register_namespace(server, root, namespace, limits \\ []) do
-    GenServer.call(server, {:register_namespace, root, namespace, limits})
+    GenServer.call(server, {:register_namespace, root, namespace, limits}, @commit_timeout)
   end
 
   @doc "Reserves an artifact, open capture, headers, and any expected data bytes."
   @spec reserve_capture(server(), String.t(), non_neg_integer(), non_neg_integer() | nil) ::
           :ok | {:error, error_reason()}
   def reserve_capture(server, namespace, bytes, headroom \\ nil) do
-    GenServer.call(server, {:reserve_capture, namespace, bytes, headroom})
+    GenServer.call(server, {:reserve_capture, namespace, bytes, headroom}, @commit_timeout)
   end
 
   @doc "Reserves logical blob and index bytes before an append writes either file."
   @spec reserve_append(server(), String.t(), non_neg_integer(), non_neg_integer()) ::
           :ok | {:error, error_reason()}
   def reserve_append(server, namespace, bytes, items) do
-    GenServer.call(server, {:reserve_append, namespace, bytes, items})
+    GenServer.call(server, {:reserve_append, namespace, bytes, items}, @commit_timeout)
   end
 
   @doc "Releases unused conservative capture reservations without deleting the artifact."
   @spec release_reservation(server(), String.t(), non_neg_integer(), non_neg_integer()) ::
           :ok | {:error, error_reason()}
   def release_reservation(server, namespace, bytes, items) do
-    GenServer.call(server, {:release_reservation, namespace, bytes, items})
+    GenServer.call(server, {:release_reservation, namespace, bytes, items}, @commit_timeout)
   end
 
   @doc "Releases an open-capture slot after terminal metadata is durable."
   @spec finish_capture(server(), String.t()) :: :ok | {:error, error_reason()}
   def finish_capture(server, namespace) do
-    GenServer.call(server, {:finish_capture, namespace})
+    GenServer.call(server, {:finish_capture, namespace}, @commit_timeout)
   end
 
   @doc "Releases every reservation for one durably canceled open capture."
   @spec cancel_capture(server(), String.t(), non_neg_integer(), non_neg_integer()) ::
           :ok | {:error, error_reason()}
   def cancel_capture(server, namespace, bytes, items) do
-    GenServer.call(server, {:cancel_capture, namespace, bytes, items})
+    GenServer.call(server, {:cancel_capture, namespace, bytes, items}, @commit_timeout)
   end
 
   @doc "Releases conservative artifact reservations after owned files are deleted."
   @spec release_artifact(server(), String.t(), non_neg_integer(), non_neg_integer()) ::
           :ok | {:error, error_reason()}
   def release_artifact(server, namespace, bytes, items) do
-    GenServer.call(server, {:release_artifact, namespace, bytes, items})
+    GenServer.call(server, {:release_artifact, namespace, bytes, items}, @commit_timeout)
   end
 
   @doc "Reconciles aggregate counters to exact durable namespace manifest facts."
@@ -92,7 +98,8 @@ defmodule MingaAgent.ArtifactQuota do
   def reconcile_namespace(server, namespace, bytes, items, artifacts, open_captures) do
     GenServer.call(
       server,
-      {:reconcile_namespace, namespace, bytes, items, artifacts, open_captures}
+      {:reconcile_namespace, namespace, bytes, items, artifacts, open_captures},
+      @commit_timeout
     )
   end
 
@@ -106,7 +113,7 @@ defmodule MingaAgent.ArtifactQuota do
   @doc "Decharges one explicitly deleted record after its directory is durably absent."
   @spec delete_namespace(server(), String.t()) :: :ok | {:error, error_reason()}
   def delete_namespace(server, namespace) do
-    GenServer.call(server, {:delete_namespace, namespace})
+    GenServer.call(server, {:delete_namespace, namespace}, @commit_timeout)
   end
 
   @doc "Returns aggregate logical counters without namespace identities or content access."

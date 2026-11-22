@@ -56,7 +56,6 @@ struct SearchQueryField: NSViewRepresentable {
         coordinator.focusPolicy?.nativeTextEditingDidEnd()
     }
 
-    @MainActor
     final class Coordinator: NSObject, NSTextFieldDelegate {
         let searchState: SearchState
         var sendAction: ViewActionHandler<Action>?

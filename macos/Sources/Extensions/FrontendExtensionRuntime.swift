@@ -17,7 +17,6 @@ public struct FrontendExtensionViewContext {
     }
 }
 
-@MainActor
 @Observable
 public final class FrontendExtensionRuntimeRegistry {
     public typealias Decoder = (FrontendExtensionRuntimeMessage) -> Void

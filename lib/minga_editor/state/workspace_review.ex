@@ -249,6 +249,7 @@ defmodule MingaEditor.State.WorkspaceReview do
 
   @spec conflict_path(term()) :: String.t() | nil
   defp conflict_path({:conflict, path, _reason}) when is_binary(path), do: path
+  defp conflict_path({:error, path, _reason}) when is_binary(path), do: path
   defp conflict_path({path, {:conflict, _details}}) when is_binary(path), do: path
   defp conflict_path({path, {:error, _reason}}) when is_binary(path), do: path
   defp conflict_path(_conflict), do: nil

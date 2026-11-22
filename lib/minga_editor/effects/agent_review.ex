@@ -182,6 +182,7 @@ defmodule MingaEditor.Effects.AgentReview do
          %__MODULE__{connection_target: %ConnectionTarget{} = target, path: path},
          fallback
        ) do
+    # minga:allow-blocking — runs in AgentReview.run/1 under EffectScheduler, not in the Editor
     case Session.read_cumulative_file_change(target, path) do
       {:ok, {before_side, after_side}} -> retained_diff(path, before_side, after_side)
       {:error, :no_file_change} -> fallback

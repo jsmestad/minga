@@ -20,6 +20,7 @@ import MingaProtocol
 // MARK: - AnchoredOverlayPlacement
 
 @Suite("AnchoredOverlayPlacement")
+@MainActor
 struct AnchoredOverlayPlacementTests {
     private let cellHeight: CGFloat = 18
     private let viewportHeight: CGFloat = 300
@@ -711,7 +712,7 @@ struct StatusBarViewViewTests {
     }
 
     @Test("Private-use glyph detection covers Nerd Font symbols")
-    func privateUseGlyphDetection() {
+    @MainActor func privateUseGlyphDetection() {
         #expect(StatusBarModelineFont.containsPrivateUseGlyph("\u{E0B0}"))
         #expect(StatusBarModelineFont.containsPrivateUseGlyph("branch \u{F0001} ahead"))
         #expect(StatusBarModelineFont.containsPrivateUseGlyph("wide \u{100001}"))
@@ -921,7 +922,7 @@ struct StatusBarViewViewTests {
 @Suite("TabBarView View Structure")
 struct TabBarViewViewTests {
 
-    private func workspaceSnapshot(id: UInt16, label: String) -> WorkspacePresentationSnapshot {
+    @MainActor private func workspaceSnapshot(id: UInt16, label: String) -> WorkspacePresentationSnapshot {
         WorkspacePresentationSnapshot(
             version: 1,
             activeWorkspaceId: id,
@@ -952,7 +953,7 @@ struct TabBarViewViewTests {
         Wire.TabEntry(id: id, groupId: groupId, isActive: isActive, isDirty: false, isAgent: false, hasAttention: false, agentStatus: 0, isPinned: isPinned, tintColorRGB: 0, icon: "", label: label ?? "tab-\(id).ex")
     }
 
-    private func tab(id: UInt32, groupId: UInt16 = 0, isActive: Bool = false, isPinned: Bool = false, label: String? = nil) -> TabEntry {
+    @MainActor private func tab(id: UInt32, groupId: UInt16 = 0, isActive: Bool = false, isPinned: Bool = false, label: String? = nil) -> TabEntry {
         TabEntry(id: id, groupId: groupId, isActive: isActive, isDirty: false, isAgent: false, hasAttention: false, agentStatus: .idle, isPinned: isPinned, tintColor: nil, icon: "", label: label ?? "tab-\(id).ex")
     }
 
@@ -1858,6 +1859,29 @@ struct PickerOverlayActivationTests {
             (try? $0.accessibilityLabel().string()) == "Last readable page"
         })
         #expect(!choice.isDisabled())
+    }
+
+    @Test("A stacked status row still reads its description to VoiceOver")
+    @MainActor func stackedRowAccessibility() throws {
+        let description = "Claude subscription · Ready (Claude Max) · 70% of 5h limit · resets 2:50 PM"
+        let state = PickerState()
+        state.update(
+            visible: true, selectedIndex: 0, filteredCount: 1, totalCount: 1,
+            markedCount: 0, title: "Choose Model", query: "", hasPreview: false,
+            rawItems: [
+                Wire.PickerItem(iconColor: 0, flags: 0x05, label: "Claude Opus 4.5", description: description, annotation: "", matchPositions: [], activationID: 41),
+            ],
+            actionMenu: nil, activationGeneration: 99
+        )
+        #expect(state.items[0].stacksDescription)
+        let body = try PickerOverlay(state: state, sendAction: nil)
+            .environment(\.themeColors, ThemeColors())
+            .inspect()
+        let row = try #require(body.findAll(ViewType.Button.self).first {
+            (try? $0.accessibilityLabel().string()) == "Claude Opus 4.5"
+        })
+
+        #expect(try row.accessibilityValue().string() == "selected, \(description)")
     }
 
     @Test("Picker choices expose selected marked and unavailable state")

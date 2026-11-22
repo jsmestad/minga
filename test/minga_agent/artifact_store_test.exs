@@ -13,6 +13,10 @@ defmodule MingaAgent.ArtifactStoreTest do
 
   @moduletag :tmp_dir
 
+  # Bound for the stalled-call tests. Only the deliberately stalled call may exceed it.
+  # Unstalled calls in those tests skip fsync and get room for a loaded CI runner.
+  @stall_bound 500
+
   test "a composer selection reads its exact retained text only with the captured revision and owner",
        %{tmp_dir: root} do
     {quota, store} = start_pair(root, "composer-selection")
@@ -881,8 +885,143 @@ defmodule MingaAgent.ArtifactStoreTest do
     assert ArtifactQuota.usage(quota).artifacts == 0
   end
 
+  describe "a capture call that outlives its bound" do
+    test "an append whose quota commit stalls returns storage_timeout and the store cancels the capture",
+         %{tmp_dir: root} do
+      test_pid = self()
+      stall = :atomics.new(1, [])
+
+      quota_injector = fn
+        :before_quota_checkpoint -> hold_while_armed(stall, test_pid)
+        _point -> :ok
+      end
+
+      quota =
+        start_quota(root, {:quota, make_ref()},
+          fault_injector: quota_injector,
+          synchronous: :off
+        )
+
+      store =
+        start_store(root, quota, "stalled-quota", {:store, make_ref()},
+          call_timeout: @stall_bound,
+          synchronous: :off
+        )
+
+      baseline = ArtifactQuota.usage(quota)
+      capture = begin_capture(store, "stalled-append", :bytes, "text/plain")
+      :atomics.put(stall, 1, 1)
+
+      assert {:error, :storage_timeout} = ArtifactStore.append(store, capture, "late bytes")
+
+      assert_receive {:stalled, quota_pid}
+      :atomics.put(stall, 1, 0)
+      send(quota_pid, :release)
+
+      # The store finishes the stalled append, then runs the queued abandon.
+      :sys.get_state(store)
+
+      assert ArtifactQuota.usage(quota) == baseline
+
+      assert {:error, :unknown_delivery} =
+               ArtifactStore.lookup_delivery(store, {:delivery, "checkpoint-1", "stalled-append"})
+
+      assert {:error, :unknown_capture} = ArtifactStore.finish(store, capture, :complete)
+    end
+
+    test "a finish that commits after its bound stays a durable terminal capture with exact accounting",
+         %{tmp_dir: root} do
+      test_pid = self()
+      stall = :atomics.new(1, [])
+      :atomics.put(stall, 1, 1)
+
+      injector = %{before_blob_rename: fn -> hold_while_armed(stall, test_pid) end}
+
+      {quota, store} =
+        start_pair_with_store_opts(root, "stalled-finish",
+          fault_injector: injector,
+          call_timeout: @stall_bound,
+          synchronous: :off
+        )
+
+      capture = begin_capture(store, "stalled-finish", :bytes, "text/plain")
+      assert {:ok, _progress} = ArtifactStore.append(store, capture, "kept")
+
+      assert {:error, :storage_timeout} = ArtifactStore.finish(store, capture, :complete)
+
+      assert_receive {:stalled, store_pid}
+      :atomics.put(stall, 1, 0)
+      send(store_pid, :release)
+      :sys.get_state(store)
+
+      assert {:ok, %{capture: :complete, reference: %{bytes: 4}}} =
+               ArtifactStore.lookup_delivery(store, {:delivery, "checkpoint-1", "stalled-finish"})
+
+      usage = ArtifactQuota.usage(quota)
+      assert usage.artifacts == 1
+      assert usage.open_captures == 0
+    end
+  end
+
+  test "a draft attachment whose finish commits after its bound leaves no pinned artifact", %{
+    tmp_dir: root
+  } do
+    test_pid = self()
+    stall = :atomics.new(1, [])
+    :atomics.put(stall, 1, 1)
+    injector = %{before_blob_rename: fn -> hold_while_armed(stall, test_pid) end}
+
+    {quota, store} =
+      start_pair_with_store_opts(root, "stalled-draft",
+        fault_injector: injector,
+        call_timeout: @stall_bound,
+        synchronous: :off
+      )
+
+    baseline = ArtifactQuota.usage(quota)
+
+    assert {:error, :storage_timeout} =
+             DraftAttachment.capture_text(store, {:selection, "test.ex", "selection", "late"})
+
+    assert_receive {:stalled, store_pid}
+    :atomics.put(stall, 1, 0)
+    send(store_pid, :release)
+
+    # The late finish commits, then the queued abandon, cancel, and release run.
+    :sys.get_state(store)
+
+    assert {:ok, 1} = ArtifactStore.cleanup_unreferenced(store)
+    assert ArtifactQuota.usage(quota) == baseline
+  end
+
+  test "SQLite commits fsync by default and skip it only when a caller opts out", %{
+    tmp_dir: root
+  } do
+    {:ok, durable} = SQLite.open(Path.join(root, "durable.sqlite3"), [])
+    {:ok, relaxed} = SQLite.open(Path.join(root, "relaxed.sqlite3"), [], :off)
+
+    assert {:ok, [[2]]} = SQLite.query(durable, "PRAGMA synchronous")
+    assert {:ok, [[0]]} = SQLite.query(relaxed, "PRAGMA synchronous")
+
+    :ok = SQLite.close(durable)
+    :ok = SQLite.close(relaxed)
+  end
+
+  # Blocks the calling artifact process while armed, standing in for a stalled fsync.
+  defp hold_while_armed(stall, test_pid) do
+    if :atomics.get(stall, 1) == 1 do
+      send(test_pid, {:stalled, self()})
+
+      receive do
+        :release -> :ok
+      end
+    else
+      :ok
+    end
+  end
+
   defp start_pair_with_store_opts(root, session_id, opts) do
-    quota = start_quota(root, {:quota, make_ref()})
+    quota = start_quota(root, {:quota, make_ref()}, Keyword.take(opts, [:synchronous]))
     store = start_store(root, quota, session_id, {:store, make_ref()}, opts)
     {quota, store}
   end

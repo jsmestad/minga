@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 
 /// Pure preflight used before requesting a drawable or claiming a presentation sequence.
 public enum PresentationSamplePreflight {
@@ -15,10 +16,10 @@ public enum PresentationSamplePreflight {
 /// Records honest native input latency milestones without treating semantic apply
 /// as presentation. Input sequences remain pending after apply until Metal submits
 /// and completes the matching drawable, or until an explicit discard reason wins.
-public final class LatencyRecorder: @unchecked Sendable {
-    private let ringSize = 4096
-    private let lock = NSLock()
-    private let now: () -> DispatchTime
+public final class LatencyRecorder: Sendable {
+    private static let ringSize = 4096
+    private let state = Mutex(State())
+    private let now: @Sendable () -> DispatchTime
 
     private struct Pending {
         let received: DispatchTime
@@ -86,118 +87,120 @@ public final class LatencyRecorder: @unchecked Sendable {
         }
     }
 
-    private var nextSeq: UInt32 = 0
-    private var pending: [UInt32: Pending] = [:]
-    private var pendingOrder: [UInt32] = []
-    private var applySamples: [Double] = []
-    private var presentSamples: [Double] = []
-    private var submittedCount: UInt64 = 0
-    private var discardCounts: [DiscardReason: UInt64] = [:]
+    /// Mutable recorder state; only accessed while holding `state`.
+    private struct State {
+        var nextSeq: UInt32 = 0
+        var pending: [UInt32: Pending] = [:]
+        var pendingOrder: [UInt32] = []
+        var applySamples: [Double] = []
+        var presentSamples: [Double] = []
+        var submittedCount: UInt64 = 0
+        var discardCounts: [DiscardReason: UInt64] = [:]
+
+        mutating func removePending(_ seq: UInt32) -> Pending? {
+            guard let entry = pending.removeValue(forKey: seq) else { return nil }
+            if let index = pendingOrder.firstIndex(of: seq) { pendingOrder.remove(at: index) }
+            return entry
+        }
+
+        static func append(_ sample: Double, to samples: inout [Double]) {
+            if samples.count == LatencyRecorder.ringSize { samples.removeFirst() }
+            samples.append(sample)
+        }
+    }
 
     /// Creates a recorder using the supplied monotonic clock.
-    public init(now: @escaping () -> DispatchTime = { DispatchTime.now() }) {
+    public init(now: @escaping @Sendable () -> DispatchTime = { DispatchTime.now() }) {
         self.now = now
     }
 
     /// Marks input receipt and returns a non-zero correlation sequence.
     public func stamp() -> UInt32 {
-        lock.lock()
-        defer { lock.unlock() }
-        nextSeq &+= 1
-        if nextSeq == 0 { nextSeq = 1 }
-        let seq = nextSeq
-        pending[seq] = Pending(received: now())
-        pendingOrder.append(seq)
-        while pendingOrder.count > ringSize {
-            let oldest = pendingOrder.removeFirst()
-            if pending.removeValue(forKey: oldest) != nil {
-                discardCounts[.dropped, default: 0] &+= 1
+        state.withLock { state in
+            state.nextSeq &+= 1
+            if state.nextSeq == 0 { state.nextSeq = 1 }
+            let seq = state.nextSeq
+            state.pending[seq] = Pending(received: now())
+            state.pendingOrder.append(seq)
+            while state.pendingOrder.count > Self.ringSize {
+                let oldest = state.pendingOrder.removeFirst()
+                if state.pending.removeValue(forKey: oldest) != nil {
+                    state.discardCounts[.dropped, default: 0] &+= 1
+                }
             }
+            return seq
         }
-        return seq
     }
 
     /// Marks frontend semantic publication. This records apply latency but does
     /// not resolve or remove the presentation sample.
     public func markApplied(seq: UInt32) {
         guard seq != 0 else { return }
-        lock.lock()
-        defer { lock.unlock() }
-        guard var entry = pending[seq], entry.applied == nil else { return }
-        let applied = now()
-        entry.applied = applied
-        pending[seq] = entry
-        append(Double(applied.uptimeNanoseconds &- entry.received.uptimeNanoseconds), to: &applySamples)
+        state.withLock { state in
+            guard var entry = state.pending[seq], entry.applied == nil else { return }
+            let applied = now()
+            entry.applied = applied
+            state.pending[seq] = entry
+            State.append(Double(applied.uptimeNanoseconds &- entry.received.uptimeNanoseconds),
+                         to: &state.applySamples)
+        }
     }
 
     /// Marks command-buffer submission for a semantically applied sequence.
     public func markSubmitted(seq: UInt32) {
         guard seq != 0 else { return }
-        lock.lock()
-        defer { lock.unlock() }
-        guard var entry = pending[seq], entry.applied != nil, entry.submitted == nil else { return }
-        entry.submitted = now()
-        pending[seq] = entry
-        submittedCount &+= 1
+        state.withLock { state in
+            guard var entry = state.pending[seq], entry.applied != nil, entry.submitted == nil else { return }
+            entry.submitted = now()
+            state.pending[seq] = entry
+            state.submittedCount &+= 1
+        }
     }
 
     /// Resolves presentation only after the submitted Metal command buffer
     /// completes successfully. Apply acknowledgement alone never calls this.
     public func markPresented(seq: UInt32) {
         guard seq != 0 else { return }
-        lock.lock()
-        defer { lock.unlock() }
-        guard let entry = pending[seq], entry.submitted != nil else { return }
-        _ = removePending(seq)
-        append(Double(now().uptimeNanoseconds &- entry.received.uptimeNanoseconds), to: &presentSamples)
+        state.withLock { state in
+            guard let entry = state.pending[seq], entry.submitted != nil else { return }
+            _ = state.removePending(seq)
+            State.append(Double(now().uptimeNanoseconds &- entry.received.uptimeNanoseconds),
+                         to: &state.presentSamples)
+        }
     }
 
     /// Removes an unpresentable sample with a typed diagnostic reason.
     public func discard(seq: UInt32, reason: DiscardReason) {
         guard seq != 0 else { return }
-        lock.lock()
-        defer { lock.unlock() }
-        guard removePending(seq) != nil else { return }
-        discardCounts[reason, default: 0] &+= 1
+        state.withLock { state in
+            guard state.removePending(seq) != nil else { return }
+            state.discardCounts[reason, default: 0] &+= 1
+        }
     }
 
     /// Retires all unresolved input samples when their BEAM connection is replaced.
     public func replaceConnection() {
-        lock.lock()
-        defer { lock.unlock() }
-        let count = pending.count
-        pending.removeAll(keepingCapacity: true)
-        pendingOrder.removeAll(keepingCapacity: true)
-        if count > 0 {
-            discardCounts[.connectionReplaced, default: 0] &+= UInt64(count)
+        state.withLock { state in
+            let count = state.pending.count
+            state.pending.removeAll(keepingCapacity: true)
+            state.pendingOrder.removeAll(keepingCapacity: true)
+            if count > 0 {
+                state.discardCounts[.connectionReplaced, default: 0] &+= UInt64(count)
+            }
         }
     }
 
     /// Returns an immutable percentile and discard-count snapshot.
     public func snapshot() -> Stats {
-        lock.lock()
-        let apply = applySamples
-        let present = presentSamples
-        let submissions = submittedCount
-        let discards = discardCounts
-        lock.unlock()
+        let (apply, present, submissions, discards) = state.withLock { state in
+            (state.applySamples, state.presentSamples, state.submittedCount, state.discardCounts)
+        }
         return Stats(
             apply: stageStats(apply),
             present: stageStats(present),
             submittedCount: submissions,
             discardCounts: discards
         )
-    }
-
-    private func removePending(_ seq: UInt32) -> Pending? {
-        guard let entry = pending.removeValue(forKey: seq) else { return nil }
-        if let index = pendingOrder.firstIndex(of: seq) { pendingOrder.remove(at: index) }
-        return entry
-    }
-
-    private func append(_ sample: Double, to samples: inout [Double]) {
-        if samples.count == ringSize { samples.removeFirst() }
-        samples.append(sample)
     }
 
     private func stageStats(_ samples: [Double]) -> StageStats {

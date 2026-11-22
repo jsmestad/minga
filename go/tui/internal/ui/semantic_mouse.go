@@ -3,8 +3,12 @@ package ui
 import (
 	"fmt"
 	"net/url"
+	"slices"
+	"strconv"
+	"sync/atomic"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/jsmestad/minga/go/tui/internal/protocol"
 )
 
@@ -21,6 +25,7 @@ const (
 	zonePrefixTimelineReview   = "timeline:review:"
 	zonePrefixEmptyStateItem   = "empty-state:item:"
 	zoneIDHoverAction          = "hover:action"
+	zoneIDGitRetry             = "git:retry"
 	bottomPanelWheelLines      = 3
 )
 
@@ -49,6 +54,11 @@ func zoneIDCompletionItem(index int) string {
 
 func zoneIDSidebarItem(id string) string {
 	return zonePrefixSidebarItem + url.QueryEscape(id)
+}
+
+// Slots identify only painted rows. Panel IDs and paths never enter the zone registry.
+func zoneIDGitStatusRow(slot int) string {
+	return "git:row:" + strconv.Itoa(slot)
 }
 
 // zoneIDNotificationDismiss tags the dismiss ("x") affordance of one
@@ -357,6 +367,12 @@ func (m Model) leftPaneMousePacket(msg tea.MouseMsg) ([]byte, bool) {
 	if packet, ok := m.fileTreeMousePacket(msg); ok {
 		return packet, true
 	}
+	mouse := msg.Mouse()
+	if m.gitStatusHits != nil && m.gitStatusHits.box.Contains(mouse.X, mouse.Y) {
+		// Only the flushed view may activate Git. Don't forward a raw click into
+		// the latest panel when it wasn't claimed by the displayed view.
+		return nil, true
+	}
 	if packet, ok := m.sidebarMousePacket(msg); ok {
 		return packet, true
 	}
@@ -600,6 +616,138 @@ func (m Model) completionMousePacket(msg tea.MouseMsg) ([]byte, bool) {
 	// Title, documentation, and other non-item cells must not become a raw
 	// click that the BEAM interprets as an item index.
 	return nil, true
+}
+
+type presentedMouseClick struct {
+	packet        []byte
+	claimed       bool
+	maskedGit     bool
+	epoch         *atomic.Uint64
+	observedEpoch uint64
+}
+
+func (c *presentedMouseClick) take() presentedMouseClick {
+	if c == nil {
+		return presentedMouseClick{}
+	}
+	hit := *c
+	*c = presentedMouseClick{}
+	return hit
+}
+
+func (c presentedMouseClick) publicationChanged() bool {
+	return c.epoch != nil && c.epoch.Load() != c.observedEpoch
+}
+
+// Bubble Tea invokes OnMouse from the last flushed View, synchronously before
+// Update receives the input. Each handler captures only what that view showed.
+func (m Model) presentedMouseHandler(layers []*lipgloss.Layer) func(tea.MouseMsg) tea.Cmd {
+	claim := m.presentedClick
+	if claim == nil {
+		return nil
+	}
+	git := m.presentedGitStatusHandler(layers)
+	var agent func(tea.MouseClickMsg)
+	if !m.pickerVisible() {
+		agent = m.presentedConflictHandler()
+		if agent == nil {
+			agent = m.presentedComposerHandler()
+		}
+	}
+	if git == nil && agent == nil {
+		return nil
+	}
+	return func(msg tea.MouseMsg) tea.Cmd {
+		click, ok := msg.(tea.MouseClickMsg)
+		if ok && click.Button == tea.MouseLeft {
+			if git != nil {
+				git(click)
+			}
+			if !claim.claimed && agent != nil {
+				agent(click)
+			}
+		}
+		return nil
+	}
+}
+
+type gitStatusHits struct {
+	box     uiRect
+	panelID uint64
+	retryID uint64
+	rows    []gitStatusRowTarget
+}
+
+type gitStatusRowTarget struct {
+	row     int
+	path    string
+	section byte
+}
+
+func (hits *gitStatusHits) sameTargets(other *gitStatusHits) bool {
+	if hits == nil || other == nil {
+		return hits == other
+	}
+	return hits.box == other.box && hits.panelID == other.panelID &&
+		hits.retryID == other.retryID && slices.Equal(hits.rows, other.rows)
+}
+
+func (m Model) presentedGitStatusHandler(layers []*lipgloss.Layer) func(tea.MouseClickMsg) {
+	hits := m.gitStatusHits
+	if hits == nil || hits.box.Height == 0 {
+		return nil
+	}
+	var mask uiRect
+	modal := m.pickerVisible() || m.whichKeyVisible()
+	if !modal {
+		if winner, ok := m.overlayWinner(); ok {
+			mask, _ = m.surfaceScreenRect(winner.surfaceID)
+		}
+	}
+	// A layer can paint past its authored hit rect (e.g. padded hover text or
+	// a shadow). Neither those cells nor the authored mask may activate Git.
+	var paintedMasks []uiRect
+	if !modal && len(layers) > 0 {
+		paintedMasks = make([]uiRect, 0, len(layers))
+		for _, layer := range layers {
+			paintedMasks = append(paintedMasks, uiRect{X: layer.GetX(), Y: layer.GetY(), Width: layer.Width(), Height: layer.Height()})
+		}
+	}
+	// Scan replaces the zone map on each View; the individual bounds we keep
+	// here are read-only. They include viewport clipping and header placement.
+	zones := make([]*zoneInfo, len(hits.rows))
+	for i, target := range hits.rows {
+		zones[i] = m.zones.Get(zoneIDGitStatusRow(target.row))
+	}
+	retryZone := m.zones.Get(zoneIDGitRetry)
+	claim := m.presentedClick
+	return func(click tea.MouseClickMsg) {
+		if !hits.box.Contains(click.X, click.Y) {
+			return
+		}
+		claim.claimed = true
+		if modal || mask.Contains(click.X, click.Y) {
+			claim.maskedGit = true
+			return
+		}
+		for _, rect := range paintedMasks {
+			if rect.Contains(click.X, click.Y) {
+				claim.maskedGit = true
+				return
+			}
+		}
+		if hits.retryID != 0 && retryZone.InBounds(click) {
+			claim.packet = protocol.EncodeGUIGitPullAndRetry(hits.retryID)
+			return
+		}
+		for i, zone := range zones {
+			if zone.InBounds(click) {
+				target := hits.rows[i]
+				claim.packet = protocol.EncodeGUIGitOpenDiff(hits.panelID, target.path, target.section)
+				return
+			}
+		}
+	}
 }
 
 func (m Model) sidebarMousePacket(msg tea.MouseMsg) ([]byte, bool) {

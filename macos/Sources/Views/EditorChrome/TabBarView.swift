@@ -288,7 +288,6 @@ public struct TabBarView: View {
         }
     }
 
-    @MainActor
     private func workspaceGotoCommand(for workspace: WorkspacePresentationEntry) -> String {
         "workspace_goto_id:\(workspace.id)"
     }
@@ -683,14 +682,12 @@ private struct TabGroup {
 
 // MARK: - Previews
 
-@MainActor
 private func tabBarPreviewState() -> TabBarState {
     let state = TabBarState()
     PreviewFixtures.populateTabBar(state)
     return state
 }
 
-@MainActor
 private func tabBarPinnedPreviewState() -> TabBarState {
     let state = TabBarState()
     state.update(activeIndex: 1, entries: [

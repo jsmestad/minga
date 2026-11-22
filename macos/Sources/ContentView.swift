@@ -1117,7 +1117,8 @@ public struct ContentView<EditorSurface: View>: View {
             isGitStatusVisible: input.gitStatusState.snapshot.visible,
             isBottomPanelVisible: input.bottomPanelState.visible,
             isAgentChatVisible: input.agentChatState.visible,
-            gitSyncing: input.gitStatusState.snapshot.syncing
+            gitSyncing: input.gitStatusState.snapshot.syncing,
+            hasGitStatusControl: input.sidebarHostState.sidebars.contains { $0.semanticKind == .gitStatus }
         )
     }
 
@@ -1202,7 +1203,6 @@ public struct ContentView<EditorSurface: View>: View {
 /// no `EditorNSView`, and no Metal are involved: `ContentView` renders entirely
 /// from injected `MingaUI` values, so the whole shell lays out in Xcode's canvas
 /// with a placeholder rect where the Metal editor surface would be.
-@MainActor
 private func fullShellPreviewGUI() -> GUIState {
     let gui = GUIState()
     PreviewFixtures.applyPreviewTheme(to: gui.themeColors)

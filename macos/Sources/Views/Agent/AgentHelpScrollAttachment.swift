@@ -2,7 +2,6 @@ import AppKit
 import SwiftUI
 
 /// A discardable attachment to the currently mounted Help scroll view, not another input or layout owner.
-@MainActor
 final class AgentHelpScrollAttachment {
     private weak var probe: NSView?
 

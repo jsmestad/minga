@@ -2,11 +2,16 @@ defmodule MingaEditor.RenderModel.Window.VisualRow do
   @moduledoc "Internal retained visual-row entry for semantic window builds."
 
   alias Minga.Core.Unicode
+  alias Minga.Core.Decorations.BlockDecoration
   alias Minga.RenderModel.Window.Row
   alias MingaEditor.RenderModel.Window.SourceOffsetMap
 
   @enforce_keys ~w(row buf_line visual_index display_row source_text source_offset_map source_start_byte source_end_byte source_start_col source_end_col composed_start_utf16 composed_end_utf16 indent_width row_width)a
-  defstruct @enforce_keys ++ [input_hash: nil, reused?: false, wrap_line_hash: nil]
+  defstruct @enforce_keys ++
+              [input_hash: nil, reused?: false, wrap_line_hash: nil, block_click: nil]
+
+  @type block_target ::
+          {:block_action, BlockDecoration.click_fn(), non_neg_integer(), non_neg_integer()}
 
   @type t :: %__MODULE__{
           row: Row.t(),
@@ -25,7 +30,8 @@ defmodule MingaEditor.RenderModel.Window.VisualRow do
           row_width: non_neg_integer(),
           input_hash: non_neg_integer() | nil,
           reused?: boolean(),
-          wrap_line_hash: non_neg_integer() | nil
+          wrap_line_hash: non_neg_integer() | nil,
+          block_click: {BlockDecoration.click_fn(), non_neg_integer()} | nil
         }
 
   @spec new(
@@ -58,6 +64,22 @@ defmodule MingaEditor.RenderModel.Window.VisualRow do
       indent_width: indent_width,
       row_width: Unicode.display_width(row.text)
     }
+  end
+
+  @doc "Retains the click callback for this rendered block line."
+  @spec with_block_click(t(), BlockDecoration.click_fn(), non_neg_integer()) :: t()
+  def with_block_click(%__MODULE__{} = row, click, line) when is_function(click, 2),
+    do: %{row | block_click: {click, line}}
+
+  def with_block_click(%__MODULE__{} = row, nil, _line), do: row
+
+  @doc "Resolves a block hit from the committed row, not from live decorations."
+  @spec block_target(t(), non_neg_integer()) :: block_target() | nil
+  def block_target(%__MODULE__{block_click: nil}, _offset), do: nil
+
+  def block_target(%__MODULE__{block_click: {click, line}, row: row, row_width: width}, offset) do
+    col = display_col_for_utf16(row.text, offset, 0, 0)
+    if col < width, do: {:block_action, click, line, col}
   end
 
   @spec with_display_row(t(), non_neg_integer()) :: t()

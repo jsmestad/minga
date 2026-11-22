@@ -135,7 +135,7 @@ If you're a Doom user, you rely on minor modes constantly. Minga doesn't have th
 Most of what minor modes do in Emacs, Minga handles differently:
 
 - **LSP keybindings** live under `SPC c` globally. They no-op gracefully if no server is connected.
-- **Git keybindings** live under `SPC g` globally once you turn on git porcelain with `extension :git_porcelain` (see [Optional extensions](CONFIGURATION.md#optional-extensions)). Commands check for a git repo.
+- **Git keybindings** live under `SPC g` after you install [GitExtended](CONFIGURATION.md#optional-extensions). Commands check for a Git repository.
 - **Surround operations** are operators in operator-pending mode (`ds"`, `cs"'`).
 - **Error navigation** (`]d`, `[d`) is always available. Does nothing if there are no diagnostics.
 

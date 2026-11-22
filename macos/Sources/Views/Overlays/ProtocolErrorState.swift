@@ -8,7 +8,6 @@
 
 import SwiftUI
 
-@MainActor
 @Observable
 public final class ProtocolErrorState {
     public init() {}

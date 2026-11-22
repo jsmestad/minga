@@ -29,9 +29,11 @@ private func publishGitStatus(
     branchName: String = "main",
     entries: [GitStatusEntry] = [],
     lastCommitMessage: String = "",
-    stashCount: UInt16 = 0
+    stashCount: UInt16 = 0,
+    panelID: UInt64 = 1,
+    commitTargetID: UInt64 = 101
 ) {
-    state.update(repoState: repoState, branchName: branchName, ahead: 0, behind: 0, syncing: false, entries: entries, toast: nil, entryBasePath: "/repo", lastCommitMessage: lastCommitMessage, stashCount: stashCount)
+    state.update(repoState: repoState, branchName: branchName, ahead: 0, behind: 0, syncing: false, entries: entries, toast: nil, entryBasePath: "/repo", lastCommitMessage: lastCommitMessage, stashCount: stashCount, panelID: panelID, commitTargetID: commitTargetID)
 }
 
 // MARK: - ActivityBar
@@ -197,7 +199,7 @@ struct SidebarContainerViewTests {
         #expect(strings.contains("The native frontend does not have an adapter for \"custom_sidebar\"."))
     }
 
-    private func sidebarItem(id: String, displayName: String, kind: String) -> SidebarItem {
+    @MainActor private func sidebarItem(id: String, displayName: String, kind: String) -> SidebarItem {
         SidebarItem(Wire.SidebarMetadata(
             id: id,
             displayName: displayName,
@@ -728,14 +730,14 @@ struct GitStatusViewSectionTests {
     @Test("Amend mode pre-fills previous commit message without clobbering user text")
     @MainActor func amendModePrefillsPreviousCommitMessageWithoutClobberingUserText() {
         let state = GitStatusState()
-        state.update(repoState: .normal, branchName: "main", ahead: 0, behind: 0, syncing: false, entries: [], toast: nil, entryBasePath: "/repo", lastCommitMessage: "feat: previous subject", stashCount: 0)
+        publishGitStatus(state, lastCommitMessage: "feat: previous subject")
 
-        state.setAmendMode(true)
+        state.setAmendMode(true, for: 1)
         #expect(state.session.draft == "feat: previous subject")
 
-        state.setAmendMode(false)
-        state.updateDraft("fix: user typed subject")
-        state.setAmendMode(true)
+        state.setAmendMode(false, for: 1)
+        state.updateDraft("fix: user typed subject", for: 1)
+        state.setAmendMode(true, for: 1)
         #expect(state.session.draft == "fix: user typed subject")
     }
 
@@ -792,8 +794,8 @@ struct GitStatusViewSectionTests {
             GitStatusEntry(pathHash: 1, section: .staged, status: .modified, path: "lib/staged.ex"),
             GitStatusEntry(pathHash: 2, section: .changed, status: .modified, path: "lib/changed.ex"),
         ], lastCommitMessage: "previous subject")
-        state.updateDraft("typed subject\n\nbody")
-        state.setAmendMode(true)
+        state.updateDraft("typed subject\n\nbody", for: 1)
+        state.setAmendMode(true, for: 1)
         state.toggleSection(.changed)
 
         let firstView = GitStatusView(state: state, sendAction: nil, usesPreviewEagerLayout: true)
@@ -812,41 +814,85 @@ struct GitStatusViewSectionTests {
         #expect(state.session.collapsedSections == [.changed])
     }
 
-    @Test("Commit button sends captured normal and amend submissions and resets only draft state")
+    @Test("Commit controls submit from the refreshed panel without retargeting an older draft")
     @MainActor func commitButtonUsesOwnerSubmission() throws {
         let state = GitStatusState()
-        publishGitStatus(state, branchName: "feature/local-session", entries: [
-            GitStatusEntry(pathHash: 1, section: .staged, status: .modified, path: "lib/staged.ex"),
-        ])
-        state.updateDraft("  commit subject  ")
+        let changed = GitStatusEntry(pathHash: 1, section: .changed, status: .modified, path: "lib/stage-me.ex")
+        let staged = GitStatusEntry(pathHash: 1, section: .staged, status: .modified, path: "lib/stage-me.ex")
+        publishGitStatus(state, entries: [changed], panelID: 41)
+        state.updateDraft("  commit subject  ", for: 41)
         state.toggleSection(.staged)
         let spy = SpyEncoder()
-        let view = GitStatusView(state: state, sendAction: { action in _ = spy.send(FrontendActionComposition.outbound(action)) }, usesPreviewEagerLayout: true)
+
+        func commitButton() throws -> InspectableView<ViewType.Button> {
+            let view = GitStatusView(
+                state: state,
+                sendAction: { action in _ = spy.send(FrontendActionComposition.outbound(action)) },
+                usesPreviewEagerLayout: true
+            )
             .environment(\.themeColors, ThemeColors())
-        let buttons = try view.inspect().findAll(ViewType.Button.self)
-        let commitButton = try #require(buttons.last)
+            return try #require(view.inspect().findAll(ViewType.Button.self).last)
+        }
 
-        try commitButton.tap()
+        #expect(try commitButton().isDisabled())
+        publishGitStatus(state, entries: [staged], panelID: 42)
+        try commitButton().tap()
 
-        #expect(spy.actions == [.gitCommit(message: "commit subject")])
+        let commit = OutboundAction.gitCommit(panelID: 42, message: "commit subject")
+        #expect(spy.actions == [commit])
         #expect(state.session.draft.isEmpty)
         #expect(state.session.amendMode == false)
         #expect(state.session.collapsedSections == [.staged])
-        #expect(state.snapshot.branchName == "feature/local-session")
 
-        state.updateDraft("amended subject")
-        state.setAmendMode(true)
-        let amendView = GitStatusView(state: state, sendAction: { action in _ = spy.send(FrontendActionComposition.outbound(action)) }, usesPreviewEagerLayout: true)
-            .environment(\.themeColors, ThemeColors())
-        let amendButton = try #require(amendView.inspect().findAll(ViewType.Button.self).last)
+        state.updateDraft("amended subject", for: 42)
+        state.setAmendMode(true, for: 42)
+        let oldAmendButton = try commitButton()
+        publishGitStatus(state, panelID: 43)
 
-        try amendButton.tap()
+        try oldAmendButton.tap()
+        #expect(spy.actions == [commit])
+        try commitButton().tap()
 
-        #expect(spy.actions == [.gitCommit(message: "commit subject"), .gitCommitAmend(message: "amended subject")])
+        let amend = OutboundAction.gitCommitAmend(panelID: 43, message: "amended subject")
+        #expect(spy.actions == [commit, amend])
         #expect(state.session.draft.isEmpty)
         #expect(state.session.amendMode == false)
         #expect(state.session.collapsedSections == [.staged])
-        #expect(state.snapshot.branchName == "feature/local-session")
+
+        state.updateDraft("draft for main", for: 43)
+        state.setAmendMode(true, for: 43)
+        let oldTargetButton = try commitButton()
+        publishGitStatus(state, branchName: "feature/other", entries: [staged], panelID: 44, commitTargetID: 102)
+        #expect(try commitButton().isDisabled())
+        try oldTargetButton.tap()
+        #expect(spy.actions == [commit, amend])
+    }
+
+    @Test("a remote button keeps the panel that offered it through action composition")
+    @MainActor func remoteButtonRetainsRenderedPanel() throws {
+        let state = GitStatusState()
+        let spy = SpyEncoder()
+
+        func fetchButton(in panelID: UInt64) throws -> InspectableView<ViewType.Button> {
+            publishGitStatus(state, panelID: panelID)
+            let view = GitStatusView(
+                state: state,
+                sendAction: { action in _ = spy.send(FrontendActionComposition.outbound(action)) },
+                usesPreviewEagerLayout: true
+            )
+            .environment(\.themeColors, ThemeColors())
+
+            return try #require(view.inspect().findAll(ViewType.Button.self).first {
+                (try? $0.labelView().find(ViewType.Text.self).string()) == "Fetch"
+            })
+        }
+
+        let oldFetch = try fetchButton(in: 41)
+        let newFetch = try fetchButton(in: 42)
+        try oldFetch.tap()
+        try newFetch.tap()
+
+        #expect(spy.actions == [.gitFetch(panelID: 41), .gitFetch(panelID: 42)])
     }
 }
 
@@ -866,6 +912,7 @@ private func fileTreeRowView(entry: FileTreeEntry, isHovered: Bool = false, isDr
     )
 }
 
+@MainActor
 private func sidebarFileTreeEntry(
     id: UInt32,
     index: Int,

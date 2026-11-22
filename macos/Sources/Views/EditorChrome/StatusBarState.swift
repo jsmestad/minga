@@ -1,7 +1,6 @@
 import SwiftUI
 import MingaProtocol
 
-@MainActor
 @Observable
 public final class StatusBarState {
     public init(contentKind: EditorContentKind = .buffer, mode: EditorMode = .normal, cursorLine: UInt32 = 1, cursorCol: UInt32 = 1, lineCount: UInt32 = 1, flags: StatusBarFlags = [], lspStatus: UInt8 = 0, gitBranch: String = "", message: String = "", filetype: String = "", errorCount: UInt16 = 0, warningCount: UInt16 = 0, modelName: String = "", messageCount: UInt32 = 0, sessionStatus: AgentStatus = .idle, infoCount: UInt16 = 0, hintCount: UInt16 = 0, macroRecording: UInt8 = 0, parserStatus: UInt8 = 0, agentStatus: AgentStatus = .idle, activeToolName: String = "", gitAdded: UInt16 = 0, gitModified: UInt16 = 0, gitDeleted: UInt16 = 0, icon: String = "", iconColorR: UInt8 = 0, iconColorG: UInt8 = 0, iconColorB: UInt8 = 0, filename: String = "", diagnosticHint: String = "", backgroundSubagentCount: UInt16 = 0, backgroundSubagentLabel: String = "", indent: StatusBarUpdate.IndentInfo = .init(kind: 0, size: 2), modelineSegmentsPresent: Bool = false, modelineLeftSegments: [Wire.StatusBarSegment] = [], modelineRightSegments: [Wire.StatusBarSegment] = [], selection: StatusBarUpdate.SelectionInfo = .init(mode: 0, size: 0), pendingKeys: String = "") {

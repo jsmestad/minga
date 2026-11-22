@@ -20,7 +20,6 @@ defmodule MingaEditor.Handlers.FileEventHandlerTest do
   alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.LSP, as: LSPState
   alias MingaEditor.State.Tab
-  alias MingaEditor.Sidebar.BuiltinSurfaces
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Workspace, as: WorkspaceModel
   alias MingaEditor.Session.State, as: SessionState
@@ -36,6 +35,8 @@ defmodule MingaEditor.Handlers.FileEventHandlerTest do
           state,
           GitStatusPanel.new(%{
             repo_state: :normal,
+            git_root: "/tmp/repo",
+            entry_base_path: "/tmp/repo/apps/myapp",
             branch: "main",
             ahead: 0,
             behind: 0,
@@ -75,20 +76,28 @@ defmodule MingaEditor.Handlers.FileEventHandlerTest do
              } = panel
 
       snapshot_panel = fields |> StatusSnapshot.new() |> GitStatusPanel.from_repo_status()
-      assert panel == snapshot_panel
+      old_panel = SidebarWorkflow.git_status_panel(state)
+      refute panel.id == old_panel.id
+      refute panel.commit_target_id == old_panel.commit_target_id
+
+      identity_fields = [:id, :commit_target_id]
+
+      assert Map.drop(GitStatusPanel.to_map(panel), identity_fields) ==
+               Map.drop(GitStatusPanel.to_map(snapshot_panel), identity_fields)
+
       assert {:render, 16} in effects
     end
 
     test "background git refresh updates visible Git panel without stealing Observatory focus" do
       base = base_state()
-      # Git porcelain declared: startup registers the Git Status surface.
-      :ok = BuiltinSurfaces.register_contributions(base.extension_surfaces.sidebar_registry, true)
 
       state =
         base
         |> SidebarWorkflow.open_observatory(nil)
         |> SidebarWorkflow.select("observatory")
-        |> SidebarWorkflow.replace_git_status(GitStatusPanel.new(%{entries: []}))
+        |> SidebarWorkflow.replace_git_status(
+          GitStatusPanel.new(%{git_root: "/tmp/repo", entries: []})
+        )
 
       table = state.extension_surfaces.sidebar_registry
       assert Sidebar.get(table, "observatory").focused?
@@ -111,7 +120,12 @@ defmodule MingaEditor.Handlers.FileEventHandlerTest do
       assert SidebarWorkflow.active_id(new_state) == "observatory"
 
       assert %GitStatusPanel{entries: [^entry], branch: "", entry_base_path: "/tmp/repo"} =
+               panel =
                SidebarWorkflow.git_status_panel(new_state)
+
+      previous = SidebarWorkflow.git_status_panel(state)
+      refute panel.id == previous.id
+      assert panel.commit_target_id == previous.commit_target_id
 
       assert %{visible?: true, focused?: false, badge_count: 1} = Sidebar.get(table, "git_status")
       assert Sidebar.get(table, "observatory").focused?
@@ -124,6 +138,7 @@ defmodule MingaEditor.Handlers.FileEventHandlerTest do
         |> SidebarWorkflow.replace_git_status(
           GitStatusPanel.new(%{
             repo_state: :normal,
+            git_root: "/tmp/repo",
             branch: "main",
             ahead: 0,
             behind: 0,
@@ -146,6 +161,23 @@ defmodule MingaEditor.Handlers.FileEventHandlerTest do
       panel = SidebarWorkflow.git_status_panel(new_state)
       refute Map.has_key?(panel, :tui_state)
       assert ShellState.git_status_tui_state(Runtime.state(new_state.shell_runtime)) == nil
+    end
+
+    test "an update for another repository cannot replace the open Git panel" do
+      panel = GitStatusPanel.new(%{git_root: "/tmp/repo", branch: "main"})
+      state = SidebarWorkflow.replace_git_status(base_state(), panel)
+      installed_panel = SidebarWorkflow.git_status_panel(state)
+
+      event = %GitStatusEvent{
+        git_root: "/tmp/other",
+        entries: [%StatusEntry{path: "foreign.ex", status: :modified, staged: false}],
+        branch: "foreign",
+        ahead: 1,
+        behind: 0
+      }
+
+      {new_state, []} = FileEventHandler.handle(state, {:minga_event, :git_status_changed, event})
+      assert SidebarWorkflow.git_status_panel(new_state) == installed_panel
     end
 
     test "without git panel or file tree open is a no-op" do

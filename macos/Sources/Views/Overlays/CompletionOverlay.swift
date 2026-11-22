@@ -252,7 +252,6 @@ private struct CompletionAccessibilityIdentity: Hashable {
     let detail: String
 }
 
-@MainActor
 private func completionPreviewState() -> CompletionState {
     let state = CompletionState()
     state.update(

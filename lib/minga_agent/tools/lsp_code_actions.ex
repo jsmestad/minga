@@ -12,6 +12,7 @@ defmodule MingaAgent.Tools.LspCodeActions do
   Part of epic #1241. See #1246.
   """
 
+  alias MingaAgent.Tool.Context, as: ToolContext
   alias MingaAgent.Tools.LspBridge
   alias MingaAgent.Tools.WorkspaceEditApplier
   alias Minga.Diagnostics
@@ -22,40 +23,43 @@ defmodule MingaAgent.Tools.LspCodeActions do
   Lists or applies code actions at the given file position.
 
   When `apply` is nil, lists available actions. When `apply` is a string
-  (action title) or integer (1-indexed position), applies that action.
+  (action title) or integer (1-indexed position), applies that action
+  through `context`. An action whose workspace edit names any file outside
+  the context's project root is refused whole.
 
   Line is 0-indexed.
   """
-  @spec execute(String.t(), non_neg_integer(), keyword()) ::
+  @spec execute(ToolContext.t(), String.t(), non_neg_integer(), keyword()) ::
           {:ok, String.t()} | {:error, String.t()}
-  def execute(path, line, opts \\ []) when is_binary(path) and is_integer(line) do
+  def execute(%ToolContext{} = context, path, line, opts \\ [])
+      when is_binary(path) and is_integer(line) do
     abs_path = Path.expand(path)
     col = Keyword.get(opts, :col, 0)
     apply_action = Keyword.get(opts, :apply, nil)
 
-    case LspBridge.client_for_path(abs_path) do
-      {:ok, client} -> do_code_actions(client, abs_path, path, line, col, apply_action)
+    case LspBridge.document_for_path(abs_path) do
+      {:ok, document} -> do_code_actions(document, context, path, line, col, apply_action)
       {:error, reason} -> {:error, reason}
     end
   end
 
   @spec do_code_actions(
-          pid(),
-          String.t(),
+          LspBridge.document(),
+          ToolContext.t(),
           String.t(),
           non_neg_integer(),
           non_neg_integer(),
           term()
         ) ::
           {:ok, String.t()} | {:error, String.t()}
-  defp do_code_actions(client, abs_path, path, line, col, apply_action) do
-    case fetch_actions(client, abs_path, line, col, Client.encoding(client)) do
+  defp do_code_actions(%{client: client} = document, context, path, line, col, apply_action) do
+    case fetch_actions(document, line, col, Client.encoding(client)) do
       {:ok, []} ->
         {:ok, "No code actions available at #{Path.basename(path)}:#{line + 1}"}
 
       {:ok, actions} ->
         if apply_action do
-          apply_selected_action(client, actions, apply_action, path)
+          apply_selected_action(client, actions, apply_action, context)
         else
           {:ok, format_actions(path, line, actions)}
         end
@@ -68,16 +72,14 @@ defmodule MingaAgent.Tools.LspCodeActions do
   # ── Private: fetch ─────────────────────────────────────────────────────────
 
   @spec fetch_actions(
-          pid(),
-          String.t(),
+          LspBridge.document(),
           non_neg_integer(),
           non_neg_integer(),
           Minga.LSP.PositionEncoding.encoding()
         ) ::
           {:ok, [map()]} | {:error, String.t()}
-  defp fetch_actions(client, abs_path, line, col, encoding) do
-    uri = LspBridge.path_to_uri(abs_path)
-    position = LspBridge.position_params(abs_path, line, col, encoding)["position"]
+  defp fetch_actions(%{client: client, uri: uri} = document, line, col, encoding) do
+    position = LspBridge.position_params(document, line, col, encoding)["position"]
 
     range = %{
       "start" => position,
@@ -144,9 +146,9 @@ defmodule MingaAgent.Tools.LspCodeActions do
 
   # ── Private: apply ─────────────────────────────────────────────────────────
 
-  @spec apply_selected_action(pid(), [map()], String.t() | integer(), String.t()) ::
+  @spec apply_selected_action(pid(), [map()], String.t() | integer(), ToolContext.t()) ::
           {:ok, String.t()} | {:error, String.t()}
-  defp apply_selected_action(client, actions, selection, path) do
+  defp apply_selected_action(client, actions, selection, context) do
     action = find_action(actions, selection)
 
     case action do
@@ -154,7 +156,7 @@ defmodule MingaAgent.Tools.LspCodeActions do
         {:error, "No matching code action found for #{inspect(selection)}"}
 
       action ->
-        do_apply_action(client, action, path)
+        do_apply_action(client, action, context)
     end
   end
 
@@ -171,8 +173,9 @@ defmodule MingaAgent.Tools.LspCodeActions do
 
   defp find_action(_actions, _), do: nil
 
-  @spec do_apply_action(pid(), map(), String.t()) :: {:ok, String.t()} | {:error, String.t()}
-  defp do_apply_action(client, action, _path) do
+  @spec do_apply_action(pid(), map(), ToolContext.t()) ::
+          {:ok, String.t()} | {:error, String.t()}
+  defp do_apply_action(client, action, context) do
     # Some actions need resolving to get the full edit
     action =
       case Map.get(action, "edit") do
@@ -199,7 +202,7 @@ defmodule MingaAgent.Tools.LspCodeActions do
             encoding = Client.encoding(client)
 
             {file_count, edit_count, errors} =
-              WorkspaceEditApplier.apply(documents, client, encoding)
+              WorkspaceEditApplier.apply(documents, client, encoding, context)
 
             finish_workspace_edit(client, action, title, file_count, edit_count, errors)
 

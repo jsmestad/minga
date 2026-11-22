@@ -11,7 +11,6 @@
 import SwiftUI
 import MingaProtocol
 
-@MainActor
 @Observable
 public final class LatencyHUDState {
     /// Whether the overlay is currently shown.
@@ -112,10 +111,10 @@ public final class LatencyHUDState {
     // Task.sleep timer pattern (see BlinkingCursor / AGENTS.md concurrency notes).
 }
 
-/// Pure formatting model for the latency HUD. Kept `Sendable` and free of
-/// `@MainActor` so it can be unit-tested directly, mirroring the Go TUI's
+/// Pure formatting model for the latency HUD. Kept `Sendable` and `nonisolated`
+/// so it can be unit-tested directly, mirroring the Go TUI's
 /// `Stats.HUD()`/`fmtDur` helpers.
-public struct LatencyHUDModel: Sendable, Equatable {
+nonisolated public struct LatencyHUDModel: Sendable, Equatable {
     public init(stats: LatencyRecorder.Stats) {
         self.stats = stats
     }

@@ -1,6 +1,7 @@
 package protocol
 
 import (
+	"encoding/binary"
 	"fmt"
 	"strings"
 
@@ -544,20 +545,26 @@ func decodeGitStatus(payload []byte) (GitStatus, string, int) {
 		git.Toast.Level = payload[offset+1]
 		git.Toast.Action = payload[offset+2]
 		git.Toast.Message, offset, ok = readString16(payload, offset+3)
-		if !ok {
+		if !ok || len(payload) < offset+8 {
 			return git, gitSummary(git), len(payload)
 		}
+		git.Toast.ID = binary.BigEndian.Uint64(payload[offset : offset+8])
+		offset += 8
 	} else {
 		offset++
 	}
 	if git.EntryBasePath, offset, ok = readString16(payload, offset); !ok {
 		return git, gitSummary(git), len(payload)
 	}
-	if git.LastCommitMessage, offset, ok = readString16(payload, offset); !ok || len(payload) < offset+2 {
+	if git.LastCommitMessage, offset, ok = readString16(payload, offset); !ok || len(payload) < offset+23 {
 		return git, gitSummary(git), len(payload)
 	}
 	git.StashCount = u16(payload, offset)
-	offset += 2
+	git.TerminalCursor = u32(payload, offset+2)
+	git.TerminalCollapsed = payload[offset+6]
+	git.PanelID = binary.BigEndian.Uint64(payload[offset+7 : offset+15])
+	git.CommitTargetID = binary.BigEndian.Uint64(payload[offset+15 : offset+23])
+	offset += 23
 	return git, gitSummary(git), offset
 }
 

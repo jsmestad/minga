@@ -1,10 +1,9 @@
 defmodule MingaEditor.Input.Prompt do
   @moduledoc """
-  Input handler for the text input prompt overlay.
+  Input handler for the minibuffer prompt overlay.
 
-  When a prompt is active, all keys route to `PromptUI.handle_key/3`.
-  The prompt is a single-line text input used by extensions for
-  collecting free-form text (capture titles, rename targets, etc.).
+  When a text or confirmation prompt is active, all keys route to
+  `PromptUI.handle_key/3`. Paste inserts text only into text prompts.
   """
 
   @behaviour MingaEditor.Input.Handler

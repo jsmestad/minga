@@ -44,7 +44,9 @@ defmodule Minga.Extension.SourceFilesTest do
   } do
     touch!(root, "mix.exs")
     touch!(root, "lib/my_ext.ex")
-    for n <- 1..200, do: touch!(root, "deps/big_dep/lib/mod_#{n}.ex")
+    dependency_sources = Path.join(root, "deps/big_dep/lib")
+    File.mkdir_p!(dependency_sources)
+    for n <- 1..200, do: File.write!(Path.join(dependency_sources, "mod_#{n}.ex"), "")
 
     assert relative(root, SourceFiles.list(root)) == ["lib/my_ext.ex"]
   end

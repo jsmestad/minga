@@ -25,6 +25,7 @@ defmodule MingaEditor.Commands.Agent do
   alias MingaEditor.Agent.Transcript
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.UIState.Panel
+  alias MingaEditor.Agent.UIState.TranscriptProjection
   alias MingaEditor.Agent.View.Preview
   alias Minga.Buffer
   alias Minga.Clipboard
@@ -208,10 +209,11 @@ defmodule MingaEditor.Commands.Agent do
     with :ok <- DraftWorkflow.before_reopen(state, session_id),
          :ok <- load_persisted_session(session_pid, session_id) do
       state
+      |> MingaEditor.Agent.Arrival.retire(session_pid)
       |> update_agent_ui(&UIState.reset_edit_timeline/1)
       |> DraftWorkflow.after_reopen(session_pid, session_id)
       |> sync_restored_model_selection(session_pid)
-      |> arm_provenance_jump(session_pid, tool_call_id, origin)
+      |> arm_provenance_jump(tool_call_id, origin)
       |> activate_agent_view(return_target)
     else
       {:error, %EditorState{} = preserved} ->
@@ -237,6 +239,7 @@ defmodule MingaEditor.Commands.Agent do
   @spec load_persisted_session(pid(), String.t()) ::
           :ok | {:error, atom() | {:model_selection_correction_required, String.t()}}
   defp load_persisted_session(session_pid, session_id) do
+    # minga:allow-blocking — Editor, user-initiated resume of a persisted session; one-shot restore (#2450 inventory)
     case Session.load_session(session_pid, session_id) do
       :ok ->
         :ok
@@ -341,26 +344,13 @@ defmodule MingaEditor.Commands.Agent do
 
   defp capture_origin(_state), do: nil
 
-  @spec arm_provenance_jump(state(), pid(), String.t() | nil, ProvenanceJump.origin() | nil) ::
-          state()
-  defp arm_provenance_jump(state, _session_pid, nil, _origin), do: state
+  @spec arm_provenance_jump(state(), String.t() | nil, ProvenanceJump.origin() | nil) :: state()
+  defp arm_provenance_jump(state, nil, _origin), do: state
 
-  defp arm_provenance_jump(state, session_pid, tool_call_id, origin) do
-    with pairs when is_list(pairs) <- safe_messages_with_ids(session_pid),
-         target_id when is_integer(target_id) <-
-           Transcript.turn_anchor_id(pairs, tool_call_id) do
-      jump = ProvenanceJump.request(target_id, origin)
-
-      TraditionalWorkflow.install_agent_panel(
-        state,
-        (&Panel.set_provenance_jump(&1, jump)).(state.workspace.agent_ui.panel)
-      )
-    else
-      # Dead session (nil pairs) or tool call not in the transcript (nil anchor):
-      # skip the jump and open at the bottom. A non-nil unexpected shape should
-      # surface as a WithClauseError rather than silently degrade.
-      nil -> state
-    end
+  defp arm_provenance_jump(state, tool_call_id, origin) do
+    jump = ProvenanceJump.request({:tool_call_id, tool_call_id}, origin)
+    panel = Panel.set_provenance_jump(state.workspace.agent_ui.panel, jump)
+    TraditionalWorkflow.install_agent_panel(state, panel)
   end
 
   @spec safe_file_path(pid()) :: String.t() | nil
@@ -373,13 +363,6 @@ defmodule MingaEditor.Commands.Agent do
   @spec safe_cursor(pid()) :: {non_neg_integer(), non_neg_integer()} | nil
   defp safe_cursor(buf) do
     Buffer.cursor(buf)
-  catch
-    :exit, _ -> nil
-  end
-
-  @spec safe_messages_with_ids(pid()) :: [{pos_integer(), term()}] | nil
-  defp safe_messages_with_ids(session_pid) do
-    Session.messages_with_ids(session_pid)
   catch
     :exit, _ -> nil
   end
@@ -1188,6 +1171,7 @@ defmodule MingaEditor.Commands.Agent do
     if remote_session?(state) do
       {:ok, text}
     else
+      # minga:allow-blocking — Editor, once per local prompt submit to resolve file mentions for the active model
       selection = Session.model_selection(Runtime.active_session(state.shell_runtime))
       resolve_mentions(text, model_selection: selection)
     end
@@ -1265,16 +1249,7 @@ defmodule MingaEditor.Commands.Agent do
   @doc "Clears the chat display without affecting conversation history."
   @spec clear_chat_display(state()) :: state()
   def clear_chat_display(state) do
-    msg_count =
-      if Runtime.active_session(state.shell_runtime) do
-        try do
-          Enum.count(Session.messages(Runtime.active_session(state.shell_runtime)))
-        catch
-          :exit, _ -> 0
-        end
-      else
-        0
-      end
+    msg_count = TranscriptProjection.source_count(state.workspace.agent_ui.panel.transcript)
 
     state = update_agent_ui(state, &UIState.clear_display(&1, msg_count))
 
@@ -1703,6 +1678,7 @@ defmodule MingaEditor.Commands.Agent do
 
   @spec sync_restored_model_selection(state(), pid()) :: state()
   defp sync_restored_model_selection(state, session) do
+    # minga:allow-blocking — Editor, once after a user-initiated session resume
     case Session.model_selection(session) do
       %ModelSelection{} = selection ->
         apply_model_selection_to_ui(state, selection)
@@ -1768,12 +1744,12 @@ defmodule MingaEditor.Commands.Agent do
       nil ->
         state
 
-      {_idx, msg, line_type} ->
+      {_id, msg, offset, line_type} ->
         text = Message.text(msg)
 
         if line_type == :code do
           blocks = Markdown.extract_code_blocks(text)
-          content = code_block_for_scroll(state, blocks)
+          content = code_block_for_scroll(msg, offset, blocks)
           copy_to_clipboard(state, content, "code block")
         else
           copy_to_clipboard(state, text, "message")
@@ -1786,7 +1762,7 @@ defmodule MingaEditor.Commands.Agent do
   def scope_copy_message(state) do
     case scroll_context(state) do
       nil -> state
-      {_idx, msg, _type} -> copy_to_clipboard(state, Message.text(msg), "message")
+      {_id, msg, _offset, _type} -> copy_to_clipboard(state, Message.text(msg), "message")
     end
   end
 
@@ -1799,16 +1775,16 @@ defmodule MingaEditor.Commands.Agent do
       nil ->
         state
 
-      {_idx, msg, :code} ->
+      {_id, msg, offset, :code} ->
         text = Message.text(msg)
         blocks = Markdown.extract_code_blocks(text)
-        block = code_block_at_scroll(state, blocks)
+        block = Enum.at(blocks, code_block_index_for_scroll(msg, offset, blocks))
 
         if block,
           do: AgentSession.open_code_block(state, block.language, block.content),
           else: state
 
-      {_idx, _msg, _other_type} ->
+      {_id, _msg, _offset, _other_type} ->
         state
     end
   end
@@ -1822,10 +1798,10 @@ defmodule MingaEditor.Commands.Agent do
       nil ->
         state
 
-      {_idx, msg, :code} ->
+      {_id, msg, offset, :code} ->
         text = Message.text(msg)
         blocks = Markdown.extract_code_blocks(text)
-        block_index = code_block_index_for_scroll(state, blocks)
+        block_index = code_block_index_for_scroll(msg, offset, blocks)
         block = Enum.at(blocks, block_index)
 
         if block do
@@ -1834,7 +1810,7 @@ defmodule MingaEditor.Commands.Agent do
           state
         end
 
-      {_idx, _msg, _other_type} ->
+      {_id, _msg, _offset, _other_type} ->
         state
     end
   end
@@ -1931,8 +1907,7 @@ defmodule MingaEditor.Commands.Agent do
   def scope_pin_message(state) do
     with session when is_pid(session) <-
            Runtime.active_session(state.shell_runtime),
-         {msg_idx, _msg, _line_type} <- scroll_context(state),
-         {id, msg} <- display_pair_at(state, session, msg_idx),
+         {id, msg, _offset, _line_type} <- scroll_context(state),
          false <- synthetic_display_message?(msg) do
       Session.toggle_pin(session, id)
     end
@@ -1940,17 +1915,6 @@ defmodule MingaEditor.Commands.Agent do
     state
   catch
     :exit, _ -> state
-  end
-
-  @spec display_pair_at(state(), pid(), non_neg_integer()) :: {pos_integer(), Message.t()} | nil
-  defp display_pair_at(state, session, msg_idx) do
-    pairs =
-      case state.workspace.agent_ui.panel.transcript.message_pairs do
-        [] -> Session.messages_with_ids(session)
-        cached -> cached
-      end
-
-    Enum.at(pairs, msg_idx)
   end
 
   @spec synthetic_display_message?(term()) :: boolean()
@@ -2446,32 +2410,12 @@ defmodule MingaEditor.Commands.Agent do
     end
   end
 
-  @spec scroll_context(state()) ::
-          {non_neg_integer(), Message.t(), Transcript.line_type()} | nil
+  @spec scroll_context(state()) :: TranscriptProjection.Index.position() | nil
   defp scroll_context(state) do
-    session = Runtime.active_session(state.shell_runtime)
     panel = state.workspace.agent_ui.panel
-
-    if session do
-      messages = safe_messages(session)
-      line_map = cached_or_compute_line_index(panel, messages)
-
-      display_msgs =
-        case panel.transcript.messages do
-          [] -> messages
-          cached -> cached
-        end
-
-      total = Enum.count(line_map)
-      target = Minga.Editing.resolve_scroll(panel.scroll, total, 1)
-
-      case Enum.at(line_map, target) do
-        {msg_idx, line_type} -> {msg_idx, Enum.at(display_msgs, msg_idx), line_type}
-        nil -> nil
-      end
-    else
-      nil
-    end
+    total = TranscriptProjection.line_count(panel.transcript)
+    target = Minga.Editing.resolve_scroll(panel.scroll, total, 1)
+    TranscriptProjection.line_at(panel.transcript, target)
   end
 
   @spec copy_to_clipboard(state(), String.t(), String.t()) :: state()
@@ -2502,86 +2446,32 @@ defmodule MingaEditor.Commands.Agent do
     state
   end
 
-  @spec code_block_for_scroll(state(), [Markdown.code_block()]) :: String.t()
-  defp code_block_for_scroll(_state, []), do: ""
+  @spec code_block_for_scroll(Message.t(), non_neg_integer(), [Markdown.code_block()]) ::
+          String.t()
+  defp code_block_for_scroll(_message, _offset, []), do: ""
 
-  defp code_block_for_scroll(state, blocks) do
-    idx = code_block_index_for_scroll(state, blocks)
-    Enum.at(blocks, idx, hd(blocks)).content
+  defp code_block_for_scroll(message, offset, blocks) do
+    index = code_block_index_for_scroll(message, offset, blocks)
+    Enum.at(blocks, index, hd(blocks)).content
   end
 
-  @spec code_block_at_scroll(state(), [Markdown.code_block()]) :: Markdown.code_block() | nil
-  defp code_block_at_scroll(_state, []), do: nil
-
-  defp code_block_at_scroll(state, blocks) do
-    index = code_block_index_for_scroll(state, blocks)
-    Enum.at(blocks, index)
-  end
-
-  @spec code_block_index_for_scroll(state(), [Markdown.code_block()]) :: non_neg_integer()
-  defp code_block_index_for_scroll(state, blocks) do
-    session = Runtime.active_session(state.shell_runtime)
-    panel = state.workspace.agent_ui.panel
-    messages = safe_messages(session)
-
-    line_map = cached_or_compute_line_index(panel, messages)
-
-    total = Enum.count(line_map)
-    target = Minga.Editing.resolve_scroll(panel.scroll, total, 1)
-
-    {msg_idx, _type} =
-      case Enum.at(line_map, target) do
-        nil -> {0, :text}
-        entry -> entry
-      end
-
-    msg_start =
-      Enum.find_index(line_map, fn {idx, _} -> idx == msg_idx end) || 0
-
-    lines_for_msg =
-      line_map
-      |> Enum.drop(msg_start)
-      |> Enum.take_while(fn {idx, _} -> idx == msg_idx end)
-
-    relative = target - msg_start
-    idx = count_code_block_at(lines_for_msg, relative)
-    min(idx, Enum.count(blocks) - 1)
-  end
-
-  @spec count_code_block_at(
-          [{non_neg_integer(), Transcript.line_type()}],
+  @spec code_block_index_for_scroll(Message.t(), non_neg_integer(), [Markdown.code_block()]) ::
           non_neg_integer()
-        ) ::
-          non_neg_integer()
-  defp count_code_block_at(lines, target_offset) do
-    lines
-    |> Enum.take(target_offset + 1)
-    |> Enum.reduce({0, false}, fn {_idx, type}, {block_count, in_code} ->
-      case {type, in_code} do
-        {:code, false} -> {block_count, true}
-        {:code, true} -> {block_count, true}
-        {_, true} -> {block_count + 1, false}
-        {_, false} -> {block_count, false}
-      end
-    end)
-    |> elem(0)
-  end
+  defp code_block_index_for_scroll(_message, _offset, []), do: 0
 
-  @spec safe_messages(pid()) :: [Message.t()]
-  defp safe_messages(session) do
-    Session.messages(session)
-  catch
-    :exit, _ -> []
-  end
+  defp code_block_index_for_scroll(message, offset, blocks) do
+    profile = Transcript.line_profile(message)
 
-  # Returns the cached line index from the panel state if available, otherwise recomputes from messages.
-  @spec cached_or_compute_line_index(Panel.t(), [Message.t()]) ::
-          [{non_neg_integer(), Transcript.line_type()}]
-  defp cached_or_compute_line_index(panel, messages) do
-    case panel.transcript.line_index do
-      [] -> Transcript.line_message_index(messages)
-      cached -> cached
-    end
+    {block, _in_code?} =
+      Enum.reduce(0..offset, {0, false}, fn local_line, {block, in_code?} ->
+        case Transcript.line_type_at(profile, local_line) do
+          :code -> {block, true}
+          _other when in_code? -> {block + 1, false}
+          _other -> {block, false}
+        end
+      end)
+
+    min(block, length(blocks) - 1)
   end
 
   # Delegates to EditorState shared helper.

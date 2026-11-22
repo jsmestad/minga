@@ -541,7 +541,11 @@ defmodule MingaEditor.RenderPipeline.Content do
             prompt_window.cursor_shape
           )
 
-    total_lines = Enum.count(state.workspace.agent_ui.panel.transcript.line_index)
+    total_lines =
+      MingaEditor.Agent.UIState.TranscriptProjection.line_count(
+        state.workspace.agent_ui.panel.transcript
+      )
+
     state = update_agent_scroll_metrics(state, total_lines, chat_height)
 
     {WindowContent.new(nil, [prompt_window], cursor), cursor, state}

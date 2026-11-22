@@ -6,9 +6,7 @@ defmodule MingaEditor.State.Agent do
   The session pid lives on the active `Tab` in the Traditional shell and
   is read through the active shell runtime.
 
-  After a tab switch, `MingaEditor.AgentLifecycle.rebuild_agent_from_session/2`
-  repopulates the cache fields below from the incoming tab's session
-  process via `MingaAgent.Session.editor_snapshot/1`.
+  On local tab arrival, `MingaEditor.Agent.Arrival` installs the active Session's ordered snapshot without retaining approval or error per tab.
 
   Domain-only state (status, model, provider, session ID) lives in the
   composed `MingaAgent.RuntimeState` struct at `runtime`. Lifecycle

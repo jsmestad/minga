@@ -448,7 +448,7 @@ defmodule MingaEditor.Commands.AgentSplitToggleTest do
       assert %EditorState{} = new_state
     end
 
-    test "with a tool_call_id, arms a provenance jump to the turn's opening message" do
+    test "defers resolving the provenance target until the restored transcript arrives" do
       messages = [
         {:user, "add auth"},
         {:thinking, "use middleware", false},
@@ -462,8 +462,7 @@ defmodule MingaEditor.Commands.AgentSplitToggleTest do
 
       jump = new_state.workspace.agent_ui.panel.transcript.provenance_jump
       assert jump != nil
-      # default ids zip with index+1, so the :user message is id 1.
-      assert jump.target_message_id == 1
+      assert jump.target == {:tool_call_id, "tc_auth"}
       refute jump.landed?
       assert_receive {:stub_loaded_session, "sess-42"}
     end
@@ -486,7 +485,8 @@ defmodule MingaEditor.Commands.AgentSplitToggleTest do
       state = base_state(active: true, session: session)
 
       jump =
-        ProvenanceJump.request(1, {"/tmp/no_such_file.ex", 5}) |> ProvenanceJump.mark_landed()
+        ProvenanceJump.request({:message_id, 1}, {"/tmp/no_such_file.ex", 5})
+        |> ProvenanceJump.mark_landed()
 
       state =
         MingaEditor.Shell.Traditional.Workflow.install_agent_panel(

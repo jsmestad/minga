@@ -56,7 +56,6 @@ public enum NativeSidebarKind: Equatable {
     }
 }
 
-@MainActor
 struct NativeSidebarHeader: View {
     let input: ShellHostInput
     let item: SidebarItem
@@ -98,7 +97,6 @@ struct NativeSidebarHeader: View {
     }
 }
 
-@MainActor
 struct NativeSidebarBody: View {
     let input: ShellHostInput
     let item: SidebarItem

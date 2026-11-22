@@ -79,6 +79,7 @@ enum OutboundTransportInitializationError: Error, Equatable {
 }
 
 final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
+    // @unchecked: mutable transport state is confined to the serial `writeQueue`, which the compiler cannot see.
     enum DisconnectReason: Sendable {
         case expectedTeardown
         case unexpectedPeerClosure
@@ -233,13 +234,20 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
             return oversizedString(sessionId, limit: Int(UInt16.max))
                 ?? oversizedString(requestId, limit: Int(UInt16.max))
                 ?? oversizedString(toolCallId, limit: Int(UInt16.max))
-        case .openFile(let path), .gitStageFile(let path), .gitUnstageFile(let path),
-             .gitDiscardFile(let path), .gitOpenFile(let path):
+        case .openFile(let path):
             return oversizedString(path, limit: Int(UInt16.max))
-        case .gitCommit(let message), .gitCommitAmend(let message):
+        case .gitCommit(let panelID, let message), .gitCommitAmend(let panelID, let message):
+            guard panelID != 0 else { return .invalidPayload("Git action requires a displayed panel") }
             return oversizedString(message, limit: Int(UInt16.max))
-        case .gitOpenDiff(let path, _):
-            return oversizedString(path, limit: Int(UInt16.max))
+        case .gitStageAll(let panelID), .gitUnstageAll(let panelID),
+             .gitPush(let panelID), .gitPull(let panelID), .gitFetch(let panelID):
+            return panelID == 0 ? .invalidPayload("Git action requires a displayed panel") : nil
+        case .gitStageFile(let target), .gitUnstageFile(let target), .gitDiscardFile(let target),
+             .gitOpenFile(let target), .gitOpenDiff(let target):
+            guard target.panelID != 0, target.section <= 3 else {
+                return .invalidPayload("Git action requires a displayed panel and row")
+            }
+            return oversizedString(target.path, limit: Int(UInt16.max))
         case .workspaceRename(_, let name):
             return oversizedString(name, limit: Int(UInt16.max))
         case .workspaceSetIcon(_, let icon):
@@ -269,6 +277,8 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
             return windowID == 65534 ? nil : .invalidPayload("Invalid agent prompt scroll target")
         case .horizontalPan(_, _, let inputSeq):
             return inputSeq > 0 ? nil : .invalidPayload("Horizontal pan requires a positive input sequence")
+        case .gitPullAndRetry(let toastID):
+            return toastID > 0 ? nil : .invalidPayload("Git retry requires a positive toast identity")
         case .ready, .keyPress, .resize, .requestKeyframe, .frameApplied, .frameRejected,
              .windowReferenceMiss, .operationNativeResult, .nativePresentationObservation,
              .applicationQuitRequest, .applicationQuitDecision, .mouse, .editorText, .textPresentationState, .scrollBatch,
@@ -277,8 +287,7 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
              .pickerActionActivate, .fileTreeEditCancel, .fileTreeCollapseAll,
              .fileTreeRefresh, .togglePanel, .newTab, .systemWillSleep,
              .systemDidWake, .powerThermalState, .commandCopy, .commandCut,
-             .panelDismiss, .panelResize, .agentToolToggle, .gitStageAll,
-             .gitUnstageAll, .gitPush, .gitPull, .gitFetch, .gitPullAndRetry,
+             .panelDismiss, .panelResize, .agentToolToggle,
              .workspaceClose, .spaceLeaderChord, .spaceLeaderRetract, .agentApprove,
              .agentRequestChanges, .agentDismiss, .chatScrolledAwayFromBottom,
              .chatReturnedToBottom, .scrollToLine, .scrollToVisualRank, .foldToggleAtLine, .focusWindow,
@@ -427,19 +436,19 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
             writeFrame(buf)
         case .executeCommand(let name): encodeExecuteCommand(name: name)
         case .openFile(let path): encodeOpenFile(path: path)
-        case .gitStageFile(let path): encodeGitStageFile(path: path)
-        case .gitUnstageFile(let path): encodeGitUnstageFile(path: path)
-        case .gitDiscardFile(let path): encodeGitDiscardFile(path: path)
-        case .gitStageAll: encodeGitStageAll()
-        case .gitUnstageAll: encodeGitUnstageAll()
-        case .gitCommit(let message): encodeGitCommit(message: message)
-        case .gitOpenFile(let path): encodeGitOpenFile(path: path)
-        case .gitOpenDiff(let path, let section): encodeGitOpenDiff(path: path, section: section)
-        case .gitPush: encodeGitPush()
-        case .gitPull: encodeGitPull()
-        case .gitFetch: encodeGitFetch()
-        case .gitCommitAmend(let message): encodeGitCommitAmend(message: message)
-        case .gitPullAndRetry: encodeGitPullAndRetry()
+        case .gitStageFile(let target): encodeGitEntryAction(GUI_ACTION_GIT_STAGE_FILE, target)
+        case .gitUnstageFile(let target): encodeGitEntryAction(GUI_ACTION_GIT_UNSTAGE_FILE, target)
+        case .gitDiscardFile(let target): encodeGitEntryAction(GUI_ACTION_GIT_DISCARD_FILE, target)
+        case .gitStageAll(let panelID): encodeGitPanelAction(GUI_ACTION_GIT_STAGE_ALL, panelID: panelID)
+        case .gitUnstageAll(let panelID): encodeGitPanelAction(GUI_ACTION_GIT_UNSTAGE_ALL, panelID: panelID)
+        case .gitCommit(let panelID, let message): encodeGitCommit(panelID: panelID, message: message, amend: false)
+        case .gitOpenFile(let target): encodeGitEntryAction(GUI_ACTION_GIT_OPEN_FILE, target)
+        case .gitOpenDiff(let target): encodeGitEntryAction(GUI_ACTION_GIT_OPEN_DIFF, target)
+        case .gitPush(let panelID): encodeGitPanelAction(GUI_ACTION_GIT_PUSH, panelID: panelID)
+        case .gitPull(let panelID): encodeGitPanelAction(GUI_ACTION_GIT_PULL, panelID: panelID)
+        case .gitFetch(let panelID): encodeGitPanelAction(GUI_ACTION_GIT_FETCH, panelID: panelID)
+        case .gitCommitAmend(let panelID, let message): encodeGitCommit(panelID: panelID, message: message, amend: true)
+        case .gitPullAndRetry(let toastID): encodeGitPullAndRetry(toastID: toastID)
         case .workspaceRename(let id, let name): encodeWorkspaceRename(id: id, name: name)
         case .workspaceSetIcon(let id, let icon): encodeWorkspaceSetIcon(id: id, icon: icon)
         case .workspaceClose(let id): encodeWorkspaceClose(id: id)
@@ -1135,98 +1144,33 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
 
     // MARK: - Git Status Actions
 
-    private func encodeGitStageFile(path: String) {
-        encodeGitPathAction(GUI_ACTION_GIT_STAGE_FILE, path: path)
-    }
-
-    private func encodeGitUnstageFile(path: String) {
-        encodeGitPathAction(GUI_ACTION_GIT_UNSTAGE_FILE, path: path)
-    }
-
-    private func encodeGitDiscardFile(path: String) {
-        encodeGitPathAction(GUI_ACTION_GIT_DISCARD_FILE, path: path)
-    }
-
-    private func encodeGitStageAll() {
-        var buf = Data(count: 2)
+    private func encodeGitPanelAction(_ subtype: UInt8, panelID: UInt64) {
+        var buf = Data(count: 10)
         buf[0] = OP_GUI_ACTION
-        buf[1] = GUI_ACTION_GIT_STAGE_ALL
+        buf[1] = subtype
+        writeU64(&buf, 2, panelID)
         writeFrame(buf)
     }
 
-    private func encodeGitUnstageAll() {
-        var buf = Data(count: 2)
-        buf[0] = OP_GUI_ACTION
-        buf[1] = GUI_ACTION_GIT_UNSTAGE_ALL
-        writeFrame(buf)
-    }
-
-    private func encodeGitCommit(message: String) {
-        encodeGitCommit(message: message, amend: false)
-    }
-
-    private func encodeGitCommit(message: String, amend: Bool) {
-        let utf8 = Array(message.utf8)
-        let msgLen = utf8.count
-        var buf = Data(count: 5 + msgLen)
+    private func encodeGitCommit(panelID: UInt64, message: String, amend: Bool) {
+        let utf8 = message.utf8
+        let length = utf8.count
+        var buf = Data(count: 13 + length)
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_GIT_COMMIT
-        buf[2] = amend ? 1 : 0
-        writeU16(&buf, 3, UInt16(msgLen))
-        if msgLen > 0 {
-            buf.replaceSubrange(5..<(5 + msgLen), with: utf8[0..<msgLen])
-        }
+        writeU64(&buf, 2, panelID)
+        buf[10] = amend ? 1 : 0
+        writeU16(&buf, 11, UInt16(length))
+        buf.replaceSubrange(13..<(13 + length), with: utf8)
         writeFrame(buf)
     }
 
-    private func encodeGitOpenFile(path: String) {
-        encodeGitPathAction(GUI_ACTION_GIT_OPEN_FILE, path: path)
-    }
-
-    private func encodeGitOpenDiff(path: String, section: UInt8) {
-        let utf8 = Array(path.utf8)
-        let pathLen = utf8.count
-        var buf = Data(count: 5 + pathLen)
-        buf[0] = OP_GUI_ACTION
-        buf[1] = GUI_ACTION_GIT_OPEN_DIFF
-        writeU16(&buf, 2, UInt16(pathLen))
-        if pathLen > 0 {
-            buf.replaceSubrange(4..<(4 + pathLen), with: utf8[0..<pathLen])
-        }
-        buf[4 + pathLen] = section
-        writeFrame(buf)
-    }
-
-    private func encodeGitPush() {
-        var buf = Data(count: 2)
-        buf[0] = OP_GUI_ACTION
-        buf[1] = GUI_ACTION_GIT_PUSH
-        writeFrame(buf)
-    }
-
-    private func encodeGitPull() {
-        var buf = Data(count: 2)
-        buf[0] = OP_GUI_ACTION
-        buf[1] = GUI_ACTION_GIT_PULL
-        writeFrame(buf)
-    }
-
-    private func encodeGitFetch() {
-        var buf = Data(count: 2)
-        buf[0] = OP_GUI_ACTION
-        buf[1] = GUI_ACTION_GIT_FETCH
-        writeFrame(buf)
-    }
-
-    private func encodeGitCommitAmend(message: String) {
-        encodeGitCommit(message: message, amend: true)
-    }
-
-    /// Send a gui_action: git_pull_and_retry. Layout: opcode(1) + action_type(1).
-    private func encodeGitPullAndRetry() {
-        var buf = Data(count: 2)
+    /// Sends the exact Git toast identity offered for Pull & Retry.
+    private func encodeGitPullAndRetry(toastID: UInt64) {
+        var buf = Data(count: 10)
         buf[0] = OP_GUI_ACTION
         buf[1] = GUI_ACTION_GIT_PULL_AND_RETRY
+        writeU64(&buf, 2, toastID)
         writeFrame(buf)
     }
 
@@ -1308,16 +1252,13 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
         writeFrame(buf)
     }
 
-    private func encodeGitPathAction(_ actionType: UInt8, path: String) {
-        let utf8 = Array(path.utf8)
-        let pathLen = utf8.count
-        var buf = Data(count: 4 + pathLen)
+    private func encodeGitEntryAction(_ actionType: UInt8, _ target: GitStatusEntryTarget) {
+        var buf = Data(count: 10)
         buf[0] = OP_GUI_ACTION
         buf[1] = actionType
-        writeU16(&buf, 2, UInt16(pathLen))
-        if pathLen > 0 {
-            buf.replaceSubrange(4..<(4 + pathLen), with: utf8[0..<pathLen])
-        }
+        writeU64(&buf, 2, target.panelID)
+        appendString16(&buf, target.path)
+        buf.append(target.section)
         writeFrame(buf)
     }
 

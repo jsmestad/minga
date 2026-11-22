@@ -11,7 +11,7 @@ defmodule MingaEditor.DisplayList do
   The per-surface chrome painters (completion menu, dashboard, hover/signature
   popups, modeline, tab bar, float popups, etc.) were deleted in #2311; the
   semantic frontends render those surfaces natively. `draw/4` remains for the
-  Git Porcelain extension shell renderer. The nested `Overlay` type is a legacy
+  GitExtended shell renderer. The nested `Overlay` type is a legacy
   carrier with no live producer; the semantic chrome path supplies an empty
   overlay list.
 

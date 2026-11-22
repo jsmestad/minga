@@ -133,6 +133,18 @@ defmodule MingaAgent.Tools.ReadFileTest do
       assert File.read!(path) == "disk content"
     end
 
+    test "reading the real path returns the unsaved content of a buffer opened through a symlink",
+         %{tmp_dir: dir} do
+      real = Path.join(dir, "real.txt")
+      link = Path.join(dir, "link.txt")
+      File.write!(real, "disk content")
+      File.ln_s!("real.txt", link)
+      buffer = start_supervised!({Buffer.Process, file_path: link})
+      :ok = Buffer.replace_content(buffer, "unsaved content", :user)
+
+      assert {:ok, "unsaved content"} = ReadFile.execute(real)
+    end
+
     test "buffer routing works with offset and limit", %{tmp_dir: dir} do
       path = Path.join(dir, "buffered_lines.txt")
       disk_lines = Enum.map_join(1..10, "\n", &"disk line #{&1}")

@@ -31,6 +31,7 @@ defmodule MingaEditor.UI.Picker.ThinkingLevelSource do
   @impl true
   @spec candidates(Context.t()) :: [Item.t()]
   def candidates(%Context{agent_session: session} = context) when is_pid(session) do
+    # minga:allow-blocking — Editor, sync candidates on user picker open; one read
     case Session.model_selection(session) do
       %ModelSelection{} = selection ->
         reasoning = selection.policy.reasoning

@@ -38,7 +38,6 @@ public struct TabEntry: Identifiable {
 }
 
 /// Observable state for the tab bar, driven by BEAM protocol messages.
-@MainActor
 @Observable
 public final class TabBarState {
     public init(tabs: [TabEntry] = [], activeIndex: UInt8 = 0, workspaces: [WorkspacePresentationEntry] = [], workspaceTabs: [WorkspacePresentationTabEntry] = [], activeWorkspaceId: UInt16 = 0, workspaceMode: WorkspaceViewMode = .editor, workspaceFlags: WorkspaceFlags = [], hasCanonicalWorkspaceTabs: Bool = false) {

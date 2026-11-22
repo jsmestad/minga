@@ -10,6 +10,7 @@ defmodule Minga.Runtime do
       Minga.Runtime.Headless (rest_for_one)
       ├── Minga.Foundation.Supervisor
       ├── Minga.Buffer.Registry
+      ├── Minga.Buffer.FileRegistry
       ├── Minga.Buffer.Supervisor
       ├── Minga.Log.MessagesBuffer
       ├── Minga.Services.Supervisor
@@ -33,6 +34,7 @@ defmodule Minga.Runtime do
     children = [
       Minga.Foundation.Supervisor,
       {Registry, keys: :unique, name: Minga.Buffer.Registry},
+      {Registry, keys: :duplicate, name: Minga.Buffer.FileRegistry},
       {DynamicSupervisor, name: Minga.Buffer.Supervisor, strategy: :one_for_one},
       Minga.Log.MessagesBuffer,
       Minga.Services.Supervisor,

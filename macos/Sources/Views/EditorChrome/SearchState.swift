@@ -1,7 +1,7 @@
 import Foundation
 import SwiftUI
 
-public enum SearchFlags {
+nonisolated public enum SearchFlags {
     public static let replaceMode: UInt8 = 0x01
     public static let caseSensitive: UInt8 = 0x02
     public static let wholeWord: UInt8 = 0x04
@@ -30,7 +30,6 @@ public enum SearchStatus: UInt8, Sendable {
 
 /// Owns the native presentation of one authoritative BEAM search session.
 /// Local committed edits are provisional until the BEAM acknowledges their sequence.
-@MainActor
 @Observable
 public final class SearchState {
     public init(visible: Bool = false, matchCount: UInt32 = 0, currentIndex: UInt32 = 0, query: String = "", sessionID: UInt32 = 0, acknowledgedEditSeq: UInt32 = 0, replaceMode: Bool = false, caseSensitive: Bool = false, wholeWord: Bool = false, regex: Bool = false, status: SearchStatus = .ready) {

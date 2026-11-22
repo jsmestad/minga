@@ -5,6 +5,7 @@ import Testing
 @testable import MingaUI
 
 @Suite("Picker Native Query Editing")
+@MainActor
 struct PickerQueryFieldTests {
     @Test("stale BEAM echoes do not overwrite a newer local edit")
     func staleEchoReconciliation() {

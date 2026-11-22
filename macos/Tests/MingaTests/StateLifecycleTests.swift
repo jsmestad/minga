@@ -231,8 +231,54 @@ struct PickerStateLifecycleTests {
         #expect(state.items[0].isMarked == false)
         #expect(state.items[0].matchPositions == [0, 3])
         #expect(state.items[1].isMarked == true)
+        #expect(state.items[0].keepsDescriptionStart == false)
+        #expect(state.items[1].keepsDescriptionStart == false)
         #expect(state.actionMenu != nil)
         #expect(state.actionMenu?.actions == ["Open", "Split"])
+    }
+
+    @Test("update() keeps a status description's start only when the BEAM marks it")
+    @MainActor func updateCarriesDescriptionOverflow() {
+        let state = PickerState()
+        let raw = [
+            Wire.PickerItem(iconColor: 0, flags: 0x05, label: "Claude Opus 4.5",
+                         description: "Claude subscription · Ready (Claude Max) · 70% of 5h limit · resets 2:50 PM",
+                         annotation: "", matchPositions: []),
+            Wire.PickerItem(iconColor: 0, flags: 0x01, label: "editor.ex",
+                         description: "lib/minga/editor.ex", annotation: "", matchPositions: [])
+        ]
+
+        state.update(visible: true, selectedIndex: 0, filteredCount: 2,
+                     totalCount: 2, markedCount: 0, title: "Choose Model", query: "",
+                     hasPreview: false, rawItems: raw, actionMenu: nil, modePrefix: "")
+
+        #expect(state.items[0].keepsDescriptionStart == true)
+        #expect(state.items[0].isTwoLine == true)
+        #expect(state.items[0].isMarked == false)
+        #expect(state.items[1].keepsDescriptionStart == false)
+    }
+
+    @Test("only a marked non-empty description stacks, and the list height sums each row")
+    @MainActor func stackedRowHeights() {
+        func item(_ id: Int, _ description: String, keepStart: Bool) -> PickerItem {
+            PickerItem(id: id, iconColor: 0, label: "row \(id)", description: description, annotation: "",
+                       matchPositions: [], isTwoLine: true, isMarked: false, keepsDescriptionStart: keepStart)
+        }
+        let stacked = item(0, "Ready (Claude Max) · 70% of 5h limit · resets 2:50 PM", keepStart: true)
+        let emptyStatus = item(1, "", keepStart: true)
+        let path = item(2, "lib/minga/editor.ex", keepStart: false)
+
+        #expect(stacked.stacksDescription == true)
+        #expect(emptyStatus.stacksDescription == false)
+        #expect(path.stacksDescription == false)
+        #expect(PickerOverlay.rowHeight(stacked) == 40)
+        #expect(PickerOverlay.rowHeight(emptyStatus) == 24)
+        #expect(PickerOverlay.rowHeight(path) == 24)
+        let mixed = [stacked, emptyStatus, path, stacked]
+        let summed: CGFloat = 40 + 24 + 24 + 40
+        #expect(PickerOverlay.listContentHeight(mixed) == summed)
+        #expect(PickerOverlay.listContentHeight(mixed) == mixed.map(PickerOverlay.rowHeight).reduce(0, +))
+        #expect(PickerOverlay.listContentHeight([]) == CGFloat(0))
     }
 
     @Test("updatePreview() converts styled segments")
@@ -559,7 +605,7 @@ struct AgentChatTranscriptTests {
         Wire.ChatMessage(beamId: id, content: .assistant(text: text))
     }
 
-    private func exactTranscriptWeightOracle(
+    @MainActor private func exactTranscriptWeightOracle(
         _ snapshot: AgentTranscriptSnapshot
     ) throws -> FrameResourceWeight {
         var weight = FrameResourceWeight(arrayEntries: snapshot.messages.count)
@@ -1065,45 +1111,52 @@ struct MessagesContentStateLifecycleTests {
 
 @Suite("GitStatusState Lifecycle")
 struct GitStatusStateLifecycleTests {
-    @Test("published refresh and hide/show preserve the local session")
+    @Test("same-target refresh preserves the session but invalidates older controls")
     @MainActor func publishedRefreshPreservesSession() {
         let state = GitStatusState()
         publish(state, branchName: "main", lastCommitMessage: "old subject")
-        state.updateDraft("typed subject\n\nbody")
-        state.setAmendMode(true)
+        state.updateDraft("typed subject\n\nbody", for: 1)
+        state.setAmendMode(true, for: 1)
         state.toggleSection(.changed)
 
-        publish(state, branchName: "feature/new", lastCommitMessage: "new subject")
+        publish(state, lastCommitMessage: "new subject", panelID: 2)
+        #expect(state.canSubmit)
+        state.updateDraft("late editor event", for: 1)
+        state.setAmendMode(false, for: 1)
+        #expect(state.submit(panelID: 1) == nil)
         state.hide()
-        publish(state, branchName: "feature/new", lastCommitMessage: "new subject")
+        #expect(!state.canSubmit)
+        #expect(state.snapshot.commitTargetID == 0)
+        publish(state, lastCommitMessage: "new subject", panelID: 3)
 
-        #expect(state.snapshot.branchName == "feature/new")
+        #expect(state.snapshot.commitTargetID == 101)
         #expect(state.snapshot.lastCommitMessage == "new subject")
         #expect(state.session.draft == "typed subject\n\nbody")
         #expect(state.session.amendMode == true)
         #expect(state.session.collapsedSections == [.changed])
+        #expect(state.submit(panelID: 3) == GitCommitSubmission(panelID: 3, action: .amend, message: "typed subject\n\nbody"))
     }
 
     @Test("amend prefill handles empty, whitespace, typed, multiline, and repeated toggles")
     @MainActor func amendPrefillMatrix() {
         let empty = GitStatusState()
         publish(empty, lastCommitMessage: "previous subject")
-        empty.setAmendMode(true)
-        empty.setAmendMode(true)
+        empty.setAmendMode(true, for: 1)
+        empty.setAmendMode(true, for: 1)
         #expect(empty.session.draft == "previous subject")
 
         let whitespace = GitStatusState()
         publish(whitespace, lastCommitMessage: "previous subject")
-        whitespace.updateDraft(" \n\t")
-        whitespace.setAmendMode(true)
+        whitespace.updateDraft(" \n\t", for: 1)
+        whitespace.setAmendMode(true, for: 1)
         #expect(whitespace.session.draft == "previous subject")
 
         let typed = GitStatusState()
         publish(typed, lastCommitMessage: "previous subject")
-        typed.updateDraft("typed subject\n\nbody")
-        typed.setAmendMode(true)
-        typed.setAmendMode(false)
-        typed.setAmendMode(true)
+        typed.updateDraft("typed subject\n\nbody", for: 1)
+        typed.setAmendMode(true, for: 1)
+        typed.setAmendMode(false, for: 1)
+        typed.setAmendMode(true, for: 1)
         #expect(typed.session.draft == "typed subject\n\nbody")
     }
 
@@ -1112,11 +1165,11 @@ struct GitStatusStateLifecycleTests {
         let normal = GitStatusState()
         let staged = GitStatusEntry(pathHash: 1, section: .staged, status: .modified, path: "lib/a.ex")
         publish(normal, entries: [staged], lastCommitMessage: "previous subject")
-        normal.updateDraft("  normal subject\n\nbody  ")
+        normal.updateDraft("  normal subject\n\nbody  ", for: 1)
         normal.toggleSection(.staged)
         let publishedBeforeSubmit = normal.snapshot
 
-        #expect(normal.submit() == GitCommitSubmission(action: .commit, message: "normal subject\n\nbody"))
+        #expect(normal.submit(panelID: 1) == GitCommitSubmission(panelID: 1, action: .commit, message: "normal subject\n\nbody"))
         #expect(normal.session.draft.isEmpty)
         #expect(normal.session.amendMode == false)
         #expect(normal.session.collapsedSections == [.staged])
@@ -1124,21 +1177,47 @@ struct GitStatusStateLifecycleTests {
 
         let amend = GitStatusState()
         publish(amend, entries: [], lastCommitMessage: "previous subject")
-        amend.setAmendMode(true)
-        #expect(amend.submit() == GitCommitSubmission(action: .amend, message: "previous subject"))
+        amend.setAmendMode(true, for: 1)
+        #expect(amend.submit(panelID: 1) == GitCommitSubmission(panelID: 1, action: .amend, message: "previous subject"))
         #expect(amend.session.draft.isEmpty)
         #expect(amend.session.amendMode == false)
 
         let unavailable = GitStatusState()
         publish(unavailable, entries: [])
-        unavailable.updateDraft("not staged")
-        #expect(unavailable.submit() == nil)
+        unavailable.updateDraft("not staged", for: 1)
+        #expect(unavailable.submit(panelID: 1) == nil)
         #expect(unavailable.session.draft == "not staged")
     }
 
+    @Test("a held draft and amend selection cannot migrate to a replacement repository")
+    @MainActor func replacementTargetCannotRetargetDraft() {
+        let state = GitStatusState()
+        let staged = GitStatusEntry(pathHash: 1, section: .staged, status: .modified, path: "lib/a.ex")
+        publish(state, entries: [staged], panelID: 41)
+        state.updateDraft("original subject", for: 41)
+        state.setAmendMode(true, for: 41)
+
+        publish(state, entries: [staged], panelID: 42, commitTargetID: 102, entryBasePath: "/other")
+        state.updateDraft("late editor event", for: 41)
+        #expect(state.session.draft == "original subject")
+        #expect(!state.canSubmit)
+        #expect(state.submit(panelID: 41) == nil)
+        #expect(state.submit(panelID: 42) == nil)
+        state.updateDraft("edited but not cleared", for: 42)
+        #expect(!state.canSubmit)
+        #expect(state.submit(panelID: 42) == nil)
+
+        state.updateDraft("", for: 42)
+        #expect(!state.session.amendMode)
+        state.updateDraft("new subject", for: 42)
+        #expect(state.canSubmit)
+        #expect(state.submit(panelID: 41) == nil)
+        #expect(state.submit(panelID: 42) == GitCommitSubmission(panelID: 42, action: .commit, message: "new subject"))
+    }
+
     @MainActor
-    private func publish(_ state: GitStatusState, branchName: String = "main", entries: [GitStatusEntry] = [], lastCommitMessage: String = "") {
-        state.update(repoState: .normal, branchName: branchName, ahead: 0, behind: 0, syncing: false, entries: entries, toast: nil, entryBasePath: "/repo", lastCommitMessage: lastCommitMessage, stashCount: 0)
+    private func publish(_ state: GitStatusState, branchName: String = "main", entries: [GitStatusEntry] = [], lastCommitMessage: String = "", panelID: UInt64 = 1, commitTargetID: UInt64 = 101, entryBasePath: String = "/repo") {
+        state.update(repoState: .normal, branchName: branchName, ahead: 0, behind: 0, syncing: false, entries: entries, toast: nil, entryBasePath: entryBasePath, lastCommitMessage: lastCommitMessage, stashCount: 0, panelID: panelID, commitTargetID: commitTargetID)
     }
 }
 

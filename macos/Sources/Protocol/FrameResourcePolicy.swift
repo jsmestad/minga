@@ -233,6 +233,7 @@ public enum FrameResourceError: Error, Sendable, Equatable {
 
 /// Phase-local mutable accounting. It never crosses actor isolation.
 public final class FrameResourceUsageBuilder: @unchecked Sendable {
+    // @unchecked: `weight` is mutated only synchronously inside `FrameDecodeAccounting.withUsage` on the decoding thread; that scope creates no child tasks.
     public typealias ReservationProbe = @Sendable (FrameResourceDimension, Int) -> Void
 
     public private(set) var weight = FrameResourceWeight()

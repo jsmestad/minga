@@ -8,6 +8,7 @@ defmodule MingaEditor.State.AgentConnection do
   """
 
   alias MingaAgent.InferenceRoute.StatusChangedEvent
+  alias MingaEditor.Agent.Arrival
   alias MingaEditor.State.RouteUsage
 
   @type t :: %__MODULE__{
@@ -15,6 +16,7 @@ defmodule MingaEditor.State.AgentConnection do
           agent_provider_module: module() | nil,
           agent_provider_opts: keyword(),
           question_receipts: %{pid() => binary()},
+          arrival: Arrival.t() | nil,
           route_usage: RouteUsage.t()
         }
 
@@ -23,6 +25,7 @@ defmodule MingaEditor.State.AgentConnection do
             agent_provider_module: nil,
             agent_provider_opts: [],
             question_receipts: %{},
+            arrival: nil,
             route_usage: %RouteUsage{}
 
   @doc "Creates agent connection state from startup provider configuration."
@@ -51,6 +54,10 @@ defmodule MingaEditor.State.AgentConnection do
   @spec forget_question_receipt(t(), pid()) :: t()
   def forget_question_receipt(%__MODULE__{} = connection, session) when is_pid(session),
     do: %{connection | question_receipts: Map.delete(connection.question_receipts, session)}
+
+  @doc "Keeps the active tab's outstanding local Session request in the owning Editor."
+  @spec install_arrival(t(), Arrival.t() | nil) :: t()
+  def install_arrival(%__MODULE__{} = connection, arrival), do: %{connection | arrival: arrival}
 
   @doc "Records a contributed route's reported status for the modeline."
   @spec record_route_status(t(), StatusChangedEvent.t()) :: t()
