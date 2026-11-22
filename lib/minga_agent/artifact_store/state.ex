@@ -4,6 +4,7 @@ defmodule MingaAgent.ArtifactStore.State do
   alias MingaAgent.ArtifactQuota
   alias MingaAgent.ArtifactStorage.FaultInjector
   alias MingaAgent.ArtifactStorage.Files
+  alias MingaAgent.ArtifactStorage.SQLite
   alias MingaAgent.ArtifactStore.ActiveCapture
   alias MingaAgent.ArtifactStore.Blob
   alias MingaAgent.ArtifactStore.Capture
@@ -42,7 +43,8 @@ defmodule MingaAgent.ArtifactStore.State do
           active: %{optional(String.t()) => ActiveCapture.t()},
           monitors: %{optional(reference()) => String.t()},
           blocked: boolean(),
-          fault_injector: FaultInjector.t()
+          fault_injector: FaultInjector.t(),
+          call_timeout: pos_integer()
         }
 
   @enforce_keys [
@@ -54,7 +56,8 @@ defmodule MingaAgent.ArtifactStore.State do
     :active,
     :monitors,
     :blocked,
-    :fault_injector
+    :fault_injector,
+    :call_timeout
   ]
   defstruct @enforce_keys
 
@@ -69,13 +72,15 @@ defmodule MingaAgent.ArtifactStore.State do
     with true <- is_binary(session_id) and byte_size(session_id) > 0,
          true <- is_binary(root),
          true <- valid_quota_server?(quota),
+         {:ok, synchronous} <- SQLite.synchronous_option(opts),
+         {:ok, call_timeout} <- call_timeout_option(opts),
          namespace = Reference.namespace(session_id),
          {:ok, limits} <-
            ArtifactQuota.register_namespace(quota, root, namespace, requested_limits),
          directory = Path.join([root, "namespaces", namespace]),
          :ok <- Files.ensure_private_directory(Path.dirname(directory)),
          :ok <- Files.ensure_private_directory(directory),
-         {:ok, db} <- Metadata.open(Path.join(directory, "artifacts.sqlite3")),
+         {:ok, db} <- Metadata.open(Path.join(directory, "artifacts.sqlite3"), synchronous),
          state = %__MODULE__{
            namespace: namespace,
            directory: directory,
@@ -85,13 +90,22 @@ defmodule MingaAgent.ArtifactStore.State do
            active: %{},
            monitors: %{},
            blocked: false,
-           fault_injector: Keyword.get(opts, :fault_injector)
+           fault_injector: Keyword.get(opts, :fault_injector),
+           call_timeout: call_timeout
          },
          {:ok, recovered} <- recover_opened_state(state) do
       {:ok, recovered}
     else
       false -> {:error, :invalid_artifact_store_options}
       {:error, _reason} = error -> error
+    end
+  end
+
+  @spec call_timeout_option(keyword()) :: {:ok, pos_integer()} | {:error, :invalid_call_timeout}
+  defp call_timeout_option(opts) do
+    case Keyword.get(opts, :call_timeout, Capture.default_call_timeout()) do
+      timeout when is_integer(timeout) and timeout > 0 -> {:ok, timeout}
+      _other -> {:error, :invalid_call_timeout}
     end
   end
 
@@ -435,7 +449,7 @@ defmodule MingaAgent.ArtifactStore.State do
           )
 
         next_state = put_active(state, active)
-        {{:ok, Capture.new(row.id, state.namespace)}, next_state}
+        {{:ok, Capture.new(row.id, state.namespace, state.call_timeout)}, next_state}
 
       {:error, reason} ->
         case cancel_open_row(state, row) do
@@ -473,11 +487,11 @@ defmodule MingaAgent.ArtifactStore.State do
   @spec resume_existing_capture(t(), CaptureSpec.t(), Metadata.row()) ::
           {{:ok, Capture.t()} | {:error, term()}, t()}
   defp resume_existing_capture(state, _spec, %{state: :terminal} = row),
-    do: {{:ok, Capture.new(row.id, state.namespace)}, state}
+    do: {{:ok, Capture.new(row.id, state.namespace, state.call_timeout)}, state}
 
   defp resume_existing_capture(state, spec, %{state: :open} = row) do
     if Map.has_key?(state.active, row.id) do
-      {{:ok, Capture.new(row.id, state.namespace)}, state}
+      {{:ok, Capture.new(row.id, state.namespace, state.call_timeout)}, state}
     else
       resume_recovered_capture(state, spec, row)
     end
@@ -490,7 +504,7 @@ defmodule MingaAgent.ArtifactStore.State do
       {:ok, recovered} ->
         case Metadata.get(recovered.db, row.id) do
           {:ok, %{state: :terminal}} ->
-            {{:ok, Capture.new(row.id, state.namespace)}, recovered}
+            {{:ok, Capture.new(row.id, state.namespace, state.call_timeout)}, recovered}
 
           {:ok, nil} ->
             begin_new_capture(recovered, spec, PinKey.encode(spec.delivery_key))

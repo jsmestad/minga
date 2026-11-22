@@ -87,9 +87,9 @@ defmodule MingaAgent.ArtifactStore.Metadata do
   ]
 
   @doc "Opens one private namespace manifest under its retained single-writer lock."
-  @spec open(String.t()) :: {:ok, db()} | {:error, term()}
-  def open(path) do
-    case SQLite.open_exclusive(path, @bootstrap_schema) do
+  @spec open(String.t(), SQLite.synchronous()) :: {:ok, db()} | {:error, term()}
+  def open(path, synchronous \\ :full) do
+    case SQLite.open_exclusive(path, @bootstrap_schema, synchronous) do
       {:ok, db} -> open_validated(db)
       {:error, :artifact_root_in_use} -> {:error, :artifact_namespace_in_use}
       {:error, _reason} = error -> error
