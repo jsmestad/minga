@@ -15,6 +15,7 @@ defmodule Minga.Application do
       ├── Minga.Foundation.Supervisor (rest_for_one)
       │   ├── Minga.Language.Registry
       │   ├── Minga.Extensions.LanguagePacks
+      │   ├── Minga.Config.ThemeRegistry      (sole writer of theme registrations)
       │   ├── Minga.Extensions.ThemePacks
       │   ├── Minga.Events (Registry, :duplicate)
       │   ├── Minga.Config.Options
@@ -105,7 +106,6 @@ defmodule Minga.Application do
     Minga.LoggerHandler.ensure_buffer_table()
     Grammar.init_registry()
     DevHandler.attach()
-    Minga.Config.ThemeRegistry.seed_builtin()
 
     # Prepend managed tools bin directory to PATH so System.find_executable
     # discovers managed tools. Done before supervisors start so LSP and
