@@ -99,7 +99,8 @@ defmodule MingaAgent.Test.ModelSelectionFixture do
         model_id: model_id,
         display_name: display_name,
         execution: execution,
-        metadata: %{}
+        metadata: %{},
+        provider_label: Keyword.get(opts, :provider_label)
       })
 
     {:ok, policy} =
@@ -142,6 +143,9 @@ defmodule MingaAgent.Test.ModelSelectionFixture do
     do:
       MingaAgent.ModelSelection.Credential.OAuth.new("fixture-account", "/tmp/fixture-oauth.json")
 
+  defp fixture_credential(:contributed, route_id),
+    do: MingaAgent.ModelSelection.Credential.RouteOwned.new(route_id, nil)
+
   defp fixture_credential(_provider, owner), do: ApiKey.new(owner, :env)
 
   @spec execution_defaults(atom()) :: map()
@@ -152,6 +156,16 @@ defmodule MingaAgent.Test.ModelSelectionFixture do
       transport: "http",
       base_url: "https://anthropic.example/v1",
       path: "/v1/messages"
+    }
+  end
+
+  defp execution_defaults(:contributed) do
+    %{
+      family: "inference_route",
+      wire_protocol: "inference_route",
+      transport: "in_process",
+      base_url: nil,
+      path: nil
     }
   end
 

@@ -8,6 +8,7 @@ defmodule MingaAgent.ModelResolverContributedTest do
   alias MingaAgent.ModelResolver
   alias MingaAgent.ModelSelection
   alias MingaAgent.ModelSelection.Credential.RouteOwned
+  alias MingaAgent.ModelSelection.Route
   alias MingaAgent.ModelSelection.Stored
   alias MingaAgent.ProviderPacks.Native
   alias MingaAgent.Test.FixtureInferenceRoute
@@ -56,6 +57,7 @@ defmodule MingaAgent.ModelResolverContributedTest do
     assert selection.route.request_provider == :contributed
     assert selection.route.id == "fixture/fixture-model"
     assert selection.route.display_name == "Fixture Model"
+    assert selection.route.provider_label == "Fixture Route"
     assert selection.credential == RouteOwned.new("fixture", "me@example.com")
     assert selection.request_model.provider == :contributed
 
@@ -152,12 +154,36 @@ defmodule MingaAgent.ModelResolverContributedTest do
 
     assert {:ok, %Stored{} = stored} = ModelSelection.decode(saved)
     assert stored.credential == selection.credential
-    assert stored.route == selection.route
+    assert Route.same_declaration?(stored.route, selection.route)
     assert stored.policy == selection.policy
     assert ModelSelection.id(stored) == ModelSelection.id(selection)
 
     assert {:ok, restored} = ModelResolver.restore(saved, opts)
     assert ModelSelection.id(restored) == ModelSelection.id(selection)
+  end
+
+  test "a restored contributed selection names its route by the route's current display name",
+       %{registry: registry, reporter: reporter, opts: opts} do
+    report(reporter, registry, {:ready, "me@example.com"})
+    {:ok, selection} = ModelResolver.resolve("fixture:fixture-model", opts)
+    saved = round_trip(selection)
+
+    assert {:ok, restored} = ModelResolver.restore(saved, opts)
+    assert restored.route.provider_label == "Fixture Route"
+
+    {:ok, reporter} =
+      InferenceRouteRegistry.register(registry,
+        source: @source,
+        id: "fixture",
+        module: FixtureInferenceRoute,
+        display_name: "Renamed Route"
+      )
+
+    report(reporter, registry, {:ready, "me@example.com"})
+
+    assert {:ok, renamed} = ModelResolver.restore(saved, opts)
+    assert renamed.route.provider_label == "Renamed Route"
+    assert ModelSelection.id(renamed) == ModelSelection.id(selection)
   end
 
   test "a credential cannot be paired with another route", %{

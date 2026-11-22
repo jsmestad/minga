@@ -384,6 +384,47 @@ defmodule MingaAgent.ModelResolverTest do
     assert restored.route.execution == original.route.execution
   end
 
+  test "built-in routes name their provider by its catalog name, and restore names it again" do
+    snapshot =
+      Snapshot.new(
+        %{"openai" => :env},
+        OAuth.new("account-123", "/tmp/minga-resolver-oauth.json")
+      )
+
+    named =
+      Keyword.put(resolver_opts(snapshot), :providers, [Map.put(@provider, :name, "OpenAI")])
+
+    candidates = ModelResolver.candidates(named)
+
+    labels =
+      Map.new(
+        candidates,
+        &{&1.selection.route.request_provider, &1.selection.route.provider_label}
+      )
+
+    assert labels == %{openai: "OpenAI", openai_codex: "OpenAI (ChatGPT subscription)"}
+
+    # Restoring the OAuth route needs a readable credential file; both routes restore through the same catalog path.
+    api_key = Enum.find(candidates, &(&1.selection.route.request_provider == :openai)).selection
+    saved = api_key |> ModelSelection.encode() |> JSON.encode!() |> JSON.decode!()
+    refute Map.has_key?(saved["route"], "provider_label")
+    assert {:ok, restored} = ModelResolver.restore(saved, named)
+    assert restored.route.provider_label == "OpenAI"
+
+    unnamed = resolver_opts(Snapshot.new(%{"openai" => :env}, nil))
+    assert {:ok, selection} = ModelResolver.resolve("openai:not-a-codex-name", unnamed)
+    assert selection.route.provider_label == "openai"
+
+    apple_opts = resolver_opts(Snapshot.new(%{}, nil))
+    assert {:ok, apple} = ModelResolver.resolve("apple:system", apple_opts)
+    assert apple.route.provider_label == "Apple"
+
+    assert {:ok, restored_apple} =
+             apple |> ModelSelection.encode() |> ModelResolver.restore(apple_opts)
+
+    assert restored_apple.route.provider_label == "Apple"
+  end
+
   test "OAuth persistence binds a source without serializing its filesystem path" do
     path = "/tmp/private-source-a/oauth.json"
     snapshot = Snapshot.new(%{}, OAuth.new("same-account", path))

@@ -6,6 +6,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
   alias MingaEditor.Agent.Transcript
   alias MingaEditor.Agent.UIState
   alias MingaAgent.Session.{ConnectionSnapshot, ConnectionTarget}
+  alias MingaAgent.Test.ModelSelectionFixture
   alias MingaAgent.Tool.Output
   alias MingaAgent.Tool.Output.{Range, Reference}
   alias MingaAgent.ToolApproval
@@ -50,6 +51,67 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
       assert model.visible?
       assert model.model_name == "Model not resolved"
     end
+  end
+
+  describe "model identity" do
+    test "a contributed route selection names the route's display name as its provider" do
+      selection =
+        ModelSelectionFixture.selection(
+          request_provider: :contributed,
+          origin: {:contributed, "claude_bridge", "haiku"},
+          model_provider: "claude_bridge",
+          model_id: "haiku",
+          route_id: "claude_bridge/haiku",
+          display_name: "Claude Haiku",
+          provider_label: "Claude (subscription)"
+        )
+
+      assert built_model_name(selection) == "Claude (subscription):Claude Haiku"
+    end
+
+    test "a built-in selection names its catalog provider" do
+      selection =
+        ModelSelectionFixture.selection(
+          request_provider: :anthropic,
+          model_id: "claude-sonnet-4-5",
+          display_name: "Claude Sonnet 4.5",
+          provider_label: "Anthropic"
+        )
+
+      assert built_model_name(selection) == "Anthropic:Claude Sonnet 4.5"
+    end
+
+    test "a route display name containing the frontend separator is not split" do
+      selection =
+        ModelSelectionFixture.selection(
+          request_provider: :contributed,
+          origin: {:contributed, "bridge", "haiku"},
+          model_provider: "bridge",
+          model_id: "haiku",
+          route_id: "bridge/haiku",
+          display_name: "Claude Haiku",
+          provider_label: "Bridge: Claude"
+        )
+
+      assert built_model_name(selection) == "Claude Haiku"
+    end
+  end
+
+  defp built_model_name(selection) do
+    session = fake_session_pid()
+
+    connection = %ConnectionSnapshot{
+      target: ConnectionTarget.new(session, "model-identity", nil, make_ref()),
+      credential_readiness: :configured,
+      model_selection: selection,
+      provider_phase: :running,
+      operation: :idle,
+      problem: nil
+    }
+
+    context(session, synced_panel([]), connection: connection)
+    |> AgentChatBuilder.build()
+    |> Map.fetch!(:model_name)
   end
 
   test "build/1 requires the Content stage's retained prompt in the same frame" do

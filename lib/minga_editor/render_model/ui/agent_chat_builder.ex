@@ -80,7 +80,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
     %AgentChat{
       visible?: true,
       status: MingaEditor.State.Agent.display_status(shell_agent),
-      model_name: Panel.model_label(panel),
+      model_name: Panel.chat_model_label(panel),
       thinking_level: panel.thinking_level,
       prompt: prompt_text,
       prompt_line_count: length(projection.lines),
