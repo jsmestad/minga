@@ -54,6 +54,7 @@ enum PreviewSnapshotPolicy {
         case "AgentChatView", "AgentChatStreaming", "AgentChatApproval", "AgentChatError", "AgentChatCompletion", "AgentChatSummary": CGSize(width: 760, height: 600)
         case "PickerOverlay": CGSize(width: 600, height: 400)
         case "PickerModelRows": CGSize(width: 680, height: 400)
+        case "PickerMixedScroll": CGSize(width: 680, height: 600)
         case "MinibufferView": CGSize(width: 600, height: 140)
         case "WhichKeyOverlay", "WhichKeyPaged": CGSize(width: 520, height: 300)
         case "LatencyHUDOverlay", "LatencyHUDEmpty": CGSize(width: 520, height: 120)

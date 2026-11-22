@@ -25,9 +25,9 @@ public struct PickerOverlay: View {
     public let sendAction: ViewActionHandler<Action>?
 
     private let panelWidth: CGFloat = 600
-    private let itemHeight: CGFloat = 24
+    static let itemHeight: CGFloat = 24
     /// Status rows stack their description under the label so readiness and plan usage get the full row width.
-    private let stackedItemHeight: CGFloat = 40
+    static let stackedItemHeight: CGFloat = 40
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @AccessibilityFocusState private var accessibilityFocus: PickerAccessibilityFocus?
@@ -46,7 +46,7 @@ public struct PickerOverlay: View {
                         Divider()
                             .overlay(theme.popupBorder.opacity(0.3))
 
-                        let totalItemsHeight = state.items.reduce(CGFloat(0)) { $0 + rowHeight($1) }
+                        let totalItemsHeight = Self.listContentHeight(state.items)
                         let maxHeight = geo.size.height * 0.4
                         let listHeight = min(totalItemsHeight, max(maxHeight, 120))
                         resultsList(maxListHeight: listHeight)
@@ -237,7 +237,7 @@ public struct PickerOverlay: View {
                                         item: item,
                                         isSelected: item.id == state.effectiveSelectedIndex,
                                         query: state.query,
-                                        itemHeight: rowHeight(item)
+                                        itemHeight: Self.rowHeight(item)
                                     )
                                     .contentShape(Rectangle())
                                 }
@@ -368,8 +368,13 @@ public struct PickerOverlay: View {
         }
     }
 
-    private func rowHeight(_ item: PickerItem) -> CGFloat {
-        PickerItemRow.stacksDescription(item) ? stackedItemHeight : itemHeight
+    static func rowHeight(_ item: PickerItem) -> CGFloat {
+        item.stacksDescription ? stackedItemHeight : itemHeight
+    }
+
+    /// The unclipped height of every row, which bounds the scrolling list.
+    static func listContentHeight(_ items: [PickerItem]) -> CGFloat {
+        items.reduce(CGFloat(0)) { $0 + rowHeight($1) }
     }
 
     private func pickerItemAccessibilityValue(_ item: PickerItem) -> String {
@@ -443,16 +448,11 @@ private struct PickerItemRow: View {
 
     @Environment(\.themeColors) private var theme
 
-    /// A description whose start carries the meaning gets its own line; a path stays inline and keeps its end.
-    static func stacksDescription(_ item: PickerItem) -> Bool {
-        item.keepsDescriptionStart && !item.description.isEmpty
-    }
-
     var body: some View {
         HStack(spacing: Spacing.sm) {
             itemCheckmark
             itemIcon
-            if Self.stacksDescription(item) {
+            if item.stacksDescription {
                 VStack(alignment: .leading, spacing: Spacing.hairline) {
                     HStack(spacing: Spacing.sm) {
                         highlightedLabel

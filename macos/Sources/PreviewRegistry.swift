@@ -140,6 +140,8 @@ enum PreviewRegistry {
             pickerPreview()
         case "PickerModelRows":
             pickerModelRowsPreview()
+        case "PickerMixedScroll":
+            pickerMixedScrollPreview()
         case "MinibufferView":
             minibufferPreview()
         case "WhichKeyOverlay":

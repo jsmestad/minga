@@ -258,6 +258,29 @@ struct PickerStateLifecycleTests {
         #expect(state.items[1].keepsDescriptionStart == false)
     }
 
+    @Test("only a marked non-empty description stacks, and the list height sums each row")
+    @MainActor func stackedRowHeights() {
+        func item(_ id: Int, _ description: String, keepStart: Bool) -> PickerItem {
+            PickerItem(id: id, iconColor: 0, label: "row \(id)", description: description, annotation: "",
+                       matchPositions: [], isTwoLine: true, isMarked: false, keepsDescriptionStart: keepStart)
+        }
+        let stacked = item(0, "Ready (Claude Max) · 70% of 5h limit · resets 2:50 PM", keepStart: true)
+        let emptyStatus = item(1, "", keepStart: true)
+        let path = item(2, "lib/minga/editor.ex", keepStart: false)
+
+        #expect(stacked.stacksDescription == true)
+        #expect(emptyStatus.stacksDescription == false)
+        #expect(path.stacksDescription == false)
+        #expect(PickerOverlay.rowHeight(stacked) == 40)
+        #expect(PickerOverlay.rowHeight(emptyStatus) == 24)
+        #expect(PickerOverlay.rowHeight(path) == 24)
+        let mixed = [stacked, emptyStatus, path, stacked]
+        let summed: CGFloat = 40 + 24 + 24 + 40
+        #expect(PickerOverlay.listContentHeight(mixed) == summed)
+        #expect(PickerOverlay.listContentHeight(mixed) == mixed.map(PickerOverlay.rowHeight).reduce(0, +))
+        #expect(PickerOverlay.listContentHeight([]) == CGFloat(0))
+    }
+
     @Test("updatePreview() converts styled segments")
     @MainActor func updatePreviewConverts() {
         let state = PickerState()

@@ -74,7 +74,7 @@ extension PreviewRegistry {
         let keepStart: UInt8 = 0x05
         state.update(
             visible: true,
-            selectedIndex: 0,
+            selectedIndex: 1,
             filteredCount: 4,
             totalCount: 4,
             markedCount: 0,
@@ -82,13 +82,14 @@ extension PreviewRegistry {
             query: "",
             hasPreview: false,
             rawItems: [
-                Wire.PickerItem(iconColor: 0, flags: keepStart, label: "Claude Opus 4.5", description: "Claude subscription · Ready (Claude Max) · 70% of 5h limit · resets 2:50 PM · 200k ctx · thinking medium (low/medium/high) · tools yes, images yes, streaming yes · subscription", annotation: "", matchPositions: []),
-                Wire.PickerItem(iconColor: 0, flags: keepStart, label: "Claude Sonnet 4.5", description: "Claude subscription · Ready (Claude Max) · 70% of 5h limit · resets Sun 12:32 AM · 200k ctx · thinking fixed · tools yes, images yes, streaming yes · subscription", annotation: "★ favorite", matchPositions: []),
-                Wire.PickerItem(iconColor: 0, flags: keepStart, label: "Use Claude subscription", description: "Uses the Claude app login. Minga never sees your login. · Ready: Claude Max", annotation: "", matchPositions: []),
-                Wire.PickerItem(iconColor: 0x98BE65, flags: 0x01, label: "\u{f0e7}picker_item_row_test.exs", description: "test/minga_editor/render_model/ui/picker/agent_model_source/description_overflow/picker_item_row_test.exs", annotation: "", matchPositions: []),
+                Wire.PickerItem(iconColor: 0, flags: keepStart, label: "Claude Opus 4.5", description: "Claude subscription · Ready (Claude Max) · 70% of 5h limit · resets 2:50 PM · 200k ctx · thinking medium (low/medium/high) · tools yes, images yes, streaming yes · subscription", annotation: "", matchPositions: [], activationID: 1),
+                Wire.PickerItem(iconColor: 0, flags: keepStart, label: "Claude Sonnet 4.5", description: "Claude subscription · Ready (Claude Max) · 70% of 5h limit · resets Sun 12:32 AM · 200k ctx · thinking fixed · tools yes, images yes, streaming yes · subscription", annotation: "★ favorite", matchPositions: [], activationID: 2),
+                Wire.PickerItem(iconColor: 0, flags: keepStart, label: "Use Claude subscription", description: "Uses the Claude app login. Minga never sees your login. · Ready: Claude Max", annotation: "", matchPositions: [], activationID: 3),
+                Wire.PickerItem(iconColor: 0x98BE65, flags: 0x01, label: "\u{f0e7}picker_item_row_test.exs", description: "test/minga_editor/render_model/ui/picker/agent_model_source/description_overflow/picker_item_row_test.exs", annotation: "", matchPositions: [], activationID: 4),
             ],
             actionMenu: nil,
-            modePrefix: ""
+            modePrefix: "",
+            activationGeneration: 1
         )
 
         return ZStack {
@@ -98,6 +99,11 @@ extension PreviewRegistry {
         .frame(width: 680, height: 400)
         .clipped()
         .environment(theme)
+    }
+
+    /// Mixed 24pt and 40pt rows that overflow the list, with the selection moved to a stacked row near the bottom after the list appears.
+    static func pickerMixedScrollPreview() -> some View {
+        PickerMixedScrollFixture(theme: PreviewFixtures.theme())
     }
 
     // MARK: - MinibufferView
@@ -311,5 +317,43 @@ extension PreviewRegistry {
             .frame(width: 520, height: 120)
             .background(theme.editorBg)
             .environment(theme)
+    }
+}
+
+/// Owns its picker state across body re-evaluation so the post-appearance selection change drives the overlay's real scroll-to-selection path.
+private struct PickerMixedScrollFixture: View {
+    let theme: ThemeColors
+    @State private var state = Self.initialState()
+
+    private static let rows: [Wire.PickerItem] = (0..<16).map { index in
+        if index.isMultiple(of: 2) {
+            return Wire.PickerItem(iconColor: 0, flags: 0x05, label: "Model \(index)", description: "Claude subscription · Ready (Claude Max) · \(index * 5)% of 5h limit · resets 2:50 PM", annotation: "", matchPositions: [], activationID: UInt32(index + 1))
+        }
+        return Wire.PickerItem(iconColor: 0x98BE65, flags: 0, label: "\u{f0e7}file_\(index).ex", description: "lib/minga_editor/render_model/ui/picker/file_\(index).ex", annotation: "", matchPositions: [], activationID: UInt32(index + 1))
+    }
+
+    var body: some View {
+        ZStack {
+            theme.editorBg
+            PickerOverlay(state: state, sendAction: { _ in })
+        }
+        .frame(width: 680, height: 600)
+        .clipped()
+        .environment(theme)
+        .task {
+            // Change the selection after the list exists, as a keypress would.
+            try? await Task.sleep(for: .milliseconds(50))
+            Self.show(14, in: state)
+        }
+    }
+
+    private static func initialState() -> PickerState {
+        let state = PickerState()
+        show(0, in: state)
+        return state
+    }
+
+    private static func show(_ selected: UInt16, in state: PickerState) {
+        state.update(visible: true, selectedIndex: selected, filteredCount: 16, totalCount: 16, markedCount: 0, title: "Mixed Rows", query: "", hasPreview: false, rawItems: rows, actionMenu: nil, activationGeneration: 1)
     }
 }

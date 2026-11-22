@@ -44,6 +44,11 @@ public struct PickerItem: Identifiable {
     /// The BEAM marks status-like descriptions whose start carries the meaning (a model row's readiness and plan usage). Without the mark the description is path-like and keeps its end visible.
     public let keepsDescriptionStart: Bool
 
+    /// A description whose start carries the meaning gets its own line under the label; a path stays inline and keeps its end.
+    public var stacksDescription: Bool {
+        keepsDescriptionStart && !description.isEmpty
+    }
+
     /// Whether the label starts with a separate icon glyph.
     public var hasLeadingIcon: Bool {
         guard let first = label.first else { return false }

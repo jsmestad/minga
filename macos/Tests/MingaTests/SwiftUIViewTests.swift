@@ -1861,6 +1861,29 @@ struct PickerOverlayActivationTests {
         #expect(!choice.isDisabled())
     }
 
+    @Test("A stacked status row still reads its description to VoiceOver")
+    @MainActor func stackedRowAccessibility() throws {
+        let description = "Claude subscription · Ready (Claude Max) · 70% of 5h limit · resets 2:50 PM"
+        let state = PickerState()
+        state.update(
+            visible: true, selectedIndex: 0, filteredCount: 1, totalCount: 1,
+            markedCount: 0, title: "Choose Model", query: "", hasPreview: false,
+            rawItems: [
+                Wire.PickerItem(iconColor: 0, flags: 0x05, label: "Claude Opus 4.5", description: description, annotation: "", matchPositions: [], activationID: 41),
+            ],
+            actionMenu: nil, activationGeneration: 99
+        )
+        #expect(state.items[0].stacksDescription)
+        let body = try PickerOverlay(state: state, sendAction: nil)
+            .environment(\.themeColors, ThemeColors())
+            .inspect()
+        let row = try #require(body.findAll(ViewType.Button.self).first {
+            (try? $0.accessibilityLabel().string()) == "Claude Opus 4.5"
+        })
+
+        #expect(try row.accessibilityValue().string() == "selected, \(description)")
+    }
+
     @Test("Picker choices expose selected marked and unavailable state")
     @MainActor func pickerAccessibilityState() throws {
         let state = PickerState()
