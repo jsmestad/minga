@@ -62,8 +62,8 @@ The cell-paradigm render opcodes (`draw_text`, `set_cursor`, `clear`, and the re
 |--------|------|------|-------------|
 | `0x10` | begin_frame | 13 | Open a generation-aware frame transaction (frame_seq + base_frame_seq + generation); see Frame Transactions |
 | `0x11` | commit_frame | 9 | Close a frame transaction; promote staging and present (frame_seq + input_seq) |
-| `0x14` | renderer_shutdown | 1 | Ask a spawned terminal renderer to restore the terminal and exit |
 | `0x13` | _(reserved)_ | — | Freed by retiring batch_end in v3; do not reassign before a version bump past 3 |
+| `0x14` | renderer_shutdown | 1 | Ask a spawned terminal renderer to restore the terminal and exit |
 | `0x15` | set_cursor_shape | 2 | Change cursor appearance |
 | `0x16` | set_title | 3 + title_len | Set the window/terminal title |
 | `0x17` | set_window_bg | 4 | Set the default background color |
