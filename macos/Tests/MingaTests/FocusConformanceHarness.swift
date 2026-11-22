@@ -54,9 +54,10 @@ final class FocusConformanceHarness {
         window.close()
     }
 
-    /// Lets deferred policy and SwiftUI work settle without bypassing the policy's public API.
+    /// Lets SwiftUI work settle, then awaits the policy's deferred reclaim itself rather than counting scheduler turns.
     func settle() async {
         for _ in 0..<20 { await Task.yield() }
+        await policy.deferredReclaimSettled()
     }
 
     func perform(event: String, args: [String: Any]) async throws {
