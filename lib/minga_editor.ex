@@ -93,6 +93,8 @@ defmodule MingaEditor do
           | {:pane_generation_allocator, (-> pos_integer())}
 
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.State.{TabBar, Workspace}
+  alias MingaEditor.State.Workspace.Agent, as: WorkspaceAgent
 
   alias MingaEditor.Shell.Traditional.SidebarWorkflow
 
@@ -1717,6 +1719,8 @@ defmodule MingaEditor do
     {:noreply, Events.dispatch_batch(state, batch)}
   end
 
+  defp route_agent_stream_batch(state, _session_pid, _batch, :unreachable), do: {:noreply, state}
+
   defp route_agent_stream_batch(state, _session_pid, _batch, _owner) do
     {:noreply, schedule_render(state, 16)}
   end
@@ -1736,6 +1740,8 @@ defmodule MingaEditor do
     state = Events.dispatch(state, session_pid, event)
     {:noreply, state}
   end
+
+  defp route_agent_event(state, _session_pid, _event, :unreachable), do: {:noreply, state}
 
   defp route_agent_event(state, session_pid, event, :background) do
     state = MingaEditor.Shell.Workflow.ensure_available(state)
@@ -1795,7 +1801,7 @@ defmodule MingaEditor do
   end
 
   @spec agent_event_owner(EditorState.t(), pid()) ::
-          :inline_edit | :inline_ask | :active_agent | :background
+          :inline_edit | :inline_ask | :active_agent | :background | :unreachable
   defp agent_event_owner(state, session_pid) do
     if InlineEditEvents.session?(state, session_pid) do
       :inline_edit
@@ -1805,7 +1811,7 @@ defmodule MingaEditor do
   end
 
   @spec agent_event_owner_without_inline_edit(EditorState.t(), pid()) ::
-          :inline_ask | :active_agent | :background
+          :inline_ask | :active_agent | :background | :unreachable
   defp agent_event_owner_without_inline_edit(state, session_pid) do
     if InlineAskEvents.session?(state, session_pid) do
       :inline_ask
@@ -1814,7 +1820,30 @@ defmodule MingaEditor do
     end
   end
 
-  @spec active_or_background_agent_event(EditorState.t(), pid()) :: :active_agent | :background
+  @spec active_or_background_agent_event(EditorState.t(), pid()) ::
+          :active_agent | :background | :unreachable
+  defp active_or_background_agent_event(
+         %{shell_runtime: %{state: %{tab_bar: %TabBar{} = tabs}}},
+         session_pid
+       ) do
+    case TabBar.active_workspace(tabs) do
+      %Workspace{
+        payload: %WorkspaceAgent{
+          session: ^session_pid,
+          remote_session: %{connection_status: status}
+        }
+      }
+      when status != :connected ->
+        :unreachable
+
+      %Workspace{payload: %WorkspaceAgent{session: ^session_pid}} ->
+        :active_agent
+
+      _other ->
+        :background
+    end
+  end
+
   defp active_or_background_agent_event(state, session_pid) do
     if MingaEditor.Shell.Runtime.active_session(state.shell_runtime) == session_pid,
       do: :active_agent,

@@ -116,8 +116,13 @@ defmodule MingaEditor.FocusOwner do
        when scope in [:editor, :git_status],
        do: true
 
-  # Scoped yields some agent leader keys, but AgentNav still admits navigation;
-  # focused composer input also stays agent-owned. Hover runs above this layer.
+  # Agent chat and the file viewer yield every leader key to ModeFSM; a focused
+  # composer stays agent-owned. Hover runs above this layer.
+  defp yields_to_leader?(%{
+         workspace: %{keymap_scope: :agent, agent_ui: %{panel: %{input_focused: false}}}
+       }),
+       do: true
+
   defp yields_to_leader?(_state), do: false
 
   defp scope_owner(%{

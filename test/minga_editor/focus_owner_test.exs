@@ -277,14 +277,22 @@ defmodule MingaEditor.FocusOwnerTest do
     assert {:handled, _} = MingaEditor.Input.Hover.handle_key(hover, ?j, 0)
   end
 
-  test "agent leader admission is not generalized past its navigation fallback" do
+  test "agent leader input yields to ModeFSM unless the composer is focused" do
     ctx = start_editor("agent leader")
     send_keys_sync(ctx, " ")
     agent = activate_scope(editor_state(ctx), :agent, nil)
     assert Minga.Editing.in_leader?(agent)
     assert {:passthrough, _} = MingaEditor.Input.Scoped.handle_key(agent, ?j, 0)
-    assert {:handled, _} = MingaEditor.Input.AgentNav.handle_key(agent, ?j, 0)
-    assert %{responder: :editor_view, surface: :agent} = FocusOwner.derive(agent)
+    assert {:passthrough, _} = MingaEditor.Input.AgentNav.handle_key(agent, ?j, 0)
+    assert %{responder: :editor_view, surface: :editor} = FocusOwner.derive(agent)
+
+    composer =
+      MingaEditor.Shell.Traditional.Workflow.install_agent_ui(
+        agent,
+        MingaEditor.Agent.PromptBuffer.set_input_focused(agent.workspace.agent_ui, true)
+      )
+
+    assert %{responder: :editor_view, surface: :agent} = FocusOwner.derive(composer)
   end
 
   defp activate_modal(ctx, :none, _path), do: editor_state(ctx)

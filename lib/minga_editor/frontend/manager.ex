@@ -15,6 +15,8 @@ defmodule MingaEditor.Frontend.Manager do
 
   Both modes use identical `{:packet, 4}` framing. The protocol layer (event decoding, render commands, subscriber broadcasting) is the same.
 
+  In spawn mode the manager owns the renderer process. When the manager stops, including during `System.stop/1`, it sends `renderer_shutdown` and waits, bounded by `:renderer_exit_timeout_ms`, for the renderer to restore the terminal and exit. The VM therefore never exits while the renderer is still leaving the alternate screen. If the renderer does not exit in time, the manager closes the Port; the renderer also restores the terminal on stdin EOF.
+
   Output admission always uses `Port.command/3` with `:nosuspend`. If the transport is unwritable, the manager retains one current frame and one latest coalesced replacement and retries within a short budget. An expired frame-only interval requests correlated keyframe recovery. An expired interval with retained controls terminates the failed transport instead of discarding one-shot effects. Synchronous admission calls keep frame binaries out of the manager mailbox while leaving the process free to receive frontend input between attempts.
 
   Subscribers register via `subscribe/1` and receive messages as:
@@ -46,6 +48,11 @@ defmodule MingaEditor.Frontend.Manager do
 
   @transport_failure_reason :frontend_output_transport_failure
 
+  # Bounded wait for a spawned renderer to restore the terminal and exit. It stays
+  # below the default worker shutdown timeout (5 s) so the supervisor never kills
+  # the manager while it waits.
+  @renderer_exit_timeout_ms 2_000
+
   @typedoc "Options for starting the port manager."
   @type start_opt ::
           {:name, GenServer.name() | nil}
@@ -58,6 +65,7 @@ defmodule MingaEditor.Frontend.Manager do
           | {:output_retry_ms, pos_integer()}
           | {:output_failure_ms, non_neg_integer()}
           | {:tty_path, String.t() | nil}
+          | {:renderer_exit_timeout_ms, non_neg_integer()}
 
   alias MingaEditor.Frontend.Manager.State, as: PortState
 
@@ -157,6 +165,10 @@ defmodule MingaEditor.Frontend.Manager do
   def init(opts) do
     StartupTimer.mark(:frontend_port_spawn)
 
+    # Trap exits so supervisor shutdown runs terminate/2, which waits for a
+    # spawned renderer to restore the terminal before the VM can exit.
+    Process.flag(:trap_exit, true)
+
     # Port.Manager sends large binary render commands every frame.
     # Frequent full sweeps reclaim binary refs promptly.
     Process.flag(:fullsweep_after, 20)
@@ -174,7 +186,9 @@ defmodule MingaEditor.Frontend.Manager do
       port_commander: Keyword.get(opts, :port_commander, &Port.command/3),
       command_observer: Keyword.get(opts, :command_observer),
       output_retry_ms: Keyword.get(opts, :output_retry_ms, 2),
-      output_failure_ms: Keyword.get(opts, :output_failure_ms, 50)
+      output_failure_ms: Keyword.get(opts, :output_failure_ms, 50),
+      renderer_exit_timeout_ms:
+        Keyword.get(opts, :renderer_exit_timeout_ms, @renderer_exit_timeout_ms)
     }
 
     result = {:ok, start_port(state, port_opener)}
@@ -329,6 +343,14 @@ defmodule MingaEditor.Frontend.Manager do
     {:noreply, OutputHandler.disconnect(state)}
   end
 
+  # Trapping exits turns the Port's exit signal into a message. A normal close
+  # follows `:exit_status` or `:eof`, which own the lifecycle. Any other reason
+  # is a Port failure and stops the manager, as the untrapped link did.
+  def handle_info({:EXIT, port, :normal}, %{port: port} = state), do: {:noreply, state}
+
+  def handle_info({:EXIT, port, reason}, %{port: port} = state),
+    do: {:stop, reason, OutputHandler.disconnect(state)}
+
   def handle_info({:DOWN, ref, :process, pid, _reason}, state) do
     state = MingaEditor.Frontend.Manager.AgentNotifications.owner_down(state, pid, ref)
     subscribers = Enum.reject(state.subscribers, &(&1 == pid))
@@ -339,7 +361,53 @@ defmodule MingaEditor.Frontend.Manager do
     {:noreply, state}
   end
 
+  @impl true
+  @spec terminate(term(), state()) :: :ok
+  def terminate(_reason, state), do: stop_renderer(state)
+
   # ── Private ──
+
+  # A spawned renderer must restore the terminal before the VM exits. If the VM
+  # exits first, the launcher returns while the renderer is still writing the
+  # restore sequence: a shell prints its prompt on the alternate screen, and when
+  # the launcher is the terminal's session leader the kernel revokes the
+  # terminal, so the late restore write is lost. Ask the renderer to exit, wait
+  # for it, then close the Port. Connected mode does not own the frontend
+  # process, so it has nothing to stop.
+  @spec stop_renderer(state()) :: :ok
+  defp stop_renderer(%{port_mode: :spawn, port: port} = state) when is_port(port) do
+    case OutputHandler.admit_final_command(state, Protocol.encode_renderer_shutdown()) do
+      :accepted -> await_renderer_exit(port, state.renderer_exit_timeout_ms)
+      :unwritable -> :ok
+    end
+
+    close_port(port)
+  end
+
+  defp stop_renderer(_state), do: :ok
+
+  @spec await_renderer_exit(port(), non_neg_integer()) :: :ok
+  defp await_renderer_exit(port, timeout_ms) do
+    receive do
+      {^port, {:exit_status, _status}} -> :ok
+      {:EXIT, ^port, _reason} -> :ok
+    after
+      timeout_ms ->
+        Minga.Log.warning(
+          :port,
+          "Renderer did not exit within #{timeout_ms}ms of renderer_shutdown; closing its port"
+        )
+    end
+  end
+
+  # The Port is already closed when the renderer exited first.
+  @spec close_port(port()) :: :ok
+  defp close_port(port) do
+    Port.close(port)
+    :ok
+  rescue
+    ArgumentError -> :ok
+  end
 
   @spec start_port(state(), fun()) :: state()
   defp start_port(%{port_mode: :connected} = state, port_opener) do

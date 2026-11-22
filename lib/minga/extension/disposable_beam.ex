@@ -2,7 +2,9 @@ defmodule Minga.Extension.DisposableBeam do
   @moduledoc false
 
   alias Minga.Extension.ArtifactValidator
+  alias Minga.Extension.HexIsolatedInstall
   alias Minga.Extension.IsolatedCompiler
+  alias Minga.Extension.OSProcessTree
   alias Minga.SecureFile
 
   @max_request_bytes 256 * 1024
@@ -10,7 +12,7 @@ defmodule Minga.Extension.DisposableBeam do
   @line_bytes 1_024
   @startup_attempts 2
 
-  @type mode :: :compiler | :validator
+  @type mode :: :compiler | :validator | :hex_installer
   @type run_error ::
           :executable_unavailable
           | :output_limit_exceeded
@@ -23,7 +25,8 @@ defmodule Minga.Extension.DisposableBeam do
   @doc "Runs one allowlisted worker in a standalone disposable BEAM OS process."
   @spec run(mode(), map(), String.t(), timeout()) :: :ok | {:error, run_error()}
   def run(mode, request, request_parent, timeout)
-      when mode in [:compiler, :validator] and is_map(request) and is_binary(request_parent) and
+      when mode in [:compiler, :validator, :hex_installer] and is_map(request) and
+             is_binary(request_parent) and
              is_integer(timeout) and timeout > 0 do
     request_path = Path.join(request_parent, ".beam-request-#{unique_suffix()}.json")
     binary = JSON.encode!(request)
@@ -69,6 +72,7 @@ defmodule Minga.Extension.DisposableBeam do
   @spec dispatch(String.t(), map()) :: :ok
   defp dispatch("compiler", request), do: IsolatedCompiler.run_disposable(request)
   defp dispatch("validator", request), do: ArtifactValidator.run_disposable(request)
+  defp dispatch("hex_installer", request), do: HexIsolatedInstall.run_disposable(request)
   defp dispatch(_mode, _request), do: :invalid_mode
 
   @spec request_size(binary()) :: :ok | {:error, :request_too_large}
@@ -106,6 +110,7 @@ defmodule Minga.Extension.DisposableBeam do
           :stderr_to_stdout,
           :hide,
           {:line, @line_bytes},
+          {:env, child_env(mode)},
           {:args, arguments}
         ]
       )
@@ -114,6 +119,11 @@ defmodule Minga.Extension.DisposableBeam do
   rescue
     error -> {:error, {:port_failed, Exception.message(error)}}
   end
+
+  # Package compile-time code runs in the Hex installer, so it gets no Minga provider secrets.
+  @spec child_env(mode()) :: [{charlist(), false}]
+  defp child_env(:hex_installer), do: HexIsolatedInstall.child_env()
+  defp child_env(_mode), do: []
 
   @spec run_port(String.t(), mode(), String.t(), timeout(), pos_integer()) ::
           :ok | {:error, run_error()}
@@ -216,10 +226,11 @@ defmodule Minga.Extension.DisposableBeam do
   defp output_size(binary) when is_binary(binary), do: byte_size(binary)
   defp output_size({_line_status, binary}), do: byte_size(binary)
 
+  # Stops the worker and the build tools it started; see OSProcessTree for why a process-group signal is not enough.
   @spec kill(port()) :: :ok
   defp kill(port) do
     case Port.info(port, :os_pid) do
-      {:os_pid, pid} -> kill_os_pid(pid)
+      {:os_pid, pid} -> OSProcessTree.kill(pid)
       nil -> :ok
     end
 
@@ -231,20 +242,6 @@ defmodule Minga.Extension.DisposableBeam do
   defp safe_close(port) do
     if Port.info(port) != nil, do: Port.close(port)
     :ok
-  rescue
-    _error -> :ok
-  end
-
-  @spec kill_os_pid(non_neg_integer()) :: :ok
-  defp kill_os_pid(pid) do
-    case System.find_executable("kill") do
-      nil ->
-        :ok
-
-      executable ->
-        _ = System.cmd(executable, ["-KILL", Integer.to_string(pid)], stderr_to_stdout: true)
-        :ok
-    end
   rescue
     _error -> :ok
   end

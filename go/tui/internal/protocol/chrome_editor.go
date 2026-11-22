@@ -346,6 +346,7 @@ func decodeStatus(payload []byte) (StatusBar, string, int, error) {
 	}
 
 	status := StatusBar{}
+	var conflictIndex uint32
 	parts := make([]string, 0, 4)
 	offset := 2
 	for i := 0; i < int(payload[1]); i++ {
@@ -399,7 +400,19 @@ func decodeStatus(payload []byte) (StatusBar, string, int, error) {
 				return StatusBar{}, "", 0, err
 			}
 			status.Review = &review
+		case 0x11:
+			if len(section) != 4 || conflictIndex != 0 || u32(section, 0) == 0 {
+				return StatusBar{}, "", 0, fmt.Errorf("malformed gui_status_bar conflict index")
+			}
+			conflictIndex = u32(section, 0)
 		}
+	}
+
+	if conflictIndex != 0 {
+		if status.Review == nil || status.Review.Generation == 0 || status.Review.ItemID == "" {
+			return StatusBar{}, "", 0, fmt.Errorf("gui_status_bar conflict without a valid review offer")
+		}
+		status.Review.ConflictIndex = conflictIndex
 	}
 
 	return status, stringsJoin(parts, "  "), size, nil

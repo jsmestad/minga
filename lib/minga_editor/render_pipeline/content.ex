@@ -376,8 +376,7 @@ defmodule MingaEditor.RenderPipeline.Content do
     new_cursor = if ci != nil, do: ci, else: cursor
     {[content | frames], new_cursor, st}
   catch
-    # Prompt or session process died between state sync and this render.
-    # Skip this window; the next lifecycle event will clean up state.
+    # Retire the old composer frame so AgentChatBuilder can publish the failure.
     :exit, _ ->
       {frames, cursor, warn_unavailable_prompt(st, window, win_id, :unavailable)}
   end
@@ -440,7 +439,7 @@ defmodule MingaEditor.RenderPipeline.Content do
       # Publishing to Messages requests another render. Warn once per fault.
       Minga.Log.warning(
         :render,
-        "[content] skipped agent window #{id}: composer buffer #{reason}"
+        "[content] Agent composer unavailable for window #{id}: #{reason}"
       )
 
       Input.record_prompt_unavailable(state, fault)

@@ -6,7 +6,7 @@ defmodule Minga.ReleaseTest do
 
   @moduletag :tmp_dir
   @native_artifacts ~w(minga-renderer-go minga-parser minga-hook-runner minga-shell-output-reader)
-  @resources ~w(queries/elixir/highlights.scm extensions/example/extension.ex tree_sitter/parser.h tutor.txt)
+  @resources ~w(queries/elixir/highlights.scm tree_sitter/parser.h tutor.txt)
 
   setup %{tmp_dir: external_dir} do
     dir = Path.join([Mix.Project.build_path(), "release-tests", Path.basename(external_dir)])
@@ -55,7 +55,7 @@ defmodule Minga.ReleaseTest do
       Enum.each(@native_artifacts ++ @resources, &write_file(priv, &1))
 
       leftovers =
-        ~w(minga-test-harness minga-renderer minga-renderer-gui scratch/output.dSYM/Contents/debug)
+        ~w(minga-test-harness minga-renderer minga-renderer-gui scratch/output.dSYM/Contents/debug extensions/example/extension.ex)
 
       Enum.each(leftovers, &write_file(priv, &1))
       watcher_priv = Path.join(release.path, "lib/file_system-1.1.1/priv")

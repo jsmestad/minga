@@ -110,8 +110,16 @@ defmodule MingaEditor.Agent.StatusEventWorkflow do
   defp update_turn_activity(state, status) when status in [:thinking, :tool_executing],
     do: update_activity(state, &Activity.start_turn/1)
 
-  defp update_turn_activity(state, status) when status in [:idle, :error, :plan],
-    do: update_activity(state, &Activity.finish_turn/1)
+  defp update_turn_activity(state, :idle), do: update_activity(state, &Activity.finish_turn/1)
+
+  defp update_turn_activity(state, status) when status in [:error, :plan] do
+    update_activity(state, fn activity ->
+      case Activity.active_tool_name(activity) do
+        nil -> Activity.finish_turn(activity)
+        _running -> activity
+      end
+    end)
+  end
 
   defp update_turn_activity(state, _status), do: state
 

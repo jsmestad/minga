@@ -19,6 +19,7 @@ defmodule MingaEditor.Agent.SessionEventWorkflow do
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Workspace
+  alias MingaEditor.State.Workspace.Agent, as: WorkspaceAgent
   alias MingaAgent.Question
   alias MingaAgent.Question.Target, as: QuestionTarget
   alias MingaAgent.Session
@@ -92,6 +93,9 @@ defmodule MingaEditor.Agent.SessionEventWorkflow do
   @spec error(EditorState.t(), String.t()) :: EditorState.t()
   def error(%EditorState{} = state, message) when is_binary(message) do
     state
+    |> TraditionalWorkflow.install_agent_ui(
+      UIState.report_chat_start_failure(state.workspace.agent_ui, message)
+    )
     |> restore_queued_prompts_after_error()
     |> TraditionalWorkflow.install_agent_error(message)
     |> MingaEditor.schedule_render(16)
@@ -116,6 +120,36 @@ defmodule MingaEditor.Agent.SessionEventWorkflow do
   end
 
   def connection_changed(%EditorState{} = state, _session_pid, _connection), do: state
+
+  @doc "Retires the chat attached to an exact stopped or unreachable Session."
+  @spec session_unreachable(EditorState.t(), pid() | nil, :unavailable | {:failed, String.t()}) ::
+          EditorState.t()
+  def session_unreachable(
+        %EditorState{shell_runtime: %Runtime{state: %TraditionalState{tab_bar: %TabBar{} = tabs}}} =
+          state,
+        session,
+        lifecycle
+      )
+      when is_pid(session) do
+    case {Runtime.active_session(state.shell_runtime),
+          TabBar.find_workspace_by_session(tabs, session)} do
+      {^session, _owner} ->
+        state
+        |> TraditionalWorkflow.install_agent_cache_reset()
+        |> TraditionalWorkflow.install_agent_ui(
+          UIState.transition_chat(state.workspace.agent_ui, lifecycle)
+        )
+
+      {_active, %Workspace{id: id, payload: %WorkspaceAgent{agent_ui: %UIState{} = ui}}} ->
+        tabs = TabBar.set_workspace_agent_ui(tabs, id, UIState.transition_chat(ui, lifecycle))
+        WorkspaceWorkflow.install_tab_bar(state, tabs)
+
+      _no_owner ->
+        state
+    end
+  end
+
+  def session_unreachable(%EditorState{} = state, _session, _lifecycle), do: state
 
   @doc "Updates explicit credential readiness and schedules a render."
   @spec credentials_status(EditorState.t(), MingaAgent.Credentials.readiness()) :: EditorState.t()

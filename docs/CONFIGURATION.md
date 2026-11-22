@@ -1154,7 +1154,7 @@ Extensions are reusable, self-contained editor plugins. Each extension runs unde
 These extensions install only when you opt in. Add the lines you want to `config.exs` and restart Minga:
 
 ```elixir
-extension :minga_adversarial, git: "https://github.com/jsmestad/minga-adverserial"
+extension :minga_adversarial, git: "https://github.com/jsmestad/minga-adversarial"
 extension :minga_knowledge_graph, git: "https://github.com/jsmestad/minga-knowledge-graph"
 extension :minga_ghost_cursors, git: "https://github.com/jsmestad/minga-ghost-cursors"
 extension :minga_git_extended, git: "https://github.com/jsmestad/minga-git-extended"
@@ -1163,6 +1163,8 @@ extension :minga_git_extended, git: "https://github.com/jsmestad/minga-git-exten
 If you used Knowledge Graph before this change, keep the name `:minga_knowledge_graph` to continue using your saved graph. The Git checkout is separate from its data.
 
 GitExtended adds the Git status panel, staging, commits, and branch commands. The branch in the modeline and the changed-line signs in the gutter work without it.
+
+If your config has `extension :git_porcelain`, replace it with the `:minga_git_extended` line above and restart Minga.
 
 To disable an extension, remove its install line and restart Minga.
 
@@ -1258,7 +1260,7 @@ extension :minga_snippets, git: "https://github.com/user/minga-snippets"
 extension :minga_tools, hex: "minga_tools", version: "~> 0.3"
 ```
 
-Exactly one of `path:`, `git:`, or `hex:` is required. Extra keyword options (everything except the source and its sub-options like `branch:`, `app:`, or `version:`) are passed to the extension as config. If the extension declares typed options with `option/3`, these values are validated at load time:
+Provide one source: `path:`, `git:`, or `hex:`. Extra keyword options (everything except the source and its sub-options like `branch:`, `app:`, or `version:`) are passed to the extension as config. If the extension declares typed options with `option/3`, these values are validated at load time:
 
 ```elixir
 # Config options are grouped right in the extension declaration
@@ -1319,6 +1321,24 @@ extension :tools, hex: "minga_tools", app: :minga_tools, version: "== 0.3.1"
 Omitting `version:` fetches the latest stable release. If the extension config name differs from the Hex package and OTP app name, pass `app:` explicitly so Minga can build the Mix dependency and start the correct application without atomizing package strings at runtime.
 
 All hex extensions are installed in a single `Mix.install/2` call at startup. The results are cached (keyed on the dep list hash), so the second boot with the same extensions skips all network and compilation work. The cache lives at `~/.cache/mix/installs/`.
+
+#### Hex extensions under the development launcher
+
+If you work on Minga itself and run it with `bin/minga`, Minga runs inside its own Mix project (`mix minga`), and `Mix.install/2` refuses to run there. Minga handles this for you: it runs the install in a separate, short-lived BEAM process that has no Mix project, then loads the result through the same admission checks a release build uses. You declare the extension exactly as above, and it loads the way it does for users.
+
+A few things differ from a release build:
+
+- The build and install directory lives in Minga's data directory, at `$XDG_DATA_HOME/minga/hex_extension_installs/` (or `~/.local/share/minga/hex_extension_installs/`), and Minga keeps it private to your user. `bin/minga` points that directory at its private development profile, so the build never lands in your Mix project or in `~/.cache/mix/installs/`. The Hex package cache (`HEX_HOME`) and `MIX_HOME`, where the Hex client lives, are still shared with the rest of your machine.
+- The extension compiles against the Minga modules from your checkout, so `minga_sdk` compiles no stubs. A dependency that Minga already ships (for example `jason`) uses Minga's copy.
+- Minga refuses to load a dependency that would replace a Minga module. The install fails and names the conflicting module.
+- The installer process does not receive Minga's provider keys (`OPENAI_API_KEY` and the other provider variables, `ANTHROPIC_*`, and `MINGA_GATEWAY_TOKEN`), because a package's compile-time code runs there.
+- Loaded extension code stays in memory until Minga exits. If you change an extension's `version:` and reload your config, the reload fails with a message asking you to restart Minga to switch versions.
+
+If the install fails (no network, a compile error, or a module conflict), `*Messages*` shows the reason with the tail of the installer's output (with credentials in URLs redacted), and `:extensions` lists the extension as `load_error`. To work around a failure, clone the extension and load it with `path:` instead:
+
+```elixir
+extension :claude_bridge, path: "~/code/minga-claude-bridge"
+```
 
 ### Listing extensions
 

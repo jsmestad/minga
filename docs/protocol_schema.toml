@@ -77,9 +77,9 @@ version = "2.0.0"
 # geometry uses a u32 continuation offset for oversized windowed lines.
 # protocol_version 36 adds source-presentation-bound absolute visual scroll targets.
 # protocol_version 38 adds the native agent desktop notification instruction.
-# protocol_version 39 binds Git Status actions to the displayed panel, including
-# the exact row for file actions, and adds terminal Git Status presentation fields.
-protocol_version = 39
+# protocol_version 39 adds renderer_shutdown, which restores the terminal before the VM stops.
+# protocol_version 40 binds Git Status actions to the displayed panel and file actions to the exact row. It also adds terminal Git Status presentation fields.
+protocol_version = 40
 description = "Minga port protocol opcode registry"
 
 # Directions:
@@ -344,6 +344,21 @@ direction = "beam_to_frontend"
 consumers = ["swift"]
 skip = { go = "Native application quit negotiation is not used by the TUI" }
 framing = "len16"
+
+# renderer_shutdown asks a renderer the BEAM spawned to restore the terminal and
+# exit. fixed:1 = opcode only. It is an out-of-band lifecycle command and is
+# never part of a render transaction. The BEAM sends it when the renderer's
+# owner stops and waits, bounded, for the renderer process to exit, so the VM
+# never exits while the renderer is still restoring the terminal. The native GUI
+# is the BEAM's parent, never a spawned child, so it never receives it.
+[[opcodes]]
+category = "render"
+name = "renderer_shutdown"
+value = 0x14
+direction = "beam_to_frontend"
+consumers = ["go"]
+skip = { swift = "The native GUI is the BEAM's parent process; it is never spawned by the BEAM and never asked to exit" }
+framing = "fixed:1"
 
 # Frame-scoped identity of the BEAM semantic target represented by the editor
 # snapshot. The token is opaque and core-local. fixed:16 = opcode +
@@ -1435,9 +1450,10 @@ value = 0x64
 # Activates one exact item from a frontend-local presentation. Payload:
 # surface(u8) + intent(u8) + generation(u32) + item_id(string16). `item_id` is
 # opaque bytes authored by the owning BEAM surface; frontends only echo it.
-# Surfaces: 1 completion, 2 picker, 3 file_tree, 4 command_completion, 5 timeline.
+# Surfaces: 1 completion, 2 picker, 3 file_tree, 4 command_completion, 5 timeline, 6 review.
 # File-tree intents 7/8 create a file/folder under the named parent (empty = root).
 # Command-completion intent 1 accepts a candidate; timeline intent 1 navigates to an entry ID and intent 2 reviews the full offered file path.
+# Review intents: 1 back to chat, 2 review latest, 3 keep the human version, 4 use the Agent version. Intents 3/4 require an exact current conflict offer.
 [[gui_actions]]
 name = "semantic_item_activate"
 value = 0x65
@@ -2525,6 +2541,12 @@ fields = [
   { name = "request_id", type = "string16" },
   { name = "sequence", type = "u64" },
 ]
+
+[[sections]]
+opcode = "gui_agent_chat"
+id = 0x0F
+name = "lifecycle"
+fields = [{ name = "kind", type = "u8" }, { name = "reason", type = "string16" }]
 
 # gui_picker_preview (0x7D) sections
 

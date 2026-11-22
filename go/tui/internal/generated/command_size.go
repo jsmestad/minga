@@ -24,6 +24,8 @@ func CommandSize(payload []byte) (int, CommandSizeStatus) {
 		return 0, CommandSizeIncomplete
 	}
 	switch payload[0] {
+	case OPRendererShutdown:
+		return fixedCommandSize(payload, 1)
 	case OPSetCursorShape, OPSetLinkCursor:
 		return fixedCommandSize(payload, 2)
 	case OPSetWindowBg:

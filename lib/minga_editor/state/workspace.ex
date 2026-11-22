@@ -441,7 +441,7 @@ defmodule MingaEditor.State.Workspace do
           | session: nil,
             agent_status: :stopped,
             remote_session: persisted_remote_session(remote_session),
-            agent_ui: UIState.new(),
+            agent_ui: UIState.transition_chat(UIState.new(), :unavailable),
             project_view: nil,
             pending_catchup_events: []
         }

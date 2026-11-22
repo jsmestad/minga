@@ -525,6 +525,8 @@ defmodule Minga.Keymap.Bindings do
   description string (for a terminal binding) or the command atom (for a
   prefix or unnamed node).
 
+  A group label with no command bound beneath it is omitted. For example, `SPC g c` does not appear until an extension contributes a commit binding to the group.
+
   ## Examples
 
       iex> trie = Minga.Keymap.Bindings.new()
@@ -534,7 +536,9 @@ defmodule Minga.Keymap.Bindings do
   """
   @spec children(node_t()) :: [{key(), String.t() | atom()}]
   def children(%Node{children: children}) do
-    Enum.map(children, fn {key, %Node{command: command, description: description, children: sub}} ->
+    children
+    |> Enum.filter(fn {_key, node} -> reachable?(node) end)
+    |> Enum.map(fn {key, %Node{command: command, description: description, children: sub}} ->
       label =
         cond do
           description != nil -> description
@@ -546,4 +550,10 @@ defmodule Minga.Keymap.Bindings do
       {key, label}
     end)
   end
+
+  @spec reachable?(node_t()) :: boolean()
+  defp reachable?(%Node{command: command}) when command != nil, do: true
+
+  defp reachable?(%Node{children: children}),
+    do: Enum.any?(children, fn {_key, node} -> reachable?(node) end)
 end

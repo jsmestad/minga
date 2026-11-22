@@ -1581,6 +1581,36 @@ func TestDecodeAgentChatInputFocusedSectionRoundTripAndDefault(t *testing.T) {
 	}
 }
 
+func TestDecodeAgentChatKeepsDraftAndExplicitAvailability(t *testing.T) {
+	for _, fixture := range []struct {
+		kind   AgentChatLifecycle
+		reason string
+	}{
+		{AgentChatConversation, ""},
+		{AgentChatStarting, ""},
+		{AgentChatFailed, "Could not connect to café"},
+		{AgentChatUnavailable, ""},
+	} {
+		payload := []byte{generated.OPGuiAgentChat, 2}
+		payload = append(payload, section(0x01, []byte{1, 0})...)
+		payload = append(payload, section(0x03, string16("unfinished"))...)
+		if fixture.kind != AgentChatConversation {
+			payload[1]++
+			body := append([]byte{byte(fixture.kind)}, string16(fixture.reason)...)
+			payload = append(payload, section(0x0F, body)...)
+		}
+		cmd, err := DecodeCommand(payload)
+		if err != nil {
+			t.Fatal(err)
+		}
+		chat := cmd.Chrome.AgentChat
+		if cmd.Size != len(payload) || !chat.Visible || chat.Prompt != "unfinished" ||
+			chat.Lifecycle != fixture.kind || chat.LifecycleReason != fixture.reason {
+			t.Fatalf("expected %v with the draft preserved, got %+v", fixture.kind, chat)
+		}
+	}
+}
+
 func TestDecodeAgentTimelineChrome(t *testing.T) {
 	timelinePayload := []byte{1, 0xFF, 0xFF, 1, 3}
 	timelinePayload = append(timelinePayload, string8("apply_patch")...)

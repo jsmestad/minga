@@ -30,6 +30,9 @@ const (
 	CommandClipboardWrite
 	CommandExtensionRuntime
 	CommandProtocolError
+	// CommandRendererShutdown is the BEAM's request that the renderer restore
+	// the terminal and exit (renderer_shutdown). It is out of band.
+	CommandRendererShutdown
 	// CommandStreamError is a synthetic, in-band marker the reader injects when a
 	// command in a batch cannot be sized or decoded (#2219). It carries no wire
 	// payload; the model treats it as a transaction invalidation when a frame
@@ -259,6 +262,8 @@ func DecodeCommand(payload []byte) (Command, error) {
 		return skipFontFallback(payload)
 	case generated.OPProtocolError:
 		return decodeProtocolError(payload)
+	case generated.OPRendererShutdown:
+		return Command{Kind: CommandRendererShutdown, Size: 1}, nil
 	case generated.OPClipboardWrite:
 		return decodeClipboardWrite(payload)
 	case generated.OPGuiWindowContent, generated.OPGuiWindowViewportDelta, generated.OPGuiWindowRowsDelta:

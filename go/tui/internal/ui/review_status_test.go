@@ -27,6 +27,10 @@ func reviewStatusCommand(t *testing.T, review *protocol.StatusReview) protocol.C
 		packet = append(packet, 0x10)
 		packet = binary.BigEndian.AppendUint16(packet, uint16(len(section)))
 		packet = append(packet, section...)
+		if review.ConflictIndex != 0 {
+			packet[1]++
+			packet = binary.BigEndian.AppendUint32(append(packet, 0x11, 0, 4), review.ConflictIndex)
+		}
 	}
 	command, err := protocol.DecodeCommand(packet)
 	if err != nil {
@@ -122,6 +126,112 @@ func TestReviewFooterClicksEchoExactCommittedOfferAndNamedHelp(t *testing.T) {
 	click.X = zone.EndX + 2
 	if packet, ok := model.semanticMousePacket(click); ok {
 		t.Fatalf("optional footer metadata is actionable: %x", packet)
+	}
+}
+
+func TestConflictFooterKeepsBothChoicesReachableAndRejectsStaleClicks(t *testing.T) {
+	for _, width := range []uint16{60, 100} {
+		t.Run(fmt.Sprint(width), func(t *testing.T) {
+			model, review := reviewFooterModel(t, width, protocol.ReviewCurrent)
+			out := make(chan []byte, 8)
+			model.out = out
+			review.ConflictIndex = 1
+			applyProductionFrame(&model, 2, 1, 1, reviewStatusCommand(t, &review))
+			drainOutboundPackets(out) // Frame acknowledgement is not a mouse action.
+			view := model.View()
+			if footer := ansi.Strip(strings.Join(model.footerLines(), "\n")); !strings.Contains(footer, "Conflict 1") {
+				t.Fatalf("width %d clipped the visible conflict status: %q", width, footer)
+			}
+			for _, intent := range [...]byte{3, 4} {
+				zone := waitForZone(t, model, zoneIDReviewControl(review, intent))
+				if zone.StartX < 0 || zone.EndX >= int(width) {
+					t.Fatalf("conflict control clipped at width %d: %+v", width, zone)
+				}
+				click := tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft, X: zone.StartX, Y: zone.StartY})
+				next, _ := updateFromPublishedView(model, view, click)
+				model = next.(Model)
+				packets := drainOutboundPackets(out)
+				want := protocol.EncodeGUISemanticItemActivate(6, intent, review.Generation, []byte(review.ItemID))
+				if len(packets) != 1 || !bytes.Equal(packets[0], want) {
+					t.Fatalf("visible conflict control got %x, want %x", packets, want)
+				}
+			}
+			review.Freshness = protocol.ReviewStale
+			applyProductionFrame(&model, 3, 2, 1, reviewStatusCommand(t, &review))
+			drainOutboundPackets(out)
+			view = model.View()
+			if footer := ansi.Strip(strings.Join(model.footerLines(), "\n")); !strings.Contains(footer, "Stale #1") {
+				t.Fatalf("width %d clipped the visible stale status: %q", width, footer)
+			}
+			for _, intent := range [...]byte{3, 4} {
+				zone := waitForZone(t, model, zoneIDReviewControl(review, intent))
+				click := tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft, X: zone.StartX, Y: zone.StartY})
+				next, _ := updateFromPublishedView(model, view, click)
+				model = next.(Model)
+				if packets := drainOutboundPackets(out); len(packets) != 0 {
+					t.Fatalf("stale conflict activated a choice: %x", packets)
+				}
+			}
+		})
+	}
+}
+
+func TestConflictClickDoesNotUseAnUnflushedReplacementHunk(t *testing.T) {
+	model, first := reviewFooterModel(t, 60, protocol.ReviewCurrent)
+	out := make(chan []byte, 8)
+	model.out = out
+	first.ConflictIndex = 1
+	applyProductionFrame(&model, 2, 1, 1, reviewStatusCommand(t, &first))
+	displayed := model.View()
+	hit := *waitForZone(t, model, zoneIDReviewControl(first, 3))
+
+	second := first
+	second.ConflictIndex = 2
+	second.ItemID = "second-hunk"
+	applyProductionFrame(&model, 3, 2, 1, reviewStatusCommand(t, &second))
+	unflushed := model.View()
+	drainOutboundPackets(out)
+	if !strings.Contains(ansi.Strip(displayed.Content), "Conflict 1") ||
+		!strings.Contains(ansi.Strip(unflushed.Content), "Conflict 2") {
+		t.Fatal("the two frames must visibly identify their different selected conflicts")
+	}
+
+	click := tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft, X: hit.StartX, Y: hit.StartY})
+	next, _ := updateFromPublishedView(model, displayed, click)
+	packets := drainOutboundPackets(out)
+	want := protocol.EncodeGUISemanticItemActivate(6, 3, first.Generation, []byte(first.ItemID))
+	if len(packets) != 1 || !bytes.Equal(packets[0], want) {
+		t.Fatalf("click on the first displayed hunk emitted %x, want %x", packets, want)
+	}
+	currentHit := waitForZone(t, model, zoneIDReviewControl(second, 3))
+	next.Update(tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft, X: currentHit.StartX, Y: currentHit.StartY}))
+	if packets := drainOutboundPackets(out); len(packets) != 0 {
+		t.Fatalf("click without a published hit dispatched current state: %x", packets)
+	}
+}
+
+func TestPickerBackdropOwnsClicksOverConflictDecisions(t *testing.T) {
+	model, review := reviewFooterModel(t, 60, protocol.ReviewCurrent)
+	out := make(chan []byte, 8)
+	model.out = out
+	review.ConflictIndex = 1
+	applyProductionFrame(&model, 2, 1, 1, reviewStatusCommand(t, &review))
+	picker := pickerChrome(1, 0)
+	model.chrome[generated.OPGuiPicker] = picker
+	view := model.View()
+	if !strings.Contains(ansi.Strip(view.Content), "item0") {
+		t.Fatal("expected the modal picker to be visible over Review")
+	}
+	drainOutboundPackets(out)
+
+	decision := waitForZone(t, model, zoneIDReviewControl(review, 4))
+	click := tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft, X: decision.StartX, Y: decision.StartY})
+	updateFromPublishedView(model, view, click)
+
+	packets := drainOutboundPackets(out)
+	want := protocol.EncodeGUISemanticItemActivate(byte(presentationPicker), 3, picker.Picker.Generation, nil)
+	if len(packets) != 1 || !bytes.Equal(packets[0], want) {
+		t.Fatalf("picker backdrop over Use Agent sent %x, want only dismissal %x", packets, want)
 	}
 }
 

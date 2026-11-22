@@ -3,7 +3,11 @@ defmodule Minga.Extension.ContributionCleanup do
   Source-owned contribution cleanup coordinator.
 
   The extension supervisor lives in the core `Minga.*` layer, so it cannot depend on editor presentation modules directly. Editor-layer registries register cleanup callbacks here when they accept source-owned contributions. The supervisor calls this module with a source, and the coordinator cleans core registries plus any registered higher-layer callbacks without creating compile-time upward dependencies.
+
+  Callback registration arrives from many processes while they start, so this module also runs as the sole writer of the callback map. The GenServer serializes every `register/2`, `register_contextual/2`, and `unregister/1` and publishes the result through `:persistent_term`; two concurrent registrations can no longer overwrite each other. Cleanup reads the published map directly and runs the callbacks in the calling process, never inside the owner, so a callback that registers another callback cannot deadlock. The owner starts first under `Minga.Supervisor` and adopts the published map when it restarts.
   """
+
+  use GenServer
 
   @typedoc "Source that contributed registry entries."
   @type contribution_source :: :builtin | :config | {:bundle, atom()} | {:extension, atom()}
@@ -34,6 +38,10 @@ defmodule Minga.Extension.ContributionCleanup do
 
   @callbacks_key {__MODULE__, :callbacks}
 
+  @doc "Starts the sole writer of the cleanup callback map."
+  @spec start_link(keyword()) :: GenServer.on_start()
+  def start_link(_opts \\ []), do: GenServer.start_link(__MODULE__, :ok, name: __MODULE__)
+
   @doc "Registers a cleanup callback for a contribution family."
   @spec register(atom(), cleanup_fun()) :: :ok
   def register(name, fun) when is_atom(name) and is_function(fun, 1) do
@@ -48,11 +56,7 @@ defmodule Minga.Extension.ContributionCleanup do
 
   @doc "Unregisters a cleanup callback. Mostly useful for tests."
   @spec unregister(atom()) :: :ok
-  def unregister(name) when is_atom(name) do
-    callbacks = Map.delete(callbacks(), name)
-    :persistent_term.put(@callbacks_key, callbacks)
-    :ok
-  end
+  def unregister(name) when is_atom(name), do: GenServer.call(__MODULE__, {:unregister, name})
 
   @doc false
   @spec merge_callbacks(%{atom() => registered_cleanup_fun()}) ::
@@ -131,10 +135,34 @@ defmodule Minga.Extension.ContributionCleanup do
   defp include_full_cleanup_family?(_source, _family), do: true
 
   @spec put_callback(atom(), registered_cleanup_fun()) :: :ok
-  defp put_callback(name, fun) do
-    updated = Map.put(callbacks(), name, fun)
+  defp put_callback(name, fun), do: GenServer.call(__MODULE__, {:put, name, fun})
+
+  @impl true
+  @spec init(:ok) :: {:ok, %{atom() => registered_cleanup_fun()}}
+  def init(:ok), do: {:ok, callbacks()}
+
+  @impl true
+  @spec handle_call(
+          {:put, atom(), registered_cleanup_fun()} | {:unregister, atom()},
+          GenServer.from(),
+          %{atom() => registered_cleanup_fun()}
+        ) :: {:reply, :ok, %{atom() => registered_cleanup_fun()}}
+  def handle_call({:put, name, fun}, _from, callbacks) do
+    {:reply, :ok, publish_changed(callbacks, Map.put(callbacks, name, fun))}
+  end
+
+  def handle_call({:unregister, name}, _from, callbacks) do
+    {:reply, :ok, publish_changed(callbacks, Map.delete(callbacks, name))}
+  end
+
+  # Every :persistent_term write triggers a global literal-area scan.
+  # Registrations often repeat an identical callback, so an unchanged map is not republished.
+  @spec publish_changed(map(), map()) :: map()
+  defp publish_changed(callbacks, callbacks), do: callbacks
+
+  defp publish_changed(_previous, updated) do
     :persistent_term.put(@callbacks_key, updated)
-    :ok
+    updated
   end
 
   @spec invoke_targeted(registered_cleanup_fun(), contribution_source(), term()) ::

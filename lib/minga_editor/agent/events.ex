@@ -42,18 +42,15 @@ defmodule MingaEditor.Agent.Events do
   def dispatch(%EditorState{} = state, _session_pid, {:tool_started, tool_call_id, name, args}),
     do: ToolEventWorkflow.started(state, tool_call_id, name, args)
 
-  def dispatch(%EditorState{} = state, _session_pid, {:tool_started, name, args}),
-    do: ToolEventWorkflow.started(state, name, args)
-
   def dispatch(%EditorState{} = state, _session_pid, {:tool_update, tool_call_id, name, partial}),
     do: ToolEventWorkflow.updated(state, tool_call_id, name, partial)
 
   def dispatch(
         %EditorState{} = state,
-        session_pid,
+        _session_pid,
         {:tool_ended, %MingaAgent.Event.ToolEnd{} = event}
       ),
-      do: ToolEventWorkflow.ended(state, session_pid, event)
+      do: ToolEventWorkflow.ended(state, event)
 
   def dispatch(%EditorState{} = state, _session_pid, {:tool_interrupted, tool_call_id}),
     do: ToolEventWorkflow.interrupted(state, tool_call_id)

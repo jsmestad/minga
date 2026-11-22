@@ -13,11 +13,13 @@ defmodule Minga.Foundation.Supervisor do
       Foundation.Supervisor (rest_for_one)
       ├── Minga.Language.Registry        ETS, language definitions
       ├── Minga.Extensions.LanguagePacks Bundled language catalog loader
+      ├── Minga.Config.ThemeRegistry     Sole writer of theme registrations
       ├── Minga.Extensions.ThemePacks    Bundled theme pack loader
       ├── Minga.Tool.Recipe.Registry     ETS, tool install recipes
       ├── Minga.Extensions.RecipePacks   Bundled recipe pack loader
       ├── Minga.Events                   Registry(:duplicate), pub/sub bus
       ├── Minga.Config.Options           GenServer, typed options
+      ├── Minga.Keymap.Scope.Registry    Sole writer of keymap scope registrations
       ├── Minga.Keymap.Active            Active keymap state
       ├── Minga.Config.Hooks             Lifecycle hooks
       ├── Minga.Config.Advice            Before/after command advice (ETS)
@@ -30,7 +32,7 @@ defmodule Minga.Foundation.Supervisor do
       ├── MingaAgent.ToolPacks.LSP       Bundled LSP agent tools
       └── Minga.Language.Filetype.Registry Filetype detection
 
-  Language.Registry is first because it owns the ETS table. Bundled packs (language, theme, recipe) start next so consumers see the default catalogs before services, LSP, syntax highlighting, or filetype detection query them. Recipe.Registry precedes RecipePacks and Tool.Registry precedes ToolPacks so the ETS tables exist before packs register into them. Events follows so everything after it re-subscribes on Events restart.
+  Language.Registry is first because it owns the ETS table. Bundled packs (language, theme, recipe) start next so consumers see the default catalogs before services, LSP, syntax highlighting, or filetype detection query them. ThemeRegistry precedes ThemePacks so bundled theme registrations find their writer running; it adopts the published snapshot when it restarts. Recipe.Registry precedes RecipePacks and Tool.Registry precedes ToolPacks so the ETS tables exist before packs register into them. Events follows so everything after it re-subscribes on Events restart. Scope.Registry precedes Keymap.Active, Services, and extension startup so every scope registration finds its writer running; it adopts the published snapshot when it restarts.
   """
 
   use Supervisor
@@ -50,11 +52,13 @@ defmodule Minga.Foundation.Supervisor do
     children = [
       StartupTimer.timed_child_spec(:fnd_lang_registry, Minga.Language.Registry),
       StartupTimer.timed_child_spec(:fnd_lang_packs, Minga.Extensions.LanguagePacks),
+      StartupTimer.timed_child_spec(:fnd_theme_registry, Minga.Config.ThemeRegistry),
       StartupTimer.timed_child_spec(:fnd_theme_packs, Minga.Extensions.ThemePacks),
       StartupTimer.timed_child_spec(:fnd_recipe_registry, Minga.Tool.Recipe.Registry),
       StartupTimer.timed_child_spec(:fnd_recipe_packs, Minga.Extensions.RecipePacks),
       StartupTimer.timed_child_spec(:fnd_events, Minga.Events),
       StartupTimer.timed_child_spec(:fnd_config_options, Minga.Config.Options),
+      StartupTimer.timed_child_spec(:fnd_keymap_scopes, Minga.Keymap.Scope.Registry),
       StartupTimer.timed_child_spec(:fnd_keymap, Minga.Keymap.Active),
       StartupTimer.timed_child_spec(:fnd_hooks, Minga.Config.Hooks),
       StartupTimer.timed_child_spec(:fnd_advice, Minga.Config.Advice),

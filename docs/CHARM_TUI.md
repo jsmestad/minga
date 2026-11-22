@@ -93,6 +93,25 @@ To update the corpus after an intentional semantic change, run `mix run --no-sta
 
 This evidence is an emitted-text-cell capture, not pixel, color, animation or live-interaction proof. The ready-only `scripts/go_tui_boot_smoke.py`, model-only coverage tracked in #2101 and legacy Zig snapshots prove different contracts. Production capture gates Go UI acceptance, not the start of a focused repair. A user-facing change still needs its actual keyboard and mouse walkthrough, plus the relevant [screen snapshot review](recipes/update-snapshots.md).
 
+## Time Agent opening in the packaged terminal editor
+
+Use the shipping launcher to measure what a user waits for after pressing `SPC a n`. The renderer boot smoke cannot measure this request because it does not start the BEAM or send keys. From the source checkout, run:
+
+```bash
+timing_root="$(mktemp -d)"
+python3 -m venv "$timing_root/venv"
+"$timing_root/venv/bin/python" -m pip install -r scripts/go_tui_capture_requirements.txt
+"$timing_root/venv/bin/python" scripts/journey_agent_open.py \
+  --launcher _build/prod/rel/minga/launchers/minga \
+  --revision "$(git rev-parse HEAD)" --output "$timing_root/evidence"
+```
+
+Point `--launcher` to the assembled release's launcher (or `Minga.app/Contents/Resources/bin/minga-tui`) and supply the commit that built those bytes, not an unrelated source checkout. The non-gating **Shipping Agent-open timing** workflow uses the pinned release toolchain and uploads the same evidence without publishing a package.
+
+The driver starts a new disposable profile for every pair, opens a known file, and sends the cold keys on the first visible editor frame. After the first configured conversation settles, it returns to the file and repeats the keys in the same VM. Each timing ends at the first PTY read containing the complete editable composer, which can precede provider readiness. `samples.ndjson` records input and read timestamps; `summary.json` reports nearest-rank p50 and p95 separately from at least 20 cold and 20 warm samples. If the composer never appears, the run fails and keeps the last screen and terminal stream rather than counting a timeout as a sample.
+
+The disposable profile supplies a synthetic OpenAI credential so the built-in Native provider resolves a default model through the packaged local catalog. The driver never submits a prompt and does not qualify remote inference. It measures the Go TUI and the shared Editor. Native macOS adds AppKit key delivery, SwiftUI layout and display presentation, none of which this number includes.
+
 ## Validation
 
 Before pushing renderer changes, run:

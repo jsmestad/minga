@@ -19,8 +19,16 @@ See `Minga.Keymap.Scope` for the behaviour contract, `MingaEditor.Input.Scoped` 
 1. **Sacred vim motions stay.** j/k, gg/G, Ctrl-d/u, /, n/N work exactly as a vim user expects.
 2. **Editing keys are repurposed.** i/a focus the input (semantic parallel to "enter insert mode"). y copies structured content. q/Esc returns to the editor context for the same workspace.
 3. **Standard prefixes for multi-key sequences.** `z` for all-block collapse toggling, `]`/`[` for next/prev code-block or diff-hunk navigation, `g` for go-to actions.
-4. **SPC leader always works.** In navigation mode, SPC delegates to the mode FSM so leader sequences and which-key popups function normally.
-5. **The command line works, and nothing else leaks.** `:` opens the command line, so `:w`, `:qa`, and `:model` work from the chat. Every other key the chat does not bind is ignored. It never edits, or moves focus to, the file buffer behind the chat.
+4. **SPC leader always works.** In navigation mode, SPC delegates to the mode FSM so leader sequences and which-key popups function normally. Once a leader sequence, an operator, or the describe-key prompt (`SPC h k`) is pending, every key goes to it, so `SPC h k q` describes `q` instead of closing the chat.
+5. **The command line works, and nothing else leaks.** `:` opens the command line, so `:w`, `:qa`, and `:model` work from the chat. While the command line, search, or eval prompt is open, every key goes to it. Every other key the chat does not bind is ignored. It never edits, or moves focus to, the file buffer behind the chat.
+
+The chat and the file viewer share one rule for unbound keys: from navigation mode, only SPC, `:`, `M-:`, `/`, `n`, and `N` reach the mode FSM. The rules for pending sequences and open prompts also cover the agent side panel (`SPC a a`), so `:qa` typed from the side panel types `qa` instead of `q` closing the split. Tool approval and diff review keys (`y`, `n`, `a`, `x`, and so on) do not act while a command line or key sequence owns the key, so `:x` never rejects a hunk.
+
+### CUA editing model
+
+The same rule holds in CUA mode. The chat and the file viewer do not edit files, so a CUA editing shortcut that reaches them as a key, such as an undo or paste chord from the terminal, is ignored instead of changing the file buffer behind the chat. Switch to the file to undo there.
+
+On macOS, Cmd+S, Cmd+Z, Cmd+X, Cmd+C, and Cmd+V are menu shortcuts. The menu sends the command itself, not a key, so this rule does not filter them: Cmd+S still saves through the menu, and each of these commands acts on the active buffer exactly as it does from any other surface.
 
 ## Chat Navigation Mode
 
@@ -80,6 +88,8 @@ While the current review is selected, these keys apply:
 | `X` | (unused) | Reject all remaining hunks |
 
 When all hunks are resolved (accepted or rejected), the viewer returns to normal file view.
+
+If a staged agent edit overlaps your own changes, Review shows both versions. Choose **Keep mine** (`x`) or **Use Agent version** (`y`) for the selected conflict. Minga applies the combined result only after every conflict has a choice and the source revisions still match. If either source changes, **Review latest** reloads the conflict before you can choose again.
 
 ### Publishing Approved Edits
 

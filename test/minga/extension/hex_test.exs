@@ -56,8 +56,7 @@ defmodule Minga.Extension.HexTest do
       assert :ok = ExtHex.install_all(r)
     end
 
-    # NOTE: We can't test actual Mix.install/2 inside a Mix project.
-    # The release-level integration test (via `minga eval`) in
-    # application_config_test.exs covers the real Mix.install path.
+    # Inside a Mix project (this test VM, or `bin/minga`) the install runs in a disposable
+    # process; hex_isolated_install_test.exs drives that path with local fixture packages.
   end
 end

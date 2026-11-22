@@ -8,7 +8,7 @@ import Foundation
 
 /// Typed snapshot of status bar data from the BEAM. Named fields prevent transposition bugs.
 public struct StatusBarUpdate: Sendable {
-    /// Immutable source-bound action offer for the read-only Review buffer.
+    /// Immutable source-bound action offer for the Review buffer.
     public struct Review: Sendable, Equatable {
         public enum Freshness: UInt8, Sendable {
             case current = 0
@@ -16,12 +16,14 @@ public struct StatusBarUpdate: Sendable {
         }
         public let path: String
         public let freshness: Freshness
+        public let conflictIndex: UInt32?
         public let generation: UInt32
         public let itemID: String
 
-        public init(path: String, freshness: Freshness, generation: UInt32, itemID: String) {
+        public init(path: String, freshness: Freshness, generation: UInt32, itemID: String, conflictIndex: UInt32? = nil) {
             self.path = path
             self.freshness = freshness
+            self.conflictIndex = conflictIndex
             self.generation = generation
             self.itemID = itemID
         }

@@ -672,9 +672,7 @@ defmodule Minga.Config do
   end
 
   @doc """
-  Declares a built-in extension module to load.
-
-  Built-in optional extensions are already on Minga's code path and do not need a path, git URL, or Hex package.
+  Declares a built-in extension to load. Its module is already on Minga's code path.
 
   ## Examples
 
@@ -728,13 +726,11 @@ defmodule Minga.Config do
 
   @spec register_module_extension(module(), keyword()) :: :ok
   defp register_module_extension(module, opts) when is_atom(module) and is_list(opts) do
-    with {:module, ^module} <- Code.ensure_loaded(module),
-         true <- function_exported?(module, :name, 0) do
+    if Code.ensure_loaded?(module) and function_exported?(module, :name, 0) do
       ExtRegistry.register_module(module.name(), module, opts)
     else
-      _other ->
-        raise ArgumentError,
-              "extension #{inspect(module)}: one of :path, :git, or :hex is required unless the argument is a loaded Minga.Extension module"
+      raise ArgumentError,
+            "extension #{inspect(module)}: one of :path, :git, or :hex is required unless the argument is a loaded Minga.Extension module"
     end
   end
 

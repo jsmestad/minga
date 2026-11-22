@@ -8,14 +8,8 @@ defmodule MingaEditor.Agent.StreamEventWorkflow do
   alias MingaEditor.Agent.ToolEventWorkflow
   alias MingaEditor.Agent.UIState.Panel
   alias MingaEditor.AgentLifecycle
-  alias MingaEditor.Shell.Runtime
-  alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.Shell.Traditional.Workflow, as: TraditionalWorkflow
-  alias MingaEditor.WorkspaceWorkflow
   alias MingaEditor.State, as: EditorState
-  alias MingaEditor.State.TabBar
-  alias MingaEditor.State.Workspace
-  alias MingaAgent.Session
 
   @doc "Applies one durable stream delta through the bounded batch workflow."
   @spec delta(EditorState.t(), term()) :: EditorState.t()
@@ -30,10 +24,9 @@ defmodule MingaEditor.Agent.StreamEventWorkflow do
         Panel.bump_message_version(state.workspace.agent_ui.panel)
       )
 
-    state = maybe_rename_workspace_from_assistant(state)
-    state = MingaEditor.schedule_render(state, 16)
-    state = AgentLifecycle.sync_transcript(state)
-    AgentLifecycle.maybe_update_tab_label(state)
+    state
+    |> MingaEditor.schedule_render(16)
+    |> AgentLifecycle.sync_transcript(:messages_changed)
   end
 
   @doc "Applies one coalesced stream batch with one render and at most one transcript sync."
@@ -77,47 +70,4 @@ defmodule MingaEditor.Agent.StreamEventWorkflow do
   @spec sync_transcript(EditorState.t(), boolean()) :: EditorState.t()
   defp sync_transcript(state, true), do: AgentLifecycle.sync_transcript(state)
   defp sync_transcript(state, false), do: state
-
-  @spec maybe_rename_workspace_from_assistant(EditorState.t()) :: EditorState.t()
-  defp maybe_rename_workspace_from_assistant(state) do
-    with pid when is_pid(pid) <- Runtime.active_session(state.shell_runtime),
-         %TabBar{} = tab_bar <- traditional_tab_bar(state),
-         %Workspace{custom_name: nil} = workspace <-
-           TabBar.find_workspace_by_session(tab_bar, pid),
-         text when is_binary(text) <- first_assistant_opening(safe_messages(pid)),
-         candidate = text |> String.slice(0, 30) |> String.trim(),
-         true <- candidate != "" and candidate != workspace.label do
-      WorkspaceWorkflow.install_auto_named_workspace(state, workspace.id, text)
-    else
-      _unavailable -> state
-    end
-  rescue
-    _error -> state
-  end
-
-  @spec first_assistant_opening([term()]) :: String.t() | nil
-  defp first_assistant_opening(messages) do
-    Enum.find_value(messages, fn
-      {:assistant, text} when is_binary(text) and text != "" ->
-        text |> String.split("\n") |> hd() |> String.trim()
-
-      _message ->
-        nil
-    end)
-  end
-
-  @spec safe_messages(pid()) :: [term()]
-  defp safe_messages(pid) do
-    Session.messages(pid)
-  catch
-    :exit, _reason -> []
-  end
-
-  @spec traditional_tab_bar(EditorState.t()) :: TabBar.t() | nil
-  defp traditional_tab_bar(%EditorState{
-         shell_runtime: %Runtime{state: %TraditionalState{} = state}
-       }),
-       do: TraditionalState.tab_bar(state)
-
-  defp traditional_tab_bar(%EditorState{}), do: nil
 end

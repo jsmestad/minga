@@ -96,7 +96,7 @@ defmodule Minga.Config.LoaderTest do
         bind :normal, "SPC k f", :knowledge_map, "Familiarity"
         bind :normal, "SPC k c", :knowledge_briefing, "Briefing"
         bind :normal, "SPC a z", :adversarial_analyze, "Challenge"
-        extension :minga_adversarial, git: "https://github.com/jsmestad/minga-adverserial"
+        extension :minga_adversarial, git: "https://github.com/jsmestad/minga-adversarial"
         raise "later config error"
         """)
 
@@ -132,6 +132,37 @@ defmodule Minga.Config.LoaderTest do
       server = Map.new(server, fn {key, value} -> {to_string(key), value} end)
       assert Map.get(server, "name") == "github"
       assert Map.get(server, "command") == "npx"
+    end
+  end
+
+  describe "optional GitExtended" do
+    setup do
+      previous_load_extensions = Application.get_env(:minga, :load_extensions)
+      # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
+      Application.put_env(:minga, :load_extensions, true)
+      ensure_extension_runtime()
+
+      on_exit(fn ->
+        ExtSupervisor.stop_all()
+        ExtRegistry.reset()
+        restore_application_env(:load_extensions, previous_load_extensions)
+      end)
+
+      :ok
+    end
+
+    test "a default config does not declare GitExtended or register its commands" do
+      {_dir, config_home, cleanup} = make_config_dir("use Minga.Config\n")
+      on_exit(cleanup)
+      Minga.Events.subscribe(:extension_deferred_batch_complete)
+
+      pid = start_supervised!({Loader, name: nil, config_home: config_home})
+
+      assert Loader.load_error(pid) == nil
+      assert ExtRegistry.get(:minga_git_extended) == :error
+      assert ExtRegistry.all() == []
+      assert CommandRegistry.lookup(CommandRegistry, :git_status_toggle) == :error
+      refute_receive {:minga_event, :extension_deferred_batch_complete, _event}, 500
     end
   end
 
@@ -1202,6 +1233,11 @@ defmodule Minga.Config.LoaderTest do
       assert Loader.load_error(pid) == nil
       # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
       Application.put_env(:minga, :load_extensions, true)
+
+      on_exit(fn ->
+        ExtSupervisor.stop_all()
+        ExtRegistry.reset()
+      end)
 
       assert {:error, msg} = Loader.reload(pid)
       assert msg =~ "Extension start_all failed"

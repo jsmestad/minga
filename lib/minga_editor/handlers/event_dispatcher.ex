@@ -15,6 +15,7 @@ defmodule MingaEditor.Handlers.EventDispatcher do
   alias Minga.Mode.ExtensionConfirmState
   alias MingaAgent.InferenceRoute.StatusChangedEvent
   alias MingaAgent.Session.ConnectionSnapshot
+  alias MingaEditor.Agent.SessionEventWorkflow
   alias MingaEditor.Agent.UIState
   alias MingaEditor.AgentLifecycle
   alias MingaEditor.Commands
@@ -469,6 +470,7 @@ defmodule MingaEditor.Handlers.EventDispatcher do
 
     if active_remote_server?(state, server_name) do
       state
+      |> project_active_remote_unavailable()
       |> MingaEditor.Shell.Traditional.Workflow.install_agent_spinner_stop()
       |> then(fn state ->
         MingaEditor.Shell.Traditional.Workflow.install_agent_state(
@@ -487,6 +489,12 @@ defmodule MingaEditor.Handlers.EventDispatcher do
         "[#{server_name}] disconnected, reconnecting..."
       )
     end
+  end
+
+  @spec project_active_remote_unavailable(EditorState.t()) :: EditorState.t()
+  defp project_active_remote_unavailable(state) do
+    session = MingaEditor.Shell.Runtime.active_session(state.shell_runtime)
+    SessionEventWorkflow.session_unreachable(state, session, :unavailable)
   end
 
   @spec discover_remote_sessions(node(), String.t()) :: [Remote.remote_session_entry()]

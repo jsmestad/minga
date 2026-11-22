@@ -165,6 +165,22 @@ defmodule Minga.Test.ScopedInputHelpers do
     end)
   end
 
+  @doc "Walks each key through the surface handler chain and returns the final state."
+  @spec walk_keys(EditorState.t(), [{non_neg_integer(), non_neg_integer()}]) :: EditorState.t()
+  def walk_keys(state, keys) do
+    Enum.reduce(keys, state, fn {cp, mods}, acc ->
+      {:handled, acc} = walk_surface_handlers(acc, cp, mods)
+      acc
+    end)
+  end
+
+  @doc "Returns the text shown in the `*Help*` buffer, or nil when none was shown."
+  @spec help_text(EditorState.t()) :: String.t() | nil
+  def help_text(%EditorState{workspace: %{buffers: %{help: help}}}) when is_pid(help),
+    do: Minga.Buffer.content(help)
+
+  def help_text(_state), do: nil
+
   @spec ft(EditorState.t()) :: FileTreeState.t()
   def ft(state), do: state.workspace.file_tree
 

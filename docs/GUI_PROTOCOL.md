@@ -344,6 +344,7 @@ opcode(1) + section_count(1) + [section_id(1) + section_len(2) + payload(section
 | 0x0E | PendingKeys | keys_len(2) + keys |
 | 0x0F | Operation | operation_id(8) + kind(1) + status(1) + flags(1) + message_len(2) + message + queue_position(2) + queue_total(2) + progress_current(4) + progress_total(4) |
 | 0x10 | Review | path_len(2) + path + freshness(1: 0=current, 1=stale) + generation(4) + item_id_len(2) + item_id |
+| 0x11 | ReviewConflict | `conflict_index:u32` (one-based). Requires a Review section in the same update with a nonzero generation and nonempty item ID. |
 
 The Operation section is omitted when the Editor-global operation store is empty. It is independent of the Message section, so a structured-only payload remains discoverable. Operation selection prefers the newest active (`pending`, `queued`, or `running`) record and otherwise the newest retained terminal record. An older terminal outcome never displaces a newer active operation.
 
@@ -352,6 +353,8 @@ Operation kind values: 0=unknown, 1=external_format, 2=git_stage, 3=git_unstage,
 Operation status values: 1=pending, 2=queued, 3=running, 4=success, 5=error, 6=timeout, 7=canceled, 8=stale. Flags: bit 0=cancelable, bit 1=queue values present, bit 2=progress values present. Queue and progress integer fields are zero placeholders when their presence flag is clear. Message punctuation has no semantic meaning; clients must use the generated status value.
 
 The optional Review section identifies a read-only review, not an editable buffer. Omission clears the previous Review offer. Reserve Back to chat, Review latest and Help before optional path or ordinary status metadata. Keep the Refresh slot disabled while current, and keep all three controls in place when the review becomes stale. Back and Refresh activate the exact committed offer through `semantic_item_activate` surface 6; neither control derives a file from current selection.
+
+When the conflict marker is present, show **Keep mine (x)** and **Use Agent version (y)** for the current conflict, before optional path metadata. Both controls echo the exact Review offer using surface 6, intent 3 or 4 respectively. The offer changes when a different conflict hunk is selected. On a stale conflict, disable both decisions and offer Review latest. Only the existing revision-checked conflict workflow can apply a decision.
 
 Back resumes the retained draft without changing its text, cursor, selection or editing mode. It restores input focus through the BEAM owner; frontends do not infer draft focus from the displayed mode label.
 
@@ -502,6 +505,7 @@ Each section uses `section_id(1) + section_len(2) + payload(section_len)`. Secti
 | 0x0C | StopTarget | `session_id(string16) + request_id(string16)`. Both IDs are nonempty. Absence clears the target and disables the displayed Stop control. |
 | 0x0D | PromptPresentation | `generation(8)`. The nonzero ID names the retained prompt displayed by both frontends and binds its workspace, saved conversation, source buffer and content revision. Absence means no pointer Send target. |
 | 0x0E | QueueTarget | `session_id(string16) + request_id(string16) + sequence(8)`. The target names one insertion position of the active saved-session queue. Absence disables Steer and Queue Next. |
+| 0x0F | ChatLifecycle | `kind(1) + reason(string16)`. Omitted for a live conversation. `1` means starting, `2` means failed with a reason, and `3` means unavailable. Starting and unavailable send an empty reason. Neither frontend shows approval controls while the conversation is not live. A zero-row prompt means the composer is unavailable. |
 
 Status values: 0 = idle, 1 = thinking, 2 = tool_executing, 3 = error, 4 = plan, 5 = approval_waiting
 
@@ -1513,7 +1517,7 @@ The owner follows keyboard dispatch precedence: conflict, active inline edit, ac
 
 Every scope, including agent, yields command-line input (Escape included) to the command handler, so command completion names the command-completion surface in all scopes.
 
-Normal-mode leader sequences name `editor_view / editor` when the underlying source yields to the leader FSM: the launchpad, file-tree browse, and Git status. This decision comes from BEAM input admission, not which-key visibility. Native file-tree edits and focused hover keep their earlier handler priority. Agent admission is not the same rule: its navigation fallback still claims navigation during a leader sequence, and focused composer input also remains agent-owned; the derivation preserves that existing routing rather than inventing a frontend exception.
+Normal-mode leader sequences name `editor_view / editor` when the underlying source yields to the leader FSM: the launchpad, file-tree browse, Git status, and agent chat or file viewer navigation. This decision comes from BEAM input admission, not which-key visibility. Native file-tree edits and focused hover keep their earlier handler priority. Focused agent composer input remains agent-owned.
 
 The semantic UI encoder sends exactly one command when the owner changes and on every keyframe, before window content. It sends none when the owner is unchanged in a delta frame. The command belongs to the frame transaction: a rejected frame must not change focus. A recovery keyframe restores the authoritative owner even when the previous frontend state was lost.
 

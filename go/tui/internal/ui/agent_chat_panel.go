@@ -7,6 +7,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/jsmestad/minga/go/tui/internal/protocol"
 )
 
@@ -17,7 +18,7 @@ type agentPanel struct {
 }
 
 func (m Model) agentAnimating(chat protocol.AgentChat) bool {
-	if !chat.Visible {
+	if !chat.Visible || chat.Lifecycle != protocol.AgentChatConversation {
 		return false
 	}
 	if chat.Status == 5 {
@@ -40,7 +41,7 @@ func (a *agentPanel) spinner() string {
 
 // handleKey resolves read and collapse shortcuts against stable resident message IDs.
 func (a *agentPanel) handleKey(chat protocol.AgentChat, messages *residentTranscript, msg tea.KeyPressMsg) ([]byte, bool) {
-	if !chat.Visible {
+	if !chat.Visible || chat.Lifecycle != protocol.AgentChatConversation {
 		return nil, false
 	}
 	key := msg.Key()
@@ -132,7 +133,7 @@ func (m Model) renderAgentChatPanelWithLimit(chat protocol.AgentChat, width int,
 	}
 	lines := []string{m.renderAgentHeader(chat, width)}
 
-	if agentDetailsVisible(width) && limit > 5 {
+	if chat.Lifecycle == protocol.AgentChatConversation && agentDetailsVisible(width) && limit > 5 {
 		bodyBudget := limit - 1
 		detailWidth := agentDetailsWidth(width)
 		leftWidth := max(width-detailWidth-agentColumnGap(), 40)
@@ -163,8 +164,11 @@ func agentColumnGap() int {
 }
 
 func (m Model) renderAgentMainColumn(chat protocol.AgentChat, width int, budget int, empty bool) []string {
-	lines := make([]string, 0, budget)
 	composer := m.renderAgentComposerWithLimit(chat, width, budget)
+	if chat.Lifecycle != protocol.AgentChatConversation {
+		return m.renderAgentLifecycle(chat, width, budget-len(composer), composer)
+	}
+	lines := make([]string, 0, budget)
 	_, statusHeight, contentBudget, messageBudget := agentMainColumnBudgets(chat, len(composer), budget)
 	messageCount := m.transcript.len()
 	sparse := messageCount <= 1 && chat.Pending == "" && strings.TrimSpace(chat.Prompt) == ""
@@ -193,6 +197,36 @@ func (m Model) renderAgentMainColumn(chat protocol.AgentChat, width int, budget 
 	}
 	lines = append(lines, composer...)
 	return takeLines(lines, budget)
+}
+
+func (m Model) renderAgentLifecycle(chat protocol.AgentChat, width, budget int, composer []string) []string {
+	title, details := "Agent unavailable", []string{"Start a new Agent session (SPC a n), then reopen the conversation in Sessions."}
+	switch chat.Lifecycle {
+	case protocol.AgentChatStarting:
+		title, details = "Starting Agent", nil
+	case protocol.AgentChatFailed:
+		action := "Start a new Agent session (SPC a n)."
+		if chat.PromptVisibleRows == 0 {
+			action = "Switch away from this tab and return to reopen the composer."
+		}
+		details = []string{chat.LifecycleReason, action}
+	}
+	lines := make([]string, 0, budget+len(composer))
+	if budget > 0 {
+		lines = append(lines, m.renderAgentNotice(title, "", width))
+	}
+	for _, detail := range details {
+		for _, row := range strings.Split(ansi.Wrap(detail, max(width-1, 1), ""), "\n") {
+			if len(lines) >= budget {
+				break
+			}
+			lines = append(lines, m.renderAgentNotice("", row, width))
+		}
+	}
+	for len(lines) < budget {
+		lines = append(lines, m.renderAgentBlankLine(width))
+	}
+	return append(lines, composer...)
 }
 
 func agentMainColumnBudgets(chat protocol.AgentChat, composerRows int, budget int) (composerHeight int, statusHeight int, contentBudget int, messageBudget int) {

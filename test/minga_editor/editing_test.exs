@@ -134,6 +134,34 @@ defmodule MingaEditor.EditingTest do
       ms = %{Mode.initial_state() | prefix_node: %Minga.Keymap.Bindings.Node{}}
       assert Minga.Editing.key_sequence_pending?(build_state(mode_state: ms))
     end
+
+    test "true while the describe-key prompt waits for a key" do
+      ms = %{Mode.initial_state() | describe_key: %Minga.Mode.DescribeKey{}}
+      assert Minga.Editing.key_sequence_pending?(build_state(mode_state: ms))
+    end
+  end
+
+  describe "owns_next_key?/1" do
+    test "true for an open prompt or a pending sequence, false at rest and while editing" do
+      describing = %{Mode.initial_state() | describe_key: %Minga.Mode.DescribeKey{}}
+      leader = %{Mode.initial_state() | leader_node: %{children: %{}}}
+
+      for state <- [
+            build_state(mode: :command),
+            build_state(mode: :search),
+            build_state(mode: :eval),
+            build_state(mode: :search_prompt),
+            build_state(mode: :operator_pending),
+            build_state(mode_state: describing),
+            build_state(mode_state: leader)
+          ] do
+        assert Minga.Editing.owns_next_key?(state)
+      end
+
+      for mode <- [:normal, :insert, :visual] do
+        refute Minga.Editing.owns_next_key?(build_state(mode: mode))
+      end
+    end
   end
 
   describe "status_segment/1" do

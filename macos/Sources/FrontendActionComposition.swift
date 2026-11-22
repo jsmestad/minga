@@ -136,6 +136,10 @@ public enum FrontendActionComposition {
             .semanticItemActivate(surface: .review, intent: 1, generation: generation, itemID: Data(itemID.utf8))
         case .reviewLatest(let generation, let itemID):
             .semanticItemActivate(surface: .review, intent: 2, generation: generation, itemID: Data(itemID.utf8))
+        case .reviewKeepMine(let generation, let itemID):
+            .semanticItemActivate(surface: .review, intent: 3, generation: generation, itemID: Data(itemID.utf8))
+        case .reviewUseAgentVersion(let generation, let itemID):
+            .semanticItemActivate(surface: .review, intent: 4, generation: generation, itemID: Data(itemID.utf8))
         }
     }
 

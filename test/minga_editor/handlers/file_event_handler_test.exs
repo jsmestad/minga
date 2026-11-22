@@ -89,8 +89,10 @@ defmodule MingaEditor.Handlers.FileEventHandlerTest do
     end
 
     test "background git refresh updates visible Git panel without stealing Observatory focus" do
+      base = base_state()
+
       state =
-        base_state()
+        base
         |> SidebarWorkflow.open_observatory(nil)
         |> SidebarWorkflow.select("observatory")
         |> SidebarWorkflow.replace_git_status(

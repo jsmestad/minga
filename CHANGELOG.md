@@ -19,12 +19,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - `SPC a D` or the macOS editor context menu captures a file's published diagnostics as an inspectable Agent draft attachment.
 - The Agent can pause for a question. Use **Answer question** or `SPC a Q` to choose an answer, type your own, or cancel without granting tool permission.
 - Agent chat keeps Send, Steer, Queue Next, and Stop in fixed positions on macOS and in the terminal. Steer and Queue Next act on the displayed saved conversation and appear disabled when that action is unavailable.
+- Agent tabs show their conversation, a starting message, or the reason the chat is unavailable. A failed start keeps the current draft. Returning to an Agent tab restores its composer, including when the previous composer closed unexpectedly.
 - Successful rolling builds from `main` publish Apple Silicon packages to the Minga Homebrew tap. Use `brew upgrade minga` for the TUI or `brew upgrade --cask minga-mac` for the GUI.
 
 ### Changed
 
 - Adversarial, Knowledge Graph, and Ghost Cursors are now opt-in. [Add the corresponding Git install line](docs/CONFIGURATION.md#optional-extensions) and restart to keep using them. Existing Knowledge Graph data stays in place.
-- GitExtended is now opt-in. [Add its Git install line](docs/CONFIGURATION.md#optional-extensions) and restart to enable the Git status panel, staging, commits, and branch commands. The branch in the modeline and the changed-line signs in the gutter work without it.
+- GitExtended replaces bundled Git porcelain. [Add its Git install line](docs/CONFIGURATION.md#optional-extensions) in place of `extension :git_porcelain` and restart to enable Git workflows and their `SPC g` bindings. The modeline branch, gutter signs, and file tree status work without it.
 - Elixir builds use checked-in protocol and language-alias sources. Run `mix codegen` to refresh them after schema changes; CI rejects drift.
 - Standalone TUI downloads are native Mix release archives instead of self-extracting binaries. Linux builds target Ubuntu 24.04 glibc; the macOS DMG build is unchanged.
 - Generated Python bytecode is excluded from version control while local script caches remain untouched.
@@ -32,14 +33,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - Local ChatGPT sign-in is available from Models and connections and `/login`. Cancel stops the current authorization attempt without changing credentials or the draft. The manual fallback uses masked input.
 - On macOS, pickers open below the window toolbar so the search field and results do not overlap the window controls. The selected row uses readable text on the selection background.
 - **All Changes** omits the directory shared by the results, so files with the same name show their distinguishing directory sooner. Search still accepts full paths.
+- When the Agent and a human edit the same file region, Review shows **Keep mine (x)** and **Use Agent version (y)** for the selected conflict. A stale comparison must be reopened before applying a choice.
 - On narrow terminals, status notices stay readable when optional file and cursor information does not fit.
 - The traditional modeline reads only placement metadata when ordering custom segments and builds status bar output without intermediate groups.
 - Native approval geometry checks bind the live host and window to their run before making one foreground request. Acceptance still requires external foreground observation, global button hits, native captures and complete child cleanup.
 - macOS Agent elapsed-time refreshes stop when the context bar disappears and refresh immediately when a new dispatch timestamp arrives.
+- Agent tab and workspace names use the transcript already read by the editor instead of requesting the same conversation again.
 - On macOS, typing in the Agent composer, moving the caret and opening prompt completion no longer re-evaluate the conversation, so typing costs the same in a long session as in a new one.
 - Idle Agent activity no longer appears as completed work while unfinished tasks or retained activity remain visible.
+- Agent activity keeps showing the remaining tool when another concurrent call finishes. Tool updates no longer read the Session to choose an active tool.
 - Agent activity shows an error even when the turn fails before running a tool, changing a file, or creating a checklist item.
 - A timed-out Agent hook escalates termination even if its shell exits before a descendant that ignores `TERM`.
+- Agent prompt readiness uses the current session's published connection state instead of waiting on separate provider and session lookups. A starting or unavailable session keeps the draft.
 - Agent shell operations terminate their process group on timeout or when the owning worker exits, preventing delayed writes by ordinary background children.
 - Agent transcript updates locate streaming tails and tool calls through indexed source storage. Atomic revision cursors return only current changed entries, with consistent identity, pins, usage and reset facts instead of separate full-history queries.
 - Switching Agent transcript branches keeps only relevant pins without collecting every saved message ID. Restoring transcripts scans identity candidates without flattening the snapshots or changing the allocator's existing rules.

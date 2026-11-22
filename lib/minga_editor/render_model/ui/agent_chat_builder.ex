@@ -12,6 +12,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
   alias MingaEditor.Agent.PendingQuestion
   alias MingaEditor.Agent.RetainedOutputTarget
   alias MingaEditor.Agent.SemanticUI.Registry, as: SemanticUIRegistry
+  alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.UIState.Panel
   alias MingaEditor.Agent.UIState.TranscriptProjection
   alias MingaEditor.Agent.View.PromptFrame
@@ -33,26 +34,25 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
   def build(ctx) do
     active_window = Map.get(ctx.windows.map, ctx.windows.active)
     is_agent_chat = active_window != nil && Content.agent_chat?(active_window.content)
-    session = active_session(ctx)
 
-    if is_agent_chat && session && match?(%PromptFrame{}, ctx.prompt) do
-      build_visible(ctx, session)
+    if is_agent_chat do
+      build_visible(ctx, ctx.workspace.agent_ui.chat_lifecycle)
     else
       %AgentChat{visible?: false}
     end
   end
 
-  @spec active_session(Context.t()) :: pid() | nil
-  defp active_session(ctx) do
-    ctx.intent.frame.shell.active_session(ctx.intent.frame.shell_state)
-  rescue
-    _ -> nil
-  catch
-    :exit, _ -> nil
+  @spec build_visible(Context.t(), UIState.chat_lifecycle()) :: AgentChat.t()
+  defp build_visible(%Context{prompt: nil}, _lifecycle) do
+    %AgentChat{
+      visible?: true,
+      lifecycle: {:failed, "composer unavailable"},
+      prompt_visible_rows: 0
+    }
   end
 
-  @spec build_visible(Context.t(), pid()) :: AgentChat.t()
-  defp build_visible(ctx, session) do
+  defp build_visible(ctx, lifecycle) do
+    {presentation, session} = chat_presentation(lifecycle)
     agent_ui = ctx.workspace.agent_ui
     shell_agent = TraditionalState.agent(ctx.intent.frame.shell_state)
     panel = agent_ui.panel
@@ -62,24 +62,13 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
     {cursor_line, cursor_col} = projection.cursor
     visible_rows = projection.visible_rows
 
-    full_pairs = panel.transcript.message_pairs
-    full_styled_cache = resolve_styled_cache(panel, ctx.intent.frame.theme)
-    pending_approval = PendingApproval.public(shell_agent.pending_approval)
-    retained_scope = retained_scope(agent_ui.connection, ctx.intent.frame.shell_state, session)
-
-    # Resident transcript (#2654): the projection display-start scoped conversation for
-    # the gui_agent_transcript (0x86) stream. It is never sliced by scroll; this
-    # builder applies the configured byte-cap suffix bound and records whether
-    # older complete messages were omitted.
-    {resident_messages, resident_truncated?} =
-      full_pairs
-      |> build_gui_messages(full_styled_cache, pending_approval, retained_scope)
-      |> append_resident_transcript_enrichments(SemanticUIRegistry.default_table())
-      |> select_resident_messages()
+    {resident_messages, resident_truncated?, transcript_epoch} =
+      resident_transcript(ctx, shell_agent, session)
 
     %AgentChat{
       visible?: true,
-      status: MingaEditor.State.Agent.display_status(shell_agent),
+      lifecycle: presentation,
+      status: chat_status(shell_agent, presentation),
       model_name: Panel.chat_model_label(panel),
       thinking_level: panel.thinking_level,
       prompt: prompt_text,
@@ -100,9 +89,38 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
           ctx.intent.frame.focus_owner.surface == :agent,
       resident_messages: resident_messages,
       resident_truncated?: resident_truncated?,
-      transcript_epoch: TranscriptProjection.presentation_epoch(panel.transcript, session)
+      transcript_epoch: transcript_epoch
     }
   end
+
+  @spec resident_transcript(Context.t(), MingaEditor.State.Agent.t(), pid() | nil) ::
+          {[AgentChat.message()], boolean(), non_neg_integer()}
+  defp resident_transcript(_ctx, _agent, nil), do: {[], false, 0}
+
+  defp resident_transcript(ctx, agent, session) do
+    agent_ui = ctx.workspace.agent_ui
+    panel = agent_ui.panel
+    styled = resolve_styled_cache(panel, ctx.intent.frame.theme)
+    approval = pending_approval(agent.pending_approval, session)
+    retained = retained_scope(agent_ui.connection, ctx.intent.frame.shell_state, session)
+
+    {messages, truncated?} =
+      panel.transcript.message_pairs
+      |> build_gui_messages(styled, approval, retained)
+      |> append_resident_transcript_enrichments(SemanticUIRegistry.default_table())
+      |> select_resident_messages()
+
+    {messages, truncated?, TranscriptProjection.presentation_epoch(panel.transcript, session)}
+  end
+
+  @spec chat_presentation(UIState.chat_lifecycle()) :: {AgentChat.lifecycle(), pid() | nil}
+  defp chat_presentation({:conversation, session}), do: {:conversation, session}
+  defp chat_presentation(lifecycle), do: {lifecycle, nil}
+
+  @spec chat_status(MingaEditor.State.Agent.t(), AgentChat.lifecycle()) :: atom()
+  defp chat_status(agent, :conversation), do: MingaEditor.State.Agent.display_status(agent)
+  defp chat_status(_agent, {:failed, _reason}), do: :error
+  defp chat_status(_agent, _unavailable), do: :idle
 
   @spec submission_generation(PromptFrame.t()) :: pos_integer() | nil
   defp submission_generation(%PromptFrame{
@@ -119,7 +137,13 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
   defp attachment_count(%DraftSave{attachments: attachments}), do: length(attachments)
   defp attachment_count(nil), do: 0
 
-  @spec pending_question(PendingQuestion.t() | nil, pid()) ::
+  @spec pending_approval(PendingApproval.t() | nil, pid() | nil) :: PublicApproval.t() | nil
+  defp pending_approval(%PendingApproval{session_pid: session, approval: approval}, session),
+    do: approval
+
+  defp pending_approval(_approval, _session), do: nil
+
+  @spec pending_question(PendingQuestion.t() | nil, pid() | nil) ::
           {pos_integer(), String.t()} | nil
   defp pending_question(
          %PendingQuestion{session: session, offer: offer, question: question},
@@ -129,7 +153,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
 
   defp pending_question(_question, _session), do: nil
 
-  @spec stop_target({pid(), {String.t(), String.t()}} | nil, pid()) ::
+  @spec stop_target({pid(), {String.t(), String.t()}} | nil, pid() | nil) ::
           {String.t(), String.t()} | nil
   defp stop_target({session, target}, session), do: target
   defp stop_target(_target, _session), do: nil
@@ -137,7 +161,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
   @spec queue_target(
           {pid(), MingaAgent.Session.queue_target()} | nil,
           DraftSave.t() | nil,
-          pid()
+          pid() | nil
         ) :: MingaAgent.Session.queue_target() | nil
   defp queue_target(
          {session, {record, _, _} = target},
@@ -148,7 +172,8 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
 
   defp queue_target(_target, _save, _session), do: nil
 
-  @spec retained_scope(term(), TraditionalState.t(), pid()) :: RetainedOutputTarget.scope() | nil
+  @spec retained_scope(term(), TraditionalState.t(), pid() | nil) ::
+          RetainedOutputTarget.scope() | nil
   defp retained_scope(%{target: %{session: session, epoch: epoch}}, shell_state, session) do
     case TraditionalState.tab_bar(shell_state) do
       %TabBar{} = tabs -> {TabBar.active_workspace_id(tabs), epoch}

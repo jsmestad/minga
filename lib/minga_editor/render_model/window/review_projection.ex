@@ -189,11 +189,13 @@ defmodule MingaEditor.RenderModel.Window.ReviewProjection do
     {old_lines, baseline_keys} = retained_inputs(previous, revision)
     initial = {[], %{}, allocator, baseline_keys, MapSet.new(), %{}, 0, ContentDigest.empty()}
     scope = {epoch, 0, :normal}
+    fork_conflict? = not is_nil(review.fork_revision)
 
     result =
       review
       |> DiffReview.to_display_lines()
       |> Enum.reduce_while({:ok, initial}, fn line, {:ok, context} ->
+        line = label_conflict_header(line, fork_conflict?)
         source = line_source(line.source, lineages)
 
         case project_line(line, source, old_lines, layout, elem(context, 2), scope) do
@@ -216,6 +218,16 @@ defmodule MingaEditor.RenderModel.Window.ReviewProjection do
       scope
     )
   end
+
+  @spec label_conflict_header(DisplayLine.t(), boolean()) :: DisplayLine.t()
+  defp label_conflict_header(
+         %DisplayLine{source: {:hunk_header, index} = source, text: text},
+         true
+       ) do
+    DisplayLine.new(source, "Conflict #{index + 1}  #{text}", :hunk_header, index)
+  end
+
+  defp label_conflict_header(line, _fork_conflict?), do: line
 
   @spec retained_inputs(t() | nil, {non_neg_integer(), tuple()}) :: {line_cache(), MapSet.t()}
   defp retained_inputs(nil, _revision), do: {%{}, MapSet.new()}

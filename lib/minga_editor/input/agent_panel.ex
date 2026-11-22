@@ -150,13 +150,12 @@ defmodule MingaEditor.Input.AgentPanel do
 
   @spec handle_panel_nav(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
           {:handled, EditorState.t()} | {:passthrough, EditorState.t()}
-  # Leader sequence in progress: passthrough to ModeFSM so the leader
-  # command runs against the real active buffer, not the chat buffer.
-  # Previously this called delegate_to_mode_fsm(state, 0, 0) which
-  # discarded the actual key and could clobber buffers.active if the
-  # leader command (e.g. :new_buffer) changed it during execution.
+  # Pending sequence (leader, operator, describe-key) or open command line,
+  # search, or eval prompt: the mode FSM owns the key, so `:qa` types `qa`
+  # instead of `q` closing the split, and leader commands run against the
+  # real active buffer, not the chat buffer.
   defp handle_panel_nav(state, cp, mods) do
-    if Minga.Editing.in_leader?(state) do
+    if Minga.Editing.owns_next_key?(state) do
       {:passthrough, state}
     else
       handle_panel_nav_dispatch(state, cp, mods)

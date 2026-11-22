@@ -181,6 +181,16 @@ func decodeAgentChat(payload []byte) (AgentChat, string, int) {
 			if ok && requestID != "" && len(section)-end == 8 {
 				chat.QueueTarget = AgentQueueTarget{AgentStopTarget{sessionID, requestID}, binary.BigEndian.Uint64(section[end:])}
 			}
+		case 0x0F:
+			if len(section) < 3 {
+				continue
+			}
+			kind := AgentChatLifecycle(section[0])
+			if reason, end, ok := readString16(section, 1); ok && end == len(section) &&
+				kind >= AgentChatStarting && kind <= AgentChatUnavailable {
+				chat.Lifecycle = kind
+				chat.LifecycleReason = reason
+			}
 		}
 	}
 	return chat, chat.ModelName, size

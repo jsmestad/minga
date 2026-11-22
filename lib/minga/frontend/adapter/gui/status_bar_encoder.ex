@@ -36,6 +36,7 @@ defmodule Minga.Frontend.Adapter.GUI.StatusBarEncoder do
   @section_pending_keys 0x0E
   @section_operation 0x0F
   @section_review 0x10
+  @section_review_conflict 0x11
 
   @spec encode(StatusBar.t(), Caches.t()) :: {binary(), Caches.t()}
   def encode(%StatusBar{} = model, %Caches{} = caches), do: {encode_command(model), caches}
@@ -181,7 +182,18 @@ defmodule Minga.Frontend.Adapter.GUI.StatusBarEncoder do
       |> Writer.string16(:review_item_id, review.item_id)
       |> Writer.finish()
 
-    [section(@section_review, payload)]
+    encoded = section(@section_review, payload)
+
+    case review.conflict_index do
+      nil ->
+        [encoded]
+
+      number ->
+        payload =
+          Writer.new(@command) |> Writer.uint32(:conflict_index, number) |> Writer.finish()
+
+        [encoded, section(@section_review_conflict, payload)]
+    end
   end
 
   @spec review_freshness(:current | :stale) :: 0 | 1

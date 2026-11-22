@@ -90,6 +90,36 @@ defmodule MingaEditor.Agent.ReviewTargetTest do
     end
   end
 
+  test "conflict choices authorize only the offered conflict hunk and never an ordinary diff" do
+    state = reviewing_state()
+    ordinary = ReviewTarget.capture(state)
+    preview = state.workspace.agent_ui.view.preview
+
+    conflict =
+      DiffReview.from_fork_snapshot("selected.ex", {self(), 2, 1}, [
+        {:conflict, ["Agent A"], ["Human A"], []},
+        {:resolved, ["unchanged"]},
+        {:conflict, ["Agent B"], ["Human B"], []}
+      ])
+
+    preview = Preview.set_diff(preview, conflict)
+    active = update_preview(state, preview)
+    offer = active |> Context.from_editor_state() |> ReviewTarget.capture()
+    moved = update_preview(active, Preview.navigate_hunk(preview, :next))
+    stale = update_preview(active, Preview.refresh_after_write(preview, "selected.ex"))
+
+    for intent <- [:keep_mine, :use_agent_version] do
+      decision = activation(offer, intent)
+      assert {:ok, {:review, %ReviewTarget{conflict_index: 1}}} = Target.resolve(active, decision)
+      assert {:error, :target_mismatch} = Target.resolve(moved, decision)
+      assert {:error, :target_mismatch} = Target.resolve(stale, decision)
+      assert {:error, :target_mismatch} = Target.resolve(state, activation(ordinary, intent))
+
+      assert {:ok, {:review, %ReviewTarget{conflict_index: 2}}} =
+               Target.resolve(moved, activation(ReviewTarget.capture(moved), intent))
+    end
+  end
+
   defp activation(offer, intent) do
     %Target{
       surface: :review,

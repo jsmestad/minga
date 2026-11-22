@@ -8,12 +8,15 @@ defmodule MingaEditor.Agent.Activity do
   """
 
   alias MingaAgent.TodoItem
+  alias MingaAgent.Session.TurnExecution
 
   @type t :: %__MODULE__{
           todos: [TodoItem.t()],
           started_at: DateTime.t() | nil,
           active_action: String.t(),
           tool_count: non_neg_integer(),
+          running_tools: %{String.t() => {pos_integer(), String.t()}},
+          active_tool_id: String.t() | nil,
           file_paths: MapSet.t(String.t())
         }
 
@@ -21,6 +24,8 @@ defmodule MingaEditor.Agent.Activity do
             started_at: nil,
             active_action: "",
             tool_count: 0,
+            running_tools: %{},
+            active_tool_id: nil,
             file_paths: MapSet.new()
 
   @doc "Creates an empty activity projection."
@@ -50,7 +55,7 @@ defmodule MingaEditor.Agent.Activity do
   @doc "Marks the turn idle while preserving the last visible summary."
   @spec finish_turn(t()) :: t()
   def finish_turn(%__MODULE__{} = activity) do
-    %{activity | active_action: "", started_at: nil}
+    %{activity | active_action: "", started_at: nil, running_tools: %{}, active_tool_id: nil}
   end
 
   @doc "Seeds the first visible timestamp without resetting the turn state."
@@ -67,18 +72,69 @@ defmodule MingaEditor.Agent.Activity do
     %{activity | todos: todos}
   end
 
-  @doc "Records that a tool started running."
-  @spec start_tool(t(), String.t()) :: t()
-  def start_tool(%__MODULE__{} = activity, tool_name) when is_binary(tool_name) do
-    activity
-    |> start_turn()
-    |> put_tool(tool_name)
+  @doc "Records the identity and start order of a running tool."
+  @spec start_tool(t(), String.t(), String.t()) :: t()
+  def start_tool(%__MODULE__{running_tools: tools} = activity, id, name) do
+    case tools do
+      %{^id => _known} ->
+        activity
+
+      %{} ->
+        activity = start_turn(activity)
+        count = activity.tool_count + 1
+
+        %{
+          activity
+          | running_tools: Map.put(tools, id, {count, name}),
+            active_tool_id: id,
+            tool_count: count,
+            active_action: action(name)
+        }
+    end
   end
 
-  @doc "Clears the active action after a tool finishes."
-  @spec finish_tool(t()) :: t()
-  def finish_tool(%__MODULE__{} = activity) do
-    %{activity | active_action: "Thinking"}
+  @doc "Retires only the finished or interrupted call."
+  @spec finish_tool(t(), String.t()) :: t()
+  def finish_tool(%__MODULE__{running_tools: tools} = activity, id) do
+    case Map.pop(tools, id) do
+      {nil, _tools} ->
+        activity
+
+      {_tool, tools} when id == activity.active_tool_id ->
+        project_tools(activity, tools)
+
+      {_tool, tools} ->
+        %{activity | running_tools: tools}
+    end
+  end
+
+  @doc "Hydrates the active tool projection from the Session's ordered snapshot."
+  @spec restore_running_tools(t(), [TurnExecution.active_tool()]) :: t()
+  def restore_running_tools(%__MODULE__{} = activity, []) do
+    case activity.running_tools do
+      tools when map_size(tools) == 0 -> activity
+      _tools -> project_tools(activity, %{})
+    end
+  end
+
+  def restore_running_tools(%__MODULE__{} = activity, tools) do
+    {running_tools, count} =
+      Enum.reduce(tools, {%{}, 0}, fn {id, name}, {running_tools, count} ->
+        index = count + 1
+        {Map.put(running_tools, id, {index, name}), index}
+      end)
+
+    activity = ensure_started_at(activity)
+    project_tools(%{activity | tool_count: max(count, activity.tool_count)}, running_tools)
+  end
+
+  @doc "Returns the most recently started tool that has not ended."
+  @spec active_tool_name(t()) :: String.t() | nil
+  def active_tool_name(%__MODULE__{active_tool_id: nil}), do: nil
+
+  def active_tool_name(%__MODULE__{active_tool_id: id, running_tools: tools}) do
+    {_order, name} = Map.fetch!(tools, id)
+    name
   end
 
   @doc "Records a touched file path for the current turn."
@@ -91,8 +147,15 @@ defmodule MingaEditor.Agent.Activity do
   @spec file_count(t()) :: non_neg_integer()
   def file_count(%__MODULE__{} = activity), do: MapSet.size(activity.file_paths)
 
-  @spec put_tool(t(), String.t()) :: t()
-  defp put_tool(%__MODULE__{} = activity, tool_name) do
-    %{activity | active_action: "Running #{tool_name}", tool_count: activity.tool_count + 1}
+  @spec project_tools(t(), %{String.t() => {pos_integer(), String.t()}}) :: t()
+  defp project_tools(activity, running_tools) do
+    {id, {_order, name}} =
+      Enum.max_by(running_tools, fn {_id, {order, _name}} -> order end, fn -> {nil, {0, nil}} end)
+
+    %{activity | running_tools: running_tools, active_tool_id: id, active_action: action(name)}
   end
+
+  @spec action(String.t() | nil) :: String.t()
+  defp action(nil), do: "Thinking"
+  defp action(name), do: "Running #{name}"
 end

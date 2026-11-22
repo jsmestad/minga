@@ -640,14 +640,21 @@ func (c presentedMouseClick) publicationChanged() bool {
 }
 
 // Bubble Tea invokes OnMouse from the last flushed View, synchronously before
-// Update receives the input. Both handlers capture only what that view showed.
+// Update receives the input. Each handler captures only what that view showed.
 func (m Model) presentedMouseHandler(layers []*lipgloss.Layer) func(tea.MouseMsg) tea.Cmd {
 	claim := m.presentedClick
 	if claim == nil {
 		return nil
 	}
-	git, composer := m.presentedGitStatusHandler(layers), m.presentedComposerHandler()
-	if git == nil && composer == nil {
+	git := m.presentedGitStatusHandler(layers)
+	var agent func(tea.MouseClickMsg)
+	if !m.pickerVisible() {
+		agent = m.presentedConflictHandler()
+		if agent == nil {
+			agent = m.presentedComposerHandler()
+		}
+	}
+	if git == nil && agent == nil {
 		return nil
 	}
 	return func(msg tea.MouseMsg) tea.Cmd {
@@ -656,8 +663,8 @@ func (m Model) presentedMouseHandler(layers []*lipgloss.Layer) func(tea.MouseMsg
 			if git != nil {
 				git(click)
 			}
-			if !claim.claimed && composer != nil {
-				composer(click)
+			if !claim.claimed && agent != nil {
+				agent(click)
 			}
 		}
 		return nil

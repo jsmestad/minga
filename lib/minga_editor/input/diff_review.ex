@@ -3,7 +3,8 @@ defmodule MingaEditor.Input.DiffReview do
   Input handler for the diff review sub-state (y/x/Y/X).
 
   Active when the agentic view is in `:file_viewer` focus with a
-  diff preview and the panel input is not focused. Handles y (accept
+  diff preview, the panel input is not focused, and no command line or
+  key sequence owns the key. Handles y (accept
   hunk), x (reject hunk), Y (accept all), X (reject all), and passes
   navigation keys through to the scope trie.
   """
@@ -24,9 +25,11 @@ defmodule MingaEditor.Input.DiffReview do
     view = state.workspace.agent_ui.view
     panel = state.workspace.agent_ui.panel
 
+    # An open command line or pending sequence owns every key, so `:x` or
+    # `SPC h k y` never accepts or rejects a hunk.
     if View.focus(view) == :file_viewer and
          match?(%Preview{content: {:diff, _}}, view.preview) and
-         not panel.input_focused do
+         not panel.input_focused and not Minga.Editing.owns_next_key?(state) do
       dispatch_diff_key(state, cp, mods)
     else
       {:passthrough, state}

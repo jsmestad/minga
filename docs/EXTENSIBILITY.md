@@ -440,6 +440,10 @@ Compatibility note: concrete theme fields `editor.tilde_fg`, `tree.modified_fg`,
 
 ---
 
+See [Optional extensions](CONFIGURATION.md#optional-extensions) for installation and configuration.
+
+---
+
 ## Runtime grammar loading for extensions
 
 Extensions can ship tree-sitter grammar source files and have Minga compile and load them at runtime, enabling syntax highlighting for new languages without rebuilding the binary.

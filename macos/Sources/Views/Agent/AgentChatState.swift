@@ -493,6 +493,7 @@ public final class AgentChatState {
     public private(set) var stopTarget: AgentStopTarget?
     public private(set) var promptPresentation: UInt64 = 0
     public private(set) var queueTarget: AgentQueueTarget?
+    public private(set) var lifecycle: AgentChatLifecycle = .conversation
     /// Production font pitch projected only at accepted editor-frame publication.
     public private(set) var promptRowPitch: CGFloat = 0
 
@@ -551,8 +552,9 @@ public final class AgentChatState {
     /// Updates the chat chrome (visibility, status, model, prompt).
     ///
     /// Message content is sourced from the resident 0x86 stream via `applyTranscript`.
-    public func update(visible: Bool, status: AgentStatus, model: String, thinkingLevel: String, prompt: String, promptLineCount: UInt8, promptCursorLine: UInt16, promptCursorCol: UInt16, promptMode: PromptMode, promptVisibleRows: UInt8, promptCompletion: Wire.PromptCompletion?, draftAttachmentCount: UInt8 = 0, draftAttachmentOffer: UInt64 = 0, question: AgentQuestionOffer? = nil, stopTarget: AgentStopTarget? = nil, promptPresentation: UInt64 = 0, queueTarget: AgentQueueTarget? = nil) {
+    public func update(visible: Bool, status: AgentStatus, model: String, thinkingLevel: String, prompt: String, promptLineCount: UInt8, promptCursorLine: UInt16, promptCursorCol: UInt16, promptMode: PromptMode, promptVisibleRows: UInt8, promptCompletion: Wire.PromptCompletion?, draftAttachmentCount: UInt8 = 0, draftAttachmentOffer: UInt64 = 0, question: AgentQuestionOffer? = nil, stopTarget: AgentStopTarget? = nil, promptPresentation: UInt64 = 0, queueTarget: AgentQueueTarget? = nil, lifecycle: AgentChatLifecycle = .conversation) {
         self.visible = visible
+        self.lifecycle = lifecycle
         self.status = status
         self.model = model
         self.thinkingLevel = thinkingLevel
@@ -732,6 +734,7 @@ public final class AgentChatState {
 
     public func hide() {
         visible = false
+        lifecycle = .conversation
         draftAttachmentCount = 0
         draftAttachmentOffer = 0
         question = nil

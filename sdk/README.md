@@ -24,10 +24,11 @@ Both options matter. The SDK only defines compile-time stubs of modules the edit
 
 | minga_sdk | Minga |
 |-----------|-------|
-| 0.1.1 | Minga builds with the source-owned picker, prompt, and Git workflow APIs |
+| 0.1.2 | First rolling Minga build after [#3819](https://github.com/jsmestad/minga/pull/3819), which adds the source-owned picker, prompt, and Git workflow APIs |
+| 0.1.1 | Minga builds with the extension notice API (#3764) |
 | 0.1.0 | `main` from jsmestad/minga#3756 (model routes with setup rows and plan usage) onward; the first rolling build after that merge and later |
 
-The SDK is versioned separately from Minga. A minor SDK release can add APIs that need a newer Minga; this table says which.
+The SDK is versioned separately from Minga. New SDK APIs can require a newer Minga build, even within the same minor SDK series.
 
 ## Usage
 

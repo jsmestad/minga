@@ -353,10 +353,18 @@ defmodule Minga.Editing do
   @spec cursor_shape(map()) :: :beam | :block | :underline
   def cursor_shape(state), do: active_model(state).cursor_shape(model_state(state))
 
-  @doc "Is a multi-key sequence in progress (leader key, operator-pending, etc.)?"
+  @doc "Is a multi-key sequence in progress (leader key, operator-pending, describe-key, etc.)?"
   @spec key_sequence_pending?(map()) :: boolean()
   def key_sequence_pending?(state),
     do: active_model(state).key_sequence_pending?(model_state(state))
+
+  @doc """
+  Does the editing model own the next key?
+
+  True while a key sequence is pending (leader, prefix, operator, describe-key) or a command line, search, or eval prompt is open. Surface handlers that bind single keys pass every key through while this holds, so the sequence or prompt receives the key instead of the surface.
+  """
+  @spec owns_next_key?(map()) :: boolean()
+  def owns_next_key?(state), do: minibuffer_mode?(state) or key_sequence_pending?(state)
 
   @doc "Short mode label for the status bar (e.g., 'NORMAL', 'INSERT', '')."
   @spec status_segment(map()) :: String.t()

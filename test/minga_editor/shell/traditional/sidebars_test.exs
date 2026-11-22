@@ -9,6 +9,7 @@ defmodule MingaEditor.Shell.Traditional.SidebarsTest do
   alias MingaEditor.Shell.Traditional.Observatory
   alias MingaEditor.Shell.Traditional.SidebarWorkflow
   alias MingaEditor.Shell.Traditional.Sidebars
+  alias MingaEditor.Sidebar.BuiltinSurfaces
   alias MingaEditor.State, as: EditorState
 
   test "Git status close clears its selected surface and paired TUI state" do
@@ -26,18 +27,33 @@ defmodule MingaEditor.Shell.Traditional.SidebarsTest do
   end
 
   test "Git status workflow close clears shell state and registered visibility" do
+    base = MingaEditor.RenderPipeline.TestHelpers.base_state()
+    table = base.extension_surfaces.sidebar_registry
+
     state =
-      MingaEditor.RenderPipeline.TestHelpers.base_state()
+      base
       |> SidebarWorkflow.replace_git_status(Panel.new(%{entries: []}))
       |> SidebarWorkflow.select("git_status")
 
-    table = state.extension_surfaces.sidebar_registry
     assert %{visible?: true, focused?: true} = Sidebar.get(table, "git_status")
 
     closed = SidebarWorkflow.close_git_status(state)
 
     assert SidebarWorkflow.git_status_panel(closed) == nil
     assert SidebarWorkflow.active_id(closed) == nil
+    assert Sidebar.get(table, "git_status") == nil
+  end
+
+  test "built-in contributions do not register the optional Git Status surface" do
+    base = MingaEditor.RenderPipeline.TestHelpers.base_state()
+    table = base.extension_surfaces.sidebar_registry
+    :ok = BuiltinSurfaces.register_contributions(table)
+
+    assert Sidebar.get(table, "git_status") == nil
+    assert %{id: "observatory"} = Sidebar.get(table, "observatory")
+
+    state = SidebarWorkflow.refresh_git_status(base, Panel.new(%{entries: []}))
+    assert SidebarWorkflow.git_status_panel(state) == nil
     assert Sidebar.get(table, "git_status") == nil
   end
 

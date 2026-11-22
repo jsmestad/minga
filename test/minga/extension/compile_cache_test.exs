@@ -651,6 +651,37 @@ defmodule Minga.Extension.CompileCacheTest do
     refute Code.ensure_loaded?(module)
   end
 
+  test "compiler timeout stops the OS processes the build started, not only the BEAM",
+       context do
+    module = unique_module("CompilerTimeoutDescendants")
+    file = Path.join(context.root, "timeout_descendants.ex")
+    pid_file = Path.join(context.root, "descendants.pids")
+
+    # The compile-time shell runs as a port program in its own session, and its
+    # background sleep is a grandchild of that shell.
+    File.write!(file, """
+    System.cmd("sh", ["-c", "sleep 300 & echo $$ $! > #{pid_file}; wait"])
+    defmodule #{inspect(module)}, do: def(marker, do: :never_loaded)
+    """)
+
+    assert {:error, "isolated compiler timed out"} =
+             load(context, [file], :compiler_timeout_descendants,
+               enabled: false,
+               subprocess_timeout: 5_000
+             )
+
+    [shell_pid, sleep_pid] = pid_file |> File.read!() |> String.split()
+
+    stopped? = await_os_pid_dead(shell_pid, 2_000) and await_os_pid_dead(sleep_pid, 2_000)
+
+    # Only clean up survivors; a confirmed-dead pid may already belong to another process.
+    unless stopped?,
+      do: System.cmd("kill", ["-KILL", shell_pid, sleep_pid], stderr_to_stdout: true)
+
+    assert stopped?
+    refute Code.ensure_loaded?(module)
+  end
+
   test "compiler output limit kills a noisy blocked worker and removes every temporary artifact",
        context do
     module = unique_module("CompilerOutputLimit")

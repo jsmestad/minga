@@ -65,6 +65,18 @@ defmodule MingaEditor.Input.ScopedAgentSubStatesTest do
                nil
     end
 
+    test "approval keys after SPC h k are described instead of approving", %{state: state} do
+      for key <- [?y, ?a, ?t, ?n, 13] do
+        described = walk_keys(state, [{?\s, 0}, {?h, 0}, {?k, 0}, {key, 0}])
+
+        refute Minga.Editing.key_sequence_pending?(described)
+        assert help_text(described) =~ "Key"
+
+        assert MingaEditor.Shell.Traditional.State.agent(described.shell_runtime.state).pending_approval !=
+                 nil
+      end
+    end
+
     test "only triggers when input is not focused", %{state: state} do
       # If input is focused in insert mode, approval keys should not be intercepted
       state =
@@ -107,6 +119,27 @@ defmodule MingaEditor.Input.ScopedAgentSubStatesTest do
     test "diff review action and navigation keys are handled", %{state: state} do
       for key <- [?y, ?x, ?Y, ?X, ?j] do
         assert {:handled, _new_state} = walk_surface_handlers(state, key, 0)
+      end
+    end
+
+    test "hunk keys typed into an open command line stay in the command line", %{state: state} do
+      preview = state.workspace.agent_ui.view.preview
+      state = walk_keys(state, [{?:, 0}, {?y, 0}, {?x, 0}, {?Y, 0}, {?X, 0}])
+
+      assert state.workspace.editing.mode == :command
+      assert state.workspace.editing.mode_state.input == "yxYX"
+      assert state.workspace.agent_ui.view.preview == preview
+    end
+
+    test "hunk keys after SPC h k are described instead of resolving a hunk", %{state: state} do
+      preview = state.workspace.agent_ui.view.preview
+
+      for key <- [?y, ?x, ?Y, ?X] do
+        described = walk_keys(state, [{?\s, 0}, {?h, 0}, {?k, 0}, {key, 0}])
+
+        refute Minga.Editing.key_sequence_pending?(described)
+        assert help_text(described) =~ "Key"
+        assert described.workspace.agent_ui.view.preview == preview
       end
     end
 

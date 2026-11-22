@@ -142,6 +142,34 @@ jobs:
         working-directory: sdk-checkout/sdk
         run: mix hex.build
 
+  test-git-extended:
+    name: Test (GitExtended extension)
+    runs-on: ubuntu-latest
+    # Run the standalone extension's integration suite against the candidate host.
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: erlef/setup-beam@v1
+        with:
+          version-file: .tool-versions
+          version-type: strict
+
+      - uses: actions/checkout@v4
+        with:
+          repository: jsmestad/minga-git-extended
+          ref: 5abf5009f6018b88b7cb301d1e29f2c7836b04bc
+          path: git-extended-checkout
+          persist-credentials: false
+
+      - name: Test the standalone GitExtended suite
+        working-directory: git-extended-checkout
+        env:
+          MIX_ENV: test
+          MINGA_HOST_SOURCE: ${{ github.workspace }}
+        run: |
+          mix deps.get
+          mix test
+
   keystroke-latency-baseline:
     name: Keystroke Latency Baseline
     runs-on: ubuntu-latest
@@ -681,6 +709,7 @@ jobs:
       - lint
       - test
       - test-sdk
+      - test-git-extended
       - keystroke-latency-baseline
       - conformance
       - test-zig
