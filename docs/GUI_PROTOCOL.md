@@ -1508,7 +1508,7 @@ The owner follows keyboard dispatch precedence: conflict, active inline edit, ac
 
 Every scope, including agent, yields command-line input (Escape included) to the command handler, so command completion names the command-completion surface in all scopes.
 
-Normal-mode leader sequences name `editor_view / editor` when the underlying source yields to the leader FSM: the launchpad, file-tree browse, and Git status. This decision comes from BEAM input admission, not which-key visibility. Native file-tree edits and focused hover keep their earlier handler priority. Agent admission is not the same rule: its navigation fallback still claims navigation during a leader sequence, and focused composer input also remains agent-owned; the derivation preserves that existing routing rather than inventing a frontend exception.
+Normal-mode leader sequences name `editor_view / editor` when the underlying source yields to the leader FSM: the launchpad, file-tree browse, Git status, and agent chat or file viewer navigation. This decision comes from BEAM input admission, not which-key visibility. Native file-tree edits and focused hover keep their earlier handler priority. Focused agent composer input remains agent-owned.
 
 The semantic UI encoder sends exactly one command when the owner changes and on every keyframe, before window content. It sends none when the owner is unchanged in a delta frame. The command belongs to the frame transaction: a rejected frame must not change focus. A recovery keyframe restores the authoritative owner even when the previous frontend state was lost.
 
