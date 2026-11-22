@@ -8,7 +8,7 @@ defmodule MingaAgent.StagedDraftKeeper do
     * **Rebuildable tracking.** When the keeper subscribes, the changeset keeps its view and workspace id as its staging registration and joins a `:pg` scope (`:scope` option). The membership belongs to the changeset, so it outlives a keeper crash; a restarted keeper adopts every member's view and re-saves it. `:pg` monitors members rather than linking them, so a failing scope cannot take staged edits down with it.
     * **Oversized drafts.** A draft above the store's size limit is not saved. Its stored copy is replaced with a content-free "lost: too large" marker, so the next start names it as lost instead of restoring an older version, and the user is told once per path in `*Messages*`.
     * **Persistence.** After each staged change the keeper writes the view's drafts with `Minga.Session.StagedDrafts` (one private, atomic file per draft). Only drafts whose content changed are rewritten; files for paths that are no longer staged are removed. A snapshot that fails to leave disk matching the staged drafts is not recorded as saved and is retried with backoff (`:retry_ms`, doubling up to a minute), without waiting for another staged change.
-    * **Deletion.** A changeset stops normally only after a successful publish, a discard, or a close of a clean view, so a `:normal` exit deletes that view's draft files. Any other exit (a crash, an application shutdown) keeps them for the next start.
+    * **Deletion.** A changeset stops normally only after a successful publish, a discard, or a close of a clean view, so a `:normal` exit retires that view: its drafts are deleted behind a tombstone (`StagedDrafts.retire_view/3`). A deletion that fails is kept as a pending delete and retried with the same backoff as a failed save until it succeeds or Minga stops; the tombstone keeps the view from being offered again, in this run or after a restart, and the next start finishes the deletion. Any other exit (a crash, an application shutdown) keeps the drafts for the next start.
     * **Recovery.** `recover/3` hands an Editor every staged view of its project: views that are still running (`:live`, after an Editor restart) and views rebuilt from disk (`:disk`, after a full restart). The reply is `{:staged_drafts_recovered, project_root, [Recovery.t()]}`, sent only when there is something to offer. A draft file is deleted only when it can never be restored; a draft that fails for a reason that may pass (I/O, an unavailable process) stays on disk, and its whole view waits for the next start.
 
   All disk I/O and every call into the changeset and forks happen here, never on the Editor process. Callers only cast.
@@ -57,7 +57,8 @@ defmodule MingaAgent.StagedDraftKeeper do
            retry_ms: pos_integer(),
            scope: atom(),
            tracked: %{view_id() => tracked()},
-           pending: MapSet.t(view_id())
+           pending: MapSet.t(view_id()),
+           deletes: %{String.t() => pos_integer()}
          }
 
   @typedoc """
@@ -134,7 +135,8 @@ defmodule MingaAgent.StagedDraftKeeper do
       scope: Keyword.get(opts, :scope, @scope),
       retry_ms: Keyword.get(opts, :retry_ms, @retry_ms),
       tracked: %{},
-      pending: MapSet.new()
+      pending: MapSet.new(),
+      deletes: %{}
     }
 
     {:ok, state, {:continue, :adopt}}
@@ -190,6 +192,12 @@ defmodule MingaAgent.StagedDraftKeeper do
         state = put_tracked(state, %{tracked | retry_pending: false})
         {:noreply, snapshot(state, view_id)}
     end
+  end
+
+  def handle_info({:retry_delete, dir}, state) do
+    if pending_delete?(state, dir),
+      do: {:noreply, retire(state, dir)},
+      else: {:noreply, state}
   end
 
   def handle_info({:DOWN, ref, :process, _pid, reason}, state) do
@@ -312,15 +320,20 @@ defmodule MingaAgent.StagedDraftKeeper do
         state
 
       {view_id, tracked} ->
-        # A normal stop follows publish, discard, or closing a clean view:
-        # nothing is staged any more. Any other exit keeps the last snapshot.
-        if reason == :normal, do: delete_files(state, tracked.view)
-
-        %{
+        state = %{
           state
           | tracked: Map.delete(state.tracked, view_id),
             pending: MapSet.delete(state.pending, view_id)
         }
+
+        # A normal stop follows publish, discard, or closing a clean view:
+        # nothing is staged any more. Any other exit keeps the last snapshot.
+        if reason == :normal do
+          %ProjectView{project_root: root} = tracked.view
+          retire(state, StagedDrafts.view_dir(root, view_id, state.store_opts))
+        else
+          state
+        end
     end
   end
 
@@ -331,6 +344,26 @@ defmodule MingaAgent.StagedDraftKeeper do
         drain_exit_reports(changeset_down(state, ref, reason))
     after
       0 -> :ok
+    end
+  end
+
+  # ── Retirement ──────────────────────────────────────────────────────────
+
+  # Deletes a published or discarded view's drafts. A failure stays pending
+  # and is retried with backoff; the warning is given once per run of
+  # failures. The view's tombstone keeps it from being offered meanwhile.
+  @spec retire(state(), String.t()) :: state()
+  defp retire(state, dir) do
+    case StagedDrafts.retire_view_dir(dir) do
+      :ok ->
+        %{state | deletes: Map.delete(state.deletes, dir)}
+
+      {:error, reason} ->
+        previous = Map.get(state.deletes, dir)
+        if is_nil(previous), do: cleanup_warning(reason)
+        delay = next_retry_delay(state, previous)
+        Process.send_after(self(), {:retry_delete, dir}, delay)
+        %{state | deletes: Map.put(state.deletes, dir, delay)}
     end
   end
 
@@ -353,22 +386,23 @@ defmodule MingaAgent.StagedDraftKeeper do
   @spec snapshot(state(), view_id()) :: state()
   defp snapshot(state, view_id) do
     %{view: view, written: written} = tracked = Map.fetch!(state.tracked, view_id)
+    # Warn once per run of failures; retries stay quiet until a save succeeds.
+    warn? = is_nil(tracked.retry_delay)
 
     {complete?, tracked} =
       case Overlay.staged_drafts(view) do
         {:ok, []} ->
-          {delete_files(state, view) == :ok, %{tracked | written: %{}}}
+          deleted = StagedDrafts.delete_view(view.project_root, view.id, state.store_opts)
+          {cleaned_up?(deleted, warn?), %{tracked | written: %{}}}
 
         {:ok, drafts} ->
           {written, tracked} = write_changed(state, tracked, drafts, written)
 
           pruned =
-            log_error(
-              StagedDrafts.prune(view.project_root, view.id, Map.keys(written), state.store_opts)
-            )
+            StagedDrafts.prune(view.project_root, view.id, Map.keys(written), state.store_opts)
 
           saved? = Enum.all?(written, fn {_path, digest} -> is_binary(digest) end)
-          {saved? and pruned == :ok, %{tracked | written: written}}
+          {saved? and cleaned_up?(pruned, warn?), %{tracked | written: written}}
 
         {:error, reason} ->
           Minga.Log.debug(
@@ -388,15 +422,14 @@ defmodule MingaAgent.StagedDraftKeeper do
   defp settle(_state, %{retry_pending: true} = tracked, false), do: tracked
 
   defp settle(state, tracked, false) do
-    delay =
-      case tracked.retry_delay do
-        nil -> state.retry_ms
-        previous -> min(previous * 2, @max_retry_ms)
-      end
-
+    delay = next_retry_delay(state, tracked.retry_delay)
     Process.send_after(self(), {:retry_snapshot, tracked.view.id}, delay)
     %{tracked | retry_delay: delay, retry_pending: true}
   end
+
+  @spec next_retry_delay(state(), pos_integer() | nil) :: pos_integer()
+  defp next_retry_delay(state, nil), do: state.retry_ms
+  defp next_retry_delay(_state, previous), do: min(previous * 2, @max_retry_ms)
 
   @spec put_tracked(state(), tracked()) :: state()
   defp put_tracked(state, tracked),
@@ -482,12 +515,26 @@ defmodule MingaAgent.StagedDraftKeeper do
   defp log_error(:ok), do: :ok
 
   defp log_error({:error, reason} = error) do
+    cleanup_warning(reason)
+    error
+  end
+
+  @spec cleaned_up?(:ok | {:error, term()}, boolean()) :: boolean()
+  defp cleaned_up?(:ok, _warn?), do: true
+
+  defp cleaned_up?({:error, reason}, true) do
+    cleanup_warning(reason)
+    false
+  end
+
+  defp cleaned_up?({:error, _reason}, false), do: false
+
+  @spec cleanup_warning(term()) :: :ok
+  defp cleanup_warning(reason) do
     Minga.Log.warning(
       :agent,
       "Staged agent edit files could not be cleaned up: #{inspect(Recovery.safe_reason(reason))}"
     )
-
-    error
   end
 
   @spec display_path(String.t()) :: String.t()
@@ -507,13 +554,20 @@ defmodule MingaAgent.StagedDraftKeeper do
   end
 
   # A view that is still tracked is never rebuilt from disk; its files are
-  # the snapshot of that running view.
+  # the snapshot of that running view. A retired view, or one whose deletion
+  # is pending, is never offered; the deletion of a retired view left by an
+  # earlier run is finished here.
   @spec disk_recoveries(state(), String.t()) :: {[Recovery.t()], state()}
   defp disk_recoveries(state, root) do
     case StagedDrafts.load(root, state.store_opts) do
       {:ok, stored} ->
+        {retired, stored} = Enum.split_with(stored, & &1.retired)
+        state = Enum.reduce(retired, state, &finish_retirement(&2, &1.dir))
+
         stored
-        |> Enum.reject(&Map.has_key?(state.tracked, &1.view_id))
+        |> Enum.reject(
+          &(Map.has_key?(state.tracked, &1.view_id) or pending_delete?(state, &1.dir))
+        )
         |> Enum.map_reduce(state, &restore_view(&2, root, &1))
 
       {:error, reason} ->
@@ -525,6 +579,15 @@ defmodule MingaAgent.StagedDraftKeeper do
         {[], state}
     end
   end
+
+  # A deletion that is already pending waits for its retry timer.
+  @spec finish_retirement(state(), String.t()) :: state()
+  defp finish_retirement(state, dir) do
+    if pending_delete?(state, dir), do: state, else: retire(state, dir)
+  end
+
+  @spec pending_delete?(state(), String.t()) :: boolean()
+  defp pending_delete?(state, dir), do: Map.has_key?(state.deletes, dir)
 
   @spec restore_view(state(), String.t(), StagedDrafts.stored_view()) :: {Recovery.t(), state()}
   defp restore_view(

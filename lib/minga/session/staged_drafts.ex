@@ -6,7 +6,7 @@ defmodule Minga.Session.StagedDrafts do
 
       $XDG_DATA_HOME/minga/staged_drafts/<project key>/<view key>/<path key>.json
 
-  The keys are SHA-256 hashes, so file names never reveal project paths. Files are grouped by the identity of the staging view (`MingaAgent.ProjectView` id), not by workspace: two views that claim the same workspace never overwrite or delete each other's drafts. The workspace id is an attribute stored in each draft.
+  The keys are SHA-256 hashes, so file names never reveal project paths. Files are grouped by the identity of the staging view (`MingaAgent.ProjectView` id), not by workspace: two views that claim the same workspace never overwrite or delete each other's drafts. The workspace id is an attribute stored in each draft. A published or discarded view is retired: a content-free `<view key>.retired` tombstone beside its directory marks it until the deletion finishes, so a failed deletion never brings its drafts back.
 
   Each draft is one JSON file, written atomically (temporary file, then rename), so a crash leaves either the previous complete draft or the new one. The file carries a `version` field. The project root, view id, and path are Base64-encoded, because names can be arbitrary bytes that JSON cannot hold, and so are the base and staged bytes. A `base_sha256` fingerprint guards the base against corruption.
 
@@ -23,6 +23,7 @@ defmodule Minga.Session.StagedDrafts do
   @format "minga-staged-draft"
   @current_version 1
   @extension ".json"
+  @retired ".retired"
 
   # The editor refuses to open files above 10 MiB by default; agent changesets
   # stage files without that limit. 64 MiB of base plus 64 MiB of content is
@@ -49,12 +50,17 @@ defmodule Minga.Session.StagedDrafts do
           | {:lost, String.t(), String.t(), lost_reason()}
           | {:retained, String.t(), String.t(), retained_reason()}
 
-  @typedoc "The stored drafts of one staging view."
+  @typedoc """
+  The stored drafts of one staging view.
+
+  A retired view (`retired: true`) was published or discarded, and its deletion has not finished. It has no entries and must never be offered again; its directory is removed with `retire_view_dir/1`.
+  """
   @type stored_view :: %{
           dir: String.t(),
           view_id: String.t(),
           workspace_id: non_neg_integer() | nil,
-          entries: [entry()]
+          entries: [entry()],
+          retired: boolean()
         }
 
   @doc "Largest base or staged content, in bytes, that is persisted (`opts[:max_file_bytes]`, default 64 MiB)."
@@ -195,10 +201,43 @@ defmodule Minga.Session.StagedDrafts do
 
   @doc "Deletes a loaded view's directory, for a view none of whose drafts can be restored."
   @spec remove_view_dir(stored_view()) :: :ok | {:error, term()}
-  def remove_view_dir(%{dir: dir}) do
-    case File.rm_rf(dir) do
-      {:ok, _removed} -> :ok
-      {:error, reason, _path} -> {:error, reason}
+  def remove_view_dir(%{dir: dir}), do: remove_dir(dir)
+
+  @doc """
+  Deletes every stored draft of a view that is published or discarded, so its drafts are never offered again.
+
+  A content-free tombstone next to the view directory (`<view key>.retired`) is written first and removed last. If the deletion fails, the tombstone survives a restart, so `load/2` reports the view as retired instead of offering its drafts. Retry with `retire_view_dir/1`.
+  """
+  @spec retire_view(String.t(), String.t(), keyword()) :: :ok | {:error, term()}
+  def retire_view(project_root, view_id, opts \\ []) do
+    project_root |> view_dir(view_id, opts) |> retire_view_dir()
+  end
+
+  @doc "Finishes retiring the view stored in `dir` (from `view_dir/3`, or a loaded view). A view that is already gone is not an error."
+  @spec retire_view_dir(String.t()) :: :ok | {:error, term()}
+  def retire_view_dir(dir) when is_binary(dir) do
+    tombstone = dir <> @retired
+
+    case File.lstat(dir) do
+      {:error, :enoent} ->
+        remove_file(tombstone)
+
+      _exists ->
+        # A failed tombstone only matters if the deletion fails too; the
+        # deletion's result decides whether the view is still pending.
+        _ = mark_retired(tombstone)
+
+        with :ok <- remove_dir(dir) do
+          remove_file(tombstone)
+        end
+    end
+  end
+
+  @spec mark_retired(String.t()) :: :ok | {:error, term()}
+  defp mark_retired(tombstone) do
+    case File.write(tombstone, "", [:exclusive]) do
+      result when result in [:ok, {:error, :eexist}] -> :ok
+      {:error, _reason} = error -> error
     end
   end
 
@@ -209,12 +248,14 @@ defmodule Minga.Session.StagedDrafts do
   """
   @spec delete_view(String.t(), String.t(), keyword()) :: :ok | {:error, term()}
   def delete_view(project_root, view_id, opts \\ []) do
-    case File.rm_rf(view_dir(project_root, view_id, opts)) do
-      {:ok, _removed} ->
-        :ok
+    project_root |> view_dir(view_id, opts) |> remove_dir()
+  end
 
-      {:error, reason, _path} ->
-        {:error, reason}
+  @spec remove_dir(String.t()) :: :ok | {:error, term()}
+  defp remove_dir(dir) do
+    case File.rm_rf(dir) do
+      {:ok, _removed} -> :ok
+      {:error, reason, _path} -> {:error, reason}
     end
   end
 
@@ -231,7 +272,7 @@ defmodule Minga.Session.StagedDrafts do
   @doc """
   Loads every stored draft of a project, grouped by staging view.
 
-  A draft that can never be restored is returned as `{:lost, file, name, reason}`; one that cannot be read now is `{:retained, file, name, reason}`. `name` is the draft's path when the file still names it. Temporary files are skipped and left alone: one may belong to a write that is still in progress (`prune/4` removes leftovers for the view's owner). Returns `{:error, reason}` without reading anything when a store directory fails the privacy check.
+  A draft that can never be restored is returned as `{:lost, file, name, reason}`; one that cannot be read now is `{:retained, file, name, reason}`. A view with a retirement tombstone is returned with `retired: true` and no entries; its drafts are not read. `name` is the draft's path when the file still names it. Temporary files are skipped and left alone: one may belong to a write that is still in progress (`prune/4` removes leftovers for the view's owner). Returns `{:error, reason}` without reading anything when a store directory fails the privacy check.
   """
   @spec load(String.t(), keyword()) :: {:ok, [stored_view()]} | {:error, term()}
   def load(project_root, opts \\ []) when is_binary(project_root) do
@@ -241,10 +282,12 @@ defmodule Minga.Session.StagedDrafts do
          :ok <- verify_existing_private(dir(opts), uid),
          :ok <- verify_existing_private(project, uid),
          {:ok, names} <- list_dir(project) do
-      dirs = names |> Enum.sort() |> Enum.map(&Path.join(project, &1))
+      {retired, live} = split_retired(names)
+      dirs = live |> Enum.sort() |> Enum.map(&Path.join(project, &1))
 
       with :ok <- all_ok(dirs, &verify_private(&1, uid)) do
-        {:ok, Enum.flat_map(dirs, &List.wrap(load_view(&1, project_root, opts)))}
+        loaded = Enum.flat_map(dirs, &List.wrap(load_view(&1, project_root, opts)))
+        {:ok, Enum.map(retired, &retired_view(Path.join(project, &1))) ++ loaded}
       end
     else
       :absent -> {:ok, []}
@@ -256,6 +299,23 @@ defmodule Minga.Session.StagedDrafts do
 
   @spec project_dir(String.t(), keyword()) :: String.t()
   defp project_dir(project_root, opts), do: Path.join(dir(opts), hash(project_root))
+
+  # Splits a project directory's names into retired view keys (with or
+  # without a remaining view directory) and the live view directories.
+  @spec split_retired([String.t()]) :: {[String.t()], [String.t()]}
+  defp split_retired(names) do
+    retired =
+      for name <- names, String.ends_with?(name, @retired), into: MapSet.new() do
+        String.replace_suffix(name, @retired, "")
+      end
+
+    live = Enum.reject(names, &(String.ends_with?(&1, @retired) or MapSet.member?(retired, &1)))
+    {retired |> MapSet.to_list() |> Enum.sort(), live}
+  end
+
+  @spec retired_view(String.t()) :: stored_view()
+  defp retired_view(dir),
+    do: %{dir: dir, view_id: "", workspace_id: nil, entries: [], retired: true}
 
   @spec list_dir(String.t()) :: {:ok, [String.t()]} | :absent | {:error, term()}
   defp list_dir(dir) do
@@ -308,7 +368,8 @@ defmodule Minga.Session.StagedDrafts do
       dir: dir,
       view_id: view_id,
       workspace_id: workspace_id,
-      entries: Enum.map(decoded, &elem(&1, 0))
+      entries: Enum.map(decoded, &elem(&1, 0)),
+      retired: false
     }
   end
 

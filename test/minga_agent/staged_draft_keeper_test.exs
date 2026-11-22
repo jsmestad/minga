@@ -1,6 +1,8 @@
 defmodule MingaAgent.StagedDraftKeeperTest do
   use ExUnit.Case, async: true
 
+  import ExUnit.CaptureLog
+
   alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Session.StagedDrafts
   alias MingaAgent.ProjectView
@@ -404,6 +406,79 @@ defmodule MingaAgent.StagedDraftKeeperTest do
       send(keeper, {:retry_snapshot, view.id})
 
       eventually(keeper, fn -> match?(%{{1, "lib/a.ex"} => _}, stored(root, store)) end)
+    end
+  end
+
+  describe "failed cleanup after a publish" do
+    # A view directory without write permission makes the deletion fail.
+    defp block_cleanup(root, view, store) do
+      dir = StagedDrafts.view_dir(root, view.id, store)
+      File.chmod!(dir, 0o500)
+      on_exit(fn -> File.chmod(dir, 0o700) end)
+      dir
+    end
+
+    defp publish_and_wait_for_retirement(keeper, root, store, view) do
+      ref = Process.monitor(Overlay.changeset_pid(view))
+      assert ProjectView.promote(view, :project_root) == :ok
+      assert_receive {:DOWN, ^ref, :process, _, :normal}, 2_000
+
+      eventually(keeper, fn ->
+        match?({:ok, [%{retired: true}]}, StagedDrafts.load(root, store))
+      end)
+    end
+
+    test "is retried until it succeeds, warning once, and the view is not offered meanwhile",
+         %{root: root, store: store} do
+      keeper = start_keeper(Keyword.put(store, :retry_ms, 60_000), :retrying)
+      {:ok, view} = ProjectView.overlay(root)
+      StagedDraftKeeper.persist(keeper, view, 1)
+      :ok = ProjectView.write_file(view, "lib/a.ex", "ONE\ntwo\nthree\n")
+      eventually(keeper, fn -> map_size(stored(root, store)) == 1 end)
+      dir = block_cleanup(root, view, store)
+
+      log =
+        capture_log(fn ->
+          publish_and_wait_for_retirement(keeper, root, store, view)
+
+          # The retry timer's message, delivered instead of waited for, fails
+          # again without a second warning.
+          send(keeper, {:retry_delete, dir})
+          :sys.get_state(keeper)
+        end)
+
+      assert log |> String.split("could not be cleaned up") |> length() == 2
+
+      :ok = StagedDraftKeeper.recover(keeper, root, self())
+      :sys.get_state(keeper)
+      refute_received {:staged_drafts_recovered, _, _}
+
+      File.chmod!(dir, 0o700)
+      send(keeper, {:retry_delete, dir})
+
+      eventually(keeper, fn -> StagedDrafts.load(root, store) == {:ok, []} end)
+      refute File.exists?(dir)
+    end
+
+    test "is not offered at the next start, which finishes the cleanup",
+         %{root: root, store: store, keeper: keeper} do
+      {:ok, view} = ProjectView.overlay(root)
+      StagedDraftKeeper.persist(keeper, view, 1)
+      stage(view)
+      eventually(keeper, fn -> map_size(stored(root, store)) == 3 end)
+      dir = block_cleanup(root, view, store)
+
+      publish_and_wait_for_retirement(keeper, root, store, view)
+      stop_supervised!(:first)
+      File.chmod!(dir, 0o700)
+
+      fresh = start_keeper(store, :second)
+      :ok = StagedDraftKeeper.recover(fresh, root, self())
+      :sys.get_state(fresh)
+
+      refute_received {:staged_drafts_recovered, _, _}
+      assert StagedDrafts.load(root, store) == {:ok, []}
+      refute File.exists?(dir)
     end
   end
 end
