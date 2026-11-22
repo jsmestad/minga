@@ -2,38 +2,69 @@ defmodule Minga.Session.StagedDrafts do
   @moduledoc """
   On-disk store for staged agent edits, so they survive a full Minga restart.
 
-  Approved agent edits wait in memory until the user publishes or discards them. This module keeps a durable copy next to the other session files, keyed by project and workspace:
+  Approved agent edits wait in memory until the user publishes or discards them. This module keeps a durable copy next to the other session files, keyed by project and by staging view:
 
-      $XDG_DATA_HOME/minga/staged_drafts/<project key>/<workspace id>/<path key>.json
+      $XDG_DATA_HOME/minga/staged_drafts/<project key>/<view key>/<path key>.json
 
-  The project and path keys are SHA-256 hashes, so file names never reveal project paths. Each draft is one JSON file, written atomically (temporary file, then rename), so a crash leaves either the previous complete draft or the new one. The file carries a `version` field and the project root, workspace id, and path it belongs to; the base and staged bytes are Base64-encoded because file content can be arbitrary bytes. A `base_sha256` fingerprint guards the base against corruption.
+  The keys are SHA-256 hashes, so file names never reveal project paths. Files are grouped by the identity of the staging view (`MingaAgent.ProjectView` id), not by workspace: two views that claim the same workspace never overwrite or delete each other's drafts. The workspace id is an attribute stored in each draft.
 
-  The drafts are user file content. Directories are created with mode `0700` and files with mode `0600`.
+  Each draft is one JSON file, written atomically (temporary file, then rename), so a crash leaves either the previous complete draft or the new one. The file carries a `version` field. The project root, view id, and path are Base64-encoded, because names can be arbitrary bytes that JSON cannot hold, and so are the base and staged bytes. A `base_sha256` fingerprint guards the base against corruption.
+
+  The drafts are user file content. Every store directory must be a real directory (not a symlink) owned by the current user and not writable by group or others; it is created with mode `0700`, and a directory that fails the check is refused for both writing and loading. Draft files get mode `0600` before they become visible under their final name. Reads accept regular files only and are bounded by `max_draft_bytes/0`.
 
   This module only reads and writes files. `MingaAgent.StagedDraftKeeper` decides when to write and delete them.
   """
 
+  import Bitwise, only: [band: 2]
+
+  alias Minga.SecureFile
   alias Minga.Session.StagedDraft
 
   @format "minga-staged-draft"
   @current_version 1
   @extension ".json"
 
-  @typedoc "Why one stored draft could not be loaded."
+  # The editor refuses to open files above 10 MiB by default; agent changesets
+  # stage files without that limit. 64 MiB of base plus 64 MiB of content is
+  # well above any source file an agent edits, and keeps a corrupt or hostile
+  # draft from exhausting the keeper.
+  @max_file_bytes 64 * 1024 * 1024
+  @max_draft_bytes 2 * div(@max_file_bytes * 4, 3) + 64 * 1024
+
+  @typedoc "Why one stored draft is gone for good. Its file is deleted."
   @type lost_reason ::
           :invalid_format
           | :base_fingerprint_mismatch
           | :project_mismatch
           | :invalid_path
+          | :too_large
+          | :not_a_regular_file
           | {:unsupported_version, term()}
-          | {:read_failed, term()}
 
-  @typedoc "One loaded draft file: a usable draft, or a lost draft named by its path when known."
+  @typedoc "Why one stored draft cannot be read now. Its file is kept for a later start."
+  @type retained_reason :: {:read_failed, term()}
+
+  @typedoc "One loaded draft file."
   @type entry ::
-          {:ok, String.t(), StagedDraft.t()} | {:lost, String.t(), String.t(), lost_reason()}
+          {:ok, String.t(), StagedDraft.t()}
+          | {:lost, String.t(), String.t(), lost_reason()}
+          | {:retained, String.t(), String.t(), retained_reason()}
 
-  @typedoc "Stored drafts of one workspace."
-  @type workspace_drafts :: {non_neg_integer(), [entry()]}
+  @typedoc "The stored drafts of one staging view."
+  @type stored_view :: %{
+          dir: String.t(),
+          view_id: String.t(),
+          workspace_id: non_neg_integer() | nil,
+          entries: [entry()]
+        }
+
+  @doc "Largest base or staged content, in bytes, that is persisted."
+  @spec max_file_bytes() :: pos_integer()
+  def max_file_bytes, do: @max_file_bytes
+
+  @doc "Largest draft file, in bytes, that is read back."
+  @spec max_draft_bytes() :: pos_integer()
+  def max_draft_bytes, do: @max_draft_bytes
 
   @doc "Returns the root directory of the staged draft store."
   @spec dir(keyword()) :: String.t()
@@ -46,29 +77,44 @@ defmodule Minga.Session.StagedDrafts do
     end)
   end
 
-  @doc "Returns the directory holding one workspace's drafts."
-  @spec workspace_dir(String.t(), non_neg_integer(), keyword()) :: String.t()
-  def workspace_dir(project_root, workspace_id, opts \\ [])
-      when is_binary(project_root) and is_integer(workspace_id) and workspace_id >= 0 do
-    Path.join(project_dir(project_root, opts), Integer.to_string(workspace_id))
+  @doc "Returns the directory holding one view's drafts."
+  @spec view_dir(String.t(), String.t(), keyword()) :: String.t()
+  def view_dir(project_root, view_id, opts \\ [])
+      when is_binary(project_root) and is_binary(view_id) do
+    Path.join(project_dir(project_root, opts), hash(view_id))
   end
 
   @doc "Returns the file that stores the draft for `path`."
-  @spec draft_file(String.t(), non_neg_integer(), String.t(), keyword()) :: String.t()
-  def draft_file(project_root, workspace_id, path, opts \\ []) when is_binary(path) do
-    Path.join(workspace_dir(project_root, workspace_id, opts), hash(path) <> @extension)
+  @spec draft_file(String.t(), String.t(), String.t(), keyword()) :: String.t()
+  def draft_file(project_root, view_id, path, opts \\ []) when is_binary(path) do
+    Path.join(view_dir(project_root, view_id, opts), hash(path) <> @extension)
   end
 
-  @doc "Atomically writes one draft with private permissions."
-  @spec write(String.t(), non_neg_integer(), StagedDraft.t(), keyword()) :: :ok | {:error, term()}
-  def write(project_root, workspace_id, %StagedDraft{} = draft, opts \\ []) do
-    target = draft_file(project_root, workspace_id, draft.path, opts)
-    tmp = "#{target}.#{System.unique_integer([:positive, :monotonic])}.tmp"
-    json = JSON.encode!(encode(project_root, workspace_id, draft))
+  @doc """
+  Returns the uid that must own the store directories.
 
-    with :ok <- ensure_private_dirs(project_root, workspace_id, opts),
-         :ok <- File.write(tmp, json, [:exclusive]),
-         :ok <- File.chmod(tmp, 0o600),
+  `opts[:owner_uid]` wins; otherwise the uid is read from a file this process creates, which avoids spawning an OS process.
+  """
+  @spec owner_uid(keyword()) :: {:ok, non_neg_integer()} | {:error, term()}
+  def owner_uid(opts \\ []) do
+    case Keyword.fetch(opts, :owner_uid) do
+      {:ok, uid} when is_integer(uid) -> {:ok, uid}
+      :error -> probe_uid()
+    end
+  end
+
+  @doc "Atomically writes one draft of `view_id`, staged for `workspace_id`."
+  @spec write(String.t(), String.t(), non_neg_integer(), StagedDraft.t(), keyword()) ::
+          :ok | {:error, term()}
+  def write(project_root, view_id, workspace_id, %StagedDraft{} = draft, opts \\ [])
+      when is_integer(workspace_id) and workspace_id >= 0 do
+    target = draft_file(project_root, view_id, draft.path, opts)
+    tmp = "#{target}.#{System.unique_integer([:positive, :monotonic])}.tmp"
+
+    with :ok <- within_size_limit(draft),
+         {:ok, json} <- encode_json(encode(project_root, view_id, workspace_id, draft)),
+         :ok <- ensure_private_dirs(project_root, view_id, opts),
+         :ok <- write_private(tmp, json),
          :ok <- File.rename(tmp, target) do
       :ok
     else
@@ -78,31 +124,10 @@ defmodule Minga.Session.StagedDrafts do
     end
   end
 
-  @doc "Deletes the stored draft for `path`. A missing file is not an error."
-  @spec delete(String.t(), non_neg_integer(), String.t(), keyword()) :: :ok | {:error, term()}
-  def delete(project_root, workspace_id, path, opts \\ []) do
-    project_root |> draft_file(workspace_id, path, opts) |> remove_file()
-  end
-
-  @doc "Deletes every stored draft of one workspace."
-  @spec delete_workspace(String.t(), non_neg_integer(), keyword()) :: :ok | {:error, term()}
-  def delete_workspace(project_root, workspace_id, opts \\ []) do
-    dir = workspace_dir(project_root, workspace_id, opts)
-
-    case File.rm_rf(dir) do
-      {:ok, _removed} ->
-        _ = File.rmdir(project_dir(project_root, opts))
-        :ok
-
-      {:error, reason, _path} ->
-        {:error, reason}
-    end
-  end
-
-  @doc "Deletes every stored draft of one workspace except the drafts for `keep_paths`."
-  @spec prune(String.t(), non_neg_integer(), [String.t()], keyword()) :: :ok | {:error, term()}
-  def prune(project_root, workspace_id, keep_paths, opts \\ []) when is_list(keep_paths) do
-    dir = workspace_dir(project_root, workspace_id, opts)
+  @doc "Deletes every stored draft of one view except the drafts for `keep_paths`."
+  @spec prune(String.t(), String.t(), [String.t()], keyword()) :: :ok | {:error, term()}
+  def prune(project_root, view_id, keep_paths, opts \\ []) when is_list(keep_paths) do
+    dir = view_dir(project_root, view_id, opts)
     keep = MapSet.new(keep_paths, &(hash(&1) <> @extension))
 
     case File.ls(dir) do
@@ -121,6 +146,34 @@ defmodule Minga.Session.StagedDrafts do
     end
   end
 
+  @doc "Deletes the stored draft of one view for `path`. A missing file is not an error."
+  @spec delete(String.t(), String.t(), String.t(), keyword()) :: :ok | {:error, term()}
+  def delete(project_root, view_id, path, opts \\ []) do
+    project_root |> draft_file(view_id, path, opts) |> remove_file()
+  end
+
+  @doc "Deletes a loaded view's directory, for a view none of whose drafts can be restored."
+  @spec remove_view_dir(stored_view()) :: :ok | {:error, term()}
+  def remove_view_dir(%{dir: dir}) do
+    case File.rm_rf(dir) do
+      {:ok, _removed} -> :ok
+      {:error, reason, _path} -> {:error, reason}
+    end
+  end
+
+  @doc "Deletes every stored draft of one view."
+  @spec delete_view(String.t(), String.t(), keyword()) :: :ok | {:error, term()}
+  def delete_view(project_root, view_id, opts \\ []) do
+    case File.rm_rf(view_dir(project_root, view_id, opts)) do
+      {:ok, _removed} ->
+        _ = File.rmdir(project_dir(project_root, opts))
+        :ok
+
+      {:error, reason, _path} ->
+        {:error, reason}
+    end
+  end
+
   @doc "Removes one stored draft file, for example a draft reported as lost."
   @spec remove_file(String.t()) :: :ok | {:error, term()}
   def remove_file(file) when is_binary(file) do
@@ -132,24 +185,26 @@ defmodule Minga.Session.StagedDrafts do
   end
 
   @doc """
-  Loads every stored draft of a project, grouped by workspace id.
+  Loads every stored draft of a project, grouped by staging view.
 
-  A draft file that cannot be read or decoded is returned as `{:lost, file, name, reason}`, where `name` is the draft's path when the file still names it. Leftover temporary files from an interrupted write are incomplete and are removed.
+  A draft that can never be restored is returned as `{:lost, file, name, reason}`; one that cannot be read now is `{:retained, file, name, reason}`. `name` is the draft's path when the file still names it. Leftover temporary files from an interrupted write are incomplete and are removed. Returns `{:error, reason}` without reading anything when a store directory fails the privacy check.
   """
-  @spec load(String.t(), keyword()) :: [workspace_drafts()]
+  @spec load(String.t(), keyword()) :: {:ok, [stored_view()]} | {:error, term()}
   def load(project_root, opts \\ []) when is_binary(project_root) do
-    dir = project_dir(project_root, opts)
+    project = project_dir(project_root, opts)
 
-    case File.ls(dir) do
-      {:ok, names} ->
-        names
-        |> Enum.flat_map(&workspace_id_from_name/1)
-        |> Enum.sort()
-        |> Enum.map(fn id -> {id, load_workspace(project_root, id, opts)} end)
-        |> Enum.reject(fn {_id, entries} -> entries == [] end)
+    with {:ok, uid} <- owner_uid(opts),
+         :ok <- verify_existing_private(dir(opts), uid),
+         :ok <- verify_existing_private(project, uid),
+         {:ok, names} <- list_dir(project) do
+      dirs = names |> Enum.sort() |> Enum.map(&Path.join(project, &1))
 
-      {:error, _reason} ->
-        []
+      with :ok <- all_ok(dirs, &verify_private(&1, uid)) do
+        {:ok, Enum.flat_map(dirs, &List.wrap(load_view(&1, project_root)))}
+      end
+    else
+      :absent -> {:ok, []}
+      {:error, _reason} = error -> error
     end
   end
 
@@ -158,75 +213,127 @@ defmodule Minga.Session.StagedDrafts do
   @spec project_dir(String.t(), keyword()) :: String.t()
   defp project_dir(project_root, opts), do: Path.join(dir(opts), hash(project_root))
 
-  @spec load_workspace(String.t(), non_neg_integer(), keyword()) :: [entry()]
-  defp load_workspace(project_root, workspace_id, opts) do
-    dir = workspace_dir(project_root, workspace_id, opts)
-
+  @spec list_dir(String.t()) :: {:ok, [String.t()]} | :absent | {:error, term()}
+  defp list_dir(dir) do
     case File.ls(dir) do
-      {:ok, names} ->
-        names
-        |> Enum.sort()
-        |> Enum.flat_map(&load_entry(Path.join(dir, &1), project_root, workspace_id))
-
-      {:error, _reason} ->
-        []
+      {:ok, names} -> {:ok, names}
+      {:error, :enoent} -> :absent
+      {:error, reason} -> {:error, reason}
     end
   end
 
-  @spec load_entry(String.t(), String.t(), non_neg_integer()) :: [entry()]
-  defp load_entry(file, project_root, workspace_id) do
+  # Applies `check` in order and stops at the first error.
+  @spec all_ok([String.t()], (String.t() -> :ok | {:error, term()})) :: :ok | {:error, term()}
+  defp all_ok(items, check) do
+    Enum.reduce_while(items, :ok, fn item, :ok ->
+      case check.(item) do
+        :ok -> {:cont, :ok}
+        {:error, _reason} = error -> {:halt, error}
+      end
+    end)
+  end
+
+  @spec load_view(String.t(), String.t()) :: stored_view() | nil
+  defp load_view(dir, project_root) do
+    entries =
+      case File.ls(dir) do
+        {:ok, names} ->
+          names
+          |> Enum.sort()
+          |> Enum.flat_map(&load_entry(Path.join(dir, &1), project_root))
+
+        {:error, _reason} ->
+          []
+      end
+
+    case entries do
+      [] -> nil
+      entries -> Map.put(stored_view(entries), :dir, dir)
+    end
+  end
+
+  # The view id and workspace id come from the decoded drafts; a view whose
+  # drafts are all unreadable is still reported so its losses are named.
+  @spec stored_view([{entry(), String.t() | nil, non_neg_integer() | nil}]) :: stored_view()
+  defp stored_view(decoded) do
+    owner = Enum.find_value(decoded, fn {_entry, view_id, ws} -> view_id && {view_id, ws} end)
+    {view_id, workspace_id} = owner || {"", nil}
+
+    %{
+      view_id: view_id,
+      workspace_id: workspace_id,
+      entries: Enum.map(decoded, &elem(&1, 0))
+    }
+  end
+
+  @spec load_entry(String.t(), String.t()) :: [
+          {entry(), String.t() | nil, non_neg_integer() | nil}
+        ]
+  defp load_entry(file, project_root) do
     cond do
       String.ends_with?(file, ".tmp") ->
         _ = File.rm(file)
         []
 
       String.ends_with?(file, @extension) ->
-        [read_entry(file, project_root, workspace_id)]
+        [read_entry(file, project_root)]
 
       true ->
         []
     end
   end
 
-  @spec read_entry(String.t(), String.t(), non_neg_integer()) :: entry()
-  defp read_entry(file, project_root, workspace_id) do
-    with {:ok, data} <- read_file(file),
-         {:ok, map} <- decode_json(data) do
-      decode(file, map, project_root, workspace_id)
-    else
-      {:error, reason} -> {:lost, file, Path.basename(file), reason}
+  @spec read_entry(String.t(), String.t()) ::
+          {entry(), String.t() | nil, non_neg_integer() | nil}
+  defp read_entry(file, project_root) do
+    case SecureFile.read(file, @max_draft_bytes) do
+      {:ok, data} ->
+        decode_file(file, data, project_root)
+
+      {:error, {:file_too_large, _path, _size, _max}} ->
+        {{:lost, file, Path.basename(file), :too_large}, nil, nil}
+
+      {:error, {:non_regular_file, _path, _type}} ->
+        {{:lost, file, Path.basename(file), :not_a_regular_file}, nil, nil}
+
+      {:error, {:file_read_failed, _path, reason}} ->
+        {{:retained, file, Path.basename(file), {:read_failed, reason}}, nil, nil}
+
+      {:error, _changed_during_read} ->
+        {{:retained, file, Path.basename(file), {:read_failed, :changed_during_read}}, nil, nil}
     end
   end
 
-  @spec read_file(String.t()) :: {:ok, binary()} | {:error, {:read_failed, term()}}
-  defp read_file(file) do
-    case File.read(file) do
-      {:ok, data} -> {:ok, data}
-      {:error, reason} -> {:error, {:read_failed, reason}}
-    end
-  end
-
-  @spec decode_json(binary()) :: {:ok, map()} | {:error, :invalid_format}
-  defp decode_json(data) do
+  @spec decode_file(String.t(), binary(), String.t()) ::
+          {entry(), String.t() | nil, non_neg_integer() | nil}
+  defp decode_file(file, data, project_root) do
     case JSON.decode(data) do
-      {:ok, %{} = map} -> {:ok, map}
-      _invalid -> {:error, :invalid_format}
+      {:ok, %{} = map} -> decode(file, map, project_root)
+      _invalid -> {{:lost, file, Path.basename(file), :invalid_format}, nil, nil}
     end
   end
 
-  @spec encode(String.t(), non_neg_integer(), StagedDraft.t()) :: map()
-  defp encode(project_root, workspace_id, %StagedDraft{} = draft) do
+  @spec encode(String.t(), String.t(), non_neg_integer(), StagedDraft.t()) :: map()
+  defp encode(project_root, view_id, workspace_id, %StagedDraft{} = draft) do
     %{
       "format" => @format,
       "version" => @current_version,
-      "project_root" => project_root,
+      "project_root" => Base.encode64(project_root),
+      "view_id" => Base.encode64(view_id),
       "workspace_id" => workspace_id,
-      "path" => draft.path,
+      "path" => Base.encode64(draft.path),
       "base_sha256" => StagedDraft.base_fingerprint(draft),
       "base" => encode_bytes(draft.base),
       "deleted" => draft.content == :deleted,
       "content" => encode_content(draft.content)
     }
+  end
+
+  @spec encode_json(map()) :: {:ok, String.t()} | {:error, :invalid_format}
+  defp encode_json(map) do
+    {:ok, JSON.encode!(map)}
+  rescue
+    _error -> {:error, :invalid_format}
   end
 
   @spec encode_bytes(binary() | nil) :: String.t() | nil
@@ -237,43 +344,80 @@ defmodule Minga.Session.StagedDrafts do
   defp encode_content(:deleted), do: nil
   defp encode_content(bytes), do: Base.encode64(bytes)
 
-  @spec decode(String.t(), map(), String.t(), non_neg_integer()) :: entry()
-  defp decode(file, %{"format" => @format, "version" => @current_version} = map, root, id) do
-    name = Map.get(map, "path")
+  @spec within_size_limit(StagedDraft.t()) :: :ok | {:error, :draft_too_large}
+  defp within_size_limit(%StagedDraft{base: base, content: content}) do
+    if byte_size_or_zero(base) <= @max_file_bytes and
+         byte_size_or_zero(content) <= @max_file_bytes,
+       do: :ok,
+       else: {:error, :draft_too_large}
+  end
 
-    with {:ok, path} <- decode_path(name),
-         :ok <- same_owner(map, root, id),
+  @spec byte_size_or_zero(binary() | atom() | nil) :: non_neg_integer()
+  defp byte_size_or_zero(bytes) when is_binary(bytes), do: byte_size(bytes)
+  defp byte_size_or_zero(_none), do: 0
+
+  @spec decode(String.t(), map(), String.t()) ::
+          {entry(), String.t() | nil, non_neg_integer() | nil}
+  defp decode(file, %{"format" => @format, "version" => @current_version} = map, root) do
+    name = lost_name(map, file)
+
+    with {:ok, path} <- decode_path(Map.get(map, "path")),
+         {:ok, view_id, workspace_id} <- decode_owner(map, root),
          {:ok, base} <- decode_optional_bytes(Map.get(map, "base")),
          :ok <- verify_base(base, Map.get(map, "base_sha256")),
          {:ok, content} <- decode_content(map) do
-      {:ok, file, StagedDraft.new(path, base, content)}
+      {{:ok, file, StagedDraft.new(path, base, content)}, view_id, workspace_id}
     else
-      {:error, reason} -> {:lost, file, lost_name(name, file), reason}
+      {:error, reason} -> {{:lost, file, name, reason}, nil, nil}
     end
   end
 
-  defp decode(file, %{"format" => @format, "version" => version} = map, _root, _id),
-    do: {:lost, file, lost_name(Map.get(map, "path"), file), {:unsupported_version, version}}
+  defp decode(file, %{"format" => @format, "version" => version} = map, _root),
+    do: {{:lost, file, lost_name(map, file), {:unsupported_version, version}}, nil, nil}
 
-  defp decode(file, map, _root, _id),
-    do: {:lost, file, lost_name(Map.get(map, "path"), file), :invalid_format}
+  defp decode(file, map, _root),
+    do: {{:lost, file, lost_name(map, file), :invalid_format}, nil, nil}
 
-  @spec lost_name(term(), String.t()) :: String.t()
-  defp lost_name(path, _file) when is_binary(path) and path != "", do: path
-  defp lost_name(_path, file), do: Path.basename(file)
+  @spec lost_name(map(), String.t()) :: String.t()
+  defp lost_name(map, file) do
+    with encoded when is_binary(encoded) <- Map.get(map, "path"),
+         {:ok, path} when path != "" <- Base.decode64(encoded) do
+      path
+    else
+      _unnamed -> Path.basename(file)
+    end
+  end
 
   @spec decode_path(term()) :: {:ok, String.t()} | {:error, :invalid_path}
-  defp decode_path(path) when is_binary(path) and path != "" do
+  defp decode_path(encoded) when is_binary(encoded) do
+    case Base.decode64(encoded) do
+      {:ok, path} when path != "" -> relative_path(path)
+      _invalid -> {:error, :invalid_path}
+    end
+  end
+
+  defp decode_path(_encoded), do: {:error, :invalid_path}
+
+  @spec relative_path(String.t()) :: {:ok, String.t()} | {:error, :invalid_path}
+  defp relative_path(path) do
     if Path.type(path) == :relative and ".." not in Path.split(path),
       do: {:ok, path},
       else: {:error, :invalid_path}
   end
 
-  defp decode_path(_path), do: {:error, :invalid_path}
+  @spec decode_owner(map(), String.t()) ::
+          {:ok, String.t(), non_neg_integer()} | {:error, :project_mismatch}
+  defp decode_owner(%{"project_root" => root64, "view_id" => view64, "workspace_id" => ws}, root)
+       when is_binary(root64) and is_binary(view64) and is_integer(ws) and ws >= 0 do
+    with {:ok, ^root} <- Base.decode64(root64),
+         {:ok, view_id} when view_id != "" <- Base.decode64(view64) do
+      {:ok, view_id, ws}
+    else
+      _mismatch -> {:error, :project_mismatch}
+    end
+  end
 
-  @spec same_owner(map(), String.t(), non_neg_integer()) :: :ok | {:error, :project_mismatch}
-  defp same_owner(%{"project_root" => root, "workspace_id" => id}, root, id), do: :ok
-  defp same_owner(_map, _root, _id), do: {:error, :project_mismatch}
+  defp decode_owner(_map, _root), do: {:error, :project_mismatch}
 
   @spec decode_optional_bytes(term()) :: {:ok, binary() | nil} | {:error, :invalid_format}
   defp decode_optional_bytes(nil), do: {:ok, nil}
@@ -306,29 +450,80 @@ defmodule Minga.Session.StagedDrafts do
 
   defp decode_content(_map), do: {:error, :invalid_format}
 
-  @spec workspace_id_from_name(String.t()) :: [non_neg_integer()]
-  defp workspace_id_from_name(name) do
-    case Integer.parse(name) do
-      {id, ""} when id >= 0 -> [id]
-      _other -> []
+  # ── Private directories ─────────────────────────────────────────────────
+
+  @spec ensure_private_dirs(String.t(), String.t(), keyword()) :: :ok | {:error, term()}
+  defp ensure_private_dirs(project_root, view_id, opts) do
+    root = dir(opts)
+
+    with {:ok, uid} <- owner_uid(opts),
+         :ok <- File.mkdir_p(Path.dirname(root)) do
+      all_ok(
+        [root, project_dir(project_root, opts), view_dir(project_root, view_id, opts)],
+        &create_private(&1, uid)
+      )
     end
   end
 
-  @spec ensure_private_dirs(String.t(), non_neg_integer(), keyword()) :: :ok | {:error, term()}
-  defp ensure_private_dirs(project_root, workspace_id, opts) do
-    [dir(opts), project_dir(project_root, opts), workspace_dir(project_root, workspace_id, opts)]
-    |> Enum.reduce_while(:ok, fn dir, :ok ->
-      case ensure_private_dir(dir) do
-        :ok -> {:cont, :ok}
-        {:error, _reason} = error -> {:halt, error}
-      end
-    end)
+  @spec create_private(String.t(), non_neg_integer()) :: :ok | {:error, term()}
+  defp create_private(dir, uid) do
+    case File.mkdir(dir) do
+      result when result in [:ok, {:error, :eexist}] -> verify_private(dir, uid)
+      {:error, _reason} = error -> error
+    end
   end
 
-  @spec ensure_private_dir(String.t()) :: :ok | {:error, term()}
-  defp ensure_private_dir(dir) do
-    with :ok <- File.mkdir_p(dir) do
-      File.chmod(dir, 0o700)
+  @spec verify_existing_private(String.t(), non_neg_integer()) ::
+          :ok | :absent | {:error, term()}
+  defp verify_existing_private(dir, uid) do
+    case File.lstat(dir) do
+      {:error, :enoent} -> :absent
+      _exists -> verify_private(dir, uid)
+    end
+  end
+
+  # A store directory must be a real directory owned by this user. It is made
+  # 0700, and refused if it stays writable by group or others.
+  @spec verify_private(String.t(), non_neg_integer()) :: :ok | {:error, term()}
+  defp verify_private(dir, uid) do
+    with {:ok, %File.Stat{type: :directory, uid: ^uid}} <- File.lstat(dir),
+         :ok <- File.chmod(dir, 0o700),
+         {:ok, %File.Stat{type: :directory, uid: ^uid, mode: mode}} <- File.lstat(dir),
+         0 <- band(mode, 0o022) do
+      :ok
+    else
+      {:ok, %File.Stat{type: :directory}} -> {:error, {:insecure_directory, dir, :owner}}
+      {:ok, %File.Stat{type: type}} -> {:error, {:insecure_directory, dir, type}}
+      mode when is_integer(mode) -> {:error, {:insecure_directory, dir, :writable}}
+      {:error, _reason} = error -> error
+    end
+  end
+
+  @spec write_private(String.t(), binary()) :: :ok | {:error, term()}
+  defp write_private(path, data) do
+    # The containing directory is already private; the file is made 0600
+    # before it is renamed to its visible name.
+    with :ok <- File.write(path, data, [:exclusive]) do
+      File.chmod(path, 0o600)
+    end
+  end
+
+  @spec probe_uid() :: {:ok, non_neg_integer()} | {:error, term()}
+  defp probe_uid do
+    probe =
+      Path.join(
+        System.tmp_dir!(),
+        "minga-uid-#{Base.encode16(:crypto.strong_rand_bytes(8), case: :lower)}"
+      )
+
+    with :ok <- File.write(probe, "", [:exclusive]),
+         {:ok, %File.Stat{uid: uid}} <- File.lstat(probe) do
+      _ = File.rm(probe)
+      {:ok, uid}
+    else
+      {:error, _reason} = error ->
+        _ = File.rm(probe)
+        error
     end
   end
 

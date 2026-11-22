@@ -322,11 +322,11 @@ defmodule MingaAgent.Changeset do
   @doc """
   Registers `observer` to receive `{:changeset_revised, changeset}` after every staged change.
 
-  One observer at a time; a later call replaces the earlier one.
+  One observer at a time; a later call replaces the earlier one. With `{registry, value}`, the changeset also registers itself in `registry` under its own pid with `value` (updating an earlier value). The registration lives as long as the changeset, so a restarted observer can find every live changeset again.
   """
-  @spec observe(changeset(), pid()) :: :ok
-  def observe(cs, observer) when is_pid(observer) do
-    GenServer.call(cs, {:observe, observer})
+  @spec observe(changeset(), pid(), {atom(), term()} | nil) :: :ok | {:error, term()}
+  def observe(cs, observer, registration \\ nil) when is_pid(observer) do
+    GenServer.call(cs, {:observe, observer, registration})
   end
 
   @doc """

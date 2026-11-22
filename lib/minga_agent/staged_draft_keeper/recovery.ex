@@ -16,7 +16,7 @@ defmodule MingaAgent.StagedDraftKeeper.Recovery do
   @type failed_draft :: {String.t(), term()}
 
   @type t :: %__MODULE__{
-          workspace_id: non_neg_integer(),
+          workspace_id: non_neg_integer() | nil,
           source: :live | :disk,
           view: ProjectView.t() | nil,
           changes: [map()],
@@ -42,8 +42,12 @@ defmodule MingaAgent.StagedDraftKeeper.Recovery do
     %__MODULE__{workspace_id: workspace_id, source: :live, view: view, changes: changes}
   end
 
-  @doc "The outcome of rebuilding one workspace's persisted drafts."
-  @spec restored(non_neg_integer(), ProjectView.t() | nil, keyword()) :: t()
+  @doc """
+  The outcome of rebuilding one view's persisted drafts.
+
+  `workspace_id` is `nil` only when no stored draft named its workspace. Failure reasons are reduced with `safe_reason/1`, because they end up in `*Messages*` and the log.
+  """
+  @spec restored(non_neg_integer() | nil, ProjectView.t() | nil, keyword()) :: t()
   def restored(workspace_id, view, fields) do
     %__MODULE__{
       workspace_id: workspace_id,
@@ -51,8 +55,25 @@ defmodule MingaAgent.StagedDraftKeeper.Recovery do
       view: view,
       changes: Keyword.get(fields, :changes, []),
       base_changed: Keyword.get(fields, :base_changed, []),
-      lost: Keyword.get(fields, :lost, []),
-      retained: Keyword.get(fields, :retained, [])
+      lost: safe_failures(Keyword.get(fields, :lost, [])),
+      retained: safe_failures(Keyword.get(fields, :retained, []))
     }
   end
+
+  @doc """
+  Reduces a failure reason to atoms and integers.
+
+  Reasons can embed call arguments or file bytes. Strings, maps, lists, and processes become `:redacted`, so a reported reason never carries draft content.
+  """
+  @spec safe_reason(term()) :: term()
+  def safe_reason(reason) when is_atom(reason) or is_integer(reason), do: reason
+
+  def safe_reason(reason) when is_tuple(reason),
+    do: reason |> Tuple.to_list() |> Enum.map(&safe_reason/1) |> List.to_tuple()
+
+  def safe_reason(_reason), do: :redacted
+
+  @spec safe_failures([failed_draft()]) :: [failed_draft()]
+  defp safe_failures(failures),
+    do: Enum.map(failures, fn {path, reason} -> {path, safe_reason(reason)} end)
 end

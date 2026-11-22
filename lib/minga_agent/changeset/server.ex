@@ -277,8 +277,8 @@ defmodule MingaAgent.Changeset.Server do
     {:reply, SourceRead.lines(source, state.revision, start, count, max_bytes), state}
   end
 
-  def handle_call({:observe, observer}, _from, state) do
-    {:reply, :ok, %{state | observer: observer}}
+  def handle_call({:observe, observer, registration}, _from, state) do
+    {:reply, register_staging(registration), %{state | observer: observer}}
   end
 
   def handle_call({:staged_drafts, baseline_paths}, _from, state) do
@@ -769,6 +769,24 @@ defmodule MingaAgent.Changeset.Server do
     state = %{state | revision: state.revision + 1}
     notify_observer(state)
     state
+  end
+
+  # The changeset outlives its observer, so it carries its own staging
+  # registration: a restarted observer finds every live staged view there.
+  @spec register_staging({atom(), term()} | nil) :: :ok | {:error, term()}
+  defp register_staging(nil), do: :ok
+
+  defp register_staging({registry, value}) do
+    case Registry.register(registry, self(), value) do
+      {:ok, _owner} ->
+        :ok
+
+      {:error, {:already_registered, _owner}} ->
+        {_new, _old} = Registry.update_value(registry, self(), fn _old -> value end)
+        :ok
+    end
+  rescue
+    ArgumentError -> {:error, :registry_unavailable}
   end
 
   @spec notify_observer(state()) :: :ok

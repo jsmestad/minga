@@ -259,7 +259,9 @@ defmodule MingaEditor.Agent.EditPublication do
 
   # The workspace takes the recovered view only while it has no staging area
   # of its own; a session that already started there keeps its view.
-  @spec recovery_workspace(TabBar.t(), non_neg_integer()) :: {TabBar.t(), Workspace.t()}
+  @spec recovery_workspace(TabBar.t(), non_neg_integer() | nil) :: {TabBar.t(), Workspace.t()}
+  defp recovery_workspace(tb, nil), do: TabBar.add_workspace(tb, "Recovered agent edits")
+
   defp recovery_workspace(tb, workspace_id) do
     case TabBar.get_workspace(tb, workspace_id) do
       %Workspace{payload: %WorkspaceAgent{project_view: nil}} = workspace -> {tb, workspace}
@@ -289,15 +291,19 @@ defmodule MingaEditor.Agent.EditPublication do
   def recovery_messages(%Recovery{} = recovery, workspace) do
     headline(recovery.source, workspace) ++
       Enum.map(recovery.base_changed, fn path ->
-        "Staged agent edit for #{path} was made against an older version of the file. Publishing merges it with the file on disk, or keeps it staged and reports a conflict."
+        "Staged agent edit for #{display_path(path)} was made against an older version of the file. Publishing merges it with the file on disk, or keeps it staged and reports a conflict."
       end) ++
       Enum.map(recovery.lost, fn {path, reason} ->
-        "Staged agent edit for #{path} from the previous run was lost: #{inspect(reason)}"
+        "Staged agent edit for #{display_path(path)} from the previous run was lost: #{inspect(Recovery.safe_reason(reason))}"
       end) ++
       Enum.map(recovery.retained, fn {path, reason} ->
-        "Staged agent edit for #{path} from the previous run could not be restored (#{inspect(reason)}). It stays saved and is offered again at the next start."
+        "Staged agent edit for #{display_path(path)} from the previous run could not be restored (#{inspect(Recovery.safe_reason(reason))}). It stays saved and is offered again at the next start."
       end)
   end
+
+  # Paths are file names, which may be arbitrary bytes.
+  @spec display_path(String.t()) :: String.t()
+  defp display_path(path), do: if(String.valid?(path), do: path, else: inspect(path))
 
   @spec headline(:live | :disk, Workspace.t() | nil) :: [String.t()]
   defp headline(_source, nil), do: []

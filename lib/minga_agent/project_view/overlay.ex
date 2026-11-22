@@ -82,7 +82,9 @@ defmodule MingaAgent.ProjectView.Overlay do
       {:error, reason} -> [{draft.path, reason}]
     end
   catch
-    :exit, reason -> [{draft.path, {:changeset_unavailable, reason}}]
+    # An exit reason carries the call's arguments, here the draft's bytes;
+    # keep only its kind so user content never reaches messages or logs.
+    :exit, reason -> [{draft.path, {:changeset_unavailable, exit_kind(reason)}}]
   end
 
   @doc """
@@ -95,23 +97,46 @@ defmodule MingaAgent.ProjectView.Overlay do
       {changeset_drafts, baselines} =
         Changeset.staged_drafts(changeset(view), Enum.map(forks, &elem(&1, 0)))
 
-      fork_drafts =
-        for {path, fork} <- forks,
-            do: StagedDraft.new(path, Map.get(baselines, path), fork_draft_content(fork))
+      with {:ok, fork_drafts} <- fork_drafts(forks, baselines) do
+        # A published fork hands its draft to the changeset, which then holds
+        # the authoritative content for that path.
+        drafts =
+          (fork_drafts ++ changeset_drafts)
+          |> Map.new(&{&1.path, &1})
+          |> Map.values()
+          |> Enum.sort_by(& &1.path)
 
-      # A published fork hands its draft to the changeset, which then holds the
-      # authoritative content for that path.
-      drafts =
-        (fork_drafts ++ changeset_drafts)
-        |> Map.new(&{&1.path, &1})
-        |> Map.values()
-        |> Enum.sort_by(& &1.path)
-
-      {:ok, drafts}
+        {:ok, drafts}
+      end
     end
   catch
-    :exit, reason -> {:error, {:staged_drafts_unavailable, reason}}
+    :exit, reason -> {:error, {:staged_drafts_unavailable, exit_kind(reason)}}
   end
+
+  @spec fork_drafts([{String.t(), pid()}], %{String.t() => binary() | nil}) ::
+          {:ok, [StagedDraft.t()]} | {:error, term()}
+  defp fork_drafts(forks, baselines) do
+    Enum.reduce_while(forks, {:ok, []}, fn {path, fork}, {:ok, drafts} ->
+      case fork_draft_content(fork) do
+        {:ok, content} ->
+          {:cont, {:ok, [StagedDraft.new(path, Map.get(baselines, path), content) | drafts]}}
+
+        {:error, reason} ->
+          {:halt, {:error, {:fork_unavailable, reason}}}
+      end
+    end)
+  end
+
+  @doc """
+  Reduces an exit reason to its kind (`:noproc`, `:timeout`, `:normal`, ...).
+
+  A `GenServer.call` exit reason embeds the call's arguments, which can be file content; callers report the kind instead.
+  """
+  @spec exit_kind(term()) :: atom()
+  def exit_kind(reason) when is_atom(reason), do: reason
+  def exit_kind({kind, _call}) when is_atom(kind), do: kind
+  def exit_kind({{kind, _detail}, _call}) when is_atom(kind), do: kind
+  def exit_kind(_reason), do: :exit
 
   @doc "Returns the changeset process that owns the view's staged state."
   @spec changeset_pid(ProjectView.t()) :: pid()
@@ -134,15 +159,14 @@ defmodule MingaAgent.ProjectView.Overlay do
     end
   end
 
-  @spec fork_draft_content(pid()) :: StagedDraft.content()
+  # One read decides presence and bytes, so a fork deleted between two calls
+  # cannot be misread.
+  @spec fork_draft_content(pid()) :: {:ok, StagedDraft.content()} | {:error, term()}
   defp fork_draft_content(fork) do
-    case Fork.status(fork) do
-      :deleted ->
-        :deleted
-
-      :present ->
-        {:ok, content} = Fork.read_file(fork)
-        content
+    case Fork.read_file(fork) do
+      {:ok, content} -> {:ok, content}
+      {:error, :enoent} -> {:ok, :deleted}
+      {:error, reason} -> {:error, reason}
     end
   end
 

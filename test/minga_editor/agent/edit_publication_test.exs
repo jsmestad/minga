@@ -213,7 +213,9 @@ defmodule MingaEditor.Agent.EditPublicationTest do
 
     test "after a full restart the saved drafts are offered and can be discarded",
          %{state: state, workspace_id: id, root: root, tmp_dir: dir} do
-      store = [staged_drafts_dir: Path.join(dir, "store")]
+      registry = :"publication_views_#{System.unique_integer([:positive])}"
+      start_supervised!({Registry, keys: :unique, name: registry})
+      store = [staged_drafts_dir: Path.join(dir, "store"), registry: registry]
       File.write!(Path.join(root, "todo.md"), "a\nb\n")
       keeper = start_supervised!({StagedDraftKeeper, [name: nil] ++ store}, id: :before)
 
@@ -301,6 +303,27 @@ defmodule MingaEditor.Agent.EditPublicationTest do
                )
 
       assert EditPublication.recovery_messages(recovery, nil) |> length() == 3
+    end
+
+    test "a restore failure message never carries the draft's content",
+         %{state: state, workspace_id: id} do
+      secret = "api_key = \"TOP-SECRET\""
+      draft = Minga.Session.StagedDraft.new("lib/a.ex", "base #{secret}", secret)
+      # The shape of a GenServer.call exit: the call's arguments, the draft included.
+      exit_reason = {:noproc, {GenServer, :call, [self(), {:restore_draft, draft}, 5000]}}
+
+      assert Overlay.exit_kind(exit_reason) == :noproc
+
+      recovery =
+        Recovery.restored(id, nil,
+          lost: [{"lib/a.ex", {:changeset_unavailable, exit_reason}}],
+          retained: [{"lib/a.ex", {:changeset_unavailable, exit_reason}}, {"lib/b.ex", draft}]
+        )
+
+      messages = EditPublication.recovery_messages(recovery, workspace(state, id))
+      assert [_headline, _lost, _retained, _other] = messages
+      refute Enum.any?(messages, &String.contains?(&1, "TOP-SECRET"))
+      refute Enum.any?(messages, &String.contains?(&1, "base "))
     end
   end
 end

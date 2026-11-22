@@ -17,16 +17,25 @@ defmodule MingaAgent.StagedDraftKeeperTest do
     File.write!(Path.join(root, "lib/b.ex"), "alpha\nbeta\n")
     File.write!(Path.join(root, "old.txt"), "remove me\n")
 
-    store = [staged_drafts_dir: Path.join(dir, "store")]
+    registry = :"staged_views_#{System.unique_integer([:positive])}"
+    start_supervised!({Registry, keys: :unique, name: registry})
+    store = [staged_drafts_dir: Path.join(dir, "store"), registry: registry]
     %{root: root, store: store, keeper: start_keeper(store, :first)}
   end
 
   defp start_keeper(store, id) do
-    start_supervised!(Supervisor.child_spec({StagedDraftKeeper, [name: nil] ++ store}, id: id))
+    start_supervised!(
+      Supervisor.child_spec({StagedDraftKeeper, [name: nil] ++ store},
+        id: id,
+        restart: :temporary
+      )
+    )
   end
 
   defp stored(root, store) do
-    for {workspace_id, entries} <- StagedDrafts.load(root, store),
+    {:ok, views} = StagedDrafts.load(root, store)
+
+    for %{workspace_id: workspace_id, entries: entries} <- views,
         {:ok, _file, draft} <- entries,
         into: %{},
         do: {{workspace_id, draft.path}, draft}
@@ -236,7 +245,7 @@ defmodule MingaAgent.StagedDraftKeeperTest do
       eventually(keeper, fn -> map_size(stored(root, store)) == 3 end)
       full_shutdown(view)
 
-      file = StagedDrafts.draft_file(root, 1, "lib/new.ex", store)
+      file = StagedDrafts.draft_file(root, view.id, "lib/new.ex", store)
 
       File.write!(
         file,
@@ -256,6 +265,80 @@ defmodule MingaAgent.StagedDraftKeeperTest do
       :ok = StagedDraftKeeper.recover(keeper, root, self())
       :sys.get_state(keeper)
       refute_received {:staged_drafts_recovered, _, _}
+    end
+  end
+
+  describe "keeper restart" do
+    test "a restarted keeper adopts live views: publishing still deletes their drafts and new edits are saved",
+         %{root: root, store: store, keeper: keeper} do
+      {:ok, view} = ProjectView.overlay(root)
+      StagedDraftKeeper.persist(keeper, view, 1)
+      :ok = ProjectView.write_file(view, "lib/a.ex", "ONE\ntwo\nthree\n")
+      eventually(keeper, fn -> map_size(stored(root, store)) == 1 end)
+
+      ref = Process.monitor(keeper)
+      Process.exit(keeper, :kill)
+      assert_receive {:DOWN, ^ref, :process, _, :killed}
+      restarted = start_keeper(store, :restarted)
+      :sys.get_state(restarted)
+
+      :ok = ProjectView.write_file(view, "lib/b.ex", "alpha\nBETA\n")
+      eventually(restarted, fn -> map_size(stored(root, store)) == 2 end)
+
+      changeset = Process.monitor(Overlay.changeset_pid(view))
+      assert ProjectView.promote(view, :project_root) == :ok
+      assert_receive {:DOWN, ^changeset, :process, _, :normal}, 2_000
+      eventually(restarted, fn -> stored(root, store) == %{} end)
+    end
+  end
+
+  describe "two views for one workspace" do
+    test "a new view for an occupied workspace never deletes the other view's drafts",
+         %{root: root, store: store, keeper: keeper} do
+      {:ok, surviving} = ProjectView.overlay(root)
+      StagedDraftKeeper.persist(keeper, surviving, 4)
+      :ok = ProjectView.write_file(surviving, "lib/a.ex", "ONE\ntwo\nthree\n")
+      eventually(keeper, fn -> map_size(stored(root, store)) == 1 end)
+
+      # The restarted Editor gives workspace 4 a fresh, empty staging area.
+      {:ok, fresh} = ProjectView.overlay(root)
+      StagedDraftKeeper.persist(keeper, fresh, 4)
+      :sys.get_state(keeper)
+
+      assert Map.keys(stored(root, store)) == [{4, "lib/a.ex"}]
+
+      :ok = StagedDraftKeeper.recover(keeper, root, self())
+
+      assert_receive {:staged_drafts_recovered, ^root,
+                      [%Recovery{source: :live, view: ^surviving}]},
+                     2_000
+    end
+  end
+
+  describe "restore failures" do
+    test "a draft that cannot be read now keeps every draft of its view on disk",
+         %{root: root, store: store, keeper: keeper} do
+      {:ok, view} = ProjectView.overlay(root)
+      StagedDraftKeeper.persist(keeper, view, 1)
+      stage(view)
+      eventually(keeper, fn -> map_size(stored(root, store)) == 3 end)
+      full_shutdown(view)
+
+      unreadable = StagedDrafts.draft_file(root, view.id, "lib/a.ex", store)
+      File.chmod!(unreadable, 0o000)
+      on_exit(fn -> File.chmod(unreadable, 0o600) end)
+
+      fresh = start_keeper(store, :second)
+      :ok = StagedDraftKeeper.recover(fresh, root, self())
+
+      assert_receive {:staged_drafts_recovered, ^root, [%Recovery{view: nil} = recovery]}, 2_000
+      assert recovery.lost == []
+
+      assert recovery.retained |> Enum.map(&elem(&1, 0)) |> Enum.sort() ==
+               ["lib/new.ex", "old.txt", Path.basename(unreadable)] |> Enum.sort()
+
+      File.chmod!(unreadable, 0o600)
+      assert map_size(stored(root, store)) == 3
     end
   end
 end
