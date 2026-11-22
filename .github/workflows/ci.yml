@@ -600,6 +600,8 @@ jobs:
   dialyzer:
     name: Dialyzer
     runs-on: ubuntu-latest
+    # A warm run takes about 5 minutes; a cold PLT build adds the OTP, Elixir, and dependency PLTs. The bound turns a hang into an explicit timeout.
+    timeout-minutes: 40
     env:
       MIX_ENV: dev
     steps:
@@ -621,8 +623,30 @@ jobs:
           key: dialyzer-v2-${{ runner.os }}-${{ hashFiles('.tool-versions') }}-${{ hashFiles('mix.exs', 'mix.lock') }}
           restore-keys: dialyzer-v2-${{ runner.os }}-${{ hashFiles('.tool-versions') }}-
 
+      - name: Report runner resources
+        run: |
+          nproc
+          free -m
+          swapon --show || true
+          df -h . "$HOME"
+
       - run: mix deps.get
-      - run: mix dialyzer
+
+      # Compile, PLT build, and analysis run as separate steps so a lost runner shows which phase it was in, and completed phases keep their logs. The memory guard fails a step with an explicit error before memory exhaustion starves the runner.
+      - name: Compile
+        timeout-minutes: 10
+        run: .github/scripts/run-with-memory-guard.sh mix compile
+
+      - name: Build or update PLT
+        timeout-minutes: 25
+        run: .github/scripts/run-with-memory-guard.sh mix dialyzer --plt
+        env:
+          # Dialyzer sizes its worker pool from the online BEAM schedulers.
+          ERL_FLAGS: "+S 2:2"
+
+      - name: Run Dialyzer
+        timeout-minutes: 15
+        run: .github/scripts/run-with-memory-guard.sh mix dialyzer
         env:
           # Dialyzer sizes its worker pool from the online BEAM schedulers.
           ERL_FLAGS: "+S 2:2"
