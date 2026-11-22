@@ -1,19 +1,21 @@
 defmodule MingaEditor.Agent.ReviewTarget do
-  @moduledoc "Binds read-only Review actions to the exact offered presentation without retaining authority."
+  @moduledoc "Binds Review actions to the exact offered presentation without retaining authority."
 
+  alias MingaEditor.Agent.DiffReview
   alias MingaEditor.Agent.View.Preview
   alias MingaEditor.Frontend.Emit.Context
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.TabBar
 
-  @enforce_keys [:path, :freshness, :generation, :item_id]
+  @enforce_keys [:path, :freshness, :conflict_index, :generation, :item_id]
   defstruct @enforce_keys
 
-  @type intent :: :back_to_chat | :review_file
+  @type intent :: :back_to_chat | :review_file | :keep_mine | :use_agent_version
   @type t :: %__MODULE__{
           path: String.t(),
           freshness: :current | :stale,
+          conflict_index: pos_integer() | nil,
           generation: non_neg_integer(),
           item_id: String.t()
         }
@@ -79,12 +81,14 @@ defmodule MingaEditor.Agent.ReviewTarget do
        ) do
     case Preview.review_source(preview) do
       {:diff, path, rows_revision, _selection_revision} = source ->
-        binding = {:review, 1, identity, scope, tab_id, {id, generation}, source}
+        conflict = conflict_binding(preview)
+        binding = {:review, 1, identity, scope, tab_id, {id, generation}, source, conflict}
         digest = :crypto.hash(:sha256, :erlang.term_to_binary(binding))
 
         %__MODULE__{
           path: path,
           freshness: preview.freshness,
+          conflict_index: conflict_index(conflict),
           generation: rows_revision,
           item_id: "r1." <> Base.url_encode64(digest, padding: false)
         }
@@ -96,8 +100,28 @@ defmodule MingaEditor.Agent.ReviewTarget do
 
   defp offer(_window, _preview, _identity, _scope, _tab_bar), do: nil
 
+  @spec conflict_binding(Preview.t()) ::
+          {Minga.Buffer.Fork.review_revision(), non_neg_integer(), pos_integer()} | nil
+  defp conflict_binding(%Preview{
+         content:
+           {:diff, %DiffReview{fork_revision: {_, _, _} = revision, current_hunk_index: index}},
+         content_revision: content_revision
+       }),
+       do: {revision, content_revision, index + 1}
+
+  defp conflict_binding(%Preview{}), do: nil
+
+  @spec conflict_index(tuple() | nil) :: pos_integer() | nil
+  defp conflict_index({_revision, _content_revision, number}), do: number
+  defp conflict_index(nil), do: nil
+
   @spec offered_intent(t(), intent()) :: {:ok, t()} | {:error, :target_mismatch}
   defp offered_intent(%__MODULE__{} = target, :back_to_chat), do: {:ok, target}
   defp offered_intent(%__MODULE__{freshness: :stale} = target, :review_file), do: {:ok, target}
+
+  defp offered_intent(%__MODULE__{freshness: :current, conflict_index: index} = target, intent)
+       when is_integer(index) and intent in [:keep_mine, :use_agent_version],
+       do: {:ok, target}
+
   defp offered_intent(%__MODULE__{}, _intent), do: {:error, :target_mismatch}
 end

@@ -294,19 +294,19 @@ func (m *Model) sendAgentPromptScroll(msg tea.MouseMsg, delta int) bool {
 	return true
 }
 
-type presentedComposerClick struct {
+type presentedChromeClick struct {
 	packet        []byte
 	claimed       bool
 	epoch         *atomic.Uint64
 	observedEpoch uint64
 }
 
-func (c *presentedComposerClick) take() ([]byte, bool, bool) {
+func (c *presentedChromeClick) take() ([]byte, bool, bool) {
 	if c == nil {
 		return nil, false, false
 	}
 	hit := *c
-	*c = presentedComposerClick{}
+	*c = presentedChromeClick{}
 	changed := hit.epoch != nil && hit.epoch.Load() != hit.observedEpoch
 	return hit.packet, hit.claimed, changed
 }
@@ -316,7 +316,7 @@ func (c *presentedComposerClick) take() ([]byte, bool, bool) {
 func (m Model) presentedComposerHandler() func(tea.MouseMsg) tea.Cmd {
 	chat, _ := m.agentChat()
 	p, ok := m.agentPromptPlacement()
-	if !ok || m.composerClick == nil {
+	if !ok || m.presentedClick == nil {
 		return nil
 	}
 	start, y := m.layout.body.X+p.col-p.prefix, m.layout.body.Y+p.controlsRow
@@ -342,7 +342,7 @@ func (m Model) presentedComposerHandler() func(tea.MouseMsg) tea.Cmd {
 	}
 	generation, offer := chat.PromptPresentation, chat.DraftAttachmentOffer
 	stopTarget, queueTarget := chat.StopTarget, chat.QueueTarget
-	claim := m.composerClick
+	claim := m.presentedClick
 	return func(msg tea.MouseMsg) tea.Cmd {
 		click, ok := msg.(tea.MouseClickMsg)
 		if ok && click.Button == tea.MouseLeft && click.Y == y {

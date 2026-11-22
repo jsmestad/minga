@@ -29,14 +29,14 @@ const (
 )
 
 type Model struct {
-	width         int
-	height        int
-	out           chan<- []byte
-	done          <-chan struct{}
-	viewport      viewport.Model
-	zones         *zoneManager
-	composerClick *presentedComposerClick
-	windows       map[uint16]protocol.WindowContent
+	width          int
+	height         int
+	out            chan<- []byte
+	done           <-chan struct{}
+	viewport       viewport.Model
+	zones          *zoneManager
+	presentedClick *presentedChromeClick
+	windows        map[uint16]protocol.WindowContent
 	// residentRows is the indexed, value-semantic authority for window rows.
 	// WindowContent.Rows is retained only as a small-fixture compatibility view.
 	residentRows      map[uint16]residentRows
@@ -189,7 +189,7 @@ func NewWithTransport(width, height uint16, out chan<- []byte, done <-chan struc
 		done:                           done,
 		viewport:                       vp,
 		zones:                          newZoneManager(),
-		composerClick:                  &presentedComposerClick{},
+		presentedClick:                 &presentedChromeClick{},
 		windows:                        map[uint16]protocol.WindowContent{},
 		residentRows:                   map[uint16]residentRows{},
 		residentSemantics:              map[uint16]*residentSemanticStore{},
@@ -328,7 +328,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.PasteMsg:
 		m.send(pastePacket(msg))
 	case tea.MouseMsg:
-		composerPacket, composerClaimed, publicationChanged := m.composerClick.take()
+		publishedPacket, publishedClaimed, publicationChanged := m.presentedClick.take()
 		if m.textDrag != nil && isEditorTextDragContinuation(msg) {
 			updated, packet, handled := m.handleEditorTextMouse(msg)
 			m = updated
@@ -351,9 +351,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if publicationChanged {
 				break // The press could belong to either side of the terminal write.
 			}
-			if composerClaimed {
-				if composerPacket != nil {
-					m.send(composerPacket)
+			if publishedClaimed {
+				if publishedPacket != nil {
+					m.send(publishedPacket)
 				}
 				break
 			}
@@ -627,8 +627,12 @@ func (m Model) View() tea.View {
 	view.WindowTitle = m.title
 	view.BackgroundColor = m.editorBackground()
 	view.ForegroundColor = m.palette().Text()
-	if m.protocolError == "" {
-		view.OnMouse = m.presentedComposerHandler()
+	picker, _ := m.picker()
+	if m.protocolError == "" && !picker.Visible {
+		view.OnMouse = m.presentedConflictHandler()
+		if view.OnMouse == nil {
+			view.OnMouse = m.presentedComposerHandler()
+		}
 	}
 	if chat, ok := m.agentChat(); ok && chat.Visible {
 		view.Cursor = m.agentPromptCursor()

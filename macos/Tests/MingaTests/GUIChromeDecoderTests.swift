@@ -938,6 +938,39 @@ struct GUIStatusBarDecoderTests {
         #expect(update.modelineRightSegments.isEmpty)
     }
 
+    @Test("Fork conflict status requires a valid Review offer and exposes the selected hunk")
+    func conflictNeedsAnExactReviewOffer() throws {
+        var conflict = Data()
+        appendU32(&conflict, 2)
+        let conflictSection = buildSection(0x11, conflict)
+        func packet(generation: UInt32, itemID: String) -> Data {
+            var review = Data()
+            appendString16(&review, "note.txt")
+            review.append(0)
+            appendU32(&review, generation)
+            appendString16(&review, itemID)
+            return Data([OP_GUI_STATUS_BAR, 2]) + buildSection(0x10, review) + conflictSection
+        }
+
+        let (command, _) = try decodeCommand(data: packet(generation: 9, itemID: "hunk-B"), offset: 0)
+        guard case .guiStatusBar(let update) = command else {
+            Issue.record("Expected the decoded Review status")
+            return
+        }
+        #expect(update.review?.conflictIndex == 2)
+        let invalidPackets = [
+            Data([OP_GUI_STATUS_BAR, 1]) + conflictSection,
+            packet(generation: 0, itemID: "hunk-B"),
+            packet(generation: 9, itemID: "")
+        ]
+        for invalid in invalidPackets {
+            do {
+                _ = try decodeCommand(data: invalid, offset: 0)
+                Issue.record("Accepted a conflict without its exact Review offer")
+            } catch ProtocolDecodeError.malformed {}
+        }
+    }
+
     @Test("Invalid UTF-8 modeline segment text throws malformed")
     func invalidUTF8ModelineSegmentTextThrows() throws {
         var identity = Data()

@@ -1147,6 +1147,8 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   defp decode_semantic_intent(:timeline, 2), do: {:ok, :review_file}
   defp decode_semantic_intent(:review, 1), do: {:ok, :back_to_chat}
   defp decode_semantic_intent(:review, 2), do: {:ok, :review_file}
+  defp decode_semantic_intent(:review, 3), do: {:ok, :keep_mine}
+  defp decode_semantic_intent(:review, 4), do: {:ok, :use_agent_version}
   defp decode_semantic_intent(_surface, _intent), do: :error
 
   @spec decode_file_dialog_result(

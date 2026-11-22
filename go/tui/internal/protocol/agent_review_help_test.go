@@ -62,6 +62,33 @@ func TestReviewStatusRejectsUnknownFreshnessAndMalformedOffer(t *testing.T) {
 	}
 }
 
+func TestConflictStatusRequiresAValidExactReviewOffer(t *testing.T) {
+	conflict := []byte{0x11, 0, 4, 0, 0, 0, 2}
+	offer := func(generation uint32, itemID string) []byte {
+		section := append(reviewHelpString16("note.txt"), byte(ReviewCurrent))
+		section = binary.BigEndian.AppendUint32(section, generation)
+		return append(section, reviewHelpString16(itemID)...)
+	}
+	packet := func(generation uint32, itemID string) []byte {
+		packet := reviewStatusPacket(offer(generation, itemID))
+		packet[1] = 2
+		return append(packet, conflict...)
+	}
+	command, err := DecodeCommand(packet(9, "hunk-B"))
+	if err != nil || command.Chrome.Status.Review == nil || command.Chrome.Status.Review.ConflictIndex != 2 {
+		t.Fatalf("valid conflict offer was lost: %+v, %v", command, err)
+	}
+	for _, invalid := range [][]byte{
+		append([]byte{generated.OPGuiStatusBar, 1}, conflict...),
+		packet(0, "hunk-B"),
+		packet(9, ""),
+	} {
+		if _, err := DecodeCommand(invalid); err == nil {
+			t.Fatalf("invalid conflict offer was accepted: %x", invalid)
+		}
+	}
+}
+
 func TestAgentHelpDecodesIndependentLen32GroupsAndHiddenReset(t *testing.T) {
 	body := []byte{1, 1, 2}
 	body = append(body, reviewHelpString16("Review é")...)

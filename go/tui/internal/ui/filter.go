@@ -26,13 +26,13 @@ func (f *InputFilter) Filter(model tea.Model, msg tea.Msg) tea.Msg {
 	switch msg := msg.(type) {
 	case tea.MouseClickMsg:
 		if msg.Button == tea.MouseLeft {
-			if m, ok := model.(Model); ok && m.composerClick != nil {
+			if m, ok := model.(Model); ok && m.presentedClick != nil {
 				epoch := f.outputEpoch.Load()
 				if epoch&1 != 0 {
 					return nil
 				}
-				m.composerClick.epoch = &f.outputEpoch
-				m.composerClick.observedEpoch = epoch
+				m.presentedClick.epoch = &f.outputEpoch
+				m.presentedClick.observedEpoch = epoch
 			}
 		}
 	case tea.MouseMotionMsg:

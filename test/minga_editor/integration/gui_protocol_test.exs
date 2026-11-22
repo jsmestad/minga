@@ -566,6 +566,27 @@ defmodule Minga.Integration.GUIProtocolTest do
       assert decoded["selection_size"] == 42
     end
 
+    test "conflict status preserves the exact action offer in Swift", %{harness: harness} do
+      review = %StatusBar.Review{
+        path: "/project/é/shared.ex",
+        freshness: :stale,
+        conflict_index: 2,
+        generation: 43,
+        item_id: "review:hunk-é/2"
+      }
+
+      model = %StatusBar{content_kind: :agent, data: %Data{}, review: review}
+      decoded = round_trip(harness, StatusBarEncoder.encode_command(model), "gui_status_bar")
+
+      assert decoded["review"] == %{
+               "path" => "/project/é/shared.ex",
+               "freshness" => 1,
+               "conflict_index" => 2,
+               "generation" => 43,
+               "item_id" => "review:hunk-é/2"
+             }
+    end
+
     test "gui_status_bar agent variant encodes and decodes correctly", %{harness: harness} do
       model = %StatusBar{
         content_kind: :agent,

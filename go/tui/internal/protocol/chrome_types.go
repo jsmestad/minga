@@ -462,10 +462,11 @@ const (
 
 // StatusReview is an immutable action offer, not a mutable buffer selection.
 type StatusReview struct {
-	Path       string
-	Freshness  ReviewFreshness
-	Generation uint32
-	ItemID     string
+	Path          string
+	Freshness     ReviewFreshness
+	ConflictIndex uint32 // one-based; zero means read-only Review
+	Generation    uint32
+	ItemID        string
 }
 
 type AgentHelp struct {
