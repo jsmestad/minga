@@ -225,7 +225,7 @@ When adding or changing opcodes, edit the schema and regenerate instead of hand-
 
 - **Swift 6.0+** with strict concurrency
 - **Metal 3.1+** (MSL 3.1), macOS 15.0+ deployment target
-- **Xcode 16+** for building
+- **Xcode 26.0+** for building (Swift 6.2 or later). The Metal shaders compile with the Metal Toolchain component that Xcode installs (Xcode Settings > Components); no `TOOLCHAINS` override is needed.
 - Install the version pinned in `.xcodegen-version` with `scripts/install_xcodegen` (pass the installation directory as its argument). From the repository root, run `(cd macos && xcodegen generate)` and `mix swift.build` to build the Debug frontend.
 
 ## Development app identity

@@ -4,7 +4,7 @@ options:
   bundleIdPrefix: com.minga
   deploymentTarget:
     macOS: "15.0"
-  xcodeVersion: "16.0"
+  xcodeVersion: "26.0"
   generateEmptyDirectories: true
   createIntermediateGroups: true
 
@@ -12,8 +12,6 @@ settings:
   base:
     SWIFT_VERSION: "6.0"
     MINGA_APP_BUNDLE_IDENTIFIER: com.minga.editor
-    # NOTE: The Metal toolchain pin (TOOLCHAINS) is intentionally NOT global.
-    # It lives only on the targets that compile Metal (Minga, MingaTestHost, MingaTests, NativeRenderPerformance, PreviewHost) so the Metal-free framework targets can render SwiftUI canvas previews without that toolchain.
   configs:
     Debug:
       MINGA_APP_BUNDLE_IDENTIFIER: com.minga.editor.dev
@@ -66,8 +64,6 @@ targets:
       base:
         GENERATE_INFOPLIST_FILE: "YES"
         PRODUCT_NAME: MingaProtocol
-        # No TOOLCHAINS pin: this framework is Metal-toolchain-free so it (and
-        # MingaUI) can build SwiftUI canvas previews without the Metal toolchain.
     dependencies: []
 
   MingaUI:
@@ -127,8 +123,6 @@ targets:
       base:
         GENERATE_INFOPLIST_FILE: "YES"
         PRODUCT_NAME: MingaUI
-        # No TOOLCHAINS pin: this SwiftUI framework is Metal-toolchain-free so it
-        # builds and renders SwiftUI canvas previews without the Metal toolchain.
     dependencies:
       - target: MingaProtocol
 
@@ -232,9 +226,6 @@ targets:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         COMBINE_HIDPI_IMAGES: "YES"
         MTL_LANGUAGE_REVISION: UseDeploymentTarget
-        # Workaround: macOS 26 beta cryptex bug prevents Metal toolchain auto-mount.
-        # Remove once `metal --version` works without this (check Xcode Settings > Components).
-        TOOLCHAINS: com.apple.dt.toolchain.Metal.32023.864
       configs:
         Debug:
           SWIFT_OPTIMIZATION_LEVEL: "-Onone"
@@ -313,7 +304,6 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.minga.test-host
         GENERATE_INFOPLIST_FILE: "YES"
         INFOPLIST_KEY_NSPrincipalClass: NSApplication
-        TOOLCHAINS: com.apple.dt.toolchain.Metal.32023.864
     dependencies:
       - target: MingaProtocol
       - target: MingaUI
@@ -403,8 +393,6 @@ targets:
         GENERATE_INFOPLIST_FILE: "YES"
         TEST_HOST: "$(BUILT_PRODUCTS_DIR)/MingaTestHost.app/Contents/MacOS/MingaTestHost"
         BUNDLE_LOADER: "$(TEST_HOST)"
-        # Compiles Renderer/ Metal sources; needs the Metal toolchain pin.
-        TOOLCHAINS: com.apple.dt.toolchain.Metal.32023.864
         SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) MINGA_SNAPSHOT_RENDERER"
     dependencies:
       - target: MingaTestHost
@@ -533,7 +521,6 @@ targets:
       base:
         PRODUCT_NAME: minga-native-render-performance
         GENERATE_INFOPLIST_FILE: "YES"
-        TOOLCHAINS: com.apple.dt.toolchain.Metal.32023.864
         SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) MINGA_SNAPSHOT_RENDERER"
     dependencies:
       - target: MingaProtocol
@@ -623,8 +610,6 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.minga.preview-host
         GENERATE_INFOPLIST_FILE: "YES"
         SWIFT_OPTIMIZATION_LEVEL: "-Onone"
-        # Builds the full shell incl. Renderer/ Metal sources; needs the toolchain pin.
-        TOOLCHAINS: com.apple.dt.toolchain.Metal.32023.864
     dependencies:
       - target: MingaProtocol
       - target: MingaUI

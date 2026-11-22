@@ -1810,7 +1810,7 @@
 			isa = PBXProject;
 			attributes = {
 				BuildIndependentTargetsInParallel = YES;
-				LastUpgradeCheck = 1600;
+				LastUpgradeCheck = 2600;
 				TargetAttributes = {
 					93F21D7AD83D2CDE656E4384 = {
 						TestTargetID = D96277718552247F338DD197;
@@ -2630,7 +2630,6 @@
 				PRODUCT_NAME = "minga-native-render-performance";
 				SDKROOT = macosx;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) MINGA_SNAPSHOT_RENDERER";
-				TOOLCHAINS = com.apple.dt.toolchain.Metal.32023.864;
 			};
 			name = Debug;
 		};
@@ -2710,7 +2709,6 @@
 				PRODUCT_NAME = Minga;
 				SDKROOT = macosx;
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
-				TOOLCHAINS = com.apple.dt.toolchain.Metal.32023.864;
 			};
 			name = Debug;
 		};
@@ -2794,7 +2792,6 @@
 				SDKROOT = macosx;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) MINGA_SNAPSHOT_RENDERER";
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/MingaTestHost.app/Contents/MacOS/MingaTestHost";
-				TOOLCHAINS = com.apple.dt.toolchain.Metal.32023.864;
 			};
 			name = Release;
 		};
@@ -2890,7 +2887,6 @@
 				SDKROOT = macosx;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) MINGA_SNAPSHOT_RENDERER";
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/MingaTestHost.app/Contents/MacOS/MingaTestHost";
-				TOOLCHAINS = com.apple.dt.toolchain.Metal.32023.864;
 			};
 			name = Debug;
 		};
@@ -2924,7 +2920,6 @@
 				PRODUCT_BUNDLE_IDENTIFIER = "com.minga.test-host";
 				PRODUCT_NAME = MingaTestHost;
 				SDKROOT = macosx;
-				TOOLCHAINS = com.apple.dt.toolchain.Metal.32023.864;
 			};
 			name = Debug;
 		};
@@ -2955,7 +2950,6 @@
 				PRODUCT_NAME = "minga-native-render-performance";
 				SDKROOT = macosx;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) MINGA_SNAPSHOT_RENDERER";
-				TOOLCHAINS = com.apple.dt.toolchain.Metal.32023.864;
 			};
 			name = Release;
 		};
@@ -3021,7 +3015,6 @@
 				PRODUCT_NAME = PreviewHost;
 				SDKROOT = macosx;
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
-				TOOLCHAINS = com.apple.dt.toolchain.Metal.32023.864;
 			};
 			name = Debug;
 		};
@@ -3077,7 +3070,6 @@
 				PRODUCT_NAME = PreviewHost;
 				SDKROOT = macosx;
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
-				TOOLCHAINS = com.apple.dt.toolchain.Metal.32023.864;
 			};
 			name = Release;
 		};
@@ -3095,7 +3087,6 @@
 				PRODUCT_BUNDLE_IDENTIFIER = "com.minga.test-host";
 				PRODUCT_NAME = MingaTestHost;
 				SDKROOT = macosx;
-				TOOLCHAINS = com.apple.dt.toolchain.Metal.32023.864;
 			};
 			name = Release;
 		};
@@ -3118,7 +3109,6 @@
 				PRODUCT_NAME = Minga;
 				SDKROOT = macosx;
 				SWIFT_OPTIMIZATION_LEVEL = "-O";
-				TOOLCHAINS = com.apple.dt.toolchain.Metal.32023.864;
 			};
 			name = Release;
 		};
