@@ -48,6 +48,14 @@ defmodule Minga.Buffer do
   defdelegate pid_for_path(path), to: BufferProcess
 
   @doc """
+  Looks up an open buffer visiting the same file as `path`, following symlinks.
+
+  `pid_for_path/1` matches the name a buffer was opened with. This function matches the file: a buffer opened through a symlink is found by the real path, and the reverse. Use it when a caller must select the one buffer that owns a file's content, such as agent staging. Returns `:not_found` if no buffer visits that file.
+  """
+  @spec pid_for_file(String.t()) :: {:ok, pid()} | :not_found
+  defdelegate pid_for_file(path), to: BufferProcess
+
+  @doc """
   Returns the pid for a buffer at `path`, starting one if it doesn't exist.
 
   If a buffer is already registered for `path`, returns its pid immediately.

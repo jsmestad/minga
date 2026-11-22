@@ -458,7 +458,7 @@ defmodule MingaEditor.Agent.EditPublication do
 
   @spec acknowledge_open_buffer(String.t()) :: :ok
   defp acknowledge_open_buffer(path) do
-    with {:ok, buffer} <- Buffer.pid_for_path(path) do
+    with {:ok, buffer} <- Buffer.pid_for_file(path) do
       _ = Buffer.mark_saved_if_disk_matches(buffer)
     end
 

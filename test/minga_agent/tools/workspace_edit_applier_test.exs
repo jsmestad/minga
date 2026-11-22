@@ -127,6 +127,27 @@ defmodule MingaAgent.Tools.WorkspaceEditApplierTest do
     assert File.read!(real_path) == "old_name\n"
   end
 
+  for {kind, opened} <- [final: "lib/link.ex", directory: "linked/real.ex"] do
+    test "an edit to a file the user opened through a #{kind} symlink is staged in that buffer's fork",
+         %{project: project, view: view, context: context} do
+      real_path = write!(Path.join(project, "lib/real.ex"), "old_name\n")
+      File.ln_s!("real.ex", Path.join(project, "lib/link.ex"))
+      File.ln_s!("lib", Path.join(project, "linked"))
+
+      buffer =
+        start_supervised!({BufferProcess, file_path: Path.join(project, unquote(opened))})
+
+      assert :ok = Buffer.replace_content(buffer, "old_name\nunsaved\n", :user)
+
+      assert {1, 1, []} = apply_edit(context, [real_path])
+
+      assert {:ok, %{owner: {:fork, fork}}} = ProjectView.resolve_source(view, "lib/real.ex")
+      assert Minga.Buffer.Fork.content(fork) == "new_name\nunsaved\n"
+      assert Buffer.content(buffer) == "old_name\nunsaved\n"
+      assert File.read!(real_path) == "old_name\n"
+    end
+  end
+
   test "an open read-only buffer under staging is staged, and publication reports it read-only",
        %{project: project, view: view, context: context} do
     path = write!(Path.join(project, "lib/locked.ex"), "old_name\n")

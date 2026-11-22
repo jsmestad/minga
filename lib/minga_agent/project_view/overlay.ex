@@ -323,10 +323,12 @@ defmodule MingaAgent.ProjectView.Overlay do
     Source.changeset(buffer_path(view, relative_path), cs, relative_path)
   end
 
+  # Selects the buffer by the file it visits, not the name it was opened with,
+  # so a buffer opened through a symlink owns the file the agent names.
   @spec open_buffer_pid(ProjectView.t(), String.t()) ::
           {:ok, pid()} | :not_found | {:error, term()}
   defp open_buffer_pid(%ProjectView{} = view, relative_path) do
-    Minga.Buffer.pid_for_path(buffer_path(view, relative_path))
+    Minga.Buffer.pid_for_file(buffer_path(view, relative_path))
   rescue
     _ -> {:error, {:buffer_lookup_failed, relative_path}}
   end

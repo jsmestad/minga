@@ -34,8 +34,7 @@ defmodule MingaAgent.Tools.WorkspaceEditApplier do
            project_view: ProjectView.t() | nil,
            open_buffer_route: open_buffer_route(),
            relative_path: String.t(),
-           real_path: String.t(),
-           buffer_paths: [String.t()]
+           real_path: String.t()
          }
   # The content the language server computed the edit positions against.
   @typep baseline :: {:disk, String.t()} | {:live_buffer, binary()}
@@ -90,8 +89,7 @@ defmodule MingaAgent.Tools.WorkspaceEditApplier do
           project_view: project_view,
           open_buffer_route: open_buffer_route,
           relative_path: relative_path,
-          real_path: real_path,
-          buffer_paths: buffer_paths(project_view, relative_path, real_path, document.path)
+          real_path: real_path
         }
 
         {document, target, plan_file(document, target, client, encoding)}
@@ -116,28 +114,11 @@ defmodule MingaAgent.Tools.WorkspaceEditApplier do
     end
   end
 
-  # The paths an open buffer for this document can be registered under, in
-  # order. The view's owner path comes first: an overlay selects the buffer at
-  # `project_root/relative_path`, so finding the same buffer keeps the live
-  # baseline and the staged fork on one owner. The real path covers a project
-  # root reached through a symlink, and the server's path covers a buffer that
-  # was opened through an in-root symlink.
-  @spec buffer_paths(ProjectView.t() | nil, String.t(), String.t(), String.t()) :: [String.t()]
-  defp buffer_paths(nil, _relative_path, real_path, server_path),
-    do: Enum.uniq([real_path, server_path])
-
-  defp buffer_paths(%ProjectView{project_root: root}, relative_path, real_path, server_path),
-    do: Enum.uniq([Path.join(root, relative_path), real_path, server_path])
-
+  # Buffers are found by the file they visit, the same lookup the overlay uses
+  # to select a fork's buffer, so the live baseline and the staged fork share
+  # one owner even when the buffer was opened through a symlink.
   @spec open_buffer(target()) :: {:ok, pid()} | :not_found
-  defp open_buffer(%{buffer_paths: paths}) do
-    Enum.find_value(paths, :not_found, fn path ->
-      case Buffer.pid_for_path(path) do
-        {:ok, _pid} = found -> found
-        :not_found -> nil
-      end
-    end)
-  end
+  defp open_buffer(%{real_path: real_path}), do: Buffer.pid_for_file(real_path)
 
   # ── Containment ────────────────────────────────────────────────────────────
 

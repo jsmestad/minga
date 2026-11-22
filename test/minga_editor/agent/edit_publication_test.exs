@@ -143,6 +143,35 @@ defmodule MingaEditor.Agent.EditPublicationTest do
     assert workspace(result, id).review.state == :clean
   end
 
+  test "publishing an edit to a file open through a symlink updates that buffer and leaves it saved",
+       %{state: state, session: session, view: view, root: root, workspace_id: id} do
+    real = Path.join(root, "real.md")
+    File.write!(real, "one\ntwo\n")
+    File.ln_s!("real.md", Path.join(root, "link.md"))
+    linked = start_supervised!({BufferProcess, file_path: Path.join(root, "link.md")}, id: :link)
+
+    {:ok, source} = ProjectView.resolve_source(view, "real.md")
+
+    token =
+      Minga.Buffer.FileMutation.revision("one\ntwo\n", nil, {:project_view, source.source_id})
+
+    {:ok, _} = ProjectView.conditional_mutate(view, "real.md", token, {:edit, [{"two", "TWO"}]})
+
+    state =
+      state
+      |> EditPublication.record_edit(session, real)
+      |> EditPublication.turn_finished(session)
+
+    GuiActionHandler.dispatch(
+      state,
+      {:notification_action, "agent:unpublished_edits:#{id}", "publish"}
+    )
+
+    assert File.read!(real) == "one\nTWO\n"
+    assert BufferProcess.content(linked) == "one\nTWO\n"
+    refute BufferProcess.dirty?(linked)
+  end
+
   test "clicking the notification's Discard action drops the staged edit",
        %{state: state, session: session, view: view, path: path, workspace_id: id} do
     :ok = stage_edit(view)
