@@ -1316,7 +1316,8 @@ defmodule Minga.Buffer.Process do
               filetype: filetype,
               options: reseed_options(state, filetype),
               decorations: Decorations.new(),
-              undo_history: UndoHistory.clear(state.undo_history)
+              undo_history: UndoHistory.clear(state.undo_history),
+              change_log: ChangeLog.clear(state.change_log)
           }
 
           new_state = rebuild_conflict_index(new_state)
@@ -1696,6 +1697,7 @@ defmodule Minga.Buffer.Process do
             filetype: filetype,
             options: reseed_options(state, filetype),
             undo_history: UndoHistory.clear(state.undo_history),
+            change_log: ChangeLog.clear(state.change_log),
             decorations: Decorations.new()
         }
 

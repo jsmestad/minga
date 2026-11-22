@@ -2539,6 +2539,60 @@ struct CommandDispatcherStagingTests {
         #expect(dispatcher.visibleEditorSnapshot?.metadata.textPresentations[1] == 88)
     }
 
+    // Regression for #3886: a buffer window committed resident semantics, then
+    // the same window id carried a fork-conflict review, which has no
+    // semantics. A keyframe replaces every window, so the old semantics must
+    // not make every recovery keyframe invalid.
+    @Test("a keyframe accepts a resident window without semantics after its id carried semantics")
+    @MainActor func keyframeForgetsReplacedResidentSemantics() throws {
+        let (dispatcher, _) = makeDispatcher()
+        var results: [FrameTransactionResult] = []
+        dispatcher.onTransactionResult = { results.append($0) }
+        let fixture = WrappedScrollFixture()
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiWindowContent(data: try fixture.content(top: 0, continuation: 0)))
+        dispatcher.dispatch(.guiResidentSemantics(data: fixture.semantics(rows: fixture.rows)))
+        dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
+        #expect(dispatcher.committedEditorSnapshot?.surface(for: 1)?.residentSemantics != nil)
+
+        let reviewRows = (0..<3).map { index in
+            GUIVisualRow(
+                rowType: .normal, rowId: UInt64(100 + index), bufLine: UInt32(index),
+                contentHash: UInt32(100 + index), text: "review \(index)", spans: []
+            )
+        }
+        let rect = GUICellRect(row: 0, col: 0, width: 80, height: 3)
+        let review = try GUIWindowContent(
+            windowId: 1, fullRefresh: true, contentEpoch: 9,
+            cursorRow: 0, cursorCol: 0, cursorShape: .block,
+            rowStoreMode: .sequential, rows: reviewRows,
+            selection: nil, searchMatches: [], diagnosticUnderlines: [], documentHighlights: [],
+            paneGeometry: GUIPaneGeometry(
+                windowId: 1, totalRect: rect, contentRect: rect, textRect: rect,
+                gutterRect: GUICellRect(row: 0, col: 0, width: 0, height: 3), clipRect: rect,
+                viewport: GUIViewportSummary(
+                    top: 0, left: 0, rows: 3, cols: 80, totalLines: 3,
+                    visualRowOffset: 0, totalVisualRows: 3
+                ),
+                gutterMetrics: GUIGutterMetrics(lineNumberWidth: 0, signColWidth: 0), hitRegions: []
+            )
+        )
+
+        for frameSeq in UInt32(2)...UInt32(3) {
+            dispatcher.dispatch(.beginFrame(frameSeq: frameSeq, baseFrameSeq: 0, generation: frameSeq))
+            dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+            dispatcher.dispatch(.guiWindowContent(data: review))
+            dispatcher.dispatch(.commitFrame(frameSeq: frameSeq, seq: 0))
+            #expect(dispatcher.lastCommittedFrameSeq == frameSeq)
+        }
+
+        #expect(!results.contains { if case .rejected = $0 { return true } else { return false } })
+        let committed = try #require(dispatcher.committedEditorSnapshot)
+        #expect(committed.content(for: 1)?.contentEpoch == 9)
+        #expect(committed.surface(for: 1)?.residentSemantics == nil)
+    }
+
     @Test("resident gutter rejects a windowed row store")
     @MainActor func residentGutterRejectsWindowedStore() throws {
         let (dispatcher, _) = makeDispatcher()

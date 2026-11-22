@@ -7,6 +7,7 @@ defmodule MingaEditor.Agent.EditPublicationTest do
   alias MingaAgent.ProjectView.Overlay
   alias MingaAgent.StagedDraftKeeper
   alias MingaAgent.StagedDraftKeeper.Recovery
+  alias MingaEditor.Agent.DiffReview
   alias MingaEditor.Agent.EditPublication
   alias MingaEditor.Handlers.GuiActionHandler
   alias MingaEditor.Session.State, as: SessionState
@@ -74,6 +75,8 @@ defmodule MingaEditor.Agent.EditPublicationTest do
 
   defp notification(state, id),
     do: NotificationCenter.find(state.feedback.notifications, "agent:unpublished_edits:#{id}")
+
+  defp conflict?(region), do: elem(region, 0) == :conflict
 
   test "an agent edit drafts the session's workspace and the finished turn offers Publish and Discard",
        %{state: state, session: session, path: path, workspace_id: id} do
@@ -170,6 +173,49 @@ defmodule MingaEditor.Agent.EditPublicationTest do
     assert File.read!(real) == "one\nTWO\n"
     assert BufferProcess.content(linked) == "one\nTWO\n"
     refute BufferProcess.dirty?(linked)
+  end
+
+  # Regression for #3886: the staged edit's base was changed in the editor and
+  # then on disk before publishing.
+  test "publishing a staged edit whose base diverged keeps it staged as a resolvable conflict",
+       %{state: state, session: session, view: view, path: path, workspace_id: id} do
+    buffer = state.workspace.buffers.active
+    :ok = stage_edit(view)
+
+    state =
+      state
+      |> EditPublication.record_edit(session, path)
+      |> EditPublication.turn_finished(session)
+
+    :ok = BufferProcess.move_to(buffer, {1, 0})
+    :ok = BufferProcess.insert_text(buffer, "user-")
+    :ok = BufferProcess.save(buffer)
+    File.write!(path, "one\nshell-two\n")
+    :ok = BufferProcess.reload(buffer)
+
+    conflicted = EditPublication.publish(state, id)
+
+    assert workspace(conflicted, id).review.state == :conflict
+    assert File.read!(path) == "one\nshell-two\n"
+    assert BufferProcess.content(buffer) == "one\nshell-two\n"
+
+    assert {:ok, revision, regions} = Overlay.fork_conflict_snapshot(view, "notes.md")
+    assert [{:conflict, ["TWO"], ["shell-two"], _ancestor}] = Enum.filter(regions, &conflict?/1)
+
+    review = DiffReview.from_fork_snapshot("notes.md", revision, regions)
+    assert review.fork_revision == revision
+    assert [%{old_lines: ["shell-two"]}] = review.hunks
+
+    # Accepting the agent's side installs the resolution into the open buffer;
+    # saving it lets the next publish complete.
+    assert :ok = Overlay.resolve_fork_conflicts(view, "notes.md", revision, [:accepted])
+    assert BufferProcess.content(buffer) == "one\nTWO\n"
+    :ok = BufferProcess.save(buffer)
+
+    published = EditPublication.publish(conflicted, id)
+
+    assert File.read!(path) == "one\nTWO\n"
+    assert workspace(published, id).review.state == :clean
   end
 
   test "clicking the notification's Discard action drops the staged edit",
