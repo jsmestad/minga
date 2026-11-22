@@ -24,6 +24,9 @@ unless Code.ensure_loaded?(Minga.Git.Stub),
 
 Minga.Git.Stub.ensure_table()
 
+unless Code.ensure_loaded?(Minga.Test.GUIWindowDecoder),
+  do: Code.require_file(Path.join(parent_test_support, "gui_window_decoder.ex"))
+
 unless Code.ensure_loaded?(Minga.Test.HeadlessPort),
   do: Code.require_file(Path.join(parent_test_support, "headless_port.ex"))
 

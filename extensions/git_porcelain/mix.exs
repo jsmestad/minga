@@ -13,7 +13,8 @@ defmodule MingaGitPorcelain.MixProject do
       deps: deps(),
       description: "Bundled Git porcelain UI extension for Minga",
       source_url: @source_url,
-      elixirc_paths: elixirc_paths(Mix.env())
+      elixirc_paths: elixirc_paths(Mix.env()),
+      test_ignore_filters: [&String.starts_with?(&1, "test/fixtures/")]
     ]
   end
 
