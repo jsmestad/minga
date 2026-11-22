@@ -60,9 +60,11 @@ defmodule MingaEditor.Input do
     {Popup, 80},
     {MingaEditor.Input.CUA.TUISpaceLeader, 90},
     {Scoped, 100},
-    {AgentNav, 110},
     {GlobalBindings, 120},
-    {BottomPanel, 125}
+    {BottomPanel, 125},
+    # Last surface handler: agent chat navigation consumes keys the chat does
+    # not own, so editor-wide chords must already have had their turn.
+    {AgentNav, 130}
   ]
 
   @builtin_handler_entries (for {module, priority} <- @builtin_surface_handlers do

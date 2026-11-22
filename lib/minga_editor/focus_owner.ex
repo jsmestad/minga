@@ -65,14 +65,6 @@ defmodule MingaEditor.FocusOwner do
        ),
        do: {:editor_view, :completion, ModalWorkflow.completion_generation(state)}
 
-  # Scoped's agent trie claims Escape before command completion.
-  defp modal_owner(
-         :command_completion,
-         _modal,
-         %{workspace: %{keymap_scope: :agent}} = state
-       ),
-       do: search_owner(Search.gui_search_active?(state.workspace.search), :agent)
-
   # Command completion is handled by the editing model's command-mode handler,
   # not by Input.Completion (which only claims insert-mode completions).
   defp modal_owner(:command_completion, {:command_completion, %{generation: generation}}, _state),
@@ -133,11 +125,10 @@ defmodule MingaEditor.FocusOwner do
        }),
        do: {:editor_view, :empty_state, 0}
 
-  defp scope_owner(state), do: search_owner(false, state.workspace.keymap_scope)
+  defp scope_owner(state), do: {:editor_view, scope_surface(state.workspace.keymap_scope), 0}
 
-  defp search_owner(true, _scope), do: {:search_query, :search, 0}
-  defp search_owner(false, :file_tree), do: {:editor_view, :file_tree, 0}
-  defp search_owner(false, :agent), do: {:editor_view, :agent, 0}
-  defp search_owner(false, :git_status), do: {:editor_view, :git_status, 0}
-  defp search_owner(false, :editor), do: {:editor_view, :editor, 0}
+  defp scope_surface(:file_tree), do: :file_tree
+  defp scope_surface(:agent), do: :agent
+  defp scope_surface(:git_status), do: :git_status
+  defp scope_surface(:editor), do: :editor
 end

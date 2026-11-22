@@ -20,6 +20,7 @@ See `Minga.Keymap.Scope` for the behaviour contract, `MingaEditor.Input.Scoped` 
 2. **Editing keys are repurposed.** i/a focus the input (semantic parallel to "enter insert mode"). y copies structured content. q/Esc returns to the editor context for the same workspace.
 3. **Standard prefixes for multi-key sequences.** `z` for all-block collapse toggling, `]`/`[` for next/prev code-block or diff-hunk navigation, `g` for go-to actions.
 4. **SPC leader always works.** In navigation mode, SPC delegates to the mode FSM so leader sequences and which-key popups function normally.
+5. **The command line works, and nothing else leaks.** `:` opens the command line, so `:w`, `:qa`, and `:model` work from the chat. Every other key the chat does not bind is ignored. It never edits, or moves focus to, the file buffer behind the chat.
 
 ## Chat Navigation Mode
 

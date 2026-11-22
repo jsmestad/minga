@@ -31,11 +31,6 @@ defmodule MingaEditor.FocusOwnerTest do
   }
   @scope_rows %{editor: :editor, file_tree: :file_tree, agent: :agent, git_status: :git_status}
 
-  # Agent scope claims Escape in command mode; other scopes yield to ModeFSM.
-  @modal_scope_rows %{
-    {:command_completion, :agent} => {:editor_view, :agent}
-  }
-
   # Every current modal has a producing workflow below. A future tag with no
   # public producing path must be recorded here with its missing path, not
   # manufactured with a raw modal/state update.
@@ -81,8 +76,9 @@ defmodule MingaEditor.FocusOwnerTest do
       state = ctx |> activate_modal(tag, path) |> activate_scope(scope, root)
       assert ModalOverlay.tag(state.shell_runtime.state.modal) == tag
 
-      {responder, expected_surface} =
-        Map.get(@modal_scope_rows, {tag, scope}, Map.fetch!(@modal_rows, tag))
+      # Every scope, including agent, yields command-line keys (Escape
+      # included) to the mode FSM, so modal rows have no scope exceptions.
+      {responder, expected_surface} = Map.fetch!(@modal_rows, tag)
 
       surface = resolve_surface(expected_surface, scope)
       probe = probe_key(tag)

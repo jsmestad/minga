@@ -49,6 +49,22 @@ defmodule MingaEditor.Input.ScopedAgentSubStatesTest do
                nil
     end
 
+    test "approval keys typed into an open command line stay in the command line", %{
+      state: state
+    } do
+      state =
+        Enum.reduce([?:, ?q, ?a, ?y, ?t, ?n], state, fn cp, acc ->
+          {:handled, acc} = walk_surface_handlers(acc, cp, 0)
+          acc
+        end)
+
+      assert state.workspace.editing.mode == :command
+      assert state.workspace.editing.mode_state.input == "qaytn"
+
+      assert MingaEditor.Shell.Traditional.State.agent(state.shell_runtime.state).pending_approval !=
+               nil
+    end
+
     test "only triggers when input is not focused", %{state: state} do
       # If input is focused in insert mode, approval keys should not be intercepted
       state =

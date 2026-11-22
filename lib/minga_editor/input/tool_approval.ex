@@ -2,8 +2,8 @@ defmodule MingaEditor.Input.ToolApproval do
   @moduledoc """
   Input handler for the tool approval sub-state (y/Enter/a/t/n).
 
-  Active when `agent.pending_approval` is non-nil and the panel
-  input is not focused. Handles y or Enter (approve), a (trust this tool for the session),
+  Active when `agent.pending_approval` is non-nil, the panel
+  input is not focused, and no command line, search, or eval prompt is open. Handles y or Enter (approve), a (trust this tool for the session),
   t (trust this tool for the current turn), n or Esc (deny), and lets unrelated keys continue
   through normal editor routing.
   """
@@ -21,7 +21,9 @@ defmodule MingaEditor.Input.ToolApproval do
   def handle_key(state, cp, 0) do
     agent = MingaEditor.Shell.Traditional.State.agent(state.shell_runtime.state)
 
-    if is_map(agent.pending_approval) and not state.workspace.agent_ui.panel.input_focused do
+    # An open command line owns every key, so typing `:qa` never trusts a tool.
+    if is_map(agent.pending_approval) and not state.workspace.agent_ui.panel.input_focused and
+         not Minga.Editing.minibuffer_mode?(state) do
       dispatch_approval(state, cp)
     else
       {:passthrough, state}

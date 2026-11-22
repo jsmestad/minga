@@ -507,6 +507,52 @@ defmodule MingaEditor.Input.ScopedEditorAgentTest do
     end
   end
 
+  describe "agent scope — command line" do
+    test ": in chat navigation opens the command line" do
+      state = base_state(keymap_scope: :agent, agentic_active: true)
+
+      assert {:passthrough, _} = Scoped.handle_key(state, ?:, 0)
+      {:handled, new_state} = walk_surface_handlers(state, ?:, 0)
+      assert new_state.workspace.editing.mode == :command
+    end
+
+    test "command-line keys reach the command line instead of chat bindings" do
+      state = base_state(keymap_scope: :agent, agentic_active: true)
+      {:handled, state} = walk_surface_handlers(state, ?:, 0)
+
+      # Each of these is a chat binding in navigation mode.
+      for {cp, mods} <- [{?q, 0}, {?a, 0}, {?i, 0}, {?y, 0}, {?s, 0}, {13, 0}, {27, 0}] do
+        assert {:passthrough, _} = Scoped.handle_key(state, cp, mods)
+      end
+
+      state =
+        Enum.reduce([?q, ?a], state, fn cp, acc ->
+          {:handled, acc} = walk_surface_handlers(acc, cp, 0)
+          acc
+        end)
+
+      assert state.workspace.editing.mode == :command
+      assert state.workspace.keymap_scope == :agent
+      assert state.workspace.editing.mode_state.input == "qa"
+    end
+
+    test "unbound chat keys never edit or focus the buffer behind the chat" do
+      state = base_state(keymap_scope: :agent, agentic_active: true)
+      buffer = state.workspace.buffers.active
+
+      for keys <- [~c"x", ~c"o", ~c"p", ~c"J", ~c"~", ~c"dd", ~c"v", ~c"r"] do
+        {:handled, after_keys} =
+          Enum.reduce(keys, {:handled, state}, fn cp, {_, acc} ->
+            walk_surface_handlers(acc, cp, 0)
+          end)
+
+        assert after_keys.workspace.keymap_scope == :agent, "#{keys} left the agent scope"
+        assert after_keys.workspace.editing.mode == :normal, "#{keys} changed the mode"
+        assert Buffer.content(buffer) == "hello world", "#{keys} edited the file buffer"
+      end
+    end
+  end
+
   describe "agent scope — toast dismiss" do
     test "any key dismisses toast then processes normally" do
       state = base_state(keymap_scope: :agent, agentic_active: true)

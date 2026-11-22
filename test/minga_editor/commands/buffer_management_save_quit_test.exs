@@ -1034,6 +1034,21 @@ defmodule MingaEditor.Commands.BufferManagementSaveQuitTest do
 
       assert_received {:shutdown, 0}
     end
+
+    test ":qa typed in agent chat navigation quits without touching the file buffer", %{
+      tmp_dir: root
+    } do
+      {ctx, path, _view} = staged_agent_edit_editor(root, stage?: false)
+      state = open_agent_tab(ctx)
+      assert state.workspace.keymap_scope == :agent
+      refute state.workspace.agent_ui.panel.input_focused
+
+      send_keys_sync(ctx, ":qa<CR>")
+
+      assert_received {:shutdown, 0}
+      assert buffer_content(ctx) == "one\ntwo\n"
+      assert File.read!(path) == "one\ntwo\n"
+    end
   end
 
   defp staged_agent_edit_editor(root, opts) do
@@ -1088,6 +1103,24 @@ defmodule MingaEditor.Commands.BufferManagementSaveQuitTest do
 
       tb = tb |> TabBar.update_context(tab.id, context) |> TabBar.switch_to(tab.id)
       install_tab_bar(state, tb)
+    end)
+  end
+
+  # Inserts an agent tab behind the active file tab, then switches to it
+  # through the tab workflow so its context is restored like a user switch.
+  defp open_agent_tab(ctx) do
+    :sys.replace_state(ctx.editor, fn state ->
+      {tb, tab} = TabBar.insert(state.shell_runtime.state.tab_bar, :agent, "Agent")
+
+      context =
+        TabContext.new_agent(
+          state.frontend.terminal_viewport,
+          state.workspace.file_tree.project_root
+        )
+
+      state
+      |> install_tab_bar(TabBar.update_context(tb, tab.id, context))
+      |> MingaEditor.TabWorkflow.switch(tab.id)
     end)
   end
 

@@ -13,6 +13,7 @@ defmodule MingaEditor.Input.AgentNavTest do
   alias MingaEditor.Window
 
   @ctrl MingaEditor.Frontend.Protocol.mod_ctrl()
+  @alt MingaEditor.Frontend.Protocol.mod_alt()
 
   defp make_state(opts) do
     prompt_buf = start_supervised!({BufferProcess, content: ""}, id: make_ref())
@@ -115,18 +116,36 @@ defmodule MingaEditor.Input.AgentNavTest do
       assert up_state.workspace.agent_ui.view.preview.scroll.offset == 0
     end
 
-    test "unclaimed viewer keys stop before buffer editing while chat and focused drafts still delegate" do
-      viewer = make_state(focus: :file_viewer)
-
-      for {cp, mods} <- [{?r, 0}, {?p, 0}, {?y, @ctrl}, {0x754C, 0}] do
-        assert {:handled, ^viewer} = AgentNav.handle_key(viewer, cp, mods)
+    test "unclaimed viewer and chat keys stop before buffer editing while focused drafts still delegate" do
+      for state <- [make_state(focus: :file_viewer), make_state(focus: :chat)],
+          {cp, mods} <- [{?r, 0}, {?p, 0}, {?x, 0}, {?y, @ctrl}, {?r, @ctrl}, {0x754C, 0}] do
+        assert {:handled, ^state} = AgentNav.handle_key(state, cp, mods)
       end
 
-      for state <- [
-            make_state(focus: :chat),
-            make_state(focus: :file_viewer, input_focused: true)
-          ] do
-        assert {:passthrough, ^state} = AgentNav.handle_key(state, ?r, 0)
+      draft = make_state(focus: :file_viewer, input_focused: true)
+      assert {:passthrough, ^draft} = AgentNav.handle_key(draft, ?r, 0)
+    end
+  end
+
+  describe "chat keys owned by the mode FSM" do
+    test "leader, command line, eval, and search entry keys reach the mode FSM" do
+      state = make_state(focus: :chat)
+
+      for {cp, mods} <- [{?\s, 0}, {?:, 0}, {?:, @alt}, {?/, 0}, {?n, 0}, {?N, 0}] do
+        assert {:passthrough, ^state} = AgentNav.handle_key(state, cp, mods)
+      end
+    end
+
+    test "an open command line receives every key, including chat navigation keys" do
+      state = make_state(focus: :chat)
+
+      command_line = %{
+        state
+        | workspace: MingaEditor.Session.State.transition_mode(state.workspace, :command)
+      }
+
+      for {cp, mods} <- [{?j, 0}, {?q, 0}, {?x, 0}, {13, 0}] do
+        assert {:passthrough, ^command_line} = AgentNav.handle_key(command_line, cp, mods)
       end
     end
   end

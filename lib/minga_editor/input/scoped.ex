@@ -118,15 +118,20 @@ defmodule MingaEditor.Input.Scoped do
     # SPC when not in insert mode: passthrough to leader/which-key
     if cp == @space and not panel.input_focused and band(mods, @ctrl) == 0 do
       {:passthrough, state}
-      # Leader sequence in progress: passthrough ALL keys to mode FSM
+      # Leader sequence or command line in progress: the mode FSM owns every key
+      # until it finishes, so the chat trie must not claim `q`, `a`, Escape, etc.
     else
-      if Minga.Editing.in_leader?(state) and not panel.input_focused do
+      if mode_fsm_owns_sequence?(state) and not panel.input_focused do
         {:passthrough, state}
       else
         dispatch_agent_key_inner(state, cp, mods)
       end
     end
   end
+
+  @spec mode_fsm_owns_sequence?(EditorState.t()) :: boolean()
+  defp mode_fsm_owns_sequence?(state),
+    do: Minga.Editing.in_leader?(state) or Minga.Editing.minibuffer_mode?(state)
 
   defp dispatch_agent_key_inner(state, cp, mods) do
     panel = state.workspace.agent_ui.panel
