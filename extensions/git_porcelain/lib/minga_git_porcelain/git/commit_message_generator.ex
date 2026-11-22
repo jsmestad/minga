@@ -4,7 +4,7 @@ defmodule MingaGitPorcelain.Git.CommitMessageGenerator do
   the configured AI provider. The effect scheduler owns the worker lifecycle.
   """
 
-  alias ReqLLM.StreamResponse
+  alias Minga.Extension.AI
 
   @max_diff_chars 4000
   @system_prompt """
@@ -25,40 +25,33 @@ defmodule MingaGitPorcelain.Git.CommitMessageGenerator do
   - Output ONLY the commit message, no explanation or markdown formatting
   """
 
-  @doc "Generates a commit message synchronously for one staged diff."
-  @spec generate(String.t()) :: {:ok, String.t()} | {:error, String.t()}
-  def generate(staged_diff) when is_binary(staged_diff) do
-    model = MingaAgent.ProviderResolver.configured_model() || MingaAgent.Config.default_model()
-    run_generation(model, staged_diff)
-  end
+  @doc """
+  Generates a commit message synchronously for one staged diff.
 
-  @spec run_generation(String.t(), String.t()) :: {:ok, String.t()} | {:error, String.t()}
-  defp run_generation(model, staged_diff) do
-    diff_text = truncate_diff(staged_diff)
+  Generation goes through `Minga.Extension.AI.complete/2`, which resolves the user's model, catalog base URL, and stored or environment credentials. `ai_opts` are passed through to it; production callers pass none.
+  """
+  @spec generate(String.t(), keyword()) :: {:ok, String.t()} | {:error, String.t()}
+  def generate(staged_diff, ai_opts \\ []) when is_binary(staged_diff) and is_list(ai_opts) do
+    opts = Keyword.merge(ai_opts, system: @system_prompt, max_tokens: 300)
 
-    messages = [
-      %{role: "system", content: @system_prompt},
-      %{role: "user", content: diff_text}
-    ]
-
-    call_llm(model, messages, max_tokens: 300)
+    [%{role: "user", content: truncate_diff(staged_diff)}]
+    |> AI.complete(opts)
+    |> generation_result()
   rescue
     e ->
       Minga.Log.warning(:agent, "AI commit message generation failed: #{Exception.message(e)}")
       {:error, "AI generation error: #{Exception.message(e)}"}
   end
 
-  @spec call_llm(String.t(), [map()], keyword()) :: {:ok, String.t()} | {:error, String.t()}
-  defp call_llm(model, messages, stream_opts) do
-    with {:ok, stream_response} <- ReqLLM.stream_text(model, messages, stream_opts),
-         {:ok, response} <- StreamResponse.process_stream(stream_response),
-         text when text != "" <- String.trim(ReqLLM.Response.text(response) || "") do
-      {:ok, text}
-    else
-      "" -> {:error, "AI returned an empty commit message"}
-      {:error, reason} -> {:error, "AI generation failed: #{inspect(reason)}"}
-    end
-  end
+  @spec generation_result({:ok, String.t()} | {:error, AI.error()}) ::
+          {:ok, String.t()} | {:error, String.t()}
+  defp generation_result({:ok, text}), do: {:ok, text}
+
+  defp generation_result({:error, :empty_response}),
+    do: {:error, "AI returned an empty commit message"}
+
+  defp generation_result({:error, {:provider_error, reason}}),
+    do: {:error, "AI generation failed: #{inspect(reason)}"}
 
   @spec truncate_diff(String.t()) :: String.t()
   defp truncate_diff(diff) when byte_size(diff) <= @max_diff_chars, do: diff
