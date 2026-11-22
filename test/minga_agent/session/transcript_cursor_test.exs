@@ -48,7 +48,7 @@ defmodule MingaAgent.Session.TranscriptCursorTest do
     assert streamed.content_revision == next.revision
     assert changes.count == 4
     assert changes.next_id == 5
-    refute changes.pins_changed?
+    assert changes.pin_changes == []
     refute changes.usage_changed?
     refute changes.timestamp_changed?
     assert {:unchanged, _} = Transcript.since(next, changes.cursor)
@@ -179,26 +179,95 @@ defmodule MingaAgent.Session.TranscriptCursorTest do
     pinned = Transcript.toggle_pin(source, 1)
     assert {:changes, pins} = Transcript.since(pinned, cursor)
     assert pins.entries == []
-    assert pins.pinned_ids == MapSet.new([1])
-    assert pins.pins_changed?
+    assert pins.pin_changes == [{1, true}]
     refute pins.usage_changed?
     refute pins.timestamp_changed?
 
     unpinned = Transcript.toggle_pin(pinned, 1)
     assert {:changes, pins} = Transcript.since(unpinned, Transcript.cursor(pinned))
-    assert pins.pins_changed?
-    assert pins.pinned_ids == MapSet.new()
+    assert pins.pin_changes == [{1, false}]
 
     next =
       unpinned |> Transcript.add_usage(TurnUsage.new(1, 2, 0, 0, 0.5)) |> Transcript.touch(@later)
 
     assert {:changes, metadata} = Transcript.since(next, Transcript.cursor(unpinned))
     assert metadata.entries == []
-    refute metadata.pins_changed?
+    assert metadata.pin_changes == []
     assert metadata.usage_changed?
     assert metadata.timestamp_changed?
     assert metadata.usage.input == 1
     assert metadata.last_changed_at == @later
+  end
+
+  test "skipping pin revisions returns one current fact per affected active ID" do
+    source = new([{:user, "one"}, {:assistant, "two"}, {:user, "three"}])
+    pinned = source |> Transcript.toggle_pin(1) |> Transcript.toggle_pin(3)
+    cursor = Transcript.cursor(pinned)
+
+    next =
+      pinned
+      |> Transcript.toggle_pin(2)
+      |> Transcript.toggle_pin(1)
+      |> Transcript.toggle_pin(2)
+      |> Transcript.toggle_pin(2)
+
+    assert {:changes, %Changes{entries: [], pin_changes: changes}} =
+             Transcript.since(next, cursor)
+
+    assert Enum.sort(changes) == [{1, false}, {2, true}]
+    assert {:snapshot, %Snapshot{pinned_ids: pins}} = Transcript.since(next, :snapshot)
+    assert pins == MapSet.new([2, 3])
+  end
+
+  test "a pre-active pin enters the delta only when its ID becomes active" do
+    source = new([{:user, "one"}])
+    pinned = Transcript.toggle_pin(source, 3)
+
+    assert {:changes, %Changes{entries: [], pin_changes: []}} =
+             Transcript.since(pinned, Transcript.cursor(source))
+
+    assert {:snapshot, %Snapshot{pinned_ids: pins}} = Transcript.since(pinned, :snapshot)
+    assert pins == MapSet.new([3])
+
+    next = Transcript.append_many(pinned, [{:assistant, "two"}, {:user, "three"}])
+
+    assert {:changes, %Changes{entries: [%Entry{id: 2}, %Entry{id: 3}], pin_changes: [{3, true}]}} =
+             Transcript.since(next, Transcript.cursor(pinned))
+
+    revised = Transcript.update_at(next, -1, fn _ -> {:user, "three revised"} end)
+
+    assert {:changes,
+            %Changes{
+              entries: [%Entry{id: 2}, %Entry{id: 3, message: {:user, "three revised"}}],
+              pin_changes: [{3, true}]
+            }} =
+             Transcript.since(revised, Transcript.cursor(source))
+
+    unpinned = Transcript.toggle_pin(revised, 3)
+
+    assert {:changes, %Changes{entries: [], pin_changes: [{3, false}]}} =
+             Transcript.since(unpinned, Transcript.cursor(revised))
+  end
+
+  test "branch resets preserve canonical membership but do not carry old pin facts forward" do
+    source =
+      [{:user, "one"}, {:assistant, "two"}]
+      |> new()
+      |> Transcript.toggle_pin(2)
+
+    {:ok, branched, _branch} = Transcript.branch_at(source, 0, @later)
+    branched = Transcript.toggle_pin(branched, 1)
+    {:ok, restored} = Transcript.switch_branch(branched, 1)
+
+    assert {:reset, :reset_generation, %Snapshot{cursor: cursor, pinned_ids: pins}} =
+             Transcript.since(restored, Transcript.cursor(source))
+
+    assert pins == MapSet.new([1, 2])
+
+    next = Transcript.toggle_pin(restored, 2)
+
+    assert {:changes, %Changes{entries: [], pin_changes: [{2, false}]}} =
+             Transcript.since(next, cursor)
   end
 
   test "malformed, foreign and future cursors never guess continuity" do

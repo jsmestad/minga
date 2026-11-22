@@ -4,6 +4,9 @@ defmodule MingaAgent.Session.Transcript.Changes do
 
   Entries are ordered by ordinal. An entry with `created_revision` greater than
   the supplied cursor revision was appended; other entries revise existing IDs.
+  Pin facts contain the latest membership for each affected active ID. New
+  entries are unpinned unless a fact says otherwise. Only snapshots carry the
+  full membership, including pins for IDs outside the active transcript.
   Metadata is the current atomic value, with exact per-field change flags.
   No intermediate payload versions are retained or returned.
   """
@@ -15,32 +18,31 @@ defmodule MingaAgent.Session.Transcript.Changes do
   @enforce_keys [
     :cursor,
     :entries,
-    :pinned_ids,
+    :pin_changes,
     :usage,
     :last_changed_at,
     :next_id,
     :count,
-    :pins_changed?,
     :usage_changed?,
     :timestamp_changed?
   ]
   defstruct @enforce_keys
 
+  @type pin_fact :: {pos_integer(), boolean()}
+
   @type t :: %__MODULE__{
           cursor: Cursor.t(),
           entries: [Entry.t()],
-          pinned_ids: MapSet.t(pos_integer()),
+          pin_changes: [pin_fact()],
           usage: TurnUsage.t(),
           last_changed_at: DateTime.t(),
           next_id: pos_integer(),
           count: non_neg_integer(),
-          pins_changed?: boolean(),
           usage_changed?: boolean(),
           timestamp_changed?: boolean()
         }
 
   @type metadata_changes :: %{
-          pins_changed?: boolean(),
           usage_changed?: boolean(),
           timestamp_changed?: boolean()
         }
@@ -49,7 +51,7 @@ defmodule MingaAgent.Session.Transcript.Changes do
   @spec new(
           Cursor.t(),
           [Entry.t()],
-          MapSet.t(pos_integer()),
+          [pin_fact()],
           TurnUsage.t(),
           DateTime.t(),
           pos_integer(),
@@ -59,13 +61,12 @@ defmodule MingaAgent.Session.Transcript.Changes do
   def new(
         cursor,
         entries,
-        pins,
+        pin_changes,
         usage,
         changed_at,
         next_id,
         count,
         %{
-          pins_changed?: pins_changed?,
           usage_changed?: usage_changed?,
           timestamp_changed?: timestamp_changed?
         }
@@ -73,12 +74,11 @@ defmodule MingaAgent.Session.Transcript.Changes do
     %__MODULE__{
       cursor: cursor,
       entries: entries,
-      pinned_ids: pins,
+      pin_changes: pin_changes,
       usage: usage,
       last_changed_at: changed_at,
       next_id: next_id,
       count: count,
-      pins_changed?: pins_changed?,
       usage_changed?: usage_changed?,
       timestamp_changed?: timestamp_changed?
     }

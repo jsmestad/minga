@@ -41,8 +41,7 @@ defmodule MingaAgent.SessionTranscriptCursorTest do
 
     assert {:changes, changes} = Session.transcript_since(session, cursor)
     assert [%Entry{id: id, message: {:tool_call, %{result: "current"}}}] = changes.entries
-    assert changes.pinned_ids == MapSet.new([id])
-    assert changes.pins_changed?
+    assert changes.pin_changes == [{id, true}]
     assert changes.count == initial.count + 1
     assert changes.next_id == id + 1
     assert {:unchanged, _} = Session.transcript_since(session, changes.cursor)
@@ -50,10 +49,8 @@ defmodule MingaAgent.SessionTranscriptCursorTest do
 
     assert :ok = Session.toggle_pin(session, id)
 
-    assert {:changes, %{entries: [], pinned_ids: pins, pins_changed?: true}} =
+    assert {:changes, %Changes{entries: [], pin_changes: [{^id, false}]}} =
              Session.transcript_since(session, changes.cursor)
-
-    assert pins == MapSet.new()
   end
 
   test "arrival forwards the current runtime and changed transcript after preceding Session events" do
