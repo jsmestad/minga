@@ -1881,6 +1881,40 @@ defmodule Minga.Buffer.ProcessTest do
       assert {:ok, ^pid} = Buffer.pid_for_file(Path.join(dir, "lib/new.ex"))
     end
 
+    test "a buffer follows its link when the link is retargeted on disk", %{tmp_dir: dir} do
+      old_target = Path.join(dir, "old.ex")
+      new_target = Path.join(dir, "new.ex")
+      link = Path.join(dir, "link.ex")
+      File.write!(old_target, "old")
+      File.write!(new_target, "new")
+      File.ln_s!("old.ex", link)
+
+      pid = start_supervised!({BufferProcess, file_path: link})
+      assert {:ok, ^pid} = Buffer.pid_for_file(old_target)
+
+      File.rm!(link)
+      File.ln_s!("new.ex", link)
+
+      assert {:ok, ^pid} = Buffer.pid_for_file(new_target)
+      assert {:ok, ^pid} = Buffer.pid_for_file(link)
+      assert :not_found = Buffer.pid_for_file(old_target)
+    end
+
+    test "a buffer opened through a dangling link is found once the target is created", %{
+      tmp_dir: dir
+    } do
+      target = Path.join(dir, "new.ex")
+      link = Path.join(dir, "link.ex")
+      File.ln_s!("new.ex", link)
+
+      pid = start_supervised!({BufferProcess, file_path: link})
+
+      File.write!(target, "new")
+
+      assert {:ok, ^pid} = Buffer.pid_for_file(target)
+      assert {:ok, ^pid} = Buffer.pid_for_file(link)
+    end
+
     test "buffers opened by both names select the same buffer from either name", %{tmp_dir: dir} do
       real = Path.join(dir, "real.ex")
       link = Path.join(dir, "link.ex")
