@@ -53,19 +53,71 @@ defmodule MingaAgent.Tools.WorkspaceEditApplierTest do
     assert {:ok, []} = ProjectView.diff(view)
   end
 
-  test "in-project edits change open buffers and route closed files through the project view",
+  test "a symlinked in-project closed file is edited through the project view at its real path",
        %{project: project, view: view, context: context} do
-    open_path = write!(Path.join(project, "lib/open.ex"), "old_name\n")
-    buffer = start_supervised!({BufferProcess, file_path: open_path, content: "old_name\n"})
     real_path = write!(Path.join(project, "lib/real.ex"), "old_name\n")
     File.ln_s!("real.ex", Path.join(project, "lib/link.ex"))
     linked_path = Path.join(project, "lib/link.ex")
 
-    assert {2, 2, []} = apply_edit(context, [open_path, linked_path])
+    assert {1, 1, []} = apply_edit(context, [linked_path])
 
-    assert Buffer.content(buffer) == "new_name\n"
     assert {:ok, "new_name\n"} = ProjectView.read_file(view, "lib/real.ex")
     assert File.read!(real_path) == "old_name\n"
+  end
+
+  test "an open-buffer edit under staging lands in the staged view and reaches the buffer only when published",
+       %{project: project, view: view, context: context} do
+    path = write!(Path.join(project, "lib/open.ex"), "old_name\n")
+    buffer = start_supervised!({BufferProcess, file_path: path, content: "old_name\n"})
+
+    assert {1, 1, []} = apply_edit(context, [path])
+
+    assert Buffer.content(buffer) == "old_name\n"
+    assert File.read!(path) == "old_name\n"
+    assert {:ok, %{owner: {:fork, _fork}}} = ProjectView.resolve_source(view, "lib/open.ex")
+    assert {:ok, "new_name\n"} = ProjectView.read_file(view, "lib/open.ex")
+    assert {:ok, entries} = ProjectView.diff(view)
+    assert Enum.any?(entries, &(&1.path == "lib/open.ex"))
+
+    assert :ok = ProjectView.promote(view, :project_root)
+    assert Buffer.content(buffer) == "new_name\n"
+  end
+
+  test "an open-buffer edit under staging is refused when the staged copy differs from the buffer the server saw",
+       %{project: project, view: view, context: context} do
+    path = write!(Path.join(project, "lib/drafted.ex"), "old_name\n")
+    buffer = start_supervised!({BufferProcess, file_path: path, content: "old_name\n"})
+    {:ok, source} = ProjectView.resolve_source(view, "lib/drafted.ex")
+
+    token =
+      Minga.Buffer.FileMutation.revision("old_name\n", nil, {:project_view, source.source_id})
+
+    assert {:ok, _receipt} =
+             ProjectView.conditional_mutate(
+               view,
+               "lib/drafted.ex",
+               token,
+               {:replace, "draft_name\n"}
+             )
+
+    assert {0, 0, [error]} = apply_edit(context, [path])
+
+    assert error =~ "staged copy of this open file differs from the buffer content"
+    assert {:ok, "draft_name\n"} = ProjectView.read_file(view, "lib/drafted.ex")
+    assert Buffer.content(buffer) == "old_name\n"
+  end
+
+  test "without staging, open-buffer edits change the live buffer directly", %{project: project} do
+    path = write!(Path.join(project, "lib/open.ex"), "old_name\n")
+    buffer = start_supervised!({BufferProcess, file_path: path, content: "old_name\n"})
+    {:ok, direct} = ProjectView.direct(project)
+    on_exit(fn -> ProjectView.close(direct) end)
+    context = ToolContext.new(project_root: project, project_view: direct)
+
+    assert {1, 1, []} = apply_edit(context, [path])
+
+    assert Buffer.content(buffer) == "new_name\n"
+    assert {:ok, []} = ProjectView.diff(direct)
   end
 
   test "a closed-file edit is staged in an overlay view and reaches disk only when published", %{

@@ -4,7 +4,11 @@ defmodule MingaAgent.Tools.WorkspaceEditApplier do
 
   Language-server URIs are untrusted, because the server is influenced by the project it indexes. Before anything is applied, every document path is resolved through `MingaAgent.Changeset.PublicationTarget.relative_path/3`, which follows every symlink and requires the result to stay inside the project root. If any document fails that check, the whole workspace edit is refused and no file is changed: a rename or code action applied to only part of its files leaves the project inconsistent, which is worse than not applying it.
 
-  Open files are changed through their buffer process, because the language server computed the edit positions against that buffer's synchronized content. Files without an open buffer are changed through the session's `MingaAgent.ProjectView`, the same owner that the other agent file tools use, so the edit is staged when the view stages changes. The language server computed those positions against the file on disk, so the edit is committed only while the view's content still matches the disk content.
+  Every edit is checked against the content the language server computed it from. For an open file that is the buffer's synchronized content; for a file without an open buffer it is the file on disk.
+
+  When the session's `MingaAgent.ProjectView` stages changes (an overlay view), every edit goes through that view, the same owner that the other agent file tools use. An open file's edit lands in the session's buffer fork and is published or discarded with the agent's other edits; the live buffer does not change until publication. The view commits the edit only while its staged copy still equals the server's baseline, so a staged draft the server has not seen refuses the file as stale.
+
+  When the session does not stage, open files are changed through their buffer process directly, and files without an open buffer go through the session's view, which writes them.
 
   Versioned edits are rejected when the current document version cannot be verified. The result retains successful file and edit counts together with every file-level error so callers can report partial application accurately.
   """
@@ -23,11 +27,15 @@ defmodule MingaAgent.Tools.WorkspaceEditApplier do
   @type result :: {non_neg_integer(), non_neg_integer(), [String.t()]}
 
   @typep contained :: {WorkspaceEdit.Document.t(), {String.t(), String.t()}}
+  @typep open_buffer_route :: :staged_view | :live_buffer
   @typep target :: %{
            project_view: ProjectView.t() | nil,
+           open_buffer_route: open_buffer_route(),
            relative_path: String.t(),
            real_path: String.t()
          }
+  # The content the language server computed the edit positions against.
+  @typep baseline :: {:disk, String.t()} | {:live_buffer, binary()}
 
   @file_system {SystemFileSystem, []}
 
@@ -59,13 +67,34 @@ defmodule MingaAgent.Tools.WorkspaceEditApplier do
           ProjectView.t() | nil
         ) :: result()
   defp apply_contained(contained, client, encoding, project_view) do
+    open_buffer_route = open_buffer_route(project_view)
+
     {file_count, edit_count, errors} =
       Enum.reduce(contained, {0, 0, []}, fn {document, {relative_path, real_path}}, counts ->
-        target = %{project_view: project_view, relative_path: relative_path, real_path: real_path}
+        target = %{
+          project_view: project_view,
+          open_buffer_route: open_buffer_route,
+          relative_path: relative_path,
+          real_path: real_path
+        }
+
         accumulate_file_edit(document, target, client, encoding, counts)
       end)
 
     {file_count, edit_count, Enum.reverse(errors)}
+  end
+
+  # A staging view owns every agent edit, including edits to open files, so the
+  # edit is reviewed and published with the rest. Without staging, the live
+  # buffer is the only writer for an open file.
+  @spec open_buffer_route(ProjectView.t() | nil) :: open_buffer_route()
+  defp open_buffer_route(nil), do: :live_buffer
+
+  defp open_buffer_route(%ProjectView{} = view) do
+    case ProjectView.capabilities(view) do
+      %{isolation: :overlay} -> :staged_view
+      %{isolation: :none} -> :live_buffer
+    end
   end
 
   # ── Containment ────────────────────────────────────────────────────────────
@@ -149,10 +178,36 @@ defmodule MingaAgent.Tools.WorkspaceEditApplier do
           pid(),
           Minga.LSP.PositionEncoding.encoding()
         ) :: :ok | {:error, String.t()}
-  defp apply_edits_to_file(document, target, client, encoding) do
+  defp apply_edits_to_file(
+         document,
+         %{open_buffer_route: :live_buffer} = target,
+         client,
+         encoding
+       ) do
     case apply_edits_to_open_buffer(document, client, encoding) do
-      :closed -> apply_edits_via_project_view(document, target, encoding)
-      result -> result
+      :closed ->
+        apply_edits_via_project_view(document, target, {:disk, target.real_path}, encoding)
+
+      result ->
+        result
+    end
+  end
+
+  defp apply_edits_to_file(
+         document,
+         %{open_buffer_route: :staged_view} = target,
+         client,
+         encoding
+       ) do
+    case live_buffer_baseline(document, client) do
+      {:ok, content} ->
+        apply_edits_via_project_view(document, target, {:live_buffer, content}, encoding)
+
+      :closed ->
+        apply_edits_via_project_view(document, target, {:disk, target.real_path}, encoding)
+
+      {:error, _reason} = error ->
+        error
     end
   end
 
@@ -173,6 +228,30 @@ defmodule MingaAgent.Tools.WorkspaceEditApplier do
           :ok
         else
           {:error, :read_only} -> {:error, "buffer is read-only"}
+          {:error, reason} -> {:error, inspect(reason)}
+        end
+
+      :not_found ->
+        :closed
+    end
+  rescue
+    error -> {:error, Exception.message(error)}
+  catch
+    :exit, _reason -> :closed
+  end
+
+  # Reads the content the language server saw for an open file without changing
+  # the buffer. A buffer that is missing or exits during the read counts as
+  # closed, so the caller uses the disk baseline instead.
+  @spec live_buffer_baseline(WorkspaceEdit.Document.t(), pid()) ::
+          {:ok, binary()} | {:error, String.t()} | :closed
+  defp live_buffer_baseline(document, client) do
+    case Buffer.pid_for_path(document.path) do
+      {:ok, pid} ->
+        {content, revision} = Buffer.content_with_version(pid)
+
+        case validate_version(document, client, pid, revision) do
+          :ok -> {:ok, content}
           {:error, reason} -> {:error, inspect(reason)}
         end
 
@@ -206,27 +285,36 @@ defmodule MingaAgent.Tools.WorkspaceEditApplier do
     :exit, _reason -> {:error, "cannot verify document version for a closed file"}
   end
 
+  # The live-buffer baseline has already passed the document version check
+  # against its buffer; a disk baseline has no version to check.
   @spec apply_edits_via_project_view(
           WorkspaceEdit.Document.t(),
           target(),
+          baseline(),
           Minga.LSP.PositionEncoding.encoding()
         ) :: :ok | {:error, String.t()}
-  defp apply_edits_via_project_view(%WorkspaceEdit.Document{version: version}, _target, _encoding)
+  defp apply_edits_via_project_view(
+         %WorkspaceEdit.Document{version: version},
+         _target,
+         {:disk, _path},
+         _encoding
+       )
        when is_integer(version),
        do: {:error, "cannot verify document version for a closed file"}
 
-  defp apply_edits_via_project_view(_document, %{project_view: nil}, _encoding),
+  defp apply_edits_via_project_view(_document, %{project_view: nil}, {:disk, _path}, _encoding),
     do: {:error, "no editable project view for a closed file"}
 
   defp apply_edits_via_project_view(
          document,
-         %{project_view: view, relative_path: path, real_path: real_path},
+         %{project_view: %ProjectView{} = view, relative_path: path},
+         baseline,
          encoding
        ) do
-    with {:ok, disk_content} <- read_server_baseline(real_path),
-         {:ok, new_content} <- apply_text_edits(disk_content, document.edits, encoding),
-         {:ok, expected} <- view_revision(view, path, disk_content) do
-      mutate_view(view, path, expected, new_content)
+    with {:ok, server_content} <- read_server_baseline(baseline),
+         {:ok, new_content} <- apply_text_edits(server_content, document.edits, encoding),
+         {:ok, expected} <- view_revision(view, path, server_content) do
+      mutate_view(view, path, expected, new_content, baseline)
     end
   rescue
     error -> {:error, Exception.message(error)}
@@ -234,10 +322,12 @@ defmodule MingaAgent.Tools.WorkspaceEditApplier do
     :exit, reason -> {:error, "project view unavailable: #{inspect(reason)}"}
   end
 
-  # The language server computed closed-file positions against the disk content.
-  # Read the real path that containment checked, never the server's raw path.
-  @spec read_server_baseline(String.t()) :: {:ok, binary()} | {:error, String.t()}
-  defp read_server_baseline(path) do
+  # A disk baseline reads the real path that containment checked, never the
+  # server's raw path.
+  @spec read_server_baseline(baseline()) :: {:ok, binary()} | {:error, String.t()}
+  defp read_server_baseline({:live_buffer, content}), do: {:ok, content}
+
+  defp read_server_baseline({:disk, path}) do
     case File.read(path) do
       {:ok, content} -> {:ok, content}
       {:error, reason} -> {:error, "could not read: #{file_error(reason)}"}
@@ -253,35 +343,38 @@ defmodule MingaAgent.Tools.WorkspaceEditApplier do
     end
   end
 
-  # The revision binds the mutation to the disk content, so a view whose content
-  # differs, such as a staged draft the server has not seen, refuses it as stale.
+  # The revision binds the mutation to the server's baseline, so a view whose
+  # content differs, such as a staged draft the server has not seen, refuses it
+  # as stale.
   @spec view_revision(ProjectView.t(), String.t(), binary()) ::
           {:ok, String.t()} | {:error, String.t()}
-  defp view_revision(view, path, disk_content) do
+  defp view_revision(view, path, server_content) do
     case ProjectView.resolve_source(view, path) do
       {:ok, source} ->
-        {:ok, FileMutation.revision(disk_content, nil, {:project_view, source.source_id})}
+        {:ok, FileMutation.revision(server_content, nil, {:project_view, source.source_id})}
 
       {:error, reason} ->
         {:error, "project view unavailable: #{inspect(reason)}"}
     end
   end
 
-  @spec mutate_view(ProjectView.t(), String.t(), String.t(), String.t()) ::
+  @spec mutate_view(ProjectView.t(), String.t(), String.t(), String.t(), baseline()) ::
           :ok | {:error, String.t()}
-  defp mutate_view(view, path, expected, new_content) do
+  defp mutate_view(view, path, expected, new_content, baseline) do
     case ProjectView.conditional_mutate(view, path, expected, {:replace, new_content}) do
-      {:ok, _receipt} ->
-        :ok
-
-      {:error, :stale_revision} ->
-        {:error,
-         "the agent's view of this file differs from the disk content the language server used"}
-
-      {:error, reason} ->
-        {:error, "could not write: #{inspect(reason)}"}
+      {:ok, _receipt} -> :ok
+      {:error, :stale_revision} -> {:error, stale_message(baseline)}
+      {:error, reason} -> {:error, "could not write: #{inspect(reason)}"}
     end
   end
+
+  @spec stale_message(baseline()) :: String.t()
+  defp stale_message({:disk, _path}),
+    do: "the agent's view of this file differs from the disk content the language server used"
+
+  defp stale_message({:live_buffer, _content}),
+    do:
+      "the agent's staged copy of this open file differs from the buffer content the language server used"
 
   @spec file_error(File.posix()) :: String.t()
   defp file_error(reason), do: reason |> :file.format_error() |> IO.chardata_to_string()
