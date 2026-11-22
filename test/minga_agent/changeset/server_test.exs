@@ -601,6 +601,116 @@ defmodule MingaAgent.Changeset.ServerTest do
     end
   end
 
+  describe "merge through symlinks" do
+    setup %{project: project} do
+      outside = project <> "-outside"
+      File.mkdir_p!(outside)
+      File.write!(Path.join(outside, "existing.txt"), "outside content")
+      on_exit(fn -> File.rm_rf!(outside) end)
+      %{outside: outside}
+    end
+
+    test "refuses writes through a directory symlink that leaves the project", %{
+      project: project,
+      outside: outside
+    } do
+      File.ln_s!(outside, Path.join(project, "out"))
+      server = start_server(project)
+
+      assert :ok = Changeset.write_file(server, "out/existing.txt", "agent version")
+      assert :ok = Changeset.write_file(server, "out/new.txt", "agent file")
+      assert :ok = Changeset.write_file(server, "hello.txt", "agent hello")
+
+      assert {:conflict, %{conflicts: conflicts}} = Changeset.merge(server)
+
+      assert Enum.sort(conflicts) == [
+               {:error, "out/existing.txt", :outside_project_root},
+               {:error, "out/new.txt", :outside_project_root}
+             ]
+
+      assert File.read!(Path.join(outside, "existing.txt")) == "outside content"
+      refute File.exists?(Path.join(outside, "new.txt"))
+      assert File.read!(Path.join(project, "hello.txt")) == "agent hello"
+      assert %{modified: ["out/existing.txt", "out/new.txt"]} = Changeset.modified_files(server)
+    end
+
+    test "refuses a final-component symlink that leaves the project", %{
+      project: project,
+      outside: outside
+    } do
+      File.ln_s!(Path.join(outside, "existing.txt"), Path.join(project, "link.txt"))
+      server = start_server(project)
+
+      assert :ok = Changeset.write_file(server, "link.txt", "agent version")
+
+      assert {:conflict, %{conflicts: [{:error, "link.txt", :outside_project_root}]}} =
+               Changeset.preflight_merge(server)
+
+      assert {:conflict, %{conflicts: [{:error, "link.txt", :outside_project_root}]}} =
+               Changeset.merge(server)
+
+      assert File.read!(Path.join(outside, "existing.txt")) == "outside content"
+      assert {:ok, %File.Stat{type: :symlink}} = File.lstat(Path.join(project, "link.txt"))
+    end
+
+    test "refuses a dangling symlink whose target is outside the project", %{
+      project: project,
+      outside: outside
+    } do
+      File.ln_s!(Path.join(outside, "missing.txt"), Path.join(project, "dangling.txt"))
+      server = start_server(project)
+
+      assert :ok = Changeset.write_file(server, "dangling.txt", "agent version")
+
+      assert {:conflict, %{conflicts: [{:error, "dangling.txt", :outside_project_root}]}} =
+               Changeset.merge(server)
+
+      refute File.exists?(Path.join(outside, "missing.txt"))
+    end
+
+    test "refuses to delete through a directory symlink that leaves the project", %{
+      project: project,
+      outside: outside
+    } do
+      File.ln_s!(outside, Path.join(project, "out"))
+      server = start_server(project)
+
+      assert {:error, :outside_project_root} = Changeset.delete_file(server, "out/existing.txt")
+      assert :ok = Changeset.merge(server)
+      assert File.read!(Path.join(outside, "existing.txt")) == "outside content"
+    end
+
+    test "publishes through symlinks that stay inside the project", %{project: project} do
+      File.ln_s!(Path.join(project, "lib"), Path.join(project, "alias"))
+      File.ln_s!("hello.txt", Path.join(project, "hello_link.txt"))
+      File.ln_s!("lib/later.ex", Path.join(project, "dangling_inside.ex"))
+      server = start_server(project)
+
+      assert :ok = Changeset.write_file(server, "alias/foo.ex", "aliased foo")
+      assert :ok = Changeset.write_file(server, "alias/created.ex", "created")
+      assert :ok = Changeset.write_file(server, "hello_link.txt", "linked hello")
+      assert :ok = Changeset.write_file(server, "dangling_inside.ex", "later")
+      assert :ok = Changeset.merge(server)
+
+      assert File.read!(Path.join(project, "lib/foo.ex")) == "aliased foo"
+      assert File.read!(Path.join(project, "lib/created.ex")) == "created"
+      assert File.read!(Path.join(project, "hello.txt")) == "linked hello"
+      assert File.read!(Path.join(project, "lib/later.ex")) == "later"
+      assert {:ok, %File.Stat{type: :symlink}} = File.lstat(Path.join(project, "hello_link.txt"))
+    end
+
+    test "deleting an in-project symlink removes the link, not its target", %{project: project} do
+      File.ln_s!("hello.txt", Path.join(project, "hello_link.txt"))
+      server = start_server(project)
+
+      assert :ok = Changeset.delete_file(server, "hello_link.txt")
+      assert :ok = Changeset.merge(server)
+
+      assert {:error, :enoent} = File.lstat(Path.join(project, "hello_link.txt"))
+      assert File.read!(Path.join(project, "hello.txt")) == "original content"
+    end
+  end
+
   describe "preflight_merge" do
     test "returns a clean preview without touching the real project", %{project: project} do
       server = start_server(project)

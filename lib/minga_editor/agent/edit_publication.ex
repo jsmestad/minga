@@ -384,7 +384,7 @@ defmodule MingaEditor.Agent.EditPublication do
           handoff()
         ) :: EditorState.t()
   defp install_publish_result(
-         {:ok, %Workspace{review: %WorkspaceReview{state: :conflict}} = conflicted},
+         {:ok, %Workspace{review: %WorkspaceReview{state: :conflict} = review} = conflicted},
          state,
          tb,
          workspace,
@@ -395,9 +395,7 @@ defmodule MingaEditor.Agent.EditPublication do
 
     state
     |> install_workspace(tb, conflicted)
-    |> NoticeWorkflow.publish(
-      "Some agent edits conflict with newer changes on disk; they stay staged for review"
-    )
+    |> NoticeWorkflow.publish(conflict_notice(outside_root_paths(review.last_error)))
   end
 
   defp install_publish_result({:ok, published}, state, tb, workspace, count, handoff) do
@@ -424,6 +422,21 @@ defmodule MingaEditor.Agent.EditPublication do
     abandon_handoff(workspace, handoff)
     NoticeWorkflow.publish(state, "Publishing agent edits failed: #{inspect(reason)}")
   end
+
+  @spec conflict_notice([String.t()]) :: String.t()
+  defp conflict_notice([]),
+    do: "Some agent edits conflict with newer changes on disk; they stay staged for review"
+
+  defp conflict_notice(paths) do
+    "Refused to publish agent edits to #{Enum.join(paths, ", ")}: the path leads outside the project root through a symlink. Those edits, and any conflicting ones, stay staged for review"
+  end
+
+  @spec outside_root_paths(term()) :: [String.t()]
+  defp outside_root_paths(%{conflicts: conflicts}) when is_list(conflicts) do
+    for {:error, path, :outside_project_root} <- conflicts, is_binary(path), do: path
+  end
+
+  defp outside_root_paths(_details), do: []
 
   # Publication merged each open buffer and wrote the same text to disk. The
   # buffer owner clears its modified flag only when disk and buffer match.

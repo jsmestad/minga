@@ -25,6 +25,28 @@ defmodule MingaAgent.ProjectViewTest do
     end
   end
 
+  describe "promote through symlinks" do
+    test "refuses a staged edit whose directory symlink leaves the project", %{tmp_dir: dir} do
+      project = Path.join(dir, "project")
+      outside = Path.join(dir, "outside")
+      seed_project(project)
+      File.mkdir_p!(outside)
+      File.write!(Path.join(outside, "secret.txt"), "outside\n")
+      File.ln_s!(outside, Path.join(project, "vendor"))
+      {:ok, view} = ProjectView.overlay(project)
+
+      :ok = ProjectView.write_file(view, "vendor/secret.txt", "agent\n")
+      :ok = ProjectView.write_file(view, "lib/a.txt", "agent\n")
+
+      assert {:conflict, %{conflicts: [{:error, "vendor/secret.txt", :outside_project_root}]}} =
+               ProjectView.promote(view, :project_root)
+
+      assert File.read!(Path.join(outside, "secret.txt")) == "outside\n"
+      assert File.read!(Path.join(project, "lib/a.txt")) == "agent\n"
+      assert :ok = ProjectView.discard(view)
+    end
+  end
+
   describe "active?/1" do
     test "reports an overlay inactive after a promote stops its changeset", %{tmp_dir: dir} do
       seed_project(dir)
