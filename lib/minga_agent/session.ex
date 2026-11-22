@@ -374,7 +374,8 @@ defmodule MingaAgent.Session do
   @type editor_arrival :: {editor_snapshot(), editor_arrival_transcript()}
   @type editor_arrival_transcript ::
           {:unchanged, Transcript.Cursor.t()}
-          | {:replace, :changed | :reset, Transcript.Snapshot.t(), non_neg_integer(),
+          | {:changes, Transcript.Changes.t()}
+          | {:replace, :changed | :reset, Transcript.Snapshot.t(),
              %{String.t() => pos_integer()} | nil}
 
   @doc "Returns a snapshot of session state for the editor to rebuild AgentState."
@@ -6148,19 +6149,18 @@ defmodule MingaAgent.Session do
       {:changes, %Transcript.Changes{entries: [], pin_changes: [], cursor: cursor}} ->
         {:unchanged, cursor}
 
-      {:changes, %Transcript.Changes{entries: entries}} ->
-        {:snapshot, snapshot} = Transcript.since(transcript, :snapshot)
-        {:replace, :changed, snapshot, length(entries), nil}
+      {:changes, %Transcript.Changes{} = changes} ->
+        {:changes, changes}
 
       {:snapshot, snapshot} ->
-        {:replace, :changed, snapshot, 0, FileChange.changed_file_counts(files)}
+        {:replace, :changed, snapshot, FileChange.changed_file_counts(files)}
 
       {:reset, _reason, snapshot} ->
-        {:replace, :reset, snapshot, 0, FileChange.changed_file_counts(files)}
+        {:replace, :reset, snapshot, FileChange.changed_file_counts(files)}
 
       {:error, :invalid_cursor} ->
         {:snapshot, snapshot} = Transcript.since(transcript, :snapshot)
-        {:replace, :reset, snapshot, 0, nil}
+        {:replace, :reset, snapshot, nil}
     end
   end
 

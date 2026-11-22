@@ -82,7 +82,10 @@ defmodule MingaEditor.Agent.FocusedEventWorkflowsTest do
 
     state = StreamEventWorkflow.batch(state, [{:text_delta, "Live streamed answer"}])
 
-    assert state.workspace.agent_ui.panel.transcript.messages != []
+    assert {:assistant, "Live streamed answer"} in Minga.Test.TranscriptFixture.messages(
+             state.workspace.agent_ui.panel.transcript
+           )
+
     assert state.workspace.agent_ui.panel.transcript.version == 1
     assert RenderCorrelation.scheduled?(state.render.render_correlation)
   end
@@ -393,7 +396,10 @@ defmodule MingaEditor.Agent.FocusedEventWorkflowsTest do
 
     assert state.workspace.agent_ui.panel.credentials_configured
     assert state.workspace.agent_ui.panel.transcript.version == panel.transcript.version
-    assert state.workspace.agent_ui.panel.transcript.messages == panel.transcript.messages
+
+    assert Minga.Test.TranscriptFixture.messages(state.workspace.agent_ui.panel.transcript) ==
+             Minga.Test.TranscriptFixture.messages(panel.transcript)
+
     assert RenderCorrelation.scheduled?(state.render.render_correlation)
   end
 
@@ -427,7 +433,7 @@ defmodule MingaEditor.Agent.FocusedEventWorkflowsTest do
 
     assert state.workspace.agent_ui.panel.input_focused
     assert RenderCorrelation.scheduled?(state.render.render_correlation)
-    assert state.workspace.agent_ui.panel.transcript.messages != []
+    assert Minga.Test.TranscriptFixture.messages(state.workspace.agent_ui.panel.transcript) != []
   end
 
   test "every approval retirement releases waiting presentation and synchronizes the transcript" do
@@ -474,7 +480,10 @@ defmodule MingaEditor.Agent.FocusedEventWorkflowsTest do
       agent = TraditionalState.agent(resolved.shell_runtime.state)
       assert agent.pending_approval == nil
       assert AgentState.display_status(agent) == :idle
-      assert resolved.workspace.agent_ui.panel.transcript.messages != []
+
+      assert Minga.Test.TranscriptFixture.messages(resolved.workspace.agent_ui.panel.transcript) !=
+               []
+
       assert RenderCorrelation.scheduled?(resolved.render.render_correlation)
       assert resolved.workspace.agent_ui.panel.prompt_buffer == prompt
 

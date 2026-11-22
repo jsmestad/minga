@@ -18,7 +18,6 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
   alias MingaEditor.Agent.View.PromptFrame
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.State.TabBar
-  alias MingaEditor.UI.Theme
   alias Minga.RenderModel.UI.AgentChat
   alias Minga.RenderModel.UI.AgentChat.ApprovalView
   alias Minga.RenderModel.UI.AgentChat.PromptCompletion
@@ -43,11 +42,17 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
   end
 
   @spec build_visible(Context.t(), UIState.chat_lifecycle()) :: AgentChat.t()
-  defp build_visible(%Context{prompt: nil}, _lifecycle) do
+  defp build_visible(%Context{prompt: nil} = ctx, _lifecycle) do
+    shell_agent = TraditionalState.agent(ctx.intent.frame.shell_state)
+    {messages, truncated?, epoch} = resident_transcript(ctx, shell_agent, nil)
+
     %AgentChat{
       visible?: true,
       lifecycle: {:failed, "composer unavailable"},
-      prompt_visible_rows: 0
+      prompt_visible_rows: 0,
+      resident_messages: messages,
+      resident_truncated?: truncated?,
+      transcript_epoch: epoch
     }
   end
 
@@ -95,22 +100,34 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
 
   @spec resident_transcript(Context.t(), MingaEditor.State.Agent.t(), pid() | nil) ::
           {[AgentChat.message()], boolean(), non_neg_integer()}
-  defp resident_transcript(_ctx, _agent, nil), do: {[], false, 0}
+  defp resident_transcript(
+         %Context{workspace: %{agent_ui: %{panel: %Panel{transcript: %{generation: nil}}}}},
+         _agent,
+         nil
+       ),
+       do: {[], false, 0}
 
   defp resident_transcript(ctx, agent, session) do
     agent_ui = ctx.workspace.agent_ui
     panel = agent_ui.panel
-    styled = resolve_styled_cache(panel, ctx.intent.frame.theme)
     approval = pending_approval(agent.pending_approval, session)
-    retained = retained_scope(agent_ui.connection, ctx.intent.frame.shell_state, session)
+
+    retained =
+      retained_scope(
+        agent_ui.connection,
+        ctx.intent.frame.shell_state,
+        session,
+        panel.transcript.generation
+      )
 
     {messages, truncated?} =
-      panel.transcript.message_pairs
-      |> build_gui_messages(styled, approval, retained)
+      panel.transcript
+      |> TranscriptProjection.presentation()
+      |> build_gui_messages(approval, retained)
       |> append_resident_transcript_enrichments(SemanticUIRegistry.default_table())
       |> select_resident_messages()
 
-    {messages, truncated?, TranscriptProjection.presentation_epoch(panel.transcript, session)}
+    {messages, truncated?, TranscriptProjection.presentation_epoch(panel.transcript)}
   end
 
   @spec chat_presentation(UIState.chat_lifecycle()) :: {AgentChat.lifecycle(), pid() | nil}
@@ -172,16 +189,22 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
 
   defp queue_target(_target, _save, _session), do: nil
 
-  @spec retained_scope(term(), TraditionalState.t(), pid() | nil) ::
+  @spec retained_scope(term(), TraditionalState.t(), pid() | nil, reference() | nil) ::
           RetainedOutputTarget.scope() | nil
-  defp retained_scope(%{target: %{session: session, epoch: epoch}}, shell_state, session) do
+  defp retained_scope(
+         %{target: %{session: session, epoch: epoch}},
+         shell_state,
+         session,
+         generation
+       )
+       when is_pid(session) and is_reference(generation) do
     case TraditionalState.tab_bar(shell_state) do
-      %TabBar{} = tabs -> {TabBar.active_workspace_id(tabs), epoch}
+      %TabBar{} = tabs -> {TabBar.active_workspace_id(tabs), epoch, generation}
       nil -> nil
     end
   end
 
-  defp retained_scope(_connection, _shell_state, _session), do: nil
+  defp retained_scope(_connection, _shell_state, _session, _generation), do: nil
 
   @doc false
   @spec select_resident_messages([AgentChat.message()], pos_integer()) ::
@@ -216,18 +239,6 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
 
   defp build_prompt_completion(_panel), do: nil
 
-  @spec resolve_styled_cache(MingaEditor.Agent.UIState.Panel.t(), Theme.t() | nil) ::
-          [term()] | nil
-  defp resolve_styled_cache(panel, theme) do
-    case TranscriptProjection.styled_for(
-           panel.transcript,
-           TranscriptProjection.styled_cache_fingerprint(theme)
-         ) do
-      {:ok, styled} -> styled
-      :stale -> nil
-    end
-  end
-
   # The resident transcript is never windowed, so its enrichments always sit at
   # the true end (independent of scroll pin state).
   @spec append_resident_transcript_enrichments(
@@ -240,78 +251,46 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
 
   # A tool ID can recur; a pending target decorates only its latest transcript occurrence.
   @spec build_gui_messages(
-          [{pos_integer(), term()}],
-          [term()] | nil,
+          [TranscriptProjection.Index.item()],
           approval() | nil,
           RetainedOutputTarget.scope() | nil
-        ) :: [{pos_integer(), term()}]
-  defp build_gui_messages(messages_with_ids, nil, nil, scope) do
-    Enum.map(messages_with_ids, &to_core_message(&1, scope))
+        ) ::
+          [{pos_integer(), term()}]
+  defp build_gui_messages(items, nil, scope) do
+    Enum.map(items, fn item -> item |> maybe_style_message(nil) |> to_core_message(scope) end)
   end
 
-  defp build_gui_messages(messages_with_ids, nil, %PublicApproval{} = pending_approval, scope) do
+  defp build_gui_messages(items, %PublicApproval{} = pending_approval, scope) do
     {messages, _remaining} =
       :lists.mapfoldr(
-        fn message, approval ->
-          projected = message |> maybe_inline_approval(approval) |> to_core_message(scope)
-          {projected, remaining_approval(message, approval)}
-        end,
-        pending_approval,
-        messages_with_ids
-      )
-
-    messages
-  end
-
-  defp build_gui_messages(messages_with_ids, styled_cache, nil, scope)
-       when is_list(styled_cache) do
-    padded = pad_cache(styled_cache, length(messages_with_ids))
-
-    Enum.zip_with(messages_with_ids, padded, fn message, style ->
-      {message, style} |> maybe_style_message(nil) |> to_core_message(scope)
-    end)
-  end
-
-  defp build_gui_messages(
-         messages_with_ids,
-         styled_cache,
-         %PublicApproval{} = pending_approval,
-         scope
-       )
-       when is_list(styled_cache) do
-    padded = pad_cache(styled_cache, length(messages_with_ids))
-    entries = Enum.zip(messages_with_ids, padded)
-
-    {messages, _remaining} =
-      :lists.mapfoldr(
-        fn {message, _cache_entry} = entry, approval ->
+        fn entry, approval ->
           projected = entry |> maybe_style_message(approval) |> to_core_message(scope)
-          {projected, remaining_approval(message, approval)}
+          {projected, remaining_approval(entry, approval)}
         end,
         pending_approval,
-        entries
+        items
       )
 
     messages
   end
 
-  @spec maybe_style_message({{pos_integer(), term()}, term()}, approval() | nil) ::
+  @spec maybe_style_message(TranscriptProjection.Index.item(), approval() | nil) ::
           {pos_integer(), term()}
   defp maybe_style_message(
-         {{id, {:assistant, _text}}, {:markdown_blocks, blocks}},
+         {id, {:assistant, _text}, {:markdown_blocks, blocks}},
          _pending_approval
        ) do
     {id, {:assistant_markdown, blocks}}
   end
 
   defp maybe_style_message(
-         {{id, {:assistant, _text}}, {:styled_lines, styled_lines}},
+         {id, {:assistant, _text}, {:styled_lines, styled_lines}},
          _pending_approval
        ) do
     {id, {:styled_assistant, styled_lines}}
   end
 
-  defp maybe_style_message({{id, {:tool_call, tc} = msg}, cache_entry}, pending_approval) do
+  defp maybe_style_message({id, {:tool_call, tc} = msg, cache_entry}, pending_approval) do
     case maybe_inline_approval({id, msg}, pending_approval) do
       {^id, {:approval_tool_call, _tc, _approval}} = approval_message ->
         approval_message
@@ -324,7 +303,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
     end
   end
 
-  defp maybe_style_message({{id, msg}, _cache_entry}, _pending_approval), do: {id, msg}
+  defp maybe_style_message({id, msg, _cache_entry}, _pending_approval), do: {id, msg}
 
   @spec maybe_styled_tool_call(pos_integer(), ToolCall.t(), term(), term()) ::
           {pos_integer(), term()}
@@ -334,9 +313,10 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
 
   defp maybe_styled_tool_call(id, _tc, _cache_entry, fallback), do: {id, fallback}
 
-  @spec remaining_approval({pos_integer(), term()}, approval() | nil) :: approval() | nil
+  @spec remaining_approval(TranscriptProjection.Index.item(), approval() | nil) ::
+          approval() | nil
   defp remaining_approval(
-         {_id, {:tool_call, %ToolCall{id: tool_call_id}}},
+         {_id, {:tool_call, %ToolCall{id: tool_call_id}}, _style},
          %PublicApproval{target: %ApprovalTarget{tool_call_id: tool_call_id}}
        ),
        do: nil
@@ -354,15 +334,6 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
   end
 
   defp maybe_inline_approval({id, msg}, _pending_approval), do: {id, msg}
-
-  @spec pad_cache([term()], non_neg_integer()) :: [term()]
-  defp pad_cache(cache, target_len) do
-    if Enum.count(cache) >= target_len do
-      cache
-    else
-      cache ++ List.duplicate(nil, target_len - Enum.count(cache))
-    end
-  end
 
   # ── Agent-struct → core-view conversion ──
   #

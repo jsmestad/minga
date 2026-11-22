@@ -113,6 +113,7 @@ defmodule MingaEditor.Agent.SessionEventWorkflow do
     |> TraditionalWorkflow.install_agent_ui(
       UIState.project_connection(state.workspace.agent_ui, connection)
     )
+    |> AgentLifecycle.restyle_transcript()
     |> ConnectionSetup.retire_prompt(connection)
     |> AgentRetainedOutputSource.dismiss_if_stale()
     |> AgentDraftAttachmentSource.dismiss_if_stale()
@@ -159,6 +160,7 @@ defmodule MingaEditor.Agent.SessionEventWorkflow do
     |> TraditionalWorkflow.install_agent_ui(
       UIState.project_credential_readiness(state.workspace.agent_ui, readiness)
     )
+    |> AgentLifecycle.restyle_transcript()
     |> MingaEditor.schedule_render(16)
   end
 

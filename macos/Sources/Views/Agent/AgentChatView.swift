@@ -64,11 +64,10 @@ public struct AgentChatView: View {
             })
             .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { headerHeight = $0 }
 
-            if state.lifecycle == .conversation {
-                AgentConversationList(state: state, sendAction: sendAction)
-            } else {
+            if state.lifecycle != .conversation {
                 lifecycleNotice
             }
+            AgentConversationList(state: state, sendAction: state.lifecycle == .conversation ? sendAction : nil)
 
             if state.lifecycle == .conversation, let question = state.question {
                 HStack(spacing: Spacing.md) {
@@ -132,7 +131,7 @@ public struct AgentChatView: View {
         }
         .fixedSize(horizontal: false, vertical: true)
         .padding(Spacing.lg)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func childAction<ChildAction: Sendable>(_ translate: @escaping @Sendable (ChildAction) -> Action) -> ViewActionHandler<ChildAction>? {
@@ -238,6 +237,7 @@ struct AgentConversationList: View {
                 .overlay(Capsule().strokeBorder(theme.agentCodeBorder.opacity(0.25), lineWidth: 1))
         }
         .buttonStyle(.plain)
+        .disabled(sendAction == nil)
         .frame(maxWidth: .infinity, alignment: .center)
         .accessibilityHint("Earlier session messages are outside the current display.")
     }

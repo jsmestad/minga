@@ -14,8 +14,6 @@ defmodule MingaEditor.Agent.UIState.Panel do
   alias MingaAgent.Config, as: AgentConfig
   alias MingaAgent.ModelSelection
   alias MingaAgent.Credentials
-  alias MingaAgent.Session.Transcript.Cursor
-  alias MingaEditor.Agent.Transcript
   alias Minga.Editing.Scroll
   alias MingaEditor.Agent.UIState.TranscriptProjection
   alias MingaEditor.Agent.PromptViewport
@@ -198,29 +196,18 @@ defmodule MingaEditor.Agent.UIState.Panel do
     %{panel | model_name: model, provider_label: nil}
   end
 
-  @spec cache_transcript_display(
-          t(),
-          Transcript.display_result(),
-          TranscriptProjection.styled_cache(),
-          keyword()
-        ) ::
+  @doc "Installs the new source and its remapped reading position together."
+  @spec install_transcript(t(), TranscriptProjection.t(), :keep | :follow | non_neg_integer()) ::
           t()
-  def cache_transcript_display(
-        %__MODULE__{transcript: projection} = panel,
-        display,
-        styled_messages,
-        opts \\ []
-      ) do
-    %{
-      panel
-      | transcript: TranscriptProjection.cache_display(projection, display, styled_messages, opts)
-    }
-  end
+  def install_transcript(%__MODULE__{} = panel, projection, reading) do
+    scroll =
+      case reading do
+        :keep -> panel.scroll
+        :follow -> Scroll.pin_to_bottom(panel.scroll)
+        offset -> Scroll.set_offset(panel.scroll, offset)
+      end
 
-  @doc "Advances the source revision without replacing the retained transcript display."
-  @spec advance_transcript_cursor(t(), Cursor.t()) :: t()
-  def advance_transcript_cursor(%__MODULE__{transcript: projection} = panel, cursor) do
-    %{panel | transcript: TranscriptProjection.advance_source_cursor(projection, cursor)}
+    %{panel | transcript: projection, scroll: scroll}
   end
 
   @spec clear_transcript_cache(t()) :: t()
@@ -235,21 +222,6 @@ defmodule MingaEditor.Agent.UIState.Panel do
   @spec set_display_start(t(), non_neg_integer()) :: t()
   def set_display_start(%__MODULE__{transcript: projection} = panel, display_start) do
     %{panel | transcript: TranscriptProjection.set_display_start(projection, display_start)}
-  end
-
-  @doc "Replaces cached styled transcript runs without changing the display window."
-  @spec cache_styled_messages(t(), TranscriptProjection.styled_cache(), non_neg_integer() | nil) ::
-          t()
-  def cache_styled_messages(
-        %__MODULE__{transcript: projection} = panel,
-        styled_messages,
-        styled_fingerprint
-      ) do
-    %{
-      panel
-      | transcript:
-          TranscriptProjection.cache_styled(projection, styled_messages, styled_fingerprint)
-    }
   end
 
   @spec stale_unqualified_model?(String.t(), String.t()) :: boolean()

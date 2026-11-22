@@ -9,6 +9,7 @@ defmodule Minga.Bench.TranscriptWorkScenario do
   alias MingaAgent.Event
   alias MingaAgent.EventLog
   alias MingaAgent.Session
+  alias MingaAgent.Session.Transcript
   alias MingaEditor.Shell.Runtime
 
   @tool_id "middle-tool"
@@ -101,12 +102,76 @@ defmodule Minga.Bench.TranscriptWorkScenario do
       {:snapshot, %{pinned_ids: pinned}} = Session.transcript_since(session, :snapshot)
       true = MapSet.member?(pinned, tool_id)
 
+      switch_tab(ctx, file_tab)
+      pin_entire_history(session)
+      switch_tab(ctx, agent_tab)
+
+      append =
+        TranscriptWorkProbe.measure(ctx, session, fn ->
+          emit(request, %Event.ThinkingDelta{delta: "Appended with the whole history pinned"})
+        end)
+
+      assert_work(text, entries, :content)
+      assert_work(tool, entries, :content)
+      assert_work(collapse, entries, :collapse)
+      assert_work(pin, entries, :pin)
+      assert_work(append, entries, :append)
+
+      expected = entries + 1
+
+      {:snapshot, %{count: ^expected, pinned_ids: pinned}} =
+        Session.transcript_since(session, :snapshot)
+
+      ^entries = MapSet.size(pinned)
+
       %{
         retained_entries: entries,
-        operations: %{tail_text: text, middle_tool_result: tool, collapse: collapse, pin: pin}
+        operations: %{
+          tail_text: text,
+          middle_tool_result: tool,
+          collapse: collapse,
+          pin: pin,
+          fully_pinned_append: append
+        }
       }
     after
       GenServer.stop(session, :normal, 30_000)
+    end
+  end
+
+  defp pin_entire_history(session) do
+    :sys.replace_state(session, fn %{transcript: transcript} = state ->
+      {:snapshot, snapshot} = Transcript.since(transcript, :snapshot)
+
+      transcript =
+        Enum.reduce(snapshot.entries, transcript, fn entry, acc ->
+          if MapSet.member?(snapshot.pinned_ids, entry.id),
+            do: acc,
+            else: Transcript.toggle_pin(acc, entry.id)
+        end)
+
+      %{state | transcript: transcript}
+    end)
+  end
+
+  defp assert_work(work, entries, operation) do
+    height = entries |> :math.log2() |> ceil()
+    bound = 2 * (height + 1) + 2
+
+    expected =
+      case operation do
+        :content -> {1, 0, 1, 1}
+        :collapse -> {1, 0, 0, 0}
+        :pin -> {0, 1, 0, 0}
+        :append -> {1, 0, 1, 0}
+      end
+
+    actual = {work.copied_entries, work.pin_facts, work.line_derivations, work.restyled}
+
+    unless work.session_calls == 1 and
+             work.projection_visits <= bound and work.projection_copies <= bound and
+             actual == expected do
+      raise "#{operation} exceeded the transcript work contract at #{entries} entries: #{inspect(work)} (node bound #{bound})"
     end
   end
 

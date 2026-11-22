@@ -10,7 +10,7 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
   use ExUnit.Case, async: true
 
   alias MingaEditor.Agent.Ingest
-  alias MingaEditor.Agent.Transcript
+  alias Minga.Test.TranscriptFixture
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.UIState.Panel
   alias MingaEditor.Agent.UIState.TranscriptProjection
@@ -319,8 +319,11 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
       assert cache.pending_approval == nil
     end
 
-    test "a suspended Session does not block arrival or carry over live controls" do
-      a = start_supervised!({StubServer, []}, id: :outgoing)
+    test "an arrival timeout publishes the incoming conversation without live controls" do
+      a =
+        start_supervised!({StubServer, messages: [{:user, "outgoing conversation A"}]},
+          id: :outgoing
+        )
 
       b =
         start_supervised!({StubServer, messages: [{:user, "retained conversation B"}]}, id: :busy)
@@ -328,6 +331,8 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
       pa = approval_for("session-a", "turn-a", "call-a")
       tabs = [agent_tab(1, "A", a), agent_tab(2, "B", b)]
       state = tabs |> base_state(1) |> connect_arrivals([a, b]) |> arrive(2, b) |> arrive(1, a)
+      baseline = Minga.Test.AgentWorkflowDriver.chat_model(state)
+      refute {1, {:user, "retained conversation B"}} in baseline.resident_messages
 
       state =
         AgentLifecycle.apply_session_snapshot(state, a, %{pending_approval: pa, error: "A only"})
@@ -343,12 +348,24 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
         end
 
       assert_receive {:switch_calls, :unavailable, 1}
-      assert %{lifecycle: :unavailable} = Minga.Test.AgentWorkflowDriver.chat_model(arrived)
+
+      assert %{
+               lifecycle: :unavailable,
+               resident_messages: messages,
+               transcript_epoch: epoch,
+               pending_question: nil,
+               stop_target: nil,
+               queue_target: nil
+             } = Minga.Test.AgentWorkflowDriver.chat_model(arrived)
+
+      assert {1, {:user, "retained conversation B"}} in messages
+      refute {1, {:user, "outgoing conversation A"}} in messages
+      assert epoch != baseline.transcript_epoch
 
       assert %{pending_approval: nil, error: nil} =
                TraditionalState.agent(arrived.shell_runtime.state)
 
-      assert arrived.workspace.agent_ui.panel.transcript.messages == [
+      assert TranscriptFixture.messages(arrived.workspace.agent_ui.panel.transcript) == [
                {:user, "retained conversation B"}
              ]
 
@@ -358,7 +375,9 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
       recovered = handle(pending, fence)
 
       assert_receive {:switch_calls, :unchanged, 2}
-      assert %{lifecycle: :conversation} = Minga.Test.AgentWorkflowDriver.chat_model(recovered)
+
+      assert %{lifecycle: :conversation, transcript_epoch: ^epoch, resident_messages: ^messages} =
+               Minga.Test.AgentWorkflowDriver.chat_model(recovered)
 
       assert recovered.workspace.agent_ui.panel.transcript ===
                arrived.workspace.agent_ui.panel.transcript
@@ -583,7 +602,7 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
     end
 
     for count <- [100, 10_000] do
-      test "local switch reads zero of #{count} unchanged entries and one consistent snapshot on change" do
+      test "local switch reads zero of #{count} unchanged entries and only changes made while away" do
         count = unquote(count)
         session_a = start_session(:session_a)
         session_b = start_session(:session_b)
@@ -618,11 +637,12 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
         assert_receive {:transcript_sync, :unchanged, 0}
         Session.add_system_message(session_b, "B received this while hidden")
         updated = arrive(away, 2, session_b)
-        entries_read = count + 2
-        assert_receive {:transcript_sync, :changed, ^entries_read}
+        assert_receive {:transcript_sync, :changed, 1}
         assert updated.workspace.agent_ui.panel.transcript.source_cursor != valid_cursor
 
-        assert {:system, "B received this while hidden", :info} in updated.workspace.agent_ui.panel.transcript.messages
+        assert {:system, "B received this while hidden", :info} in TranscriptFixture.messages(
+                 updated.workspace.agent_ui.panel.transcript
+               )
       end
     end
 
@@ -642,21 +662,22 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
 
       theme = state.appearance.theme
       theme = %{theme | syntax: Map.put(theme.syntax, :test_theme_marker, true)}
-      state = state |> EditorState.apply_theme(theme) |> AgentLifecycle.sync_transcript()
+      state = state |> EditorState.apply_theme(theme) |> AgentLifecycle.restyle_transcript()
+      refute_received {:transcript_sync, _, _}
+      state = AgentLifecycle.sync_transcript(state)
       assert_receive {:transcript_sync, :unchanged, 0}
       after_touch = state.workspace.agent_ui.panel.transcript
       assert after_touch.source_cursor != original.source_cursor
-      assert after_touch.styled_fingerprint != original.styled_fingerprint
-      assert after_touch.messages == original.messages
+      assert after_touch.syntax == theme.syntax
+      assert TranscriptFixture.messages(after_touch) == TranscriptFixture.messages(original)
 
       invalid = %Cursor{incarnation: nil, generation: 0, revision: 0}
 
       panel =
-        Panel.cache_transcript_display(
+        Panel.install_transcript(
           state.workspace.agent_ui.panel,
-          Transcript.display([]),
-          [],
-          source_cursor: invalid
+          TranscriptProjection.advance_source_cursor(after_touch, invalid),
+          :keep
         )
 
       state =
@@ -665,13 +686,15 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
         |> AgentLifecycle.sync_transcript()
 
       assert_receive {:transcript_sync, :reset, ^count}
-      assert state.workspace.agent_ui.panel.transcript.messages == original.messages
+
+      assert TranscriptFixture.messages(state.workspace.agent_ui.panel.transcript) ==
+               TranscriptFixture.messages(original)
 
       :ok = Session.new_session(session)
       :ok = Session.send_prompt(session, "Only in the replacement conversation")
       replaced = AgentLifecycle.sync_transcript(state)
       assert_receive {:transcript_sync, :reset, _}
-      messages = replaced.workspace.agent_ui.panel.transcript.messages
+      messages = TranscriptFixture.messages(replaced.workspace.agent_ui.panel.transcript)
       assert {:user, "Only in the replacement conversation"} in messages
       refute {:user, "Only in the original conversation"} in messages
 
@@ -727,162 +750,85 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
       state =
         [agent_tab(1, "Agent", pid)]
         |> base_state(1)
-        |> then(fn state ->
-          MingaEditor.Shell.Traditional.Workflow.install_agent_panel(
-            state,
-            (fn panel ->
-               display = Transcript.display([stale_message], message_ids: [{7, stale_message}])
-
-               Panel.cache_transcript_display(panel, display, [nil],
-                 styled_fingerprint: TranscriptProjection.styled_cache_fingerprint(%{})
-               )
-             end).(state.workspace.agent_ui.panel)
-          )
-        end)
+        |> install_fixture(
+          TranscriptFixture.projection([stale_message], message_ids: [{7, stale_message}])
+        )
 
       preserved = AgentLifecycle.sync_transcript(state)
-      panel = preserved.workspace.agent_ui.panel
-
-      assert panel.transcript.line_index == [{0, :text}]
-      assert panel.transcript.messages == [stale_message]
-      assert panel.transcript.message_pairs == [{7, stale_message}]
-      assert panel.transcript.styled == [nil]
+      projection = preserved.workspace.agent_ui.panel.transcript
+      assert TranscriptProjection.line_at(projection, 0) == {7, stale_message, 0, :text}
+      assert TranscriptProjection.visible_pair(projection, 7) == {7, stale_message}
     end
 
-    test "cache_messages clears stale semantic transcript cache when the session has no messages" do
-      stale_state =
-        base_state([Tab.new_agent(1, "Agent")], 1)
-        |> then(fn state ->
-          MingaEditor.Shell.Traditional.Workflow.install_agent_panel(
-            state,
-            (fn panel ->
-               display =
-                 Transcript.display([{:assistant, "stale answer"}],
-                   display_start_index: 3,
-                   message_ids: [{7, {:assistant, "stale answer"}}]
-                 )
+    test "an empty supplied remote transcript clears the prior display" do
+      stale = TranscriptFixture.projection([{:assistant, "stale answer"}], display_start_index: 3)
+      state = base_state([Tab.new_agent(1, "Agent")], 1) |> install_fixture(stale)
+      cleared = AgentLifecycle.cache_messages(state, [])
+      projection = cleared.workspace.agent_ui.panel.transcript
 
-               Panel.cache_transcript_display(
-                 panel,
-                 display,
-                 [{:styled_lines, [[{"stale", 0, 0, 0}]]}],
-                 provenance_jump: MingaEditor.Agent.ProvenanceJump.request(7),
-                 styled_fingerprint: TranscriptProjection.styled_cache_fingerprint(%{})
-               )
-             end).(state.workspace.agent_ui.panel)
-          )
-        end)
-
-      cleared = AgentLifecycle.cache_messages(stale_state, [])
-      panel = cleared.workspace.agent_ui.panel
-
-      assert panel.transcript.line_index == []
-      assert panel.transcript.messages == []
-      assert panel.transcript.message_pairs == []
-      assert panel.transcript.styled == nil
-      assert panel.transcript.display_start == 0
-      assert panel.transcript.provenance_jump == nil
+      assert TranscriptProjection.presentation(projection) == []
+      assert projection.display_start == 0
     end
 
-    test "update_styled_cache reuses unchanged displayed message styles" do
-      message = {:assistant, "unchanged answer"}
-      cached = [{:styled_lines, [[{"cached styled answer", 0x98BE65, 0x21242B, 0x10}]]}]
+    test "an empty live remote attachment publishes setup guidance as credential readiness changes" do
+      session = start_supervised!({StubServer, []})
+      file = Tab.new_file(1, "main.ex")
+      remote = agent_tab(2, "Remote", session)
 
-      {:ok, session} = StubServer.start_link(messages: [message])
-
-      state =
-        [agent_tab(1, "Agent", session)]
-        |> base_state(1)
-
-      fingerprint = TranscriptProjection.styled_cache_fingerprint(state.appearance.theme.syntax)
+      state = [file, remote] |> base_state(1) |> connect_arrivals([session]) |> arrive(2, session)
+      panel = state.workspace.agent_ui.panel
 
       state =
         state
-        |> then(fn state ->
-          MingaEditor.Shell.Traditional.Workflow.install_agent_panel(
-            state,
-            (fn panel ->
-               display = Transcript.display([message])
+        |> MingaEditor.Shell.Traditional.Workflow.install_agent_panel(
+          Panel.set_credential_readiness(panel, :checking)
+        )
+        |> AgentLifecycle.cache_messages([])
 
-               Panel.cache_transcript_display(panel, display, cached,
-                 styled_fingerprint: fingerprint
-               )
-             end).(state.workspace.agent_ui.panel)
-          )
-        end)
+      assert %{lifecycle: :conversation, resident_messages: checking} =
+               Minga.Test.AgentWorkflowDriver.chat_model(state)
 
-      updated = AgentLifecycle.update_styled_cache(state)
+      setup_prompt = "Checking agent credentials and model availability..."
+      assert Enum.any?(checking, &match?({_, {:system, ^setup_prompt, :info}}, &1))
 
-      assert updated.workspace.agent_ui.panel.transcript.styled == cached
+      panel =
+        state.workspace.agent_ui.panel
+        |> Panel.set_model_name("unknown")
+        |> Panel.set_credential_readiness(:unconfigured)
+
+      updated =
+        state
+        |> MingaEditor.Shell.Traditional.Workflow.install_agent_panel(panel)
+        |> AgentLifecycle.restyle_transcript()
+
+      assert %{resident_messages: guidance} = Minga.Test.AgentWorkflowDriver.chat_model(updated)
+      assert Enum.any?(guidance, &match?({_, {:system, "Pick a model" <> _, :info}}, &1))
     end
 
-    test "update_styled_cache invalidates stale styles when the theme syntax changes" do
+    test "restyling a retained answer uses the new palette without reading the Session" do
       message = {:assistant, "plain answer"}
-      cached = [{:styled_lines, [[{"plain answer", 0xBBC2CF, 0, 0}]]}]
+      session = start_supervised!({StubServer, messages: [message]})
+      state = base_state([agent_tab(1, "Agent", session)], 1) |> AgentLifecycle.sync_transcript()
+      theme = state.appearance.theme
+      theme = %{theme | syntax: Map.put(theme.syntax, "variable", fg: 0x123456)}
+      observe_sync()
 
-      {:ok, session} = StubServer.start_link(messages: [message])
+      updated = state |> EditorState.apply_theme(theme) |> AgentLifecycle.restyle_transcript()
 
-      state =
-        [agent_tab(1, "Agent", session)]
-        |> base_state(1)
+      assert [{1, ^message, {:markdown_blocks, [%{lines: [[{"plain answer", 0x123456, 0, 0}]]}]}}] =
+               TranscriptProjection.presentation(updated.workspace.agent_ui.panel.transcript)
 
-      old_theme = state.appearance.theme
-      new_theme = %{old_theme | syntax: Map.put(old_theme.syntax, "variable", fg: 0x123456)}
-      fingerprint = TranscriptProjection.styled_cache_fingerprint(old_theme.syntax)
-
-      state =
-        state
-        |> EditorState.apply_theme(new_theme)
-        |> then(fn state ->
-          MingaEditor.Shell.Traditional.Workflow.install_agent_panel(
-            state,
-            (fn panel ->
-               display = Transcript.display([message])
-
-               Panel.cache_transcript_display(panel, display, cached,
-                 styled_fingerprint: fingerprint
-               )
-             end).(state.workspace.agent_ui.panel)
-          )
-        end)
-
-      updated = AgentLifecycle.update_styled_cache(state)
-
-      assert [{:markdown_blocks, [%{lines: [[{"plain answer", 0x123456, 0, 0}]]}]}] =
-               updated.workspace.agent_ui.panel.transcript.styled
-    end
-
-    test "update_styled_cache restyles unchanged displayed messages when style cache is missing" do
-      message = {:assistant, "unchanged answer"}
-
-      {:ok, session} = StubServer.start_link(messages: [message])
-
-      state =
-        [agent_tab(1, "Agent", session)]
-        |> base_state(1)
-        |> then(fn state ->
-          MingaEditor.Shell.Traditional.Workflow.install_agent_panel(
-            state,
-            (fn panel ->
-               Panel.cache_transcript_display(panel, Transcript.display([message]), nil)
-             end).(state.workspace.agent_ui.panel)
-          )
-        end)
-
-      updated = AgentLifecycle.update_styled_cache(state)
-
-      assert [{:markdown_blocks, [%{kind: :paragraph, lines: [[{"unchanged answer", _, 0, 0}]]}]}] =
-               updated.workspace.agent_ui.panel.transcript.styled
+      refute_received {:transcript_sync, _, _}
     end
 
     test "an empty assistant message keeps its semantic spacer" do
       {:ok, session} = StubServer.start_link(messages: [{:assistant, ""}])
       state = base_state([agent_tab(1, "Agent", session)], 1)
 
-      updated = AgentLifecycle.update_styled_cache(state)
+      updated = AgentLifecycle.sync_transcript(state)
 
-      assert [{:markdown_blocks, [%{kind: :spacer}]}] =
-               updated.workspace.agent_ui.panel.transcript.styled
+      assert [{1, {:assistant, ""}, {:markdown_blocks, [%{kind: :spacer}]}}] =
+               TranscriptProjection.presentation(updated.workspace.agent_ui.panel.transcript)
     end
 
     test "tab workflow orders restored replay modal spinner and incoming session presentation" do
@@ -950,7 +896,7 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
       assert AgentState.status(agent) == :tool_executing
       assert agent.runtime.active_tool_name == "read_file"
 
-      assert switched.workspace.agent_ui.panel.transcript.messages == [
+      assert TranscriptFixture.messages(switched.workspace.agent_ui.panel.transcript) == [
                {:user, "incoming question"},
                {:assistant, "incoming answer"}
              ]
@@ -988,18 +934,7 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
       state =
         tabs
         |> base_state(1)
-        |> then(fn state ->
-          MingaEditor.Shell.Traditional.Workflow.install_agent_panel(
-            state,
-            (fn panel ->
-               Panel.cache_transcript_display(
-                 panel,
-                 Transcript.display([{:assistant, "stale answer"}]),
-                 nil
-               )
-             end).(state.workspace.agent_ui.panel)
-          )
-        end)
+        |> install_fixture(TranscriptFixture.projection([{:assistant, "stale answer"}]))
 
       switched = state |> connect_arrivals([background_session]) |> arrive(2, background_session)
 
@@ -1011,7 +946,7 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
 
       assert {:agent_chat, :semantic} = active_window.content
 
-      assert switched.workspace.agent_ui.panel.transcript.messages == [
+      assert TranscriptFixture.messages(switched.workspace.agent_ui.panel.transcript) == [
                {:user, "inspect background session"},
                {:assistant, "unique background answer"}
              ]
@@ -1019,6 +954,11 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
       assert %{visible?: true, lifecycle: :conversation, prompt: ""} =
                Minga.Test.AgentWorkflowDriver.chat_model(switched)
     end
+  end
+
+  defp install_fixture(state, projection) do
+    panel = Panel.install_transcript(state.workspace.agent_ui.panel, projection, :keep)
+    MingaEditor.Shell.Traditional.Workflow.install_agent_panel(state, panel)
   end
 
   @spec drain_spinner_ticks() :: :ok

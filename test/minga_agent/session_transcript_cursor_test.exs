@@ -77,7 +77,7 @@ defmodule MingaAgent.SessionTranscriptCursorTest do
     assert_receive {:agent_event, ^session,
                     {:editor_arrival_ready, ^arrival,
                      {%{active_tools: [{"arriving", "probe"}]},
-                      {:replace, :changed, %Snapshot{entries: entries}, 1, nil}}}}
+                      {:changes, %Changes{entries: entries}}}}}
 
     assert Enum.any?(entries, &match?(%Entry{message: {:tool_call, %{id: "arriving"}}}, &1))
   end

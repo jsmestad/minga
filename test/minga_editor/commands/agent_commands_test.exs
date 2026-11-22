@@ -19,7 +19,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
   alias Minga.Editing.Scroll
   alias MingaEditor.Agent.CatalogStartup
   alias MingaEditor.Agent.Ingest
-  alias MingaEditor.Agent.Transcript
+  alias Minga.Test.TranscriptFixture
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.UIState.Panel
   alias MingaEditor.Agent.UIState.View
@@ -740,8 +740,8 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
           pinned_ids: MapSet.new([101])
         )
 
-      display =
-        Transcript.display(messages,
+      projection =
+        TranscriptFixture.projection(messages,
           display_start_index: 2,
           message_ids: message_ids,
           pinned_ids: MapSet.new([101])
@@ -755,7 +755,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
             (fn ui ->
                panel =
                  ui.panel
-                 |> Panel.cache_transcript_display(display, nil)
+                 |> Panel.install_transcript(projection, :keep)
                  |> Panel.set_scroll(Scroll.new(6))
 
                %{ui | panel: panel}
@@ -1329,8 +1329,9 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
       assert active_a.workspace.keymap_scope == :agent
       assert active_a.workspace.agent_ui.panel.visible
       assert View.active?(active_a.workspace.agent_ui.view)
-      assert {:assistant, "Focus answer"} in active_a.workspace.agent_ui.panel.transcript.messages
-      refute {:assistant, "Draft answer"} in active_a.workspace.agent_ui.panel.transcript.messages
+      messages = TranscriptFixture.messages(active_a.workspace.agent_ui.panel.transcript)
+      assert {:assistant, "Focus answer"} in messages
+      refute {:assistant, "Draft answer"} in messages
 
       assert WorkspaceState.active_window_struct(active_a.workspace).content ==
                {:agent_chat, :semantic}
@@ -1376,8 +1377,9 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
 
       assert active_b.workspace.agent_ui.panel.visible
       assert View.active?(active_b.workspace.agent_ui.view)
-      assert {:assistant, "Draft answer"} in active_b.workspace.agent_ui.panel.transcript.messages
-      refute {:assistant, "Focus answer"} in active_b.workspace.agent_ui.panel.transcript.messages
+      messages = TranscriptFixture.messages(active_b.workspace.agent_ui.panel.transcript)
+      assert {:assistant, "Draft answer"} in messages
+      refute {:assistant, "Focus answer"} in messages
     end
 
     defp with_catalog_scheduler(state) do
