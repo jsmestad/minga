@@ -1,0 +1,100 @@
+name: Shipping Agent-open timing
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/agent-open-timing.yml'
+      - 'scripts/journey_agent_open.py'
+      - 'scripts/go_tui_capture.py'
+      - 'scripts/go_tui_capture_requirements.txt'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/agent-open-timing.yml'
+      - '.tool-versions'
+      - 'mix.lock'
+      - 'scripts/journey_agent_open.py'
+      - 'scripts/go_tui_capture*'
+      - 'scripts/build-release-erts.py'
+      - 'scripts/release_erts_sources.json'
+      - 'lib/minga_editor/agent/catalog_startup.ex'
+      - 'lib/minga_editor/tab_workflow.ex'
+      - 'lib/minga_editor/commands/agent*.ex'
+      - 'go/tui/internal/ui/agent*.go'
+
+permissions:
+  contents: read
+
+jobs:
+  terminal-agent-open:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    env:
+      MIX_ENV: prod
+      EXQLITE_USE_SYSTEM: ''
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: erlef/setup-beam@v1
+        with:
+          version-file: .tool-versions
+          version-type: strict
+      - name: Read pinned Go, Zig and Python versions
+        id: versions
+        run: |
+          set -euo pipefail
+          {
+            printf 'go=%s\n' "$(awk '$1 == "golang" {print $2}' .tool-versions)"
+            printf 'zig=%s\n' "$(awk '$1 == "zig" {print $2}' .tool-versions)"
+            printf 'python=%s\n' "$(jq -er .build_python_version scripts/release_erts_sources.json)"
+          } >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ steps.versions.outputs.go }}
+          cache-dependency-path: go/tui/go.sum
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ steps.versions.outputs.zig }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ steps.versions.outputs.python }}
+      - name: Set up the release build and terminal parser
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends build-essential binutils perl ca-certificates
+          python -m pip install -r scripts/go_tui_capture_requirements.txt
+          mix deps.get --only prod
+      - uses: actions/cache@v4
+        id: erts
+        with:
+          path: |
+            ${{ runner.temp }}/agent-open-erts/receipt.json
+            ${{ runner.temp }}/agent-open-erts/erts.tar.gz
+          key: agent-open-erts-ubuntu24-x86_64-${{ hashFiles('scripts/build-release-erts.py', 'scripts/release_erts_sources.json') }}
+      - name: Build pinned private ERTS input
+        if: steps.erts.outputs.cache-hit != 'true'
+        run: python scripts/build-release-erts.py --os linux --arch x86_64 --output "$RUNNER_TEMP/agent-open-erts"
+      - name: Assemble a local shipping TUI release without publishing
+        run: |
+          set -euo pipefail
+          mix native.build.tui
+          mix compile --warnings-as-errors
+          MINGA_RELEASE_ERTS_RECEIPT="$RUNNER_TEMP/agent-open-erts/receipt.json" mix release.tui --no-compile
+      - name: Measure cold and warm opens
+        run: |
+          set -euo pipefail
+          output="$RUNNER_TEMP/minga-agent-open-timing"
+          python scripts/journey_agent_open.py \
+            --launcher _build/prod/rel/minga/launchers/minga \
+            --revision "$(git rev-parse HEAD)" --output "$output"
+          jq -r '.timing | to_entries[] | "- \(.key): n=\(.value.samples), p50 \(.value.p50_ms) ms, p95 \(.value.p95_ms) ms"' \
+            "$output/summary.json" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: shipping-agent-open-timing-linux-x86_64
+          path: ${{ runner.temp }}/minga-agent-open-timing
+          if-no-files-found: ignore
