@@ -48,7 +48,9 @@ defmodule MingaAgent.Tools.LspCodeActionsTest do
       client = start_fake_client(%{"textDocument/codeAction" => {:ok, [action]}})
       SyncServer.put_clients(buffer, [client])
 
-      assert {:error, result} = LspCodeActions.execute(context(tmp_dir), path, 0, apply: 1)
+      assert {:error, result} =
+               LspCodeActions.execute(direct_context(tmp_dir), path, 0, apply: 1)
+
       assert result =~ "Failed to apply"
       assert result =~ "buffer is read-only"
       assert Buffer.content(buffer) == "old_name\n"
@@ -73,7 +75,9 @@ defmodule MingaAgent.Tools.LspCodeActionsTest do
       client = start_fake_client(%{"textDocument/codeAction" => {:ok, [action]}})
       SyncServer.put_clients(buffer, [client])
 
-      assert {:error, result} = LspCodeActions.execute(context(tmp_dir), path, 0, apply: 1)
+      assert {:error, result} =
+               LspCodeActions.execute(direct_context(tmp_dir), path, 0, apply: 1)
+
       assert result =~ "buffer is read-only"
       refute_receive {:lsp_request, "workspace/executeCommand"}
     end
@@ -119,11 +123,16 @@ defmodule MingaAgent.Tools.LspCodeActionsTest do
       client = start_fake_client(responses)
       SyncServer.put_clients(buffer, [client])
 
-      assert {:error, result} = LspCodeActions.execute(context(tmp_dir), path, 0, apply: 1)
+      context = context(tmp_dir)
+
+      assert {:error, result} = LspCodeActions.execute(context, path, 0, apply: 1)
       assert result =~ "Applied \"Replace and organize\": 1 edits across 1 files"
       assert result =~ "source.organizeImports"
       assert result =~ "command rejected"
-      assert Buffer.content(buffer) == "new_name\n"
+      assert Buffer.content(buffer) == "old_name\n"
+
+      assert {:ok, "new_name\n"} =
+               ProjectView.read_file(context.router_context.project_view, "command.ex")
     end
 
     @tag :tmp_dir
@@ -236,10 +245,16 @@ defmodule MingaAgent.Tools.LspCodeActionsTest do
       client = start_fake_client(%{"textDocument/codeAction" => {:ok, [action]}})
       SyncServer.put_clients(source, [client])
 
-      assert {:ok, "Applied \"Mixed edit\": 1 edits across 1 files"} =
-               LspCodeActions.execute(context(tmp_dir), source_path, 0, apply: 1)
+      context = context(tmp_dir)
 
-      assert Buffer.content(source) == "new_name\n"
+      assert {:ok, "Applied \"Mixed edit\": 1 edits across 1 files"} =
+               LspCodeActions.execute(context, source_path, 0, apply: 1)
+
+      assert Buffer.content(source) == "old_name\n"
+
+      assert {:ok, "new_name\n"} =
+               ProjectView.read_file(context.router_context.project_view, "mixed_source.ex")
+
       assert File.stat!(target_path) == before_stat
       assert File.read!(target_path) == "unchanged\n"
     end
@@ -248,6 +263,14 @@ defmodule MingaAgent.Tools.LspCodeActionsTest do
   @spec context(String.t()) :: ToolContext.t()
   defp context(project_root) do
     {:ok, view} = ProjectView.overlay(project_root)
+    on_exit(fn -> ProjectView.close(view) end)
+    ToolContext.new(project_root: project_root, project_view: view)
+  end
+
+  # A direct view does not stage, so open-buffer edits change the live buffer.
+  @spec direct_context(String.t()) :: ToolContext.t()
+  defp direct_context(project_root) do
+    {:ok, view} = ProjectView.direct(project_root)
     on_exit(fn -> ProjectView.close(view) end)
     ToolContext.new(project_root: project_root, project_view: view)
   end
