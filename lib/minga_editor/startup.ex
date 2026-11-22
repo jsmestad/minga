@@ -405,7 +405,10 @@ defmodule MingaEditor.Startup do
     )
 
     log_contribution_registration(
-      BuiltinSurfaces.register_contributions(sidebar_registry),
+      BuiltinSurfaces.register_contributions(
+        sidebar_registry,
+        Minga.Extension.Bundled.declared?(:git_porcelain)
+      ),
       "Built-in sidebar contribution registration failed"
     )
   end

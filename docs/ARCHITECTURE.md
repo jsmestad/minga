@@ -260,7 +260,7 @@ graph TD
     SVC --> CALLBACKS["Extension.CallbackRegistry<br/><i>declarative callbacks</i>"]
     SVC --> INSTREG["Extension.InstanceRegistry<br/><i>stable process names</i>"]
     SVC --> ROOTSUP["Extension.RootSupervisor<br/><i>DynamicSupervisor</i>"]
-    ROOTSUP --> ROOT1["Extension.Root: git_porcelain<br/><i>rest_for_one</i>"]
+    ROOTSUP --> ROOT1["Extension.Root: git_porcelain (when enabled)<br/><i>rest_for_one</i>"]
     ROOT1 --> RTSUP1["RuntimeSupervisor<br/><i>temporary runtime children</i>"]
     ROOT1 --> INST1["Instance<br/><i>lifecycle authority</i>"]
     RTSUP1 --> EXT1["Extension runtime child"]

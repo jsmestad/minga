@@ -35,17 +35,13 @@ defmodule MingaGitPorcelain.Git.CommitMessageGenerator do
   @spec run_generation(String.t(), String.t()) :: {:ok, String.t()} | {:error, String.t()}
   defp run_generation(model, staged_diff) do
     diff_text = truncate_diff(staged_diff)
-    config = MingaAgent.Config.resolve()
 
     messages = [
       %{role: "system", content: @system_prompt},
       %{role: "user", content: diff_text}
     ]
 
-    stream_opts = [max_tokens: 300]
-    stream_opts = maybe_add_base_url(stream_opts, model, config)
-
-    call_llm(model, messages, stream_opts)
+    call_llm(model, messages, max_tokens: 300)
   rescue
     e ->
       Minga.Log.warning(:agent, "AI commit message generation failed: #{Exception.message(e)}")
@@ -71,20 +67,4 @@ defmodule MingaGitPorcelain.Git.CommitMessageGenerator do
     truncated = binary_slice(diff, 0, @max_diff_chars)
     truncated <> "\n\n[diff truncated at #{@max_diff_chars} bytes]"
   end
-
-  @spec maybe_add_base_url(keyword(), String.t(), MingaAgent.Config.t()) :: keyword()
-  defp maybe_add_base_url(opts, _model, config) do
-    url = non_empty(config.api_base_url_override) || non_empty(config.api_base_url)
-
-    if url do
-      Keyword.put(opts, :base_url, url)
-    else
-      opts
-    end
-  end
-
-  @spec non_empty(String.t() | nil) :: String.t() | nil
-  defp non_empty(nil), do: nil
-  defp non_empty(""), do: nil
-  defp non_empty(s) when is_binary(s), do: s
 end

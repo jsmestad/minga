@@ -19,16 +19,26 @@ defmodule MingaEditor.Sidebar.BuiltinSurfaces do
   @git_status_id "git_status"
   @observatory_id "observatory"
 
-  @doc "Registers built-in sidebar surfaces that do not have their own feature adapter."
-  @spec register_contributions(Sidebar.table()) :: :ok | {:error, term()}
-  def register_contributions(sidebar_registry \\ Sidebar.default_table()) do
-    case sync_git_status_panel(nil, sidebar_registry) do
+  @doc """
+  Registers built-in sidebar surfaces that do not have their own feature adapter.
+
+  The Git Status surface opens only through git porcelain commands, so it is registered only when `git_status?` is true. Callers pass whether git porcelain is declared; the declaration cannot change without a restart.
+  """
+  @spec register_contributions(Sidebar.table(), boolean()) :: :ok | {:error, term()}
+  def register_contributions(sidebar_registry, git_status?) when is_boolean(git_status?) do
+    case register_git_status_surface(git_status?, sidebar_registry) do
       :ok -> sync_observatory(false, sidebar_registry)
       {:error, _reason} = error -> error
     end
   end
 
-  @doc "Synchronizes Git Status sidebar surface metadata from shell panel state."
+  @spec register_git_status_surface(boolean(), Sidebar.table()) :: :ok | {:error, term()}
+  defp register_git_status_surface(true, sidebar_registry),
+    do: put_git_status(false, false, 0, sidebar_registry)
+
+  defp register_git_status_surface(false, _sidebar_registry), do: :ok
+
+  @doc "Synchronizes Git Status sidebar surface metadata from shell panel state. Does nothing when the surface is not registered."
   @spec sync_git_status_panel(GitStatusPanel.t() | map() | nil, Sidebar.table(), boolean()) ::
           :ok | {:error, term()}
   def sync_git_status_panel(panel, sidebar_registry \\ Sidebar.default_table(), focused? \\ false)
@@ -106,6 +116,15 @@ defmodule MingaEditor.Sidebar.BuiltinSurfaces do
   @spec register_git_status(boolean(), boolean(), non_neg_integer(), Sidebar.table()) ::
           :ok | {:error, term()}
   defp register_git_status(visible?, focused?, badge_count, sidebar_registry) do
+    case Sidebar.get(sidebar_registry, @git_status_id) do
+      nil -> :ok
+      _entry -> put_git_status(visible?, focused?, badge_count, sidebar_registry)
+    end
+  end
+
+  @spec put_git_status(boolean(), boolean(), non_neg_integer(), Sidebar.table()) ::
+          :ok | {:error, term()}
+  defp put_git_status(visible?, focused?, badge_count, sidebar_registry) do
     focused? = visible? and focused?
 
     result =

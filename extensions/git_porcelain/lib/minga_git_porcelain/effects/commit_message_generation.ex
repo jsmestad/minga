@@ -113,7 +113,7 @@ defmodule MingaGitPorcelain.Effects.CommitMessageGeneration do
   @spec repository_context(EditorState.t()) :: repository_context()
   def repository_context(%EditorState{workspace: %{file_tree: file_tree}}) do
     {file_tree.project_root, file_tree.original_root,
-     MingaEditor.State.FileTree.root_generation(file_tree)}
+     MingaEditor.State.FileTree.watcher_intent(file_tree).generation}
   end
 
   @doc "Resolves the exact repository root captured before worker admission."

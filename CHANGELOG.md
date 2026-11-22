@@ -24,6 +24,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
+- Git porcelain (the Git status panel actions, staging, commit, branch, stash, remote, and conflict workflows, and their `SPC g` keybindings) is now opt-in. Add `extension :git_porcelain` to `config.exs` and restart to keep using it; it ships with Minga, so no download is needed. [Optional extensions](docs/CONFIGURATION.md#optional-extensions) explains the change. The modeline branch, gutter signs, and file tree status work with or without it. Opening a git project without it writes one reminder to `*Messages*` at startup.
 - Adversarial, Knowledge Graph, and Ghost Cursors are now opt-in. [Add the corresponding Git install line](docs/CONFIGURATION.md#optional-extensions) and restart to keep using them. Existing Knowledge Graph data stays in place.
 - Elixir builds use checked-in protocol and language-alias sources. Run `mix codegen` to refresh them after schema changes; CI rejects drift.
 - Standalone TUI downloads are native Mix release archives instead of self-extracting binaries. Linux builds target Ubuntu 24.04 glibc; the macOS DMG build is unchanged.

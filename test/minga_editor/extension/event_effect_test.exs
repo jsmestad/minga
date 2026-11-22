@@ -193,7 +193,7 @@ defmodule MingaEditor.Extension.EventEffectTest do
              EventEffect.apply(current, outcome)
 
     assert result.shell_runtime.state.notice.message ==
-             "Git porcelain extension is disabled or failed to load"
+             "Git porcelain is off or failed to load; add `extension :git_porcelain` to config.exs to turn it on"
 
     assert EventEffect.render?(applied)
     EffectScheduler.finalize(ctx.scheduler, applied)
@@ -201,7 +201,8 @@ defmodule MingaEditor.Extension.EventEffectTest do
 
   test "declined source-owned actions restore visible feedback", ctx do
     actions = [
-      {{:editor_action, :execute_git_command, :status}, "Git command unavailable"},
+      {{:editor_action, :execute_git_command, :status},
+       "Git porcelain is off or failed to load; add `extension :git_porcelain` to config.exs to turn it on"},
       {{:editor_action, :branch_delete_confirm, {"/repo", "feature", false}},
        "Branch delete action unavailable"},
       {{:editor_action, :branch_delete_cancel, nil}, "Branch delete action unavailable"}

@@ -41,6 +41,8 @@ defmodule MingaGitPorcelain.CommandsRemoteTest do
     git_root = Path.join(System.tmp_dir!(), "git_remote_#{System.unique_integer([:positive])}")
     File.mkdir_p!(git_root)
     {:ok, root} = Root.directory(git_root)
+    # Project activation canonicalizes the root (for example /var to /private/var on macOS).
+    git_root = root.path
     {:ok, _snapshot} = Minga.Project.activate(root)
     Stub.set_root(git_root, git_root)
 
@@ -316,8 +318,8 @@ defmodule MingaGitPorcelain.CommandsRemoteTest do
     running = receive_running(scheduler, :pull)
     assert_receive {:dependency_called, {:remote, :pull}, _worker, ^git_root}, @timeout
 
-    [%{running: %{task: task}}] =
-      scheduler |> :sys.get_state() |> Map.fetch!(:lanes) |> Map.values()
+    [{_ref, {_, _, task}}] =
+      scheduler |> :sys.get_state() |> Map.fetch!(:tasks) |> Map.to_list()
 
     assert :ok = EffectScheduler.cancel(scheduler, running.request.id)
     {result, outcome} = receive_and_apply(returned, scheduler, :canceled)

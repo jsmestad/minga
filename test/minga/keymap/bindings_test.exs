@@ -173,6 +173,23 @@ defmodule Minga.Keymap.BindingsTest do
       assert Enum.count(kids) == 2
     end
 
+    test "omits group labels with no command bound beneath them" do
+      trie =
+        Bindings.new()
+        |> Bindings.bind([key(?g), key(?w)], :code_why, "Why")
+        |> Bindings.bind_prefix([key(?g)], "+git")
+        |> Bindings.bind_prefix([key(?g), key(?c)], "+commit")
+        |> Bindings.bind_prefix([key(?g), key(?z), key(?q)], "+nested empty")
+
+      assert [{_git, "+git"}] = Bindings.children(trie)
+      {:prefix, g_node} = Bindings.lookup(trie, key(?g))
+      assert Bindings.children(g_node) == [{key(?w), "Why"}]
+
+      filled = Bindings.bind(trie, [key(?g), key(?c), key(?c)], :commit, "Commit")
+      {:prefix, g_node} = Bindings.lookup(filled, key(?g))
+      assert {key(?c), "+commit"} in Bindings.children(g_node)
+    end
+
     test "label for a terminal binding is the description string" do
       trie =
         Bindings.new()

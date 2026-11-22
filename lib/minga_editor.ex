@@ -361,6 +361,8 @@ defmodule MingaEditor do
       Minga.API.message(migration_notice)
     end
 
+    :ok = emit_git_porcelain_upgrade_notice(state.workspace.file_tree.project_root)
+
     EventBus.subscribe(:face_overrides_changed, events_registry)
     EventBus.subscribe(:agent_session_stopped, events_registry)
     EventBus.subscribe(:agent_session_restarted, events_registry)
@@ -411,6 +413,18 @@ defmodule MingaEditor do
 
   defp attach_effect_scheduler(scheduler) do
     :ok = EffectScheduler.attach(scheduler, self())
+  end
+
+  # Safe mode skips user config, so the registry cannot say whether git porcelain is enabled.
+  @spec emit_git_porcelain_upgrade_notice(String.t() | nil) :: :ok
+  defp emit_git_porcelain_upgrade_notice(project_root) do
+    with false <- Minga.SafeMode.active?(),
+         notice when is_binary(notice) <-
+           Minga.Extension.Bundled.git_porcelain_upgrade_notice(project_root) do
+      Minga.API.message(notice)
+    end
+
+    :ok
   end
 
   @spec renderer_pid_for_backend(EditorState.backend()) :: pid() | nil

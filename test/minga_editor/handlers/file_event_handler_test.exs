@@ -20,6 +20,7 @@ defmodule MingaEditor.Handlers.FileEventHandlerTest do
   alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.LSP, as: LSPState
   alias MingaEditor.State.Tab
+  alias MingaEditor.Sidebar.BuiltinSurfaces
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Workspace, as: WorkspaceModel
   alias MingaEditor.Session.State, as: SessionState
@@ -79,8 +80,12 @@ defmodule MingaEditor.Handlers.FileEventHandlerTest do
     end
 
     test "background git refresh updates visible Git panel without stealing Observatory focus" do
+      base = base_state()
+      # Git porcelain declared: startup registers the Git Status surface.
+      :ok = BuiltinSurfaces.register_contributions(base.extension_surfaces.sidebar_registry, true)
+
       state =
-        base_state()
+        base
         |> SidebarWorkflow.open_observatory(nil)
         |> SidebarWorkflow.select("observatory")
         |> SidebarWorkflow.replace_git_status(GitStatusPanel.new(%{entries: []}))

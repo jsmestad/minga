@@ -29,6 +29,14 @@ defmodule MingaGitPorcelain.LifecycleTest do
   @admission Module.concat(__MODULE__, Admission)
   @timeout 2_000
 
+  # Private instances here share the global Git porcelain source, so stopping them and the
+  # cleanup below remove the contributions and callbacks of the instance the test helper's
+  # config declared. Restart that instance once this module finishes so later modules keep it.
+  setup_all do
+    on_exit(&restart_declared_git_porcelain/0)
+    :ok
+  end
+
   setup do
     Dependencies.reset(self())
     start_supervised!({CodeLease, name: @admission})
@@ -309,12 +317,12 @@ defmodule MingaGitPorcelain.LifecycleTest do
   defp running_task_ref(scheduler, request_id) do
     scheduler
     |> :sys.get_state()
-    |> Map.fetch!(:lanes)
-    |> Map.values()
+    |> Map.fetch!(:tasks)
     |> Enum.find_value(fn
-      %{running: %{request: %{id: ^request_id}, task: task}} -> task.ref
-      _lane -> nil
+      {task_ref, {_resource, ^request_id, _task}} -> task_ref
+      _task -> nil
     end)
+    |> tap(&assert(is_reference(&1)))
   end
 
   defp receive_candidate(scheduler, request_id, status) do
@@ -324,6 +332,28 @@ defmodule MingaGitPorcelain.LifecycleTest do
                    @timeout
 
     outcome
+  end
+
+  defp restart_declared_git_porcelain do
+    {:ok, entry} = ExtRegistry.get(:minga_git_porcelain)
+
+    :ok =
+      ExtSupervisor.stop_extension(
+        Minga.Extension.Supervisor,
+        ExtRegistry,
+        :minga_git_porcelain,
+        entry
+      )
+
+    {:ok, entry} = ExtRegistry.get(:minga_git_porcelain)
+
+    {:ok, _pid} =
+      ExtSupervisor.start_extension(
+        Minga.Extension.Supervisor,
+        ExtRegistry,
+        :minga_git_porcelain,
+        entry
+      )
   end
 
   defp cleanup_git_porcelain_contributions do

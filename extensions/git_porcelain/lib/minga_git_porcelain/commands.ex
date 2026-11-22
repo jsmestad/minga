@@ -609,7 +609,7 @@ defmodule MingaGitPorcelain.Commands do
   # Mutual exclusivity: close file tree when opening git status.
   @spec close_file_tree_if_open(state()) :: state()
   defp close_file_tree_if_open(state) do
-    if state.workspace.file_tree.tree == nil do
+    if MingaEditor.State.FileTree.tree(state.workspace.file_tree) == nil do
       state
     else
       Commands.FileTree.close(state)

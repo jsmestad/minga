@@ -256,12 +256,12 @@ defmodule MingaEditor.Extension.EventEffect do
 
   defp interactive_failure(state, _event), do: state
 
-  @spec interactive_unavailable(EditorState.t(), EventHandler.event()) :: EditorState.t()
-  defp interactive_unavailable(state, {:editor_action, :open_git_diff_for_path, _arguments}),
-    do: NoticeWorkflow.publish(state, "Git porcelain extension is disabled or failed to load")
+  @git_porcelain_unavailable "Git porcelain is off or failed to load; add `extension :git_porcelain` to config.exs to turn it on"
 
-  defp interactive_unavailable(state, {:editor_action, :execute_git_command, _command}),
-    do: NoticeWorkflow.publish(state, "Git command unavailable")
+  @spec interactive_unavailable(EditorState.t(), EventHandler.event()) :: EditorState.t()
+  defp interactive_unavailable(state, {:editor_action, action, _arguments})
+       when action in [:open_git_diff_for_path, :execute_git_command],
+       do: NoticeWorkflow.publish(state, @git_porcelain_unavailable)
 
   defp interactive_unavailable(state, {:editor_action, action, _arguments})
        when action in [:branch_delete_confirm, :branch_delete_cancel],

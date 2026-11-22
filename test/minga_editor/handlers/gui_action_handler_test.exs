@@ -48,6 +48,7 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
   alias MingaEditor.UI.Popup.Active, as: PopupActive
   alias Minga.Popup.Rule
   alias Minga.Project.FileTree, as: ProjectFileTree
+  alias MingaEditor.Sidebar.BuiltinSurfaces
   alias MingaEditor.WorkspaceWorkflow
 
   setup do
@@ -418,6 +419,8 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
     assert file_tree_active.workspace.keymap_scope == :file_tree
     assert SidebarWorkflow.active_id(file_tree_active) == "file_tree"
 
+    # Git porcelain declared: startup registers the Git Status surface.
+    :ok = BuiltinSurfaces.register_contributions(table, true)
     git_state = SidebarWorkflow.replace_git_status(state, GitStatusPanel.new(%{entries: []}))
 
     assert %{visible?: true, focused?: false} = Sidebar.get(table, "git_status")
