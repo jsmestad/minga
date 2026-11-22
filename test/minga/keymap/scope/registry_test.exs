@@ -1,7 +1,7 @@
 defmodule Minga.Keymap.Scope.RegistryTest do
-  # Writes go to the application-wide scope registry.
-  # Every test uses unique scope names and asserts only on those names, so async modules cannot interfere.
-  use ExUnit.Case, async: true
+  # Mutates the application-wide keymap scope registry, which other async tests read in full
+  # (for example FocusOwnerTest checks every registered scope); the concurrency comes from tasks inside each test.
+  use ExUnit.Case, async: false
 
   alias Minga.Keymap.Scope
 
