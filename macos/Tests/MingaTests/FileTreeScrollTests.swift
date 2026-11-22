@@ -28,6 +28,7 @@ private func nestedTreeEntries(fileCount: Int) -> [FileTreeEntry] {
     return entries
 }
 
+@MainActor
 private func firstScrollView(in view: NSView) -> NSScrollView? {
     if let scrollView = view as? NSScrollView { return scrollView }
     for subview in view.subviews {
@@ -37,6 +38,7 @@ private func firstScrollView(in view: NSView) -> NSScrollView? {
 }
 
 @Suite("File tree top row")
+@MainActor
 struct FileTreeTopRowTests {
     private let rowHeight: CGFloat = 22
     private let topPadding: CGFloat = Spacing.hairline
@@ -89,6 +91,7 @@ struct FileTreeTopRowTests {
 }
 
 @Suite("File tree scroll invalidation")
+@MainActor
 struct FileTreeScrollInvalidationTests {
     @Test("Scrolling less than one row does not re-evaluate the tree; crossing a row boundary re-evaluates it once")
     @MainActor func subRowScrollSkipsTreeEvaluation() throws {

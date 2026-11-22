@@ -136,8 +136,8 @@ public struct FileTreeView: View {
                     }
                     .padding(.top, Spacing.hairline)
                 }
-                .onScrollGeometryChange(for: Int.self) { geometry in
-                    Self.topRow(contentOffsetY: geometry.contentOffset.y, contentInsetTop: geometry.contentInsets.top, topPadding: Spacing.hairline, rowHeight: rowHeight)
+                .onScrollGeometryChange(for: Int.self) { [topPadding = Spacing.hairline, rowHeight] geometry in
+                    Self.topRow(contentOffsetY: geometry.contentOffset.y, contentInsetTop: geometry.contentInsets.top, topPadding: topPadding, rowHeight: rowHeight)
                 } action: { _, newTopRow in
                     topRow = newTopRow
                 }
@@ -276,14 +276,14 @@ public struct FileTreeView: View {
     /// The index of the row under the top edge of the visible content, given the scroll view's geometry.
     ///
     /// `contentOffsetY + contentInsetTop` is the distance scrolled past the inset content top, so the sticky header (a top safe-area inset) never moves the row boundaries.
-    static func topRow(contentOffsetY: CGFloat, contentInsetTop: CGFloat, topPadding: CGFloat, rowHeight: CGFloat) -> Int {
+    nonisolated static func topRow(contentOffsetY: CGFloat, contentInsetTop: CGFloat, topPadding: CGFloat, rowHeight: CGFloat) -> Int {
         topRow(scrolledDistance: contentOffsetY + contentInsetTop, topPadding: topPadding, rowHeight: rowHeight)
     }
 
     /// The index of the row under the top edge of the visible content.
     ///
     /// Row `n` spans `topPadding + n * rowHeight` up to the next row in content space, so the top padding, the resting position, and overscroll all resolve to row zero.
-    static func topRow(scrolledDistance: CGFloat, topPadding: CGFloat, rowHeight: CGFloat) -> Int {
+    nonisolated static func topRow(scrolledDistance: CGFloat, topPadding: CGFloat, rowHeight: CGFloat) -> Int {
         Int((max(0, scrolledDistance - topPadding) / rowHeight).rounded(.down))
     }
 
