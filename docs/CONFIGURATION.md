@@ -1315,6 +1315,24 @@ Omitting `version:` fetches the latest stable release. If the extension config n
 
 All hex extensions are installed in a single `Mix.install/2` call at startup. The results are cached (keyed on the dep list hash), so the second boot with the same extensions skips all network and compilation work. The cache lives at `~/.cache/mix/installs/`.
 
+#### Hex extensions under the development launcher
+
+If you work on Minga itself and run it with `bin/minga`, Minga runs inside its own Mix project (`mix minga`), and `Mix.install/2` refuses to run there. Minga handles this for you: it runs the install in a separate, short-lived BEAM process that has no Mix project, then loads the result through the same admission checks a release build uses. You declare the extension exactly as above, and it loads the way it does for users.
+
+A few things differ from a release build:
+
+- The build and install directory lives in Minga's data directory, at `$XDG_DATA_HOME/minga/hex_extension_installs/` (or `~/.local/share/minga/hex_extension_installs/`), and Minga keeps it private to your user. `bin/minga` points that directory at its private development profile, so the build never lands in your Mix project or in `~/.cache/mix/installs/`. The Hex package cache (`HEX_HOME`) and `MIX_HOME`, where the Hex client lives, are still shared with the rest of your machine.
+- The extension compiles against the Minga modules from your checkout, so `minga_sdk` compiles no stubs. A dependency that Minga already ships (for example `jason`) uses Minga's copy.
+- Minga refuses to load a dependency that would replace a Minga module. The install fails and names the conflicting module.
+- The installer process does not receive Minga's provider keys (`OPENAI_API_KEY` and the other provider variables, `ANTHROPIC_*`, and `MINGA_GATEWAY_TOKEN`), because a package's compile-time code runs there.
+- Loaded extension code stays in memory until Minga exits. If you change an extension's `version:` and reload your config, the reload fails with a message asking you to restart Minga to switch versions.
+
+If the install fails (no network, a compile error, or a module conflict), `*Messages*` shows the reason with the tail of the installer's output (with credentials in URLs redacted), and `:extensions` lists the extension as `load_error`. To work around a failure, clone the extension and load it with `path:` instead:
+
+```elixir
+extension :claude_bridge, path: "~/code/minga-claude-bridge"
+```
+
 ### Listing extensions
 
 `SPC h e l` or `:extensions` (`:ext`) in command mode lists all loaded extensions with their source type:
