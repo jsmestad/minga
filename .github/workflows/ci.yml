@@ -599,6 +599,8 @@ jobs:
   dialyzer:
     name: Dialyzer
     runs-on: ubuntu-latest
+    # A warm run takes about 5 to 8 minutes; a cold PLT build adds the OTP, Elixir, and dependency PLTs. The bound turns a hang into an explicit timeout.
+    timeout-minutes: 40
     env:
       MIX_ENV: dev
     steps:
@@ -620,11 +622,42 @@ jobs:
           key: dialyzer-v2-${{ runner.os }}-${{ hashFiles('.tool-versions') }}-${{ hashFiles('mix.exs', 'mix.lock') }}
           restore-keys: dialyzer-v2-${{ runner.os }}-${{ hashFiles('.tool-versions') }}-
 
+      # Dialyzer's analysis peaks near the 16 GB runner limit (#3869). Larger GitHub runners need an organization on a paid plan, so add swap: a peak past RAM pages instead of losing the runner.
+      - name: Add swap
+        run: |
+          sudo fallocate -l 16G /mnt/dialyzer.swap
+          sudo chmod 600 /mnt/dialyzer.swap
+          sudo mkswap /mnt/dialyzer.swap
+          sudo swapon /mnt/dialyzer.swap
+
+      - name: Report runner resources
+        run: |
+          nproc
+          free -m
+          swapon --show || true
+          df -h . "$HOME"
+
       - run: mix deps.get
-      - run: mix dialyzer
+
+      # Compile, PLT build, and analysis run as separate steps so a lost runner shows which phase it was in, and completed phases keep their logs. The memory guard fails a step with an explicit error before memory exhaustion starves the runner.
+      - name: Compile
+        timeout-minutes: 10
+        run: .github/scripts/run-with-memory-guard.sh mix compile
+
+      - name: Build or update PLT
+        timeout-minutes: 25
+        run: .github/scripts/run-with-memory-guard.sh mix dialyzer --plt
         env:
           # Dialyzer sizes its worker pool from the online BEAM schedulers.
           ERL_FLAGS: "+S 2:2"
+
+      - name: Run Dialyzer
+        timeout-minutes: 15
+        run: .github/scripts/run-with-memory-guard.sh mix dialyzer
+        env:
+          ERL_FLAGS: "+S 2:2"
+          # Analysis peaks near the 16 GB of RAM (#3869); the added swap absorbs the excess and the guard counts RAM plus free swap.
+          MEMORY_GUARD_MIN_AVAILABLE_MB: "768"
 
   release-prerequisites:
     name: Native release prerequisites (${{ matrix.runner }})
