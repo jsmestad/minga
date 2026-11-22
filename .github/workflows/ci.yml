@@ -623,6 +623,14 @@ jobs:
           key: dialyzer-v2-${{ runner.os }}-${{ hashFiles('.tool-versions') }}-${{ hashFiles('mix.exs', 'mix.lock') }}
           restore-keys: dialyzer-v2-${{ runner.os }}-${{ hashFiles('.tool-versions') }}-
 
+      # Dialyzer's analysis peaks near the 16 GB runner limit (#3869). Larger GitHub runners need an organization on a paid plan, so add swap: a peak past RAM pages instead of losing the runner.
+      - name: Add swap
+        run: |
+          sudo fallocate -l 16G /mnt/dialyzer.swap
+          sudo chmod 600 /mnt/dialyzer.swap
+          sudo mkswap /mnt/dialyzer.swap
+          sudo swapon /mnt/dialyzer.swap
+
       - name: Report runner resources
         run: |
           nproc
@@ -649,8 +657,8 @@ jobs:
         run: .github/scripts/run-with-memory-guard.sh mix dialyzer
         env:
           ERL_FLAGS: "+S 2:2"
-          # Analysis peaks near the 16 GB runner limit even on one scheduler, so the memory comes from a single large job (#3869); the root fix is splitting MingaAgent.Session. The guard only intervenes near real starvation, so runs that fit still pass and a starved run fails with a labeled error instead of a lost runner.
-          MEMORY_GUARD_MIN_AVAILABLE_MB: "128"
+          # Analysis peaks near the 16 GB of RAM (#3869); the added swap absorbs the excess and the guard counts RAM plus free swap.
+          MEMORY_GUARD_MIN_AVAILABLE_MB: "768"
 
   release-prerequisites:
     name: Native release prerequisites (${{ matrix.runner }})

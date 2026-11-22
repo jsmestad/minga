@@ -8,7 +8,7 @@
 #   MEMORY_GUARD_INTERVAL_SECONDS  Sampling interval in seconds (default 1).
 #   MEMORY_GUARD_MEMINFO           Path to the meminfo file (default /proc/meminfo); tests override it.
 #
-# On exit the script prints the lowest MemAvailable it observed, so passing runs record their memory headroom.
+# On exit the script prints the lowest available RAM plus free swap it observed, so passing runs record their memory headroom.
 set -uo pipefail
 
 if [ "$#" -eq 0 ]; then
@@ -24,8 +24,13 @@ mem_field_mb() {
   awk -v field="$1:" '$1 == field { print int($2 / 1024); exit }' "$meminfo"
 }
 
-total_mb="$(mem_field_mb MemTotal)"
-lowest_available_mb="$(mem_field_mb MemAvailable)"
+# Headroom counts free swap as well as available RAM: the job adds swap so a large analysis pages instead of starving the runner.
+headroom_mb() {
+  echo $(( $(mem_field_mb MemAvailable) + $(mem_field_mb SwapFree) ))
+}
+
+total_mb="$(( $(mem_field_mb MemTotal) + $(mem_field_mb SwapTotal) ))"
+lowest_available_mb="$(headroom_mb)"
 
 "$@" &
 pid=$!
@@ -38,14 +43,14 @@ kill_command() {
 trap 'kill_command; exit 143' TERM INT
 
 while kill -0 "$pid" 2>/dev/null; do
-  available_mb="$(mem_field_mb MemAvailable)"
+  available_mb="$(headroom_mb)"
 
   if [ "$available_mb" -lt "$lowest_available_mb" ]; then
     lowest_available_mb="$available_mb"
   fi
 
   if [ "$available_mb" -lt "$min_available_mb" ]; then
-    echo "::error title=Memory guard::MemAvailable fell to ${available_mb} MiB of ${total_mb} MiB (limit ${min_available_mb} MiB) while running '$*'. Killing it before the runner is starved."
+    echo "::error title=Memory guard::Available RAM plus free swap fell to ${available_mb} MiB of ${total_mb} MiB (limit ${min_available_mb} MiB) while running '$*'. Killing it before the runner is starved."
     echo "Largest processes by resident memory:"
     ps -eo pid,rss,vsz,etime,args --sort=-rss | head -n 10
     kill_command
@@ -59,5 +64,5 @@ done
 status=0
 wait "$pid" || status=$?
 
-echo "Memory guard: lowest MemAvailable ${lowest_available_mb} MiB of ${total_mb} MiB while running '$*'."
+echo "Memory guard: lowest available RAM plus free swap ${lowest_available_mb} MiB of ${total_mb} MiB while running '$*'."
 exit "$status"
