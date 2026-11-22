@@ -14,6 +14,7 @@ defmodule MingaEditor.Input.AgentNavTest do
 
   @ctrl MingaEditor.Frontend.Protocol.mod_ctrl()
   @alt MingaEditor.Frontend.Protocol.mod_alt()
+  @super MingaEditor.Frontend.Protocol.mod_super()
 
   defp make_state(opts) do
     prompt_buf = start_supervised!({BufferProcess, content: ""}, id: make_ref())
@@ -127,25 +128,58 @@ defmodule MingaEditor.Input.AgentNavTest do
     end
   end
 
-  describe "chat keys owned by the mode FSM" do
-    test "leader, command line, eval, and search entry keys reach the mode FSM" do
-      state = make_state(focus: :chat)
-
-      for {cp, mods} <- [{?\s, 0}, {?:, 0}, {?:, @alt}, {?/, 0}, {?n, 0}, {?N, 0}] do
+  describe "keys owned by the mode FSM" do
+    test "leader, command line, eval, and search entry keys reach the mode FSM from chat and the viewer" do
+      for state <- [make_state(focus: :chat), make_state(focus: :file_viewer)],
+          {cp, mods} <- [{?\s, 0}, {?:, 0}, {?:, @alt}, {?/, 0}, {?n, 0}, {?N, 0}] do
         assert {:passthrough, ^state} = AgentNav.handle_key(state, cp, mods)
       end
     end
 
-    test "an open command line receives every key, including chat navigation keys" do
-      state = make_state(focus: :chat)
+    test "an open command line receives every key, including navigation keys" do
+      for focus <- [:chat, :file_viewer] do
+        state = make_state(focus: focus)
 
-      command_line = %{
-        state
-        | workspace: MingaEditor.Session.State.transition_mode(state.workspace, :command)
-      }
+        command_line = %{
+          state
+          | workspace: MingaEditor.Session.State.transition_mode(state.workspace, :command)
+        }
 
-      for {cp, mods} <- [{?j, 0}, {?q, 0}, {?x, 0}, {13, 0}] do
-        assert {:passthrough, ^command_line} = AgentNav.handle_key(command_line, cp, mods)
+        for {cp, mods} <- [{?j, 0}, {?q, 0}, {?x, 0}, {13, 0}] do
+          assert {:passthrough, ^command_line} = AgentNav.handle_key(command_line, cp, mods)
+        end
+      end
+    end
+
+    test "a pending describe-key prompt receives every key, including navigation keys" do
+      for focus <- [:chat, :file_viewer] do
+        state = make_state(focus: focus)
+
+        describing =
+          MingaEditor.Editing.update_mode_state(state, fn ms ->
+            %{ms | describe_key: %Minga.Mode.DescribeKey{}}
+          end)
+
+        for {cp, mods} <- [{?j, 0}, {?k, 0}, {?G, 0}, {?d, @ctrl}, {?x, 0}, {?r, @ctrl}] do
+          assert {:passthrough, ^describing} = AgentNav.handle_key(describing, cp, mods)
+        end
+      end
+    end
+  end
+
+  describe "CUA editing model" do
+    # The chat and viewer edit no file, so CUA editing shortcuts stop here
+    # instead of undoing or pasting into the buffer behind the surface.
+    test "unclaimed CUA shortcuts in chat and the viewer stop before the file buffer" do
+      for focus <- [:chat, :file_viewer] do
+        state = %{
+          make_state(focus: focus)
+          | interaction: MingaEditor.State.Interaction.new(editing_model: :cua)
+        }
+
+        for {cp, mods} <- [{?z, @super}, {?Z, @super}, {?v, @super}, {?x, @super}, {?a, 0}] do
+          assert {:handled, ^state} = AgentNav.handle_key(state, cp, mods)
+        end
       end
     end
   end

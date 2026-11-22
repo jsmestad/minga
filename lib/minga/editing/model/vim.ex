@@ -99,6 +99,10 @@ defmodule Minga.Editing.Model.Vim do
       when mode in [:operator_pending, :command],
       do: true
 
+  # The describe-key prompt (`SPC h k`) waits for the key it will describe.
+  def key_sequence_pending?(%__MODULE__{mode_state: %{describe_key: %Mode.DescribeKey{}}}),
+    do: true
+
   def key_sequence_pending?(%__MODULE__{}), do: false
 
   @impl Minga.Editing.Model

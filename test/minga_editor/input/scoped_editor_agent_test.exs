@@ -590,4 +590,65 @@ defmodule MingaEditor.Input.ScopedEditorAgentTest do
       assert new_state.workspace.agent_ui.view |> View.focus() == :chat
     end
   end
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # Mode FSM keys on every agent surface
+  # ══════════════════════════════════════════════════════════════════════════
+
+  @agent_surfaces [
+    chat: [keymap_scope: :agent, agentic_active: true],
+    side_panel: [keymap_scope: :editor, panel_visible: true],
+    file_viewer: [keymap_scope: :agent, agentic_active: true, focus: :file_viewer]
+  ]
+
+  describe "agent surfaces — mode FSM keys" do
+    test "keys typed into the command line from the side panel stay there" do
+      state = base_state(keymap_scope: :editor, panel_visible: true)
+
+      # q closes the split, i focuses the draft, and j/G scroll the panel.
+      state = walk_keys(state, [{?:, 0}, {?q, 0}, {?a, 0}, {?i, 0}, {?j, 0}, {?G, 0}])
+
+      assert state.workspace.editing.mode == :command
+      assert state.workspace.editing.mode_state.input == "qaijG"
+      assert state.workspace.agent_ui.panel.visible
+      refute state.workspace.agent_ui.panel.input_focused
+    end
+
+    test "SPC and : from the file viewer reach the mode FSM like in chat" do
+      state = base_state(keymap_scope: :agent, agentic_active: true, focus: :file_viewer)
+
+      command_line = walk_keys(state, [{?:, 0}, {?w, 0}, {?q, 0}])
+      assert command_line.workspace.editing.mode == :command
+      assert command_line.workspace.editing.mode_state.input == "wq"
+
+      assert Minga.Editing.in_leader?(walk_keys(state, [{?\s, 0}]))
+    end
+
+    for {surface, opts} <- @agent_surfaces, key <- [?q, ?j, ?x, 27] do
+      @tag surface: surface, opts: opts, key: key
+      @outcome if key == 27, do: "cancels describe-key", else: "describes the key"
+      test "SPC h k then #{inspect(<<key::utf8>>)} #{@outcome} in #{surface}", %{
+        opts: opts,
+        key: key
+      } do
+        state = base_state(opts)
+        buffer = state.workspace.buffers.active
+
+        state = walk_keys(state, [{?\s, 0}, {?h, 0}, {?k, 0}])
+        assert Minga.Editing.key_sequence_pending?(state)
+
+        {:handled, state} = walk_surface_handlers(state, key, 0)
+
+        refute Minga.Editing.key_sequence_pending?(state)
+        assert Buffer.content(buffer) == "hello world"
+        describe_or_cancel(state, key)
+      end
+    end
+  end
+
+  # Escape cancels the describe-key prompt; every other key is described.
+  defp describe_or_cancel(state, 27), do: assert(help_text(state) == nil)
+
+  defp describe_or_cancel(state, key),
+    do: assert(help_text(state) =~ ~r/Key(:| not bound:)\s+#{<<key::utf8>>}\b/)
 end

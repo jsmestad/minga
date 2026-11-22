@@ -13,7 +13,10 @@ defmodule MingaEditor.Input.AgentNav do
   ## File viewer navigation
 
   When `agent_ui.focus == :file_viewer`, navigation keys scroll the preview pane.
-  Keys not claimed by earlier scope handlers stop here so the read-only viewer cannot edit an underlying human buffer.
+
+  ## Unclaimed keys
+
+  The chat and the file viewer apply one rule. Keys not claimed by earlier scope handlers stop here so the read-only surface cannot edit an underlying human buffer. The mode entry keys (SPC, `:`, `M-:`, `/`, `n`, `N`) pass through to the mode FSM, and every key passes through while a key sequence is pending or a command line, search, or eval prompt is open.
 
   ## Side panel usage
 
@@ -44,15 +47,12 @@ defmodule MingaEditor.Input.AgentNav do
   def handle_key(%{workspace: %{keymap_scope: :agent}} = state, cp, mods) do
     panel = state.workspace.agent_ui.panel
 
-    if panel.input_focused do
+    # A focused draft, a pending sequence (leader, describe-key), and an open
+    # command line, search, or eval prompt all own the key before navigation.
+    if panel.input_focused or Minga.Editing.owns_next_key?(state) do
       {:passthrough, state}
     else
-      view = state.workspace.agent_ui.view
-
-      case UIState.View.focus(view) do
-        :chat -> handle_agent_chat_key(state, cp, mods)
-        :file_viewer -> handle_viewer_nav(state, cp, mods)
-      end
+      handle_surface_key(state, UIState.View.focus(state.workspace.agent_ui.view), cp, mods)
     end
   end
 
@@ -69,37 +69,51 @@ defmodule MingaEditor.Input.AgentNav do
     end
   end
 
-  # The agent chat owns no editable buffer. A key that neither scrolls the
-  # transcript nor belongs to the mode FSM (command line, search, leader)
-  # stops here, so it cannot edit or refocus the human buffer behind the chat.
-  @spec handle_agent_chat_key(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
-          MingaEditor.Input.Handler.result()
-  defp handle_agent_chat_key(state, cp, mods) do
-    binding_state = Minga.Editing.binding_state(state)
-
-    case chat_nav_command(cp, mods) do
-      # Command line, search, and eval input belong to the mode FSM.
-      _command when binding_state not in [:normal, :cua] -> {:passthrough, state}
-      {:scroll, fun} -> {:handled, scroll_chat(state, fun)}
-      :passthrough -> unclaimed_chat_key(state, binding_state, {cp, mods})
-    end
-  end
-
-  @spec unclaimed_chat_key(
+  # The agent chat and file viewer own no editable buffer. A key that neither
+  # scrolls the surface nor enters the mode FSM (leader, command line, eval,
+  # search) stops here, so it cannot edit or refocus the human buffer behind it.
+  @spec handle_surface_key(
           EditorState.t(),
-          :normal | :cua,
-          {non_neg_integer(), non_neg_integer()}
+          :chat | :file_viewer,
+          non_neg_integer(),
+          non_neg_integer()
         ) ::
           MingaEditor.Input.Handler.result()
-  defp unclaimed_chat_key(state, :normal, key) do
-    if key in @mode_fsm_entry_keys or Minga.Editing.key_sequence_pending?(state) do
-      {:passthrough, state}
-    else
-      {:handled, state}
+  defp handle_surface_key(state, surface, cp, mods) do
+    binding_state = Minga.Editing.binding_state(state)
+
+    case nav_command(surface, cp, mods) do
+      # Visual and insert input belong to the mode FSM.
+      _command when binding_state not in [:normal, :cua] -> {:passthrough, state}
+      {:scroll, fun} -> {:handled, scroll(state, surface, fun)}
+      :passthrough -> unclaimed_key(state, binding_state, {cp, mods})
     end
   end
 
-  defp unclaimed_chat_key(state, :cua, _key), do: {:handled, state}
+  @spec nav_command(:chat | :file_viewer, non_neg_integer(), non_neg_integer()) ::
+          {:scroll, (UIState.t() -> UIState.t())} | :passthrough
+  defp nav_command(:chat, cp, mods), do: chat_nav_command(cp, mods)
+  defp nav_command(:file_viewer, cp, mods), do: viewer_nav_command(cp, mods)
+
+  @spec scroll(EditorState.t(), :chat | :file_viewer, (UIState.t() -> UIState.t())) ::
+          EditorState.t()
+  defp scroll(state, :chat, fun), do: scroll_chat(state, fun)
+
+  defp scroll(state, :file_viewer, fun),
+    do:
+      MingaEditor.Shell.Traditional.Workflow.install_agent_ui(
+        state,
+        fun.(state.workspace.agent_ui)
+      )
+
+  @spec unclaimed_key(EditorState.t(), :normal | :cua, {non_neg_integer(), non_neg_integer()}) ::
+          MingaEditor.Input.Handler.result()
+  defp unclaimed_key(state, :normal, key) when key in @mode_fsm_entry_keys,
+    do: {:passthrough, state}
+
+  # CUA editing shortcuts (Cmd+Z and friends) stop here too: the surface does
+  # not edit the file behind it. Cmd+S still saves through the macOS menu.
+  defp unclaimed_key(state, _binding_state, _key), do: {:handled, state}
 
   @spec scroll_chat(EditorState.t(), (UIState.t() -> UIState.t())) :: EditorState.t()
   defp scroll_chat(state, fun) do
@@ -109,22 +123,6 @@ defmodule MingaEditor.Input.AgentNav do
   end
 
   # ── File viewer navigation ─────────────────────────────────────────────
-
-  @spec handle_viewer_nav(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
-          MingaEditor.Input.Handler.result()
-  defp handle_viewer_nav(state, cp, mods) do
-    case viewer_nav_command(cp, mods) do
-      {:scroll, fun} ->
-        {:handled,
-         MingaEditor.Shell.Traditional.Workflow.install_agent_ui(
-           state,
-           fun.(state.workspace.agent_ui)
-         )}
-
-      :passthrough ->
-        {:handled, state}
-    end
-  end
 
   @spec viewer_nav_command(non_neg_integer(), non_neg_integer()) ::
           {:scroll, (UIState.t() -> UIState.t())} | :passthrough
