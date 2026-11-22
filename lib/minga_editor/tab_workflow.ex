@@ -9,6 +9,7 @@ defmodule MingaEditor.TabWorkflow do
   installs only the atomic immutable tab transition.
   """
 
+  alias MingaEditor.Agent.Arrival
   alias MingaEditor.Agent.PromptBuffer
   alias MingaEditor.Agent.UIState
   alias MingaEditor.AgentLifecycle
@@ -148,6 +149,7 @@ defmodule MingaEditor.TabWorkflow do
   @spec finish_restore(EditorState.t(), pid() | nil) :: EditorState.t()
   defp finish_restore(state, old_buffer) do
     state
+    |> Arrival.cancel()
     |> sync_active_workspace_agent_ui()
     |> restore_active_agent(Runtime.active_tab(state.shell_runtime))
     |> arrive()
@@ -181,6 +183,7 @@ defmodule MingaEditor.TabWorkflow do
   @spec finish_switch(EditorState.t(), Tab.t()) :: EditorState.t()
   defp finish_switch(state, target) do
     state
+    |> Arrival.cancel()
     |> sync_active_workspace_agent_ui(:incoming)
     |> ModalWorkflow.dismiss_if_stale()
     |> TraditionalWorkflow.install_agent_spinner_stop()
@@ -331,6 +334,15 @@ defmodule MingaEditor.TabWorkflow do
   end
 
   @spec rebuild_switched_agent(EditorState.t(), Tab.t()) :: EditorState.t()
+  defp rebuild_switched_agent(state, %Tab{
+         id: id,
+         kind: :agent,
+         payload: %Tab.Agent{session: session, remote_session_id: nil}
+       })
+       when is_pid(session) and node(session) == node() do
+    Arrival.start(state, id, session)
+  end
+
   defp rebuild_switched_agent(state, %Tab{kind: :agent} = tab) do
     state
     |> AgentLifecycle.rebuild_agent_from_session(tab)

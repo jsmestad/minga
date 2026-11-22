@@ -16,6 +16,7 @@ defmodule MingaEditor.Renderer do
   * `Renderer.Regions`         — region definition commands
   """
 
+  alias MingaEditor.Agent.Arrival
   alias MingaEditor.RenderPipeline.Intent
   alias MingaEditor.Renderer.Submission
   alias MingaEditor.Renderer.Server, as: RendererServer
@@ -49,9 +50,15 @@ defmodule MingaEditor.Renderer do
   """
   @spec render_or_async(state()) :: state()
   def render_or_async(%EditorState{frontend: %{rendering: :disabled}} = state), do: state
-  def render_or_async(%EditorState{frontend: %{backend: :headless}} = state), do: render(state)
 
-  def render_or_async(%EditorState{render: %{renderer: pid}} = state) when is_pid(pid) do
+  def render_or_async(state) do
+    if Arrival.defer_frame?(state), do: state, else: submit_frame(state)
+  end
+
+  @spec submit_frame(state()) :: state()
+  defp submit_frame(%EditorState{frontend: %{backend: :headless}} = state), do: render(state)
+
+  defp submit_frame(%EditorState{render: %{renderer: pid}} = state) when is_pid(pid) do
     state = MingaEditor.Shell.Workflow.ensure_available(state)
 
     if async_render?(state) do
@@ -72,7 +79,7 @@ defmodule MingaEditor.Renderer do
     end
   end
 
-  def render_or_async(state), do: render(state)
+  defp submit_frame(state), do: render(state)
 
   @doc """
   Renders the first frame for a newly ready frontend connection.

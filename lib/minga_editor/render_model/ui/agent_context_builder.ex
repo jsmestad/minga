@@ -9,6 +9,8 @@ defmodule MingaEditor.RenderModel.UI.AgentContextBuilder do
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
 
   @spec build(Context.t() | term()) :: AgentContext.t()
+  def build(%Context{workspace: %{agent_ui: %{chat_lifecycle: :unavailable}}}), do: hidden()
+
   def build(%Context{} = ctx) do
     activity = get_activity(ctx)
     {status, action} = status_and_action(ctx, activity)
@@ -31,6 +33,8 @@ defmodule MingaEditor.RenderModel.UI.AgentContextBuilder do
   def build(_other), do: hidden()
 
   @spec visible?(Context.t() | map()) :: boolean()
+  def visible?(%{workspace: %{agent_ui: %{chat_lifecycle: :unavailable}}}), do: false
+
   def visible?(%Context{} = ctx) do
     activity = get_activity(ctx)
     {status, _action} = status_and_action(ctx, activity)

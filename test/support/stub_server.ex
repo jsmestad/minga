@@ -35,29 +35,35 @@ defmodule Minga.Test.StubServer do
     do: {:reply, Map.get(state, :pinned_ids, MapSet.new()), state}
 
   def handle_call({:transcript_since, cursor}, _from, state) do
-    messages = Map.get(state, :messages, [])
-    pairs = Map.get_lazy(state, :message_ids, fn -> default_message_ids(messages) end)
-    pins = Map.get(state, :pinned_ids, MapSet.new())
-    source = {messages, pairs, pins}
-
-    transcript =
-      case Map.get(state, :transcript_fixture) do
-        {^source, transcript} ->
-          transcript
-
-        previous ->
-          now = DateTime.utc_now()
-
-          transcript =
-            if previous, do: elem(previous, 1), else: Transcript.new([], now, make_ref())
-
-          ids = Enum.map(pairs, &elem(&1, 0))
-          Transcript.restore(transcript, messages, ids, [], TurnUsage.new(), pins, now)
-      end
-
-    {:reply, Transcript.since(transcript, cursor),
-     Map.put(state, :transcript_fixture, {source, transcript})}
+    {transcript, state} = fixture_transcript(state)
+    {:reply, Transcript.since(transcript, cursor), state}
   end
+
+  def handle_call({:editor_arrival, cursor, subscriber, token}, from, state) do
+    case Map.fetch(state, :arrival_observer) do
+      {:ok, observer} ->
+        send(observer, {:capture_requested, self(), token})
+        {:noreply, Map.put(state, :pending_capture, {cursor, subscriber, token, from})}
+
+      :error ->
+        {:reply, :forwarded, forward_arrival(state, cursor, subscriber, token)}
+    end
+  end
+
+  def handle_call(
+        {:release_capture, snapshot, before_fence},
+        _from,
+        %{pending_capture: pending} = state
+      ) do
+    {cursor, subscriber, token, from} = pending
+    Enum.each(before_fence, &send(subscriber, {:agent_event, self(), &1}))
+    state = Map.merge(Map.delete(state, :pending_capture), snapshot)
+    state = forward_arrival(state, cursor, subscriber, token)
+    GenServer.reply(from, :forwarded)
+    {:reply, :ok, state}
+  end
+
+  def handle_call({:subscribe, _pid, _opts}, _from, state), do: {:reply, :ok, state}
 
   def handle_call({:toggle_pin, id}, _from, state) do
     pinned_ids = Map.get(state, :pinned_ids, MapSet.new())
@@ -76,16 +82,7 @@ defmodule Minga.Test.StubServer do
   def handle_call({:subscribe, _pid}, _from, state), do: {:reply, :ok, state}
   def handle_call({:unsubscribe, _pid}, _from, state), do: {:reply, :ok, state}
 
-  def handle_call(:editor_snapshot, _from, state) do
-    snapshot = %{
-      status: Map.get(state, :status, :idle),
-      pending_approval: Map.get(state, :pending_approval),
-      error: Map.get(state, :error),
-      active_tool_name: Map.get(state, :active_tool_name)
-    }
-
-    {:reply, snapshot, state}
-  end
+  def handle_call(:editor_snapshot, _from, state), do: {:reply, fixture_snapshot(state), state}
 
   def handle_call({:load_session, session_id, nil}, _from, state) do
     case Map.get(state, :load_result, :ok) do
@@ -114,6 +111,61 @@ defmodule Minga.Test.StubServer do
   end
 
   def handle_call(_msg, _from, state), do: {:reply, :ok, state}
+
+  # The stand-in sees one canonical transcript and snapshot for all of its Editor readers.
+  defp fixture_transcript(state) do
+    messages = Map.get(state, :messages, [])
+    pairs = Map.get_lazy(state, :message_ids, fn -> default_message_ids(messages) end)
+    pins = Map.get(state, :pinned_ids, MapSet.new())
+    source = {messages, pairs, pins}
+
+    transcript =
+      case Map.get(state, :transcript_fixture) do
+        {^source, transcript} ->
+          transcript
+
+        previous ->
+          now = DateTime.utc_now()
+
+          transcript =
+            if previous, do: elem(previous, 1), else: Transcript.new([], now, make_ref())
+
+          ids = Enum.map(pairs, &elem(&1, 0))
+          Transcript.restore(transcript, messages, ids, [], TurnUsage.new(), pins, now)
+      end
+
+    {transcript, Map.put(state, :transcript_fixture, {source, transcript})}
+  end
+
+  defp forward_arrival(state, cursor, subscriber, token) do
+    {transcript, state} = fixture_transcript(state)
+
+    capture =
+      case Transcript.since(transcript, cursor) do
+        {:unchanged, cursor} -> {:unchanged, cursor}
+        {:snapshot, snapshot} -> {:replace, :changed, snapshot, 0, nil}
+      end
+
+    send(
+      subscriber,
+      {:agent_event, self(), {:editor_arrival_ready, token, {fixture_snapshot(state), capture}}}
+    )
+
+    state
+  end
+
+  defp fixture_snapshot(state) do
+    status = Map.get(state, :status, :idle)
+
+    %{
+      status: status,
+      display_status: Map.get(state, :display_status, status),
+      pending_approval: Map.get(state, :pending_approval),
+      error: Map.get(state, :error),
+      active_tool_name: Map.get(state, :active_tool_name),
+      connection: Map.get(state, :connection)
+    }
+  end
 
   @spec toggle_pinned_id(MapSet.t(pos_integer()), pos_integer()) :: MapSet.t(pos_integer())
   defp toggle_pinned_id(pinned_ids, id) do

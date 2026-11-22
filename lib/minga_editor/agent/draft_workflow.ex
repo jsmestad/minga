@@ -827,6 +827,45 @@ defmodule MingaEditor.Agent.DraftWorkflow do
 
   def recall(_state, _session), do: :volatile
 
+  @doc "Starts volatile queue recall without waiting for the arriving local Session."
+  @spec recall_volatile(State.t(), pid()) :: State.t()
+  def recall_volatile(state, session) do
+    with %{target: %{session: ^session}, conversation: conversation}
+         when is_reference(conversation) <-
+           state.workspace.agent_ui.connection,
+         %TabBar{} = tabs <- tab_bar(state),
+         owner when is_integer(owner) <- TabBar.active_workspace_id(tabs) do
+      :ok = Session.request_volatile_queue_recall(session, conversation, owner)
+      state
+    else
+      _unconfirmed -> state
+    end
+  end
+
+  @doc "Restores recalled input to the originating conversation without replacing newer draft text."
+  @spec apply_volatile_recall(
+          State.t(),
+          pid(),
+          reference(),
+          pos_integer(),
+          [String.t() | [ReqLLM.Message.ContentPart.t()]]
+        ) :: State.t()
+  def apply_volatile_recall(state, _session, _conversation, _owner, []), do: state
+
+  def apply_volatile_recall(state, session, conversation, owner, queued) do
+    update_origin(state, owner, fn
+      %UIState{connection: %{target: %{session: ^session}, conversation: ^conversation}} = ui ->
+        restored = Session.combine_queue_entries_to_text(queued)
+        draft = PromptBuffer.prompt_text(ui)
+        text = if draft == "", do: restored, else: restored <> "\n\n" <> draft
+        {:unchanged, PromptBuffer.set_prompt_text(ui, text)}
+
+      ui ->
+        {:unchanged, ui}
+    end)
+    |> MingaEditor.schedule_render(16)
+  end
+
   @doc "Requests Stop with durable recall when the original workspace draft is ready."
   @spec stop(State.t(), pid(), {String.t(), String.t()}) :: {:saved, State.t()} | :direct
   def stop(

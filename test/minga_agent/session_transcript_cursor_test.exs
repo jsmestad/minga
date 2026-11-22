@@ -56,6 +56,35 @@ defmodule MingaAgent.SessionTranscriptCursorTest do
     assert pins == MapSet.new()
   end
 
+  test "arrival forwards the current runtime and changed transcript after preceding Session events" do
+    session = start_subscribed_session()
+    assert {:snapshot, %Snapshot{cursor: cursor}} = Session.transcript_since(session, :snapshot)
+    assert :ok = Session.continue(session)
+    assert %{active_tools: []} = Session.editor_snapshot(session)
+
+    send_provider_event(session, %Event.ToolStart{
+      tool_call_id: "arriving",
+      name: "probe",
+      args: %{}
+    })
+
+    arrival = make_ref()
+    request = Session.request_editor_arrival(session, cursor, self(), arrival)
+    assert {:reply, :forwarded} = :gen_server.receive_response(request, :infinity)
+
+    assert_receive {:agent_event, ^session, event}
+                   when elem(event, 0) in [:tool_started, :editor_arrival_ready]
+
+    assert {:tool_started, "arriving", "probe", %{}} = event
+
+    assert_receive {:agent_event, ^session,
+                    {:editor_arrival_ready, ^arrival,
+                     {%{active_tools: [{"arriving", "probe"}]},
+                      {:replace, :changed, %Snapshot{entries: entries}, 1, nil}}}}
+
+    assert Enum.any?(entries, &match?(%Entry{message: {:tool_call, %{id: "arriving"}}}, &1))
+  end
+
   @tag :tmp_dir
   test "same-PID loads and clears reset old revision-zero cursors without persisting runtime identity",
        %{tmp_dir: dir} do

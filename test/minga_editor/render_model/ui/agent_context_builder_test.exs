@@ -29,6 +29,20 @@ defmodule MingaEditor.RenderModel.UI.AgentContextBuilderTest do
   end
 
   describe "build/1" do
+    test "unavailable chat does not display retained tool activity as live" do
+      activity = Activity.start_tool(Activity.new(), "call-before-switch", "shell")
+
+      ui =
+        UIState.new()
+        |> UIState.replace_activity(activity)
+        |> UIState.transition_chat(:unavailable)
+
+      ctx = context(ui, %TraditionalState{})
+
+      refute AgentContextBuilder.visible?(ctx)
+      assert %AgentContext{visible: false} = AgentContextBuilder.build(ctx)
+    end
+
     test "tool approval keeps attention without offering unrelated task review actions" do
       todo = %TodoItem{id: "1", description: "Run tests", status: :in_progress}
 
