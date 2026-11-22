@@ -15,6 +15,12 @@ defmodule MingaAgent.Tools.RetainedShellCaptureTest do
 
   @moduletag :tmp_dir
 
+  # Gated producers cannot exit until the test writes their release file, so the only other end is this deadline.
+  @gated_producer_secs 30
+  # Bounds the wait for early output only to report a hang. It stays well below the producer deadline, so a received
+  # chunk proves the output became visible while the producer was still running.
+  @early_output_ms 10_000
+
   test "canonical shell retains all 135168 bytes with bounded previews and one producer", %{
     tmp_dir: root
   } do
@@ -353,6 +359,8 @@ defmodule MingaAgent.Tools.RetainedShellCaptureTest do
        %{
          tmp_dir: root
        } do
+    # Release the gated producer even if an assertion fails first, so no shell loop outlives the test.
+    on_exit(fn -> File.write(Path.join(root, "release-output"), "") end)
     store = start_store(root)
     ctx = context(root, store, "incremental")
     parent = self()
@@ -361,9 +369,9 @@ defmodule MingaAgent.Tools.RetainedShellCaptureTest do
     task =
       Task.Supervisor.async_nolink(supervisor, fn ->
         Shell.capture(
-          "printf 'early\\n'; while [ ! -f release-output ]; do :; done; printf 'late\\n'",
+          "printf 'early\\n'; while [ ! -f release-output ]; do sleep 0.01; done; printf 'late\\n'",
           root,
-          5,
+          @gated_producer_secs,
           capture_opts(ctx) ++
             [
               on_output: fn chunk ->
@@ -374,7 +382,7 @@ defmodule MingaAgent.Tools.RetainedShellCaptureTest do
         )
       end)
 
-    assert_receive {:chunk, "early\n"}, 1_000
+    assert_receive {:chunk, "early\n"}, @early_output_ms
     assert Task.yield(task, 0) == nil
     File.write!(Path.join(root, "release-output"), "")
     assert {:ok, output} = Task.await(task, 5_000)
@@ -383,6 +391,7 @@ defmodule MingaAgent.Tools.RetainedShellCaptureTest do
   end
 
   test "reader EOF alone cannot complete a producer that is still running", %{tmp_dir: root} do
+    on_exit(fn -> File.write(Path.join(root, "release-exit"), "") end)
     store = start_store(root)
     ctx = context(root, store, "eof-first")
     parent = self()
@@ -391,9 +400,9 @@ defmodule MingaAgent.Tools.RetainedShellCaptureTest do
     task =
       Task.Supervisor.async_nolink(supervisor, fn ->
         Shell.capture(
-          "printf 'before eof\\n'; exec 1>&- 2>&-; while [ ! -f release-exit ]; do :; done; exit 42",
+          "printf 'before eof\\n'; exec 1>&- 2>&-; while [ ! -f release-exit ]; do sleep 0.01; done; exit 42",
           root,
-          5,
+          @gated_producer_secs,
           capture_opts(ctx) ++
             [
               on_output: fn chunk ->
@@ -404,7 +413,7 @@ defmodule MingaAgent.Tools.RetainedShellCaptureTest do
         )
       end)
 
-    assert_receive {:chunk, "before eof\n"}, 1_000
+    assert_receive {:chunk, "before eof\n"}, @early_output_ms
     assert Task.yield(task, 0) == nil
     File.write!(Path.join(root, "release-exit"), "")
     assert {:ok, output} = Task.await(task, 5_000)

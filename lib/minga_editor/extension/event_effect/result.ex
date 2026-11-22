@@ -6,28 +6,37 @@ defmodule MingaEditor.Extension.EventEffect.Result do
   """
 
   alias MingaEditor.Extension.EventDispatchResult
+  alias MingaEditor.Extension.RepositoryJob
   alias MingaEditor.State, as: EditorState
 
   @enforce_keys [:status, :state, :failures]
-  defstruct [:status, :state, :failures]
+  defstruct [:status, :state, :failures, :job]
 
   @type t :: %__MODULE__{
           status: EventDispatchResult.status(),
           state: :base | EditorState.t(),
-          failures: [Minga.Extension.CallbackInvoker.failure()]
+          failures: [Minga.Extension.CallbackInvoker.failure()],
+          job: {Minga.Extension.CallbackInvoker.source(), RepositoryJob.t()} | nil
         }
 
   @type resolved :: %__MODULE__{
           status: EventDispatchResult.status(),
           state: EditorState.t(),
-          failures: [Minga.Extension.CallbackInvoker.failure()]
+          failures: [Minga.Extension.CallbackInvoker.failure()],
+          job: {Minga.Extension.CallbackInvoker.source(), RepositoryJob.t()} | nil
         }
 
   @doc "Keeps a changed candidate, or refers to an exactly unchanged base snapshot."
   @spec from_dispatch(EventDispatchResult.t(), EditorState.t()) :: t()
   def from_dispatch(%EventDispatchResult{} = result, %EditorState{} = base) do
     candidate = if result.state === base, do: :base, else: result.state
-    %__MODULE__{status: result.status, state: candidate, failures: result.failures}
+
+    %__MODULE__{
+      status: result.status,
+      state: candidate,
+      failures: result.failures,
+      job: result.job
+    }
   end
 
   @doc "Resolves the candidate against the request's snapshot before the normal stale check."

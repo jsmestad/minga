@@ -2,7 +2,6 @@ defmodule MingaEditor.Renderer.TextPresentations do
   @moduledoc "Owns committed, active, and explicitly discarded text-presentation leases."
 
   alias MingaEditor.Mouse.TextEvent
-  alias MingaEditor.Mouse.Target.Text, as: TextTarget
   alias MingaEditor.RenderPipeline.Input
   alias MingaEditor.Renderer.RenderWindow
   alias MingaEditor.Renderer.TextInteractionIndex
@@ -109,7 +108,7 @@ defmodule MingaEditor.Renderer.TextPresentations do
 
   @doc "Resolves input only against the presentation currently declared visible."
   @spec resolve(t(), TextEvent.t()) ::
-          {:ok, TextTarget.t()} | {:error, :inactive | atom()}
+          {:ok, TextPresentation.target()} | {:error, :inactive | atom()}
   def resolve(%__MODULE__{} = state, %TextEvent{} = event) do
     state.index |> TextInteractionIndex.reader() |> Reader.resolve(event)
   end

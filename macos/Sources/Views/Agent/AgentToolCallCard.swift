@@ -68,8 +68,8 @@ public struct AgentToolCallCard: View {
         VStack(alignment: .leading, spacing: 0) {
             // Header (clickable to toggle collapse)
             HStack(spacing: Spacing.sm) {
-                // Collapse/expand chevron (only shown when there's result content)
-                if hasResult {
+                // Show the disclosure affordance only when the current session can handle it.
+                if hasResult && sendAction != nil {
                     Image(systemName: collapsed ? "chevron.right" : "chevron.down")
                         .font(Typography.font(.micro, weight: .medium))
                         .foregroundStyle(theme.agentTextFg.opacity(0.4))

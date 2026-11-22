@@ -11,7 +11,7 @@ defmodule Minga.Frontend.Adapter.GUI.GitStatusEncoder do
 
   @spec encode(GitStatus.t(), Caches.t()) :: {binary() | nil, Caches.t()}
   def encode(%GitStatus{} = model, %Caches{} = caches) do
-    fp = :erlang.phash2(model)
+    fp = {model.panel_id, :erlang.phash2(model)}
 
     if fp != caches.last_git_status_fp do
       {encode_command(model), %{caches | last_git_status_fp: fp}}
@@ -45,7 +45,11 @@ defmodule Minga.Frontend.Adapter.GUI.GitStatusEncoder do
       toast: model.git_toast,
       entry_base_path: model.entry_base_path,
       last_commit_message: model.last_commit_message,
-      stash_count: model.stash_count
+      stash_count: model.stash_count,
+      terminal_cursor: model.terminal_cursor,
+      terminal_collapsed: model.terminal_collapsed,
+      panel_id: model.panel_id,
+      commit_target_id: model.commit_target_id
     }
   end
 end

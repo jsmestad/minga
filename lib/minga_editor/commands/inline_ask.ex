@@ -127,8 +127,7 @@ defmodule MingaEditor.Commands.InlineAsk do
 
         case MingaAgent.Session.seed_messages(session_pid, messages) do
           :ok ->
-            # minga:allow-blocking — Editor, once after the user hands an inline ask to the Agent
-            AgentLifecycle.cache_messages(state, MingaAgent.Session.messages(session_pid))
+            AgentLifecycle.sync_transcript(state, :messages_changed)
 
           {:error, reason} ->
             MingaEditor.Shell.Traditional.NoticeWorkflow.publish(

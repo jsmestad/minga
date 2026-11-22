@@ -26,15 +26,17 @@ defmodule MingaEditor.State.WorkspaceReviewTest do
         {:conflict, "lib/a.ex", :changed},
         {"lib/b.ex", {:conflict, :changed}},
         {"lib/c.ex", {:error, :unreadable}},
+        {:error, "lib/d.ex", :outside_project_root},
         {:unknown, "lib/ignored.ex"}
       ]
     }
 
-    assert [^file_ref_a, file_ref_b, file_ref_c] =
+    assert [^file_ref_a, file_ref_b, file_ref_c, file_ref_d] =
              WorkspaceReview.conflict_file_refs("/tmp/minga", details)
 
     assert file_ref_b.relative_path == "lib/b.ex"
     assert file_ref_c.relative_path == "lib/c.ex"
+    assert file_ref_d.relative_path == "lib/d.ex"
     assert WorkspaceReview.conflict_file_refs(nil, details) == []
     assert WorkspaceReview.conflict_file_refs("/tmp/minga", %{}) == []
   end

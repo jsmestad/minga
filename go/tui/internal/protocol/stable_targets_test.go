@@ -28,6 +28,8 @@ func TestGUISendersUseOnlyRemainingActions(t *testing.T) {
 		"GUIActionAgentStopTurn":              false,
 		"GUIActionSemanticItemActivate":       false,
 		"GUIActionHoverOpenAction":            false,
+		"GUIActionGitOpenDiff":                false,
+		"GUIActionGitPullAndRetry":            false,
 		"GUIActionSidebarAction":              false,
 		"GUIActionNotificationDismiss":        false,
 		"GUIActionNotificationAction":         false,

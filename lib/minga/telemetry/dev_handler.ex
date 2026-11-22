@@ -143,6 +143,17 @@ defmodule Minga.Telemetry.DevHandler do
 
   def handle_event(
         [:minga, :agent, :transcript_sync],
+        %{entries_read: count, session_calls: calls},
+        %{outcome: outcome},
+        _config
+      ) do
+    Minga.Log.debug(:agent, fn ->
+      "[agent:transcript_sync] #{outcome} (#{count} entries read, #{calls} Session calls)"
+    end)
+  end
+
+  def handle_event(
+        [:minga, :agent, :transcript_sync],
         %{entries_read: count},
         %{outcome: outcome},
         _config

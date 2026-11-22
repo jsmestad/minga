@@ -3,10 +3,11 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
 
   alias MingaEditor.Agent.PendingApproval
   alias MingaEditor.Agent.PromptBuffer
-  alias MingaEditor.Agent.Transcript
+  alias Minga.Test.TranscriptFixture
   alias MingaEditor.Agent.UIState
   alias MingaAgent.Session.{ConnectionSnapshot, ConnectionTarget}
   alias MingaAgent.Test.ModelSelectionFixture
+  alias MingaAgent.Session.Transcript, as: SourceTranscript
   alias MingaAgent.Tool.Output
   alias MingaAgent.Tool.Output.{Range, Reference}
   alias MingaAgent.ToolApproval
@@ -185,9 +186,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
 
     panel =
       synced_panel([{:assistant, "```elixir\nIO.puts(:hi)\n```"}],
-        styled_messages: [{:markdown_blocks, blocks}],
-        styled_fingerprint:
-          TranscriptProjection.styled_cache_fingerprint(Theme.Fallback.theme().syntax)
+        styled_messages: [{:markdown_blocks, blocks}]
       )
 
     model =
@@ -195,24 +194,6 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
       |> AgentChatBuilder.build()
 
     assert [{1, {:assistant_markdown, ^blocks}} | _] = model.resident_messages
-  end
-
-  test "build/1 ignores stale styled cache when theme syntax changes" do
-    session = fake_session_pid()
-    old_theme = Theme.Fallback.theme()
-    new_theme = %{old_theme | syntax: Map.put(old_theme.syntax, "variable", fg: 0x12_34_56)}
-
-    panel =
-      synced_panel([{:assistant, "cached answer"}],
-        styled_messages: [{:styled_lines, [[{"cached answer", 0x98BE65, 0, 0}]]}],
-        styled_fingerprint: TranscriptProjection.styled_cache_fingerprint(old_theme.syntax)
-      )
-
-    model =
-      context(session, panel, theme: new_theme)
-      |> AgentChatBuilder.build()
-
-    assert {1, {:assistant, "cached answer"}} = hd(model.resident_messages)
   end
 
   test "build/1 keeps the full transcript resident for local frontend scrolling (#2654)" do
@@ -452,8 +433,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
     for styled_messages <- [nil, [{:styled_lines, [[{"cached output", 0xBBC2CF, 0, 0}]]}]] do
       panel =
         synced_panel([{:tool_call, tool_call}, {:tool_call, other}],
-          styled_messages: styled_messages,
-          styled_fingerprint: TranscriptProjection.styled_cache_fingerprint(theme.syntax)
+          styled_messages: styled_messages
         )
 
       model = context(session, panel, agent: agent, theme: theme) |> AgentChatBuilder.build()
@@ -499,36 +479,30 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
     current = ToolCall.new(target.tool_call_id, "shell", args)
     theme = Theme.Fallback.theme()
 
-    for styled_messages <- [nil, [nil, nil, nil, nil]] do
-      panel =
-        synced_panel(
-          [
-            {:tool_call, abandoned},
-            {:tool_call, completed},
-            {:tool_call, rejected},
-            {:tool_call, current}
-          ],
-          styled_messages: styled_messages,
-          styled_fingerprint: TranscriptProjection.styled_cache_fingerprint(theme.syntax)
-        )
+    panel =
+      synced_panel([
+        {:tool_call, abandoned},
+        {:tool_call, completed},
+        {:tool_call, rejected},
+        {:tool_call, current}
+      ])
 
-      model = context(session, panel, agent: agent, theme: theme) |> AgentChatBuilder.build()
+    model = context(session, panel, agent: agent, theme: theme) |> AgentChatBuilder.build()
 
-      assert [
-               {1, {:tool_call, %ToolCallView{status: :running}}},
-               {2, {:tool_call, %ToolCallView{status: :complete, result: "old output"}}},
-               {3, {:tool_call, %ToolCallView{status: :error, result: "denied", is_error: true}}},
-               {4,
-                {:approval_tool_call,
-                 %ApprovalView{
-                   session_id: "session-A",
-                   request_id: "new-admitted-request",
-                   tool_call_id: "reused-tool-id",
-                   summary: "echo current"
-                 }}}
-               | _
-             ] = model.resident_messages
-    end
+    assert [
+             {1, {:tool_call, %ToolCallView{status: :running}}},
+             {2, {:tool_call, %ToolCallView{status: :complete, result: "old output"}}},
+             {3, {:tool_call, %ToolCallView{status: :error, result: "denied", is_error: true}}},
+             {4,
+              {:approval_tool_call,
+               %ApprovalView{
+                 session_id: "session-A",
+                 request_id: "new-admitted-request",
+                 tool_call_id: "reused-tool-id",
+                 summary: "echo current"
+               }}}
+             | _
+           ] = model.resident_messages
   end
 
   test "a retained output offer survives unrelated streaming but not a conversation change" do
@@ -560,31 +534,65 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
     tool = ToolCall.new("retained", "shell", %{}) |> ToolCall.complete("", output)
     preview_only = ToolCall.new("preview", "shell", %{}) |> ToolCall.complete("preview")
     messages = [{:tool_call, tool}, {:tool_call, preview_only}]
-    original = connection.(make_ref())
+    connection = connection.(make_ref())
+    source = SourceTranscript.new(messages, ~U[2026-01-01 00:00:00Z], make_ref())
+    {:snapshot, snapshot} = SourceTranscript.since(source, :snapshot)
+    style = {nil, %{}, fn _message, _id, _syntax -> nil end}
+
+    projection =
+      TranscriptProjection.replace(
+        TranscriptProjection.new(),
+        snapshot.entries,
+        snapshot.pinned_ids,
+        snapshot.cursor,
+        style
+      )
+
+    panel = Panel.install_transcript(Panel.new(), projection, :keep)
 
     assert [
              {1, {:tool_call, %ToolCallView{retained_output_offer: <<_::128>> = offer} = card}},
              {2, {:tool_call, %ToolCallView{retained_output_offer: nil}}}
              | _
            ] =
-             context(session, synced_panel(messages), connection: original)
+             context(session, panel, connection: connection)
              |> AgentChatBuilder.build()
              |> Map.fetch!(:resident_messages)
 
     assert <<0x0B, ^offer::binary-size(16), _::binary>> =
              AgentChatMessageCodec.encode_message_body({:tool_call, card})
 
+    source = SourceTranscript.append(source, {:assistant, "Streaming"})
+    assert {:changes, changes} = SourceTranscript.since(source, snapshot.cursor)
+
+    {streaming_projection, :follow} =
+      TranscriptProjection.apply_changes(projection, changes, :follow, style)
+
     streaming =
-      context(session, synced_panel(messages ++ [{:assistant, "Streaming"}]),
-        connection: original
+      context(session, Panel.install_transcript(panel, streaming_projection, :keep),
+        connection: connection
       )
       |> AgentChatBuilder.build()
 
     assert [{1, {:tool_call, %ToolCallView{retained_output_offer: ^offer}}} | _] =
              streaming.resident_messages
 
+    replacement = SourceTranscript.new(messages, ~U[2026-01-01 00:00:00Z], make_ref())
+    {:snapshot, snapshot} = SourceTranscript.since(replacement, :snapshot)
+
+    changed_projection =
+      TranscriptProjection.replace(
+        streaming_projection,
+        snapshot.entries,
+        snapshot.pinned_ids,
+        snapshot.cursor,
+        style
+      )
+
     changed =
-      context(session, synced_panel(messages), connection: connection.(make_ref()))
+      context(session, Panel.install_transcript(panel, changed_projection, :keep),
+        connection: connection
+      )
       |> AgentChatBuilder.build()
 
     assert [
@@ -651,16 +659,11 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
   defp message_summary({id, {kind, _, _}}), do: {id, kind, nil}
 
   defp synced_panel(messages, opts \\ []) do
-    {panel_opts, transcript_opts} =
-      Keyword.split(opts, [:scroll, :styled_messages, :styled_fingerprint])
-
-    display = Transcript.display(messages, transcript_opts)
+    projection = TranscriptFixture.projection(messages, opts)
 
     Panel.new()
-    |> Panel.cache_transcript_display(display, Keyword.get(panel_opts, :styled_messages),
-      styled_fingerprint: Keyword.get(panel_opts, :styled_fingerprint)
-    )
-    |> maybe_set_panel_scroll(Keyword.get(panel_opts, :scroll))
+    |> Panel.install_transcript(projection, :keep)
+    |> maybe_set_panel_scroll(Keyword.get(opts, :scroll))
   end
 
   defp maybe_set_panel_scroll(panel, nil), do: panel

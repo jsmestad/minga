@@ -10,6 +10,7 @@ defmodule MingaEditor.KeyDispatch do
   """
 
   alias Minga.Buffer
+  alias Minga.Command
   alias Minga.Config
   alias Minga.Editing, as: CoreEditing
 
@@ -306,7 +307,8 @@ defmodule MingaEditor.KeyDispatch do
 
   @spec add_gui_only_leader_bindings(Bindings.node_t(), EditorState.t()) :: Bindings.node_t()
   defp add_gui_only_leader_bindings(trie, state) do
-    if MingaEditor.Frontend.gui?(state.frontend.capabilities) do
+    if MingaEditor.Frontend.gui?(state.frontend.capabilities) and
+         match?({:ok, _}, Command.lookup(:git_diff_toggle_layout)) do
       trie
       |> promote_default_diff_binding_for_gui()
       |> bind_gui_side_by_side_if_missing()

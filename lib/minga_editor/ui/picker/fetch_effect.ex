@@ -14,21 +14,29 @@ defmodule MingaEditor.UI.Picker.FetchEffect do
   alias MingaEditor.Effect.Policy
   alias MingaEditor.Effect.Request
   alias MingaEditor.PickerUI
+  alias MingaEditor.Extension.Picker.Item, as: PublicItem
+  alias MingaEditor.Extension.Picker.Source, as: PublicContract
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.UI.Picker.Candidate
   alias MingaEditor.UI.Picker.Context
   alias MingaEditor.UI.Picker.DirectorySource
   alias MingaEditor.UI.Picker.FileSource
   alias MingaEditor.UI.Picker.FilesystemContext
+  alias MingaEditor.UI.Picker.PublicSource
   alias MingaEditor.UI.Picker.Source
 
   @enforce_keys [:source, :callback_source, :context, :revision]
   defstruct [:source, :callback_source, :context, :revision, :fetch_identity]
 
+  @typep input ::
+           Context.t()
+           | {:page, term(), PublicContract.page_request()}
+           | {:preview, PublicItem.t(), term()}
+
   @type t :: %__MODULE__{
           source: module(),
           callback_source: ContributionCleanup.contribution_source() | nil,
-          context: Context.t(),
+          context: input(),
           revision: reference(),
           fetch_identity: term() | nil
         }
@@ -36,12 +44,13 @@ defmodule MingaEditor.UI.Picker.FetchEffect do
   @typedoc "Normalized data allowed to cross from the picker worker to the Editor."
   @type result ::
           {:ok, [MingaEditor.UI.Picker.item()], [Candidate.t()], Source.fetch_meta()}
+          | PublicSource.preview_result()
 
   @doc "Builds a latest-wins picker fetch request."
   @spec request(
           module(),
           ContributionCleanup.contribution_source() | nil,
-          Context.t(),
+          input(),
           reference()
         ) :: Request.t()
   def request(source, callback_source, %Context{} = context, revision)
@@ -57,6 +66,30 @@ defmodule MingaEditor.UI.Picker.FetchEffect do
     build_request(effect, source, callback_source)
   end
 
+  def request(source, callback_source, {:page, _args, page} = input, revision) do
+    effect = %__MODULE__{
+      source: source,
+      callback_source: callback_source,
+      context: input,
+      revision: revision,
+      fetch_identity: page
+    }
+
+    build_request(effect, source, callback_source)
+  end
+
+  def request(source, callback_source, {:preview, %PublicItem{id: id}, _args} = input, revision) do
+    effect = %__MODULE__{
+      source: source,
+      callback_source: callback_source,
+      context: input,
+      revision: revision,
+      fetch_identity: id
+    }
+
+    Request.new(effect, {:picker_preview, source}, Policy.latest_wins(), source: callback_source)
+  end
+
   @spec build_request(t(), module(), ContributionCleanup.contribution_source() | nil) ::
           Request.t()
   defp build_request(effect, source, nil) do
@@ -69,6 +102,20 @@ defmodule MingaEditor.UI.Picker.FetchEffect do
 
   @impl true
   @spec run(t()) :: {:ok, result()} | {:error, term()}
+  def run(%__MODULE__{context: {:page, args, page}} = effect) do
+    case PublicSource.fetch(effect.callback_source, effect.source, args, page) do
+      {:ok, items, next} ->
+        {:ok, {:ok, items, Candidate.from_items(items), %{extension_page: next}}}
+
+      {:error, _message} = error ->
+        error
+    end
+  end
+
+  def run(%__MODULE__{context: {:preview, item, args}} = effect) do
+    {:ok, PublicSource.preview(effect.callback_source, effect.source, item, args)}
+  end
+
   def run(%__MODULE__{} = effect) do
     case Source.fetch(effect.source, effect.context, effect.callback_source) do
       {:ok, items, meta} -> {:ok, {:ok, items, Candidate.from_items(items), meta}}
@@ -102,8 +149,27 @@ defmodule MingaEditor.UI.Picker.FetchEffect do
 
   def render?(%Outcome{}), do: false
 
-  @spec apply_result(EditorState.t(), t(), tuple(), Outcome.t()) ::
+  @spec apply_result(EditorState.t(), t(), result() | {:error, String.t()}, Outcome.t()) ::
           {EditorState.t(), Outcome.t()}
+  defp apply_result(
+         state,
+         %__MODULE__{context: {:preview, _item, _args}} = effect,
+         result,
+         outcome
+       ) do
+    case PickerUI.apply_preview_result(
+           state,
+           effect.source,
+           effect.callback_source,
+           effect.revision,
+           effect.fetch_identity,
+           result
+         ) do
+      {:ok, state} -> {state, outcome}
+      :stale -> {state, Outcome.stale(outcome, :picker_preview_superseded)}
+    end
+  end
+
   defp apply_result(state, effect, result, outcome) do
     case PickerUI.apply_fetch_result(
            state,

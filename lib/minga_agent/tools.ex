@@ -1270,7 +1270,7 @@ defmodule MingaAgent.Tools do
 
         fn args ->
           path = resolve_and_validate_path!(root, args["path"])
-          LspRename.execute(path, args["line"], args["column"], args["new_name"])
+          LspRename.execute(context, path, args["line"], args["column"], args["new_name"])
         end
       end
     )
@@ -1323,7 +1323,7 @@ defmodule MingaAgent.Tools do
           opts = []
           opts = if args["column"], do: [{:col, args["column"]} | opts], else: opts
           opts = if args["apply"], do: [{:apply, args["apply"]} | opts], else: opts
-          result = LspCodeActions.execute(path, args["line"], opts)
+          result = LspCodeActions.execute(context, path, args["line"], opts)
           if args["apply"], do: result, else: retained_process_result(result, context)
         end
       end

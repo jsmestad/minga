@@ -366,7 +366,7 @@ defmodule MingaEditor.StatusBar.Data do
       content: %StatusAgent{
         model_name: if(panel.model_name != "", do: panel.model_name, else: "Agent"),
         session_status: AgentState.display_status(agent),
-        message_count: panel.transcript.turn_count
+        message_count: UIState.TranscriptProjection.turn_count(panel.transcript)
       }
     }
   end

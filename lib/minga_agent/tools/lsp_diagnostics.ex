@@ -23,24 +23,27 @@ defmodule MingaAgent.Tools.LspDiagnostics do
   @spec execute(String.t()) :: {:ok, String.t()}
   def execute(path) when is_binary(path) do
     abs_path = Path.expand(path)
-    uri = LspBridge.path_to_uri(abs_path)
-    diags = Diagnostics.for_uri(uri)
+    lookup = LspBridge.document_for_path(abs_path)
 
-    case diags do
-      [] ->
-        # Check if we even have an LSP client for context
-        case LspBridge.client_for_path(abs_path) do
-          {:ok, _} ->
-            {:ok, "#{relative_path(path)}: No diagnostics. File is clean."}
-
-          {:error, reason} ->
-            {:ok, "#{relative_path(path)}: No diagnostics available. #{reason}"}
-        end
-
-      diagnostics ->
-        {:ok, format_diagnostics(path, diagnostics)}
+    case lookup |> diagnostics_uri(abs_path) |> Diagnostics.for_uri() do
+      [] -> {:ok, no_diagnostics(path, lookup)}
+      diagnostics -> {:ok, format_diagnostics(path, diagnostics)}
     end
   end
+
+  # An open document's diagnostics are published under the URI its server
+  # opened it with, which can name a symlink. A file that is not open is
+  # known by its own path.
+  @spec diagnostics_uri(LspBridge.document_result(), String.t()) :: String.t()
+  defp diagnostics_uri({:ok, %{uri: uri}}, _abs_path), do: uri
+  defp diagnostics_uri({:error, _reason}, abs_path), do: LspBridge.path_to_uri(abs_path)
+
+  @spec no_diagnostics(String.t(), LspBridge.document_result()) :: String.t()
+  defp no_diagnostics(path, {:ok, _document}),
+    do: "#{relative_path(path)}: No diagnostics. File is clean."
+
+  defp no_diagnostics(path, {:error, reason}),
+    do: "#{relative_path(path)}: No diagnostics available. #{reason}"
 
   # ── Formatting ─────────────────────────────────────────────────────────────
 

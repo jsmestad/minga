@@ -2681,14 +2681,19 @@ struct GUIGitStatusDecoderTests {
         data.append(1) // error level
         data.append(1) // pull_and_retry action
         appendString16(&data, "Push failed: fetch first")
+        data.append(contentsOf: [0, 0, 0, 1, 0, 0, 0, 42])
         appendString16(&data, "/repo")
         appendString16(&data, "feat: previous commit")
         appendU16(&data, 3) // stash_count
+        appendU32(&data, 4) // terminal cursor, ignored by macOS
+        data.append(2) // terminal collapsed sections
+        data.append(contentsOf: [0, 0, 0, 2, 0, 0, 0, 42]) // panel identity
+        data.append(contentsOf: [0, 0, 0, 3, 0, 0, 0, 43]) // commit target identity
 
         let (cmd, size) = try decodeCommand(data: data, offset: 0)
         #expect(size == data.count)
 
-        guard case .guiGitStatus(let repoState, let syncing, let ahead, let behind, let branchName, let entries, let toast, let entryBasePath, let lastCommitMessage, let stashCount) = cmd else {
+        guard case .guiGitStatus(let repoState, let syncing, let ahead, let behind, let branchName, let entries, let toast, let entryBasePath, let lastCommitMessage, let stashCount, let toastID, let panelID, let commitTargetID) = cmd else {
             Issue.record("Expected .guiGitStatus"); return
         }
 
@@ -2705,9 +2710,50 @@ struct GUIGitStatusDecoderTests {
         #expect(toast?.message == "Push failed: fetch first")
         #expect(toast?.level == 1)
         #expect(toast?.action == 1)
+        #expect(toastID == 0x1_0000_002A)
         #expect(entryBasePath == "/repo")
         #expect(lastCommitMessage == "feat: previous commit")
         #expect(stashCount == 3)
+        #expect(panelID == 0x2_0000_002A)
+        #expect(commitTargetID == 0x3_0000_002B)
+        #expect(throws: ProtocolDecodeError.self) {
+            try decodeCommand(data: Data(data.dropLast()), offset: 0)
+        }
+
+        var zeroCommitTarget = Data(data.dropLast(8))
+        zeroCommitTarget.append(Data(repeating: 0, count: 8))
+        #expect(throws: ProtocolDecodeError.self) {
+            try decodeCommand(data: zeroCommitTarget, offset: 0)
+        }
+    }
+
+    @Test("Absent Git status panel carries two zero identities")
+    func decodeAbsentGitStatus() throws {
+        var data = Data([OP_GUI_GIT_STATUS, 1, 0]) // not a repo, not syncing
+        appendU16(&data, 0) // ahead
+        appendU16(&data, 0) // behind
+        appendString16(&data, "")
+        appendU16(&data, 0) // entry_count
+        data.append(0) // toast_present
+        appendString16(&data, "") // entry_base_path
+        appendString16(&data, "") // last_commit_message
+        appendU16(&data, 0) // stash_count
+        appendU32(&data, 0) // terminal cursor
+        data.append(0) // terminal collapsed sections
+        data.append(Data(repeating: 0, count: 16)) // panel and commit target identity
+
+        let (cmd, size) = try decodeCommand(data: data, offset: 0)
+        #expect(size == data.count)
+        guard case .guiGitStatus(_, _, _, _, _, _, _, _, _, _, _, let panelID, let commitTargetID) = cmd else {
+            Issue.record("Expected .guiGitStatus"); return
+        }
+        #expect(panelID == 0)
+        #expect(commitTargetID == 0)
+
+        data[data.count - 1] = 1
+        #expect(throws: ProtocolDecodeError.self) {
+            try decodeCommand(data: data, offset: 0)
+        }
     }
 
     @Test("Invalid repo state in gui_git_status throws malformed")

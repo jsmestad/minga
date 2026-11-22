@@ -404,6 +404,19 @@ func EncodeGUINotificationAction(id, actionID string) []byte {
 	return appendString16(out, actionID)
 }
 
+// EncodeGUIGitOpenDiff opens the clicked row in the displayed panel instance.
+func EncodeGUIGitOpenDiff(panelID uint64, path string, section byte) []byte {
+	out := make([]byte, 2, 13+len(path))
+	out[0], out[1] = generated.OPGuiAction, generated.GUIActionGitOpenDiff
+	out = binary.BigEndian.AppendUint64(out, panelID)
+	return append(appendString16(out, path), section)
+}
+
+// EncodeGUIGitPullAndRetry activates the exact displayed remote-error toast.
+func EncodeGUIGitPullAndRetry(id uint64) []byte {
+	return binary.BigEndian.AppendUint64([]byte{generated.OPGuiAction, generated.GUIActionGitPullAndRetry}, id)
+}
+
 // EncodeGUIObservatoryInspect encodes an observatory_inspect action. Wire
 // format: <gui_action, 0x4D, pid_len:u16, pid>. Mirrors the macOS info-circle
 // button (ProtocolEncoder.swift:1104 sendObservatoryInspect): a click on an

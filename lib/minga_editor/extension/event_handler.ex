@@ -10,6 +10,7 @@ defmodule MingaEditor.Extension.EventHandler do
   """
 
   alias Minga.Extension.CallbackInvoker
+  alias MingaEditor.Extension.RepositoryJob
   alias MingaEditor.State, as: EditorState
 
   @typedoc "A runtime editor event offered to registered extensions."
@@ -22,7 +23,10 @@ defmodule MingaEditor.Extension.EventHandler do
   @type event_kind :: :buffer_saved | :editor_action | :source_unload
 
   @typedoc "A handler either updates editor state or successfully declines."
-  @type callback_result :: {:handled, EditorState.t()} | :not_matched
+  @type callback_result ::
+          {:handled, EditorState.t()}
+          | {:schedule, EditorState.t(), RepositoryJob.t()}
+          | :not_matched
 
   @doc "Handles one runtime editor event in a bounded effect worker."
   @callback handle_editor_event(EditorState.t(), event()) :: callback_result()

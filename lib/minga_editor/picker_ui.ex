@@ -23,9 +23,15 @@ defmodule MingaEditor.PickerUI do
   alias MingaEditor.Effect.Request
   alias MingaEditor.EffectScheduler
   alias MingaEditor.State, as: EditorState
+  alias MingaEditor.Extension.Picker.Source, as: PublicContract
+  alias MingaEditor.Handlers.BufferRegistry
+  alias MingaEditor.Shell.Traditional.ModalWorkflow
+  alias MingaEditor.Shell.Traditional.NoticeWorkflow
   alias MingaEditor.State.ModalOverlay.Picker, as: PickerPayload
   alias MingaEditor.State.Picker, as: PickerState
+  alias MingaEditor.State.Picker.Extension, as: ExtensionPicker
   alias MingaEditor.State.BufferLifecycle
+  alias MingaEditor.State.Buffers
   alias MingaEditor.UI.Picker
   alias MingaEditor.UI.Picker.AgentRetainedOutputSource
   alias MingaEditor.UI.Picker.Context
@@ -37,6 +43,7 @@ defmodule MingaEditor.PickerUI do
   alias MingaEditor.UI.Picker.FilesystemQuery
   alias MingaEditor.UI.Picker.FindFileSession
   alias MingaEditor.UI.Picker.Item
+  alias MingaEditor.UI.Picker.PublicSource
   alias MingaEditor.UI.Picker.Source
 
   import Bitwise
@@ -102,6 +109,58 @@ defmodule MingaEditor.PickerUI do
     end
   end
 
+  @doc "Opens the extension-owned picker and starts its first result page."
+  @spec open_extension(state(), module(), PublicSource.owner(), term()) :: state()
+  def open_extension(state, source, owner, args) do
+    case PublicSource.presentation(owner, source) do
+      {:ok, title, preview?, live_file_preview?} ->
+        state = prepare_picker_open(state)
+
+        origin =
+          if live_file_preview? and is_integer(picker_restore_index(state)),
+            do: state.workspace.buffers.active
+
+        extension = ExtensionPicker.new(args, preview?, origin)
+        max_vis = max(state.frontend.terminal_viewport.rows - 3, 5)
+        picker = Picker.new([], title: title, max_visible: max_vis, results: :all)
+        picker_state = PickerState.extension_loading(picker, source, owner, extension)
+        state = ModalWorkflow.open(state, {:picker, PickerPayload.new(picker_state)})
+
+        case state.shell_runtime.state.modal do
+          {:picker, %PickerPayload{picker_ui: ^picker_state}} ->
+            schedule_extension_page(state, picker_state, :start)
+
+          _modal ->
+            state
+        end
+
+      {:error, message} ->
+        NoticeWorkflow.publish(state, message)
+    end
+  end
+
+  @spec schedule_extension_page(state(), PickerState.t(), PublicContract.page_request()) ::
+          state()
+  defp schedule_extension_page(state, %PickerState{extension: extension} = picker_state, page) do
+    {loading, revision} = PickerState.begin_fetch(picker_state, page)
+    state = update_picker(state, fn _current -> loading end)
+
+    request =
+      FetchEffect.request(
+        loading.source,
+        loading.callback_source,
+        {:page, extension.args, page},
+        revision
+      )
+
+    schedule_fetch(state, request, loading.source, revision)
+  end
+
+  @spec prepare_picker_open(state()) :: state()
+  defp prepare_picker_open(state) do
+    state |> restore_live_origin() |> cancel_current_preview() |> cancel_current_fetch()
+  end
+
   @spec open_sync(state(), module(), map() | nil, PickerState.callback_source()) :: state()
   defp open_sync(state, source_module, context, callback_source) do
     ctx = Context.from_editor_state(state, context)
@@ -112,6 +171,7 @@ defmodule MingaEditor.PickerUI do
         state
 
       _ ->
+        state = prepare_picker_open(state)
         open_with_items(state, source_module, items, context, callback_source)
     end
   end
@@ -140,7 +200,7 @@ defmodule MingaEditor.PickerUI do
   @doc "Opens an async picker in its loading state without starting a fetch."
   @spec open_loading(state(), module(), map() | nil) :: {state(), reference()}
   def open_loading(state, source_module, context \\ nil) do
-    state = cancel_current_fetch(state)
+    state = prepare_picker_open(state)
     max_vis = max(state.frontend.terminal_viewport.rows - 3, 5)
     callback_source = Source.source_identity(source_module)
 
@@ -230,14 +290,16 @@ defmodule MingaEditor.PickerUI do
       {:ok, payload} ->
         {:ok, items, candidates, meta} = project_fetch_result(source_module, state, result)
         picker_state = payload.picker_ui
-        picker = Picker.put_candidates(picker_state.picker, items, candidates)
-        new_picker_state = PickerState.complete_fetch(picker_state, picker)
+
+        new_picker_state =
+          picker_state |> commit_fetch(items, candidates, meta) |> update_fallback_after_fetch()
 
         new_state =
           state
           |> MingaEditor.Shell.Traditional.ModalWorkflow.transition(
             {:picker, PickerPayload.put_picker_ui(payload, new_picker_state)}
           )
+          |> maybe_request_extension_preview()
           |> apply_fetch_status(meta)
 
         {:ok, new_state}
@@ -251,7 +313,11 @@ defmodule MingaEditor.PickerUI do
     case live_fetch(state, source_module, revision, fetch_identity, nil) do
       {:ok, payload} ->
         picker_state = payload.picker_ui
-        new_picker_state = PickerState.fail_fetch(picker_state, reason)
+
+        new_picker_state =
+          picker_state
+          |> PickerState.fail_fetch(reason)
+          |> maybe_invalidate_extension_fetch()
 
         {:ok,
          MingaEditor.Shell.Traditional.ModalWorkflow.transition(
@@ -262,6 +328,27 @@ defmodule MingaEditor.PickerUI do
       :stale ->
         :stale
     end
+  end
+
+  @spec maybe_invalidate_extension_fetch(PickerState.t()) :: PickerState.t()
+  defp maybe_invalidate_extension_fetch(%PickerState{extension: %ExtensionPicker{}} = ps),
+    do: PickerState.invalidate_fetch(ps)
+
+  defp maybe_invalidate_extension_fetch(ps), do: ps
+
+  @spec commit_fetch(PickerState.t(), [Item.t()], [Picker.Candidate.t()], Source.fetch_meta()) ::
+          PickerState.t()
+  defp commit_fetch(
+         %PickerState{extension: %ExtensionPicker{}} = ps,
+         items,
+         candidates,
+         %{extension_page: page}
+       ) do
+    PickerState.commit_extension_page(ps, items, candidates, page)
+  end
+
+  defp commit_fetch(ps, items, candidates, _meta) do
+    PickerState.complete_fetch(ps, Picker.put_candidates(ps.picker, items, candidates))
   end
 
   @spec project_fetch_result(module(), state(), fetch_result()) :: fetch_result()
@@ -671,7 +758,12 @@ defmodule MingaEditor.PickerUI do
   @spec install_query_edit(state(), Picker.t(), String.t(), non_neg_integer()) :: state()
   defp install_query_edit(state, picker, query, edit_seq) do
     filtered = Picker.filter(picker, query)
-    state = update_picker(state, &PickerState.accept_query_edit(&1, filtered, edit_seq))
+
+    state =
+      update_picker(state, fn ps ->
+        PickerState.accept_query_edit(ps, picker_fallback(ps, filtered), edit_seq)
+      end)
+
     maybe_preview_selection(state)
   end
 
@@ -792,35 +884,20 @@ defmodule MingaEditor.PickerUI do
   # ── Normal picker handlers ─────────────────────────────────────────────────
 
   def handle_key(
-        %{
-          shell_runtime: %{
-            state: %{
-              modal: {:picker, %{picker_ui: %{source: source, callback_source: callback_source}}}
-            }
-          }
-        } = state,
+        %{shell_runtime: %{state: %{modal: {:picker, %PickerPayload{}}}}} = state,
         @escape,
         _mods
-      ) do
-    new_state = Source.on_cancel(source, state, callback_source)
-    close(new_state)
-  end
+      ),
+      do: cancel_picker(state)
 
   # C-g → cancel (Emacs-style)
   def handle_key(
-        %{
-          shell_runtime: %{
-            state: %{
-              modal: {:picker, %{picker_ui: %{source: source, callback_source: callback_source}}}
-            }
-          }
-        } = state,
+        %{shell_runtime: %{state: %{modal: {:picker, %PickerPayload{}}}}} = state,
         ?g,
         mods
       )
       when band(mods, @ctrl) != 0 do
-    new_state = Source.on_cancel(source, state, callback_source)
-    close(new_state)
+    cancel_picker(state)
   end
 
   def handle_key(
@@ -902,6 +979,17 @@ defmodule MingaEditor.PickerUI do
 
   # Tab → toggle multi-select mark on current item, then move down
   def handle_key(
+        %{
+          shell_runtime: %{
+            state: %{modal: {:picker, %{picker_ui: %{extension: %ExtensionPicker{}}}}}
+          }
+        } = state,
+        9,
+        _mods
+      ),
+      do: state
+
+  def handle_key(
         %{shell_runtime: %{state: %{modal: {:picker, %{picker_ui: %{picker: picker}}}}}} = state,
         9,
         _mods
@@ -936,7 +1024,7 @@ defmodule MingaEditor.PickerUI do
         state
 
       item ->
-        actions = action_menu_actions(source, picker, item, callback_source)
+        actions = current_item_actions(state, source, picker, item, callback_source)
 
         case actions do
           [] -> state
@@ -961,7 +1049,7 @@ defmodule MingaEditor.PickerUI do
       %Item{} = item ->
         callback_source = current_callback_source(state)
 
-        case Picker.Source.shortcut_action(source, item, {:ctrl, ?d}, callback_source) do
+        case current_shortcut_action(state, source, item, {:ctrl, ?d}, callback_source) do
           nil -> state
           action -> run_source_action_and_close(state, source, action, item)
         end
@@ -1015,7 +1103,9 @@ defmodule MingaEditor.PickerUI do
         switch_back_to_original(state)
 
       {%Picker{} = new_picker, _source_switch} ->
-        state = update_picker(state, &PickerState.update_picker(&1, new_picker))
+        state =
+          update_picker(state, &PickerState.update_picker(&1, picker_fallback(&1, new_picker)))
+
         maybe_preview_selection(state)
     end
   end
@@ -1076,7 +1166,7 @@ defmodule MingaEditor.PickerUI do
     case PickerState.resolve_item_activation(picker_state, generation, activation_id) do
       {:ok, index, item} ->
         selected_picker = Picker.select_index(picker, index)
-        state = update_picker(state, &PickerState.update_picker(&1, selected_picker))
+        state = install_picker(state, PickerState.update_picker(picker_state, selected_picker))
         select_item(state, selected_picker, item, source, callback_source)
 
       :error ->
@@ -1133,9 +1223,18 @@ defmodule MingaEditor.PickerUI do
   end
 
   defp run_source_action(state, source, action_id, item) do
-    callback_source = current_callback_source(state)
-    new_state = state |> restore_picker_origin() |> close()
-    run_action(source, action_id, item, new_state, callback_source)
+    case {picker_state(state), item} do
+      {%PickerState{extension: %ExtensionPicker{args: args}, callback_source: owner},
+       %Item{meta: %{extension_item: public_item}}} ->
+        PublicSource.on_action(owner, source, close(state), action_id, public_item, args)
+
+      {%PickerState{extension: %ExtensionPicker{}}, _item} ->
+        state
+
+      {%PickerState{callback_source: callback_source}, _item} ->
+        new_state = state |> restore_picker_origin() |> close()
+        run_action(source, action_id, item, new_state, callback_source)
+    end
   end
 
   @spec type_printable_char(EditorState.t(), PickerState.t(), String.t()) :: EditorState.t()
@@ -1160,10 +1259,34 @@ defmodule MingaEditor.PickerUI do
 
       :no_switch ->
         new_picker = Picker.type_char(picker, char)
-        state = update_picker(state, &PickerState.update_picker(&1, new_picker))
+
+        state =
+          update_picker(state, &PickerState.update_picker(&1, picker_fallback(&1, new_picker)))
+
         maybe_preview_selection(state)
     end
   end
+
+  @spec update_fallback_after_fetch(PickerState.t()) :: PickerState.t()
+  defp update_fallback_after_fetch(%PickerState{picker: picker} = state) do
+    case picker_fallback(state, picker) do
+      ^picker -> state
+      updated -> PickerState.update_picker(state, updated)
+    end
+  end
+
+  @spec picker_fallback(PickerState.t(), Picker.t()) :: Picker.t()
+  defp picker_fallback(
+         %PickerState{extension: %ExtensionPicker{args: args, page: :done}, load_status: :ready} =
+           state,
+         %Picker{query: query, filtered: []} = picker
+       )
+       when query != "" do
+    item = PublicSource.fallback(state.callback_source, state.source, query, args)
+    Picker.offer_fallback(picker, item)
+  end
+
+  defp picker_fallback(_state, picker), do: picker
 
   @spec select_item(
           EditorState.t(),
@@ -1172,11 +1295,96 @@ defmodule MingaEditor.PickerUI do
           module(),
           PickerState.callback_source()
         ) :: EditorState.t() | {EditorState.t(), {:execute_command, atom()}}
+  defp select_item(
+         %{
+           shell_runtime: %{
+             state: %{modal: {:picker, %{picker_ui: %{extension: %ExtensionPicker{}}}}}
+           }
+         } = state,
+         _picker,
+         item,
+         _source,
+         _callback_source
+       ),
+       do: select_extension_item(state, item)
+
   defp select_item(state, picker, item, source, callback_source) do
     if bulk_select?(source, picker) do
       run_bulk_select_and_close(state, picker, source, callback_source)
     else
       select_single_item(state, item, source, callback_source)
+    end
+  end
+
+  @doc "Loads a continuation page or activates the selected extension item."
+  @spec select_extension_item(state(), Item.t()) :: state()
+  def select_extension_item(state, %Item{id: {:extension_more, _ref} = id}) do
+    case picker_state(state) do
+      %PickerState{load_status: :loading} ->
+        state
+
+      %PickerState{extension: %ExtensionPicker{page: {:more, cursor}}, picker: picker} = ps ->
+        case Enum.find_index(picker.filtered, &(&1.id == id)) do
+          nil ->
+            state
+
+          index ->
+            ps = PickerState.update_picker(ps, Picker.select_index(picker, index))
+            schedule_extension_page(state, ps, {:continue, cursor})
+        end
+
+      %PickerState{} ->
+        state
+    end
+  end
+
+  def select_extension_item(state, %Item{meta: %{extension_item: item}}) do
+    %PickerState{source: source, callback_source: owner, extension: %ExtensionPicker{args: args}} =
+      picker_state(state)
+
+    PublicSource.on_select(owner, source, close(state), item, args)
+  end
+
+  @spec current_item_actions(
+          state(),
+          module(),
+          Picker.t(),
+          Item.t(),
+          PickerState.callback_source()
+        ) ::
+          [Source.action_entry()]
+  defp current_item_actions(state, source, picker, item, owner) do
+    case {picker_state(state), item} do
+      {%PickerState{extension: %ExtensionPicker{args: args}},
+       %Item{meta: %{extension_item: public_item}}} ->
+        PublicSource.actions(owner, source, public_item, args)
+
+      {%PickerState{extension: %ExtensionPicker{}}, _item} ->
+        []
+
+      {%PickerState{}, _item} ->
+        action_menu_actions(source, picker, item, owner)
+    end
+  end
+
+  @spec current_shortcut_action(
+          state(),
+          module(),
+          Item.t(),
+          Source.shortcut(),
+          PickerState.callback_source()
+        ) :: term()
+  defp current_shortcut_action(state, source, item, shortcut, owner) do
+    case {picker_state(state), item} do
+      {%PickerState{extension: %ExtensionPicker{args: args}},
+       %Item{meta: %{extension_item: public_item}}} ->
+        PublicSource.shortcut_action(owner, source, public_item, shortcut, args)
+
+      {%PickerState{extension: %ExtensionPicker{}}, _item} ->
+        nil
+
+      {%PickerState{}, _item} ->
+        Source.shortcut_action(source, item, shortcut, owner)
     end
   end
 
@@ -1369,10 +1577,47 @@ defmodule MingaEditor.PickerUI do
 
   defp cancel_current_fetch(state), do: state
 
+  @spec cancel_current_preview(state()) :: state()
+  defp cancel_current_preview(
+         %{
+           effect_scheduler: scheduler,
+           shell_runtime: %{
+             state: %{
+               modal:
+                 {:picker,
+                  %{
+                    picker_ui: %{
+                      source: source,
+                      extension: %ExtensionPicker{preview: {:pending, _, _}}
+                    }
+                  }}
+             }
+           }
+         } = state
+       ) do
+    _result = EffectScheduler.cancel_resource(scheduler, {:picker_preview, source})
+    state
+  end
+
+  defp cancel_current_preview(state), do: state
+
+  @spec cancel_picker(state()) :: state()
+  defp cancel_picker(state) do
+    case picker_state(state) do
+      %PickerState{extension: %ExtensionPicker{}} ->
+        close(state)
+
+      %PickerState{source: source, callback_source: owner} ->
+        close(Source.on_cancel(source, state, owner))
+    end
+  end
+
   @doc "Closes the picker and resets picker-related state."
   @spec close(state()) :: state()
   def close(state) do
     state
+    |> restore_live_origin()
+    |> cancel_current_preview()
     |> cancel_current_fetch()
     |> dismiss()
   end
@@ -1384,7 +1629,11 @@ defmodule MingaEditor.PickerUI do
           state,
         source
       ) do
-    if PickerState.owned_by?(picker, source), do: dismiss(state), else: state
+    if PickerState.owned_by?(picker, source) do
+      state |> restore_live_origin() |> dismiss()
+    else
+      state
+    end
   end
 
   def remove_source(state, _source), do: state
@@ -1407,6 +1656,15 @@ defmodule MingaEditor.PickerUI do
   @spec refresh_items(state()) :: state()
   def refresh_items(
         %{shell_runtime: %{state: %{modal: {:picker, %{picker_ui: %{picker: nil}}}}}} = state
+      ),
+      do: state
+
+  def refresh_items(
+        %{
+          shell_runtime: %{
+            state: %{modal: {:picker, %{picker_ui: %{extension: %ExtensionPicker{}}}}}
+          }
+        } = state
       ),
       do: state
 
@@ -1457,8 +1715,14 @@ defmodule MingaEditor.PickerUI do
   """
   @spec update_picker(state(), (PickerState.t() -> PickerState.t())) :: state()
   def update_picker(state, fun) do
+    state
+    |> install_picker(fun.(picker_state(state)))
+    |> maybe_request_extension_preview()
+  end
+
+  @spec install_picker(state(), PickerState.t()) :: state()
+  defp install_picker(state, new_pui) do
     {:picker, payload} = state.shell_runtime.state.modal
-    new_pui = fun.(payload.picker_ui)
 
     MingaEditor.Shell.Traditional.ModalWorkflow.transition(
       state,
@@ -1570,6 +1834,15 @@ defmodule MingaEditor.PickerUI do
   # the original buffer, not the preview buffer currently shown in the window.
   @spec restore_picker_origin(state()) :: state()
   defp restore_picker_origin(
+         %{
+           shell_runtime: %{
+             state: %{modal: {:picker, %{picker_ui: %{extension: %ExtensionPicker{}}}}}
+           }
+         } = state
+       ),
+       do: restore_live_origin(state)
+
+  defp restore_picker_origin(
          %{shell_runtime: %{state: %{modal: {:picker, %{picker_ui: %{restore: idx}}}}}} = state
        )
        when is_integer(idx) do
@@ -1578,10 +1851,169 @@ defmodule MingaEditor.PickerUI do
 
   defp restore_picker_origin(state), do: state
 
+  @spec restore_live_origin(state()) :: state()
+  defp restore_live_origin(
+         %{shell_runtime: %{state: %{modal: {:picker, payload}}}, workspace: %{buffers: buffers}} =
+           state
+       ) do
+    case payload.picker_ui do
+      %PickerState{extension: %ExtensionPicker{live_origin: pid}}
+      when is_pid(pid) and pid != buffers.active ->
+        case Buffers.switch_to_pid(buffers, pid) do
+          ^buffers -> state
+          origin -> MingaEditor.BufferActivation.activate(state, origin, notify_shell?: false)
+        end
+
+      _picker ->
+        state
+    end
+  end
+
+  defp restore_live_origin(state), do: state
+
+  @spec maybe_request_extension_preview(state()) :: state()
+  defp maybe_request_extension_preview(
+         %{shell_runtime: %{state: %{modal: {:picker, %PickerPayload{picker_ui: ps}}}}} = state
+       ) do
+    case ps do
+      %PickerState{extension: %ExtensionPicker{preview?: true}, picker: picker} ->
+        request_extension_preview(state, ps, Picker.selected_item(picker))
+
+      _picker ->
+        state
+    end
+  end
+
+  @spec request_extension_preview(state(), PickerState.t(), Item.t() | nil) :: state()
+  defp request_extension_preview(state, ps, %Item{meta: %{extension_item: item}}) do
+    id = item.id
+
+    case ps.extension.preview do
+      {:pending, _revision, ^id} ->
+        state
+
+      {:resolved, ^id, _result} ->
+        state
+
+      _previous ->
+        revision = make_ref()
+
+        request =
+          FetchEffect.request(
+            ps.source,
+            ps.callback_source,
+            {:preview, item, ps.extension.args},
+            revision
+          )
+
+        state =
+          install_picker(state, PickerState.put_extension_preview(ps, {:pending, revision, id}))
+
+        case submit_preview(state.effect_scheduler, request) do
+          :ok ->
+            state
+
+          {:error, reason} ->
+            message = "Picker preview not scheduled: #{inspect(reason)}"
+
+            install_picker(
+              restore_live_origin(state),
+              PickerState.put_extension_preview(ps, {:resolved, id, {:error, message}})
+            )
+        end
+    end
+  end
+
+  defp request_extension_preview(state, %PickerState{extension: %{preview: nil}}, _no_item),
+    do: state
+
+  defp request_extension_preview(state, ps, _no_item) do
+    state
+    |> cancel_current_preview()
+    |> restore_live_origin()
+    |> install_picker(PickerState.put_extension_preview(ps, nil))
+  end
+
+  @spec submit_preview(pid() | nil, Request.t()) :: :ok | {:error, term()}
+  defp submit_preview(nil, _request), do: {:error, :scheduler_unavailable}
+
+  defp submit_preview(scheduler, request) do
+    case EffectScheduler.schedule(scheduler, request) do
+      {:ok, _id, _disposition} -> :ok
+      {:error, _reason} = error -> error
+    end
+  catch
+    :exit, reason -> {:error, reason}
+  end
+
+  @doc "Installs a preview only while its source, selection, and generation are current."
+  @spec apply_preview_result(
+          state(),
+          module(),
+          PickerState.callback_source(),
+          reference(),
+          term(),
+          PublicSource.preview_result()
+        ) :: {:ok, state()} | :stale
+  def apply_preview_result(
+        %{shell_runtime: %{state: %{modal: {:picker, %PickerPayload{picker_ui: ps}}}}} = state,
+        source,
+        owner,
+        revision,
+        id,
+        result
+      ) do
+    case ps do
+      %PickerState{
+        source: ^source,
+        callback_source: ^owner,
+        extension: %ExtensionPicker{preview: {:pending, ^revision, ^id}, live_origin: origin},
+        picker: picker
+      } ->
+        if Picker.selected_id(picker) == {:extension_item, id} do
+          state =
+            install_picker(state, PickerState.put_extension_preview(ps, {:resolved, id, result}))
+
+          {:ok, preview_file_live(state, origin, result)}
+        else
+          :stale
+        end
+
+      _picker ->
+        :stale
+    end
+  end
+
+  def apply_preview_result(_state, _source, _owner, _revision, _id, _result), do: :stale
+
+  @spec preview_file_live(state(), pid() | nil, PublicSource.preview_result()) :: state()
+  defp preview_file_live(state, origin, {:file, path, _lines}) when is_pid(origin) do
+    preview_state = %{
+      state
+      | buffer_lifecycle: BufferLifecycle.expect_buffer(state.buffer_lifecycle, :preview)
+    }
+
+    case BufferRegistry.open_or_activate_path(preview_state, path, existing_target: :buffer) do
+      {:ok, new_state, _pid, _status} -> new_state
+      {:error, _reason} -> restore_live_origin(state)
+    end
+  end
+
+  defp preview_file_live(state, _origin, _result), do: restore_live_origin(state)
+
   # Live preview: temporarily apply the source's on_select for the highlighted item.
   # Sets buffer_add_context to :preview so add_buffer calls inside on_select update
   # the current tab in-place instead of creating a new tab.
   @spec maybe_preview_selection(state()) :: state()
+  defp maybe_preview_selection(
+         %{
+           shell_runtime: %{
+             state: %{modal: {:picker, %{picker_ui: %{extension: %ExtensionPicker{}}}}}
+           }
+         } = state
+       ),
+       do: state
+
   defp maybe_preview_selection(
          %{
            shell_runtime: %{

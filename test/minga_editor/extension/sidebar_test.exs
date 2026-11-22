@@ -44,6 +44,22 @@ defmodule MingaEditor.Extension.SidebarTest do
              })
   end
 
+  test "generic sidebar registration cannot claim the native Git Status id or kind", %{
+    table: table
+  } do
+    source = {:extension, :example}
+
+    assert {:error, {:reserved_sidebar_id, "git_status"}} =
+             Sidebar.register(table, source, %{id: "git_status", display_name: "Status"})
+
+    assert {:error, {:reserved_sidebar_kind, "git_status"}} =
+             Sidebar.register(table, source, %{
+               id: "custom",
+               display_name: "Status",
+               semantic_kind: "git_status"
+             })
+  end
+
   test "rejects duplicate sidebar ids from different sources", %{table: table} do
     assert :ok =
              Sidebar.register(table, {:extension, :alpha}, %{

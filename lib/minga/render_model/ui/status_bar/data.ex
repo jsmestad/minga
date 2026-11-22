@@ -26,7 +26,6 @@ defmodule Minga.RenderModel.UI.StatusBar.Data do
           | :extension_confirm
           | :tool_confirm
           | :delete_confirm
-          | :branch_delete_confirm
   @type modeline_segment ::
           {atom() | String.t(), String.t(), non_neg_integer(), non_neg_integer(), keyword(),
            atom() | nil}

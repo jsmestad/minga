@@ -1,7 +1,7 @@
 defmodule MingaSdk.MixProject do
   use Mix.Project
 
-  @version "0.1.1"
+  @version "0.1.2"
   @source_url "https://github.com/jsmestad/minga"
 
   # Defined only by a running Minga editor; the SDK never defines it.
@@ -77,6 +77,7 @@ defmodule MingaSdk.MixProject do
           Minga.Buffer.EditDelta,
           Minga.Buffer.EditSource
         ],
+        Git: [Minga.Git, ~r/^Minga\.Git\./],
         "Model routes": [
           Minga.Extension.ModelRoutes,
           ~r/^MingaAgent\.InferenceRoute/

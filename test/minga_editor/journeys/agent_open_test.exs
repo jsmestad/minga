@@ -10,6 +10,7 @@ defmodule MingaEditor.Journeys.AgentOpenTest do
   alias Minga.Config.Options
   alias Minga.Distribution.Events.NodeDisconnectedEvent
   alias Minga.Project.FileRef
+  alias Minga.Test.HeadlessPort
   alias Minga.Test.StubServer
   alias MingaAgent.Session
   alias MingaAgent.Subagent.Handle
@@ -80,7 +81,7 @@ defmodule MingaEditor.Journeys.AgentOpenTest do
     refute match?(%{visible?: true}, agent_chat(ctx))
 
     send_keys_async(ctx, "<SPC>aa")
-    assert %{visible?: true, prompt: "unfinished"} = agent_chat(ctx)
+    assert %{visible?: true, prompt: "unfinished"} = await_conversation(ctx)
   end
 
   test "Next agent tab from the file reopens the existing draft", %{editor_ctx: ctx} do
@@ -91,7 +92,7 @@ defmodule MingaEditor.Journeys.AgentOpenTest do
     refute match?(%{visible?: true}, agent_chat(ctx))
 
     send_keys_async(ctx, "<SPC>\ta")
-    assert %{visible?: true, prompt: "existing"} = agent_chat(ctx)
+    assert %{visible?: true, prompt: "existing"} = await_conversation(ctx)
   end
 
   test "tab clicks, workspace navigation and Sessions restore the intended Agent draft", %{
@@ -105,17 +106,25 @@ defmodule MingaEditor.Journeys.AgentOpenTest do
     send_gui_action(ctx, {:select_tab, manual.id})
     refute match?(%{visible?: true}, agent_chat(ctx))
 
-    send_gui_action(ctx, {:select_tab, agent.id})
-    assert %{visible?: true, lifecycle: :conversation, prompt: "arrival draft"} = agent_chat(ctx)
+    frame = HeadlessPort.prepare_await(ctx.port)
+    send(ctx.editor, {:minga_input, {:gui_action, {:select_tab, agent.id}}})
+
+    assert {:ok,
+            %{agent_chat: %{visible?: true, lifecycle: :conversation, prompt: "arrival draft"}}} =
+             HeadlessPort.collect_frame(frame)
 
     send_keys_async(ctx, "<SPC>ansecond draft<Esc>")
     assert %{visible?: true, lifecycle: :conversation, prompt: "second draft"} = agent_chat(ctx)
 
     send_gui_action(ctx, {:execute_command, "workspace_prev"})
-    assert %{visible?: true, lifecycle: :conversation, prompt: "arrival draft"} = agent_chat(ctx)
+
+    assert %{visible?: true, lifecycle: :conversation, prompt: "arrival draft"} =
+             await_conversation(ctx)
 
     send_gui_action(ctx, {:execute_command, "workspace_next"})
-    assert %{visible?: true, lifecycle: :conversation, prompt: "second draft"} = agent_chat(ctx)
+
+    assert %{visible?: true, lifecycle: :conversation, prompt: "second draft"} =
+             await_conversation(ctx)
 
     send_gui_action(ctx, {:execute_command, "agent_session_switcher"})
     offer = modal_picker!(ctx).picker_ui.activation_offer
@@ -135,7 +144,9 @@ defmodule MingaEditor.Journeys.AgentOpenTest do
     })
 
     refute picker_open?(ctx)
-    assert %{visible?: true, lifecycle: :conversation, prompt: "arrival draft"} = agent_chat(ctx)
+
+    assert %{visible?: true, lifecycle: :conversation, prompt: "arrival draft"} =
+             await_conversation(ctx)
   end
 
   test "closing a file tab restores the previous Agent composer", %{
@@ -152,7 +163,7 @@ defmodule MingaEditor.Journeys.AgentOpenTest do
     send_gui_action(ctx, {:close_tab, scratch.id})
 
     assert %{visible?: true, lifecycle: :conversation, prompt: "work in progress"} =
-             agent_chat(ctx)
+             await_conversation(ctx)
   end
 
   test "closing an inactive file restores an editable Agent composer after its buffer died", %{
@@ -166,7 +177,7 @@ defmodule MingaEditor.Journeys.AgentOpenTest do
     send_gui_action(ctx, {:close_tab, file.id})
 
     assert %{visible?: true, lifecycle: :conversation, prompt: "", prompt_vim_mode: 1} =
-             agent_chat(ctx)
+             await_conversation(ctx)
 
     send_keys_async(ctx, "Recovered composer<Esc>")
     assert %{visible?: true, prompt: "Recovered composer"} = agent_chat(ctx)
@@ -177,7 +188,7 @@ defmodule MingaEditor.Journeys.AgentOpenTest do
     announce_background_session(ctx)
 
     send_gui_action(ctx, {:close_tab, file.id})
-    assert %{visible?: true, lifecycle: :conversation, prompt: ""} = agent_chat(ctx)
+    assert %{visible?: true, lifecycle: :conversation, prompt: ""} = await_conversation(ctx)
 
     send_keys_async(ctx, "iChild draft<Esc>")
     assert %{visible?: true, prompt: "Child draft"} = agent_chat(ctx)
@@ -190,7 +201,7 @@ defmodule MingaEditor.Journeys.AgentOpenTest do
     refute match?(%{visible?: true}, agent_chat(ctx))
 
     send_gui_action(ctx, {:select_tab, child.id})
-    assert %{visible?: true, lifecycle: :conversation, prompt: ""} = agent_chat(ctx)
+    assert %{visible?: true, lifecycle: :conversation, prompt: ""} = await_conversation(ctx)
   end
 
   test "an authenticated remote arrival does not revive from queued events after disconnect", %{
@@ -254,7 +265,7 @@ defmodule MingaEditor.Journeys.AgentOpenTest do
     end)
 
     send_keys_async(ctx, "\t")
-    assert %{visible?: true, lifecycle: :conversation, prompt: ""} = agent_chat(ctx)
+    assert %{visible?: true, lifecycle: :conversation, prompt: ""} = await_conversation(ctx)
 
     send_keys_async(ctx, "iFollow-up draft<Esc>")
     assert %{visible?: true, prompt: "Follow-up draft"} = agent_chat(ctx)
@@ -292,6 +303,29 @@ defmodule MingaEditor.Journeys.AgentOpenTest do
   end
 
   defp active_tab(ctx), do: Runtime.active_tab(editor_state(ctx).shell_runtime)
+
+  defp await_conversation(ctx),
+    do: await_conversation(ctx, System.monotonic_time(:millisecond) + 5_000)
+
+  defp await_conversation(ctx, deadline) do
+    ref = HeadlessPort.prepare_await(ctx.port)
+
+    case agent_chat(ctx) do
+      %{lifecycle: :conversation} = model ->
+        model
+
+      model ->
+        timeout = max(deadline - System.monotonic_time(:millisecond), 0)
+
+        case HeadlessPort.collect_frame(ref, timeout) do
+          {:ok, _snapshot} ->
+            await_conversation(ctx, deadline)
+
+          {:error, :timeout} ->
+            flunk("No committed Agent conversation; last model: #{inspect(model)}")
+        end
+    end
+  end
 
   defp announce_background_session(ctx) do
     child =

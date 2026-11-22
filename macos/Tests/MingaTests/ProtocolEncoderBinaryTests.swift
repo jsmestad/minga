@@ -9,15 +9,20 @@ import Testing
 import Foundation
 import MingaUI
 
-/// Helper to create a pipe-backed encoder and read the framed output.
-private func captureFrame(_ action: (ProtocolEncoder) -> Void) -> Data {
+/// Captures every framed byte written by the encoder.
+private func captureWire(_ action: (ProtocolEncoder) -> Void) -> Data {
     let pipe = Pipe()
     let encoder = try! ProtocolEncoder(output: pipe.fileHandleForWriting)
     action(encoder)
     #expect(encoder.waitForPendingWritesForTesting())
     // Close write end so read doesn't block
     pipe.fileHandleForWriting.closeFile()
-    let raw = pipe.fileHandleForReading.readDataToEndOfFile()
+    return pipe.fileHandleForReading.readDataToEndOfFile()
+}
+
+/// Helper to read the first payload from a pipe-backed encoder.
+private func captureFrame(_ action: (ProtocolEncoder) -> Void) -> Data {
+    let raw = captureWire(action)
     // Strip the 4-byte length prefix to get the payload
     guard raw.count >= 4 else { return Data() }
     let len = Int(raw[0]) << 24 | Int(raw[1]) << 16 | Int(raw[2]) << 8 | Int(raw[3])
@@ -759,46 +764,77 @@ struct EncoderGUIActionTests {
         #expect(decoded == path)
     }
 
-    @Test("git_commit encodes amend flag, length, and message")
+    @Test("bulk and remote Git actions encode exactly the displayed panel identity")
+    func gitPanelActionLayout() {
+        let panelID: UInt64 = 0x0102_0304_0506_0708
+        let actions: [(OutboundAction, UInt8)] = [
+            (.gitStageAll(panelID: panelID), 0x1B),
+            (.gitUnstageAll(panelID: panelID), 0x1C),
+            (.gitPush(panelID: panelID), 0x38),
+            (.gitPull(panelID: panelID), 0x39),
+            (.gitFetch(panelID: panelID), 0x3A),
+        ]
+
+        for (action, subtype) in actions {
+            let payload = captureFrame { $0.send(action) }
+            #expect(payload == Data([0x07, subtype, 1, 2, 3, 4, 5, 6, 7, 8]))
+        }
+    }
+
+    @Test("commit and amend encode the draft's panel, amend flag, and exact UTF-8 message")
     func gitCommitLayout() {
-        let message = "feat: polish git panel"
-        let payload = captureFrame { $0.send(.gitCommit(message: message)) }
+        let panelID: UInt64 = 0x0102_0304_0506_0708
+        let actions: [(OutboundAction, UInt8)] = [
+            (.gitCommit(panelID: panelID, message: "café"), 0),
+            (.gitCommitAmend(panelID: panelID, message: "café"), 1),
+        ]
 
-        #expect(payload[0] == OP_GUI_ACTION)
-        #expect(payload[1] == GUI_ACTION_GIT_COMMIT)
-        #expect(payload[2] == 0)
-        let messageLen = readU16(payload, 3)
-        #expect(messageLen == UInt16(message.utf8.count))
-        let decoded = String(data: payload[5..<(5 + Int(messageLen))], encoding: .utf8)
-        #expect(decoded == message)
+        for (action, amendFlag) in actions {
+            let payload = captureFrame { $0.send(action) }
+            let expected = Data([0x07, 0x1D, 1, 2, 3, 4, 5, 6, 7, 8, amendFlag, 0, 5, 0x63, 0x61, 0x66, 0xC3, 0xA9])
+            #expect(payload == expected)
+        }
     }
 
-    @Test("git_commit amend encodes amend flag, length, and message")
-    func gitCommitAmendLayout() {
-        let message = "fixup: previous subject"
-        let payload = captureFrame { $0.send(.gitCommitAmend(message: message)) }
+    @Test("Git panel actions with zero identity emit only the rejection log")
+    func rejectsMissingGitPanelIdentity() {
+        let actions: [OutboundAction] = [
+            .gitStageAll(panelID: 0), .gitUnstageAll(panelID: 0),
+            .gitPush(panelID: 0), .gitPull(panelID: 0), .gitFetch(panelID: 0),
+            .gitCommit(panelID: 0, message: "test"), .gitCommitAmend(panelID: 0, message: "test"),
+        ]
 
-        #expect(payload[0] == OP_GUI_ACTION)
-        #expect(payload[1] == GUI_ACTION_GIT_COMMIT)
-        #expect(payload[2] == 1)
-        let messageLen = readU16(payload, 3)
-        #expect(messageLen == UInt16(message.utf8.count))
-        let decoded = String(data: payload[5..<(5 + Int(messageLen))], encoding: .utf8)
-        #expect(decoded == message)
+        for action in actions {
+            let wire = captureWire { #expect(!$0.send(action).wasAccepted) }
+            let payloadSize = wire.prefix(4).reduce(0) { ($0 << 8) | Int($1) }
+            #expect(wire.count == 4 + payloadSize)
+            #expect(wire.dropFirst(4).first == OP_LOG_MESSAGE)
+        }
     }
 
-    @Test("git_open_diff encodes path and section")
-    func gitOpenDiffLayout() {
-        let path = "lib/editor.ex"
-        let payload = captureFrame { $0.send(.gitOpenDiff(path: path, section: 2)) }
+    @Test("Git row actions encode the offered panel identity, path, and section")
+    func gitRowActionLayout() {
+        let target = GitStatusEntryTarget(panelID: 0x2_0000_002A, path: "lib/café.ex", section: 2)
+        let actions: [(OutboundAction, UInt8)] = [
+            (.gitOpenFile(target), GUI_ACTION_GIT_OPEN_FILE),
+            (.gitOpenDiff(target), GUI_ACTION_GIT_OPEN_DIFF),
+            (.gitStageFile(target), GUI_ACTION_GIT_STAGE_FILE),
+            (.gitUnstageFile(target), GUI_ACTION_GIT_UNSTAGE_FILE),
+            (.gitDiscardFile(target), GUI_ACTION_GIT_DISCARD_FILE),
+        ]
 
-        #expect(payload[0] == OP_GUI_ACTION)
-        #expect(payload[1] == GUI_ACTION_GIT_OPEN_DIFF)
-        let pathLen = readU16(payload, 2)
-        #expect(pathLen == UInt16(path.utf8.count))
-        let decoded = String(data: payload[4..<(4 + Int(pathLen))], encoding: .utf8)
-        #expect(decoded == path)
-        #expect(payload[4 + Int(pathLen)] == 2)
+        for (action, opcode) in actions {
+            let payload = captureFrame { $0.send(action) }
+            #expect(payload[0] == OP_GUI_ACTION)
+            #expect(payload[1] == opcode)
+            #expect(readU64(payload, 2) == target.panelID)
+            let pathLen = Int(readU16(payload, 10))
+            #expect(pathLen == target.path.utf8.count)
+            #expect(payload.count == 13 + pathLen)
+            let decoded = String(data: payload[12..<(12 + pathLen)], encoding: .utf8)
+            #expect(decoded == target.path)
+            #expect(payload[12 + pathLen] == target.section)
+        }
     }
 
 

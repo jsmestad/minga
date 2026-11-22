@@ -824,6 +824,7 @@ func DecodeGitToast(data []byte, offset int, windowEnd int) (GitToast, int, erro
 	var level GitToastLevel
 	var action GitToastAction
 	var message string
+	var id uint64
 	if present == 1 {
 		var err error
 		if err := decodeRequireWindow(windowEnd, pos+1, "level"); err != nil {
@@ -840,12 +841,18 @@ func DecodeGitToast(data []byte, offset int, windowEnd int) (GitToast, int, erro
 		if err != nil {
 			return GitToast{}, offset, err
 		}
+		if err := decodeRequireWindow(windowEnd, pos+8, "id"); err != nil {
+			return GitToast{}, offset, err
+		}
+		id = decodeU64(data, pos)
+		pos += 8
 	}
 	return GitToast{
 		Present: present,
 		Level:   level,
 		Action:  action,
 		Message: message,
+		ID:      id,
 	}, pos, nil
 }
 
@@ -2754,6 +2761,26 @@ func DecodeGuiGitStatusFields(data []byte, offset int, windowEnd int) (GuiGitSta
 	}
 	stashCount := decodeU16(data, pos)
 	pos += 2
+	if err := decodeRequireWindow(windowEnd, pos+4, "terminal_cursor"); err != nil {
+		return GuiGitStatusFields{}, offset, err
+	}
+	terminalCursor := decodeU32(data, pos)
+	pos += 4
+	if err := decodeRequireWindow(windowEnd, pos+1, "terminal_collapsed"); err != nil {
+		return GuiGitStatusFields{}, offset, err
+	}
+	terminalCollapsed := data[pos]
+	pos++
+	if err := decodeRequireWindow(windowEnd, pos+8, "panel_id"); err != nil {
+		return GuiGitStatusFields{}, offset, err
+	}
+	panelID := decodeU64(data, pos)
+	pos += 8
+	if err := decodeRequireWindow(windowEnd, pos+8, "commit_target_id"); err != nil {
+		return GuiGitStatusFields{}, offset, err
+	}
+	commitTargetID := decodeU64(data, pos)
+	pos += 8
 	return GuiGitStatusFields{
 		RepoState:         repoState,
 		Syncing:           syncing,
@@ -2765,6 +2792,10 @@ func DecodeGuiGitStatusFields(data []byte, offset int, windowEnd int) (GuiGitSta
 		EntryBasePath:     entryBasePath,
 		LastCommitMessage: lastCommitMessage,
 		StashCount:        stashCount,
+		TerminalCursor:    terminalCursor,
+		TerminalCollapsed: terminalCollapsed,
+		PanelID:           panelID,
+		CommitTargetID:    commitTargetID,
 	}, pos, nil
 }
 

@@ -74,7 +74,6 @@ class ReleaseContentsTest(unittest.TestCase):
             self.put(self.priv / name, header(target), True)
         for name in ("tutor.txt", "tree_sitter/api.h", "tree_sitter/parser.h", "queries/elixir/highlights.scm"):
             self.put(self.priv / name)
-        self.put(self.priv / "extensions/git_porcelain/lib/extension.ex")
 
     def run_checker(self, *args, success=True):
         result = subprocess.run([sys.executable, str(SCRIPT), str(self.release), "--target", self.target, *map(str, args)], capture_output=True, text=True, timeout=10)
@@ -83,6 +82,24 @@ class ReleaseContentsTest(unittest.TestCase):
         else:
             self.assertNotEqual(result.returncode, 0, result.stdout)
         return result
+
+    def test_rejects_stale_bundled_extension_source(self):
+        for name in ("git_porcelain", "git_extended"):
+            with self.subTest(name=name):
+                leaked = self.put(self.priv / "extensions" / name / "lib/extension.ex")
+                rejected = self.run_checker(success=False)
+                self.assertIn("Unexpected source in packaged extensions", rejected.stderr)
+                leaked.unlink()
+                leaked.parent.rmdir()
+                leaked.parent.parent.rmdir()
+
+    def test_requires_bundled_sources_only_when_selected_source_ships_them(self):
+        old_source = self.root / "older-source"
+        self.put(old_source / "extensions/git_porcelain/lib/minga_git_porcelain.ex")
+        rejected = self.run_checker("--source-tree", old_source, success=False)
+        self.assertIn("Missing bundled extension source: git_porcelain", rejected.stderr)
+        self.put(self.priv / "extensions/git_porcelain/lib/minga_git_porcelain.ex")
+        self.run_checker("--source-tree", old_source)
 
     def test_accepts_all_four_actual_native_header_targets(self):
         for target in ("linux_x86_64", "linux_aarch64", "macos_x86_64", "macos_aarch64"):
@@ -207,7 +224,7 @@ class ReleaseContentsTest(unittest.TestCase):
                         self.run_checker(success=False)
 
     def test_missing_required_resources_and_executables_fail(self):
-        paths = [self.priv / "minga-parser", self.priv / "minga-renderer-go", self.priv / "minga-hook-runner", self.priv / "minga-shell-output-reader", self.priv / "tutor.txt", self.priv / "tree_sitter/api.h", self.priv / "queries/elixir/highlights.scm", self.priv / "extensions/git_porcelain/lib/extension.ex", self.release / "releases/0.1.0/start.boot", self.release / "bin/minga"]
+        paths = [self.priv / "minga-parser", self.priv / "minga-renderer-go", self.priv / "minga-hook-runner", self.priv / "minga-shell-output-reader", self.priv / "tutor.txt", self.priv / "tree_sitter/api.h", self.priv / "queries/elixir/highlights.scm", self.release / "releases/0.1.0/start.boot", self.release / "bin/minga"]
         for path in paths:
             with self.subTest(path=path):
                 contents = path.read_bytes()

@@ -27,9 +27,18 @@ defmodule MingaEditor.Extension.EditorAPI do
   @typedoc "Editor state (opaque to extensions)."
   @type state :: EditorState.t()
 
-  @doc "Displays a transient editor notice and returns the updated command state."
+  @doc "Shows a short notice in the editor."
   @spec notice(state(), String.t()) :: state()
   def notice(state, message) when is_binary(message), do: NoticeWorkflow.publish(state, message)
+
+  @doc "Returns the current directory workspace, or `nil` when there is none."
+  @spec project_root(state()) :: String.t() | nil
+  def project_root(%EditorState{workspace: %{file_tree: tree}}),
+    do: tree.original_root || tree.project_root
+
+  @doc "Resolves Git for the selected project, or the active file when no project is open."
+  @spec git_root(state()) :: {:ok, String.t()} | :not_git
+  def git_root(state), do: Minga.Git.root_for(project_root(state) || active_path(state))
 
   @doc """
   Opens a file by path in the current window.
@@ -41,7 +50,11 @@ defmodule MingaEditor.Extension.EditorAPI do
   @spec open_file(state(), String.t()) :: state()
   def open_file(state, path) when is_binary(path) do
     abs_path = Path.expand(path)
-    BufferRegistry.open_file_by_path(state, abs_path)
+
+    case BufferRegistry.open_or_activate_path(state, abs_path, existing_target: :tab) do
+      {:ok, updated, _buffer, _status} -> updated
+      {:error, _reason} -> notice(state, "Could not open #{abs_path}")
+    end
   end
 
   @doc """

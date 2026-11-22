@@ -4,6 +4,49 @@ import MingaUI
 import SwiftUI
 import Testing
 
+/// Bounded waits for focus tests. Each wait observes the event a test depends on instead of counting scheduler turns,
+/// and fails with a description of that event when it does not arrive in time.
+@MainActor
+enum FocusWait {
+    static let timeout: Duration = .seconds(5)
+    private static let pollInterval: Duration = .milliseconds(10)
+
+    struct Timeout: Error, CustomStringConvertible {
+        let description: String
+    }
+
+    /// Polls `condition`, sleeping between checks so the main run loop can process AppKit and SwiftUI work.
+    static func until(
+        _ event: String, timeout: Duration = timeout, _ condition: () -> Bool
+    ) async throws {
+        let deadline = ContinuousClock.now + timeout
+        while !condition() {
+            guard ContinuousClock.now < deadline else {
+                throw Timeout(description: "Timed out after \(timeout) waiting for \(event)")
+            }
+            try await Task.sleep(for: pollInterval)
+        }
+    }
+
+    /// Awaits the policy's deferred reclaims until a full poll interval passes with no new reclaim scheduled.
+    /// A reclaim that SwiftUI or AppKit work schedules during the settle is therefore awaited too.
+    static func settle(_ policy: EditorFocusPolicy, timeout: Duration = timeout) async throws {
+        let deadline = ContinuousClock.now + timeout
+        await policy.deferredReclaimSettled()
+        var observed = policy.deferredReclaimsScheduled
+        while ContinuousClock.now < deadline {
+            try await Task.sleep(for: pollInterval)
+            await policy.deferredReclaimSettled()
+            let scheduled = policy.deferredReclaimsScheduled
+            if scheduled == observed { return }
+            observed = scheduled
+        }
+        throw Timeout(
+            description: "Timed out after \(timeout) waiting for deferred focus reclaims to stop; \(observed) scheduled so far"
+        )
+    }
+}
+
 /// Replays native events through the production policy and a real offscreen responder chain.
 @MainActor
 final class FocusConformanceHarness {
@@ -54,9 +97,9 @@ final class FocusConformanceHarness {
         window.close()
     }
 
-    /// Lets deferred policy and SwiftUI work settle without bypassing the policy's public API.
-    func settle() async {
-        for _ in 0..<20 { await Task.yield() }
+    /// Awaits deferred reclaims, including any that SwiftUI work schedules while settling, rather than counting scheduler turns.
+    func settle() async throws {
+        try await FocusWait.settle(policy)
     }
 
     func perform(event: String, args: [String: Any]) async throws {
@@ -106,7 +149,7 @@ final class FocusConformanceHarness {
         case "first_frame_rendered": policy.firstFrameDidRender()
         default: throw ConformanceError.badTranscript("unknown native_event \(event)")
         }
-        await settle()
+        try await settle()
     }
 
     var firstResponder: String {
@@ -188,7 +231,8 @@ struct FocusLifecycleConformanceTests {
         let text = policySource as NSString
         let methods = Set(pattern.matches(in: policySource, range: NSRange(location: 0, length: text.length)).map { text.substring(with: $0.range(at: 1)) })
         // Queries, attachment lifetime, key routing, and committed-frame input have separate contracts.
-        let excluded: Set<String> = ["nativeTextEditingIsActive", "presentationFocusReady", "requestAccessibilityFocus", "requestPresentationFocus", "routeAgentOverlayEvent", "attach", "detach", "focusOwnerDidChange", "shouldYieldSystemCommandShortcut"]
+        // `deferredReclaimSettled` only observes completion of work that a lifecycle entry point already scheduled.
+        let excluded: Set<String> = ["nativeTextEditingIsActive", "presentationFocusReady", "requestAccessibilityFocus", "requestPresentationFocus", "routeAgentOverlayEvent", "attach", "detach", "focusOwnerDidChange", "shouldYieldSystemCommandShortcut", "deferredReclaimSettled"]
         let mapped = Set(FocusConformanceHarness.eventMethods.values)
         #expect(methods.subtracting(excluded) == mapped, "unmapped lifecycle methods: \(methods.subtracting(excluded).subtracting(mapped)); obsolete mappings: \(mapped.subtracting(methods))")
         var recorded: Set<String> = []

@@ -147,15 +147,21 @@ func TestRunSessionConcurrentFailuresReturnOneTerminalCause(t *testing.T) {
 
 func TestRunSessionReaderFailureUnblocksProducerBehindFullQueue(t *testing.T) {
 	readerGate := make(chan struct{})
+	releaseReader := sync.OnceFunc(func() { close(readerGate) })
+	t.Cleanup(releaseReader)
 	readerStarted := make(chan struct{})
 	inputErr := errors.New("input failed")
 	writer := newBlockingWriteCloser()
 	out := make(chan []byte, 1)
 	out <- []byte("being written")
 	done := make(chan struct{})
-	ctx, stop := context.WithCancel(context.Background())
-	model := ui.NewWithTransport(80, 24, out, done)
-	program := tea.NewProgram(model, tea.WithContext(ctx), tea.WithInput(nil), tea.WithoutRenderer())
+	ctx, stop := context.WithCancel(t.Context())
+	defer stop()
+	const width, height = 80, 24
+	model := ui.NewWithTransport(width, height, out, done)
+	// Bubble Tea sends a startup resize even without terminal input. Match the
+	// model's size so that only the test fills the blocked writer's queue.
+	program := tea.NewProgram(model, tea.WithContext(ctx), tea.WithInput(nil), tea.WithOutput(io.Discard), tea.WithWindowSize(width, height), tea.WithoutRenderer())
 	sessionResult := make(chan error, 1)
 	go func() {
 		sessionResult <- runSession(program, &gatedReadCloser{gate: readerGate, started: readerStarted, err: inputErr}, writer, out, done, stop)
@@ -163,26 +169,19 @@ func TestRunSessionReaderFailureUnblocksProducerBehindFullQueue(t *testing.T) {
 
 	<-writer.started
 	<-readerStarted
-	out <- []byte("fills queue while writer is blocked")
-	producerStarted := make(chan struct{})
-	producerDone := make(chan struct{})
-	go func() {
-		close(producerStarted)
-		_, _ = model.Update(tea.KeyPressMsg(tea.Key{Code: 'a', Text: "a"}))
-		close(producerDone)
-	}()
-	<-producerStarted
 	select {
-	case <-producerDone:
-		t.Fatal("producer completed behind full queue before failure")
+	case out <- []byte("fills queue while writer is blocked"):
 	default:
+		t.Fatal("an unexpected startup packet already filled the queue")
 	}
 
-	close(readerGate)
+	// Send returns when the program receives the key. The session must then
+	// release that update before it can join the UI and return the read error.
+	program.Send(tea.KeyPressMsg(tea.Key{Code: 'a', Text: "a"}))
+	releaseReader()
 	if err := <-sessionResult; !errors.Is(err, inputErr) {
 		t.Fatalf("runSession error = %v, want %v", err, inputErr)
 	}
-	<-producerDone
 	if got := len(out); got != 1 {
 		t.Fatalf("queued packets after cancellation = %d, want the already admitted packet only", got)
 	}

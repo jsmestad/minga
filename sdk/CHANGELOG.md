@@ -6,8 +6,16 @@ All notable changes to `minga_sdk` are documented here. The SDK is versioned sep
 
 | minga_sdk | Minga |
 |-----------|-------|
+| 0.1.2 | First rolling Minga build after [#3819](https://github.com/jsmestad/minga/pull/3819), which adds the source-owned picker, prompt, and Git workflow APIs |
 | 0.1.1 | Minga builds with the extension notice API and optional extension support (#3764) |
 | 0.1.0 | `main` from jsmestad/minga#3756 (model routes with setup rows and plan usage) onward; the first rolling build after that merge and later |
+
+## 0.1.2
+
+- Open pickers and prompts from extension commands with captured arguments and source-owned callbacks. The editor handles presentation, pagination, dismissal, and unload.
+- Use `Minga.Git` for explicit repository operations and versioned tracked-buffer snapshots. Index reads distinguish a missing entry from an empty file or a read failure. Stage one selected change without staging unrelated changes.
+- Use `MingaEditor.Extension.GitStatus` and `GitDiff` to present Git workflows in the host. Use `RepositoryJob` for work that must run outside the editor process.
+- Resolve conflicts and save or replace buffer text at a specific version.
 
 ## 0.1.1
 

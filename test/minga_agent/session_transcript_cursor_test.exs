@@ -41,8 +41,7 @@ defmodule MingaAgent.SessionTranscriptCursorTest do
 
     assert {:changes, changes} = Session.transcript_since(session, cursor)
     assert [%Entry{id: id, message: {:tool_call, %{result: "current"}}}] = changes.entries
-    assert changes.pinned_ids == MapSet.new([id])
-    assert changes.pins_changed?
+    assert changes.pin_changes == [{id, true}]
     assert changes.count == initial.count + 1
     assert changes.next_id == id + 1
     assert {:unchanged, _} = Session.transcript_since(session, changes.cursor)
@@ -50,10 +49,37 @@ defmodule MingaAgent.SessionTranscriptCursorTest do
 
     assert :ok = Session.toggle_pin(session, id)
 
-    assert {:changes, %{entries: [], pinned_ids: pins, pins_changed?: true}} =
+    assert {:changes, %Changes{entries: [], pin_changes: [{^id, false}]}} =
              Session.transcript_since(session, changes.cursor)
+  end
 
-    assert pins == MapSet.new()
+  test "arrival forwards the current runtime and changed transcript after preceding Session events" do
+    session = start_subscribed_session()
+    assert {:snapshot, %Snapshot{cursor: cursor}} = Session.transcript_since(session, :snapshot)
+    assert :ok = Session.continue(session)
+    assert %{active_tools: []} = Session.editor_snapshot(session)
+
+    send_provider_event(session, %Event.ToolStart{
+      tool_call_id: "arriving",
+      name: "probe",
+      args: %{}
+    })
+
+    arrival = make_ref()
+    request = Session.request_editor_arrival(session, cursor, self(), arrival)
+    assert {:reply, :forwarded} = :gen_server.receive_response(request, :infinity)
+
+    assert_receive {:agent_event, ^session, event}
+                   when elem(event, 0) in [:tool_started, :editor_arrival_ready]
+
+    assert {:tool_started, "arriving", "probe", %{}} = event
+
+    assert_receive {:agent_event, ^session,
+                    {:editor_arrival_ready, ^arrival,
+                     {%{active_tools: [{"arriving", "probe"}]},
+                      {:changes, %Changes{entries: entries}}}}}
+
+    assert Enum.any?(entries, &match?(%Entry{message: {:tool_call, %{id: "arriving"}}}, &1))
   end
 
   @tag :tmp_dir

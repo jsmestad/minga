@@ -147,12 +147,25 @@ defmodule MingaAgent.Tools.Shell do
     if remaining == 0 do
       timeout_result(reader, state)
     else
-      case OutputReader.next(reader, min(remaining, @debounce_ms)) do
+      case OutputReader.next(reader, min(remaining, wait_ms(state))) do
         {:data, data, reader} -> handle_port_data(reader, data, state)
         {:exit_status, status, reader} -> handle_port_exit(reader, status, state)
         {:wait, reader} -> handle_port_wait(reader, state)
         {:error, reason, reader} -> transport_failure(reader, reason, state)
       end
+    end
+  end
+
+  # Pending output is due one debounce window after the previous flush, not after its own arrival.
+  # Waiting a full window from arrival would hold the first chunk for up to two windows.
+  @spec wait_ms(collect_state()) :: non_neg_integer()
+  defp wait_ms(%{on_output: nil}), do: @debounce_ms
+
+  defp wait_ms(state) do
+    if output_state_empty?(state.pending) do
+      @debounce_ms
+    else
+      max(state.last_flush + @debounce_ms - System.monotonic_time(:millisecond), 0)
     end
   end
 

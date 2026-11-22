@@ -286,6 +286,7 @@ defmodule MingaEditor.Handlers.EventDispatcher do
     end
 
     state
+    |> MingaEditor.Agent.Arrival.retire(pid)
     |> MingaEditor.Agent.QuestionResponse.retire_remote_attachment(pid)
     |> Commands.BufferManagement.handle_agent_session_down(pid, reason)
   end

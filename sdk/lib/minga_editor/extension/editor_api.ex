@@ -11,9 +11,17 @@ defmodule MingaEditor.Extension.EditorAPI do
 
   @type state :: term()
 
-  @doc "Displays a transient editor notice and returns the updated command state."
+  @doc "Shows a short notice in the editor."
   @spec notice(state(), String.t()) :: state()
   def notice(_state, _message), do: raise("minga_sdk is compile-time only")
+
+  @doc "Returns the current directory workspace, or `nil` when there is none."
+  @spec project_root(state()) :: String.t() | nil
+  def project_root(_state), do: raise("minga_sdk is compile-time only")
+
+  @doc "Resolves Git for the selected project, or the active file when no project is open."
+  @spec git_root(state()) :: {:ok, String.t()} | :not_git
+  def git_root(_state), do: raise("minga_sdk is compile-time only")
 
   @spec open_file(state(), String.t()) :: state()
   def open_file(_state, _path), do: raise("minga_sdk is compile-time only")

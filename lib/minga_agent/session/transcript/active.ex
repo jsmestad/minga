@@ -117,6 +117,10 @@ defmodule MingaAgent.Session.Transcript.Active do
   @spec id_ordinals(t(), pos_integer()) :: [non_neg_integer()]
   def id_ordinals(%__MODULE__{} = active, id), do: occurrences(active.ids, id)
 
+  @doc "Checks whether a stable ID occurs in the active transcript."
+  @spec has_id?(t(), pos_integer()) :: boolean()
+  def has_id?(%__MODULE__{ids: ids}, id), do: Map.has_key?(ids, id)
+
   @doc "Reads up to `limit` active entries immediately before a unique message identity."
   @spec before(t(), pos_integer() | :tail, pos_integer()) ::
           {:ok, [Entry.t()], boolean()} | {:error, :anchor_unavailable}

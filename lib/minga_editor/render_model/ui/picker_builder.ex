@@ -6,15 +6,17 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilder do
   alias Minga.Buffer
   alias Minga.RenderModel.UI.Picker, as: PickerModel
   alias Minga.RenderModel.UI.Picker.ActionMenu
+  alias MingaEditor.Extension.Picker.Source, as: PublicSource
   alias MingaEditor.Frontend.Emit.Context
   alias MingaEditor.State.Picker, as: PickerState
   alias MingaEditor.State.Picker.ActivationOffer
+  alias MingaEditor.State.Picker.Extension, as: ExtensionPicker
   alias MingaEditor.UI.Picker
+  alias MingaEditor.UI.Picker.FilePreview
   alias MingaEditor.UI.Picker.FileSource
   alias MingaEditor.UI.Picker.ProjectFileCandidate
 
   @preview_max_lines 50
-  @binary_preview_message "Binary file preview unavailable"
 
   @spec build(Context.t()) :: PickerModel.t()
   def build(ctx) do
@@ -46,7 +48,8 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilder do
            activation_offer: activation_offer
          } = picker_state
        ) do
-    has_preview = source != nil and Picker.Source.gui_preview?(source, callback_source)
+    {has_preview, preview_lines} = picker_preview(ctx, picker_state)
+    display_source = if picker_state.extension, do: nil, else: source
 
     offered_items = ActivationOffer.offered_items(activation_offer)
     {selected_index, selected_item_id} = offered_selection(offered_items, picker.selected)
@@ -54,7 +57,7 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilder do
     enriched_items =
       offered_items
       |> Enum.map(&elem(&1, 2))
-      |> enrich_for_display(source, callback_source, picker.query)
+      |> enrich_for_display(display_source, callback_source, picker.query)
 
     items =
       offered_items
@@ -62,8 +65,6 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilder do
       |> Enum.map(fn {{activation_id, _index, _offered_item}, item} ->
         item_model(picker, item, activation_id)
       end)
-
-    preview_lines = if has_preview, do: build_picker_preview(ctx)
 
     %PickerModel{
       visible?: true,
@@ -85,6 +86,43 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilder do
       load_status: load_status,
       preview_lines: preview_lines
     }
+  end
+
+  @spec picker_preview(Context.t(), PickerState.t()) ::
+          {boolean(), [[PickerModel.preview_segment()]] | nil}
+  defp picker_preview(ctx, %PickerState{extension: %ExtensionPicker{} = extension}) do
+    {extension.preview?, accepted_preview_lines(ctx, extension.preview)}
+  end
+
+  defp picker_preview(ctx, %PickerState{source: source, callback_source: owner}) do
+    has_preview = source != nil and Picker.Source.gui_preview?(source, owner)
+    {has_preview, if(has_preview, do: build_picker_preview(ctx))}
+  end
+
+  @spec accepted_preview_lines(Context.t(), ExtensionPicker.preview()) ::
+          [[PickerModel.preview_segment()]] | nil
+  defp accepted_preview_lines(ctx, {:resolved, _id, {:lines, lines}}),
+    do: resolve_preview_colors(ctx, lines)
+
+  defp accepted_preview_lines(ctx, {:resolved, _id, {:file, _path, lines}}),
+    do: resolve_preview_colors(ctx, lines)
+
+  defp accepted_preview_lines(ctx, {:resolved, _id, {:error, message}}),
+    do: resolve_preview_colors(ctx, [[{message, :default, true}]])
+
+  defp accepted_preview_lines(_ctx, _no_content), do: nil
+
+  @spec resolve_preview_colors(Context.t(), PublicSource.styled_lines()) ::
+          [[PickerModel.preview_segment()]]
+  defp resolve_preview_colors(ctx, lines) do
+    default_fg = Map.get(ctx.intent.frame.theme, :fg, 0xCCCCCC)
+
+    Enum.map(lines, fn line ->
+      Enum.map(line, fn
+        {text, :default, bold?} -> {text, default_fg, bold?}
+        segment -> segment
+      end)
+    end)
   end
 
   @spec offered_selection([ActivationOffer.item_entry()], non_neg_integer()) ::
@@ -332,27 +370,10 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilder do
 
   @spec read_file_preview(String.t(), Context.t()) :: [[PickerModel.preview_segment()]] | nil
   defp read_file_preview(abs_path, ctx) do
-    case File.read(abs_path) do
-      {:ok, content} ->
-        fg_color = Map.get(ctx.intent.frame.theme, :fg, 0xCCCCCC)
-
-        if text_preview?(content) do
-          content
-          |> String.splitter("\n")
-          |> Enum.take(@preview_max_lines)
-          |> Enum.map(&[{&1, fg_color, false}])
-        else
-          [[{@binary_preview_message, fg_color, true}]]
-        end
-
-      {:error, _} ->
-        nil
+    case FilePreview.read(abs_path) do
+      {:ok, lines} -> resolve_preview_colors(ctx, lines)
+      {:error, _reason} -> nil
     end
-  end
-
-  @spec text_preview?(binary()) :: boolean()
-  defp text_preview?(content) do
-    String.valid?(content) and not String.contains?(content, <<0>>)
   end
 
   @spec safe_file_path(pid()) :: String.t() | nil

@@ -9,11 +9,23 @@ defmodule Minga.Buffer do
   BEAM VM provides the implementation.
   """
 
+  alias Minga.Buffer.Conflict
+
   @type t :: GenServer.server()
   @type position :: {line :: non_neg_integer(), col :: non_neg_integer()}
 
   @spec content(t()) :: String.t()
   def content(_server), do: raise("minga_sdk is compile-time only")
+
+  @doc "Returns content and its mutation version from the same buffer state."
+  @spec content_with_version(t()) :: {String.t(), non_neg_integer()}
+  def content_with_version(_server), do: raise("minga_sdk is compile-time only")
+
+  @doc "Replaces the content only at the observed version, returning the new version."
+  @spec replace_content_if_version(t(), non_neg_integer(), String.t()) ::
+          {:ok, non_neg_integer()} | {:error, :read_only | :stale}
+  def replace_content_if_version(_server, _expected_version, _new_content),
+    do: raise("minga_sdk is compile-time only")
 
   @spec conflicts(t()) :: [term()]
   def conflicts(_server), do: raise("minga_sdk is compile-time only")
@@ -23,6 +35,20 @@ defmodule Minga.Buffer do
 
   @spec conflict_snapshot(t()) :: {String.t(), position(), [term()]}
   def conflict_snapshot(_server), do: raise("minga_sdk is compile-time only")
+
+  @doc "Returns the cursor, inclusive conflict regions, and their shared buffer version."
+  @spec conflict_view(t()) :: Conflict.view()
+  def conflict_view(_server), do: raise("minga_sdk is compile-time only")
+
+  @doc "Resolves one conflict at the observed version without saving."
+  @spec resolve_conflict(t(), non_neg_integer(), Conflict.target(), Conflict.choice()) ::
+          {:ok, Conflict.resolution()} | {:error, Conflict.rejection()}
+  def resolve_conflict(_server, _expected_version, _target, _choice),
+    do: raise("minga_sdk is compile-time only")
+
+  @doc "Saves the file only when the buffer is still at the requested version."
+  @spec save_if_version(t(), non_neg_integer()) :: :ok | {:error, term()}
+  def save_if_version(_server, _expected_version), do: raise("minga_sdk is compile-time only")
 
   @spec cursor(t()) :: position()
   def cursor(_server), do: raise("minga_sdk is compile-time only")

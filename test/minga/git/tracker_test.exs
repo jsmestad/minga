@@ -4,9 +4,12 @@ defmodule Minga.Git.TrackerTest do
 
   alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Events
+  alias Minga.Git.Buffer, as: GitBuffer
   alias Minga.Git.Repo
   alias Minga.Git.Stub, as: GitStub
   alias Minga.Git.Tracker
+  alias Minga.Git.TrackedFile
+  alias Minga.Project.Root
 
   @moduletag :tmp_dir
   @sync_timeout 15_000
@@ -194,6 +197,105 @@ defmodule Minga.Git.TrackerTest do
 
       refute Tracker.tracked?(buf, table)
     end
+
+    test "renaming an open file binds the new HEAD path without restarting its repo", %{
+      events_registry: events_registry,
+      registry_table: table,
+      root: root,
+      tracker: tracker
+    } do
+      old_path = Path.join(root, "before.txt")
+      new_path = Path.join(root, "after.txt")
+      File.write!(old_path, "working\n")
+      GitStub.set_head(root, "before.txt", "old HEAD\n")
+      GitStub.set_head(root, "after.txt", "new HEAD\n")
+      buf = open_file(old_path, events_registry, tracker)
+
+      git_pid = Tracker.lookup(buf, table)
+      assert is_pid(git_pid)
+
+      assert {:ok, %TrackedFile{path: "before.txt", base: "old HEAD\n"}} =
+               GitBuffer.tracked_file(git_pid, BufferProcess.file_observation(buf))
+
+      repo = Repo.lookup(root)
+      assert is_pid(repo)
+      previous = Process.monitor(git_pid)
+      File.rename!(old_path, new_path)
+      assert :ok = BufferProcess.retarget_path(buf, new_path)
+      assert_receive {:DOWN, ^previous, :process, ^git_pid, _}, @sync_timeout
+
+      assert {:ok, %TrackedFile{path: "after.txt", base: "new HEAD\n", content: "working\n"}} =
+               tracked_file(buf, table)
+
+      assert Repo.lookup(root) == repo
+
+      repo_monitor = Process.monitor(repo)
+      assert :ok = BufferProcess.retarget_path(buf, root <> "-outside.txt")
+      assert_receive {:DOWN, ^repo_monitor, :process, ^repo, _}, @sync_timeout
+      refute Tracker.tracked?(buf, table)
+    end
+
+    test "saving an unnamed buffer under a repo starts tracking its adopted path", %{
+      events_registry: events_registry,
+      registry_table: table,
+      root: root
+    } do
+      :ok = Events.subscribe(:log_message, events_registry)
+
+      buf =
+        start_supervised!(
+          {BufferProcess, content: "new content\n", events_registry: events_registry}
+        )
+
+      refute Tracker.tracked?(buf, table)
+      assert :ok = BufferProcess.save_as(buf, Path.join(root, "saved.txt"))
+
+      assert_receive {:minga_event, :log_message,
+                      %Events.LogMessageEvent{text: "Git: tracking saved.txt"}},
+                     @sync_timeout
+
+      assert {:ok, %TrackedFile{path: "saved.txt", base: nil, content: "new content\n"}} =
+               tracked_file(buf, table)
+    end
+
+    test "opening a file symlink binds the target repo and retires the old repo", %{
+      events_registry: events_registry,
+      registry_table: table,
+      root: root,
+      tracker: tracker
+    } do
+      original = Path.join(root, "original.txt")
+      File.write!(original, "working\n")
+      buf = open_file(original, events_registry, tracker)
+      repo = Repo.lookup(root)
+      assert is_pid(repo)
+      previous = Process.monitor(repo)
+
+      assert {:ok, canonical} = Root.canonical_path(root)
+      other_repo = Path.join(canonical, "other")
+      File.mkdir!(other_repo)
+      target = Path.join(other_repo, "target.txt")
+      File.write!(target, "on disk\n")
+      GitStub.set_root(other_repo, other_repo)
+      GitStub.set_head(other_repo, "target.txt", "target HEAD\n")
+
+      on_exit(fn ->
+        GitStub.clear(other_repo)
+
+        case Repo.lookup(other_repo) do
+          nil -> :ok
+          pid -> DynamicSupervisor.terminate_child(Minga.Git.Repo.Supervisor, pid)
+        end
+      end)
+
+      link = Path.join(root, "link.txt")
+      File.ln_s!(target, link)
+      assert :ok = BufferProcess.open(buf, link)
+      assert_receive {:DOWN, ^previous, :process, ^repo, _}, @sync_timeout
+
+      assert {:ok, %TrackedFile{root: ^other_repo, path: "target.txt", base: "target HEAD\n"}} =
+               tracked_file(buf, table)
+    end
   end
 
   describe "buffer_changed event" do
@@ -254,5 +356,24 @@ defmodule Minga.Git.TrackerTest do
 
       flush_tracker(tracker)
     end
+  end
+
+  defp open_file(path, events_registry, tracker) do
+    buf = start_supervised!({BufferProcess, file_path: path, events_registry: events_registry})
+
+    Events.broadcast(
+      :buffer_opened,
+      %Events.BufferEvent{buffer: buf, path: path},
+      events_registry
+    )
+
+    flush_tracker(tracker)
+    buf
+  end
+
+  defp tracked_file(buf, table) do
+    git_pid = Tracker.lookup(buf, table)
+    assert is_pid(git_pid)
+    GitBuffer.tracked_file(git_pid, BufferProcess.file_observation(buf))
   end
 end

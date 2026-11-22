@@ -47,7 +47,6 @@ class BuildTuiDebTest(unittest.TestCase):
             self.put(priv + name, native, mode=0o755)
         for name in ("tutor.txt", "tree_sitter/api.h", "tree_sitter/parser.h", "queries/elixir/highlights.scm"):
             self.put(priv + name)
-        self.put(priv + "extensions/git_porcelain/lib/extension.ex")
 
     def pack(self, *extra):
         with tarfile.open(self.archive, "w:gz") as archive:

@@ -60,18 +60,30 @@ defmodule MingaEditor.MergeConflict.RenderTest do
     } =
       action_row_columns(rendered)
 
-    assert {:command, {:git_accept_conflict, :current, 0}} = block.on_click.(0, current.start)
-    assert {:command, {:git_accept_conflict, :current, 0}} = block.on_click.(0, current.stop)
+    version = BufferProcess.version(buffer)
+    region = %{start_line: 0, end_line: 4}
+
+    for column <- [current.start, current.stop] do
+      assert {:command, {:git_accept_conflict, ^buffer, ^version, ^region, :current}} =
+               block.on_click.(0, column)
+    end
+
     assert :ok = block.on_click.(0, current_separator.start)
     assert :ok = block.on_click.(0, current_separator.stop)
 
-    assert {:command, {:git_accept_conflict, :incoming, 0}} = block.on_click.(0, incoming.start)
-    assert {:command, {:git_accept_conflict, :incoming, 0}} = block.on_click.(0, incoming.stop)
+    for column <- [incoming.start, incoming.stop] do
+      assert {:command, {:git_accept_conflict, ^buffer, ^version, ^region, :incoming}} =
+               block.on_click.(0, column)
+    end
+
     assert :ok = block.on_click.(0, incoming_separator.start)
     assert :ok = block.on_click.(0, incoming_separator.stop)
 
-    assert {:command, {:git_accept_conflict, :both, 0}} = block.on_click.(0, both.start)
-    assert {:command, {:git_accept_conflict, :both, 0}} = block.on_click.(0, both.stop)
+    for column <- [both.start, both.stop] do
+      assert {:command, {:git_accept_conflict, ^buffer, ^version, ^region, :both}} =
+               block.on_click.(0, column)
+    end
+
     assert :ok = block.on_click.(0, trailing.start)
   end
 
@@ -149,11 +161,11 @@ defmodule MingaEditor.MergeConflict.RenderTest do
 
     gutter_width = HitTest.buffer_gutter_width(buffer, BufferProcess.line_count(buffer))
 
-    assert {:command, {:git_accept_conflict, :current, 0}} =
+    assert {:command, {:git_accept_conflict, ^buffer, _version, %{start_line: 0}, :current}} =
              HitTest.resolve_buffer(state, row, col + gutter_width + 1)
   end
 
-  test "mouse click on action block is a no-op when Git porcelain is disabled", %{
+  test "mouse click on action block is a no-op when GitExtended is disabled", %{
     events_registry: events_registry,
     options_server: options_server
   } do
