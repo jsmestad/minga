@@ -258,9 +258,9 @@ defmodule MingaEditor.RenderModel.UI.AgentChatResidentTest do
         bump(counter, :derived)
         derive_message(item, approval)
       end,
-      size: fn message ->
+      measure: fn message ->
         bump(counter, :sized)
-        size(message)
+        {:ok, size(message)}
       end,
       tool_id: fn
         {_id, {:tool_call, %ToolCall{id: id}}, _style} -> id

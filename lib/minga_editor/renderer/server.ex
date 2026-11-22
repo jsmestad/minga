@@ -286,6 +286,14 @@ defmodule MingaEditor.Renderer.Server do
   @spec request_transcript_seed(State.transcript_admission(), State.editor_ref()) :: :ok
   defp request_transcript_seed(:admitted, _submitter), do: :ok
 
+  # Reported once, when an entry first shows its fallback notice.
+  defp request_transcript_seed({:admitted, keys}, _submitter) do
+    Minga.Log.warning(
+      :render,
+      "Agent transcript shows #{length(keys)} entries as too large to display: #{inspect(keys)}"
+    )
+  end
+
   defp request_transcript_seed({:failed, error}, _submitter) do
     Minga.Log.warning(
       :render,

@@ -189,15 +189,60 @@ defmodule MingaEditor.Renderer.TranscriptAdmissionTest do
     assert {:seed, _, _, _, _} = replaced.transcript
   end
 
-  test "an entry the codec rejects keeps the last good root and requests no seed", ctx do
+  test "a seed for another presentation with an unencodable entry installs that presentation with a fallback body",
+       ctx do
     {render, frame_a} = submit(ctx.render, ctx.editor)
 
     {receiver, _intent, :admitted} =
       RendererState.receive_submission(RendererState.new([]), frame_a)
 
+    assert {2, :approval} in summary_of(receiver.agent_transcript)
+
+    # Tab B: a different presentation whose only tool call cannot be encoded.
+    source_b =
+      Source.new(
+        [{:user, "other tab"}, {:tool_call, oversized_tool("tool-1")}],
+        ~U[2026-01-01 00:00:00Z],
+        make_ref()
+      )
+
+    {:snapshot, snapshot} = Source.since(source_b, :snapshot)
+
+    projection_b =
+      TranscriptProjection.replace(
+        TranscriptProjection.new(),
+        snapshot.entries,
+        snapshot.pinned_ids,
+        snapshot.cursor,
+        @context
+      )
+
+    {_render, seed_b} = submit(render, with_transcript(ctx.editor, ctx.session, projection_b))
+    assert {:seed, identity_b, _, _, _} = seed_b.transcript
+
+    {installed, intent, admission} = RendererState.receive_submission(receiver, seed_b)
+    assert {:admitted, _fallbacks} = normalize(admission)
+    root = Intent.agent_transcript(intent)
+    assert root === installed.agent_transcript
+    assert root.identity == identity_b
+
+    assert [{1, {:user, "other tab"}}, {2, {:system, fallback, :error}} | _footer] =
+             root |> AgentChatResident.resident_messages() |> elem(0)
+
+    assert fallback =~ "too large to display"
+    refute Enum.any?(summary_of(root), &match?({_, :approval}, &1))
+    refute {3, :assistant} in summary_of(root)
+  end
+
+  test "an unencodable changed entry admits a fallback and later frames stay contiguous", ctx do
+    renderer = start_renderer(require_ack?: false)
+    {render, frame_a} = submit(ctx.render, ctx.editor)
+    Server.cast_snapshot(renderer, frame_a, 1)
+    assert_receive {:presented, 1, _, _, _}, 1_000
+
     source =
       Source.update_at(ctx.source, 1, fn {:tool_call, _call} ->
-        {:tool_call, ToolCall.new("tool-1", String.duplicate("n", 70_000), %{})}
+        {:tool_call, oversized_tool("tool-1")}
       end)
 
     {:changes, changes} = Source.since(source, ctx.projection.source_cursor)
@@ -205,13 +250,60 @@ defmodule MingaEditor.Renderer.TranscriptAdmissionTest do
     {projection, _} =
       TranscriptProjection.apply_changes(ctx.projection, changes, :follow, @context)
 
-    {_render, invalid} = submit(render, with_transcript(ctx.editor, ctx.session, projection))
+    editor_b = with_transcript(ctx.editor, ctx.session, projection)
+    {render, invalid} = submit(render, editor_b)
+    assert {:changes, _, 1, 2, _, _} = invalid.transcript
+    Server.cast_snapshot(renderer, invalid, 2)
+    assert_receive {:presented, 2, _, _, presented}, 1_000
+    assert {2, :system} in presented
 
-    assert {kept, intent, {:failed, %Minga.Frontend.Adapter.GUI.EncodingError{}}} =
-             RendererState.receive_submission(receiver, invalid)
+    # Composer-only and further transcript frames stay contiguous with the Editor base.
+    {render, unchanged} = submit(render, editor_b)
+    assert {:unchanged, _, 2, _} = unchanged.transcript
+    Server.cast_snapshot(renderer, unchanged, 3)
 
-    assert kept.agent_transcript === receiver.agent_transcript
-    assert Intent.agent_transcript(intent) === receiver.agent_transcript
+    source = Source.append(source, {:assistant, "after"})
+    {:changes, more} = Source.since(source, projection.source_cursor)
+    {projection, _} = TranscriptProjection.apply_changes(projection, more, :follow, @context)
+    {_render, next} = submit(render, with_transcript(ctx.editor, ctx.session, projection))
+    assert {:changes, _, 2, 3, _, _} = next.transcript
+    Server.cast_snapshot(renderer, next, 4)
+
+    assert_receive {:presented, 3, _, _, _}, 1_000
+    assert_receive {:presented, 4, _, _, after_append}, 1_000
+    assert {2, :system} in after_append
+    assert {4, :assistant} in after_append
+    assert :sys.get_state(renderer).agent_transcript.revision == 3
+    refute_received {:renderer_transcript_reseed, _}
+  end
+
+  test "an entry that stays unencodable is reported once, not on every frame", ctx do
+    {render, frame_a} = submit(ctx.render, ctx.editor)
+
+    {receiver, _intent, :admitted} =
+      RendererState.receive_submission(RendererState.new([]), frame_a)
+
+    source =
+      Source.update_at(ctx.source, 1, fn {:tool_call, _call} ->
+        {:tool_call, oversized_tool("tool-1")}
+      end)
+
+    {:changes, changes} = Source.since(source, ctx.projection.source_cursor)
+
+    {projection, _} =
+      TranscriptProjection.apply_changes(ctx.projection, changes, :follow, @context)
+
+    editor_b = with_transcript(ctx.editor, ctx.session, projection)
+    {render, invalid} = submit(render, editor_b)
+    {receiver, _, first} = RendererState.receive_submission(receiver, invalid)
+    assert {:admitted, [{3, 1}]} = normalize(first)
+
+    Enum.reduce(1..3, {render, receiver}, fn _frame, {render, receiver} ->
+      {render, unchanged} = submit(render, editor_b)
+      {receiver, _, admission} = RendererState.receive_submission(receiver, unchanged)
+      assert admission == :admitted
+      {render, receiver}
+    end)
   end
 
   test "a rejected update asks the submitting Editor for a seed", ctx do
@@ -292,6 +384,15 @@ defmodule MingaEditor.Renderer.TranscriptAdmissionTest do
         []
     end
   end
+
+  defp oversized_tool(id), do: ToolCall.new(id, String.duplicate("n", 70_000), %{})
+
+  defp summary_of(root),
+    do: root |> AgentChatResident.resident_messages() |> elem(0) |> Enum.map(&message_summary/1)
+
+  defp normalize(:admitted), do: {:admitted, []}
+  defp normalize({:admitted, keys}), do: {:admitted, keys}
+  defp normalize(other), do: other
 
   defp message_summary({id, {:approval_tool_call, _view}}), do: {id, :approval}
   defp message_summary({id, {:tool_call, view}}), do: {id, {:tool_call, view.status}}

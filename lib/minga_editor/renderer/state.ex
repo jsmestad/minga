@@ -137,10 +137,15 @@ defmodule MingaEditor.Renderer.State do
   end
 
   @typedoc """
-  `:reseed_required` means the transcript update did not match the resident base. `{:failed, error}` means a changed entry could not be encoded; the last good root stays installed and no seed is requested, because the same data would fail again.
+  Outcome of admitting one transcript update.
+
+  `{:admitted, keys}` names entries that newly show a fallback notice because their body exceeded a codec limit. `:reseed_required` means the update did not match the resident base. `{:failed, error}` is defense in depth: no root from another presentation is ever kept.
   """
   @type transcript_admission ::
-          :admitted | :reseed_required | {:failed, Minga.Frontend.Adapter.GUI.EncodingError.t()}
+          :admitted
+          | {:admitted, nonempty_list(AgentChatResident.key())}
+          | :reseed_required
+          | {:failed, Minga.Frontend.Adapter.GUI.EncodingError.t()}
 
   @doc """
   Installs presentation updates before any submission can be rejected or coalesced.
@@ -170,14 +175,25 @@ defmodule MingaEditor.Renderer.State do
           {transcript_admission(), AgentChatResident.t() | nil}
   defp admit_transcript(root, update, intent) do
     case AgentChatBuilder.admit(root, update, intent) do
-      {:ok, root} -> {:admitted, root}
+      {:ok, next} -> {admitted(AgentChatResident.new_fallbacks(root, next)), next}
       {:reseed, root} -> {:reseed_required, root}
     end
   rescue
-    # The codec rejects out-of-range fields instead of truncating them. Keep the
-    # last good transcript rather than losing the renderer process.
-    error in Minga.Frontend.Adapter.GUI.EncodingError -> {{:failed, error}, root}
+    # Admission measures with fallbacks, so this is defense in depth. Never keep
+    # another presentation's root for an update addressed to a different one.
+    error in Minga.Frontend.Adapter.GUI.EncodingError ->
+      {{:failed, error}, retained_root(root, update)}
   end
+
+  defp admitted([]), do: :admitted
+  defp admitted(keys), do: {:admitted, keys}
+
+  defp retained_root(%AgentChatResident{identity: identity} = root, update)
+       when is_tuple(update) and elem(update, 1) == identity,
+       do: root
+
+  defp retained_root(root, nil), do: root
+  defp retained_root(_root, _update), do: nil
 
   @doc "Prepares derived highlights from this attempt's immutable sources."
   @spec prepare_highlights(t(), Intent.t()) :: {t(), HighlightCache.highlights()}

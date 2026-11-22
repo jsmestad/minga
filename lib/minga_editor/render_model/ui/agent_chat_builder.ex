@@ -2,6 +2,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
   @moduledoc false
 
   alias Minga.Frontend.Adapter.GUI.AgentChatMessageCodec, as: AgentChatMessageCodec
+  alias Minga.Frontend.Adapter.GUI.EncodingError
   alias MingaAgent.ToolApproval
   alias MingaAgent.ToolApproval.Public, as: PublicApproval
   alias MingaAgent.ToolApproval.Target, as: ApprovalTarget
@@ -142,10 +143,25 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
       derive: fn item, decoration ->
         item |> maybe_style_message(decoration) |> to_core_message(scope)
       end,
-      size: &AgentChatMessageCodec.resident_entry_size/1,
+      measure: &measure_entry/1,
       tool_id: &item_tool_id/1,
       decoratable?: &running_tool?/1
     }
+  end
+
+  # The codec rejects out-of-range fields instead of truncating them. Showing a
+  # bounded notice under the same message ID keeps admission total, so Editor
+  # and renderer bases stay aligned and no other presentation is shown.
+  @spec measure_entry(AgentChat.message()) ::
+          {:ok, pos_integer()} | {:fallback, AgentChat.message(), pos_integer()}
+  defp measure_entry({id, _body} = message) do
+    {:ok, AgentChatMessageCodec.resident_entry_size(message)}
+  rescue
+    error in EncodingError ->
+      fallback =
+        {id, {:system, "Message too large to display (#{error.field} exceeds its limit)", :error}}
+
+      {:fallback, fallback, AgentChatMessageCodec.resident_entry_size(fallback)}
   end
 
   # A missing composer or a non-conversation lifecycle presents no Session

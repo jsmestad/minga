@@ -19,7 +19,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatResident do
   @typedoc """
   Admission context resolved by the semantic builder from the admitted intent.
 
-  `approval` is `{tool_call_id, approval}` for the displayed Session's pending approval. `derive` converts one display item with an optional approval into its semantic message; `tool_id` names the tool call a display item shows; `decoratable?` reports whether an item can carry inline approval controls. `size` returns an exact resident wire weight.
+  `approval` is `{tool_call_id, approval}` for the displayed Session's pending approval. `derive` converts one display item with an optional approval into its semantic message; `tool_id` names the tool call a display item shows; `decoratable?` reports whether an item can carry inline approval controls. `measure` returns a message's exact resident wire weight, or a bounded fallback message and its weight when the message exceeds a codec limit, so admission is total.
   """
   @type context :: %{
           scope: term(),
@@ -27,7 +27,8 @@ defmodule MingaEditor.RenderModel.UI.AgentChatResident do
           footer: [AgentChat.message()],
           max_bytes: pos_integer(),
           derive: (Index.item(), term() | nil -> AgentChat.message()),
-          size: (AgentChat.message() -> pos_integer()),
+          measure: (AgentChat.message() ->
+                      {:ok, pos_integer()} | {:fallback, AgentChat.message(), pos_integer()}),
           tool_id: (Index.item() -> String.t() | nil),
           decoratable?: (Index.item() -> boolean())
         }
@@ -55,6 +56,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatResident do
             scope: nil,
             approval: nil,
             decorated: nil,
+            fallbacks: MapSet.new(),
             selection: nil
 
   @type t :: %__MODULE__{
@@ -73,6 +75,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatResident do
           scope: term(),
           approval: {String.t(), term()} | nil,
           decorated: {key(), term()} | nil,
+          fallbacks: MapSet.t(key()),
           selection: {pos_integer(), selection(), boolean()} | nil
         }
 
@@ -122,6 +125,21 @@ defmodule MingaEditor.RenderModel.UI.AgentChatResident do
     {messages, truncated?}
   end
 
+  @doc """
+  Returns the display keys that show a fallback notice in `root` but did not in `previous`.
+
+  A different presentation reports all of its fallback keys. Callers use this to report each unencodable entry once instead of on every frame.
+  """
+  @spec new_fallbacks(t() | nil, t() | nil) :: [key()]
+  def new_fallbacks(
+        %__MODULE__{identity: identity} = previous,
+        %__MODULE__{identity: identity} = root
+      ),
+      do: root.fallbacks |> MapSet.difference(previous.fallbacks) |> Enum.sort()
+
+  def new_fallbacks(_previous, %__MODULE__{fallbacks: fallbacks}), do: Enum.sort(fallbacks)
+  def new_fallbacks(_previous, nil), do: []
+
   @doc "Returns the trie height used by the work bound, the larger of the two row segments."
   @spec height(t()) :: non_neg_integer()
   def height(%__MODULE__{pinned: pinned, rows: rows}),
@@ -148,6 +166,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatResident do
       Enum.map(entries, fn {key, item} -> {key, derive(key, item, decorated, context)} end)
 
     root = %__MODULE__{
+      fallbacks: for({key, %Entry{fallback?: true}} <- derived, into: MapSet.new(), do: key),
       identity: identity,
       revision: revision,
       epoch: epoch,
@@ -307,7 +326,12 @@ defmodule MingaEditor.RenderModel.UI.AgentChatResident do
   defp derive(_key, item, _decorated, context),
     do: weigh(item, context.derive.(item, nil), context)
 
-  defp weigh(item, message, context), do: Entry.new(item, message, context.size.(message))
+  defp weigh(item, message, context) do
+    case context.measure.(message) do
+      {:ok, weight} -> Entry.new(item, message, weight)
+      {:fallback, fallback, weight} -> Entry.fallback(item, fallback, weight)
+    end
+  end
 
   # ── Footer ──
 
@@ -339,19 +363,33 @@ defmodule MingaEditor.RenderModel.UI.AgentChatResident do
   defp lookup(root, {3, ordinal}), do: Trie.fetch(root.rows, ordinal)
   defp lookup(root, {4, 0}), do: root.empty
 
-  defp place(root, {0, ordinal}, entry),
+  defp place(root, key, entry), do: root |> place_entry(key, entry) |> track_fallback(key, entry)
+
+  defp place_entry(root, {0, ordinal}, entry),
     do: %{root | pinned: Trie.put(root.pinned, ordinal, entry)}
 
-  defp place(root, {1, 0}, entry), do: %{root | pinned_separator: entry}
-  defp place(root, {2, 0}, entry), do: %{root | hidden_separator: entry}
-  defp place(root, {3, ordinal}, entry), do: %{root | rows: Trie.put(root.rows, ordinal, entry)}
-  defp place(root, {4, 0}, entry), do: %{root | empty: entry}
+  defp place_entry(root, {1, 0}, entry), do: %{root | pinned_separator: entry}
+  defp place_entry(root, {2, 0}, entry), do: %{root | hidden_separator: entry}
 
-  defp remove(root, {0, ordinal}), do: %{root | pinned: Trie.delete(root.pinned, ordinal)}
-  defp remove(root, {1, 0}), do: %{root | pinned_separator: nil}
-  defp remove(root, {2, 0}), do: %{root | hidden_separator: nil}
-  defp remove(root, {3, ordinal}), do: %{root | rows: Trie.delete(root.rows, ordinal)}
-  defp remove(root, {4, 0}), do: %{root | empty: nil}
+  defp place_entry(root, {3, ordinal}, entry),
+    do: %{root | rows: Trie.put(root.rows, ordinal, entry)}
+
+  defp place_entry(root, {4, 0}, entry), do: %{root | empty: entry}
+
+  defp track_fallback(root, key, %Entry{fallback?: true}),
+    do: %{root | fallbacks: MapSet.put(root.fallbacks, key)}
+
+  defp track_fallback(root, key, _entry),
+    do: %{root | fallbacks: MapSet.delete(root.fallbacks, key)}
+
+  defp remove(root, key),
+    do: %{remove_entry(root, key) | fallbacks: MapSet.delete(root.fallbacks, key)}
+
+  defp remove_entry(root, {0, ordinal}), do: %{root | pinned: Trie.delete(root.pinned, ordinal)}
+  defp remove_entry(root, {1, 0}), do: %{root | pinned_separator: nil}
+  defp remove_entry(root, {2, 0}), do: %{root | hidden_separator: nil}
+  defp remove_entry(root, {3, ordinal}), do: %{root | rows: Trie.delete(root.rows, ordinal)}
+  defp remove_entry(root, {4, 0}), do: %{root | empty: nil}
 
   # ── Byte-capped newest suffix ──
 
