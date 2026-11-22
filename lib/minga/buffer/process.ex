@@ -722,13 +722,29 @@ defmodule Minga.Buffer.Process do
   Looks up the buffer visiting the same file as `path` via `Minga.Buffer.FileRegistry`.
 
   Both the buffer's registered path and `path` are resolved through every symlink, so a buffer opened as `lib/link.ex` is found by the path of the file the link names, and the reverse. A path whose tail does not exist yet resolves its existing parent directories. When several buffers visit the same file, every caller selects the same one (the lowest pid). Returns `:not_found` if no buffer visits the file.
+
+  A buffer whose path went through a symlink, or did not fully exist, when it registered is resolved again at lookup, so it follows a link that was retargeted or a dangling link whose target was created since. Each lookup resolves only those buffers; a buffer whose path was already its real path is matched by its registered key.
   """
   @spec pid_for_file(String.t()) :: {:ok, pid()} | :not_found
   def pid_for_file(path) do
-    case Registry.lookup(Minga.Buffer.FileRegistry, file_key(path)) do
+    key = file_key(path)
+    direct = Minga.Buffer.FileRegistry |> Registry.match(key, nil) |> Enum.map(&elem(&1, 0))
+
+    case direct ++ resolved_indirect_pids(key) do
       [] -> :not_found
-      entries -> {:ok, entries |> Enum.map(&elem(&1, 0)) |> Enum.min()}
+      pids -> {:ok, Enum.min(pids)}
     end
+  end
+
+  # Buffers registered through a symlink or a missing tail store their path as
+  # the registry value; their key may have changed on disk since registration.
+  @spec resolved_indirect_pids(String.t()) :: [pid()]
+  defp resolved_indirect_pids(key) do
+    Minga.Buffer.FileRegistry
+    |> Registry.select([{{:_, :"$1", :"$2"}, [{:is_binary, :"$2"}], [{{:"$1", :"$2"}}]}])
+    |> Enum.flat_map(fn {pid, registered_path} ->
+      if file_key(registered_path) == key, do: [pid], else: []
+    end)
   end
 
   @doc "Returns the metadata needed to list this buffer, without reading its content."
@@ -2742,8 +2758,20 @@ defmodule Minga.Buffer.Process do
       {:error, {:already_registered, _}} -> :ok
     end
 
-    {:ok, _} = Registry.register(Minga.Buffer.FileRegistry, file_key(abs_path), nil)
+    {key, indirection} = file_registration(abs_path)
+    {:ok, _} = Registry.register(Minga.Buffer.FileRegistry, key, indirection)
     :ok
+  end
+
+  # A path that is already its real path registers `nil`; any other path
+  # registers itself so `pid_for_file/1` resolves it again at lookup.
+  @spec file_registration(String.t()) :: {String.t(), String.t() | nil}
+  defp file_registration(abs_path) do
+    case Minga.Project.Root.canonical_path(abs_path) do
+      {:ok, ^abs_path} -> {abs_path, nil}
+      {:ok, real_path} -> {real_path, abs_path}
+      {:error, _reason} -> {missing_tail_file_key(abs_path), abs_path}
+    end
   end
 
   # The file key is computed when the path is registered, so it may differ from
