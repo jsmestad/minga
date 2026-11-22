@@ -11,7 +11,14 @@ defmodule Minga.Extension.HexIsolatedInstall do
     * A dependency application the host already provides is skipped; the host copy wins. A declared extension application that the host already provides is an error.
     * Any other dependency `ebin` that contains a module the host can already load is an error, and no path is added.
     * Accepted paths are appended, not prepended, so host code always wins code-path lookup.
+    * An accepted `ebin` must be a real directory under the install directory, with no symbolic link anywhere on its path.
+
+  The install directory must be private to the current user. The child process does not inherit Minga's provider secrets (`MingaAgent.Credentials` key variables, `MINGA_GATEWAY_TOKEN`, and `ANTHROPIC_*`), and URL credentials are redacted from the installer output Minga reports.
+
+  Code admitted into this VM stays resident until the OS process exits. When a later install in the same VM resolves an application to a different version, the install fails and asks for a restart instead of loading a second copy.
   """
+
+  import Bitwise
 
   alias Minga.Extension.DisposableBeam
   alias Minga.SecureFile
@@ -23,6 +30,11 @@ defmodule Minga.Extension.HexIsolatedInstall do
   @output_tail_lines 30
   @outside_install_dir "isolated Hex installer reported a path outside its install directory"
 
+  # Secrets Minga reads (MingaAgent.Credentials @env_vars and the Gateway token). Package
+  # compile-time code runs in the child, so it must not see them.
+  @secret_vars ~w(OPENAI_API_KEY GOOGLE_API_KEY OPENROUTER_API_KEY GROQ_API_KEY MISTRAL_API_KEY DEEPSEEK_API_KEY MINGA_GATEWAY_TOKEN)
+  @secret_prefixes ["ANTHROPIC_"]
+
   @typedoc "A Mix dependency tuple whose source is `hex:` or `path:`."
   @type dep :: {atom(), String.t(), [{:hex | :path, String.t()}]}
 
@@ -31,6 +43,7 @@ defmodule Minga.Extension.HexIsolatedInstall do
           {:install_dir, String.t()}
           | {:force, boolean()}
           | {:timeout, pos_integer()}
+          | {:owner_uid, non_neg_integer()}
 
   @doc """
   Installs `deps` in a disposable OS process and appends their `ebin` directories to the host code path.
@@ -42,13 +55,25 @@ defmodule Minga.Extension.HexIsolatedInstall do
     timeout = Keyword.get(opts, :timeout, @default_timeout)
 
     with {:ok, install_dir} <-
-           make_install_dir(Keyword.get(opts, :install_dir, default_install_dir())),
+           make_install_dir(Keyword.get(opts, :install_dir, default_install_dir()), opts),
          {:ok, encoded_deps} <- encode_deps(deps),
          {:ok, ebins} <- run_child(encoded_deps, install_dir, opts, timeout),
          {:ok, accepted} <- admit_ebins(ebins, install_dir, extension_apps) do
       :ok = Code.append_paths(accepted, cache: false)
       {:ok, accepted}
     end
+  end
+
+  @doc """
+  Returns the `Port.open/2` `:env` entries that remove Minga's provider secrets from the installer process.
+
+  The installer runs package compile-time code, so it must not inherit `MingaAgent.Credentials` key variables, `ANTHROPIC_*`, or `MINGA_GATEWAY_TOKEN`. Everything else, including `HEX_*`, `MIX_HOME`, `HOME`, `PATH`, and proxy variables, is inherited.
+  """
+  @spec child_env() :: [{charlist(), false}]
+  def child_env do
+    for {name, _value} <- System.get_env(),
+        name in @secret_vars or String.starts_with?(name, @secret_prefixes),
+        do: {String.to_charlist(name), false}
   end
 
   @doc "Returns the default install directory used for isolated Hex installs."
@@ -60,13 +85,61 @@ defmodule Minga.Extension.HexIsolatedInstall do
   # Mix builds under the working directory it changes into, and the OS reports that directory
   # with symlinks resolved (for example `/var` -> `/private/var` on macOS). Resolve the install
   # directory up front so the child's paths and the host's containment checks agree.
-  @spec make_install_dir(String.t()) :: {:ok, String.t()} | {:error, String.t()}
-  defp make_install_dir(install_dir) do
+  @spec make_install_dir(String.t(), [option()]) :: {:ok, String.t()} | {:error, String.t()}
+  defp make_install_dir(install_dir, opts) do
     expanded = Path.expand(install_dir)
 
-    case File.mkdir_p(expanded) do
-      :ok -> resolve_real_path(expanded, @max_symlink_depth)
-      {:error, reason} -> {:error, "cannot create #{expanded}: #{:file.format_error(reason)}"}
+    with :ok <- create_dir(expanded),
+         {:ok, real} <- resolve_real_path(expanded, @max_symlink_depth),
+         {:ok, uid} <- owner_uid(opts),
+         :ok <- ensure_private_dir(real, uid) do
+      {:ok, real}
+    end
+  end
+
+  @spec create_dir(String.t()) :: :ok | {:error, String.t()}
+  defp create_dir(path) do
+    case File.mkdir_p(path) do
+      :ok -> :ok
+      {:error, reason} -> {:error, "cannot create #{path}: #{:file.format_error(reason)}"}
+    end
+  end
+
+  @spec owner_uid([option()]) :: {:ok, non_neg_integer()} | {:error, String.t()}
+  defp owner_uid(opts) do
+    case Keyword.fetch(opts, :owner_uid) do
+      {:ok, uid} -> {:ok, uid}
+      :error -> current_uid()
+    end
+  end
+
+  @spec current_uid() :: {:ok, non_neg_integer()} | {:error, String.t()}
+  defp current_uid do
+    case System.cmd("id", ["-u"], stderr_to_stdout: true) do
+      {uid, 0} -> {:ok, uid |> String.trim() |> String.to_integer()}
+      _other -> {:error, "cannot determine the current user for the Hex install directory"}
+    end
+  rescue
+    _error -> {:error, "cannot determine the current user for the Hex install directory"}
+  end
+
+  # Other users must not be able to plant code the host will load.
+  @spec ensure_private_dir(String.t(), non_neg_integer()) :: :ok | {:error, String.t()}
+  defp ensure_private_dir(dir, uid) do
+    _ = File.chmod(dir, 0o700)
+
+    case File.lstat(dir) do
+      {:ok, %File.Stat{type: :directory, uid: ^uid, mode: mode}} when (mode &&& 0o022) == 0 ->
+        :ok
+
+      {:ok, %File.Stat{type: :directory, uid: ^uid}} ->
+        {:error, "Hex install directory #{dir} is group- or world-writable"}
+
+      {:ok, %File.Stat{type: :directory}} ->
+        {:error, "Hex install directory #{dir} is not owned by the current user"}
+
+      _other ->
+        {:error, "Hex install directory #{dir} is not a directory"}
     end
   end
 
@@ -177,7 +250,7 @@ defmodule Minga.Extension.HexIsolatedInstall do
   end
 
   defp decode_report(%{"status" => "error", "message" => message}) when is_binary(message),
-    do: {:error, message}
+    do: {:error, redact_url_credentials(message)}
 
   defp decode_report(_report), do: {:error, "isolated Hex installer returned an invalid report"}
 
@@ -191,7 +264,7 @@ defmodule Minga.Extension.HexIsolatedInstall do
     |> Enum.reduce_while({:ok, []}, fn ebin, {:ok, acc} ->
       case admit_ebin(ebin, install_dir, declared) do
         {:ok, :accept} -> {:cont, {:ok, [ebin | acc]}}
-        {:ok, :host_provided} -> {:cont, {:ok, acc}}
+        {:ok, skipped} when skipped in [:host_provided, :already_resident] -> {:cont, {:ok, acc}}
         {:error, _reason} = error -> {:halt, error}
       end
     end)
@@ -206,13 +279,60 @@ defmodule Minga.Extension.HexIsolatedInstall do
   end
 
   @spec admit_ebin(String.t(), String.t(), MapSet.t(String.t())) ::
-          {:ok, :accept | :host_provided} | {:error, String.t()}
+          {:ok, :accept | :host_provided | :already_resident} | {:error, String.t()}
   defp admit_ebin(ebin, install_dir, declared) do
     with {:ok, app} <- ebin_application(ebin, install_dir),
          :ok <- real_directory(ebin) do
-      classify_ebin(ebin, app, install_dir, MapSet.member?(declared, app))
+      case previous_install(app, ebin, install_dir) do
+        nil -> classify_ebin(ebin, app, install_dir, MapSet.member?(declared, app))
+        previous -> compare_resident_version(app, previous, ebin)
+      end
     end
   end
+
+  # An earlier isolated install in this VM already appended this application. Its modules may
+  # be loaded and admitted, and admitted code stays resident, so removing the old path would
+  # leave a mix of versions. The same version is already resident; another version needs a
+  # fresh Minga process.
+  @spec previous_install(String.t(), String.t(), String.t()) :: String.t() | nil
+  defp previous_install(app, ebin, install_dir) do
+    Enum.find_value(:code.get_path(), fn path ->
+      path = List.to_string(path)
+
+      if path != ebin and ebin_application(path, install_dir) == {:ok, app},
+        do: path,
+        else: nil
+    end)
+  end
+
+  @spec compare_resident_version(String.t(), String.t(), String.t()) ::
+          {:ok, :already_resident} | {:error, String.t()}
+  defp compare_resident_version(app, previous, ebin) do
+    case {app_version(previous, app), app_version(ebin, app)} do
+      {same, same} when is_binary(same) ->
+        {:ok, :already_resident}
+
+      {old, new} ->
+        {:error,
+         "restart Minga to switch :#{app} from #{old || "an unknown version"} " <>
+           "to #{new || "an unknown version"}"}
+    end
+  end
+
+  @spec app_version(String.t(), String.t()) :: String.t() | nil
+  defp app_version(ebin, app) do
+    case :file.consult(String.to_charlist(Path.join(ebin, app <> ".app"))) do
+      {:ok, [{:application, _name, properties}]} when is_list(properties) ->
+        properties |> Keyword.get(:vsn) |> version_string()
+
+      _other ->
+        nil
+    end
+  end
+
+  @spec version_string(term()) :: String.t() | nil
+  defp version_string(vsn) when is_list(vsn), do: List.to_string(vsn)
+  defp version_string(_vsn), do: nil
 
   # The host copy of a shared dependency wins. A declared extension must come from the install.
   @spec classify_ebin(String.t(), String.t(), String.t(), boolean()) ::
@@ -251,11 +371,17 @@ defmodule Minga.Extension.HexIsolatedInstall do
 
   defp installed_application(_segments), do: {:error, @outside_install_dir}
 
+  # A planted symbolic link at any level (`_build`, `lib`, `lib/<app>`, `ebin`) could point
+  # outside the install directory, so the resolved path must equal the reported one.
   @spec real_directory(String.t()) :: :ok | {:error, String.t()}
   defp real_directory(ebin) do
-    case File.lstat(ebin) do
-      {:ok, %File.Stat{type: :directory}} -> :ok
-      _other -> {:error, "isolated Hex installer reported an invalid ebin directory"}
+    with {:ok, ^ebin} <- resolve_real_path(ebin, @max_symlink_depth),
+         {:ok, %File.Stat{type: :directory}} <- File.lstat(ebin) do
+      :ok
+    else
+      _other ->
+        {:error,
+         "isolated Hex installer reported an ebin path that is not a real directory: #{ebin}"}
     end
   end
 
@@ -314,6 +440,10 @@ defmodule Minga.Extension.HexIsolatedInstall do
   defp within?(path, install_dir),
     do: String.starts_with?(Path.expand(to_string(path)), install_dir <> "/")
 
+  @spec redact_url_credentials(String.t()) :: String.t()
+  defp redact_url_credentials(text),
+    do: Regex.replace(~r{([A-Za-z][A-Za-z0-9+.\-]*://)[^\s/@]+@}, text, "\\1[REDACTED]@")
+
   @spec existing_atom(String.t()) :: atom() | nil
   defp existing_atom(name) do
     String.to_existing_atom(name)
@@ -333,7 +463,11 @@ defmodule Minga.Extension.HexIsolatedInstall do
   # Variables that would point the child's Mix at the developer's project or build.
   @project_env ~w(MIX_ENV MIX_TARGET MIX_EXS MIX_BUILD_PATH MIX_BUILD_ROOT MIX_DEPS_PATH MIX_LOCKFILE MIX_INSTALL_FORCE MIX_INSTALL_RESTORE_PROJECT_DIR)
 
-  @doc false
+  @doc """
+  Runs one install request inside the disposable installer process and writes its JSON report.
+
+  `Minga.Extension.DisposableBeam` calls this in the child; the host never calls it.
+  """
   @spec run_disposable(map()) :: :ok
   def run_disposable(%{
         "deps" => deps,

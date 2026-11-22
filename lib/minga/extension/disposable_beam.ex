@@ -109,6 +109,7 @@ defmodule Minga.Extension.DisposableBeam do
           :stderr_to_stdout,
           :hide,
           {:line, @line_bytes},
+          {:env, child_env(mode)},
           {:args, arguments}
         ]
       )
@@ -117,6 +118,11 @@ defmodule Minga.Extension.DisposableBeam do
   rescue
     error -> {:error, {:port_failed, Exception.message(error)}}
   end
+
+  # Package compile-time code runs in the Hex installer, so it gets no Minga provider secrets.
+  @spec child_env(mode()) :: [{charlist(), false}]
+  defp child_env(:hex_installer), do: HexIsolatedInstall.child_env()
+  defp child_env(_mode), do: []
 
   @spec run_port(String.t(), mode(), String.t(), timeout(), pos_integer()) ::
           :ok | {:error, run_error()}
