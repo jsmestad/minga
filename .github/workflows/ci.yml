@@ -597,67 +597,84 @@ jobs:
         run: mix test test/minga_editor/integration/gui_protocol_test.exs --include swift_harness
 
   dialyzer:
-    name: Dialyzer
+    name: Dialyzer memory (${{ matrix.variant }})
     runs-on: ubuntu-latest
-    # A warm run takes about 5 to 8 minutes; a cold PLT build adds the OTP, Elixir, and dependency PLTs. The bound turns a hang into an explicit timeout.
-    timeout-minutes: 40
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [warn-trace, no-contracts, incremental]
     env:
       MIX_ENV: dev
     steps:
       - uses: actions/checkout@v4
-
       - uses: erlef/setup-beam@v1
         with:
           version-file: .tool-versions
           version-type: strict
-
-      # Separate cache from test jobs: dialyzer needs _build/dev, not _build/test.
-      # mix.exs also sets the PLT app list; an exact cache hit cannot save a repaired PLT.
       - name: Cache deps & PLT
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: |
             deps
             _build/dev
           key: dialyzer-v2-${{ runner.os }}-${{ hashFiles('.tool-versions') }}-${{ hashFiles('mix.exs', 'mix.lock') }}
           restore-keys: dialyzer-v2-${{ runner.os }}-${{ hashFiles('.tool-versions') }}-
-
-      # Dialyzer's analysis peaks near the 16 GB runner limit (#3869). Larger GitHub runners need an organization on a paid plan, so add swap: a peak past RAM pages instead of losing the runner.
       - name: Add swap
         run: |
           sudo fallocate -l 16G /mnt/dialyzer.swap
           sudo chmod 600 /mnt/dialyzer.swap
           sudo mkswap /mnt/dialyzer.swap
           sudo swapon /mnt/dialyzer.swap
-
-      - name: Report runner resources
-        run: |
-          nproc
           free -m
-          swapon --show || true
-          df -h . "$HOME"
-
       - run: mix deps.get
-
-      # Compile, PLT build, and analysis run as separate steps so a lost runner shows which phase it was in, and completed phases keep their logs. The memory guard fails a step with an explicit error before memory exhaustion starves the runner.
-      - name: Compile
-        timeout-minutes: 10
-        run: .github/scripts/run-with-memory-guard.sh mix compile
-
-      - name: Build or update PLT
-        timeout-minutes: 25
-        run: .github/scripts/run-with-memory-guard.sh mix dialyzer --plt
+      - run: mix compile
+      - run: mix dialyzer --plt
         env:
-          # Dialyzer sizes its worker pool from the online BEAM schedulers.
-          ERL_FLAGS: "+S 2:2"
-
-      - name: Run Dialyzer
-        timeout-minutes: 15
-        run: .github/scripts/run-with-memory-guard.sh mix dialyzer
+          ERL_FLAGS: "+S 1:1"
+      - name: PLT and beam sizes
+        run: |
+          ls -la _build/dev/*.plt || true
+          du -sk _build/dev/lib/*/ebin | sort -rn | head -15
+      - name: Measure (${{ matrix.variant }})
         env:
-          ERL_FLAGS: "+S 2:2"
-          # Analysis peaks near the 16 GB of RAM (#3869); the added swap absorbs the excess and the guard counts RAM plus free swap.
-          MEMORY_GUARD_MIN_AVAILABLE_MB: "768"
+          ERL_FLAGS: "+S 1:1"
+          VARIANT: ${{ matrix.variant }}
+        run: |
+          measure() {
+            label="$1"; shift
+            echo "::group::$label"
+            /usr/bin/time -v "$@" > "out-$label.txt" 2> "time-$label.txt" || true
+            echo "::endgroup::"
+            tail -n 60 "out-$label.txt"
+            grep -E "_start|_stop" "out-$label.txt" | head -n 80 || true
+            awk 'NF>=3 && $3 ~ /^[0-9]+$/ { if ($4 ~ /_start$/) { ph=$4; sub(/_start$/,"",ph) } if ($3+0 > max[ph]+0) max[ph]=$3 } END { for (p in max) printf "phase-peak %-14s %8d MiB\n", p, max[p]/1048576 }' "out-$label.txt" | sort -k3 -n || true
+            echo "RESULT $label $(grep -E 'Maximum resident set size' "time-$label.txt") | $(grep -E 'Elapsed \(wall clock\)' "time-$label.txt") | $(grep -E 'Exit status' "time-$label.txt")"
+            tail -n 25 "time-$label.txt" | grep -E "Exit status|Command being timed|signal" || true
+          }
+          probe=".github/scripts/dialyzer_probe.exs"
+          case "$VARIANT" in
+            warn-trace)
+              PROBE_TRACE=1 PROBE_TIMING=debug measure probe-trace mix run --no-compile --no-start "$probe"
+              grep -E "^probe-module|warning-phase modules" out-probe-trace.txt || true
+              ;;
+            no-contracts)
+              PROBE_FLAGS=no_contracts PROBE_TIMING=debug measure probe-no-contracts mix run --no-compile --no-start "$probe"
+              ;;
+            incremental)
+              touch_module() {
+                perl -0pi -e 's/end\s*\z/\n  \@doc false\n  \@spec probe_touch() :: :ok\n  def probe_touch, do: :ok\nend\n/' "$1"
+                tail -n 5 "$1"
+                mix compile
+              }
+              measure incremental-cold mix dialyzer.incremental
+              touch_module lib/minga/core/face.ex
+              measure incremental-leaf mix dialyzer.incremental
+              touch_module lib/minga_editor/state.ex
+              measure incremental-state mix dialyzer.incremental
+              grep -iE "analy|modules" out-incremental-*.txt | head -n 20 || true
+              ;;
+          esac
 
   release-prerequisites:
     name: Native release prerequisites (${{ matrix.runner }})
