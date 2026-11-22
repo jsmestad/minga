@@ -14,7 +14,8 @@ defmodule MingaEditor.Extension.Sidebar do
   alias MingaEditor.Extension.Sidebar.Snapshot
 
   @table __MODULE__
-  @reserved_builtin_ids MapSet.new(["file_tree", "git_status", "observatory"])
+  @git_status_id Entry.git_status_id()
+  @reserved_builtin_ids MapSet.new(["file_tree", "observatory"])
   @default_notify MingaEditor
 
   @typedoc "Registry table name."
@@ -89,6 +90,19 @@ defmodule MingaEditor.Extension.Sidebar do
 
   def register(table, source, attrs) when is_list(attrs) or is_map(attrs) do
     call_table(table, {:register, source, attrs})
+  end
+
+  @doc "Registers the reserved Git Status entry for its extension owner."
+  @spec register_git_status(table(), {:extension, atom()}) :: :ok | {:error, term()}
+  def register_git_status(table, {:extension, _name} = source) do
+    call_table(table, {:register_git_status, source})
+  end
+
+  @doc "Synchronizes the registered Git Status entry with the visible panel."
+  @spec sync_git_status(table(), non_neg_integer() | nil, boolean(), boolean()) ::
+          :ok | {:error, term()}
+  def sync_git_status(table, badge_count, focused?, install_fixture?) do
+    call_table(table, {:sync_git_status, badge_count, focused?, install_fixture?})
   end
 
   @doc "Unregisters a sidebar when it is owned by the caller's source."
@@ -202,6 +216,13 @@ defmodule MingaEditor.Extension.Sidebar do
 
   def dispatch_action(table, state, sidebar_id, action, context) do
     case get(table, sidebar_id) do
+      %{id: @git_status_id, source: source} ->
+        MingaEditor.Shell.Traditional.SidebarWorkflow.handle_git_status_action(
+          state,
+          action,
+          source
+        )
+
       %{source: source, action_handler: nil} ->
         run_action_handler(nil, source, state, action, Map.put(context, :sidebar_id, sidebar_id))
 
@@ -242,6 +263,26 @@ defmodule MingaEditor.Extension.Sidebar do
     {:reply, do_register(table, source, attrs), table}
   end
 
+  def handle_call({:register_git_status, source}, _from, table) do
+    result =
+      case lookup(table, @git_status_id) do
+        nil -> put_entry(table, Entry.git_status(source))
+        %{source: ^source} -> :ok
+        %{source: other} -> {:error, {:duplicate_sidebar_id, @git_status_id, other}}
+      end
+
+    {:reply, result, table}
+  end
+
+  def handle_call({:sync_git_status, badge_count, focused?, install_fixture?}, _from, table) do
+    result = sync_git_status_entry(table, badge_count, focused?, install_fixture?)
+    {:reply, result, table}
+  end
+
+  def handle_call({:unregister, _source, @git_status_id}, _from, table) do
+    {:reply, {:error, {:reserved_sidebar_id, @git_status_id}}, table}
+  end
+
   def handle_call({:unregister, source, id}, _from, table) do
     {:reply, do_unregister(table, source, id), table}
   end
@@ -275,12 +316,41 @@ defmodule MingaEditor.Extension.Sidebar do
   @spec do_register(table(), source(), register_attrs() | keyword()) :: :ok | {:error, term()}
   defp do_register(table, source, attrs) do
     with {:ok, entry} <- build_entry(source, attrs),
-         :ok <- reject_reserved_builtin_id(source, entry.id),
+         :ok <- reject_reserved_entry(entry),
          :ok <- reject_foreign_duplicate(table, source, entry.id) do
-      :ets.insert(table, {entry.id, entry})
-      notify_changed(table)
-      :ok
+      put_entry(table, entry)
     end
+  end
+
+  @spec sync_git_status_entry(table(), non_neg_integer() | nil, boolean(), boolean()) ::
+          :ok | {:error, :not_found}
+  defp sync_git_status_entry(table, badge_count, focused?, install_fixture?) do
+    case lookup(table, @git_status_id) do
+      nil when is_nil(badge_count) ->
+        :ok
+
+      nil when install_fixture? ->
+        fixture = Entry.git_status(:builtin)
+        put_entry(table, Entry.present_git_status(fixture, true, badge_count, focused?))
+
+      nil ->
+        {:error, :not_found}
+
+      %{source: :builtin} when is_nil(badge_count) ->
+        do_unregister(table, :builtin, @git_status_id)
+
+      entry ->
+        put_entry(
+          table,
+          Entry.present_git_status(entry, not is_nil(badge_count), badge_count || 0, focused?)
+        )
+    end
+  end
+
+  @spec put_entry(table(), entry()) :: :ok
+  defp put_entry(table, %Entry{id: id} = entry) do
+    :ets.insert(table, {id, entry})
+    notify_changed(table)
   end
 
   @spec do_unregister(table(), source(), String.t()) :: :ok | {:error, term()}
@@ -428,6 +498,16 @@ defmodule MingaEditor.Extension.Sidebar do
 
   defp remove_source_entry(_table, _source, _id, %Entry{}, removed?), do: removed?
 
+  @spec reject_reserved_entry(entry()) :: :ok | {:error, term()}
+  defp reject_reserved_entry(%Entry{id: @git_status_id}),
+    do: {:error, {:reserved_sidebar_id, @git_status_id}}
+
+  defp reject_reserved_entry(%Entry{semantic_kind: @git_status_id}),
+    do: {:error, {:reserved_sidebar_kind, @git_status_id}}
+
+  defp reject_reserved_entry(%Entry{source: source, id: id}),
+    do: reject_reserved_builtin_id(source, id)
+
   @spec reject_reserved_builtin_id(source(), String.t()) :: :ok | {:error, term()}
   defp reject_reserved_builtin_id(:builtin, _id), do: :ok
 
@@ -454,6 +534,9 @@ defmodule MingaEditor.Extension.Sidebar do
     case lookup(table, id) do
       nil ->
         {:error, :not_found}
+
+      %Entry{id: @git_status_id} ->
+        {:error, {:reserved_sidebar_id, @git_status_id}}
 
       %{source: ^source} = entry ->
         :ets.insert(table, {id, fun.(entry)})

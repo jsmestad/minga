@@ -35,7 +35,9 @@ type Model struct {
 	done           <-chan struct{}
 	viewport       viewport.Model
 	zones          *zoneManager
-	presentedClick *presentedChromeClick
+	presentedClick *presentedMouseClick
+	gitStatusHits  *gitStatusHits
+	gitHitRevision uint64
 	windows        map[uint16]protocol.WindowContent
 	// residentRows is the indexed, value-semantic authority for window rows.
 	// WindowContent.Rows is retained only as a small-fixture compatibility view.
@@ -189,7 +191,7 @@ func NewWithTransport(width, height uint16, out chan<- []byte, done <-chan struc
 		done:                           done,
 		viewport:                       vp,
 		zones:                          newZoneManager(),
-		presentedClick:                 &presentedChromeClick{},
+		presentedClick:                 &presentedMouseClick{},
 		windows:                        map[uint16]protocol.WindowContent{},
 		residentRows:                   map[uint16]residentRows{},
 		residentSemantics:              map[uint16]*residentSemanticStore{},
@@ -328,7 +330,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.PasteMsg:
 		m.send(pastePacket(msg))
 	case tea.MouseMsg:
-		publishedPacket, publishedClaimed, publicationChanged := m.presentedClick.take()
+		hit := m.presentedClick.take()
 		if m.textDrag != nil && isEditorTextDragContinuation(msg) {
 			updated, packet, handled := m.handleEditorTextMouse(msg)
 			m = updated
@@ -348,12 +350,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			break
 		}
 		if click, ok := msg.(tea.MouseClickMsg); ok && click.Button == tea.MouseLeft {
-			if publicationChanged {
+			if hit.publicationChanged() {
 				break // The press could belong to either side of the terminal write.
 			}
-			if publishedClaimed {
-				if publishedPacket != nil {
-					m.send(publishedPacket)
+			if hit.claimed && !hit.maskedGit {
+				if hit.packet != nil {
+					m.send(hit.packet)
 				}
 				break
 			}
@@ -362,6 +364,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.send(packet)
 				}
 				break
+			}
+			if hit.maskedGit {
+				if packet, _ := m.overlayMousePacket(msg); packet != nil {
+					m.send(packet)
+				}
+				break // Covered Git cells do not fall through to the editor.
 			}
 		}
 		mouse := msg.Mouse()
@@ -581,7 +589,11 @@ func agentTranscriptScrollRows(msg tea.KeyPressMsg, page int) (int, bool) {
 func (m *Model) composeBody() string {
 	start := time.Now()
 	m.lineCache.resetCounters()
-	content := m.content()
+	content, hits := m.renderBody()
+	if !hits.sameTargets(m.gitStatusHits) {
+		m.gitHitRevision++
+	}
+	m.gitStatusHits = hits
 	if m.latency != nil {
 		hits, misses := m.lineCache.takeCounters()
 		m.latency.ObserveCompose(time.Since(start), hits, misses)
@@ -611,7 +623,8 @@ func (m Model) View() tea.View {
 		parts = append(parts, m.footerLines()[:m.layout.footer.Height]...)
 		content = m.zones.Scan(lipgloss.JoinVertical(lipgloss.Left, parts...))
 	}
-	out := m.cursorStyleSequence() + m.composeFrame(content) + m.latencyHUDSequence()
+	frame, layers := m.composeFrameWithLayers(content)
+	out := m.cursorStyleSequence() + frame + m.latencyHUDSequence()
 	if m.zones != nil && len(m.zones.approvalMarkers) != 0 {
 		if m.transcriptRenderer != nil {
 			m.transcriptRenderer.retainApprovalMarkers(m.zones)
@@ -621,18 +634,20 @@ func (m Model) View() tea.View {
 	if m.pendingClipboard != "" {
 		out += ansi.SetClipboard(ansi.SystemClipboard, m.pendingClipboard)
 	}
+	if m.protocolError == "" && m.gitStatusHits != nil {
+		// Bubble Tea compares Content, but not OnMouse, when deciding whether
+		// to publish a new View. This trailing SGR paints no cells and makes
+		// target-only changes (such as a new panel ID) publishable.
+		out += fmt.Sprintf("\x1b[0:%dm", m.gitHitRevision)
+	}
 	view := tea.NewView(out)
 	view.AltScreen = true
 	view.MouseMode = tea.MouseModeCellMotion
 	view.WindowTitle = m.title
 	view.BackgroundColor = m.editorBackground()
 	view.ForegroundColor = m.palette().Text()
-	picker, _ := m.picker()
-	if m.protocolError == "" && !picker.Visible {
-		view.OnMouse = m.presentedConflictHandler()
-		if view.OnMouse == nil {
-			view.OnMouse = m.presentedComposerHandler()
-		}
+	if m.protocolError == "" {
+		view.OnMouse = m.presentedMouseHandler(layers)
 	}
 	if chat, ok := m.agentChat(); ok && chat.Visible {
 		view.Cursor = m.agentPromptCursor()

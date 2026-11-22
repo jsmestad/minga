@@ -14,6 +14,8 @@ defmodule MingaEditor.Extension.SourceFinalizer do
   alias MingaEditor.EffectScheduler
   alias MingaEditor.Extension.EventWorkflow
   alias MingaEditor.PickerUI
+  alias MingaEditor.PromptUI
+  alias MingaEditor.Shell.Traditional.SidebarWorkflow
   alias MingaEditor.State, as: EditorState
 
   @cleanup_family :editor_effects
@@ -82,12 +84,22 @@ defmodule MingaEditor.Extension.SourceFinalizer do
     EventWorkflow.dispatch_unload(state, source, context, reply_to)
   end
 
-  @doc "Cancels source work before removing its live picker presentation."
+  @doc "Cancels source work before removing its live editor presentation."
   @spec finalize(EditorState.t(), source()) :: {result(), EditorState.t()}
   def finalize(%EditorState{} = state, source) do
     case EffectScheduler.cancel_source(state.effect_scheduler, source) do
-      :ok -> {:ok, PickerUI.remove_source(state, source)}
-      {:error, reason} -> {{:error, reason}, state}
+      :ok ->
+        updated =
+          state
+          |> PickerUI.remove_source(source)
+          |> PromptUI.remove_source(source)
+          |> MingaEditor.Shell.Traditional.GitToastWorkflow.remove_source(source)
+          |> SidebarWorkflow.remove_git_status_source(source)
+
+        {:ok, updated}
+
+      {:error, reason} ->
+        {{:error, reason}, state}
     end
   end
 

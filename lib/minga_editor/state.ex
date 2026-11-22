@@ -191,6 +191,12 @@ defmodule MingaEditor.State do
     end
   end
 
+  @doc "Routes subsequent keys to the input scope owned by the focused surface."
+  @spec focus_keymap_scope(t(), Minga.Keymap.Scope.scope_name()) :: t()
+  def focus_keymap_scope(%__MODULE__{} = state, scope) do
+    %{state | workspace: SessionState.set_keymap_scope(state.workspace, scope)}
+  end
+
   @doc "Atomically integrates a synchronous focused renderer receipt."
   @spec integrate_synchronous_renderer_receipt(t(), RenderReceipt.t()) :: t()
   def integrate_synchronous_renderer_receipt(%__MODULE__{} = state, %RenderReceipt{} = receipt) do
@@ -362,8 +368,21 @@ defmodule MingaEditor.State do
     {context, runtime} = resolve_tab_context(state, context)
     workspace = SessionState.restore_tab_context(state.workspace, context)
     workspace = activate_file_tab_buffer(workspace, runtime)
+    workspace = restore_git_status_scope(workspace, runtime)
     %{state | workspace: workspace, shell_runtime: runtime}
   end
+
+  @spec restore_git_status_scope(SessionState.t(), ShellRuntime.t()) :: SessionState.t()
+  defp restore_git_status_scope(
+         %SessionState{keymap_scope: :git_status} = workspace,
+         %ShellRuntime{state: %ShellState{} = shell}
+       ) do
+    if ShellState.git_status_panel(shell),
+      do: workspace,
+      else: SessionState.set_keymap_scope(workspace, :editor)
+  end
+
+  defp restore_git_status_scope(workspace, _runtime), do: workspace
 
   @doc "Purely switches tab-owned root values and returns the selected tab."
   @spec switch_tab(t(), Tab.id()) :: {t(), tab_switch_result()}

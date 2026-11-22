@@ -28,6 +28,7 @@ defmodule MingaEditor.Commands do
   alias Minga.Mode.CommandState
   alias Minga.Extension.CallbackInvoker
   alias MingaEditor.Extension.EventWorkflow, as: ExtensionEventWorkflow
+  alias MingaEditor.Extension.RepositoryJob
   alias MingaEditor.Shell.Traditional.NoticeWorkflow
   alias MingaEditor.Shell.Traditional.ToolPrompts
   alias MingaEditor.Shell.Traditional.ToolPromptWorkflow
@@ -304,16 +305,6 @@ defmodule MingaEditor.Commands do
     restore_file_tree_scope(state)
   end
 
-  # ── Source-owned parameterized actions ─────────────────────────────────────
-
-  def execute(state, {:branch_delete_confirm, git_root, name, force}) do
-    dispatch_editor_action(state, :branch_delete_confirm, {git_root, name, force})
-  end
-
-  def execute(state, :branch_delete_cancel) do
-    dispatch_editor_action(state, :branch_delete_cancel, nil)
-  end
-
   # ── Agent tuple commands ──────────────────────────────────────────────────
 
   def execute(state, {:agent_set_model, [model]}), do: AgentCommands.set_model(state, model)
@@ -328,10 +319,8 @@ defmodule MingaEditor.Commands do
 
   # ── Parameterized git commands ────────────────────────────────────────────
 
-  def execute(state, {:git_accept_conflict, choice, start_line}) do
-    guard_buffer(state, fn ->
-      dispatch_editor_action(state, :git_accept_conflict, {choice, start_line})
-    end)
+  def execute(state, {:git_accept_conflict, buffer, version, region, choice}) do
+    dispatch_editor_action(state, :git_accept_conflict, {buffer, version, region, choice})
   end
 
   # ── Parameterized movement ────────────────────────────────────────────────
@@ -733,8 +722,14 @@ defmodule MingaEditor.Commands do
          {:extension_callback, source, module, function, {:ok, returned}},
          original_state
        ) do
-    _failure = CallbackInvoker.invalid_return(source, module, function, returned)
-    original_state
+    with {:schedule, %EditorState{} = state, proposal} <- returned,
+         {:ok, job} <- RepositoryJob.cast(proposal) do
+      RepositoryJob.submit(state, source, job)
+    else
+      _invalid ->
+        _failure = CallbackInvoker.invalid_return(source, module, function, returned)
+        original_state
+    end
   end
 
   defp normalize_registered_command_result(

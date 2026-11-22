@@ -96,12 +96,18 @@ defmodule MingaEditor.RenderModel.UI.Builder do
   defp build_git_status(%Context{} = ctx) do
     shell_state = ctx.intent.frame.shell_state
 
-    panel =
-      if match?(%TraditionalState{}, shell_state),
-        do: TraditionalState.git_status_panel(shell_state),
-        else: nil
+    case shell_state do
+      %TraditionalState{} ->
+        GitStatusBuilder.build(
+          TraditionalState.git_status_panel(shell_state),
+          ctx.intent.frame.git_syncing,
+          ctx.git_toast,
+          TraditionalState.git_status_tui_state(shell_state)
+        )
 
-    GitStatusBuilder.build(panel, ctx.intent.frame.git_syncing, ctx.git_toast)
+      _ ->
+        GitStatusBuilder.build(nil, ctx.intent.frame.git_syncing, ctx.git_toast)
+    end
   end
 
   @spec build_which_key(Context.t()) :: Minga.RenderModel.UI.WhichKey.t() | nil

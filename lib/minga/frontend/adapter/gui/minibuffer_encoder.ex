@@ -68,7 +68,6 @@ defmodule Minga.Frontend.Adapter.GUI.MinibufferEncoder do
   defp encode_mode(:extension_confirm), do: 6
   defp encode_mode(:describe_key), do: 7
   defp encode_mode(:delete_confirm), do: 8
-  defp encode_mode(:branch_delete_confirm), do: 9
   defp encode_mode(:text_prompt), do: 10
   defp encode_mode(:unknown), do: 0
 

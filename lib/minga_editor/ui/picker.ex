@@ -149,6 +149,13 @@ defmodule MingaEditor.UI.Picker do
     refilter(%{picker | query: query, match_query: match_query})
   end
 
+  @doc "Offers a derived item without adding it to the searchable candidates."
+  @spec offer_fallback(t(), item() | nil) :: t()
+  def offer_fallback(%__MODULE__{filtered: []} = picker, %Item{} = item),
+    do: %{picker | filtered: [item], selected: 0}
+
+  def offer_fallback(%__MODULE__{} = picker, _item), do: picker
+
   # ── Navigation ──────────────────────────────────────────────────────────────
 
   @doc "Moves the selection down by one (wraps around)."

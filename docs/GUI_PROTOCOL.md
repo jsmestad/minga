@@ -694,7 +694,7 @@ Mode values:
 | 6 | extension_confirm | (plugin prompt) | no | (empty) |
 | 7 | describe_key | `"Press key: "` | no | (accumulated keys) |
 | 8 | delete_confirm | `"Delete 'file.txt'? (y/n)"` | no | (empty) |
-| 9 | branch_delete_confirm | `"Delete branch feature? (y/n)"` | no | (empty) |
+| 9 | reserved | | | |
 | 10 | text_prompt | `"Add project: "` | yes | (empty) |
 
 `cursor_pos` is the 0-indexed character position within `input` for the beam cursor. `0xFFFF` means no cursor (prompt-only modes 5-9). `context` is right-aligned supplementary text. `match_score` is 0-255 fuzzy match quality. `candidate_count == 0` naturally represents "input visible, no completions."
@@ -1006,16 +1006,16 @@ When no splits are active, the BEAM sends counts of 0 for both separator types.
 
 ### 0x85 — gui_git_status
 
-Git status panel data for the native sidebar, plus remote operation feedback used by the sidebar and status bar.
+Git status panel data for both sidebars, plus remote operation feedback used by the sidebar and status bar.
 
 ```
-opcode(1) + repo_state(1) + syncing(1) + ahead(2) + behind(2) + branch_len(2) + branch(branch_len) + entry_count(2) + entries... + toast_present(1) + toast? + entry_base_path_len(2) + entry_base_path(entry_base_path_len) + last_commit_message_len(2) + last_commit_message(last_commit_message_len) + stash_count(2)
+opcode(1) + repo_state(1) + syncing(1) + ahead(2) + behind(2) + branch_len(2) + branch(branch_len) + entry_count(2) + entries... + toast_present(1) + toast? + entry_base_path_len(2) + entry_base_path(entry_base_path_len) + last_commit_message_len(2) + last_commit_message(last_commit_message_len) + stash_count(2) + terminal_cursor(4) + terminal_collapsed(1) + panel_id(8) + commit_target_id(8)
 
 Per entry:
   path_hash(4) + section(1) + status(1) + path_len(2) + path(path_len)
 
 Toast when toast_present == 1:
-  level(1) + action(1) + msg_len(2) + msg(msg_len)
+  level(1) + action(1) + msg_len(2) + msg(msg_len) + toast_id(8)
 ```
 
 `repo_state`: 0 = normal, 1 = not_a_repo, 2 = loading.
@@ -1025,7 +1025,12 @@ Toast when toast_present == 1:
 `status`: 0 = unknown, 1 = modified, 2 = added, 3 = deleted, 4 = renamed, 5 = copied, 6 = untracked, 7 = conflict.
 `level`: 0 = success, 1 = error.
 `action`: 0 = none, 1 = pull_and_retry.
+`toast_id`: identifies the exact toast that offered the action. Send this identifier when activating Pull & Retry; the editor rejects an action from a replaced toast.
 `stash_count`: number of stashes in the repository. It must fit the u16 carrier; an out-of-range value rejects the frame before any bytes reach the frontend. Frontends should show it only when greater than zero.
+`terminal_cursor`: zero-based row in the terminal list, including section headers. The display order is Conflicts, Staged, Changes, Untracked, omitting empty sections.
+`terminal_collapsed`: one bit per section ID. A collapsed section shows its header but not its entries. The native sidebar ignores these two terminal fields.
+`panel_id`: identifies the installed panel's displayed status snapshot. Zero means no installed panel. A status refresh retires the previous ID. A frontend sends the ID from the frame that offered the action, including actions offered before a confirmation dialog opened.
+`commit_target_id`: identifies the commit draft's repository and branch within the installed panel. It stays stable across status-only refreshes, but changes on branch changes or panel replacement. The frontend retains a local draft for this target and sends the current, displayed `panel_id` when submitting it. Zero means no installed panel.
 
 When the git status panel is closed, the BEAM sends `repo_state = not_a_repo`, no entries, and an empty `entry_base_path` as the hide signal. A non-git project opened in the Source Control tab also uses `repo_state = not_a_repo`, but includes the project root so the frontend can show the native "Not a git repository" empty state instead of hiding the panel. The frontend should still copy `syncing` and `toast` so remote operation feedback remains accurate while the panel is hidden.
 
@@ -1245,13 +1250,13 @@ Scrolling changes only the BEAM-owned logical/continuation viewport anchor, neve
 | 0x10 | file_tree_refresh | (empty) | Refresh file tree |
 | 0x15 | agent_tool_toggle | message_id(4) | Toggle collapse/expand of the agent tool or thinking entry with the stable transcript message ID |
 | 0x16 | execute_command | name_len(2) + name(name_len) | Execute a named command from the BEAM command registry |
-| 0x18 | git_stage_file | path_len(2) + path(path_len) | Stage a file |
-| 0x19 | git_unstage_file | path_len(2) + path(path_len) | Unstage a file |
-| 0x1A | git_discard_file | path_len(2) + path(path_len) | Discard working-tree changes |
-| 0x1B | git_stage_all | (empty) | Stage all changes |
-| 0x1C | git_unstage_all | (empty) | Unstage all |
-| 0x1D | git_commit | amend(1) + msg_len(2) + msg(msg_len) | Commit with message, or amend when `amend` is 1. New frontends should use this action for both normal and amend commits. |
-| 0x1E | git_open_file | path_len(2) + path(path_len) | Open file in editor |
+| 0x18 | git_stage_file | panel_id(8) + path_len(2) + path(path_len) + section(1) | Stage the displayed file |
+| 0x19 | git_unstage_file | panel_id(8) + path_len(2) + path(path_len) + section(1) | Unstage the displayed file |
+| 0x1A | git_discard_file | panel_id(8) + path_len(2) + path(path_len) + section(1) | Discard the displayed working-tree changes |
+| 0x1B | git_stage_all | panel_id(8) | Stage all changes in the offered Git Status panel's repository |
+| 0x1C | git_unstage_all | panel_id(8) | Unstage all changes in the offered Git Status panel's repository |
+| 0x1D | git_commit | panel_id(8) + amend(1) + msg_len(2) + msg(msg_len) | Commit with the draft message, or amend when `amend` is 1 |
+| 0x1E | git_open_file | panel_id(8) + path_len(2) + path(path_len) + section(1) | Open the displayed file in the editor |
 | 0x1F | workspace_rename | id(2) + name_len(2) + name(name_len) | Rename an agent workspace group |
 | 0x20 | workspace_set_icon | id(2) + icon_len(1) + icon(icon_len) | Change an agent workspace icon |
 | 0x21 | workspace_close | id(2) | Close an agent workspace |
@@ -1303,14 +1308,14 @@ Scrolling changes only the BEAM-owned logical/continuation viewport anchor, neve
 | 0x35 | system_did_wake | (empty) | System woke and BEAM should refresh external state |
 | 0x36 | cmd_copy | (empty) | Execute mode-aware copy from the macOS menu |
 | 0x37 | cmd_cut | (empty) | Execute mode-aware cut from the macOS menu |
-| 0x38 | git_push | (empty) | Push the current branch |
-| 0x39 | git_pull | (empty) | Pull from the upstream branch |
-| 0x3A | git_fetch | (empty) | Fetch remote refs |
-| 0x3B | git_commit_amend | msg_len(2) + msg(msg_len) | Legacy compatibility action for amending the previous commit; new frontends should send `git_commit` with `amend = 1` instead |
-| 0x3C | git_pull_and_retry | (empty) | Pull, then retry the failed push |
+| 0x38 | git_push | panel_id(8) | Push the offered Git Status panel's branch |
+| 0x39 | git_pull | panel_id(8) | Pull from the offered Git Status panel's upstream branch |
+| 0x3A | git_fetch | panel_id(8) | Fetch remote refs for the offered Git Status panel |
+| 0x3B | git_commit_amend | panel_id(8) + msg_len(2) + msg(msg_len) | Scoped amend alias. Frontends use `git_commit` with `amend = 1`. |
+| 0x3C | git_pull_and_retry | toast_id(8) | Pull, then retry the push for the repository captured by that toast |
 | 0x3E | tab_copy_path | tab_id(4) | Copy a tab's file path |
 | 0x3F | hover_open_action | (empty) | Accept the current hover popup action |
-| 0x42 | git_open_diff | path_len(2) + path(path_len) + section(1) | Open a diff view for a git status file in the selected section |
+| 0x42 | git_open_diff | panel_id(8) + path_len(2) + path(path_len) + section(1) | Open a diff for the displayed file and section |
 
 `semantic_item_activate` surfaces are `1 = completion`, `2 = picker`, `3 = file_tree`, `4 = command_completion`, `5 = timeline`, and `6 = review`. Completion and command-completion intent `1` accepts the item. Picker intents are `1 = activate item`, `2 = activate action`, and `3 = dismiss`. Dismissal sends the visible picker's activation generation and an empty item ID. A stale dismissal cannot close a replacement picker. File-tree intents are `1 = primary`, `2 = toggle`, `3 = open in split`, `4 = delete`, `5 = rename`, `6 = duplicate`, `7 = new file`, and `8 = new folder`. Creation names the parent entry; an empty ID means the project root, not the cursor entry. Timeline intent `1` navigates to the named entry; intent `2` reviews the exact offered full file path. Review intents are `1 = back to chat` and `2 = review latest`. Review uses the opaque item ID and generation from status section 0x10, bound to the shell registration, workspace/session, tab, pane incarnation and selected source. Refresh is offered only while stale.
 
@@ -1324,7 +1329,7 @@ Approval decisions use `1 = approve once`, `2 = trust for session`, `3 = trust f
 
 Protocol version 28 retires `file_tree_click` (0x03), `file_tree_toggle` (0x04), `completion_select` (0x05), `breadcrumb_click` (0x06), `panel_switch_tab` (0x09), `file_tree_new_file` (0x0D), `file_tree_new_folder` (0x0E), `minibuffer_select` (0x17), `file_tree_delete` (0x30), `file_tree_rename` (0x31), `file_tree_duplicate` (0x32), `file_tree_move` (0x33), `file_tree_open_in_split` (0x3D), and `timeline_navigate` (0x4F). These sub-opcodes reject all payloads. Breadcrumb and panel-tab actions had no behavior and have no replacement.
 
-Older path-only `git_open_diff` payloads are accepted as a compatibility fallback only when the path is unambiguous. Native frontends should always send the section-aware form.
+Git Status panel and file actions echo the nonzero big-endian `u64` panel ID from the snapshot that offered the control or commit draft. The BEAM rejects the action before scheduling work or dispatching a remote event if that exact panel is no longer installed, even if the replacement shows the same repository. File actions also echo the path and section of the exact offered row. Unscoped payloads are invalid. Commit messages are UTF-8 bytes preceded by their big-endian `u16` byte length. For `git_commit`, `amend` is exactly `0` or `1`.
 
 For `file_tree_drop`, `target_kind` is `1` for a directory and `0` for a file. Each source is encoded as `path_len(2) + path(path_len)`. The BEAM validates the generation and resolves the stable target ID before handling the drop. The retained target index is observation metadata, not an activation target. Drops onto files resolve to that named file's parent directory.
 

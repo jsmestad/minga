@@ -73,12 +73,8 @@ defmodule MingaEditor.Extension.EventWorkflow do
   defp admission_failure(state, {:editor_action, :open_git_diff_for_path, _arguments}, reason),
     do: NoticeWorkflow.publish(state, "Git diff not scheduled: #{inspect(reason)}")
 
-  defp admission_failure(state, {:editor_action, :execute_git_command, _command}, reason),
-    do: NoticeWorkflow.publish(state, "Git command not scheduled: #{inspect(reason)}")
-
-  defp admission_failure(state, {:editor_action, action, _arguments}, reason)
-       when action in [:branch_delete_confirm, :branch_delete_cancel],
-       do: NoticeWorkflow.publish(state, "Branch delete action not scheduled: #{inspect(reason)}")
+  defp admission_failure(state, {:editor_action, :git_status_remote, _target}, reason),
+    do: NoticeWorkflow.publish(state, "Git operation not scheduled: #{inspect(reason)}")
 
   defp admission_failure(state, _event, _reason), do: state
 

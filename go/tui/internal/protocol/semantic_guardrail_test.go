@@ -121,7 +121,7 @@ func TestSemanticFrontendOpcodesAreAccountedFor(t *testing.T) {
 		generated.OPGuiSignatureHelp:        {generated.OPGuiSignatureHelp, 0},
 		generated.OPGuiFloatPopup:           {generated.OPGuiFloatPopup, 0},
 		generated.OPGuiSplitSeparators:      {generated.OPGuiSplitSeparators, 0, 0, 0, 0},
-		generated.OPGuiGitStatus:            {generated.OPGuiGitStatus, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0},
+		generated.OPGuiGitStatus:            append([]byte{generated.OPGuiGitStatus}, make([]byte, 38)...),
 		generated.OPGuiAgentContext:         {generated.OPGuiAgentContext, 0, 0},
 		generated.OPGuiHoverAction:          {generated.OPGuiHoverAction, 0, 1, 0},
 		generated.OPGuiConfigState:          {generated.OPGuiConfigState, 0, 0},

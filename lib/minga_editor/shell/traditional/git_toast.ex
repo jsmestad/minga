@@ -8,23 +8,25 @@ defmodule MingaEditor.Shell.Traditional.GitToast do
 
   @type id :: non_neg_integer()
   @type level :: :info | :success | :warning | :error
-  @type action :: :pull_and_retry | nil
+  alias Minga.Extension.CallbackInvoker
+  alias MingaEditor.Extension.RepositoryJob
+
+  @type retry :: {CallbackInvoker.source(), RepositoryJob.t()} | nil
   @type t :: %__MODULE__{
           id: id(),
           message: String.t() | nil,
           level: level() | nil,
-          action: action(),
+          retry: retry(),
           timer: reference() | nil
         }
 
-  defstruct id: 0, message: nil, level: nil, action: nil, timer: nil
+  defstruct id: 0, message: nil, level: nil, retry: nil, timer: nil
 
   @doc "Publishes a latest-wins toast and advances its identity."
-  @spec publish(t(), String.t(), level(), action()) :: t()
-  def publish(%__MODULE__{} = toast, message, level, action \\ nil)
-      when is_binary(message) and level in [:info, :success, :warning, :error] and
-             action in [:pull_and_retry, nil] do
-    %__MODULE__{id: toast.id + 1, message: message, level: level, action: action}
+  @spec publish(t(), String.t(), level(), retry()) :: t()
+  def publish(%__MODULE__{} = toast, message, level, retry \\ nil)
+      when is_binary(message) and level in [:info, :success, :warning, :error] do
+    %__MODULE__{id: toast.id + 1, message: message, level: level, retry: retry}
   end
 
   @doc "Returns whether this toast level should be auto-dismissed."
@@ -65,5 +67,5 @@ defmodule MingaEditor.Shell.Traditional.GitToast do
   defp clear(%__MODULE__{message: nil, timer: nil} = toast), do: toast
 
   defp clear(%__MODULE__{} = toast),
-    do: %{toast | message: nil, level: nil, action: nil, timer: nil}
+    do: %{toast | message: nil, level: nil, retry: nil, timer: nil}
 end

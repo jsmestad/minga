@@ -12,7 +12,7 @@ defmodule Minga.Frontend.Adapter.GUI.Caches do
           last_focus_owner_fp: integer() | nil,
           last_notifications_fp: integer() | nil,
           last_search_state_fp: integer() | nil,
-          last_git_status_fp: integer() | nil,
+          last_git_status_fp: {non_neg_integer(), integer()} | nil,
           last_agent_context_fp: integer() | nil,
           last_observatory_fp: fingerprint() | nil,
           last_tab_bar_fp: integer() | :suppressed | nil,

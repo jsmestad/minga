@@ -29,8 +29,6 @@ defmodule MingaEditor.Shell.Traditional.SidebarsTest do
   test "Git status workflow close clears shell state and registered visibility" do
     base = MingaEditor.RenderPipeline.TestHelpers.base_state()
     table = base.extension_surfaces.sidebar_registry
-    # Git porcelain declared: startup registers the Git Status surface.
-    :ok = BuiltinSurfaces.register_contributions(table, true)
 
     state =
       base
@@ -43,21 +41,19 @@ defmodule MingaEditor.Shell.Traditional.SidebarsTest do
 
     assert SidebarWorkflow.git_status_panel(closed) == nil
     assert SidebarWorkflow.active_id(closed) == nil
-    assert %{visible?: false, focused?: false, badge_count: 0} = Sidebar.get(table, "git_status")
+    assert Sidebar.get(table, "git_status") == nil
   end
 
-  test "without git porcelain, Git status panel changes never create a sidebar entry" do
+  test "built-in contributions do not register the optional Git Status surface" do
     base = MingaEditor.RenderPipeline.TestHelpers.base_state()
     table = base.extension_surfaces.sidebar_registry
-    :ok = BuiltinSurfaces.register_contributions(table, false)
+    :ok = BuiltinSurfaces.register_contributions(table)
 
     assert Sidebar.get(table, "git_status") == nil
     assert %{id: "observatory"} = Sidebar.get(table, "observatory")
 
-    state = SidebarWorkflow.replace_git_status(base, Panel.new(%{entries: []}))
-    assert Sidebar.get(table, "git_status") == nil
-
-    _closed = SidebarWorkflow.close_git_status(state)
+    state = SidebarWorkflow.refresh_git_status(base, Panel.new(%{entries: []}))
+    assert SidebarWorkflow.git_status_panel(state) == nil
     assert Sidebar.get(table, "git_status") == nil
   end
 

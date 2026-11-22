@@ -18,7 +18,6 @@ defmodule Minga.RenderModel.UI.Minibuffer do
           | :extension_confirm
           | :describe_key
           | :delete_confirm
-          | :branch_delete_confirm
           | :text_prompt
           | :unknown
 

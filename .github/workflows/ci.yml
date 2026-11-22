@@ -142,11 +142,10 @@ jobs:
         working-directory: sdk-checkout/sdk
         run: mix hex.build
 
-  test-git-porcelain:
-    name: Test (Git porcelain extension)
+  test-git-extended:
+    name: Test (GitExtended extension)
     runs-on: ubuntu-latest
-    # The extension's standalone suite compiles core from the path dependency, so a core API
-    # change that breaks the bundled extension fails here. The suite needs no native binaries.
+    # Run the standalone extension's integration suite against the candidate host.
     steps:
       - uses: actions/checkout@v4
 
@@ -155,21 +154,21 @@ jobs:
           version-file: .tool-versions
           version-type: strict
 
-      - name: Cache git porcelain deps
-        uses: actions/cache@v4
+      - uses: actions/checkout@v4
         with:
-          path: |
-            extensions/git_porcelain/deps
-            extensions/git_porcelain/_build
-          key: git-porcelain-deps-${{ runner.os }}-${{ hashFiles('.tool-versions') }}-${{ hashFiles('extensions/git_porcelain/mix.lock') }}
-          restore-keys: git-porcelain-deps-${{ runner.os }}-${{ hashFiles('.tool-versions') }}-
+          repository: jsmestad/minga-git-extended
+          ref: 5abf5009f6018b88b7cb301d1e29f2c7836b04bc
+          path: git-extended-checkout
+          persist-credentials: false
 
-      - name: Compile and test the standalone git porcelain suite
-        working-directory: extensions/git_porcelain
+      - name: Test the standalone GitExtended suite
+        working-directory: git-extended-checkout
+        env:
+          MIX_ENV: test
+          MINGA_HOST_SOURCE: ${{ github.workspace }}
         run: |
           mix deps.get
-          mix compile --warnings-as-errors
-          mix test --warnings-as-errors
+          mix test
 
   keystroke-latency-baseline:
     name: Keystroke Latency Baseline
@@ -710,7 +709,7 @@ jobs:
       - lint
       - test
       - test-sdk
-      - test-git-porcelain
+      - test-git-extended
       - keystroke-latency-baseline
       - conformance
       - test-zig

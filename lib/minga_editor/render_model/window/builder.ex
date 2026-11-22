@@ -1982,6 +1982,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
     entry =
       row
       |> visual_entry(source_text, ctx, 0, Unicode.display_width(row.text), 0)
+      |> retain_block_click(kind)
       |> VisualRow.with_retention(input_hash, reused?)
 
     build_folded_rows(
@@ -1993,6 +1994,12 @@ defmodule MingaEditor.RenderModel.Window.Builder do
       {style_key, builds, counters, registry, [entry | acc]}
     )
   end
+
+  @spec retain_block_click(VisualRow.t(), term()) :: VisualRow.t()
+  defp retain_block_click(row, {:block, block, line}),
+    do: VisualRow.with_block_click(row, block.on_click, line)
+
+  defp retain_block_click(row, _kind), do: row
 
   defp project_mixed_run(
          %DisplayMap{wrap_basis: nil} = page,

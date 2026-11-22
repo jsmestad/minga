@@ -238,6 +238,8 @@ type Breadcrumb struct {
 }
 
 type GitStatus struct {
+	PanelID           uint64
+	CommitTargetID    uint64
 	RepoState         byte
 	Syncing           bool
 	Ahead             uint16
@@ -248,6 +250,8 @@ type GitStatus struct {
 	EntryBasePath     string
 	LastCommitMessage string
 	StashCount        uint16
+	TerminalCursor    uint32
+	TerminalCollapsed byte
 }
 
 type GitStatusEntry struct {
@@ -258,6 +262,7 @@ type GitStatusEntry struct {
 }
 
 type GitToast struct {
+	ID      uint64
 	Visible bool
 	Level   byte
 	Action  byte

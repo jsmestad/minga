@@ -67,7 +67,6 @@ defmodule MingaEditor.MinibufferData do
   @mode_extension_confirm 6
   @mode_describe_key 7
   @mode_delete_confirm 8
-  @mode_branch_delete_confirm 9
   @mode_text_prompt 10
 
   # Maximum candidates to send (keep the list manageable)
@@ -120,8 +119,7 @@ defmodule MingaEditor.MinibufferData do
              :eval,
              :substitute_confirm,
              :extension_confirm,
-             :delete_confirm,
-             :branch_delete_confirm
+             :delete_confirm
            ],
       do: true
 
@@ -164,7 +162,7 @@ defmodule MingaEditor.MinibufferData do
         }
       })
       when handler != nil do
-    text_prompt(prompt_state)
+    overlay_prompt(prompt_state)
   end
 
   def from_state(%Input{
@@ -177,7 +175,7 @@ defmodule MingaEditor.MinibufferData do
         }
       })
       when handler != nil do
-    text_prompt(prompt_state)
+    overlay_prompt(prompt_state)
   end
 
   def from_state(%{workspace: %{editing: %{mode: :command, mode_state: ms}}} = state) do
@@ -288,19 +286,6 @@ defmodule MingaEditor.MinibufferData do
     }
   end
 
-  def from_state(%{workspace: %{editing: %{mode: :branch_delete_confirm, mode_state: ms}}}) do
-    %__MODULE__{
-      visible: true,
-      mode: @mode_branch_delete_confirm,
-      cursor_pos: 0xFFFF,
-      prompt: Minga.Mode.display(:branch_delete_confirm, ms),
-      input: "",
-      context: "",
-      selected_index: 0,
-      candidates: []
-    }
-  end
-
   def from_state(%{
         workspace: %{
           editing: %{
@@ -351,9 +336,26 @@ defmodule MingaEditor.MinibufferData do
     }
   end
 
-  @spec text_prompt(PromptState.t()) :: t()
-  defp text_prompt(prompt_state) do
+  @spec overlay_prompt(PromptState.t()) :: t()
+  defp overlay_prompt(prompt_state) do
     {label, input, cursor} = PromptState.render_data(prompt_state)
+
+    {cursor, choices} =
+      case prompt_state.kind do
+        :text ->
+          {cursor,
+           [
+             choice("Submit", "Submit prompt", "Enter"),
+             choice("Cancel", "Cancel prompt", "Escape")
+           ]}
+
+        :confirm ->
+          {0xFFFF,
+           [
+             choice("Yes", "Accept confirmation", "y"),
+             choice("No", "Cancel confirmation", "n / Esc")
+           ]}
+      end
 
     %__MODULE__{
       visible: true,
@@ -364,23 +366,19 @@ defmodule MingaEditor.MinibufferData do
       input: input,
       context: "",
       selected_index: 0,
-      candidates: [
-        %{
-          label: "Submit",
-          description: "Submit prompt",
-          match_score: 0,
-          match_positions: [],
-          annotation: "Enter"
-        },
-        %{
-          label: "Cancel",
-          description: "Cancel prompt",
-          match_score: 0,
-          match_positions: [],
-          annotation: "Escape"
-        }
-      ],
+      candidates: choices,
       total_candidates: 2
+    }
+  end
+
+  @spec choice(String.t(), String.t(), String.t()) :: candidate()
+  defp choice(label, description, annotation) do
+    %{
+      label: label,
+      description: description,
+      match_score: 0,
+      match_positions: [],
+      annotation: annotation
     }
   end
 

@@ -22,6 +22,7 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
   alias MingaEditor.Frontend.Capabilities
   alias MingaEditor.Frontend.Emit.Context
   alias MingaEditor.GitStatus.Panel, as: GitStatusPanel
+  alias MingaEditor.Handlers.BufferRegistry
   alias MingaEditor.Handlers.GuiActionHandler
   alias MingaEditor.RenderModel.UI.SidebarsBuilder
   alias MingaEditor.RenderPipeline.TestHelpers
@@ -48,7 +49,6 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
   alias MingaEditor.UI.Popup.Active, as: PopupActive
   alias Minga.Popup.Rule
   alias Minga.Project.FileTree, as: ProjectFileTree
-  alias MingaEditor.Sidebar.BuiltinSurfaces
   alias MingaEditor.WorkspaceWorkflow
 
   setup do
@@ -419,8 +419,6 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
     assert file_tree_active.workspace.keymap_scope == :file_tree
     assert SidebarWorkflow.active_id(file_tree_active) == "file_tree"
 
-    # Git porcelain declared: startup registers the Git Status surface.
-    :ok = BuiltinSurfaces.register_contributions(table, true)
     git_state = SidebarWorkflow.replace_git_status(state, GitStatusPanel.new(%{entries: []}))
 
     assert %{visible?: true, focused?: false} = Sidebar.get(table, "git_status")
@@ -451,6 +449,78 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
     refute FileTreeState.focused?(observatory_active.workspace.file_tree)
     assert observatory_active.workspace.keymap_scope == :editor
     assert SidebarWorkflow.active_id(observatory_active) == "observatory"
+  end
+
+  @tag :tmp_dir
+  test "TUI open closes Git status before switching tabs, but only for the exact row", %{
+    sidebar_registry: table,
+    tmp_dir: root
+  } do
+    target_path = Path.join(root, "target.txt")
+    previous_path = Path.join(root, "previous.txt")
+    File.write!(target_path, "target\n")
+    File.write!(previous_path, "previous\n")
+
+    initial = base_state(table, backend: :tui, rendering: :disabled)
+    tab_bar = TabBar.new(Tab.new_file(1, "scratch"))
+
+    shell_state =
+      MingaEditor.Shell.Traditional.State.install_tab_bar(
+        Runtime.state(initial.shell_runtime),
+        tab_bar
+      )
+
+    state =
+      %{
+        initial
+        | shell_runtime: Runtime.install_traditional_state(initial.shell_runtime, shell_state)
+      }
+      |> BufferRegistry.open_file_by_path(target_path)
+      |> BufferRegistry.open_file_by_path(previous_path)
+
+    previous_tab_id = state.shell_runtime.state.tab_bar.active_id
+    entry = %Minga.Git.StatusEntry{path: "target.txt", status: :modified, staged: false}
+
+    focused =
+      state
+      |> SidebarWorkflow.replace_git_status(
+        GitStatusPanel.new(%{git_root: root, entries: [entry]})
+      )
+      |> GuiActionHandler.dispatch({:sidebar_action, "git_status", "git_status", "activate"})
+
+    panel_id = SidebarWorkflow.git_status_panel(focused).id
+    denied = GuiActionHandler.dispatch(focused, {:git_open_file, panel_id, entry.path, 0})
+    assert denied.workspace.keymap_scope == :git_status
+    assert denied.shell_runtime.state.tab_bar.active_id == previous_tab_id
+    assert SidebarWorkflow.git_status_panel(denied).id == panel_id
+
+    {:handled, selected} = MingaEditor.Input.GitStatus.handle_key(denied, ?j, 0)
+    {:handled, opened} = MingaEditor.Input.GitStatus.handle_key(selected, ?o, 0)
+    assert Minga.Buffer.file_path(opened.workspace.buffers.active) == target_path
+    assert SidebarWorkflow.git_status_panel(opened) == nil
+
+    returned = GuiActionHandler.dispatch(opened, {:select_tab, previous_tab_id})
+    assert Minga.Buffer.file_path(returned.workspace.buffers.active) == previous_path
+    assert returned.workspace.keymap_scope == :editor
+    assert SidebarWorkflow.git_status_panel(returned) == nil
+
+    target_tab_id = opened.shell_runtime.state.tab_bar.active_id
+
+    focused =
+      returned
+      |> SidebarWorkflow.replace_git_status(
+        GitStatusPanel.new(%{git_root: root, entries: [entry]})
+      )
+      |> GuiActionHandler.dispatch({:sidebar_action, "git_status", "git_status", "activate"})
+
+    offered_id = SidebarWorkflow.git_status_panel(focused).id
+    switched = GuiActionHandler.dispatch(focused, {:select_tab, target_tab_id})
+    closed = GuiActionHandler.dispatch(switched, {:git_open_file, offered_id, entry.path, 1})
+    assert SidebarWorkflow.git_status_panel(closed) == nil
+
+    restored = GuiActionHandler.dispatch(closed, {:select_tab, previous_tab_id})
+    assert Minga.Buffer.file_path(restored.workspace.buffers.active) == previous_path
+    assert restored.workspace.keymap_scope == :editor
   end
 
   @tag :tmp_dir
@@ -585,27 +655,17 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
     assert FileTreeState.tree(resolved.workspace.file_tree).cursor == 0
   end
 
-  test "optional GUI commands report scheduling failures instead of no-op", %{
-    sidebar_registry: table
-  } do
+  test "stale Git sidebar actions cannot open an unavailable surface", %{sidebar_registry: table} do
     state = base_state(table)
 
     toggled = GuiActionHandler.dispatch(state, {:toggle_panel, 2})
 
-    assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(toggled) ==
-             "Git command not scheduled: :scheduler_unavailable"
-
-    assert toggled.workspace.keymap_scope == state.workspace.keymap_scope
-    assert SidebarWorkflow.active_id(toggled) == SidebarWorkflow.active_id(state)
+    assert toggled == state
 
     activated =
       GuiActionHandler.dispatch(state, {:sidebar_action, "git_status", "git_status", "activate"})
 
-    assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(activated) ==
-             "Git command not scheduled: :scheduler_unavailable"
-
-    assert activated.workspace.keymap_scope == state.workspace.keymap_scope
-    assert SidebarWorkflow.active_id(activated) == nil
+    assert activated == state
   end
 
   test "extension panel actions route semantic registry entries before legacy extensions", %{

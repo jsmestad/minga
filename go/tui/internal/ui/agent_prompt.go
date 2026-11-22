@@ -3,7 +3,6 @@ package ui
 import (
 	"strconv"
 	"strings"
-	"sync/atomic"
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -303,29 +302,10 @@ func (m *Model) sendAgentPromptScroll(msg tea.MouseMsg, delta int) bool {
 	return true
 }
 
-type presentedChromeClick struct {
-	packet        []byte
-	claimed       bool
-	epoch         *atomic.Uint64
-	observedEpoch uint64
-}
-
-func (c *presentedChromeClick) take() ([]byte, bool, bool) {
-	if c == nil {
-		return nil, false, false
-	}
-	hit := *c
-	*c = presentedChromeClick{}
-	changed := hit.epoch != nil && hit.epoch.Load() != hit.observedEpoch
-	return hit.packet, hit.claimed, changed
-}
-
-// Bubble Tea invokes OnMouse from the last flushed View, synchronously before
-// Update receives that input. Capture only the displayed hit cells and target.
-func (m Model) presentedComposerHandler() func(tea.MouseMsg) tea.Cmd {
+func (m Model) presentedComposerHandler() func(tea.MouseClickMsg) {
 	chat, _ := m.agentChat()
 	p, ok := m.agentPromptPlacement()
-	if !ok || m.presentedClick == nil {
+	if !ok {
 		return nil
 	}
 	start, y := m.layout.body.X+p.col-p.prefix, m.layout.body.Y+p.controlsRow
@@ -352,9 +332,8 @@ func (m Model) presentedComposerHandler() func(tea.MouseMsg) tea.Cmd {
 	generation, offer := chat.PromptPresentation, chat.DraftAttachmentOffer
 	stopTarget, queueTarget := chat.StopTarget, chat.QueueTarget
 	claim := m.presentedClick
-	return func(msg tea.MouseMsg) tea.Cmd {
-		click, ok := msg.(tea.MouseClickMsg)
-		if ok && click.Button == tea.MouseLeft && click.Y == y {
+	return func(click tea.MouseClickMsg) {
+		if click.Y == y {
 			cell := click.X - start
 			if cell >= 0 && cell < width && cells&(1<<cell) != 0 {
 				claim.claimed = true
@@ -374,7 +353,6 @@ func (m Model) presentedComposerHandler() func(tea.MouseMsg) tea.Cmd {
 				}
 			}
 		}
-		return nil
 	}
 }
 

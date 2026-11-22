@@ -207,19 +207,19 @@ public enum FrontendActionComposition {
 
     public static func outbound(_ action: GitStatusView.Action) -> OutboundAction {
         switch action {
-        case .discardFile(let path): .gitDiscardFile(path: path)
-        case .unstageAll: .gitUnstageAll
-        case .stageAll: .gitStageAll
-        case .openFile(let path): .gitOpenFile(path: path)
-        case .openDiff(let path, let section): .gitOpenDiff(path: path, section: section)
-        case .stageFile(let path): .gitStageFile(path: path)
-        case .unstageFile(let path): .gitUnstageFile(path: path)
-        case .pull: .gitPull
-        case .push: .gitPush
-        case .fetch: .gitFetch
-        case .commit(let message): .gitCommit(message: message)
-        case .amend(let message): .gitCommitAmend(message: message)
-        case .pullAndRetry: .gitPullAndRetry
+        case .discardFile(let target): .gitDiscardFile(target)
+        case .unstageAll(let panelID): .gitUnstageAll(panelID: panelID)
+        case .stageAll(let panelID): .gitStageAll(panelID: panelID)
+        case .openFile(let target): .gitOpenFile(target)
+        case .openDiff(let target): .gitOpenDiff(target)
+        case .stageFile(let target): .gitStageFile(target)
+        case .unstageFile(let target): .gitUnstageFile(target)
+        case .pull(let panelID): .gitPull(panelID: panelID)
+        case .push(let panelID): .gitPush(panelID: panelID)
+        case .fetch(let panelID): .gitFetch(panelID: panelID)
+        case .commit(let panelID, let message): .gitCommit(panelID: panelID, message: message)
+        case .amend(let panelID, let message): .gitCommitAmend(panelID: panelID, message: message)
+        case .pullAndRetry(let toastID): .gitPullAndRetry(toastID: toastID)
         }
     }
 

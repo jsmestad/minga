@@ -4,12 +4,11 @@ defmodule Minga.Extension.Instance.Source do
 
   Committed current-generation artifacts are always reused first. Path and
   resolved Git declarations use `CompileCache`; deterministic JSON bundles use
-  `JsonLoader`; module, bundled, and Hex declarations adopt trusted resident
+  `JsonLoader`; module and Hex declarations adopt trusted resident
   inventories without replacing code in this VM.
   """
 
   alias Minga.Extension.ArtifactAdmission
-  alias Minga.Extension.BundledApplications
   alias Minga.Extension.CompileCache
   alias Minga.Extension.Entry
   alias Minga.Extension.Instance.Artifact
@@ -120,7 +119,7 @@ defmodule Minga.Extension.Instance.Source do
   defp compile_path(name, expanded, source, admission, opts) do
     case source_files(expanded) do
       [] -> load_json(name, expanded, source, admission, opts)
-      files -> load_compiled(name, expanded, files, source, admission, opts)
+      files -> load_compiled(expanded, files, source, admission)
     end
   end
 
@@ -134,14 +133,10 @@ defmodule Minga.Extension.Instance.Source do
     end
   end
 
-  @spec load_compiled(atom(), String.t(), [String.t()], term(), GenServer.server(), keyword()) ::
+  @spec load_compiled(String.t(), [String.t()], term(), GenServer.server()) ::
           {:ok, module(), [module()]} | {:error, term()}
-  defp load_compiled(name, expanded, files, source, admission, _opts) do
-    compile_opts = [
-      source: source,
-      artifact_admission: admission,
-      trusted_application: BundledApplications.trusted_application(name)
-    ]
+  defp load_compiled(expanded, files, source, admission) do
+    compile_opts = [source: source, artifact_admission: admission]
 
     with {:ok, %{modules: compiled, diagnostics: diagnostics}} <-
            CompileCache.load_or_compile(expanded, files, compile_opts),

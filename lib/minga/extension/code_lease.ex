@@ -42,7 +42,12 @@ defmodule Minga.Extension.CodeLease do
         }
 
   @type source_status :: :active | {:quiescing, unload_token()} | :inactive
-  @typep source_record :: %{status: source_status(), modules: MapSet.t(module())}
+  @type activation :: reference()
+  @typep source_record :: %{
+           status: source_status(),
+           modules: MapSet.t(module()),
+           activation: activation()
+         }
 
   @typep drain_waiter :: {pid(), reference()}
   @typep state :: %{
@@ -114,7 +119,7 @@ defmodule Minga.Extension.CodeLease do
         ) :: {:ok, t()} | {:error, term()}
   def admit_callback(source, module, reason, opts \\ [])
       when is_atom(module) and is_atom(reason) do
-    admit({:ordinary, source}, module, reason, opts)
+    admit({:ordinary, source, Keyword.get(opts, :activation)}, module, reason, opts)
   end
 
   @doc "Admits a token-scoped callback while its extension source is quiescing."
@@ -161,6 +166,14 @@ defmodule Minga.Extension.CodeLease do
     safe_call(server, {:source_status, source}, :unknown)
   end
 
+  @doc "Captures the active generation of a module in its owning source."
+  @spec activation(ContributionCleanup.contribution_source(), module(), keyword()) ::
+          {:ok, activation()} | {:error, term()}
+  def activation(source, module, opts \\ []) do
+    server = Keyword.get(opts, :server, __MODULE__)
+    safe_call(server, {:activation, source, module}, {:error, :not_started})
+  end
+
   @doc "Returns active leases matching a module, source, or both."
   @spec active_leases(keyword()) :: [summary()]
   def active_leases(opts \\ []) do
@@ -192,7 +205,7 @@ defmodule Minga.Extension.CodeLease do
         {:reply, {:error, {:source_quiescing, source, token}}, state}
 
       {{:ok, module_set}, _record} ->
-        record = %{status: :active, modules: module_set}
+        record = %{status: :active, modules: module_set, activation: make_ref()}
         token_sources = drop_source_tokens(state.token_sources, source)
 
         {:reply, :ok,
@@ -249,9 +262,9 @@ defmodule Minga.Extension.CodeLease do
     transition_unload_token(state, token, :active)
   end
 
-  def handle_call({:admit, {:ordinary, source}, module, owner, reason}, _from, state) do
-    case ordinary_source(state, source, module) do
-      :ok -> put_admitted_lease(state, source, module, owner, reason)
+  def handle_call({:admit, {:ordinary, source, activation}, module, owner, reason}, _from, state) do
+    case ordinary_source(state, source, module, activation) do
+      {:ok, _activation} -> put_admitted_lease(state, source, module, owner, reason)
       {:error, _reason} = error -> {:reply, error, state}
     end
   end
@@ -281,6 +294,10 @@ defmodule Minga.Extension.CodeLease do
     {:reply, status, state}
   end
 
+  def handle_call({:activation, source, module}, _from, state) do
+    {:reply, ordinary_source(state, source, module, nil), state}
+  end
+
   def handle_call({:active_leases, source, module}, _from, state) do
     {:reply, matching_leases(state, source, module), state}
   end
@@ -295,8 +312,12 @@ defmodule Minga.Extension.CodeLease do
 
   def handle_info(_message, state), do: {:noreply, state}
 
-  @spec admit({:ordinary, term()} | {:unload, unload_token()}, module(), reason(), keyword()) ::
-          {:ok, t()} | {:error, term()}
+  @spec admit(
+          {:ordinary, term(), activation() | nil} | {:unload, unload_token()},
+          module(),
+          reason(),
+          keyword()
+        ) :: {:ok, t()} | {:error, term()}
   defp admit(scope, module, reason, opts) do
     server = Keyword.get(opts, :server, __MODULE__)
     owner = Keyword.get(opts, :owner, self())
@@ -377,13 +398,28 @@ defmodule Minga.Extension.CodeLease do
     Map.reject(token_sources, fn {_token, token_source} -> token_source == source end)
   end
 
-  @spec ordinary_source(state(), term(), module()) :: :ok | {:error, term()}
-  defp ordinary_source(state, source, module) do
+  @spec ordinary_source(state(), term(), module(), activation() | nil) ::
+          {:ok, activation()} | {:error, term()}
+  defp ordinary_source(state, source, module, expected) do
     case Map.get(state.sources, source) do
-      %{status: :active, modules: modules} -> source_module_result(source, module, modules)
-      %{status: {:quiescing, _token}} -> {:error, {:source_quiescing, source}}
-      %{status: :inactive} -> {:error, {:source_inactive, source}}
-      nil -> {:error, {:source_not_active, source}}
+      %{status: :active, activation: current, modules: modules}
+      when is_nil(expected) or expected == current ->
+        case source_module_result(source, module, modules) do
+          :ok -> {:ok, current}
+          {:error, _reason} = error -> error
+        end
+
+      %{status: :active} ->
+        {:error, {:source_reactivated, source}}
+
+      %{status: {:quiescing, _token}} ->
+        {:error, {:source_quiescing, source}}
+
+      %{status: :inactive} ->
+        {:error, {:source_inactive, source}}
+
+      nil ->
+        {:error, {:source_not_active, source}}
     end
   end
 
