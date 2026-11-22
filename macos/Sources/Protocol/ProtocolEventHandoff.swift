@@ -6,6 +6,7 @@ import MingaUI
 
 /// A single-producer/single-consumer admission handoff. The producer must own the sole slot before reading a payload. Admission stays reserved until consumption returns, so nested modal loops cannot reorder events and payload memory cannot accumulate behind the main actor.
 final class ProtocolEventHandoff: @unchecked Sendable {
+    // @unchecked: admission state is guarded by the NSCondition `condition`, which must wait (Mutex cannot), so the compiler cannot verify it.
     let connectionID: UInt64
     private let consume: @MainActor @Sendable (DecodedFrameEvent) -> Void
     private let condition = NSCondition()

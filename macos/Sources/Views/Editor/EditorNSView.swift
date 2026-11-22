@@ -4034,8 +4034,8 @@ private struct AccessibilityProjectionKey: Equatable {
 }
 
 /// Bridges the main-actor pane projection to AppKit's nonisolated focused-element getter.
-// @unchecked: EditorPaneAccessibilityElement is an NSAccessibilityElement subclass and not Sendable; `lock` guards every access to `element`.
 private final class AccessibilityFocusedElementSnapshot: @unchecked Sendable {
+    // @unchecked: EditorPaneAccessibilityElement is an NSAccessibilityElement subclass and not Sendable; `lock` guards every access to `element`.
     private let lock = Mutex(())
     private var element: EditorPaneAccessibilityElement?
 

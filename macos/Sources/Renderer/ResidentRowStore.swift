@@ -1124,6 +1124,7 @@ public struct ResidentRowStore: Sendable {
     }
 
     private final class Storage: @unchecked Sendable {
+        // @unchecked: copy-on-write box with mutable fields; ResidentRowStore writes it only after ensureUniqueStorage() proves sole ownership.
         var root: Node?
         var locators: LocatorTable
         var nextChunkID: UInt64
