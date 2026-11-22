@@ -269,9 +269,18 @@ defmodule MingaAgent.InferenceRouteRegistryTest do
                InferenceRouteRegistry.lookup(registry, "fixture")
     end
 
-    test "no usage data, an unchanged report, and invalid windows publish nothing",
+    test "a first report without data is published once; unchanged and invalid reports publish nothing",
          %{registry: registry} do
       {:ok, reporter} = InferenceRouteRegistry.register(registry, spec({:extension, :one}))
+
+      assert {:ok, %Entry{status: %Status{plan_usage: :unreported}}} =
+               InferenceRouteRegistry.lookup(registry, "fixture")
+
+      # The first report ends "checking", even without data, so subscribers must hear it.
+      assert :ok = InferenceRouteRegistry.report_usage(registry, reporter, [])
+
+      assert_receive {:minga_event, :inference_route_status_changed,
+                      %StatusChangedEvent{status: %Status{plan_usage: nil}}}
 
       assert :ok = InferenceRouteRegistry.report_usage(registry, reporter, [])
       refute_receive {:minga_event, :inference_route_status_changed, _event}, 50

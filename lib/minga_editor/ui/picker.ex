@@ -206,6 +206,17 @@ defmodule MingaEditor.UI.Picker do
 
   def select_index(%__MODULE__{} = picker, _index), do: picker
 
+  @doc "Selects the filtered item with `id`; leaves the selection unchanged when no filtered item has it."
+  @spec select_id(t(), term()) :: t()
+  def select_id(%__MODULE__{} = picker, nil), do: picker
+
+  def select_id(%__MODULE__{filtered: filtered} = picker, id) do
+    case Enum.find_index(filtered, &(&1.id == id)) do
+      nil -> picker
+      index -> %{picker | selected: index}
+    end
+  end
+
   # ── Accessors ───────────────────────────────────────────────────────────────
 
   @doc "Returns the currently selected item, or nil if no items match."
