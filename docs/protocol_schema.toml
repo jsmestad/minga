@@ -2528,6 +2528,12 @@ fields = [
   { name = "sequence", type = "u64" },
 ]
 
+[[sections]]
+opcode = "gui_agent_chat"
+id = 0x0F
+name = "lifecycle"
+fields = [{ name = "kind", type = "u8" }, { name = "reason", type = "string16" }]
+
 # gui_picker_preview (0x7D) sections
 
 [[sections]]

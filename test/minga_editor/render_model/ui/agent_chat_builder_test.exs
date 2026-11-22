@@ -114,12 +114,18 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
     |> Map.fetch!(:model_name)
   end
 
-  test "build/1 requires the Content stage's retained prompt in the same frame" do
+  test "a missing composer has a reason instead of hiding the chat" do
     session = fake_session_pid()
     ctx = context(session, synced_panel([{:assistant, "ready"}]))
 
-    assert AgentChatBuilder.build(ctx).visible?
-    refute AgentChatBuilder.build(%{ctx | prompt: nil}).visible?
+    assert %{visible?: true, lifecycle: :conversation} = AgentChatBuilder.build(ctx)
+
+    assert %{
+             visible?: true,
+             lifecycle: {:failed, "composer unavailable"},
+             prompt_visible_rows: 0
+           } = AgentChatBuilder.build(%{ctx | prompt: nil})
+
     assert Process.info(session, :messages) == {:messages, []}
   end
 
@@ -607,6 +613,17 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
 
     assert [{42, {:approval_tool_call, %ApprovalView{}}} | _] = pending.resident_messages
 
+    for phase <- [:starting, {:failed, "Agent could not connect"}, :unavailable] do
+      model =
+        context(session, panel, agent: agent, lifecycle: phase, draft: "Unsent draft café")
+        |> AgentChatBuilder.build()
+
+      assert model.visible?
+      assert model.lifecycle == phase
+      assert model.prompt == "Unsent draft café"
+      refute Enum.any?(model.resident_messages, &match?({_, {:approval_tool_call, _}}, &1))
+    end
+
     resolved_agent = AgentState.clear_approval(agent, target, session)
 
     for resolved_tool <- [
@@ -656,7 +673,12 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
     window = Window.new_agent_chat(1, 24, 80)
 
     state = TestHelpers.base_state(port_manager: nil)
-    agent_ui = PromptBuffer.ensure(%UIState{panel: panel})
+
+    agent_ui =
+      %UIState{panel: panel}
+      |> PromptBuffer.ensure()
+      |> PromptBuffer.insert_char(Keyword.get(opts, :draft, ""))
+      |> UIState.transition_chat(Keyword.get(opts, :lifecycle, {:conversation, session}))
 
     agent_ui =
       case Keyword.fetch(opts, :connection) do

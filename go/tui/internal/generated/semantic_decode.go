@@ -921,6 +921,23 @@ func DecodeGuiAgentChatQueueTarget(data []byte, offset int, windowEnd int) (GuiA
 	}, pos, nil
 }
 
+func DecodeGuiAgentChatLifecycle(data []byte, offset int, windowEnd int) (GuiAgentChatLifecycle, int, error) {
+	pos := offset
+	if err := decodeRequireWindow(windowEnd, pos+1, "kind"); err != nil {
+		return GuiAgentChatLifecycle{}, offset, err
+	}
+	kind := data[pos]
+	pos++
+	reason, pos, err := decodeString16Window(data, pos, windowEnd)
+	if err != nil {
+		return GuiAgentChatLifecycle{}, offset, err
+	}
+	return GuiAgentChatLifecycle{
+		Kind:   kind,
+		Reason: reason,
+	}, pos, nil
+}
+
 // Section decoders for gui_gutter
 
 func DecodeGuiGutterWindow(data []byte, offset int, windowEnd int) (GuiGutterWindow, int, error) {

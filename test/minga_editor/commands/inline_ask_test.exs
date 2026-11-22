@@ -183,6 +183,8 @@ defmodule MingaEditor.Commands.InlineAskTest do
 
     assert %{content: {:agent_chat, :semantic}} =
              state.workspace.windows.map[state.workspace.windows.active]
+
+    assert %{visible?: true, prompt: ""} = Minga.Test.AgentWorkflowDriver.chat_model(state)
   end
 
   defp state_with_file(root, rel_path, content \\ "hello") do

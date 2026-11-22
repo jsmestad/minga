@@ -702,6 +702,9 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
                {:user, "inspect background session"},
                {:assistant, "unique background answer"}
              ]
+
+      assert %{visible?: true, lifecycle: :conversation, prompt: ""} =
+               Minga.Test.AgentWorkflowDriver.chat_model(switched)
     end
   end
 

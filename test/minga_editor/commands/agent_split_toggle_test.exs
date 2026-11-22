@@ -258,6 +258,9 @@ defmodule MingaEditor.Commands.AgentSplitToggleTest do
     assert Runtime.active_session(connected.shell_runtime) == session
     assert_cold_composer(connected)
 
+    assert %{visible?: true, lifecycle: :conversation, prompt: ""} =
+             Minga.Test.AgentWorkflowDriver.chat_model(connected)
+
     returned = MingaEditor.TabWorkflow.switch(connected, original_tab.id)
 
     assert MingaEditor.Agent.PromptBuffer.prompt_text(returned.workspace.agent_ui) ==

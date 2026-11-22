@@ -496,9 +496,20 @@ type AgentStopTarget struct {
 	RequestID string
 }
 
+type AgentChatLifecycle byte
+
+const (
+	AgentChatConversation AgentChatLifecycle = iota
+	AgentChatStarting
+	AgentChatFailed
+	AgentChatUnavailable
+)
+
 type AgentChat struct {
 	Visible           bool
 	Status            byte
+	Lifecycle         AgentChatLifecycle
+	LifecycleReason   string
 	ModelName         string
 	Prompt            string
 	PromptLineCount   byte

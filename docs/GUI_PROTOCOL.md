@@ -505,6 +505,7 @@ Each section uses `section_id(1) + section_len(2) + payload(section_len)`. Secti
 | 0x0C | StopTarget | `session_id(string16) + request_id(string16)`. Both IDs are nonempty. Absence clears the target and disables the displayed Stop control. |
 | 0x0D | PromptPresentation | `generation(8)`. The nonzero ID names the retained prompt displayed by both frontends and binds its workspace, saved conversation, source buffer and content revision. Absence means no pointer Send target. |
 | 0x0E | QueueTarget | `session_id(string16) + request_id(string16) + sequence(8)`. The target names one insertion position of the active saved-session queue. Absence disables Steer and Queue Next. |
+| 0x0F | ChatLifecycle | `kind(1) + reason(string16)`. Omitted for a live conversation. `1` means starting, `2` means failed with a reason, and `3` means unavailable. Starting and unavailable send an empty reason. Neither frontend shows approval controls while the conversation is not live. A zero-row prompt means the composer is unavailable. |
 
 Status values: 0 = idle, 1 = thinking, 2 = tool_executing, 3 = error, 4 = plan, 5 = approval_waiting
 

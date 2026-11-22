@@ -56,18 +56,37 @@ defmodule MingaEditor.Agent.CatalogStartup do
   def apply(state, %Outcome{request: %{effect: effect}, value: value} = outcome) do
     current? = origin(state) == effect.origin and destination_current?(state, effect.action)
 
-    case {current?, value} do
-      {true, {:completed, :ready}} ->
+    case {current?, value, effect.action} do
+      {true, {:completed, :ready}, _action} ->
         {resume(state, effect.action), outcome}
 
-      {true, {:failed, _reason}} ->
-        {publish_failure(state), outcome}
+      {true, {:failed, _reason}, _action} ->
+        {publish_failure(state, effect.action), outcome}
 
-      {false, {:completed, :ready}} ->
+      {false, {:completed, :ready}, {:start, hooks?, recover?}} ->
+        complete_inactive_start(state, outcome, effect.origin, {:ready, hooks?, recover?})
+
+      {false, {:failed, _reason}, {:start, _hooks?, _recover?}} ->
+        complete_inactive_start(state, outcome, effect.origin, {:failed, catalog_failure()})
+
+      {false, {:completed, :ready}, _action} ->
         {state, Outcome.stale(outcome, :agent_origin_changed)}
 
       _inactive ->
         {state, outcome}
+    end
+  end
+
+  @spec complete_inactive_start(
+          EditorState.t(),
+          Outcome.t(),
+          origin(),
+          AgentSession.catalog_start_result()
+        ) :: {EditorState.t(), Outcome.t()}
+  defp complete_inactive_start(state, outcome, target, result) do
+    case AgentSession.complete_inactive_start(state, target, result) do
+      {:ok, next} -> {next, outcome}
+      :stale -> {state, Outcome.stale(outcome, :agent_origin_changed)}
     end
   end
 
@@ -88,19 +107,26 @@ defmodule MingaEditor.Agent.CatalogStartup do
 
   @doc "Schedules a data-only action for this editor generation."
   @spec defer(EditorState.t(), action()) :: EditorState.t()
-  def defer(%{effect_scheduler: nil} = state, _action), do: publish_failure(state)
+  def defer(%{effect_scheduler: nil} = state, action), do: publish_failure(state, action)
 
   def defer(state, action) do
     effect = %__MODULE__{origin: origin(state), action: action}
-    request = Request.new(effect, :agent_catalog_startup, Policy.latest_wins())
+    request = Request.new(effect, resource(effect), Policy.latest_wins())
 
     case EffectScheduler.schedule(state.effect_scheduler, request) do
       {:ok, _id, _disposition} -> NoticeWorkflow.publish(state, "Loading Agent model catalog…")
-      {:error, _reason} -> publish_failure(state)
+      {:error, _reason} -> publish_failure(state, action)
     end
   catch
-    :exit, _reason -> publish_failure(state)
+    :exit, _reason -> publish_failure(state, action)
   end
+
+  @spec resource(t()) :: Request.resource()
+  defp resource(%__MODULE__{action: {:start, _, _}, origin: {tab, workspace, _}})
+       when is_integer(tab) and is_integer(workspace) and workspace > 0,
+       do: {:agent_catalog_session_start, tab, workspace}
+
+  defp resource(%__MODULE__{}), do: :agent_catalog_startup
 
   @spec destination_current?(EditorState.t(), action()) :: boolean()
   defp destination_current?(state, {:toggle, destination}),
@@ -117,11 +143,18 @@ defmodule MingaEditor.Agent.CatalogStartup do
 
   defp resume(state, action), do: Agent.resume_catalog_action(state, action)
 
-  @spec publish_failure(EditorState.t()) :: EditorState.t()
-  defp publish_failure(state),
-    do:
-      NoticeWorkflow.publish(
-        state,
-        "Could not load the Agent model catalog. Try opening Agent again."
-      )
+  @spec publish_failure(EditorState.t(), action()) :: EditorState.t()
+  defp publish_failure(state, {:start, _hooks?, _recover?}) do
+    AgentSession.startup_failed(state, catalog_failure())
+  end
+
+  defp publish_failure(state, _action) do
+    NoticeWorkflow.publish(
+      state,
+      "Could not load the Agent model catalog. Try opening Agent again."
+    )
+  end
+
+  @spec catalog_failure() :: String.t()
+  defp catalog_failure, do: "Could not load the Agent model catalog."
 end

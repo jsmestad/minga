@@ -10,6 +10,8 @@ defmodule MingaEditor.Agent.UIState do
 
   `connection` caches the Session's authoritative connection projection; nil means it has not been attached or hydrated, not that credentials are absent.
 
+  `chat_lifecycle` records whether the Agent pane can display a live conversation. Turn execution and provider credential status are separate.
+
   Most callers use the functions on this module. Input handlers and
   renderers read the focused UI value from the editor workspace.
   """
@@ -30,20 +32,26 @@ defmodule MingaEditor.Agent.UIState do
   @typedoc "Thinking level for models that support extended reasoning."
   @type thinking_level :: String.t()
 
+  @typedoc "Availability of the Agent chat and the exact attached Session, if any."
+  @type chat_lifecycle ::
+          :starting | {:conversation, pid()} | {:failed, String.t()} | :unavailable
+
   @typedoc "Agent UI state wrapping Panel and View sub-structs."
   @type t :: %__MODULE__{
           panel: Panel.t(),
           view: View.t(),
           draft_save: MingaEditor.Agent.DraftSave.t() | nil,
           connection: ConnectionSnapshot.t() | nil,
-          connection_prompt: ConnectionPrompt.t() | nil
+          connection_prompt: ConnectionPrompt.t() | nil,
+          chat_lifecycle: chat_lifecycle()
         }
 
   defstruct panel: %Panel{},
             view: %View{},
             draft_save: nil,
             connection: nil,
-            connection_prompt: nil
+            connection_prompt: nil,
+            chat_lifecycle: :starting
 
   # Placeholder prefix used in input lines to represent a collapsed paste block.
   @paste_placeholder_prefix "\0PASTE:"
@@ -51,6 +59,11 @@ defmodule MingaEditor.Agent.UIState do
   @doc "Creates a new UIState with credential-aware panel defaults."
   @spec new() :: t()
   def new, do: %__MODULE__{panel: Panel.new()}
+
+  @doc "Installs the observed chat lifecycle without changing the live draft or conversation."
+  @spec transition_chat(t(), chat_lifecycle()) :: t()
+  def transition_chat(%__MODULE__{} = state, lifecycle),
+    do: %{state | chat_lifecycle: lifecycle}
 
   @doc "Caches canonical connection facts without changing draft, focus, history or scroll."
   @spec project_connection(t(), ConnectionSnapshot.t()) :: t()
@@ -63,8 +76,32 @@ defmodule MingaEditor.Agent.UIState do
     state = retire_previous_changes(state, connection)
 
     prompt = current_connection_prompt(state.connection_prompt, connection)
-    %{state | connection: connection, panel: panel, connection_prompt: prompt}
+    state = %{state | connection: connection, panel: panel, connection_prompt: prompt}
+    transition_chat(state, connection_lifecycle(connection, state.chat_lifecycle))
   end
+
+  @doc "Projects the Session's detailed startup failure without replacing its draft."
+  @spec report_chat_start_failure(t(), String.t() | nil) :: t()
+  def report_chat_start_failure(%__MODULE__{chat_lifecycle: {:failed, _}} = state, reason)
+      when is_binary(reason) and reason != "",
+      do: transition_chat(state, {:failed, reason})
+
+  def report_chat_start_failure(%__MODULE__{} = state, _reason), do: state
+
+  @spec connection_lifecycle(ConnectionSnapshot.t(), chat_lifecycle()) :: chat_lifecycle()
+  defp connection_lifecycle(
+         %ConnectionSnapshot{problem: {:provider, :startup_failed}},
+         {:failed, _reason} = previous
+       ),
+       do: previous
+
+  defp connection_lifecycle(%ConnectionSnapshot{problem: {:provider, :startup_failed}}, _),
+    do: {:failed, "The Agent provider could not start."}
+
+  defp connection_lifecycle(%ConnectionSnapshot{provider_phase: :starting}, _), do: :starting
+
+  defp connection_lifecycle(%ConnectionSnapshot{target: %{session: session}}, _),
+    do: {:conversation, session}
 
   @spec retire_previous_changes(t(), ConnectionSnapshot.t()) :: t()
   defp retire_previous_changes(

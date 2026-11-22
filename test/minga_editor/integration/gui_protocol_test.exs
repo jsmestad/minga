@@ -344,6 +344,7 @@ defmodule Minga.Integration.GUIProtocolTest do
         %{visible: true} = d ->
           %AgentChat{
             visible?: true,
+            lifecycle: Map.get(d, :lifecycle, :conversation),
             status: Map.get(d, :status, :idle),
             model_name: Map.get(d, :model, ""),
             thinking_level: Map.get(d, :thinking_level, ""),
@@ -370,6 +371,27 @@ defmodule Minga.Integration.GUIProtocolTest do
   end
 
   describe "GUI chrome opcode round-trip" do
+    test "Agent availability and its reason decode independently of the existing draft", %{
+      harness: harness
+    } do
+      for {lifecycle, label, reason} <- [
+            {:conversation, "conversation", ""},
+            {:starting, "starting", ""},
+            {{:failed, "Could not connect to café"}, "failed", "Could not connect to café"},
+            {:unavailable, "unavailable", ""}
+          ] do
+        command =
+          encode_gui_agent_chat(%{visible: true, prompt: "unfinished", lifecycle: lifecycle})
+
+        assert %{
+                 "visible" => true,
+                 "prompt" => "unfinished",
+                 "lifecycle" => ^label,
+                 "lifecycle_reason" => ^reason
+               } = round_trip(harness, command, "gui_agent_chat")
+      end
+    end
+
     test "Agent chat reports saved attachments without changing the draft text", %{
       harness: harness
     } do

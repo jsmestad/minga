@@ -14,7 +14,6 @@ defmodule MingaEditor.Commands.InlineAsk do
   alias MingaEditor.Commands.AgentSession
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.InlineAsk
-  alias MingaEditor.State.Tab.Context, as: TabContext
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Workspace
 
@@ -96,14 +95,13 @@ defmodule MingaEditor.Commands.InlineAsk do
 
   @spec create_agent_tab(state()) :: state()
   defp create_agent_tab(%{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state) do
-    context =
-      TabContext.new_agent(
+    {tb, tab} =
+      MingaEditor.TabWorkflow.insert_agent(
+        tb,
+        "Inline Ask",
         state.frontend.terminal_viewport,
         state.workspace.file_tree.project_root
       )
-
-    {tb, tab} = TabBar.insert(tb, :agent, "Inline Ask")
-    tb = TabBar.update_context(tb, tab.id, context)
 
     shell_state =
       MingaEditor.Shell.Traditional.State.install_tab_bar(

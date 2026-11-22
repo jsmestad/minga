@@ -1547,7 +1547,7 @@ defmodule MingaEditor.Commands.BufferManagement do
          replacement_id
        ) do
     case TabBar.get(tab_bar, replacement_id) do
-      %Tab{} = replacement -> EditorState.restore_tab_after_close(state, replacement)
+      %Tab{} = replacement -> MingaEditor.TabWorkflow.restore_after_close(state, replacement)
       nil -> restore_active_tab_context(state)
     end
   end
@@ -1600,7 +1600,13 @@ defmodule MingaEditor.Commands.BufferManagement do
   end
 
   def handle_agent_session_down(state, session_pid, reason) do
-    state = Workflow.ensure_available(state)
+    lifecycle = session_end_lifecycle(reason)
+
+    state =
+      state
+      |> Workflow.ensure_available()
+      |> MingaEditor.Agent.SessionEventWorkflow.session_unreachable(session_pid, lifecycle)
+
     {state, owned?} = update_active_shell_session_down(state, session_pid, reason)
 
     if owned? do
@@ -1609,6 +1615,11 @@ defmodule MingaEditor.Commands.BufferManagement do
       handle_unowned_session_down(state, session_pid, reason)
     end
   end
+
+  @spec session_end_lifecycle(term()) :: :unavailable | {:failed, String.t()}
+  defp session_end_lifecycle(reason) when reason in [:normal, :shutdown], do: :unavailable
+  defp session_end_lifecycle({:shutdown, _reason}), do: :unavailable
+  defp session_end_lifecycle(_reason), do: {:failed, "Agent session crashed"}
 
   @type session_restart_ownership :: {:owned, state()} | {:stale, state()}
 
@@ -1783,6 +1794,9 @@ defmodule MingaEditor.Commands.BufferManagement do
          reason
        ) do
     case project_view_changed_files(workspace) do
+      {:ok, []} when reason not in [:normal, :shutdown] ->
+        finish_standard_session_down(state, session_pid, reason)
+
       {:ok, []} ->
         case MingaEditor.WorkspaceWorkflow.close_project_view(workspace) do
           :ok ->
@@ -1952,9 +1966,14 @@ defmodule MingaEditor.Commands.BufferManagement do
 
   @spec handle_remote_session_disconnected(state(), pid()) :: state()
   defp handle_remote_session_disconnected(
-         %{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state,
+         %{shell_runtime: %{state: %{tab_bar: %TabBar{}}}} = state,
          session_pid
        ) do
+    state =
+      MingaEditor.Agent.SessionEventWorkflow.session_unreachable(state, session_pid, :unavailable)
+
+    tb = state.shell_runtime.state.tab_bar
+
     case TabBar.find_workspace_by_session(tb, session_pid) do
       %WorkspaceModel{
         id: workspace_id,
@@ -3024,10 +3043,17 @@ defmodule MingaEditor.Commands.BufferManagement do
   defp restore_neighbor_tab_or_create_fallback(state, _old_buffers, true) do
     state = restore_active_tab_context(state)
 
-    if state.workspace.buffers.active do
-      MingaEditor.BufferActivation.activate(state, state.workspace.buffers, notify_shell?: false)
-    else
-      EditorState.enter_empty_state(state)
+    case {state.workspace.buffers.active, Runtime.active_tab_kind(state.shell_runtime)} do
+      {nil, :agent} ->
+        state
+
+      {nil, _file} ->
+        EditorState.enter_empty_state(state)
+
+      {_buffer, _kind} ->
+        MingaEditor.BufferActivation.activate(state, state.workspace.buffers,
+          notify_shell?: false
+        )
     end
   end
 
@@ -3105,10 +3131,13 @@ defmodule MingaEditor.Commands.BufferManagement do
 
   # Restores the now-active tab's snapshotted context into live editor state.
   # Called after removing a tab to switch the editor to the neighbor tab's
-  # buffers, windows, viewport, etc. No-op for brand-new tabs with no snapshot.
+  # buffers, windows, viewport, and Agent presentation.
   @spec restore_active_tab_context(state()) :: state()
   defp restore_active_tab_context(state) do
     case MingaEditor.Shell.Runtime.active_tab(state.shell_runtime) do
+      %Tab{kind: :agent, context: context} ->
+        MingaEditor.TabWorkflow.restore_context(state, context)
+
       %Tab{context: context} when is_map(context) ->
         if TabContext.empty?(context) do
           state

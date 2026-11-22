@@ -24,17 +24,34 @@ defmodule MingaEditor.TabWorkflow do
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.Tab
+  alias MingaEditor.State.Tab.Context
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Workspace
   alias MingaEditor.UI.Picker.AgentChecklistSource
   alias MingaEditor.UI.Picker.AgentDraftAttachmentSource
   alias MingaEditor.UI.Picker.AgentHistorySource
   alias MingaEditor.UI.Picker.AgentRetainedOutputSource
+  alias MingaEditor.Viewport
   alias MingaEditor.WorkspaceWorkflow
 
   @opaque staged_switch ::
             {:unchanged, EditorState.t()}
             | {:switched, EditorState.t(), EditorState.t(), Tab.t(), pid() | nil}
+
+  @doc "Creates an inactive Agent tab with its semantic pane context."
+  @spec insert_agent(TabBar.t(), String.t(), Viewport.t(), String.t() | nil) ::
+          {TabBar.t(), Tab.t()}
+  def insert_agent(%TabBar{} = tabs, label, %Viewport{} = viewport, project_root) do
+    insert_agent(tabs, label, Context.new_agent(viewport, project_root))
+  end
+
+  @doc "Creates an inactive Agent tab with an already prepared tab context."
+  @spec insert_agent(TabBar.t(), String.t(), Context.t()) :: {TabBar.t(), Tab.t()}
+  def insert_agent(%TabBar{} = tabs, label, %Context{} = context) do
+    {tabs, tab} = TabBar.insert(tabs, :agent, label)
+    tab = Tab.set_context(tab, context)
+    {TabBar.accept_tab(tabs, tab), tab}
+  end
 
   @doc "Switches tabs and performs the external work requested by the pure transition result."
   @spec switch(EditorState.t(), Tab.id()) :: EditorState.t()
@@ -44,7 +61,7 @@ defmodule MingaEditor.TabWorkflow do
     case switch_target(state, target_id) do
       :unchanged ->
         case Runtime.active_tab(state.shell_runtime) do
-          %Tab{id: ^target_id} = target -> ensure_agent_composer(state, target)
+          %Tab{id: ^target_id} = target -> arrive(state, target)
           _tab -> state
         end
 
@@ -115,10 +132,33 @@ defmodule MingaEditor.TabWorkflow do
 
     state
     |> EditorState.restore_tab_context(context)
+    |> finish_restore(old_buffer)
+  end
+
+  @doc "Restores the exact replacement after a tab closes and installs its presentation."
+  @spec restore_after_close(EditorState.t(), Tab.t()) :: EditorState.t()
+  def restore_after_close(%EditorState{} = state, %Tab{} = target) do
+    old_buffer = state.workspace.buffers.active
+
+    state
+    |> EditorState.restore_tab_after_close(target)
+    |> finish_restore(old_buffer)
+  end
+
+  @spec finish_restore(EditorState.t(), pid() | nil) :: EditorState.t()
+  defp finish_restore(state, old_buffer) do
+    state
     |> sync_active_workspace_agent_ui()
-    |> ensure_active_agent_composer()
+    |> restore_active_agent(Runtime.active_tab(state.shell_runtime))
+    |> arrive()
     |> HighlightSync.ensure_active_buffer_presentation(old_buffer)
   end
+
+  @spec restore_active_agent(EditorState.t(), Tab.t() | nil) :: EditorState.t()
+  defp restore_active_agent(state, %Tab{kind: :agent} = tab),
+    do: rebuild_switched_agent(state, tab)
+
+  defp restore_active_agent(state, _tab), do: state
 
   @doc "Transfers the active workspace agent presentation and replays pending foreground catch-up events."
   @spec sync_active_workspace_agent_ui(EditorState.t()) :: EditorState.t()
@@ -145,27 +185,27 @@ defmodule MingaEditor.TabWorkflow do
     |> ModalWorkflow.dismiss_if_stale()
     |> TraditionalWorkflow.install_agent_spinner_stop()
     |> rebuild_switched_agent(target)
-    |> ensure_agent_composer(target)
+    |> arrive(target)
     |> AgentHistorySource.dismiss_if_stale()
     |> AgentChecklistSource.dismiss_if_stale()
     |> AgentDraftAttachmentSource.dismiss_if_stale()
     |> maybe_restart_incoming_spinner()
   end
 
-  @spec ensure_active_agent_composer(EditorState.t()) :: EditorState.t()
-  defp ensure_active_agent_composer(state),
-    do: ensure_agent_composer(state, Runtime.active_tab(state.shell_runtime))
+  @spec arrive(EditorState.t()) :: EditorState.t()
+  defp arrive(state), do: arrive(state, Runtime.active_tab(state.shell_runtime))
 
-  @spec ensure_agent_composer(EditorState.t(), Tab.t() | nil) :: EditorState.t()
-  defp ensure_agent_composer(state, %Tab{kind: :agent}) do
-    if is_pid(Runtime.active_session(state.shell_runtime)) do
-      TraditionalWorkflow.install_agent_ui(state, PromptBuffer.ensure(state.workspace.agent_ui))
-    else
-      state
+  @spec arrive(EditorState.t(), Tab.t() | nil) :: EditorState.t()
+  defp arrive(state, %Tab{kind: :agent}) do
+    ui = state.workspace.agent_ui
+
+    case PromptBuffer.ensure(ui) do
+      ^ui -> state
+      attached -> TraditionalWorkflow.install_agent_ui(state, attached)
     end
   end
 
-  defp ensure_agent_composer(state, _tab), do: state
+  defp arrive(state, _tab), do: state
 
   @spec switch_target(EditorState.t(), Tab.id()) :: :accepted | :unchanged
   defp switch_target(

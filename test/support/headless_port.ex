@@ -1574,6 +1574,7 @@ defmodule Minga.Test.HeadlessPort do
     {agent_chat, <<>>} =
       decode_agent_chat_sections(rest, section_count, %{
         visible?: true,
+        lifecycle: :conversation,
         prompt: "",
         prompt_cursor_line: 0,
         prompt_cursor_col: 0
@@ -1612,6 +1613,15 @@ defmodule Minga.Test.HeadlessPort do
 
   defp decode_agent_chat_section(0x09, <<focused::8>>, result),
     do: Map.put(result, :input_focused?, focused == 1)
+
+  defp decode_agent_chat_section(0x0F, <<1, 0::16>>, result),
+    do: Map.put(result, :lifecycle, :starting)
+
+  defp decode_agent_chat_section(0x0F, <<2, size::16, reason::binary-size(size)>>, result),
+    do: Map.put(result, :lifecycle, {:failed, reason})
+
+  defp decode_agent_chat_section(0x0F, <<3, 0::16>>, result),
+    do: Map.put(result, :lifecycle, :unavailable)
 
   defp decode_agent_chat_section(_section_id, _payload, result), do: result
 

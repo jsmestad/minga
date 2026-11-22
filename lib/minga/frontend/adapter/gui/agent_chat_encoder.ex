@@ -44,6 +44,7 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatEncoder do
   @section_chat_question 0x0B
   @section_chat_stop_target 0x0C
   @section_chat_queue_target 0x0E
+  @section_chat_lifecycle 0x0F
 
   @spec encode(AgentChat.t(), Caches.t()) :: {binary() | nil, Caches.t()}
   def encode(%AgentChat{} = model, %Caches{} = caches) do
@@ -120,6 +121,7 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatEncoder do
       |> add_question_section(model.pending_question)
       |> add_stop_target_section(model.stop_target)
       |> add_queue_target_section(model.queue_target)
+      |> add_lifecycle_section(model.lifecycle)
 
     sections =
       case model.prompt_presentation do
@@ -140,6 +142,26 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatEncoder do
     |> Writer.uint8(:section_count, Enum.count(sections))
     |> Writer.append(sections)
     |> Writer.finish()
+  end
+
+  @spec add_lifecycle_section([binary()], AgentChat.lifecycle()) :: [binary()]
+  defp add_lifecycle_section(sections, :conversation), do: sections
+
+  defp add_lifecycle_section(sections, lifecycle) do
+    {kind, reason} =
+      case lifecycle do
+        :starting -> {1, ""}
+        {:failed, reason} -> {2, String.byte_slice(reason, 0, 4096)}
+        :unavailable -> {3, ""}
+      end
+
+    payload =
+      Writer.new(@command)
+      |> Writer.uint8(:lifecycle_kind, kind)
+      |> Writer.string16(:lifecycle_reason, reason)
+      |> Writer.finish()
+
+    [encode_section(@section_chat_lifecycle, payload) | sections]
   end
 
   @spec add_queue_target_section([binary()], {String.t(), String.t(), pos_integer()} | nil) ::

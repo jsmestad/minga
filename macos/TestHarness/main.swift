@@ -259,11 +259,21 @@ func commandToJSON(_ command: RenderCommand) -> [String: Any]? {
             }
         ]
 
-    case .guiAgentChat(let visible, let status, let model, let thinkingLevel, let prompt, let promptLineCount, let promptCursorLine, let promptCursorCol, let promptVimMode, let promptVisibleRows, let promptCompletion, let pendingToolName, let pendingToolSummary, let draftAttachmentCount, let draftAttachmentOffer, let question, let stopTarget, let promptPresentation, _):
+    case .guiAgentChat(let visible, let status, let model, let thinkingLevel, let prompt, let promptLineCount, let promptCursorLine, let promptCursorCol, let promptVimMode, let promptVisibleRows, let promptCompletion, let pendingToolName, let pendingToolSummary, let draftAttachmentCount, let draftAttachmentOffer, let question, let stopTarget, let promptPresentation, _, let lifecycle):
+        let phase: String
+        let reason: String
+        switch lifecycle {
+        case .conversation: (phase, reason) = ("conversation", "")
+        case .starting: (phase, reason) = ("starting", "")
+        case .failed(let message): (phase, reason) = ("failed", message)
+        case .unavailable: (phase, reason) = ("unavailable", "")
+        }
         let result: [String: Any] = [
             "type": "gui_agent_chat",
             "visible": visible,
             "status": Int(status.rawValue),
+            "lifecycle": phase,
+            "lifecycle_reason": reason,
             "model": model,
             "thinking_level": thinkingLevel,
             "prompt": prompt,

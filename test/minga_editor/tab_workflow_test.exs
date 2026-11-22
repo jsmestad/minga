@@ -84,6 +84,43 @@ defmodule MingaEditor.TabWorkflowTest do
     assert Map.has_key?(restored.parser.highlighting.highlights, second_buffer)
   end
 
+  test "arriving at an Agent tab without a session attaches an editable composer", %{
+    manager: manager
+  } do
+    state = base_state(filetype: :elixir, parser_manager: manager)
+    tabs = TabBar.new(Tab.new_file(1, "one.ex"))
+    {tabs, workspace} = TabBar.add_workspace(tabs, "Agent")
+    {tabs, tab} = TabBar.insert(tabs, :agent, "Agent")
+    context = Context.new_agent(state.frontend.terminal_viewport, nil)
+
+    tabs =
+      tabs
+      |> TabBar.move_tab_to_workspace(tab.id, workspace.id)
+      |> TabBar.update_context(tab.id, context)
+
+    active = state |> WorkspaceWorkflow.install_tab_bar(tabs) |> TabWorkflow.switch(tab.id)
+    assert MingaEditor.Shell.Runtime.active_session(active.shell_runtime) == nil
+    prompt = active.workspace.agent_ui.panel.prompt_buffer
+    on_exit(fn -> if is_pid(prompt) and Process.alive?(prompt), do: GenServer.stop(prompt) end)
+    assert is_pid(prompt)
+    :ok = Minga.Buffer.insert_text(prompt, "unfinished draft")
+
+    restored = TabWorkflow.restore_context(active, context)
+    assert restored.workspace.agent_ui.panel.prompt_buffer == prompt
+    assert Minga.Buffer.content(prompt) == "unfinished draft"
+
+    :ok = GenServer.stop(prompt)
+    recovered = TabWorkflow.restore_context(restored, context)
+    replacement = recovered.workspace.agent_ui.panel.prompt_buffer
+
+    on_exit(fn ->
+      if is_pid(replacement) and Process.alive?(replacement), do: GenServer.stop(replacement)
+    end)
+
+    assert replacement != prompt
+    assert Minga.Buffer.content(replacement) == ""
+  end
+
   defp install_two_file_tabs(state, second_buffer) do
     tab_bar =
       Tab.new_file(1, "one.ex")

@@ -1,3 +1,11 @@
+/// Availability of the chat surface, independent of the current turn.
+public enum AgentChatLifecycle: Equatable, Sendable {
+    case conversation
+    case starting
+    case failed(String)
+    case unavailable
+}
+
 /// Semantic agent activity decoded from status bytes shared by agent chrome.
 public enum AgentStatus: Equatable, Sendable {
     case idle

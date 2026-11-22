@@ -107,7 +107,7 @@ enum RenderCommand: Sendable {
     case guiPicker(visible: Bool, selectedIndex: UInt16, filteredCount: UInt16, totalCount: UInt16, markedCount: UInt16, title: String, query: String, hasPreview: Bool, items: [Wire.PickerItem], actionMenu: Wire.PickerActionMenu?, modePrefix: String, loadStatus: Wire.PickerLoadStatus, queryGeneration: UInt32, acknowledgedQueryEditSeq: UInt32, activationGeneration: UInt32)
     case guiPickerSelection(generation: UInt32, selectedItemID: UInt32, selectedActionID: UInt32)
     case guiPickerPreview(visible: Bool, lines: [Wire.PickerPreviewLine])
-    case guiAgentChat(visible: Bool, status: AgentStatus, model: String, thinkingLevel: String, prompt: String, promptLineCount: UInt8, promptCursorLine: UInt16, promptCursorCol: UInt16, promptMode: PromptMode, promptVisibleRows: UInt8, promptCompletion: Wire.PromptCompletion?, pendingToolName: String?, pendingToolSummary: String, draftAttachmentCount: UInt8 = 0, draftAttachmentOffer: UInt64 = 0, question: AgentQuestionOffer? = nil, stopTarget: AgentStopTarget? = nil, promptPresentation: UInt64 = 0, queueTarget: AgentQueueTarget? = nil)
+    case guiAgentChat(visible: Bool, status: AgentStatus, model: String, thinkingLevel: String, prompt: String, promptLineCount: UInt8, promptCursorLine: UInt16, promptCursorCol: UInt16, promptMode: PromptMode, promptVisibleRows: UInt8, promptCompletion: Wire.PromptCompletion?, pendingToolName: String?, pendingToolSummary: String, draftAttachmentCount: UInt8 = 0, draftAttachmentOffer: UInt64 = 0, question: AgentQuestionOffer? = nil, stopTarget: AgentStopTarget? = nil, promptPresentation: UInt64 = 0, queueTarget: AgentQueueTarget? = nil, lifecycle: AgentChatLifecycle = .conversation)
     case guiAgentHelp(visible: Bool, groups: [Wire.HelpGroup])
     /// Resident agent-chat transcript stream (0x86, #2654). `mode` is 0=full_replace, 1=append.
     /// `truncated` marks older messages sitting outside the resident byte-cap window. On append,
@@ -1606,6 +1606,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         var stopTarget: AgentStopTarget?
         var promptPresentation: UInt64?
         var queueTarget: AgentQueueTarget?
+        var lifecycle: AgentChatLifecycle = .conversation
 
         for _ in 0..<chatSectionCount {
             guard data.count >= chatPos + 3 else { throw ProtocolDecodeError.malformed }
@@ -1722,13 +1723,26 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
                 guard sequence != 0 else { throw ProtocolDecodeError.malformed }
                 queueTarget = AgentQueueTarget(turn: AgentStopTarget(sessionID: sessionID, requestID: requestID), sequence: sequence)
 
+            case 0x0F:
+                var pos = csStart + 1
+                let end = csStart + csLen
+                guard csLen >= 3 else { throw ProtocolDecodeError.malformed }
+                let reason = try readString16(data: data, pos: &pos, end: end)
+                guard pos == end else { throw ProtocolDecodeError.malformed }
+                switch data[csStart] {
+                case 1: lifecycle = .starting
+                case 2: lifecycle = .failed(reason)
+                case 3: lifecycle = .unavailable
+                default: break
+                }
+
             default: break
             }
 
             chatPos = csStart + csLen
         }
 
-        return (.guiAgentChat(visible: chatVisible, status: AgentStatus(rawValue: chatStatus), model: chatModel, thinkingLevel: chatThinkingLevel, prompt: chatPrompt, promptLineCount: promptLineCount, promptCursorLine: promptCursorLine, promptCursorCol: promptCursorCol, promptMode: PromptMode(rawValue: promptVimMode), promptVisibleRows: promptVisibleRows, promptCompletion: promptCompletion, pendingToolName: pendingToolName, pendingToolSummary: pendingToolSummary, draftAttachmentCount: draftAttachmentCount, draftAttachmentOffer: draftAttachmentOffer, question: question, stopTarget: stopTarget, promptPresentation: promptPresentation ?? 0, queueTarget: queueTarget), chatPos - offset)
+        return (.guiAgentChat(visible: chatVisible, status: AgentStatus(rawValue: chatStatus), model: chatModel, thinkingLevel: chatThinkingLevel, prompt: chatPrompt, promptLineCount: promptLineCount, promptCursorLine: promptCursorLine, promptCursorCol: promptCursorCol, promptMode: PromptMode(rawValue: promptVimMode), promptVisibleRows: promptVisibleRows, promptCompletion: promptCompletion, pendingToolName: pendingToolName, pendingToolSummary: pendingToolSummary, draftAttachmentCount: draftAttachmentCount, draftAttachmentOffer: draftAttachmentOffer, question: question, stopTarget: stopTarget, promptPresentation: promptPresentation ?? 0, queueTarget: queueTarget, lifecycle: lifecycle), chatPos - offset)
 
     case .guiAgentHelp:
         guard rest + 4 <= data.endIndex else { throw ProtocolDecodeError.malformed }

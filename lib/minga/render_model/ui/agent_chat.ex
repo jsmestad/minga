@@ -82,8 +82,12 @@ defmodule Minga.RenderModel.UI.AgentChat do
   @typedoc "A message with its stable GUI identity, or a bare body that encodes with ID 0."
   @type message :: {pos_integer(), message_body()} | message_body()
 
+  @typedoc "Availability of the Agent pane, independent of turn execution."
+  @type lifecycle :: :conversation | :starting | {:failed, String.t()} | :unavailable
+
   @type t :: %__MODULE__{
           visible?: boolean(),
+          lifecycle: lifecycle(),
           status: atom(),
           # Chrome fields are typed `| nil` defensively: defstruct defaults are non-nil
           # and the builder always populates them, but the encoder retains `|| default`
@@ -111,6 +115,7 @@ defmodule Minga.RenderModel.UI.AgentChat do
         }
 
   defstruct visible?: false,
+            lifecycle: :conversation,
             status: :idle,
             model_name: "",
             thinking_level: "",

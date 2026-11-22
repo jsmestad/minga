@@ -185,7 +185,7 @@ defmodule MingaEditor.RenderPipeline.ContentTest do
       assert window.render_cache.last_buf_version >= 0
     end
 
-    test "a missing composer skips the Agent window and warns with its identity" do
+    test "a missing composer logs one warning with the Agent window identity across frames" do
       state = gui_state(content: "regular buffer")
       win_id = state.workspace.windows.active
       window = Window.new_agent_chat(win_id, 24, 80)
@@ -202,7 +202,7 @@ defmodule MingaEditor.RenderPipeline.ContentTest do
           assert {[], nil, _state} = Content.build_agent_chat_content(next, layout)
         end)
 
-      warning = "skipped agent window #{win_id}: composer buffer missing"
+      warning = "Agent composer unavailable for window #{win_id}: missing"
       assert length(:binary.matches(log, warning)) == 1
     end
 

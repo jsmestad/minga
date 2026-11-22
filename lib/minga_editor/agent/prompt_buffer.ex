@@ -26,7 +26,9 @@ defmodule MingaEditor.Agent.PromptBuffer do
     Buffer.buffer_name(pid)
     state
   catch
-    :exit, _ -> start(state, "")
+    :exit, _ ->
+      Minga.Log.warning(:agent, "Agent composer unavailable; attaching a new buffer.")
+      start(state, "")
   end
 
   def ensure(%UIState{} = state), do: start(state, "")

@@ -14,7 +14,6 @@ defmodule MingaEditor.AgentLifecycle do
   alias MingaEditor.Agent.ConnectionAction
   alias MingaEditor.Agent.EditTimeline
   alias MingaEditor.Agent.MarkdownHighlight
-  alias MingaEditor.Agent.PromptBuffer
   alias MingaEditor.Agent.ProvenanceJump
   alias MingaEditor.Agent.Transcript
   alias MingaEditor.Agent.UIState.Panel
@@ -30,11 +29,13 @@ defmodule MingaEditor.AgentLifecycle do
   alias Minga.Config
   alias MingaEditor.Commands
   alias MingaEditor.LayoutPreset
+  alias MingaEditor.Shell.Runtime
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.Tab
   alias MingaEditor.State.Tab.Agent
   alias MingaEditor.State.TabBar
+  alias MingaEditor.TabWorkflow
   @type state :: EditorState.t()
 
   # Maximum characters of tool call result to send for styled rendering.
@@ -43,13 +44,23 @@ defmodule MingaEditor.AgentLifecycle do
 
   @doc "Rebuilds the active agent presentation from its authoritative session snapshot."
   @spec rebuild_agent_from_session(state(), Tab.t() | pid()) :: state()
+  def rebuild_agent_from_session(
+        state,
+        %Tab{kind: :agent, payload: %Agent{connection_status: status}}
+      )
+      when status in [:disconnected, :unavailable],
+      do: install_unavailable_chat(state)
+
   def rebuild_agent_from_session(state, %Tab{kind: :agent, payload: %Agent{session: session_pid}})
       when is_pid(session_pid), do: rebuild_agent_from_session(state, session_pid)
 
   def rebuild_agent_from_session(state, session_pid) when is_pid(session_pid) do
     case safe_editor_snapshot(session_pid) do
-      nil -> MingaEditor.Shell.Traditional.Workflow.install_agent_cache_reset(state)
-      snapshot -> apply_session_snapshot(state, session_pid, snapshot)
+      nil ->
+        install_unavailable_chat(state)
+
+      snapshot ->
+        apply_session_snapshot(state, session_pid, snapshot)
     end
   end
 
@@ -57,6 +68,15 @@ defmodule MingaEditor.AgentLifecycle do
     do: MingaEditor.Shell.Traditional.Workflow.install_agent_cache_reset(state)
 
   def rebuild_agent_from_session(state, %Tab{}), do: state
+
+  @spec install_unavailable_chat(state()) :: state()
+  defp install_unavailable_chat(state) do
+    state
+    |> MingaEditor.Shell.Traditional.Workflow.install_agent_cache_reset()
+    |> MingaEditor.Shell.Traditional.Workflow.install_agent_ui(
+      UIState.transition_chat(state.workspace.agent_ui, :unavailable)
+    )
+  end
 
   @doc "Hydrates execution and resolved model facts without replaying activation effects."
   @spec apply_session_snapshot(state(), pid(), AgentSession.editor_snapshot()) :: state()
@@ -92,10 +112,14 @@ defmodule MingaEditor.AgentLifecycle do
     ui =
       case Map.get(snapshot, :connection) do
         %ConnectionSnapshot{target: %{session: ^session_pid}} = connection ->
-          UIState.project_connection(ui, connection)
+          ui
+          |> UIState.project_connection(connection)
+          |> UIState.report_chat_start_failure(Map.get(snapshot, :error))
 
         _unavailable ->
-          UIState.clear_connection(ui)
+          ui
+          |> UIState.clear_connection()
+          |> UIState.transition_chat({:conversation, session_pid})
       end
 
     state
@@ -126,9 +150,13 @@ defmodule MingaEditor.AgentLifecycle do
   @spec maybe_start_session(state()) :: state()
   def maybe_start_session(state) do
     if LayoutPreset.has_agent_chat?(state) do
-      state = start_session_if_needed(state)
-      ui = PromptBuffer.ensure(state.workspace.agent_ui)
-      MingaEditor.Shell.Traditional.Workflow.install_agent_ui(state, ui)
+      case Runtime.active_tab(state.shell_runtime) do
+        %Tab{kind: :agent, id: id} ->
+          state |> TabWorkflow.switch(id) |> start_session_if_needed()
+
+        _tab ->
+          start_session_if_needed(state)
+      end
     else
       state
     end
