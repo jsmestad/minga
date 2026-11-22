@@ -143,7 +143,9 @@ defmodule Minga.Test.StubServer do
     capture =
       case Transcript.since(transcript, cursor) do
         {:unchanged, cursor} -> {:unchanged, cursor}
-        {:snapshot, snapshot} -> {:replace, :changed, snapshot, 0, nil}
+        {:changes, changes} -> {:changes, changes}
+        {:snapshot, snapshot} -> {:replace, :changed, snapshot, nil}
+        {:reset, _reason, snapshot} -> {:replace, :reset, snapshot, nil}
       end
 
     send(

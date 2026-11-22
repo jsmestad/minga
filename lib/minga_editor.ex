@@ -1658,8 +1658,10 @@ defmodule MingaEditor do
     # layout forces a full re-render, and the frame transaction's ThemeEncoder
     # re-emits gui_theme semantically (the new theme changes the adapter cache
     # fingerprint). A keyframe re-emits it for free. See MingaEditor.RuntimeThemePushTest for the proof.
-    state = EditorState.apply_theme(state, theme)
-    Layout.invalidate(state)
+    state
+    |> EditorState.apply_theme(theme)
+    |> MingaEditor.AgentLifecycle.restyle_transcript()
+    |> Layout.invalidate()
   end
 
   def apply_runtime_config_option(state, name, _value)

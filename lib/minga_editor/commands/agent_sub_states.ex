@@ -6,7 +6,6 @@ defmodule MingaEditor.Commands.AgentSubStates do
   Extracted from `Commands.Agent` to reduce module size.
   """
 
-  alias MingaEditor.Agent.Transcript
   alias MingaEditor.Agent.PendingApproval
   alias MingaEditor.Agent.ChatSearch
   alias MingaAgent.FileMention
@@ -19,6 +18,7 @@ defmodule MingaEditor.Commands.AgentSubStates do
   alias MingaEditor.Agent.SlashCommand
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.UIState.Panel
+  alias MingaEditor.Agent.UIState.TranscriptProjection
   alias Minga.Buffer
   alias MingaEditor.Commands.Agent, as: AgentCommands
   alias MingaEditor.Commands.AgentSession
@@ -530,9 +530,8 @@ defmodule MingaEditor.Commands.AgentSubStates do
 
   @spec run_search(state(), String.t()) :: state()
   defp run_search(state, query) do
-    session = MingaEditor.Shell.Runtime.active_session(state.shell_runtime)
-    messages = if session, do: safe_messages(session), else: []
-    matches = ChatSearch.find_matches(messages, query)
+    items = TranscriptProjection.presentation(state.workspace.agent_ui.panel.transcript)
+    matches = ChatSearch.find_matches(items, query)
     state = update_agent_ui(state, &UIState.set_search_matches(&1, matches))
     if matches != [], do: scroll_to_current_match(state), else: state
   end
@@ -546,17 +545,14 @@ defmodule MingaEditor.Commands.AgentSubStates do
       search ->
         case Enum.at(search.matches, search.current) do
           nil -> state
-          match -> scroll_to_message(state, ChatSearch.match_message_index(match))
+          {id, _start, _end} -> scroll_to_message(state, id)
         end
     end
   end
 
-  @spec scroll_to_message(state(), non_neg_integer()) :: state()
-  defp scroll_to_message(state, msg_idx) do
-    session = MingaEditor.Shell.Runtime.active_session(state.shell_runtime)
-    messages = if session, do: safe_messages(session), else: []
-
-    case Transcript.message_start_line(messages, msg_idx) do
+  @spec scroll_to_message(state(), pos_integer()) :: state()
+  defp scroll_to_message(state, id) do
+    case TranscriptProjection.start_line(state.workspace.agent_ui.panel.transcript, id) do
       nil -> state
       line_idx -> update_agent_ui(state, &UIState.set_scroll(&1, line_idx))
     end
@@ -702,13 +698,6 @@ defmodule MingaEditor.Commands.AgentSubStates do
     else
       :outside_project
     end
-  end
-
-  @spec safe_messages(pid()) :: [term()]
-  defp safe_messages(session) do
-    Session.messages(session)
-  catch
-    :exit, _ -> []
   end
 
   # ── State update helpers (delegated to AA) ─────────────────────────────────

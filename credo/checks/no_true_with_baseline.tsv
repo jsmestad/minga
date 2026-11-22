@@ -149,7 +149,6 @@ lib/minga_editor/agent/semantic_ui/entry.ex	6a602b34faeda810adcf020ff8ad2801bb23
 lib/minga_editor/agent/semantic_ui/entry.ex	9d16649c0104de2fc30f087238805e4843ca7c1b451cefa9ea41272e6112f4cd	"is_binary(panel.panel_id)"
 lib/minga_editor/agent/semantic_ui/entry.ex	ace08e7eab8a3b3c33aec17fe2fb0c226dac66a35246696ce6e38021f8610bf8	"is_list(panel.content) and Enum.all?(panel.content, &content_block_valid?/1)"
 lib/minga_editor/agent_lifecycle.ex	1b2ef41a231fefae31f61dae932cfc2eb7dc52ea2d406e9f9d5a4f55a5ea80ff	"default_agent_label?(label)"
-lib/minga_editor/agent_lifecycle.ex	4eb91e4b027973bc6918d5564a881c07d125b793c27a9a1d0dbf9b7ebabe9961	"is_pid(session)"
 lib/minga_editor/effects/agent_review.ex	d8c787bd48e279a83b1bf67c8bd3f43bfa006483adc89e0b24787986888aeb90	":crypto.hash(:sha256, content) == digest"
 lib/minga_editor/frontend/protocol/gui.ex	239b8a953ceb735d6c5f154e7354bce21eabbe4c3dd83e1fc832039fdde3a67c	"settings_option?(name)"
 lib/minga_editor/gui_search_workflow.ex	8d980ea11fb465626c77990a7b86f7f6f24ce80ae10b13598d7f1305ad7a30e2	"IndexOwner.current?(generation)"

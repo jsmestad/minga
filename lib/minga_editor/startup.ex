@@ -543,7 +543,7 @@ defmodule MingaEditor.Startup do
   def apply_config_options(state) do
     theme_name = Options.get(state.interaction.options_server, :theme)
     theme = MingaEditor.UI.Theme.get!(theme_name)
-    state = EditorState.apply_theme(state, theme)
+    state = state |> EditorState.apply_theme(theme) |> AgentLifecycle.restyle_transcript()
 
     case Config.load_error() do
       nil -> state
