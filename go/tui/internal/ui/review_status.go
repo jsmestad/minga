@@ -105,7 +105,7 @@ func (m Model) renderReviewStatus(review protocol.StatusReview) string {
 }
 
 // Conflict decisions use the button cells and target of the View the terminal flushed.
-func (m Model) presentedConflictHandler() func(tea.MouseMsg) tea.Cmd {
+func (m Model) presentedConflictHandler() func(tea.MouseClickMsg) {
 	status, ok := m.statusBar()
 	if !ok || status.Review == nil || status.Review.ConflictIndex == 0 {
 		return nil
@@ -120,20 +120,17 @@ func (m Model) presentedConflictHandler() func(tea.MouseMsg) tea.Cmd {
 		}
 	}
 	claim := m.presentedClick
-	return func(msg tea.MouseMsg) tea.Cmd {
-		if click, ok := msg.(tea.MouseClickMsg); ok && click.Button == tea.MouseLeft {
-			for i, hit := range hits {
-				if hit.StartX <= hit.EndX && hit.InBounds(click) {
-					claim.claimed = true
-					intent := byte(3 + i)
-					if reviewStatusIntentEnabled(review, intent) {
-						claim.packet = protocol.EncodeGUISemanticItemActivate(6, intent, review.Generation, []byte(review.ItemID))
-					}
-					break
+	return func(click tea.MouseClickMsg) {
+		for i, hit := range hits {
+			if hit.StartX <= hit.EndX && hit.InBounds(click) {
+				claim.claimed = true
+				intent := byte(3 + i)
+				if reviewStatusIntentEnabled(review, intent) {
+					claim.packet = protocol.EncodeGUISemanticItemActivate(6, intent, review.Generation, []byte(review.ItemID))
 				}
+				break
 			}
 		}
-		return nil
 	}
 }
 

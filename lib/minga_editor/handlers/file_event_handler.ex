@@ -12,6 +12,7 @@ defmodule MingaEditor.Handlers.FileEventHandler do
   """
 
   alias MingaEditor.Extension.EventWorkflow
+  alias MingaEditor.Extension.GitDiff
   alias MingaEditor.FileTree.Freshness, as: FileTreeFreshness
   alias MingaEditor.GitStatus.Panel, as: GitStatusPanel
   alias MingaEditor.GuiSearchWorkflow
@@ -107,17 +108,17 @@ defmodule MingaEditor.Handlers.FileEventHandler do
 
   @spec handle_git_status_changed(EditorState.t(), Minga.Events.GitStatusEvent.t()) ::
           {EditorState.t(), [file_effect()]}
-  defp handle_git_status_changed(state, %Minga.Events.GitStatusEvent{entries: entries} = event) do
+  defp handle_git_status_changed(
+         state,
+         %Minga.Events.GitStatusEvent{git_root: git_root, entries: entries} = event
+       ) do
     state = FileTreeFreshness.refresh_git_status(state, event)
 
     case SidebarWorkflow.git_status_panel(state) do
-      nil ->
-        if FileTreeFreshness.open?(state), do: {state, [{:render, 16}]}, else: {state, []}
-
-      _panel ->
+      %GitStatusPanel{git_root: ^git_root} = panel ->
         state =
           state
-          |> SidebarWorkflow.replace_git_status(GitStatusPanel.from_repo_status(event))
+          |> SidebarWorkflow.refresh_git_status(GitStatusPanel.refresh(panel, event))
           |> Workflow.ensure_available()
 
         {runtime, workspace} =
@@ -129,6 +130,9 @@ defmodule MingaEditor.Handlers.FileEventHandler do
 
         new_state = %{state | shell_runtime: runtime, workspace: workspace}
         {new_state, [{:render, 16}]}
+
+      _other_panel ->
+        if FileTreeFreshness.open?(state), do: {state, [{:render, 16}]}, else: {state, []}
     end
   end
 
@@ -140,6 +144,7 @@ defmodule MingaEditor.Handlers.FileEventHandler do
       state
       |> FileTreeFreshness.refresh_git_status_from_cache()
       |> MingaEditor.BufferFileIdentity.rebind(saved_buf, saved_path)
+      |> GitDiff.refresh_saved(saved_buf)
       |> dispatch_extension_buffer_saved(saved_buf)
 
     effects = [

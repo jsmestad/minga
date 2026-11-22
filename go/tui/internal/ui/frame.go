@@ -6,7 +6,7 @@ import (
 	"charm.land/lipgloss/v2"
 )
 
-func (m Model) composeFrame(content string) string {
+func (m Model) composeFrameWithLayers(content string) (string, []*lipgloss.Layer) {
 	layers := []*lipgloss.Layer{
 		lipgloss.NewLayer(m.windowBackground()).X(0).Y(0).Z(0),
 		lipgloss.NewLayer(content).X(0).Y(0).Z(1),
@@ -15,7 +15,7 @@ func (m Model) composeFrame(content string) string {
 		layers = append(layers, timeline)
 	}
 	layers = append(layers, m.floatingOverlayLayers()...)
-	return lipgloss.NewCompositor(layers...).Render()
+	return lipgloss.NewCompositor(layers...).Render(), layers[2:]
 }
 
 func (m Model) windowBackground() string {

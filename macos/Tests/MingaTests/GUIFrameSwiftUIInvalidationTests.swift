@@ -784,7 +784,9 @@ struct GUIFrameSwiftUIInvalidationTests {
                 toast: nil,
                 entryBasePath: "/repo",
                 lastCommitMessage: "prior",
-                stashCount: 0
+                stashCount: 0,
+                panelID: 1,
+                commitTargetID: 101
             )
         }
         await expectOnlyOwnerProbeUpdate(.messages, value: "message-entry|false|true", recorder: recorder) {

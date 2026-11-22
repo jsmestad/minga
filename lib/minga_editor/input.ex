@@ -22,6 +22,7 @@ defmodule MingaEditor.Input do
   alias MingaEditor.Input.ConflictPrompt
   alias MingaEditor.Input.DiffReview
   alias MingaEditor.Input.EmptyState
+  alias MingaEditor.Input.GitStatus
   alias MingaEditor.Input.GlobalBindings
   alias MingaEditor.Input.Hover
   alias MingaEditor.Input.InlineAsk
@@ -57,6 +58,7 @@ defmodule MingaEditor.Input do
     {AgentPanel, 40},
     {Sidebar, 45},
     {EmptyState, 50},
+    {GitStatus, 60},
     {Popup, 80},
     {MingaEditor.Input.CUA.TUISpaceLeader, 90},
     {Scoped, 100},

@@ -43,7 +43,27 @@ defmodule Minga.Extension.CallbackInvoker do
       )
       when is_atom(name) and is_atom(module) and is_atom(function) and is_list(args) and
              is_atom(semantics) do
-    case CodeLease.admit_callback(source, module, semantics, server: admission) do
+    invoke_ordinary(source, module, function, args, semantics, server: admission)
+  end
+
+  @doc "Invokes a deferred callback only during the activation that proposed it."
+  @spec invoke_in_activation(
+          source(),
+          CodeLease.activation(),
+          module(),
+          atom(),
+          [term()],
+          semantics()
+        ) :: result(term())
+  def invoke_in_activation(source, activation, module, function, args, semantics)
+      when is_reference(activation) do
+    invoke_ordinary(source, module, function, args, semantics, activation: activation)
+  end
+
+  @spec invoke_ordinary(source(), module(), atom(), [term()], semantics(), keyword()) ::
+          result(term())
+  defp invoke_ordinary(source, module, function, args, semantics, opts) do
+    case CodeLease.admit_callback(source, module, semantics, opts) do
       {:ok, lease} -> invoke_admitted(source, module, function, args, semantics, lease)
       {:error, reason} -> unavailable(source, module, function, reason)
     end

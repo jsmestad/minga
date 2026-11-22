@@ -474,121 +474,86 @@ Minga.Config.Options.set_extension_option(:minga_org, :conceal, false)
 
 ## Picker
 
-The picker is a fuzzy-filter selection UI (like `SPC :` for the command palette or `SPC f f` for file finder). Extensions use it to present lists of choices to the user.
+Use a picker when an extension needs the user to choose from a list. Implement `MingaEditor.Extension.Picker.Source` and open it from an extension command. The editor handles filtering, keyboard and mouse input, and presentation on both frontends.
 
-You implement a `Picker.Source` behaviour module, then open it from a command.
+This picker opens one of the note files supplied by the command:
 
 ```elixir
-defmodule MyExtension.FormatPicker do
-  @behaviour Minga.Picker.Source
+defmodule MyExtension.NotesPicker do
+  @behaviour MingaEditor.Extension.Picker.Source
+
+  alias MingaEditor.Extension.EditorAPI
+  alias MingaEditor.Extension.Picker.Item
 
   @impl true
-  def title, do: "Export format"
+  def title, do: "Open note"
 
   @impl true
-  def candidates(_context) do
-    [
-      %Minga.Picker.Item{id: :html, label: " HTML", description: "Export as HTML"},
-      %Minga.Picker.Item{id: :pdf, label: " PDF", description: "Export as PDF"},
-      %Minga.Picker.Item{id: :md, label: " Markdown", description: "Export as Markdown"}
-    ]
+  def candidates(paths, :start) do
+    items = Enum.map(paths, fn path -> %Item{id: path, label: Path.basename(path)} end)
+    {:ok, items, :done}
   end
 
   @impl true
-  def on_select(%{id: format}, state) do
-    do_export(state, format)
-  end
+  def preview(%Item{id: path}, _paths), do: {:file, path}
 
   @impl true
-  def on_cancel(state), do: state
+  def on_select(state, %Item{id: path}, _paths), do: EditorAPI.open_file(state, path)
 end
 ```
 
-Then register a command that opens it:
+From a command callback, call `MingaEditor.Extension.Picker.open(state, MyExtension.NotesPicker, absolute_paths)`. The picker passes the original arguments to the source. Capture the path or repository at open time, not after the user selects an item.
 
-```elixir
-Minga.Command.Registry.register(
-  Minga.Command.Registry,
-  :org_export,
-  "Export org file",
-  fn state -> Minga.Editor.PickerUI.open(state, MyExtension.FormatPicker) end
-)
-```
-
-That's all the wiring you need. The picker handles fuzzy filtering, keyboard navigation, and rendering.
-
-**`Picker.Item` fields:**
-
-| Field | Required | What it does |
-|-------|----------|--------------|
-| `:id` | yes | Unique identifier (any term). Passed to `on_select` |
-| `:label` | yes | Display text. Fuzzy matching runs against this |
-| `:description` | no | Secondary text (dimmed, below or beside the label) |
-| `:annotation` | no | Right-aligned metadata (keybinding hint, status) |
-| `:icon_color` | no | 24-bit RGB for the first grapheme of the label |
-| `:two_line` | no | Render description on a second line instead of inline |
-
-**Optional callbacks** for advanced behavior:
-
-| Callback | Default | What it does |
-|----------|---------|--------------|
-| `preview?/0` | `false` | Live-preview the selection while navigating |
-| `layout/0` | `:bottom` | `:bottom` (minibuffer-style) or `:centered` (floating window) |
-| `keep_open_on_select?/0` | `false` | Don't close after selection (useful for toggle-style pickers) |
-| `actions/1` | `[]` | Alternative actions shown in the `C-o` menu |
-| `on_action/3` | n/a | Execute an alternative action |
+`candidates/2` and `preview/2` run outside the editor process. For a long list, return `{:more, cursor, item}` instead of `:done`. The editor requests `{:continue, cursor}` only when the user activates that row. It keeps the existing results. Selection and alternative actions run after dismissal. See [`Picker.Source`](https://hexdocs.pm/minga_sdk/MingaEditor.Extension.Picker.Source.html) for preview, fallback, and shortcut callbacks.
 
 ---
 
 ## Prompt
 
-The prompt collects free-form text input. It's the counterpart to the picker: where the picker selects from a list, the prompt asks the user to type something. This is the equivalent of Emacs's `read-from-minibuffer`.
+Use a text prompt when the user must enter a value, or a confirmation when you need an explicit Yes or No. The editor closes the prompt before calling the handler with the original arguments.
+
+This text prompt jumps to a line in the file captured by the command, even if another buffer becomes active in the meantime:
 
 ```elixir
-defmodule MyExtension.CaptureTitle do
-  @behaviour Minga.Prompt.Handler
+defmodule MyExtension.JumpPrompt do
+  @behaviour MingaEditor.Extension.Prompt.Handler
 
-  @impl true
-  def label, do: "Capture title: "
+  alias MingaEditor.Extension.EditorAPI
+  alias MingaEditor.Extension.Prompt
 
-  @impl true
-  def on_submit(text, state) do
-    # text is whatever the user typed
-    insert_capture(state, text)
+  def open(state, path) do
+    case Prompt.text(state, __MODULE__, path, label: "Go to line: ", default: "1") do
+      {:ok, updated} -> updated
+      {:error, _reason} -> EditorAPI.notice(state, "Could not open the line prompt")
+    end
   end
 
+  @impl true
+  def on_submit(state, text, path) do
+    case Integer.parse(text) do
+      {line, ""} when line > 0 -> EditorAPI.navigate_to(state, path, line - 1)
+      _ -> EditorAPI.notice(state, "Enter a positive line number")
+    end
+  end
 end
 ```
 
-`on_cancel/1` is optional and defaults to returning state unchanged. Implement it only when cancellation should have visible behavior.
+For a Yes/No prompt, call `Prompt.confirm/4` and implement `on_confirm(state, decision, args)`. Only `:accepted` authorizes the operation. A No or Escape produces `:canceled`; unloading the extension dismisses the prompt without invoking the handler. Use `admission: :if_idle` when a background result should not replace an active modal.
 
-Open it from a command or from a picker's `on_select` (for multi-step flows):
+## Repository operations
 
-```elixir
-# Simple: open directly
-Minga.Editor.PromptUI.open(state, MyExtension.CaptureTitle)
+For repository operations that can block, propose a `MingaEditor.Extension.RepositoryJob` with an absolute repository root and immutable arguments. Return the proposal from the command or editor action. `run/2` performs the work in a supervised process. `on_result/4` updates the editor only while the same extension activation and project are current. The host owns the Git sidebar and rendered diff buffers; [`GitStatus`](https://hexdocs.pm/minga_sdk/MingaEditor.Extension.GitStatus.html) and [`GitDiff`](https://hexdocs.pm/minga_sdk/MingaEditor.Extension.GitDiff.html) provide their public operations.
 
-# With pre-filled text:
-Minga.Editor.PromptUI.open(state, MyExtension.CaptureTitle, default: "TODO ")
-
-# With context data the handler can read:
-Minga.Editor.PromptUI.open(state, MyExtension.CaptureTitle,
-  context: %{template: selected_template}
-)
-```
-
-**Composability** is the key design here. A picker's `on_select` can open a prompt, letting you build multi-step flows: select a capture template (picker), then enter a title (prompt). Each primitive is small and composable.
-
-Picker and prompt are mutually exclusive. Opening one closes the other.
+A Git diff origin also identifies the comparison: `:unstaged` uses the index and working text, and `:staged` uses HEAD and the index. For an unmerged path, pass HEAD and worktree text as a `:conflict` preview. Do not stage or revert hunks from a conflict preview.
 
 ---
 
 ## Buffer Operations
 
-Buffers are GenServer processes. The active buffer's PID lives at `state.buffers.active` in your command functions. Read and write through `Minga.Buffer`:
+Use `EditorAPI.active_buffer/1` to get the active buffer PID. It returns `nil` when there is no live buffer. Do not read fields from editor state. Read and write through `Minga.Buffer`:
 
 ```elixir
-buf = state.buffers.active
+buf = MingaEditor.Extension.EditorAPI.active_buffer(state)
 
 # Reading
 {line, col} = Minga.Buffer.cursor(buf)

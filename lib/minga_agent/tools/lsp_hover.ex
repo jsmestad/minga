@@ -10,6 +10,7 @@ defmodule MingaAgent.Tools.LspHover do
   Part of epic #1241. See #1243.
   """
 
+  alias Minga.LSP.Client
   alias Minga.LSP.HoverContent
   alias MingaAgent.Tools.LspBridge
 
@@ -26,16 +27,16 @@ defmodule MingaAgent.Tools.LspHover do
   def execute(path, line, col) when is_binary(path) and is_integer(line) and is_integer(col) do
     abs_path = Path.expand(path)
 
-    case LspBridge.client_for_path(abs_path) do
-      {:ok, client} -> do_hover(client, abs_path, path, line, col)
+    case LspBridge.document_for_path(abs_path) do
+      {:ok, document} -> do_hover(document, path, line, col)
       {:error, reason} -> {:ok, reason}
     end
   end
 
-  @spec do_hover(pid(), String.t(), String.t(), non_neg_integer(), non_neg_integer()) ::
+  @spec do_hover(LspBridge.document(), String.t(), non_neg_integer(), non_neg_integer()) ::
           {:ok, String.t()} | {:error, String.t()}
-  defp do_hover(client, abs_path, path, line, col) do
-    params = LspBridge.position_params(abs_path, line, col)
+  defp do_hover(%{client: client} = document, path, line, col) do
+    params = LspBridge.position_params(document, line, col, Client.encoding(client))
     not_found = "No hover information at #{Path.basename(path)}:#{line + 1}:#{col}"
 
     case LspBridge.request_sync(client, "textDocument/hover", params, @hover_timeout) do

@@ -42,9 +42,9 @@ defmodule MingaAgent.ArtifactQuota.Ledger do
   ]
 
   @doc "Opens the root quota ledger and retains its exclusive cross-BEAM lock."
-  @spec open(String.t()) :: {:ok, db()} | {:error, term()}
-  def open(path) do
-    case SQLite.open_exclusive(path, @schema) do
+  @spec open(String.t(), SQLite.synchronous()) :: {:ok, db()} | {:error, term()}
+  def open(path, synchronous \\ :full) do
+    case SQLite.open_exclusive(path, @schema, synchronous) do
       {:ok, db} -> validate_schema(db)
       {:error, _reason} = error -> error
     end

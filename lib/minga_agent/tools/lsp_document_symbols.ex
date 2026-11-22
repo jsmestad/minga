@@ -20,10 +20,8 @@ defmodule MingaAgent.Tools.LspDocumentSymbols do
   def execute(path) when is_binary(path) do
     abs_path = Path.expand(path)
 
-    case LspBridge.client_for_path(abs_path) do
-      {:ok, client} ->
-        uri = LspBridge.path_to_uri(abs_path)
-
+    case LspBridge.document_for_path(abs_path) do
+      {:ok, %{client: client, uri: uri}} ->
         params = %{
           "textDocument" => %{"uri" => uri}
         }

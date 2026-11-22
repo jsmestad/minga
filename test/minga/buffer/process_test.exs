@@ -1842,6 +1842,106 @@ defmodule Minga.Buffer.ProcessTest do
     end
   end
 
+  describe "pid_for_file/1" do
+    test "a buffer opened through a final symlink is found by the real path and the link", %{
+      tmp_dir: dir
+    } do
+      real = Path.join(dir, "real.ex")
+      link = Path.join(dir, "link.ex")
+      File.write!(real, "real")
+      File.ln_s!("real.ex", link)
+
+      pid = start_supervised!({BufferProcess, file_path: link})
+
+      assert {:ok, ^pid} = Buffer.pid_for_file(real)
+      assert {:ok, ^pid} = Buffer.pid_for_file(link)
+      assert :not_found = Buffer.pid_for_path(real)
+      assert BufferProcess.file_path(pid) == link
+    end
+
+    test "a buffer opened through a directory symlink is found by the real path", %{tmp_dir: dir} do
+      File.mkdir_p!(Path.join(dir, "lib"))
+      real = Path.join(dir, "lib/real.ex")
+      File.write!(real, "real")
+      File.ln_s!("lib", Path.join(dir, "linked"))
+
+      pid = start_supervised!({BufferProcess, file_path: Path.join(dir, "linked/real.ex")})
+
+      assert {:ok, ^pid} = Buffer.pid_for_file(real)
+    end
+
+    test "a buffer for a file not yet created is found through its symlinked parent", %{
+      tmp_dir: dir
+    } do
+      File.mkdir_p!(Path.join(dir, "lib"))
+      File.ln_s!("lib", Path.join(dir, "linked"))
+
+      pid = start_supervised!({BufferProcess, file_path: Path.join(dir, "linked/new.ex")})
+
+      assert {:ok, ^pid} = Buffer.pid_for_file(Path.join(dir, "lib/new.ex"))
+    end
+
+    test "a buffer follows its link when the link is retargeted on disk", %{tmp_dir: dir} do
+      old_target = Path.join(dir, "old.ex")
+      new_target = Path.join(dir, "new.ex")
+      link = Path.join(dir, "link.ex")
+      File.write!(old_target, "old")
+      File.write!(new_target, "new")
+      File.ln_s!("old.ex", link)
+
+      pid = start_supervised!({BufferProcess, file_path: link})
+      assert {:ok, ^pid} = Buffer.pid_for_file(old_target)
+
+      File.rm!(link)
+      File.ln_s!("new.ex", link)
+
+      assert {:ok, ^pid} = Buffer.pid_for_file(new_target)
+      assert {:ok, ^pid} = Buffer.pid_for_file(link)
+      assert :not_found = Buffer.pid_for_file(old_target)
+    end
+
+    test "a buffer opened through a dangling link is found once the target is created", %{
+      tmp_dir: dir
+    } do
+      target = Path.join(dir, "new.ex")
+      link = Path.join(dir, "link.ex")
+      File.ln_s!("new.ex", link)
+
+      pid = start_supervised!({BufferProcess, file_path: link})
+
+      File.write!(target, "new")
+
+      assert {:ok, ^pid} = Buffer.pid_for_file(target)
+      assert {:ok, ^pid} = Buffer.pid_for_file(link)
+    end
+
+    test "buffers opened by both names select the same buffer from either name", %{tmp_dir: dir} do
+      real = Path.join(dir, "real.ex")
+      link = Path.join(dir, "link.ex")
+      File.write!(real, "real")
+      File.ln_s!("real.ex", link)
+
+      by_link = start_supervised!({BufferProcess, file_path: link}, id: :by_link)
+      by_real = start_supervised!({BufferProcess, file_path: real}, id: :by_real)
+
+      assert {:ok, selected} = Buffer.pid_for_file(real)
+      assert {:ok, ^selected} = Buffer.pid_for_file(link)
+      assert selected in [by_link, by_real]
+    end
+
+    test "changing a buffer's path moves its file registration", %{tmp_dir: dir} do
+      path_a = Path.join(dir, "a.ex")
+      path_b = Path.join(dir, "b.ex")
+      File.write!(path_a, "aaa")
+      pid = start_supervised!({BufferProcess, file_path: path_a})
+
+      assert :ok = BufferProcess.retarget_path(pid, path_b)
+
+      assert :not_found = Buffer.pid_for_file(path_a)
+      assert {:ok, ^pid} = Buffer.pid_for_file(path_b)
+    end
+  end
+
   describe "find_and_replace/4 with boundary" do
     test "allows edits within inclusive boundaries" do
       cases = [

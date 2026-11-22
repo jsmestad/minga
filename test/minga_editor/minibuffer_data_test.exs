@@ -28,8 +28,7 @@ defmodule MingaEditor.MinibufferDataTest do
           :eval,
           :substitute_confirm,
           :extension_confirm,
-          :delete_confirm,
-          :branch_delete_confirm
+          :delete_confirm
         ] do
       assert MinibufferData.visible?(%{workspace: %{editing: %{mode: mode}}})
     end
@@ -323,48 +322,6 @@ defmodule MingaEditor.MinibufferDataTest do
       assert result.prompt == "replace with foo?"
       assert result.input == ""
       assert result.context == "y/n/a/q (2 of 3)"
-      assert result.candidates == []
-    end
-  end
-
-  describe "from_state/1 branch delete confirm" do
-    test "shows branch delete confirmation prompt" do
-      state = %{
-        workspace: %{
-          editing: %{
-            mode: :branch_delete_confirm,
-            mode_state: Minga.Mode.BranchDeleteConfirmState.new("/repo", "feature")
-          }
-        }
-      }
-
-      result = MinibufferData.from_state(state)
-
-      assert result.visible == true
-      assert result.mode == 9
-      assert result.cursor_pos == 0xFFFF
-      assert result.prompt == "Delete branch feature? (y/n)"
-      assert result.candidates == []
-    end
-
-    test "force delete fallback shows a force prompt" do
-      state = %{
-        workspace: %{
-          editing: %{
-            mode: :branch_delete_confirm,
-            mode_state:
-              Minga.Mode.BranchDeleteConfirmState.new("/repo", "feature")
-              |> Minga.Mode.BranchDeleteConfirmState.to_force("not fully merged")
-          }
-        }
-      }
-
-      result = MinibufferData.from_state(state)
-
-      assert result.visible == true
-      assert result.mode == 9
-      assert result.cursor_pos == 0xFFFF
-      assert result.prompt == "Force delete branch feature? (y/n)"
       assert result.candidates == []
     end
   end

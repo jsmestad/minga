@@ -20,6 +20,7 @@ defmodule Minga.Buffer.Process do
 
   alias Minga.Buffer.{
     ChangeLog,
+    Conflict,
     ConflictIndex,
     Cursor,
     CursorContext,
@@ -46,6 +47,8 @@ defmodule Minga.Buffer.Process do
   alias Minga.Core.PositionEncoding
   alias Minga.Core.Unicode
   alias Minga.Events
+  alias Minga.Git.MergeConflict
+  alias Minga.Git.MergeConflict.Entry
   alias Minga.Language
 
   alias Minga.Buffer.State, as: BufState
@@ -519,6 +522,11 @@ defmodule Minga.Buffer.Process do
     GenServer.call(server, :content_with_version)
   end
 
+  @doc "Returns path, text, cursor, and edit version in one buffer observation."
+  @spec file_observation(GenServer.server()) ::
+          {String.t() | nil, String.t(), Document.position(), non_neg_integer()}
+  def file_observation(server), do: GenServer.call(server, :file_observation)
+
   @doc "Returns the complete text and file path from one buffer state only if the text fits."
   @spec bounded_content_with_path(GenServer.server(), non_neg_integer()) ::
           {:ok, String.t(), String.t() | nil} | {:error, :too_large}
@@ -546,6 +554,35 @@ defmodule Minga.Buffer.Process do
   @spec conflict_snapshot(GenServer.server()) ::
           {String.t(), Document.position(), [Minga.Git.MergeConflict.Entry.t()]}
   def conflict_snapshot(server), do: GenServer.call(server, :conflict_snapshot)
+
+  @doc "Returns the current version and conflict markers used by the renderer."
+  @spec conflict_render_snapshot(GenServer.server()) :: {non_neg_integer(), [Entry.t()]}
+  def conflict_render_snapshot(server), do: GenServer.call(server, :conflict_render_snapshot)
+
+  @doc "Returns the cursor, public conflict regions, and version from one buffer state."
+  @spec conflict_view(GenServer.server()) :: Conflict.view()
+  def conflict_view(server), do: GenServer.call(server, :conflict_view)
+
+  @doc "Resolves one indexed conflict when its observed buffer version still matches."
+  @spec resolve_conflict(
+          GenServer.server(),
+          non_neg_integer(),
+          Conflict.target(),
+          Conflict.choice()
+        ) :: {:ok, Conflict.resolution()} | {:error, Conflict.rejection()}
+  def resolve_conflict(server, expected_version, target, choice)
+      when is_integer(expected_version) and expected_version >= 0 and
+             choice in [:current, :incoming, :both] do
+    case target do
+      {:cursor, line} when is_integer(line) and line >= 0 ->
+        GenServer.call(server, {:resolve_conflict, expected_version, target, choice})
+
+      {:region, %{start_line: start_line, end_line: end_line}}
+      when is_integer(start_line) and is_integer(end_line) and start_line >= 0 and
+             end_line >= start_line ->
+        GenServer.call(server, {:resolve_conflict, expected_version, target, choice})
+    end
+  end
 
   @doc "Returns bounded semantic inspection data from one coherent buffer state."
   @spec inspection_snapshot(GenServer.server(), non_neg_integer(), pos_integer()) ::
@@ -716,6 +753,35 @@ defmodule Minga.Buffer.Process do
       [{pid, _value}] -> {:ok, pid}
       [] -> :not_found
     end
+  end
+
+  @doc """
+  Looks up the buffer visiting the same file as `path` via `Minga.Buffer.FileRegistry`.
+
+  Both the buffer's registered path and `path` are resolved through every symlink, so a buffer opened as `lib/link.ex` is found by the path of the file the link names, and the reverse. A path whose tail does not exist yet resolves its existing parent directories. When several buffers visit the same file, every caller selects the same one (the lowest pid). Returns `:not_found` if no buffer visits the file.
+
+  A buffer whose path went through a symlink, or did not fully exist, when it registered is resolved again at lookup, so it follows a link that was retargeted or a dangling link whose target was created since. Each lookup resolves only those buffers; a buffer whose path was already its real path is matched by its registered key.
+  """
+  @spec pid_for_file(String.t()) :: {:ok, pid()} | :not_found
+  def pid_for_file(path) do
+    key = file_key(path)
+    direct = Minga.Buffer.FileRegistry |> Registry.match(key, nil) |> Enum.map(&elem(&1, 0))
+
+    case direct ++ resolved_indirect_pids(key) do
+      [] -> :not_found
+      pids -> {:ok, Enum.min(pids)}
+    end
+  end
+
+  # Buffers registered through a symlink or a missing tail store their path as
+  # the registry value; their key may have changed on disk since registration.
+  @spec resolved_indirect_pids(String.t()) :: [pid()]
+  defp resolved_indirect_pids(key) do
+    Minga.Buffer.FileRegistry
+    |> Registry.select([{{:_, :"$1", :"$2"}, [{:is_binary, :"$2"}], [{{:"$1", :"$2"}}]}])
+    |> Enum.flat_map(fn {pid, registered_path} ->
+      if file_key(registered_path) == key, do: [pid], else: []
+    end)
   end
 
   @doc "Returns the metadata needed to list this buffer, without reading its content."
@@ -1257,6 +1323,9 @@ defmodule Minga.Buffer.Process do
 
           unregister_path(state.file_path)
           register_path(file_path)
+
+          broadcast_buffer_path_changed(state.file_path, new_state)
+
           {:reply, :ok, new_state}
         else
           {:reply, {:error, :binary_file}, state}
@@ -1672,6 +1741,7 @@ defmodule Minga.Buffer.Process do
       register_path(new_path)
       state = BufState.retarget_path(state, new_path)
       state = if BufState.dirty?(state), do: schedule_swap_write(state), else: state
+      broadcast_buffer_path_changed(old_path, state)
       {:reply, :ok, state}
     end
   end
@@ -1787,6 +1857,11 @@ defmodule Minga.Buffer.Process do
     {:reply, {Document.content(state.document), BufState.version(state)}, state}
   end
 
+  def handle_call(:file_observation, _from, state) do
+    {content, cursor} = Document.content_and_cursor(state.document)
+    {:reply, {state.file_path, content, cursor, BufState.version(state)}, state}
+  end
+
   def handle_call({:bounded_content_with_path, max_bytes}, _from, state) do
     if Document.content_byte_size(state.document) <= max_bytes do
       {:reply, {:ok, Document.content(state.document), state.file_path}, state}
@@ -1818,6 +1893,58 @@ defmodule Minga.Buffer.Process do
     }
 
     {:reply, snapshot, state}
+  end
+
+  def handle_call(:conflict_render_snapshot, _from, state) do
+    {:reply, {BufState.version(state), ConflictIndex.entries(state.conflict_index)}, state}
+  end
+
+  def handle_call(:conflict_view, _from, state) do
+    entries = Enum.map(ConflictIndex.entries(state.conflict_index), &conflict_region/1)
+
+    view = %{
+      version: BufState.version(state),
+      cursor: Document.cursor(state.document),
+      entries: entries
+    }
+
+    {:reply, view, state}
+  end
+
+  def handle_call(
+        {:resolve_conflict, _version, _target, _choice},
+        _from,
+        %{read_only: true} = state
+      ) do
+    {:reply, {:error, :read_only}, state}
+  end
+
+  def handle_call({:resolve_conflict, expected_version, target, choice}, _from, state) do
+    if BufState.version(state) == expected_version do
+      case find_conflict(ConflictIndex.entries(state.conflict_index), target) do
+        {%Entry{} = entry, anchor_line} ->
+          document =
+            state.document
+            |> Document.content()
+            |> MergeConflict.replace_region(entry, choice)
+            |> Document.new()
+            |> Document.move_to({anchor_line, 0})
+
+          resolved = replace_content_document_state(state, document, :user)
+
+          receipt = %{
+            version: BufState.version(resolved),
+            remaining: ConflictIndex.count(resolved.conflict_index)
+          }
+
+          {:reply, {:ok, receipt}, resolved}
+
+        nil ->
+          {:reply, {:error, :not_found}, state}
+      end
+    else
+      {:reply, {:error, :stale}, state}
+    end
   end
 
   def handle_call({:inspection_snapshot, viewport_start, viewport_count}, _from, state) do
@@ -2503,6 +2630,7 @@ defmodule Minga.Buffer.Process do
         new_state = %{new_state | options: reseed_options(new_state, filetype)}
         new_state = mark_saved(new_state, {new_mtime, new_size}, content)
         broadcast_buffer_saved(new_state, intent.target)
+        broadcast_buffer_path_changed(state.file_path, new_state)
 
         {:reply, :ok, new_state}
 
@@ -2728,15 +2856,57 @@ defmodule Minga.Buffer.Process do
       {:ok, _} -> :ok
       {:error, {:already_registered, _}} -> :ok
     end
+
+    {key, indirection} = file_registration(abs_path)
+    {:ok, _} = Registry.register(Minga.Buffer.FileRegistry, key, indirection)
+    :ok
   end
 
+  # A path that is already its real path registers `nil`; any other path
+  # registers itself so `pid_for_file/1` resolves it again at lookup.
+  @spec file_registration(String.t()) :: {String.t(), String.t() | nil}
+  defp file_registration(abs_path) do
+    case Minga.Project.Root.canonical_path(abs_path) do
+      {:ok, ^abs_path} -> {abs_path, nil}
+      {:ok, real_path} -> {real_path, abs_path}
+      {:error, _reason} -> {missing_tail_file_key(abs_path), abs_path}
+    end
+  end
+
+  # The file key is computed when the path is registered, so it may differ from
+  # a key computed now if a symlink changed since; remove every key this buffer
+  # holds instead of recomputing the old one.
   @spec unregister_path(String.t() | nil) :: :ok
   defp unregister_path(nil), do: :ok
 
   defp unregister_path(path) do
     abs_path = Path.expand(path)
     Registry.unregister(Minga.Buffer.Registry, abs_path)
-    :ok
+
+    Minga.Buffer.FileRegistry
+    |> Registry.keys(self())
+    |> Enum.each(&Registry.unregister(Minga.Buffer.FileRegistry, &1))
+  end
+
+  # Names the file a path visits: the path with every symlink followed. A
+  # missing tail (a new file not yet saved) keeps its names under the resolved
+  # existing parent, so the key does not change when the file is created.
+  @spec file_key(String.t()) :: String.t()
+  defp file_key(path) do
+    expanded = Path.expand(path)
+
+    case Minga.Project.Root.canonical_path(expanded) do
+      {:ok, real_path} -> real_path
+      {:error, _reason} -> missing_tail_file_key(expanded)
+    end
+  end
+
+  @spec missing_tail_file_key(String.t()) :: String.t()
+  defp missing_tail_file_key(path) do
+    case Path.dirname(path) do
+      ^path -> path
+      parent -> Path.join(file_key(parent), Path.basename(path))
+    end
   end
 
   # ── Private ──
@@ -3420,6 +3590,17 @@ defmodule Minga.Buffer.Process do
     )
   end
 
+  @spec broadcast_buffer_path_changed(String.t() | nil, state()) :: :ok
+  defp broadcast_buffer_path_changed(path, %{file_path: path}), do: :ok
+
+  defp broadcast_buffer_path_changed(_old_path, state) do
+    Events.broadcast(
+      :buffer_path_changed,
+      %Events.BufferEvent{buffer: self(), path: state.file_path},
+      state.events_registry
+    )
+  end
+
   @spec log_to_messages(state(), String.t(), Events.LogMessageEvent.level()) :: :ok
   defp log_to_messages(state, text, level) do
     Events.broadcast(
@@ -3500,6 +3681,27 @@ defmodule Minga.Buffer.Process do
     case swap_backend_call(fn -> backend.delete(path, opts) end) do
       :ok -> :ok
       {:error, reason} -> log_swap_failure(state, {:delete_failed, reason})
+    end
+  end
+
+  # ── Conflict selection ──
+
+  @spec conflict_region(Entry.t()) :: Conflict.region()
+  defp conflict_region(%Entry{start_line: start_line, end_line: end_line}),
+    do: %{start_line: start_line, end_line: end_line}
+
+  @spec find_conflict([Entry.t()], Conflict.target()) :: {Entry.t(), non_neg_integer()} | nil
+  defp find_conflict(entries, {:cursor, line}) do
+    case MergeConflict.at_line(entries, line) do
+      %Entry{} = entry -> {entry, line}
+      nil -> nil
+    end
+  end
+
+  defp find_conflict(entries, {:region, %{start_line: start_line, end_line: end_line}}) do
+    case Enum.find(entries, &match?(%Entry{start_line: ^start_line, end_line: ^end_line}, &1)) do
+      %Entry{} = entry -> {entry, start_line}
+      nil -> nil
     end
   end
 

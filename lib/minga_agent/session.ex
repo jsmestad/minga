@@ -370,10 +370,33 @@ defmodule MingaAgent.Session do
           connection: ConnectionSnapshot.t()
         }
 
+  @typedoc "One local arrival's ordered snapshot and transcript projection."
+  @type editor_arrival :: {editor_snapshot(), editor_arrival_transcript()}
+  @type editor_arrival_transcript ::
+          {:unchanged, Transcript.Cursor.t()}
+          | {:changes, Transcript.Changes.t()}
+          | {:replace, :changed | :reset, Transcript.Snapshot.t(),
+             %{String.t() => pos_integer()} | nil}
+
   @doc "Returns a snapshot of session state for the editor to rebuild AgentState."
   @spec editor_snapshot(GenServer.server()) :: editor_snapshot()
   def editor_snapshot(session) do
     GenServer.call(session, :editor_snapshot)
+  end
+
+  @doc "Starts an editor snapshot read without installing a caller-side timeout."
+  @spec request_editor_snapshot(pid()) :: :gen_server.request_id()
+  def request_editor_snapshot(session) when is_pid(session) and node(session) == node() do
+    :gen_server.send_request(session, :editor_snapshot)
+  end
+
+  @doc "Requests the final local arrival snapshot in the subscriber's Session event order."
+  @spec request_editor_arrival(pid(), :snapshot | Transcript.Cursor.t(), pid(), reference()) ::
+          :gen_server.request_id()
+  def request_editor_arrival(session, cursor, subscriber, arrival)
+      when is_pid(session) and node(session) == node() and is_pid(subscriber) and
+             node(subscriber) == node() and is_reference(arrival) do
+    :gen_server.send_request(session, {:editor_arrival, cursor, subscriber, arrival})
   end
 
   @doc "Renames the exact displayed local conversation after its record commits."
@@ -1208,6 +1231,13 @@ defmodule MingaAgent.Session do
     GenServer.call(session, :recall_queues)
   end
 
+  @doc "Recalls volatile queued input asynchronously for an exact local conversation."
+  @spec request_volatile_queue_recall(pid(), reference(), pos_integer()) :: :ok
+  def request_volatile_queue_recall(session, conversation, workspace)
+      when node(session) == node() and is_reference(conversation) do
+    GenServer.cast(session, {:recall_volatile_queue, self(), conversation, workspace})
+  end
+
   @doc "Clears both queues without returning their contents."
   @spec clear_queues(GenServer.server()) :: :ok | {:error, term()}
   def clear_queues(session) do
@@ -1771,6 +1801,25 @@ defmodule MingaAgent.Session do
     {:reply, Transcript.since(state.transcript, cursor), state}
   end
 
+  def handle_call({:editor_arrival, cursor, subscriber, arrival}, _from, state)
+      when is_pid(subscriber) and node(subscriber) == node() and is_reference(arrival) do
+    case SubscriberLifecycle.role(state.subscriber_lifecycle, subscriber) do
+      nil ->
+        {:reply, {:error, :unsubscribed}, state}
+
+      _role ->
+        snapshot = editor_snapshot_from_state(state)
+        transcript = editor_arrival_transcript(state.transcript, state.file_changes, cursor)
+
+        send(
+          subscriber,
+          {:agent_event, self(), {:editor_arrival_ready, arrival, {snapshot, transcript}}}
+        )
+
+        {:reply, :forwarded, state}
+    end
+  end
+
   def handle_call({:retained_output_store, target, id, reference}, _from, state) do
     result =
       with :ok <- validate_connection_target(state, target),
@@ -1866,25 +1915,7 @@ defmodule MingaAgent.Session do
   end
 
   def handle_call(:editor_snapshot, _from, state) do
-    snapshot = %{
-      status: TurnExecution.status(state.turn_execution),
-      display_status: TurnExecution.display_status(state.turn_execution),
-      stop_target: active_turn_target(state),
-      pending_approval:
-        public_pending_approval(TurnExecution.pending_approval(state.turn_execution), state),
-      pending_question: public_question(state.turn_execution),
-      queue_target: displayed_queue_target(state),
-      error: TurnExecution.error(state.turn_execution),
-      active_tool_name: TurnExecution.active_tool_name(state.turn_execution),
-      active_tools: TurnExecution.active_tools(state.turn_execution),
-      checklist: state.checklist,
-      credentials_configured: state.credentials_configured,
-      credential_readiness: state.credential_readiness,
-      model_selection: state.model_selection,
-      connection: connection_snapshot(state)
-    }
-
-    {:reply, snapshot, state}
+    {:reply, editor_snapshot_from_state(state), state}
   end
 
   def handle_call({:begin_connection, target, method, owner, notify}, _from, state) do
@@ -3631,6 +3662,22 @@ defmodule MingaAgent.Session do
   def handle_cast({:request_connection_cancel, target, operation_ref, caller}, state) do
     {:reply, _result, state} = cancel_connection_workflow(state, target, operation_ref, caller)
     {:noreply, state}
+  end
+
+  def handle_cast({:recall_volatile_queue, caller, conversation, workspace}, state) do
+    if state.connection.conversation == conversation and
+         not Persistence.enabled?(state.persistence) do
+      {{steering, follow_up}, execution} = TurnExecution.recall_queues(state.turn_execution)
+
+      send(
+        caller,
+        {:volatile_queue_recalled, self(), conversation, workspace, steering ++ follow_up}
+      )
+
+      {:noreply, broadcast(%{state | turn_execution: execution}, :queues_recalled)}
+    else
+      {:noreply, state}
+    end
   end
 
   def handle_cast({:request_connection_worker, target, ref, worker, caller}, state) do
@@ -6066,6 +6113,55 @@ defmodule MingaAgent.Session do
   @spec idle_gc_timeout_ms() :: non_neg_integer()
   defp idle_gc_timeout_ms do
     Options.get(:agent_session_idle_timeout_ms)
+  end
+
+  @spec editor_snapshot_from_state(state()) :: editor_snapshot()
+  defp editor_snapshot_from_state(state) do
+    %{
+      status: TurnExecution.status(state.turn_execution),
+      display_status: TurnExecution.display_status(state.turn_execution),
+      stop_target: active_turn_target(state),
+      pending_approval:
+        public_pending_approval(TurnExecution.pending_approval(state.turn_execution), state),
+      pending_question: public_question(state.turn_execution),
+      queue_target: displayed_queue_target(state),
+      error: TurnExecution.error(state.turn_execution),
+      active_tool_name: TurnExecution.active_tool_name(state.turn_execution),
+      active_tools: TurnExecution.active_tools(state.turn_execution),
+      checklist: state.checklist,
+      credentials_configured: state.credentials_configured,
+      credential_readiness: state.credential_readiness,
+      model_selection: state.model_selection,
+      connection: connection_snapshot(state)
+    }
+  end
+
+  @spec editor_arrival_transcript(
+          Transcript.t(),
+          [FileChange.t()],
+          :snapshot | Transcript.Cursor.t()
+        ) :: editor_arrival_transcript()
+  defp editor_arrival_transcript(transcript, files, cursor) do
+    case Transcript.since(transcript, cursor) do
+      {:unchanged, cursor} ->
+        {:unchanged, cursor}
+
+      {:changes, %Transcript.Changes{entries: [], pin_changes: [], cursor: cursor}} ->
+        {:unchanged, cursor}
+
+      {:changes, %Transcript.Changes{} = changes} ->
+        {:changes, changes}
+
+      {:snapshot, snapshot} ->
+        {:replace, :changed, snapshot, FileChange.changed_file_counts(files)}
+
+      {:reset, _reason, snapshot} ->
+        {:replace, :reset, snapshot, FileChange.changed_file_counts(files)}
+
+      {:error, :invalid_cursor} ->
+        {:snapshot, snapshot} = Transcript.since(transcript, :snapshot)
+        {:replace, :reset, snapshot, nil}
+    end
   end
 
   @spec driver_allowed?(state(), pid()) :: boolean()

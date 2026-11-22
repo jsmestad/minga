@@ -10,9 +10,14 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
   alias MingaAgent.EventLog.EventRecord
   alias MingaAgent.Session
   alias MingaAgent.SessionManager
+  alias MingaAgent.Tool.Output
+  alias MingaAgent.Tool.Output.{Range, Reference}
+  alias MingaAgent.ToolCall
   alias MingaEditor.Agent.DraftWorkflow
+  alias MingaEditor.Agent.RetainedOutputTarget
   alias MingaEditor.Agent.SessionEventWorkflow
   alias MingaEditor.Agent.UIState
+  alias MingaEditor.Agent.UIState.Panel
   alias MingaEditor.Commands.AgentSession
   alias MingaEditor.Commands.BufferManagement
   alias MingaEditor.Effect.{Outcome, Policy, Request}
@@ -78,7 +83,9 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
     opened = MingaEditor.Handlers.BufferRegistry.add_buffer(state, new_buffer, context: :open)
 
     assert prompt_text(opened.workspace.agent_ui) == "agent draft"
-    assert opened.workspace.agent_ui.panel.transcript.messages == ["kept transcript"]
+
+    assert Minga.Test.TranscriptFixture.messages(opened.workspace.agent_ui.panel.transcript) ==
+             [{:assistant, "kept transcript"}]
 
     restored = MingaEditor.TabWorkflow.switch(opened, agent_tab_id)
 
@@ -364,7 +371,9 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
     drained_workspace =
       TabBar.get_workspace(state.shell_runtime.state.tab_bar, remote_workspace.id)
 
-    first_messages = state.workspace.agent_ui.panel.transcript.messages
+    first_messages =
+      Minga.Test.TranscriptFixture.messages(state.workspace.agent_ui.panel.transcript)
+
     assert {:system, "Remote work is ready to resume.", :info} in first_messages
     assert workspace_payload(drained_workspace).pending_catchup_events == []
     assert workspace_payload(drained_workspace).remote_session.last_seen_event_id == 42
@@ -380,7 +389,8 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
     state = MingaEditor.TabWorkflow.switch(state, initial_tab_id)
     state = MingaEditor.TabWorkflow.switch(state, agent_tab.id)
 
-    assert state.workspace.agent_ui.panel.transcript.messages == first_messages
+    assert Minga.Test.TranscriptFixture.messages(state.workspace.agent_ui.panel.transcript) ==
+             first_messages
 
     assert workspace_payload(
              TabBar.get_workspace(state.shell_runtime.state.tab_bar, remote_workspace.id)
@@ -791,6 +801,57 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
     closed = SessionEventWorkflow.connection_changed(state, session, refreshed)
     assert closed.shell_runtime.state.modal == :none
     assert prompt_text(closed.workspace.agent_ui) == "restart draft"
+  end
+
+  test "a captured row action cannot open a same-ID result after a same-PID transcript replacement" do
+    {:ok, session_id, session} = SessionManager.start_session([])
+    on_exit(fn -> stop_session(session) end)
+    {state, workspace_id, _file_ref} = state_with_active_agent_workspace(session)
+    %{connection: connection} = Session.editor_snapshot(session)
+    state = SessionEventWorkflow.connection_changed(state, session, connection)
+    {:ok, token} = Reference.token(session_id, String.duplicate("a", 32))
+
+    {:ok, reference} =
+      Reference.new(
+        token: token,
+        media_type: "text/plain",
+        bytes: 3,
+        sha256: Reference.digest("old")
+      )
+
+    {:ok, range} = Range.new(:full, :bytes, 0, 3, 3)
+    {:ok, output} = Output.new("", :complete, range, reference: reference)
+    call = ToolCall.new("call", "read_file", %{}) |> ToolCall.complete("", output)
+    messages = [{:tool_call, call}]
+
+    old = Minga.Test.TranscriptFixture.projection(messages)
+
+    offer =
+      RetainedOutputTarget.offer({workspace_id, connection.target.epoch, old.generation}, 1, call)
+
+    replacement = Minga.Test.TranscriptFixture.projection(messages)
+    panel = Panel.install_transcript(state.workspace.agent_ui.panel, replacement, :keep)
+    state = Traditional.Workflow.install_agent_panel(state, panel)
+
+    action = %RetainedOutputTarget{message_id: 1, offer: offer}
+    rejected = GuiActionHandler.dispatch(state, {:agent_read_retained_output, action})
+    assert rejected.shell_runtime.state.modal == :none
+
+    assert rejected.shell_runtime.state.notice.message ==
+             "The displayed tool result changed or is no longer retained."
+
+    fresh =
+      RetainedOutputTarget.offer(
+        {workspace_id, connection.target.epoch, replacement.generation},
+        1,
+        call
+      )
+
+    opened =
+      GuiActionHandler.dispatch(state, {:agent_read_retained_output, %{action | offer: fresh}})
+
+    assert {:picker, %{picker_ui: %{context: %{message_id: 1, reference: ^reference}}}} =
+             opened.shell_runtime.state.modal
   end
 
   test "session-down cleanup clears session and status while preserving draft and file membership" do
@@ -1470,8 +1531,16 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
   end
 
   defp put_transcript_projection(%UIState{} = ui, message, version) do
-    transcript = %{ui.panel.transcript | messages: [message], version: version}
-    %{ui | panel: %{ui.panel | transcript: transcript}}
+    projection = Minga.Test.TranscriptFixture.projection([{:assistant, message}])
+
+    panel =
+      MingaEditor.Agent.UIState.Panel.install_transcript(
+        ui.panel,
+        %{projection | version: version},
+        :keep
+      )
+
+    UIState.replace_panel(ui, panel)
   end
 
   defp show_panel(%UIState{} = ui) do

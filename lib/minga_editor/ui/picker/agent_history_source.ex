@@ -118,6 +118,7 @@ defmodule MingaEditor.UI.Picker.AgentHistorySource do
   @spec read_page(ConnectionTarget.t(), source(), pos_integer() | :tail) ::
           MingaAgent.Session.Transcript.history_result() | {:error, term()}
   defp read_page(%ConnectionTarget{session: pid}, source, anchor) when node(pid) == node() do
+    # minga:allow-blocking — only async_fetch/1 calls this, in the picker fetch worker (async?/0 is true)
     Session.transcript_history_before(pid, source, anchor, @page_size)
   end
 

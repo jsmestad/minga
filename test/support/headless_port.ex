@@ -57,6 +57,7 @@ defmodule Minga.Test.HeadlessPort do
 
   @typedoc "Screen snapshot with grid and cursor position."
   @type screen :: %{
+          optional(:agent_chat) => map() | nil,
           grid: grid(),
           cursor: {non_neg_integer(), non_neg_integer()},
           cursor_shape: Protocol.cursor_shape(),
@@ -113,7 +114,7 @@ defmodule Minga.Test.HeadlessPort do
             file_tree: map() | nil,
             agent_chat: map() | nil,
             subscribers: [pid()],
-            waiters: [{pid(), reference()}],
+            waiters: [{pid(), reference(), non_neg_integer() | nil}],
             frame_count: non_neg_integer(),
             transaction: map() | nil,
             last_frame_seq: non_neg_integer(),
@@ -269,25 +270,21 @@ defmodule Minga.Test.HeadlessPort do
   """
   @spec await_frame(GenServer.server(), timeout()) :: :ok | {:error, :timeout}
   def await_frame(server, timeout \\ 1000) do
-    ref = make_ref()
-    :ok = GenServer.call(server, {:wait_for_frame, self(), ref})
-
-    receive do
-      {:frame_ready, ^ref, _snapshot} -> :ok
-    after
-      timeout -> {:error, :timeout}
+    case server |> prepare_await() |> collect_frame(timeout) do
+      {:ok, _snapshot} -> :ok
+      {:error, :timeout} = error -> error
     end
   end
 
   @doc """
   Registers a frame waiter synchronously, returning a ref.
   Call this BEFORE triggering the action that causes a render,
-  then use `collect_frame/2` to wait for the frame.
+  then use `collect_frame/2`. An optional input sequence ignores unsolicited commits.
   """
-  @spec prepare_await(GenServer.server()) :: reference()
-  def prepare_await(server) do
+  @spec prepare_await(GenServer.server(), non_neg_integer() | nil) :: reference()
+  def prepare_await(server, input_seq \\ nil) do
     ref = make_ref()
-    :ok = GenServer.call(server, {:wait_for_frame, self(), ref})
+    :ok = GenServer.call(server, {:wait_for_frame, self(), ref, input_seq})
     ref
   end
 
@@ -453,8 +450,8 @@ defmodule Minga.Test.HeadlessPort do
     {:reply, :ok, %{state | width: width, height: height, grid: blank_grid(width, height)}}
   end
 
-  def handle_call({:wait_for_frame, pid, ref}, _from, state) do
-    {:reply, :ok, %{state | waiters: [{pid, ref} | state.waiters]}}
+  def handle_call({:wait_for_frame, pid, ref, input_seq}, _from, state) do
+    {:reply, :ok, %{state | waiters: [{pid, ref, input_seq} | state.waiters]}}
   end
 
   def handle_call({:send_commands, commands}, _from, state) do
@@ -694,14 +691,21 @@ defmodule Minga.Test.HeadlessPort do
       cursor_shape: state.cursor_shape,
       width: state.width,
       height: state.height,
+      agent_chat: state.agent_chat,
       input_seq: input_seq
     }
 
-    Enum.each(state.waiters, fn {pid, ref} ->
-      send(pid, {:frame_ready, ref, snapshot})
-    end)
+    waiting =
+      Enum.reject(state.waiters, fn {pid, ref, expected} ->
+        if is_nil(expected) or expected == input_seq do
+          send(pid, {:frame_ready, ref, snapshot})
+          true
+        else
+          false
+        end
+      end)
 
-    %{state | waiters: [], frame_count: state.frame_count + 1}
+    %{state | waiters: waiting, frame_count: state.frame_count + 1}
   end
 
   @spec project_semantic_grid(State.t()) :: State.t()

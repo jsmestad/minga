@@ -5,6 +5,7 @@ defmodule MingaAgent.ArtifactQuota.State do
   alias MingaAgent.ArtifactQuota.Usage
   alias MingaAgent.ArtifactStorage.FaultInjector
   alias MingaAgent.ArtifactStorage.Files
+  alias MingaAgent.ArtifactStorage.SQLite
   alias MingaAgent.ArtifactStore.Limits
 
   @type storage :: :cold | {:open, Ledger.db()}
@@ -18,7 +19,8 @@ defmodule MingaAgent.ArtifactQuota.State do
           total_artifacts: non_neg_integer(),
           total_open_captures: non_neg_integer(),
           blocked: boolean(),
-          fault_injector: FaultInjector.t()
+          fault_injector: FaultInjector.t(),
+          synchronous: SQLite.synchronous()
         }
 
   @typep release_operation ::
@@ -36,7 +38,8 @@ defmodule MingaAgent.ArtifactQuota.State do
     :total_artifacts,
     :total_open_captures,
     :blocked,
-    :fault_injector
+    :fault_injector,
+    :synchronous
   ]
   defstruct @enforce_keys
 
@@ -46,6 +49,7 @@ defmodule MingaAgent.ArtifactQuota.State do
     root = Keyword.get(opts, :root)
 
     with true <- is_binary(root) and String.trim(root) != "",
+         {:ok, synchronous} <- SQLite.synchronous_option(opts),
          {:ok, limits} <- normalize_limits(Keyword.get(opts, :limits)),
          true <- limits.root_bytes >= Limits.sqlite_envelope_bytes() do
       {:ok,
@@ -59,7 +63,8 @@ defmodule MingaAgent.ArtifactQuota.State do
          total_artifacts: 0,
          total_open_captures: 0,
          blocked: false,
-         fault_injector: Keyword.get(opts, :fault_injector)
+         fault_injector: Keyword.get(opts, :fault_injector),
+         synchronous: synchronous
        }}
     else
       false -> {:error, :invalid_quota_root}
@@ -403,7 +408,7 @@ defmodule MingaAgent.ArtifactQuota.State do
 
     with :ok <- Files.ensure_private_directory(state.root),
          :ok <- validate_ledger_presence(state.root, ledger_path),
-         {:ok, db} <- Ledger.open(ledger_path) do
+         {:ok, db} <- Ledger.open(ledger_path, state.synchronous) do
       load_opened(state, db)
     end
   end

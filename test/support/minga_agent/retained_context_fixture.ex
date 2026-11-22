@@ -3,6 +3,9 @@ defmodule MingaAgent.Test.RetainedContextFixture do
 
   alias MingaAgent.Tool.Context
 
+  # Tool tests exercise capture results, not power-loss durability. SQLite
+  # commits skip fsync here so a loaded CI disk cannot stall a tool call.
+
   @spec new(String.t(), String.t()) :: Context.t()
   def new(project_root, call_id) when is_binary(project_root) and is_binary(call_id) do
     root =
@@ -12,13 +15,14 @@ defmodule MingaAgent.Test.RetainedContextFixture do
 
     quota =
       ExUnit.Callbacks.start_supervised!(
-        {MingaAgent.ArtifactQuota, root: root, name: nil},
+        {MingaAgent.ArtifactQuota, root: root, name: nil, synchronous: :off},
         id: {__MODULE__, root, :quota}
       )
 
     store =
       ExUnit.Callbacks.start_supervised!(
-        {MingaAgent.ArtifactStore, root: root, quota: quota, session_id: "test-record"},
+        {MingaAgent.ArtifactStore,
+         root: root, quota: quota, session_id: "test-record", synchronous: :off},
         id: {__MODULE__, root, :store}
       )
 

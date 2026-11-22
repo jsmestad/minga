@@ -5,10 +5,11 @@ defmodule Minga.Git.MergeConflict do
   The parser recognizes standard two-way conflicts and diff3 conflicts with a `|||||||` base section. It returns complete regions only, so callers never render an action row for a malformed or partially typed conflict block.
   """
 
+  alias Minga.Buffer.Conflict
   alias Minga.Git.MergeConflict.Region
   alias Minga.Git.MergeConflict.Entry
 
-  @type choice :: :current | :incoming | :both
+  @type choice :: Conflict.choice()
 
   @typep marker_position :: {non_neg_integer(), String.t()}
   @typep side :: {marker_position(), [String.t()]}

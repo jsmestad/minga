@@ -3,243 +3,36 @@ defmodule MingaEditor.Agent.TranscriptTest do
 
   alias MingaEditor.Agent.Transcript
 
-  describe "line_message_index/1" do
-    test "returns empty list for no messages" do
-      assert Transcript.line_message_index([]) == []
-    end
+  test "classifies only assistant fences and keeps the trailing blank line" do
+    assert types({:assistant, "lead\n  ```elixir\ncode\n```\n"}) == [
+             :text,
+             :code,
+             :code,
+             :code,
+             :text
+           ]
 
-    test "maps a single user message" do
-      messages = [{:user, "hello world"}]
-      index = Transcript.line_message_index(messages)
-
-      assert [{0, :text}] = index
-    end
-
-    test "maps a multiline user message" do
-      messages = [{:user, "line 1\nline 2\nline 3"}]
-      index = Transcript.line_message_index(messages)
-
-      assert [{0, :text}, {0, :text}, {0, :text}] = index
-    end
-
-    test "maps multiple messages with separator lines" do
-      messages = [{:user, "hello"}, {:assistant, "world"}]
-      index = Transcript.line_message_index(messages)
-
-      # "hello\n\nworld" → ["hello", "", "world"]
-      # Line 0: user msg (idx 0), Line 1: separator, Line 2: assistant msg (idx 1)
-      assert [{0, :text}, {0, :empty}, {1, :text}] = index
-    end
-
-    test "classifies assistant code blocks as :code" do
-      messages = [{:assistant, "text\n```elixir\ncode here\n```\nmore text"}]
-      index = Transcript.line_message_index(messages)
-
-      assert [
-               {0, :text},
-               {0, :code},
-               {0, :code},
-               {0, :code},
-               {0, :text}
-             ] = index
-    end
-
-    test "classifies tool_call lines as :tool" do
-      tc = %MingaAgent.ToolCall{
-        id: "tc-1",
-        name: "bash",
-        args: %{},
-        result: "output",
-        status: :complete,
-        collapsed: false
-      }
-
-      messages = [{:tool_call, tc}]
-      index = Transcript.line_message_index(messages)
-
-      assert [{0, :tool}] = index
-    end
-
-    test "classifies thinking lines as :thinking" do
-      messages = [{:thinking, "hmm...\nlet me think", false}]
-      index = Transcript.line_message_index(messages)
-
-      assert [{0, :thinking}, {0, :thinking}] = index
-    end
-
-    test "classifies usage lines as :usage" do
-      messages = [{:usage, %MingaAgent.TurnUsage{input: 100, output: 50, cost: 0.01}}]
-      index = Transcript.line_message_index(messages)
-
-      assert [{0, :usage}] = index
-    end
-
-    test "classifies system message lines as :system" do
-      messages = [{:system, "API key status:\n  ✗ Anthropic\n  ✗ Google", :info}]
-      index = Transcript.line_message_index(messages)
-
-      assert [{0, :system}, {0, :system}, {0, :system}] = index
-    end
-
-    test "handles mixed message types" do
-      messages = [
-        {:user, "question"},
-        {:assistant, "answer with\n```\ncode\n```"}
-      ]
-
-      index = Transcript.line_message_index(messages)
-
-      assert [
-               {0, :text},
-               {0, :empty},
-               {1, :text},
-               {1, :code},
-               {1, :code},
-               {1, :code}
-             ] = index
-    end
-
-    test "empty tool_call result produces single line" do
-      tc = %MingaAgent.ToolCall{
-        id: "tc-2",
-        name: "bash",
-        args: %{},
-        result: "",
-        status: :running,
-        collapsed: false
-      }
-
-      messages = [{:tool_call, tc}]
-      index = Transcript.line_message_index(messages)
-
-      assert [{0, :tool}] = index
-    end
+    assert types({:user, "```\nnot assistant code"}) == [:text, :text]
+    assert types({:assistant, "x ```inline\nplain"}) == [:text, :text]
   end
 
-  describe "display/2" do
-    test "cached message pairs preserve supplied stable ids without pins" do
-      first_message = {:user, "first"}
-      second_message = {:assistant, "second"}
-      message_ids = [{41, first_message}, {42, second_message}]
+  test "a tool result uses the first 500 graphemes, including only the newlines in that range" do
+    tool =
+      MingaAgent.ToolCall.new("tool", "read_file")
+      |> MingaAgent.ToolCall.complete(String.duplicate("e\u0301", 499) <> "\nextra\nhidden")
 
-      %{display_message_pairs: display_pairs} =
-        Transcript.display([first_message, second_message], message_ids: message_ids)
-
-      assert [{41, ^first_message}, {42, ^second_message}] = display_pairs
-    end
-
-    test "cached index and message pairs use the same display order" do
-      old_message = {:assistant, "old pinned"}
-      hidden_message = {:user, "hidden"}
-      visible_message = {:assistant, "visible"}
-      messages = [old_message, hidden_message, visible_message]
-      message_ids = [{101, old_message}, {102, hidden_message}, {103, visible_message}]
-
-      %{
-        line_index: index,
-        display_messages: display_messages,
-        display_message_pairs: display_pairs
-      } =
-        Transcript.display(messages,
-          display_start_index: 2,
-          message_ids: message_ids,
-          pinned_ids: MapSet.new([101])
-        )
-
-      assert [
-               {0, :text},
-               {0, :empty},
-               {1, :system},
-               {1, :empty},
-               {2, :system},
-               {2, :empty},
-               {3, :text}
-             ] = index
-
-      assert [
-               ^old_message,
-               {:system, "── pinned ──", :info},
-               {:system, "── 2 earlier messages hidden ──", :info},
-               ^visible_message
-             ] = display_messages
-
-      assert [
-               {101, ^old_message},
-               {_, {:system, "── pinned ──", :info}},
-               {_, {:system, "── 2 earlier messages hidden ──", :info}},
-               {103, ^visible_message}
-             ] = display_pairs
-    end
-
-    test "empty state replaces startup-only transcript for display without mutating messages" do
-      startup = {:system, "Session started", :info}
-      result = Transcript.display([startup], empty_state: :credentials_missing)
-
-      assert [{_id, {:system, text, :info}}] = result.display_message_pairs
-      assert result.display_messages == [{:system, text, :info}]
-      assert text =~ "Connect a provider"
-      refute text =~ "Session started"
-    end
-
-    test "pending discovery presents checking instead of an unconfigured result" do
-      result = Transcript.display([{:system, "Session started", :info}], empty_state: :checking)
-
-      assert [{:system, "Checking agent credentials and model availability...", :info}] =
-               result.display_messages
-    end
-
-    test "empty state does not replace transcripts with user turns" do
-      startup = {:system, "Session started", :info}
-      user = {:user, "hello"}
-      result = Transcript.display([startup, user], empty_state: :credentials_missing)
-
-      assert result.display_messages == [startup, user]
-      assert [{_id1, ^startup}, {_id2, ^user}] = result.display_message_pairs
-    end
+    assert types({:tool_call, tool}) == [:tool, :tool]
+    assert types({:tool_call, MingaAgent.ToolCall.new("empty", "read_file")}) == [:tool]
   end
 
-  describe "messages_to_markdown_with_offsets/1" do
-    test "system messages produce their text content" do
-      messages = [{:system, "API key status:\n  ✗ Anthropic", :info}]
-      {text, offsets} = Transcript.messages_to_markdown_with_offsets(messages)
-
-      assert text == "API key status:\n  ✗ Anthropic"
-      assert [{0, 0, 2}] = offsets
-    end
-
-    test "system error messages produce their text content" do
-      messages = [{:system, "Something went wrong", :error}]
-      {text, _offsets} = Transcript.messages_to_markdown_with_offsets(messages)
-
-      assert text == "Something went wrong"
-    end
+  test "separates thinking, notices and usage from regular text" do
+    assert types({:thinking, "one\ntwo", false}) == [:thinking, :thinking]
+    assert types({:system, "API key status:\n  ✗ Anthropic", :info}) == [:system, :system]
+    assert types({:usage, MingaAgent.TurnUsage.new()}) == [:usage]
   end
 
-  describe "message_start_line/2" do
-    test "returns 0 for first message" do
-      messages = [{:user, "hello"}, {:assistant, "world"}]
-      assert Transcript.message_start_line(messages, 0) == 0
-    end
-
-    test "returns correct start for second message" do
-      messages = [{:user, "hello"}, {:assistant, "world"}]
-      # "hello\n\nworld" → line 0: hello, line 1: separator, line 2: world
-      assert Transcript.message_start_line(messages, 1) == 2
-    end
-
-    test "returns nil for out-of-range index" do
-      messages = [{:user, "hello"}]
-      assert Transcript.message_start_line(messages, 5) == nil
-    end
-
-    test "accounts for multiline messages" do
-      messages = [{:user, "line 1\nline 2\nline 3"}, {:assistant, "response"}]
-      # Lines: 0-2 user (3 lines), 3 separator, 4 response
-      assert Transcript.message_start_line(messages, 1) == 4
-    end
-
-    test "returns nil for empty message list" do
-      assert Transcript.message_start_line([], 0) == nil
-    end
+  defp types(message) do
+    {count, _type} = profile = Transcript.line_profile(message)
+    Enum.map(0..(count - 1), &Transcript.line_type_at(profile, &1))
   end
 end

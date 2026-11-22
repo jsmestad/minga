@@ -31,17 +31,38 @@ defmodule Minga.Bench.KeystrokeLatencyBaseline do
   and prints `METRIC` lines so a CI job can track the numbers over time without
   gating merges.
 
-  Run with: `mix run bench/keystroke_latency_baseline.exs`
+  Run with: `MIX_ENV=test mix run bench/keystroke_latency_baseline.exs`
+  With `MIX_ENV=test MINGA_BENCH_ACTIVE_AGENT=1`, also measure a real active
+  Session with 100 and 10,000 retained transcript entries. Each measured
+  key follows one forwarded text batch. This limits backlog without skipping
+  active projection. The original `agent_stream` measures free-running
+  background contention. The active fixture makes no provider HTTP requests.
+
+  Set `MINGA_BENCH_TRANSCRIPT_WORK=1` to collect work counts instead of timing.
   """
 
   alias Minga.Buffer.Process, as: BufferProcess
+  alias Minga.Config.Options
+  alias Minga.Recovery.ProviderFixture
   alias Minga.Test.HeadlessPort
+  alias MingaAgent.Session
   alias MingaEditor.Extension.Sidebar
   alias MingaEditor.Frontend.Capabilities
+  alias MingaEditor.Shell.Runtime
   alias MingaEditor.State
   alias MingaEditor.State.AgentConnection
 
   Code.require_file("fixtures/agent_stream_replay.exs", __DIR__)
+  Code.require_file("../scripts/agent_recovery_provider.exs", __DIR__)
+
+  unless Code.ensure_loaded?(MingaAgent.Test.ModelSelectionFixture) do
+    Code.require_file("../test/support/minga_agent/model_selection_fixture.ex", __DIR__)
+  end
+
+  Code.require_file("fixtures/active_session_provider.exs", __DIR__)
+
+  Code.require_file("fixtures/transcript_work_probe.exs", __DIR__)
+  Code.require_file("fixtures/transcript_work_scenario.exs", __DIR__)
 
   @warmup_keys 20
   @measured_keys 120
@@ -53,6 +74,15 @@ defmodule Minga.Bench.KeystrokeLatencyBaseline do
     image_support: :native
   }
 
+  @spec transcript_work() :: :ok
+  def transcript_work do
+    Minga.Bench.TranscriptWorkScenario.run(
+      [width: 220, height: 60, capabilities: %{@gui_caps | semantic_ui: true}],
+      &with_editor/2,
+      &open_active_agent/1
+    )
+  end
+
   @spec run() :: :ok
   def run do
     scenarios = [
@@ -60,6 +90,19 @@ defmodule Minga.Bench.KeystrokeLatencyBaseline do
       large_frame: &scenario_large_frame/0,
       agent_stream: &scenario_agent_stream/0
     ]
+
+    scenarios =
+      if System.get_env("MINGA_BENCH_ACTIVE_AGENT") == "1" do
+        if Mix.env() != :test, do: raise("the active Agent benchmark requires MIX_ENV=test")
+
+        scenarios ++
+          [
+            active_agent_stream_100: fn -> scenario_active_agent_stream(100) end,
+            active_agent_stream_10000: fn -> scenario_active_agent_stream(10_000) end
+          ]
+      else
+        scenarios
+      end
 
     results =
       Map.new(scenarios, fn {name, fun} ->
@@ -124,6 +167,143 @@ defmodule Minga.Bench.KeystrokeLatencyBaseline do
         stop_agent_producer(producer, ctx, session)
       end
     end)
+  end
+
+  @spec scenario_active_agent_stream(pos_integer()) :: map()
+  defp scenario_active_agent_stream(retained) do
+    _providers = LLMDB.providers()
+    Minga.Git.Stub.ensure_table()
+
+    opts = [
+      width: 220,
+      height: 60,
+      capabilities: %{@gui_caps | semantic_ui: true},
+      agent_provider_module: MingaAgent.Providers.Native,
+      agent_provider_opts: Minga.Bench.ActiveSessionProvider.options(self())
+    ]
+
+    with_editor(opts, fn ctx ->
+      {:ok, _model} =
+        Options.set(:agent_model, MingaAgent.Test.ModelSelectionFixture.model_intent())
+
+      session = open_active_agent(ctx)
+
+      warm_active_session(session)
+      {:snapshot, %{count: initial_count}} = Session.transcript_since(session, :snapshot)
+      true = retained > initial_count
+      messages = for n <- (initial_count + 1)..retained, do: {:assistant, "Retained #{n}"}
+      :ok = Session.seed_messages(session, messages)
+      {:snapshot, %{count: ^retained}} = Session.transcript_since(session, :snapshot)
+
+      Enum.each(1..@warmup_keys, fn _ -> send_key(ctx, ?a, 0) end)
+      :ok = Session.send_prompt(session, "Stream the fixed benchmark response")
+      producer = start_active_stream()
+
+      ingest = agent_stream_target(ctx)
+      probe = attach_ingest_probe(ingest)
+
+      try do
+        samples =
+          Enum.map(1..@measured_keys, fn seq ->
+            send(producer, {:benchmark_stream_chunk, self()})
+            await_forwarded_chunk(ingest)
+            queue_len = editor_queue_len(ctx)
+            Map.put(send_key(ctx, ?a, seq, :exact), :queue_len, queue_len)
+          end)
+
+        samples
+        |> summarize()
+        |> Map.merge(%{retained_entries: retained, raw_samples: samples})
+      after
+        :telemetry.detach(probe)
+        send(producer, {:finish_benchmark_stream, self()})
+      end
+    end)
+  end
+
+  @spec open_active_agent(map()) :: pid()
+  defp open_active_agent(%{editor: editor, port: port}) do
+    ref = HeadlessPort.prepare_await(port)
+    send(editor, {:minga_input, {:gui_action, {:execute_command, "agent_new_session"}}})
+    {:ok, _frame} = HeadlessPort.collect_frame(ref, 15_000)
+    session = Runtime.active_session(:sys.get_state(editor).shell_runtime)
+    true = is_pid(session)
+    session
+  end
+
+  @spec warm_active_session(pid()) :: :ok
+  defp warm_active_session(session) do
+    :ok = Session.subscribe(session)
+    :ok = Session.send_prompt(session, "Benchmark conversation")
+
+    receive do
+      {:recovery_request, request} ->
+        :ok = ProviderFixture.deliver(request, ProviderFixture.text("Initial response"))
+    after
+      15_000 -> raise "active Session did not dispatch its warmup request"
+    end
+
+    receive do
+      {:agent_event, ^session, {:resumable_boundary, _revision}} -> :ok
+    after
+      15_000 -> raise "active Session did not finish its warmup turn"
+    end
+
+    :idle = Session.status(session)
+    :ok = Session.unsubscribe(session)
+  end
+
+  @spec start_active_stream() :: pid()
+  defp start_active_stream do
+    receive do
+      {:recovery_request, request} ->
+        :ok = ProviderFixture.deliver(request, Minga.Bench.ActiveSessionProvider.stream(self()))
+    after
+      15_000 -> raise "active Session did not dispatch the benchmark request"
+    end
+
+    receive do
+      {:active_stream_consumer, consumer} -> consumer
+    after
+      15_000 -> raise "Native worker did not consume the benchmark stream"
+    end
+  end
+
+  @spec attach_ingest_probe(pid()) :: reference()
+  defp attach_ingest_probe(ingest) do
+    id = make_ref()
+    driver = self()
+
+    :ok =
+      :telemetry.attach(
+        id,
+        [:minga, :agent, :ingest_flush],
+        &notify_ingest_flush/4,
+        {ingest, driver}
+      )
+
+    id
+  end
+
+  @spec notify_ingest_flush([atom()], map(), map(), {pid(), pid()}) :: :ok
+  defp notify_ingest_flush(_event, %{delta_count: 1}, _metadata, {ingest, driver})
+       when self() == ingest do
+    send(driver, {:active_benchmark_flush, ingest})
+    :ok
+  end
+
+  defp notify_ingest_flush(_event, _measurements, _metadata, _config), do: :ok
+
+  @spec await_forwarded_chunk(pid()) :: :ok
+  defp await_forwarded_chunk(ingest) do
+    receive do
+      {:active_benchmark_flush, ^ingest} ->
+        # The probe runs in the Ingest callback before it sends the batch.
+        _ = :sys.get_state(ingest)
+        :ok
+    after
+      15_000 -> raise "Ingest did not forward the active benchmark batch"
+    end
   end
 
   # ── Concurrent agent producer (#2289) ───────────────────────────────────────
@@ -214,16 +394,12 @@ defmodule Minga.Bench.KeystrokeLatencyBaseline do
   # resulting frame. Verifies the echoed sequence on commit_frame matches, proving
   # the round-trip correlation (ticket #2215 acceptance; commit_frame absorbed the
   # echo from batch_end in #2219).
-  @spec send_key(map(), non_neg_integer(), pos_integer()) :: %{
+  @spec send_key(map(), non_neg_integer(), non_neg_integer(), :next | :exact) :: %{
           wall_us: non_neg_integer(),
           correlated: boolean()
         }
-  defp send_key(%{editor: editor, port: port}, codepoint, seq) do
-    # Generous timeout: under the concurrent agent producer the per-delta path
-    # (pre-#2289) can deeply back up the Editor mailbox; we want the run to
-    # complete and surface that as large latency, not crash the sync barrier.
-    _ = :sys.get_state(editor, 30_000)
-    ref = HeadlessPort.prepare_await(port)
+  defp send_key(%{editor: editor, port: port}, codepoint, seq, correlation \\ :next) do
+    ref = prepare_key_frame(editor, port, seq, correlation)
     started_at = System.monotonic_time(:microsecond)
     send(editor, {:minga_input, {:key_press, codepoint, 0, seq}})
 
@@ -233,8 +409,16 @@ defmodule Minga.Bench.KeystrokeLatencyBaseline do
         %{wall_us: stopped_at - started_at, correlated: Map.get(snapshot, :input_seq) == seq}
 
       {:error, :timeout} ->
-        raise "timed out waiting for frame after key #{inspect(codepoint)}"
+        raise "timed out waiting for frame after key #{inspect(codepoint)} (sequence #{seq})"
     end
+  end
+
+  @spec prepare_key_frame(pid(), pid(), non_neg_integer(), :next | :exact) :: reference()
+  defp prepare_key_frame(_editor, port, seq, :exact), do: HeadlessPort.prepare_await(port, seq)
+
+  defp prepare_key_frame(editor, port, _seq, :next) do
+    _ = :sys.get_state(editor, 30_000)
+    HeadlessPort.prepare_await(port)
   end
 
   @spec warmup(map()) :: :ok
@@ -313,15 +497,17 @@ defmodule Minga.Bench.KeystrokeLatencyBaseline do
 
     {:ok, generation} =
       MingaEditor.GenerationSupervisor.start_editor_generation_link(
-        name: :"kl_bench_editor_#{id}",
-        backend: :headless,
-        port_manager: port,
-        buffer: buffer,
-        width: width,
-        height: height,
-        editing_model: :vim,
-        sidebar_registry: sidebar_registry,
-        suppress_tool_prompts: true
+        [
+          name: :"kl_bench_editor_#{id}",
+          backend: :headless,
+          port_manager: port,
+          buffer: buffer,
+          width: width,
+          height: height,
+          editing_model: :vim,
+          sidebar_registry: sidebar_registry,
+          suppress_tool_prompts: true
+        ] ++ Keyword.take(opts, [:agent_provider_module, :agent_provider_opts])
       )
 
     {:ok, editor} = MingaEditor.GenerationSupervisor.editor_owner(generation)
@@ -382,9 +568,19 @@ defmodule Minga.Bench.KeystrokeLatencyBaseline do
       "scenarios" => results
     }
 
-    File.mkdir_p!(Path.dirname(@baseline_path))
-    File.write!(@baseline_path, json_encode(payload) <> "\n")
-    IO.puts("Wrote baseline: #{@baseline_path}")
+    path =
+      if Map.has_key?(results, "active_agent_stream_100") do
+        Path.join(
+          System.tmp_dir!(),
+          "minga-active-session-keystrokes-#{System.os_time(:microsecond)}.json"
+        )
+      else
+        @baseline_path
+      end
+
+    File.mkdir_p!(Path.dirname(path))
+    File.write!(path, json_encode(payload) <> "\n")
+    IO.puts("Wrote baseline: #{path}")
     :ok
   end
 
@@ -395,8 +591,7 @@ defmodule Minga.Bench.KeystrokeLatencyBaseline do
         IO.puts("METRIC keystroke_#{scenario}_#{field}=#{Map.fetch!(stats, field)}")
       end)
 
-      # Editor mailbox depth sampled during the scenario (#2289 AC 4). Only the
-      # agent_stream scenario records these.
+      # Streaming scenarios also record the Editor mailbox depth.
       Enum.each([:queue_p50, :queue_p99, :queue_max], fn field ->
         case Map.fetch(stats, field) do
           {:ok, value} -> IO.puts("METRIC keystroke_#{scenario}_#{field}=#{value}")
@@ -419,6 +614,9 @@ defmodule Minga.Bench.KeystrokeLatencyBaseline do
 
     "{" <> inner <> "}"
   end
+
+  defp json_encode(list) when is_list(list),
+    do: "[" <> Enum.map_join(list, ",", &json_encode/1) <> "]"
 
   defp json_encode(value) when is_binary(value) do
     "\"" <> String.replace(value, "\"", "\\\"") <> "\""
@@ -452,4 +650,7 @@ defmodule Minga.Bench.KeystrokeLatencyBaseline do
   defp stop_if_alive(_), do: :ok
 end
 
-Minga.Bench.KeystrokeLatencyBaseline.run()
+case System.get_env("MINGA_BENCH_TRANSCRIPT_WORK") do
+  "1" -> Minga.Bench.KeystrokeLatencyBaseline.transcript_work()
+  _ -> Minga.Bench.KeystrokeLatencyBaseline.run()
+end

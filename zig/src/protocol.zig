@@ -1464,12 +1464,15 @@ fn guiGitStatusSize(payload: []const u8) usize {
         if (payload.len < offset + 3) return payload.len;
         offset += 3;
         _ = readString16Size(payload, &offset) orelse return payload.len;
+        if (payload.len < offset + 8) return payload.len;
+        offset += 8; // toast identity
     }
 
     _ = readString16Size(payload, &offset) orelse return payload.len;
     _ = readString16Size(payload, &offset) orelse return payload.len;
-    if (payload.len < offset + 2) return payload.len;
-    return offset + 2;
+    // stash_count, terminal cursor and collapse mask, panel and commit target identities.
+    if (payload.len < offset + 23) return payload.len;
+    return offset + 23;
 }
 
 fn guiBottomPanelSize(payload: []const u8) usize {
@@ -2015,7 +2018,7 @@ test "all generated GUI render opcodes are accounted for by TUI semantic noops" 
         &[_]u8{ OP_GUI_SIGNATURE_HELP, 0 },
         &[_]u8{ OP_GUI_FLOAT_POPUP, 0 },
         &[_]u8{ OP_GUI_SPLIT_SEPARATORS, 0, 0, 0, 0 },
-        &[_]u8{ OP_GUI_GIT_STATUS, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+        &([_]u8{OP_GUI_GIT_STATUS} ++ ([_]u8{0} ** 38)),
         &[_]u8{ OP_GUI_AGENT_CONTEXT, 0, 0 },
         &[_]u8{ OP_GUI_HOVER_ACTION, 0, 1, 0 },
         &[_]u8{ OP_GUI_CONFIG_STATE, 0, 0 },
@@ -2687,52 +2690,22 @@ test "commandSize: hidden gui_float_popup is two bytes" {
 
 test "commandSize: gui_git_status packet" {
     const data = [_]u8{
-        OP_GUI_GIT_STATUS, 0,
-        1,                 0,
-        2,                 0,
-        1,                 0,
-        4,                 'm',
-        'a',               'i',
-        'n',               0,
-        1,                 0x11,
-        0x22,              0x33,
-        0x44,              1,
-        6,                 0,
-        8,                 'l',
-        'i',               'b',
-        '/',               'a',
-        '.',               'e',
-        'x',               1,
-        0,                 1,
-        0,                 6,
-        'p',               'u',
-        's',               'h',
-        'e',               'd',
-        0,                 3,
-        'l',               'i',
-        'b',               0,
-        6,                 'c',
-        'o',               'm',
-        'm',               'i',
-        't',               0,
-        2,                 OP_COMMIT_FRAME,
+        OP_GUI_GIT_STATUS, 0, 1, 0, 2, 0, 1, // repository header
+        0,    4,    'm',  'a',  'i', 'n', 0,   1, // branch and entry count
+        0x11, 0x22, 0x33, 0x44, 1,   6,   0,   8,
+        'l',  'i',  'b',  '/',  'a', '.', 'e', 'x',
+        1, 0, 1, 0, 6, 'p', 'u', 's', 'h', 'e', 'd', 0, 0, 0, 1, 0, 0, 0, 42, // toast
+        0, 3, 'l', 'i', 'b', 0, 6, 'c', 'o', 'm', 'm', 'i', 't', // base and subject
+        0, 2, 0, 0, 0, 3, 2, // stash, cursor and collapsed sections
+        0, 0, 0, 2, 0, 0, 0, 42, // panel identity
+        0,               0, 0, 3, 0, 0, 0, 43, // commit target identity
+        OP_COMMIT_FRAME,
     };
     try std.testing.expectEqual(data.len - 1, commandSize(&data));
 }
 
 test "commandSize: minimal gui_git_status packet" {
-    const data = [_]u8{
-        OP_GUI_GIT_STATUS, 0,
-        0,                 0,
-        0,                 0,
-        0,                 0,
-        0,                 0,
-        0,                 0,
-        0,                 0,
-        0,                 0,
-        0,                 0,
-        OP_COMMIT_FRAME,
-    };
+    const data = [_]u8{OP_GUI_GIT_STATUS} ++ ([_]u8{0} ** 38) ++ [_]u8{OP_COMMIT_FRAME};
     try std.testing.expectEqual(data.len - 1, commandSize(&data));
 }
 

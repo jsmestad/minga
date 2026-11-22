@@ -286,6 +286,7 @@ defmodule MingaEditor.Handlers.EventDispatcher do
     end
 
     state
+    |> MingaEditor.Agent.Arrival.retire(pid)
     |> MingaEditor.Agent.QuestionResponse.retire_remote_attachment(pid)
     |> Commands.BufferManagement.handle_agent_session_down(pid, reason)
   end
@@ -407,6 +408,7 @@ defmodule MingaEditor.Handlers.EventDispatcher do
   end
 
   defp subscribe_through_ingest(_ingest, pid) do
+    # minga:allow-blocking — Editor, only when Ingest is down during a session restart
     AgentSession.subscribe(pid, self(), questions?: true)
   end
 

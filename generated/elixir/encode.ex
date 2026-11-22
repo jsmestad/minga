@@ -444,6 +444,7 @@ defmodule Minga.Protocol.Encode do
           (fn value -> validate_uint!(command, [:level | path], value, 255); <<value::8>> end).(encode_git_toast_level(Map.fetch!(model, :level))),
           (fn value -> validate_uint!(command, [:action | path], value, 255); <<value::8>> end).(encode_git_toast_action(Map.fetch!(model, :action))),
           (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:message | path], byte_size(bin), 65535); <<byte_size(bin)::16, bin::binary>> end).(Map.fetch!(model, :message)),
+          (fn value -> validate_uint!(command, [:id | path], value, 18446744073709551615); <<value::64>> end).(Map.fetch!(model, :id)),
         ]
       else
         []
@@ -1248,6 +1249,10 @@ defmodule Minga.Protocol.Encode do
       (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:entry_base_path | path], byte_size(bin), 65535); <<byte_size(bin)::16, bin::binary>> end).(Map.fetch!(model, :entry_base_path)),
       (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:last_commit_message | path], byte_size(bin), 65535); <<byte_size(bin)::16, bin::binary>> end).(Map.fetch!(model, :last_commit_message)),
       (fn value -> validate_uint!(command, [:stash_count | path], value, 65535); <<value::16>> end).(Map.fetch!(model, :stash_count)),
+      (fn value -> validate_uint!(command, [:terminal_cursor | path], value, 4294967295); <<value::32>> end).(Map.fetch!(model, :terminal_cursor)),
+      (fn value -> validate_uint!(command, [:terminal_collapsed | path], value, 255); <<value::8>> end).(Map.fetch!(model, :terminal_collapsed)),
+      (fn value -> validate_uint!(command, [:panel_id | path], value, 18446744073709551615); <<value::64>> end).(Map.fetch!(model, :panel_id)),
+      (fn value -> validate_uint!(command, [:commit_target_id | path], value, 18446744073709551615); <<value::64>> end).(Map.fetch!(model, :commit_target_id)),
     ]
   end
 

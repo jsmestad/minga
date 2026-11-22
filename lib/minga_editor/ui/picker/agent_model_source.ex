@@ -154,6 +154,7 @@ defmodule MingaEditor.UI.Picker.AgentModelSource do
   # Setup rows come from the registry in this fetch worker, after discovery refreshed route availability.
   @spec route_setup_items(map()) :: [Item.t()]
   defp route_setup_items(%{target: %{session: session}} = origin) when node(session) == node() do
+    # minga:allow-blocking — only async_fetch/1 calls this, in the picker fetch worker (async?/0 is true)
     case Session.inference_route_setups(session) do
       {:ok, entries} ->
         Enum.map(entries, fn entry ->
@@ -211,12 +212,14 @@ defmodule MingaEditor.UI.Picker.AgentModelSource do
           {:ok, term(), String.t() | :superseded | nil, :atomics.atomics_ref() | nil}
           | {:error, term()}
   defp fetch_models(session) when node(session) == node() do
+    # minga:allow-blocking — only async_fetch/1 calls this, in the picker fetch worker (async?/0 is true)
     Session.discover_available_models(session)
   catch
     :exit, _reason -> {:error, :session_unavailable}
   end
 
   defp fetch_models(session) do
+    # minga:allow-blocking — only async_fetch/1 calls this, in the picker fetch worker (async?/0 is true)
     with {:ok, models} <- Session.get_available_models(session), do: {:ok, models, nil, nil}
   catch
     :exit, _reason -> {:error, :session_unavailable}

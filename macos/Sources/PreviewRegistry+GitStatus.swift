@@ -9,7 +9,7 @@ extension PreviewRegistry {
     static func gitStatusPreview() -> some View {
         let theme = PreviewFixtures.theme()
         let state = gitStatusState()
-        state.updateDraft("feat(macos): polish preview snapshots")
+        state.updateDraft("feat(macos): polish preview snapshots", for: state.snapshot.panelID)
 
         return GitStatusView(
             state: state,
@@ -33,7 +33,9 @@ extension PreviewRegistry {
             toast: nil,
             entryBasePath: "/Users/dev/code/minga",
             lastCommitMessage: "feat(editor): add preview host target",
-            stashCount: 1
+            stashCount: 1,
+            panelID: 1,
+            commitTargetID: 101
         )
         return state
     }
@@ -53,7 +55,9 @@ extension PreviewRegistry {
             toast: nil,
             entryBasePath: "/Users/dev/code/minga",
             lastCommitMessage: "chore: bump dependency versions",
-            stashCount: 0
+            stashCount: 0,
+            panelID: 1,
+            commitTargetID: 102
         )
 
         return GitStatusView(
@@ -81,9 +85,11 @@ extension PreviewRegistry {
             toast: nil,
             entryBasePath: "/Users/dev/code/minga",
             lastCommitMessage: "feat(agent): restructure session manager",
-            stashCount: 0
+            stashCount: 0,
+            panelID: 1,
+            commitTargetID: 103
         )
-        state.updateDraft("")
+        state.updateDraft("", for: state.snapshot.panelID)
 
         return GitStatusView(
             state: state,
@@ -122,9 +128,11 @@ extension PreviewRegistry {
             toast: nil,
             entryBasePath: "/Users/dev/code/minga",
             lastCommitMessage: "wip: large refactor across multiple subsystems",
-            stashCount: 3
+            stashCount: 3,
+            panelID: 1,
+            commitTargetID: 104
         )
-        state.updateDraft("feat(editor): comprehensive render pipeline overhaul")
+        state.updateDraft("feat(editor): comprehensive render pipeline overhaul", for: state.snapshot.panelID)
 
         return GitStatusView(
             state: state,

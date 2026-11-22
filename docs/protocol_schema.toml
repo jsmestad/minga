@@ -77,8 +77,9 @@ version = "2.0.0"
 # geometry uses a u32 continuation offset for oversized windowed lines.
 # protocol_version 36 adds source-presentation-bound absolute visual scroll targets.
 # protocol_version 38 adds the native agent desktop notification instruction.
-# protocol_version 39 adds renderer_shutdown: the BEAM asks a spawned terminal renderer to restore the terminal and exit, then waits for it before the VM stops.
-protocol_version = 39
+# protocol_version 39 adds renderer_shutdown, which restores the terminal before the VM stops.
+# protocol_version 40 binds Git Status actions to the displayed panel and file actions to the exact row. It also adds terminal Git Status presentation fields.
+protocol_version = 40
 description = "Minga port protocol opcode registry"
 
 # Directions:
@@ -1141,30 +1142,37 @@ name = "execute_command"
 value = 0x16
 
 [[gui_actions]]
+# Payload: panel_id(u64) + path(string16) + section(u8).
 name = "git_stage_file"
 value = 0x18
 
 [[gui_actions]]
+# Payload: panel_id(u64) + path(string16) + section(u8).
 name = "git_unstage_file"
 value = 0x19
 
 [[gui_actions]]
+# Payload: panel_id(u64) + path(string16) + section(u8).
 name = "git_discard_file"
 value = 0x1A
 
 [[gui_actions]]
+# Payload: panel_id(u64).
 name = "git_stage_all"
 value = 0x1B
 
 [[gui_actions]]
+# Payload: panel_id(u64).
 name = "git_unstage_all"
 value = 0x1C
 
 [[gui_actions]]
+# Payload: panel_id(u64) + amend(u8: 0 or 1) + message(string16).
 name = "git_commit"
 value = 0x1D
 
 [[gui_actions]]
+# Payload: panel_id(u64) + path(string16) + section(u8).
 name = "git_open_file"
 value = 0x1E
 
@@ -1236,18 +1244,22 @@ name = "cmd_cut"
 value = 0x37
 
 [[gui_actions]]
+# Payload: panel_id(u64).
 name = "git_push"
 value = 0x38
 
 [[gui_actions]]
+# Payload: panel_id(u64).
 name = "git_pull"
 value = 0x39
 
 [[gui_actions]]
+# Payload: panel_id(u64).
 name = "git_fetch"
 value = 0x3A
 
 [[gui_actions]]
+# Payload: panel_id(u64) + message(string16).
 name = "git_commit_amend"
 value = 0x3B
 legacy = true
@@ -1276,6 +1288,7 @@ name = "fold_toggle_at_line"
 value = 0x41
 
 [[gui_actions]]
+# Payload: panel_id(u64) + path(string16) + section(u8).
 name = "git_open_diff"
 value = 0x42
 
@@ -1953,6 +1966,7 @@ conditional_tail = { guard = "present == 1", fields = [
   { name = "level", type = "enum", enum = "git_toast_level" },
   { name = "action", type = "enum", enum = "git_toast_action" },
   { name = "message", type = "string16" },
+  { name = "id", type = "u64" },
 ] }
 
 # ── Section layouts for sectioned commands ────────────────────────────────
@@ -2659,6 +2673,10 @@ fields = [
   { name = "entry_base_path", type = "string16" },
   { name = "last_commit_message", type = "string16" },
   { name = "stash_count", type = "u16" },
+  { name = "terminal_cursor", type = "u32" },
+  { name = "terminal_collapsed", type = "u8" },
+  { name = "panel_id", type = "u64" }, # 0 means no installed panel
+  { name = "commit_target_id", type = "u64" }, # stable across status refreshes of the same commit target
 ]
 
 [[command_fields]]

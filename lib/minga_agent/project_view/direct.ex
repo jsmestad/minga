@@ -4,16 +4,23 @@ defmodule MingaAgent.ProjectView.Direct do
   @moduledoc """
   Direct project view backend.
 
-  Legacy non-model writes mutate the project root immediately. Conditional mutations use an owned overlay view, including unsaved open-buffer drafts, and publish through its reconciliation path.
+  Legacy non-model writes mutate the project root immediately. Writes replace the directory entry atomically through `Minga.Buffer.Persistence.LocalWriter`, so a hard link to a file outside the project is broken rather than written through. Writes and deletes resolve every symlink in the target first and refuse with `{:error, :outside_project_root}` when it leads outside the project root, through the same rule as publication (`MingaAgent.Changeset.PublicationTarget`). Conditional mutations use an owned overlay view, including unsaved open-buffer drafts, and publish through its reconciliation path.
   """
 
   @behaviour MingaAgent.ProjectView.Backend
 
   alias Minga.Buffer.Document
+  alias Minga.Buffer.Persistence.LocalWriter
+  alias Minga.Buffer.Persistence.SystemFileSystem
   alias Minga.Buffer.Replace
+  alias MingaAgent.Changeset.PublicationTarget
   alias MingaAgent.ProjectView
   alias MingaAgent.ProjectView.Overlay
   alias MingaAgent.ProjectView.Source
+
+  # Direct writes use the plain file API; the publication backend answers the
+  # containment question with the same system calls.
+  @file_system {SystemFileSystem, []}
 
   @type direct_state :: %{
           modified: MapSet.t(String.t()),
@@ -71,11 +78,10 @@ defmodule MingaAgent.ProjectView.Direct do
   @impl true
   @spec write_file(ProjectView.t(), String.t(), binary()) :: :ok | {:error, term()}
   def write_file(%ProjectView{} = view, relative_path, content) do
-    target = target_path(view, relative_path)
-
     with :ok <- ensure_tracking_agent_available(view),
-         :ok <- File.mkdir_p(Path.dirname(target)),
-         :ok <- File.write(target, content),
+         {:ok, target} <-
+           PublicationTarget.write_path(view.project_root, relative_path, @file_system),
+         :ok <- LocalWriter.write(target, content, :replace, SystemFileSystem, []),
          :ok <- track_modified(view, relative_path) do
       :ok
     end
@@ -94,10 +100,10 @@ defmodule MingaAgent.ProjectView.Direct do
   @impl true
   @spec delete_file(ProjectView.t(), String.t()) :: :ok | {:error, term()}
   def delete_file(%ProjectView{} = view, relative_path) do
-    target = target_path(view, relative_path)
-
     with :ok <- ensure_tracking_agent_available(view),
-         :ok <- File.rm(target),
+         {:ok, entry} <-
+           PublicationTarget.remove_path(view.project_root, relative_path, @file_system),
+         :ok <- File.rm(entry),
          :ok <- track_deleted(view, relative_path) do
       :ok
     end
@@ -213,11 +219,6 @@ defmodule MingaAgent.ProjectView.Direct do
       supports_discard: false,
       supports_command_env: true
     }
-  end
-
-  @spec target_path(ProjectView.t(), String.t()) :: String.t()
-  defp target_path(%ProjectView{project_root: project_root}, relative_path) do
-    Path.join(project_root, relative_path)
   end
 
   @spec owned_view(ProjectView.t()) :: {:ok, ProjectView.t()} | {:error, term()}

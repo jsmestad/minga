@@ -11,6 +11,7 @@ defmodule MingaEditor.RenderPipeline.ContentTest do
   alias Minga.Core.WrapMap
   alias Minga.RenderModel.Cursor
   alias MingaEditor.Agent.UIState
+  alias Minga.Test.TranscriptFixture
   alias MingaEditor.Agent.UIState.Panel
   alias MingaEditor.Agent.View.PromptRenderWindow
   alias MingaEditor.Agent.ViewContext
@@ -213,15 +214,8 @@ defmodule MingaEditor.RenderPipeline.ContentTest do
       windows = %{state.workspace.windows | map: %{win_id => window}}
       agent_ui = UIState.new() |> MingaEditor.Agent.PromptBuffer.ensure()
 
-      transcript = %{
-        line_index: [{0, :text}, {0, :code}, {1, :tool}],
-        display_messages: [],
-        display_message_pairs: [],
-        markdown: "",
-        line_offsets: []
-      }
-
-      panel = Panel.cache_transcript_display(agent_ui.panel, transcript, nil)
+      projection = TranscriptFixture.projection([{:assistant, "line one\nline two\nline three"}])
+      panel = Panel.install_transcript(agent_ui.panel, projection, :keep)
       agent_ui = UIState.replace_panel(agent_ui, panel)
       state = %{state | workspace: %{state.workspace | windows: windows, agent_ui: agent_ui}}
       intent = Intent.from_editor_state(state)

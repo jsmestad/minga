@@ -482,7 +482,9 @@ struct CommandDispatcherRoutingTests {
             toast: nil,
             entryBasePath: "/tmp",
             lastCommitMessage: "",
-            stashCount: 0
+            stashCount: 0,
+            panelID: 1,
+            commitTargetID: 101
         ))
 
         #expect(gui.workspaceState.activeWorkspaceId == 7)
@@ -783,9 +785,11 @@ struct CommandDispatcherRoutingTests {
             Wire.GitStatusEntry(pathHash: 12345, section: 1, status: 1, path: "lib/editor.ex")
         ]
         dispatcher.applyForTesting(.guiGitStatus(repoState: 0, syncing: false, ahead: 2, behind: 0,
-                                           branchName: "main", entries: rawEntries, toast: nil, entryBasePath: "", lastCommitMessage: "", stashCount: 4))
+                                           branchName: "main", entries: rawEntries, toast: nil, entryBasePath: "", lastCommitMessage: "", stashCount: 4, panelID: 41, commitTargetID: 101))
 
         #expect(gui.gitStatusState.snapshot.visible == true)
+        #expect(gui.gitStatusState.snapshot.panelID == 41)
+        #expect(gui.gitStatusState.snapshot.commitTargetID == 101)
         #expect(gui.gitStatusState.snapshot.branchName == "main")
         #expect(gui.gitStatusState.snapshot.ahead == 2)
         #expect(gui.gitStatusState.snapshot.stashCount == 4)
@@ -793,32 +797,35 @@ struct CommandDispatcherRoutingTests {
         #expect(gui.gitStatusState.snapshot.changedEntries[0].path == "lib/editor.ex")
     }
 
-    @Test("git status refresh replaces only published facts")
+    @Test("git status refresh rotates the panel but preserves the commit target session")
     @MainActor func guiGitStatusRefreshPreservesLocalSession() throws {
         let (dispatcher, gui) = makeDispatcher()
 
         dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
         dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
         dispatcher.dispatch(.guiGitStatus(repoState: 0, syncing: false, ahead: 0, behind: 0,
-                                          branchName: "main", entries: [], toast: nil, entryBasePath: "/repo", lastCommitMessage: "old subject", stashCount: 0))
+                                          branchName: "main", entries: [], toast: nil, entryBasePath: "/repo", lastCommitMessage: "old subject", stashCount: 0, panelID: 41, commitTargetID: 101))
         dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
 
-        gui.gitStatusState.updateDraft("typed subject\n\nbody")
-        gui.gitStatusState.setAmendMode(true)
+        gui.gitStatusState.updateDraft("typed subject\n\nbody", for: 41)
+        gui.gitStatusState.setAmendMode(true, for: 41)
         gui.gitStatusState.toggleSection(.changed)
 
         dispatcher.dispatch(.beginFrame(frameSeq: 2, baseFrameSeq: 0, generation: 1))
         dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
         dispatcher.dispatch(.guiGitStatus(repoState: 0, syncing: true, ahead: 3, behind: 1,
-                                          branchName: "feature/new", entries: [], toast: nil, entryBasePath: "/repo", lastCommitMessage: "new subject", stashCount: 2))
+                                          branchName: "main", entries: [], toast: nil, entryBasePath: "/repo", lastCommitMessage: "new subject", stashCount: 2, panelID: 42, commitTargetID: 101))
         dispatcher.dispatch(.commitFrame(frameSeq: 2, seq: 0))
 
-        #expect(gui.gitStatusState.snapshot.branchName == "feature/new")
+        #expect(gui.gitStatusState.snapshot.branchName == "main")
+        #expect(gui.gitStatusState.snapshot.panelID == 42)
+        #expect(gui.gitStatusState.snapshot.commitTargetID == 101)
         #expect(gui.gitStatusState.snapshot.lastCommitMessage == "new subject")
         #expect(gui.gitStatusState.snapshot.ahead == 3)
         #expect(gui.gitStatusState.session.draft == "typed subject\n\nbody")
         #expect(gui.gitStatusState.session.amendMode == true)
         #expect(gui.gitStatusState.session.collapsedSections == [.changed])
+        #expect(gui.gitStatusState.canSubmit)
     }
 
     @Test("rejected frame preserves last-good git snapshot and local session")
@@ -828,23 +835,25 @@ struct CommandDispatcherRoutingTests {
         dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
         dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
         dispatcher.dispatch(.guiGitStatus(repoState: 0, syncing: false, ahead: 0, behind: 0,
-                                          branchName: "last-good", entries: [], toast: nil, entryBasePath: "/repo", lastCommitMessage: "last good subject", stashCount: 0))
+                                          branchName: "last-good", entries: [], toast: nil, entryBasePath: "/repo", lastCommitMessage: "last good subject", stashCount: 0, panelID: 41, commitTargetID: 101))
         dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
-        gui.gitStatusState.updateDraft("local draft")
+        gui.gitStatusState.updateDraft("local draft", for: 41)
         gui.gitStatusState.toggleSection(.staged)
 
         dispatcher.dispatch(.beginFrame(frameSeq: 2, baseFrameSeq: 0, generation: 1))
         dispatcher.dispatch(.guiGitStatus(repoState: 0, syncing: true, ahead: 9, behind: 0,
-                                          branchName: "rejected", entries: [], toast: nil, entryBasePath: "/other", lastCommitMessage: "rejected subject", stashCount: 4))
+                                          branchName: "rejected", entries: [], toast: nil, entryBasePath: "/other", lastCommitMessage: "rejected subject", stashCount: 4, panelID: 42, commitTargetID: 102))
         dispatcher.dispatch(.commitFrame(frameSeq: 2, seq: 0))
 
         #expect(gui.gitStatusState.snapshot.branchName == "last-good")
+        #expect(gui.gitStatusState.snapshot.panelID == 41)
+        #expect(gui.gitStatusState.snapshot.commitTargetID == 101)
         #expect(gui.gitStatusState.snapshot.lastCommitMessage == "last good subject")
         #expect(gui.gitStatusState.session.draft == "local draft")
         #expect(gui.gitStatusState.session.collapsedSections == [.staged])
     }
 
-    @Test("guiGitStatus hides when notARepo with empty entries (panel closed signal)")
+    @Test("guiGitStatus hides when no panel token is installed")
     @MainActor func guiGitStatusHidesOnClearSignal() throws {
         let (dispatcher, gui) = makeDispatcher()
         // First show it with real data
@@ -852,13 +861,15 @@ struct CommandDispatcherRoutingTests {
             Wire.GitStatusEntry(pathHash: 12345, section: 1, status: 1, path: "lib/editor.ex")
         ]
         dispatcher.applyForTesting(.guiGitStatus(repoState: 0, syncing: false, ahead: 0, behind: 0,
-                                           branchName: "main", entries: rawEntries, toast: nil, entryBasePath: "", lastCommitMessage: "", stashCount: 0))
+                                           branchName: "main", entries: rawEntries, toast: nil, entryBasePath: "", lastCommitMessage: "", stashCount: 0, panelID: 41, commitTargetID: 101))
         #expect(gui.gitStatusState.snapshot.visible == true)
 
-        // Then send the "panel closed" sentinel: notARepo (1) + empty entries. Syncing and toast still update because remote operations can finish while the panel is hidden.
+        // Syncing and toast can update even after the installed panel closes.
         dispatcher.applyForTesting(.guiGitStatus(repoState: 1, syncing: true, ahead: 0, behind: 0,
-                                           branchName: "", entries: [], toast: (message: "Push failed", level: 1, action: 1), entryBasePath: "", lastCommitMessage: "", stashCount: 0))
+                                           branchName: "", entries: [], toast: (message: "Push failed", level: 1, action: 1), entryBasePath: "", lastCommitMessage: "", stashCount: 0, panelID: 0, commitTargetID: 0))
         #expect(gui.gitStatusState.snapshot.visible == false)
+        #expect(gui.gitStatusState.snapshot.panelID == 0)
+        #expect(gui.gitStatusState.snapshot.commitTargetID == 0)
         #expect(gui.gitStatusState.snapshot.syncing == true)
         #expect(gui.gitStatusState.snapshot.toastMessage == "Push failed")
         #expect(gui.gitStatusState.snapshot.toastAction == .pullAndRetry)
@@ -872,7 +883,7 @@ struct CommandDispatcherRoutingTests {
             Wire.GitStatusEntry(pathHash: 12346, section: 1, status: 99, path: "lib/invalid-status.ex")
         ]
         dispatcher.applyForTesting(.guiGitStatus(repoState: 0, syncing: false, ahead: 0, behind: 0,
-                                           branchName: "main", entries: rawEntries, toast: nil, entryBasePath: "", lastCommitMessage: "", stashCount: 0))
+                                           branchName: "main", entries: rawEntries, toast: nil, entryBasePath: "", lastCommitMessage: "", stashCount: 0, panelID: 41, commitTargetID: 101))
 
         #expect(gui.gitStatusState.snapshot.changedEntries.count == 2)
         #expect(gui.gitStatusState.snapshot.changedEntries[0].status == .unknown)
@@ -886,30 +897,28 @@ struct CommandDispatcherRoutingTests {
             Wire.GitStatusEntry(pathHash: 12345, section: 99, status: 1, path: "lib/bad-section.ex")
         ]
         dispatcher.applyForTesting(.guiGitStatus(repoState: 0, syncing: false, ahead: 0, behind: 0,
-                                           branchName: "main", entries: rawEntries, toast: nil, entryBasePath: "", lastCommitMessage: "", stashCount: 0))
+                                           branchName: "main", entries: rawEntries, toast: nil, entryBasePath: "", lastCommitMessage: "", stashCount: 0, panelID: 41, commitTargetID: 101))
 
         #expect(gui.gitStatusState.totalCount == 0)
     }
 
-    @Test("guiGitStatus shows not-a-repo panel when BEAM sends a project root")
+    @Test("guiGitStatus shows an installed not-a-repo panel without a project root")
     @MainActor func guiGitStatusShowsNotARepoPanel() throws {
         let (dispatcher, gui) = makeDispatcher()
 
         dispatcher.applyForTesting(.guiGitStatus(repoState: 1, syncing: false, ahead: 0, behind: 0,
-                                           branchName: "", entries: [], toast: nil, entryBasePath: "/project", lastCommitMessage: "", stashCount: 0))
+                                           branchName: "", entries: [], toast: nil, entryBasePath: "", lastCommitMessage: "", stashCount: 0, panelID: 41, commitTargetID: 101))
 
         #expect(gui.gitStatusState.snapshot.visible == true)
         #expect(gui.gitStatusState.snapshot.repoState == .notARepo)
-        #expect(gui.gitStatusState.snapshot.entryBasePath == "/project")
+        #expect(gui.gitStatusState.snapshot.panelID == 41)
     }
 
     @Test("guiGitStatus shows panel for normal repo with clean working tree")
     @MainActor func guiGitStatusShowsCleanRepo() throws {
         let (dispatcher, gui) = makeDispatcher()
-        // Normal repo (0) with zero entries is a clean working tree, NOT
-        // a hide signal. Only notARepo + empty triggers hide.
         dispatcher.applyForTesting(.guiGitStatus(repoState: 0, syncing: false, ahead: 0, behind: 0,
-                                           branchName: "main", entries: [], toast: nil, entryBasePath: "", lastCommitMessage: "", stashCount: 0))
+                                           branchName: "main", entries: [], toast: nil, entryBasePath: "", lastCommitMessage: "", stashCount: 0, panelID: 41, commitTargetID: 101))
         #expect(gui.gitStatusState.snapshot.visible == true)
         #expect(gui.gitStatusState.snapshot.branchName == "main")
     }
@@ -918,14 +927,14 @@ struct CommandDispatcherRoutingTests {
     @MainActor func guiGitStatusToastFallback() throws {
         let (dispatcher, gui) = makeDispatcher()
         dispatcher.applyForTesting(.guiGitStatus(repoState: 0, syncing: false, ahead: 0, behind: 0,
-                                           branchName: "main", entries: [], toast: (message: "Remote failed", level: 99, action: 99), entryBasePath: "", lastCommitMessage: "", stashCount: 0))
+                                           branchName: "main", entries: [], toast: (message: "Remote failed", level: 99, action: 99), entryBasePath: "", lastCommitMessage: "", stashCount: 0, panelID: 41, commitTargetID: 101))
 
         #expect(gui.gitStatusState.snapshot.toastMessage == "Remote failed")
         #expect(gui.gitStatusState.snapshot.toastLevel == .error)
         #expect(gui.gitStatusState.snapshot.toastAction == .none)
 
         dispatcher.applyForTesting(.guiGitStatus(repoState: 0, syncing: false, ahead: 0, behind: 0,
-                                           branchName: "main", entries: [], toast: nil, entryBasePath: "", lastCommitMessage: "", stashCount: 0))
+                                           branchName: "main", entries: [], toast: nil, entryBasePath: "", lastCommitMessage: "", stashCount: 0, panelID: 42, commitTargetID: 101))
 
         #expect(gui.gitStatusState.snapshot.toastMessage == nil)
         #expect(gui.gitStatusState.snapshot.toastLevel == .success)

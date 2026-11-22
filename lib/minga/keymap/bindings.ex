@@ -525,7 +525,7 @@ defmodule Minga.Keymap.Bindings do
   description string (for a terminal binding) or the command atom (for a
   prefix or unnamed node).
 
-  A group label with no command bound anywhere beneath it is omitted. Group labels are declared ahead of the bindings that fill them, for example `SPC g c` "+commit" before git porcelain is enabled, and an empty group leads nowhere.
+  A group label with no command bound beneath it is omitted. For example, `SPC g c` does not appear until an extension contributes a commit binding to the group.
 
   ## Examples
 

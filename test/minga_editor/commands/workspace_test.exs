@@ -1013,6 +1013,28 @@ defmodule MingaEditor.Commands.WorkspaceTest do
                "Some agent edits conflict with newer changes on disk; they stay staged for review"
     end
 
+    test "a publish that would leave the project through a symlink names the refused path", %{
+      tmp_dir: dir
+    } do
+      outside = dir <> "-outside"
+      File.mkdir_p!(outside)
+      on_exit(fn -> File.rm_rf!(outside) end)
+      File.write!(Path.join(outside, "secret.md"), "outside\n")
+      File.ln_s!(outside, Path.join(dir, "vendor"))
+      %{state: state, view: view} = staged_edit_state(dir)
+      :ok = ProjectView.write_file(view, "vendor/secret.md", "agent\n")
+
+      result = Workspace.agent_edits_publish(state)
+
+      assert File.read!(Path.join(outside, "secret.md")) == "outside\n"
+      review = TabBar.get_workspace(result.shell_runtime.state.tab_bar, 1).review
+      assert review.state == :conflict
+      assert Enum.map(review.conflict_files, & &1.relative_path) == ["vendor/secret.md"]
+
+      assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(result) ==
+               "Refused to publish agent edits to vendor/secret.md: a symlink on the path leads outside the project root or changed during publishing. Those edits, and any conflicting ones, stay staged for review"
+    end
+
     test "reports when nothing is staged", %{tmp_dir: dir} do
       {:ok, view} = ProjectView.overlay(dir)
 

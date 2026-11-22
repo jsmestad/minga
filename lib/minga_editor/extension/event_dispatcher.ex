@@ -14,6 +14,7 @@ defmodule MingaEditor.Extension.EventDispatcher do
   alias Minga.Extension.CodeLease
   alias MingaEditor.Extension.EventDispatchResult
   alias MingaEditor.Extension.EventHandler
+  alias MingaEditor.Extension.RepositoryJob
   alias MingaEditor.State, as: EditorState
 
   @doc "Dispatches an ordinary recognized event with its family policy."
@@ -230,8 +231,18 @@ defmodule MingaEditor.Extension.EventDispatcher do
            event_kind(event),
            admission
          ) do
-      {:ok, result} -> validate_result(source, callback, state, result)
-      {:error, failure} -> EventDispatchResult.callback_failed(state, [failure])
+      {:ok, {:schedule, %EditorState{} = updated, proposal} = result}
+      when elem(event, 0) == :editor_action ->
+        case RepositoryJob.cast(proposal) do
+          {:ok, job} -> EventDispatchResult.schedule(updated, source, job)
+          :error -> validate_result(source, callback, state, result)
+        end
+
+      {:ok, result} ->
+        validate_result(source, callback, state, result)
+
+      {:error, failure} ->
+        EventDispatchResult.callback_failed(state, [failure])
     end
   end
 

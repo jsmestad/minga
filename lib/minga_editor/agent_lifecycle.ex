@@ -14,7 +14,6 @@ defmodule MingaEditor.AgentLifecycle do
   alias MingaEditor.Agent.ConnectionAction
   alias MingaEditor.Agent.EditTimeline
   alias MingaEditor.Agent.MarkdownHighlight
-  alias MingaEditor.Agent.ProvenanceJump
   alias MingaEditor.Agent.Transcript
   alias MingaEditor.Agent.UIState.Panel
   alias MingaEditor.Agent.UIState.TranscriptProjection
@@ -22,7 +21,8 @@ defmodule MingaEditor.AgentLifecycle do
   alias MingaAgent.Session, as: AgentSession
   alias MingaAgent.Session.ConnectionSnapshot
   alias MingaAgent.Session.ConnectionTarget
-  alias MingaAgent.Session.Transcript.{Changes, Cursor, Snapshot}
+  alias MingaAgent.Session.Transcript.{Changes, Cursor, Entry, Snapshot}
+  alias MingaAgent.TranscriptEntry
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.View.Preview
   alias Minga.Buffer
@@ -142,6 +142,7 @@ defmodule MingaEditor.AgentLifecycle do
 
   @spec safe_editor_snapshot(pid()) :: map() | nil
   defp safe_editor_snapshot(session_pid) do
+    # minga:allow-blocking — Editor, on Agent tab switch, open and draft reopen; the switch read kept by #3643
     AgentSession.editor_snapshot(session_pid)
   catch
     :exit, _ -> nil
@@ -214,36 +215,42 @@ defmodule MingaEditor.AgentLifecycle do
   @doc "Refreshes the transcript for a render or a committed message change."
   @spec sync_transcript(state(), :refresh | :messages_changed) :: state()
   def sync_transcript(state, trigger) do
-    session = MingaEditor.Shell.Runtime.active_session(state.shell_runtime)
+    case Runtime.active_session(state.shell_runtime) do
+      nil ->
+        state
 
-    sync_session_transcript(state, session, trigger)
+      session ->
+        if MingaEditor.Agent.Arrival.pending?(state, session),
+          do: state,
+          else: sync_session_transcript(state, session, trigger)
+    end
   end
 
-  @spec sync_session_transcript(state(), pid() | nil, :refresh | :messages_changed) :: state()
+  @spec sync_session_transcript(state(), pid(), :refresh | :messages_changed) :: state()
   defp sync_session_transcript(state, session, _trigger)
        when is_pid(session) and node(session) == node() do
     projection = state.workspace.agent_ui.panel.transcript
 
+    # minga:allow-blocking — Editor, incremental sync per stream batch and tab switch (#3611, #3613)
     case AgentSession.transcript_since(session, projection.source_cursor || :snapshot) do
       {:unchanged, cursor} ->
-        reuse_transcript(state, projection, cursor)
+        reuse_transcript(state, cursor)
 
-      {:changes, %Changes{entries: [], pins_changed?: false, cursor: cursor}} ->
-        reuse_transcript(state, projection, cursor)
+      {:changes, %Changes{entries: [], pin_changes: [], cursor: cursor}} ->
+        reuse_transcript(state, cursor)
 
-      {:changes, %Changes{entries: entries}} ->
-        {:snapshot, snapshot} = AgentSession.transcript_since(session, :snapshot)
-        install_transcript_snapshot(state, snapshot, :changed, length(entries))
+      {:changes, %Changes{} = changes} ->
+        install_transcript_changes(state, changes, 1)
 
       {:snapshot, snapshot} ->
         state
         |> recover_changed_files(session)
-        |> install_transcript_snapshot(snapshot, :changed, 0)
+        |> install_transcript_snapshot(snapshot, :changed)
 
       {:reset, _reason, snapshot} ->
         state
         |> recover_changed_files(session)
-        |> install_transcript_snapshot(snapshot, :reset, 0)
+        |> install_transcript_snapshot(snapshot, :reset)
 
       {:error, :invalid_cursor} ->
         Minga.Log.warning(
@@ -251,8 +258,9 @@ defmodule MingaEditor.AgentLifecycle do
           "Agent transcript cursor was invalid; reading an atomic snapshot."
         )
 
+        # minga:allow-blocking — Editor, atomic snapshot fallback inside the incremental sync after an invalid cursor
         {:snapshot, snapshot} = AgentSession.transcript_since(session, :snapshot)
-        install_transcript_snapshot(state, snapshot, :reset, 0)
+        install_transcript_snapshot(state, snapshot, :reset, 2)
     end
   catch
     :exit, _ -> state
@@ -262,274 +270,273 @@ defmodule MingaEditor.AgentLifecycle do
     case {safe_session_messages(session), trigger} do
       {{:ok, messages}, :messages_changed} ->
         state
-        |> cache_transcript(messages)
-        |> apply_transcript_names(messages)
+        |> refresh_remote_messages(messages, session)
+        |> update_transcript_names()
 
       {{:ok, messages}, :refresh} ->
-        cache_transcript(state, messages)
+        refresh_remote_messages(state, messages, session)
 
       {:dead_session, _trigger} ->
         state
     end
   end
 
-  defp sync_session_transcript(state, nil, _trigger), do: state
+  @doc "Installs an ordered Session arrival without querying that Session again."
+  @spec apply_editor_arrival(state(), pid(), AgentSession.editor_arrival()) :: state()
+  def apply_editor_arrival(state, session, {snapshot, transcript}) do
+    state
+    |> apply_session_snapshot(session, snapshot)
+    |> apply_arrival_transcript(transcript)
+  end
+
+  @spec apply_arrival_transcript(state(), AgentSession.editor_arrival_transcript()) :: state()
+  defp apply_arrival_transcript(state, {:unchanged, cursor}) do
+    reuse_transcript(state, cursor, 2)
+  end
+
+  defp apply_arrival_transcript(state, {:changes, changes}) do
+    install_transcript_changes(state, changes, 2)
+  end
+
+  defp apply_arrival_transcript(state, {:replace, outcome, snapshot, files}) do
+    state
+    |> apply_changed_file_counts(files)
+    |> install_transcript_snapshot(snapshot, outcome, 2)
+  end
 
   @spec recover_changed_files(state(), pid()) :: state()
   defp recover_changed_files(state, session) do
     with {:ok, _tab, %{target: %ConnectionTarget{session: ^session} = target}} <-
            ConnectionAction.origin(state),
+         # minga:allow-blocking — Editor, only after a transcript snapshot or reset; recovers changed-file counts once
          {:ok, files} <- AgentSession.changed_file_counts(target) do
-      ui = state.workspace.agent_ui
-      timeline = EditTimeline.recover_files(ui.view.edit_timeline, files)
-      ui = UIState.replace_edit_timeline(ui, timeline)
-      MingaEditor.Shell.Traditional.Workflow.install_agent_ui(state, ui)
+      apply_changed_file_counts(state, files)
     else
       _unavailable -> state
     end
   end
 
-  @spec install_transcript_snapshot(state(), Snapshot.t(), :changed | :reset, non_neg_integer()) ::
+  @spec apply_changed_file_counts(state(), %{String.t() => pos_integer()} | nil) :: state()
+  defp apply_changed_file_counts(state, nil), do: state
+
+  defp apply_changed_file_counts(state, files) do
+    ui = state.workspace.agent_ui
+    timeline = EditTimeline.recover_files(ui.view.edit_timeline, files)
+    ui = UIState.replace_edit_timeline(ui, timeline)
+    MingaEditor.Shell.Traditional.Workflow.install_agent_ui(state, ui)
+  end
+
+  @spec install_transcript_snapshot(state(), Snapshot.t(), :changed | :reset, pos_integer()) ::
           state()
-  defp install_transcript_snapshot(state, snapshot, outcome, previously_read) do
-    {messages, pairs} =
-      Enum.map_reduce(snapshot.entries, [], fn %{id: id, message: message}, pairs ->
-        {message, [{id, message} | pairs]}
-      end)
+  defp install_transcript_snapshot(state, snapshot, outcome, session_calls \\ 1) do
+    projection = state.workspace.agent_ui.panel.transcript
 
-    opts =
-      [message_ids: Enum.reverse(pairs), source_cursor: snapshot.cursor]
-      |> maybe_put_pinned_ids(snapshot.pinned_ids)
+    projection =
+      if outcome == :reset,
+        do: TranscriptProjection.set_display_start(projection, 0),
+        else: projection
 
-    {empty_state, first_run} =
-      if Transcript.first_run_transcript?(messages) do
-        empty_state = empty_state_for_panel(state.workspace.agent_ui.panel, nil)
-        {empty_state, {messages, Keyword.delete(opts, :source_cursor), empty_state}}
-      else
-        {nil, nil}
-      end
-
-    synced =
-      cache_display_transcript(
-        state,
-        messages,
-        empty_state,
-        Keyword.put(opts, :first_run, first_run)
+    next =
+      TranscriptProjection.replace(
+        projection,
+        snapshot.entries,
+        snapshot.pinned_ids,
+        snapshot.cursor,
+        presentation_context(state)
       )
 
-    synced
-    |> apply_transcript_names(messages)
-    |> report_transcript_sync(outcome, previously_read + snapshot.count)
+    state
+    |> install_projection(next, :keep)
+    |> update_transcript_names()
+    |> report_transcript_sync(outcome, snapshot.count, session_calls)
   end
 
-  @spec reuse_transcript(state(), TranscriptProjection.t(), Cursor.t()) :: state()
-  defp reuse_transcript(state, projection, cursor) do
-    case refresh_first_run(state, projection.first_run, cursor) do
-      {:rebuilt, synced} ->
-        report_transcript_sync(synced, :unchanged, 0)
-
-      :unchanged ->
-        state
-        |> maybe_restyle_retained_transcript(projection)
-        |> advance_transcript_cursor(cursor)
-        |> report_transcript_sync(:unchanged, 0)
-    end
-  end
-
-  @spec refresh_first_run(state(), TranscriptProjection.first_run() | nil, Cursor.t()) ::
-          :unchanged | {:rebuilt, state()}
-  defp refresh_first_run(_state, nil, _cursor), do: :unchanged
-
-  defp refresh_first_run(state, {messages, opts, previous}, cursor) do
-    case empty_state_for_panel(state.workspace.agent_ui.panel, nil) do
-      ^previous ->
-        :unchanged
-
-      empty_state ->
-        opts = [source_cursor: cursor, first_run: {messages, opts, empty_state}] ++ opts
-        {:rebuilt, cache_display_transcript(state, messages, empty_state, opts)}
-    end
-  end
-
-  @spec maybe_restyle_retained_transcript(state(), TranscriptProjection.t()) :: state()
-  defp maybe_restyle_retained_transcript(state, %TranscriptProjection{messages: []}), do: state
-
-  defp maybe_restyle_retained_transcript(state, projection) do
-    fingerprint = TranscriptProjection.styled_cache_fingerprint(state.appearance.theme.syntax)
-
-    case TranscriptProjection.styled_for(projection, fingerprint) do
-      :stale ->
-        ids = Enum.map(projection.message_pairs, fn {id, _message} -> id end)
-        styled = compute_styled_messages(state, projection.messages, ids, [], [])
-        panel = Panel.cache_styled_messages(state.workspace.agent_ui.panel, styled, fingerprint)
-        MingaEditor.Shell.Traditional.Workflow.install_agent_panel(state, panel)
-
-      {:ok, _styled} ->
-        state
-    end
-  end
-
-  @spec advance_transcript_cursor(state(), Cursor.t()) :: state()
-  defp advance_transcript_cursor(
-         %{workspace: %{agent_ui: %{panel: %{transcript: %{source_cursor: cursor}}}}} = state,
-         cursor
-       ),
-       do: state
-
-  defp advance_transcript_cursor(state, cursor) do
+  @spec install_transcript_changes(state(), Changes.t(), pos_integer()) :: state()
+  defp install_transcript_changes(state, changes, calls) do
     panel = state.workspace.agent_ui.panel
 
-    MingaEditor.Shell.Traditional.Workflow.install_agent_panel(
-      state,
-      Panel.advance_transcript_cursor(panel, cursor)
+    reading =
+      case panel.scroll do
+        %{pinned: true} -> :follow
+        %{offset: offset} -> offset
+      end
+
+    {projection, reading} =
+      TranscriptProjection.apply_changes(
+        panel.transcript,
+        changes,
+        reading,
+        presentation_context(state)
+      )
+
+    state
+    |> install_projection(projection, reading)
+    |> update_transcript_names()
+    |> report_transcript_sync(
+      :changed,
+      length(changes.entries),
+      calls,
+      length(changes.pin_changes)
     )
   end
 
-  @spec report_transcript_sync(state(), :unchanged | :changed | :reset, non_neg_integer()) ::
+  @spec reuse_transcript(state(), Cursor.t(), pos_integer()) :: state()
+  defp reuse_transcript(state, cursor, calls \\ 1) do
+    projection =
+      state.workspace.agent_ui.panel.transcript
+      |> TranscriptProjection.prepare(presentation_context(state))
+      |> TranscriptProjection.advance_source_cursor(cursor)
+
+    state
+    |> install_projection(projection, :keep)
+    |> report_transcript_sync(:unchanged, 0, calls)
+  end
+
+  @spec install_projection(state(), TranscriptProjection.t(), :keep | :follow | non_neg_integer()) ::
           state()
-  defp report_transcript_sync(state, outcome, entries_read) do
-    Minga.Telemetry.execute([:minga, :agent, :transcript_sync], %{entries_read: entries_read}, %{
-      outcome: outcome
-    })
+  defp install_projection(
+         %{workspace: %{agent_ui: %{panel: %Panel{transcript: projection}}}} = state,
+         projection,
+         :keep
+       ),
+       do: state
+
+  defp install_projection(state, next, reading) do
+    panel = state.workspace.agent_ui.panel
+    reading = newly_landed_reading(panel.transcript, next, reading)
+    panel = Panel.install_transcript(panel, next, reading)
+    MingaEditor.Shell.Traditional.Workflow.install_agent_panel(state, panel)
+  end
+
+  defp newly_landed_reading(
+         %{provenance_jump: %{landed?: false}},
+         %{provenance_jump: %{landed?: true, target: {:message_id, id}}} = next,
+         reading
+       ),
+       do: TranscriptProjection.start_line(next, id) || reading
+
+  defp newly_landed_reading(_previous, _next, reading), do: reading
+
+  @spec presentation_context(state()) :: TranscriptProjection.presentation_context()
+  defp presentation_context(state) do
+    {empty_state_for_panel(state.workspace.agent_ui.panel), state.appearance.theme.syntax,
+     &style_message/3}
+  end
+
+  @doc "Records a switch whose Session could not provide a transcript."
+  @spec report_unavailable_arrival(state(), 1 | 2) :: state()
+  def report_unavailable_arrival(state, calls),
+    do: report_transcript_sync(state, :unavailable, 0, calls)
+
+  @spec report_transcript_sync(
+          state(),
+          :unchanged | :changed | :reset | :unavailable,
+          non_neg_integer(),
+          pos_integer(),
+          non_neg_integer()
+        ) :: state()
+  defp report_transcript_sync(state, outcome, entries_read, session_calls, pin_facts \\ 0) do
+    measurements = %{
+      entries_read: entries_read,
+      pin_facts: pin_facts,
+      session_calls: session_calls
+    }
+
+    Minga.Telemetry.execute([:minga, :agent, :transcript_sync], measurements, %{outcome: outcome})
 
     state
   end
 
-  @doc "Caches semantic transcript metadata for an explicit message list."
+  @doc "Installs an explicitly supplied remote transcript without using the local cursor contract."
   @spec cache_messages(state(), [term()]) :: state()
-  def cache_messages(state, []), do: clear_transcript_cache(state)
-
-  def cache_messages(state, messages) when is_list(messages) do
-    cache_transcript(state, messages)
+  def cache_messages(state, messages) do
+    session = Runtime.active_session(state.shell_runtime)
+    replace_remote_messages(state, messages, session)
   end
+
+  defp replace_remote_messages(state, [], nil) do
+    projection = TranscriptProjection.clear(state.workspace.agent_ui.panel.transcript)
+    install_projection(state, projection, :keep)
+  end
+
+  defp replace_remote_messages(state, messages, session) do
+    panel = state.workspace.agent_ui.panel
+    {entries, pins} = remote_entries(messages, session)
+
+    projection =
+      TranscriptProjection.replace(
+        panel.transcript,
+        entries,
+        pins,
+        nil,
+        presentation_context(state)
+      )
+
+    install_projection(state, projection, :keep)
+  catch
+    :exit, _ -> state
+  end
+
+  defp refresh_remote_messages(state, messages, session) do
+    {entries, pins} = remote_entries(messages, session)
+
+    projection =
+      TranscriptProjection.refresh_remote(
+        state.workspace.agent_ui.panel.transcript,
+        entries,
+        pins,
+        presentation_context(state)
+      )
+
+    install_projection(state, projection, :keep)
+  catch
+    :exit, _ -> state
+  end
+
+  defp remote_entries([], _session), do: {[], MapSet.new()}
+
+  defp remote_entries(messages, session) do
+    {pairs, pins} = remote_transcript_pairs(messages, session)
+
+    entries =
+      Enum.with_index(pairs, fn {id, message}, ordinal ->
+        Entry.new(TranscriptEntry.new(id, message), ordinal, 0)
+      end)
+
+    {entries, pins}
+  end
+
+  defp remote_transcript_pairs(messages, session)
+       when is_pid(session) and node(session) != node() do
+    # minga:allow-blocking — Editor, remote sessions only; no transcript cursor over distribution
+    case AgentSession.messages_with_ids(session) do
+      [] ->
+        numbered_messages(messages)
+
+      pairs ->
+        # minga:allow-blocking — Editor, remote sessions only; pins for the pairs read above
+        {pairs, AgentSession.pinned_ids(session)}
+    end
+  end
+
+  defp remote_transcript_pairs(messages, _session), do: numbered_messages(messages)
+
+  defp numbered_messages(messages),
+    do: {Enum.with_index(messages, fn message, index -> {index + 1, message} end), MapSet.new()}
 
   @spec safe_session_messages(pid()) :: {:ok, [term()]} | :dead_session
   defp safe_session_messages(session) do
+    # minga:allow-blocking — Editor, remote sessions only; no transcript cursor over distribution
     {:ok, AgentSession.messages(session)}
   catch
     :exit, _ -> :dead_session
   end
 
-  @spec cache_transcript(state(), [term()]) :: state()
-  defp cache_transcript(state, []) do
-    cache_empty_transcript(state, first_run_empty_state(state, []))
-  end
+  @spec empty_state_for_panel(Panel.t()) :: Transcript.empty_state()
+  defp empty_state_for_panel(%Panel{credential_readiness: :checking}), do: :checking
 
-  defp cache_transcript(state, messages) do
-    cache_display_transcript(state, messages, first_run_empty_state(state, messages))
-  end
-
-  @spec cache_display_transcript(state(), [term()], Transcript.empty_state(), keyword() | nil) ::
-          state()
-  defp cache_display_transcript(state, messages, empty_state, opts \\ nil) do
-    panel = state.workspace.agent_ui.panel
-    projection = panel.transcript
-    jump = projection.provenance_jump
-
-    sync_opts =
-      opts ||
-        add_session_display_opts(
-          [],
-          MingaEditor.Shell.Runtime.active_session(state.shell_runtime)
-        )
-
-    sync_opts = maybe_put_empty_state(sync_opts, empty_state)
-
-    # A pending provenance jump may reveal an older, paged-out turn so it can be landed on.
-    # Otherwise keep the current display window.
-    display_start = jump_display_start(jump, projection.display_start, sync_opts[:message_ids])
-
-    sync_opts =
-      if display_start > 0,
-        do: Keyword.put(sync_opts, :display_start_index, display_start),
-        else: sync_opts
-
-    result = Transcript.display(messages, sync_opts)
-
-    # Compute styled runs for GUI rendering against the displayed transcript.
-    # Reuse unchanged entries only when the style context still matches the cached fingerprint.
-    styled_fingerprint =
-      TranscriptProjection.styled_cache_fingerprint(state.appearance.theme.syntax)
-
-    {previous_messages, previous_styled} =
-      case TranscriptProjection.styled_for(projection, styled_fingerprint) do
-        :stale -> {[], []}
-        {:ok, styled} -> {projection.messages, styled || []}
-      end
-
-    message_ids = Enum.map(result.display_message_pairs, fn {id, _message} -> id end)
-
-    styled =
-      compute_styled_messages(
-        state,
-        result.display_messages,
-        message_ids,
-        previous_messages,
-        previous_styled
-      )
-
-    styled_assistant_count =
-      Enum.count(styled, fn
-        nil -> false
-        _ -> true
-      end)
-
-    Minga.Log.debug(
-      :agent,
-      "[sync] styled cache: #{Enum.count(styled)} entries, #{styled_assistant_count} with content (#{Enum.count(messages)} messages)"
-    )
-
-    # Cache the line index and styled messages in the UI state so
-    # callers can read them without recomputing. Persist the (possibly lowered)
-    # display window and mark the jump landed so later re-syncs hold position
-    # instead of re-pinning to the bottom.
-    MingaEditor.Shell.Traditional.Workflow.install_agent_panel(
-      state,
-      (fn p ->
-         Panel.cache_transcript_display(p, result, styled,
-           display_start: display_start,
-           provenance_jump: advance_jump(jump),
-           styled_fingerprint: styled_fingerprint,
-           source_cursor: sync_opts[:source_cursor],
-           first_run: sync_opts[:first_run],
-           turn_count: MingaAgent.SessionMetadata.turn_count(messages)
-         )
-       end).(state.workspace.agent_ui.panel)
-    )
-  end
-
-  @spec cache_empty_transcript(state(), Transcript.empty_state()) :: state()
-  defp cache_empty_transcript(state, nil), do: clear_transcript_cache(state)
-
-  defp cache_empty_transcript(state, empty_state) do
-    cache_display_transcript(state, [], empty_state)
-  end
-
-  @spec clear_transcript_cache(state()) :: state()
-  defp clear_transcript_cache(state) do
-    MingaEditor.Shell.Traditional.Workflow.install_agent_panel(
-      state,
-      (&Panel.clear_transcript_cache/1).(state.workspace.agent_ui.panel)
-    )
-  end
-
-  @spec first_run_empty_state(state(), [term()]) :: Transcript.empty_state()
-  defp first_run_empty_state(state, messages) do
-    if Transcript.first_run_transcript?(messages) do
-      panel = state.workspace.agent_ui.panel
-      empty_state_for_panel(panel, MingaEditor.Shell.Runtime.active_session(state.shell_runtime))
-    end
-  end
-
-  @spec empty_state_for_panel(MingaEditor.Agent.UIState.Panel.t(), pid() | nil) ::
-          Transcript.empty_state()
-  defp empty_state_for_panel(%Panel{credential_readiness: :checking}, _session), do: :checking
-
-  defp empty_state_for_panel(panel, session) do
-    empty_state_for_status(
-      configured_model?(panel.model_name),
-      credentials_configured?(panel, session)
-    )
+  defp empty_state_for_panel(panel) do
+    empty_state_for_status(configured_model?(panel.model_name), panel.credentials_configured)
   end
 
   @spec empty_state_for_status(boolean(), boolean()) :: Transcript.empty_state()
@@ -537,67 +544,29 @@ defmodule MingaEditor.AgentLifecycle do
   defp empty_state_for_status(true, false), do: :credentials_missing
   defp empty_state_for_status(true, true), do: nil
 
-  @spec maybe_put_empty_state(keyword(), Transcript.empty_state()) :: keyword()
-  defp maybe_put_empty_state(opts, nil), do: opts
-  defp maybe_put_empty_state(opts, empty_state), do: Keyword.put(opts, :empty_state, empty_state)
-
   @spec configured_model?(String.t()) :: boolean()
   defp configured_model?(model) when model in ["", "unknown"], do: false
   defp configured_model?(model), do: model != AgentConfig.unconfigured_model()
 
-  @spec credentials_configured?(MingaEditor.Agent.UIState.Panel.t(), pid() | nil) :: boolean()
-  defp credentials_configured?(_panel, session) when is_pid(session) do
-    session
-    |> AgentSession.editor_snapshot()
-    |> Map.get(:credentials_configured, false)
-  catch
-    :exit, _ -> false
-  end
+  @spec update_transcript_names(state()) :: state()
+  defp update_transcript_names(state) do
+    {user, assistant, _turn_count} =
+      TranscriptProjection.names_and_turns(state.workspace.agent_ui.panel.transcript)
 
-  defp credentials_configured?(panel, _session), do: panel.credentials_configured
-
-  # The display window needed to render the jump target. Reveals a paged-out
-  # target turn; otherwise keeps the panel's current window.
-  @spec jump_display_start(
-          ProvenanceJump.t() | nil,
-          non_neg_integer(),
-          [{pos_integer(), term()}] | nil
-        ) ::
-          non_neg_integer()
-  defp jump_display_start(nil, current, _pairs), do: current
-  defp jump_display_start(%ProvenanceJump{landed?: true}, current, _pairs), do: current
-
-  defp jump_display_start(%ProvenanceJump{target_message_id: id}, current, pairs) do
-    case pairs && Enum.find_index(pairs, fn {mid, _msg} -> mid == id end) do
-      nil -> current
-      target_index -> min(current, target_index)
-    end
-  end
-
-  # After the first sync that lands the jump, mark it landed so subsequent
-  # syncs hold the cursor (`:keep`) rather than re-landing or re-pinning.
-  @spec advance_jump(ProvenanceJump.t() | nil) :: ProvenanceJump.t() | nil
-  defp advance_jump(nil), do: nil
-  defp advance_jump(%ProvenanceJump{} = jump), do: ProvenanceJump.mark_landed(jump)
-
-  @spec apply_transcript_names(state(), [term()]) :: state()
-  defp apply_transcript_names(state, []), do: state
-
-  defp apply_transcript_names(state, messages) do
     state
-    |> maybe_rename_workspace_from_assistant(messages)
-    |> maybe_update_tab_label(messages)
+    |> maybe_rename_workspace_from_assistant(assistant)
+    |> maybe_update_tab_label(user)
   end
 
-  @spec maybe_rename_workspace_from_assistant(state(), [term()]) :: state()
+  @spec maybe_rename_workspace_from_assistant(state(), String.t() | nil) :: state()
   defp maybe_rename_workspace_from_assistant(
          %{shell_runtime: %{state: %{tab_bar: %TabBar{} = tab_bar}}} = state,
-         messages
-       ) do
+         text
+       )
+       when is_binary(text) do
     with session when is_pid(session) <- Runtime.active_session(state.shell_runtime),
          %Workspace{custom_name: nil, id: id} <-
-           TabBar.find_workspace_by_session(tab_bar, session),
-         text when is_binary(text) <- first_assistant_opening(messages) do
+           TabBar.find_workspace_by_session(tab_bar, session) do
       WorkspaceWorkflow.install_auto_named_workspace(state, id, text)
     else
       _unavailable -> state
@@ -606,14 +575,14 @@ defmodule MingaEditor.AgentLifecycle do
 
   defp maybe_rename_workspace_from_assistant(state, _messages), do: state
 
-  @spec maybe_update_tab_label(state(), [term()]) :: state()
+  @spec maybe_update_tab_label(state(), String.t() | nil) :: state()
   defp maybe_update_tab_label(
          %{shell_runtime: %{state: %{tab_bar: %TabBar{active_id: active_id} = tab_bar}}} = state,
-         messages
-       ) do
+         text
+       )
+       when is_binary(text) do
     with %Tab{kind: :agent, label: label} when is_binary(label) <- TabBar.active(tab_bar),
-         true <- default_agent_label?(label),
-         text when is_binary(text) <- first_user_message(messages) do
+         true <- default_agent_label?(label) do
       tab_bar = TabBar.update_label(tab_bar, active_id, truncate_label(text, 30))
 
       shell =
@@ -671,26 +640,6 @@ defmodule MingaEditor.AgentLifecycle do
   defp default_agent_label?("minga"), do: true
   defp default_agent_label?(_), do: false
 
-  @spec first_user_message([term()]) :: String.t() | nil
-  defp first_user_message(messages) do
-    Enum.find_value(messages, fn
-      {:user, text} -> text
-      {:user, text, _attachments} -> text
-      _ -> nil
-    end)
-  end
-
-  @spec first_assistant_opening([term()]) :: String.t() | nil
-  defp first_assistant_opening(messages) do
-    Enum.find_value(messages, fn
-      {:assistant, text} when is_binary(text) and text != "" ->
-        text |> String.split("\n", parts: 2) |> hd() |> String.trim()
-
-      _message ->
-        nil
-    end)
-  end
-
   @spec truncate_label(String.t(), pos_integer()) :: String.t()
   defp truncate_label(text, max) do
     line = text |> String.split("\n", parts: 2) |> hd() |> String.trim()
@@ -702,186 +651,22 @@ defmodule MingaEditor.AgentLifecycle do
     end
   end
 
-  # ── Styled message caching for GUI ─────────────────────────────────────────
+  @doc "Applies the current theme to the installed transcript without reading Session history."
+  @spec restyle_transcript(state()) :: state()
+  def restyle_transcript(
+        %{workspace: %{agent_ui: %{panel: %Panel{transcript: %{index: nil}}}}} = state
+      ),
+      do: state
 
-  @doc """
-  Re-computes cached styled messages for the semantic transcript.
-  """
-  @spec update_styled_cache(state()) :: state()
-  def update_styled_cache(state) do
-    session = MingaEditor.Shell.Runtime.active_session(state.shell_runtime)
-
-    with true <- is_pid(session),
-         messages when messages != [] <- displayed_messages_for_styling(state, session) do
-      panel = state.workspace.agent_ui.panel
-
-      styled_fingerprint =
-        TranscriptProjection.styled_cache_fingerprint(state.appearance.theme.syntax)
-
-      projection = panel.transcript
-
-      {previous_messages, previous_styled} =
-        case TranscriptProjection.styled_for(projection, styled_fingerprint) do
-          :stale -> {[], []}
-          {:ok, styled} -> {projection.messages, styled || []}
-        end
-
-      message_ids = displayed_message_ids_for_styling(state, session)
-
-      styled =
-        compute_styled_messages(
-          state,
-          messages,
-          message_ids,
-          previous_messages,
-          previous_styled
-        )
-
-      MingaEditor.Shell.Traditional.Workflow.install_agent_panel(
-        state,
-        (fn p ->
-           Panel.cache_styled_messages(p, styled, styled_fingerprint)
-         end).(state.workspace.agent_ui.panel)
+  def restyle_transcript(state) do
+    projection =
+      TranscriptProjection.prepare(
+        state.workspace.agent_ui.panel.transcript,
+        presentation_context(state)
       )
-    else
-      _ -> state
-    end
+
+    install_projection(state, projection, :keep)
   end
-
-  @spec safe_messages(pid()) :: [term()]
-  defp safe_messages(session) do
-    AgentSession.messages(session)
-  catch
-    :exit, _ -> []
-  end
-
-  @spec displayed_messages_for_styling(state(), pid()) :: [term()]
-  defp displayed_messages_for_styling(state, session) do
-    case state.workspace.agent_ui.panel.transcript.messages do
-      [] -> safe_messages(session)
-      messages -> messages
-    end
-  end
-
-  @spec displayed_message_ids_for_styling(state(), pid()) :: [pos_integer()]
-  defp displayed_message_ids_for_styling(state, session) do
-    panel = state.workspace.agent_ui.panel
-
-    case panel.transcript.message_pairs do
-      [] -> session |> AgentSession.messages_with_ids() |> Enum.map(fn {id, _message} -> id end)
-      pairs -> Enum.map(pairs, fn {id, _message} -> id end)
-    end
-  catch
-    :exit, _ -> []
-  end
-
-  # Cache one presentation for each displayed message. Nil slots preserve message order.
-  @spec compute_styled_messages(
-          state(),
-          [term()],
-          [pos_integer()],
-          [term()],
-          TranscriptProjection.styled_cache()
-        ) ::
-          TranscriptProjection.styled_cache()
-  defp compute_styled_messages(state, messages, message_ids, previous_messages, previous_styled) do
-    compute_styled_messages(
-      messages,
-      message_ids,
-      previous_messages,
-      previous_styled,
-      0,
-      state.appearance.theme.syntax,
-      []
-    )
-  end
-
-  @spec compute_styled_messages(
-          [term()],
-          [pos_integer()],
-          [term()],
-          TranscriptProjection.styled_cache(),
-          non_neg_integer(),
-          map(),
-          [TranscriptProjection.rendered_message() | nil]
-        ) :: [TranscriptProjection.rendered_message() | nil]
-  defp compute_styled_messages(
-         [],
-         _message_ids,
-         _previous_messages,
-         _previous_styled,
-         _idx,
-         _theme_syntax,
-         acc
-       ) do
-    Enum.reverse(acc)
-  end
-
-  defp compute_styled_messages(
-         [message | messages],
-         message_ids,
-         previous_messages,
-         previous_styled,
-         idx,
-         theme_syntax,
-         acc
-       ) do
-    {next_previous_messages, next_previous_styled, cached} =
-      cached_styled_message(message, previous_messages, previous_styled)
-
-    {message_id, next_message_ids} = next_message_id(message_ids, idx)
-
-    styled =
-      case cached do
-        {:ok, cached_styled} ->
-          cached_styled
-
-        :miss ->
-          style_message(message, message_id, theme_syntax)
-      end
-
-    compute_styled_messages(
-      messages,
-      next_message_ids,
-      next_previous_messages,
-      next_previous_styled,
-      idx + 1,
-      theme_syntax,
-      [styled | acc]
-    )
-  end
-
-  @spec cached_styled_message(term(), [term()], TranscriptProjection.styled_cache()) ::
-          {[term()], TranscriptProjection.styled_cache(),
-           {:ok, TranscriptProjection.rendered_message() | nil} | :miss}
-  defp cached_styled_message(message, [previous_message | previous_messages], [
-         styled | previous_styled
-       ])
-       when message == previous_message do
-    {previous_messages, previous_styled, {:ok, styled}}
-  end
-
-  defp cached_styled_message(_message, [_previous_message | previous_messages], [
-         _styled | previous_styled
-       ]) do
-    {previous_messages, previous_styled, :miss}
-  end
-
-  defp cached_styled_message(_message, [_previous_message | previous_messages], []) do
-    {previous_messages, [], :miss}
-  end
-
-  defp cached_styled_message(_message, [], [_styled | previous_styled]) do
-    {[], previous_styled, :miss}
-  end
-
-  defp cached_styled_message(_message, [], []) do
-    {[], [], :miss}
-  end
-
-  @spec next_message_id([pos_integer()], non_neg_integer()) :: {pos_integer(), [pos_integer()]}
-  defp next_message_id([id | rest], _idx), do: {id, rest}
-  defp next_message_id([], idx), do: {idx + 1, []}
 
   @spec style_message(term(), pos_integer(), map()) ::
           TranscriptProjection.rendered_message() | nil
@@ -903,27 +688,4 @@ defmodule MingaEditor.AgentLifecycle do
   end
 
   defp style_message(_message, _message_id, _theme_syntax), do: nil
-
-  @spec add_session_display_opts(keyword(), pid() | nil) :: keyword()
-  defp add_session_display_opts(opts, session) when is_pid(session) do
-    pinned = AgentSession.pinned_ids(session)
-    ids = AgentSession.messages_with_ids(session)
-
-    opts
-    |> Keyword.put(:message_ids, ids)
-    |> maybe_put_pinned_ids(pinned)
-  catch
-    :exit, _ -> opts
-  end
-
-  defp add_session_display_opts(opts, _session), do: opts
-
-  @spec maybe_put_pinned_ids(keyword(), MapSet.t(pos_integer())) :: keyword()
-  defp maybe_put_pinned_ids(opts, pinned) do
-    if MapSet.size(pinned) > 0 do
-      Keyword.put(opts, :pinned_ids, pinned)
-    else
-      opts
-    end
-  end
 end

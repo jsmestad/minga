@@ -19,6 +19,16 @@ import (
 	"github.com/jsmestad/minga/go/tui/internal/protocol"
 )
 
+func (m Model) composeFrame(content string) string {
+	frame, _ := m.composeFrameWithLayers(content)
+	return frame
+}
+
+func (m Model) content() string {
+	content, _ := m.renderBody()
+	return content
+}
+
 func TestSendRejectsAfterTransportTermination(t *testing.T) {
 	out := make(chan []byte, 1)
 	done := make(chan struct{})
@@ -3325,6 +3335,181 @@ func TestSemanticMouseRoutesSidebarItemZones(t *testing.T) {
 	cmd, ok = model.semanticMousePacket(tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft, X: inactiveZone.StartX + 1, Y: inactiveZone.StartY}))
 	if !ok || !bytes.Equal(cmd, protocol.EncodeGUISidebarAction("git", "git_status", "activate")) {
 		t.Fatalf("inactive sidebar click should route sidebar_action activate, ok=%v packet=%v", ok, cmd)
+	}
+}
+
+func gitSidebarChrome(git protocol.GitStatus) map[byte]protocol.ChromePayload {
+	return map[byte]protocol.ChromePayload{
+		generated.OPGuiSidebars: {Sidebars: protocol.Sidebars{Visible: true, ActiveID: "git_status", Items: []protocol.Sidebar{
+			{ID: "git_status", DisplayName: "Git", SemanticKind: "git_status", PreferredWidth: 24, Visible: true},
+		}}},
+		generated.OPGuiGitStatus: {Git: git},
+	}
+}
+
+func renderedGitRow(t *testing.T, view tea.View, label string) int {
+	t.Helper()
+	for y, line := range strings.Split(ansi.Strip(view.Content), "\n") {
+		if strings.Contains(line, label) {
+			return y
+		}
+	}
+	t.Fatalf("rendered view does not contain %q: %s", label, ansi.Strip(view.Content))
+	return 0
+}
+
+func TestGitSidebarClicksUseLastFlushedPanel(t *testing.T) {
+	out := make(chan []byte, 64)
+	model := New(100, 14, out)
+	const panelID = 0x1_0000_002a
+	staged := protocol.GitStatusEntry{Section: 0, Path: "lib/shared.ex"}
+	changed := protocol.GitStatusEntry{Section: 1, Path: "lib/shared.ex"}
+	git := protocol.GitStatus{
+		PanelID: panelID, Branch: "topic", Entries: []protocol.GitStatusEntry{changed, staged},
+		TerminalCursor: 2, TerminalCollapsed: 1,
+		Toast: protocol.GitToast{ID: 61, Visible: true, Action: 1},
+	}
+	model.chrome = gitSidebarChrome(git)
+	model.putWindow(protocol.WindowContent{ID: 1, Rows: []protocol.WindowRow{{Text: "editor body"}}, GeometrySet: true, Geometry: protocol.PaneGeometry{ContentRect: protocol.Rect{Row: 0, Col: 0, Width: 24, Height: 1}}})
+	model = applyTo(t, model)
+	shown := model.View()
+	view := ansi.Strip(shown.Content)
+	for _, text := range []string{"Staged (1)", "Changes (1)", "lib/shared.ex", "editor body"} {
+		if !strings.Contains(view, text) {
+			t.Fatalf("Git sidebar must show %q: %s", text, view)
+		}
+	}
+	if count := strings.Count(view, "lib/shared.ex"); count != 1 {
+		t.Fatalf("collapsed staged entry must not render: %s", view)
+	}
+	y := renderedGitRow(t, shown, changed.Path)
+	retryY := renderedGitRow(t, shown, "Pull & Retry (r)")
+	zoneCount := len(model.zones.ids)
+
+	// B is fully composed (including its scanned hit zones) but not flushed.
+	untracked := protocol.GitStatusEntry{Section: 2, Path: "lib/replacement.ex"}
+	git.PanelID++
+	git.Entries = []protocol.GitStatusEntry{untracked, staged}
+	git.Toast.ID++
+	model.chrome[generated.OPGuiGitStatus] = protocol.ChromePayload{Git: git}
+	model = applyTo(t, model)
+	pending := model.View()
+	if got := renderedGitRow(t, pending, untracked.Path); got != y {
+		t.Fatalf("replacement row must occupy the same screen row: got %d, want %d", got, y)
+	}
+	drainOutboundPackets(out)
+
+	for _, step := range []struct {
+		view tea.View
+		y    int
+		want []byte
+	}{
+		{shown, y, protocol.EncodeGUIGitOpenDiff(panelID, changed.Path, changed.Section)},
+		{shown, retryY, protocol.EncodeGUIGitPullAndRetry(61)},
+		{pending, y, protocol.EncodeGUIGitOpenDiff(git.PanelID, untracked.Path, untracked.Section)},
+		{pending, retryY, protocol.EncodeGUIGitPullAndRetry(git.Toast.ID)},
+	} {
+		click := tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft, X: 2, Y: step.y})
+		updated, _ := updateFromPublishedView(model, step.view, click)
+		model = updated.(Model)
+		if packets := drainOutboundPackets(out); len(packets) != 1 || !bytes.Equal(packets[0], step.want) {
+			t.Fatalf("click at row %d sent %x, want only %x", step.y, packets, step.want)
+		}
+	}
+	if got := len(model.zones.ids); got != zoneCount {
+		t.Fatalf("replacing Git identities grew the zone registry from %d to %d", zoneCount, got)
+	}
+}
+
+func TestGitSidebarPublishesReplacementWithIdenticalCells(t *testing.T) {
+	out := make(chan []byte, 64)
+	model := New(100, 14, out)
+	entry := protocol.GitStatusEntry{Path: "lib/unchanged.ex", Section: 1}
+	git := protocol.GitStatus{PanelID: 42, Entries: []protocol.GitStatusEntry{entry}}
+	model.chrome = gitSidebarChrome(git)
+	model = applyTo(t, model)
+	shown := model.View()
+
+	git.PanelID++
+	model.chrome[generated.OPGuiGitStatus] = protocol.ChromePayload{Git: git}
+	model = applyTo(t, model)
+	pending := model.View()
+	if ansi.Strip(shown.Content) != ansi.Strip(pending.Content) {
+		t.Fatal("changing only the panel ID changed the visible cells")
+	}
+	if shown.Content == pending.Content {
+		t.Fatal("Bubble Tea cannot publish the replacement callback when Content compares equal")
+	}
+	drainOutboundPackets(out)
+
+	click := tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft, X: 2, Y: renderedGitRow(t, shown, entry.Path)})
+	_, _ = updateFromPublishedView(model, pending, click)
+	want := protocol.EncodeGUIGitOpenDiff(git.PanelID, entry.Path, entry.Section)
+	if packets := drainOutboundPackets(out); len(packets) != 1 || !bytes.Equal(packets[0], want) {
+		t.Fatalf("target-only flush sent %x, want only %x", packets, want)
+	}
+}
+
+func TestGitSidebarContainsMaskedAndNonTargetPressesButNotWheel(t *testing.T) {
+	out := make(chan []byte, 64)
+	model := New(100, 14, out)
+	entry := protocol.GitStatusEntry{Path: "lib/covered.ex", Section: 1}
+	git := protocol.GitStatus{PanelID: 23, Entries: []protocol.GitStatusEntry{entry}}
+	model.chrome = gitSidebarChrome(git)
+	model.chrome[generated.OPGuiHoverPopup] = protocol.ChromePayload{Hover: protocol.HoverPopup{
+		Visible: true, Lines: []protocol.RichLine{{Segments: []protocol.RichSegment{{Text: "doc"}}}},
+	}}
+	model.surfacePlacements = []generated.SurfacePlacement{
+		{SurfaceID: surfaceIDHoverPopup, Rect: generated.Rect{Row: 2, Width: 8, Height: 1}, Z: 290},
+	}
+	model = applyTo(t, model)
+	shown := model.View()
+	y := renderedGitRow(t, shown, "Hover 1:1")
+	drainOutboundPackets(out)
+
+	// Hover paints a padded line beyond its authored eight-cell rect.
+	click := tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft, X: 12, Y: y})
+	updated, _ := updateFromPublishedView(model, shown, click)
+	model = updated.(Model)
+	if packets := drainOutboundPackets(out); len(packets) != 0 {
+		t.Fatalf("masked press escaped: %x", packets)
+	}
+	wheel := tea.MouseWheelMsg(tea.Mouse{Button: tea.MouseWheelDown, X: click.X, Y: y})
+	updated, _ = updateFromPublishedView(model, shown, wheel)
+	model = updated.(Model)
+	wantWheel := protocol.EncodeMouseEvent(int16(y-model.layout.grid.Y), int16(click.X), 0x41, 0, 0, 1)
+	if packets := drainOutboundPackets(out); len(packets) != 1 || !bytes.Equal(packets[0], wantWheel) {
+		t.Fatalf("masked wheel changed routing: %x, want %x", packets, wantWheel)
+	}
+
+	delete(model.chrome, generated.OPGuiHoverPopup)
+	model.surfacePlacements = nil
+	model = applyTo(t, model)
+	pending := model.View()
+	if got := renderedGitRow(t, pending, entry.Path); got != y {
+		t.Fatalf("hover must cover the row used for the test: entry at %d, hover at %d", got, y)
+	}
+	drainOutboundPackets(out)
+	updated, _ = updateFromPublishedView(model, shown, click)
+	model = updated.(Model)
+	if packets := drainOutboundPackets(out); len(packets) != 0 {
+		t.Fatalf("the row exposed only in the pending view accepted a press: %x", packets)
+	}
+
+	for _, cell := range []tea.MouseClickMsg{
+		{Button: tea.MouseLeft, X: 2, Y: y - 1},                           // Section heading.
+		{Button: tea.MouseLeft, X: model.layout.leftPane.Width - 1, Y: y}, // Separator.
+	} {
+		updated, _ = updateFromPublishedView(model, pending, cell)
+		model = updated.(Model)
+		if packets := drainOutboundPackets(out); len(packets) != 0 {
+			t.Fatalf("non-target sidebar cell escaped: %x", packets)
+		}
+	}
+	_, _ = updateFromPublishedView(model, pending, click)
+	wantClick := protocol.EncodeGUIGitOpenDiff(git.PanelID, entry.Path, entry.Section)
+	if packets := drainOutboundPackets(out); len(packets) != 1 || !bytes.Equal(packets[0], wantClick) {
+		t.Fatalf("flushed, exposed row sent %x, want only %x", packets, wantClick)
 	}
 }
 

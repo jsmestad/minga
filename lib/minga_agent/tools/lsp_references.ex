@@ -9,6 +9,7 @@ defmodule MingaAgent.Tools.LspReferences do
   Part of epic #1241. See #1243.
   """
 
+  alias Minga.LSP.Client
   alias MingaAgent.Tools.LspBridge
 
   @doc """
@@ -23,10 +24,11 @@ defmodule MingaAgent.Tools.LspReferences do
     abs_path = Path.expand(path)
     include_declaration = Keyword.get(opts, :include_declaration, true)
 
-    case LspBridge.client_for_path(abs_path) do
-      {:ok, client} ->
+    case LspBridge.document_for_path(abs_path) do
+      {:ok, %{client: client} = document} ->
         params =
-          LspBridge.position_params(abs_path, line, col)
+          document
+          |> LspBridge.position_params(line, col, Client.encoding(client))
           |> Map.put("context", %{"includeDeclaration" => include_declaration})
 
         case LspBridge.request_sync(client, "textDocument/references", params) do

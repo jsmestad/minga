@@ -2,7 +2,6 @@ defmodule MingaEditor.Renderer.TextInteractionIndex.Reader do
   @moduledoc "Opaque read capability for one renderer-owned interaction-index generation."
 
   alias MingaEditor.Mouse.TextEvent
-  alias MingaEditor.Mouse.Target.Text, as: TextTarget
   alias MingaEditor.RenderModel.Window.ResidentStore
   alias MingaEditor.Renderer.TextPresentation
   alias MingaEditor.Renderer.WrapLayout
@@ -17,7 +16,7 @@ defmodule MingaEditor.Renderer.TextInteractionIndex.Reader do
 
   @doc "Resolves input directly from immutable renderer-owned data."
   @spec resolve(t(), TextEvent.t()) ::
-          {:ok, TextTarget.t()}
+          {:ok, TextPresentation.target()}
           | {:error,
              :inactive
              | :row_not_found

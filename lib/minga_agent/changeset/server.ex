@@ -17,8 +17,10 @@ defmodule MingaAgent.Changeset.Server do
   alias Minga.Buffer.Persistence.LocalWriter
   alias Minga.Buffer.Persistence.SystemFileSystem
   alias Minga.Buffer.Replace
+  alias Minga.Session.StagedDraft
   alias MingaAgent.Changeset.MergedEvent
   alias MingaAgent.Changeset.Overlay
+  alias MingaAgent.Changeset.PublicationTarget
   alias MingaAgent.Changeset.SourceRead
 
   @tombstone_suffix ".__changeset_deleted__"
@@ -36,7 +38,9 @@ defmodule MingaAgent.Changeset.Server do
           budget: pos_integer() | :unlimited,
           attempts: non_neg_integer(),
           revision: non_neg_integer(),
-          publication: {module(), keyword()}
+          publication: {module(), keyword()},
+          observer: pid() | nil,
+          staging: {atom(), term()} | nil
         }
 
   @spec start_link(keyword()) :: GenServer.on_start()
@@ -64,7 +68,9 @@ defmodule MingaAgent.Changeset.Server do
           publication: {
             Keyword.get(opts, :publication_file_system, SystemFileSystem),
             Keyword.get(opts, :publication_opts, [])
-          }
+          },
+          observer: nil,
+          staging: nil
         }
 
         {:ok, state}
@@ -159,7 +165,7 @@ defmodule MingaAgent.Changeset.Server do
 
   def handle_call({:capture_original, relative_path}, _from, state) do
     with {:ok, path} <- normalize_path(state, relative_path) do
-      case File.read(Path.join(state.project_root, path)) do
+      case read_project_file(state, path) do
         {:ok, _} = source -> {:reply, :ok, remember_original(state, path, source)}
         {:error, :enoent} = source -> {:reply, :ok, remember_original(state, path, source)}
         {:error, reason} -> {:reply, {:error, reason}, state}
@@ -200,7 +206,7 @@ defmodule MingaAgent.Changeset.Server do
          true <- Map.has_key?(state.originals, path) do
       case plan_one_deletion(state, path) do
         {{:ok, _, _} = result, action} ->
-          case apply_merge_action(action, state.publication) do
+          case apply_merge_action(action, state) do
             :ok ->
               state = prune_successful_merge_result(result, state)
               {:reply, :ok, bump_revision(state)}
@@ -272,6 +278,42 @@ defmodule MingaAgent.Changeset.Server do
       with {:ok, path} <- normalize_path(state, relative_path), do: source_descriptor(state, path)
 
     {:reply, SourceRead.lines(source, state.revision, start, count, max_bytes), state}
+  end
+
+  def handle_call({:observe, observer, registration}, _from, state) do
+    case join_staging(state.staging, registration) do
+      :ok -> {:reply, :ok, %{state | observer: observer, staging: registration}}
+      {:error, _reason} = error -> {:reply, error, %{state | observer: observer}}
+    end
+  end
+
+  def handle_call(:staging, _from, state) do
+    {:reply, staging_value(state.staging), state}
+  end
+
+  def handle_call({:staged_drafts, baseline_paths}, _from, state) do
+    drafts =
+      state.changes
+      |> Enum.sort_by(fn {path, _change} -> path end)
+      |> Enum.map(fn {path, change} ->
+        StagedDraft.new(path, Map.get(state.originals, path), change)
+      end)
+
+    {:reply, {drafts, Map.take(state.originals, baseline_paths)}, state}
+  end
+
+  def handle_call({:restore_draft, %StagedDraft{} = draft}, _from, state) do
+    with {:ok, path} <- normalize_path(state, draft.path),
+         :ok <- Overlay.commit_file(state.overlay, path, draft.content) do
+      state =
+        %{state | originals: Map.put(state.originals, path, draft.base)}
+        |> install_mutation(path, draft.content)
+        |> bump_revision()
+
+      {:reply, :ok, state}
+    else
+      {:error, reason} -> {:reply, {:error, reason}, state}
+    end
   end
 
   def handle_call(:overlay_path, _from, state) do
@@ -378,7 +420,7 @@ defmodule MingaAgent.Changeset.Server do
 
     # Apply every clean per-file plan, even on a partial conflict. Files that
     # merged cleanly are written and pruned so a later retry skips them.
-    results = apply_plans(plans, state.publication)
+    results = apply_plans(plans, state)
 
     case merge_result_details(results) do
       nil ->
@@ -428,8 +470,14 @@ defmodule MingaAgent.Changeset.Server do
   # A per-file merge plan pairs the decision result tuple with the disk action
   # that `:merge` performs to realize it. `:preflight_merge` keeps the results
   # and discards the actions, so planning is fully write-free and reusable.
+  # Write and remove actions carry the project-relative path and the real
+  # target resolved during planning, so the action can confirm that the target
+  # still resolves to the same place inside the project root just before it
+  # touches disk.
   @typep merge_action ::
-           {:write | :create, String.t(), binary()} | {:rm, String.t()} | :noop
+           {:write | :create, String.t(), String.t(), binary()}
+           | {:rm, String.t(), String.t()}
+           | :noop
   @typep merge_plan :: {result :: tuple(), merge_action()}
 
   # Plans the full merge without touching disk. Returns one plan per file; the
@@ -475,29 +523,63 @@ defmodule MingaAgent.Changeset.Server do
   # Performs the disk writes for the clean plans. Only reached from `:merge`.
   # Conflict plans carry a `:noop` action, so partial merges write only the
   # files that merged cleanly and leave conflicting files on disk untouched.
-  @spec apply_plans([merge_plan()], {module(), keyword()}) :: [tuple()]
-  defp apply_plans(plans, publication) do
+  @spec apply_plans([merge_plan()], state()) :: [tuple()]
+  defp apply_plans(plans, state) do
     Enum.map(plans, fn {result, action} ->
-      case apply_merge_action(action, publication) do
+      case apply_merge_action(action, state) do
         :ok -> result
         {:error, reason} -> {:error, elem(result, 1), reason}
       end
     end)
   end
 
-  @spec apply_merge_action(merge_action(), {module(), keyword()}) :: :ok | {:error, term()}
-  defp apply_merge_action({:write, real_path, content}, {file_system, opts}) do
-    LocalWriter.write(real_path, content, :replace, file_system, opts)
+  # Each action re-resolves its target immediately before the write so a
+  # symlink swapped in after planning cannot redirect it outside the project.
+  @spec apply_merge_action(merge_action(), state()) :: :ok | {:error, term()}
+  defp apply_merge_action({:write, path, target, content}, state) do
+    write_target(state, path, target, content, :replace)
   end
 
-  defp apply_merge_action({:create, real_path, content}, {file_system, opts}) do
-    LocalWriter.write(real_path, content, :exclusive_create, file_system, opts)
+  defp apply_merge_action({:create, path, target, content}, state) do
+    write_target(state, path, target, content, :exclusive_create)
   end
 
-  defp apply_merge_action({:rm, real_path}, {file_system, opts}),
-    do: file_system.remove(real_path, opts)
+  defp apply_merge_action({:rm, path, entry}, %{publication: {file_system, opts}} = state) do
+    with :ok <- confirm_target(remove_target(state, path), entry) do
+      file_system.remove(entry, opts)
+    end
+  end
 
-  defp apply_merge_action(:noop, _publication), do: :ok
+  defp apply_merge_action(:noop, _state), do: :ok
+
+  @spec write_target(
+          state(),
+          String.t(),
+          String.t(),
+          binary(),
+          Minga.Buffer.Persistence.write_policy()
+        ) :: :ok | {:error, term()}
+  defp write_target(%{publication: {file_system, opts}} = state, path, target, content, policy) do
+    with :ok <- confirm_target(publication_target(state, path), target) do
+      LocalWriter.write(target, content, policy, file_system, opts)
+    end
+  end
+
+  @spec publication_target(state(), String.t()) ::
+          {:ok, String.t()} | {:error, PublicationTarget.error()}
+  defp publication_target(state, path),
+    do: PublicationTarget.write_path(state.project_root, path, state.publication)
+
+  @spec remove_target(state(), String.t()) ::
+          {:ok, String.t()} | {:error, PublicationTarget.error()}
+  defp remove_target(state, path),
+    do: PublicationTarget.remove_path(state.project_root, path, state.publication)
+
+  @spec confirm_target({:ok, String.t()} | {:error, PublicationTarget.error()}, String.t()) ::
+          :ok | {:error, PublicationTarget.error() | :publication_target_changed}
+  defp confirm_target({:ok, planned}, planned), do: :ok
+  defp confirm_target({:ok, _moved}, _planned), do: {:error, :publication_target_changed}
+  defp confirm_target({:error, _reason} = error, _planned), do: error
 
   @spec prune_successful_merge_results(state(), [tuple()]) :: state()
   defp prune_successful_merge_results(state, results) do
@@ -511,7 +593,14 @@ defmodule MingaAgent.Changeset.Server do
 
   @spec plan_one_file(state(), String.t(), binary()) :: merge_plan()
   defp plan_one_file(state, path, changeset_content) do
-    real_path = Path.join(state.project_root, path)
+    case publication_target(state, path) do
+      {:ok, target} -> plan_one_target(state, path, target, changeset_content)
+      {:error, reason} -> {{:error, path, reason}, :noop}
+    end
+  end
+
+  @spec plan_one_target(state(), String.t(), String.t(), binary()) :: merge_plan()
+  defp plan_one_target(state, path, real_path, changeset_content) do
     original = Map.get(state.originals, path)
 
     current_real =
@@ -527,7 +616,7 @@ defmodule MingaAgent.Changeset.Server do
   @spec plan_strategy(String.t(), String.t(), binary() | nil, binary() | nil, binary()) ::
           merge_plan()
   defp plan_strategy(real_path, path, nil = _original, nil = _current_real, changeset_content) do
-    {{:ok, path, :created}, {:create, real_path, changeset_content}}
+    {{:ok, path, :created}, {:create, path, real_path, changeset_content}}
   end
 
   # New file but someone else also created it
@@ -542,7 +631,7 @@ defmodule MingaAgent.Changeset.Server do
   # Real file unchanged since changeset was created: apply directly
   defp plan_strategy(real_path, path, original, current_real, changeset_content)
        when current_real == original do
-    {{:ok, path, :applied}, {:write, real_path, changeset_content}}
+    {{:ok, path, :applied}, {:write, path, real_path, changeset_content}}
   end
 
   # Real file was also modified: three-way merge
@@ -553,7 +642,7 @@ defmodule MingaAgent.Changeset.Server do
 
     case Minga.Core.Diff.merge3(ancestor_lines, ours_lines, theirs_lines) do
       {:ok, merged_lines} ->
-        {{:ok, path, :merged_three_way}, {:write, real_path, Enum.join(merged_lines, "\n")}}
+        {{:ok, path, :merged_three_way}, {:write, path, real_path, Enum.join(merged_lines, "\n")}}
 
       {:conflict, _hunks} ->
         {{:conflict, path, :concurrent_edit}, :noop}
@@ -562,12 +651,19 @@ defmodule MingaAgent.Changeset.Server do
 
   @spec plan_one_deletion(state(), String.t()) :: merge_plan()
   defp plan_one_deletion(state, path) do
-    real_path = Path.join(state.project_root, path)
+    case remove_target(state, path) do
+      {:ok, entry} -> plan_one_removal(state, path, entry)
+      {:error, reason} -> {{:error, path, reason}, :noop}
+    end
+  end
+
+  @spec plan_one_removal(state(), String.t(), String.t()) :: merge_plan()
+  defp plan_one_removal(state, path, entry) do
     original = Map.get(state.originals, path)
 
-    case File.read(real_path) do
+    case File.read(entry) do
       {:ok, content} when content == original ->
-        {{:ok, path, :deleted}, {:rm, real_path}}
+        {{:ok, path, :deleted}, {:rm, path, entry}}
 
       {:ok, _changed} ->
         {{:conflict, path, :modified_before_delete}, :noop}
@@ -730,8 +826,42 @@ defmodule MingaAgent.Changeset.Server do
   defp restore_undo_overlay(state, path, content) when is_binary(content),
     do: Overlay.materialize_file(state.overlay, path, content)
 
+  # Every staged change bumps the revision; the observer (the staged draft
+  # keeper) learns that the staged drafts changed and persists them.
   @spec bump_revision(state()) :: state()
-  defp bump_revision(state), do: %{state | revision: state.revision + 1}
+  defp bump_revision(state) do
+    state = %{state | revision: state.revision + 1}
+    notify_observer(state)
+    state
+  end
+
+  # The changeset outlives its observer, so it carries its own staging
+  # registration and announces itself in a `:pg` scope. `:pg` monitors its
+  # members instead of linking them, so a failing scope never takes staged
+  # edits down with it, and a restarted observer finds every live changeset.
+  @spec join_staging({atom(), term()} | nil, {atom(), term()} | nil) :: :ok | {:error, term()}
+  defp join_staging(_current, nil), do: :ok
+  defp join_staging({scope, _value}, {scope, _new_value}), do: :ok
+
+  defp join_staging(_current, {scope, _value}) do
+    :pg.join(scope, :staged_views, self())
+  catch
+    :error, _reason -> {:error, :staging_scope_unavailable}
+    # :pg.join/3 calls the scope process, so a stopped scope raises an exit.
+    :exit, _reason -> {:error, :staging_scope_unavailable}
+  end
+
+  @spec staging_value({atom(), term()} | nil) :: term() | nil
+  defp staging_value({_scope, value}), do: value
+  defp staging_value(nil), do: nil
+
+  @spec notify_observer(state()) :: :ok
+  defp notify_observer(%{observer: observer}) when is_pid(observer) do
+    send(observer, {:changeset_revised, self()})
+    :ok
+  end
+
+  defp notify_observer(_state), do: :ok
 
   @spec bump_if_sources_changed(state(), state()) :: state()
   defp bump_if_sources_changed(new_state, previous_state) do
@@ -758,12 +888,19 @@ defmodule MingaAgent.Changeset.Server do
   end
 
   @spec source_descriptor(state(), String.t()) ::
-          {:ok, {:memory, binary()} | {:disk, String.t()}} | {:error, :deleted}
+          {:ok, {:memory, binary()} | {:disk, String.t()}}
+          | {:error, :deleted | Overlay.read_error()}
   defp source_descriptor(state, path) do
     case current_change(state, path) do
-      :deleted -> {:error, :deleted}
-      :unmodified -> {:ok, {:disk, Path.join(state.project_root, path)}}
-      content -> {:ok, {:memory, content}}
+      :deleted ->
+        {:error, :deleted}
+
+      :unmodified ->
+        with {:ok, real_path} <- Overlay.project_read_path(state.overlay, path),
+             do: {:ok, {:disk, real_path}}
+
+      content ->
+        {:ok, {:memory, content}}
     end
   end
 
@@ -771,10 +908,13 @@ defmodule MingaAgent.Changeset.Server do
   defp current_content(state, path) do
     case current_change(state, path) do
       :deleted -> {:error, :deleted}
-      :unmodified -> File.read(Path.join(state.project_root, path))
+      :unmodified -> read_project_file(state, path)
       content -> {:ok, content}
     end
   end
+
+  @spec read_project_file(state(), String.t()) :: {:ok, binary()} | {:error, Overlay.read_error()}
+  defp read_project_file(state, path), do: Overlay.read_project_file(state.overlay, path)
 
   @spec current_change(state(), String.t()) :: change()
   defp current_change(state, path), do: Map.get(state.changes, path, :unmodified)
@@ -784,7 +924,7 @@ defmodule MingaAgent.Changeset.Server do
     if Map.has_key?(state.originals, path) do
       state
     else
-      case File.read(Path.join(state.project_root, path)) do
+      case read_project_file(state, path) do
         {:ok, content} -> put_in(state.originals[path], content)
         {:error, _} -> state
       end
@@ -834,37 +974,73 @@ defmodule MingaAgent.Changeset.Server do
           :ok | {:error, term()}
   defp restore_original_with_backup(state, path, backup_suffix) do
     overlay_path = Path.join(state.overlay.overlay_dir, path)
-    project_path = Path.join(state.project_root, path)
     tombstone_path = overlay_path <> ".__changeset_deleted__"
     backup_path = overlay_path <> backup_suffix
 
-    if File.regular?(project_path) do
-      with :ok <- remove_overlay_artifact(backup_path),
-           :ok <- remove_overlay_artifact(tombstone_path),
-           :ok <- prune_empty_overlay_dirs(state, path),
-           :ok <-
-             restore_project_file(state.overlay, state.project_root, overlay_path, backup_path),
-           :ok <- remove_overlay_artifact(backup_path) do
-        :ok
-      else
-        {:error, reason} ->
-          case restore_overlay_backup(overlay_path, backup_path) do
-            :ok -> {:error, reason}
-            {:error, rollback_reason} -> {:error, {:cleanup_failed, reason, rollback_reason}}
-          end
-      end
+    case restorable_project_file(state, path) do
+      {:ok, project_file} ->
+        restore_from_project(
+          state,
+          path,
+          project_file,
+          {overlay_path, tombstone_path, backup_path}
+        )
+
+      :none ->
+        clear_overlay_path(state, path, overlay_path, tombstone_path)
+    end
+  end
+
+  # A project file the overlay may copy back: a regular file whose real path
+  # stays inside the project root.
+  @spec restorable_project_file(state(), String.t()) :: {:ok, String.t()} | :none
+  defp restorable_project_file(state, path) do
+    case Overlay.project_read_path(state.overlay, path) do
+      {:ok, real_path} -> if File.regular?(real_path), do: {:ok, real_path}, else: :none
+      {:error, _reason} -> :none
+    end
+  end
+
+  @spec restore_from_project(
+          state(),
+          String.t(),
+          String.t(),
+          {String.t(), String.t(), String.t()}
+        ) ::
+          :ok | {:error, term()}
+  defp restore_from_project(
+         state,
+         path,
+         project_file,
+         {overlay_path, tombstone_path, backup_path}
+       ) do
+    with :ok <- remove_overlay_artifact(backup_path),
+         :ok <- remove_overlay_artifact(tombstone_path),
+         :ok <- prune_empty_overlay_dirs(state, path),
+         :ok <- restore_project_file(project_file, overlay_path, backup_path),
+         :ok <- remove_overlay_artifact(backup_path) do
+      :ok
     else
-      with :ok <- remove_overlay_artifact(overlay_path),
-           :ok <- remove_overlay_artifact(tombstone_path),
-           :ok <- prune_empty_overlay_dirs(state, path) do
-        :ok
-      else
-        {:error, reason} ->
-          case restore_discarded_overlay(state, path, tombstone_path) do
-            :ok -> {:error, reason}
-            {:error, rollback_reason} -> {:error, {:cleanup_failed, reason, rollback_reason}}
-          end
-      end
+      {:error, reason} ->
+        case restore_overlay_backup(overlay_path, backup_path) do
+          :ok -> {:error, reason}
+          {:error, rollback_reason} -> {:error, {:cleanup_failed, reason, rollback_reason}}
+        end
+    end
+  end
+
+  @spec clear_overlay_path(state(), String.t(), String.t(), String.t()) :: :ok | {:error, term()}
+  defp clear_overlay_path(state, path, overlay_path, tombstone_path) do
+    with :ok <- remove_overlay_artifact(overlay_path),
+         :ok <- remove_overlay_artifact(tombstone_path),
+         :ok <- prune_empty_overlay_dirs(state, path) do
+      :ok
+    else
+      {:error, reason} ->
+        case restore_discarded_overlay(state, path, tombstone_path) do
+          :ok -> {:error, reason}
+          {:error, rollback_reason} -> {:error, {:cleanup_failed, reason, rollback_reason}}
+        end
     end
   end
 
@@ -925,19 +1101,13 @@ defmodule MingaAgent.Changeset.Server do
     end
   end
 
-  @spec restore_project_file(Overlay.t(), String.t(), String.t(), String.t()) ::
-          :ok | {:error, term()}
-  defp restore_project_file(%Overlay{} = overlay, project_root, overlay_path, backup_path) do
-    project_path = Path.join(project_root, Path.relative_to(overlay_path, overlay.overlay_dir))
+  @spec restore_project_file(String.t(), String.t(), String.t()) :: :ok | {:error, term()}
+  defp restore_project_file(project_file, overlay_path, backup_path) do
     temp_path = overlay_path <> ".__restore_tmp__"
 
-    if File.regular?(project_path) do
-      with :ok <- remove_overlay_artifact(temp_path),
-           :ok <- relink_file(overlay, project_path, temp_path) do
-        swap_overlay_with_temp(overlay_path, temp_path, backup_path)
-      end
-    else
-      :ok
+    with :ok <- remove_overlay_artifact(temp_path),
+         :ok <- File.cp(project_file, temp_path) do
+      swap_overlay_with_temp(overlay_path, temp_path, backup_path)
     end
   end
 
@@ -969,11 +1139,6 @@ defmodule MingaAgent.Changeset.Server do
           {:error, reason}
       end
     end
-  end
-
-  @spec relink_file(Overlay.t(), String.t(), String.t()) :: :ok | {:error, term()}
-  defp relink_file(%Overlay{}, source, target) do
-    File.cp(source, target)
   end
 
   @spec rename_overlay_to_backup(String.t(), String.t()) :: :ok | {:error, term()}

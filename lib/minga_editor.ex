@@ -13,6 +13,7 @@ defmodule MingaEditor do
 
   use GenServer
 
+  alias MingaEditor.Agent.Arrival
   alias MingaEditor.Agent.Events
   alias MingaEditor.Agent.UIState
   alias Minga.Buffer
@@ -361,8 +362,6 @@ defmodule MingaEditor do
       Minga.API.message(migration_notice)
     end
 
-    :ok = emit_git_porcelain_upgrade_notice(state.workspace.file_tree.project_root)
-
     EventBus.subscribe(:face_overrides_changed, events_registry)
     EventBus.subscribe(:agent_session_stopped, events_registry)
     EventBus.subscribe(:agent_session_restarted, events_registry)
@@ -373,6 +372,10 @@ defmodule MingaEditor do
     EventBus.subscribe(:option_changed, events_registry)
     EventBus.subscribe(:extension_updates_available, events_registry)
     EventBus.subscribe(:inference_route_status_changed, events_registry)
+
+    if state.frontend.backend != :headless do
+      Startup.announce_git_extended_opt_in(state.workspace.file_tree.project_root)
+    end
 
     # Monitor all initial buffers so we get :DOWN when they die.
     all_initial_pids =
@@ -413,18 +416,6 @@ defmodule MingaEditor do
 
   defp attach_effect_scheduler(scheduler) do
     :ok = EffectScheduler.attach(scheduler, self())
-  end
-
-  # Safe mode skips user config, so the registry cannot say whether git porcelain is enabled.
-  @spec emit_git_porcelain_upgrade_notice(String.t() | nil) :: :ok
-  defp emit_git_porcelain_upgrade_notice(project_root) do
-    with false <- Minga.SafeMode.active?(),
-         notice when is_binary(notice) <-
-           Minga.Extension.Bundled.git_porcelain_upgrade_notice(project_root) do
-      Minga.API.message(notice)
-    end
-
-    :ok
   end
 
   @spec renderer_pid_for_backend(EditorState.backend()) :: pid() | nil
@@ -1354,6 +1345,25 @@ defmodule MingaEditor do
   # Agent events are handled directly via Agent.Events, which reads and
   # writes agent/agentic fields on EditorState directly.
 
+  def handle_info({:agent_event, session, {:editor_arrival_ready, token, capture}}, state) do
+    {:noreply, Arrival.ready(state, session, token, capture)}
+  end
+
+  def handle_info({:agent_arrival_deadline, token}, state) do
+    {:noreply, Arrival.presentation_deadline(state, token)}
+  end
+
+  def handle_info({:volatile_queue_recalled, session, conversation, workspace, queued}, state) do
+    {:noreply,
+     MingaEditor.Agent.DraftWorkflow.apply_volatile_recall(
+       state,
+       session,
+       conversation,
+       workspace,
+       queued
+     )}
+  end
+
   def handle_info({:agent_event, session_pid, event}, state) do
     Log.debug(:agent, "[event] #{inspect(event)}")
     route_agent_event(state, session_pid, event)
@@ -1388,6 +1398,13 @@ defmodule MingaEditor do
     {:noreply, schedule_render(state, 16)}
   end
 
+  # Staged agent edits from before this Editor started (an Editor restart or
+  # the previous run), sent by MingaAgent.StagedDraftKeeper.
+  def handle_info({:staged_drafts_recovered, root, recoveries}, state) do
+    state = MingaEditor.Agent.EditPublication.recovered(state, root, recoveries)
+    {:noreply, schedule_render(state, 16)}
+  end
+
   def handle_info(:agent_spinner_tick, state) do
     state = MingaEditor.Agent.SessionEventWorkflow.spinner_tick(state)
     {:noreply, state}
@@ -1395,14 +1412,10 @@ defmodule MingaEditor do
 
   # Process died. Check buffer monitors and git remote tasks.
   # Agent session deaths are handled via :agent_session_stopped events from SessionManager.
-  def handle_info({:DOWN, ref, :process, pid, reason}, state) do
-    case classify_down(state, ref, pid, reason) do
-      :buffer ->
-        state = MingaEditor.Handlers.BufferRegistry.retire_dead_buffer(state, pid)
-        {:noreply, Renderer.render_or_async(state)}
-
-      :unknown ->
-        {:noreply, state}
+  def handle_info({:DOWN, ref, :process, pid, reason} = message, state) do
+    case Arrival.response(state, message) do
+      {:handled, updated} -> {:noreply, updated}
+      :unrelated -> handle_dependency_down(state, ref, pid, reason)
     end
   end
 
@@ -1486,8 +1499,11 @@ defmodule MingaEditor do
      MingaEditor.Agent.SessionOrganization.receive_result(state, origin, change, result)}
   end
 
-  def handle_info(_msg, state) do
-    {:noreply, state}
+  def handle_info(message, state) do
+    case Arrival.response(state, message) do
+      {:handled, updated} -> {:noreply, updated}
+      :unrelated -> {:noreply, state}
+    end
   end
 
   @spec apply_current_scheduler_result(state(), pid(), Outcome.t()) :: {:noreply, state()}
@@ -1577,6 +1593,19 @@ defmodule MingaEditor do
 
   # ── :DOWN classifier ────────────────────────────────────────────────────────
 
+  @spec handle_dependency_down(EditorState.t(), reference(), pid(), term()) ::
+          {:noreply, EditorState.t()}
+  defp handle_dependency_down(state, ref, pid, reason) do
+    case classify_down(state, ref, pid, reason) do
+      :buffer ->
+        state = MingaEditor.Handlers.BufferRegistry.retire_dead_buffer(state, pid)
+        {:noreply, Renderer.render_or_async(state)}
+
+      :unknown ->
+        {:noreply, state}
+    end
+  end
+
   @spec classify_down(EditorState.t(), reference(), pid(), term()) :: :buffer | :unknown
   defp classify_down(state, _ref, pid, _reason) do
     if Map.has_key?(state.buffer_lifecycle.buffer_monitors, pid), do: :buffer, else: :unknown
@@ -1619,8 +1648,10 @@ defmodule MingaEditor do
     # layout forces a full re-render, and the frame transaction's ThemeEncoder
     # re-emits gui_theme semantically (the new theme changes the adapter cache
     # fingerprint). A keyframe re-emits it for free. See MingaEditor.RuntimeThemePushTest for the proof.
-    state = EditorState.apply_theme(state, theme)
-    Layout.invalidate(state)
+    state
+    |> EditorState.apply_theme(theme)
+    |> MingaEditor.AgentLifecycle.restyle_transcript()
+    |> Layout.invalidate()
   end
 
   def apply_runtime_config_option(state, name, _value)
@@ -1747,8 +1778,9 @@ defmodule MingaEditor do
   end
 
   defp route_agent_event(state, session_pid, event, :active_agent) do
-    state = Events.dispatch(state, session_pid, event)
-    {:noreply, state}
+    if Arrival.pending?(state, session_pid),
+      do: {:noreply, Arrival.dispatch_before_capture(state, session_pid, event)},
+      else: {:noreply, Events.dispatch(state, session_pid, event)}
   end
 
   defp route_agent_event(state, _session_pid, _event, :unreachable), do: {:noreply, state}

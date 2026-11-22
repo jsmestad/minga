@@ -10,6 +10,19 @@ nonisolated public enum SemanticItemSurface: UInt8, Equatable, Sendable {
     case review = 6
 }
 
+/// A row offered by a particular installation of the Git status panel.
+nonisolated public struct GitStatusEntryTarget: Equatable, Sendable {
+    public let panelID: UInt64
+    public let path: String
+    public let section: UInt8
+
+    public init(panelID: UInt64, path: String, section: UInt8) {
+        self.panelID = panelID
+        self.path = path
+        self.section = section
+    }
+}
+
 /// A position in the immutable composed row that the frontend displayed.
 nonisolated public struct EditorTextTarget: Equatable, Sendable {
     public let windowID: UInt16
@@ -110,19 +123,19 @@ nonisolated public enum OutboundAction: Equatable, Sendable {
     case agentStopTurn(AgentStopTarget)
     case executeCommand(name: String)
     case openFile(path: String)
-    case gitStageFile(path: String)
-    case gitUnstageFile(path: String)
-    case gitDiscardFile(path: String)
-    case gitStageAll
-    case gitUnstageAll
-    case gitCommit(message: String)
-    case gitOpenFile(path: String)
-    case gitOpenDiff(path: String, section: UInt8)
-    case gitPush
-    case gitPull
-    case gitFetch
-    case gitCommitAmend(message: String)
-    case gitPullAndRetry
+    case gitStageFile(GitStatusEntryTarget)
+    case gitUnstageFile(GitStatusEntryTarget)
+    case gitDiscardFile(GitStatusEntryTarget)
+    case gitStageAll(panelID: UInt64)
+    case gitUnstageAll(panelID: UInt64)
+    case gitCommit(panelID: UInt64, message: String)
+    case gitOpenFile(GitStatusEntryTarget)
+    case gitOpenDiff(GitStatusEntryTarget)
+    case gitPush(panelID: UInt64)
+    case gitPull(panelID: UInt64)
+    case gitFetch(panelID: UInt64)
+    case gitCommitAmend(panelID: UInt64, message: String)
+    case gitPullAndRetry(toastID: UInt64)
     case workspaceRename(id: UInt16, name: String)
     case workspaceSetIcon(id: UInt16, icon: String)
     case workspaceClose(id: UInt16)

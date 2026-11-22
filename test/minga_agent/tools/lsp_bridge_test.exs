@@ -142,14 +142,15 @@ defmodule MingaAgent.Tools.LspBridgeTest do
     end
   end
 
-  describe "position_params/3" do
-    test "builds standard LSP position params" do
-      params = LspBridge.position_params("/home/dev/lib/foo.ex", 10, 5)
+  describe "position_params/4" do
+    test "names the document by its URI and converts the column from the buffer's line" do
+      buffer = start_supervised!({Minga.Buffer.Process, content: "x\né = foo\n"})
+      document = %{client: self(), uri: "file:///home/dev/lib/link.ex", buffer: buffer}
 
-      assert %{
-               "textDocument" => %{"uri" => "file:///home/dev/lib/foo.ex"},
-               "position" => %{"line" => 10, "character" => 5}
-             } = params
+      assert LspBridge.position_params(document, 1, 5, :utf16) == %{
+               "textDocument" => %{"uri" => "file:///home/dev/lib/link.ex"},
+               "position" => %{"line" => 1, "character" => 4}
+             }
     end
   end
 

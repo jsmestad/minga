@@ -24,8 +24,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
-- Git porcelain (the Git status panel actions, staging, commit, branch, stash, remote, and conflict workflows, and their `SPC g` keybindings) is now opt-in. Add `extension :git_porcelain` to `config.exs` and restart to keep using it; it ships with Minga, so no download is needed. [Optional extensions](docs/CONFIGURATION.md#optional-extensions) explains the change. The modeline branch, gutter signs, and file tree status work with or without it. Opening a git project without it writes one reminder to `*Messages*` at startup.
 - Adversarial, Knowledge Graph, and Ghost Cursors are now opt-in. [Add the corresponding Git install line](docs/CONFIGURATION.md#optional-extensions) and restart to keep using them. Existing Knowledge Graph data stays in place.
+- GitExtended replaces bundled Git porcelain. [Add its Git install line](docs/CONFIGURATION.md#optional-extensions) in place of `extension :git_porcelain` and restart to enable Git workflows and their `SPC g` bindings. The modeline branch, gutter signs, and file tree status work without it.
 - Elixir builds use checked-in protocol and language-alias sources. Run `mix codegen` to refresh them after schema changes; CI rejects drift.
 - Standalone TUI downloads are native Mix release archives instead of self-extracting binaries. Linux builds target Ubuntu 24.04 glibc; the macOS DMG build is unchanged.
 - Generated Python bytecode is excluded from version control while local script caches remain untouched.
@@ -39,6 +39,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - Native approval geometry checks bind the live host and window to their run before making one foreground request. Acceptance still requires external foreground observation, global button hits, native captures and complete child cleanup.
 - macOS Agent elapsed-time refreshes stop when the context bar disappears and refresh immediately when a new dispatch timestamp arrives.
 - Agent tab and workspace names use the transcript already read by the editor instead of requesting the same conversation again.
+- Switching to a busy local Agent session stops waiting after 250 ms. Your draft and transcript position are retained, and live controls return automatically when the session answers.
 - On macOS, typing in the Agent composer, moving the caret and opening prompt completion no longer re-evaluate the conversation, so typing costs the same in a long session as in a new one.
 - Idle Agent activity no longer appears as completed work while unfinished tasks or retained activity remain visible.
 - Agent activity keeps showing the remaining tool when another concurrent call finishes. Tool updates no longer read the Session to choose an active tool.
@@ -158,6 +159,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- Staged agent edits survive an editor crash or restart. After the editor restarts on its own they come back to their workspace; after Minga exits without publishing or discarding them, the next start for the project restores them, says so in `*Messages*`, and offers **Publish** and **Discard** again. A file that changed on disk in the meantime is merged or kept as a conflict, never overwritten, and a saved edit that cannot be restored is reported as lost by name. The saved copies are private files that are deleted on publish or discard.
 - Approved edits from an agent session started in the editor no longer vanish. They are staged until you publish them: when the turn ends, a notification offers **Publish** and **Discard** (clickable on macOS and in the terminal), `SPC a p` publishes and `SPC a P` discards, and publishing updates the file on disk and any open buffer. `:q`, `:wq`, `:qa`, `:wqa`, and quitting the macOS app stop while edits are staged; `:q!`, `:qa!` and `:cq` discard them on purpose.
 - The macOS startup screen shows the Minga logo and loading phrases again. **Quit Minga** appears after ten seconds.
 - CI can save a refreshed Dialyzer cache when `mix.exs` changes which applications the PLT includes, instead of repeating that repair on every run.

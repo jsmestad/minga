@@ -288,6 +288,7 @@ defmodule MingaEditor.UI.Picker.AgentRetainedOutputSource do
          reference: reference
        })
        when node(session) == node() do
+    # minga:allow-blocking — async_fetch/1 runs the reader in the picker fetch worker (async?/0 is true)
     {:ok, &Session.read_retained_output(target, message_id, reference, &1)}
   end
 

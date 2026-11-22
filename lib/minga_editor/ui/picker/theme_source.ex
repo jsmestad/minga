@@ -57,6 +57,7 @@ defmodule MingaEditor.UI.Picker.ThemeSource do
   defp put_theme(%EditorState{} = state, %Theme{} = theme) do
     state
     |> EditorState.apply_theme(theme)
+    |> MingaEditor.AgentLifecycle.restyle_transcript()
     |> EditorState.reset_frontend_render_state()
   end
 

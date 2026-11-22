@@ -2,24 +2,24 @@ defmodule Minga.Git.Tracker do
   @moduledoc """
   Manages git buffer lifecycle by subscribing to the event bus.
 
-  Listens for `:buffer_opened` and `:buffer_saved` events. When a file
-  buffer is opened in a git repository, starts a `Git.Buffer` GenServer
-  to track diffs. When a buffer is saved, invalidates the cached HEAD
-  version so the diff reflects the new base.
+  Starts a `Git.Buffer` for a file in a repository and replaces the
+  binding when the buffer adopts a different path or reloads a different
+  target through the same alias. A save at the same target invalidates
+  the cached HEAD version.
 
   Maintains an ETS table (`Minga.Git.Tracker.Registry`) mapping buffer
   pids to git buffer pids. The renderer and git commands look up git
   buffer pids from this table instead of the Editor state.
 
-  Monitors buffer pids so entries are cleaned up when buffers are killed.
+  Monitors source buffers and retires their bindings when they close.
   """
 
   use GenServer
 
   alias Minga.Buffer
+  alias Minga.Events
   alias Minga.Git
   alias Minga.Git.Buffer, as: GitBuffer
-  alias Minga.Events
 
   @registry_table __MODULE__.Registry
 
@@ -82,8 +82,16 @@ defmodule Minga.Git.Tracker do
 
   # ── GenServer callbacks ────────────────────────────────────────────────
 
+  @typep binding :: %{
+           path: String.t(),
+           canonical_target: String.t(),
+           git_root: String.t(),
+           git_pid: pid(),
+           monitor: reference()
+         }
+
   @typep tracker_state :: %{
-           monitors: %{reference() => {pid(), String.t()}},
+           bindings: %{pid() => binding()},
            repo_buffer_counts: %{String.t() => pos_integer()},
            events_registry: Events.registry(),
            registry_table: atom()
@@ -104,11 +112,13 @@ defmodule Minga.Git.Tracker do
 
     Events.subscribe(:buffer_opened, events_registry)
     Events.subscribe(:buffer_saved, events_registry)
+    Events.subscribe(:buffer_path_changed, events_registry)
     Events.subscribe(:buffer_changed, events_registry)
+    Events.subscribe(:content_replaced, events_registry)
 
     {:ok,
      %{
-       monitors: %{},
+       bindings: %{},
        repo_buffer_counts: %{},
        events_registry: events_registry,
        registry_table: registry_table
@@ -126,40 +136,32 @@ defmodule Minga.Git.Tracker do
     {:noreply, state}
   end
 
-  def handle_info(
-        {:minga_event, :buffer_opened, %Events.BufferEvent{buffer: buf, path: path}},
-        state
-      )
+  def handle_info({:minga_event, topic, %Events.BufferEvent{buffer: buf}}, state)
+      when topic in [:buffer_opened, :buffer_path_changed, :content_replaced] and is_pid(buf) do
+    {:noreply, sync_tracking(state, buf, current_path(buf))}
+  end
+
+  def handle_info({:minga_event, :buffer_saved, %Events.BufferEvent{buffer: buf}}, state)
       when is_pid(buf) do
-    # Start Git.Repo for the git root (if not already running) before
-    # per-buffer tracking. This ensures repo-wide state is available
-    # for the status panel and modeline even before per-buffer diffs.
-    ensure_repo_for_path(path, state.events_registry)
-    state = maybe_start_git_buffer(state, buf, path)
+    # The saved path may be an alias or a path the buffer just adopted.
+    # Only refresh the HEAD cache for the currently bound path.
+    with %{^buf => %{path: path, canonical_target: target, git_pid: git_pid}} <- state.bindings,
+         ^target <- GitBuffer.canonical_target(path),
+         {:ok, content} <- content_at_path(buf, path) do
+      GitBuffer.invalidate_base(git_pid, content)
+    end
+
     {:noreply, state}
   end
 
-  def handle_info(
-        {:minga_event, :buffer_saved, %Events.BufferEvent{buffer: buf}},
-        state
-      )
-      when is_pid(buf) do
-    invalidate_on_save(buf, state.registry_table)
-    {:noreply, state}
-  end
+  def handle_info({:DOWN, ref, :process, buf, _reason}, state) do
+    case state.bindings do
+      %{^buf => %{monitor: ^ref} = binding} ->
+        state = unregister_binding(state, buf)
+        {:noreply, release_binding(state, binding)}
 
-  def handle_info({:DOWN, ref, :process, _pid, _reason}, state) do
-    case Map.pop(state.monitors, ref) do
-      {nil, monitors} ->
-        {:noreply, %{state | monitors: monitors}}
-
-      {{buffer_pid, git_root}, monitors} ->
-        # Clean up the git buffer registry entry
-        :ets.delete(state.registry_table, buffer_pid)
-
-        # Decrement repo buffer count; stop Git.Repo when no buffers remain
-        repo_counts = maybe_decrement_repo_count(state.repo_buffer_counts, git_root)
-        {:noreply, %{state | monitors: monitors, repo_buffer_counts: repo_counts}}
+      _ ->
+        {:noreply, state}
     end
   end
 
@@ -182,50 +184,109 @@ defmodule Minga.Git.Tracker do
     :exit, _ -> :ok
   end
 
-  @spec maybe_start_git_buffer(map(), pid(), String.t()) :: map()
-  defp maybe_start_git_buffer(state, buffer_pid, path) do
-    with {:ok, git_root} <- Git.root_for(path),
-         {content, _cursor} <- Buffer.content_and_cursor(buffer_pid),
+  @spec current_path(pid()) :: String.t() | nil
+  defp current_path(buffer_pid) do
+    Buffer.file_path(buffer_pid)
+  catch
+    :exit, _ -> nil
+  end
+
+  @spec content_at_path(pid(), String.t()) :: {:ok, binary()} | :unavailable
+  defp content_at_path(buffer_pid, path) do
+    case Buffer.file_observation(buffer_pid) do
+      {^path, content, _cursor, _version} -> {:ok, content}
+      _ -> :unavailable
+    end
+  catch
+    :exit, _ -> :unavailable
+  end
+
+  @spec sync_tracking(tracker_state(), pid(), String.t() | nil) :: tracker_state()
+  defp sync_tracking(state, _buffer_pid, nil), do: state
+
+  defp sync_tracking(state, buffer_pid, path) do
+    target = GitBuffer.canonical_target(path)
+
+    case Map.get(state.bindings, buffer_pid) do
+      %{path: ^path, canonical_target: ^target, git_pid: git_pid} ->
+        with {:ok, content} <- content_at_path(buffer_pid, path) do
+          GitBuffer.update(git_pid, content)
+        end
+
+        state
+
+      nil ->
+        maybe_start_git_buffer(state, buffer_pid, path, target)
+
+      previous ->
+        state = unregister_binding(state, buffer_pid)
+        state = maybe_start_git_buffer(state, buffer_pid, path, target)
+        # Count a same-repo replacement before retiring its predecessor.
+        release_binding(state, previous)
+    end
+  end
+
+  @spec maybe_start_git_buffer(tracker_state(), pid(), String.t(), String.t() | nil) ::
+          tracker_state()
+  defp maybe_start_git_buffer(state, _buffer_pid, _path, nil), do: state
+
+  defp maybe_start_git_buffer(state, buffer_pid, path, target) do
+    with {:ok, git_root} <- Git.root_for(target),
+         {:ok, content} <- content_at_path(buffer_pid, path),
          {:ok, git_pid} <-
            DynamicSupervisor.start_child(
              Minga.Buffer.Supervisor,
-             {GitBuffer, git_root: git_root, file_path: path, initial_content: content}
+             {GitBuffer,
+              git_root: git_root,
+              file_path: path,
+              canonical_target: target,
+              initial_content: content}
            ) do
+      ensure_repo(git_root, state.events_registry)
       :ets.insert(state.registry_table, {buffer_pid, git_pid})
-      ref = Process.monitor(buffer_pid)
-      rel_path = Path.relative_to(path, git_root)
 
       Events.broadcast(
         :log_message,
         %Events.LogMessageEvent{
-          text: "Git: tracking #{rel_path}",
+          text: "Git: tracking #{Path.relative_to(target, git_root)}",
           level: :info
         },
         state.events_registry
       )
 
-      repo_counts = Map.update(state.repo_buffer_counts, git_root, 1, &(&1 + 1))
+      binding = %{
+        path: path,
+        canonical_target: target,
+        git_root: git_root,
+        git_pid: git_pid,
+        monitor: Process.monitor(buffer_pid)
+      }
 
-      # Store {buffer_pid, git_root} so we can decrement repo counts
-      # without calling back into a potentially-dead GitBuffer process.
       %{
         state
-        | monitors: Map.put(state.monitors, ref, {buffer_pid, git_root}),
-          repo_buffer_counts: repo_counts
+        | bindings: Map.put(state.bindings, buffer_pid, binding),
+          repo_buffer_counts: Map.update(state.repo_buffer_counts, git_root, 1, &(&1 + 1))
       }
     else
       _ -> state
     end
-  catch
-    :exit, _ -> state
   end
 
-  @spec ensure_repo_for_path(String.t(), Events.registry()) :: :ok
-  defp ensure_repo_for_path(path, events_registry) do
-    case Git.root_for(path) do
-      {:ok, git_root} -> ensure_repo(git_root, events_registry)
-      :not_git -> :ok
-    end
+  @spec unregister_binding(tracker_state(), pid()) :: tracker_state()
+  defp unregister_binding(state, buffer_pid) do
+    :ets.delete(state.registry_table, buffer_pid)
+    %{state | bindings: Map.delete(state.bindings, buffer_pid)}
+  end
+
+  @spec release_binding(tracker_state(), binding()) :: tracker_state()
+  defp release_binding(state, binding) do
+    Process.demonitor(binding.monitor, [:flush])
+    DynamicSupervisor.terminate_child(Minga.Buffer.Supervisor, binding.git_pid)
+
+    %{
+      state
+      | repo_buffer_counts: decrement_repo_count(state.repo_buffer_counts, binding.git_root)
+    }
   end
 
   @spec ensure_repo(String.t(), Events.registry()) :: :ok
@@ -254,16 +315,11 @@ defmodule Minga.Git.Tracker do
     end
   end
 
-  @spec maybe_decrement_repo_count(%{String.t() => pos_integer()}, String.t() | nil) :: %{
+  @spec decrement_repo_count(%{String.t() => pos_integer()}, String.t()) :: %{
           String.t() => pos_integer()
         }
-  defp maybe_decrement_repo_count(counts, nil), do: counts
-
-  defp maybe_decrement_repo_count(counts, git_root) do
-    case Map.get(counts, git_root) do
-      nil ->
-        counts
-
+  defp decrement_repo_count(counts, git_root) do
+    case Map.fetch!(counts, git_root) do
       1 ->
         # Last buffer for this repo closed; stop Git.Repo
         stop_repo(git_root)
@@ -282,21 +338,6 @@ defmodule Minga.Git.Tracker do
 
       pid ->
         DynamicSupervisor.terminate_child(Minga.Git.Repo.Supervisor, pid)
-        :ok
-    end
-  catch
-    :exit, _ -> :ok
-  end
-
-  @spec invalidate_on_save(pid(), atom()) :: :ok
-  defp invalidate_on_save(buf, registry_table) do
-    case lookup(buf, registry_table) do
-      nil ->
-        :ok
-
-      git_pid ->
-        {content, _cursor} = Buffer.content_and_cursor(buf)
-        GitBuffer.invalidate_base(git_pid, content)
         :ok
     end
   catch

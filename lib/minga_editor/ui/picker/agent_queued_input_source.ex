@@ -144,15 +144,18 @@ defmodule MingaEditor.UI.Picker.AgentQueuedInputSource do
     {:ok,
      fn
        :read_queue ->
+         # minga:allow-blocking — closure runs in an EffectScheduler worker, not the Editor
          Session.queued_input_summaries(session, record)
 
        {:withdraw_queued_input, identity} ->
          Session.change_queued_input(session, record, identity, :remove)
 
        {:read_queued_input_text, identity} ->
+         # minga:allow-blocking — closure runs in an EffectScheduler worker, not the Editor
          Session.queued_input_text(session, record, identity)
 
        {:edit_queued_input, identity, text} ->
+         # minga:allow-blocking — closure runs in the QueuedInputEdit effect under EffectScheduler, not in the Editor
          selection = Session.model_selection(session)
 
          with {:ok, resolved} <-

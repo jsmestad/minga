@@ -1,6 +1,6 @@
 defmodule Minga.Git.BackendOperationsTest do
   @moduledoc """
-  Tests for the unstage, unstage_all, discard, and stash backend callbacks.
+  Tests for Git mutations and stable history pagination.
 
   Uses a real temporary git repository (async: false) since these
   operations require actual git state. Each test creates a clean repo
@@ -22,6 +22,27 @@ defmodule Minga.Git.BackendOperationsTest do
     {"GIT_COMMITTER_NAME", "Test"},
     {"GIT_COMMITTER_EMAIL", "test@test.com"}
   ]
+
+  @tag :tmp_dir
+  test "a pinned file history page does not shift after HEAD moves", %{tmp_dir: dir} do
+    init_git_repo(dir)
+    path = "file.txt"
+
+    for message <- ["first", "second"] do
+      File.write!(Path.join(dir, path), message)
+      git_cmd(dir, ["add", path])
+      git_cmd(dir, ["commit", "-m", message])
+    end
+
+    assert {:ok, [%{hash: revision, message: "second"}]} =
+             Minga.Git.System.log(dir, count: 1)
+
+    File.write!(Path.join(dir, path), "new head")
+    git_cmd(dir, ["commit", "-am", "new head"])
+
+    assert {:ok, [%{message: "first"}]} =
+             Minga.Git.System.log(dir, count: 1, path: path, revision: revision, skip: 1)
+  end
 
   describe "unstage/2" do
     @tag :tmp_dir

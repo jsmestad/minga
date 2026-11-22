@@ -12,24 +12,26 @@ import (
 	"github.com/rivo/uniseg"
 )
 
-func (m Model) content() string {
+func (m Model) renderBody() (string, *gitStatusHits) {
 	if chat, ok := m.agentChat(); ok && chat.Visible {
-		return strings.Join(m.withFileTree(m.renderAgentChatBody(chat)), "\n")
+		lines, hits := m.withFileTree(m.renderAgentChatBody(chat))
+		return strings.Join(lines, "\n"), hits
 	}
 	// The launchpad (#2689) takes over the editor region when the workspace has
 	// zero buffers, exactly as the zero-windows path below takes over: its
 	// content replaces window content, not overlays it.
 	if state, ok := m.emptyState(); ok && state.Visible {
-		return strings.Join(m.renderEmptyState(state), "\n")
+		return strings.Join(m.renderEmptyState(state), "\n"), nil
 	}
+	var lines []string
 	if len(m.windows) > 0 {
-		return strings.Join(m.fillBody(m.withFileTree(m.withSplitSeparators(m.semanticLines()))), "\n")
+		lines = m.semanticLines()
+	} else {
+		// Startup/teardown still composes chrome over the empty semantic canvas.
+		lines = m.withLegacyCursorline(nil)
 	}
-	// No semantic windows yet (startup/teardown): render an empty body with the
-	// semantic chrome overlays still applied. The cell-grid fallback was retired
-	// with the cell-paradigm opcodes (protocol_version 2); the BEAM only emits
-	// semantic windows now.
-	return strings.Join(m.fillBody(m.withFileTree(m.withSplitSeparators(m.withLegacyCursorline(nil)))), "\n")
+	lines, hits := m.withFileTree(m.withSplitSeparators(lines))
+	return strings.Join(m.fillBody(lines), "\n"), hits
 }
 
 func (m Model) semanticLines() []string {
@@ -914,7 +916,7 @@ func splitGraphemes(value string) []string {
 	return parts
 }
 
-func (m Model) withFileTree(mainLines []string) []string {
+func (m Model) withFileTree(mainLines []string) ([]string, *gitStatusHits) {
 	tree, ok := m.fileTree()
 	if !ok || !tree.Visible || tree.Width == 0 || m.width < 50 {
 		return m.withSemanticSidebars(mainLines)
@@ -944,17 +946,17 @@ func (m Model) withFileTree(mainLines []string) []string {
 		}
 		lines[i] = lipgloss.JoinHorizontal(lipgloss.Top, left, right)
 	}
-	return lines
+	return lines, nil
 }
 
-func (m Model) withSemanticSidebars(mainLines []string) []string {
+func (m Model) withSemanticSidebars(mainLines []string) ([]string, *gitStatusHits) {
 	sidebars, ok := m.sidebars()
 	if !ok || len(sidebars.Items) == 0 || m.width < 60 {
-		return mainLines
+		return mainLines, nil
 	}
 	visible := visibleSidebars(sidebars)
 	if len(visible) == 0 {
-		return mainLines
+		return mainLines, nil
 	}
 	width := semanticSidebarWidth(m.width, sidebars)
 	theme := m.palette()
@@ -962,6 +964,20 @@ func (m Model) withSemanticSidebars(mainLines []string) []string {
 	activeStyle := style.Bold(true).Foreground(theme.Text()).Background(theme.Selection())
 	sepStyle := lipgloss.NewStyle().Foreground(theme.TreeSeparator()).Background(m.editorBackground())
 	sep := sepStyle.Render("│")
+	if sidebars.ActiveID == "git_status" {
+		if git, ok := m.gitStatus(); ok {
+			height := max(len(mainLines), m.bodyHeight())
+			hits := &gitStatusHits{
+				box:     uiRect{Y: m.layout.body.Y, Width: width + 1, Height: m.bodyHeight()},
+				panelID: git.PanelID,
+			}
+			panel := m.renderGitStatusPanel(git, style, activeStyle, width, height, hits)
+			for i := range panel {
+				panel[i] = lipgloss.JoinHorizontal(lipgloss.Top, panel[i], sep, lineAt(mainLines, i))
+			}
+			return panel, hits
+		}
+	}
 	lines := make([]string, max(len(mainLines), len(visible)+1))
 	lines[0] = lipgloss.JoinHorizontal(lipgloss.Top, style.Bold(true).Render(fit("Sidebars", width)), sep, lineAt(mainLines, 0))
 	for i, item := range visible {
@@ -979,7 +995,7 @@ func (m Model) withSemanticSidebars(mainLines []string) []string {
 	for i := len(visible) + 1; i < len(lines); i++ {
 		lines[i] = lipgloss.JoinHorizontal(lipgloss.Top, style.Render(strings.Repeat(" ", width)), sep, lineAt(mainLines, i))
 	}
-	return lines
+	return lines, nil
 }
 
 func presentedGutterEntry(wrappedResident bool, gutter protocol.Gutter, rank int, row protocol.WindowRow, hasRow bool) (protocol.GutterEntry, bool) {

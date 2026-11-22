@@ -23,6 +23,8 @@ defmodule Minga.Git.Stub do
 
   @behaviour Minga.Git.Backend
 
+  alias Minga.Git.Change
+
   @table __MODULE__
 
   # ── Table lifecycle ────────────────────────────────────────────────────
@@ -69,10 +71,19 @@ defmodule Minga.Git.Stub do
     :ok
   end
 
-  @doc "Sets the staged index content for a file in a git root."
-  @spec set_staged(String.t(), String.t(), String.t()) :: :ok
-  def set_staged(git_root, relative_path, content) do
-    :ets.insert(@table, {{:staged, Path.expand(git_root), relative_path}, content})
+  @doc "Overrides a staged blob for the path, or marks the index entry as deleted."
+  @spec set_staged(String.t(), String.t(), String.t() | :deleted) :: :ok
+  def set_staged(git_root, relative_path, :deleted),
+    do: set_index_blob(git_root, relative_path, {:ok, nil})
+
+  def set_staged(git_root, relative_path, content),
+    do: set_index_blob(git_root, relative_path, {:ok, content})
+
+  @doc "Sets the exact stage-zero blob, absence, or lookup error for a path."
+  @spec set_index_blob(String.t(), String.t(), {:ok, binary() | nil} | {:error, String.t()}) ::
+          :ok
+  def set_index_blob(git_root, relative_path, result) do
+    :ets.insert(@table, {{:staged, Path.expand(git_root), relative_path}, result})
     :ok
   end
 
@@ -238,9 +249,22 @@ defmodule Minga.Git.Stub do
   @impl true
   @spec show_staged(String.t(), String.t()) :: {:ok, String.t()} | :error
   def show_staged(git_root, relative_path) do
-    case :ets.lookup(@table, {:staged, Path.expand(git_root), relative_path}) do
-      [{_, content}] -> {:ok, content}
-      [] -> :error
+    case index_blob(git_root, relative_path) do
+      {:ok, content} when is_binary(content) -> {:ok, content}
+      _ -> :error
+    end
+  end
+
+  @impl true
+  @spec index_blob(String.t(), String.t()) :: {:ok, binary() | nil} | {:error, String.t()}
+  def index_blob(git_root, relative_path) do
+    with :ok <- Change.validate_path(relative_path) do
+      expanded = Path.expand(git_root)
+
+      case :ets.lookup(@table, {:staged, expanded, relative_path}) do
+        [{_, result}] -> result
+        [] -> default_index_blob(expanded, relative_path)
+      end
     end
   end
 
@@ -304,30 +328,8 @@ defmodule Minga.Git.Stub do
   def stage(git_root, paths) do
     expanded = Path.expand(git_root)
 
-    case :ets.lookup(@table, {:stage_blocker, expanded}) do
-      [{_, notify_pid}] ->
-        send(notify_pid, {:stub_stage_blocked, self()})
-        receive do: (:unblock_stub_stage -> :ok)
-
-      [] ->
-        :ok
-    end
-
-    case :ets.lookup(@table, {:stage_result, expanded}) do
-      [{_, {:error, _} = err}] ->
-        err
-
-      _ ->
-        new_paths = List.wrap(paths)
-
-        existing =
-          case :ets.lookup(@table, {:staged_paths, expanded}) do
-            [{_, staged}] -> staged
-            [] -> []
-          end
-
-        :ets.insert(@table, {{:staged_paths, expanded}, Enum.reverse(new_paths) ++ existing})
-        :ok
+    with :ok <- stage_result(expanded) do
+      record_staged_paths(expanded, List.wrap(paths))
     end
   end
 
@@ -359,6 +361,24 @@ defmodule Minga.Git.Stub do
   @impl true
   @spec stage_patch(String.t(), String.t()) :: :ok
   def stage_patch(_git_root, _patch), do: :ok
+
+  @impl true
+  @spec stage_change(String.t(), String.t(), binary() | nil, binary() | nil, Minga.Git.change()) ::
+          :ok | {:error, String.t()}
+  def stage_change(git_root, relative_path, base, revised, change) do
+    expanded = Path.expand(git_root)
+
+    with :ok <- stage_result(expanded),
+         {:ok, index} <- index_blob(expanded, relative_path),
+         {:ok, result} <- Change.stage_result(base, revised, change, index) do
+      if result != index do
+        set_index_blob(expanded, relative_path, {:ok, result})
+        record_staged_paths(expanded, [relative_path])
+      end
+
+      :ok
+    end
+  end
 
   @impl true
   @spec current_branch(String.t()) :: {:ok, String.t()} | :error
@@ -575,6 +595,65 @@ defmodule Minga.Git.Stub do
   end
 
   # ── Private ────────────────────────────────────────────────────────────
+
+  @spec default_index_blob(String.t(), String.t()) ::
+          {:ok, binary() | nil} | {:error, String.t()}
+  defp default_index_blob(expanded, relative_path) do
+    status_entry =
+      case :ets.lookup(@table, {:status, expanded}) do
+        [{_, entries}] ->
+          Enum.find(entries, fn entry ->
+            entry.path == relative_path and
+              (entry.status == :conflict or (entry.staged and entry.status == :deleted))
+          end)
+
+        [] ->
+          nil
+      end
+
+    case status_entry do
+      %{status: :conflict} ->
+        {:error, "The Git index path is unmerged."}
+
+      %{status: :deleted} ->
+        {:ok, nil}
+
+      nil ->
+        case show_head(expanded, relative_path) do
+          {:ok, content} -> {:ok, content}
+          :error -> {:ok, nil}
+        end
+    end
+  end
+
+  @spec stage_result(String.t()) :: :ok | {:error, String.t()}
+  defp stage_result(expanded) do
+    case :ets.lookup(@table, {:stage_blocker, expanded}) do
+      [{_, notify_pid}] ->
+        send(notify_pid, {:stub_stage_blocked, self()})
+        receive do: (:unblock_stub_stage -> :ok)
+
+      [] ->
+        :ok
+    end
+
+    case :ets.lookup(@table, {:stage_result, expanded}) do
+      [{_, result}] -> result
+      [] -> :ok
+    end
+  end
+
+  @spec record_staged_paths(String.t(), [String.t()]) :: :ok
+  defp record_staged_paths(expanded, new_paths) do
+    existing =
+      case :ets.lookup(@table, {:staged_paths, expanded}) do
+        [{_, staged}] -> staged
+        [] -> []
+      end
+
+    :ets.insert(@table, {{:staged_paths, expanded}, Enum.reverse(new_paths, existing)})
+    :ok
+  end
 
   @spec remote_operation(String.t(), :push | :pull | :fetch) :: :ok | {:error, String.t()}
   defp remote_operation(git_root, operation) do

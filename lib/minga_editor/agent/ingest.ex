@@ -315,6 +315,7 @@ defmodule MingaEditor.Agent.Ingest do
 
   @spec do_subscribe(pid(), keyword()) :: :ok | {:error, term()}
   defp do_subscribe(session_pid, opts) do
+    # minga:allow-blocking — runs in the Ingest process on the Editor's behalf, not in the Editor
     case Session.subscribe(session_pid, self(), opts, @session_subscribe_timeout_ms) do
       :ok ->
         # Monitor the session so its abrupt death (no control event) still drops

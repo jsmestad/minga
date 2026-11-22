@@ -36,6 +36,8 @@ defmodule MingaAgent.Session.Transcript do
           {name :: String.t(), messages :: [Message.t()], message_ids :: [term()],
            created_at :: DateTime.t()}
 
+  @typep pin_index :: :gb_trees.tree({non_neg_integer(), pos_integer()}, boolean())
+
   @typedoc "Canonical transcript state owned by one Session process."
   @type t :: %__MODULE__{
           active: Active.t(),
@@ -46,7 +48,8 @@ defmodule MingaAgent.Session.Transcript do
           usage: TurnUsage.t(),
           pinned_ids: MapSet.t(pos_integer()),
           revision: non_neg_integer(),
-          pins_revision: non_neg_integer(),
+          pin_revisions: %{optional(pos_integer()) => non_neg_integer()},
+          pin_changes: pin_index(),
           usage_revision: non_neg_integer(),
           timestamp_revision: non_neg_integer(),
           last_changed_at: DateTime.t()
@@ -61,7 +64,8 @@ defmodule MingaAgent.Session.Transcript do
     :usage,
     :pinned_ids,
     :revision,
-    :pins_revision,
+    :pin_revisions,
+    :pin_changes,
     :usage_revision,
     :timestamp_revision,
     :last_changed_at
@@ -91,7 +95,8 @@ defmodule MingaAgent.Session.Transcript do
       usage: TurnUsage.new(),
       pinned_ids: MapSet.new(),
       revision: 0,
-      pins_revision: 0,
+      pin_revisions: %{},
+      pin_changes: :gb_trees.empty(),
       usage_revision: 0,
       timestamp_revision: 0,
       last_changed_at: changed_at
@@ -132,7 +137,6 @@ defmodule MingaAgent.Session.Transcript do
         usage: usage,
         pinned_ids: pinned_ids,
         last_changed_at: changed_at,
-        pins_revision: next.revision,
         usage_revision: next.revision,
         timestamp_revision: next.revision
     }
@@ -210,17 +214,30 @@ defmodule MingaAgent.Session.Transcript do
     Changes.new(
       cursor(transcript),
       Active.changed_since(transcript.active, revision),
-      transcript.pinned_ids,
+      pin_changes_since(transcript.pin_changes, revision),
       transcript.usage,
       transcript.last_changed_at,
       transcript.next_id,
       Active.size(transcript.active),
       %{
-        pins_changed?: transcript.pins_revision > revision,
         usage_changed?: transcript.usage_revision > revision,
         timestamp_changed?: transcript.timestamp_revision > revision
       }
     )
+  end
+
+  @spec pin_changes_since(pin_index(), non_neg_integer()) :: [Changes.pin_fact()]
+  defp pin_changes_since(index, revision) do
+    {revision + 1, 0}
+    |> :gb_trees.iterator_from(index)
+    |> :gb_trees.next()
+    |> collect_pin_changes([])
+  end
+
+  defp collect_pin_changes(:none, facts), do: facts
+
+  defp collect_pin_changes({{_revision, id}, pinned?, iterator}, facts) do
+    collect_pin_changes(:gb_trees.next(iterator), [{id, pinned?} | facts])
   end
 
   defp snapshot(transcript) do
@@ -291,12 +308,30 @@ defmodule MingaAgent.Session.Transcript do
   def append_many(%__MODULE__{} = transcript, messages) when is_list(messages) do
     revision = transcript.revision + 1
 
-    {active, next_id} =
-      Enum.reduce(messages, {transcript.active, transcript.next_id}, fn message, {active, id} ->
-        {Active.append(active, TranscriptEntry.new(id, message), revision), id + 1}
-      end)
+    {active, next_id, pin_changes, pin_revisions} =
+      Enum.reduce(
+        messages,
+        {transcript.active, transcript.next_id, transcript.pin_changes, transcript.pin_revisions},
+        fn message, {active, id, pin_changes, pin_revisions} ->
+          active = Active.append(active, TranscriptEntry.new(id, message), revision)
 
-    %{transcript | active: active, next_id: next_id, revision: revision}
+          if MapSet.member?(transcript.pinned_ids, id) do
+            pin_changes = :gb_trees.insert({revision, id}, true, pin_changes)
+            {active, id + 1, pin_changes, Map.put(pin_revisions, id, revision)}
+          else
+            {active, id + 1, pin_changes, pin_revisions}
+          end
+        end
+      )
+
+    %{
+      transcript
+      | active: active,
+        next_id: next_id,
+        revision: revision,
+        pin_changes: pin_changes,
+        pin_revisions: pin_revisions
+    }
   end
 
   @doc "Replaces or appends the indexed streaming tail from a whole batch of chunks."
@@ -440,9 +475,31 @@ defmodule MingaAgent.Session.Transcript do
   @spec toggle_pin(t(), pos_integer()) :: t()
   def toggle_pin(%__MODULE__{} = transcript, message_id)
       when is_integer(message_id) and message_id > 0 do
-    pinned_ids = toggle_member(transcript.pinned_ids, message_id)
     revision = transcript.revision + 1
-    %{transcript | pinned_ids: pinned_ids, revision: revision, pins_revision: revision}
+    pinned? = not MapSet.member?(transcript.pinned_ids, message_id)
+
+    pinned_ids =
+      if pinned?,
+        do: MapSet.put(transcript.pinned_ids, message_id),
+        else: MapSet.delete(transcript.pinned_ids, message_id)
+
+    next = %{transcript | pinned_ids: pinned_ids, revision: revision}
+
+    if Active.has_id?(transcript.active, message_id) do
+      pin_changes =
+        case Map.fetch(transcript.pin_revisions, message_id) do
+          {:ok, previous} -> :gb_trees.delete({previous, message_id}, transcript.pin_changes)
+          :error -> transcript.pin_changes
+        end
+
+      %{
+        next
+        | pin_changes: :gb_trees.insert({revision, message_id}, pinned?, pin_changes),
+          pin_revisions: Map.put(transcript.pin_revisions, message_id, revision)
+      }
+    else
+      next
+    end
   end
 
   @doc "Creates a frozen branch snapshot and truncates the active transcript."
@@ -484,7 +541,7 @@ defmodule MingaAgent.Session.Transcript do
         pins = retain_branch_pins(transcript.pinned_ids, transcript.branches)
         next = reset_active(transcript, branch.entries)
 
-        {:ok, %{next | pinned_ids: pins, pins_revision: next.revision}}
+        {:ok, %{next | pinned_ids: pins}}
     end
   end
 
@@ -517,7 +574,6 @@ defmodule MingaAgent.Session.Transcript do
         branches: [],
         usage: TurnUsage.new(),
         pinned_ids: MapSet.new(),
-        pins_revision: next.revision,
         usage_revision: next.revision
     }
   end
@@ -553,18 +609,15 @@ defmodule MingaAgent.Session.Transcript do
       transcript
       | active: Active.new(entries, revision),
         generation: transcript.generation + 1,
-        revision: revision
+        revision: revision,
+        pin_changes: :gb_trees.empty(),
+        pin_revisions: %{}
     }
   end
 
   @spec stream_message(stream_kind(), String.t()) :: Message.t()
   defp stream_message(:assistant, text), do: Message.assistant(text)
   defp stream_message(:thinking, text), do: Message.thinking(text)
-
-  @spec toggle_member(MapSet.t(pos_integer()), pos_integer()) :: MapSet.t(pos_integer())
-  defp toggle_member(set, id) do
-    if MapSet.member?(set, id), do: MapSet.delete(set, id), else: MapSet.put(set, id)
-  end
 
   @spec retain_branch_pins(MapSet.t(pos_integer()), [Branch.t()]) :: MapSet.t(pos_integer())
   defp retain_branch_pins(pins, branches) do

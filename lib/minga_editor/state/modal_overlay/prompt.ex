@@ -4,13 +4,13 @@ defmodule MingaEditor.State.ModalOverlay.Prompt do
 
   Wraps the existing `MingaEditor.State.Prompt` struct with the metadata the
   ModalOverlay sum type carries for every variant: `opened_at` (monotonic
-  millisecond timestamp) and `owner`. Prompts are global UX, so `owner`
-  defaults to `:global`.
+  millisecond timestamp) and `owner`. Built-in prompts use `:global`;
+  extension prompts carry the source that opened them.
   """
 
   alias MingaEditor.State.Prompt, as: PromptState
 
-  @type owner :: term()
+  @type owner :: :global | Minga.Extension.CallbackInvoker.source()
 
   @type t :: %__MODULE__{
           prompt_ui: PromptState.t(),
