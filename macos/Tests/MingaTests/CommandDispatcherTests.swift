@@ -2556,11 +2556,14 @@ struct CommandDispatcherStagingTests {
         dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
         #expect(dispatcher.committedEditorSnapshot?.surface(for: 1)?.residentSemantics != nil)
 
-        let reviewRows = (0..<3).map { index in
-            GUIVisualRow(
-                rowType: .normal, rowId: UInt64(100 + index), bufLine: UInt32(index),
-                contentHash: UInt32(100 + index), text: "review \(index)", spans: []
+        var reviewRows: [GUIVisualRow] = []
+        for index in 0..<3 {
+            let rowNumber: Int = 100 + index
+            let row = GUIVisualRow(
+                rowType: .normal, rowId: UInt64(rowNumber), bufLine: UInt32(index),
+                contentHash: UInt32(rowNumber), text: "review \(index)", spans: []
             )
+            reviewRows.append(row)
         }
         let rect = GUICellRect(row: 0, col: 0, width: 80, height: 3)
         let review = try GUIWindowContent(
