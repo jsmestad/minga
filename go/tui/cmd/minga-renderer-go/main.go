@@ -6,6 +6,8 @@ import (
 	"io"
 	"log"
 	"os"
+	"os/signal"
+	"syscall"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/jsmestad/minga/go/tui/internal/port"
@@ -42,7 +44,33 @@ func run() error {
 	ctx, stop := context.WithCancel(context.Background())
 	defer stop()
 	program := tea.NewProgram(model, tea.WithContext(ctx), tea.WithInput(tty), tea.WithOutput(filter.TrackOutput(tty)), tea.WithFilter(filter.Filter))
+	stopHangup := quitOnHangup(program)
+	defer stopHangup()
 	return runSession(program, os.Stdin, os.Stdout, out, done, stop)
+}
+
+// quitOnHangup quits the program gracefully on SIGHUP so Bubble Tea restores
+// the terminal. Bubble Tea handles SIGINT and SIGTERM itself; without this,
+// SIGHUP's default action kills the process with the terminal still in the
+// alternate screen. A SIGHUP that was ignored at startup (nohup) stays ignored.
+func quitOnHangup(program *tea.Program) (stop func()) {
+	if signal.Ignored(syscall.SIGHUP) {
+		return func() {}
+	}
+	hangup := make(chan os.Signal, 1)
+	stopped := make(chan struct{})
+	signal.Notify(hangup, syscall.SIGHUP)
+	go func() {
+		select {
+		case <-hangup:
+			program.Quit()
+		case <-stopped:
+		}
+	}()
+	return func() {
+		signal.Stop(hangup)
+		close(stopped)
+	}
 }
 
 type programResult struct {
@@ -91,7 +119,12 @@ func runSession(program *tea.Program, reader io.ReadCloser, writer io.Writer, ou
 	if closer, ok := writer.(io.Closer); ok {
 		_ = closer.Close()
 	}
-	if first.name != "input" {
+	// After the UI quits, the terminal is already restored. The input worker can
+	// still be blocked reading the BEAM's pipe, and closing a blocking pipe does
+	// not interrupt that read. The BEAM keeps the pipe open until this process
+	// exits (it waits for the exit after renderer_shutdown), so joining here
+	// would deadlock. Process exit releases the worker.
+	if first.name != "input" && first.name != "ui" {
 		<-readerJoined
 	}
 	if first.name != "output" {

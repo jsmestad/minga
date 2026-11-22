@@ -76,6 +76,7 @@ defmodule MingaEditor.Frontend.ProtocolSchemaTest do
     assert_opcodes(schema, "render",
       begin_frame: 0x10,
       commit_frame: 0x11,
+      renderer_shutdown: 0x14,
       set_cursor_shape: 0x15,
       set_title: 0x16,
       set_window_bg: 0x17,

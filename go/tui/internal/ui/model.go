@@ -782,6 +782,12 @@ func (m *Model) applyCommands(commands []protocol.Command) tea.Cmd {
 			// land in Minga's *Messages* buffer instead.
 			m.protocolError = command.ProtocolError
 			m.logToMessages(protocol.LogLevelErr, "Go TUI protocol error: %s", command.ProtocolError)
+		case protocol.CommandRendererShutdown:
+			// Out of band: the BEAM is stopping and waits for this process to
+			// exit. Quitting lets Bubble Tea restore the terminal; any open
+			// transaction is abandoned with the session.
+			m.staging = nil
+			cmds = append(cmds, tea.Quit)
 		case protocol.CommandNoop:
 			// Sized-but-ignored compatibility commands, such as font setup, can arrive out of band during startup. They do not mutate the Go TUI and should not be treated as frame-transaction violations.
 			continue

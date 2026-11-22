@@ -7,7 +7,7 @@ defmodule Minga.Protocol.Opcodes do
 
   # Protocol version
   @spec protocol_version() :: non_neg_integer()
-  def protocol_version, do: 38
+  def protocol_version, do: 39
 
   # Input
   @spec key_press() :: non_neg_integer()
@@ -66,6 +66,8 @@ defmodule Minga.Protocol.Opcodes do
   def set_link_cursor, do: 0x19
   @spec application_quit_response() :: non_neg_integer()
   def application_quit_response, do: 0x1A
+  @spec renderer_shutdown() :: non_neg_integer()
+  def renderer_shutdown, do: 0x14
   @spec presentation_target() :: non_neg_integer()
   def presentation_target, do: 0x1B
   @spec presentation_operation() :: non_neg_integer()

@@ -48,7 +48,7 @@ The frontend runs as a child process of the BEAM. Communication uses stdin (BEAM
 
 **Text encoding:** All text fields (titles, language names, query source, semantic content) are UTF-8 encoded.
 
-**Protocol version:** The schema carries a `protocol_version` integer (currently 37). The BEAM and every frontend compile against it and exchange it in the `ready` handshake. The BEAM rejects a frontend whose version does not match and sends an explicit `protocol_error` instead of streaming frames the frontend cannot decode. Version 37 extends `scroll_batch` to horizontal panning. See [Protocol Version Negotiation](#protocol-version-negotiation) and [GUI_PROTOCOL.md](GUI_PROTOCOL.md).
+**Protocol version:** The schema carries a `protocol_version` integer (currently 39). The BEAM and every frontend compile against it and exchange it in the `ready` handshake. The BEAM rejects a frontend whose version does not match and sends an explicit `protocol_error` instead of streaming frames the frontend cannot decode. Version 39 adds `renderer_shutdown`. See [Protocol Version Negotiation](#protocol-version-negotiation) and [GUI_PROTOCOL.md](GUI_PROTOCOL.md).
 
 ---
 
@@ -62,6 +62,7 @@ The cell-paradigm render opcodes (`draw_text`, `set_cursor`, `clear`, and the re
 |--------|------|------|-------------|
 | `0x10` | begin_frame | 13 | Open a generation-aware frame transaction (frame_seq + base_frame_seq + generation); see Frame Transactions |
 | `0x11` | commit_frame | 9 | Close a frame transaction; promote staging and present (frame_seq + input_seq) |
+| `0x14` | renderer_shutdown | 1 | Ask a spawned terminal renderer to restore the terminal and exit |
 | `0x13` | _(reserved)_ | — | Freed by retiring batch_end in v3; do not reassign before a version bump past 3 |
 | `0x15` | set_cursor_shape | 2 | Change cursor appearance |
 | `0x16` | set_title | 3 + title_len | Set the window/terminal title |
@@ -217,6 +218,18 @@ message: [msg_len]u8    human-readable reason
 Total size: 3 + msg_len bytes.
 
 **Behavior:** The frontend displays the message as a blocking error and stops decoding subsequent frames. The BEAM does not stream render frames to a version-mismatched frontend.
+
+### `0x14` renderer_shutdown
+
+Sent by the BEAM to a terminal renderer it spawned, when the renderer's owner (`MingaEditor.Frontend.Manager`) stops. Every orderly exit, including `:q`, `:qa`, `:qa!`, and `:wq`, passes through this path. This lifecycle command is sent outside render transactions.
+
+```
+opcode: u8 = 0x14
+```
+
+Total size: 1 byte.
+
+**Behavior:** The renderer abandons any open frame transaction, restores the terminal (leaves the alternate screen, turns off mouse reporting, bracketed paste, and keyboard enhancements, and shows the cursor), and exits. The BEAM waits for the renderer process to exit before the VM can stop, bounded at 2 seconds. If the renderer does not exit in time, the BEAM closes the Port, and the renderer restores the terminal on stdin EOF. Without this wait, the VM can exit while the renderer is still writing the restore sequence: the shell prompt then appears on the alternate screen, or the restore is lost when the launcher was the terminal's session leader. The native GUI is the BEAM's parent, never a spawned child, so it never receives this command.
 
 ### `0x1A` application_quit_response
 
@@ -867,7 +880,7 @@ Total size: 4 + msg_len bytes.
 
 ## Protocol Version Negotiation
 
-The schema (`docs/protocol_schema.toml`) carries a `protocol_version` integer (currently 38). `mix protocol.gen` emits it as a constant on every side: `Minga.Protocol.Opcodes.protocol_version()` (Elixir), `generated.ProtocolVersion` (Go), `PROTOCOL_VERSION` (Swift), `PROTOCOL_VERSION` (Zig parser). Bump it whenever the wire contract changes incompatibly. Version 38 adds native agent desktop alerts. Version 37 adds horizontal directions to `scroll_batch`. Version 36 binds absolute visual scroll targets to the displayed text presentation. Version 35 adds grouped soft-wrapped resident rows and a u32 pane geometry continuation offset. Version 34 adds approval-wait presentation and distinct tool denial, cancellation, and expiry outcomes. Version 33 adds request-bound approval actions and the session/request fields in approval transcript rows. Version 32 moves Agent Help from Chat into independent opcode 0xAB and adds Review status section 0x10 with source-bound activations. Version 31 added source-presentation-targeted prompt fit and wrapped visual-row scroll; version 30 extended committed focus ownership to focused hover and the empty launchpad. The schema's version comments record earlier changes. A frontend built against an older protocol receives the `protocol_error` blocking surface instead of a desynced stream.
+The schema (`docs/protocol_schema.toml`) carries a `protocol_version` integer (currently 39). `mix protocol.gen` emits it as a constant on every side: `Minga.Protocol.Opcodes.protocol_version()` (Elixir), `generated.ProtocolVersion` (Go), `PROTOCOL_VERSION` (Swift), `PROTOCOL_VERSION` (Zig parser). Bump it whenever the wire contract changes incompatibly. Version 39 adds `renderer_shutdown`. Version 38 adds native agent desktop alerts. Version 37 adds horizontal directions to `scroll_batch`. Version 36 binds absolute visual scroll targets to the displayed text presentation. Version 35 adds grouped soft-wrapped resident rows and a u32 pane geometry continuation offset. Version 34 adds approval-wait presentation and distinct tool denial, cancellation, and expiry outcomes. Version 33 adds request-bound approval actions and the session/request fields in approval transcript rows. Version 32 moves Agent Help from Chat into independent opcode 0xAB and adds Review status section 0x10 with source-bound activations. Version 31 added source-presentation-targeted prompt fit and wrapped visual-row scroll; version 30 extended committed focus ownership to focused hover and the empty launchpad. The schema's version comments record earlier changes. A frontend built against an older protocol receives the `protocol_error` blocking surface instead of a desynced stream.
 
 **Handshake.** A frontend appends its compiled-in `protocol_version` as a u16 tail on the extended `ready` event (after `caps_data`). A frontend that omits the tail (short ready, or extended ready without the tail) is treated as protocol_version 0 and rejected.
 
@@ -887,7 +900,7 @@ A frontend that receives `protocol_error` should display the message as a blocki
 
 ### Current design
 
-Tree-sitter parsing runs in a dedicated `minga-parser` Zig process, separate from the rendering frontend. The rendering frontend handles the surviving render-transport and lifecycle commands (`begin_frame`, `commit_frame`, `set_cursor_shape`, `set_title`, `set_window_bg`, `protocol_error`, `application_quit_response`, `gui_request`) plus GUI chrome (`0x70+`). The parser process handles highlight commands (`0x20`-`0x2F`) and sends highlight responses (`0x30`-`0x3D`). Both use the same `{:packet, 4}` framing on their respective stdin/stdout pipes. The BEAM manages both Port processes, routing commands to the appropriate one. Zig is parser infrastructure only; the legacy Zig terminal renderer was removed in #2223.
+Tree-sitter parsing runs in a dedicated `minga-parser` Zig process, separate from the rendering frontend. The rendering frontend handles the surviving render-transport and lifecycle commands (`begin_frame`, `commit_frame`, `set_cursor_shape`, `set_title`, `set_window_bg`, `protocol_error`, `renderer_shutdown`, `application_quit_response`, `gui_request`) plus GUI chrome (`0x70+`). The parser process handles highlight commands (`0x20`-`0x2F`) and sends highlight responses (`0x30`-`0x3D`). Both use the same `{:packet, 4}` framing on their respective stdin/stdout pipes. The BEAM manages both Port processes, routing commands to the appropriate one. Zig is parser infrastructure only; the legacy Zig terminal renderer was removed in #2223.
 
 This separation means rendering frontends (Swift/Metal, GTK4, Go/Bubble Tea) only need to implement render commands. Tree-sitter parsing is handled by the shared parser process regardless of which frontend is active.
 
