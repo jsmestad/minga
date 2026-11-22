@@ -106,6 +106,10 @@ Publish writes the staged files to disk and merges them into any open buffer, th
 
 Staged edits are never lost silently. Every ordinary way out stops and shows the same Publish and Discard choice: `:q` and `:wq` when they would close the last tab, `:qa`, `:wqa`, the quit confirmation prompt, and quitting the macOS app. `:wq` and `:wqa` still save your buffers first. The force and abort quits, `:q!` (when it would exit), `:qa!` and `:cq`, quit and discard staged agent edits on purpose. Quitting is never blocked when nothing is staged.
 
+Staged edits also survive a crash or restart. If the editor restarts on its own (for example after the watchdog recovers a frozen editor), the staged edits are still running and come back to their workspace. If Minga itself exits without a publish or discard, such as after a crash, the next start for the same project restores them: `*Messages*` says how many files were restored, and the same Publish and Discard notification appears. Minga saves each staged edit together with the version of the file it was made against. If that file changed on disk while Minga was not running, `*Messages*` says so, and publishing merges the two or keeps the edit staged as a conflict; it never overwrites your change. A saved edit that cannot be restored is named in `*Messages*` as lost.
+
+The saved copies are private to your user (`~/.local/share/minga/staged_drafts`, or under `$XDG_DATA_HOME`), and Minga deletes them when you publish or discard.
+
 ### Input
 
 | Key | Action |
