@@ -407,7 +407,7 @@ defmodule MingaAgent.StagedDraftKeeper do
   defp ceded_warning do
     Minga.Log.warning(
       :agent,
-      "Staged agent edits are now kept by another Minga instance; this instance leaves their saved files alone."
+      "Staged agent edits are now kept by another Minga instance; this instance no longer saves them for crash recovery and leaves their saved files alone."
     )
   end
 
