@@ -140,7 +140,7 @@ enum RenderCommand: Sendable {
     case guiCursorAnimation(enabled: Bool)
     case guiFocusOwner(Wire.FocusOwner)
     case guiSplitSeparators(borderColor: UInt32, verticals: [Wire.VerticalSeparator], horizontals: [Wire.HorizontalSeparator])
-    case guiGitStatus(repoState: UInt8, syncing: Bool, ahead: UInt16, behind: UInt16, branchName: String, entries: [Wire.GitStatusEntry], toast: (message: String, level: UInt8, action: UInt8)?, entryBasePath: String, lastCommitMessage: String, stashCount: UInt16)
+    case guiGitStatus(repoState: UInt8, syncing: Bool, ahead: UInt16, behind: UInt16, branchName: String, entries: [Wire.GitStatusEntry], toast: (message: String, level: UInt8, action: UInt8)?, entryBasePath: String, lastCommitMessage: String, stashCount: UInt16, toastID: UInt64 = 0, panelID: UInt64, commitTargetID: UInt64)
     case guiWorkspaces(version: UInt8, activeWorkspaceId: UInt16, mode: WorkspaceViewMode, flags: WorkspaceFlags, workspaces: [Wire.WorkspaceEntry], visibleTabs: [Wire.WorkspaceTabEntry])
     case guiAgentContext(visible: Bool, task: String, dispatchTimestamp: Date, status: CardStatus, canApprove: Bool, progress: Wire.AgentProgress, todos: [Wire.AgentTodo])
     case guiConfigState(Wire.ConfigState)
@@ -2506,8 +2506,9 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             gsEntries.append(Wire.GitStatusEntry(pathHash: gsPathHash, section: gsSection, status: gsStatus, path: gsPath))
             gsPos += 8 + gsPathLen
         }
-        // Toast section: toast_present:1, [toast_level:1, action:1, msg_len:2, msg]
+        // Toast section: toast_present:1, [toast_level:1, action:1, msg_len:2, msg, id:8]
         var gsToast: (message: String, level: UInt8, action: UInt8)? = nil
+        var gsToastID: UInt64 = 0
         guard data.count >= gsPos + 1 else { throw ProtocolDecodeError.malformed }
         let gsToastPresent = data[gsPos]
         gsPos += 1
@@ -2522,6 +2523,8 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             let gsToastMsgData = data[gsPos..<(gsPos + gsToastMsgLen)]
             let gsToastMsg = try readRequiredUTF8(gsToastMsgData)
             gsPos += gsToastMsgLen
+            gsToastID = try readU64(data, gsPos)
+            gsPos += 8
             gsToast = (message: gsToastMsg, level: gsToastLevel, action: gsToastAction)
         }
 
@@ -2539,10 +2542,14 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         let gsLastCommitMessageData = data[gsPos..<(gsPos + gsLastCommitMessageLen)]
         let gsLastCommitMessage = try readRequiredUTF8(gsLastCommitMessageData)
         gsPos += gsLastCommitMessageLen
-        guard data.count >= gsPos + 2 else { throw ProtocolDecodeError.malformed }
+        // Terminal cursor (u32) and collapsed section mask (u8) do not affect native presentation.
+        guard data.count >= gsPos + 23 else { throw ProtocolDecodeError.malformed }
         let gsStashCount = try readU16(data, gsPos)
-        gsPos += 2
-        return (.guiGitStatus(repoState: gsRepoState, syncing: gsSyncing, ahead: gsAhead, behind: gsBehind, branchName: gsBranchName, entries: gsEntries, toast: gsToast, entryBasePath: gsEntryBasePath, lastCommitMessage: gsLastCommitMessage, stashCount: gsStashCount),
+        let gsPanelID = try readU64(data, gsPos + 7)
+        let gsCommitTargetID = try readU64(data, gsPos + 15)
+        guard (gsPanelID == 0) == (gsCommitTargetID == 0) else { throw ProtocolDecodeError.malformed }
+        gsPos += 23
+        return (.guiGitStatus(repoState: gsRepoState, syncing: gsSyncing, ahead: gsAhead, behind: gsBehind, branchName: gsBranchName, entries: gsEntries, toast: gsToast, entryBasePath: gsEntryBasePath, lastCommitMessage: gsLastCommitMessage, stashCount: gsStashCount, toastID: gsToastID, panelID: gsPanelID, commitTargetID: gsCommitTargetID),
                 gsPos - offset)
 
     case .guiWorkspaces:

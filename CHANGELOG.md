@@ -24,6 +24,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 ### Changed
 
 - Adversarial, Knowledge Graph, and Ghost Cursors are now opt-in. [Add the corresponding Git install line](docs/CONFIGURATION.md#optional-extensions) and restart to keep using them. Existing Knowledge Graph data stays in place.
+- GitExtended is now opt-in. [Add its Git install line](docs/CONFIGURATION.md#optional-extensions) and restart to enable the Git status panel, staging, commits, and branch commands. The branch in the modeline and the changed-line signs in the gutter work without it.
 - Elixir builds use checked-in protocol and language-alias sources. Run `mix codegen` to refresh them after schema changes; CI rejects drift.
 - Standalone TUI downloads are native Mix release archives instead of self-extracting binaries. Linux builds target Ubuntu 24.04 glibc; the macOS DMG build is unchanged.
 - Generated Python bytecode is excluded from version control while local script caches remain untouched.

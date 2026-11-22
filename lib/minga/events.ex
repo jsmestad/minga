@@ -30,6 +30,7 @@ defmodule Minga.Events do
   |------------------|-------------------|------------------------------|
   | `:buffer_saved`   | `BufferEvent`        | `buffer: pid(), path: String.t()`              |
   | `:buffer_opened`  | `BufferEvent`        | `buffer: pid(), path: String.t()`              |
+  | `:buffer_path_changed` | `BufferEvent`    | `buffer: pid(), path: String.t()`              |
   | `:buffer_closed`  | `BufferClosedEvent`  | `buffer: pid(), path: String.t() \| :scratch`  |
   | `:buffer_changed` | `BufferChangedEvent` | `buffer: pid(), source: EditSource.t(), sequence: ChangeLog.sequence()`  |
   | `:file_watcher_ready` | `Minga.FileWatcher.ReadyEvent` | `watcher: pid()` |
@@ -72,7 +73,7 @@ defmodule Minga.Events do
   # ── Payload structs ─────────────────────────────────────────────────────────
 
   defmodule BufferEvent do
-    @moduledoc "Payload for `:buffer_saved` and `:buffer_opened` events."
+    @moduledoc "Payload for file buffer events such as open, save, and path adoption."
     @enforce_keys [:buffer, :path]
     defstruct [:buffer, :path, history_attribution: :active_workspace]
 
@@ -315,6 +316,7 @@ defmodule Minga.Events do
   @type topic ::
           :buffer_saved
           | :buffer_opened
+          | :buffer_path_changed
           | :buffer_closed
           | :buffer_changed
           | :content_replaced
@@ -484,7 +486,10 @@ defmodule Minga.Events do
   Pass `registry:` or a registry name as the third argument to broadcast through
   an isolated registry.
   """
-  @spec broadcast(:buffer_saved | :buffer_opened | :content_replaced, BufferEvent.t()) :: :ok
+  @spec broadcast(
+          :buffer_saved | :buffer_opened | :buffer_path_changed | :content_replaced,
+          BufferEvent.t()
+        ) :: :ok
   @spec broadcast(:buffer_closed, BufferClosedEvent.t()) :: :ok
   @spec broadcast(:buffer_changed, BufferChangedEvent.t()) :: :ok
   @spec broadcast(:mode_changed, ModeEvent.t()) :: :ok

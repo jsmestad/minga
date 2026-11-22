@@ -257,7 +257,7 @@ graph TD
     SVC --> CALLBACKS["Extension.CallbackRegistry<br/><i>declarative callbacks</i>"]
     SVC --> INSTREG["Extension.InstanceRegistry<br/><i>stable process names</i>"]
     SVC --> ROOTSUP["Extension.RootSupervisor<br/><i>DynamicSupervisor</i>"]
-    ROOTSUP --> ROOT1["Extension.Root: git_porcelain<br/><i>rest_for_one</i>"]
+    ROOTSUP --> ROOT1["Extension.Root: minga_git_extended<br/><i>rest_for_one</i>"]
     ROOT1 --> RTSUP1["RuntimeSupervisor<br/><i>temporary runtime children</i>"]
     ROOT1 --> INST1["Instance<br/><i>lifecycle authority</i>"]
     RTSUP1 --> EXT1["Extension runtime child"]
@@ -465,7 +465,7 @@ Epic #2652 established resident navigable models plus discardable frontend-local
 
 #### What survives of the DisplayList
 
-`MingaEditor.DisplayList` still exists, but it is no longer "what's on screen". The cell-grid window carriers (`Frame`, `WindowFrame`) were removed in #2241, and the per-surface chrome painters (completion menu, hover/signature popups, modeline, tab bar, float popups) were deleted in #2311, because the semantic frontends render those surfaces natively. What remains is a small set of raw draw tuple types and `draw/4`, currently used by the Git Porcelain extension shell renderer. The nested `Overlay` type is a legacy carrier with no live producer; the semantic chrome path supplies an empty overlay list.
+`MingaEditor.DisplayList` still exists, but it is no longer "what's on screen". The cell-grid window carriers (`Frame`, `WindowFrame`) were removed in #2241, and the per-surface chrome painters (completion menu, hover/signature popups, modeline, tab bar, float popups) were deleted in #2311, because the semantic frontends render those surfaces natively. What remains is a small set of raw draw tuple types and `draw/4`, currently used by the GitExtended shell renderer. The nested `Overlay` type is a legacy carrier with no live producer; the semantic chrome path supplies an empty overlay list.
 
 ---
 

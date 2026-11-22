@@ -31,6 +31,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   alias MingaEditor.Effects.GitMutation
   alias MingaEditor.Effects.GitMutationAdmission
   alias MingaEditor.GitRepositoryResolver
+  alias MingaEditor.GitStatus.Panel, as: GitStatusPanel
   alias MingaEditor.GuiSearchWorkflow
   alias MingaEditor.FileTree.Freshness, as: FileTreeFreshness
   alias MingaEditor.Commands
@@ -83,29 +84,31 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   Returns the updated editor state. Unrecognized actions are logged and
   the state is returned unchanged.
   """
-  @git_root_resolver_key :__gui_action_git_root_resolver__
-
   @spec dispatch(state(), Protocol.GUI.gui_action(), keyword()) :: state()
-  def dispatch(state, action, opts \\ []) do
-    previous_resolver = Process.get(@git_root_resolver_key, :__unset__)
+  def dispatch(state, action, opts \\ [])
 
-    case Keyword.fetch(opts, :git_root_resolver) do
-      {:ok, resolver} -> Process.put(@git_root_resolver_key, resolver)
-      :error -> :ok
-    end
-
-    try do
-      dispatch_action(state, action)
-    after
-      restore_git_root_resolver(previous_resolver)
-    end
+  def dispatch(state, {:git_stage_all, panel_id}, opts) do
+    git_panel_mutation(
+      state,
+      panel_id,
+      :stage_all,
+      "Staging all changes…",
+      "Staged all changes",
+      opts
+    )
   end
 
-  @spec restore_git_root_resolver(:__unset__ | {module(), term()}) :: term()
-  defp restore_git_root_resolver(:__unset__), do: Process.delete(@git_root_resolver_key)
+  def dispatch(state, {:git_unstage_all, panel_id}, opts) do
+    git_panel_mutation(state, panel_id, :unstage_all, "Unstaging all…", "Unstaged all", opts)
+  end
 
-  defp restore_git_root_resolver(previous_resolver),
-    do: Process.put(@git_root_resolver_key, previous_resolver)
+  def dispatch(state, {:git_commit, panel_id, message, amend?}, opts) do
+    pending_msg = commit_pending_msg(amend?)
+    opts = Keyword.merge(opts, message: message, amend?: amend?)
+    git_panel_mutation(state, panel_id, :commit, pending_msg, pending_msg, opts)
+  end
+
+  def dispatch(state, action, _opts), do: dispatch_action(state, action)
 
   # ── Internal dispatch clauses ────────────────────────────────────────
 
@@ -426,9 +429,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
     }
   end
 
-  defp dispatch_action(state, {:toggle_panel, 2}) do
-    execute_registered_command(state, :git_status_toggle)
-  end
+  defp dispatch_action(state, {:toggle_panel, 2}), do: SidebarWorkflow.toggle_git_status(state)
 
   defp dispatch_action(state, {:toggle_panel, 3}) do
     Commands.Agent.toggle_agent_split(state)
@@ -448,6 +449,9 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
     sidebar_registry = state.extension_surfaces.sidebar_registry
 
     case Sidebar.get(sidebar_registry, sidebar_id) do
+      nil when sidebar_id == "git_status" ->
+        state
+
       nil ->
         dispatch_missing_registered_sidebar_action(state, sidebar_id, kind, action)
 
@@ -558,49 +562,33 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
       state
   end
 
-  defp dispatch_action(state, {:git_stage_file, path}) do
-    git_action(state, "Staging #{path}…", :stage, "Staged #{path}", path: path)
+  defp dispatch_action(state, {:git_stage_file, panel_id, path, section}) do
+    git_entry_mutation(state, {panel_id, path, section}, false, :stage, "Staging", "Staged")
   end
 
-  defp dispatch_action(state, {:git_unstage_file, path}) do
-    git_action(state, "Unstaging #{path}…", :unstage, "Unstaged #{path}", path: path)
+  defp dispatch_action(state, {:git_unstage_file, panel_id, path, section}) do
+    git_entry_mutation(state, {panel_id, path, section}, true, :unstage, "Unstaging", "Unstaged")
   end
 
-  defp dispatch_action(state, {:git_discard_file, path}) do
-    git_action(state, "Discarding #{path}…", :discard, "Discarded #{path}", path: path)
+  defp dispatch_action(state, {:git_discard_file, panel_id, path, section}) do
+    git_entry_mutation(
+      state,
+      {panel_id, path, section},
+      false,
+      :discard,
+      "Discarding",
+      "Discarded"
+    )
   end
 
-  defp dispatch_action(state, :git_stage_all) do
-    git_action(state, "Staging all changes…", :stage_all, "Staged all changes")
-  end
+  defp dispatch_action(state, {:git_push, panel_id}),
+    do: remote_from_panel(state, panel_id, :push)
 
-  defp dispatch_action(state, :git_unstage_all) do
-    git_action(state, "Unstaging all…", :unstage_all, "Unstaged all")
-  end
+  defp dispatch_action(state, {:git_pull, panel_id}),
+    do: remote_from_panel(state, panel_id, :pull)
 
-  defp dispatch_action(state, {:git_commit, message}) do
-    commit_from_gui(state, message, false)
-  end
-
-  defp dispatch_action(state, {:git_commit, message, amend?}) do
-    commit_from_gui(state, message, amend?)
-  end
-
-  defp dispatch_action(state, :git_push) do
-    execute_registered_command(state, :git_push)
-  end
-
-  defp dispatch_action(state, :git_pull) do
-    execute_registered_command(state, :git_pull)
-  end
-
-  defp dispatch_action(state, :git_fetch) do
-    execute_registered_command(state, :git_fetch)
-  end
-
-  defp dispatch_action(state, {:git_commit_amend, message}) do
-    commit_from_gui(state, message, true)
-  end
+  defp dispatch_action(state, {:git_fetch, panel_id}),
+    do: remote_from_panel(state, panel_id, :fetch)
 
   defp dispatch_action(state, {:workspace_close, owner} = action) do
     case DraftWorkflow.before_close(state, owner) do
@@ -719,31 +707,30 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
     MingaEditor.Agent.PromptInput.command(state, &Commands.Editing.execute(&1, :cmd_cut))
   end
 
-  defp dispatch_action(state, {:git_open_file, path}) do
-    case MingaEditor.resolve_git_root() do
-      nil ->
-        NoticeWorkflow.publish(state, "Not in a git repository")
+  defp dispatch_action(state, {:git_open_file, panel_id, path, section}) do
+    panel = SidebarWorkflow.git_status_panel(state)
 
-      git_root ->
-        abs_path = Path.join(git_root, path)
-        BufferRegistry.open_file_by_path(state, abs_path)
+    with %Git.StatusEntry{} <- GitStatusPanel.entry(panel, panel_id, path, section),
+         {:ok, abs_path} <- GitStatusPanel.absolute_path(panel, path) do
+      state
+      |> close_terminal_git_status()
+      |> BufferRegistry.open_file_by_path(abs_path)
+    else
+      _ -> NoticeWorkflow.publish(state, "No git status entry for #{path}")
     end
   end
 
-  defp dispatch_action(state, {:git_open_diff, path, section}) do
-    case MingaEditor.resolve_git_root() do
-      nil ->
-        NoticeWorkflow.publish(state, "Not in a git repository")
+  defp dispatch_action(state, {:git_open_diff, panel_id, path, section}) do
+    panel = SidebarWorkflow.git_status_panel(state)
 
-      git_root ->
-        open_git_diff_from_panel(state, git_root, path, section)
+    case GitStatusPanel.entry(panel, panel_id, path, section) do
+      %Git.StatusEntry{} = entry -> open_git_diff_for_entry(state, panel, entry)
+      nil -> NoticeWorkflow.publish(state, "No git diff entry for #{path}")
     end
   end
 
-  defp dispatch_action(state, :git_pull_and_retry) do
-    state
-    |> MingaEditor.Shell.Traditional.GitToastWorkflow.dismiss()
-    |> execute_registered_command(:git_pull_and_retry)
+  defp dispatch_action(state, {:git_pull_and_retry, id}) do
+    MingaEditor.Shell.Traditional.GitToastWorkflow.retry(state, id)
   end
 
   defp dispatch_action(state, {:picker_query_changed, generation, edit_seq, query}) do
@@ -888,7 +875,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
 
   @spec builtin_sidebar_id?(String.t()) :: boolean()
   defp builtin_sidebar_id?(sidebar_id),
-    do: sidebar_id in ["file_tree", "git_status", "observatory"]
+    do: sidebar_id in ["file_tree", "observatory"]
 
   @spec dispatch_sidebar_action(EditorState.t(), String.t(), String.t(), String.t()) ::
           EditorState.t()
@@ -912,9 +899,6 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   defp dispatch_sidebar_toggle(state, "file_tree", _kind),
     do: Commands.FileTree.toggle(state)
 
-  defp dispatch_sidebar_toggle(state, "git_status", _kind),
-    do: execute_registered_command(state, :git_status_toggle)
-
   defp dispatch_sidebar_toggle(state, "observatory", _kind) do
     state
     |> Commands.execute(:toggle_beam_observatory)
@@ -929,12 +913,6 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
     if sidebar_visible?(state, "file_tree"),
       do: focus_visible_sidebar(state, "file_tree"),
       else: dispatch_sidebar_toggle(state, "file_tree", kind)
-  end
-
-  defp dispatch_sidebar_activate(state, "git_status", kind) do
-    if sidebar_visible?(state, "git_status"),
-      do: focus_visible_sidebar(state, "git_status"),
-      else: dispatch_sidebar_toggle(state, "git_status", kind)
   end
 
   defp dispatch_sidebar_activate(state, "observatory", kind) do
@@ -954,13 +932,6 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
       state.workspace
       |> State.set_file_tree(file_tree)
       |> State.set_keymap_scope(:file_tree)
-
-    %{state | workspace: workspace}
-    |> Layout.invalidate()
-  end
-
-  defp focus_visible_sidebar(state, "git_status") do
-    workspace = State.set_keymap_scope(state.workspace, :git_status)
 
     %{state | workspace: workspace}
     |> Layout.invalidate()
@@ -994,7 +965,6 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
     |> FileTreeState.visible_status?()
   end
 
-  defp sidebar_visible?(state, "git_status"), do: SidebarWorkflow.git_status_panel(state) != nil
   defp sidebar_visible?(state, "observatory"), do: SidebarWorkflow.observatory_visible?(state)
   defp sidebar_visible?(_state, _sidebar_id), do: false
 
@@ -1012,160 +982,131 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
     )
   end
 
-  # ── Git commit helpers ──────────────────────────────────────────────
-
-  # Commit shells out to `git commit`, so it runs off the editor's critical path
-  # on the same serialized :git_worktree lane as stage/discard (#2357). The op
-  # builds its own success and failure messages because the commit hash is only
-  # known after the subprocess returns; git-root resolution runs inside the
-  # offloaded work.
-  @spec commit_from_gui(state(), String.t(), boolean()) :: state()
-  defp commit_from_gui(state, message, amend?) do
-    pending_msg = commit_pending_msg(amend?)
-
-    git_action(state, pending_msg, :commit, pending_msg, message: message, amend?: amend?)
-  end
+  # ── Git panel action helpers ────────────────────────────────────────
 
   @spec commit_pending_msg(boolean()) :: String.t()
   defp commit_pending_msg(true), do: "Amending…"
   defp commit_pending_msg(false), do: "Committing…"
 
-  # ── Git diff helpers ────────────────────────────────────────────────
-
-  @spec open_git_diff_from_panel(state(), String.t(), String.t(), non_neg_integer()) :: state()
-  defp open_git_diff_from_panel(state, git_root, path, section) do
-    entries = git_status_panel_entries(state)
-
-    matches =
-      case section do
-        section when section in 0..3 ->
-          Enum.filter(entries, &git_status_entry_matches?(&1, path, section))
-
-        _legacy ->
-          Enum.filter(entries, &(&1.path == path))
-      end
-
-    case matches do
-      [%Git.StatusEntry{} = entry] ->
-        open_git_diff_for_entry(state, git_root, entry)
-
-      [] ->
-        NoticeWorkflow.publish(
+  @spec remote_from_panel(state(), GitStatusPanel.id(), :push | :pull | :fetch) :: state()
+  defp remote_from_panel(state, panel_id, operation) do
+    case git_panel_target(state, panel_id) do
+      %GitStatusPanel{git_root: root} ->
+        ExtensionEventWorkflow.dispatch(
           state,
-          "No git diff entry for #{path}"
+          {:editor_action, :git_status_remote, {root, operation}}
         )
 
-      [_ | [_ | _]] ->
-        NoticeWorkflow.publish(
-          state,
-          "Ambiguous git diff entry for #{path}; use section-aware diff"
-        )
+      nil ->
+        NoticeWorkflow.publish(state, "Git status target is no longer available")
     end
   end
 
-  @spec git_status_entry_matches?(Git.StatusEntry.t(), String.t(), non_neg_integer()) :: boolean()
-  defp git_status_entry_matches?(%Git.StatusEntry{} = entry, path, section) do
-    entry.path == path && git_status_section(entry) == section
-  end
+  @spec open_git_diff_for_entry(state(), GitStatusPanel.t(), Git.StatusEntry.t()) :: state()
+  defp open_git_diff_for_entry(state, %GitStatusPanel{git_root: git_root} = panel, entry) do
+    case GitStatusPanel.absolute_path(panel, entry.path) do
+      {:ok, abs_path} ->
+        arguments =
+          {git_root, Path.relative_to(abs_path, git_root), abs_path, entry.status, entry.staged}
 
-  @spec git_status_section(Git.StatusEntry.t()) :: non_neg_integer()
-  defp git_status_section(%Git.StatusEntry{staged: true}), do: 0
-  defp git_status_section(%Git.StatusEntry{status: :untracked}), do: 2
-  defp git_status_section(%Git.StatusEntry{status: :conflict}), do: 3
-  defp git_status_section(%Git.StatusEntry{}), do: 1
+        state
+        |> close_terminal_git_status()
+        |> ExtensionEventWorkflow.dispatch({:editor_action, :open_git_diff_for_path, arguments})
 
-  @spec git_status_panel_entries(state()) :: [Git.StatusEntry.t()]
-  defp git_status_panel_entries(state) do
-    case SidebarWorkflow.git_status_panel(state) do
-      nil -> []
-      panel -> Map.get(panel, :entries) || []
+      :error ->
+        NoticeWorkflow.publish(state, "Invalid git diff entry path: #{entry.path}")
     end
   end
 
-  @spec execute_registered_command(state(), atom()) :: state()
-  defp execute_registered_command(state, command) do
-    ExtensionEventWorkflow.dispatch(state, {:editor_action, :execute_git_command, command})
-  end
+  @spec close_terminal_git_status(state()) :: state()
+  defp close_terminal_git_status(%{frontend: %{backend: :tui}} = state),
+    do: SidebarWorkflow.close_git_status(state)
 
-  @spec open_git_diff_for_path(state(), String.t(), String.t(), String.t(), String.t(), keyword()) ::
-          state()
-  defp open_git_diff_for_path(state, git_root, git_path, abs_path, current_content, opts) do
-    arguments = {git_root, git_path, abs_path, current_content, opts}
+  defp close_terminal_git_status(state), do: state
 
-    ExtensionEventWorkflow.dispatch(
-      state,
-      {:editor_action, :open_git_diff_for_path, arguments}
-    )
-  end
+  @spec git_entry_mutation(
+          state(),
+          {GitStatusPanel.id(), String.t(), 0..3},
+          boolean(),
+          GitMutation.operation(),
+          String.t(),
+          String.t()
+        ) :: state()
+  defp git_entry_mutation(state, {panel_id, path, section}, staged?, operation, pending, success) do
+    panel = SidebarWorkflow.git_status_panel(state)
 
-  @spec open_git_diff_for_entry(state(), String.t(), Git.StatusEntry.t()) :: state()
-  defp open_git_diff_for_entry(state, git_root, %Git.StatusEntry{} = entry) do
-    abs_path = git_status_abs_path(git_root, entry.path)
-    git_path = Path.relative_to(abs_path, git_root)
-    git_entry = %{entry | path: git_path}
+    with %GitStatusPanel{git_root: root, entry_base_path: base} when is_binary(root) <- panel,
+         %Git.StatusEntry{staged: ^staged?} <-
+           GitStatusPanel.entry(panel, panel_id, path, section) do
+      identity = MingaEditor.GitRepositoryIdentity.new(root, base || root)
 
-    case git_diff_content(git_root, abs_path, git_entry) do
-      {:ok, current_content} ->
-        open_git_diff_for_path(state, git_root, git_path, abs_path, current_content,
-          staged: entry.staged
-        )
-
-      {:error, message} ->
-        NoticeWorkflow.publish(state, message)
-    end
-  end
-
-  @spec git_diff_content(String.t(), String.t(), Git.StatusEntry.t()) ::
-          {:ok, String.t()} | {:error, String.t()}
-  defp git_diff_content(_git_root, _abs_path, %Git.StatusEntry{status: :deleted}) do
-    {:ok, ""}
-  end
-
-  defp git_diff_content(git_root, _abs_path, %Git.StatusEntry{path: rel_path, staged: true}) do
-    case Git.show_staged(git_root, rel_path) do
-      {:ok, content} -> {:ok, content}
-      :error -> {:error, "Could not read staged file: #{rel_path}"}
-    end
-  end
-
-  defp git_diff_content(_git_root, abs_path, %Git.StatusEntry{}) do
-    case File.read(abs_path) do
-      {:ok, current_content} -> {:ok, current_content}
-      {:error, reason} -> {:error, "Could not read file: #{inspect(reason)}"}
-    end
-  end
-
-  @spec git_status_abs_path(String.t(), String.t()) :: String.t()
-  defp git_status_abs_path(git_root, path) do
-    git_status_abs_path(git_root, path, Minga.Project.resolve_root())
-  end
-
-  @spec git_status_abs_path(String.t(), String.t(), String.t() | nil) :: String.t()
-  defp git_status_abs_path(git_root, path, nil), do: Path.join(git_root, path)
-
-  defp git_status_abs_path(git_root, path, project_root) do
-    if String.starts_with?(Path.expand(project_root), Path.expand(git_root)) do
-      Path.join(project_root, path)
-    else
-      Path.join(git_root, path)
-    end
-  end
-
-  # ── Git action helper ──────────────────────────────────────────────
-
-  # Repository discovery may call git, so it is itself a typed FIFO effect. Its
-  # applied result admits the actual mutation to the resolved repository lane.
-  @spec git_action(state(), String.t(), GitMutation.operation(), String.t(), keyword()) :: state()
-  defp git_action(state, pending_msg, operation, success_msg, opts \\ [])
-
-  defp git_action(state, pending_msg, operation, success_msg, opts)
-       when is_binary(pending_msg) and is_binary(success_msg) do
-    {resolver, resolver_input} =
-      Process.get(
-        @git_root_resolver_key,
-        {GitRepositoryResolver, :current_project}
+      enqueue_git_action(
+        state,
+        "#{pending} #{path}…",
+        operation,
+        "#{success} #{path}",
+        [path: path],
+        GitRepositoryResolver,
+        identity
       )
+    else
+      _ -> NoticeWorkflow.publish(state, "Git status target is no longer available")
+    end
+  end
 
+  @spec git_panel_mutation(
+          state(),
+          GitStatusPanel.id(),
+          GitMutation.operation(),
+          String.t(),
+          String.t(),
+          keyword()
+        ) :: state()
+  defp git_panel_mutation(state, panel_id, operation, pending_msg, success_msg, opts) do
+    case git_panel_target(state, panel_id) do
+      %GitStatusPanel{git_root: root, entry_base_path: base} ->
+        identity = MingaEditor.GitRepositoryIdentity.new(root, base || root)
+
+        {resolver, input} =
+          Keyword.get(opts, :git_root_resolver, {GitRepositoryResolver, identity})
+
+        enqueue_git_action(state, pending_msg, operation, success_msg, opts, resolver, input)
+
+      nil ->
+        NoticeWorkflow.publish(state, "Git status target is no longer available")
+    end
+  end
+
+  @spec git_panel_target(state(), GitStatusPanel.id()) :: GitStatusPanel.t() | nil
+  defp git_panel_target(state, panel_id) do
+    case SidebarWorkflow.git_status_panel(state) do
+      %GitStatusPanel{id: ^panel_id, repo_state: :normal, git_root: root} = panel
+      when is_binary(root) ->
+        panel
+
+      _ ->
+        nil
+    end
+  end
+
+  @spec enqueue_git_action(
+          state(),
+          String.t(),
+          GitMutation.operation(),
+          String.t(),
+          keyword(),
+          module(),
+          term()
+        ) :: state()
+  defp enqueue_git_action(
+         state,
+         pending_msg,
+         operation,
+         success_msg,
+         opts,
+         resolver,
+         resolver_input
+       ) do
     request_opts =
       opts
       |> Keyword.put(:pending_message, pending_msg)

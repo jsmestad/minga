@@ -294,6 +294,34 @@ defmodule MingaEditor.Startup do
     :ok
   end
 
+  @doc "Tells Git project users how to restore the formerly automatic workflows."
+  @spec announce_git_extended_opt_in(String.t() | nil) :: :ok
+  def announce_git_extended_opt_in(nil), do: :ok
+
+  def announce_git_extended_opt_in(project_root) do
+    unless Minga.SafeMode.active?() or
+             match?({:ok, _entry}, Minga.Extension.Registry.get(:minga_git_extended)) do
+      Task.Supervisor.start_child(Minga.Eval.TaskSupervisor, fn ->
+        notify_git_extended_opt_in(project_root)
+      end)
+    end
+
+    :ok
+  end
+
+  @spec notify_git_extended_opt_in(String.t()) :: :ok
+  defp notify_git_extended_opt_in(project_root) do
+    case Minga.Git.root_for(project_root) do
+      {:ok, _root} ->
+        Minga.API.message(
+          ~s(GitExtended is opt-in. Add `extension :minga_git_extended, git: "https://github.com/jsmestad/minga-git-extended"` to config.exs and restart.)
+        )
+
+      :not_git ->
+        :ok
+    end
+  end
+
   @doc """
   Creates the initial window based on the startup mode.
 

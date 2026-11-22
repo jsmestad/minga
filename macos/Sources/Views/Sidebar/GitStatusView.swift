@@ -8,19 +8,19 @@ import SwiftUI
 
 public struct GitStatusView: View {
     public enum Action: Equatable, Sendable {
-        case discardFile(path: String)
-        case unstageAll
-        case stageAll
-        case openFile(path: String)
-        case openDiff(path: String, section: UInt8)
-        case stageFile(path: String)
-        case unstageFile(path: String)
-        case pull
-        case push
-        case fetch
-        case commit(message: String)
-        case amend(message: String)
-        case pullAndRetry
+        case discardFile(GitStatusEntryTarget)
+        case unstageAll(panelID: UInt64)
+        case stageAll(panelID: UInt64)
+        case openFile(GitStatusEntryTarget)
+        case openDiff(GitStatusEntryTarget)
+        case stageFile(GitStatusEntryTarget)
+        case unstageFile(GitStatusEntryTarget)
+        case pull(panelID: UInt64)
+        case push(panelID: UInt64)
+        case fetch(panelID: UInt64)
+        case commit(panelID: UInt64, message: String)
+        case amend(panelID: UInt64, message: String)
+        case pullAndRetry(toastID: UInt64)
     }
 
     public let state: GitStatusState
@@ -53,24 +53,25 @@ public struct GitStatusView: View {
 
     @State private var hoveredEntryId: UInt32? = nil
     @State private var hoveredSection: GitStatusSection? = nil
-    @State private var fileToDiscard: GitStatusEntry? = nil
+    @State private var fileToDiscard: (filename: String, target: GitStatusEntryTarget)? = nil
 
     public var body: some View {
+        let snapshot = state.snapshot
         VStack(spacing: 0) {
             // Toast banner
-            if let toast = state.snapshot.toastMessage {
-                toastBanner(message: toast, level: state.snapshot.toastLevel, action: state.snapshot.toastAction)
+            if let toast = snapshot.toastMessage {
+                toastBanner(message: toast, level: snapshot.toastLevel, action: snapshot.toastAction, id: snapshot.toastID)
             }
 
             Group {
-                if state.snapshot.repoState == .notARepo {
+                if snapshot.repoState == .notARepo {
                     notARepoView
-                } else if state.snapshot.repoState == .loading {
+                } else if snapshot.repoState == .loading {
                     loadingView
-                } else if state.isClean {
+                } else if snapshot.isClean {
                     cleanView
                 } else {
-                    fileList
+                    fileList(snapshot)
                 }
             }
             .frame(maxWidth: .infinity)
@@ -79,8 +80,8 @@ public struct GitStatusView: View {
             .layoutPriority(0)
 
             // Git actions are available for any normal repo. A clean tree can still be ahead/behind, and amend does not require file changes.
-            if state.snapshot.repoState == .normal {
-                commitArea
+            if snapshot.repoState == .normal, snapshot.panelID != 0 {
+                commitArea(snapshot)
                     .fixedSize(horizontal: false, vertical: true)
                     .layoutPriority(1)
             }
@@ -91,20 +92,16 @@ public struct GitStatusView: View {
         .alert("Discard Changes?", isPresented: Binding(
             get: { fileToDiscard != nil },
             set: { if !$0 { fileToDiscard = nil } }
-        )) {
+        ), presenting: fileToDiscard) { offer in
             Button("Cancel", role: .cancel) {
                 fileToDiscard = nil
             }
             Button("Discard", role: .destructive) {
-                if let entry = fileToDiscard {
-                    sendAction?(.discardFile(path: entry.path))
-                    fileToDiscard = nil
-                }
+                sendAction?(.discardFile(offer.target))
+                fileToDiscard = nil
             }
-        } message: {
-            if let entry = fileToDiscard {
-                Text("Discard changes in \(entry.filename)? This cannot be undone.")
-            }
+        } message: { offer in
+            Text("Discard changes in \(offer.filename)? This cannot be undone.")
         }
     }
 
@@ -161,40 +158,41 @@ public struct GitStatusView: View {
     // MARK: - File list
 
     @ViewBuilder
-    private var fileList: some View {
+    private func fileList(_ snapshot: GitStatusSnapshot) -> some View {
         if usesPreviewEagerLayout {
             VStack(spacing: 0) {
-                sectionBlock(.conflicted)
-                sectionBlock(.staged)
-                sectionBlock(.changed)
-                sectionBlock(.untracked)
+                sectionBlock(.conflicted, snapshot: snapshot)
+                sectionBlock(.staged, snapshot: snapshot)
+                sectionBlock(.changed, snapshot: snapshot)
+                sectionBlock(.untracked, snapshot: snapshot)
             }
             .padding(.top, Spacing.hairline)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .clipped()
-            .animation(.easeInOut(duration: animDuration), value: state.snapshot.entriesRevision)
+            .animation(.easeInOut(duration: animDuration), value: snapshot.entriesRevision)
         } else {
             ScrollView(.vertical) {
                 LazyVStack(spacing: 0) {
-                    sectionBlock(.conflicted)
-                    sectionBlock(.staged)
-                    sectionBlock(.changed)
-                    sectionBlock(.untracked)
+                    sectionBlock(.conflicted, snapshot: snapshot)
+                    sectionBlock(.staged, snapshot: snapshot)
+                    sectionBlock(.changed, snapshot: snapshot)
+                    sectionBlock(.untracked, snapshot: snapshot)
                 }
                 .padding(.top, Spacing.hairline)
-                .animation(.easeInOut(duration: animDuration), value: state.snapshot.entriesRevision)
+                .animation(.easeInOut(duration: animDuration), value: snapshot.entriesRevision)
             }
         }
     }
 
     @ViewBuilder
-    private func sectionBlock(_ section: GitStatusSection) -> some View {
-        let entries = state.entries(for: section)
+    private func sectionBlock(_ section: GitStatusSection, snapshot: GitStatusSnapshot) -> some View {
+        let entries = snapshot.entries(for: section)
+        let panelID = snapshot.panelID
         if !entries.isEmpty {
-            sectionHeader(section, count: entries.count)
+            sectionHeader(section, count: entries.count, panelID: panelID)
             if !state.session.collapsedSections.contains(section) {
                 ForEach(entries) { entry in
-                    fileRow(entry)
+                    fileRow(entry, panelID: panelID)
                 }
             }
         }
@@ -203,9 +201,12 @@ public struct GitStatusView: View {
     // MARK: - Section header
 
     @ViewBuilder
-    private func sectionHeader(_ section: GitStatusSection, count: Int) -> some View {
+    private func sectionHeader(_ section: GitStatusSection, count: Int, panelID: UInt64) -> some View {
         let isCollapsed = state.session.collapsedSections.contains(section)
         let isHovered = hoveredSection == section
+        let performBulkAction = {
+            performSectionBulkAction(section, panelID: panelID)
+        }
 
         HStack(spacing: Spacing.xs) {
             Image(systemName: "chevron.right")
@@ -233,7 +234,7 @@ public struct GitStatusView: View {
 
             // Bulk action buttons (visible on hover)
             if isHovered {
-                sectionActions(section)
+                sectionActions(section, perform: performBulkAction)
                     .transition(.opacity.animation(.easeInOut(duration: animDuration)))
             }
         }
@@ -248,7 +249,7 @@ public struct GitStatusView: View {
         .accessibilityAction {
             toggleSection(section)
         }
-        .modifier(GitSectionAccessibilityActions(section: section, perform: performSectionBulkAction))
+        .modifier(GitSectionAccessibilityActions(section: section, perform: performBulkAction))
         .onTapGesture {
             toggleSection(section)
         }
@@ -258,21 +259,13 @@ public struct GitStatusView: View {
     }
 
     @ViewBuilder
-    private func sectionActions(_ section: GitStatusSection) -> some View {
+    private func sectionActions(_ section: GitStatusSection, perform: @escaping () -> Void) -> some View {
         HStack(spacing: Spacing.hairline) {
             switch section {
             case .staged:
-                actionButton(systemName: "minus", tooltip: "Unstage All") {
-                    performSectionBulkAction(.staged)
-                }
-            case .changed:
-                actionButton(systemName: "plus", tooltip: "Stage All") {
-                    performSectionBulkAction(.changed)
-                }
-            case .untracked:
-                actionButton(systemName: "plus", tooltip: "Stage All") {
-                    performSectionBulkAction(.untracked)
-                }
+                actionButton(systemName: "minus", tooltip: "Unstage All", action: perform)
+            case .changed, .untracked:
+                actionButton(systemName: "plus", tooltip: "Stage All", action: perform)
             case .conflicted:
                 EmptyView()
             }
@@ -292,8 +285,12 @@ public struct GitStatusView: View {
     // MARK: - File row
 
     @ViewBuilder
-    private func fileRow(_ entry: GitStatusEntry) -> some View {
+    private func fileRow(_ entry: GitStatusEntry, panelID: UInt64) -> some View {
         let isHovered = hoveredEntryId == entry.id
+        let target = GitStatusEntryTarget(panelID: panelID, path: entry.path, section: entry.section.rawValue)
+        let perform: (GitEntryAccessibilityAction) -> Void = { action in
+            performEntryAction(action, for: entry, target: target)
+        }
 
         HStack(spacing: 0) {
             // Status letter (M, A, D, R, C, ?, !)
@@ -327,7 +324,7 @@ public struct GitStatusView: View {
 
             // Hover-revealed action buttons
             if isHovered {
-                rowActions(entry)
+                rowActions(entry.section, perform: perform)
                     .transition(.opacity.animation(.easeInOut(duration: animDuration)))
             }
         }
@@ -341,68 +338,68 @@ public struct GitStatusView: View {
         }
         .matchedGeometryEffect(id: state.animationID(for: entry), in: fileMoveNamespace)
         .onTapGesture {
-            performEntryAction(.open, for: entry)
+            perform(.open)
         }
-        .contextMenu { fileContextMenu(entry) }
+        .contextMenu { fileContextMenu(entry.section, perform: perform) }
         .accessibilityAddTraits(.isButton)
         .accessibilityIdentifier("git-file-\(entry.id)")
         .accessibilityLabel("\(statusAccessibilityLabel(entry.status)) file: \(entry.filename)")
         .accessibilityValue("\(entry.section.label), \(entry.path)")
         .accessibilityAction {
-            performEntryAction(.open, for: entry)
+            perform(.open)
         }
-        .modifier(GitEntryAccessibilityActions(entry: entry, perform: performEntryAction))
+        .modifier(GitEntryAccessibilityActions(section: entry.section, perform: perform))
     }
 
     @ViewBuilder
-    private func rowActions(_ entry: GitStatusEntry) -> some View {
+    private func rowActions(_ section: GitStatusSection, perform: @escaping (GitEntryAccessibilityAction) -> Void) -> some View {
         HStack(spacing: Spacing.hairline) {
-            switch entry.section {
+            switch section {
             case .staged:
                 actionButton(systemName: "minus", tooltip: "Unstage") {
-                    performEntryAction(.unstage, for: entry)
+                    perform(.unstage)
                 }
             case .changed:
                 actionButton(systemName: "arrow.uturn.backward", tooltip: "Discard Changes") {
-                    performEntryAction(.discard, for: entry)
+                    perform(.discard)
                 }
                 actionButton(systemName: "plus", tooltip: "Stage") {
-                    performEntryAction(.stage, for: entry)
+                    perform(.stage)
                 }
             case .untracked:
                 actionButton(systemName: "plus", tooltip: "Stage") {
-                    performEntryAction(.stage, for: entry)
+                    perform(.stage)
                 }
             case .conflicted:
                 actionButton(systemName: "plus", tooltip: "Stage (mark resolved)") {
-                    performEntryAction(.stage, for: entry)
+                    perform(.stage)
                 }
             }
         }
     }
 
     @ViewBuilder
-    private func fileContextMenu(_ entry: GitStatusEntry) -> some View {
+    private func fileContextMenu(_ section: GitStatusSection, perform: @escaping (GitEntryAccessibilityAction) -> Void) -> some View {
         Button("Open File") {
-            performEntryAction(.open, for: entry)
+            perform(.open)
         }
         Button("Open Diff") {
-            performEntryAction(.openDiff, for: entry)
+            perform(.openDiff)
         }
 
         Divider()
 
-        switch entry.section {
+        switch section {
         case .staged:
             Button("Unstage") {
-                performEntryAction(.unstage, for: entry)
+                perform(.unstage)
             }
         case .changed, .untracked, .conflicted:
-            Button(entry.section == .conflicted ? "Stage (Mark Resolved)" : "Stage") {
-                performEntryAction(.stage, for: entry)
+            Button(section == .conflicted ? "Stage (Mark Resolved)" : "Stage") {
+                perform(.stage)
             }
             Button(role: .destructive) {
-                performEntryAction(.discard, for: entry)
+                perform(.discard)
             } label: {
                 Text("Discard Changes")
             }
@@ -411,10 +408,10 @@ public struct GitStatusView: View {
         Divider()
 
         Button("Copy Path") {
-            performEntryAction(.copyPath, for: entry)
+            perform(.copyPath)
         }
         Button("Reveal in Finder") {
-            performEntryAction(.revealInFinder, for: entry)
+            perform(.revealInFinder)
         }
     }
 
@@ -425,31 +422,31 @@ public struct GitStatusView: View {
         }
     }
 
-    private func performSectionBulkAction(_ section: GitStatusSection) {
-        guard !state.entries(for: section).isEmpty else { return }
+    private func performSectionBulkAction(_ section: GitStatusSection, panelID: UInt64) {
         switch section {
         case .staged:
-            sendAction?(.unstageAll)
+            sendAction?(.unstageAll(panelID: panelID))
         case .changed, .untracked:
-            sendAction?(.stageAll)
+            sendAction?(.stageAll(panelID: panelID))
         case .conflicted:
             break
         }
     }
 
-    private func performEntryAction(_ action: GitEntryAccessibilityAction, for offeredEntry: GitStatusEntry) {
-        guard let entry = currentEntry(matching: offeredEntry) else { return }
+    private func performEntryAction(_ action: GitEntryAccessibilityAction, for offeredEntry: GitStatusEntry, target: GitStatusEntryTarget) {
+        guard target.panelID == state.snapshot.panelID,
+              let entry = currentEntry(matching: offeredEntry) else { return }
         switch action {
         case .open:
-            sendAction?(.openFile(path: entry.path))
+            sendAction?(.openFile(target))
         case .openDiff:
-            sendAction?(.openDiff(path: entry.path, section: entry.section.rawValue))
+            sendAction?(.openDiff(target))
         case .stage:
-            sendAction?(.stageFile(path: entry.path))
+            sendAction?(.stageFile(target))
         case .unstage:
-            sendAction?(.unstageFile(path: entry.path))
+            sendAction?(.unstageFile(target))
         case .discard:
-            fileToDiscard = entry
+            fileToDiscard = (entry.filename, target)
         case .copyPath:
             copyToClipboard(entry.path)
         case .revealInFinder:
@@ -490,7 +487,8 @@ public struct GitStatusView: View {
     // MARK: - Commit area
 
     @ViewBuilder
-    private var commitArea: some View {
+    private func commitArea(_ snapshot: GitStatusSnapshot) -> some View {
+        let panelID = snapshot.panelID
         VStack(spacing: 0) {
             Rectangle()
                 .fill(theme.treeSeparatorFg.opacity(0.3))
@@ -501,7 +499,7 @@ public struct GitStatusView: View {
                 HStack {
                     Toggle(isOn: Binding(
                         get: { state.session.amendMode },
-                        set: { state.setAmendMode($0) }
+                        set: { state.setAmendMode($0, for: panelID) }
                     )) {
                         Text("Amend")
                             .font(Typography.font(.small))
@@ -524,7 +522,7 @@ public struct GitStatusView: View {
 
                     TextEditor(text: Binding(
                         get: { state.session.draft },
-                        set: { state.updateDraft($0) }
+                        set: { state.updateDraft($0, for: panelID) }
                     ))
                         .padding(.vertical, Spacing.sm)
                         .font(Typography.font(.body))
@@ -546,30 +544,30 @@ public struct GitStatusView: View {
 
                 // Push / Pull / Fetch row
                 HStack(spacing: Spacing.xs) {
-                    if state.snapshot.behind > 0 {
-                        miniButton(systemName: "arrow.down.circle", label: "Pull \(state.snapshot.behind)") {
-                            sendAction?(.pull)
+                    if snapshot.behind > 0 {
+                        miniButton(systemName: "arrow.down.circle", label: "Pull \(snapshot.behind)") {
+                            sendAction?(.pull(panelID: panelID))
                         }
                     }
-                    if state.snapshot.ahead > 0 {
-                        miniButton(systemName: "arrow.up.circle", label: "Push \(state.snapshot.ahead)") {
-                            sendAction?(.push)
+                    if snapshot.ahead > 0 {
+                        miniButton(systemName: "arrow.up.circle", label: "Push \(snapshot.ahead)") {
+                            sendAction?(.push(panelID: panelID))
                         }
                     }
                     miniButton(systemName: "arrow.2.circlepath", label: "Fetch") {
-                        sendAction?(.fetch)
+                        sendAction?(.fetch(panelID: panelID))
                     }
                     Spacer()
                 }
 
                 // Commit / Amend button
                 Button {
-                    guard let submission = state.submit() else { return }
+                    guard let submission = state.submit(panelID: panelID) else { return }
                     switch submission.action {
                     case .commit:
-                        sendAction?(.commit(message: submission.message))
+                        sendAction?(.commit(panelID: submission.panelID, message: submission.message))
                     case .amend:
-                        sendAction?(.amend(message: submission.message))
+                        sendAction?(.amend(panelID: submission.panelID, message: submission.message))
                     }
                 } label: {
                     HStack(spacing: Spacing.xs) {
@@ -637,6 +635,9 @@ public struct GitStatusView: View {
     }
 
     private var commitButtonHelp: String {
+        if let draftCommitTargetID = state.session.draftCommitTargetID, draftCommitTargetID != state.snapshot.commitTargetID {
+            return "Clear the draft from the previous Git target before committing"
+        }
         if state.session.amendMode {
             return state.session.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 ? "Enter a commit message"
@@ -678,7 +679,7 @@ public struct GitStatusView: View {
     // MARK: - Toast banner
 
     @ViewBuilder
-    private func toastBanner(message: String, level: ToastLevel, action: ToastAction) -> some View {
+    private func toastBanner(message: String, level: ToastLevel, action: ToastAction, id: UInt64) -> some View {
         HStack(spacing: Spacing.sm) {
             Image(systemName: level == .success ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
                 .font(Typography.font(.small))
@@ -691,9 +692,9 @@ public struct GitStatusView: View {
 
             Spacer(minLength: 4)
 
-            if action == .pullAndRetry {
+            if action == .pullAndRetry && id != 0 {
                 Button("Pull & Retry") {
-                    sendAction?(.pullAndRetry)
+                    sendAction?(.pullAndRetry(toastID: id))
                 }
                 .font(Typography.font(.caption, weight: .medium))
                 .buttonStyle(.plain)
@@ -768,15 +769,15 @@ private enum GitEntryAccessibilityAction {
 
 private struct GitSectionAccessibilityActions: ViewModifier {
     let section: GitStatusSection
-    let perform: (GitStatusSection) -> Void
+    let perform: () -> Void
 
     @ViewBuilder
     func body(content: Content) -> some View {
         switch section {
         case .staged:
-            content.accessibilityAction(named: Text("Unstage All")) { perform(section) }
+            content.accessibilityAction(named: Text("Unstage All")) { perform() }
         case .changed, .untracked:
-            content.accessibilityAction(named: Text("Stage All")) { perform(section) }
+            content.accessibilityAction(named: Text("Stage All")) { perform() }
         case .conflicted:
             content
         }
@@ -784,31 +785,27 @@ private struct GitSectionAccessibilityActions: ViewModifier {
 }
 
 private struct GitEntryAccessibilityActions: ViewModifier {
-    let entry: GitStatusEntry
-    let perform: (GitEntryAccessibilityAction, GitStatusEntry) -> Void
+    let section: GitStatusSection
+    let perform: (GitEntryAccessibilityAction) -> Void
 
     @ViewBuilder
     func body(content: Content) -> some View {
         let commonActions = content
-            .accessibilityAction(named: Text("Open Diff")) { perform(.openDiff, entry) }
-            .accessibilityAction(named: Text("Copy Path")) { perform(.copyPath, entry) }
-            .accessibilityAction(named: Text("Reveal in Finder")) { perform(.revealInFinder, entry) }
+            .accessibilityAction(named: Text("Open Diff")) { perform(.openDiff) }
+            .accessibilityAction(named: Text("Copy Path")) { perform(.copyPath) }
+            .accessibilityAction(named: Text("Reveal in Finder")) { perform(.revealInFinder) }
 
-        switch entry.section {
+        switch section {
         case .staged:
-            commonActions.accessibilityAction(named: Text("Unstage")) { perform(.unstage, entry) }
-        case .changed:
+            commonActions.accessibilityAction(named: Text("Unstage")) { perform(.unstage) }
+        case .changed, .untracked:
             commonActions
-                .accessibilityAction(named: Text("Stage")) { perform(.stage, entry) }
-                .accessibilityAction(named: Text("Discard Changes")) { perform(.discard, entry) }
-        case .untracked:
-            commonActions
-                .accessibilityAction(named: Text("Stage")) { perform(.stage, entry) }
-                .accessibilityAction(named: Text("Discard Changes")) { perform(.discard, entry) }
+                .accessibilityAction(named: Text("Stage")) { perform(.stage) }
+                .accessibilityAction(named: Text("Discard Changes")) { perform(.discard) }
         case .conflicted:
             commonActions
-                .accessibilityAction(named: Text("Stage (Mark Resolved)")) { perform(.stage, entry) }
-                .accessibilityAction(named: Text("Discard Changes")) { perform(.discard, entry) }
+                .accessibilityAction(named: Text("Stage (Mark Resolved)")) { perform(.stage) }
+                .accessibilityAction(named: Text("Discard Changes")) { perform(.discard) }
         }
     }
 }

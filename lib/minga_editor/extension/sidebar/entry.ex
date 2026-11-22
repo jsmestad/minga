@@ -56,6 +56,35 @@ defmodule MingaEditor.Extension.Sidebar.Entry do
             badge_count: nil,
             snapshot: Snapshot.new()
 
+  @git_status_id "git_status"
+
+  @doc "Returns the reserved Git Status sidebar identity."
+  @spec git_status_id() :: String.t()
+  def git_status_id, do: @git_status_id
+
+  @doc "Creates the sidebar entry for the active Git Status provider."
+  @spec git_status(source()) :: t()
+  def git_status(source) do
+    %__MODULE__{
+      source: source,
+      id: @git_status_id,
+      display_name: "Git Status",
+      description: "Repository changes",
+      priority: 20,
+      preferred_width: 30,
+      semantic_kind: @git_status_id,
+      input_handler: MingaEditor.Input.GitStatus,
+      icon: "point.3.filled.connected.trianglepath.dotted",
+      badge_count: 0
+    }
+  end
+
+  @doc "Updates visibility, the changed-file count, and keyboard focus for Git Status."
+  @spec present_git_status(t(), boolean(), non_neg_integer(), boolean()) :: t()
+  def present_git_status(%__MODULE__{id: @git_status_id} = entry, visible?, badge_count, focused?) do
+    %{entry | visible?: visible?, badge_count: badge_count, focused?: visible? and focused?}
+  end
+
   @doc "Updates the cached snapshot."
   @spec publish_snapshot(t(), Snapshot.t()) :: t()
   def publish_snapshot(%__MODULE__{} = entry, %Snapshot{} = snapshot),

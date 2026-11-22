@@ -81,12 +81,30 @@ defmodule MingaEditor.Mouse do
   @typep target_move :: (text_position() -> {:ok, text_position()} | {:error, atom()})
 
   @doc "Applies a frontend text-pointer event whose source target was resolved by the renderer."
-  @spec handle_text_event(state(), TextEvent.t(), TextTarget.t() | nil) :: state()
+  @spec handle_text_event(
+          state(),
+          TextEvent.t(),
+          MingaEditor.Renderer.TextPresentation.target() | nil
+        ) ::
+          state()
   def handle_text_event(state, %TextEvent{button: :left, event_type: :release}, _target) do
     handle(state, 0, 0, :left, 0, :release, 1)
   end
 
   def handle_text_event(state, %TextEvent{}, nil), do: state
+
+  def handle_text_event(
+        state,
+        %TextEvent{button: :left, event_type: :press, mods: 0},
+        {:block_action, click, row, col}
+      ) do
+    case click.(row, col) do
+      {:command, command} -> MingaEditor.dispatch_command(state, command)
+      :ok -> state
+    end
+  end
+
+  def handle_text_event(state, %TextEvent{}, {:block_action, _click, _row, _col}), do: state
 
   def handle_text_event(state, %TextEvent{} = event, %TextTarget{window_id: 65_534} = target) do
     if MingaEditor.Agent.PromptInput.current_source?(state, target),

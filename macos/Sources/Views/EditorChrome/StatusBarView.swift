@@ -40,12 +40,13 @@ public struct StatusBarView: View {
         case reviewLatest(generation: UInt32, itemID: String)
     }
 
-    public init(state: StatusBarState, feedbackState: FeedbackState? = nil, sendAction: ViewActionHandler<Action>?, isFileTreeVisible: Bool = false, isGitStatusVisible: Bool = false, isBottomPanelVisible: Bool = false, isAgentChatVisible: Bool = false, gitSyncing: Bool = false) {
+    public init(state: StatusBarState, feedbackState: FeedbackState? = nil, sendAction: ViewActionHandler<Action>?, isFileTreeVisible: Bool = false, isGitStatusVisible: Bool = false, isBottomPanelVisible: Bool = false, isAgentChatVisible: Bool = false, gitSyncing: Bool = false, hasGitStatusControl: Bool = true) {
         self.state = state
         self.feedbackState = feedbackState
         self.sendAction = sendAction
         self.isFileTreeVisible = isFileTreeVisible
         self.isGitStatusVisible = isGitStatusVisible
+        self.hasGitStatusControl = hasGitStatusControl
         self.isBottomPanelVisible = isBottomPanelVisible
         self.isAgentChatVisible = isAgentChatVisible
         self.gitSyncing = gitSyncing
@@ -57,6 +58,7 @@ public struct StatusBarView: View {
     public let sendAction: ViewActionHandler<Action>?
     public var isFileTreeVisible: Bool = false
     public var isGitStatusVisible: Bool = false
+    private var hasGitStatusControl: Bool
     public var isBottomPanelVisible: Bool = false
     public var isAgentChatVisible: Bool = false
     public var gitSyncing: Bool = false
@@ -832,16 +834,17 @@ public struct StatusBarView: View {
                 sendAction?(.togglePanel(panel: 0))
             }
 
-            // Source control toggle
-            StatusBarIconButton(
-                icon: "point.3.filled.connected.trianglepath.dotted",
-                isActive: isGitStatusVisible,
-                accentFg: theme.statusbarAccentFg,
-                barHeight: barHeight,
-                barFg: theme.modelineBarFg,
-                tooltip: "Git status (SPC g g)"
-            ) {
-                sendAction?(.togglePanel(panel: 2))
+            if hasGitStatusControl {
+                StatusBarIconButton(
+                    icon: "point.3.filled.connected.trianglepath.dotted",
+                    isActive: isGitStatusVisible,
+                    accentFg: theme.statusbarAccentFg,
+                    barHeight: barHeight,
+                    barFg: theme.modelineBarFg,
+                    tooltip: "Git status (SPC g g)"
+                ) {
+                    sendAction?(.togglePanel(panel: 2))
+                }
             }
 
             // Bottom panel toggle

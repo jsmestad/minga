@@ -428,9 +428,11 @@ defmodule Minga.ConfigTest do
     end
 
     test "raises when no source is provided" do
-      assert_raise ArgumentError, ~r/one of :path, :git, or :hex is required/, fn ->
-        Minga.Config.extension(:bad, greeting: "hello")
-      end
+      assert_raise ArgumentError,
+                   ~r/one of :path, :git, or :hex is required/,
+                   fn ->
+                     Minga.Config.extension(:bad, greeting: "hello")
+                   end
     end
 
     test "raises when multiple sources are provided" do

@@ -10,7 +10,9 @@ defmodule Minga.Extension.SdkContractTest do
     Minga.Buffer.EditSource => "Value type; host construction helpers stay internal.",
     Minga.Config => "The SDK exposes extension option reads, not the editor configuration DSL.",
     Minga.Events =>
-      "Extensions subscribe to documented topics; registry plumbing stays in the host."
+      "Extensions subscribe to documented topics; registry plumbing stays in the host.",
+    Minga.Git =>
+      "Extensions operate on explicit repository roots, not the host's tracker or process registry."
   }
 
   # Runtime functions that extensions must not call or never need, by reason.
@@ -66,6 +68,11 @@ defmodule Minga.Extension.SdkContractTest do
       {:visible, 0} => :render_read,
       {:visible, 1} => :render_read
     },
+    MingaEditor.Extension.RepositoryJob => %{
+      {:cast, 1} => :host_construction,
+      {:remote_retry, 1} => :host_dispatch,
+      {:submit, 3} => :host_dispatch
+    },
     MingaEditor.Extension.Sidebar => %{
       {:start_link, 1} => :lifecycle,
       {:unregister_source, 1} => :lifecycle,
@@ -73,6 +80,8 @@ defmodule Minga.Extension.SdkContractTest do
       {:default_table, 0} => :lifecycle,
       {:table_for, 1} => :lifecycle,
       {:register, 3} => :injected_server,
+      {:register_git_status, 2} => :host_construction,
+      {:sync_git_status, 4} => :host_dispatch,
       {:unregister, 3} => :injected_server,
       {:publish_snapshot, 4} => :injected_server,
       {:set_visible, 4} => :injected_server,

@@ -7,6 +7,11 @@ defmodule MingaEditor.State.Picker do
   """
 
   alias MingaEditor.State.Picker.ActivationOffer
+  alias MingaEditor.State.Picker.Extension
+  alias MingaEditor.UI.Picker
+  alias MingaEditor.UI.Picker.Candidate
+  alias MingaEditor.UI.Picker.Item
+  alias MingaEditor.UI.Picker.PublicSource
 
   @typedoc "Action menu state: `{actions, selected_index, captured_item}` or nil when closed."
   @type action_menu ::
@@ -53,6 +58,7 @@ defmodule MingaEditor.State.Picker do
           restore_theme: MingaEditor.UI.Theme.t() | nil,
           action_menu: action_menu(),
           context: map() | nil,
+          extension: Extension.t() | nil,
           layout: MingaEditor.UI.Picker.Source.layout(),
           source_switch: source_switch(),
           load_status: load_status(),
@@ -70,6 +76,7 @@ defmodule MingaEditor.State.Picker do
             restore_theme: nil,
             action_menu: nil,
             context: nil,
+            extension: nil,
             layout: :bottom,
             source_switch: :original,
             load_status: :ready,
@@ -101,6 +108,13 @@ defmodule MingaEditor.State.Picker do
       layout: layout,
       load_status: :loading
     }
+    |> begin_query_session()
+  end
+
+  @doc "Builds a picker session with immutable callback arguments and no built-in context."
+  @spec extension_loading(Picker.t(), module(), PublicSource.owner(), Extension.t()) :: t()
+  def extension_loading(picker, source, owner, %Extension{} = extension) do
+    %__MODULE__{picker: picker, source: source, callback_source: owner, extension: extension}
     |> begin_query_session()
   end
 
@@ -326,6 +340,53 @@ defmodule MingaEditor.State.Picker do
   def complete_fetch(%__MODULE__{} = ps, picker) do
     %{ps | picker: picker, load_status: :ready}
     |> refresh_activation_offer()
+  end
+
+  @doc "Commits a page, replacing only the previous continuation row."
+  @spec commit_extension_page(t(), [Item.t()], [Candidate.t()], PublicSource.page()) :: t()
+  def commit_extension_page(
+        %__MODULE__{extension: %Extension{} = extension} = ps,
+        items,
+        candidates,
+        page
+      ) do
+    case Extension.accept_page(extension, items, page) do
+      {:ok, extension} ->
+        picker = install_page(ps, items, candidates)
+
+        updated = %{ps | extension: extension}
+        updated |> complete_fetch(picker) |> invalidate_fetch()
+
+      :duplicate ->
+        ps |> fail_fetch("Picker source returned duplicate item ids") |> invalidate_fetch()
+    end
+  end
+
+  @spec install_page(t(), [Item.t()], [Candidate.t()]) :: Picker.t()
+  defp install_page(%__MODULE__{fetch_identity: :start, picker: picker}, items, candidates) do
+    Picker.put_candidates(picker, items, candidates)
+  end
+
+  defp install_page(
+         %__MODULE__{fetch_identity: {:continue, _cursor}, picker: picker},
+         items,
+         candidates
+       ) do
+    Picker.put_candidates(
+      picker,
+      replace_continuation(picker.items, items),
+      replace_continuation(picker.candidates, candidates)
+    )
+  end
+
+  @spec replace_continuation([value], [value]) :: [value] when value: var
+  defp replace_continuation([_continuation], page), do: page
+  defp replace_continuation([item | rest], page), do: [item | replace_continuation(rest, page)]
+
+  @doc "Records the preview request or clears the preview when no item is selected."
+  @spec put_extension_preview(t(), Extension.preview()) :: t()
+  def put_extension_preview(%__MODULE__{extension: %Extension{} = extension} = ps, preview) do
+    %{ps | extension: Extension.put_preview(extension, preview)}
   end
 
   @doc "Records a user-visible failure for the current asynchronous fetch."

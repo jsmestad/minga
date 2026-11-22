@@ -38,7 +38,7 @@ defmodule MingaEditor.Shell.Traditional.SidebarsTest do
 
     assert SidebarWorkflow.git_status_panel(closed) == nil
     assert SidebarWorkflow.active_id(closed) == nil
-    assert %{visible?: false, focused?: false, badge_count: 0} = Sidebar.get(table, "git_status")
+    assert Sidebar.get(table, "git_status") == nil
   end
 
   test "Git status replacement rejects legacy map-shaped panel and TUI state" do

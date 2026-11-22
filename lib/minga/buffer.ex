@@ -12,6 +12,7 @@ defmodule Minga.Buffer do
   """
 
   alias Minga.Buffer.ChangeLog
+  alias Minga.Buffer.Conflict
   alias Minga.Buffer.CursorContext
   alias Minga.Buffer.Document
   alias Minga.Buffer.FileMutation
@@ -123,6 +124,10 @@ defmodule Minga.Buffer do
   @spec content_with_version(t()) :: {String.t(), non_neg_integer()}
   defdelegate content_with_version(server), to: BufferProcess
 
+  @doc false
+  @spec file_observation(t()) :: {String.t() | nil, String.t(), position(), non_neg_integer()}
+  defdelegate file_observation(server), to: BufferProcess
+
   @doc "Returns the complete text and file path from one buffer state only if the text fits."
   @spec bounded_content_with_path(t(), non_neg_integer()) ::
           {:ok, String.t(), String.t() | nil} | {:error, :too_large}
@@ -145,6 +150,25 @@ defmodule Minga.Buffer do
   @spec conflict_snapshot(t()) ::
           {String.t(), Minga.Buffer.Document.position(), [Minga.Git.MergeConflict.Entry.t()]}
   defdelegate conflict_snapshot(server), to: BufferProcess
+
+  @doc false
+  @spec conflict_render_snapshot(t()) :: {non_neg_integer(), [Minga.Git.MergeConflict.Entry.t()]}
+  defdelegate conflict_render_snapshot(server), to: BufferProcess
+
+  @doc "Returns the cursor, inclusive conflict regions, and their shared buffer version."
+  @spec conflict_view(t()) :: Conflict.view()
+  defdelegate conflict_view(server), to: BufferProcess
+
+  @doc """
+  Resolves one conflict at the observed version, moving the cursor to the selected
+  line (or the region start), clamped to the resulting document.
+
+  Does not save. To persist this exact resolution, pass the returned version to
+  `save_if_version/2`. A rejected resolution leaves the buffer unchanged.
+  """
+  @spec resolve_conflict(t(), non_neg_integer(), Conflict.target(), Conflict.choice()) ::
+          {:ok, Conflict.resolution()} | {:error, Conflict.rejection()}
+  defdelegate resolve_conflict(server, expected_version, target, choice), to: BufferProcess
 
   @doc "Bounded metadata, cursor, and viewport lines captured in one buffer call."
   @spec inspection_snapshot(t(), non_neg_integer(), pos_integer()) ::
@@ -443,6 +467,8 @@ defmodule Minga.Buffer do
   @spec save(t()) :: :ok | {:error, term()}
   defdelegate save(server), to: BufferProcess
 
+  @doc "Saves the file only when the buffer is still at the requested version."
+  @spec save_if_version(t(), non_neg_integer()) :: :ok | {:error, term()}
   @spec save_if_version(t(), non_neg_integer(), keyword()) :: :ok | {:error, term()}
   defdelegate save_if_version(server, expected_version, opts \\ []), to: BufferProcess
 

@@ -6,16 +6,21 @@ defmodule MingaEditor.State.Git do
   generated-buffer views whose results are still relevant to this editor.
   """
 
-  @type diff_view_info :: %{
-          required(:source_buf) => pid() | nil,
-          required(:git_root) => String.t(),
-          required(:rel_path) => String.t(),
-          required(:staged) => boolean(),
-          required(:line_metadata) => [Minga.Core.DiffView.line_meta()],
-          required(:hunk_lines) => [non_neg_integer()],
-          optional(:view_mode) => :unified | :side_by_side,
-          optional(:pane_width) => pos_integer()
-        }
+  alias MingaEditor.Extension.GitDiff.View
+
+  @typedoc "Presentation metadata alone or a complete semantic Git diff view."
+  @type diff_view_info :: projection_info() | View.t()
+
+  @typep projection_info :: %{
+           required(:source_buf) => pid() | nil,
+           required(:git_root) => String.t(),
+           required(:rel_path) => String.t(),
+           required(:staged) => boolean(),
+           required(:line_metadata) => [Minga.Core.DiffView.line_meta()],
+           required(:hunk_lines) => [non_neg_integer()],
+           optional(:view_mode) => :unified | :side_by_side,
+           optional(:pane_width) => pos_integer()
+         }
 
   @type t :: %__MODULE__{diff_views: %{pid() => diff_view_info()}}
 

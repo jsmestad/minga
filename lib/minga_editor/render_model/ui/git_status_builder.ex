@@ -2,6 +2,7 @@ defmodule MingaEditor.RenderModel.UI.GitStatusBuilder do
   @moduledoc false
 
   alias Minga.RenderModel.UI.GitStatus
+  alias MingaEditor.GitStatus.TUIState
   alias MingaEditor.Shell.Traditional.GitToast
 
   @spec build(map() | nil, boolean(), map() | nil) :: GitStatus.t()
@@ -24,6 +25,8 @@ defmodule MingaEditor.RenderModel.UI.GitStatusBuilder do
     data = panel_to_map(panel_data)
 
     %GitStatus{
+      panel_id: Map.get(data, :id, 0),
+      commit_target_id: Map.get(data, :commit_target_id, 0),
       repo_state: Map.get(data, :repo_state, :normal),
       syncing: syncing,
       branch: Map.get(data, :branch) || "",
@@ -35,6 +38,14 @@ defmodule MingaEditor.RenderModel.UI.GitStatusBuilder do
       stash_count: Map.get(data, :stash_count) || 0,
       git_toast: normalize_toast(toast)
     }
+  end
+
+  @spec build(map() | nil, boolean(), map() | nil, TUIState.t() | nil) :: GitStatus.t()
+  def build(panel, syncing, toast, nil), do: build(panel, syncing, toast)
+
+  def build(panel, syncing, toast, %TUIState{} = tui) do
+    {cursor, collapsed} = TUIState.presentation(tui)
+    %{build(panel, syncing, toast) | terminal_cursor: cursor, terminal_collapsed: collapsed}
   end
 
   @spec panel_to_map(map()) :: map()
@@ -50,33 +61,33 @@ defmodule MingaEditor.RenderModel.UI.GitStatusBuilder do
     Enum.map(entries, fn entry ->
       %{
         path_hash: :erlang.phash2(entry.path, 0xFFFFFFFF),
-        section: section(entry),
+        section: MingaEditor.GitStatus.Panel.section(entry),
         status: entry.status,
         path: entry.path
       }
     end)
   end
 
-  # The section byte, formerly encode_status_section/1's multi-clause predicate.
-  @spec section(map()) :: non_neg_integer()
-  defp section(%{staged: true}), do: 0
-  defp section(%{status: :untracked}), do: 2
-  defp section(%{status: :conflict}), do: 3
-  defp section(_entry), do: 1
-
   # Normalize a raw toast into the non-nullable wire map (presence byte plus the
   # conditional level/action/message tail). A nil action maps to :none.
   @spec normalize_toast(map() | nil) :: GitStatus.wire_toast()
   defp normalize_toast(nil), do: %{present: 0}
 
-  defp normalize_toast(%GitToast{message: message, level: level, action: action})
+  defp normalize_toast(%GitToast{id: id, message: message, level: level, retry: retry})
        when is_binary(message) and level in [:info, :success, :warning, :error] do
-    %{present: 1, level: level, action: action || :none, message: message}
+    action = if is_nil(retry), do: :none, else: :pull_and_retry
+    %{present: 1, id: id, level: level, action: action, message: message}
   end
 
-  defp normalize_toast(%{message: message, level: level, action: action})
+  defp normalize_toast(%{message: message, level: level, action: action} = toast)
        when is_binary(message) and level in [:info, :success, :warning, :error] do
-    %{present: 1, level: level, action: action || :none, message: message}
+    %{
+      present: 1,
+      id: Map.get(toast, :id, 0),
+      level: level,
+      action: action || :none,
+      message: message
+    }
   end
 
   defp normalize_toast(_toast), do: %{present: 0}

@@ -8,7 +8,12 @@ defmodule Minga.Git do
       config :minga, git_module: Minga.Git.Stub
   """
 
+  alias Minga.Buffer
+  alias Minga.Core.Diff
+  alias Minga.Git.Buffer, as: GitBuffer
+  alias Minga.Git.Change
   alias Minga.Git.StashEntry
+  alias Minga.Git.TrackedFile
   alias Minga.Project.Root
 
   defmodule StatusEntry do
@@ -60,6 +65,9 @@ defmodule Minga.Git do
           }
   end
 
+  @typedoc "One contiguous change with zero-based coordinates in the base and revised text."
+  @type change :: Diff.hunk()
+
   @typedoc "A structured status entry for one file."
   @type status_entry :: StatusEntry.t()
 
@@ -88,9 +96,10 @@ defmodule Minga.Git do
   Finds the git repository root for a file path.
 
   Returns `{:ok, root_path}` if the file is inside a git repo, or
-  `:not_git` if it isn't.
+  `:not_git` if it isn't or if no path was provided (`nil`).
   """
-  @spec root_for(String.t()) :: {:ok, String.t()} | :not_git
+  @spec root_for(String.t() | nil) :: {:ok, String.t()} | :not_git
+  def root_for(nil), do: :not_git
   def root_for(path), do: impl().root_for(path)
 
   @doc """
@@ -106,16 +115,38 @@ defmodule Minga.Git do
   Reads the staged (index) version of a file from git.
 
   Returns `{:ok, content}` with the file content in the index, or `:error`
-  if the file is not staged.
+  if the path has no stage-zero entry in the index.
   """
   @spec show_staged(String.t(), String.t()) :: {:ok, String.t()} | :error
   def show_staged(git_root, relative_path), do: impl().show_staged(git_root, relative_path)
+
+  @doc """
+  Reads a regular file's stage-zero blob from the index.
+
+  Returns `{:ok, nil}` only when the path is absent, including after a staged
+  deletion. A present empty blob is `{:ok, ""}`. Unmerged paths and read
+  failures return `{:error, reason}`.
+  """
+  @spec index_blob(String.t(), String.t()) :: {:ok, binary() | nil} | {:error, String.t()}
+  def index_blob(git_root, relative_path), do: impl().index_blob(git_root, relative_path)
 
   @doc """
   Applies a unified diff patch to the git index (staging area).
   """
   @spec stage_patch(String.t(), String.t()) :: :ok | {:error, String.t()}
   def stage_patch(git_root, patch), do: impl().stage_patch(git_root, patch)
+
+  @doc """
+  Stages only `change` from `base` to `revised`, without writing to the worktree.
+
+  Use `nil` for an absent file and `""` for a present empty file in either
+  snapshot. A mismatch in index presence or a conflicting edit at the selected
+  hunk is rejected. Unrelated staged changes are preserved.
+  """
+  @spec stage_change(String.t(), String.t(), binary() | nil, binary() | nil, change()) ::
+          :ok | {:error, String.t()}
+  def stage_change(git_root, relative_path, base, revised, change),
+    do: impl().stage_change(git_root, relative_path, base, revised, change)
 
   @doc """
   Gets blame information for a specific line of a file.
@@ -151,7 +182,7 @@ defmodule Minga.Git do
   @doc """
   Returns recent commits as structured entries.
 
-  Options: `:count` (default 10), `:path` (limit to file).
+  Options: `:count` (default 10), `:path` (limit to one file), `:skip` (default 0), and `:revision` (full object ID, defaults to `HEAD`). Use `:revision` with `:skip` to page through the same history after the active branch moves.
   """
   @spec log(String.t(), keyword()) :: {:ok, [log_entry()]} | {:error, String.t()}
   def log(git_root, opts \\ []), do: impl().log(git_root, opts)
@@ -281,6 +312,15 @@ defmodule Minga.Git do
   @spec refresh_repo(pid()) :: :ok
   defdelegate refresh_repo(repo_pid), to: Minga.Git.Repo, as: :refresh
 
+  @doc "Requests a status refresh if Minga already tracks this repository."
+  @spec refresh_status(String.t()) :: :ok
+  def refresh_status(git_root) when is_binary(git_root) do
+    case lookup_repo(git_root) do
+      nil -> :ok
+      pid -> refresh_repo(pid)
+    end
+  end
+
   @doc """
   Returns the git tracking process for a buffer, or nil if untracked.
 
@@ -289,6 +329,26 @@ defmodule Minga.Git do
   """
   @spec tracking_pid(pid()) :: pid() | nil
   defdelegate tracking_pid(buffer_pid), to: Minga.Git.Tracker, as: :lookup
+
+  @doc """
+  Captures the buffer's content, cursor and mutation version together and
+  computes its changes against the Git tracker's cached HEAD.
+
+  Returns `:not_tracked` for a buffer without Git tracking. An absent HEAD
+  entry has a `nil` base.
+  """
+  @spec tracked_file(pid()) :: {:ok, TrackedFile.t()} | :not_tracked
+  def tracked_file(buffer_pid) when is_pid(buffer_pid) do
+    case tracking_pid(buffer_pid) do
+      nil ->
+        :not_tracked
+
+      git_pid ->
+        GitBuffer.tracked_file(git_pid, Buffer.file_observation(buffer_pid))
+    end
+  catch
+    :exit, _ -> :not_tracked
+  end
 
   @doc "Returns gutter sign indicators (line → hunk type) for a tracked buffer."
   @spec gutter_signs(GenServer.server()) :: %{non_neg_integer() => atom()}
@@ -323,6 +383,36 @@ defmodule Minga.Git do
 
   # ── Pure diff computation ──────────────────────────────────────────────
 
+  @doc "Finds the change at a buffer line, including the anchor above a deletion."
+  @spec change_at([change()], non_neg_integer()) :: change() | nil
+  defdelegate change_at(hunks, line), to: Diff, as: :hunk_at_line
+
+  @doc "Returns the next or previous change's buffer line, or nil if there is none."
+  @spec neighbor_change_line([change()], non_neg_integer(), :next | :previous) ::
+          non_neg_integer() | nil
+  def neighbor_change_line(hunks, line, :next) do
+    Enum.find_value(hunks, fn hunk ->
+      anchor = change_line(hunk)
+      if anchor > line, do: anchor
+    end)
+  end
+
+  def neighbor_change_line(hunks, line, :previous) do
+    Enum.reduce_while(hunks, nil, fn hunk, previous ->
+      anchor = change_line(hunk)
+      if anchor < line, do: {:cont, anchor}, else: {:halt, previous}
+    end)
+  end
+
+  @doc "Reverts just one change in the revised text, without editing or saving a buffer."
+  @spec revert_change(binary(), change()) :: binary()
+  def revert_change(content, change) do
+    content
+    |> Change.lines()
+    |> Diff.revert_hunk(change)
+    |> Enum.join("\n")
+  end
+
   @doc "Computes line-level diff hunks between two lists of lines."
   @spec diff_lines([String.t()], [String.t()]) :: [Minga.Core.Diff.hunk()]
   defdelegate diff_lines(base_lines, current_lines), to: Minga.Core.Diff
@@ -342,6 +432,10 @@ defmodule Minga.Git do
   end
 
   # ── Private ────────────────────────────────────────────────────────────
+
+  @spec change_line(change()) :: non_neg_integer()
+  defp change_line(%{type: :deleted, start_line: start}), do: max(0, start - 1)
+  defp change_line(%{start_line: start}), do: start
 
   @spec canonical_git_path(String.t()) :: String.t()
   defp canonical_git_path(path) do

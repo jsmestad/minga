@@ -8,6 +8,8 @@ defmodule Minga.Git.System do
 
   @behaviour Minga.Git.Backend
 
+  alias Minga.Git.Change
+
   @cmd_timeout 5_000
   @default_timeout_ms 2_000
   @status_timeout_ms 2_000
@@ -31,7 +33,7 @@ defmodule Minga.Git.System do
   @impl true
   @spec show_head(String.t(), String.t()) :: {:ok, String.t()} | :error
   def show_head(git_root, relative_path) when is_binary(git_root) and is_binary(relative_path) do
-    case git_cmd(["show", "HEAD:#{relative_path}"],
+    case git_cmd(["show", "HEAD:#{relative_path}", "--"],
            cd: git_root,
            stderr_to_stdout: true
          ) do
@@ -46,7 +48,7 @@ defmodule Minga.Git.System do
   @spec show_staged(String.t(), String.t()) :: {:ok, String.t()} | :error
   def show_staged(git_root, relative_path)
       when is_binary(git_root) and is_binary(relative_path) do
-    case git_cmd(["show", ":#{relative_path}"],
+    case git_cmd(["show", ":0:#{relative_path}", "--"],
            cd: git_root,
            stderr_to_stdout: true
          ) do
@@ -58,32 +60,112 @@ defmodule Minga.Git.System do
   end
 
   @impl true
+  @spec index_blob(String.t(), String.t()) :: {:ok, binary() | nil} | {:error, String.t()}
+  def index_blob(git_root, relative_path) do
+    with :ok <- Change.validate_path(relative_path),
+         {:ok, content, _mode} <- read_index_entry(git_root, relative_path) do
+      {:ok, content}
+    end
+  end
+
+  @impl true
   @spec stage_patch(String.t(), String.t()) :: :ok | {:error, String.t()}
   def stage_patch(git_root, patch) when is_binary(git_root) and is_binary(patch) do
-    port =
-      Port.open(
-        {:spawn_executable, System.find_executable("git") |> String.to_charlist()},
-        [
-          {:args, ~w[apply --cached -]},
-          {:cd, String.to_charlist(git_root)},
-          :binary,
-          :exit_status,
-          :use_stdio
-        ]
-      )
+    apply_cached_patch(git_root, patch, ["apply", "--cached"])
+  end
 
-    Port.command(port, patch)
-    Port.command(port, "")
-    send(port, {self(), :close})
-
-    receive do
-      {^port, {:exit_status, 0}} -> :ok
-      {^port, {:exit_status, _code}} -> {:error, "git apply failed"}
-    after
-      @cmd_timeout -> {:error, "git apply timed out"}
+  @impl true
+  @spec stage_change(String.t(), String.t(), binary() | nil, binary() | nil, Minga.Git.change()) ::
+          :ok | {:error, String.t()}
+  def stage_change(git_root, relative_path, base, revised, change) do
+    with :ok <- Change.validate_path(relative_path),
+         {:ok, index, mode} <- read_index_entry(git_root, relative_path),
+         {:ok, result} <- Change.stage_result(base, revised, change, index) do
+      if result == index do
+        :ok
+      else
+        patch = Change.patch(relative_path, index, result, mode)
+        args = ["-c", "apply.ignoreWhitespace=no", "apply", "--cached", "--whitespace=nowarn"]
+        apply_cached_patch(git_root, patch, args)
+      end
     end
-  rescue
-    e -> {:error, Exception.message(e)}
+  end
+
+  @spec read_index_entry(String.t(), String.t()) ::
+          {:ok, binary() | nil, binary() | nil} | {:error, String.t()}
+  defp read_index_entry("", _path), do: {:error, "Expected a Git repository root."}
+
+  defp read_index_entry(git_root, path) do
+    args = ["-C", git_root, "--literal-pathspecs", "ls-files", "--stage", "-z", "--", path]
+
+    case git_cmd(args, []) do
+      {output, 0} ->
+        read_stage_zero(git_root, path, output)
+
+      {output, _} ->
+        {:error, "Could not read the Git index: #{String.trim(output)}"}
+    end
+  end
+
+  @spec read_stage_zero(String.t(), String.t(), binary()) ::
+          {:ok, binary() | nil, binary() | nil} | {:error, String.t()}
+  defp read_stage_zero(git_root, path, output) do
+    # A literal directory pathspec also selects its descendants.
+    entries =
+      for entry <- :binary.split(output, <<0>>, [:global, :trim]),
+          [metadata, ^path] <- [:binary.split(entry, "\t")],
+          do: metadata
+
+    with [metadata] <- entries,
+         [mode, oid, "0"] when mode in ["100644", "100755"] <-
+           :binary.split(metadata, " ", [:global]) do
+      case git_cmd(["-C", git_root, "cat-file", "blob", oid], []) do
+        {content, 0} -> {:ok, content, mode}
+        {reason, _} -> {:error, "Could not read the Git index blob: #{String.trim(reason)}"}
+      end
+    else
+      [] -> {:ok, nil, nil}
+      _ -> {:error, "The Git index path is unmerged or is not a regular file."}
+    end
+  end
+
+  @spec apply_cached_patch(String.t(), iodata(), [String.t()]) :: :ok | {:error, String.t()}
+  defp apply_cached_patch(git_root, patch, args) do
+    with tmp when is_binary(tmp) <- System.tmp_dir(),
+         suffix <- Base.url_encode64(:crypto.strong_rand_bytes(16), padding: false),
+         dir <- Path.join(tmp, "minga-git-apply-#{suffix}"),
+         :ok <- File.mkdir(dir),
+         :ok <- apply_from_temp_dir(git_root, dir, patch, args) do
+      :ok
+    else
+      nil ->
+        {:error, "Could not find a temporary directory for the Git patch."}
+
+      {:error, reason} when is_atom(reason) ->
+        {:error, "Could not write the temporary Git patch: #{:file.format_error(reason)}"}
+
+      {:error, _} = error ->
+        error
+    end
+  end
+
+  @spec apply_from_temp_dir(String.t(), String.t(), iodata(), [String.t()]) ::
+          :ok | {:error, String.t() | File.posix()}
+  defp apply_from_temp_dir(git_root, dir, patch, args) do
+    path = Path.join(dir, "change.patch")
+
+    try do
+      with :ok <- File.chmod(dir, 0o700),
+           :ok <- File.write(path, patch, [:binary, :exclusive]) do
+        case git_cmd(args ++ ["--", path], cd: git_root, timeout_ms: @cmd_timeout) do
+          {_output, 0} -> :ok
+          {output, _} -> {:error, "git apply failed: #{String.trim(output)}"}
+        end
+      end
+    after
+      File.rm(path)
+      File.rmdir(dir)
+    end
   end
 
   @impl true
@@ -174,11 +256,35 @@ defmodule Minga.Git.System do
   @spec log(String.t(), keyword()) :: {:ok, [Minga.Git.log_entry()]} | {:error, String.t()}
   def log(git_root, opts \\ []) when is_binary(git_root) do
     count = Keyword.get(opts, :count, 10)
+    skip = Keyword.get(opts, :skip, 0)
+    revision = Keyword.get(opts, :revision, "HEAD")
     path = Keyword.get(opts, :path)
 
+    with :ok <- validate_log_position(skip, revision) do
+      read_log(git_root, count, skip, revision, path)
+    end
+  rescue
+    e in [ErlangError, ArgumentError] -> {:error, "git log error: #{Exception.message(e)}"}
+  end
+
+  @spec validate_log_position(term(), term()) :: :ok | {:error, String.t()}
+  defp validate_log_position(skip, revision)
+       when is_integer(skip) and skip >= 0 and is_binary(revision) do
+    if revision == "HEAD" or Regex.match?(~r/\A(?:[a-f0-9]{40}|[a-f0-9]{64})\z/i, revision) do
+      :ok
+    else
+      {:error, "git log revision must be a full object ID"}
+    end
+  end
+
+  defp validate_log_position(_skip, _revision), do: {:error, "Invalid git log position"}
+
+  @spec read_log(String.t(), pos_integer(), non_neg_integer(), String.t(), String.t() | nil) ::
+          {:ok, [Minga.Git.log_entry()]} | {:error, String.t()}
+  defp read_log(git_root, count, skip, revision, path) do
     format = "%H%x1f%h%x1f%an%x1f%cr%x1f%s"
-    args = ["log", "--format=#{format}", "-n", "#{count}"]
-    args = if path, do: args ++ ["--", path], else: args
+    args = ["log", "--format=#{format}", "-n", "#{count}", "--skip=#{skip}", revision, "--"]
+    args = if path, do: args ++ [path], else: args
 
     case git_cmd(args, cd: git_root, stderr_to_stdout: true) do
       {output, 0} ->
@@ -193,8 +299,6 @@ defmodule Minga.Git.System do
       {output, _} ->
         {:error, "git log failed: #{String.trim(output)}"}
     end
-  rescue
-    e in [ErlangError, ArgumentError] -> {:error, "git log error: #{Exception.message(e)}"}
   end
 
   @impl true

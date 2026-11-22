@@ -686,7 +686,7 @@ defmodule Minga.Config do
   @doc """
   Declares an extension to load.
 
-  Exactly one source must be provided: `path:`, `git:`, or `hex:`. Built-in extension modules may omit a source.
+  Provide one source: `path:`, `git:`, or `hex:`. Built-in extension modules may omit a source.
   Extra keyword options (beyond the source and its options) are passed
   to the extension's `init/1` callback as config.
 

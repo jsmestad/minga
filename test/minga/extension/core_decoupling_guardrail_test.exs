@@ -1,18 +1,17 @@
 defmodule Minga.Extension.CoreDecouplingGuardrailTest do
-  @moduledoc "Guards the runtime boundary between editor core and bundled extensions."
+  @moduledoc "Guards the runtime boundary between editor core and GitExtended."
 
   use ExUnit.Case, async: true
 
   @core_files Path.wildcard("lib/**/*.ex") ++ Path.wildcard("sdk/lib/declarations/**/*.ex")
   @registry_key_allowlist [
-    "lib/minga/config/loader.ex",
-    "lib/minga/extension/bundled_applications.ex"
+    "lib/minga_editor/startup.ex"
   ]
-  @concrete_namespace "MingaGitPorcelain"
-  @extension_registry_key :minga_git_porcelain
+  @concrete_namespace "MingaGitExtended"
+  @extension_registry_key :minga_git_extended
 
   for {files, batch} <- @core_files |> Enum.sort() |> Enum.chunk_every(160) |> Enum.with_index(1) do
-    test "core respects bundled extension boundaries in source batch #{batch}" do
+    test "core respects GitExtended boundaries in source batch #{batch}" do
       violations =
         Enum.flat_map(unquote(files), fn file ->
           ast = file |> File.read!() |> Code.string_to_quoted!(file: file, columns: true)

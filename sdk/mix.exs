@@ -77,6 +77,7 @@ defmodule MingaSdk.MixProject do
           Minga.Buffer.EditDelta,
           Minga.Buffer.EditSource
         ],
+        Git: [Minga.Git, ~r/^Minga\.Git\./],
         "Model routes": [
           Minga.Extension.ModelRoutes,
           ~r/^MingaAgent\.InferenceRoute/

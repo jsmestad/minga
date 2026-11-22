@@ -1331,14 +1331,20 @@ func TestDecodeThemeAndEverydayChrome(t *testing.T) {
 	git = append(git, 0)
 	git = append(git, string16("/repo")...)
 	git = append(git, string16("last commit")...)
+	git = append(git, 0, 3, 0, 0, 0, 4, 2)
+	git = append(git, 0, 0, 0, 1, 0, 0, 0, 42)
+	git = append(git, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef)
 	// Trailing commit_frame is a fixed:9 sentinel (opcode + frame_seq + echoed input_seq).
-	git = append(git, 0, 3, generated.OPCommitFrame, 0, 0, 0, 0, 0, 0, 0, 0)
+	git = append(git, generated.OPCommitFrame, 0, 0, 0, 0, 0, 0, 0, 0)
 	command, err = DecodeCommand(git)
 	if err != nil {
 		t.Fatalf("DecodeCommand git returned error: %v", err)
 	}
-	if command.Size != len(git)-9 || command.Chrome.Git.Branch != "main" || command.Chrome.Git.Ahead != 2 || len(command.Chrome.Git.Entries) != 1 || command.Chrome.Git.StashCount != 3 {
+	if command.Size != len(git)-9 || command.Chrome.Git.Branch != "main" || command.Chrome.Git.Ahead != 2 || len(command.Chrome.Git.Entries) != 1 || command.Chrome.Git.StashCount != 3 || command.Chrome.Git.TerminalCursor != 4 || command.Chrome.Git.TerminalCollapsed != 2 {
 		t.Fatalf("git decoded incorrectly: size=%d git=%+v", command.Size, command.Chrome.Git)
+	}
+	if command.Chrome.Git.PanelID != 0x1_0000_002a || command.Chrome.Git.CommitTargetID != 0x0123_4567_89ab_cdef {
+		t.Fatalf("git identities decoded incorrectly: panel=%#x commit target=%#x", command.Chrome.Git.PanelID, command.Chrome.Git.CommitTargetID)
 	}
 
 	searchPayload := []byte{1, 0, 0, 0, 9, 0, 0, 0, 12, 0x03}

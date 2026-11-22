@@ -185,12 +185,32 @@ defmodule MingaEditor.Extension.EventEffect do
           Outcome.t(),
           EventHandler.event()
         ) :: {EditorState.t(), Outcome.t()}
+  defp commit_result(
+         current,
+         base,
+         %Result{state: base, job: {source, job}, failures: failures},
+         outcome,
+         event
+       ) do
+    report_callback_failures(event, failures)
+    # No editor transition to merge. The job checks the selected repository, buffer, and source.
+    {MingaEditor.Extension.RepositoryJob.submit(current, source, job), outcome}
+  end
+
   defp commit_result(current, base_state, result, outcome, event) do
     report_callback_failures(event, result.failures)
 
     case EditorState.accept_extension_event_result(current, base_state, result.state) do
       {:ok, state} ->
-        {result_feedback(state, result, event), outcome}
+        state = result_feedback(state, result, event)
+
+        case result.job do
+          nil ->
+            {state, outcome}
+
+          {source, job} ->
+            {MingaEditor.Extension.RepositoryJob.submit(state, source, job), outcome}
+        end
 
       :stale ->
         request_id = outcome.request.id
@@ -200,10 +220,17 @@ defmodule MingaEditor.Extension.EventEffect do
           "Discarded stale extension editor event request=#{inspect(request_id)} event=#{inspect(event_label(event))} reason=editor_state_changed"
         )
 
-        state = result_feedback(current, result, event)
+        state = stale_feedback(current, result, event)
         {state, Outcome.stale(outcome, :editor_state_changed)}
     end
   end
+
+  @spec stale_feedback(EditorState.t(), Result.resolved(), EventHandler.event()) ::
+          EditorState.t()
+  defp stale_feedback(state, %Result{status: :handled}, event),
+    do: terminal_feedback(state, event, :stale, :editor_state_changed)
+
+  defp stale_feedback(state, %Result{} = result, event), do: result_feedback(state, result, event)
 
   @spec result_feedback(EditorState.t(), Result.resolved(), EventHandler.event()) ::
           EditorState.t()
@@ -220,6 +247,22 @@ defmodule MingaEditor.Extension.EventEffect do
   defp terminal_feedback(
          state,
          {:editor_action, :open_git_diff_for_path, _arguments},
+         :stale,
+         :editor_state_changed
+       ),
+       do: NoticeWorkflow.publish(state, "Editor context changed; retry opening the Git diff")
+
+  defp terminal_feedback(
+         state,
+         {:editor_action, :git_status_remote, _target},
+         :stale,
+         :editor_state_changed
+       ),
+       do: NoticeWorkflow.publish(state, "Editor context changed; retry the Git operation")
+
+  defp terminal_feedback(
+         state,
+         {:editor_action, :open_git_diff_for_path, _arguments},
          status,
          reason
        ),
@@ -227,45 +270,29 @@ defmodule MingaEditor.Extension.EventEffect do
 
   defp terminal_feedback(
          state,
-         {:editor_action, :execute_git_command, _command},
+         {:editor_action, :git_status_remote, _target},
          status,
          reason
        ),
-       do: NoticeWorkflow.publish(state, "Git command #{status}: #{bounded_inspect(reason)}")
-
-  defp terminal_feedback(state, {:editor_action, action, _arguments}, status, reason)
-       when action in [:branch_delete_confirm, :branch_delete_cancel],
-       do:
-         NoticeWorkflow.publish(
-           state,
-           "Branch delete action #{status}: #{bounded_inspect(reason)}"
-         )
+       do: NoticeWorkflow.publish(state, "Git operation #{status}: #{bounded_inspect(reason)}")
 
   defp terminal_feedback(state, _event, _status, _reason), do: state
 
   @spec interactive_failure(EditorState.t(), EventHandler.event()) :: EditorState.t()
   defp interactive_failure(state, {:editor_action, :open_git_diff_for_path, _arguments}),
-    do: NoticeWorkflow.publish(state, "Git porcelain extension callback failed")
+    do: NoticeWorkflow.publish(state, "GitExtended callback failed")
 
-  defp interactive_failure(state, {:editor_action, :execute_git_command, _command}),
-    do: NoticeWorkflow.publish(state, "Git command callback failed")
-
-  defp interactive_failure(state, {:editor_action, action, _arguments})
-       when action in [:branch_delete_confirm, :branch_delete_cancel],
-       do: NoticeWorkflow.publish(state, "Branch delete action failed")
+  defp interactive_failure(state, {:editor_action, :git_status_remote, _target}),
+    do: NoticeWorkflow.publish(state, "Git operation callback failed")
 
   defp interactive_failure(state, _event), do: state
 
   @spec interactive_unavailable(EditorState.t(), EventHandler.event()) :: EditorState.t()
   defp interactive_unavailable(state, {:editor_action, :open_git_diff_for_path, _arguments}),
-    do: NoticeWorkflow.publish(state, "Git porcelain extension is disabled or failed to load")
+    do: NoticeWorkflow.publish(state, "GitExtended is disabled or failed to load")
 
-  defp interactive_unavailable(state, {:editor_action, :execute_git_command, _command}),
-    do: NoticeWorkflow.publish(state, "Git command unavailable")
-
-  defp interactive_unavailable(state, {:editor_action, action, _arguments})
-       when action in [:branch_delete_confirm, :branch_delete_cancel],
-       do: NoticeWorkflow.publish(state, "Branch delete action unavailable")
+  defp interactive_unavailable(state, {:editor_action, :git_status_remote, _target}),
+    do: NoticeWorkflow.publish(state, "Git operation unavailable")
 
   defp interactive_unavailable(state, _event), do: state
 

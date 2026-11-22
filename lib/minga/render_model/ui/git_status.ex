@@ -26,12 +26,15 @@ defmodule Minga.RenderModel.UI.GitStatus do
           %{present: 0}
           | %{
               present: 1,
+              id: non_neg_integer(),
               level: :success | :error,
               action: toast_action(),
               message: String.t()
             }
 
   @type t :: %__MODULE__{
+          panel_id: non_neg_integer(),
+          commit_target_id: non_neg_integer(),
           repo_state: repo_state(),
           syncing: boolean(),
           branch: String.t(),
@@ -41,11 +44,15 @@ defmodule Minga.RenderModel.UI.GitStatus do
           entry_base_path: String.t(),
           last_commit_message: String.t(),
           stash_count: non_neg_integer(),
-          git_toast: wire_toast()
+          git_toast: wire_toast(),
+          terminal_cursor: non_neg_integer(),
+          terminal_collapsed: 0..15
         }
 
   @enforce_keys [:repo_state, :syncing]
   defstruct repo_state: :not_a_repo,
+            panel_id: 0,
+            commit_target_id: 0,
             syncing: false,
             branch: "",
             ahead: 0,
@@ -54,5 +61,7 @@ defmodule Minga.RenderModel.UI.GitStatus do
             entry_base_path: "",
             last_commit_message: "",
             stash_count: 0,
-            git_toast: %{present: 0}
+            git_toast: %{present: 0},
+            terminal_cursor: 0,
+            terminal_collapsed: 0
 end

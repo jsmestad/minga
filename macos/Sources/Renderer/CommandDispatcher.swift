@@ -1361,14 +1361,7 @@ final class CommandDispatcher {
                 title: title, lines: lines
             )
 
-        case .guiGitStatus(let repoState, let syncing, let ahead, let behind, let branchName, let rawEntries, let rawToast, let entryBasePath, let lastCommitMessage, let stashCount):
-            // When git_status_panel is nil, the BEAM sends notARepo + empty
-            // entries as the "panel closed" signal (same pattern as file tree
-            // sending empty entries to trigger hide). Can't gate on
-            // rawEntries.isEmpty alone: a clean working tree (normal repo,
-            // 0 changed files) is a valid visible-panel state. The compound
-            // check notARepo + empty is the specific sentinel the BEAM sends
-            // when git_status_panel is nil. (#1047)
+        case .guiGitStatus(let repoState, let syncing, let ahead, let behind, let branchName, let rawEntries, let rawToast, let entryBasePath, let lastCommitMessage, let stashCount, let toastID, let panelID, let commitTargetID):
             let parsedRepoState = GitRepoState(rawValue: repoState) ?? .notARepo
             let toast: (String, ToastLevel, ToastAction)? = rawToast.map { t in
                 let parsedLevel = ToastLevel(rawValue: t.level)
@@ -1381,8 +1374,8 @@ final class CommandDispatcher {
                 return (t.message, parsedLevel ?? .error, parsedAction ?? .none)
             }
 
-            if parsedRepoState == .notARepo && rawEntries.isEmpty && entryBasePath.isEmpty {
-                guiState.gitStatusState.hide(syncing: syncing, toast: toast)
+            if panelID == 0 {
+                guiState.gitStatusState.hide(syncing: syncing, toast: toast, toastID: toastID)
             } else {
                 let entries = rawEntries.compactMap { raw -> GitStatusEntry? in
                     guard let section = GitStatusSection(rawValue: raw.section) else {
@@ -1410,7 +1403,10 @@ final class CommandDispatcher {
                     toast: toast,
                     entryBasePath: entryBasePath,
                     lastCommitMessage: lastCommitMessage,
-                    stashCount: stashCount
+                    stashCount: stashCount,
+                    toastID: toastID,
+                    panelID: panelID,
+                    commitTargetID: commitTargetID
                 )
             }
 

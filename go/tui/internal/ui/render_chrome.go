@@ -493,8 +493,88 @@ func (m Model) gitSummary(git protocol.GitStatus) string {
 	return strings.Join(parts, "  ")
 }
 
-func (m Model) renderGitStatus(git protocol.GitStatus) string {
-	return lipgloss.NewStyle().Foreground(m.palette().Muted()).Background(m.palette().SurfaceAlt()).Width(m.width).Render(fit(m.gitSummary(git), m.width))
+func (m Model) renderGitStatusPanel(git protocol.GitStatus, style, selected lipgloss.Style, width, height int, hits *gitStatusHits) []string {
+	lines := make([]string, height)
+	if height == 0 {
+		return lines
+	}
+	toast := git.Toast
+	git.Toast.Visible = false
+	title := m.gitSummary(git)
+	switch {
+	case git.RepoState == 1:
+		title = "Not a Git repository"
+	case git.RepoState == 2:
+		title = "Loading Git status…"
+	case len(git.Entries) == 0 && !git.Syncing:
+		title += " · Clean"
+	}
+	lines[0] = style.Bold(true).Render(fit(title, width))
+	startRow := 1
+	if toast.Visible && toast.Action == 1 && toast.ID != 0 && height >= 4 {
+		lines[startRow] = style.Bold(true).Render(fit("Pull & Retry (r)", width))
+		if startRow < hits.box.Height {
+			hits.retryID = toast.ID
+			lines[startRow] = m.zones.Mark(zoneIDGitRetry, lines[startRow])
+		}
+		startRow++
+	}
+	cursor := int(git.TerminalCursor)
+	start := max(cursor-(height-startRow)+1, 0)
+	rank := 0
+	drawRow := func(label string, entry *protocol.GitStatusEntry) {
+		if i := rank - start + startRow; i >= startRow && i < height {
+			rowStyle := style
+			if rank == cursor {
+				rowStyle = selected
+			}
+			line := rowStyle.Render(fit(label, width))
+			if entry != nil && git.PanelID != 0 && i < hits.box.Height {
+				if hits.rows == nil {
+					hits.rows = make([]gitStatusRowTarget, 0, min(len(git.Entries), hits.box.Height-startRow))
+				}
+				line = m.zones.Mark(zoneIDGitStatusRow(i), line)
+				hits.rows = append(hits.rows, gitStatusRowTarget{row: i, path: entry.Path, section: entry.Section})
+			}
+			lines[i] = line
+		}
+		rank++
+	}
+
+	var counts [4]int
+	for _, entry := range git.Entries {
+		if entry.Section < 4 {
+			counts[entry.Section]++
+		}
+	}
+	names := [4]string{"Staged", "Changes", "Untracked", "Conflicts"}
+	for _, section := range [...]byte{3, 0, 1, 2} {
+		if counts[section] == 0 || rank >= start+height-startRow {
+			continue
+		}
+		marker := "▾ "
+		collapsed := git.TerminalCollapsed&(1<<section) != 0
+		if collapsed {
+			marker = "▸ "
+		}
+		drawRow(fmt.Sprintf("%s%s (%d)", marker, names[section], counts[section]), nil)
+		if !collapsed {
+			for _, entry := range git.Entries {
+				if rank >= start+height-startRow {
+					break
+				}
+				if entry.Section == section {
+					drawRow("  "+entry.Path, &entry)
+				}
+			}
+		}
+	}
+	for i := 1; i < len(lines); i++ {
+		if lines[i] == "" {
+			lines[i] = style.Render(strings.Repeat(" ", width))
+		}
+	}
+	return lines
 }
 
 func (m Model) renderMinibuffer(mini protocol.Minibuffer) string {

@@ -49,7 +49,7 @@ defmodule MingaEditor.FocusOwnerTest do
     Input.AgentNav => :agent,
     Input.ModeFSM => :editor,
     Input.CUA.Dispatch => :editor,
-    MingaGitPorcelain.Input.GitStatus => :git_status
+    Input.GitStatus => :git_status
   }
 
   @tag :tmp_dir

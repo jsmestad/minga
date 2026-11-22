@@ -1151,15 +1151,20 @@ Extensions are reusable, self-contained editor plugins. Each extension runs unde
 
 ### Optional extensions
 
-Adversarial, Knowledge Graph, and Ghost Cursors install only when you opt in. Add the lines you want to `config.exs` and restart Minga:
+These extensions install only when you opt in. Add the lines you want to `config.exs` and restart Minga:
 
 ```elixir
 extension :minga_adversarial, git: "https://github.com/jsmestad/minga-adverserial"
 extension :minga_knowledge_graph, git: "https://github.com/jsmestad/minga-knowledge-graph"
 extension :minga_ghost_cursors, git: "https://github.com/jsmestad/minga-ghost-cursors"
+extension :minga_git_extended, git: "https://github.com/jsmestad/minga-git-extended"
 ```
 
 If you used Knowledge Graph before this change, keep the name `:minga_knowledge_graph` to continue using your saved graph. The Git checkout is separate from its data.
+
+GitExtended adds the Git status panel, staging, commits, and branch commands. The branch in the modeline and the changed-line signs in the gutter work without it.
+
+To disable an extension, remove its install line and restart Minga.
 
 ### Writing an extension
 

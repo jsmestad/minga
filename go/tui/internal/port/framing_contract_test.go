@@ -59,9 +59,8 @@ import (
 // the second command, proving the first command was framed to its exact length.
 var commitFrameSentinel = []byte{generated.OPCommitFrame, 0, 0, 0, 7, 0, 0, 0, 0}
 
-// maxMinimalBodyProbe bounds the zero-fill search. The largest known minimal
-// bounded frame (gui_git_status) is ~18 bytes; 48 leaves generous headroom while
-// keeping a failed search fast and unambiguous.
+// maxMinimalBodyProbe bounds the zero-fill search. It leaves room for the
+// 38-byte zero-filled gui_git_status body while keeping a failed search fast.
 const maxMinimalBodyProbe = 48
 
 // minimalBodyOverrides supplies a hand-built minimal body for any opcode whose

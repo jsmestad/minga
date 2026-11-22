@@ -5,24 +5,45 @@ defmodule MingaEditor.State.Prompt do
   `MingaEditor.PromptUI` handles the modal lifecycle and invokes callbacks.
   """
 
+  @type kind :: :text | :confirm
+
   @type t :: %__MODULE__{
           handler: module() | nil,
+          kind: kind(),
           generation: non_neg_integer(),
           text: String.t(),
           cursor: non_neg_integer(),
           label: String.t(),
-          context: map() | nil,
+          context: term(),
           sensitive: boolean()
         }
 
   @derive {Inspect, except: [:text, :context]}
   defstruct handler: nil,
+            kind: :text,
             generation: 0,
             text: "",
             cursor: 0,
             label: "",
             context: nil,
             sensitive: false
+
+  @doc "Builds one prompt opening with a fresh activation generation."
+  @spec new(kind(), module(), String.t(), keyword()) :: t()
+  def new(kind, handler, label, opts) do
+    default = Keyword.get(opts, :default, "")
+
+    %__MODULE__{
+      handler: handler,
+      kind: kind,
+      generation: Integer.mod(System.unique_integer([:positive, :monotonic]), 4_294_967_295) + 1,
+      text: default,
+      cursor: String.length(default),
+      label: label,
+      context: Keyword.get(opts, :context),
+      sensitive: Keyword.get(opts, :sensitive, false)
+    }
+  end
 
   @doc "Returns true if a prompt is currently open."
   @spec open?(t()) :: boolean()
@@ -35,6 +56,8 @@ defmodule MingaEditor.State.Prompt do
 
   @doc "Inserts text at the cursor, advancing it by the inserted text's own grapheme count."
   @spec insert_text(t(), String.t()) :: t()
+  def insert_text(%__MODULE__{kind: :confirm} = prompt, _inserted), do: prompt
+
   def insert_text(%__MODULE__{} = prompt, ""), do: prompt
 
   def insert_text(%__MODULE__{text: text, cursor: cursor} = prompt, inserted) do
@@ -111,7 +134,8 @@ defmodule MingaEditor.State.Prompt do
     %{prompt | text: masked, context: nil, sensitive: false}
   end
 
-  def render_snapshot(%__MODULE__{} = prompt), do: prompt
+  def render_snapshot(%__MODULE__{context: nil} = prompt), do: prompt
+  def render_snapshot(%__MODULE__{} = prompt), do: %{prompt | context: nil}
 
   @doc "Resolves an action only for the exact opening that offered it."
   @spec resolve_activation(t(), non_neg_integer(), binary()) ::
@@ -123,7 +147,9 @@ defmodule MingaEditor.State.Prompt do
       when current != generation or generation == 0,
       do: {:error, :stale_generation}
 
-  def resolve_activation(%__MODULE__{}, _generation, "Submit"), do: {:ok, :submit}
-  def resolve_activation(%__MODULE__{}, _generation, "Cancel"), do: {:ok, :cancel}
+  def resolve_activation(%__MODULE__{kind: :text}, _generation, "Submit"), do: {:ok, :submit}
+  def resolve_activation(%__MODULE__{kind: :text}, _generation, "Cancel"), do: {:ok, :cancel}
+  def resolve_activation(%__MODULE__{kind: :confirm}, _generation, "Yes"), do: {:ok, :submit}
+  def resolve_activation(%__MODULE__{kind: :confirm}, _generation, "No"), do: {:ok, :cancel}
   def resolve_activation(%__MODULE__{}, _generation, _item_id), do: {:error, :not_found}
 end

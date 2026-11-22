@@ -19,6 +19,7 @@ defmodule MingaEditor.Input.Picker do
   alias MingaEditor.State.ModalOverlay
   alias MingaEditor.State.Picker, as: PickerState
   alias MingaEditor.UI.Picker, as: PickerData
+  alias MingaEditor.State.Picker.Extension, as: ExtensionPicker
   alias MingaEditor.UI.Picker.Source
 
   @impl true
@@ -173,6 +174,18 @@ defmodule MingaEditor.Input.Picker do
           PickerData.item(),
           MingaEditor.State.Picker.callback_source()
         ) :: EditorState.t()
+  defp confirm_clicked_item(
+         %{
+           shell_runtime: %{
+             state: %{modal: {:picker, %{picker_ui: %{extension: %ExtensionPicker{}}}}}
+           }
+         } = state,
+         _module,
+         item,
+         _source
+       ),
+       do: PickerUI.select_extension_item(state, item)
+
   defp confirm_clicked_item(state, AgentRetainedOutputSource, item, _source),
     do: AgentRetainedOutputSource.on_select(item, state)
 

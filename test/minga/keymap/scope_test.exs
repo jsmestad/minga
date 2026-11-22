@@ -28,8 +28,7 @@ defmodule Minga.Keymap.ScopeTest do
       assert :editor in scopes
       assert :agent in scopes
       assert :file_tree in scopes
-      refute :git_status in scopes
-      assert Enum.count(scopes) >= 3
+      assert :git_status in scopes
     end
   end
 

@@ -7,6 +7,8 @@ defmodule MingaEditor.Extension.EventHandler do
   represented by this successful callback return type.
   """
 
+  alias MingaEditor.Extension.RepositoryJob
+
   @typedoc "Runtime editor events available to SDK consumers."
   @type event ::
           {:buffer_saved, pid()}
@@ -17,7 +19,10 @@ defmodule MingaEditor.Extension.EventHandler do
   @type event_kind :: :buffer_saved | :editor_action | :source_unload
 
   @typedoc "A successful state transition or explicit decline."
-  @type callback_result :: {:handled, state :: term()} | :not_matched
+  @type callback_result ::
+          {:handled, state :: term()}
+          | {:schedule, state :: term(), RepositoryJob.t()}
+          | :not_matched
 
   @doc "Handles one runtime editor event synchronously."
   @callback handle_editor_event(state :: term(), event()) :: callback_result()

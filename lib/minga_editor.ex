@@ -370,6 +370,10 @@ defmodule MingaEditor do
     EventBus.subscribe(:extension_updates_available, events_registry)
     EventBus.subscribe(:inference_route_status_changed, events_registry)
 
+    if state.frontend.backend != :headless do
+      Startup.announce_git_extended_opt_in(state.workspace.file_tree.project_root)
+    end
+
     # Monitor all initial buffers so we get :DOWN when they die.
     all_initial_pids =
       state.workspace.buffers.list ++

@@ -29,7 +29,7 @@ defmodule Minga.Keymap.ActiveTest do
       assert {:prefix, _m_node} = Bindings.lookup(trie, {?m, 0})
     end
 
-    test "omits bundled Git porcelain bindings until the extension contributes them", %{store: s} do
+    test "omits bundled GitExtended bindings until the extension contributes them", %{store: s} do
       trie = Active.leader_trie(s)
       assert :not_found = Bindings.lookup_sequence(trie, [{?g, 0}, {?d, 0}])
     end

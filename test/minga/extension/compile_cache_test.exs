@@ -748,45 +748,6 @@ defmodule Minga.Extension.CompileCacheTest do
     refute_received {:io_request, _pid, _ref, _request}
   end
 
-  test "real bundled Git Porcelain inventory is adopted without replacing loaded code", context do
-    root = Path.expand("extensions/git_porcelain")
-    files = root |> Path.join("lib/**/*.ex") |> Path.wildcard() |> Enum.sort()
-
-    assert {:ok, application_modules, _diagnostics} =
-             Kernel.ParallelCompiler.compile(files, return_diagnostics: true)
-
-    application_spec =
-      {:application, :minga_git_porcelain,
-       [vsn: ~c"test", description: ~c"test", modules: application_modules]}
-
-    assert :ok = :application.load(application_spec)
-
-    on_exit(fn ->
-      Application.unload(:minga_git_porcelain)
-
-      Enum.each(application_modules, fn module ->
-        :code.purge(module)
-        :code.delete(module)
-      end)
-    end)
-
-    source = {:extension, source_name(:bundled_git_porcelain)}
-    before = Map.new(application_modules, &{&1, :code.which(&1)})
-
-    assert {:ok, %{modules: modules}} =
-             CompileCache.load_or_compile(root, files,
-               cache_dir: context.cache,
-               source: source,
-               artifact_admission: context.admission,
-               trusted_application: :minga_git_porcelain
-             )
-
-    assert Enum.sort(modules) == Enum.sort(application_modules)
-    assert Map.new(application_modules, &{&1, :code.which(&1)}) == before
-    assert {:ok, admitted} = ArtifactAdmission.source_modules(source, server: context.admission)
-    assert Enum.sort(admitted) == Enum.sort(application_modules)
-  end
-
   test "source count and byte limits reject input before compiler transfer", context do
     first = write_module(context.root, unique_module("SourceLimitA"), ":a")
     second = Path.join(context.root, "second.ex")

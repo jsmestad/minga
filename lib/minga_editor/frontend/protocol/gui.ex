@@ -275,15 +275,14 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
           | {:agent_stop_turn, {String.t(), String.t()}}
           | {:agent_tool_approval, ApprovalTarget.t(), MingaAgent.Session.approval_decision()}
           | {:execute_command, name :: String.t()}
-          | {:git_stage_file, path :: String.t()}
-          | {:git_unstage_file, path :: String.t()}
-          | {:git_discard_file, path :: String.t()}
-          | :git_stage_all
-          | :git_unstage_all
-          | {:git_commit, message :: String.t()}
-          | {:git_commit, message :: String.t(), amend? :: boolean()}
-          | {:git_open_file, path :: String.t()}
-          | {:git_open_diff, path :: String.t(), section :: non_neg_integer()}
+          | {:git_stage_file, panel_id :: pos_integer(), path :: String.t(), section :: 0..3}
+          | {:git_unstage_file, panel_id :: pos_integer(), path :: String.t(), section :: 0..3}
+          | {:git_discard_file, panel_id :: pos_integer(), path :: String.t(), section :: 0..3}
+          | {:git_stage_all, panel_id :: pos_integer()}
+          | {:git_unstage_all, panel_id :: pos_integer()}
+          | {:git_commit, panel_id :: pos_integer(), message :: String.t(), amend? :: boolean()}
+          | {:git_open_file, panel_id :: pos_integer(), path :: String.t(), section :: 0..3}
+          | {:git_open_diff, panel_id :: pos_integer(), path :: String.t(), section :: 0..3}
           | {:workspace_rename, id :: non_neg_integer(), name :: String.t()}
           | {:workspace_set_icon, id :: non_neg_integer(), icon :: String.t()}
           | {:workspace_close, id :: non_neg_integer()}
@@ -315,11 +314,10 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
           | {:power_thermal_state, low_power? :: boolean(), thermal_state()}
           | :cmd_copy
           | :cmd_cut
-          | :git_push
-          | :git_pull
-          | :git_fetch
-          | {:git_commit_amend, message :: String.t()}
-          | :git_pull_and_retry
+          | {:git_push, panel_id :: pos_integer()}
+          | {:git_pull, panel_id :: pos_integer()}
+          | {:git_fetch, panel_id :: pos_integer()}
+          | {:git_pull_and_retry, non_neg_integer()}
           | {:config_update, Options.option_name(), term()}
           | :config_query
           | {:notification_dismiss, notification_id :: String.t()}
@@ -803,65 +801,67 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
 
   def decode_gui_action(
         @gui_action_git_stage_file,
-        <<path_len::16, path::binary-size(path_len)>>
-      ),
-      do: {:ok, {:git_stage_file, path}}
+        <<panel_id::64, path_len::16, path::binary-size(path_len), section::8>>
+      )
+      when panel_id > 0 and section in 0..3,
+      do: {:ok, {:git_stage_file, panel_id, path, section}}
 
   def decode_gui_action(
         @gui_action_git_unstage_file,
-        <<path_len::16, path::binary-size(path_len)>>
-      ),
-      do: {:ok, {:git_unstage_file, path}}
+        <<panel_id::64, path_len::16, path::binary-size(path_len), section::8>>
+      )
+      when panel_id > 0 and section in 0..3,
+      do: {:ok, {:git_unstage_file, panel_id, path, section}}
 
   def decode_gui_action(
         @gui_action_git_discard_file,
-        <<path_len::16, path::binary-size(path_len)>>
-      ),
-      do: {:ok, {:git_discard_file, path}}
+        <<panel_id::64, path_len::16, path::binary-size(path_len), section::8>>
+      )
+      when panel_id > 0 and section in 0..3,
+      do: {:ok, {:git_discard_file, panel_id, path, section}}
 
-  def decode_gui_action(@gui_action_git_stage_all, <<>>),
-    do: {:ok, :git_stage_all}
+  def decode_gui_action(@gui_action_git_stage_all, <<panel_id::64>>) when panel_id > 0,
+    do: {:ok, {:git_stage_all, panel_id}}
 
-  def decode_gui_action(@gui_action_git_unstage_all, <<>>),
-    do: {:ok, :git_unstage_all}
+  def decode_gui_action(@gui_action_git_unstage_all, <<panel_id::64>>) when panel_id > 0,
+    do: {:ok, {:git_unstage_all, panel_id}}
 
   def decode_gui_action(
         @gui_action_git_commit,
-        <<amend_byte::8, msg_len::16, message::binary-size(msg_len)>>
+        <<panel_id::64, amend_byte::8, msg_len::16, message::binary-size(msg_len)>>
       )
-      when amend_byte in [0, 1],
-      do: {:ok, {:git_commit, message, amend_byte == 1}}
+      when panel_id > 0 and amend_byte in [0, 1],
+      do: {:ok, {:git_commit, panel_id, message, amend_byte == 1}}
 
-  def decode_gui_action(@gui_action_git_commit, <<msg_len::16, message::binary-size(msg_len)>>),
-    do: {:ok, {:git_commit, message}}
-
-  def decode_gui_action(@gui_action_git_open_file, <<path_len::16, path::binary-size(path_len)>>),
-    do: {:ok, {:git_open_file, path}}
+  def decode_gui_action(
+        @gui_action_git_open_file,
+        <<panel_id::64, path_len::16, path::binary-size(path_len), section::8>>
+      )
+      when panel_id > 0 and section in 0..3,
+      do: {:ok, {:git_open_file, panel_id, path, section}}
 
   def decode_gui_action(
         @gui_action_git_open_diff,
-        <<path_len::16, path::binary-size(path_len), section::8>>
+        <<panel_id::64, path_len::16, path::binary-size(path_len), section::8>>
       )
-      when section in 0..3,
-      do: {:ok, {:git_open_diff, path, section}}
+      when panel_id > 0 and section in 0..3,
+      do: {:ok, {:git_open_diff, panel_id, path, section}}
 
-  def decode_gui_action(@gui_action_git_open_diff, <<path_len::16, path::binary-size(path_len)>>),
-    do: {:ok, {:git_open_diff, path, 255}}
+  def decode_gui_action(@gui_action_git_push, <<panel_id::64>>) when panel_id > 0,
+    do: {:ok, {:git_push, panel_id}}
 
-  def decode_gui_action(@gui_action_git_push, <<>>),
-    do: {:ok, :git_push}
+  def decode_gui_action(@gui_action_git_pull, <<panel_id::64>>) when panel_id > 0,
+    do: {:ok, {:git_pull, panel_id}}
 
-  def decode_gui_action(@gui_action_git_pull, <<>>),
-    do: {:ok, :git_pull}
-
-  def decode_gui_action(@gui_action_git_fetch, <<>>),
-    do: {:ok, :git_fetch}
+  def decode_gui_action(@gui_action_git_fetch, <<panel_id::64>>) when panel_id > 0,
+    do: {:ok, {:git_fetch, panel_id}}
 
   def decode_gui_action(
         @gui_action_git_commit_amend,
-        <<msg_len::16, message::binary-size(msg_len)>>
-      ),
-      do: {:ok, {:git_commit_amend, message}}
+        <<panel_id::64, msg_len::16, message::binary-size(msg_len)>>
+      )
+      when panel_id > 0,
+      do: {:ok, {:git_commit, panel_id, message, true}}
 
   def decode_gui_action(
         @gui_action_workspace_rename,
@@ -969,8 +969,8 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   def decode_gui_action(@gui_action_cmd_cut, <<>>),
     do: {:ok, :cmd_cut}
 
-  def decode_gui_action(@gui_action_git_pull_and_retry, <<>>),
-    do: {:ok, :git_pull_and_retry}
+  def decode_gui_action(@gui_action_git_pull_and_retry, <<id::unsigned-big-64>>) when id > 0,
+    do: {:ok, {:git_pull_and_retry, id}}
 
   def decode_gui_action(@gui_action_config_query, <<>>), do: {:ok, :config_query}
 

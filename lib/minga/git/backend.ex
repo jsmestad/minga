@@ -20,6 +20,9 @@ defmodule Minga.Git.Backend do
   @callback show_staged(git_root :: String.t(), relative_path :: String.t()) ::
               {:ok, String.t()} | :error
 
+  @callback index_blob(git_root :: String.t(), relative_path :: String.t()) ::
+              {:ok, binary() | nil} | {:error, String.t()}
+
   @callback blame_line(
               git_root :: String.t(),
               relative_path :: String.t(),
@@ -47,6 +50,14 @@ defmodule Minga.Git.Backend do
 
   @callback stage_patch(git_root :: String.t(), patch :: String.t()) ::
               :ok | {:error, String.t()}
+
+  @callback stage_change(
+              git_root :: String.t(),
+              relative_path :: String.t(),
+              base :: binary() | nil,
+              revised :: binary() | nil,
+              change :: Minga.Git.change()
+            ) :: :ok | {:error, String.t()}
 
   @callback current_branch(git_root :: String.t()) ::
               {:ok, String.t()} | :error

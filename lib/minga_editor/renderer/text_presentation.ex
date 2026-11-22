@@ -11,6 +11,7 @@ defmodule MingaEditor.Renderer.TextPresentation do
 
   @type rows :: {:resident, ResidentStore.t()} | {:windowed, tuple()}
   @type wrap_counts :: {tuple(), WrapLayout.counts()}
+  @type target :: TextTarget.t() | VisualRow.block_target()
 
   @enforce_keys [:window_id, :presentation_id, :buffer, :source_version, :identity, :rows]
   defstruct [{:settled_scroll_seq, nil} | @enforce_keys]
@@ -136,7 +137,7 @@ defmodule MingaEditor.Renderer.TextPresentation do
 
   @doc "Resolves one rank-addressed row after verifying its durable row id."
   @spec resolve(t(), non_neg_integer(), non_neg_integer(), non_neg_integer()) ::
-          {:ok, TextTarget.t()} | {:error, :row_not_found | :row_id_mismatch | :not_source_backed}
+          {:ok, target()} | {:error, :row_not_found | :row_id_mismatch | :not_source_backed}
   def resolve(%__MODULE__{} = presentation, row_index, row_id, utf16_offset) do
     case row_at(presentation.rows, row_index) do
       {:ok, row} ->
@@ -162,7 +163,7 @@ defmodule MingaEditor.Renderer.TextPresentation do
           VisualRow.t(),
           non_neg_integer(),
           non_neg_integer()
-        ) :: {:ok, TextTarget.t()} | {:error, :row_id_mismatch | :not_source_backed}
+        ) :: {:ok, target()} | {:error, :row_id_mismatch | :not_source_backed}
   def resolve_row(
         window_id,
         buffer,
@@ -174,20 +175,29 @@ defmodule MingaEditor.Renderer.TextPresentation do
     if stored_row_id != row_id do
       {:error, :row_id_mismatch}
     else
-      case VisualRow.source_character_position(row, utf16_offset) do
-        {:ok, {line, byte}} ->
-          {:ok,
-           TextTarget.new(%{
-             window_id: window_id,
-             buffer: buffer,
-             source_version: source_version,
-             line: line,
-             byte: byte
-           })}
-
-        :not_source_backed ->
-          {:error, :not_source_backed}
+      case VisualRow.block_target(row, utf16_offset) do
+        nil -> resolve_character(window_id, buffer, source_version, row, utf16_offset)
+        target -> {:ok, target}
       end
+    end
+  end
+
+  @spec resolve_character(Window.id(), pid(), non_neg_integer(), VisualRow.t(), non_neg_integer()) ::
+          {:ok, TextTarget.t()} | {:error, :not_source_backed}
+  defp resolve_character(window_id, buffer, source_version, row, utf16_offset) do
+    case VisualRow.source_character_position(row, utf16_offset) do
+      {:ok, {line, byte}} ->
+        {:ok,
+         TextTarget.new(%{
+           window_id: window_id,
+           buffer: buffer,
+           source_version: source_version,
+           line: line,
+           byte: byte
+         })}
+
+      :not_source_backed ->
+        {:error, :not_source_backed}
     end
   end
 

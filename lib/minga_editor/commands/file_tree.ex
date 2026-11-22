@@ -1052,8 +1052,6 @@ defmodule MingaEditor.Commands.FileTree do
   defp reroot(state, root), do: FileTreeFreshness.reroot(state, root)
 
   # Mutual exclusivity: close git status panel when opening file tree.
-  # Explicitly resets keymap_scope to :editor so we don't leave orphaned
-  # :git_status scope if a future refactor separates the open steps.
   @spec close_git_status_if_open(state()) :: state()
   defp close_git_status_if_open(state) do
     case SidebarWorkflow.git_status_panel(state) do
@@ -1061,8 +1059,6 @@ defmodule MingaEditor.Commands.FileTree do
         state
 
       _panel ->
-        workspace = State.set_keymap_scope(state.workspace, :editor)
-        state = %{state | workspace: workspace}
         SidebarWorkflow.close_git_status(state)
     end
   end
