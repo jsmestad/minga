@@ -104,4 +104,47 @@ defmodule MingaAgent.Changeset.PublicationTargetTest do
 
     assert File.dir?(Path.join(project, "sub"))
   end
+
+  describe "relative_path/3" do
+    test "maps an absolute path to its real project-relative path, even through a symlinked root",
+         %{project: project, dir: dir} do
+      root_link = Path.join(dir, "root_link")
+      File.ln_s!(project, root_link)
+      File.ln_s!("file.txt", Path.join(project, "sub/alias.txt"))
+
+      for path <- [
+            Path.join(project, "sub/file.txt"),
+            Path.join(root_link, "sub/file.txt"),
+            Path.join(project, "sub/alias.txt"),
+            Path.join(project, "sub/../sub/file.txt")
+          ] do
+        assert {:ok, "sub/file.txt"} =
+                 PublicationTarget.relative_path(root_link, path, @publication),
+               "expected #{inspect(path)} to resolve inside the project"
+      end
+    end
+
+    test "refuses paths that leave the project or are not absolute", %{
+      project: project,
+      outside: outside
+    } do
+      File.ln_s!(outside, Path.join(project, "vendor"))
+
+      for path <- [
+            Path.join(outside, "x"),
+            Path.join(project, "vendor/x"),
+            Path.join(project, "../outside/x"),
+            project
+          ] do
+        assert {:error, :outside_project_root} =
+                 PublicationTarget.relative_path(project, path, @publication),
+               "expected #{inspect(path)} to be refused"
+      end
+
+      for path <- ["sub/file.txt", "untitled:Untitled-1"] do
+        assert {:error, :invalid_path} =
+                 PublicationTarget.relative_path(project, path, @publication)
+      end
+    end
+  end
 end

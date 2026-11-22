@@ -5,6 +5,8 @@ defmodule MingaAgent.Tools.LspRenameTest do
   alias Minga.Buffer
   alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.LSP.SyncServer
+  alias MingaAgent.ProjectView
+  alias MingaAgent.Tool.Context, as: ToolContext
   alias MingaAgent.Tools.LspRename
 
   setup do
@@ -15,7 +17,15 @@ defmodule MingaAgent.Tools.LspRenameTest do
 
   describe "execute/4 without LSP client" do
     test "returns error when no buffer exists" do
-      {:error, result} = LspRename.execute("/nonexistent/file.ex", 10, 5, "new_name")
+      {:error, result} =
+        LspRename.execute(
+          ToolContext.new(project_root: "/nonexistent"),
+          "/nonexistent/file.ex",
+          10,
+          5,
+          "new_name"
+        )
+
       assert result =~ "No buffer open"
       assert result =~ "file must be open"
     end
@@ -45,39 +55,54 @@ defmodule MingaAgent.Tools.LspRenameTest do
       client = start_fake_client(responses)
       SyncServer.put_clients(buffer, [client])
 
-      assert {:error, result} = LspRename.execute(path, 0, 0, "new_name")
+      assert {:error, result} = LspRename.execute(context(tmp_dir), path, 0, 0, "new_name")
       assert result =~ "Failed to rename"
       assert result =~ "buffer is read-only"
       assert Buffer.content(buffer) == "old_name\n"
     end
 
     @tag :tmp_dir
-    test "reports filesystem write failures", %{tmp_dir: tmp_dir} do
-      source_path = Path.join(tmp_dir, "source.ex")
-      target_path = Path.join(tmp_dir, "unwritable.ex")
-      File.write!(source_path, "source\n")
-      File.write!(target_path, "old_name\n")
-      File.chmod!(target_path, 0o400)
-      on_exit(fn -> File.chmod(target_path, 0o600) end)
-
-      source = start_supervised!({BufferProcess, file_path: source_path, content: "source\n"})
+    test "refuses the whole rename when an edit escapes the project through a symlink", %{
+      tmp_dir: tmp_dir
+    } do
+      project = Path.join(tmp_dir, "project")
+      outside = Path.join(tmp_dir, "outside")
+      File.mkdir_p!(project)
+      File.mkdir_p!(outside)
+      source_path = Path.join(project, "source.ex")
+      victim = Path.join(outside, "victim.ex")
+      File.write!(source_path, "old_name\n")
+      File.write!(victim, "old_name\n")
+      File.ln_s!(outside, Path.join(project, "vendor"))
+      linked_path = Path.join(project, "vendor/victim.ex")
+      source = start_supervised!({BufferProcess, file_path: source_path, content: "old_name\n"})
 
       responses = %{
         "textDocument/prepareRename" =>
           {:ok,
            %{
              "start" => %{"line" => 0, "character" => 0},
-             "end" => %{"line" => 0, "character" => 6}
+             "end" => %{"line" => 0, "character" => 8}
            }},
-        "textDocument/rename" => {:ok, workspace_edit(target_path, "new_name")}
+        "textDocument/rename" =>
+          {:ok,
+           %{
+             "changes" =>
+               Map.merge(
+                 workspace_edit(source_path, "new_name")["changes"],
+                 workspace_edit(linked_path, "new_name")["changes"]
+               )
+           }}
       }
 
       client = start_fake_client(responses)
       SyncServer.put_clients(source, [client])
 
-      assert {:error, result} = LspRename.execute(source_path, 0, 0, "new_name")
-      assert result =~ "could not write"
-      assert File.read!(target_path) == "old_name\n"
+      assert {:error, result} = LspRename.execute(context(project), source_path, 0, 0, "new_name")
+      assert result =~ "#{linked_path}: outside the project root"
+      assert result =~ "no files were changed"
+      assert File.read!(victim) == "old_name\n"
+      assert Buffer.content(source) == "old_name\n"
     end
 
     @tag :tmp_dir
@@ -101,7 +126,7 @@ defmodule MingaAgent.Tools.LspRenameTest do
       client = start_fake_client(responses)
       SyncServer.put_clients(source, [client])
 
-      assert {:error, result} = LspRename.execute(source_path, 0, 0, "new_name")
+      assert {:error, result} = LspRename.execute(context(tmp_dir), source_path, 0, 0, "new_name")
       assert result =~ "cannot verify document version"
       assert File.read!(target_path) == "old_name\n"
     end
@@ -129,7 +154,7 @@ defmodule MingaAgent.Tools.LspRenameTest do
       SyncServer.put_clients(source, [client])
 
       assert {:error, "Rename returned no edits to apply"} =
-               LspRename.execute(source_path, 0, 0, "new_name")
+               LspRename.execute(context(tmp_dir), source_path, 0, 0, "new_name")
 
       assert File.stat!(target_path) == before_stat
       assert File.read!(target_path) == "unchanged\n"
@@ -159,7 +184,7 @@ defmodule MingaAgent.Tools.LspRenameTest do
       client = start_fake_client(responses)
       SyncServer.put_clients(buffer, [client])
 
-      assert {:error, result} = LspRename.execute(path, 0, 0, "new_name")
+      assert {:error, result} = LspRename.execute(context(tmp_dir), path, 0, 0, "new_name")
       assert result =~ "version_mismatch"
       assert Buffer.content(buffer) == "source\n"
       assert Buffer.version(buffer) == version
@@ -191,7 +216,7 @@ defmodule MingaAgent.Tools.LspRenameTest do
       client = start_fake_client(responses)
       SyncServer.put_clients(source, [client])
 
-      assert {:error, result} = LspRename.execute(source_path, 0, 0, "new_name")
+      assert {:error, result} = LspRename.execute(context(tmp_dir), source_path, 0, 0, "new_name")
       assert result =~ "cannot verify document version"
       assert File.stat!(target_path) == before_stat
       assert File.read!(target_path) == "unchanged\n"
@@ -220,12 +245,19 @@ defmodule MingaAgent.Tools.LspRenameTest do
       SyncServer.put_clients(source, [client])
 
       assert {:ok, "Renamed to `new_name` across 1 file (1 edits)"} =
-               LspRename.execute(source_path, 0, 0, "new_name")
+               LspRename.execute(context(tmp_dir), source_path, 0, 0, "new_name")
 
       assert Buffer.content(source) == "new_name\n"
       assert File.stat!(target_path) == before_stat
       assert File.read!(target_path) == "unchanged\n"
     end
+  end
+
+  @spec context(String.t()) :: ToolContext.t()
+  defp context(project_root) do
+    {:ok, view} = ProjectView.overlay(project_root)
+    on_exit(fn -> ProjectView.close(view) end)
+    ToolContext.new(project_root: project_root, project_view: view)
   end
 
   @spec workspace_edit(String.t(), String.t()) :: map()

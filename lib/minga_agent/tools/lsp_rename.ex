@@ -13,6 +13,7 @@ defmodule MingaAgent.Tools.LspRename do
   Part of epic #1241. See #1246.
   """
 
+  alias MingaAgent.Tool.Context, as: ToolContext
   alias MingaAgent.Tools.LspBridge
   alias MingaAgent.Tools.WorkspaceEditApplier
   alias Minga.LSP.Client
@@ -24,13 +25,13 @@ defmodule MingaAgent.Tools.LspRename do
   Flow:
   1. `textDocument/prepareRename` validates the position is renameable
   2. `textDocument/rename` returns a WorkspaceEdit
-  3. The edit is applied across all affected files
+  3. The edit is applied across all affected files through `context`, and refused whole if any file is outside its project root
 
   Line and column are 0-indexed.
   """
-  @spec execute(String.t(), non_neg_integer(), non_neg_integer(), String.t()) ::
+  @spec execute(ToolContext.t(), String.t(), non_neg_integer(), non_neg_integer(), String.t()) ::
           {:ok, String.t()} | {:error, String.t()}
-  def execute(path, line, col, new_name)
+  def execute(%ToolContext{} = context, path, line, col, new_name)
       when is_binary(path) and is_integer(line) and is_integer(col) and is_binary(new_name) do
     abs_path = Path.expand(path)
 
@@ -40,7 +41,7 @@ defmodule MingaAgent.Tools.LspRename do
 
         with {:ok, _} <- prepare_rename(client, abs_path, line, col, encoding),
              {:ok, workspace_edit} <- do_rename(client, abs_path, line, col, new_name, encoding) do
-          apply_rename(workspace_edit, new_name, client, encoding)
+          apply_rename(workspace_edit, new_name, client, encoding, context)
         end
 
       {:error, reason} ->
@@ -111,15 +112,20 @@ defmodule MingaAgent.Tools.LspRename do
     end
   end
 
-  @spec apply_rename(map(), String.t(), pid(), Minga.LSP.PositionEncoding.encoding()) ::
-          {:ok, String.t()} | {:error, String.t()}
-  defp apply_rename(workspace_edit, new_name, client, encoding) do
+  @spec apply_rename(
+          map(),
+          String.t(),
+          pid(),
+          Minga.LSP.PositionEncoding.encoding(),
+          ToolContext.t()
+        ) :: {:ok, String.t()} | {:error, String.t()}
+  defp apply_rename(workspace_edit, new_name, client, encoding, context) do
     case WorkspaceEdit.parse(workspace_edit) do
       {:ok, []} ->
         {:error, "Rename returned no edits to apply"}
 
       {:ok, documents} ->
-        finish_rename(documents, new_name, client, encoding)
+        finish_rename(documents, new_name, client, encoding, context)
 
       {:error, reason} ->
         {:error, "Rename returned an invalid workspace edit: #{inspect(reason)}"}
@@ -130,10 +136,12 @@ defmodule MingaAgent.Tools.LspRename do
           [WorkspaceEdit.Document.t()],
           String.t(),
           pid(),
-          Minga.LSP.PositionEncoding.encoding()
+          Minga.LSP.PositionEncoding.encoding(),
+          ToolContext.t()
         ) :: {:ok, String.t()} | {:error, String.t()}
-  defp finish_rename(documents, new_name, client, encoding) do
-    {file_count, edit_count, errors} = WorkspaceEditApplier.apply(documents, client, encoding)
+  defp finish_rename(documents, new_name, client, encoding, context) do
+    {file_count, edit_count, errors} =
+      WorkspaceEditApplier.apply(documents, client, encoding, context)
 
     case {edit_count, errors} do
       {0, []} ->

@@ -5,6 +5,8 @@ defmodule MingaAgent.Tools.LspCodeActionsTest do
   alias Minga.Buffer
   alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.LSP.SyncServer
+  alias MingaAgent.ProjectView
+  alias MingaAgent.Tool.Context, as: ToolContext
   alias MingaAgent.Tools.LspCodeActions
 
   setup do
@@ -15,7 +17,13 @@ defmodule MingaAgent.Tools.LspCodeActionsTest do
 
   describe "execute/3 without LSP client" do
     test "returns error when no buffer exists" do
-      {:error, result} = LspCodeActions.execute("/nonexistent/file.ex", 10)
+      {:error, result} =
+        LspCodeActions.execute(
+          ToolContext.new(project_root: "/nonexistent"),
+          "/nonexistent/file.ex",
+          10
+        )
+
       assert result =~ "No buffer open"
       assert result =~ "file must be open"
     end
@@ -40,7 +48,7 @@ defmodule MingaAgent.Tools.LspCodeActionsTest do
       client = start_fake_client(%{"textDocument/codeAction" => {:ok, [action]}})
       SyncServer.put_clients(buffer, [client])
 
-      assert {:error, result} = LspCodeActions.execute(path, 0, apply: 1)
+      assert {:error, result} = LspCodeActions.execute(context(tmp_dir), path, 0, apply: 1)
       assert result =~ "Failed to apply"
       assert result =~ "buffer is read-only"
       assert Buffer.content(buffer) == "old_name\n"
@@ -65,28 +73,30 @@ defmodule MingaAgent.Tools.LspCodeActionsTest do
       client = start_fake_client(%{"textDocument/codeAction" => {:ok, [action]}})
       SyncServer.put_clients(buffer, [client])
 
-      assert {:error, result} = LspCodeActions.execute(path, 0, apply: 1)
+      assert {:error, result} = LspCodeActions.execute(context(tmp_dir), path, 0, apply: 1)
       assert result =~ "buffer is read-only"
       refute_receive {:lsp_request, "workspace/executeCommand"}
     end
 
     @tag :tmp_dir
-    test "reports filesystem write failures", %{tmp_dir: tmp_dir} do
+    test "stages a closed-file edit in the session's project view", %{tmp_dir: tmp_dir} do
       source_path = Path.join(tmp_dir, "source.ex")
-      target_path = Path.join(tmp_dir, "unwritable.ex")
+      target_path = Path.join(tmp_dir, "closed.ex")
       File.write!(source_path, "source\n")
       File.write!(target_path, "old_name\n")
-      File.chmod!(target_path, 0o400)
-      on_exit(fn -> File.chmod(target_path, 0o600) end)
 
       source = start_supervised!({BufferProcess, file_path: source_path, content: "source\n"})
       action = %{"title" => "Replace name", "edit" => workspace_edit(target_path, "new_name")}
       client = start_fake_client(%{"textDocument/codeAction" => {:ok, [action]}})
       SyncServer.put_clients(source, [client])
+      context = context(tmp_dir)
 
-      assert {:error, result} = LspCodeActions.execute(source_path, 0, apply: 1)
-      assert result =~ "could not write"
+      assert {:ok, result} = LspCodeActions.execute(context, source_path, 0, apply: 1)
+      assert result =~ "1 edits across 1 files"
       assert File.read!(target_path) == "old_name\n"
+
+      assert {:ok, "new_name\n"} =
+               ProjectView.read_file(context.router_context.project_view, "closed.ex")
     end
 
     @tag :tmp_dir
@@ -109,7 +119,7 @@ defmodule MingaAgent.Tools.LspCodeActionsTest do
       client = start_fake_client(responses)
       SyncServer.put_clients(buffer, [client])
 
-      assert {:error, result} = LspCodeActions.execute(path, 0, apply: 1)
+      assert {:error, result} = LspCodeActions.execute(context(tmp_dir), path, 0, apply: 1)
       assert result =~ "Applied \"Replace and organize\": 1 edits across 1 files"
       assert result =~ "source.organizeImports"
       assert result =~ "command rejected"
@@ -132,7 +142,7 @@ defmodule MingaAgent.Tools.LspCodeActionsTest do
       client = start_fake_client(%{"textDocument/codeAction" => {:ok, [action]}})
       SyncServer.put_clients(source, [client])
 
-      assert {:error, result} = LspCodeActions.execute(source_path, 0, apply: 1)
+      assert {:error, result} = LspCodeActions.execute(context(tmp_dir), source_path, 0, apply: 1)
       assert result =~ "cannot verify document version"
       assert File.read!(target_path) == "old_name\n"
     end
@@ -151,7 +161,7 @@ defmodule MingaAgent.Tools.LspCodeActionsTest do
       SyncServer.put_clients(source, [client])
 
       assert {:ok, "Code action \"Empty edit\": no edits to apply"} =
-               LspCodeActions.execute(source_path, 0, apply: 1)
+               LspCodeActions.execute(context(tmp_dir), source_path, 0, apply: 1)
 
       assert File.stat!(target_path) == before_stat
       assert File.read!(target_path) == "unchanged\n"
@@ -176,7 +186,7 @@ defmodule MingaAgent.Tools.LspCodeActionsTest do
       client = start_fake_client(%{"textDocument/codeAction" => {:ok, [action]}})
       SyncServer.put_clients(buffer, [client])
 
-      assert {:error, result} = LspCodeActions.execute(path, 0, apply: 1)
+      assert {:error, result} = LspCodeActions.execute(context(tmp_dir), path, 0, apply: 1)
       assert result =~ "version_mismatch"
       assert Buffer.content(buffer) == "source\n"
       assert Buffer.version(buffer) == version
@@ -203,7 +213,7 @@ defmodule MingaAgent.Tools.LspCodeActionsTest do
       client = start_fake_client(%{"textDocument/codeAction" => {:ok, [action]}})
       SyncServer.put_clients(source, [client])
 
-      assert {:error, result} = LspCodeActions.execute(source_path, 0, apply: 1)
+      assert {:error, result} = LspCodeActions.execute(context(tmp_dir), source_path, 0, apply: 1)
       assert result =~ "cannot verify document version"
       assert File.stat!(target_path) == before_stat
       assert File.read!(target_path) == "unchanged\n"
@@ -227,12 +237,19 @@ defmodule MingaAgent.Tools.LspCodeActionsTest do
       SyncServer.put_clients(source, [client])
 
       assert {:ok, "Applied \"Mixed edit\": 1 edits across 1 files"} =
-               LspCodeActions.execute(source_path, 0, apply: 1)
+               LspCodeActions.execute(context(tmp_dir), source_path, 0, apply: 1)
 
       assert Buffer.content(source) == "new_name\n"
       assert File.stat!(target_path) == before_stat
       assert File.read!(target_path) == "unchanged\n"
     end
+  end
+
+  @spec context(String.t()) :: ToolContext.t()
+  defp context(project_root) do
+    {:ok, view} = ProjectView.overlay(project_root)
+    on_exit(fn -> ProjectView.close(view) end)
+    ToolContext.new(project_root: project_root, project_view: view)
   end
 
   @spec workspace_edit(String.t(), String.t()) :: map()

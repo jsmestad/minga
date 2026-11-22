@@ -32,6 +32,23 @@ defmodule MingaAgent.Changeset.PublicationTarget do
   end
 
   @doc """
+  Returns the project-relative path that an absolute `path` names after every symlink is followed.
+
+  Use this for absolute paths from an untrusted source, such as a language-server URI. The path is resolved from the file-system root, so a project root that is itself reached through a symlink still matches. The result is relative to the real path of the project root and must stay strictly inside it. A path that is not absolute is refused with `:invalid_path`. A missing tail is allowed, as in `write_path/3`.
+  """
+  @spec relative_path(String.t(), String.t(), publication()) ::
+          {:ok, String.t()} | {:error, error()}
+  def relative_path(project_root, path, {file_system, opts})
+      when is_binary(project_root) and is_binary(path) do
+    with :ok <- require_absolute(path),
+         {:ok, real_root} <- real_root(file_system, project_root, opts),
+         {:ok, real_path} <- walk(file_system, Path.split(path), "/", 0, opts),
+         {:ok, target} <- require_inside(real_path, real_root) do
+      {:ok, Path.relative_to(target, real_root)}
+    end
+  end
+
+  @doc """
   Returns the directory entry that deleting `relative_path` must unlink.
 
   The parent directory is fully resolved and the final component is kept, so deleting an in-root symlink removes the link rather than its target. The final component's own resolution must also stay inside the project root. A final name of `.`, `..`, or an empty path names no entry and is refused with `:invalid_path`.
@@ -123,6 +140,11 @@ defmodule MingaAgent.Changeset.PublicationTarget do
     names = Enum.reject(rest, &(&1 == "."))
 
     if ".." in names, do: {:error, :enoent}, else: {:ok, Path.join([candidate | names])}
+  end
+
+  @spec require_absolute(String.t()) :: :ok | {:error, :invalid_path}
+  defp require_absolute(path) do
+    if Path.type(path) == :absolute, do: :ok, else: {:error, :invalid_path}
   end
 
   @spec require_inside(String.t(), String.t()) ::
