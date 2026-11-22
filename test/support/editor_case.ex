@@ -445,6 +445,18 @@ defmodule Minga.Test.EditorCase do
     get_editor_state(editor)
   end
 
+  @doc "Sends a Vim key sequence back to back, then waits once for the editor to process it."
+  @spec send_keys_async(editor_ctx(), String.t()) :: :ok
+  def send_keys_async(%{editor: editor, port: port}, sequence) do
+    Enum.each(parse_key_sequence(sequence), fn {codepoint, mods} ->
+      send(editor, {:minga_input, {:key_press, codepoint, mods}})
+    end)
+
+    Process.delete({:last_frame_snapshot, port})
+    sync_editor(editor)
+    :ok
+  end
+
   @doc """
   Syncs the port so its grid reflects the latest render from the editor.
 
@@ -462,6 +474,13 @@ defmodule Minga.Test.EditorCase do
     assert_rendering_enabled!(ctx, "sync_screen/1")
     sync_port(port)
     :ok
+  end
+
+  @doc "Returns the Agent chat decoded from the latest committed semantic frame."
+  @spec agent_chat(editor_ctx()) :: map() | nil
+  def agent_chat(%{port: port} = ctx) do
+    assert_rendering_enabled!(ctx, "agent_chat/1")
+    HeadlessPort.agent_chat(port)
   end
 
   @doc "Sends each character in the string as a key press, waiting after each."
