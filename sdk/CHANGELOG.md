@@ -6,7 +6,19 @@ All notable changes to `minga_sdk` are documented here. The SDK is versioned sep
 
 | minga_sdk | Minga |
 |-----------|-------|
-| 0.1.x | `main` from jsmestad/minga#3756 (model routes with setup rows and plan usage) onward; the first rolling build after that merge and later |
+| 0.1.1 | Minga builds with the extension notice API and optional extension support (#3764) |
+| 0.1.0 | `main` from jsmestad/minga#3756 (model routes with setup rows and plan usage) onward; the first rolling build after that merge and later |
+
+## 0.1.1
+
+### Added
+
+- `MingaEditor.Extension.EditorAPI.notice/2` shows a transient editor notice from an extension command.
+- `Minga.Config.get_extension_option/2` lets standalone extensions compile against the public extension option reader.
+
+### Fixed
+
+- The compiler no longer infers that runtime editor calls cannot return from the SDK's compile-time guards.
 
 ## 0.1.0
 

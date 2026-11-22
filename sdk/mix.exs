@@ -1,7 +1,7 @@
 defmodule MingaSdk.MixProject do
   use Mix.Project
 
-  @version "0.1.0"
+  @version "0.1.1"
   @source_url "https://github.com/jsmestad/minga"
 
   # Defined only by a running Minga editor; the SDK never defines it.
@@ -14,6 +14,8 @@ defmodule MingaSdk.MixProject do
       elixir: "~> 1.18",
       start_permanent: false,
       elixirc_paths: elixirc_paths(),
+      # The editor supplies these implementations at runtime. Do not export return types inferred from the SDK's compile-time guards.
+      elixirc_options: [infer_signatures: false],
       deps: deps(),
       description: "Compile-time SDK for building Minga editor extensions",
       package: package(),

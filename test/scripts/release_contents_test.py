@@ -74,8 +74,7 @@ class ReleaseContentsTest(unittest.TestCase):
             self.put(self.priv / name, header(target), True)
         for name in ("tutor.txt", "tree_sitter/api.h", "tree_sitter/parser.h", "queries/elixir/highlights.scm"):
             self.put(self.priv / name)
-        for name in ("git_porcelain", "knowledge_graph", "adversarial"):
-            self.put(self.priv / "extensions" / name / "lib/extension.ex")
+        self.put(self.priv / "extensions/git_porcelain/lib/extension.ex")
 
     def run_checker(self, *args, success=True):
         result = subprocess.run([sys.executable, str(SCRIPT), str(self.release), "--target", self.target, *map(str, args)], capture_output=True, text=True, timeout=10)

@@ -354,6 +354,11 @@ defmodule MingaEditor do
     EventBus.subscribe(:tool_uninstall_complete, events_registry)
     EventBus.subscribe(:tool_missing, events_registry)
     EventBus.subscribe(:log_message, events_registry)
+
+    if migration_notice = Minga.Config.Loader.migration_notice() do
+      Minga.API.message(migration_notice)
+    end
+
     EventBus.subscribe(:face_overrides_changed, events_registry)
     EventBus.subscribe(:agent_session_stopped, events_registry)
     EventBus.subscribe(:agent_session_restarted, events_registry)

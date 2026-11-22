@@ -143,7 +143,7 @@ defmodule Minga.Extension do
 
   * `:execute` (required) — `{Module, :function}` MFA tuple. The function
     receives editor state and returns new state. Extensions that need
-    config should call `Minga.Config.Options.get_extension_option/2`
+    config should call `Minga.Config.get_extension_option/2`
     inside the function body.
   * `:requires_buffer` — when `true`, command is skipped if no buffer
     is active (default: `false`)

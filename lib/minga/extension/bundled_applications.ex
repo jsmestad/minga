@@ -8,11 +8,7 @@ defmodule Minga.Extension.BundledApplications do
   outputs as one atomic source set.
   """
 
-  @applications %{
-    minga_adversarial: :minga_adversarial,
-    minga_git_porcelain: :minga_git_porcelain,
-    minga_knowledge_graph: :minga_knowledge_graph
-  }
+  @applications %{minga_git_porcelain: :minga_git_porcelain}
 
   @doc "Returns the verified OTP application for a bundled source, if present."
   @spec trusted_application(atom()) :: atom() | nil

@@ -248,7 +248,7 @@ jobs:
               archive.extractall(sys.argv[2], filter=package_member)
           PY
           package="$unpacked/minga"
-          "$GITHUB_WORKSPACE/trusted/scripts/check-release-contents" "$package" --target "${TARGET_OS}_${TARGET_ARCH}" --runtime-receipt "$MINGA_RELEASE_ERTS_RECEIPT"
+          "$GITHUB_WORKSPACE/trusted/scripts/check-release-contents" "$package" --source-tree "$GITHUB_WORKSPACE/source" --target "${TARGET_OS}_${TARGET_ARCH}" --runtime-receipt "$MINGA_RELEASE_ERTS_RECEIPT"
           cd "$CANDIDATE_ROOT"
           smoke_env=(env -i HOME="$HOME" PATH=/usr/bin:/bin TMPDIR="$TMPDIR"
             XDG_CONFIG_HOME="$XDG_CONFIG_HOME" XDG_DATA_HOME="$XDG_DATA_HOME"
@@ -277,7 +277,7 @@ jobs:
           if [ -n "${MINGA_ROLLING_VERSION:-}" ]; then
             "$GITHUB_WORKSPACE/trusted/scripts/stamp-rolling-app" "$app" "$MINGA_ROLLING_VERSION"
           fi
-          version_args=(--target macos_aarch64 --app "$app")
+          version_args=(--target macos_aarch64 --app "$app" --source-tree "$GITHUB_WORKSPACE/source")
           if [ -n "${MINGA_ROLLING_VERSION:-}" ]; then version_args+=(--rolling-version "$MINGA_ROLLING_VERSION"); fi
           "$GITHUB_WORKSPACE/trusted/scripts/check-release-contents" "$app/Contents/Resources/release" "${version_args[@]}"
           xcodebuild -version > "$CANDIDATE_ROOT/xcode.txt"
@@ -378,7 +378,7 @@ jobs:
           app="$mount/Minga.app"
           codesign --verify --deep --strict "$app"
           codesign -dv --verbose=4 "$app" 2>&1 | grep -F 'Authority=Developer ID Application'
-          version_args=(--target macos_aarch64 --app "$app")
+          version_args=(--target macos_aarch64 --app "$app" --source-tree "$GITHUB_WORKSPACE/source")
           if [ -n "${MINGA_ROLLING_VERSION:-}" ]; then version_args+=(--rolling-version "$MINGA_ROLLING_VERSION"); fi
           "$GITHUB_WORKSPACE/trusted/scripts/check-release-contents" "$app/Contents/Resources/release" "${version_args[@]}"
           helper="$app/Contents/Resources/bin/minga-ipc"

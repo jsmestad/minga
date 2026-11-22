@@ -8,6 +8,7 @@ defmodule Minga.Extension.SdkContractTest do
       "Buffer stubs cover the read and edit calls extensions use; the host API is much larger.",
     Minga.Buffer.EditDelta => "Value type; host construction helpers stay internal.",
     Minga.Buffer.EditSource => "Value type; host construction helpers stay internal.",
+    Minga.Config => "The SDK exposes extension option reads, not the editor configuration DSL.",
     Minga.Events =>
       "Extensions subscribe to documented topics; registry plumbing stays in the host."
   }

@@ -41,6 +41,14 @@ defmodule Minga.Config.Loader do
   alias Minga.Log
   alias Minga.Telemetry.StartupProgress
 
+  @extracted_extensions [
+    {:minga_adversarial, "minga-adverserial",
+     [:adversarial_analyze, :adversarial_clear, :adversarial_cycle_skepticism]},
+    {:minga_knowledge_graph, "minga-knowledge-graph",
+     [:knowledge_briefing, :knowledge_map, :knowledge_heat_refresh]},
+    {:minga_ghost_cursors, "minga-ghost-cursors", [:ghost_cursor_follow]}
+  ]
+
   @type keymap_server :: Keymap.server()
   @type options_server :: Options.server()
   @typep user_module_mode :: :compile | {:reuse, [module()], [String.t()]}
@@ -55,6 +63,7 @@ defmodule Minga.Config.Loader do
   @typep load_report :: %{
            config_path: String.t(),
            load_error: String.t() | nil,
+           migration_notice: String.t() | nil,
            loaded_modules: [module()],
            modules_errors: [String.t()],
            modules_fingerprint: binary(),
@@ -154,6 +163,21 @@ defmodule Minga.Config.Loader do
   @spec load_error(GenServer.server()) :: String.t() | nil
   def load_error, do: load_error(__MODULE__)
   def load_error(server), do: Agent.get(server, & &1.report.load_error)
+
+  @doc "Returns the startup notice for saved bindings that need an opt-in extension."
+  @spec migration_notice() :: String.t() | nil
+  @spec migration_notice(GenServer.server()) :: String.t() | nil
+  def migration_notice(server \\ __MODULE__), do: Agent.get(server, & &1.report.migration_notice)
+
+  @doc false
+  @spec record_config_binding(atom()) :: :ok
+  def record_config_binding(command) do
+    if bindings = Process.get(:minga_config_bound_commands) do
+      Process.put(:minga_config_bound_commands, MapSet.put(bindings, command))
+    end
+
+    :ok
+  end
 
   @doc "Returns the list of modules compiled from the user's modules directory."
   @spec loaded_modules() :: [module()]
@@ -486,6 +510,7 @@ defmodule Minga.Config.Loader do
     previous_keymap_server = Process.put(:minga_config_keymap, keymap_server)
     previous_options_server = Process.put(:minga_config_options, options_server)
     previous_lsp_settings = Process.put(:minga_config_lsp_settings, %{})
+    previous_bound_commands = Process.put(:minga_config_bound_commands, MapSet.new())
 
     try do
       config_cleanup_error =
@@ -582,6 +607,7 @@ defmodule Minga.Config.Loader do
         %{
           config_path: config_path,
           load_error: load_error,
+          migration_notice: extension_migration_notice(),
           loaded_modules: loaded_modules,
           modules_errors: modules_errors,
           modules_fingerprint: modules_fingerprint,
@@ -599,6 +625,7 @@ defmodule Minga.Config.Loader do
       restore_pdict(:minga_config_keymap, previous_keymap_server)
       restore_pdict(:minga_config_options, previous_options_server)
       restore_pdict(:minga_config_lsp_settings, previous_lsp_settings)
+      restore_pdict(:minga_config_bound_commands, previous_bound_commands)
     end
   end
 
@@ -609,6 +636,7 @@ defmodule Minga.Config.Loader do
     %{
       config_path: config_path,
       load_error: nil,
+      migration_notice: nil,
       loaded_modules: [],
       modules_errors: [],
       modules_fingerprint: user_modules_fingerprint(config_dir),
@@ -623,6 +651,25 @@ defmodule Minga.Config.Loader do
     }
   end
 
+  @spec extension_migration_notice() :: String.t() | nil
+  defp extension_migration_notice do
+    bindings = Process.get(:minga_config_bound_commands)
+
+    installs =
+      for {name, repo, commands} <- @extracted_extensions,
+          Enum.any?(commands, &MapSet.member?(bindings, &1)),
+          ExtRegistry.get(name) == :error,
+          do: "extension #{inspect(name)}, git: \"https://github.com/jsmestad/#{repo}\""
+
+    case installs do
+      [] ->
+        nil
+
+      _ ->
+        "Some configured keybindings need optional extensions. Add to config.exs and restart: #{Enum.join(installs, "; ")}"
+    end
+  end
+
   @spec register_bundled_extensions() :: :ok
   defp register_bundled_extensions do
     ExtRegistry.register(
@@ -630,20 +677,6 @@ defmodule Minga.Config.Loader do
       bundled_extension_path("git_porcelain"),
       load_policy: :deferred
     )
-
-    ExtRegistry.register(
-      :minga_knowledge_graph,
-      bundled_extension_path("knowledge_graph"),
-      load_policy: :deferred
-    )
-
-    ExtRegistry.register(
-      :minga_adversarial,
-      bundled_extension_path("adversarial"),
-      load_policy: :deferred
-    )
-
-    :ok
   end
 
   @spec bundled_extension_path(String.t()) :: String.t()

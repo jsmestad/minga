@@ -356,7 +356,7 @@ defmodule Minga.Config do
       end
 
     case result do
-      :ok -> :ok
+      :ok -> Loader.record_config_binding(command_name)
       {:error, reason} -> Minga.Log.warning(:config, "bind failed: #{reason}")
     end
 
@@ -379,7 +379,7 @@ defmodule Minga.Config do
       when is_atom(mode) and is_binary(key_str) and is_atom(command_name) and
              is_binary(description) and is_list(opts) do
     case Keymap.bind(keymap_server(), mode, key_str, command_name, description, opts) do
-      :ok -> :ok
+      :ok -> Loader.record_config_binding(command_name)
       {:error, reason} -> Minga.Log.warning(:config, "bind failed: #{reason}")
     end
 
