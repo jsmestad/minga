@@ -20,6 +20,10 @@ defmodule MingaAgent.Changeset.Overlay do
           link_mode: :copy
         }
 
+  @typedoc "Why a project read was refused or failed. The refusal names the project-relative path."
+  @type read_error ::
+          {:outside_project_root, String.t()} | PublicationTarget.error() | File.posix()
+
   @typedoc "Project materialization metrics."
   @type materialization_stats :: %{
           copied_files: non_neg_integer(),
@@ -276,11 +280,10 @@ defmodule MingaAgent.Changeset.Overlay do
   @spec modified?(t(), String.t()) :: boolean()
   def modified?(%__MODULE__{} = overlay, relative_path) do
     overlay_file = safe_target!(overlay, relative_path)
-    project_file = Path.join(overlay.project_root, relative_path)
 
     modified_contents?(
       File.read(overlay_file),
-      File.read(project_file),
+      read_project_file(overlay, relative_path),
       deleted?(overlay, relative_path)
     )
   end
@@ -320,6 +323,35 @@ defmodule MingaAgent.Changeset.Overlay do
     ]
   end
 
+  @doc """
+  Reads a project file the way the overlay's lazy view does.
+
+  Every symlink in `relative_path` is resolved first. When the real path leaves the project root, returns `{:error, {:outside_project_root, relative_path}}` and reads nothing.
+  """
+  @spec read_project_file(t(), String.t()) :: {:ok, binary()} | {:error, read_error()}
+  def read_project_file(%__MODULE__{} = overlay, relative_path) do
+    with {:ok, path} <- project_read_path(overlay, relative_path), do: File.read(path)
+  end
+
+  @doc """
+  Returns the real path to open when reading `relative_path` from the project.
+
+  Every symlink is resolved, and a missing tail is allowed so the caller's own read reports `:enoent`. A real path outside the project root returns `{:error, {:outside_project_root, relative_path}}`.
+  """
+  @spec project_read_path(t(), String.t()) :: {:ok, String.t()} | {:error, read_error()}
+  def project_read_path(%__MODULE__{project_root: root}, relative_path) do
+    resolve_project_read(Path.expand(root), relative_path)
+  end
+
+  @spec resolve_project_read(String.t(), String.t()) :: {:ok, String.t()} | {:error, read_error()}
+  defp resolve_project_read(root, relative_path) do
+    case PublicationTarget.read_path(root, relative_path, {SystemFileSystem, []}) do
+      {:ok, path} -> {:ok, path}
+      {:error, :outside_project_root} -> {:error, {:outside_project_root, relative_path}}
+      {:error, _reason} = error -> error
+    end
+  end
+
   @doc "Removes the overlay directory and all its contents."
   @spec cleanup(t()) :: :ok
   def cleanup(%__MODULE__{overlay_dir: dir}) do
@@ -356,12 +388,20 @@ defmodule MingaAgent.Changeset.Overlay do
     end
   end
 
+  # Listing a project directory follows its symlinks only while they stay
+  # inside the project root, the same rule staging applies to file reads.
   @spec safe_project_path_allow_root(t(), String.t()) ::
-          {:ok, String.t()} | {:error, :path_traversal}
+          {:ok, String.t()}
+          | {:error, :path_traversal | read_error()}
   defp safe_project_path_allow_root(%__MODULE__{} = overlay, relative_path) do
     root = Path.expand(overlay.project_root)
     target = Path.join(root, relative_path) |> Path.expand()
-    validate_path_allow_root(root, target)
+
+    case validate_path_allow_root(root, target) do
+      {:ok, ^root} -> {:ok, root}
+      {:ok, _target} -> resolve_project_read(root, Path.relative_to(target, root))
+      {:error, _reason} = error -> error
+    end
   end
 
   @spec validate_target(String.t(), String.t()) ::

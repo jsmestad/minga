@@ -165,7 +165,7 @@ defmodule MingaAgent.Changeset.Server do
 
   def handle_call({:capture_original, relative_path}, _from, state) do
     with {:ok, path} <- normalize_path(state, relative_path) do
-      case File.read(Path.join(state.project_root, path)) do
+      case read_project_file(state, path) do
         {:ok, _} = source -> {:reply, :ok, remember_original(state, path, source)}
         {:error, :enoent} = source -> {:reply, :ok, remember_original(state, path, source)}
         {:error, reason} -> {:reply, {:error, reason}, state}
@@ -888,12 +888,19 @@ defmodule MingaAgent.Changeset.Server do
   end
 
   @spec source_descriptor(state(), String.t()) ::
-          {:ok, {:memory, binary()} | {:disk, String.t()}} | {:error, :deleted}
+          {:ok, {:memory, binary()} | {:disk, String.t()}}
+          | {:error, :deleted | Overlay.read_error()}
   defp source_descriptor(state, path) do
     case current_change(state, path) do
-      :deleted -> {:error, :deleted}
-      :unmodified -> {:ok, {:disk, Path.join(state.project_root, path)}}
-      content -> {:ok, {:memory, content}}
+      :deleted ->
+        {:error, :deleted}
+
+      :unmodified ->
+        with {:ok, real_path} <- Overlay.project_read_path(state.overlay, path),
+             do: {:ok, {:disk, real_path}}
+
+      content ->
+        {:ok, {:memory, content}}
     end
   end
 
@@ -901,10 +908,13 @@ defmodule MingaAgent.Changeset.Server do
   defp current_content(state, path) do
     case current_change(state, path) do
       :deleted -> {:error, :deleted}
-      :unmodified -> File.read(Path.join(state.project_root, path))
+      :unmodified -> read_project_file(state, path)
       content -> {:ok, content}
     end
   end
+
+  @spec read_project_file(state(), String.t()) :: {:ok, binary()} | {:error, Overlay.read_error()}
+  defp read_project_file(state, path), do: Overlay.read_project_file(state.overlay, path)
 
   @spec current_change(state(), String.t()) :: change()
   defp current_change(state, path), do: Map.get(state.changes, path, :unmodified)
@@ -914,7 +924,7 @@ defmodule MingaAgent.Changeset.Server do
     if Map.has_key?(state.originals, path) do
       state
     else
-      case File.read(Path.join(state.project_root, path)) do
+      case read_project_file(state, path) do
         {:ok, content} -> put_in(state.originals[path], content)
         {:error, _} -> state
       end
@@ -964,37 +974,73 @@ defmodule MingaAgent.Changeset.Server do
           :ok | {:error, term()}
   defp restore_original_with_backup(state, path, backup_suffix) do
     overlay_path = Path.join(state.overlay.overlay_dir, path)
-    project_path = Path.join(state.project_root, path)
     tombstone_path = overlay_path <> ".__changeset_deleted__"
     backup_path = overlay_path <> backup_suffix
 
-    if File.regular?(project_path) do
-      with :ok <- remove_overlay_artifact(backup_path),
-           :ok <- remove_overlay_artifact(tombstone_path),
-           :ok <- prune_empty_overlay_dirs(state, path),
-           :ok <-
-             restore_project_file(state.overlay, state.project_root, overlay_path, backup_path),
-           :ok <- remove_overlay_artifact(backup_path) do
-        :ok
-      else
-        {:error, reason} ->
-          case restore_overlay_backup(overlay_path, backup_path) do
-            :ok -> {:error, reason}
-            {:error, rollback_reason} -> {:error, {:cleanup_failed, reason, rollback_reason}}
-          end
-      end
+    case restorable_project_file(state, path) do
+      {:ok, project_file} ->
+        restore_from_project(
+          state,
+          path,
+          project_file,
+          {overlay_path, tombstone_path, backup_path}
+        )
+
+      :none ->
+        clear_overlay_path(state, path, overlay_path, tombstone_path)
+    end
+  end
+
+  # A project file the overlay may copy back: a regular file whose real path
+  # stays inside the project root.
+  @spec restorable_project_file(state(), String.t()) :: {:ok, String.t()} | :none
+  defp restorable_project_file(state, path) do
+    case Overlay.project_read_path(state.overlay, path) do
+      {:ok, real_path} -> if File.regular?(real_path), do: {:ok, real_path}, else: :none
+      {:error, _reason} -> :none
+    end
+  end
+
+  @spec restore_from_project(
+          state(),
+          String.t(),
+          String.t(),
+          {String.t(), String.t(), String.t()}
+        ) ::
+          :ok | {:error, term()}
+  defp restore_from_project(
+         state,
+         path,
+         project_file,
+         {overlay_path, tombstone_path, backup_path}
+       ) do
+    with :ok <- remove_overlay_artifact(backup_path),
+         :ok <- remove_overlay_artifact(tombstone_path),
+         :ok <- prune_empty_overlay_dirs(state, path),
+         :ok <- restore_project_file(project_file, overlay_path, backup_path),
+         :ok <- remove_overlay_artifact(backup_path) do
+      :ok
     else
-      with :ok <- remove_overlay_artifact(overlay_path),
-           :ok <- remove_overlay_artifact(tombstone_path),
-           :ok <- prune_empty_overlay_dirs(state, path) do
-        :ok
-      else
-        {:error, reason} ->
-          case restore_discarded_overlay(state, path, tombstone_path) do
-            :ok -> {:error, reason}
-            {:error, rollback_reason} -> {:error, {:cleanup_failed, reason, rollback_reason}}
-          end
-      end
+      {:error, reason} ->
+        case restore_overlay_backup(overlay_path, backup_path) do
+          :ok -> {:error, reason}
+          {:error, rollback_reason} -> {:error, {:cleanup_failed, reason, rollback_reason}}
+        end
+    end
+  end
+
+  @spec clear_overlay_path(state(), String.t(), String.t(), String.t()) :: :ok | {:error, term()}
+  defp clear_overlay_path(state, path, overlay_path, tombstone_path) do
+    with :ok <- remove_overlay_artifact(overlay_path),
+         :ok <- remove_overlay_artifact(tombstone_path),
+         :ok <- prune_empty_overlay_dirs(state, path) do
+      :ok
+    else
+      {:error, reason} ->
+        case restore_discarded_overlay(state, path, tombstone_path) do
+          :ok -> {:error, reason}
+          {:error, rollback_reason} -> {:error, {:cleanup_failed, reason, rollback_reason}}
+        end
     end
   end
 
@@ -1055,19 +1101,13 @@ defmodule MingaAgent.Changeset.Server do
     end
   end
 
-  @spec restore_project_file(Overlay.t(), String.t(), String.t(), String.t()) ::
-          :ok | {:error, term()}
-  defp restore_project_file(%Overlay{} = overlay, project_root, overlay_path, backup_path) do
-    project_path = Path.join(project_root, Path.relative_to(overlay_path, overlay.overlay_dir))
+  @spec restore_project_file(String.t(), String.t(), String.t()) :: :ok | {:error, term()}
+  defp restore_project_file(project_file, overlay_path, backup_path) do
     temp_path = overlay_path <> ".__restore_tmp__"
 
-    if File.regular?(project_path) do
-      with :ok <- remove_overlay_artifact(temp_path),
-           :ok <- relink_file(overlay, project_path, temp_path) do
-        swap_overlay_with_temp(overlay_path, temp_path, backup_path)
-      end
-    else
-      :ok
+    with :ok <- remove_overlay_artifact(temp_path),
+         :ok <- File.cp(project_file, temp_path) do
+      swap_overlay_with_temp(overlay_path, temp_path, backup_path)
     end
   end
 
@@ -1099,11 +1139,6 @@ defmodule MingaAgent.Changeset.Server do
           {:error, reason}
       end
     end
-  end
-
-  @spec relink_file(Overlay.t(), String.t(), String.t()) :: :ok | {:error, term()}
-  defp relink_file(%Overlay{}, source, target) do
-    File.cp(source, target)
   end
 
   @spec rename_overlay_to_backup(String.t(), String.t()) :: :ok | {:error, term()}
