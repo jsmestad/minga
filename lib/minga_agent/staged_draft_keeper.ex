@@ -7,7 +7,7 @@ defmodule MingaAgent.StagedDraftKeeper do
     * **Tracking.** `persist/3` registers a view with the workspace it belongs to. Views are tracked by their own identity; the workspace id is an attribute that can change. A new view for a workspace never displaces another live view or its drafts. The keeper monitors the view's changeset and subscribes to its revisions.
     * **Rebuildable tracking.** When the keeper subscribes, the changeset keeps its view and workspace id as its staging registration and joins a `:pg` scope (`:scope` option). The membership belongs to the changeset, so it outlives a keeper crash; a restarted keeper adopts every member's view and re-saves it. `:pg` monitors members rather than linking them, so a failing scope cannot take staged edits down with it.
     * **Oversized drafts.** A draft above the store's size limit is not saved. Its stored copy is replaced with a content-free "lost: too large" marker, so the next start names it as lost instead of restoring an older version, and the user is told once per path in `*Messages*`.
-    * **Persistence.** After each staged change the keeper writes the view's drafts with `Minga.Session.StagedDrafts` (one private, atomic file per draft). Only drafts whose content changed are rewritten; files for paths that are no longer staged are removed.
+    * **Persistence.** After each staged change the keeper writes the view's drafts with `Minga.Session.StagedDrafts` (one private, atomic file per draft). Only drafts whose content changed are rewritten; files for paths that are no longer staged are removed. A snapshot that fails to leave disk matching the staged drafts is not recorded as saved and is retried with backoff (`:retry_ms`, doubling up to a minute), without waiting for another staged change.
     * **Deletion.** A changeset stops normally only after a successful publish, a discard, or a close of a clean view, so a `:normal` exit deletes that view's draft files. Any other exit (a crash, an application shutdown) keeps them for the next start.
     * **Recovery.** `recover/3` hands an Editor every staged view of its project: views that are still running (`:live`, after an Editor restart) and views rebuilt from disk (`:disk`, after a full restart). The reply is `{:staged_drafts_recovered, project_root, [Recovery.t()]}`, sent only when there is something to offer. A draft file is deleted only when it can never be restored; a draft that fails for a reason that may pass (I/O, an unavailable process) stays on disk, and its whole view waits for the next start.
 
@@ -24,6 +24,8 @@ defmodule MingaAgent.StagedDraftKeeper do
   alias MingaAgent.StagedDraftKeeper.Recovery
 
   @scope MingaAgent.StagedDraftKeeper.Scope
+  @retry_ms 1_000
+  @max_retry_ms 60_000
 
   # Failures that no later attempt can fix. Their draft files are deleted.
   @permanent_failures [
@@ -45,18 +47,21 @@ defmodule MingaAgent.StagedDraftKeeper do
            changeset: pid(),
            monitor: reference(),
            written: %{String.t() => binary() | nil},
-           too_large: MapSet.t(String.t())
+           too_large: MapSet.t(String.t()),
+           retry_delay: pos_integer() | nil,
+           retry_pending: boolean()
          }
 
   @typep state :: %{
            store_opts: keyword(),
+           retry_ms: pos_integer(),
            scope: atom(),
            tracked: %{view_id() => tracked()},
            pending: MapSet.t(view_id())
          }
 
   @typedoc """
-  Start options. `:staged_drafts_dir` overrides the store directory, `:scope` names the `:pg` scope of live staged views (default `#{inspect(@scope)}`), `:owner_uid` fixes the uid that must own the store, and `:max_file_bytes` sets the largest saved draft.
+  Start options. `:staged_drafts_dir` overrides the store directory, `:scope` names the `:pg` scope of live staged views (default `#{inspect(@scope)}`), `:owner_uid` fixes the uid that must own the store, `:max_file_bytes` sets the largest saved draft, and `:retry_ms` is the first delay before an incomplete save is retried (default #{@retry_ms} ms, doubling up to #{@max_retry_ms} ms).
   """
   @type start_opt ::
           {:name, GenServer.name() | nil}
@@ -64,6 +69,7 @@ defmodule MingaAgent.StagedDraftKeeper do
           | {:scope, atom()}
           | {:owner_uid, non_neg_integer()}
           | {:max_file_bytes, pos_integer()}
+          | {:retry_ms, pos_integer()}
 
   # ── Client API ──────────────────────────────────────────────────────────
 
@@ -126,6 +132,7 @@ defmodule MingaAgent.StagedDraftKeeper do
     state = %{
       store_opts: store_opts,
       scope: Keyword.get(opts, :scope, @scope),
+      retry_ms: Keyword.get(opts, :retry_ms, @retry_ms),
       tracked: %{},
       pending: MapSet.new()
     }
@@ -172,6 +179,17 @@ defmodule MingaAgent.StagedDraftKeeper do
     if Map.has_key?(state.tracked, view_id),
       do: {:noreply, snapshot(state, view_id)},
       else: {:noreply, state}
+  end
+
+  def handle_info({:retry_snapshot, view_id}, state) do
+    case Map.get(state.tracked, view_id) do
+      nil ->
+        {:noreply, state}
+
+      tracked ->
+        state = put_tracked(state, %{tracked | retry_pending: false})
+        {:noreply, snapshot(state, view_id)}
+    end
   end
 
   def handle_info({:DOWN, ref, :process, _pid, reason}, state) do
@@ -259,7 +277,9 @@ defmodule MingaAgent.StagedDraftKeeper do
           changeset: changeset,
           monitor: monitor,
           written: written,
-          too_large: MapSet.new()
+          too_large: MapSet.new(),
+          retry_delay: nil,
+          retry_pending: false
         }
 
         {:ok, %{state | tracked: Map.put(state.tracked, view.id, tracked)}}
@@ -327,33 +347,60 @@ defmodule MingaAgent.StagedDraftKeeper do
     end
   end
 
+  # A snapshot that did not leave disk matching the staged drafts (a failed
+  # write, prune, or delete, or unreadable drafts) is retried with backoff, so
+  # a transient failure never waits for the next staged change.
   @spec snapshot(state(), view_id()) :: state()
   defp snapshot(state, view_id) do
     %{view: view, written: written} = tracked = Map.fetch!(state.tracked, view_id)
 
-    case Overlay.staged_drafts(view) do
-      {:ok, []} ->
-        delete_files(state, view)
-        put_written(state, tracked, %{})
+    {complete?, tracked} =
+      case Overlay.staged_drafts(view) do
+        {:ok, []} ->
+          {delete_files(state, view) == :ok, %{tracked | written: %{}}}
 
-      {:ok, drafts} ->
-        {written, tracked} = write_changed(state, tracked, drafts, written)
+        {:ok, drafts} ->
+          {written, tracked} = write_changed(state, tracked, drafts, written)
 
-        log_error(
-          StagedDrafts.prune(view.project_root, view.id, Map.keys(written), state.store_opts)
-        )
+          pruned =
+            log_error(
+              StagedDrafts.prune(view.project_root, view.id, Map.keys(written), state.store_opts)
+            )
 
-        put_written(state, tracked, written)
+          saved? = Enum.all?(written, fn {_path, digest} -> is_binary(digest) end)
+          {saved? and pruned == :ok, %{tracked | written: written}}
 
-      {:error, reason} ->
-        Minga.Log.debug(
-          :agent,
-          "Staged agent edits were not saved: #{inspect(Recovery.safe_reason(reason))}"
-        )
+        {:error, reason} ->
+          Minga.Log.debug(
+            :agent,
+            "Staged agent edits were not saved: #{inspect(Recovery.safe_reason(reason))}"
+          )
 
-        state
-    end
+          {false, tracked}
+      end
+
+    put_tracked(state, settle(state, tracked, complete?))
   end
+
+  @spec settle(state(), tracked(), boolean()) :: tracked()
+  defp settle(_state, tracked, true), do: %{tracked | retry_delay: nil}
+
+  defp settle(_state, %{retry_pending: true} = tracked, false), do: tracked
+
+  defp settle(state, tracked, false) do
+    delay =
+      case tracked.retry_delay do
+        nil -> state.retry_ms
+        previous -> min(previous * 2, @max_retry_ms)
+      end
+
+    Process.send_after(self(), {:retry_snapshot, tracked.view.id}, delay)
+    %{tracked | retry_delay: delay, retry_pending: true}
+  end
+
+  @spec put_tracked(state(), tracked()) :: state()
+  defp put_tracked(state, tracked),
+    do: %{state | tracked: Map.put(state.tracked, tracked.view.id, tracked)}
 
   @spec write_changed(state(), tracked(), [StagedDraft.t()], %{String.t() => binary() | nil}) ::
           {%{String.t() => binary() | nil}, tracked()}
@@ -382,10 +429,13 @@ defmodule MingaAgent.StagedDraftKeeper do
         mark_too_large(state, tracked, draft, digest)
 
       {:error, reason} ->
-        Minga.Log.warning(
-          :agent,
-          "Staged agent edit for #{display_path(draft.path)} could not be saved: #{inspect(Recovery.safe_reason(reason))}"
-        )
+        # Warn once per run of failures; retries stay quiet until a save succeeds.
+        if is_nil(tracked.retry_delay) do
+          Minga.Log.warning(
+            :agent,
+            "Staged agent edit for #{display_path(draft.path)} could not be saved, retrying: #{inspect(Recovery.safe_reason(reason))}"
+          )
+        end
 
         {nil, tracked}
     end
@@ -423,24 +473,21 @@ defmodule MingaAgent.StagedDraftKeeper do
     end
   end
 
-  @spec put_written(state(), tracked(), %{String.t() => binary() | nil}) :: state()
-  defp put_written(state, tracked, written) do
-    %{state | tracked: Map.put(state.tracked, tracked.view.id, %{tracked | written: written})}
-  end
-
-  @spec delete_files(state(), ProjectView.t()) :: :ok
+  @spec delete_files(state(), ProjectView.t()) :: :ok | {:error, term()}
   defp delete_files(state, %ProjectView{project_root: root, id: view_id}) do
     log_error(StagedDrafts.delete_view(root, view_id, state.store_opts))
   end
 
-  @spec log_error(:ok | {:error, term()}) :: :ok
+  @spec log_error(:ok | {:error, term()}) :: :ok | {:error, term()}
   defp log_error(:ok), do: :ok
 
-  defp log_error({:error, reason}) do
+  defp log_error({:error, reason} = error) do
     Minga.Log.warning(
       :agent,
       "Staged agent edit files could not be cleaned up: #{inspect(Recovery.safe_reason(reason))}"
     )
+
+    error
   end
 
   @spec display_path(String.t()) :: String.t()

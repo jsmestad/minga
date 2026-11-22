@@ -177,13 +177,40 @@ defmodule Minga.Session.StagedDraftsTest do
     assert File.exists?(file)
   end
 
-  test "leftover temporary files from an interrupted write are removed", %{opts: opts, root: root} do
-    :ok = StagedDrafts.write(root, "v", 1, StagedDraft.new("a", "base", "x"), opts)
-    tmp = StagedDrafts.draft_file(root, "v", "a", opts) <> ".7.tmp"
-    File.write!(tmp, "partial")
+  describe "temporary files" do
+    test "loading leaves the temporary file of a write in progress alone",
+         %{opts: opts, root: root} do
+      :ok = StagedDrafts.write(root, "v", 1, StagedDraft.new("a", "base", "x"), opts)
+      # Another writer is between writing its temporary file and renaming it.
+      tmp = StagedDrafts.draft_file(root, "v", "b", opts) <> ".7.tmp"
+      File.write!(tmp, "in flight")
 
-    assert [%{path: "a"}] = root |> load!(opts) |> drafts()
-    refute File.exists?(tmp)
+      assert [%{path: "a"}] = root |> load!(opts) |> drafts()
+      assert File.read!(tmp) == "in flight"
+    end
+
+    test "the view's owner removes leftover temporary files when it prunes",
+         %{opts: opts, root: root} do
+      :ok = StagedDrafts.write(root, "v", 1, StagedDraft.new("a", "base", "x"), opts)
+      tmp = StagedDrafts.draft_file(root, "v", "b", opts) <> ".7.tmp"
+      File.write!(tmp, "left over")
+
+      :ok = StagedDrafts.prune(root, "v", ["a"], opts)
+
+      refute File.exists?(tmp)
+      assert [%{path: "a"}] = root |> load!(opts) |> drafts()
+    end
+  end
+
+  test "deleting a view leaves the project directory another writer may be using",
+       %{opts: opts, root: root} do
+    :ok = StagedDrafts.write(root, "v", 1, StagedDraft.new("a", "base", "x"), opts)
+    project_dir = Path.dirname(StagedDrafts.view_dir(root, "v", opts))
+
+    :ok = StagedDrafts.delete_view(root, "v", opts)
+
+    assert File.dir?(project_dir)
+    assert :ok = StagedDrafts.write(root, "w", 1, StagedDraft.new("b", "base", "x"), opts)
   end
 
   describe "base_changed?/2" do

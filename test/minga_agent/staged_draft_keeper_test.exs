@@ -377,4 +377,33 @@ defmodule MingaAgent.StagedDraftKeeperTest do
       refute File.exists?(file)
     end
   end
+
+  describe "failed saves" do
+    test "a save that fails is retried without waiting for another staged change",
+         %{root: root, store: store} do
+      keeper = start_keeper(Keyword.put(store, :retry_ms, 60_000), :retrying)
+      {:ok, view} = ProjectView.overlay(root)
+
+      :ok = ProjectView.write_file(view, "lib/a.ex", "ONE\ntwo\nthree\n")
+
+      # A directory where the draft file belongs makes the save fail.
+      blocker = StagedDrafts.draft_file(root, view.id, "lib/a.ex", store)
+      File.mkdir_p!(Path.join(blocker, "occupied"))
+
+      StagedDraftKeeper.persist(keeper, view, 1)
+      :sys.get_state(keeper)
+      assert stored(root, store) == %{}
+
+      # The keeper's retry state is the behavior under test here.
+      assert %{retry_pending: true, written: %{"lib/a.ex" => nil}} =
+               :sys.get_state(keeper).tracked[view.id]
+
+      # The failed save scheduled a retry. Clear the obstacle, then deliver
+      # the retry timer's message instead of waiting for it.
+      File.rm_rf!(blocker)
+      send(keeper, {:retry_snapshot, view.id})
+
+      eventually(keeper, fn -> match?(%{{1, "lib/a.ex"} => _}, stored(root, store)) end)
+    end
+  end
 end

@@ -155,7 +155,11 @@ defmodule Minga.Session.StagedDrafts do
     end
   end
 
-  @doc "Deletes every stored draft of one view except the drafts for `keep_paths`."
+  @doc """
+  Deletes every stored draft of one view except the drafts for `keep_paths`, plus leftover temporary files.
+
+  Only the owner of the view (the process that writes its drafts) may call this, and never while one of its own writes is in progress: temporary files are removed here, not when loading, because a temporary file can belong to a write that is still running.
+  """
   @spec prune(String.t(), String.t(), [String.t()], keyword()) :: :ok | {:error, term()}
   def prune(project_root, view_id, keep_paths, opts \\ []) when is_list(keep_paths) do
     dir = view_dir(project_root, view_id, opts)
@@ -164,7 +168,7 @@ defmodule Minga.Session.StagedDrafts do
     case File.ls(dir) do
       {:ok, names} ->
         names
-        |> Enum.filter(&(String.ends_with?(&1, @extension) and not MapSet.member?(keep, &1)))
+        |> Enum.filter(&stale_name?(&1, keep))
         |> Enum.reduce(:ok, fn name, result ->
           first_error(result, remove_file(Path.join(dir, name)))
         end)
@@ -175,6 +179,12 @@ defmodule Minga.Session.StagedDrafts do
       {:error, _reason} = error ->
         error
     end
+  end
+
+  @spec stale_name?(String.t(), MapSet.t(String.t())) :: boolean()
+  defp stale_name?(name, keep) do
+    String.ends_with?(name, ".tmp") or
+      (String.ends_with?(name, @extension) and not MapSet.member?(keep, name))
   end
 
   @doc "Deletes the stored draft of one view for `path`. A missing file is not an error."
@@ -192,12 +202,15 @@ defmodule Minga.Session.StagedDrafts do
     end
   end
 
-  @doc "Deletes every stored draft of one view."
+  @doc """
+  Deletes every stored draft of one view.
+
+  The project directory is left in place, even when empty: removing it could race with another writer (another view, or another Minga instance) that has just checked it and is about to create its own view directory inside it.
+  """
   @spec delete_view(String.t(), String.t(), keyword()) :: :ok | {:error, term()}
   def delete_view(project_root, view_id, opts \\ []) do
     case File.rm_rf(view_dir(project_root, view_id, opts)) do
       {:ok, _removed} ->
-        _ = File.rmdir(project_dir(project_root, opts))
         :ok
 
       {:error, reason, _path} ->
@@ -218,7 +231,7 @@ defmodule Minga.Session.StagedDrafts do
   @doc """
   Loads every stored draft of a project, grouped by staging view.
 
-  A draft that can never be restored is returned as `{:lost, file, name, reason}`; one that cannot be read now is `{:retained, file, name, reason}`. `name` is the draft's path when the file still names it. Leftover temporary files from an interrupted write are incomplete and are removed. Returns `{:error, reason}` without reading anything when a store directory fails the privacy check.
+  A draft that can never be restored is returned as `{:lost, file, name, reason}`; one that cannot be read now is `{:retained, file, name, reason}`. `name` is the draft's path when the file still names it. Temporary files are skipped and left alone: one may belong to a write that is still in progress (`prune/4` removes leftovers for the view's owner). Returns `{:error, reason}` without reading anything when a store directory fails the privacy check.
   """
   @spec load(String.t(), keyword()) :: {:ok, [stored_view()]} | {:error, term()}
   def load(project_root, opts \\ []) when is_binary(project_root) do
@@ -301,17 +314,11 @@ defmodule Minga.Session.StagedDrafts do
           {entry(), String.t() | nil, non_neg_integer() | nil}
         ]
   defp load_entry(file, project_root, opts) do
-    cond do
-      String.ends_with?(file, ".tmp") ->
-        _ = File.rm(file)
-        []
-
-      String.ends_with?(file, @extension) ->
-        [read_entry(file, project_root, opts)]
-
-      true ->
-        []
-    end
+    # A temporary file may belong to a write that is still in progress, in
+    # this process or another; loading never touches it.
+    if String.ends_with?(file, @extension),
+      do: [read_entry(file, project_root, opts)],
+      else: []
   end
 
   @spec read_entry(String.t(), String.t(), keyword()) ::
