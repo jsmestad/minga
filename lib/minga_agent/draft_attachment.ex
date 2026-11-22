@@ -163,11 +163,29 @@ defmodule MingaAgent.DraftAttachment do
         {:error, reason}
 
       {:error, :storage_timeout} = abandoned ->
+        :ok = settle_abandoned(store, capture, key)
         abandoned
 
       {:error, _reason} = error ->
         _cancel = ArtifactStore.cancel(store, capture)
         error
+    end
+  end
+
+  # Only this function knows the random composer delivery key, so no later
+  # lookup can adopt a capture whose finish committed after the caller gave up.
+  # The cancel queues behind the stalled request. If the capture already became
+  # terminal, or the store is still stalled, the queued release removes the
+  # delivery pin once the late finish commits, leaving the artifact unpinned.
+  @spec settle_abandoned(GenServer.server(), Capture.t(), tuple()) :: :ok
+  defp settle_abandoned(store, %Capture{call_timeout: timeout} = capture, key) do
+    case ArtifactStore.cancel(store, capture) do
+      {:error, reason} when reason in [:capture_not_open, :storage_timeout] ->
+        _release = ArtifactStore.release(store, key, timeout)
+        :ok
+
+      _canceled_or_unknown ->
+        :ok
     end
   end
 end

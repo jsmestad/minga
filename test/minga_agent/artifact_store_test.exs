@@ -951,6 +951,36 @@ defmodule MingaAgent.ArtifactStoreTest do
     end
   end
 
+  test "a draft attachment whose finish commits after its bound leaves no pinned artifact", %{
+    tmp_dir: root
+  } do
+    test_pid = self()
+    stall = :atomics.new(1, [])
+    :atomics.put(stall, 1, 1)
+    injector = %{before_blob_rename: fn -> hold_while_armed(stall, test_pid) end}
+
+    {quota, store} =
+      start_pair_with_store_opts(root, "stalled-draft",
+        fault_injector: injector,
+        call_timeout: 50
+      )
+
+    baseline = ArtifactQuota.usage(quota)
+
+    assert {:error, :storage_timeout} =
+             DraftAttachment.capture_text(store, {:selection, "test.ex", "selection", "late"})
+
+    assert_receive {:stalled, store_pid}
+    :atomics.put(stall, 1, 0)
+    send(store_pid, :release)
+
+    # The late finish commits, then the queued abandon, cancel, and release run.
+    :sys.get_state(store)
+
+    assert {:ok, 1} = ArtifactStore.cleanup_unreferenced(store)
+    assert ArtifactQuota.usage(quota) == baseline
+  end
+
   test "SQLite commits fsync by default and skip it only when a caller opts out", %{
     tmp_dir: root
   } do

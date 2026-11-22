@@ -134,9 +134,18 @@ defmodule MingaAgent.ArtifactStore do
     GenServer.call(server, {:pin, pin_key, references, opts})
   end
 
-  @doc "Releases one complete pin set without deleting retained content."
-  @spec release(server(), PinKey.t() | tuple()) :: :ok | {:error, error_reason()}
-  def release(server, pin_key), do: GenServer.call(server, {:release, pin_key})
+  @doc """
+  Releases one complete pin set without deleting retained content.
+
+  Waits at most `timeout` milliseconds and then returns `{:error, :storage_timeout}`. A timed-out release stays queued, so the store still releases the pin set after the requests ahead of it.
+  """
+  @spec release(server(), PinKey.t() | tuple(), timeout()) :: :ok | {:error, error_reason()}
+  def release(server, pin_key, timeout \\ 5_000) do
+    GenServer.call(server, {:release, pin_key}, timeout)
+  catch
+    :exit, {:timeout, {GenServer, :call, _args}} -> {:error, :storage_timeout}
+  end
+
   @doc "Releases snapshot pins not named by the durable session JSON generation."
   @spec reconcile_snapshot_pins(server(), String.t() | nil) ::
           :ok | {:error, error_reason()}
