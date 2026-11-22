@@ -234,7 +234,7 @@ defmodule MingaEditor.AgentLifecycle do
       {:unchanged, cursor} ->
         reuse_transcript(state, projection, cursor)
 
-      {:changes, %Changes{entries: [], pins_changed?: false, cursor: cursor}} ->
+      {:changes, %Changes{entries: [], pin_changes: [], cursor: cursor}} ->
         reuse_transcript(state, projection, cursor)
 
       {:changes, %Changes{entries: entries}} ->

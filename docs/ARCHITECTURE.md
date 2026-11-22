@@ -963,15 +963,11 @@ carries creation, content and latest-change revisions. A `:gb_trees` index store
 one latest-revision/ordinal key per live entry, with no old payload journal.
 Append, streamed-tail replacement and targeted updates use indexed paths.
 
-`Session.transcript_since/2` is one atomic source query. `:snapshot` returns an
-ordered `Transcript.Snapshot`; an equal cursor returns `:unchanged` without entry
-traversal; an older same-generation cursor returns `Transcript.Changes` containing
-only coalesced current affected entries in ordinal order. Creation revisions
-distinguish appends from existing-entry revisions. Pins, usage and timestamps
-carry separate change flags; collapse/preview changes do not advance content
-revisions. Discovery costs O(log M + K), ordering O(K log K), indexed fetches
-O(K log M), plus processing of changed payloads. Explicit snapshot/list queries
-for providers, persistence and frozen branches remain O(M).
+`Session.transcript_since/2` is one atomic source query. `:snapshot` returns ordered entries and full pin membership. An equal cursor returns `:unchanged` without entry traversal. An older same-generation cursor returns `Transcript.Changes` with coalesced current affected entries in ordinal order. Creation revisions distinguish appends from existing-entry revisions. Collapse and preview changes do not advance content revisions.
+
+The delta carries only the latest pin fact for each affected active ID. It includes unpins and a positive fact when a previously pinned ID first becomes active. A new ID without a fact starts unpinned. The revision index seeks past older pin records instead of scanning the unchanged membership. Reset drops the pin index; the replacement snapshot includes the canonical pins. Usage and timestamp retain separate change flags.
+
+Entry discovery costs O(log M + K), with O(K log K) ordering and O(K log M) indexed fetches for K changed entries in M retained entries, plus processing of changed payloads. Discovery of Q pin facts costs O(log M + Q). Explicit snapshot and list queries for providers, persistence and frozen branches remain O(M).
 
 The Session runtime supplies a nonce to the pure constructor. Structural branch,
 compaction, restore/load and clear/reset transitions advance an exact generation

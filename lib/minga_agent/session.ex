@@ -6145,7 +6145,7 @@ defmodule MingaAgent.Session do
       {:unchanged, cursor} ->
         {:unchanged, cursor}
 
-      {:changes, %Transcript.Changes{entries: [], pins_changed?: false, cursor: cursor}} ->
+      {:changes, %Transcript.Changes{entries: [], pin_changes: [], cursor: cursor}} ->
         {:unchanged, cursor}
 
       {:changes, %Transcript.Changes{entries: entries}} ->
