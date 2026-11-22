@@ -35,7 +35,9 @@ defmodule MingaEditor.AgentLifecycle do
   alias MingaEditor.State.Tab
   alias MingaEditor.State.Tab.Agent
   alias MingaEditor.State.TabBar
+  alias MingaEditor.State.Workspace
   alias MingaEditor.TabWorkflow
+  alias MingaEditor.WorkspaceWorkflow
   @type state :: EditorState.t()
 
   # Maximum characters of tool call result to send for styled rendering.
@@ -204,14 +206,19 @@ defmodule MingaEditor.AgentLifecycle do
   Called as a surface effect when the agent view receives new messages.
   """
   @spec sync_transcript(state()) :: state()
-  def sync_transcript(state) do
+  def sync_transcript(state), do: sync_transcript(state, :refresh)
+
+  @doc "Refreshes the transcript for a render or a committed message change."
+  @spec sync_transcript(state(), :refresh | :messages_changed) :: state()
+  def sync_transcript(state, trigger) do
     session = MingaEditor.Shell.Runtime.active_session(state.shell_runtime)
 
-    sync_session_transcript(state, session)
+    sync_session_transcript(state, session, trigger)
   end
 
-  @spec sync_session_transcript(state(), pid() | nil) :: state()
-  defp sync_session_transcript(state, session) when is_pid(session) and node(session) == node() do
+  @spec sync_session_transcript(state(), pid() | nil, :refresh | :messages_changed) :: state()
+  defp sync_session_transcript(state, session, _trigger)
+       when is_pid(session) and node(session) == node() do
     projection = state.workspace.agent_ui.panel.transcript
 
     case AgentSession.transcript_since(session, projection.source_cursor || :snapshot) do
@@ -248,14 +255,22 @@ defmodule MingaEditor.AgentLifecycle do
     :exit, _ -> state
   end
 
-  defp sync_session_transcript(state, session) when is_pid(session) do
-    case safe_session_messages(session) do
-      {:ok, messages} -> cache_transcript(state, messages)
-      :dead_session -> state
+  defp sync_session_transcript(state, session, trigger) when is_pid(session) do
+    case {safe_session_messages(session), trigger} do
+      {{:ok, messages}, :messages_changed} ->
+        state
+        |> cache_transcript(messages)
+        |> apply_transcript_names(messages)
+
+      {{:ok, messages}, :refresh} ->
+        cache_transcript(state, messages)
+
+      {:dead_session, _trigger} ->
+        state
     end
   end
 
-  defp sync_session_transcript(state, nil), do: state
+  defp sync_session_transcript(state, nil, _trigger), do: state
 
   @spec recover_changed_files(state(), pid()) :: state()
   defp recover_changed_files(state, session) do
@@ -299,7 +314,9 @@ defmodule MingaEditor.AgentLifecycle do
         Keyword.put(opts, :first_run, first_run)
       )
 
-    report_transcript_sync(synced, outcome, previously_read + snapshot.count)
+    synced
+    |> apply_transcript_names(messages)
+    |> report_transcript_sync(outcome, previously_read + snapshot.count)
   end
 
   @spec reuse_transcript(state(), TranscriptProjection.t(), Cursor.t()) :: state()
@@ -560,28 +577,52 @@ defmodule MingaEditor.AgentLifecycle do
   defp advance_jump(nil), do: nil
   defp advance_jump(%ProvenanceJump{} = jump), do: ProvenanceJump.mark_landed(jump)
 
-  @doc """
-  Updates the active agent tab's label to the first user prompt (truncated).
+  @spec apply_transcript_names(state(), [term()]) :: state()
+  defp apply_transcript_names(state, []), do: state
 
-  Only updates if the current label is the default "New Agent" or "minga".
-  """
-  @spec maybe_update_tab_label(state()) :: state()
-  def maybe_update_tab_label(
-        %{shell_runtime: %{state: %{tab_bar: %{active_id: active_id} = tb}}} = state
-      ) do
-    session = MingaEditor.Shell.Runtime.active_session(state.shell_runtime)
+  defp apply_transcript_names(state, messages) do
+    state
+    |> maybe_rename_workspace_from_assistant(messages)
+    |> maybe_update_tab_label(messages)
+  end
 
-    with true <- is_pid(session),
-         %{kind: :agent, label: label} when is_binary(label) <- TabBar.active(tb),
-         true <- default_agent_label?(label) do
-      update_tab_from_session(state, tb, active_id, session)
+  @spec maybe_rename_workspace_from_assistant(state(), [term()]) :: state()
+  defp maybe_rename_workspace_from_assistant(
+         %{shell_runtime: %{state: %{tab_bar: %TabBar{} = tab_bar}}} = state,
+         messages
+       ) do
+    with session when is_pid(session) <- Runtime.active_session(state.shell_runtime),
+         %Workspace{custom_name: nil, id: id} <-
+           TabBar.find_workspace_by_session(tab_bar, session),
+         text when is_binary(text) <- first_assistant_opening(messages) do
+      WorkspaceWorkflow.install_auto_named_workspace(state, id, text)
     else
-      _ -> state
+      _unavailable -> state
     end
   end
 
-  # No tab_bar (e.g., an extension shell) — nothing to update.
-  def maybe_update_tab_label(state), do: state
+  defp maybe_rename_workspace_from_assistant(state, _messages), do: state
+
+  @spec maybe_update_tab_label(state(), [term()]) :: state()
+  defp maybe_update_tab_label(
+         %{shell_runtime: %{state: %{tab_bar: %TabBar{active_id: active_id} = tab_bar}}} = state,
+         messages
+       ) do
+    with %Tab{kind: :agent, label: label} when is_binary(label) <- TabBar.active(tab_bar),
+         true <- default_agent_label?(label),
+         text when is_binary(text) <- first_user_message(messages) do
+      tab_bar = TabBar.update_label(tab_bar, active_id, truncate_label(text, 30))
+
+      shell =
+        MingaEditor.Shell.Traditional.State.install_tab_bar(state.shell_runtime.state, tab_bar)
+
+      %{state | shell_runtime: Runtime.install_traditional_state(state.shell_runtime, shell)}
+    else
+      _unavailable -> state
+    end
+  end
+
+  defp maybe_update_tab_label(state, _messages), do: state
 
   # ── Private helpers ──────────────────────────────────────────────────────
 
@@ -611,39 +652,6 @@ defmodule MingaEditor.AgentLifecycle do
     end
   end
 
-  @spec update_tab_from_session(state(), TabBar.t(), Tab.id(), pid()) :: state()
-  defp update_tab_from_session(state, tb, active_id, session) do
-    # Session may be dead before :DOWN is processed (same race as sync_transcript).
-    # Empty list from catch is safe here: first_user_message([]) returns nil.
-    messages =
-      try do
-        AgentSession.messages(session)
-      catch
-        :exit, _ -> []
-      end
-
-    case first_user_message(messages) do
-      nil ->
-        state
-
-      text ->
-        label = truncate_label(text, 30)
-
-        shell_state = MingaEditor.Shell.Runtime.state(state.shell_runtime)
-        tab_bar = MingaEditor.State.TabBar.update_label(tb, active_id, label)
-        shell_state = MingaEditor.Shell.Traditional.State.install_tab_bar(shell_state, tab_bar)
-
-        %{
-          state
-          | shell_runtime:
-              MingaEditor.Shell.Runtime.install_traditional_state(
-                state.shell_runtime,
-                shell_state
-              )
-        }
-    end
-  end
-
   @spec update_preview(state(), (Preview.t() -> Preview.t())) :: state()
   defp update_preview(state, fun) do
     MingaEditor.Shell.Traditional.Workflow.install_agent_ui(
@@ -655,6 +663,7 @@ defmodule MingaEditor.AgentLifecycle do
   end
 
   @spec default_agent_label?(String.t()) :: boolean()
+  defp default_agent_label?("Agent"), do: true
   defp default_agent_label?("New Agent"), do: true
   defp default_agent_label?("minga"), do: true
   defp default_agent_label?(_), do: false
@@ -665,6 +674,17 @@ defmodule MingaEditor.AgentLifecycle do
       {:user, text} -> text
       {:user, text, _attachments} -> text
       _ -> nil
+    end)
+  end
+
+  @spec first_assistant_opening([term()]) :: String.t() | nil
+  defp first_assistant_opening(messages) do
+    Enum.find_value(messages, fn
+      {:assistant, text} when is_binary(text) and text != "" ->
+        text |> String.split("\n", parts: 2) |> hd() |> String.trim()
+
+      _message ->
+        nil
     end)
   end
 

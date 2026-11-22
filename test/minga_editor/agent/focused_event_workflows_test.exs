@@ -87,26 +87,35 @@ defmodule MingaEditor.Agent.FocusedEventWorkflowsTest do
     assert RenderCorrelation.scheduled?(state.render.render_correlation)
   end
 
-  test "stream workflow directly orders render, transcript synchronization, and label refresh" do
+  test "changed transcript names the Agent tab and workspace without another Session read" do
     {:ok, session} = start_supervised({Session, provider_opts: []})
 
     :ok =
-      Session.seed_messages(session, [{:assistant, "Summarize focused workflows\nMore detail"}])
+      Session.seed_messages(session, [
+        {:user, "Find the first failing check\nMore detail"},
+        {:assistant, "Summarize focused workflows\nMore detail"}
+      ])
 
     state = event_state(session)
-
+    :erlang.trace(session, true, [:receive, {:tracer, self()}])
     state = StreamEventWorkflow.messages_changed(state)
+    trace_barrier = :erlang.trace_delivered(session)
+    assert_receive {:trace_delivered, ^session, ^trace_barrier}
+    refute_received {:trace, ^session, :receive, {:"$gen_call", _from, :messages}}
 
-    assert RenderCorrelation.scheduled?(state.render.render_correlation)
-    assert state.workspace.agent_ui.panel.transcript.messages != []
-    assert state.workspace.agent_ui.panel.transcript.version == 1
+    tabs = TraditionalState.tab_bar(state.shell_runtime.state)
+    assert %Tab{label: "Find the first failing check"} = TabBar.active(tabs)
 
-    workspace =
-      state.shell_runtime.state
-      |> TraditionalState.tab_bar()
-      |> TabBar.find_workspace_by_session(session)
+    assert %Workspace{label: "Summarize focused workflows", id: workspace_id} =
+             TabBar.find_workspace_by_session(tabs, session)
 
-    assert %Workspace{label: "Summarize focused workflows", custom_name: nil} = workspace
+    # An unchanged sync leaves names added independently of transcript updates alone.
+    state = WorkspaceWorkflow.install_tab_bar(state, TabBar.update_label(tabs, 1, "Agent"))
+    state = WorkspaceWorkflow.install_auto_named_workspace(state, workspace_id, "Queued next")
+    state = StreamEventWorkflow.messages_changed(state)
+    tabs = TraditionalState.tab_bar(state.shell_runtime.state)
+    assert %Tab{label: "Agent"} = TabBar.active(tabs)
+    assert %Workspace{label: "Queued next"} = TabBar.find_workspace_by_session(tabs, session)
   end
 
   test "session workflow auto-names the active session workspace from queued prompts" do
