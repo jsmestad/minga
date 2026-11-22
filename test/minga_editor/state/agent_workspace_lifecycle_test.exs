@@ -816,7 +816,7 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
   test "closing a file tab preserves workspace file membership until workspace close" do
     {:ok, _session_id, session} = SessionManager.start_session([])
     on_exit(fn -> stop_session(session) end)
-    {state, workspace_id, file_ref} = state_with_active_agent_workspace(session)
+    {state, workspace_id, file_ref} = state_with_active_agent_workspace(session, "")
     state = MingaEditor.TabWorkflow.switch(state, 1)
 
     state = BufferManagement.execute(state, :force_quit)
@@ -1282,10 +1282,11 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
     end)
   end
 
-  defp state_with_active_agent_workspace(session) when is_pid(session) do
+  defp state_with_active_agent_workspace(session, draft \\ "restart draft")
+       when is_pid(session) do
     state = state_with_tabs()
     file_ref = FileRef.from_buffer(state.workspace.buffers.active)
-    ui = UIState.new() |> put_prompt("restart draft") |> show_panel()
+    ui = UIState.new() |> put_prompt(draft) |> show_panel()
 
     {tab_bar, agent_tab} = TabBar.add(state.shell_runtime.state.tab_bar, :agent, "Agent")
     {tab_bar, workspace} = TabBar.add_workspace(tab_bar, "Agent", session)

@@ -64,10 +64,13 @@ public struct AgentChatView: View {
             })
             .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { headerHeight = $0 }
 
-            // Messages: a separate view so composer frames do not re-evaluate it.
-            AgentConversationList(state: state, sendAction: sendAction)
+            if state.lifecycle == .conversation {
+                AgentConversationList(state: state, sendAction: sendAction)
+            } else {
+                lifecycleNotice
+            }
 
-            if let question = state.question {
+            if state.lifecycle == .conversation, let question = state.question {
                 HStack(spacing: Spacing.md) {
                     Text(question.prompt)
                         .lineLimit(2)
@@ -82,14 +85,16 @@ public struct AgentChatView: View {
             }
 
             // Prompt (completion popup + input capsule)
-            AgentPromptView(state: state, isInsertMode: isInsertMode, sendAction: childAction { [generation = state.promptPresentation, offer = state.draftAttachmentOffer] action in
-                switch action {
-                case .submit: .composerSubmit(generation: generation, offer: offer)
-                case .queue(let followUp, let target): .composerQueue(generation: generation, offer: offer, followUp: followUp, target: target)
-                case .abort(let target): .stopTurn(target)
-                case .attachments: .executeCommand(name: "agent_draft_attachments")
-                }
-            }, maximumHeight: max(0, availableHeight - headerHeight))
+            if state.lifecycle == .conversation || state.promptVisibleRows > 0 {
+                AgentPromptView(state: state, isInsertMode: isInsertMode, sendAction: childAction { [generation = state.promptPresentation, offer = state.draftAttachmentOffer] action in
+                    switch action {
+                    case .submit: .composerSubmit(generation: generation, offer: offer)
+                    case .queue(let followUp, let target): .composerQueue(generation: generation, offer: offer, followUp: followUp, target: target)
+                    case .abort(let target): .stopTurn(target)
+                    case .attachments: .executeCommand(name: "agent_draft_attachments")
+                    }
+                }, maximumHeight: max(0, availableHeight - headerHeight))
+            }
         }
         .backgroundPreferenceValue(AgentPromptApertureKey.self) { aperture in
             GeometryReader { geometry in
@@ -103,6 +108,31 @@ public struct AgentChatView: View {
         }
         .coordinateSpace(name: "agentChat")
         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { availableHeight = $0 }
+    }
+
+    private var lifecycleNotice: some View {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            switch state.lifecycle {
+            case .conversation:
+                EmptyView()
+            case .starting:
+                Text("Starting Agent").font(.headline)
+            case .failed(let reason):
+                Text("Agent unavailable").font(.headline)
+                Text(reason)
+                if state.promptVisibleRows == 0 {
+                    Text("Switch away from this tab and return to reopen the composer.")
+                } else {
+                    Text("Start a new Agent session (SPC a n).")
+                }
+            case .unavailable:
+                Text("Agent unavailable").font(.headline)
+                Text("Start a new Agent session (SPC a n), then reopen the conversation in Sessions.")
+            }
+        }
+        .fixedSize(horizontal: false, vertical: true)
+        .padding(Spacing.lg)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
     private func childAction<ChildAction: Sendable>(_ translate: @escaping @Sendable (ChildAction) -> Action) -> ViewActionHandler<ChildAction>? {

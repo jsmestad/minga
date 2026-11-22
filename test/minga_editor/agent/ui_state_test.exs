@@ -2,6 +2,7 @@ defmodule MingaEditor.Agent.UIStateTest do
   use ExUnit.Case, async: true
 
   alias Minga.Buffer.Process, as: BufferProcess
+  alias MingaAgent.Session.{ConnectionSnapshot, ConnectionTarget}
   alias MingaEditor.Agent.Transcript
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.UIState.Panel
@@ -18,6 +19,52 @@ defmodule MingaEditor.Agent.UIStateTest do
     ui
     |> put_in([Access.key(:panel), Access.key(:prompt_history)], history)
     |> put_in([Access.key(:panel), Access.key(:history_index)], index)
+  end
+
+  test "every lifecycle transition preserves the same live draft and prompt cursor" do
+    initial = ui_with_input(["unfinished", "café"], {1, 3})
+    states = [:starting, {:conversation, self()}, {:failed, "startup failed"}, :unavailable]
+
+    for from <- states, to <- states do
+      ui = initial |> UIState.transition_chat(from) |> UIState.transition_chat(to)
+      assert ui.chat_lifecycle == to
+      assert MingaEditor.Agent.PromptBuffer.input_text(ui) == "unfinished\ncafé"
+      assert MingaEditor.Agent.PromptBuffer.input_cursor(ui) == {1, 3}
+      assert ui.panel.prompt_buffer == initial.panel.prompt_buffer
+    end
+  end
+
+  test "a provider startup failure reports the Session reason and keeps the draft until ready" do
+    session = self()
+
+    starting = %ConnectionSnapshot{
+      target: ConnectionTarget.new(session, "session", nil, make_ref()),
+      credential_readiness: :configured,
+      model_selection: nil,
+      provider_phase: :starting,
+      operation: :idle,
+      problem: nil
+    }
+
+    ui = UIState.project_connection(ui_with_input(["keep draft"], {0, 5}), starting)
+    assert ui.chat_lifecycle == :starting
+
+    failed =
+      ui
+      |> UIState.project_connection(%{starting | problem: {:provider, :startup_failed}})
+      |> UIState.report_chat_start_failure("Could not start the configured provider")
+
+    assert failed.chat_lifecycle == {:failed, "Could not start the configured provider"}
+    assert MingaEditor.Agent.PromptBuffer.input_text(failed) == "keep draft"
+
+    ready =
+      failed
+      |> UIState.project_connection(%{starting | provider_phase: :running})
+      |> UIState.report_chat_start_failure("An unrelated turn failed")
+
+    assert ready.chat_lifecycle == {:conversation, session}
+    assert MingaEditor.Agent.PromptBuffer.input_text(ready) == "keep draft"
+    assert MingaEditor.Agent.PromptBuffer.input_cursor(ready) == {0, 5}
   end
 
   describe "new/0 and basic state" do

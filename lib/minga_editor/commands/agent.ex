@@ -389,21 +389,15 @@ defmodule MingaEditor.Commands.Agent do
   defp ensure_agent_tab(state) do
     case find_agent_tab(state) do
       nil ->
-        # Build complete context with all @per_tab_fields populated.
-        context =
-          MingaEditor.State.Tab.Context.new_agent(
+        tab_bar = state.shell_runtime.state.tab_bar || TabBar.new(Tab.new_file(1, "File"))
+
+        {tb, new_tab} =
+          MingaEditor.TabWorkflow.insert_agent(
+            tab_bar,
+            "Agent",
             state.frontend.terminal_viewport,
             state.workspace.file_tree.project_root
           )
-
-        tab_bar = state.shell_runtime.state.tab_bar || TabBar.new(Tab.new_file(1, "File"))
-        original_active_id = tab_bar.active_id
-        {tb, new_tab} = TabBar.add(tab_bar, :agent, "Agent")
-
-        tb =
-          tb
-          |> TabBar.update_context(new_tab.id, context)
-          |> TabBar.switch_to(original_active_id)
 
         install_owned_agent_tab(state, tb, new_tab.id)
 
@@ -471,11 +465,10 @@ defmodule MingaEditor.Commands.Agent do
 
   @spec activate_agent_view(state(), UIState.View.return_target()) :: state()
   defp activate_agent_view(state, return_target) do
-    update_agent_ui(state, fn ui ->
-      ui
-      |> UIState.activate(return_target.windows, return_target.file_tree, return_target)
-      |> PromptBuffer.ensure()
-    end)
+    update_agent_ui(
+      state,
+      &UIState.activate(&1, return_target.windows, return_target.file_tree, return_target)
+    )
   end
 
   @doc "Reveals an already resolved Agent tab without toggling it or starting a session."
@@ -1498,20 +1491,26 @@ defmodule MingaEditor.Commands.Agent do
       |> UIState.set_thinking_level(thinking_level)
       |> UIState.toggle()
       |> UIState.activate(state.workspace.windows, state.workspace.file_tree)
+      |> retain_arrived_composer(state.workspace.agent_ui.panel.prompt_buffer)
 
     TraditionalWorkflow.install_agent_ui(state, agent_ui)
   end
 
+  @spec retain_arrived_composer(UIState.t(), pid() | nil) :: UIState.t()
+  defp retain_arrived_composer(ui, pid) when is_pid(pid),
+    do: UIState.attach_prompt_buffer(ui, pid)
+
+  defp retain_arrived_composer(ui, nil), do: ui
+
   @spec create_active_agent_tab(state()) :: state()
   defp create_active_agent_tab(%{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state) do
-    context =
-      MingaEditor.State.Tab.Context.new_agent(
+    {tb, tab} =
+      MingaEditor.TabWorkflow.insert_agent(
+        tb,
+        "Agent",
         state.frontend.terminal_viewport,
         state.workspace.file_tree.project_root
       )
-
-    {tb, tab} = TabBar.insert(tb, :agent, "Agent")
-    tb = TabBar.update_context(tb, tab.id, context)
 
     shell_state =
       MingaEditor.Shell.Traditional.State.install_tab_bar(

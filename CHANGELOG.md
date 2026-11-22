@@ -19,6 +19,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - `SPC a D` or the macOS editor context menu captures a file's published diagnostics as an inspectable Agent draft attachment.
 - The Agent can pause for a question. Use **Answer question** or `SPC a Q` to choose an answer, type your own, or cancel without granting tool permission.
 - Agent chat keeps Send, Steer, Queue Next, and Stop in fixed positions on macOS and in the terminal. Steer and Queue Next act on the displayed saved conversation and appear disabled when that action is unavailable.
+- Agent tabs show their conversation, a starting message, or the reason the chat is unavailable. A failed start keeps the current draft. Returning to an Agent tab restores its composer, including when the previous composer closed unexpectedly.
 - Successful rolling builds from `main` publish Apple Silicon packages to the Minga Homebrew tap. Use `brew upgrade minga` for the TUI or `brew upgrade --cask minga-mac` for the GUI.
 
 ### Changed

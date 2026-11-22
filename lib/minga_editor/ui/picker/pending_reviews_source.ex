@@ -63,7 +63,14 @@ defmodule MingaEditor.UI.Picker.PendingReviewsSource do
   defp switch_to_restored_workspace(state, tab_bar, workspace_id) do
     case TabBar.get_workspace(tab_bar, workspace_id) do
       %Workspace{} = workspace ->
-        {tab_bar, tab} = TabBar.insert(tab_bar, :agent, workspace.label)
+        {tab_bar, tab} =
+          MingaEditor.TabWorkflow.insert_agent(
+            tab_bar,
+            workspace.label,
+            state.frontend.terminal_viewport,
+            workspace.project_root
+          )
+
         tab_bar = TabBar.move_tab_to_workspace(tab_bar, tab.id, workspace_id)
 
         shell_state =

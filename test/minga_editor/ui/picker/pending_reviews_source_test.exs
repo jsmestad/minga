@@ -168,6 +168,9 @@ defmodule MingaEditor.UI.Picker.PendingReviewsSourceTest do
       assert tab.payload.agent_status == :thinking
       assert tab.payload.server_name == "home"
       assert tab.payload.remote_session_id == "session-1"
+
+      assert %{visible?: true, lifecycle: :unavailable, prompt: ""} =
+               Minga.Test.AgentWorkflowDriver.chat_model(switched)
     end
 
     test "switches to the selected workspace" do

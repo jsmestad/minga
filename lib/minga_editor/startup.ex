@@ -364,8 +364,12 @@ defmodule MingaEditor.Startup do
   """
   @spec initial_tab_bar(pid() | nil, atom(), String.t() | nil) :: TabBar.t()
   def initial_tab_bar(_active_buf, :agent, project_root) do
-    TabBar.new(Tab.new_agent(1, "Agent"), project_root)
-    |> restore_persisted_workspaces(project_root)
+    tabs =
+      TabBar.new(Tab.new_agent(1, "Agent"), project_root)
+      |> restore_persisted_workspaces(project_root)
+
+    {tabs, workspace} = TabBar.add_workspace(tabs, "Agent")
+    TabBar.move_tab_to_workspace(tabs, 1, workspace.id)
   end
 
   def initial_tab_bar(nil, _scope, project_root) do

@@ -1458,6 +1458,72 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
       assert Runtime.active_session(finished.shell_runtime) == session
     end
 
+    test "a deferred Agent start finishes in its departed workspace without taking focus" do
+      state = with_catalog_scheduler(source_workspace_state())
+      tabs = state.shell_runtime.state.tab_bar
+      source_id = tabs.active_id
+
+      {tabs, tab} =
+        MingaEditor.TabWorkflow.insert_agent(
+          tabs,
+          "Starting",
+          state.frontend.terminal_viewport,
+          nil
+        )
+
+      {tabs, workspace} = TabBar.add_workspace(tabs, "Starting")
+
+      pending =
+        state
+        |> install_tab_bar(TabBar.move_tab_to_workspace(tabs, tab.id, workspace.id))
+        |> MingaEditor.TabWorkflow.switch(tab.id)
+
+      pending =
+        MingaEditor.Shell.Traditional.Workflow.install_agent_ui(
+          pending,
+          MingaEditor.Agent.PromptBuffer.set_prompt_text(
+            pending.workspace.agent_ui,
+            "draft before leaving"
+          )
+        )
+        |> CatalogStartup.defer({:start, false, false})
+
+      departed = MingaEditor.TabWorkflow.switch(pending, source_id)
+
+      assert_receive {:effect_result, scheduler, %Outcome{value: {:completed, :ready}} = outcome},
+                     20_000
+
+      assert :ok = EffectScheduler.claim(scheduler, outcome)
+
+      failure = Outcome.failed(outcome.request, :model_catalog_unavailable)
+      {failed, ^failure} = CatalogStartup.apply(departed, failure)
+      assert Runtime.active_tab(failed.shell_runtime).id == source_id
+
+      failed = MingaEditor.TabWorkflow.switch(failed, tab.id)
+
+      assert %{
+               visible?: true,
+               lifecycle: {:failed, "Could not load the Agent model catalog."},
+               prompt: "draft before leaving"
+             } =
+               Minga.Test.AgentWorkflowDriver.chat_model(failed)
+
+      {started, ^outcome} = CatalogStartup.apply(departed, outcome)
+      EffectScheduler.finalize(scheduler, outcome)
+      assert Runtime.active_tab(started.shell_runtime).id == source_id
+
+      {^started, %Outcome{value: {:stale, :agent_origin_changed}}} =
+        CatalogStartup.apply(started, outcome)
+
+      returned = MingaEditor.TabWorkflow.switch(started, tab.id)
+      session = Runtime.active_session(returned.shell_runtime)
+      assert is_pid(session)
+      on_exit(fn -> MingaAgent.SessionManager.stop_session_by_pid(session) end)
+
+      assert %{visible?: true, lifecycle: :conversation, prompt: "draft before leaving"} =
+               Minga.Test.AgentWorkflowDriver.chat_model(returned)
+    end
+
     test "a pending file-to-Agent toggle keeps the file editable and can retry after failure" do
       state = with_catalog_scheduler(source_workspace_state())
       file = state.workspace.buffers.active

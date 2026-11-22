@@ -76,7 +76,8 @@ defmodule MingaEditor.Shell.Traditional do
       {shell_state, workspace}
     else
       label = MingaAgent.Subagent.Handle.label(handle)
-      {tb, tab} = TabBar.insert(tb, :agent, label)
+      context = background_agent_context(workspace, viewport)
+      {tb, tab} = MingaEditor.TabWorkflow.insert_agent(tb, label, context)
 
       tab = Tab.mark_background_subagent(tab, handle)
       {tb, agent_workspace} = TabBar.add_workspace(tb, label, handle.pid)
@@ -88,8 +89,6 @@ defmodule MingaEditor.Shell.Traditional do
         |> TabBar.move_tab_to_workspace(tab.id, agent_workspace.id)
         |> TabBar.accept_workspace(agent_workspace)
 
-      context = background_agent_context(workspace, viewport)
-      tb = TabBar.update_context(tb, tab.id, context)
       {ShellState.install_tab_bar(shell_state, tb), workspace}
     end
   end
@@ -391,6 +390,10 @@ defmodule MingaEditor.Shell.Traditional do
       ) do
     tab_bar =
       case TabBar.find_workspace_by_session(tab_bar, session_pid) do
+        %Workspace{payload: %WorkspaceAgent{remote_session: %{connection_status: status}}}
+        when status != :connected ->
+          tab_bar
+
         %Workspace{payload: %WorkspaceAgent{agent_ui: %UIState{} = ui}} = owner ->
           updated = Workspace.set_agent_ui(owner, UIState.project_connection(ui, connection))
           TabBar.accept_workspace(tab_bar, updated)

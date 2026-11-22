@@ -622,6 +622,11 @@ type GuiAgentChatQueueTarget struct {
 	Sequence  uint64
 }
 
+type GuiAgentChatLifecycle struct {
+	Kind   uint8
+	Reason string
+}
+
 type GuiPickerPreviewHeader struct {
 	Visible uint8
 	Kind    uint8
