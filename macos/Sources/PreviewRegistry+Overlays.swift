@@ -67,6 +67,39 @@ extension PreviewRegistry {
         .environment(theme)
     }
 
+    /// Model rows lead with readiness and plan usage and keep that start; the long path row keeps its file name.
+    static func pickerModelRowsPreview() -> some View {
+        let theme = PreviewFixtures.theme()
+        let state = PickerState()
+        let keepStart: UInt8 = 0x05
+        state.update(
+            visible: true,
+            selectedIndex: 0,
+            filteredCount: 4,
+            totalCount: 4,
+            markedCount: 0,
+            title: "Choose Model",
+            query: "",
+            hasPreview: false,
+            rawItems: [
+                Wire.PickerItem(iconColor: 0, flags: keepStart, label: "Claude Opus 4.5", description: "Claude subscription · Ready (Claude Max) · 70% of 5h limit · resets 2:50 PM · 200k ctx · thinking medium (low/medium/high) · tools yes, images yes, streaming yes · subscription", annotation: "", matchPositions: []),
+                Wire.PickerItem(iconColor: 0, flags: keepStart, label: "Claude Sonnet 4.5", description: "Claude subscription · Ready (Claude Max) · 70% of 5h limit · resets Sun 12:32 AM · 200k ctx · thinking fixed · tools yes, images yes, streaming yes · subscription", annotation: "★ favorite", matchPositions: []),
+                Wire.PickerItem(iconColor: 0, flags: keepStart, label: "Use Claude subscription", description: "Uses the Claude app login. Minga never sees your login. · Ready: Claude Max", annotation: "", matchPositions: []),
+                Wire.PickerItem(iconColor: 0x98BE65, flags: 0x01, label: "\u{f0e7}picker_item_row_test.exs", description: "test/minga_editor/render_model/ui/picker/agent_model_source/description_overflow/picker_item_row_test.exs", annotation: "", matchPositions: []),
+            ],
+            actionMenu: nil,
+            modePrefix: ""
+        )
+
+        return ZStack {
+            theme.editorBg
+            PickerOverlay(state: state, sendAction: { _ in })
+        }
+        .frame(width: 680, height: 400)
+        .clipped()
+        .environment(theme)
+    }
+
     // MARK: - MinibufferView
 
     static func minibufferPreview() -> some View {

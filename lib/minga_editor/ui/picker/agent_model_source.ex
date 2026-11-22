@@ -176,7 +176,8 @@ defmodule MingaEditor.UI.Picker.AgentModelSource do
       label: action.label,
       description: "#{action.description} · #{setup_readiness(status)}",
       search_text: "#{action.label} #{spec.display_name} setup",
-      two_line: true
+      two_line: true,
+      description_overflow: :keep_start
     }
   end
 
@@ -374,6 +375,7 @@ defmodule MingaEditor.UI.Picker.AgentModelSource do
       annotation: if(candidate.favorite, do: "★ favorite", else: nil),
       search_text: "#{route_name} #{route.model_provider} #{route.model_id}",
       two_line: true,
+      description_overflow: :keep_start,
       active: candidate.current
     }
   end
@@ -410,6 +412,7 @@ defmodule MingaEditor.UI.Picker.AgentModelSource do
       search_text:
         "#{route.model_provider} #{route.model_id} #{route.execution.wire_protocol} #{endpoint} #{credential}",
       two_line: true,
+      description_overflow: :keep_start,
       active: candidate.current
     }
   end

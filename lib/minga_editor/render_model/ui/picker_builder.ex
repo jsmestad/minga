@@ -194,7 +194,8 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilder do
   defp item_flags(item, marked?) do
     two_line = if item.two_line, do: 1, else: 0
     marked = if marked?, do: 1, else: 0
-    bor(two_line, marked <<< 1)
+    keep_start = if item.description_overflow == :keep_start, do: 1, else: 0
+    two_line |> bor(marked <<< 1) |> bor(keep_start <<< 2)
   end
 
   @spec action_menu_model(term(), ActivationOffer.t()) :: ActionMenu.t() | nil

@@ -231,8 +231,31 @@ struct PickerStateLifecycleTests {
         #expect(state.items[0].isMarked == false)
         #expect(state.items[0].matchPositions == [0, 3])
         #expect(state.items[1].isMarked == true)
+        #expect(state.items[0].keepsDescriptionStart == false)
+        #expect(state.items[1].keepsDescriptionStart == false)
         #expect(state.actionMenu != nil)
         #expect(state.actionMenu?.actions == ["Open", "Split"])
+    }
+
+    @Test("update() keeps a status description's start only when the BEAM marks it")
+    @MainActor func updateCarriesDescriptionOverflow() {
+        let state = PickerState()
+        let raw = [
+            Wire.PickerItem(iconColor: 0, flags: 0x05, label: "Claude Opus 4.5",
+                         description: "Claude subscription · Ready (Claude Max) · 70% of 5h limit · resets 2:50 PM",
+                         annotation: "", matchPositions: []),
+            Wire.PickerItem(iconColor: 0, flags: 0x01, label: "editor.ex",
+                         description: "lib/minga/editor.ex", annotation: "", matchPositions: [])
+        ]
+
+        state.update(visible: true, selectedIndex: 0, filteredCount: 2,
+                     totalCount: 2, markedCount: 0, title: "Choose Model", query: "",
+                     hasPreview: false, rawItems: raw, actionMenu: nil, modePrefix: "")
+
+        #expect(state.items[0].keepsDescriptionStart == true)
+        #expect(state.items[0].isTwoLine == true)
+        #expect(state.items[0].isMarked == false)
+        #expect(state.items[1].keepsDescriptionStart == false)
     }
 
     @Test("updatePreview() converts styled segments")

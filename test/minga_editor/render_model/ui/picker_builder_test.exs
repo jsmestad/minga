@@ -130,6 +130,7 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilderTest do
         annotation: "enter",
         icon_color: 0x123456,
         two_line: true,
+        description_overflow: :keep_start,
         match_positions: [0, 2]
       }
 
@@ -168,13 +169,13 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilderTest do
       assert model.action_menu.actions == ["Open"]
       assert model.action_menu.activation_ids == [2]
       assert model.action_menu.selected_index == 0
-      # The builder emits wire-shaped item maps: flags packs two_line (bit 0)
-      # and marked (bit 1), description/annotation default to "", icon_color
+      # The builder emits wire-shaped item maps: flags packs two_line (bit 0),
+      # marked (bit 1), and keep_description_start (bit 2), description/annotation default to "", icon_color
       # defaults to 0, and match_positions are preserved exactly.
       assert [
                %{
                  icon_color: 0x123456,
-                 flags: 3,
+                 flags: 7,
                  label: "One",
                  description: "First result",
                  annotation: "enter",

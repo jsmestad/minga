@@ -26,6 +26,8 @@ public struct PickerOverlay: View {
 
     private let panelWidth: CGFloat = 600
     private let itemHeight: CGFloat = 24
+    /// Status rows stack their description under the label so readiness and plan usage get the full row width.
+    private let stackedItemHeight: CGFloat = 40
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @AccessibilityFocusState private var accessibilityFocus: PickerAccessibilityFocus?
@@ -44,7 +46,7 @@ public struct PickerOverlay: View {
                         Divider()
                             .overlay(theme.popupBorder.opacity(0.3))
 
-                        let totalItemsHeight = CGFloat(state.items.count) * itemHeight
+                        let totalItemsHeight = state.items.reduce(CGFloat(0)) { $0 + rowHeight($1) }
                         let maxHeight = geo.size.height * 0.4
                         let listHeight = min(totalItemsHeight, max(maxHeight, 120))
                         resultsList(maxListHeight: listHeight)
@@ -235,7 +237,7 @@ public struct PickerOverlay: View {
                                         item: item,
                                         isSelected: item.id == state.effectiveSelectedIndex,
                                         query: state.query,
-                                        itemHeight: itemHeight
+                                        itemHeight: rowHeight(item)
                                     )
                                     .contentShape(Rectangle())
                                 }
@@ -366,6 +368,10 @@ public struct PickerOverlay: View {
         }
     }
 
+    private func rowHeight(_ item: PickerItem) -> CGFloat {
+        PickerItemRow.stacksDescription(item) ? stackedItemHeight : itemHeight
+    }
+
     private func pickerItemAccessibilityValue(_ item: PickerItem) -> String {
         var values: [String] = []
         values.append(item.id == state.effectiveSelectedIndex ? "selected" : "available")
@@ -437,18 +443,34 @@ private struct PickerItemRow: View {
 
     @Environment(\.themeColors) private var theme
 
+    /// A description whose start carries the meaning gets its own line; a path stays inline and keeps its end.
+    static func stacksDescription(_ item: PickerItem) -> Bool {
+        item.keepsDescriptionStart && !item.description.isEmpty
+    }
+
     var body: some View {
         HStack(spacing: Spacing.sm) {
             itemCheckmark
             itemIcon
-            highlightedLabel
+            if Self.stacksDescription(item) {
+                VStack(alignment: .leading, spacing: Spacing.hairline) {
+                    HStack(spacing: Spacing.sm) {
+                        highlightedLabel
+                        Spacer(minLength: 4)
+                        itemAnnotation
+                    }
+                    highlightedDescription
+                }
+            } else {
+                highlightedLabel
 
-            if !item.description.isEmpty {
-                highlightedDescription
+                if !item.description.isEmpty {
+                    highlightedDescription
+                }
+
+                Spacer(minLength: 4)
+                itemAnnotation
             }
-
-            Spacer(minLength: 4)
-            itemAnnotation
         }
         .padding(.horizontal, Spacing.md)
         .frame(height: itemHeight)
@@ -533,7 +555,7 @@ private struct PickerItemRow: View {
                 .font(Typography.font(.body))
                 .foregroundStyle(fg)
                 .lineLimit(1)
-                .truncationMode(.head)
+                .truncationMode(descriptionTruncation)
         } else {
             Text(TextHighlighting.attributedString(
                 desc,
@@ -544,8 +566,13 @@ private struct PickerItemRow: View {
                 matchColor: Color(theme.accent)
             ))
             .lineLimit(1)
-            .truncationMode(.head)
+            .truncationMode(descriptionTruncation)
         }
+    }
+
+    /// Paths keep their end (the file name); status text keeps its start (readiness and usage).
+    private var descriptionTruncation: Text.TruncationMode {
+        item.keepsDescriptionStart ? .tail : .head
     }
 
     // MARK: - Helpers

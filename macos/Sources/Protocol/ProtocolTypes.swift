@@ -569,7 +569,7 @@ public enum Wire {
     /// A picker item from gui_picker (v2 extended format).
     public struct PickerItem: Sendable {
         public let iconColor: UInt32  // 24-bit RGB
-        public let flags: UInt8       // bit 0: two_line, bit 1: marked
+        public let flags: UInt8       // bit 0: two_line, bit 1: marked, bit 2: keep_description_start
         public let label: String
         public let description: String
         public let annotation: String
@@ -578,6 +578,7 @@ public enum Wire {
 
         public var isTwoLine: Bool { flags & 0x01 != 0 }
         public var isMarked: Bool { flags & 0x02 != 0 }
+        public var keepsDescriptionStart: Bool { flags & 0x04 != 0 }
 
         public init(iconColor: UInt32, flags: UInt8, label: String, description: String, annotation: String, matchPositions: [UInt16], activationID: UInt32 = 0) {
             self.iconColor = iconColor

@@ -23,6 +23,10 @@ defmodule MingaEditor.UI.Picker.Item do
     label, computed during fuzzy filtering for rendering highlights
   - `:two_line` — when true, renders description on a second line below the label
     instead of inline. Used by file/buffer pickers for path display.
+  - `:description_overflow` — which end of the description a frontend keeps when
+    the description does not fit. `:keep_end` (the default) suits paths, where the
+    file name at the end matters most. `:keep_start` suits status text that leads
+    with the important facts, such as a model row's readiness and plan usage.
   - `:active` — when true, marks this item as the currently active selection
     (e.g. the current thinking level). The centered picker renderer draws a
     `●` indicator for active items and blank padding for inactive siblings.
@@ -42,9 +46,13 @@ defmodule MingaEditor.UI.Picker.Item do
     search_text: "",
     match_positions: [],
     two_line: false,
+    description_overflow: :keep_end,
     active: false,
     meta: %{}
   ]
+
+  @typedoc "Which end of the description survives when a frontend must shorten it."
+  @type description_overflow :: :keep_end | :keep_start
 
   @type t :: %__MODULE__{
           id: term(),
@@ -55,6 +63,7 @@ defmodule MingaEditor.UI.Picker.Item do
           search_text: String.t(),
           match_positions: [non_neg_integer()],
           two_line: boolean(),
+          description_overflow: description_overflow(),
           active: boolean(),
           meta: map()
         }
