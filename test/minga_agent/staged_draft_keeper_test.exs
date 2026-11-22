@@ -4,6 +4,7 @@ defmodule MingaAgent.StagedDraftKeeperTest do
   import ExUnit.CaptureLog
 
   alias Minga.Buffer.Process, as: BufferProcess
+  alias Minga.Session.StagedDraft
   alias Minga.Session.StagedDrafts
   alias MingaAgent.ProjectView
   alias MingaAgent.ProjectView.Overlay
@@ -532,6 +533,68 @@ defmodule MingaAgent.StagedDraftKeeperTest do
 
       assert recovery.changes |> Enum.map(& &1.path) |> Enum.sort() ==
                ["lib/a.ex", "lib/b.ex", "lib/new.ex", "old.txt"]
+    end
+  end
+
+  describe "a view another instance took over" do
+    # This instance (`first`) is still running, but the other instance judged
+    # it gone and claimed its view.
+    setup %{root: root, store: store} do
+      first = %{os_pid: 301, started: "Sun Nov 22 11:00:00 2026"}
+      second = %{os_pid: 302, started: "Sun Nov 22 11:05:00 2026"}
+      running = start_supervised!({Agent, fn -> MapSet.new([first, second]) end})
+      alive? = fn owner -> Agent.get(running, &MapSet.member?(&1, owner)) end
+
+      keeper = start_keeper([instance: first, instance_alive?: alive?] ++ store, :took_over)
+      {:ok, view} = ProjectView.overlay(root)
+      StagedDraftKeeper.persist(keeper, view, 1)
+      :ok = ProjectView.write_file(view, "lib/a.ex", "ONE\ntwo\nthree\n")
+      eventually(keeper, fn -> map_size(stored(root, store)) == 1 end)
+
+      dir = StagedDrafts.view_dir(root, view.id, store)
+      :ok = StagedDrafts.claim_view_dir(dir, second, fn _owner -> false end, store)
+      theirs = StagedDraft.new("lib/theirs.ex", nil, "theirs\n")
+      :ok = StagedDrafts.write(root, view.id, 1, theirs, store)
+
+      %{took_over_keeper: keeper, view: view, dir: dir, second: second}
+    end
+
+    # Whether the keeper still tracks the view is the behavior under test.
+    defp tracks?(keeper, view), do: Map.has_key?(:sys.get_state(keeper).tracked, view.id)
+
+    test "is neither saved into nor pruned, and the loss is logged once",
+         %{root: root, store: store, took_over_keeper: keeper, view: view, dir: dir} = context do
+      log =
+        capture_log(fn ->
+          :ok = ProjectView.write_file(view, "lib/b.ex", "alpha\nBETA\n")
+          eventually(keeper, fn -> not tracks?(keeper, view) end)
+          :ok = ProjectView.write_file(view, "lib/b.ex", "alpha\nBETA!\n")
+          :sys.get_state(keeper)
+        end)
+
+      assert log |> String.split("kept by another Minga instance") |> length() == 2
+
+      assert Map.keys(stored(root, store)) |> Enum.sort() == [
+               {1, "lib/a.ex"},
+               {1, "lib/theirs.ex"}
+             ]
+
+      assert StagedDrafts.check_view_claim(dir, context.second, fn _ -> true end) == :ok
+    end
+
+    test "is not deleted when this instance publishes it",
+         %{root: root, store: store, took_over_keeper: keeper, view: view, dir: dir} do
+      ref = Process.monitor(Overlay.changeset_pid(view))
+      assert ProjectView.promote(view, :project_root) == :ok
+      assert_receive {:DOWN, ^ref, :process, _, :normal}, 2_000
+      eventually(keeper, fn -> not tracks?(keeper, view) end)
+
+      assert File.dir?(dir)
+
+      assert Map.keys(stored(root, store)) |> Enum.sort() == [
+               {1, "lib/a.ex"},
+               {1, "lib/theirs.ex"}
+             ]
     end
   end
 end

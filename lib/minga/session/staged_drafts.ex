@@ -27,6 +27,7 @@ defmodule Minga.Session.StagedDrafts do
   @extension ".json"
   @retired ".retired"
   @owner_file "owner"
+  @aside ".aside"
   @owner_format "minga-staged-draft-owner"
   @max_owner_bytes 4096
   @claim_attempts 3
@@ -218,7 +219,9 @@ defmodule Minga.Session.StagedDrafts do
   @doc """
   Claims the view stored in `dir` (from `view_dir/3`, or a loaded view) for `owner`.
 
-  Returns `:ok` when `owner` already holds the claim, when the view has no owner, or when its owner is gone (`alive?` returns `false`, or the record is unreadable). Returns `{:error, :owned}` while another instance that is still running holds it. The record is created atomically (hard link of a complete file), and a stale record is moved aside before it is replaced, so two instances that take over the same stale view never both succeed.
+  Returns `:ok` when `owner` already holds the claim, when the view has no owner, or when its owner is gone (`alive?` returns `false`, or the record is unreadable). Returns `{:error, :owned}` while another instance that is still running holds it. The record is created atomically (hard link of a complete file), and a stale record is moved aside (`owner.<n>.aside`, a name `prune/4` never removes) before it is replaced, so two instances that take over the same stale view never both succeed. A moved record that turns out to be another instance's fresh claim is put back; if that fails, it stays aside, and every later claim yields to it while its owner runs.
+
+  `opts[:link]` replaces `File.ln/2`, for tests.
   """
   @spec claim_view_dir(String.t(), owner(), owner_alive?(), keyword()) ::
           :ok | {:error, :owned | term()}
@@ -227,7 +230,32 @@ defmodule Minga.Session.StagedDrafts do
     with {:ok, uid} <- owner_uid(opts),
          :ok <- File.mkdir_p(Path.dirname(dir(opts))),
          :ok <- all_ok([dir(opts), Path.dirname(dir), dir], &create_private(&1, uid)) do
-      claim(Path.join(dir, @owner_file), owner, alive?, @claim_attempts)
+      context = %{
+        dir: dir,
+        file: Path.join(dir, @owner_file),
+        owner: owner,
+        alive?: alive?,
+        link: Keyword.get(opts, :link, &File.ln/2)
+      }
+
+      claim(context, @claim_attempts)
+    end
+  end
+
+  @doc """
+  Checks, without creating anything, that `owner` may still change the view stored in `dir`.
+
+  Returns `:ok` when `owner` holds the claim, when the view has no owner record, or when its recorded owner is gone; `{:error, :owned}` when another instance that is still running holds it. Call it before deleting files of a view claimed earlier: another instance may have taken the view over since.
+  """
+  @spec check_view_claim(String.t(), owner(), owner_alive?()) :: :ok | {:error, :owned | term()}
+  def check_view_claim(dir, %{os_pid: _, started: _} = owner, alive?)
+      when is_binary(dir) and is_function(alive?, 1) do
+    case read_owner(Path.join(dir, @owner_file)) do
+      {:ok, {:owner, ^owner, _bytes}} -> :ok
+      {:ok, {:owner, other, _bytes}} -> if alive?.(other), do: {:error, :owned}, else: :ok
+      {:ok, {:invalid, _content}} -> :ok
+      {:error, :enoent} -> :ok
+      {:error, _reason} = error -> error
     end
   end
 
@@ -244,36 +272,42 @@ defmodule Minga.Session.StagedDrafts do
     end
   end
 
-  @spec claim(String.t(), owner(), owner_alive?(), non_neg_integer()) ::
-          :ok | {:error, :owned | term()}
-  defp claim(_file, _owner, _alive?, 0), do: {:error, :claim_contended}
+  @typep claim_context :: %{
+           dir: String.t(),
+           file: String.t(),
+           owner: owner(),
+           alive?: owner_alive?(),
+           link: (String.t(), String.t() -> :ok | {:error, term()})
+         }
 
-  defp claim(file, owner, alive?, attempts) do
-    case create_owner(file, owner) do
-      :ok -> :ok
-      {:error, :eexist} -> claim_existing(file, owner, alive?, attempts)
-      {:error, :enoent} -> claim(file, owner, alive?, attempts - 1)
+  @spec claim(claim_context(), non_neg_integer()) :: :ok | {:error, :owned | term()}
+  defp claim(_context, 0), do: {:error, :claim_contended}
+
+  defp claim(context, attempts) do
+    case create_owner(context) do
+      :ok -> settle_asides(context)
+      {:error, :eexist} -> claim_existing(context, attempts)
+      {:error, :enoent} -> claim(context, attempts - 1)
       {:error, _reason} = error -> error
     end
   end
 
-  @spec claim_existing(String.t(), owner(), owner_alive?(), pos_integer()) ::
-          :ok | {:error, :owned | term()}
-  defp claim_existing(file, owner, alive?, attempts) do
-    case read_owner(file) do
+  @spec claim_existing(claim_context(), pos_integer()) :: :ok | {:error, :owned | term()}
+  defp claim_existing(%{owner: owner} = context, attempts) do
+    case read_owner(context.file) do
       {:ok, {:owner, ^owner, _bytes}} ->
         :ok
 
       {:ok, {:owner, other, _bytes} = record} ->
-        if alive?.(other),
+        if context.alive?.(other),
           do: {:error, :owned},
-          else: take_over(file, record, owner, alive?, attempts)
+          else: take_over(context, record, attempts)
 
       {:ok, {:invalid, _content} = record} ->
-        take_over(file, record, owner, alive?, attempts)
+        take_over(context, record, attempts)
 
       {:error, :enoent} ->
-        claim(file, owner, alive?, attempts - 1)
+        claim(context, attempts - 1)
 
       {:error, _reason} = error ->
         error
@@ -282,34 +316,93 @@ defmodule Minga.Session.StagedDrafts do
 
   # Moves the stale record aside, then claims again. If another instance
   # replaced the stale record first, the moved file is that instance's fresh
-  # claim: it is put back, and the view stays theirs.
-  @spec take_over(String.t(), owner_record(), owner(), owner_alive?(), pos_integer()) ::
+  # claim: it is put back, and the view stays theirs. A record that cannot be
+  # put back is never deleted; it stays aside for `settle_asides/1`.
+  @spec take_over(claim_context(), owner_record(), pos_integer()) ::
           :ok | {:error, :owned | term()}
-  defp take_over(file, stale, owner, alive?, attempts) do
-    aside = "#{file}.#{System.unique_integer([:positive, :monotonic])}.tmp"
+  defp take_over(%{file: file} = context, stale, attempts) do
+    aside = "#{file}.#{System.unique_integer([:positive, :monotonic])}#{@aside}"
 
     case File.rename(file, aside) do
       :ok ->
         if read_owner(aside) == {:ok, stale} do
           _ = File.rm(aside)
-          claim(file, owner, alive?, attempts - 1)
+          claim(context, attempts - 1)
         else
-          _ = File.ln(aside, file)
-          _ = File.rm(aside)
-          {:error, :owned}
+          put_back(context, aside)
         end
 
       {:error, :enoent} ->
-        claim(file, owner, alive?, attempts - 1)
+        claim(context, attempts - 1)
 
       {:error, _reason} = error ->
         error
     end
   end
 
+  @spec put_back(claim_context(), String.t()) :: {:error, :owned}
+  defp put_back(context, aside) do
+    case context.link.(aside, context.file) do
+      :ok -> _ = File.rm(aside)
+      {:error, _reason} -> :ok
+    end
+
+    {:error, :owned}
+  end
+
+  # A new claim yields to a record left aside by a failed put-back while that
+  # record's owner runs. Aside records that are this owner's, unreadable, or
+  # of an owner that is gone are removed.
+  @spec settle_asides(claim_context()) :: :ok | {:error, :owned}
+  defp settle_asides(%{dir: dir} = context) do
+    names =
+      case File.ls(dir) do
+        {:ok, names} -> Enum.filter(names, &String.ends_with?(&1, @aside))
+        {:error, _reason} -> []
+      end
+
+    Enum.reduce_while(names, :ok, fn name, :ok ->
+      case settle_aside(context, Path.join(dir, name)) do
+        :ok -> {:cont, :ok}
+        {:error, :owned} = owned -> {:halt, owned}
+      end
+    end)
+  end
+
+  @spec settle_aside(claim_context(), String.t()) :: :ok | {:error, :owned}
+  defp settle_aside(%{owner: owner} = context, aside) do
+    case read_owner(aside) do
+      {:ok, {:owner, ^owner, _bytes}} ->
+        _ = File.rm(aside)
+        :ok
+
+      {:ok, {:owner, other, _bytes}} ->
+        if context.alive?.(other), do: yield(context, aside), else: remove_aside(aside)
+
+      {:ok, {:invalid, _content}} ->
+        remove_aside(aside)
+
+      {:error, _reason} ->
+        :ok
+    end
+  end
+
+  @spec remove_aside(String.t()) :: :ok
+  defp remove_aside(aside) do
+    _ = File.rm(aside)
+    :ok
+  end
+
+  # Gives the just-created claim back to the running owner of `aside`.
+  @spec yield(claim_context(), String.t()) :: {:error, :owned}
+  defp yield(context, aside) do
+    _ = File.rm(context.file)
+    put_back(context, aside)
+  end
+
   # A hard link publishes a complete record and fails when one exists.
-  @spec create_owner(String.t(), owner()) :: :ok | {:error, term()}
-  defp create_owner(file, %{os_pid: os_pid, started: started}) do
+  @spec create_owner(claim_context()) :: :ok | {:error, term()}
+  defp create_owner(%{file: file, owner: %{os_pid: os_pid, started: started}} = context) do
     tmp = "#{file}.#{System.unique_integer([:positive, :monotonic])}.tmp"
 
     json =
@@ -322,7 +415,7 @@ defmodule Minga.Session.StagedDrafts do
 
     result =
       with :ok <- write_private(tmp, json) do
-        File.ln(tmp, file)
+        context.link.(tmp, file)
       end
 
     _ = File.rm(tmp)

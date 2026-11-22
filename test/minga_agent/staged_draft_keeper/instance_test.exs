@@ -14,6 +14,13 @@ defmodule MingaAgent.StagedDraftKeeper.InstanceTest do
     assert Instance.alive?(instance)
   end
 
+  test "the identity reads the same in every time zone" do
+    tokyo = Instance.current([{"TZ", "Asia/Tokyo"}])
+
+    assert Instance.current([{"TZ", "America/Denver"}]) == tokyo
+    assert Instance.alive?(tokyo, [{"TZ", "America/Denver"}])
+  end
+
   test "a reused process id with another start time is not the recorded instance" do
     refute Instance.alive?(%{Instance.current() | started: "Thu Jan  1 00:00:00 1970"})
   end

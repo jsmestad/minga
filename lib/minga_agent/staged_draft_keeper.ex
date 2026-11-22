@@ -369,10 +369,15 @@ defmodule MingaAgent.StagedDraftKeeper do
   # Deletes a published or discarded view's drafts. A failure stays pending
   # and is retried with backoff; the warning is given once per run of
   # failures. The view's tombstone keeps it from being offered meanwhile.
+  # A view that another running instance has taken over is its to delete.
   @spec retire(state(), String.t()) :: state()
   defp retire(state, dir) do
-    case StagedDrafts.retire_view_dir(dir) do
-      :ok ->
+    with :ok <- StagedDrafts.check_view_claim(dir, state.instance, state.instance_alive?),
+         :ok <- StagedDrafts.retire_view_dir(dir) do
+      %{state | deletes: Map.delete(state.deletes, dir)}
+    else
+      {:error, :owned} ->
+        ceded_warning()
         %{state | deletes: Map.delete(state.deletes, dir)}
 
       {:error, reason} ->
@@ -382,6 +387,28 @@ defmodule MingaAgent.StagedDraftKeeper do
         Process.send_after(self(), {:retry_delete, dir}, delay)
         %{state | deletes: Map.put(state.deletes, dir, delay)}
     end
+  end
+
+  # Another instance took the view over (it judged this one gone): this
+  # instance stops saving the view and never deletes its files.
+  @spec cede(state(), tracked()) :: state()
+  defp cede(state, %{view: %ProjectView{id: view_id}} = tracked) do
+    Process.demonitor(tracked.monitor, [:flush])
+    ceded_warning()
+
+    %{
+      state
+      | tracked: Map.delete(state.tracked, view_id),
+        pending: MapSet.delete(state.pending, view_id)
+    }
+  end
+
+  @spec ceded_warning() :: :ok
+  defp ceded_warning do
+    Minga.Log.warning(
+      :agent,
+      "Staged agent edits are now kept by another Minga instance; this instance leaves their saved files alone."
+    )
   end
 
   # ── Snapshots ───────────────────────────────────────────────────────────
@@ -402,65 +429,101 @@ defmodule MingaAgent.StagedDraftKeeper do
   # a transient failure never waits for the next staged change.
   @spec snapshot(state(), view_id()) :: state()
   defp snapshot(state, view_id) do
-    %{view: view, written: written} = tracked = Map.fetch!(state.tracked, view_id)
+    tracked = Map.fetch!(state.tracked, view_id)
+
+    case save_snapshot(state, tracked) do
+      {:lost, tracked} -> cede(state, tracked)
+      {:complete, tracked} -> put_tracked(state, settle(state, tracked, true))
+      {:incomplete, tracked} -> put_tracked(state, settle(state, tracked, false))
+    end
+  end
+
+  @typep snapshot_outcome :: {:complete | :incomplete | :lost, tracked()}
+
+  # The claim is checked before every write and every deletion: another
+  # instance may have taken the view over since this one claimed it.
+  @spec save_snapshot(state(), tracked()) :: snapshot_outcome()
+  defp save_snapshot(state, %{view: view} = tracked) do
     # Warn once per run of failures; retries stay quiet until a save succeeds.
     warn? = is_nil(tracked.retry_delay)
 
-    {complete?, tracked} =
-      case Overlay.staged_drafts(view) do
-        {:ok, []} ->
-          # The view directory goes, with its owner record.
+    case Overlay.staged_drafts(view) do
+      {:ok, []} ->
+        # The view directory goes, with its owner record.
+        with :ok <- check_claim(state, tracked, warn?) do
           deleted = StagedDrafts.delete_view(view.project_root, view.id, state.store_opts)
-          {cleaned_up?(deleted, warn?), %{tracked | written: %{}, owned: false}}
+          outcome(cleaned_up?(deleted, warn?), %{tracked | written: %{}, owned: false})
+        end
 
-        {:ok, drafts} ->
-          case claim(state, tracked, warn?) do
-            {:ok, tracked} -> save(state, tracked, drafts, written, warn?)
-            {:error, tracked} -> {false, tracked}
-          end
+      {:ok, drafts} ->
+        with {:ok, tracked} <- claim(state, tracked, warn?) do
+          save(state, tracked, drafts, warn?)
+        end
 
-        {:error, reason} ->
-          Minga.Log.debug(
-            :agent,
-            "Staged agent edits were not saved: #{inspect(Recovery.safe_reason(reason))}"
-          )
+      {:error, reason} ->
+        Minga.Log.debug(
+          :agent,
+          "Staged agent edits were not saved: #{inspect(Recovery.safe_reason(reason))}"
+        )
 
-          {false, tracked}
-      end
-
-    put_tracked(state, settle(state, tracked, complete?))
+        {:incomplete, tracked}
+    end
   end
 
-  @spec save(state(), tracked(), [StagedDraft.t()], %{String.t() => binary() | nil}, boolean()) ::
-          {boolean(), tracked()}
-  defp save(state, %{view: view} = tracked, drafts, written, warn?) do
-    {written, tracked} = write_changed(state, tracked, drafts, written)
-    pruned = StagedDrafts.prune(view.project_root, view.id, Map.keys(written), state.store_opts)
-    saved? = Enum.all?(written, fn {_path, digest} -> is_binary(digest) end)
-    {saved? and cleaned_up?(pruned, warn?), %{tracked | written: written}}
+  @spec save(state(), tracked(), [StagedDraft.t()], boolean()) :: snapshot_outcome()
+  defp save(state, %{view: view} = tracked, drafts, warn?) do
+    {written, tracked} = write_changed(state, tracked, drafts, tracked.written)
+    tracked = %{tracked | written: written}
+
+    with :ok <- check_claim(state, tracked, warn?) do
+      pruned = StagedDrafts.prune(view.project_root, view.id, Map.keys(written), state.store_opts)
+      saved? = Enum.all?(written, fn {_path, digest} -> is_binary(digest) end)
+      outcome(saved? and cleaned_up?(pruned, warn?), tracked)
+    end
   end
+
+  @spec outcome(boolean(), tracked()) :: snapshot_outcome()
+  defp outcome(true, tracked), do: {:complete, tracked}
+  defp outcome(false, tracked), do: {:incomplete, tracked}
 
   # Drafts are written only into a view directory this instance has claimed.
-  @spec claim(state(), tracked(), boolean()) :: {:ok, tracked()} | {:error, tracked()}
-  defp claim(_state, %{owned: true} = tracked, _warn?), do: {:ok, tracked}
+  # A view claimed earlier is checked again, without taking anything over.
+  @spec claim(state(), tracked(), boolean()) :: {:ok, tracked()} | snapshot_outcome()
+  defp claim(state, %{owned: true} = tracked, warn?) do
+    with :ok <- check_claim(state, tracked, warn?), do: {:ok, tracked}
+  end
 
   defp claim(state, %{view: view} = tracked, warn?) do
     dir = StagedDrafts.view_dir(view.project_root, view.id, state.store_opts)
 
     case StagedDrafts.claim_view_dir(dir, state.instance, state.instance_alive?, state.store_opts) do
-      :ok ->
-        {:ok, %{tracked | owned: true}}
-
-      {:error, reason} ->
-        if warn? do
-          Minga.Log.warning(
-            :agent,
-            "Staged agent edits could not be saved, retrying: #{inspect(Recovery.safe_reason(reason))}"
-          )
-        end
-
-        {:error, tracked}
+      :ok -> {:ok, %{tracked | owned: true}}
+      {:error, reason} -> claim_failed(tracked, reason, warn?)
     end
+  end
+
+  @spec check_claim(state(), tracked(), boolean()) :: :ok | snapshot_outcome()
+  defp check_claim(state, %{view: view} = tracked, warn?) do
+    dir = StagedDrafts.view_dir(view.project_root, view.id, state.store_opts)
+
+    case StagedDrafts.check_view_claim(dir, state.instance, state.instance_alive?) do
+      :ok -> :ok
+      {:error, reason} -> claim_failed(tracked, reason, warn?)
+    end
+  end
+
+  @spec claim_failed(tracked(), term(), boolean()) :: snapshot_outcome()
+  defp claim_failed(tracked, :owned, _warn?), do: {:lost, tracked}
+
+  defp claim_failed(tracked, reason, warn?) do
+    if warn? do
+      Minga.Log.warning(
+        :agent,
+        "Staged agent edits could not be saved, retrying: #{inspect(Recovery.safe_reason(reason))}"
+      )
+    end
+
+    {:incomplete, tracked}
   end
 
   @spec settle(state(), tracked(), boolean()) :: tracked()

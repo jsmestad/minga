@@ -266,6 +266,45 @@ defmodule Minga.Session.StagedDraftsTest do
       assert StagedDrafts.claim_view_dir(dir, @second, fn _ -> true end, opts) == :ok
     end
 
+    test "a taken-over record that cannot be put back is kept aside, and later claims yield to it",
+         %{opts: opts, root: root, dir: dir} do
+      third = %{os_pid: 13, started: "third"}
+      fourth = %{os_pid: 14, started: "fourth"}
+      :ok = StagedDrafts.claim_view_dir(dir, @first, fn _ -> true end, opts)
+      file = Path.join(dir, "owner")
+
+      # A third instance replaces the stale record between this claimer's
+      # read and its takeover, and putting its record back fails.
+      alive? = fn
+        @first ->
+          File.write!(file, owner_json(third))
+          false
+
+        owner ->
+          owner == third
+      end
+
+      failing_put_back = fn source, target ->
+        if String.ends_with?(source, ".aside"), do: {:error, :eio}, else: File.ln(source, target)
+      end
+
+      assert StagedDrafts.claim_view_dir(dir, @second, alive?, [link: failing_put_back] ++ opts) ==
+               {:error, :owned}
+
+      refute File.exists?(file)
+      assert [aside] = dir |> File.ls!() |> Enum.filter(&String.ends_with?(&1, ".aside"))
+      assert File.read!(Path.join(dir, aside)) == owner_json(third)
+
+      # The owner's prune leaves the moved record alone.
+      :ok = StagedDrafts.prune(root, "v", [], opts)
+      assert File.exists?(Path.join(dir, aside))
+
+      # A later claim gives the view back to the running third instance.
+      assert StagedDrafts.claim_view_dir(dir, fourth, &(&1 == third), opts) == {:error, :owned}
+      assert StagedDrafts.check_view_claim(dir, third, fn _ -> true end) == :ok
+      refute dir |> File.ls!() |> Enum.any?(&String.ends_with?(&1, ".aside"))
+    end
+
     test "the owner record is not a draft", %{opts: opts, root: root, dir: dir} do
       :ok = StagedDrafts.claim_view_dir(dir, @first, fn _ -> true end, opts)
       :ok = StagedDrafts.write(root, "v", 1, StagedDraft.new("a", "base", "x"), opts)
@@ -287,6 +326,15 @@ defmodule Minga.Session.StagedDraftsTest do
       refute StagedDraft.base_changed?(created, {:error, :enoent})
       assert StagedDraft.base_changed?(created, {:ok, "someone made it"})
     end
+  end
+
+  defp owner_json(%{os_pid: os_pid, started: started}) do
+    JSON.encode!(%{
+      "format" => "minga-staged-draft-owner",
+      "version" => 1,
+      "os_pid" => os_pid,
+      "started" => started
+    })
   end
 
   defp mode(path), do: Bitwise.band(File.stat!(path).mode, 0o777)
