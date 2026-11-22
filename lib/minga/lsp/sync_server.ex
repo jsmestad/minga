@@ -751,8 +751,13 @@ defmodule Minga.LSP.SyncServer do
     {sl, sc, el, ec, delta.inserted_text}
   end
 
+  @doc """
+  Returns the document URI language servers know `buffer_pid` by, or `nil` for a buffer without a file.
+
+  The URI is built from the name the buffer was opened with, so a buffer opened through a symlink is known by the link path, not the path the link names. Every request about an open buffer must use this URI.
+  """
   @spec buffer_uri(pid()) :: String.t() | nil
-  defp buffer_uri(buffer_pid) do
+  def buffer_uri(buffer_pid) when is_pid(buffer_pid) do
     case Buffer.file_path(buffer_pid) do
       nil -> nil
       path -> path_to_uri(path)

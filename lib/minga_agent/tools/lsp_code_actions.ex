@@ -37,24 +37,23 @@ defmodule MingaAgent.Tools.LspCodeActions do
     col = Keyword.get(opts, :col, 0)
     apply_action = Keyword.get(opts, :apply, nil)
 
-    case LspBridge.client_for_path(abs_path) do
-      {:ok, client} -> do_code_actions(client, context, abs_path, path, line, col, apply_action)
+    case LspBridge.document_for_path(abs_path) do
+      {:ok, document} -> do_code_actions(document, context, path, line, col, apply_action)
       {:error, reason} -> {:error, reason}
     end
   end
 
   @spec do_code_actions(
-          pid(),
+          LspBridge.document(),
           ToolContext.t(),
-          String.t(),
           String.t(),
           non_neg_integer(),
           non_neg_integer(),
           term()
         ) ::
           {:ok, String.t()} | {:error, String.t()}
-  defp do_code_actions(client, context, abs_path, path, line, col, apply_action) do
-    case fetch_actions(client, abs_path, line, col, Client.encoding(client)) do
+  defp do_code_actions(%{client: client} = document, context, path, line, col, apply_action) do
+    case fetch_actions(document, line, col, Client.encoding(client)) do
       {:ok, []} ->
         {:ok, "No code actions available at #{Path.basename(path)}:#{line + 1}"}
 
@@ -73,16 +72,14 @@ defmodule MingaAgent.Tools.LspCodeActions do
   # ── Private: fetch ─────────────────────────────────────────────────────────
 
   @spec fetch_actions(
-          pid(),
-          String.t(),
+          LspBridge.document(),
           non_neg_integer(),
           non_neg_integer(),
           Minga.LSP.PositionEncoding.encoding()
         ) ::
           {:ok, [map()]} | {:error, String.t()}
-  defp fetch_actions(client, abs_path, line, col, encoding) do
-    uri = LspBridge.path_to_uri(abs_path)
-    position = LspBridge.position_params(abs_path, line, col, encoding)["position"]
+  defp fetch_actions(%{client: client, uri: uri} = document, line, col, encoding) do
+    position = LspBridge.position_params(document, line, col, encoding)["position"]
 
     range = %{
       "start" => position,

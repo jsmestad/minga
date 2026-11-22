@@ -2,15 +2,14 @@ defmodule MingaAgent.Tools.LspBridge do
   @moduledoc """
   Shared LSP lookup infrastructure for agent tools.
 
-  Encapsulates the file-path-to-LSP-client lookup chain that all agent
-  LSP tools need. It projects decoded locations to paths and adds source
-  context for reference results.
+  Agent tools receive a path with every symlink resolved, but a language server knows an open buffer by the name the user opened it with, which can be a symlink. `document_for_path/1` bridges the two: it finds the buffer visiting the file, then returns the client, the buffer's own document URI, and the buffer that holds the content the server has. Requests about the document use that URI, and positions are computed from that buffer.
 
-  The lookup chain:
   ```
-  file_path → Path.expand → Buffer.pid_for_path → SyncServer.clients_for_buffer → client_pid
-  file_path → SyncServer.path_to_uri → Diagnostics.for_uri (direct ETS read)
+  real path → Buffer.pid_for_file → buffer → SyncServer.buffer_uri → document URI
+                                           → SyncServer.clients_for_buffer → client
   ```
+
+  The agent always sees real paths. Paths decoded from result URIs are resolved through every symlink, so a location the server reports under a link path names the same file the agent passes back.
   """
 
   alias Minga.Buffer
@@ -19,51 +18,85 @@ defmodule MingaAgent.Tools.LspBridge do
   alias Minga.LSP.PositionEncoding
   alias Minga.LSP.SyncServer
   alias Minga.LSP.Supervisor, as: LSPSupervisor
+  alias Minga.Project.Root
 
-  @typedoc "Result of the client lookup chain."
+  @typedoc """
+  An open document as a language server knows it.
+
+  `uri` is the URI the server opened the document under, and `buffer` holds the content the server has.
+  """
+  @type document :: %{client: pid(), uri: String.t(), buffer: pid()}
+
+  @typedoc "Result of the document lookup."
+  @type document_result :: {:ok, document()} | {:error, String.t()}
+
+  @typedoc "Result of a client lookup."
   @type client_result :: {:ok, pid()} | {:error, String.t()}
 
   @typedoc "A parsed LSP location: `{file_path, line, col}`."
   @type location :: {String.t(), non_neg_integer(), non_neg_integer()}
 
-  # ── Client lookup ──────────────────────────────────────────────────────────
+  # ── Document lookup ────────────────────────────────────────────────────────
 
   @doc """
-  Resolves a file path to an LSP client pid.
+  Finds the open document for a file path and the LSP client attached to it.
 
-  Walks the lookup chain: expand path → find buffer pid → find attached
-  LSP clients. Returns `{:ok, client_pid}` or `{:error, reason}` with a
-  human-readable explanation the agent can use to understand why LSP is
-  unavailable.
+  The buffer is found by the file it visits, so a buffer opened through a symlink is found by the real path and the reverse. Returns `{:error, reason}` with a human-readable explanation the agent can use to understand why LSP is unavailable.
   """
-  @spec client_for_path(String.t()) :: client_result()
-  def client_for_path(path) when is_binary(path) do
-    abs_path = Path.expand(path)
-
-    case Buffer.pid_for_path(abs_path) do
-      {:ok, buf_pid} ->
-        case SyncServer.clients_for_buffer(buf_pid) do
-          [client | _] ->
-            {:ok, client}
-
-          [] ->
-            {:error,
-             "No language server attached to #{Path.basename(path)}. " <>
-               "The file is open but no LSP server is configured for this filetype."}
-        end
-
-      :not_found ->
-        {:error,
-         "No buffer open for #{Path.basename(path)}. " <>
-           "The file must be open in the editor for LSP features to work."}
+  @spec document_for_path(String.t()) :: document_result()
+  def document_for_path(path) when is_binary(path) do
+    with {:ok, buffer} <- open_buffer(path),
+         {:ok, uri} <- buffer_uri(buffer, path) do
+      attached_document(buffer, uri, path)
     end
   rescue
-    _ ->
-      {:error, "Could not look up LSP client for #{Path.basename(path)}."}
+    _ -> lookup_failed(path)
+  catch
+    :exit, _ -> lookup_failed(path)
+  end
+
+  @spec open_buffer(String.t()) :: {:ok, pid()} | {:error, String.t()}
+  defp open_buffer(path) do
+    case Buffer.pid_for_file(Path.expand(path)) do
+      {:ok, buffer} -> {:ok, buffer}
+      :not_found -> {:error, no_buffer(path)}
+    end
+  end
+
+  @spec buffer_uri(pid(), String.t()) :: {:ok, String.t()} | {:error, String.t()}
+  defp buffer_uri(buffer, path) do
+    case SyncServer.buffer_uri(buffer) do
+      nil -> {:error, no_buffer(path)}
+      uri -> {:ok, uri}
+    end
+  end
+
+  @spec attached_document(pid(), String.t(), String.t()) :: document_result()
+  defp attached_document(buffer, uri, path) do
+    case SyncServer.clients_for_buffer(buffer) do
+      [client | _] ->
+        {:ok, %{client: client, uri: uri, buffer: buffer}}
+
+      [] ->
+        {:error,
+         "No language server attached to #{Path.basename(path)}. " <>
+           "The file is open but no LSP server is configured for this filetype."}
+    end
+  end
+
+  @spec no_buffer(String.t()) :: String.t()
+  defp no_buffer(path) do
+    "No buffer open for #{Path.basename(path)}. " <>
+      "The file must be open in the editor for LSP features to work."
+  end
+
+  @spec lookup_failed(String.t()) :: {:error, String.t()}
+  defp lookup_failed(path) do
+    {:error, "Could not look up LSP client for #{Path.basename(path)}."}
   end
 
   @doc """
-  Returns any available LSP client, preferring one for the given path.
+  Returns any available LSP client, preferring the one attached to the given path.
 
   Falls back to any running client from `LSP.Supervisor.all_clients/0`.
   Useful for workspace-scoped requests like `workspace/symbol` that don't
@@ -72,8 +105,8 @@ defmodule MingaAgent.Tools.LspBridge do
   @spec any_client(String.t() | nil) :: client_result()
   def any_client(path \\ nil) do
     if path do
-      case client_for_path(path) do
-        {:ok, _} = ok -> ok
+      case document_for_path(path) do
+        {:ok, %{client: client}} -> {:ok, client}
         {:error, _} -> first_available_client()
       end
     else
@@ -93,6 +126,8 @@ defmodule MingaAgent.Tools.LspBridge do
 
   @doc """
   Converts a file path to an LSP URI.
+
+  Use the document URI from `document_for_path/1` for an open document. This URI names the path itself, which a server knows only when the document is not open.
   """
   @spec path_to_uri(String.t()) :: String.t()
   def path_to_uri(path), do: SyncServer.path_to_uri(path)
@@ -117,40 +152,28 @@ defmodule MingaAgent.Tools.LspBridge do
   # ── Position params builder ────────────────────────────────────────────────
 
   @doc """
-  Builds standard LSP textDocument/position params from a file path, line, and column.
-  """
-  @spec position_params(String.t(), non_neg_integer(), non_neg_integer()) :: map()
-  def position_params(path, line, col) do
-    position_params(path, line, col, :utf8)
-  end
+  Builds `textDocument/position` params for an open document.
 
-  @doc "Builds position params using the producing client's negotiated encoding."
+  The params name the document by its own URI. The position is converted to `encoding`, the document client's negotiated encoding, using the line from the document's buffer, which is the content the server has.
+  """
   @spec position_params(
-          String.t(),
+          document(),
           non_neg_integer(),
           non_neg_integer(),
           PositionEncoding.encoding()
         ) :: map()
-  def position_params(path, line, col, encoding) do
-    line_text = document_line(path, line)
+  def position_params(document, line, col, encoding) do
+    line_text = document_line(document, line)
 
     %{
-      "textDocument" => %{"uri" => path_to_uri(path)},
+      "textDocument" => %{"uri" => document.uri},
       "position" => PositionEncoding.to_lsp({line, col}, line_text, encoding)
     }
   end
 
-  @spec document_line(String.t(), non_neg_integer()) :: String.t()
-  defp document_line(path, line) do
-    case Buffer.pid_for_path(Path.expand(path)) do
-      {:ok, buffer} ->
-        buffer |> Buffer.lines(line, 1) |> List.first() || ""
-
-      :not_found ->
-        path |> File.read!() |> String.split(~r/\r\n|\n|\r/, trim: false) |> Enum.at(line, "")
-    end
-  rescue
-    _ -> ""
+  @spec document_line(document(), non_neg_integer()) :: String.t()
+  defp document_line(%{buffer: buffer}, line) do
+    buffer |> Buffer.lines(line, 1) |> List.first() || ""
   catch
     :exit, _ -> ""
   end
@@ -167,7 +190,7 @@ defmodule MingaAgent.Tools.LspBridge do
   def parse_location(response) do
     case Location.first(response) do
       nil -> nil
-      {uri, line, col} -> {uri_to_path(uri), line, col}
+      {uri, line, col} -> {result_path(uri), line, col}
     end
   end
 
@@ -180,7 +203,7 @@ defmodule MingaAgent.Tools.LspBridge do
   def parse_all_locations(locations) when is_list(locations) do
     for location <- locations, decoded = Location.decode(location) do
       {uri, line, col} = decoded
-      path = uri_to_path(uri)
+      path = result_path(uri)
       context = read_line_content(path, line)
       {path, line, col, context}
     end
@@ -207,7 +230,7 @@ defmodule MingaAgent.Tools.LspBridge do
 
       path =
         case sym do
-          %{"location" => %{"uri" => uri}} -> uri_to_path(uri)
+          %{"location" => %{"uri" => uri}} -> result_path(uri)
           _ -> ""
         end
 
@@ -227,7 +250,7 @@ defmodule MingaAgent.Tools.LspBridge do
     uri = location["uri"]
     range = location["range"]
     {line, col} = Location.range_start(range)
-    path = uri_to_path(uri)
+    path = result_path(uri)
     kind = symbol_kind_name(sym["kind"])
     container = Map.get(sym, "containerName", "")
     name = sym["name"]
@@ -268,6 +291,19 @@ defmodule MingaAgent.Tools.LspBridge do
   def symbol_kind_name(_), do: "Symbol"
 
   # ── Private helpers ────────────────────────────────────────────────────────
+
+  # The agent sees real paths: a server reports an open document under the
+  # name the buffer was opened with, which can be a symlink. A path that does
+  # not resolve, such as a deleted file, is kept as the server named it.
+  @spec result_path(String.t()) :: String.t()
+  defp result_path(uri) do
+    path = uri_to_path(uri)
+
+    case Root.canonical_path(path) do
+      {:ok, real_path} -> real_path
+      {:error, _reason} -> path
+    end
+  end
 
   @spec read_line_content(String.t(), non_neg_integer()) :: String.t()
   defp read_line_content(path, line) do
