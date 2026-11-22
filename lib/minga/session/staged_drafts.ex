@@ -292,18 +292,20 @@ defmodule Minga.Session.StagedDrafts do
 
     case entries do
       [] -> nil
-      entries -> Map.put(stored_view(entries), :dir, dir)
+      entries -> stored_view(dir, entries)
     end
   end
 
   # The view id and workspace id come from the decoded drafts; a view whose
   # drafts are all unreadable is still reported so its losses are named.
-  @spec stored_view([{entry(), String.t() | nil, non_neg_integer() | nil}, ...]) :: stored_view()
-  defp stored_view(decoded) do
+  @spec stored_view(String.t(), [{entry(), String.t() | nil, non_neg_integer() | nil}, ...]) ::
+          stored_view()
+  defp stored_view(dir, decoded) do
     owner = Enum.find_value(decoded, fn {_entry, view_id, ws} -> view_id && {view_id, ws} end)
     {view_id, workspace_id} = owner || {"", nil}
 
     %{
+      dir: dir,
       view_id: view_id,
       workspace_id: workspace_id,
       entries: Enum.map(decoded, &elem(&1, 0))
