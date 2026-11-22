@@ -6,6 +6,13 @@ defmodule MingaAgent.ArtifactStorage.SQLite do
 
   @type db :: %__MODULE__{connection: Sqlite3.db(), path: String.t()}
 
+  @typedoc """
+  SQLite commit durability. Production uses `:full`, which survives power loss.
+  `:off` skips fsync and survives only process crashes; tests that do not exercise
+  durability use it so their commits do not wait on a loaded disk.
+  """
+  @type synchronous :: :full | :off
+
   @enforce_keys [:connection, :path]
   defstruct [:connection, :path]
 
@@ -14,16 +21,27 @@ defmodule MingaAgent.ArtifactStorage.SQLite do
           | {:error, term()}
           | {:error, {:checkpoint_failed, term()}, {:committed, value}}
 
+  @doc "Reads the `:synchronous` durability option, defaulting to production `:full`."
+  @spec synchronous_option(keyword()) :: {:ok, synchronous()} | {:error, :invalid_synchronous}
+  def synchronous_option(opts) when is_list(opts) do
+    case Keyword.get(opts, :synchronous, :full) do
+      synchronous when synchronous in [:full, :off] -> {:ok, synchronous}
+      _other -> {:error, :invalid_synchronous}
+    end
+  end
+
   @doc "Opens a private bounded database, installs schema, and truncates its WAL."
-  @spec open(String.t(), [String.t()]) :: {:ok, db()} | {:error, term()}
-  def open(path, schema) when is_binary(path) and is_list(schema) do
-    open_with_lock(path, schema, :normal)
+  @spec open(String.t(), [String.t()], synchronous()) :: {:ok, db()} | {:error, term()}
+  def open(path, schema, synchronous \\ :full)
+      when is_binary(path) and is_list(schema) and synchronous in [:full, :off] do
+    open_with_lock(path, schema, :normal, synchronous)
   end
 
   @doc "Opens a database under a retained exclusive SQLite lock."
-  @spec open_exclusive(String.t(), [String.t()]) :: {:ok, db()} | {:error, term()}
-  def open_exclusive(path, schema) when is_binary(path) and is_list(schema) do
-    case open_with_lock(path, schema, :exclusive) do
+  @spec open_exclusive(String.t(), [String.t()], synchronous()) :: {:ok, db()} | {:error, term()}
+  def open_exclusive(path, schema, synchronous \\ :full)
+      when is_binary(path) and is_list(schema) and synchronous in [:full, :off] do
+    case open_with_lock(path, schema, :exclusive, synchronous) do
       {:error, reason} ->
         if lock_conflict?(reason),
           do: {:error, :artifact_root_in_use},
@@ -34,13 +52,13 @@ defmodule MingaAgent.ArtifactStorage.SQLite do
     end
   end
 
-  @spec open_with_lock(String.t(), [String.t()], :normal | :exclusive) ::
+  @spec open_with_lock(String.t(), [String.t()], :normal | :exclusive, synchronous()) ::
           {:ok, db()} | {:error, term()}
-  defp open_with_lock(path, schema, lock) do
+  defp open_with_lock(path, schema, lock, synchronous) do
     with :ok <- Files.ensure_private_directory(Path.dirname(path)),
          :ok <- ensure_private_files(path),
          {:ok, connection} <- Sqlite3.open(path) do
-      setup_opened(connection, path, schema, lock)
+      setup_opened(connection, path, schema, lock, synchronous)
     else
       {:error, reason} -> {:error, normalize_reason(reason)}
     end
@@ -126,15 +144,15 @@ defmodule MingaAgent.ArtifactStorage.SQLite do
     end)
   end
 
-  @spec setup_opened(Sqlite3.db(), String.t(), [String.t()], :normal | :exclusive) ::
+  @spec setup_opened(Sqlite3.db(), String.t(), [String.t()], :normal | :exclusive, synchronous()) ::
           {:ok, db()} | {:error, term()}
-  defp setup_opened(connection, path, schema, lock) do
+  defp setup_opened(connection, path, schema, lock, synchronous) do
     db = %__MODULE__{connection: connection, path: path}
 
     statements = [
       "PRAGMA page_size=4096",
       "PRAGMA journal_mode=WAL",
-      "PRAGMA synchronous=FULL",
+      synchronous_pragma(synchronous),
       "PRAGMA max_page_count=1024",
       "PRAGMA foreign_keys=ON",
       "PRAGMA cache_spill=OFF",
@@ -159,6 +177,10 @@ defmodule MingaAgent.ArtifactStorage.SQLite do
         error
     end
   end
+
+  @spec synchronous_pragma(synchronous()) :: String.t()
+  defp synchronous_pragma(:full), do: "PRAGMA synchronous=FULL"
+  defp synchronous_pragma(:off), do: "PRAGMA synchronous=OFF"
 
   @spec acquire_lock(db(), :normal | :exclusive) :: :ok | {:error, term()}
   defp acquire_lock(_db, :normal), do: :ok

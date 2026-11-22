@@ -31,6 +31,7 @@ defmodule MingaAgent.ArtifactStore do
           | :disk_full
           | :interrupted
           | :storage_unavailable
+          | :storage_timeout
           | term()
 
   @doc "Starts one store for a durable session ID and explicit root quota actor."
@@ -39,28 +40,64 @@ defmodule MingaAgent.ArtifactStore do
     GenServer.start_link(__MODULE__, opts, Keyword.take(opts, [:name]))
   end
 
-  @doc "Begins or resumes a stable streamed capture."
-  @spec begin(server(), CaptureSpec.t()) :: {:ok, Capture.t()} | {:error, error_reason()}
-  def begin(server, %CaptureSpec{} = spec), do: GenServer.call(server, {:begin, spec})
+  @doc """
+  Begins or resumes a stable streamed capture.
 
-  @doc "Appends at most 64KiB and optionally records chunk-relative item ends."
+  Waits at most `Capture.default_call_timeout/0` and then returns `{:error, :storage_timeout}`. A capture the store opens after that point stays owned by the caller and is finalized as interrupted when the caller exits.
+  """
+  @spec begin(server(), CaptureSpec.t()) :: {:ok, Capture.t()} | {:error, error_reason()}
+  def begin(server, %CaptureSpec{} = spec) do
+    GenServer.call(server, {:begin, spec}, Capture.default_call_timeout())
+  catch
+    :exit, {:timeout, {GenServer, :call, _args}} -> {:error, :storage_timeout}
+  end
+
+  @doc """
+  Appends at most 64KiB and optionally records chunk-relative item ends.
+
+  Waits at most the capture's `call_timeout`. On timeout it returns `{:error, :storage_timeout}` and abandons the capture: the store cancels it after the stalled commit, so the capture is never exposed and its quota is released. A later finish of the abandoned capture returns an error.
+  """
   @spec append(server(), Capture.t(), binary(), keyword()) ::
           {:ok, CaptureProgress.t()} | {:error, error_reason()}
   def append(server, %Capture{} = capture, chunk, opts \\ []) do
-    GenServer.call(server, {:append, capture, chunk, opts})
+    abandoning_call(server, capture, {:append, capture, chunk, opts})
   end
 
-  @doc "Durably completes or marks a capture incomplete and returns its stable reference."
+  @doc """
+  Durably completes or marks a capture incomplete and returns its stable reference.
+
+  Waits at most the capture's `call_timeout` and then returns `{:error, :storage_timeout}`. A finish that the store commits after that point is a durable terminal capture with exact quota accounting; otherwise the store cancels the abandoned capture.
+  """
   @spec finish(server(), Capture.t(), :complete | {:incomplete, atom()}) ::
           {:ok, Stored.t()} | {:error, error_reason()}
   def finish(server, %Capture{} = capture, status) do
-    GenServer.call(server, {:finish, capture, status})
+    abandoning_call(server, capture, {:finish, capture, status})
   end
 
-  @doc "Durably cancels one open capture and releases all of its quota reservations."
+  @doc """
+  Durably cancels one open capture and releases all of its quota reservations.
+
+  Waits at most the capture's `call_timeout`. A timed-out cancel stays queued, so the store still cancels the capture.
+  """
   @spec cancel(server(), Capture.t()) :: :ok | {:error, error_reason()}
-  def cancel(server, %Capture{} = capture) do
-    GenServer.call(server, {:cancel, capture}, :infinity)
+  def cancel(server, %Capture{call_timeout: timeout} = capture) do
+    GenServer.call(server, {:cancel, capture}, timeout)
+  catch
+    :exit, {:timeout, {GenServer, :call, _args}} -> {:error, :storage_timeout}
+  end
+
+  # The one boundary where a tool waits on a durable commit. A stalled fsync
+  # must become a typed outcome instead of an exit in the calling tool. The
+  # request stays in the store mailbox, so the caller queues a cancel behind it;
+  # the store then removes the capture and releases its reservations, whatever
+  # the stalled request committed. A late reply is dropped by the call alias.
+  @spec abandoning_call(server(), Capture.t(), tuple()) :: term()
+  defp abandoning_call(server, %Capture{call_timeout: timeout} = capture, request) do
+    GenServer.call(server, request, timeout)
+  catch
+    :exit, {:timeout, {GenServer, :call, _args}} ->
+      GenServer.cast(server, {:abandon, capture})
+      {:error, :storage_timeout}
   end
 
   @doc "Fetches exact immutable captured bytes for an authorized bounded range."
@@ -188,6 +225,24 @@ defmodule MingaAgent.ArtifactStore do
       {reply, next_state, :keep} -> {:reply, reply, next_state}
       {reply, next_state, :stop} -> {:stop, :normal, reply, next_state}
     end
+  end
+
+  @impl GenServer
+  @spec handle_cast({:abandon, Capture.t()}, State.t()) :: {:noreply, State.t()}
+  def handle_cast({:abandon, capture}, state) do
+    {reply, next_state} = State.cancel(state, capture)
+    log_abandon_result(state, reply)
+    {:noreply, next_state}
+  end
+
+  @spec log_abandon_result(State.t(), :ok | {:error, term()}) :: :ok
+  defp log_abandon_result(_state, :ok), do: :ok
+
+  defp log_abandon_result(state, {:error, reason}) do
+    Minga.Log.debug(
+      :agent,
+      "[ArtifactStore] abandoned capture in #{state.namespace} was not canceled: #{inspect(reason)}"
+    )
   end
 
   @impl GenServer

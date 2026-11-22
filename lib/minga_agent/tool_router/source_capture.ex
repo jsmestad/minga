@@ -676,6 +676,9 @@ defmodule MingaAgent.ToolRouter.SourceCapture do
               }
             )
 
+          {:error, :storage_timeout} = abandoned ->
+            abandoned
+
           {:error, reason} ->
             finish_append_refusal(context, progress, reason)
         end

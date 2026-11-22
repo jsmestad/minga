@@ -191,6 +191,7 @@ defmodule MingaAgent.Tools.OutputCapture do
 
     case ArtifactStore.append(store, capture, chunk, item_ends: []) do
       {:ok, _progress} -> append_bytes(store, capture, bytes, offset + count, opts)
+      {:error, :storage_timeout} = abandoned -> abandoned
       {:error, reason} -> finish_bytes(store, capture, bytes, incomplete(reason), opts)
     end
   end
@@ -211,7 +212,7 @@ defmodule MingaAgent.Tools.OutputCapture do
         finish_items(store, capture, accepted_items, status, opts)
 
       {:error, reason, accepted_items} ->
-        finish_items(store, capture, accepted_items, incomplete(reason), opts)
+        finish_refused_items(store, capture, accepted_items, reason, opts)
     end
   end
 
@@ -225,7 +226,7 @@ defmodule MingaAgent.Tools.OutputCapture do
           append_items(store, capture, [item | rest], [], 0, next_accepted, opts)
 
         {:error, reason, next_accepted} ->
-          finish_items(store, capture, next_accepted, incomplete(reason), opts)
+          finish_refused_items(store, capture, next_accepted, reason, opts)
       end
     else
       append_item_record(
@@ -288,7 +289,7 @@ defmodule MingaAgent.Tools.OutputCapture do
         finish_items(store, capture, next_accepted, {:incomplete, :capture_byte_limit}, opts)
 
       {:error, reason, next_accepted} ->
-        finish_items(store, capture, next_accepted, incomplete(reason), opts)
+        finish_refused_items(store, capture, next_accepted, reason, opts)
     end
   end
 
@@ -350,6 +351,19 @@ defmodule MingaAgent.Tools.OutputCapture do
       Output.result(output)
     end
   end
+
+  @spec finish_refused_items(
+          GenServer.server(),
+          term(),
+          non_neg_integer(),
+          term(),
+          capture_opts()
+        ) :: {:ok, Output.t()} | {:error, Output.t() | term()}
+  defp finish_refused_items(_store, _capture, _accepted_items, :storage_timeout, _opts),
+    do: {:error, :storage_timeout}
+
+  defp finish_refused_items(store, capture, accepted_items, reason, opts),
+    do: finish_items(store, capture, accepted_items, incomplete(reason), opts)
 
   @spec finish_items(
           GenServer.server(),

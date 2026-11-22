@@ -162,6 +162,9 @@ defmodule MingaAgent.DraftAttachment do
         _release = ArtifactStore.release(store, key)
         {:error, reason}
 
+      {:error, :storage_timeout} = abandoned ->
+        abandoned
+
       {:error, _reason} = error ->
         _cancel = ArtifactStore.cancel(store, capture)
         error
