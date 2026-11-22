@@ -792,6 +792,8 @@ defmodule MingaAgent.Changeset.Server do
     :pg.join(scope, :staged_views, self())
   catch
     :error, _reason -> {:error, :staging_scope_unavailable}
+    # :pg.join/3 calls the scope process, so a stopped scope raises an exit.
+    :exit, _reason -> {:error, :staging_scope_unavailable}
   end
 
   @spec staging_value({atom(), term()} | nil) :: term() | nil
