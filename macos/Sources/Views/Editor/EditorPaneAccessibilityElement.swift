@@ -1,5 +1,5 @@
 import AppKit
-import os
+import Synchronization
 
 /// Virtual AppKit text area for one visible editor pane.
 final class EditorPaneAccessibilityElement: NSAccessibilityElement {
@@ -9,8 +9,8 @@ final class EditorPaneAccessibilityElement: NSAccessibilityElement {
         var nativeKeyboardFocus: Bool
     }
 
-    private final class OwnerReference: @unchecked Sendable {
-        weak var owner: EditorNSView?
+    private final class OwnerReference: Sendable {
+        weak let owner: EditorNSView?
 
         init(owner: EditorNSView) {
             self.owner = owner
@@ -18,14 +18,14 @@ final class EditorPaneAccessibilityElement: NSAccessibilityElement {
     }
 
     private let ownerReference: OwnerReference
-    private let snapshot: OSAllocatedUnfairLock<Snapshot>
+    private let snapshot: Mutex<Snapshot>
     let identity: EditorAccessibilityIdentity
 
     @MainActor
     init(owner: EditorNSView, projection: EditorAccessibilityProjection) {
         ownerReference = OwnerReference(owner: owner)
         identity = projection.identity
-        snapshot = OSAllocatedUnfairLock(initialState: Snapshot(
+        snapshot = Mutex(Snapshot(
             projection: projection,
             paneScreenFrame: owner.accessibilityScreenRect(for: projection.frameInView),
             nativeKeyboardFocus: owner.accessibilityHasNativeKeyboardFocus

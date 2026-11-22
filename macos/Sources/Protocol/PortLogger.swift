@@ -1,5 +1,6 @@
 import Foundation
 import os
+import Synchronization
 
 /// Writes macOS diagnostics to unified logging and forwards them to the editor's Messages pane.
 nonisolated public final class PortLogger: Sendable {
@@ -43,7 +44,7 @@ nonisolated public final class PortLogger: Sendable {
         var pending: [Entry] = []
     }
 
-    private let state = OSAllocatedUnfairLock(initialState: Connection())
+    private let state = Mutex(Connection())
 
     /// Installs a ready encoder and forwards recent diagnostics recorded without a core.
     public static func setup(encoder: any OutboundActionEncoding) {

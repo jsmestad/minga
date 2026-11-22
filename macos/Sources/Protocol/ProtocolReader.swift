@@ -15,6 +15,7 @@ import Synchronization
 /// Defaults to stdin (BEAM is parent, spawned us). In bundle mode, the
 /// BEAMProcessManager passes the child process's stdout pipe instead.
 final class ProtocolReader: @unchecked Sendable {
+    // @unchecked: `thread` is a mutable var, written only by start() after the `running` Mutex admits it, and never read.
     private static let defaultMaxPayloadLength = FrameResourcePolicy.default.wire.payloadBytes
 
     private var thread: Thread?

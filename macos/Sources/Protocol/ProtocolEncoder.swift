@@ -79,6 +79,7 @@ enum OutboundTransportInitializationError: Error, Equatable {
 }
 
 final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
+    // @unchecked: mutable transport state is confined to the serial `writeQueue`, which the compiler cannot see.
     enum DisconnectReason: Sendable {
         case expectedTeardown
         case unexpectedPeerClosure
