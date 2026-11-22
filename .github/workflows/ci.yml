@@ -656,6 +656,8 @@ jobs:
         run: .github/scripts/run-with-memory-guard.sh mix dialyzer
         env:
           ERL_FLAGS: "+S 2:2"
+          # The peak (#3869) is not the analysis itself: after the warning pass, OTP's dialyzer_typegraph:module_type_deps/3 copies every contract and the Core of every module into the long-lived analysis process, whose heap reaches about 4.4 GB and then doubles while it is garbage collected. Full-sweep collection keeps that heap near its live size instead of carrying garbage from earlier phases.
+          ERL_FULLSWEEP_AFTER: "0"
           # Analysis peaks near the 16 GB of RAM (#3869); the added swap absorbs the excess and the guard counts RAM plus free swap.
           MEMORY_GUARD_MIN_AVAILABLE_MB: "768"
 
