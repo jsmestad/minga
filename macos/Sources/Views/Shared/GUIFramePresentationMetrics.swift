@@ -4,7 +4,6 @@ import SwiftUI
 
 /// Release telemetry for commit-to-first-affected-native-presentation.
 /// This object is passive instrumentation, not an Observation dependency for editor correctness or SwiftUI invalidation.
-@MainActor
 public final class GUIFramePresentationMetrics {
     public enum Outcome: String, CaseIterable, Sendable {
         case submitted
@@ -154,7 +153,6 @@ private struct GUIFrameNativeDrawProbe: NSViewRepresentable {
     }
 }
 
-@MainActor
 private final class GUIFrameDrawNSView: NSView {
     private var domain: GUIFrameImpact
     private var expectedFrame: GUICommittedFrame?

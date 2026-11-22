@@ -26,7 +26,6 @@ public struct LocalPresentationIdentity: Equatable, Sendable {
 ///
 /// The source owns identity. A preview survives only while its generation and
 /// item ID remain present in the next authoritative model.
-@MainActor
 @Observable
 public final class LocalPresentationStore {
     /// Creates an empty local presentation store.

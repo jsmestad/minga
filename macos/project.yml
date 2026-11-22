@@ -123,6 +123,8 @@ targets:
       base:
         GENERATE_INFOPLIST_FILE: "YES"
         PRODUCT_NAME: MingaUI
+        SWIFT_DEFAULT_ACTOR_ISOLATION: MainActor
+        SWIFT_UPCOMING_FEATURE_INFER_ISOLATED_CONFORMANCES: "YES"
     dependencies:
       - target: MingaProtocol
 

@@ -3,7 +3,6 @@ import SwiftUI
 import MingaProtocol
 
 /// Committed Help chrome, independent of Chat and its composer/transcript lifetime.
-@MainActor
 @Observable
 public final class AgentHelpState {
     public init() {}

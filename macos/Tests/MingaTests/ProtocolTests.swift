@@ -9,7 +9,7 @@ import os
 import MingaProtocol
 
 @MainActor
-final class LocalActionRecorder<Action: Equatable & Sendable> {
+final class LocalActionRecorder<Action: Sendable> {
     private(set) var actions: [Action] = []
 
     var handler: ViewActionHandler<Action> {

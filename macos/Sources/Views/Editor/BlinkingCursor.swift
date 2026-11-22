@@ -39,7 +39,6 @@ public struct SystemBlinkTiming {
 
     /// Whether the system has disabled cursor blinking via Accessibility settings.
     /// When true, cursors should remain solid (always visible, no blink).
-    @MainActor
     public static var blinkingDisabled: Bool {
         NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
     }
@@ -82,7 +81,6 @@ public struct BlinkingCursor: View {
 
     /// Cancels any active blink timer, snaps cursor to visible, and starts
     /// a new blink cycle. Called on appear and whenever resetToken changes.
-    @MainActor
     private func restartBlink() {
         blinkTask?.cancel()
         isVisible = true

@@ -2,7 +2,6 @@ import SwiftUI
 import MingaProtocol
 
 /// Observable state for the workspace header and active-workspace file tabs.
-@MainActor
 @Observable
 public final class WorkspaceState {
     public init(workspaces: [WorkspacePresentationEntry] = [], visibleTabs: [WorkspacePresentationTabEntry] = [], activeWorkspaceId: UInt16 = 0, viewMode: WorkspaceViewMode = .editor, flags: WorkspaceFlags = [], hasCanonicalPayload: Bool = false) {

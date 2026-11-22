@@ -103,7 +103,6 @@ public struct SignatureHelpOverlay: View {
 
 // MARK: - Previews
 
-@MainActor
 private func signatureHelpPreviewState() -> SignatureHelpState {
     let state = SignatureHelpState()
     state.update(

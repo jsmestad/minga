@@ -1246,14 +1246,12 @@ private struct StatusBarIconButton: View {
 
 // MARK: - Previews
 
-@MainActor
 private func statusBarPreviewState(mode: PreviewFixtures.PreviewMode = .normal) -> StatusBarState {
     let state = StatusBarState()
     state.update(from: PreviewFixtures.statusBarUpdate(agentVisible: false, mode: mode))
     return state
 }
 
-@MainActor
 private func statusBarAgentPreviewState() -> StatusBarState {
     let state = StatusBarState()
     state.update(from: PreviewFixtures.statusBarUpdate(agentVisible: true, mode: .normal))

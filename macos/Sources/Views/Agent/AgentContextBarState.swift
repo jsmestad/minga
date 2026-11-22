@@ -9,7 +9,6 @@ import MingaProtocol
 /// when the active agent surface exposes a non-user agent context.
 ///
 /// Updated by the BEAM via the `gui_agent_context` opcode (0x88).
-@MainActor
 @Observable
 public final class AgentContextBarState {
     public init(visible: Bool = false, task: String = "", dispatchTimestamp: Date = Date(), status: CardStatus = .idle, canApprove: Bool = false, progress: Wire.AgentProgress = .init(activeAction: "", toolCount: 0, fileCount: 0, reviewHint: ""), todos: [Wire.AgentTodo] = []) {

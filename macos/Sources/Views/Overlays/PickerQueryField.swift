@@ -107,7 +107,6 @@ struct PickerQueryField: NSViewRepresentable {
         coordinator.focusPolicy?.nativeTextEditingDidEnd()
     }
 
-    @MainActor
     final class Coordinator: NSObject, NSTextFieldDelegate {
         var sendAction: ViewActionHandler<Action>?
         var style: InlineEditFieldStyle

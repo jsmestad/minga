@@ -5,7 +5,6 @@
 
 import SwiftUI
 
-@MainActor
 @Observable
 public final class BreadcrumbState {
     public init(segments: [String] = []) {
@@ -113,7 +112,6 @@ public struct BreadcrumbBar: View {
 
 // MARK: - Previews
 
-@MainActor
 private func breadcrumbPreviewState() -> BreadcrumbState {
     let state = BreadcrumbState()
     state.update(segments: ["macos", "Sources", "Views", "EditorChrome", "BreadcrumbBar.swift"])

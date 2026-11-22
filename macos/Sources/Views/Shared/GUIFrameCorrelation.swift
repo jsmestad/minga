@@ -1,5 +1,5 @@
 /// Consumer regions affected by one atomic GUI commit.
-public struct GUIFrameImpact: OptionSet, Sendable, Equatable, Hashable {
+nonisolated public struct GUIFrameImpact: OptionSet, Sendable, Equatable, Hashable {
     public let rawValue: UInt8
 
     public init(rawValue: UInt8) {
@@ -14,7 +14,7 @@ public struct GUIFrameImpact: OptionSet, Sendable, Equatable, Hashable {
 }
 
 /// Identity of a transaction committed by one local BEAM connection.
-public struct GUICommittedFrame: Equatable, Sendable {
+nonisolated public struct GUICommittedFrame: Equatable, Sendable {
     public let connectionID: UInt64
     public let generation: UInt32
     public let frameSeq: UInt32

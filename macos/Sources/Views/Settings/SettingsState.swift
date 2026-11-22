@@ -23,7 +23,6 @@ public enum SettingsLineNumberStyle: String, CaseIterable, Identifiable, Sendabl
 }
 
 /// Observable state for the native Settings scene.
-@MainActor
 @Observable
 public final class SettingsState {
     public enum Action: Equatable, Sendable {
@@ -131,7 +130,6 @@ public final class SettingsState {
 }
 
 /// AppKit bridge for NSFontPanel changes.
-@MainActor
 public final class FontPanelCoordinator: NSObject {
     private weak var settingsState: SettingsState?
 

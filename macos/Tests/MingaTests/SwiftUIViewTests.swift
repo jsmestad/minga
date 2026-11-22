@@ -20,6 +20,7 @@ import MingaProtocol
 // MARK: - AnchoredOverlayPlacement
 
 @Suite("AnchoredOverlayPlacement")
+@MainActor
 struct AnchoredOverlayPlacementTests {
     private let cellHeight: CGFloat = 18
     private let viewportHeight: CGFloat = 300
@@ -711,7 +712,7 @@ struct StatusBarViewViewTests {
     }
 
     @Test("Private-use glyph detection covers Nerd Font symbols")
-    func privateUseGlyphDetection() {
+    @MainActor func privateUseGlyphDetection() {
         #expect(StatusBarModelineFont.containsPrivateUseGlyph("\u{E0B0}"))
         #expect(StatusBarModelineFont.containsPrivateUseGlyph("branch \u{F0001} ahead"))
         #expect(StatusBarModelineFont.containsPrivateUseGlyph("wide \u{100001}"))
@@ -921,7 +922,7 @@ struct StatusBarViewViewTests {
 @Suite("TabBarView View Structure")
 struct TabBarViewViewTests {
 
-    private func workspaceSnapshot(id: UInt16, label: String) -> WorkspacePresentationSnapshot {
+    @MainActor private func workspaceSnapshot(id: UInt16, label: String) -> WorkspacePresentationSnapshot {
         WorkspacePresentationSnapshot(
             version: 1,
             activeWorkspaceId: id,
@@ -952,7 +953,7 @@ struct TabBarViewViewTests {
         Wire.TabEntry(id: id, groupId: groupId, isActive: isActive, isDirty: false, isAgent: false, hasAttention: false, agentStatus: 0, isPinned: isPinned, tintColorRGB: 0, icon: "", label: label ?? "tab-\(id).ex")
     }
 
-    private func tab(id: UInt32, groupId: UInt16 = 0, isActive: Bool = false, isPinned: Bool = false, label: String? = nil) -> TabEntry {
+    @MainActor private func tab(id: UInt32, groupId: UInt16 = 0, isActive: Bool = false, isPinned: Bool = false, label: String? = nil) -> TabEntry {
         TabEntry(id: id, groupId: groupId, isActive: isActive, isDirty: false, isAgent: false, hasAttention: false, agentStatus: .idle, isPinned: isPinned, tintColor: nil, icon: "", label: label ?? "tab-\(id).ex")
     }
 

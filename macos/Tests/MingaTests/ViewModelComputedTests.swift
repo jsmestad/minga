@@ -14,6 +14,7 @@ import MingaProtocol
 // MARK: - WorkspacePresentationSnapshot
 
 @Suite("Workspace Presentation Snapshot")
+@MainActor
 struct WorkspacePresentationSnapshotTests {
     @Test("converts every shared workspace and tab field once")
     func convertsSharedWorkspaceFields() throws {
@@ -94,6 +95,7 @@ struct WorkspacePresentationSnapshotTests {
 // MARK: - PickerItem
 
 @Suite("PickerItem Computed Properties")
+@MainActor
 struct PickerItemComputedTests {
 
     @Test("icon is empty for plain labels")
@@ -269,6 +271,7 @@ struct CursorShapeTests {
 // MARK: - WhichKeyBinding
 
 @Suite("WhichKeyBinding Computed Properties")
+@MainActor
 struct WhichKeyBindingTests {
 
     @Test("isGroup is true when kind == 1")
@@ -352,6 +355,7 @@ struct FileTreePathTests {
     }
 }
 
+@MainActor
 private func computedFileTreeEntry(path: String, relPath: String, isDir: Bool = false, isDirty: Bool = false) -> FileTreeEntry {
     FileTreeEntry(id: relPath, pathHash: 1, index: 0, isDir: isDir, isExpanded: false, isSelected: false,
                   isFocused: false, isActive: false, isDirty: isDirty, isEditing: false,

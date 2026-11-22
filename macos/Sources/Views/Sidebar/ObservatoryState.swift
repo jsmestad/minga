@@ -3,7 +3,6 @@ import Observation
 import MingaProtocol
 
 /// Observable state for the BEAM Observatory sidebar.
-@MainActor
 @Observable
 public final class ObservatoryState {
     public init(visible: Bool = false, nodes: [ObservatoryNode] = []) {

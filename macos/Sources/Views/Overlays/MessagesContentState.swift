@@ -139,7 +139,6 @@ public struct MessageEntry: Identifiable, Equatable {
     }
 }
 
-@MainActor
 @Observable
 public final class MessagesContentState {
     public init(entries: [MessageEntry] = [], isAutoScrolling: Bool = true, hasNewEntries: Bool = false, activeLevels: Set<MessageLevel> = [.info, .warning, .error], activeSubsystems: Set<MessageSubsystem> = [.editor, .lsp, .parser, .git, .render, .agent, .zig, .gui], searchText: String = "") {

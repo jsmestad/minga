@@ -2,7 +2,7 @@ import Foundation
 import os
 
 /// Writes macOS diagnostics to unified logging and forwards them to the editor's Messages pane.
-public final class PortLogger: Sendable {
+nonisolated public final class PortLogger: Sendable {
     /// Singleton accessed via static methods below.
     private static let shared = PortLogger()
 

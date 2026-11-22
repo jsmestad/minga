@@ -1,7 +1,7 @@
 import Foundation
 import MingaProtocol
 
-public enum SemanticItemSurface: UInt8, Equatable, Sendable {
+nonisolated public enum SemanticItemSurface: UInt8, Equatable, Sendable {
     case completion = 1
     case picker = 2
     case fileTree = 3
@@ -11,7 +11,7 @@ public enum SemanticItemSurface: UInt8, Equatable, Sendable {
 }
 
 /// A position in the immutable composed row that the frontend displayed.
-public struct EditorTextTarget: Equatable, Sendable {
+nonisolated public struct EditorTextTarget: Equatable, Sendable {
     public let windowID: UInt16
     public let presentationID: UInt64
     public let rowIndex: UInt32
@@ -27,12 +27,12 @@ public struct EditorTextTarget: Equatable, Sendable {
     }
 }
 
-public enum TextPresentationState: UInt8, Equatable, Sendable {
+nonisolated public enum TextPresentationState: UInt8, Equatable, Sendable {
     case discarded = 0
     case active = 1
 }
 /// Semantic tool-approval decisions; wire values belong to the generated protocol.
-public enum AgentApprovalDecision: Equatable, Sendable {
+nonisolated public enum AgentApprovalDecision: Equatable, Sendable {
     case approve
     case approveSession
     case approveTurn
@@ -44,7 +44,7 @@ public enum AgentApprovalDecision: Equatable, Sendable {
 ///
 /// This is the only production outbound action hierarchy. `ProtocolEncoder`
 /// exhaustively chooses the wire encoding for every case.
-public enum OutboundAction: Equatable, Sendable {
+nonisolated public enum OutboundAction: Equatable, Sendable {
     case ready(cols: UInt16, rows: UInt16)
     case keyPress(codepoint: UInt32, modifiers: UInt8, sequence: UInt32, composerOffer: UInt64 = 0)
     case resize(cols: UInt16, rows: UInt16)
@@ -154,7 +154,7 @@ public enum OutboundAction: Equatable, Sendable {
 }
 
 /// A reason an outbound action was not admitted to the ordered transport.
-public enum OutboundActionRejection: Equatable, Sendable {
+nonisolated public enum OutboundActionRejection: Equatable, Sendable {
     case disconnected
     case payloadTooLarge(limitBytes: Int, attemptedBytes: Int)
     case collectionTooLarge(limitCount: Int, attemptedCount: Int)
@@ -163,7 +163,7 @@ public enum OutboundActionRejection: Equatable, Sendable {
 }
 
 /// The synchronous admission outcome for one outbound action.
-public enum OutboundActionResult: Equatable, Sendable {
+nonisolated public enum OutboundActionResult: Equatable, Sendable {
     case accepted
     case rejected(OutboundActionRejection)
 
@@ -173,13 +173,13 @@ public enum OutboundActionResult: Equatable, Sendable {
 }
 
 /// The raw-input and app-composition boundary for outbound actions.
-public protocol OutboundActionEncoding: AnyObject, Sendable {
+nonisolated public protocol OutboundActionEncoding: AnyObject, Sendable {
     @discardableResult
     func send(_ action: OutboundAction) -> OutboundActionResult
 }
 
 /// An explicit closure-backed boundary for previews, tests, and disconnected state.
-public final class ClosureOutboundActionEncoder: OutboundActionEncoding, Sendable {
+nonisolated public final class ClosureOutboundActionEncoder: OutboundActionEncoding, Sendable {
     private let handler: @Sendable (OutboundAction) -> OutboundActionResult
 
     public init(handler: @escaping @Sendable (OutboundAction) -> OutboundActionResult) {

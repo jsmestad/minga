@@ -21,11 +21,11 @@ public struct InlineEditFieldStyle {
     public let selectionForegroundColor: Color
     public let insertionPointColor: Color
 
-    @MainActor public var nsTextColor: NSColor {
+    public var nsTextColor: NSColor {
         Self.nsColor(textColor)
     }
 
-    @MainActor public func apply(to textView: NSTextView) {
+    public func apply(to textView: NSTextView) {
         textView.textColor = nsTextColor
         textView.insertionPointColor = Self.nsColor(insertionPointColor)
         textView.selectedTextAttributes = [
@@ -34,7 +34,7 @@ public struct InlineEditFieldStyle {
         ]
     }
 
-    @MainActor private static func nsColor(_ color: Color) -> NSColor {
+    private static func nsColor(_ color: Color) -> NSColor {
         NSColor(color).usingColorSpace(.sRGB) ?? NSColor(color)
     }
 }
@@ -94,14 +94,13 @@ public struct InlineEditField: NSViewRepresentable {
         coordinator.focusPolicy?.nativeTextEditingDidEnd()
     }
 
-    @MainActor private static func applyStyle(_ style: InlineEditFieldStyle, to field: NSTextField) {
+    private static func applyStyle(_ style: InlineEditFieldStyle, to field: NSTextField) {
         field.textColor = style.nsTextColor
 
         guard let editor = field.currentEditor() as? NSTextView else { return }
         style.apply(to: editor)
     }
 
-    @MainActor
     public final class Coordinator: NSObject, NSTextFieldDelegate {
         public var style: InlineEditFieldStyle
         public let onCommit: (String) -> Void

@@ -197,7 +197,7 @@ struct SidebarContainerViewTests {
         #expect(strings.contains("The native frontend does not have an adapter for \"custom_sidebar\"."))
     }
 
-    private func sidebarItem(id: String, displayName: String, kind: String) -> SidebarItem {
+    @MainActor private func sidebarItem(id: String, displayName: String, kind: String) -> SidebarItem {
         SidebarItem(Wire.SidebarMetadata(
             id: id,
             displayName: displayName,
@@ -866,6 +866,7 @@ private func fileTreeRowView(entry: FileTreeEntry, isHovered: Bool = false, isDr
     )
 }
 
+@MainActor
 private func sidebarFileTreeEntry(
     id: UInt32,
     index: Int,
