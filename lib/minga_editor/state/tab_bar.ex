@@ -1023,6 +1023,15 @@ defmodule MingaEditor.State.TabBar do
     |> project_workspace_agent_tabs(workspace_id)
   end
 
+  @doc "Returns a renderer-boundary copy whose workspaces carry no retained agent transcript."
+  @spec render_snapshot(t()) :: t()
+  def render_snapshot(%__MODULE__{workspaces: workspaces} = tab_bar) do
+    case Enum.map(workspaces, &Workspace.render_snapshot/1) do
+      ^workspaces -> tab_bar
+      snapshots -> %{tab_bar | workspaces: snapshots}
+    end
+  end
+
   @doc "Records the inactive agent UI projection on the identified workspace."
   @spec set_workspace_agent_ui(t(), non_neg_integer(), MingaEditor.Agent.UIState.t() | nil) :: t()
   def set_workspace_agent_ui(tab_bar, workspace_id, agent_ui) do

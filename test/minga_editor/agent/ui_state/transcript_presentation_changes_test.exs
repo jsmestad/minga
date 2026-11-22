@@ -9,6 +9,7 @@ defmodule MingaEditor.Agent.UIState.TranscriptPresentationChangesTest do
   @context {nil, %{}, &__MODULE__.style/3}
 
   @doc false
+  @spec style(term(), pos_integer(), map()) :: term()
   def style({:assistant, text}, _id, _syntax), do: {:styled_lines, [[{text, 0, 0, 0}]]}
   def style(_message, _id, _syntax), do: nil
 

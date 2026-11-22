@@ -237,47 +237,74 @@ defmodule MingaEditor.Renderer.Server do
     end
   end
 
-  def handle_call({:reset_keyframe, submission, seq, pushed_at}, _from, state) do
-    {state, intent, seq} = receive_submission(state, submission, seq)
+  def handle_call({:reset_keyframe, submission, seq, pushed_at}, {caller, _tag}, state) do
+    {state, intent, seq} = receive_submission(state, submission, seq, caller)
     RecoveryHandler.keyframe(state, intent, seq, pushed_at)
   end
 
-  def handle_call({:reset_keyframe_sync, submission, seq, pushed_at}, _from, state) do
-    {state, intent, seq} = receive_submission(state, submission, seq)
+  def handle_call({:reset_keyframe_sync, submission, seq, pushed_at}, {caller, _tag}, state) do
+    {state, intent, seq} = receive_submission(state, submission, seq, caller)
     RecoveryHandler.keyframe_sync(state, intent, seq, pushed_at)
   end
 
-  def handle_call({:reset_connection, submission, seq, pushed_at}, _from, state) do
-    {state, intent, seq} = receive_submission(state, submission, seq)
+  def handle_call({:reset_connection, submission, seq, pushed_at}, {caller, _tag}, state) do
+    {state, intent, seq} = receive_submission(state, submission, seq, caller)
     RecoveryHandler.reset(state, intent, seq, pushed_at)
   end
 
-  def handle_call({:reset_sync, submission, seq, pushed_at}, _from, state) do
-    {state, intent, seq} = receive_submission(state, submission, seq)
+  def handle_call({:reset_sync, submission, seq, pushed_at}, {caller, _tag}, state) do
+    {state, intent, seq} = receive_submission(state, submission, seq, caller)
     RecoveryHandler.reset_sync(state, intent, seq, pushed_at)
   end
 
-  def handle_call({:render_sync, submission, seq, pushed_at}, _from, state) do
-    {state, intent, seq} = receive_submission(state, submission, seq)
+  def handle_call({:render_sync, submission, seq, pushed_at}, {caller, _tag}, state) do
+    {state, intent, seq} = receive_submission(state, submission, seq, caller)
     FrameHandler.render_sync(state, intent, seq, pushed_at)
   end
 
   @impl true
   def handle_cast({:render, submission, seq, pushed_at}, state) do
-    {state, intent, seq} = receive_submission(state, submission, seq)
+    {state, intent, seq} = receive_submission(state, submission, seq, state.editor_pid)
     FrameHandler.enqueue(state, intent, seq, pushed_at)
   end
 
   @impl true
   def handle_info(message, state), do: FrameHandler.dispatch(message, state)
 
-  @spec receive_submission(t(), Submission.t(), non_neg_integer()) ::
+  @spec receive_submission(t(), Submission.t(), non_neg_integer(), State.editor_ref()) ::
           {t(), MingaEditor.RenderPipeline.Intent.t(), non_neg_integer()}
-  defp receive_submission(state, submission, requested_seq) do
+  defp receive_submission(state, submission, requested_seq, submitter) do
     {state, seq} = State.reserve_submission_sequence(state, requested_seq)
     FrameHandler.observe_submission(submission, seq)
-    {state, intent} = State.receive_submission(state, submission)
+    {state, intent, admission} = State.receive_submission(state, submission)
+    request_transcript_seed(admission, submitter)
     {state, intent, seq}
+  end
+
+  # The Editor owns the seed. A rejected update keeps the last good root visible
+  # until the Editor's next submission reseeds this renderer generation.
+  @spec request_transcript_seed(State.transcript_admission(), State.editor_ref()) :: :ok
+  defp request_transcript_seed(:admitted, _submitter), do: :ok
+
+  defp request_transcript_seed({:failed, error}, _submitter) do
+    Minga.Log.warning(
+      :render,
+      "Agent transcript update kept the last good transcript: #{Exception.message(error)}"
+    )
+  end
+
+  defp request_transcript_seed(:reseed_required, nil), do: :ok
+
+  defp request_transcript_seed(:reseed_required, submitter) when is_atom(submitter) do
+    case Process.whereis(submitter) do
+      nil -> :ok
+      pid -> request_transcript_seed(:reseed_required, pid)
+    end
+  end
+
+  defp request_transcript_seed(:reseed_required, submitter) when is_pid(submitter) do
+    send(submitter, {:renderer_transcript_reseed, self()})
+    :ok
   end
 
   @spec monotonic_now() :: integer()

@@ -1,7 +1,13 @@
 defmodule MingaEditor.RenderPipeline.WorkspaceIntent do
-  @moduledoc "Explicit allowlisted workspace portion of an Editor-to-Renderer intent."
+  @moduledoc """
+  Explicit allowlisted workspace portion of an Editor-to-Renderer intent.
+
+  The retained Agent transcript never crosses the boundary inside `agent_ui`. `agent_ui` carries an index-free snapshot and `agent_transcript_lines` carries the bounded scroll fact. `agent_transcript` has three phases: the Editor's `{:source, projection}` reference, `nil` while packed in a `MingaEditor.Renderer.Submission`, and the renderer-local `MingaEditor.RenderModel.UI.AgentChatResident` root after admission.
+  """
 
   alias MingaEditor.Agent.UIState
+  alias MingaEditor.Agent.UIState.TranscriptProjection
+  alias MingaEditor.RenderModel.UI.AgentChatResident
   alias MingaEditor.Session.State, as: SessionState
 
   @fields [
@@ -15,7 +21,9 @@ defmodule MingaEditor.RenderPipeline.WorkspaceIntent do
     :search,
     :last_search_pattern,
     :keymap_scope,
-    :launchpad
+    :launchpad,
+    :agent_transcript,
+    :agent_transcript_lines
   ]
 
   @enforce_keys @fields
@@ -32,15 +40,20 @@ defmodule MingaEditor.RenderPipeline.WorkspaceIntent do
           search: MingaEditor.State.Search.Projection.t(),
           last_search_pattern: String.t() | nil,
           keymap_scope: atom(),
-          launchpad: term()
+          launchpad: term(),
+          agent_transcript: agent_transcript(),
+          agent_transcript_lines: non_neg_integer()
         }
+
+  @type agent_transcript ::
+          {:source, TranscriptProjection.t()} | AgentChatResident.t() | nil
 
   @spec from_workspace(SessionState.t(), MingaEditor.State.Search.Projection.t()) :: t()
   def from_workspace(%SessionState{} = workspace, %MingaEditor.State.Search.Projection{} = search) do
     %__MODULE__{
       buffers: workspace.buffers,
       file_tree: SessionState.file_tree_state(workspace),
-      agent_ui: workspace.agent_ui,
+      agent_ui: UIState.render_snapshot(workspace.agent_ui),
       editing: workspace.editing,
       document_highlights: workspace.document_highlights,
       cmd_hover_link: workspace.hover_observation.link,
@@ -48,9 +61,21 @@ defmodule MingaEditor.RenderPipeline.WorkspaceIntent do
       search: search,
       last_search_pattern: workspace.search.last_pattern,
       keymap_scope: workspace.keymap_scope,
-      launchpad: workspace.launchpad
+      launchpad: workspace.launchpad,
+      agent_transcript: {:source, workspace.agent_ui.panel.transcript},
+      agent_transcript_lines: TranscriptProjection.line_count(workspace.agent_ui.panel.transcript)
     }
   end
+
+  @doc "Returns the Editor projection this intent was built from, or nil after packing."
+  @spec transcript_source(t()) :: TranscriptProjection.t() | nil
+  def transcript_source(%__MODULE__{agent_transcript: {:source, projection}}), do: projection
+  def transcript_source(%__MODULE__{}), do: nil
+
+  @doc "Installs the transcript phase for packing or for the renderer-local resident root."
+  @spec with_agent_transcript(t(), agent_transcript()) :: t()
+  def with_agent_transcript(%__MODULE__{} = workspace, transcript),
+    do: %{workspace | agent_transcript: transcript}
 
   @spec record_agent_scroll_metrics(t(), non_neg_integer(), pos_integer()) :: t()
   def record_agent_scroll_metrics(

@@ -104,7 +104,7 @@ defmodule MingaEditor.RenderPipeline.Input do
 
   @spec from_editor_state(MingaEditor.State.t()) :: t()
   def from_editor_state(%MingaEditor.State{} = state) do
-    intent = Intent.from_editor_state(state)
+    intent = admit_transcript_seed(Intent.from_editor_state(state))
 
     windows =
       Map.new(intent.windows, fn {id, %WindowIntent{} = carrier} ->
@@ -123,6 +123,20 @@ defmodule MingaEditor.RenderPipeline.Input do
       FontRegistry.new(),
       intent.frame.message_store
     )
+  end
+
+  # A local pipeline has no renderer process, so it admits a fresh seed exactly
+  # as a new renderer would.
+  @spec admit_transcript_seed(Intent.t()) :: Intent.t()
+  defp admit_transcript_seed(%Intent{} = intent) do
+    update =
+      case WorkspaceIntent.transcript_source(intent.workspace) do
+        nil -> nil
+        projection -> MingaEditor.Renderer.TranscriptUpdate.seed(projection, 0)
+      end
+
+    {:ok, root} = MingaEditor.RenderModel.UI.AgentChatBuilder.admit(nil, update, intent)
+    Intent.with_agent_transcript(intent, root)
   end
 
   @spec file_tree_state(t()) :: FileTreeState.t()

@@ -12,6 +12,8 @@ defmodule MingaEditor.Renderer.State do
   alias MingaEditor.Frontend.Manager, as: FrontendManager
   alias MingaEditor.Frontend.ResourcePolicy
   alias MingaEditor.RenderPipeline
+  alias MingaEditor.RenderModel.UI.AgentChatBuilder
+  alias MingaEditor.RenderModel.UI.AgentChatResident
   alias MingaEditor.RenderPipeline.Intent
   alias MingaEditor.RenderPipeline.Input
   alias MingaEditor.Renderer.AckLease
@@ -46,6 +48,7 @@ defmodule MingaEditor.Renderer.State do
           highlights: Submission.highlights(),
           semantic_tokens: Submission.semantic_tokens(),
           highlight_cache: HighlightCache.t(),
+          agent_transcript: AgentChatResident.t() | nil,
           frame_credit: frame_credit(),
           next_frame_seq: non_neg_integer(),
           ack_timeout_ms: pos_integer(),
@@ -66,6 +69,7 @@ defmodule MingaEditor.Renderer.State do
             highlights: %{},
             semantic_tokens: %{},
             highlight_cache: HighlightCache.new(),
+            agent_transcript: nil,
             frame_credit: :idle,
             next_frame_seq: 1,
             ack_timeout_ms: 2_000,
@@ -132,16 +136,47 @@ defmodule MingaEditor.Renderer.State do
     {%{state | next_frame_seq: max(state.next_frame_seq, next_frame_seq)}, context}
   end
 
-  @doc "Installs presentation updates before any submission can be rejected or coalesced."
-  @spec receive_submission(t(), Submission.t()) :: {t(), Intent.t()}
+  @typedoc """
+  `:reseed_required` means the transcript update did not match the resident base. `{:failed, error}` means a changed entry could not be encoded; the last good root stays installed and no seed is requested, because the same data would fail again.
+  """
+  @type transcript_admission ::
+          :admitted | :reseed_required | {:failed, Minga.Frontend.Adapter.GUI.EncodingError.t()}
+
+  @doc """
+  Installs presentation updates before any submission can be rejected or coalesced.
+
+  The transcript update is admitted against the resident root in mailbox order, and the returned intent carries the immutable root for this revision. A noncontiguous or cross-generation update leaves the last good root in place and returns `:reseed_required`.
+  """
+  @spec receive_submission(t(), Submission.t()) :: {t(), Intent.t(), transcript_admission()}
   def receive_submission(%__MODULE__{} = state, submission) do
     {intent, highlights, semantic_tokens} =
       Submission.materialize(submission, state.highlights, state.semantic_tokens)
 
     cache = HighlightCache.retain(state.highlight_cache, intent)
 
-    {%{state | highlights: highlights, semantic_tokens: semantic_tokens, highlight_cache: cache},
-     intent}
+    {admission, root} =
+      admit_transcript(state.agent_transcript, Submission.transcript(submission), intent)
+
+    {%{
+       state
+       | highlights: highlights,
+         semantic_tokens: semantic_tokens,
+         highlight_cache: cache,
+         agent_transcript: root
+     }, Intent.with_agent_transcript(intent, root), admission}
+  end
+
+  @spec admit_transcript(AgentChatResident.t() | nil, term(), Intent.t()) ::
+          {transcript_admission(), AgentChatResident.t() | nil}
+  defp admit_transcript(root, update, intent) do
+    case AgentChatBuilder.admit(root, update, intent) do
+      {:ok, root} -> {:admitted, root}
+      {:reseed, root} -> {:reseed_required, root}
+    end
+  rescue
+    # The codec rejects out-of-range fields instead of truncating them. Keep the
+    # last good transcript rather than losing the renderer process.
+    error in Minga.Frontend.Adapter.GUI.EncodingError -> {{:failed, error}, root}
   end
 
   @doc "Prepares derived highlights from this attempt's immutable sources."
@@ -259,11 +294,12 @@ defmodule MingaEditor.Renderer.State do
         %{dimension: dimension} = descriptor,
         %Intent{} = adapted
       )
-      when lease.generation == generation and lease.attempt.seq == frame_seq and
-             adapted != lease.attempt.intent do
+      when lease.generation == generation and lease.attempt.seq == frame_seq do
     rejected = lease.attempt.intent
+    # An adapted retry renders the original attempt's transcript root, never a fresh update.
+    adapted = Intent.with_agent_transcript(adapted, Intent.agent_transcript(rejected))
 
-    if advertised_dimension?(rejected, dimension) do
+    if adapted != rejected and advertised_dimension?(rejected, dimension) do
       rejection_state =
         RejectionState.adapt(state.rejection_state, generation, frame_seq, descriptor, adapted)
 

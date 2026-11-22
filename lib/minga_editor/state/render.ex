@@ -5,18 +5,26 @@ defmodule MingaEditor.State.Render do
   This value owns the renderer connection, render correlation, semantic message
   store, and layout observations committed from one editor revision. Renderer
   process caches remain owned by `MingaEditor.Renderer.Server`.
+
+  `transcript` is the Editor-to-Renderer transcript base for the connected
+  renderer generation: the revision and projection last submitted to it. It is
+  not a frontend acknowledgement and not a Session cursor. Rejected or
+  superseded frames do not acknowledge it; the renderer admits every submission
+  in mailbox order, so the next update is always relative to the last one sent.
   """
 
   alias MingaEditor.FocusTree
   alias MingaEditor.Layout
   alias MingaEditor.State.RenderCorrelation
   alias MingaEditor.Renderer.Submission
+  alias MingaEditor.Renderer.TranscriptUpdate
   alias MingaEditor.Renderer.TextInteractionIndex.Reader
   alias MingaEditor.RenderPipeline.Intent
   alias MingaEditor.UI.Panel.MessageStore
 
   @type t :: %__MODULE__{
           renderer: pid() | nil,
+          transcript: TranscriptUpdate.base(),
           text_interaction_reader: Reader.t() | nil,
           submitted_highlights: Submission.revisions() | nil,
           submitted_semantic_tokens: Submission.revisions(),
@@ -28,6 +36,7 @@ defmodule MingaEditor.State.Render do
         }
 
   defstruct renderer: nil,
+            transcript: {:unseeded, 0},
             text_interaction_reader: nil,
             submitted_highlights: nil,
             submitted_semantic_tokens: %{},
@@ -54,6 +63,7 @@ defmodule MingaEditor.State.Render do
       do: %{
         render
         | renderer: renderer,
+          transcript: unseeded(render.transcript),
           text_interaction_reader: nil,
           submitted_highlights: nil,
           submitted_semantic_tokens: %{}
@@ -74,26 +84,48 @@ defmodule MingaEditor.State.Render do
       do: %{
         render
         | renderer: renderer,
+          transcript: unseeded(render.transcript),
           text_interaction_reader: reader,
           submitted_highlights: nil,
           submitted_semantic_tokens: %{}
       }
 
+  @doc "Sends the next submission as a transcript seed after the named renderer lost its base."
+  @spec require_transcript_seed(t(), pid()) :: t()
+  def require_transcript_seed(%__MODULE__{renderer: renderer} = render, renderer)
+      when is_pid(renderer),
+      do: %{render | transcript: unseeded(render.transcript)}
+
+  def require_transcript_seed(%__MODULE__{} = render, _other_renderer), do: render
+
+  @spec unseeded(TranscriptUpdate.base()) :: TranscriptUpdate.base()
+  defp unseeded({:unseeded, _revision} = base), do: base
+  defp unseeded({:submitted, revision, _projection}), do: {:unseeded, revision}
+
   @doc "Packs one frame and remembers source revisions sent to the connected renderer."
   @spec prepare_submission(t(), Intent.t(), Submission.revisions()) :: {t(), Submission.t()}
   def prepare_submission(%__MODULE__{} = render, %Intent{} = intent, semantic_revisions) do
+    {transcript, update} = TranscriptUpdate.advance_base(render.transcript, intent)
+
     submission =
       case render.submitted_highlights do
         nil ->
-          Submission.full(intent)
+          Submission.full(intent, update)
 
         previous ->
-          Submission.delta(intent, previous, render.submitted_semantic_tokens, semantic_revisions)
+          Submission.delta(
+            intent,
+            previous,
+            render.submitted_semantic_tokens,
+            semantic_revisions,
+            update
+          )
       end
 
     {%{
        render
-       | submitted_highlights: intent.frame.highlighting.revisions,
+       | transcript: transcript,
+         submitted_highlights: intent.frame.highlighting.revisions,
          submitted_semantic_tokens: semantic_revisions
      }, submission}
   end

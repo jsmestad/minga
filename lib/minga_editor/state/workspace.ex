@@ -92,6 +92,17 @@ defmodule MingaEditor.State.Workspace do
     workspace
   end
 
+  @doc "Returns a renderer-boundary copy without retained agent transcript history."
+  @spec render_snapshot(t()) :: t()
+  def render_snapshot(%__MODULE__{payload: %Agent{agent_ui: %UIState{} = agent_ui}} = workspace) do
+    case UIState.render_snapshot(agent_ui) do
+      ^agent_ui -> workspace
+      snapshot -> set_agent_ui(workspace, snapshot)
+    end
+  end
+
+  def render_snapshot(%__MODULE__{} = workspace), do: workspace
+
   @doc "Sets the workspace-owned agent UI projection."
   @spec set_agent_ui(t(), UIState.t() | nil) :: t()
   def set_agent_ui(%__MODULE__{payload: %Agent{} = payload} = workspace, %UIState{} = agent_ui) do

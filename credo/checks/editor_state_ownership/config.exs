@@ -400,6 +400,7 @@ defmodule Minga.Credo.EditorStateOwnership.Config do
     "MingaEditor.Renderer.ReceiptProjection",
     "MingaEditor.Renderer.RenderReceipt",
     "MingaEditor.Renderer.Submission",
+    "MingaEditor.Renderer.TranscriptUpdate",
     "Minga.Keymap.Scope",
     "MingaAgent.Branch",
     "MingaAgent.Changeset.BudgetExhaustedEvent",

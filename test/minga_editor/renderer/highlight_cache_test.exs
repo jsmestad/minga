@@ -172,7 +172,9 @@ defmodule MingaEditor.Renderer.HighlightCacheTest do
     intent: intent,
     buffer: buffer
   } do
-    {state, restored} = State.receive_submission(State.new([]), Submission.full(intent))
+    {state, restored, _admission} =
+      State.receive_submission(State.new([]), Submission.full(intent))
+
     assert state.highlight_cache == HighlightCache.new()
     {state, input} = BufferChanges.prepare(state, restored)
     reset = State.reset_frontend(state, 1)
@@ -183,7 +185,7 @@ defmodule MingaEditor.Renderer.HighlightCacheTest do
     assert down.highlight_cache == HighlightCache.new()
     assert down.highlights == state.highlights
     empty = Intent.with_highlight_payload(intent, %{}, %{})
-    {removed, _} = State.receive_submission(state, Submission.full(empty))
+    {removed, _, _admission} = State.receive_submission(state, Submission.full(empty))
     assert removed.highlight_cache == HighlightCache.new()
   end
 
@@ -197,13 +199,13 @@ defmodule MingaEditor.Renderer.HighlightCacheTest do
 
     plain = Intent.from_editor_state(empty)
     {state, _} = BufferChanges.prepare(State.new([]), plain)
-    {next, _} = State.receive_submission(state, Submission.full(plain))
+    {next, _, _admission} = State.receive_submission(state, Submission.full(plain))
     assert next.highlight_cache == state.highlight_cache
 
     {state, _} = BufferChanges.prepare(state, intent)
     changed = %{editor | lsp: LSP.clear_semantic_tokens(editor.lsp, buffer)}
     hidden = %{Intent.from_editor_state(changed) | windows: %{}}
-    {next, _} = State.receive_submission(state, Submission.full(hidden))
+    {next, _, _admission} = State.receive_submission(state, Submission.full(hidden))
     assert next.highlight_cache == HighlightCache.new()
   end
 
@@ -212,7 +214,7 @@ defmodule MingaEditor.Renderer.HighlightCacheTest do
     intent: intent,
     buffer: buffer
   } do
-    {state, first} = State.receive_submission(State.new([]), Submission.full(intent))
+    {state, first, _admission} = State.receive_submission(State.new([]), Submission.full(intent))
     {state, old} = BufferChanges.prepare(state, first)
 
     editor = %{
@@ -224,7 +226,7 @@ defmodule MingaEditor.Renderer.HighlightCacheTest do
     }
 
     latest = Intent.from_editor_state(editor)
-    {state, latest} = State.receive_submission(state, Submission.full(latest))
+    {state, latest, _admission} = State.receive_submission(state, Submission.full(latest))
     {state, current} = BufferChanges.prepare(state, latest)
     refute current.composed_highlights[buffer].spans == old.composed_highlights[buffer].spans
     {state, retried} = BufferChanges.prepare(state, first)

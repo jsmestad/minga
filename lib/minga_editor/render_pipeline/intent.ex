@@ -2,7 +2,7 @@ defmodule MingaEditor.RenderPipeline.Intent do
   @moduledoc """
   Cache-free Editor-to-Renderer frame intent.
 
-  Pipeline and workspace fields use explicit allowlisted boundary structs; windows use `WindowIntent`. No `Input`, editor `Window`, renderer cache, resident store, font registry, or acknowledgement state crosses the boundary.
+  Pipeline and workspace fields use explicit allowlisted boundary structs; windows use `WindowIntent`. No `Input`, editor `Window`, renderer cache, resident store, font registry, or acknowledgement state crosses the boundary. The retained Agent transcript travels beside the packed intent as a `MingaEditor.Renderer.TranscriptUpdate`; after admission the renderer installs its local resident root into `workspace.agent_transcript`.
   """
 
   alias MingaEditor.RenderPipeline.FrameIntent
@@ -60,6 +60,16 @@ defmodule MingaEditor.RenderPipeline.Intent do
       intent
       | frame: FrameIntent.with_highlight_payload(intent.frame, highlights, semantic_tokens)
     }
+
+  @doc "Replaces the transcript phase when packing, admitting or retrying a renderer submission."
+  @spec with_agent_transcript(t(), WorkspaceIntent.agent_transcript()) :: t()
+  def with_agent_transcript(%__MODULE__{} = intent, transcript),
+    do: %{intent | workspace: WorkspaceIntent.with_agent_transcript(intent.workspace, transcript)}
+
+  @doc "Returns the renderer-local transcript root admitted for this intent, if any."
+  @spec agent_transcript(t()) :: WorkspaceIntent.agent_transcript()
+  def agent_transcript(%__MODULE__{workspace: %WorkspaceIntent{agent_transcript: transcript}}),
+    do: transcript
 
   @doc "Marks semantic frame state for a recovery keyframe without adding cache state."
   @spec force_keyframe(t()) :: t()

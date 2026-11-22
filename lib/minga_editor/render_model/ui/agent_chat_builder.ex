@@ -15,6 +15,9 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.UIState.Panel
   alias MingaEditor.Agent.UIState.TranscriptProjection
+  alias MingaEditor.Renderer.TranscriptUpdate
+  alias MingaEditor.RenderModel.UI.AgentChatResident
+  alias MingaEditor.RenderPipeline.Intent
   alias MingaEditor.Agent.View.PromptFrame
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.State.TabBar
@@ -43,8 +46,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
 
   @spec build_visible(Context.t(), UIState.chat_lifecycle()) :: AgentChat.t()
   defp build_visible(%Context{prompt: nil} = ctx, _lifecycle) do
-    shell_agent = TraditionalState.agent(ctx.intent.frame.shell_state)
-    {messages, truncated?, epoch} = resident_transcript(ctx, shell_agent, nil)
+    {messages, truncated?, epoch} = resident_transcript(ctx)
 
     %AgentChat{
       visible?: true,
@@ -67,8 +69,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
     {cursor_line, cursor_col} = projection.cursor
     visible_rows = projection.visible_rows
 
-    {resident_messages, resident_truncated?, transcript_epoch} =
-      resident_transcript(ctx, shell_agent, session)
+    {resident_messages, resident_truncated?, transcript_epoch} = resident_transcript(ctx)
 
     %AgentChat{
       visible?: true,
@@ -98,37 +99,88 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
     }
   end
 
-  @spec resident_transcript(Context.t(), MingaEditor.State.Agent.t(), pid() | nil) ::
-          {[AgentChat.message()], boolean(), non_neg_integer()}
-  defp resident_transcript(
-         %Context{workspace: %{agent_ui: %{panel: %Panel{transcript: %{generation: nil}}}}},
-         _agent,
-         nil
-       ),
-       do: {[], false, 0}
-
-  defp resident_transcript(ctx, agent, session) do
-    agent_ui = ctx.workspace.agent_ui
-    panel = agent_ui.panel
-    approval = pending_approval(agent.pending_approval, session)
-
-    retained =
-      retained_scope(
-        agent_ui.connection,
-        ctx.intent.frame.shell_state,
-        session,
-        panel.transcript.generation
-      )
-
-    {messages, truncated?} =
-      panel.transcript
-      |> TranscriptProjection.presentation()
-      |> build_gui_messages(approval, retained)
-      |> append_resident_transcript_enrichments(SemanticUIRegistry.default_table())
-      |> select_resident_messages()
-
-    {messages, truncated?, TranscriptProjection.presentation_epoch(panel.transcript)}
+  # The resident root was admitted with this attempt's intent. Enumerating its
+  # selected suffix is the still-unmigrated adapter boundary; no body is
+  # converted or sized here.
+  @spec resident_transcript(Context.t()) :: {[AgentChat.message()], boolean(), non_neg_integer()}
+  defp resident_transcript(%Context{workspace: %{agent_transcript: %AgentChatResident{} = root}}) do
+    {messages, truncated?} = AgentChatResident.resident_messages(root)
+    {messages, truncated?, root.epoch}
   end
+
+  defp resident_transcript(%Context{}), do: {[], false, 0}
+
+  @doc """
+  Admits one Editor transcript update into the renderer-local resident root.
+
+  Runs at renderer admission, in mailbox order, before frames are coalesced. Decorations come from the same intent: the displayed Session's pending approval, the retained-output scope and the registry footer. Only changed entries and exactly affected decorated rows are derived and sized.
+  """
+  @spec admit(AgentChatResident.t() | nil, TranscriptUpdate.t() | nil, Intent.t()) ::
+          AgentChatResident.admission()
+  def admit(root, nil, %Intent{}), do: {:ok, root}
+
+  def admit(root, update, %Intent{} = intent) do
+    AgentChatResident.admit(root, update, resident_context(update_identity(update), intent))
+  end
+
+  @spec update_identity(TranscriptUpdate.t()) :: TranscriptUpdate.identity()
+  defp update_identity(update), do: elem(update, 1)
+
+  @spec resident_context(TranscriptUpdate.identity(), Intent.t()) :: AgentChatResident.context()
+  defp resident_context(identity, %Intent{} = intent) do
+    agent_ui = intent.workspace.agent_ui
+    shell_state = intent.frame.shell_state
+    session = transcript_session(agent_ui)
+    approval = pending_approval(shell_pending_approval(shell_state), session)
+    scope = retained_scope(agent_ui.connection, shell_state, session, identity)
+
+    %{
+      scope: scope,
+      approval: approval_target(approval),
+      footer: resident_footer(identity, session),
+      max_bytes: Minga.Config.get(:agent_transcript_resident_max_bytes),
+      derive: fn item, decoration ->
+        item |> maybe_style_message(decoration) |> to_core_message(scope)
+      end,
+      size: &AgentChatMessageCodec.resident_entry_size/1,
+      tool_id: &item_tool_id/1,
+      decoratable?: &running_tool?/1
+    }
+  end
+
+  # A missing composer or a non-conversation lifecycle presents no Session
+  # controls, matching the composer-unavailable chat model.
+  @spec transcript_session(UIState.t()) :: pid() | nil
+  defp transcript_session(%UIState{panel: %Panel{prompt_buffer: nil}}), do: nil
+  defp transcript_session(%UIState{chat_lifecycle: {:conversation, session}}), do: session
+  defp transcript_session(%UIState{}), do: nil
+
+  @spec shell_pending_approval(term()) :: PendingApproval.t() | nil
+  defp shell_pending_approval(%TraditionalState{} = shell_state),
+    do: TraditionalState.agent(shell_state).pending_approval
+
+  defp shell_pending_approval(_shell_state), do: nil
+
+  @spec approval_target(approval() | nil) :: {String.t(), approval()} | nil
+  defp approval_target(%PublicApproval{target: %ApprovalTarget{tool_call_id: id}} = approval),
+    do: {id, approval}
+
+  defp approval_target(nil), do: nil
+
+  # Without a presentation or a Session there is no transcript, so no footer.
+  @spec resident_footer(TranscriptUpdate.identity(), pid() | nil) :: [AgentChat.message()]
+  defp resident_footer(nil, nil), do: []
+
+  defp resident_footer(_identity, _session),
+    do: SemanticUIRegistry.transcript_enrichments(SemanticUIRegistry.default_table())
+
+  @spec item_tool_id(TranscriptProjection.Index.item()) :: String.t() | nil
+  defp item_tool_id({_id, {:tool_call, %ToolCall{id: id}}, _style}), do: id
+  defp item_tool_id(_item), do: nil
+
+  @spec running_tool?(TranscriptProjection.Index.item()) :: boolean()
+  defp running_tool?({_id, {:tool_call, %ToolCall{status: :running}}, _style}), do: true
+  defp running_tool?(_item), do: false
 
   @spec chat_presentation(UIState.chat_lifecycle()) :: {AgentChat.lifecycle(), pid() | nil}
   defp chat_presentation({:conversation, session}), do: {:conversation, session}
@@ -189,7 +241,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
 
   defp queue_target(_target, _save, _session), do: nil
 
-  @spec retained_scope(term(), TraditionalState.t(), pid() | nil, reference() | nil) ::
+  @spec retained_scope(term(), term(), pid() | nil, reference() | nil) ::
           RetainedOutputTarget.scope() | nil
   defp retained_scope(
          %{target: %{session: session, epoch: epoch}},
@@ -197,7 +249,8 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
          session,
          generation
        )
-       when is_pid(session) and is_reference(generation) do
+       when is_pid(session) and is_reference(generation) and
+              is_struct(shell_state, TraditionalState) do
     case TraditionalState.tab_bar(shell_state) do
       %TabBar{} = tabs -> {TabBar.active_workspace_id(tabs), epoch, generation}
       nil -> nil
@@ -205,16 +258,6 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
   end
 
   defp retained_scope(_connection, _shell_state, _session, _generation), do: nil
-
-  @doc false
-  @spec select_resident_messages([AgentChat.message()], pos_integer()) ::
-          {[AgentChat.message()], boolean()}
-  def select_resident_messages(
-        messages,
-        max_bytes \\ Minga.Config.get(:agent_transcript_resident_max_bytes)
-      ) do
-    AgentChat.resident_suffix(messages, max_bytes, &AgentChatMessageCodec.resident_entry_size/1)
-  end
 
   @spec build_prompt_completion(MingaEditor.Agent.UIState.Panel.t()) :: PromptCompletion.t() | nil
   defp build_prompt_completion(%{mention_completion: %{candidates: candidates} = comp})
@@ -238,41 +281,6 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
   end
 
   defp build_prompt_completion(_panel), do: nil
-
-  # The resident transcript is never windowed, so its enrichments always sit at
-  # the true end (independent of scroll pin state).
-  @spec append_resident_transcript_enrichments(
-          [{pos_integer(), term()}],
-          SemanticUIRegistry.table()
-        ) :: [{pos_integer(), term()}]
-  defp append_resident_transcript_enrichments(messages, agent_ui_registry) do
-    messages ++ SemanticUIRegistry.transcript_enrichments(agent_ui_registry)
-  end
-
-  # A tool ID can recur; a pending target decorates only its latest transcript occurrence.
-  @spec build_gui_messages(
-          [TranscriptProjection.Index.item()],
-          approval() | nil,
-          RetainedOutputTarget.scope() | nil
-        ) ::
-          [{pos_integer(), term()}]
-  defp build_gui_messages(items, nil, scope) do
-    Enum.map(items, fn item -> item |> maybe_style_message(nil) |> to_core_message(scope) end)
-  end
-
-  defp build_gui_messages(items, %PublicApproval{} = pending_approval, scope) do
-    {messages, _remaining} =
-      :lists.mapfoldr(
-        fn entry, approval ->
-          projected = entry |> maybe_style_message(approval) |> to_core_message(scope)
-          {projected, remaining_approval(entry, approval)}
-        end,
-        pending_approval,
-        items
-      )
-
-    messages
-  end
 
   @spec maybe_style_message(TranscriptProjection.Index.item(), approval() | nil) ::
           {pos_integer(), term()}
@@ -312,16 +320,6 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
   end
 
   defp maybe_styled_tool_call(id, _tc, _cache_entry, fallback), do: {id, fallback}
-
-  @spec remaining_approval(TranscriptProjection.Index.item(), approval() | nil) ::
-          approval() | nil
-  defp remaining_approval(
-         {_id, {:tool_call, %ToolCall{id: tool_call_id}}, _style},
-         %PublicApproval{target: %ApprovalTarget{tool_call_id: tool_call_id}}
-       ),
-       do: nil
-
-  defp remaining_approval(_message, approval), do: approval
 
   @spec maybe_inline_approval({pos_integer(), term()}, approval() | nil) ::
           {pos_integer(), term()}

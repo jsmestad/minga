@@ -323,6 +323,15 @@ defmodule MingaEditor.Agent.UIState do
 
   # ── Scrolling (delegates to Minga.Editing.Scroll) ────────────────────────────────
 
+  @doc "Returns a renderer-boundary copy whose transcript travels separately as presentation changes."
+  @spec render_snapshot(t()) :: t()
+  def render_snapshot(%__MODULE__{panel: panel} = state) do
+    case Panel.render_snapshot(panel) do
+      ^panel -> state
+      snapshot -> %{state | panel: snapshot}
+    end
+  end
+
   @doc "Records transcript scroll metrics observed during rendering."
   @spec record_scroll_metrics(t(), non_neg_integer(), pos_integer()) :: t()
   def record_scroll_metrics(%__MODULE__{panel: panel} = state, total_lines, visible_height) do
