@@ -35,12 +35,12 @@ defmodule MingaAgent.Tools.LspRename do
       when is_binary(path) and is_integer(line) and is_integer(col) and is_binary(new_name) do
     abs_path = Path.expand(path)
 
-    case LspBridge.client_for_path(abs_path) do
-      {:ok, client} ->
+    case LspBridge.document_for_path(abs_path) do
+      {:ok, %{client: client} = document} ->
         encoding = Client.encoding(client)
 
-        with {:ok, _} <- prepare_rename(client, abs_path, line, col, encoding),
-             {:ok, workspace_edit} <- do_rename(client, abs_path, line, col, new_name, encoding) do
+        with {:ok, _} <- prepare_rename(document, abs_path, line, col, encoding),
+             {:ok, workspace_edit} <- do_rename(document, line, col, new_name, encoding) do
           apply_rename(workspace_edit, new_name, client, encoding, context)
         end
 
@@ -52,15 +52,15 @@ defmodule MingaAgent.Tools.LspRename do
   # ── Private ────────────────────────────────────────────────────────────────
 
   @spec prepare_rename(
-          pid(),
+          LspBridge.document(),
           String.t(),
           non_neg_integer(),
           non_neg_integer(),
           Minga.LSP.PositionEncoding.encoding()
         ) ::
           {:ok, map()} | {:error, String.t()}
-  defp prepare_rename(client, abs_path, line, col, encoding) do
-    params = LspBridge.position_params(abs_path, line, col, encoding)
+  defp prepare_rename(%{client: client} = document, abs_path, line, col, encoding) do
+    params = LspBridge.position_params(document, line, col, encoding)
 
     case LspBridge.request_sync(client, "textDocument/prepareRename", params) do
       {:ok, nil} ->
@@ -81,17 +81,17 @@ defmodule MingaAgent.Tools.LspRename do
   end
 
   @spec do_rename(
-          pid(),
-          String.t(),
+          LspBridge.document(),
           non_neg_integer(),
           non_neg_integer(),
           String.t(),
           Minga.LSP.PositionEncoding.encoding()
         ) ::
           {:ok, map()} | {:error, String.t()}
-  defp do_rename(client, abs_path, line, col, new_name, encoding) do
+  defp do_rename(%{client: client} = document, line, col, new_name, encoding) do
     params =
-      LspBridge.position_params(abs_path, line, col, encoding)
+      document
+      |> LspBridge.position_params(line, col, encoding)
       |> Map.put("newName", new_name)
 
     case LspBridge.request_sync(client, "textDocument/rename", params) do

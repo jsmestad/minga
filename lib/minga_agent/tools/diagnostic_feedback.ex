@@ -22,10 +22,8 @@ defmodule MingaAgent.Tools.DiagnosticFeedback do
   """
 
   alias MingaAgent.Tools.LspBridge
-  alias Minga.Buffer
   alias Minga.Diagnostics
   alias Minga.Events
-  alias Minga.LSP.SyncServer
 
   @default_timeout 5_000
   @default_quiet_period 500
@@ -48,12 +46,11 @@ defmodule MingaAgent.Tools.DiagnosticFeedback do
     quiet_ms = Keyword.get(opts, :quiet_period, @default_quiet_period)
     abs_path = Path.expand(file_path)
 
-    if has_lsp_client?(abs_path) do
-      uri = LspBridge.path_to_uri(abs_path)
-      summary = do_await(uri, timeout, quiet_ms)
-      {:ok, summary}
-    else
-      {:skip, "No LSP diagnostics available for this file."}
+    # The server publishes diagnostics under the URI it opened the document
+    # with, which can name a symlink rather than the agent's real path.
+    case LspBridge.document_for_path(abs_path) do
+      {:ok, %{uri: uri}} -> {:ok, do_await(uri, timeout, quiet_ms)}
+      {:error, _reason} -> {:skip, "No LSP diagnostics available for this file."}
     end
   end
 
@@ -72,16 +69,6 @@ defmodule MingaAgent.Tools.DiagnosticFeedback do
   end
 
   # ── Private ────────────────────────────────────────────────────────────────
-
-  @spec has_lsp_client?(String.t()) :: boolean()
-  defp has_lsp_client?(abs_path) do
-    case Buffer.pid_for_path(abs_path) do
-      {:ok, buf_pid} -> SyncServer.clients_for_buffer(buf_pid) != []
-      :not_found -> false
-    end
-  rescue
-    _ -> false
-  end
 
   @spec do_await(String.t(), non_neg_integer(), non_neg_integer()) :: String.t()
   defp do_await(uri, timeout, quiet_ms) do
