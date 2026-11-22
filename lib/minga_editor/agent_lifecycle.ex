@@ -108,6 +108,9 @@ defmodule MingaEditor.AgentLifecycle do
       ui
       |> UIState.replace_panel(panel)
       |> UIState.project_model_selection(Map.get(snapshot, :model_selection))
+      |> UIState.replace_activity(
+        Activity.restore_running_tools(ui.view.activity, Map.get(snapshot, :active_tools, []))
+      )
 
     ui =
       case Map.get(snapshot, :connection) do

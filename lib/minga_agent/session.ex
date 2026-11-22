@@ -362,6 +362,7 @@ defmodule MingaAgent.Session do
           queue_target: queue_target() | nil,
           error: String.t() | nil,
           active_tool_name: String.t() | nil,
+          active_tools: [TurnExecution.active_tool()],
           checklist: Checklist.t(),
           credentials_configured: boolean(),
           credential_readiness: Credentials.readiness(),
@@ -1875,6 +1876,7 @@ defmodule MingaAgent.Session do
       queue_target: displayed_queue_target(state),
       error: TurnExecution.error(state.turn_execution),
       active_tool_name: TurnExecution.active_tool_name(state.turn_execution),
+      active_tools: TurnExecution.active_tools(state.turn_execution),
       checklist: state.checklist,
       credentials_configured: state.credentials_configured,
       credential_readiness: state.credential_readiness,
@@ -4778,7 +4780,7 @@ defmodule MingaAgent.Session do
     state = append_msg(state, {:tool_call, tool_call})
 
     state
-    |> broadcast({:tool_started, event.name, event.args})
+    |> broadcast({:tool_started, event.tool_call_id, event.name, event.args})
     |> notify_messages_changed()
   end
 
@@ -4853,14 +4855,15 @@ defmodule MingaAgent.Session do
       [] ->
         state
 
-      [_tool | _rest] ->
-        transcript =
-          Enum.reduce(TurnExecution.active_tools(execution), state.transcript, fn {id, _name},
-                                                                                  transcript ->
-            Transcript.update_tool_call(transcript, id, &ToolCall.abort/1)
+      tools ->
+        state =
+          Enum.reduce(tools, state, fn {id, _name}, state ->
+            transcript = Transcript.update_tool_call(state.transcript, id, &ToolCall.abort/1)
+            state = %{state | transcript: transcript}
+            record_critical_event(state, :tool_call_interrupted, %{tool_call_id: id})
+            broadcast(state, {:tool_interrupted, id})
           end)
 
-        state = %{state | transcript: transcript}
         if notify?, do: notify_messages_changed(state), else: state
     end
   end
@@ -6864,7 +6867,7 @@ defmodule MingaAgent.Session do
   defp event_log_entry({:text_delta, delta}), do: {:assistant_delta, %{delta: delta}}
   defp event_log_entry({:thinking_delta, delta}), do: {:thinking_delta, %{delta: delta}}
 
-  defp event_log_entry({:tool_started, _name, _args}), do: nil
+  defp event_log_entry({:tool_started, _tool_call_id, _name, _args}), do: nil
 
   defp event_log_entry({:tool_update, tool_call_id, name, partial_result}),
     do:

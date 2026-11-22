@@ -60,6 +60,26 @@ defmodule MingaEditor.Agent.EventRoutingTest do
     }
   end
 
+  defp tool_event_state(session) do
+    {tab_bar, workspace} =
+      TabBar.add_workspace(TabBar.new(Tab.new_agent(1, "Agent")), "Agent", session)
+
+    tab_bar = TabBar.move_tab_to_workspace(tab_bar, 1, workspace.id)
+
+    %EditorState{
+      frontend: %MingaEditor.State.Frontend{backend: :gui, port_manager: nil},
+      workspace: workspace(),
+      shell_runtime:
+        Runtime.new(
+          Runtime.default_entry(),
+          TraditionalState.install_tab_bar(
+            TraditionalState.replace_agent(%TraditionalState{}, %AgentState{}),
+            tab_bar
+          )
+        )
+    }
+  end
+
   defp fake_session_pid do
     pid =
       spawn(fn ->
@@ -309,36 +329,23 @@ defmodule MingaEditor.Agent.EventRoutingTest do
   end
 
   describe "Agent.Events.dispatch/3 tool status" do
-    test "tool_started and tool_ended keep active_tool_name synced with the session snapshot" do
+    test "finishing the newer tool reveals the call that survived a provider error" do
       {:ok, session} = start_supervised({Session, provider_opts: []})
-      :sys.get_state(session)
+      :ok = Session.subscribe(session)
       assert :ok = Session.send_prompt(session, "route tool events")
+      :erlang.trace(session, true, [:receive, {:tracer, self()}])
 
-      {tab_bar, workspace} =
-        TabBar.add_workspace(TabBar.new(Tab.new_agent(1, "Agent")), "Agent", session)
-
-      tab_bar = TabBar.move_tab_to_workspace(tab_bar, 1, workspace.id)
-
-      state = %EditorState{
-        frontend: %MingaEditor.State.Frontend{backend: :gui, port_manager: nil},
-        workspace: workspace(),
-        shell_runtime:
-          Runtime.new(
-            Runtime.default_entry(),
-            TraditionalState.install_tab_bar(
-              TraditionalState.replace_agent(%TraditionalState{}, %AgentState{}),
-              tab_bar
-            )
-          )
-      }
+      state = tool_event_state(session)
 
       Minga.Test.SessionCase.send_provider_event(
         session,
         %Event.ToolStart{tool_call_id: "tc1", name: "alpha", args: %{}}
       )
 
-      :sys.get_state(session)
-      state = Events.dispatch(state, session, {:tool_started, "alpha", %{}})
+      assert_receive {:agent_event, ^session, {:tool_started, "tc1", "alpha", %{}} = started},
+                     5_000
+
+      state = Events.dispatch(state, session, started)
 
       assert AgentState.active_tool_name(
                MingaEditor.Shell.Traditional.State.agent(state.shell_runtime.state)
@@ -346,31 +353,27 @@ defmodule MingaEditor.Agent.EventRoutingTest do
 
       Minga.Test.SessionCase.send_provider_event(
         session,
+        %Event.Error{kind: :tool_error, message: "A recoverable provider error"}
+      )
+
+      assert_receive {:agent_event, ^session, {:status_changed, :error} = status}, 5_000
+      assert_receive {:agent_event, ^session, {:error, _message} = error}, 5_000
+
+      state = state |> Events.dispatch(session, status) |> Events.dispatch(session, error)
+      assert state.workspace.agent_ui.view.activity.active_action == "Running alpha"
+
+      Minga.Test.SessionCase.send_provider_event(
+        session,
         %Event.ToolStart{tool_call_id: "tc2", name: "beta", args: %{}}
       )
 
-      :sys.get_state(session)
-      state = Events.dispatch(state, session, {:tool_started, "beta", %{}})
+      assert_receive {:agent_event, ^session, {:tool_started, "tc2", "beta", %{}} = started},
+                     5_000
 
-      assert AgentState.active_tool_name(
-               MingaEditor.Shell.Traditional.State.agent(state.shell_runtime.state)
-             ) == "beta"
+      state = Events.dispatch(state, session, started)
 
-      alpha_end = %Event.ToolEnd{
-        tool_call_id: "tc1",
-        name: "alpha",
-        result: "contents",
-        outcome: :complete
-      }
-
-      Minga.Test.SessionCase.send_provider_event(session, alpha_end)
-
-      :sys.get_state(session)
-      state = Events.dispatch(state, session, {:tool_ended, alpha_end})
-
-      assert AgentState.active_tool_name(
-               MingaEditor.Shell.Traditional.State.agent(state.shell_runtime.state)
-             ) == "beta"
+      assert AgentState.active_tool_name(TraditionalState.agent(state.shell_runtime.state)) ==
+               "beta"
 
       beta_end = %Event.ToolEnd{
         tool_call_id: "tc2",
@@ -381,18 +384,81 @@ defmodule MingaEditor.Agent.EventRoutingTest do
 
       Minga.Test.SessionCase.send_provider_event(session, beta_end)
 
-      :sys.get_state(session)
-      state = Events.dispatch(state, session, {:tool_ended, beta_end})
+      assert_receive {:agent_event, ^session,
+                      {:tool_ended, %Event.ToolEnd{tool_call_id: "tc2"}} = ended},
+                     5_000
 
-      assert AgentState.active_tool_name(
-               MingaEditor.Shell.Traditional.State.agent(state.shell_runtime.state)
-             ) == nil
+      state = Events.dispatch(state, session, ended)
+
+      assert AgentState.active_tool_name(TraditionalState.agent(state.shell_runtime.state)) ==
+               "alpha"
+
+      assert state.workspace.agent_ui.view.activity.active_action == "Running alpha"
+
+      alpha_end = %Event.ToolEnd{
+        tool_call_id: "tc1",
+        name: "alpha",
+        result: "contents",
+        outcome: :complete
+      }
+
+      Minga.Test.SessionCase.send_provider_event(session, alpha_end)
+
+      assert_receive {:agent_event, ^session,
+                      {:tool_ended, %Event.ToolEnd{tool_call_id: "tc1"}} = ended},
+                     5_000
+
+      state = Events.dispatch(state, session, ended)
+      assert AgentState.active_tool_name(TraditionalState.agent(state.shell_runtime.state)) == nil
+
+      trace_barrier = :erlang.trace_delivered(session)
+      assert_receive {:trace_delivered, ^session, ^trace_barrier}
+      refute_received {:trace, ^session, :receive, {:"$gen_call", _from, :editor_snapshot}}
+    end
+
+    test "a crashed provider retires its exact running tool before reporting the failure" do
+      session = start_supervised!({Session, provider_opts: [], provider_restart_max_attempts: 0})
+      :ok = Session.subscribe(session)
+      assert :ok = Session.send_prompt(session, "run a tool")
+      provider = Session.get_provider(session)
+      :erlang.trace(session, true, [:receive, {:tracer, self()}])
+
+      Minga.Test.SessionCase.send_provider_event(
+        session,
+        %Event.ToolStart{tool_call_id: "crashed-tool", name: "alpha", args: %{}}
+      )
+
+      assert_receive {:agent_event, ^session,
+                      {:tool_started, "crashed-tool", "alpha", %{}} =
+                        started},
+                     5_000
+
+      state = Events.dispatch(tool_event_state(session), session, started)
+      assert state.workspace.agent_ui.view.activity.active_action == "Running alpha"
+
+      Process.exit(provider, :kill)
+
+      assert_receive {:agent_event, ^session, {event, payload}}
+                     when event == :tool_interrupted or
+                            (event == :status_changed and payload == :error),
+                     5_000
+
+      assert {event, payload} == {:tool_interrupted, "crashed-tool"}
+      interrupted = {event, payload}
+      assert_receive {:agent_event, ^session, {:status_changed, :error} = status}, 5_000
+      state = state |> Events.dispatch(session, interrupted) |> Events.dispatch(session, status)
+      assert state.workspace.agent_ui.view.activity.active_action == ""
+      assert AgentState.active_tool_name(TraditionalState.agent(state.shell_runtime.state)) == nil
+
+      trace_barrier = :erlang.trace_delivered(session)
+      assert_receive {:trace_delivered, ^session, ^trace_barrier}
+      refute_received {:trace, ^session, :receive, {:"$gen_call", _from, :editor_snapshot}}
     end
 
     test "tool_started and tool_ended update an editor without an agent session" do
       state = event_state(%AgentState{})
 
-      state = Events.dispatch(state, self(), {:tool_started, "read_file", %{}})
+      state = Events.dispatch(state, self(), {:tool_started, "no-session-tool", "read_file", %{}})
 
       assert AgentState.active_tool_name(
                MingaEditor.Shell.Traditional.State.agent(state.shell_runtime.state)

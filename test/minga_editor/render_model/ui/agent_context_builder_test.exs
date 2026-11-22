@@ -36,7 +36,7 @@ defmodule MingaEditor.RenderModel.UI.AgentContextBuilderTest do
         Activity.new()
         |> Activity.set_todos([todo])
         |> Activity.start_turn(~U[2026-06-23 12:00:00Z])
-        |> Activity.start_tool("shell")
+        |> Activity.start_tool("call-1", "shell")
         |> Activity.record_file("lib/a.ex")
 
       agent_ui = UIState.replace_activity(UIState.new(), activity)

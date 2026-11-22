@@ -1650,7 +1650,9 @@ defmodule MingaAgent.SessionPersistenceTest do
                  dir
                )
 
-      assert :ok = Session.load_session(session, record_id)
+      # This checks the installed outcome, not storage speed. ExUnit still bounds the test.
+      restore = :gen_server.send_request(session, {:load_session, record_id, nil})
+      assert {:reply, :ok} = :gen_server.receive_response(restore, :infinity)
 
       assert {:tool_call,
               %ToolCall{

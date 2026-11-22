@@ -151,7 +151,7 @@ defmodule MingaEditor.Agent.FocusedEventWorkflowsTest do
              non_traditional
   end
 
-  test "tool workflow follows the session snapshot and clears completed activity" do
+  test "tool preview shows the completed read result while running activity clears" do
     state = event_state()
 
     state = ToolEventWorkflow.started(state, "tc1", "read_file", %{"path" => "lib/a.ex"})
@@ -162,7 +162,7 @@ defmodule MingaEditor.Agent.FocusedEventWorkflowsTest do
     assert state.workspace.agent_ui.view.preview.content == {:file, "lib/a.ex", ""}
 
     state =
-      ToolEventWorkflow.ended(state, nil, %MingaAgent.Event.ToolEnd{
+      ToolEventWorkflow.ended(state, %MingaAgent.Event.ToolEnd{
         tool_call_id: "tc1",
         name: "read_file",
         result: "contents",
@@ -182,7 +182,7 @@ defmodule MingaEditor.Agent.FocusedEventWorkflowsTest do
       started = ToolEventWorkflow.started(event_state(), "rejected", name, args)
 
       finished =
-        ToolEventWorkflow.ended(started, nil, %MingaAgent.Event.ToolEnd{
+        ToolEventWorkflow.ended(started, %MingaAgent.Event.ToolEnd{
           tool_call_id: "rejected",
           name: name,
           result: "The tool did not produce file contents or directory entries",
@@ -238,7 +238,7 @@ defmodule MingaEditor.Agent.FocusedEventWorkflowsTest do
       assert updated.workspace.agent_ui.view.preview == preview
 
       ended =
-        ToolEventWorkflow.ended(updated, nil, %MingaAgent.Event.ToolEnd{
+        ToolEventWorkflow.ended(updated, %MingaAgent.Event.ToolEnd{
           tool_call_id: "tc1",
           name: tool,
           result: result,
