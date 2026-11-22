@@ -47,11 +47,14 @@ defmodule Minga.Credo.NoBlockingEditorCallCheck do
 
   # Public MingaAgent.Session functions that make the caller wait on a GenServer.call to read session state. load_session, import_legacy_session and subscribe also mutate, but the Editor calls them as part of reading a session in.
   @session_reads [
+    :artifact_store,
+    :boundary_for,
     :changed_file_counts,
     :check_inference_route,
     :discover_available_models,
     :editor_snapshot,
     :get_available_models,
+    :get_commands,
     :get_provider,
     :import_legacy_session,
     :inference_route_setups,
@@ -65,6 +68,7 @@ defmodule Minga.Credo.NoBlockingEditorCallCheck do
     :model_selection,
     :pending_question,
     :pinned_ids,
+    :queue_target,
     :queued_input_summaries,
     :queued_input_text,
     :read_cumulative_file_change,
@@ -72,6 +76,7 @@ defmodule Minga.Credo.NoBlockingEditorCallCheck do
     :read_retained_output,
     :session_id,
     :status,
+    :subagent_context,
     :subscribe,
     :subscriber_role,
     :transcript_history_before,
@@ -287,7 +292,8 @@ defmodule Minga.Credo.NoBlockingEditorCallCheck do
   end
 
   defp editor_layer?(filename) do
-    String.contains?(filename, "/minga_editor/") or String.ends_with?(filename, "/minga_editor.ex")
+    String.contains?(filename, "/minga_editor/") or
+      String.ends_with?(filename, "/minga_editor.ex")
   end
 
   defp supervisor_context?(%SourceFile{} = source_file) do
