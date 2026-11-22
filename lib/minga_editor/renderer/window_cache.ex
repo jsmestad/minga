@@ -351,14 +351,14 @@ defmodule MingaEditor.Renderer.WindowCache do
       ) do
     if LineIdentity.line_count(cache.line_identity) == line_count,
       do: cache,
-      else: rehydrate_line_identity(cache, buffer, snapshot)
+      else: rehydrate_line_identity(cache, buffer, snapshot, :line_count)
   end
 
   def sync_line_identity(%__MODULE__{} = cache, buffer, %RenderSnapshot{} = snapshot) do
     # ChangeLog interpretation is renderer-owned and happens before fetching.
     # A sequence mismatch here means the consumed lineage cannot describe this
     # snapshot; never apply a non-mutating snapshot delta.
-    rehydrate_line_identity(cache, buffer, snapshot)
+    rehydrate_line_identity(cache, buffer, snapshot, :sequence)
   end
 
   # Lineage that disagrees with the atomic snapshot cannot be repaired by
@@ -366,8 +366,16 @@ defmodule MingaEditor.Renderer.WindowCache do
   # epoch, in the same frame. Leaving identity unset would fail this frame's
   # build, and because a failed frame never commits, every later frame would
   # observe the same disagreement and fail again.
-  @spec rehydrate_line_identity(t(), pid(), RenderSnapshot.t()) :: t()
-  defp rehydrate_line_identity(cache, buffer, snapshot) do
+  # Recovery is automatic, but a disagreement means some producer broke lineage, so it is logged.
+  @spec rehydrate_line_identity(t(), pid(), RenderSnapshot.t(), :line_count | :sequence) :: t()
+  defp rehydrate_line_identity(cache, buffer, snapshot, reason) do
+    Minga.Log.warning(
+      :render,
+      "Rebuilt line identity for buffer #{inspect(buffer)} (#{reason} mismatch: " <>
+        "cache sequence #{cache.applied_change_sequence}, snapshot sequence #{snapshot.change_sequence}, " <>
+        "snapshot lines #{snapshot.line_count})"
+    )
+
     cache
     |> mark_identity_reset()
     |> sync_line_identity(buffer, snapshot)
