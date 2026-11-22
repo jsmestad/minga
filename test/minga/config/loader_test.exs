@@ -15,6 +15,7 @@ defmodule Minga.Config.LoaderTest do
   alias Minga.Config.ModelineSegments
   alias Minga.Config.Options
   alias Minga.Extension.ContributionCleanup
+  alias Minga.Extension.DeferredBatchCompleteEvent
   alias Minga.Extension.InstanceRegistry
   alias Minga.Extension.Registry, as: ExtRegistry
   alias Minga.Extension.RootSupervisor
@@ -239,8 +240,10 @@ defmodule Minga.Config.LoaderTest do
       :code.delete(Minga.TestExtensions.AfterConfigExt)
     end)
 
+    Minga.Events.subscribe(:extension_deferred_batch_complete)
     name = :"loader_project_after_ext_#{System.unique_integer([:positive])}"
     {:ok, pid} = Loader.start_link(name: name, config_home: config_home)
+    await_deferred_extension_batch()
 
     assert Loader.load_error(pid) == nil
     assert {:ok, project_entry} = ExtRegistry.get(:project_config_ext)
@@ -1202,8 +1205,15 @@ defmodule Minga.Config.LoaderTest do
       assert Loader.load_error(pid) == nil
       # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
       Application.put_env(:minga, :load_extensions, true)
+      Minga.Events.subscribe(:extension_deferred_batch_complete)
+
+      on_exit(fn ->
+        ExtSupervisor.stop_all()
+        ExtRegistry.reset()
+      end)
 
       assert {:error, msg} = Loader.reload(pid)
+      await_deferred_extension_batch()
       assert msg =~ "Extension start_all failed"
       assert msg =~ Atom.to_string(extension_name)
       assert msg =~ "cleanup_failed"
@@ -2062,6 +2072,21 @@ defmodule Minga.Config.LoaderTest do
   defp restore_application_env(key, nil), do: Application.delete_env(:minga, key)
   # credo:disable-for-next-line Minga.Credo.NoGlobalStateInTestCheck
   defp restore_application_env(key, value), do: Application.put_env(:minga, key, value)
+
+  # Loading config with extensions enabled declares the bundled git porcelain
+  # extension as deferred, and `Minga.Extension.Lazy` starts it from an
+  # unsupervised task about 100ms later. Without this wait, that start registers
+  # its keymap scope and publishes its lifecycle projection while a later test
+  # reloads config against the same global registries (#3785). The caller must
+  # subscribe before the load that schedules the batch.
+  @spec await_deferred_extension_batch() :: :ok
+  defp await_deferred_extension_batch do
+    assert_receive {:minga_event, :extension_deferred_batch_complete,
+                    %DeferredBatchCompleteEvent{}},
+                   30_000
+
+    :ok
+  end
 
   @spec ensure_extension_runtime() :: :ok
   defp ensure_extension_runtime do
