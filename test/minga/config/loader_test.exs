@@ -97,7 +97,7 @@ defmodule Minga.Config.LoaderTest do
         bind :normal, "SPC k f", :knowledge_map, "Familiarity"
         bind :normal, "SPC k c", :knowledge_briefing, "Briefing"
         bind :normal, "SPC a z", :adversarial_analyze, "Challenge"
-        extension :minga_adversarial, git: "https://github.com/jsmestad/minga-adverserial"
+        extension :minga_adversarial, git: "https://github.com/jsmestad/minga-adversarial"
         raise "later config error"
         """)
 

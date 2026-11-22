@@ -1174,7 +1174,7 @@ Shipped extensions are named by a bare atom with no `path:`, `git:`, or `hex:` o
 Adversarial, Knowledge Graph, and Ghost Cursors install only when you opt in. Add the lines you want to `config.exs` and restart Minga:
 
 ```elixir
-extension :minga_adversarial, git: "https://github.com/jsmestad/minga-adverserial"
+extension :minga_adversarial, git: "https://github.com/jsmestad/minga-adversarial"
 extension :minga_knowledge_graph, git: "https://github.com/jsmestad/minga-knowledge-graph"
 extension :minga_ghost_cursors, git: "https://github.com/jsmestad/minga-ghost-cursors"
 ```

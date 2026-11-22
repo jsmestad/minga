@@ -447,7 +447,7 @@ Minga keeps its core small and ships its larger features as extensions you choos
 ```elixir
 # ~/.config/minga/config.exs
 extension :git_porcelain
-extension :minga_adversarial, git: "https://github.com/jsmestad/minga-adverserial"
+extension :minga_adversarial, git: "https://github.com/jsmestad/minga-adversarial"
 extension :minga_knowledge_graph, git: "https://github.com/jsmestad/minga-knowledge-graph"
 extension :minga_ghost_cursors, git: "https://github.com/jsmestad/minga-ghost-cursors"
 ```
