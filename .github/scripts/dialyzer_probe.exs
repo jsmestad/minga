@@ -84,8 +84,18 @@ if System.get_env("PROBE_TRACE") == "1" do
     spawn(fn ->
       loop = fn loop ->
         receive do
-          {:trace, pid, :call, _mfa, mod} ->
-            :ets.insert(table, {pid, mod, System.monotonic_time(:millisecond)})
+          {:trace, pid, :call, {:dialyzer_succ_typings, _, _}, mod} ->
+            :ets.insert(table, {pid, {mod, :contracts_without_fun}, System.monotonic_time(:millisecond)})
+            loop.(loop)
+
+          {:trace, pid, :call, {step_mod, _, _}, _msg} ->
+            step = if step_mod == :dialyzer_dataflow, do: :dataflow, else: :behaviours
+
+            case :ets.lookup(table, pid) do
+              [{^pid, {mod, _}, _}] -> :ets.insert(table, {pid, {mod, step}, System.monotonic_time(:millisecond)})
+              _ -> :ok
+            end
+
             loop.(loop)
 
           _ ->
@@ -96,7 +106,10 @@ if System.get_env("PROBE_TRACE") == "1" do
       loop.(loop)
     end)
 
-  :erlang.trace_pattern({:dialyzer_succ_typings, :collect_warnings, 2}, [{[:"$1", :_], [], [{:message, :"$1"}]}], [:global])
+  Enum.each([:dialyzer_succ_typings, :dialyzer_dataflow, :dialyzer_behaviours], &Code.ensure_loaded!/1)
+  1 = :erlang.trace_pattern({:dialyzer_succ_typings, :collect_warnings, 2}, [{[:"$1", :_], [], [{:message, :"$1"}]}], [:global])
+  1 = :erlang.trace_pattern({:dialyzer_dataflow, :get_warnings, 5}, [{:_, [], [{:message, :dataflow}]}], [:global])
+  1 = :erlang.trace_pattern({:dialyzer_behaviours, :check_callbacks, 5}, [{:_, [], [{:message, :behaviours}]}], [:global])
   :erlang.trace(:all, true, [:call, :arity, {:tracer, tracer}])
 
   spawn(fn ->
@@ -137,11 +150,11 @@ if Process.whereis(:probe_module_watch) do
 
   receive do
     {:modules, acc} ->
-      IO.puts("probe: warning-phase modules observed: #{map_size(acc)}")
+      IO.puts("probe: warning-phase module steps observed: #{map_size(acc)}")
 
       acc
       |> Enum.sort_by(fn {_mod, {_t0, _total, heap}} -> -heap end)
-      |> Enum.take(25)
+      |> Enum.take(30)
       |> Enum.each(fn {mod, {_t0, total, heap}} ->
         IO.puts("probe-module #{inspect(mod)} worker_peak=#{div(heap, 1_048_576)} MiB vm_total_peak=#{div(total, 1_048_576)} MiB")
       end)

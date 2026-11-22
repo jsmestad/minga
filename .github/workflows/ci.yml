@@ -603,7 +603,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        variant: [warn-trace, no-contracts, incremental]
+        variant: [warn-trace, no-behaviours]
     env:
       MIX_ENV: dev
     steps:
@@ -656,23 +656,10 @@ jobs:
           case "$VARIANT" in
             warn-trace)
               PROBE_TRACE=1 PROBE_TIMING=debug measure probe-trace mix run --no-compile --no-start "$probe"
-              grep -E "^probe-module|warning-phase modules" out-probe-trace.txt || true
+              grep -E "^probe-module|warning-phase module" out-probe-trace.txt || true
               ;;
-            no-contracts)
-              PROBE_FLAGS=no_contracts PROBE_TIMING=debug measure probe-no-contracts mix run --no-compile --no-start "$probe"
-              ;;
-            incremental)
-              touch_module() {
-                perl -0pi -e 's/end\s*\z/\n  \@doc false\n  \@spec probe_touch() :: :ok\n  def probe_touch, do: :ok\nend\n/' "$1"
-                tail -n 5 "$1"
-                mix compile
-              }
-              measure incremental-cold mix dialyzer.incremental
-              touch_module lib/minga/core/face.ex
-              measure incremental-leaf mix dialyzer.incremental
-              touch_module lib/minga_editor/state.ex
-              measure incremental-state mix dialyzer.incremental
-              grep -iE "analy|modules" out-incremental-*.txt | head -n 20 || true
+            no-behaviours)
+              PROBE_FLAGS=no_behaviours PROBE_TIMING=debug measure probe-no-behaviours mix run --no-compile --no-start "$probe"
               ;;
           esac
 
