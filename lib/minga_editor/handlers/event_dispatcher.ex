@@ -407,6 +407,7 @@ defmodule MingaEditor.Handlers.EventDispatcher do
   end
 
   defp subscribe_through_ingest(_ingest, pid) do
+    # minga:allow-blocking — Editor, only when Ingest is down during a session restart
     AgentSession.subscribe(pid, self(), questions?: true)
   end
 

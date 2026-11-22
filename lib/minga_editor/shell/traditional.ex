@@ -538,6 +538,7 @@ defmodule MingaEditor.Shell.Traditional do
 
   @spec restarted_session_status(pid()) :: Tab.agent_status()
   defp restarted_session_status(new_pid) do
+    # minga:allow-blocking — Editor, once per agent session restart event to restore the tab status
     %{display_status: status} = MingaAgent.Session.editor_snapshot(new_pid)
     status
   catch

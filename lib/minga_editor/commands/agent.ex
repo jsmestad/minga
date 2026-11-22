@@ -237,6 +237,7 @@ defmodule MingaEditor.Commands.Agent do
   @spec load_persisted_session(pid(), String.t()) ::
           :ok | {:error, atom() | {:model_selection_correction_required, String.t()}}
   defp load_persisted_session(session_pid, session_id) do
+    # minga:allow-blocking — Editor, user-initiated resume of a persisted session; one-shot restore (#2450 inventory)
     case Session.load_session(session_pid, session_id) do
       :ok ->
         :ok
@@ -379,6 +380,7 @@ defmodule MingaEditor.Commands.Agent do
 
   @spec safe_messages_with_ids(pid()) :: [{pos_integer(), term()}] | nil
   defp safe_messages_with_ids(session_pid) do
+    # minga:allow-blocking — Editor, one-shot read when a provenance jump resumes a session
     Session.messages_with_ids(session_pid)
   catch
     :exit, _ -> nil
@@ -1188,6 +1190,7 @@ defmodule MingaEditor.Commands.Agent do
     if remote_session?(state) do
       {:ok, text}
     else
+      # minga:allow-blocking — Editor, once per local prompt submit to resolve file mentions for the active model
       selection = Session.model_selection(Runtime.active_session(state.shell_runtime))
       resolve_mentions(text, model_selection: selection)
     end
@@ -1268,6 +1271,7 @@ defmodule MingaEditor.Commands.Agent do
     msg_count =
       if Runtime.active_session(state.shell_runtime) do
         try do
+          # minga:allow-blocking — Editor, user-run clear chat; one-shot message count
           Enum.count(Session.messages(Runtime.active_session(state.shell_runtime)))
         catch
           :exit, _ -> 0
@@ -1703,6 +1707,7 @@ defmodule MingaEditor.Commands.Agent do
 
   @spec sync_restored_model_selection(state(), pid()) :: state()
   defp sync_restored_model_selection(state, session) do
+    # minga:allow-blocking — Editor, once after a user-initiated session resume
     case Session.model_selection(session) do
       %ModelSelection{} = selection ->
         apply_model_selection_to_ui(state, selection)
@@ -1946,6 +1951,7 @@ defmodule MingaEditor.Commands.Agent do
   defp display_pair_at(state, session, msg_idx) do
     pairs =
       case state.workspace.agent_ui.panel.transcript.message_pairs do
+        # minga:allow-blocking — Editor, user pin command, only when the display cache is empty
         [] -> Session.messages_with_ids(session)
         cached -> cached
       end
@@ -2569,6 +2575,7 @@ defmodule MingaEditor.Commands.Agent do
 
   @spec safe_messages(pid()) :: [Message.t()]
   defp safe_messages(session) do
+    # minga:allow-blocking — Editor, user-run scroll-context and code-block commands; one-shot read
     Session.messages(session)
   catch
     :exit, _ -> []

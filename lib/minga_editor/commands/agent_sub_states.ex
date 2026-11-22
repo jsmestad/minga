@@ -706,6 +706,7 @@ defmodule MingaEditor.Commands.AgentSubStates do
 
   @spec safe_messages(pid()) :: [term()]
   defp safe_messages(session) do
+    # minga:allow-blocking — Editor, user-run chat search and match navigation; one read per action
     Session.messages(session)
   catch
     :exit, _ -> []
