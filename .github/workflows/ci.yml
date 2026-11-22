@@ -600,7 +600,7 @@ jobs:
   dialyzer:
     name: Dialyzer
     runs-on: ubuntu-latest
-    # A warm run takes about 5 minutes; a cold PLT build adds the OTP, Elixir, and dependency PLTs. The bound turns a hang into an explicit timeout.
+    # A warm run takes about 5 to 8 minutes; a cold PLT build adds the OTP, Elixir, and dependency PLTs. The bound turns a hang into an explicit timeout.
     timeout-minutes: 40
     env:
       MIX_ENV: dev
@@ -645,11 +645,11 @@ jobs:
           ERL_FLAGS: "+S 2:2"
 
       - name: Run Dialyzer
-        timeout-minutes: 15
+        timeout-minutes: 20
         run: .github/scripts/run-with-memory-guard.sh mix dialyzer
         env:
-          # Dialyzer sizes its worker pool from the online BEAM schedulers.
-          ERL_FLAGS: "+S 2:2"
+          # Dialyzer's regulator allows one active typesig or dataflow job per online scheduler, so peak memory is the shared analysis state plus every concurrently active job. With two schedulers, analysis of identical code sometimes passed and sometimes used about 14.8 GB of the 16 GB runner, which points to large jobs overlapping (#3869). One scheduler makes the peak deterministic at the shared state plus the largest single job, at the cost of a slower analysis.
+          ERL_FLAGS: "+S 1:1"
 
   release-prerequisites:
     name: Native release prerequisites (${{ matrix.runner }})
