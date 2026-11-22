@@ -3837,3 +3837,41 @@ func TestPickerReconcileRetainsPreviewAcrossSameGenerationReorder(t *testing.T) 
 		t.Fatalf("same-generation reorder should retain preview by ID at index 0, got %d", got)
 	}
 }
+
+func TestRendererShutdownQuitsTheProgramEvenInsideAnOpenTransaction(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		commands []protocol.Command
+	}{
+		{"out of band", []protocol.Command{{Kind: protocol.CommandRendererShutdown, Size: 1}}},
+		{"inside an open transaction", []protocol.Command{
+			{Kind: protocol.CommandBeginFrame, Size: 13, FrameSeq: 1, Generation: 1},
+			{Kind: protocol.CommandRendererShutdown, Size: 1},
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			model := NewWithTransport(80, 24, make(chan []byte, 8), make(chan struct{}))
+			_, cmd := model.Update(port.PacketMsg{Commands: tc.commands})
+			if !commandQuits(cmd) {
+				t.Fatal("renderer_shutdown did not quit the program")
+			}
+		})
+	}
+}
+
+func commandQuits(cmd tea.Cmd) bool {
+	if cmd == nil {
+		return false
+	}
+	switch msg := cmd().(type) {
+	case tea.QuitMsg:
+		return true
+	case tea.BatchMsg:
+		for _, inner := range msg {
+			if commandQuits(inner) {
+				return true
+			}
+		}
+	}
+	return false
+}

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -12,8 +13,11 @@ import (
 	"sync/atomic"
 	"syscall"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
+	"github.com/jsmestad/minga/go/tui/internal/generated"
 	"github.com/jsmestad/minga/go/tui/internal/protocol"
 	"github.com/jsmestad/minga/go/tui/internal/ui"
 )
@@ -184,16 +188,26 @@ func TestRunSessionReaderFailureUnblocksProducerBehindFullQueue(t *testing.T) {
 	}
 }
 
-func TestRunSessionNormalUIQuitClosesAndJoinsWorkers(t *testing.T) {
-	reader := newTrackedBlockingReader()
+func TestRunSessionNormalUIQuitDoesNotWaitForBlockedInput(t *testing.T) {
+	// The BEAM keeps stdin open until the renderer exits, and closing a blocking
+	// pipe does not interrupt a pending read. A UI quit must still return.
+	reader := newUninterruptibleReader()
+	defer reader.release()
 	writer := &trackedWriteCloser{}
 	out := make(chan []byte, 1)
 	done := make(chan struct{})
 	ctx, stop := context.WithCancel(context.Background())
 	program := tea.NewProgram(quittingModel{}, tea.WithContext(ctx), tea.WithInput(nil), tea.WithoutRenderer())
+	result := make(chan error, 1)
+	go func() { result <- runSession(program, reader, writer, out, done, stop) }()
 
-	if err := runSession(program, reader, writer, out, done, stop); err != nil {
-		t.Fatalf("runSession error = %v, want nil for normal UI quit", err)
+	select {
+	case err := <-result:
+		if err != nil {
+			t.Fatalf("runSession error = %v, want nil for normal UI quit", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("runSession waited for an input read that closing cannot interrupt")
 	}
 	if got := reader.closeCount.Load(); got != 1 {
 		t.Fatalf("reader close count = %d, want 1", got)
@@ -201,11 +215,124 @@ func TestRunSessionNormalUIQuitClosesAndJoinsWorkers(t *testing.T) {
 	if got := writer.closeCount.Load(); got != 1 {
 		t.Fatalf("writer close count = %d, want 1", got)
 	}
-	select {
-	case <-reader.returned:
-	default:
-		t.Fatal("reader worker was not joined before runSession returned")
+}
+
+// TestRendererRestoresTerminalOnEveryExitPath runs a real session on a PTY and
+// ends it each way the renderer can be told to stop. Every path must leave the
+// alternate screen and return without the BEAM closing stdin first, except the
+// EOF path, which is the stdin close itself.
+func TestRendererRestoresTerminalOnEveryExitPath(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("BSD script harness is available on macOS")
 	}
+	if raceEnabled {
+		t.Skip("Bubble Tea v2.0.7 races inside cancelreader when a real PTY is closed; the session race suite uses controlled I/O")
+	}
+	if path := os.Getenv("MINGA_TEST_EXIT_PATH"); path != "" {
+		runExitPathHelper(path)
+		return
+	}
+
+	for _, path := range []string{"renderer_shutdown", "stdin_eof", "sigterm", "sighup"} {
+		t.Run(path, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			command := exec.CommandContext(ctx, "/usr/bin/script", "-q", "/dev/null", os.Args[0], "-test.run=^TestRendererRestoresTerminalOnEveryExitPath$")
+			command.Env = append(os.Environ(), "MINGA_TEST_EXIT_PATH="+path)
+			output, err := command.CombinedOutput()
+			if err != nil {
+				t.Fatalf("exit-path helper failed: %v\n%q", err, output)
+			}
+			enter := bytes.Index(output, []byte(ansi.SetModeAltScreenSaveCursor))
+			if enter < 0 {
+				t.Fatalf("helper never entered the alternate screen: %q", output)
+			}
+			if !bytes.Contains(output[enter:], []byte(ansi.ResetModeAltScreenSaveCursor)) {
+				t.Fatalf("%s left the terminal in the alternate screen: %q", path, output)
+			}
+			if !bytes.Contains(output[enter:], []byte(ansi.ShowCursor)) {
+				t.Fatalf("%s left the cursor hidden: %q", path, output)
+			}
+		})
+	}
+}
+
+// runExitPathHelper runs inside the PTY. stdin is a blocking pipe, like the
+// pipe the BEAM gives the renderer, so a close cannot interrupt its read.
+func runExitPathHelper(path string) {
+	fail := func(err error) {
+		fmt.Fprintf(os.Stderr, "exit-path helper: %v\n", err)
+		os.Exit(2)
+	}
+	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
+	if err != nil {
+		fail(err)
+	}
+	defer tty.Close()
+	var fds [2]int
+	if err := syscall.Pipe(fds[:]); err != nil {
+		fail(err)
+	}
+	stdin := os.NewFile(uintptr(fds[0]), "stdin")
+	beam := os.NewFile(uintptr(fds[1]), "beam")
+	defer beam.Close()
+
+	entered := make(chan struct{})
+	out := make(chan []byte, 128)
+	done := make(chan struct{})
+	ctx, stop := context.WithCancel(context.Background())
+	model := ui.NewWithTransport(80, 24, out, done)
+	program := tea.NewProgram(model, tea.WithContext(ctx), tea.WithInput(tty), tea.WithOutput(&altScreenWatcher{Writer: tty, entered: entered}))
+	stopHangup := quitOnHangup(program)
+	defer stopHangup()
+
+	result := make(chan error, 1)
+	go func() { result <- runSession(program, stdin, io.Discard, out, done, stop) }()
+	select {
+	case <-entered:
+	case <-time.After(10 * time.Second):
+		fail(errors.New("program never entered the alternate screen"))
+	}
+
+	switch path {
+	case "renderer_shutdown":
+		err = protocol.WritePacket(beam, []byte{generated.OPRendererShutdown})
+	case "stdin_eof":
+		err = beam.Close()
+	case "sigterm":
+		err = syscall.Kill(os.Getpid(), syscall.SIGTERM)
+	case "sighup":
+		err = syscall.Kill(os.Getpid(), syscall.SIGHUP)
+	default:
+		err = fmt.Errorf("unknown exit path %q", path)
+	}
+	if err != nil {
+		fail(err)
+	}
+	select {
+	case err := <-result:
+		if err != nil {
+			fail(err)
+		}
+	case <-time.After(10 * time.Second):
+		fail(fmt.Errorf("session did not end after %s", path))
+	}
+}
+
+// altScreenWatcher signals once the program has entered the alternate screen,
+// so the helper never ends a session that has not drawn yet.
+type altScreenWatcher struct {
+	io.Writer
+	entered chan struct{}
+	once    sync.Once
+}
+
+func (watcher *altScreenWatcher) Write(payload []byte) (int, error) {
+	n, err := watcher.Writer.Write(payload)
+	if bytes.Contains(payload, []byte(ansi.SetModeAltScreenSaveCursor)) {
+		watcher.once.Do(func() { close(watcher.entered) })
+	}
+	return n, err
 }
 
 func TestRunSessionRestoresPTYAfterWriterFailure(t *testing.T) {
@@ -372,28 +499,30 @@ func (quittingModel) View() tea.View {
 	return tea.NewView("")
 }
 
-type trackedBlockingReader struct {
-	closed     chan struct{}
-	returned   chan struct{}
-	closeOnce  sync.Once
-	returnOnce sync.Once
-	closeCount atomic.Int32
+// uninterruptibleReader models a blocking stdin pipe: Close does not wake a
+// pending Read. release lets the test end the leaked read.
+type uninterruptibleReader struct {
+	released    chan struct{}
+	releaseOnce sync.Once
+	closeCount  atomic.Int32
 }
 
-func newTrackedBlockingReader() *trackedBlockingReader {
-	return &trackedBlockingReader{closed: make(chan struct{}), returned: make(chan struct{})}
+func newUninterruptibleReader() *uninterruptibleReader {
+	return &uninterruptibleReader{released: make(chan struct{})}
 }
 
-func (reader *trackedBlockingReader) Read([]byte) (int, error) {
-	<-reader.closed
-	reader.returnOnce.Do(func() { close(reader.returned) })
-	return 0, io.ErrClosedPipe
+func (reader *uninterruptibleReader) Read([]byte) (int, error) {
+	<-reader.released
+	return 0, io.EOF
 }
 
-func (reader *trackedBlockingReader) Close() error {
+func (reader *uninterruptibleReader) Close() error {
 	reader.closeCount.Add(1)
-	reader.closeOnce.Do(func() { close(reader.closed) })
 	return nil
+}
+
+func (reader *uninterruptibleReader) release() {
+	reader.releaseOnce.Do(func() { close(reader.released) })
 }
 
 type trackedWriteCloser struct {

@@ -45,6 +45,16 @@ defmodule MingaEditor.Frontend.Manager.OutputHandler do
     end
   end
 
+  @doc """
+  Attempts one final command ahead of retained output.
+
+  The stopping owner abandons retained frames, so the command does not wait
+  behind them. Admission stays non-suspending.
+  """
+  @spec admit_final_command(State.t(), binary()) :: Manager.admission()
+  def admit_final_command(%{port: nil}, _command), do: :unwritable
+  def admit_final_command(state, command) when is_binary(command), do: write_batch(state, command)
+
   @doc "Retries the retained current frame for the matching timer token."
   @spec retry(State.t(), reference()) :: retry_result()
   def retry(state, token) do

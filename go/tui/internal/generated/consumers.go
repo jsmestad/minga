@@ -5,6 +5,7 @@ package generated
 var GoRequiredOpcodes = map[byte]string{
 	OPBeginFrame:             "begin_frame",
 	OPCommitFrame:            "commit_frame",
+	OPRendererShutdown:       "renderer_shutdown",
 	OPSetCursorShape:         "set_cursor_shape",
 	OPSetTitle:               "set_title",
 	OPSetWindowBg:            "set_window_bg",

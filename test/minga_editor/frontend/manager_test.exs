@@ -23,6 +23,7 @@ defmodule MingaEditor.Frontend.ManagerTest do
     end
 
     @tag :heavy
+    @tag capture_log: true
     test "spawn mode opens renderer executable with tty env" do
       name = unique_name()
 
@@ -46,7 +47,8 @@ defmodule MingaEditor.Frontend.ManagerTest do
          name: name,
          renderer_path: renderer_path,
          port_opener: capturing_opener,
-         tty_path: "/dev/tty"},
+         tty_path: "/dev/tty",
+         renderer_exit_timeout_ms: 0},
         id: name
       )
 
@@ -1169,6 +1171,78 @@ defmodule MingaEditor.Frontend.ManagerTest do
     end
   end
 
+  describe "renderer shutdown" do
+    # The fake renderer exits only after it reads renderer_shutdown, then takes
+    # a moment to "restore the terminal" before writing its marker and exiting.
+    @restoring_renderer """
+    request=$(head -c 5 | od -An -tx1 | tr -d ' \\n')
+    [ "$request" = "0000000114" ] || exit 3
+    sleep 0.2
+    echo restored > "$1"
+    """
+
+    @stuck_renderer "cat >/dev/null"
+
+    test "stopping the manager asks a spawned renderer to exit and waits for it" do
+      marker = Path.join(System.tmp_dir!(), "minga-renderer-restored-#{unique_integer()}")
+      on_exit(fn -> File.rm(marker) end)
+      name = unique_name()
+
+      start_supervised!(
+        {Manager,
+         name: name,
+         renderer_path: temporary_renderer_path(),
+         port_opener: script_port_opener(@restoring_renderer, [marker])},
+        id: name
+      )
+
+      assert_receive {:script_port, _port}
+      :ok = stop_supervised(name)
+
+      assert File.read(marker) == {:ok, "restored\n"}
+    end
+
+    test "stopping the manager closes the port when the renderer does not exit in time" do
+      name = unique_name()
+
+      start_supervised!(
+        {Manager,
+         name: name,
+         renderer_path: temporary_renderer_path(),
+         port_opener: script_port_opener(@stuck_renderer, []),
+         renderer_exit_timeout_ms: 50},
+        id: name
+      )
+
+      assert_receive {:script_port, port}
+
+      log =
+        capture_log(fn ->
+          {elapsed_us, :ok} = :timer.tc(fn -> stop_supervised(name) end)
+          assert elapsed_us >= 50_000
+          assert elapsed_us < 2_000_000
+        end)
+
+      assert log =~ "Renderer did not exit within 50ms"
+      assert Port.info(port) == nil
+    end
+
+    test "a connected frontend is not asked to exit" do
+      name = unique_name()
+      parent = self()
+
+      commander = fn port, batch, [:nosuspend] ->
+        send(parent, {:port_command, batch})
+        Port.command(port, batch, [:nosuspend])
+      end
+
+      {_pid, _port} = start_connected(name, port_commander: commander)
+      :ok = stop_supervised(name)
+
+      refute_received {:port_command, <<0x14>>}
+    end
+  end
+
   describe "unknown messages" do
     test "unknown messages are ignored" do
       name = unique_name()
@@ -1342,6 +1416,22 @@ defmodule MingaEditor.Frontend.ManagerTest do
       <<0x70, payload::binary>>,
       Protocol.encode_commit_frame(frame_seq)
     ]
+  end
+
+  defp unique_integer, do: System.unique_integer([:positive])
+
+  # Opens a real spawned port with the manager's options, running `script` as
+  # the renderer. The script's positional parameters are `args`.
+  defp script_port_opener(script, args) do
+    parent = self()
+
+    fn _spec, opts ->
+      port =
+        Port.open({:spawn_executable, "/bin/sh"}, [{:args, ["-c", script, "sh" | args]} | opts])
+
+      send(parent, {:script_port, port})
+      port
+    end
   end
 
   defp temporary_renderer_path do

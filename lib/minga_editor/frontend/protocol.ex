@@ -53,6 +53,7 @@ defmodule MingaEditor.Frontend.Protocol do
   @op_paste_event Opcodes.paste_event()
   @op_gui_action Opcodes.gui_action()
   @op_protocol_error Opcodes.protocol_error()
+  @op_renderer_shutdown Opcodes.renderer_shutdown()
   @op_begin_frame Opcodes.begin_frame()
   @op_commit_frame Opcodes.commit_frame()
   @op_request_keyframe Opcodes.request_keyframe()
@@ -297,6 +298,16 @@ defmodule MingaEditor.Frontend.Protocol do
   def encode_protocol_error(message) when is_binary(message) do
     <<@op_protocol_error, byte_size(message)::16, message::binary>>
   end
+
+  @doc """
+  Encodes a renderer_shutdown command.
+
+  The BEAM sends this to a renderer it spawned when the renderer's owner stops.
+  The renderer restores the terminal and exits, so the VM does not exit while
+  the terminal is still in the alternate screen. fixed:1: opcode only.
+  """
+  @spec encode_renderer_shutdown() :: binary()
+  def encode_renderer_shutdown, do: <<@op_renderer_shutdown>>
 
   @doc "Encodes a begin-frame command in the initial recovery generation."
   @spec encode_begin_frame(non_neg_integer(), non_neg_integer()) :: binary()

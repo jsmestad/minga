@@ -77,7 +77,8 @@ version = "2.0.0"
 # geometry uses a u32 continuation offset for oversized windowed lines.
 # protocol_version 36 adds source-presentation-bound absolute visual scroll targets.
 # protocol_version 38 adds the native agent desktop notification instruction.
-protocol_version = 38
+# protocol_version 39 adds renderer_shutdown: the BEAM asks a spawned terminal renderer to restore the terminal and exit, then waits for it before the VM stops.
+protocol_version = 39
 description = "Minga port protocol opcode registry"
 
 # Directions:
@@ -342,6 +343,21 @@ direction = "beam_to_frontend"
 consumers = ["swift"]
 skip = { go = "Native application quit negotiation is not used by the TUI" }
 framing = "len16"
+
+# renderer_shutdown asks a renderer the BEAM spawned to restore the terminal and
+# exit. fixed:1 = opcode only. It is an out-of-band lifecycle command and is
+# never part of a render transaction. The BEAM sends it when the renderer's
+# owner stops and waits, bounded, for the renderer process to exit, so the VM
+# never exits while the renderer is still restoring the terminal. The native GUI
+# is the BEAM's parent, never a spawned child, so it never receives it.
+[[opcodes]]
+category = "render"
+name = "renderer_shutdown"
+value = 0x14
+direction = "beam_to_frontend"
+consumers = ["go"]
+skip = { swift = "The native GUI is the BEAM's parent process; it is never spawned by the BEAM and never asked to exit" }
+framing = "fixed:1"
 
 # Frame-scoped identity of the BEAM semantic target represented by the editor
 # snapshot. The token is opaque and core-local. fixed:16 = opcode +
