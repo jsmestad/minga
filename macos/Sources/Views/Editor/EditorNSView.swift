@@ -10,6 +10,7 @@
 import MingaUI
 import AppKit
 import os
+import Synchronization
 import MetalKit
 import MingaProtocol
 
@@ -4033,20 +4034,20 @@ private struct AccessibilityProjectionKey: Equatable {
 }
 
 /// Bridges the main-actor pane projection to AppKit's nonisolated focused-element getter.
+// @unchecked: EditorPaneAccessibilityElement is an NSAccessibilityElement subclass and not Sendable; `lock` guards every access to `element`.
 private final class AccessibilityFocusedElementSnapshot: @unchecked Sendable {
-    private let lock = NSLock()
+    private let lock = Mutex(())
     private var element: EditorPaneAccessibilityElement?
 
     func read() -> EditorPaneAccessibilityElement? {
-        lock.lock()
-        defer { lock.unlock() }
-        return element
+        // Copy through a local so the result is not a `sending` value; the element is not Sendable.
+        var current: EditorPaneAccessibilityElement?
+        lock.withLock { _ in current = element }
+        return current
     }
 
     func write(_ element: EditorPaneAccessibilityElement?) {
-        lock.lock()
-        self.element = element
-        lock.unlock()
+        lock.withLock { _ in self.element = element }
     }
 }
 
