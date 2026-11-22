@@ -15,6 +15,14 @@ defmodule MingaEditor.Agent.UIState.TranscriptProjection.Index do
   @type position :: {pos_integer(), term(), non_neg_integer(), Transcript.line_type()}
   @type styler :: (term(), pos_integer(), map() -> TranscriptProjection.rendered_message() | nil)
   @type reading :: :follow | non_neg_integer()
+
+  @typedoc """
+  Stable position of one displayed item.
+
+  Classes sort in display order: `0` pinned rows before the display cut, `1` the pinned separator, `2` the hidden-history separator, `3` rows at or after the cut. The second element is the source ordinal for rows and `0` for separators.
+  """
+  @type display_key :: {0 | 3, non_neg_integer()} | {1 | 2, 0}
+  @type display_change :: {:put, display_key(), item()} | {:delete, display_key()}
   @typep update_context :: {t(), reading()}
 
   @enforce_keys [:tree, :ordinals, :cut, :cut_weights]
@@ -172,6 +180,102 @@ defmodule MingaEditor.Agent.UIState.TranscriptProjection.Index do
     |> Tree.reduce_range(cut, Tree.count(tree), :all, prefix, &prepend_item/2)
     |> Enum.reverse()
   end
+
+  @doc "Enumerates every displayed item with its stable display key, in display order."
+  @spec presentation_entries(t()) :: [{display_key(), item()}]
+  def presentation_entries(%__MODULE__{tree: tree, cut: cut} = index) do
+    prefix = Tree.reduce_range(tree, 0, cut, :pinned, [], &prepend_entry(&1, &2, 0))
+
+    prefix
+    |> prepend_separators(index)
+    |> then(
+      &Tree.reduce_range(tree, cut, Tree.count(tree), :all, &1, fn row, acc ->
+        prepend_entry(row, acc, 3)
+      end)
+    )
+    |> Enum.reverse()
+  end
+
+  @doc """
+  Returns the ordered display changes between two indexes of one generation.
+
+  Only changed leaves, rows crossing a moved display cut, and the two synthetic separators are inspected.
+  """
+  @spec presentation_changes(t(), t()) :: [display_change()]
+  def presentation_changes(%__MODULE__{} = index, %__MODULE__{} = index), do: []
+
+  def presentation_changes(%__MODULE__{} = old, %__MODULE__{} = new) do
+    rows =
+      old.tree
+      |> Tree.changed_ordinals(new.tree)
+      |> merge_ordinals(cut_range(old.cut, new.cut))
+      |> Enum.flat_map(fn ordinal ->
+        entry_changes(
+          display_entry(Tree.fetch(old.tree, ordinal), old.cut),
+          display_entry(Tree.fetch(new.tree, ordinal), new.cut)
+        )
+      end)
+
+    separators =
+      entry_changes(pinned_entry(old), pinned_entry(new)) ++
+        entry_changes(hidden_entry(old), hidden_entry(new))
+
+    Enum.sort_by(separators ++ rows, &change_key/1)
+  end
+
+  @spec display_entry(Row.t() | nil, non_neg_integer()) :: {display_key(), item()} | nil
+  defp display_entry(nil, _cut), do: nil
+
+  defp display_entry(%Row{entry: %Entry{ordinal: ordinal}} = row, cut) when ordinal >= cut,
+    do: {{3, ordinal}, row_item(row)}
+
+  defp display_entry(%Row{entry: %Entry{ordinal: ordinal}, pinned?: true} = row, _cut),
+    do: {{0, ordinal}, row_item(row)}
+
+  defp display_entry(%Row{}, _cut), do: nil
+
+  defp pinned_entry(%__MODULE__{cut_weights: {_hidden, pin_slots}}) when pin_slots > 0,
+    do: {{1, 0}, pinned_separator()}
+
+  defp pinned_entry(%__MODULE__{}), do: nil
+
+  defp hidden_entry(%__MODULE__{cut: 0}), do: nil
+  defp hidden_entry(%__MODULE__{cut: cut}), do: {{2, 0}, hidden_separator(cut)}
+
+  @spec entry_changes({display_key(), item()} | nil, {display_key(), item()} | nil) ::
+          [display_change()]
+  defp entry_changes(nil, nil), do: []
+  defp entry_changes(same, same), do: []
+  defp entry_changes({key, _old}, {key, item}), do: [{:put, key, item}]
+  defp entry_changes({key, _old}, nil), do: [{:delete, key}]
+  defp entry_changes(nil, {key, item}), do: [{:put, key, item}]
+  defp entry_changes({old_key, _old}, {key, item}), do: [{:delete, old_key}, {:put, key, item}]
+
+  defp change_key({:put, key, _item}), do: key
+  defp change_key({:delete, key}), do: key
+
+  defp cut_range(cut, cut), do: []
+  defp cut_range(old, new), do: Enum.to_list(min(old, new)..(max(old, new) - 1)//1)
+
+  defp merge_ordinals([], right), do: right
+  defp merge_ordinals(left, []), do: left
+  defp merge_ordinals([same | left], [same | right]), do: [same | merge_ordinals(left, right)]
+
+  defp merge_ordinals([l | left], [r | _] = right) when l < r,
+    do: [l | merge_ordinals(left, right)]
+
+  defp merge_ordinals(left, [r | right]), do: [r | merge_ordinals(left, right)]
+
+  defp prepend_separators(prefix, %__MODULE__{cut: cut} = index) do
+    prefix = if entry = pinned_entry(index), do: [entry | prefix], else: prefix
+    if cut > 0, do: [hidden_entry(index) | prefix], else: prefix
+  end
+
+  defp prepend_entry(%Row{entry: %Entry{ordinal: ordinal}} = row, acc, class),
+    do: [{{class, ordinal}, row_item(row)} | acc]
+
+  defp row_item(%Row{entry: %Entry{id: id, message: message}} = row),
+    do: {id, message, Row.displayed_style(row)}
 
   @spec revise_entry(update_context(), Entry.t(), map(), styler()) :: update_context()
   defp revise_entry({index, reading}, %Entry{id: id, ordinal: ordinal} = entry, syntax, style) do

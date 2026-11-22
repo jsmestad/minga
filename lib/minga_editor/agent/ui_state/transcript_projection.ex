@@ -25,6 +25,13 @@ defmodule MingaEditor.Agent.UIState.TranscriptProjection do
 
   @type presentation_context :: {Transcript.empty_state(), map(), Index.styler()}
 
+  @typedoc "Stable display position; class `4` is the first-run empty state, which displays alone."
+  @type display_key :: Index.display_key() | {4, 0}
+  @type display_change :: {:put, display_key(), Index.item()} | {:delete, display_key()}
+
+  @typedoc "Identifies one installed transcript generation; a replacement never shares it."
+  @type presentation_identity :: reference() | nil
+
   defstruct index: nil,
             generation: nil,
             source_cursor: nil,
@@ -164,6 +171,52 @@ defmodule MingaEditor.Agent.UIState.TranscriptProjection do
   def presentation(%__MODULE__{empty_item: {item, _lines}}), do: [item]
   def presentation(%__MODULE__{index: nil}), do: []
   def presentation(%__MODULE__{index: index}), do: Index.presentation(index)
+
+  @doc "Returns the identity a renderer base must match before it accepts presentation changes."
+  @spec presentation_identity(t()) :: presentation_identity()
+  def presentation_identity(%__MODULE__{generation: generation}), do: generation
+
+  @doc "Enumerates the keyed display for a renderer seed. This is a whole-display operation."
+  @spec presentation_entries(t()) :: [{display_key(), Index.item()}]
+  def presentation_entries(%__MODULE__{empty_item: {item, _lines}}), do: [{{4, 0}, item}]
+  def presentation_entries(%__MODULE__{index: nil}), do: []
+  def presentation_entries(%__MODULE__{index: index}), do: Index.presentation_entries(index)
+
+  @doc """
+  Returns the ordered display changes from `previous` to `current` within one presentation identity.
+
+  An unchanged projection costs one identity comparison. Indexed displays visit only changed leaves, rows crossing a moved cut and the separators. Entering or leaving the first-run empty state enumerates both small displays.
+  """
+  @spec presentation_changes(t(), t()) :: [display_change()]
+  def presentation_changes(%__MODULE__{} = projection, %__MODULE__{} = projection), do: []
+
+  def presentation_changes(
+        %__MODULE__{index: %Index{} = previous, empty_item: nil},
+        %__MODULE__{index: %Index{} = current, empty_item: nil}
+      ),
+      do: Index.presentation_changes(previous, current)
+
+  def presentation_changes(%__MODULE__{} = previous, %__MODULE__{} = current) do
+    before = Map.new(presentation_entries(previous))
+    entries = presentation_entries(current)
+    keys = MapSet.new(entries, &elem(&1, 0))
+
+    deletes =
+      for {key, _item} <- before, not MapSet.member?(keys, key), do: {:delete, key}
+
+    puts = for {key, item} <- entries, Map.get(before, key) != item, do: {:put, key, item}
+    Enum.sort_by(deletes ++ puts, &change_key/1)
+  end
+
+  defp change_key({:put, key, _item}), do: key
+  defp change_key({:delete, key}), do: key
+
+  @doc "Drops retained display state from a copy that crosses the renderer boundary."
+  @spec render_snapshot(t()) :: t()
+  def render_snapshot(%__MODULE__{index: nil, empty_item: nil, source_cursor: nil} = projection),
+    do: projection
+
+  def render_snapshot(%__MODULE__{}), do: %__MODULE__{}
 
   @spec start_line(t(), pos_integer()) :: non_neg_integer() | nil
   def start_line(%__MODULE__{index: nil}, _id), do: nil
