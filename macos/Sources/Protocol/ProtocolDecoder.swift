@@ -1178,6 +1178,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         var workspace: StatusBarUpdate.WorkspaceInfo? = nil
         var pendingKeys = ""
         var review: StatusBarUpdate.Review? = nil
+        var conflictIndex: UInt32?
 
         for _ in 0..<sectionCount {
             let section = try readSection16(data, at: pos, containingEnd: data.endIndex)
@@ -1326,11 +1327,23 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
                 guard reviewPos == section.end else { throw ProtocolDecodeError.malformed }
                 review = .init(path: path, freshness: freshness, generation: generation, itemID: itemID)
 
+            case 0x11: // One-based index of the exact selected fork conflict.
+                guard sectionLen == 4, conflictIndex == nil else { throw ProtocolDecodeError.malformed }
+                let index = try readU32(data, sStart)
+                guard index > 0 else { throw ProtocolDecodeError.malformed }
+                conflictIndex = index
+
             default:
                 break // Skip unknown sections (forward compatibility)
             }
 
             pos = sStart + sectionLen
+        }
+
+        if let conflictIndex {
+            guard let offer = review, offer.generation != 0, !offer.itemID.isEmpty
+            else { throw ProtocolDecodeError.malformed }
+            review = .init(path: offer.path, freshness: offer.freshness, generation: offer.generation, itemID: offer.itemID, conflictIndex: conflictIndex)
         }
 
         if let agentSectionRange {

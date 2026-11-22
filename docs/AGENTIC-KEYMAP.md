@@ -89,6 +89,8 @@ While the current review is selected, these keys apply:
 
 When all hunks are resolved (accepted or rejected), the viewer returns to normal file view.
 
+If a staged agent edit overlaps your own changes, Review shows both versions. Choose **Keep mine** (`x`) or **Use Agent version** (`y`) for the selected conflict. Minga applies the combined result only after every conflict has a choice and the source revisions still match. If either source changes, **Review latest** reloads the conflict before you can choose again.
+
 ### Publishing Approved Edits
 
 Approving an edit lets the agent make it, but it does not write the file yet. An agent session you start from the editor works in an isolated copy of the project, so an approved edit is staged: the agent sees it, **Review files** lists it, and the file on disk and your open buffer still show the old text. You decide when staged edits land.

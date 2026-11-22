@@ -38,6 +38,8 @@ public struct StatusBarView: View {
         case togglePanel(panel: UInt8)
         case reviewBack(generation: UInt32, itemID: String)
         case reviewLatest(generation: UInt32, itemID: String)
+        case reviewKeepMine(generation: UInt32, itemID: String)
+        case reviewUseAgentVersion(generation: UInt32, itemID: String)
     }
 
     public init(state: StatusBarState, feedbackState: FeedbackState? = nil, sendAction: ViewActionHandler<Action>?, isFileTreeVisible: Bool = false, isGitStatusVisible: Bool = false, isBottomPanelVisible: Bool = false, isAgentChatVisible: Bool = false, gitSyncing: Bool = false) {
@@ -101,9 +103,24 @@ public struct StatusBarView: View {
     /// Protected Review chrome bypasses the bounded generic modeline groups.
     /// The compact form fits the supported 160pt minimum without hiding any action.
     private func reviewStatus(_ review: StatusBarUpdate.Review, width: CGFloat) -> some View {
-        HStack(spacing: Spacing.xs) {
-            ReviewFreshnessLabel(freshness: review.freshness, compact: width < 420)
-            ReviewButtons(review: review, compact: width < 420, sendAction: sendAction)
+        let compact = width < (review.conflictIndex != nil ? 520 : 420)
+        let tight = width < 240
+        return HStack(spacing: Spacing.xs) {
+            if let index = review.conflictIndex {
+                let current = tight ? "C\(index)" : "Conflict \(index)"
+                let stale = tight ? "S\(index)" : "Stale conflict \(index)"
+                ZStack(alignment: .leading) {
+                    Text(stale).hidden()
+                    Text(review.freshness == .stale ? stale : current)
+                }
+                .font(Typography.font(.caption))
+                .lineLimit(1)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(review.freshness == .stale ? "Stale conflict \(index)" : "Conflict \(index) selected")
+            } else {
+                ReviewFreshnessLabel(freshness: review.freshness, compact: compact)
+            }
+            ReviewButtons(review: review, compact: compact, sendAction: sendAction, tight: tight)
             if width >= 560 {
                 Text(review.path)
                     .font(Typography.font(.small))
@@ -113,6 +130,7 @@ public struct StatusBarView: View {
             Spacer(minLength: 0)
         }
         .padding(.horizontal, Spacing.xs)
+        .padding(.leading, review.conflictIndex != nil ? Spacing.md : 0)
         .foregroundStyle(theme.modelineBarFg)
         .frame(width: width, height: barHeight, alignment: .leading)
     }
@@ -146,15 +164,20 @@ public struct StatusBarView: View {
         public let review: StatusBarUpdate.Review
         public let compact: Bool
         public let sendAction: ViewActionHandler<Action>?
+        private let tight: Bool
 
-        public init(review: StatusBarUpdate.Review, compact: Bool, sendAction: ViewActionHandler<Action>?) {
+        public init(review: StatusBarUpdate.Review, compact: Bool, sendAction: ViewActionHandler<Action>?, tight: Bool = false) {
             self.review = review
             self.compact = compact
             self.sendAction = sendAction
+            self.tight = tight
         }
 
         public var body: some View {
             HStack(spacing: 0) {
+                if review.conflictIndex != nil {
+                    conflictButtons
+                }
                 reviewButton("Back to chat", symbol: "arrow.uturn.backward", accessibility: "Back to chat") {
                     sendAction?(.reviewBack(generation: review.generation, itemID: review.itemID))
                 }
@@ -170,15 +193,31 @@ public struct StatusBarView: View {
             .fixedSize()
         }
 
-        private func reviewButton(_ title: String, symbol: String, accessibility: String, action: @escaping () -> Void) -> some View {
+        private var conflictButtons: some View {
+            HStack(spacing: 0) {
+                reviewButton(compact ? "Keep mine" : "Keep mine (x)", symbol: nil, accessibility: "Keep my version (x)", key: "x") {
+                    sendAction?(.reviewKeepMine(generation: review.generation, itemID: review.itemID))
+                }
+                reviewButton(compact ? "Use Agent" : "Use Agent version (y)", symbol: nil, accessibility: "Use Agent version (y)", key: "y") {
+                    sendAction?(.reviewUseAgentVersion(generation: review.generation, itemID: review.itemID))
+                }
+            }
+            .disabled(review.freshness == .stale)
+            .opacity(review.freshness == .stale ? 0.4 : 1)
+        }
+
+        private func reviewButton(_ title: String, symbol: String?, accessibility: String, key: String? = nil, action: @escaping () -> Void) -> some View {
             Button(action: action) {
                 Group {
-                    if compact {
+                    if tight, let key {
+                        Text(key)
+                            .frame(width: 24, height: 24)
+                    } else if compact, let symbol {
                         Image(systemName: symbol)
                             .frame(width: 24, height: 24)
                     } else {
                         Text(title)
-                            .padding(.horizontal, Spacing.sm)
+                            .padding(.horizontal, compact ? Spacing.xs : Spacing.sm)
                             .frame(height: 24)
                     }
                 }

@@ -1323,6 +1323,12 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   defp apply_semantic_target(state, %Target{}, :review_file, {:review, review}),
     do: Commands.EditTimeline.review_file(state, review.path)
 
+  defp apply_semantic_target(state, %Target{}, :keep_mine, {:review, _review}),
+    do: Commands.AgentSubStates.reject_hunk(state)
+
+  defp apply_semantic_target(state, %Target{}, :use_agent_version, {:review, _review}),
+    do: Commands.AgentSubStates.accept_hunk(state)
+
   defp apply_semantic_target(state, %Target{}, intent, {:file_tree, tree, entry})
        when intent in [:new_file, :new_folder],
        do: Commands.FileTree.new_entry_at(state, tree, entry, intent)

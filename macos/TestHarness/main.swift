@@ -208,7 +208,8 @@ func commandToJSON(_ command: RenderCommand) -> [String: Any]? {
         if let review = update.review {
             result["review"] = [
                 "path": review.path, "freshness": Int(review.freshness.rawValue),
-                "generation": Int(review.generation), "item_id": review.itemID
+                "generation": Int(review.generation), "item_id": review.itemID,
+                "conflict_index": Int(review.conflictIndex ?? 0)
             ]
         }
         return result

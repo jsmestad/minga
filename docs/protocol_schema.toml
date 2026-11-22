@@ -1421,9 +1421,10 @@ value = 0x64
 # Activates one exact item from a frontend-local presentation. Payload:
 # surface(u8) + intent(u8) + generation(u32) + item_id(string16). `item_id` is
 # opaque bytes authored by the owning BEAM surface; frontends only echo it.
-# Surfaces: 1 completion, 2 picker, 3 file_tree, 4 command_completion, 5 timeline.
+# Surfaces: 1 completion, 2 picker, 3 file_tree, 4 command_completion, 5 timeline, 6 review.
 # File-tree intents 7/8 create a file/folder under the named parent (empty = root).
 # Command-completion intent 1 accepts a candidate; timeline intent 1 navigates to an entry ID and intent 2 reviews the full offered file path.
+# Review intents: 1 back to chat, 2 review latest, 3 keep the human version, 4 use the Agent version. Intents 3/4 require an exact current conflict offer.
 [[gui_actions]]
 name = "semantic_item_activate"
 value = 0x65

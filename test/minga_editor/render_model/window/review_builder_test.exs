@@ -122,6 +122,37 @@ defmodule MingaEditor.RenderModel.Window.ReviewBuilderTest do
     assert ReviewObservation.from_window(window) == nil
   end
 
+  test "navigation and a non-final decision name the exact conflict in the retained review" do
+    review =
+      DiffReview.from_fork_snapshot("note.txt", {self(), 2, 1}, [
+        {:conflict, ["Agent A"], ["Human A"], []},
+        {:resolved, ["unchanged"]},
+        {:conflict, ["Agent B"], ["Human B"], []}
+      ])
+
+    preview = Preview.set_diff(Preview.new(), review)
+    rects = %{content: {2, 4, 60, 30}, total: {2, 4, 60, 30}}
+    layout = ReviewLayout.new(60, %Monospace{}, Theme.get!(:minga_default), 4)
+    scope = {1, nil}
+
+    assert {:ok, first, window} =
+             ReviewBuilder.build(render_window(), preview, rects, layout, scope)
+
+    assert first.accessibility_label =~ "Conflict 1 selected"
+    assert Enum.any?(first.rows, &String.starts_with?(&1.text, "Conflict 1 "))
+    assert Enum.any?(first.rows, &String.starts_with?(&1.text, "Conflict 2 "))
+
+    next = Preview.navigate_hunk(preview, :next)
+    assert {:ok, navigated, window} = ReviewBuilder.build(window, next, rects, layout, scope)
+    assert navigated.accessibility_label =~ "Conflict 2 selected"
+    assert navigated.row_delta == nil
+
+    decided = Preview.replace_diff(next, DiffReview.accept_current(Preview.diff_review(next)))
+    assert {:ok, advanced, _window} = ReviewBuilder.build(window, decided, rects, layout, scope)
+    assert advanced.accessibility_label =~ "Conflict 1 selected"
+    assert DiffReview.resolution_at(Preview.diff_review(decided), 1) == :accepted
+  end
+
   defp render_window do
     window = Window.new_agent_chat(1, 3, 16) |> Window.show_agent_body(:review)
     cache = RendererState.window_cache(RendererState.new([]), 1)

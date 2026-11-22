@@ -43,6 +43,7 @@ defmodule MingaEditor.RenderModel.UI.StatusBarBuilder do
         %StatusReview{
           path: offer.path,
           freshness: offer.freshness,
+          conflict_index: offer.conflict_index,
           generation: offer.generation,
           item_id: offer.item_id
         }

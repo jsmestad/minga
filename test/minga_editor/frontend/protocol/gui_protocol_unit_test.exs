@@ -75,7 +75,9 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
             {5, 1, :timeline, :navigate, "entry-id"},
             {5, 2, :timeline, :review_file, "selected.ex"},
             {6, 1, :review, :back_to_chat, "r1.é:source"},
-            {6, 2, :review, :review_file, "r1.é:source"}
+            {6, 2, :review, :review_file, "r1.é:source"},
+            {6, 3, :review, :keep_mine, "r1.é:conflict"},
+            {6, 4, :review, :use_agent_version, "r1.é:conflict"}
           ] do
         assert {:ok,
                 %MingaEditor.Target{surface: name, intent: operation, generation: 10, item_id: id}} ==
@@ -92,7 +94,7 @@ defmodule MingaEditor.Frontend.Protocol.GUIProtocolUnitTest do
       assert :error == ProtocolGUI.decode_gui_action(opcode, <<9, 1, 7::32, 1::16, "x">>)
       assert :error == ProtocolGUI.decode_gui_action(opcode, <<1, 9, 7::32, 1::16, "x">>)
       assert :error == ProtocolGUI.decode_gui_action(opcode, <<1, 1, 7::32, 4::16, "x">>)
-      assert :error == ProtocolGUI.decode_gui_action(opcode, <<6, 3, 7::32, 1::16, "x">>)
+      assert :error == ProtocolGUI.decode_gui_action(opcode, <<6, 5, 7::32, 1::16, "x">>)
       assert :error == ProtocolGUI.decode_gui_action(opcode, <<6, 1, 7::32, 4::16, "x">>)
     end
   end

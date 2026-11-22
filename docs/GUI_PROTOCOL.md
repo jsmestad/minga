@@ -344,6 +344,7 @@ opcode(1) + section_count(1) + [section_id(1) + section_len(2) + payload(section
 | 0x0E | PendingKeys | keys_len(2) + keys |
 | 0x0F | Operation | operation_id(8) + kind(1) + status(1) + flags(1) + message_len(2) + message + queue_position(2) + queue_total(2) + progress_current(4) + progress_total(4) |
 | 0x10 | Review | path_len(2) + path + freshness(1: 0=current, 1=stale) + generation(4) + item_id_len(2) + item_id |
+| 0x11 | ReviewConflict | `conflict_index:u32` (one-based). Requires a Review section in the same update with a nonzero generation and nonempty item ID. |
 
 The Operation section is omitted when the Editor-global operation store is empty. It is independent of the Message section, so a structured-only payload remains discoverable. Operation selection prefers the newest active (`pending`, `queued`, or `running`) record and otherwise the newest retained terminal record. An older terminal outcome never displaces a newer active operation.
 
@@ -352,6 +353,8 @@ Operation kind values: 0=unknown, 1=external_format, 2=git_stage, 3=git_unstage,
 Operation status values: 1=pending, 2=queued, 3=running, 4=success, 5=error, 6=timeout, 7=canceled, 8=stale. Flags: bit 0=cancelable, bit 1=queue values present, bit 2=progress values present. Queue and progress integer fields are zero placeholders when their presence flag is clear. Message punctuation has no semantic meaning; clients must use the generated status value.
 
 The optional Review section identifies a read-only review, not an editable buffer. Omission clears the previous Review offer. Reserve Back to chat, Review latest and Help before optional path or ordinary status metadata. Keep the Refresh slot disabled while current, and keep all three controls in place when the review becomes stale. Back and Refresh activate the exact committed offer through `semantic_item_activate` surface 6; neither control derives a file from current selection.
+
+When the conflict marker is present, show **Keep mine (x)** and **Use Agent version (y)** for the current conflict, before optional path metadata. Both controls echo the exact Review offer using surface 6, intent 3 or 4 respectively. The offer changes when a different conflict hunk is selected. On a stale conflict, disable both decisions and offer Review latest. Only the existing revision-checked conflict workflow can apply a decision.
 
 Back resumes the retained draft without changing its text, cursor, selection or editing mode. It restores input focus through the BEAM owner; frontends do not infer draft focus from the displayed mode label.
 
