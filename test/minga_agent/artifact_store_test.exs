@@ -13,7 +13,8 @@ defmodule MingaAgent.ArtifactStoreTest do
 
   @moduletag :tmp_dir
 
-  # Bound for the stalled-call tests. Only the deliberately stalled call may exceed it, so unstalled calls in those tests run without fsync and get room for a loaded CI runner.
+  # Bound for the stalled-call tests. Only the deliberately stalled call may exceed it.
+  # Unstalled calls in those tests skip fsync and get room for a loaded CI runner.
   @stall_bound 500
 
   test "a composer selection reads its exact retained text only with the captured revision and owner",
