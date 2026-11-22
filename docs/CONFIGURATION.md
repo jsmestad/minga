@@ -1303,6 +1303,22 @@ Omitting `version:` fetches the latest stable release. If the extension config n
 
 All hex extensions are installed in a single `Mix.install/2` call at startup. The results are cached (keyed on the dep list hash), so the second boot with the same extensions skips all network and compilation work. The cache lives at `~/.cache/mix/installs/`.
 
+#### Hex extensions under the development launcher
+
+If you work on Minga itself and run it with `bin/minga`, Minga runs inside its own Mix project (`mix minga`), and `Mix.install/2` refuses to run there. Minga handles this for you: it runs the install in a separate, short-lived BEAM process that has no Mix project, then loads the result through the same admission checks a release build uses. You declare the extension exactly as above, and it loads the way it does for users.
+
+A few things differ from a release build:
+
+- The install cache lives in Minga's data directory, at `$XDG_DATA_HOME/minga/hex_extension_installs/` (or `~/.local/share/minga/hex_extension_installs/`). `bin/minga` points that directory at its private development profile, so the install never touches your Mix project or your global Mix cache.
+- The extension compiles against the Minga modules from your checkout, so `minga_sdk` compiles no stubs. A dependency that Minga already ships (for example `jason`) uses Minga's copy.
+- Minga refuses to load a dependency that would replace a Minga module. The install fails and names the conflicting module.
+
+If the install fails (no network, a compile error, or a module conflict), `*Messages*` shows the reason with the tail of the installer's output, and `:extensions` lists the extension as `load_error`. To work around a failure, clone the extension and load it with `path:` instead:
+
+```elixir
+extension :claude_bridge, path: "~/code/minga-claude-bridge"
+```
+
 ### Listing extensions
 
 `SPC h e l` or `:extensions` (`:ext`) in command mode lists all loaded extensions with their source type:

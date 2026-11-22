@@ -8,6 +8,14 @@ defmodule Minga.Extension.Hex do
   so subsequent boots with the same extensions skip all network and
   compilation work.
 
+  ## Development launcher
+
+  `Mix.install/2` cannot run inside a Mix project, and `bin/minga` runs Minga through
+  `mix minga`. In that case the install runs in a disposable OS process through
+  `Minga.Extension.HexIsolatedInstall`, which builds into Minga's data directory and appends
+  the resulting `ebin` directories to the code path without letting them shadow host modules.
+  Admission is the same in both cases.
+
   ## Limitations
 
   `Mix.install/2` can only be called once per VM (or again with
@@ -16,6 +24,7 @@ defmodule Minga.Extension.Hex do
   """
 
   alias Minga.Extension.Entry
+  alias Minga.Extension.HexIsolatedInstall
   alias Minga.Extension.Registry, as: ExtRegistry
   alias Minga.Log
   alias Minga.Telemetry.StartupProgress
@@ -93,11 +102,48 @@ defmodule Minga.Extension.Hex do
   @spec do_install([mix_dep()], keyword()) :: :ok | {:error, String.t()}
   defp do_install(deps, opts \\ []) do
     Log.info(:config, "Installing #{Enum.count(deps)} hex extension(s)...")
-
     applications = Enum.map(deps, &elem(&1, 0))
+
+    StartupProgress.during_hex_install(applications, fn ->
+      if inside_mix_project?(),
+        do: install_isolated(deps, applications, opts),
+        else: install_in_vm(deps, opts)
+    end)
+  end
+
+  # `Mix.install/2` refuses to run inside a Mix project, which is how the development
+  # launcher (`bin/minga` -> `mix minga`) runs Minga. Release builds have no Mix project.
+  @spec inside_mix_project?() :: boolean()
+  defp inside_mix_project? do
+    Code.ensure_loaded?(Mix.ProjectStack) and is_pid(Process.whereis(Mix.ProjectStack)) and
+      Mix.Project.get() != nil
+  end
+
+  @spec install_isolated([mix_dep()], [atom()], keyword()) :: :ok | {:error, String.t()}
+  defp install_isolated(deps, applications, opts) do
+    Log.info(
+      :config,
+      "Installing hex extensions in an isolated build (running inside a Mix project)"
+    )
+
+    case HexIsolatedInstall.install(deps, applications, force: Keyword.get(opts, :force, false)) do
+      {:ok, _ebins} ->
+        :ok
+
+      {:error, reason} ->
+        msg =
+          "Hex extension install failed. Load the extension from a local checkout with " <>
+            "`path:` to skip Hex.\n#{reason}"
+
+        Log.warning(:config, msg)
+        {:error, msg}
+    end
+  end
+
+  @spec install_in_vm([mix_dep()], keyword()) :: :ok | {:error, String.t()}
+  defp install_in_vm(deps, opts) do
     # Source admission starts OTP applications after the compiler status has cleared.
-    opts = Keyword.put(opts, :start_applications, false)
-    StartupProgress.during_hex_install(applications, fn -> Mix.install(deps, opts) end)
+    Mix.install(deps, Keyword.put(opts, :start_applications, false))
     :ok
   rescue
     e in [Mix.Error] ->
