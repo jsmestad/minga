@@ -25,6 +25,108 @@ defmodule MingaAgent.ProjectViewTest do
     end
   end
 
+  describe "promote through symlinks" do
+    test "refuses a staged edit whose directory symlink leaves the project", %{tmp_dir: dir} do
+      project = Path.join(dir, "project")
+      outside = Path.join(dir, "outside")
+      seed_project(project)
+      File.mkdir_p!(outside)
+      File.write!(Path.join(outside, "secret.txt"), "outside\n")
+      File.ln_s!(outside, Path.join(project, "vendor"))
+      {:ok, view} = ProjectView.overlay(project)
+
+      :ok = ProjectView.write_file(view, "vendor/secret.txt", "agent\n")
+      :ok = ProjectView.write_file(view, "lib/a.txt", "agent\n")
+
+      assert {:conflict, %{conflicts: [{:error, "vendor/secret.txt", :outside_project_root}]}} =
+               ProjectView.promote(view, :project_root)
+
+      assert File.read!(Path.join(outside, "secret.txt")) == "outside\n"
+      assert File.read!(Path.join(project, "lib/a.txt")) == "agent\n"
+      assert :ok = ProjectView.discard(view)
+    end
+  end
+
+  describe "direct writes through symlinks" do
+    setup %{tmp_dir: dir} do
+      project = Path.join(dir, "project")
+      outside = Path.join(dir, "outside")
+      seed_project(project)
+      File.mkdir_p!(outside)
+      File.write!(Path.join(outside, "secret.txt"), "outside\n")
+      {:ok, view} = ProjectView.direct(project)
+      on_exit(fn -> ProjectView.close(view) end)
+      %{project: project, outside: outside, view: view}
+    end
+
+    test "refuses to write or delete through a directory symlink that leaves the project", %{
+      project: project,
+      outside: outside,
+      view: view
+    } do
+      File.ln_s!(outside, Path.join(project, "vendor"))
+
+      assert {:error, :outside_project_root} =
+               ProjectView.write_file(view, "vendor/secret.txt", "agent\n")
+
+      assert {:error, :outside_project_root} =
+               ProjectView.write_file(view, "vendor/new.txt", "agent\n")
+
+      assert {:error, :outside_project_root} = ProjectView.delete_file(view, "vendor/secret.txt")
+
+      assert File.read!(Path.join(outside, "secret.txt")) == "outside\n"
+      refute File.exists?(Path.join(outside, "new.txt"))
+    end
+
+    test "refuses to write or delete through a final symlink that leaves the project", %{
+      project: project,
+      outside: outside,
+      view: view
+    } do
+      link = Path.join(project, "secret.txt")
+      File.ln_s!(Path.join(outside, "secret.txt"), link)
+
+      assert {:error, :outside_project_root} =
+               ProjectView.write_file(view, "secret.txt", "agent\n")
+
+      assert {:error, :outside_project_root} = ProjectView.delete_file(view, "secret.txt")
+
+      assert File.read!(Path.join(outside, "secret.txt")) == "outside\n"
+      assert {:ok, %File.Stat{type: :symlink}} = File.lstat(link)
+    end
+
+    test "replaces a hard-linked file instead of writing through to the outside file", %{
+      project: project,
+      outside: outside,
+      view: view
+    } do
+      linked = Path.join(project, "linked.txt")
+      File.ln!(Path.join(outside, "secret.txt"), linked)
+
+      assert :ok = ProjectView.write_file(view, "linked.txt", "agent\n")
+
+      assert File.read!(linked) == "agent\n"
+      assert File.read!(Path.join(outside, "secret.txt")) == "outside\n"
+    end
+
+    test "writes and deletes through symlinks that stay inside the project", %{
+      project: project,
+      view: view
+    } do
+      File.ln_s!(Path.join(project, "lib"), Path.join(project, "alias"))
+      File.ln_s!("lib/a.txt", Path.join(project, "a_link.txt"))
+
+      assert :ok = ProjectView.write_file(view, "alias/new.txt", "aliased\n")
+      assert :ok = ProjectView.write_file(view, "a_link.txt", "linked\n")
+      assert File.read!(Path.join(project, "lib/new.txt")) == "aliased\n"
+      assert File.read!(Path.join(project, "lib/a.txt")) == "linked\n"
+
+      assert :ok = ProjectView.delete_file(view, "a_link.txt")
+      assert {:error, :enoent} = File.lstat(Path.join(project, "a_link.txt"))
+      assert File.read!(Path.join(project, "lib/a.txt")) == "linked\n"
+    end
+  end
+
   describe "active?/1" do
     test "reports an overlay inactive after a promote stops its changeset", %{tmp_dir: dir} do
       seed_project(dir)

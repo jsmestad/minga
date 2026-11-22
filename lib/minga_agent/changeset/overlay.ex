@@ -9,6 +9,9 @@ defmodule MingaAgent.Changeset.Overlay do
 
   import Bitwise, only: [band: 2]
 
+  alias Minga.Buffer.Persistence.SystemFileSystem
+  alias MingaAgent.Changeset.PublicationTarget
+
   @typedoc "Overlay state."
   @type t :: %__MODULE__{
           overlay_dir: String.t(),
@@ -339,12 +342,18 @@ defmodule MingaAgent.Changeset.Overlay do
     validate_path_allow_root(root, target)
   end
 
+  # Staging a deletion refuses a project path that leaves the root through a
+  # symlink, the same rule publication enforces before it unlinks the entry.
   @spec safe_project_path(t(), String.t()) ::
-          {:ok, String.t()} | {:error, :invalid_path | :path_traversal}
+          {:ok, String.t()}
+          | {:error, :invalid_path | :path_traversal | PublicationTarget.error()}
   defp safe_project_path(%__MODULE__{} = overlay, relative_path) do
     root = Path.expand(overlay.project_root)
     target = Path.join(root, relative_path) |> Path.expand()
-    validate_target_without_symlink_check(root, target)
+
+    with {:ok, _lexical} <- validate_target_without_symlink_check(root, target) do
+      PublicationTarget.remove_path(root, Path.relative_to(target, root), {SystemFileSystem, []})
+    end
   end
 
   @spec safe_project_path_allow_root(t(), String.t()) ::

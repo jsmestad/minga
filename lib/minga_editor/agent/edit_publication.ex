@@ -384,7 +384,7 @@ defmodule MingaEditor.Agent.EditPublication do
           handoff()
         ) :: EditorState.t()
   defp install_publish_result(
-         {:ok, %Workspace{review: %WorkspaceReview{state: :conflict}} = conflicted},
+         {:ok, %Workspace{review: %WorkspaceReview{state: :conflict} = review} = conflicted},
          state,
          tb,
          workspace,
@@ -395,9 +395,7 @@ defmodule MingaEditor.Agent.EditPublication do
 
     state
     |> install_workspace(tb, conflicted)
-    |> NoticeWorkflow.publish(
-      "Some agent edits conflict with newer changes on disk; they stay staged for review"
-    )
+    |> NoticeWorkflow.publish(conflict_notice(refused_symlink_paths(review.last_error)))
   end
 
   defp install_publish_result({:ok, published}, state, tb, workspace, count, handoff) do
@@ -424,6 +422,26 @@ defmodule MingaEditor.Agent.EditPublication do
     abandon_handoff(workspace, handoff)
     NoticeWorkflow.publish(state, "Publishing agent edits failed: #{inspect(reason)}")
   end
+
+  @spec conflict_notice([String.t()]) :: String.t()
+  defp conflict_notice([]),
+    do: "Some agent edits conflict with newer changes on disk; they stay staged for review"
+
+  defp conflict_notice(paths) do
+    "Refused to publish agent edits to #{Enum.join(paths, ", ")}: a symlink on the path leads outside the project root or changed during publishing. Those edits, and any conflicting ones, stay staged for review"
+  end
+
+  # Publication refuses a file when its target resolves outside the project
+  # root, or when its resolution changed between planning and the write.
+  @spec refused_symlink_paths(term()) :: [String.t()]
+  defp refused_symlink_paths(%{conflicts: conflicts}) when is_list(conflicts) do
+    for {:error, path, reason} <- conflicts,
+        is_binary(path),
+        reason in [:outside_project_root, :publication_target_changed],
+        do: path
+  end
+
+  defp refused_symlink_paths(_details), do: []
 
   # Publication merged each open buffer and wrote the same text to disk. The
   # buffer owner clears its modified flag only when disk and buffer match.
