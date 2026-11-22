@@ -335,6 +335,7 @@ struct GUIObservationGuardrailTests {
         let source = try source(at: "Sources/Views/Shared/GUIFramePresentationMetrics.swift")
         #expect(source.sanitized.contains("\npublic final class GUIFramePresentationMetrics"))
         #expect(!source.sanitized.contains("@Observable\npublic final class GUIFramePresentationMetrics"))
+        #expect(!source.sanitized.contains("nonisolated\npublic final class GUIFramePresentationMetrics"))
         #expect(source.sanitized.contains("private var pending: [GUIFrameImpact: Pending] = [:]"))
         #expect(source.sanitized.contains("expectedFrame: metrics.expectedNativeDrawFrame(domain: domain)"))
         #expect(source.sanitized.contains("func frameNativeDrawProbe("))
