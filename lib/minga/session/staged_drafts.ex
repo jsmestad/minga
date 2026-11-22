@@ -10,7 +10,7 @@ defmodule Minga.Session.StagedDrafts do
 
   Each draft is one JSON file, written atomically (temporary file, then rename), so a crash leaves either the previous complete draft or the new one. The file carries a `version` field. The project root, view id, and path are Base64-encoded, because names can be arbitrary bytes that JSON cannot hold, and so are the base and staged bytes. A `base_sha256` fingerprint guards the base against corruption.
 
-  The drafts are user file content. Every store directory must be a real directory (not a symlink) owned by the current user and not writable by group or others; it is created with mode `0700`, and a directory that fails the check is refused for both writing and loading. Draft files get mode `0600` before they become visible under their final name. Reads accept regular files only and are bounded by `max_draft_bytes/0`.
+  The drafts are user file content. Every store directory must be a real directory (not a symlink) owned by the current user and not writable by group or others; it is created with mode `0700`, and a directory that fails the check is refused for both writing and loading. Draft files get mode `0600` before they become visible under their final name. Reads accept regular files only and are bounded by `max_draft_bytes/1`. A draft above `max_file_bytes/1` is never saved; `write_lost/6` replaces its stored copy with a content-free marker, so the next start reports it as lost instead of restoring an older version.
 
   This module only reads and writes files. `MingaAgent.StagedDraftKeeper` decides when to write and delete them.
   """
@@ -29,7 +29,6 @@ defmodule Minga.Session.StagedDrafts do
   # well above any source file an agent edits, and keeps a corrupt or hostile
   # draft from exhausting the keeper.
   @max_file_bytes 64 * 1024 * 1024
-  @max_draft_bytes 2 * div(@max_file_bytes * 4, 3) + 64 * 1024
 
   @typedoc "Why one stored draft is gone for good. Its file is deleted."
   @type lost_reason ::
@@ -58,13 +57,13 @@ defmodule Minga.Session.StagedDrafts do
           entries: [entry()]
         }
 
-  @doc "Largest base or staged content, in bytes, that is persisted."
-  @spec max_file_bytes() :: pos_integer()
-  def max_file_bytes, do: @max_file_bytes
+  @doc "Largest base or staged content, in bytes, that is persisted (`opts[:max_file_bytes]`, default 64 MiB)."
+  @spec max_file_bytes(keyword()) :: pos_integer()
+  def max_file_bytes(opts \\ []), do: Keyword.get(opts, :max_file_bytes, @max_file_bytes)
 
-  @doc "Largest draft file, in bytes, that is read back."
-  @spec max_draft_bytes() :: pos_integer()
-  def max_draft_bytes, do: @max_draft_bytes
+  @doc "Largest draft file, in bytes, that is read back: Base64 of a maximal base and content, plus room for the envelope."
+  @spec max_draft_bytes(keyword()) :: pos_integer()
+  def max_draft_bytes(opts \\ []), do: 2 * div(max_file_bytes(opts) * 4, 3) + 64 * 1024
 
   @doc "Returns the root directory of the staged draft store."
   @spec dir(keyword()) :: String.t()
@@ -109,11 +108,43 @@ defmodule Minga.Session.StagedDrafts do
   def write(project_root, view_id, workspace_id, %StagedDraft{} = draft, opts \\ [])
       when is_integer(workspace_id) and workspace_id >= 0 do
     target = draft_file(project_root, view_id, draft.path, opts)
+
+    with :ok <- within_size_limit(draft, opts),
+         {:ok, json} <- encode_json(encode(project_root, view_id, workspace_id, draft)) do
+      publish(project_root, view_id, opts, target, json)
+    end
+  end
+
+  @doc """
+  Replaces the stored draft for `path` with a marker that it is lost, for a draft that cannot be saved (`:too_large`).
+
+  The marker names the path and the reason and holds no content, so the next start reports the draft as lost instead of restoring an older saved version.
+  """
+  @spec write_lost(String.t(), String.t(), non_neg_integer(), String.t(), :too_large, keyword()) ::
+          :ok | {:error, term()}
+  def write_lost(project_root, view_id, workspace_id, path, :too_large, opts \\ [])
+      when is_binary(path) and is_integer(workspace_id) and workspace_id >= 0 do
+    marker = %{
+      "format" => @format,
+      "version" => @current_version,
+      "project_root" => Base.encode64(project_root),
+      "view_id" => Base.encode64(view_id),
+      "workspace_id" => workspace_id,
+      "path" => Base.encode64(path),
+      "lost" => "too_large"
+    }
+
+    with {:ok, json} <- encode_json(marker) do
+      publish(project_root, view_id, opts, draft_file(project_root, view_id, path, opts), json)
+    end
+  end
+
+  @spec publish(String.t(), String.t(), keyword(), String.t(), String.t()) ::
+          :ok | {:error, term()}
+  defp publish(project_root, view_id, opts, target, json) do
     tmp = "#{target}.#{System.unique_integer([:positive, :monotonic])}.tmp"
 
-    with :ok <- within_size_limit(draft),
-         {:ok, json} <- encode_json(encode(project_root, view_id, workspace_id, draft)),
-         :ok <- ensure_private_dirs(project_root, view_id, opts),
+    with :ok <- ensure_private_dirs(project_root, view_id, opts),
          :ok <- write_private(tmp, json),
          :ok <- File.rename(tmp, target) do
       :ok
@@ -200,7 +231,7 @@ defmodule Minga.Session.StagedDrafts do
       dirs = names |> Enum.sort() |> Enum.map(&Path.join(project, &1))
 
       with :ok <- all_ok(dirs, &verify_private(&1, uid)) do
-        {:ok, Enum.flat_map(dirs, &List.wrap(load_view(&1, project_root)))}
+        {:ok, Enum.flat_map(dirs, &List.wrap(load_view(&1, project_root, opts)))}
       end
     else
       :absent -> {:ok, []}
@@ -233,14 +264,14 @@ defmodule Minga.Session.StagedDrafts do
     end)
   end
 
-  @spec load_view(String.t(), String.t()) :: stored_view() | nil
-  defp load_view(dir, project_root) do
+  @spec load_view(String.t(), String.t(), keyword()) :: stored_view() | nil
+  defp load_view(dir, project_root, opts) do
     entries =
       case File.ls(dir) do
         {:ok, names} ->
           names
           |> Enum.sort()
-          |> Enum.flat_map(&load_entry(Path.join(dir, &1), project_root))
+          |> Enum.flat_map(&load_entry(Path.join(dir, &1), project_root, opts))
 
         {:error, _reason} ->
           []
@@ -266,27 +297,27 @@ defmodule Minga.Session.StagedDrafts do
     }
   end
 
-  @spec load_entry(String.t(), String.t()) :: [
+  @spec load_entry(String.t(), String.t(), keyword()) :: [
           {entry(), String.t() | nil, non_neg_integer() | nil}
         ]
-  defp load_entry(file, project_root) do
+  defp load_entry(file, project_root, opts) do
     cond do
       String.ends_with?(file, ".tmp") ->
         _ = File.rm(file)
         []
 
       String.ends_with?(file, @extension) ->
-        [read_entry(file, project_root)]
+        [read_entry(file, project_root, opts)]
 
       true ->
         []
     end
   end
 
-  @spec read_entry(String.t(), String.t()) ::
+  @spec read_entry(String.t(), String.t(), keyword()) ::
           {entry(), String.t() | nil, non_neg_integer() | nil}
-  defp read_entry(file, project_root) do
-    case SecureFile.read(file, @max_draft_bytes) do
+  defp read_entry(file, project_root, opts) do
+    case SecureFile.read(file, max_draft_bytes(opts)) do
       {:ok, data} ->
         decode_file(file, data, project_root)
 
@@ -344,12 +375,13 @@ defmodule Minga.Session.StagedDrafts do
   defp encode_content(:deleted), do: nil
   defp encode_content(bytes), do: Base.encode64(bytes)
 
-  @spec within_size_limit(StagedDraft.t()) :: :ok | {:error, :draft_too_large}
-  defp within_size_limit(%StagedDraft{base: base, content: content}) do
-    if byte_size_or_zero(base) <= @max_file_bytes and
-         byte_size_or_zero(content) <= @max_file_bytes,
-       do: :ok,
-       else: {:error, :draft_too_large}
+  @spec within_size_limit(StagedDraft.t(), keyword()) :: :ok | {:error, :draft_too_large}
+  defp within_size_limit(%StagedDraft{base: base, content: content}, opts) do
+    max = max_file_bytes(opts)
+
+    if byte_size_or_zero(base) <= max and byte_size_or_zero(content) <= max,
+      do: :ok,
+      else: {:error, :draft_too_large}
   end
 
   @spec byte_size_or_zero(binary() | atom() | nil) :: non_neg_integer()
@@ -363,6 +395,7 @@ defmodule Minga.Session.StagedDrafts do
 
     with {:ok, path} <- decode_path(Map.get(map, "path")),
          {:ok, view_id, workspace_id} <- decode_owner(map, root),
+         :ok <- not_lost(map),
          {:ok, base} <- decode_optional_bytes(Map.get(map, "base")),
          :ok <- verify_base(base, Map.get(map, "base_sha256")),
          {:ok, content} <- decode_content(map) do
@@ -372,11 +405,16 @@ defmodule Minga.Session.StagedDrafts do
     end
   end
 
-  defp decode(file, %{"format" => @format, "version" => version} = map, _root),
-    do: {{:lost, file, lost_name(map, file), {:unsupported_version, version}}, nil, nil}
+  defp decode(file, %{"format" => @format, "version" => version} = map, _root)
+       when version != @current_version,
+       do: {{:lost, file, lost_name(map, file), {:unsupported_version, version}}, nil, nil}
 
   defp decode(file, map, _root),
     do: {{:lost, file, lost_name(map, file), :invalid_format}, nil, nil}
+
+  @spec not_lost(map()) :: :ok | {:error, :too_large}
+  defp not_lost(%{"lost" => "too_large"}), do: {:error, :too_large}
+  defp not_lost(_map), do: :ok
 
   @spec lost_name(map(), String.t()) :: String.t()
   defp lost_name(map, file) do

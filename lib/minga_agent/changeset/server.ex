@@ -38,7 +38,8 @@ defmodule MingaAgent.Changeset.Server do
           attempts: non_neg_integer(),
           revision: non_neg_integer(),
           publication: {module(), keyword()},
-          observer: pid() | nil
+          observer: pid() | nil,
+          staging: {atom(), term()} | nil
         }
 
   @spec start_link(keyword()) :: GenServer.on_start()
@@ -67,7 +68,8 @@ defmodule MingaAgent.Changeset.Server do
             Keyword.get(opts, :publication_file_system, SystemFileSystem),
             Keyword.get(opts, :publication_opts, [])
           },
-          observer: nil
+          observer: nil,
+          staging: nil
         }
 
         {:ok, state}
@@ -278,7 +280,14 @@ defmodule MingaAgent.Changeset.Server do
   end
 
   def handle_call({:observe, observer, registration}, _from, state) do
-    {:reply, register_staging(registration), %{state | observer: observer}}
+    case join_staging(state.staging, registration) do
+      :ok -> {:reply, :ok, %{state | observer: observer, staging: registration}}
+      {:error, _reason} = error -> {:reply, error, %{state | observer: observer}}
+    end
+  end
+
+  def handle_call(:staging, _from, state) do
+    {:reply, staging_value(state.staging), state}
   end
 
   def handle_call({:staged_drafts, baseline_paths}, _from, state) do
@@ -772,22 +781,22 @@ defmodule MingaAgent.Changeset.Server do
   end
 
   # The changeset outlives its observer, so it carries its own staging
-  # registration: a restarted observer finds every live staged view there.
-  @spec register_staging({atom(), term()} | nil) :: :ok | {:error, term()}
-  defp register_staging(nil), do: :ok
+  # registration and announces itself in a `:pg` scope. `:pg` monitors its
+  # members instead of linking them, so a failing scope never takes staged
+  # edits down with it, and a restarted observer finds every live changeset.
+  @spec join_staging({atom(), term()} | nil, {atom(), term()} | nil) :: :ok | {:error, term()}
+  defp join_staging(_current, nil), do: :ok
+  defp join_staging({scope, _value}, {scope, _new_value}), do: :ok
 
-  defp register_staging({registry, value}) do
-    case Registry.register(registry, self(), value) do
-      {:ok, _owner} ->
-        :ok
-
-      {:error, {:already_registered, _owner}} ->
-        {_new, _old} = Registry.update_value(registry, self(), fn _old -> value end)
-        :ok
-    end
-  rescue
-    ArgumentError -> {:error, :registry_unavailable}
+  defp join_staging(_current, {scope, _value}) do
+    :pg.join(scope, :staged_views, self())
+  catch
+    :error, _reason -> {:error, :staging_scope_unavailable}
   end
+
+  @spec staging_value({atom(), term()} | nil) :: term() | nil
+  defp staging_value({_scope, value}), do: value
+  defp staging_value(nil), do: nil
 
   @spec notify_observer(state()) :: :ok
   defp notify_observer(%{observer: observer}) when is_pid(observer) do

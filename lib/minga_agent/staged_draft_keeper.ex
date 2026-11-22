@@ -5,7 +5,8 @@ defmodule MingaAgent.StagedDraftKeeper do
   Approved agent edits wait in a workspace's overlay `MingaAgent.ProjectView` (a changeset plus buffer forks) until the user publishes or discards them. Those processes live under `MingaAgent.Supervisor`, so they outlive an Editor restart, but the restarted Editor has no handle to them, and a full restart loses them. This process is the single owner of their durability:
 
     * **Tracking.** `persist/3` registers a view with the workspace it belongs to. Views are tracked by their own identity; the workspace id is an attribute that can change. A new view for a workspace never displaces another live view or its drafts. The keeper monitors the view's changeset and subscribes to its revisions.
-    * **Rebuildable tracking.** When the keeper subscribes, the changeset registers itself in a `Registry` (`:registry` option) with its view and workspace id. The registration belongs to the changeset, so it outlives a keeper crash; a restarted keeper adopts every registered view and re-saves it.
+    * **Rebuildable tracking.** When the keeper subscribes, the changeset keeps its view and workspace id as its staging registration and joins a `:pg` scope (`:scope` option). The membership belongs to the changeset, so it outlives a keeper crash; a restarted keeper adopts every member's view and re-saves it. `:pg` monitors members rather than linking them, so a failing scope cannot take staged edits down with it.
+    * **Oversized drafts.** A draft above the store's size limit is not saved. Its stored copy is replaced with a content-free "lost: too large" marker, so the next start names it as lost instead of restoring an older version, and the user is told once per path in `*Messages*`.
     * **Persistence.** After each staged change the keeper writes the view's drafts with `Minga.Session.StagedDrafts` (one private, atomic file per draft). Only drafts whose content changed are rewritten; files for paths that are no longer staged are removed.
     * **Deletion.** A changeset stops normally only after a successful publish, a discard, or a close of a clean view, so a `:normal` exit deletes that view's draft files. Any other exit (a crash, an application shutdown) keeps them for the next start.
     * **Recovery.** `recover/3` hands an Editor every staged view of its project: views that are still running (`:live`, after an Editor restart) and views rebuilt from disk (`:disk`, after a full restart). The reply is `{:staged_drafts_recovered, project_root, [Recovery.t()]}`, sent only when there is something to offer. A draft file is deleted only when it can never be restored; a draft that fails for a reason that may pass (I/O, an unavailable process) stays on disk, and its whole view waits for the next start.
@@ -22,7 +23,7 @@ defmodule MingaAgent.StagedDraftKeeper do
   alias MingaAgent.ProjectView.Overlay
   alias MingaAgent.StagedDraftKeeper.Recovery
 
-  @registry MingaAgent.StagedDraftKeeper.Registry
+  @scope MingaAgent.StagedDraftKeeper.Scope
 
   # Failures that no later attempt can fix. Their draft files are deleted.
   @permanent_failures [
@@ -43,30 +44,32 @@ defmodule MingaAgent.StagedDraftKeeper do
            workspace_id: non_neg_integer(),
            changeset: pid(),
            monitor: reference(),
-           written: %{String.t() => binary() | nil}
+           written: %{String.t() => binary() | nil},
+           too_large: MapSet.t(String.t())
          }
 
   @typep state :: %{
            store_opts: keyword(),
-           registry: atom(),
+           scope: atom(),
            tracked: %{view_id() => tracked()},
            pending: MapSet.t(view_id())
          }
 
   @typedoc """
-  Start options. `:staged_drafts_dir` overrides the store directory, `:registry` names the changeset registry (default `#{inspect(@registry)}`), and `:owner_uid` fixes the uid that must own the store.
+  Start options. `:staged_drafts_dir` overrides the store directory, `:scope` names the `:pg` scope of live staged views (default `#{inspect(@scope)}`), `:owner_uid` fixes the uid that must own the store, and `:max_file_bytes` sets the largest saved draft.
   """
   @type start_opt ::
           {:name, GenServer.name() | nil}
           | {:staged_drafts_dir, String.t()}
-          | {:registry, atom()}
+          | {:scope, atom()}
           | {:owner_uid, non_neg_integer()}
+          | {:max_file_bytes, pos_integer()}
 
   # ── Client API ──────────────────────────────────────────────────────────
 
-  @doc "Returns the default changeset registry name."
-  @spec registry() :: atom()
-  def registry, do: @registry
+  @doc "Returns the default `:pg` scope of live staged views."
+  @spec scope() :: atom()
+  def scope, do: @scope
 
   @doc "Starts the keeper."
   @spec start_link([start_opt()]) :: GenServer.on_start()
@@ -112,7 +115,7 @@ defmodule MingaAgent.StagedDraftKeeper do
     # of discarded or published changesets still delete their drafts.
     Process.flag(:trap_exit, true)
 
-    store_opts = Keyword.take(opts, [:staged_drafts_dir, :owner_uid])
+    store_opts = Keyword.take(opts, [:staged_drafts_dir, :owner_uid, :max_file_bytes])
 
     store_opts =
       case StagedDrafts.owner_uid(store_opts) do
@@ -122,7 +125,7 @@ defmodule MingaAgent.StagedDraftKeeper do
 
     state = %{
       store_opts: store_opts,
-      registry: Keyword.get(opts, :registry, @registry),
+      scope: Keyword.get(opts, :scope, @scope),
       tracked: %{},
       pending: MapSet.new()
     }
@@ -189,7 +192,7 @@ defmodule MingaAgent.StagedDraftKeeper do
   # started (a keeper restart) is tracked again and re-saved.
   @spec adopt_registered(state()) :: state()
   defp adopt_registered(state) do
-    state.registry
+    state.scope
     |> registered_views()
     |> Enum.reduce(state, fn {view, workspace_id}, state ->
       case track(state, view, workspace_id) do
@@ -200,10 +203,25 @@ defmodule MingaAgent.StagedDraftKeeper do
   end
 
   @spec registered_views(atom()) :: [{ProjectView.t(), non_neg_integer()}]
-  defp registered_views(registry) do
-    Registry.select(registry, [{{:_, :_, :"$1"}, [], [:"$1"]}])
-  rescue
-    ArgumentError -> []
+  defp registered_views(scope) do
+    for changeset <- staging_members(scope),
+        {%ProjectView{}, workspace_id} = registration <- [staging(changeset)],
+        is_integer(workspace_id),
+        do: registration
+  end
+
+  @spec staging_members(atom()) :: [pid()]
+  defp staging_members(scope) do
+    :pg.get_members(scope, :staged_views)
+  catch
+    :error, _reason -> []
+  end
+
+  @spec staging(pid()) :: term()
+  defp staging(changeset) do
+    Changeset.staging(changeset)
+  catch
+    :exit, _reason -> nil
   end
 
   @spec track(state(), ProjectView.t(), non_neg_integer()) :: {:ok, state()} | {:error, state()}
@@ -216,7 +234,7 @@ defmodule MingaAgent.StagedDraftKeeper do
         # The view moved to another workspace: rewrite every draft with the
         # new workspace id.
         register(state, tracked.changeset, view, workspace_id)
-        tracked = %{tracked | workspace_id: workspace_id, written: %{}}
+        tracked = %{tracked | workspace_id: workspace_id, written: %{}, too_large: MapSet.new()}
         {:ok, %{state | tracked: Map.put(state.tracked, view_id, tracked)}}
 
       nil ->
@@ -229,6 +247,9 @@ defmodule MingaAgent.StagedDraftKeeper do
         }) :: {:ok, state()} | {:error, state()}
   defp start_tracking(state, view, workspace_id, written) do
     changeset = Overlay.changeset_pid(view)
+    # Monitor first: a changeset that stops normally between the two calls
+    # then reports `:normal` (drafts deleted), not `:noproc` (drafts kept).
+    monitor = Process.monitor(changeset)
 
     case register(state, changeset, view, workspace_id) do
       :ok ->
@@ -236,20 +257,22 @@ defmodule MingaAgent.StagedDraftKeeper do
           view: view,
           workspace_id: workspace_id,
           changeset: changeset,
-          monitor: Process.monitor(changeset),
-          written: written
+          monitor: monitor,
+          written: written,
+          too_large: MapSet.new()
         }
 
         {:ok, %{state | tracked: Map.put(state.tracked, view.id, tracked)}}
 
       {:error, _reason} ->
+        Process.demonitor(monitor, [:flush])
         {:error, state}
     end
   end
 
   @spec register(state(), pid(), ProjectView.t(), non_neg_integer()) :: :ok | {:error, term()}
   defp register(state, changeset, view, workspace_id) do
-    Changeset.observe(changeset, self(), {state.registry, {view, workspace_id}})
+    Changeset.observe(changeset, self(), {state.scope, {view, workspace_id}})
   catch
     :exit, reason -> {:error, {:changeset_unavailable, Overlay.exit_kind(reason)}}
   end
@@ -314,7 +337,7 @@ defmodule MingaAgent.StagedDraftKeeper do
         put_written(state, tracked, %{})
 
       {:ok, drafts} ->
-        written = write_changed(state, tracked, drafts, written)
+        {written, tracked} = write_changed(state, tracked, drafts, written)
 
         log_error(
           StagedDrafts.prune(view.project_root, view.id, Map.keys(written), state.store_opts)
@@ -333,23 +356,30 @@ defmodule MingaAgent.StagedDraftKeeper do
   end
 
   @spec write_changed(state(), tracked(), [StagedDraft.t()], %{String.t() => binary() | nil}) ::
-          %{String.t() => binary() | nil}
+          {%{String.t() => binary() | nil}, tracked()}
   defp write_changed(state, tracked, drafts, written) do
-    Map.new(drafts, fn draft ->
+    Enum.reduce(drafts, {%{}, tracked}, fn draft, {acc, tracked} ->
       digest = StagedDraft.digest(draft)
 
-      if Map.get(written, draft.path) == digest,
-        do: {draft.path, digest},
-        else: {draft.path, write_draft(state, tracked, draft, digest)}
+      {saved, tracked} =
+        if Map.get(written, draft.path) == digest,
+          do: {digest, tracked},
+          else: write_draft(state, tracked, draft, digest)
+
+      {Map.put(acc, draft.path, saved), tracked}
     end)
   end
 
-  # Returns the digest now on disk; `nil` forces a retry at the next snapshot.
-  @spec write_draft(state(), tracked(), StagedDraft.t(), binary()) :: binary() | nil
-  defp write_draft(state, %{view: view, workspace_id: workspace_id}, draft, digest) do
+  # Returns the digest now on disk (`nil` retries at the next snapshot) and
+  # the tracked view with its too-large notices updated.
+  @spec write_draft(state(), tracked(), StagedDraft.t(), binary()) :: {binary() | nil, tracked()}
+  defp write_draft(state, %{view: view, workspace_id: workspace_id} = tracked, draft, digest) do
     case StagedDrafts.write(view.project_root, view.id, workspace_id, draft, state.store_opts) do
       :ok ->
-        digest
+        {digest, %{tracked | too_large: MapSet.delete(tracked.too_large, draft.path)}}
+
+      {:error, :draft_too_large} ->
+        mark_too_large(state, tracked, draft, digest)
 
       {:error, reason} ->
         Minga.Log.warning(
@@ -357,7 +387,39 @@ defmodule MingaAgent.StagedDraftKeeper do
           "Staged agent edit for #{display_path(draft.path)} could not be saved: #{inspect(Recovery.safe_reason(reason))}"
         )
 
-        nil
+        {nil, tracked}
+    end
+  end
+
+  # The stored older version must not come back after a restart: replace it
+  # with a lost marker, and tell the user once per path.
+  @spec mark_too_large(state(), tracked(), StagedDraft.t(), binary()) ::
+          {binary() | nil, tracked()}
+  defp mark_too_large(state, %{view: view} = tracked, draft, digest) do
+    case StagedDrafts.write_lost(
+           view.project_root,
+           view.id,
+           tracked.workspace_id,
+           draft.path,
+           :too_large,
+           state.store_opts
+         ) do
+      :ok ->
+        unless MapSet.member?(tracked.too_large, draft.path) do
+          Minga.API.message(
+            "Staged agent edit for #{display_path(draft.path)} is larger than #{StagedDrafts.max_file_bytes(state.store_opts)} bytes, so it is not saved for a restart. Publish or discard it before quitting."
+          )
+        end
+
+        {digest, %{tracked | too_large: MapSet.put(tracked.too_large, draft.path)}}
+
+      {:error, reason} ->
+        Minga.Log.warning(
+          :agent,
+          "Staged agent edit for #{display_path(draft.path)} is too large to save, and its saved copy could not be retired: #{inspect(Recovery.safe_reason(reason))}"
+        )
+
+        {nil, tracked}
     end
   end
 
@@ -535,7 +597,7 @@ defmodule MingaAgent.StagedDraftKeeper do
     recovery =
       Recovery.restored(workspace_id, view,
         changes: changes,
-        base_changed: base_changed_paths(view.project_root, restored),
+        base_changed: base_changed_paths(view.project_root, restored, state.store_opts),
         lost: lost
       )
 
@@ -558,18 +620,20 @@ defmodule MingaAgent.StagedDraftKeeper do
     :exit, _reason -> :ok
   end
 
-  @spec base_changed_paths(String.t(), [StagedDraft.t()]) :: [String.t()]
-  defp base_changed_paths(root, drafts) do
+  @spec base_changed_paths(String.t(), [StagedDraft.t()], keyword()) :: [String.t()]
+  defp base_changed_paths(root, drafts, store_opts) do
+    max = StagedDrafts.max_file_bytes(store_opts)
+
     for draft <- drafts,
-        StagedDraft.base_changed?(draft, read_project_file(Path.join(root, draft.path))),
+        StagedDraft.base_changed?(draft, read_project_file(Path.join(root, draft.path), max)),
         do: draft.path
   end
 
   # Regular files only, bounded: a FIFO or device in the project must not
   # block or exhaust the keeper.
-  @spec read_project_file(String.t()) :: {:ok, binary()} | {:error, term()}
-  defp read_project_file(path) do
-    case Minga.SecureFile.read(path, StagedDrafts.max_file_bytes()) do
+  @spec read_project_file(String.t(), pos_integer()) :: {:ok, binary()} | {:error, term()}
+  defp read_project_file(path, max) do
+    case Minga.SecureFile.read(path, max) do
       {:ok, bytes} -> {:ok, bytes}
       {:error, {:file_read_failed, _path, :enoent}} -> {:error, :enoent}
       {:error, _reason} -> {:error, :unreadable}

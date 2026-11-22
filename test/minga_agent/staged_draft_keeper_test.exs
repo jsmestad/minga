@@ -17,9 +17,9 @@ defmodule MingaAgent.StagedDraftKeeperTest do
     File.write!(Path.join(root, "lib/b.ex"), "alpha\nbeta\n")
     File.write!(Path.join(root, "old.txt"), "remove me\n")
 
-    registry = :"staged_views_#{System.unique_integer([:positive])}"
-    start_supervised!({Registry, keys: :unique, name: registry})
-    store = [staged_drafts_dir: Path.join(dir, "store"), registry: registry]
+    scope = :"staged_views_#{System.unique_integer([:positive])}"
+    start_supervised!(%{id: scope, start: {:pg, :start_link, [scope]}})
+    store = [staged_drafts_dir: Path.join(dir, "store"), scope: scope]
     %{root: root, store: store, keeper: start_keeper(store, :first)}
   end
 
@@ -339,6 +339,42 @@ defmodule MingaAgent.StagedDraftKeeperTest do
 
       File.chmod!(unreadable, 0o600)
       assert map_size(stored(root, store)) == 3
+    end
+  end
+
+  describe "oversized drafts" do
+    test "a draft that grows past the limit is reported lost after a restart, never restored stale",
+         %{root: root, store: store} do
+      small = Keyword.put(store, :max_file_bytes, 32)
+      keeper = start_keeper(small, :small)
+      {:ok, view} = ProjectView.overlay(root)
+      StagedDraftKeeper.persist(keeper, view, 1)
+
+      :ok = ProjectView.write_file(view, "lib/a.ex", "small edit\n")
+      eventually(keeper, fn -> match?(%{{1, "lib/a.ex"} => _}, stored(root, store)) end)
+
+      big = String.duplicate("grown past the limit\n", 10)
+      :ok = ProjectView.write_file(view, "lib/a.ex", big)
+      eventually(keeper, fn -> stored(root, store) == %{} end)
+
+      file = StagedDrafts.draft_file(root, view.id, "lib/a.ex", store)
+      marker = File.read!(file)
+      refute marker =~ Base.encode64("small edit\n")
+      refute marker =~ "grown"
+
+      changeset = Overlay.changeset_pid(view)
+      ref = Process.monitor(changeset)
+      stop_supervised!(:small)
+      Process.exit(changeset, :shutdown)
+      assert_receive {:DOWN, ^ref, :process, _, :shutdown}
+
+      fresh = start_keeper(small, :fresh)
+      :ok = StagedDraftKeeper.recover(fresh, root, self())
+
+      assert_receive {:staged_drafts_recovered, ^root, [%Recovery{} = recovery]}, 2_000
+      assert recovery.view == nil
+      assert recovery.lost == [{"lib/a.ex", :too_large}]
+      refute File.exists?(file)
     end
   end
 end

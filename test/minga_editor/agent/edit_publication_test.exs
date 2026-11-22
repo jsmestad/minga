@@ -213,9 +213,9 @@ defmodule MingaEditor.Agent.EditPublicationTest do
 
     test "after a full restart the saved drafts are offered and can be discarded",
          %{state: state, workspace_id: id, root: root, tmp_dir: dir} do
-      registry = :"publication_views_#{System.unique_integer([:positive])}"
-      start_supervised!({Registry, keys: :unique, name: registry})
-      store = [staged_drafts_dir: Path.join(dir, "store"), registry: registry]
+      scope = :"publication_views_#{System.unique_integer([:positive])}"
+      start_supervised!(%{id: scope, start: {:pg, :start_link, [scope]}})
+      store = [staged_drafts_dir: Path.join(dir, "store"), scope: scope]
       File.write!(Path.join(root, "todo.md"), "a\nb\n")
       keeper = start_supervised!({StagedDraftKeeper, [name: nil] ++ store}, id: :before)
 

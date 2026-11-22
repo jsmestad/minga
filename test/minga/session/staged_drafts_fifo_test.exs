@@ -33,9 +33,9 @@ defmodule Minga.Session.StagedDraftsFifoTest do
     root = Path.join(dir, "project")
     File.mkdir_p!(root)
     File.write!(Path.join(root, "a.txt"), "base\n")
-    registry = :"fifo_views_#{System.unique_integer([:positive])}"
-    start_supervised!({Registry, keys: :unique, name: registry})
-    opts = [name: nil, staged_drafts_dir: Path.join(dir, "store"), registry: registry]
+    scope = :"fifo_views_#{System.unique_integer([:positive])}"
+    start_supervised!(%{id: scope, start: {:pg, :start_link, [scope]}})
+    opts = [name: nil, staged_drafts_dir: Path.join(dir, "store"), scope: scope]
 
     keeper =
       start_supervised!(

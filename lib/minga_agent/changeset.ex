@@ -322,12 +322,16 @@ defmodule MingaAgent.Changeset do
   @doc """
   Registers `observer` to receive `{:changeset_revised, changeset}` after every staged change.
 
-  One observer at a time; a later call replaces the earlier one. With `{registry, value}`, the changeset also registers itself in `registry` under its own pid with `value` (updating an earlier value). The registration lives as long as the changeset, so a restarted observer can find every live changeset again.
+  One observer at a time; a later call replaces the earlier one. With `{scope, value}`, the changeset also keeps `value` as its staging registration (see `staging/1`) and joins the `:staged_views` group of the `:pg` scope `scope`. Membership lasts as long as the changeset, so a restarted observer can find every live changeset again. `:pg` monitors members rather than linking them.
   """
   @spec observe(changeset(), pid(), {atom(), term()} | nil) :: :ok | {:error, term()}
   def observe(cs, observer, registration \\ nil) when is_pid(observer) do
     GenServer.call(cs, {:observe, observer, registration})
   end
+
+  @doc "Returns the staging registration value given to `observe/3`, or `nil`."
+  @spec staging(changeset()) :: term() | nil
+  def staging(cs), do: GenServer.call(cs, :staging)
 
   @doc """
   Returns the staged drafts, with the base each change was staged against, plus the retained baselines of `baseline_paths`.
