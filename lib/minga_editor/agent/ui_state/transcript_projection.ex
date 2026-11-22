@@ -191,9 +191,10 @@ defmodule MingaEditor.Agent.UIState.TranscriptProjection do
   def presentation_changes(%__MODULE__{} = projection, %__MODULE__{} = projection), do: []
 
   def presentation_changes(
-        %__MODULE__{index: %Index{} = previous, empty_item: nil},
-        %__MODULE__{index: %Index{} = current, empty_item: nil}
-      ),
+        %__MODULE__{index: previous, empty_item: nil},
+        %__MODULE__{index: current, empty_item: nil}
+      )
+      when previous != nil and current != nil,
       do: Index.presentation_changes(previous, current)
 
   def presentation_changes(%__MODULE__{} = previous, %__MODULE__{} = current) do
