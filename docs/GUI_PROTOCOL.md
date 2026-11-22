@@ -439,6 +439,7 @@ icon_color is a 24-bit RGB value for the item's icon.
 flags bits:
   bit 0: two_line (render description on second line)
   bit 1: marked (multi-select checkmark)
+  bit 2: keep_description_start (the description leads with its important facts, such as a model row's readiness and plan usage; when it does not fit, shorten its end. When clear, the description is path-like and its end matters most)
 annotation is a right-aligned string (e.g., keybinding "SPC f s").
 match_positions is a list of uint16 character indices for highlighting matched characters.
 has_preview indicates whether the picker source supports preview (triggers split layout).

@@ -138,6 +138,10 @@ enum PreviewRegistry {
             agentChatSummaryPreview()
         case "PickerOverlay":
             pickerPreview()
+        case "PickerModelRows":
+            pickerModelRowsPreview()
+        case "PickerMixedScroll":
+            pickerMixedScrollPreview()
         case "MinibufferView":
             minibufferPreview()
         case "WhichKeyOverlay":

@@ -422,6 +422,8 @@ defmodule MingaEditor.UI.Picker.AgentModelSourceTest do
       assert ready.description =~ "Ready: fixture@example.com"
       assert offline.description =~ FixtureInferenceRoute.remedy()
       assert ready.meta.intent == {:check_route, ctx.setup_id, "Setup Fixture"}
+      # Readiness trails the setup text, so a frontend that shortens it must keep the start.
+      assert Enum.all?(rows, &(&1.description_overflow == :keep_start))
 
       assert Enum.all?(rows, &match?({:check_route, _id, _name}, &1.meta.intent))
     end
@@ -544,6 +546,13 @@ defmodule MingaEditor.UI.Picker.AgentModelSourceTest do
       # A reset after midnight local time carries a weekday ("Sun 12:32 AM").
       assert row.description =~ ~r/82% of 5h limit · resets (\w{3} )?\d{1,2}:\d{2} (AM|PM)/
       refute row.description =~ "7d"
+
+      # Readiness and usage lead the description, and the row asks frontends to keep
+      # that start when they shorten it, so capability and cost details drop first.
+      assert row.description_overflow == :keep_start
+      [_route, readiness, usage, _kind, _reset | _rest] = String.split(row.description, " · ")
+      assert readiness == "Availability not checked"
+      assert usage == "82% of 5h limit"
     end
   end
 
