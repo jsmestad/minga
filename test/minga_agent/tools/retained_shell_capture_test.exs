@@ -359,6 +359,8 @@ defmodule MingaAgent.Tools.RetainedShellCaptureTest do
        %{
          tmp_dir: root
        } do
+    # Release the gated producer even if an assertion fails first, so no shell loop outlives the test.
+    on_exit(fn -> File.write(Path.join(root, "release-output"), "") end)
     store = start_store(root)
     ctx = context(root, store, "incremental")
     parent = self()
@@ -389,6 +391,7 @@ defmodule MingaAgent.Tools.RetainedShellCaptureTest do
   end
 
   test "reader EOF alone cannot complete a producer that is still running", %{tmp_dir: root} do
+    on_exit(fn -> File.write(Path.join(root, "release-exit"), "") end)
     store = start_store(root)
     ctx = context(root, store, "eof-first")
     parent = self()
