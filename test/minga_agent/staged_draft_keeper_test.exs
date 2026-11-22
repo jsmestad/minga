@@ -25,12 +25,15 @@ defmodule MingaAgent.StagedDraftKeeperTest do
     %{root: root, store: store, keeper: start_keeper(store, :first)}
   end
 
+  # One simulated Minga instance, unless a test names another: finding the
+  # real identity runs `ps`, an OS process.
+  @instance %{os_pid: 101, started: "Sun Nov 22 09:00:00 2026"}
+
   defp start_keeper(store, id) do
+    opts = [name: nil] ++ store ++ [instance: @instance, instance_alive?: fn _owner -> false end]
+
     start_supervised!(
-      Supervisor.child_spec({StagedDraftKeeper, [name: nil] ++ store},
-        id: id,
-        restart: :temporary
-      )
+      Supervisor.child_spec({StagedDraftKeeper, opts}, id: id, restart: :temporary)
     )
   end
 
@@ -479,6 +482,56 @@ defmodule MingaAgent.StagedDraftKeeperTest do
       refute_received {:staged_drafts_recovered, _, _}
       assert StagedDrafts.load(root, store) == {:ok, []}
       refute File.exists?(dir)
+    end
+  end
+
+  describe "two Minga instances on one project" do
+    test "a running instance's staged views are left to it, and recovered once it exits without publishing",
+         %{root: root, store: store} do
+      first = %{os_pid: 201, started: "Sun Nov 22 10:00:00 2026"}
+      second = %{os_pid: 202, started: "Sun Nov 22 10:05:00 2026"}
+      running = start_supervised!({Agent, fn -> MapSet.new([first, second]) end})
+      alive? = fn owner -> Agent.get(running, &MapSet.member?(&1, owner)) end
+
+      # Each instance has its own BEAM, so its own scope of live views.
+      other_scope = :"staged_views_#{System.unique_integer([:positive])}"
+      start_supervised!(%{id: other_scope, start: {:pg, :start_link, [other_scope]}})
+
+      first_keeper = start_keeper([instance: first, instance_alive?: alive?] ++ store, :one)
+      {:ok, view} = ProjectView.overlay(root)
+      StagedDraftKeeper.persist(first_keeper, view, 1)
+      stage(view)
+      eventually(first_keeper, fn -> map_size(stored(root, store)) == 3 end)
+
+      second_store = Keyword.put(store, :scope, other_scope)
+
+      second_keeper =
+        start_keeper([instance: second, instance_alive?: alive?] ++ second_store, :two)
+
+      :ok = StagedDraftKeeper.recover(second_keeper, root, self())
+      :sys.get_state(second_keeper)
+      refute_received {:staged_drafts_recovered, _, _}
+
+      # The first instance still saves its view.
+      :ok = ProjectView.write_file(view, "lib/b.ex", "alpha\nBETA\n")
+      eventually(first_keeper, fn -> map_size(stored(root, store)) == 4 end)
+
+      # The first instance exits without publishing.
+      changeset = Overlay.changeset_pid(view)
+      ref = Process.monitor(changeset)
+      stop_supervised!(:one)
+      Process.exit(changeset, :shutdown)
+      assert_receive {:DOWN, ^ref, :process, _, :shutdown}
+      Agent.update(running, &MapSet.delete(&1, first))
+
+      :ok = StagedDraftKeeper.recover(second_keeper, root, self())
+
+      assert_receive {:staged_drafts_recovered, ^root,
+                      [%Recovery{source: :disk, workspace_id: 1} = recovery]},
+                     2_000
+
+      assert recovery.changes |> Enum.map(& &1.path) |> Enum.sort() ==
+               ["lib/a.ex", "lib/b.ex", "lib/new.ex", "old.txt"]
     end
   end
 end

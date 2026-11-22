@@ -9,6 +9,7 @@ defmodule MingaAgent.StagedDraftKeeper do
     * **Oversized drafts.** A draft above the store's size limit is not saved. Its stored copy is replaced with a content-free "lost: too large" marker, so the next start names it as lost instead of restoring an older version, and the user is told once per path in `*Messages*`.
     * **Persistence.** After each staged change the keeper writes the view's drafts with `Minga.Session.StagedDrafts` (one private, atomic file per draft). Only drafts whose content changed are rewritten; files for paths that are no longer staged are removed. A snapshot that fails to leave disk matching the staged drafts is not recorded as saved and is retried with backoff (`:retry_ms`, doubling up to a minute), without waiting for another staged change.
     * **Deletion.** A changeset stops normally only after a successful publish, a discard, or a close of a clean view, so a `:normal` exit retires that view: its drafts are deleted behind a tombstone (`StagedDrafts.retire_view/3`). A deletion that fails is kept as a pending delete and retried with the same backoff as a failed save until it succeeds or Minga stops; the tombstone keeps the view from being offered again, in this run or after a restart, and the next start finishes the deletion. Any other exit (a crash, an application shutdown) keeps the drafts for the next start.
+    * **Ownership.** Several Minga instances can run on one project and share the store. Before it writes a view's drafts, the keeper claims the view for its instance (`StagedDrafts.claim_view_dir/4`, identity from `MingaAgent.StagedDraftKeeper.Instance`). Recovery claims a stored view before it touches it: a view whose owner is still running belongs to that instance and is neither rebuilt nor offered here; the view of an instance that exited without publishing is taken over and recovered.
     * **Recovery.** `recover/3` hands an Editor every staged view of its project: views that are still running (`:live`, after an Editor restart) and views rebuilt from disk (`:disk`, after a full restart). The reply is `{:staged_drafts_recovered, project_root, [Recovery.t()]}`, sent only when there is something to offer. A draft file is deleted only when it can never be restored; a draft that fails for a reason that may pass (I/O, an unavailable process) stays on disk, and its whole view waits for the next start.
 
   All disk I/O and every call into the changeset and forks happen here, never on the Editor process. Callers only cast.
@@ -21,6 +22,7 @@ defmodule MingaAgent.StagedDraftKeeper do
   alias MingaAgent.Changeset
   alias MingaAgent.ProjectView
   alias MingaAgent.ProjectView.Overlay
+  alias MingaAgent.StagedDraftKeeper.Instance
   alias MingaAgent.StagedDraftKeeper.Recovery
 
   @scope MingaAgent.StagedDraftKeeper.Scope
@@ -49,7 +51,8 @@ defmodule MingaAgent.StagedDraftKeeper do
            written: %{String.t() => binary() | nil},
            too_large: MapSet.t(String.t()),
            retry_delay: pos_integer() | nil,
-           retry_pending: boolean()
+           retry_pending: boolean(),
+           owned: boolean()
          }
 
   @typep state :: %{
@@ -58,11 +61,13 @@ defmodule MingaAgent.StagedDraftKeeper do
            scope: atom(),
            tracked: %{view_id() => tracked()},
            pending: MapSet.t(view_id()),
-           deletes: %{String.t() => pos_integer()}
+           deletes: %{String.t() => pos_integer()},
+           instance: StagedDrafts.owner() | nil,
+           instance_alive?: StagedDrafts.owner_alive?()
          }
 
   @typedoc """
-  Start options. `:staged_drafts_dir` overrides the store directory, `:scope` names the `:pg` scope of live staged views (default `#{inspect(@scope)}`), `:owner_uid` fixes the uid that must own the store, `:max_file_bytes` sets the largest saved draft, and `:retry_ms` is the first delay before an incomplete save is retried (default #{@retry_ms} ms, doubling up to #{@max_retry_ms} ms).
+  Start options. `:staged_drafts_dir` overrides the store directory, `:scope` names the `:pg` scope of live staged views (default `#{inspect(@scope)}`), `:owner_uid` fixes the uid that must own the store, `:max_file_bytes` sets the largest saved draft, `:instance` and `:instance_alive?` replace this instance's identity and the liveness check of other instances (`MingaAgent.StagedDraftKeeper.Instance`), and `:retry_ms` is the first delay before an incomplete save is retried (default #{@retry_ms} ms, doubling up to #{@max_retry_ms} ms).
   """
   @type start_opt ::
           {:name, GenServer.name() | nil}
@@ -71,6 +76,8 @@ defmodule MingaAgent.StagedDraftKeeper do
           | {:owner_uid, non_neg_integer()}
           | {:max_file_bytes, pos_integer()}
           | {:retry_ms, pos_integer()}
+          | {:instance, StagedDrafts.owner()}
+          | {:instance_alive?, StagedDrafts.owner_alive?()}
 
   # ── Client API ──────────────────────────────────────────────────────────
 
@@ -136,7 +143,11 @@ defmodule MingaAgent.StagedDraftKeeper do
       retry_ms: Keyword.get(opts, :retry_ms, @retry_ms),
       tracked: %{},
       pending: MapSet.new(),
-      deletes: %{}
+      deletes: %{},
+      # Resolved in handle_continue/2: finding the identity runs `ps`, which
+      # must not hold up the supervisor.
+      instance: Keyword.get(opts, :instance),
+      instance_alive?: Keyword.get(opts, :instance_alive?, &Instance.alive?/1)
     }
 
     {:ok, state, {:continue, :adopt}}
@@ -144,6 +155,7 @@ defmodule MingaAgent.StagedDraftKeeper do
 
   @impl true
   def handle_continue(:adopt, state) do
+    state = %{state | instance: state.instance || Instance.current()}
     {:noreply, adopt_registered(state)}
   end
 
@@ -264,14 +276,18 @@ defmodule MingaAgent.StagedDraftKeeper do
         {:ok, %{state | tracked: Map.put(state.tracked, view_id, tracked)}}
 
       nil ->
-        start_tracking(state, view, workspace_id, %{})
+        start_tracking(state, view, workspace_id, %{}, false)
     end
   end
 
-  @spec start_tracking(state(), ProjectView.t(), non_neg_integer(), %{
-          String.t() => binary() | nil
-        }) :: {:ok, state()} | {:error, state()}
-  defp start_tracking(state, view, workspace_id, written) do
+  @spec start_tracking(
+          state(),
+          ProjectView.t(),
+          non_neg_integer(),
+          %{String.t() => binary() | nil},
+          boolean()
+        ) :: {:ok, state()} | {:error, state()}
+  defp start_tracking(state, view, workspace_id, written, owned) do
     changeset = Overlay.changeset_pid(view)
     # Monitor first: a changeset that stops normally between the two calls
     # then reports `:normal` (drafts deleted), not `:noproc` (drafts kept).
@@ -287,7 +303,8 @@ defmodule MingaAgent.StagedDraftKeeper do
           written: written,
           too_large: MapSet.new(),
           retry_delay: nil,
-          retry_pending: false
+          retry_pending: false,
+          owned: owned
         }
 
         {:ok, %{state | tracked: Map.put(state.tracked, view.id, tracked)}}
@@ -392,17 +409,15 @@ defmodule MingaAgent.StagedDraftKeeper do
     {complete?, tracked} =
       case Overlay.staged_drafts(view) do
         {:ok, []} ->
+          # The view directory goes, with its owner record.
           deleted = StagedDrafts.delete_view(view.project_root, view.id, state.store_opts)
-          {cleaned_up?(deleted, warn?), %{tracked | written: %{}}}
+          {cleaned_up?(deleted, warn?), %{tracked | written: %{}, owned: false}}
 
         {:ok, drafts} ->
-          {written, tracked} = write_changed(state, tracked, drafts, written)
-
-          pruned =
-            StagedDrafts.prune(view.project_root, view.id, Map.keys(written), state.store_opts)
-
-          saved? = Enum.all?(written, fn {_path, digest} -> is_binary(digest) end)
-          {saved? and cleaned_up?(pruned, warn?), %{tracked | written: written}}
+          case claim(state, tracked, warn?) do
+            {:ok, tracked} -> save(state, tracked, drafts, written, warn?)
+            {:error, tracked} -> {false, tracked}
+          end
 
         {:error, reason} ->
           Minga.Log.debug(
@@ -414,6 +429,38 @@ defmodule MingaAgent.StagedDraftKeeper do
       end
 
     put_tracked(state, settle(state, tracked, complete?))
+  end
+
+  @spec save(state(), tracked(), [StagedDraft.t()], %{String.t() => binary() | nil}, boolean()) ::
+          {boolean(), tracked()}
+  defp save(state, %{view: view} = tracked, drafts, written, warn?) do
+    {written, tracked} = write_changed(state, tracked, drafts, written)
+    pruned = StagedDrafts.prune(view.project_root, view.id, Map.keys(written), state.store_opts)
+    saved? = Enum.all?(written, fn {_path, digest} -> is_binary(digest) end)
+    {saved? and cleaned_up?(pruned, warn?), %{tracked | written: written}}
+  end
+
+  # Drafts are written only into a view directory this instance has claimed.
+  @spec claim(state(), tracked(), boolean()) :: {:ok, tracked()} | {:error, tracked()}
+  defp claim(_state, %{owned: true} = tracked, _warn?), do: {:ok, tracked}
+
+  defp claim(state, %{view: view} = tracked, warn?) do
+    dir = StagedDrafts.view_dir(view.project_root, view.id, state.store_opts)
+
+    case StagedDrafts.claim_view_dir(dir, state.instance, state.instance_alive?, state.store_opts) do
+      :ok ->
+        {:ok, %{tracked | owned: true}}
+
+      {:error, reason} ->
+        if warn? do
+          Minga.Log.warning(
+            :agent,
+            "Staged agent edits could not be saved, retrying: #{inspect(Recovery.safe_reason(reason))}"
+          )
+        end
+
+        {:error, tracked}
+    end
   end
 
   @spec settle(state(), tracked(), boolean()) :: tracked()
@@ -568,7 +615,7 @@ defmodule MingaAgent.StagedDraftKeeper do
         |> Enum.reject(
           &(Map.has_key?(state.tracked, &1.view_id) or pending_delete?(state, &1.dir))
         )
-        |> Enum.map_reduce(state, &restore_view(&2, root, &1))
+        |> Enum.flat_map_reduce(state, &claim_and_restore(&2, root, &1))
 
       {:error, reason} ->
         Minga.Log.warning(
@@ -588,6 +635,32 @@ defmodule MingaAgent.StagedDraftKeeper do
 
   @spec pending_delete?(state(), String.t()) :: boolean()
   defp pending_delete?(state, dir), do: Map.has_key?(state.deletes, dir)
+
+  # A stored view is restored only by the instance that claims it. The view
+  # of another instance that is still running is left alone and not offered.
+  # A claim that is not kept by a tracked view is given up again, so an
+  # instance never holds drafts it does not keep alive.
+  @spec claim_and_restore(state(), String.t(), StagedDrafts.stored_view()) ::
+          {[Recovery.t()], state()}
+  defp claim_and_restore(state, root, %{dir: dir} = stored) do
+    case StagedDrafts.claim_view_dir(dir, state.instance, state.instance_alive?, state.store_opts) do
+      :ok ->
+        {recovery, state} = restore_view(state, root, stored)
+        if recovery.view == nil, do: log_error(StagedDrafts.release_view_dir(dir, state.instance))
+        {[recovery], state}
+
+      {:error, :owned} ->
+        {[], state}
+
+      {:error, reason} ->
+        retained = for entry <- stored.entries, do: {entry_name(entry), {:claim_failed, reason}}
+        {[Recovery.restored(stored.workspace_id, nil, retained: retained)], state}
+    end
+  end
+
+  @spec entry_name(StagedDrafts.entry()) :: String.t()
+  defp entry_name({:ok, _file, draft}), do: draft.path
+  defp entry_name({_kind, _file, name, _reason}), do: name
 
   @spec restore_view(state(), String.t(), StagedDrafts.stored_view()) :: {Recovery.t(), state()}
   defp restore_view(
@@ -693,7 +766,7 @@ defmodule MingaAgent.StagedDraftKeeper do
     written = Map.new(restored, &{&1.path, StagedDraft.digest(&1)})
 
     state =
-      case start_tracking(state, view, workspace_id, written) do
+      case start_tracking(state, view, workspace_id, written, true) do
         {:ok, state} -> state
         {:error, state} -> state
       end

@@ -12,6 +12,8 @@ defmodule Minga.Session.StagedDrafts do
 
   The drafts are user file content. Every store directory must be a real directory (not a symlink) owned by the current user and not writable by group or others; it is created with mode `0700`, and a directory that fails the check is refused for both writing and loading. Draft files get mode `0600` before they become visible under their final name. Reads accept regular files only and are bounded by `max_draft_bytes/1`. A draft above `max_file_bytes/1` is never saved; `write_lost/6` replaces its stored copy with a content-free marker, so the next start reports it as lost instead of restoring an older version.
 
+  Several Minga instances can share the store. Each view directory holds an owner record naming the instance that saves it (`claim_view_dir/4`): its OS process id and that process's start time, so a reused process id never looks like the old owner. An instance only writes, restores, or deletes a view it has claimed; a view whose owner is still running is left alone, and the claim of an owner that is gone is taken over.
+
   This module only reads and writes files. `MingaAgent.StagedDraftKeeper` decides when to write and delete them.
   """
 
@@ -24,6 +26,10 @@ defmodule Minga.Session.StagedDrafts do
   @current_version 1
   @extension ".json"
   @retired ".retired"
+  @owner_file "owner"
+  @owner_format "minga-staged-draft-owner"
+  @max_owner_bytes 4096
+  @claim_attempts 3
 
   # The editor refuses to open files above 10 MiB by default; agent changesets
   # stage files without that limit. 64 MiB of base plus 64 MiB of content is
@@ -62,6 +68,12 @@ defmodule Minga.Session.StagedDrafts do
           entries: [entry()],
           retired: boolean()
         }
+
+  @typedoc "The Minga instance that saves a view: its OS process id and that process's start time."
+  @type owner :: %{os_pid: pos_integer(), started: String.t()}
+
+  @typedoc "Answers whether another instance's owner record names a process that is still running."
+  @type owner_alive? :: (owner() -> boolean())
 
   @doc "Largest base or staged content, in bytes, that is persisted (`opts[:max_file_bytes]`, default 64 MiB)."
   @spec max_file_bytes(keyword()) :: pos_integer()
@@ -202,6 +214,152 @@ defmodule Minga.Session.StagedDrafts do
   @doc "Deletes a loaded view's directory, for a view none of whose drafts can be restored."
   @spec remove_view_dir(stored_view()) :: :ok | {:error, term()}
   def remove_view_dir(%{dir: dir}), do: remove_dir(dir)
+
+  @doc """
+  Claims the view stored in `dir` (from `view_dir/3`, or a loaded view) for `owner`.
+
+  Returns `:ok` when `owner` already holds the claim, when the view has no owner, or when its owner is gone (`alive?` returns `false`, or the record is unreadable). Returns `{:error, :owned}` while another instance that is still running holds it. The record is created atomically (hard link of a complete file), and a stale record is moved aside before it is replaced, so two instances that take over the same stale view never both succeed.
+  """
+  @spec claim_view_dir(String.t(), owner(), owner_alive?(), keyword()) ::
+          :ok | {:error, :owned | term()}
+  def claim_view_dir(dir, %{os_pid: _, started: _} = owner, alive?, opts \\ [])
+      when is_binary(dir) and is_function(alive?, 1) do
+    with {:ok, uid} <- owner_uid(opts),
+         :ok <- File.mkdir_p(Path.dirname(dir(opts))),
+         :ok <- all_ok([dir(opts), Path.dirname(dir), dir], &create_private(&1, uid)) do
+      claim(Path.join(dir, @owner_file), owner, alive?, @claim_attempts)
+    end
+  end
+
+  @doc "Gives up `owner`'s claim on the view stored in `dir`, leaving another owner's claim alone."
+  @spec release_view_dir(String.t(), owner()) :: :ok | {:error, term()}
+  def release_view_dir(dir, %{os_pid: _, started: _} = owner) when is_binary(dir) do
+    file = Path.join(dir, @owner_file)
+
+    case read_owner(file) do
+      {:ok, {:owner, ^owner, _bytes}} -> remove_file(file)
+      {:ok, _other} -> :ok
+      {:error, :enoent} -> :ok
+      {:error, _reason} = error -> error
+    end
+  end
+
+  @spec claim(String.t(), owner(), owner_alive?(), non_neg_integer()) ::
+          :ok | {:error, :owned | term()}
+  defp claim(_file, _owner, _alive?, 0), do: {:error, :claim_contended}
+
+  defp claim(file, owner, alive?, attempts) do
+    case create_owner(file, owner) do
+      :ok -> :ok
+      {:error, :eexist} -> claim_existing(file, owner, alive?, attempts)
+      {:error, :enoent} -> claim(file, owner, alive?, attempts - 1)
+      {:error, _reason} = error -> error
+    end
+  end
+
+  @spec claim_existing(String.t(), owner(), owner_alive?(), pos_integer()) ::
+          :ok | {:error, :owned | term()}
+  defp claim_existing(file, owner, alive?, attempts) do
+    case read_owner(file) do
+      {:ok, {:owner, ^owner, _bytes}} ->
+        :ok
+
+      {:ok, {:owner, other, _bytes} = record} ->
+        if alive?.(other),
+          do: {:error, :owned},
+          else: take_over(file, record, owner, alive?, attempts)
+
+      {:ok, {:invalid, _content} = record} ->
+        take_over(file, record, owner, alive?, attempts)
+
+      {:error, :enoent} ->
+        claim(file, owner, alive?, attempts - 1)
+
+      {:error, _reason} = error ->
+        error
+    end
+  end
+
+  # Moves the stale record aside, then claims again. If another instance
+  # replaced the stale record first, the moved file is that instance's fresh
+  # claim: it is put back, and the view stays theirs.
+  @spec take_over(String.t(), owner_record(), owner(), owner_alive?(), pos_integer()) ::
+          :ok | {:error, :owned | term()}
+  defp take_over(file, stale, owner, alive?, attempts) do
+    aside = "#{file}.#{System.unique_integer([:positive, :monotonic])}.tmp"
+
+    case File.rename(file, aside) do
+      :ok ->
+        if read_owner(aside) == {:ok, stale} do
+          _ = File.rm(aside)
+          claim(file, owner, alive?, attempts - 1)
+        else
+          _ = File.ln(aside, file)
+          _ = File.rm(aside)
+          {:error, :owned}
+        end
+
+      {:error, :enoent} ->
+        claim(file, owner, alive?, attempts - 1)
+
+      {:error, _reason} = error ->
+        error
+    end
+  end
+
+  # A hard link publishes a complete record and fails when one exists.
+  @spec create_owner(String.t(), owner()) :: :ok | {:error, term()}
+  defp create_owner(file, %{os_pid: os_pid, started: started}) do
+    tmp = "#{file}.#{System.unique_integer([:positive, :monotonic])}.tmp"
+
+    json =
+      JSON.encode!(%{
+        "format" => @owner_format,
+        "version" => @current_version,
+        "os_pid" => os_pid,
+        "started" => started
+      })
+
+    result =
+      with :ok <- write_private(tmp, json) do
+        File.ln(tmp, file)
+      end
+
+    _ = File.rm(tmp)
+    result
+  end
+
+  # An owner record as found on disk. Its bytes (or why it is unusable)
+  # identify it when it is moved aside during a takeover.
+  @typep owner_record :: {:owner, owner(), binary()} | {:invalid, binary() | atom()}
+
+  @spec read_owner(String.t()) :: {:ok, owner_record()} | {:error, term()}
+  defp read_owner(file) do
+    case SecureFile.read(file, @max_owner_bytes) do
+      {:ok, bytes} -> {:ok, decode_owner_record(bytes)}
+      {:error, {:file_read_failed, _path, reason}} -> {:error, reason}
+      # The reason without the path, which changes when the file is moved.
+      {:error, unusable} -> {:ok, {:invalid, elem(unusable, 0)}}
+    end
+  end
+
+  @spec decode_owner_record(binary()) :: owner_record()
+  defp decode_owner_record(bytes) do
+    case JSON.decode(bytes) do
+      {:ok,
+       %{
+         "format" => @owner_format,
+         "version" => @current_version,
+         "os_pid" => os_pid,
+         "started" => started
+       }}
+      when is_integer(os_pid) and os_pid > 0 and is_binary(started) ->
+        {:owner, %{os_pid: os_pid, started: started}, bytes}
+
+      _invalid ->
+        {:invalid, bytes}
+    end
+  end
 
   @doc """
   Deletes every stored draft of a view that is published or discarded, so its drafts are never offered again.

@@ -229,6 +229,53 @@ defmodule Minga.Session.StagedDraftsTest do
     assert :ok = StagedDrafts.write(root, "w", 1, StagedDraft.new("b", "base", "x"), opts)
   end
 
+  describe "owner claims" do
+    setup %{opts: opts, root: root} do
+      %{dir: StagedDrafts.view_dir(root, "v", opts)}
+    end
+
+    @first %{os_pid: 11, started: "first"}
+    @second %{os_pid: 12, started: "second"}
+
+    test "a running owner keeps its view; a gone owner's view is taken over",
+         %{opts: opts, dir: dir} do
+      assert StagedDrafts.claim_view_dir(dir, @first, fn _ -> true end, opts) == :ok
+      assert StagedDrafts.claim_view_dir(dir, @first, fn _ -> true end, opts) == :ok
+
+      assert StagedDrafts.claim_view_dir(dir, @second, &(&1 == @first), opts) ==
+               {:error, :owned}
+
+      assert StagedDrafts.claim_view_dir(dir, @second, fn _ -> false end, opts) == :ok
+      assert StagedDrafts.claim_view_dir(dir, @first, &(&1 == @second), opts) == {:error, :owned}
+    end
+
+    test "an unreadable owner record counts as gone", %{opts: opts, dir: dir} do
+      :ok = StagedDrafts.claim_view_dir(dir, @first, fn _ -> true end, opts)
+      File.write!(Path.join(dir, "owner"), "not a record")
+
+      assert StagedDrafts.claim_view_dir(dir, @second, fn _ -> true end, opts) == :ok
+    end
+
+    test "releasing gives up only the releasing owner's claim", %{opts: opts, dir: dir} do
+      :ok = StagedDrafts.claim_view_dir(dir, @first, fn _ -> true end, opts)
+
+      assert StagedDrafts.release_view_dir(dir, @second) == :ok
+      assert StagedDrafts.claim_view_dir(dir, @second, fn _ -> true end, opts) == {:error, :owned}
+
+      assert StagedDrafts.release_view_dir(dir, @first) == :ok
+      assert StagedDrafts.claim_view_dir(dir, @second, fn _ -> true end, opts) == :ok
+    end
+
+    test "the owner record is not a draft", %{opts: opts, root: root, dir: dir} do
+      :ok = StagedDrafts.claim_view_dir(dir, @first, fn _ -> true end, opts)
+      :ok = StagedDrafts.write(root, "v", 1, StagedDraft.new("a", "base", "x"), opts)
+      :ok = StagedDrafts.prune(root, "v", ["a"], opts)
+
+      assert [%{entries: [{:ok, _, %{path: "a"}}]}] = load!(root, opts)
+      assert StagedDrafts.claim_view_dir(dir, @second, fn _ -> true end, opts) == {:error, :owned}
+    end
+  end
+
   describe "base_changed?/2" do
     test "compares the file on disk with the staged base" do
       draft = StagedDraft.new("a", "base", "x")
