@@ -44,6 +44,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - Agent activity keeps showing the remaining tool when another concurrent call finishes. Tool updates no longer read the Session to choose an active tool.
 - Agent activity shows an error even when the turn fails before running a tool, changing a file, or creating a checklist item.
 - A timed-out Agent hook escalates termination even if its shell exits before a descendant that ignores `TERM`.
+- Agent prompt readiness uses the current session's published connection state instead of waiting on separate provider and session lookups. A starting or unavailable session keeps the draft.
 - Agent shell operations terminate their process group on timeout or when the owning worker exits, preventing delayed writes by ordinary background children.
 - Agent transcript updates locate streaming tails and tool calls through indexed source storage. Atomic revision cursors return only current changed entries, with consistent identity, pins, usage and reset facts instead of separate full-history queries.
 - Switching Agent transcript branches keeps only relevant pins without collecting every saved message ID. Restoring transcripts scans identity candidates without flattening the snapshots or changing the allocator's existing rules.

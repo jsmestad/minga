@@ -17,6 +17,7 @@ defmodule MingaEditor.Commands.Agent do
   alias MingaAgent.Message
   alias MingaAgent.ModelSelection
   alias MingaAgent.Session
+  alias MingaAgent.Session.ConnectionSnapshot
   alias MingaAgent.SessionStore
   alias MingaEditor.Agent.PromptBuffer
   alias MingaEditor.Agent.ProvenanceJump
@@ -56,6 +57,7 @@ defmodule MingaEditor.Commands.Agent do
           | :credentials_checking
           | :credentials_missing
           | :starting
+          | :unavailable
           | {:startup_failed, String.t()}
           | :ready
   @type prompt_submit_status :: :ready | {:blocked, String.t()}
@@ -638,15 +640,10 @@ defmodule MingaEditor.Commands.Agent do
   defp submit_prompt(state, _panel, true, _session), do: state
 
   defp submit_prompt(state, panel, false, nil) do
-    case prompt_readiness(state, panel, nil) do
-      :no_model ->
-        NoticeWorkflow.publish(state, no_model_status())
-
-      _readiness ->
-        NoticeWorkflow.publish(
-          state,
-          "No agent session, try closing and reopening the panel"
-        )
+    if model_configured?(panel.model_name) do
+      NoticeWorkflow.publish(state, "No agent session, try closing and reopening the panel")
+    else
+      NoticeWorkflow.publish(state, no_model_status())
     end
   end
 
@@ -741,7 +738,7 @@ defmodule MingaEditor.Commands.Agent do
 
   @spec submit_connected_prompt(state(), String.t(), Panel.t()) :: state()
   defp submit_connected_prompt(state, text, panel) do
-    case prompt_submit_status(state, panel) do
+    case prompt_submit_status(state) do
       :ready ->
         state
         |> then(fn state ->
@@ -826,7 +823,7 @@ defmodule MingaEditor.Commands.Agent do
     else
       panel = state.workspace.agent_ui.panel
 
-      case prompt_submit_status(state, panel) do
+      case prompt_submit_status(state) do
         :ready -> resolve_and_deliver_follow_up(state, text, panel.model_name)
         {:blocked, msg} -> NoticeWorkflow.publish(state, msg)
       end
@@ -848,7 +845,7 @@ defmodule MingaEditor.Commands.Agent do
     with false <- PromptBuffer.input_empty?(panel),
          false <-
            SlashCommand.slash_command?(text) or SlashCommand.indented_credential_command?(text),
-         :ready <- prompt_submit_status(state, panel),
+         :ready <- prompt_submit_status(state),
          {:ok, resolved} <- resolve_prompt_for_session(state, text, panel.model_name),
          {:saved, updated} <- DraftWorkflow.queue(state, kind, resolved, target) do
       updated
@@ -1062,58 +1059,72 @@ defmodule MingaEditor.Commands.Agent do
   defp attached_submit_error(_reason),
     do: "The attached prompt was not submitted. The draft was kept."
 
-  @spec prompt_submit_status(state(), Panel.t()) :: prompt_submit_status()
-  defp prompt_submit_status(state, panel) do
-    if remote_session?(state) do
-      :ready
-    else
-      state
-      |> prompt_readiness(panel, Runtime.active_session(state.shell_runtime))
-      |> prompt_readiness_submit_status()
+  @spec prompt_submit_status(state()) :: prompt_submit_status()
+  defp prompt_submit_status(state) do
+    case Runtime.active_session(state.shell_runtime) do
+      session when is_pid(session) and node(session) != node() ->
+        :ready
+
+      session ->
+        agent = MingaEditor.Shell.Traditional.State.agent(state.shell_runtime.state)
+
+        state.workspace.agent_ui
+        |> prompt_readiness(session, agent.error)
+        |> prompt_readiness_submit_status()
     end
   end
 
-  @spec prompt_readiness(state(), Panel.t(), pid() | nil) :: prompt_readiness()
-  defp prompt_readiness(state, %Panel{} = panel, session) do
+  @spec prompt_readiness(UIState.t(), pid() | nil, String.t() | nil) :: prompt_readiness()
+  defp prompt_readiness(%UIState{panel: panel} = ui, session, error) do
     if model_configured?(panel.model_name) do
-      prompt_readiness_with_model(state, panel, session)
+      projected_prompt_readiness(ui, session, error)
     else
       :no_model
     end
   end
 
-  @spec prompt_readiness_with_model(state(), Panel.t(), pid() | nil) :: prompt_readiness()
-  defp prompt_readiness_with_model(state, %Panel{}, session) when is_pid(session) do
-    prompt_readiness_with_credentials(state, session)
-  end
+  @spec projected_prompt_readiness(UIState.t(), pid() | nil, String.t() | nil) ::
+          prompt_readiness()
+  defp projected_prompt_readiness(%UIState{chat_lifecycle: :unavailable}, _session, _error),
+    do: :unavailable
 
-  defp prompt_readiness_with_model(_state, %Panel{credentials_configured: false}, nil),
-    do: :credentials_missing
+  defp projected_prompt_readiness(
+         %UIState{
+           connection: %ConnectionSnapshot{target: %{session: session}} = connection,
+           chat_lifecycle: lifecycle
+         },
+         session,
+         error
+       ),
+       do: connection_prompt_readiness(connection, lifecycle, error)
 
-  defp prompt_readiness_with_model(state, %Panel{credentials_configured: true}, nil) do
-    prompt_readiness_with_credentials(state, nil)
-  end
+  defp projected_prompt_readiness(%UIState{}, _session, _error), do: :starting
 
-  @spec prompt_readiness_with_credentials(state(), pid() | nil) :: prompt_readiness()
-  defp prompt_readiness_with_credentials(_state, nil), do: :ready
+  @spec connection_prompt_readiness(
+          ConnectionSnapshot.t(),
+          UIState.chat_lifecycle(),
+          String.t() | nil
+        ) :: prompt_readiness()
+  defp connection_prompt_readiness(%ConnectionSnapshot{provider_phase: :running}, _, _),
+    do: :ready
 
-  defp prompt_readiness_with_credentials(_state, session) when is_pid(session) do
-    case Session.get_provider(session) do
-      provider when is_pid(provider) -> :ready
-      _provider -> providerless_prompt_readiness(session)
-    end
-  end
+  defp connection_prompt_readiness(%ConnectionSnapshot{credential_readiness: :checking}, _, _),
+    do: :credentials_checking
 
-  @spec providerless_prompt_readiness(pid()) :: prompt_readiness()
-  defp providerless_prompt_readiness(session) do
-    case Session.editor_snapshot(session) do
-      %{credential_readiness: :checking} -> :credentials_checking
-      %{credential_readiness: :unconfigured} -> :credentials_missing
-      %{credentials_configured: false} -> :credentials_missing
-      %{error: error} when is_binary(error) and error != "" -> {:startup_failed, error}
-      _snapshot -> :starting
-    end
-  end
+  defp connection_prompt_readiness(
+         %ConnectionSnapshot{credential_readiness: :unconfigured},
+         _,
+         _
+       ),
+       do: :credentials_missing
+
+  defp connection_prompt_readiness(%ConnectionSnapshot{}, {:failed, error}, _),
+    do: {:startup_failed, error}
+
+  defp connection_prompt_readiness(%ConnectionSnapshot{}, _, error)
+       when is_binary(error) and error != "", do: {:startup_failed, error}
+
+  defp connection_prompt_readiness(%ConnectionSnapshot{}, _, _), do: :starting
 
   @spec model_configured?(String.t()) :: boolean()
   defp model_configured?(model) when model in ["", "unknown"], do: false
@@ -1130,6 +1141,10 @@ defmodule MingaEditor.Commands.Agent do
     do: {:blocked, credentials_pending_status()}
 
   defp prompt_readiness_submit_status(:starting), do: {:blocked, provider_starting_status()}
+
+  defp prompt_readiness_submit_status(:unavailable) do
+    {:blocked, "Agent session unavailable. Your prompt was preserved."}
+  end
 
   defp prompt_readiness_submit_status({:startup_failed, error}) do
     {:blocked, provider_startup_failed_status(error)}
