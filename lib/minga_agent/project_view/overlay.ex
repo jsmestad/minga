@@ -160,14 +160,16 @@ defmodule MingaAgent.ProjectView.Overlay do
   end
 
   # One read decides presence and bytes, so a fork deleted between two calls
-  # cannot be misread.
-  @spec fork_draft_content(pid()) :: {:ok, StagedDraft.content()} | {:error, term()}
+  # cannot be misread. A fork process that has stopped exits the call; report
+  # only the exit kind so no content reaches the reason.
+  @spec fork_draft_content(pid()) :: {:ok, StagedDraft.content()} | {:error, atom()}
   defp fork_draft_content(fork) do
     case Fork.read_file(fork) do
       {:ok, content} -> {:ok, content}
       {:error, :enoent} -> {:ok, :deleted}
-      {:error, reason} -> {:error, reason}
     end
+  catch
+    :exit, reason -> {:error, exit_kind(reason)}
   end
 
   @impl true
