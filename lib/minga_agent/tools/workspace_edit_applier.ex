@@ -34,7 +34,8 @@ defmodule MingaAgent.Tools.WorkspaceEditApplier do
            project_view: ProjectView.t() | nil,
            open_buffer_route: open_buffer_route(),
            relative_path: String.t(),
-           real_path: String.t()
+           real_path: String.t(),
+           buffer_paths: [String.t()]
          }
   # The content the language server computed the edit positions against.
   @typep baseline :: {:disk, String.t()} | {:live_buffer, binary()}
@@ -89,7 +90,8 @@ defmodule MingaAgent.Tools.WorkspaceEditApplier do
           project_view: project_view,
           open_buffer_route: open_buffer_route,
           relative_path: relative_path,
-          real_path: real_path
+          real_path: real_path,
+          buffer_paths: buffer_paths(project_view, relative_path, real_path, document.path)
         }
 
         {document, target, plan_file(document, target, client, encoding)}
@@ -112,6 +114,29 @@ defmodule MingaAgent.Tools.WorkspaceEditApplier do
       %{isolation: :overlay} -> :staged_view
       %{isolation: :none} -> :live_buffer
     end
+  end
+
+  # The paths an open buffer for this document can be registered under, in
+  # order. The view's owner path comes first: an overlay selects the buffer at
+  # `project_root/relative_path`, so finding the same buffer keeps the live
+  # baseline and the staged fork on one owner. The real path covers a project
+  # root reached through a symlink, and the server's path covers a buffer that
+  # was opened through an in-root symlink.
+  @spec buffer_paths(ProjectView.t() | nil, String.t(), String.t(), String.t()) :: [String.t()]
+  defp buffer_paths(nil, _relative_path, real_path, server_path),
+    do: Enum.uniq([real_path, server_path])
+
+  defp buffer_paths(%ProjectView{project_root: root}, relative_path, real_path, server_path),
+    do: Enum.uniq([Path.join(root, relative_path), real_path, server_path])
+
+  @spec open_buffer(target()) :: {:ok, pid()} | :not_found
+  defp open_buffer(%{buffer_paths: paths}) do
+    Enum.find_value(paths, :not_found, fn path ->
+      case Buffer.pid_for_path(path) do
+        {:ok, _pid} = found -> found
+        :not_found -> nil
+      end
+    end)
   end
 
   # ── Containment ────────────────────────────────────────────────────────────
@@ -156,22 +181,22 @@ defmodule MingaAgent.Tools.WorkspaceEditApplier do
   defp plan_file(%WorkspaceEdit.Document{edits: [], version: nil}, _target, _client, _encoding),
     do: :unchanged
 
-  defp plan_file(%WorkspaceEdit.Document{edits: []} = document, _target, client, _encoding) do
-    case validate_empty_file_edit(document, client) do
+  defp plan_file(%WorkspaceEdit.Document{edits: []} = document, target, client, _encoding) do
+    case validate_empty_file_edit(document, target, client) do
       :ok -> :unchanged
       {:error, _reason} = error -> error
     end
   end
 
   defp plan_file(document, %{open_buffer_route: :live_buffer} = target, _client, encoding) do
-    case Buffer.pid_for_path(document.path) do
+    case open_buffer(target) do
       {:ok, _pid} -> :buffer_edit
       :not_found -> plan_view_write(document, target, {:disk, target.real_path}, encoding)
     end
   end
 
   defp plan_file(document, %{open_buffer_route: :staged_view} = target, client, encoding) do
-    case live_buffer_baseline(document, client) do
+    case live_buffer_baseline(document, target, client) do
       {:ok, content} ->
         plan_view_write(document, target, {:live_buffer, content}, encoding)
 
@@ -186,10 +211,10 @@ defmodule MingaAgent.Tools.WorkspaceEditApplier do
   # Reads the content the language server saw for an open file without changing
   # the buffer. A buffer that is missing or exits during the read counts as
   # closed, so the caller uses the disk baseline instead.
-  @spec live_buffer_baseline(WorkspaceEdit.Document.t(), pid()) ::
+  @spec live_buffer_baseline(WorkspaceEdit.Document.t(), target(), pid()) ::
           {:ok, binary()} | {:error, String.t()} | :closed
-  defp live_buffer_baseline(document, client) do
-    case Buffer.pid_for_path(document.path) do
+  defp live_buffer_baseline(document, target, client) do
+    case open_buffer(target) do
       {:ok, pid} ->
         {content, revision} = Buffer.content_with_version(pid)
 
@@ -207,10 +232,10 @@ defmodule MingaAgent.Tools.WorkspaceEditApplier do
     :exit, _reason -> :closed
   end
 
-  @spec validate_empty_file_edit(WorkspaceEdit.Document.t(), pid()) ::
+  @spec validate_empty_file_edit(WorkspaceEdit.Document.t(), target(), pid()) ::
           :ok | {:error, String.t()}
-  defp validate_empty_file_edit(document, client) do
-    case Buffer.pid_for_path(document.path) do
+  defp validate_empty_file_edit(document, target, client) do
+    case open_buffer(target) do
       {:ok, pid} ->
         {_content, revision} = Buffer.content_with_version(pid)
 
@@ -370,7 +395,7 @@ defmodule MingaAgent.Tools.WorkspaceEditApplier do
   # A buffer that closed after planning falls back to the project view once,
   # with the disk baseline and no further staleness gate.
   defp run_plan(document, target, :buffer_edit, client, encoding) do
-    case apply_edits_to_open_buffer(document, client, encoding) do
+    case apply_edits_to_open_buffer(document, target, client, encoding) do
       :closed ->
         case plan_view_write(document, target, {:disk, target.real_path}, encoding) do
           {:view_write, write} -> write_view(write)
@@ -387,11 +412,12 @@ defmodule MingaAgent.Tools.WorkspaceEditApplier do
   # caller falls back to the project view exactly once.
   @spec apply_edits_to_open_buffer(
           WorkspaceEdit.Document.t(),
+          target(),
           pid(),
           Minga.LSP.PositionEncoding.encoding()
         ) :: :ok | {:error, String.t()} | :closed
-  defp apply_edits_to_open_buffer(document, client, encoding) do
-    case Buffer.pid_for_path(document.path) do
+  defp apply_edits_to_open_buffer(document, target, client, encoding) do
+    case open_buffer(target) do
       {:ok, pid} ->
         {_content, revision} = snapshot = Buffer.content_with_version(pid)
 

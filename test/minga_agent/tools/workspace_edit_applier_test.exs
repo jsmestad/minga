@@ -111,6 +111,38 @@ defmodule MingaAgent.Tools.WorkspaceEditApplierTest do
     assert Buffer.content(buffer) == "old_name\n"
   end
 
+  test "an open-buffer edit through an in-root symlink is staged in the fork of the buffer at the real path",
+       %{project: project, view: view, context: context} do
+    real_path = write!(Path.join(project, "lib/real.ex"), "old_name\n")
+    File.ln_s!("real.ex", Path.join(project, "lib/link.ex"))
+    linked_path = Path.join(project, "lib/link.ex")
+    buffer = start_supervised!({BufferProcess, file_path: real_path, content: "old_name\n"})
+    assert :ok = Buffer.replace_content(buffer, "old_name\nunsaved\n", :user)
+
+    assert {1, 1, []} = apply_edit(context, [linked_path])
+
+    assert {:ok, %{owner: {:fork, fork}}} = ProjectView.resolve_source(view, "lib/real.ex")
+    assert Minga.Buffer.Fork.content(fork) == "new_name\nunsaved\n"
+    assert Buffer.content(buffer) == "old_name\nunsaved\n"
+    assert File.read!(real_path) == "old_name\n"
+  end
+
+  test "an open read-only buffer under staging is staged, and publication reports it read-only",
+       %{project: project, view: view, context: context} do
+    path = write!(Path.join(project, "lib/locked.ex"), "old_name\n")
+
+    buffer =
+      start_supervised!({BufferProcess, file_path: path, content: "old_name\n", read_only: true})
+
+    assert {1, 1, []} = apply_edit(context, [path])
+    assert {:ok, "new_name\n"} = ProjectView.read_file(view, "lib/locked.ex")
+
+    assert {:conflict, conflict} = ProjectView.promote(view, :project_root)
+    assert {:error, "lib/locked.ex", :read_only} in conflict.conflicts
+    assert Buffer.content(buffer) == "old_name\n"
+    assert File.read!(path) == "old_name\n"
+  end
+
   test "without staging, open-buffer edits change the live buffer directly", %{project: project} do
     path = write!(Path.join(project, "lib/open.ex"), "old_name\n")
     buffer = start_supervised!({BufferProcess, file_path: path, content: "old_name\n"})
