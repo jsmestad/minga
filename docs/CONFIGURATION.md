@@ -30,7 +30,7 @@ That's it. Save the file and restart Minga. Your options take effect immediately
 | `:max_file_size` | positive integer | `10485760` | Maximum file size in bytes Minga will open. Larger files show a text-only "file too large" surface instead of loading a buffer; checked with a pre-read stat so the gap buffer and tree-sitter parser never touch the content. Default 10 MB. Raise it for the brave. |
 | `:resident_store_max_lines` | non-negative integer | `65536` | Maximum number of laid-out rows that can stay loaded in each frontend for immediate scrolling. Continuations count as rows. Set to `0` to disable residence. See [Fast scrolling (residence)](#fast-scrolling-residence) below. |
 | `:resident_store_max_bytes` | positive integer | `10485760` | Maximum buffer byte size that still gets full-document residence. Residence needs both this and `:resident_store_max_lines`; set `:resident_store_max_lines` to `0` to disable residence regardless of byte size. Default 10 MB. |
-| `:theme` | theme name atom | `:astrodark` | Color theme (see [Themes](#themes) below) |
+| `:theme` | theme name atom | `:catppuccin_frappe` | Color theme (see [Themes](#themes) below) |
 | `:indent_with` | `:spaces` or `:tabs` | `:spaces` | Whether to indent with spaces or tab characters |
 | `:trim_trailing_whitespace` | boolean | `false` | Strip trailing whitespace on save |
 | `:insert_final_newline` | boolean | `false` | Ensure file ends with a newline on save |
@@ -428,9 +428,9 @@ set :theme, :catppuccin_mocha
 
 | Theme | Style |
 |-------|-------|
-| `:astrodark` | Dark (default), AstroNvim |
+| `:astrodark` | Dark, AstroNvim |
 | `:doom_one` | Dark, Doom Emacs |
-| `:catppuccin_frappe` | Dark, Catppuccin family |
+| `:catppuccin_frappe` | Dark (default), Catppuccin family |
 | `:catppuccin_latte` | Light, Catppuccin family |
 | `:catppuccin_macchiato` | Dark, Catppuccin family |
 | `:catppuccin_mocha` | Dark, Catppuccin family |
