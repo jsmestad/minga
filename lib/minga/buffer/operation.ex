@@ -10,6 +10,7 @@ defmodule Minga.Buffer.Operation do
   alias Minga.Buffer.EditDelta
   alias Minga.Buffer.Lines
   alias Minga.Buffer.Position
+  alias Minga.Buffer.RangeBatch
   alias Minga.Buffer.Selection
   alias Minga.Buffer.Span
   alias Minga.Buffer.UndoPatch
@@ -40,7 +41,11 @@ defmodule Minga.Buffer.Operation do
           result()
   def replace_range(%Document{} = doc, from_pos, to_pos, replacement)
       when is_binary(replacement) do
-    selection = Selection.characterwise(doc, from_pos, to_pos)
+    replace_selection(doc, Selection.characterwise(doc, from_pos, to_pos), replacement)
+  end
+
+  @spec replace_selection(Document.t(), Selection.t(), String.t()) :: result()
+  defp replace_selection(doc, selection, replacement) when is_binary(replacement) do
     %Span{start: start_byte, stop: old_end_byte} = selection.span
 
     new_doc =
@@ -207,18 +212,84 @@ defmodule Minga.Buffer.Operation do
     new_doc
   end
 
-  @doc "Applies multiple range replacements and returns undo patches in newest-first recording order."
+  @doc """
+  Applies multiple range replacements and returns undo patches in newest-first recording order.
+
+  Edits apply one at a time from the highest start position to the lowest, and each edit resolves its positions against the document the previous edit produced. `Minga.Buffer.RangeBatch` applies each run of separated edits in one pass with that exact result; any other edit applies on its own.
+  """
   @spec replace_ranges_with_patches(Document.t(), [range_edit()]) ::
           {Document.t(), [UndoPatch.t()]}
+  def replace_ranges_with_patches(%Document{} = doc, []), do: {doc, []}
+
   def replace_ranges_with_patches(%Document{} = doc, edits) when is_list(edits) do
     edits
     |> Enum.sort(fn {from_a, _, _}, {from_b, _, _} -> from_a >= from_b end)
-    |> Enum.reduce({doc, []}, fn {from_pos, to_pos, replacement}, {acc_doc, patches} ->
-      {:edited, new_doc, delta} = replace_range(acc_doc, from_pos, to_pos, replacement)
-      patch = UndoPatch.from_delta(delta, acc_doc)
-      {new_doc, [patch | patches]}
-    end)
+    |> replace_ordered(doc, Lines.snapshot(doc), :unchecked, [])
   end
+
+  # Runs need valid UTF-8, because they skip grapheme scans that raise on invalid text. The
+  # check waits until at least two edits remain, since one edit gains nothing from a run. Once
+  # an edit may have produced invalid text, the rest of the batch applies one edit at a time.
+  @typep text_check :: :unchecked | :valid_utf8 | :unverified
+
+  @spec replace_ordered(
+          [range_edit(), ...],
+          Document.t(),
+          Lines.snapshot(),
+          text_check(),
+          [UndoPatch.t()]
+        ) :: {Document.t(), [UndoPatch.t()]}
+  defp replace_ordered([_edit] = edits, doc, snapshot, check, patches),
+    do: replace_next(edits, doc, snapshot, check, patches)
+
+  defp replace_ordered(edits, doc, {_line_starts, text} = snapshot, :unchecked, patches) do
+    check = if Unicode.valid_utf8?(text), do: :valid_utf8, else: :unverified
+    replace_ordered(edits, doc, snapshot, check, patches)
+  end
+
+  defp replace_ordered(edits, doc, snapshot, :valid_utf8, patches) do
+    case RangeBatch.apply_run(doc, snapshot, edits) do
+      {:applied, new_doc, run_patches, remaining} ->
+        continue_ordered(remaining, new_doc, :valid_utf8, run_patches ++ patches)
+
+      :sequential ->
+        replace_next(edits, doc, snapshot, :valid_utf8, patches)
+    end
+  end
+
+  defp replace_ordered(edits, doc, snapshot, :unverified, patches),
+    do: replace_next(edits, doc, snapshot, :unverified, patches)
+
+  # Reuses the run's snapshot, so an edit applied on its own costs what it did before.
+  @spec replace_next(
+          [range_edit(), ...],
+          Document.t(),
+          Lines.snapshot(),
+          text_check(),
+          [UndoPatch.t()]
+        ) :: {Document.t(), [UndoPatch.t()]}
+  defp replace_next([{from_pos, to_pos, replacement} | rest], doc, snapshot, check, patches) do
+    {_line_starts, text} = snapshot
+    selection = Selection.characterwise_in(snapshot, from_pos, to_pos)
+    {:edited, new_doc, delta} = replace_selection(doc, selection, replacement)
+    patches = [UndoPatch.from_delta(delta, doc) | patches]
+
+    continue_ordered(rest, new_doc, check_after(check, text, selection, replacement), patches)
+  end
+
+  @spec check_after(text_check(), String.t(), Selection.t(), String.t()) :: text_check()
+  defp check_after(:valid_utf8, text, %Selection{span: span}, replacement) do
+    if RangeBatch.keeps_valid_utf8?(text, span, replacement), do: :valid_utf8, else: :unverified
+  end
+
+  defp check_after(check, _text, _selection, _replacement), do: check
+
+  @spec continue_ordered([range_edit()], Document.t(), text_check(), [UndoPatch.t()]) ::
+          {Document.t(), [UndoPatch.t()]}
+  defp continue_ordered([], doc, _check, patches), do: {doc, patches}
+
+  defp continue_ordered(edits, doc, check, patches),
+    do: replace_ordered(edits, doc, Lines.snapshot(doc), check, patches)
 
   @doc "Deletes the character before the cursor."
   @spec backspace(Document.t()) :: result()
