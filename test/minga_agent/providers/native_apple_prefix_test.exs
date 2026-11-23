@@ -20,7 +20,7 @@ defmodule MingaAgent.Providers.NativeApplePrefixTest do
 
       counts =
         for candidate <- candidates do
-          text = candidate |> Enum.map(&Enum.at(texts, &1)) |> Enum.join("\n\n")
+          text = Enum.map_join(candidate, "\n\n", &Enum.at(texts, &1))
           div(byte_size(text), 4) + 250 * length(tools)
         end
 
