@@ -1343,7 +1343,6 @@ kbd {
   padding: 0;
   list-style: none;
   border-top: 1px solid var(--border);
-  max-width: var(--measure);
 }
 
 .step-item {
@@ -1380,7 +1379,7 @@ kbd {
 }
 
 .essay-hero .container {
-  max-width: 56rem;
+  max-width: 54rem;
 }
 
 .essay-subtitle {
@@ -1388,7 +1387,6 @@ kbd {
   font-size: 1.1rem;
   line-height: 1.6;
   color: var(--text-secondary);
-  max-width: var(--measure);
 }
 
 .essay-toc {
@@ -1416,7 +1414,7 @@ kbd {
 }
 
 .essay-body .container {
-  max-width: 56rem;
+  max-width: 54rem;
 }
 
 .essay-section {
@@ -1434,11 +1432,6 @@ kbd {
 
 .essay-section > h3 {
   margin: 1.75rem 0 0.55rem;
-}
-
-.essay-section > p,
-.essay-section > ul {
-  max-width: var(--measure);
 }
 
 .essay-section > ul:not(.spec-ledger) {
