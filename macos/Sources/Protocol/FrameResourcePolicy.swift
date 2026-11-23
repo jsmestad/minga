@@ -371,6 +371,9 @@ public enum FrameDecodeAccounting {
         }
     }
 
+    /// The usage builder installed for the current decoder pass, if any. Loops that reserve once per element resolve it once and reserve through it directly, because each `reserve(_:_:)` call reads the task-local again.
+    public static var currentUsage: FrameResourceUsageBuilder? { current }
+
     /// Reserves through the current decoder builder when present.
     public static func reserve(_ dimension: FrameResourceDimension, _ amount: Int) throws {
         try current?.reserve(dimension, amount)
