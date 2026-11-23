@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - "site/**"
+      - "wrangler.jsonc"
       - "docs/**"
       - "assets/**"
       - "mix.exs"
@@ -18,6 +19,7 @@ on:
     branches: [main]
     paths:
       - "site/**"
+      - "wrangler.jsonc"
       - "docs/**"
       - "assets/**"
       - "mix.exs"
@@ -73,12 +75,11 @@ jobs:
       - name: Verify internal links, redirects, headers, and staging noindex
         run: python3 scripts/check_site_links.py _site --expect-noindex
 
-      - name: Determine Cloudflare Pages deploy target
+      - name: Determine Cloudflare Workers deploy mode
         id: target
         env:
           CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CF_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          CF_PROJECT: ${{ vars.CLOUDFLARE_PAGES_PROJECT }}
           EVENT_NAME: ${{ github.event_name }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           REF_NAME: ${{ github.ref }}
@@ -87,49 +88,60 @@ jobs:
         run: |
           if [[ "$IS_SAME_REPO" != "true" || -z "$CF_TOKEN" || -z "$CF_ACCOUNT" ]]; then
             echo "should_deploy=false" >> "$GITHUB_OUTPUT"
-            echo "Skipping Cloudflare Pages deploy (fork PR or Cloudflare secrets not configured)." >> "$GITHUB_STEP_SUMMARY"
+            echo "Skipping Cloudflare Workers deploy (fork PR or Cloudflare secrets not configured)." >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
 
-          project="${CF_PROJECT:-mingacode-site}"
-          if [[ ! "$project" =~ ^[a-z0-9][a-z0-9-]{0,57}$ ]]; then
-            echo "error: invalid CLOUDFLARE_PAGES_PROJECT name: '$project'" >&2
-            exit 1
-          fi
+          echo "should_deploy=true" >> "$GITHUB_OUTPUT"
 
           if [[ "$EVENT_NAME" == "pull_request" ]]; then
-            branch="pr-${PR_NUMBER}"
+            echo "mode=preview" >> "$GITHUB_OUTPUT"
+            echo "preview_name=pr-${PR_NUMBER}" >> "$GITHUB_OUTPUT"
           elif [[ "$REF_NAME" == "refs/heads/main" ]]; then
-            branch="main"
+            echo "mode=deploy" >> "$GITHUB_OUTPUT"
           else
-            branch="manual-${COMMIT_SHA:0:7}"
+            echo "mode=preview" >> "$GITHUB_OUTPUT"
+            echo "preview_name=manual-${COMMIT_SHA:0:7}" >> "$GITHUB_OUTPUT"
           fi
 
-          echo "should_deploy=true" >> "$GITHUB_OUTPUT"
-          echo "project=${project}" >> "$GITHUB_OUTPUT"
-          echo "branch=${branch}" >> "$GITHUB_OUTPUT"
-
-      - name: Deploy to Cloudflare Pages
-        id: deploy
-        if: steps.target.outputs.should_deploy == 'true'
-        uses: cloudflare/wrangler-action@v3
+      - name: Deploy Worker preview (PR or non-main dispatch)
+        id: preview
+        if: steps.target.outputs.should_deploy == 'true' && steps.target.outputs.mode == 'preview'
+        uses: cloudflare/wrangler-action@v4
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy _site --project-name=${{ steps.target.outputs.project }} --branch=${{ steps.target.outputs.branch }} --commit-hash=${{ github.sha }}
+          wranglerVersion: "4.136.3"
+          command: preview --name ${{ steps.target.outputs.preview_name }}
+          gitHubToken: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Record preview URL in workflow summary
+      - name: Deploy Worker staging production (main)
+        id: deploy
+        if: steps.target.outputs.should_deploy == 'true' && steps.target.outputs.mode == 'deploy'
+        uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: "4.136.3"
+          command: deploy
+          gitHubToken: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Record deployment URLs in workflow summary
         if: steps.target.outputs.should_deploy == 'true'
         env:
+          PREVIEW_URL: ${{ steps.preview.outputs.preview-url }}
+          PREVIEW_IMMUTABLE_URL: ${{ steps.preview.outputs.preview-deployment-url }}
           DEPLOY_URL: ${{ steps.deploy.outputs.deployment-url }}
-          ALIAS_URL: ${{ steps.deploy.outputs.pages-deployment-alias-url }}
         run: |
           {
-            echo "### Cloudflare Pages preview"
-            if [[ -n "$ALIAS_URL" ]]; then
-              echo "- Branch alias: ${ALIAS_URL}"
+            echo "### Cloudflare Workers Static Assets"
+            if [[ -n "$PREVIEW_URL" ]]; then
+              echo "- Preview URL: ${PREVIEW_URL}"
+            fi
+            if [[ -n "$PREVIEW_IMMUTABLE_URL" ]]; then
+              echo "- Immutable preview deployment: ${PREVIEW_IMMUTABLE_URL}"
             fi
             if [[ -n "$DEPLOY_URL" ]]; then
-              echo "- Immutable deployment: ${DEPLOY_URL}"
+              echo "- Staging URL: ${DEPLOY_URL}"
             fi
           } >> "$GITHUB_STEP_SUMMARY"

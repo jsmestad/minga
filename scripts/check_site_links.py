@@ -171,7 +171,7 @@ def check_redirects(site_root: Path, redirects_path: Path) -> list[str]:
         seen_sources.add(source)
 
         if status not in VALID_REDIRECT_CODES:
-            errors.append(f"_redirects:{lineno}: unsupported Cloudflare Pages status code '{status}'")
+            errors.append(f"_redirects:{lineno}: unsupported Cloudflare static asset status code '{status}'")
 
         if source == destination:
             errors.append(f"_redirects:{lineno}: redirect source equals destination: {source}")

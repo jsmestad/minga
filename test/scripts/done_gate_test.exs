@@ -294,6 +294,7 @@ defmodule Minga.DoneGateTest do
   test "site-only changes skip Elixir and Swift gates and run site checks", ctx do
     install_site!(ctx.dir)
     write!(ctx.dir, "site/index.html", "<html></html>\n")
+    write!(ctx.dir, "wrangler.jsonc", "{\"name\":\"mingacode-site\"}\n")
     {output, 0} = gate(ctx)
 
     assert output =~ "[skip] format"
