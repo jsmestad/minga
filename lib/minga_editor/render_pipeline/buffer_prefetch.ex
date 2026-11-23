@@ -18,6 +18,8 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
   alias Minga.Core.Unicode
   alias Minga.Core.WidthOracle
   alias Minga.Core.WrapMap
+  alias Minga.Diagnostics
+  alias Minga.LSP.SyncServer
   alias MingaEditor.DisplayMap
   alias MingaEditor.FoldMap
   alias MingaEditor.FoldMap.VisibleLines
@@ -26,6 +28,8 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
   alias MingaEditor.BufferDecorations
   alias MingaEditor.RenderModel.Window.ResidentBuild
   alias MingaEditor.RenderModel.Window.ResidentStore
+  alias MingaEditor.RenderModel.Window.WindowDiagnostics
+  alias MingaEditor.Renderer.Caches
   alias MingaEditor.Renderer.Gutter
   alias MingaEditor.Renderer.MixedLayout
   alias MingaEditor.Renderer.SearchHighlight
@@ -56,17 +60,42 @@ defmodule MingaEditor.RenderPipeline.BufferPrefetch do
   """
   @spec prefetch_scrolls(state(), Layout.t()) :: {%{Window.id() => WindowScroll.t()}, state()}
   def prefetch_scrolls(input, layout) do
-    layout.window_layouts
-    |> Enum.reduce({%{}, input}, fn {win_id, win_layout}, {acc, st} ->
-      window = Map.get(st.windows.map, win_id)
+    {scrolls, input} =
+      layout.window_layouts
+      |> Enum.reduce({%{}, input}, fn {win_id, win_layout}, {acc, st} ->
+        window = Map.get(st.windows.map, win_id)
 
-      if window == nil or not match?({:buffer, _}, window.content) do
-        # Skip nil and semantic windows; they have no buffer snapshot to prefetch.
-        {acc, st}
-      else
-        scroll_and_invalidate(input, st, acc, win_id, window, win_layout)
-      end
-    end)
+        if window == nil or not match?({:buffer, _}, window.content) do
+          # Skip nil and semantic windows; they have no buffer snapshot to prefetch.
+          {acc, st}
+        else
+          scroll_and_invalidate(input, st, acc, win_id, window, win_layout)
+        end
+      end)
+
+    {scrolls, prefetch_diagnostics(input, scrolls)}
+  end
+
+  # Looks up each displayed file's diagnostics once per frame, shared by every
+  # split showing it. An unchanged revision keeps the retained view without
+  # copying its list; files no longer displayed are dropped.
+  @spec prefetch_diagnostics(state(), %{Window.id() => WindowScroll.t()}) :: state()
+  defp prefetch_diagnostics(input, scrolls) do
+    retained =
+      scrolls
+      |> Map.values()
+      |> Enum.flat_map(fn
+        %WindowScroll{snapshot: %{file_path: path}} when is_binary(path) -> [path]
+        _scroll -> []
+      end)
+      |> Enum.uniq()
+      |> Map.new(fn path ->
+        current = Caches.diagnostics_for(input.caches, path)
+        change = Diagnostics.changed_since(SyncServer.path_to_uri(path), current.revision)
+        {path, WindowDiagnostics.apply_change(current, change)}
+      end)
+
+    Input.retain_diagnostics(input, retained)
   end
 
   @doc "Fetches the version-qualified source range needed by the resident build plan."

@@ -245,6 +245,14 @@ defmodule MingaEditor.RenderPipeline.Input do
     }
   end
 
+  @doc "Retains the frame's per-file diagnostic views in the renderer caches."
+  @spec retain_diagnostics(t(), %{
+          String.t() => MingaEditor.RenderModel.Window.WindowDiagnostics.t()
+        }) ::
+          t()
+  def retain_diagnostics(%__MODULE__{caches: caches} = input, diagnostics),
+    do: %{input | caches: Caches.retain_diagnostics(caches, diagnostics)}
+
   @spec record_agent_scroll_metrics(t(), non_neg_integer(), pos_integer()) :: t()
   def record_agent_scroll_metrics(
         %__MODULE__{workspace: %WorkspaceIntent{} = workspace} = input,

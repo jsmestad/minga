@@ -513,8 +513,8 @@ defmodule MingaEditor.StatusBar.Data do
   defp cursor_line_diagnostic_hint_from_path(path, line) do
     path
     |> SyncServer.path_to_uri()
-    |> Diagnostics.for_uri()
-    |> Enum.find(fn d -> d.range.start_line == line end)
+    |> Diagnostics.on_line(line)
+    |> List.first()
     |> format_diagnostic_hint()
   end
 

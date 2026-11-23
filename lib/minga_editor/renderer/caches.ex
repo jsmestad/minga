@@ -2,12 +2,14 @@ defmodule MingaEditor.Renderer.Caches do
   @moduledoc "Explicit render-pipeline cache state retained by the renderer."
 
   alias Minga.Frontend.Adapter.GUI.Caches, as: GUICaches
+  alias MingaEditor.RenderModel.Window.WindowDiagnostics
 
   defstruct chrome_prev_fingerprint: nil,
             chrome_prev_result: nil,
             search_decoration_cache: nil,
             doc_highlight_cache: nil,
             cmd_hover_link_cache: nil,
+            diagnostics: %{},
             frame_rows_rasterized: 0,
             frame_render_path: :full,
             last_title: nil,
@@ -27,6 +29,7 @@ defmodule MingaEditor.Renderer.Caches do
           search_decoration_cache: term(),
           doc_highlight_cache: term(),
           cmd_hover_link_cache: term(),
+          diagnostics: %{String.t() => WindowDiagnostics.t()},
           frame_rows_rasterized: non_neg_integer(),
           frame_render_path: :patch | :full,
           last_title: String.t() | nil,
@@ -86,6 +89,16 @@ defmodule MingaEditor.Renderer.Caches do
         cmd_hover_link_cache: cmd_hover_link_cache
     }
   end
+
+  @doc "Replaces the per-file diagnostic views retained for the current frame's buffer windows."
+  @spec retain_diagnostics(t(), %{String.t() => WindowDiagnostics.t()}) :: t()
+  def retain_diagnostics(%__MODULE__{} = caches, diagnostics) when is_map(diagnostics),
+    do: %{caches | diagnostics: diagnostics}
+
+  @doc "Returns the diagnostic view prefetched for a file path this frame, or the empty view."
+  @spec diagnostics_for(t(), String.t() | nil) :: WindowDiagnostics.t()
+  def diagnostics_for(%__MODULE__{diagnostics: diagnostics}, path),
+    do: Map.get(diagnostics, path, WindowDiagnostics.empty())
 
   @spec acknowledge_frame(t(), non_neg_integer(), non_neg_integer()) :: t()
   def acknowledge_frame(%__MODULE__{} = caches, frame_seq, generation)
