@@ -18,6 +18,7 @@ defmodule MingaEditor.Commands.Movement do
   alias MingaEditor.BottomPanel
   alias MingaEditor.DisplayMap
   alias MingaEditor.Renderer.Gutter
+  alias MingaEditor.Commands.Agent, as: AgentCommands
   alias MingaEditor.Commands.Helpers
   alias MingaEditor.FoldMap
   alias MingaEditor.Layout
@@ -72,10 +73,10 @@ defmodule MingaEditor.Commands.Movement do
     {:scroll_center, "Center viewport on cursor (zz)", true},
     {:scroll_cursor_top, "Scroll cursor to top of viewport (zt)", true},
     {:scroll_cursor_bottom, "Scroll cursor to bottom of viewport (zb)", true},
-    {:window_left, "Focus window left", true},
-    {:window_right, "Focus window right", true},
-    {:window_up, "Focus window up", true},
-    {:window_down, "Focus window down", true},
+    {:window_left, "Focus window left", false},
+    {:window_right, "Focus window right", false},
+    {:window_up, "Focus window up", false},
+    {:window_down, "Focus window down", false},
     {:split_vertical, "Split window vertically", true},
     {:split_horizontal, "Split window horizontally", true},
     {:window_close, "Close window", true},
@@ -676,7 +677,13 @@ defmodule MingaEditor.Commands.Movement do
     if FileTreeState.focused?(state.workspace.file_tree) do
       state = update_file_tree(state, &FileTreeState.unfocus/1)
       scope = MingaEditor.Session.State.scope_for_active_window(state.workspace)
-      %{state | workspace: MingaEditor.Session.State.set_keymap_scope(state.workspace, scope)}
+
+      state = %{
+        state
+        | workspace: MingaEditor.Session.State.set_keymap_scope(state.workspace, scope)
+      }
+
+      enter_window_from_file_tree(state, scope)
     else
       navigate_window_to_neighbor(state, :right)
     end
@@ -685,6 +692,12 @@ defmodule MingaEditor.Commands.Movement do
   defp navigate_window(state, direction) do
     navigate_window_to_neighbor(state, direction)
   end
+
+  # An Agent chat window has no buffer of its own; its composer is what takes
+  # the keys back from the tree. Focusing the tree blurred it (#3955).
+  @spec enter_window_from_file_tree(state(), atom()) :: state()
+  defp enter_window_from_file_tree(state, :agent), do: AgentCommands.return_to_chat(state)
+  defp enter_window_from_file_tree(state, _scope), do: state
 
   @spec navigate_window_to_neighbor(state(), WindowTree.nav_direction()) :: state()
   defp navigate_window_to_neighbor(state, direction) do

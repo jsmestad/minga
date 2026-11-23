@@ -380,7 +380,6 @@ defmodule Minga.Test.HeadlessPort do
   end
 
   def handle_call(:agent_chat, _from, state), do: {:reply, state.agent_chat, state}
-
   def handle_call(:file_tree, _from, state), do: {:reply, state.file_tree, state}
 
   def handle_call({:get_row_text, row}, _from, state) do

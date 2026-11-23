@@ -5,6 +5,7 @@ defmodule MingaEditor.Agent.PromptInputTest do
   alias Minga.Frontend.Adapter.GUI
   alias Minga.Frontend.Adapter.GUI.Caches
   alias Minga.Frontend.Adapter.GUI.WindowEncoder
+  alias Minga.Project.FileTree, as: ProjectFileTree
   alias Minga.Protocol.Opcodes
   alias MingaAgent.Session.{ConnectionSnapshot, ConnectionTarget}
   alias MingaEditor.Agent.DraftSave
@@ -26,6 +27,7 @@ defmodule MingaEditor.Agent.PromptInputTest do
   alias MingaEditor.Renderer.TextPresentations
   alias MingaEditor.Session.State, as: SessionState
   alias MingaEditor.State.Buffers
+  alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.Render
   alias MingaEditor.State.{Tab, TabBar}
   alias MingaEditor.State.Windows
@@ -230,13 +232,15 @@ defmodule MingaEditor.Agent.PromptInputTest do
     {state, runtime, connection, ui}
   end
 
-  test "both prompt focus paths reclaim agent keybindings without replacing the draft" do
+  test "both prompt focus paths reclaim agent keybindings from a focused tree without replacing the draft" do
     for focus_path <- [:pointer, :presentation] do
       {state, regular} = prompt_state("draft")
       Buffer.move_to(state.workspace.agent_ui.panel.prompt_buffer, {0, 0})
+      tree = FileTreeState.open(%FileTreeState{}, ProjectFileTree.new("/project"), nil)
 
       workspace =
         state.workspace
+        |> SessionState.set_file_tree(tree)
         |> SessionState.set_keymap_scope(:file_tree)
         |> SessionState.transition_mode(:normal)
 
@@ -254,6 +258,8 @@ defmodule MingaEditor.Agent.PromptInputTest do
         end
 
       assert state.workspace.keymap_scope == :agent
+      refute FileTreeState.focused?(state.workspace.file_tree), "#{focus_path} focus"
+      assert FileTreeState.visible?(state.workspace.file_tree)
       assert state.workspace.editing.mode == :normal
       assert PromptBuffer.input_text(state.workspace.agent_ui) == "draft"
       state = MingaEditor.Input.Router.route_key(state, ?i, 0)
