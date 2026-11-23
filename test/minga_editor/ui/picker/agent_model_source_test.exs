@@ -9,6 +9,7 @@ defmodule MingaEditor.UI.Picker.AgentModelSourceTest do
   alias MingaAgent.ModelResolver
   alias MingaAgent.ModelCandidate
   alias MingaAgent.ModelSelection
+  alias MingaAgent.ModelSelection.Credential.ApiKey
   alias MingaAgent.ModelSelection.Credential.OAuth
   alias MingaAgent.Providers.Native
   alias MingaAgent.Session
@@ -32,6 +33,7 @@ defmodule MingaEditor.UI.Picker.AgentModelSourceTest do
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
   alias MingaEditor.UI.Picker
+  alias MingaEditor.UI.Picker.AgentConnectionSource
   alias MingaEditor.UI.Picker.AgentModelSource
   alias MingaEditor.UI.Picker.Candidate
   alias MingaEditor.UI.Picker.Context
@@ -66,7 +68,7 @@ defmodule MingaEditor.UI.Picker.AgentModelSourceTest do
         when session == self(), do: {:reply, {:error, message}, fixture}
   end
 
-  test "shows exact route, unverified status, favorite, and thinking controls" do
+  test "an API route row shows a ready chip and leads with its route, price, and context" do
     selection =
       ModelSelectionFixture.selection(
         model_provider: "openai",
@@ -76,7 +78,8 @@ defmodule MingaEditor.UI.Picker.AgentModelSourceTest do
         transport: "http",
         reasoning: %{effort: "low", options: ["off", "low", "high"]},
         limits: %{context: 128_000, input: nil, output: 8_192, request_output: 2_048},
-        capabilities: %{tools: true, images: true, streaming: true}
+        capabilities: %{tools: true, images: false, streaming: :unknown},
+        cost: %{input: 2.5, output: 10}
       )
 
     candidate = %ModelCandidate{selection: selection, favorite: true, current: true}
@@ -86,12 +89,15 @@ defmodule MingaEditor.UI.Picker.AgentModelSourceTest do
     assert item.id == ModelSelection.id(selection)
     assert item.active
     assert item.annotation == "★ favorite"
-    assert item.description =~ "openai via openai_chat"
-    assert item.description =~ "https://api.openai.com/v1/chat/completions"
-    assert item.description =~ "unverified catalog route"
-    assert item.description =~ "openai:env"
-    assert item.description =~ "thinking low (off/low/high)"
-    assert item.description =~ "tools yes, images yes, streaming yes"
+    assert item.status == ItemStatus.new(:ready, "Ready")
+
+    # Only a capability the model lacks is named; supported and unknown ones are not.
+    assert item.description ==
+             "openai API · $2.5/10 per MTok · 128k ctx · thinking low · no images"
+
+    # The exact endpoint and credential stay searchable without filling the row.
+    assert item.search_text =~ "https://api.openai.com/v1/chat/completions"
+    assert item.search_text =~ "openai:env"
   end
 
   test "/model discovers Apple off the editor path and only activates it while ready" do
@@ -149,9 +155,10 @@ defmodule MingaEditor.UI.Picker.AgentModelSourceTest do
 
     assert [apple] = Enum.filter(items, &model_choice?/1)
     assert apple.label == "Apple Intelligence (On Device)"
-    assert apple.description =~ "No credentials"
-    assert apple.description =~ "Ready on this device"
-    assert apple.description =~ "Compact file tools"
+    assert apple.status == ItemStatus.new(:ready, "Ready")
+
+    assert apple.description ==
+             "On device · 4k ctx · no thinking controls · compact file tools, no images"
 
     assert [completion] = SlashCommand.completion_candidates(state, "model apple")
     assert completion.insert == "model #{apple.id}"
@@ -235,6 +242,124 @@ defmodule MingaEditor.UI.Picker.AgentModelSourceTest do
     assert Session.status(session) == :idle
   end
 
+  describe "connection actions" do
+    # An API-key route with a stored key and a signed-in ChatGPT route.
+    defp connected_candidates do
+      api =
+        ModelSelectionFixture.selection(
+          model_id: "gpt-4o",
+          display_name: "GPT-4o",
+          credential: ApiKey.new("openai", :file)
+        )
+
+      codex =
+        ModelSelectionFixture.selection(
+          request_provider: :openai_codex,
+          model_id: "gpt-5",
+          display_name: "GPT-5"
+        )
+
+      for selection <- [api, codex],
+          do: %ModelCandidate{selection: selection, favorite: false, current: false}
+    end
+
+    test "with a usable model, /model lists the models and one row for connection actions" do
+      session = start_supervised!({ModelPickerSession, connected_candidates()})
+      ctx = context(connection(session), 1)
+      items = AgentModelSource.candidates(ctx)
+
+      assert Enum.map(items, & &1.label) == ["GPT-4o", "GPT-5", "Connect another provider…"]
+      assert connect_row(items).status == nil
+      assert Enum.at(items, 1).description =~ ~r/^ChatGPT · /
+
+      child = items |> connect_row() |> child_items(ctx)
+      labels = Enum.map(child, & &1.label)
+
+      # Connected providers offer account actions instead of a first sign-in.
+      refute "Sign in with ChatGPT" in labels
+      refute "Connect openai with API key" in labels
+
+      for label <- [
+            "Sign in to ChatGPT again",
+            "Sign in to ChatGPT again manually",
+            "Sign out of ChatGPT",
+            "Replace openai API key",
+            "Remove openai API key",
+            "Connect anthropic with API key",
+            "Retry current connection"
+          ] do
+        assert label in labels, "missing #{label} in #{inspect(labels)}"
+      end
+
+      intents = Map.new(child, &{&1.label, &1.meta.intent})
+      assert intents["Sign in to ChatGPT again"] == {:connect, :oauth_browser}
+      assert intents["Sign out of ChatGPT"] == {:sign_out, "openai_codex"}
+      assert intents["Replace openai API key"] == {:connect, {:api_key, "openai"}}
+      assert intents["Remove openai API key"] == {:sign_out, "openai"}
+
+      signed_in = Enum.find(child, &(&1.label == "Sign in to ChatGPT again"))
+      assert signed_in.status == ItemStatus.new(:ready, "Signed in")
+    end
+
+    test "with no listed model, the connection actions stay in /model as first-run setup" do
+      session = start_supervised!({ModelPickerSession, []})
+
+      labels =
+        context(connection(session), 1) |> AgentModelSource.candidates() |> Enum.map(& &1.label)
+
+      assert Enum.take(labels, 2) == ["Sign in with ChatGPT", "Sign in with ChatGPT manually"]
+      assert "Connect openai with API key" in labels
+      assert Enum.take(labels, -1) == ["Retry current connection"]
+      refute "Connect another provider…" in labels
+    end
+
+    test "a setup in progress stays in /model beside the models" do
+      session = start_supervised!({ModelPickerSession, connected_candidates()})
+      connecting = %{connection(session) | operation: {:connecting, make_ref()}}
+      labels = context(connecting, 1) |> AgentModelSource.candidates() |> Enum.map(& &1.label)
+
+      assert labels == ["GPT-4o", "GPT-5", "Cancel connection setup", "Connect another provider…"]
+    end
+
+    test "Escape in the connection picker returns to /model with its query and selection" do
+      session = start_supervised!({ModelPickerSession, connected_candidates()})
+      task_supervisor = start_supervised!({Task.Supervisor, []})
+      scheduler = start_supervised!({EffectScheduler, task_supervisor: task_supervisor})
+      :ok = EffectScheduler.attach(scheduler, self())
+      {state, _workspace_id} = editor_state(connection(session), "GPT-4o", scheduler)
+
+      assert {:ok, state} = SlashCommand.execute(state, "/model")
+      assert {:ok, state} = land_fetch(state, scheduler)
+      connect_id = {:connection, :connect_another_provider}
+
+      state =
+        PickerUI.update_picker(state, fn ps ->
+          picker = Picker.filter(ps.picker, "connect")
+          PickerState.update_picker(ps, Picker.select_id(picker, connect_id))
+        end)
+
+      state = PickerUI.handle_key(state, 13, 0)
+      assert %{source: AgentConnectionSource, load_status: :loading} = picker_ui(state)
+      assert picker_ui(state).picker.query == ""
+      assert {:ok, state} = land_fetch(state, scheduler)
+      assert Enum.any?(picker_ui(state).picker.items, &(&1.label == "Sign out of ChatGPT"))
+
+      state = PickerUI.handle_key(state, 27, 0)
+      model_picker = picker_ui(state)
+
+      assert model_picker.source == AgentModelSource
+      assert model_picker.load_status == :ready
+      assert model_picker.picker.query == "connect"
+      assert Picker.selected_id(model_picker.picker) == connect_id
+
+      # The rows come back as they were; returning does not discover models again.
+      assert Enum.map(model_picker.picker.items, & &1.label) ==
+               ["GPT-4o", "GPT-5", "Connect another provider…"]
+
+      refute_receive {:effect_result, ^scheduler, _outcome}, 50
+    end
+  end
+
   describe "contributed model routes" do
     setup do
       registry = :"picker_inference_routes_#{System.unique_integer([:positive])}"
@@ -282,6 +407,24 @@ defmodule MingaEditor.UI.Picker.AgentModelSourceTest do
       assert offline.description =~ "Offline Route · #{FixtureInferenceRoute.remedy()} · 200k ctx"
       refute offline.description =~ "Unavailable"
       assert Enum.all?([ready, offline], &(request_provider(&1) == :contributed))
+    end
+
+    test "routes that are not ready keep the connection actions in /model", %{registry: registry} do
+      candidates =
+        ModelResolver.candidates(
+          backend_spec: MingaAgent.ProviderPacks.Native.spec(),
+          credential_snapshot: Snapshot.new(%{}, nil),
+          models: [],
+          inference_routes: registry
+        )
+
+      session = start_supervised!({ModelPickerSession, candidates})
+      items = AgentModelSource.candidates(context(connection(session), 1))
+
+      # Neither route was checked, so no listed model can be used yet.
+      assert Enum.any?(items, &model_choice?/1)
+      assert "Sign in with ChatGPT" in Enum.map(items, & &1.label)
+      refute "Connect another provider…" in Enum.map(items, & &1.label)
     end
 
     test "contributed rows are runtime-gated discovery that a superseded fetch drops", %{
@@ -421,8 +564,14 @@ defmodule MingaEditor.UI.Picker.AgentModelSourceTest do
 
     test "setup rows show each route's readiness and never ask for a secret", ctx do
       %{connection: connection} = Session.editor_snapshot(ctx.session)
-      items = AgentModelSource.candidates(context(connection, 1))
-      rows = setup_rows(items)
+      ctx_1 = context(connection, 1)
+      items = AgentModelSource.candidates(ctx_1)
+
+      # Discovery found a ready route, so its model is usable and the setup rows move behind
+      # "Connect another provider…".
+      assert setup_rows(items) == []
+      assert connect_row(items)
+      rows = items |> connect_row() |> child_items(ctx_1) |> setup_rows()
 
       ready = Enum.find(rows, &(&1.label == "Use Setup Fixture"))
       offline = Enum.find(rows, &(&1.label == "Use Offline Setup"))
@@ -448,15 +597,19 @@ defmodule MingaEditor.UI.Picker.AgentModelSourceTest do
       :ok = EffectScheduler.attach(scheduler, self())
       {state, workspace_id} = editor_state(connection, "Prior Model", scheduler)
 
+      picker_context = context(connection, workspace_id)
+      items = AgentModelSource.candidates(picker_context)
+
       [row | _rest] =
-        context(connection, workspace_id)
-        |> AgentModelSource.candidates()
+        items
+        |> connect_row()
+        |> child_items(picker_context)
         |> setup_rows()
         |> Enum.filter(&(&1.label == "Use Setup Fixture"))
 
       assert_receive {:fixture_availability_checked, _id, _discovery_caller}
 
-      state = AgentModelSource.on_select(row, state)
+      state = AgentConnectionSource.on_select(row, state)
       assert state.shell_runtime.state.notice.message == "Checking Setup Fixture…"
 
       setup_id = ctx.setup_id
@@ -780,8 +933,15 @@ defmodule MingaEditor.UI.Picker.AgentModelSourceTest do
     assert [item] = Enum.filter(items, &model_choice?/1)
 
     assert request_provider(item) == :openai
-    assert Enum.any?(items, &match?({:connect, _}, &1.meta.intent))
     assert status =~ "/login"
+
+    # The API-key model is usable, so connection actions sit behind one row. ChatGPT lists no
+    # model, so the child still offers a first sign-in.
+    refute Enum.any?(items, &match?({:connect, _}, &1.meta.intent))
+    assert connect_row(items)
+    labels = items |> connect_row() |> child_items(ctx) |> Enum.map(& &1.label)
+    assert "Sign in with ChatGPT" in labels
+    refute "Connect openai with API key" in labels
     assert {:ok, [candidate]} = Session.get_available_models(session)
     assert candidate.selection.route.request_provider == :openai
 
@@ -948,7 +1108,7 @@ defmodule MingaEditor.UI.Picker.AgentModelSourceTest do
 
     assert Enum.map(items, & &1.label) == ["Shared Model", "Shared Model"]
     assert items |> Enum.map(& &1.id) |> Enum.uniq() |> length() == 2
-    assert Enum.all?(items, &String.contains?(&1.description, "api.openai.example"))
+    assert Enum.all?(items, &String.contains?(&1.search_text, "api.openai.example"))
   end
 
   test "rejected picker selection preserves the prior visible model" do
@@ -1090,6 +1250,17 @@ defmodule MingaEditor.UI.Picker.AgentModelSourceTest do
       capabilities: %{},
       theme: Theme.get!(:doom_one)
     }
+  end
+
+  defp connect_row(items),
+    do: Enum.find(items, &(&1.id == {:connection, :connect_another_provider}))
+
+  # The rows of the child picker that a "Connect another provider…" row opens.
+  defp child_items(item, %Context{picker_ui: %{context: origin}} = ctx) do
+    assert {:stay_open, {:nested, AgentConnectionSource, child}} =
+             AgentModelSource.selection_disposition(item, origin)
+
+    AgentConnectionSource.candidates(%{ctx | picker_ui: %{context: child}})
   end
 
   defp model_items(context) do

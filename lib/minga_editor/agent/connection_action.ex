@@ -1,12 +1,13 @@
 defmodule MingaEditor.Agent.ConnectionAction do
   @moduledoc """
-  Executes model selection, connection retry, exact cancellation, and model route checks outside the Editor.
+  Executes model selection, connection retry, exact cancellation, model route checks, and sign-out outside the Editor.
 
   Every request retains the offered workspace and Session target. Session validates the target at the mutation boundary; canonical connection events update presentation. Results never optimistically install a model or restore focus to a workspace the user left.
   """
 
   @behaviour MingaEditor.Effect
 
+  alias MingaAgent.Credentials
   alias MingaAgent.ModelSelection
   alias MingaAgent.Session
   alias MingaAgent.Session.ConnectionTarget
@@ -28,6 +29,7 @@ defmodule MingaEditor.Agent.ConnectionAction do
           | :retry
           | {:cancel, reference()}
           | {:check_route, route_id :: String.t(), short_name :: String.t()}
+          | {:sign_out, provider :: String.t()}
   @type t :: %__MODULE__{
           workspace_id: non_neg_integer(),
           target: ConnectionTarget.t(),
@@ -137,12 +139,39 @@ defmodule MingaEditor.Agent.ConnectionAction do
     end
   end
 
+  # Removes the local ChatGPT sign-in or a stored API key, then asks the Session to resolve its
+  # credentials again. An environment key is never removed.
+  defp execute(target, {:sign_out, provider}) do
+    case Credentials.revoke(provider) do
+      :ok ->
+        Session.refresh_credentials(target.session)
+        {:notice, sign_out_message(provider)}
+
+      {:error, :oauth_file_busy} ->
+        {:error, "ChatGPT is refreshing its sign-in. Sign out again in a moment."}
+
+      {:error, _reason} ->
+        {:error, "Could not remove the #{provider_name(provider)} credential."}
+    end
+  end
+
+  @spec sign_out_message(String.t()) :: String.t()
+  defp sign_out_message("openai_codex"), do: "Signed out of ChatGPT."
+
+  defp sign_out_message(provider),
+    do:
+      "Removed the stored #{provider} API key. #{Credentials.env_var_for(provider)} still applies when set."
+
+  @spec provider_name(String.t()) :: String.t()
+  defp provider_name("openai_codex"), do: "ChatGPT"
+  defp provider_name(provider), do: provider
+
   @spec route_check_message(String.t(), MingaAgent.InferenceRoute.Status.t()) :: String.t()
   defp route_check_message(name, %{availability: {:ready, account}}),
     do: "#{name} is ready: #{account}."
 
   defp route_check_message(_name, status),
-    do: MingaEditor.UI.Picker.AgentModelSource.setup_readiness(status)
+    do: MingaEditor.UI.Picker.AgentConnectionSource.setup_readiness(status)
 
   @spec resource(t()) :: term()
   defp resource(%__MODULE__{target: target}), do: {:agent_connection, target.session}
