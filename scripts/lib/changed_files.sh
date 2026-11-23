@@ -27,3 +27,13 @@ elixir_changed() {
 macos_changed() {
   grep -q -E '^macos/|^docs/protocol_schema\.toml$' <<<"$1"
 }
+
+site_changed() {
+  grep -q -E '^site/|^wrangler\.jsonc$|^scripts/build_site\.sh$|^scripts/check_site_links\.py$|^test/scripts/check_site_links_test\.py$|^\.github/workflows/site\.yml$' <<<"$1"
+}
+
+site_only_changed() {
+  local non_empty
+  non_empty=$(grep -v '^$' <<<"$1") || return 1
+  ! grep -qv -E '^site/|^wrangler\.jsonc$|^scripts/build_site\.sh$|^scripts/check_site_links\.py$|^test/scripts/check_site_links_test\.py$|^\.github/workflows/site\.yml$' <<<"$non_empty"
+}

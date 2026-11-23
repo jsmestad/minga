@@ -291,6 +291,71 @@ defmodule Minga.DoneGateTest do
     assert native_results(ctx.dir)["success"]
   end
 
+  test "site-only changes skip Elixir and Swift gates and run site checks", ctx do
+    install_site!(ctx.dir)
+    write!(ctx.dir, "site/index.html", "<html></html>\n")
+    write!(ctx.dir, "wrangler.jsonc", "{\"name\":\"mingacode-site\"}\n")
+    {output, 0} = gate(ctx)
+
+    assert output =~ "[skip] format"
+    assert output =~ "[skip] credo"
+    assert output =~ "[skip] ex-dna"
+    assert output =~ "[skip] compile"
+    assert output =~ "[skip] dialyzer"
+    assert output =~ "[skip] reach"
+    assert output =~ "[skip] test.llm"
+    assert output =~ "site-only changes"
+    assert output =~ "[pass] site.test"
+    assert output =~ "[pass] site"
+    assert output =~ "[skip] swift.build"
+    assert output =~ "[skip] swift.test"
+  end
+
+  test "site check failures fail the gate on site-only changes", ctx do
+    install_site!(ctx.dir)
+    write!(ctx.dir, "site/index.html", "<html></html>\n")
+    {output, 1} = gate(ctx, [{"SITE_CHECK_EXIT", "1"}])
+
+    assert output =~ "[skip] test.llm"
+    assert output =~ "[FAIL] site"
+    assert output =~ "broken site link"
+    refute output =~ "All local review checks passed"
+  end
+
+  test "mixed site and Elixir changes run both Elixir and site gates", ctx do
+    install_site!(ctx.dir)
+    write!(ctx.dir, "site/index.html", "<html></html>\n")
+    write!(ctx.dir, "lib/change.ex", "changed\n")
+    {output, 0} = gate(ctx)
+
+    assert output =~ "[pass] format"
+    assert output =~ "[pass] compile"
+    assert output =~ "[pass] test.llm"
+    assert output =~ "[pass] site.test"
+    assert output =~ "[pass] site"
+  end
+
+  defp install_site!(dir) do
+    write!(dir, "test/scripts/check_site_links_test.py", """
+    import unittest
+
+    class StubSiteLinksTest(unittest.TestCase):
+        def test_ok(self):
+            self.assertTrue(True)
+    """)
+
+    build_script = Path.join(dir, "scripts/build_site.sh")
+    write!(dir, "scripts/build_site.sh", "#!/usr/bin/env bash\nmkdir -p \"$1\"\n")
+    File.chmod!(build_script, 0o755)
+
+    write!(dir, "scripts/check_site_links.py", """
+    import os, sys
+    if os.environ.get("SITE_CHECK_EXIT", "0") != "0":
+        print("broken site link", file=sys.stderr)
+        sys.exit(int(os.environ["SITE_CHECK_EXIT"]))
+    """)
+  end
+
   defp install_swift!(dir) do
     fixture = Path.join(dir, "bin/native-approval-geometry-fixture")
     File.cp!(Path.join(@root, "test/fixtures/native_approval_geometry_observer.py"), fixture)

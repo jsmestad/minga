@@ -1,0 +1,19 @@
+# Legacy root ExDoc guide paths redirected to /docs/
+/readme.html /docs/readme.html 301
+/getting-started.html /docs/getting-started.html 301
+/configuration.html /docs/configuration.html 301
+/agent-model-selection.html /docs/agent-model-selection.html 301
+/projects.html /docs/projects.html 301
+/for-neovim-users.html /docs/for-neovim-users.html 301
+/for-emacs-users.html /docs/for-emacs-users.html 301
+/for-ai-coders.html /docs/for-ai-coders.html 301
+/extensibility.html /docs/extensibility.html 301
+/extension_api.html /docs/extension_api.html 301
+/keymap-scopes.html /docs/keymap-scopes.html 301
+/agentic-keymap.html /docs/agentic-keymap.html 301
+/architecture.html /docs/architecture.html 301
+/protocol.html /docs/protocol.html 301
+/buffer-aware-agents.html /docs/buffer-aware-agents.html 301
+/contributing.html /docs/contributing.html 301
+/releasing.html /docs/releasing.html 301
+/changelog.html /docs/changelog.html 301
