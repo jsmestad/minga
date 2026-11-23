@@ -1330,6 +1330,13 @@ defmodule MingaEditor do
     {:noreply, RenderHandler.handle_render_done(state, receipt)}
   end
 
+  # The connected renderer rejected a transcript update and kept its last good
+  # root. The next submission seeds it from the Editor's projection.
+  def handle_info({:renderer_transcript_reseed, renderer}, state) when is_pid(renderer) do
+    render = MingaEditor.State.Render.require_transcript_seed(state.render, renderer)
+    {:noreply, schedule_render(%{state | render: render}, 16)}
+  end
+
   # Concern-specific animation messages carry semantic generations.
   def handle_info({:nav_flash_step, generation}, state) do
     {:noreply, MingaEditor.Shell.Traditional.FlashesWorkflow.advance_nav(state, generation)}

@@ -1,11 +1,16 @@
 defmodule MingaEditor.Renderer.Submission do
   @moduledoc """
-  Editor-to-Renderer transport containing only changed bulk highlight data.
+  Editor-to-Renderer transport containing only changed bulk highlight data and the transcript update.
 
   The packed intent is private to this envelope. Materialize it in mailbox order before rejecting or coalescing frames, so every renderer workflow receives a complete immutable Intent. A full submission replaces the retained maps; a delta preserves unchanged buffers and explicitly removes closed ones.
+
+  The packed intent never carries the retained Agent transcript. `transcript` is a `MingaEditor.Renderer.TranscriptUpdate`: a seed, an unchanged marker, or ordered display changes. `Renderer.State.receive_submission/2` admits it against the renderer-local resident root before scheduling.
   """
 
+  alias MingaEditor.Agent.UIState.TranscriptProjection
   alias MingaEditor.RenderPipeline.Intent
+  alias MingaEditor.RenderPipeline.WorkspaceIntent
+  alias MingaEditor.Renderer.TranscriptUpdate
   alias MingaEditor.State.LSP
   alias MingaEditor.UI.Highlight
 
@@ -19,7 +24,8 @@ defmodule MingaEditor.Renderer.Submission do
     :highlights,
     :semantic_tokens,
     :removed_highlights,
-    :removed_semantic_tokens
+    :removed_semantic_tokens,
+    :transcript
   ]
   defstruct @enforce_keys
 
@@ -29,29 +35,43 @@ defmodule MingaEditor.Renderer.Submission do
             highlights: highlights(),
             semantic_tokens: semantic_tokens(),
             removed_highlights: [pid()],
-            removed_semantic_tokens: [pid()]
+            removed_semantic_tokens: [pid()],
+            transcript: TranscriptUpdate.t() | nil
           }
 
-  @doc "Builds a self-contained submission for a new renderer or an independent caller."
+  @doc "Builds a self-contained submission, including a transcript seed, for a new renderer or an independent caller."
   @spec full(Intent.t()) :: t()
-  def full(%Intent{} = intent) do
+  def full(%Intent{} = intent), do: full(intent, seed(intent))
+
+  @doc "Builds a self-contained highlight submission carrying an explicit transcript update."
+  @spec full(Intent.t(), TranscriptUpdate.t() | nil) :: t()
+  def full(%Intent{} = intent, transcript) do
     %__MODULE__{
-      intent: Intent.with_highlight_payload(intent, %{}, %{}),
+      intent: pack(intent),
       mode: :full,
       highlights: intent.frame.highlighting.highlights,
       semantic_tokens: intent.frame.semantic_tokens,
       removed_highlights: [],
-      removed_semantic_tokens: []
+      removed_semantic_tokens: [],
+      transcript: transcript
     }
   end
 
   @doc "Builds a delta against the same renderer process's last submitted source revisions."
-  @spec delta(Intent.t(), revisions(), revisions(), revisions()) :: t()
-  def delta(%Intent{} = intent, previous_highlights, previous_semantics, semantic_revisions) do
+  @spec delta(Intent.t(), revisions(), revisions(), revisions(), TranscriptUpdate.t() | nil) ::
+          t()
+  def delta(
+        %Intent{} = intent,
+        previous_highlights,
+        previous_semantics,
+        semantic_revisions,
+        transcript
+      ) do
     highlight_revisions = intent.frame.highlighting.revisions
 
     %__MODULE__{
-      intent: Intent.with_highlight_payload(intent, %{}, %{}),
+      intent: pack(intent),
+      transcript: transcript,
       mode: :delta,
       highlights:
         changed_values(
@@ -64,6 +84,25 @@ defmodule MingaEditor.Renderer.Submission do
       removed_highlights: removed_buffers(previous_highlights, highlight_revisions),
       removed_semantic_tokens: removed_buffers(previous_semantics, semantic_revisions)
     }
+  end
+
+  @doc "Returns the transcript update the renderer must admit before scheduling this frame."
+  @spec transcript(t()) :: TranscriptUpdate.t() | nil
+  def transcript(%__MODULE__{transcript: transcript}), do: transcript
+
+  @spec pack(Intent.t()) :: Intent.t()
+  defp pack(intent) do
+    intent
+    |> Intent.with_highlight_payload(%{}, %{})
+    |> Intent.with_agent_transcript(nil)
+  end
+
+  @spec seed(Intent.t()) :: TranscriptUpdate.t() | nil
+  defp seed(%Intent{workspace: workspace}) do
+    case WorkspaceIntent.transcript_source(workspace) do
+      %TranscriptProjection{} = projection -> TranscriptUpdate.seed(projection, 0)
+      nil -> nil
+    end
   end
 
   @doc "Installs the update and restores the exact full intent before frame scheduling."

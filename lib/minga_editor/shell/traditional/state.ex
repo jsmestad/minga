@@ -70,10 +70,16 @@ defmodule MingaEditor.Shell.Traditional.State do
 
   @doc "Returns presentation state safe to retain outside the input owner."
   @spec render_snapshot(t()) :: t()
-  def render_snapshot(%__MODULE__{modal: modal} = state) do
-    case ModalOverlay.render_snapshot(modal) do
-      ^modal -> state
-      snapshot -> %{state | modal: snapshot}
+  def render_snapshot(%__MODULE__{modal: modal, tab_bar: tab_bar} = state) do
+    state =
+      case ModalOverlay.render_snapshot(modal) do
+        ^modal -> state
+        snapshot -> %{state | modal: snapshot}
+      end
+
+    case tab_bar && TabBar.render_snapshot(tab_bar) do
+      ^tab_bar -> state
+      snapshot -> %{state | tab_bar: snapshot}
     end
   end
 

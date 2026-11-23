@@ -196,6 +196,15 @@ defmodule MingaEditor.Agent.UIState.Panel do
     %{panel | model_name: model, provider_label: nil}
   end
 
+  @doc "Returns a renderer-boundary copy without the retained transcript display."
+  @spec render_snapshot(t()) :: t()
+  def render_snapshot(%__MODULE__{transcript: projection} = panel) do
+    case TranscriptProjection.render_snapshot(projection) do
+      ^projection -> panel
+      snapshot -> %{panel | transcript: snapshot}
+    end
+  end
+
   @doc "Installs the new source and its remapped reading position together."
   @spec install_transcript(t(), TranscriptProjection.t(), :keep | :follow | non_neg_integer()) ::
           t()

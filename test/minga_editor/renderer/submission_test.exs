@@ -48,12 +48,15 @@ defmodule MingaEditor.Renderer.SubmissionTest do
   } do
     intent = Intent.from_editor_state(editor)
     {render, first} = submit(render, editor)
-    {renderer, restored} = RendererState.receive_submission(RendererState.new([]), first)
-    assert restored == intent
+
+    {renderer, restored, _admission} =
+      RendererState.receive_submission(RendererState.new([]), first)
+
+    assert without_transcript(restored) == without_transcript(intent)
 
     {_render, unchanged} = submit(render, editor)
-    {next, restored} = RendererState.receive_submission(renderer, unchanged)
-    assert restored == intent
+    {next, restored, _admission} = RendererState.receive_submission(renderer, unchanged)
+    assert without_transcript(restored) == without_transcript(intent)
     assert next.highlights == renderer.highlights
     assert next.semantic_tokens == renderer.semantic_tokens
     assert :erts_debug.flat_size(unchanged) < :erts_debug.flat_size(first)
@@ -104,7 +107,7 @@ defmodule MingaEditor.Renderer.SubmissionTest do
     render: render
   } do
     {render, first} = submit(render, editor)
-    {receiver, _} = RendererState.receive_submission(RendererState.new([]), first)
+    {receiver, _, _admission} = RendererState.receive_submission(RendererState.new([]), first)
     correlation = EventCorrelation.new(make_ref(), 1)
 
     changes = [
@@ -121,7 +124,7 @@ defmodule MingaEditor.Renderer.SubmissionTest do
     for changed <- changes do
       updated = put_highlight(editor, buffer, changed)
       {_render, submission} = submit(render, updated)
-      {_receiver, restored} = RendererState.receive_submission(receiver, submission)
+      {_receiver, restored, _admission} = RendererState.receive_submission(receiver, submission)
       assert restored.frame.highlighting.highlights[buffer] == changed
       assert restored.frame.semantic_tokens == editor.lsp.semantic_tokens
     end
@@ -133,7 +136,7 @@ defmodule MingaEditor.Renderer.SubmissionTest do
     render: render
   } do
     {render, first} = submit(render, editor)
-    {receiver, _} = RendererState.receive_submission(RendererState.new([]), first)
+    {receiver, _, _admission} = RendererState.receive_submission(RendererState.new([]), first)
 
     updated = %{
       editor
@@ -144,13 +147,13 @@ defmodule MingaEditor.Renderer.SubmissionTest do
     }
 
     {render, change} = submit(render, updated)
-    {receiver, restored} = RendererState.receive_submission(receiver, change)
+    {receiver, restored, _admission} = RendererState.receive_submission(receiver, change)
     assert restored.frame.semantic_tokens == updated.lsp.semantic_tokens
     assert restored.frame.highlighting == editor.parser.highlighting
 
     cleared = %{updated | lsp: LSP.clear_semantic_tokens(updated.lsp, buffer)}
     {_render, removal} = submit(render, cleared)
-    {receiver, restored} = RendererState.receive_submission(receiver, removal)
+    {receiver, restored, _admission} = RendererState.receive_submission(receiver, removal)
     assert receiver.semantic_tokens == %{}
     assert restored.frame.semantic_tokens == %{}
     assert restored.frame.highlighting == editor.parser.highlighting
@@ -162,7 +165,10 @@ defmodule MingaEditor.Renderer.SubmissionTest do
     render: render
   } do
     {render, first} = submit(render, editor)
-    {receiver, original} = RendererState.receive_submission(RendererState.new([]), first)
+
+    {receiver, original, _admission} =
+      RendererState.receive_submission(RendererState.new([]), first)
+
     current = FrameAttempt.new(original, 1, 0)
     receiver = RendererState.schedule_frame(receiver, current, make_ref())
 
@@ -177,7 +183,7 @@ defmodule MingaEditor.Renderer.SubmissionTest do
     }
 
     {_render, removal} = submit(render, closed)
-    {receiver, restored} = RendererState.receive_submission(receiver, removal)
+    {receiver, restored, _admission} = RendererState.receive_submission(receiver, removal)
     assert receiver.highlights == %{}
     assert receiver.semantic_tokens == %{}
     assert restored.frame.highlighting.highlights == %{}
@@ -197,9 +203,12 @@ defmodule MingaEditor.Renderer.SubmissionTest do
 
     replacement = spawn(fn -> :ok end)
     {next, full} = render |> Render.connect_renderer(replacement) |> submit(editor)
-    {receiver, restored} = RendererState.receive_submission(RendererState.new([]), full)
+
+    {receiver, restored, _admission} =
+      RendererState.receive_submission(RendererState.new([]), full)
+
     assert next.renderer == replacement
-    assert restored == Intent.from_editor_state(editor)
+    assert without_transcript(restored) == without_transcript(Intent.from_editor_state(editor))
     assert receiver.highlights == editor.parser.highlighting.highlights
   end
 
@@ -208,11 +217,11 @@ defmodule MingaEditor.Renderer.SubmissionTest do
     render: render
   } do
     {render, first} = submit(render, editor)
-    {receiver, _} = RendererState.receive_submission(RendererState.new([]), first)
+    {receiver, _, _admission} = RendererState.receive_submission(RendererState.new([]), first)
     receiver = RendererState.reset_frontend(receiver, 2)
     {_render, unchanged} = submit(render, editor)
-    {_receiver, restored} = RendererState.receive_submission(receiver, unchanged)
-    assert restored == Intent.from_editor_state(editor)
+    {_receiver, restored, _admission} = RendererState.receive_submission(receiver, unchanged)
+    assert without_transcript(restored) == without_transcript(Intent.from_editor_state(editor))
   end
 
   test "syntax overrides and frame-local face overrides still travel on unchanged spans", %{
@@ -221,7 +230,7 @@ defmodule MingaEditor.Renderer.SubmissionTest do
     render: render
   } do
     {render, first} = submit(render, editor)
-    {receiver, _} = RendererState.receive_submission(RendererState.new([]), first)
+    {receiver, _, _admission} = RendererState.receive_submission(RendererState.new([]), first)
     syntax = %{"keyword" => [fg: 0x123456]}
 
     updated = %{
@@ -240,8 +249,8 @@ defmodule MingaEditor.Renderer.SubmissionTest do
     {_render, delta} =
       Render.prepare_submission(render, intent, updated.lsp.semantic_token_revisions)
 
-    {_receiver, restored} = RendererState.receive_submission(receiver, delta)
-    assert restored == intent
+    {_receiver, restored, _admission} = RendererState.receive_submission(receiver, delta)
+    assert without_transcript(restored) == without_transcript(intent)
   end
 
   test "a coalesced update survives while the acknowledged frame retains its original highlights",
@@ -484,4 +493,7 @@ defmodule MingaEditor.Renderer.SubmissionTest do
           )
     }
   end
+
+  # The packed intent carries the Editor's transcript source; the restored intent carries the admitted resident root.
+  defp without_transcript(intent), do: Intent.with_agent_transcript(intent, nil)
 end

@@ -2261,7 +2261,9 @@ defmodule MingaEditor.Renderer.ServerTest do
       search: %MingaEditor.State.Search{},
       last_search_pattern: nil,
       keymap_scope: :editor,
-      launchpad: nil
+      launchpad: nil,
+      agent_transcript: nil,
+      agent_transcript_lines: 0
     }
   end
 

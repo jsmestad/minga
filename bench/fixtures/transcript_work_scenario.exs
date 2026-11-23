@@ -34,6 +34,8 @@ defmodule Minga.Bench.TranscriptWorkScenario do
         with_editor.(opts, &scenario(&1, entries, open_agent))
       end)
 
+    assert_transfer_independent_of_history(results)
+
     path =
       Path.join(System.tmp_dir!(), "minga-transcript-work-#{System.os_time(:microsecond)}.json")
 
@@ -111,11 +113,21 @@ defmodule Minga.Bench.TranscriptWorkScenario do
           emit(request, %Event.ThinkingDelta{delta: "Appended with the whole history pinned"})
         end)
 
+      composer =
+        TranscriptWorkProbe.measure(
+          ctx,
+          session,
+          fn -> send(ctx.editor, {:minga_input, {:key_press, ?i, 0, 1}}) end,
+          :frame
+        )
+
       assert_work(text, entries, :content)
       assert_work(tool, entries, :content)
       assert_work(collapse, entries, :collapse)
       assert_work(pin, entries, :pin)
       assert_work(append, entries, :append)
+      Enum.each([text, tool, collapse, pin, append], &assert_resident_work(&1, entries))
+      assert_composer_work(composer, entries)
 
       expected = entries + 1
 
@@ -131,7 +143,8 @@ defmodule Minga.Bench.TranscriptWorkScenario do
           middle_tool_result: tool,
           collapse: collapse,
           pin: pin,
-          fully_pinned_append: append
+          fully_pinned_append: append,
+          composer_only: composer
         }
       }
     after
@@ -173,6 +186,45 @@ defmodule Minga.Bench.TranscriptWorkScenario do
              actual == expected do
       raise "#{operation} exceeded the transcript work contract at #{entries} entries: #{inspect(work)} (node bound #{bound})"
     end
+  end
+
+  # Renderer gate: one changed entry is transferred, derived and sized once;
+  # unchanged bodies and footer bodies are not. Index node visits and copies stay
+  # within 4 × (K+B+1) × (H+1) for K changed entries and B cap evictions plus
+  # admissions.
+  defp assert_resident_work(work, entries) do
+    k = work.changed_entries
+    b = work.cap_evictions + work.cap_admissions
+    bound = 4 * (k + b + 1) * (work.index_height + 1)
+
+    unless work.transferred_entries <= 1 and work.builder_derivations <= 1 and
+             work.builder_sizings == work.builder_derivations and work.footer_sizings == 0 and
+             work.decoration_derivations == 0 and work.index_visits <= bound and
+             work.index_copies <= bound and :seed not in work.update_kinds do
+      raise "resident transcript work exceeded the contract at #{entries} entries: #{inspect(work)} (node bound #{bound})"
+    end
+  end
+
+  defp assert_composer_work(work, entries) do
+    unless work.transferred_entries == 0 and work.builder_derivations == 0 and
+             work.builder_sizings == 0 and work.index_visits == 0 and work.index_copies == 0 and
+             Enum.all?(work.update_kinds, &(&1 == :unchanged)) do
+      raise "a composer-only frame did transcript work at #{entries} entries: #{inspect(work)}"
+    end
+  end
+
+  # Matched one-entry updates with identical bodies must not transfer more
+  # flat BEAM words as retained history grows.
+  defp assert_transfer_independent_of_history([small, large]) do
+    for {operation, small_work} <- small.operations do
+      large_work = Map.fetch!(large.operations, operation)
+
+      if large_work.bearing_words > small_work.bearing_words do
+        raise "#{operation} transferred #{large_work.bearing_words} words at #{large.retained_entries} entries but #{small_work.bearing_words} at #{small.retained_entries}"
+      end
+    end
+
+    :ok
   end
 
   @spec seed_request(pid(), pos_integer()) :: active_request()
@@ -221,7 +273,8 @@ defmodule Minga.Bench.TranscriptWorkScenario do
 
   @spec emit_history_entry(active_request(), non_neg_integer(), pos_integer()) :: :ok
   defp emit_history_entry(request, index, end_index) do
-    delta = "Retained #{index}"
+    # Fixed-width text keeps matched updates byte-identical at every history size.
+    delta = "Retained #{String.pad_leading(Integer.to_string(index), 5, "0")}"
 
     case rem(end_index - index, 2) do
       1 -> emit(request, %Event.TextDelta{delta: delta})

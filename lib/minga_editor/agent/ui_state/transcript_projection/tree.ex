@@ -102,6 +102,66 @@ defmodule MingaEditor.Agent.UIState.TranscriptProjection.Tree do
     %{tree | root: map_range(root, capacity, from, to, selection, map)}
   end
 
+  @doc """
+  Lists, in ascending order, the ordinals whose leaves differ between two trees of one generation.
+
+  Shared subtrees compare by identity first, so the walk visits only the copied paths of changed or appended leaves.
+  """
+  @spec changed_ordinals(t(), t()) :: [non_neg_integer()]
+  def changed_ordinals(%__MODULE__{root: root, capacity: capacity}, %__MODULE__{
+        root: root,
+        capacity: capacity
+      }),
+      do: []
+
+  def changed_ordinals(%__MODULE__{root: old, capacity: old_capacity}, %__MODULE__{
+        root: new,
+        capacity: new_capacity
+      }) do
+    old
+    |> changed(old_capacity, new, new_capacity, 0, [])
+    |> Enum.reverse()
+  end
+
+  defp changed(old, old_capacity, new, new_capacity, offset, acc)
+       when old_capacity < new_capacity do
+    half = div(new_capacity, 2)
+    {left, right} = children(new)
+    acc = changed(old, old_capacity, left, half, offset, acc)
+    leaf_ordinals(right, half, offset + half, acc)
+  end
+
+  defp changed(old, old_capacity, new, new_capacity, offset, acc)
+       when old_capacity > new_capacity do
+    half = div(old_capacity, 2)
+    {left, right} = children(old)
+    acc = changed(left, half, new, new_capacity, offset, acc)
+    leaf_ordinals(right, half, offset + half, acc)
+  end
+
+  defp changed(same, _capacity, same, _same_capacity, _offset, acc), do: acc
+  defp changed(_old, 1, _new, 1, offset, acc), do: [offset | acc]
+
+  defp changed(old, capacity, new, capacity, offset, acc) do
+    half = div(capacity, 2)
+    {old_left, old_right} = children(old)
+    {new_left, new_right} = children(new)
+    acc = changed(old_left, half, new_left, half, offset, acc)
+    changed(old_right, half, new_right, half, offset + half, acc)
+  end
+
+  defp children(nil), do: {nil, nil}
+  defp children({:branch, left, right, _summary}), do: {left, right}
+
+  defp leaf_ordinals(nil, _capacity, _offset, acc), do: acc
+  defp leaf_ordinals(%Row{}, 1, offset, acc), do: [offset | acc]
+
+  defp leaf_ordinals({:branch, left, right, _summary}, capacity, offset, acc) do
+    half = div(capacity, 2)
+    acc = leaf_ordinals(left, half, offset, acc)
+    leaf_ordinals(right, half, offset + half, acc)
+  end
+
   defp capacity_for(count, capacity) when count <= capacity, do: capacity
   defp capacity_for(count, capacity), do: capacity_for(count, capacity * 2)
 
@@ -213,13 +273,15 @@ defmodule MingaEditor.Agent.UIState.TranscriptProjection.Tree do
 
   defp map_selected(%Row{} = row, 1, _from, _to, _selection, map), do: map.(row)
 
-  defp map_selected({:branch, left, right, _summary}, capacity, from, to, selection, map) do
+  defp map_selected({:branch, left, right, _summary} = node, capacity, from, to, selection, map) do
     half = div(capacity, 2)
+    mapped_left = map_range(left, half, from, to, selection, map)
+    mapped_right = map_range(right, half, from - half, to - half, selection, map)
 
-    branch(
-      map_range(left, half, from, to, selection, map),
-      map_range(right, half, from - half, to - half, selection, map)
-    )
+    # Keep an unchanged subtree's identity so presentation changes stay local.
+    if mapped_left === left and mapped_right === right,
+      do: node,
+      else: branch(mapped_left, mapped_right)
   end
 
   defp included?(nil, _capacity, _from, _to, _selection), do: false
