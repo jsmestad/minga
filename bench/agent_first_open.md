@@ -4,6 +4,75 @@ Receipt for [#3610](https://github.com/jsmestad/minga/issues/3610). In the shipp
 
 The decision is Gate B, a non-blocking start request, with the composer shown before the catalog load finishes and the Ingest subscription moved into `Session.init/1`. See [Decision](#decision).
 
+## After #3934
+
+The fix ([#3934](https://github.com/jsmestad/minga/issues/3934), with [#3641](https://github.com/jsmestad/minga/issues/3641)) meets the 50 ms target. A cold `SPC a n` or `SPC a a` right after launch now writes the frame with the Agent tab and composer, in the starting state, 11 to 15 ms after the final key at p50 and 22 to 24 ms at p95. The open command spends under 2 ms in the Editor. Send becomes ready when the provider attaches: about 105 to 160 ms after the key once the launch preload has finished, and 2.4 s when the open arrives while the preload is still running.
+
+Build: commit `3692c0429614ab6b2c732491c9a14445d3aba4f8` (this branch before it was rebased onto #3937, which changed only the macOS sidebar layout; the BEAM code matches `a0e6b29b0`), assembled with `MIX_ENV=prod mix app.assemble`, main binary SHA-256 `29718541dc905b468241db6f67d760f0b6f384dc5c1bee4a01953bd239845549`. Same machine, OS and fixture as below: Apple M1, 16 GB, macOS 27.2 (26B123). 20 launches per first-open cell and 40 later opens per command, no failed launches. Raw samples are in `bench/agent_first_open/after/`; `scripts/agent_first_open/summarize.py bench/agent_first_open/after/matrix` reproduces the tables.
+
+### Before and after
+
+Composer frame written, ms from the final key-down, p50 / p95:
+
+| Command | Condition | Before (#3610), receipt attribution | After, receipt attribution | After, corrected attribution |
+|---|---|---|---|---|
+| SPC a n | immediate | 3,045.4 / 3,586.7 | 29.1 / 41.3 | 12.6 / 23.8 |
+| SPC a n | first open 10 s after launch | 3,024.5 / 6,806.0 | 29.0 / 38.4 | 14.3 / 20.7 |
+| SPC a n | later open, same run | 210.3 / 290.7 | 24.8 / 37.3 | 13.4 / 19.9 |
+| SPC a a | immediate | 3,049.1 / 4,147.2 | 24.9 / 38.9 | 11.1 / 21.6 |
+| SPC a a | first open 10 s after launch | 3,051.1 / 4,499.6 | 25.8 / 36.6 | 12.1 / 20.4 |
+| SPC a a | later open, same run (reopen) | 27.6 / 39.5 | 29.6 / 37.0 | 12.9 / 20.1 |
+
+**Attribution fix.** The #3610 driver took the first port write after the composer frame's render span *ended*. The renderer writes a frame inside its own span, so that was the next frame's write, often 10 to 20 ms later. `measure.py` now takes the first write after the render *began*, which is the composer frame's own write. It still records the old attribution (`composer_emit_receipt_attribution_ms`) so the before column compares like for like; the before raw samples cannot be recomputed because their traces were not committed. The target holds under both.
+
+Other endpoints, p50 / p95:
+
+| Command | Condition | Composer presented (app), before → after | Send-ready frame written, before → after |
+|---|---|---|---|
+| SPC a n | immediate | 3,189.9 / 3,752.8 → 190.5 / 214.1 (n=17) | 3,045.4 / 3,586.7 → 2,418.4 / 2,450.7 |
+| SPC a n | first open 10 s after launch | 3,157.7 / 6,987.0 → 194.9 / 215.6 | 3,024.5 / 6,806.0 → 152.1 / 164.9 |
+| SPC a n | later open, same run | 305.8 / 422.5 → 126.1 / 160.1 | 210.3 / 290.7 → 105.8 / 116.3 |
+| SPC a a | immediate | 3,187.4 / 4,334.6 → 190.5 / 214.4 (n=16) | 3,049.1 / 4,147.2 → 2,417.8 / 2,466.8 |
+| SPC a a | first open 10 s after launch | 3,181.4 / 4,672.4 → 182.4 / 199.6 | 3,051.1 / 4,499.6 → 157.6 / 167.7 |
+| SPC a a | later open, same run (reopen) | 84.2 / 99.3 → 86.3 / 96.3 | 27.6 / 39.5 → 12.9 / 20.1 |
+
+Seven immediate opens have no presented time because the app reported no presentation for that frame sequence within the driver's 1 s window; their BEAM endpoints are complete. Send-ready is BEAM-side: the first frame written after the provider attached. The app disables Send until the conversation is live.
+
+### Where the time goes now
+
+| Stage, p50 / p95 ms | SPC a n immediate | SPC a n 10 s | SPC a n later | SPC a a immediate | SPC a a 10 s |
+|---|---|---|---|---|---|
+| Open command in the Editor | 0.4 / 1.5 | 0.3 / 0.4 | 0.4 / 0.5 | 0.5 / 0.7 | 0.2 / 0.4 |
+| `tab_switch` | 0.2 / 1.1 | 0.2 / 0.2 | 0.2 / 0.3 | 0.2 / 0.3 | 0.1 / 0.2 |
+| `ensure_configured_model` | 0.0 / 0.0 | 0.0 / 0.0 | 0.0 / 0.0 | 0.0 / 0.0 | 0.0 / 0.0 |
+| Key post to BEAM dispatch | 6.0 / 17.3 | 9.4 / 16.7 | 10.3 / 16.3 | 5.2 / 15.6 | 7.4 / 15.5 |
+| `session_manager_start` (manager) | 83.3 / 86.9 | 105.5 / 108.3 | 57.0 / 58.8 | 85.6 / 90.7 | 105.8 / 112.2 |
+| `session_model_resolve` (session) | 76.7 / 79.7 | 97.8 / 101.0 | 51.3 / 52.8 | 76.9 / 82.4 | 97.1 / 100.6 |
+| `session_subscribe` (session init) | 0.1 / 0.1 | 0.1 / 0.1 | 0.0 / 0.0 | 0.0 / 0.1 | 0.1 / 0.1 |
+| `provider_start` (session) | 27.6 / 28.5 | 28.3 / 29.4 | 30.7 / 32.6 | 27.4 / 28.6 | 28.7 / 29.9 |
+| `session_start_hook_config` (hook task) | 0.0 / 0.0 | 0.0 / 0.0 | 0.0 / 0.0 | 0.0 / 0.0 | 0.0 / 0.1 |
+| App: composer presented minus written | 176.6 / 189.4 | 177.2 / 194.9 | 112.3 / 146.2 | 176.4 / 193.3 | 169.3 / 177.6 |
+
+- **Nothing on the first-frame path waits for the session.** The open command installs the tab and composer and sends one `:gen_server.send_request/2`; `tab_switch` is 0.2 ms on a first open (was 11 to 14 ms) because `MingaEditor.LaunchWarmup` loads the editor's modules in the background after the first frame (0.35 to 0.47 s, low priority). In interactive release mode the first open used to load and JIT-compile about 36 modules inside the Editor.
+- **The catalog loads once, before the user asks.** `MingaAgent.ModelCatalog` starts the load when the first frame is dispatched. An open that arrives during it joins that load instead of starting a second one; two concurrent loads had serialized on `llm_db`'s `:global` lock, whose retry backoff added 1.2 to 2.6 s. `catalog_load` does not appear in the open windows above because it started before the final key.
+- **Session start no longer blocks the Editor or Ingest**, and Ingest attaches inside `Session.init/1` (`session_subscribe` 0.1 ms, in the session). The Editor makes no call into the new session.
+- **Remaining cost, off the Editor:** `session_model_resolve` is still 51 to 98 ms. The cached catalog index halved it in a dev VM (28 to 14 ms per resolve), but resolving the default model still builds candidate intents over the whole catalog. It runs inside `SessionManager.start_session`, so it delays send-ready and other manager callers, not the Editor. A later change could cache the resolved default per catalog epoch and credential snapshot.
+- **The app still takes 110 to 190 ms to present the first Agent frame** (#3935, out of scope here).
+
+### SessionStart hook that runs a shell command
+
+Same `sleep 0.5` hook as below, `SPC a n immediate`, 5 launches with 4 later opens each (raw samples in `bench/agent_first_open/after/hook/`). The hook still runs about 570 ms (p50 570.3, max 587.8, n=25), now in its own task:
+
+| Measure | Before: cold p50 / p95 (n=5) | Before: later p50 / p95 (n=20) | After: cold p50 / p95 (n=5) | After: later p50 / p95 (n=20) |
+|---|---|---|---|---|
+| Composer frame written | 3,870.2 / 3,973.1 | 760.6 / 792.5 | 15.0 / 22.2 | 13.1 / 18.3 |
+| Send-ready frame written | | | 2,431.0 / 2,472.9 | 103.5 / 113.7 |
+| Editor blocked (open command) | 861.6 / 869.8 | 744.2 / 771.8 | 0.3 to 0.6 | 0.2 to 0.6 |
+
+The hook no longer delays the Editor, Ingest, or provider readiness.
+
+The sections below are the original #3610 receipt, unchanged.
+
 ## What was measured
 
 Build: commit `587e3df5aa3643a634647d8f04a2a6e1cf4da32a` (this branch: `main` at `2a40ec83e` plus the telemetry spans below), assembled with `MIX_ENV=prod mix app.assemble` (Release Swift build, prod BEAM release). Main binary SHA-256 `7a83dfb832554fa167d5dfe974cf9a3cfbfe75dfe65c71d3328c2443ebede767`. Machine: Apple M1 (4 performance and 4 efficiency cores), 16 GB, macOS 27.2 (26B123), Xcode 27.2. Other processes were running (several Expert language servers), as on a normal workstation.

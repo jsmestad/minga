@@ -32,9 +32,11 @@ defmodule MingaAgentOpenTrace do
             [:minga, :input, :dispatch, :stop],
             [:minga, :command, :execute, :stop],
             [:minga, :render, :pipeline, :stop],
-            [:minga, :port, :write, :stop]
+            [:minga, :port, :write, :stop],
+            [:minga, :editor, :code_warmup, :stop]
           ] ++ Enum.map(@agent_spans, &[:minga, :agent, &1, :stop])
 
+  @spec start(Path.t()) :: :ok
   def start(path) do
     writer = spawn(fn -> write_loop(File.open!(path, [:append, :binary])) end)
     :telemetry.attach_many("minga-agent-open-trace", @events, &__MODULE__.handle/4, writer)
@@ -42,6 +44,7 @@ defmodule MingaAgentOpenTrace do
     :ok
   end
 
+  @spec handle([atom()], map(), map(), pid()) :: term()
   def handle(event, measurements, metadata, writer) do
     at = :os.system_time(:microsecond)
 

@@ -57,10 +57,6 @@ defmodule MingaEditor.Agent.SessionStart do
   ]
   defstruct @enforce_keys
 
-  @doc "Returns how long a start may take before its tab shows a failure."
-  @spec timeout_ms() :: pos_integer()
-  def timeout_ms, do: @timeout_ms
-
   @doc """
   Sends the start request for the agent workspace `workspace_id` and returns at once.
 
