@@ -403,6 +403,125 @@ struct CommandDispatcherRoutingTests {
         #expect(gui.tabBarState.activeIndex == 0)
     }
 
+    private func documentTab(id: UInt32, active: Bool, dirty: Bool, agent: Bool = false) -> Wire.TabEntry {
+        Wire.TabEntry(id: id, groupId: 0, isActive: active, isDirty: dirty, isAgent: agent,
+                      hasAttention: false, agentStatus: 0, isPinned: false, tintColorRGB: 0, icon: "", label: "tab\(id)")
+    }
+
+    @MainActor
+    private func documentEditedValues(_ effects: [ApplicationCommitEffect]) -> [Bool] {
+        var values: [Bool] = []
+        for effect in effects {
+            if case .documentEditedChanged(let edited) = effect { values.append(edited) }
+        }
+        return values
+    }
+
+    @Test("an unsaved active file tab marks the window edited, once, and saving clears it")
+    @MainActor func documentEditedFollowsActiveFileTab() {
+        var effects: [ApplicationCommitEffect] = []
+        let (dispatcher, _) = makeDispatcher { effects.append($0) }
+
+        dispatcher.applyForTesting(.guiTabBar(activeIndex: 0, tabs: [documentTab(id: 1, active: true, dirty: false)]))
+        #expect(documentEditedValues(effects) == [])
+
+        dispatcher.applyForTesting(.guiTabBar(activeIndex: 0, tabs: [documentTab(id: 1, active: true, dirty: true)]))
+        dispatcher.applyForTesting(.guiTabBar(activeIndex: 0, tabs: [documentTab(id: 1, active: true, dirty: true)]))
+        #expect(documentEditedValues(effects) == [true])
+
+        dispatcher.applyForTesting(.guiTabBar(activeIndex: 0, tabs: [documentTab(id: 1, active: true, dirty: false)]))
+        #expect(documentEditedValues(effects) == [true, false])
+    }
+
+    @Test("switching tabs follows the active tab's unsaved state")
+    @MainActor func documentEditedFollowsTabSwitch() {
+        var effects: [ApplicationCommitEffect] = []
+        let (dispatcher, _) = makeDispatcher { effects.append($0) }
+        let dirtyActive: [Wire.TabEntry] = [documentTab(id: 1, active: true, dirty: true), documentTab(id: 2, active: false, dirty: false)]
+        let cleanActive: [Wire.TabEntry] = [documentTab(id: 1, active: false, dirty: true), documentTab(id: 2, active: true, dirty: false)]
+
+        dispatcher.applyForTesting(.guiTabBar(activeIndex: 0, tabs: dirtyActive))
+        dispatcher.applyForTesting(.guiTabBar(activeIndex: 1, tabs: cleanActive))
+        dispatcher.applyForTesting(.guiTabBar(activeIndex: 0, tabs: dirtyActive))
+
+        #expect(documentEditedValues(effects) == [true, false, true])
+    }
+
+    @Test("agent tabs and an empty tab bar never mark the window edited")
+    @MainActor func documentEditedIgnoresAgentAndEmptyTabBar() {
+        var effects: [ApplicationCommitEffect] = []
+        let (dispatcher, gui) = makeDispatcher { effects.append($0) }
+        let dirtyFile: [Wire.TabEntry] = [documentTab(id: 1, active: true, dirty: true)]
+        let activeAgent: [Wire.TabEntry] = [documentTab(id: 1, active: false, dirty: true), documentTab(id: 2, active: true, dirty: true, agent: true)]
+
+        dispatcher.applyForTesting(.guiTabBar(activeIndex: 1, tabs: activeAgent))
+        #expect(documentEditedValues(effects) == [])
+        #expect(gui.tabBarState.activeTabHasUnsavedChanges == false)
+
+        dispatcher.applyForTesting(.guiTabBar(activeIndex: 0, tabs: dirtyFile))
+        dispatcher.applyForTesting(.guiTabBar(activeIndex: 1, tabs: activeAgent))
+        dispatcher.applyForTesting(.guiTabBar(activeIndex: 0, tabs: dirtyFile))
+        dispatcher.applyForTesting(.guiTabBar(activeIndex: 0, tabs: []))
+
+        #expect(documentEditedValues(effects) == [true, false, true, false])
+    }
+
+    @Test("canonical workspace tabs drive the unsaved indicator with one settled value per frame")
+    @MainActor func documentEditedUsesCanonicalWorkspaceTabs() {
+        var effects: [ApplicationCommitEffect] = []
+        let (dispatcher, gui) = makeDispatcher { effects.append($0) }
+        let workspace = Wire.WorkspaceEntry(
+            id: 7, kind: 0, status: 0, flags: 0, colorR: 0, colorG: 0, colorB: 0,
+            tabCount: 2, draftCount: 0, conflictCount: 0, runningBackgroundCount: 0, label: "Main", icon: ""
+        )
+        let dirtyFile = Wire.WorkspaceTabEntry(
+            id: 41, workspaceId: 7, kind: 0, flags: 0x0001, pathHash: 41, tintColorRGB: 0,
+            icon: "", label: "dirty.ex", path: "/tmp/dirty.ex"
+        )
+        let cleanFile = Wire.WorkspaceTabEntry(
+            id: 42, workspaceId: 7, kind: 0, flags: 0, pathHash: 42, tintColorRGB: 0,
+            icon: "", label: "clean.ex", path: "/tmp/clean.ex"
+        )
+        let visibleTabs: [Wire.WorkspaceTabEntry] = [dirtyFile, cleanFile]
+        // The compatibility tab list disagrees on purpose: the canonical workspace tabs are what the tab bar shows.
+        let compatibility: [Wire.TabEntry] = [documentTab(id: 41, active: true, dirty: false)]
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: compatibility))
+        dispatcher.dispatch(.guiWorkspaces(
+            version: 1, activeWorkspaceId: 7, mode: .editor, flags: [],
+            workspaces: [workspace], visibleTabs: visibleTabs
+        ))
+        dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
+
+        #expect(gui.tabBarState.displayTabs.first?.isDirty == true)
+        #expect(documentEditedValues(effects) == [true])
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 2, baseFrameSeq: 1, generation: 1))
+        dispatcher.dispatch(.guiTabBar(activeIndex: 1, tabs: compatibility))
+        dispatcher.dispatch(.guiWorkspaces(
+            version: 2, activeWorkspaceId: 7, mode: .editor, flags: [],
+            workspaces: [workspace], visibleTabs: visibleTabs
+        ))
+        dispatcher.dispatch(.commitFrame(frameSeq: 2, seq: 0))
+
+        #expect(documentEditedValues(effects) == [true, false])
+    }
+
+    @Test("a replacement connection clears the unsaved indicator and re-arms deduplication")
+    @MainActor func documentEditedResetsOnConnectionReplacement() {
+        var effects: [ApplicationCommitEffect] = []
+        let (dispatcher, _) = makeDispatcher { effects.append($0) }
+        let dirtyFile: [Wire.TabEntry] = [documentTab(id: 1, active: true, dirty: true)]
+
+        dispatcher.applyForTesting(.guiTabBar(activeIndex: 0, tabs: dirtyFile))
+        dispatcher.replaceConnection(with: 2)
+        dispatcher.applyForTesting(.guiTabBar(activeIndex: 0, tabs: dirtyFile))
+
+        #expect(documentEditedValues(effects) == [true, false, true])
+    }
+
     @Test("canonical chrome payloads keep compatibility mirrors in presentation parity")
     @MainActor func canonicalChromeCompatibilityParity() {
         let (dispatcher, gui) = makeDispatcher()
@@ -3809,6 +3928,7 @@ struct CommandDispatcherStagingTests {
             case .scrollPresentationReset: events.append("scroll")
             case .titleChanged: events.append("title")
             case .windowBackgroundChanged: events.append("background")
+            case .documentEditedChanged: events.append("document-edited")
             case .accessibilityModeChanged: events.append("mode")
             case .lineSpacingChanged: events.append("spacing")
             case .cursorAnimationChanged: events.append("cursor-animation")
