@@ -167,6 +167,7 @@ public struct AgentChatHeaderView: View {
         .buttonStyle(.plain)
         .help(command.help)
         .accessibilityLabel(command.accessibilityLabel)
+        .accessibilityHint(command.accessibilityHint)
     }
 
     private var overflowMenu: some View {
@@ -229,6 +230,14 @@ public struct AgentChatHeaderView: View {
             case .queuedInputs: "Inspect queued Agent inputs (SPC a J)"
             case .retainedHistory: "Read retained messages (SPC a H)"
             case .help: "Keyboard shortcuts (?)"
+            }
+        }
+
+        /// Extra VoiceOver context, kept identical across the full, icon and compact rows.
+        var accessibilityHint: String {
+            switch self {
+            case .help: "Shows keybinding cheatsheet"
+            case .checklist, .queuedInputs, .retainedHistory: ""
             }
         }
 
