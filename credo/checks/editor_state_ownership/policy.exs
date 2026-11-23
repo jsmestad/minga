@@ -14,7 +14,10 @@ defmodule Minga.Credo.EditorStateOwnership.Policy do
     :process_modules,
     :boundary_prefixes,
     :boundary_segments,
-    :value_modules
+    :value_modules,
+    :catalog_modules,
+    :catalog_functions,
+    :catalog_free_namespaces
   ]
   defstruct @enforce_keys
 
@@ -24,7 +27,10 @@ defmodule Minga.Credo.EditorStateOwnership.Policy do
           process_modules: MapSet.t(String.t()),
           boundary_prefixes: [String.t()],
           boundary_segments: MapSet.t(String.t()),
-          value_modules: MapSet.t(String.t())
+          value_modules: MapSet.t(String.t()),
+          catalog_modules: [String.t()],
+          catalog_functions: MapSet.t({String.t(), atom()}),
+          catalog_free_namespaces: [{String.t(), String.t()}]
         }
 
   @doc "Returns the declaration for an exact protected struct."
@@ -84,6 +90,26 @@ defmodule Minga.Credo.EditorStateOwnership.Policy do
   @spec pure_owner?(t(), String.t() | nil) :: boolean()
   def pure_owner?(%__MODULE__{}, nil), do: false
   def pure_owner?(%__MODULE__{pure_modules: modules}, module), do: MapSet.member?(modules, module)
+
+  @doc "Returns the reported ownership when a module must stay out of the model catalog."
+  @spec catalog_free_ownership(t(), String.t() | nil) :: Ownership.t() | nil
+  def catalog_free_ownership(%__MODULE__{}, nil), do: nil
+
+  def catalog_free_ownership(%__MODULE__{catalog_free_namespaces: namespaces} = policy, module) do
+    Enum.find_value(namespaces, fn {namespace, struct} ->
+      if module == namespace or String.starts_with?(module, namespace <> "."),
+        do: ownership_by_struct(policy, struct)
+    end)
+  end
+
+  @doc "Returns whether a call reads or resolves the model catalog."
+  @spec catalog_call?(t(), String.t(), atom()) :: boolean()
+  def catalog_call?(%__MODULE__{} = policy, module, function) do
+    MapSet.member?(policy.catalog_functions, {module, function}) or
+      Enum.any?(policy.catalog_modules, fn prefix ->
+        module == prefix or String.starts_with?(module, prefix <> ".")
+      end)
+  end
 
   @spec path_rank([atom()], [atom()]) :: {non_neg_integer(), non_neg_integer()} | nil
   defp path_rank(path, owned_path) do

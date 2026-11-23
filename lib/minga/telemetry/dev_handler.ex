@@ -30,7 +30,7 @@ defmodule Minga.Telemetry.DevHandler do
   | `[:minga, :agent, :transcript_sync]` | `:agent` | `[agent:transcript_sync] unchanged (0 entries read)` |
   | `[:minga, :agent, span, :stop]` for each Agent session-start span below | `:agent` | `[agent:session_subscribe] 85µs` |
 
-  The Agent session-start spans cover the stages of opening a local Agent session, in the Editor (`catalog_load` runs in an effect worker) and in the new session process: `catalog_load`, `tab_switch`, `start_agent_session`, `ensure_configured_model`, `project_view_overlay`, `session_manager_start`, `session_init`, `session_model_resolve`, `session_subscribe`, `provider_project_view_refresh`, `session_snapshot_read`, `provider_start`, `session_start_hooks`, and `session_start_hook_config`. `bench/agent_first_open.md` attributes the first-open wait to them.
+  The Agent session-start spans cover the stages of opening a local Agent session, in the Editor (`catalog_load` runs in a `MingaAgent.ModelCatalog` task, triggered by the launch preload or a cold start request), in `MingaAgent.SessionManager` (`session_manager_start`), in the new session process (`session_init`, `session_model_resolve`, `session_subscribe` for the initial subscribers, `provider_start`), and in the SessionStart hook task (`session_start_hooks`, `session_start_hook_config`): `catalog_load`, `tab_switch`, `start_agent_session`, `ensure_configured_model`, `project_view_overlay`, `session_manager_start`, `session_init`, `session_model_resolve`, `session_subscribe`, `provider_project_view_refresh`, `session_snapshot_read`, `provider_start`, `session_start_hooks`, and `session_start_hook_config`. `bench/agent_first_open.md` attributes the first-open wait to them.
   """
 
   @handler_id "minga-dev-handler"

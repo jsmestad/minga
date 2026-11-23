@@ -50,6 +50,8 @@ defmodule MingaEditor.Startup do
     :ok = EditPublication.request_recovery(state)
 
     state = AgentLifecycle.maybe_start_session(state)
+    :ok = MingaEditor.LaunchWarmup.start()
+    state = MingaEditor.Agent.CatalogStartup.preload(state)
 
     %{
       state

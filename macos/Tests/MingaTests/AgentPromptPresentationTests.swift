@@ -682,6 +682,22 @@ struct AgentPromptPresentationTests {
         #expect(try control.inspect().findAll(ViewType.Button.self).allSatisfy { try $0.isDisabled() })
     }
 
+    @Test("A starting session keeps the draft and disables Send until the conversation is live")
+    func startingControls() throws {
+        let state = AgentChatState(prompt: "typed while starting", promptMode: .insert, promptVisibleRows: 1)
+        var actions: [AgentPromptView.Action] = []
+        let control = AgentPromptActionButtons(state: state, sendAction: { actions.append($0) })
+            .environment(\.themeColors, ThemeColors())
+        state.update(visible: true, status: .idle, model: "", thinkingLevel: "", prompt: state.prompt, promptLineCount: 1, promptCursorLine: 0, promptCursorCol: 20, promptMode: .insert, promptVisibleRows: 1, promptCompletion: nil, promptPresentation: 7, lifecycle: .starting)
+        #expect(try control.inspect().findAll(ViewType.Button.self)[0].isDisabled())
+        #expect(state.prompt == "typed while starting")
+        state.update(visible: true, status: .idle, model: "", thinkingLevel: "", prompt: state.prompt, promptLineCount: 1, promptCursorLine: 0, promptCursorCol: 20, promptMode: .insert, promptVisibleRows: 1, promptCompletion: nil, promptPresentation: 7, lifecycle: .conversation)
+        let send = try control.inspect().findAll(ViewType.Button.self)[0]
+        #expect(!send.isDisabled())
+        try send.tap()
+        #expect(actions == [.submit])
+    }
+
     @Test("Awaiting approval retains enabled Stop and draft in every prompt mode",
           arguments: [EditorMode.insert, .normal, .visual, .operatorPending, .replace])
     func waitingControls(mode: EditorMode) throws {

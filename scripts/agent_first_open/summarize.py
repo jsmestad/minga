@@ -12,6 +12,8 @@ from pathlib import Path
 import sys
 
 ENDPOINTS = ("composer_emit_ms", "composer_presented_ms", "send_ready_ms")
+# The #3610 receipt's attribution (first write after the render span ended).
+RECEIPT_ENDPOINT = "composer_emit_receipt_attribution_ms"
 CONDITIONS = ("immediate", "later-first", "later-same-run")
 STAGES = (
     "catalog_load",
@@ -62,6 +64,12 @@ def provider_wait(sample):
     return overlap(call["start_ms"], call["start_ms"] + call["duration_ms"], start, end)
 
 
+def open_command(sample):
+    """Milliseconds the Editor spent in the open key's command (the Editor-blocked time since #3934)."""
+    spans = [span for name, spans in sample["stages"].items() if name.startswith("command:") for span in spans]
+    return sum(span["duration_ms"] for span in spans) if spans else None
+
+
 def main():
     samples = []
     for directory in sys.argv[1:]:
@@ -84,6 +92,16 @@ def main():
                 values.append(f"{fmt(rank(v, 50))} / {fmt(rank(v, 95))}" + ("" if len(v) == len(cell) else f" (n={len(v)})"))
             print(f"| SPC a {command} | {condition} | {len(cell)} | " + " | ".join(values) + " |")
 
+    if any(RECEIPT_ENDPOINT in s for s in opens):
+        print("\n## Composer frame written, #3610 receipt attribution (ms)\n")
+        print("| Command | Condition | n | p50 / p95 |")
+        print("|---|---|---:|---|")
+        for command in ("n", "a"):
+            for condition in CONDITIONS:
+                v = [s[RECEIPT_ENDPOINT] for s in opens if s["command"] == command and s["condition"] == condition and RECEIPT_ENDPOINT in s]
+                if v:
+                    print(f"| SPC a {command} | {condition} | {len(v)} | {fmt(rank(v, 50))} / {fmt(rank(v, 95))} |")
+
     print("\n## Stages (ms, p50 / p95 per open)\n")
     header = [f"SPC a {c} {cond}" for c in ("n", "a") for cond in CONDITIONS]
     print("| Stage | " + " | ".join(header) + " |")
@@ -92,6 +110,7 @@ def main():
         "frontend: presented minus written": lambda s: (s["composer_presented_ms"] - s["composer_emit_ms"]) if s.get("composer_presented_ms") is not None else None,
         "key post to BEAM dispatch": lambda s: s["final_key_dispatch_ms"],
         "subscribe time behind provider start and hooks": provider_wait,
+        "open command in the Editor": open_command,
     }
     rows = [(stage, (lambda st: lambda s: stage_total(s, st))(stage)) for stage in STAGES] + list(derived.items())
     for name, getter in rows:

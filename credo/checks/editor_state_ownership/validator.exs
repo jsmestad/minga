@@ -59,7 +59,10 @@ defmodule Minga.Credo.EditorStateOwnership.Validator do
       process_modules: MapSet.new(Config.process_modules()),
       boundary_prefixes: Config.boundary_prefixes(),
       boundary_segments: MapSet.new(Config.boundary_segments()),
-      value_modules: MapSet.new(Config.value_modules())
+      value_modules: MapSet.new(Config.value_modules()),
+      catalog_modules: Config.catalog_modules(),
+      catalog_functions: MapSet.new(Config.catalog_functions()),
+      catalog_free_namespaces: Config.catalog_free_namespaces()
     }
   end
 
@@ -174,7 +177,8 @@ defmodule Minga.Credo.EditorStateOwnership.Validator do
   @spec valid_paths?(term()) :: boolean()
   defp valid_paths?(paths) when is_list(paths) do
     Enum.all?(paths, fn path ->
-      is_list(path) and path != [] and length(path) <= 8 and Enum.all?(path, &is_atom/1)
+      is_list(path) and path != [] and Enum.count_until(path, 9) <= 8 and
+        Enum.all?(path, &is_atom/1)
     end) and length(paths) == length(Enum.uniq(paths))
   end
 

@@ -160,6 +160,7 @@ defmodule MingaAgent.Session do
           background_subagent: boolean(),
           hooks_enabled?: boolean(),
           session_start_hook_enabled?: boolean(),
+          hook_task_supervisor: GenServer.server(),
           session_store_dir: String.t() | nil,
           session_manager: pid() | nil,
           created_at: DateTime.t(),
@@ -189,7 +190,11 @@ defmodule MingaAgent.Session do
     }
   end
 
-  @doc "Starts a new agent session."
+  @doc """
+  Starts a new agent session.
+
+  `:subscribers` is a list of `{pid, subscribe_opts}` attached inside `init/1`, before provider start is queued, so no subscriber waits behind provider start or SessionStart hooks. With `:start_token`, each initial subscriber first receives `{:agent_event, session, {:session_start_attached, token}}`, which orders the start acknowledgement ahead of every other event from this session.
+  """
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts) do
     GenServer.start_link(__MODULE__, opts, name: Keyword.get(opts, :name))
@@ -1475,6 +1480,7 @@ defmodule MingaAgent.Session do
       hooks_enabled?: Keyword.get(opts, :hooks_enabled?, true),
       session_start_hook_enabled?:
         Keyword.get(opts, :session_start_hook_enabled?, Keyword.get(opts, :hooks_enabled?, true)),
+      hook_task_supervisor: Keyword.get(opts, :hook_task_supervisor, Minga.Eval.TaskSupervisor),
       session_store_dir: Keyword.get(opts, :session_store_dir),
       session_manager: Keyword.get(opts, :session_manager),
       created_at: now,
@@ -1488,6 +1494,16 @@ defmodule MingaAgent.Session do
       provider: state.provider.provider_name,
       background_subagent: state.background_subagent
     })
+
+    # Initial subscribers attach before provider start is queued, so their first
+    # events are this start's acknowledgement and connection, never a reply that
+    # waits behind provider start or SessionStart hooks.
+    state =
+      subscribe_initial(
+        state,
+        Keyword.get(opts, :subscribers, []),
+        Keyword.get(opts, :start_token)
+      )
 
     # Start configured providers asynchronously; unconfigured sessions retain drafts.
     if credentials_configured? do
@@ -5894,6 +5910,28 @@ defmodule MingaAgent.Session do
 
   # ── Subscriber lifecycle ──────────────────────────────────────────────────
 
+  @spec subscribe_initial(state(), [{pid(), keyword()}], reference() | nil) :: state()
+  defp subscribe_initial(state, [], _token), do: state
+
+  defp subscribe_initial(state, subscribers, token) do
+    Minga.Telemetry.span([:minga, :agent, :session_subscribe], %{}, fn ->
+      Enum.reduce(subscribers, state, &attach_initial_subscriber(&2, &1, token))
+    end)
+  end
+
+  @spec attach_initial_subscriber(state(), {pid(), keyword()}, reference() | nil) :: state()
+  defp attach_initial_subscriber(state, {pid, opts}, token) when is_pid(pid) do
+    if is_reference(token),
+      do: send(pid, {:agent_event, self(), {:session_start_attached, token}})
+
+    role = Keyword.get(opts, :role, SubscriberLifecycle.default_role(state.subscriber_lifecycle))
+
+    case reply_to_subscribe(state, pid, role, Keyword.get(opts, :questions?, false) == true) do
+      {:reply, {:ok, _attachment}, subscribed} -> subscribed
+      {:reply, {:error, _reason}, unchanged} -> unchanged
+    end
+  end
+
   @spec reply_to_subscribe(state(), pid(), term(), boolean() | :remote) ::
           {:reply, {:ok, broker_attachment()} | {:error, :invalid_role}, state()}
   defp reply_to_subscribe(state, pid, role, questions?) do
@@ -10249,32 +10287,44 @@ defmodule MingaAgent.Session do
   defp dispatch_session_start(%{hooks_enabled?: false}), do: :ok
   defp dispatch_session_start(%{session_start_hook_enabled?: false}), do: :ok
 
+  # SessionStart hooks are notification-only, so their result cannot change the
+  # session. They run in a supervised task: a slow hook command never holds the
+  # session process, and so never holds the Editor or Ingest calls queued on it.
   defp dispatch_session_start(state) do
-    Minga.Telemetry.span([:minga, :agent, :session_start_hooks], %{}, fn ->
-      run_session_start_hooks(state)
-    end)
+    payload =
+      state.session_id
+      |> SessionStartPayload.new(state.provider.model_name, state.provider.provider_name)
+      |> SessionStartPayload.to_map()
+
+    case Task.Supervisor.start_child(state.hook_task_supervisor, fn ->
+           run_session_start_hooks(payload)
+         end) do
+      {:ok, _pid} -> :ok
+      {:error, reason} -> log_session_start_failure(reason)
+    end
+  catch
+    :exit, reason -> log_session_start_failure(reason)
   end
 
-  @spec run_session_start_hooks(state()) :: :ok
-  defp run_session_start_hooks(state) do
-    payload =
-      SessionStartPayload.new(
-        state.session_id,
-        state.provider.model_name,
-        state.provider.provider_name
-      )
+  @spec run_session_start_hooks(map()) :: :ok
+  defp run_session_start_hooks(payload) do
+    Minga.Telemetry.span([:minga, :agent, :session_start_hooks], %{}, fn ->
+      hooks =
+        Minga.Telemetry.span([:minga, :agent, :session_start_hook_config], %{}, fn ->
+          AgentConfig.agent_hooks()
+        end)
 
-    hooks =
-      Minga.Telemetry.span([:minga, :agent, :session_start_hook_config], %{}, fn ->
-        AgentConfig.resolve().agent_hooks
-      end)
-
-    HookDispatcher.session_start(hooks, SessionStartPayload.to_map(payload))
+      HookDispatcher.session_start(hooks, payload)
+    end)
   rescue
     e -> Minga.Log.warning(:agent, "SessionStart hook dispatch failed: #{Exception.message(e)}")
   catch
-    _, reason ->
-      Minga.Log.warning(:agent, "SessionStart hook dispatch failed: #{inspect(reason)}")
+    _, reason -> log_session_start_failure(reason)
+  end
+
+  @spec log_session_start_failure(term()) :: :ok
+  defp log_session_start_failure(reason) do
+    Minga.Log.warning(:agent, "SessionStart hook dispatch failed: #{inspect(reason)}")
   end
 
   @spec dispatch_session_end(state(), term()) :: :ok
@@ -10285,7 +10335,7 @@ defmodule MingaAgent.Session do
       SessionEndPayload.new(state.session_id, reason, TurnExecution.status(state.turn_execution))
 
     HookDispatcher.session_end(
-      AgentConfig.resolve().agent_hooks,
+      AgentConfig.agent_hooks(),
       SessionEndPayload.to_map(payload)
     )
   rescue
@@ -10301,7 +10351,7 @@ defmodule MingaAgent.Session do
   defp dispatch_stop(state) do
     last_message = extract_last_assistant_text(Transcript.messages(state.transcript))
     payload = StopPayload.new(state.session_id, :end_turn, last_message)
-    HookDispatcher.stop(AgentConfig.resolve().agent_hooks, StopPayload.to_map(payload))
+    HookDispatcher.stop(AgentConfig.agent_hooks(), StopPayload.to_map(payload))
     state
   rescue
     e ->
@@ -10320,7 +10370,7 @@ defmodule MingaAgent.Session do
     payload = NotificationPayload.new(state.session_id, trigger, message)
 
     HookDispatcher.notification(
-      AgentConfig.resolve().agent_hooks,
+      AgentConfig.agent_hooks(),
       NotificationPayload.to_map(payload)
     )
   rescue
@@ -10338,7 +10388,7 @@ defmodule MingaAgent.Session do
     payload = UserPromptSubmitPayload.new(state.session_id, content)
 
     HookDispatcher.user_prompt_submit(
-      AgentConfig.resolve().agent_hooks,
+      AgentConfig.agent_hooks(),
       UserPromptSubmitPayload.to_map(payload)
     )
   rescue

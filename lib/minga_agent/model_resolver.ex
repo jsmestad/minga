@@ -23,6 +23,7 @@ defmodule MingaAgent.ModelResolver do
   alias MingaAgent.Providers.Apple
 
   @request_providers ~w(anthropic openai openai_codex google openrouter groq mistral deepseek)a
+  @catalog_index_key {__MODULE__, :catalog_index}
   @request_provider_names Enum.map(@request_providers, &Atom.to_string/1)
   @codex_provider_label "OpenAI (ChatGPT subscription)"
   @reasoning_efforts ~w(off none minimal low medium high xhigh max)
@@ -1201,7 +1202,7 @@ defmodule MingaAgent.ModelResolver do
 
     opts =
       context.opts
-      |> Keyword.put(:model_index, catalog_index(catalog))
+      |> Keyword.put(:model_index, model_index(context.opts, catalog))
       |> Keyword.put(:models, catalog)
       |> Keyword.put(:candidate_resolution, true)
 
@@ -1545,11 +1546,37 @@ defmodule MingaAgent.ModelResolver do
   @spec exact_catalog_model(String.t(), String.t(), keyword()) ::
           {:ok, map()} | {:error, :not_found}
   defp exact_catalog_model(provider, model_id, opts) do
-    index = Keyword.get_lazy(opts, :model_index, fn -> catalog_index(models(opts)) end)
+    index = Keyword.get_lazy(opts, :model_index, fn -> model_index(opts, models(opts)) end)
 
     case Map.get(index, {provider, model_id}) do
       nil -> {:error, :not_found}
       model -> {:ok, model}
+    end
+  end
+
+  # The packaged catalog changes only when LLMDB loads a new snapshot, so its
+  # index is built once per catalog epoch and shared by every session start.
+  # An injected `:models` list is indexed directly and never cached.
+  @spec model_index(keyword(), [map()]) :: %{{String.t(), String.t()} => map()}
+  defp model_index(opts, catalog) do
+    if Keyword.has_key?(opts, :models),
+      do: catalog_index(catalog),
+      else: cached_catalog_index(catalog, LLMDB.epoch())
+  end
+
+  @spec cached_catalog_index([map()], non_neg_integer()) ::
+          %{{String.t(), String.t()} => map()}
+  defp cached_catalog_index(catalog, 0), do: catalog_index(catalog)
+
+  defp cached_catalog_index(catalog, epoch) do
+    case :persistent_term.get(@catalog_index_key, nil) do
+      {^epoch, index} ->
+        index
+
+      _stale ->
+        index = catalog_index(catalog)
+        :persistent_term.put(@catalog_index_key, {epoch, index})
+        index
     end
   end
 

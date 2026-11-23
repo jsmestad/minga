@@ -8,9 +8,10 @@ defmodule MingaEditor.Agent.Ingest do
   and sits FIFO ahead of any key press queued behind it: head-of-line blocking
   that jitters keystroke latency under streaming load (epic #2220 AC 3, #2289).
 
-  Ingest sits between the session and the Editor. It subscribes to the session
-  on the Editor's behalf via `MingaAgent.Session.subscribe/4`, so deltas land in
-  *its* mailbox, not the Editor's. It then forwards one
+  Ingest sits between the session and the Editor. A new local session attaches
+  Ingest as an initial subscriber inside `MingaAgent.Session.init/1`; a restarted
+  session is subscribed on the Editor's behalf via `MingaAgent.Session.subscribe/4`.
+  Either way deltas land in *its* mailbox, not the Editor's. It then forwards one
   `{:agent_stream_batch, session_pid, batch}` per coalescing window instead of
   one message per delta. Keystrokes never pass through Ingest; they gain only a
   shorter mailbox ahead of them.
@@ -72,7 +73,8 @@ defmodule MingaEditor.Agent.Ingest do
           window_ms: non_neg_integer(),
           max_batch_items: pos_integer(),
           max_batch_bytes: pos_integer(),
-          sessions: %{optional(pid()) => session_state()}
+          sessions: %{optional(pid()) => session_state()},
+          monitored: MapSet.t(pid())
         }
 
   # One 60Hz frame. Adds at most one window to steady-state stream visibility,
@@ -144,7 +146,8 @@ defmodule MingaEditor.Agent.Ingest do
        window_ms: window_ms,
        max_batch_items: max_items,
        max_batch_bytes: max_bytes,
-       sessions: %{}
+       sessions: %{},
+       monitored: MapSet.new()
      }}
   end
 
@@ -152,13 +155,16 @@ defmodule MingaEditor.Agent.Ingest do
   @spec handle_call({:subscribe_session, pid(), keyword()}, GenServer.from(), state()) ::
           {:reply, :ok | {:error, term()}, state()}
   def handle_call({:subscribe_session, session_pid, opts}, _from, state) do
-    {:reply, do_subscribe(session_pid, opts), state}
+    case do_subscribe(session_pid, opts) do
+      :ok -> {:reply, :ok, monitor_session(state, session_pid)}
+      {:error, _reason} = error -> {:reply, error, state}
+    end
   end
 
   @impl true
   @spec handle_info({:agent_event, pid(), term()}, state()) :: {:noreply, state()}
   def handle_info({:agent_event, session_pid, event}, state) do
-    {:noreply, route(state, session_pid, event)}
+    {:noreply, state |> monitor_session(session_pid) |> route(session_pid, event)}
   end
 
   def handle_info({:ingest_tick, session_pid}, state) do
@@ -171,7 +177,8 @@ defmodule MingaEditor.Agent.Ingest do
   # the death via its own SessionManager subscription, so no forwarding is
   # needed here.
   def handle_info({:DOWN, _ref, :process, session_pid, _reason}, state) do
-    {:noreply, drop_session(state, session_pid)}
+    state = drop_session(state, session_pid)
+    {:noreply, %{state | monitored: MapSet.delete(state.monitored, session_pid)}}
   end
 
   def handle_info(_msg, state), do: {:noreply, state}
@@ -316,23 +323,22 @@ defmodule MingaEditor.Agent.Ingest do
   @spec do_subscribe(pid(), keyword()) :: :ok | {:error, term()}
   defp do_subscribe(session_pid, opts) do
     # minga:allow-blocking — runs in the Ingest process on the Editor's behalf, not in the Editor
-    case Session.subscribe(session_pid, self(), opts, @session_subscribe_timeout_ms) do
-      :ok ->
-        # Monitor the session so its abrupt death (no control event) still drops
-        # the per-session accumulation via the {:DOWN, ...} clause above. Only
-        # monitor on a successful subscribe so a rejected subscribe leaves no
-        # dangling monitor. Callers always pass a freshly started session pid
-        # (start, background start, restart), so this cannot double-register;
-        # even a duplicate :DOWN would be harmless since drop_session is
-        # idempotent.
-        Process.monitor(session_pid)
-        :ok
-
-      {:error, _reason} = error ->
-        error
-    end
+    Session.subscribe(session_pid, self(), opts, @session_subscribe_timeout_ms)
   catch
     :exit, reason -> {:error, {:exit, reason}}
+  end
+
+  # Monitor each session once, whether Ingest subscribed it explicitly or the
+  # session attached Ingest in its own init (the first event identifies it), so
+  # an abrupt death (no control event) still drops the per-session accumulation.
+  @spec monitor_session(state(), pid()) :: state()
+  defp monitor_session(%{monitored: monitored} = state, session_pid) do
+    if MapSet.member?(monitored, session_pid) do
+      state
+    else
+      Process.monitor(session_pid)
+      %{state | monitored: MapSet.put(monitored, session_pid)}
+    end
   end
 
   @spec session(state(), pid()) :: session_state()

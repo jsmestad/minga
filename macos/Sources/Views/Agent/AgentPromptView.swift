@@ -233,9 +233,12 @@ struct AgentPromptActionButtons: View {
         let hasDraft = state.promptPresentation != 0 && !state.prompt.isEmpty
         let queue = active && hasDraft ? state.queueTarget : nil
         let stop = active ? state.stopTarget : nil
+        // Send waits for a live conversation; while the session starts the draft
+        // is kept and the "Starting Agent" notice explains why.
+        let sendable = hasDraft && !active && state.lifecycle == .conversation
 
         HStack(spacing: Spacing.md) {
-            button("Send", icon: "arrow.up.circle.fill", action: hasDraft && !active ? .submit : nil)
+            button("Send", icon: "arrow.up.circle.fill", action: sendable ? .submit : nil)
             button("Steer", icon: "arrow.turn.up.right", action: queue.map { .queue(followUp: false, target: $0) })
             button("Queue Next", icon: "text.badge.plus", action: queue.map { .queue(followUp: true, target: $0) })
             button("Stop", icon: "stop.circle.fill", action: stop.map(AgentPromptView.Action.abort))

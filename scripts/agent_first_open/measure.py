@@ -12,11 +12,12 @@ reads two traces:
 Endpoints, all measured from the moment the final key-down was posted:
 
 * composer_emit_ms: the BEAM wrote the first frame rendered after the open
-  installed the Agent chat (BEAM-side; this is the frame that carries the composer).
+  command installed the Agent chat (BEAM-side; this is the frame that carries the
+  composer, in the starting state since #3934).
 * composer_presented_ms: the app presented that frame (frontend-side), when the
   Metal layer presented it.
-* send_ready_ms: the first frame written after both the Editor installed the new
-  session and the session finished attaching its provider (BEAM-side).
+* send_ready_ms: the first frame written after both the open command finished and
+  the session finished attaching its provider (BEAM-side).
 
 Scenarios (one launch each):
 
@@ -201,7 +202,9 @@ def frame_after(launch, after_us, description, seconds):
                       and "frame_seq" in e and e["start_us"] >= after_us), None),
         f"{description} frame render", seconds,
     )
-    emit = launch.wait_for(lambda: launch.find("minga.port.write.stop", frame["at_us"]), f"{description} frame write", seconds)
+    # The renderer writes a frame to the port inside its pipeline span, so the
+    # frame's write is the first one after its render began, not after it ended.
+    emit = launch.wait_for(lambda: launch.find("minga.port.write.stop", frame["start_us"]), f"{description} frame write", seconds)
     return frame, emit
 
 
@@ -211,29 +214,28 @@ def measure_open(launch, keys, expects_session, offset_ns, seconds):
     final_us = final["realtime_ns"] // 1000
 
     key = launch.wait_for(lambda: launch.find("minga.input.dispatch.start", final_us - 2_000), "final key dispatch", seconds)
-    if expects_session:
-        installed = launch.wait_for(
-            lambda: launch.find("minga.agent.start_agent_session.stop", final_us), "session start", seconds
-        )
-        installed_us = installed["at_us"]
-    else:
-        command = launch.wait_for(
-            lambda: next((e for e in launch.events if e["event"] == "minga.command.execute.stop"
-                          and e["start_us"] >= key["at_us"]), None),
-            "open command", seconds,
-        )
-        installed_us = command["at_us"]
+    # Since #3934 the open command itself installs the Agent tab and composer
+    # (in the starting state); the session starts after it without blocking.
+    command = launch.wait_for(
+        lambda: next((e for e in launch.events if e["event"] == "minga.command.execute.stop"
+                      and e["start_us"] >= key["at_us"]), None),
+        "open command", seconds,
+    )
+    installed_us = command["at_us"]
     frame, emit = frame_after(launch, installed_us, "composer", seconds)
+    # The #3610 receipt took the first write after the render span ended, which
+    # is the next frame's write; kept so before and after compare like for like.
+    receipt_emit = launch.wait_for(lambda: launch.find("minga.port.write.stop", frame["at_us"]), "next frame write", seconds)
 
     attached_us = installed_us
     if expects_session:
+        # The provider-ready connection broadcast follows the provider attachment
+        # in the session; SessionStart hooks run in their own task and do not gate it.
         attach = launch.wait_for(
-            lambda: launch.find("minga.agent.session_start_hooks.stop", final_us)
-            or launch.find("minga.agent.provider_start.stop", final_us),
-            "provider attachment", seconds,
+            lambda: launch.find("minga.agent.provider_start.stop", final_us), "provider attachment", seconds
         )
         attached_us = max(installed_us, attach["at_us"])
-    _ready_frame, ready_emit = frame_after(launch, max(installed_us, attached_us), "send-ready", seconds)
+    _ready_frame, ready_emit = frame_after(launch, attached_us, "send-ready", seconds)
 
     presented = None
     deadline = time.monotonic() + 1.0
@@ -274,6 +276,7 @@ def measure_open(launch, keys, expects_session, offset_ns, seconds):
         "installed_ms": ms(installed_us),
         "composer_frame_seq": frame.get("frame_seq"),
         "composer_emit_ms": ms(emit["at_us"]),
+        "composer_emit_receipt_attribution_ms": ms(receipt_emit["at_us"]),
         "composer_presented_ms": presented_ms,
         "send_ready_ms": ms(ready_emit["at_us"]),
         "stages": stages,
@@ -382,7 +385,7 @@ def main():
         if sample["condition"] == "launch":
             continue
         cell = summary.setdefault(f"{sample['command']}:{sample['condition']}", {})
-        for endpoint in ("composer_emit_ms", "composer_presented_ms", "send_ready_ms", "final_key_dispatch_ms"):
+        for endpoint in ("composer_emit_ms", "composer_emit_receipt_attribution_ms", "composer_presented_ms", "send_ready_ms", "final_key_dispatch_ms"):
             if sample.get(endpoint) is not None:
                 cell.setdefault(endpoint, []).append(sample[endpoint])
     table = {
