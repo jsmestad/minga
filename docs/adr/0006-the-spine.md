@@ -46,6 +46,7 @@ The design went through four rounds on the canvas, with reviews from a Minga UX 
 - The BEAM must say more: ordered modeline segments with priorities, per-author undo groups, task trees with subagents, command blocks for terminals. Frontends decide less: they draw tokens the BEAM sends and drop the lowest-priority segments to fit.
 - Design rules become executable: design tokens generated into Swift, Go and Elixir, a scenario registry rendered by both frontends, and flow-graph checks for dead ends. See [`storyboard.md`](../design/storyboard.md).
 - Some terminal features need a modern terminal (notifications, the Kitty keyboard protocol, graphics). Each is detected at startup and degrades quietly.
+- Every colour is a theme role, never a literal; Minga is themeable and users keep their theme. The design canvas shows astrodark defaults plus Catppuccin Frappé and Latte renders of the same boards. Three roles are new (minga, needs_you, done), and two existing agent fields (`assistant_label`, `status_thinking`) move to keep one meaning per colour. The storyboard factory renders each scenario in at least astrodark, catppuccin_frappe and a light theme (catppuccin_latte or one_light). See [`themes.md`](../design/themes.md).
 
 ## Open questions
 
