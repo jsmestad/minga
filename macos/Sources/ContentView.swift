@@ -642,8 +642,9 @@ public struct ContentView<EditorSurface: View>: View {
                             workspaceState: input.workspaceState,
                             sendAction: translatedAction(FrontendActionComposition.outbound)
                         )
-                        .frame(maxWidth: 280)
-                        .fixedSize(horizontal: true, vertical: false)
+                        // Ideal width up to 280 pt, compressing before the tabs when the window is narrow.
+                        .compressibleIdealWidth(maximum: 280)
+                        .layoutPriority(1)
                     }
 
                     if !input.tabBarState.displayTabs.isEmpty {

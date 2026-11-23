@@ -18,12 +18,24 @@ public struct AgentChatHeaderView: View {
     @State private var isHelpHovered: Bool = false
 
     public var body: some View {
+        // The full row is chosen whenever its ideal width fits, so wide panes
+        // keep every labelled control. Narrower panes first drop the labels,
+        // then move the commands into one menu while the model name truncates.
+        ViewThatFits(in: .horizontal) {
+            fullRow
+            iconRow
+            compactRow
+        }
+        .background(theme.agentHeaderBg)
+
+        Rectangle()
+            .fill(theme.agentCodeBorder.opacity(0.3))
+            .frame(height: 1)
+    }
+
+    private var fullRow: some View {
         HStack(spacing: Spacing.md) {
-            // Status indicator
-            Circle()
-                .fill(statusColor)
-                .frame(width: 7, height: 7)
-                .accessibilityLabel("Agent status: \(state.statusLabel)")
+            statusIndicator
 
             modelPickerButton
 
@@ -31,7 +43,7 @@ public struct AgentChatHeaderView: View {
                 .font(Typography.font(.small))
                 .foregroundStyle(theme.agentDisabledFg)
 
-            thinkingLevelMenu
+            thinkingLevelMenu(compact: false)
 
             if state.isThinking {
                 ProgressView()
@@ -44,45 +56,28 @@ public struct AgentChatHeaderView: View {
             Text(state.statusLabel)
                 .font(Typography.font(.small))
                 .foregroundStyle(theme.agentMutedFg)
+                .lineLimit(1)
 
             Button {
-                sendAction?(.executeCommand(name: "agent_checklist"))
+                send(.checklist)
             } label: {
-                Label("Tasks", systemImage: "checklist")
+                Label(HeaderCommand.checklist.title, systemImage: HeaderCommand.checklist.systemImage)
                     .font(Typography.font(.small))
                     .foregroundStyle(theme.agentMutedFg)
+                    .lineLimit(1)
                     .padding(Spacing.xs)
             }
             .buttonStyle(.plain)
-            .help("Inspect Agent checklist (SPC a k)")
-            .accessibilityLabel("Agent checklist")
+            .help(HeaderCommand.checklist.help)
+            .accessibilityLabel(HeaderCommand.checklist.accessibilityLabel)
+
+            iconButton(.queuedInputs)
+            iconButton(.retainedHistory)
 
             Button {
-                sendAction?(.executeCommand(name: "agent_queued_inputs"))
+                send(.help)
             } label: {
-                Image(systemName: "list.bullet.rectangle")
-                    .foregroundStyle(theme.agentMutedFg)
-                    .padding(Spacing.xs)
-            }
-            .buttonStyle(.plain)
-            .help("Inspect queued Agent inputs (SPC a J)")
-            .accessibilityLabel("Queued Agent inputs")
-
-            Button {
-                sendAction?(.executeCommand(name: "agent_retained_history"))
-            } label: {
-                Image(systemName: "clock.arrow.circlepath")
-                    .foregroundStyle(theme.agentMutedFg)
-                    .padding(Spacing.xs)
-            }
-            .buttonStyle(.plain)
-            .help("Read retained messages (SPC a H)")
-            .accessibilityLabel("Retained Agent history")
-
-            Button {
-                sendAction?(.executeCommand(name: "agent_toggle_help"))
-            } label: {
-                Image(systemName: "questionmark.circle")
+                Image(systemName: HeaderCommand.help.systemImage)
                     .font(Typography.font(.emphasis))
                     .foregroundStyle(theme.agentMutedFg)
                     .padding(.horizontal, Spacing.xs)
@@ -90,8 +85,8 @@ public struct AgentChatHeaderView: View {
                     .background(RoundedRectangle(cornerRadius: Radius.sm).fill(isHelpHovered ? theme.agentTextFg.opacity(0.06) : Color.clear))
             }
             .buttonStyle(.plain)
-            .help("Keyboard shortcuts (?)")
-            .accessibilityLabel("Agent help")
+            .help(HeaderCommand.help.help)
+            .accessibilityLabel(HeaderCommand.help.accessibilityLabel)
             .accessibilityHint("Shows keybinding cheatsheet")
             .accessibilityAddTraits(.isButton)
             .onHover { hovering in
@@ -101,11 +96,150 @@ public struct AgentChatHeaderView: View {
         }
         .padding(.horizontal, Spacing.xl)
         .padding(.vertical, Spacing.md)
-        .background(theme.agentHeaderBg)
+    }
 
-        Rectangle()
-            .fill(theme.agentCodeBorder.opacity(0.3))
-            .frame(height: 1)
+    /// Keeps each command as its own labelled icon button when labels no longer fit.
+    private var iconRow: some View {
+        HStack(spacing: Spacing.sm) {
+            statusIndicator
+
+            modelPickerButton
+                .layoutPriority(-1)
+
+            thinkingLevelMenu(compact: true)
+
+            if state.isThinking {
+                ProgressView()
+                    .controlSize(.small)
+                    .scaleEffect(0.6)
+            }
+
+            Spacer(minLength: 0)
+
+            ForEach(HeaderCommand.allCases, id: \.self) { command in
+                iconButton(command)
+            }
+        }
+        .padding(.horizontal, Spacing.lg)
+        .padding(.vertical, Spacing.md)
+    }
+
+    /// Keeps every control reachable in a narrow pane: the model name truncates,
+    /// the thinking menu shows its icon, and the remaining commands share one menu.
+    private var compactRow: some View {
+        HStack(spacing: Spacing.sm) {
+            statusIndicator
+
+            modelPickerButton
+                .layoutPriority(-1)
+
+            thinkingLevelMenu(compact: true)
+
+            if state.isThinking {
+                ProgressView()
+                    .controlSize(.small)
+                    .scaleEffect(0.6)
+            }
+
+            Spacer(minLength: 0)
+
+            overflowMenu
+        }
+        .padding(.horizontal, Spacing.lg)
+        .padding(.vertical, Spacing.md)
+    }
+
+    private var statusIndicator: some View {
+        Circle()
+            .fill(statusColor)
+            .frame(width: 7, height: 7)
+            .accessibilityLabel("Agent status: \(state.statusLabel)")
+    }
+
+    private func iconButton(_ command: HeaderCommand) -> some View {
+        Button {
+            send(command)
+        } label: {
+            Image(systemName: command.systemImage)
+                .foregroundStyle(theme.agentMutedFg)
+                .padding(Spacing.xs)
+        }
+        .buttonStyle(.plain)
+        .help(command.help)
+        .accessibilityLabel(command.accessibilityLabel)
+    }
+
+    private var overflowMenu: some View {
+        Menu {
+            Text(state.statusLabel)
+            Divider()
+            ForEach(HeaderCommand.allCases, id: \.self) { command in
+                Button {
+                    send(command)
+                } label: {
+                    Label(command.title, systemImage: command.systemImage)
+                }
+                .accessibilityLabel(command.accessibilityLabel)
+            }
+        } label: {
+            Image(systemName: "ellipsis.circle")
+                .font(Typography.font(.emphasis))
+                .foregroundStyle(theme.agentMutedFg)
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("More Agent actions")
+        .accessibilityLabel("More Agent actions")
+        .accessibilityValue(state.statusLabel)
+    }
+
+    private func send(_ command: HeaderCommand) {
+        sendAction?(.executeCommand(name: command.rawValue))
+    }
+
+    /// Header commands shared by the full row and the compact overflow menu.
+    enum HeaderCommand: String, CaseIterable {
+        case checklist = "agent_checklist"
+        case queuedInputs = "agent_queued_inputs"
+        case retainedHistory = "agent_retained_history"
+        case help = "agent_toggle_help"
+
+        var title: String {
+            switch self {
+            case .checklist: "Tasks"
+            case .queuedInputs: "Queued Inputs"
+            case .retainedHistory: "Retained History"
+            case .help: "Keyboard Shortcuts"
+            }
+        }
+
+        var systemImage: String {
+            switch self {
+            case .checklist: "checklist"
+            case .queuedInputs: "list.bullet.rectangle"
+            case .retainedHistory: "clock.arrow.circlepath"
+            case .help: "questionmark.circle"
+            }
+        }
+
+        var help: String {
+            switch self {
+            case .checklist: "Inspect Agent checklist (SPC a k)"
+            case .queuedInputs: "Inspect queued Agent inputs (SPC a J)"
+            case .retainedHistory: "Read retained messages (SPC a H)"
+            case .help: "Keyboard shortcuts (?)"
+            }
+        }
+
+        var accessibilityLabel: String {
+            switch self {
+            case .checklist: "Agent checklist"
+            case .queuedInputs: "Queued Agent inputs"
+            case .retainedHistory: "Retained Agent history"
+            case .help: "Agent help"
+            }
+        }
     }
 
     // MARK: - Model picker
@@ -119,6 +253,8 @@ public struct AgentChatHeaderView: View {
             HStack(spacing: Spacing.xs) {
                 Text(state.displayModel.isEmpty ? "Agent" : state.displayModel)
                     .font(Typography.font(.body, weight: .medium))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
                 Image(systemName: "chevron.up.chevron.down")
                     .font(Typography.font(.micro, weight: .semibold))
             }
@@ -141,9 +277,9 @@ public struct AgentChatHeaderView: View {
     // MARK: - Thinking level
 
     @ViewBuilder
-    private var thinkingLevelMenu: some View {
+    private func thinkingLevelMenu(compact: Bool) -> some View {
         if state.hasActiveTurn {
-            thinkingLevelLabel
+            thinkingLevelLabel(compact: compact)
                 .help("Pick thinking level (SPC a T)")
                 .accessibilityLabel("Agent thinking level")
                 .accessibilityValue(state.thinkingLabel)
@@ -166,7 +302,7 @@ public struct AgentChatHeaderView: View {
                     .accessibilityHint("Changes the agent thinking level to \(thinkingDisplayName(level))")
                 }
             } label: {
-                thinkingLevelLabel
+                thinkingLevelLabel(compact: compact)
             }
             .menuStyle(.borderlessButton)
             .fixedSize()
@@ -180,12 +316,15 @@ public struct AgentChatHeaderView: View {
         }
     }
 
-    private var thinkingLevelLabel: some View {
+    private func thinkingLevelLabel(compact: Bool) -> some View {
         HStack(spacing: Spacing.xs) {
             Image(systemName: state.thinkingIconName)
                 .font(Typography.font(.body))
-            Text(state.thinkingLabel)
-                .font(Typography.font(.body, weight: .medium))
+            if !compact {
+                Text(state.thinkingLabel)
+                    .font(Typography.font(.body, weight: .medium))
+                    .lineLimit(1)
+            }
             Image(systemName: "chevron.down")
                 .font(Typography.font(.symbol, weight: .semibold))
         }

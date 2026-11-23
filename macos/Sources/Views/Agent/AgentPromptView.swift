@@ -246,10 +246,16 @@ struct AgentPromptActionButtons: View {
         Button {
             if let action { sendAction?(action) }
         } label: {
-            Label(label, systemImage: icon)
-                .font(Typography.font(.small))
-                .foregroundStyle(action == nil ? theme.agentTextFg.opacity(0.4) : theme.agentInputBorder)
-                .frame(minHeight: 24)
+            // A narrow composer keeps every control in place and drops a title
+            // only when it no longer fits on one line.
+            ViewThatFits(in: .horizontal) {
+                Label(label, systemImage: icon)
+                    .lineLimit(1)
+                Image(systemName: icon)
+            }
+            .font(Typography.font(.small))
+            .foregroundStyle(action == nil ? theme.agentTextFg.opacity(0.4) : theme.agentInputBorder)
+            .frame(minHeight: 24)
         }
         .buttonStyle(.plain)
         .disabled(action == nil)
