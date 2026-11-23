@@ -135,10 +135,11 @@ title = "Project switcher with no known projects"
 surfaces = ["picker"]
 states = []
 frontends = ["macos", "tui"]
-status = "missing"
+status = "designed"
+boards = { macos = "Batch4_files_empty.dc.html", tui = "Batch4_files_empty.dc.html" }
 transient = true
 exits = [
-  { key = "SPC p a", click = "Add project", to = "start.project_switcher" },
+  { key = "SPC p a", click = "", to = "start.project_switcher", keyboard_only = "add a known project; click comes in the mouse sweep" },
   { key = "esc", click = "click outside", to = "edit.plain" },
 ]
 
@@ -395,11 +396,14 @@ title = "Buffer search with no match"
 surfaces = ["editor", "search_toolbar"]
 states = []
 frontends = ["macos", "tui"]
-status = "missing"
+status = "designed"
+boards = { macos = "Batch4_search_empty.dc.html", tui = "Batch4_search_empty.dc.html" }
 transient = true
 exits = [
+  { key = "SPC s p", click = "", to = "search.project", keyboard_only = "the echo line offers it as text; click comes in the mouse sweep" },
   { key = "esc", click = "search field close", to = "edit.plain" },
 ]
+notes = "The minibuffer says no matches and names the next step: search the project with the same query."
 
 [[scenario]]
 id = "search.project"
@@ -425,9 +429,12 @@ title = "Project search with no results"
 surfaces = ["picker"]
 states = []
 frontends = ["macos", "tui"]
-status = "missing"
+status = "designed"
+boards = { macos = "Batch4_search_empty.dc.html", tui = "Batch4_search_empty.dc.html" }
 transient = true
 exits = [
+  { key = "⌃A", click = "", to = "search.project", keyboard_only = "rerun including ignored files; click comes in the mouse sweep" },
+  { key = "⌃H", click = "", to = "search.project", keyboard_only = "rerun including hidden files; click comes in the mouse sweep" },
   { key = "esc", click = "click outside", to = "edit.plain" },
 ]
 
@@ -438,16 +445,19 @@ title = "Quickfix list"
 surfaces = ["drawer:quickfix"]
 states = []
 frontends = ["macos", "tui"]
-status = "missing"
+status = "designed"
+boards = { macos = "Batch4_search_quickfix.dc.html", tui = "Batch4_search_quickfix.dc.html" }
 transient = true
 list = true
 empty_state = "search.project.no_results"
 exits = [
   { key = "↩", click = "row", to = "edit.plain" },
-  { key = "]q", click = "", to = "edit.plain" },
+  { key = "]q / [q", click = "", to = "edit.plain", keyboard_only = "Vim quickfix motions; keep working after the drawer closes" },
+  { key = ":cdo / :cfdo", click = "", to = "edit.plain", keyboard_only = "ex commands, listed in which-key under SPC s q" },
   { key = "q", click = "close", to = "edit.plain" },
+  { key = "esc", click = "click outside", to = "edit.plain" },
 ]
-notes = "V4.1 says :Minga review and search results can fill quickfix."
+notes = "Filled by :Minga review or project search. Items from :Minga review carry the twist mark. ↩ jumps and the drawer stays open."
 
 [[scenario]]
 id = "search.replace"
@@ -618,7 +628,8 @@ title = "Diagnostics list with nothing to report"
 surfaces = ["drawer:diagnostics"]
 states = []
 frontends = ["macos", "tui"]
-status = "missing"
+status = "designed"
+boards = { macos = "Batch4_code_empty.dc.html", tui = "Batch4_code_empty.dc.html" }
 transient = true
 exits = [
   { key = "q", click = "close", to = "edit.plain" },
@@ -648,11 +659,14 @@ title = "No code actions here"
 surfaces = ["minibuffer"]
 states = []
 frontends = ["macos", "tui"]
-status = "missing"
+status = "designed"
+boards = { macos = "Batch4_code_empty.dc.html", tui = "Batch4_code_empty.dc.html" }
 transient = true
 exits = [
+  { key = "SPC a ?", click = "", to = "minga.inline_ask", keyboard_only = "named as text in the echo line" },
   { key = "esc", click = "click outside", to = "edit.plain" },
 ]
+notes = "Answers in the echo area, never an empty drawer: no code actions here, with the next step (ask Minga). Any other key goes back to editing."
 
 [[scenario]]
 id = "code.rename"
@@ -691,11 +705,14 @@ title = "No references found"
 surfaces = ["minibuffer"]
 states = []
 frontends = ["macos", "tui"]
-status = "missing"
+status = "designed"
+boards = { macos = "Batch4_code_empty.dc.html", tui = "Batch4_code_empty.dc.html" }
 transient = true
 exits = [
+  { key = "SPC c g", click = "", to = "edit.plain", keyboard_only = "named as text in the echo line; jumps to the definition" },
   { key = "esc", click = "click outside", to = "edit.plain" },
 ]
+notes = "Answers in the echo area, never an empty drawer: no references found, with the next step (go to definition). Any other key goes back to editing."
 
 [[scenario]]
 id = "code.call_hierarchy"
@@ -780,8 +797,10 @@ title = "Git status with a clean tree"
 surfaces = ["buffer:git_status"]
 states = []
 frontends = ["macos", "tui"]
-status = "missing"
+status = "designed"
+boards = { macos = "Batch4_git_ext_queue_empty.dc.html", tui = "Batch4_git_ext_queue_empty.dc.html" }
 exits = [
+  { key = "l", click = "", to = "git.log", keyboard_only = "bare key in a special buffer; click comes in the mouse sweep" },
   { key = "q", click = "close", to = "edit.plain" },
 ]
 
@@ -860,12 +879,30 @@ title = "Blame for the current line or file"
 surfaces = ["editor", "gutter"]
 states = []
 frontends = ["macos", "tui"]
-status = "missing"
+status = "designed"
+boards = { macos = "Batch4_git_blame.dc.html", tui = "Batch4_git_blame.dc.html" }
+exits = [
+  { key = "K", click = "hover", to = "git.blame" },
+  { key = "↩", click = "", to = "minga.conversation", keyboard_only = "on a Minga line: opens that task; click comes in the mouse sweep" },
+  { key = "↩", click = "", to = "git.log", keyboard_only = "on a commit line: opens the commit; click comes in the mouse sweep" },
+  { key = "SPC g b", click = "", to = "edit.plain" },
+  { key = "q", click = "close", to = "edit.plain" },
+]
+notes = "A narrow left column of author initials and relative age. Lines Minga wrote are attributed to Minga in the minga role, with the task name in the K detail."
+
+[[scenario]]
+id = "git.log"
+journey = "git"
+title = "Git log for the project or a commit"
+surfaces = ["buffer:git_log"]
+states = []
+frontends = ["macos", "tui"]
+status = "existing-only"
 exits = [
   { key = "q", click = "close", to = "edit.plain" },
-  { key = "esc", click = "click outside", to = "edit.plain" },
 ]
-notes = "Doom has it; the authorship column could show blame on demand."
+notes = "Reached from l in git status and ↩ on a commit line in blame. Needs a redesign under the Spine rules when its migration ticket touches it."
+
 
 # ---- minga -----------------------------------------------------------------
 
@@ -1210,7 +1247,8 @@ title = "Queue with nothing queued"
 surfaces = ["buffer:queue"]
 states = []
 frontends = ["macos", "tui"]
-status = "missing"
+status = "designed"
+boards = { macos = "Batch4_git_ext_queue_empty.dc.html", tui = "Batch4_git_ext_queue_empty.dc.html" }
 exits = [
   { key = "q", click = "close", to = "minga.conversation" },
 ]
@@ -1600,9 +1638,11 @@ title = "Switcher with no match"
 surfaces = ["drawer:switcher"]
 states = []
 frontends = ["macos", "tui"]
-status = "missing"
+status = "designed"
+boards = { macos = "Batch4_files_empty.dc.html", tui = "Batch4_files_empty.dc.html" }
 transient = true
 exits = [
+  { key = "⌃N", click = "", to = "edit.plain", keyboard_only = "creates the typed file; click comes in the mouse sweep" },
   { key = "esc", click = "click outside", to = "edit.plain" },
 ]
 
@@ -1645,8 +1685,11 @@ title = "File tree for an empty folder"
 surfaces = ["drawer:file_tree"]
 states = []
 frontends = ["macos", "tui"]
-status = "missing"
+status = "designed"
+boards = { macos = "Batch4_files_empty.dc.html", tui = "Batch4_files_empty.dc.html" }
 exits = [
+  { key = "a", click = "", to = "files.tree", keyboard_only = "new file prompt (dired convention); click comes in the mouse sweep" },
+  { key = "A", click = "", to = "files.tree", keyboard_only = "new folder prompt; click comes in the mouse sweep" },
   { key = "q", click = "close", to = "edit.plain" },
 ]
 
@@ -1709,9 +1752,10 @@ title = "A narrow window: modeline and panes collapse"
 surfaces = ["modeline"]
 states = []
 frontends = ["macos", "tui"]
-status = "missing"
+status = "designed"
+boards = { macos = "Batch4_windows_narrow.dc.html", tui = "Batch4_windows_narrow.dc.html" }
 exits = []
-notes = "V3Narrow predates V4.1; redraw with the V4.1 modeline truncation order on both frontends. A state of other scenarios, not a place you navigate to."
+notes = "A state of other scenarios, not a place: narrowing changes presentation only, every key keeps its meaning. Modeline drops filetype, position, git, then Minga's words (to glyph and 2/3); mode, needs-you, file, change position and errors never drop. Breakpoints are starting values: macOS about 1360, 1180, 1000 pt; TUI 140, 120, 100, 80 columns."
 
 [[scenario]]
 id = "windows.drawer_stack"
@@ -1886,8 +1930,10 @@ title = "No extensions installed"
 surfaces = ["extension_panel"]
 states = []
 frontends = ["macos", "tui"]
-status = "missing"
+status = "designed"
+boards = { macos = "Batch4_git_ext_queue_empty.dc.html", tui = "Batch4_git_ext_queue_empty.dc.html" }
 exits = [
+  { key = "SPC h e l", click = "", to = "settings.extensions", keyboard_only = "named as text in the empty state" },
   { key = "q", click = "close", to = "edit.plain" },
 ]
 

@@ -26,6 +26,8 @@ The modeline is the spine. It is the one place state is always visible.
 
 **Truncation**, dropped first to last when the window narrows: filetype, position, git, then Minga's words down to the glyph and "2/3". Never dropped: mode, needs-you, the file name, diagnostics with errors, and persistent problem segments.
 
+**Narrow windows.** Narrowing changes presentation only; every key keeps its meaning. Starting breakpoints, tuned during the build: on macOS about 1360, 1180 and 1000 pt; in the TUI 140, 120, 100 and 80 columns. Drawers truncate task goals before they drop states.
+
 **Accessibility.** Each segment is an accessibility element with a label and an action, for example "1 task needs you. Press SPC a a." VoiceOver announces only when needs-you goes from zero to non-zero.
 
 The resting modeline shows no key hints. Clicking any segment does what its key does.
@@ -112,6 +114,7 @@ See [marks](marks.md#diagnostics) for underlines and signs.
 - Hover the underline or press `K` for a popover: severity, message, source, and "Fix", "Ask Minga to Fix", "Copy".
 - `]d` and `[d` move between diagnostics; `SPC c a` lists code actions; `SPC c d` opens the list as a buffer.
 - The modeline shows counts only when there is something to report.
+- **Empty answers stay in the echo area.** When there are no code actions or no references, the echo area says so and names the next step ("No code actions here · SPC a ? ask Minga", "No references found · SPC c g definition"). An empty list never opens an empty drawer.
 - If a change Minga is making produces an error, Minga fixes it as part of its work and says so in a tool step.
 
 ## Subagent peek
