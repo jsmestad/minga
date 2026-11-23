@@ -35,6 +35,7 @@ defmodule MingaEditor.UI.Picker.AgentModelSourceTest do
   alias MingaEditor.UI.Picker.AgentModelSource
   alias MingaEditor.UI.Picker.Candidate
   alias MingaEditor.UI.Picker.Context
+  alias MingaEditor.UI.Picker.Item.Status, as: ItemStatus
   alias MingaEditor.UI.Theme
   alias MingaEditor.Viewport
   alias MingaEditor.VimState
@@ -252,9 +253,10 @@ defmodule MingaEditor.UI.Picker.AgentModelSourceTest do
       %{registry: registry}
     end
 
-    test "rows show route readiness, remedy, thinking, and capabilities from the route", %{
-      registry: registry
-    } do
+    test "rows show route readiness as a chip and the remedy, thinking, and capabilities as detail",
+         %{
+           registry: registry
+         } do
       InferenceRouteRegistry.refresh_availability(registry)
 
       candidates =
@@ -271,15 +273,14 @@ defmodule MingaEditor.UI.Picker.AgentModelSourceTest do
       offline = Enum.find(items, &(&1.description =~ "Offline Route"))
 
       assert ready.label == "Fixture Model"
-      assert ready.description =~ "Ready (fixture@example.com)"
-      assert ready.description =~ "200k ctx"
-      assert ready.description =~ "thinking off (off/low/high)"
-      assert ready.description =~ "tools yes, images yes, streaming yes"
-      assert ready.description =~ "subscription"
-      refute ready.description =~ "unverified catalog route"
+      assert ready.status == ItemStatus.new(:checking, "Checking…")
 
-      assert offline.description =~ "Unavailable: #{FixtureInferenceRoute.remedy()}"
-      refute offline.description =~ "unverified catalog route"
+      assert ready.description ==
+               "Fixture Route · fixture@example.com · checking plan usage · 200k ctx · thinking off · tools, images, streaming"
+
+      assert offline.status == ItemStatus.new(:error, "Unavailable")
+      assert offline.description =~ "Offline Route · #{FixtureInferenceRoute.remedy()} · 200k ctx"
+      refute offline.description =~ "Unavailable"
       assert Enum.all?([ready, offline], &(request_provider(&1) == :contributed))
     end
 
@@ -333,7 +334,8 @@ defmodule MingaEditor.UI.Picker.AgentModelSourceTest do
 
       items = model_items(context(connection, workspace_id))
       offline = Enum.find(items, &(&1.description =~ "Offline Route"))
-      assert offline.description =~ "Unavailable: #{FixtureInferenceRoute.remedy()}"
+      assert offline.status == ItemStatus.new(:error, "Unavailable")
+      assert offline.description =~ FixtureInferenceRoute.remedy()
 
       state = AgentModelSource.on_select(offline, state)
 
@@ -425,12 +427,15 @@ defmodule MingaEditor.UI.Picker.AgentModelSourceTest do
       ready = Enum.find(rows, &(&1.label == "Use Setup Fixture"))
       offline = Enum.find(rows, &(&1.label == "Use Offline Setup"))
 
-      assert ready.description =~ "Minga never sees your login."
-      assert ready.description =~ "Ready: fixture@example.com"
+      # Readiness is the chip; the setup text and the account or remedy stay readable as detail.
+      assert ready.status == ItemStatus.new(:ready, "Ready")
+
+      assert ready.description ==
+               "Sign in with the fixture CLI. Minga never sees your login. · fixture@example.com"
+
+      assert offline.status == ItemStatus.new(:error, "Unavailable")
       assert offline.description =~ FixtureInferenceRoute.remedy()
       assert ready.meta.intent == {:check_route, ctx.setup_id, "Setup Fixture"}
-      # Readiness trails the setup text, so a frontend that shortens it must keep the start.
-      assert Enum.all?(rows, &(&1.description_overflow == :keep_start))
 
       assert Enum.all?(rows, &match?({:check_route, _id, _name}, &1.meta.intent))
     end
@@ -512,26 +517,10 @@ defmodule MingaEditor.UI.Picker.AgentModelSourceTest do
                Minga.Command.Registry.lookup(Minga.Command.Registry, :agent_pick_model)
     end
 
-    test "subscription rows show reported usage and nothing without data", ctx do
-      opts = [
-        backend_spec: MingaAgent.ProviderPacks.Native.spec(),
-        credential_snapshot: Snapshot.new(%{}, nil),
-        models: [],
-        inference_routes: ctx.registry
-      ]
-
-      session =
-        start_supervised!({ModelPickerSession, ModelResolver.candidates(opts)},
-          id: :without_usage
-        )
-
-      row =
-        Enum.find(
-          model_items(context(connection(session), 1)),
-          &(&1.description =~ "Setup Fixture")
-        )
-
-      refute row.description =~ "limit"
+    test "an unchecked route says so in its chip and keeps its plan reset as detail", ctx do
+      rows = route_items(ctx.registry)
+      assert rows["Setup Fixture"].status == ItemStatus.new(:neutral, "Not checked")
+      refute rows["Setup Fixture"].description =~ "limit"
 
       resets_at = DateTime.add(DateTime.utc_now(), 3_600)
 
@@ -541,25 +530,72 @@ defmodule MingaEditor.UI.Picker.AgentModelSourceTest do
           %{kind: "seven_day", utilization: 0.31, resets_at: nil, status: :allowed}
         ])
 
-      session =
-        start_supervised!({ModelPickerSession, ModelResolver.candidates(opts)}, id: :with_usage)
+      row = route_items(ctx.registry)["Setup Fixture"]
+      assert row.status == ItemStatus.new(:neutral, "Not checked")
+      # A reset after midnight local time carries a weekday ("Sun 12:32 AM").
+      assert row.description =~
+               ~r/^Setup Fixture · 5h limit resets (\w{3} )?\d{1,2}:\d{2} (AM|PM) · /
 
-      row =
-        Enum.find(
-          model_items(context(connection(session), 1)),
-          &(&1.description =~ "Setup Fixture")
+      refute row.description =~ "7d"
+      refute row.description =~ "%"
+    end
+
+    test "model row chips show readiness and the busiest plan window by tone", ctx do
+      reporter = ctx.reporters[ctx.setup_id]
+
+      {:ok, _reporter} =
+        InferenceRouteRegistry.register(
+          ctx.registry,
+          [
+            source: {:extension, :fixture_bridge},
+            id: "metered#{ctx.setup_id}",
+            module: FixtureInferenceRoute,
+            display_name: "Metered Fixture"
+          ],
+          config: [models: [FixtureInferenceRoute.model(id: "metered-model", cost: :metered)]]
         )
 
-      # A reset after midnight local time carries a weekday ("Sun 12:32 AM").
-      assert row.description =~ ~r/82% of 5h limit · resets (\w{3} )?\d{1,2}:\d{2} (AM|PM)/
-      refute row.description =~ "7d"
+      InferenceRouteRegistry.refresh_availability(ctx.registry)
+      :ok = InferenceRouteRegistry.report_status(ctx.registry, reporter, {:ready, "Claude Max"})
+      resets_at = DateTime.add(DateTime.utc_now(), 3_600)
 
-      # Readiness and usage lead the description, and the row asks frontends to keep
-      # that start when they shorten it, so capability and cost details drop first.
-      assert row.description_overflow == :keep_start
-      [_route, readiness, usage, _kind, _reset | _rest] = String.split(row.description, " · ")
-      assert readiness == "Availability not checked"
-      assert usage == "82% of 5h limit"
+      window = fn utilization, status ->
+        %{kind: "five_hour", utilization: utilization, resets_at: resets_at, status: status}
+      end
+
+      rows = route_items(ctx.registry)
+      assert rows["Setup Fixture"].status == ItemStatus.new(:checking, "Checking…")
+
+      assert rows["Setup Fixture"].description =~
+               "Setup Fixture · Claude Max · checking plan usage · 200k ctx"
+
+      assert rows["Metered Fixture"].status == ItemStatus.new(:ready, "Ready")
+      refute rows["Metered Fixture"].description =~ "plan usage"
+      assert rows["Offline Setup"].status == ItemStatus.new(:error, "Unavailable")
+
+      assert rows["Offline Setup"].description =~
+               "Offline Setup · #{FixtureInferenceRoute.remedy()} · 200k ctx"
+
+      cases = [
+        {[window.(0.45, :allowed)], ItemStatus.new(:ready, "Ready · 45%")},
+        {[window.(0.79, :allowed)], ItemStatus.new(:ready, "Ready · 79%")},
+        {[window.(0.82, :warning)], ItemStatus.new(:warn, "Ready · 82%")},
+        {[window.(1.0, :warning)], ItemStatus.new(:error, "Limit reached")},
+        {[window.(0.6, :rejected)], ItemStatus.new(:error, "Limit reached")},
+        {[], ItemStatus.new(:ready, "Ready")}
+      ]
+
+      for {windows, chip} <- cases do
+        :ok = InferenceRouteRegistry.report_usage(ctx.registry, reporter, windows)
+        row = route_items(ctx.registry)["Setup Fixture"]
+        assert row.status == chip, "#{inspect(windows)} gave #{inspect(row.status)}"
+        # The chip is the only usage signal; the description keeps the account and the reset time.
+        refute row.description =~ "%"
+        refute row.description =~ "Ready"
+        refute row.description =~ "subscription"
+        assert row.description =~ "Setup Fixture · Claude Max"
+        assert windows == [] != (row.description =~ ~r/5h limit resets (\w{3} )?\d{1,2}:\d{2}/)
+      end
     end
 
     test "a ready subscription route says it is checking plan usage until its first report",
@@ -583,18 +619,21 @@ defmodule MingaEditor.UI.Picker.AgentModelSourceTest do
           {:ready, "me"}
         )
 
-      rows = route_rows(ctx.registry)
+      rows = route_items(ctx.registry)
 
       # Usage follows readiness; the metered and the unavailable routes have no plan to wait for.
-      assert rows["Setup Fixture"] =~ "Ready (me) · Checking plan usage…"
-      refute rows["Offline Setup"] =~ "Checking"
-      refute rows["Metered Fixture"] =~ "Checking"
+      assert rows["Setup Fixture"].status == ItemStatus.new(:checking, "Checking…")
+      assert rows["Setup Fixture"].description =~ "Setup Fixture · me · checking plan usage"
+      assert rows["Offline Setup"].status.tone != :checking
+      assert rows["Metered Fixture"].status.tone != :checking
+      refute rows["Metered Fixture"].description =~ "checking"
 
       :ok = InferenceRouteRegistry.report_usage(ctx.registry, ctx.reporters[ctx.setup_id], [])
 
-      rows = route_rows(ctx.registry)
-      refute rows["Setup Fixture"] =~ "Checking"
-      refute rows["Setup Fixture"] =~ "limit"
+      rows = route_items(ctx.registry)
+      assert rows["Setup Fixture"].status == ItemStatus.new(:ready, "Ready")
+      refute rows["Setup Fixture"].description =~ "checking"
+      refute rows["Setup Fixture"].description =~ "limit"
     end
 
     test "an open chooser lists usage as soon as a route reports it and keeps query and selection",
@@ -623,8 +662,7 @@ defmodule MingaEditor.UI.Picker.AgentModelSourceTest do
       assert {:ok, state} = land_fetch(state, scheduler)
       refute_received {:fixture_availability_checked, _id, _caller}
 
-      assert row_description(state, "Setup Fixture") =~
-               "Ready (fixture@example.com) · Checking plan usage…"
+      assert row_item(state, "Setup Fixture").status == ItemStatus.new(:checking, "Checking…")
 
       state =
         PickerUI.update_picker(state, fn ps ->
@@ -649,8 +687,8 @@ defmodule MingaEditor.UI.Picker.AgentModelSourceTest do
       assert {:ok, state} = land_fetch(state, scheduler)
       refute_received {:fixture_availability_checked, _id, _caller}
 
-      assert row_description(state, "Setup Fixture") =~
-               "Ready (fixture@example.com) · 45% of 5h limit"
+      assert row_item(state, "Setup Fixture").status == ItemStatus.new(:ready, "Ready · 45%")
+      assert row_item(state, "Setup Fixture").description =~ "fixture@example.com · 5h limit ·"
 
       assert picker_ui(state).picker.query == "fixture model"
       assert Picker.selected_id(picker_ui(state).picker) == selected
@@ -658,7 +696,7 @@ defmodule MingaEditor.UI.Picker.AgentModelSourceTest do
   end
 
   # Model rows by route display name, from a session that lists the registry's current routes.
-  defp route_rows(registry) do
+  defp route_items(registry) do
     opts = [
       backend_spec: MingaAgent.ProviderPacks.Native.spec(),
       credential_snapshot: Snapshot.new(%{}, nil),
@@ -673,7 +711,7 @@ defmodule MingaEditor.UI.Picker.AgentModelSourceTest do
 
     context(connection(session), 1)
     |> model_items()
-    |> Map.new(fn item -> {item.description |> String.split(" · ") |> hd(), item.description} end)
+    |> Map.new(fn item -> {item.description |> String.split(" · ") |> hd(), item} end)
   end
 
   defp land_fetch(state, scheduler) do
@@ -690,10 +728,11 @@ defmodule MingaEditor.UI.Picker.AgentModelSourceTest do
     picker_ui
   end
 
-  defp row_description(state, route_name) do
-    picker_ui(state).picker.items
-    |> Enum.find(&(model_choice?(&1) and &1.description =~ route_name))
-    |> Map.fetch!(:description)
+  defp row_item(state, route_name) do
+    Enum.find(
+      picker_ui(state).picker.items,
+      &(model_choice?(&1) and &1.description =~ route_name)
+    )
   end
 
   defp start_codex_session(plug, path \\ "/tmp/model-picker-oauth.json") do

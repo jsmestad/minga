@@ -672,6 +672,15 @@ func DecodePickerItem(data []byte, offset int, windowEnd int) (PickerItem, int, 
 	}
 	activationID := decodeU32(data, pos)
 	pos += 4
+	status, pos, err := decodeString16Window(data, pos, windowEnd)
+	if err != nil {
+		return PickerItem{}, offset, err
+	}
+	if err := decodeRequireWindow(windowEnd, pos+1, "status_tone"); err != nil {
+		return PickerItem{}, offset, err
+	}
+	statusTone := PickerStatusTone(data[pos])
+	pos++
 	return PickerItem{
 		IconColor:      iconColor,
 		Flags:          flags,
@@ -680,6 +689,8 @@ func DecodePickerItem(data []byte, offset int, windowEnd int) (PickerItem, int, 
 		Annotation:     annotation,
 		MatchPositions: matchPositions,
 		ActivationID:   activationID,
+		Status:         status,
+		StatusTone:     statusTone,
 	}, pos, nil
 }
 

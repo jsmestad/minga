@@ -147,7 +147,6 @@ defmodule MingaEditor.UI.Picker.PublicSource do
       annotation: item.annotation,
       search_text: item.search_text,
       icon_color: item.icon_color,
-      two_line: item.two_line,
       meta: meta
     }
   end

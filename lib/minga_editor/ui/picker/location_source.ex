@@ -70,8 +70,7 @@ defmodule MingaEditor.UI.Picker.LocationSource do
     %Item{
       id: {path, line, col},
       label: "#{display_path}:#{line_num}:#{col_num}",
-      description: String.trim(label),
-      two_line: true
+      description: String.trim(label)
     }
   end
 

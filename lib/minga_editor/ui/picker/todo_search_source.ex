@@ -159,8 +159,7 @@ defmodule MingaEditor.UI.Picker.TodoSearchSource do
       id: %{path: path, line: marker.line, index: idx},
       label: "#{icon} #{rel_path}:#{marker.line}",
       description: String.trim(marker.text),
-      icon_color: color,
-      two_line: true
+      icon_color: color
     }
   end
 

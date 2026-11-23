@@ -1027,7 +1027,20 @@ defmodule Minga.Integration.GUIProtocolTest do
             description: "lib",
             annotation: "",
             match_positions: [0, 1, 2],
-            activation_id: 23
+            activation_id: 23,
+            status: "",
+            status_tone: :none
+          },
+          %{
+            icon_color: 0,
+            flags: 8,
+            label: "Claude Opus 4",
+            description: "Claude (subscription) · Claude Max · 5h limit resets 3:59 PM",
+            annotation: "★ favorite",
+            match_positions: [],
+            activation_id: 24,
+            status: "Limit reached",
+            status_tone: :error
           }
         ],
         action_menu: nil,
@@ -1056,12 +1069,22 @@ defmodule Minga.Integration.GUIProtocolTest do
       assert decoded["filtered_count"] == 1
       assert decoded["total_count"] == 2
       assert decoded["marked_count"] == 1
-      assert Enum.count(decoded["items"]) == 1
+      assert Enum.count(decoded["items"]) == 2
 
-      item = hd(decoded["items"])
+      [item, model_row] = decoded["items"]
       assert item["label"] == "editor.ex"
       assert item["description"] == "lib"
       assert item["match_positions"] == [0, 1, 2]
+      assert item["flags"] == 2
+      assert item["status"] == ""
+      assert item["status_tone"] == 0
+
+      assert model_row["label"] == "Claude Opus 4"
+      assert model_row["flags"] == 8
+      assert model_row["annotation"] == "★ favorite"
+      assert model_row["status"] == "Limit reached"
+      # status_tone error is 3 (none 0, ready 1, warn 2, error 3, checking 4, neutral 5).
+      assert model_row["status_tone"] == 3
     end
   end
 
