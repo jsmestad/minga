@@ -15,6 +15,10 @@ defmodule Minga.Mode.ReplaceTest do
     test "Escape with modifiers transitions to :normal" do
       assert {:transition, :normal, _} = Replace.handle_key({27, 1}, fresh_state())
     end
+
+    test "Ctrl+C transitions to :normal like Escape" do
+      assert {:transition, :normal, _} = Replace.handle_key({?c, 0x02}, fresh_state())
+    end
   end
 
   describe "printable characters overwrite" do

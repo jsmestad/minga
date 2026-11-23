@@ -825,7 +825,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
   end
 
   describe "scope_ctrl_c/1" do
-    test "aborts a live turn and restores queued messages to the prompt" do
+    test "aborts a live turn, restores queued messages to the prompt and leaves Insert mode" do
       session =
         start_supervised!(
           {Session,
@@ -851,6 +851,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
           )
         end)
         |> MingaEditor.Agent.Events.dispatch(session, stop_event)
+        |> enter_insert()
 
       new_state = AgentCommands.scope_ctrl_c(state)
 
@@ -858,9 +859,10 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
       prompt = MingaEditor.Agent.PromptBuffer.input_text(new_state.workspace.agent_ui.panel)
       assert prompt =~ "steering note"
       assert prompt =~ "follow-up note"
+      assert Minga.Editing.mode(new_state) == :normal
     end
 
-    test "retries the provider when the agent is in error state" do
+    test "retries the provider and leaves Insert mode when the agent is in error state" do
       {:ok, session} = RestartStubSession.start_link(self())
 
       state =
@@ -873,12 +875,18 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
             )
           )
         end)
+        |> enter_insert()
 
       new_state = AgentCommands.scope_ctrl_c(state)
 
       assert_receive :restart_provider_called
       assert new_state.shell_runtime.state.notice.message == "Agent provider restarted"
+      assert Minga.Editing.mode(new_state) == :normal
     end
+  end
+
+  defp enter_insert(state) do
+    %{state | workspace: MingaEditor.Session.State.transition_mode(state.workspace, :insert)}
   end
 
   # ── ensure_agent_session ─────────────────────────────────────────────────

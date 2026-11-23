@@ -67,6 +67,17 @@ defmodule MingaEditor.Journeys.AgentOpenTest do
              agent_chat(ctx)
   end
 
+  test "Ctrl+C and Escape both leave Replace mode in the composer", %{editor_ctx: ctx} do
+    send_keys_async(ctx, "<SPC>anxyz<Esc>0Rab")
+    assert %{prompt: "abz", prompt_vim_mode: 6, input_focused?: true} = agent_chat(ctx)
+
+    send_keys_async(ctx, "<C-c>")
+    assert %{prompt: "abz", prompt_vim_mode: 0, input_focused?: true} = agent_chat(ctx)
+
+    send_keys_async(ctx, "Rc<Esc>")
+    assert %{prompt: "abc", prompt_vim_mode: 0, input_focused?: true} = agent_chat(ctx)
+  end
+
   test "keys immediately following SPC a n appear in the new composer", %{editor_ctx: ctx} do
     send_keys_async(ctx, "<SPC>anmy draft")
 

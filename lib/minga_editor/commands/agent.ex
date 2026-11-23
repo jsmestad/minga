@@ -1428,18 +1428,23 @@ defmodule MingaEditor.Commands.Agent do
   @doc """
   Context-sensitive Ctrl-C handler.
 
-  During streaming: aborts the agent and restores queued messages to the prompt.
-  When idle in insert mode: returns to normal mode (vim convention).
-  When idle in normal mode: no-op.
+  Always leaves Insert mode, as Escape does (vim convention). During streaming it also aborts the agent and restores queued messages to the prompt. After a provider error it also restarts the provider.
   """
   @spec scope_ctrl_c(state()) :: state()
   def scope_ctrl_c(state) do
-    case MingaEditor.Shell.Traditional.State.agent(state.shell_runtime.state).runtime.status do
-      status when status in [:thinking, :tool_executing] -> abort_agent(state)
-      :error -> restart_agent_provider(state)
-      _status -> input_to_normal(state)
-    end
+    state
+    |> interrupt_for_ctrl_c(
+      MingaEditor.Shell.Traditional.State.agent(state.shell_runtime.state).runtime.status
+    )
+    |> input_to_normal()
   end
+
+  @spec interrupt_for_ctrl_c(state(), atom()) :: state()
+  defp interrupt_for_ctrl_c(state, status) when status in [:thinking, :tool_executing],
+    do: abort_agent(state)
+
+  defp interrupt_for_ctrl_c(state, :error), do: restart_agent_provider(state)
+  defp interrupt_for_ctrl_c(state, _status), do: state
 
   @doc "Starts an agent session if one isn't already running. No-op otherwise."
   @spec ensure_agent_session(state()) :: state()
@@ -2505,7 +2510,7 @@ defmodule MingaEditor.Commands.Agent do
     {:agent_submit_or_newline, "Submit or newline", :scope_submit_or_newline},
     {:agent_insert_newline, "Insert newline in agent input", :scope_insert_newline},
     {:agent_submit_or_abort, "Submit or abort agent", :scope_submit_or_abort},
-    {:agent_ctrl_c, "Abort (streaming) or normal mode (idle)", :scope_ctrl_c},
+    {:agent_ctrl_c, "Normal mode (also aborts while streaming)", :scope_ctrl_c},
     {:agent_queue_follow_up, "Queue as follow-up or submit if idle", :scope_queue_follow_up},
     {:agent_dequeue, "Dequeue messages back to editor", :scope_dequeue},
     {:agent_toggle_help, "Toggle agent help", :scope_toggle_help},

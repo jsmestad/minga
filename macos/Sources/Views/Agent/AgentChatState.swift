@@ -485,7 +485,7 @@ public enum AgentTranscriptPreparationFailure: Error, Equatable {
 
 @Observable
 public final class AgentChatState {
-    public init(visible: Bool = false, status: AgentStatus = .idle, model: String = "", thinkingLevel: String = "medium", prompt: String = "", messages: [ChatMessageEntry] = [], promptLineCount: UInt8 = 1, promptCursorLine: UInt16 = 0, promptCursorCol: UInt16 = 0, promptMode: PromptMode = .normal, promptVisibleRows: UInt8 = 1, promptCompletion: Wire.PromptCompletion? = nil) {
+    public init(visible: Bool = false, status: AgentStatus = .idle, model: String = "", thinkingLevel: String = "medium", prompt: String = "", messages: [ChatMessageEntry] = [], promptLineCount: UInt8 = 1, promptCursorLine: UInt16 = 0, promptCursorCol: UInt16 = 0, promptMode: EditorMode = .normal, promptVisibleRows: UInt8 = 1, promptCompletion: Wire.PromptCompletion? = nil) {
         self.visible = visible
         self.status = status
         self.model = model
@@ -560,7 +560,7 @@ public final class AgentChatState {
     public var promptCursorLine: UInt16 = 0
     /// Cursor column within the prompt buffer.
     public var promptCursorCol: UInt16 = 0
-    public var promptMode: PromptMode = .normal
+    public var promptMode: EditorMode = .normal
     /// Number of visible rows in the prompt (after wrapping, clamped to max).
     public var promptVisibleRows: UInt8 = 1
     public private(set) var draftAttachmentCount: UInt8 = 0
@@ -628,7 +628,7 @@ public final class AgentChatState {
     /// Updates the chat chrome (visibility, status, model, prompt).
     ///
     /// Message content is sourced from the resident 0x86 stream via `applyTranscript`.
-    public func update(visible: Bool, status: AgentStatus, model: String, thinkingLevel: String, prompt: String, promptLineCount: UInt8, promptCursorLine: UInt16, promptCursorCol: UInt16, promptMode: PromptMode, promptVisibleRows: UInt8, promptCompletion: Wire.PromptCompletion?, draftAttachmentCount: UInt8 = 0, draftAttachmentOffer: UInt64 = 0, question: AgentQuestionOffer? = nil, stopTarget: AgentStopTarget? = nil, promptPresentation: UInt64 = 0, queueTarget: AgentQueueTarget? = nil, lifecycle: AgentChatLifecycle = .conversation) {
+    public func update(visible: Bool, status: AgentStatus, model: String, thinkingLevel: String, prompt: String, promptLineCount: UInt8, promptCursorLine: UInt16, promptCursorCol: UInt16, promptMode: EditorMode, promptVisibleRows: UInt8, promptCompletion: Wire.PromptCompletion?, draftAttachmentCount: UInt8 = 0, draftAttachmentOffer: UInt64 = 0, question: AgentQuestionOffer? = nil, stopTarget: AgentStopTarget? = nil, promptPresentation: UInt64 = 0, queueTarget: AgentQueueTarget? = nil, lifecycle: AgentChatLifecycle = .conversation) {
         self.visible = visible
         self.lifecycle = lifecycle
         self.status = status

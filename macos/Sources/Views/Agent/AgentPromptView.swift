@@ -71,16 +71,7 @@ public struct AgentPromptView: View {
     }
 
     /// Vim mode label shown in the prompt border.
-    private var modeLabel: String {
-        switch state.promptMode {
-        case .normal: return "NORMAL"
-        case .visual: return "VISUAL"
-        case .visualLine: return "V-LINE"
-        case .operatorPending: return "OP"
-        case .insert: return "INSERT"
-        case .unknown: return "NORMAL"
-        }
-    }
+    private var modeLabel: String { state.promptMode.displayName }
 
     public var body: some View {
         VStack(spacing: 0) {
