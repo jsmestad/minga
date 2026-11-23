@@ -1,22 +1,20 @@
 # Legacy root ExDoc guide paths redirected to /docs/
 /readme.html /docs/readme.html 301
-/getting-started.html /docs/getting-started.html 301
 /configuration.html /docs/configuration.html 301
 /agent-model-selection.html /docs/agent-model-selection.html 301
 /projects.html /docs/projects.html 301
-# Retired positioning and comparison docs redirected to /why-minga or Extension API
+# Retired positioning and comparison docs redirected to site guides
 /for-neovim-users.html /why-minga 301
 /docs/for-neovim-users.html /why-minga 301
 /for-emacs-users.html /why-minga 301
 /docs/for-emacs-users.html /why-minga 301
 /for-ai-coders.html /why-minga 301
 /docs/for-ai-coders.html /why-minga 301
-/extensibility.html /docs/extension_api.html 301
-/docs/extensibility.html /docs/extension_api.html 301
+/extensibility.html /extending 301
+/docs/extensibility.html /extending 301
 /extension_api.html /docs/extension_api.html 301
 /keymap-scopes.html /docs/keymap-scopes.html 301
 /agentic-keymap.html /docs/agentic-keymap.html 301
-/architecture.html /docs/architecture.html 301
 /protocol.html /docs/protocol.html 301
 /gui_protocol.html /docs/gui_protocol.html 301
 /charm_tui.html /docs/charm_tui.html 301

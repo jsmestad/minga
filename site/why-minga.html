@@ -4,9 +4,16 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex, nofollow">
-  <title>Why Minga: Programmable workbench on the BEAM</title>
-  <meta name="description" content="Why agent multiplexers and PTY harnesses like Herdr hit a structural ceiling, and how Minga builds a programmable BEAM workbench over typed buffer and agent authorities.">
+  <title>Why Minga: A programmable workbench where text is the interface</title>
+  <meta name="description" content="Why Minga makes quiet text-first chrome the default across macOS and the terminal, how it compares honestly to Cursor, Zed, Herdr, Neovim, and Emacs, and what comes after v0.1.0.">
+  <meta property="og:type" content="article">
+  <meta property="og:title" content="Why Minga: A programmable workbench where text is the interface">
+  <meta property="og:description" content="Why Minga makes quiet text-first chrome the default across macOS and the terminal, how it compares to Cursor, Zed, Herdr, Neovim, and Emacs, and what comes after v0.1.0.">
+  <meta property="og:image" content="/assets/og-minga.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:image" content="/assets/og-minga.png">
   <link rel="icon" type="image/svg+xml" href="/assets/minga_dark-transparent.svg">
+  <link rel="preload" href="/fonts/instrument-serif-italic.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/styles.css">
   <script>
     (() => {
@@ -25,14 +32,16 @@
   <header class="site-header">
     <div class="container header-inner">
       <a class="brand-link" href="/">
-        <img src="/assets/minga_dark-transparent.svg" alt="Minga logo" width="28" height="28">
-        <span>Minga</span>
-        <span class="brand-tag">v0.1.0 preview</span>
+        <img src="/assets/minga_dark-transparent.svg" alt="Minga logo" width="24" height="24">
+        <span class="brand-wordmark">minga</span>
+        <span class="brand-version">/ v0.1.0-pre</span>
       </a>
       <nav class="site-nav" aria-label="Primary">
         <a href="/why-minga" aria-current="page">Why Minga</a>
-        <a href="/docs/">Docs</a>
-        <a href="/#install">Install</a>
+        <a href="/getting-started">Getting Started</a>
+        <a href="/architecture">Architecture</a>
+        <a href="/extending">Extending</a>
+        <a href="/docs/">Reference</a>
         <a href="https://github.com/jsmestad/minga">GitHub</a>
         <button type="button" class="theme-toggle" data-theme-toggle aria-label="Toggle color theme">Light</button>
       </nav>
@@ -42,161 +51,164 @@
   <main id="main">
     <header class="essay-hero">
       <div class="container">
-        <p class="kicker">Thesis &amp; Architecture</p>
+        <p class="section-index"><span>THESIS</span> Design &amp; Tradeoffs</p>
         <h1>Why Minga</h1>
-        <p class="essay-subtitle">Spawning parallel CLI agents is easy now. Verifying, steering, and fixing their code without bouncing across terminal panes, worktrees, and a second editor is the real bottleneck.</p>
+        <p class="essay-subtitle">Editors fail when agent chrome fights your code for screen width and focus. Terminal multiplexers escape that clutter, then strand your agents outside the editor buffer. Minga is built for engineers who want one quiet, programmable workbench shared by macOS and the terminal.</p>
         <nav class="essay-toc" aria-label="Sections">
-          <a href="#the-bottleneck">1. Where the multiplexer loop breaks down</a>
-          <a href="#comparison">2. How Minga compares</a>
-          <a href="#programmable-workbench">3. Programmable workbench</a>
-          <a href="#the-beam">4. Why the BEAM</a>
-          <a href="#honest-gaps">5. What is still early</a>
+          <a href="#why-quiet-chrome">1. Why quiet chrome</a>
+          <a href="#the-bottleneck">2. Beyond multiplexers</a>
+          <a href="#comparison">3. How Minga compares</a>
+          <a href="#programmable-workbench">4. Disposable &amp; reusable workflows</a>
+          <a href="#zero-lock-in">5. Zero lock-in &amp; roadmap</a>
         </nav>
       </div>
     </header>
 
     <article class="essay-body">
       <div class="container">
+        <section class="essay-section" id="why-quiet-chrome">
+          <h2>1. Editors fail when chrome competes with your code</h2>
+          <p>Most AI editors default to IDE chrome: activity rails, permanent file trees, tab bars, chat drawers, and workspace pills. You can hide those panels in VS Code, Cursor, or Zed via Zen Mode, but the surrounding workflow still assumes permanent docks and desktop-only panels. We learned the same lesson the hard way in Minga's early builds: once we added separate "Editor" and "Agent" workspaces, icon rails, and status strips, people could not tell which workspace they were in, status indicators disagreed across bars, and the macOS app and terminal client drifted apart.</p>
+          <p>Minga's interface model (<a href="https://github.com/jsmestad/minga/blob/main/docs/adr/0006-the-spine.md">ADR-0006</a>) makes text-first the default constraint rather than an optional mode. Ordinary window splits and on-demand file switchers remain first-class, while permanent rails, tab strips, and workspace containers disappear. That is a deliberate tradeoff: if you prefer a permanent wide-screen file tree and fixed tabs on a 5K monitor, Cursor or Zed is built for that. If you want the exact same quiet muscle memory on your MacBook and over SSH in a terminal, one shared layout is the point.</p>
+        </section>
+
         <section class="essay-section" id="the-bottleneck">
-          <h2>1. Where the agent multiplexer loop breaks down</h2>
-          <p>The most popular agent workflow right now is not an IDE at all. It is an agent multiplexer: tools like Herdr, or homegrown tmux setups, wrapping Claude Code, Codex, pi, and OpenCode in persistent terminal workspaces with status sidebars and socket APIs.</p>
-          <p>That workflow earned its adoption. Closing your laptop no longer kills an agent mid-task, one sidebar shows which sessions are working or waiting on approval, and scripts can coordinate multiple CLI agents across repositories. If your day is launching six unrelated agents across separate repos and checking on them from a status list, a PTY multiplexer fits well.</p>
-          <p>The cost shows up the moment you stay close to the code on a real, subtle change:</p>
+          <h2>2. Where the terminal multiplexer loop hits a wall</h2>
+          <p>Many senior engineers moved past IDE chat sidebars to CLI agents like Claude Code and Codex inside tmux or multiplexers like Herdr. That workflow earned its following: persistent background daemons survive sleep, status panels show which sessions need approval, and you can run vendor-native CLI harnesses side by side on flat-rate subscriptions.</p>
+          <p>The ceiling shows up when you want editing, review, remote daemons, and agent execution inside one programmable environment:</p>
           <ul>
-            <li><strong>The bottleneck shifted from generating code to verifying and steering it.</strong> Terminal scrollback has no jump-to-definition, no type hover, and no live LSP diagnostics. To understand what a 400-line diff actually breaks, you flip to Neovim, Emacs, or VS Code, trace callers there, copy file paths and line numbers back into chat, and wait on another full turn for a four-line fix you could have typed yourself.</li>
-            <li><strong>You get forced into slow batch handoffs instead of working on the same code together.</strong> Because CLI agents write straight to disk, editing the same file while an agent works risks clobbering unsaved buffers or scrambling undo history. Isolating every pane in its own Git worktree prevents collisions, but you pay for it with duplicated build caches, cold compiles, separate LSP indexes, and manual conflict cleanup whenever two tasks touch overlapping modules.</li>
-            <li><strong>Customizing a multiplexer only changes chrome around a black box.</strong> You can script tabs, status indicators, and markdown instructions around external CLIs, but you cannot build a workflow that ties live editor state and agent turns together: staging hunks into an open buffer, rejecting one hunk while hand-editing another with undo intact, attaching live diagnostics directly to a draft, or building a custom interactive review surface you keep across projects.</li>
+            <li><strong>Two disconnected worlds for editing and review.</strong> CLI agents operate on disk, so coordinating parallel edits with open editor buffers requires Git worktrees, file-watcher reloads, or per-editor bridge plugins.</li>
+            <li><strong>Linear undo across two authors.</strong> When an agent edits a file you are working in, ordinary editor undo treats both authors as one timeline. Minga separates authorship so <kbd>u</kbd> / <kbd>⌘Z</kbd> undoes only your edits while agent changes stay tracked per step and leave cleanly through Reject.</li>
+            <li><strong>Customization stops at the terminal edge.</strong> Multiplexers script panes, status bars, hooks, and prompt files around external CLIs, whereas Minga lets you reshape the editor, review buffers, hooks, and agent workflows in one Elixir runtime.</li>
           </ul>
-          <p>Minga starts from the opposite side of that boundary: put the editor, buffers, LSP clients, and supervised agent sessions inside one programmable BEAM runtime so steering code and running agents happen in the same loop.</p>
 
           <h3>What if you do not want to read every line of code?</h3>
-          <p>Even if you stop reading implementation lines altogether, terminal scrollback is still a poor workbench. When your work moves up a level to specs, contracts, architecture, verification evidence, and adversarial reviews, you outgrow scrolling terminal panes faster, not slower.</p>
-          <p>The point of Minga is that the workbench reshapes itself to fit your style of work for that task, embracing disposable, customized software. Stay hands-on in the buffer with native editing, LSP, and inline hunk review when you want to work close to the code, or spin up a task-specific spec review surface, architecture view, or automated check workflow when you want to work a level above the implementation. Throw it away when the task finishes, or keep it when it earns reuse across projects.</p>
+          <p>Even when your work moves up a level to specs, contracts, architecture, verification evidence, and adversarial reviews, scrolling terminal panes gets worse, not better. Minga is built so the workbench reshapes itself to fit your task, embracing disposable, customized software: stay hands-on in the buffer when writing code, or build a task-specific spec review buffer or check workflow when supervising agents. Discard it when the work lands, or reuse it across projects.</p>
         </section>
 
         <section class="essay-section" id="comparison">
-          <h2>2. Neither an AI sidebar nor a PTY multiplexer</h2>
-          <p>Most coding setups today choose between legacy IDEs with bolted-on chat panels or agent multiplexers wrapping terminal CLIs. Here is how those architectures compare at the runtime boundary:</p>
+          <h2>3. How Minga compares (and where others win today)</h2>
+          <p>Every tool in this space makes real architectural tradeoffs. Here is where Minga sits against the options engineers actually use:</p>
 
           <div class="table-wrap">
             <table>
               <thead>
                 <tr>
                   <th>Dimension</th>
-                  <th>AI-retrofitted IDEs</th>
-                  <th>Agent multiplexers &amp; CLI harnesses (Herdr, tmux + Claude Code / Codex / pi)</th>
+                  <th>VS Code / Cursor</th>
+                  <th>Zed</th>
+                  <th>CLI Harnesses &amp; Multiplexers (tmux, Herdr + Claude Code / Codex)</th>
                   <th>Minga</th>
                 </tr>
               </thead>
               <tbody>
                 <tr>
-                  <td>Runtime &amp; persistence</td>
-                  <td>Single UI event loop; closing the app tears down workspace state and heavy streams contend with typing.</td>
-                  <td>Background server keeps PTY panes alive across disconnects; status is inferred from opaque terminal sessions.</td>
-                  <td>Supervised BEAM processes with preemptive scheduling and per-process heaps, plus <code>minga --headless</code> for durable local or remote sessions.</td>
+                  <td>Chrome &amp; clients</td>
+                  <td>Electron desktop IDE (optional Zen Mode); no terminal client; polished inline Tab prediction.</td>
+                  <td>Native Rust GPU desktop app (macOS, Linux, Windows); fast multibuffer diffs and Edit Prediction; optional panel hiding; no terminal TUI.</td>
+                  <td>Runs in any terminal or persistent daemon (Herdr adds desktop and mobile clients); pairs with your editor of choice.</td>
+                  <td>Quiet text-first layout (text + one modeline, buffers in drawers) shared by macOS and the Go TUI; no Windows or Linux desktop GUI yet.</td>
                 </tr>
                 <tr>
-                  <td>How agents edit files</td>
-                  <td>Mutate shared editor state or patch files through an extension host bridge.</td>
-                  <td>Write directly to disk; concurrent work requires separate Git worktrees per pane and breaks editor undo history.</td>
-                  <td>Route through <code>MingaAgent.ToolRouter</code> into in-memory buffer forks, staged review (<kbd>SPC a p</kbd> / <kbd>SPC a P</kbd>), three-way merge, and undo integration.</td>
+                  <td>Agent harness &amp; providers</td>
+                  <td>Deeply tuned built-in agents, cloud/background agents, and massive marketplace.</td>
+                  <td>Built-in multi-provider agents plus Agent Client Protocol (ACP) to run vendor CLIs like Claude Code and Codex natively.</td>
+                  <td>Runs frontier vendor CLIs directly on day zero with flat-rate vendor subscriptions.</td>
+                  <td>Built-in open multi-provider agent loop (8 hosted providers plus custom corporate gateway routes); does not wrap external vendor CLIs.</td>
                 </tr>
                 <tr>
-                  <td>Code reading &amp; auditing</td>
-                  <td>Full editor navigation, often weighed down by Electron chrome and extension sprawl.</td>
-                  <td>Diff text in terminal scrollback; you open Neovim or VS Code in another window to jump to definitions or edit.</td>
-                  <td>Native Swift/Metal macOS GUI and Go terminal client with Vim + CUA editing, LSP, 50 tree-sitter grammars, and inline diff review.</td>
+                  <td>Edits, review &amp; undo</td>
+                  <td>Direct workspace edits with inline editable diffs, live LSP diagnostics, and shared undo.</td>
+                  <td>Editable multibuffer inline diffs with live LSP diagnostics, syntax highlighting, and CRDT collaboration.</td>
+                  <td>Disk writes (with checkpoints like <code>/rewind</code>, IDE diff bridges, or isolated Git worktrees).</td>
+                  <td>Revision-checked staged overlays, three-way merge, crash-safe drafts, and read-only hunk review today; inline Twist authorship, per-author undo, and <code>*minga-review*</code> landing for v0.1.0.</td>
                 </tr>
                 <tr>
-                  <td>Orchestration &amp; customization</td>
-                  <td>Fixed sidebar UX; plugin APIs wrap a host you cannot deeply reshape without forking.</td>
-                  <td>Socket/CLI pane spawning, scratch-file handoffs, and markdown/layout rules around external CLI processes.</td>
-                  <td>Typed Elixir config, hooks, advice, and supervised extensions, moving toward ADR-0004 definitions you Save, activate, and Keep over real engine state.</td>
+                  <td>Remote &amp; programmability</td>
+                  <td>Remote SSH extension; TypeScript extensions in a shared Node Extension Host; host chrome mostly fixed.</td>
+                  <td>Remote SSH dev; compiled Rust core with limited WASM extension surface; deep UI changes require forking.</td>
+                  <td>Persistent remote daemons; hooks, MCP, and pane scripting around external CLI processes.</td>
+                  <td>Persistent <code>minga --headless</code> + <code>minga attach ssh://</code>, Elixir config/hooks/advice, Hex/Git extensions, and <code>PreToolUse</code>/MCP today; save-to-activate reusable workflows in v0.1.0.</td>
                 </tr>
               </tbody>
             </table>
           </div>
 
-          <h3>If you live in Herdr or tmux + Neovim + CLI agents</h3>
-          <p>You keep your modal muscle memory and terminal reach without splitting editing and orchestration across two worlds. Minga ships Normal, Insert, Visual, Operator-Pending, Replace, and Search modes, text objects (<code>iw</code>, <code>i"</code>, <code>a{</code>), registers, macros, marks, dot repeat, counts, 50 compiled tree-sitter grammars, supervised LSP clients, and a Go/Bubble Tea terminal client over the same BEAM core and headless daemon as the macOS app. CUA editing is also first-class when you want standard desktop shortcuts.</p>
+          <div class="scope-strip">
+            <div class="scope-note">
+              <h3>When Herdr, tmux, or Zed is a better fit</h3>
+              <p>If you want to run Anthropic's Claude Code and OpenAI's Codex CLI side by side on flat-rate vendor subscriptions, Herdr, tmux, or Zed's Agent Client Protocol is built for that. If you want a compiled Rust desktop IDE with editable multibuffer diffs and Tab prediction today, look at Zed or Cursor.</p>
+            </div>
+            <div class="scope-note">
+              <h3>What about Cursor and VS Code?</h3>
+              <p>VS Code and Cursor have massive extension ecosystems, polished inline Tab completion, and cloud agents. Minga trades Electron and fixed extension-host APIs for native macOS and terminal clients sharing one keyboard-first design over the Erlang VM.</p>
+            </div>
+          </div>
 
-          <h3>If you come from Emacs or Doom Emacs</h3>
-          <p>Minga shares Emacs's core philosophy: your config is the same language as the editor, commands wrap with <code>:before</code>, <code>:after</code>, <code>:around</code>, and <code>:override</code> advice, hooks attach to lifecycle events, and <kbd>SPC</kbd> leader menus make deep command trees discoverable via Which-Key. What changes is the runtime underneath: hooks run concurrently in isolated processes instead of freezing typing, buffer-local state is enforced by per-buffer processes rather than global symbol-table conventions, and there is no single-threaded C wall blocking agent concurrency.</p>
+          <h3>Coming from Neovim</h3>
+          <p>Core Vim motions, text objects (<code>iw</code>, <code>i"</code>, <code>a{</code>), registers, macros, marks, dot repeat, counts, language servers, and a first-class terminal client carry over directly. Inside code buffers, <kbd>y</kbd>, <kbd>n</kbd>, <kbd>=</kbd>, and <kbd>q</kbd> stay strictly Vim, while bare single-letter review keys live only in special buffers like <code>*minga-review*</code> and <code>*minga-tasks*</code> (the same boundary fugitive and gitsigns follow). If your workflow already thrives on Neovim + <code>gitsigns</code> + <code>fugitive</code> + <code>oil.nvim</code> + <code>telescope</code> with 15ms LuaJIT startup on every Linux box, Minga's plugin catalog is still young; the reason to look at Minga is Erlang VM fault isolation, Elixir programmability, native macOS rendering with TUI parity, and integrated multi-agent review primitives without gluing a dozen Lua plugins together.</p>
+
+          <h3>Coming from Emacs or Doom Emacs</h3>
+          <p>Emacs and Doom directly inspired Minga's Spacebar leader menus (with live counts in which-key), magit-style special buffers, hooks, command advice (<code>:before</code>, <code>:after</code>, <code>:around</code>, <code>:override</code>), and writing configuration in the editor's own language. While Emacs runs I/O and LSP asynchronously via subprocesses, CPU-bound Elisp still shares one Lisp thread; Minga isolates every open buffer, hook, extension, MCP server, and agent session in its own Erlang VM process and heap. The tradeoff today: config options, hooks, and advice reload live, whereas compiled extension packages activate on restart to avoid split-version bugs (<a href="/docs/0003-extension-code-updates-require-a-new-vm-generation.html">ADR-0003</a>), trading away Emacs's live <code>eval-defun</code> patching of loaded packages and mature tools like <code>magit</code> and <code>TRAMP</code>. Personality stays quiet and only shows up at the edges: Minga is Bavarian for Munich ("Servus." on welcome, "Passt." once when a task finishes, and "Ciao." on quit).</p>
+
+          <h3>Coming from VS Code, Cursor, or Zed</h3>
+          <p>Minga is a Vim-first keyboard workbench by design, with an optional standard-desktop shortcut mode (<code>set :editing_model, :cua</code>) and first-class mouse support where every visible action has a click. Even in desktop-shortcut mode, Minga intentionally omits permanent tab strips and sidebars in favor of a fast file switcher, pinned files, and on-demand drawers. If you want standard IDE tabs, a permanent sidebar, and inline Tab prediction, Cursor or Zed will feel more immediately familiar.</p>
         </section>
 
         <section class="essay-section" id="programmable-workbench">
-          <h2>3. Programmability over real engine owners (not PTY glue)</h2>
-          <p>Minga's v0.1.0 design (<a href="https://github.com/jsmestad/minga/issues/3542">#3542</a>, <a href="https://github.com/jsmestad/minga/issues/3662">#3662</a>, and <a href="/docs/0004-products-are-root-applets-over-a-fixed-engine.html">ADR-0004</a>) draws a sharp line between what stays fixed in the engine and what you or your agent can reshape.</p>
+          <h2>4. Disposable and reusable workflows (v0.1.0 direction)</h2>
+          <p>Minga separates what stays fixed in the engine from what you or your agent can reshape for a task (<a href="/docs/0004-products-are-root-applets-over-a-fixed-engine.html">ADR-0004</a>):</p>
 
           <ul>
-            <li><strong>Authoritative owners stay fixed.</strong> Buffer processes own canonical text, edits, and undo. Agent sessions own conversations, admitted turns, tool execution, permissions, and lossless continuation (<a href="/docs/session-recovery.html">Session Recovery</a>). Authored workflows steer and compose those authorities rather than scraping terminal output, inventing a second task database, or substituting markdown prompt glue for real execution controls.</li>
-            <li><strong>Two clear ways to evolve Minga.</strong> Customize Minga by discovering supported capabilities, authoring readable Elixir source, saving to activate, inspecting the result, and keeping useful definitions across projects. Develop Minga itself through normal source changes, tests, and pull requests when a task genuinely needs a new native or engine capability.</li>
-            <li><strong>Explicit boundaries instead of magic hot-reloading.</strong> Under <a href="/docs/0003-extension-code-updates-require-a-new-vm-generation.html">ADR-0003</a>, arbitrary compiled extension packages and dependencies still activate on a fresh BEAM generation so active callbacks and loaded modules never mix versions, while <kbd>SPC h r</kbd> reloads options, keybindings, hooks, and advice cleanly in place. Restricted live Save-to-activate definitions, grouped Save, and Keep are being specified and verified step by step as part of v0.1.0 rather than hand-waved as unrestricted VM code patching.</li>
-          </ul>
-
-          <div class="callout">
-            <span class="callout-title">No hidden sandbox claims</span>
-            <p>Elixir extensions and authored definitions run with OS-user privileges inside Minga's BEAM VM, the same trust model as Emacs Lisp and Neovim Lua. Minga uses explicit session grants and source-owned cleanup for admission and recovery, not OS-level sandboxing of untrusted code. See <a href="/docs/extension_api.html#trust-model">Extension API: Trust Model</a>.</p>
-          </div>
-        </section>
-
-        <section class="essay-section" id="the-beam">
-          <h2>4. Why the BEAM, and why native code still draws the screen</h2>
-          <p>Most editors treat concurrency as an afterthought because human typing is slow compared to a CPU. Agentic work changes the load profile completely: multiple model streams, background sub-agents, shell commands, LSP servers, tree-sitter reparsing, and interactive editing all happen at once.</p>
-
-          <ul>
-            <li><strong>Preemptive scheduling and per-process GC.</strong> The BEAM allocates a separate heap per process and preemptively schedules work across cores. A busy agent session or a large LSP response cannot lock out editor input or trigger a global stop-the-world GC pause.</li>
-            <li><strong>Structural fault isolation.</strong> Each buffer, agent session, LSP client, and extension lives under an OTP supervision tree. A crashed tool worker or misbehaving extension callback is contained and reported cleanly without taking down open buffers or unsaved edits.</li>
-            <li><strong>Observable live state.</strong> Because everything is an OTP process, you can inspect running state with <code>:sys.get_state/1</code>, trace messages with <code>:dbg</code>, or open <code>:observer.start()</code> when diagnosing a workflow instead of guessing through print statements.</li>
-            <li><strong>Durable headless execution.</strong> Running <code>minga --headless</code> keeps agent sessions alive without a display, locally or on a remote machine, with clients attaching over WebSocket and JSON-RPC (<a href="/docs/remote_agents.html">Remote Agents</a>).</li>
-          </ul>
-
-          <h3>What the BEAM does not do</h3>
-          <p>Picking the right runtime also means respecting its limits. Minga does not use the BEAM for GPU rendering, terminal escape-sequence layout, or syntax parsing:</p>
-          <ul>
-            <li><strong>macOS GUI:</strong> Swift 6, CoreText, and Metal 3.1 own font shaping, native chrome, accessibility, row measurement (<a href="/docs/0001-frontend-owns-row-fit.html">ADR-0001</a>), and immediate UI feedback (<a href="/docs/0005-frontend-owns-immediate-ui-feedback.html">ADR-0005</a>).</li>
-            <li><strong>Terminal frontend:</strong> Go and Bubble Tea render the TUI over the same Semantic UI protocol (<a href="/docs/charm_tui.html">Charm TUI</a>).</li>
-            <li><strong>Parsing and native helpers:</strong> Zig runs the tree-sitter parser port across 50 compiled grammars and manages process-group isolation for agent hooks.</li>
+            <li><strong>Core data stays with one owner.</strong> Open buffers own text, edits, and undo. Agent sessions own conversations, tool approvals, permissions, and crash-safe persistence (<a href="/docs/session-recovery.html">Session Recovery</a>). Custom workflows compose those real primitives rather than scraping terminal output or inventing shadow databases.</li>
+            <li><strong>Two paths to evolve the workbench.</strong> Customize Minga through readable Elixir config and extensions today (and save-to-activate task workflows in v0.1.0), or extend Minga's native clients and core engine through ordinary pull requests when you need a new low-level capability.</li>
+            <li><strong>Explicit boundaries for safety and recovery.</strong> Extensions and authored workflows run with OS-user privileges, so human approval gates, revocable session grants, and automatic restoration on failed activation stay explicit rather than hidden behind silent hot-patching. See <a href="/extending#security-and-reloads">Security, privacy, and reload boundaries</a>.</li>
           </ul>
         </section>
 
-        <section class="essay-section" id="honest-gaps">
-          <h2>5. An honest accounting of what is still early</h2>
-          <p>Minga is pre-release software building toward v0.1.0. If you are deciding whether to try it now or follow along until the release cut, here is where things actually stand:</p>
+        <section class="essay-section" id="zero-lock-in">
+          <h2>5. Zero lock-in and what comes next</h2>
+          <p>Trying Minga carries zero repository lock-in. Minga never writes proprietary project files or metadata into your Git repo; your code stays an ordinary directory you can open in Neovim, Zed, or VS Code at any moment. Staged agent drafts and saved transcripts live in documented local paths under <code>~/.local/share/minga/</code>, and the entire codebase is MIT open source.</p>
+
+          <p>Where things stand ahead of v0.1.0 and what is scoped post-v0.1.0:</p>
 
           <div class="table-wrap">
             <table>
               <thead>
                 <tr>
                   <th>Area</th>
-                  <th>Current status</th>
+                  <th>Status</th>
                 </tr>
               </thead>
               <tbody>
                 <tr>
-                  <td>v0.1.0 live authoring &amp; Keep</td>
-                  <td>Active release milestone (<a href="https://github.com/jsmestad/minga/issues/3542">#3542</a>, <a href="https://github.com/jsmestad/minga/issues/3662">#3662</a>). Config DSL, hooks, advice, and supervised extensions ship today; live Save-to-activate definitions and Keep are gated on release qualification.</td>
+                  <td>Quiet chrome, marks &amp; parity (ADR-0006)</td>
+                  <td>Proposed design, scenario inventory, theme-role rules, and default Catppuccin Frappé theme have landed on <code>main</code> (<a href="https://github.com/jsmestad/minga/tree/main/docs/design"><code>docs/design/</code></a>). Surface-by-surface implementation (Twist gutter, Orbit states, per-author undo, Subagent Peek, prioritized modeline, Storyboard CI) lands toward v0.1.0; today's rolling Homebrew build still runs the earlier shell and read-only diff viewer.</td>
                 </tr>
                 <tr>
-                  <td>Extension ecosystem</td>
-                  <td>The extension runtime, <code>minga_sdk</code>, model routes, and runtime tree-sitter grammar loading ship today (with early extensions such as <code>minga-org</code> and <code>GitExtended</code>), but the third-party package catalog is tiny compared to MELPA, Neovim, or VS Code.</td>
+                  <td>Disposable &amp; reusable workflows (ADR-0004)</td>
+                  <td>Active v0.1.0 target. Live config, hooks, command advice, Hex/Git extensions, <code>PreToolUse</code> hooks, MCP servers, and corporate LLM gateways ship today; save-to-activate task workflows and cross-repo reuse land in v0.1.0.</td>
                 </tr>
                 <tr>
-                  <td>Platforms</td>
-                  <td>Native macOS GUI (Swift + Metal) and terminal client (Go + Bubble Tea, macOS and Linux) ship today. A native Linux desktop GUI (GTK4) is post-v0.1.0.</td>
+                  <td>Built-in terminal buffers</td>
+                  <td>Interaction contract (<code>*terminal*</code>, <code>*minga-shell*</code>, OSC 133 command blocks, <code>ic</code>/<code>ac</code>) is designed in <code>docs/design/terminal.md</code>; emulator engine selection is still open and scoped beyond today's build.</td>
                 </tr>
                 <tr>
-                  <td>Inline ghost text &amp; DAP</td>
-                  <td>Not shipped yet. Agent work focuses on multi-file buffer-aware sessions, staged diffs, and programmable workflows.</td>
+                  <td>Staged diff review &amp; shell overlays</td>
+                  <td>Today's prerelease diff review pane is read-only (LSP checks published open buffers). Shell commands inside an agent turn materialize the overlay into a temporary directory with an isolated build path, skipping <code>.git</code> and <code>node_modules</code>.</td>
+                </tr>
+                <tr>
+                  <td>Inline autocomplete, DAP &amp; platforms</td>
+                  <td>Inline next-edit prediction (Cursor Tab / Zed Zeta) and interactive DAP debugging are post-v0.1.0. Signed Apple Silicon macOS desktop and CLI builds ship via Homebrew today; Linux and Intel Macs build from source, a native Linux desktop GUI is post-v0.1.0, and Windows is unsupported.</td>
                 </tr>
               </tbody>
             </table>
           </div>
 
           <div class="actions">
-            <a class="btn btn-primary" href="/docs/getting-started.html">Get Started</a>
-            <a class="btn" href="/docs/extension_api.html">Read Extension API</a>
-            <a class="btn" href="/docs/architecture.html">Read Architecture</a>
+            <a class="btn btn-primary" href="/getting-started">Get Started</a>
+            <a class="btn" href="/architecture">Explore Architecture</a>
+            <a class="btn" href="/extending">Extending Minga</a>
           </div>
         </section>
       </div>
@@ -206,15 +218,15 @@
   <footer class="site-footer">
     <div class="container footer-inner">
       <div class="footer-note">
-        <p><strong>Minga</strong> is open source under the MIT license. Created by <a href="https://evalcode.com">Justin Smestad</a> in Colorado.</p>
-        <p>Pre-release staging preview ahead of v0.1.0 launch (<a href="https://github.com/jsmestad/minga/issues/3542">#3542</a>).</p>
+        <p><span class="brand-wordmark" style="font-size:1.15rem;margin-right:0.25rem;">minga</span> is open source under the MIT license. Created by <a href="https://evalcode.com">Justin Smestad</a>.</p>
       </div>
       <nav class="footer-links" aria-label="Footer">
         <a href="/">Home</a>
-        <a href="/docs/">Documentation</a>
-        <a href="/docs/architecture.html">Architecture</a>
+        <a href="/getting-started">Getting Started</a>
+        <a href="/architecture">Architecture</a>
+        <a href="/extending">Extending</a>
+        <a href="/docs/">API Docs</a>
         <a href="/docs/changelog.html">Changelog</a>
-        <a href="/docs/contributing.html">Contributing</a>
         <a href="https://github.com/jsmestad/minga">GitHub</a>
       </nav>
     </div>
