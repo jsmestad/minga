@@ -531,13 +531,7 @@ kbd {
   color: var(--text-muted);
 }
 
-/* Grids & Cards */
-
-.grid-3 {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 1.25rem;
-}
+/* Grids */
 
 .grid-2 {
   display: grid;
@@ -552,37 +546,131 @@ kbd {
   align-items: start;
 }
 
-.panel {
-  background: var(--bg-elevated);
+/* Aligned Workflow Trace Comparison */
+
+.loop-compare {
   border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  padding: 1.4rem 1.45rem;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  background: var(--bg-elevated);
 }
 
-.panel-highlight {
-  border-color: var(--accent-border);
-  background: linear-gradient(180deg, var(--accent-soft), var(--bg-elevated) 68%);
+.loop-head,
+.loop-row {
+  display: grid;
+  grid-template-columns: 11.5rem minmax(0, 1fr) minmax(0, 1fr);
 }
 
-.panel-kicker {
+.loop-head {
+  background: var(--bg-subtle);
+  border-bottom: 1px solid var(--border);
+}
+
+.loop-head-cell {
+  padding: 0.9rem 1.2rem;
   font-family: var(--font-mono);
-  font-size: 0.72rem;
-  letter-spacing: 0.06em;
+  font-size: 0.74rem;
+  letter-spacing: 0.05em;
   text-transform: uppercase;
   color: var(--text-muted);
-  margin-bottom: 0.45rem;
 }
 
-.panel-highlight .panel-kicker {
+.loop-head-cell strong {
+  display: block;
+  font-family: var(--font-sans);
+  font-size: 0.92rem;
+  letter-spacing: -0.01em;
+  text-transform: none;
+  color: var(--text);
+  margin-bottom: 0.12rem;
+}
+
+.loop-head-minga {
+  border-left: 1px solid var(--border);
+  box-shadow: inset 0 2px 0 0 var(--accent);
+  background: var(--accent-soft);
+}
+
+.loop-head-minga strong {
   color: var(--accent);
 }
 
-.panel h3 {
-  margin-bottom: 0.55rem;
+.loop-row {
+  border-bottom: 1px solid var(--border);
 }
 
-.panel p {
+.loop-row:last-child {
+  border-bottom: none;
+}
+
+.loop-step {
+  padding: 1.25rem 1.2rem;
+  background: var(--bg-subtle);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.loop-num {
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: var(--accent);
+  letter-spacing: 0.06em;
+}
+
+.loop-step-title {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text);
+  line-height: 1.3;
+}
+
+.loop-cell {
+  padding: 1.25rem 1.35rem;
+  font-size: 0.94rem;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+
+.loop-cell-minga {
+  border-left: 1px solid var(--border);
+  background: color-mix(in srgb, var(--accent-soft) 45%, var(--bg-elevated));
+  color: var(--text);
+}
+
+.loop-cell-label {
+  display: none;
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 0.35rem;
+}
+
+.loop-cell-minga .loop-cell-label {
+  color: var(--accent);
+}
+
+.scope-strip {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1.5rem 2.25rem;
+  margin-top: 1.75rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--border);
+}
+
+.scope-note h3 {
   font-size: 0.95rem;
+  margin-bottom: 0.4rem;
+}
+
+.scope-note p {
+  font-size: 0.9rem;
+  color: var(--text-muted);
 }
 
 /* Feature list & Callouts */
@@ -930,12 +1018,35 @@ td:first-child {
 /* Responsive */
 
 @media (max-width: 900px) {
-  .grid-3,
   .doc-links {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   .split-layout {
     grid-template-columns: 1fr;
+  }
+  .loop-head {
+    display: none;
+  }
+  .loop-row {
+    grid-template-columns: 1fr;
+  }
+  .loop-step {
+    flex-direction: row;
+    align-items: baseline;
+    gap: 0.65rem;
+    padding: 0.8rem 1.15rem;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+  .loop-cell {
+    padding: 1rem 1.15rem;
+  }
+  .loop-cell-minga {
+    border-left: none;
+    border-top: 1px solid var(--border);
+  }
+  .loop-cell-label {
+    display: block;
   }
 }
 
@@ -946,10 +1057,10 @@ td:first-child {
   .section {
     padding: 3.25rem 0;
   }
-  .grid-3,
   .grid-2,
   .runtime-grid,
-  .doc-links {
+  .doc-links,
+  .scope-strip {
     grid-template-columns: 1fr;
   }
   .header-inner {

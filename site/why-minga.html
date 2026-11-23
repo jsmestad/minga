@@ -44,9 +44,9 @@
       <div class="container">
         <p class="kicker">Thesis &amp; Architecture</p>
         <h1>Why Minga</h1>
-        <p class="essay-subtitle">Agent multiplexers solved keeping CLI agents alive in background panes. They did not solve what happens when those panes are blind to your buffers, your symbols, your diffs, and each other.</p>
+        <p class="essay-subtitle">Spawning parallel CLI agents is easy now. Verifying, steering, and fixing their code without bouncing across terminal panes, worktrees, and a second editor is the real bottleneck.</p>
         <nav class="essay-toc" aria-label="Sections">
-          <a href="#the-pty-ceiling">1. The PTY-pane ceiling</a>
+          <a href="#the-bottleneck">1. Where the multiplexer loop breaks down</a>
           <a href="#comparison">2. How Minga compares</a>
           <a href="#programmable-workbench">3. Programmable workbench</a>
           <a href="#the-beam">4. Why the BEAM</a>
@@ -57,18 +57,17 @@
 
     <article class="essay-body">
       <div class="container">
-        <section class="essay-section" id="the-pty-ceiling">
-          <h2>1. The PTY-pane ceiling of agent multiplexers</h2>
-          <p>The fastest-growing workflow in software engineering right now is not an IDE at all. It is an agent multiplexer: tools like Herdr, or homegrown tmux setups, wrapping Claude Code, Codex, pi, and OpenCode inside persistent terminal workspaces with status sidebars and socket APIs.</p>
-          <p>That workflow became popular for real reasons. Closing your laptop no longer kills an agent mid-task. A sidebar rolls up which panes are working, idle, or waiting for approval. Scripts or primary agents can spawn panes and coordinate planner, implementer, and reviewer loops across Git worktrees.</p>
-          <p>Then you hit the structural ceiling of multiplexing opaque PTYs:</p>
+        <section class="essay-section" id="the-bottleneck">
+          <h2>1. Where the agent multiplexer loop breaks down</h2>
+          <p>The most popular agent workflow right now is not an IDE at all. It is an agent multiplexer: tools like Herdr, or homegrown tmux setups, wrapping Claude Code, Codex, pi, and OpenCode in persistent terminal workspaces with status sidebars and socket APIs.</p>
+          <p>That workflow earned its adoption. Closing your laptop no longer kills an agent mid-task, one sidebar shows which sessions are working or waiting on approval, and scripts can coordinate multiple CLI agents across repositories. If your day is launching six unrelated agents across separate repos and checking on them from a status list, a PTY multiplexer fits well.</p>
+          <p>The cost shows up the moment you stay close to the code on a real, subtle change:</p>
           <ul>
-            <li><strong>Every agent is still a blind terminal stream.</strong> A multiplexer watches raw shell output to guess whether an agent is working or blocked, and coordinates work by injecting keystrokes, piping text over sockets, or passing scratch files on disk. It has no structured model of provider turns, tool admission boundaries, or failed effects.</li>
-            <li><strong>Disk writes and worktree sprawl replace real buffer ownership.</strong> CLI agents edit files directly on disk. Edit the same file yourself and you get conflicts or broken undo history; run parallel agents and you end up juggling a separate Git worktree for every pane and untangling merges afterward.</li>
-            <li><strong>You still drop back into a second editor the moment code gets subtle.</strong> Nobody blindly merges a thousand-line diff from terminal scrollback. You flip to Neovim, Emacs, or VS Code to jump to definitions, inspect LSP diagnostics, trace types across modules, and rewrite the tricky part by hand.</li>
-            <li><strong>Scripting panes is not owning the runtime.</strong> Asking a harness to reshape tabs, timers, or markdown instructions changes shell chrome around external CLIs. It cannot compose buffer decorations, inline diff review, LSP diagnostics, and agent tool approvals inside one authoritative model.</li>
+            <li><strong>The bottleneck shifted from generating code to verifying and steering it.</strong> Terminal scrollback has no jump-to-definition, no type hover, and no live LSP diagnostics. To understand what a 400-line diff actually breaks, you flip to Neovim, Emacs, or VS Code, trace callers there, copy file paths and line numbers back into chat, and wait on another full turn for a four-line fix you could have typed yourself.</li>
+            <li><strong>You get forced into slow batch handoffs instead of working on the same code together.</strong> Because CLI agents write straight to disk, editing the same file while an agent works risks clobbering unsaved buffers or scrambling undo history. Isolating every pane in its own Git worktree prevents collisions, but you pay for it with duplicated build caches, cold compiles, separate LSP indexes, and manual conflict cleanup whenever two tasks touch overlapping modules.</li>
+            <li><strong>Customizing a multiplexer only changes chrome around a black box.</strong> You can script tabs, status indicators, and markdown instructions around external CLIs, but you cannot build a workflow that ties live editor state and agent turns together: staging hunks into an open buffer, rejecting one hunk while hand-editing another with undo intact, attaching live diagnostics directly to a draft, or building a custom interactive review surface you keep across projects.</li>
           </ul>
-          <p>Minga takes the demand that agent multiplexers proved and solves it one layer deeper: instead of multiplexing disconnected CLI agents across PTYs, put the editor, buffers, LSP clients, and supervised agent sessions inside one programmable BEAM runtime.</p>
+          <p>Minga starts from the opposite side of that boundary: put the editor, buffers, LSP clients, and supervised agent sessions inside one programmable BEAM runtime so steering code and running agents happen in the same loop.</p>
         </section>
 
         <section class="essay-section" id="comparison">

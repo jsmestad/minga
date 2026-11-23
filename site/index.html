@@ -45,7 +45,7 @@
         <div class="hero-copy">
           <p class="kicker">Pre-release · Building toward v0.1.0 · macOS &amp; Terminal</p>
           <h1>A programmable workbench on the BEAM.</h1>
-          <p class="hero-lead">Engineers running fleets of CLI agents in multiplexers like Herdr or tmux did not stop needing an editor. They stopped needing a static one built for typing every line by hand. Minga replaces opaque terminal panes and disk-level glue with one supervised Elixir runtime where native code editing, buffer-aware agents, and inspectable workflows share the same memory and state.</p>
+          <p class="hero-lead">Spawning more coding agents is no longer the hard part; verifying, steering, and fixing their code is. Minga puts native code editing, buffer-aware agent sessions, and inspectable Elixir workflows in one runtime, so you stop bouncing between terminal panes, worktrees, and a second editor every two minutes.</p>
           <div class="actions">
             <a class="btn btn-primary" href="#install">Install Minga</a>
             <a class="btn" href="/why-minga">Read Why Minga</a>
@@ -75,29 +75,109 @@
     <section class="section" id="the-split">
       <div class="container">
         <div class="section-header">
-          <p class="kicker">The problem with current tools</p>
-          <h2>Neither a bolted-on AI sidebar nor a terminal multiplexer for agents.</h2>
-          <p>Agent multiplexers and CLI harnesses solved keeping background agents alive, but they still treat every agent as an opaque terminal pane disconnected from your buffers, symbols, and diffs.</p>
+          <p class="kicker">The real bottleneck</p>
+          <h2>Spawning agents is easy. Verifying and steering their code is where you lose the day.</h2>
+          <p>Follow one ordinary moment: an agent finishes a 400-line refactor, and hunk 3 has a subtle edge-case bug.</p>
         </div>
 
-        <div class="grid-3">
-          <article class="panel">
-            <p class="panel-kicker">AI-retrofitted IDEs</p>
-            <h3>Fixed panels over a single thread</h3>
-            <p>Legacy IDEs assume one operator typing into one event loop. Agent chat sits in a sidebar bolted onto an extension host you cannot deeply reshape, while streaming responses and indexing still compete with your typing.</p>
-          </article>
+        <div class="loop-compare" role="region" aria-label="Workflow comparison: agent multiplexer versus Minga">
+          <div class="loop-head" aria-hidden="true">
+            <div class="loop-head-cell">Step</div>
+            <div class="loop-head-cell">
+              <strong>Agent multiplexer + separate editor</strong>
+              Herdr, tmux + Claude Code / Codex / pi
+            </div>
+            <div class="loop-head-cell loop-head-minga">
+              <strong>Minga</strong>
+              One programmable BEAM workbench
+            </div>
+          </div>
 
-          <article class="panel">
-            <p class="panel-kicker">Agent multiplexers &amp; CLI harnesses</p>
-            <h3>Opaque PTY panes and disk-level glue</h3>
-            <p>Tools like Herdr and tmux + Claude Code or Codex keep CLI agents alive in tabs, but every pane is still a blind shell writing straight to disk. Orchestration leans on terminal I/O, scratch files, and worktree sprawl, and serious code review still sends you back to a second editor.</p>
-          </article>
+          <div class="loop-row">
+            <div class="loop-step">
+              <span class="loop-num">01</span>
+              <span class="loop-step-title">Edits land</span>
+            </div>
+            <div class="loop-cell">
+              <span class="loop-cell-label">Agent multiplexer + separate editor</span>
+              The CLI writes straight to disk, risking overwrites and broken undo on open buffers, or forces a separate Git worktree with another build cache and cold LSP index.
+            </div>
+            <div class="loop-cell loop-cell-minga">
+              <span class="loop-cell-label">Minga</span>
+              Approved edits stay staged in an isolated in-memory overlay while disk and your open buffer remain untouched. Stay in one repo with one build and one LSP.
+            </div>
+          </div>
 
-          <article class="panel panel-highlight">
-            <p class="panel-kicker">Minga</p>
-            <h3>One typed BEAM workbench</h3>
-            <p>Buffers, LSP servers, tree-sitter, agent sessions, and extensions share one supervised Elixir runtime behind native macOS and terminal frontends. Agent edits stage in memory for inline review, and custom workflows steer real engine state instead of scripting terminal panes.</p>
-          </article>
+          <div class="loop-row">
+            <div class="loop-step">
+              <span class="loop-num">02</span>
+              <span class="loop-step-title">You check the diff</span>
+            </div>
+            <div class="loop-cell">
+              <span class="loop-cell-label">Agent multiplexer + separate editor</span>
+              Terminal scrollback has no jump-to-definition and no live diagnostics. You switch to Neovim or VS Code to trace callers and find what broke.
+            </div>
+            <div class="loop-cell loop-cell-minga">
+              <span class="loop-cell-label">Minga</span>
+              Review hunks inline (<kbd>]c</kbd> / <kbd>[c</kbd>) with full tree-sitter highlighting, jump-to-definition, and live LSP diagnostics. Background writes never yank your cursor or open file.
+            </div>
+          </div>
+
+          <div class="loop-row">
+            <div class="loop-step">
+              <span class="loop-num">03</span>
+              <span class="loop-step-title">Hunk 3 is wrong</span>
+            </div>
+            <div class="loop-cell">
+              <span class="loop-cell-label">Agent multiplexer + separate editor</span>
+              You either hand-edit in your second editor and untangle collisions later, or type file paths and line numbers back into chat and wait for another full turn over a four-line fix.
+            </div>
+            <div class="loop-cell loop-cell-minga">
+              <span class="loop-cell-label">Minga</span>
+              Accept good hunks (<kbd>y</kbd>), reject hunk 3 (<kbd>x</kbd>), and edit those four lines directly in Vim or CUA with undo intact. Overlapping changes open conflict review (<strong>Keep mine</strong> / <strong>Use Agent version</strong>).
+            </div>
+          </div>
+
+          <div class="loop-row">
+            <div class="loop-step">
+              <span class="loop-num">04</span>
+              <span class="loop-step-title">Sending context back</span>
+            </div>
+            <div class="loop-cell">
+              <span class="loop-cell-label">Agent multiplexer + separate editor</span>
+              Save the file, copy compiler errors and line ranges out of your editor, and paste them into a terminal prompt hoping the agent reads the updated file.
+            </div>
+            <div class="loop-cell loop-cell-minga">
+              <span class="loop-cell-label">Minga</span>
+              Attach your live unsaved buffer (<kbd>SPC a b</kbd>) or published LSP diagnostics (<kbd>SPC a D</kbd>) straight to the agent draft, or publish staged changes cleanly (<kbd>SPC a p</kbd>).
+            </div>
+          </div>
+
+          <div class="loop-row">
+            <div class="loop-step">
+              <span class="loop-num">05</span>
+              <span class="loop-step-title">Improving the loop</span>
+            </div>
+            <div class="loop-cell">
+              <span class="loop-cell-label">Agent multiplexer + separate editor</span>
+              Customizing a multiplexer changes tabs, status bars, and shell scripts around an opaque CLI. It cannot bind buffer edits, diagnostics, and agent turns into one workflow.
+            </div>
+            <div class="loop-cell loop-cell-minga">
+              <span class="loop-cell-label">Minga</span>
+              Author a sharper review surface or check workflow in ordinary Elixir over real buffer and agent state, save to activate, and keep it across projects (<a href="/docs/0004-products-are-root-applets-over-a-fixed-engine.html">ADR-0004</a>).
+            </div>
+          </div>
+        </div>
+
+        <div class="scope-strip">
+          <div class="scope-note">
+            <h3>When a PTY multiplexer is the right fit</h3>
+            <p>If your workflow is launching six unrelated CLI agents across separate repositories and checking in occasionally from a status sidebar or phone, tools like Herdr are built for that. Minga is built for engineers who stay close to the code.</p>
+          </div>
+          <div class="scope-note">
+            <h3>What about AI-retrofitted IDEs?</h3>
+            <p>Cursor and VS Code put chat beside your editor, but on a single-threaded host with fixed panels you cannot deeply reprogram. Minga keeps editing and agents together without giving up BEAM concurrency or Elixir ownership.</p>
+          </div>
         </div>
       </div>
     </section>
