@@ -289,7 +289,8 @@ defmodule MingaAgent.SessionProviderErrorTest do
       assert {[], ["after the limit"]} = Session.get_queued_messages(session)
 
       # /model lists the route as limit-reached until the reset passes or a request succeeds.
-      assert {:ok, [limited], _notice, _validity} = Session.discover_available_models(session)
+      assert {:ok, candidates, _notice, _validity} = Session.discover_available_models(session)
+      assert [limited] = remote_candidates(candidates)
 
       assert %MingaAgent.UsageLimit{
                service: "ChatGPT",
@@ -302,7 +303,8 @@ defmodule MingaAgent.SessionProviderErrorTest do
       assert :ok = Session.send_prompt(session, "try again")
       assert_receive {:usage_limit_request, 1, _request}, @durable_workflow_timeout
       assert_receive {:agent_event, ^session, {:status_changed, :idle}}, @durable_workflow_timeout
-      assert {:ok, [lifted], _notice, _validity} = Session.discover_available_models(session)
+      assert {:ok, candidates, _notice, _validity} = Session.discover_available_models(session)
+      assert [lifted] = remote_candidates(candidates)
       assert lifted.usage_limit == nil
     end
 
@@ -651,4 +653,9 @@ defmodule MingaAgent.SessionProviderErrorTest do
   defp error_messages(session) do
     for {:system, text, :error} <- Session.messages(session), do: text
   end
+
+  # A Mac with the Apple Intelligence helper built also discovers the local on-device
+  # route; these assertions are about the stubbed remote route only.
+  defp remote_candidates(candidates),
+    do: Enum.reject(candidates, &(&1.selection.route.request_provider == :apple))
 end
