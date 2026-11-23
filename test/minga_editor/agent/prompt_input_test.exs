@@ -109,6 +109,27 @@ defmodule MingaEditor.Agent.PromptInputTest do
     assert Buffer.cursor(regular) == {0, 0}
   end
 
+  test "a plain GUI click inside the composer keeps Insert and Normal, and collapses Visual" do
+    for {before, expected} <- [insert: :insert, normal: :normal, visual: :normal] do
+      {state, _regular} = prompt_state("first line\nsecond line")
+      {state, _output, model, _lease, registry} = present(state, 20, 301)
+      {:ok, registry} = TextPresentations.activate(registry, 65_534, 301)
+      reader = TextPresentations.reader(registry)
+
+      state = %{
+        state
+        | workspace: SessionState.transition_mode(state.workspace, before, mode_state(before))
+      }
+
+      row = Enum.at(model.rows, 1)
+      event = event(model, 1, row.row_id, 2)
+      assert {:ok, target} = Reader.resolve(reader, event)
+      clicked = Mouse.handle_text_event(state, event, target)
+
+      assert Minga.Editing.mode(clicked) == expected, "#{before} click"
+    end
+  end
+
   test "Send refuses an older displayed conversation even when it reuses the same draft process" do
     {state, _regular} = prompt_state("draft to send")
     {state, runtime, connection, ui} = with_send_owner(state)
@@ -662,6 +683,9 @@ defmodule MingaEditor.Agent.PromptInputTest do
 
     {state, output, model, lease, registry}
   end
+
+  defp mode_state(:visual), do: %Minga.Mode.VisualState{visual_anchor: {0, 0}, visual_type: :char}
+  defp mode_state(_mode), do: nil
 
   defp event(model, index, row_id, utf16) do
     TextEvent.new(%{

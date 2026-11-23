@@ -296,6 +296,72 @@ defmodule Minga.Buffer.Document do
     end
   end
 
+  @doc """
+  Replaces the text of lines `first_line..last_line`, up to but not including the line break that ends `last_line`, with `replacement`.
+
+  `replacement` must contain exactly `last_line - first_line` line breaks, so the line count is unchanged. Only the replaced span is copied when the cursor is at or before `first_line`'s start, and the line index is adjusted rather than rebuilt, so the cost follows the span and the line count rather than the document's size. The cursor ends at the end of the replaced span.
+  """
+  @spec replace_line_span(t(), non_neg_integer(), non_neg_integer(), String.t()) :: t()
+  def replace_line_span(%__MODULE__{line_count: lc} = doc, first_line, last_line, replacement)
+      when is_integer(first_line) and first_line >= 0 and is_integer(last_line) and
+             last_line >= first_line and last_line < lc and is_binary(replacement) do
+    breaks = :binary.matches(replacement, "\n")
+
+    if length(breaks) != last_line - first_line do
+      raise ArgumentError, "replacement must keep #{last_line - first_line} line breaks"
+    end
+
+    span_start = Lines.start_of(doc, first_line)
+
+    span_end =
+      if last_line + 1 < lc,
+        do: Lines.start_of(doc, last_line + 1) - 1,
+        else: content_byte_size(doc)
+
+    {prefix, suffix} = split_around_span(doc, span_start, span_end)
+    growth = byte_size(replacement) - (span_end - span_start)
+
+    %{
+      doc
+      | before: prefix <> replacement,
+        after: suffix,
+        cursor_line: last_line,
+        cursor_col: Lines.last_line_width(replacement),
+        line_offsets:
+          Lines.update_after_span_replace(
+            doc.line_offsets,
+            first_line,
+            last_line,
+            span_start,
+            breaks,
+            growth
+          )
+    }
+  end
+
+  # Returns the text before `span_start` and after `span_end`, copying as
+  # little as the gap position allows.
+  @spec split_around_span(t(), non_neg_integer(), non_neg_integer()) :: {binary(), binary()}
+  defp split_around_span(%__MODULE__{before: before, after: after_}, span_start, span_end) do
+    gap = byte_size(before)
+
+    cond do
+      gap <= span_start ->
+        skip = span_end - gap
+
+        {before <> binary_part(after_, 0, span_start - gap),
+         binary_part(after_, skip, byte_size(after_) - skip)}
+
+      gap < span_end ->
+        skip = span_end - gap
+        {binary_part(before, 0, span_start), binary_part(after_, skip, byte_size(after_) - skip)}
+
+      true ->
+        {binary_part(before, 0, span_start),
+         binary_part(before, span_end, gap - span_end) <> after_}
+    end
+  end
+
   # ── Range operations ──
 
   @doc """
@@ -441,14 +507,25 @@ defmodule Minga.Buffer.Document do
           String.t()
         ) :: {non_neg_integer(), non_neg_integer(), pos_integer()}
   defp compute_cursor_after_insert(line, col, lc, text) do
-    newline_count = Lines.break_count(text)
+    {new_line, new_col} = position_after_insert({line, col}, text)
+    {new_line, new_col, lc + (new_line - line)}
+  end
 
-    case newline_count do
-      0 ->
-        {line, col + byte_size(text), lc}
+  @doc """
+  Returns where the cursor lands after `insert_text/2` inserts `text` at `position`.
 
-      _ ->
-        {line + newline_count, Lines.last_line_width(text), lc + newline_count}
+  ## Examples
+
+      iex> Minga.Buffer.Document.position_after_insert({2, 3}, "ab")
+      {2, 5}
+      iex> Minga.Buffer.Document.position_after_insert({2, 3}, "a\\nbc")
+      {3, 2}
+  """
+  @spec position_after_insert(position(), String.t()) :: position()
+  def position_after_insert({line, col}, text) when is_binary(text) do
+    case Lines.break_count(text) do
+      0 -> {line, col + byte_size(text)}
+      newline_count -> {line + newline_count, Lines.last_line_width(text)}
     end
   end
 

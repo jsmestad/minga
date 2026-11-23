@@ -72,6 +72,7 @@ defmodule MingaEditor.Agent.UIState do
       panel
       |> Panel.set_credential_readiness(connection.credential_readiness)
       |> Panel.project_model_selection(connection.model_selection)
+      |> Panel.project_model_problem(ConnectionSnapshot.resolution_message(connection))
 
     state = retire_previous_changes(state, connection)
 
@@ -322,6 +323,15 @@ defmodule MingaEditor.Agent.UIState do
   end
 
   # ── Scrolling (delegates to Minga.Editing.Scroll) ────────────────────────────────
+
+  @doc "Returns a renderer-boundary copy whose transcript travels separately as presentation changes."
+  @spec render_snapshot(t()) :: t()
+  def render_snapshot(%__MODULE__{panel: panel} = state) do
+    case Panel.render_snapshot(panel) do
+      ^panel -> state
+      snapshot -> %{state | panel: snapshot}
+    end
+  end
 
   @doc "Records transcript scroll metrics observed during rendering."
   @spec record_scroll_metrics(t(), non_neg_integer(), pos_integer()) :: t()

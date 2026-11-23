@@ -1002,6 +1002,40 @@ defmodule Minga.Credo.EditorStateOwnershipCheckTest do
     |> refute_issues()
   end
 
+  test "Agent UI value modules may not read or resolve the model catalog" do
+    issues =
+      """
+      defmodule MingaEditor.Agent.UIState.Panel do
+        alias MingaAgent.Config, as: AgentConfig
+
+        def refresh(panel, options) do
+          _models = LLMDB.models()
+          _candidates = MingaAgent.ModelResolver.candidates([])
+          %{panel | model_name: AgentConfig.default_model(options)}
+        end
+      end
+      """
+      |> check("lib/minga_editor/agent/ui_state/panel.ex")
+
+    triggers = Enum.map(issues, & &1.trigger)
+    assert "LLMDB.models" in triggers
+    assert "MingaAgent.ModelResolver.candidates" in triggers
+    assert "MingaAgent.Config.default_model" in triggers
+    assert Enum.all?(issues, &(&1.message =~ "MingaEditor.Agent.UIState"))
+
+    """
+    defmodule MingaEditor.Agent.UIState.Panel do
+      alias MingaAgent.Config, as: AgentConfig
+
+      def configured(panel, options) do
+        %{panel | model_name: AgentConfig.configured_model(options)}
+      end
+    end
+    """
+    |> check("lib/minga_editor/agent/ui_state/panel.ex")
+    |> refute_issues()
+  end
+
   test "resolves multi-segment and grouped aliases by expanding their first segment" do
     source =
       """

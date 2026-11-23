@@ -5,6 +5,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpersTest do
   alias Minga.Language.Highlight.Span
   alias MingaEditor.UI.Theme
   alias MingaEditor.Renderer.Context
+  alias MingaEditor.RenderModel.Window.WindowDiagnostics
   alias MingaEditor.RenderPipeline.ContentHelpers
   alias MingaEditor.RenderPipeline.TestHelpers
   alias MingaEditor.UI.Highlight
@@ -22,6 +23,44 @@ defmodule MingaEditor.RenderPipeline.ContentHelpersTest do
   end
 
   describe "context_fingerprint/2" do
+    test "ignores a message-only diagnostic republication but follows gutter signs" do
+      ctx = %Context{viewport: Viewport.new(20, 80), gutter_w: 4, content_w: 76}
+
+      published = fn revision, message, severity ->
+        diagnostic = %Minga.Diagnostics.Diagnostic{
+          range: %{start_line: 2, start_col: 0, end_line: 2, end_col: 3},
+          severity: severity,
+          message: message
+        }
+
+        WindowDiagnostics.apply_change(
+          WindowDiagnostics.empty(),
+          {:changed, revision, [diagnostic], %{2 => severity}}
+        )
+      end
+
+      before_fp =
+        ContentHelpers.context_fingerprint(
+          %{ctx | diagnostics: published.(1, "old", :error)},
+          true
+        )
+
+      reworded =
+        ContentHelpers.context_fingerprint(
+          %{ctx | diagnostics: published.(2, "new", :error)},
+          true
+        )
+
+      resigned =
+        ContentHelpers.context_fingerprint(
+          %{ctx | diagnostics: published.(3, "new", :warning)},
+          true
+        )
+
+      assert reworded == before_fp
+      refute resigned == before_fp
+    end
+
     test "changes when syntax highlight spans arrive" do
       ctx = %Context{viewport: Viewport.new(20, 80), gutter_w: 4, content_w: 76}
       before_fp = ContentHelpers.context_fingerprint(ctx, true)

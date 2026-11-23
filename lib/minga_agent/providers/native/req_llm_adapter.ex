@@ -146,8 +146,11 @@ defmodule MingaAgent.Providers.Native.ReqLLMAdapter do
   end
 
   @doc "Builds SDK advertisement values without executable callbacks or captured validators."
-  @spec advertised_tools(MingaAgent.Session.Prefix.t()) :: [Tool.t()]
-  def advertised_tools(%MingaAgent.Session.Prefix{schemas: schemas}) do
+  @spec advertised_tools(MingaAgent.Session.Prefix.t() | [map()]) :: [Tool.t()]
+  def advertised_tools(%MingaAgent.Session.Prefix{schemas: schemas}),
+    do: advertised_tools(schemas)
+
+  def advertised_tools(schemas) when is_list(schemas) do
     Enum.map(schemas, fn schema ->
       %Tool{
         name: schema.name,

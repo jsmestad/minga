@@ -111,7 +111,7 @@ defmodule MingaEditor.Commands.Agent do
     case find_agent_tab(state) do
       %Tab{id: agent_id} ->
         state
-        |> MingaEditor.TabWorkflow.switch(agent_id)
+        |> measured_tab_switch(agent_id)
         |> maybe_start_session()
         |> activate_agent_view(return_target)
 
@@ -156,15 +156,47 @@ defmodule MingaEditor.Commands.Agent do
 
     case find_agent_tab(state) do
       %Tab{id: agent_id} ->
-        state
-        |> MingaEditor.TabWorkflow.switch(agent_id)
-        |> maybe_start_session()
-        |> open_session_in_tab(session_id, tool_call_id, origin, return_target)
+        state = MingaEditor.TabWorkflow.switch(state, agent_id)
+
+        case Runtime.active_session(state.shell_runtime) do
+          nil ->
+            AgentSession.start_agent_session(state,
+              follow_up: {:restore, session_id, tool_call_id, origin, return_target}
+            )
+
+          _session ->
+            open_session_in_tab(state, session_id, tool_call_id, origin, return_target)
+        end
 
       nil ->
         NoticeWorkflow.publish(state, "Could not open agent")
     end
   end
+
+  @doc """
+  Loads a saved conversation into a session that started for it.
+
+  `MingaEditor.Agent.SessionStart` runs this once the new session is bound to the active Agent workspace.
+  """
+  @spec restore_into_started_session(
+          state(),
+          pid(),
+          String.t(),
+          String.t() | nil,
+          ProvenanceJump.origin() | nil,
+          UIState.View.return_target()
+        ) :: state()
+  def restore_into_started_session(
+        state,
+        session,
+        session_id,
+        tool_call_id,
+        origin,
+        return_target
+      )
+      when is_pid(session),
+      do:
+        resume_persisted_session(state, session, session_id, tool_call_id, origin, return_target)
 
   @spec open_session_in_tab(
           state(),
@@ -236,8 +268,7 @@ defmodule MingaEditor.Commands.Agent do
     end
   end
 
-  @spec load_persisted_session(pid(), String.t()) ::
-          :ok | {:error, atom() | {:model_selection_correction_required, String.t()}}
+  @spec load_persisted_session(pid(), String.t()) :: :ok | {:error, atom()}
   defp load_persisted_session(session_pid, session_id) do
     # minga:allow-blocking — Editor, user-initiated resume of a persisted session; one-shot restore (#2450 inventory)
     case Session.load_session(session_pid, session_id) do
@@ -259,7 +290,7 @@ defmodule MingaEditor.Commands.Agent do
     :exit, _reason -> {:error, :session_unavailable}
   end
 
-  @spec safe_restore_error(term()) :: atom() | {:model_selection_correction_required, String.t()}
+  @spec safe_restore_error(term()) :: atom()
   defp safe_restore_error(:invalid_session_record), do: :invalid_saved_session
 
   defp safe_restore_error({:checkpoint_reconciliation_failed, _reason}),
@@ -285,19 +316,11 @@ defmodule MingaEditor.Commands.Agent do
 
   defp safe_restore_error({:save_current_failed, _reason}), do: :current_session_save_failed
 
-  defp safe_restore_error({:model_selection_correction_required, message})
-       when is_binary(message),
-       do: {:model_selection_correction_required, message}
-
   defp safe_restore_error({:invalid_continuation_boundaries, _reason}), do: :invalid_saved_session
   defp safe_restore_error({:invalid_continuation, _reason}), do: :invalid_saved_session
   defp safe_restore_error(_reason), do: :restore_failed
 
-  @spec restore_failure_message(atom() | {:model_selection_correction_required, String.t()}) ::
-          String.t()
-  defp restore_failure_message({:model_selection_correction_required, message}),
-    do: "#{message} The current conversation was not replaced."
-
+  @spec restore_failure_message(atom()) :: String.t()
   defp restore_failure_message(:invalid_saved_session),
     do: "The saved session record is invalid. The current conversation was not replaced."
 
@@ -1059,12 +1082,25 @@ defmodule MingaEditor.Commands.Agent do
 
   @spec prompt_readiness(UIState.t(), pid() | nil, String.t() | nil) :: prompt_readiness()
   defp prompt_readiness(%UIState{panel: panel} = ui, session, error) do
-    if model_configured?(panel.model_name) do
-      projected_prompt_readiness(ui, session, error)
-    else
-      :no_model
+    cond do
+      model_configured?(panel.model_name) -> projected_prompt_readiness(ui, session, error)
+      awaiting_session_model?(ui, session) -> :starting
+      true -> :no_model
     end
   end
+
+  # With no configured model the panel learns the model from the starting
+  # session's first connection report (#3641); until then it is starting, not
+  # unconfigured.
+  @spec awaiting_session_model?(UIState.t(), pid() | nil) :: boolean()
+  defp awaiting_session_model?(
+         %UIState{connection: %ConnectionSnapshot{target: %{session: session}}},
+         session
+       ),
+       do: false
+
+  defp awaiting_session_model?(%UIState{chat_lifecycle: lifecycle}, _session),
+    do: lifecycle == :starting
 
   @spec projected_prompt_readiness(UIState.t(), pid() | nil, String.t() | nil) ::
           prompt_readiness()
@@ -1428,18 +1464,23 @@ defmodule MingaEditor.Commands.Agent do
   @doc """
   Context-sensitive Ctrl-C handler.
 
-  During streaming: aborts the agent and restores queued messages to the prompt.
-  When idle in insert mode: returns to normal mode (vim convention).
-  When idle in normal mode: no-op.
+  Always leaves Insert mode, as Escape does (vim convention). During streaming it also aborts the agent and restores queued messages to the prompt. After a provider error it also restarts the provider.
   """
   @spec scope_ctrl_c(state()) :: state()
   def scope_ctrl_c(state) do
-    case MingaEditor.Shell.Traditional.State.agent(state.shell_runtime.state).runtime.status do
-      status when status in [:thinking, :tool_executing] -> abort_agent(state)
-      :error -> restart_agent_provider(state)
-      _status -> input_to_normal(state)
-    end
+    state
+    |> interrupt_for_ctrl_c(
+      MingaEditor.Shell.Traditional.State.agent(state.shell_runtime.state).runtime.status
+    )
+    |> input_to_normal()
   end
+
+  @spec interrupt_for_ctrl_c(state(), atom()) :: state()
+  defp interrupt_for_ctrl_c(state, status) when status in [:thinking, :tool_executing],
+    do: abort_agent(state)
+
+  defp interrupt_for_ctrl_c(state, :error), do: restart_agent_provider(state)
+  defp interrupt_for_ctrl_c(state, _status), do: state
 
   @doc "Starts an agent session if one isn't already running. No-op otherwise."
   @spec ensure_agent_session(state()) :: state()
@@ -1466,7 +1507,7 @@ defmodule MingaEditor.Commands.Agent do
     thinking_level = state.workspace.agent_ui.panel.thinking_level
 
     state
-    |> create_active_agent_tab()
+    |> measured_agent_tab_switch()
     |> reset_agent_state_for_new_session(thinking_level)
     |> AgentSession.start_agent_session(recover_interrupted_work?: false)
     |> scope_focus_input()
@@ -1491,6 +1532,20 @@ defmodule MingaEditor.Commands.Agent do
     do: UIState.attach_prompt_buffer(ui, pid)
 
   defp retain_arrived_composer(ui, nil), do: ui
+
+  @spec measured_tab_switch(state(), Tab.id()) :: state()
+  defp measured_tab_switch(state, tab_id) do
+    Minga.Telemetry.span([:minga, :agent, :tab_switch], %{}, fn ->
+      MingaEditor.TabWorkflow.switch(state, tab_id)
+    end)
+  end
+
+  @spec measured_agent_tab_switch(state()) :: state()
+  defp measured_agent_tab_switch(state) do
+    Minga.Telemetry.span([:minga, :agent, :tab_switch], %{}, fn ->
+      create_active_agent_tab(state)
+    end)
+  end
 
   @spec create_active_agent_tab(state()) :: state()
   defp create_active_agent_tab(%{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state) do
@@ -2505,7 +2560,7 @@ defmodule MingaEditor.Commands.Agent do
     {:agent_submit_or_newline, "Submit or newline", :scope_submit_or_newline},
     {:agent_insert_newline, "Insert newline in agent input", :scope_insert_newline},
     {:agent_submit_or_abort, "Submit or abort agent", :scope_submit_or_abort},
-    {:agent_ctrl_c, "Abort (streaming) or normal mode (idle)", :scope_ctrl_c},
+    {:agent_ctrl_c, "Normal mode (also aborts while streaming)", :scope_ctrl_c},
     {:agent_queue_follow_up, "Queue as follow-up or submit if idle", :scope_queue_follow_up},
     {:agent_dequeue, "Dequeue messages back to editor", :scope_dequeue},
     {:agent_toggle_help, "Toggle agent help", :scope_toggle_help},

@@ -98,6 +98,7 @@ defmodule MingaEditor.Renderer.BufferChangesTest do
                :composed_highlights,
                :focus_tree,
                :font_registry,
+               :frame_admission,
                :frame_seq,
                :intent,
                :layout,
@@ -207,6 +208,8 @@ defmodule MingaEditor.Renderer.BufferChangesTest do
 
     assert Map.keys(Map.from_struct(bounded.workspace)) |> Enum.sort() ==
              [
+               :agent_transcript,
+               :agent_transcript_lines,
                :agent_ui,
                :buffers,
                :cmd_hover_link,

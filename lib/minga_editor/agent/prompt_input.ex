@@ -150,6 +150,17 @@ defmodule MingaEditor.Agent.PromptInput do
 
   def command(state, operation), do: operation.(state)
 
+  @doc """
+  Settles the editing mode after a plain click inside the composer.
+
+  The click keeps the composer's mode, as in Vim: Insert stays Insert so typing continues where the user clicked. Every other mode collapses to Normal, as a plain click does anywhere else. Both the GUI text-event path and the terminal mouse path apply this one rule.
+  """
+  @spec settle_mode_after_click(state()) :: state()
+  def settle_mode_after_click(%State{workspace: %{editing: %{mode: :insert}}} = state), do: state
+
+  def settle_mode_after_click(%State{} = state),
+    do: %{state | workspace: SessionState.transition_mode(state.workspace, :normal)}
+
   @doc "Focuses the actual agent pane while retaining the exact prompt-buffer owner."
   @spec focus(state(), Text.t()) :: {:ok, state()} | {:error, atom()}
   def focus(state, %Text{window_id: 65_534, buffer: buffer}), do: focus_owner(state, buffer)

@@ -9,8 +9,14 @@ defmodule MingaAgent.ModelSelection.Policy.RequestCapacity do
           | :count_transport
           | {:count_http, pos_integer()}
 
+  @typedoc """
+  How the prepared input was sized.
+
+  A `{:provider_count, total, prefix}` measurement also carries the provider's count of the fixed prefix (instructions and tool declarations) within the total, so a refusal can say which part does not fit.
+  """
   @type input_measurement ::
           {:provider_count, non_neg_integer()}
+          | {:provider_count, non_neg_integer(), non_neg_integer()}
           | {:upper_bound, non_neg_integer()}
           | {:estimate, non_neg_integer()}
           | {:unavailable, atom()}
@@ -29,6 +35,14 @@ defmodule MingaAgent.ModelSelection.Policy.RequestCapacity do
   @enforce_keys [:limits, :input, :output_cap, :decision]
   defstruct @enforce_keys ++ [observed_context: nil]
 
+  @typedoc "Provider-counted tokens behind a context refusal. `history` is retained history plus the new input."
+  @type overflow :: %{
+          prefix: non_neg_integer(),
+          history: non_neg_integer(),
+          reserve: pos_integer(),
+          context: pos_integer()
+        }
+
   @type refusal ::
           {:unknown_input_size, atom()}
           | :estimate_not_a_bound
@@ -38,6 +52,8 @@ defmodule MingaAgent.ModelSelection.Policy.RequestCapacity do
           | :input_limit_exceeded
           | :output_limit_exceeded
           | :context_reservation_exceeded
+          | {:fixed_prefix_exceeded, overflow()}
+          | {:history_exceeded, overflow()}
 
   @doc "Reports exact count provenance, reserve, encoded cap, and any uncertainty or refusal."
   @spec assess(Limits.t(), input_measurement(), output_cap(), pos_integer() | nil) :: t()
@@ -58,7 +74,11 @@ defmodule MingaAgent.ModelSelection.Policy.RequestCapacity do
   defp context_ceiling(configured, nil), do: configured
   defp context_ceiling(configured, observed), do: min(configured, observed)
 
-  @doc "Checks each applicable limit, using the greater of the policy reserve and the encoded cap for shared context."
+  @doc """
+  Checks each applicable limit, using the greater of the policy reserve and the encoded cap for shared context.
+
+  When the measurement separates the fixed prefix from the rest, a context refusal names the part that does not fit: `{:fixed_prefix_exceeded, overflow}` when the prefix alone leaves no room for the reserve, otherwise `{:history_exceeded, overflow}`.
+  """
   @spec check(Limits.t(), input_measurement(), output_cap()) :: :ok | {:error, refusal()}
   def check(%Limits{context: context} = limits, measurement, cap),
     do: check(limits, measurement, cap, context)
@@ -80,6 +100,34 @@ defmodule MingaAgent.ModelSelection.Policy.RequestCapacity do
          :ok <- check_output(limits, cap) do
       check_context(context, limits.request_output, tokens, cap)
     end
+  end
+
+  defp check(%Limits{} = limits, {:provider_count, tokens, prefix}, cap, context)
+       when is_integer(tokens) and is_integer(prefix) and prefix >= 0 and prefix <= tokens do
+    case check(limits, {:provider_count, tokens}, cap, context) do
+      {:error, :context_reservation_exceeded} ->
+        {:error, overflow(tokens, prefix, max(limits.request_output, encoded(cap)), context)}
+
+      result ->
+        result
+    end
+  end
+
+  defp check(%Limits{}, {:provider_count, _tokens, _prefix}, _cap, _context),
+    do: {:error, {:count_acquisition_failed, :invalid_count_response}}
+
+  @spec encoded(output_cap()) :: non_neg_integer()
+  defp encoded({:encoded, cap}), do: cap
+  defp encoded(:omitted), do: 0
+
+  @spec overflow(non_neg_integer(), non_neg_integer(), pos_integer(), pos_integer()) ::
+          {:fixed_prefix_exceeded | :history_exceeded, overflow()}
+  defp overflow(tokens, prefix, reserve, context) do
+    counts = %{prefix: prefix, history: tokens - prefix, reserve: reserve, context: context}
+
+    if prefix + reserve > context,
+      do: {:fixed_prefix_exceeded, counts},
+      else: {:history_exceeded, counts}
   end
 
   @spec check_input(pos_integer() | nil, pos_integer() | nil, non_neg_integer()) ::

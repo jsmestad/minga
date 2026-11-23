@@ -33,6 +33,7 @@ defmodule MingaEditor.Agent.UIState.Panel do
           provider_name: String.t(),
           provider_label: String.t() | nil,
           model_name: String.t(),
+          model_problem: String.t() | nil,
           thinking_level: String.t() | nil,
           input_focused: boolean(),
           transcript: TranscriptProjection.t(),
@@ -52,6 +53,7 @@ defmodule MingaEditor.Agent.UIState.Panel do
             provider_name: "",
             provider_label: nil,
             model_name: "unknown",
+            model_problem: nil,
             thinking_level: nil,
             input_focused: false,
             transcript: TranscriptProjection.new(),
@@ -86,24 +88,25 @@ defmodule MingaEditor.Agent.UIState.Panel do
     }
   end
 
-  @doc "Refreshes stale unqualified model names to the current credential-aware default."
-  @spec ensure_configured_model(t()) :: t()
-  def ensure_configured_model(%__MODULE__{} = panel) do
-    if resolved_model?(panel.model_name) do
-      panel
-    else
-      refresh_model(panel, AgentConfig.default_model())
-    end
-  end
+  @doc """
+  Refreshes a stale unqualified model name from the user's configured model.
 
-  @doc "Refreshes stale unqualified model names from a specific options server."
+  The panel never discovers a model itself. With no configured model it stays unresolved until the session reports its selection.
+  """
+  @spec ensure_configured_model(t()) :: t()
+  def ensure_configured_model(%__MODULE__{} = panel),
+    do: refresh_configured_model(panel, AgentConfig.configured_model())
+
+  @doc "Refreshes a stale unqualified model name from a specific options server's configured model."
   @spec ensure_configured_model(t(), Minga.Config.Options.server()) :: t()
-  def ensure_configured_model(%__MODULE__{} = panel, options_server) do
-    if resolved_model?(panel.model_name) do
-      panel
-    else
-      refresh_model(panel, AgentConfig.default_model(options_server))
-    end
+  def ensure_configured_model(%__MODULE__{} = panel, options_server),
+    do: refresh_configured_model(panel, AgentConfig.configured_model(options_server))
+
+  @spec refresh_configured_model(t(), String.t() | nil) :: t()
+  defp refresh_configured_model(panel, nil), do: panel
+
+  defp refresh_configured_model(panel, configured) do
+    if resolved_model?(panel.model_name), do: panel, else: refresh_model(panel, configured)
   end
 
   @spec resolved_model?(String.t()) :: boolean()
@@ -143,11 +146,22 @@ defmodule MingaEditor.Agent.UIState.Panel do
     }
   end
 
-  @doc "Projects model status without treating deferred resolution as missing credentials."
+  @doc """
+  Projects model status without treating deferred resolution as missing credentials.
+
+  An unresolved model reads "Resolving model…" until the session reports its selection, or the session's explanation when it could not resolve one.
+  """
   @spec model_label(t()) :: String.t()
   def model_label(%__MODULE__{model_name: model}) when model not in ["", "unknown"], do: model
   def model_label(%__MODULE__{credential_readiness: :unconfigured}), do: "No model configured"
-  def model_label(%__MODULE__{}), do: "Model not resolved"
+  def model_label(%__MODULE__{model_problem: problem}) when is_binary(problem), do: problem
+  def model_label(%__MODULE__{}), do: "Resolving model…"
+
+  @doc "Records the session's explanation for an unresolved model, or clears it."
+  @spec project_model_problem(t(), String.t() | nil) :: t()
+  def project_model_problem(%__MODULE__{} = panel, problem)
+      when is_binary(problem) or is_nil(problem),
+      do: %{panel | model_problem: problem}
 
   @doc """
   Projects the agent chat model identity as `provider:model` when the selected route names its provider, otherwise as `model_label/1`.
@@ -194,6 +208,15 @@ defmodule MingaEditor.Agent.UIState.Panel do
   @spec set_model_name(t(), String.t()) :: t()
   def set_model_name(%__MODULE__{} = panel, model) when is_binary(model) do
     %{panel | model_name: model, provider_label: nil}
+  end
+
+  @doc "Returns a renderer-boundary copy without the retained transcript display."
+  @spec render_snapshot(t()) :: t()
+  def render_snapshot(%__MODULE__{transcript: projection} = panel) do
+    case TranscriptProjection.render_snapshot(projection) do
+      ^projection -> panel
+      snapshot -> %{panel | transcript: snapshot}
+    end
   end
 
   @doc "Installs the new source and its remapped reading position together."

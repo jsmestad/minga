@@ -14,6 +14,7 @@ defmodule MingaEditor do
   use GenServer
 
   alias MingaEditor.Agent.Arrival
+  alias MingaEditor.Agent.SessionStart
   alias MingaEditor.Agent.Events
   alias MingaEditor.Agent.UIState
   alias Minga.Buffer
@@ -1330,6 +1331,13 @@ defmodule MingaEditor do
     {:noreply, RenderHandler.handle_render_done(state, receipt)}
   end
 
+  # The connected renderer rejected a transcript update and kept its last good
+  # root. The next submission seeds it from the Editor's projection.
+  def handle_info({:renderer_transcript_reseed, renderer}, state) when is_pid(renderer) do
+    render = MingaEditor.State.Render.require_transcript_seed(state.render, renderer)
+    {:noreply, schedule_render(%{state | render: render}, 16)}
+  end
+
   # Concern-specific animation messages carry semantic generations.
   def handle_info({:nav_flash_step, generation}, state) do
     {:noreply, MingaEditor.Shell.Traditional.FlashesWorkflow.advance_nav(state, generation)}
@@ -1351,6 +1359,14 @@ defmodule MingaEditor do
 
   def handle_info({:agent_arrival_deadline, token}, state) do
     {:noreply, Arrival.presentation_deadline(state, token)}
+  end
+
+  def handle_info({:agent_event, session, {:session_start_attached, token}}, state) do
+    {:noreply, state |> SessionStart.attached(session, token) |> schedule_render(16)}
+  end
+
+  def handle_info({:agent_session_start_timeout, token}, state) do
+    {:noreply, state |> SessionStart.timeout(token) |> schedule_render(16)}
   end
 
   def handle_info({:volatile_queue_recalled, session, conversation, workspace, queued}, state) do
@@ -1413,7 +1429,7 @@ defmodule MingaEditor do
   # Process died. Check buffer monitors and git remote tasks.
   # Agent session deaths are handled via :agent_session_stopped events from SessionManager.
   def handle_info({:DOWN, ref, :process, pid, reason} = message, state) do
-    case Arrival.response(state, message) do
+    case agent_request_response(state, message) do
       {:handled, updated} -> {:noreply, updated}
       :unrelated -> handle_dependency_down(state, ref, pid, reason)
     end
@@ -1500,9 +1516,23 @@ defmodule MingaEditor do
   end
 
   def handle_info(message, state) do
-    case Arrival.response(state, message) do
+    case agent_request_response(state, message) do
       {:handled, updated} -> {:noreply, updated}
       :unrelated -> {:noreply, state}
+    end
+  end
+
+  @spec render_session_start({:handled, state()} | :unrelated) ::
+          {:handled, state()} | :unrelated
+  defp render_session_start({:handled, state}), do: {:handled, schedule_render(state, 16)}
+  defp render_session_start(:unrelated), do: :unrelated
+
+  # Replies and request monitors for the Editor's outstanding local Session requests.
+  @spec agent_request_response(state(), term()) :: {:handled, state()} | :unrelated
+  defp agent_request_response(state, message) do
+    case Arrival.response(state, message) do
+      {:handled, _updated} = handled -> handled
+      :unrelated -> SessionStart.response(state, message) |> render_session_start()
     end
   end
 

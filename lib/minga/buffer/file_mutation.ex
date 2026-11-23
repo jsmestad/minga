@@ -2,7 +2,7 @@ defmodule Minga.Buffer.FileMutation do
   @moduledoc """
   Prepares one revision-checked file mutation without side effects.
 
-  Exact replacements run in order against prepared content. Each old text must be nonempty and occur exactly once, including overlapping occurrences. A later replacement cannot touch bytes inserted by an earlier replacement. Failure reports the one-based edit index and discards the complete preparation.
+  Exact replacements run in order against prepared content. Each nonempty old text must occur exactly once, including overlapping occurrences. An empty old text appends its new text at the end of the prepared content; when that content is nonempty, does not end with a newline, and the new text does not start with one, a single `"\\n"` separates them so the appended text starts on its own line. An append with empty new text is rejected as `:empty_edit`. A later replacement cannot touch bytes inserted by an earlier replacement. Failure reports the one-based edit index and discards the complete preparation.
   """
 
   @type operation ::
@@ -76,6 +76,22 @@ defmodule Minga.Buffer.FileMutation do
           {:ok, binary()} | {:error, term()}
   defp prepare_edits(content, [], _index, _touched), do: {:ok, content}
 
+  defp prepare_edits(_content, [{"", ""} | _rest], index, _touched),
+    do: {:error, {:edit_failed, index, :empty_edit}}
+
+  defp prepare_edits(content, [{"", new} | rest], index, touched) when is_binary(new) do
+    case validate_content(new) do
+      {:ok, _} ->
+        # The separator is inserted text too: later edits cannot touch it.
+        appended = append_separator(content, new) <> new
+        inserted = {byte_size(content), byte_size(appended)}
+        prepare_edits(content <> appended, rest, index + 1, [inserted | touched])
+
+      {:error, reason} ->
+        {:error, {:edit_failed, index, reason}}
+    end
+  end
+
   defp prepare_edits(content, [{old, new} | rest], index, touched)
        when is_binary(old) and byte_size(old) > 0 and is_binary(new) do
     with {:ok, _} <- validate_content(old),
@@ -105,6 +121,14 @@ defmodule Minga.Buffer.FileMutation do
 
   defp prepare_edits(_content, _edits, index, _touched),
     do: {:error, {:edit_failed, index, :invalid_edit}}
+
+  @spec append_separator(binary(), binary()) :: binary()
+  defp append_separator("", _new), do: ""
+  defp append_separator(_content, "\n" <> _new), do: ""
+
+  defp append_separator(content, _new) do
+    if :binary.last(content) == ?\n, do: "", else: "\n"
+  end
 
   @spec unique_match(binary(), binary()) :: {:ok, non_neg_integer()} | {:error, atom()}
   defp unique_match(content, old) do

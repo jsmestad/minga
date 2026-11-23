@@ -189,6 +189,19 @@ defmodule MingaEditor.Renderer.FrameHandler do
   end
 
   @spec await_or_commit(State.t(), Input.t(), FrameAttempt.t()) :: result()
+  defp await_or_commit(
+         %State{require_ack?: true} = state,
+         %Input{frame_admission: {:refused, :not_ready}},
+         %FrameAttempt{} = attempt
+       ) do
+    # The frontend never received this frame, so no acknowledgement can follow.
+    # Discard its output as a rejection would: the acknowledged bases and pending
+    # font registrations stay in state. The frontend's ready handshake resets
+    # the connection and renders a keyframe of the current state.
+    Minga.Log.debug(:render, "Frontend not ready; discarded frame #{attempt.seq}")
+    advance(state)
+  end
+
   defp await_or_commit(%State{require_ack?: true} = state, output, %FrameAttempt{} = attempt) do
     lease = AckLease.start(attempt, output, state.ack_timeout_ms)
 

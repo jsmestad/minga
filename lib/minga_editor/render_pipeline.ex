@@ -159,14 +159,15 @@ defmodule MingaEditor.RenderPipeline do
     Telemetry.span([:minga, :render, :stage], %{stage: :emit}, fn ->
       ctx = MingaEditor.Frontend.Emit.Context.from_input(input)
 
-      {updated_caches, updated_font_registry, updated_message_store} =
+      {updated_caches, updated_font_registry, updated_message_store, admission} =
         Emit.emit(frame, ctx, chrome, input.caches)
 
       Input.accept_emit_results(
         input,
         updated_caches,
         updated_font_registry,
-        updated_message_store
+        updated_message_store,
+        admission
       )
     end)
   end

@@ -103,6 +103,17 @@ func (m Model) breadcrumb() (protocol.Breadcrumb, bool) {
 	return protocol.Breadcrumb{}, false
 }
 
+// agentMessageTotal returns the BEAM-owned message total for the Agent chat
+// (the status bar agent section). The resident transcript holds only a suffix
+// once the cap is exceeded, so its length is not the conversation total.
+func (m Model) agentMessageTotal() (uint32, bool) {
+	payload, ok := m.chrome[generated.OPGuiStatusBar]
+	if !ok || payload.Status.Agent == nil {
+		return 0, false
+	}
+	return payload.Status.Agent.MessageCount, true
+}
+
 func (m Model) gitStatus() (protocol.GitStatus, bool) {
 	payload, ok := m.chrome[generated.OPGuiGitStatus]
 	return payload.Git, ok

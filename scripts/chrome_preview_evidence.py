@@ -256,9 +256,9 @@ def preview_sources(name, supplemental=None):
                     ["TabBarView", "StatusBarView", "BreadcrumbBar", "WorkspaceHeaderView", "BottomPanelView", "EmptyStateView"]]
     shell += [f"Overlays/{view}.swift" for view in
               ["CompletionOverlay", "HoverPopupOverlay", "SignatureHelpOverlay", "NotificationCenterView"]]
-    if name in {"EditorChromeView", "AgentChromeView", "DiagnosticsEditorView", "InsertModeEditorView",
-                "HoverEditorView", "SignatureHelpEditorView"}:
-        return shell + (chat if name == "AgentChromeView" else [])
+    if name in {"EditorChromeView", "AgentChromeView", "AgentWorkspaceChromeView", "DiagnosticsEditorView",
+                "InsertModeEditorView", "HoverEditorView", "SignatureHelpEditorView"}:
+        return shell + (chat if name in {"AgentChromeView", "AgentWorkspaceChromeView"} else [])
     if name.startswith("FileTree"):
         return tree
     if name.startswith("GitStatus"):

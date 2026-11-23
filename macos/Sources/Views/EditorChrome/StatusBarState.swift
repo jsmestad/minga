@@ -177,18 +177,7 @@ public final class StatusBarState {
         pendingKeys = ""
     }
 
-    public var modeName: String {
-        switch mode {
-        case .normal: return "NORMAL"
-        case .insert: return "INSERT"
-        case .visual: return "VISUAL"
-        case .command: return "COMMAND"
-        case .operatorPending: return "O-PENDING"
-        case .search: return "SEARCH"
-        case .replace: return "REPLACE"
-        case .unknown: return "NORMAL"
-        }
-    }
+    public var modeName: String { mode.displayName }
 
     public var hasGit: Bool { flags.contains(.hasGit) }
     public var hasLsp: Bool { flags.contains(.hasLSP) }

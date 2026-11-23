@@ -10,6 +10,7 @@ defmodule MingaEditor.UI.Picker.AgentModelSource do
   @behaviour MingaEditor.UI.Picker.Source
 
   alias MingaAgent.ModelCandidate
+  alias MingaAgent.ModelResolver
   alias MingaAgent.ModelSelection
   alias MingaAgent.Credentials.Snapshot, as: CredentialSnapshot
   alias MingaAgent.ModelSelection.Credential.ApiKey
@@ -333,7 +334,15 @@ defmodule MingaEditor.UI.Picker.AgentModelSource do
 
   @spec connection_label(ConnectionSnapshot.t()) :: String.t()
   defp connection_label(connection),
-    do: connection |> ConnectionSnapshot.status() |> status_label()
+    do: connection |> ConnectionSnapshot.status() |> status_label(connection.problem)
+
+  # A resolver failure other than "no model" names what to fix; the generic label would hide it.
+  @spec status_label(atom(), ConnectionSnapshot.problem() | nil) :: String.t()
+  defp status_label(status, {:resolution, reason})
+       when status in [:unsupported, :credential_failure],
+       do: ModelResolver.message(reason)
+
+  defp status_label(status, _problem), do: status_label(status)
 
   @spec status_label(atom()) :: String.t()
   defp status_label(:unconfigured),
@@ -429,10 +438,11 @@ defmodule MingaEditor.UI.Picker.AgentModelSource do
 
   defp catalog_thinking(selection), do: compact_thinking(selection)
 
-  # Apple's on-device model has its own compact tool set. Other routes name only what they lack.
+  # Apple's on-device model has its own compact tool set and sends instruction files only when
+  # they fit its context. Other routes name only what they lack.
   @spec catalog_limitations(ModelSelection.t()) :: String.t()
   defp catalog_limitations(%ModelSelection{route: %{request_provider: :apple}}),
-    do: "compact file tools, no images"
+    do: "compact file tools, no images, instruction files only if they fit"
 
   defp catalog_limitations(%ModelSelection{policy: %{capabilities: capabilities}}) do
     [tools: capabilities.tools, images: capabilities.images]

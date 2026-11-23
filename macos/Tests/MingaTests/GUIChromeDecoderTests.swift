@@ -2324,6 +2324,19 @@ struct GUIAgentChatDecoderTests {
         #expect(promptCompletion?.candidates.first?.description == "run command")
     }
 
+    @Test("Agent composer mode decodes with the status bar mapping",
+          arguments: [(UInt8(0), "NORMAL"), (1, "INSERT"), (2, "VISUAL"), (3, "COMMAND"),
+                      (4, "O-PENDING"), (5, "SEARCH"), (6, "REPLACE")])
+    func decodeComposerModeMatchesStatusBar(rawValue: UInt8, label: String) throws {
+        let data = buildChatData(status: 0, model: "test", prompt: "draft", promptVimMode: rawValue)
+        let (cmd, _) = try decodeCommand(data: data, offset: 0)
+        guard case .guiAgentChat(_, _, _, _, _, _, _, _, let promptMode, _, _, _, _, _, _, _, _, _, _, _) = cmd else {
+            Issue.record("Expected .guiAgentChat"); return
+        }
+        #expect(promptMode == EditorMode(rawValue: rawValue))
+        #expect(promptMode.displayName == label)
+    }
+
     @Test("Agent chat decodes approval waiting without changing the composer",
           arguments: [UInt8(0), 1, 2, 3, 4, 5])
     func decodeAgentActivityBytes(rawValue: UInt8) throws {

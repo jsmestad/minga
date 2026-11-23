@@ -16,17 +16,16 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
   alias Minga.Core.Decorations
   alias Minga.Core.Face
   alias Minga.Core.Unicode
-  alias Minga.Diagnostics
   alias MingaEditor.DisplayMap
   alias MingaEditor.InlineAsk.Render, as: InlineAskRender
   alias MingaEditor.InlineEdit.Render, as: InlineEditRender
   alias MingaEditor.State.Mouse
+  alias MingaEditor.Renderer.Caches
   alias MingaEditor.Renderer.Context
   alias MingaEditor.Renderer.SearchHighlight
   alias MingaEditor.RenderPipeline.Input
   alias MingaEditor.Shell.Traditional.NavFlash
   alias Minga.Git
-  alias Minga.LSP.SyncServer
   alias Minga.Mode.VisualState
   alias MingaEditor.UI.Highlight
 
@@ -168,8 +167,7 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
       has_sign_column: has_sign_column,
       decorations: decorations,
       composition_key: composition_key,
-      diagnostic_signs: diagnostic_signs_for_path(Map.get(params, :file_path)),
-      diagnostics_snapshot: diagnostics_snapshot(Map.get(params, :file_path)),
+      diagnostics: Caches.diagnostics_for(state.caches, Map.get(params, :file_path)),
       git_signs: prefetched_git_signs(params, state, window),
       gutter_colors: frame.theme.gutter,
       git_colors: frame.theme.git,
@@ -205,16 +203,6 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
 
   defp visible_search_matches(state, [], _map, lines, first),
     do: SearchHighlight.search_matches_for_lines(state, lines, first)
-
-  @spec diagnostics_snapshot(String.t() | nil) ::
-          {non_neg_integer(), [Minga.Diagnostics.Diagnostic.t()]}
-  defp diagnostics_snapshot(nil), do: {0, []}
-
-  defp diagnostics_snapshot(path) do
-    path
-    |> SyncServer.path_to_uri()
-    |> Diagnostics.snapshot()
-  end
 
   @spec extract_hover_row(state()) :: non_neg_integer() | nil
   defp extract_hover_row(state) do
@@ -541,23 +529,6 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
     end
   end
 
-  @doc "Returns diagnostic signs for a window's buffer."
-  @spec diagnostic_signs_for_window(window()) :: %{non_neg_integer() => atom()}
-  def diagnostic_signs_for_window(%{content: {:buffer, buf}}) when is_pid(buf) do
-    case Buffer.file_path(buf) do
-      nil -> %{}
-      path -> diagnostic_signs_for_path(path)
-    end
-  end
-
-  @doc "Returns diagnostic signs for a buffer path."
-  @spec diagnostic_signs_for_path(String.t() | nil) :: %{non_neg_integer() => atom()}
-  def diagnostic_signs_for_path(nil), do: %{}
-
-  def diagnostic_signs_for_path(path) when is_binary(path) do
-    Diagnostics.gutter_signs_by_line(SyncServer.path_to_uri(path))
-  end
-
   # ── Visual selection ───────────────────────────────────────────────────────
 
   @doc "Computes visual selection bounds in display columns."
@@ -622,7 +593,9 @@ defmodule MingaEditor.RenderPipeline.ContentHelpers do
       ctx.visual_selection,
       ctx.search_matches,
       highlight_fingerprint(ctx.highlight),
-      ctx.diagnostic_signs,
+      # Signs, not the revision: a message-only republication must not
+      # invalidate text. The retained term compares by identity when unchanged.
+      ctx.diagnostics.signs,
       ctx.git_signs,
       ctx.viewport.cols,
       ctx.content_w,

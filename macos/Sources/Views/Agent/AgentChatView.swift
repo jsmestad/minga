@@ -507,6 +507,7 @@ struct AgentConversationList: View {
         }
         .font(Typography.font(.caption))
         .foregroundStyle(theme.agentTextFg.opacity(0.3))
+        .lineLimit(1)
     }
 
     private func reportedCost(_ micros: UInt32) -> String {

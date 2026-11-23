@@ -167,7 +167,7 @@ defmodule MingaAgent.Config do
           ~w(write_file edit_file delete_file shell git_stage git_commit rename)
         ),
       tool_permissions: get(:agent_tool_permissions, nil),
-      agent_hooks: merged_agent_hooks(get(:agent_hooks, [])),
+      agent_hooks: agent_hooks(),
       system_prompt: get(:agent_system_prompt, ""),
       append_system_prompt: get(:agent_append_system_prompt, ""),
       mcp_servers: get(:agent_mcp_servers, []),
@@ -234,6 +234,14 @@ defmodule MingaAgent.Config do
       model -> %{"model" => model}
     end
   end
+
+  @doc """
+  Returns the merged lifecycle hook list without resolving the rest of the config.
+
+  Hook dispatch runs on every lifecycle event, so it must not pay for model resolution, which walks the model catalog.
+  """
+  @spec agent_hooks() :: [Hook.t()]
+  def agent_hooks, do: merged_agent_hooks(get(:agent_hooks, []))
 
   @doc "Returns a config with agent hooks disabled."
   @spec without_hooks(t()) :: t()

@@ -7,10 +7,11 @@ defmodule Minga.Diagnostics do
   (gutter signs, picker, navigation, minibuffer hints) queries this module
   and doesn't know or care where diagnostics came from.
 
-  Backed by ETS with `read_concurrency: true` for lock-free reads on the
-  render path. The GenServer owns the ETS table lifecycle and broadcasts
-  change notifications via `Minga.Events`. Reads go directly to ETS;
-  writes go through the GenServer to serialize event broadcasts.
+  Backed by protected ETS tables with `read_concurrency: true` for lock-free reads on the render path. The GenServer is the only writer. Each write merges the URI's sources once and publishes one committed row holding a revision, the merged list, severity counts and gutter signs, plus one row per diagnostic line so line readers copy only that line. Readers only look up committed rows; they never populate caches. The row is written before the change is broadcast via `Minga.Events`.
+
+  ## Revisions
+
+  Every publication of a non-empty URI carries a fresh VM-unique positive revision from `:erlang.unique_integer/1`, so a revision never repeats across clears, republications of identical lists, or a restarted server. Revision `0` means the URI has no diagnostics. Clearing a URI deletes its row; no per-URI counter or tombstone survives. Consumers that retain derived state compare revisions with `changed_since/3` instead of copying an unchanged list.
 
   Modeled on Neovim's `vim.diagnostic` and Emacs's `flymake`.
 
@@ -49,12 +50,22 @@ defmodule Minga.Diagnostics do
   @typedoc "A file URI string (e.g., `\"file:///path/to/file.ex\"`)."
   @type uri :: String.t()
 
-  @typedoc "Internal state: ETS table references, merge cache, and per-URI revisions."
+  @typedoc "A committed publication revision. `0` means no diagnostics."
+  @type revision :: non_neg_integer()
+
+  @typedoc "Gutter sign per line: a severity, or `:diag_advisory` when only advisory diagnostics exist."
+  @type gutter_signs :: %{non_neg_integer() => Diagnostic.severity() | :diag_advisory}
+
+  @typedoc "Severity counts as `{errors, warnings, info, hints}`."
+  @type count_tuple ::
+          {non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer()}
+
+  @typedoc "Internal state: protected ETS table references."
   @type state :: %{
           table: :ets.table(),
           uri_index: :ets.table(),
-          merge_cache: :ets.table(),
-          uri_generations: %{optional(uri()) => non_neg_integer()}
+          published: :ets.table(),
+          lines: :ets.table()
         }
 
   # ── Client API: Lifecycle ──────────────────────────────────────────────────
@@ -114,11 +125,51 @@ defmodule Minga.Diagnostics do
     |> merged_for_uri(uri)
   end
 
-  @doc "Returns one serialized diagnostic revision and its merged URI snapshot."
-  @spec snapshot(GenServer.server(), uri()) :: {non_neg_integer(), [Diagnostic.t()]}
+  @doc "Returns one committed revision and its merged URI list, read atomically from the same row."
+  @spec snapshot(GenServer.server(), uri()) :: {revision(), [Diagnostic.t()]}
   def snapshot(server \\ __MODULE__, uri) when is_binary(uri) do
-    GenServer.call(server, {:snapshot, uri})
+    case server |> table_name() |> published_row(uri) do
+      nil -> {0, []}
+      {^uri, revision, diagnostics, _counts, _signs} -> {revision, diagnostics}
+    end
   end
+
+  @doc "Returns the committed revision for a URI without copying its diagnostics. `0` means none."
+  @spec revision(GenServer.server(), uri()) :: revision()
+  def revision(server \\ __MODULE__, uri) when is_binary(uri) do
+    {_uri_index, published, _lines} = server |> table_name() |> secondary_tables()
+    :ets.lookup_element(published, uri, 2, 0)
+  end
+
+  @doc """
+  Returns the committed publication for a URI only when its revision differs from `known_revision`.
+
+  An unchanged revision copies one integer and no diagnostic list. A changed revision returns the revision, merged list and gutter signs from the same committed row.
+  """
+  @spec changed_since(GenServer.server(), uri(), revision()) ::
+          :unchanged | {:changed, revision(), [Diagnostic.t()], gutter_signs()}
+  def changed_since(server \\ __MODULE__, uri, known_revision)
+      when is_binary(uri) and is_integer(known_revision) and known_revision >= 0 do
+    table = table_name(server)
+    {_uri_index, published, _lines} = secondary_tables(table)
+
+    if :ets.lookup_element(published, uri, 2, 0) == known_revision do
+      :unchanged
+    else
+      changed_publication(published_row(table, uri), uri, known_revision)
+    end
+  end
+
+  @spec changed_publication(tuple() | nil, uri(), revision()) ::
+          :unchanged | {:changed, revision(), [Diagnostic.t()], gutter_signs()}
+  defp changed_publication(nil, _uri, 0), do: :unchanged
+  defp changed_publication(nil, _uri, _known), do: {:changed, 0, [], %{}}
+
+  defp changed_publication({_uri, known, _diagnostics, _counts, _signs}, _uri2, known),
+    do: :unchanged
+
+  defp changed_publication({_uri, revision, diagnostics, _counts, signs}, _uri2, _known),
+    do: {:changed, revision, diagnostics, signs}
 
   @doc "Counts diagnostics by severity."
   @spec severity_counts([Diagnostic.t()]) :: %{atom() => non_neg_integer()}
@@ -162,11 +213,8 @@ defmodule Minga.Diagnostics do
           non_neg_integer() => Diagnostic.severity() | :diag_advisory
         }
   def gutter_signs_by_line(server \\ __MODULE__, uri) when is_binary(uri) do
-    server
-    |> table_name()
-    |> merged_for_uri(uri)
-    |> Enum.group_by(& &1.range.start_line)
-    |> Map.new(fn {line, diags} -> {line, line_gutter_sign(diags)} end)
+    {_uri_index, published, _lines} = server |> table_name() |> secondary_tables()
+    :ets.lookup_element(published, uri, 5, %{})
   end
 
   @spec line_gutter_sign([Diagnostic.t()]) :: Diagnostic.severity() | :diag_advisory
@@ -220,12 +268,10 @@ defmodule Minga.Diagnostics do
           hint: non_neg_integer()
         }
   def count(server \\ __MODULE__, uri) when is_binary(uri) do
-    server
-    |> table_name()
-    |> merged_for_uri(uri)
-    |> Enum.reduce(%{error: 0, warning: 0, info: 0, hint: 0}, fn diag, acc ->
-      Map.update!(acc, diag.severity, &(&1 + 1))
-    end)
+    case count_tuple(server, uri) do
+      nil -> %{error: 0, warning: 0, info: 0, hint: 0}
+      {e, w, i, h} -> %{error: e, warning: w, info: i, hint: h}
+    end
   end
 
   @doc """
@@ -235,8 +281,7 @@ defmodule Minga.Diagnostics do
   or `nil` when there are none. Used by both the TUI modeline and the
   GUI status bar protocol encoder.
   """
-  @spec count_tuple(GenServer.server(), uri()) ::
-          {non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer()} | nil
+  @spec count_tuple(GenServer.server(), uri()) :: count_tuple() | nil
   def count_tuple(server \\ __MODULE__, uri) when is_binary(uri) do
     server
     |> table_name()
@@ -266,10 +311,8 @@ defmodule Minga.Diagnostics do
   @spec on_line(GenServer.server(), uri(), non_neg_integer()) :: [Diagnostic.t()]
   def on_line(server \\ __MODULE__, uri, line)
       when is_binary(uri) and is_integer(line) do
-    server
-    |> table_name()
-    |> merged_for_uri(uri)
-    |> Enum.filter(fn diag -> diag.range.start_line == line end)
+    {_uri_index, _published, lines} = server |> table_name() |> secondary_tables()
+    :ets.lookup_element(lines, {uri, line}, 2, [])
   end
 
   # ── Server Callbacks ───────────────────────────────────────────────────────
@@ -278,54 +321,45 @@ defmodule Minga.Diagnostics do
   @spec init(atom() | pid()) :: {:ok, state()}
   def init(name) do
     tname = table_name(name)
-    table = :ets.new(tname, [:set, :public, :named_table, read_concurrency: true])
+    # All tables are protected: this process is their only writer.
+    table = :ets.new(tname, [:set, :protected, :named_table, read_concurrency: true])
 
     # Secondary index: maps URI → list of sources that have diagnostics for it.
     # Enables O(1) URI lookups instead of scanning the entire table.
-    uri_index = :ets.new(:"#{tname}_uri_idx", [:set, :public, read_concurrency: true])
+    uri_index = :ets.new(:"#{tname}_uri_idx", [:set, :protected, read_concurrency: true])
 
-    # Merge cache: stores merged diagnostics per URI.
-    # Invalidated on publish/clear for that URI only.
-    merge_cache = :ets.new(:"#{tname}_cache", [:set, :public, read_concurrency: true])
+    # Committed publications: {uri, revision, merged, counts, signs}.
+    # Written once per change, before the change is broadcast.
+    published = :ets.new(:"#{tname}_published", [:set, :protected, read_concurrency: true])
+
+    # Per-line projection of each committed list: {{uri, line}, diagnostics}.
+    # Lets line readers copy only that line instead of the whole URI list.
+    lines = :ets.new(:"#{tname}_lines", [:set, :protected, read_concurrency: true])
 
     # Store refs so readers can find the secondary tables from the main table name.
-    :persistent_term.put({__MODULE__, tname}, {uri_index, merge_cache})
+    :persistent_term.put({__MODULE__, tname}, {uri_index, published, lines})
 
-    {:ok,
-     %{
-       table: table,
-       uri_index: uri_index,
-       merge_cache: merge_cache,
-       uri_generations: %{}
-     }}
+    {:ok, %{table: table, uri_index: uri_index, published: published, lines: lines}}
   end
 
   @impl GenServer
   def handle_call({:publish, source, uri, diagnostics}, _from, state) do
     store_published_diagnostics(state, source, uri, diagnostics)
-    invalidate_cache(state.merge_cache, uri)
+    commit_uri(state, uri)
     broadcast_diagnostics_updated(uri, source)
-    {:reply, :ok, bump_uri_generation(state, uri)}
-  end
-
-  def handle_call({:snapshot, uri}, _from, state) do
-    {:reply, {Map.get(state.uri_generations, uri, 0), merged_for_uri(state.table, uri)}, state}
+    {:reply, :ok, state}
   end
 
   def handle_call({:clear, source, uri}, _from, state) do
     :ets.delete(state.table, {source, uri})
     update_uri_index(state.uri_index, uri, source, :remove)
-    invalidate_cache(state.merge_cache, uri)
+    commit_uri(state, uri)
     broadcast_diagnostics_updated(uri, source)
-    {:reply, :ok, bump_uri_generation(state, uri)}
+    {:reply, :ok, state}
   end
 
   def handle_call(:table_name, _from, state) do
     {:reply, state.table, state}
-  end
-
-  def handle_call(:table_refs, _from, state) do
-    {:reply, {state.table, state.uri_index, state.merge_cache}, state}
   end
 
   def handle_call({:clear_source, source}, _from, state) do
@@ -344,20 +378,71 @@ defmodule Minga.Diagnostics do
 
     Enum.each(affected_uris, fn uri ->
       update_uri_index(state.uri_index, uri, source, :remove)
-      invalidate_cache(state.merge_cache, uri)
+      commit_uri(state, uri)
     end)
 
     Enum.each(affected_uris, &broadcast_diagnostics_updated(&1, source))
-
-    state = Enum.reduce(affected_uris, state, &bump_uri_generation(&2, &1))
     {:reply, :ok, state}
   end
 
   # ── Private ────────────────────────────────────────────────────────────────
 
-  @spec bump_uri_generation(state(), uri()) :: state()
-  defp bump_uri_generation(state, uri) do
-    %{state | uri_generations: Map.update(state.uri_generations, uri, 1, &(&1 + 1))}
+  # Merges the URI's sources and replaces its committed row in one insert.
+  # An empty merge deletes the row, so revision 0 needs no tombstone. Line
+  # rows are replaced in one insert before the list row, and lines the new
+  # list no longer has are removed after it, all before the broadcast.
+  @spec commit_uri(state(), uri()) :: :ok
+  defp commit_uri(state, uri) do
+    previous_lines = state.published |> :ets.lookup_element(uri, 5, %{}) |> Map.keys()
+
+    case merge_from_index(state.table, state.uri_index, uri) do
+      [] ->
+        :ets.delete(state.published, uri)
+        delete_lines(state.lines, uri, previous_lines, %{})
+
+      merged ->
+        revision = :erlang.unique_integer([:positive, :monotonic])
+        by_line = by_line(merged)
+        :ets.insert(state.lines, Enum.map(by_line, fn {line, diags} -> {{uri, line}, diags} end))
+
+        :ets.insert(
+          state.published,
+          {uri, revision, merged, counts(merged), gutter_signs(by_line)}
+        )
+
+        delete_lines(state.lines, uri, previous_lines, by_line)
+    end
+  end
+
+  @spec delete_lines(:ets.table(), uri(), [non_neg_integer()], map()) :: :ok
+  defp delete_lines(lines, uri, previous_lines, retained) do
+    Enum.each(previous_lines, fn line ->
+      unless Map.has_key?(retained, line), do: :ets.delete(lines, {uri, line})
+    end)
+  end
+
+  # Groups the merged list by start line, preserving published order and duplicates.
+  @spec by_line([Diagnostic.t()]) :: %{non_neg_integer() => [Diagnostic.t()]}
+  defp by_line(merged) do
+    merged
+    |> Enum.reverse()
+    |> Enum.reduce(%{}, fn diag, acc ->
+      Map.update(acc, diag.range.start_line, [diag], &[diag | &1])
+    end)
+  end
+
+  @spec gutter_signs(%{non_neg_integer() => [Diagnostic.t()]}) :: gutter_signs()
+  defp gutter_signs(by_line),
+    do: Map.new(by_line, fn {line, diags} -> {line, line_gutter_sign(diags)} end)
+
+  @spec counts([Diagnostic.t()]) :: count_tuple()
+  defp counts(merged) do
+    Enum.reduce(merged, {0, 0, 0, 0}, fn
+      %{severity: :error}, {e, w, i, h} -> {e + 1, w, i, h}
+      %{severity: :warning}, {e, w, i, h} -> {e, w + 1, i, h}
+      %{severity: :info}, {e, w, i, h} -> {e, w, i + 1, h}
+      %{severity: :hint}, {e, w, i, h} -> {e, w, i, h + 1}
+    end)
   end
 
   @spec store_published_diagnostics(state(), source(), uri(), [Diagnostic.t()]) :: :ok
@@ -371,23 +456,24 @@ defmodule Minga.Diagnostics do
     update_uri_index(state.uri_index, uri, source, :add)
   end
 
-  # Merged diagnostics for a URI, using the URI index for O(1) source
-  # lookup and a generation-based cache to avoid re-merging on every call.
+  @spec secondary_tables(:ets.table()) :: {:ets.table(), :ets.table(), :ets.table()}
+  defp secondary_tables(table), do: :persistent_term.get({__MODULE__, table})
+
+  @spec published_row(:ets.table(), uri()) :: tuple() | nil
+  defp published_row(table, uri) do
+    {_uri_index, published, _lines} = secondary_tables(table)
+
+    case :ets.lookup(published, uri) do
+      [row] -> row
+      [] -> nil
+    end
+  end
+
+  # Committed merged diagnostics for a URI. Readers never write.
   @spec merged_for_uri(:ets.table(), uri()) :: [Diagnostic.t()]
   defp merged_for_uri(table, uri) do
-    {uri_index, cache_table} = :persistent_term.get({__MODULE__, table})
-
-    # Check cache first
-    case :ets.lookup(cache_table, uri) do
-      [{^uri, cached_diags}] ->
-        cached_diags
-
-      [] ->
-        # Cache miss: look up sources for this URI, then fetch each
-        result = merge_from_index(table, uri_index, uri)
-        :ets.insert(cache_table, {uri, result})
-        result
-    end
+    {_uri_index, published, _lines} = secondary_tables(table)
+    :ets.lookup_element(published, uri, 3, [])
   end
 
   @spec merge_from_index(:ets.table(), :ets.table(), uri()) :: [Diagnostic.t()]
@@ -412,7 +498,7 @@ defmodule Minga.Diagnostics do
           uri() => {non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer()}
         }
   defp do_count_tuples_by_uri_prefix(table, uri_prefix) do
-    {uri_index, _cache_table} = :persistent_term.get({__MODULE__, table})
+    {uri_index, _published, _lines} = secondary_tables(table)
 
     :ets.foldl(
       fn {uri, _sources}, acc ->
@@ -444,27 +530,11 @@ defmodule Minga.Diagnostics do
     if String.ends_with?(uri_prefix, "/"), do: uri_prefix, else: uri_prefix <> "/"
   end
 
-  @spec count_tuple_from_table(:ets.table(), uri()) ::
-          {non_neg_integer(), non_neg_integer(), non_neg_integer(), non_neg_integer()} | nil
+  # A committed row is never empty, so its counts are never all zero.
+  @spec count_tuple_from_table(:ets.table(), uri()) :: count_tuple() | nil
   defp count_tuple_from_table(table, uri) do
-    case count_from_table(table, uri) do
-      %{error: 0, warning: 0, info: 0, hint: 0} -> nil
-      %{error: e, warning: w, info: i, hint: h} -> {e, w, i, h}
-    end
-  end
-
-  @spec count_from_table(:ets.table(), uri()) :: %{
-          error: non_neg_integer(),
-          warning: non_neg_integer(),
-          info: non_neg_integer(),
-          hint: non_neg_integer()
-        }
-  defp count_from_table(table, uri) do
-    table
-    |> merged_for_uri(uri)
-    |> Enum.reduce(%{error: 0, warning: 0, info: 0, hint: 0}, fn diag, acc ->
-      Map.update!(acc, diag.severity, &(&1 + 1))
-    end)
+    {_uri_index, published, _lines} = secondary_tables(table)
+    :ets.lookup_element(published, uri, 4, nil)
   end
 
   @spec find_next([Diagnostic.t()], non_neg_integer()) :: Diagnostic.t() | nil
@@ -520,11 +590,6 @@ defmodule Minga.Diagnostics do
     end
 
     :ok
-  end
-
-  @spec invalidate_cache(:ets.table(), uri()) :: true
-  defp invalidate_cache(cache, uri) do
-    :ets.delete(cache, uri)
   end
 
   @spec broadcast_diagnostics_updated(uri(), source()) :: :ok

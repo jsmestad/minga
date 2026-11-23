@@ -228,8 +228,16 @@ type StatusBar struct {
 	PendingKeys string
 	Operation   *generated.GuiStatusBarOperation
 	Review      *StatusReview
-	Left        []StatusSegment
-	Right       []StatusSegment
+	// Agent is set only for agent-content status bars (content kind 1). It carries
+	// the BEAM-owned conversation total, not the resident transcript count.
+	Agent *StatusAgent
+	Left  []StatusSegment
+	Right []StatusSegment
+}
+
+// StatusAgent is the agent section (0x09) of an agent-content status bar.
+type StatusAgent struct {
+	MessageCount uint32
 }
 
 type StatusSegment struct {

@@ -763,6 +763,62 @@ defmodule Minga.Buffer.ProcessTest do
     end
   end
 
+  describe "apply_edits/3 batch contract" do
+    # The sequential control is the pre-change algorithm. The batch mixes separated edits, which
+    # apply in one pass, with an overlapping pair and a line past the end, which apply one at a
+    # time, over Unicode and CRLF text.
+    setup do
+      lines = for n <- 0..399, do: "l#{n} é字 😀 e\u0301 word#{n}"
+      text = Enum.join(lines, "\r\n") <> "\n"
+
+      # Ascending order, so the batch arrives unsorted.
+      separated = for n <- 0..399//2, do: {{n, 0}, {n, 1}, "L#{n}\n"}
+
+      edits =
+        [
+          {{10, 19}, {10, 22}, "ü"},
+          {{10, 21}, {10, 24}, "XY"},
+          {{900, 0}, {900, 0}, "tail"}
+        ] ++ separated
+
+      doc = text |> Document.new() |> Document.move_to({5, 3})
+
+      {expected, _patches} =
+        Minga.Test.SequentialRangeReplace.replace_ranges_with_patches(doc, edits)
+
+      %{text: text, edits: edits, expected: expected}
+    end
+
+    test "matches the sequential result, bumps the version once, and undoes and redoes as one entry",
+         %{text: text, edits: edits, expected: expected} do
+      pid = start_supervised!({BufferProcess, content: text})
+      BufferProcess.move_to(pid, {5, 3})
+      version = BufferProcess.version(pid)
+
+      assert :ok = BufferProcess.apply_edits(pid, edits)
+      assert BufferProcess.content(pid) == Document.content(expected)
+      assert BufferProcess.cursor(pid) == Document.cursor(expected)
+      assert BufferProcess.version(pid) == version + 1
+      assert BufferProcess.dirty?(pid)
+
+      BufferProcess.undo(pid)
+      assert BufferProcess.content(pid) == text
+      assert BufferProcess.cursor(pid) == {5, 3}
+
+      BufferProcess.redo(pid)
+      assert BufferProcess.content(pid) == Document.content(expected)
+      assert BufferProcess.cursor(pid) == Document.cursor(expected)
+    end
+
+    test "sends no incremental delta, so delta consumers resynchronize", %{edits: edits} = ctx do
+      pid = start_supervised!({BufferProcess, content: ctx.text})
+      assert {:ok, []} = BufferProcess.consume_edit_deltas(pid, :lsp)
+
+      assert :ok = BufferProcess.apply_edits(pid, edits)
+      assert :reset_required = BufferProcess.consume_edit_deltas(pid, :lsp)
+    end
+  end
+
   describe "buffer_type" do
     test "buffer type controls read-only defaults" do
       {:ok, file} = BufferProcess.start_link()

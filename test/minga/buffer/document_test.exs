@@ -3,6 +3,61 @@ defmodule Minga.Buffer.DocumentTest do
   use ExUnitProperties
 
   alias Minga.Buffer.Document
+  alias Minga.Buffer.Lines
+
+  describe "replace_line_span/4" do
+    property "matches a rebuilt document for any gap position and pending line index" do
+      check all(
+              lines <-
+                list_of(member_of(["", "a", "é世", "\tx", "  yz"]), min_length: 1, max_length: 10),
+              cursor_line <- integer(0..(length(lines) - 1)),
+              cursor_col <- integer(0..4),
+              pending? <- boolean(),
+              first <- integer(0..(length(lines) - 1)),
+              span <- integer(0..(length(lines) - 1)),
+              replacement_lines <-
+                list_of(member_of(["", "b", "✓✓", "  q"]),
+                  length: min(span, length(lines) - 1 - first) + 1
+                )
+            ) do
+        last = first + length(replacement_lines) - 1
+
+        doc =
+          lines
+          |> Enum.join("\n")
+          |> Document.new()
+          |> Document.move_to({cursor_line, cursor_col})
+
+        doc = if pending?, do: Document.insert_text(doc, "p"), else: doc
+        before = doc |> Document.content() |> String.split("\n")
+        replacement = Enum.join(replacement_lines, "\n")
+
+        new_doc = Document.replace_line_span(doc, first, last, replacement)
+
+        expected =
+          (Enum.take(before, first) ++ replacement_lines ++ Enum.drop(before, last + 1))
+          |> Enum.join("\n")
+
+        rebuilt = Document.new(expected)
+        assert Document.content(new_doc) == expected
+        assert Document.line_count(new_doc) == Document.line_count(rebuilt)
+
+        assert Document.cursor(new_doc) ==
+                 {last,
+                  replacement |> String.split("\n") |> Enum.reverse() |> hd() |> byte_size()}
+
+        for line <- 0..(Document.line_count(rebuilt) - 1) do
+          assert Lines.start_of(new_doc, line) == Lines.start_of(rebuilt, line)
+        end
+      end
+    end
+
+    test "rejects a replacement that changes the line count" do
+      doc = Document.new("a\nb\nc")
+
+      assert_raise ArgumentError, fn -> Document.replace_line_span(doc, 0, 1, "one line") end
+    end
+  end
 
   describe "new/1" do
     test "creates an empty buffer" do

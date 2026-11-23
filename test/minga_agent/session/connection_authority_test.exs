@@ -636,6 +636,70 @@ defmodule MingaAgent.Session.ConnectionAuthorityTest do
     assert Session.cancel_connection(session, original, ref) == {:error, :stale_target}
   end
 
+  test "a native start without a model reports the problem through the connection, not the transcript, and selecting a model clears it",
+       context do
+    intent = ModelSelectionFixture.model_intent()
+
+    session =
+      start_session(context,
+        provider: MingaAgent.Providers.Native,
+        provider_opts: [
+          model: intent,
+          credential_opts: context.credential_opts,
+          config: %MingaAgent.Config{},
+          model_resolver_opts: resolver_opts()
+        ]
+      )
+
+    assert {:resolution, _problem} = Session.editor_snapshot(session).connection.problem
+    assert system_errors(session) == []
+
+    assert :ok = Credentials.store("openai", "synthetic-configured", context.credential_opts)
+    assert :ok = Session.set_model_for_target(session, target(session), intent)
+
+    assert Session.editor_snapshot(session).connection.problem == nil
+    assert system_errors(session) == []
+  end
+
+  test "restoring a session drops a selection error saved before the model was selected",
+       context do
+    session = start_session(context, session_store_dir: context.tmp_dir)
+    id = Session.session_id(session)
+
+    stale =
+      {:system,
+       "Model selection needs correction: No executable model route is available. Open /model to choose an on-device model or connect a provider.",
+       :error}
+
+    kept_error = {:system, "Provider request failed", :error}
+
+    assert :ok =
+             SessionStore.save(
+               %{
+                 id: id,
+                 timestamp: DateTime.to_iso8601(DateTime.utc_now()),
+                 model_name: "test:loaded",
+                 usage: Session.usage(session),
+                 messages: [
+                   {:system, "Session started", :info},
+                   stale,
+                   {:user, "hello"},
+                   kept_error
+                 ],
+                 continuation: Continuation.new()
+               },
+               context.tmp_dir
+             )
+
+    assert :ok = Session.load_session(session, id)
+
+    assert Session.messages(session) == [
+             {:system, "Session started", :info},
+             {:user, "hello"},
+             kept_error
+           ]
+  end
+
   test "public Apple model changes need readiness and cannot commit to a replacement conversation",
        context do
     owner = self()
@@ -732,6 +796,9 @@ defmodule MingaAgent.Session.ConnectionAuthorityTest do
   end
 
   defp target(session), do: Session.editor_snapshot(session).connection.target
+
+  defp system_errors(session),
+    do: Enum.filter(Session.messages(session), &match?({:system, _text, :error}, &1))
 
   defp waiting_process do
     start_supervised!(

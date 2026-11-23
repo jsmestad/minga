@@ -169,6 +169,24 @@ defmodule MingaEditor.State do
     %{state | agent_connection: AgentConnection.install_arrival(state.agent_connection, arrival)}
   end
 
+  @doc "Keeps the Editor-owned local Session start request."
+  @spec track_agent_session_start(t(), MingaEditor.Agent.SessionStart.t()) :: t()
+  def track_agent_session_start(%__MODULE__{} = state, start) do
+    %{
+      state
+      | agent_connection: AgentConnection.track_session_start(state.agent_connection, start)
+    }
+  end
+
+  @doc "Forgets a finished local Session start request."
+  @spec finish_agent_session_start(t(), reference()) :: t()
+  def finish_agent_session_start(%__MODULE__{} = state, token) do
+    %{
+      state
+      | agent_connection: AgentConnection.finish_session_start(state.agent_connection, token)
+    }
+  end
+
   @doc "Records a contributed model route's reported status from its change event."
   @spec record_inference_route_status(t(), MingaAgent.InferenceRoute.StatusChangedEvent.t()) ::
           t()

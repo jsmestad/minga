@@ -47,6 +47,23 @@ defmodule Minga.Buffer.ChangeLog do
     }
   end
 
+  @doc "Records edit deltas in application order, exactly as recording each in turn would, but trims retained entries once."
+  @spec record_changes(t(), [EditDelta.t()]) :: t()
+  def record_changes(%__MODULE__{} = log, deltas) when is_list(deltas) do
+    {pending_changes, entries, sequence} =
+      Enum.reduce(deltas, {log.pending_changes, log.entries, log.sequence}, fn
+        %EditDelta{} = delta, {pending, entries, sequence} ->
+          {[delta | pending], [{sequence + 1, delta} | entries], sequence + 1}
+      end)
+
+    %{
+      log
+      | pending_changes: pending_changes,
+        sequence: sequence,
+        entries: Enum.take(entries, @max_single_consumer_entries)
+    }
+  end
+
   @doc "Returns globally pending changes in edit order and clears that legacy pending list."
   @spec drain_pending_changes(t()) :: {[EditDelta.t()], t()}
   def drain_pending_changes(%__MODULE__{} = log) do

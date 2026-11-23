@@ -15,8 +15,8 @@ defmodule MingaEditor.Renderer.Context do
   alias Minga.Core.Face
   alias Minga.Core.WidthOracle
   alias Minga.Core.WidthOracle.Monospace
-  alias Minga.Diagnostics.Diagnostic
   alias Minga.Editing.Search.Match
+  alias MingaEditor.RenderModel.Window.WindowDiagnostics
   alias MingaEditor.Viewport
   alias MingaEditor.UI.Highlight
 
@@ -33,8 +33,7 @@ defmodule MingaEditor.Renderer.Context do
             nav_flash_bg: nil,
             editor_bg: 0x282C34,
             has_sign_column: true,
-            diagnostic_signs: %{},
-            diagnostics_snapshot: {0, []},
+            diagnostics: WindowDiagnostics.empty(),
             git_signs: %{},
             git_colors: %MingaEditor.UI.Theme.Git{
               added_fg: 0x98BE65,
@@ -94,8 +93,7 @@ defmodule MingaEditor.Renderer.Context do
           nav_flash_bg: MingaEditor.UI.Theme.color() | nil,
           editor_bg: MingaEditor.UI.Theme.color(),
           has_sign_column: boolean(),
-          diagnostic_signs: %{non_neg_integer() => Diagnostic.severity() | :diag_advisory},
-          diagnostics_snapshot: {non_neg_integer(), [Diagnostic.t()]},
+          diagnostics: WindowDiagnostics.t(),
           git_signs: %{non_neg_integer() => Minga.Core.Diff.hunk_type()},
           decorations: Decorations.t(),
           composition_key: tuple() | nil,

@@ -30,7 +30,7 @@ defmodule MingaEditor.Frontend do
 
   @doc "Sends a list of pre-encoded commands to the frontend process."
   @spec send_commands(GenServer.server() | nil, [binary()]) ::
-          MingaEditor.Frontend.Adapter.admission()
+          MingaEditor.Frontend.Adapter.frame_admission()
   def send_commands(server \\ MingaEditor.Frontend.Manager, commands),
     do: MingaEditor.Frontend.Manager.send_commands(server, commands)
 
@@ -46,7 +46,7 @@ defmodule MingaEditor.Frontend do
   sample for the Renderer.Server → Port.Manager scheduling delay.
   """
   @spec send_render_commands(GenServer.server() | nil, [binary()]) ::
-          MingaEditor.Frontend.Adapter.admission()
+          MingaEditor.Frontend.Adapter.frame_admission()
   def send_render_commands(server \\ MingaEditor.Frontend.Manager, commands),
     do: MingaEditor.Frontend.Manager.send_render_commands(server, commands)
 

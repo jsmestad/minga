@@ -111,4 +111,11 @@ defmodule MingaAgent.Session.ConnectionSnapshot do
 
   def status(%__MODULE__{credential_readiness: :configured}), do: :connecting
   def status(%__MODULE__{}), do: :unconfigured
+
+  @doc "Returns the session's explanation when it could not resolve a model, otherwise nil."
+  @spec resolution_message(t()) :: String.t() | nil
+  def resolution_message(%__MODULE__{model_selection: nil, problem: {:resolution, reason}}),
+    do: ModelResolver.message(reason)
+
+  def resolution_message(%__MODULE__{}), do: nil
 end

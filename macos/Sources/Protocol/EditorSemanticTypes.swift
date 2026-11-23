@@ -61,48 +61,25 @@ public enum EditorMode: Equatable, Sendable {
         case .unknown(let rawValue): rawValue
         }
     }
-}
 
-/// Modal state encoded for the agent prompt.
-///
-/// This mapping is intentionally distinct from `EditorMode`. In particular,
-/// raw value 3 is visual-line mode here and command mode in `EditorMode`.
-public enum PromptMode: Equatable, Sendable {
-    case normal
-    case insert
-    case visual
-    case visualLine
-    case operatorPending
-    case unknown(rawValue: UInt8)
-
-    /// Decodes a prompt-mode byte without using the editor-mode mapping.
-    public init(rawValue: UInt8) {
-        switch rawValue {
-        case 0: self = .normal
-        case 1: self = .insert
-        case 2: self = .visual
-        case 3: self = .visualLine
-        case 4: self = .operatorPending
-        default: self = .unknown(rawValue: rawValue)
-        }
-    }
-
-    /// The original protocol byte.
-    public var rawValue: UInt8 {
+    /// The label every mode indicator shows, so the status bar and the Agent composer never disagree.
+    public var displayName: String {
         switch self {
-        case .normal: 0
-        case .insert: 1
-        case .visual: 2
-        case .visualLine: 3
-        case .operatorPending: 4
-        case .unknown(let rawValue): rawValue
+        case .normal: "NORMAL"
+        case .insert: "INSERT"
+        case .visual: "VISUAL"
+        case .command: "COMMAND"
+        case .operatorPending: "O-PENDING"
+        case .search: "SEARCH"
+        case .replace: "REPLACE"
+        case .unknown: "NORMAL"
         }
     }
 
-    /// Whether the prompt accepts inserted text.
+    /// Whether typed text is inserted at the cursor.
     public var isInsert: Bool { self == .insert }
 
-    /// Whether the prompt should render a block cursor.
+    /// Whether a text surface in this mode renders a block cursor.
     public var usesBlockCursor: Bool { self != .insert }
 }
 

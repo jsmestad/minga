@@ -26,6 +26,8 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
   alias MingaEditor.Layout
   alias MingaEditor.RenderPipeline.Content
   alias MingaEditor.RenderPipeline.Input
+  alias MingaEditor.RenderPipeline.Intent
+  alias MingaEditor.Renderer.TranscriptUpdate
   alias MingaEditor.RenderPipeline.TestHelpers
   alias Minga.RenderModel.UI.AgentChat.ApprovalView
   alias Minga.RenderModel.UI.AgentChat.MarkdownBlock
@@ -52,7 +54,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
         |> AgentChatBuilder.build()
 
       assert model.visible?
-      assert model.model_name == "Model not resolved"
+      assert model.model_name == "Resolving model…"
     end
   end
 
@@ -225,19 +227,6 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
 
     # transcript_epoch is a stable, non-nil change token for the session.
     assert is_integer(model.transcript_epoch)
-  end
-
-  test "select_resident_messages/2 applies the configured wire-byte cap before the adapter" do
-    messages = [
-      {1, {:user, "first"}},
-      {2, {:user, "second"}},
-      {3, {:user, "third"}}
-    ]
-
-    {selected, truncated?} = AgentChatBuilder.select_resident_messages(messages, 37)
-
-    assert selected == [{2, {:user, "second"}}, {3, {:user, "third"}}]
-    assert truncated?
   end
 
   test "build/1 applies the configured resident byte cap and marks omitted messages" do
@@ -811,9 +800,16 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
     # Capture live status before attaching the identity-only session for Content and emit.
     input = state |> Input.from_editor_state() |> Layout.put()
     frame = %{input.intent.frame | shell_state: shell}
-    input = %{input | intent: %{input.intent | frame: frame}}
+    intent = admit_seed(%{input.intent | frame: frame}, panel.transcript)
+    input = %{input | intent: intent, workspace: intent.workspace}
     {[_content], _cursor, input} = Content.build_agent_chat_content(input, Layout.get(input))
     Context.from_input(input)
+  end
+
+  # The renderer admits the transcript with the same intent that carries its decorations.
+  defp admit_seed(intent, projection) do
+    {:ok, root} = AgentChatBuilder.admit(nil, TranscriptUpdate.seed(projection, 0), intent)
+    Intent.with_agent_transcript(intent, root)
   end
 
   defp fake_session_pid do

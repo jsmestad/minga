@@ -321,6 +321,34 @@ defmodule Minga.Buffer.Lines do
     end
   end
 
+  @doc """
+  Updates line_offsets after the text of lines `first_line..last_line` is replaced in place by text with the same number of line breaks.
+
+  `span_start` is where `first_line` starts, `breaks` are the `:binary.matches/2` line-break positions inside the replacement, and `growth` is the replacement's byte size minus the replaced span's. O(1) for a single line, as for an insert; O(line_count) otherwise.
+  """
+  @spec update_after_span_replace(
+          Document.line_offsets(),
+          line_index(),
+          line_index(),
+          non_neg_integer(),
+          [{non_neg_integer(), pos_integer()}],
+          integer()
+        ) :: Document.line_offsets()
+  def update_after_span_replace(nil, _first_line, _last_line, _span_start, _breaks, _growth),
+    do: nil
+
+  def update_after_span_replace(ls, line, line, _span_start, [], growth),
+    do: accumulate_delta(ls, line, growth)
+
+  def update_after_span_replace(ls, first_line, last_line, span_start, breaks, growth) do
+    starts = ensure_clean(ls)
+    total = tuple_size(starts)
+    kept = for i <- 0..first_line, do: elem(starts, i)
+    inner = Enum.map(breaks, fn {pos, _len} -> span_start + pos + 1 end)
+    shifted = for i <- (last_line + 1)..(total - 1)//1, do: elem(starts, i) + growth
+    List.to_tuple(kept ++ inner ++ shifted)
+  end
+
   @doc "Updates line_offsets after deleting one character before the cursor."
   @spec update_after_delete_before(
           Document.line_offsets(),

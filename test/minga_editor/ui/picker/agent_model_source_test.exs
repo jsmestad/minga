@@ -68,6 +68,28 @@ defmodule MingaEditor.UI.Picker.AgentModelSourceTest do
         when session == self(), do: {:reply, {:error, message}, fixture}
   end
 
+  test "the chooser status names a specific startup resolution failure and keeps the plain no-model label" do
+    session = start_supervised!({RejectingSession, {[], "unused"}})
+    missing = {:model_not_found, "openai:no-such-model"}
+
+    unresolved = %{
+      connection(session)
+      | credential_readiness: :unconfigured,
+        provider_phase: :stopped,
+        problem: {:resolution, missing}
+    }
+
+    assert {:ok, _items, %{status: status}} = AgentModelSource.async_fetch(context(unresolved, 1))
+    assert status == ModelResolver.message(missing)
+    assert status =~ "openai:no-such-model"
+
+    no_model = %{unresolved | problem: {:resolution, :no_available_model}}
+
+    assert {:ok, _items,
+            %{status: "Choose a model or connect a provider. Your draft will not be sent."}} =
+             AgentModelSource.async_fetch(context(no_model, 1))
+  end
+
   test "an API route row shows a ready chip and leads with its route, price, and context" do
     selection =
       ModelSelectionFixture.selection(
@@ -108,36 +130,38 @@ defmodule MingaEditor.UI.Picker.AgentModelSourceTest do
     owner = self()
 
     session =
-      start_supervised!(
-        {Session,
-         provider: Native,
-         persist?: false,
-         hooks_enabled?: false,
-         credentials_snapshot_fn: fn -> Snapshot.new(%{}, nil) end,
-         provider_opts: [
-           mcp_enabled?: false,
-           model_resolver_opts: [
-             models: [],
-             apple_availability_fn: fn ->
-               status = :atomics.get(readiness, 1)
-               send(owner, {:apple_probe, self()})
+      start_supervised!({Session,
+       provider: Native,
+       persist?: false,
+       hooks_enabled?: false,
+       credentials_snapshot_fn: fn -> Snapshot.new(%{}, nil) end,
+       provider_opts: [
+         mcp_enabled?: false,
+         # Activation counts the Apple prefix; this test is about readiness, not the tokenizer.
+         apple_counter: fn _texts, candidates, _tools, _reserve ->
+           {:ok, %{counts: Enum.map(candidates, fn _candidate -> 1_600 end), context: 4_096}}
+         end,
+         model_resolver_opts: [
+           models: [],
+           apple_availability_fn: fn ->
+             status = :atomics.get(readiness, 1)
+             send(owner, {:apple_probe, self()})
 
-               case status do
-                 1 ->
-                   {:ok, 4_096}
+             case status do
+               1 ->
+                 {:ok, 4_096}
 
-                 0 ->
-                   {:error, :disabled}
+               0 ->
+                 {:error, :disabled}
 
-                 2 ->
-                   receive do
-                     {:finish_apple_probe, result} -> result
-                   end
-               end
+               2 ->
+                 receive do
+                   {:finish_apple_probe, result} -> result
+                 end
              end
-           ]
-         ]}
-      )
+           end
+         ]
+       ]})
 
     %{connection: connection} = Session.editor_snapshot(session)
     assert ConnectionSnapshot.status(connection) == :unconfigured
@@ -160,7 +184,9 @@ defmodule MingaEditor.UI.Picker.AgentModelSourceTest do
     assert apple.status == ItemStatus.new(:ready, "Ready")
 
     assert apple.group == "On device"
-    assert apple.description == "4k ctx · no thinking controls · compact file tools, no images"
+
+    assert apple.description ==
+             "4k ctx · no thinking controls · compact file tools, no images, instruction files only if they fit"
 
     assert [completion] = SlashCommand.completion_candidates(state, "model apple")
     assert completion.insert == "model #{apple.id}"

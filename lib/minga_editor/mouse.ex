@@ -215,7 +215,7 @@ defmodule MingaEditor.Mouse do
     case focus_and_move_target(state, target, target_position(target)) do
       {:ok, focused, position} ->
         focused
-        |> normalize_mode_for_targeted_gesture()
+        |> normalize_mode_for_plain_click(target)
         |> update_mouse(&start_target_drag(&1, position, target))
 
       _ ->
@@ -1395,6 +1395,17 @@ defmodule MingaEditor.Mouse do
       | workspace: MingaEditor.Session.State.clear_cmd_hover_link(state.workspace)
     }
   end
+
+  # A plain click inside the Agent composer keeps its mode; the composer owns that rule.
+  @spec normalize_mode_for_plain_click(state(), text_target()) :: state()
+  defp normalize_mode_for_plain_click(state, %TextTarget{window_id: 65_534}) do
+    state
+    |> cancel_mode_for_mouse()
+    |> MingaEditor.Agent.PromptInput.settle_mode_after_click()
+  end
+
+  defp normalize_mode_for_plain_click(state, _target),
+    do: normalize_mode_for_targeted_gesture(state)
 
   @spec normalize_mode_for_targeted_gesture(state()) :: state()
   defp normalize_mode_for_targeted_gesture(state) do

@@ -64,6 +64,8 @@ defmodule MingaAgent.Providers.Native do
   alias MingaAgent.Providers.Native.LoopCtx
   alias MingaAgent.Providers.Native.OutputHydration
   alias MingaAgent.Providers.Native.ReqLLMAdapter
+  alias MingaAgent.Providers.Native.SystemPrompt
+  alias MingaAgent.Providers.Native.ToolResultBound
   alias MingaAgent.Redaction
   alias MingaAgent.Retry
   alias MingaAgent.Session
@@ -101,6 +103,10 @@ defmodule MingaAgent.Providers.Native do
   @typedoc "Function that executes a matching hook."
   @type hook_runner :: (MingaAgent.Hooks.Hook.t(), PreToolUsePayload.t() -> HookResult.t())
 
+  @typedoc "Counts candidate Apple prefixes in one helper start without generating."
+  @type apple_counter :: ([String.t()], [[non_neg_integer()]], [Tool.t()], pos_integer() ->
+                            {:ok, MingaAgent.Providers.Apple.prefix_counts()} | {:error, term()})
+
   @typedoc "Internal state for the native provider."
   @type state :: %{
           subscriber: pid(),
@@ -122,6 +128,8 @@ defmodule MingaAgent.Providers.Native do
           schema_cache: {[Tool.t()], [map()]} | nil,
           prefix_candidate: Prefix.t() | :unknown,
           prefix_preview: map() | nil,
+          apple_counter: apple_counter(),
+          prefix_fit: {binary(), SystemPrompt.fit()} | nil,
           llm_client: llm_client(),
           hook_runner: hook_runner(),
           task: Task.t() | nil,
@@ -359,6 +367,9 @@ defmodule MingaAgent.Providers.Native do
       schema_cache: nil,
       prefix_candidate: :unknown,
       prefix_preview: nil,
+      apple_counter:
+        Keyword.get(opts, :apple_counter, &MingaAgent.Providers.Apple.count_prefixes/4),
+      prefix_fit: nil,
       llm_client: llm_client,
       hook_runner: hook_runner,
       task: nil,
@@ -802,13 +813,16 @@ defmodule MingaAgent.Providers.Native do
            ),
          identity = ModelSelection.replay_identity(selection, authentication.identity),
          {schemas, current} = current_prefix_schemas(current),
+         schemas = schemas |> model_schemas(selection) |> question_schemas(questions?),
+         {:ok, fit, current} <- fit_system_prompt(current, active_skills, selection, schemas),
          {:ok, candidate} <-
            PrefixStore.candidate(
              current.prefix_candidate,
-             build_system_prompt(current.project_root, active_skills, selection),
-             schemas |> model_schemas(selection) |> question_schemas(questions?),
+             fit.text,
+             schemas,
              identity,
-             Enum.map(active_skills, & &1.name)
+             Enum.map(active_skills, & &1.name),
+             fit.omitted
            ) do
       preview = %{
         token: token,
@@ -958,7 +972,11 @@ defmodule MingaAgent.Providers.Native do
   end
 
   def handle_call(:get_state, _from, state) do
-    system_prompt = build_system_prompt(state.project_root, state.active_skills, state.selection)
+    system_prompt =
+      state.project_root
+      |> system_prompt_parts(state.active_skills, state.selection)
+      |> SystemPrompt.text()
+
     selection = state.selection
 
     session_state = %{
@@ -1022,17 +1040,6 @@ defmodule MingaAgent.Providers.Native do
   def handle_call(
         {:compact, _messages},
         _from,
-        %{selection: %{route: %{request_provider: :apple}}} = state
-      ) do
-    {:reply,
-     {:error,
-      "Apple Intelligence does not compact history. Start a new conversation to clear its context."},
-     state}
-  end
-
-  def handle_call(
-        {:compact, _messages},
-        _from,
         %{selection: %{policy: %{compaction: :unsupported}}} = state
       ) do
     {:reply, {:error, compaction_unsupported_message(state.selection)}, state}
@@ -1069,17 +1076,6 @@ defmodule MingaAgent.Providers.Native do
       {:error, _result} ->
         {:reply, {:error, "compaction blocked by hook"}, state}
     end
-  end
-
-  def handle_call(
-        {:compact, _messages, _opts},
-        _from,
-        %{selection: %{route: %{request_provider: :apple}}} = state
-      ) do
-    {:reply,
-     {:error,
-      "Apple Intelligence does not compact history. Start a new conversation to clear its context."},
-     state}
   end
 
   def handle_call(
@@ -1992,9 +1988,9 @@ defmodule MingaAgent.Providers.Native do
        ) do
     limits = lctx.selection.policy.limits
 
-    admission = fn digest, tokens, cap, context ->
-      evidence =
-        RequestCapacity.assess(limits, {:provider_count, tokens}, {:encoded, cap}, context)
+    admission = fn digest, tokens, prefix, cap, context ->
+      measurement = {:provider_count, tokens, prefix}
+      evidence = RequestCapacity.assess(limits, measurement, {:encoded, cap}, context)
 
       authorize_prepared_dispatch(lctx.session_pid, attempt, digest, evidence)
     end
@@ -2897,7 +2893,7 @@ defmodule MingaAgent.Providers.Native do
         dispatch_post_hook: false
       )
 
-    formatted = format_executor_result(result)
+    formatted = format_executor_result(result, tool_result_bound(lctx.selection))
     if mutation, do: {formatted, mutation}, else: formatted
   end
 
@@ -2952,42 +2948,56 @@ defmodule MingaAgent.Providers.Native do
        ),
        do: context
 
-  @spec format_executor_result(ToolExecutor.result()) :: formatted_tool_result()
-  defp format_executor_result({:storage_error, reason}),
+  # One ordinary read must leave Apple room for the rest of a read-then-edit turn.
+  @apple_tool_result_bytes 2_048
+
+  @spec tool_result_bound(ModelSelection.t()) :: ToolResultBound.t()
+  defp tool_result_bound(%ModelSelection{route: %{request_provider: :apple}}),
+    do: {:bytes, @apple_tool_result_bytes}
+
+  defp tool_result_bound(%ModelSelection{}), do: :unbounded
+
+  @spec format_executor_result(ToolExecutor.result(), ToolResultBound.t()) ::
+          formatted_tool_result()
+  defp format_executor_result({:storage_error, reason}, _bound),
     do: throw({:tool_storage_failed, reason})
 
-  defp format_executor_result({:ok, %Output{} = output}),
-    do: {format_output(output), :complete, nil, false, output}
+  defp format_executor_result({:ok, %Output{} = output}, bound),
+    do: {format_output(output, bound), :complete, nil, false, output}
 
-  defp format_executor_result({:error, %Output{} = output}),
-    do: {format_output(output), :error, nil, false, output}
+  defp format_executor_result({:error, %Output{} = output}, bound),
+    do: {format_output(output, bound), :error, nil, false, output}
 
-  defp format_executor_result({:error, %Limitation{} = limitation}),
-    do: {Limitation.message(limitation), :error, nil, false, nil}
+  defp format_executor_result({:error, %Limitation{} = limitation}, bound),
+    do: {ToolResultBound.limit(Limitation.message(limitation), bound), :error, nil, false, nil}
 
-  defp format_executor_result({:ok, result}),
-    do: {format_tool_result(result), :complete, nil, false, nil}
+  defp format_executor_result({:ok, result}, bound),
+    do: {ToolResultBound.limit(format_tool_result(result), bound), :complete, nil, false, nil}
 
-  defp format_executor_result({:error, {kind, _detail} = reason})
+  defp format_executor_result({:error, {kind, _detail} = reason}, bound)
        when kind in [:tool_refused, :tool_denied, :hook_veto],
-       do: {format_error(reason), :denied, nil, false, nil}
+       do: {ToolResultBound.limit(format_error(reason), bound), :denied, nil, false, nil}
 
-  defp format_executor_result({:error, reason}),
-    do: {format_error(reason), :error, nil, false, nil}
+  defp format_executor_result({:error, reason}, bound),
+    do: {ToolResultBound.limit(format_error(reason), bound), :error, nil, false, nil}
 
-  @spec format_output(Output.t()) :: String.t()
+  # The revision line stays intact after a bounded view so a truncated read can still be edited.
+  @spec format_output(Output.t(), ToolResultBound.t()) :: String.t()
   defp format_output(
          %Output{capture: :complete, revision: %MingaAgent.Tool.Output.Revision{} = revision} =
-           output
+           output,
+         bound
        ) do
+    view = ToolResultBound.limit(output.view, bound)
+
     if MingaAgent.Tool.Output.Revision.full_source?(revision) do
-      output.view <> "\n[expected_revision: #{MingaAgent.Tool.Output.Revision.token(revision)}]"
+      view <> "\n[expected_revision: #{MingaAgent.Tool.Output.Revision.token(revision)}]"
     else
-      output.view <> "\n[range revision only; read the complete file before mutation]"
+      view <> "\n[range revision only; read the complete file before mutation]"
     end
   end
 
-  defp format_output(%Output{} = output), do: output.view
+  defp format_output(%Output{} = output, bound), do: ToolResultBound.limit(output.view, bound)
 
   @spec deterministic_output(String.t()) :: Output.t()
   defp deterministic_output(text) when is_binary(text) do
@@ -3312,19 +3322,137 @@ defmodule MingaAgent.Providers.Native do
   defp local_spec(%Tool{provider_options: %{minga_tool_spec: %ToolSpec{} = spec}}), do: spec
   defp local_spec(%Tool{} = tool), do: ToolRegistry.from_req_tool(tool)
 
-  @spec build_system_prompt(String.t(), [Skills.skill()], ModelSelection.t()) :: String.t()
-  defp build_system_prompt(project_root, active_skills, selection) do
-    base = resolve_base_prompt(project_root)
-    instructions = Instructions.assemble(project_root)
-    skills_section = Skills.format_for_prompt(active_skills)
-    append = read_config_string(:agent_append_system_prompt)
+  @spec system_prompt_parts(String.t(), [Skills.skill()], ModelSelection.t()) ::
+          SystemPrompt.t()
+  defp system_prompt_parts(project_root, active_skills, selection) do
+    SystemPrompt.new(
+      [resolve_base_prompt(project_root), provider_tool_guidance(selection)],
+      instructions: Instructions.assemble(project_root),
+      skills: Skills.format_for_prompt(active_skills),
+      append_prompt: read_config_string(:agent_append_system_prompt)
+    )
+  end
 
-    parts =
-      [base, provider_tool_guidance(selection), instructions, skills_section, append]
-      |> Enum.reject(&(is_nil(&1) or &1 == ""))
-      |> Enum.join("\n\n")
+  # Apple's 4,096-token context cannot hold large project instructions. Its prefix sends the
+  # optional parts only when the Apple tokenizer says they leave room for the conversation,
+  # and records every omission on the Prefix. Other routes send every part.
+  @apple_history_floor 1_536
 
-    parts
+  @spec fit_system_prompt(state(), [Skills.skill()], ModelSelection.t(), [map()]) ::
+          {:ok, SystemPrompt.fit(), state()} | {:error, String.t()}
+  defp fit_system_prompt(
+         state,
+         active_skills,
+         %ModelSelection{route: %{request_provider: :apple}} = selection,
+         schemas
+       ) do
+    parts = system_prompt_parts(state.project_root, active_skills, selection)
+    reserve = selection.policy.limits.request_output
+    key = :crypto.hash(:sha256, :erlang.term_to_binary({parts, schemas, selection.policy.limits}))
+
+    case state.prefix_fit do
+      {^key, fit} ->
+        {:ok, fit, state}
+
+      _stale ->
+        budget = %{reserve: reserve, history_floor: @apple_history_floor}
+        measure = apple_prefix_measure(state.apple_counter, schemas, selection)
+
+        case SystemPrompt.fit(parts, budget, measure) do
+          {:ok, fit} -> {:ok, fit, %{state | prefix_fit: {key, fit}}}
+          {:error, reason} -> {:error, prefix_refusal_message(reason, selection)}
+        end
+    end
+  end
+
+  defp fit_system_prompt(state, active_skills, selection, _schemas) do
+    fit =
+      state.project_root
+      |> system_prompt_parts(active_skills, selection)
+      |> SystemPrompt.unbounded()
+
+    {:ok, fit, state}
+  end
+
+  # Preview runs inside Session's 5 s GenServer.call, which the Editor's synchronous prompt
+  # send also waits on for 5 s. One bounded count leaves 2 s for credential binding, schema
+  # projection, and Session's own transition, so a slow helper is refused, never a timeout.
+  @apple_count_deadline 3_000
+
+  # Counts every candidate instructions entry with the same tool projection a dispatch sends.
+  @spec apple_prefix_measure(apple_counter(), [map()], ModelSelection.t()) ::
+          SystemPrompt.measure()
+  defp apple_prefix_measure(counter, schemas, selection) do
+    tools = ReqLLMAdapter.advertised_tools(schemas)
+    reserve = selection.policy.limits.request_output
+    configured = selection.policy.limits.context
+
+    fn texts, candidates ->
+      case within_count_deadline(fn -> counter.(texts, candidates, tools, reserve) end) do
+        {:ok, %{counts: counts, context: context}} ->
+          {:ok, %{counts: counts, context: min(context, configured || context)}}
+
+        {:error, _reason} = error ->
+          error
+      end
+    end
+  end
+
+  # Runs the count in a process that owns the helper Port, so killing it at the deadline
+  # also closes the Port and retires the helper.
+  @spec within_count_deadline((-> result)) :: result | {:error, term()} when result: term()
+  defp within_count_deadline(count) do
+    parent = self()
+    receipt = make_ref()
+    {pid, monitor} = spawn_monitor(fn -> send(parent, {receipt, count.()}) end)
+
+    receive do
+      {^receipt, result} ->
+        Process.demonitor(monitor, [:flush])
+        result
+
+      {:DOWN, ^monitor, :process, ^pid, reason} ->
+        {:error, {:apple_count_failed, reason}}
+    after
+      @apple_count_deadline ->
+        Process.exit(pid, :kill)
+        Process.demonitor(monitor, [:flush])
+
+        receive do
+          {^receipt, _late} -> :ok
+        after
+          0 -> :ok
+        end
+
+        {:error, :apple_count_timeout}
+    end
+  end
+
+  @spec prefix_refusal_message(term(), ModelSelection.t()) :: String.t()
+  defp prefix_refusal_message(
+         {:fixed_prefix_exceeded, %{prefix: prefix, reserve: reserve, context: context}},
+         selection
+       ) do
+    "#{selection.route.display_name} cannot hold its fixed instructions and tools: Apple counts #{format_tokens(prefix)} tokens, plus #{format_tokens(reserve)} reserved for the response, over its #{format_tokens(context)}-token context. A new conversation will not help; choose a model with a larger context"
+  end
+
+  defp prefix_refusal_message(:apple_count_timeout, selection) do
+    "#{selection.route.display_name} could not count its fixed instructions and tools within #{div(@apple_count_deadline, 1000)} seconds. Try again, or reopen /model to check availability"
+  end
+
+  defp prefix_refusal_message(reason, selection) do
+    "#{selection.route.display_name} could not count its fixed instructions and tools (#{Redaction.format_error(reason)}). Reopen /model to check availability"
+  end
+
+  @spec format_tokens(non_neg_integer()) :: String.t()
+  defp format_tokens(count) when is_integer(count) do
+    count
+    |> Integer.to_string()
+    |> String.reverse()
+    |> String.to_charlist()
+    |> Enum.chunk_every(3)
+    |> Enum.join(",")
+    |> String.reverse()
   end
 
   @spec provider_tool_guidance(ModelSelection.t()) :: String.t() | nil
@@ -3339,7 +3467,7 @@ defmodule MingaAgent.Providers.Native do
 
   <rules>
   - Read files before editing them and verify changes with appropriate tests.
-  - Use edit_file for one ordered batch per file. Copy expected_revision from a complete read_file result. A rejected batch commits nothing; read again after a stale revision.
+  - Use edit_file for one ordered batch per file. Copy expected_revision from a complete read_file result. An edit with an empty old_text appends new_text at the end of the file. A rejected batch commits nothing; read again after a stale revision.
   - Use write_file with mode=create and expected_revision=absent for new files, or mode=replace and a full read revision for replacements. delete_file also requires a full read revision.
   - Atomicity is one file only. Report each file's outcome separately. Never claim cross-file transactions or bypass revision checks with shell writes.
   - Use the advertised tools for discovery, inspection and changes.
@@ -3774,8 +3902,6 @@ defmodule MingaAgent.Providers.Native do
   defp classify_legacy_error_checks([]), do: :provider_error
 
   @spec normalize_usage(map() | nil, ModelSelection.t()) :: Event.token_usage() | nil
-  defp normalize_usage(_usage, %ModelSelection{route: %{request_provider: :apple}}), do: nil
-
   defp normalize_usage(_usage, %ModelSelection{policy: %{usage: :none}}), do: nil
 
   defp normalize_usage(nil, _selection), do: nil
@@ -3831,6 +3957,21 @@ defmodule MingaAgent.Providers.Native do
   defp format_tool_result(result), do: inspect(result)
 
   @spec format_error(term()) :: String.t()
+  defp format_error(
+         {:request_admission_refused,
+          {:fixed_prefix_exceeded, %{prefix: prefix, reserve: reserve, context: context}}}
+       ),
+       do:
+         "The fixed instructions and tools use #{format_tokens(prefix)} provider-counted tokens, plus #{format_tokens(reserve)} reserved for the response, over this model's #{format_tokens(context)}-token context. A new conversation will not help; choose a model with a larger context. The saved history was retained."
+
+  defp format_error(
+         {:request_admission_refused,
+          {:history_exceeded,
+           %{prefix: prefix, history: history, reserve: reserve, context: context}}}
+       ),
+       do:
+         "Retained history and input use #{format_tokens(history)} provider-counted tokens on top of #{format_tokens(prefix)} for the fixed instructions and tools. With #{format_tokens(reserve)} reserved for the response, that exceeds this model's #{format_tokens(context)}-token context. Shorten the input or start a new conversation. The saved history was retained."
+
   defp format_error({:request_admission_refused, reason})
        when reason in [:input_limit_exceeded, :context_reservation_exceeded],
        do:

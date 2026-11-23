@@ -35,9 +35,12 @@ private struct Inference: Decodable {
     let messages: [Message]
     let tools: [ToolDeclaration]
     let maxOutputTokens: Int
+    /// Count only: instruction texts, each sent once, and candidate prefixes as in-order part indices.
+    let parts: [String]?
+    let candidates: [[Int]]?
 
     private enum CodingKeys: String, CodingKey {
-        case messages, tools
+        case messages, tools, parts, candidates
         case maxOutputTokens = "max_output_tokens"
     }
 }
@@ -76,7 +79,7 @@ private enum JSONValue: Codable, Sendable, Hashable {
 }
 
 private struct Operation: Decodable {
-    enum Kind: String, Decodable { case availability, infer }
+    enum Kind: String, Decodable { case availability, infer, count }
     let op: Kind
 }
 
@@ -89,13 +92,17 @@ private enum Availability: String, Encodable {
 
 private enum Frame: Encodable {
     case availability(Availability, context: Int? = nil)
-    case preflight(inputTokens: Int, outputCap: Int, context: Int)
+    case preflight(inputTokens: Int, prefixTokens: Int, outputCap: Int, context: Int)
+    case count(instructionsTokens: Int, transcriptTokens: Int, candidateTokens: [Int], context: Int)
     case delta(String)
     case stop
     case calls([Call])
     case error(String)
 
-    private enum CodingKeys: String, CodingKey { case status, context, inputTokens, outputCap, delta, finish, calls, error }
+    private enum CodingKeys: String, CodingKey {
+        case status, context, inputTokens, prefixTokens, outputCap, instructionsTokens, transcriptTokens, candidateTokens
+        case delta, finish, calls, error
+    }
 
     func encode(to encoder: any Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
@@ -103,9 +110,15 @@ private enum Frame: Encodable {
         case let .availability(status, context):
             try container.encode(status, forKey: .status)
             try container.encodeIfPresent(context, forKey: .context)
-        case let .preflight(inputTokens, outputCap, context):
+        case let .preflight(inputTokens, prefixTokens, outputCap, context):
             try container.encode(inputTokens, forKey: .inputTokens)
+            try container.encode(prefixTokens, forKey: .prefixTokens)
             try container.encode(outputCap, forKey: .outputCap)
+            try container.encode(context, forKey: .context)
+        case let .count(instructionsTokens, transcriptTokens, candidateTokens, context):
+            try container.encode(instructionsTokens, forKey: .instructionsTokens)
+            try container.encode(transcriptTokens, forKey: .transcriptTokens)
+            try container.encode(candidateTokens, forKey: .candidateTokens)
             try container.encode(context, forKey: .context)
         case .delta(let delta): try container.encode(delta, forKey: .delta)
         case .stop: try container.encode("stop", forKey: .finish)
@@ -128,7 +141,7 @@ private enum Frame: Encodable {
 private enum BridgeError: Error {
     case invalidRequest(String)
     case invalidSchema(String)
-    case invalidArguments(String)
+    case invalidArguments(tool: String, reason: String)
     case unavailable(Availability)
     case invalidTranscript
     case invalidToolGroup
@@ -144,7 +157,7 @@ private enum BridgeError: Error {
         switch self {
         case .invalidRequest(let reason): "Invalid Apple inference request: \(reason)"
         case .invalidSchema(let reason): "Unsupported Apple tool schema: \(reason)"
-        case .invalidArguments(let name): "Invalid arguments for Apple tool \(name)"
+        case let .invalidArguments(tool, reason): "Invalid arguments for Apple tool \(tool): \(reason)"
         case .unavailable(let status): "Apple model unavailable: \(status.rawValue)"
         case .invalidTranscript: "Apple executor received an unexpected input transcript"
         case .invalidToolGroup: "Apple executor did not settle one complete new tool group"
@@ -357,8 +370,10 @@ private struct ArgumentSchema: Sendable {
         }
     }
 
-    // Apple supplies no string-length or unique-items guide. Explain those rules in
-    // the declaration and check them before accepting a callback or publishing a group.
+    // Apple supplies no string-length or unique-items guide, so generated arguments can
+    // break those rules. Explain them in the declaration. Minga validates every published
+    // call against the canonical schema and returns a violation to the model as a tool
+    // error naming the field, so the model can retry instead of losing the whole turn.
     private var guidance: String? {
         var sentences = description.map { [$0] } ?? []
         switch shape {
@@ -374,33 +389,6 @@ private struct ArgumentSchema: Sendable {
         }
         return sentences.isEmpty ? nil : sentences.joined(separator: " ")
     }
-
-    func accepts(_ value: JSONValue) -> Bool {
-        switch (shape, value) {
-        case let (.object(fields, required), .object(values)):
-            return required.allSatisfy { values[$0] != nil } && values.allSatisfy { key, value in
-                fields[key]?.accepts(value) == true
-            }
-        case let (.array(items, min, max, unique), .array(values)):
-            guard Self.within(values.count, min: min, max: max), values.allSatisfy(items.accepts) else { return false }
-            return !unique || Set(values).count == values.count
-        case let (.string(choices, min, max), .string(value)):
-            return (choices?.contains { $0.utf8.elementsEqual(value.utf8) } ?? true)
-                && Self.within(value.unicodeScalars.count, min: min, max: max)
-        case let (.integer(min, max), number):
-            return number.integer.map { Self.within($0, min: min, max: max) } ?? false
-        case let (.number(min, max), .number(number)):
-            let value = NSDecimalNumber(decimal: number).doubleValue
-            return value.isFinite && Self.within(value, min: min, max: max)
-        case (.boolean, .bool), (.null, .null): return true
-        case let (.union(choices), value): return choices.contains { $0.accepts(value) }
-        default: return false
-        }
-    }
-
-    private static func within<T: Comparable>(_ value: T, min: T?, max: T?) -> Bool {
-        (min.map { value >= $0 } ?? true) && (max.map { value <= $0 } ?? true)
-    }
 }
 
 @available(macOS 27.0, *)
@@ -408,7 +396,6 @@ private struct ProposalTool: Tool {
     let name: String
     let description: String
     let parameters: GenerationSchema
-    private let schema: ArgumentSchema
     private let marker: String
 
     init(declaration: ToolDeclaration, schemaPrefix: String, marker: String) throws {
@@ -416,16 +403,21 @@ private struct ProposalTool: Tool {
         guard schema.isObject else { throw BridgeError.invalidSchema("\(declaration.name): arguments must be an object") }
         do { parameters = try schema.generationSchema(prefix: schemaPrefix) }
         catch { throw BridgeError.invalidSchema("\(declaration.name): Apple rejected the projected schema") }
-        self.schema = schema
         self.marker = marker
         name = declaration.name
         description = declaration.description
     }
 
+    // Only content that is not one complete JSON object is fatal here: there is no
+    // call to publish. Schema rules are Minga's to check (see `guidance`).
     func arguments(_ content: GeneratedContent) throws -> [String: JSONValue] {
-        guard content.isComplete, case .structure = content.kind,
-              let value = try? JSONDecoder().decode([String: JSONValue].self, from: Data(content.jsonString.utf8)),
-              schema.accepts(.object(value)) else { throw BridgeError.invalidArguments(name) }
+        guard content.isComplete else {
+            throw BridgeError.invalidArguments(tool: name, reason: "generation ended before the arguments were complete")
+        }
+        guard case .structure = content.kind,
+              let value = try? JSONDecoder().decode([String: JSONValue].self, from: Data(content.jsonString.utf8)) else {
+            throw BridgeError.invalidArguments(tool: name, reason: "arguments are not a JSON object")
+        }
         return value
     }
 
@@ -526,6 +518,12 @@ private struct Projection: Sendable {
         historicalIDs = known
     }
 
+    /// The transcript one inference would count: the history plus a new user prompt, if any.
+    var countedTranscript: Transcript {
+        guard let userPrompt else { return Transcript(entries: history) }
+        return Transcript(entries: history + [.prompt(.init(segments: [.text(.init(content: userPrompt))]))])
+    }
+
     func request(_ request: LanguageModelExecutorGenerationRequest) throws -> LanguageModelExecutorGenerationRequest {
         let transcript = request.transcript
         // Verify the API appended exactly one prompt to the known history. Only drop
@@ -544,6 +542,15 @@ private struct Projection: Sendable {
         projected.transcript = Transcript(entries: history)
         return projected
     }
+}
+
+/// Counts the fixed prefix alone: the leading instructions entry with its tool definitions.
+@available(macOS 27.0, *)
+private func instructionTokens(in transcript: Transcript, with model: SystemLanguageModel) async throws -> Int {
+    guard case .instructions(let instructions)? = transcript.first else { return 0 }
+    let tokens = try await model.tokenCount(for: Transcript(entries: [.instructions(instructions)]))
+    guard tokens > 0 else { throw BridgeError.tokenCountUnavailable }
+    return tokens
 }
 
 @available(macOS 27.0, *)
@@ -676,7 +683,8 @@ private struct OneInferenceModel: LanguageModel {
             let limit = model.actual.contextSize
             let tokens = try await model.actual.tokenCount(for: request.transcript)
             guard tokens > 0, limit > 0 else { throw BridgeError.tokenCountUnavailable }
-            Frame.preflight(inputTokens: tokens, outputCap: reserve, context: limit).emit()
+            let prefix = try await instructionTokens(in: request.transcript, with: model.actual)
+            Frame.preflight(inputTokens: tokens, prefixTokens: prefix, outputCap: reserve, context: limit).emit()
             var authorization = model.admission.makeAsyncIterator()
             guard case .some = await authorization.next() else { throw CancellationError() }
             guard reserve <= limit, tokens <= limit - reserve else {
@@ -759,7 +767,7 @@ private struct AppleInference {
             guard #available(macOS 27.0, *) else {
                 switch operation.op {
                 case .availability: Frame.availability(.unsupported).emit()
-                case .infer: Frame.error(BridgeError.unavailable(.unsupported).message).emit()
+                case .infer, .count: Frame.error(BridgeError.unavailable(.unsupported).message).emit()
                 }
                 return
             }
@@ -772,6 +780,10 @@ private struct AppleInference {
                 guard status == .ready else { throw BridgeError.unavailable(status) }
                 let request = try JSONDecoder().decode(Inference.self, from: input)
                 try await infer(request, with: model, admission: admission).emit()
+            case .count:
+                guard status == .ready else { throw BridgeError.unavailable(status) }
+                let request = try JSONDecoder().decode(Inference.self, from: input)
+                try await count(request, with: model).emit()
             }
         } catch let error as BridgeError {
             Frame.error(error.message).emit()
@@ -797,17 +809,53 @@ private struct AppleInference {
         }
     }
 
+    /// Projects a request exactly as `infer` does and counts it without generating or admitting anything.
+    /// Each candidate prefix is also counted as one instructions entry with the same tool definitions,
+    /// so a caller can compare several prompt compositions with one helper start.
     @available(macOS 27.0, *)
-    private static func infer(_ inference: Inference, with model: SystemLanguageModel, admission: AsyncStream<Void>) async throws -> Frame {
-        let marker = "MINGA_TOOL_CAPTURE_\(UUID().uuidString)"
+    private static func count(_ inference: Inference, with model: SystemLanguageModel) async throws -> Frame {
+        let tools = try proposalTools(inference.tools, marker: "MINGA_TOOL_COUNT")
+        let projection = try Projection(inference, tools: tools)
+        let transcript = projection.countedTranscript
+        let limit = model.contextSize
+        let tokens = try await model.tokenCount(for: transcript)
+        guard tokens > 0, limit > 0 else { throw BridgeError.tokenCountUnavailable }
+        let prefix = try await instructionTokens(in: transcript, with: model)
+        let parts = inference.parts ?? []
+        var candidateTokens: [Int] = []
+        for indices in inference.candidates ?? [] {
+            guard indices.allSatisfy(parts.indices.contains) else {
+                throw BridgeError.invalidRequest("candidate part index out of range")
+            }
+            let text = indices.map { parts[$0] }.joined(separator: "\n\n")
+            let entry = Transcript.Entry.instructions(
+                .init(segments: [.text(.init(content: text))], toolDefinitions: projection.definitions)
+            )
+            let count = try await model.tokenCount(for: Transcript(entries: [entry]))
+            guard count > 0 else { throw BridgeError.tokenCountUnavailable }
+            candidateTokens.append(count)
+        }
+        return .count(
+            instructionsTokens: prefix, transcriptTokens: tokens, candidateTokens: candidateTokens, context: limit
+        )
+    }
+
+    @available(macOS 27.0, *)
+    private static func proposalTools(_ declarations: [ToolDeclaration], marker: String) throws -> [ProposalTool] {
         var names: Set<String> = []
-        let tools = try inference.tools.enumerated().map { index, declaration in
+        return try declarations.enumerated().map { index, declaration in
             guard !declaration.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
                   names.insert(declaration.name).inserted else {
                 throw BridgeError.invalidRequest("missing or duplicate tool name")
             }
             return try ProposalTool(declaration: declaration, schemaPrefix: "Tool\(index + 1)", marker: marker)
         }
+    }
+
+    @available(macOS 27.0, *)
+    private static func infer(_ inference: Inference, with model: SystemLanguageModel, admission: AsyncStream<Void>) async throws -> Frame {
+        let marker = "MINGA_TOOL_CAPTURE_\(UUID().uuidString)"
+        let tools = try proposalTools(inference.tools, marker: marker)
         let projection = try Projection(inference, tools: tools)
         let attempt = Attempt(projection: projection, tools: tools, marker: marker)
         let session = LanguageModelSession(

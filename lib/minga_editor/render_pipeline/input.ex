@@ -2,7 +2,7 @@ defmodule MingaEditor.RenderPipeline.Input do
   @moduledoc """
   Renderer-local frame wrapper.
 
-  The accepted Editor-to-Renderer value is `intent`. Materialization attaches only renderer-owned working values beside it: materialized windows, mutable frame-local workspace, composed highlights, caches, font registry, message store, layout, focus tree, and frame sequence.
+  The accepted Editor-to-Renderer value is `intent`. Materialization attaches only renderer-owned working values beside it: materialized windows, mutable frame-local workspace, composed highlights, caches, font registry, message store, layout, focus tree, frame sequence, and the frontend's admission of the emitted frame.
   """
 
   alias MingaEditor.Extension.Sidebar
@@ -40,7 +40,8 @@ defmodule MingaEditor.RenderPipeline.Input do
     :message_store,
     :frame_seq,
     :composed_highlights,
-    prompt: nil
+    prompt: nil,
+    frame_admission: nil
   ]
 
   @type t :: %__MODULE__{
@@ -54,7 +55,8 @@ defmodule MingaEditor.RenderPipeline.Input do
           message_store: MessageStore.t(),
           frame_seq: non_neg_integer() | nil,
           composed_highlights: HighlightCache.highlights(),
-          prompt: MingaEditor.Agent.View.PromptFrame.t() | nil
+          prompt: MingaEditor.Agent.View.PromptFrame.t() | nil,
+          frame_admission: MingaEditor.Frontend.Adapter.frame_admission() | nil
         }
 
   @type workspace :: WorkspaceIntent.t()
@@ -104,7 +106,7 @@ defmodule MingaEditor.RenderPipeline.Input do
 
   @spec from_editor_state(MingaEditor.State.t()) :: t()
   def from_editor_state(%MingaEditor.State{} = state) do
-    intent = Intent.from_editor_state(state)
+    intent = admit_transcript_seed(Intent.from_editor_state(state))
 
     windows =
       Map.new(intent.windows, fn {id, %WindowIntent{} = carrier} ->
@@ -123,6 +125,20 @@ defmodule MingaEditor.RenderPipeline.Input do
       FontRegistry.new(),
       intent.frame.message_store
     )
+  end
+
+  # A local pipeline has no renderer process, so it admits a fresh seed exactly
+  # as a new renderer would.
+  @spec admit_transcript_seed(Intent.t()) :: Intent.t()
+  defp admit_transcript_seed(%Intent{} = intent) do
+    update =
+      case WorkspaceIntent.transcript_source(intent.workspace) do
+        nil -> nil
+        projection -> MingaEditor.Renderer.TranscriptUpdate.seed(projection, 0)
+      end
+
+    {:ok, root} = MingaEditor.RenderModel.UI.AgentChatBuilder.admit(nil, update, intent)
+    Intent.with_agent_transcript(intent, root)
   end
 
   @spec file_tree_state(t()) :: FileTreeState.t()
@@ -157,14 +173,32 @@ defmodule MingaEditor.RenderPipeline.Input do
   def refresh_focus_tree(%__MODULE__{} = input),
     do: with_focus_tree(input, FocusTree.from_state(input))
 
-  @spec accept_emit_results(t(), Caches.t(), FontRegistry.t(), MessageStore.t()) :: t()
+  @doc """
+  Installs the emit stage's results, including the frontend's admission of the frame.
+
+  `admission` is `nil` when emit submitted no frame.
+  """
+  @spec accept_emit_results(
+          t(),
+          Caches.t(),
+          FontRegistry.t(),
+          MessageStore.t(),
+          MingaEditor.Frontend.Adapter.frame_admission() | nil
+        ) :: t()
   def accept_emit_results(
         %__MODULE__{} = input,
         %Caches{} = caches,
         %FontRegistry{} = font_registry,
-        %MessageStore{} = message_store
+        %MessageStore{} = message_store,
+        admission
       ) do
-    %{input | caches: caches, font_registry: font_registry, message_store: message_store}
+    %{
+      input
+      | caches: caches,
+        font_registry: font_registry,
+        message_store: message_store,
+        frame_admission: admission
+    }
   end
 
   @spec record_prompt(t(), MingaEditor.Agent.View.PromptFrame.t()) :: t()
@@ -210,6 +244,14 @@ defmodule MingaEditor.RenderPipeline.Input do
           )
     }
   end
+
+  @doc "Retains the frame's per-file diagnostic views in the renderer caches."
+  @spec retain_diagnostics(t(), %{
+          String.t() => MingaEditor.RenderModel.Window.WindowDiagnostics.t()
+        }) ::
+          t()
+  def retain_diagnostics(%__MODULE__{caches: caches} = input, diagnostics),
+    do: %{input | caches: Caches.retain_diagnostics(caches, diagnostics)}
 
   @spec record_agent_scroll_metrics(t(), non_neg_integer(), pos_integer()) :: t()
   def record_agent_scroll_metrics(

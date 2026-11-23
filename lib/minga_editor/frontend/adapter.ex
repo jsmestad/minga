@@ -22,15 +22,23 @@ defmodule MingaEditor.Frontend.Adapter do
   @typedoc "Non-suspending frontend output admission result."
   @type admission :: :accepted | :unwritable
 
+  @typedoc """
+  Admission result for a batch that may be a frame transaction.
+
+  `{:refused, :not_ready}` means the frontend has not completed its `ready` handshake, so the frame was discarded without entering the transport or retained output. No acknowledgement will follow. `:unwritable` means the frame was retained or coalesced under output pressure and may still be delivered.
+  """
+  @type frame_admission :: admission() | {:refused, :not_ready}
+
   @doc "Starts the frontend process."
   @callback start_link(opts :: keyword()) :: GenServer.on_start()
 
   @doc """
   Sends a list of pre-encoded render command binaries to the frontend.
 
-  Commands are encoded via `MingaEditor.Frontend.Protocol.encode_*` functions. The frontend returns `:accepted` when the batch entered its transport or `:unwritable` without suspending the caller. A `commit_frame` command closes the frame transaction and triggers a render flush (#2219).
+  Commands are encoded via `MingaEditor.Frontend.Protocol.encode_*` functions. The frontend returns `:accepted` when the batch entered its transport, `:unwritable` without suspending the caller, or `{:refused, :not_ready}` for a frame sent before the frontend is ready. A `commit_frame` command closes the frame transaction and triggers a render flush (#2219).
   """
-  @callback send_commands(server :: GenServer.server(), commands :: [binary()]) :: admission()
+  @callback send_commands(server :: GenServer.server(), commands :: [binary()]) ::
+              frame_admission()
 
   @doc """
   Subscribes the calling process to receive input events.

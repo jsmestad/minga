@@ -23,6 +23,7 @@ defmodule MingaAgent.ModelResolver do
   alias MingaAgent.Providers.Apple
 
   @request_providers ~w(anthropic openai openai_codex google openrouter groq mistral deepseek)a
+  @catalog_index_key {__MODULE__, :catalog_index}
   @request_provider_names Enum.map(@request_providers, &Atom.to_string/1)
   @codex_provider_label "OpenAI (ChatGPT subscription)"
   @reasoning_efforts ~w(off none minimal low medium high xhigh max)
@@ -350,7 +351,13 @@ defmodule MingaAgent.ModelResolver do
         credential -> credential
       end
 
-    case ModelSelection.build(spec, route, credential, stored.policy, stored.evidence) do
+    case ModelSelection.build(
+           spec,
+           route,
+           credential,
+           stored_policy(stored, route),
+           stored.evidence
+         ) do
       {:ok, selection} ->
         {:ok, selection}
 
@@ -463,6 +470,16 @@ defmodule MingaAgent.ModelResolver do
   end
 
   defp stored_source(_stored, _opts), do: {:error, :invalid_source}
+
+  # Apple selections saved before its route behavior was declared carry the catalog defaults.
+  # Behavior is not part of the selection identity, so the current declaration applies.
+  @spec stored_policy(Stored.t(), Route.t()) :: Policy.t()
+  defp stored_policy(%Stored{policy: policy}, %Route{request_provider: :apple}) do
+    {:ok, policy} = Policy.with_behavior(policy, route_behavior(apple_source()))
+    policy
+  end
+
+  defp stored_policy(%Stored{policy: policy}, _route), do: policy
 
   @spec stored_policy_matches?(Policy.t(), source()) :: boolean()
   defp stored_policy_matches?(policy, source) do
@@ -1151,6 +1168,8 @@ defmodule MingaAgent.ModelResolver do
         cost: cost(source)
       }
 
+      attrs = Map.merge(attrs, route_behavior(source))
+
       case Policy.new(attrs) do
         {:ok, policy} ->
           {:ok, policy}
@@ -1183,7 +1202,7 @@ defmodule MingaAgent.ModelResolver do
 
     opts =
       context.opts
-      |> Keyword.put(:model_index, catalog_index(catalog))
+      |> Keyword.put(:model_index, model_index(context.opts, catalog))
       |> Keyword.put(:models, catalog)
       |> Keyword.put(:candidate_resolution, true)
 
@@ -1527,11 +1546,37 @@ defmodule MingaAgent.ModelResolver do
   @spec exact_catalog_model(String.t(), String.t(), keyword()) ::
           {:ok, map()} | {:error, :not_found}
   defp exact_catalog_model(provider, model_id, opts) do
-    index = Keyword.get_lazy(opts, :model_index, fn -> catalog_index(models(opts)) end)
+    index = Keyword.get_lazy(opts, :model_index, fn -> model_index(opts, models(opts)) end)
 
     case Map.get(index, {provider, model_id}) do
       nil -> {:error, :not_found}
       model -> {:ok, model}
+    end
+  end
+
+  # The packaged catalog changes only when LLMDB loads a new snapshot, so its
+  # index is built once per catalog epoch and shared by every session start.
+  # An injected `:models` list is indexed directly and never cached.
+  @spec model_index(keyword(), [map()]) :: %{{String.t(), String.t()} => map()}
+  defp model_index(opts, catalog) do
+    if Keyword.has_key?(opts, :models),
+      do: catalog_index(catalog),
+      else: cached_catalog_index(catalog, LLMDB.epoch())
+  end
+
+  @spec cached_catalog_index([map()], non_neg_integer()) ::
+          %{{String.t(), String.t()} => map()}
+  defp cached_catalog_index(catalog, 0), do: catalog_index(catalog)
+
+  defp cached_catalog_index(catalog, epoch) do
+    case :persistent_term.get(@catalog_index_key, nil) do
+      {^epoch, index} ->
+        index
+
+      _stale ->
+        index = catalog_index(catalog)
+        :persistent_term.put(@catalog_index_key, {epoch, index})
+        index
     end
   end
 
@@ -1581,6 +1626,11 @@ defmodule MingaAgent.ModelResolver do
 
   @spec display_name(source(), String.t()) :: String.t()
   defp display_name({_kind, model}, fallback), do: value(model, "name") || fallback
+
+  # Apple's on-device model has no history compaction and reports no token usage of its own.
+  @spec route_behavior(source()) :: %{compaction: Policy.compaction(), usage: Policy.usage()}
+  defp route_behavior({:apple, _model}), do: %{compaction: :unsupported, usage: :none}
+  defp route_behavior({:catalog, _model}), do: %{compaction: :native, usage: :tokens}
 
   @spec cost(source()) :: map()
   defp cost({_kind, model}) do

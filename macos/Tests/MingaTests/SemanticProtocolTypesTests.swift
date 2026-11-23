@@ -72,8 +72,8 @@ struct SemanticProtocolTypesTests {
         #expect(unknown.label == "Unknown")
     }
 
-    @Test("Editor and prompt mode mappings remain distinct")
-    func editorAndPromptModes() {
+    @Test("Editor modes preserve known and future values")
+    func editorModes() {
         let editorModes: [(UInt8, EditorMode)] = [
             (0, .normal),
             (1, .insert),
@@ -83,27 +83,14 @@ struct SemanticProtocolTypesTests {
             (5, .search),
             (6, .replace)
         ]
-        let promptModes: [(UInt8, PromptMode)] = [
-            (0, .normal),
-            (1, .insert),
-            (2, .visual),
-            (3, .visualLine),
-            (4, .operatorPending)
-        ]
 
         for (rawValue, expected) in editorModes {
             #expect(EditorMode(rawValue: rawValue) == expected)
             #expect(expected.rawValue == rawValue)
         }
-        for (rawValue, expected) in promptModes {
-            #expect(PromptMode(rawValue: rawValue) == expected)
-            #expect(expected.rawValue == rawValue)
-        }
 
-        #expect(EditorMode(rawValue: 3) == .command)
-        #expect(PromptMode(rawValue: 3) == .visualLine)
         #expect(EditorMode(rawValue: 0xFC) == .unknown(rawValue: 0xFC))
-        #expect(PromptMode(rawValue: 0xFC) == .unknown(rawValue: 0xFC))
+        #expect(EditorMode(rawValue: 0xFC).displayName == "NORMAL")
     }
 
     @Test("Editor content and minibuffer modes preserve known and future values")

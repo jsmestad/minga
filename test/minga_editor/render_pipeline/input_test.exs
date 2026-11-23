@@ -58,6 +58,7 @@ defmodule MingaEditor.RenderPipeline.InputTest do
                  :composed_highlights,
                  :focus_tree,
                  :font_registry,
+                 :frame_admission,
                  :frame_seq,
                  :intent,
                  :layout,

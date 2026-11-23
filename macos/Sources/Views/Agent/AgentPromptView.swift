@@ -71,16 +71,7 @@ public struct AgentPromptView: View {
     }
 
     /// Vim mode label shown in the prompt border.
-    private var modeLabel: String {
-        switch state.promptMode {
-        case .normal: return "NORMAL"
-        case .visual: return "VISUAL"
-        case .visualLine: return "V-LINE"
-        case .operatorPending: return "OP"
-        case .insert: return "INSERT"
-        case .unknown: return "NORMAL"
-        }
-    }
+    private var modeLabel: String { state.promptMode.displayName }
 
     public var body: some View {
         VStack(spacing: 0) {
@@ -242,9 +233,12 @@ struct AgentPromptActionButtons: View {
         let hasDraft = state.promptPresentation != 0 && !state.prompt.isEmpty
         let queue = active && hasDraft ? state.queueTarget : nil
         let stop = active ? state.stopTarget : nil
+        // Send waits for a live conversation; while the session starts the draft
+        // is kept and the "Starting Agent" notice explains why.
+        let sendable = hasDraft && !active && state.lifecycle == .conversation
 
         HStack(spacing: Spacing.md) {
-            button("Send", icon: "arrow.up.circle.fill", action: hasDraft && !active ? .submit : nil)
+            button("Send", icon: "arrow.up.circle.fill", action: sendable ? .submit : nil)
             button("Steer", icon: "arrow.turn.up.right", action: queue.map { .queue(followUp: false, target: $0) })
             button("Queue Next", icon: "text.badge.plus", action: queue.map { .queue(followUp: true, target: $0) })
             button("Stop", icon: "stop.circle.fill", action: stop.map(AgentPromptView.Action.abort))
@@ -255,10 +249,16 @@ struct AgentPromptActionButtons: View {
         Button {
             if let action { sendAction?(action) }
         } label: {
-            Label(label, systemImage: icon)
-                .font(Typography.font(.small))
-                .foregroundStyle(action == nil ? theme.agentTextFg.opacity(0.4) : theme.agentInputBorder)
-                .frame(minHeight: 24)
+            // A narrow composer keeps every control in place and drops a title
+            // only when it no longer fits on one line.
+            ViewThatFits(in: .horizontal) {
+                Label(label, systemImage: icon)
+                    .lineLimit(1)
+                Image(systemName: icon)
+            }
+            .font(Typography.font(.small))
+            .foregroundStyle(action == nil ? theme.agentTextFg.opacity(0.4) : theme.agentInputBorder)
+            .frame(minHeight: 24)
         }
         .buttonStyle(.plain)
         .disabled(action == nil)

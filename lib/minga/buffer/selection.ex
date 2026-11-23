@@ -16,7 +16,12 @@ defmodule Minga.Buffer.Selection do
   @doc "Builds a characterwise selection between two editor positions."
   @spec characterwise(Document.t(), Document.position(), Document.position()) :: t()
   def characterwise(%Document{} = doc, from_pos, to_pos) do
-    {line_starts, text} = Lines.snapshot(doc)
+    doc |> Lines.snapshot() |> characterwise_in(from_pos, to_pos)
+  end
+
+  @doc "Builds a characterwise selection against an existing line-indexed snapshot of a document."
+  @spec characterwise_in(Lines.snapshot(), Document.position(), Document.position()) :: t()
+  def characterwise_in({line_starts, text}, from_pos, to_pos) do
     text_size = byte_size(text)
     from_point = Position.point_in(line_starts, elem(from_pos, 0), elem(from_pos, 1), text_size)
     to_point = Position.point_in(line_starts, elem(to_pos, 0), elem(to_pos, 1), text_size)

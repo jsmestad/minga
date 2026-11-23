@@ -227,6 +227,35 @@ public enum PreviewFixtures {
         state.applyTranscript(mode: 0, epoch: 1, baseCount: 0, messages: agentChatMessages())
     }
 
+    /// The Agent workspace shell from the live narrow-window check (#3926):
+    /// an active Agent workspace beside a manual one, no sidebar, the Agent
+    /// activity bar and the All Changes row. Callers populate the chat first.
+    public static func populateAgentWorkspace(_ gui: GUIState) {
+        gui.sidebarHostState.update(activeId: "", sidebars: [])
+        let snapshot = WorkspacePresentationSnapshot(
+            version: 1, activeWorkspaceId: 9, mode: .agent, flags: [],
+            workspaces: [
+                Wire.WorkspaceEntry(id: 7, kind: 0, status: 0, flags: 0, colorR: 0x51, colorG: 0xAF, colorB: 0xEF, tabCount: 0, draftCount: 0, conflictCount: 0, runningBackgroundCount: 0, label: "minga", icon: "folder"),
+                Wire.WorkspaceEntry(id: 9, kind: 1, status: 0, flags: 2, colorR: 0xC6, colorG: 0x78, colorB: 0xDD, tabCount: 1, draftCount: 0, conflictCount: 0, runningBackgroundCount: 0, label: "Reply 2: the module now keeps its highlight spans.", icon: "cpu")
+            ],
+            visibleTabs: [
+                Wire.WorkspaceTabEntry(id: 51, workspaceId: 9, kind: 1, flags: 1, pathHash: 51, tintColorRGB: 0, icon: "", label: "Agent", path: "")
+            ]
+        )
+        gui.workspaceState.install(snapshot)
+        gui.tabBarState.install(snapshot)
+        gui.agentContextBarState.update(
+            visible: true, task: "Agent activity", dispatchTimestamp: Date(timeIntervalSince1970: 0),
+            status: .idle, canApprove: false,
+            progress: Wire.AgentProgress(activeAction: "", toolCount: 0, fileCount: 4, reviewHint: ""),
+            todos: []
+        )
+        let files: [Wire.TimelineFile] = ["lib/minga/editor.ex", "macos/Sources/Views/NotificationCenterView.swift"].map { path in
+            Wire.TimelineFile(path: path, entryCount: 1, linesAdded: 12, linesRemoved: 3, reviewStatus: 0)
+        }
+        gui.editTimelineState.update(visible: true, viewingIndex: 0xFFFF, wireEntries: [], wireFiles: files, generation: 1)
+    }
+
     // MARK: - StatusBar Helpers
 
     public static func statusBarUpdate(agentVisible: Bool, mode: PreviewMode = .normal, motionFrozen: Bool = false) -> StatusBarUpdate {

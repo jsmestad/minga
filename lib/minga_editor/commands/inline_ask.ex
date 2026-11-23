@@ -73,13 +73,12 @@ defmodule MingaEditor.Commands.InlineAsk do
 
   @spec promote_answered(state(), InlineAsk.t(), keyword()) :: state()
   defp promote_answered(state, %InlineAsk{} = ask, opts) do
-    session_starter = Keyword.get(opts, :session_starter, &start_promoted_agent_session/1)
-    seeder = Keyword.get(opts, :seeder, &seed_agent_session/2)
+    session_starter = Keyword.get(opts, :session_starter, &start_promoted_agent_session/2)
+    history = [{:user, ask.prompt}, {:assistant, InlineAsk.response(ask)}]
 
     state = dismiss_without_stop(state, ask.buffer_pid)
     state = create_agent_tab(state)
-    state = session_starter.(state)
-    state = seeder.(state, ask)
+    state = session_starter.(state, {:seed, history})
     state = add_file_to_active_workspace(state, ask.file_ref)
 
     MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
@@ -88,9 +87,15 @@ defmodule MingaEditor.Commands.InlineAsk do
     )
   end
 
-  @spec start_promoted_agent_session(state()) :: state()
-  defp start_promoted_agent_session(state) do
-    AgentSession.start_agent_session(state, session_start_hook_enabled?: false)
+  # The session starts without blocking the Editor; the answered history is
+  # seeded once the session is bound to the new workspace.
+  @spec start_promoted_agent_session(state(), MingaEditor.Agent.SessionStart.follow_up()) ::
+          state()
+  defp start_promoted_agent_session(state, follow_up) do
+    AgentSession.start_agent_session(state,
+      session_start_hook_enabled?: false,
+      follow_up: follow_up
+    )
   end
 
   @spec create_agent_tab(state()) :: state()
@@ -119,25 +124,25 @@ defmodule MingaEditor.Commands.InlineAsk do
 
   defp create_agent_tab(state), do: state
 
-  @spec seed_agent_session(state(), InlineAsk.t()) :: state()
-  defp seed_agent_session(state, %InlineAsk{} = ask) do
-    case MingaEditor.Shell.Runtime.active_session(state.shell_runtime) do
-      session_pid when is_pid(session_pid) ->
-        messages = [{:user, ask.prompt}, {:assistant, InlineAsk.response(ask)}]
+  @doc """
+  Seeds a promoted Inline Ask's history into the session that started for it.
 
-        case MingaAgent.Session.seed_messages(session_pid, messages) do
-          :ok ->
-            AgentLifecycle.sync_transcript(state, :messages_changed)
+  `MingaEditor.Agent.SessionStart` runs this once the session is bound. The seed waits only for the new session's mailbox, a one-time cost of an explicit promote.
+  """
+  @spec seed_started_session(state(), pid(), [{:user | :assistant, String.t()}]) :: state()
+  def seed_started_session(state, session, messages) when is_pid(session) do
+    # minga:allow-blocking — Editor, one-shot seed of a promoted Inline Ask into its new session
+    case MingaAgent.Session.seed_messages(session, messages) do
+      :ok ->
+        if MingaEditor.Shell.Runtime.active_session(state.shell_runtime) == session,
+          do: AgentLifecycle.sync_transcript(state, :messages_changed),
+          else: state
 
-          {:error, reason} ->
-            MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
-              state,
-              "Inline Ask history could not be added to the agent session: #{inspect(reason)}"
-            )
-        end
-
-      _ ->
-        state
+      {:error, reason} ->
+        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+          state,
+          "Inline Ask history could not be added to the agent session: #{inspect(reason)}"
+        )
     end
   catch
     :exit, _ -> state

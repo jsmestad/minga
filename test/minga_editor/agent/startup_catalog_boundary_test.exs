@@ -97,10 +97,103 @@ defmodule MingaEditor.Agent.StartupCatalogBoundaryTest do
     assert {LLMDB, :models, []} in calls
   end
 
+  test "opening the Agent with no configured model makes no catalog or resolver call in the Editor" do
+    _catalog = LLMDB.providers()
+    options = start_supervised!({Minga.Config.Options, name: nil})
+    state = agent_open_state(options, silent_manager())
+
+    {opened, calls} =
+      trace_catalog(fn -> MingaEditor.Commands.Agent.new_agent_session(state) end)
+
+    # Reading the catalog's load epoch decides whether the start must wait; it
+    # never loads or walks the catalog.
+    assert calls -- [{LLMDB, :epoch, []}] == []
+    assert map_size(opened.agent_connection.session_starts) == 1
+    assert opened.workspace.agent_ui.chat_lifecycle == :starting
+
+    assert MingaEditor.Agent.UIState.Panel.model_label(opened.workspace.agent_ui.panel) =~
+             "Resolving"
+  end
+
+  test "the launch preload loads the catalog off the Editor so the next open skips the load" do
+    _catalog = LLMDB.providers()
+    saved = LLMDB.Catalog.get()
+    LLMDB.Catalog.clear!()
+    previous = Application.get_env(:minga, :agent_catalog_preload)
+    Application.put_env(:minga, :agent_catalog_preload, true)
+
+    on_exit(fn ->
+      :persistent_term.put(:llm_db_store, saved)
+      Application.put_env(:minga, :agent_catalog_preload, previous)
+    end)
+
+    options = start_supervised!({Minga.Config.Options, name: nil})
+    manager = silent_manager()
+    cold = agent_open_state(options, manager)
+
+    # Cold, a start cannot send its request until a catalog load finishes.
+    waiting = MingaEditor.Commands.Agent.new_agent_session(cold)
+    assert waiting.agent_connection.session_starts == %{}
+    refute_received {:start_requested, ^manager}
+
+    test = self()
+    handler = {__MODULE__, make_ref()}
+
+    :ok =
+      :telemetry.attach(
+        handler,
+        [:minga, :agent, :catalog_load, :start],
+        fn _event, _measurements, metadata, _config -> send(test, {:catalog_load, metadata}) end,
+        nil
+      )
+
+    on_exit(fn -> :telemetry.detach(handler) end)
+
+    launched = MingaEditor.Agent.CatalogStartup.preload(cold)
+    assert_receive {:catalog_load, %{trigger: :preload}}, 2_000
+
+    # A start that arrives during the preload joins it instead of loading again.
+    assert {:ok, :ready} = MingaAgent.ModelCatalog.load()
+    refute_received {:catalog_load, _metadata}
+    refute LLMDB.epoch() == 0
+
+    opened = MingaEditor.Commands.Agent.new_agent_session(launched)
+    assert map_size(opened.agent_connection.session_starts) == 1
+    assert_receive {:start_requested, ^manager}
+  end
+
+  @spec agent_open_state(GenServer.server(), pid()) :: MingaEditor.State.t()
+  defp agent_open_state(options, manager) do
+    state = TestHelpers.base_state(rendering: :disabled)
+    state = MingaEditor.WorkspaceWorkflow.install_tab_bar(state, TabBar.new(Tab.new_file(1, "f")))
+    connection = %{state.agent_connection | session_manager: manager}
+
+    %{
+      state
+      | agent_connection: connection,
+        interaction: MingaEditor.State.Interaction.new(options_server: options)
+    }
+  end
+
+  @spec silent_manager() :: pid()
+  defp silent_manager do
+    test = self()
+
+    spawn_link(fn ->
+      receive do
+        {:"$gen_call", _from, {:start_session, _opts}} ->
+          send(test, {:start_requested, self()})
+          receive(do: (:never -> :ok))
+      end
+    end)
+  end
+
   @spec trace_catalog((-> result)) :: {result, [tuple()]} when result: var
   defp trace_catalog(operation) do
     {:module, LLMDB} = Code.ensure_loaded(LLMDB)
+    {:module, MingaAgent.ModelResolver} = Code.ensure_loaded(MingaAgent.ModelResolver)
     :erlang.trace_pattern({LLMDB, :_, :_}, true, [])
+    :erlang.trace_pattern({MingaAgent.ModelResolver, :_, :_}, true, [])
     tracer = spawn_link(fn -> collect([]) end)
     :erlang.trace(self(), true, [:call, {:tracer, tracer}])
 
@@ -115,6 +208,7 @@ defmodule MingaEditor.Agent.StartupCatalogBoundaryTest do
     after
       :erlang.trace(self(), false, [:call])
       :erlang.trace_pattern({LLMDB, :_, :_}, false, [])
+      :erlang.trace_pattern({MingaAgent.ModelResolver, :_, :_}, false, [])
       send(tracer, :stop)
     end
   end

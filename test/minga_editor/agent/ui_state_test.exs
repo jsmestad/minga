@@ -98,16 +98,36 @@ defmodule MingaEditor.Agent.UIStateTest do
       panel = Panel.set_model_name(Panel.new(), "unknown")
 
       assert Panel.model_label(Panel.set_credential_readiness(panel, :checking)) ==
-               "Model not resolved"
+               "Resolving model…"
 
       assert Panel.model_label(Panel.set_credential_readiness(panel, :configured)) ==
-               "Model not resolved"
+               "Resolving model…"
 
       assert Panel.model_label(Panel.set_credential_readiness(panel, :unconfigured)) ==
                "No model configured"
 
       selected = Panel.set_model_name(panel, "openai:selected")
       assert Panel.model_label(selected) == "openai:selected"
+    end
+
+    test "an unresolved model shows the session's explanation once the session reports it" do
+      session = self()
+
+      connection = %ConnectionSnapshot{
+        target: ConnectionTarget.new(session, "session-1", nil, make_ref()),
+        credential_readiness: :configured,
+        model_selection: nil,
+        provider_phase: :stopped,
+        operation: :idle,
+        problem: {:resolution, {:model_not_found, "openai:missing"}}
+      }
+
+      ui = UIState.project_connection(UIState.new(), connection)
+
+      assert Panel.model_label(ui.panel) ==
+               MingaAgent.ModelResolver.message({:model_not_found, "openai:missing"})
+
+      assert Panel.model_label(ui.panel) != "Resolving model…"
     end
 
     test "a route's provider label names the chat model until another model replaces it" do

@@ -119,46 +119,75 @@ public struct TabBarView: View {
             // Right-side controls
             verticalSeparator
 
-            // New tab / new agent dropdown
-            Menu {
-                Button(action: {
-                    sendAction?(.newTab)
-                }) {
-                    Label("New File", systemImage: "doc")
+            // In a narrow toolbar (#3933) the split commands move into the new-tab menu, so every command stays reachable.
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 0) {
+                    newTabMenu(includesSplits: false)
+                    splitButtons
                 }
-                Button(action: {
-                    sendAction?(.executeCommand(name: "agent_new_session"))
-                }) {
-                    Label("New Agent Workspace", systemImage: "cpu")
-                }
-            } label: {
-                Image(systemName: "plus")
-                    .font(Typography.font(.small, weight: .medium))
-                    .foregroundStyle(theme.chromeMutedFg)
-                    .frame(width: 28, height: barHeight)
-            }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .frame(width: 28)
-            .help("New file or agent workspace")
-            .pointingHandCursor()
 
-            // Window split buttons
-            tabBarButton(
-                systemIcon: "rectangle.split.2x1",
-                tooltip: "Split right (SPC w v)"
-            ) {
-                sendAction?(.executeCommand(name: "split_vertical"))
+                newTabMenu(includesSplits: true)
             }
-            tabBarButton(
-                systemIcon: "rectangle.expand.vertical",
-                tooltip: "Split below (SPC w s)"
-            ) {
-                sendAction?(.executeCommand(name: "split_horizontal"))
-            }
+            .layoutPriority(1)
         }
         .focusable(false)
         .focusEffectDisabled()
+    }
+
+    /// New tab / new agent dropdown.
+    private func newTabMenu(includesSplits: Bool) -> some View {
+        Menu {
+            Button(action: {
+                sendAction?(.newTab)
+            }) {
+                Label("New File", systemImage: "doc")
+            }
+            Button(action: {
+                sendAction?(.executeCommand(name: "agent_new_session"))
+            }) {
+                Label("New Agent Workspace", systemImage: "cpu")
+            }
+            if includesSplits {
+                Divider()
+                Button(action: {
+                    sendAction?(.executeCommand(name: "split_vertical"))
+                }) {
+                    Label("Split Right", systemImage: "rectangle.split.2x1")
+                }
+                Button(action: {
+                    sendAction?(.executeCommand(name: "split_horizontal"))
+                }) {
+                    Label("Split Below", systemImage: "rectangle.expand.vertical")
+                }
+            }
+        } label: {
+            Image(systemName: "plus")
+                .font(Typography.font(.small, weight: .medium))
+                .foregroundStyle(theme.chromeMutedFg)
+                .frame(width: 28, height: barHeight)
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .frame(width: 28)
+        .help(includesSplits ? "New file, agent workspace or split" : "New file or agent workspace")
+        .pointingHandCursor()
+    }
+
+    /// Window split buttons.
+    @ViewBuilder
+    private var splitButtons: some View {
+        tabBarButton(
+            systemIcon: "rectangle.split.2x1",
+            tooltip: "Split right (SPC w v)"
+        ) {
+            sendAction?(.executeCommand(name: "split_vertical"))
+        }
+        tabBarButton(
+            systemIcon: "rectangle.expand.vertical",
+            tooltip: "Split below (SPC w s)"
+        ) {
+            sendAction?(.executeCommand(name: "split_horizontal"))
+        }
     }
 
     public func performTabContextMenuAction(_ action: TabContextMenuAction, for tab: TabEntry) {

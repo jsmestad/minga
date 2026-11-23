@@ -85,6 +85,10 @@ def main(argv=None):
         names = registry_names(root / "macos/Sources/PreviewRegistry.swift")
         if args.view == "agent-workspace":
             captures = [("AgentChromeView", width, f"AgentChromeView-{width}-doom-one") for width in (800, 1200)]
+            # The narrow window geometry (#3926) uses the Agent workspace without a sidebar.
+            captures.append(("AgentWorkspaceChromeView", 420, "AgentWorkspaceChromeView-420-doom-one"))
+            # The same narrow window with the file-tree sidebar open (#3933).
+            captures.append(("AgentChromeView", 420, "AgentChromeView-420-doom-one"))
         else:
             selected = names if args.view == "all" else [args.view]
             if any(name not in names for name in selected):

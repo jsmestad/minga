@@ -2,11 +2,13 @@ package ui
 
 import (
 	"bytes"
+	"encoding/binary"
 	"fmt"
 	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/jsmestad/minga/go/tui/internal/generated"
 	"github.com/jsmestad/minga/go/tui/internal/port"
@@ -224,6 +226,9 @@ func TestAgentTranscriptNavigationMapping(t *testing.T) {
 		{"ctrl-u", tea.Key{Code: 'u', Mod: tea.ModCtrl}, -8, true},
 		{"G", tea.Key{Code: 'G'}, 1 << 20, true},
 		{"shift-G", tea.Key{Code: 'G', Mod: tea.ModShift}, 1 << 20, true},
+		{"shift-g as the PTY decoder delivers G", tea.Key{Code: 'g', ShiftedCode: 'G', Text: "G", Mod: tea.ModShift}, 1 << 20, true},
+		{"plain g", tea.Key{Code: 'g', Text: "g"}, 0, false},
+		{"ctrl-shift-g", tea.Key{Code: 'g', Mod: tea.ModCtrl | tea.ModShift}, 0, false},
 		{"page down", tea.Key{Code: tea.KeyPgDown}, page, true},
 		{"page up", tea.Key{Code: tea.KeyPgUp}, -page, true},
 		{"ctrl-j", tea.Key{Code: 'j', Mod: tea.ModCtrl}, 0, false},
@@ -239,6 +244,42 @@ func TestAgentTranscriptNavigationMapping(t *testing.T) {
 			got, handled := agentTranscriptScrollRows(tea.KeyPressMsg(test.key), page)
 			if got != test.want || handled != test.handled {
 				t.Fatalf("mapping = (%d, %v), want (%d, %v)", got, handled, test.want, test.handled)
+			}
+		})
+	}
+}
+
+// TestAgentTranscriptKeysFromPTYBytes feeds raw terminal bytes through the same
+// ultraviolet decoder that Bubble Tea uses. A PTY never sends tea.Key{Code: 'G'};
+// it sends "G", which decodes to Code 'g' with ModShift and Text "G".
+func TestAgentTranscriptKeysFromPTYBytes(t *testing.T) {
+	const page = 17
+	tests := []struct {
+		name    string
+		input   []byte
+		want    int
+		handled bool
+	}{
+		{"shift-G from PTY", []byte("G"), 1 << 20, true},
+		{"plain g from PTY does not jump", []byte("g"), 0, false},
+		{"j from PTY", []byte("j"), 1, true},
+		{"ctrl-d from PTY", []byte{0x04}, page / 2, true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var decoder uv.EventDecoder
+			n, event := decoder.Decode(test.input)
+			if n != len(test.input) {
+				t.Fatalf("decoded %d bytes, want %d", n, len(test.input))
+			}
+			press, ok := event.(uv.KeyPressEvent)
+			if !ok {
+				t.Fatalf("event = %T, want uv.KeyPressEvent", event)
+			}
+			msg := tea.KeyPressMsg(tea.Key(uv.Key(press)))
+			got, handled := agentTranscriptScrollRows(msg, page)
+			if got != test.want || handled != test.handled {
+				t.Fatalf("mapping = (%d, %v), want (%d, %v); key=%+v", got, handled, test.want, test.handled, msg.Key())
 			}
 		})
 	}
@@ -800,4 +841,55 @@ func TestContentShrinkClampsAnchorAndReportsReturn(t *testing.T) {
 			t.Fatal("all-fitting replacement did not report pinReturned")
 		}
 	})
+}
+
+// agentStatusCommand builds a gui_status_bar frame for agent content with the
+// agent section's message_count set to total.
+func agentStatusCommand(t *testing.T, total uint32) protocol.Command {
+	t.Helper()
+	identity := []byte{1, 0, 0}
+	agent := []byte{0}
+	agent = binary.BigEndian.AppendUint32(agent, total)
+	agent = append(agent, 0, 0)
+	agent = binary.BigEndian.AppendUint16(agent, 0)
+	agent = binary.BigEndian.AppendUint16(agent, 0)
+	agent = append(agent, 0)
+	packet := []byte{generated.OPGuiStatusBar, 2}
+	packet = append(packet, 0x01)
+	packet = binary.BigEndian.AppendUint16(packet, uint16(len(identity)))
+	packet = append(packet, identity...)
+	packet = append(packet, 0x09)
+	packet = binary.BigEndian.AppendUint16(packet, uint16(len(agent)))
+	packet = append(packet, agent...)
+	command, err := protocol.DecodeCommand(packet)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return command
+}
+
+func TestAgentHeaderCountsEveryMessageOverResidentCap(t *testing.T) {
+	// 56 resident entries stand in for a 205-message conversation whose older
+	// messages were evicted by the resident cap.
+	model := residentModel(t, 56)
+	model.transcript.truncated = true
+	model.applyMutation(agentStatusCommand(t, 205))
+
+	body := ansi.Strip(model.content())
+	if !strings.Contains(body, "205 messages") {
+		t.Fatalf("Agent header should show the BEAM total of 205 messages: %q", body)
+	}
+	if strings.Contains(body, "56 messages") {
+		t.Fatalf("Agent header must not present the resident count as the message count: %q", body)
+	}
+}
+
+func TestAgentHeaderOmitsCountUntilStatusTotalArrives(t *testing.T) {
+	model := residentModel(t, 56)
+	model.transcript.truncated = true
+
+	body := ansi.Strip(model.content())
+	if strings.Contains(body, "56 messages") || strings.Contains(body, "messages ·") {
+		t.Fatalf("Agent header must not guess a message count without the BEAM total: %q", body)
+	}
 }

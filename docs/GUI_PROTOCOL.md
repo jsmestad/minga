@@ -515,6 +515,8 @@ Each section uses `section_id(1) + section_len(2) + payload(section_len)`. Secti
 | 0x0E | QueueTarget | `session_id(string16) + request_id(string16) + sequence(8)`. The target names one insertion position of the active saved-session queue. Absence disables Steer and Queue Next. |
 | 0x0F | ChatLifecycle | `kind(1) + reason(string16)`. Omitted for a live conversation. `1` means starting, `2` means failed with a reason, and `3` means unavailable. Starting and unavailable send an empty reason. Neither frontend shows approval controls while the conversation is not live. A zero-row prompt means the composer is unavailable. |
 
+The Prompt section's `vim_mode` uses the status bar's mode values (0=normal, 1=insert, 2=visual, 3=command, 4=operator_pending, 5=search, 6=replace), because both indicators show the same editing mode. Frontends decode both bytes with one mapping.
+
 Status values: 0 = idle, 1 = thinking, 2 = tool_executing, 3 = error, 4 = plan, 5 = approval_waiting
 
 Approval waiting is a presentation status, not a new execution or busy state. Render it without an execution animation, but keep Stop available because the turn is still active.

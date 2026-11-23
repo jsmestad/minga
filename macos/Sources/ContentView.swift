@@ -557,7 +557,7 @@ public struct ContentView<EditorSurface: View>: View {
                     UnifiedToolbarHost(input: shellInput) { input in
                         unifiedToolbar(input)
                     }
-                    HStack(spacing: 0) {
+                    SidebarSplitLayout(contentMinimum: SidebarSizing.contentMinWidth) {
                         SidebarHost(input: shellInput) { input in
                             sidebarBody(input)
                                 .onAppear { applyActiveSidebarPreferredWidth(input) }
@@ -619,49 +619,33 @@ public struct ContentView<EditorSurface: View>: View {
         ZStack(alignment: .bottom) {
             HStack(spacing: 0) {
                 if input.sidebarHostState.hasVisibleSidebar {
-                    HStack(spacing: 0) {
-                        Color.clear
-                            .frame(width: activityBarWidth)
+                    // Same layout and leading widths as the body row, so the header narrows with the sidebar below it.
+                    SidebarSplitLayout(contentMinimum: SidebarSizing.contentMinWidth) {
+                        HStack(spacing: 0) {
+                            Color.clear
+                                .frame(width: activityBarWidth)
 
-                        sidebarHeaderContent(input)
-                            .frame(width: sidebarWidth + 8) // +8 aligns with resize handle
-                    }
-
-                    Rectangle()
-                        .fill(theme.tabSeparatorFg.opacity(0.4))
-                        .frame(width: 1, height: 16)
-                } else if !input.workspaceState.shouldShowHeader {
-                    compactProjectBranchHeader(input)
-                } else {
-                    Color.clear.frame(width: titleBarLeadingPadding)
-                }
-
-                HStack(spacing: 0) {
-                    if input.workspaceState.shouldShowHeader {
-                        WorkspaceHeaderView(
-                            workspaceState: input.workspaceState,
-                            sendAction: translatedAction(FrontendActionComposition.outbound)
-                        )
-                        .frame(maxWidth: 280)
-                        .fixedSize(horizontal: true, vertical: false)
-                    }
-
-                    if !input.tabBarState.displayTabs.isEmpty {
-                        TabBarView(
-                            tabBarState: input.tabBarState,
-                            sendAction: translatedAction(FrontendActionComposition.outbound)
-                        )
-                        .background {
-                            frameProbeView(
-                                .shell,
-                                value: input.tabBarState.displayTabs.map(\.label).joined(separator: ","),
-                                stateObject: input.tabBarState
-                            )
+                            // +8 aligns with resize handle
+                            sidebarHeaderContent(input)
+                                .frame(minWidth: SidebarSizing.narrowMinWidth + 8, idealWidth: sidebarWidth + 8, maxWidth: sidebarWidth + 8)
                         }
-                        .accessibilityIdentifier("workspace-tabbar")
-                    } else {
-                        Spacer()
+
+                        HStack(spacing: 0) {
+                            Rectangle()
+                                .fill(theme.tabSeparatorFg.opacity(0.4))
+                                .frame(width: 1, height: 16)
+
+                            toolbarTrailingContent(input)
+                        }
                     }
+                } else {
+                    if !input.workspaceState.shouldShowHeader {
+                        compactProjectBranchHeader(input)
+                    } else {
+                        Color.clear.frame(width: titleBarLeadingPadding)
+                    }
+
+                    toolbarTrailingContent(input)
                 }
             }
             .frame(height: toolbarHeight)
@@ -678,6 +662,39 @@ public struct ContentView<EditorSurface: View>: View {
                 theme.tabBg
                 TitleBarDragRegion()
                     .accessibilityHidden(true)
+            }
+        }
+    }
+
+    /// The workspace header and tab bar, right of the sidebar header or the title bar inset.
+    @ViewBuilder
+    private func toolbarTrailingContent(_ input: ShellHostInput) -> some View {
+        HStack(spacing: 0) {
+            if input.workspaceState.shouldShowHeader {
+                WorkspaceHeaderView(
+                    workspaceState: input.workspaceState,
+                    sendAction: translatedAction(FrontendActionComposition.outbound)
+                )
+                // Ideal width up to 280 pt, compressing before the tabs when the window is narrow.
+                .compressibleIdealWidth(maximum: 280)
+                .layoutPriority(1)
+            }
+
+            if !input.tabBarState.displayTabs.isEmpty {
+                TabBarView(
+                    tabBarState: input.tabBarState,
+                    sendAction: translatedAction(FrontendActionComposition.outbound)
+                )
+                .background {
+                    frameProbeView(
+                        .shell,
+                        value: input.tabBarState.displayTabs.map(\.label).joined(separator: ","),
+                        stateObject: input.tabBarState
+                    )
+                }
+                .accessibilityIdentifier("workspace-tabbar")
+            } else {
+                Spacer()
             }
         }
     }

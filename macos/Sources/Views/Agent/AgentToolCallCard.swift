@@ -89,6 +89,7 @@ public struct AgentToolCallCard: View {
                 Text(name)
                     .font(Typography.font(.body, weight: .medium, design: .monospaced))
                     .foregroundStyle(theme.agentTextFg)
+                    .lineLimit(1)
                     .layoutPriority(1)
 
                 // Tool summary (command, path, etc.)
