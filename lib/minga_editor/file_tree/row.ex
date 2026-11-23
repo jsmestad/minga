@@ -58,11 +58,7 @@ defmodule MingaEditor.FileTree.Row do
 
   @doc "Constructs a semantic file-tree row."
   @spec new(keyword()) :: t()
-  def new(attrs) when is_list(attrs) do
-    attrs
-    |> Keyword.drop([:relative_path])
-    |> then(&struct!(__MODULE__, &1))
-  end
+  def new(attrs) when is_list(attrs), do: struct!(__MODULE__, attrs)
 
   @doc "Builds a stable row identity for a file-tree entry."
   @spec id_for(FileTree.entry()) :: String.t()

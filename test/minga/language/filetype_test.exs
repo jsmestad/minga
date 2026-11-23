@@ -177,6 +177,31 @@ defmodule Minga.Language.FiletypeTest do
     end
   end
 
+  describe "detect_all/1" do
+    test "labels each path in order with the same result as detect/1" do
+      paths = [
+        "lib/app.ex",
+        "/abs/path/Makefile",
+        "mix.lock",
+        "SCREAM.EX",
+        ".env.local",
+        "Dockerfile",
+        "notes.unknownext",
+        "noextension",
+        nil
+      ]
+
+      assert Filetype.detect_all(paths) == Enum.map(paths, &Filetype.detect/1)
+
+      assert Filetype.detect_all(paths) ==
+               [:elixir, :make, :elixir, :elixir, :bash, :dockerfile, :text, :text, :text]
+    end
+
+    test "returns an empty list for no paths" do
+      assert Filetype.detect_all([]) == []
+    end
+  end
+
   describe "detect_from_content/2 — shebang detection" do
     test "detects Ruby from shebang" do
       assert Filetype.detect_from_content("script", "#!/usr/bin/env ruby") == :ruby

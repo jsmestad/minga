@@ -66,11 +66,20 @@ defmodule Minga.Project.FileTree.BufferSync do
   """
   @spec entries_to_text([FileTree.entry()], MapSet.t(String.t())) :: String.t()
   def entries_to_text(entries, expanded) do
-    Enum.map_join(entries, "\n", fn entry -> entry_to_line(entry, expanded) end)
+    # One registry snapshot for every file line instead of one lookup per line.
+    filetypes = entries |> Enum.map(&filetype_subject/1) |> Language.detect_filetypes()
+
+    entries
+    |> Enum.zip_with(filetypes, &entry_to_line(&1, &2, expanded))
+    |> Enum.join("\n")
   end
 
-  @spec entry_to_line(FileTree.entry(), MapSet.t(String.t())) :: String.t()
-  defp entry_to_line(entry, expanded) do
+  @spec filetype_subject(FileTree.entry()) :: String.t() | nil
+  defp filetype_subject(%{dir?: true}), do: nil
+  defp filetype_subject(%{path: path}), do: path
+
+  @spec entry_to_line(FileTree.entry(), atom(), MapSet.t(String.t())) :: String.t()
+  defp entry_to_line(entry, filetype, expanded) do
     guides = build_guides(entry.guides, entry.last_child?)
     is_expanded = entry.dir? and MapSet.member?(expanded, entry.path)
 
@@ -78,7 +87,7 @@ defmodule Minga.Project.FileTree.BufferSync do
       case {entry.dir?, is_expanded} do
         {true, true} -> @folder_open
         {true, false} -> @folder_closed
-        {false, _} -> Devicon.icon(Language.detect_filetype(entry.path))
+        {false, _} -> Devicon.icon(filetype)
       end
 
     name = if entry.dir?, do: entry.name <> "/", else: entry.name
