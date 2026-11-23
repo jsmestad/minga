@@ -13,7 +13,7 @@ let inputLog = OSLog(subsystem: PortLogger.subsystem, category: "Input")
 
 /// Interval signposts for the main-thread frame transaction path: `FrameStage`, `FrameFreeze`, and `FramePublish`.
 ///
-/// They share the `Render` category with the renderer's `Frame` interval, so `xctrace` and Instruments record them with the existing frame signposts. Each frame emits at most one interval of each name per packet, and every interval carries `frame=<frameSeq>`. The dynamic-tracing category would make them free when nothing records, but `xctrace record` does not enable that category, so it cannot produce the receipt in `bench/frame_staging_main_thread.md`, which also measures the cost of these intervals.
+/// They share the `Render` category with the renderer's `Frame` interval, so `xctrace` and Instruments record them with the existing frame signposts. Each frame emits at most one interval of each name per packet, and every interval carries `frame=<frameSeq>`. The dynamic-tracing category would make them free when nothing records, but `xctrace record` does not enable that category, so it cannot produce the measurement recorded on issue #3652, which also measures the cost of these intervals.
 let frameTransactionSignposter = OSSignposter(logHandle: renderLog)
 
 /// Emits opt-in startup probe timestamps to stderr, which is separate from the protocol transport.

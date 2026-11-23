@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Summarize a measure.py output directory into the tables used by bench/agent_first_open.md.
+"""Summarize a measure.py output directory into the tables recorded on issue #3610.
 
 Usage: summarize.py OUTPUT_DIR [OUTPUT_DIR...]
 
