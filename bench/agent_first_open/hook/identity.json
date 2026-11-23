@@ -1,0 +1,12 @@
+{
+  "revision": "587e3df5aa3643a634647d8f04a2a6e1cf4da32a",
+  "build_mode": "Release, assembled with MIX_ENV=prod mix app.assemble",
+  "app_binary_sha256": "7a83dfb832554fa167d5dfe974cf9a3cfbfe75dfe65c71d3328c2443ebede767",
+  "os": "27.2",
+  "os_build": "26B123",
+  "cpu_model": "Apple M1",
+  "memory_bytes": 17179869184,
+  "scenarios": "n-immediate",
+  "later_delay_s": 10.0,
+  "hook": "sleep 0.5"
+}

@@ -111,7 +111,7 @@ defmodule MingaEditor.Commands.Agent do
     case find_agent_tab(state) do
       %Tab{id: agent_id} ->
         state
-        |> MingaEditor.TabWorkflow.switch(agent_id)
+        |> measured_tab_switch(agent_id)
         |> maybe_start_session()
         |> activate_agent_view(return_target)
 
@@ -1462,7 +1462,7 @@ defmodule MingaEditor.Commands.Agent do
     thinking_level = state.workspace.agent_ui.panel.thinking_level
 
     state
-    |> create_active_agent_tab()
+    |> measured_agent_tab_switch()
     |> reset_agent_state_for_new_session(thinking_level)
     |> AgentSession.start_agent_session(recover_interrupted_work?: false)
     |> scope_focus_input()
@@ -1487,6 +1487,20 @@ defmodule MingaEditor.Commands.Agent do
     do: UIState.attach_prompt_buffer(ui, pid)
 
   defp retain_arrived_composer(ui, nil), do: ui
+
+  @spec measured_tab_switch(state(), Tab.id()) :: state()
+  defp measured_tab_switch(state, tab_id) do
+    Minga.Telemetry.span([:minga, :agent, :tab_switch], %{}, fn ->
+      MingaEditor.TabWorkflow.switch(state, tab_id)
+    end)
+  end
+
+  @spec measured_agent_tab_switch(state()) :: state()
+  defp measured_agent_tab_switch(state) do
+    Minga.Telemetry.span([:minga, :agent, :tab_switch], %{}, fn ->
+      create_active_agent_tab(state)
+    end)
+  end
 
   @spec create_active_agent_tab(state()) :: state()
   defp create_active_agent_tab(%{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state) do

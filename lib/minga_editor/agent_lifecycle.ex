@@ -142,6 +142,13 @@ defmodule MingaEditor.AgentLifecycle do
 
   @spec safe_editor_snapshot(pid()) :: map() | nil
   defp safe_editor_snapshot(session_pid) do
+    Minga.Telemetry.span([:minga, :agent, :session_snapshot_read], %{}, fn ->
+      read_editor_snapshot(session_pid)
+    end)
+  end
+
+  @spec read_editor_snapshot(pid()) :: map() | nil
+  defp read_editor_snapshot(session_pid) do
     # minga:allow-blocking — Editor, on Agent tab switch, open and draft reopen; the switch read kept by #3643
     AgentSession.editor_snapshot(session_pid)
   catch
