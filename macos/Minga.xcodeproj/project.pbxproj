@@ -351,6 +351,7 @@
 		B48BC4542B423D422705314A /* NativeTextCommandRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = BF00AA30A3F2887F49DA9E90 /* NativeTextCommandRouter.swift */; };
 		B4D102EA2208CBB90DB2D894 /* NativeRenderResources.swift in Sources */ = {isa = PBXBuildFile; fileRef = E945E6E53217CEC4BAAECBDD /* NativeRenderResources.swift */; };
 		B4E3EC9A8E5388DF973D170F /* NativeRenderResourcesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4819FED95BD6D1746F538DED /* NativeRenderResourcesTests.swift */; };
+		B539C49FAC29BD0C76B6A37E /* FrameStagingReplay.swift in Sources */ = {isa = PBXBuildFile; fileRef = 003A95D62576214C4E5604F3 /* FrameStagingReplay.swift */; };
 		B560AA260DA6DC554626BA95 /* OperationReadiness.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0584599FD3264B1C8F85A90 /* OperationReadiness.swift */; };
 		B5D79AA3EB89928091967F73 /* ProtocolEventHandoff.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB164EE3CF13E41E95FFD9AA /* ProtocolEventHandoff.swift */; };
 		B6BE99B3BFD3369D50383A45 /* ChromeTokens.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41B163D79D71D7866C8EEA59 /* ChromeTokens.swift */; };
@@ -664,6 +665,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		003A95D62576214C4E5604F3 /* FrameStagingReplay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FrameStagingReplay.swift; sourceTree = "<group>"; };
 		00EC9D6E3E77B85DF13841B4 /* PickerStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PickerStateTests.swift; sourceTree = "<group>"; };
 		01BF1616E1F36ACCECE34309 /* FocusTestApplicationScope.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FocusTestApplicationScope.swift; sourceTree = "<group>"; };
 		048C53BF025A1476EE8BC1A7 /* IMEComposition.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IMEComposition.swift; sourceTree = "<group>"; };
@@ -1414,6 +1416,7 @@
 		E21EB402C3CF337C600FBBEC /* NativePerformance */ = {
 			isa = PBXGroup;
 			children = (
+				003A95D62576214C4E5604F3 /* FrameStagingReplay.swift */,
 				C96967ED4DCCC7465EC07D8B /* NativeRenderPerformanceMain.swift */,
 				E5ACBDC580464626842B6C23 /* NativeResourceInvestigation.swift */,
 			);
@@ -2110,6 +2113,7 @@
 				15F65BBF4297D723F7C47A28 /* FontFace.swift in Sources */,
 				21D2F006D7D827CA7E024F84 /* FontManager.swift in Sources */,
 				D4557DCFEC94887B44D7D901 /* FrameMetrics.swift in Sources */,
+				B539C49FAC29BD0C76B6A37E /* FrameStagingReplay.swift in Sources */,
 				DF498FA4A0E14A495D35773F /* FrameState.swift in Sources */,
 				245180E7A0626A8C48245493 /* IMEComposition.swift in Sources */,
 				98B18D9FDEF20AFA62901108 /* Instrumentation.swift in Sources */,
