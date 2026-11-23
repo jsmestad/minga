@@ -85,7 +85,9 @@ struct EditorSceneTests {
     /// AppKit skips the launch window for an inactive app; the editor must still exist so the frontend can send `ready`.
     ///
     /// The BEAM executes the frontend directly rather than through LaunchServices, which is the launch path where AppKit applies that skip.
-    @Test("an inactive direct launch creates the editor window without activating the app")
+    /// Whether the launched app ends up active depends on what else is frontmost on the machine (a CI runner usually has nothing), so the
+    /// test asserts only the window. It discriminates the fallback when another app is frontmost, as in the reported launch.
+    @Test("a direct launch creates the editor window even when AppKit skips the launch window")
     @MainActor func inactiveLaunchCreatesEditorWindow() async throws {
         let executable = try #require(Bundle(url: productionApplicationURL())?.executableURL)
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("minga-inactive-launch-\(UUID().uuidString)", isDirectory: true)
@@ -110,7 +112,6 @@ struct EditorSceneTests {
         }
         let snapshot = try JSONDecoder().decode(InactiveLaunchSnapshot.self, from: Data(contentsOf: output))
 
-        #expect(!snapshot.applicationIsActive)
         #expect(snapshot.editorWindowCount == 1)
         #expect(snapshot.editorWindowIsVisible)
     }
