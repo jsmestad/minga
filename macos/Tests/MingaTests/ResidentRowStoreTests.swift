@@ -322,7 +322,8 @@ struct ResidentRowStoreTests {
         #expect(work.idsResolved == 0)
         #expect(work.splices == 1)
         #expect(work.changedRowsValidated == 1)
-        #expect(work.locatorNodesCopied == 13)
+        // One path: branching nodes at digits 9 through 12, then the leaf.
+        #expect(work.locatorNodesCopied == 5)
         #expect(work.fullResets == 0)
         #expect(committed.validateInvariants())
         #expect(staged.validateInvariants())
@@ -389,7 +390,8 @@ struct ResidentRowStoreTests {
         let work = store.counters - before
         #expect(work.changedRowsValidated == 1)
         #expect(work.chunksTouched == 1)
-        #expect(work.locatorNodesCopied == 13)
+        // One path: branching nodes at digits 10 through 12, then the leaf.
+        #expect(work.locatorNodesCopied == 4)
         #expect(store.validateInvariants())
     }
 
@@ -418,7 +420,8 @@ struct ResidentRowStoreTests {
         let work = store.counters - before
         #expect(work.changedRowsValidated == replacements.count)
         #expect(work.chunksTouched == replacements.count)
-        #expect(work.locatorNodesCopied == replacements.count * 13)
+        // One path each: branching nodes at digits 11 and 12, then the leaf.
+        #expect(work.locatorNodesCopied == replacements.count * 3)
         #expect(work.splices == replacements.count)
         #expect(store.validateInvariants())
     }
@@ -627,6 +630,159 @@ struct ResidentRowStoreTests {
         #expect(throws: ResidentSemanticStoreError.invalid) { try committed.applying(invalid, content: content) }
         #expect(committed.revision == 1)
         #expect(committed.rowCount == 2)
+    }
+
+    @Test(
+        "bulk-built locator index equals per-row inserts at radix boundaries",
+        arguments: [0, 1, 31, 32, 33, 1_023, 1_024, 1_025, 32_767, 32_768, 32_769]
+    )
+    func bulkLocatorIndexMatchesPerRowInserts(size: Int) throws {
+        for rowSet in locatorRowSets(count: size, seed: UInt64(size) &+ 0x3906) {
+            let bulk = try ResidentRowStore(rows: rowSet, mode: .sequential)
+            let reference = bulk.rebuildingLocatorsIncrementally()
+
+            #expect(bulk.locatorIndexStructurallyEquals(reference))
+
+            #expect(bulk.locatorIndexHasCanonicalShape)
+
+            #expect(reference.locatorIndexHasCanonicalShape)
+            #expect(bulk.validateInvariants())
+            #expect(reference.validateInvariants())
+            #expect(bulk.counters.locatorNodesCopied == bulk.locatorNodeCount)
+            try expectSameLookups(bulk, reference, rows: rowSet)
+        }
+    }
+
+    @Test("bulk build of unsorted identities at digit boundaries equals per-row inserts")
+    func bulkLocatorIndexOrdersUnsortedIDs() throws {
+        let identities: [UInt64] = [900, 3, UInt64.max, 0, 1 << 60, 31, 32, 16, 15, 1 << 63, 33]
+        var unsorted: [GUIVisualRow] = []
+        for (index, identity) in identities.enumerated() {
+            unsorted.append(row(identity, bufferLine: UInt32(index)))
+        }
+        let bulk = try ResidentRowStore(rows: unsorted, mode: .sequential)
+        let reference = bulk.rebuildingLocatorsIncrementally()
+
+        #expect(bulk.locatorIndexStructurallyEquals(reference))
+
+        #expect(bulk.locatorIndexHasCanonicalShape)
+
+        #expect(reference.locatorIndexHasCanonicalShape)
+        #expect(bulk.validateInvariants())
+        try expectSameLookups(bulk, reference, rows: unsorted)
+    }
+
+    @Test("persistent edits on a bulk-built index match edits on a per-row index")
+    func editsAfterBulkBuildMatchPerRowIndex() throws {
+        var generator = Generator(state: 0x3906)
+        var oracle: [GUIVisualRow] = []
+        for line in 0..<1_100 {
+            oracle.append(row(productionRowID(source: UInt64(line)), bufferLine: UInt32(line)))
+        }
+        var bulk = try ResidentRowStore(rows: oracle, mode: .sequential)
+        var reference = bulk.rebuildingLocatorsIncrementally()
+        var removedIDs: [UInt64] = []
+        var nextSource: UInt64 = 1_100
+
+        for generation in 0..<300 {
+            if generation % 3 == 0, !oracle.isEmpty {
+                let index = generator.int(oracle.count)
+                let replacement = row(
+                    oracle[index].rowId, bufferLine: oracle[index].bufLine,
+                    text: "generation \(generation)", hash: UInt32(generation + 1)
+                )
+                let splice = ResidentRowSplice(startIndex: index, deleteCount: 1, insertedRows: [replacement])
+                try bulk.applyBatch([splice], baseRowCount: oracle.count, resultRowCount: oracle.count)
+                try reference.applyBatch([splice], baseRowCount: oracle.count, resultRowCount: oracle.count)
+                oracle[index] = replacement
+            } else {
+                let index = oracle.isEmpty ? 0 : generator.int(oracle.count + 1)
+                let removable = oracle.count - index
+                let removeCount = removable == 0 ? 0 : generator.int(min(removable, 30) + 1)
+                var inserted: [GUIVisualRow] = []
+                let insertCount = generator.int(40)
+                for offset in 0..<insertCount {
+                    let identity: UInt64
+                    if !removedIDs.isEmpty, generator.int(2) == 0 {
+                        identity = removedIDs.removeLast()
+                    } else {
+                        identity = productionRowID(source: nextSource, slot: UInt64(generator.int(3)))
+                        nextSource += 1
+                    }
+                    inserted.append(row(identity, bufferLine: UInt32(index + offset)))
+                }
+                for removed in oracle[index..<(index + removeCount)] { removedIDs.append(removed.rowId) }
+                try bulk.splice(at: index, removeCount: removeCount, inserting: inserted)
+                try reference.splice(at: index, removeCount: removeCount, inserting: inserted)
+                oracle.replaceSubrange(index..<(index + removeCount), with: inserted)
+            }
+
+            #expect(bulk.locatorIndexStructurallyEquals(reference))
+
+            #expect(bulk.locatorIndexHasCanonicalShape)
+
+            #expect(reference.locatorIndexHasCanonicalShape)
+            #expect(bulk.counters == reference.counters)
+            #expect(bulk.rows(in: 0..<bulk.count).rows == reference.rows(in: 0..<reference.count).rows)
+            #expect(bulk.validateInvariants())
+        }
+        try expectSameLookups(bulk, reference, rows: oracle)
+    }
+
+    /// Dense, production-layout, and random unsorted identities of `count` rows.
+    private func locatorRowSets(count: Int, seed: UInt64) -> [[GUIVisualRow]] {
+        var dense: [GUIVisualRow] = []
+        var production: [GUIVisualRow] = []
+        var random: [GUIVisualRow] = []
+        var generator = Generator(state: seed)
+        var seen = Set<UInt64>()
+        for line in 0..<count {
+            let bufferLine = UInt32(line)
+            dense.append(row(UInt64(line + 1), bufferLine: bufferLine))
+            // Every seventh row continues the previous source line in the next row slot.
+            let continuation = line % 7 == 6
+            let source = UInt64(continuation ? line - 1 : line)
+            production.append(row(productionRowID(source: source, slot: continuation ? 1 : 0),
+                                  bufferLine: bufferLine))
+            var identity = randomRowID(&generator)
+            while !seen.insert(identity).inserted { identity = randomRowID(&generator) }
+            random.append(row(identity, bufferLine: bufferLine))
+        }
+        return [dense, production, random]
+    }
+
+    /// The BEAM row-ID layout: `kind:4 | source_id:32 | row_slot:28`, normal kind.
+    private func productionRowID(source: UInt64, slot: UInt64 = 0) -> UInt64 {
+        (UInt64(1) << 60) | (source << 28) | slot
+    }
+
+    private func randomRowID(_ generator: inout Generator) -> UInt64 {
+        let high = UInt64(generator.int(Int(UInt32.max)))
+        let low = UInt64(generator.int(Int(UInt32.max)))
+        return (high << 32) | low
+    }
+
+    private func expectSameLookups(
+        _ bulk: ResidentRowStore, _ reference: ResidentRowStore, rows expected: [GUIVisualRow]
+    ) throws {
+        var bulkLookups = bulk
+        var referenceLookups = reference
+        var latest: [UInt64: GUIVisualRow] = [:]
+        for expectedRow in expected { latest[expectedRow.rowId] = expectedRow }
+        for (identity, expectedRow) in latest {
+            let bulkRow = try bulkLookups.resolve(rowID: identity, contentHash: expectedRow.contentHash)
+            let referenceRow = try referenceLookups.resolve(rowID: identity, contentHash: expectedRow.contentHash)
+            #expect(bulkRow == expectedRow)
+            #expect(referenceRow == expectedRow)
+        }
+        var missing: UInt64 = 0x5EED_0000_0000_0001
+        while latest[missing] != nil { missing &+= 1 }
+        #expect(throws: ResidentRowStoreError.missingRowID(missing)) {
+            try bulkLookups.resolve(rowID: missing, contentHash: 0)
+        }
+        #expect(throws: ResidentRowStoreError.missingRowID(missing)) {
+            try referenceLookups.resolve(rowID: missing, contentHash: 0)
+        }
     }
 
     private func semanticContent(rows: [GUIVisualRow]) throws -> GUIWindowContent {

@@ -858,7 +858,7 @@ public struct ResidentRowStoreCounters: Sendable, Equatable {
     public var splices = 0
     /// Rows inserted and validated by splice operations.
     public var changedRowsValidated = 0
-    /// Persistent locator radix nodes copied.
+    /// Locator index nodes and leaves allocated, by persistent path copies or by a bulk index build.
     public var locatorNodesCopied = 0
     /// Complete store resets.
     public var fullResets = 0
@@ -1031,95 +1031,357 @@ public struct ResidentRowStore: Sendable {
         }
     }
 
-    private struct Locator: Sendable {
+    private struct Locator: Sendable, Equatable {
         let chunkID: UInt64
         let offset: Int
         let row: GUIVisualRow
     }
 
-    /// Immutable 32-way radix node. Thirteen 5-bit steps cover all 64 row-id bits;
-    /// the final step uses the low four bits, so distinct IDs never share a leaf.
-    private final class LocatorRadixNode: Sendable {
-        let children: [LocatorRadixNode?]
-        let value: Locator?
+    /// One indexed row identity. Leaves are shared between persistent table versions.
+    private final class LocatorLeaf: Sendable {
+        let rowID: UInt64
+        let locator: Locator
 
-        init(children: [LocatorRadixNode?] = Array(repeating: nil, count: 32), value: Locator? = nil) {
-            self.children = children
-            self.value = value
+        init(rowID: UInt64, locator: Locator) {
+            self.rowID = rowID
+            self.locator = locator
         }
     }
 
+    /// A locator table slot: one row identity, or a node over two or more identities.
+    private enum LocatorSlot: Sendable {
+        case leaf(LocatorLeaf)
+        case node(LocatorRadixNode)
+    }
+
+    /// Immutable node of a path-compressed radix tree over row IDs. Row IDs are read as thirteen digits: twelve 5-bit digits from the high bits, then the low four bits. A node exists only where at least two IDs below it differ first, at digit `level`; every ID below it shares `prefix`, the digits above `level`. Bit `d` of `occupancy` marks digit `d`, and `children` holds the occupied slots in digit order.
+    private final class LocatorRadixNode: Sendable {
+        let level: Int
+        let prefix: UInt64
+        let occupancy: UInt32
+        let children: [LocatorSlot]
+
+        init(level: Int, prefix: UInt64, occupancy: UInt32, children: [LocatorSlot]) {
+            self.level = level
+            self.prefix = prefix
+            self.occupancy = occupancy
+            self.children = children
+        }
+
+        /// Position in `children` of the slot for `digit`, if it is occupied.
+        func position(of digit: Int) -> Int? {
+            let bit: UInt32 = 1 << UInt32(digit)
+            guard occupancy & bit != 0 else { return nil }
+            return (occupancy & (bit &- 1)).nonzeroBitCount
+        }
+    }
+
+    /// One row identity and its chunk position, the input of a bulk index build.
+    private struct LocatorEntry {
+        let rowID: UInt64
+        let chunkIndex: Int
+        let offset: Int
+    }
+
+    /// Persistent row-ID index. A key set has exactly one tree shape, so a bulk build and any sequence of persistent inserts and removals that reach the same keys produce the same nodes. Each insert or removal copies only the nodes on one path.
     private struct LocatorTable: Sendable {
-        private static let levelCount = 13
-        private var roots: [LocatorRadixNode?] = Array(repeating: nil, count: 32)
+        private static let lastLevel = 12
+        private static let fanout = 32
+        private var roots: [LocatorSlot?] = Array(repeating: nil, count: 32)
         private(set) var count = 0
 
-        subscript(rowID: UInt64) -> Locator? {
-            var node = roots[Self.branch(for: rowID, level: 0)]
-            for level in 1..<Self.levelCount {
-                node = node?.children[Self.branch(for: rowID, level: level)]
+        init() {}
+
+        /// Builds a complete table in one bottom-up pass. Entries are ordered by row ID, so every node covers one contiguous run and is created exactly once. A repeated row ID keeps its last entry, as repeated `set` calls would.
+        init(building entries: [LocatorEntry], in chunks: [Chunk], createdNodes: inout Int) {
+            let order = Self.distinctRowIDOrder(entries)
+            var start = 0
+            while start < order.count {
+                let slot = Self.branch(for: entries[order[start]].rowID, level: 0)
+                let end = Self.runEnd(entries, order, from: start, to: order.count, level: 0, slot: slot)
+                roots[slot] = Self.building(
+                    entries, order, chunks, range: start..<end, createdNodes: &createdNodes
+                )
+                start = end
             }
-            return node?.value
+            count = order.count
+        }
+
+        subscript(rowID: UInt64) -> Locator? {
+            var slot = roots[Self.branch(for: rowID, level: 0)]
+            while let current = slot {
+                switch current {
+                case .leaf(let leaf):
+                    return leaf.rowID == rowID ? leaf.locator : nil
+                case .node(let node):
+                    guard let position = node.position(of: Self.branch(for: rowID, level: node.level)) else {
+                        return nil
+                    }
+                    slot = node.children[position]
+                }
+            }
+            return nil
         }
 
         mutating func set(_ locator: Locator, for rowID: UInt64, copiedNodes: inout Int) {
-            let existed = self[rowID] != nil
             let rootIndex = Self.branch(for: rowID, level: 0)
-            roots[rootIndex] = Self.setting(
-                roots[rootIndex], rowID: rowID, locator: locator,
-                level: 1, copiedNodes: &copiedNodes
-            )
-            if !existed { count += 1 }
+            copiedNodes += 1
+            let leaf = LocatorLeaf(rowID: rowID, locator: locator)
+            let result = Self.inserting(roots[rootIndex], leaf: leaf, copiedNodes: &copiedNodes)
+            roots[rootIndex] = result.slot
+            if result.inserted { count += 1 }
         }
 
         mutating func remove(_ rowID: UInt64, copiedNodes: inout Int) {
-            guard self[rowID] != nil else { return }
             let rootIndex = Self.branch(for: rowID, level: 0)
-            roots[rootIndex] = Self.removing(
-                roots[rootIndex], rowID: rowID, level: 1, copiedNodes: &copiedNodes
-            )
+            let result = Self.removing(roots[rootIndex], rowID: rowID, copiedNodes: &copiedNodes)
+            guard result.removed else { return }
+            roots[rootIndex] = result.slot
             count -= 1
         }
 
-        mutating func removeAll() {
-            roots = Array(repeating: nil, count: 32)
-            count = 0
+        /// Whether both tables have the same nodes in the same slots and equal leaf values.
+        func structurallyEquals(_ other: LocatorTable) -> Bool {
+            guard count == other.count else { return false }
+            for slot in 0..<Self.fanout where !Self.sameShape(roots[slot], other.roots[slot]) {
+                return false
+            }
+            return true
+        }
+
+        /// Number of nodes and leaves reachable from the roots.
+        func nodeCount() -> Int {
+            var total = 0
+            for root in roots {
+                guard let root else { continue }
+                total += Self.nodeCount(root)
+            }
+            return total
+        }
+
+        /// Whether every node branches where its keys first differ and routes each key to the slot of its digit, which makes the shape unique for the key set.
+        func hasCanonicalShape() -> Bool {
+            var leaves = 0
+            for index in 0..<Self.fanout {
+                guard let root = roots[index] else { continue }
+                guard Self.branch(for: Self.key(of: root), level: 0) == index,
+                      Self.canonical(root, parentLevel: 0, leaves: &leaves) else { return false }
+            }
+            return leaves == count
         }
 
         private static func branch(for rowID: UInt64, level: Int) -> Int {
             let shift = max(64 - ((level + 1) * 5), 0)
-            return Int((rowID >> UInt64(shift)) & (level == levelCount - 1 ? 0x0F : 0x1F))
+            return Int((rowID >> UInt64(shift)) & (level == lastLevel ? 0x0F : 0x1F))
         }
 
-        private static func setting(_ node: LocatorRadixNode?, rowID: UInt64, locator: Locator,
-                                    level: Int, copiedNodes: inout Int) -> LocatorRadixNode {
-            copiedNodes += 1
-            if level == levelCount {
-                return LocatorRadixNode(
-                    children: node?.children ?? Array(repeating: nil, count: 32),
-                    value: locator
-                )
+        /// Bits of the digits above `level`.
+        private static func prefixMask(level: Int) -> UInt64 {
+            UInt64.max << UInt64(64 - (level * 5))
+        }
+
+        /// First digit at which two different row IDs differ.
+        private static func divergence(_ left: UInt64, _ right: UInt64) -> Int {
+            let bit = 63 - (left ^ right).leadingZeroBitCount
+            return bit >= 4 ? (63 - bit) / 5 : lastLevel
+        }
+
+        private static func key(of slot: LocatorSlot) -> UInt64 {
+            switch slot {
+            case .leaf(let leaf): return leaf.rowID
+            case .node(let node): return node.prefix
             }
-            let index = branch(for: rowID, level: level)
-            var children = node?.children ?? Array(repeating: nil, count: 32)
-            children[index] = setting(
-                children[index], rowID: rowID, locator: locator,
-                level: level + 1, copiedNodes: &copiedNodes
-            )
-            return LocatorRadixNode(children: children, value: node?.value)
         }
 
-        private static func removing(_ node: LocatorRadixNode?, rowID: UInt64, level: Int,
-                                     copiedNodes: inout Int) -> LocatorRadixNode? {
-            guard let node else { return nil }
-            copiedNodes += 1
-            if level == levelCount { return nil }
-            let index = branch(for: rowID, level: level)
-            var children = node.children
-            children[index] = removing(children[index], rowID: rowID, level: level + 1,
-                                       copiedNodes: &copiedNodes)
-            if children.allSatisfy({ $0 == nil }), node.value == nil { return nil }
-            return LocatorRadixNode(children: children, value: node.value)
+        private static func pair(_ first: LocatorSlot, _ second: LocatorSlot, level: Int) -> LocatorRadixNode {
+            let firstDigit = branch(for: key(of: first), level: level)
+            let secondDigit = branch(for: key(of: second), level: level)
+            let children: [LocatorSlot] = firstDigit < secondDigit ? [first, second] : [second, first]
+            return LocatorRadixNode(
+                level: level, prefix: key(of: first) & prefixMask(level: level),
+                occupancy: (1 << UInt32(firstDigit)) | (1 << UInt32(secondDigit)), children: children
+            )
+        }
+
+        private static func inserting(_ slot: LocatorSlot?, leaf: LocatorLeaf,
+                                      copiedNodes: inout Int) -> (slot: LocatorSlot, inserted: Bool) {
+            guard let slot else { return (.leaf(leaf), true) }
+            switch slot {
+            case .leaf(let existing):
+                if existing.rowID == leaf.rowID { return (.leaf(leaf), false) }
+                copiedNodes += 1
+                let level = divergence(existing.rowID, leaf.rowID)
+                return (.node(pair(slot, .leaf(leaf), level: level)), true)
+            case .node(let node):
+                if (leaf.rowID ^ node.prefix) & prefixMask(level: node.level) != 0 {
+                    copiedNodes += 1
+                    let level = divergence(node.prefix, leaf.rowID)
+                    return (.node(pair(slot, .leaf(leaf), level: level)), true)
+                }
+                let digit = branch(for: leaf.rowID, level: node.level)
+                var children = node.children
+                var occupancy = node.occupancy
+                let inserted: Bool
+                if let position = node.position(of: digit) {
+                    let result = inserting(children[position], leaf: leaf, copiedNodes: &copiedNodes)
+                    children[position] = result.slot
+                    inserted = result.inserted
+                } else {
+                    let bit: UInt32 = 1 << UInt32(digit)
+                    children.insert(.leaf(leaf), at: (occupancy & (bit &- 1)).nonzeroBitCount)
+                    occupancy |= bit
+                    inserted = true
+                }
+                copiedNodes += 1
+                let copy = LocatorRadixNode(
+                    level: node.level, prefix: node.prefix, occupancy: occupancy, children: children
+                )
+                return (.node(copy), inserted)
+            }
+        }
+
+        private static func removing(_ slot: LocatorSlot?, rowID: UInt64,
+                                     copiedNodes: inout Int) -> (slot: LocatorSlot?, removed: Bool) {
+            guard let slot else { return (nil, false) }
+            switch slot {
+            case .leaf(let leaf):
+                return leaf.rowID == rowID ? (nil, true) : (slot, false)
+            case .node(let node):
+                let digit = branch(for: rowID, level: node.level)
+                guard let position = node.position(of: digit) else { return (slot, false) }
+                let result = removing(node.children[position], rowID: rowID, copiedNodes: &copiedNodes)
+                guard result.removed else { return (slot, false) }
+                var children = node.children
+                var occupancy = node.occupancy
+                if let child = result.slot {
+                    children[position] = child
+                } else {
+                    children.remove(at: position)
+                    occupancy &= ~(UInt32(1) << UInt32(digit))
+                    if children.count == 1 { return (children[0], true) }
+                }
+                copiedNodes += 1
+                let copy = LocatorRadixNode(
+                    level: node.level, prefix: node.prefix, occupancy: occupancy, children: children
+                )
+                return (.node(copy), true)
+            }
+        }
+
+        /// Entry indexes in row-ID order, keeping only the last entry of each row ID. Decoded rows usually arrive in row-ID order already, which skips the sort.
+        private static func distinctRowIDOrder(_ entries: [LocatorEntry]) -> [Int] {
+            var order = Array(entries.indices)
+            var ordered = true
+            var index = 1
+            while index < entries.count {
+                if entries[index - 1].rowID >= entries[index].rowID {
+                    ordered = false
+                    break
+                }
+                index += 1
+            }
+            if ordered { return order }
+            order.sort { left, right in
+                let leftID: UInt64 = entries[left].rowID
+                let rightID: UInt64 = entries[right].rowID
+                return leftID == rightID ? left < right : leftID < rightID
+            }
+            var distinct: [Int] = []
+            distinct.reserveCapacity(order.count)
+            for position in order.indices {
+                let next = position + 1
+                if next < order.count, entries[order[next]].rowID == entries[order[position]].rowID {
+                    continue
+                }
+                distinct.append(order[position])
+            }
+            return distinct
+        }
+
+        /// End of the run that starts at `start` and shares `slot` at `level`.
+        private static func runEnd(_ entries: [LocatorEntry], _ order: [Int], from start: Int,
+                                   to upperBound: Int, level: Int, slot: Int) -> Int {
+            var end = start + 1
+            while end < upperBound, branch(for: entries[order[end]].rowID, level: level) == slot {
+                end += 1
+            }
+            return end
+        }
+
+        private static func building(_ entries: [LocatorEntry], _ order: [Int], _ chunks: [Chunk],
+                                     range: Range<Int>, createdNodes: inout Int) -> LocatorSlot {
+            createdNodes += 1
+            let first: LocatorEntry = entries[order[range.lowerBound]]
+            if range.count == 1 {
+                let chunk = chunks[first.chunkIndex]
+                let locator = Locator(chunkID: chunk.id, offset: first.offset, row: chunk.rows[first.offset])
+                return .leaf(LocatorLeaf(rowID: first.rowID, locator: locator))
+            }
+            let level = divergence(first.rowID, entries[order[range.upperBound - 1]].rowID)
+            var children: [LocatorSlot] = []
+            children.reserveCapacity(min(range.count, fanout))
+            var occupancy: UInt32 = 0
+            var start = range.lowerBound
+            while start < range.upperBound {
+                let slot = branch(for: entries[order[start]].rowID, level: level)
+                let end = runEnd(entries, order, from: start, to: range.upperBound, level: level, slot: slot)
+                children.append(building(entries, order, chunks, range: start..<end, createdNodes: &createdNodes))
+                occupancy |= 1 << UInt32(slot)
+                start = end
+            }
+            return .node(LocatorRadixNode(
+                level: level, prefix: first.rowID & prefixMask(level: level),
+                occupancy: occupancy, children: children
+            ))
+        }
+
+        private static func nodeCount(_ slot: LocatorSlot) -> Int {
+            guard case .node(let node) = slot else { return 1 }
+            var total = 1
+            for child in node.children { total += nodeCount(child) }
+            return total
+        }
+
+        private static func sameShape(_ left: LocatorSlot?, _ right: LocatorSlot?) -> Bool {
+            switch (left, right) {
+            case (nil, nil):
+                return true
+            case (.leaf(let leftLeaf)?, .leaf(let rightLeaf)?):
+                return leftLeaf.rowID == rightLeaf.rowID && leftLeaf.locator == rightLeaf.locator
+            case (.node(let leftNode)?, .node(let rightNode)?):
+                guard leftNode.level == rightNode.level, leftNode.prefix == rightNode.prefix,
+                      leftNode.occupancy == rightNode.occupancy,
+                      leftNode.children.count == rightNode.children.count else { return false }
+                for position in leftNode.children.indices
+                where !sameShape(leftNode.children[position], rightNode.children[position]) {
+                    return false
+                }
+                return true
+            default:
+                return false
+            }
+        }
+
+        private static func canonical(_ slot: LocatorSlot, parentLevel: Int, leaves: inout Int) -> Bool {
+            guard case .node(let node) = slot else {
+                leaves += 1
+                return true
+            }
+            let mask = prefixMask(level: node.level)
+            guard node.level > parentLevel, node.level <= lastLevel, node.prefix & mask == node.prefix,
+                  node.children.count >= 2, node.children.count == node.occupancy.nonzeroBitCount,
+                  let firstChild = node.children.first, let lastChild = node.children.last else { return false }
+            var previousDigit = -1
+            var occupancy: UInt32 = 0
+            for child in node.children {
+                let childKey = key(of: child)
+                let digit = branch(for: childKey, level: node.level)
+                guard childKey & mask == node.prefix, digit > previousDigit,
+                      canonical(child, parentLevel: node.level, leaves: &leaves) else { return false }
+                previousDigit = digit
+                occupancy |= 1 << UInt32(digit)
+            }
+            return occupancy == node.occupancy && divergence(key(of: firstChild), key(of: lastChild)) == node.level
         }
     }
 
@@ -1182,7 +1444,7 @@ public struct ResidentRowStore: Sendable {
         self.storage = Storage(resourceWeight: resourceWeight)
         let chunks = makeChunks(rows)
         storage.root = Self.buildTree(chunks)
-        indexChunks(chunks)
+        rebuildLocators(chunks)
         storage.counters.rowsVisited = rows.count
         storage.counters.chunksTouched = chunks.count
         storage.counters.fullResets = 1
@@ -1206,6 +1468,34 @@ public struct ResidentRowStore: Sendable {
     public func sharesStorage(with other: ResidentRowStore) -> Bool {
         storage === other.storage
     }
+
+    /// Test-only copy whose locator index is rebuilt with one persistent insert per row, the reference that a bulk-built index must match.
+    public func rebuildingLocatorsIncrementally() -> ResidentRowStore {
+        var copy = self
+        copy.storage = storage.copy()
+        var table = LocatorTable()
+        var copiedNodes = 0
+        for chunk in Self.flattenChunks(storage.root) {
+            for (offset, row) in chunk.rows.enumerated() {
+                table.set(Locator(chunkID: chunk.id, offset: offset, row: row), for: row.rowId,
+                          copiedNodes: &copiedNodes)
+            }
+        }
+        copy.storage.locators = table
+        return copy
+    }
+
+    /// Test-only check that both locator indexes have the same nodes in the same slots.
+    public func locatorIndexStructurallyEquals(_ other: ResidentRowStore) -> Bool {
+        storage.locators.structurallyEquals(other.storage.locators)
+    }
+
+    /// Test-only count of locator index nodes and leaves.
+    public var locatorNodeCount: Int { storage.locators.nodeCount() }
+
+    /// Test-only check that the locator index has its canonical path-compressed shape. Kept out of
+    /// `validateInvariants()`, which runs for every staged window frame.
+    public var locatorIndexHasCanonicalShape: Bool { storage.locators.hasCanonicalShape() }
     #endif
 
     /// Replaces the complete sequence and records one explicit full reset.
@@ -1216,11 +1506,9 @@ public struct ResidentRowStore: Sendable {
         let resultingWeight = try Self.weight(of: rows)
         try Self.validate(resultingWeight, limit: limit)
         ensureUniqueStorage()
-        storage.root = nil
-        storage.locators.removeAll()
         let chunks = makeChunks(rows)
         storage.root = Self.buildTree(chunks)
-        indexChunks(chunks)
+        rebuildLocators(chunks)
         storage.resourceWeight = resultingWeight
         storage.counters.rowsVisited += rows.count
         storage.counters.chunksTouched += chunks.count
@@ -1515,7 +1803,7 @@ public struct ResidentRowStore: Sendable {
         if storage.root == nil {
             let chunks = makeChunks(insertedRows)
             storage.root = Self.buildTree(chunks)
-            indexChunks(chunks)
+            rebuildLocators(chunks)
             storage.resourceWeight = insertedResourceWeight
             storage.counters.resourceWeightRowsVisited += resourceWeightRowsVisited
             recordSplice(oldRows: 0, newRows: insertedRows.count, changedRows: insertedRows.count,
@@ -1722,6 +2010,22 @@ public struct ResidentRowStore: Sendable {
         return chunks
     }
 
+    /// Replaces the locator index for a complete store in one bulk pass that creates each radix node once, instead of one persistent path copy per row.
+    private mutating func rebuildLocators(_ chunks: [Chunk]) {
+        var rowTotal = 0
+        for chunk in chunks { rowTotal += chunk.rows.count }
+        var entries: [LocatorEntry] = []
+        entries.reserveCapacity(rowTotal)
+        for (chunkIndex, chunk) in chunks.enumerated() {
+            for (offset, row) in chunk.rows.enumerated() {
+                entries.append(LocatorEntry(rowID: row.rowId, chunkIndex: chunkIndex, offset: offset))
+            }
+        }
+        var createdNodes = 0
+        storage.locators = LocatorTable(building: entries, in: chunks, createdNodes: &createdNodes)
+        storage.counters.locatorNodesCopied += createdNodes
+    }
+
     private mutating func indexChunks(_ chunks: [Chunk]) {
         for chunk in chunks {
             for (offset, row) in chunk.rows.enumerated() {
@@ -1854,13 +2158,24 @@ public struct ResidentRowStore: Sendable {
         )
     }
 
+    private static func rowIDsStrictlyAscending(_ rows: [GUIVisualRow]) -> Bool {
+        var index = 1
+        while index < rows.count {
+            if rows[index - 1].rowId >= rows[index].rowId { return false }
+            index += 1
+        }
+        return true
+    }
+
     private static func validateRows(
         _ rows: [GUIVisualRow], mode: ResidentRowStoreMode
     ) throws {
+        // Strictly ascending row IDs cannot repeat, so a decoded keyframe in ID order skips hashing.
+        let idsAscending = rowIDsStrictlyAscending(rows)
         var ids = Set<UInt64>()
         var previousBufferLine: UInt32?
         for row in rows {
-            if !ids.insert(row.rowId).inserted {
+            if !idsAscending, !ids.insert(row.rowId).inserted {
                 throw ResidentRowStoreError.duplicateRowID(row.rowId)
             }
             if mode == .sequentialWrapped, row.rowType != .normal, row.rowType != .wrapContinuation {
