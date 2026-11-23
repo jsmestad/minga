@@ -210,8 +210,8 @@ defmodule Minga.Conformance.ProductionRenderCorpusTest do
       frame = Map.fetch!(frames, input.frame_seq)
       ctx = Context.from_input(input)
 
-      {caches, font_registry, message_store} = Emit.emit(frame, ctx, nil, input.caches)
-      Input.accept_emit_results(input, caches, font_registry, message_store)
+      {caches, font_registry, message_store, admission} = Emit.emit(frame, ctx, nil, input.caches)
+      Input.accept_emit_results(input, caches, font_registry, message_store, admission)
     end
   end
 

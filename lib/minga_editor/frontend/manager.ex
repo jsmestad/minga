@@ -41,6 +41,9 @@ defmodule MingaEditor.Frontend.Manager do
 
   @typedoc "Non-suspending frontend transport admission result."
   @type admission :: :accepted | :unwritable
+
+  @typedoc "Admission result for a batch that may be a frame transaction; see `MingaEditor.Frontend.Adapter.frame_admission/0`."
+  @type frame_admission :: admission() | {:refused, :not_ready}
   @type lifecycle_admission :: :accepted | :unwritable | :disconnected
 
   @typedoc "One recovery reservation: fresh generation and next usable wire sequence."
@@ -84,7 +87,7 @@ defmodule MingaEditor.Frontend.Manager do
 
   @doc "Attempts non-suspending admission of encoded commands to the renderer."
   @impl MingaEditor.Frontend.Adapter
-  @spec send_commands(GenServer.server() | nil, [binary()]) :: admission()
+  @spec send_commands(GenServer.server() | nil, [binary()]) :: frame_admission()
   def send_commands(server \\ __MODULE__, commands)
   def send_commands(nil, commands) when is_list(commands), do: :unwritable
 
@@ -106,7 +109,7 @@ defmodule MingaEditor.Frontend.Manager do
   @doc """
   Like `send_commands/2` but stamps the synchronous admission request with a monotonic send time. The receiver emits a `[:minga, :render, :hop_latency]` (`hop: :send_commands`) sample measuring the Renderer.Server to Port.Manager scheduling delay. Used only for the per-frame render batch on the keystroke path.
   """
-  @spec send_render_commands(GenServer.server() | nil, [binary()]) :: admission()
+  @spec send_render_commands(GenServer.server() | nil, [binary()]) :: frame_admission()
   def send_render_commands(server \\ __MODULE__, commands)
   def send_render_commands(nil, commands) when is_list(commands), do: :unwritable
 
@@ -541,7 +544,7 @@ defmodule MingaEditor.Frontend.Manager do
   end
 
   @spec consume_output_call(OutputHandler.output_result()) ::
-          {:reply, admission(), state()} | {:stop, term(), admission(), state()}
+          {:reply, frame_admission(), state()} | {:stop, term(), admission(), state()}
   defp consume_output_call({:continue, admission, state}), do: {:reply, admission, state}
 
   defp consume_output_call({:transport_failure, state}),

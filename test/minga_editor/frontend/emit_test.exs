@@ -101,6 +101,17 @@ defmodule MingaEditor.Frontend.EmitTest do
       assert Enum.all?(commands, &is_binary/1)
     end
 
+    test "emit returns the frontend's admission of the frame batch" do
+      frame = ComposedFrame.new([], Cursor.new(0, 0, :block))
+      ctx = Context.from_editor_state(gui_state(port_manager: Process.get(:emit_test_frontend)))
+
+      assert {_caches, _font_registry, _message_store, :accepted} = Emit.emit(frame, ctx)
+      assert_receive_frame_commands()
+
+      ctx = put_port_manager(ctx, nil)
+      assert {_caches, _font_registry, _message_store, :unwritable} = Emit.emit(frame, ctx)
+    end
+
     test "GUI config state is emitted inside the frame transaction" do
       frame = ComposedFrame.new([], Cursor.new(0, 0, :block))
       config_state = %ConfigState{options: [{"cursor_blink", false}]}
@@ -234,12 +245,12 @@ defmodule MingaEditor.Frontend.EmitTest do
       ctx =
         Context.from_editor_state(semantic_state()) |> put_frame_seq(11) |> put_port_manager(nil)
 
-      {caches, _font_registry, _message_store} = Emit.emit(frame, ctx, nil, %Caches{})
+      {caches, _font_registry, _message_store, _admission} = Emit.emit(frame, ctx, nil, %Caches{})
       assert caches.last_acknowledged_frame_seq == 11
       assert caches.last_frame_keyframe?
 
       ctx = put_frame_seq(ctx, 22)
-      {caches, _font_registry, _message_store} = Emit.emit(frame, ctx, nil, caches)
+      {caches, _font_registry, _message_store, _admission} = Emit.emit(frame, ctx, nil, caches)
       assert caches.last_acknowledged_frame_seq == 22
       refute caches.last_frame_keyframe?
     end
@@ -284,7 +295,7 @@ defmodule MingaEditor.Frontend.EmitTest do
       invalid_frame = frame_with_invalid_indent_level(frame)
       ctx = %{Context.from_editor_state(state) | frame_seq: 22}
 
-      {recovered_caches, _font_registry, _message_store} =
+      {recovered_caches, _font_registry, _message_store, nil} =
         Emit.emit(invalid_frame, ctx, nil, caches)
 
       refute_receive {:frontend_commands, _frontend, [<<@op_begin_frame, _::binary>> | _]}
@@ -391,7 +402,7 @@ defmodule MingaEditor.Frontend.EmitTest do
       {_id, registry, true} = FontRegistry.get_or_register(FontRegistry.new(), "Fira Code")
       ctx = %{Context.from_editor_state(emit_state()) | font_registry: registry, frame_seq: 41}
 
-      {caches, font_registry, _message_store} = Emit.emit(frame, ctx, nil, %Caches{})
+      {caches, font_registry, _message_store, _admission} = Emit.emit(frame, ctx, nil, %Caches{})
       commands = assert_receive_frame_commands()
 
       assert FontRegistry.pending_registrations(font_registry) == []
@@ -401,7 +412,7 @@ defmodule MingaEditor.Frontend.EmitTest do
       assert registration_index < window_index
 
       ctx = %{ctx | font_registry: font_registry, frame_seq: 42}
-      {_caches, font_registry, _message_store} = Emit.emit(frame, ctx, nil, caches)
+      {_caches, font_registry, _message_store, _admission} = Emit.emit(frame, ctx, nil, caches)
       commands = assert_receive_frame_commands()
 
       refute Enum.any?(commands, &match?(<<0x52, _::binary>>, &1))
@@ -422,9 +433,14 @@ defmodule MingaEditor.Frontend.EmitTest do
           frame_seq: 77
       }
 
-      {_caches, first_registry, _message_store} = Emit.emit(frame, ctx, nil, %Caches{})
+      {_caches, first_registry, _message_store, _admission} =
+        Emit.emit(frame, ctx, nil, %Caches{})
+
       first_commands = assert_receive_frame_commands()
-      {_caches, second_registry, _message_store} = Emit.emit(frame, ctx, nil, %Caches{})
+
+      {_caches, second_registry, _message_store, _admission} =
+        Emit.emit(frame, ctx, nil, %Caches{})
+
       second_commands = assert_receive_frame_commands()
 
       assert first_commands == second_commands
@@ -444,7 +460,7 @@ defmodule MingaEditor.Frontend.EmitTest do
 
       ctx = %{Context.from_editor_state(semantic_state()) | font_registry: registry, frame_seq: 9}
 
-      {_caches, returned_registry, _message_store} =
+      {_caches, returned_registry, _message_store, nil} =
         Emit.emit(invalid_frame, ctx, nil, %Caches{})
 
       refute_receive {:frontend_commands, _frontend, [<<@op_begin_frame, _::binary>> | _]}
@@ -460,14 +476,14 @@ defmodule MingaEditor.Frontend.EmitTest do
       ctx = Context.from_editor_state(state)
       caches0 = %Caches{}
 
-      {caches1, _font_registry, _message_store} = Emit.emit(frame, ctx, nil, caches0)
+      {caches1, _font_registry, _message_store, _admission} = Emit.emit(frame, ctx, nil, caches0)
       # Flush first commands + title
       _commands = assert_receive_frame_commands()
 
       assert is_binary(caches1.last_title)
 
       # Emit again with same ctx; title should not be re-sent (cache hit)
-      {caches2, _font_registry, _message_store} = Emit.emit(frame, ctx, nil, caches1)
+      {caches2, _font_registry, _message_store, _admission} = Emit.emit(frame, ctx, nil, caches1)
       _commands2 = assert_receive_frame_commands()
 
       assert caches2.last_title == caches1.last_title
@@ -482,13 +498,13 @@ defmodule MingaEditor.Frontend.EmitTest do
       ctx = Context.from_editor_state(state)
       caches0 = %Caches{}
 
-      {caches1, _font_registry, _message_store} = Emit.emit(frame, ctx, nil, caches0)
+      {caches1, _font_registry, _message_store, _admission} = Emit.emit(frame, ctx, nil, caches0)
       _ = assert_receive_frame_commands()
 
       assert caches1.last_window_bg == state.appearance.theme.editor.bg
 
       # Emit again, should not re-send
-      {caches2, _font_registry, _message_store} = Emit.emit(frame, ctx, nil, caches1)
+      {caches2, _font_registry, _message_store, _admission} = Emit.emit(frame, ctx, nil, caches1)
       _ = assert_receive_frame_commands()
       assert caches2.last_window_bg == caches1.last_window_bg
     end
@@ -570,7 +586,7 @@ defmodule MingaEditor.Frontend.EmitTest do
       |> put_force_keyframe(Keyword.get(opts, :force_keyframe?, false))
       |> Map.put(:acknowledgement_required?, true)
 
-    {new_caches, _font_registry, _message_store} = Emit.emit(frame, ctx, nil, caches)
+    {new_caches, _font_registry, _message_store, _admission} = Emit.emit(frame, ctx, nil, caches)
     commands = assert_receive_frame_commands()
     {commands, new_caches}
   end

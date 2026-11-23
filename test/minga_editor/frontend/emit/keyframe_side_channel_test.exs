@@ -116,7 +116,7 @@ defmodule MingaEditor.Frontend.Emit.KeyframeSideChannelTest do
       |> Map.put(:frame_seq, Keyword.fetch!(opts, :frame_seq))
       |> put_force_keyframe(Keyword.get(opts, :force_keyframe?, false))
 
-    {new_caches, _font_registry, _message_store} = Emit.emit(frame, ctx, nil, caches)
+    {new_caches, _font_registry, _message_store, _admission} = Emit.emit(frame, ctx, nil, caches)
 
     assert_receive {:frontend_commands, _frontend, [<<@op_begin_frame, _::binary>> | _]}
 

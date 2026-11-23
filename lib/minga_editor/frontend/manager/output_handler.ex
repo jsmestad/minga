@@ -14,12 +14,16 @@ defmodule MingaEditor.Frontend.Manager.OutputHandler do
 
   @typedoc "Internal output admission or terminal transport-failure disposition."
   @type output_result ::
-          {:continue, Manager.admission(), State.t()} | {:transport_failure, State.t()}
+          {:continue, Manager.frame_admission(), State.t()} | {:transport_failure, State.t()}
 
   @typedoc "Internal retry disposition."
   @type retry_result :: {:continue, State.t()} | {:transport_failure, State.t()}
 
-  @doc "Attempts one command batch without suspending the Port owner."
+  @doc """
+  Attempts one command batch without suspending the Port owner.
+
+  A frame batch sent before the frontend is ready returns `{:refused, :not_ready}`: it is discarded, never retained, and will never be acknowledged. `:unwritable` is reserved for output the transport could not take now, which is retained or coalesced under output pressure.
+  """
   @spec admit_commands(State.t(), [binary()]) :: output_result()
   def admit_commands(%{port: nil} = state, _commands), do: {:continue, :unwritable, state}
 
@@ -27,7 +31,7 @@ defmodule MingaEditor.Frontend.Manager.OutputHandler do
     log_frame_transaction_violation(commands)
 
     case PendingFrame.from_commands(commands) do
-      {:ok, _frame} when not state.ready -> {:continue, :unwritable, state}
+      {:ok, _frame} when not state.ready -> {:continue, {:refused, :not_ready}, state}
       {:ok, frame} -> admit_frame(state, frame)
       {:error, _reason} -> admit_control(state, commands)
     end
