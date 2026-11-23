@@ -6,7 +6,7 @@ Start with [principles](principles.md). They are short, and every other file fol
 
 | File | What it answers |
 |---|---|
-| [principles.md](principles.md) | The ten rules every surface follows |
+| [principles.md](principles.md) | The eleven rules every surface follows |
 | [marks.md](marks.md) | The twist and the orbit: exact SVGs, terminal glyphs, colour roles, the gutter, diagnostics |
 | [themes.md](themes.md) | Every colour is a theme role: the roles, where they live in the Theme struct, the reference themes and their contrast |
 | [keys.md](keys.md) | Every key by context, and how it compares with today's keymap |
