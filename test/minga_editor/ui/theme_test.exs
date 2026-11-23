@@ -22,17 +22,17 @@ defmodule Minga.ThemeTest do
   end
 
   describe "default/0" do
-    test "returns :astrodark" do
-      assert Theme.default() == :astrodark
+    test "returns :catppuccin_frappe" do
+      assert Theme.default() == :catppuccin_frappe
     end
 
-    test "stays :astrodark when AstroNvim is unavailable" do
-      ThemePacks.unregister_pack(ThemePacks.AstroNvim)
+    test "stays :catppuccin_frappe when Catppuccin is unavailable" do
+      ThemePacks.unregister_pack(ThemePacks.Catppuccin)
 
-      assert Theme.default() == :astrodark
-      refute :astrodark in Theme.available()
+      assert Theme.default() == :catppuccin_frappe
+      refute :catppuccin_frappe in Theme.available()
     after
-      ThemePacks.register_pack(ThemePacks.AstroNvim)
+      ThemePacks.register_pack(ThemePacks.Catppuccin)
     end
   end
 

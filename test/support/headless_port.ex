@@ -218,7 +218,7 @@ defmodule Minga.Test.HeadlessPort do
   @spec agent_chat(GenServer.server()) :: map() | nil
   def agent_chat(server), do: GenServer.call(server, :agent_chat)
 
-  @doc "Returns the decoded file tree sidebar from the latest committed frame."
+  @doc "Returns the decoded file tree (rows, selection, focus) from the latest committed frame."
   @spec file_tree(GenServer.server()) :: map() | nil
   def file_tree(server), do: GenServer.call(server, :file_tree)
   @doc "Returns just the text of a specific row."
@@ -1686,8 +1686,8 @@ defmodule Minga.Test.HeadlessPort do
     decode_file_tree_rows(rest, remaining - 1, [row | acc])
   end
 
-  # A selection delta only follows a full tree command, so there is no tree to update.
-  defp apply_file_tree_selection(nil, _payload), do: nil
+  defp apply_file_tree_selection(nil, payload),
+    do: decode_file_tree(<<4, 0, 0, payload::binary, 0::16, 0::16, 0::16, 0::16>>)
 
   defp apply_file_tree_selection(
          file_tree,
