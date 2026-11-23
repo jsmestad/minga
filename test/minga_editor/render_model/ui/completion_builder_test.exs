@@ -5,6 +5,9 @@ defmodule MingaEditor.RenderModel.UI.CompletionBuilderTest do
   alias Minga.Editing.Completion, as: EditingCompletion
   alias Minga.RenderModel.UI.Completion
   alias Minga.RenderModel.UI.Completion.Item
+  alias Minga.Frontend.Adapter.GUI.Caches
+  alias Minga.Frontend.Adapter.GUI.CompletionEncoder
+  alias Minga.Test.CallCounter
   alias MingaEditor.RenderModel.UI.CompletionBuilder
   alias MingaEditor.Viewport
   alias MingaEditor.Window
@@ -106,7 +109,31 @@ defmodule MingaEditor.RenderModel.UI.CompletionBuilderTest do
       assert model.cursor_row == 5
       assert model.cursor_col == 19
     end
+
+    test "builds and encodes item ids from each item's carried wire id without hashing" do
+      completion =
+        ["alpha", "beta", "gamma"]
+        |> Enum.map(&item(&1, :function, "detail"))
+        |> EditingCompletion.new({0, 0})
+        |> EditingCompletion.move_down()
+
+      {hashes, model} =
+        CallCounter.count({:crypto, :hash, 2}, fn ->
+          model = CompletionBuilder.build(ctx(completion))
+          {_command, _caches} = CompletionEncoder.encode(model, Caches.new())
+          model
+        end)
+
+      assert hashes == 0
+
+      assert Enum.map(model.items, & &1.id) ==
+               Enum.map(completion.filtered, &wire_id_of_identity/1)
+
+      assert model.selected_item_id == wire_id_of_identity(Enum.at(completion.filtered, 1))
+    end
   end
+
+  defp wire_id_of_identity(item), do: EditingCompletion.Item.wire_id(item.id)
 
   defp ctx(completion, opts \\ []) do
     row = Keyword.get(opts, :row, 0)
