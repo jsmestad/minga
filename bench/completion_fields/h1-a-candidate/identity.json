@@ -1,0 +1,1 @@
+{"label":"h1-a-candidate","otp":"29","schedulers":4,"elixir":"1.20.5","arch":"aarch64-apple-darwin27.2.0","commit":"81a40c50f212f6fcc40490b57d3b200d84c310bb","counts":[0,100,1000,10000],"lib_dirty":[],"completion_sources_sha256":"3286BE0D42D4EE4F4384D9F99F7145FADF9DCEA98D06CED10FAC9BA3891DB731","mix_env":"test"}
