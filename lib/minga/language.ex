@@ -126,6 +126,10 @@ defmodule Minga.Language do
   @spec detect_filetype(String.t() | nil) :: atom()
   defdelegate detect_filetype(path), to: Minga.Language.Filetype, as: :detect
 
+  @doc "Detects the language atoms of many paths, in input order, with one registry read."
+  @spec detect_filetypes([String.t() | nil]) :: [atom()]
+  defdelegate detect_filetypes(paths), to: Minga.Language.Filetype, as: :detect_all
+
   @doc "Detects filetype using both path and first line content (shebang)."
   @spec detect_filetype_from_content(String.t(), String.t()) :: atom()
   defdelegate detect_filetype_from_content(path, first_line),

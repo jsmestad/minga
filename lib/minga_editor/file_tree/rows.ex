@@ -101,10 +101,11 @@ defmodule MingaEditor.FileTree.Rows do
 
   @spec row_from_entry(FileTree.entry(), non_neg_integer(), FileTree.t(), map()) :: Row.t()
   defp row_from_entry(entry, index, tree, opts) do
-    path = Path.expand(entry.path)
+    # A row's identity is its expanded path, so expand once for both fields.
+    path = Row.id_for(entry)
 
     Row.new(
-      id: Row.id_for(entry),
+      id: path,
       path: path,
       name: entry.name,
       directory?: entry.dir?,

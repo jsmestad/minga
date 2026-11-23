@@ -84,6 +84,17 @@ defmodule Minga.Language.Filetype.Registry do
     end)
   end
 
+  @doc "Returns the extension and filename overrides in one read, for batch detection."
+  @spec path_overrides() :: %{
+          extensions: %{String.t() => Filetype.filetype()},
+          filenames: %{String.t() => Filetype.filetype()}
+        }
+  def path_overrides do
+    Agent.get(__MODULE__, fn state ->
+      %{extensions: state.extensions, filenames: state.filenames}
+    end)
+  end
+
   @doc "Looks up a filetype by extension (without the dot, already downcased)."
   @spec lookup_extension(String.t()) :: Filetype.filetype() | nil
   def lookup_extension(ext) when is_binary(ext) do

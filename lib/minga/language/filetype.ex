@@ -31,14 +31,50 @@ defmodule Minga.Language.Filetype do
   def detect(nil), do: :text
 
   def detect(file_path) when is_binary(file_path) do
-    basename = Path.basename(file_path)
+    file_path
+    |> Path.basename()
+    |> detect_basename(&lookup_registry_filename/1, &lookup_registry_extension/1)
+  end
 
-    with :miss <- lookup_registry_filename(basename),
+  @doc """
+  Detects the languages of many paths, in input order, with the same priority as `detect/1`.
+
+  Reads the runtime overrides from `Minga.Language.Filetype.Registry` once for the whole list instead of once per path, so a caller that labels thousands of paths for one frame does not make thousands of registry calls.
+  """
+  @spec detect_all([String.t() | nil]) :: [filetype()]
+  def detect_all(paths) when is_list(paths) do
+    %{filenames: filenames, extensions: extensions} =
+      Minga.Language.Filetype.Registry.path_overrides()
+
+    filename_override = &Map.get(filenames, &1, :miss)
+    extension_override = &lookup_extension_in(extensions, &1)
+
+    Enum.map(paths, fn
+      nil -> :text
+      path -> path |> Path.basename() |> detect_basename(filename_override, extension_override)
+    end)
+  end
+
+  @spec detect_basename(
+          String.t(),
+          (String.t() -> filetype() | :miss),
+          (String.t() -> filetype() | :miss)
+        ) :: filetype()
+  defp detect_basename(basename, filename_override, extension_override) do
+    with :miss <- filename_override.(basename),
          :miss <- lookup_lang_registry_filename(basename),
-         :miss <- lookup_registry_extension(basename),
+         :miss <- extension_override.(basename),
          :miss <- lookup_lang_registry_extension(basename),
          :miss <- detect_env_pattern(basename) do
       :text
+    end
+  end
+
+  @spec lookup_extension_in(%{String.t() => filetype()}, String.t()) :: filetype() | :miss
+  defp lookup_extension_in(extensions, basename) do
+    case Path.extname(basename) do
+      "" -> :miss
+      "." <> ext -> Map.get(extensions, String.downcase(ext), :miss)
     end
   end
 
