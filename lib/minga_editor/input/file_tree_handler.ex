@@ -102,16 +102,7 @@ defmodule MingaEditor.Input.FileTreeHandler do
   end
 
   @spec focus_file_tree_for_mouse(EditorState.t(), atom()) :: EditorState.t()
-  defp focus_file_tree_for_mouse(state, :left) do
-    file_tree = FileTreeState.focus(state.workspace.file_tree)
-
-    workspace = MingaEditor.Session.State.set_file_tree(state.workspace, file_tree)
-
-    %{
-      state
-      | workspace: MingaEditor.Session.State.set_keymap_scope(workspace, :file_tree)
-    }
-  end
+  defp focus_file_tree_for_mouse(state, :left), do: Commands.FileTree.focus_tree(state)
 
   defp focus_file_tree_for_mouse(state, _button), do: state
 

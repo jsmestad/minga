@@ -295,6 +295,34 @@ defmodule MingaEditor.FocusOwnerTest do
     assert %{responder: :editor_view, surface: :agent} = FocusOwner.derive(composer)
   end
 
+  @tag :tmp_dir
+  test "focusing the file tree from an Insert composer hands every key to the tree", %{
+    tmp_dir: root
+  } do
+    ctx = start_editor("composer", project_root: root)
+    agent = activate_scope(editor_state(ctx), :agent, nil)
+
+    composer =
+      agent
+      |> MingaEditor.Shell.Traditional.Workflow.install_agent_ui(
+        agent.workspace.agent_ui
+        |> MingaEditor.Agent.UIState.toggle()
+        |> MingaEditor.Agent.PromptBuffer.set_input_focused(true)
+      )
+      |> then(&%{&1 | workspace: SessionState.transition_mode(&1.workspace, :insert)})
+
+    assert composer.workspace.agent_ui.panel.visible
+
+    # A composer focus that survives into the tree scope must not claim keys.
+    stale = activate_scope(composer, :file_tree, root)
+    assert_owner_agrees(stale, :editor_view, :file_tree, ?j, :stale_composer_focus)
+
+    focused = MingaEditor.Commands.FileTree.focus_tree(stale)
+    refute focused.workspace.agent_ui.panel.input_focused
+    assert focused.workspace.editing.mode == :normal
+    assert_owner_agrees(focused, :editor_view, :file_tree, ?j, :file_tree_focus)
+  end
+
   defp activate_modal(ctx, :none, _path), do: editor_state(ctx)
   defp activate_modal(ctx, :prompt, _path), do: PromptUI.open(editor_state(ctx), WorkspaceRename)
   defp activate_modal(ctx, :picker, _path), do: PickerUI.open(editor_state(ctx), CommandSource)
