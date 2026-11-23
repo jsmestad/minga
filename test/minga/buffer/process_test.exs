@@ -1,5 +1,6 @@
 defmodule Minga.Buffer.ProcessTest do
   use ExUnit.Case, async: true
+  use ExUnitProperties
 
   alias Minga.Buffer
   alias Minga.Buffer.Document
@@ -783,7 +784,7 @@ defmodule Minga.Buffer.ProcessTest do
 
       doc = text |> Document.new() |> Document.move_to({5, 3})
 
-      {expected, _patches} =
+      {:ok, expected, _patches} =
         Minga.Test.SequentialRangeReplace.replace_ranges_with_patches(doc, edits)
 
       %{text: text, edits: edits, expected: expected}
@@ -816,6 +817,80 @@ defmodule Minga.Buffer.ProcessTest do
 
       assert :ok = BufferProcess.apply_edits(pid, edits)
       assert :reset_required = BufferProcess.consume_edit_deltas(pid, :lsp)
+    end
+  end
+
+  describe "apply_edits/3 rejection and exact undo" do
+    test "rejects overlapping edits that split a code point and changes nothing" do
+      pid = start_supervised!({BufferProcess, content: "ab\ncd"})
+      BufferProcess.move_to(pid, {1, 1})
+      version = BufferProcess.version(pid)
+
+      # The second edit inserts "字"; the first then ends its span inside it.
+      edits = [{{0, 0}, {0, 2}, ""}, {{0, 1}, {0, 1}, "字"}]
+
+      assert BufferProcess.apply_edits(pid, edits) == {:error, {:edit_failed, 0, :invalid_utf8}}
+      assert BufferProcess.content(pid) == "ab\ncd"
+      assert BufferProcess.cursor(pid) == {1, 1}
+      assert BufferProcess.version(pid) == version
+      refute BufferProcess.dirty?(pid)
+
+      # No history entry was recorded, so undo has nothing to do.
+      assert BufferProcess.undo(pid) == :ok
+      assert BufferProcess.content(pid) == "ab\ncd"
+    end
+
+    test "a column past the line end deletes and inserts at the line end, and undo is exact" do
+      pid = start_supervised!({BufferProcess, content: "ab\ncd"})
+      BufferProcess.move_to(pid, {1, 1})
+
+      assert :ok = BufferProcess.apply_edits(pid, [{{0, 5}, {0, 5}, "Z"}])
+      assert BufferProcess.content(pid) == "abZcd"
+
+      assert BufferProcess.undo(pid) == :ok
+      assert BufferProcess.content(pid) == "ab\ncd"
+      assert BufferProcess.cursor(pid) == {1, 1}
+
+      assert BufferProcess.redo(pid) == :ok
+      assert BufferProcess.content(pid) == "abZcd"
+    end
+
+    property "apply, undo, and redo round-trip through the buffer, or the batch changes nothing" do
+      fragments = ["a", "é", "e\u0301", "字", "😀", "\n", "\r\n", "ᄀ", "ᅡ"]
+
+      check all(
+              text <- map(list_of(member_of(fragments), max_length: 12), &Enum.join/1),
+              edits <-
+                list_of(
+                  tuple(
+                    {tuple({integer(0..3), integer(0..14)}),
+                     tuple({integer(0..3), integer(0..14)}),
+                     one_of([constant(""), member_of(fragments)])}
+                  ),
+                  min_length: 1,
+                  max_length: 5
+                ),
+              max_runs: 200
+            ) do
+        {:ok, pid} = BufferProcess.start_link(content: text)
+        version = BufferProcess.version(pid)
+
+        case BufferProcess.apply_edits(pid, edits) do
+          :ok ->
+            edited = BufferProcess.content(pid)
+            assert BufferProcess.undo(pid) == :ok
+            assert BufferProcess.content(pid) == text
+            assert BufferProcess.cursor(pid) == {0, 0}
+            assert BufferProcess.redo(pid) == :ok
+            assert BufferProcess.content(pid) == edited
+
+          {:error, {:edit_failed, _index, :invalid_utf8}} ->
+            assert BufferProcess.content(pid) == text
+            assert BufferProcess.version(pid) == version
+        end
+
+        GenServer.stop(pid)
+      end
     end
   end
 

@@ -8,6 +8,33 @@ defmodule Minga.Buffer.UndoPatchTest do
 
   defp doc(text), do: Document.new(text)
 
+  defp apply!(patch, document) do
+    {:ok, applied} = UndoPatch.apply(patch, document)
+    applied
+  end
+
+  describe "apply/2" do
+    test "refuses a patch whose replaced bytes the document does not hold" do
+      # The patch says "Z" sits at byte 5, but byte 5 of "abZ\ncd" is "d".
+      patch = UndoPatch.replacement(5, "", "Z", {0, 0})
+
+      assert UndoPatch.apply(patch, doc("abZ\ncd")) == {:error, :patch_mismatch}
+    end
+
+    test "refuses a patch whose range runs past the document" do
+      patch = UndoPatch.replacement(2, "", "xyz", {0, 0})
+
+      assert UndoPatch.apply(patch, doc("abc")) == {:error, :patch_mismatch}
+    end
+
+    test "refuses a patch whose result would not be valid UTF-8" do
+      # Replacing the "é" lead byte with an ASCII byte leaves a lone continuation byte.
+      patch = UndoPatch.replacement(0, "e", <<0xC3>>, {0, 0})
+
+      assert UndoPatch.apply(patch, doc("é")) == {:error, :invalid_utf8}
+    end
+  end
+
   describe "from_delta/2" do
     test "captures insertion patches" do
       old_doc = doc("hello")
@@ -18,7 +45,7 @@ defmodule Minga.Buffer.UndoPatchTest do
       assert patch.start_byte == 0
       assert patch.old_text == ""
       assert patch.new_text == "X"
-      assert UndoPatch.apply(patch, new_doc) |> Document.content() == "hello"
+      assert apply!(patch, new_doc) |> Document.content() == "hello"
     end
 
     test "captures deletion patches" do
@@ -29,7 +56,7 @@ defmodule Minga.Buffer.UndoPatchTest do
 
       assert patch.old_text == "é"
       assert patch.new_text == ""
-      assert UndoPatch.apply(patch, new_doc) |> Document.content() == "héllo"
+      assert apply!(patch, new_doc) |> Document.content() == "héllo"
     end
 
     test "captures replacement patches" do
@@ -40,7 +67,7 @@ defmodule Minga.Buffer.UndoPatchTest do
 
       assert patch.old_text == "two"
       assert patch.new_text == "TWO"
-      assert UndoPatch.apply(patch, new_doc) |> Document.content() == "one two three"
+      assert apply!(patch, new_doc) |> Document.content() == "one two three"
     end
 
     test "captures deleted text across the cursor gap" do
@@ -51,7 +78,7 @@ defmodule Minga.Buffer.UndoPatchTest do
 
       assert patch.old_text == "c d"
       assert patch.new_text == "X"
-      assert UndoPatch.apply(patch, new_doc) |> Document.content() == "abc def"
+      assert apply!(patch, new_doc) |> Document.content() == "abc def"
     end
 
     test "owns deleted slices instead of retaining the original large document binary" do
@@ -75,8 +102,8 @@ defmodule Minga.Buffer.UndoPatchTest do
       patch = UndoPatch.from_delta(delta, old_doc)
       inverse = UndoPatch.invert(patch, new_doc)
 
-      restored = UndoPatch.apply(patch, new_doc)
-      redone = UndoPatch.apply(inverse, restored)
+      restored = apply!(patch, new_doc)
+      redone = apply!(inverse, restored)
 
       assert Document.content(redone) == "Xhello"
       assert Document.cursor(redone) == Document.cursor(new_doc)
@@ -99,7 +126,7 @@ defmodule Minga.Buffer.UndoPatchTest do
       assert patch.new_text == <<0xA8>>
       refute String.valid?(patch.old_text)
       refute String.valid?(patch.new_text)
-      assert Document.content(UndoPatch.apply(patch, doc("è"))) == "é"
+      assert Document.content(apply!(patch, doc("è"))) == "é"
     end
 
     test "large document patch size stays proportional to the changed slice" do
@@ -126,7 +153,7 @@ defmodule Minga.Buffer.UndoPatchTest do
       assert byte_size(patch.new_text) == 1
       refute String.valid?(patch.old_text)
       refute String.valid?(patch.new_text)
-      assert Document.content(UndoPatch.apply(patch, new_doc)) == "αβγδ"
+      assert Document.content(apply!(patch, new_doc)) == "αβγδ"
     end
 
     test "empty and identical documents produce empty patches at the document end" do
@@ -179,8 +206,8 @@ defmodule Minga.Buffer.UndoPatchTest do
 
         assert {patch.start_byte, patch.old_text, patch.new_text} == {6, "second", "SECOND!"}
         assert patch.cursor == old_cursor
-        assert Document.content(UndoPatch.apply(patch, new_doc)) == old_text
-        assert Document.cursor(UndoPatch.apply(patch, new_doc)) == old_cursor
+        assert Document.content(apply!(patch, new_doc)) == old_text
+        assert Document.cursor(apply!(patch, new_doc)) == old_cursor
       end
     end
 
@@ -242,11 +269,11 @@ defmodule Minga.Buffer.UndoPatchTest do
     assert patch.new_text == middle(new_text, prefix, suffix)
     assert patch.cursor == Document.cursor(old_doc)
 
-    undone = UndoPatch.apply(patch, new_doc)
+    undone = apply!(patch, new_doc)
     assert Document.content(undone) == old_text
     assert Document.cursor(undone) == Document.cursor(old_doc)
 
-    redone = UndoPatch.apply(UndoPatch.invert(patch, new_doc), undone)
+    redone = apply!(UndoPatch.invert(patch, new_doc), undone)
     assert Document.content(redone) == new_text
     assert Document.cursor(redone) == Document.cursor(new_doc)
   end

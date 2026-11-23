@@ -227,7 +227,14 @@ defmodule Minga.Buffer.Process do
   entry is pushed and the version bumps once. Edits should be sorted in
   reverse document order (last position first) so earlier offsets remain
   valid as later text is replaced. If edits are not pre-sorted, this
-  function sorts them automatically.
+  function sorts them automatically. Each edit follows
+  `Minga.Buffer.Operation.replace_range/4`: a column past its line's end
+  means the line end.
+
+  Returns `{:error, {:edit_failed, index, :invalid_utf8}}`, and changes
+  nothing, when the buffer is not valid UTF-8 or the edit at `index` in
+  `edits` would leave it invalid, for example overlapping edits that split
+  a code point.
 
   Used by AI/LSP batch operations to avoid N round-trips and N undo entries.
 
@@ -235,7 +242,7 @@ defmodule Minga.Buffer.Process do
   are typically LSP code actions or agent tool calls, not interactive typing.
   """
   @spec apply_edits(GenServer.server(), [text_edit()], EditSource.t()) ::
-          :ok | {:error, :read_only}
+          :ok | {:error, :read_only | Operation.batch_error()}
   def apply_edits(server, edits, source \\ EditSource.lsp(:unknown)) when is_list(edits) do
     GenServer.call(server, {:apply_edits, edits, source})
   end
@@ -1064,20 +1071,21 @@ defmodule Minga.Buffer.Process do
     GenServer.call(server, {:clear_line, line})
   end
 
-  @doc "Undoes the last mutation, restoring the previous buffer state."
-  @spec undo(GenServer.server()) :: :ok
+  @doc "Undoes the last mutation, restoring the previous buffer state. Returns an error, with content and history unchanged, when the history entry no longer applies."
+  @spec undo(GenServer.server()) :: :ok | {:error, UndoPatch.apply_error()}
   def undo(server) do
     GenServer.call(server, :undo)
   end
 
-  @doc "Redoes the last undone mutation."
-  @spec redo(GenServer.server()) :: :ok
+  @doc "Redoes the last undone mutation. Returns an error, with content and history unchanged, when the history entry no longer applies."
+  @spec redo(GenServer.server()) :: :ok | {:error, UndoPatch.apply_error()}
   def redo(server) do
     GenServer.call(server, :redo)
   end
 
   @doc "Undoes all consecutive agent-sourced entries from the top of the undo stack."
-  @spec undo_agent_session(GenServer.server()) :: {:ok, non_neg_integer()} | :empty
+  @spec undo_agent_session(GenServer.server()) ::
+          {:ok, non_neg_integer()} | :empty | {:error, UndoPatch.apply_error()}
   def undo_agent_session(server) do
     GenServer.call(server, :undo_agent_session)
   end
@@ -1438,14 +1446,19 @@ defmodule Minga.Buffer.Process do
   end
 
   def handle_call({:apply_edits, edits, source}, _from, state) do
-    {doc, patches} = Operation.replace_ranges_with_patches(state.document, edits)
-    undo_source = EditSource.to_undo_source(source)
+    case Operation.replace_ranges_with_patches(state.document, edits) do
+      {:ok, doc, patches} ->
+        undo_source = EditSource.to_undo_source(source)
 
-    # Batch edits shift offsets between replacements, so consumers need a full content sync.
-    state =
-      apply_operation(state, {:batch, doc, patches}, source, {:batch, undo_source, :clear})
+        # Batch edits shift offsets between replacements, so consumers need a full content sync.
+        state =
+          apply_operation(state, {:batch, doc, patches}, source, {:batch, undo_source, :clear})
 
-    {:reply, :ok, state}
+        {:reply, :ok, state}
+
+      {:error, _reason} = error ->
+        {:reply, error, state}
+    end
   end
 
   def handle_call(
@@ -2334,6 +2347,10 @@ defmodule Minga.Buffer.Process do
       :empty ->
         {:reply, :ok, state}
 
+      {:error, reason} = error ->
+        log_history_failure(:undo, reason)
+        {:reply, error, state}
+
       {:ok, restore, undo_history} ->
         event_source = EditSource.from_undo_source(restore.source)
 
@@ -2355,6 +2372,10 @@ defmodule Minga.Buffer.Process do
     case UndoHistory.redo(state.undo_history, BufState.version(state), state.document) do
       :empty ->
         {:reply, :ok, state}
+
+      {:error, reason} = error ->
+        log_history_failure(:redo, reason)
+        {:reply, error, state}
 
       {:ok, restore, undo_history} ->
         event_source = EditSource.from_undo_source(restore.source)
@@ -2381,6 +2402,10 @@ defmodule Minga.Buffer.Process do
          ) do
       :empty ->
         {:reply, :empty, state}
+
+      {:error, reason} = error ->
+        log_history_failure(:undo_agent_session, reason)
+        {:reply, error, state}
 
       {:ok, restore, undo_history, count} ->
         event_source = EditSource.from_undo_source(:agent)
@@ -3329,6 +3354,14 @@ defmodule Minga.Buffer.Process do
   defp now_ms, do: System.monotonic_time(:millisecond)
 
   # Logs undo/redo source for non-user edits (diagnostic, gated by :log_level_editor).
+  @spec log_history_failure(:undo | :redo | :undo_agent_session, UndoPatch.apply_error()) :: :ok
+  defp log_history_failure(operation, reason) do
+    Minga.Log.warning(
+      :editor,
+      "Buffer #{operation} refused: its patch does not apply (#{reason}); content and history are unchanged"
+    )
+  end
+
   @spec log_undo_source(:undo | :redo, BufState.edit_source()) :: :ok
   defp log_undo_source(_action, :user), do: :ok
 

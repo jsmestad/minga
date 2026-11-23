@@ -32,6 +32,13 @@ defmodule Minga.Buffer.Operation do
   @typedoc "A range replacement edit using Buffer's characterwise inclusive range semantics."
   @type range_edit :: {Document.position(), Document.position(), String.t()}
 
+  @typedoc """
+  Why a batch of range replacements was rejected, naming the edit by its index in the caller's list.
+
+  `:invalid_utf8` means applying that edit would leave the document as invalid UTF-8.
+  """
+  @type batch_error :: {:edit_failed, non_neg_integer(), :invalid_utf8}
+
   @doc "Inserts text at the current cursor and returns the updated document plus insertion delta."
   @spec insert_at_cursor(Document.t(), String.t()) :: {:edited, Document.t(), EditDelta.t()}
   def insert_at_cursor(%Document{} = doc, text) when is_binary(text) do
@@ -43,22 +50,38 @@ defmodule Minga.Buffer.Operation do
     {:edited, new_doc, delta}
   end
 
-  @doc "Replaces a characterwise range and returns the updated document plus replacement delta."
+  @doc """
+  Replaces a characterwise inclusive range and returns the updated document plus replacement delta.
+
+  Positions are clamped to existing text first: a column past its line's end means the line end, and a line past the final line means the final line. The replacement is inserted where the deleted span started, which is the place the delta records, and the cursor lands after it.
+  """
   @spec replace_range(Document.t(), Document.position(), Document.position(), String.t()) ::
           result()
   def replace_range(%Document{} = doc, from_pos, to_pos, replacement)
       when is_binary(replacement) do
-    replace_selection(doc, Selection.characterwise(doc, from_pos, to_pos), replacement)
+    {_line_starts, text} = snapshot = Lines.snapshot(doc)
+    selection = Selection.clamped_characterwise_in(snapshot, from_pos, to_pos)
+    replace_selection(doc, text, selection, replacement)
   end
 
-  @spec replace_selection(Document.t(), Selection.t(), String.t()) :: result()
-  defp replace_selection(doc, selection, replacement) when is_binary(replacement) do
-    %Span{start: start_byte, stop: old_end_byte} = selection.span
+  # `text` is the content of `doc`. The selection cursor is the position of the span start, so the
+  # replacement goes exactly where the delta records it, and the cursor lands exactly after it,
+  # as `Document.insert_text/2` leaves it. No grapheme segmentation runs, so text that is not valid
+  # UTF-8 cannot make the edit raise.
+  @spec replace_selection(Document.t(), String.t(), Selection.t(), String.t()) :: result()
+  defp replace_selection(doc, text, %Selection{span: span, cursor: caret}, replacement)
+       when is_binary(replacement) do
+    %Span{start: start_byte, stop: old_end_byte} = span
+    insert_end = Document.position_after_insert(caret, replacement)
 
     new_doc =
-      doc
-      |> Selection.delete(selection)
-      |> Document.insert_text(replacement)
+      [
+        binary_part(text, 0, start_byte),
+        replacement,
+        binary_part(text, old_end_byte, byte_size(text) - old_end_byte)
+      ]
+      |> IO.iodata_to_binary()
+      |> Document.new_at(insert_end)
 
     delta =
       EditDelta.replacement(
@@ -67,7 +90,7 @@ defmodule Minga.Buffer.Operation do
         Position.from_point(doc, start_byte),
         Position.from_point(doc, old_end_byte),
         replacement,
-        Document.cursor(new_doc)
+        insert_end
       )
 
     {:edited, new_doc, delta}
@@ -337,91 +360,108 @@ defmodule Minga.Buffer.Operation do
     {:shifted, new_doc, deltas, UndoPatch.from_delta(span, doc)}
   end
 
-  @doc "Applies multiple range replacements from the end of the document toward the start."
-  @spec replace_ranges(Document.t(), [range_edit()]) :: Document.t()
-  def replace_ranges(%Document{} = doc, edits) when is_list(edits) do
-    {new_doc, _patches} = replace_ranges_with_patches(doc, edits)
-    new_doc
-  end
-
   @doc """
   Applies multiple range replacements and returns undo patches in newest-first recording order.
 
-  Edits apply one at a time from the highest start position to the lowest, and each edit resolves its positions against the document the previous edit produced. `Minga.Buffer.RangeBatch` applies each run of separated edits in one pass with that exact result; any other edit applies on its own.
+  Edits apply one at a time from the highest start position to the lowest, and each edit resolves its positions against the document the previous edit produced, with `replace_range/4` semantics. `Minga.Buffer.RangeBatch` applies each run of separated edits in one pass with that exact result; any other edit applies on its own.
+
+  The input document and every document the batch produces must be valid UTF-8, because undo and redo replay the patches through those documents. Otherwise nothing is applied and the error names the first edit, by its index in `edits`, whose application would leave invalid UTF-8. When the input is already invalid, that is the first edit in application order.
   """
   @spec replace_ranges_with_patches(Document.t(), [range_edit()]) ::
-          {Document.t(), [UndoPatch.t()]}
-  def replace_ranges_with_patches(%Document{} = doc, []), do: {doc, []}
+          {:ok, Document.t(), [UndoPatch.t()]} | {:error, batch_error()}
+  def replace_ranges_with_patches(%Document{} = doc, []), do: {:ok, doc, []}
 
   def replace_ranges_with_patches(%Document{} = doc, edits) when is_list(edits) do
-    edits
-    |> Enum.sort(fn {from_a, _, _}, {from_b, _, _} -> from_a >= from_b end)
-    |> replace_ordered(doc, Lines.snapshot(doc), :unchecked, [])
-  end
+    {_line_starts, text} = snapshot = Lines.snapshot(doc)
 
-  # Runs need valid UTF-8, because they skip grapheme scans that raise on invalid text. The
-  # check waits until at least two edits remain, since one edit gains nothing from a run. Once
-  # an edit may have produced invalid text, the rest of the batch applies one edit at a time.
-  @typep text_check :: :unchecked | :valid_utf8 | :unverified
+    ordered =
+      edits
+      |> Enum.with_index()
+      |> Enum.sort(fn {{from_a, _, _}, _}, {{from_b, _, _}, _} -> from_a >= from_b end)
 
-  @spec replace_ordered(
-          [range_edit(), ...],
-          Document.t(),
-          Lines.snapshot(),
-          text_check(),
-          [UndoPatch.t()]
-        ) :: {Document.t(), [UndoPatch.t()]}
-  defp replace_ordered([_edit] = edits, doc, snapshot, check, patches),
-    do: replace_next(edits, doc, snapshot, check, patches)
-
-  defp replace_ordered(edits, doc, {_line_starts, text} = snapshot, :unchecked, patches) do
-    check = if Unicode.valid_utf8?(text), do: :valid_utf8, else: :unverified
-    replace_ordered(edits, doc, snapshot, check, patches)
-  end
-
-  defp replace_ordered(edits, doc, snapshot, :valid_utf8, patches) do
-    case RangeBatch.apply_run(doc, snapshot, edits) do
-      {:applied, new_doc, run_patches, remaining} ->
-        continue_ordered(remaining, new_doc, :valid_utf8, run_patches ++ patches)
-
-      :sequential ->
-        replace_next(edits, doc, snapshot, :valid_utf8, patches)
+    if Unicode.valid_utf8?(text) do
+      replace_ordered(ordered, doc, snapshot, [])
+    else
+      [{_edit, index} | _rest] = ordered
+      {:error, {:edit_failed, index, :invalid_utf8}}
     end
   end
 
-  defp replace_ordered(edits, doc, snapshot, :unverified, patches),
-    do: replace_next(edits, doc, snapshot, :unverified, patches)
+  # One edit gains nothing from a run, so it applies on its own.
+  @spec replace_ordered(
+          [RangeBatch.indexed_edit(), ...],
+          Document.t(),
+          Lines.snapshot(),
+          [UndoPatch.t()]
+        ) :: {:ok, Document.t(), [UndoPatch.t()]} | {:error, batch_error()}
+  defp replace_ordered([_edit] = edits, doc, snapshot, patches),
+    do: replace_next(edits, doc, snapshot, patches)
+
+  defp replace_ordered(edits, doc, snapshot, patches) do
+    case RangeBatch.apply_run(doc, snapshot, edits) do
+      {:applied, new_doc, run_patches, remaining} ->
+        continue_ordered(remaining, new_doc, run_patches ++ patches)
+
+      :sequential ->
+        replace_next(edits, doc, snapshot, patches)
+    end
+  end
 
   # Reuses the run's snapshot, so an edit applied on its own costs what it did before.
   @spec replace_next(
-          [range_edit(), ...],
+          [RangeBatch.indexed_edit(), ...],
           Document.t(),
           Lines.snapshot(),
-          text_check(),
           [UndoPatch.t()]
-        ) :: {Document.t(), [UndoPatch.t()]}
-  defp replace_next([{from_pos, to_pos, replacement} | rest], doc, snapshot, check, patches) do
+        ) :: {:ok, Document.t(), [UndoPatch.t()]} | {:error, batch_error()}
+  defp replace_next([{{from_pos, to_pos, replacement}, index} | rest], doc, snapshot, patches) do
     {_line_starts, text} = snapshot
-    selection = Selection.characterwise_in(snapshot, from_pos, to_pos)
-    {:edited, new_doc, delta} = replace_selection(doc, selection, replacement)
-    patches = [UndoPatch.from_delta(delta, doc) | patches]
+    selection = Selection.clamped_characterwise_in(snapshot, from_pos, to_pos)
 
-    continue_ordered(rest, new_doc, check_after(check, text, selection, replacement), patches)
+    if splice_keeps_valid_utf8?(text, selection.span, replacement) do
+      {:edited, new_doc, delta} = replace_selection(doc, text, selection, replacement)
+      continue_ordered(rest, new_doc, [UndoPatch.from_delta(delta, doc) | patches])
+    else
+      {:error, {:edit_failed, index, :invalid_utf8}}
+    end
   end
 
-  @spec check_after(text_check(), String.t(), Selection.t(), String.t()) :: text_check()
-  defp check_after(:valid_utf8, text, %Selection{span: span}, replacement) do
-    if RangeBatch.keeps_valid_utf8?(text, span, replacement), do: :valid_utf8, else: :unverified
+  @spec continue_ordered([RangeBatch.indexed_edit()], Document.t(), [UndoPatch.t()]) ::
+          {:ok, Document.t(), [UndoPatch.t()]} | {:error, batch_error()}
+  defp continue_ordered([], doc, patches), do: {:ok, doc, patches}
+
+  defp continue_ordered(edits, doc, patches),
+    do: replace_ordered(edits, doc, Lines.snapshot(doc), patches)
+
+  # `text` is valid UTF-8, so everything before the code point holding `start` and everything
+  # from the code point boundary at or after `stop` stays valid. The result is valid exactly when
+  # the bytes between those two boundaries, with the replacement spliced in, are valid.
+  @spec splice_keeps_valid_utf8?(String.t(), Span.t(), term()) :: boolean()
+  defp splice_keeps_valid_utf8?(text, %Span{start: start, stop: stop}, replacement)
+       when is_binary(replacement) do
+    lead = start - code_point_start(text, start)
+    trail = code_point_end(text, stop) - stop
+
+    Unicode.valid_utf8?(
+      binary_part(text, start - lead, lead) <> replacement <> binary_part(text, stop, trail)
+    )
   end
 
-  defp check_after(check, _text, _selection, _replacement), do: check
+  @spec code_point_start(String.t(), non_neg_integer()) :: non_neg_integer()
+  defp code_point_start(text, point) do
+    if continuation_byte?(text, point), do: code_point_start(text, point - 1), else: point
+  end
 
-  @spec continue_ordered([range_edit()], Document.t(), text_check(), [UndoPatch.t()]) ::
-          {Document.t(), [UndoPatch.t()]}
-  defp continue_ordered([], doc, _check, patches), do: {doc, patches}
+  @spec code_point_end(String.t(), non_neg_integer()) :: non_neg_integer()
+  defp code_point_end(text, point) do
+    if continuation_byte?(text, point), do: code_point_end(text, point + 1), else: point
+  end
 
-  defp continue_ordered(edits, doc, check, patches),
-    do: replace_ordered(edits, doc, Lines.snapshot(doc), check, patches)
+  @spec continuation_byte?(String.t(), non_neg_integer()) :: boolean()
+  defp continuation_byte?(text, point) when point > 0 and point < byte_size(text),
+    do: Bitwise.band(:binary.at(text, point), 0xC0) == 0x80
+
+  defp continuation_byte?(_text, _point), do: false
 
   @doc "Deletes the character before the cursor."
   @spec backspace(Document.t()) :: result()

@@ -397,6 +397,43 @@ defmodule Minga.Buffer.DocumentTest do
     end
   end
 
+  describe "splice_byte_range/5" do
+    test "replaces bytes and places the cursor" do
+      assert {:ok, buf} =
+               Document.splice_byte_range(Document.new("hello world"), 6, 5, "there", {0, 2})
+
+      assert Document.content(buf) == "hello there"
+      assert Document.cursor(buf) == {0, 2}
+    end
+
+    test "accepts fragments that split code points when the result is valid" do
+      assert {:ok, buf} = Document.splice_byte_range(Document.new("è"), 1, 1, <<0xA9>>, {0, 0})
+      assert Document.content(buf) == "é"
+    end
+
+    test "returns an error for a range beyond the content" do
+      assert Document.splice_byte_range(Document.new("hello"), 4, 2, "x", {0, 0}) ==
+               {:error, :invalid_range}
+    end
+
+    test "returns an error when the result is not valid UTF-8" do
+      assert Document.splice_byte_range(Document.new("é"), 1, 0, <<0xFF>>, {0, 0}) ==
+               {:error, :invalid_utf8}
+    end
+  end
+
+  describe "new_at/2" do
+    test "keeps the cursor exactly where it is placed, even inside a grapheme" do
+      # Column 1 sits between "e" and its combining mark; move_to/2 would snap it to 0.
+      buf = Document.new_at("e\u0301x\ny", {0, 1})
+
+      assert Document.cursor(buf) == {0, 1}
+      assert Document.cursor_offset(buf) == 1
+      assert Document.content(buf) == "e\u0301x\ny"
+      assert Document.line_count(buf) == 2
+    end
+  end
+
   # ── Round-trip integrity ──
 
   describe "content integrity" do

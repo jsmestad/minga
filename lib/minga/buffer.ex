@@ -347,7 +347,7 @@ defmodule Minga.Buffer do
 
   @doc "Apply a batch of edits atomically (for LSP workspace edits)."
   @spec apply_edits(t(), [text_edit()], Minga.Buffer.EditSource.t()) ::
-          :ok | {:error, :read_only}
+          :ok | {:error, :read_only | Minga.Buffer.Operation.batch_error()}
   defdelegate apply_edits(server, edits, source \\ Minga.Buffer.EditSource.lsp(:unknown)),
     to: BufferProcess
 
@@ -471,15 +471,16 @@ defmodule Minga.Buffer do
   # ── Undo/Redo ──────────────────────────────────────────────────────
 
   @doc "Undo the last edit."
-  @spec undo(t()) :: :ok | :empty
+  @spec undo(t()) :: :ok | {:error, Minga.Buffer.UndoPatch.apply_error()}
   defdelegate undo(server), to: BufferProcess
 
   @doc "Redo the last undone edit."
-  @spec redo(t()) :: :ok | :empty
+  @spec redo(t()) :: :ok | {:error, Minga.Buffer.UndoPatch.apply_error()}
   defdelegate redo(server), to: BufferProcess
 
   @doc "Undo all consecutive agent-sourced entries from the top of the undo stack."
-  @spec undo_agent_session(t()) :: {:ok, non_neg_integer()} | :empty
+  @spec undo_agent_session(t()) ::
+          {:ok, non_neg_integer()} | :empty | {:error, Minga.Buffer.UndoPatch.apply_error()}
   defdelegate undo_agent_session(server), to: BufferProcess
 
   @doc "Force the next edit to start a new undo group."

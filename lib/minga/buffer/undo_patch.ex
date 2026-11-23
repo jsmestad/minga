@@ -135,16 +135,39 @@ defmodule Minga.Buffer.UndoPatch do
     }
   end
 
-  @doc "Applies the patch to a document, returning the previous document state for undo or the next state for redo."
-  @spec apply(t(), Document.t()) :: Document.t()
+  @typedoc """
+  Why a patch does not apply to a document.
+
+  `:patch_mismatch` means the document does not hold the patch's `new_text` at its start byte, `:invalid_range` means the range is outside the content, and `:invalid_utf8` means the result would not be valid UTF-8.
+  """
+  @type apply_error :: :patch_mismatch | :invalid_range | :invalid_utf8
+
+  @doc """
+  Applies the patch to a document, returning the previous document state for undo or the next state for redo.
+
+  The document must hold the patch's replaced bytes at its start byte. A patch that does not fit returns an error instead of raising or restoring the wrong text, so a damaged history cannot crash or corrupt the buffer that replays it.
+  """
+  @spec apply(t(), Document.t()) :: {:ok, Document.t()} | {:error, apply_error()}
   def apply(%__MODULE__{} = patch, %Document{} = document) do
-    Document.replace_at_byte_range(
-      document,
-      patch.start_byte,
-      byte_size(patch.new_text),
-      patch.old_text,
-      patch.cursor
-    )
+    removed = byte_size(patch.new_text)
+
+    if fits?(document, patch.start_byte, patch.new_text) do
+      Document.splice_byte_range(
+        document,
+        patch.start_byte,
+        removed,
+        patch.old_text,
+        patch.cursor
+      )
+    else
+      {:error, :patch_mismatch}
+    end
+  end
+
+  @spec fits?(Document.t(), non_neg_integer(), byte_fragment()) :: boolean()
+  defp fits?(document, start_byte, expected) do
+    start_byte + byte_size(expected) <= Document.content_byte_size(document) and
+      Document.slice_byte_range(document, start_byte, byte_size(expected)) == expected
   end
 
   @spec own_binary(binary()) :: binary()

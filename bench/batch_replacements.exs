@@ -43,7 +43,11 @@ defmodule Minga.Bench.BatchReplacements do
 
   # ── Sequential control ──────────────────────────────────────────────────────
 
-  @doc "The pre-#3500 batch algorithm: one `replace_range/4` per edit, from the end."
+  @doc """
+  The pre-#3500 batch algorithm: one `replace_range/4` per edit, from the end.
+
+  It uses the checked-out commit's `replace_range/4`, so it follows that commit's range semantics. The bench workloads are valid UTF-8, so it needs no rejection check.
+  """
   @spec sequential(Document.t(), [Operation.range_edit()]) :: {Document.t(), [UndoPatch.t()]}
   def sequential(%Document{} = doc, edits) do
     edits
@@ -52,6 +56,16 @@ defmodule Minga.Bench.BatchReplacements do
       {:edited, new_doc, delta} = Operation.replace_range(acc_doc, from_pos, to_pos, replacement)
       {new_doc, [UndoPatch.from_delta(delta, acc_doc) | patches]}
     end)
+  end
+
+  # The production operation returns `{:ok, doc, patches}` since #3940 and `{doc, patches}` before
+  # it. Every workload is valid UTF-8, so a rejection is a bench failure.
+  defp production(doc, edits) do
+    case Operation.replace_ranges_with_patches(doc, edits) do
+      {:ok, new_doc, patches} -> {new_doc, patches}
+      {%Document{} = new_doc, patches} -> {new_doc, patches}
+      {:error, reason} -> raise "batch rejected: #{inspect(reason)}"
+    end
   end
 
   # ── Fixtures ────────────────────────────────────────────────────────────────
@@ -217,7 +231,7 @@ defmodule Minga.Bench.BatchReplacements do
     sample_until_budget(fn index ->
       runs = [
         {"sequential", fn -> sequential(doc, edits) end},
-        {"production", fn -> Operation.replace_ranges_with_patches(doc, edits) end}
+        {"production", fn -> production(doc, edits) end}
       ]
 
       ordered = if rem(index, 2) == 0, do: runs, else: Enum.reverse(runs)
@@ -255,7 +269,7 @@ defmodule Minga.Bench.BatchReplacements do
     # Stage mode proves the production operation equals the sequential control on every
     # workload, and the production operation is quick to compute on any commit.
     {expected_doc, _patches} =
-      Operation.replace_ranges_with_patches(Document.move_to(doc, {3, 2}), edits)
+      production(Document.move_to(doc, {3, 2}), edits)
 
     expected = Document.content(expected_doc)
     expected_cursor = Document.cursor(expected_doc)
