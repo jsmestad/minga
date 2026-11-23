@@ -1,68 +1,68 @@
 {
   "Agent transcript delta, streaming": {
-    "samples": 6077,
+    "samples": 5932,
     "shares": {
-      "allocation_and_arc": 0.09116340299489879,
-      "decoder_bodies": 0.1449728484449564,
+      "allocation_and_arc": 0.09204315576534053,
+      "decoder_bodies": 0.15087660148347942,
       "model_build": 0.0,
-      "resource_accounting": 0.20585815369425703,
-      "utf8_strings": 0.27365476386374854,
-      "wire_read_helpers": 0.2843508310021392
+      "resource_accounting": 0.19757248819959541,
+      "utf8_strings": 0.2591031692515172,
+      "wire_read_helpers": 0.3004045853000674
     }
   },
   "Agent transcript replace, 10,002 messages": {
-    "samples": 5733,
+    "samples": 5622,
     "shares": {
-      "allocation_and_arc": 0.19710448281876852,
-      "decoder_bodies": 0.10832025117739404,
+      "allocation_and_arc": 0.192102454642476,
+      "decoder_bodies": 0.10334400569192458,
       "model_build": 0.0,
-      "resource_accounting": 0.2508285365428223,
-      "utf8_strings": 0.0927960927960928,
-      "wire_read_helpers": 0.3509506366649224
+      "resource_accounting": 0.26360725720384204,
+      "utf8_strings": 0.08306652436855212,
+      "wire_read_helpers": 0.35787975809320527
     }
   },
   "Row delta, scroll": {
-    "samples": 6532,
+    "samples": 6665,
     "shares": {
-      "allocation_and_arc": 0.06751377832210655,
-      "decoder_bodies": 0.23285364360073485,
+      "allocation_and_arc": 0.06721680420105026,
+      "decoder_bodies": 0.2420105026256564,
       "model_build": 0.0,
-      "resource_accounting": 0.10303123086344151,
-      "utf8_strings": 0.1501837109614207,
-      "wire_read_helpers": 0.4464176362522964
+      "resource_accounting": 0.09767441860465116,
+      "utf8_strings": 0.14973743435858966,
+      "wire_read_helpers": 0.4433608402100525
     }
   },
   "Row delta, typing": {
-    "samples": 6451,
+    "samples": 6332,
     "shares": {
-      "allocation_and_arc": 0.07115175941714463,
-      "decoder_bodies": 0.21562548442102,
+      "allocation_and_arc": 0.08038534428300695,
+      "decoder_bodies": 0.2533164876816172,
       "model_build": 0.0,
-      "resource_accounting": 0.11812122151604403,
-      "utf8_strings": 0.1488141373430476,
-      "wire_read_helpers": 0.44628739730274375
+      "resource_accounting": 0.10391661402400505,
+      "utf8_strings": 0.13913455464308275,
+      "wire_read_helpers": 0.4232469993682881
     }
   },
   "Window content, 2,000-line keyframe": {
-    "samples": 4486,
+    "samples": 4902,
     "shares": {
-      "allocation_and_arc": 0.00780205082478823,
-      "decoder_bodies": 0.00780205082478823,
-      "model_build": 0.8765046812304949,
-      "resource_accounting": 0.024743646901471242,
-      "utf8_strings": 0.016049933125278644,
-      "wire_read_helpers": 0.06709763709317877
+      "allocation_and_arc": 0.1036311709506324,
+      "decoder_bodies": 0.40718074255405956,
+      "model_build": 0.33414932680538556,
+      "resource_accounting": 0.13402692778457773,
+      "utf8_strings": 0.0055079559363525096,
+      "wire_read_helpers": 0.015503875968992248
     }
   },
   "Window content, 50,000-line keyframe": {
-    "samples": 4470,
+    "samples": 4485,
     "shares": {
-      "allocation_and_arc": 0.0071588366890380315,
-      "decoder_bodies": 0.006935123042505592,
-      "model_build": 0.8644295302013423,
-      "resource_accounting": 0.028635346756152126,
-      "utf8_strings": 0.021252796420581657,
-      "wire_read_helpers": 0.07158836689038031
+      "allocation_and_arc": 0.10412486064659977,
+      "decoder_bodies": 0.40222965440356745,
+      "model_build": 0.33979933110367894,
+      "resource_accounting": 0.15183946488294314,
+      "utf8_strings": 0.0006688963210702341,
+      "wire_read_helpers": 0.0013377926421404682
     }
   }
 }
