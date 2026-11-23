@@ -217,6 +217,10 @@ defmodule Minga.Test.HeadlessPort do
   @doc "Returns the decoded Agent chat from the latest committed frame."
   @spec agent_chat(GenServer.server()) :: map() | nil
   def agent_chat(server), do: GenServer.call(server, :agent_chat)
+
+  @doc "Returns the decoded file tree (rows, selection, focus) from the latest committed frame."
+  @spec file_tree(GenServer.server()) :: map() | nil
+  def file_tree(server), do: GenServer.call(server, :file_tree)
   @doc "Returns just the text of a specific row."
   @spec get_row_text(GenServer.server(), non_neg_integer()) :: String.t()
   def get_row_text(server, row) do
@@ -376,6 +380,8 @@ defmodule Minga.Test.HeadlessPort do
   end
 
   def handle_call(:agent_chat, _from, state), do: {:reply, state.agent_chat, state}
+
+  def handle_call(:file_tree, _from, state), do: {:reply, state.file_tree, state}
 
   def handle_call({:get_row_text, row}, _from, state) do
     text =
@@ -1631,9 +1637,9 @@ defmodule Minga.Test.HeadlessPort do
 
   @spec decode_file_tree(binary()) :: map()
   defp decode_file_tree(
-         <<3::8, flags::8, _status::8, selected_len::16, selected::binary-size(selected_len),
-           root_len::16, root::binary-size(root_len), width::16, row_count::16, error_len::16,
-           error::binary-size(error_len), rest::binary>>
+         <<4::8, flags::8, _status::8, _generation::32, selected_len::16,
+           selected::binary-size(selected_len), root_len::16, root::binary-size(root_len),
+           width::16, row_count::16, error_len::16, error::binary-size(error_len), rest::binary>>
        ) do
     {rows, <<>>} = decode_file_tree_rows(rest, row_count, [])
 
@@ -1676,11 +1682,11 @@ defmodule Minga.Test.HeadlessPort do
   end
 
   defp apply_file_tree_selection(nil, payload),
-    do: decode_file_tree(<<3, 0, 0, payload::binary, 0::16, 0::16, 0::16, 0::16>>)
+    do: decode_file_tree(<<4, 0, 0, payload::binary, 0::16, 0::16, 0::16, 0::16>>)
 
   defp apply_file_tree_selection(
          file_tree,
-         <<flags::8, selected_len::16, selected::binary-size(selected_len)>>
+         <<flags::8, _generation::32, selected_len::16, selected::binary-size(selected_len)>>
        ),
        do: %{
          file_tree
