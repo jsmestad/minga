@@ -1479,6 +1479,69 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
                Minga.Test.AgentWorkflowDriver.chat_model(returned)
     end
 
+    test "a deferred Agent start ignores catalog progress and replaced starts until the load settles" do
+      state = source_workspace_state() |> with_catalog_scheduler() |> with_agent_ingest()
+      tabs = state.shell_runtime.state.tab_bar
+
+      {tabs, tab} =
+        MingaEditor.TabWorkflow.insert_agent(
+          tabs,
+          "Starting",
+          state.frontend.terminal_viewport,
+          nil
+        )
+
+      {tabs, workspace} = TabBar.add_workspace(tabs, "Starting")
+
+      pending =
+        state
+        |> install_tab_bar(TabBar.move_tab_to_workspace(tabs, tab.id, workspace.id))
+        |> MingaEditor.TabWorkflow.switch(tab.id)
+
+      pending =
+        MingaEditor.Shell.Traditional.Workflow.install_agent_ui(
+          pending,
+          MingaEditor.Agent.PromptBuffer.set_prompt_text(pending.workspace.agent_ui, "keep me")
+        )
+        |> CatalogStartup.defer({:start, workspace.id, false, false, nil})
+
+      assert_receive {:effect_result, scheduler, %Outcome{value: {:completed, :ready}} = outcome},
+                     20_000
+
+      assert :ok = EffectScheduler.claim(scheduler, outcome)
+      request = outcome.request
+
+      not_terminal = [
+        Outcome.running(request),
+        Outcome.queued(request, 1, 1),
+        Outcome.canceled(request, :superseded),
+        Outcome.stale(outcome, :superseded)
+      ]
+
+      still_starting =
+        Enum.reduce(not_terminal, pending, fn progress, acc ->
+          {next, ^progress} = CatalogStartup.apply(acc, progress)
+          next
+        end)
+
+      assert %{lifecycle: lifecycle, prompt: "keep me"} =
+               Minga.Test.AgentWorkflowDriver.chat_model(still_starting)
+
+      refute match?({:failed, _}, lifecycle)
+
+      {started, ^outcome} = CatalogStartup.apply(still_starting, outcome)
+      EffectScheduler.finalize(scheduler, outcome)
+      started = AgentSessionStart.settle(started)
+      session = Runtime.active_session(started.shell_runtime)
+      assert is_pid(session)
+      on_exit(fn -> MingaAgent.SessionManager.stop_session_by_pid(session) end)
+
+      assert %{lifecycle: started_lifecycle, prompt: "keep me"} =
+               Minga.Test.AgentWorkflowDriver.chat_model(started)
+
+      refute match?({:failed, _}, started_lifecycle)
+    end
+
     test "a pending file-to-Agent toggle keeps the file editable and can retry after failure" do
       state = with_catalog_scheduler(source_workspace_state())
       file = state.workspace.buffers.active
