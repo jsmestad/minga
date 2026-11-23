@@ -441,14 +441,25 @@ defmodule Minga.Buffer.Document do
           String.t()
         ) :: {non_neg_integer(), non_neg_integer(), pos_integer()}
   defp compute_cursor_after_insert(line, col, lc, text) do
-    newline_count = Lines.break_count(text)
+    {new_line, new_col} = position_after_insert({line, col}, text)
+    {new_line, new_col, lc + (new_line - line)}
+  end
 
-    case newline_count do
-      0 ->
-        {line, col + byte_size(text), lc}
+  @doc """
+  Returns where the cursor lands after `insert_text/2` inserts `text` at `position`.
 
-      _ ->
-        {line + newline_count, Lines.last_line_width(text), lc + newline_count}
+  ## Examples
+
+      iex> Minga.Buffer.Document.position_after_insert({2, 3}, "ab")
+      {2, 5}
+      iex> Minga.Buffer.Document.position_after_insert({2, 3}, "a\\nbc")
+      {3, 2}
+  """
+  @spec position_after_insert(position(), String.t()) :: position()
+  def position_after_insert({line, col}, text) when is_binary(text) do
+    case Lines.break_count(text) do
+      0 -> {line, col + byte_size(text)}
+      newline_count -> {line + newline_count, Lines.last_line_width(text)}
     end
   end
 

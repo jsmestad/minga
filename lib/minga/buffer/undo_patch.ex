@@ -27,15 +27,30 @@ defmodule Minga.Buffer.UndoPatch do
   @spec from_delta(EditDelta.t(), Document.t()) :: t()
   def from_delta(%EditDelta{} = delta, %Document{} = old_document) do
     old_text =
-      old_document
-      |> Document.slice_byte_range(delta.start_byte, delta.old_end_byte - delta.start_byte)
-      |> own_binary()
+      Document.slice_byte_range(
+        old_document,
+        delta.start_byte,
+        delta.old_end_byte - delta.start_byte
+      )
 
+    replacement(delta.start_byte, old_text, delta.inserted_text, Document.cursor(old_document))
+  end
+
+  @doc """
+  Builds a patch for replacing `old_text` at `start_byte` with `new_text`.
+
+  `cursor` is the position to restore when undo applies the patch, normally the cursor of the document before the edit. Both fragments are copied so the patch never keeps a larger document binary alive.
+  """
+  @spec replacement(non_neg_integer(), byte_fragment(), byte_fragment(), Document.position()) ::
+          t()
+  def replacement(start_byte, old_text, new_text, cursor)
+      when is_integer(start_byte) and start_byte >= 0 and is_binary(old_text) and
+             is_binary(new_text) do
     %__MODULE__{
-      start_byte: delta.start_byte,
-      old_text: old_text,
-      new_text: own_binary(delta.inserted_text),
-      cursor: Document.cursor(old_document)
+      start_byte: start_byte,
+      old_text: own_binary(old_text),
+      new_text: own_binary(new_text),
+      cursor: cursor
     }
   end
 
