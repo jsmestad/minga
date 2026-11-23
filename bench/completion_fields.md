@@ -11,7 +11,6 @@ MIX_ENV=test mix run bench/completion_fields.exs OUT_DIR            # 0, 100, 1,
 MIX_ENV=test mix run bench/completion_fields.exs OUT_DIR --quick    # 0 and 10,000 items
 elixir bench/completion_fields/compare.exs bench/completion_fields v1   # tables below, deferral
 elixir bench/completion_fields/compare.exs bench/completion_fields c3   # tables below, ASCII mapping
-elixir bench/completion_fields/compare.exs bench/completion_fields h1   # hash once (#3952)
 ```
 
 Each run writes `samples.csv` (gzipped here), `summary.json` and `identity.json` (commit, dirty `lib/` paths, a hash of the two completion sources, OTP, Elixir, schedulers, architecture). The bench uses only public functions present on every compared commit, so the same script runs on the baseline and on each candidate. To rerun a candidate, apply its patch on the baseline: `git apply bench/completion_fields/rejected-deferral.patch` or `git apply bench/completion_fields/rejected-ascii-mapping.patch` (the second also adds the contract tests).
@@ -214,29 +213,8 @@ These tests were written for this ticket, recorded on the baseline, and passed o
 
 Each check was mutated to confirm it fails. Mapping every label regardless of its filter text, or dropping the mapped ranges, fails at least four tests in the two files (the run stops at its failure limit). Showing the first item's documentation instead of the selected item's fails two contract tests; keeping snippet markers in text edits fails two; making resolve a no-op fails one; and not lowercasing ASCII capitals in candidate 2 fails two tests.
 
-## Follow-up: hash each item's wire id once (#3952, shipped)
-
-[#3952](https://github.com/jsmestad/minga/issues/3952) acts on the first finding below. `Item.from_lsp/2` and `Item.from_fields/2` now compute the wire id of the item's identity once, in the completion Task, and carry it on the item. Ranking, snapshots, selection and the popup model read the carried value, so the Editor process no longer hashes any identity when it installs or filters a list.
-
-Runs `h1`: baseline `754c6d315` (`main`), candidate `81a40c50f`, two pairs with alternating order, same machine and method as above. All four runs report the same result digest for every item count, so wire ids, ranking, filtering, selection, documentation and the accepted edit are unchanged.
-
-| Items | Stage | Pair A p50 ms, baseline → candidate | Pair B p50 ms, baseline → candidate | Reductions ratio (A / B) |
-|---:|---|---:|---:|---:|
-| 100 | install | 1.26 → 0.37 | 1.47 → 0.38 | 0.38 / 0.38 |
-| 1,000 | install | 12.65 → 5.44 | 19.82 → 4.30 | 0.38 / 0.37 |
-| 10,000 | install | 167 → 66 | 267 → 88 | 0.36 / 0.36 |
-| 100 | filter (per keystroke) | 0.56 → 0.17 | 0.67 → 0.17 | 0.53 / 0.53 |
-| 1,000 | filter (per keystroke) | 4.21 → 1.54 | 5.81 → 1.36 | 0.44 / 0.44 |
-| 10,000 | filter (per keystroke) | 43.3 → 11.3 | 65.9 → 14.2 | 0.38 / 0.38 |
-| 10,000 | parse (completion Task) | 299 → 379 | 468 → 553 | 1.12 / 1.11 |
-
-- **Editor process:** installation does 36% to 38% of the baseline's work at every size, and each keystroke's filter 38% to 53%. Visible-popup and selection-move work also fall, by 30% to 39%. Accept is unchanged.
-- **Completion Task:** parsing does 10% to 15% more work. This is the one hash per item that moved off the Editor, which is the trade the ticket asks for: it runs once, in the background, instead of two or three times per item on every install and keystroke.
-- **Response to visible popup:** parse, transfer, install and visible together are about the same end to end at 1,000 and 10,000 items, within this host's run-to-run noise. The total barely moves because the work moved; what changed is that it now runs on the background Task, not on the Editor where it blocks keystrokes.
-- **Bench change:** the `accept` stage now places the edit as `CompletionHandling.apply_completion_edit/2` does (LSP UTF-16 columns, half-open byte range), because since [#3953](https://github.com/jsmestad/minga/pull/3953) `Completion.accept/1` on `main` returns the accepted item instead of a bare edit, and the old stage no longer ran. Its digest keeps the item's pid-free wire id. Both sides of `h1` ran this same script.
-
 ## Findings outside this ticket
 
-- **Identity hashing dominates installation.** Installing a 10,000-item batch scans the whole index three times (`Session.accept_batch/2` picks the default selection with a 1-item snapshot, then `Completion.new/3` and `Completion.filter/2` each take a 200-item snapshot), and every scored item computes `Item.wire_id/1`, a `term_to_binary` plus SHA-256 plus Base64 of its identity, twice (`Ranker.rank_key/2` and the snapshot entry). That is 58,828 hashes per install and about half of its call time in a profile of the baseline. Each keystroke repeats one full scan with two hashes per matching item. This is identity and ranking work, not an unused field, so it is out of scope here. [#3952](https://github.com/jsmestad/minga/issues/3952) computes each item's wire id once per batch, in the Task; see the follow-up section above.
+- **Identity hashing dominates installation.** Installing a 10,000-item batch scans the whole index three times (`Session.accept_batch/2` picks the default selection with a 1-item snapshot, then `Completion.new/3` and `Completion.filter/2` each take a 200-item snapshot), and every scored item computes `Item.wire_id/1`, a `term_to_binary` plus SHA-256 plus Base64 of its identity, twice (`Ranker.rank_key/2` and the snapshot entry). That is 58,828 hashes per install and about half of its call time in a profile of the baseline. Each keystroke repeats one full scan with two hashes per matching item. This is identity and ranking work, not an unused field, so it is out of scope here; computing each item's wire id once per batch, in the Task, is the candidate follow-up.
 - **Accepting a `textEdit` deletes one character too many.** `CompletionHandling.apply_completion_edit/2` passes the LSP range, whose end is exclusive, to `Minga.Buffer.apply_edit/6`, whose end is inclusive. Replacing `han` in `    han(1)` with `handle` produces `    handle1)`; at the end of a line it joins the next line. The LSP `character` offsets are also used as columns without UTF-16 conversion. [#2753](https://github.com/jsmestad/minga/issues/2753) owns coherent acceptance.
 - **`additionalTextEdits` are never applied.** Items keep them in `raw`, and `Minga.LSP.Client` advertises them as resolvable, but acceptance applies only the primary edit. This is also [#2753](https://github.com/jsmestad/minga/issues/2753).
