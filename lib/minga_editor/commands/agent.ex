@@ -236,8 +236,7 @@ defmodule MingaEditor.Commands.Agent do
     end
   end
 
-  @spec load_persisted_session(pid(), String.t()) ::
-          :ok | {:error, atom() | {:model_selection_correction_required, String.t()}}
+  @spec load_persisted_session(pid(), String.t()) :: :ok | {:error, atom()}
   defp load_persisted_session(session_pid, session_id) do
     # minga:allow-blocking — Editor, user-initiated resume of a persisted session; one-shot restore (#2450 inventory)
     case Session.load_session(session_pid, session_id) do
@@ -259,7 +258,7 @@ defmodule MingaEditor.Commands.Agent do
     :exit, _reason -> {:error, :session_unavailable}
   end
 
-  @spec safe_restore_error(term()) :: atom() | {:model_selection_correction_required, String.t()}
+  @spec safe_restore_error(term()) :: atom()
   defp safe_restore_error(:invalid_session_record), do: :invalid_saved_session
 
   defp safe_restore_error({:checkpoint_reconciliation_failed, _reason}),
@@ -285,19 +284,11 @@ defmodule MingaEditor.Commands.Agent do
 
   defp safe_restore_error({:save_current_failed, _reason}), do: :current_session_save_failed
 
-  defp safe_restore_error({:model_selection_correction_required, message})
-       when is_binary(message),
-       do: {:model_selection_correction_required, message}
-
   defp safe_restore_error({:invalid_continuation_boundaries, _reason}), do: :invalid_saved_session
   defp safe_restore_error({:invalid_continuation, _reason}), do: :invalid_saved_session
   defp safe_restore_error(_reason), do: :restore_failed
 
-  @spec restore_failure_message(atom() | {:model_selection_correction_required, String.t()}) ::
-          String.t()
-  defp restore_failure_message({:model_selection_correction_required, message}),
-    do: "#{message} The current conversation was not replaced."
-
+  @spec restore_failure_message(atom()) :: String.t()
   defp restore_failure_message(:invalid_saved_session),
     do: "The saved session record is invalid. The current conversation was not replaced."
 

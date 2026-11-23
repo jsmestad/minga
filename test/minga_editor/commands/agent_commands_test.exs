@@ -1019,20 +1019,6 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
       assert MingaEditor.Agent.View.Preview.diff_review(state.workspace.agent_ui.view.preview) ==
                nil
     end
-
-    test "preserves actionable model correction details after restore rejection" do
-      message = "Credential profile anthropic:env is no longer available."
-
-      {:ok, session} =
-        StubServer.start_link(
-          load_result: {:error, {:model_selection_correction_required, message}}
-        )
-
-      state = base_state(session: session) |> AgentCommands.open_session("saved-session")
-
-      assert state.shell_runtime.state.notice.message =~ message
-      assert state.shell_runtime.state.notice.message =~ "current conversation was not replaced"
-    end
   end
 
   describe "set_model/2" do

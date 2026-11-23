@@ -712,6 +712,132 @@ defmodule MingaAgent.SessionRecoveryTest do
     assert Session.editor_snapshot(session).credential_readiness == :configured
   end
 
+  defp ambiguous_sonnet_catalog do
+    models =
+      Enum.filter(LLMDB.models(), fn model ->
+        model.provider in [:anthropic, :helicone] and
+          "claude-sonnet-4" in ([model.id, model.provider_model_id] ++
+                                  List.wrap(Map.get(model, :aliases)))
+      end)
+
+    [models: models]
+  end
+
+  defp save_unresolvable_record(dir, id, model_name) do
+    assert :ok =
+             SessionStore.save(
+               %{
+                 id: id,
+                 timestamp: "2026-09-16T00:00:00Z",
+                 model_name: model_name,
+                 provider_name: "native",
+                 messages: [{:user, "saved question"}, {:assistant, "saved answer"}],
+                 continuation: MingaAgent.Session.Continuation.new(),
+                 usage: %TurnUsage{}
+               },
+               dir
+             )
+  end
+
+  # The editor starts a model-less session with an empty provider name.
+  defp start_model_less_session(dir) do
+    start_session(
+      [
+        provider: Native,
+        persist?: true,
+        session_store_dir: dir,
+        provider_opts: [
+          model: AgentConfig.unconfigured_model(),
+          provider: "",
+          model_resolver_opts: ambiguous_sonnet_catalog()
+        ]
+      ],
+      false
+    )
+  end
+
+  @tag :tmp_dir
+  test "replacing a fresh session without a model saves it validly before restore", %{
+    tmp_dir: dir
+  } do
+    {session, _checker} = start_model_less_session(dir)
+    fresh_id = Session.session_id(session)
+    save_unresolvable_record(dir, "saved-history", "claude-sonnet-4")
+
+    assert :ok = Session.load_session(session, "saved-history")
+    assert Session.session_id(session) == "saved-history"
+    assert {:ok, fresh} = SessionStore.load(fresh_id, dir)
+    assert fresh.model_name == AgentConfig.unconfigured_model()
+    assert fresh.provider_name == "unknown"
+  end
+
+  @tag :tmp_dir
+  test "a saved session whose route is ambiguous or lacks a credential opens as unavailable", %{
+    tmp_dir: dir
+  } do
+    for {model_name, expected} <- [
+          {"claude-sonnet-4", "ambiguous"},
+          {"anthropic:claude-sonnet-4-20250514", "Credential profile"}
+        ] do
+      {session, checker} = start_model_less_session(dir)
+      id = "saved-" <> Base.url_encode64(model_name, padding: false)
+      save_unresolvable_record(dir, id, model_name)
+
+      assert :ok = Session.load_session(session, id)
+      assert Session.session_id(session) == id
+      assert {:user, "saved question"} in Session.messages(session)
+      assert {:assistant, "saved answer"} in Session.messages(session)
+      assert Session.model_selection(session) == nil
+      assert Session.get_provider(session) == nil
+
+      snapshot = Session.editor_snapshot(session)
+      assert snapshot.credential_readiness == :unconfigured
+      assert {:resolution, reason} = snapshot.connection.problem
+      assert ModelResolver.message(reason) =~ expected
+      assert {:error, :credentials_not_configured} = Session.send_prompt(session, "next")
+
+      # The stored model intent stays on the session, so the remedy is to choose a route.
+      assert Session.metadata(session).model_name == model_name
+
+      Agent.update(checker, fn _configured? -> true end)
+
+      assert :ok =
+               Session.set_model(session, "anthropic:claude-sonnet-4-20250514", @startup_timeout)
+
+      assert Session.editor_snapshot(session).connection.problem == nil
+      assert Session.editor_snapshot(session).credential_readiness == :configured
+      assert {:user, "saved question"} in Session.messages(session)
+    end
+  end
+
+  @tag :tmp_dir
+  test "a configured session that opens an ambiguous saved route refuses prompts until a route is chosen",
+       %{tmp_dir: dir} do
+    {session, _checker} =
+      start_session(
+        [
+          provider: Native,
+          persist?: true,
+          session_store_dir: dir,
+          provider_opts: [
+            model: "anthropic:claude-sonnet-4-20250514",
+            model_resolver_opts: ambiguous_sonnet_catalog()
+          ]
+        ],
+        true
+      )
+
+    assert %MingaAgent.ModelSelection{} = Session.model_selection(session)
+    save_unresolvable_record(dir, "ambiguous-history", "claude-sonnet-4")
+
+    assert :ok = Session.load_session(session, "ambiguous-history")
+    assert {:assistant, "saved answer"} in Session.messages(session)
+    assert Session.model_selection(session) == nil
+    assert {:resolution, reason} = Session.editor_snapshot(session).connection.problem
+    assert ModelResolver.message(reason) =~ "ambiguous"
+    assert {:error, :credentials_not_configured} = Session.send_prompt(session, "next")
+  end
+
   test "legacy provider options select the exact model and profile when top-level intent is absent or unconfigured" do
     for top_level_intent <- [nil, AgentConfig.unconfigured_model()] do
       opts = [

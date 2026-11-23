@@ -723,7 +723,7 @@ defmodule MingaAgent.Session do
   @doc """
   Loads a previously saved session, replacing the current conversation history.
 
-  The current session is saved before replacement. The restored conversation history, branches, model, and metadata become the active session state.
+  The current session is saved before replacement. The restored conversation history, branches, model, and metadata become the active session state. A saved model route that cannot resolve now still opens its history: the session has no model selection and its connection snapshot reports the resolution problem until the user chooses a route.
 
   Pass the currently displayed session ID to reject a delayed activation after this process has changed conversations.
   """
@@ -825,6 +825,10 @@ defmodule MingaAgent.Session do
   def unsubscribe(session, pid) when is_pid(pid) do
     GenServer.call(session, {:unsubscribe, pid})
   end
+
+  # A saved route resolved for restore, or the resolution problem that keeps it unavailable.
+  @typep saved_route ::
+           {:resolved, ModelSelection.t() | nil} | {:unresolved, ModelResolver.resolution_error()}
 
   @typedoc "Internal rollback handle for a broker attach that may have created a monitor."
   @type broker_attachment :: :existing | {:created, pid(), reference()}
@@ -7999,10 +8003,13 @@ defmodule MingaAgent.Session do
   @spec session_provider_name(String.t() | nil, keyword()) :: String.t()
   defp session_provider_name(provider, _provider_opts) when is_binary(provider), do: provider
 
+  # The editor passes an empty provider while no model is selected. A saved record requires a
+  # provider name, so a blank one falls back to the same "unknown" name as an absent one.
   defp session_provider_name(_provider, provider_opts) do
-    provider_opts
-    |> Keyword.get(:provider, "unknown")
-    |> to_string()
+    case provider_opts |> Keyword.get(:provider) |> to_string() do
+      "" -> "unknown"
+      provider -> provider
+    end
   end
 
   @spec maybe_put_provider(keyword(), String.t() | nil) :: keyword()
@@ -9314,44 +9321,28 @@ defmodule MingaAgent.Session do
           GenServer.from()
         ) :: {:reply, term(), state()} | {:noreply, state()}
   defp begin_loaded_session_restore(state, data, _from) do
-    opts = model_resolution_opts(state)
+    route = resolve_saved_model_selection(state, data)
 
-    case resolve_saved_model_selection(state, data, opts) do
-      {:ok, %ModelSelection{} = selection} ->
-        data = Map.put(data, :model_selection, selection)
-        reply_to_loaded_session_restore(state, data)
-
-      {:ok, nil} ->
-        reply_to_loaded_session_restore(state, data)
-
-      {:error, reason} ->
-        {:reply, {:error, reason}, state}
-    end
-  end
-
-  @spec reply_to_loaded_session_restore(state(), SessionStore.session_data()) ::
-          {:reply, term(), state()}
-  defp reply_to_loaded_session_restore(state, data) do
-    case restore_loaded_session(state, data) do
+    case restore_loaded_session(state, data, route) do
       {:ok, restored} -> {:reply, :ok, restored}
       {:error, reason} -> {:reply, {:error, reason}, state}
     end
   end
 
-  @spec restore_loaded_session(state(), SessionStore.session_data()) ::
+  @spec restore_loaded_session(state(), SessionStore.session_data(), saved_route()) ::
           {:ok, state()} | {:error, term()}
-  defp restore_loaded_session(state, data) do
+  defp restore_loaded_session(state, data, route) do
     case persist_current_before_replacement(state, data.id) do
-      :ok -> reserve_loaded_session(state, data)
+      :ok -> reserve_loaded_session(state, data, route)
       {:error, reason} -> {:error, {:save_current_failed, reason}}
     end
   end
 
-  @spec reserve_loaded_session(state(), SessionStore.session_data()) ::
+  @spec reserve_loaded_session(state(), SessionStore.session_data(), saved_route()) ::
           {:ok, state()} | {:error, term()}
-  defp reserve_loaded_session(state, data) do
+  defp reserve_loaded_session(state, data, route) do
     case reserve_session_identity(state, data.id) do
-      {:ok, reservation} -> restore_reserved_session(state, data, reservation)
+      {:ok, reservation} -> restore_reserved_session(state, data, route, reservation)
       {:error, _reason} = error -> error
     end
   end
@@ -9359,10 +9350,11 @@ defmodule MingaAgent.Session do
   @spec restore_reserved_session(
           state(),
           SessionStore.session_data(),
+          saved_route(),
           SessionManager.identity_reservation() | :unchanged | :unmanaged
         ) :: {:ok, state()} | {:error, term()}
-  defp restore_reserved_session(state, data, reservation) do
-    case restore_loaded_candidate(state, data, reservation) do
+  defp restore_reserved_session(state, data, route, reservation) do
+    case restore_loaded_candidate(state, data, route, reservation) do
       {:ok, _restored} = result ->
         result
 
@@ -9405,18 +9397,16 @@ defmodule MingaAgent.Session do
     SessionManager.abort_session_identity(state.session_manager, reservation)
   end
 
-  @spec resolve_saved_model_selection(state(), SessionStore.session_data()) ::
-          {:ok, ModelSelection.t() | nil} | {:error, term()}
-  defp resolve_saved_model_selection(state, data),
-    do: resolve_saved_model_selection(state, data, model_resolution_opts(state))
-
-  @spec resolve_saved_model_selection(state(), SessionStore.session_data(), keyword()) ::
-          {:ok, ModelSelection.t() | nil} | {:error, term()}
+  # A saved route that cannot resolve now (ambiguous, removed, or missing its credential) does not
+  # block access to the saved history. The session opens without a selection and retains the
+  # resolution problem, so the connection snapshot shows the route as unavailable with its remedy.
+  @spec resolve_saved_model_selection(state(), SessionStore.session_data()) :: saved_route()
   defp resolve_saved_model_selection(
-         %{provider: %{module: MingaAgent.Providers.Native}},
-         data,
-         opts
+         %{provider: %{module: MingaAgent.Providers.Native}} = state,
+         data
        ) do
+    opts = model_resolution_opts(state)
+
     result =
       case Map.get(data, :model_selection) do
         %ModelSelection{} = selection ->
@@ -9431,19 +9421,16 @@ defmodule MingaAgent.Session do
       end
 
     case result do
-      {:ok, selection} ->
-        {:ok, selection}
-
-      {:error, reason} ->
-        {:error, {:model_selection_correction_required, ModelResolver.message(reason)}}
+      {:ok, selection} -> {:resolved, selection}
+      {:error, reason} -> {:unresolved, reason}
     end
   end
 
-  defp resolve_saved_model_selection(_state, _data, _opts), do: {:ok, nil}
+  defp resolve_saved_model_selection(_state, _data), do: {:resolved, nil}
 
   # Sessions saved before the selection problem moved to the connection snapshot stored it as a
-  # permanent transcript error. A restore succeeds only with a resolved selection, so that
-  # notice can no longer apply and must not be shown as current.
+  # permanent transcript error. A restore now retains any current selection problem in the
+  # connection snapshot, so that old notice is never current and must not be shown.
   @spec drop_retired_selection_notices(Transcript.t()) :: Transcript.t()
   defp drop_retired_selection_notices(transcript) do
     retained =
@@ -9463,79 +9450,94 @@ defmodule MingaAgent.Session do
   @spec restore_loaded_candidate(
           state(),
           SessionStore.session_data(),
+          saved_route(),
           SessionManager.identity_reservation() | :unchanged | :unmanaged
         ) :: {:ok, state()} | {:error, term()}
-  defp restore_loaded_candidate(state, data, reservation) do
-    with {:ok, selection} <- resolve_saved_model_selection(state, data) do
-      loaded_at = parse_datetime(Map.get(data, :last_message_at)) || DateTime.utc_now()
-      model_name = selection_model_name(selection, data.model_name)
-      provider_name = if selection, do: selection.route.model_provider, else: data.provider_name
+  defp restore_loaded_candidate(state, data, route, reservation) do
+    {selection, resolution_problem} = saved_route_selection(route)
+    loaded_at = parse_datetime(Map.get(data, :last_message_at)) || DateTime.utc_now()
+    model_name = selection_model_name(selection, data.model_name)
+    provider_name = if selection, do: selection.route.model_provider, else: data.provider_name
 
-      provider_opts =
-        state.provider.opts
-        |> Keyword.put(:model, model_name)
-        |> maybe_put_model_selection(selection)
+    provider_opts =
+      state.provider.opts
+      |> Keyword.put(:model, model_name)
+      |> maybe_put_model_selection(selection)
 
-      lifecycle =
-        ProviderLifecycle.replace(
-          state.provider,
-          model_name,
-          provider_name,
-          provider_opts
-        )
+    lifecycle =
+      ProviderLifecycle.replace(
+        state.provider,
+        model_name,
+        provider_name,
+        provider_opts
+      )
 
-      transcript =
-        Transcript.restore(
-          state.transcript,
-          data.messages,
-          data.message_ids,
-          Map.get(data, :branches, []),
-          data.usage,
-          Map.get(data, :pinned_ids, MapSet.new()),
-          loaded_at
-        )
-        |> drop_retired_selection_notices()
+    transcript =
+      Transcript.restore(
+        state.transcript,
+        data.messages,
+        data.message_ids,
+        Map.get(data, :branches, []),
+        data.usage,
+        Map.get(data, :pinned_ids, MapSet.new()),
+        loaded_at
+      )
+      |> drop_retired_selection_notices()
 
-      execution =
-        TurnExecution.restore_pending_inputs(Map.get(data, :pending_inputs, {1, [], [], []}))
+    execution =
+      TurnExecution.restore_pending_inputs(Map.get(data, :pending_inputs, {1, [], [], []}))
 
-      {credential_readiness, credentials_configured} =
-        loaded_selection_readiness(state, selection)
+    {credential_readiness, credentials_configured} =
+      loaded_selection_readiness(state, selection)
 
-      candidate = %{
-        state
-        | session_id: data.id,
-          custom_title: Map.get(data, :custom_title),
-          archived?: Map.get(data, :archived?, false),
-          transcript: transcript,
-          continuation: data.continuation,
-          checklist: Map.get(data, :checklist, Checklist.new()),
-          checklist_archive: Map.get(data, :checklist_archive, ChecklistArchive.new()),
-          file_changes: Map.get(data, :file_changes, []),
-          provider: lifecycle,
-          credential_readiness: credential_readiness,
-          credentials_configured: credentials_configured,
-          model_selection: selection,
-          turn_execution: execution,
-          pending_model_change: nil,
-          created_at: loaded_at
-      }
+    candidate = %{
+      state
+      | session_id: data.id,
+        custom_title: Map.get(data, :custom_title),
+        archived?: Map.get(data, :archived?, false),
+        transcript: transcript,
+        continuation: data.continuation,
+        checklist: Map.get(data, :checklist, Checklist.new()),
+        checklist_archive: Map.get(data, :checklist_archive, ChecklistArchive.new()),
+        file_changes: Map.get(data, :file_changes, []),
+        provider: lifecycle,
+        credential_readiness: credential_readiness,
+        credentials_configured: credentials_configured,
+        model_selection: selection,
+        connection: Connection.resolved(state.connection, resolution_problem),
+        turn_execution: execution,
+        pending_model_change: nil,
+        created_at: loaded_at
+    }
 
-      with {:ok, staged, reconciled?} <- reconcile_loaded_checkpoint(candidate),
-           {:ok, staged} <- prepare_reconciliation_warning(staged, reconciled?),
-           {:ok, staged} <-
-             restore_loaded_provider_model(staged, state.model_selection) do
-        restore_loaded_memory_candidate(
-          state,
-          data,
-          staged,
-          execution,
-          loaded_at,
-          reservation
-        )
-      end
+    with {:ok, staged, reconciled?} <- reconcile_loaded_checkpoint(candidate),
+         {:ok, staged} <- prepare_reconciliation_warning(staged, reconciled?),
+         {:ok, staged} <- restore_loaded_route_provider(staged, state.model_selection, route) do
+      restore_loaded_memory_candidate(
+        state,
+        data,
+        staged,
+        execution,
+        loaded_at,
+        reservation
+      )
     end
   end
+
+  @spec saved_route_selection(saved_route()) ::
+          {ModelSelection.t() | nil, ModelResolver.resolution_error() | nil}
+  defp saved_route_selection({:resolved, selection}), do: {selection, nil}
+  defp saved_route_selection({:unresolved, reason}), do: {nil, reason}
+
+  # An unresolved saved route has no exact selection to hand the provider, so the provider is
+  # neither started nor retargeted. Prompts stay refused until the user chooses a route.
+  @spec restore_loaded_route_provider(state(), ModelSelection.t() | nil, saved_route()) ::
+          {:ok, state()} | {:error, {:provider_model_restore_failed, term()}}
+  defp restore_loaded_route_provider(staged, current_selection, {:resolved, _selection}),
+    do: restore_loaded_provider_model(staged, current_selection)
+
+  defp restore_loaded_route_provider(staged, _current_selection, {:unresolved, _reason}),
+    do: {:ok, staged}
 
   @spec loaded_selection_readiness(state(), ModelSelection.t() | nil) ::
           {Credentials.readiness(), boolean()}
@@ -9678,7 +9680,7 @@ defmodule MingaAgent.Session do
     }
 
     loaded = invalidate_connection(loaded, :conversation)
-    loaded = retain_resolution_problem(loaded, nil)
+    loaded = retain_resolution_problem(loaded, staged.connection.resolver_problem)
     loaded = finish_loaded_provider_attachment(loaded, state.provider)
     finish_loaded_session_restore(loaded)
   end
