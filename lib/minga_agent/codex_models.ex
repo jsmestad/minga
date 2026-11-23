@@ -7,6 +7,11 @@ defmodule MingaAgent.CodexModels do
   @enforce_keys [:account_id, :source_id, :model_ids]
   defstruct @enforce_keys
 
+  # The Codex backend lists only the models a client at this version can run, so a stale value hides
+  # newer models from the picker (0.154.0 hid everything released after 2026-09-09). Keep it at a
+  # current Codex CLI release: `npm view @openai/codex version`.
+  @client_version "0.171.0"
+
   @type t :: %__MODULE__{
           account_id: String.t(),
           source_id: String.t(),
@@ -18,6 +23,10 @@ defmodule MingaAgent.CodexModels do
           | :request_failed
           | {:http_status, pos_integer()}
   @type result :: {:ok, t()} | {:error, error() | :not_loaded}
+
+  @doc "Returns the Codex client version sent with inventory requests."
+  @spec client_version() :: String.t()
+  def client_version, do: @client_version
 
   @doc "Fetches one inventory using the exact account and source pinned by the caller."
   @spec fetch(OAuth.t(), keyword()) :: result()
@@ -32,7 +41,7 @@ defmodule MingaAgent.CodexModels do
   defp fetch_inventory(credential, material, opts) do
     request_opts = [
       url: "https://chatgpt.com/backend-api/codex/models",
-      params: [client_version: "0.154.0"],
+      params: [client_version: @client_version],
       auth: {:bearer, Keyword.fetch!(material, :access_token)},
       headers: [{"chatgpt-account-id", credential.account_id}, {"originator", "minga"}],
       retry: false,
