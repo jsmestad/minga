@@ -1438,7 +1438,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
             "draft before leaving"
           )
         )
-        |> CatalogStartup.defer({:start, false, false, nil})
+        |> CatalogStartup.defer({:start, workspace.id, false, false, nil})
 
       departed = MingaEditor.TabWorkflow.switch(pending, source_id)
 

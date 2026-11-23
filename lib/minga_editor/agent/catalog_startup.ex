@@ -27,7 +27,7 @@ defmodule MingaEditor.Agent.CatalogStartup do
           {:toggle, destination()}
           | {:restore, destination(), String.t(), String.t() | nil, ProvenanceJump.origin() | nil}
           | :new
-  @type start :: {:start, boolean(), boolean(), SessionStart.follow_up()}
+  @type start :: {:start, pos_integer(), boolean(), boolean(), SessionStart.follow_up()}
   @type action :: workspace_action() | start()
   @type t :: %__MODULE__{origin: origin(), action: action()}
 
@@ -37,7 +37,7 @@ defmodule MingaEditor.Agent.CatalogStartup do
   Opening or toggling the Agent runs at once. A session start or a cold restore waits for the catalog in an effect worker.
   """
   @spec continue(EditorState.t(), action()) :: EditorState.t()
-  def continue(state, {:start, _hooks?, _recover?, _follow_up} = action),
+  def continue(state, {:start, _workspace, _hooks?, _recover?, _follow_up} = action),
     do: when_catalog_ready(state, action)
 
   def continue(state, {:restore, {_tab, _workspace, session}, _, _, _} = action)
@@ -80,43 +80,36 @@ defmodule MingaEditor.Agent.CatalogStartup do
 
   @impl true
   @spec apply(EditorState.t(), Outcome.t()) :: {EditorState.t(), Outcome.t()}
+  # A start carries the workspace it was requested for, so its outcome is
+  # judged by that workspace, not by which tab is active now.
+  def apply(
+        state,
+        %Outcome{request: %{effect: %__MODULE__{action: {:start, _, _, _, _}}}} = outcome
+      ),
+      do: complete_start(state, outcome)
+
   def apply(state, %Outcome{request: %{effect: effect}, value: value} = outcome) do
     current? = origin(state) == effect.origin and destination_current?(state, effect.action)
 
-    case {current?, value, effect.action} do
-      {true, {:completed, :ready}, _action} ->
-        {resume(state, effect.action), outcome}
-
-      {true, {:failed, _reason}, _action} ->
-        {publish_failure(state, effect.action), outcome}
-
-      {false, {:completed, :ready}, {:start, hooks?, recover?, follow_up}} ->
-        complete_inactive_start(
-          state,
-          outcome,
-          effect.origin,
-          {:ready, hooks?, recover?, follow_up}
-        )
-
-      {false, {:failed, _reason}, {:start, _hooks?, _recover?, _follow_up}} ->
-        complete_inactive_start(state, outcome, effect.origin, {:failed, catalog_failure()})
-
-      {false, {:completed, :ready}, _action} ->
-        {state, Outcome.stale(outcome, :agent_origin_changed)}
-
-      _inactive ->
-        {state, outcome}
+    case {current?, value} do
+      {true, {:completed, :ready}} -> {resume(state, effect.action), outcome}
+      {true, {:failed, _reason}} -> {publish_failure(state, effect.action), outcome}
+      {false, {:completed, :ready}} -> {state, Outcome.stale(outcome, :agent_origin_changed)}
+      _inactive -> {state, outcome}
     end
   end
 
-  @spec complete_inactive_start(
-          EditorState.t(),
-          Outcome.t(),
-          origin(),
-          AgentSession.catalog_start_result()
-        ) :: {EditorState.t(), Outcome.t()}
-  defp complete_inactive_start(state, outcome, target, result) do
-    case AgentSession.complete_inactive_start(state, target, result) do
+  @spec complete_start(EditorState.t(), Outcome.t()) :: {EditorState.t(), Outcome.t()}
+  defp complete_start(state, %Outcome{request: %{effect: effect}, value: value} = outcome) do
+    {:start, workspace, hooks?, recover?, follow_up} = effect.action
+
+    result =
+      case value do
+        {:completed, :ready} -> {:ready, hooks?, recover?, follow_up}
+        _failed -> {:failed, catalog_failure()}
+      end
+
+    case AgentSession.complete_deferred_start(state, workspace, result) do
       {:ok, next} -> {next, outcome}
       :stale -> {state, Outcome.stale(outcome, :agent_origin_changed)}
     end
@@ -154,9 +147,8 @@ defmodule MingaEditor.Agent.CatalogStartup do
   end
 
   @spec resource(t()) :: Request.resource()
-  defp resource(%__MODULE__{action: {:start, _, _, _}, origin: {tab, workspace, _}})
-       when is_integer(tab) and is_integer(workspace) and workspace > 0,
-       do: {:agent_catalog_session_start, tab, workspace}
+  defp resource(%__MODULE__{action: {:start, workspace, _, _, _}}),
+    do: {:agent_catalog_session_start, workspace}
 
   defp resource(%__MODULE__{}), do: :agent_catalog_startup
 
@@ -170,14 +162,14 @@ defmodule MingaEditor.Agent.CatalogStartup do
   defp destination_current?(_state, _action), do: true
 
   @spec resume(EditorState.t(), action()) :: EditorState.t()
-  defp resume(state, {:start, hooks?, recover?, follow_up}),
-    do: AgentSession.start_catalog_ready(state, hooks?, recover?, follow_up)
+  defp resume(state, {:start, workspace, hooks?, recover?, follow_up}),
+    do: AgentSession.start_catalog_ready(state, workspace, hooks?, recover?, follow_up)
 
   defp resume(state, action), do: Agent.resume_catalog_action(state, action)
 
   @spec publish_failure(EditorState.t(), action()) :: EditorState.t()
-  defp publish_failure(state, {:start, _hooks?, _recover?, _follow_up}) do
-    AgentSession.startup_failed(state, catalog_failure())
+  defp publish_failure(state, {:start, workspace, _hooks?, _recover?, _follow_up}) do
+    AgentSession.workspace_start_failed(state, workspace, catalog_failure())
   end
 
   defp publish_failure(state, _action) do

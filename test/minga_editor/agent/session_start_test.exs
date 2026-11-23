@@ -11,6 +11,7 @@ defmodule MingaEditor.Agent.SessionStartTest do
   alias MingaEditor.Agent.PromptBuffer
   alias MingaEditor.Agent.SessionStart
   alias MingaEditor.Commands.Agent, as: AgentCommands
+  alias MingaEditor.Commands.AgentSession
   alias MingaEditor.RenderPipeline.TestHelpers
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
@@ -62,6 +63,54 @@ defmodule MingaEditor.Agent.SessionStartTest do
       assert PromptBuffer.prompt_text(typed.workspace.agent_ui) == "hi"
       assert typed.workspace.agent_ui.chat_lifecycle == :starting
       assert Minga.Buffer.content(file) == "ine one\nline two\nline three"
+    end
+  end
+
+  describe "a start from a file tab with no Agent tab" do
+    test "two starts create one Agent workspace and send one request" do
+      manager = silent_manager()
+      first = state(manager) |> AgentSession.start_agent_session()
+      assert_receive {:start_requested, ^manager, _opts}
+
+      second = AgentSession.start_agent_session(first)
+      refute_receive {:start_requested, ^manager, _opts}, 50
+
+      tabs = second.shell_runtime.state.tab_bar
+      assert [%{id: workspace_id}] = Enum.filter(tabs.workspaces, &(&1.kind == :agent))
+      assert TabBar.active_workspace_id(tabs) == 0
+      assert [%{workspace: ^workspace_id}] = Map.values(second.agent_connection.session_starts)
+      assert [%Tab{kind: :agent}] = TabBar.tabs_in_workspace(tabs, workspace_id)
+    end
+
+    test "the boot start ends its starting state when the user switches to the workspace" do
+      _catalog = LLMDB.providers()
+      ingest = start_supervised!({MingaEditor.Agent.Ingest, editor: self()})
+
+      booted =
+        state(MingaAgent.SessionManager)
+        |> with_agent_chat_window()
+        |> then(fn state ->
+          %{
+            state
+            | agent_connection: AgentConnection.connect_ingest(state.agent_connection, ingest)
+          }
+        end)
+        |> MingaEditor.AgentLifecycle.maybe_start_session()
+        |> AgentSessionStart.settle()
+
+      tabs = booted.shell_runtime.state.tab_bar
+
+      assert [%{id: workspace_id, payload: %{session: session}}] =
+               Enum.filter(tabs.workspaces, &(&1.kind == :agent))
+
+      on_exit(fn -> MingaAgent.SessionManager.stop_session_by_pid(session) end)
+      assert is_pid(session)
+      assert TabBar.active_workspace_id(tabs) == 0
+      assert [%Tab{id: agent_tab}] = TabBar.tabs_in_workspace(tabs, workspace_id)
+
+      arrived = booted |> MingaEditor.TabWorkflow.switch(agent_tab) |> collect_arrival(session)
+      assert Runtime.active_session(arrived.shell_runtime) == session
+      assert {:conversation, ^session} = arrived.workspace.agent_ui.chat_lifecycle
     end
   end
 
@@ -147,6 +196,31 @@ defmodule MingaEditor.Agent.SessionStartTest do
 
     connection = AgentConnection.new(Minga.Test.StubProvider)
     %{state | agent_connection: %{connection | session_manager: manager}}
+  end
+
+  # A file tab whose layout already shows the Agent chat beside the file, as
+  # when the editor boots into a saved Agent split.
+  @spec with_agent_chat_window(MingaEditor.State.t()) :: MingaEditor.State.t()
+  defp with_agent_chat_window(state) do
+    windows = state.workspace.windows
+    chat = MingaEditor.Window.new_agent_chat(windows.next_id, 24, 80)
+    windows = %{windows | map: Map.put(windows.map, chat.id, chat), next_id: chat.id + 1}
+    %{state | workspace: %{state.workspace | windows: windows}}
+  end
+
+  # Waits through the arrival's ordered capture, as the Editor does.
+  @spec collect_arrival(MingaEditor.State.t(), pid()) :: MingaEditor.State.t()
+  defp collect_arrival(state, session) do
+    receive do
+      {:agent_event, ^session, {:editor_arrival_ready, _, _}} = capture ->
+        {:noreply, state} = MingaEditor.handle_info(capture, state)
+        state
+
+      {:agent_event, ^session, _earlier} ->
+        collect_arrival(state, session)
+    after
+      5_000 -> flunk("expected the Agent arrival capture")
+    end
   end
 
   @spec draft(MingaEditor.State.t(), String.t()) :: MingaEditor.State.t()

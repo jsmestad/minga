@@ -37,7 +37,10 @@ defmodule MingaEditor.Commands.AgentSessionProjectRootTest do
     state =
       project
       |> editor_state(notes)
-      |> AgentSession.start_catalog_ready(false, false, nil)
+      |> AgentSession.start_agent_session(
+        session_start_hook_enabled?: false,
+        recover_interrupted_work?: false
+      )
       |> Minga.Test.AgentSessionStart.settle()
 
     session = started_session(state)
