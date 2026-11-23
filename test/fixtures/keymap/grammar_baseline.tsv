@@ -1,0 +1,74 @@
+# Key grammar baseline: violations that existed when the guard landed.
+#
+# Entries may only be removed, never added. The migration tickets remove them.
+# A new binding that breaks the grammar must follow the grammar instead; see
+# AGENTS.md "Key grammar" and test/minga/keymap/grammar_test.exs.
+#
+# Regenerate only to prune rows the code no longer violates:
+#   MINGA_WRITE_KEY_GRAMMAR_BASELINE=1 mix test test/minga/keymap/grammar_test.exs
+# The writer keeps only rows that are already in this file, so it cannot add one.
+#
+# rule	scope	vim_state	key	command	reason
+duplicate_key	agent	cua	Down	agent_input_down | move_down	2 meanings for one key
+duplicate_key	agent	cua	Down(kitty)	agent_input_down | move_down	2 meanings for one key
+duplicate_key	agent	cua	RET	agent_focus_or_submit | agent_submit_or_newline	2 meanings for one key
+duplicate_key	agent	cua	Up	agent_input_up | move_up	2 meanings for one key
+duplicate_key	agent	cua	Up(kitty)	agent_input_up | move_up	2 meanings for one key
+duplicate_key	git_status	cua	⌃c	copy_or_interrupt | git_commit_open	2 meanings for one key
+duplicate_key	git_status	cua	⌘c	git_commit_open | yank_visual_selection	2 meanings for one key
+duplicate_leader_command	leader	normal	SPC TAB d, SPC b d	kill_buffer	one command on 2 leader keys without a declared alias
+duplicate_leader_command	leader	normal	SPC a a, SPC a t	toggle_agentic_view	one command on 2 leader keys without a declared alias
+duplicate_leader_command	leader	normal	SPC c j, SPC s j	document_symbols	one command on 2 leader keys without a declared alias
+duplicate_leader_command	leader	normal	SPC h a, SPC h c	describe_command	one command on 2 leader keys without a declared alias
+duplicate_leader_command	leader	normal	SPC m t a, SPC p T	test_all	one command on 2 leader keys without a declared alias
+editing_collision	agent	cua	⌃a	select_all	text-editing control key where you type
+editing_collision	agent	insert	⌃u	agent_scroll_half_up	text-editing control key where you type
+editing_collision	editor	cua	⌃a	select_all	text-editing control key where you type
+normal_mode_modifier	agent	input_normal	⌃c	agent_ctrl_c	modifier where letters are not text
+normal_mode_modifier	agent	input_normal	⌃l	agent_clear_chat	modifier where letters are not text
+normal_mode_modifier	agent	input_normal	⌃q	agent_unfocus_and_quit	modifier where letters are not text
+normal_mode_modifier	agent	input_normal	⌃s	agent_save_buffer	modifier where letters are not text
+normal_mode_modifier	agent	normal	⌃l	agent_clear_chat	modifier where letters are not text
+normal_mode_modifier	editor	normal	⌥:	enter_eval	modifier where letters are not text
+normal_mode_modifier	editor	normal	⌥h	nav_parent	modifier where letters are not text
+normal_mode_modifier	editor	normal	⌥j	nav_next_sibling	modifier where letters are not text
+normal_mode_modifier	editor	normal	⌥k	nav_prev_sibling	modifier where letters are not text
+normal_mode_modifier	editor	normal	⌥l	nav_first_child	modifier where letters are not text
+normal_mode_modifier	git_status	cua	⌃a	select_all	modifier where letters are not text
+normal_mode_modifier	git_status	cua	⌃c	git_commit_open	modifier where letters are not text
+normal_mode_modifier	git_status	cua	⌃v	paste_after	modifier where letters are not text
+normal_mode_modifier	git_status	cua	⌃y	redo	modifier where letters are not text
+normal_mode_modifier	git_status	cua	⌃z	undo	modifier where letters are not text
+platform_key	agent	cua	⌘a	select_all	not an allow-listed macOS platform key
+platform_key	agent	cua	⌘c	agent_copy_code_block	not an allow-listed macOS platform key
+platform_key	editor	cua	⇧⌘z	redo	not an allow-listed macOS platform key
+platform_key	editor	cua	⌘a	select_all	not an allow-listed macOS platform key
+platform_key	editor	cua	⌘c	yank_visual_selection	not an allow-listed macOS platform key
+platform_key	editor	cua	⌘v	paste_after	not an allow-listed macOS platform key
+platform_key	editor	cua	⌘x	delete_visual_selection	not an allow-listed macOS platform key
+platform_key	git_status	cua	⇧⌘z	redo	not an allow-listed macOS platform key
+platform_key	git_status	cua	⌘a	select_all	not an allow-listed macOS platform key
+platform_key	git_status	cua	⌘c	git_commit_open	not an allow-listed macOS platform key
+platform_key	git_status	cua	⌘v	paste_after	not an allow-listed macOS platform key
+platform_key	git_status	cua	⌘x	delete_visual_selection	not an allow-listed macOS platform key
+unconventional_modifier	agent	cua	⌃c	agent_copy_code_block	modifier where you type is not an established convention
+unconventional_modifier	agent	cua	⌃j	agent_insert_newline	modifier where you type is not an established convention
+unconventional_modifier	agent	cua	⌥RET	agent_insert_newline	modifier where you type is not an established convention
+unconventional_modifier	agent	insert	⌃RET	agent_queue_follow_up	modifier where you type is not an established convention
+unconventional_modifier	agent	insert	⌃c	agent_ctrl_c	modifier where you type is not an established convention
+unconventional_modifier	agent	insert	⌃d	agent_scroll_half_down	modifier where you type is not an established convention
+unconventional_modifier	agent	insert	⌃j	agent_insert_newline	modifier where you type is not an established convention
+unconventional_modifier	agent	insert	⌃l	agent_clear_chat	modifier where you type is not an established convention
+unconventional_modifier	agent	insert	⌃q	agent_unfocus_and_quit	modifier where you type is not an established convention
+unconventional_modifier	agent	insert	⌃s	agent_save_buffer	modifier where you type is not an established convention
+unconventional_modifier	agent	insert	⌥RET	agent_insert_newline	modifier where you type is not an established convention
+unconventional_modifier	agent	insert	⌥Up	agent_dequeue	modifier where you type is not an established convention
+unconventional_modifier	agent	insert	⌥Up(kitty)	agent_dequeue	modifier where you type is not an established convention
+unconventional_modifier	editor	cua	⌃c	copy_or_interrupt	modifier where you type is not an established convention
+unconventional_modifier	editor	cua	⌃p	command_palette	modifier where you type is not an established convention
+unconventional_modifier	editor	cua	⌃v	paste_after	modifier where you type is not an established convention
+unconventional_modifier	editor	cua	⌃y	redo	modifier where you type is not an established convention
+unconventional_modifier	editor	cua	⌃z	undo	modifier where you type is not an established convention
+unconventional_modifier	editor	cua	⌃⇧P	command_palette	modifier where you type is not an established convention
+unconventional_modifier	editor	cua	⌃⇧p	command_palette	modifier where you type is not an established convention
+vim_grammar_override	agent	input_normal	q	agent_unfocus_input	printable key rebound over Vim grammar in a text field

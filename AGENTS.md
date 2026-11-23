@@ -742,6 +742,21 @@ The tradeoff: scopes can't automatically inherit bindings from a parent scope. I
 - **Adding a new scope:** Create a new `Minga.Keymap.Scope.*` module implementing the `Minga.Keymap.Scope` behaviour. Declare its tries. Include shared groups for common bindings. Register it in `@builtin_scopes` in `lib/minga/keymap/scope.ex`.
 - **Debugging "key does nothing":** Look at the active scope module's trie for that vim state. If the key isn't there, it's not bound. No need to trace through handler stacks or check command guards.
 
+### Key grammar
+
+Every built-in binding follows six rules (design principle 11):
+
+1. **Mnemonic leader sequences first:** `SPC` + which-key group letter + action letter. Match Doom where Doom has a binding, and record each match or deliberate divergence in `test/fixtures/keymap/doom_conventions.tsv`.
+2. **Vim grammar inside buffers.** Printable keys in a Vim normal state keep their Vim meaning.
+3. **Single mnemonic letters only in special buffers** (conversation navigation, file tree, git status), never where letters type text.
+4. **Modifiers only where letters must type text, and only established conventions:** ⌃J/⌃K list movement, ⌃V/⌃T/⌃Q in pickers, ⌥↩ in the composer, ⌃\ ⌃N to leave the terminal, ⌃. for the act menu. Never bind ⌃A ⌃E ⌃H ⌃W ⌃U ⌃K in a prompt, insert state, or the composer, except for list movement.
+5. **macOS platform keys** (⌘S ⌘Z ⌘W ⌘Q ⌘. ⌘1 to ⌘4 ⌘[ ⌘]) only as aliases of a binding without modifiers.
+6. **Never** three-modifier chords, two of ⌃ ⌥ ⌘ together (⌃⌘, ⌥⌘, ⌃⌥), or function keys.
+
+Also: one key has one meaning per scope and vim state, a command sits on two leader keys only when one is a declared alias, and every leader binding lives under a declared which-key group.
+
+`test/minga/keymap/grammar_test.exs` enforces these rules with named rule ids through the pure classifier in `test/support/key_grammar.ex`, which also holds the rule 4 and 5 allow-lists and the leader aliases. Violations that existed when the guard landed are listed in `test/fixtures/keymap/grammar_baseline.tsv`. **Never add baseline rows;** fix the binding instead. When you fix a listed violation, remove its row: the test fails on stale rows.
+
 ## Mouse Support (first-class citizen)
 
 Mouse support is not optional or secondary to keyboard input. Minga ships multiple frontends (macOS GUI via Swift/Metal, TUI via Go/Bubble Tea, Linux GUI via GTK4 planned), and all must handle mouse interactions properly. The bar is **Doom Emacs**: if Doom supports a mouse interaction, Minga should too.

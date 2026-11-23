@@ -1,0 +1,80 @@
+# Doom Emacs leader bindings that Minga matches or deliberately diverges from.
+#
+# One row per Doom key. The key grammar test (test/minga/keymap/grammar_test.exs) checks:
+# - every row with a minga_key binds that key to minga_command today;
+# - a Minga leader binding on a listed doom_key is declared here by a row whose minga_key and minga_command match it, otherwise it is a :doom_conflict;
+# - a top-level leader key (SPC x) is allowed only when it is listed here as a doom_key.
+# "matches" means same key, same meaning. "diverges" means Minga deliberately uses the key differently, places the meaning elsewhere, or leaves it unbound ("-"), and the reason says why.
+#
+# doom_key	doom_meaning	minga_key	minga_command	status	reason
+SPC SPC	Find file in project	SPC SPC	project_find_file	matches	Doom's top-level project file finder
+SPC .	Find file	SPC f f	find_file	diverges	SPC . is unbound; find_file lives on SPC f f, which Doom also binds
+SPC ,	Switch workspace buffer	-	-	diverges	Unbound today; docs/design/keys.md plans SPC , as the buffer and file switcher
+SPC :	M-x (execute command)	SPC :	command_palette	matches	The command palette is Minga's M-x
+SPC ;	Eval expression	-	-	diverges	Unbound; eval is M-: in Normal mode
+SPC /	Search project	SPC /	search_project	matches	Declared alias of SPC s p
+SPC f f	Find file	SPC f f	find_file	matches	Same key, same meaning
+SPC f s	Save file	SPC f s	save	matches	Same key, same meaning
+SPC b b	Switch workspace buffer	SPC b b	buffer_list	matches	Same key, same meaning
+SPC b d	Kill buffer	SPC b d	kill_buffer	matches	Same key, same meaning
+SPC b n	Next buffer	SPC b n	buffer_next	matches	Same key, same meaning
+SPC b p	Previous buffer	SPC b p	buffer_prev	matches	Same key, same meaning
+SPC b m	Set bookmark	SPC b m	view_messages	diverges	Minga has no bookmarks; SPC b m opens *Messages*
+SPC b N	New empty buffer	SPC b N	new_buffer	matches	Same key, same meaning
+SPC b K	Kill all buffers	SPC b K	kill_all_buffers	matches	Same key, same meaning
+SPC w v	Split window vertically	SPC w v	split_vertical	matches	Same key, same meaning
+SPC w s	Split window	SPC w s	split_horizontal	matches	Same key, same meaning
+SPC w d	Delete window	SPC w d	window_close	matches	Same key, same meaning
+SPC w h	Window left	SPC w h	window_left	matches	Same key, same meaning
+SPC w j	Window down	SPC w j	window_down	matches	Same key, same meaning
+SPC w k	Window up	SPC w k	window_up	matches	Same key, same meaning
+SPC w l	Window right	SPC w l	window_right	matches	Same key, same meaning
+SPC s p	Search project	SPC s p	search_project	matches	Same key, same meaning
+SPC s s	Search buffer	SPC s s	search_buffer	matches	Same key, same meaning
+SPC s i	Jump to symbol (imenu)	SPC s j	document_symbols	diverges	Document symbols sit on SPC s j
+SPC s j	Jump list	SPC s j	document_symbols	diverges	Minga uses SPC s j for document symbols; the jump list is ⌃O and ⌃I
+SPC s r	Jump to mark	SPC s r	search_and_replace	diverges	Minga uses SPC s r for search and replace
+SPC s u	Undo history	-	-	diverges	No undo tree view yet
+SPC c a	Code actions	SPC c a	code_action	matches	Same key, same meaning
+SPC c d	Jump to definition	SPC c g	goto_definition	diverges	SPC c d is the diagnostics list (docs/design/keys.md); definition is SPC c g and gd
+SPC c x	List errors	SPC c d	diagnostics_list	diverges	The diagnostics list sits on SPC c d
+SPC c D	Jump to references	SPC c D	find_references	matches	Same key, same meaning
+SPC c f	Format buffer	SPC c f	format_buffer	matches	Same key, same meaning
+SPC c i	Find implementations	SPC c i	goto_implementation	matches	Same key, same meaning
+SPC c k	Jump to documentation	SPC c k	hover	matches	Same key, same meaning
+SPC c r	Rename	SPC c r	rename_symbol	matches	Same key, same meaning
+SPC c t	Find type definition	SPC c t	goto_type_definition	matches	Same key, same meaning
+SPC g g	Magit status	-	-	diverges	No magit buffer yet; git status is planned on SPC g s (docs/design/keys.md)
+SPC g s	Stage hunk	-	-	diverges	docs/design/keys.md plans SPC g s as the git status buffer
+SPC g b	Switch branch	-	-	diverges	docs/design/keys.md plans SPC g b as blame
+SPC g B	Blame	-	-	diverges	Blame is planned on SPC g b
+SPC h a	Apropos	SPC h a	describe_command	matches	Searches command help
+SPC h f	Describe function	SPC h f	describe_function	matches	Same key, same meaning
+SPC h k	Describe key	SPC h k	describe_key	matches	Same key, same meaning
+SPC h v	Describe variable	SPC h v	describe_option	matches	Options are Minga's variables
+SPC h t	Load theme	SPC h t	theme_picker	matches	Same key, same meaning
+SPC o p	Project sidebar	SPC o p	toggle_file_tree	matches	Same key, same meaning
+SPC o t	Toggle terminal popup	-	-	diverges	No terminal yet; docs/design/keys.md reserves SPC o t for the terminal drawer
+SPC o T	Open terminal here	-	-	diverges	No terminal yet; docs/design/keys.md reserves SPC o T for a terminal in the current window
+SPC p p	Switch project	SPC p p	project_switch	matches	Same key, same meaning
+SPC p f	Find file in project	SPC p f	project_find_file	matches	Same key, same meaning
+SPC p a	Add known project	SPC p a	project_add	matches	Same key, same meaning
+SPC p d	Remove known project	SPC p d	project_remove	matches	Same key, same meaning
+SPC p i	Invalidate project cache	SPC p i	project_invalidate	matches	Same key, same meaning
+SPC p r	Recent project files	SPC p r	project_recent_files	matches	Same key, same meaning
+SPC p T	Test project	SPC p T	test_all	matches	Same key, same meaning
+SPC q q	Quit Emacs	SPC q q	quit_all	matches	Same key, same meaning
+SPC t l	Line numbers	SPC t l	cycle_line_numbers	matches	Same key, same meaning
+SPC t w	Soft line wrapping	SPC t w	toggle_wrap	matches	Same key, same meaning
+SPC TAB n	New workspace	SPC TAB n	tab_next	diverges	Minga's SPC TAB group mixes tabs and workspaces
+SPC TAB d	Delete workspace	SPC TAB d	kill_buffer	diverges	Minga's SPC TAB group mixes tabs and workspaces
+SPC TAB r	Rename workspace	SPC TAB r	workspace_rename	matches	Same key, same meaning
+SPC 1	Switch to workspace 1	SPC 1	tab_goto_1	diverges	Tabs today; docs/design/keys.md moves SPC 1 to SPC 4 to pinned files
+SPC 2	Switch to workspace 2	SPC 2	tab_goto_2	diverges	Tabs today; docs/design/keys.md moves SPC 1 to SPC 4 to pinned files
+SPC 3	Switch to workspace 3	SPC 3	tab_goto_3	diverges	Tabs today; docs/design/keys.md moves SPC 1 to SPC 4 to pinned files
+SPC 4	Switch to workspace 4	SPC 4	tab_goto_4	diverges	Tabs today; docs/design/keys.md moves SPC 1 to SPC 4 to pinned files
+SPC 5	Switch to workspace 5	SPC 5	tab_goto_5	diverges	Tabs today; docs/design/keys.md moves SPC 1 to SPC 4 to pinned files
+SPC 6	Switch to workspace 6	SPC 6	tab_goto_6	diverges	Tabs today; docs/design/keys.md moves SPC 1 to SPC 4 to pinned files
+SPC 7	Switch to workspace 7	SPC 7	tab_goto_7	diverges	Tabs today; docs/design/keys.md moves SPC 1 to SPC 4 to pinned files
+SPC 8	Switch to workspace 8	SPC 8	tab_goto_8	diverges	Tabs today; docs/design/keys.md moves SPC 1 to SPC 4 to pinned files
+SPC 9	Switch to workspace 9	SPC 9	tab_goto_9	diverges	Tabs today; docs/design/keys.md moves SPC 1 to SPC 4 to pinned files
