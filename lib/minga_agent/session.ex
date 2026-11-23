@@ -4169,6 +4169,9 @@ defmodule MingaAgent.Session do
               "The turn finished in memory but could not be saved. Its result is not yet durable."
             )
 
+          {{:reported, message}, _boundary_result} ->
+            settle_reported_failure(state, completing, message)
+
           {{:interrupted, message}, _boundary_result} ->
             fail_completed_turn(state, completing, message)
 
@@ -4195,6 +4198,19 @@ defmodule MingaAgent.Session do
     |> Map.put(:turn_execution, execution)
   end
 
+  # The provider error event already reported this failure through report_turn_error/2, which owns its
+  # transcript message, notification, and error broadcast. Completion only settles the turn.
+  @spec settle_reported_failure(state(), TurnExecution.t(), String.t()) :: state()
+  defp settle_reported_failure(state, completing, message) do
+    execution = TurnExecution.fail(completing, message)
+
+    state
+    |> mark_unsaved_active_tools()
+    |> announce_turn_status(execution)
+    |> notify_messages_changed()
+    |> Map.put(:turn_execution, execution)
+  end
+
   @spec mark_unsaved_active_tools(state()) :: state()
   defp mark_unsaved_active_tools(state) do
     transcript =
@@ -4215,16 +4231,19 @@ defmodule MingaAgent.Session do
     do: "Outcome indeterminate after interruption; the tool was not rerun.\n\n" <> partial
 
   @spec apply_provider_outcome(state(), Outcome.t() | nil) ::
-          {state(), :accepted | {:interrupted, String.t()} | {:rejected, String.t()}}
+          {state(),
+           :accepted
+           | {:reported, String.t()}
+           | {:interrupted, String.t()}
+           | {:rejected, String.t()}}
   defp apply_provider_outcome(state, nil) do
     continuation = Continuation.interrupt_request(state.continuation)
     state = %{state | continuation: continuation} |> reconcile_interrupted_checkpoint()
 
-    message =
-      TurnExecution.error(state.turn_execution) ||
-        "Agent response ended before a continuation was returned."
-
-    {state, {:interrupted, message}}
+    case TurnExecution.error(state.turn_execution) do
+      nil -> {state, {:interrupted, "Agent response ended before a continuation was returned."}}
+      reported -> {state, {:reported, reported}}
+    end
   end
 
   defp apply_provider_outcome(state, %Outcome{} = outcome) do
