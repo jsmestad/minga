@@ -3529,6 +3529,8 @@ const FramingContract = struct {
 };
 
 test "framing contract: every parser-stream opcode is exactly framed" {
+    // The comptime walk over every opcode export grows with the protocol; give it headroom.
+    @setEvalBranchQuota(10_000);
     var framed: usize = 0;
     inline for (@typeInfo(opcodes).@"struct".decls) |decl| {
         comptime if (decl.name.len < 3 or !std.mem.eql(u8, decl.name[0..3], "OP_")) continue;
