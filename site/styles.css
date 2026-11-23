@@ -330,6 +330,7 @@ code {
   color: var(--text);
   padding: 0.12em 0.36em;
   border-radius: 4px;
+  white-space: nowrap;
 }
 
 pre code {
@@ -337,6 +338,7 @@ pre code {
   padding: 0;
   border-radius: 0;
   font-size: 0.85rem;
+  white-space: pre;
 }
 
 kbd {
@@ -695,13 +697,17 @@ kbd {
 }
 
 .callout {
-  margin-top: 1.75rem;
+  margin: 1.75rem 0;
   padding: 1.15rem 1.35rem;
   background: var(--bg-subtle);
   border: 1px solid var(--border);
   border-left: 3px solid var(--accent);
   border-radius: var(--radius-sm);
   font-size: 0.94rem;
+}
+
+.callout:last-child {
+  margin-bottom: 0;
 }
 
 .callout-title {
@@ -1015,14 +1021,16 @@ kbd {
   background: var(--accent-soft);
   border: 1px solid var(--accent-border);
   border-radius: var(--radius-sm);
-  padding: 0.2rem 0;
+  padding: 0.18rem 0;
   text-align: center;
-  margin-top: 0.15rem;
+  line-height: 1.3;
+  margin-top: 0.05rem;
 }
 
 .step-item h3 {
   margin: 0 0 0.35rem;
   font-size: 1rem;
+  line-height: 1.35;
 }
 
 .step-item p {
@@ -1084,28 +1092,37 @@ kbd {
   margin-bottom: 0;
 }
 
-.essay-section h2 {
+.essay-section > h2 {
   margin-bottom: 1rem;
   padding-top: 0.5rem;
 }
 
-.essay-section h3 {
+.essay-section > h3 {
   margin: 1.65rem 0 0.55rem;
 }
 
-.essay-section p,
-.essay-section ul {
+.essay-section > p,
+.essay-section > ul {
   max-width: var(--measure);
 }
 
-.essay-section ul {
+.essay-section > ul:not(.spec-ledger) {
   margin: 0.75rem 0 1.25rem;
   padding-left: 1.25rem;
   color: var(--text-secondary);
 }
 
-.essay-section li {
+.essay-section > ul:not(.spec-ledger) > li {
   margin-bottom: 0.55rem;
+}
+
+.essay-section > .code-card,
+.essay-section > .grid-2 {
+  margin: 1.4rem 0 1.6rem;
+}
+
+.essay-section > .actions {
+  margin-top: 1.75rem;
 }
 
 /* Tables */
@@ -1250,5 +1267,13 @@ td:first-child {
   }
   td:first-child {
     white-space: normal;
+  }
+  code {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+  pre code {
+    white-space: pre;
+    overflow-wrap: normal;
   }
 }
