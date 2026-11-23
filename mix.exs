@@ -45,6 +45,7 @@ defmodule Minga.MixProject do
       # Docs
       name: "Minga",
       source_url: "https://github.com/jsmestad/minga",
+      homepage_url: docs_homepage_url(),
       docs: [
         main: "readme",
         assets: %{"assets" => "assets"},
@@ -197,6 +198,14 @@ defmodule Minga.MixProject do
         ]
       ]
     ]
+  end
+
+  @spec docs_homepage_url() :: String.t() | nil
+  defp docs_homepage_url do
+    case System.get_env("MINGA_SITE_URL") do
+      url when is_binary(url) and url != "" -> url
+      _ -> nil
+    end
   end
 
   @spec project_version(atom()) :: String.t()

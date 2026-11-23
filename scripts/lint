@@ -8,7 +8,7 @@
 #       When no Elixir-relevant file changed against the base ref (docs-only branches), the compile chain and ExDNA are skipped.
 # full: format, full Credo, ExDNA                              (no compile, run in parallel)
 #       compile -> classic Dialyzer + Reach arch and smells     (followers run in parallel once compile passes)
-# done: fast lint, then the non-heavy ExUnit suite, then Swift build and MingaTests when macOS inputs changed.
+# done: fast lint, then the non-heavy ExUnit suite (skipped on site-only branches), site build and link check when site inputs changed, then Swift build and MingaTests when macOS inputs changed.
 set -uo pipefail
 
 mode=${1:-fast}
@@ -122,11 +122,21 @@ swift_test() {
   scripts/test_macos_unit --output-dir "$MINGA_DONE_DIR/native-unit"
 }
 
-run format mix format --check-formatted
-if [ "$mode" = full ]; then
-  run credo mix credo --strict
+site_check() {
+  scripts/build_site.sh "$log_dir/site-bundle" &&
+    python3 scripts/check_site_links.py "$log_dir/site-bundle"
+}
+
+if [ "$mode" != full ] && site_only_changed "$changed"; then
+  skip format "site-only changes"
+  skip credo "site-only changes"
 else
-  run credo scripts/credo_changed
+  run format mix format --check-formatted
+  if [ "$mode" = full ]; then
+    run credo mix credo --strict
+  else
+    run credo scripts/credo_changed
+  fi
 fi
 
 if [ "$mode" = full ]; then
@@ -146,11 +156,26 @@ else
   skip reach "no Elixir-relevant file changed"
 fi
 
+if [ "$mode" != full ] && site_changed "$changed"; then
+  run site.test python3 -m unittest discover -s test/scripts -p 'check_site_links_test.py' -v
+fi
+
 wait
 
 if [ "$mode" = done ]; then
-  run test.llm mix test.llm
-  wait
+  if site_only_changed "$changed"; then
+    skip test.llm "site-only changes"
+  else
+    run test.llm mix test.llm
+    wait
+  fi
+
+  if site_changed "$changed"; then
+    run site site_check
+    wait
+  else
+    skip site "no site-relevant file changed"
+  fi
 
   if ! macos_changed "$changed"; then
     skip swift.build "no macOS-relevant file changed"

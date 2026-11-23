@@ -1,0 +1,135 @@
+name: Site & Docs Preview
+
+on:
+  pull_request:
+    paths:
+      - "site/**"
+      - "docs/**"
+      - "assets/**"
+      - "mix.exs"
+      - "README.md"
+      - "CONTRIBUTING.md"
+      - "CHANGELOG.md"
+      - "scripts/build_site.sh"
+      - "scripts/check_site_links.py"
+      - "test/scripts/check_site_links_test.py"
+      - ".github/workflows/site.yml"
+  push:
+    branches: [main]
+    paths:
+      - "site/**"
+      - "docs/**"
+      - "assets/**"
+      - "mix.exs"
+      - "README.md"
+      - "CONTRIBUTING.md"
+      - "CHANGELOG.md"
+      - "scripts/build_site.sh"
+      - "scripts/check_site_links.py"
+      - "test/scripts/check_site_links_test.py"
+      - ".github/workflows/site.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: site-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+  deployments: write
+
+jobs:
+  build-and-preview:
+    name: Build & Preview Site
+    runs-on: ubuntu-latest
+    env:
+      MINGA_SKIP_GO_TUI_BUILD: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: erlef/setup-beam@v1
+        with:
+          version-file: .tool-versions
+          version-type: strict
+
+      - name: Cache deps
+        uses: actions/cache@v4
+        with:
+          path: |
+            deps
+            _build
+          key: deps-site-${{ runner.os }}-${{ hashFiles('.tool-versions') }}-${{ hashFiles('mix.lock') }}
+          restore-keys: deps-site-${{ runner.os }}-${{ hashFiles('.tool-versions') }}-
+
+      - name: Test site link verifier
+        run: python3 -m unittest discover -s test/scripts -p 'check_site_links_test.py' -v
+
+      - name: Install Elixir dependencies
+        run: mix deps.get
+
+      - name: Assemble combined site and ExDoc bundle
+        run: scripts/build_site.sh _site
+
+      - name: Verify internal links, redirects, headers, and staging noindex
+        run: python3 scripts/check_site_links.py _site --expect-noindex
+
+      - name: Determine Cloudflare Pages deploy target
+        id: target
+        env:
+          CF_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CF_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          CF_PROJECT: ${{ vars.CLOUDFLARE_PAGES_PROJECT }}
+          EVENT_NAME: ${{ github.event_name }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REF_NAME: ${{ github.ref }}
+          COMMIT_SHA: ${{ github.sha }}
+          IS_SAME_REPO: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+        run: |
+          if [[ "$IS_SAME_REPO" != "true" || -z "$CF_TOKEN" || -z "$CF_ACCOUNT" ]]; then
+            echo "should_deploy=false" >> "$GITHUB_OUTPUT"
+            echo "Skipping Cloudflare Pages deploy (fork PR or Cloudflare secrets not configured)." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          project="${CF_PROJECT:-mingacode-site}"
+          if [[ ! "$project" =~ ^[a-z0-9][a-z0-9-]{0,57}$ ]]; then
+            echo "error: invalid CLOUDFLARE_PAGES_PROJECT name: '$project'" >&2
+            exit 1
+          fi
+
+          if [[ "$EVENT_NAME" == "pull_request" ]]; then
+            branch="pr-${PR_NUMBER}"
+          elif [[ "$REF_NAME" == "refs/heads/main" ]]; then
+            branch="main"
+          else
+            branch="manual-${COMMIT_SHA:0:7}"
+          fi
+
+          echo "should_deploy=true" >> "$GITHUB_OUTPUT"
+          echo "project=${project}" >> "$GITHUB_OUTPUT"
+          echo "branch=${branch}" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy to Cloudflare Pages
+        id: deploy
+        if: steps.target.outputs.should_deploy == 'true'
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy _site --project-name=${{ steps.target.outputs.project }} --branch=${{ steps.target.outputs.branch }} --commit-hash=${{ github.sha }}
+
+      - name: Record preview URL in workflow summary
+        if: steps.target.outputs.should_deploy == 'true'
+        env:
+          DEPLOY_URL: ${{ steps.deploy.outputs.deployment-url }}
+          ALIAS_URL: ${{ steps.deploy.outputs.pages-deployment-alias-url }}
+        run: |
+          {
+            echo "### Cloudflare Pages preview"
+            if [[ -n "$ALIAS_URL" ]]; then
+              echo "- Branch alias: ${ALIAS_URL}"
+            fi
+            if [[ -n "$DEPLOY_URL" ]]; then
+              echo "- Immutable deployment: ${DEPLOY_URL}"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

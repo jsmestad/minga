@@ -190,3 +190,24 @@ Use the archive that matches your OS and CPU. The launcher maps `--cookie-file`,
    The file list must contain only `lib/`, `mix.exs`, `README.md`, `CHANGELOG.md`, and `LICENSE`. Stop if anything else appears.
 4. Publish from your own account with `mix hex.publish`. HexDocs source links point at `main`. Hex shows the package and docs before asking for confirmation; check the version and file list again there.
 5. Publish or update dependent extensions only after the new SDK version is visible on Hex.
+
+## Marketing site and staging previews (Cloudflare Pages)
+
+The combined marketing site (`site/`) and ExDoc documentation (`/docs/`) assemble into `_site/` via `scripts/build_site.sh` and are validated by `python3 scripts/check_site_links.py _site --expect-noindex`. `.github/workflows/site.yml` runs this build and link check on every pull request touching site, docs, assets, or ExDoc configuration, and deploys to Cloudflare Pages when repository secrets are available. Forked pull requests skip deployment cleanly while still running the full build and link checks.
+
+### One-time Cloudflare Pages setup
+
+1. Create a Cloudflare Pages project named `mingacode-site` (Direct Upload mode, or set repository variable `CLOUDFLARE_PAGES_PROJECT` to override the project name).
+2. Create a Cloudflare API token scoped to `Account -> Cloudflare Pages -> Edit`.
+3. Add `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` as GitHub Actions repository secrets on `jsmestad/minga`.
+
+Until v0.1.0 launches, Cloudflare Pages deployments stay on `*.pages.dev` with crawler opt-out enforced in `site/_headers` (`X-Robots-Tag: noindex, nofollow`), `site/robots.txt` (`Disallow: /`), and `<meta name="robots" content="noindex, nofollow">` in site HTML. The existing GitHub Pages job in `.github/workflows/ci.yml` keeps serving `https://jsmestad.github.io/minga/` without interruption during pre-release.
+
+### v0.1.0 launch cutover checklist (`mingacode.dev`)
+
+Perform this cutover only after explicit v0.1.0 release approval and publication:
+
+1. Attach `mingacode.dev` as the primary custom domain on the Cloudflare Pages project, configure `mingacode.com` to 301-redirect to `https://mingacode.dev/` (preserving path), and verify TLS issuance on both domains.
+2. Remove `X-Robots-Tag: noindex, nofollow` from `site/_headers`, remove `<meta name="robots" content="noindex, nofollow">` from `site/` HTML pages, update `site/robots.txt` to allow crawling, and drop `--expect-noindex` from `.github/workflows/site.yml`.
+3. Verify `https://mingacode.dev/`, `https://mingacode.dev/docs/`, and legacy redirects (`/getting-started.html` -> `/docs/getting-started.html`) return expected status codes and assets.
+4. Replace the legacy GitHub Pages artifact in `.github/workflows/ci.yml` with a redirect stub pointing `https://jsmestad.github.io/minga/` to `https://mingacode.dev/docs/`.
