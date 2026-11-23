@@ -615,8 +615,7 @@ defmodule MingaEditor.PickerUI do
     else
       next_query = filesystem_query(session, query)
 
-      if picker_state.load_status == :ready and
-           FilesystemQuery.same_directory?(context.query, next_query) do
+      if listing_reusable?(picker_state, next_query) do
         reuse_directory_listing(state, picker_state, next_query, edit_seq)
       else
         switch_to_directory_query(state, picker_state, next_query, edit_seq)
@@ -643,11 +642,7 @@ defmodule MingaEditor.PickerUI do
          next_query,
          edit_seq
        ) do
-    rebound =
-      picker
-      |> Picker.replace_items(DirectorySource.rebind(picker.items, next_query))
-      |> Picker.filter_with_match_query(next_query.text, FilesystemQuery.filter_text(next_query))
-
+    rebound = rebind_directory_listing(picker, next_query)
     next_context = FilesystemContext.new(next_query)
 
     update_picker(state, fn _current ->
@@ -656,6 +651,22 @@ defmodule MingaEditor.PickerUI do
       |> PickerState.accept_query_edit(rebound, edit_seq)
       |> PickerState.invalidate_fetch()
     end)
+  end
+
+  @spec listing_reusable?(PickerState.t(), FilesystemQuery.t()) :: boolean()
+  defp listing_reusable?(
+         %PickerState{load_status: :ready, context: %FilesystemContext{query: current}},
+         next_query
+       ),
+       do: FilesystemQuery.same_directory?(current, next_query)
+
+  defp listing_reusable?(%PickerState{}, _next_query), do: false
+
+  @spec rebind_directory_listing(Picker.t(), FilesystemQuery.t()) :: Picker.t()
+  defp rebind_directory_listing(picker, query) do
+    picker
+    |> Picker.replace_items(DirectorySource.rebind(picker.items, query))
+    |> Picker.filter_with_match_query(query.text, FilesystemQuery.filter_text(query))
   end
 
   @spec switch_to_directory_query(
@@ -983,7 +994,8 @@ defmodule MingaEditor.PickerUI do
     maybe_preview_selection(state)
   end
 
-  # Tab → toggle multi-select mark on current item, then move down
+  # Tab completes the highlighted item when the source completes, marks it when the source
+  # confirms marked items, and otherwise does nothing.
   def handle_key(
         %{
           shell_runtime: %{
@@ -996,12 +1008,28 @@ defmodule MingaEditor.PickerUI do
       do: state
 
   def handle_key(
-        %{shell_runtime: %{state: %{modal: {:picker, %{picker_ui: %{picker: picker}}}}}} = state,
+        %{
+          shell_runtime: %{
+            state: %{
+              modal:
+                {:picker, %{picker_ui: %PickerState{picker: %Picker{} = picker, source: source}}}
+            }
+          }
+        } = state,
         9,
         _mods
       ) do
-    new_picker = picker |> Picker.toggle_mark() |> Picker.move_down()
-    update_picker(state, &PickerState.update_picker(&1, new_picker))
+    cond do
+      Source.completes?(source) ->
+        complete_selected_item(state)
+
+      Source.has_bulk_select?(source) ->
+        new_picker = picker |> Picker.toggle_mark() |> Picker.move_down()
+        update_picker(state, &PickerState.update_picker(&1, new_picker))
+
+      true ->
+        state
+    end
   end
 
   # C-o → open action menu for the selected item
@@ -1394,6 +1422,28 @@ defmodule MingaEditor.PickerUI do
     end
   end
 
+  @spec complete_selected_item(EditorState.t()) :: EditorState.t()
+  defp complete_selected_item(state) do
+    %PickerState{
+      picker: picker,
+      source: source,
+      callback_source: callback_source,
+      context: context
+    } =
+      picker_state(state)
+
+    case Picker.selected_item(picker) do
+      nil ->
+        state
+
+      item ->
+        case Source.complete(source, item, context, callback_source) do
+          {:ok, next_context} -> stay_open_selection(state, source, next_context)
+          {:error, message} -> NoticeWorkflow.publish(state, message)
+        end
+    end
+  end
+
   @spec select_single_item(
           EditorState.t(),
           Picker.item(),
@@ -1424,16 +1474,25 @@ defmodule MingaEditor.PickerUI do
   defp stay_open_selection(
          state,
          DirectorySource,
-         %FilesystemContext{query: query}
+         %FilesystemContext{query: query} = next_context
        ) do
     picker_state = picker_state(state)
 
-    switch_to_directory_query(
-      state,
-      picker_state,
-      query,
-      picker_state.acknowledged_query_edit_seq
-    )
+    if listing_reusable?(picker_state, query) do
+      update_picker(state, fn _current ->
+        picker_state
+        |> PickerState.put_context(next_context)
+        |> PickerState.update_picker(rebind_directory_listing(picker_state.picker, query))
+        |> PickerState.invalidate_fetch()
+      end)
+    else
+      switch_to_directory_query(
+        state,
+        picker_state,
+        query,
+        picker_state.acknowledged_query_edit_seq
+      )
+    end
   end
 
   defp stay_open_selection(state, AgentRetainedOutputSource, %Item{} = item),

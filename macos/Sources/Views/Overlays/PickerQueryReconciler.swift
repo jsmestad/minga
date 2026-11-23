@@ -42,6 +42,15 @@ struct PickerQueryReconciler {
         text.utf8.count <= maximumQueryBytes
     }
 
+    /// Places the caret after adopting authoritative text. A caret at the end of the old text stays at the end, so a BEAM completion such as `~/pro` to `~/projects/` leaves the caret ready for the next keystroke; any other selection is clamped.
+    static func adoptedSelection(_ range: NSRange, previousText: String, adoptedText: String) -> NSRange {
+        let previousLength = (previousText as NSString).length
+        if range.length == 0, range.location == previousLength {
+            return NSRange(location: (adoptedText as NSString).length, length: 0)
+        }
+        return clampSelection(range, to: adoptedText)
+    }
+
     /// Clamps an AppKit UTF-16 selection to the replacement text.
     static func clampSelection(_ range: NSRange, to text: String) -> NSRange {
         let length = (text as NSString).length

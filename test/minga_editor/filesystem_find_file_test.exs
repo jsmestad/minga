@@ -128,6 +128,69 @@ defmodule MingaEditor.FilesystemFindFileTest do
              {:browse, tmp_dir, "folder with space"}
   end
 
+  test "Tab on a folder descends into it and lists its entries without opening anything", %{
+    tmp_dir: tmp_dir
+  } do
+    nested = Path.join(tmp_dir, "nested")
+    File.mkdir!(nested)
+    inside = Path.join(nested, "inside.txt")
+    File.write!(inside, "inside")
+    ready = ready_directory_state(directory_query(tmp_dir))
+    before = picker_state(ready)
+
+    directory =
+      Enum.find(before.picker.filtered, &match?(%FilesystemCandidate{path: ^nested}, &1.id))
+
+    state = replace_picker_state(ready, select_item(before, directory))
+
+    tabbed = PickerUI.handle_key(state, 9, 0)
+    descended = picker_state(tabbed)
+
+    assert descended.source == DirectorySource
+
+    assert descended.picker.query ==
+             FilesystemQuery.for_directory(before.context.query.session, nested).text
+
+    assert descended.context.query.resolution == {:browse, nested, ""}
+    assert descended.acknowledged_query_edit_seq == before.acknowledged_query_edit_seq
+    refute Picker.has_marks?(descended.picker)
+
+    listed = picker_state(complete_current_fetch(tabbed))
+    assert contains_path?(listed.picker.filtered, inside)
+    assert tabbed.workspace.buffers.list == ready.workspace.buffers.list
+  end
+
+  test "Tab on a file completes the query to its path and keeps the picker open", %{
+    tmp_dir: tmp_dir
+  } do
+    alpha = Path.join(tmp_dir, "alpha.txt")
+    File.write!(alpha, "alpha")
+    File.write!(Path.join(tmp_dir, "beta.txt"), "beta")
+    ready = ready_directory_state(directory_query(tmp_dir))
+    before = picker_state(ready)
+    file = Enum.find(before.picker.filtered, &match?(%FilesystemCandidate{path: ^alpha}, &1.id))
+    state = replace_picker_state(ready, select_item(before, file))
+
+    tabbed = PickerUI.handle_key(state, 9, 0)
+    completed = picker_state(tabbed)
+    expected_text = FilesystemQuery.display_path(before.context.query, alpha)
+
+    assert completed.source == DirectorySource
+    assert completed.picker.query == expected_text
+    assert completed.context.query.text == expected_text
+    assert completed.load_status == :ready
+    assert completed.fetch_revision == nil
+    assert completed.acknowledged_query_edit_seq == before.acknowledged_query_edit_seq
+    refute Picker.has_marks?(completed.picker)
+    assert %Item{id: %FilesystemCandidate{path: ^alpha}} = Picker.selected_item(completed.picker)
+    assert tabbed.workspace.buffers.list == ready.workspace.buffers.list
+
+    opened = PickerUI.handle_key(tabbed, 13, 0)
+    on_exit(fn -> stop_added_buffers(opened, ready) end)
+    assert opened.shell_runtime.state.modal == :none
+    assert Minga.Buffer.file_path(opened.workspace.buffers.active) == alpha
+  end
+
   test "native query and semantic activation open the exact Unicode file outside a different project",
        %{
          tmp_dir: tmp_dir

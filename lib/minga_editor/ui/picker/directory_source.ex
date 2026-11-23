@@ -101,6 +101,34 @@ defmodule MingaEditor.UI.Picker.DirectorySource do
   def selection_disposition(%Item{}, _context),
     do: {:reject, "Filesystem finder result is unavailable"}
 
+  @doc """
+  Completes the highlighted entry into the query without opening anything.
+
+  A directory descends into it, so the query becomes `…/dir/` and lists its entries. A file
+  completes the query to the file's path over the same listing.
+  """
+  @impl true
+  @spec complete(Item.t(), term()) :: MingaEditor.UI.Picker.Source.completion()
+  def complete(
+        %Item{id: %FilesystemCandidate{kind: :directory} = candidate},
+        %FilesystemContext{} = context
+      ),
+      do: navigate(candidate, context)
+
+  def complete(
+        %Item{id: %FilesystemCandidate{kind: :file, path: path} = candidate},
+        %FilesystemContext{query: query} = context
+      ) do
+    if current_candidate?(candidate, context) do
+      text = FilesystemQuery.display_path(query, path)
+      {:ok, FilesystemContext.new(FilesystemQuery.parse(query.session, text))}
+    else
+      {:error, "File finder result changed; select the entry again"}
+    end
+  end
+
+  def complete(%Item{}, _context), do: {:error, "Filesystem finder result is unavailable"}
+
   @impl true
   @spec on_select(Item.t(), MingaEditor.State.t()) :: MingaEditor.State.t()
   def on_select(%Item{} = item, state) do

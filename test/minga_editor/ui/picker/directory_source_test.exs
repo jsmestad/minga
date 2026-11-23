@@ -98,6 +98,47 @@ defmodule MingaEditor.UI.Picker.DirectorySourceTest do
     refute DirectorySource.current_candidate?(forged, context)
   end
 
+  describe "complete/2" do
+    test "a directory descends into it with a trailing separator", %{tmp_dir: tmp_dir} do
+      nested = Path.join(tmp_dir, "nested")
+      File.mkdir!(nested)
+      query = FilesystemQuery.parse(session(tmp_dir), "~/nes")
+      {items, context} = fetch(query)
+      item = Enum.find(items, &match?(%FilesystemCandidate{path: ^nested}, &1.id))
+
+      assert {:ok, %FilesystemContext{query: next}} = DirectorySource.complete(item, context)
+      assert next.text == "~/nested/"
+      assert FilesystemQuery.directory(next) == {:ok, nested}
+      assert FilesystemQuery.filter_text(next) == ""
+    end
+
+    test "a file completes the query to its path over the same directory", %{tmp_dir: tmp_dir} do
+      path = Path.join(tmp_dir, "alpha.ex")
+      File.write!(path, "a")
+      query = FilesystemQuery.parse(session(tmp_dir), "~/al")
+      {items, context} = fetch(query)
+      item = Enum.find(items, &match?(%FilesystemCandidate{path: ^path}, &1.id))
+
+      assert {:ok, %FilesystemContext{query: next}} = DirectorySource.complete(item, context)
+      assert next.text == "~/alpha.ex"
+      assert FilesystemQuery.same_directory?(query, next)
+      assert FilesystemQuery.filter_text(next) == "alpha.ex"
+    end
+
+    test "a stale entry is rejected instead of completed", %{tmp_dir: tmp_dir} do
+      File.write!(Path.join(tmp_dir, "alpha.ex"), "a")
+      File.mkdir!(Path.join(tmp_dir, "nested"))
+      {items, _context} = fetch(query_for_directory(tmp_dir))
+      newer = FilesystemContext.new(query_for_directory(tmp_dir))
+
+      for kind <- [:file, :directory] do
+        item = Enum.find(items, &match?(%FilesystemCandidate{kind: ^kind}, &1.id))
+        assert {:error, message} = DirectorySource.complete(item, newer)
+        assert message =~ "select the entry again"
+      end
+    end
+  end
+
   test "reports missing directories and unsupported named-user paths as errors", %{
     tmp_dir: tmp_dir
   } do
@@ -131,6 +172,12 @@ defmodule MingaEditor.UI.Picker.DirectorySourceTest do
   defp query_for_directory(directory) do
     session = FindFileSession.new(directory, directory, nil)
     FilesystemQuery.for_directory(session, directory)
+  end
+
+  @spec fetch(FilesystemQuery.t()) :: {[Picker.Item.t()], FilesystemContext.t()}
+  defp fetch(query) do
+    assert {:ok, items, %{}} = DirectorySource.async_fetch(source_context(query))
+    {items, FilesystemContext.new(query)}
   end
 
   @spec session(String.t()) :: FindFileSession.t()
