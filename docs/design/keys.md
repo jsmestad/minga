@@ -28,6 +28,7 @@ Notation: modifiers as Mac glyphs (⌃J, ⌥↩, ⌘.), leader sequences as `SPC
 | `SPC g s` | Git status (a magit-style buffer) | new |
 | `SPC g b` | Blame for the current line or file | new |
 | `SPC t e` | Edit timeline | new |
+| `SPC s q` | Quickfix group: open the list (`:copen`), with `:cdo` / `:cfdo` listed as hints in which-key | new |
 | `SPC o t` | Toggle the terminal drawer | new |
 | `SPC o T` | New terminal in the current window | new |
 
@@ -136,6 +137,29 @@ The approval keys match the agent scope today (`lib/minga/keymap/scope/agent.ex:
 | `⌃T` | Pin or unpin |
 | `⌃J` / `⌃K` | Move |
 | `esc` | Close |
+
+## Quickfix (`SPC s q`)
+
+| Keys | Action |
+|---|---|
+| `↩` | Jump to the item; the drawer stays open |
+| `]q` / `[q` | Next / previous item, also after the drawer closes |
+| `:cdo` / `:cfdo` | Run a command on every item or file (hints in which-key) |
+| `q`, `esc` | Close |
+
+## Bare keys in other special buffers
+
+Special buffers (git status, the file tree, blame) follow the same rule as Minga's: single letters act there because they are not text.
+
+| Buffer | Keys | Action |
+|---|---|---|
+| Git status | `l` | Git log |
+| Git status | `q` | Close |
+| File tree | `a` / `A` | New file / new folder (the dired convention) |
+| File tree | `q` | Close |
+| Blame (`SPC g b`) | `K` | Detail: commit, or Minga's task and review state |
+| Blame | `↩` | On a Minga line, open that task's conversation; on a commit line, open the commit |
+| Blame | `SPC g b`, `q` | Close |
 
 ## Composer
 
