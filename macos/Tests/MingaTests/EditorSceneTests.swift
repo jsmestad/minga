@@ -76,6 +76,55 @@ struct EditorSceneTests {
         #expect(snapshot.receivedFilePaths == fileURLs.map(\.path))
     }
 
+    private struct InactiveLaunchSnapshot: Codable {
+        let editorWindowCount: Int
+        let editorWindowIsVisible: Bool
+        let applicationIsActive: Bool
+    }
+
+    /// AppKit skips the launch window for an inactive app; the editor must still exist so the frontend can send `ready`.
+    ///
+    /// The BEAM executes the frontend directly rather than through LaunchServices, which is the launch path where AppKit applies that skip.
+    /// Whether the launched app ends up active depends on what else is frontmost on the machine (a CI runner usually has nothing), so the
+    /// test asserts only the window. It discriminates the fallback when another app is frontmost, as in the reported launch.
+    @Test("a direct launch creates the editor window even when AppKit skips the launch window")
+    @MainActor func inactiveLaunchCreatesEditorWindow() async throws {
+        let executable = try #require(Bundle(url: productionApplicationURL())?.executableURL)
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("minga-inactive-launch-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let output = directory.appendingPathComponent("probe.json")
+        let process = Process()
+        process.executableURL = executable
+        let environment = ProcessInfo.processInfo.environment
+        process.environment = [
+            "HOME": environment["HOME"] ?? NSHomeDirectory(),
+            "PATH": environment["PATH"] ?? "/usr/bin:/bin",
+            "MINGA_INACTIVE_LAUNCH_WINDOW_PROBE_PATH": output.path,
+        ]
+        process.standardInput = Pipe()
+        process.standardOutput = FileHandle.nullDevice
+        try process.run()
+        defer { if process.isRunning { process.terminate() } }
+
+        for _ in 0..<1000 where !FileManager.default.fileExists(atPath: output.path) {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        let snapshot = try JSONDecoder().decode(InactiveLaunchSnapshot.self, from: Data(contentsOf: output))
+
+        #expect(snapshot.editorWindowCount == 1)
+        #expect(snapshot.editorWindowIsVisible)
+    }
+
+    private func productionApplicationURL() throws -> URL {
+        let applicationPath = try #require(ProcessInfo.processInfo.environment["MINGA_TEST_PRODUCTION_APP_PATH"])
+        let applicationURL = URL(fileURLWithPath: applicationPath, isDirectory: true)
+        try #require(applicationURL.lastPathComponent == "Minga.app", "Probe requires the separately built Minga app")
+        let bundle = try #require(Bundle(url: applicationURL))
+        try #require(bundle.bundleIdentifier == "com.minga.editor.dev", "Debug app must not use installed Minga preferences")
+        return applicationURL
+    }
+
     /// Targets the launched process, not another concurrently running Minga app with the same bundle ID.
     private func sendFileOpenEvent(_ url: URL, to pid: pid_t) throws {
         let event = NSAppleEventDescriptor(
