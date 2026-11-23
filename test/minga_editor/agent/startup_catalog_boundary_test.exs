@@ -136,18 +136,25 @@ defmodule MingaEditor.Agent.StartupCatalogBoundaryTest do
     assert waiting.agent_connection.session_starts == %{}
     refute_received {:start_requested, ^manager}
 
-    tasks = start_supervised!(Task.Supervisor)
-    scheduler = start_supervised!({MingaEditor.EffectScheduler, task_supervisor: tasks})
-    :ok = MingaEditor.EffectScheduler.attach(scheduler, self())
-    launched = MingaEditor.Agent.CatalogStartup.preload(%{cold | effect_scheduler: scheduler})
+    test = self()
+    handler = {__MODULE__, make_ref()}
 
-    assert_receive {:effect_result, ^scheduler,
-                    %MingaEditor.Effect.Outcome{
-                      request: %{effect: %MingaEditor.Agent.CatalogStartup{action: :preload}},
-                      value: {:completed, :ready}
-                    }},
-                   30_000
+    :ok =
+      :telemetry.attach(
+        handler,
+        [:minga, :agent, :catalog_load, :start],
+        fn _event, _measurements, metadata, _config -> send(test, {:catalog_load, metadata}) end,
+        nil
+      )
 
+    on_exit(fn -> :telemetry.detach(handler) end)
+
+    launched = MingaEditor.Agent.CatalogStartup.preload(cold)
+    assert_receive {:catalog_load, %{trigger: :preload}}, 2_000
+
+    # A start that arrives during the preload joins it instead of loading again.
+    assert {:ok, :ready} = MingaAgent.ModelCatalog.load()
+    refute_received {:catalog_load, _metadata}
     refute LLMDB.epoch() == 0
 
     opened = MingaEditor.Commands.Agent.new_agent_session(launched)

@@ -2,11 +2,12 @@ defmodule MingaEditor.Agent.CatalogStartup do
   @moduledoc """
   Runs the model catalog load off the Editor.
 
-  The catalog preloads in the background once the first frame is dispatched, so a later open finds it ready. Opening the Agent never waits for it: the tab and composer appear at once, and only the session start request waits for a cold catalog. Restoring a saved conversation still waits for the catalog before it changes tabs.
+  The catalog preloads in the background through `MingaAgent.ModelCatalog` once the first frame is dispatched, so a later open finds it ready. Opening the Agent never waits for it: the tab and composer appear at once, and only the session start request waits for a cold catalog. Restoring a saved conversation still waits for the catalog before it changes tabs.
   """
 
   @behaviour MingaEditor.Effect
 
+  alias MingaAgent.ModelCatalog
   alias MingaEditor.Agent.ProvenanceJump
   alias MingaEditor.Agent.SessionStart
   alias MingaEditor.Commands.{Agent, AgentSession}
@@ -27,7 +28,7 @@ defmodule MingaEditor.Agent.CatalogStartup do
           | {:restore, destination(), String.t(), String.t() | nil, ProvenanceJump.origin() | nil}
           | :new
   @type start :: {:start, boolean(), boolean(), SessionStart.follow_up()}
-  @type action :: workspace_action() | start() | :preload
+  @type action :: workspace_action() | start()
   @type t :: %__MODULE__{origin: origin(), action: action()}
 
   @doc """
@@ -57,52 +58,28 @@ defmodule MingaEditor.Agent.CatalogStartup do
   @spec catalog_ready?(EditorState.t()) :: boolean()
   defp catalog_ready?(state) do
     state.agent_connection.agent_provider_module not in [nil, MingaAgent.Providers.Native] or
-      LLMDB.epoch() != 0
+      ModelCatalog.loaded?()
   end
 
   @doc """
   Loads the model catalog in the background after launch.
 
-  Runs in an effect worker, after the first frame is dispatched. An Agent opened after it finishes starts its session without waiting for a load. Disabled with `config :minga, agent_catalog_preload: false`.
+  `MingaAgent.ModelCatalog` runs the load in a low-priority task, after the first frame is dispatched. A session start that arrives during it joins the same load, and an Agent opened after it finishes starts its session without waiting. Disabled with `config :minga, agent_catalog_preload: false`.
   """
   @spec preload(EditorState.t()) :: EditorState.t()
-  def preload(%{effect_scheduler: nil} = state), do: state
-
   def preload(state) do
     if Application.get_env(:minga, :agent_catalog_preload, true) and not catalog_ready?(state),
-      do: schedule_preload(state),
-      else: state
-  end
+      do: ModelCatalog.preload()
 
-  @spec schedule_preload(EditorState.t()) :: EditorState.t()
-  defp schedule_preload(state) do
-    effect = %__MODULE__{origin: {nil, nil, nil}, action: :preload}
-    request = Request.new(effect, resource(effect), Policy.latest_wins())
-    _scheduled = EffectScheduler.schedule(state.effect_scheduler, request)
     state
-  catch
-    :exit, _reason -> state
   end
 
   @impl true
   @spec run(t()) :: {:ok, :ready} | {:error, :model_catalog_unavailable}
-  def run(%__MODULE__{}) do
-    Minga.Telemetry.span([:minga, :agent, :catalog_load], %{}, &load_catalog/0)
-  end
-
-  @spec load_catalog() :: {:ok, :ready} | {:error, :model_catalog_unavailable}
-  defp load_catalog do
-    _providers = LLMDB.providers()
-    {:ok, :ready}
-  rescue
-    LLMDB.LoadError -> {:error, :model_catalog_unavailable}
-  end
+  def run(%__MODULE__{}), do: ModelCatalog.load()
 
   @impl true
   @spec apply(EditorState.t(), Outcome.t()) :: {EditorState.t(), Outcome.t()}
-  def apply(state, %Outcome{request: %{effect: %__MODULE__{action: :preload}}} = outcome),
-    do: {state, outcome}
-
   def apply(state, %Outcome{request: %{effect: effect}, value: value} = outcome) do
     current? = origin(state) == effect.origin and destination_current?(state, effect.action)
 
@@ -147,7 +124,6 @@ defmodule MingaEditor.Agent.CatalogStartup do
 
   @impl true
   @spec render?(Outcome.t()) :: boolean()
-  def render?(%Outcome{request: %{effect: %__MODULE__{action: :preload}}}), do: false
   def render?(%Outcome{value: {status, _}}) when status in [:completed, :failed], do: true
   def render?(%Outcome{}), do: false
 
@@ -178,8 +154,6 @@ defmodule MingaEditor.Agent.CatalogStartup do
   end
 
   @spec resource(t()) :: Request.resource()
-  defp resource(%__MODULE__{action: :preload}), do: :agent_catalog_preload
-
   defp resource(%__MODULE__{action: {:start, _, _, _}, origin: {tab, workspace, _}})
        when is_integer(tab) and is_integer(workspace) and workspace > 0,
        do: {:agent_catalog_session_start, tab, workspace}

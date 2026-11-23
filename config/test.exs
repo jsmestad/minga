@@ -56,6 +56,9 @@ config :minga, test_provider_module: Minga.Test.StubProvider
 # that cover the preload call it directly.
 config :minga, agent_catalog_preload: false
 
+# Test VMs load modules on demand; do not load the whole app per test Editor.
+config :minga, launch_code_warmup: false
+
 # Disable user extension loading so tests are deterministic regardless
 # of which extensions the developer has installed locally.
 config :minga, load_extensions: false

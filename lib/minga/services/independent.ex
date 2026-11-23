@@ -14,6 +14,7 @@ defmodule Minga.Services.Independent do
       ├── Minga.Git.Tracker              Subscribes to buffer events, ETS registry
       ├── Minga.CommandOutput.Registry    Registry(:unique)
       ├── Minga.Eval.TaskSupervisor      Task.Supervisor for eval/async work
+      ├── MingaAgent.ModelCatalog        Shares the one model catalog load
       ├── Minga.Command.Registry         Named command lookup
       ├── MingaAgent.StatusCommand       Cached agent status command output
       ├── Minga.Diagnostics              ETS-backed diagnostics store
@@ -56,6 +57,7 @@ defmodule Minga.Services.Independent do
         :ind_eval_sup,
         {Task.Supervisor, name: Minga.Eval.TaskSupervisor}
       ),
+      StartupTimer.timed_child_spec(:ind_model_catalog, MingaAgent.ModelCatalog),
       StartupTimer.timed_child_spec(:ind_cmd_registry, Minga.Command.Registry),
       StartupTimer.timed_child_spec(:ind_status_cmd, MingaAgent.StatusCommand),
       StartupTimer.timed_child_spec(:ind_conn_mgr, Minga.Distribution.ConnectionManager),
