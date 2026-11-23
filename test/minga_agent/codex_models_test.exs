@@ -14,6 +14,9 @@ defmodule MingaAgent.CodexModelsTest do
       assert Plug.Conn.get_req_header(conn, "authorization") == ["Bearer discovery-token"]
       assert Plug.Conn.get_req_header(conn, "chatgpt-account-id") == ["discovery-account"]
 
+      assert Plug.Conn.fetch_query_params(conn).query_params["client_version"] ==
+               CodexModels.client_version()
+
       Req.Test.json(conn, %{
         "models" => [
           %{"slug" => "listed", "visibility" => "list"},
@@ -30,6 +33,11 @@ defmodule MingaAgent.CodexModelsTest do
 
     other_source = OAuth.new(credential.account_id, "/tmp/other-discovery-oauth.json")
     refute CodexModels.permits?(inventory, other_source, "listed")
+  end
+
+  test "asks for the inventory as a current Codex client" do
+    # The backend hides models from older clients; 0.154.0 hid every model released after 2026-09-09.
+    assert Version.compare(CodexModels.client_version(), "0.171.0") in [:eq, :gt]
   end
 
   test "distinguishes an empty inventory from rejection or malformed data" do
