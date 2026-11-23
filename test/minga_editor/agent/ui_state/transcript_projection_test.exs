@@ -36,6 +36,54 @@ defmodule MingaEditor.Agent.UIState.TranscriptProjectionTest do
     assert TranscriptProjection.visible_pair(cleared, 1) == nil
   end
 
+  test "a streamed content revision keeps the presentation epoch, but a shape change does not" do
+    source =
+      Source.new([{:user, "question"}, {:assistant, "Str"}], ~U[2026-01-01 00:00:00Z], make_ref())
+
+    {:snapshot, snapshot} = Source.since(source, :snapshot)
+    context = {nil, %{}, fn _message, _id, _syntax -> nil end}
+
+    projection =
+      TranscriptProjection.replace(
+        TranscriptProjection.new(),
+        snapshot.entries,
+        snapshot.pinned_ids,
+        snapshot.cursor,
+        context
+      )
+
+    epoch = TranscriptProjection.presentation_epoch(projection)
+
+    streamed = Source.append_stream_tail(source, :assistant, ["eaming"])
+    {:changes, changes} = Source.since(streamed, snapshot.cursor)
+    {revised, :follow} = TranscriptProjection.apply_changes(projection, changes, :follow, context)
+    revised = TranscriptProjection.bump_version(revised)
+
+    assert revised.version == projection.version + 1
+    assert TranscriptProjection.presentation_epoch(revised) == epoch
+
+    {:snapshot, replacement} = Source.since(streamed, :snapshot)
+
+    replaced =
+      TranscriptProjection.replace(
+        revised,
+        replacement.entries,
+        replacement.pinned_ids,
+        replacement.cursor,
+        context
+      )
+
+    shape_changes = [
+      replaced,
+      TranscriptProjection.set_display_start(revised, 1),
+      TranscriptProjection.clear(revised)
+    ]
+
+    for changed <- shape_changes do
+      refute TranscriptProjection.presentation_epoch(changed) == epoch
+    end
+  end
+
   test "a provenance request resolves against the incoming generation, not the visible one" do
     tool = {:tool_call, MingaAgent.ToolCall.new("shared", "edit_file")}
 

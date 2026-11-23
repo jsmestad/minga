@@ -1,0 +1,210 @@
+#!/usr/bin/env python3
+"""Measure main-thread frame staging, freeze, and publish per frame (#3652).
+
+Replays packets captured by `bench/frame_staging_capture.exs` through the Release `NativeRenderPerformance` harness in three conditions per run:
+
+* `baseline`: a harness built with `frameTransactionSignposter = OSSignposter.disabled` (optional, `--baseline-build`).
+* `idle`: the committed signposts, with no tool recording.
+* `recorded`: the committed signposts under `xctrace record --instrument os_signpost`.
+
+The recorded run supplies the per-frame `FrameStage`, `FrameFreeze`, and `FramePublish` durations. All three conditions report the harness's own per-frame dispatch time, which is the overhead check. Raw `.trace` bundles, interval exports, and replay JSON stay in the output directory; `summary.json` holds the aggregated figures.
+"""
+
+import argparse
+import csv
+import json
+import math
+import statistics
+import subprocess
+import sys
+import xml.etree.ElementTree as ET
+from pathlib import Path
+
+WORKLOADS = ["scroll", "typing", "agent_stream"]
+INTERVALS = ["FrameStage", "FrameFreeze", "FramePublish"]
+BINARY = "Build/Products/Release/minga-native-render-performance"
+
+
+def percentile(samples, ratio):
+    ordered = sorted(samples)
+    index = min(max(math.ceil(len(ordered) * ratio) - 1, 0), len(ordered) - 1)
+    return ordered[index]
+
+
+def replay(binary, captures, workload, output, record_trace=None):
+    command = [
+        str(binary), "--frame-staging-replay",
+        str(captures / f"{workload}.packets"), str(captures / f"{workload}.json"), str(output),
+    ]
+    if record_trace is not None:
+        command = [
+            "xcrun", "xctrace", "record", "--instrument", "os_signpost", "--no-prompt",
+            "--output", str(record_trace), "--launch", "--",
+        ] + command
+    subprocess.run(command, check=True, stdout=subprocess.DEVNULL)
+    return json.loads(output.read_text())
+
+
+def export_intervals(trace, destination):
+    xpath = '/trace-toc/run[@number="1"]/data/table[@schema="OSSignpostIntervals"]'
+    with destination.open("w") as handle:
+        subprocess.run(
+            ["xcrun", "xctrace", "export", "--input", str(trace), "--xpath", xpath],
+            check=True, stdout=handle,
+        )
+
+
+def frame_intervals(export):
+    """Returns {name: {frame_seq: total_ms}} for the frame transaction intervals in one export."""
+    by_id = {}
+    totals = {name: {} for name in INTERVALS}
+    for _event, element in ET.iterparse(export, events=("end",)):
+        if element.get("id") is not None:
+            by_id[element.get("id")] = element
+        if element.tag != "row":
+            continue
+        cells = [by_id.get(child.get("ref"), child) for child in element]
+        name = cells[3].text
+        if name in totals:
+            # Instruments formats integers with grouping separators, for example `frame=1,000`.
+            frame = int(cells[11].get("fmt").split("=", 1)[1].replace(",", ""))
+            totals[name][frame] = totals[name].get(frame, 0.0) + int(cells[1].text) / 1_000_000
+    return totals
+
+
+def run_summary(samples):
+    return {"p50_ms": percentile(samples, 0.50), "p95_ms": percentile(samples, 0.95), "frames": len(samples)}
+
+
+def measure(args):
+    output = args.output
+    output.mkdir(parents=True, exist_ok=True)
+    binary = args.build / BINARY
+    baseline = args.baseline_build / BINARY if args.baseline_build else None
+    for workload in args.workloads:
+        for run in range(args.first_run, args.runs + 1):
+            prefix = output / f"{workload}-run{run}"
+            if baseline is not None:
+                replay(baseline, args.captures, workload, prefix.with_suffix(".baseline.json"))
+            replay(binary, args.captures, workload, prefix.with_suffix(".idle.json"))
+            trace = prefix.with_suffix(".trace")
+            replay(binary, args.captures, workload, prefix.with_suffix(".recorded.json"), trace)
+            export_intervals(trace, prefix.with_suffix(".intervals.xml"))
+            print(f"{workload} run {run} done", file=sys.stderr)
+    report(output, args.runs)
+
+
+def load_run(prefix):
+    entry = {}
+    for condition in ("baseline", "idle", "recorded"):
+        path = prefix.with_suffix(f".{condition}.json")
+        if path.exists():
+            entry[condition] = json.loads(path.read_text())
+    entry["intervals"] = frame_intervals(prefix.with_suffix(".intervals.xml"))
+    return entry
+
+
+def report(output, runs):
+    """Writes summary.json and frames.csv from the replay JSON and interval exports in `output`."""
+    results = {}
+    with (output / "frames.csv").open("w", newline="") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(["workload", "run", "frame_seq", "full_transcript_replace", "stage_ms", "freeze_ms", "publish_ms", "recorded_dispatch_cpu_ms"])
+        for workload in WORKLOADS:
+            entries = [load_run(output / f"{workload}-run{run}") for run in range(1, runs + 1)]
+            for run, entry in enumerate(entries, start=1):
+                recorded = entry["recorded"]
+                rows = zip(recorded["sampleFrameSeqs"], recorded["sampleFullTranscriptReplace"], recorded["dispatchCPUSamplesMs"])
+                for frame, replaced, dispatch in rows:
+                    values = [entry["intervals"][name].get(frame, 0.0) for name in INTERVALS]
+                    writer.writerow([workload, run, frame, int(replaced)] + [f"{value:.6f}" for value in values] + [f"{dispatch:.6f}"])
+            results[workload] = summarize(entries)
+    (output / "summary.json").write_text(json.dumps(results, indent=2, sort_keys=True) + "\n")
+    print(markdown(results))
+
+
+def summarize(runs):
+    """Per-run p50/p95 for each interval and each dispatch condition, split by transcript replacement when present."""
+    summary = {"runs": []}
+    for entry in runs:
+        recorded = entry["recorded"]
+        frames = recorded["sampleFrameSeqs"]
+        replaced = recorded["sampleFullTranscriptReplace"]
+        groups = {"all": frames}
+        if any(replaced):
+            groups["full_replace"] = [f for f, r in zip(frames, replaced) if r]
+            groups["incremental"] = [f for f, r in zip(frames, replaced) if not r]
+        run = {"dispatch": {}, "intervals": {}}
+        for condition in ("baseline", "idle", "recorded"):
+            if condition in entry:
+                run["dispatch"][condition] = dispatch_groups(entry[condition])
+        for group, group_frames in groups.items():
+            per_interval = {}
+            sums = []
+            for name in INTERVALS:
+                values = [entry["intervals"][name].get(frame, 0.0) for frame in group_frames]
+                per_interval[name] = run_summary(values)
+            for frame in group_frames:
+                sums.append(sum(entry["intervals"][name].get(frame, 0.0) for name in ("FrameFreeze", "FramePublish")))
+            per_interval["FreezePlusPublish"] = run_summary(sums)
+            run["intervals"][group] = per_interval
+        summary["runs"].append(run)
+    return summary
+
+
+def dispatch_groups(measurement):
+    samples = measurement["dispatchCPUSamplesMs"]
+    replaced = measurement["sampleFullTranscriptReplace"]
+    groups = {"all": run_summary(samples)}
+    if any(replaced):
+        groups["full_replace"] = run_summary([s for s, r in zip(samples, replaced) if r])
+        groups["incremental"] = run_summary([s for s, r in zip(samples, replaced) if not r])
+    return groups
+
+
+def spread(values):
+    return f"{statistics.median(values):.4f} ({min(values):.4f} to {max(values):.4f})"
+
+
+def markdown(results):
+    lines = ["| Workload | Frames | Interval | p50 ms, median (run range) | p95 ms, median (run range) |", "|---|---|---|---|---|"]
+    for workload, summary in results.items():
+        for group in summary["runs"][0]["intervals"]:
+            label = workload if group == "all" else f"{workload} ({group})"
+            for name in INTERVALS + ["FreezePlusPublish"]:
+                p50 = [run["intervals"][group][name]["p50_ms"] for run in summary["runs"]]
+                p95 = [run["intervals"][group][name]["p95_ms"] for run in summary["runs"]]
+                frames = summary["runs"][0]["intervals"][group][name]["frames"]
+                lines.append(f"| {label} | {frames} | {name} | {spread(p50)} | {spread(p95)} |")
+    lines += ["", "| Workload | Condition | Dispatch CPU p50 ms | Dispatch CPU p95 ms |", "|---|---|---|---|"]
+    for workload, summary in results.items():
+        for condition in summary["runs"][0]["dispatch"]:
+            for group in summary["runs"][0]["dispatch"][condition]:
+                label = workload if group == "all" else f"{workload} ({group})"
+                p50 = [run["dispatch"][condition][group]["p50_ms"] for run in summary["runs"]]
+                p95 = [run["dispatch"][condition][group]["p95_ms"] for run in summary["runs"]]
+                lines.append(f"| {label} | {condition} | {spread(p50)} | {spread(p95)} |")
+    return "\n".join(lines)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--build", type=Path, help="NativeRenderPerformance build directory")
+    parser.add_argument("--baseline-build", type=Path, help="build directory with the frame signposter disabled")
+    parser.add_argument("--captures", type=Path, help="output directory of bench/frame_staging_capture.exs")
+    parser.add_argument("--runs", type=int, default=5)
+    parser.add_argument("--first-run", type=int, default=1, help="resume an interrupted measurement at this run")
+    parser.add_argument("--workloads", nargs="+", choices=WORKLOADS, default=WORKLOADS)
+    parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--report-only", action="store_true", help="summarize an existing output directory without replaying")
+    args = parser.parse_args()
+    if args.report_only:
+        report(args.output, args.runs)
+    elif args.build is None or args.captures is None:
+        parser.error("--build and --captures are required unless --report-only is given")
+    else:
+        measure(args)
+
+
+if __name__ == "__main__":
+    main()

@@ -456,6 +456,8 @@ targets:
         type: file
       - path: Tests/NativePerformance/NativeResourceInvestigation.swift
         type: file
+      - path: Tests/NativePerformance/FrameStagingReplay.swift
+        type: file
       - path: Sources
         type: group
         excludes:

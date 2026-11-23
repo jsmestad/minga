@@ -37,6 +37,7 @@ ruler_paths=(
   macos/project.yml
   macos/Sources/Protocol/RenderPerformanceGate.swift
   macos/Tests/NativePerformance/NativeRenderPerformanceMain.swift
+  macos/Tests/NativePerformance/FrameStagingReplay.swift
   macos/Tests/Performance/NativeCompare/main.swift
 )
 
