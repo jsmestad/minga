@@ -164,6 +164,22 @@ struct AgentWorkspaceNarrowLayoutTests {
         #expect(width(200) == minimum)
     }
 
+    @Test("A resize drag keeps the saved sidebar width unless it narrows the sidebar on screen",
+          arguments: [
+              // (start on screen, saved preference, drag, expected saved width)
+              (250, 360, 30, 360),   // narrowed, rightward: the layout pins the width, keep the preference
+              (200, 300, 130, 330),  // narrowed, rightward past the preference: widen it
+              (250, 360, -40, 210),  // narrowed, leftward: narrows below the presented width and lowers the preference
+              (240, 240, 40, 280),   // not narrowed, rightward: unchanged behavior
+              (240, 240, -40, 200),  // not narrowed, leftward: unchanged behavior
+              (240, 240, -100, 180), // not narrowed, leftward past the drag minimum
+              (150, 300, 0, 300),    // below the drag minimum, zero drag: 180 does not override the preference
+              (150, 300, 20, 300),   // below the drag minimum, rightward: keeps the preference
+          ] as [(CGFloat, CGFloat, CGFloat, CGFloat)])
+    func draggedWidth(start: CGFloat, preference: CGFloat, translation: CGFloat, expected: CGFloat) {
+        #expect(SidebarSizing.draggedWidth(start: start, preference: preference, translation: translation, for: nil) == expected)
+    }
+
     @Test("The narrow header menu dispatches every header command",
           arguments: AgentChatHeaderView.HeaderCommand.allCases)
     func overflowMenuDispatchesCommands(command: AgentChatHeaderView.HeaderCommand) throws {

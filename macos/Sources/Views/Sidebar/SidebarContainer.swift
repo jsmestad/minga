@@ -31,6 +31,14 @@ public enum SidebarSizing {
         clamp(max(currentWidth, preferredWidth(for: item)), for: item)
     }
 
+    /// The saved width after a resize drag that started at `start`, the width on screen.
+    /// In a narrow window `start` is below `preference`, and widening the drag cannot show more because the layout pins the width. So a drag that does not narrow the sidebar keeps the saved preference; only a drag that narrows it lowers the preference.
+    public static func draggedWidth(start: CGFloat, preference: CGFloat, translation: CGFloat, for item: SidebarItem?) -> CGFloat {
+        let proposed = clamp(start + translation, for: item)
+        guard proposed >= start else { return proposed }
+        return max(proposed, preference)
+    }
+
     /// The narrowest the sidebar is ever presented, below the 180 pt drag minimum.
     /// It still shows file icons with short names and the header's project icon and actions.
     public static let narrowMinWidth: CGFloat = 100
@@ -80,6 +88,7 @@ public struct SidebarContainer: View {
 
     @State private var isDraggingResize: Bool = false
     @State private var dragStartWidth: CGFloat = 0
+    @State private var dragStartPreference: CGFloat = 0
     /// The width on screen, which is narrower than `sidebarWidth` in a narrow window. A drag starts from what the user sees.
     @State private var presentedWidth: CGFloat = SidebarSizing.defaultWidth
 
@@ -125,9 +134,14 @@ public struct SidebarContainer: View {
                         if !isDraggingResize {
                             isDraggingResize = true
                             dragStartWidth = min(sidebarWidth, presentedWidth)
+                            dragStartPreference = sidebarWidth
                         }
-                        let newWidth = dragStartWidth + value.translation.width
-                        sidebarWidth = SidebarSizing.clamp(newWidth, for: activeSidebar)
+                        sidebarWidth = SidebarSizing.draggedWidth(
+                            start: dragStartWidth,
+                            preference: dragStartPreference,
+                            translation: value.translation.width,
+                            for: activeSidebar
+                        )
                     }
                     .onEnded { _ in
                         isDraggingResize = false
