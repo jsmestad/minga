@@ -17,7 +17,8 @@ While scenarios.toml sets phase = "keyboard", missing click paths (2, by clicks,
 and 5) are reported as "pending mouse sweep" and do not fail the run. With
 --final, or phase = "final", they are violations like the rest.
 
-Removed scenarios are skipped, and so are states that are not places (no exits),
+Deferred scenarios (needs a rethink before design) are listed like missing ones
+for reporting and are not violations by themselves. Removed scenarios are skipped, and so are states that are not places (no exits),
 terminal states and surfaces outside the app. Scenarios with reached_by (events
 such as errors or Minga asking) count as reachable, and a list reaches its
 empty_state the same way it is reached. Exits with exit code 1 when any violation is found.
@@ -169,6 +170,11 @@ def main(argv):
             print(f"  - {item}")
     if pending:
         print(f"\n{pending} pending the mouse sweep (not failures in the keyboard phase)")
+    deferred = [s["id"] for s in scenarios if s["status"] == "deferred"]
+    if deferred:
+        print(f"\nDeferred (needs a rethink, not a violation): {len(deferred)}")
+        for d in deferred:
+            print(f"  - {d}")
     print(f"\n{total} violations")
     return 1 if total else 0
 

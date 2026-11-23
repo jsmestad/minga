@@ -12,10 +12,11 @@
 #   surfaces   the surfaces on screen (see surfaces.md), e.g. ["modeline", "drawer:tasks"].
 #   states     the Minga or UI states shown, e.g. ["needs_you", "working"].
 #   frontends  ["macos", "tui"], or one of them with platform_only_reason set.
-#   status     "designed" | "existing-only" | "missing" | "removed".
+#   status     "designed" | "existing-only" | "missing" | "deferred" | "removed".
 #              designed:      a design board exists and follows docs/design.
 #              existing-only: the screen exists in the app but has not been redesigned.
 #              missing:       no design and no implementation.
+#              deferred:      needs a rethink before it is designed; the board, if any, is a placeholder.
 #              removed:       exists today; the Spine takes it away (notes say where its job goes).
 #   boards     design canvas board files when designed: { macos = "...", tui = "..." }.
 #   exits      every way out, by key and by click:
@@ -96,18 +97,19 @@ notes = "The cold-start scenario for reachability. Existing empty_state builder;
 [[scenario]]
 id = "start.first_run"
 journey = "start"
-title = "First run: Servus, choose keymap and provider"
+title = "First run: onboarding (deferred)"
 surfaces = ["welcome"]
 states = []
 frontends = ["macos", "tui"]
-status = "missing"
+status = "deferred"
+boards = { macos = "Batch2_start_first_run.dc.html", tui = "Batch2_start_first_run.dc.html" }
 reached_by = "the first launch"
 transient = true
 exits = [
   { key = "↩", click = "Continue", to = "start.empty" },
   { key = "esc", click = "Skip", to = "start.empty" },
 ]
-notes = "Bavarian voice belongs here (Servus). Picks Vim or CUA keys, theme follows the system, signs in a model provider or skips."
+notes = "Deferred: onboarding needs a rethink (a walkthrough or an interactive tutorial that teaches SPC and Minga by doing; SPC h T exists to build on). Batch2_start_first_run is a placeholder, not the design. Voice: Servus."
 
 [[scenario]]
 id = "start.project_switcher"
@@ -163,14 +165,15 @@ title = "Quit with unsaved files or Minga working: confirm"
 surfaces = ["minibuffer"]
 states = []
 frontends = ["macos", "tui"]
-status = "missing"
+status = "designed"
+boards = { macos = "Batch2_start_quit_confirm.dc.html", tui = "Batch2_start_quit_confirm.dc.html" }
 transient = true
 exits = [
-  { key = "y", click = "Quit", to = "start.quit.farewell" },
-  { key = "n", click = "Cancel", to = "edit.plain" },
+  { key = "s", click = "Save all and quit", to = "start.quit.farewell" },
+  { key = "d", click = "Discard and quit", to = "start.quit.farewell" },
   { key = "esc", click = "click outside", to = "edit.plain" },
 ]
-notes = "Lists what would be lost: unsaved buffers, running tasks, unreviewed changes."
+notes = "Shown by SPC q q or ⌘Q only when something is at stake. Lists it: unsaved buffers, running tasks, unreviewed changes. s saves all first; d drops only your unsaved edits. Quitting never discards Minga's unreviewed changes: they wait for review next time. Explicit s and d, no y/n ambiguity."
 
 [[scenario]]
 id = "start.quit.farewell"
@@ -179,10 +182,11 @@ title = "Ciao: the app closes"
 surfaces = ["minibuffer"]
 states = []
 frontends = ["macos", "tui"]
-status = "missing"
+status = "designed"
+boards = { macos = "Batch2_start_quit_farewell.dc.html", tui = "Batch2_start_quit_farewell.dc.html" }
 terminal_state = true
 exits = []
-notes = "Voice: \"Ciao.\" (everyday Munich speech). Terminal state: the process exits."
+notes = "Voice: \"Ciao.\" (everyday Munich speech), with an optional one-line summary. macOS: the modeline shows it while the window fades. TUI: printed after the terminal is restored, so it stays in scrollback. Terminal state: the process exits."
 
 # ---- edit ------------------------------------------------------------------
 
@@ -1084,28 +1088,39 @@ id = "minga.approval.diff"
 journey = "minga"
 title = "Show diff of what an approval would change"
 surfaces = ["drawer:tasks", "diff"]
-states = []
+states = ["needs_you"]
 frontends = ["macos", "tui"]
-status = "missing"
+status = "designed"
+boards = { macos = "Batch2_minga_approval_diff.dc.html", tui = "Batch2_minga_approval_diff.dc.html" }
 transient = true
 exits = [
   { key = "y", click = "Approve once", to = "minga.tasks.working" },
+  { key = "a", click = "Always for this session", to = "minga.tasks.working" },
+  { key = "t", click = "This turn", to = "minga.tasks.working" },
   { key = "n", click = "Deny", to = "minga.tasks.working" },
+  { key = "]h / [h", click = "", to = "minga.approval.diff", keyboard_only = "moves between changes when the request edits several places" },
+  { key = "esc", click = "close", to = "minga.tasks.needs_you" },
   { key = "q", click = "close", to = "minga.tasks.needs_you" },
 ]
+notes = "Opened with = on the needs-you row (= is Show diff in the drawer and in review). The approval stays answerable while you read the diff."
 
 [[scenario]]
 id = "minga.task.output"
 journey = "minga"
 title = "A task's output or log"
 surfaces = ["buffer:task_output"]
-states = []
+states = ["failed"]
 frontends = ["macos", "tui"]
-status = "missing"
+status = "designed"
+boards = { macos = "Batch2_minga_task_output.dc.html", tui = "Batch2_minga_task_output.dc.html" }
 exits = [
-  { key = "SPC a ?", click = "Ask Minga to fix", to = "minga.inline_ask" },
+  { key = "r", click = "Retry", to = "minga.tasks.working" },
+  { key = "f", click = "Ask Minga to fix", to = "minga.conversation" },
+  { key = "↩", click = "file:line link", to = "edit.plain", note = "on a file:line" },
+  { key = "]] / [[", click = "", to = "minga.task.output", note = "next or previous failure" },
   { key = "q", click = "close", to = "minga.tasks.list" },
 ]
+notes = "Opened with o on a failed or waiting row. Read-only buffer: the error is highlighted, file:line are links, f attaches the output to the conversation."
 
 [[scenario]]
 id = "minga.review.keep_all.confirm"
@@ -1453,14 +1468,19 @@ title = "Terminal drawer in Normal mode, scrolled back"
 surfaces = ["drawer:terminal", "modeline"]
 states = []
 frontends = ["macos", "tui"]
-status = "missing"
+status = "designed"
+boards = { macos = "Batch3_terminal_drawer_normal.dc.html", tui = "Batch3_terminal_drawer_normal.dc.html" }
 transient = true
 exits = [
-  { key = "i", click = "click the live prompt", to = "terminal.drawer" },
+  { key = "i / a", click = "click the live prompt", to = "terminal.drawer" },
+  { key = "↩", click = "click the live prompt", to = "terminal.drawer", note = "on the live prompt line" },
   { key = "]] / [[", click = "", to = "terminal.drawer.normal" },
-  { key = "q", click = "drawer close", to = "edit.plain", note = "proposed: q hides the drawer, the shell keeps running" },
+  { key = "yic / yac", click = "", to = "terminal.drawer.normal", keyboard_only = "text objects copy a command's output or whole block" },
+  { key = "↩", click = "click the failed glyph", to = "terminal.failed_block.menu", note = "on a failed block" },
+  { key = "q", click = "drawer close", to = "edit.plain", note = "hides the drawer; the shell keeps running" },
+  { key = "SPC o t", click = "drawer close", to = "edit.plain" },
 ]
-notes = "Shows the ↓ N new lines marker."
+notes = "Shows the ↓ N new lines marker; the view holds still while output arrives."
 
 [[scenario]]
 id = "terminal.failed_block.menu"
@@ -1506,25 +1526,32 @@ title = "SPC o T: a terminal in the current window"
 surfaces = ["editor:terminal", "modeline"]
 states = []
 frontends = ["macos", "tui"]
-status = "missing"
+status = "designed"
+boards = { macos = "Batch3_terminal_window.dc.html", tui = "Batch3_terminal_window.dc.html" }
 exits = [
   { key = "⌃\\ ⌃N", click = "", to = "terminal.drawer.normal", keyboard_only = "terminal mode passes every key to the shell", back = true },
+  { key = "SPC ,", click = "", to = "files.switcher", note = "terminals are listed under Terminals" },
   { key = ":q", click = "", to = "edit.plain" },
+  { key = "exit", click = "", to = "terminal.exited", note = "the shell ends; the window keeps its scrollback" },
 ]
+notes = "The title bar shows the buffer and its working directory (\"*terminal 2*  ~/code/minga\")."
 
 [[scenario]]
 id = "terminal.exited"
 journey = "terminal"
 title = "Shell exited: what is left of the terminal"
-surfaces = ["drawer:terminal"]
+surfaces = ["editor:terminal"]
 states = []
 frontends = ["macos", "tui"]
-status = "missing"
-reached_by = "the shell exits in SPC o T"
+status = "designed"
+boards = { macos = "Batch3_terminal_exited.dc.html", tui = "Batch3_terminal_exited.dc.html" }
+reached_by = "the shell ends in an SPC o T window, or dies on its own"
 exits = [
+  { key = "↩", click = "Restart shell", to = "terminal.window" },
   { key = "q", click = "close", to = "edit.plain" },
-  { key = "↩", click = "Restart shell", to = "terminal.drawer" },
+  { key = "yic / /", click = "", to = "terminal.exited", note = "the scrollback stays searchable and copyable" },
 ]
+notes = "Shows \"Shell exited (code 0) · ↩ restart · q close\". Typing exit in the drawer closes the drawer and its buffer instead; this state is for SPC o T windows and shells that end on their own."
 
 [[scenario]]
 id = "terminal.plain"
@@ -1533,13 +1560,16 @@ title = "Terminal without shell integration"
 surfaces = ["drawer:terminal"]
 states = []
 frontends = ["macos", "tui"]
-status = "missing"
+status = "designed"
+boards = { macos = "Batch3_terminal_plain.dc.html", tui = "Batch3_terminal_plain.dc.html" }
 reached_by = "SPC o t in a shell without integration"
 exits = [
   { key = "SPC o t", click = "drawer close", to = "edit.plain" },
+  { key = "⌃\\ ⌃N", click = "", to = "terminal.drawer.normal", keyboard_only = "terminal mode passes every key to the shell", back = true },
   { key = "q (Normal mode)", click = "", to = "edit.plain" },
+  { key = "SPC b m", click = "", to = "files.messages", note = "the one-time hint" },
 ]
-notes = "No command blocks; a one-time hint in *Messages* explains how to enable them. q in Normal mode hides the drawer and leaves the shell running, as in terminal.drawer.normal."
+notes = "No command blocks; a one-time hint in *Messages* explains how to enable them. q in Normal mode hides the drawer and leaves the shell running."
 
 # ---- files -----------------------------------------------------------------
 
@@ -1959,39 +1989,51 @@ exits = []
 [[scenario]]
 id = "errors.crash_reconnect"
 journey = "errors"
-title = "The core restarted: reconnecting"
-surfaces = ["overlay"]
+title = "The core restarted: reconnecting, then a notice"
+surfaces = ["overlay", "notifications"]
 states = []
 frontends = ["macos", "tui"]
-status = "missing"
-reached_by = "the core restarts"
-exits = []
-notes = "What survives a restart, and how Minga says so."
+status = "designed"
+boards = { macos = "Batch3_errors_crash_reconnect.dc.html", tui = "Batch3_errors_crash_reconnect.dc.html" }
+reached_by = "a supervised part of the core restarts"
+exits = [
+  { key = "(reconnected)", click = "", to = "edit.plain", keyboard_only = "happens on its own when the frontend reconnects" },
+  { key = "SPC b m", click = "", to = "files.messages" },
+  { key = "esc", click = "dismiss", to = "edit.plain", note = "Normal mode only" },
+]
+notes = "Your work stays on screen while it reconnects. The notice names what restarted: \"Minga's session restarted after a crash; your files and tasks are intact.\" or the editor core. The BEAM reports which supervised part restarted."
 
 [[scenario]]
 id = "errors.lsp_failed"
 journey = "errors"
 title = "A language server failed to start"
 surfaces = ["notifications", "modeline"]
-states = []
+states = ["failed"]
 frontends = ["macos", "tui"]
-status = "missing"
-reached_by = "a language server fails to start"
+status = "designed"
+boards = { macos = "Batch3_errors_lsp_failed.dc.html", tui = "Batch3_errors_lsp_failed.dc.html" }
+reached_by = "a language server fails to start or crashes"
 exits = [
+  { key = "SPC c l r", click = "Restart", to = "edit.plain" },
   { key = "SPC c l i", click = "Details", to = "code.lsp_info" },
-  { key = "esc", click = "dismiss", to = "edit.plain" },
+  { key = "SPC c l I", click = "Manage tools", to = "code.lsp_tools" },
+  { key = "esc", click = "dismiss", to = "edit.plain", note = "Normal mode only" },
 ]
+notes = "Editing continues. The modeline segment \"elixir-ls failed\" replaces the diagnostics count while the server is down and is never dropped. Notice actions use leader keys, never bare keys."
 
 [[scenario]]
 id = "errors.config_error"
 journey = "errors"
 title = "Config failed to load"
-surfaces = ["notifications"]
-states = []
+surfaces = ["notifications", "modeline"]
+states = ["failed"]
 frontends = ["macos", "tui"]
-status = "missing"
+status = "designed"
+boards = { macos = "Batch3_errors_config_error.dc.html", tui = "Batch3_errors_config_error.dc.html" }
 reached_by = "the config fails to load"
 exits = [
-  { key = "↩", click = "Open config", to = "edit.plain" },
-  { key = "esc", click = "dismiss", to = "edit.plain" },
+  { key = "SPC f p", click = "Open config", to = "edit.plain", note = "opens config.exs at the failing line" },
+  { key = "SPC h r", click = "Reload", to = "edit.plain" },
+  { key = "esc", click = "dismiss", to = "edit.plain", note = "Normal mode only" },
 ]
+notes = "Minga opens with defaults. The notice names file:line and the error; the modeline segment \"config: defaults\" stays until the config loads and is never dropped."

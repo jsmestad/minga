@@ -10,6 +10,7 @@ Notation: modifiers as Mac glyphs (⌃J, ⌥↩, ⌘.), leader sequences as `SPC
 - **In a file, `y n = Y q` are always Vim.** Minga's changes are handled with leader keys, a text object and ex commands. Bare single-letter actions live only in Minga's special buffers.
 - **Typing surfaces use control keys.** Where you type into a prompt (the switcher, filters), actions use ⌃ keys so letters stay text.
 - **Bulk actions confirm.** Keep all and Reject all ask "y/n" in the minibuffer first.
+- **Notices act through leader keys only.** An error notice in the echo area never takes bare keys; its actions are leader bindings such as `SPC c l r`, and `esc` dismisses it in Normal mode only.
 - **`q` closes special buffers and splits; `esc` closes anything transient.** `q` in Minga's special buffers and splits (conversation, queue, subagent peek, checklist, attachments, retained history, the observatory) returns you to the window you came from, the way `quit-window` works in Emacs `special-mode` buffers and Doom popups. `esc` cancels or dismisses any transient surface (prompts, pickers, menus, overlays). In the conversation, `q` applies in Normal mode outside the composer, where it is not text.
 
 ## Leader
@@ -94,6 +95,26 @@ Minga is pre-release, so keys move without deprecation aliases.
 | `q` | Close | all |
 
 The approval keys match the agent scope today (`lib/minga/keymap/scope/agent.ex:249` to `252`: `y` or Enter approve once, `a` session, `t` turn, `n` or Esc deny).
+
+## Task output (`o` on a task row)
+
+| Keys | Action |
+|---|---|
+| `]]` / `[[` | Next / previous failure |
+| `↩` on a `file:line` | Open the file at that line |
+| `r` | Retry the task |
+| `f` | Ask Minga to fix it, with the output attached |
+| `q` | Close |
+
+`]]` / `[[` mean "next block in a read-only log" here, as they do for command blocks in the terminal.
+
+## Quit prompt
+
+| Keys | Action |
+|---|---|
+| `s` | Save all and quit |
+| `d` | Discard your unsaved edits and quit (Minga's unreviewed changes are kept) |
+| `esc` | Cancel |
 
 ## Subagent peek
 
