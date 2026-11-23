@@ -407,7 +407,7 @@ kbd {
 /* Asymmetric two-column section header on landing page */
 .section-header {
   display: grid;
-  grid-template-columns: 12.5rem minmax(0, 44rem);
+  grid-template-columns: 12.5rem minmax(0, 1fr);
   gap: 0.45rem 2.25rem;
   align-items: baseline;
   margin-bottom: 2.5rem;
@@ -437,11 +437,11 @@ kbd {
 }
 
 .hero-copy {
-  max-width: 52rem;
+  max-width: 100%;
 }
 
 .hero-copy h1 {
-  max-width: 24ch;
+  max-width: 28ch;
   text-wrap: balance;
 }
 
@@ -450,12 +450,12 @@ kbd {
   font-size: clamp(1.06rem, 1.4vw, 1.18rem);
   line-height: 1.62;
   color: var(--text-secondary);
-  max-width: 46rem;
+  max-width: 56rem;
 }
 
 .hero-install {
   margin-top: 1.75rem;
-  max-width: 42rem;
+  max-width: 48rem;
 }
 
 .hero-install .code-tabs {
@@ -1341,7 +1341,6 @@ kbd {
 .runtime-answer p {
   font-size: 0.95rem;
   line-height: 1.62;
-  max-width: 40rem;
 }
 
 .boundary-band {
