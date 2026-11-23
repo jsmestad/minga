@@ -3,6 +3,8 @@ defmodule MingaEditor.Agent.UIStateTest do
 
   alias Minga.Buffer.Process, as: BufferProcess
   alias MingaAgent.Session.{ConnectionSnapshot, ConnectionTarget}
+  alias MingaEditor.Agent.StartFailure
+  alias MingaEditor.Agent.StartRequest
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.UIState.Panel
 
@@ -21,10 +23,11 @@ defmodule MingaEditor.Agent.UIStateTest do
 
   test "every lifecycle transition preserves the same live draft and prompt cursor" do
     initial = ui_with_input(["unfinished", "café"], {1, 3})
-    states = [:starting, {:conversation, self()}, {:failed, "startup failed"}, :unavailable]
+    failure = StartFailure.timed_out(StartRequest.default())
+    states = [:starting, {:conversation, self()}, {:failed, failure}, :unavailable]
 
     for from <- states, to <- states do
-      ui = initial |> UIState.transition_chat(from) |> UIState.transition_chat(to)
+      ui = initial |> UIState.restore_chat(from) |> UIState.restore_chat(to)
       assert ui.chat_lifecycle == to
       assert MingaEditor.Agent.PromptBuffer.input_text(ui) == "unfinished\ncafé"
       assert MingaEditor.Agent.PromptBuffer.input_cursor(ui) == {1, 3}
@@ -32,7 +35,16 @@ defmodule MingaEditor.Agent.UIStateTest do
     end
   end
 
-  test "a provider startup failure reports the Session reason and keeps the draft until ready" do
+  test "fail_start installs the classified failure and keeps the draft" do
+    failure = StartFailure.timed_out(StartRequest.default())
+    failed = UIState.fail_start(ui_with_input(["keep"], {0, 2}), failure)
+
+    assert failed.chat_lifecycle == {:failed, failure}
+    assert UIState.start_failure(failed) == failure
+    assert MingaEditor.Agent.PromptBuffer.input_text(failed) == "keep"
+  end
+
+  test "a provider startup failure offers a provider retry and keeps the draft until ready" do
     session = self()
 
     starting = %ConnectionSnapshot{
@@ -47,22 +59,60 @@ defmodule MingaEditor.Agent.UIStateTest do
     ui = UIState.project_connection(ui_with_input(["keep draft"], {0, 5}), starting)
     assert ui.chat_lifecycle == :starting
 
-    failed =
-      ui
-      |> UIState.project_connection(%{starting | problem: {:provider, :startup_failed}})
-      |> UIState.report_chat_start_failure("Could not start the configured provider")
+    failed = UIState.project_connection(ui, %{starting | problem: {:provider, :startup_failed}})
 
-    assert failed.chat_lifecycle == {:failed, "Could not start the configured provider"}
+    assert failed.chat_lifecycle ==
+             {:failed,
+              %StartFailure{
+                message: "The Agent provider could not start.",
+                remedy: {:retry, :provider}
+              }}
+
     assert MingaEditor.Agent.PromptBuffer.input_text(failed) == "keep draft"
 
-    ready =
-      failed
-      |> UIState.project_connection(%{starting | provider_phase: :running})
-      |> UIState.report_chat_start_failure("An unrelated turn failed")
+    ready = UIState.project_connection(failed, %{starting | provider_phase: :running})
 
     assert ready.chat_lifecycle == {:conversation, session}
     assert MingaEditor.Agent.PromptBuffer.input_text(ready) == "keep draft"
     assert MingaEditor.Agent.PromptBuffer.input_cursor(ready) == {0, 5}
+  end
+
+  describe "model_label/1" do
+    test "names the header model from the lifecycle, never Resolving after a failed start" do
+      failure = StartFailure.timed_out(StartRequest.default())
+      unresolved = Panel.set_model_name(Panel.new(), "unknown")
+      configured = Panel.set_model_name(Panel.new(), "gpt-5")
+
+      for {lifecycle, panel, label} <- [
+            {:starting, unresolved, "Starting…"},
+            {:starting, configured, "gpt-5"},
+            {{:failed, failure}, Panel.set_credential_readiness(unresolved, :unconfigured),
+             "No model configured"},
+            {{:failed, failure}, Panel.set_credential_readiness(unresolved, :configured),
+             "Not started"},
+            {{:failed, failure}, Panel.set_credential_readiness(configured, :configured),
+             "Not started"},
+            {:unavailable, configured, "No session"},
+            {{:conversation, self()}, configured, "gpt-5"}
+          ] do
+        ui = UIState.restore_chat(%UIState{panel: panel}, lifecycle)
+        assert UIState.model_label(ui) == label, "#{inspect(lifecycle)}"
+      end
+    end
+  end
+
+  describe "start_remedy/1" do
+    test "names the remedy only for a failed start" do
+      for {lifecycle, remedy} <- [
+            {:starting, nil},
+            {:unavailable, nil},
+            {{:conversation, self()}, nil},
+            {{:failed, StartFailure.timed_out(StartRequest.default())}, :retry},
+            {{:failed, StartFailure.missing_credentials()}, :set_up_provider}
+          ] do
+        assert UIState.start_remedy(UIState.restore_chat(UIState.new(), lifecycle)) == remedy
+      end
+    end
   end
 
   describe "new/0 and basic state" do

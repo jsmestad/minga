@@ -2,7 +2,15 @@ defmodule Minga.RenderModel.UI.TabBar.Tab do
   @moduledoc false
 
   @type kind :: :file | :agent
-  @type agent_status :: :idle | :thinking | :tool_executing | :error | :plan | nil
+  @type agent_status ::
+          :idle
+          | :thinking
+          | :tool_executing
+          | :error
+          | :plan
+          | :approval_waiting
+          | :needs_you
+          | nil
 
   @type t :: %__MODULE__{
           id: non_neg_integer(),

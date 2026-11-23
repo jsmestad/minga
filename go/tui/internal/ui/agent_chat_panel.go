@@ -204,31 +204,80 @@ func (m Model) renderAgentMainColumn(chat protocol.AgentChat, width int, budget 
 	return takeLines(lines, budget)
 }
 
+// renderAgentLifecycleNotice draws a non-conversation chat: a glyph and
+// headline, the BEAM's sentence about the cause, the one action it offers as a
+// clickable zone with its key hint, then a muted note that the draft is kept.
+// The action label and key hint are rendered exactly as sent.
 func (m Model) renderAgentLifecycleNotice(chat protocol.AgentChat, width, budget int) []string {
-	title, details := "Agent unavailable", []string{"Start a new Agent session (SPC a n), then reopen the conversation in Sessions."}
-	switch chat.Lifecycle {
-	case protocol.AgentChatStarting:
-		title, details = "Starting Agent", nil
-	case protocol.AgentChatFailed:
-		action := "Start a new Agent session (SPC a n)."
-		if chat.PromptVisibleRows == 0 {
-			action = "Switch away from this tab and return to reopen the composer."
-		}
-		details = []string{chat.LifecycleReason, action}
-	}
 	if budget <= 0 {
 		return nil
 	}
-	lines := []string{m.renderAgentNotice(title, "", width)}
-	for _, detail := range details {
-		for _, row := range strings.Split(ansi.Wrap(detail, max(width-1, 1), ""), "\n") {
+	p := m.palette()
+	surface := lipgloss.NewStyle().Background(p.SurfaceAlt())
+	headline := lipgloss.NewStyle().Bold(true).Foreground(p.Text()).Background(p.SurfaceAlt())
+	secondary := lipgloss.NewStyle().Foreground(p.Text()).Background(p.SurfaceAlt())
+	muted := lipgloss.NewStyle().Foreground(p.Muted()).Background(p.SurfaceAlt())
+	row := func(content string) string {
+		return surface.Width(width).Render(fitStyled(content, width))
+	}
+
+	glyph := lipgloss.NewStyle().Bold(true).Foreground(p.AgentStatusNeedsYou()).Background(p.SurfaceAlt()).Render("⚠")
+	if chat.Lifecycle == protocol.AgentChatStarting {
+		glyph = lipgloss.NewStyle().Foreground(p.AgentStatusWorking()).Background(p.SurfaceAlt()).Render(m.agentSpinner())
+	}
+	lines := []string{row(glyph + surface.Render(" ") + headline.Render(agentLifecycleHeadline(chat)))}
+	indent := surface.Render("  ")
+	wrapWidth := max(width-3, 1)
+	appendWrapped := func(text string, style lipgloss.Style) bool {
+		for _, part := range strings.Split(ansi.Wrap(text, wrapWidth, ""), "\n") {
 			if len(lines) >= budget {
-				return lines
+				return false
 			}
-			lines = append(lines, m.renderAgentNotice("", row, width))
+			lines = append(lines, row(indent+style.Render(part)))
 		}
+		return true
+	}
+	if chat.Lifecycle == protocol.AgentChatFailed && chat.LifecycleReason != "" &&
+		!appendWrapped(chat.LifecycleReason, secondary) {
+		return lines
+	}
+	if remedy := chat.LifecycleRemedy; chat.Lifecycle == protocol.AgentChatFailed &&
+		remedy.Kind != protocol.AgentStartRemedyNone {
+		if len(lines) >= budget {
+			return lines
+		}
+		button := lipgloss.NewStyle().Bold(true).Foreground(p.SelectionText()).Background(p.AgentStatusNeedsYou()).Padding(0, 1).Render(remedy.Label)
+		action := m.zones.Mark(agentStartRemedyZoneID(remedy.Kind), button)
+		if remedy.KeyHint != "" {
+			action += surface.Render(" ") + muted.Render(remedy.KeyHint)
+		}
+		lines = append(lines, row(indent+action))
+	}
+	if (chat.Lifecycle == protocol.AgentChatFailed || chat.Lifecycle == protocol.AgentChatUnavailable) &&
+		chat.PromptVisibleRows > 0 {
+		appendWrapped("Your draft is saved. SPC a n starts a new session.", muted)
 	}
 	return lines
+}
+
+func agentLifecycleHeadline(chat protocol.AgentChat) string {
+	switch chat.Lifecycle {
+	case protocol.AgentChatStarting:
+		return "Starting Agent"
+	case protocol.AgentChatUnavailable:
+		return "No active Agent session"
+	case protocol.AgentChatFailed:
+		switch chat.LifecycleRemedy.Kind {
+		case protocol.AgentStartRemedySetUpProvider:
+			return "Agent needs setup"
+		case protocol.AgentStartRemedyRetry:
+			return "Agent could not start"
+		default:
+			return "Agent unavailable"
+		}
+	default:
+		return ""
+	}
 }
 
 func agentMainColumnBudgets(chat protocol.AgentChat, composerRows int, budget int) (composerHeight int, statusHeight int, contentBudget int, messageBudget int) {
@@ -572,7 +621,7 @@ func (m Model) renderAgentStatusBadge(status byte) string {
 		style = style.Foreground(p.SelectionText()).Background(p.AgentStatusIterating())
 	case 3: // error
 		style = style.Foreground(p.SelectionText()).Background(p.AgentStatusErrored())
-	case 4, 5, agentStatusQuestionWaiting: // planning, awaiting input
+	case 4, 5, agentStatusNeedsYou, agentStatusQuestionWaiting: // planning, awaiting input, failed start
 		style = style.Foreground(p.SelectionText()).Background(p.AgentStatusNeedsYou())
 	default: // idle
 		style = style.Foreground(p.AgentStatusIdle()).Background(p.SurfaceAlt())
@@ -584,7 +633,13 @@ func (m Model) agentSpinner() string {
 	return m.agent.spinner()
 }
 
-const agentStatusQuestionWaiting = 6
+// agentStatusNeedsYou is the wire status of a failed start waiting for the
+// user's action. agentStatusQuestionWaiting is a local presentation status
+// outside the wire range.
+const (
+	agentStatusNeedsYou        = 6
+	agentStatusQuestionWaiting = 0xF0
+)
 
 func agentPresentationStatus(chat protocol.AgentChat) byte {
 	if chat.QuestionOffer != 0 {
@@ -605,6 +660,8 @@ func agentChatStatusLabel(status byte) string {
 		return "planning"
 	case 5:
 		return "Awaiting approval"
+	case agentStatusNeedsYou:
+		return "Needs you"
 	case agentStatusQuestionWaiting:
 		return "Waiting for your answer"
 	default:

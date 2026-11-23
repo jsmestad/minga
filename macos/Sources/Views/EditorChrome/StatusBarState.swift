@@ -221,6 +221,7 @@ public final class StatusBarState {
         case .error: return "error"
         case .planning: return "plan"
         case .approvalWaiting: return "Awaiting approval"
+        case .needsYou: return "Needs you"
         case .unknown: return "unknown"
         }
     }

@@ -17,6 +17,20 @@ defmodule Minga.Frontend.Adapter.GUI.WorkspacesEncoderTest do
       assert {nil, _caches} = WorkspacesEncoder.encode(%Workspaces{}, Caches.new())
     end
 
+    test "a failed Agent start encodes its workspace as needs-you (6)" do
+      model = full_model()
+      [manual, agent] = model.workspaces
+      model = %{model | workspaces: [manual, %{agent | status: :needs_you}]}
+
+      {cmd, _caches} = WorkspacesEncoder.encode(model, Caches.new())
+      assert <<@op_gui_workspaces, len::16, payload::binary-size(len)>> = cmd
+      assert <<2::8, 2::16, 1::8, 1::8, 2::8, rest::binary>> = payload
+      {_manual, rest} = decode_workspace(rest)
+      {agent_workspace, _rest} = decode_workspace(rest)
+
+      assert agent_workspace.status == 6
+    end
+
     test "encodes full v2 workspace and visible tab command directly" do
       model = full_model()
 

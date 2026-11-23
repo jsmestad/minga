@@ -12,6 +12,8 @@ defmodule MingaEditor.Agent.SessionStart do
   alias MingaAgent.ProjectView
   alias MingaAgent.SessionManager
   alias MingaEditor.Agent.ProvenanceJump
+  alias MingaEditor.Agent.StartFailure
+  alias MingaEditor.Agent.StartRequest
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.Shell.Traditional.Workflow
@@ -42,7 +44,7 @@ defmodule MingaEditor.Agent.SessionStart do
           workspace: non_neg_integer(),
           project_view: ProjectView.t() | nil,
           created_project_view?: boolean(),
-          follow_up: follow_up(),
+          start_request: StartRequest.t(),
           phase: phase()
         }
 
@@ -52,7 +54,7 @@ defmodule MingaEditor.Agent.SessionStart do
     :workspace,
     :project_view,
     :created_project_view?,
-    :follow_up,
+    :start_request,
     :phase
   ]
   defstruct @enforce_keys
@@ -60,16 +62,22 @@ defmodule MingaEditor.Agent.SessionStart do
   @doc """
   Sends the start request for the agent workspace `workspace_id` and returns at once.
 
-  `session_opts` are the Session start options. The project view travels with the request so the session never needs a second call to learn it.
+  `session_opts` are the Session start options. The project view travels with the request so the session never needs a second call to learn it. `start_request` is kept so a failed start can offer to run again unchanged; its follow-up runs only once the session binds.
   """
   @spec request(
           EditorState.t(),
           non_neg_integer(),
           keyword(),
           {ProjectView.t() | nil, boolean()},
-          follow_up()
+          StartRequest.t()
         ) :: EditorState.t()
-  def request(state, workspace_id, session_opts, {project_view, created?}, follow_up) do
+  def request(
+        state,
+        workspace_id,
+        session_opts,
+        {project_view, created?},
+        %StartRequest{} = start_request
+      ) do
     token = make_ref()
 
     opts =
@@ -86,7 +94,7 @@ defmodule MingaEditor.Agent.SessionStart do
       workspace: workspace_id,
       project_view: project_view,
       created_project_view?: created?,
-      follow_up: follow_up,
+      start_request: start_request,
       phase: {:awaiting, timer}
     })
   end
@@ -134,7 +142,7 @@ defmodule MingaEditor.Agent.SessionStart do
       %__MODULE__{phase: {:awaiting, _timer}} = start ->
         state
         |> EditorState.track_agent_session_start(%{start | phase: :abandoned})
-        |> fail(start, "The Agent session did not start within #{div(@timeout_ms, 1000)} s.")
+        |> fail(start, StartFailure.timed_out(start.start_request), :timeout)
 
       _settled ->
         state
@@ -148,8 +156,8 @@ defmodule MingaEditor.Agent.SessionStart do
 
     case reply do
       {:reply, {:ok, _session_id, session}} -> bind(state, start, session)
-      {:reply, {:error, reason}} -> fail(state, start, start_error(reason))
-      {:error, {reason, _manager}} -> fail(state, start, start_error(reason))
+      {:reply, {:error, reason}} -> session_error(state, start, reason)
+      {:error, {reason, _manager}} -> session_error(state, start, reason)
     end
   end
 
@@ -207,11 +215,16 @@ defmodule MingaEditor.Agent.SessionStart do
   end
 
   @spec run_follow_up(EditorState.t(), t(), pid()) :: EditorState.t()
-  defp run_follow_up(state, %__MODULE__{follow_up: nil}, _session), do: state
+  defp run_follow_up(state, %__MODULE__{start_request: %StartRequest{follow_up: nil}}, _session),
+    do: state
 
   defp run_follow_up(
          state,
-         %__MODULE__{follow_up: {:restore, id, tool_call, origin, return_target}} = start,
+         %__MODULE__{
+           start_request: %StartRequest{
+             follow_up: {:restore, id, tool_call, origin, return_target}
+           }
+         } = start,
          session
        ) do
     if active_workspace?(state, start.workspace),
@@ -227,37 +240,42 @@ defmodule MingaEditor.Agent.SessionStart do
       else: state
   end
 
-  defp run_follow_up(state, %__MODULE__{follow_up: {:seed, messages}}, session),
-    do: MingaEditor.Commands.InlineAsk.seed_started_session(state, session, messages)
+  defp run_follow_up(
+         state,
+         %__MODULE__{start_request: %StartRequest{follow_up: {:seed, messages}}},
+         session
+       ),
+       do: MingaEditor.Commands.InlineAsk.seed_started_session(state, session, messages)
 
-  @spec fail(EditorState.t(), t(), String.t()) :: EditorState.t()
-  defp fail(state, start, message) do
-    Minga.Log.error(:agent, "[Agent] #{message}")
+  # The raw reason is logged here; the tab shows only the failure's plain sentence.
+  @spec session_error(EditorState.t(), t(), term()) :: EditorState.t()
+  defp session_error(state, start, reason),
+    do: fail(state, start, StartFailure.session_error(reason, start.start_request), reason)
+
+  @spec fail(EditorState.t(), t(), StartFailure.t(), term()) :: EditorState.t()
+  defp fail(state, start, %StartFailure{} = failure, reason) do
+    Minga.Log.error(:agent, "[Agent] #{failure.message} (#{inspect(reason)})")
     discard_project_view(start)
     tabs = tab_bar(state)
 
     case tabs && TabBar.get_workspace(tabs, start.workspace) do
       %Workspace{payload: %WorkspaceAgent{}} = workspace ->
-        show_failure(state, tabs, workspace, message)
+        show_failure(state, tabs, workspace, failure)
 
       _closed ->
         state
     end
   end
 
-  @spec show_failure(EditorState.t(), TabBar.t(), Workspace.agent(), String.t()) ::
+  @spec show_failure(EditorState.t(), TabBar.t(), Workspace.agent(), StartFailure.t()) ::
           EditorState.t()
-  defp show_failure(state, tabs, %Workspace{id: id} = workspace, message) do
+  defp show_failure(state, tabs, %Workspace{id: id} = workspace, failure) do
     cond do
       active_workspace?(state, id) ->
-        state
-        |> Workflow.install_agent_ui(
-          UIState.transition_chat(state.workspace.agent_ui, {:failed, message})
-        )
-        |> Workflow.install_agent_error(message)
+        Workflow.install_agent_ui(state, UIState.fail_start(state.workspace.agent_ui, failure))
 
       match?(%UIState{}, workspace.payload.agent_ui) ->
-        ui = UIState.transition_chat(workspace.payload.agent_ui, {:failed, message})
+        ui = UIState.fail_start(workspace.payload.agent_ui, failure)
 
         WorkspaceWorkflow.install_tab_bar(
           state,
@@ -268,11 +286,6 @@ defmodule MingaEditor.Agent.SessionStart do
         state
     end
   end
-
-  @spec start_error(term()) :: String.t()
-  defp start_error({:noproc, _}), do: "Agent supervisor not running"
-  defp start_error(:noproc), do: "Agent supervisor not running"
-  defp start_error(reason), do: "Failed to start session: #{inspect(reason)}"
 
   @spec subscriber(EditorState.t()) :: pid()
   defp subscriber(%EditorState{agent_connection: %{agent_ingest: ingest}}) when is_pid(ingest),

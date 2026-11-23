@@ -243,6 +243,7 @@ pub const GUI_ACTION_AGENT_COMPOSER_SUBMIT = opcodes.GUI_ACTION_AGENT_COMPOSER_S
 pub const GUI_ACTION_AGENT_OPEN_QUESTION = opcodes.GUI_ACTION_AGENT_OPEN_QUESTION;
 pub const GUI_ACTION_AGENT_STOP_TURN = opcodes.GUI_ACTION_AGENT_STOP_TURN;
 pub const GUI_ACTION_AGENT_COMPOSER_QUEUE = opcodes.GUI_ACTION_AGENT_COMPOSER_QUEUE;
+pub const GUI_ACTION_AGENT_START_REMEDY = opcodes.GUI_ACTION_AGENT_START_REMEDY;
 // END GENERATED OPCODE EXPORTS.
 
 // Log levels
@@ -3528,6 +3529,8 @@ const FramingContract = struct {
 };
 
 test "framing contract: every parser-stream opcode is exactly framed" {
+    // The comptime walk over every opcode export grows with the protocol; give it headroom.
+    @setEvalBranchQuota(10_000);
     var framed: usize = 0;
     inline for (@typeInfo(opcodes).@"struct".decls) |decl| {
         comptime if (decl.name.len < 3 or !std.mem.eql(u8, decl.name[0..3], "OP_")) continue;

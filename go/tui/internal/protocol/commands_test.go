@@ -1,6 +1,7 @@
 package protocol
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
 	"testing"
@@ -1585,22 +1586,26 @@ func TestDecodeAgentChatInputFocusedSectionRoundTripAndDefault(t *testing.T) {
 }
 
 func TestDecodeAgentChatKeepsDraftAndExplicitAvailability(t *testing.T) {
+	retry := AgentStartRemedy{Kind: AgentStartRemedyRetry, Label: "Retry", KeyHint: "r"}
+	setUp := AgentStartRemedy{Kind: AgentStartRemedySetUpProvider, Label: "Set up provider", KeyHint: "s"}
 	for _, fixture := range []struct {
 		kind   AgentChatLifecycle
 		reason string
+		remedy AgentStartRemedy
 	}{
-		{AgentChatConversation, ""},
-		{AgentChatStarting, ""},
-		{AgentChatFailed, "Could not connect to café"},
-		{AgentChatUnavailable, ""},
+		{AgentChatConversation, "", AgentStartRemedy{}},
+		{AgentChatStarting, "", AgentStartRemedy{}},
+		{AgentChatFailed, "Could not connect to café.", retry},
+		{AgentChatFailed, "No Agent provider is set up yet.", setUp},
+		{AgentChatFailed, "The composer is unavailable.", AgentStartRemedy{}},
+		{AgentChatUnavailable, "", AgentStartRemedy{}},
 	} {
 		payload := []byte{generated.OPGuiAgentChat, 2}
 		payload = append(payload, section(0x01, []byte{1, 0})...)
 		payload = append(payload, section(0x03, string16("unfinished"))...)
 		if fixture.kind != AgentChatConversation {
 			payload[1]++
-			body := append([]byte{byte(fixture.kind)}, string16(fixture.reason)...)
-			payload = append(payload, section(0x0F, body)...)
+			payload = append(payload, section(0x0F, lifecycleBody(fixture.kind, fixture.reason, fixture.remedy))...)
 		}
 		cmd, err := DecodeCommand(payload)
 		if err != nil {
@@ -1608,10 +1613,53 @@ func TestDecodeAgentChatKeepsDraftAndExplicitAvailability(t *testing.T) {
 		}
 		chat := cmd.Chrome.AgentChat
 		if cmd.Size != len(payload) || !chat.Visible || chat.Prompt != "unfinished" ||
-			chat.Lifecycle != fixture.kind || chat.LifecycleReason != fixture.reason {
+			chat.Lifecycle != fixture.kind || chat.LifecycleReason != fixture.reason ||
+			chat.LifecycleRemedy != fixture.remedy {
 			t.Fatalf("expected %v with the draft preserved, got %+v", fixture.kind, chat)
 		}
 	}
+}
+
+func TestDecodeAgentChatIgnoresMalformedLifecycle(t *testing.T) {
+	retry := AgentStartRemedy{Kind: AgentStartRemedyRetry, Label: "Retry", KeyHint: "r"}
+	valid := lifecycleBody(AgentChatFailed, "The Agent took too long to start.", retry)
+	for name, body := range map[string][]byte{
+		"truncated remedy":     valid[:len(valid)-1],
+		"trailing byte":        append(append([]byte{}, valid...), 0),
+		"unknown remedy":       lifecycleBody(AgentChatFailed, "x.", AgentStartRemedy{Kind: 3, Label: "Go"}),
+		"remedy without label": lifecycleBody(AgentChatFailed, "x.", AgentStartRemedy{Kind: AgentStartRemedyRetry}),
+		"reason only (v42)":    append([]byte{byte(AgentChatFailed)}, string16("old")...),
+	} {
+		payload := []byte{generated.OPGuiAgentChat, 1}
+		payload = append(payload, section(0x0F, body)...)
+		cmd, err := DecodeCommand(payload)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if chat := cmd.Chrome.AgentChat; chat.Lifecycle != AgentChatConversation || chat.LifecycleRemedy != (AgentStartRemedy{}) {
+			t.Fatalf("%s: expected the malformed lifecycle to be ignored, got %+v", name, chat)
+		}
+	}
+}
+
+func TestEncodeGUIAgentStartRemedySendsOnlyKnownRemedies(t *testing.T) {
+	for kind, want := range map[AgentStartRemedyKind][]byte{
+		AgentStartRemedyNone:          nil,
+		AgentStartRemedyRetry:         {generated.OPGuiAction, generated.GUIActionAgentStartRemedy, 1},
+		AgentStartRemedySetUpProvider: {generated.OPGuiAction, generated.GUIActionAgentStartRemedy, 2},
+		3:                             nil,
+	} {
+		if got := EncodeGUIAgentStartRemedy(kind); !bytes.Equal(got, want) {
+			t.Fatalf("remedy %d: got %v, want %v", kind, got, want)
+		}
+	}
+}
+
+func lifecycleBody(kind AgentChatLifecycle, reason string, remedy AgentStartRemedy) []byte {
+	body := append([]byte{byte(kind)}, string16(reason)...)
+	body = append(body, byte(remedy.Kind))
+	body = append(body, string16(remedy.Label)...)
+	return append(body, string16(remedy.KeyHint)...)
 }
 
 func TestDecodeAgentTimelineChrome(t *testing.T) {

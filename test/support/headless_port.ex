@@ -1618,14 +1618,20 @@ defmodule Minga.Test.HeadlessPort do
   defp decode_agent_chat_section(0x09, <<focused::8>>, result),
     do: Map.put(result, :input_focused?, focused == 1)
 
-  defp decode_agent_chat_section(0x0F, <<1, 0::16>>, result),
-    do: Map.put(result, :lifecycle, :starting)
-
-  defp decode_agent_chat_section(0x0F, <<2, size::16, reason::binary-size(size)>>, result),
-    do: Map.put(result, :lifecycle, {:failed, reason})
-
-  defp decode_agent_chat_section(0x0F, <<3, 0::16>>, result),
-    do: Map.put(result, :lifecycle, :unavailable)
+  # Lifecycle (0x0F): kind, reason, then the remedy kind, action label and key hint.
+  defp decode_agent_chat_section(
+         0x0F,
+         <<kind, reason_size::16, reason::binary-size(reason_size), _remedy, label_size::16,
+           _label::binary-size(label_size), hint_size::16, _hint::binary-size(hint_size)>>,
+         result
+       ) do
+    case kind do
+      1 -> Map.put(result, :lifecycle, :starting)
+      2 -> Map.put(result, :lifecycle, {:failed, reason})
+      3 -> Map.put(result, :lifecycle, :unavailable)
+      _other -> result
+    end
+  end
 
   defp decode_agent_chat_section(_section_id, _payload, result), do: result
 

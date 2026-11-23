@@ -2,7 +2,15 @@ defmodule Minga.RenderModel.UI.Workspaces.Workspace do
   @moduledoc false
 
   @type kind :: :manual | :agent
-  @type status :: :idle | :thinking | :tool_executing | :error | :plan | :approval_waiting | nil
+  @type status ::
+          :idle
+          | :thinking
+          | :tool_executing
+          | :error
+          | :plan
+          | :approval_waiting
+          | :needs_you
+          | nil
 
   @type t :: %__MODULE__{
           id: non_neg_integer(),

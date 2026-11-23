@@ -371,14 +371,30 @@ defmodule Minga.Integration.GUIProtocolTest do
   end
 
   describe "GUI chrome opcode round-trip" do
-    test "Agent availability and its reason decode independently of the existing draft", %{
-      harness: harness
-    } do
-      for {lifecycle, label, reason} <- [
-            {:conversation, "conversation", ""},
-            {:starting, "starting", ""},
-            {{:failed, "Could not connect to café"}, "failed", "Could not connect to café"},
-            {:unavailable, "unavailable", ""}
+    test "Agent availability, its reason and its remedy decode independently of the existing draft",
+         %{harness: harness} do
+      retry = %Minga.RenderModel.UI.AgentChat.StartRemedy{
+        kind: :retry,
+        label: "Retry",
+        key_hint: "r"
+      }
+
+      setup = %Minga.RenderModel.UI.AgentChat.StartRemedy{
+        kind: :set_up_provider,
+        label: "Set up provider",
+        key_hint: "s"
+      }
+
+      for {lifecycle, label, reason, remedy, action, key} <- [
+            {:conversation, "conversation", "", 0, "", ""},
+            {:starting, "starting", "", 0, "", ""},
+            {{:failed, "Could not connect to café.", retry}, "failed",
+             "Could not connect to café.", 1, "Retry", "r"},
+            {{:failed, "No Agent provider is set up yet.", setup}, "failed",
+             "No Agent provider is set up yet.", 2, "Set up provider", "s"},
+            {{:failed, "The composer is unavailable.", nil}, "failed",
+             "The composer is unavailable.", 0, "", ""},
+            {:unavailable, "unavailable", "", 0, "", ""}
           ] do
         command =
           encode_gui_agent_chat(%{visible: true, prompt: "unfinished", lifecycle: lifecycle})
@@ -387,9 +403,17 @@ defmodule Minga.Integration.GUIProtocolTest do
                  "visible" => true,
                  "prompt" => "unfinished",
                  "lifecycle" => ^label,
-                 "lifecycle_reason" => ^reason
+                 "lifecycle_reason" => ^reason,
+                 "lifecycle_remedy" => ^remedy,
+                 "lifecycle_action_label" => ^action,
+                 "lifecycle_key_hint" => ^key
                } = round_trip(harness, command, "gui_agent_chat")
       end
+    end
+
+    test "a failed start's needs-you status decodes as its own status", %{harness: harness} do
+      command = encode_gui_agent_chat(%{visible: true, status: :needs_you})
+      assert %{"status" => 6} = round_trip(harness, command, "gui_agent_chat")
     end
 
     test "Agent chat reports saved attachments without changing the draft text", %{

@@ -70,7 +70,8 @@ defmodule MingaEditor.RenderModel.UI.WorkspacesBuilder do
       workspace: %{
         buffers: ctx.workspace.buffers,
         file_tree: ctx.workspace.file_tree,
-        keymap_scope: ctx.workspace.keymap_scope
+        keymap_scope: ctx.workspace.keymap_scope,
+        agent_ui: ctx.workspace.agent_ui
       }
     }
   end

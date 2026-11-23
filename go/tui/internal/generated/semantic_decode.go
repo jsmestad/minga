@@ -955,9 +955,25 @@ func DecodeGuiAgentChatLifecycle(data []byte, offset int, windowEnd int) (GuiAge
 	if err != nil {
 		return GuiAgentChatLifecycle{}, offset, err
 	}
+	if err := decodeRequireWindow(windowEnd, pos+1, "remedy"); err != nil {
+		return GuiAgentChatLifecycle{}, offset, err
+	}
+	remedy := data[pos]
+	pos++
+	actionLabel, pos, err := decodeString16Window(data, pos, windowEnd)
+	if err != nil {
+		return GuiAgentChatLifecycle{}, offset, err
+	}
+	keyHint, pos, err := decodeString16Window(data, pos, windowEnd)
+	if err != nil {
+		return GuiAgentChatLifecycle{}, offset, err
+	}
 	return GuiAgentChatLifecycle{
-		Kind:   kind,
-		Reason: reason,
+		Kind:        kind,
+		Reason:      reason,
+		Remedy:      remedy,
+		ActionLabel: actionLabel,
+		KeyHint:     keyHint,
 	}, pos, nil
 }
 

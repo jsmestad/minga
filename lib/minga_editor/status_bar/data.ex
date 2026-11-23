@@ -154,7 +154,7 @@ defmodule MingaEditor.StatusBar.Data do
         indent: %StatusIndent{type: indent_type, size: indent_size},
         selection: selection_model(selection_info),
         agent: %SemanticStatusAgent{
-          agent_status: AgentState.display_status(agent),
+          agent_status: agent_session_status(state.workspace.agent_ui, agent),
           background_count: background.count,
           background_label: background.label,
           active_tool_name: agent.runtime.active_tool_name
@@ -365,11 +365,18 @@ defmodule MingaEditor.StatusBar.Data do
       common: state |> build_common_data("[no file]") |> apply_agent_modeline_theme(state),
       content: %StatusAgent{
         model_name: if(panel.model_name != "", do: panel.model_name, else: "Agent"),
-        session_status: AgentState.display_status(agent),
+        session_status: agent_session_status(state.workspace.agent_ui, agent),
         message_count: UIState.TranscriptProjection.turn_count(panel.transcript)
       }
     }
   end
+
+  # A failed start needs the user, whatever the runtime last reported.
+  @spec agent_session_status(UIState.t(), AgentState.t()) :: StatusAgent.session_status()
+  defp agent_session_status(%UIState{chat_lifecycle: {:failed, _failure}}, _agent),
+    do: :needs_you
+
+  defp agent_session_status(_agent_ui, agent), do: AgentState.display_status(agent)
 
   @spec apply_agent_modeline_theme(Common.t(), EditorState.t() | map()) :: Common.t()
   defp apply_agent_modeline_theme(%Common{} = common, state) do

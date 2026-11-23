@@ -416,6 +416,7 @@ defmodule Minga.Frontend.Adapter.GUI.StatusBarEncoder do
   defp encode_agent_session_status(:error), do: 3
   defp encode_agent_session_status(:plan), do: 4
   defp encode_agent_session_status(:approval_waiting), do: 5
+  defp encode_agent_session_status(:needs_you), do: 6
   defp encode_agent_session_status(_), do: 0
 
   @spec encode_workspace_kind(Workspace.kind()) :: non_neg_integer()

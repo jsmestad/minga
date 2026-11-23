@@ -13,6 +13,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
   alias MingaEditor.Agent.PendingQuestion
   alias MingaEditor.Agent.RetainedOutputTarget
   alias MingaEditor.Agent.SemanticUI.Registry, as: SemanticUIRegistry
+  alias MingaEditor.Agent.StartFailure
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.UIState.Panel
   alias MingaEditor.Agent.UIState.TranscriptProjection
@@ -25,6 +26,8 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
   alias Minga.RenderModel.UI.AgentChat
   alias Minga.RenderModel.UI.AgentChat.ApprovalView
   alias Minga.RenderModel.UI.AgentChat.PromptCompletion
+  alias Minga.RenderModel.UI.AgentChat.StartRemedy
+  alias Minga.Keymap.Scope.Agent, as: AgentScope
   alias Minga.RenderModel.UI.AgentChat.ToolArgSummary
   alias Minga.RenderModel.UI.AgentChat.ToolCallView
   alias Minga.RenderModel.UI.AgentChat.Usage
@@ -32,6 +35,8 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
   alias MingaEditor.Window.Content
 
   @typep approval :: PublicApproval.t()
+
+  @composer_unavailable "The composer is unavailable. Switch away from this tab and return to reopen it."
 
   @spec build(Context.t()) :: AgentChat.t()
   def build(ctx) do
@@ -51,7 +56,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
 
     %AgentChat{
       visible?: true,
-      lifecycle: {:failed, "composer unavailable"},
+      lifecycle: {:failed, @composer_unavailable, nil},
       prompt_visible_rows: 0,
       resident_messages: messages,
       resident_truncated?: truncated?,
@@ -60,8 +65,11 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
   end
 
   defp build_visible(ctx, lifecycle) do
-    {presentation, session} = chat_presentation(lifecycle)
     agent_ui = ctx.workspace.agent_ui
+
+    {presentation, session} =
+      chat_presentation(lifecycle, remedy_focus(ctx.intent.frame.editing_model, agent_ui))
+
     shell_agent = TraditionalState.agent(ctx.intent.frame.shell_state)
     panel = agent_ui.panel
 
@@ -76,7 +84,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
       visible?: true,
       lifecycle: presentation,
       status: chat_status(shell_agent, presentation),
-      model_name: Panel.chat_model_label(panel),
+      model_name: UIState.model_label(agent_ui),
       thinking_level: panel.thinking_level,
       prompt: prompt_text,
       prompt_line_count: length(projection.lines),
@@ -196,13 +204,43 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
   defp running_tool?({_id, {:tool_call, %ToolCall{status: :running}}, _style}), do: true
   defp running_tool?(_item), do: false
 
-  @spec chat_presentation(UIState.chat_lifecycle()) :: {AgentChat.lifecycle(), pid() | nil}
-  defp chat_presentation({:conversation, session}), do: {:conversation, session}
-  defp chat_presentation(lifecycle), do: {lifecycle, nil}
+  @spec chat_presentation(UIState.chat_lifecycle(), AgentScope.start_remedy_focus()) ::
+          {AgentChat.lifecycle(), pid() | nil}
+  defp chat_presentation({:conversation, session}, _focus), do: {:conversation, session}
 
+  defp chat_presentation({:failed, %StartFailure{message: message, remedy: remedy}}, focus),
+    do: {{:failed, message, start_remedy(remedy, focus)}, nil}
+
+  defp chat_presentation(lifecycle, _focus) when lifecycle in [:starting, :unavailable],
+    do: {lifecycle, nil}
+
+  # Key dispatch resolves CUA keys through one trie, a focused Vim composer's
+  # keys through the prompt (Enter runs the remedy), and other Vim keys through
+  # chat navigation (`r` runs it), so the hint follows the same facts.
+  @spec remedy_focus(atom(), UIState.t()) :: AgentScope.start_remedy_focus()
+  defp remedy_focus(:cua, _ui), do: :cua
+  defp remedy_focus(_vim, %UIState{panel: %Panel{input_focused: true}}), do: :composer
+  defp remedy_focus(_vim, %UIState{}), do: :chat
+
+  # The label and key hint come from the BEAM so no frontend authors remedy copy;
+  # the hint is the key the Agent scope binds at the current focus.
+  @spec start_remedy(StartFailure.remedy() | nil, AgentScope.start_remedy_focus()) ::
+          StartRemedy.t() | nil
+  defp start_remedy(nil, _focus), do: nil
+  defp start_remedy({:retry, _target}, focus), do: start_remedy(:retry, "Retry", focus)
+
+  defp start_remedy(:set_up_provider, focus),
+    do: start_remedy(:set_up_provider, "Set up provider", focus)
+
+  @spec start_remedy(StartRemedy.kind(), String.t(), AgentScope.start_remedy_focus()) ::
+          StartRemedy.t()
+  defp start_remedy(kind, label, focus),
+    do: %StartRemedy{kind: kind, label: label, key_hint: AgentScope.start_remedy_key_hint(focus)}
+
+  # A failed start needs the user; it is not an execution error.
   @spec chat_status(MingaEditor.State.Agent.t(), AgentChat.lifecycle()) :: atom()
   defp chat_status(agent, :conversation), do: MingaEditor.State.Agent.display_status(agent)
-  defp chat_status(_agent, {:failed, _reason}), do: :error
+  defp chat_status(_agent, {:failed, _reason, _remedy}), do: :needs_you
   defp chat_status(_agent, _unavailable), do: :idle
 
   @spec submission_generation(PromptFrame.t()) :: pos_integer() | nil

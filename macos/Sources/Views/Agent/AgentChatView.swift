@@ -36,6 +36,8 @@ public struct AgentChatView: View {
         case composerQueue(generation: UInt64, offer: UInt64, followUp: Bool, target: AgentQueueTarget)
         case openQuestion(offer: UInt64)
         case stopTurn(AgentStopTarget)
+        /// Runs the remedy a failed start offers, as sent by the BEAM.
+        case startRemedy(AgentStartRemedy.Kind)
         case chatScrolledAwayFromBottom
         case chatReturnedToBottom
     }
@@ -109,29 +111,96 @@ public struct AgentChatView: View {
         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { availableHeight = $0 }
     }
 
+    /// A non-conversation chat: a glyph, a headline, the BEAM's sentence about the cause, and the one action it offers.
+    /// The action label and key hint are rendered exactly as sent; this view authors no remedy copy.
     private var lifecycleNotice: some View {
-        VStack(alignment: .leading, spacing: Spacing.xs) {
-            switch state.lifecycle {
-            case .conversation:
-                EmptyView()
-            case .starting:
-                Text("Starting Agent").font(.headline)
-            case .failed(let reason):
-                Text("Agent unavailable").font(.headline)
-                Text(reason)
-                if state.promptVisibleRows == 0 {
-                    Text("Switch away from this tab and return to reopen the composer.")
-                } else {
-                    Text("Start a new Agent session (SPC a n).")
+        HStack(alignment: .firstTextBaseline, spacing: Spacing.md) {
+            lifecycleGlyph
+            VStack(alignment: .leading, spacing: Spacing.xs) {
+                Text(lifecycleHeadline)
+                    .font(Typography.font(.emphasis, weight: .semibold))
+                    .foregroundStyle(theme.agentTextFg)
+                if let reason = lifecycleReason, !reason.isEmpty {
+                    Text(reason)
+                        .font(Typography.font(.body))
+                        .foregroundStyle(theme.agentSecondaryFg)
                 }
-            case .unavailable:
-                Text("Agent unavailable").font(.headline)
-                Text("Start a new Agent session (SPC a n), then reopen the conversation in Sessions.")
+                if let remedy = lifecycleRemedy {
+                    HStack(spacing: Spacing.sm) {
+                        Button(remedy.label) {
+                            sendAction?(.startRemedy(remedy.kind))
+                        }
+                        .disabled(sendAction == nil)
+                        .fixedSize()
+                        if !remedy.keyHint.isEmpty {
+                            Text(remedy.keyHint)
+                                .font(Typography.monospacedSmall)
+                                .foregroundStyle(theme.agentMutedFg)
+                        }
+                    }
+                    .padding(.top, Spacing.xs)
+                }
+                if showsDraftNote {
+                    Text("Your draft is saved. SPC a n starts a new session.")
+                        .font(Typography.font(.small))
+                        .foregroundStyle(theme.agentMutedFg)
+                }
             }
         }
         .fixedSize(horizontal: false, vertical: true)
         .padding(Spacing.lg)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
+        .accessibilityActions {
+            if let remedy = lifecycleRemedy, sendAction != nil {
+                Button(remedy.label) { sendAction?(.startRemedy(remedy.kind)) }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var lifecycleGlyph: some View {
+        switch state.lifecycle {
+        case .starting:
+            ProgressView()
+                .controlSize(.small)
+        case .failed, .unavailable:
+            Image(systemName: "exclamationmark.triangle")
+                .font(Typography.font(.emphasis, weight: .semibold))
+                .foregroundStyle(theme.agentStatusNeedsYou)
+                .accessibilityHidden(true)
+        case .conversation:
+            EmptyView()
+        }
+    }
+
+    private var lifecycleHeadline: String {
+        switch state.lifecycle {
+        case .conversation: ""
+        case .starting: "Starting Agent"
+        case .failed(_, let remedy?) where remedy.kind == .setUpProvider: "Agent needs setup"
+        case .failed(_, .some): "Agent could not start"
+        case .failed(_, .none): "Agent unavailable"
+        case .unavailable: "No active Agent session"
+        }
+    }
+
+    private var lifecycleReason: String? {
+        if case .failed(let reason, _) = state.lifecycle { return reason }
+        return nil
+    }
+
+    private var lifecycleRemedy: AgentStartRemedy? {
+        if case .failed(_, let remedy) = state.lifecycle { return remedy }
+        return nil
+    }
+
+    /// The draft survives a failed or missing session; say so where a composer is shown.
+    private var showsDraftNote: Bool {
+        switch state.lifecycle {
+        case .failed, .unavailable: state.promptVisibleRows > 0
+        case .conversation, .starting: false
+        }
     }
 
     private func childAction<ChildAction: Sendable>(_ translate: @escaping @Sendable (ChildAction) -> Action) -> ViewActionHandler<ChildAction>? {

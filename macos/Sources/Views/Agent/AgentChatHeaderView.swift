@@ -363,6 +363,7 @@ public struct AgentChatHeaderView: View {
         case .error: return Color.red
         case .planning: return theme.agentStatusNeedsYou
         case .approvalWaiting: return theme.agentStatusNeedsYou
+        case .needsYou: return theme.agentStatusNeedsYou
         case .unknown: return Color.gray
         }
     }

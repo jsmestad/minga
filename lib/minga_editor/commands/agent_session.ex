@@ -12,6 +12,8 @@ defmodule MingaEditor.Commands.AgentSession do
   alias Minga.Buffer
   alias MingaEditor.Agent.CatalogStartup
   alias MingaEditor.Agent.SessionStart
+  alias MingaEditor.Agent.StartFailure
+  alias MingaEditor.Agent.StartRequest
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.UIState.Panel
   alias MingaEditor.AgentLifecycle
@@ -114,22 +116,77 @@ defmodule MingaEditor.Commands.AgentSession do
   @spec start_agent_session(state()) :: state()
   @spec start_agent_session(state(), keyword()) :: state()
   def start_agent_session(state, opts \\ []) do
-    {state, workspace_id} = starting_workspace(state)
+    request =
+      StartRequest.new(
+        Keyword.get(opts, :session_start_hook_enabled?, true),
+        Keyword.get(opts, :recover_interrupted_work?, true),
+        Keyword.get(opts, :follow_up)
+      )
 
-    cond do
-      not is_integer(workspace_id) ->
-        startup_failed(state, "No Agent workspace to start the session in.")
+    case starting_workspace(state) do
+      {state, workspace_id} when is_integer(workspace_id) ->
+        begin_start(state, workspace_id, request)
 
-      SessionStart.pending?(state, workspace_id) ->
+      {state, nil} ->
+        startup_failed(state, StartFailure.no_workspace(request))
+    end
+  end
+
+  @doc """
+  Runs a failed start again in the active Agent tab, keeping its draft.
+
+  A start that never bound a session runs again with the same request, so the tab returns to Starting. A session whose provider failed retries that provider on the same session; the session's connection events move the tab back to Starting. Any other lifecycle is left unchanged. Unlike a new session, nothing is reset.
+  """
+  @spec retry_start(state()) :: state()
+  def retry_start(state) do
+    case active_start_failure(state) do
+      {workspace_id, %StartFailure{remedy: {:retry, %StartRequest{} = request}}} ->
+        begin_start(state, workspace_id, request)
+
+      {_workspace_id, %StartFailure{remedy: {:retry, :provider}}} ->
+        MingaEditor.Agent.ConnectionAction.schedule_current(state, :retry)
+
+      _not_retryable ->
         state
+    end
+  end
 
-      true ->
-        state
-        |> update_workspace_ui(workspace_id, &UIState.transition_chat(&1, :starting))
-        |> CatalogStartup.continue(
-          {:start, workspace_id, Keyword.get(opts, :session_start_hook_enabled?, true),
-           Keyword.get(opts, :recover_interrupted_work?, true), Keyword.get(opts, :follow_up)}
-        )
+  @doc """
+  Runs the remedy the active tab's failed start offers: a retry runs `retry_start/1`, a setup opens the model and provider picker. Any other lifecycle is left unchanged. The draft is never touched or sent.
+  """
+  @spec run_start_remedy(state()) :: state()
+  def run_start_remedy(state) do
+    case UIState.start_remedy(state.workspace.agent_ui) do
+      :retry -> retry_start(state)
+      :set_up_provider -> MingaEditor.UI.Picker.AgentModelSource.open(state)
+      nil -> state
+    end
+  end
+
+  @spec active_start_failure(state()) :: {pos_integer(), StartFailure.t()} | nil
+  defp active_start_failure(%{shell_runtime: %{state: %{tab_bar: %TabBar{} = tabs}}} = state) do
+    case {TabBar.active_workspace(tabs), UIState.start_failure(state.workspace.agent_ui)} do
+      {%Workspace{id: id, kind: :agent, payload: %WorkspaceAgent{remote_session: nil}},
+       %StartFailure{} = failure} ->
+        {id, failure}
+
+      _other ->
+        nil
+    end
+  end
+
+  defp active_start_failure(_state), do: nil
+
+  @spec begin_start(state(), pos_integer(), StartRequest.t()) :: state()
+  defp begin_start(state, workspace_id, %StartRequest{} = request) do
+    if SessionStart.pending?(state, workspace_id) do
+      state
+    else
+      state
+      |> update_workspace_ui(workspace_id, &UIState.transition_chat(&1, :starting))
+      |> CatalogStartup.continue(
+        {:start, workspace_id, request.hooks?, request.recover?, request.follow_up}
+      )
     end
   end
 
@@ -143,12 +200,12 @@ defmodule MingaEditor.Commands.AgentSession do
         ) :: state()
   def start_catalog_ready(state, workspace_id, hooks?, recover?, follow_up) do
     Minga.Telemetry.span([:minga, :agent, :start_agent_session], %{}, fn ->
-      do_start_agent_session(state, workspace_id, hooks?, recover?, follow_up)
+      do_start_agent_session(state, workspace_id, StartRequest.new(hooks?, recover?, follow_up))
     end)
   end
 
   @type catalog_start_result ::
-          {:ready, boolean(), boolean(), SessionStart.follow_up()} | {:failed, String.t()}
+          {:ready, boolean(), boolean(), SessionStart.follow_up()} | {:failed, StartFailure.t()}
 
   @doc """
   Finishes a start that waited for the model catalog, in the workspace it was requested for.
@@ -167,8 +224,8 @@ defmodule MingaEditor.Commands.AgentSession do
   defp finish_deferred_start(state, workspace_id, {:ready, hooks?, recover?, follow_up}),
     do: start_catalog_ready(state, workspace_id, hooks?, recover?, follow_up)
 
-  defp finish_deferred_start(state, workspace_id, {:failed, reason}),
-    do: workspace_start_failed(state, workspace_id, reason)
+  defp finish_deferred_start(state, workspace_id, {:failed, %StartFailure{} = failure}),
+    do: workspace_start_failed(state, workspace_id, failure)
 
   @spec deferred_start_current?(state(), pos_integer()) :: boolean()
   defp deferred_start_current?(state, workspace_id) do
@@ -180,40 +237,37 @@ defmodule MingaEditor.Commands.AgentSession do
       )
   end
 
-  @doc "Shows a startup failure in the active Agent tab and keeps its draft."
-  @spec startup_failed(state(), String.t()) :: state()
-  def startup_failed(state, message) when is_binary(message) do
-    Minga.Log.error(:agent, "[Agent] #{message}")
+  @doc """
+  Shows a startup failure in the active Agent tab and keeps its draft.
 
-    state
-    |> TraditionalWorkflow.install_agent_ui(
-      UIState.transition_chat(state.workspace.agent_ui, {:failed, message})
+  The tab shows the failure's cause and remedy. It does not mark the Agent errored; the chat, tab and status bar derive their "needs you" status from the failed lifecycle.
+  """
+  @spec startup_failed(state(), StartFailure.t()) :: state()
+  def startup_failed(state, %StartFailure{} = failure) do
+    Minga.Log.error(:agent, "[Agent] #{failure.message}")
+
+    TraditionalWorkflow.install_agent_ui(
+      state,
+      UIState.fail_start(state.workspace.agent_ui, failure)
     )
-    |> TraditionalWorkflow.install_agent_error(message)
   end
 
   @doc "Shows a startup failure in the starting workspace, live or stored, and keeps its draft."
-  @spec workspace_start_failed(state(), pos_integer(), String.t()) :: state()
-  def workspace_start_failed(state, workspace_id, message) when is_binary(message) do
+  @spec workspace_start_failed(state(), pos_integer(), StartFailure.t()) :: state()
+  def workspace_start_failed(state, workspace_id, %StartFailure{} = failure) do
     if active_workspace?(state, workspace_id) do
-      startup_failed(state, message)
+      startup_failed(state, failure)
     else
-      Minga.Log.error(:agent, "[Agent] #{message}")
-      update_workspace_ui(state, workspace_id, &UIState.transition_chat(&1, {:failed, message}))
+      Minga.Log.error(:agent, "[Agent] #{failure.message}")
+      update_workspace_ui(state, workspace_id, &UIState.fail_start(&1, failure))
     end
   end
 
   # The panel takes its model from configuration only (#3641). With no
   # configured model it reads "Resolving model…" until the session's
   # connection reports the model the session resolved.
-  @spec do_start_agent_session(
-          state(),
-          pos_integer(),
-          boolean(),
-          boolean(),
-          SessionStart.follow_up()
-        ) :: state()
-  defp do_start_agent_session(state, workspace_id, hooks?, recover?, follow_up) do
+  @spec do_start_agent_session(state(), pos_integer(), StartRequest.t()) :: state()
+  defp do_start_agent_session(state, workspace_id, %StartRequest{} = request) do
     case workspace_and_ui(state, workspace_id) do
       {%Workspace{payload: %WorkspaceAgent{remote_session: nil}} = workspace, %UIState{} = ui} ->
         panel =
@@ -224,8 +278,18 @@ defmodule MingaEditor.Commands.AgentSession do
         state = update_workspace_ui(state, workspace_id, &UIState.replace_panel(&1, panel))
         {project_view, _created?} = view = start_project_view(state, workspace)
         root = start_root(state, workspace)
-        opts = session_start_opts(state, panel, project_view, root, hooks?, recover?)
-        SessionStart.request(state, workspace_id, opts, view, follow_up)
+
+        opts =
+          session_start_opts(
+            state,
+            panel,
+            project_view,
+            root,
+            request.hooks?,
+            request.recover?
+          )
+
+        SessionStart.request(state, workspace_id, opts, view, request)
 
       _gone_or_remote ->
         state

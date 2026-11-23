@@ -3,9 +3,12 @@ defmodule MingaEditor.StatusBar.Data.Agent do
 
   alias MingaEditor.State.Agent, as: AgentState
 
+  @typedoc "The session's display status, or `:needs_you` when its start failed."
+  @type session_status :: AgentState.display_status() | :needs_you
+
   @type t :: %__MODULE__{
           model_name: String.t(),
-          session_status: AgentState.display_status(),
+          session_status: session_status(),
           message_count: non_neg_integer()
         }
 

@@ -201,8 +201,9 @@ defmodule MingaEditor.Commands.AgentSplitToggleTest do
 
     opened = Minga.Test.AgentSessionStart.settle(opened)
     assert Runtime.active_session(opened.shell_runtime) == nil
-    assert TraditionalState.agent(opened.shell_runtime.state).error =~ ":boom"
-    assert {:failed, _reason} = opened.workspace.agent_ui.chat_lifecycle
+    # A failed start is not an Agent error; the tab offers its remedy instead.
+    assert TraditionalState.agent(opened.shell_runtime.state).error == nil
+    assert {:failed, %MingaEditor.Agent.StartFailure{}} = opened.workspace.agent_ui.chat_lifecycle
 
     returned = AgentCommands.toggle_agent_split(opened)
     assert Runtime.active_tab_kind(returned.shell_runtime) == :file
@@ -523,7 +524,7 @@ defmodule MingaEditor.Commands.AgentSplitToggleTest do
     alias Minga.Keymap.Scope.Agent, as: AgentScope
 
     test "g b returns to the provenance source" do
-      trie = AgentScope.keymap(:normal, %{})
+      trie = AgentScope.keymap(:normal, [])
       {:prefix, g_node} = Bindings.lookup(trie, {?g, 0})
       assert {:command, :agent_provenance_return} = Bindings.lookup(g_node, {?b, 0})
     end

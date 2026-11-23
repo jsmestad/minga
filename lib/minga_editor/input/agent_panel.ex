@@ -77,7 +77,8 @@ defmodule MingaEditor.Input.AgentPanel do
              :agent,
              binding_state,
              key,
-             keymap_server: state.interaction.keymap_server
+             keymap_server: state.interaction.keymap_server,
+             agent_start_remedy: UIState.start_remedy(state.workspace.agent_ui)
            ) do
         {:command, command} ->
           execute_prompt_binding(state, command)
@@ -91,9 +92,29 @@ defmodule MingaEditor.Input.AgentPanel do
           handle_panel_self_insert(state, cp, mods)
       end
     else
-      # Normal, visual, operator-pending: route through Mode FSM
-      # targeting the prompt buffer
-      dispatch_prompt_via_mode_fsm(state, cp, mods)
+      # Normal, visual, operator-pending: a failed start's remedy key runs
+      # first, then Vim editing targets the prompt buffer.
+      dispatch_composer_normal_key(state, cp, mods)
+    end
+  end
+
+  @doc """
+  Dispatches a composer key outside insert mode.
+
+  While the active tab's start has failed, the Agent scope binds the remedy key (Enter) for the composer; that binding runs before Vim editing. Every other key, and every key without a failed start, goes through the Mode FSM targeting the prompt buffer.
+  """
+  @spec dispatch_composer_normal_key(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
+          EditorState.t()
+  def dispatch_composer_normal_key(state, cp, mods) do
+    remedies =
+      Minga.Keymap.Scope.Agent.start_remedy_keymap(
+        :composer,
+        agent_start_remedy: UIState.start_remedy(state.workspace.agent_ui)
+      )
+
+    case Minga.Keymap.Bindings.lookup(remedies, {cp, mods}) do
+      {:command, command} -> execute_prompt_binding(state, command)
+      _vim_key -> dispatch_prompt_via_mode_fsm(state, cp, mods)
     end
   end
 

@@ -182,18 +182,44 @@ func decodeAgentChat(payload []byte) (AgentChat, string, int) {
 				chat.QueueTarget = AgentQueueTarget{AgentStopTarget{sessionID, requestID}, binary.BigEndian.Uint64(section[end:])}
 			}
 		case 0x0F:
-			if len(section) < 3 {
-				continue
-			}
-			kind := AgentChatLifecycle(section[0])
-			if reason, end, ok := readString16(section, 1); ok && end == len(section) &&
-				kind >= AgentChatStarting && kind <= AgentChatUnavailable {
-				chat.Lifecycle = kind
+			if lifecycle, reason, remedy, ok := decodeAgentChatLifecycle(section); ok {
+				chat.Lifecycle = lifecycle
 				chat.LifecycleReason = reason
+				chat.LifecycleRemedy = remedy
 			}
 		}
 	}
 	return chat, chat.ModelName, size
+}
+
+// decodeAgentChatLifecycle reads kind + reason + remedy + action label + key
+// hint. A remedy other than none needs a label; a malformed section is ignored.
+func decodeAgentChatLifecycle(section []byte) (AgentChatLifecycle, string, AgentStartRemedy, bool) {
+	if len(section) < 8 {
+		return 0, "", AgentStartRemedy{}, false
+	}
+	kind := AgentChatLifecycle(section[0])
+	if kind < AgentChatStarting || kind > AgentChatUnavailable {
+		return 0, "", AgentStartRemedy{}, false
+	}
+	reason, next, ok := readString16(section, 1)
+	if !ok || next >= len(section) {
+		return 0, "", AgentStartRemedy{}, false
+	}
+	remedyKind := AgentStartRemedyKind(section[next])
+	label, next, ok := readString16(section, next+1)
+	if !ok {
+		return 0, "", AgentStartRemedy{}, false
+	}
+	keyHint, end, ok := readString16(section, next)
+	if !ok || end != len(section) || remedyKind > AgentStartRemedySetUpProvider ||
+		(remedyKind != AgentStartRemedyNone && label == "") {
+		return 0, "", AgentStartRemedy{}, false
+	}
+	if remedyKind == AgentStartRemedyNone {
+		return kind, reason, AgentStartRemedy{}, true
+	}
+	return kind, reason, AgentStartRemedy{Kind: remedyKind, Label: label, KeyHint: keyHint}, true
 }
 
 func decodeAgentPrompt(chat AgentChat, section []byte) AgentChat {

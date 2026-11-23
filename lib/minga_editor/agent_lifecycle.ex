@@ -117,9 +117,7 @@ defmodule MingaEditor.AgentLifecycle do
     ui =
       case Map.get(snapshot, :connection) do
         %ConnectionSnapshot{target: %{session: ^session_pid}} = connection ->
-          ui
-          |> UIState.project_connection(connection)
-          |> UIState.report_chat_start_failure(Map.get(snapshot, :error))
+          UIState.project_connection(ui, connection)
 
         _unavailable ->
           ui

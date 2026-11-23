@@ -157,6 +157,10 @@ defmodule MingaEditor.Agent.UIState.Panel do
   def model_label(%__MODULE__{model_problem: problem}) when is_binary(problem), do: problem
   def model_label(%__MODULE__{}), do: "Resolving model…"
 
+  @doc "Whether the panel names a model, from configuration or from the session's selection."
+  @spec configured_model?(t()) :: boolean()
+  def configured_model?(%__MODULE__{model_name: model}), do: model not in ["", "unknown"]
+
   @doc "Records the session's explanation for an unresolved model, or clears it."
   @spec project_model_problem(t(), String.t() | nil) :: t()
   def project_model_problem(%__MODULE__{} = panel, problem)
