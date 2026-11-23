@@ -308,7 +308,7 @@ set :agent_destructive_tools, []
 
 The two options are orthogonal. `:agent_tool_approval` controls *whether* to prompt. `:agent_destructive_tools` controls *which tools* count as destructive when the mode is `:destructive`.
 
-For the full option API, see [`Minga.Config.Options`](https://jsmestad.github.io/minga/Minga.Config.Options.html).
+For the full option API, see `Minga.Config.Options`.
 
 ### Buffer-aware agent options
 
@@ -439,7 +439,7 @@ set :theme, :catppuccin_mocha
 
 The theme picker (`SPC h t`) live-previews each theme as you navigate the list. Selecting one applies it for the current session. To make it permanent, add the `set :theme` line to your config file.
 
-For theme internals, see [`Minga.Theme`](https://jsmestad.github.io/minga/Minga.Theme.html).
+For theme internals, see `MingaEditor.UI.Theme`.
 
 ## Fonts
 
@@ -895,7 +895,7 @@ Minga uses [keymap scopes](KEYMAP-SCOPES.md) to provide view-type-specific keybi
 
 For the full scope architecture and resolution order, see [Keymap Scopes](KEYMAP-SCOPES.md).
 
-For key parser internals, see [`Minga.Keymap.KeyParser`](https://jsmestad.github.io/minga/Minga.Keymap.KeyParser.html). For how the keymap trie works, see [`Minga.Keymap.Store`](https://jsmestad.github.io/minga/Minga.Keymap.Store.html) and [`Minga.Keymap.Trie`](https://jsmestad.github.io/minga/Minga.Keymap.Trie.html).
+For key parser internals, see `Minga.Keymap.KeyParser`. For how the active keymap and bindings work, see `Minga.Keymap.Active` and `Minga.Keymap.Bindings`.
 
 ## Custom commands
 
@@ -914,7 +914,7 @@ bind :normal, "SPC c t", :count_todos, "Count TODOs"
 
 Commands run inside a supervised Task. If your command raises an exception, the error shows in the status bar but the editor keeps running. You can't crash the editor with a buggy command.
 
-The [`Minga.API`](https://jsmestad.github.io/minga/Minga.API.html) module provides a user-friendly interface for common operations inside commands: `content/0`, `insert/1`, `cursor/0`, `move_to/2`, `save/0`, `message/1`, and more.
+The `Minga.API` module provides a user-friendly interface for common operations inside commands: `content/0`, `insert/1`, `cursor/0`, `move_to/2`, `save/0`, `message/1`, and more.
 
 ## Lifecycle hooks
 
@@ -948,7 +948,7 @@ Hooks run asynchronously. A slow `:after_save` hook (like running a formatter) w
 
 Multiple hooks on the same event fire in registration order.
 
-For the hooks API, see [`Minga.Config.Hooks`](https://jsmestad.github.io/minga/Minga.Config.Hooks.html).
+For the hooks API, see `Minga.Config.Hooks`.
 
 ## Command advice
 
@@ -1043,7 +1043,7 @@ An around or override callback can replace the result with an explicit `{:return
 
 **Advice** (`advise/3`) is for changing how a command behaves: conditionally skipping it, transforming editor state before or after it runs, or replacing the command entirely. Advice runs synchronously as part of the command, so it can affect what happens next.
 
-For the advice API, see [`Minga.Config.Advice`](https://jsmestad.github.io/minga/Minga.Config.Advice.html).
+For the advice API, see `Minga.Config.Advice`.
 
 ## Error handling
 
@@ -1055,7 +1055,7 @@ Minga is forgiving about config errors:
 - **Command crashes**: error shown in status bar, editor keeps running
 - **Hook crashes**: error logged, other hooks still fire, editor keeps running
 
-You can check for config load errors programmatically with [`Minga.Config.Loader.load_error/0`](https://jsmestad.github.io/minga/Minga.Config.Loader.html#load_error/0).
+You can check for config load errors programmatically with `Minga.Config.Loader.load_error/0`.
 
 ## User modules
 
@@ -1466,18 +1466,18 @@ extension :tools, hex: "minga_tools", app: :minga_tools, version: "~> 0.3"
 
 ## Further reading
 
-- [`Minga.Config`](https://jsmestad.github.io/minga/Minga.Config.html): the DSL module (`set`, `bind`, `command`, `on`, `advise`, `for_filetype`)
-- [`Minga.Config.Options`](https://jsmestad.github.io/minga/Minga.Config.Options.html): typed option registry with per-filetype overrides
-- [`Minga.Config.Loader`](https://jsmestad.github.io/minga/Minga.Config.Loader.html): config file discovery and evaluation
-- [`Minga.Config.Hooks`](https://jsmestad.github.io/minga/Minga.Config.Hooks.html): lifecycle hook registry
-- [`Minga.Config.Advice`](https://jsmestad.github.io/minga/Minga.Config.Advice.html): before/after command advice
-- [`Minga.Keymap.Store`](https://jsmestad.github.io/minga/Minga.Keymap.Store.html): mutable keymap (defaults + user overrides)
-- [`Minga.Keymap.KeyParser`](https://jsmestad.github.io/minga/Minga.Keymap.KeyParser.html): key sequence string parser
-- [`Minga.API`](https://jsmestad.github.io/minga/Minga.API.html): user-friendly editor API for commands and eval
-- [`Minga.Formatter`](https://jsmestad.github.io/minga/Minga.Formatter.html): formatter execution and default formatter registry
-- [`Minga.Extension`](https://jsmestad.github.io/minga/Minga.Extension.html): extension behaviour and lifecycle
-- [`Minga.Extension.Supervisor`](https://jsmestad.github.io/minga/Minga.Extension.Supervisor.html): extension process management
-- [`Minga.Extension.Git`](https://jsmestad.github.io/minga/Minga.Extension.Git.html): git clone, fetch, update, and rollback
-- [`Minga.Extension.Hex`](https://jsmestad.github.io/minga/Minga.Extension.Hex.html): Hex package resolution via Mix.install
-- [`Minga.Extension.Updater`](https://jsmestad.github.io/minga/Minga.Extension.Updater.html): update orchestration with confirmation and rollback
-- [Elixir is Minga's Elisp](https://jsmestad.github.io/minga/extensibility.html): deep dive on how the BEAM enables Emacs-level extensibility
+- `Minga.Config`: the DSL module (`set`, `bind`, `command`, `on`, `advise`, `for_filetype`)
+- `Minga.Config.Options`: typed option registry with per-filetype overrides
+- `Minga.Config.Loader`: config file discovery and evaluation
+- `Minga.Config.Hooks`: lifecycle hook registry
+- `Minga.Config.Advice`: before/after command advice
+- `Minga.Keymap.Active`: active keymap store (defaults + user overrides)
+- `Minga.Keymap.KeyParser`: key sequence string parser
+- `Minga.API`: user-friendly editor API for commands and eval
+- `Minga.Editing.Formatter`: formatter execution and default formatter registry
+- `Minga.Extension`: extension behaviour and lifecycle
+- `Minga.Extension.Supervisor`: extension process management
+- `Minga.Extension.Git`: git clone, fetch, update, and rollback
+- `Minga.Extension.Hex`: Hex package resolution via Mix.install
+- `Minga.Extension.Updater`: update orchestration with confirmation and rollback
+- [Elixir is Minga's Elisp](EXTENSIBILITY.md): deep dive on how the BEAM enables Emacs-level extensibility

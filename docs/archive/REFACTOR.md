@@ -1,5 +1,7 @@
 # Editor Architecture Refactor
 
+> **Archived (historical):** This completed March 2026 architecture refactor note is retained for historical context only. See [Architecture](../ARCHITECTURE.md) for current architecture.
+
 **Status:** Complete. All planned refactoring work is done.
 **Updated:** 2026-03-12
 

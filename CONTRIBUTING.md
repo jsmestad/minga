@@ -4,15 +4,14 @@ Thanks for your interest! Minga is in early development and contributions are we
 
 ## Build from source
 
-Minga is two programs: an Elixir app (editor logic) and a Zig binary (terminal rendering). You need both toolchains plus Erlang. A version manager makes this painless.
+Minga combines an Elixir/BEAM core with a Swift/Metal macOS GUI, a Go/Bubble Tea terminal renderer, and Zig native binaries (tree-sitter parser and process helpers). Install the pinned toolchains from `.tool-versions` with [asdf](https://asdf-vm.com/) or [mise](https://mise.jdx.dev/):
 
 ### Install the toolchain
-
-Using [asdf](https://asdf-vm.com/) or [mise](https://mise.jdx.dev/):
 
 ```bash
 asdf plugin add erlang
 asdf plugin add elixir
+asdf plugin add golang
 asdf plugin add zig
 ```
 
@@ -21,13 +20,13 @@ asdf plugin add zig
 ```bash
 git clone https://github.com/jsmestad/minga.git
 cd minga
-asdf install          # Installs pinned Erlang, Elixir, Zig from .tool-versions
+asdf install          # Installs pinned Erlang, Elixir, Go, and Zig from .tool-versions
 mix deps.get
-mix compile
-make native.support   # Build the native parser and helper binaries
+mix compile           # Compiles Elixir and the Go terminal renderer
+make native.support   # Builds the Zig tree-sitter parser and helper binaries
 ```
 
-The first build takes a few minutes (Zig compiles tree-sitter grammars for 24 languages). After that, rebuilds are incremental and fast.
+The first build takes a few minutes while Zig compiles 50 tree-sitter grammars. After that, rebuilds are incremental and fast.
 
 ### Refresh generated sources
 
@@ -51,25 +50,39 @@ For a one-off source smoke run that should not use the worktree profile, run `py
 ## Running Tests
 
 ```bash
-mix test                       # Elixir tests
-cd zig && zig build test       # Zig renderer tests
+mix test.llm                   # Non-heavy Elixir suite (LLM-friendly summary)
+cd go/tui && go test ./...     # Go/Bubble Tea terminal renderer tests
+cd zig && zig build test       # Zig parser and helper tests
 ```
+
+### Native macOS unit tests
+
+After generating the Xcode project (`cd macos && xcodegen generate`), run `scripts/test_macos_unit` from the repository root. This is the authoritative Xcode/Metal unit-test entrypoint used by CI and the Swift stage of `make done`; SwiftPM is not a substitute for this native gate.
+
+Scheme `MingaUnitTests` builds the existing `MingaTests` target for two execution contexts, without changing its source ownership. Production `Minga.app` builds separately and must never host or embed the unit tests. Production-app probes receive its explicit path through the scheme's `MINGA_TEST_PRODUCTION_APP_PATH` environment variable. The host compiles the existing production Metal shader so `Bundle.main` retains real shader-library coverage.
+
+The entrypoint runs ordinary tests bare with explicit empty `TEST_HOST` and `BUNDLE_LOADER` build settings, excluding the two focus suites. It then runs an explicit hosted `build-for-testing` phase, verifies the fresh plan and products, and executes all 13 `EditorFocusPolicyTests` functions from a pinned policy copy. Only accepted policy execution authorizes `FocusReplayWindowTests` in a separate host process from a replay copy of that same input. Both plan copies bind their original product root, select their own suite explicitly, and remove conflicting target-local skip filters. These exclusions route tests between execution contexts; they do not omit acceptance coverage.
+
+Production-window replay observes responder and positive AX identity within the same bounded wait; observation never assigns focus or substitutes an expected AX object. For native fields, AX identity means the exact AppKit cell installed on the expected production field, with the cell's `controlView` pointing back to that field. CI repeats the canonical lifecycle against the same DerivedData and retains a separate warm manifest, so hosted-to-bare reuse is exercised rather than inferred from a cache. Do not combine the focus selectors or run competing GUI tests concurrently: suite-local `.serialized` does not isolate application activation and key-window state from other suites.
+
+Use `--output-dir PATH` to retain evidence elsewhere (default: `macos-unit-evidence/`). Each invocation preserves separate action logs and `.xcresult` bundles, and writes `results.json` with the three actual result summaries/test trees, commands, exit statuses, timings, and aggregate logical-function counts. Global xcresult counts do not count parameterized executions; replay acceptance requires the enumerator and all seven actual named passed argument nodes. Evidence includes settings queried from the testing build graph, actual bare/hosted runtime identity, the hosted build command/status/log, and raw pre/post plan signatures and copies. For this scheme, the pinned Xcode emits format 1 with a top-level `MingaTests` target and an application-bundle `TestHostPath`; unsupported formats fail explicitly. The default build graph omits the test target, and `test` alone does not produce the persisted plan required for replay. Failed builds and missing, ambiguous, stale, or wrong-mode hosted plans block focused execution rather than fall back to cached products. Any ordinary failure remains an aggregate failure even if subsequent hosted diagnostics pass. Missing results, zero executed tests, incomplete focus coverage, or missing or reused focus test-runner PIDs fail the gate even if `xcodebuild` exits zero. The empty-setting transition and warm hosted-to-bare reuse require actual macOS verification; command flags alone are not native proof.
 
 ## Before Committing
 
-Run the fast local gate once before requesting review. CI owns the full gate; `make lint.full` exists for reproducing a CI failure locally.
+Run `make done` (or `make lint` for fast lint only) before requesting review. CI owns the full gate; `make lint.full` exists for reproducing a CI failure locally.
 
 ```bash
 make lint                         # Formatting + changed Credo + ExDNA, in parallel with compile -> incremental Dialyzer + Reach arch policy (~25s warm)
+make done                         # Fast lint + mix test.llm + site/macOS gates when relevant files changed
 make lint.full                    # Same plus full Credo, Reach smells, and classic Dialyzer (minutes)
 mix test.llm                      # Non-heavy test suite with an LLM-friendly summary
 ```
 
-Both gates run every independent check even when one fails (Dialyzer and Reach are skipped only when compile fails) and print one status line per check followed by the logs of the failed ones. The fast gate skips compile, Dialyzer, Reach, and ExDNA on branches with no Elixir-relevant change. CI also runs full Credo, ExDNA, Reach architecture checks, and classic Dialyzer before merge.
+Both gates run every independent check even when one fails (Dialyzer and Reach are skipped only when compile fails) and print one status line per check followed by the logs of the failed ones. The fast gate skips compile, Dialyzer, Reach, and ExDNA on branches with no Elixir-relevant change; `site/`-only branches skip Elixir and Swift checks and run site bundle and link checks instead. CI also runs full Credo, ExDNA, Reach architecture checks, and classic Dialyzer before merge.
 
-The [Reach smells workflow](.github/workflows/reach-smells.yml) reports advisory findings weekly or on demand. It does not block PRs. The required `Swift (macOS GUI)` check passes only when both the macOS correctness and performance jobs pass.
+The [Reach smells workflow](https://github.com/jsmestad/minga/blob/main/.github/workflows/reach-smells.yml) reports advisory findings weekly or on demand. It does not block PRs. The required `Swift (macOS GUI)` check passes only when both the macOS correctness and performance jobs pass.
 
-Swift correctness CI restores only Xcode's compilation cache. It builds fresh app and test bundles and records native build and test time separately in `macos-unit-evidence/results.json`. The [scheduled Swift evidence workflow](.github/workflows/swift-evidence.yml) still starts with a cold build.
+Swift correctness CI restores only Xcode's compilation cache. It builds fresh app and test bundles and records native build and test time separately in `macos-unit-evidence/results.json`. The [scheduled Swift evidence workflow](https://github.com/jsmestad/minga/blob/main/.github/workflows/swift-evidence.yml) still starts with a cold build.
 
 ## Project Layout
 
@@ -85,32 +98,21 @@ See `AGENTS.md` (in the repo root) for the full project structure, coding standa
 | Doc | What it covers |
 |-----|---------------|
 | [README.md](README.md) | Project overview and quick start |
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Two-process design, supervision, port protocol |
-| [docs/MACOS_ACCESSIBILITY_TESTING.md](docs/MACOS_ACCESSIBILITY_TESTING.md) | Real launched-app macOS accessibility validation |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Supervision tree, layer rules, and rendering pipeline |
+| [docs/AUTOMATION-IPC.md](docs/AUTOMATION-IPC.md) | Native macOS `minga-ipc` readiness and navigation receipts |
+| [docs/MACOS_ACCESSIBILITY_TESTING.md](https://github.com/jsmestad/minga/blob/main/docs/MACOS_ACCESSIBILITY_TESTING.md) | Real launched-app macOS accessibility validation |
 | `AGENTS.md` | Coding standards, project structure, how to add features |
 
 ## How to Add Things
 
-### A new command
-1. Define in `Minga.Command.Registry` with name + description
-2. Add keybinding in `Minga.Keymap.Defaults`
-3. Implement in the appropriate `lib/minga/editor/commands/*.ex` module
-4. Test the command and the keybinding lookup
+Step-by-step recipes live under `docs/recipes/`:
 
-### A new motion
-1. Add function to the appropriate `lib/minga/motion/*.ex` module with `@spec`
-2. Wire into `Minga.Mode.Normal` and `Minga.Mode.OperatorPending`
-3. Test against known buffer content, including Unicode edge cases
-
-### A new text object
-1. Add function to `Minga.TextObject` with `@spec`
-2. Register in `Minga.Mode.OperatorPending`
-3. Test: cursor inside, cursor outside, nested, empty content
-
-### A new render command (both sides)
-1. Add opcode + encoder in `Minga.Port.Protocol`
-2. Add decoder + handler in `zig/src/protocol.zig` and `zig/src/renderer.zig`
-3. Test encode/decode round-trip on both sides
+- **New command:** [docs/recipes/new-command.md](https://github.com/jsmestad/minga/blob/main/docs/recipes/new-command.md)
+- **New motion:** [docs/recipes/new-motion.md](https://github.com/jsmestad/minga/blob/main/docs/recipes/new-motion.md)
+- **New text object:** [docs/recipes/new-text-object.md](https://github.com/jsmestad/minga/blob/main/docs/recipes/new-text-object.md)
+- **New or modified agent tool:** [docs/recipes/new-agent-tool.md](https://github.com/jsmestad/minga/blob/main/docs/recipes/new-agent-tool.md)
+- **New render command:** [docs/recipes/new-render-command.md](https://github.com/jsmestad/minga/blob/main/docs/recipes/new-render-command.md)
+- **New tree-sitter grammar:** [docs/recipes/new-grammar.md](https://github.com/jsmestad/minga/blob/main/docs/recipes/new-grammar.md)
 
 ## Performance Debugging with Telemetry
 

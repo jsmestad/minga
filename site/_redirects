@@ -13,7 +13,14 @@
 /agentic-keymap.html /docs/agentic-keymap.html 301
 /architecture.html /docs/architecture.html 301
 /protocol.html /docs/protocol.html 301
+/gui_protocol.html /docs/gui_protocol.html 301
+/charm_tui.html /docs/charm_tui.html 301
 /buffer-aware-agents.html /docs/buffer-aware-agents.html 301
+/session-recovery.html /docs/session-recovery.html 301
+/remote_agents.html /docs/remote_agents.html 301
+/hooks.html /docs/hooks.html 301
+/mcp.html /docs/mcp.html 301
+/automation-ipc.html /docs/automation-ipc.html 301
 /contributing.html /docs/contributing.html 301
 /releasing.html /docs/releasing.html 301
 /changelog.html /docs/changelog.html 301

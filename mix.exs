@@ -46,156 +46,251 @@ defmodule Minga.MixProject do
       name: "Minga",
       source_url: "https://github.com/jsmestad/minga",
       homepage_url: docs_homepage_url(),
-      docs: [
-        main: "readme",
-        assets: %{"assets" => "assets"},
-        extras: [
-          # Overview
-          "README.md",
-          "CHANGELOG.md",
-          # Getting Started
-          "docs/GETTING-STARTED.md",
-          # Using Minga
+      docs: docs()
+    ]
+  end
+
+  @spec docs() :: keyword()
+  defp docs do
+    module_groups = docs_module_groups()
+
+    published_modules =
+      module_groups
+      |> Keyword.values()
+      |> List.flatten()
+      |> MapSet.new()
+
+    published_module_names = MapSet.new(published_modules, &inspect/1)
+
+    [
+      main: "readme",
+      logo: "assets/minga_dark-transparent.svg",
+      assets: %{"assets" => "assets"},
+      extras: [
+        # Overview
+        "README.md",
+        "CHANGELOG.md",
+        # Getting Started
+        "docs/GETTING-STARTED.md",
+        # Using Minga
+        "docs/CONFIGURATION.md",
+        "docs/PROJECTS.md",
+        "docs/AGENT-MODEL-SELECTION.md",
+        "docs/BUFFER-AWARE-AGENTS.md",
+        "docs/SESSION-RECOVERY.md",
+        "docs/REMOTE_AGENTS.md",
+        "docs/HOOKS.md",
+        "docs/MCP.md",
+        # Coming From...
+        "docs/FOR-NEOVIM-USERS.md",
+        "docs/FOR-EMACS-USERS.md",
+        "docs/FOR-AI-CODERS.md",
+        # Extending Minga
+        "docs/EXTENSIBILITY.md",
+        "docs/EXTENSION_API.md",
+        "docs/KEYMAP-SCOPES.md",
+        "docs/AGENTIC-KEYMAP.md",
+        # Architecture
+        "docs/ARCHITECTURE.md",
+        "docs/PROTOCOL.md",
+        "docs/GUI_PROTOCOL.md",
+        "docs/CHARM_TUI.md",
+        # Architecture Decisions
+        "docs/adr/0001-frontend-owns-row-fit.md",
+        "docs/adr/0002-editor-state-transitions-have-explicit-owners.md",
+        "docs/adr/0003-extension-code-updates-require-a-new-vm-generation.md",
+        "docs/adr/0004-products-are-root-applets-over-a-fixed-engine.md",
+        "docs/adr/0005-frontend-owns-immediate-ui-feedback.md",
+        # Development
+        "CONTRIBUTING.md",
+        "docs/AUTOMATION-IPC.md",
+        "docs/RELEASING.md"
+      ],
+      groups_for_extras: [
+        "Getting Started": [
+          "docs/GETTING-STARTED.md"
+        ],
+        "Using Minga": [
           "docs/CONFIGURATION.md",
-          "docs/AGENT-MODEL-SELECTION.md",
           "docs/PROJECTS.md",
-          # Coming From...
+          "docs/AGENT-MODEL-SELECTION.md",
+          "docs/BUFFER-AWARE-AGENTS.md",
+          "docs/SESSION-RECOVERY.md",
+          "docs/REMOTE_AGENTS.md",
+          "docs/HOOKS.md",
+          "docs/MCP.md"
+        ],
+        "Coming From...": [
           "docs/FOR-NEOVIM-USERS.md",
           "docs/FOR-EMACS-USERS.md",
-          "docs/FOR-AI-CODERS.md",
-          # Extending Minga
+          "docs/FOR-AI-CODERS.md"
+        ],
+        "Extending Minga": [
           "docs/EXTENSIBILITY.md",
           "docs/EXTENSION_API.md",
           "docs/KEYMAP-SCOPES.md",
-          "docs/AGENTIC-KEYMAP.md",
-          # Architecture
+          "docs/AGENTIC-KEYMAP.md"
+        ],
+        Architecture: [
           "docs/ARCHITECTURE.md",
           "docs/PROTOCOL.md",
-          "docs/BUFFER-AWARE-AGENTS.md",
-          # Development
+          "docs/GUI_PROTOCOL.md",
+          "docs/CHARM_TUI.md"
+        ],
+        "Architecture Decisions": [
+          "docs/adr/0001-frontend-owns-row-fit.md",
+          "docs/adr/0002-editor-state-transitions-have-explicit-owners.md",
+          "docs/adr/0003-extension-code-updates-require-a-new-vm-generation.md",
+          "docs/adr/0004-products-are-root-applets-over-a-fixed-engine.md",
+          "docs/adr/0005-frontend-owns-immediate-ui-feedback.md"
+        ],
+        Development: [
           "CONTRIBUTING.md",
+          "docs/AUTOMATION-IPC.md",
           "docs/RELEASING.md"
-        ],
-        groups_for_extras: [
-          "Getting Started": [
-            "docs/GETTING-STARTED.md"
-          ],
-          "Using Minga": [
-            "docs/CONFIGURATION.md",
-            "docs/AGENT-MODEL-SELECTION.md",
-            "docs/PROJECTS.md"
-          ],
-          "Coming From...": [
-            "docs/FOR-NEOVIM-USERS.md",
-            "docs/FOR-EMACS-USERS.md",
-            "docs/FOR-AI-CODERS.md"
-          ],
-          "Extending Minga": [
-            "docs/EXTENSIBILITY.md",
-            "docs/EXTENSION_API.md",
-            "docs/KEYMAP-SCOPES.md",
-            "docs/AGENTIC-KEYMAP.md"
-          ],
-          Architecture: [
-            "docs/ARCHITECTURE.md",
-            "docs/PROTOCOL.md",
-            "docs/BUFFER-AWARE-AGENTS.md"
-          ],
-          Development: [
-            "CONTRIBUTING.md",
-            "docs/RELEASING.md"
-          ]
-        ],
-        before_closing_body_tag: %{
-          html: """
-          <script defer src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
-          <script>
-            let initialized = false;
-            window.addEventListener("exdoc:loaded", () => {
-              if (!initialized) {
-                mermaid.initialize({
-                  startOnLoad: false,
-                  theme: document.body.className.includes("dark") ? "dark" : "default"
-                });
-                initialized = true;
-              }
-              let id = 0;
-              for (const codeEl of document.querySelectorAll("pre code.mermaid")) {
-                const preEl = codeEl.parentElement;
-                const graphDefinition = codeEl.textContent;
-                const graphEl = document.createElement("div");
-                const graphId = "mermaid-graph-" + id++;
-                mermaid.render(graphId, graphDefinition).then(({svg, bindFunctions}) => {
-                  graphEl.innerHTML = svg;
-                  bindFunctions?.(graphEl);
-                  preEl.insertAdjacentElement("afterend", graphEl);
-                  preEl.remove();
-                });
-              }
-            });
-          </script>
-          """
-        },
-        groups_for_modules: [
-          "Public API": [
-            Minga.API
-          ],
-          Editor: [
-            MingaEditor,
-            MingaEditor.Commands,
-            MingaEditor.Viewport,
-            MingaEditor.Window,
-            MingaEditor.WindowTree
-          ],
-          Buffer: [
-            Minga.Buffer,
-            Minga.Buffer.Document,
-            Minga.Buffer.Process
-          ],
-          Modes: [
-            Minga.Mode,
-            Minga.Mode.Normal,
-            Minga.Mode.Insert,
-            Minga.Mode.Visual,
-            Minga.Mode.Command,
-            Minga.Mode.Eval,
-            Minga.Mode.OperatorPending,
-            Minga.Mode.Replace,
-            Minga.Mode.Search
-          ],
-          Configuration: [
-            Minga.Config,
-            Minga.Config.Options,
-            Minga.Config.Loader,
-            Minga.Config.Hooks
-          ],
-          Themes: [
-            Minga.Theme,
-            Minga.Theme.DoomOne,
-            Minga.Theme.CatppuccinFrappe,
-            Minga.Theme.CatppuccinLatte,
-            Minga.Theme.CatppuccinMacchiato,
-            Minga.Theme.CatppuccinMocha,
-            Minga.Theme.OneDark,
-            Minga.Theme.OneLight
-          ],
-          Keymap: [
-            Minga.Keymap.Trie,
-            Minga.Keymap.Defaults,
-            Minga.Keymap.Store,
-            Minga.Keymap.KeyParser,
-            MingaEditor.UI.WhichKey
-          ],
-          "Port Protocol": [
-            Minga.Port.Protocol,
-            Minga.Port.Manager
-          ],
-          Commands: [
-            Minga.Command,
-            Minga.Command.Registry,
-            Minga.Command.Parser
-          ]
         ]
+      ],
+      before_closing_body_tag: %{
+        html: """
+        <script defer src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+        <script>
+          let initialized = false;
+          window.addEventListener("exdoc:loaded", () => {
+            if (!initialized) {
+              mermaid.initialize({
+                startOnLoad: false,
+                theme: document.body.className.includes("dark") ? "dark" : "default"
+              });
+              initialized = true;
+            }
+            let id = 0;
+            for (const codeEl of document.querySelectorAll("pre code.mermaid")) {
+              const preEl = codeEl.parentElement;
+              const graphDefinition = codeEl.textContent;
+              const graphEl = document.createElement("div");
+              const graphId = "mermaid-graph-" + id++;
+              mermaid.render(graphId, graphDefinition).then(({svg, bindFunctions}) => {
+                graphEl.innerHTML = svg;
+                bindFunctions?.(graphEl);
+                preEl.insertAdjacentElement("afterend", graphEl);
+                preEl.remove();
+              });
+            }
+          });
+        </script>
+        """
+      },
+      filter_modules: fn mod, _meta -> MapSet.member?(published_modules, mod) end,
+      skip_code_autolink_to: &internal_module_reference?(&1, published_module_names),
+      groups_for_modules: module_groups
+    ]
+  end
+
+  @spec internal_module_reference?(String.t(), MapSet.t(String.t())) :: boolean()
+  defp internal_module_reference?(ref, published_module_names) do
+    cleaned = Regex.replace(~r/^(?:t|c|m):/, ref, "")
+
+    case Regex.run(~r/^(Minga(?:Agent|Editor)?(?:\.[A-Z][A-Za-z0-9_]*)*)/, cleaned) do
+      [_, module_name] -> not MapSet.member?(published_module_names, module_name)
+      _ -> false
+    end
+  end
+
+  @spec docs_module_groups() :: [{atom(), [module()]}]
+  defp docs_module_groups do
+    [
+      "Public API": [
+        Minga.API,
+        Minga.Events
+      ],
+      Configuration: [
+        Minga.Config,
+        Minga.Config.Options,
+        Minga.Config.Loader,
+        Minga.Config.Hooks,
+        Minga.Config.Advice,
+        Minga.Editing.Formatter
+      ],
+      Extensions: [
+        Minga.Extension,
+        Minga.Extension.Editor,
+        Minga.Extension.Agent,
+        Minga.Extension.AgentAPI,
+        Minga.Extension.Supervisor,
+        Minga.Extension.Registry,
+        Minga.Extension.Git,
+        Minga.Extension.Hex,
+        Minga.Extension.Updater
+      ],
+      "Agent Runtime": [
+        MingaAgent.Runtime,
+        MingaAgent.Session,
+        MingaAgent.SessionManager,
+        MingaAgent.Introspection,
+        MingaAgent.ProviderRegistry,
+        MingaAgent.Tool.Context,
+        MingaAgent.Tool.Registry,
+        MingaAgent.Tool.Spec
+      ],
+      "Buffer & Services": [
+        Minga.Buffer,
+        Minga.Buffer.Document,
+        Minga.Buffer.Process,
+        Minga.Buffer.Fork,
+        Minga.Git,
+        Minga.Language,
+        Minga.LSP.Client,
+        Minga.LSP.ServerRegistry,
+        Minga.Project,
+        Minga.Session
+      ],
+      "Modes & Keymaps": [
+        Minga.Mode,
+        Minga.Mode.Normal,
+        Minga.Mode.Insert,
+        Minga.Mode.Visual,
+        Minga.Mode.Command,
+        Minga.Mode.Eval,
+        Minga.Mode.OperatorPending,
+        Minga.Mode.Replace,
+        Minga.Mode.Search,
+        Minga.Keymap,
+        Minga.Keymap.Active,
+        Minga.Keymap.Bindings,
+        Minga.Keymap.Defaults,
+        Minga.Keymap.CUADefaults,
+        Minga.Keymap.KeyParser,
+        Minga.Keymap.Scope
+      ],
+      Commands: [
+        Minga.Command,
+        Minga.Command.Registry,
+        Minga.Command.Parser,
+        Minga.Command.Provider
+      ],
+      "Editor & Frontends": [
+        MingaEditor,
+        MingaEditor.Shell,
+        MingaEditor.Commands,
+        MingaEditor.Viewport,
+        MingaEditor.Window,
+        MingaEditor.WindowTree,
+        MingaEditor.Frontend,
+        MingaEditor.Frontend.Protocol,
+        MingaEditor.Frontend.Manager,
+        MingaEditor.Frontend.Capabilities,
+        MingaEditor.UI.WhichKey
+      ],
+      Themes: [
+        MingaEditor.UI.Theme,
+        MingaEditor.UI.Theme.DoomOne,
+        MingaEditor.UI.Theme.CatppuccinFrappe,
+        MingaEditor.UI.Theme.CatppuccinLatte,
+        MingaEditor.UI.Theme.CatppuccinMacchiato,
+        MingaEditor.UI.Theme.CatppuccinMocha,
+        MingaEditor.UI.Theme.OneDark,
+        MingaEditor.UI.Theme.OneLight,
+        MingaEditor.UI.Theme.AstroDark
       ]
     ]
   end

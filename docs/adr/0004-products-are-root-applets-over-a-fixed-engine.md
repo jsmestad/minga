@@ -70,7 +70,7 @@ Source replacement must reconcile or fence active migration callbacks and pendin
 
 ## What R0 establishes, and what remains a gate
 
-The merged [R0 investigation](../investigations/3547_live_definition.md) demonstrates a bounded stable-name replacement sequence with helper-dependent calls, rejected-candidate restoration and independent instance failure/recovery. All four admission-owner interruption schedules remain explicitly unavailable. The fixture does not demonstrate automatic production recovery, arbitrary-source confinement, durable storage, grants, grouped Save, packaged compilation or native interaction.
+The merged [R0 investigation](https://github.com/jsmestad/minga/blob/main/docs/investigations/3547_live_definition.md) demonstrates a bounded stable-name replacement sequence with helper-dependent calls, rejected-candidate restoration and independent instance failure/recovery. All four admission-owner interruption schedules remain explicitly unavailable. The fixture does not demonstrate automatic production recovery, arbitrary-source confinement, durable storage, grants, grouped Save, packaged compilation or native interaction.
 
 That evidence enables the next restricted-source specification, not a production loader. ADR-0003 still requires a new VM generation for arbitrary extension code and dependency updates. Its restricted-API exit clause needs a separately reviewed boundary and real proof; this document grants no global loader exemption.
 

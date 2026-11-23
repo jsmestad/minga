@@ -16,7 +16,7 @@ The extensibility model you love transfers directly. Minga's runtime is the BEAM
 
 | Emacs concept | Minga equivalent | Status |
 |--------------|-----------------|--------|
-| `defun` / `fset` (redefine anything) | Hot code reloading (swap modules at runtime) | ✅ |
+| `defun` / `fset` (redefine behavior) | Commands, advice, hooks, and extension boundaries (module code updates take effect on restart per [ADR-0003](adr/0003-extension-code-updates-require-a-new-vm-generation.md)) | ✅ |
 | `define-advice` (wrap any function) | `advise :before/:after/:around/:override` | ✅ |
 | `add-hook` (attach to events) | `on :after_save, :after_open, :on_mode_change` | ✅ |
 | Buffer-local variables | Per-process state (isolation enforced by VM) | ✅ |
@@ -67,21 +67,21 @@ Emacs uses a stop-the-world garbage collector. When it runs, everything pauses. 
 
 Emacs is "written in Elisp," except for the display engine, regex engine, buffer internals, and redisplay loop. Those are C. When you need to change how rendering works or modify buffer data structures, you hit a wall.
 
-**Minga:** Editor logic is Elixir all the way down. Buffers, modes, motions, operators, the keymap trie, the render pipeline. The only non-Elixir code is the Zig renderer, and that's on the other side of a process boundary by design.
+**Minga:** Editor logic is Elixir all the way down: buffers, modes, motions, operators, keymap resolution, agent orchestration, and the render model. Native code lives strictly across explicit process boundaries for what it does best: Swift/Metal for macOS rendering, Go/Bubble Tea for the terminal frontend, and Zig for the tree-sitter parser and process helpers.
 
 ### AI agents need concurrency you don't have
 
 You're using `gptel` or `ellama`. They make HTTP requests and stream responses in your single-threaded Elisp environment. A slow API response blocks your typing. Now imagine agentic tools that modify files, run shell commands, and operate autonomously for minutes.
 
-**Minga:** Each AI agent session is its own supervised process tree. Agent tools are being [wired to edit buffers in-memory](BUFFER-AWARE-AGENTS.md) with full undo integration, incremental tree-sitter sync, and buffer forking for concurrent agents. The BEAM's process model makes this architecturally natural.
+**Minga:** Each AI agent session runs in its own supervised process tree. Agent file edits route through [in-memory buffer forks and staged changesets](BUFFER-AWARE-AGENTS.md) with revision checks, three-way merge, and undo integration. The BEAM's process model makes this architecturally natural.
 
 ---
 
 ## What you gain
 
-### Modal editing (yes, really)
+### Modal editing (and CUA support)
 
-You might already use `evil-mode`, an admission that Emacs's default keybindings cause RSI and Vim's modal model is more efficient. Minga gives you Vim-native modal editing without the impedance mismatch:
+You might already use `evil-mode`, an admission that Emacs's default keybindings cause RSI and Vim's modal model is more efficient. Minga gives you Vim-native modal editing without the impedance mismatch (alongside CUA editing support):
 
 - Full normal/insert/visual/operator-pending modes
 - Motions and text objects (`iw`, `i"`, `a{`)
@@ -90,11 +90,11 @@ You might already use `evil-mode`, an admission that Emacs's default keybindings
 
 If you use Doom Emacs, the leader key layout will feel familiar.
 
-### Hot code reloading that actually works
+### Clean config reloads with explicit code generations
 
-Emacs has `eval-buffer` and `load-file`. They work, but reloading a package often requires restarting because of stale state and cached closures.
+Emacs has `eval-buffer` and `load-file`, which often leave stale state or cached closures behind until you restart anyway.
 
-The BEAM was designed for hot code upgrades in production systems. It manages two versions of a module simultaneously. Reload your config with `SPC h r` and it applies cleanly. No restart. No stale state.
+In Minga, `SPC h r` reloads configuration options, keybindings, hooks, and advice cleanly in place. Compiled extension and user-module code follows an explicit generation boundary ([ADR-0003](adr/0003-extension-code-updates-require-a-new-vm-generation.md)): edits to compiled extension code validate in a disposable BEAM process and activate cleanly on restart rather than leaving half-updated modules in memory.
 
 ### Observability that Emacs can't match
 
@@ -102,11 +102,11 @@ Emacs has `describe-function` and `edebug`. The BEAM has a production-grade obse
 
 ```elixir
 :observer.start()                     # full GUI dashboard
-:sys.get_state(Minga.Editor)          # inspect any process live
+:sys.get_state(MingaEditor)           # inspect any process live
 :sys.get_state(buffer_pid)            # buffer state without stopping it
 
 :dbg.tracer()
-:dbg.p(Process.whereis(Minga.Editor), [:receive])  # trace messages live
+:dbg.p(Process.whereis(MingaEditor), [:receive])  # trace messages live
 ```
 
 ---
@@ -116,15 +116,15 @@ Emacs has `describe-function` and `edebug`. The BEAM has a production-grade obse
 | Aspect | Elisp | Elixir |
 |--------|-------|--------|
 | **Execution model** | Single-threaded interpreter | Multi-process preemptive VM |
-| **Function redefinition** | Immediate, per-function | Per-module reload (~50ms) |
+| **Behavior updates** | Immediate per-function `fset` | Live config/hook/advice reload; explicit VM generation for compiled extension updates ([ADR-0003](adr/0003-extension-code-updates-require-a-new-vm-generation.md)) |
 | **Failure behavior** | Can leave editor in inconsistent state | Contained to one process |
 | **Extension concurrency** | None (slow extension freezes editor) | Extensions are processes |
 | **GC model** | Stop-the-world | Per-process (no global pauses) |
 | **State model** | Global mutable state | Per-process state (isolated by default) |
 | **Community packages** | MELPA (thousands) | Hex (large ecosystem, not editor-specific yet) |
-| **Editor internals** | Elisp + C wall | Elixir all the way down |
+| **Editor internals** | Elisp + C wall | Elixir core + thin native frontends/parser across ports |
 
-The single real tradeoff: you reload a whole module, not a single function. In practice, modules are small and reload is fast.
+The single real tradeoff: arbitrary compiled extension modules do not mutate in-place mid-session; they activate cleanly on a fresh process generation so module ownership and cleanup stay unambiguous.
 
 ---
 
@@ -148,8 +148,8 @@ The Doom pattern of "always bind the key, let the command handle the empty case"
 | Emacs has | Minga status |
 |-----------|-------------|
 | `org-mode` | In progress. See [minga-org](https://github.com/jsmestad/minga-org) for TODO cycling, checkbox toggling, heading promotion, and tree-sitter highlighting. |
-| `magit` | Git integration planned, as supervised processes. |
-| LSP (`eglot` / `lsp-mode`) | Planned. Each LSP client as its own process. |
+| `magit` | Core Git status/diff/blame ship in `Minga.Git`; richer interactive Git workflows ship via the optional [GitExtended](CONFIGURATION.md#optional-extensions) extension. |
+| LSP (`eglot` / `lsp-mode`) | ✅ Shipped. Supervised LSP clients (`Minga.LSP.Client`) provide diagnostics, hover, definitions, completion, code actions, and rename. |
 | MELPA packages | ✅ Extensions install from Hex packages, git repos, or local paths. Supervised, crash-isolated, with update and rollback. |
 | `projectile` | ✅ Project detection, `SPC p` group. See [Projects](PROJECTS.md). |
 | Emacs Lisp (if you love Lisp) | Elixir. |
