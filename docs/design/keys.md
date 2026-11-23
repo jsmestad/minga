@@ -30,6 +30,8 @@ Notation: modifiers as Mac glyphs (⌃J, ⌥↩, ⌘.), leader sequences as `SPC
 | `SPC t e` | Edit timeline | new |
 | `SPC s q` | Quickfix group: open the list (`:copen`), with `:cdo` / `:cfdo` listed as hints in which-key | new |
 | `SPC o t` | Toggle the terminal drawer | new |
+| `SPC p h` | Project home (`*home*`) from anywhere | new |
+| `SPC q n` | Start fresh instead of the restored session: closes the restored files and opens the project home | new |
 | `SPC o T` | New terminal in the current window | new |
 
 ## Leader `SPC a` (Minga)

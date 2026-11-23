@@ -100,11 +100,41 @@ Minga's replies are markdown, but the frontends never parse it. The BEAM sends s
 Sections:
 
 - **Pinned**: up to four files, numbered for `SPC 1` to `SPC 4` and ⌘1 to ⌘4.
-- **Changed**: your unsaved files with a dot in the you role; Minga's changes grouped under their task, with its state and the small twist mark.
+- **Changed**: your unsaved files with a dot in the you role; Minga's changes grouped under their task, with its state. Because this section mixes your edits and Minga's, each row carries a thin authorship strand at its left edge (you role or minga role); see [marks](marks.md#the-twist).
 - **Recent**: by last visit.
 - **Terminals**: each with its cwd and last state.
 
 Files never need closing; only unsaved or unreviewed work is called out. Back and forward are ⌃⌘← and ⌃⌘→ on macOS, or a trackpad swipe.
+
+## Opening a directory
+
+`minga .` means "I want to work on this project".
+
+- **The directory becomes the project root.** From a subdirectory (`minga lib/minga_agent`) the root is the nearest project marker above it (`.git`, `mix.exs` and the other markers), and the switcher opens filtered to that subdirectory; backspace widens it to the whole project. A directory with no markers still opens, with itself as the root.
+- **If you worked here before, Minga picks up where you left off.** Files, splits, cursors and scroll come back, and the echo area says "Restored 3 files from last time". `SPC q n` starts fresh instead: it closes the restored files and opens the project home, and never discards unsaved edits or Minga's unreviewed changes.
+- **The first time, the project home opens.** `*home*` is a quiet resting view, not a splash screen and not a special buffer, so `q` does nothing there. It shows the project name and path, the branch and change count, "Recent in this project" numbered `1` to `9`, this project's Minga tasks with their state glyphs, and the next actions as an action list. Opening a file replaces it; `SPC p h` brings it back from anywhere.
+- **Minga's tasks are not part of the window session.** They keep running across windows and restarts, and show on the home buffer and in the modeline. The session restores only what the window held: open files, cursors, scroll and the active buffer.
+- **`minga` with no arguments** behaves like `minga .` inside a project. Outside any project, the home lists recent projects, numbered.
+- **macOS routes** (dragging a folder onto the Dock icon, File › Open Folder) take the same path. The TUI and macOS draw the same picture.
+
+## Empty states and notices with actions
+
+Every empty state, and every notice that offers actions, has the same anatomy so a call to action never reads like a description:
+
+1. **What happened:** a title line in primary text weight, with the state glyph if there is one.
+2. **Why, or what it means:** one muted line.
+3. **What you can do:** after a clear gap, an action list. One row per action, a fixed-width key column in the accent colour and the label in normal text ("`l`   Show log"). The first, most likely action is preselected with a selection bar: `↩` runs it, `j` and `k` move, every row can be clicked. On macOS rows behave like native list rows with a hover highlight; in the TUI the selected row's key is a reverse-video chip on a full-width selection bar.
+
+The block is left-aligned inside its panel. Close controls are not repeated in the body: `q close` lives in the drawer header and the bottom border.
+
+## Blame
+
+`SPC g b` adds a narrow column on the left of the code, not a new buffer.
+
+- **One continuous column** with its own surface tint, from the first visible line to the last.
+- **Grouped by commit.** Consecutive lines from the same commit form a group; the author and relative age show on the group's first line only, with a hairline above each group. Every line belongs to a commit, blank lines included.
+- **Minga as an author.** Lines Minga wrote form their own group in the minga role, labelled "Minga" with its age; `K` shows the task and review state, and `↩` opens that task's conversation. Uncommitted lines of yours read "You · now" in the you role.
+- `SPC g b` again or `q` closes the column.
 
 ## Diagnostics
 

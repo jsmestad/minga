@@ -46,6 +46,10 @@ A ribbon of two strands in the gutter's authorship column, 10 pt wide, between t
 
 Each line draws its own segment, so the ribbon stays aligned at any line height. The files use a 26 pt line; scale the height to the real line height and keep the crossing in the top 18 pt. The crossing gap is drawn in the code background colour (`#1e1f24` in the default theme). A single-line change uses the head shape with both strands ending at 21 pt.
 
+**Only in the code gutter.** The twist marks a place in your text, so it appears only in the code gutter, on the first line of one of Minga's changes. Lists, menus, popovers and headers never carry a twist: in a list where every row is Minga's change, the same mark on every row says nothing, and the header already names the source.
+
+**Authorship strand in mixed lists.** A list that mixes sources, such as the switcher's Changed section (your edits and Minga's) or a quickfix list that combines search hits with Minga's changes, shows a thin authorship strand at each row's left edge: 2 pt on macOS, a one-cell bar in the TUI. The strand uses the minga role for Minga's rows and the you role for yours; rows from neither get nothing. A list whose rows all share one source carries no mark.
+
 **Sticky twist.** When part of a long change is visible but its first line has scrolled above the viewport, the twist head pins to the top of the gutter column with a hairline shadow, like a sticky section header. It stays clickable and lets go when the change scrolls away.
 
 **Small mark.** Lists, the switcher and menus use the head shape scaled to 10 × 14 pt, with the gap drawn in the surrounding background colour.

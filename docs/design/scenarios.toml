@@ -77,22 +77,105 @@ phase = "keyboard"
 [[scenario]]
 id = "start.empty"
 journey = "start"
-title = "Launched with no file open"
-surfaces = ["empty_state", "modeline"]
+title = "minga outside any project: home with recent projects"
+surfaces = ["home", "modeline"]
 states = []
 frontends = ["macos", "tui"]
-status = "existing-only"
+status = "designed"
+boards = { macos = "Batch6_start_empty.dc.html", tui = "Batch6_start_empty.dc.html" }
 cold_start = true
 home = true
 exits = [
+  { key = "1-9", click = "project row", to = "start.open_dir.restored" },
+  { key = "↩", click = "project row", to = "start.open_dir.restored" },
   { key = "SPC SPC", click = "Find file", to = "files.project_find" },
   { key = "SPC p p", click = "Open project", to = "start.project_switcher" },
+  { key = "SPC p a", click = "Add project", to = "start.project_switcher" },
   { key = "SPC p r", click = "Recent file", to = "start.recent_files" },
+  { key = "SPC f f", click = "", to = "files.switcher" },
   { key = "SPC ,", click = "", to = "files.switcher" },
   { key = "SPC h T", click = "Tutorial", to = "settings.tutorial" },
   { key = "SPC q q", click = "", to = "start.quit.confirm" },
 ]
-notes = "The cold-start scenario for reachability. Existing empty_state builder; the Spine version needs a board (resting view, wordmark, a few actions as text with keys)."
+notes = "The cold-start scenario for reachability. *home* outside a project lists recent projects, numbered; 1 to 9 open one (restored session when it has one, otherwise its project home). A resting view: q does nothing."
+
+[[scenario]]
+id = "start.open_dir.home"
+journey = "start"
+title = "minga . in a project opened for the first time: project home"
+surfaces = ["home", "modeline"]
+states = ["working"]
+frontends = ["macos", "tui"]
+status = "designed"
+boards = { macos = "Batch6_start_open_dir_home.dc.html", tui = "Batch6_start_open_dir_home.dc.html" }
+home = true
+reached_by = "minga . (or minga with no arguments) inside a project with no saved session"
+exits = [
+  { key = "1-9", click = "recent file row", to = "edit.plain" },
+  { key = "↩", click = "file row", to = "edit.plain" },
+  { key = "↩", click = "task row", to = "minga.conversation" },
+  { key = "SPC SPC", click = "Find file", to = "files.project_find" },
+  { key = "SPC a n", click = "New task", to = "minga.task.new" },
+  { key = "SPC o p", click = "File tree", to = "files.tree" },
+  { key = "SPC p p", click = "Switch project", to = "start.project_switcher" },
+]
+notes = "*home*: project name and path, branch and change count, Recent in this project (1 to 9), this project's Minga tasks with state glyphs, next actions as an action list. A resting view: q does nothing. SPC p h returns here from anywhere."
+
+[[scenario]]
+id = "start.open_dir.restored"
+journey = "start"
+title = "minga . in a project with a saved session: picks up where you left off"
+surfaces = ["editor", "modeline", "echo"]
+states = ["working"]
+frontends = ["macos", "tui"]
+status = "designed"
+boards = { macos = "Batch6_start_open_dir_restored.dc.html", tui = "Batch6_start_open_dir_restored.dc.html" }
+home = true
+reached_by = "minga . inside a project with a saved session"
+exits = [
+  { key = "SPC q n", click = "Start fresh", to = "start.open_dir.home" },
+  { key = "SPC p h", click = "Project home", to = "start.open_dir.home" },
+  { key = "any key", click = "", to = "edit.working" },
+]
+notes = "Files, splits, cursors and scroll come back; the echo says \"Restored 3 files from last time\" with SPC q n to start fresh. Start fresh closes the restored files and keeps Minga's tasks, unsaved edits and unreviewed changes. Minga's tasks are not part of the window session."
+
+[[scenario]]
+id = "start.open_dir.subdir"
+journey = "start"
+title = "minga lib/minga_agent inside a project: root found above, switcher filtered"
+surfaces = ["drawer:switcher", "modeline"]
+states = []
+frontends = ["macos", "tui"]
+status = "designed"
+boards = { macos = "Batch6_start_open_dir_subdir.dc.html", tui = "Batch6_start_open_dir_subdir.dc.html" }
+transient = true
+reached_by = "minga <subdirectory> inside a project"
+exits = [
+  { key = "↩", click = "file row", to = "edit.plain" },
+  { key = "⌃V", click = "", to = "windows.split" },
+  { key = "typing", click = "", to = "files.switcher", keyboard_only = "typing narrows the filter; backspace widens it to the whole project" },
+  { key = "esc", click = "", to = "start.open_dir.home", back = true },
+]
+notes = "The root is the nearest project marker above the directory; the switcher opens filtered to the subdirectory."
+
+[[scenario]]
+id = "start.open_dir.not_project"
+journey = "start"
+title = "minga . in a directory with no project markers"
+surfaces = ["home", "modeline"]
+states = []
+frontends = ["macos", "tui"]
+status = "designed"
+boards = { macos = "Batch6_start_open_dir_not_project.dc.html", tui = "Batch6_start_open_dir_not_project.dc.html" }
+home = true
+reached_by = "minga . in a directory with no project markers"
+exits = [
+  { key = "SPC o p", click = "File tree", to = "files.tree" },
+  { key = "SPC SPC", click = "Find file", to = "files.project_find" },
+  { key = "SPC p a", click = "Add as project", to = "start.project_switcher" },
+  { key = "SPC a n", click = "New task", to = "minga.task.new" },
+]
+notes = "Opens with the directory itself as the root; the home buffer carries a one-line note and the file tree action."
 
 [[scenario]]
 id = "start.first_run"
@@ -888,7 +971,7 @@ exits = [
   { key = "SPC g b", click = "", to = "edit.plain" },
   { key = "q", click = "close", to = "edit.plain" },
 ]
-notes = "A narrow left column of author initials and relative age. Lines Minga wrote are attributed to Minga in the minga role, with the task name in the K detail."
+notes = "One continuous column on the left, grouped by commit: author and relative age on each group's first line, a hairline between groups, every line (blank ones included) belongs to a commit. Lines Minga wrote form a group labelled Minga in the minga role, with the task in the K detail; uncommitted lines read You · now in the you role."
 
 [[scenario]]
 id = "git.log"
@@ -1764,12 +1847,14 @@ title = "Opening a drawer while another is open (terminal, then tasks)"
 surfaces = ["drawer:tasks", "modeline"]
 states = []
 frontends = ["macos", "tui"]
-status = "missing"
+status = "designed"
+boards = { macos = "Batch5_windows_drawer_stack.dc.html", tui = "Batch5_windows_drawer_stack.dc.html" }
 exits = [
   { key = "q", click = "close", to = "terminal.drawer", back = true },
   { key = "esc", click = "", to = "terminal.drawer", back = true },
+  { key = "SPC o t", click = "", to = "terminal.drawer" },
 ]
-notes = "One drawer at a time: the tasks drawer replaces the terminal drawer, and closing it returns to the terminal drawer (Doom popup behaviour). Splits show two things at once."
+notes = "One drawer at a time: the tasks drawer replaces the terminal drawer (header: \"terminal 1 hidden · q returns\"), and closing it returns to the terminal drawer with its shell still running (Doom popup behaviour). Splits show two things at once."
 
 [[scenario]]
 id = "windows.focus_lost"
