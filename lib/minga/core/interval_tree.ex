@@ -45,11 +45,12 @@ defmodule Minga.Core.IntervalTree do
 
   @typedoc """
   An interval stored in the tree. `start` is inclusive, `end_` is exclusive.
-  `id` is a unique reference for deletion. `value` is the associated data
+  `id` is a caller-unique identifier used for deletion, such as a reference
+  or a position in an immutable source list. `value` is the associated data
   (e.g., a highlight range struct).
   """
   @type interval :: %{
-          id: reference(),
+          id: term(),
           start: position(),
           end_: position(),
           value: term()
@@ -136,7 +137,7 @@ defmodule Minga.Core.IntervalTree do
 
   Returns the new tree. No-op if the ID is not found.
   """
-  @spec delete(t(), reference()) :: t()
+  @spec delete(t(), term()) :: t()
   def delete(nil, _id), do: nil
 
   def delete(node, id) do

@@ -45,6 +45,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
   alias MingaEditor.Renderer.TextPresentation
   alias MingaEditor.Renderer.WrapLayout
   alias MingaEditor.RenderModel.Window.VisualRow
+  alias MingaEditor.RenderModel.Window.WindowDiagnostics
   alias Minga.RenderModel.Window.Annotation
   alias Minga.RenderModel.Window.Cursorline
   alias Minga.RenderModel.Window.DiagnosticRange
@@ -316,7 +317,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
     # Diagnostic inline ranges in display coordinates
     diagnostic_ranges =
       build_diagnostic_ranges(
-        elem(ctx.diagnostics_snapshot, 1),
+        ctx.diagnostics,
         viewport,
         visible_row_count,
         visual_entries,
@@ -422,7 +423,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
           cursorline_bg: ctx.cursorline_bg,
           selection: if(wrapped_coordinates?, do: raw_selection, else: ctx.visual_selection),
           wrapped?: wrapped_coordinates?,
-          diagnostics_snapshot: ctx.diagnostics_snapshot,
+          diagnostics_snapshot: WindowDiagnostics.snapshot(ctx.diagnostics),
           annotations_revision: ctx.decorations.annotation_version,
           decorations: ctx.decorations,
           tab_width: ctx.tab_width,
@@ -3050,7 +3051,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
 
     overrides =
       (Map.keys(ctx.git_signs) ++
-         Map.keys(ctx.diagnostic_signs) ++
+         Map.keys(ctx.diagnostics.signs) ++
          MapSet.to_list(fold_start_lines) ++ annotation_lines)
       |> Enum.uniq()
       |> Enum.filter(&(&1 >= 0 and &1 < line_count))
@@ -3132,7 +3133,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
          line_count
        )
        when buf_line < line_count do
-    sign_type = resolve_sign_type(buf_line, ctx.diagnostic_signs, ctx.git_signs)
+    sign_type = resolve_sign_type(buf_line, ctx.diagnostics.signs, ctx.git_signs)
     display_type = resolve_display_type(row_type, fold_start_lines, buf_line)
     fold_end_line = Map.get(fold_end_by_start, buf_line, 0xFFFF_FFFF)
 
@@ -3574,90 +3575,99 @@ defmodule MingaEditor.RenderModel.Window.Builder do
   end
 
   @spec build_diagnostic_ranges(
-          [Diagnostic.t()],
+          WindowDiagnostics.t(),
           Viewport.t(),
-          pos_integer(),
+          non_neg_integer(),
           [visual_row_entry()],
           boolean(),
           [String.t()] | DisplayMap.t(),
           non_neg_integer(),
           ResidentBuild.t() | nil
         ) :: [DiagnosticRange.t()]
+  # Resident windows publish diagnostics through their resident semantic
+  # layer. Per-frame overlay ranges are neither encoded nor fingerprinted for
+  # them, so building those ranges would only repeat whole-URI work each frame.
   defp build_diagnostic_ranges(
-         diagnostics,
+         _diags,
+         _viewport,
+         _rows,
+         _entries,
+         _wrapped?,
+         _lines,
+         _first,
+         %ResidentBuild{}
+       ),
+       do: []
+
+  defp build_diagnostic_ranges(
+         %WindowDiagnostics{} = diagnostics,
          viewport,
          visible_rows,
          visual_entries,
          wrapped?,
          lines,
          first_line,
-         resident_build
+         nil
        ) do
-    case source_backed_diagnostics(diagnostics, resident_build) do
+    {first_visible, last_visible} =
+      visible_source_lines(viewport, visible_rows, visual_entries, wrapped?)
+
+    case WindowDiagnostics.visible(diagnostics, first_visible, last_visible) do
       [] ->
         []
 
-      diagnostics ->
-        viewport_bottom = viewport.top + visible_rows
-        line_cache = diagnostic_line_cache(diagnostics, lines, first_line, resident_build)
+      visible ->
+        line_cache = diagnostic_line_cache(visible, lines, first_line)
 
         if wrapped? do
-          Enum.flat_map(
-            diagnostics,
-            &diagnostic_to_wrapped_ranges(&1, visual_entries, line_cache)
-          )
+          Enum.flat_map(visible, &diagnostic_to_wrapped_ranges(&1, visual_entries, line_cache))
         else
-          DiagnosticRange.from_diagnostics(diagnostics, viewport.top, viewport_bottom, line_cache)
+          viewport_bottom = viewport.top + visible_rows
+          DiagnosticRange.from_diagnostics(visible, viewport.top, viewport_bottom, line_cache)
         end
     end
+  end
+
+  # Source lines a projection can touch. Unwrapped rows cover the viewport
+  # lines; wrapped rows cover the visual entries' source lines.
+  @spec visible_source_lines(Viewport.t(), non_neg_integer(), [visual_row_entry()], boolean()) ::
+          {non_neg_integer(), integer()}
+  defp visible_source_lines(viewport, visible_rows, _visual_entries, false),
+    do: {viewport.top, viewport.top + max(visible_rows - 1, 0)}
+
+  defp visible_source_lines(_viewport, _visible_rows, [], true), do: {0, -1}
+
+  defp visible_source_lines(_viewport, _visible_rows, visual_entries, true) do
+    visual_entries
+    |> Enum.map(& &1.buf_line)
+    |> Enum.min_max()
   end
 
   defp diagnostic_source(%WindowScroll{visible_line_map: %DisplayMap{} = page}), do: page
   defp diagnostic_source(%WindowScroll{lines: lines}), do: lines
 
-  @spec source_backed_diagnostics([Diagnostic.t()], ResidentBuild.t() | nil) :: [Diagnostic.t()]
-  defp source_backed_diagnostics(diagnostics, nil), do: diagnostics
-
-  defp source_backed_diagnostics(diagnostics, %ResidentBuild{line_count: count}) do
-    Enum.filter(diagnostics, fn %{range: range} ->
-      range.start_line < count and range.end_line < count
-    end)
-  end
-
   @spec diagnostic_line_cache(
           [Diagnostic.t()],
           [String.t()] | DisplayMap.t(),
-          non_neg_integer(),
-          ResidentBuild.t() | nil
-        ) :: %{
-          non_neg_integer() => String.t()
-        }
-  defp diagnostic_line_cache(diagnostics, lines, first_line, resident_build) do
+          non_neg_integer()
+        ) :: %{non_neg_integer() => String.t()}
+  defp diagnostic_line_cache(diagnostics, lines, first_line) do
     diagnostics
     |> Enum.flat_map(fn diag -> [diag.range.start_line, diag.range.end_line] end)
     |> Enum.uniq()
-    |> Map.new(fn line ->
-      {line, diagnostic_source_line(line, lines, first_line, resident_build)}
-    end)
+    |> Map.new(fn line -> {line, diagnostic_source_line(line, lines, first_line)} end)
   end
 
   @spec diagnostic_source_line(
           non_neg_integer(),
           [String.t()] | DisplayMap.t(),
-          non_neg_integer(),
-          ResidentBuild.t() | nil
-        ) :: String.t()
-  defp diagnostic_source_line(line, _lines, _first_line, %ResidentBuild{store: store}) do
-    case ResidentStore.source_row(store, line) do
-      {:ok, %VisualRow{source_text: text}} -> text
-      :error -> raise ArgumentError, "diagnostic source line is outside the resident store"
-    end
-  end
-
-  defp diagnostic_source_line(line, %DisplayMap{} = page, _first_line, nil),
+          non_neg_integer()
+        ) ::
+          String.t()
+  defp diagnostic_source_line(line, %DisplayMap{} = page, _first_line),
     do: DisplayMap.source_text(page, line)
 
-  defp diagnostic_source_line(line, lines, first_line, nil), do: line_at(lines, line, first_line)
+  defp diagnostic_source_line(line, lines, first_line), do: line_at(lines, line, first_line)
 
   @spec diagnostic_to_wrapped_ranges(Diagnostic.t(), [visual_row_entry()], %{
           non_neg_integer() => String.t()

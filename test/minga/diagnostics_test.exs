@@ -41,10 +41,11 @@ defmodule Minga.DiagnosticsTest do
 
       diagnostic = make_diag(message: "current")
       Diagnostics.publish(s, :server_a, @uri, [diagnostic])
-      assert Diagnostics.snapshot(s, @uri) == {1, [diagnostic]}
+      assert {revision, [^diagnostic]} = Diagnostics.snapshot(s, @uri)
+      assert revision > 0
 
       Diagnostics.clear(s, :server_a, @uri)
-      assert Diagnostics.snapshot(s, @uri) == {2, []}
+      assert Diagnostics.snapshot(s, @uri) == {0, []}
     end
 
     test "publishes and retrieves diagnostics", %{server: s} do
@@ -109,6 +110,132 @@ defmodule Minga.DiagnosticsTest do
       assert Enum.count(Diagnostics.for_uri(s, @uri)) == 1
       assert hd(Diagnostics.for_uri(s, @uri)).message == "file1 error"
       assert hd(Diagnostics.for_uri(s, @uri2)).message == "file2 error"
+    end
+  end
+
+  describe "committed publications" do
+    test "every non-empty publication commits a fresh positive revision", %{server: s} do
+      diagnostic = make_diag()
+      Diagnostics.publish(s, :server_a, @uri, [diagnostic])
+      first = Diagnostics.revision(s, @uri)
+
+      # An identical republication is still a new publication.
+      Diagnostics.publish(s, :server_a, @uri, [diagnostic])
+      second = Diagnostics.revision(s, @uri)
+
+      Diagnostics.publish(s, :server_b, @uri, [make_diag(line: 2)])
+      third = Diagnostics.revision(s, @uri)
+
+      assert first > 0
+      assert Enum.uniq([first, second, third]) == [first, second, third]
+      assert {^third, [_, _]} = Diagnostics.snapshot(s, @uri)
+    end
+
+    test "clearing the last source returns the URI to revision 0 without retained state",
+         %{server: s} do
+      uris = for i <- 1..50, do: "file:///tmp/cleared_#{i}.ex"
+
+      for uri <- uris do
+        Diagnostics.publish(s, :server_a, uri, [make_diag()])
+        Diagnostics.clear(s, :server_a, uri)
+      end
+
+      assert Enum.all?(uris, &(Diagnostics.revision(s, &1) == 0))
+      assert Enum.all?(uris, &(Diagnostics.snapshot(s, &1) == {0, []}))
+
+      # No per-URI counter or tombstone survives a clear.
+      state = :sys.get_state(s)
+      assert state |> Map.keys() |> Enum.sort() == [:lines, :published, :table, :uri_index]
+      assert :ets.info(state.published, :size) == 0
+      assert :ets.info(state.lines, :size) == 0
+    end
+
+    test "changed_since copies nothing for the known revision and survives clear/republish ABA",
+         %{server: s} do
+      assert Diagnostics.changed_since(s, @uri, 0) == :unchanged
+
+      diagnostic = make_diag(line: 3)
+      Diagnostics.publish(s, :server_a, @uri, [diagnostic])
+      revision = Diagnostics.revision(s, @uri)
+
+      assert {:changed, ^revision, [^diagnostic], %{3 => :error}} =
+               Diagnostics.changed_since(s, @uri, 0)
+
+      assert Diagnostics.changed_since(s, @uri, revision) == :unchanged
+
+      Diagnostics.clear(s, :server_a, @uri)
+      assert Diagnostics.changed_since(s, @uri, revision) == {:changed, 0, [], %{}}
+
+      # The same list published again must not look like the retained revision.
+      Diagnostics.publish(s, :server_a, @uri, [diagnostic])
+
+      assert {:changed, republished, [^diagnostic], _signs} =
+               Diagnostics.changed_since(s, @uri, revision)
+
+      assert republished != revision
+    end
+
+    test "a restarted server never reissues a revision a reader may retain" do
+      name = :"diag_restart_#{System.unique_integer([:positive])}"
+      start_supervised!({Diagnostics, name: name}, id: :first)
+      Diagnostics.publish(name, :server_a, @uri, [make_diag()])
+      before_restart = Diagnostics.revision(name, @uri)
+      :ok = stop_supervised(:first)
+
+      start_supervised!({Diagnostics, name: name}, id: :second)
+      assert Diagnostics.changed_since(name, @uri, before_restart) == {:changed, 0, [], %{}}
+
+      Diagnostics.publish(name, :server_a, @uri, [make_diag()])
+      assert Diagnostics.revision(name, @uri) not in [0, before_restart]
+    end
+
+    test "foreign processes cannot write or delete committed diagnostics", %{server: s} do
+      diagnostic = make_diag(line: 1)
+      Diagnostics.publish(s, :server_a, @uri, [diagnostic])
+      committed = Diagnostics.snapshot(s, @uri)
+
+      %{table: table, uri_index: uri_index, published: published, lines: lines} =
+        :sys.get_state(s)
+
+      for tab <- [table, uri_index, published, lines] do
+        assert_raise ArgumentError, fn -> :ets.insert(tab, {@uri, :forged}) end
+        assert_raise ArgumentError, fn -> :ets.delete(tab, @uri) end
+        assert_raise ArgumentError, fn -> :ets.delete_all_objects(tab) end
+      end
+
+      assert Diagnostics.snapshot(s, @uri) == committed
+      assert Diagnostics.for_uri(s, @uri) == [diagnostic]
+      assert Diagnostics.count_tuple(s, @uri) == {1, 0, 0, 0}
+    end
+
+    test "line, count and sign readers agree with the merged published list", %{server: s} do
+      first = make_diag(line: 4, col: 1, message: "first", severity: :warning)
+      duplicate = make_diag(line: 4, col: 1, message: "first", severity: :warning)
+      advisory = make_diag(line: 7, severity: :hint, advisory: true)
+      Diagnostics.publish(s, :server_a, @uri, [first, advisory])
+      Diagnostics.publish(s, :server_b, @uri, [duplicate, make_diag(line: 4, col: 0)])
+
+      merged = Diagnostics.for_uri(s, @uri)
+
+      for line <- 0..8 do
+        assert Diagnostics.on_line(s, @uri, line) ==
+                 Enum.filter(merged, &(&1.range.start_line == line))
+      end
+
+      assert Diagnostics.count(s, @uri) == Diagnostics.severity_counts(merged)
+      assert Diagnostics.gutter_signs_by_line(s, @uri) == %{4 => :error, 7 => :diag_advisory}
+
+      # Replacing a source moves its line rows with it.
+      Diagnostics.publish(s, :server_a, @uri, [make_diag(line: 6)])
+      assert Diagnostics.on_line(s, @uri, 7) == []
+      assert [%{range: %{start_line: 6}}] = Diagnostics.on_line(s, @uri, 6)
+
+      Diagnostics.clear_source(s, :server_a)
+      Diagnostics.clear_source(s, :server_b)
+      assert Diagnostics.on_line(s, @uri, 4) == []
+      assert Diagnostics.on_line(s, @uri, 6) == []
+      assert Diagnostics.count_tuple(s, @uri) == nil
+      assert Diagnostics.gutter_signs_by_line(s, @uri) == %{}
     end
   end
 

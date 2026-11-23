@@ -278,14 +278,17 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
         on_exit(fn -> Diagnostics.clear(:builder_test, uri) end)
         {[_arming], _, state} = build_content(state)
         {[hydrated], _, state} = build_content(state)
-        expected = hydrated.window_model.diagnostic_ranges
-        assert [%{start_row: 3, start_col: 8, end_row: 4, end_col: 11}] = expected
+        # Resident windows carry diagnostics only in the resident semantic layer.
+        assert {:replace, [%{start_row: 3, start_col: 8, end_row: 4, end_col: 11}]} =
+                 hydrated.window_model.resident_semantics.diagnostics
+
+        assert hydrated.window_model.diagnostic_ranges == []
         :ok = BufferProcess.move_to(buffer, {8, 0})
         :ok = BufferProcess.insert_text(buffer, "x")
         {[edited], _, state} = build_content(state)
-        assert_diagnostic_source(edited.window_model)
+        assert edited.window_model.resident_semantics.diagnostics == :retain
         {[idle], _, _state} = build_content(state)
-        assert_diagnostic_source(idle.window_model)
+        assert retained_diagnostics?(idle.window_model.resident_semantics)
       end
     end
 
@@ -407,6 +410,58 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
         |> Enum.filter(&(&1.kind == :divider))
 
       assert Enum.any?(divider_regions, &(&1.rect == {0, 39, 1, 24}))
+    end
+
+    @tag :tmp_dir
+    test "split windows share one retained diagnostic view that unchanged frames reuse",
+         %{tmp_dir: tmp_dir} do
+      state = gui_state(rows: 10, cols: 40, content: long_content(200))
+      buffer = state.workspace.buffers.active
+      path = Path.join(tmp_dir, "shared.txt")
+      :ok = Buffer.save_as(buffer, path)
+      assert {:ok, true} = BufferProcess.set_option(buffer, :wrap, true)
+      uri = SyncServer.path_to_uri(path)
+
+      visible = %Diagnostic{
+        range: %{start_line: 1, start_col: 0, end_line: 1, end_col: 4},
+        severity: :warning,
+        message: "visible"
+      }
+
+      offscreen = %Diagnostic{visible | range: %{visible.range | start_line: 150, end_line: 150}}
+      Diagnostics.publish(:builder_test, uri, [visible, offscreen])
+      on_exit(fn -> Diagnostics.clear(:builder_test, uri) end)
+
+      {:ok, tree} = WindowTree.split(state.workspace.windows.tree, 1, :vertical, 2)
+      second = EditorWindow.new(2, buffer, 10, 40)
+
+      windows = %Windows{
+        state.workspace.windows
+        | tree: tree,
+          map: Map.put(state.workspace.windows.map, 2, second),
+          next_id: 3
+      }
+
+      state = %{state | workspace: %{state.workspace | windows: windows}}
+
+      {[left, right], _cursor, input} = build_content(state)
+      assert %{^path => first_view} = input.caches.diagnostics
+      assert map_size(input.caches.diagnostics) == 1
+      assert first_view.revision == Diagnostics.revision(uri)
+
+      # Only the visible match is projected, in both splits.
+      for view <- [left, right] do
+        assert [%{start_col: 0, end_col: 4, severity: :warning}] =
+                 view.window_model.diagnostic_ranges
+      end
+
+      {[_left, _right], _cursor, input} = build_content(input)
+      assert :erts_debug.same(input.caches.diagnostics[path], first_view)
+
+      Diagnostics.publish(:builder_test, uri, [offscreen])
+      {[left, _right], _cursor, input} = build_content(input)
+      assert input.caches.diagnostics[path].diagnostics == [offscreen]
+      assert left.window_model.diagnostic_ranges == []
     end
 
     test "inactive GUI windows hide their cursor" do
@@ -1705,13 +1760,9 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
     end
   end
 
-  defp assert_diagnostic_source(model) do
-    assert [%{start_row: start_row, start_col: 8, end_row: end_row, end_col: 11}] =
-             model.diagnostic_ranges
-
-    assert start_row + model.geometry.viewport.top == 3
-    assert end_row + model.geometry.viewport.top == 4
-  end
+  # An idle frame either sends no semantic update or retains the diagnostic layer.
+  defp retained_diagnostics?(nil), do: true
+  defp retained_diagnostics?(semantics), do: semantics.diagnostics == :retain
 
   defp assert_guide_source(model, buffer) do
     viewport = model.geometry.viewport
