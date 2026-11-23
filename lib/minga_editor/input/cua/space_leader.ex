@@ -7,7 +7,9 @@ defmodule MingaEditor.Input.CUA.SpaceLeader do
   to the BEAM:
 
   - `space_leader_chord`: clean chord within the 30ms grace period.
-    No space was sent to the BEAM. Enter leader mode directly.
+    No space was sent to the BEAM. Enter leader mode directly. When the
+    space leader is inactive or the key matches no leader binding, replay
+    the withheld space and the key through the input router.
   - `space_leader_retract`: fallback chord after the grace period.
     A space was already sent. Delete it, then enter leader mode.
 
@@ -41,18 +43,17 @@ defmodule MingaEditor.Input.CUA.SpaceLeader do
           enter_leader(state, node)
 
         :no_match ->
-          # Key doesn't match a leader prefix. Insert the space that the
-          # frontend withheld, then process the key normally.
-          state = insert_space(state)
-          dispatch_key_normally(state, codepoint, modifiers)
+          # Key doesn't match a leader prefix. Replay the withheld space
+          # and the key as two ordinary keystrokes.
+          replay_withheld_space(state, codepoint, modifiers)
       end
     else
-      # Space leader not active (Vim mode, or CUA without :chord).
-      # The Swift frontend withheld the space and sent the next key as
-      # a chord gui_action. Replay both: insert the withheld space,
-      # then dispatch the key through normal input handling.
-      state = insert_space(state)
-      dispatch_key_normally(state, codepoint, modifiers)
+      # Space leader not active (Vim mode, or CUA without :chord). The
+      # Swift frontend withheld the space and sent the next key as a chord
+      # gui_action. Replay both as ordinary keystrokes so the focused
+      # surface decides what SPC means: Vim Normal starts the leader, a
+      # composer or picker receives a space.
+      replay_withheld_space(state, codepoint, modifiers)
     end
   end
 
@@ -105,13 +106,14 @@ defmodule MingaEditor.Input.CUA.SpaceLeader do
     end
   end
 
-  @spec insert_space(EditorState.t()) :: EditorState.t()
-  defp insert_space(state) do
-    buf = state.workspace.buffers.active
-    if is_pid(buf), do: Buffer.insert_char(buf, " ")
+  # The withheld space goes through the input router, never straight into the
+  # active buffer: only the focused surface knows whether SPC is text or a leader.
+  @spec replay_withheld_space(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
+          EditorState.t()
+  defp replay_withheld_space(state, codepoint, modifiers) do
     state
-  catch
-    :exit, _ -> state
+    |> dispatch_key_normally(?\s, 0)
+    |> dispatch_key_normally(codepoint, modifiers)
   end
 
   @spec retract_space(EditorState.t()) :: EditorState.t()
