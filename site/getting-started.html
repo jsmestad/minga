@@ -61,7 +61,7 @@
       <div class="container">
         <section class="essay-section" id="install">
           <h2>1. Install Minga</h2>
-          <p>On Apple Silicon macOS, Homebrew installs both the native Swift + Metal app (<code>Minga.app</code>) and the Go terminal client (<code>minga</code>). On Linux, Intel Macs, or when developing Minga itself, build from source using the pinned toolchains in <code>.tool-versions</code> (Erlang, Elixir, Go, and Zig).</p>
+          <p>On Apple Silicon macOS, Homebrew installs both the desktop app (<code>Minga.app</code>) and the terminal client (<code>minga</code>). On Linux, Intel Macs, or when developing Minga itself, build from source using the pinned toolchains in <code>.tool-versions</code> (Erlang, Elixir, Go, and Zig).</p>
 
           <div class="grid-2">
             <div class="code-card">
@@ -93,7 +93,7 @@ bin/minga-mac</code></pre>
             </div>
           </div>
 
-          <p>The first source build takes a few minutes while Zig compiles 50 tree-sitter grammars; incremental rebuilds after that are fast. Both <code>asdf</code> and <code>mise</code> read <code>.tool-versions</code> directly. Update rolling Homebrew builds anytime with <code>brew upgrade minga</code> or <code>brew upgrade --cask minga-mac</code>.</p>
+          <p>The first source build takes a few minutes while syntax grammars compile; incremental rebuilds after that are fast. Both <code>asdf</code> and <code>mise</code> read <code>.tool-versions</code> directly. Update rolling Homebrew builds anytime with <code>brew upgrade minga</code> or <code>brew upgrade --cask minga-mac</code>.</p>
         </section>
 
         <section class="essay-section" id="six-keys">
@@ -175,7 +175,7 @@ bin/minga-mac</code></pre>
               <span class="step-badge">02</span>
               <div>
                 <h3>Inspect hunks and steer directly</h3>
-                <p>Choose <strong>Review</strong> on the changed file to walk hunks (<kbd>]c</kbd> / <kbd>[c</kbd>) with full tree-sitter highlighting and live LSP diagnostics. Accept good hunks (<kbd>y</kbd>), reject anything wrong (<kbd>x</kbd>), or hand-edit directly in the buffer. Need another pass? Attach your live unsaved buffer (<kbd>SPC a b</kbd>) or published file diagnostics (<kbd>SPC a D</kbd>) straight to the agent draft.</p>
+                <p>Choose <strong>Review</strong> on the changed file to walk hunks (<kbd>]c</kbd> / <kbd>[c</kbd>) with full syntax highlighting and live LSP diagnostics. Accept good hunks (<kbd>y</kbd>), reject anything wrong (<kbd>x</kbd>), or hand-edit directly in the buffer. Need another pass? Attach your live unsaved buffer (<kbd>SPC a b</kbd>) or published file diagnostics (<kbd>SPC a D</kbd>) straight to the agent draft.</p>
               </div>
             </li>
             <li class="step-item">
@@ -209,7 +209,7 @@ set <span class="tok-atom">:format_on_save</span>, <span class="tok-atom">true</
 
           <div class="callout">
             <span class="callout-title">Where to go next</span>
-            <p>Read <a href="/extending">Extending Minga</a> for the three-layer customization model (hooks, advice, extensions, and task-shaped workflows), <a href="/architecture">Architecture</a> for diagrams of the BEAM and native ports, or jump straight to the exhaustive <a href="/docs/configuration.html">Configuration Reference</a> and <a href="/docs/agentic-keymap.html">Agentic Keymap</a> in ExDoc.</p>
+            <p>Read <a href="/extending">Extending Minga</a> for the three-layer customization model (hooks, advice, extensions, and task-shaped workflows), <a href="/architecture">Architecture</a> for diagrams of how the runtime and staged edits work, or jump straight to the complete <a href="/docs/configuration.html">Configuration Reference</a> and <a href="/docs/agentic-keymap.html">Agentic Keymap</a> in ExDoc.</p>
           </div>
 
           <div class="actions">

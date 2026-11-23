@@ -46,7 +46,7 @@
       <div class="container">
         <p class="kicker">Programmability</p>
         <h1>Extending Minga</h1>
-        <p class="essay-subtitle">Minga edits 50 languages through tree-sitter and LSP. Like Lua in Neovim or Elisp in Emacs, Elixir is the extension layer underneath: start with five lines in <code>config.exs</code>, grow into supervised packages, or reshape the workbench for a single task.</p>
+        <p class="essay-subtitle">Minga works with any language you write. Like Lua in Neovim or Elisp in Emacs, Elixir is the extension language underneath: start with five lines in <code>config.exs</code>, grow into installable packages, or reshape the workbench for a single task.</p>
         <nav class="essay-toc" aria-label="Sections">
           <a href="#three-layers">1. Three layers</a>
           <a href="#layer-config">2. config.exs</a>
@@ -70,23 +70,23 @@
             </li>
             <li class="spec-row">
               <span class="spec-key spec-key-strong">Layer 2 · Extensions</span>
-              <span class="spec-detail"><strong>Ships today (<a href="/docs/0003-extension-code-updates-require-a-new-vm-generation.html">ADR-0003</a>).</strong> Supervised Elixir packages from local paths, Git repos, or Hex using <code>minga_sdk</code>: declarative commands, source-owned sidebars, custom LLM model routes, and runtime-compiled tree-sitter grammars.</span>
+              <span class="spec-detail"><strong>Ships today.</strong> Installable packages from local paths, Git repos, or Hex using <code>minga_sdk</code>: declarative commands, custom sidebars, custom model routes, and runtime-compiled syntax grammars.</span>
             </li>
             <li class="spec-row">
               <span class="spec-key spec-key-strong">Layer 3 · Task workflows</span>
-              <span class="spec-detail"><strong>Building for v0.1.0 (<a href="/docs/0004-products-are-root-applets-over-a-fixed-engine.html">ADR-0004</a>).</strong> Write or ask Minga's agent to author readable source over fixed buffer, agent, and permission owners; Save to activate; discard when a one-off task ends or Keep across projects.</span>
+              <span class="spec-detail"><strong>Building for v0.1.0.</strong> Write or ask Minga's agent to author readable source over real buffer, agent, and permission owners; Save to activate; discard when a one-off task ends or Keep across projects.</span>
             </li>
           </ul>
         </section>
 
         <section class="essay-section" id="layer-config">
           <h2>2. Layer 1: Everyday customization in config.exs</h2>
-          <p><code>~/.config/minga/config.exs</code> is ordinary Elixir backed by typed validation. Hooks execute in separate BEAM processes so a slow formatter or linter never stalls typing, and advice wraps any command through a read-concurrent ETS table with failure containment if your hook raises.</p>
+          <p><code>~/.config/minga/config.exs</code> is ordinary Elixir with typed option validation. Hooks execute in isolated background processes so a slow formatter or linter never stalls typing, and advice wraps any command cleanly without crashing the editor if your handler raises.</p>
 
           <div class="code-card">
             <div class="code-header">
               <span>~/.config/minga/config.exs</span>
-              <span>Elixir</span>
+              <span>Config</span>
             </div>
             <pre><code><span class="tok-kw">use</span> <span class="tok-mod">Minga.Config</span>
 
@@ -100,7 +100,7 @@ for_filetype <span class="tok-atom">:go</span> <span class="tok-kw">do</span>
   set <span class="tok-atom">:indent_with</span>, <span class="tok-atom">:tabs</span>
 <span class="tok-kw">end</span>
 
-<span class="tok-comment"># Hooks run in their own BEAM processes so slow CLI tools never freeze typing.</span>
+<span class="tok-comment"># Hooks run in isolated background processes so slow CLI tools never freeze typing.</span>
 on <span class="tok-atom">:after_save</span>, <span class="tok-kw">fn</span> _buf, path <span class="tok-kw">-&gt;</span>
   <span class="tok-kw">if</span> <span class="tok-mod">String</span>.ends_with?(path, <span class="tok-str">".go"</span>) <span class="tok-kw">do</span>
     <span class="tok-mod">System</span>.cmd(<span class="tok-str">"gofmt"</span>, [<span class="tok-str">"-w"</span>, path])
@@ -159,27 +159,27 @@ extension <span class="tok-atom">:git_extended</span>, git: <span class="tok-str
 
           <h3>Two extension seams worth knowing</h3>
           <ul>
-            <li><strong>Custom model routes (<code>MingaAgent.InferenceRoute</code>).</strong> Connect an internal company LLM gateway or custom subscription route to <code>/model</code>. Your route only streams model replies; Minga keeps running tool approvals, staged buffer forks, retries, compaction, and session history (<a href="/docs/extension_api.html#model-routes">Model Routes Reference</a>).</li>
-            <li><strong>Runtime tree-sitter grammars (<code>Minga.Language.register/3</code>).</strong> Ship grammar C sources with an extension and Minga compiles them on demand with the system C compiler, caches the shared library in <code>~/.local/share/minga/grammars/</code>, loads it into the Zig parser port, and wires highlight queries without rebuilding Minga (<a href="/docs/extension_api.html#tree-sitter-grammars">Tree-Sitter Grammars Reference</a>).</li>
+            <li><strong>Custom model routes.</strong> Connect an internal company LLM gateway or custom subscription route to <code>/model</code> via <code>MingaAgent.InferenceRoute</code>. Your route only streams model replies; Minga keeps running tool approvals, staged buffer forks, retries, compaction, and session history (<a href="/docs/extension_api.html#model-routes">Model Routes Reference</a>).</li>
+            <li><strong>Runtime language grammars.</strong> Ship tree-sitter grammar sources with an extension via <code>Minga.Language.register/3</code> and Minga compiles them on demand, caches the shared library in <code>~/.local/share/minga/grammars/</code>, and wires highlight queries without rebuilding Minga (<a href="/docs/extension_api.html#tree-sitter-grammars">Tree-Sitter Grammars Reference</a>).</li>
           </ul>
         </section>
 
         <section class="essay-section" id="layer-workflows">
           <h2>4. Layer 3: Disposable when one-off, kept when it sticks (v0.1.0)</h2>
-          <p>The defining promise of Minga v0.1.0 (<a href="https://github.com/jsmestad/minga/issues/3542">#3542</a>, <a href="https://github.com/jsmestad/minga/issues/3662">#3662</a>, and <a href="/docs/0004-products-are-root-applets-over-a-fixed-engine.html">ADR-0004</a>) is treating your working environment as disposable, task-shaped software.</p>
-          <p>You do not have to write a full Hex package or fork Minga just to reshape how you review a thorny migration or collaborate on a Markdown spec. Ask Minga's agent (or edit the source yourself) to author a workflow or surface over Minga's existing buffer, agent, and permission owners, save the file to activate it, and inspect the result live. When the task finishes, throw it away if it was one-off, or <strong>Keep</strong> the shared definition so it stays available across tabs, restarts, and repositories without regenerating it.</p>
+          <p>The defining promise of Minga v0.1.0 (<a href="https://github.com/jsmestad/minga/issues/3542">#3542</a> and <a href="https://github.com/jsmestad/minga/issues/3662">#3662</a>) is treating your working environment as disposable, task-shaped software.</p>
+          <p>You do not have to write a full package or fork Minga just to reshape how you review a thorny migration or collaborate on a Markdown spec. Ask Minga's agent (or edit the source yourself) to author a workflow or surface over Minga's existing buffer, agent, and permission owners, save the file to activate it, and inspect the result live. When the task finishes, throw it away if it was one-off, or <strong>Keep</strong> the shared definition so it stays available across tabs, restarts, and repositories without regenerating it.</p>
 
           <div class="callout">
             <span class="callout-title">Release status</span>
-            <p>Layers 1 and 2 (<code>config.exs</code>, hooks, advice, supervised extensions, model routes, and runtime grammars) ship on <code>main</code> today. Layer 3 (restricted live Save-to-activate definitions, shared composition, and Keep across projects) is the active v0.1.0 milestone gated on <a href="https://github.com/jsmestad/minga/issues/3542">#3542</a> and <a href="https://github.com/jsmestad/minga/issues/3662">#3662</a>.</p>
+            <p>Layers 1 and 2 (<code>config.exs</code>, hooks, advice, installable extensions, model routes, and runtime grammars) ship on <code>main</code> today. Layer 3 (live Save-to-activate definitions, shared composition, and Keep across projects) is the active v0.1.0 milestone gated on <a href="https://github.com/jsmestad/minga/issues/3542">#3542</a> and <a href="https://github.com/jsmestad/minga/issues/3662">#3662</a>.</p>
           </div>
         </section>
 
         <section class="essay-section" id="trust-and-reloads">
           <h2>5. Honest trust model and reload boundaries</h2>
           <ul>
-            <li><strong>No hidden sandbox claims.</strong> Extensions and authored definitions run inside Minga's BEAM VM with OS-user privileges, matching Emacs Lisp and Neovim Lua. Minga contains dynamic callback failures through <code>Minga.Extension.CallbackInvoker</code> so a broken extension does not crash the Editor process, and uses explicit session grants for v0.1.0 preparation, but that is failure containment rather than OS-level sandboxing of untrusted code.</li>
-            <li><strong>Why compiled extension code updates take effect on restart (<a href="/docs/0003-extension-code-updates-require-a-new-vm-generation.html">ADR-0003</a>).</strong> While <kbd>SPC h r</kbd> reloads options, bindings, hooks, and advice immediately, arbitrary compiled extension packages can own supervisors, closures, and Hex dependencies that cannot atomically cross a version boundary mid-session. Disabling takes effect immediately in-session; updated extension artifacts activate cleanly on a fresh BEAM generation.</li>
+            <li><strong>No hidden sandbox claims.</strong> Extensions and authored definitions run with OS-user privileges, matching Emacs Lisp and Neovim Lua. Minga isolates extension callback failures so a broken callback cannot crash the editor, and uses explicit session grants for v0.1.0 preparation, but that is failure containment rather than OS-level sandboxing of untrusted code.</li>
+            <li><strong>Why compiled extension updates take effect on restart.</strong> While <kbd>SPC h r</kbd> reloads options, bindings, hooks, and advice immediately, compiled extension packages can own supervisors, closures, and dependencies that cannot atomically cross a version boundary mid-session. Disabling takes effect immediately; updated extension artifacts activate cleanly on restart (<a href="/docs/0003-extension-code-updates-require-a-new-vm-generation.html">ADR-0003</a>).</li>
           </ul>
 
           <div class="actions">

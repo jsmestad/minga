@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex, nofollow">
-  <title>Why Minga: Programmable workbench on the BEAM</title>
-  <meta name="description" content="Why agent multiplexers and PTY harnesses like Herdr hit a structural ceiling, and how Minga builds a programmable BEAM workbench over typed buffer and agent authorities.">
+  <title>Why Minga: A programmable workbench for code and agents</title>
+  <meta name="description" content="Why agent multiplexers hit a ceiling, why disposable customized software matters, and how Minga puts native editing and agent workflows in one runtime.">
   <link rel="icon" type="image/svg+xml" href="/assets/minga_dark-transparent.svg">
   <link rel="stylesheet" href="/styles.css">
   <script>
@@ -51,7 +51,7 @@
           <a href="#the-bottleneck">1. Where the multiplexer loop breaks down</a>
           <a href="#comparison">2. How Minga compares</a>
           <a href="#programmable-workbench">3. Programmable workbench</a>
-          <a href="#the-beam">4. Why the BEAM</a>
+          <a href="#the-runtime">4. Why a concurrent runtime matters</a>
           <a href="#honest-gaps">5. What is still early</a>
         </nav>
       </div>
@@ -69,7 +69,7 @@
             <li><strong>You get forced into slow batch handoffs instead of working on the same code together.</strong> Because CLI agents write straight to disk, editing the same file while an agent works risks clobbering unsaved buffers or scrambling undo history. Isolating every pane in its own Git worktree prevents collisions, but you pay for it with duplicated build caches, cold compiles, separate LSP indexes, and manual conflict cleanup whenever two tasks touch overlapping modules.</li>
             <li><strong>Customizing a multiplexer only changes chrome around a black box.</strong> You can script tabs, status indicators, and markdown instructions around external CLIs, but you cannot build a workflow that ties live editor state and agent turns together: staging hunks into an open buffer, rejecting one hunk while hand-editing another with undo intact, attaching live diagnostics directly to a draft, or building a custom interactive review surface you keep across projects.</li>
           </ul>
-          <p>Minga starts from the opposite side of that boundary: put the editor, buffers, LSP clients, and supervised agent sessions inside one programmable BEAM runtime so steering code and running agents happen in the same loop.</p>
+          <p>Minga starts from the opposite side of that boundary: put the editor, language servers, open buffers, and agent sessions inside one programmable runtime so steering code and running agents happen in the same loop.</p>
 
           <h3>What if you do not want to read every line of code?</h3>
           <p>Even if you stop reading implementation lines altogether, terminal scrollback is still a poor workbench. When your work moves up a level to specs, contracts, architecture, verification evidence, and adversarial reviews, you outgrow scrolling terminal panes faster, not slower.</p>
@@ -95,70 +95,63 @@
                   <td>Runtime &amp; persistence</td>
                   <td>Single UI event loop; closing the app tears down workspace state and heavy streams contend with typing.</td>
                   <td>Background server keeps PTY panes alive across disconnects; status is inferred from opaque terminal sessions.</td>
-                  <td>Supervised BEAM processes with preemptive scheduling and per-process heaps, plus <code>minga --headless</code> for durable local or remote sessions.</td>
+                  <td>Preemptively scheduled isolated processes per buffer and session, plus <code>minga --headless</code> for durable local or remote runs.</td>
                 </tr>
                 <tr>
                   <td>How agents edit files</td>
                   <td>Mutate shared editor state or patch files through an extension host bridge.</td>
                   <td>Write directly to disk; concurrent work requires separate Git worktrees per pane and breaks editor undo history.</td>
-                  <td>Route through <code>MingaAgent.ToolRouter</code> into in-memory buffer forks, staged review (<kbd>SPC a p</kbd> / <kbd>SPC a P</kbd>), three-way merge, and undo integration.</td>
+                  <td>Stage in isolated in-memory buffer forks for inline review (<kbd>SPC a p</kbd> / <kbd>SPC a P</kbd>), three-way merge, and real undo integration.</td>
                 </tr>
                 <tr>
                   <td>Code reading &amp; auditing</td>
                   <td>Full editor navigation, often weighed down by Electron chrome and extension sprawl.</td>
                   <td>Diff text in terminal scrollback; you open Neovim or VS Code in another window to jump to definitions or edit.</td>
-                  <td>Native Swift/Metal macOS GUI and Go terminal client with Vim + CUA editing, LSP, 50 tree-sitter grammars, and inline diff review.</td>
+                  <td>Native macOS app and terminal client with Vim and CUA editing, LSP, syntax highlighting, and inline diff review.</td>
                 </tr>
                 <tr>
                   <td>Orchestration &amp; customization</td>
                   <td>Fixed sidebar UX; plugin APIs wrap a host you cannot deeply reshape without forking.</td>
                   <td>Socket/CLI pane spawning, scratch-file handoffs, and markdown/layout rules around external CLI processes.</td>
-                  <td>Typed Elixir config, hooks, advice, and supervised extensions, moving toward ADR-0004 definitions you Save, activate, and Keep over real engine state.</td>
+                  <td>Config, hooks, advice, and installable extensions today, moving toward disposable or kept task workflows over real engine state.</td>
                 </tr>
               </tbody>
             </table>
           </div>
 
           <h3>If you live in Herdr or tmux + Neovim + CLI agents</h3>
-          <p>You keep your modal muscle memory and terminal reach without splitting editing and orchestration across two worlds. Minga ships Normal, Insert, Visual, Operator-Pending, Replace, and Search modes, text objects (<code>iw</code>, <code>i"</code>, <code>a{</code>), registers, macros, marks, dot repeat, counts, 50 compiled tree-sitter grammars, supervised LSP clients, and a Go/Bubble Tea terminal client over the same BEAM core and headless daemon as the macOS app. CUA editing is also first-class when you want standard desktop shortcuts.</p>
+          <p>You keep your modal muscle memory and terminal reach without splitting editing and orchestration across two worlds. Minga ships Normal, Insert, Visual, Operator-Pending, Replace, and Search modes, text objects (<code>iw</code>, <code>i"</code>, <code>a{</code>), registers, macros, marks, dot repeat, counts, language server support, and a terminal client over the same core and headless daemon as the macOS app. CUA editing is also first-class when you want standard desktop shortcuts.</p>
 
           <h3>If you come from Emacs or Doom Emacs</h3>
-          <p>Minga shares Emacs's core philosophy: your config is the same language as the editor, commands wrap with <code>:before</code>, <code>:after</code>, <code>:around</code>, and <code>:override</code> advice, hooks attach to lifecycle events, and <kbd>SPC</kbd> leader menus make deep command trees discoverable via Which-Key. What changes is the runtime underneath: hooks run concurrently in isolated processes instead of freezing typing, buffer-local state is enforced by per-buffer processes rather than global symbol-table conventions, and there is no single-threaded C wall blocking agent concurrency.</p>
+          <p>Minga shares Emacs's core philosophy: your config is the same language as the editor, commands wrap with <code>:before</code>, <code>:after</code>, <code>:around</code>, and <code>:override</code> advice, hooks attach to lifecycle events, and <kbd>SPC</kbd> leader menus make deep command trees discoverable via Which-Key. What changes is the runtime underneath: hooks run concurrently instead of freezing typing, buffer-local state is isolated by process boundaries rather than global symbol tables, and there is no single-threaded wall blocking agent concurrency.</p>
         </section>
 
         <section class="essay-section" id="programmable-workbench">
           <h2>3. Programmability over real engine owners (not PTY glue)</h2>
-          <p>Minga's v0.1.0 design (<a href="https://github.com/jsmestad/minga/issues/3542">#3542</a>, <a href="https://github.com/jsmestad/minga/issues/3662">#3662</a>, and <a href="/docs/0004-products-are-root-applets-over-a-fixed-engine.html">ADR-0004</a>) draws a sharp line between what stays fixed in the engine and what you or your agent can reshape.</p>
+          <p>Minga's v0.1.0 design (<a href="https://github.com/jsmestad/minga/issues/3542">#3542</a>, <a href="https://github.com/jsmestad/minga/issues/3662">#3662</a>, and <a href="/architecture#adrs">our architecture decisions</a>) draws a sharp line between what stays fixed in the engine and what you or your agent can reshape.</p>
 
           <ul>
-            <li><strong>Authoritative owners stay fixed.</strong> Buffer processes own canonical text, edits, and undo. Agent sessions own conversations, admitted turns, tool execution, permissions, and lossless continuation (<a href="/docs/session-recovery.html">Session Recovery</a>). Authored workflows steer and compose those authorities rather than scraping terminal output, inventing a second task database, or substituting markdown prompt glue for real execution controls.</li>
-            <li><strong>Two clear ways to evolve Minga.</strong> Customize Minga by discovering supported capabilities, authoring readable Elixir source, saving to activate, inspecting the result, and keeping useful definitions across projects. Develop Minga itself through normal source changes, tests, and pull requests when a task genuinely needs a new native or engine capability.</li>
-            <li><strong>Explicit boundaries instead of magic hot-reloading.</strong> Under <a href="/docs/0003-extension-code-updates-require-a-new-vm-generation.html">ADR-0003</a>, arbitrary compiled extension packages and dependencies still activate on a fresh BEAM generation so active callbacks and loaded modules never mix versions, while <kbd>SPC h r</kbd> reloads options, keybindings, hooks, and advice cleanly in place. Restricted live Save-to-activate definitions, grouped Save, and Keep are being specified and verified step by step as part of v0.1.0 rather than hand-waved as unrestricted VM code patching.</li>
+            <li><strong>Authoritative owners stay fixed.</strong> Buffers own canonical text, edits, and undo. Agent sessions own conversations, admitted turns, tool execution, permissions, and lossless recovery (<a href="/docs/session-recovery.html">Session Recovery</a>). Authored workflows steer and compose those authorities rather than scraping terminal output, inventing a second task database, or substituting prompt glue for real execution controls.</li>
+            <li><strong>Two clear ways to evolve Minga.</strong> Customize Minga by discovering supported capabilities, authoring readable source, saving to activate, and either discarding it after the task or keeping useful definitions across projects. Develop Minga itself through normal source changes, tests, and pull requests when a task genuinely needs a new native or engine capability.</li>
+            <li><strong>Explicit boundaries instead of magic hot-reloading.</strong> Today, <kbd>SPC h r</kbd> reloads options, keybindings, hooks, and advice cleanly in place, while compiled extension packages activate on a fresh restart so active callbacks and loaded modules never mix versions. Restricted live Save-to-activate definitions, grouped Save, and Keep are being built and verified step by step as part of v0.1.0 rather than hand-waved as unrestricted live code patching.</li>
           </ul>
 
           <div class="callout">
             <span class="callout-title">No hidden sandbox claims</span>
-            <p>Elixir extensions and authored definitions run with OS-user privileges inside Minga's BEAM VM, the same trust model as Emacs Lisp and Neovim Lua. Minga uses explicit session grants and source-owned cleanup for admission and recovery, not OS-level sandboxing of untrusted code. See <a href="/docs/extension_api.html#trust-model">Extension API: Trust Model</a>.</p>
+            <p>Extensions and authored definitions run with OS-user privileges, the same trust model as Emacs Lisp and Neovim Lua. Minga uses explicit session grants and callback failure containment, not OS-level sandboxing of untrusted code. See <a href="/extending#trust-and-reloads">Trust &amp; reload boundaries</a>.</p>
           </div>
         </section>
 
-        <section class="essay-section" id="the-beam">
-          <h2>4. Why the BEAM, and why native code still draws the screen</h2>
-          <p>Most editors treat concurrency as an afterthought because human typing is slow compared to a CPU. Agentic work changes the load profile completely: multiple model streams, background sub-agents, shell commands, LSP servers, tree-sitter reparsing, and interactive editing all happen at once.</p>
+        <section class="essay-section" id="the-runtime">
+          <h2>4. Why a concurrent runtime matters</h2>
+          <p>Most editors treat concurrency as an afterthought because human typing is slow compared to a CPU. Agentic work changes the load profile completely: multiple model streams, background sub-agents, shell commands, language servers, syntax reparsing, and interactive editing all happen at once.</p>
+          <p>Minga runs its core on the Erlang VM (BEAM) because four runtime properties match that workload directly:</p>
 
           <ul>
-            <li><strong>Preemptive scheduling and per-process GC.</strong> The BEAM allocates a separate heap per process and preemptively schedules work across cores. A busy agent session or a large LSP response cannot lock out editor input or trigger a global stop-the-world GC pause.</li>
-            <li><strong>Structural fault isolation.</strong> Each buffer, agent session, LSP client, and extension lives under an OTP supervision tree. A crashed tool worker or misbehaving extension callback is contained and reported cleanly without taking down open buffers or unsaved edits.</li>
-            <li><strong>Observable live state.</strong> Because everything is an OTP process, you can inspect running state with <code>:sys.get_state/1</code>, trace messages with <code>:dbg</code>, or open <code>:observer.start()</code> when diagnosing a workflow instead of guessing through print statements.</li>
-            <li><strong>Durable headless execution.</strong> Running <code>minga --headless</code> keeps agent sessions alive without a display, locally or on a remote machine, with clients attaching over WebSocket and JSON-RPC (<a href="/docs/remote_agents.html">Remote Agents</a>).</li>
-          </ul>
-
-          <h3>What the BEAM does not do</h3>
-          <p>Picking the right runtime also means respecting its limits. Minga does not use the BEAM for GPU rendering, terminal escape-sequence layout, or syntax parsing:</p>
-          <ul>
-            <li><strong>macOS GUI:</strong> Swift 6, CoreText, and Metal 3.1 own font shaping, native chrome, accessibility, row measurement (<a href="/docs/0001-frontend-owns-row-fit.html">ADR-0001</a>), and immediate UI feedback (<a href="/docs/0005-frontend-owns-immediate-ui-feedback.html">ADR-0005</a>).</li>
-            <li><strong>Terminal frontend:</strong> Go and Bubble Tea render the TUI over the same Semantic UI protocol (<a href="/docs/charm_tui.html">Charm TUI</a>).</li>
-            <li><strong>Parsing and native helpers:</strong> Zig runs the tree-sitter parser port across 50 compiled grammars and manages process-group isolation for agent hooks.</li>
+            <li><strong>Preemptive scheduling and per-process GC.</strong> Every open buffer and session has its own heap and fair CPU time. A busy agent turn or a large language-server response cannot lock out editor input or trigger a global GC pause.</li>
+            <li><strong>Structural fault isolation.</strong> Buffers, agent sessions, language servers, and extensions run in separate supervised processes. A crashed tool worker or misbehaving extension callback is contained and reported cleanly without touching open buffers or unsaved edits.</li>
+            <li><strong>Durable headless execution.</strong> Running <code>minga --headless</code> keeps agent sessions alive without a display, locally or on a remote machine, with clients attaching and detaching over the network (<a href="/docs/remote_agents.html">Remote Agents</a>).</li>
+            <li><strong>Native code where it counts.</strong> The VM never renders pixels or parses syntax trees; platform-native clients handle macOS rendering, terminal layout, and syntax parsing across clean process boundaries. See <a href="/architecture">Architecture</a> for the full diagrams and stack breakdown.</li>
           </ul>
         </section>
 
@@ -177,15 +170,15 @@
               <tbody>
                 <tr>
                   <td>v0.1.0 live authoring &amp; Keep</td>
-                  <td>Active release milestone (<a href="https://github.com/jsmestad/minga/issues/3542">#3542</a>, <a href="https://github.com/jsmestad/minga/issues/3662">#3662</a>). Config DSL, hooks, advice, and supervised extensions ship today; live Save-to-activate definitions and Keep are gated on release qualification.</td>
+                  <td>Active release milestone (<a href="https://github.com/jsmestad/minga/issues/3542">#3542</a>, <a href="https://github.com/jsmestad/minga/issues/3662">#3662</a>). Config, hooks, advice, and installable extensions ship today; live Save-to-activate definitions and Keep are gated on release qualification.</td>
                 </tr>
                 <tr>
                   <td>Extension ecosystem</td>
-                  <td>The extension runtime, <code>minga_sdk</code>, model routes, and runtime tree-sitter grammar loading ship today (with early extensions such as <code>minga-org</code> and <code>GitExtended</code>), but the third-party package catalog is tiny compared to MELPA, Neovim, or VS Code.</td>
+                  <td>The extension runtime, model routes, and runtime grammar loading ship today (with early extensions such as <code>minga-org</code> and <code>GitExtended</code>), but the third-party catalog is tiny compared to MELPA, Neovim, or VS Code.</td>
                 </tr>
                 <tr>
                   <td>Platforms</td>
-                  <td>Native macOS GUI (Swift + Metal) and terminal client (Go + Bubble Tea, macOS and Linux) ship today. A native Linux desktop GUI (GTK4) is post-v0.1.0.</td>
+                  <td>Native macOS desktop app and terminal client (macOS and Linux) ship today. A native Linux desktop GUI is post-v0.1.0.</td>
                 </tr>
                 <tr>
                   <td>Inline ghost text &amp; DAP</td>

@@ -857,27 +857,6 @@ kbd {
   font-size: 0.92rem;
 }
 
-.native-stack {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  margin-top: 0.85rem;
-}
-
-.native-chip {
-  font-family: var(--font-mono);
-  font-size: 0.77rem;
-  padding: 0.28rem 0.65rem;
-  background: var(--bg-elevated);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  color: var(--text);
-}
-
-.native-chip span {
-  color: var(--text-muted);
-}
-
 /* Guide directory (open hairline 2-column index) */
 
 .guide-index {
