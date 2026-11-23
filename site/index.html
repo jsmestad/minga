@@ -45,7 +45,7 @@
         <div class="hero-copy">
           <p class="kicker">Pre-release · Building toward v0.1.0 · macOS &amp; Terminal</p>
           <h1>A programmable workbench on the BEAM.</h1>
-          <p class="hero-lead">Engineers living in terminal agent harnesses did not stop needing a working environment. They stopped needing a static text editor built for typing every line by hand. Minga puts native code editing, buffer-aware agent sessions, and inspectable Elixir customization in one runtime, so you can shape the workflow you want and keep it across projects.</p>
+          <p class="hero-lead">Engineers running fleets of CLI agents in multiplexers like Herdr or tmux did not stop needing an editor. They stopped needing a static one built for typing every line by hand. Minga replaces opaque terminal panes and disk-level glue with one supervised Elixir runtime where native code editing, buffer-aware agents, and inspectable workflows share the same memory and state.</p>
           <div class="actions">
             <a class="btn btn-primary" href="#install">Install Minga</a>
             <a class="btn" href="/why-minga">Read Why Minga</a>
@@ -76,27 +76,27 @@
       <div class="container">
         <div class="section-header">
           <p class="kicker">The problem with current tools</p>
-          <h2>Neither a bolted-on AI sidebar nor a blind terminal harness.</h2>
-          <p>Most engineers working seriously with agents today split their day across two disconnected tools, or keep hopping between harnesses every quarter to borrow someone else's fixed workflow.</p>
+          <h2>Neither a bolted-on AI sidebar nor a terminal multiplexer for agents.</h2>
+          <p>Agent multiplexers and CLI harnesses solved keeping background agents alive, but they still treat every agent as an opaque terminal pane disconnected from your buffers, symbols, and diffs.</p>
         </div>
 
         <div class="grid-3">
           <article class="panel">
             <p class="panel-kicker">AI-retrofitted IDEs</p>
             <h3>Fixed panels over a single thread</h3>
-            <p>Legacy IDEs assume one operator typing into one event loop. Agent chat lives in a sidebar bolted onto an extension host you cannot deeply reshape, and heavy streaming or indexing still competes with your typing.</p>
+            <p>Legacy IDEs assume one operator typing into one event loop. Agent chat sits in a sidebar bolted onto an extension host you cannot deeply reshape, while streaming responses and indexing still compete with your typing.</p>
           </article>
 
           <article class="panel">
-            <p class="panel-kicker">Terminal agent harnesses</p>
-            <h3>Fast to start, split from your code</h3>
-            <p>Harnesses write straight to disk while you switch back to Neovim or VS Code to read diffs, jump to definitions, and fix subtle bugs. When another harness ships a better review flow, you have to jump tools again.</p>
+            <p class="panel-kicker">Agent multiplexers &amp; CLI harnesses</p>
+            <h3>Opaque PTY panes and disk-level glue</h3>
+            <p>Tools like Herdr and tmux + Claude Code or Codex keep CLI agents alive in tabs, but every pane is still a blind shell writing straight to disk. Orchestration leans on terminal I/O, scratch files, and worktree sprawl, and serious code review still sends you back to a second editor.</p>
           </article>
 
           <article class="panel panel-highlight">
             <p class="panel-kicker">Minga</p>
-            <h3>One programmable BEAM workbench</h3>
-            <p>Buffers, LSP servers, agent sessions, and extensions share one supervised Elixir runtime behind native macOS and terminal frontends. Agent edits stage in memory for inline review, and workflows live in Elixir you own.</p>
+            <h3>One typed BEAM workbench</h3>
+            <p>Buffers, LSP servers, tree-sitter, agent sessions, and extensions share one supervised Elixir runtime behind native macOS and terminal frontends. Agent edits stage in memory for inline review, and custom workflows steer real engine state instead of scripting terminal panes.</p>
           </article>
         </div>
       </div>
@@ -106,8 +106,8 @@
       <div class="container">
         <div class="section-header">
           <p class="kicker">Programmability</p>
-          <h2>Stop switching tools to adopt a workflow. Author it, inspect it, and keep it.</h2>
-          <p>Minga's configuration and extensions are written in Elixir, the same language as the core runtime. Your working environment evolves through readable source instead of black-box settings or editor forks.</p>
+          <h2>Shape the actual engine, not shell panes wrapped around it.</h2>
+          <p>Minga's configuration and extensions are written in Elixir, the same language as the core runtime. Your working environment evolves through readable source over real buffer and agent APIs instead of terminal scripts, markdown glue, or editor forks.</p>
         </div>
 
         <div class="split-layout">
@@ -287,7 +287,7 @@ bin/minga</code></pre>
         <div class="doc-links" aria-label="Documentation links">
           <a class="doc-link" href="/why-minga">
             <span class="doc-link-title">Why Minga</span>
-            <span class="doc-link-desc">The full thesis: harness churn, ADR-0004 programmability, BEAM tradeoffs, and what is still early.</span>
+            <span class="doc-link-desc">The full thesis: the PTY-pane ceiling of agent multiplexers, ADR-0004 programmability, BEAM tradeoffs, and early gaps.</span>
           </a>
           <a class="doc-link" href="/docs/getting-started.html">
             <span class="doc-link-title">Getting Started</span>

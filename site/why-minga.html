@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex, nofollow">
   <title>Why Minga: Programmable workbench on the BEAM</title>
-  <meta name="description" content="Why engineers moved from static IDEs to terminal harnesses, why harness churn keeps happening, and how Minga builds a programmable BEAM workbench over fixed authorities.">
+  <meta name="description" content="Why agent multiplexers and PTY harnesses like Herdr hit a structural ceiling, and how Minga builds a programmable BEAM workbench over typed buffer and agent authorities.">
   <link rel="icon" type="image/svg+xml" href="/assets/minga_dark-transparent.svg">
   <link rel="stylesheet" href="/styles.css">
   <script>
@@ -44,9 +44,9 @@
       <div class="container">
         <p class="kicker">Thesis &amp; Architecture</p>
         <h1>Why Minga</h1>
-        <p class="essay-subtitle">Engineers who stopped opening their old IDE did not stop needing a working environment. They stopped needing a static text editor built for one person typing one line at a time.</p>
+        <p class="essay-subtitle">Agent multiplexers solved keeping CLI agents alive in background panes. They did not solve what happens when those panes are blind to your buffers, your symbols, your diffs, and each other.</p>
         <nav class="essay-toc" aria-label="Sections">
-          <a href="#the-two-tool-split">1. The two-tool split</a>
+          <a href="#the-pty-ceiling">1. The PTY-pane ceiling</a>
           <a href="#comparison">2. How Minga compares</a>
           <a href="#programmable-workbench">3. Programmable workbench</a>
           <a href="#the-beam">4. Why the BEAM</a>
@@ -57,17 +57,23 @@
 
     <article class="essay-body">
       <div class="container">
-        <section class="essay-section" id="the-two-tool-split">
-          <h2>1. The two-tool split and harness churn</h2>
-          <p>Ask experienced engineers what editor they use right now and many will say they barely open one anymore: they spend their day inside Claude Code, Codex, pi, or another terminal agent harness. Watch them work for ten minutes, though, and a second window is always open.</p>
-          <p>The agent runs in one terminal pane while Neovim, Emacs, or VS Code sits in the next pane for reading diffs, jumping to definitions, tracing types across three modules, and fixing the subtle bug the model missed. Nobody blindly commits a thousand-line diff from a terminal scrollback. The editor did not disappear; it was demoted into a disconnected review tool that has no idea an agent exists.</p>
-          <p>The second pain point is quieter and more exhausting: <strong>harness churn</strong>. Every few months a new terminal harness or AI editor ships a better review loop, task view, or delegation flow. Because each tool bakes its workflow and UI into a closed host, adopting a good idea means abandoning your current setup and relearning another stack.</p>
-          <p>Minga starts from a different premise, inspired by the deepest idea Emacs ever proved: your working environment should be programmable in its own language while you use it, on a runtime built for concurrent human and agent work.</p>
+        <section class="essay-section" id="the-pty-ceiling">
+          <h2>1. The PTY-pane ceiling of agent multiplexers</h2>
+          <p>The fastest-growing workflow in software engineering right now is not an IDE at all. It is an agent multiplexer: tools like Herdr, or homegrown tmux setups, wrapping Claude Code, Codex, pi, and OpenCode inside persistent terminal workspaces with status sidebars and socket APIs.</p>
+          <p>That workflow became popular for real reasons. Closing your laptop no longer kills an agent mid-task. A sidebar rolls up which panes are working, idle, or waiting for approval. Scripts or primary agents can spawn panes and coordinate planner, implementer, and reviewer loops across Git worktrees.</p>
+          <p>Then you hit the structural ceiling of multiplexing opaque PTYs:</p>
+          <ul>
+            <li><strong>Every agent is still a blind terminal stream.</strong> A multiplexer watches raw shell output to guess whether an agent is working or blocked, and coordinates work by injecting keystrokes, piping text over sockets, or passing scratch files on disk. It has no structured model of provider turns, tool admission boundaries, or failed effects.</li>
+            <li><strong>Disk writes and worktree sprawl replace real buffer ownership.</strong> CLI agents edit files directly on disk. Edit the same file yourself and you get conflicts or broken undo history; run parallel agents and you end up juggling a separate Git worktree for every pane and untangling merges afterward.</li>
+            <li><strong>You still drop back into a second editor the moment code gets subtle.</strong> Nobody blindly merges a thousand-line diff from terminal scrollback. You flip to Neovim, Emacs, or VS Code to jump to definitions, inspect LSP diagnostics, trace types across modules, and rewrite the tricky part by hand.</li>
+            <li><strong>Scripting panes is not owning the runtime.</strong> Asking a harness to reshape tabs, timers, or markdown instructions changes shell chrome around external CLIs. It cannot compose buffer decorations, inline diff review, LSP diagnostics, and agent tool approvals inside one authoritative model.</li>
+          </ul>
+          <p>Minga takes the demand that agent multiplexers proved and solves it one layer deeper: instead of multiplexing disconnected CLI agents across PTYs, put the editor, buffers, LSP clients, and supervised agent sessions inside one programmable BEAM runtime.</p>
         </section>
 
         <section class="essay-section" id="comparison">
-          <h2>2. Neither an AI sidebar nor a disconnected harness</h2>
-          <p>Most coding tools fall into two camps: legacy editors retrofitted with chat sidebars, or standalone terminal harnesses with no native editing core. Both leave structural gaps when you work with agents every day.</p>
+          <h2>2. Neither an AI sidebar nor a PTY multiplexer</h2>
+          <p>Most coding setups today choose between legacy IDEs with bolted-on chat panels or agent multiplexers wrapping terminal CLIs. Here is how those architectures compare at the runtime boundary:</p>
 
           <div class="table-wrap">
             <table>
@@ -75,52 +81,52 @@
                 <tr>
                   <th>Dimension</th>
                   <th>AI-retrofitted IDEs</th>
-                  <th>Terminal agent harnesses</th>
+                  <th>Agent multiplexers &amp; CLI harnesses (Herdr, tmux + Claude Code / Codex / pi)</th>
                   <th>Minga</th>
                 </tr>
               </thead>
               <tbody>
                 <tr>
-                  <td>Runtime model</td>
-                  <td>Single UI event loop; heavy extensions and streaming contend for the main thread.</td>
-                  <td>Standalone CLI process isolated from your editor; file watcher syncs after the fact.</td>
-                  <td>Supervised BEAM processes with preemptive scheduling and per-process heaps across buffers, LSP, and agents.</td>
+                  <td>Runtime &amp; persistence</td>
+                  <td>Single UI event loop; closing the app tears down workspace state and heavy streams contend with typing.</td>
+                  <td>Background server keeps PTY panes alive across disconnects; status is inferred from opaque terminal sessions.</td>
+                  <td>Supervised BEAM processes with preemptive scheduling and per-process heaps, plus <code>minga --headless</code> for durable local or remote sessions.</td>
                 </tr>
                 <tr>
                   <td>How agents edit files</td>
-                  <td>Directly mutate shared editor state or patch files through extension host bridges.</td>
-                  <td>Write directly to disk; conflicts with open unsaved buffers and breaks editor undo history.</td>
+                  <td>Mutate shared editor state or patch files through an extension host bridge.</td>
+                  <td>Write directly to disk; concurrent work requires separate Git worktrees per pane and breaks editor undo history.</td>
                   <td>Route through <code>MingaAgent.ToolRouter</code> into in-memory buffer forks, staged review (<kbd>SPC a p</kbd> / <kbd>SPC a P</kbd>), three-way merge, and undo integration.</td>
                 </tr>
                 <tr>
                   <td>Code reading &amp; auditing</td>
-                  <td>Full editor navigation, often bogged down by heavy Electron chrome and extension sprawl.</td>
-                  <td>Diff text in terminal scrollback; you flip to Neovim or VS Code to jump to definitions or edit.</td>
+                  <td>Full editor navigation, often weighed down by Electron chrome and extension sprawl.</td>
+                  <td>Diff text in terminal scrollback; you open Neovim or VS Code in another window to jump to definitions or edit.</td>
                   <td>Native Swift/Metal macOS GUI and Go terminal client with Vim + CUA editing, LSP, 50 tree-sitter grammars, and inline diff review.</td>
                 </tr>
                 <tr>
-                  <td>Workflow customization</td>
+                  <td>Orchestration &amp; customization</td>
                   <td>Fixed sidebar UX; plugin APIs wrap a host you cannot deeply reshape without forking.</td>
-                  <td>Prompt files, slash commands, and hooks inside a fixed terminal loop; no native programmable UI.</td>
-                  <td>Config and extensions in Elixir, moving toward ADR-0004 live-authored definitions you Save, activate, and Keep across projects.</td>
+                  <td>Socket/CLI pane spawning, scratch-file handoffs, and markdown/layout rules around external CLI processes.</td>
+                  <td>Typed Elixir config, hooks, advice, and supervised extensions, moving toward ADR-0004 definitions you Save, activate, and Keep over real engine state.</td>
                 </tr>
               </tbody>
             </table>
           </div>
 
-          <h3>If you live in Neovim + tmux + a terminal harness</h3>
-          <p>You do not have to give up modal muscle memory or terminal speed to get one unified environment. Minga ships Normal, Insert, Visual, Operator-Pending, Replace, and Search modes, text objects (<code>iw</code>, <code>i"</code>, <code>a{</code>), registers, macros, marks, dot repeat, counts, 50 compiled tree-sitter grammars, supervised LSP clients, and a Go/Bubble Tea terminal client that shares the exact same BEAM core and config as the macOS app. CUA editing is also supported when you want standard desktop shortcuts.</p>
+          <h3>If you live in Herdr or tmux + Neovim + CLI agents</h3>
+          <p>You keep your modal muscle memory and terminal reach without splitting editing and orchestration across two worlds. Minga ships Normal, Insert, Visual, Operator-Pending, Replace, and Search modes, text objects (<code>iw</code>, <code>i"</code>, <code>a{</code>), registers, macros, marks, dot repeat, counts, 50 compiled tree-sitter grammars, supervised LSP clients, and a Go/Bubble Tea terminal client over the same BEAM core and headless daemon as the macOS app. CUA editing is also first-class when you want standard desktop shortcuts.</p>
 
           <h3>If you come from Emacs or Doom Emacs</h3>
           <p>Minga shares Emacs's core philosophy: your config is the same language as the editor, commands wrap with <code>:before</code>, <code>:after</code>, <code>:around</code>, and <code>:override</code> advice, hooks attach to lifecycle events, and <kbd>SPC</kbd> leader menus make deep command trees discoverable via Which-Key. What changes is the runtime underneath: hooks run concurrently in isolated processes instead of freezing typing, buffer-local state is enforced by per-buffer processes rather than global symbol-table conventions, and there is no single-threaded C wall blocking agent concurrency.</p>
         </section>
 
         <section class="essay-section" id="programmable-workbench">
-          <h2>3. Programmability over fixed harnesses (the v0.1.0 direction)</h2>
+          <h2>3. Programmability over real engine owners (not PTY glue)</h2>
           <p>Minga's v0.1.0 design (<a href="https://github.com/jsmestad/minga/issues/3542">#3542</a>, <a href="https://github.com/jsmestad/minga/issues/3662">#3662</a>, and <a href="/docs/0004-products-are-root-applets-over-a-fixed-engine.html">ADR-0004</a>) draws a sharp line between what stays fixed in the engine and what you or your agent can reshape.</p>
 
           <ul>
-            <li><strong>Authoritative owners stay fixed.</strong> Buffer processes own canonical text, edits, and undo. Agent sessions own conversations, admitted turns, tool execution, permissions, and lossless continuation (<a href="/docs/session-recovery.html">Session Recovery</a>). Authored workflows steer and compose those authorities rather than inventing a second task database, a second scheduler, or fake prompt-only automation.</li>
+            <li><strong>Authoritative owners stay fixed.</strong> Buffer processes own canonical text, edits, and undo. Agent sessions own conversations, admitted turns, tool execution, permissions, and lossless continuation (<a href="/docs/session-recovery.html">Session Recovery</a>). Authored workflows steer and compose those authorities rather than scraping terminal output, inventing a second task database, or substituting markdown prompt glue for real execution controls.</li>
             <li><strong>Two clear ways to evolve Minga.</strong> Customize Minga by discovering supported capabilities, authoring readable Elixir source, saving to activate, inspecting the result, and keeping useful definitions across projects. Develop Minga itself through normal source changes, tests, and pull requests when a task genuinely needs a new native or engine capability.</li>
             <li><strong>Explicit boundaries instead of magic hot-reloading.</strong> Under <a href="/docs/0003-extension-code-updates-require-a-new-vm-generation.html">ADR-0003</a>, arbitrary compiled extension packages and dependencies still activate on a fresh BEAM generation so active callbacks and loaded modules never mix versions, while <kbd>SPC h r</kbd> reloads options, keybindings, hooks, and advice cleanly in place. Restricted live Save-to-activate definitions, grouped Save, and Keep are being specified and verified step by step as part of v0.1.0 rather than hand-waved as unrestricted VM code patching.</li>
           </ul>
