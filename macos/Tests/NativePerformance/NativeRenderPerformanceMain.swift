@@ -729,6 +729,15 @@ private struct NativeRenderPerformanceMain {
             )
             return
         }
+        if CommandLine.arguments.count == 5,
+           CommandLine.arguments[1] == "--frame-staging-replay" {
+            try runFrameStagingReplay(
+                capturePath: CommandLine.arguments[2],
+                manifestPath: CommandLine.arguments[3],
+                outputURL: URL(fileURLWithPath: CommandLine.arguments[4])
+            )
+            return
+        }
         if CommandLine.arguments.count == 3,
            CommandLine.arguments[1] == "--accessibility-measurement-output" {
             let measurement = try accessibilityMeasurement()
@@ -741,7 +750,7 @@ private struct NativeRenderPerformanceMain {
         }
         guard CommandLine.arguments.count == 3,
               CommandLine.arguments[1] == "--measurement-output" else {
-            FileHandle.standardError.write(Data("usage: minga-native-render-performance (--measurement-output | --accessibility-measurement-output | --resource-investigation-output) OUTPUT.json\n".utf8))
+            FileHandle.standardError.write(Data("usage: minga-native-render-performance (--measurement-output | --accessibility-measurement-output | --resource-investigation-output) OUTPUT.json | --frame-staging-replay CAPTURE.packets MANIFEST.json OUTPUT.json\n".utf8))
             exit(2)
         }
         guard MTLCreateSystemDefaultDevice() != nil else {
