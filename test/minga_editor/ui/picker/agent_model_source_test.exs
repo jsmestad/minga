@@ -68,6 +68,28 @@ defmodule MingaEditor.UI.Picker.AgentModelSourceTest do
         when session == self(), do: {:reply, {:error, message}, fixture}
   end
 
+  test "the chooser status names a specific startup resolution failure and keeps the plain no-model label" do
+    session = start_supervised!({RejectingSession, {[], "unused"}})
+    missing = {:model_not_found, "openai:no-such-model"}
+
+    unresolved = %{
+      connection(session)
+      | credential_readiness: :unconfigured,
+        provider_phase: :stopped,
+        problem: {:resolution, missing}
+    }
+
+    assert {:ok, _items, %{status: status}} = AgentModelSource.async_fetch(context(unresolved, 1))
+    assert status == ModelResolver.message(missing)
+    assert status =~ "openai:no-such-model"
+
+    no_model = %{unresolved | problem: {:resolution, :no_available_model}}
+
+    assert {:ok, _items,
+            %{status: "Choose a model or connect a provider. Your draft will not be sent."}} =
+             AgentModelSource.async_fetch(context(no_model, 1))
+  end
+
   test "an API route row shows a ready chip and leads with its route, price, and context" do
     selection =
       ModelSelectionFixture.selection(

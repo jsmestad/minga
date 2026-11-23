@@ -10,6 +10,7 @@ defmodule MingaEditor.UI.Picker.AgentModelSource do
   @behaviour MingaEditor.UI.Picker.Source
 
   alias MingaAgent.ModelCandidate
+  alias MingaAgent.ModelResolver
   alias MingaAgent.ModelSelection
   alias MingaAgent.Credentials.Snapshot, as: CredentialSnapshot
   alias MingaAgent.ModelSelection.Credential.ApiKey
@@ -333,7 +334,15 @@ defmodule MingaEditor.UI.Picker.AgentModelSource do
 
   @spec connection_label(ConnectionSnapshot.t()) :: String.t()
   defp connection_label(connection),
-    do: connection |> ConnectionSnapshot.status() |> status_label()
+    do: connection |> ConnectionSnapshot.status() |> status_label(connection.problem)
+
+  # A resolver failure other than "no model" names what to fix; the generic label would hide it.
+  @spec status_label(atom(), ConnectionSnapshot.problem() | nil) :: String.t()
+  defp status_label(status, {:resolution, reason})
+       when status in [:unsupported, :credential_failure],
+       do: ModelResolver.message(reason)
+
+  defp status_label(status, _problem), do: status_label(status)
 
   @spec status_label(atom()) :: String.t()
   defp status_label(:unconfigured),
