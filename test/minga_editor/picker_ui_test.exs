@@ -275,6 +275,16 @@ defmodule MingaEditor.PickerUITest do
     ModalWorkflow.open(state, {:picker, PickerPayload.new(picker_state)})
   end
 
+  defp tab_picker_state(source) do
+    picker =
+      [%Item{id: :first, label: "first"}, %Item{id: :second, label: "second"}]
+      |> Picker.new(title: "Test", max_visible: 10)
+
+    state = TestHelpers.base_state(content: "initial")
+    picker_state = %PickerState{picker: picker, source: source, restore: 0}
+    ModalWorkflow.open(state, {:picker, PickerPayload.new(picker_state)})
+  end
+
   defp mark_all_picker(%Picker{items: []} = picker), do: picker
 
   defp mark_all_picker(%Picker{} = picker) do
@@ -553,6 +563,24 @@ defmodule MingaEditor.PickerUITest do
       assert new_state.shell_runtime.state.modal == :none
       assert Enum.count(new_state.workspace.buffers.list) == 1
       assert Minga.Buffer.content(new_state.workspace.buffers.active) == "alpha"
+    end
+  end
+
+  describe "Tab" do
+    test "marks the highlighted entry and moves down in a source that confirms marked items" do
+      state = tab_picker_state(FileSource)
+
+      tabbed = PickerUI.handle_key(state, 9, 0)
+
+      {:picker, %{picker_ui: %{picker: picker}}} = tabbed.shell_runtime.state.modal
+      assert Enum.map(Picker.marked_items(picker), & &1.id) == [:first]
+      assert Picker.selected_item(picker).id == :second
+    end
+
+    test "does nothing in a source that neither completes nor confirms marked items" do
+      state = tab_picker_state(NoBulkActionsSource)
+
+      assert PickerUI.handle_key(state, 9, 0) == state
     end
   end
 

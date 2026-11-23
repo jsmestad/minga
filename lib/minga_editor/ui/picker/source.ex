@@ -17,6 +17,7 @@ defmodule MingaEditor.UI.Picker.Source do
   - `gui_preview?/0` — whether the GUI preview pane should be shown for this source (default: false)
   - `preview/2` — optional source-provided GUI preview content for the selected item, called with the render context
   - `title/0` — the picker title shown in the separator bar
+  - `complete/2`: optionally completes the highlighted item into the picker query when the user presses Tab
 
   ## Example
 
@@ -68,6 +69,16 @@ defmodule MingaEditor.UI.Picker.Source do
   `{:stay_open, {:nested, child_source, child_context}}` opens `child_source` as a child picker in the same modal. Escape or `C-g` in the child returns to this picker with its query and selection; selecting a child item closes both.
   """
   @callback selection_disposition(Picker.item(), term()) :: selection_disposition()
+
+  @typedoc "Outcome of completing a highlighted item into the picker query."
+  @type completion :: {:ok, term()} | {:error, String.t()}
+
+  @doc """
+  Completes the highlighted item into the picker query, keeping the picker open.
+
+  Tab calls this callback when the source implements it. `{:ok, next_context}` installs the next source context exactly like a `{:stay_open, next_context}` selection disposition; `{:error, message}` shows the message and leaves the picker unchanged. Sources without this callback keep Tab as the multi-select mark when they implement `on_bulk_select/2`.
+  """
+  @callback complete(Picker.item(), term()) :: completion()
 
   @doc """
   Called when the user confirms explicitly marked items. Returns the new editor state.
@@ -210,7 +221,8 @@ defmodule MingaEditor.UI.Picker.Source do
     async?: 0,
     async_fetch: 1,
     enrich: 1,
-    selection_disposition: 2
+    selection_disposition: 2,
+    complete: 2
   ]
 
   @doc """
@@ -282,6 +294,32 @@ defmodule MingaEditor.UI.Picker.Source do
       )
     else
       :accept
+    end
+  end
+
+  @doc "Returns whether a source completes the highlighted item into the query."
+  @spec completes?(module()) :: boolean()
+  def completes?(module), do: exported?(module, :complete, 2)
+
+  @doc "Returns the validated query completion for a highlighted item."
+  @spec complete(
+          module(),
+          Picker.item(),
+          term(),
+          ContributionCleanup.contribution_source() | nil
+        ) :: completion()
+  def complete(module, item, context, source \\ nil) do
+    if completes?(module) do
+      invoke_value(
+        module,
+        :complete,
+        [item, context],
+        source,
+        &valid_completion?/1,
+        {:error, "Picker completion is unavailable"}
+      )
+    else
+      {:error, "Picker source does not complete entries"}
     end
   end
 
@@ -641,6 +679,11 @@ defmodule MingaEditor.UI.Picker.Source do
 
   defp valid_fetch_result?({:error, message}), do: is_binary(message)
   defp valid_fetch_result?(_result), do: false
+
+  @spec valid_completion?(term()) :: boolean()
+  defp valid_completion?({:ok, _context}), do: true
+  defp valid_completion?({:error, message}), do: is_binary(message)
+  defp valid_completion?(_completion), do: false
 
   @spec valid_selection_disposition?(term()) :: boolean()
   defp valid_selection_disposition?(:accept), do: true

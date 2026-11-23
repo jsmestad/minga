@@ -137,11 +137,12 @@ struct PickerQueryField: NSViewRepresentable {
 
             applyingAuthoritativeText = true
             let selection = editor?.selectedRange()
+            let previousText = editor?.string ?? field.stringValue
             field.stringValue = text
 
             if let editor, let selection {
                 editor.string = text
-                editor.setSelectedRange(PickerQueryReconciler.clampSelection(selection, to: text))
+                editor.setSelectedRange(PickerQueryReconciler.adoptedSelection(selection, previousText: previousText, adoptedText: text))
             }
 
             applyingAuthoritativeText = false

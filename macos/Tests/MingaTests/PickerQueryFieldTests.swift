@@ -53,6 +53,38 @@ struct PickerQueryFieldTests {
         #expect(editor.selectedRange() == NSRange(location: 1, length: 2))
     }
 
+    @Test("the native field adopts a BEAM-completed query with the caret at its end")
+    @MainActor func adoptsCompletedQuery() {
+        let recorder = LocalActionRecorder<PickerQueryField.Action>()
+        let style = InlineEditFieldStyle(textColor: .primary, selectionBackgroundColor: .accentColor, selectionForegroundColor: .primary, insertionPointColor: .accentColor)
+        let coordinator = PickerQueryField.Coordinator(sendAction: recorder.handler, style: style)
+        let field = PickerNSTextField()
+        let editor = NSTextView()
+        field.isEditable = true
+
+        coordinator.reconcile(field: field, editor: editor, generation: 7, acknowledgedSequence: 0, authoritativeText: "")
+        field.stringValue = "~/pro"
+        editor.string = "~/pro"
+        editor.setSelectedRange(NSRange(location: 5, length: 0))
+        coordinator.handleTextChange(field: field, editor: editor)
+        coordinator.reconcile(field: field, editor: editor, generation: 7, acknowledgedSequence: 1, authoritativeText: "~/pro")
+
+        // Tab is a key press, not a query edit, so the completed query arrives with the same acknowledgement.
+        coordinator.reconcile(field: field, editor: editor, generation: 7, acknowledgedSequence: 1, authoritativeText: "~/projects/")
+
+        #expect(field.stringValue == "~/projects/")
+        #expect(editor.string == "~/projects/")
+        #expect(editor.selectedRange() == NSRange(location: 11, length: 0))
+        #expect(recorder.actions == [.queryChanged(generation: 7, editSequence: 1, text: "~/pro")])
+    }
+
+    @Test("adopted text keeps a caret at the end and clamps any other selection")
+    func adoptedSelection() {
+        #expect(PickerQueryReconciler.adoptedSelection(NSRange(location: 5, length: 0), previousText: "~/pro", adoptedText: "~/projects/") == NSRange(location: 11, length: 0))
+        #expect(PickerQueryReconciler.adoptedSelection(NSRange(location: 2, length: 0), previousText: "~/pro", adoptedText: "~/projects/") == NSRange(location: 2, length: 0))
+        #expect(PickerQueryReconciler.adoptedSelection(NSRange(location: 1, length: 4), previousText: "~/pro", adoptedText: "~/p") == NSRange(location: 1, length: 2))
+    }
+
     @Test("native text command routing covers standard editing operations")
     @MainActor func nativeTextCommands() {
         let editor = NSTextView()

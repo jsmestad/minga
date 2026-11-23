@@ -165,6 +165,32 @@ func TestGUIFocusOwnerDoesNotChangeTerminalPresentation(t *testing.T) {
 	}
 }
 
+func TestPickerAdoptsQueryReplacedByTheBEAM(t *testing.T) {
+	model := New(80, 24, nil)
+	pickerFrame := func(query string, labels ...string) protocol.Command {
+		items := make([]protocol.PickerItem, 0, len(labels))
+		for _, label := range labels {
+			items = append(items, protocol.PickerItem{Label: label})
+		}
+		return protocol.Command{Kind: protocol.CommandChrome, Chrome: protocol.ChromePayload{
+			Opcode: generated.OPGuiPicker,
+			Picker: protocol.Picker{Visible: true, Title: "Find file", Query: query, Items: items},
+		}}
+	}
+
+	applyProductionFrame(&model, 1, 0, 1, testThemeCommand(), focusOwnerCommand(0, 0), pickerFrame("~/pro", "projects"))
+	// Tab completes the highlighted folder on the BEAM; the next frame carries the replaced query.
+	applyProductionFrame(&model, 2, 1, 1, pickerFrame("~/projects/", "minga"))
+
+	view := ansi.Strip(model.View().Content)
+	if !strings.Contains(view, "Find file  ~/projects/") || !strings.Contains(view, "minga") {
+		t.Fatalf("picker should render the BEAM-replaced query and its entries: %q", view)
+	}
+	if strings.Contains(view, "Find file  ~/pro ") {
+		t.Fatalf("picker kept the superseded query: %q", view)
+	}
+}
+
 func TestFloatingPickerRendersOverEditorWithAuthoredHiddenMinibuffer(t *testing.T) {
 	model := New(80, 24, nil)
 	model.chrome = map[byte]protocol.ChromePayload{
