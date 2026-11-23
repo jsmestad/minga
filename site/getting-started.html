@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Getting Started: Minga</title>
+  <meta name="description" content="Install Minga on macOS or from source, learn the six keys you actually need, connect a model provider, and run your first staged agent edit.">
+  <link rel="icon" type="image/svg+xml" href="/assets/minga_dark-transparent.svg">
+  <link rel="stylesheet" href="/styles.css">
+  <script>
+    (() => {
+      try {
+        const saved = window.localStorage.getItem("minga-theme");
+        if (saved === "light" || saved === "dark") {
+          document.documentElement.setAttribute("data-theme", saved);
+        }
+      } catch (_) {}
+    })();
+  </script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="site-header">
+    <div class="container header-inner">
+      <a class="brand-link" href="/">
+        <img src="/assets/minga_dark-transparent.svg" alt="Minga logo" width="28" height="28">
+        <span>Minga</span>
+        <span class="brand-tag">v0.1.0 preview</span>
+      </a>
+      <nav class="site-nav" aria-label="Primary">
+        <a href="/why-minga">Why Minga</a>
+        <a href="/getting-started" aria-current="page">Getting Started</a>
+        <a href="/architecture">Architecture</a>
+        <a href="/extending">Extending</a>
+        <a href="/docs/">Reference</a>
+        <a href="https://github.com/jsmestad/minga">GitHub</a>
+        <button type="button" class="theme-toggle" data-theme-toggle aria-label="Toggle color theme">Light</button>
+      </nav>
+    </div>
+  </header>
+
+  <main id="main">
+    <header class="essay-hero">
+      <div class="container">
+        <p class="kicker">First 10 Minutes</p>
+        <h1>Getting Started</h1>
+        <p class="essay-subtitle">Install Minga, learn the six keys that open the rest of the workbench, connect a model provider, and walk through your first staged diff review.</p>
+        <nav class="essay-toc" aria-label="Sections">
+          <a href="#install">1. Install</a>
+          <a href="#six-keys">2. Six core keys</a>
+          <a href="#connect-model">3. Connect a model</a>
+          <a href="#first-staged-edit">4. First staged edit</a>
+          <a href="#starter-config">5. Starter config</a>
+        </nav>
+      </div>
+    </header>
+
+    <article class="essay-body">
+      <div class="container">
+        <section class="essay-section" id="install">
+          <h2>1. Install Minga</h2>
+          <p>On Apple Silicon macOS, Homebrew installs both the native Swift + Metal app (<code>Minga.app</code>) and the Go terminal client (<code>minga</code>). On Linux, Intel Macs, or when developing Minga itself, build from source using the pinned toolchains in <code>.tool-versions</code> (Erlang, Elixir, Go, and Zig).</p>
+
+          <div class="grid-2">
+            <div class="code-card">
+              <div class="code-header">
+                <span>macOS · Homebrew</span>
+                <button type="button" class="copy-btn" data-copy-target="gs-brew">Copy</button>
+              </div>
+              <pre><code id="gs-brew">brew install --cask jsmestad/minga/minga-mac
+brew install jsmestad/minga/minga
+
+# Launch GUI or terminal client
+open -a Minga
+minga path/to/project</code></pre>
+            </div>
+
+            <div class="code-card">
+              <div class="code-header">
+                <span>From source · macOS &amp; Linux</span>
+                <button type="button" class="copy-btn" data-copy-target="gs-source">Copy</button>
+              </div>
+              <pre><code id="gs-source">git clone https://github.com/jsmestad/minga.git
+cd minga
+asdf install &amp;&amp; mix deps.get
+mix compile &amp;&amp; make native.support
+
+# Launch terminal client or macOS GUI
+bin/minga
+bin/minga-mac</code></pre>
+            </div>
+          </div>
+
+          <p>The first source build takes a few minutes while Zig compiles 50 tree-sitter grammars; incremental rebuilds after that are fast. Both <code>asdf</code> and <code>mise</code> read <code>.tool-versions</code> directly. Update rolling Homebrew builds anytime with <code>brew upgrade minga</code> or <code>brew upgrade --cask minga-mac</code>.</p>
+        </section>
+
+        <section class="essay-section" id="six-keys">
+          <h2>2. The six keys that open the rest of the workbench</h2>
+          <p>Minga supports both Vim modal editing and standard CUA desktop shortcuts. In Normal mode, pressing <kbd>SPC</kbd> opens a Which-Key popup grouped by mnemonic prefix (<code>f</code> for files, <code>b</code> for buffers, <code>s</code> for search, <code>a</code> for agent), so you can discover commands on demand instead of memorizing a cheat sheet up front.</p>
+
+          <ul class="spec-ledger">
+            <li class="spec-row">
+              <span class="spec-key"><kbd>SPC</kbd></span>
+              <span class="spec-detail"><strong>Open the command menu.</strong> Read the Which-Key popup and press the next mnemonic letter to narrow down.</span>
+            </li>
+            <li class="spec-row">
+              <span class="spec-key"><kbd>SPC f f</kbd> / <kbd>SPC s p</kbd></span>
+              <span class="spec-detail"><strong>Find files or search the project.</strong> Project roots are detected automatically and shared with LSP clients.</span>
+            </li>
+            <li class="spec-row">
+              <span class="spec-key"><kbd>SPC a a</kbd> / <kbd>SPC a t</kbd></span>
+              <span class="spec-detail"><strong>Toggle the agent panel or full agent workspace.</strong> Keep your editor buffers open beside the conversation.</span>
+            </li>
+            <li class="spec-row">
+              <span class="spec-key"><kbd>]c</kbd> / <kbd>[c</kbd> · <kbd>y</kbd> / <kbd>x</kbd></span>
+              <span class="spec-detail"><strong>Review staged agent diffs inline.</strong> Jump across hunks with <kbd>]c</kbd>/<kbd>[c</kbd>, accept with <kbd>y</kbd>, reject with <kbd>x</kbd>.</span>
+            </li>
+            <li class="spec-row">
+              <span class="spec-key"><kbd>SPC a p</kbd> / <kbd>SPC a P</kbd></span>
+              <span class="spec-detail"><strong>Publish or discard staged agent edits.</strong> Publish runs a three-way merge into open buffers and disk; discard drops staged changes cleanly.</span>
+            </li>
+            <li class="spec-row">
+              <span class="spec-key"><kbd>SPC f p</kbd> / <kbd>SPC h r</kbd></span>
+              <span class="spec-detail"><strong>Open and reload your config.</strong> Opens <code>~/.config/minga/config.exs</code> (creating a starter file if missing) and reloads options, bindings, hooks, and advice in place.</span>
+            </li>
+          </ul>
+        </section>
+
+        <section class="essay-section" id="connect-model">
+          <h2>3. Connect a model provider</h2>
+          <p>Minga ships a native multi-provider runtime covering Anthropic, OpenAI, OpenAI Codex, Google, OpenRouter, Groq, Mistral, DeepSeek, plus custom routes added by extensions. Credentials stay out of your chat history.</p>
+
+          <ol class="step-list">
+            <li class="step-item">
+              <span class="step-badge">01</span>
+              <div>
+                <h3>Open Models and connections</h3>
+                <p>Open the agent view (<kbd>SPC a a</kbd> or <kbd>SPC a t</kbd>) and run <code>/model</code> in the composer.</p>
+              </div>
+            </li>
+            <li class="step-item">
+              <span class="step-badge">02</span>
+              <div>
+                <h3>Enter credentials in the masked prompt</h3>
+                <p>Pick a provider's API-key action (or run <code>/auth anthropic</code>) and enter the key in that masked prompt, never in the chat composer. Submitting saves the credential locally without sending your draft.</p>
+              </div>
+            </li>
+            <li class="step-item">
+              <span class="step-badge">03</span>
+              <div>
+                <h3>Select an exact model route</h3>
+                <p>Run <code>/model</code> again and choose a model for your connected provider. Saved sessions remember the selected route identity, never the key. Use <code>/thinking high</code> for extended reasoning, <code>/tasks</code> for the session checklist, or <code>/help</code> to see all slash commands.</p>
+              </div>
+            </li>
+          </ol>
+
+          <p>For route selection rules, credential profiles, and native replay compatibility across providers, see <a href="/docs/agent-model-selection.html">Agent Model Selection</a> in ExDoc.</p>
+        </section>
+
+        <section class="essay-section" id="first-staged-edit">
+          <h2>4. Run your first staged edit</h2>
+          <p>Unlike terminal harnesses that write straight to disk while you hope nothing collides, Minga stages approved agent edits inside an isolated in-memory overlay until you decide to land them:</p>
+
+          <ol class="step-list">
+            <li class="step-item">
+              <span class="step-badge">01</span>
+              <div>
+                <h3>Ask for a real change on an open file</h3>
+                <p>Open a file in your project, prompt the agent, and approve its edit tool call. Notice that disk and your open buffer still show the original text while the turn finishes.</p>
+              </div>
+            </li>
+            <li class="step-item">
+              <span class="step-badge">02</span>
+              <div>
+                <h3>Inspect hunks and steer directly</h3>
+                <p>Choose <strong>Review</strong> on the changed file to walk hunks (<kbd>]c</kbd> / <kbd>[c</kbd>) with full tree-sitter highlighting and live LSP diagnostics. Accept good hunks (<kbd>y</kbd>), reject anything wrong (<kbd>x</kbd>), or hand-edit directly in the buffer. Need another pass? Attach your live unsaved buffer (<kbd>SPC a b</kbd>) or published file diagnostics (<kbd>SPC a D</kbd>) straight to the agent draft.</p>
+              </div>
+            </li>
+            <li class="step-item">
+              <span class="step-badge">03</span>
+              <div>
+                <h3>Publish with three-way merge</h3>
+                <p>Press <kbd>SPC a p</kbd> (or click <strong>Publish</strong> in the turn-end notice) to merge staged edits into open buffers and disk with undo intact, or <kbd>SPC a P</kbd> to discard them. If you edited overlapping lines in the meantime, Review shows both sides (<strong>Keep mine</strong> / <strong>Use Agent version</strong>) instead of clobbering either edit.</p>
+              </div>
+            </li>
+          </ol>
+
+          <p>Read <a href="/architecture#buffer-aware-agents">Architecture: Buffer-Aware Agents</a> for the visual diagram of how forks, revisions, and crash-safe staged drafts work.</p>
+        </section>
+
+        <section class="essay-section" id="starter-config">
+          <h2>5. Make it yours in five lines</h2>
+          <p>Press <kbd>SPC f p</kbd> to open <code>~/.config/minga/config.exs</code> (respects <code>$XDG_CONFIG_HOME</code>). You do not need to know Elixir to configure basics; <code>set :option, value</code> covers options, and <kbd>SPC h r</kbd> reloads changes in place:</p>
+
+          <div class="code-card">
+            <div class="code-header">
+              <span>~/.config/minga/config.exs</span>
+              <button type="button" class="copy-btn" data-copy-target="gs-config">Copy</button>
+            </div>
+            <pre><code id="gs-config"><span class="tok-kw">use</span> <span class="tok-mod">Minga.Config</span>
+
+set <span class="tok-atom">:theme</span>, <span class="tok-atom">:catppuccin_mocha</span>
+set <span class="tok-atom">:line_numbers</span>, <span class="tok-atom">:relative</span>
+set <span class="tok-atom">:tab_width</span>, <span class="tok-num">2</span>
+set <span class="tok-atom">:format_on_save</span>, <span class="tok-atom">true</span></code></pre>
+          </div>
+
+          <div class="callout">
+            <span class="callout-title">Where to go next</span>
+            <p>Read <a href="/extending">Extending Minga</a> for the three-layer customization model (hooks, advice, extensions, and task-shaped workflows), <a href="/architecture">Architecture</a> for diagrams of the BEAM and native ports, or jump straight to the exhaustive <a href="/docs/configuration.html">Configuration Reference</a> and <a href="/docs/agentic-keymap.html">Agentic Keymap</a> in ExDoc.</p>
+          </div>
+
+          <div class="actions">
+            <a class="btn btn-primary" href="/architecture">Explore Architecture</a>
+            <a class="btn" href="/extending">Extending Minga</a>
+            <a class="btn" href="/docs/configuration.html">Configuration Reference</a>
+          </div>
+        </section>
+      </div>
+    </article>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container footer-inner">
+      <div class="footer-note">
+        <p><strong>Minga</strong> is open source under the MIT license. Created by <a href="https://evalcode.com">Justin Smestad</a> in Colorado.</p>
+        <p>Pre-release staging preview ahead of v0.1.0 launch (<a href="https://github.com/jsmestad/minga/issues/3542">#3542</a>).</p>
+      </div>
+      <nav class="footer-links" aria-label="Footer">
+        <a href="/">Home</a>
+        <a href="/why-minga">Why Minga</a>
+        <a href="/architecture">Architecture</a>
+        <a href="/extending">Extending</a>
+        <a href="/docs/">ExDoc Reference</a>
+        <a href="/docs/changelog.html">Changelog</a>
+        <a href="https://github.com/jsmestad/minga">GitHub</a>
+      </nav>
+    </div>
+  </footer>
+
+  <script defer src="/site.js"></script>
+</body>
+</html>

@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Architecture &amp; Buffer-Aware Agents: Minga</title>
+  <meta name="description" content="Visual overview of Minga's BEAM supervision tree, thin native Swift/Go/Zig ports, buffer-aware staged agent edits, and the five architecture decision records.">
+  <link rel="icon" type="image/svg+xml" href="/assets/minga_dark-transparent.svg">
+  <link rel="stylesheet" href="/styles.css">
+  <script>
+    (() => {
+      try {
+        const saved = window.localStorage.getItem("minga-theme");
+        if (saved === "light" || saved === "dark") {
+          document.documentElement.setAttribute("data-theme", saved);
+        }
+      } catch (_) {}
+    })();
+  </script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="site-header">
+    <div class="container header-inner">
+      <a class="brand-link" href="/">
+        <img src="/assets/minga_dark-transparent.svg" alt="Minga logo" width="28" height="28">
+        <span>Minga</span>
+        <span class="brand-tag">v0.1.0 preview</span>
+      </a>
+      <nav class="site-nav" aria-label="Primary">
+        <a href="/why-minga">Why Minga</a>
+        <a href="/getting-started">Getting Started</a>
+        <a href="/architecture" aria-current="page">Architecture</a>
+        <a href="/extending">Extending</a>
+        <a href="/docs/">Reference</a>
+        <a href="https://github.com/jsmestad/minga">GitHub</a>
+        <button type="button" class="theme-toggle" data-theme-toggle aria-label="Toggle color theme">Light</button>
+      </nav>
+    </div>
+  </header>
+
+  <main id="main">
+    <header class="essay-hero">
+      <div class="container">
+        <p class="kicker">Runtime &amp; Process Design</p>
+        <h1>Architecture &amp; Buffer-Aware Agents</h1>
+        <p class="essay-subtitle">How Minga splits state ownership inside one BEAM VM from native rendering and parsing across explicit OS process boundaries, and how agents edit in-memory buffer forks instead of writing blind to disk.</p>
+        <nav class="essay-toc" aria-label="Sections">
+          <a href="#process-map">1. BEAM core + native ports</a>
+          <a href="#buffer-aware-agents">2. Buffer-aware staged edits</a>
+          <a href="#ownership-rules">3. Ownership &amp; recovery</a>
+          <a href="#adrs">4. Architecture decisions</a>
+        </nav>
+      </div>
+    </header>
+
+    <article class="essay-body">
+      <div class="container">
+        <section class="essay-section" id="process-map">
+          <h2>1. One BEAM core, thin native OS processes</h2>
+          <p>Minga does not ask one runtime to do everything. All editing state, concurrency, supervision, agent orchestration, and semantic UI modeling live inside an Elixir/OTP 29 BEAM process. Rendering, native accessibility, immediate gesture response, and tree-sitter parsing run in separate native OS processes over binary stdin/stdout ports with zero shared memory.</p>
+
+          <figure class="diagram-figure">
+            <div class="diagram-bar">
+              <span>Figure 1 · Process topology &amp; port boundaries</span>
+              <span>BEAM (OTP 29) &lt;-&gt; Native clients</span>
+            </div>
+            <div class="diagram-canvas">
+              <svg class="diagram-svg" viewBox="0 0 880 392" role="img" aria-labelledby="fig1-title fig1-desc" xmlns="http://www.w3.org/2000/svg">
+                <title id="fig1-title">Minga process topology: BEAM core connected to Swift, Go, and Zig OS processes</title>
+                <desc id="fig1-desc">The BEAM VM supervises Foundation registries, MingaEditor with 16 immutable value owners, dynamic supervisors for Buffers, Agents, LSP, and Extensions, plus Frontend.Manager and headless WebSocket gateway. Bidirectional port arrows connect to three separate OS processes: Swift and Metal on macOS, Go and Bubble Tea in the terminal, and Zig minga-parser for 50 tree-sitter grammars.</desc>
+                <defs>
+                  <marker id="arrow-accent" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                    <path d="M 1 1 L 9 5 L 1 9 z" fill="var(--accent)"/>
+                  </marker>
+                  <marker id="arrow-muted" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                    <path d="M 1 1 L 9 5 L 1 9 z" fill="var(--text-muted)"/>
+                  </marker>
+                </defs>
+
+                <!-- Left BEAM container -->
+                <rect x="16" y="16" width="540" height="360" rx="10" fill="var(--bg-subtle)" stroke="var(--accent-border)" stroke-width="1.5"/>
+                <text x="36" y="44" fill="var(--accent)" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="12" font-weight="600" letter-spacing="0.04em">BEAM VM · ELIXIR / OTP 29 (SEMANTIC AUTHORITY)</text>
+
+                <!-- Tier 1: Foundation -->
+                <rect x="36" y="60" width="500" height="52" rx="7" fill="var(--bg-elevated)" stroke="var(--border-strong)" stroke-width="1"/>
+                <text x="52" y="82" fill="var(--text)" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="13" font-weight="600">Minga.Supervisor (rest_for_one)</text>
+                <text x="52" y="100" fill="var(--text-muted)" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="11">Foundation: Config · Keymaps · Events · Source-owned registries</text>
+
+                <!-- Middle Left: MingaEditor -->
+                <rect x="36" y="128" width="238" height="134" rx="7" fill="var(--bg-elevated)" stroke="var(--accent-border)" stroke-width="1.2"/>
+                <text x="52" y="152" fill="var(--text)" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="13" font-weight="600">MingaEditor GenServer</text>
+                <text x="52" y="174" fill="var(--text-secondary)" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="11.5">Single interactive mailbox</text>
+                <text x="52" y="194" fill="var(--text-secondary)" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="11.5">16 immutable value owners</text>
+                <text x="52" y="214" fill="var(--text-secondary)" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="11.5">Renderer.Server -&gt; Semantic UI</text>
+                <text x="52" y="244" fill="var(--accent)" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10.5">ADR-0002 explicit state owners</text>
+
+                <!-- Middle Right: Dynamic Supervisors -->
+                <rect x="290" y="128" width="246" height="40" rx="6" fill="var(--bg-elevated)" stroke="var(--border-strong)" stroke-width="1"/>
+                <text x="304" y="146" fill="var(--text)" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="12" font-weight="600">Buffer.Supervisor</text>
+                <text x="304" y="161" fill="var(--text-muted)" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10.5">1 GenServer + heap per open file</text>
+
+                <rect x="290" y="175" width="246" height="40" rx="6" fill="var(--bg-elevated)" stroke="var(--border-strong)" stroke-width="1"/>
+                <text x="304" y="193" fill="var(--text)" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="12" font-weight="600">MingaAgent.Supervisor</text>
+                <text x="304" y="208" fill="var(--text-muted)" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10.5">Sessions · ToolRouter · DraftKeeper</text>
+
+                <rect x="290" y="222" width="246" height="40" rx="6" fill="var(--bg-elevated)" stroke="var(--border-strong)" stroke-width="1"/>
+                <text x="304" y="240" fill="var(--text)" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="12" font-weight="600">LSP &amp; Extension Trees</text>
+                <text x="304" y="255" fill="var(--text-muted)" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10.5">Isolated clients &amp; minga_sdk packages</text>
+
+                <!-- Bottom Transport Bar -->
+                <rect x="36" y="278" width="238" height="80" rx="7" fill="var(--bg-elevated)" stroke="var(--border-strong)" stroke-width="1"/>
+                <text x="52" y="302" fill="var(--text)" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="12.5" font-weight="600">Frontend.Manager</text>
+                <text x="52" y="322" fill="var(--text-secondary)" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="11.5">Binary Semantic UI frames</text>
+                <text x="52" y="340" fill="var(--text-muted)" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10.5">stdin/stdout OS ports</text>
+
+                <rect x="290" y="278" width="246" height="80" rx="7" fill="var(--bg-elevated)" stroke="var(--border-strong)" stroke-width="1"/>
+                <text x="304" y="302" fill="var(--text)" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="12.5" font-weight="600">minga --headless</text>
+                <text x="304" y="322" fill="var(--text-secondary)" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="11.5">WebSocket + JSON-RPC gateway</text>
+                <text x="304" y="340" fill="var(--text-muted)" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10.5">Local &amp; remote attach/detach</text>
+
+                <!-- Port Connectors -->
+                <line x1="556" y1="70" x2="616" y2="70" stroke="var(--accent)" stroke-width="1.6" marker-start="url(#arrow-accent)" marker-end="url(#arrow-accent)"/>
+                <text x="586" y="61" text-anchor="middle" fill="var(--text-muted)" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="9.5">port</text>
+
+                <line x1="556" y1="196" x2="616" y2="196" stroke="var(--accent)" stroke-width="1.6" marker-start="url(#arrow-accent)" marker-end="url(#arrow-accent)"/>
+                <text x="586" y="187" text-anchor="middle" fill="var(--text-muted)" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="9.5">port</text>
+
+                <line x1="556" y1="322" x2="616" y2="322" stroke="var(--text-muted)" stroke-width="1.6" marker-start="url(#arrow-muted)" marker-end="url(#arrow-muted)"/>
+                <text x="586" y="313" text-anchor="middle" fill="var(--text-muted)" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="9.5">port</text>
+
+                <!-- Right Column: Native OS Processes -->
+                <rect x="622" y="16" width="242" height="108" rx="9" fill="var(--bg-elevated)" stroke="var(--border-strong)" stroke-width="1.2"/>
+                <text x="638" y="42" fill="var(--text)" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="13" font-weight="600">Swift 6 + Metal</text>
+                <text x="638" y="62" fill="var(--text-secondary)" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="11.5">Native macOS GUI (primary)</text>
+                <text x="638" y="82" fill="var(--text-secondary)" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="11.5">CoreText · Metal surface · Chrome</text>
+                <text x="638" y="106" fill="var(--accent)" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10.5">Row fit &amp; gestures (ADR-0001/05)</text>
+
+                <rect x="622" y="142" width="242" height="108" rx="9" fill="var(--bg-elevated)" stroke="var(--border-strong)" stroke-width="1.2"/>
+                <text x="638" y="168" fill="var(--text)" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="13" font-weight="600">Go + Bubble Tea</text>
+                <text x="638" y="188" fill="var(--text-secondary)" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="11.5">Terminal client (macOS &amp; Linux)</text>
+                <text x="638" y="208" fill="var(--text-secondary)" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="11.5">Shared Semantic UI protocol</text>
+                <text x="638" y="232" fill="var(--text-muted)" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10.5">Same core &amp; config over SSH</text>
+
+                <rect x="622" y="268" width="242" height="108" rx="9" fill="var(--bg-elevated)" stroke="var(--border-strong)" stroke-width="1.2"/>
+                <text x="638" y="294" fill="var(--text)" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="13" font-weight="600">Zig (minga-parser)</text>
+                <text x="638" y="314" fill="var(--text-secondary)" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="11.5">50 compiled tree-sitter grammars</text>
+                <text x="638" y="334" fill="var(--text-secondary)" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="11.5">Highlight &amp; injection queries</text>
+                <text x="638" y="358" fill="var(--text-muted)" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10.5">Runtime grammar dlopen + hooks</text>
+              </svg>
+            </div>
+            <figcaption class="diagram-caption">Each OS process has isolated memory. Frontends receive structured Semantic UI models rather than raw terminal cell diffs, so macOS SwiftUI chrome and the Go TUI stay aligned without duplicating editor logic.</figcaption>
+          </figure>
+        </section>
+
+        <section class="essay-section" id="buffer-aware-agents">
+          <h2>2. How buffer-aware agent edits work</h2>
+          <p>Standalone CLI harnesses read and overwrite files directly on disk, which breaks open-buffer undo and forces separate Git worktrees the moment two tasks overlap. In Minga, every buffer is a BEAM process and agent file tools have no blind filesystem write fallback.</p>
+
+          <figure class="diagram-figure">
+            <div class="diagram-bar">
+              <span>Figure 2 · Staged fork, review, and merge pipeline</span>
+              <span>MingaAgent.ToolRouter -&gt; Buffer.Fork -&gt; 3-Way Merge</span>
+            </div>
+            <div class="diagram-canvas">
+              <svg class="diagram-svg" viewBox="0 0 880 314" role="img" aria-labelledby="fig2-title fig2-desc" xmlns="http://www.w3.org/2000/svg">
+                <title id="fig2-title">Buffer-aware agent edit pipeline with in-memory forks, inline diff review, and StagedDraftKeeper durability</title>
+                <desc id="fig2-desc">Four stages left to right: 01 Agent Tool Call with expected_revision token, 02 ToolRouter writing to an isolated in-memory Buffer.Fork and Changeset, 03 Inline Diff Review with hunk navigation and simultaneous human editing, and 04 Publish via three-way merge or Discard. Below, Open Buffer and Disk stay untouched until publish, while MingaAgent.StagedDraftKeeper persists private atomic drafts under MingaAgent.Supervisor so staged work survives Editor restarts.</desc>
+                <defs>
+                  <marker id="arrow-flow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+                    <path d="M 1 1 L 9 5 L 1 9 z" fill="var(--accent)"/>
+                  </marker>
+                  <marker id="arrow-down" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+                    <path d="M 1 1 L 9 5 L 1 9 z" fill="var(--text-muted)"/>
+                  </marker>
+                </defs>
+
+                <!-- Stage 1 -->
+                <rect x="16" y="24" width="182" height="132" rx="8" fill="var(--bg-elevated)" stroke="var(--border-strong)" stroke-width="1.2"/>
+                <text x="32" y="48" fill="var(--accent)" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10.5" font-weight="600">01 · TOOL CALL</text>
+                <text x="32" y="70" fill="var(--text)" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="13" font-weight="600">Atomic edit_file</text>
+                <text x="32" y="92" fill="var(--text-secondary)" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="11.5">Requires full read_file</text>
+                <text x="32" y="110" fill="var(--text-secondary)" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="11.5">expected_revision token.</text>
+                <text x="32" y="134" fill="var(--text-muted)" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10">Stale edits reject cleanly</text>
+
+                <line x1="198" y1="90" x2="232" y2="90" stroke="var(--accent)" stroke-width="1.6" marker-end="url(#arrow-flow)"/>
+
+                <!-- Stage 2 -->
+                <rect x="238" y="24" width="188" height="132" rx="8" fill="var(--bg-elevated)" stroke="var(--border-strong)" stroke-width="1.2"/>
+                <text x="254" y="48" fill="var(--accent)" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10.5" font-weight="600">02 · STAGED FORK</text>
+                <text x="254" y="70" fill="var(--text)" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="13" font-weight="600">ToolRouter -&gt; Overlay</text>
+                <text x="254" y="92" fill="var(--text-secondary)" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="11.5">Writes land in an isolated</text>
+                <text x="254" y="110" fill="var(--text-secondary)" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="11.5">Buffer.Fork + Changeset.</text>
+                <text x="254" y="134" fill="var(--text-muted)" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10">No blind disk fallback</text>
+
+                <line x1="426" y1="90" x2="460" y2="90" stroke="var(--accent)" stroke-width="1.6" marker-end="url(#arrow-flow)"/>
+
+                <!-- Stage 3 (accented human control point) -->
+                <rect x="466" y="24" width="188" height="132" rx="8" fill="var(--accent-soft)" stroke="var(--accent-border)" stroke-width="1.5"/>
+                <text x="482" y="48" fill="var(--accent)" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10.5" font-weight="600">03 · HUMAN REVIEW</text>
+                <text x="482" y="70" fill="var(--text)" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="13" font-weight="600">Inline Diff Review</text>
+                <text x="482" y="92" fill="var(--text-secondary)" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="11.5">Jump hunks ]c / [c; accept y</text>
+                <text x="482" y="110" fill="var(--text-secondary)" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="11.5">or reject x. Edit freely beside</text>
+                <text x="482" y="134" fill="var(--accent)" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10">Full LSP + tree-sitter active</text>
+
+                <line x1="654" y1="90" x2="688" y2="90" stroke="var(--accent)" stroke-width="1.6" marker-end="url(#arrow-flow)"/>
+
+                <!-- Stage 4 -->
+                <rect x="694" y="24" width="170" height="132" rx="8" fill="var(--bg-elevated)" stroke="var(--border-strong)" stroke-width="1.2"/>
+                <text x="710" y="48" fill="var(--accent)" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10.5" font-weight="600">04 · SETTLE</text>
+                <text x="710" y="70" fill="var(--text)" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="13" font-weight="600">Publish or Discard</text>
+                <text x="710" y="92" fill="var(--text-secondary)" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="11.5">SPC a p: 3-way merge into</text>
+                <text x="710" y="110" fill="var(--text-secondary)" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="11.5">buffer + disk with undo.</text>
+                <text x="710" y="134" fill="var(--text-muted)" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10">Overlap -&gt; conflict review</text>
+
+                <!-- Vertical persistence connector -->
+                <line x1="332" y1="156" x2="332" y2="202" stroke="var(--text-muted)" stroke-width="1.4" stroke-dasharray="4 3" marker-end="url(#arrow-down)"/>
+
+                <!-- Bottom Left: Open Buffer + Disk -->
+                <rect x="16" y="206" width="182" height="90" rx="8" fill="var(--bg-subtle)" stroke="var(--border)" stroke-width="1.2"/>
+                <text x="32" y="232" fill="var(--text)" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="12.5" font-weight="600">Open Buffer + Disk</text>
+                <text x="32" y="254" fill="var(--text-secondary)" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="11.5">Untouched until SPC a p.</text>
+                <text x="32" y="274" fill="var(--text-muted)" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10">Human undo never breaks</text>
+
+                <!-- Bottom Right: StagedDraftKeeper -->
+                <rect x="238" y="206" width="626" height="90" rx="8" fill="var(--bg-subtle)" stroke="var(--border-strong)" stroke-width="1.2"/>
+                <text x="256" y="232" fill="var(--text)" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="12.5" font-weight="600">Durability: MingaAgent.StagedDraftKeeper (under MingaAgent.Supervisor)</text>
+                <text x="256" y="254" fill="var(--text-secondary)" font-family="-apple-system, BlinkMacSystemFont, sans-serif" font-size="11.5">Outlives Editor restarts and crashes. Persists atomic versioned drafts with base revisions</text>
+                <text x="256" y="274" fill="var(--text-muted)" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="10.5">~/.local/share/minga/staged_drafts · Restores staged overlays cleanly on next launch</text>
+              </svg>
+            </div>
+            <figcaption class="diagram-caption">Ordinary quit commands stop if unpublished edits remain staged, while force quits (<code>:q!</code>, <code>:qa!</code>, <code>:cq</code>) discard on purpose. Background edits to another file never steal focus or jump your reading position while reviewing.</figcaption>
+          </figure>
+        </section>
+
+        <section class="essay-section" id="ownership-rules">
+          <h2>3. Why these boundaries hold under load</h2>
+          <ul>
+            <li><strong>One interactive mailbox, explicit value owners.</strong> <code>MingaEditor</code> stays a single GenServer so keystrokes, shell changes, and renderer receipts remain strictly ordered, while 16 immutable value modules own their own transitions (enforced by custom Credo checks with an empty allowlist). New processes are created for independent failure or lifecycle boundaries, not per UI widget.</li>
+            <li><strong>Lossless continuation and honest crash recovery.</strong> <code>MingaAgent.Session</code> stores the exact provider continuation beside the display transcript and records single-attempt tool admission before executing external effects. If a process dies mid-tool, recovery marks the call indeterminate and never silently replays a side effect (<a href="/docs/session-recovery.html">Session Recovery</a>).</li>
+            <li><strong>Coalescing stream ingest.</strong> Rapid model token deltas pass through <code>MingaEditor.Agent.Ingest</code> with leading-and-trailing-edge batching so streaming at hundreds of chunks per second cannot create head-of-line latency ahead of your keystrokes.</li>
+          </ul>
+        </section>
+
+        <section class="essay-section" id="adrs">
+          <h2>4. Five architecture decision records</h2>
+          <p>Minga records major structural decisions as concise ADRs so contributors and extensions share the same invariants:</p>
+
+          <ul class="spec-ledger">
+            <li class="spec-row">
+              <span class="spec-key spec-key-strong"><a href="/docs/0001-frontend-owns-row-fit.html">ADR-0001</a></span>
+              <span class="spec-detail"><strong>Frontends own row fit.</strong> Swift and Go measure how many rows fit their pixel or terminal area once and report that count; the BEAM never derives row counts from pixel math or line spacing.</span>
+            </li>
+            <li class="spec-row">
+              <span class="spec-key spec-key-strong"><a href="/docs/0002-editor-state-transitions-have-explicit-owners.html">ADR-0002</a></span>
+              <span class="spec-detail"><strong>Editor state transitions have explicit owners.</strong> One writer per struct, one <code>MingaEditor</code> mailbox, and typed asynchronous effects through <code>MingaEditor.EffectScheduler</code>.</span>
+            </li>
+            <li class="spec-row">
+              <span class="spec-key spec-key-strong"><a href="/docs/0003-extension-code-updates-require-a-new-vm-generation.html">ADR-0003</a></span>
+              <span class="spec-detail"><strong>Extension code updates require a new VM generation.</strong> Config reload (<kbd>SPC h r</kbd>) applies options, bindings, hooks, and advice in place; compiled extension packages activate cleanly on restart rather than mixing module versions.</span>
+            </li>
+            <li class="spec-row">
+              <span class="spec-key spec-key-strong"><a href="/docs/0004-products-are-root-applets-over-a-fixed-engine.html">ADR-0004</a></span>
+              <span class="spec-detail"><strong>Programmable workbench over fixed engine authorities.</strong> The v0.1.0 direction: author readable Elixir over fixed buffer, agent, and permission owners; Save to activate; Keep useful definitions across projects.</span>
+            </li>
+            <li class="spec-row">
+              <span class="spec-key spec-key-strong"><a href="/docs/0005-frontend-owns-immediate-ui-feedback.html">ADR-0005</a></span>
+              <span class="spec-detail"><strong>Frontends own immediate UI feedback.</strong> Frontends handle smooth gesture and scroll motion locally over resident committed models while semantic edits and cursor decisions remain authoritative in the BEAM.</span>
+            </li>
+          </ul>
+
+          <div class="callout">
+            <span class="callout-title">Deep technical reference in ExDoc</span>
+            <p>For wire opcodes, supervision trees, and contributor contracts, see <a href="/docs/architecture.html">Full Architecture Spec</a>, <a href="/docs/buffer-aware-agents.html">Buffer-Aware Agents Contract</a>, <a href="/docs/protocol.html">Port Protocol</a>, <a href="/docs/gui_protocol.html">Semantic UI Protocol</a>, and <a href="/docs/charm_tui.html">Charm TUI Renderer</a>.</p>
+          </div>
+
+          <div class="actions">
+            <a class="btn btn-primary" href="/extending">Extending Minga</a>
+            <a class="btn" href="/getting-started">Getting Started</a>
+            <a class="btn" href="/docs/architecture.html">Full ExDoc Spec</a>
+          </div>
+        </section>
+      </div>
+    </article>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container footer-inner">
+      <div class="footer-note">
+        <p><strong>Minga</strong> is open source under the MIT license. Created by <a href="https://evalcode.com">Justin Smestad</a> in Colorado.</p>
+        <p>Pre-release staging preview ahead of v0.1.0 launch (<a href="https://github.com/jsmestad/minga/issues/3542">#3542</a>).</p>
+      </div>
+      <nav class="footer-links" aria-label="Footer">
+        <a href="/">Home</a>
+        <a href="/why-minga">Why Minga</a>
+        <a href="/getting-started">Getting Started</a>
+        <a href="/extending">Extending</a>
+        <a href="/docs/">ExDoc Reference</a>
+        <a href="/docs/changelog.html">Changelog</a>
+        <a href="https://github.com/jsmestad/minga">GitHub</a>
+      </nav>
+    </div>
+  </footer>
+
+  <script defer src="/site.js"></script>
+</body>
+</html>

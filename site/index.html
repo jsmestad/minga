@@ -31,8 +31,10 @@
       </a>
       <nav class="site-nav" aria-label="Primary">
         <a href="/why-minga">Why Minga</a>
-        <a href="/docs/">Docs</a>
-        <a href="#install">Install</a>
+        <a href="/getting-started">Getting Started</a>
+        <a href="/architecture">Architecture</a>
+        <a href="/extending">Extending</a>
+        <a href="/docs/">Reference</a>
         <a href="https://github.com/jsmestad/minga">GitHub</a>
         <button type="button" class="theme-toggle" data-theme-toggle aria-label="Toggle color theme">Light</button>
       </nav>
@@ -47,9 +49,9 @@
           <h1>A programmable workbench on the BEAM.</h1>
           <p class="hero-lead">Spawning more coding agents is no longer the hard part; verifying, steering, and fixing their code is. Minga puts native code editing across 50 languages, buffer-aware agent sessions, and custom workflows you can inspect and keep in one runtime, so you stop bouncing between terminal panes, worktrees, and a second editor every two minutes.</p>
           <div class="actions">
-            <a class="btn btn-primary" href="#install">Install Minga</a>
+            <a class="btn btn-primary" href="/getting-started">Get Started</a>
             <a class="btn" href="/why-minga">Read Why Minga</a>
-            <a class="btn" href="/docs/">Explore Docs</a>
+            <a class="btn" href="/architecture">How It Works</a>
           </div>
           <p class="hero-meta">50 languages via tree-sitter + LSP · Swift + Metal on macOS · Go + Bubble Tea in the terminal · Powered by Elixir / OTP 29</p>
         </div>
@@ -390,35 +392,54 @@ brew install jsmestad/minga/minga</code></pre>
             </div>
             <pre><code id="cmd-source">git clone https://github.com/jsmestad/minga.git
 cd minga
-asdf install &amp;&amp; mix deps.get &amp;&amp; mix compile &amp;&amp; make native.support
+asdf install &amp;&amp; mix deps.get
+mix compile &amp;&amp; make native.support
 bin/minga</code></pre>
           </div>
         </div>
 
-        <div class="doc-links" aria-label="Documentation links">
-          <a class="doc-link" href="/why-minga">
-            <span class="doc-link-title">Why Minga</span>
-            <span class="doc-link-desc">The full thesis: the PTY-pane ceiling of agent multiplexers, ADR-0004 programmability, BEAM tradeoffs, and early gaps.</span>
+        <div class="guide-index" aria-label="Guides and technical reference">
+          <a class="guide-row" href="/why-minga">
+            <span class="guide-row-top">
+              <span class="guide-row-title">Why Minga</span>
+              <span class="guide-row-kind">Thesis</span>
+            </span>
+            <span class="guide-row-desc">Where agent multiplexers break down, disposable task-shaped software, and honest early gaps.</span>
           </a>
-          <a class="doc-link" href="/docs/getting-started.html">
-            <span class="doc-link-title">Getting Started</span>
-            <span class="doc-link-desc">Five-minute walkthrough from install and first keys to connecting a model provider.</span>
+          <a class="guide-row" href="/getting-started">
+            <span class="guide-row-top">
+              <span class="guide-row-title">Getting Started</span>
+              <span class="guide-row-kind">Guide</span>
+            </span>
+            <span class="guide-row-desc">First 10 minutes: install, six core keys, connecting a model route, and your first staged diff.</span>
           </a>
-          <a class="doc-link" href="/docs/configuration.html">
-            <span class="doc-link-title">Configuration</span>
-            <span class="doc-link-desc">Options, themes, keybindings, hooks, advice, and installing extensions in config.exs.</span>
+          <a class="guide-row" href="/architecture">
+            <span class="guide-row-top">
+              <span class="guide-row-title">Architecture &amp; Buffer-Aware Agents</span>
+              <span class="guide-row-kind">Diagrams</span>
+            </span>
+            <span class="guide-row-desc">Visual BEAM supervision tree, native port boundaries, in-memory fork review, and ADRs 0001 through 0005.</span>
           </a>
-          <a class="doc-link" href="/docs/extension_api.html">
-            <span class="doc-link-title">Extension API</span>
-            <span class="doc-link-desc">Declarative macros, source-owned registries, model routes, runtime grammars, and AgentAPI.</span>
+          <a class="guide-row" href="/extending">
+            <span class="guide-row-top">
+              <span class="guide-row-title">Extending Minga</span>
+              <span class="guide-row-kind">Guide</span>
+            </span>
+            <span class="guide-row-desc">The three-layer customization model: config.exs, supervised extensions, and ADR-0004 workflows.</span>
           </a>
-          <a class="doc-link" href="/docs/buffer-aware-agents.html">
-            <span class="doc-link-title">Buffer-Aware Agents</span>
-            <span class="doc-link-desc">How in-memory forks, staged changesets, revision checks, and three-way merge protect your buffers.</span>
+          <a class="guide-row" href="/docs/configuration.html">
+            <span class="guide-row-top">
+              <span class="guide-row-title">Configuration &amp; Extension Reference</span>
+              <span class="guide-row-kind">ExDoc</span>
+            </span>
+            <span class="guide-row-desc">Exhaustive option tables, keymap scopes, hooks, MCP servers, and public Elixir callback specs.</span>
           </a>
-          <a class="doc-link" href="/docs/architecture.html">
-            <span class="doc-link-title">Architecture &amp; ADRs</span>
-            <span class="doc-link-desc">Supervision trees, Semantic UI protocol, and the five architecture decision records.</span>
+          <a class="guide-row" href="/docs/">
+            <span class="guide-row-top">
+              <span class="guide-row-title">Full API &amp; Protocol Docs</span>
+              <span class="guide-row-kind">ExDoc</span>
+            </span>
+            <span class="guide-row-desc">75 public Elixir modules, Semantic UI wire protocols, Session Recovery contracts, and ADRs.</span>
           </a>
         </div>
       </div>
@@ -433,10 +454,11 @@ bin/minga</code></pre>
       </div>
       <nav class="footer-links" aria-label="Footer">
         <a href="/why-minga">Why Minga</a>
-        <a href="/docs/">Documentation</a>
-        <a href="/docs/architecture.html">Architecture</a>
+        <a href="/getting-started">Getting Started</a>
+        <a href="/architecture">Architecture</a>
+        <a href="/extending">Extending</a>
+        <a href="/docs/">ExDoc Reference</a>
         <a href="/docs/changelog.html">Changelog</a>
-        <a href="/docs/contributing.html">Contributing</a>
         <a href="https://github.com/jsmestad/minga">GitHub</a>
       </nav>
     </div>

@@ -878,46 +878,176 @@ kbd {
   color: var(--text-muted);
 }
 
-/* Link rows */
+/* Guide directory (open hairline 2-column index) */
 
-.doc-links {
+.guide-index {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 0.9rem;
-  margin-top: 2rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 2.5rem;
+  margin-top: 2.25rem;
+  border-top: 1px solid var(--border);
 }
 
-.doc-link {
-  display: block;
-  padding: 1rem 1.1rem;
-  background: var(--bg-elevated);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
+.guide-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding: 1.15rem 0;
+  border-bottom: 1px solid var(--border);
   text-decoration: none;
-  transition: border-color 120ms ease;
 }
 
-.doc-link:hover {
-  border-color: var(--accent);
+.guide-row-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
 }
 
-.doc-link-title {
-  display: block;
-  font-weight: 600;
-  font-size: 0.95rem;
+.guide-row-title {
+  font-weight: 620;
+  font-size: 0.98rem;
   color: var(--text);
-  margin-bottom: 0.25rem;
+  transition: color 120ms ease;
 }
 
-.doc-link:hover .doc-link-title {
+.guide-row:hover .guide-row-title {
   color: var(--accent);
 }
 
-.doc-link-desc {
-  display: block;
-  font-size: 0.86rem;
-  line-height: 1.45;
+.guide-row-kind {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
   color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.guide-row-desc {
+  font-size: 0.89rem;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+/* Keybindings & ADR open ledger */
+
+.spec-ledger {
+  margin: 1.5rem 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--border);
+}
+
+.spec-row {
+  display: grid;
+  grid-template-columns: minmax(0, 13.5rem) minmax(0, 1fr);
+  gap: 0.65rem 1.75rem;
+  padding: 1rem 0;
+  border-bottom: 1px solid var(--border);
+  align-items: baseline;
+}
+
+.spec-key {
+  font-family: var(--font-mono);
+  font-size: 0.84rem;
+  color: var(--text);
+}
+
+.spec-key-strong {
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.spec-detail {
+  font-size: 0.94rem;
+  color: var(--text-secondary);
+}
+
+.spec-detail strong {
+  color: var(--text);
+}
+
+/* Inline themed architecture diagrams */
+
+.diagram-figure {
+  margin: 1.75rem 0 2.25rem;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+.diagram-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.6rem 1rem;
+  background: var(--bg-subtle);
+  border-bottom: 1px solid var(--border);
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  color: var(--text-muted);
+}
+
+.diagram-canvas {
+  padding: 1.1rem;
+  overflow-x: auto;
+}
+
+.diagram-svg {
+  width: 100%;
+  min-width: 640px;
+  height: auto;
+  display: block;
+}
+
+.diagram-caption {
+  padding: 0.75rem 1rem;
+  border-top: 1px solid var(--border);
+  font-size: 0.86rem;
+  color: var(--text-muted);
+  background: var(--bg-subtle);
+}
+
+/* Numbered walkthrough steps */
+
+.step-list {
+  margin: 1.5rem 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 1.15rem;
+}
+
+.step-item {
+  display: grid;
+  grid-template-columns: 2.25rem minmax(0, 1fr);
+  gap: 0.85rem;
+  align-items: start;
+}
+
+.step-badge {
+  font-family: var(--font-mono);
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius-sm);
+  padding: 0.2rem 0;
+  text-align: center;
+  margin-top: 0.15rem;
+}
+
+.step-item h3 {
+  margin: 0 0 0.35rem;
+  font-size: 1rem;
+}
+
+.step-item p {
+  font-size: 0.94rem;
 }
 
 /* Essay Page Layout */
@@ -1091,12 +1221,10 @@ td:first-child {
 /* Responsive */
 
 @media (max-width: 900px) {
-  .doc-links {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
   .split-layout,
   .runtime-row,
-  .boundary-band {
+  .boundary-band,
+  .guide-index {
     grid-template-columns: 1fr;
   }
   .loop-head {
@@ -1133,8 +1261,8 @@ td:first-child {
     padding: 3.25rem 0;
   }
   .grid-2,
-  .doc-links,
-  .scope-strip {
+  .scope-strip,
+  .spec-row {
     grid-template-columns: 1fr;
   }
   .header-inner {
