@@ -564,8 +564,15 @@ func agentTranscriptScrollRows(msg tea.KeyPressMsg, page int) (int, bool) {
 			return -half, true
 		}
 	case 'G':
+		// Synthetic form: a key built with the uppercase rune and no modifier.
 		if key.Mod == 0 || key.Mod == tea.ModShift {
 			// Jump to bottom: a large downward amount the render clamps and re-pins.
+			return 1 << 20, true
+		}
+	case 'g':
+		// A PTY delivers uppercase letters as the lowercase code plus ModShift
+		// (ultraviolet EventDecoder.parseUtf8), so shift+g is the real G key.
+		if key.Mod == tea.ModShift {
 			return 1 << 20, true
 		}
 	case tea.KeyPgDown:
