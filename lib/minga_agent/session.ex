@@ -146,6 +146,7 @@ defmodule MingaAgent.Session do
           idle_gc_timeout_ms: non_neg_integer(),
           persistence: Persistence.t(),
           model_selection: ModelSelection.t() | nil,
+          unresolved_route: unresolved_route() | nil,
           model_discovery:
             {:atomics.atomics_ref(), CodexModels.result(),
              ModelResolver.apple_availability() | nil}
@@ -830,6 +831,10 @@ defmodule MingaAgent.Session do
   @typep saved_route ::
            {:resolved, ModelSelection.t() | nil} | {:unresolved, ModelResolver.resolution_error()}
 
+  # The stored selection and intent of a restored route that did not resolve. Saving writes them
+  # back verbatim so an unavailable route keeps its exact route and policy until a model is chosen.
+  @typep unresolved_route :: {Stored.t() | nil, map() | nil}
+
   @typedoc "Internal rollback handle for a broker attach that may have created a monitor."
   @type broker_attachment :: :existing | {:created, pid(), reference()}
 
@@ -1459,6 +1464,7 @@ defmodule MingaAgent.Session do
       idle_gc_timeout_ms: Keyword.get_lazy(opts, :idle_gc_timeout_ms, &idle_gc_timeout_ms/0),
       persistence: Persistence.new(Keyword.get(opts, :persist?, true)),
       model_selection: model_selection,
+      unresolved_route: nil,
       model_discovery: nil,
       model_discovery_request: nil,
       apple_selection_probe: nil,
@@ -7925,6 +7931,7 @@ defmodule MingaAgent.Session do
       state
       | provider: lifecycle,
         model_selection: selection,
+        unresolved_route: nil,
         credentials_configured: true
     }
   end
@@ -7956,7 +7963,7 @@ defmodule MingaAgent.Session do
         provider_opts
       )
 
-    state = %{state | provider: lifecycle}
+    state = %{state | provider: lifecycle, unresolved_route: nil}
 
     case TurnExecution.recover(state.turn_execution) do
       {:changed, execution} ->
@@ -8964,6 +8971,19 @@ defmodule MingaAgent.Session do
     end
   end
 
+  @spec saved_model_selection(state()) :: ModelSelection.t() | Stored.t() | nil
+  defp saved_model_selection(%{model_selection: nil, unresolved_route: {stored, _intent}}),
+    do: stored
+
+  defp saved_model_selection(state), do: state.model_selection
+
+  @spec saved_selection_intent(state()) :: map()
+  defp saved_selection_intent(%{model_selection: nil, unresolved_route: {_stored, intent}})
+       when is_map(intent),
+       do: intent
+
+  defp saved_selection_intent(state), do: %{"model" => state.provider.model_name}
+
   @spec save_to_disk(state(), snapshot_write_mode()) :: :ok | {:error, term()}
 
   defp save_to_disk(state, draft_revision \\ :preserve) do
@@ -8981,8 +9001,8 @@ defmodule MingaAgent.Session do
             readable_title(first_user_prompt(messages)),
         model_name: state.provider.model_name,
         provider_name: state.provider.provider_name,
-        model_selection: state.model_selection,
-        selection_intent: %{"model" => state.provider.model_name},
+        model_selection: saved_model_selection(state),
+        selection_intent: saved_selection_intent(state),
         messages: messages,
         message_ids: message_ids,
         pinned_ids: Transcript.pinned_ids(state.transcript),
@@ -9455,6 +9475,7 @@ defmodule MingaAgent.Session do
         ) :: {:ok, state()} | {:error, term()}
   defp restore_loaded_candidate(state, data, route, reservation) do
     {selection, resolution_problem} = saved_route_selection(route)
+    unresolved_route = saved_unresolved_route(route, data)
     loaded_at = parse_datetime(Map.get(data, :last_message_at)) || DateTime.utc_now()
     model_name = selection_model_name(selection, data.model_name)
     provider_name = if selection, do: selection.route.model_provider, else: data.provider_name
@@ -9504,6 +9525,7 @@ defmodule MingaAgent.Session do
         credential_readiness: credential_readiness,
         credentials_configured: credentials_configured,
         model_selection: selection,
+        unresolved_route: unresolved_route,
         connection: Connection.resolved(state.connection, resolution_problem),
         turn_execution: execution,
         pending_model_change: nil,
@@ -9529,8 +9551,23 @@ defmodule MingaAgent.Session do
   defp saved_route_selection({:resolved, selection}), do: {selection, nil}
   defp saved_route_selection({:unresolved, reason}), do: {nil, reason}
 
+  @spec saved_unresolved_route(saved_route(), SessionStore.session_data()) ::
+          unresolved_route() | nil
+  defp saved_unresolved_route({:resolved, _selection}, _data), do: nil
+
+  defp saved_unresolved_route({:unresolved, _reason}, data) do
+    stored =
+      case Map.get(data, :model_selection) do
+        %Stored{} = stored -> stored
+        _absent -> nil
+      end
+
+    {stored, Map.get(data, :selection_intent)}
+  end
+
   # An unresolved saved route has no exact selection to hand the provider, so the provider is
-  # neither started nor retargeted. Prompts stay refused until the user chooses a route.
+  # neither started nor retargeted here. Installation stops any previous provider once the
+  # restore commits; prompts stay refused until the user chooses a route.
   @spec restore_loaded_route_provider(state(), ModelSelection.t() | nil, saved_route()) ::
           {:ok, state()} | {:error, {:provider_model_restore_failed, term()}}
   defp restore_loaded_route_provider(staged, current_selection, {:resolved, _selection}),
@@ -9673,6 +9710,7 @@ defmodule MingaAgent.Session do
         credential_readiness: staged.credential_readiness,
         credentials_configured: staged.credentials_configured,
         model_selection: staged.model_selection,
+        unresolved_route: staged.unresolved_route,
         turn_execution: execution,
         tool_authority: %{current.tool_authority | revision: make_ref(), invocations: %{}},
         pending_model_change: nil,
@@ -9681,9 +9719,20 @@ defmodule MingaAgent.Session do
 
     loaded = invalidate_connection(loaded, :conversation)
     loaded = retain_resolution_problem(loaded, staged.connection.resolver_problem)
-    loaded = finish_loaded_provider_attachment(loaded, state.provider)
+    loaded = settle_loaded_provider(loaded, state.provider)
     finish_loaded_session_restore(loaded)
   end
+
+  # A restored route that did not resolve has no provider to attach. The previous session's
+  # provider must not keep serving the restored conversation, so it stops; its retry timer and
+  # lease go with it. No attachment effects (onboarding notice, SessionStart hook, manager
+  # notification) run, because no provider started.
+  @spec settle_loaded_provider(state(), ProviderLifecycle.t()) :: state()
+  defp settle_loaded_provider(%{unresolved_route: {_stored, _intent}} = state, _previous),
+    do: stop_provider_lifecycle(state)
+
+  defp settle_loaded_provider(state, previous),
+    do: finish_loaded_provider_attachment(state, previous)
 
   @spec finish_loaded_provider_attachment(state(), ProviderLifecycle.t()) :: state()
   defp finish_loaded_provider_attachment(state, previous)

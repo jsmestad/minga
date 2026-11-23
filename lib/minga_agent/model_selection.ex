@@ -102,9 +102,13 @@ defmodule MingaAgent.ModelSelection do
     end
   end
 
-  @doc "Encodes an active selection without runtime modules, models, paths, or secrets."
-  @spec encode(t()) :: map()
-  def encode(%__MODULE__{} = selection) do
+  @doc """
+  Encodes an active selection without runtime modules, models, paths, or secrets.
+
+  A decoded stored selection encodes to the same shape, so a route that cannot be materialized now is saved back unchanged.
+  """
+  @spec encode(t() | Stored.t()) :: map()
+  def encode(%struct{} = selection) when struct in [__MODULE__, Stored] do
     %{
       "version" => @version,
       "backend_id" => selection.backend_id,

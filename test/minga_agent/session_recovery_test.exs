@@ -785,8 +785,12 @@ defmodule MingaAgent.SessionRecoveryTest do
 
       assert :ok = Session.load_session(session, id)
       assert Session.session_id(session) == id
-      assert {:user, "saved question"} in Session.messages(session)
-      assert {:assistant, "saved answer"} in Session.messages(session)
+      # No provider attached, so no onboarding notice or SessionStart work joins the history.
+      assert Session.messages(session) == [
+               {:user, "saved question"},
+               {:assistant, "saved answer"}
+             ]
+
       assert Session.model_selection(session) == nil
       assert Session.get_provider(session) == nil
 
@@ -830,12 +834,83 @@ defmodule MingaAgent.SessionRecoveryTest do
     assert %MingaAgent.ModelSelection{} = Session.model_selection(session)
     save_unresolvable_record(dir, "ambiguous-history", "claude-sonnet-4")
 
+    previous_provider = Session.get_provider(session)
+    assert is_pid(previous_provider)
+    provider_ref = Process.monitor(previous_provider)
+
     assert :ok = Session.load_session(session, "ambiguous-history")
-    assert {:assistant, "saved answer"} in Session.messages(session)
+    assert Session.messages(session) == [{:user, "saved question"}, {:assistant, "saved answer"}]
     assert Session.model_selection(session) == nil
     assert {:resolution, reason} = Session.editor_snapshot(session).connection.problem
     assert ModelResolver.message(reason) =~ "ambiguous"
+
+    # The previous route's provider stops, so nothing can run the restored history on it.
+    assert_receive {:DOWN, ^provider_ref, :process, ^previous_provider, _reason}
+    assert Session.get_provider(session) == nil
+    assert {:error, "No active provider"} = Session.compact(session)
     assert {:error, :credentials_not_configured} = Session.send_prompt(session, "next")
+  end
+
+  @tag :tmp_dir
+  test "replacing an unavailable restored session saves its stored route and intent unchanged",
+       %{tmp_dir: dir} do
+    model = %{
+      id: "reasoning-model",
+      provider: :openai,
+      provider_model_id: "reasoning-model",
+      modalities: %{"output" => ["text"]},
+      execution: %{
+        text: %{
+          supported: true,
+          family: "openai_responses_compatible",
+          wire_protocol: "openai_responses",
+          transport: "http",
+          provider_model_id: "reasoning-model",
+          base_url: "https://api.openai.example/v1",
+          path: "/responses"
+        }
+      },
+      extra: %{"reasoning_options" => ["low", "high"]}
+    }
+
+    resolver_opts = [
+      credential_snapshot: CredentialSnapshot.new(%{"openai" => :env}, nil),
+      models: [model]
+    ]
+
+    {:ok, selection} = ModelResolver.resolve("openai:reasoning-model", resolver_opts)
+    effort = Enum.find(["low", "high"], &(&1 != selection.policy.reasoning.effort))
+    {:ok, selection} = MingaAgent.ModelSelection.with_reasoning(selection, effort)
+    intent = %{"model" => "openai:reasoning-model", "reasoning" => effort}
+
+    assert :ok =
+             SessionStore.save(
+               %{
+                 id: "exact-route",
+                 timestamp: "2026-09-16T00:00:00Z",
+                 model_name: MingaAgent.ModelSelection.id(selection),
+                 provider_name: "openai",
+                 model_selection: selection,
+                 selection_intent: intent,
+                 messages: [{:user, "saved question"}],
+                 continuation: MingaAgent.Session.Continuation.new(),
+                 usage: %TurnUsage{}
+               },
+               dir
+             )
+
+    assert {:ok, original} = SessionStore.load("exact-route", dir)
+    save_unresolvable_record(dir, "next-history", "claude-sonnet-4")
+
+    {session, _checker} = start_model_less_session(dir)
+    assert :ok = Session.load_session(session, "exact-route")
+    assert {:resolution, _reason} = Session.editor_snapshot(session).connection.problem
+
+    assert :ok = Session.load_session(session, "next-history")
+    assert {:ok, resaved} = SessionStore.load("exact-route", dir)
+    assert resaved.model_selection == original.model_selection
+    assert resaved.model_selection.policy.reasoning.effort == effort
+    assert resaved.selection_intent == intent
   end
 
   test "legacy provider options select the exact model and profile when top-level intent is absent or unconfigured" do

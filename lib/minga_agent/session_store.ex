@@ -2082,9 +2082,11 @@ defmodule MingaAgent.SessionStore do
     end
   end
 
-  @spec serialize_model_selection(ModelSelection.t() | nil) :: map() | nil
-  defp serialize_model_selection(%ModelSelection{} = selection),
-    do: ModelSelection.encode(selection)
+  @spec serialize_model_selection(ModelSelection.t() | ModelSelection.Stored.t() | nil) ::
+          map() | nil
+  defp serialize_model_selection(%struct{} = selection)
+       when struct in [ModelSelection, ModelSelection.Stored],
+       do: ModelSelection.encode(selection)
 
   defp serialize_model_selection(nil), do: nil
 
