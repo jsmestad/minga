@@ -110,12 +110,14 @@ defmodule Minga.Buffer.CursorTest do
       assert Document.cursor(buf) == {0, 3}
     end
 
-    test "clamps clusters that the gap splits and keeps line-end placement before LF" do
+    test "clamps clusters that the gap splits and places a CRLF line end before the CR" do
       for {prefix, suffix, target, expected} <- [
             {"ae", "\u0301x", {0, 2}, {0, 1}},
             {"👩", "\u200D💻!", {0, 6}, {0, 0}},
             {"🇨", "🇦🇺🇸", {0, 9}, {0, 8}},
-            {"ab\r", "\nnext", {0, 99}, {0, 3}},
+            {"ab\r", "\nnext", {0, 99}, {0, 2}},
+            {"ab\r", "\nnext", {0, 3}, {0, 2}},
+            {"ab", "\r", {0, 99}, {0, 3}},
             {"ab\r", "\nnext", {1, 2}, {1, 2}}
           ],
           doc = suffix |> Document.new() |> Document.insert_text(prefix),
@@ -308,7 +310,14 @@ defmodule Minga.Buffer.CursorTest do
     line = min(target_line, tuple_size(line_starts) - 1)
     {start, length} = Lines.span(line_starts, line, byte_size(text))
     line_text = binary_part(text, start, length)
-    column = Cursor.caret_column(line_text, min(target_column, length))
+
+    # The line end on a CRLF line is before the CR, so the caret never splits the pair.
+    line_text =
+      if line < tuple_size(line_starts) - 1,
+        do: String.replace_suffix(line_text, "\r", ""),
+        else: line_text
+
+    column = Cursor.caret_column(line_text, min(target_column, byte_size(line_text)))
     {start + column, {line, column}}
   end
 

@@ -34,6 +34,7 @@ defmodule Minga.Editing.Completion.Session do
             trigger_position: {0, 0},
             provider_order: [],
             provider_requests: %{},
+            request_origins: %{},
             batches: %{},
             index: %Index{},
             selected_item_id: nil,
@@ -51,6 +52,7 @@ defmodule Minga.Editing.Completion.Session do
           trigger_position: {non_neg_integer(), non_neg_integer()},
           provider_order: [Item.provider_id()],
           provider_requests: %{Item.provider_id() => provider_request()},
+          request_origins: %{reference() => Item.request_origin()},
           batches: %{Item.provider_id() => ProviderBatch.t()},
           index: Index.t(),
           selected_item_id: Item.id() | nil,
@@ -93,9 +95,18 @@ defmodule Minga.Editing.Completion.Session do
     %{session | trigger_position: trigger_position, debounce_timer: nil}
   end
 
-  @doc "Registers one independently cancellable request per provider."
-  @spec register_requests(t(), [{Item.provider_id(), pid(), reference()}]) :: t()
-  def register_requests(%__MODULE__{} = session, requests) when is_list(requests) do
+  @doc """
+  Registers one independently cancellable request per provider.
+
+  `origin` is where the requests were sent from. `accept_batch/2` records it on the items of the batch each request produces, so a text edit can be placed after the user edits further. A `nil` origin records nothing.
+  """
+  @spec register_requests(
+          t(),
+          [{Item.provider_id(), pid(), reference()}],
+          Item.request_origin() | nil
+        ) :: t()
+  def register_requests(%__MODULE__{} = session, requests, origin \\ nil)
+      when is_list(requests) do
     provider_order =
       Enum.uniq(
         session.provider_order ++ Enum.map(requests, fn {provider_id, _, _} -> provider_id end)
@@ -110,8 +121,29 @@ defmodule Minga.Editing.Completion.Session do
       session
       | provider_order: provider_order,
         provider_requests: provider_requests,
+        request_origins: put_origins(session.request_origins, requests, origin),
         debounce_timer: nil
     }
+  end
+
+  @spec put_origins(
+          %{reference() => Item.request_origin()},
+          [{Item.provider_id(), pid(), reference()}],
+          Item.request_origin() | nil
+        ) :: %{reference() => Item.request_origin()}
+  defp put_origins(origins, _requests, nil), do: origins
+
+  defp put_origins(origins, requests, origin),
+    do:
+      Enum.reduce(requests, origins, fn {_provider_id, _client, ref}, acc ->
+        Map.put(acc, ref, origin)
+      end)
+
+  # Keeps the origins of pending requests; an accepted batch's items already carry theirs.
+  @spec prune_origins(t()) :: t()
+  defp prune_origins(%__MODULE__{} = session) do
+    live = Enum.map(session.provider_requests, fn {_provider_id, {_client, ref}} -> ref end)
+    %{session | request_origins: Map.take(session.request_origins, live)}
   end
 
   @doc "Advances an existing session for trigger-kind-3 requests while retaining complete batches."
@@ -119,17 +151,16 @@ defmodule Minga.Editing.Completion.Session do
           t(),
           non_neg_integer(),
           non_neg_integer(),
-          [{Item.provider_id(), pid(), reference()}]
+          [{Item.provider_id(), pid(), reference()}],
+          Item.request_origin() | nil
         ) :: t()
-  def retrigger(%__MODULE__{} = session, generation, buffer_version, requests)
+  def retrigger(%__MODULE__{} = session, generation, buffer_version, requests, origin \\ nil)
       when is_integer(generation) and generation > session.generation and
              is_integer(buffer_version) and buffer_version >= session.buffer_version and
              is_list(requests) do
-    session
-    |> Map.put(:generation, generation)
-    |> Map.put(:buffer_version, buffer_version)
-    |> Map.put(:provider_requests, %{})
-    |> register_requests(requests)
+    %{session | generation: generation, buffer_version: buffer_version, provider_requests: %{}}
+    |> prune_origins()
+    |> register_requests(requests, origin)
   end
 
   @doc "Advances the session snapshot after local filtering sends no provider request."
@@ -164,9 +195,10 @@ defmodule Minga.Editing.Completion.Session do
          expected == {batch.client, batch.request_ref} do
       provider_requests = Map.delete(session.provider_requests, batch.provider_id)
       batches = Map.put(session.batches, batch.provider_id, batch)
-      index = Index.put_provider(session.index, batch.provider_id, batch.items, batch.incomplete)
+      items = with_origin(batch.items, Map.get(session.request_origins, batch.request_ref))
+      index = Index.put_provider(session.index, batch.provider_id, items, batch.incomplete)
       next = %{session | provider_requests: provider_requests, batches: batches, index: index}
-      {:ok, preserve_selection(next)}
+      {:ok, next |> prune_origins() |> preserve_selection()}
     else
       :stale
     end
@@ -174,12 +206,21 @@ defmodule Minga.Editing.Completion.Session do
 
   def accept_batch(%__MODULE__{}, %ProviderBatch{}), do: :stale
 
+  @spec with_origin([Item.t()], Item.request_origin() | nil) :: [Item.t()]
+  defp with_origin(items, nil), do: items
+  defp with_origin(items, origin), do: Enum.map(items, &Item.with_request_origin(&1, origin))
+
   @doc "Clears one failed provider request only when its request identity is still current."
   @spec fail_request(t(), Item.provider_id(), reference()) :: {:ok, t()} | :stale
   def fail_request(%__MODULE__{} = session, provider_id, request_ref) do
     case Map.fetch(session.provider_requests, provider_id) do
       {:ok, {_client, ^request_ref}} ->
-        {:ok, %{session | provider_requests: Map.delete(session.provider_requests, provider_id)}}
+        session = %{
+          session
+          | provider_requests: Map.delete(session.provider_requests, provider_id)
+        }
+
+        {:ok, prune_origins(session)}
 
       _ ->
         :stale
@@ -314,6 +355,7 @@ defmodule Minga.Editing.Completion.Session do
     {%{
        session
        | provider_requests: %{},
+         request_origins: %{},
          batches: %{},
          index: Index.empty(),
          selected_item_id: nil,

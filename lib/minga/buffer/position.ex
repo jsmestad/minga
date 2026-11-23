@@ -51,16 +51,15 @@ defmodule Minga.Buffer.Position do
   end
 
   @doc """
-  Clamps an editor position to existing text against an existing line index.
+  Clamps an editor position to existing text against a line-indexed snapshot.
 
-  A line past the final line becomes the final line, and a column past its line's end becomes the line end. This is the line and column that `Minga.Buffer.Cursor.place/2` chooses for such a position, so the clamped position names the same place for a deletion and for an insertion.
+  A line past the final line becomes the final line, and a column past its line's content becomes the line end, which is before the `\\r` of a CRLF terminator (see `Minga.Buffer.Lines.content_length_in/2`). This is the line and column that `Minga.Buffer.Cursor.place/2` chooses for such a position, so the clamped position names the same place for a deletion and for an insertion.
   """
-  @spec clamp_in(Lines.line_starts(), t(), non_neg_integer()) :: t()
-  def clamp_in(line_starts, {line, column}, text_size)
-      when is_tuple(line_starts) and line >= 0 and column >= 0 do
+  @spec clamp_in(Lines.snapshot(), t()) :: t()
+  def clamp_in({line_starts, text} = snapshot, {line, column})
+      when is_tuple(line_starts) and is_binary(text) and line >= 0 and column >= 0 do
     clamped_line = min(line, tuple_size(line_starts) - 1)
-    {_line_start, line_length} = Lines.span(line_starts, clamped_line, text_size)
-    {clamped_line, min(column, line_length)}
+    {clamped_line, min(column, Lines.content_length_in(snapshot, clamped_line))}
   end
 
   @doc "Returns the on-screen column for an editor position."

@@ -344,8 +344,9 @@ defmodule Minga.Buffer.ProcessTest do
       assert BufferProcess.cursor(pid) == {1, 8}
       assert :ok = BufferProcess.insert_char(pid, "-")
 
+      # The line end on a CRLF line is before the CR.
       BufferProcess.move(pid, :up)
-      assert BufferProcess.cursor(pid) == {0, 6}
+      assert BufferProcess.cursor(pid) == {0, 5}
       BufferProcess.move_to(pid, {99, 99})
       assert BufferProcess.cursor(pid) == {3, 3}
       BufferProcess.move(pid, :up)
@@ -885,6 +886,98 @@ defmodule Minga.Buffer.ProcessTest do
             assert BufferProcess.content(pid) == edited
 
           {:error, {:edit_failed, _index, :invalid_utf8}} ->
+            assert BufferProcess.content(pid) == text
+            assert BufferProcess.version(pid) == version
+        end
+
+        GenServer.stop(pid)
+      end
+    end
+  end
+
+  describe "apply_edit/7 rejection and exact undo" do
+    test "rejects an edit that would leave invalid UTF-8 and changes nothing" do
+      for {text, from, to, replacement} <- [
+            # A start column inside "é" (bytes 1..2).
+            {"aéb", {0, 2}, {0, 2}, "X"},
+            # An end column inside "😀" keeps its trailing bytes.
+            {"a😀b", {0, 0}, {0, 2}, ""},
+            # A replacement that is not valid UTF-8.
+            {"abc", {0, 1}, {0, 1}, <<0xFF>>}
+          ] do
+        pid = start_supervised!({BufferProcess, content: text}, id: make_ref())
+        version = BufferProcess.version(pid)
+
+        assert BufferProcess.apply_edit(
+                 pid,
+                 elem(from, 0),
+                 elem(from, 1),
+                 elem(to, 0),
+                 elem(to, 1),
+                 replacement
+               ) ==
+                 {:error, :invalid_utf8}
+
+        assert BufferProcess.content(pid) == text
+        assert BufferProcess.version(pid) == version
+        refute BufferProcess.dirty?(pid)
+      end
+    end
+
+    test "a malformed edit returns an error and the buffer keeps serving" do
+      pid = start_supervised!({BufferProcess, content: "abc"})
+
+      assert BufferProcess.apply_edit(pid, 0, 0, 0, 1, :not_text) == {:error, :malformed_edit}
+      assert BufferProcess.apply_edit(pid, 0, -1, 0, 1, "x") == {:error, :malformed_edit}
+      assert BufferProcess.apply_edit(pid, 0, 0, nil, 1, "x") == {:error, :malformed_edit}
+
+      assert BufferProcess.apply_edits(pid, [{{0, 0}, {0, 0}, "x"}, {{0, 0}, "x"}]) ==
+               {:error, {:edit_failed, 1, :malformed_edit}}
+
+      assert BufferProcess.apply_edits(pid, [{{0, 0}, {0, 0}, 42}]) ==
+               {:error, {:edit_failed, 0, :malformed_edit}}
+
+      assert BufferProcess.content(pid) == "abc"
+      assert :ok = BufferProcess.apply_edit(pid, 0, 0, 0, 0, "X")
+      assert BufferProcess.content(pid) == "Xbc"
+    end
+
+    test "a column past a CRLF line end replaces the whole CRLF, like an LF, and undo is exact" do
+      pid = start_supervised!({BufferProcess, content: "ab\r\ncd"})
+
+      assert :ok = BufferProcess.apply_edit(pid, 0, 9, 0, 9, "Z")
+      assert BufferProcess.content(pid) == "abZcd"
+
+      assert BufferProcess.undo(pid) == :ok
+      assert BufferProcess.content(pid) == "ab\r\ncd"
+    end
+
+    property "apply, undo, and redo round-trip through the buffer, or the edit changes nothing" do
+      fragments = ["a", "é", "e\u0301", "字", "😀", "🇺🇸", "\n", "\r\n", "ᄀ", "ᅡ"]
+
+      check all(
+              text <- map(list_of(member_of(fragments), max_length: 12), &Enum.join/1),
+              {from_line, from_col} <- tuple({integer(0..3), integer(0..16)}),
+              {to_line, to_col} <- tuple({integer(0..3), integer(0..16)}),
+              replacement <- one_of([constant(""), member_of(fragments)]),
+              max_runs: 300
+            ) do
+        {:ok, pid} = BufferProcess.start_link(content: text)
+        version = BufferProcess.version(pid)
+
+        case BufferProcess.apply_edit(pid, from_line, from_col, to_line, to_col, replacement) do
+          :ok ->
+            edited = BufferProcess.content(pid)
+            assert String.valid?(edited)
+            # Line ends exclude the CR of a CRLF, so an edit never leaves a lone CR.
+            refute edited =~ ~r/\r(?!\n)/u
+            assert BufferProcess.undo(pid) == :ok
+            assert BufferProcess.content(pid) == text
+            assert BufferProcess.cursor(pid) == {0, 0}
+            assert BufferProcess.redo(pid) == :ok
+            assert BufferProcess.content(pid) == edited
+
+          {:error, :invalid_utf8} ->
             assert BufferProcess.content(pid) == text
             assert BufferProcess.version(pid) == version
         end

@@ -33,11 +33,15 @@ defmodule Minga.Buffer.Operation do
   @type range_edit :: {Document.position(), Document.position(), String.t()}
 
   @typedoc """
-  Why a batch of range replacements was rejected, naming the edit by its index in the caller's list.
+  Why a range replacement was rejected. Nothing is applied on error.
 
-  `:invalid_utf8` means applying that edit would leave the document as invalid UTF-8.
+  * `:invalid_utf8` means the document would not be valid UTF-8 after the edit, for example because a position falls inside a multi-byte code point or the replacement is not valid UTF-8. A document that is already invalid also rejects every edit, because undo could never replay through it.
+  * `:malformed_edit` means the edit is not `{{line, column}, {line, column}, replacement}` with non-negative integer positions and a binary replacement.
   """
-  @type batch_error :: {:edit_failed, non_neg_integer(), :invalid_utf8}
+  @type edit_error :: :invalid_utf8 | :malformed_edit
+
+  @typedoc "Why a batch of range replacements was rejected, naming the edit by its index in the caller's list."
+  @type batch_error :: {:edit_failed, non_neg_integer(), edit_error()}
 
   @doc "Inserts text at the current cursor and returns the updated document plus insertion delta."
   @spec insert_at_cursor(Document.t(), String.t()) :: {:edited, Document.t(), EditDelta.t()}
@@ -53,15 +57,44 @@ defmodule Minga.Buffer.Operation do
   @doc """
   Replaces a characterwise inclusive range and returns the updated document plus replacement delta.
 
-  Positions are clamped to existing text first: a column past its line's end means the line end, and a line past the final line means the final line. The replacement is inserted where the deleted span started, which is the place the delta records, and the cursor lands after it.
+  Positions are clamped to existing text first: a column past its line's content means the line end, and a line past the final line means the final line. The replacement is inserted where the deleted span started, which is the place the delta records, and the cursor lands after it.
+
+  Returns `{:error, reason}`, with the document unchanged, when the edit is malformed or the result would not be valid UTF-8; see `t:edit_error/0`.
   """
-  @spec replace_range(Document.t(), Document.position(), Document.position(), String.t()) ::
-          result()
-  def replace_range(%Document{} = doc, from_pos, to_pos, replacement)
-      when is_binary(replacement) do
-    {_line_starts, text} = snapshot = Lines.snapshot(doc)
+  @spec replace_range(Document.t(), term(), term(), term()) :: result() | {:error, edit_error()}
+  def replace_range(%Document{} = doc, from_pos, to_pos, replacement) do
+    with :ok <- check_edit_shape({from_pos, to_pos, replacement}) do
+      {_line_starts, text} = snapshot = Lines.snapshot(doc)
+
+      if Unicode.valid_utf8?(text),
+        do: replace_in_valid(doc, snapshot, {from_pos, to_pos, replacement}),
+        else: {:error, :invalid_utf8}
+    end
+  end
+
+  @spec check_edit_shape(term()) :: :ok | {:error, :malformed_edit}
+  defp check_edit_shape({from_pos, to_pos, replacement}) when is_binary(replacement) do
+    if position?(from_pos) and position?(to_pos), do: :ok, else: {:error, :malformed_edit}
+  end
+
+  defp check_edit_shape(_edit), do: {:error, :malformed_edit}
+
+  @spec position?(term()) :: boolean()
+  defp position?({line, column}),
+    do: is_integer(line) and line >= 0 and is_integer(column) and column >= 0
+
+  defp position?(_position), do: false
+
+  # `snapshot` indexes `doc`, whose text is valid UTF-8, so checking the bytes around the splice
+  # decides whether the whole result is valid.
+  @spec replace_in_valid(Document.t(), Lines.snapshot(), range_edit()) ::
+          result() | {:error, :invalid_utf8}
+  defp replace_in_valid(doc, {_line_starts, text} = snapshot, {from_pos, to_pos, replacement}) do
     selection = Selection.clamped_characterwise_in(snapshot, from_pos, to_pos)
-    replace_selection(doc, text, selection, replacement)
+
+    if splice_keeps_valid_utf8?(text, selection.span, replacement),
+      do: replace_selection(doc, text, selection, replacement),
+      else: {:error, :invalid_utf8}
   end
 
   # `text` is the content of `doc`. The selection cursor is the position of the span start, so the
@@ -366,24 +399,38 @@ defmodule Minga.Buffer.Operation do
   Edits apply one at a time from the highest start position to the lowest, and each edit resolves its positions against the document the previous edit produced, with `replace_range/4` semantics. `Minga.Buffer.RangeBatch` applies each run of separated edits in one pass with that exact result; any other edit applies on its own.
 
   The input document and every document the batch produces must be valid UTF-8, because undo and redo replay the patches through those documents. Otherwise nothing is applied and the error names the first edit, by its index in `edits`, whose application would leave invalid UTF-8. When the input is already invalid, that is the first edit in application order.
+
+  A malformed edit rejects the batch before anything else is checked, with `:malformed_edit` and the index of the first malformed edit.
   """
-  @spec replace_ranges_with_patches(Document.t(), [range_edit()]) ::
+  @spec replace_ranges_with_patches(Document.t(), [term()]) ::
           {:ok, Document.t(), [UndoPatch.t()]} | {:error, batch_error()}
   def replace_ranges_with_patches(%Document{} = doc, []), do: {:ok, doc, []}
 
   def replace_ranges_with_patches(%Document{} = doc, edits) when is_list(edits) do
-    {_line_starts, text} = snapshot = Lines.snapshot(doc)
+    with :ok <- check_batch_shape(edits, 0) do
+      {_line_starts, text} = snapshot = Lines.snapshot(doc)
 
-    ordered =
-      edits
-      |> Enum.with_index()
-      |> Enum.sort(fn {{from_a, _, _}, _}, {{from_b, _, _}, _} -> from_a >= from_b end)
+      ordered =
+        edits
+        |> Enum.with_index()
+        |> Enum.sort(fn {{from_a, _, _}, _}, {{from_b, _, _}, _} -> from_a >= from_b end)
 
-    if Unicode.valid_utf8?(text) do
-      replace_ordered(ordered, doc, snapshot, [])
-    else
-      [{_edit, index} | _rest] = ordered
-      {:error, {:edit_failed, index, :invalid_utf8}}
+      if Unicode.valid_utf8?(text) do
+        replace_ordered(ordered, doc, snapshot, [])
+      else
+        [{_edit, index} | _rest] = ordered
+        {:error, {:edit_failed, index, :invalid_utf8}}
+      end
+    end
+  end
+
+  @spec check_batch_shape([term()], non_neg_integer()) :: :ok | {:error, batch_error()}
+  defp check_batch_shape([], _index), do: :ok
+
+  defp check_batch_shape([edit | rest], index) do
+    case check_edit_shape(edit) do
+      :ok -> check_batch_shape(rest, index + 1)
+      {:error, reason} -> {:error, {:edit_failed, index, reason}}
     end
   end
 
@@ -414,15 +461,13 @@ defmodule Minga.Buffer.Operation do
           Lines.snapshot(),
           [UndoPatch.t()]
         ) :: {:ok, Document.t(), [UndoPatch.t()]} | {:error, batch_error()}
-  defp replace_next([{{from_pos, to_pos, replacement}, index} | rest], doc, snapshot, patches) do
-    {_line_starts, text} = snapshot
-    selection = Selection.clamped_characterwise_in(snapshot, from_pos, to_pos)
+  defp replace_next([{edit, index} | rest], doc, snapshot, patches) do
+    case replace_in_valid(doc, snapshot, edit) do
+      {:edited, new_doc, delta} ->
+        continue_ordered(rest, new_doc, [UndoPatch.from_delta(delta, doc) | patches])
 
-    if splice_keeps_valid_utf8?(text, selection.span, replacement) do
-      {:edited, new_doc, delta} = replace_selection(doc, text, selection, replacement)
-      continue_ordered(rest, new_doc, [UndoPatch.from_delta(delta, doc) | patches])
-    else
-      {:error, {:edit_failed, index, :invalid_utf8}}
+      {:error, reason} ->
+        {:error, {:edit_failed, index, reason}}
     end
   end
 
@@ -436,7 +481,7 @@ defmodule Minga.Buffer.Operation do
   # `text` is valid UTF-8, so everything before the code point holding `start` and everything
   # from the code point boundary at or after `stop` stays valid. The result is valid exactly when
   # the bytes between those two boundaries, with the replacement spliced in, are valid.
-  @spec splice_keeps_valid_utf8?(String.t(), Span.t(), term()) :: boolean()
+  @spec splice_keeps_valid_utf8?(String.t(), Span.t(), String.t()) :: boolean()
   defp splice_keeps_valid_utf8?(text, %Span{start: start, stop: stop}, replacement)
        when is_binary(replacement) do
     lead = start - code_point_start(text, start)

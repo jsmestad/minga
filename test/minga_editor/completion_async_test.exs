@@ -12,6 +12,7 @@ defmodule MingaEditor.CompletionAsyncTest do
   alias MingaEditor.State.Buffers
   alias MingaEditor.CompletionTrigger
   alias MingaEditor.Shell.Traditional.ModalWorkflow
+  alias MingaEditor.Shell.Traditional.NoticeWorkflow
   alias MingaEditor.State.ModalOverlay
   alias MingaEditor.State.ModalOverlay.Completion, as: CompletionPayload
   alias MingaEditor.State.LSP, as: LSPState
@@ -97,6 +98,207 @@ defmodule MingaEditor.CompletionAsyncTest do
       assert Minga.Buffer.cursor(buffer) == {0, byte_size("λe\u0301_value")}
     end
 
+    test "accept replaces only the typed prefix and keeps the text after the cursor" do
+      ctx = start_editor("fo(x)\nnext")
+      state = editor_state(ctx)
+      buffer = state.workspace.buffers.active
+      :ok = Minga.Buffer.move_to(buffer, {0, 2})
+
+      completion =
+        [%{"label" => "foo", "insertText" => "foo"}]
+        |> items()
+        |> Completion.new({0, 0})
+
+      _state = CompletionHandling.accept(state, completion)
+
+      assert Minga.Buffer.content(buffer) == "foo(x)\nnext"
+      assert Minga.Buffer.cursor(buffer) == {0, 3}
+    end
+  end
+
+  describe "accepting an LSP text edit" do
+    test "the range end is exclusive, so the character after it is kept" do
+      {buffer, _state} = accept_text_edit("    han(1)", 7, :utf16, {4, 7}, "handle")
+
+      assert Minga.Buffer.content(buffer) == "    handle(1)"
+      assert Minga.Buffer.cursor(buffer) == {0, byte_size("    handle")}
+    end
+
+    test "UTF-16 character offsets are converted to byte columns on a non-ASCII line" do
+      line = "héllo 🎉 fo(x)"
+      # "héllo " is 6 UTF-16 units and "🎉" is 2, so "fo" spans units 9..11 and bytes 12..14.
+      {buffer, _state} =
+        accept_text_edit(line, byte_size("héllo 🎉 fo"), :utf16, {9, 11}, "foo")
+
+      assert Minga.Buffer.content(buffer) == "héllo 🎉 foo(x)"
+      assert Minga.Buffer.cursor(buffer) == {0, byte_size("héllo 🎉 foo")}
+    end
+
+    test "a negotiated UTF-8 encoding reads character offsets as bytes" do
+      line = "héllo 🎉 fo(x)"
+
+      {buffer, _state} =
+        accept_text_edit(line, byte_size("héllo 🎉 fo"), :utf8, {12, 14}, "foo")
+
+      assert Minga.Buffer.content(buffer) == "héllo 🎉 foo(x)"
+    end
+
+    test "an offset inside a code point is rejected visibly and changes nothing" do
+      line = "héllo 🎉 fo(x)"
+
+      # UTF-16 unit 7 is the middle of the "🎉" surrogate pair.
+      {buffer, state} = accept_text_edit(line, byte_size("héllo 🎉 fo"), :utf16, {7, 11}, "foo")
+
+      assert Minga.Buffer.content(buffer) == line
+      assert NoticeWorkflow.message(state) == "Completion failed: :column_not_boundary"
+    end
+  end
+
+  describe "accepting an LSP text edit after editing since the request" do
+    test "a character deleted since the request shortens the range, keeping the text after it" do
+      {ctx, state} = open_text_edit_menu("    han(1)", 7, {4, 7}, "handle")
+
+      :ok = Minga.Buffer.delete_before(ctx.buffer)
+      state = CompletionHandling.maybe_handle(state, true, 127, 0)
+      assert %Completion{} = completion = ModalWorkflow.completion(state)
+
+      _state = CompletionHandling.accept(state, completion)
+
+      assert Minga.Buffer.content(ctx.buffer) == "    handle(1)"
+      assert Minga.Buffer.cursor(ctx.buffer) == {0, byte_size("    handle")}
+    end
+
+    test "characters typed since the request are replaced too" do
+      {ctx, state} = open_text_edit_menu("    han(1)", 7, {4, 7}, "handle")
+
+      :ok = Minga.Buffer.insert_text(ctx.buffer, "dl")
+      state = CompletionHandling.maybe_handle(state, true, ?l, 0)
+
+      _state = CompletionHandling.accept(state, ModalWorkflow.completion(state))
+
+      assert Minga.Buffer.content(ctx.buffer) == "    handle(1)"
+    end
+
+    test "a server range ending past the cursor keeps its distance from the cursor" do
+      # The server replaces the whole word "hanxx", which extends past the request cursor.
+      {ctx, state} = open_text_edit_menu("    hanxx(1)", 7, {4, 9}, "handle")
+
+      :ok = Minga.Buffer.insert_text(ctx.buffer, "d")
+      state = CompletionHandling.maybe_handle(state, true, ?d, 0)
+
+      _state = CompletionHandling.accept(state, ModalWorkflow.completion(state))
+
+      assert Minga.Buffer.content(ctx.buffer) == "    handle(1)"
+    end
+
+    test "a deletion before a non-ASCII range end converts the end against the request line" do
+      # "é" is one UTF-16 unit and two bytes; the request was sent after "hé".
+      {ctx, state} = open_text_edit_menu("    hé(1)", byte_size("    hé"), {4, 6}, "hello")
+
+      :ok = Minga.Buffer.delete_before(ctx.buffer)
+      state = CompletionHandling.maybe_handle(state, true, 127, 0)
+
+      _state = CompletionHandling.accept(state, ModalWorkflow.completion(state))
+
+      assert Minga.Buffer.content(ctx.buffer) == "    hello(1)"
+    end
+  end
+
+  # Opens a session-backed completion menu with one text-edit item, as if a UTF-16 LSP client had
+  # answered a request sent with the cursor at `cursor_col`; the word starts at the range start.
+  defp open_text_edit_menu(line, cursor_col, {start_char, end_char}, new_text) do
+    ctx = start_editor(line)
+    state = editor_state(ctx)
+    buffer = state.workspace.buffers.active
+    :ok = Minga.Buffer.move_to(buffer, {0, cursor_col})
+    client = start_encoding_responder(:utf16)
+    provider_id = {:lsp_client, client}
+    version = Minga.Buffer.version(buffer)
+    trigger_pos = {0, start_char}
+    request_ref = make_ref()
+
+    session =
+      CompletionSession.new(make_ref(), 1, buffer, version, trigger_pos)
+      |> CompletionSession.register_requests(
+        [{provider_id, client, request_ref}],
+        {{0, cursor_col}, line}
+      )
+
+    raw = %{
+      "label" => new_text,
+      "textEdit" => %{
+        "range" => %{
+          "start" => %{"line" => 0, "character" => start_char},
+          "end" => %{"line" => 0, "character" => end_char}
+        },
+        "newText" => new_text
+      }
+    }
+
+    batch =
+      ProviderBatch.from_response(session.id, 1, provider_id, client, request_ref, [raw])
+
+    {:ok, session} = CompletionSession.accept_batch(session, batch)
+    completion = Completion.new(CompletionSession.index(session), trigger_pos, nil)
+    trigger = CompletionTrigger.new() |> CompletionTrigger.put_session(session)
+    owner = state.shell_runtime.state.tab_bar.active_id
+    payload = CompletionPayload.new(owner, completion: completion, trigger: trigger)
+
+    state =
+      %{state | workspace: SessionState.transition_mode(state.workspace, :insert)}
+      |> ModalWorkflow.open({:completion, payload})
+
+    {ctx, state}
+  end
+
+  # Accepts one text-edit item from an LSP client that negotiated `encoding`, with the cursor at
+  # `cursor_col` on the single line `line`.
+  defp accept_text_edit(line, cursor_col, encoding, {start_char, end_char}, new_text) do
+    ctx = start_editor(line)
+    state = editor_state(ctx)
+    buffer = state.workspace.buffers.active
+    :ok = Minga.Buffer.move_to(buffer, {0, cursor_col})
+    client = start_encoding_responder(encoding)
+
+    completion =
+      [
+        %{
+          "label" => new_text,
+          "textEdit" => %{
+            "range" => %{
+              "start" => %{"line" => 0, "character" => start_char},
+              "end" => %{"line" => 0, "character" => end_char}
+            },
+            "newText" => new_text
+          }
+        }
+      ]
+      |> Completion.parse_response({:lsp_client, client})
+      |> Completion.new({0, start_char})
+
+    {buffer, CompletionHandling.accept(state, completion)}
+  end
+
+  # Answers `Minga.LSP.Client.encoding/1` like a client that negotiated `encoding`.
+  defp start_encoding_responder(encoding) do
+    pid =
+      spawn_link(fn ->
+        receive_loop = fn loop ->
+          receive do
+            {:"$gen_call", from, :encoding} ->
+              GenServer.reply(from, encoding)
+              loop.(loop)
+          end
+        end
+
+        receive_loop.(receive_loop)
+      end)
+
+    on_exit(fn -> Process.exit(pid, :kill) end)
+    pid
+  end
+
+  describe "completion updates" do
     test "one post-insert event reads one coherent cursor context" do
       ctx = start_editor("identifier")
       state = editor_state(ctx)
