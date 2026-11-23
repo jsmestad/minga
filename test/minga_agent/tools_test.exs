@@ -123,7 +123,12 @@ defmodule MingaAgent.ToolsTest do
       assert edit["properties"]["expected_revision"]["type"] == "string"
       assert edit["properties"]["edits"]["minItems"] == 1
       assert edit["properties"]["edits"]["items"]["required"] == ["old_text", "new_text"]
-      assert edit["properties"]["edits"]["items"]["properties"]["old_text"]["minLength"] == 1
+      # An empty old_text appends new_text at the end of the file (#3923).
+      refute Map.has_key?(
+               edit["properties"]["edits"]["items"]["properties"]["old_text"],
+               "minLength"
+             )
+
       refute Map.has_key?(edit["properties"], "old_text")
       refute Map.has_key?(edit["properties"], "find")
 

@@ -359,7 +359,7 @@ defmodule MingaAgent.Tools do
     Spec.new!(
       name: "edit_file",
       description: """
-      Apply an ordered batch of exact replacements to one file as one undoable change or none. Pass expected_revision from a full read_file result. Each nonempty old_text must occur exactly once in the sequential prepared content, including overlapping occurrences. Later edits see earlier changes but cannot touch earlier replacement bytes. Any stale, missing, ambiguous, overlapping, or invalid edit rejects the entire batch and reports the failing edit. No fuzzy matching. Atomicity is per file only; cross-file work reports separate outcomes.
+      Apply an ordered batch of exact replacements to one file as one undoable change or none. Pass expected_revision from a full read_file result. Each nonempty old_text must occur exactly once in the sequential prepared content, including overlapping occurrences. An empty old_text appends new_text at the end of the existing file; a newline separates it from a last line that lacks one. Use write_file to create files. Later edits see earlier changes but cannot touch earlier replacement bytes. Any stale, missing, ambiguous, overlapping, or invalid edit rejects the entire batch and reports the failing edit. No fuzzy matching. Atomicity is per file only; cross-file work reports separate outcomes.
       """,
       parameter_schema: %{
         "type" => "object",
@@ -372,7 +372,10 @@ defmodule MingaAgent.Tools do
             "items" => %{
               "type" => "object",
               "properties" => %{
-                "old_text" => %{"type" => "string", "minLength" => 1},
+                "old_text" => %{
+                  "type" => "string",
+                  "description" => "Exact text to replace; empty appends new_text at the end"
+                },
                 "new_text" => %{"type" => "string"}
               },
               "required" => ["old_text", "new_text"]
@@ -473,8 +476,16 @@ defmodule MingaAgent.Tools do
       {:error, :revision_required} ->
         {:error, "stale revision: expected_revision is required for #{path}"}
 
+      {:error, {:edit_failed, index, :empty_edit}} ->
+        {:error,
+         "edit #{index} failed for #{path}: old_text and new_text are both empty, so the edit changes nothing; no edits committed"}
+
       {:error, {:edit_failed, index, reason}} ->
         {:error, "edit #{index} failed for #{path}: #{inspect(reason)}; no edits committed"}
+
+      {:error, :enoent} when is_tuple(operation) and elem(operation, 0) == :edit ->
+        {:error,
+         "#{path} does not exist; edit_file only changes existing files. Use write_file with mode=create and expected_revision=absent to create it"}
 
       {:error, reason} ->
         {:error, "file mutation rejected for #{path}: #{inspect(reason)}"}

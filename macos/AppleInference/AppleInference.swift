@@ -141,7 +141,7 @@ private enum Frame: Encodable {
 private enum BridgeError: Error {
     case invalidRequest(String)
     case invalidSchema(String)
-    case invalidArguments(String)
+    case invalidArguments(tool: String, reason: String)
     case unavailable(Availability)
     case invalidTranscript
     case invalidToolGroup
@@ -157,7 +157,7 @@ private enum BridgeError: Error {
         switch self {
         case .invalidRequest(let reason): "Invalid Apple inference request: \(reason)"
         case .invalidSchema(let reason): "Unsupported Apple tool schema: \(reason)"
-        case .invalidArguments(let name): "Invalid arguments for Apple tool \(name)"
+        case let .invalidArguments(tool, reason): "Invalid arguments for Apple tool \(tool): \(reason)"
         case .unavailable(let status): "Apple model unavailable: \(status.rawValue)"
         case .invalidTranscript: "Apple executor received an unexpected input transcript"
         case .invalidToolGroup: "Apple executor did not settle one complete new tool group"
@@ -370,8 +370,10 @@ private struct ArgumentSchema: Sendable {
         }
     }
 
-    // Apple supplies no string-length or unique-items guide. Explain those rules in
-    // the declaration and check them before accepting a callback or publishing a group.
+    // Apple supplies no string-length or unique-items guide, so generated arguments can
+    // break those rules. Explain them in the declaration. Minga validates every published
+    // call against the canonical schema and returns a violation to the model as a tool
+    // error naming the field, so the model can retry instead of losing the whole turn.
     private var guidance: String? {
         var sentences = description.map { [$0] } ?? []
         switch shape {
@@ -387,33 +389,6 @@ private struct ArgumentSchema: Sendable {
         }
         return sentences.isEmpty ? nil : sentences.joined(separator: " ")
     }
-
-    func accepts(_ value: JSONValue) -> Bool {
-        switch (shape, value) {
-        case let (.object(fields, required), .object(values)):
-            return required.allSatisfy { values[$0] != nil } && values.allSatisfy { key, value in
-                fields[key]?.accepts(value) == true
-            }
-        case let (.array(items, min, max, unique), .array(values)):
-            guard Self.within(values.count, min: min, max: max), values.allSatisfy(items.accepts) else { return false }
-            return !unique || Set(values).count == values.count
-        case let (.string(choices, min, max), .string(value)):
-            return (choices?.contains { $0.utf8.elementsEqual(value.utf8) } ?? true)
-                && Self.within(value.unicodeScalars.count, min: min, max: max)
-        case let (.integer(min, max), number):
-            return number.integer.map { Self.within($0, min: min, max: max) } ?? false
-        case let (.number(min, max), .number(number)):
-            let value = NSDecimalNumber(decimal: number).doubleValue
-            return value.isFinite && Self.within(value, min: min, max: max)
-        case (.boolean, .bool), (.null, .null): return true
-        case let (.union(choices), value): return choices.contains { $0.accepts(value) }
-        default: return false
-        }
-    }
-
-    private static func within<T: Comparable>(_ value: T, min: T?, max: T?) -> Bool {
-        (min.map { value >= $0 } ?? true) && (max.map { value <= $0 } ?? true)
-    }
 }
 
 @available(macOS 27.0, *)
@@ -421,7 +396,6 @@ private struct ProposalTool: Tool {
     let name: String
     let description: String
     let parameters: GenerationSchema
-    private let schema: ArgumentSchema
     private let marker: String
 
     init(declaration: ToolDeclaration, schemaPrefix: String, marker: String) throws {
@@ -429,16 +403,21 @@ private struct ProposalTool: Tool {
         guard schema.isObject else { throw BridgeError.invalidSchema("\(declaration.name): arguments must be an object") }
         do { parameters = try schema.generationSchema(prefix: schemaPrefix) }
         catch { throw BridgeError.invalidSchema("\(declaration.name): Apple rejected the projected schema") }
-        self.schema = schema
         self.marker = marker
         name = declaration.name
         description = declaration.description
     }
 
+    // Only content that is not one complete JSON object is fatal here: there is no
+    // call to publish. Schema rules are Minga's to check (see `guidance`).
     func arguments(_ content: GeneratedContent) throws -> [String: JSONValue] {
-        guard content.isComplete, case .structure = content.kind,
-              let value = try? JSONDecoder().decode([String: JSONValue].self, from: Data(content.jsonString.utf8)),
-              schema.accepts(.object(value)) else { throw BridgeError.invalidArguments(name) }
+        guard content.isComplete else {
+            throw BridgeError.invalidArguments(tool: name, reason: "generation ended before the arguments were complete")
+        }
+        guard case .structure = content.kind,
+              let value = try? JSONDecoder().decode([String: JSONValue].self, from: Data(content.jsonString.utf8)) else {
+            throw BridgeError.invalidArguments(tool: name, reason: "arguments are not a JSON object")
+        }
         return value
     }
 

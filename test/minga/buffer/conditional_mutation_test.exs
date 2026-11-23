@@ -52,7 +52,7 @@ defmodule Minga.Buffer.ConditionalMutationTest do
         for {edits, reason} <- [
               {[{"one", "two"}, {"two", "second"}], {:edit_failed, 2, :ambiguous_match}},
               {[{"one", "first"}, {"first", "again"}], {:edit_failed, 2, :overlapping_edit}},
-              {[{"", "insert"}], {:edit_failed, 1, :invalid_edit}},
+              {[{"", ""}], {:edit_failed, 1, :empty_edit}},
               {[{"one", <<255>>}], {:edit_failed, 1, :invalid_text}},
               {[], :invalid_operation}
             ] do

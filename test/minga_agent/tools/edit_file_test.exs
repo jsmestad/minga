@@ -85,10 +85,124 @@ defmodule MingaAgent.Tools.EditFileTest do
     end
   end
 
+  for route <- [:buffer, :fork, :changeset, :direct, :overlay] do
+    for {content, appended, expected} <- [
+          {"one\ntwo", "Checked: on device", "one\ntwo\nChecked: on device"},
+          {"one\ntwo\n", "Checked: on device\n", "one\ntwo\nChecked: on device\n"},
+          {"one\ntwo", "\nChecked: on device", "one\ntwo\nChecked: on device"},
+          {"", "Checked: on device", "Checked: on device"}
+        ] do
+      @tag route: route, content: content, appended: appended, expected: expected
+      test "empty old_text appends #{inspect(appended)} to #{inspect(content)} through #{route}",
+           ctx do
+        revision = full_revision(ctx.context)
+
+        assert {:ok, _message} =
+                 edit(ctx.context, revision, [%{"old_text" => "", "new_text" => ctx.appended}])
+
+        assert {:ok, %Output{} = output} =
+                 call(ctx.context, "read_file", %{"path" => "code.txt"})
+
+        assert output.view =~ ctx.expected
+        refute full_revision(ctx.context) == revision
+      end
+    end
+
+    @tag route: route
+    test "an append through #{route} still requires the current revision", ctx do
+      revision = full_revision(ctx.context)
+      assert {:ok, _} = edit(ctx.context, revision, [%{"old_text" => "one", "new_text" => "ONE"}])
+      newer = full_revision(ctx.context)
+
+      assert {:error, message} =
+               edit(ctx.context, revision, [%{"old_text" => "", "new_text" => "late"}])
+
+      assert message =~ "stale revision"
+      assert full_revision(ctx.context) == newer
+      refute read(ctx.context).view =~ "late"
+    end
+  end
+
+  # Buffer and fork routes own only open buffers, so a missing path has no editable view there.
+  for route <- [:changeset, :direct, :overlay] do
+    @tag route: route
+    test "an append through #{route} cannot create a missing file", ctx do
+      assert {:error, message} =
+               call(ctx.context, "edit_file", %{
+                 "path" => "missing.txt",
+                 "expected_revision" => "absent",
+                 "edits" => [%{"old_text" => "", "new_text" => "Checked: on device"}]
+               })
+
+      assert message =~ "does not exist"
+      assert message =~ "write_file"
+      refute File.exists?(Path.join(ctx.context.project_root, "missing.txt"))
+    end
+  end
+
+  @tag content: "one\ntwo"
+  test "an append batch applies in order with replacements and protects the appended bytes",
+       ctx do
+    revision = full_revision(ctx.context)
+
+    assert {:ok, _} =
+             edit(ctx.context, revision, [
+               %{"old_text" => "one", "new_text" => "ONE"},
+               %{"old_text" => "", "new_text" => "three"},
+               %{"old_text" => "", "new_text" => "four\n"}
+             ])
+
+    assert read(ctx.context).view =~ "ONE\ntwo\nthree\nfour\n"
+
+    revision = full_revision(ctx.context)
+
+    assert {:error, message} =
+             edit(ctx.context, revision, [
+               %{"old_text" => "", "new_text" => "five"},
+               %{"old_text" => "four\nfive", "new_text" => "x"}
+             ])
+
+    assert message =~ "edit 2"
+    assert message =~ "overlapping_edit"
+    assert full_revision(ctx.context) == revision
+  end
+
+  test "an append with empty new_text is rejected as a no-op edit", ctx do
+    revision = full_revision(ctx.context)
+
+    assert {:error, message} =
+             edit(ctx.context, revision, [%{"old_text" => "", "new_text" => ""}])
+
+    assert message =~ "edit 1"
+    assert message =~ "both empty"
+    assert full_revision(ctx.context) == revision
+    assert File.read!(ctx.path) == ctx.original
+  end
+
+  test "the canonical schema accepts the append form and names a failing field" do
+    spec = Enum.find(Tools.all(), &(&1.name == "edit_file"))
+    old_text = spec.parameter_schema["properties"]["edits"]["items"]["properties"]["old_text"]
+
+    refute Map.has_key?(old_text, "minLength")
+    assert spec.description =~ "empty old_text appends"
+
+    append = %{
+      "path" => "code.txt",
+      "expected_revision" => "revision",
+      "edits" => [%{"old_text" => "", "new_text" => "Checked: on device"}]
+    }
+
+    assert {:ok, ^append} = Spec.validate_arguments(spec, append)
+
+    # Every route's executor returns this message to the model as the tool error text.
+    invalid = put_in(append, ["edits", Access.at(0), "old_text"], 1)
+    assert {:error, %JSV.ValidationError{} = error} = Spec.validate_arguments(spec, invalid)
+    assert Exception.message(error) =~ ~s(at: "#/edits/0/old_text")
+  end
+
   for {name, content, edits, index} <- [
         {"ambiguous", "one one", [%{"old_text" => "one", "new_text" => "ONE"}], 1},
         {"overlapping occurrences", "aaa", [%{"old_text" => "aa", "new_text" => "A"}], 1},
-        {"empty old text", "one", [%{"old_text" => "", "new_text" => "ONE"}], 1},
         {"invalid edit", "one", [%{"old_text" => "one", "new_text" => 42}], 1},
         {"touching replacement bytes", "one two",
          [%{"old_text" => "one", "new_text" => "ONE"}, %{"old_text" => "ONE", "new_text" => "x"}],
