@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/jsmestad/minga/go/tui/internal/generated"
 	"github.com/jsmestad/minga/go/tui/internal/port"
@@ -224,6 +225,9 @@ func TestAgentTranscriptNavigationMapping(t *testing.T) {
 		{"ctrl-u", tea.Key{Code: 'u', Mod: tea.ModCtrl}, -8, true},
 		{"G", tea.Key{Code: 'G'}, 1 << 20, true},
 		{"shift-G", tea.Key{Code: 'G', Mod: tea.ModShift}, 1 << 20, true},
+		{"shift-g as the PTY decoder delivers G", tea.Key{Code: 'g', ShiftedCode: 'G', Text: "G", Mod: tea.ModShift}, 1 << 20, true},
+		{"plain g", tea.Key{Code: 'g', Text: "g"}, 0, false},
+		{"ctrl-shift-g", tea.Key{Code: 'g', Mod: tea.ModCtrl | tea.ModShift}, 0, false},
 		{"page down", tea.Key{Code: tea.KeyPgDown}, page, true},
 		{"page up", tea.Key{Code: tea.KeyPgUp}, -page, true},
 		{"ctrl-j", tea.Key{Code: 'j', Mod: tea.ModCtrl}, 0, false},
@@ -239,6 +243,42 @@ func TestAgentTranscriptNavigationMapping(t *testing.T) {
 			got, handled := agentTranscriptScrollRows(tea.KeyPressMsg(test.key), page)
 			if got != test.want || handled != test.handled {
 				t.Fatalf("mapping = (%d, %v), want (%d, %v)", got, handled, test.want, test.handled)
+			}
+		})
+	}
+}
+
+// TestAgentTranscriptKeysFromPTYBytes feeds raw terminal bytes through the same
+// ultraviolet decoder that Bubble Tea uses. A PTY never sends tea.Key{Code: 'G'};
+// it sends "G", which decodes to Code 'g' with ModShift and Text "G".
+func TestAgentTranscriptKeysFromPTYBytes(t *testing.T) {
+	const page = 17
+	tests := []struct {
+		name    string
+		input   []byte
+		want    int
+		handled bool
+	}{
+		{"shift-G from PTY", []byte("G"), 1 << 20, true},
+		{"plain g from PTY does not jump", []byte("g"), 0, false},
+		{"j from PTY", []byte("j"), 1, true},
+		{"ctrl-d from PTY", []byte{0x04}, page / 2, true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var decoder uv.EventDecoder
+			n, event := decoder.Decode(test.input)
+			if n != len(test.input) {
+				t.Fatalf("decoded %d bytes, want %d", n, len(test.input))
+			}
+			press, ok := event.(uv.KeyPressEvent)
+			if !ok {
+				t.Fatalf("event = %T, want uv.KeyPressEvent", event)
+			}
+			msg := tea.KeyPressMsg(tea.Key(uv.Key(press)))
+			got, handled := agentTranscriptScrollRows(msg, page)
+			if got != test.want || handled != test.handled {
+				t.Fatalf("mapping = (%d, %v), want (%d, %v); key=%+v", got, handled, test.want, test.handled, msg.Key())
 			}
 		})
 	}
