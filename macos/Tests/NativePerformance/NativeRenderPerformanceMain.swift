@@ -448,11 +448,7 @@ private func measureTranscriptAccounting(
     dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
     precondition(dispatcher.publicationCount == 1, "transcript benchmark seed must publish")
 
-    #if MINGA_TRANSCRIPT_ACCOUNTING
     let residentWeight = guiState.agentChatState.transcriptSnapshot.resourceWeight
-    #else
-    let residentWeight = try guiState.agentChatState.transcriptSnapshot.exactResourceWeight()
-    #endif
 
     var samples: [Double] = []
     samples.reserveCapacity(transcriptMeasuredFrameCount)
