@@ -129,7 +129,9 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilderTest do
         description: "First result",
         annotation: "enter",
         icon_color: 0x123456,
-        two_line: true,
+        status: MingaEditor.UI.Picker.Item.Status.new(:warn, "Ready · 82%"),
+        active: true,
+        group: "ChatGPT",
         match_positions: [0, 2]
       }
 
@@ -168,18 +170,22 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilderTest do
       assert model.action_menu.actions == ["Open"]
       assert model.action_menu.activation_ids == [2]
       assert model.action_menu.selected_index == 0
-      # The builder emits wire-shaped item maps: flags packs two_line (bit 0)
-      # and marked (bit 1), description/annotation default to "", icon_color
+
+      # The builder emits wire-shaped item maps: flags packs marked (bit 1) and active (bit 3), the
+      # status chip flattens into text and tone, description/annotation default to "", icon_color
       # defaults to 0, and match_positions are preserved exactly.
       assert [
                %{
                  icon_color: 0x123456,
-                 flags: 3,
+                 flags: 0b1010,
                  label: "One",
                  description: "First result",
                  annotation: "enter",
                  match_positions: [0, 2],
-                 activation_id: 1
+                 activation_id: 1,
+                 status: "Ready · 82%",
+                 status_tone: :warn,
+                 group: "ChatGPT"
                }
              ] = model.items
 
@@ -233,6 +239,10 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilderTest do
       assert wire_item.icon_color == 0
       assert wire_item.description == ""
       assert wire_item.annotation == ""
+      # No status chip, no group and no flags: the row keeps the inline layout file and command
+      # pickers use, with no section header.
+      assert {wire_item.status, wire_item.status_tone, wire_item.flags} == {"", :none, 0}
+      assert wire_item.group == ""
       assert Enum.count(wire_item.match_positions) == 301
       assert wire_item.match_positions == Enum.to_list(0..300)
     end

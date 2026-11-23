@@ -187,6 +187,8 @@ public struct FrameResourceWeight: Sendable, Equatable {
     }
 
     /// Measures owned strings, data, and collection entries in an already-materialized value.
+    ///
+    /// This walks the value by reflection and costs tens of microseconds per nested value. Hot paths with known types (the Agent transcript) measure with `FrameOwnedPayloadTally` instead and must produce the same weight.
     public static func measuringOwnedPayload(_ value: Any) throws -> Self {
         if let string = value as? String {
             return Self(ownedUTF8Bytes: string.utf8.count)
@@ -216,6 +218,76 @@ public struct FrameResourceWeight: Sendable, Equatable {
         let (result, overflow) = lhs.addingReportingOverflow(rhs)
         guard !overflow else { throw FrameResourceError.arithmeticOverflow }
         return result
+    }
+}
+
+/// Typed owned-payload accumulator for values whose stored fields are known at compile time. It counts exactly what `FrameResourceWeight.measuringOwnedPayload` counts for the same value: UTF-8 bytes of every owned string and one array entry per element of every owned collection. Overflow throws `FrameResourceError.arithmeticOverflow`, as the reflective measure does.
+public struct FrameOwnedPayloadTally: Sendable, Equatable {
+    public private(set) var ownedUTF8Bytes = 0
+    public private(set) var arrayEntries = 0
+
+    /// Creates an empty tally.
+    public init() {}
+
+    /// The measured weight. Only the owned-payload dimensions are nonzero.
+    public var weight: FrameResourceWeight {
+        FrameResourceWeight(ownedUTF8Bytes: ownedUTF8Bytes, arrayEntries: arrayEntries)
+    }
+
+    /// Adds one owned string.
+    public mutating func add(_ string: String) throws {
+        ownedUTF8Bytes = try Self.checkedSum(ownedUTF8Bytes, string.utf8.count)
+    }
+
+    /// Adds one optional owned string. `nil` owns nothing.
+    public mutating func add(_ string: String?) throws {
+        if let string { try add(string) }
+    }
+
+    /// Adds one owned string collection: one entry per element plus each element's bytes.
+    public mutating func add(_ strings: [String]) throws {
+        try addEntries(strings.count)
+        for string in strings { try add(string) }
+    }
+
+    /// Adds `count` collection entries.
+    public mutating func addEntries(_ count: Int) throws {
+        arrayEntries = try Self.checkedSum(arrayEntries, count)
+    }
+
+    private static func checkedSum(_ lhs: Int, _ rhs: Int) throws -> Int {
+        let (result, overflow) = lhs.addingReportingOverflow(rhs)
+        guard !overflow else { throw FrameResourceError.arithmeticOverflow }
+        return result
+    }
+}
+
+extension Wire.StyledTextRun {
+    /// Adds this run's owned strings to `tally`.
+    public func measureOwnedPayload(into tally: inout FrameOwnedPayloadTally) throws {
+        try tally.add(text)
+        try tally.add(linkURL)
+    }
+
+    /// Adds a styled-line collection: one entry per line, one per run, and each run's strings.
+    public static func measureOwnedPayload(
+        lines: [[Wire.StyledTextRun]], into tally: inout FrameOwnedPayloadTally
+    ) throws {
+        try tally.addEntries(lines.count)
+        for line in lines {
+            try tally.addEntries(line.count)
+            for run in line { try run.measureOwnedPayload(into: &tally) }
+        }
+    }
+}
+
+extension Wire.AgentMarkdownBlock {
+    /// Adds this block's owned lines and strings to `tally`.
+    public func measureOwnedPayload(into tally: inout FrameOwnedPayloadTally) throws {
+        try Wire.StyledTextRun.measureOwnedPayload(lines: lines, into: &tally)
+        try tally.add(language)
+        try tally.add(label)
+        try tally.add(targetPath)
     }
 }
 

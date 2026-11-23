@@ -50,6 +50,9 @@ defmodule MingaEditor.State.Picker do
   @type fetch_revision :: reference() | nil
   @type fetch_identity :: term() | nil
 
+  @typedoc "Where a landing fetch leaves the selection: at the same position, or on the same item."
+  @type fetch_selection :: :position | :item
+
   @type t :: %__MODULE__{
           picker: MingaEditor.UI.Picker.t() | nil,
           source: module() | nil,
@@ -64,9 +67,11 @@ defmodule MingaEditor.State.Picker do
           load_status: load_status(),
           fetch_revision: fetch_revision(),
           fetch_identity: fetch_identity(),
+          fetch_selection: fetch_selection(),
           query_generation: query_generation(),
           acknowledged_query_edit_seq: query_edit_seq(),
-          activation_offer: ActivationOffer.t()
+          activation_offer: ActivationOffer.t(),
+          parent: t() | nil
         }
 
   defstruct picker: nil,
@@ -82,9 +87,11 @@ defmodule MingaEditor.State.Picker do
             load_status: :ready,
             fetch_revision: nil,
             fetch_identity: nil,
+            fetch_selection: :position,
             query_generation: 0,
             acknowledged_query_edit_seq: 0,
-            activation_offer: %ActivationOffer{generation: 1}
+            activation_offer: %ActivationOffer{generation: 1},
+            parent: nil
 
   @doc "Builds the semantic state for an asynchronous picker before fetching starts."
   @spec loading(
@@ -110,6 +117,36 @@ defmodule MingaEditor.State.Picker do
     }
     |> begin_query_session()
   end
+
+  @doc """
+  Opens a child picker in place of `parent` and keeps `parent` to return to.
+
+  The child starts a fresh query session so frontends show its empty query. The parent keeps its rows, query, and selection unchanged.
+  """
+  @spec nest(t(), MingaEditor.UI.Picker.t(), source_target(), map() | nil) :: t()
+  def nest(%__MODULE__{} = parent, picker, {source, callback_source, layout}, context)
+      when is_atom(source) do
+    %__MODULE__{
+      picker: picker,
+      source: source,
+      callback_source: callback_source,
+      restore: parent.restore,
+      restore_theme: parent.restore_theme,
+      context: context,
+      layout: layout,
+      parent: %{parent | action_menu: nil}
+    }
+    |> begin_query_session()
+  end
+
+  @doc """
+  Returns the parent of a child picker with its query and selection.
+
+  The parent starts a fresh query session so frontends show its query again.
+  """
+  @spec return_to_parent(t()) :: t()
+  def return_to_parent(%__MODULE__{parent: %__MODULE__{} = parent}),
+    do: begin_query_session(parent)
 
   @doc "Builds a picker session with immutable callback arguments and no built-in context."
   @spec extension_loading(Picker.t(), module(), PublicSource.owner(), Extension.t()) :: t()
@@ -172,6 +209,11 @@ defmodule MingaEditor.State.Picker do
   def put_context(%__MODULE__{} = ps, context) do
     %{ps | context: context}
   end
+
+  @doc "Replaces the source context of the parent that a child picker returns to."
+  @spec put_parent_context(t(), map() | nil) :: t()
+  def put_parent_context(%__MODULE__{parent: %__MODULE__{} = parent} = ps, context),
+    do: %{ps | parent: put_context(parent, context)}
 
   @doc "Updates the inner `MingaEditor.UI.Picker` instance."
   @spec update_picker(t(), MingaEditor.UI.Picker.t()) :: t()
@@ -329,18 +371,39 @@ defmodule MingaEditor.State.Picker do
     revision = make_ref()
 
     state =
-      %{ps | fetch_revision: revision, fetch_identity: identity, load_status: :loading}
+      %{
+        ps
+        | fetch_revision: revision,
+          fetch_identity: identity,
+          fetch_selection: :position,
+          load_status: :loading
+      }
       |> refresh_activation_offer()
 
     {state, revision}
   end
 
+  @doc """
+  Starts a fetch that reloads the same rows, like `begin_fetch/2`, but keeps the item that is selected when the result lands, wherever it moves.
+  """
+  @spec begin_refresh(t(), fetch_identity()) :: {t(), reference()}
+  def begin_refresh(%__MODULE__{} = ps, identity \\ nil) do
+    {state, revision} = begin_fetch(ps, identity)
+    {%{state | fetch_selection: :item}, revision}
+  end
+
   @doc "Accepts normalized candidates for the current asynchronous fetch."
   @spec complete_fetch(t(), MingaEditor.UI.Picker.t()) :: t()
   def complete_fetch(%__MODULE__{} = ps, picker) do
-    %{ps | picker: picker, load_status: :ready}
+    %{ps | picker: place_selection(ps, picker), load_status: :ready}
     |> refresh_activation_offer()
   end
+
+  @spec place_selection(t(), MingaEditor.UI.Picker.t()) :: MingaEditor.UI.Picker.t()
+  defp place_selection(%__MODULE__{fetch_selection: :item, picker: %Picker{} = previous}, picker),
+    do: Picker.select_id(picker, Picker.selected_id(previous))
+
+  defp place_selection(%__MODULE__{}, picker), do: picker
 
   @doc "Commits a page, replacing only the previous continuation row."
   @spec commit_extension_page(t(), [Item.t()], [Candidate.t()], PublicSource.page()) :: t()

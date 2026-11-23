@@ -38,6 +38,7 @@ defmodule MingaEditor.Handlers.EventDispatcher do
   alias MingaEditor.State.Tab
   alias MingaEditor.State.Tab.Agent
   alias MingaEditor.State.Workspace.Agent, as: WorkspaceAgent
+  alias MingaEditor.UI.Picker.AgentModelSource
   alias MingaEditor.State.Workspace
   alias MingaEditor.State.TabBar
   alias MingaEditor.UI.Face
@@ -116,9 +117,13 @@ defmodule MingaEditor.Handlers.EventDispatcher do
     |> MingaEditor.schedule_render(16)
   end
 
-  # The modeline reads route usage from this record; re-render only when it changed.
+  # The modeline reads route usage from this record; re-render only when it changed. An open
+  # /model chooser lists its rows again, off the Editor, and renders when they land.
   def dispatch(state, :inference_route_status_changed, %StatusChangedEvent{} = event, _msg) do
-    next = EditorState.record_inference_route_status(state, event)
+    next =
+      state
+      |> EditorState.record_inference_route_status(event)
+      |> AgentModelSource.route_status_changed()
 
     if next.agent_connection.route_usage == state.agent_connection.route_usage,
       do: next,

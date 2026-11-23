@@ -2,24 +2,27 @@ defmodule MingaAgent.InferenceRoute.Status do
   @moduledoc """
   Last known readiness and plan usage of one contributed route.
 
-  A route starts as `:unknown` until its availability is checked or the owning extension reports it. `plan_usage` holds the limit windows the route last reported, or nil when it has reported none; Minga shows no usage without data. Availability checks and usage reports update their own field and keep the other.
+  A route starts as `:unknown` until its availability is checked or the owning extension reports it. `plan_usage` is `:unreported` until the route's first usage report, then holds the limit windows the route last reported, or nil when it reported none; Minga shows no usage without data. Availability checks and usage reports update their own field and keep the other.
   """
 
   alias MingaAgent.InferenceRoute
   alias MingaAgent.InferenceRoute.PlanWindow
 
   @enforce_keys [:availability]
-  defstruct availability: :unknown, plan_usage: nil
+  defstruct availability: :unknown, plan_usage: :unreported
 
   @type availability :: :unknown | InferenceRoute.availability()
 
-  @type t :: %__MODULE__{availability: availability(), plan_usage: [PlanWindow.t()] | nil}
+  @typedoc "Usage the route has not reported yet, the windows it last reported, or nil when it reported none."
+  @type plan_usage :: :unreported | [PlanWindow.t()] | nil
+
+  @type t :: %__MODULE__{availability: availability(), plan_usage: plan_usage()}
 
   @doc "Returns the status of a route nobody has checked yet."
   @spec unknown() :: t()
   def unknown, do: %__MODULE__{availability: :unknown}
 
-  @doc "Builds a status from a route-reported availability, without plan usage."
+  @doc "Builds a status from a route-reported availability, before any usage report."
   @spec new(term()) :: {:ok, t()} | {:error, :invalid_status}
   def new(%__MODULE__{availability: availability}), do: new(availability)
   def new(:unknown), do: {:ok, unknown()}
@@ -42,6 +45,11 @@ defmodule MingaAgent.InferenceRoute.Status do
   @spec with_plan_usage(t(), [PlanWindow.t()] | nil) :: t()
   def with_plan_usage(%__MODULE__{} = status, windows) when is_list(windows) or is_nil(windows),
     do: %{status | plan_usage: windows}
+
+  @doc "Returns the last reported plan windows, or nil when the route has reported none or not reported yet."
+  @spec plan_windows(t()) :: [PlanWindow.t()] | nil
+  def plan_windows(%__MODULE__{plan_usage: :unreported}), do: nil
+  def plan_windows(%__MODULE__{plan_usage: windows}), do: windows
 
   @doc "Returns true when the route has reported it can serve requests."
   @spec ready?(t()) :: boolean()

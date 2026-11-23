@@ -91,6 +91,18 @@ const (
 	CompletionKindEnum     CompletionKind = 12
 )
 
+// PickerStatusTone is a generated enum (repr u8).
+type PickerStatusTone uint8
+
+const (
+	PickerStatusToneNone     PickerStatusTone = 0
+	PickerStatusToneReady    PickerStatusTone = 1
+	PickerStatusToneWarn     PickerStatusTone = 2
+	PickerStatusToneError    PickerStatusTone = 3
+	PickerStatusToneChecking PickerStatusTone = 4
+	PickerStatusToneNeutral  PickerStatusTone = 5
+)
+
 // GitFileStatus is a generated enum (repr u8).
 type GitFileStatus uint8
 
@@ -290,6 +302,9 @@ type PickerItem struct {
 	Annotation     string
 	MatchPositions []uint16
 	ActivationID   uint32
+	Status         string
+	StatusTone     PickerStatusTone
+	Group          string
 }
 
 type WhichKeyBinding struct {

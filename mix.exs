@@ -34,6 +34,9 @@ defmodule Minga.MixProject do
           :thousand_island,
           :websock
         ],
+        # dialyxir's :apps_direct walk includes the project app, which put Minga's own ~10K
+        # contracts (1.5 GB) into the dependency PLT. Analysis re-derives them anyway (#3869).
+        plt_ignore_apps: [:minga],
         ignore_warnings: ".dialyzer_ignore.exs"
       ],
       consolidate_protocols: Mix.env() != :prod,

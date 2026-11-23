@@ -135,6 +135,22 @@ public final class TabBarState {
         return tabs
     }
 
+    /// Whether the active tab the tab bar shows is a file with unsaved changes.
+    ///
+    /// Derived from the same entries as `displayTabs`, so the window's unsaved
+    /// indicator always agrees with the tab bar. Agent tabs and an empty tab bar
+    /// report false.
+    public var activeTabHasUnsavedChanges: Bool {
+        if hasCanonicalWorkspaceTabs {
+            let index = Int(activeIndex)
+            guard workspaceTabs.indices.contains(index) else { return false }
+            let tab = workspaceTabs[index]
+            return tab.isDirty && !tab.isAgent
+        }
+        guard let tab = tabs.first(where: { $0.isActive }) else { return false }
+        return tab.isDirty && !tab.isAgent
+    }
+
     // MARK: - Tab ordering
 
     public func canMoveTabLeft(_ tab: TabEntry) -> Bool {

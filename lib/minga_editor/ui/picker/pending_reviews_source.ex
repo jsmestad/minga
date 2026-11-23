@@ -118,8 +118,7 @@ defmodule MingaEditor.UI.Picker.PendingReviewsSource do
         description:
           "#{state_label} • #{WorkspaceReview.draft_count(review)} draft file(s) • #{WorkspaceReview.conflict_count(review)} conflict file(s) • Last activity #{activity.label}",
         annotation: state_label,
-        icon_color: workspace.color,
-        two_line: true
+        icon_color: workspace.color
       }
     }
   end
@@ -172,8 +171,7 @@ defmodule MingaEditor.UI.Picker.PendingReviewsSource do
       id: :empty,
       label: "No workspaces awaiting review",
       description: "All workspace drafts are clean or still in progress.",
-      annotation: nil,
-      two_line: true
+      annotation: nil
     }
   end
 end

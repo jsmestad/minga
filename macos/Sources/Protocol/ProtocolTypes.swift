@@ -566,20 +566,36 @@ public enum Wire {
 
     // MARK: - Picker
 
+    /// The tone of a picker item's status chip. The BEAM decides it; the frontend maps it to theme colors.
+    public enum PickerStatusTone: UInt8, Sendable, Equatable {
+        /// The item has no status chip.
+        case absent = 0
+        case ready = 1
+        case warn = 2
+        case error = 3
+        case checking = 4
+        case neutral = 5
+    }
+
     /// A picker item from gui_picker (v2 extended format).
     public struct PickerItem: Sendable {
         public let iconColor: UInt32  // 24-bit RGB
-        public let flags: UInt8       // bit 0: two_line, bit 1: marked
+        public let flags: UInt8       // bit 1: marked, bit 3: active (current value); bits 0 and 2 are reserved
         public let label: String
         public let description: String
         public let annotation: String
         public let matchPositions: [UInt16]  // 0-based character indices of matched chars in label
         public let activationID: UInt32
+        /// Status chip text, rendered verbatim. Empty when the item has no chip.
+        public let status: String
+        public let statusTone: PickerStatusTone
+        /// The item's section, such as a model's route. Empty when the item has no section. Frontends draw a non-selectable header where the group changes.
+        public let group: String
 
-        public var isTwoLine: Bool { flags & 0x01 != 0 }
         public var isMarked: Bool { flags & 0x02 != 0 }
+        public var isActive: Bool { flags & 0x08 != 0 }
 
-        public init(iconColor: UInt32, flags: UInt8, label: String, description: String, annotation: String, matchPositions: [UInt16], activationID: UInt32 = 0) {
+        public init(iconColor: UInt32, flags: UInt8, label: String, description: String, annotation: String, matchPositions: [UInt16], activationID: UInt32 = 0, status: String = "", statusTone: PickerStatusTone = .absent, group: String = "") {
             self.iconColor = iconColor
             self.flags = flags
             self.label = label
@@ -587,6 +603,9 @@ public enum Wire {
             self.annotation = annotation
             self.matchPositions = matchPositions
             self.activationID = activationID
+            self.status = status
+            self.statusTone = statusTone
+            self.group = group
         }
     }
 

@@ -3,10 +3,13 @@ defmodule MingaEditor.UI.Picker.AgentModelSourceTest do
 
   alias MingaAgent.Credentials.Secret
   alias MingaAgent.Credentials.Snapshot
+  alias MingaAgent.InferenceRoute.Status
+  alias MingaAgent.InferenceRoute.StatusChangedEvent
   alias MingaAgent.InferenceRouteRegistry
   alias MingaAgent.ModelResolver
   alias MingaAgent.ModelCandidate
   alias MingaAgent.ModelSelection
+  alias MingaAgent.ModelSelection.Credential.ApiKey
   alias MingaAgent.ModelSelection.Credential.OAuth
   alias MingaAgent.Providers.Native
   alias MingaAgent.Session
@@ -25,12 +28,16 @@ defmodule MingaEditor.UI.Picker.AgentModelSourceTest do
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.Buffers
+  alias MingaEditor.State.Picker, as: PickerState
   alias MingaEditor.State.Search
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
+  alias MingaEditor.UI.Picker
+  alias MingaEditor.UI.Picker.AgentConnectionSource
   alias MingaEditor.UI.Picker.AgentModelSource
   alias MingaEditor.UI.Picker.Candidate
   alias MingaEditor.UI.Picker.Context
+  alias MingaEditor.UI.Picker.Item.Status, as: ItemStatus
   alias MingaEditor.UI.Theme
   alias MingaEditor.Viewport
   alias MingaEditor.VimState
@@ -61,7 +68,7 @@ defmodule MingaEditor.UI.Picker.AgentModelSourceTest do
         when session == self(), do: {:reply, {:error, message}, fixture}
   end
 
-  test "shows exact route, unverified status, favorite, and thinking controls" do
+  test "an API route row shows a ready chip and leads with its route, price, and context" do
     selection =
       ModelSelectionFixture.selection(
         model_provider: "openai",
@@ -71,7 +78,8 @@ defmodule MingaEditor.UI.Picker.AgentModelSourceTest do
         transport: "http",
         reasoning: %{effort: "low", options: ["off", "low", "high"]},
         limits: %{context: 128_000, input: nil, output: 8_192, request_output: 2_048},
-        capabilities: %{tools: true, images: true, streaming: true}
+        capabilities: %{tools: true, images: false, streaming: :unknown},
+        cost: %{input: 2.5, output: 10}
       )
 
     candidate = %ModelCandidate{selection: selection, favorite: true, current: true}
@@ -81,12 +89,17 @@ defmodule MingaEditor.UI.Picker.AgentModelSourceTest do
     assert item.id == ModelSelection.id(selection)
     assert item.active
     assert item.annotation == "★ favorite"
-    assert item.description =~ "openai via openai_chat"
-    assert item.description =~ "https://api.openai.com/v1/chat/completions"
-    assert item.description =~ "unverified catalog route"
-    assert item.description =~ "openai:env"
-    assert item.description =~ "thinking low (off/low/high)"
-    assert item.description =~ "tools yes, images yes, streaming yes"
+    assert item.status == ItemStatus.new(:ready, "Ready")
+
+    # The route is the row's group, so the description starts with the price. Only a capability the
+    # model lacks is named; supported and unknown ones are not.
+    assert item.group == "openai API"
+    assert item.description == "$2.5/10 per MTok · 128k ctx · thinking low · no images"
+    assert item.search_text =~ "openai API"
+
+    # The exact endpoint and credential stay searchable without filling the row.
+    assert item.search_text =~ "https://api.openai.com/v1/chat/completions"
+    assert item.search_text =~ "openai:env"
   end
 
   test "/model discovers Apple off the editor path and only activates it while ready" do
@@ -144,9 +157,10 @@ defmodule MingaEditor.UI.Picker.AgentModelSourceTest do
 
     assert [apple] = Enum.filter(items, &model_choice?/1)
     assert apple.label == "Apple Intelligence (On Device)"
-    assert apple.description =~ "No credentials"
-    assert apple.description =~ "Ready on this device"
-    assert apple.description =~ "Compact file tools"
+    assert apple.status == ItemStatus.new(:ready, "Ready")
+
+    assert apple.group == "On device"
+    assert apple.description == "4k ctx · no thinking controls · compact file tools, no images"
 
     assert [completion] = SlashCommand.completion_candidates(state, "model apple")
     assert completion.insert == "model #{apple.id}"
@@ -230,6 +244,178 @@ defmodule MingaEditor.UI.Picker.AgentModelSourceTest do
     assert Session.status(session) == :idle
   end
 
+  describe "connection actions" do
+    # An API-key route with a stored key and a signed-in ChatGPT route.
+    defp connected_candidates do
+      api =
+        ModelSelectionFixture.selection(
+          model_id: "gpt-4o",
+          display_name: "GPT-4o",
+          credential: ApiKey.new("openai", :file)
+        )
+
+      codex =
+        ModelSelectionFixture.selection(
+          request_provider: :openai_codex,
+          model_id: "gpt-5",
+          display_name: "GPT-5"
+        )
+
+      for selection <- [api, codex],
+          do: %ModelCandidate{selection: selection, favorite: false, current: false}
+    end
+
+    test "with a usable model, /model lists the models and one row for connection actions" do
+      session = start_supervised!({ModelPickerSession, connected_candidates()})
+      ctx = context(connection(session), 1)
+      items = AgentModelSource.candidates(ctx)
+
+      assert Enum.map(items, & &1.label) == ["GPT-4o", "GPT-5", "Connect another provider…"]
+      assert connect_row(items).status == nil
+      # Each route is a section; the connection row sits in its own trailing section.
+      assert Enum.map(items, & &1.group) == ["openai API", "ChatGPT", "Connections"]
+      refute Enum.at(items, 1).description =~ "ChatGPT"
+
+      child = items |> connect_row() |> child_items(ctx)
+      labels = Enum.map(child, & &1.label)
+
+      # Connected providers offer account actions instead of a first sign-in.
+      refute "Sign in with ChatGPT" in labels
+      refute "Connect openai with API key" in labels
+
+      for label <- [
+            "Sign in to ChatGPT again",
+            "Sign in to ChatGPT again manually",
+            "Sign out of ChatGPT",
+            "Replace openai API key",
+            "Remove openai API key",
+            "Connect anthropic with API key",
+            "Retry current connection"
+          ] do
+        assert label in labels, "missing #{label} in #{inspect(labels)}"
+      end
+
+      intents = Map.new(child, &{&1.label, &1.meta.intent})
+      assert intents["Sign in to ChatGPT again"] == {:connect, :oauth_browser}
+      assert intents["Sign out of ChatGPT"] == {:sign_out, "openai_codex"}
+      assert intents["Replace openai API key"] == {:connect, {:api_key, "openai"}}
+      assert intents["Remove openai API key"] == {:sign_out, "openai"}
+
+      groups = Map.new(child, &{&1.label, &1.group})
+      assert groups["Sign out of ChatGPT"] == "ChatGPT"
+      assert groups["Remove openai API key"] == "API keys"
+      assert groups["Connect anthropic with API key"] == "API keys"
+      assert groups["Retry current connection"] == "Connection"
+
+      assert child |> Enum.map(& &1.group) |> Enum.dedup() == [
+               "ChatGPT",
+               "API keys",
+               "Connection"
+             ]
+
+      signed_in = Enum.find(child, &(&1.label == "Sign in to ChatGPT again"))
+      assert signed_in.status == ItemStatus.new(:ready, "Signed in")
+    end
+
+    test "with no listed model, the connection actions stay in /model as first-run setup" do
+      session = start_supervised!({ModelPickerSession, []})
+
+      labels =
+        context(connection(session), 1) |> AgentModelSource.candidates() |> Enum.map(& &1.label)
+
+      assert Enum.take(labels, 2) == ["Sign in with ChatGPT", "Sign in with ChatGPT manually"]
+      assert "Connect openai with API key" in labels
+      assert Enum.take(labels, -1) == ["Retry current connection"]
+      refute "Connect another provider…" in labels
+    end
+
+    test "a setup in progress stays in /model beside the models" do
+      session = start_supervised!({ModelPickerSession, connected_candidates()})
+      connecting = %{connection(session) | operation: {:connecting, make_ref()}}
+      labels = context(connecting, 1) |> AgentModelSource.candidates() |> Enum.map(& &1.label)
+
+      assert labels == ["GPT-4o", "GPT-5", "Cancel connection setup", "Connect another provider…"]
+
+      groups = context(connecting, 1) |> AgentModelSource.candidates() |> Enum.map(& &1.group)
+      assert groups == ["openai API", "ChatGPT", "Setup in progress", "Connections"]
+    end
+
+    test "Escape in the connection picker returns to /model with its query and selection" do
+      session = start_supervised!({ModelPickerSession, connected_candidates()})
+      task_supervisor = start_supervised!({Task.Supervisor, []})
+      scheduler = start_supervised!({EffectScheduler, task_supervisor: task_supervisor})
+      :ok = EffectScheduler.attach(scheduler, self())
+      {state, _workspace_id} = editor_state(connection(session), "GPT-4o", scheduler)
+
+      assert {:ok, state} = SlashCommand.execute(state, "/model")
+      assert {:ok, state} = land_fetch(state, scheduler)
+      connect_id = {:connection, :connect_another_provider}
+
+      state =
+        PickerUI.update_picker(state, fn ps ->
+          picker = Picker.filter(ps.picker, "connect")
+          PickerState.update_picker(ps, Picker.select_id(picker, connect_id))
+        end)
+
+      state = PickerUI.handle_key(state, 13, 0)
+      assert %{source: AgentConnectionSource, load_status: :loading} = picker_ui(state)
+      assert picker_ui(state).picker.query == ""
+      assert {:ok, state} = land_fetch(state, scheduler)
+      assert Enum.any?(picker_ui(state).picker.items, &(&1.label == "Sign out of ChatGPT"))
+
+      state = PickerUI.handle_key(state, 27, 0)
+      model_picker = picker_ui(state)
+
+      assert model_picker.source == AgentModelSource
+      assert model_picker.load_status == :ready
+      assert model_picker.picker.query == "connect"
+      assert Picker.selected_id(model_picker.picker) == connect_id
+
+      # The rows come back as they were; returning does not discover models again.
+      assert Enum.map(model_picker.picker.items, & &1.label) ==
+               ["GPT-4o", "GPT-5", "Connect another provider…"]
+
+      refute_receive {:effect_result, ^scheduler, _outcome}, 50
+    end
+
+    test "a route status change while the connection picker is open lists /model again on Escape" do
+      session = start_supervised!({ModelPickerSession, connected_candidates()})
+      task_supervisor = start_supervised!({Task.Supervisor, []})
+      scheduler = start_supervised!({EffectScheduler, task_supervisor: task_supervisor})
+      :ok = EffectScheduler.attach(scheduler, self())
+      {state, _workspace_id} = editor_state(connection(session), "GPT-4o", scheduler)
+
+      assert {:ok, state} = SlashCommand.execute(state, "/model")
+      assert {:ok, state} = land_fetch(state, scheduler)
+      connect_id = {:connection, :connect_another_provider}
+
+      state =
+        PickerUI.update_picker(state, fn ps ->
+          picker = Picker.filter(ps.picker, "connect")
+          PickerState.update_picker(ps, Picker.select_id(picker, connect_id))
+        end)
+
+      state = PickerUI.handle_key(state, 13, 0)
+      assert {:ok, state} = land_fetch(state, scheduler)
+
+      # The event arrives while the child is open; the child itself is not listed again.
+      state = AgentModelSource.route_status_changed(state)
+      assert picker_ui(state).source == AgentConnectionSource
+      assert picker_ui(state).load_status == :ready
+      refute_receive {:effect_result, ^scheduler, _outcome}, 50
+
+      state = PickerUI.handle_key(state, 27, 0)
+      assert %{source: AgentModelSource, load_status: :loading} = picker_ui(state)
+      assert %{catalog: :listed, route_status: :current} = picker_ui(state).context
+
+      assert {:ok, state} = land_fetch(state, scheduler)
+      model_picker = picker_ui(state)
+      assert model_picker.load_status == :ready
+      assert model_picker.picker.query == "connect"
+      assert Picker.selected_id(model_picker.picker) == connect_id
+    end
+  end
+
   describe "contributed model routes" do
     setup do
       registry = :"picker_inference_routes_#{System.unique_integer([:positive])}"
@@ -248,9 +434,10 @@ defmodule MingaEditor.UI.Picker.AgentModelSourceTest do
       %{registry: registry}
     end
 
-    test "rows show route readiness, remedy, thinking, and capabilities from the route", %{
-      registry: registry
-    } do
+    test "rows show route readiness as a chip and the remedy, thinking, and capabilities as detail",
+         %{
+           registry: registry
+         } do
       InferenceRouteRegistry.refresh_availability(registry)
 
       candidates =
@@ -263,20 +450,40 @@ defmodule MingaEditor.UI.Picker.AgentModelSourceTest do
 
       session = start_supervised!({ModelPickerSession, candidates})
       items = model_items(context(connection(session), 1))
-      ready = Enum.find(items, &(&1.description =~ "Fixture Route"))
-      offline = Enum.find(items, &(&1.description =~ "Offline Route"))
+      ready = Enum.find(items, &(&1.group == "Fixture Route"))
+      offline = Enum.find(items, &(&1.group == "Offline Route"))
 
       assert ready.label == "Fixture Model"
-      assert ready.description =~ "Ready (fixture@example.com)"
-      assert ready.description =~ "200k ctx"
-      assert ready.description =~ "thinking off (off/low/high)"
-      assert ready.description =~ "tools yes, images yes, streaming yes"
-      assert ready.description =~ "subscription"
-      refute ready.description =~ "unverified catalog route"
+      assert ready.status == ItemStatus.new(:checking, "Checking…")
 
-      assert offline.description =~ "Unavailable: #{FixtureInferenceRoute.remedy()}"
-      refute offline.description =~ "unverified catalog route"
+      assert ready.description ==
+               "fixture@example.com · checking plan usage · 200k ctx · thinking off · tools, images, streaming"
+
+      assert offline.status == ItemStatus.new(:error, "Unavailable")
+
+      assert offline.description =~
+               ~r/^#{Regex.escape(FixtureInferenceRoute.remedy())} · 200k ctx/
+
+      refute offline.description =~ "Unavailable"
       assert Enum.all?([ready, offline], &(request_provider(&1) == :contributed))
+    end
+
+    test "routes that are not ready keep the connection actions in /model", %{registry: registry} do
+      candidates =
+        ModelResolver.candidates(
+          backend_spec: MingaAgent.ProviderPacks.Native.spec(),
+          credential_snapshot: Snapshot.new(%{}, nil),
+          models: [],
+          inference_routes: registry
+        )
+
+      session = start_supervised!({ModelPickerSession, candidates})
+      items = AgentModelSource.candidates(context(connection(session), 1))
+
+      # Neither route was checked, so no listed model can be used yet.
+      assert Enum.any?(items, &model_choice?/1)
+      assert "Sign in with ChatGPT" in Enum.map(items, & &1.label)
+      refute "Connect another provider…" in Enum.map(items, & &1.label)
     end
 
     test "contributed rows are runtime-gated discovery that a superseded fetch drops", %{
@@ -328,8 +535,9 @@ defmodule MingaEditor.UI.Picker.AgentModelSourceTest do
       {state, workspace_id} = editor_state(connection, "Prior Model", scheduler)
 
       items = model_items(context(connection, workspace_id))
-      offline = Enum.find(items, &(&1.description =~ "Offline Route"))
-      assert offline.description =~ "Unavailable: #{FixtureInferenceRoute.remedy()}"
+      offline = Enum.find(items, &(&1.group == "Offline Route"))
+      assert offline.status == ItemStatus.new(:error, "Unavailable")
+      assert offline.description =~ FixtureInferenceRoute.remedy()
 
       state = AgentModelSource.on_select(offline, state)
 
@@ -350,8 +558,10 @@ defmodule MingaEditor.UI.Picker.AgentModelSourceTest do
   describe "subscription route setup and plan usage" do
     setup do
       suffix = System.unique_integer([:positive])
+      events = :"picker_route_events_#{suffix}"
+      start_supervised!({Registry, keys: :duplicate, name: events}, id: events)
       registry = :"picker_setup_routes_#{suffix}"
-      start_supervised!({InferenceRouteRegistry, name: registry})
+      start_supervised!({InferenceRouteRegistry, name: registry, events: events})
 
       routes = [
         {"setup#{suffix}", "Setup Fixture"},
@@ -400,6 +610,7 @@ defmodule MingaEditor.UI.Picker.AgentModelSourceTest do
         )
 
       %{
+        events: events,
         registry: registry,
         reporters: reporters,
         session: session,
@@ -412,14 +623,25 @@ defmodule MingaEditor.UI.Picker.AgentModelSourceTest do
 
     test "setup rows show each route's readiness and never ask for a secret", ctx do
       %{connection: connection} = Session.editor_snapshot(ctx.session)
-      items = AgentModelSource.candidates(context(connection, 1))
-      rows = setup_rows(items)
+      ctx_1 = context(connection, 1)
+      items = AgentModelSource.candidates(ctx_1)
+
+      # Discovery found a ready route, so its model is usable and the setup rows move behind
+      # "Connect another provider…".
+      assert setup_rows(items) == []
+      assert connect_row(items)
+      rows = items |> connect_row() |> child_items(ctx_1) |> setup_rows()
 
       ready = Enum.find(rows, &(&1.label == "Use Setup Fixture"))
       offline = Enum.find(rows, &(&1.label == "Use Offline Setup"))
 
-      assert ready.description =~ "Minga never sees your login."
-      assert ready.description =~ "Ready: fixture@example.com"
+      # Readiness is the chip; the setup text and the account or remedy stay readable as detail.
+      assert ready.status == ItemStatus.new(:ready, "Ready")
+
+      assert ready.description ==
+               "Sign in with the fixture CLI. Minga never sees your login. · fixture@example.com"
+
+      assert offline.status == ItemStatus.new(:error, "Unavailable")
       assert offline.description =~ FixtureInferenceRoute.remedy()
       assert ready.meta.intent == {:check_route, ctx.setup_id, "Setup Fixture"}
 
@@ -434,15 +656,19 @@ defmodule MingaEditor.UI.Picker.AgentModelSourceTest do
       :ok = EffectScheduler.attach(scheduler, self())
       {state, workspace_id} = editor_state(connection, "Prior Model", scheduler)
 
+      picker_context = context(connection, workspace_id)
+      items = AgentModelSource.candidates(picker_context)
+
       [row | _rest] =
-        context(connection, workspace_id)
-        |> AgentModelSource.candidates()
+        items
+        |> connect_row()
+        |> child_items(picker_context)
         |> setup_rows()
         |> Enum.filter(&(&1.label == "Use Setup Fixture"))
 
       assert_receive {:fixture_availability_checked, _id, _discovery_caller}
 
-      state = AgentModelSource.on_select(row, state)
+      state = AgentConnectionSource.on_select(row, state)
       assert state.shell_runtime.state.notice.message == "Checking Setup Fixture…"
 
       setup_id = ctx.setup_id
@@ -503,26 +729,10 @@ defmodule MingaEditor.UI.Picker.AgentModelSourceTest do
                Minga.Command.Registry.lookup(Minga.Command.Registry, :agent_pick_model)
     end
 
-    test "subscription rows show reported usage and nothing without data", ctx do
-      opts = [
-        backend_spec: MingaAgent.ProviderPacks.Native.spec(),
-        credential_snapshot: Snapshot.new(%{}, nil),
-        models: [],
-        inference_routes: ctx.registry
-      ]
-
-      session =
-        start_supervised!({ModelPickerSession, ModelResolver.candidates(opts)},
-          id: :without_usage
-        )
-
-      row =
-        Enum.find(
-          model_items(context(connection(session), 1)),
-          &(&1.description =~ "Setup Fixture")
-        )
-
-      refute row.description =~ "limit"
+    test "an unchecked route says so in its chip and keeps its plan reset as detail", ctx do
+      rows = route_items(ctx.registry)
+      assert rows["Setup Fixture"].status == ItemStatus.new(:neutral, "Not checked")
+      refute rows["Setup Fixture"].description =~ "limit"
 
       resets_at = DateTime.add(DateTime.utc_now(), 3_600)
 
@@ -532,19 +742,208 @@ defmodule MingaEditor.UI.Picker.AgentModelSourceTest do
           %{kind: "seven_day", utilization: 0.31, resets_at: nil, status: :allowed}
         ])
 
-      session =
-        start_supervised!({ModelPickerSession, ModelResolver.candidates(opts)}, id: :with_usage)
+      row = route_items(ctx.registry)["Setup Fixture"]
+      assert row.status == ItemStatus.new(:neutral, "Not checked")
+      # A reset after midnight local time carries a weekday ("Sun 12:32 AM").
+      assert row.description =~
+               ~r/^5h limit resets (\w{3} )?\d{1,2}:\d{2} (AM|PM) · /
 
-      row =
-        Enum.find(
-          model_items(context(connection(session), 1)),
-          &(&1.description =~ "Setup Fixture")
+      refute row.description =~ "7d"
+      refute row.description =~ "%"
+    end
+
+    test "model row chips show readiness and the busiest plan window by tone", ctx do
+      reporter = ctx.reporters[ctx.setup_id]
+
+      {:ok, _reporter} =
+        InferenceRouteRegistry.register(
+          ctx.registry,
+          [
+            source: {:extension, :fixture_bridge},
+            id: "metered#{ctx.setup_id}",
+            module: FixtureInferenceRoute,
+            display_name: "Metered Fixture"
+          ],
+          config: [models: [FixtureInferenceRoute.model(id: "metered-model", cost: :metered)]]
         )
 
-      # A reset after midnight local time carries a weekday ("Sun 12:32 AM").
-      assert row.description =~ ~r/82% of 5h limit · resets (\w{3} )?\d{1,2}:\d{2} (AM|PM)/
-      refute row.description =~ "7d"
+      InferenceRouteRegistry.refresh_availability(ctx.registry)
+      :ok = InferenceRouteRegistry.report_status(ctx.registry, reporter, {:ready, "Claude Max"})
+      resets_at = DateTime.add(DateTime.utc_now(), 3_600)
+
+      window = fn utilization, status ->
+        %{kind: "five_hour", utilization: utilization, resets_at: resets_at, status: status}
+      end
+
+      rows = route_items(ctx.registry)
+      assert rows["Setup Fixture"].status == ItemStatus.new(:checking, "Checking…")
+
+      assert rows["Setup Fixture"].description =~ ~r/^Claude Max · checking plan usage · 200k ctx/
+
+      assert rows["Metered Fixture"].status == ItemStatus.new(:ready, "Ready")
+      refute rows["Metered Fixture"].description =~ "plan usage"
+      assert rows["Offline Setup"].status == ItemStatus.new(:error, "Unavailable")
+
+      assert rows["Offline Setup"].description =~
+               ~r/^#{Regex.escape(FixtureInferenceRoute.remedy())} · 200k ctx/
+
+      cases = [
+        {[window.(0.45, :allowed)], ItemStatus.new(:ready, "Ready · 45%")},
+        {[window.(0.79, :allowed)], ItemStatus.new(:ready, "Ready · 79%")},
+        {[window.(0.82, :warning)], ItemStatus.new(:warn, "Ready · 82%")},
+        {[window.(1.0, :warning)], ItemStatus.new(:error, "Limit reached")},
+        {[window.(0.6, :rejected)], ItemStatus.new(:error, "Limit reached")},
+        {[], ItemStatus.new(:ready, "Ready")}
+      ]
+
+      for {windows, chip} <- cases do
+        :ok = InferenceRouteRegistry.report_usage(ctx.registry, reporter, windows)
+        row = route_items(ctx.registry)["Setup Fixture"]
+        assert row.status == chip, "#{inspect(windows)} gave #{inspect(row.status)}"
+        # The chip is the only usage signal; the description keeps the account and the reset time.
+        refute row.description =~ "%"
+        refute row.description =~ "Ready"
+        refute row.description =~ "subscription"
+        assert row.description =~ ~r/^Claude Max/
+        assert windows == [] != (row.description =~ ~r/5h limit resets (\w{3} )?\d{1,2}:\d{2}/)
+      end
     end
+
+    test "a ready subscription route says it is checking plan usage until its first report",
+         ctx do
+      {:ok, _reporter} =
+        InferenceRouteRegistry.register(
+          ctx.registry,
+          [
+            source: {:extension, :fixture_bridge},
+            id: "metered#{ctx.setup_id}",
+            module: FixtureInferenceRoute,
+            display_name: "Metered Fixture"
+          ],
+          config: [models: [FixtureInferenceRoute.model(id: "metered-model", cost: :metered)]]
+        )
+
+      :ok =
+        InferenceRouteRegistry.report_status(
+          ctx.registry,
+          ctx.reporters[ctx.setup_id],
+          {:ready, "me"}
+        )
+
+      rows = route_items(ctx.registry)
+
+      # Usage follows readiness; the metered and the unavailable routes have no plan to wait for.
+      assert rows["Setup Fixture"].status == ItemStatus.new(:checking, "Checking…")
+      assert rows["Setup Fixture"].description =~ ~r/^me · checking plan usage/
+      assert rows["Offline Setup"].status.tone != :checking
+      assert rows["Metered Fixture"].status.tone != :checking
+      refute rows["Metered Fixture"].description =~ "checking"
+
+      :ok = InferenceRouteRegistry.report_usage(ctx.registry, ctx.reporters[ctx.setup_id], [])
+
+      rows = route_items(ctx.registry)
+      assert rows["Setup Fixture"].status == ItemStatus.new(:ready, "Ready")
+      refute rows["Setup Fixture"].description =~ "checking"
+      refute rows["Setup Fixture"].description =~ "limit"
+    end
+
+    test "an open chooser lists usage as soon as a route reports it and keeps query and selection",
+         ctx do
+      :ok = Minga.Events.subscribe(:inference_route_status_changed, registry: ctx.events)
+      %{connection: connection} = Session.editor_snapshot(ctx.session)
+      task_supervisor = start_supervised!({Task.Supervisor, []})
+      scheduler = start_supervised!({EffectScheduler, task_supervisor: task_supervisor})
+      :ok = EffectScheduler.attach(scheduler, self())
+      {state, _workspace_id} = editor_state(connection, "Prior Model", scheduler)
+      assert {:ok, state} = SlashCommand.execute(state, "/model")
+
+      # Discovery checks the route and publishes its readiness while the first fetch is in flight.
+      setup_id = ctx.setup_id
+      assert_receive {:fixture_availability_checked, ^setup_id, _worker}, 1_000
+
+      assert_receive {:minga_event, :inference_route_status_changed,
+                      %StatusChangedEvent{route_id: ^setup_id}} = ready_event,
+                     1_000
+
+      assert {:noreply, state} = MingaEditor.handle_info(ready_event, state)
+      assert {:ok, state} = land_fetch(state, scheduler)
+
+      # A change that arrived during the fetch is listed again after it lands, without a new check.
+      assert picker_ui(state).load_status == :loading
+      assert {:ok, state} = land_fetch(state, scheduler)
+      refute_received {:fixture_availability_checked, _id, _caller}
+
+      assert row_item(state, "Setup Fixture").status == ItemStatus.new(:checking, "Checking…")
+
+      state =
+        PickerUI.update_picker(state, fn ps ->
+          filtered = Picker.filter(ps.picker, "fixture model")
+          model = Enum.find(filtered.filtered, &(&1.group == "Setup Fixture"))
+          PickerState.update_picker(ps, Picker.select_id(filtered, model.id))
+        end)
+
+      selected = Picker.selected_id(picker_ui(state).picker)
+      refute selected == Picker.selected_id(Picker.select_index(picker_ui(state).picker, 0))
+
+      :ok =
+        InferenceRouteRegistry.report_usage(ctx.registry, ctx.reporters[setup_id], [
+          %{kind: "five_hour", utilization: 0.45, resets_at: nil, status: :allowed}
+        ])
+
+      assert_receive {:minga_event, :inference_route_status_changed,
+                      %StatusChangedEvent{status: %Status{plan_usage: [_window]}}} = usage_event,
+                     1_000
+
+      assert {:noreply, state} = MingaEditor.handle_info(usage_event, state)
+      assert {:ok, state} = land_fetch(state, scheduler)
+      refute_received {:fixture_availability_checked, _id, _caller}
+
+      assert row_item(state, "Setup Fixture").status == ItemStatus.new(:ready, "Ready · 45%")
+      assert row_item(state, "Setup Fixture").description =~ "fixture@example.com · 5h limit ·"
+
+      assert picker_ui(state).picker.query == "fixture model"
+      assert Picker.selected_id(picker_ui(state).picker) == selected
+    end
+  end
+
+  # Model rows by route display name (the row's group), from a session that lists the registry's current routes.
+  defp route_items(registry) do
+    opts = [
+      backend_spec: MingaAgent.ProviderPacks.Native.spec(),
+      credential_snapshot: Snapshot.new(%{}, nil),
+      models: [],
+      inference_routes: registry
+    ]
+
+    session =
+      start_supervised!({ModelPickerSession, ModelResolver.candidates(opts)},
+        id: make_ref()
+      )
+
+    context(connection(session), 1)
+    |> model_items()
+    |> Map.new(fn item -> {item.group, item} end)
+  end
+
+  defp land_fetch(state, scheduler) do
+    assert_receive {:effect_result, ^scheduler,
+                    %Outcome{value: {:completed, {:ok, _items, _candidates, _meta}}} = fetched},
+                   1_000
+
+    {:noreply, state} = MingaEditor.handle_info({:effect_result, scheduler, fetched}, state)
+    {:ok, state}
+  end
+
+  defp picker_ui(state) do
+    {:picker, %{picker_ui: picker_ui}} = state.shell_runtime.state.modal
+    picker_ui
+  end
+
+  defp row_item(state, route_name) do
+    Enum.find(
+      picker_ui(state).picker.items,
+      &(model_choice?(&1) and &1.group == route_name)
+    )
   end
 
   defp start_codex_session(plug, path \\ "/tmp/model-picker-oauth.json") do
@@ -592,8 +991,15 @@ defmodule MingaEditor.UI.Picker.AgentModelSourceTest do
     assert [item] = Enum.filter(items, &model_choice?/1)
 
     assert request_provider(item) == :openai
-    assert Enum.any?(items, &match?({:connect, _}, &1.meta.intent))
     assert status =~ "/login"
+
+    # The API-key model is usable, so connection actions sit behind one row. ChatGPT lists no
+    # model, so the child still offers a first sign-in.
+    refute Enum.any?(items, &match?({:connect, _}, &1.meta.intent))
+    assert connect_row(items)
+    labels = items |> connect_row() |> child_items(ctx) |> Enum.map(& &1.label)
+    assert "Sign in with ChatGPT" in labels
+    refute "Connect openai with API key" in labels
     assert {:ok, [candidate]} = Session.get_available_models(session)
     assert candidate.selection.route.request_provider == :openai
 
@@ -760,7 +1166,7 @@ defmodule MingaEditor.UI.Picker.AgentModelSourceTest do
 
     assert Enum.map(items, & &1.label) == ["Shared Model", "Shared Model"]
     assert items |> Enum.map(& &1.id) |> Enum.uniq() |> length() == 2
-    assert Enum.all?(items, &String.contains?(&1.description, "api.openai.example"))
+    assert Enum.all?(items, &String.contains?(&1.search_text, "api.openai.example"))
   end
 
   test "rejected picker selection preserves the prior visible model" do
@@ -902,6 +1308,17 @@ defmodule MingaEditor.UI.Picker.AgentModelSourceTest do
       capabilities: %{},
       theme: Theme.get!(:doom_one)
     }
+  end
+
+  defp connect_row(items),
+    do: Enum.find(items, &(&1.id == {:connection, :connect_another_provider}))
+
+  # The rows of the child picker that a "Connect another provider…" row opens.
+  defp child_items(item, %Context{picker_ui: %{context: origin}} = ctx) do
+    assert {:stay_open, {:nested, AgentConnectionSource, child}} =
+             AgentModelSource.selection_disposition(item, origin)
+
+    AgentConnectionSource.candidates(%{ctx | picker_ui: %{context: child}})
   end
 
   defp model_items(context) do

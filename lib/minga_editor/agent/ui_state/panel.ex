@@ -251,7 +251,7 @@ defmodule MingaEditor.Agent.UIState.Panel do
     %{panel | mention_completion: nil}
   end
 
-  @doc "Increments the message version counter. Used to invalidate the GUI fingerprint cache when message content changes (collapse toggles, new messages, etc.)."
+  @doc "Records a transcript content revision (streamed text, collapse toggles, new messages). It does not change the presentation epoch."
   @spec bump_message_version(t()) :: t()
   def bump_message_version(%__MODULE__{transcript: projection} = panel) do
     %{panel | transcript: TranscriptProjection.bump_version(projection)}

@@ -62,7 +62,11 @@ defmodule MingaEditor.UI.Picker.Source do
   @typedoc "Decision made before PickerUI closes a confirmed selection."
   @type selection_disposition :: :accept | {:stay_open, term()} | {:reject, String.t()}
 
-  @doc "Allows a source to navigate in the current picker or reject a stale selection before close."
+  @doc """
+  Allows a source to navigate in the current picker or reject a stale selection before close.
+
+  `{:stay_open, {:nested, child_source, child_context}}` opens `child_source` as a child picker in the same modal. Escape or `C-g` in the child returns to this picker with its query and selection; selecting a child item closes both.
+  """
   @callback selection_disposition(Picker.item(), term()) :: selection_disposition()
 
   @doc """

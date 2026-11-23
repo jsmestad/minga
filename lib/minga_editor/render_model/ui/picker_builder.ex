@@ -171,31 +171,42 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilder do
     end
   end
 
-  # Normalize one picker source item into the wire-shaped map the generated
-  # `encode_picker_item/1` consumes. All derivation lives here (ruling 4): the
-  # `flags` byte, the `icon_color || 0` / `annotation || ""` nil-vs-empty
-  # defaulting. (The source `description` is already typed non-nil with a ""
-  # default, so it needs no defaulting.) Wire limits are enforced by the adapter,
-  # which rejects oversized values without changing this semantic model.
+  # Normalize one picker source item into the wire-shaped map the generated `encode_picker_item/1`
+  # consumes. All derivation lives here (ruling 4): the `flags` byte, the `icon_color || 0` /
+  # `annotation || ""` / `group || ""` nil-vs-empty defaulting, and flattening the status chip into text and tone.
+  # (The source `description` is already typed non-nil with a "" default, so it needs no
+  # defaulting.) Wire limits are enforced by the adapter, which rejects oversized values without
+  # changing this semantic model.
   @spec item_model(Picker.t(), Picker.Item.t(), non_neg_integer()) :: PickerModel.item()
   defp item_model(picker, item, activation_id) do
+    {status, status_tone} = status_fields(item.status)
+
     %{
       icon_color: item.icon_color || 0,
-      flags: item_flags(item, Picker.marked?(picker, item)),
+      flags: item_flags(Picker.marked?(picker, item), item.active),
       label: item.label,
       description: item.description,
       annotation: item.annotation || "",
       match_positions: item.match_positions,
-      activation_id: activation_id
+      activation_id: activation_id,
+      status: status,
+      status_tone: status_tone,
+      group: item.group || ""
     }
   end
 
-  @spec item_flags(Picker.Item.t(), boolean()) :: non_neg_integer()
-  defp item_flags(item, marked?) do
-    two_line = if item.two_line, do: 1, else: 0
-    marked = if marked?, do: 1, else: 0
-    bor(two_line, marked <<< 1)
-  end
+  # Bit 1 marks a multi-select item and bit 3 the current value. Bits 0 and 2 are reserved and stay
+  # clear.
+  @spec item_flags(boolean(), boolean()) :: non_neg_integer()
+  defp item_flags(marked?, active?), do: bor(flag(marked?) <<< 1, flag(active?) <<< 3)
+
+  @spec flag(boolean()) :: 0 | 1
+  defp flag(true), do: 1
+  defp flag(false), do: 0
+
+  @spec status_fields(Picker.Item.Status.t() | nil) :: {String.t(), PickerModel.status_tone()}
+  defp status_fields(nil), do: {"", :none}
+  defp status_fields(%Picker.Item.Status{tone: tone, text: text}), do: {text, tone}
 
   @spec action_menu_model(term(), ActivationOffer.t()) :: ActionMenu.t() | nil
   defp action_menu_model(nil, _activation_offer), do: nil

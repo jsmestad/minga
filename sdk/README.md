@@ -106,7 +106,7 @@ Minga.Extension.ModelRoutes.report_usage(reporter, [
 ])
 ```
 
-Report an empty list when you have no usage data; Minga then shows nothing.
+Report an empty list when you have no usage data; Minga then shows nothing. Until a ready route that offers subscription models makes its first report, `/model` says its plan usage is being checked, so report an empty list when a usage check fails too.
 
 `CompanyProxy.Route` implements the `MingaAgent.InferenceRoute` behaviour: `models/1`, `availability/2`, `stream/1`, and `classify_error/1`. The route contract uses only Minga-owned values, so it stays stable when Minga changes its internal model library. See [Model routes](https://github.com/jsmestad/minga/blob/main/docs/EXTENSION_API.md#model-routes) for a complete route.
 

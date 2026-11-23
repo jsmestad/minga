@@ -8,6 +8,23 @@
 import AppKit
 import SwiftUI
 
+/// Test hook that records each evaluation of the scrolling file tree content.
+/// Production leaves it nil; tests install it to prove which scroll motion re-evaluates the tree.
+struct FileTreeEvaluationProbe: Sendable {
+    let record: @MainActor @Sendable () -> Void
+}
+
+private struct FileTreeEvaluationProbeKey: EnvironmentKey {
+    static let defaultValue: FileTreeEvaluationProbe? = nil
+}
+
+extension EnvironmentValues {
+    var fileTreeEvaluationProbe: FileTreeEvaluationProbe? {
+        get { self[FileTreeEvaluationProbeKey.self] }
+        set { self[FileTreeEvaluationProbeKey.self] = newValue }
+    }
+}
+
 /// The file tree sidebar rendered on the left side of the window.
 public struct FileTreeView: View {
     public enum SemanticIntent: UInt8, Equatable, Sendable {
@@ -49,12 +66,14 @@ public struct FileTreeView: View {
     private let chevronWidth: CGFloat = 12
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.fileTreeEvaluationProbe) private var evaluationProbe
 
     private var animDuration: Double {
         reduceMotion ? 0 : 0.15
     }
 
-    @State private var scrollOffset: CGFloat = 0
+    /// Index of the row under the top edge of the visible tree. Only row-boundary crossings change it, so sub-row scrolling does not re-evaluate the tree.
+    @State private var topRow = 0
     @State private var dropTargetEntryId: String? = nil
     @State private var lastClickEntryId: String? = nil
     @State private var lastClickTime: Date? = nil
@@ -108,6 +127,7 @@ public struct FileTreeView: View {
             .clipped()
         } else {
             ScrollViewReader { proxy in
+                let _ = evaluationProbe?.record()
                 ScrollView(.vertical, showsIndicators: showsScrollIndicators) {
                     LazyVStack(spacing: 0) {
                         ForEach(fileTreeState.entries) { entry in
@@ -115,18 +135,11 @@ public struct FileTreeView: View {
                         }
                     }
                     .padding(.top, Spacing.hairline)
-                    .background(
-                        GeometryReader { geo in
-                            Color.clear.preference(
-                                key: ScrollOffsetKey.self,
-                                value: geo.frame(in: .named("fileTreeScroll")).minY
-                            )
-                        }
-                    )
                 }
-                .coordinateSpace(name: "fileTreeScroll")
-                .onPreferenceChange(ScrollOffsetKey.self) { value in
-                    scrollOffset = value
+                .onScrollGeometryChange(for: Int.self) { [topPadding = Spacing.hairline, rowHeight] geometry in
+                    Self.topRow(contentOffsetY: geometry.contentOffset.y, contentInsetTop: geometry.contentInsets.top, topPadding: topPadding, rowHeight: rowHeight)
+                } action: { _, newTopRow in
+                    topRow = newTopRow
                 }
                 .safeAreaInset(edge: .top, spacing: 0) {
                     stickyParentHeader
@@ -219,7 +232,7 @@ public struct FileTreeView: View {
     /// a directory's own row so you always know where you are in the tree.
     @ViewBuilder
     private var stickyParentHeader: some View {
-        let parents = stickyParentEntries()
+        let parents = Self.stickyParents(in: fileTreeState.entries, topRow: topRow)
         if !parents.isEmpty {
             VStack(spacing: 0) {
                 ForEach(parents) { parent in
@@ -260,18 +273,26 @@ public struct FileTreeView: View {
         }
     }
 
-    /// Computes the parent directory entries that should be pinned at the top.
-    /// Returns directories whose rows have scrolled off the top, ordered by depth.
-    private func stickyParentEntries() -> [FileTreeEntry] {
-        let entries = fileTreeState.entries
+    /// The index of the row under the top edge of the visible content, given the scroll view's geometry.
+    ///
+    /// `contentOffsetY + contentInsetTop` is the distance scrolled past the inset content top, so the sticky header (a top safe-area inset) never moves the row boundaries.
+    nonisolated static func topRow(contentOffsetY: CGFloat, contentInsetTop: CGFloat, topPadding: CGFloat, rowHeight: CGFloat) -> Int {
+        topRow(scrolledDistance: contentOffsetY + contentInsetTop, topPadding: topPadding, rowHeight: rowHeight)
+    }
+
+    /// The index of the row under the top edge of the visible content.
+    ///
+    /// Row `n` spans `topPadding + n * rowHeight` up to the next row in content space, so the top padding, the resting position, and overscroll all resolve to row zero.
+    nonisolated static func topRow(scrolledDistance: CGFloat, topPadding: CGFloat, rowHeight: CGFloat) -> Int {
+        Int((max(0, scrolledDistance - topPadding) / rowHeight).rounded(.down))
+    }
+
+    /// The parent directories pinned above the tree when `topRow` is the top visible row.
+    /// Returns directories whose rows have scrolled off the top, ordered by depth, and nothing when the top row is not nested.
+    static func stickyParents(in entries: [FileTreeEntry], topRow: Int) -> [FileTreeEntry] {
         guard !entries.isEmpty else { return [] }
 
-        // The 2px top padding shifts the content down. scrollOffset is negative
-        // when scrolled down (content moves up).
-        let adjustedOffset = -(scrollOffset - Spacing.hairline)
-        guard adjustedOffset > 0 else { return [] }
-
-        let topIndex = min(Int(adjustedOffset / rowHeight), entries.count - 1)
+        let topIndex = min(max(topRow, 0), entries.count - 1)
         let topEntry = entries[topIndex]
 
         // Only show sticky headers when the top visible entry is nested
@@ -630,14 +651,6 @@ private struct FileTreeEntryAccessibilityActions: ViewModifier {
                     sendAction?(.semantic(intent: .delete, generation: generation, itemID: entry.id))
                 }
         }
-    }
-}
-
-/// Preference key for tracking scroll offset within the file tree.
-private struct ScrollOffsetKey: PreferenceKey {
-    nonisolated(unsafe) static var defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = nextValue()
     }
 }
 

@@ -403,6 +403,125 @@ struct CommandDispatcherRoutingTests {
         #expect(gui.tabBarState.activeIndex == 0)
     }
 
+    private func documentTab(id: UInt32, active: Bool, dirty: Bool, agent: Bool = false) -> Wire.TabEntry {
+        Wire.TabEntry(id: id, groupId: 0, isActive: active, isDirty: dirty, isAgent: agent,
+                      hasAttention: false, agentStatus: 0, isPinned: false, tintColorRGB: 0, icon: "", label: "tab\(id)")
+    }
+
+    @MainActor
+    private func documentEditedValues(_ effects: [ApplicationCommitEffect]) -> [Bool] {
+        var values: [Bool] = []
+        for effect in effects {
+            if case .documentEditedChanged(let edited) = effect { values.append(edited) }
+        }
+        return values
+    }
+
+    @Test("an unsaved active file tab marks the window edited, once, and saving clears it")
+    @MainActor func documentEditedFollowsActiveFileTab() {
+        var effects: [ApplicationCommitEffect] = []
+        let (dispatcher, _) = makeDispatcher { effects.append($0) }
+
+        dispatcher.applyForTesting(.guiTabBar(activeIndex: 0, tabs: [documentTab(id: 1, active: true, dirty: false)]))
+        #expect(documentEditedValues(effects) == [])
+
+        dispatcher.applyForTesting(.guiTabBar(activeIndex: 0, tabs: [documentTab(id: 1, active: true, dirty: true)]))
+        dispatcher.applyForTesting(.guiTabBar(activeIndex: 0, tabs: [documentTab(id: 1, active: true, dirty: true)]))
+        #expect(documentEditedValues(effects) == [true])
+
+        dispatcher.applyForTesting(.guiTabBar(activeIndex: 0, tabs: [documentTab(id: 1, active: true, dirty: false)]))
+        #expect(documentEditedValues(effects) == [true, false])
+    }
+
+    @Test("switching tabs follows the active tab's unsaved state")
+    @MainActor func documentEditedFollowsTabSwitch() {
+        var effects: [ApplicationCommitEffect] = []
+        let (dispatcher, _) = makeDispatcher { effects.append($0) }
+        let dirtyActive: [Wire.TabEntry] = [documentTab(id: 1, active: true, dirty: true), documentTab(id: 2, active: false, dirty: false)]
+        let cleanActive: [Wire.TabEntry] = [documentTab(id: 1, active: false, dirty: true), documentTab(id: 2, active: true, dirty: false)]
+
+        dispatcher.applyForTesting(.guiTabBar(activeIndex: 0, tabs: dirtyActive))
+        dispatcher.applyForTesting(.guiTabBar(activeIndex: 1, tabs: cleanActive))
+        dispatcher.applyForTesting(.guiTabBar(activeIndex: 0, tabs: dirtyActive))
+
+        #expect(documentEditedValues(effects) == [true, false, true])
+    }
+
+    @Test("agent tabs and an empty tab bar never mark the window edited")
+    @MainActor func documentEditedIgnoresAgentAndEmptyTabBar() {
+        var effects: [ApplicationCommitEffect] = []
+        let (dispatcher, gui) = makeDispatcher { effects.append($0) }
+        let dirtyFile: [Wire.TabEntry] = [documentTab(id: 1, active: true, dirty: true)]
+        let activeAgent: [Wire.TabEntry] = [documentTab(id: 1, active: false, dirty: true), documentTab(id: 2, active: true, dirty: true, agent: true)]
+
+        dispatcher.applyForTesting(.guiTabBar(activeIndex: 1, tabs: activeAgent))
+        #expect(documentEditedValues(effects) == [])
+        #expect(gui.tabBarState.activeTabHasUnsavedChanges == false)
+
+        dispatcher.applyForTesting(.guiTabBar(activeIndex: 0, tabs: dirtyFile))
+        dispatcher.applyForTesting(.guiTabBar(activeIndex: 1, tabs: activeAgent))
+        dispatcher.applyForTesting(.guiTabBar(activeIndex: 0, tabs: dirtyFile))
+        dispatcher.applyForTesting(.guiTabBar(activeIndex: 0, tabs: []))
+
+        #expect(documentEditedValues(effects) == [true, false, true, false])
+    }
+
+    @Test("canonical workspace tabs drive the unsaved indicator with one settled value per frame")
+    @MainActor func documentEditedUsesCanonicalWorkspaceTabs() {
+        var effects: [ApplicationCommitEffect] = []
+        let (dispatcher, gui) = makeDispatcher { effects.append($0) }
+        let workspace = Wire.WorkspaceEntry(
+            id: 7, kind: 0, status: 0, flags: 0, colorR: 0, colorG: 0, colorB: 0,
+            tabCount: 2, draftCount: 0, conflictCount: 0, runningBackgroundCount: 0, label: "Main", icon: ""
+        )
+        let dirtyFile = Wire.WorkspaceTabEntry(
+            id: 41, workspaceId: 7, kind: 0, flags: 0x0001, pathHash: 41, tintColorRGB: 0,
+            icon: "", label: "dirty.ex", path: "/tmp/dirty.ex"
+        )
+        let cleanFile = Wire.WorkspaceTabEntry(
+            id: 42, workspaceId: 7, kind: 0, flags: 0, pathHash: 42, tintColorRGB: 0,
+            icon: "", label: "clean.ex", path: "/tmp/clean.ex"
+        )
+        let visibleTabs: [Wire.WorkspaceTabEntry] = [dirtyFile, cleanFile]
+        // The compatibility tab list disagrees on purpose: the canonical workspace tabs are what the tab bar shows.
+        let compatibility: [Wire.TabEntry] = [documentTab(id: 41, active: true, dirty: false)]
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiTabBar(activeIndex: 0, tabs: compatibility))
+        dispatcher.dispatch(.guiWorkspaces(
+            version: 1, activeWorkspaceId: 7, mode: .editor, flags: [],
+            workspaces: [workspace], visibleTabs: visibleTabs
+        ))
+        dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
+
+        #expect(gui.tabBarState.displayTabs.first?.isDirty == true)
+        #expect(documentEditedValues(effects) == [true])
+
+        dispatcher.dispatch(.beginFrame(frameSeq: 2, baseFrameSeq: 1, generation: 1))
+        dispatcher.dispatch(.guiTabBar(activeIndex: 1, tabs: compatibility))
+        dispatcher.dispatch(.guiWorkspaces(
+            version: 2, activeWorkspaceId: 7, mode: .editor, flags: [],
+            workspaces: [workspace], visibleTabs: visibleTabs
+        ))
+        dispatcher.dispatch(.commitFrame(frameSeq: 2, seq: 0))
+
+        #expect(documentEditedValues(effects) == [true, false])
+    }
+
+    @Test("a replacement connection clears the unsaved indicator and re-arms deduplication")
+    @MainActor func documentEditedResetsOnConnectionReplacement() {
+        var effects: [ApplicationCommitEffect] = []
+        let (dispatcher, _) = makeDispatcher { effects.append($0) }
+        let dirtyFile: [Wire.TabEntry] = [documentTab(id: 1, active: true, dirty: true)]
+
+        dispatcher.applyForTesting(.guiTabBar(activeIndex: 0, tabs: dirtyFile))
+        dispatcher.replaceConnection(with: 2)
+        dispatcher.applyForTesting(.guiTabBar(activeIndex: 0, tabs: dirtyFile))
+
+        #expect(documentEditedValues(effects) == [true, false, true])
+    }
+
     @Test("canonical chrome payloads keep compatibility mirrors in presentation parity")
     @MainActor func canonicalChromeCompatibilityParity() {
         let (dispatcher, gui) = makeDispatcher()
@@ -2539,6 +2658,63 @@ struct CommandDispatcherStagingTests {
         #expect(dispatcher.visibleEditorSnapshot?.metadata.textPresentations[1] == 88)
     }
 
+    // Regression for #3886: a buffer window committed resident semantics, then
+    // the same window id carried a fork-conflict review, which has no
+    // semantics. A keyframe replaces every window, so the old semantics must
+    // not make every recovery keyframe invalid.
+    @Test("a keyframe accepts a resident window without semantics after its id carried semantics")
+    @MainActor func keyframeForgetsReplacedResidentSemantics() throws {
+        let (dispatcher, _) = makeDispatcher()
+        var results: [FrameTransactionResult] = []
+        dispatcher.onTransactionResult = { results.append($0) }
+        let fixture = WrappedScrollFixture()
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiWindowContent(data: try fixture.content(top: 0, continuation: 0)))
+        dispatcher.dispatch(.guiResidentSemantics(data: fixture.semantics(rows: fixture.rows)))
+        dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
+        #expect(dispatcher.committedEditorSnapshot?.surface(for: 1)?.residentSemantics != nil)
+
+        var reviewRows: [GUIVisualRow] = []
+        for index in 0..<3 {
+            let rowNumber: Int = 100 + index
+            let row = GUIVisualRow(
+                rowType: .normal, rowId: UInt64(rowNumber), bufLine: UInt32(index),
+                contentHash: UInt32(rowNumber), text: "review \(index)", spans: []
+            )
+            reviewRows.append(row)
+        }
+        let rect = GUICellRect(row: 0, col: 0, width: 80, height: 3)
+        let review = try GUIWindowContent(
+            windowId: 1, fullRefresh: true, contentEpoch: 9,
+            cursorRow: 0, cursorCol: 0, cursorShape: .block,
+            rowStoreMode: .sequential, rows: reviewRows,
+            selection: nil, searchMatches: [], diagnosticUnderlines: [], documentHighlights: [],
+            paneGeometry: GUIPaneGeometry(
+                windowId: 1, totalRect: rect, contentRect: rect, textRect: rect,
+                gutterRect: GUICellRect(row: 0, col: 0, width: 0, height: 3), clipRect: rect,
+                viewport: GUIViewportSummary(
+                    top: 0, left: 0, rows: 3, cols: 80, totalLines: 3,
+                    visualRowOffset: 0, totalVisualRows: 3
+                ),
+                gutterMetrics: GUIGutterMetrics(lineNumberWidth: 0, signColWidth: 0), hitRegions: []
+            )
+        )
+
+        for frameSeq in UInt32(2)...UInt32(3) {
+            dispatcher.dispatch(.beginFrame(frameSeq: frameSeq, baseFrameSeq: 0, generation: frameSeq))
+            dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+            dispatcher.dispatch(.guiWindowContent(data: review))
+            dispatcher.dispatch(.commitFrame(frameSeq: frameSeq, seq: 0))
+            #expect(dispatcher.lastCommittedFrameSeq == frameSeq)
+        }
+
+        #expect(!results.contains { if case .rejected = $0 { return true } else { return false } })
+        let committed = try #require(dispatcher.committedEditorSnapshot)
+        #expect(committed.content(for: 1)?.contentEpoch == 9)
+        #expect(committed.surface(for: 1)?.residentSemantics == nil)
+    }
+
     @Test("resident gutter rejects a windowed row store")
     @MainActor func residentGutterRejectsWindowedStore() throws {
         let (dispatcher, _) = makeDispatcher()
@@ -3752,6 +3928,7 @@ struct CommandDispatcherStagingTests {
             case .scrollPresentationReset: events.append("scroll")
             case .titleChanged: events.append("title")
             case .windowBackgroundChanged: events.append("background")
+            case .documentEditedChanged: events.append("document-edited")
             case .accessibilityModeChanged: events.append("mode")
             case .lineSpacingChanged: events.append("spacing")
             case .cursorAnimationChanged: events.append("cursor-animation")

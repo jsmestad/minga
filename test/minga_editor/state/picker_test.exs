@@ -257,5 +257,23 @@ defmodule MingaEditor.State.PickerTest do
       assert failed.fetch_revision == revision
       assert failed.callback_source == source
     end
+
+    test "a refresh keeps the selected item where it moved; a fresh fetch keeps the position" do
+      [a, b, c] = for id <- [:a, :b, :c], do: %Item{id: id, label: Atom.to_string(id)}
+      shown = [a, b, c] |> Picker.new(title: "Rows") |> Picker.select_index(1)
+      state = %PickerState{picker: shown}
+      reordered = Picker.replace_items(shown, [c, a, b])
+
+      {refreshing, _revision} = PickerState.begin_refresh(state)
+      assert Picker.selected_id(PickerState.complete_fetch(refreshing, reordered).picker) == :b
+
+      {fetching, _revision} = PickerState.begin_fetch(state)
+      assert Picker.selected_id(PickerState.complete_fetch(fetching, reordered).picker) == :a
+
+      # A refresh whose selected item is gone keeps the position.
+      {refreshing, _revision} = PickerState.begin_refresh(state)
+      without_b = Picker.replace_items(shown, [c, a])
+      assert Picker.selected_id(PickerState.complete_fetch(refreshing, without_b).picker) == :a
+    end
   end
 end

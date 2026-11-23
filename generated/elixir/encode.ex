@@ -78,6 +78,15 @@ defmodule Minga.Protocol.Encode do
   def encode_completion_kind(:enum), do: 12
   def encode_completion_kind(_), do: 0
 
+  @spec encode_picker_status_tone(atom()) :: non_neg_integer()
+  def encode_picker_status_tone(:none), do: 0
+  def encode_picker_status_tone(:ready), do: 1
+  def encode_picker_status_tone(:warn), do: 2
+  def encode_picker_status_tone(:error), do: 3
+  def encode_picker_status_tone(:checking), do: 4
+  def encode_picker_status_tone(:neutral), do: 5
+  def encode_picker_status_tone(_), do: 0
+
   @spec encode_git_file_status(atom()) :: non_neg_integer()
   def encode_git_file_status(:unknown), do: 0
   def encode_git_file_status(:modified), do: 1
@@ -366,6 +375,9 @@ defmodule Minga.Protocol.Encode do
       (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:annotation | path], byte_size(bin), 65535); <<byte_size(bin)::16, bin::binary>> end).(Map.fetch!(model, :annotation)),
       (fn items -> count = Enum.count(items); validate_uint!(command, [:match_positions | path], count, 255); [<<count::8>> | Enum.map(Stream.with_index(items), fn {value, index} -> (fn value -> validate_uint!(command, [index | [:match_positions | path]], value, 65535); <<value::16>> end).(value) end)] end).(Map.fetch!(model, :match_positions)),
       (fn value -> validate_uint!(command, [:activation_id | path], value, 4294967295); <<value::32>> end).(Map.fetch!(model, :activation_id)),
+      (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:status | path], byte_size(bin), 65535); <<byte_size(bin)::16, bin::binary>> end).(Map.fetch!(model, :status)),
+      (fn value -> validate_uint!(command, [:status_tone | path], value, 255); <<value::8>> end).(encode_picker_status_tone(Map.fetch!(model, :status_tone))),
+      (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:group | path], byte_size(bin), 65535); <<byte_size(bin)::16, bin::binary>> end).(Map.fetch!(model, :group)),
     ]
   end
 

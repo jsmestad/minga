@@ -53,8 +53,7 @@ defmodule MingaEditor.UI.Picker.WorkspaceSource do
         label: "#{label}#{active_marker}",
         description: desc,
         annotation: status_annotation(ws),
-        icon_color: ws.color,
-        two_line: true
+        icon_color: ws.color
       }
     end)
   end

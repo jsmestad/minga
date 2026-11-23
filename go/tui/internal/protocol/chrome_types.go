@@ -152,8 +152,20 @@ type PickerItem struct {
 	Label        string
 	Description  string
 	Annotation   string
-	TwoLine      bool
 	Marked       bool
+	// Active marks the current value, such as the current model (flags bit 3).
+	Active bool
+	// Status is the BEAM-authored chip text, rendered verbatim; empty means no chip.
+	Status     string
+	StatusTone generated.PickerStatusTone
+	// Group is the item's section. A non-selectable header row names it before the first drawn item of each run of items with the same group; empty means no section.
+	Group string
+}
+
+// HasStatus reports whether the row carries a status chip. Rows with a chip keep
+// the chip visible and shorten the end of their description.
+func (item PickerItem) HasStatus() bool {
+	return item.Status != "" && item.StatusTone != generated.PickerStatusToneNone
 }
 
 type PickerPreview struct {

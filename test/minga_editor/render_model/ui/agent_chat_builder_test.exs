@@ -18,6 +18,8 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
   alias Minga.Config.Options
   alias Minga.Editing.Scroll
   alias Minga.Frontend.Adapter.GUI.AgentChatMessageCodec
+  alias Minga.Frontend.Adapter.GUI.AgentTranscriptEncoder
+  alias Minga.Frontend.Adapter.GUI.Caches
   alias MingaEditor.Agent.UIState.Panel
   alias MingaEditor.Agent.UIState.TranscriptProjection
   alias MingaEditor.Frontend.Emit.Context
@@ -640,6 +642,100 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
       assert view.preview_lines == ["echo hello"]
       refute Enum.any?(model.resident_messages, &match?({_, {:approval_tool_call, _}}, &1))
     end
+  end
+
+  describe "streamed transcript transfer" do
+    test "a streamed text batch sends only the changed tail entry within the epoch" do
+      frame = streamed_frame(100)
+
+      # Entries after the revised tail are resent unchanged; history is not.
+      assert %{mode: 1, trim_front: 0, base_count: 100} = frame
+      assert frame.epoch == frame.seed_epoch
+      assert [{101, body} | _enrichments] = frame.entries
+      assert body == AgentChatMessageCodec.encode_message_body({:assistant, "Streaming reply"})
+    end
+
+    test "streamed frame bytes do not grow with retained transcript length" do
+      small = streamed_frame(100)
+      large = streamed_frame(10_000)
+
+      assert %{mode: 1, base_count: 10_000} = large
+      assert large.count == small.count
+      assert large.seed_bytes > 100 * small.seed_bytes / 2
+      assert byte_size(large.frame) == byte_size(small.frame)
+    end
+  end
+
+  # Seeds a resident transcript of `history` user entries plus a streaming
+  # assistant tail, then applies one streamed text batch the way
+  # StreamEventWorkflow does and encodes the following frame.
+  defp streamed_frame(history) do
+    session = fake_session_pid()
+    style = {nil, %{}, fn _message, _id, _syntax -> nil end}
+    turns = Enum.map(1..history, &{:user, "turn #{&1}"})
+
+    source =
+      turns
+      |> SourceTranscript.new(~U[2026-01-01 00:00:00Z], make_ref())
+      |> SourceTranscript.append({:assistant, "Streaming"})
+
+    {:snapshot, snapshot} = SourceTranscript.since(source, :snapshot)
+
+    projection =
+      TranscriptProjection.replace(
+        TranscriptProjection.new(),
+        snapshot.entries,
+        snapshot.pinned_ids,
+        snapshot.cursor,
+        style
+      )
+
+    panel = Panel.install_transcript(Panel.new(), projection, :keep)
+    seed_model = session |> context(panel) |> AgentChatBuilder.build()
+    {seed, caches} = AgentTranscriptEncoder.encode(seed_model, Caches.new())
+    assert %{mode: 0, count: count} = decode_transcript(seed)
+    # Registry transcript enrichments may follow the conversation entries.
+    assert count >= history + 1
+
+    streamed = SourceTranscript.append_stream_tail(source, :assistant, [" reply"])
+    {:changes, changes} = SourceTranscript.since(streamed, snapshot.cursor)
+
+    {streamed_projection, :follow} =
+      TranscriptProjection.apply_changes(projection, changes, :follow, style)
+
+    streamed_panel =
+      panel
+      |> Panel.install_transcript(streamed_projection, :keep)
+      |> Panel.bump_message_version()
+
+    model = session |> context(streamed_panel) |> AgentChatBuilder.build()
+    {frame, _caches} = AgentTranscriptEncoder.encode(model, caches)
+
+    frame
+    |> decode_transcript()
+    |> Map.merge(%{
+      frame: frame,
+      seed_bytes: byte_size(seed),
+      seed_epoch: seed_model.transcript_epoch
+    })
+  end
+
+  defp decode_transcript(<<_op, len::32, payload::binary-size(len)>>) do
+    <<1, mode, epoch::32, _truncated, rest::binary>> = payload
+
+    {header, rest} =
+      case {mode, rest} do
+        {0, <<count::32, rest::binary>>} ->
+          {%{trim_front: 0, base_count: 0, count: count}, rest}
+
+        {1, <<trim::32, base::32, count::32, rest::binary>>} ->
+          {%{trim_front: trim, base_count: base, count: count}, rest}
+      end
+
+    entries =
+      for <<id::32, body_len::32, body::binary-size(body_len) <- rest>>, do: {id, body}
+
+    Map.merge(header, %{mode: mode, epoch: epoch, entries: entries})
   end
 
   defp message_summary({id, {:assistant, text}}), do: {id, :assistant, text}

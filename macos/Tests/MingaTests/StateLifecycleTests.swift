@@ -204,7 +204,7 @@ struct PickerStateLifecycleTests {
     @MainActor func updateConverts() {
         let state = PickerState()
         let raw = [
-            Wire.PickerItem(iconColor: 0x51AFEF, flags: 0x01, label: "editor.ex",
+            Wire.PickerItem(iconColor: 0x51AFEF, flags: 0x00, label: "editor.ex",
                          description: "lib/minga/editor.ex", annotation: "500 lines",
                          matchPositions: [0, 3]),
             Wire.PickerItem(iconColor: 0x98BE65, flags: 0x02, label: "test.ex",
@@ -227,12 +227,79 @@ struct PickerStateLifecycleTests {
         #expect(state.totalCount == 50)
         #expect(state.markedCount == 7)
         #expect(state.items.count == 2)
-        #expect(state.items[0].isTwoLine == true)
         #expect(state.items[0].isMarked == false)
+        #expect(state.items[0].isActive == false)
         #expect(state.items[0].matchPositions == [0, 3])
         #expect(state.items[1].isMarked == true)
+        #expect(state.items[0].hasStatus == false)
+        #expect(state.items[1].hasStatus == false)
         #expect(state.actionMenu != nil)
         #expect(state.actionMenu?.actions == ["Open", "Split"])
+    }
+
+    @Test("update() carries the status chip and the current-value flag")
+    @MainActor func updateCarriesStatusAndActive() {
+        let state = PickerState()
+        let model = Wire.PickerItem(iconColor: 0, flags: 0x08, label: "Claude Opus 4",
+                                    description: "Claude (subscription) · Claude Max · 5h limit resets 3:59 PM",
+                                    annotation: "★ favorite", matchPositions: [], activationID: 1,
+                                    status: "Limit reached", statusTone: .error)
+        let file = Wire.PickerItem(iconColor: 0, flags: 0x02, label: "editor.ex",
+                                   description: "lib/minga/editor.ex", annotation: "", matchPositions: [],
+                                   activationID: 2)
+
+        state.update(visible: true, selectedIndex: 0, filteredCount: 2,
+                     totalCount: 2, markedCount: 1, title: "Models and connections", query: "",
+                     hasPreview: false, rawItems: [model, file], actionMenu: nil, modePrefix: "")
+
+        #expect(state.items[0].isActive == true)
+        #expect(state.items[0].isMarked == false)
+        #expect(state.items[0].status == "Limit reached")
+        #expect(state.items[0].statusTone == .error)
+        #expect(state.items[0].hasStatus == true)
+        #expect(state.items[1].isActive == false)
+        #expect(state.items[1].isMarked == true)
+        #expect(state.items[1].hasStatus == false)
+    }
+
+    @Test("only a row with a status chip and a description stacks, and the list height sums each row")
+    @MainActor func stackedRowHeights() {
+        func item(_ id: Int, _ description: String, status: String) -> PickerItem {
+            let tone: Wire.PickerStatusTone = status.isEmpty ? .absent : .ready
+            return PickerItem(id: id, iconColor: 0, label: "row \(id)", description: description, annotation: "",
+                              matchPositions: [], isMarked: false, status: status, statusTone: tone)
+        }
+        let stacked = item(0, "Claude (subscription) · Claude Max · 5h limit resets 2:50 PM", status: "Ready · 70%")
+        let chipOnly = item(1, "", status: "Ready")
+        let path = item(2, "lib/minga/editor.ex", status: "")
+        let toneWithoutText = PickerItem(id: 3, iconColor: 0, label: "row 3", description: "detail", annotation: "",
+                                         matchPositions: [], isMarked: false, status: "", statusTone: .ready)
+
+        #expect(stacked.stacksDescription == true)
+        #expect(chipOnly.stacksDescription == false)
+        #expect(path.stacksDescription == false)
+        #expect(toneWithoutText.hasStatus == false)
+        #expect(toneWithoutText.stacksDescription == false)
+        #expect(PickerOverlay.rowHeight(stacked) == 40)
+        #expect(PickerOverlay.rowHeight(chipOnly) == 24)
+        #expect(PickerOverlay.rowHeight(path) == 24)
+        let mixed = [stacked, chipOnly, path, stacked]
+        let summed: CGFloat = 40 + 24 + 24 + 40
+        #expect(PickerOverlay.listContentHeight(mixed) == summed)
+        #expect(PickerOverlay.listContentHeight(mixed) == mixed.map(PickerOverlay.rowHeight).reduce(0, +))
+        #expect(PickerOverlay.listContentHeight([]) == CGFloat(0))
+    }
+
+    @Test("a row's spoken label names it, then its status, then its description")
+    @MainActor func rowAccessibilityLabel() {
+        let model = PickerItem(id: 0, iconColor: 0, label: "Claude Opus 4", description: "Claude Max", annotation: "",
+                               matchPositions: [], isMarked: false, isActive: true, status: "Checking…",
+                               statusTone: .checking)
+        let file = PickerItem(id: 1, iconColor: 0, label: "editor.ex", description: "lib/minga", annotation: "",
+                              matchPositions: [], isMarked: false)
+
+        #expect(PickerOverlay.rowAccessibilityLabel(model) == "Claude Opus 4, Checking…, Claude Max")
+        #expect(PickerOverlay.rowAccessibilityLabel(file) == "editor.ex, lib/minga")
     }
 
     @Test("updatePreview() converts styled segments")
@@ -801,6 +868,104 @@ struct AgentChatTranscriptTests {
             #expect(counters.retainedEntriesCopied == 0)
             #expect(counters.sequenceNodesCreated < 256)
         }
+    }
+
+    /// One decoded message of every transcript kind, with unicode, empty, optional, and long payloads.
+    private func representativeMessages(baseId: UInt32) -> [Wire.ChatMessage] {
+        let linked = Wire.StyledTextRun(text: "läuft 🚀", fgR: 1, fgG: 2, fgB: 3, bgR: 4, bgG: 5, bgB: 6, bold: true, italic: false, underline: true, code: false, linkURL: "https://example.test/ü")
+        let plain = Wire.StyledTextRun(text: "plain", fgR: 0, fgG: 0, fgB: 0, bgR: 0, bgG: 0, bgB: 0, bold: false, italic: false, underline: false)
+        let empty = Wire.StyledTextRun(text: "", fgR: 0, fgG: 0, fgB: 0, bgR: 0, bgG: 0, bgB: 0, bold: false, italic: true, underline: false, code: true, linkURL: "")
+        let lines: [[Wire.StyledTextRun]] = [[linked, plain], [], [empty]]
+        let paragraph = Wire.AgentMarkdownBlock(id: 1, kind: .paragraph, flags: 1, lines: lines, level: 0, indent: 0, ordered: false, ordinal: 0, height: 3, language: "", label: "", targetPath: "", capabilityFlags: 0)
+        let code = Wire.AgentMarkdownBlock(id: 2, kind: .codeBlock, flags: 0, lines: [[plain]], level: 0, indent: 2, ordered: true, ordinal: 4, height: 1, language: "elixir", label: "lib/a.ex", targetPath: "/tmp/日本/a.ex", capabilityFlags: 3)
+        let rule = Wire.AgentMarkdownBlock(id: 3, kind: .rule, flags: 0, lines: [], level: 0, indent: 0, ordered: false, ordinal: 0, height: 1, language: "", label: "", targetPath: "", capabilityFlags: 0)
+        var longOutput = ""
+        for index in 0..<200 {
+            longOutput += "line \(index): ✓ output with some width\n"
+        }
+        var manyPreviewLines: [String] = []
+        for index in 0..<40 {
+            manyPreviewLines.append("+preview \(index) é")
+        }
+        let offer = Wire.RetainedOutputOffer(high: 7, low: 9)
+        var messages: [Wire.ChatMessage] = []
+        messages.append(Wire.ChatMessage(beamId: baseId, content: .user(text: "Why does ß differ? 👋")))
+        messages.append(Wire.ChatMessage(beamId: baseId + 1, content: .user(text: "")))
+        messages.append(Wire.ChatMessage(beamId: baseId + 2, content: .assistant(text: "Plain assistant answer.")))
+        messages.append(Wire.ChatMessage(beamId: baseId + 3, content: .thinking(text: "Considering the thinking block…", collapsed: true)))
+        messages.append(Wire.ChatMessage(beamId: baseId + 4, content: .styledAssistant(lines: lines)))
+        messages.append(Wire.ChatMessage(beamId: baseId + 5, content: .styledAssistant(lines: [])))
+        messages.append(Wire.ChatMessage(beamId: baseId + 6, content: .assistantMarkdown(blocks: [paragraph, code, rule])))
+        messages.append(Wire.ChatMessage(beamId: baseId + 7, content: .toolCall(name: "shell", summary: "mix test", status: 2, isError: false, collapsed: false, autoApprovedScope: 1, durationMs: 1_200, result: longOutput, previewKind: 1, previewLines: manyPreviewLines), retainedOutputOffer: offer))
+        messages.append(Wire.ChatMessage(beamId: baseId + 8, content: .toolCall(name: "read", summary: "", status: 1, isError: true, collapsed: true, autoApprovedScope: 0, durationMs: 0, result: "", previewKind: 0, previewLines: [])))
+        messages.append(Wire.ChatMessage(beamId: baseId + 9, content: .styledToolCall(name: "run", summary: "styled", status: 2, isError: false, collapsed: false, autoApprovedScope: 2, durationMs: 3, resultLines: lines, previewKind: 2, previewLines: ["-old", "+new"]), retainedOutputOffer: offer))
+        messages.append(Wire.ChatMessage(beamId: baseId + 10, content: .approvalToolCall(name: "edit", summary: "needs approval", toolCallId: "tc-1", sessionId: "session-ä", requestId: "request-1", previewKind: 2, previewLines: ["mix test", ""])))
+        messages.append(Wire.ChatMessage(beamId: baseId + 11, content: .system(text: "Session resumed ⚠️", isError: false)))
+        messages.append(Wire.ChatMessage(beamId: baseId + 12, content: .system(text: "Provider error", isError: true)))
+        messages.append(Wire.ChatMessage(beamId: baseId + 13, content: .usage(input: 1, output: 2, cacheRead: 3, cacheWrite: 4, costMicros: 5)))
+        return messages
+    }
+
+    @Test("typed entry weight equals the reflective weight for every message kind")
+    @MainActor func typedEntryWeightMatchesReflection() throws {
+        let state = AgentChatState()
+        let messages = representativeMessages(baseId: 1)
+        state.applyTranscript(mode: 0, epoch: 1, baseCount: 0, messages: messages)
+
+        var checked = 0
+        for entry in state.transcriptSnapshot.messages {
+            let typed: FrameResourceWeight = try entry.resourceWeight()
+            let reflected: FrameResourceWeight = try FrameResourceWeight.measuringOwnedPayload(entry)
+            #expect(typed == reflected, "entry \(entry.id)")
+            checked += 1
+        }
+        #expect(checked == messages.count)
+
+        let oracle: FrameResourceWeight = try exactTranscriptWeightOracle(state.transcriptSnapshot)
+        #expect(state.transcriptSnapshot.resourceWeight == oracle)
+        #expect(oracle.ownedUTF8Bytes > 8_000)
+    }
+
+    @Test("preparing a 10,000-entry transcript keyframe stays fast")
+    @MainActor func tenThousandEntryKeyframe() throws {
+        var messages: [Wire.ChatMessage] = []
+        messages.reserveCapacity(10_000)
+        var baseId: UInt32 = 1
+        while messages.count < 10_000 {
+            let batch: [Wire.ChatMessage] = representativeMessages(baseId: baseId)
+            for message in batch where messages.count < 10_000 {
+                messages.append(message)
+            }
+            baseId += UInt32(batch.count)
+        }
+        let current: AgentTranscriptSnapshot = AgentChatState().transcriptSnapshot
+
+        let clock = ContinuousClock()
+        let start: ContinuousClock.Instant = clock.now
+        let result = AgentChatState.prepareTranscript(
+            from: current, mode: 0, epoch: 1, truncated: false,
+            trimFront: 0, baseCount: 0, messages: messages
+        )
+        let elapsed: Duration = clock.now - start
+
+        let snapshot: AgentTranscriptSnapshot = try result.get()
+        #expect(snapshot.messages.count == 10_000)
+        #expect(snapshot.accountingCounters.changedEntriesMeasured == 10_000)
+        // The keyframe builds each resident node once, with no discarded intermediate nodes.
+        #expect(snapshot.accountingCounters.sequenceNodesCreated == 10_000)
+        var expectedId = 1
+        var inOrder = true
+        for entry in snapshot.messages {
+            if entry.id != expectedId { inOrder = false }
+            expectedId += 1
+        }
+        #expect(inOrder)
+        #expect(snapshot.messages[0].id == 1)
+        #expect(snapshot.messages[4_999].id == 5_000)
+        #expect(snapshot.messages[9_999].id == 10_000)
+        print("AgentTranscript keyframe 10000 entries: \(elapsed)")
+        // Loose ceiling for unoptimized CI builds; the Release target is under 10 ms.
+        #expect(elapsed < .seconds(2))
     }
 }
 

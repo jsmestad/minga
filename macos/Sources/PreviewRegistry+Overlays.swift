@@ -67,6 +67,54 @@ extension PreviewRegistry {
         .environment(theme)
     }
 
+    /// Model rows grouped by route under section headers, with readiness and plan usage in a status chip, one row per tone, the current model marked and its description on a second line. The setup row has a chip too; the ungrouped long path row keeps its file name inline and has no header.
+    static func pickerModelRowsPreview() -> some View {
+        let theme = PreviewFixtures.theme()
+        let state = PickerState()
+        let active: UInt8 = 0x08
+        let tail = "1000k ctx · thinking medium · tools, images, streaming"
+        let claude = "Claude (subscription)"
+        let rows: [Wire.PickerItem] = [
+            Wire.PickerItem(iconColor: 0x98BE65, flags: 0, label: "\u{f0e7}picker_item_row_test.exs", description: "test/minga_editor/render_model/ui/picker/agent_model_source/description_overflow/picker_item_row_test.exs", annotation: "", matchPositions: [], activationID: 9),
+            Wire.PickerItem(iconColor: 0, flags: active, label: "Claude Opus 4", description: "Claude Max · 5h limit resets 3:59 PM · \(tail)", annotation: "★ favorite", matchPositions: [], activationID: 1, status: "Ready · 45%", statusTone: .ready, group: claude),
+            Wire.PickerItem(iconColor: 0, flags: 0, label: "Claude Sonnet 4", description: "Claude Max · 5h limit resets 3:40 PM · \(tail)", annotation: "", matchPositions: [], activationID: 2, status: "Ready · 82%", statusTone: .warn, group: claude),
+            Wire.PickerItem(iconColor: 0, flags: 0, label: "Claude Opus 4.1", description: "Claude Max · 5h limit resets Sun 12:32 AM · \(tail)", annotation: "", matchPositions: [], activationID: 3, status: "Limit reached", statusTone: .error, group: claude),
+            Wire.PickerItem(iconColor: 0, flags: 0, label: "Claude Haiku 4", description: "Claude Max · checking plan usage · 200k ctx · thinking fixed", annotation: "", matchPositions: [], activationID: 4, status: "Checking…", statusTone: .checking, group: claude),
+            Wire.PickerItem(iconColor: 0, flags: 0, label: "Claude Haiku 3.5", description: "Run claude login in a terminal, then reopen /model. · 200k ctx", annotation: "", matchPositions: [], activationID: 5, status: "Unavailable", statusTone: .error, group: claude),
+            Wire.PickerItem(iconColor: 0, flags: 0, label: "Claude Sonnet 4 (API)", description: "$3/15 per MTok · 200k ctx · thinking medium", annotation: "", matchPositions: [], activationID: 6, status: "Ready", statusTone: .ready, group: "anthropic API"),
+            Wire.PickerItem(iconColor: 0, flags: 0, label: "Fixture Model", description: "200k ctx · thinking off · tools, images, streaming", annotation: "", matchPositions: [], activationID: 7, status: "Not checked", statusTone: .neutral, group: "Fixture Route"),
+            Wire.PickerItem(iconColor: 0, flags: 0, label: "Use Claude subscription", description: "Uses the Claude app login. Minga never sees your login. · Claude Max", annotation: "", matchPositions: [], activationID: 8, status: "Ready", statusTone: .ready, group: "Routes"),
+            Wire.PickerItem(iconColor: 0, flags: 0, label: "Connect another provider…", description: "Sign in, manage API keys, or retry the connection.", annotation: "", matchPositions: [], activationID: 10, group: "Connections"),
+        ]
+        state.update(
+            visible: true,
+            selectedIndex: 2,
+            filteredCount: UInt16(rows.count),
+            totalCount: UInt16(rows.count),
+            markedCount: 0,
+            title: "Models and connections",
+            query: "",
+            hasPreview: false,
+            rawItems: rows,
+            actionMenu: nil,
+            modePrefix: "",
+            activationGeneration: 1
+        )
+
+        return ZStack {
+            theme.editorBg
+            PickerOverlay(state: state, sendAction: { _ in })
+        }
+        .frame(width: 680, height: 900)
+        .clipped()
+        .environment(theme)
+    }
+
+    /// Mixed 24pt and 40pt rows that overflow the list, with the selection moved to a stacked row near the bottom after the list appears.
+    static func pickerMixedScrollPreview() -> some View {
+        PickerMixedScrollFixture(theme: PreviewFixtures.theme())
+    }
+
     // MARK: - MinibufferView
 
     static func minibufferPreview() -> some View {
@@ -278,5 +326,43 @@ extension PreviewRegistry {
             .frame(width: 520, height: 120)
             .background(theme.editorBg)
             .environment(theme)
+    }
+}
+
+/// Owns its picker state across body re-evaluation so the post-appearance selection change drives the overlay's real scroll-to-selection path.
+private struct PickerMixedScrollFixture: View {
+    let theme: ThemeColors
+    @State private var state = Self.initialState()
+
+    private static let rows: [Wire.PickerItem] = (0..<16).map { index in
+        if index.isMultiple(of: 2) {
+            return Wire.PickerItem(iconColor: 0, flags: 0, label: "Model \(index)", description: "Claude (subscription) · Claude Max · 5h limit resets 2:50 PM", annotation: "", matchPositions: [], activationID: UInt32(index + 1), status: "Ready · \(index * 5)%", statusTone: .ready)
+        }
+        return Wire.PickerItem(iconColor: 0x98BE65, flags: 0, label: "\u{f0e7}file_\(index).ex", description: "lib/minga_editor/render_model/ui/picker/file_\(index).ex", annotation: "", matchPositions: [], activationID: UInt32(index + 1))
+    }
+
+    var body: some View {
+        ZStack {
+            theme.editorBg
+            PickerOverlay(state: state, sendAction: { _ in })
+        }
+        .frame(width: 680, height: 600)
+        .clipped()
+        .environment(theme)
+        .task {
+            // Change the selection after the list exists, as a keypress would.
+            try? await Task.sleep(for: .milliseconds(50))
+            Self.show(14, in: state)
+        }
+    }
+
+    private static func initialState() -> PickerState {
+        let state = PickerState()
+        show(0, in: state)
+        return state
+    }
+
+    private static func show(_ selected: UInt16, in state: PickerState) {
+        state.update(visible: true, selectedIndex: selected, filteredCount: 16, totalCount: 16, markedCount: 0, title: "Mixed Rows", query: "", hasPreview: false, rawItems: rows, actionMenu: nil, activationGeneration: 1)
     }
 }

@@ -8,10 +8,15 @@ defmodule Minga.RenderModel.UI.Picker do
   @type load_status :: :ready | :loading | {:error, String.t()}
   @type preview_segment :: {String.t(), non_neg_integer(), boolean()}
 
+  @typedoc "The tone a frontend draws a picker item's status chip in. `:none` means the item has no chip."
+  @type status_tone :: :none | :ready | :warn | :error | :checking | :neutral
+
   @typedoc """
   A wire-shaped picker item. The Layer 2 builder normalizes each source item
   into this map (flags packed, nil-vs-empty defaulted, match_positions clamped),
   so the adapter passes it straight to the generated `encode_picker_item/1`.
+
+  `flags` bit 1 marks a multi-select item and bit 3 marks the current value. `status` is the chip text (empty when `status_tone` is `:none`). `group` is the item's section header text (empty when the item has no section).
   """
   @type item :: %{
           icon_color: non_neg_integer(),
@@ -20,7 +25,10 @@ defmodule Minga.RenderModel.UI.Picker do
           description: String.t(),
           annotation: String.t(),
           match_positions: [non_neg_integer()],
-          activation_id: non_neg_integer()
+          activation_id: non_neg_integer(),
+          status: String.t(),
+          status_tone: status_tone(),
+          group: String.t()
         }
 
   @type t :: %__MODULE__{

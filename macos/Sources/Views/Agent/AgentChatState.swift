@@ -31,11 +31,45 @@ public enum ChatMessageEntry: Identifiable {
             return id
         }
     }
+
+    /// Exact owned-payload weight of this entry, measured from its typed fields. Equals `FrameResourceWeight.measuringOwnedPayload(self)` without reflection: integers, flags, and the retained-output offer own no payload.
+    public func resourceWeight() throws -> FrameResourceWeight {
+        var tally = FrameOwnedPayloadTally()
+        switch self {
+        case .user(_, let text), .assistant(_, let text), .thinking(_, let text, _), .system(_, let text, _):
+            try tally.add(text)
+        case .styledAssistant(_, let lines):
+            try Wire.StyledTextRun.measureOwnedPayload(lines: lines, into: &tally)
+        case .assistantMarkdown(_, let blocks):
+            try tally.addEntries(blocks.count)
+            for block in blocks { try block.measureOwnedPayload(into: &tally) }
+        case .toolCall(_, let name, let summary, _, _, _, _, _, let result, _, let previewLines, _):
+            try tally.add(name)
+            try tally.add(summary)
+            try tally.add(result)
+            try tally.add(previewLines)
+        case .styledToolCall(_, let name, let summary, _, _, _, _, _, let resultLines, _, let previewLines, _):
+            try tally.add(name)
+            try tally.add(summary)
+            try Wire.StyledTextRun.measureOwnedPayload(lines: resultLines, into: &tally)
+            try tally.add(previewLines)
+        case .approvalToolCall(_, let name, let summary, let toolCallId, let sessionId, let requestId, _, let previewLines):
+            try tally.add(name)
+            try tally.add(summary)
+            try tally.add(toolCallId)
+            try tally.add(sessionId)
+            try tally.add(requestId)
+            try tally.add(previewLines)
+        case .usage:
+            break
+        }
+        return tally.weight
+    }
 }
 
 /// Deterministic work counters for transcript preparation.
 public struct AgentTranscriptAccountingCounters: Sendable, Equatable {
-    /// New or replacement entries measured reflectively for exact resource weight.
+    /// New or replacement entries measured for exact resource weight.
     public var changedEntriesMeasured = 0
     /// Unchanged resident entries visited while preparing a transcript operation.
     public var unchangedEntriesVisited = 0
@@ -56,12 +90,12 @@ public struct AgentTranscriptAccountingCounters: Sendable, Equatable {
     }
 }
 
-private struct WeightedChatMessageEntry {
+nonisolated private struct WeightedChatMessageEntry {
     let message: ChatMessageEntry
     let resourceWeight: FrameResourceWeight
 }
 
-private func addingKnownValid(
+nonisolated private func addingKnownValid(
     _ left: FrameResourceWeight,
     _ right: FrameResourceWeight
 ) -> FrameResourceWeight {
@@ -72,8 +106,8 @@ private func addingKnownValid(
     }
 }
 
-/// Immutable node in the resident transcript's persistent implicit treap.
-private final class AgentTranscriptNode {
+/// Immutable node in the resident transcript's persistent implicit treap. It is `nonisolated` so that releasing nodes, including the intermediate nodes a merge discards, does not pay for a main-actor isolated deinit.
+nonisolated private final class AgentTranscriptNode {
     let entry: WeightedChatMessageEntry
     let priority: UInt64
     let left: AgentTranscriptNode?
@@ -208,18 +242,10 @@ private struct AgentTranscriptStore {
         }
         _ = try (kept?.resourceWeight ?? FrameResourceWeight()).adding(appendedWeight)
 
-        var appended: AgentTranscriptNode?
-        for entry in entries {
-            let node = Self.makeNode(
-                entry: entry,
-                priority: Self.priority(for: ordinal),
-                left: nil,
-                right: nil,
-                counters: &sequenceCounters
-            )
-            appended = Self.merge(appended, node, counters: &sequenceCounters)
-            ordinal &+= 1
-        }
+        let appended = Self.sequence(
+            entries, firstOrdinal: ordinal, counters: &sequenceCounters
+        )
+        ordinal &+= UInt64(entries.count)
 
         let nextRoot = Self.merge(kept, appended, counters: &sequenceCounters)
         counters = sequenceCounters
@@ -241,19 +267,70 @@ private struct AgentTranscriptStore {
         }
         _ = payloadWeight
 
-        var result: AgentTranscriptNode?
-        for entry in entries {
-            let node = Self.makeNode(
-                entry: entry,
-                priority: Self.priority(for: nextOrdinal),
-                left: nil,
-                right: nil,
-                counters: &counters
-            )
-            result = Self.merge(result, node, counters: &counters)
-            nextOrdinal &+= 1
-        }
+        let result = Self.sequence(entries, firstOrdinal: nextOrdinal, counters: &counters)
+        nextOrdinal &+= UInt64(entries.count)
         return result
+    }
+
+    /// Builds the treap for `entries` in order, assigning consecutive ordinals from `firstOrdinal`.
+    ///
+    /// The result is the Cartesian tree of the entry priorities, which is the same tree that merging the entries one at a time produces: priorities are a bijective hash of distinct ordinals, and ties would keep the earlier entry as the ancestor exactly as `merge` does. A monotonic stack finds every parent link in O(n), then each node is created once, children first, so no intermediate nodes are allocated and discarded.
+    private static func sequence(
+        _ entries: [WeightedChatMessageEntry],
+        firstOrdinal: UInt64,
+        counters: inout AgentTranscriptAccountingCounters
+    ) -> AgentTranscriptNode? {
+        let count = entries.count
+        guard count > 0 else { return nil }
+        var priorities: [UInt64] = []
+        priorities.reserveCapacity(count)
+        var ordinal = firstOrdinal
+        for _ in 0..<count {
+            priorities.append(priority(for: ordinal))
+            ordinal &+= 1
+        }
+
+        var leftChild = [Int](repeating: -1, count: count)
+        var rightChild = [Int](repeating: -1, count: count)
+        var spine: [Int] = []
+        for index in 0..<count {
+            var lastPopped = -1
+            while let top = spine.last, priorities[top] > priorities[index] {
+                lastPopped = spine.removeLast()
+            }
+            leftChild[index] = lastPopped
+            if let top = spine.last { rightChild[top] = index }
+            spine.append(index)
+        }
+
+        return node(
+            at: spine[0], entries: entries, priorities: priorities,
+            leftChild: leftChild, rightChild: rightChild, counters: &counters
+        )
+    }
+
+    private static func node(
+        at index: Int,
+        entries: [WeightedChatMessageEntry],
+        priorities: [UInt64],
+        leftChild: [Int],
+        rightChild: [Int],
+        counters: inout AgentTranscriptAccountingCounters
+    ) -> AgentTranscriptNode {
+        let leftIndex = leftChild[index]
+        let rightIndex = rightChild[index]
+        let left: AgentTranscriptNode? = leftIndex < 0 ? nil : node(
+            at: leftIndex, entries: entries, priorities: priorities,
+            leftChild: leftChild, rightChild: rightChild, counters: &counters
+        )
+        let right: AgentTranscriptNode? = rightIndex < 0 ? nil : node(
+            at: rightIndex, entries: entries, priorities: priorities,
+            leftChild: leftChild, rightChild: rightChild, counters: &counters
+        )
+        return makeNode(
+            entry: entries[index], priority: priorities[index],
+            left: left, right: right, counters: &counters
+        )
     }
 
     private static func measuredEntries(
@@ -265,7 +342,7 @@ private struct AgentTranscriptStore {
         for message in messages {
             entries.append(WeightedChatMessageEntry(
                 message: message,
-                resourceWeight: try FrameResourceWeight.measuringOwnedPayload(message)
+                resourceWeight: try message.resourceWeight()
             ))
             counters.changedEntriesMeasured += 1
         }

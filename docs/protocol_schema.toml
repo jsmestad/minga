@@ -79,7 +79,9 @@ version = "2.0.0"
 # protocol_version 38 adds the native agent desktop notification instruction.
 # protocol_version 39 adds renderer_shutdown, which restores the terminal before the VM stops.
 # protocol_version 40 binds Git Status actions to the displayed panel and file actions to the exact row. It also adds terminal Git Status presentation fields.
-protocol_version = 40
+# protocol_version 41 appends a status chip (status text and status_tone) to picker_item, adds the active flag (bit 3), and retires the two_line (bit 0) and keep_description_start (bit 2) flags.
+# protocol_version 42 appends a section group (string16) to picker_item. Frontends draw a non-selectable header when the group changes between adjacent items.
+protocol_version = 42
 description = "Minga port protocol opcode registry"
 
 # Directions:
@@ -1644,6 +1646,21 @@ values = [
   { name = "enum", value = 12 },
 ]
 
+# A picker item's status chip tone. none means the item has no chip; frontends
+# map the other tones to their own colors and glyphs.
+[[enums]]
+name = "picker_status_tone"
+repr = "u8"
+default = "none"
+values = [
+  { name = "none", value = 0 },
+  { name = "ready", value = 1 },
+  { name = "warn", value = 2 },
+  { name = "error", value = 3 },
+  { name = "checking", value = 4 },
+  { name = "neutral", value = 5 },
+]
+
 [[enums]]
 name = "git_file_status"
 repr = "u8"
@@ -1902,6 +1919,7 @@ fields = [
 name = "picker_item"
 fields = [
   { name = "icon_color", type = "u24" },
+  # bit 1: marked (multi-select), bit 3: active (current value). Bits 0 and 2 are reserved and written as 0.
   { name = "flags", type = "u8" },
   { name = "label", type = "string16" },
   { name = "description", type = "string16" },
@@ -1909,6 +1927,11 @@ fields = [
   # u8-counted list of u16 fuzzy-match highlight indices into the label.
   { name = "match_positions", type = "counted_array", count_type = "u8", element = "u16" },
   { name = "activation_id", type = "u32" },
+  # Status chip text, rendered verbatim (empty when status_tone is none).
+  { name = "status", type = "string16" },
+  { name = "status_tone", type = "enum", enum = "picker_status_tone" },
+  # Section header text shared by adjacent items (empty when the item has no group). Frontends draw a non-selectable header row before an item whose group differs from the previous item's, and before the first drawn item when its group is not empty.
+  { name = "group", type = "string16" },
 ]
 
 [[structures]]

@@ -340,6 +340,76 @@ defmodule MingaEditor.UI.PickerTest do
     end
   end
 
+  describe "grouped items" do
+    @grouped [
+      %Item{id: :sonnet, label: "Claude Sonnet", group: "Claude (subscription)"},
+      %Item{id: :opus, label: "Claude Opus", group: "Claude (subscription)"},
+      %Item{id: :gpt, label: "GPT-5", group: "ChatGPT"},
+      %Item{id: :opus_api, label: "Opus", group: "anthropic API"},
+      %Item{id: :connect, label: "Connect another provider…", group: "Connections"}
+    ]
+
+    test "an empty query keeps the source order" do
+      picker = Picker.new(@grouped)
+      assert Enum.map(picker.filtered, & &1.id) == [:sonnet, :opus, :gpt, :opus_api, :connect]
+    end
+
+    test "an empty query gathers a group's stray items under its first item" do
+      [sonnet, opus, gpt | rest] = @grouped
+      picker = Picker.new([sonnet, gpt, opus | rest])
+      assert Enum.map(picker.filtered, & &1.id) == [:sonnet, :opus, :gpt, :opus_api, :connect]
+    end
+
+    test "a query puts the group with the best match first and keeps each group together" do
+      picker = Picker.filter(Picker.new(@grouped), "opus")
+
+      # "Opus" is the tightest match, so its group leads; "Claude Opus" follows in its own group.
+      assert Enum.map(picker.filtered, &{&1.group, &1.id}) == [
+               {"anthropic API", :opus_api},
+               {"Claude (subscription)", :opus}
+             ]
+
+      assert Picker.selected_id(picker) == :opus_api
+    end
+
+    test "a query keeps every match of a group next to each other" do
+      items = [
+        %Item{id: :b_fuzzy, label: "xxxxxxaxxxxxxb", group: "B"},
+        %Item{id: :a_prefix, label: "abc", group: "A"},
+        %Item{id: :b_exact, label: "ab", group: "B"}
+      ]
+
+      # Scored best-first the order is ab (B), abc (A), the fuzzy match (B); B's matches stay together.
+      picker = Picker.filter(Picker.new(items), "ab")
+      assert Enum.map(picker.filtered, & &1.id) == [:b_exact, :b_fuzzy, :a_prefix]
+    end
+
+    test "a group without a match drops out" do
+      picker = Picker.filter(Picker.new(@grouped), "gpt")
+      assert Enum.map(picker.filtered, & &1.group) == ["ChatGPT"]
+    end
+
+    test "selection moves over items only" do
+      picker = Picker.new(@grouped)
+      steps = Enum.scan(1..4, picker, fn _step, acc -> Picker.move_down(acc) end)
+      assert Enum.map(steps, &Picker.selected_id/1) == [:opus, :gpt, :opus_api, :connect]
+    end
+
+    test "one shared group keeps the scored order" do
+      plain = @items |> Picker.new() |> Picker.filter("e") |> Map.fetch!(:filtered)
+
+      shared =
+        @items
+        |> Enum.map(&%{&1 | group: "Files"})
+        |> Picker.new()
+        |> Picker.filter("e")
+        |> Map.fetch!(:filtered)
+
+      assert [_, _ | _] = plain
+      assert Enum.map(shared, & &1.id) == Enum.map(plain, & &1.id)
+    end
+  end
+
   describe "move_down/1 and move_up/1" do
     test "move_down advances selection" do
       picker = Picker.new(@items)

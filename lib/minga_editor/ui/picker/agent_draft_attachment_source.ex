@@ -99,8 +99,7 @@ defmodule MingaEditor.UI.Picker.AgentDraftAttachmentSource do
         %Item{
           id: {:page, origin, {identity, 0, []}},
           label: literal(label),
-          description: "#{DraftAttachment.snapshot_label(kind)} · #{bytes} bytes",
-          two_line: true
+          description: "#{DraftAttachment.snapshot_label(kind)} · #{bytes} bytes"
         }
       end
 

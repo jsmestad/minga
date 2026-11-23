@@ -156,7 +156,7 @@ defmodule MingaEditor.UI.Picker.FileSourceAsyncTest do
       assert String.first(enriched.label) != "b"
       assert enriched.description == "lib/foo"
       assert enriched.annotation == "M"
-      assert enriched.two_line == false
+      assert enriched.status == nil
       assert is_integer(enriched.icon_color)
     end
 

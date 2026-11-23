@@ -1861,6 +1861,112 @@ struct PickerOverlayActivationTests {
         #expect(!choice.isDisabled())
     }
 
+    @Test("A stacked status row reads its current marker, status, and description to VoiceOver")
+    @MainActor func stackedRowAccessibility() throws {
+        let description = "Claude (subscription) · Claude Max · 5h limit resets 2:50 PM"
+        let state = PickerState()
+        state.update(
+            visible: true, selectedIndex: 0, filteredCount: 1, totalCount: 1,
+            markedCount: 0, title: "Choose Model", query: "", hasPreview: false,
+            rawItems: [
+                Wire.PickerItem(iconColor: 0, flags: 0x08, label: "Claude Opus 4.5", description: description, annotation: "", matchPositions: [], activationID: 41, status: "Ready · 70%", statusTone: .ready),
+            ],
+            actionMenu: nil, activationGeneration: 99
+        )
+        #expect(state.items[0].stacksDescription)
+        let body = try PickerOverlay(state: state, sendAction: nil)
+            .environment(\.themeColors, ThemeColors())
+            .inspect()
+        let row = try #require(body.findAll(ViewType.Button.self).first {
+            (try? $0.accessibilityLabel().string()) == "Claude Opus 4.5"
+        })
+
+        #expect(try row.accessibilityValue().string() == "selected, current, Ready · 70%, \(description)")
+    }
+
+    @Test("A model row draws its status chip and current dot; a file row draws neither")
+    @MainActor func statusChipAndCurrentDot() throws {
+        let state = PickerState()
+        let model = Wire.PickerItem(iconColor: 0, flags: 0x08, label: "Claude Opus 4", description: "Claude Max", annotation: "★ favorite", matchPositions: [], activationID: 41, status: "Ready · 45%", statusTone: .ready)
+        let file = Wire.PickerItem(iconColor: 0, flags: 0, label: "editor.ex", description: "lib/minga", annotation: "", matchPositions: [], activationID: 42)
+        state.update(
+            visible: true, selectedIndex: 1, filteredCount: 2, totalCount: 2,
+            markedCount: 0, title: "Models and connections", query: "", hasPreview: false,
+            rawItems: [model, file],
+            actionMenu: nil, activationGeneration: 99
+        )
+        let body = try PickerOverlay(state: state, sendAction: nil)
+            .environment(\.themeColors, ThemeColors())
+            .inspect()
+        let modelRow = try #require(body.findAll(ViewType.Button.self).first {
+            (try? $0.accessibilityLabel().string()) == "Claude Opus 4"
+        })
+        let fileRow = try #require(body.findAll(ViewType.Button.self).first {
+            (try? $0.accessibilityLabel().string()) == "editor.ex"
+        })
+
+        var modelTexts: [String] = []
+        for text in modelRow.findAll(ViewType.Text.self) {
+            if let value = try? text.string() { modelTexts.append(value) }
+        }
+        var modelImages: [String] = []
+        for image in modelRow.findAll(ViewType.Image.self) {
+            if let name = try? image.actualImage().name() { modelImages.append(name) }
+        }
+        var fileImages: [String] = []
+        for image in fileRow.findAll(ViewType.Image.self) {
+            if let name = try? image.actualImage().name() { fileImages.append(name) }
+        }
+
+        #expect(modelTexts.contains("Ready · 45%"))
+        #expect(modelTexts.contains("★ favorite"))
+        #expect(modelImages.contains("circle.fill"))
+        #expect(!fileImages.contains("circle.fill"))
+        #expect(fileRow.findAll(ViewType.Text.self).count == 2)
+    }
+
+    @Test("Section headers name each group once and are never choices")
+    @MainActor func sectionHeadersAreNotChoices() throws {
+        let spy = SpyEncoder()
+        let state = PickerState()
+        let rows: [Wire.PickerItem] = [
+            Wire.PickerItem(iconColor: 0, flags: 0, label: "GPT-5", description: "", annotation: "", matchPositions: [], activationID: 41, group: "ChatGPT"),
+            Wire.PickerItem(iconColor: 0, flags: 0, label: "GPT-5 mini", description: "", annotation: "", matchPositions: [], activationID: 42, group: "ChatGPT"),
+            Wire.PickerItem(iconColor: 0, flags: 0, label: "Claude Opus 4", description: "", annotation: "", matchPositions: [], activationID: 43, group: "Claude (subscription)"),
+        ]
+        state.update(
+            visible: true, selectedIndex: 0, filteredCount: 3, totalCount: 3,
+            markedCount: 0, title: "Models and connections", query: "", hasPreview: false,
+            rawItems: rows, actionMenu: nil, activationGeneration: 99
+        )
+        let sut = PickerOverlay(state: state, sendAction: { action in _ = spy.send(FrontendActionComposition.outbound(action)) }).environment(\.themeColors, ThemeColors())
+        let body = try sut.inspect()
+
+        var texts: [String] = []
+        for text in body.findAll(ViewType.Text.self) {
+            if let value = try? text.string() { texts.append(value) }
+        }
+        #expect(texts.filter { $0 == "ChatGPT" }.count == 1)
+        #expect(texts.filter { $0 == "Claude (subscription)" }.count == 1)
+
+        var choiceLabels: [String] = []
+        for button in body.findAll(ViewType.Button.self) {
+            if let label = try? button.accessibilityLabel().string() { choiceLabels.append(label) }
+        }
+        #expect(choiceLabels.contains("GPT-5"))
+        #expect(choiceLabels.contains("GPT-5 mini"))
+        #expect(choiceLabels.contains("Claude Opus 4"))
+        #expect(!choiceLabels.contains("ChatGPT"))
+        #expect(!choiceLabels.contains("Claude (subscription)"))
+
+        // The item under the second header activates with its own offered identity.
+        let opus = try #require(body.findAll(ViewType.Button.self).first {
+            (try? $0.accessibilityLabel().string()) == "Claude Opus 4"
+        })
+        try opus.tap()
+        #expect(spy.actions == [.semanticItemActivate(surface: .picker, intent: 1, generation: 99, itemID: Data([0, 0, 0, 43]))])
+    }
+
     @Test("Picker choices expose selected marked and unavailable state")
     @MainActor func pickerAccessibilityState() throws {
         let state = PickerState()

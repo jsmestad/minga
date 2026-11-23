@@ -25,7 +25,11 @@ public struct PickerOverlay: View {
     public let sendAction: ViewActionHandler<Action>?
 
     private let panelWidth: CGFloat = 600
-    private let itemHeight: CGFloat = 24
+    static let itemHeight: CGFloat = 24
+    /// Status rows stack their description under the label so readiness and plan usage get the full row width.
+    static let stackedItemHeight: CGFloat = 40
+    /// A section header names the group of the rows below it, such as a model route.
+    static let sectionHeaderHeight: CGFloat = 22
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @AccessibilityFocusState private var accessibilityFocus: PickerAccessibilityFocus?
@@ -44,7 +48,7 @@ public struct PickerOverlay: View {
                         Divider()
                             .overlay(theme.popupBorder.opacity(0.3))
 
-                        let totalItemsHeight = CGFloat(state.items.count) * itemHeight
+                        let totalItemsHeight = Self.listContentHeight(state.items)
                         let maxHeight = geo.size.height * 0.4
                         let listHeight = min(totalItemsHeight, max(maxHeight, 120))
                         resultsList(maxListHeight: listHeight)
@@ -228,6 +232,10 @@ public struct PickerOverlay: View {
                     ScrollView(.vertical, showsIndicators: true) {
                         LazyVStack(spacing: 0) {
                             ForEach(state.items) { item in
+                                // A section header is presentation only: it is not a button, has no activation identity, and selection, scrolling and clicks address the item below it.
+                                if let header = Self.sectionHeader(state.items, at: item.id) {
+                                    PickerSectionHeader(title: header)
+                                }
                                 Button {
                                     activate(item)
                                 } label: {
@@ -235,7 +243,7 @@ public struct PickerOverlay: View {
                                         item: item,
                                         isSelected: item.id == state.effectiveSelectedIndex,
                                         query: state.query,
-                                        itemHeight: itemHeight
+                                        itemHeight: Self.rowHeight(item)
                                     )
                                     .contentShape(Rectangle())
                                 }
@@ -366,11 +374,49 @@ public struct PickerOverlay: View {
         }
     }
 
+    /// The row's spoken label: the name, then its status, then its description.
+    static func rowAccessibilityLabel(_ item: PickerItem) -> String {
+        [item.displayLabel, item.hasStatus ? item.status : "", item.description]
+            .filter { !$0.isEmpty }
+            .joined(separator: ", ")
+    }
+
+    static func rowHeight(_ item: PickerItem) -> CGFloat {
+        item.stacksDescription ? stackedItemHeight : itemHeight
+    }
+
+    /// The group to name in a section header above `items[index]`, or nil. A header goes above an item whose group is not empty and differs from the previous item's.
+    static func sectionHeader(_ items: [PickerItem], at index: Int) -> String? {
+        guard index >= 0, index < items.count else { return nil }
+        let group = items[index].group
+        if group.isEmpty { return nil }
+        if index > 0 && items[index - 1].group == group { return nil }
+        return group
+    }
+
+    /// The unclipped height of every row and section header, which bounds the scrolling list.
+    static func listContentHeight(_ items: [PickerItem]) -> CGFloat {
+        var height: CGFloat = 0
+        for index in items.indices {
+            height += rowHeight(items[index])
+            if sectionHeader(items, at: index) != nil {
+                height += sectionHeaderHeight
+            }
+        }
+        return height
+    }
+
     private func pickerItemAccessibilityValue(_ item: PickerItem) -> String {
         var values: [String] = []
         values.append(item.id == state.effectiveSelectedIndex ? "selected" : "available")
         if item.isMarked {
             values.append("marked")
+        }
+        if item.isActive {
+            values.append("current")
+        }
+        if item.hasStatus {
+            values.append(item.status)
         }
         if !item.activation.isAvailable {
             values.append("unavailable")
@@ -427,6 +473,31 @@ private enum PickerAccessibilityFocus: Hashable {
     case action(UInt32, UInt32)
 }
 
+// MARK: - Section header
+
+/// A non-selectable row that names the group of the items below it.
+private struct PickerSectionHeader: View {
+    let title: String
+
+    @Environment(\.themeColors) private var theme
+
+    var body: some View {
+        HStack(spacing: Spacing.sm) {
+            Text(title)
+                .font(Typography.font(.small, weight: .semibold))
+                .foregroundStyle(theme.popupFg.opacity(0.5))
+                .lineLimit(1)
+                .truncationMode(.tail)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, Spacing.md)
+        .padding(.top, Spacing.xs)
+        .frame(height: PickerOverlay.sectionHeaderHeight, alignment: .bottomLeading)
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isHeader)
+    }
+}
+
 // MARK: - Picker item row (separate View for observation isolation)
 
 private struct PickerItemRow: View {
@@ -439,36 +510,86 @@ private struct PickerItemRow: View {
 
     var body: some View {
         HStack(spacing: Spacing.sm) {
-            itemCheckmark
+            leadingSlot
             itemIcon
-            highlightedLabel
+            if item.stacksDescription {
+                VStack(alignment: .leading, spacing: Spacing.hairline) {
+                    HStack(spacing: Spacing.sm) {
+                        highlightedLabel
+                        Spacer(minLength: 4)
+                        itemAnnotation
+                        statusChip
+                    }
+                    highlightedDescription
+                }
+            } else {
+                highlightedLabel
 
-            if !item.description.isEmpty {
-                highlightedDescription
+                if !item.description.isEmpty {
+                    highlightedDescription
+                }
+
+                Spacer(minLength: 4)
+                itemAnnotation
+                statusChip
             }
-
-            Spacer(minLength: 4)
-            itemAnnotation
         }
         .padding(.horizontal, Spacing.md)
         .frame(height: itemHeight)
         .background(selectionBackground)
         .id(item.id)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(Text(item.displayLabel + (item.description.isEmpty ? "" : ", " + item.description)))
+        .accessibilityLabel(Text(PickerOverlay.rowAccessibilityLabel(item)))
         .accessibilityAddTraits(isSelected ? [.isSelected] : [])
     }
 
     // MARK: - Subviews
 
+    /// The 14pt leading slot: a checkmark for a marked row, otherwise a dot for the current value.
     @ViewBuilder
-    private var itemCheckmark: some View {
+    private var leadingSlot: some View {
         Image(systemName: "checkmark.circle.fill")
             .font(Typography.font(.small))
             .foregroundStyle(theme.accent)
             .frame(width: 14)
             .opacity(item.isMarked ? 1 : 0)
+            .overlay {
+                if !item.isMarked && item.isActive {
+                    Image(systemName: "circle.fill")
+                        .font(Typography.font(.symbol))
+                        .foregroundStyle(theme.accent)
+                }
+            }
             .accessibilityHidden(true)
+    }
+
+    /// The BEAM's status text in a tinted chip. The text always carries the meaning; the tone only colors it.
+    @ViewBuilder
+    private var statusChip: some View {
+        if item.hasStatus {
+            let tone = statusToneColor(item.statusTone)
+            Text(item.status)
+                .font(Typography.font(.small, design: .monospaced))
+                .foregroundStyle(tone)
+                .lineLimit(1)
+                .padding(.horizontal, Spacing.xs)
+                .padding(.vertical, Spacing.pixel)
+                .background(
+                    RoundedRectangle(cornerRadius: Radius.sm)
+                        .fill(tone.opacity(0.12))
+                )
+                .fixedSize()
+                .layoutPriority(1)
+        }
+    }
+
+    private func statusToneColor(_ tone: Wire.PickerStatusTone) -> Color {
+        switch tone {
+        case .ready: return theme.gitAddedFg
+        case .warn: return theme.gutterWarningFg
+        case .error: return theme.gutterErrorFg
+        case .checking, .neutral, .absent: return theme.popupFg.opacity(0.5)
+        }
     }
 
     @ViewBuilder
@@ -493,6 +614,7 @@ private struct PickerItemRow: View {
                     RoundedRectangle(cornerRadius: Radius.sm)
                         .fill(theme.popupFg.opacity(0.06))
                 )
+                .layoutPriority(item.hasStatus ? 1 : 0)
         }
     }
 
@@ -533,7 +655,7 @@ private struct PickerItemRow: View {
                 .font(Typography.font(.body))
                 .foregroundStyle(fg)
                 .lineLimit(1)
-                .truncationMode(.head)
+                .truncationMode(descriptionTruncation)
         } else {
             Text(TextHighlighting.attributedString(
                 desc,
@@ -544,8 +666,13 @@ private struct PickerItemRow: View {
                 matchColor: Color(theme.accent)
             ))
             .lineLimit(1)
-            .truncationMode(.head)
+            .truncationMode(descriptionTruncation)
         }
+    }
+
+    /// Paths keep their end (the file name). A row with a status chip keeps the start of its description (the route and account).
+    private var descriptionTruncation: Text.TruncationMode {
+        item.hasStatus ? .tail : .head
     }
 
     // MARK: - Helpers
@@ -584,7 +711,7 @@ private func pickerPreviewState() -> PickerState {
         hasPreview: false,
         rawItems: [
             Wire.PickerItem(iconColor: 0x98BE65, flags: 0, label: "\u{f0e7}editor.ex", description: "lib/minga/editor.ex", annotation: "", matchPositions: [1, 2, 3, 4]),
-            Wire.PickerItem(iconColor: 0x98BE65, flags: 0x01, label: "\u{f0e7}editor_test.exs", description: "test/minga/editor_test.exs", annotation: "test", matchPositions: [1, 2, 3, 4]),
+            Wire.PickerItem(iconColor: 0x98BE65, flags: 0, label: "\u{f0e7}editor_test.exs", description: "test/minga/editor_test.exs", annotation: "test", matchPositions: [1, 2, 3, 4]),
             Wire.PickerItem(iconColor: 0x51AFEF, flags: 0, label: "\u{f0e7}EditorNSView.swift", description: "macos/Sources/EditorNSView.swift", annotation: "swift", matchPositions: [1, 2, 3, 4]),
             Wire.PickerItem(iconColor: 0xECBE7B, flags: 0, label: "\u{f085}edit_mode.ex", description: "lib/minga/mode/edit_mode.ex", annotation: "", matchPositions: [1, 2, 3, 4]),
             Wire.PickerItem(iconColor: 0xC678DD, flags: 0, label: "\u{f0e7}editor_config.ex", description: "lib/minga/editor/config.ex", annotation: "", matchPositions: [1, 2, 3, 4]),

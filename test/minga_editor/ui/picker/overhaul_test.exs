@@ -1,5 +1,5 @@
 defmodule MingaEditor.UI.Picker.OverhaulTest do
-  @moduledoc "Tests for picker overhaul features: multi-select, match positions on items, two_line flag."
+  @moduledoc "Tests for picker overhaul features: multi-select, match positions on items, item defaults."
 
   use ExUnit.Case, async: true
 
@@ -8,8 +8,8 @@ defmodule MingaEditor.UI.Picker.OverhaulTest do
 
   @items [
     %Item{id: :a, label: "README.md", description: "/project/README.md"},
-    %Item{id: :b, label: "config.exs", description: "/project/config/config.exs", two_line: true},
-    %Item{id: :c, label: "mix.exs", description: "/project/mix.exs", two_line: true},
+    %Item{id: :b, label: "config.exs", description: "/project/config/config.exs"},
+    %Item{id: :c, label: "mix.exs", description: "/project/mix.exs"},
     %Item{
       id: :d,
       label: "editor.ex",
@@ -154,14 +154,10 @@ defmodule MingaEditor.UI.Picker.OverhaulTest do
   end
 
   describe "Item struct fields" do
-    test "two_line defaults to false" do
+    test "status and active default to no chip and not current" do
       item = %Item{id: :test, label: "test"}
-      refute item.two_line
-    end
-
-    test "two_line can be set to true" do
-      item = %Item{id: :test, label: "test", two_line: true}
-      assert item.two_line
+      assert item.status == nil
+      refute item.active
     end
 
     test "annotation defaults to nil" do
