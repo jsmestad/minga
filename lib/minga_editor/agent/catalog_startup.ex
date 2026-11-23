@@ -99,16 +99,29 @@ defmodule MingaEditor.Agent.CatalogStartup do
     end
   end
 
+  # Only terminal outcomes settle a deferred start. Lifecycle progress
+  # (`:running`, `{:queued, _}`) arrives through the same callback while the
+  # catalog is still loading and leaves the workspace starting. A canceled or
+  # stale start was replaced by a newer request for the same workspace, which
+  # owns its result, so it never fails the workspace.
   @spec complete_start(EditorState.t(), Outcome.t()) :: {EditorState.t(), Outcome.t()}
   defp complete_start(state, %Outcome{request: %{effect: effect}, value: value} = outcome) do
-    {:start, workspace, hooks?, recover?, follow_up} = effect.action
+    case start_result(effect.action, value) do
+      nil -> {state, outcome}
+      result -> settle_start(state, effect.action, result, outcome)
+    end
+  end
 
-    result =
-      case value do
-        {:completed, :ready} -> {:ready, hooks?, recover?, follow_up}
-        _failed -> {:failed, catalog_failure()}
-      end
+  @spec start_result(start(), Outcome.value()) :: AgentSession.catalog_start_result() | nil
+  defp start_result({:start, _workspace, hooks?, recover?, follow_up}, {:completed, :ready}),
+    do: {:ready, hooks?, recover?, follow_up}
 
+  defp start_result({:start, _, _, _, _}, {:failed, _reason}), do: {:failed, catalog_failure()}
+  defp start_result({:start, _, _, _, _}, _progress_or_replaced), do: nil
+
+  @spec settle_start(EditorState.t(), start(), AgentSession.catalog_start_result(), Outcome.t()) ::
+          {EditorState.t(), Outcome.t()}
+  defp settle_start(state, {:start, workspace, _, _, _}, result, outcome) do
     case AgentSession.complete_deferred_start(state, workspace, result) do
       {:ok, next} -> {next, outcome}
       :stale -> {state, Outcome.stale(outcome, :agent_origin_changed)}
