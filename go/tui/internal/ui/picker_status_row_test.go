@@ -21,7 +21,8 @@ func modelPickerFixture(selected uint16) protocol.Picker {
 			{
 				ActivationID: 1,
 				Label:        "Claude Opus 4",
-				Description:  "Claude (subscription) · Claude Max · 5h limit resets 3:59 PM · 1000k ctx · thinking medium · tools, images, streaming",
+				Description:  "Claude Max · 5h limit resets 3:59 PM · 1000k ctx · thinking medium · tools, images, streaming",
+				Group:        "Claude (subscription)",
 				Annotation:   "★ favorite",
 				Active:       true,
 				Status:       "Ready · 45%",
@@ -30,14 +31,16 @@ func modelPickerFixture(selected uint16) protocol.Picker {
 			{
 				ActivationID: 2,
 				Label:        "Claude Sonnet 4",
-				Description:  "Claude (subscription) · Claude Max · 5h limit resets 3:40 PM · 200k ctx · thinking fixed · tools, images, streaming",
+				Description:  "Claude Max · 5h limit resets 3:40 PM · 200k ctx · thinking fixed · tools, images, streaming",
+				Group:        "Claude (subscription)",
 				Status:       "Ready · 82%",
 				StatusTone:   generated.PickerStatusToneWarn,
 			},
 			{
 				ActivationID: 3,
 				Label:        "Claude Haiku 4",
-				Description:  "Claude (subscription) · " + unavailableRemedy + " · 200k ctx",
+				Description:  unavailableRemedy + " · 200k ctx",
+				Group:        "Claude (subscription)",
 				Status:       "Unavailable",
 				StatusTone:   generated.PickerStatusToneError,
 			},
@@ -45,6 +48,7 @@ func modelPickerFixture(selected uint16) protocol.Picker {
 				ActivationID: 4,
 				Label:        "Retry current connection",
 				Description:  "Recheck credentials without sending your draft.",
+				Group:        "Connection",
 			},
 		},
 	}
@@ -97,15 +101,15 @@ func TestModelPickerRowsKeepChipAndCurrentMarkerAtEveryWidth(t *testing.T) {
 		}
 		switch tc.description {
 		case "none":
-			if strings.Contains(opus, "Claude (") {
+			if strings.Contains(opus, "Claude M") {
 				t.Fatalf("width %d: a short row should drop the description: %q", tc.width, opus)
 			}
 		case "short":
-			if !strings.Contains(opus, "★ favorite  Claude (") || !strings.Contains(opus, "…") {
+			if !strings.Contains(opus, "★ favorite  Claude M") || !strings.Contains(opus, "…") {
 				t.Fatalf("width %d: the description should shorten at its end: %q", tc.width, opus)
 			}
 		}
-		if tc.width == 120 && !strings.Contains(opus, "Claude (subscription) · Claude Max · 5h limit resets") {
+		if tc.width == 120 && !strings.Contains(opus, "Claude Max · 5h limit resets 3:59 PM") {
 			t.Fatalf("width 120 should keep the account and reset time: %q", opus)
 		}
 	}
@@ -151,12 +155,12 @@ func TestPickerFooterShowsTheSelectedUnavailableRowsRemedy(t *testing.T) {
 
 	// A narrow footer keeps the start of the description and shortens its end.
 	footer = ansi.Strip(model.renderPickerHelp(modelPickerFixture(2), 68))
-	if !strings.Contains(footer, "Claude (subscription) · Run claude login") || !strings.HasSuffix(strings.TrimSpace(footer), "…") {
+	if !strings.Contains(footer, "Run claude login") || !strings.HasSuffix(strings.TrimSpace(footer), "…") {
 		t.Fatalf("a narrow footer should shorten the remedy's end: %q", footer)
 	}
 
 	footer = ansi.Strip(model.renderPickerHelp(modelPickerFixture(0), 68))
-	if !strings.Contains(footer, "Enter choose") || strings.Contains(footer, "Claude (") {
+	if !strings.Contains(footer, "Enter choose") || strings.Contains(footer, "Claude Max") {
 		t.Fatalf("a ready selection keeps the key hints: %q", footer)
 	}
 }
