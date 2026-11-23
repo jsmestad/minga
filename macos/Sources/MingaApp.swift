@@ -392,6 +392,45 @@ private struct SingletonEditorWindowProbe: View {
     }
 }
 
+#if DEBUG
+/// Launch probe proving the editor window exists while the app has never requested activation.
+@MainActor
+private enum InactiveLaunchWindowProbe {
+    struct Snapshot: Codable {
+        let editorWindowCount: Int
+        let editorWindowIsVisible: Bool
+        let applicationIsActive: Bool
+    }
+
+    static var outputPath: String? {
+        ProcessInfo.processInfo.environment["MINGA_INACTIVE_LAUNCH_WINDOW_PROBE_PATH"]
+    }
+
+    static func run(writingTo path: String) {
+        Task { @MainActor in
+            for _ in 0..<300 where editorWindows.isEmpty {
+                try? await Task.sleep(for: .milliseconds(10))
+            }
+            let snapshot = Snapshot(
+                editorWindowCount: editorWindows.count,
+                editorWindowIsVisible: editorWindows.first?.isVisible == true,
+                applicationIsActive: NSApp.isActive
+            )
+            do {
+                try JSONEncoder().encode(snapshot).write(to: URL(fileURLWithPath: path), options: .atomic)
+            } catch {
+                PortLogger.report(.error, "Inactive launch window probe failed", to: appProbeLogger, privateDetail: error.localizedDescription)
+            }
+            NSApp.terminate(nil)
+        }
+    }
+
+    private static var editorWindows: [NSWindow] {
+        NSApp.windows.filter { $0.identifier == EditorScene.windowIdentifier }
+    }
+}
+#endif
+
 /// Native menu bar for Minga.
 ///
 /// Items that map to editor commands send the appropriate event to the
@@ -590,6 +629,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             appState.startup = nil
             NSApp.setActivationPolicy(.regular)
             NSApp.activate()
+            scheduleEditorWindowLaunchFallback()
+            return
+        }
+        if let outputPath = InactiveLaunchWindowProbe.outputPath {
+            // Never request activation, so AppKit handles the launch event while inactive, as it does when another app is frontmost.
+            appState.startup = nil
+            NSApp.setActivationPolicy(.regular)
+            scheduleEditorWindowLaunchFallback()
+            InactiveLaunchWindowProbe.run(writingTo: outputPath)
             return
         }
 #endif
@@ -645,6 +693,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Register as a regular GUI app so macOS routes keyboard events to us.
         NSApp.setActivationPolicy(.regular)
         NSApp.activate()
+        scheduleEditorWindowLaunchFallback()
 
         // Initial backing scale for Retina rendering. The window does not exist yet, so NSScreen.main is the only safe source here. EditorNSView.viewDidMoveToWindow/viewDidChangeBackingProperties corrects this if the window lands on another display.
         let scale = NSScreen.main?.backingScaleFactor ?? 2.0
@@ -808,6 +857,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let handles {
             connectProtocol(readHandle: handles.input, writeHandle: handles.output)
         }
+    }
+
+    /// Requests the editor window on a later main-queue turn, after AppKit has had its chance to open the launch window.
+    ///
+    /// If this runs before AppKit handles the open-application event, AppKit finds the open editor window and does not open another.
+    private func scheduleEditorWindowLaunchFallback() {
+        DispatchQueue.main.async { [weak self] in
+            self?.openEditorWindowIfLaunchSkippedIt()
+        }
+    }
+
+    /// Opens the singleton editor scene when AppKit declined to open it at launch.
+    ///
+    /// AppKit opens the launch window only when the app is active as it handles the open-application event. Cooperative activation denies `NSApp.activate()` while another app is frontmost, so a background launch otherwise creates no editor window. `EditorNSView` then never sends `ready`, and every BEAM frame goes unacknowledged until the user reopens Minga. This asks the SwiftUI application delegate for the same untitled window AppKit would have requested. It does not activate the app or take focus from the frontmost app. `Window` is a single-instance scene, so a launch that already opened the editor reuses it.
+    private func openEditorWindowIfLaunchSkippedIt() {
+        guard !NSApp.windows.contains(where: \.isVisible), let delegate = NSApp.delegate,
+              delegate.applicationShouldOpenUntitledFile?(NSApp) ?? true else { return }
+        PortLogger.report(.info, "Opening the editor window that AppKit skipped during an inactive launch", to: appStartupLogger)
+        _ = delegate.applicationOpenUntitledFile?(NSApp)
     }
 
     private func installStartupFrameCallback() {
