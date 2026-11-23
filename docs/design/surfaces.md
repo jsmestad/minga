@@ -18,7 +18,7 @@ The modeline is the spine. It is the one place state is always visible.
 4. Change position, only when the cursor is inside one of Minga's changes: "change 1/2".
 5. Git branch and change count: "main +11".
 6. Minga: the state glyph and words. "Minga here 2/3" when Minga is working in this file, otherwise "Minga editing retry.ex 2/3".
-7. Diagnostics: error and warning marks with counts, the error count in red.
+7. Diagnostics: error and warning marks with counts, the error count in the failure role.
 8. Filetype.
 9. Position, always as `240:31`.
 
@@ -54,7 +54,7 @@ Lists open in a bottom drawer: the tasks list, the review, diagnostics, the swit
 - `esc` leaves a filter first, then closes. `q` closes. ⌘W closes the focused drawer. Focus returns to the window you came from.
 - One drawer at a time. Opening another drawer replaces the current one, and closing it returns to the drawer it replaced, the way Doom's popups behave. To see two things at once, use a split.
 - When a drawer opens on its own (for example from a notification), single-letter actions are ignored for 300 ms, so a letter you were typing cannot approve something.
-- Selection uses the system accent while the list is focused, grey when it is not.
+- Selection uses the system accent while the list is focused, the muted selection when it is not.
 
 ## Tasks
 
@@ -83,7 +83,7 @@ Two ways to review, for two situations.
 
 ## Conversation and composer
 
-`SPC a v` opens the conversation as a split buffer, and `SPC a v` again or `q` in Normal mode outside the composer closes it. Messages are calm: a speaker label in its colour ("You" in blue, "Minga" in purple) above plain text, no bubbles. Tool steps are one sentence each with a state glyph ("Read native.ex and found where 429s are classified", "Test run failed · 1 failure"). The header shows the task's goal, its state and time, and the model.
+`SPC a v` opens the conversation as a split buffer, and `SPC a v` again or `q` in Normal mode outside the composer closes it. Messages are calm: a speaker label in its role colour ("You" in the you role, "Minga" in the minga role, see [themes](themes.md)) above plain text, no bubbles. Tool steps are one sentence each with a state glyph ("Read native.ex and found where 429s are classified", "Test run failed · 1 failure"). The header shows the task's goal, its state and time, and the model.
 
 The composer is a real buffer. It starts in Insert; `↩` is a newline in Insert; Normal-mode `↩` or ⌘↩ sends (steering while Minga works); `⌥↩` queues the next message; ⌘. stops. Its key hints appear only while it has focus. Queued messages live in `*minga-queue*`, an editable buffer where `dd` and `p` reorder them.
 
@@ -96,7 +96,7 @@ Minga's replies are markdown, but the frontends never parse it. The BEAM sends s
 Sections:
 
 - **Pinned**: up to four files, numbered for `SPC 1` to `SPC 4` and ⌘1 to ⌘4.
-- **Changed**: your unsaved files with a blue dot; Minga's changes grouped under their task, with its state and the small twist mark.
+- **Changed**: your unsaved files with a dot in the you role; Minga's changes grouped under their task, with its state and the small twist mark.
 - **Recent**: by last visit.
 - **Terminals**: each with its cwd and last state.
 
