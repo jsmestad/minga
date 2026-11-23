@@ -52,13 +52,14 @@ Each line draws its own segment, so the ribbon stays aligned at any line height.
 
 ## The orbit
 
-The orbit appears only while Minga is moving. When Minga stops, the orbit goes and the satellite remains, shaped by why it stopped. The five shapes differ without colour, so they work for colour-blind users and in 16-colour terminals. A state is always followed by its word.
+The orbit appears only while Minga is moving. When Minga stops, the orbit goes and the satellite remains, shaped by why it stopped. There are six state words and five shapes. The shapes differ without colour, so they work for colour-blind users and in 16-colour terminals. A state is always followed by its word, and the word is what tells Waiting and Stopped apart: they share the hollow dot.
 
 | State | Shape | Word | File | TUI |
 |---|---|---|---|---|
 | Working | satellite running its orbit, trailing an arc; animated, static under Reduce Motion | "Working", or what it is doing | [`state-working.svg`](marks/state-working.svg) | `◐`, cycling `◐ ◓ ◑ ◒` |
 | Needs you | dot with a soft halo, needs_you role | "Needs you" | [`state-needs-you.svg`](marks/state-needs-you.svg) | `◉` |
 | Waiting | hollow dot, waiting role | "Waiting", with the reason and time, e.g. "rate limited, retry in 40 s" | [`state-waiting.svg`](marks/state-waiting.svg) | `○` |
+| Stopped | hollow dot, the same shape as Waiting, waiting role | "Stopped". You stopped it; it waits for you to continue, not for anything outside | [`state-waiting.svg`](marks/state-waiting.svg) | `○` |
 | Failed | diamond, failure role | "Failed", with the reason | [`state-failed.svg`](marks/state-failed.svg) | `◆` |
 | Done | solid dot, done role | "Done" ("Passt." once, at completion) | [`state-done.svg`](marks/state-done.svg) | `●` |
 

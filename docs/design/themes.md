@@ -29,6 +29,7 @@ This page lists the roles the design uses, where each one lives in `MingaEditor.
 | failure | Errors, failed states, red diagnostics | `gutter.error_fg`, `agent.status_error` | exists |
 | done | Completed states | none for state (`git.added_fg` is the same hue in built-in themes) | **new role** in `agent` (`status_done`) |
 | waiting | The hollow waiting dot and its words | `agent.status_idle` | exists |
+| stopped | Shares the waiting role and shape; the word "Stopped" tells them apart | `agent.status_idle` | exists |
 | warning | Diagnostic warnings only | `gutter.warning_fg` | exists |
 | info | Diagnostic info and hints | `gutter.info_fg` | exists |
 | text | Primary text | `editor.fg` | exists |

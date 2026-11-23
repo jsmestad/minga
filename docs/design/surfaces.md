@@ -38,6 +38,13 @@ Pause after `SPC`, or any prefix, and which-key opens as one panel anchored abov
 - The ⌘ equivalent appears beside an entry when one exists, so the menu bar and the leader teach each other.
 - Timing: appears after the pause (`timeoutlen`), fades in within 120 ms, no fade with Reduce Motion, and never paints a frame if you type through the sequence.
 
+## Closing things
+
+One rule everywhere, so nothing traps you:
+
+- **`q` closes Minga's special buffers and splits** and returns focus to the window you came from: the conversation (in Normal mode, outside the composer), the queue, the subagent peek, the review buffer, the tasks drawer, the checklist, draft attachments, retained history and the observatory. This is the Emacs `special-mode` convention (`q` runs `quit-window` in help, Dired, `*Messages*` and Magit) and what Doom does for popups. In a file, `q` stays Vim's macro key.
+- **`esc` closes anything transient**: prompts and confirmations cancel, pickers and menus close, overlays such as the protocol error dismiss (its Reload action stays available in the notice it leaves). In a terminal in TERM mode, `esc` goes to the shell; use `⌃\ ⌃N` first.
+
 ## Drawers
 
 Lists open in a bottom drawer: the tasks list, the review, diagnostics, the switcher and the terminal. A drawer is a real split of the window, not an overlay that hides code.
@@ -45,6 +52,7 @@ Lists open in a bottom drawer: the tasks list, the review, diagnostics, the swit
 - 1 pt divider with a 5 pt hit area; height remembered per kind of buffer; double-click the divider to reset to 40%.
 - The header carries the title and the drawer's key hints. There is no second hint line above the modeline.
 - `esc` leaves a filter first, then closes. `q` closes. ⌘W closes the focused drawer. Focus returns to the window you came from.
+- One drawer at a time. Opening another drawer replaces the current one, and closing it returns to the drawer it replaced, the way Doom's popups behave. To see two things at once, use a split.
 - When a drawer opens on its own (for example from a notification), single-letter actions are ignored for 300 ms, so a letter you were typing cannot approve something.
 - Selection uses the system accent while the list is focused, the muted selection when it is not.
 
@@ -57,7 +65,8 @@ Lists open in a bottom drawer: the tasks list, the review, diagnostics, the swit
 - The row that needs you expands to show the request ("Create test/minga_agent/usage_limit_test.exs +86") and its actions as text: "`y` Approve once  `a` Always for this session  `t` This turn  `n` Deny  `=` Show diff  `↩` Open conversation".
 - Every other row shows its one relevant action: `r` Retry on waiting and failed rows, `o` Output, `i` Inspect, `↩` Review on done rows.
 - A task that fans out shows its subagents beneath it as a tree (`├─`, `└─`), each with its state.
-- Empty state: still to be designed (see ADR-0006 open questions).
+- Empty state: "No one's at the table yet." with one next action, `n` New task. `q` or `esc` returns focus to the window you came from.
+- New task: `n` in the drawer (or `SPC a n`) opens a "New task ›" minibuffer prompt. The goal you type becomes the task's title; the selection is attached as context, `@` adds more, `↩` starts it, `esc` cancels.
 
 ## Review
 
@@ -74,9 +83,11 @@ Two ways to review, for two situations.
 
 ## Conversation and composer
 
-`SPC a v` opens the conversation as a split buffer. Messages are calm: a speaker label in its role colour ("You" in the you role, "Minga" in the minga role, see [themes](themes.md)) above plain text, no bubbles. Tool steps are one sentence each with a state glyph ("Read native.ex and found where 429s are classified", "Test run failed · 1 failure"). The header shows the task's goal, its state and time, and the model.
+`SPC a v` opens the conversation as a split buffer, and `SPC a v` again or `q` in Normal mode outside the composer closes it. Messages are calm: a speaker label in its role colour ("You" in the you role, "Minga" in the minga role, see [themes](themes.md)) above plain text, no bubbles. Tool steps are one sentence each with a state glyph ("Read native.ex and found where 429s are classified", "Test run failed · 1 failure"). The header shows the task's goal, its state and time, and the model.
 
 The composer is a real buffer. It starts in Insert; `↩` is a newline in Insert; Normal-mode `↩` or ⌘↩ sends (steering while Minga works); `⌥↩` queues the next message; ⌘. stops. Its key hints appear only while it has focus. Queued messages live in `*minga-queue*`, an editable buffer where `dd` and `p` reorder them.
+
+Minga's replies are markdown, but the frontends never parse it. The BEAM sends styled spans (headings, emphasis, code, links) as part of the semantic model, and each frontend draws them: native text on macOS, Lip Gloss in the TUI. Glamour is not used, because parsing markdown in Go would duplicate meaning on the frontend.
 
 ## Switcher
 
@@ -121,3 +132,7 @@ Only needs-you escalates, and nothing steals focus.
 - macOS in the background: a Dock badge with the needs-you count, one informational bounce, and a time-sensitive notification with "Approve once" and "Deny" for low-risk requests. Clicking it opens the tasks drawer on that task.
 - Terminal: see [tui.md](tui.md#terminal-capabilities) for notifications from inside the terminal, the tab title and the tab progress bar.
 - An approval answered in one place shows "Already answered in Minga" everywhere else.
+
+## Colour roles still to fix
+
+Two existing theme fields break "one colour, one meaning" and change when the new roles land: `agent.assistant_label` uses the minga role (purple, not green), and `agent.status_thinking` uses the working role (not yellow). The same theme change raises the light-theme values that miss 3:1 against the editor background: Catppuccin Latte's needs-you, warning and waiting colours, and AstroDark's waiting colour. See [themes.md](themes.md) on main.

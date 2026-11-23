@@ -36,7 +36,7 @@ Panels yield before code does. The editor keeps at least 100 columns; drawers an
 
 ## 9. Voice at the edges
 
-Minga is Bavarian for Munich, and the voice shows up only at the edges: "Servus" on welcome, "Pfiat di" on quit, and "Passt." once when a task finishes (the notification and the moment it completes). Everywhere else the word is "Done". The agent is called Minga; conversations are named by their goal.
+Minga is Bavarian for Munich, and the voice shows up only at the edges: three lines and no more: "Servus." on welcome, "Passt." once when a task finishes (the notification and the moment it completes), and "Ciao." on quit. "Ciao" is everyday Munich speech. Everywhere else the words are plain: "Done", "Stopped", "Waiting". The agent is called Minga; conversations are named by their goal.
 
 ## 10. The keyboard is how you discover
 

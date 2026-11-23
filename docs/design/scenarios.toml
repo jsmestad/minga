@@ -24,6 +24,11 @@
 #              A "to" id that has no [[scenario]] yet is an inventory gap.
 #   notes      anything a reviewer needs; open questions.
 #
+# Top-level key:
+#
+#   phase           "keyboard" while mouse paths are pending the mouse sweep (missing click
+#                   paths are reported but do not fail the checker), "final" after it.
+#
 # Flags used by the flow-map checker (design/tools/storyboard/check.py):
 #
 #   cold_start      true on the one scenario a fresh launch lands on.
@@ -63,6 +68,10 @@
 # lifecycle screens the Spine needs. Within a journey, removed scenarios come last.
 
 # ---- start -----------------------------------------------------------------
+
+# Design phase. "keyboard": click paths are pending the mouse sweep and do not fail
+# the checker. Set to "final" once every scenario has had its mouse sweep.
+phase = "keyboard"
 
 [[scenario]]
 id = "start.empty"
@@ -166,14 +175,14 @@ notes = "Lists what would be lost: unsaved buffers, running tasks, unreviewed ch
 [[scenario]]
 id = "start.quit.farewell"
 journey = "start"
-title = "Pfiat di: the app closes"
+title = "Ciao: the app closes"
 surfaces = ["minibuffer"]
 states = []
 frontends = ["macos", "tui"]
 status = "missing"
 terminal_state = true
 exits = []
-notes = "Bavarian voice. Terminal state: the process exits."
+notes = "Voice: \"Ciao.\" (everyday Munich speech). Terminal state: the process exits."
 
 # ---- edit ------------------------------------------------------------------
 
@@ -235,6 +244,9 @@ exits = [
   { key = "SPC c D", click = "", to = "code.references" },
   { key = "SPC c h", click = "", to = "code.call_hierarchy" },
   { key = "SPC c d", click = "modeline diagnostics segment", to = "code.diagnostics.list" },
+  { key = "SPC g s", click = "", to = "git.status" },
+  { key = "SPC g b", click = "", to = "git.blame" },
+  { key = "SPC t e", click = "", to = "edit.timeline" },
   { key = "SPC c l i", click = "", to = "code.lsp_info" },
   { key = "SPC c l I", click = "", to = "code.lsp_tools" },
   { key = "SPC m t o", click = "", to = "code.test_output" },
@@ -755,7 +767,7 @@ exits = [
   { key = "↩", click = "row", to = "edit.plain" },
   { key = "q", click = "close", to = "edit.plain" },
 ]
-notes = "Lives in the sidebar today; the Spine makes it a buffer (magit-style). No leader key today."
+notes = "Lives in the sidebar today; the Spine makes it a buffer (magit-style). SPC g s (new, free on main) opens it."
 
 [[scenario]]
 id = "git.status.clean"
@@ -940,7 +952,7 @@ exits = [
   { key = "]h", click = "", to = "minga.review.in_file" },
   { key = "any motion out of the change", click = "click elsewhere", to = "edit.working" },
 ]
-notes = "]h has no click path; the twist head of the next change is the click equivalent. ]e already means next agent edit today: see ADR-0006."
+notes = "]h has no click path; the twist head of the next change is the click equivalent. ]h replaces ]e (ADR-0006)."
 
 [[scenario]]
 id = "minga.conversation"
@@ -958,6 +970,7 @@ exits = [
   { key = "SPC a r", click = "2 files changed · review", to = "minga.review.buffer" },
   { key = "↩ on a Started line", click = "Started line", to = "minga.subagent.peek" },
   { key = "SPC a v", click = "close split", to = "edit.working" },
+  { key = "q (Normal mode, outside the composer)", click = "", to = "edit.working" },
 ]
 
 [[scenario]]
@@ -992,7 +1005,7 @@ exits = [
   { key = "↩", click = "open", to = "minga.conversation" },
   { key = "q", click = "close", to = "minga.conversation" },
 ]
-notes = "]t is next class/module in normal mode today; scope it to this buffer or choose another key."
+notes = "]t / [t are bound only in this buffer; normal-mode ]t keeps next class/module."
 
 [[scenario]]
 id = "minga.tasks.list"
@@ -1018,15 +1031,16 @@ exits = [
 [[scenario]]
 id = "minga.tasks.working"
 journey = "minga"
-title = "Tasks drawer right after answering an approval"
+title = "Tasks drawer with a working task focused (after answering an approval, or right after starting a task)"
 surfaces = ["editor", "drawer:tasks", "modeline"]
 states = ["working"]
 frontends = ["macos", "tui"]
 status = "designed"
-boards = { macos = "V41Tasks.dc.html", tui = "V41TuiTasks.dc.html" }
+boards = { macos = "V41Tasks.dc.html", tui = "V41TuiTasks.dc.html", new_task = "Batch1_minga_task_new_started.dc.html" }
 transient = true
 exits = [
   { key = "↩", click = "row title", to = "minga.conversation" },
+  { key = "i", click = "Inspect", to = "minga.subagent.peek" },
   { key = "q", click = "drawer close", to = "edit.plain" },
   { key = "esc", click = "", to = "edit.plain", keyboard_only = "q has the click" },
 ]
@@ -1038,28 +1052,32 @@ title = "Tasks drawer with no tasks"
 surfaces = ["drawer:tasks"]
 states = []
 frontends = ["macos", "tui"]
-status = "missing"
+status = "designed"
+boards = { macos = "Batch1_minga_tasks_empty.dc.html", tui = "Batch1_minga_tasks_empty.dc.html" }
 transient = true
 exits = [
   { key = "n", click = "New task", to = "minga.task.new" },
   { key = "q", click = "drawer close", to = "edit.plain" },
+  { key = "esc", click = "", to = "edit.plain", keyboard_only = "q has the click" },
 ]
 notes = "Voice: \"No one's at the table yet\". Offers n New task."
 
 [[scenario]]
 id = "minga.task.new"
 journey = "minga"
-title = "SPC a n: starting a new task"
-surfaces = ["split:conversation", "composer"]
+title = "New task ›: the minibuffer prompt for a new task (n in the tasks drawer, or SPC a n)"
+surfaces = ["drawer:tasks", "minibuffer"]
 states = []
 frontends = ["macos", "tui"]
-status = "missing"
+status = "designed"
+boards = { macos = "Batch1_minga_task_new.dc.html", tui = "Batch1_minga_task_new.dc.html" }
 transient = true
 exits = [
-  { key = "⌘↩ or ↩ (Normal)", click = "Send", to = "minga.conversation" },
-  { key = "esc", click = "Cancel", to = "edit.plain" },
+  { key = "↩", click = "Start", to = "minga.tasks.working" },
+  { key = "esc", click = "Cancel", to = "minga.tasks.list" },
+  { key = "@", click = "Add context", to = "files.switcher" },
 ]
-notes = "Empty conversation with the composer focused; the task gets its title from the first message."
+notes = "The goal you type becomes the task's title. The cursor's selection is attached as context when there is one; @ adds a buffer, file or selection. The prompt never steals focus while you type."
 
 [[scenario]]
 id = "minga.approval.diff"
@@ -1096,7 +1114,8 @@ title = "Keep all 3 changes? y/n"
 surfaces = ["minibuffer"]
 states = []
 frontends = ["macos", "tui"]
-status = "missing"
+status = "designed"
+boards = { macos = "Batch1_minga_review_confirms.dc.html", tui = "Batch1_minga_review_confirms.dc.html" }
 transient = true
 exits = [
   { key = "y", click = "Keep all", to = "minga.review.all_decided" },
@@ -1109,14 +1128,15 @@ id = "minga.review.all_decided"
 journey = "minga"
 title = "Review after the last change is decided"
 surfaces = ["drawer:review"]
-states = []
+states = ["done"]
 frontends = ["macos", "tui"]
-status = "missing"
+status = "designed"
+boards = { macos = "Batch1_minga_review_all_decided.dc.html", tui = "Batch1_minga_review_all_decided.dc.html" }
 exits = [
   { key = "q", click = "close", to = "edit.plain" },
   { key = "↩", click = "Reply to Minga", to = "minga.conversation" },
 ]
-notes = "Says what was kept and rejected, offers to reply."
+notes = "Says what was kept and rejected, offers to reply. The one place the review says \"Passt.\"."
 
 [[scenario]]
 id = "minga.review.empty"
@@ -1125,10 +1145,14 @@ title = "Nothing to review"
 surfaces = ["drawer:review"]
 states = []
 frontends = ["macos", "tui"]
-status = "missing"
+status = "designed"
+boards = { macos = "Batch1_minga_review_empty.dc.html", tui = "Batch1_minga_review_empty.dc.html" }
 exits = [
   { key = "q", click = "close", to = "edit.plain" },
+  { key = "esc", click = "", to = "edit.plain", keyboard_only = "q has the click" },
+  { key = "SPC a a", click = "Tasks", to = "minga.tasks.list" },
 ]
+notes = "Empty state with the next action. No voice line."
 
 [[scenario]]
 id = "minga.reject_all.confirm"
@@ -1137,7 +1161,8 @@ title = "Reject all 3 changes? y/n"
 surfaces = ["minibuffer"]
 states = []
 frontends = ["macos", "tui"]
-status = "missing"
+status = "designed"
+boards = { macos = "Batch1_minga_review_confirms.dc.html", tui = "Batch1_minga_review_confirms.dc.html" }
 transient = true
 exits = [
   { key = "y", click = "Reject all", to = "edit.plain" },
@@ -1149,15 +1174,19 @@ exits = [
 id = "minga.conversation.stopped"
 journey = "minga"
 title = "Conversation after Stop"
-surfaces = ["split:conversation", "composer"]
-states = []
+surfaces = ["split:conversation", "composer", "modeline"]
+states = ["stopped"]
 frontends = ["macos", "tui"]
-status = "missing"
+status = "designed"
+boards = { macos = "Batch1_minga_conversation_stopped.dc.html", tui = "Batch1_minga_conversation_stopped.dc.html" }
 exits = [
-  { key = "↩", click = "Send", to = "minga.conversation" },
+  { key = "↩ (composer)", click = "Continue", to = "minga.conversation" },
+  { key = "⌥↩", click = "Queue", to = "minga.queue" },
+  { key = "SPC a r", click = "Review", to = "minga.review.buffer" },
   { key = "SPC a v", click = "close split", to = "edit.plain" },
+  { key = "q (Normal mode, outside the composer)", click = "", to = "edit.plain" },
 ]
-notes = "Says what was interrupted and what was already changed."
+notes = "Says what was interrupted and what was already changed. The modeline reads \"Minga stopped\"; the queue is kept; Continue resumes the same task."
 
 [[scenario]]
 id = "minga.queue.empty"
@@ -1326,6 +1355,7 @@ transient = true
 exits = [
   { key = "y", click = "Publish", to = "edit.plain" },
   { key = "n", click = "Cancel", to = "edit.plain" },
+  { key = "esc", click = "", to = "edit.plain" },
 ]
 
 [[scenario]]
@@ -1401,7 +1431,6 @@ exits = [
   { key = "⌃C, ⌘. or SPC a s", click = "", to = "terminal.minga_shell" },
   { key = "q", click = "close split", to = "edit.working" },
 ]
-notes = "Open: what esc does at the approval prompt."
 
 [[scenario]]
 id = "terminal.capabilities"
@@ -1466,7 +1495,7 @@ exits = [
   { key = "a", click = "always", to = "terminal.minga_shell" },
   { key = "t", click = "this turn", to = "terminal.minga_shell" },
   { key = "n", click = "deny", to = "terminal.minga_shell" },
-  { key = "esc", click = "", to = "terminal.minga_shell", keyboard_only = "open question in ADR-0006" },
+  { key = "esc", click = "", to = "terminal.minga_shell", keyboard_only = "esc defers: the request stays pending and needs-you stays lit" },
 ]
 notes = "Open: does esc deny, or leave the request pending?"
 
@@ -1508,8 +1537,9 @@ status = "missing"
 reached_by = "SPC o t in a shell without integration"
 exits = [
   { key = "SPC o t", click = "drawer close", to = "edit.plain" },
+  { key = "q (Normal mode)", click = "", to = "edit.plain" },
 ]
-notes = "No command blocks; a one-time hint in *Messages* explains how to enable them."
+notes = "No command blocks; a one-time hint in *Messages* explains how to enable them. q in Normal mode hides the drawer and leaves the shell running, as in terminal.drawer.normal."
 
 # ---- files -----------------------------------------------------------------
 
@@ -1656,15 +1686,16 @@ notes = "V3Narrow predates V4.1; redraw with the V4.1 modeline truncation order 
 [[scenario]]
 id = "windows.drawer_stack"
 journey = "windows"
-title = "Two drawers at once (terminal and tasks)"
-surfaces = ["drawer:terminal", "drawer:tasks"]
+title = "Opening a drawer while another is open (terminal, then tasks)"
+surfaces = ["drawer:tasks", "modeline"]
 states = []
 frontends = ["macos", "tui"]
 status = "missing"
 exits = [
-  { key = "q", click = "close", to = "edit.plain" },
+  { key = "q", click = "close", to = "terminal.drawer", back = true },
+  { key = "esc", click = "", to = "terminal.drawer", back = true },
 ]
-notes = "Open: do drawers stack, replace each other, or split the drawer area?"
+notes = "One drawer at a time: the tasks drawer replaces the terminal drawer, and closing it returns to the terminal drawer (Doom popup behaviour). Splits show two things at once."
 
 [[scenario]]
 id = "windows.focus_lost"
@@ -1866,6 +1897,8 @@ frontends = ["macos", "tui"]
 status = "existing-only"
 exits = [
   { key = "SPC o b", click = "close", to = "edit.plain" },
+  { key = "q", click = "", to = "edit.plain" },
+  { key = "esc", click = "", to = "edit.plain" },
 ]
 notes = "Sidebar today; becomes a buffer or drawer under the Spine."
 
@@ -1897,7 +1930,9 @@ status = "existing-only"
 reached_by = "a frame the frontend cannot decode"
 exits = [
   { key = "↩", click = "Reload", to = "edit.plain" },
+  { key = "esc", click = "", to = "edit.plain" },
 ]
+notes = "esc dismisses the overlay; Reload stays offered as an action in the notice it leaves behind."
 
 [[scenario]]
 id = "errors.resync"
