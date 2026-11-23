@@ -245,6 +245,38 @@ defmodule Minga.Buffer.Lines do
     {start, next_start - start - 1}
   end
 
+  @doc """
+  Returns the byte length of one existing editor line's content, against a line-indexed snapshot.
+
+  A line's content ends before its terminator. For a CRLF terminator that is before the `\\r`, because `\\r\\n` is one character and LSP positions end the line there too, so a caret or an edit at the line end never splits the pair. A `\\r` that no `\\n` follows, such as one at the end of the final line, is content.
+  """
+  @spec content_length_in(snapshot(), line_index()) :: non_neg_integer()
+  def content_length_in({line_starts, text}, line)
+      when is_tuple(line_starts) and is_binary(text) and line < tuple_size(line_starts) do
+    {start, length} = span(line_starts, line, byte_size(text))
+    final_line? = line == tuple_size(line_starts) - 1
+
+    if not final_line? and length > 0 and :binary.at(text, start + length - 1) == ?\r,
+      do: length - 1,
+      else: length
+  end
+
+  @doc "Returns the byte length of one existing editor line's content, with the CRLF rule of `content_length_in/2`."
+  @spec content_length(Document.t(), line_index()) :: non_neg_integer()
+  def content_length(%Document{} = doc, line) when is_integer(line) and line >= 0 do
+    line_start = start_of(doc, line)
+
+    if line + 1 < Document.line_count(doc) do
+      length = start_of(doc, line + 1) - 1 - line_start
+
+      if length > 0 and Document.byte_at(doc, line_start + length - 1) == ?\r,
+        do: length - 1,
+        else: length
+    else
+      Document.content_byte_size(doc) - line_start
+    end
+  end
+
   @doc "Returns where one editor line starts in the document text."
   @spec start(line_starts(), line_index()) :: non_neg_integer()
   def start(line_starts, line) when is_tuple(line_starts) and line >= 0 do

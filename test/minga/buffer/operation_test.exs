@@ -124,6 +124,76 @@ defmodule Minga.Buffer.OperationTest do
     end
   end
 
+  describe "replace_range/4 rejection" do
+    test "rejects positions inside a code point, invalid replacements, and malformed edits" do
+      for {text, from, to, replacement, reason} <- [
+            {"aéb", {0, 2}, {0, 2}, "X", :invalid_utf8},
+            {"a😀b", {0, 0}, {0, 3}, "", :invalid_utf8},
+            {"x\n字", {1, 1}, {1, 1}, "", :invalid_utf8},
+            {"abc", {0, 0}, {0, 0}, <<0xC3>>, :invalid_utf8},
+            {"abc", {0, 0}, {0, 0}, nil, :malformed_edit},
+            {"abc", {0, -1}, {0, 0}, "x", :malformed_edit},
+            {"abc", {0, 0}, {0}, "x", :malformed_edit},
+            {"abc", :start, {0, 0}, "x", :malformed_edit}
+          ] do
+        assert Operation.replace_range(Document.new(text), from, to, replacement) ==
+                 {:error, reason}
+      end
+    end
+
+    test "rejects every edit on a document that is already invalid UTF-8" do
+      doc = Document.new("ok" <> <<0xFF>>)
+      assert Operation.replace_range(doc, {0, 0}, {0, 0}, "x") == {:error, :invalid_utf8}
+    end
+
+    test "a column past a CRLF line end means the line end before the CR" do
+      doc = Document.new("ab\r\ncd")
+
+      assert {:edited, new_doc, delta} = Operation.replace_range(doc, {0, 9}, {0, 9}, "Z")
+      assert Document.content(new_doc) == "abZcd"
+      assert {delta.start_byte, delta.old_end_byte} == {2, 4}
+    end
+
+    property "an edit at any byte column either is rejected or leaves valid UTF-8 that its undo patch restores" do
+      fragments = ["a", "é", "e\u0301", "字", "😀", "👩\u200D💻", "\n", "\r\n", "ᄀ", "ᅡ"]
+
+      check all(
+              text <- map(list_of(member_of(fragments), max_length: 12), &Enum.join/1),
+              from <- tuple({integer(0..3), integer(0..16)}),
+              to <- tuple({integer(0..3), integer(0..16)}),
+              replacement <- one_of([constant(""), member_of(fragments)]),
+              max_runs: 1_000
+            ) do
+        doc = Document.new(text)
+
+        case Operation.replace_range(doc, from, to, replacement) do
+          {:edited, new_doc, delta} ->
+            edited = Document.content(new_doc)
+            assert String.valid?(edited)
+            refute edited =~ ~r/\r(?!\n)/u
+
+            assert {:ok, restored} =
+                     delta |> UndoPatch.from_delta(doc) |> UndoPatch.apply(new_doc)
+
+            assert Document.content(restored) == text
+
+          {:error, :invalid_utf8} ->
+            {_line_starts, _text} = snapshot = Minga.Buffer.Lines.snapshot(doc)
+            span = Minga.Buffer.Selection.clamped_characterwise_in(snapshot, from, to).span
+            # Only a position inside a code point can make valid inputs invalid.
+            refute code_point_boundary?(text, span.start) and
+                     code_point_boundary?(text, span.stop)
+        end
+      end
+    end
+  end
+
+  @spec code_point_boundary?(String.t(), non_neg_integer()) :: boolean()
+  defp code_point_boundary?(text, point) when point >= byte_size(text), do: true
+
+  defp code_point_boundary?(text, point),
+    do: Bitwise.band(:binary.at(text, point), 0xC0) != 0x80
+
   describe "replace_lines/4" do
     test "includes the selected line separator when the replacement already provides one" do
       doc = Document.new("zero\none\nthree")

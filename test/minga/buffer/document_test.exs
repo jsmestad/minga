@@ -276,7 +276,8 @@ defmodule Minga.Buffer.DocumentTest do
     end
 
     test "deleting from inside a CRLF removes only the CR" do
-      buf = "a\r\nb" |> Document.new() |> Document.move_to({0, 2})
+      # Placement never lands inside a CRLF; inserting a CR before an LF can.
+      buf = "a\nb" |> Document.new() |> Document.move_to({0, 1}) |> Document.insert_text("\r")
 
       assert Document.cursor_offset(buf) == 2
 
@@ -318,6 +319,13 @@ defmodule Minga.Buffer.DocumentTest do
       assert Document.content(buf) == "hi"
     end
 
+    test "placing past a CRLF line end stops before the CR" do
+      buf = "a\r\nb" |> Document.new() |> Document.move_to({0, 2})
+
+      assert Document.cursor(buf) == {0, 1}
+      assert Document.cursor_offset(buf) == 1
+    end
+
     test "deleting a CRLF at the cursor joins lines" do
       buf = "a\r\nb\nc" |> Document.new() |> Document.move_to({0, 1}) |> Document.delete_at()
 
@@ -329,7 +337,8 @@ defmodule Minga.Buffer.DocumentTest do
     end
 
     test "deleting from inside a CRLF removes only the LF" do
-      buf = "a\r\nb" |> Document.new() |> Document.move_to({0, 2})
+      # Placement never lands inside a CRLF; inserting a CR before an LF can.
+      buf = "a\nb" |> Document.new() |> Document.move_to({0, 1}) |> Document.insert_text("\r")
 
       assert Document.cursor_offset(buf) == 2
 

@@ -556,9 +556,30 @@ defmodule MingaEditor.Commands.Editing do
 
     edits = Minga.Editing.Comment.compute_toggle_edits(lines, prefix, start_line)
 
-    Enum.each(edits, fn edit -> apply_comment_edit(buf, edit) end)
+    case apply_comment_edits(buf, edits) do
+      :ok -> state
+      {:error, reason} -> edit_failed_notice(state, "Comment toggle", reason)
+    end
+  end
 
-    state
+  # Stops at the first rejected edit; the buffer leaves that edit unapplied.
+  @spec apply_comment_edits(pid(), [Minga.Editing.Comment.edit()]) ::
+          :ok | {:error, :read_only | Minga.Buffer.Operation.edit_error()}
+  defp apply_comment_edits(_buf, []), do: :ok
+
+  defp apply_comment_edits(buf, [edit | rest]) do
+    case apply_comment_edit(buf, edit) do
+      :ok -> apply_comment_edits(buf, rest)
+      {:error, _reason} = error -> error
+    end
+  end
+
+  @spec edit_failed_notice(state(), String.t(), term()) :: state()
+  defp edit_failed_notice(state, action, reason) do
+    MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+      state,
+      "#{action} failed: #{inspect(reason)}"
+    )
   end
 
   @spec resolve_comment_prefix(pid(), non_neg_integer(), atom(), [map()]) :: String.t()
@@ -587,7 +608,8 @@ defmodule MingaEditor.Commands.Editing do
     end
   end
 
-  @spec apply_comment_edit(pid(), Minga.Editing.Comment.edit()) :: :ok
+  @spec apply_comment_edit(pid(), Minga.Editing.Comment.edit()) ::
+          :ok | {:error, :read_only | Minga.Buffer.Operation.edit_error()}
   defp apply_comment_edit(buf, {:insert, line, col, text}) do
     Buffer.move_to(buf, {line, col})
     Buffer.insert_text(buf, text)
@@ -871,7 +893,7 @@ defmodule MingaEditor.Commands.Editing do
     ParserManager.request_indent(buffer_pid, line, parser_manager, @keystroke_indent_timeout_ms)
   end
 
-  @spec insert_indent(pid(), String.t()) :: :ok
+  @spec insert_indent(pid(), String.t()) :: :ok | {:error, :read_only}
   defp insert_indent(_buf, ""), do: :ok
   defp insert_indent(buf, indent), do: Buffer.insert_text(buf, indent)
 
@@ -882,9 +904,13 @@ defmodule MingaEditor.Commands.Editing do
     {cursor_line, _} = Buffer.cursor(buf)
     opts = indent_opts(state, buf)
 
-    for line <- start_line..end_line do
-      reindent_single_line(buf, line, opts)
-    end
+    result =
+      Enum.reduce_while(start_line..end_line, :ok, fn line, :ok ->
+        case reindent_single_line(buf, line, opts) do
+          :ok -> {:cont, :ok}
+          {:error, _reason} = error -> {:halt, error}
+        end
+      end)
 
     # Move cursor to first non-blank on cursor line
     case Buffer.lines(buf, cursor_line, 1) do
@@ -896,10 +922,14 @@ defmodule MingaEditor.Commands.Editing do
         Buffer.move_to(buf, {cursor_line, 0})
     end
 
-    state
+    case result do
+      :ok -> state
+      {:error, reason} -> edit_failed_notice(state, "Re-indent", reason)
+    end
   end
 
-  @spec reindent_single_line(pid(), non_neg_integer(), [Indent.compute_opt()]) :: :ok
+  @spec reindent_single_line(pid(), non_neg_integer(), [Indent.compute_opt()]) ::
+          :ok | {:error, :read_only | Minga.Buffer.Operation.edit_error()}
   defp reindent_single_line(buf, line, opts) do
     desired_indent = Indent.compute_for_line(buf, line, opts)
 
@@ -908,18 +938,17 @@ defmodule MingaEditor.Commands.Editing do
       [text] ->
         current_indent = Indent.extract_leading_ws(text)
 
-        if current_indent != desired_indent do
-          apply_indent_change(buf, line, current_indent, desired_indent)
-        end
-
-        :ok
+        if current_indent != desired_indent,
+          do: apply_indent_change(buf, line, current_indent, desired_indent),
+          else: :ok
 
       [] ->
         :ok
     end
   end
 
-  @spec apply_indent_change(pid(), non_neg_integer(), String.t(), String.t()) :: :ok
+  @spec apply_indent_change(pid(), non_neg_integer(), String.t(), String.t()) ::
+          :ok | {:error, :read_only | Minga.Buffer.Operation.edit_error()}
   defp apply_indent_change(buf, line, "", desired_indent) do
     Buffer.move_to(buf, {line, 0})
     insert_indent(buf, desired_indent)

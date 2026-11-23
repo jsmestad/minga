@@ -147,10 +147,9 @@ defmodule Minga.Buffer.Process do
   end
 
   @doc """
-  Replaces a range of text with new text.
+  Replaces a characterwise inclusive range with new text, as one undo entry.
 
-  Moves to the start of the range, deletes the range, then inserts the
-  new text. Used by LSP text edits.
+  The range and the cursor follow `Minga.Buffer.Operation.replace_range/4`. Returns `{:error, :invalid_utf8}` when the result would not be valid UTF-8, for example because a column falls inside a multi-byte code point, and `{:error, :malformed_edit}` when a position or the replacement has the wrong shape. The buffer is unchanged on every error.
   """
   @spec apply_edit(
           GenServer.server(),
@@ -160,7 +159,7 @@ defmodule Minga.Buffer.Process do
           non_neg_integer(),
           String.t(),
           EditSource.t()
-        ) :: :ok | {:error, :read_only}
+        ) :: :ok | {:error, :read_only | Operation.edit_error()}
   def apply_edit(
         server,
         start_line,
@@ -234,7 +233,10 @@ defmodule Minga.Buffer.Process do
   Returns `{:error, {:edit_failed, index, :invalid_utf8}}`, and changes
   nothing, when the buffer is not valid UTF-8 or the edit at `index` in
   `edits` would leave it invalid, for example overlapping edits that split
-  a code point.
+  a code point. Returns `{:error, {:edit_failed, index, :malformed_edit}}`,
+  and changes nothing, when the edit at `index` is not a
+  `{{line, col}, {line, col}, text}` tuple with non-negative integer
+  positions and a binary text.
 
   Used by AI/LSP batch operations to avoid N round-trips and N undo entries.
 
@@ -1381,8 +1383,10 @@ defmodule Minga.Buffer.Process do
   end
 
   def handle_call({:apply_edit, from_pos, to_pos, new_text, source}, _from, state) do
-    result = Operation.replace_range(state.document, from_pos, to_pos, new_text)
-    {:reply, :ok, record_operation(state, result, source)}
+    case Operation.replace_range(state.document, from_pos, to_pos, new_text) do
+      {:error, _reason} = error -> {:reply, error, state}
+      result -> {:reply, :ok, record_operation(state, result, source)}
+    end
   end
 
   def handle_call(
