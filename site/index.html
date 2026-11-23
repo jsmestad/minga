@@ -86,246 +86,263 @@
           </div>
         </div>
 
-        <figure class="spine-figure">
-          <div class="specimen-shell" data-code-tabs>
-            <div class="code-tabs-header">
-              <div class="code-tab-list" role="tablist" aria-label="Minga interface views">
-                <button type="button" class="code-tab" role="tab" id="tab-spec-twist" aria-selected="true" aria-controls="panel-spec-twist">1. Co-authoring (The Twist)</button>
-                <button type="button" class="code-tab" role="tab" id="tab-spec-peek" aria-selected="false" aria-controls="panel-spec-peek" tabindex="-1">2. Subagent Peek</button>
-                <button type="button" class="code-tab" role="tab" id="tab-spec-tasks" aria-selected="false" aria-controls="panel-spec-tasks" tabindex="-1">3. Tasks &amp; Queue</button>
-                <button type="button" class="code-tab" role="tab" id="tab-spec-parity" aria-selected="false" aria-controls="panel-spec-parity" tabindex="-1">4. macOS &amp; Terminal Parity</button>
-              </div>
-            </div>
+        <figure class="spine-figure" data-code-tabs>
+          <div class="showcase-header">
+            <span>Interface tour · Select a feature to preview</span>
+            <span>Catppuccin Frappé default · ← / → keys</span>
+          </div>
 
-            <!-- TAB 1: CO-AUTHORING (THE TWIST) IN CATPPUCCIN FRAPPE -->
-            <div class="code-tab-panel" role="tabpanel" id="panel-spec-twist" aria-labelledby="tab-spec-twist">
-              <div class="code-tab-noscript">1. Co-authoring (The Twist)</div>
-              <div class="spine-specimen" role="img" aria-label="Resting screen in Catppuccin Frappe: plain title bar, code with Twist authorship gutter, and one prioritized modeline">
-                <div class="spine-titlebar">
-                  <span class="spine-wordmark">minga</span>
-                  <span class="spine-title-file">retry.ex <span>lib/minga_agent/retry.ex</span></span>
-                  <span></span>
+          <div class="showcase-nav" role="tablist" aria-label="Minga interface feature tour">
+            <button type="button" class="showcase-tab" role="tab" id="tab-spec-twist" aria-selected="true" aria-controls="panel-spec-twist">
+              <span class="showcase-tab-num">01 / CO-AUTHORING</span>
+              <span class="showcase-tab-title">The Twist gutter</span>
+              <span class="showcase-tab-sub">Authorship strands &amp; per-author undo</span>
+            </button>
+            <button type="button" class="showcase-tab" role="tab" id="tab-spec-peek" aria-selected="false" aria-controls="panel-spec-peek" tabindex="-1">
+              <span class="showcase-tab-num">02 / PARALLEL AGENTS</span>
+              <span class="showcase-tab-title">Subagent Peek</span>
+              <span class="showcase-tab-sub">Inspect workers without losing your place</span>
+            </button>
+            <button type="button" class="showcase-tab" role="tab" id="tab-spec-tasks" aria-selected="false" aria-controls="panel-spec-tasks" tabindex="-1">
+              <span class="showcase-tab-num">03 / BUFFERS</span>
+              <span class="showcase-tab-title">Tasks &amp; Queue</span>
+              <span class="showcase-tab-sub">One approval drawer &amp; editable queue</span>
+            </button>
+            <button type="button" class="showcase-tab" role="tab" id="tab-spec-parity" aria-selected="false" aria-controls="panel-spec-parity" tabindex="-1">
+              <span class="showcase-tab-num">04 / CLIENTS</span>
+              <span class="showcase-tab-title">macOS &amp; Terminal</span>
+              <span class="showcase-tab-sub">Identical layout, marks, and keys</span>
+            </button>
+          </div>
+
+          <!-- FEATURE 1: CO-AUTHORING (THE TWIST) -->
+          <div class="showcase-panel" role="tabpanel" id="panel-spec-twist" aria-labelledby="tab-spec-twist">
+            <p class="showcase-explain"><strong>Feature 01: Co-authoring &amp; per-author undo.</strong> The resting window is just your code, a plain title bar, and one prioritized modeline. Minga's unreviewed lines show as a braided Twist in the gutter; editing inside them turns one strand blue for shared authorship while <kbd>u</kbd> / <kbd>⌘Z</kbd> undoes only your lines.</p>
+            <div class="spine-specimen" role="img" aria-label="Resting screen in Catppuccin Frappe: plain title bar, code with Twist authorship gutter, and one prioritized modeline">
+              <div class="spine-titlebar">
+                <span class="spine-wordmark">minga</span>
+                <span class="spine-title-file">retry.ex <span>lib/minga_agent/retry.ex</span></span>
+                <span></span>
+              </div>
+              <div class="spine-buffer">
+                <div class="spine-line">
+                  <span class="spine-ln">237</span>
+                  <span class="spine-sign"></span>
+                  <span class="spine-gutter"></span>
+                  <span class="spine-code"><span class="ckw">def</span> classify_status(status, headers) <span class="ckw">do</span></span>
                 </div>
-                <div class="spine-buffer">
-                  <div class="spine-line">
-                    <span class="spine-ln">237</span>
-                    <span class="spine-sign"></span>
-                    <span class="spine-gutter"></span>
-                    <span class="spine-code"><span class="ckw">def</span> classify_status(status, headers) <span class="ckw">do</span></span>
-                  </div>
-                  <div class="spine-line spine-line-hl">
-                    <span class="spine-ln">238</span>
-                    <span class="spine-sign"></span>
-                    <span class="spine-gutter">
-                      <svg xmlns="http://www.w3.org/2000/svg" width="10" height="26" viewBox="0 0 10 26" aria-hidden="true"><path d="M7 5 C7 11, 3 11, 3 17 L3 26" fill="none" stroke="#74628d" stroke-width="2.6" stroke-linecap="round"/><path d="M3 5 C3 11, 7 11, 7 17 L7 26" fill="none" stroke="#303446" stroke-width="5" stroke-linecap="round"/><path d="M3 5 C3 11, 7 11, 7 17 L7 26" fill="none" stroke="#ca9ee6" stroke-width="2.6" stroke-linecap="round"/></svg>
-                    </span>
-                    <span class="spine-code">  <span class="ckw">case</span> status <span class="ckw">do</span></span>
-                  </div>
-                  <div class="spine-line spine-line-hl">
-                    <span class="spine-ln">239</span>
-                    <span class="spine-sign"></span>
-                    <span class="spine-gutter">
-                      <svg xmlns="http://www.w3.org/2000/svg" width="10" height="26" viewBox="0 0 10 26" aria-hidden="true"><path d="M3 0 L3 26" stroke="#74628d" stroke-width="2.6"/><path d="M7 0 L7 26" stroke="#ca9ee6" stroke-width="2.6"/></svg>
-                    </span>
-                    <span class="spine-code">    <span class="cnum">429</span> -&gt; {<span class="cat">:rate_limited</span>, parse_retry_after(headers)}</span>
-                  </div>
-                  <div class="spine-line spine-line-hl">
-                    <span class="spine-ln">240</span>
-                    <span class="spine-sign"></span>
-                    <span class="spine-gutter">
-                      <svg xmlns="http://www.w3.org/2000/svg" width="10" height="26" viewBox="0 0 10 26" aria-hidden="true"><path d="M3 0 L3 26" stroke="#8caaee" stroke-width="2.6"/><path d="M7 0 L7 26" stroke="#ca9ee6" stroke-width="2.6"/></svg>
-                    </span>
-                    <span class="spine-code">    <span class="cnum">529</span> -&gt; {<span class="cat">:overloaded</span>, backoff_ms(<span class="cnum">2</span>)} <span class="ccm"># your edit inside Minga's change</span></span>
-                  </div>
-                  <div class="spine-line spine-line-hl">
-                    <span class="spine-ln">241</span>
-                    <span class="spine-sign"></span>
-                    <span class="spine-gutter">
-                      <svg xmlns="http://www.w3.org/2000/svg" width="10" height="26" viewBox="0 0 10 26" aria-hidden="true"><path d="M3 0 L3 19" stroke="#74628d" stroke-width="2.6" stroke-linecap="round"/><path d="M7 0 L7 19" stroke="#ca9ee6" stroke-width="2.6" stroke-linecap="round"/></svg>
-                    </span>
-                    <span class="spine-code">    code <span class="ckw">when</span> code &gt;= <span class="cnum">500</span> -&gt; {<span class="cat">:retryable</span>, backoff_ms(<span class="cnum">1</span>)}</span>
-                  </div>
-                  <div class="spine-line">
-                    <span class="spine-ln">242</span>
-                    <span class="spine-sign"></span>
-                    <span class="spine-gutter">
-                      <svg xmlns="http://www.w3.org/2000/svg" width="10" height="26" viewBox="0 0 10 26" aria-hidden="true"><path d="M5 0 L5 26" stroke="#8caaee" stroke-width="1.6"/></svg>
-                    </span>
-                    <span class="spine-code">    _ -&gt; {<span class="cat">:fatal</span>, status}</span>
-                  </div>
-                  <div class="spine-line">
-                    <span class="spine-ln">243</span>
-                    <span class="spine-sign"></span>
-                    <span class="spine-gutter"></span>
-                    <span class="spine-code"><span class="ckw">  end</span></span>
-                  </div>
+                <div class="spine-line spine-line-hl">
+                  <span class="spine-ln">238</span>
+                  <span class="spine-sign"></span>
+                  <span class="spine-gutter">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="10" height="26" viewBox="0 0 10 26" aria-hidden="true"><path d="M7 5 C7 11, 3 11, 3 17 L3 26" fill="none" stroke="#74628d" stroke-width="2.6" stroke-linecap="round"/><path d="M3 5 C3 11, 7 11, 7 17 L7 26" fill="none" stroke="#303446" stroke-width="5" stroke-linecap="round"/><path d="M3 5 C3 11, 7 11, 7 17 L7 26" fill="none" stroke="#ca9ee6" stroke-width="2.6" stroke-linecap="round"/></svg>
+                  </span>
+                  <span class="spine-code">  <span class="ckw">case</span> status <span class="ckw">do</span></span>
                 </div>
-                <div class="spine-modeline">
-                  <div class="ml-left">
-                    <span class="ml-pill">NORMAL</span>
-                    <span class="ml-seg ml-needs">
-                      <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6" fill="#ef9f76" fill-opacity="0.28"/><circle cx="8" cy="8" r="3.4" fill="#ef9f76"/></svg>
-                      1 needs you
-                    </span>
-                    <span class="ml-file">retry.ex</span>
-                    <span class="ml-minga">change 1/2</span>
-                    <span>main +11</span>
-                  </div>
-                  <div class="ml-right">
-                    <span class="ml-seg ml-minga">
-                      <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5.5" fill="none" stroke="#ca9ee6" stroke-opacity="0.32" stroke-width="1.5"/><path d="M8 2.5 A5.5 5.5 0 0 1 13.5 8" fill="none" stroke="#ca9ee6" stroke-width="1.5" stroke-linecap="round"/><circle cx="13.5" cy="8" r="2.1" fill="#ca9ee6"/></svg>
-                      Minga here 2/3
-                    </span>
-                    <span class="ml-dim">elixir</span>
-                    <span class="ml-dim">240:31</span>
-                  </div>
+                <div class="spine-line spine-line-hl">
+                  <span class="spine-ln">239</span>
+                  <span class="spine-sign"></span>
+                  <span class="spine-gutter">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="10" height="26" viewBox="0 0 10 26" aria-hidden="true"><path d="M3 0 L3 26" stroke="#74628d" stroke-width="2.6"/><path d="M7 0 L7 26" stroke="#ca9ee6" stroke-width="2.6"/></svg>
+                  </span>
+                  <span class="spine-code">    <span class="cnum">429</span> -&gt; {<span class="cat">:rate_limited</span>, parse_retry_after(headers)}</span>
+                </div>
+                <div class="spine-line spine-line-hl">
+                  <span class="spine-ln">240</span>
+                  <span class="spine-sign"></span>
+                  <span class="spine-gutter">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="10" height="26" viewBox="0 0 10 26" aria-hidden="true"><path d="M3 0 L3 26" stroke="#8caaee" stroke-width="2.6"/><path d="M7 0 L7 26" stroke="#ca9ee6" stroke-width="2.6"/></svg>
+                  </span>
+                  <span class="spine-code">    <span class="cnum">529</span> -&gt; {<span class="cat">:overloaded</span>, backoff_ms(<span class="cnum">2</span>)} <span class="ccm"># your edit inside Minga's change</span></span>
+                </div>
+                <div class="spine-line spine-line-hl">
+                  <span class="spine-ln">241</span>
+                  <span class="spine-sign"></span>
+                  <span class="spine-gutter">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="10" height="26" viewBox="0 0 10 26" aria-hidden="true"><path d="M3 0 L3 19" stroke="#74628d" stroke-width="2.6" stroke-linecap="round"/><path d="M7 0 L7 19" stroke="#ca9ee6" stroke-width="2.6" stroke-linecap="round"/></svg>
+                  </span>
+                  <span class="spine-code">    code <span class="ckw">when</span> code &gt;= <span class="cnum">500</span> -&gt; {<span class="cat">:retryable</span>, backoff_ms(<span class="cnum">1</span>)}</span>
+                </div>
+                <div class="spine-line">
+                  <span class="spine-ln">242</span>
+                  <span class="spine-sign"></span>
+                  <span class="spine-gutter">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="10" height="26" viewBox="0 0 10 26" aria-hidden="true"><path d="M5 0 L5 26" stroke="#8caaee" stroke-width="1.6"/></svg>
+                  </span>
+                  <span class="spine-code">    _ -&gt; {<span class="cat">:fatal</span>, status}</span>
+                </div>
+                <div class="spine-line">
+                  <span class="spine-ln">243</span>
+                  <span class="spine-sign"></span>
+                  <span class="spine-gutter"></span>
+                  <span class="spine-code"><span class="ckw">  end</span></span>
                 </div>
               </div>
-            </div>
-
-            <!-- TAB 2: SUBAGENT PEEK -->
-            <div class="code-tab-panel" role="tabpanel" id="panel-spec-peek" aria-labelledby="tab-spec-peek">
-              <div class="code-tab-noscript">2. Subagent Peek</div>
-              <div class="spine-specimen" role="img" aria-label="Subagent peek split: parent conversation on left, subagent split on right with sibling glyph strip and direct composer">
-                <div class="spine-titlebar">
-                  <span class="spine-wordmark">minga</span>
-                  <span class="spine-title-file">Refactor retry pipeline <span>parent + subagent split</span></span>
-                  <span></span>
+              <div class="spine-modeline">
+                <div class="ml-left">
+                  <span class="ml-pill">NORMAL</span>
+                  <span class="ml-seg ml-needs">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6" fill="#ef9f76" fill-opacity="0.28"/><circle cx="8" cy="8" r="3.4" fill="#ef9f76"/></svg>
+                    1 needs you
+                  </span>
+                  <span class="ml-file">retry.ex</span>
+                  <span class="ml-minga">change 1/2</span>
+                  <span>main +11</span>
                 </div>
-                <div class="specimen-split">
-                  <div class="specimen-pane">
-                    <div class="specimen-pane-head">
-                      <strong>Parent conversation</strong>
-                      <span class="ml-minga">◐ Working · 1 of 4 reports in</span>
-                    </div>
-                    <div class="specimen-row"><span class="specimen-row-you">You</span></div>
-                    <div class="specimen-row">Audit retry handling, verify edge cases, and add tests before publishing.</div>
-                    <div class="specimen-row" style="margin-top:0.45rem;"><span class="specimen-row-minga">Minga</span></div>
-                    <div class="specimen-row"><span class="ml-done">●</span> Read retry.ex and split work across 4 subagents</div>
-                    <div class="specimen-row"><span class="ml-minga">◐</span> Started Fact-Check Auditor (press ↩ to peek)</div>
-                    <div class="specimen-row"><span class="ml-done">●</span> Edge-Case Tester reported 1 missing 529 clause</div>
-                    <div class="specimen-composer">Unsent draft preserved while you inspect subagents...</div>
-                  </div>
-                  <div class="specimen-pane">
-                    <div class="specimen-pane-head">
-                      <strong>Refactor retry › Fact-Check Auditor</strong>
-                      <span class="ml-minga">◐ ◐ <span class="ml-done">●</span> ◐ &nbsp;3 of 4</span>
-                    </div>
-                    <div class="specimen-row"><span class="ml-dim">▸ Brief (folded · press za to unfold)</span></div>
-                    <div class="specimen-row" style="margin-top:0.35rem;"><span class="ml-done">●</span> Checked HTTP 429 Retry-After parsing against RFC 9110</div>
-                    <div class="specimen-row"><span class="ml-minga">◐</span> Cross-checking backoff cap in lib/minga_agent/retry.ex</div>
-                    <div class="specimen-composer">Message this subagent... &nbsp;([t / ]t siblings · q close)</div>
-                  </div>
-                </div>
-                <div class="spine-modeline">
-                  <div class="ml-left">
-                    <span class="ml-pill">NORMAL</span>
-                    <span class="ml-file">*minga-subagent*</span>
-                    <span class="ml-dim">]t / [t step siblings</span>
-                  </div>
-                  <div class="ml-right">
-                    <span class="ml-minga">◐ 3 running · 1 done</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <!-- TAB 3: TASKS & EDITABLE QUEUE -->
-            <div class="code-tab-panel" role="tabpanel" id="panel-spec-tasks" aria-labelledby="tab-spec-tasks">
-              <div class="code-tab-noscript">3. Tasks &amp; Editable Queue</div>
-              <div class="spine-specimen" role="img" aria-label="Tasks drawer with subagent tree and expanded Needs you approval row alongside editable prompt queue buffer">
-                <div class="spine-titlebar">
-                  <span class="spine-wordmark">minga</span>
-                  <span class="spine-title-file">*minga-tasks* &amp; *minga-queue* <span>buffers in drawers</span></span>
-                  <span></span>
-                </div>
-                <div class="specimen-split">
-                  <div class="specimen-pane">
-                    <div class="specimen-pane-head">
-                      <strong>*minga-tasks*</strong>
-                      <span><span class="ml-needs">1 needs you</span> · 1 working · 1 done</span>
-                    </div>
-                    <div class="specimen-row-needs">
-                      <div class="specimen-row" style="padding:0;"><span class="ml-needs">◉</span> <strong>Add usage limit tests</strong> <span class="ml-dim">· 12s</span></div>
-                      <div class="specimen-row" style="padding:0.2rem 0 0;">Create test/minga_agent/usage_limit_test.exs +86</div>
-                      <div class="specimen-keys"><span>y</span> Approve once &nbsp;<span>a</span> Session &nbsp;<span>t</span> Turn &nbsp;<span>n</span> Deny &nbsp;<span>=</span> Diff</div>
-                    </div>
-                    <div class="specimen-row"><span class="ml-minga">◐</span> Refactor retry pipeline · step 2 of 3</div>
-                    <div class="specimen-row" style="padding-left:1rem;"><span class="ml-dim">├─</span> <span class="ml-done">●</span> Edge-Case Tester · Done</div>
-                    <div class="specimen-row" style="padding-left:1rem;"><span class="ml-dim">└─</span> <span class="ml-minga">◐</span> Fact-Check Auditor · Working</div>
-                  </div>
-                  <div class="specimen-pane">
-                    <div class="specimen-pane-head">
-                      <strong>*minga-queue*</strong>
-                      <span class="ml-dim">editable buffer (dd / p reorder)</span>
-                    </div>
-                    <div class="specimen-row"><span class="ml-dim">1.</span> Run mix test test/minga_agent/retry_test.exs after edit</div>
-                    <div class="specimen-row"><span class="ml-dim">2.</span> Summarize changed error tuples for the PR description</div>
-                    <div class="specimen-row" style="margin-top:0.55rem;"><span class="ml-dim"># Normal-mode ↩ or ⌘↩ steers immediately; ⌥↩ queues here.</span></div>
-                  </div>
-                </div>
-                <div class="spine-modeline">
-                  <div class="ml-left">
-                    <span class="ml-pill">NORMAL</span>
-                    <span class="ml-needs">◉ 1 needs you</span>
-                    <span class="ml-file">*minga-tasks*</span>
-                  </div>
-                  <div class="ml-right">
-                    <span class="ml-dim">300 ms lockout active on auto-open · q close</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <!-- TAB 4: MACOS & TERMINAL PARITY -->
-            <div class="code-tab-panel" role="tabpanel" id="panel-spec-parity" aria-labelledby="tab-spec-parity">
-              <div class="code-tab-noscript">4. macOS &amp; Terminal Parity</div>
-              <div class="spine-specimen" role="img" aria-label="Side by side parity between macOS native client and Go terminal client rendering identical layout, marks, and keys">
-                <div class="spine-titlebar">
-                  <span class="spine-wordmark">minga</span>
-                  <span class="spine-title-file">Same layout · Same theme roles · Same keys</span>
-                  <span></span>
-                </div>
-                <div class="specimen-split">
-                  <div class="specimen-pane">
-                    <div class="specimen-pane-head">
-                      <strong>macOS Desktop (Swift + Metal)</strong>
-                      <span class="ml-minga">Vector Twist + CoreText</span>
-                    </div>
-                    <div class="specimen-row"><span class="ml-minga">◐</span> Working · animated orbit (static under Reduce Motion)</div>
-                    <div class="specimen-row"><span class="ml-needs">◉</span> Needs you · modeline chip + macOS Dock badge</div>
-                    <div class="specimen-row"><span class="ml-done">●</span> Done · exact vector Twist gutter + smooth trackpad scroll</div>
-                    <div class="specimen-row"><span class="ml-dim">Shortcuts:</span> hold ⌘ to reveal controls · every key has a click</div>
-                  </div>
-                  <div class="specimen-pane">
-                    <div class="specimen-tui-frame">
-                      <div class="specimen-tui-top">
-                        <span>*minga-review* · 2 files · +40 -12</span>
-                        <span>Go Terminal UI</span>
-                      </div>
-                      <div><span class="ml-minga">▚</span> lib/minga_agent/retry.ex</div>
-                      <div><span class="ml-minga">▐</span> &nbsp;├─ @@ 238 replaced 1 line with 4</div>
-                      <div><span class="ml-done">●</span> &nbsp;└─ test/retry_test.exs (+28)</div>
-                      <div class="specimen-tui-foot">y keep · n reject · = diff · Y keep all · q close</div>
-                    </div>
-                  </div>
-                </div>
-                <div class="spine-modeline">
-                  <div class="ml-left">
-                    <span class="ml-pill">NORMAL</span>
-                    <span class="ml-file">retry.ex</span>
-                    <span class="ml-minga">◐ Minga here 2/3</span>
-                  </div>
-                  <div class="ml-right">
-                    <span class="ml-dim">Degrades cleanly from truecolor to 16 colors</span>
-                  </div>
+                <div class="ml-right">
+                  <span class="ml-seg ml-minga">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5.5" fill="none" stroke="#ca9ee6" stroke-opacity="0.32" stroke-width="1.5"/><path d="M8 2.5 A5.5 5.5 0 0 1 13.5 8" fill="none" stroke="#ca9ee6" stroke-width="1.5" stroke-linecap="round"/><circle cx="13.5" cy="8" r="2.1" fill="#ca9ee6"/></svg>
+                    Minga here 2/3
+                  </span>
+                  <span class="ml-dim">elixir</span>
+                  <span class="ml-dim">240:31</span>
                 </div>
               </div>
             </div>
           </div>
+
+          <!-- FEATURE 2: SUBAGENT PEEK -->
+          <div class="showcase-panel" role="tabpanel" id="panel-spec-peek" aria-labelledby="tab-spec-peek">
+            <p class="showcase-explain"><strong>Feature 02: Subagent Peek.</strong> Press <kbd>SPC a i</kbd> (or <kbd>↩</kbd> on a worker line) to inspect a running subagent in a split on the right. Step through siblings in place with <kbd>]t</kbd> / <kbd>[t</kbd> or message a subagent directly while your main thread and unsent draft stay untouched.</p>
+            <div class="spine-specimen" role="img" aria-label="Subagent peek split: parent conversation on left, subagent split on right with sibling glyph strip and direct composer">
+              <div class="spine-titlebar">
+                <span class="spine-wordmark">minga</span>
+                <span class="spine-title-file">Refactor retry pipeline <span>parent + subagent split</span></span>
+                <span></span>
+              </div>
+              <div class="specimen-split">
+                <div class="specimen-pane">
+                  <div class="specimen-pane-head">
+                    <strong>Parent conversation</strong>
+                    <span class="ml-minga">◐ Working · 1 of 4 reports in</span>
+                  </div>
+                  <div class="specimen-row"><span class="specimen-row-you">You</span></div>
+                  <div class="specimen-row">Audit retry handling, verify edge cases, and add tests before publishing.</div>
+                  <div class="specimen-row" style="margin-top:0.45rem;"><span class="specimen-row-minga">Minga</span></div>
+                  <div class="specimen-row"><span class="ml-done">●</span> Read retry.ex and split work across 4 subagents</div>
+                  <div class="specimen-row"><span class="ml-minga">◐</span> Started Fact-Check Auditor</div>
+                  <div class="specimen-row"><span class="ml-done">●</span> Edge-Case Tester reported 1 missing 529 clause</div>
+                  <div class="specimen-composer">Draft: Also verify Retry-After HTTP-date headers before merge...</div>
+                </div>
+                <div class="specimen-pane">
+                  <div class="specimen-pane-head">
+                    <strong>Refactor retry › Fact-Check Auditor</strong>
+                    <span class="ml-minga">◐ ◐ <span class="ml-done">●</span> ◐ &nbsp;3 of 4</span>
+                  </div>
+                  <div class="specimen-row"><span class="ml-dim">▸ Brief (folded · za)</span></div>
+                  <div class="specimen-row" style="margin-top:0.35rem;"><span class="ml-done">●</span> Checked HTTP 429 Retry-After parsing against RFC 9110</div>
+                  <div class="specimen-row"><span class="ml-minga">◐</span> Cross-checking backoff cap in lib/minga_agent/retry.ex</div>
+                  <div class="specimen-composer">Message Fact-Check Auditor...</div>
+                </div>
+              </div>
+              <div class="spine-modeline">
+                <div class="ml-left">
+                  <span class="ml-pill">NORMAL</span>
+                  <span class="ml-file">*minga-subagent*</span>
+                  <span class="ml-dim">]t / [t siblings · q close</span>
+                </div>
+                <div class="ml-right">
+                  <span class="ml-minga">◐ 3 running · 1 done</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- FEATURE 3: TASKS & EDITABLE QUEUE -->
+          <div class="showcase-panel" role="tabpanel" id="panel-spec-tasks" aria-labelledby="tab-spec-tasks">
+            <p class="showcase-explain"><strong>Feature 03: Tasks drawer &amp; editable prompt queue.</strong> Approvals float to the top of <code>*minga-tasks*</code> with uniform <kbd>y</kbd>/<kbd>a</kbd>/<kbd>t</kbd>/<kbd>n</kbd> keys and a 300 ms anti-misfire lockout on auto-open. Queued follow-ups live in <code>*minga-queue*</code>, an ordinary buffer where <kbd>dd</kbd> and <kbd>p</kbd> reorder upcoming prompts.</p>
+            <div class="spine-specimen" role="img" aria-label="Tasks drawer with subagent tree and expanded Needs you approval row alongside editable prompt queue buffer">
+              <div class="spine-titlebar">
+                <span class="spine-wordmark">minga</span>
+                <span class="spine-title-file">*minga-tasks* &amp; *minga-queue* <span>buffers in drawers</span></span>
+                <span></span>
+              </div>
+              <div class="specimen-split">
+                <div class="specimen-pane">
+                  <div class="specimen-pane-head">
+                    <strong>*minga-tasks*</strong>
+                    <span><span class="ml-needs">1 needs you</span> · 1 working · 1 done</span>
+                  </div>
+                  <div class="specimen-row-needs">
+                    <div class="specimen-row" style="padding:0;"><span class="ml-needs">◉</span> <strong>Add usage limit tests</strong> <span class="ml-dim">· 12s</span></div>
+                    <div class="specimen-row" style="padding:0.2rem 0 0;">Create test/minga_agent/usage_limit_test.exs +86</div>
+                    <div class="specimen-keys"><span>y</span> Approve once &nbsp;<span>a</span> Session &nbsp;<span>t</span> Turn &nbsp;<span>n</span> Deny &nbsp;<span>=</span> Diff</div>
+                  </div>
+                  <div class="specimen-row"><span class="ml-minga">◐</span> Refactor retry pipeline · step 2 of 3</div>
+                  <div class="specimen-row" style="padding-left:1rem;"><span class="ml-dim">├─</span> <span class="ml-done">●</span> Edge-Case Tester · Done</div>
+                  <div class="specimen-row" style="padding-left:1rem;"><span class="ml-dim">└─</span> <span class="ml-minga">◐</span> Fact-Check Auditor · Working</div>
+                </div>
+                <div class="specimen-pane">
+                  <div class="specimen-pane-head">
+                    <strong>*minga-queue*</strong>
+                    <span class="ml-dim">2 queued</span>
+                  </div>
+                  <div class="specimen-row"><span class="ml-dim">1.</span> Run mix test test/minga_agent/retry_test.exs after edit</div>
+                  <div class="specimen-row"><span class="ml-dim">2.</span> Summarize changed error tuples for the PR description</div>
+                </div>
+              </div>
+              <div class="spine-modeline">
+                <div class="ml-left">
+                  <span class="ml-pill">NORMAL</span>
+                  <span class="ml-needs">◉ 1 needs you</span>
+                  <span class="ml-file">*minga-tasks*</span>
+                </div>
+                <div class="ml-right">
+                  <span class="ml-dim">q close</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- FEATURE 4: MACOS & TERMINAL PARITY -->
+          <div class="showcase-panel" role="tabpanel" id="panel-spec-parity" aria-labelledby="tab-spec-parity">
+            <p class="showcase-explain"><strong>Feature 04: True macOS &amp; Terminal parity.</strong> Both clients render the exact same screens, theme roles, and key bindings from one Erlang VM state model. The Go terminal client uses floating rounded layers and degrades cleanly from vector graphics down to 16-color terminals.</p>
+            <div class="spine-specimen" role="img" aria-label="Side by side parity between macOS native client and Go terminal client rendering identical layout, marks, and keys">
+              <div class="spine-titlebar">
+                <span class="spine-wordmark">minga</span>
+                <span class="spine-title-file">*minga-review* <span>macOS vs. Terminal</span></span>
+                <span></span>
+              </div>
+              <div class="specimen-split">
+                <div class="specimen-pane">
+                  <div class="specimen-pane-head">
+                    <strong>macOS Desktop (Swift + Metal)</strong>
+                    <span class="ml-minga">Vector marks + CoreText</span>
+                  </div>
+                  <div class="specimen-row"><span class="ml-minga">◐</span> Working · animated orbit (static under Reduce Motion)</div>
+                  <div class="specimen-row"><span class="ml-needs">◉</span> Needs you · modeline chip + macOS Dock badge</div>
+                  <div class="specimen-row"><span class="ml-done">●</span> Done · exact vector Twist gutter + smooth trackpad scroll</div>
+                  <div class="specimen-row"><span class="ml-dim">Discovery:</span> hold ⌘ on macOS · click any visible action</div>
+                </div>
+                <div class="specimen-pane">
+                  <div class="specimen-tui-frame">
+                    <div class="specimen-tui-top">
+                      <span>*minga-review* · 2 files · +40 -12</span>
+                      <span>Go Terminal UI</span>
+                    </div>
+                    <div><span class="ml-minga">▚</span> lib/minga_agent/retry.ex</div>
+                    <div><span class="ml-minga">▐</span> &nbsp;├─ @@ 238 replaced 1 line with 4</div>
+                    <div><span class="ml-done">●</span> &nbsp;└─ test/retry_test.exs (+28)</div>
+                    <div class="specimen-tui-foot">y keep · n reject · = diff · Y keep all · q close</div>
+                  </div>
+                </div>
+              </div>
+              <div class="spine-modeline">
+                <div class="ml-left">
+                  <span class="ml-pill">NORMAL</span>
+                  <span class="ml-file">*minga-review*</span>
+                  <span class="ml-minga">◐ Minga here 2/3</span>
+                </div>
+                <div class="ml-right">
+                  <span class="ml-dim">Truecolor · 256 · 16-color safe</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
           <figcaption class="spine-caption">
-            <span>Shown in default Catppuccin Frappé (<a href="/architecture#adrs">ADR-0006</a> v0.1.0 interface model): plain title bar, code, one modeline, and buffers in drawers.</span>
-            <span>Switch tabs with click or ← / →</span>
+            <span>Illustrative previews of Minga's v0.1.0 interface model (<a href="/architecture#adrs">ADR-0006</a>), shown in the default Catppuccin Frappé theme.</span>
+            <span>No tabs · No permanent sidebars · One modeline</span>
           </figcaption>
         </figure>
       </div>

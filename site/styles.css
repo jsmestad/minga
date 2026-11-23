@@ -514,47 +514,125 @@ kbd {
   color: var(--cta-text-hover);
 }
 
-/* Resting Spine Screen Specimen (Catppuccin Frappé default theme + 4-tab switcher) */
+/* Feature Showcase Switcher (physically separate from the Minga app frame) */
 
 .spine-figure {
-  margin: 2.5rem 0 0;
+  margin: 2.75rem 0 0;
 }
 
-.specimen-shell {
-  border: 1px solid var(--border);
+.showcase-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.showcase-nav {
+  display: none;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   border-top: 2px solid var(--border-strong);
-  background: #303446;
-  overflow: hidden;
+  border-left: 1px solid var(--border);
+  margin-bottom: 1rem;
+  background: var(--bg-elevated);
 }
 
-.specimen-shell .code-tabs-header {
+.js-enabled .showcase-nav {
+  display: grid;
+}
+
+.showcase-tab {
+  appearance: none;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-right: 1px solid var(--border);
+  border-bottom: 2px solid var(--border);
+  padding: 0.85rem 1rem;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+
+.showcase-tab:hover {
   background: var(--bg-subtle);
-  border-bottom: 1px solid var(--border);
-  padding-right: 0;
 }
 
-.specimen-shell .code-tab[aria-selected="true"] {
-  background: #292c3c;
-  color: #c6d0f5;
-  border-bottom-color: #ca9ee6;
+.showcase-tab[aria-selected="true"] {
+  background: var(--bg-subtle);
+  border-bottom-color: var(--accent);
 }
 
-.specimen-shell .code-tab-panel + .code-tab-panel {
-  border-top: 1px solid #414559;
+.showcase-tab-num {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  letter-spacing: 0.04em;
 }
 
-.specimen-shell .code-tab-noscript {
-  background: #232634;
-  color: #a5adce;
-  border-bottom: 1px solid #414559;
+.showcase-tab[aria-selected="true"] .showcase-tab-num {
+  color: var(--accent);
+}
+
+.showcase-tab-title {
+  font-family: var(--font-sans);
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text);
+  line-height: 1.25;
+}
+
+.showcase-tab-sub {
+  font-family: var(--font-sans);
+  font-size: 0.79rem;
+  color: var(--text-muted);
+  line-height: 1.38;
+}
+
+.showcase-panel[hidden] {
+  display: none;
+}
+
+.showcase-panel + .showcase-panel {
+  margin-top: 1.75rem;
+}
+
+.js-enabled .showcase-panel + .showcase-panel {
+  margin-top: 0;
+}
+
+.showcase-explain {
+  margin: 0 0 0.85rem;
+  padding: 0.7rem 0.95rem;
+  background: var(--bg-subtle);
+  border-left: 2px solid var(--accent);
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+}
+
+.showcase-explain strong {
+  color: var(--text);
 }
 
 .spine-specimen {
+  border: 1px solid var(--border);
   background: #303446;
   color: #c6d0f5;
   font-family: var(--font-mono);
   font-size: 0.81rem;
   overflow-x: auto;
+}
+
+.spine-specimen strong {
+  color: #e6ebff;
 }
 
 .spine-titlebar {
@@ -1767,6 +1845,9 @@ td:first-child {
 /* Responsive */
 
 @media (max-width: 900px) {
+  .showcase-nav {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
   .section-header,
   .marks-grid,
   .spine-rules,
@@ -1810,6 +1891,9 @@ td:first-child {
 }
 
 @media (max-width: 680px) {
+  .showcase-nav {
+    grid-template-columns: 1fr;
+  }
   .hero {
     padding: 3rem 0 2.75rem;
   }
