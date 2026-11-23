@@ -18,6 +18,14 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from board import FAINT, JOURNEYS, STATUS, SUB, SURF, TXT, esc, load, page, write  # noqa: E402
 from check import check  # noqa: E402
+from check import load as _load_with_phase  # noqa: E402
+
+
+def _phase():
+    """The scenarios.toml phase: "keyboard" while mouse paths are pending the sweep, else "final"."""
+    from check import DEFAULT
+
+    return _load_with_phase(DEFAULT)[1]
 
 WIDTH = 1440
 INNER = WIDTH - 64
@@ -29,6 +37,8 @@ RED, AMBER = "#e5707a", "#f2b544"
 
 def main():
     scenarios = load()
+    final = "--final" in sys.argv or _phase() == "final"
+    pending = "#a5adce"
     by_id = {s["id"]: s for s in scenarios}
     problems = check(scenarios)
     dead = set(problems["dead_end"])
@@ -144,7 +154,7 @@ def main():
         if n in dead:
             stroke, sw, dash = RED, 2.4, ""
         elif n in no_click:
-            stroke, sw, dash = AMBER, 2, ""
+            stroke, sw, dash = (AMBER, 2, "") if final else (pending, 1.6, ' stroke-dasharray="2 3"')
         opacity = ' opacity="0.45"' if n in no_key else ""
         fill = SURF if is_designed else "#1e1f24"
         svg.append(f'<g{opacity}><rect x="{x}" y="{y}" width="{NODE_W}" height="{NODE_H}" rx="7" fill="{fill}" stroke="{stroke}" stroke-width="{sw}"{dash}/>')
@@ -178,7 +188,7 @@ def main():
         + chip(STATUS["missing"][0], "Missing target", "dashed")
         + chip(STATUS["existing-only"][0], "Existing-only target", "dashed")
         + chip(RED, "Dead end")
-        + chip(AMBER, "No mouse path from cold start")
+        + (chip(AMBER, "No mouse path from cold start") if final else chip(pending, "Pending mouse sweep", "dotted"))
         + '<span style="opacity:0.45;margin-right:18px">Faded: no key path from cold start</span>'
         + '<span style="color:#8fbf8a;font-family:ui-monospace,Menlo,monospace;font-size:12px">⤺ keys that return to editing</span>'
     )
