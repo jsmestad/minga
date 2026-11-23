@@ -153,7 +153,6 @@ defmodule MingaAgent.Session do
           model_discovery_request: reference() | nil,
           apple_selection_probe:
             {reference(), pid(), ConnectionTarget.t(), ModelResolver.intent()} | nil,
-          selection_error: String.t() | nil,
           pending_model_change: ModelSelection.t() | String.t() | nil,
           pending_thinking_level: String.t() | nil,
           notifier: module() | {module(), term()},
@@ -1358,7 +1357,7 @@ defmodule MingaAgent.Session do
     resolved_provider_resolution = resolve_provider(opts)
     credential_snapshot = credentials_snapshot_fn.()
 
-    {model_selection, selection_error, resolution_problem} =
+    {model_selection, resolution_problem} =
       initial_model_selection(
         resolved_provider_resolution,
         raw_model_name,
@@ -1436,11 +1435,7 @@ defmodule MingaAgent.Session do
       turn_execution: TurnExecution.new(),
       transcript:
         Transcript.new(
-          initial_session_messages(
-            timestamp,
-            Keyword.get(opts, :startup_notice),
-            selection_error
-          ),
+          [Message.system(initial_system_message(timestamp, Keyword.get(opts, :startup_notice)))],
           now,
           make_ref()
         ),
@@ -1463,7 +1458,6 @@ defmodule MingaAgent.Session do
       model_discovery: nil,
       model_discovery_request: nil,
       apple_selection_probe: nil,
-      selection_error: selection_error,
       pending_model_change: nil,
       pending_thinking_level: if(model_selection, do: nil, else: initial_thinking_level),
       notifier: Keyword.get(opts, :notifier, Notifier),
@@ -7591,7 +7585,7 @@ defmodule MingaAgent.Session do
 
       {:error, reason} ->
         state =
-          %{state | selection_error: ModelResolver.message(reason)}
+          state
           |> retain_resolution_problem(reason)
           |> install_credential_readiness(:unconfigured)
           |> broadcast_credential_readiness()
@@ -7681,7 +7675,7 @@ defmodule MingaAgent.Session do
           keyword(),
           CredentialSnapshot.t(),
           String.t() | nil
-        ) :: {ModelSelection.t() | nil, String.t() | nil, ModelResolver.resolution_error() | nil}
+        ) :: {ModelSelection.t() | nil, ModelResolver.resolution_error() | nil}
   defp initial_model_selection(
          %{module: MingaAgent.Providers.Native} = resolution,
          model,
@@ -7702,17 +7696,17 @@ defmodule MingaAgent.Session do
     case ModelResolver.resolve(model, resolver_opts) do
       {:ok, selection} ->
         case maybe_apply_initial_reasoning(selection, thinking_level) do
-          {:ok, selection} -> {selection, nil, nil}
-          {:error, message} -> {nil, message, {:incompatible_selection, message}}
+          {:ok, selection} -> {selection, nil}
+          {:error, message} -> {nil, {:incompatible_selection, message}}
         end
 
       {:error, reason} ->
-        {nil, ModelResolver.message(reason), reason}
+        {nil, reason}
     end
   end
 
   defp initial_model_selection(_resolution, _model, _provider_opts, _snapshot, _thinking),
-    do: {nil, nil, nil}
+    do: {nil, nil}
 
   @spec maybe_apply_initial_reasoning(ModelSelection.t(), String.t() | nil) ::
           {:ok, ModelSelection.t()} | {:error, String.t()}
@@ -7720,18 +7714,6 @@ defmodule MingaAgent.Session do
 
   defp maybe_apply_initial_reasoning(selection, level),
     do: ModelSelection.with_reasoning(selection, level)
-
-  @spec initial_session_messages(String.t(), String.t() | nil, String.t() | nil) :: [Message.t()]
-  defp initial_session_messages(timestamp, startup_notice, nil) do
-    [Message.system(initial_system_message(timestamp, startup_notice))]
-  end
-
-  defp initial_session_messages(timestamp, startup_notice, selection_error) do
-    [
-      Message.system(initial_system_message(timestamp, startup_notice)),
-      Message.system("Model selection needs correction: #{selection_error}", :error)
-    ]
-  end
 
   @spec selection_model_name(ModelSelection.t() | nil, String.t()) :: String.t()
   defp selection_model_name(%ModelSelection{} = selection, _fallback),
@@ -7939,7 +7921,6 @@ defmodule MingaAgent.Session do
       state
       | provider: lifecycle,
         model_selection: selection,
-        selection_error: nil,
         credentials_configured: true
     }
   end
@@ -9460,6 +9441,25 @@ defmodule MingaAgent.Session do
 
   defp resolve_saved_model_selection(_state, _data, _opts), do: {:ok, nil}
 
+  # Sessions saved before the selection problem moved to the connection snapshot stored it as a
+  # permanent transcript error. A restore succeeds only with a resolved selection, so that
+  # notice can no longer apply and must not be shown as current.
+  @spec drop_retired_selection_notices(Transcript.t()) :: Transcript.t()
+  defp drop_retired_selection_notices(transcript) do
+    retained =
+      for {id, message} <- Transcript.messages_with_ids(transcript),
+          not retired_selection_notice?(message),
+          do: id
+
+    Transcript.compact(transcript, retained)
+  end
+
+  @spec retired_selection_notice?(Message.t()) :: boolean()
+  defp retired_selection_notice?({:system, "Model selection needs correction: " <> _, :error}),
+    do: true
+
+  defp retired_selection_notice?(_message), do: false
+
   @spec restore_loaded_candidate(
           state(),
           SessionStore.session_data(),
@@ -9494,6 +9494,7 @@ defmodule MingaAgent.Session do
           Map.get(data, :pinned_ids, MapSet.new()),
           loaded_at
         )
+        |> drop_retired_selection_notices()
 
       execution =
         TurnExecution.restore_pending_inputs(Map.get(data, :pending_inputs, {1, [], [], []}))
@@ -9515,7 +9516,6 @@ defmodule MingaAgent.Session do
           credential_readiness: credential_readiness,
           credentials_configured: credentials_configured,
           model_selection: selection,
-          selection_error: nil,
           turn_execution: execution,
           pending_model_change: nil,
           created_at: loaded_at
@@ -9671,7 +9671,6 @@ defmodule MingaAgent.Session do
         credential_readiness: staged.credential_readiness,
         credentials_configured: staged.credentials_configured,
         model_selection: staged.model_selection,
-        selection_error: staged.selection_error,
         turn_execution: execution,
         tool_authority: %{current.tool_authority | revision: make_ref(), invocations: %{}},
         pending_model_change: nil,

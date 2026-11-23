@@ -312,10 +312,10 @@ defmodule MingaAgent.SessionRecoveryTest do
           assert Session.get_provider(session) == nil
           assert Session.model_selection(session) == nil
 
-          assert Enum.any?(Session.messages(session), fn
-                   {:system, text, _} -> text =~ "unsupported"
-                   _ -> false
-                 end)
+          assert {:resolution, {:incompatible_selection, message}} =
+                   Session.editor_snapshot(session).connection.problem
+
+          assert message =~ "unsupported"
 
         level ->
           assert Session.editor_snapshot(session).credential_readiness == :configured
