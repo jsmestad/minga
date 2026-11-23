@@ -2,6 +2,7 @@ package ui
 
 import (
 	"bytes"
+	"encoding/binary"
 	"fmt"
 	"strings"
 	"testing"
@@ -840,4 +841,55 @@ func TestContentShrinkClampsAnchorAndReportsReturn(t *testing.T) {
 			t.Fatal("all-fitting replacement did not report pinReturned")
 		}
 	})
+}
+
+// agentStatusCommand builds a gui_status_bar frame for agent content with the
+// agent section's message_count set to total.
+func agentStatusCommand(t *testing.T, total uint32) protocol.Command {
+	t.Helper()
+	identity := []byte{1, 0, 0}
+	agent := []byte{0}
+	agent = binary.BigEndian.AppendUint32(agent, total)
+	agent = append(agent, 0, 0)
+	agent = binary.BigEndian.AppendUint16(agent, 0)
+	agent = binary.BigEndian.AppendUint16(agent, 0)
+	agent = append(agent, 0)
+	packet := []byte{generated.OPGuiStatusBar, 2}
+	packet = append(packet, 0x01)
+	packet = binary.BigEndian.AppendUint16(packet, uint16(len(identity)))
+	packet = append(packet, identity...)
+	packet = append(packet, 0x09)
+	packet = binary.BigEndian.AppendUint16(packet, uint16(len(agent)))
+	packet = append(packet, agent...)
+	command, err := protocol.DecodeCommand(packet)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return command
+}
+
+func TestAgentHeaderCountsEveryMessageOverResidentCap(t *testing.T) {
+	// 56 resident entries stand in for a 205-message conversation whose older
+	// messages were evicted by the resident cap.
+	model := residentModel(t, 56)
+	model.transcript.truncated = true
+	model.applyMutation(agentStatusCommand(t, 205))
+
+	body := ansi.Strip(model.content())
+	if !strings.Contains(body, "205 messages") {
+		t.Fatalf("Agent header should show the BEAM total of 205 messages: %q", body)
+	}
+	if strings.Contains(body, "56 messages") {
+		t.Fatalf("Agent header must not present the resident count as the message count: %q", body)
+	}
+}
+
+func TestAgentHeaderOmitsCountUntilStatusTotalArrives(t *testing.T) {
+	model := residentModel(t, 56)
+	model.transcript.truncated = true
+
+	body := ansi.Strip(model.content())
+	if strings.Contains(body, "56 messages") || strings.Contains(body, "messages ·") {
+		t.Fatalf("Agent header must not guess a message count without the BEAM total: %q", body)
+	}
 }

@@ -347,6 +347,7 @@ func decodeStatus(payload []byte) (StatusBar, string, int, error) {
 
 	status := StatusBar{}
 	var conflictIndex uint32
+	var agentSection []byte
 	parts := make([]string, 0, 4)
 	offset := 2
 	for i := 0; i < int(payload[1]); i++ {
@@ -400,12 +401,18 @@ func decodeStatus(payload []byte) (StatusBar, string, int, error) {
 				return StatusBar{}, "", 0, err
 			}
 			status.Review = &review
+		case 0x09:
+			agentSection = section
 		case 0x11:
 			if len(section) != 4 || conflictIndex != 0 || u32(section, 0) == 0 {
 				return StatusBar{}, "", 0, fmt.Errorf("malformed gui_status_bar conflict index")
 			}
 			conflictIndex = u32(section, 0)
 		}
+	}
+
+	if status.ContentKind == statusContentKindAgent {
+		status.Agent = decodeStatusAgent(agentSection)
 	}
 
 	if conflictIndex != 0 {
@@ -416,6 +423,19 @@ func decodeStatus(payload []byte) (StatusBar, string, int, error) {
 	}
 
 	return status, stringsJoin(parts, "  "), size, nil
+}
+
+// statusContentKindAgent is the identity section's content_kind for agent chat windows.
+const statusContentKindAgent = 1
+
+// decodeStatusAgent reads the agent-content variant of section 0x09: model_name
+// string8, then message_count u32. Buffer-content sections have no message count.
+func decodeStatusAgent(section []byte) *StatusAgent {
+	_, offset, ok := readString8(section, 0)
+	if !ok || len(section) < offset+4 {
+		return nil
+	}
+	return &StatusAgent{MessageCount: u32(section, offset)}
 }
 
 func decodeStatusSegments(section []byte) ([]StatusSegment, []StatusSegment) {

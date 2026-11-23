@@ -297,12 +297,14 @@ func (m Model) renderAgentEarlierMessagesHidden(width int) string {
 
 func (m Model) renderAgentTranscriptStatus(chat protocol.AgentChat, width int) string {
 	p := m.palette()
-	messageCount := m.transcript.len()
-	label := "messages"
-	if messageCount == 1 {
-		label = "message"
+	status := " " + agentChatStatusLabel(agentPresentationStatus(chat))
+	if total, ok := m.agentMessageTotal(); ok {
+		label := "messages"
+		if total == 1 {
+			label = "message"
+		}
+		status = fmt.Sprintf(" %d %s · %s", total, label, agentChatStatusLabel(agentPresentationStatus(chat)))
 	}
-	status := fmt.Sprintf(" %d %s · %s", messageCount, label, agentChatStatusLabel(agentPresentationStatus(chat)))
 	if chat.ThinkingLevel != "" {
 		status += " · thinking " + chat.ThinkingLevel
 	}
