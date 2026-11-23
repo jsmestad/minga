@@ -1,0 +1,64 @@
+{
+  "scenario": "file_change",
+  "geometry": "narrow",
+  "messages": 0,
+  "pairs": 3,
+  "ratios": [
+    0.9784750644232226,
+    0.9817798524318627,
+    1.0030326004548902
+  ],
+  "geomean_ratio": 0.9877028544701836,
+  "upper95": 1.0103447045221703,
+  "before_process_cpu_us": [
+    6597,
+    6641,
+    6595
+  ],
+  "after_process_cpu_us": [
+    6455,
+    6520,
+    6615
+  ],
+  "before_update_p50_ms": [
+    5.367042,
+    5.419167,
+    5.366666
+  ],
+  "after_update_p50_ms": [
+    5.26175,
+    5.309583,
+    5.403375
+  ],
+  "before_prepare_p50_ms": [
+    0.025709,
+    0.0205,
+    0.020917
+  ],
+  "after_prepare_p50_ms": [
+    0.018084,
+    0.020083,
+    0.018583
+  ],
+  "before_display_p50_ms": [
+    0.201875,
+    0.198958,
+    0.224209
+  ],
+  "after_display_p50_ms": [
+    0.184125,
+    0.190292,
+    0.199417
+  ],
+  "before_first_update_ms": [
+    5.367042,
+    5.419167,
+    5.366666
+  ],
+  "after_first_update_ms": [
+    5.26175,
+    5.309583,
+    5.403375
+  ],
+  "unobserved": 0
+}

@@ -756,6 +756,21 @@ private struct NativeRenderPerformanceMain {
             )
             return
         }
+        if CommandLine.arguments.count == 8,
+           CommandLine.arguments[1] == "--agent-transcript-view-replay",
+           let residentMessages = Int(CommandLine.arguments[3]),
+           let measuredFrames = Int(CommandLine.arguments[6]),
+           let warmupFrames = Int(CommandLine.arguments[7]) {
+            try runAgentTranscriptViewReplay(
+                outputURL: URL(fileURLWithPath: CommandLine.arguments[2]),
+                residentMessages: residentMessages,
+                geometry: CommandLine.arguments[4],
+                scenario: CommandLine.arguments[5],
+                measuredFrames: measuredFrames,
+                warmupFrames: warmupFrames
+            )
+            return
+        }
         if CommandLine.arguments.count == 3,
            CommandLine.arguments[1] == "--accessibility-measurement-output" {
             let measurement = try accessibilityMeasurement()
@@ -768,7 +783,7 @@ private struct NativeRenderPerformanceMain {
         }
         guard CommandLine.arguments.count == 3,
               CommandLine.arguments[1] == "--measurement-output" else {
-            FileHandle.standardError.write(Data("usage: minga-native-render-performance (--measurement-output | --accessibility-measurement-output | --resource-investigation-output) OUTPUT.json | --frame-staging-replay CAPTURE.packets MANIFEST.json OUTPUT.json | --protocol-decode-replay CAPTURE.packets MANIFEST.json OUTPUT.json KEYFRAME_REPEATS | --protocol-decode-loop CAPTURE.packets MANIFEST.json CATEGORY SECONDS\n".utf8))
+            FileHandle.standardError.write(Data("usage: minga-native-render-performance (--measurement-output | --accessibility-measurement-output | --resource-investigation-output) OUTPUT.json | --frame-staging-replay CAPTURE.packets MANIFEST.json OUTPUT.json | --protocol-decode-replay CAPTURE.packets MANIFEST.json OUTPUT.json KEYFRAME_REPEATS | --protocol-decode-loop CAPTURE.packets MANIFEST.json CATEGORY SECONDS | --agent-transcript-view-replay OUTPUT.json MESSAGES (default|narrow) (file_change|stream) FRAMES WARMUP\n".utf8))
             exit(2)
         }
         guard MTLCreateSystemDefaultDevice() != nil else {

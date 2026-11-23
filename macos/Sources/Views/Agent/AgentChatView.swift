@@ -165,8 +165,10 @@ struct AgentConversationList: View {
                         olderMessagesOmittedIndicator
                     }
 
-                    ForEach(Array(state.messages.enumerated()), id: \.element.id) { index, msg in
-                        messageViewWithDivider(msg, index: index)
+                    // One immutable snapshot per body: row identities, contents, and divider predecessors all come from it, so a row SwiftUI evaluates later still describes this snapshot.
+                    let rows = AgentTranscriptRows(state.messages)
+                    ForEach(rows, id: \.id) { row in
+                        messageViewWithDivider(rows.message(at: row), showsDivider: rows.showsDivider(before: row), index: row.offset)
                     }
 
                 }
@@ -247,9 +249,9 @@ struct AgentConversationList: View {
     /// Keeping one view per ForEach iteration prevents LazyVStack from
     /// miscalculating tap targets due to variable-height implicit Groups.
     @ViewBuilder
-    private func messageViewWithDivider(_ msg: ChatMessageEntry, index: Int) -> some View {
+    private func messageViewWithDivider(_ msg: ChatMessageEntry, showsDivider: Bool, index: Int) -> some View {
         VStack(spacing: Spacing.md) {
-            if index > 0 && shouldShowDivider(before: msg, after: state.messages[index - 1]) {
+            if showsDivider {
                 Rectangle()
                     .fill(theme.agentCodeBorder.opacity(0.15))
                     .frame(height: 1)
@@ -577,20 +579,6 @@ struct AgentConversationList: View {
             position.scrollTo(edge: .bottom)
         }
     }
-
-    // MARK: - Message dividers
-
-    /// Show a divider between user messages and the preceding message group.
-    /// This creates visual rhythm between conversation turns.
-    private func shouldShowDivider(before current: ChatMessageEntry, after previous: ChatMessageEntry) -> Bool {
-        // Show divider before user messages (start of a new turn),
-        // unless the previous message was also a user message.
-        switch (previous, current) {
-        case (.user, .user): return false
-        case (_, .user): return true
-        default: return false
-        }
-    }
 }
 
 // MARK: - Previews
@@ -604,4 +592,58 @@ private func agentChatPreviewState() -> AgentChatState {
 #Preview("Agent Chat", traits: .mingaChrome) {
     AgentChatView(state: agentChatPreviewState(), isInsertMode: false, sendAction: { _ in })
         .frame(width: 760, height: 600)
+}
+
+/// One transcript row: the stable message identity and its offset in the snapshot that produced it.
+struct AgentTranscriptRow: Equatable {
+    let id: Int
+    let offset: Int
+}
+
+/// Transcript rows over exactly one immutable resident snapshot.
+///
+/// Constructing rows, reading `count`, and moving indexes visit no resident entries. A row element carries only the identity and offset, so SwiftUI's identity pass reads one stored integer per row instead of copying each message. Message content and the divider predecessor are read on demand from the same snapshot, so rows that SwiftUI evaluates after a newer frame was published still describe this snapshot.
+struct AgentTranscriptRows: @MainActor RandomAccessCollection {
+    /// Sequential rows through the resident in-order leaf walk.
+    struct Iterator: IteratorProtocol {
+        private var identities: AgentTranscriptMessages.IdentityIterator
+        private var offset = 0
+
+        fileprivate init(_ messages: AgentTranscriptMessages) {
+            identities = messages.makeIdentityIterator()
+        }
+
+        mutating func next() -> AgentTranscriptRow? {
+            guard let id = identities.next() else { return nil }
+            defer { offset += 1 }
+            return AgentTranscriptRow(id: id, offset: offset)
+        }
+    }
+
+    private let messages: AgentTranscriptMessages
+
+    init(_ messages: AgentTranscriptMessages) {
+        self.messages = messages
+    }
+
+    var startIndex: Int { 0 }
+    var endIndex: Int { messages.count }
+
+    subscript(position: Int) -> AgentTranscriptRow {
+        AgentTranscriptRow(id: messages.identity(at: position), offset: position)
+    }
+
+    func makeIterator() -> Iterator { Iterator(messages) }
+
+    /// The message this row presents.
+    func message(at row: AgentTranscriptRow) -> ChatMessageEntry {
+        messages[row.offset]
+    }
+
+    /// Whether a divider separates this row from its predecessor in the same snapshot: before a user message that starts a new turn, never between consecutive user messages, and never before the first row.
+    func showsDivider(before row: AgentTranscriptRow) -> Bool {
+        guard row.offset > 0, case .user = messages[row.offset] else { return false }
+        if case .user = messages[row.offset - 1] { return false }
+        return true
+    }
 }

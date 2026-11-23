@@ -24,6 +24,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
+- On macOS, Agent chat no longer copies the whole retained history into a new array each time the transcript changes. Rows are read from the stored history on demand. In an offscreen benchmark with 10,000 retained messages, the CPU for each file-change update fell by about 30%. Message identity, dividers, the draft, and scroll position are unchanged.
 - Adversarial, Knowledge Graph, and Ghost Cursors are now opt-in. [Add the corresponding Git install line](docs/CONFIGURATION.md#optional-extensions) and restart to keep using them. Existing Knowledge Graph data stays in place.
 - GitExtended replaces bundled Git porcelain. [Add its Git install line](docs/CONFIGURATION.md#optional-extensions) in place of `extension :git_porcelain` and restart to enable Git workflows and their `SPC g` bindings. The modeline branch, gutter signs, and file tree status work without it.
 - Elixir builds use checked-in protocol and language-alias sources. Run `mix codegen` to refresh them after schema changes; CI rejects drift.
