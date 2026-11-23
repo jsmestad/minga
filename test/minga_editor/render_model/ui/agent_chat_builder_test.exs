@@ -4,6 +4,8 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
   alias MingaEditor.Agent.PendingApproval
   alias MingaEditor.Agent.PromptBuffer
   alias Minga.Test.TranscriptFixture
+  alias MingaEditor.Agent.StartFailure
+  alias MingaEditor.Agent.StartRequest
   alias MingaEditor.Agent.UIState
   alias MingaAgent.Session.{ConnectionSnapshot, ConnectionTarget}
   alias MingaAgent.Test.ModelSelectionFixture
@@ -31,6 +33,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
   alias MingaEditor.RenderPipeline.TestHelpers
   alias Minga.RenderModel.UI.AgentChat.ApprovalView
   alias Minga.RenderModel.UI.AgentChat.MarkdownBlock
+  alias Minga.RenderModel.UI.AgentChat.StartRemedy
   alias Minga.RenderModel.UI.AgentChat.ToolCallView
   alias MingaEditor.UI.Theme
   alias MingaEditor.RenderModel.UI.AgentChatBuilder
@@ -43,6 +46,8 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Windows
   alias MingaEditor.Window
+
+  @retry_remedy %StartRemedy{kind: :retry, label: "Retry", key_hint: "r"}
 
   test "visible pending discovery does not claim a missing model" do
     session = fake_session_pid()
@@ -119,6 +124,72 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
     |> Map.fetch!(:model_name)
   end
 
+  describe "a failed start" do
+    test "presents its cause and the one remedy with the key the Agent scope binds" do
+      session = fake_session_pid()
+      request = StartRequest.default()
+
+      for {failure, remedy} <- [
+            {StartFailure.catalog_unavailable(request), @retry_remedy},
+            {StartFailure.timed_out(request), @retry_remedy},
+            {StartFailure.session_error(:boom, request), @retry_remedy},
+            {StartFailure.session_crashed(), @retry_remedy},
+            {StartFailure.missing_credentials(),
+             %StartRemedy{kind: :set_up_provider, label: "Set up provider", key_hint: "r"}}
+          ] do
+        model =
+          context(session, synced_panel([]), lifecycle: {:failed, failure})
+          |> AgentChatBuilder.build()
+
+        assert model.lifecycle == {:failed, failure.message, remedy}
+      end
+    end
+
+    test "the key hint names the key that works where focus is" do
+      session = fake_session_pid()
+      failure = StartFailure.timed_out(StartRequest.default())
+
+      for {focused?, hint} <- [{false, "r"}, {true, "Enter"}] do
+        panel = %{synced_panel([]) | input_focused: focused?}
+
+        assert %{lifecycle: {:failed, _message, %StartRemedy{key_hint: ^hint}}} =
+                 context(session, panel, lifecycle: {:failed, failure})
+                 |> AgentChatBuilder.build()
+      end
+    end
+
+    test "chat status needs the user only after a failed start" do
+      session = fake_session_pid()
+      failure = StartFailure.timed_out(StartRequest.default())
+      errored = AgentState.set_error(%AgentState{}, "provider exploded")
+
+      for {lifecycle, agent, status} <- [
+            {:starting, %AgentState{}, :idle},
+            {:unavailable, %AgentState{}, :idle},
+            {{:failed, failure}, %AgentState{}, :needs_you},
+            {{:failed, failure}, errored, :needs_you},
+            {{:conversation, session}, errored, :error}
+          ] do
+        model =
+          context(session, synced_panel([]), lifecycle: lifecycle, agent: agent)
+          |> AgentChatBuilder.build()
+
+        assert model.status == status, "#{inspect(lifecycle)} -> #{model.status}"
+      end
+    end
+
+    test "the header never reads Resolving model after a failed start" do
+      session = fake_session_pid()
+      failure = StartFailure.timed_out(StartRequest.default())
+
+      model =
+        context(session, synced_panel([]), lifecycle: {:failed, failure})
+        |> AgentChatBuilder.build()
+
+      refute model.model_name =~ "Resolving"
+    end
+  end
+
   test "a missing composer has a reason instead of hiding the chat" do
     session = fake_session_pid()
     ctx = context(session, synced_panel([{:assistant, "ready"}]))
@@ -127,7 +198,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
 
     assert %{
              visible?: true,
-             lifecycle: {:failed, "composer unavailable"},
+             lifecycle: {:failed, "The composer is unavailable." <> _, nil},
              prompt_visible_rows: 0
            } = AgentChatBuilder.build(%{ctx | prompt: nil})
 
@@ -612,13 +683,19 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
 
     assert [{42, {:approval_tool_call, %ApprovalView{}}} | _] = pending.resident_messages
 
-    for phase <- [:starting, {:failed, "Agent could not connect"}, :unavailable] do
+    failure = StartFailure.timed_out(StartRequest.default())
+
+    for {phase, presented} <- [
+          {:starting, :starting},
+          {{:failed, failure}, {:failed, failure.message, @retry_remedy}},
+          {:unavailable, :unavailable}
+        ] do
       model =
         context(session, panel, agent: agent, lifecycle: phase, draft: "Unsent draft café")
         |> AgentChatBuilder.build()
 
       assert model.visible?
-      assert model.lifecycle == phase
+      assert model.lifecycle == presented
       assert model.prompt == "Unsent draft café"
       refute Enum.any?(model.resident_messages, &match?({_, {:approval_tool_call, _}}, &1))
     end
@@ -766,7 +843,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
       %UIState{panel: panel}
       |> PromptBuffer.ensure()
       |> PromptBuffer.insert_char(Keyword.get(opts, :draft, ""))
-      |> UIState.transition_chat(Keyword.get(opts, :lifecycle, {:conversation, session}))
+      |> UIState.restore_chat(Keyword.get(opts, :lifecycle, {:conversation, session}))
 
     agent_ui =
       case Keyword.fetch(opts, :connection) do

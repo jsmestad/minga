@@ -2324,6 +2324,53 @@ struct GUIAgentChatDecoderTests {
         #expect(promptCompletion?.candidates.first?.description == "run command")
     }
 
+    @Test("A failed start decodes its reason, remedy, label and key hint")
+    func decodeFailedStartRemedy() throws {
+        let retry = AgentStartRemedy(kind: .retry, label: "Retry", keyHint: "r")
+        let setUp = AgentStartRemedy(kind: .setUpProvider, label: "Set up provider", keyHint: "s")
+        let cases: [(UInt8, String, UInt8, String, String, AgentChatLifecycle)] = [
+            (1, "", 0, "", "", .starting),
+            (2, "The Agent took too long to start.", 1, "Retry", "r", .failed(reason: "The Agent took too long to start.", remedy: retry)),
+            (2, "No Agent provider is set up yet.", 2, "Set up provider", "s", .failed(reason: "No Agent provider is set up yet.", remedy: setUp)),
+            (2, "The composer is unavailable.", 0, "", "", .failed(reason: "The composer is unavailable.", remedy: nil)),
+            (3, "", 0, "", "", .unavailable)
+        ]
+        for (kind, reason, remedy, label, keyHint, expected) in cases {
+            var lifecycle = Data([kind])
+            appendString16(&lifecycle, reason)
+            lifecycle.append(remedy)
+            appendString16(&lifecycle, label)
+            appendString16(&lifecycle, keyHint)
+            var data = buildChatData(status: 6, prompt: "kept")
+            data.append(contentsOf: buildSectionData(0x0F, lifecycle))
+            data[1] += 1
+            let (cmd, size) = try decodeCommand(data: data, offset: 0)
+            #expect(size == data.count)
+            guard case .guiAgentChat(_, let status, _, _, let prompt, _, _, _, _, _, _, _, _, _, _, _, _, _, _, let decoded) = cmd else {
+                Issue.record("Expected .guiAgentChat"); return
+            }
+            #expect(status == .needsYou)
+            #expect(!status.hasActiveTurn && !status.isWorking)
+            #expect(prompt == "kept")
+            #expect(decoded == expected)
+        }
+    }
+
+    @Test("A malformed failed-start remedy rejects the frame")
+    func rejectMalformedFailedStartRemedy() {
+        for (remedy, label) in [(UInt8(3), "Go"), (1, "")] {
+            var lifecycle = Data([2])
+            appendString16(&lifecycle, "Failed.")
+            lifecycle.append(remedy)
+            appendString16(&lifecycle, label)
+            appendString16(&lifecycle, "r")
+            var data = buildChatData()
+            data.append(contentsOf: buildSectionData(0x0F, lifecycle))
+            data[1] += 1
+            #expect(throws: (any Error).self) { try decodeCommand(data: data, offset: 0) }
+        }
+    }
+
     @Test("Agent composer mode decodes with the status bar mapping",
           arguments: [(UInt8(0), "NORMAL"), (1, "INSERT"), (2, "VISUAL"), (3, "COMMAND"),
                       (4, "O-PENDING"), (5, "SEARCH"), (6, "REPLACE")])

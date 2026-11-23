@@ -109,6 +109,22 @@ defmodule MingaEditor.RenderModel.UI.AgentContextBuilderTest do
                ctx |> AgentContextBuilder.build() |> AgentContextEncoder.encode(caches)
     end
 
+    test "a failed start needs the user instead of showing an error" do
+      agent = AgentState.set_status(%AgentState{}, :error)
+      shell = TraditionalState.replace_agent(%TraditionalState{}, agent)
+      request = MingaEditor.Agent.StartRequest.default()
+
+      for {failure, task} <- [
+            {MingaEditor.Agent.StartFailure.timed_out(request), "Agent could not start"},
+            {MingaEditor.Agent.StartFailure.missing_credentials(), "Agent needs setup"}
+          ] do
+        ui = UIState.fail_start(UIState.new(), failure)
+
+        assert %AgentContext{visible: true, status: :needs_you, task: ^task} =
+                 AgentContextBuilder.build(context(ui, shell))
+      end
+    end
+
     test "approval-only visible context keeps the dispatch timestamp stable" do
       approval = approval("tc-approval")
 

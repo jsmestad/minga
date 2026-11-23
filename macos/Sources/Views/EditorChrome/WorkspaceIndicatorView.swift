@@ -193,6 +193,7 @@ public struct WorkspaceIndicatorView: View {
         case .error: "Error"
         case .planning: "Planning"
         case .approvalWaiting: "Awaiting approval"
+        case .needsYou: "Needs you"
         case .idle: "Idle"
         case .unknown: "Unknown"
         }
@@ -225,7 +226,7 @@ public struct AgentStatusDot: View {
         switch status {
         case .thinking, .executingTool: return color
         case .error: return Color.red
-        case .planning, .approvalWaiting: return theme.agentStatusNeedsYou
+        case .planning, .approvalWaiting, .needsYou: return theme.agentStatusNeedsYou
         case .idle, .unknown: return theme.tabInactiveFg
         }
     }

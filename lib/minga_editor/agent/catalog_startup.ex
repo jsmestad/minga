@@ -10,6 +10,8 @@ defmodule MingaEditor.Agent.CatalogStartup do
   alias MingaAgent.ModelCatalog
   alias MingaEditor.Agent.ProvenanceJump
   alias MingaEditor.Agent.SessionStart
+  alias MingaEditor.Agent.StartFailure
+  alias MingaEditor.Agent.StartRequest
   alias MingaEditor.Commands.{Agent, AgentSession}
   alias MingaEditor.Effect.{Outcome, Policy, Request}
   alias MingaEditor.EffectScheduler
@@ -106,7 +108,7 @@ defmodule MingaEditor.Agent.CatalogStartup do
     result =
       case value do
         {:completed, :ready} -> {:ready, hooks?, recover?, follow_up}
-        _failed -> {:failed, catalog_failure()}
+        _failed -> {:failed, catalog_failure(hooks?, recover?, follow_up)}
       end
 
     case AgentSession.complete_deferred_start(state, workspace, result) do
@@ -168,8 +170,12 @@ defmodule MingaEditor.Agent.CatalogStartup do
   defp resume(state, action), do: Agent.resume_catalog_action(state, action)
 
   @spec publish_failure(EditorState.t(), action()) :: EditorState.t()
-  defp publish_failure(state, {:start, workspace, _hooks?, _recover?, _follow_up}) do
-    AgentSession.workspace_start_failed(state, workspace, catalog_failure())
+  defp publish_failure(state, {:start, workspace, hooks?, recover?, follow_up}) do
+    AgentSession.workspace_start_failed(
+      state,
+      workspace,
+      catalog_failure(hooks?, recover?, follow_up)
+    )
   end
 
   defp publish_failure(state, _action) do
@@ -179,6 +185,7 @@ defmodule MingaEditor.Agent.CatalogStartup do
     )
   end
 
-  @spec catalog_failure() :: String.t()
-  defp catalog_failure, do: "Could not load the Agent model catalog."
+  @spec catalog_failure(boolean(), boolean(), SessionStart.follow_up()) :: StartFailure.t()
+  defp catalog_failure(hooks?, recover?, follow_up),
+    do: StartFailure.catalog_unavailable(StartRequest.new(hooks?, recover?, follow_up))
 end

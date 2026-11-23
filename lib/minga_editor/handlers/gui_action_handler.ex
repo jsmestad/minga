@@ -153,6 +153,14 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   defp dispatch_action(state, {:agent_open_question, offer}),
     do: MingaEditor.UI.Picker.AgentQuestionSource.open(state, offer)
 
+  # A click runs the remedy only while the active tab still offers it; a click
+  # on a notice that has since changed does nothing.
+  defp dispatch_action(state, {:agent_start_remedy, remedy}) do
+    if MingaEditor.Agent.UIState.start_remedy(state.workspace.agent_ui) == remedy,
+      do: MingaEditor.Commands.execute(state, :agent_start_remedy),
+      else: state
+  end
+
   defp dispatch_action(state, {:agent_stop_turn, target}),
     do: AgentCommands.stop_displayed_turn(state, target)
 

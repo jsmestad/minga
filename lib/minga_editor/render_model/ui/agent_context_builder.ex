@@ -5,6 +5,7 @@ defmodule MingaEditor.RenderModel.UI.AgentContextBuilder do
   alias Minga.RenderModel.UI.AgentContext.Progress
   alias Minga.RenderModel.UI.AgentContext.Todo
   alias MingaEditor.Agent.Activity
+  alias MingaEditor.Agent.StartFailure
   alias MingaEditor.Frontend.Emit.Context
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
 
@@ -40,6 +41,8 @@ defmodule MingaEditor.RenderModel.UI.AgentContextBuilder do
     {status, _action} = status_and_action(ctx, activity)
     visible?(activity, status)
   end
+
+  def visible?(%{workspace: %{agent_ui: %{chat_lifecycle: {:failed, _failure}}}}), do: true
 
   def visible?(state) when is_map(state) do
     visible?(get_activity_from_state(state), context_status(agent_status_from_state(state)))
@@ -83,6 +86,13 @@ defmodule MingaEditor.RenderModel.UI.AgentContextBuilder do
 
   @spec status_and_action(Context.t(), Activity.t()) ::
           {AgentContext.status(), String.t() | nil}
+  # A failed start needs the user, not an error badge, whatever the runtime last reported.
+  defp status_and_action(
+         %Context{workspace: %{agent_ui: %{chat_lifecycle: {:failed, failure}}}},
+         _activity
+       ),
+       do: {:needs_you, start_failure_action(failure)}
+
   defp status_and_action(
          %Context{intent: %{frame: %{shell_state: %TraditionalState{} = shell_state}}} = ctx,
          activity
@@ -95,6 +105,10 @@ defmodule MingaEditor.RenderModel.UI.AgentContextBuilder do
 
   defp status_and_action(%Context{}, activity),
     do: {:idle, active_action(activity, nil)}
+
+  @spec start_failure_action(StartFailure.t()) :: String.t()
+  defp start_failure_action(%StartFailure{remedy: :set_up_provider}), do: "Agent needs setup"
+  defp start_failure_action(%StartFailure{}), do: "Agent could not start"
 
   @spec visible?(Activity.t(), AgentContext.status()) :: boolean()
   defp visible?(%Activity{}, status) when status in [:needs_you, :working, :iterating, :errored],

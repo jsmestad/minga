@@ -145,6 +145,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
   @gui_action_agent_read_retained_output Opcodes.gui_action_agent_read_retained_output()
   @gui_action_agent_composer_submit Opcodes.gui_action_agent_composer_submit()
   @gui_action_agent_composer_queue Opcodes.gui_action_agent_composer_queue()
+  @gui_action_agent_start_remedy Opcodes.gui_action_agent_start_remedy()
   @gui_action_agent_open_question Opcodes.gui_action_agent_open_question()
   @gui_action_agent_stop_turn Opcodes.gui_action_agent_stop_turn()
   @gui_action_execute_command Opcodes.gui_action_execute_command()
@@ -272,6 +273,7 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
           | {:agent_composer_queue, pos_integer(), pos_integer() | nil, :steering | :follow_up,
              MingaAgent.Session.queue_target()}
           | {:agent_open_question, pos_integer()}
+          | {:agent_start_remedy, :retry | :set_up_provider}
           | {:agent_stop_turn, {String.t(), String.t()}}
           | {:agent_tool_approval, ApprovalTarget.t(), MingaAgent.Session.approval_decision()}
           | {:execute_command, name :: String.t()}
@@ -774,6 +776,12 @@ defmodule MingaEditor.Frontend.Protocol.GUI do
 
   def decode_gui_action(@gui_action_agent_open_question, <<offer::64>>) when offer > 0,
     do: {:ok, {:agent_open_question, offer}}
+
+  def decode_gui_action(@gui_action_agent_start_remedy, <<1::8>>),
+    do: {:ok, {:agent_start_remedy, :retry}}
+
+  def decode_gui_action(@gui_action_agent_start_remedy, <<2::8>>),
+    do: {:ok, {:agent_start_remedy, :set_up_provider}}
 
   def decode_gui_action(
         @gui_action_agent_stop_turn,

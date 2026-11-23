@@ -262,10 +262,11 @@ func commandToJSON(_ command: RenderCommand) -> [String: Any]? {
     case .guiAgentChat(let visible, let status, let model, let thinkingLevel, let prompt, let promptLineCount, let promptCursorLine, let promptCursorCol, let promptVimMode, let promptVisibleRows, let promptCompletion, let pendingToolName, let pendingToolSummary, let draftAttachmentCount, let draftAttachmentOffer, let question, let stopTarget, let promptPresentation, _, let lifecycle):
         let phase: String
         let reason: String
+        var startRemedy: AgentStartRemedy? = nil
         switch lifecycle {
         case .conversation: (phase, reason) = ("conversation", "")
         case .starting: (phase, reason) = ("starting", "")
-        case .failed(let message): (phase, reason) = ("failed", message)
+        case .failed(let message, let remedy): (phase, reason, startRemedy) = ("failed", message, remedy)
         case .unavailable: (phase, reason) = ("unavailable", "")
         }
         let result: [String: Any] = [
@@ -274,6 +275,9 @@ func commandToJSON(_ command: RenderCommand) -> [String: Any]? {
             "status": Int(status.rawValue),
             "lifecycle": phase,
             "lifecycle_reason": reason,
+            "lifecycle_remedy": Int(startRemedy?.kind.rawValue ?? 0),
+            "lifecycle_action_label": startRemedy?.label ?? "",
+            "lifecycle_key_hint": startRemedy?.keyHint ?? "",
             "model": model,
             "thinking_level": thinkingLevel,
             "prompt": prompt,

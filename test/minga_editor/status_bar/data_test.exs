@@ -375,6 +375,23 @@ defmodule MingaEditor.StatusBar.DataTest do
              {"unknown", :thinking, 0}
   end
 
+  test "a failed start reads as needs you, never as an Agent error" do
+    {state, _buf} = state_with_buffer("hello", nil, :elixir)
+    failure = MingaEditor.Agent.StartFailure.timed_out(MingaEditor.Agent.StartRequest.default())
+
+    state =
+      state
+      |> MingaEditor.Shell.Traditional.Workflow.install_agent_error("provider exploded")
+      |> MingaEditor.Shell.Traditional.Workflow.install_agent_ui(
+        MingaEditor.Agent.UIState.fail_start(state.workspace.agent_ui, failure)
+      )
+
+    assert %Data{common: common, content: %StatusAgent{session_status: :needs_you}} =
+             Data.from_state(with_agent_chat_window(state))
+
+    assert common.status.agent.agent_status == :needs_you
+  end
+
   test "agent no-buffer fallback stays explicit while launchpad buffer fallback stays empty" do
     buffer_state =
       put_in(

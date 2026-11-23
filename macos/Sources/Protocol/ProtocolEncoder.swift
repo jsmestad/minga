@@ -291,7 +291,7 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
              .workspaceClose, .spaceLeaderChord, .spaceLeaderRetract, .agentApprove,
              .agentRequestChanges, .agentDismiss, .chatScrolledAwayFromBottom,
              .chatReturnedToBottom, .scrollToLine, .scrollToVisualRank, .foldToggleAtLine, .focusWindow,
-             .configQuery, .fontSizeAdjust, .searchFocus, .searchNext,
+             .configQuery, .fontSizeAdjust, .searchFocus, .searchNext, .agentStartRemedy,
              .searchPrevious, .searchDismiss:
             return nil
         }
@@ -429,6 +429,8 @@ final class ProtocolEncoder: OutboundActionEncoding, @unchecked Sendable {
             buf[1] = GUI_ACTION_AGENT_OPEN_QUESTION
             writeU64(&buf, 2, offer)
             writeFrame(buf)
+        case .agentStartRemedy(let kind):
+            writeFrame(Data([OP_GUI_ACTION, GUI_ACTION_AGENT_START_REMEDY, kind.rawValue]))
         case .agentStopTurn(let target):
             var buf = Data([OP_GUI_ACTION, GUI_ACTION_AGENT_STOP_TURN])
             appendString16(&buf, target.sessionID)

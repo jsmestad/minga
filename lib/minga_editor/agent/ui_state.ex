@@ -22,6 +22,7 @@ defmodule MingaEditor.Agent.UIState do
   alias MingaEditor.Agent.UIState.Compaction
   alias MingaEditor.Agent.Activity
   alias MingaEditor.Agent.EditTimeline
+  alias MingaEditor.Agent.StartFailure
   alias MingaEditor.Agent.View.Preview
   alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.Windows
@@ -34,7 +35,7 @@ defmodule MingaEditor.Agent.UIState do
 
   @typedoc "Availability of the Agent chat and the exact attached Session, if any."
   @type chat_lifecycle ::
-          :starting | {:conversation, pid()} | {:failed, String.t()} | :unavailable
+          :starting | {:conversation, pid()} | {:failed, StartFailure.t()} | :unavailable
 
   @typedoc "Agent UI state wrapping Panel and View sub-structs."
   @type t :: %__MODULE__{
@@ -60,10 +61,76 @@ defmodule MingaEditor.Agent.UIState do
   @spec new() :: t()
   def new, do: %__MODULE__{panel: Panel.new()}
 
-  @doc "Installs the observed chat lifecycle without changing the live draft or conversation."
-  @spec transition_chat(t(), chat_lifecycle()) :: t()
-  def transition_chat(%__MODULE__{} = state, lifecycle),
-    do: %{state | chat_lifecycle: lifecycle}
+  @doc """
+  Installs the observed chat lifecycle without changing the live draft or conversation.
+
+  A failed start enters only through `fail_start/2`, which requires a classified `StartFailure`.
+  """
+  @spec transition_chat(t(), :starting | {:conversation, pid()} | :unavailable) :: t()
+  def transition_chat(%__MODULE__{} = state, lifecycle)
+      when lifecycle in [:starting, :unavailable],
+      do: %{state | chat_lifecycle: lifecycle}
+
+  def transition_chat(%__MODULE__{} = state, {:conversation, session} = lifecycle)
+      when is_pid(session),
+      do: %{state | chat_lifecycle: lifecycle}
+
+  @doc "Shows a failed start with its cause and remedy, keeping the draft."
+  @spec fail_start(t(), StartFailure.t()) :: t()
+  def fail_start(%__MODULE__{} = state, %StartFailure{} = failure),
+    do: %{state | chat_lifecycle: {:failed, failure}}
+
+  @doc """
+  Restores a lifecycle observed earlier on this value, such as one saved across an event dispatch.
+
+  Use `transition_chat/2` or `fail_start/2` to install a new lifecycle.
+  """
+  @spec restore_chat(t(), chat_lifecycle()) :: t()
+  def restore_chat(%__MODULE__{} = state, {:failed, %StartFailure{} = failure}),
+    do: fail_start(state, failure)
+
+  def restore_chat(%__MODULE__{} = state, lifecycle), do: transition_chat(state, lifecycle)
+
+  @doc """
+  The model label the chat header shows for this lifecycle.
+
+  A starting tab shows its configured model, else "Starting…". A failed start never claims to be resolving a model: it reads "No model configured" without credentials and "Not started" otherwise. A tab with no session reads "No session"; a live conversation shows the panel's model.
+  """
+  @spec model_label(t()) :: String.t()
+  def model_label(%__MODULE__{chat_lifecycle: :starting, panel: panel}) do
+    if Panel.configured_model?(panel), do: Panel.chat_model_label(panel), else: "Starting…"
+  end
+
+  def model_label(%__MODULE__{
+        chat_lifecycle: {:failed, _failure},
+        panel: %Panel{credential_readiness: :unconfigured}
+      }),
+      do: "No model configured"
+
+  def model_label(%__MODULE__{chat_lifecycle: {:failed, _failure}}), do: "Not started"
+  def model_label(%__MODULE__{chat_lifecycle: :unavailable}), do: "No session"
+
+  def model_label(%__MODULE__{chat_lifecycle: {:conversation, _session}, panel: panel}),
+    do: Panel.chat_model_label(panel)
+
+  @doc "The failure the tab shows when its start failed, otherwise nil."
+  @spec start_failure(t()) :: StartFailure.t() | nil
+  def start_failure(%__MODULE__{chat_lifecycle: {:failed, %StartFailure{} = failure}}),
+    do: failure
+
+  def start_failure(%__MODULE__{}), do: nil
+
+  @doc "The kind of remedy a failed start offers, for keymap context and rendering, otherwise nil."
+  @spec start_remedy(t()) :: :retry | :set_up_provider | nil
+  def start_remedy(%__MODULE__{chat_lifecycle: {:failed, %StartFailure{remedy: {:retry, _}}}}),
+    do: :retry
+
+  def start_remedy(%__MODULE__{
+        chat_lifecycle: {:failed, %StartFailure{remedy: :set_up_provider}}
+      }),
+      do: :set_up_provider
+
+  def start_remedy(%__MODULE__{}), do: nil
 
   @doc "Caches canonical connection facts without changing draft, focus, history or scroll."
   @spec project_connection(t(), ConnectionSnapshot.t()) :: t()
@@ -78,26 +145,18 @@ defmodule MingaEditor.Agent.UIState do
 
     prompt = current_connection_prompt(state.connection_prompt, connection)
     state = %{state | connection: connection, panel: panel, connection_prompt: prompt}
-    transition_chat(state, connection_lifecycle(connection, state.chat_lifecycle))
+    restore_chat(state, connection_lifecycle(connection, state.chat_lifecycle))
   end
-
-  @doc "Projects the Session's detailed startup failure without replacing its draft."
-  @spec report_chat_start_failure(t(), String.t() | nil) :: t()
-  def report_chat_start_failure(%__MODULE__{chat_lifecycle: {:failed, _}} = state, reason)
-      when is_binary(reason) and reason != "",
-      do: transition_chat(state, {:failed, reason})
-
-  def report_chat_start_failure(%__MODULE__{} = state, _reason), do: state
 
   @spec connection_lifecycle(ConnectionSnapshot.t(), chat_lifecycle()) :: chat_lifecycle()
   defp connection_lifecycle(
          %ConnectionSnapshot{problem: {:provider, :startup_failed}},
-         {:failed, _reason} = previous
+         {:failed, _failure} = previous
        ),
        do: previous
 
-  defp connection_lifecycle(%ConnectionSnapshot{problem: {:provider, :startup_failed}}, _),
-    do: {:failed, "The Agent provider could not start."}
+  defp connection_lifecycle(%ConnectionSnapshot{problem: {:provider, :startup_failed}} = c, _),
+    do: {:failed, StartFailure.provider_startup_failed(c)}
 
   defp connection_lifecycle(%ConnectionSnapshot{provider_phase: :starting}, _), do: :starting
 

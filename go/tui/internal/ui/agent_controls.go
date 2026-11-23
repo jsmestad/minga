@@ -19,7 +19,22 @@ const (
 	zoneIDAgentQueue              = "agent:queue"
 	zonePrefixAgentApproval       = "agent:approval:"
 	zonePrefixAgentRetainedOutput = "agent:retained-output:"
+	// The failed-start action zone retains the remedy it displayed, so a click
+	// sends that remedy even if a later frame has changed the notice.
+	zonePrefixAgentStartRemedy = "agent:start-remedy:"
 )
+
+func agentStartRemedyZoneID(kind protocol.AgentStartRemedyKind) string {
+	return zonePrefixAgentStartRemedy + strconv.Itoa(int(kind))
+}
+
+func agentStartRemedyZonePacket(id string) []byte {
+	kind, err := strconv.ParseUint(strings.TrimPrefix(id, zonePrefixAgentStartRemedy), 10, 8)
+	if err != nil {
+		return nil
+	}
+	return protocol.EncodeGUIAgentStartRemedy(protocol.AgentStartRemedyKind(kind))
+}
 
 // Approval zones retain their complete displayed target, including in cached
 // transcript rows. Neither a resident index nor the current chat can retarget it.
@@ -94,6 +109,10 @@ func (m Model) agentDisplayedControlPacket(msg tea.MouseMsg) ([]byte, bool) {
 		}
 		if strings.HasPrefix(id, zonePrefixAgentRetainedOutput) && zone.InBounds(msg) {
 			packet := agentRetainedOutputZonePacket(id)
+			return packet, packet != nil
+		}
+		if strings.HasPrefix(id, zonePrefixAgentStartRemedy) && zone.InBounds(msg) {
+			packet := agentStartRemedyZonePacket(id)
 			return packet, packet != nil
 		}
 	}

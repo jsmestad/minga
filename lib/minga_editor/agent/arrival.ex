@@ -144,7 +144,7 @@ defmodule MingaEditor.Agent.Arrival do
 
     Workflow.install_agent_ui(
       updated,
-      UIState.transition_chat(updated.workspace.agent_ui, waiting)
+      UIState.restore_chat(updated.workspace.agent_ui, waiting)
     )
   end
 

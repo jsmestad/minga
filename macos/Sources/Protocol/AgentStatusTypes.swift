@@ -2,8 +2,28 @@
 public enum AgentChatLifecycle: Equatable, Sendable {
     case conversation
     case starting
-    case failed(String)
+    /// A failed start: one plain sentence about the cause and the one action that can fix it, if any.
+    case failed(reason: String, remedy: AgentStartRemedy?)
     case unavailable
+}
+
+/// The one action a failed Agent start offers. The label and key hint come from the BEAM; the frontend never authors remedy copy.
+public struct AgentStartRemedy: Equatable, Sendable {
+    /// What the action does, echoed back to the BEAM when activated.
+    public enum Kind: UInt8, Equatable, Sendable {
+        case retry = 1
+        case setUpProvider = 2
+    }
+
+    public let kind: Kind
+    public let label: String
+    public let keyHint: String
+
+    public init(kind: Kind, label: String, keyHint: String) {
+        self.kind = kind
+        self.label = label
+        self.keyHint = keyHint
+    }
 }
 
 /// Semantic agent activity decoded from status bytes shared by agent chrome.
@@ -14,6 +34,8 @@ public enum AgentStatus: Equatable, Sendable {
     case error
     case planning
     case approvalWaiting
+    /// A failed start waits for the user's action. Not an error and not an active turn.
+    case needsYou
     case unknown(rawValue: UInt8)
 
     /// Decodes an agent status byte without discarding future values.
@@ -25,6 +47,7 @@ public enum AgentStatus: Equatable, Sendable {
         case 3: self = .error
         case 4: self = .planning
         case 5: self = .approvalWaiting
+        case 6: self = .needsYou
         default: self = .unknown(rawValue: rawValue)
         }
     }
@@ -38,6 +61,7 @@ public enum AgentStatus: Equatable, Sendable {
         case .error: 3
         case .planning: 4
         case .approvalWaiting: 5
+        case .needsYou: 6
         case .unknown(let rawValue): rawValue
         }
     }
@@ -46,7 +70,7 @@ public enum AgentStatus: Equatable, Sendable {
     public var isWorking: Bool {
         switch self {
         case .thinking, .executingTool: true
-        case .idle, .error, .planning, .approvalWaiting, .unknown: false
+        case .idle, .error, .planning, .approvalWaiting, .needsYou, .unknown: false
         }
     }
 
@@ -54,7 +78,7 @@ public enum AgentStatus: Equatable, Sendable {
     public var hasActiveTurn: Bool {
         switch self {
         case .thinking, .executingTool, .approvalWaiting: true
-        case .idle, .error, .planning, .unknown: false
+        case .idle, .error, .planning, .needsYou, .unknown: false
         }
     }
 }

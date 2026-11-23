@@ -54,6 +54,7 @@ defmodule Minga.RenderModel.UI.AgentChat do
   alias __MODULE__.ApprovalView
   alias __MODULE__.MarkdownBlock
   alias __MODULE__.PromptCompletion
+  alias __MODULE__.StartRemedy
   alias __MODULE__.ToolCallView
   alias __MODULE__.Usage
 
@@ -82,8 +83,16 @@ defmodule Minga.RenderModel.UI.AgentChat do
   @typedoc "A message with its stable GUI identity, or a bare body that encodes with ID 0."
   @type message :: {pos_integer(), message_body()} | message_body()
 
-  @typedoc "Availability of the Agent pane, independent of turn execution."
-  @type lifecycle :: :conversation | :starting | {:failed, String.t()} | :unavailable
+  @typedoc """
+  Availability of the Agent pane, independent of turn execution.
+
+  A failed pane carries one plain sentence about the cause and the action that can fix it, or nil when no action applies.
+  """
+  @type lifecycle ::
+          :conversation
+          | :starting
+          | {:failed, String.t(), StartRemedy.t() | nil}
+          | :unavailable
 
   @type t :: %__MODULE__{
           visible?: boolean(),

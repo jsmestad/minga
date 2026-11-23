@@ -1616,10 +1616,13 @@ defmodule MingaEditor.Commands.BufferManagement do
     end
   end
 
-  @spec session_end_lifecycle(term()) :: :unavailable | {:failed, String.t()}
+  @spec session_end_lifecycle(term()) ::
+          :unavailable | {:failed, MingaEditor.Agent.StartFailure.t()}
   defp session_end_lifecycle(reason) when reason in [:normal, :shutdown], do: :unavailable
   defp session_end_lifecycle({:shutdown, _reason}), do: :unavailable
-  defp session_end_lifecycle(_reason), do: {:failed, "Agent session crashed"}
+
+  defp session_end_lifecycle(_reason),
+    do: {:failed, MingaEditor.Agent.StartFailure.session_crashed()}
 
   @type session_restart_ownership :: {:owned, state()} | {:stale, state()}
 

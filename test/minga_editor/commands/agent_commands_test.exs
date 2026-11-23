@@ -21,6 +21,8 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
   alias Minga.Test.AgentSessionStart
   alias MingaEditor.Agent.Ingest
   alias Minga.Test.TranscriptFixture
+  alias MingaEditor.Agent.StartFailure
+  alias MingaEditor.Agent.StartRequest
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.UIState.Panel
   alias MingaEditor.Agent.UIState.View
@@ -316,10 +318,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
       problem: if(error, do: {:provider, :startup_failed})
     }
 
-    ui =
-      state.workspace.agent_ui
-      |> UIState.project_connection(connection)
-      |> UIState.report_chat_start_failure(error)
+    ui = UIState.project_connection(state.workspace.agent_ui, connection)
 
     Workflow.install_agent_ui(state, ui)
   end
@@ -477,8 +476,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
             {:unconfigured, :stopped, nil,
              "No provider credentials are configured for this model"},
             {:checking, :stopped, nil, "Checking hosted provider credentials"},
-            {:configured, :starting, nil, "Agent provider still starting"},
-            {:configured, :terminal_failure, "boom", "Failed to start agent: boom"}
+            {:configured, :starting, nil, "Agent provider still starting"}
           ] do
         state =
           base_state(session: session)
@@ -493,6 +491,41 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
       end
 
       refute_received {:readiness_session_prompt, _prompt}
+    end
+
+    test "Enter after a provider start failure retries the provider and keeps the draft unsent" do
+      session = start_supervised!({ReadinessSession, self()})
+      tasks = start_supervised!(Task.Supervisor)
+      scheduler = start_supervised!({EffectScheduler, task_supervisor: tasks})
+      :ok = EffectScheduler.attach(scheduler, self())
+
+      state =
+        %{base_state(session: session) | effect_scheduler: scheduler}
+        |> project_prompt_connection(session, :configured, :terminal_failure, "boom")
+        |> AgentCommands.input_paste("draft prompt")
+        |> AgentCommands.submit_prompt()
+
+      assert_receive {:effect_result, ^scheduler,
+                      %Outcome{
+                        request: %{effect: %MingaEditor.Agent.ConnectionAction{intent: :retry}}
+                      }},
+                     2_000
+
+      assert MingaEditor.Agent.PromptBuffer.prompt_text(state.workspace.agent_ui.panel) ==
+               "draft prompt"
+
+      refute_received {:readiness_session_prompt, _prompt}
+    end
+
+    test "Enter in a live conversation still submits the draft" do
+      session = start_supervised!({ReadinessSession, self()})
+
+      base_state(session: session)
+      |> project_prompt_connection(session, :configured, :running)
+      |> AgentCommands.input_paste("send me")
+      |> AgentCommands.submit_prompt()
+
+      assert_receive {:readiness_session_prompt, _prompt}, 2_000
     end
 
     test "keeps a draft and reports the published provider error while the route retries" do
@@ -1455,7 +1488,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
 
       assert %{
                visible?: true,
-               lifecycle: {:failed, "Could not load the Agent model catalog."},
+               lifecycle: {:failed, "The model catalog could not be loaded.", %{kind: :retry}},
                prompt: "draft before leaving"
              } =
                Minga.Test.AgentWorkflowDriver.chat_model(failed)
@@ -1477,6 +1510,155 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
 
       assert %{visible?: true, lifecycle: :conversation, prompt: "draft before leaving"} =
                Minga.Test.AgentWorkflowDriver.chat_model(returned)
+    end
+
+    defp with_active_agent_workspace(state) do
+      tabs = state.shell_runtime.state.tab_bar
+
+      {tabs, tab} =
+        MingaEditor.TabWorkflow.insert_agent(
+          tabs,
+          "Starting",
+          state.frontend.terminal_viewport,
+          nil
+        )
+
+      {tabs, workspace} = TabBar.add_workspace(tabs, "Starting")
+
+      state =
+        state
+        |> install_tab_bar(TabBar.move_tab_to_workspace(tabs, tab.id, workspace.id))
+        |> MingaEditor.TabWorkflow.switch(tab.id)
+
+      {state, tab, workspace}
+    end
+
+    test "Retry runs a failed start again in the same tab and keeps the draft" do
+      {pending, tab, workspace} =
+        source_workspace_state()
+        |> with_catalog_scheduler()
+        |> with_agent_ingest()
+        |> with_active_agent_workspace()
+
+      pending =
+        MingaEditor.Shell.Traditional.Workflow.install_agent_ui(
+          pending,
+          MingaEditor.Agent.PromptBuffer.set_prompt_text(
+            pending.workspace.agent_ui,
+            "draft to keep"
+          )
+        )
+        |> CatalogStartup.defer({:start, workspace.id, false, false, nil})
+
+      assert_receive {:effect_result, scheduler, %Outcome{value: {:completed, :ready}} = outcome},
+                     20_000
+
+      assert :ok = EffectScheduler.claim(scheduler, outcome)
+      failure = Outcome.failed(outcome.request, :model_catalog_unavailable)
+      {failed, ^failure} = CatalogStartup.apply(pending, failure)
+      EffectScheduler.finalize(scheduler, failure)
+
+      assert {:failed, %StartFailure{remedy: {:retry, %StartRequest{}}}} =
+               failed.workspace.agent_ui.chat_lifecycle
+
+      # Retry does not mark the Agent errored and does not reset the tab.
+      assert MingaEditor.Shell.Traditional.State.agent(failed.shell_runtime.state).error == nil
+
+      retried = MingaEditor.Commands.execute(failed, :agent_retry_start)
+      assert retried.workspace.agent_ui.chat_lifecycle == :starting
+      assert Runtime.active_tab(retried.shell_runtime).id == tab.id
+
+      assert MingaEditor.Agent.PromptBuffer.prompt_text(retried.workspace.agent_ui) ==
+               "draft to keep"
+
+      started = AgentSessionStart.settle(retried)
+      session = Runtime.active_session(started.shell_runtime)
+      assert is_pid(session)
+      on_exit(fn -> MingaAgent.SessionManager.stop_session_by_pid(session) end)
+
+      assert MingaEditor.Agent.PromptBuffer.prompt_text(started.workspace.agent_ui) ==
+               "draft to keep"
+    end
+
+    defp failed_composer(state, failure, draft) do
+      ui =
+        state.workspace.agent_ui
+        |> MingaEditor.Agent.PromptBuffer.set_prompt_text(draft)
+        |> UIState.fail_start(failure)
+
+      state |> Workflow.install_agent_ui(ui) |> AgentCommands.scope_focus_input()
+    end
+
+    defp press_enter(state) do
+      {:handled, state} = MingaEditor.Input.Scoped.handle_key(state, 13, 0)
+      state
+    end
+
+    test "Enter in the composer retries a failed start from insert and input-normal and keeps the draft" do
+      {state, tab, _workspace} =
+        source_workspace_state()
+        |> with_catalog_scheduler()
+        |> with_agent_ingest()
+        |> with_active_agent_workspace()
+
+      for leave_insert? <- [false, true] do
+        failure = StartFailure.timed_out(StartRequest.new(false, false, nil))
+        composer = failed_composer(state, failure, "draft to keep")
+
+        composer =
+          if leave_insert?, do: AgentCommands.input_to_normal(composer), else: composer
+
+        assert MingaEditor.Agent.UIState.start_remedy(composer.workspace.agent_ui) == :retry
+        assert Minga.Editing.inserting?(composer) == not leave_insert?
+        retried = press_enter(composer)
+
+        assert retried.workspace.agent_ui.chat_lifecycle == :starting
+        assert Runtime.active_tab(retried.shell_runtime).id == tab.id
+
+        assert MingaEditor.Agent.PromptBuffer.prompt_text(retried.workspace.agent_ui) ==
+                 "draft to keep"
+
+        started = AgentSessionStart.settle(retried)
+
+        if session = Runtime.active_session(started.shell_runtime) do
+          MingaAgent.SessionManager.stop_session_by_pid(session)
+        end
+
+        # The draft is not sent after the retry; it waits for the next Enter.
+        assert MingaEditor.Agent.PromptBuffer.prompt_text(started.workspace.agent_ui) ==
+                 "draft to keep"
+      end
+    end
+
+    test "Enter in the composer opens provider setup when setup is the remedy" do
+      {state, _tab, _workspace} = with_active_agent_workspace(source_workspace_state())
+      composer = failed_composer(state, StartFailure.missing_credentials(), "draft to keep")
+
+      opened = press_enter(composer)
+
+      assert opened == MingaEditor.UI.Picker.AgentModelSource.open(composer)
+
+      assert opened.workspace.agent_ui.chat_lifecycle ==
+               composer.workspace.agent_ui.chat_lifecycle
+
+      assert MingaEditor.Agent.PromptBuffer.prompt_text(opened.workspace.agent_ui) ==
+               "draft to keep"
+    end
+
+    test "Retry does nothing unless the active tab shows a retryable failed start" do
+      {state, _tab, _workspace} = with_active_agent_workspace(source_workspace_state())
+
+      for lifecycle <- [
+            :starting,
+            :unavailable,
+            {:conversation, self()},
+            {:failed, StartFailure.missing_credentials()}
+          ] do
+        ui = UIState.restore_chat(state.workspace.agent_ui, lifecycle)
+        shown = Workflow.install_agent_ui(state, ui)
+
+        assert AgentSession.retry_start(shown) == shown
+      end
     end
 
     test "a pending file-to-Agent toggle keeps the file editable and can retry after failure" do

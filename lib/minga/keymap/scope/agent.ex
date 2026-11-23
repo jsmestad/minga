@@ -43,11 +43,62 @@ defmodule Minga.Keymap.Scope.Agent do
   @impl true
   @spec keymap(Minga.Keymap.Scope.vim_state(), Minga.Keymap.Scope.context()) ::
           Bindings.node_t()
-  def keymap(:normal, _context), do: normal_trie()
+  def keymap(:normal, context),
+    do: merge_trie(normal_trie(), start_remedy_keymap(:chat, context))
+
   def keymap(:insert, _context), do: insert_trie()
   def keymap(:input_normal, _context), do: input_normal_trie()
   def keymap(:cua, _context), do: cua_trie()
   def keymap(_state, _context), do: Bindings.new()
+
+  @typedoc "The remedy a failed Agent start offers, passed as the `:agent_start_remedy` context."
+  @type start_remedy :: :retry | :set_up_provider
+
+  @typedoc "Where keys go: chat navigation, or the composer (insert or input-normal)."
+  @type start_remedy_focus :: :chat | :composer
+
+  # One table names the key that runs a failed start's remedy at each focus:
+  # the binding it resolves through and the hint frontends show for it.
+  @start_remedy_keys %{chat: {"r", "r"}, composer: {"RET", "Enter"}}
+
+  @doc """
+  The key hint for running a failed start's remedy at the given focus: `r` in chat navigation, Enter in the composer.
+
+  Both come from the same table as the bindings, so the hint names the key that works where focus is.
+  """
+  @spec start_remedy_key_hint(start_remedy_focus()) :: String.t()
+  def start_remedy_key_hint(focus) do
+    {_binding, hint} = Map.fetch!(@start_remedy_keys, focus)
+    hint
+  end
+
+  @doc """
+  The remedy bindings at the given focus while the context offers a remedy, otherwise an empty trie.
+
+  Chat navigation merges this into its `:normal` trie, so `r` runs the remedy and every other key, including `s` for the session switcher, keeps its meaning. The composer consults it before Vim editing in input-normal; in insert mode Enter reaches the remedy through prompt submit. Both remedies run through one command, which picks the action by kind.
+  """
+  @spec start_remedy_keymap(start_remedy_focus(), Minga.Keymap.Scope.context()) ::
+          Bindings.node_t()
+  def start_remedy_keymap(focus, context) do
+    case Keyword.get(context, :agent_start_remedy) do
+      remedy when remedy in [:retry, :set_up_provider] ->
+        {binding, _hint} = Map.fetch!(@start_remedy_keys, focus)
+
+        Bindings.bind(
+          Bindings.new(),
+          Minga.Keymap.KeyParser.parse!(binding),
+          :agent_start_remedy,
+          start_remedy_description(remedy)
+        )
+
+      _none ->
+        Bindings.new()
+    end
+  end
+
+  @spec start_remedy_description(start_remedy()) :: String.t()
+  defp start_remedy_description(:retry), do: "Retry Agent start"
+  defp start_remedy_description(:set_up_provider), do: "Set up provider"
 
   @impl true
   @spec shared_keymap() :: Bindings.node_t()
