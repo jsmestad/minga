@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex, nofollow">
   <title>Minga: A programmable workbench on the BEAM</title>
-  <meta name="description" content="Minga is a programmable workbench on the BEAM for editing code, running buffer-aware AI agents, and building inspectable Elixir workflows you keep across projects.">
+  <meta name="description" content="Minga is a programmable workbench on the BEAM for editing code across 50 languages, running buffer-aware AI agents, and building custom workflows you inspect and keep across projects.">
   <link rel="icon" type="image/svg+xml" href="/assets/minga_dark-transparent.svg">
   <link rel="stylesheet" href="/styles.css">
   <script>
@@ -45,13 +45,13 @@
         <div class="hero-copy">
           <p class="kicker">Pre-release · Building toward v0.1.0 · macOS &amp; Terminal</p>
           <h1>A programmable workbench on the BEAM.</h1>
-          <p class="hero-lead">Spawning more coding agents is no longer the hard part; verifying, steering, and fixing their code is. Minga puts native code editing, buffer-aware agent sessions, and inspectable Elixir workflows in one runtime, so you stop bouncing between terminal panes, worktrees, and a second editor every two minutes.</p>
+          <p class="hero-lead">Spawning more coding agents is no longer the hard part; verifying, steering, and fixing their code is. Minga puts native code editing across 50 languages, buffer-aware agent sessions, and custom workflows you can inspect and keep in one runtime, so you stop bouncing between terminal panes, worktrees, and a second editor every two minutes.</p>
           <div class="actions">
             <a class="btn btn-primary" href="#install">Install Minga</a>
             <a class="btn" href="/why-minga">Read Why Minga</a>
             <a class="btn" href="/docs/">Explore Docs</a>
           </div>
-          <p class="hero-meta">Elixir on OTP 29 · Swift + Metal on macOS · Go + Bubble Tea in the terminal · Zig tree-sitter (50 grammars)</p>
+          <p class="hero-meta">50 languages via tree-sitter + LSP · Swift + Metal on macOS · Go + Bubble Tea in the terminal · Powered by Elixir / OTP 29</p>
         </div>
 
         <div class="stage-frame" aria-label="Pre-release media placeholder">
@@ -64,7 +64,7 @@
             <div class="stage-body-inner">
               <p class="stage-label">Awaiting qualified v0.1.0 release candidate capture</p>
               <h3>Real macOS Swift + Metal capture lands here before launch</h3>
-              <p>We do not publish faked screenshots or simulated agent output. Once the v0.1.0 programmable workbench milestone (<a href="https://github.com/jsmestad/minga/issues/3542">#3542</a> and <a href="https://github.com/jsmestad/minga/issues/3662">#3662</a>) qualifies, this slot will show a silent 10 to 15 second retina clip recorded from the packaged macOS app: editing code, reviewing staged agent diffs inline, and saving a custom Elixir workflow to activate and keep across sessions.</p>
+              <p>We do not publish faked screenshots or simulated agent output. Once the v0.1.0 programmable workbench milestone (<a href="https://github.com/jsmestad/minga/issues/3542">#3542</a> and <a href="https://github.com/jsmestad/minga/issues/3662">#3662</a>) qualifies, this slot will show a silent 10 to 15 second retina clip recorded from the packaged macOS app: editing code, reviewing staged agent diffs inline, and saving a custom workflow to activate and keep across sessions.</p>
               <p class="stage-spec">Planned asset: /media/hero-workbench.webm + poster still · silent loop with pause and reduced-motion support</p>
             </div>
           </div>
@@ -164,7 +164,7 @@
             </div>
             <div class="loop-cell loop-cell-minga">
               <span class="loop-cell-label">Minga</span>
-              Author a sharper review surface or check workflow in ordinary Elixir over real buffer and agent state, save to activate, and keep it across projects (<a href="/docs/0004-products-are-root-applets-over-a-fixed-engine.html">ADR-0004</a>).
+              Write it yourself or ask the agent to build a sharper review surface or check workflow in readable source over real buffer and agent state, save to activate, and keep it across projects (<a href="/docs/0004-products-are-root-applets-over-a-fixed-engine.html">ADR-0004</a>).
             </div>
           </div>
         </div>
@@ -176,7 +176,7 @@
           </div>
           <div class="scope-note">
             <h3>What about AI-retrofitted IDEs?</h3>
-            <p>Cursor and VS Code put chat beside your editor, but on a single-threaded host with fixed panels you cannot deeply reprogram. Minga keeps editing and agents together without giving up BEAM concurrency or Elixir ownership.</p>
+            <p>Cursor and VS Code put chat beside your editor, but on a single-threaded host with fixed panels you cannot deeply reprogram. Minga keeps editing and agents together without giving up BEAM concurrency or owning your workflow.</p>
           </div>
         </div>
       </div>
@@ -187,19 +187,19 @@
         <div class="section-header">
           <p class="kicker">Programmability</p>
           <h2>Shape the actual engine, not shell panes wrapped around it.</h2>
-          <p>Minga's configuration and extensions are written in Elixir, the same language as the core runtime. Your working environment evolves through readable source over real buffer and agent APIs instead of terminal scripts, markdown glue, or editor forks.</p>
+          <p>Minga edits any language (50 tree-sitter grammars and LSP). Just as Lua configures Neovim and Elisp configures Emacs, Elixir is Minga's extension language, and you can write it yourself or let the agent author readable source for you.</p>
         </div>
 
         <div class="split-layout">
           <div>
             <ul class="pillar-list">
               <li>
-                <strong>Author in ordinary Elixir</strong>
+                <strong>Write it yourself or ask the agent</strong>
                 <p>Configure options, keybindings, concurrent hooks, command advice, and supervised extensions today in <code>~/.config/minga/config.exs</code> or packages built with <code>minga_sdk</code>. Toward v0.1.0, ask Minga's agent to author workflow and interface improvements over the same fixed buffer, agent, and permission owners.</p>
               </li>
               <li>
                 <strong>Save to activate, inspect the diff</strong>
-                <p>Real workflow code sits in plain Elixir files you can read, test, and version in Git. There is no hidden prompt masquerading as a workflow engine and no proprietary fork required for personal tooling.</p>
+                <p>Real workflow code sits in readable source files you can inspect, test, and version in Git. There is no hidden prompt masquerading as a workflow engine and no proprietary fork required for personal tooling.</p>
               </li>
               <li>
                 <strong>Keep what earns reuse</strong>
@@ -228,8 +228,8 @@ bind <span class="tok-atom">:normal</span>, <span class="tok-str">"SPC g s"</spa
 
 <span class="tok-comment"># Hooks run in separate BEAM processes so slow tools never block typing.</span>
 on <span class="tok-atom">:after_save</span>, <span class="tok-kw">fn</span> _buf, path <span class="tok-kw">-&gt;</span>
-  <span class="tok-kw">if</span> <span class="tok-mod">String</span>.ends_with?(path, <span class="tok-str">".ex"</span>) <span class="tok-kw">do</span>
-    <span class="tok-mod">System</span>.cmd(<span class="tok-str">"mix"</span>, [<span class="tok-str">"format"</span>, path])
+  <span class="tok-kw">if</span> <span class="tok-mod">String</span>.ends_with?(path, <span class="tok-str">".go"</span>) <span class="tok-kw">do</span>
+    <span class="tok-mod">System</span>.cmd(<span class="tok-str">"gofmt"</span>, [<span class="tok-str">"-w"</span>, path])
   <span class="tok-kw">end</span>
 <span class="tok-kw">end</span>
 
