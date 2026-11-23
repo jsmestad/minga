@@ -1,0 +1,1 @@
+{"label":"x-c2","otp":"29","schedulers":4,"elixir":"1.20.5","arch":"aarch64-apple-darwin27.2.0","commit":"256bfd2d17a1e32b107430aca5c114725c86f567","counts":[0,100,1000,10000],"lib_dirty":[],"completion_sources_sha256":"290CD6C0810E7D88E414E9251B710AA878EC31B8ADBE1AFAB4A9201029F10073","mix_env":"test"}
