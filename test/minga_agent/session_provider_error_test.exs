@@ -172,6 +172,55 @@ defmodule MingaAgent.SessionProviderErrorTest do
     end
   end
 
+  describe "failed turn error messages" do
+    @tag :tmp_dir
+    test "a provider stream failure adds one error message", %{tmp_dir: dir} do
+      session = start_failing_native_session(dir, fn _count -> {:error, :stream_failed} end)
+
+      assert :ok = Session.send_prompt(session, "fail")
+      message = await_failed_turn(session)
+
+      assert error_messages(session) == [message]
+    end
+
+    @tag :tmp_dir
+    test "a provider stream failure after a tool-call group adds one error message",
+         %{tmp_dir: dir} do
+      File.write!(Path.join(dir, "test.txt"), "file contents")
+
+      session =
+        start_failing_native_session(dir, fn
+          0 ->
+            build_stream_response([
+              ReqLLM.StreamChunk.tool_call("read_file", %{"path" => "test.txt"}, %{
+                id: "tc_read",
+                index: 0
+              }),
+              ReqLLM.StreamChunk.meta(%{finish_reason: :tool_use})
+            ])
+
+          _after_tool ->
+            {:error, :stream_failed}
+        end)
+
+      assert :ok = Session.set_tool_trust(session, "read_file", :turn)
+      assert :ok = Session.send_prompt(session, "read then fail")
+      message = await_failed_turn(session)
+
+      messages = Session.messages(session)
+
+      assert Enum.any?(messages, fn
+               {:system, "Interrupted tool-call group reconciled without replay" <> _, _level} ->
+                 true
+
+               _other ->
+                 false
+             end)
+
+      assert error_messages(session) == [message]
+    end
+  end
+
   describe "provider error presentation" do
     test "openai codex auth failures suggest /login instead of /auth openai_codex" do
       session = start_subscribed_session()
@@ -394,5 +443,100 @@ defmodule MingaAgent.SessionProviderErrorTest do
             inspect(Process.info(self(), :messages), limit: :infinity)
         )
     end
+  end
+
+  @spec start_failing_native_session(Path.t(), (non_neg_integer() -> term())) :: pid()
+  defp start_failing_native_session(dir, respond) do
+    call_count = :counters.new(1, [:atomics])
+    oauth_path = Path.join(dir, "credentials/oauth.json")
+
+    assert :ok =
+             MingaAgent.OAuth.write_oauth_file(
+               %{
+                 access: "fixture-access",
+                 refresh: "fixture-refresh",
+                 account_id: "fixture-account",
+                 expires: System.system_time(:millisecond) + 3_600_000
+               },
+               oauth_path
+             )
+
+    credential_opts = [
+      config_dir: Path.join(dir, "credentials"),
+      env: %{},
+      oauth_path: oauth_path
+    ]
+
+    resolver_opts =
+      MingaAgent.Test.ModelSelectionFixture.resolver_opts(model_id: "gpt-6.1-sol")
+      |> Keyword.delete(:credential_snapshot)
+
+    # Keep tool-effect admission on this case's own durability queue.
+    event_log =
+      start_supervised!(
+        {MingaAgent.EventLog,
+         name: nil, db_dir: Path.join(dir, "events"), retention_sweep?: false, health_check: :none}
+      )
+
+    suffix = System.unique_integer([:positive])
+
+    artifact_opts = [
+      name: nil,
+      root: Path.join(dir, "artifacts"),
+      quota: Module.concat(__MODULE__, "FailedTurnArtifactQuota#{suffix}"),
+      registry: Module.concat(__MODULE__, "FailedTurnArtifactRegistry#{suffix}"),
+      store_supervisor: Module.concat(__MODULE__, "FailedTurnArtifactStores#{suffix}")
+    ]
+
+    start_supervised!({MingaAgent.ArtifactSupervisor, artifact_opts})
+    {:ok, artifact_runtime} = MingaAgent.ArtifactSupervisor.runtime(artifact_opts)
+
+    llm_client = fn _model, _messages, _opts ->
+      count = :counters.get(call_count, 1)
+      :counters.add(call_count, 1, 1)
+      respond.(count)
+    end
+
+    session =
+      start_test_session(
+        provider: Native,
+        persist?: true,
+        session_store_dir: Path.join(dir, "sessions"),
+        event_log_server: event_log,
+        artifact_runtime: artifact_runtime,
+        credentials_snapshot_fn: fn -> MingaAgent.Credentials.snapshot(credential_opts) end,
+        provider_opts: [
+          model: "openai:gpt-6.1-sol",
+          model_resolver_opts: resolver_opts,
+          credential_opts: credential_opts,
+          project_root: dir,
+          llm_client: llm_client,
+          tools: MingaAgent.Tools.all(project_root: dir),
+          config: agent_config([])
+        ]
+      )
+
+    assert :ok = Session.subscribe(session)
+    session
+  end
+
+  @spec await_failed_turn(pid()) :: String.t()
+  defp await_failed_turn(session) do
+    assert_receive {:agent_event, ^session, {:error, message}}, @durable_workflow_timeout
+
+    # The error event and the turn's completion each announce the error status. Wait for both so the
+    # transcript includes everything completion writes.
+    assert_receive {:agent_event, ^session, {:status_changed, :error}}, @durable_workflow_timeout
+    assert_receive {:agent_event, ^session, {:status_changed, :error}}, @durable_workflow_timeout
+
+    # The reply follows every broadcast completion sent, so a second failure report would already be here.
+    assert Session.status(session) == :error
+    refute_received {:agent_event, ^session, {:error, _duplicate}}
+    message
+  end
+
+  @spec error_messages(pid()) :: [String.t()]
+  defp error_messages(session) do
+    for {:system, text, :error} <- Session.messages(session), do: text
   end
 end
