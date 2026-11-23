@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex, nofollow">
   <title>Minga: A programmable workbench for code and agents</title>
-  <meta name="description" content="Minga is a programmable workbench that reshapes to fit the task: native code editing, buffer-aware agent sessions, and custom workflows you can discard or keep across projects.">
+  <meta name="description" content="Minga brings native code editing, staged agent edits with three-way merge, and Elixir programmability into one concurrent workbench for macOS and the terminal.">
   <link rel="icon" type="image/svg+xml" href="/assets/minga_dark-transparent.svg">
   <link rel="stylesheet" href="/styles.css">
   <script>
@@ -47,27 +47,26 @@
         <div class="hero-copy">
           <p class="kicker">Pre-release · Building toward v0.1.0</p>
           <h1>A programmable workbench that reshapes to fit the task.</h1>
-          <p class="hero-lead">Spawning more coding agents is no longer the hard part; verifying, steering, and shaping the work is. Minga puts native code editing, buffer-aware agent sessions, and disposable custom workflows in one environment, so you stop bouncing between terminal panes, worktrees, and a second editor every two minutes.</p>
+          <p class="hero-lead">Spawning coding agents is no longer the hard part; reviewing, steering, and owning the result is. Minga brings native code editing, staged agent diffs with three-way merge, and programmable Elixir workflows into one concurrent environment on macOS and in the terminal.</p>
           <div class="actions">
             <a class="btn btn-primary" href="/getting-started">Get Started</a>
             <a class="btn" href="/why-minga">Read Why Minga</a>
             <a class="btn" href="/architecture">How It Works</a>
           </div>
-          <p class="hero-meta">Native macOS app &amp; terminal client · Vim &amp; CUA · Open source (MIT)</p>
+          <p class="hero-meta">Native macOS app &amp; terminal client · Vim or standard desktop shortcuts · Open source (MIT)</p>
         </div>
 
-        <div class="stage-frame" aria-label="Pre-release media placeholder">
+        <div class="stage-frame" aria-label="Pre-release media preview slot">
           <div class="stage-bar">
             <span class="stage-dots" aria-hidden="true"><span></span><span></span><span></span></span>
-            <span>Minga.app · hero workflow capture</span>
-            <span class="stage-pill">Staging slot · Slice 5</span>
+            <span>Minga.app · macOS preview</span>
+            <span class="stage-pill">Pre-release</span>
           </div>
           <div class="stage-body">
             <div class="stage-body-inner">
-              <p class="stage-label">Awaiting qualified v0.1.0 release candidate capture</p>
-              <h3>Real macOS capture lands here before launch</h3>
-              <p>We do not publish faked screenshots or simulated agent output. Once the v0.1.0 release milestone (<a href="https://github.com/jsmestad/minga/issues/3542">#3542</a> and <a href="https://github.com/jsmestad/minga/issues/3662">#3662</a>) qualifies, this slot will show a silent 10 to 15 second retina clip recorded from the packaged macOS app: editing code, reviewing staged agent diffs inline, and saving a custom workflow to activate and keep across sessions.</p>
-              <p class="stage-spec">Planned asset: /media/hero-workbench.webm + poster still · silent loop with pause and reduced-motion support</p>
+              <p class="stage-label">v0.1.0 capture pending</p>
+              <h3>Recorded macOS walkthrough lands here at v0.1.0</h3>
+              <p>A silent 10 to 15 second capture recorded directly from the packaged macOS app will sit here at release: editing code, reviewing staged agent hunks, and activating a custom workflow you can discard or keep across projects.</p>
             </div>
           </div>
         </div>
@@ -79,15 +78,15 @@
         <div class="section-header">
           <p class="kicker">The real bottleneck</p>
           <h2>Spawning agents is easy. Verifying and steering their code is where you lose the day.</h2>
-          <p>Follow one ordinary moment: an agent finishes a 400-line refactor, and hunk 3 has a subtle edge-case bug.</p>
+          <p>Follow one ordinary moment: an agent finishes a 400-line refactor, and one hunk has a subtle edge-case bug.</p>
         </div>
 
-        <div class="loop-compare" role="region" aria-label="Workflow comparison: agent multiplexer versus Minga">
+        <div class="loop-compare" role="region" aria-label="Workflow comparison: CLI agent multiplexers versus Minga">
           <div class="loop-head" aria-hidden="true">
             <div class="loop-head-cell">Step</div>
             <div class="loop-head-cell">
-              <strong>Agent multiplexer + separate editor</strong>
-              Herdr, tmux + Claude Code / Codex / pi
+              <strong>Terminal multiplexers + separate editor</strong>
+              tmux, Herdr + Claude Code / Codex
             </div>
             <div class="loop-head-cell loop-head-minga">
               <strong>Minga</strong>
@@ -101,12 +100,12 @@
               <span class="loop-step-title">Edits land</span>
             </div>
             <div class="loop-cell">
-              <span class="loop-cell-label">Agent multiplexer + separate editor</span>
-              The CLI writes straight to disk, risking overwrites and broken undo on open buffers, or forces a separate Git worktree with another build cache and cold LSP index.
+              <span class="loop-cell-label">Terminal multiplexers + separate editor</span>
+              CLI agents write directly to your working tree (colliding with open unsaved files and editor undo), or isolate each task in a separate Git worktree you have to track and merge afterward.
             </div>
             <div class="loop-cell loop-cell-minga">
               <span class="loop-cell-label">Minga</span>
-              Approved edits stay staged in an isolated in-memory overlay while disk and your open buffer remain untouched. Stay in one repo with one build and one LSP.
+              Approved edits stay staged in an isolated overlay while your working tree, open files, and undo history stay untouched until you explicitly publish or discard them.
             </div>
           </div>
 
@@ -116,27 +115,27 @@
               <span class="loop-step-title">You check the diff</span>
             </div>
             <div class="loop-cell">
-              <span class="loop-cell-label">Agent multiplexer + separate editor</span>
-              Terminal scrollback has no jump-to-definition and no live diagnostics. You switch to Neovim or VS Code to trace callers and find what broke.
+              <span class="loop-cell-label">Terminal multiplexers + separate editor</span>
+              You review changes in a terminal pane or bridge over to an IDE plugin, juggling focus between the agent session and your editor tabs while new writes arrive.
             </div>
             <div class="loop-cell loop-cell-minga">
               <span class="loop-cell-label">Minga</span>
-              Review hunks inline (<kbd>]c</kbd> / <kbd>[c</kbd>) with full syntax highlighting, jump-to-definition, and live LSP diagnostics. Background writes never yank your cursor or open file.
+              Inspect changed files hunk by hunk in Minga's dedicated diff review pane. Background writes to other files never steal focus or jump your reading position, and updated revisions flag cleanly until you refresh.
             </div>
           </div>
 
           <div class="loop-row">
             <div class="loop-step">
               <span class="loop-num">03</span>
-              <span class="loop-step-title">Hunk 3 is wrong</span>
+              <span class="loop-step-title">One hunk is wrong</span>
             </div>
             <div class="loop-cell">
-              <span class="loop-cell-label">Agent multiplexer + separate editor</span>
-              You either hand-edit in your second editor and untangle collisions later, or type file paths and line numbers back into chat and wait for another full turn over a four-line fix.
+              <span class="loop-cell-label">Terminal multiplexers + separate editor</span>
+              Accepting part of a change while hand-editing the rest means mixing manual buffer edits, git hunk tools, or waiting for another agent turn over a four-line fix.
             </div>
             <div class="loop-cell loop-cell-minga">
               <span class="loop-cell-label">Minga</span>
-              Accept good hunks (<kbd>y</kbd>), reject hunk 3 (<kbd>x</kbd>), and edit those four lines directly in Vim or CUA with undo intact. Overlapping changes open conflict review (<strong>Keep mine</strong> / <strong>Use Agent version</strong>).
+              Accept good hunks, reject the bad one, and edit your open file directly with Vim or standard desktop shortcuts. If your edits overlap staged changes on publish, conflict review shows both versions side by side.
             </div>
           </div>
 
@@ -146,39 +145,39 @@
               <span class="loop-step-title">Sending context back</span>
             </div>
             <div class="loop-cell">
-              <span class="loop-cell-label">Agent multiplexer + separate editor</span>
-              Save the file, copy compiler errors and line ranges out of your editor, and paste them into a terminal prompt hoping the agent reads the updated file.
+              <span class="loop-cell-label">Terminal multiplexers + separate editor</span>
+              Sharing unsaved edits or compiler errors with a terminal CLI requires saving to disk first, piping output, or relying on per-editor bridge plugins.
             </div>
             <div class="loop-cell loop-cell-minga">
               <span class="loop-cell-label">Minga</span>
-              Attach your live unsaved buffer (<kbd>SPC a b</kbd>) or published LSP diagnostics (<kbd>SPC a D</kbd>) straight to the agent draft, or publish staged changes cleanly (<kbd>SPC a p</kbd>).
+              Attach a snapshot of your live unsaved buffer or published file diagnostics directly to an open agent draft, then publish staged changes with three-way merge when satisfied.
             </div>
           </div>
 
           <div class="loop-row">
             <div class="loop-step">
               <span class="loop-num">05</span>
-              <span class="loop-step-title">Improving the loop</span>
+              <span class="loop-step-title">Shaping the loop</span>
             </div>
             <div class="loop-cell">
-              <span class="loop-cell-label">Agent multiplexer + separate editor</span>
-              Customizing a multiplexer changes tabs, status bars, and shell scripts around an opaque CLI. It cannot bind buffer edits, diagnostics, and agent turns into one workflow.
+              <span class="loop-cell-label">Terminal multiplexers + separate editor</span>
+              Customizing a multiplexer shapes tabs, status sidebars, hooks, and prompt files around an external CLI rather than modifying the editor and review surface itself.
             </div>
             <div class="loop-cell loop-cell-minga">
               <span class="loop-cell-label">Minga</span>
-              Write it yourself or ask the agent to build a sharper review surface or check workflow in readable source over real buffer and agent state, save to activate, and discard or keep it across projects.
+              Customize commands, hooks, and extensions in Elixir today. <em>On the v0.1.0 roadmap:</em> write or ask the agent to build task-specific review surfaces over live buffer and agent state, then discard after the task or keep across projects.
             </div>
           </div>
         </div>
 
         <div class="scope-strip">
           <div class="scope-note">
-            <h3>When a PTY multiplexer is the right fit</h3>
-            <p>If your workflow is launching six unrelated CLI agents across separate repositories and checking in occasionally from a status sidebar or phone, tools like Herdr are built for that. Minga is built for engineers who stay close to the code.</p>
+            <h3>When Herdr, tmux, or Zed is a better fit</h3>
+            <p>If you want to run Anthropic's Claude Code and OpenAI's Codex CLI side by side on flat-rate vendor subscriptions, a multiplexer like Herdr or Zed's agent protocol is built for that. If you want a fast compiled Rust editor with editable multibuffer diffs and Tab prediction today, look at Zed or Cursor. Minga is for engineers who want one programmable editor and agent runtime they own and reshape in a single language.</p>
           </div>
           <div class="scope-note">
-            <h3>What about AI-retrofitted IDEs?</h3>
-            <p>Cursor and VS Code put chat beside your editor, but on a single-threaded host with fixed panels you cannot deeply reprogram. Minga keeps editing and agents together without giving up responsiveness or owning your workflow.</p>
+            <h3>What about Cursor and VS Code?</h3>
+            <p>VS Code and Cursor have massive extension ecosystems, polished inline Tab completion, and cloud agents. Minga trades Electron and fixed extension-host APIs for native macOS and terminal clients over a concurrent VM built from day one for isolated buffers, extensions, and custom workflows.</p>
           </div>
         </div>
       </div>
@@ -188,37 +187,37 @@
       <div class="container">
         <div class="section-header">
           <p class="kicker">Programmability</p>
-          <h2>Shape the actual engine, not shell panes wrapped around it.</h2>
-          <p>Minga works with any language you write. Just as Lua configures Neovim and Elisp configures Emacs, Elixir is Minga's extension language, and you can write it yourself or let the agent author readable source for you.</p>
+          <h2>Shape the editor itself, not shell scripts wrapped around it.</h2>
+          <p>Minga edits any language you write, with sensible defaults and zero config required to start. Just as Lua configures Neovim and Elisp configures Emacs, Elixir is Minga's extension language.</p>
         </div>
 
         <div class="split-layout">
           <div>
             <ul class="pillar-list">
               <li>
-                <strong>Write it yourself or ask the agent</strong>
-                <p>Configure options, keybindings, concurrent hooks, command advice, and installable extensions today in <code>~/.config/minga/config.exs</code>. Toward v0.1.0, ask Minga's agent to author workflow and interface improvements over the same fixed buffer, agent, and permission owners.</p>
+                <strong>Start small, grow without hitting a wall</strong>
+                <p>Configure options, keybindings, custom commands, background save hooks, and command wrappers in <code>~/.config/minga/config.exs</code>, or install packages from local paths, Git, or Hex.</p>
               </li>
               <li>
-                <strong>Save to activate, inspect the diff</strong>
-                <p>Real workflow code sits in readable source files you can inspect, test, and version in Git. There is no hidden prompt masquerading as a workflow engine and no proprietary fork required for personal tooling.</p>
+                <strong>Readable source you can diff and test</strong>
+                <p>Workflows and extensions live in plain source files you inspect, version in Git, and approve explicitly instead of hidden prompt glue or proprietary editor forks.</p>
               </li>
               <li>
-                <strong>Disposable for one task, kept when it sticks</strong>
-                <p>Reshape Minga to fit how you work on a single migration or spec review and discard it when the work lands, or Keep useful definitions shared across tabs, restarts, and repositories without regenerating them.</p>
+                <strong>Disposable for one task, kept when it sticks (v0.1.0)</strong>
+                <p>Toward v0.1.0, ask Minga's agent or write source yourself to reshape the workbench for a single migration or spec review, discard it when the work lands, or keep useful definitions shared across projects.</p>
               </li>
             </ul>
 
             <div class="callout">
-              <span class="callout-title">Pre-release honesty boundary</span>
-              <p><strong>Ships on <code>main</code> today:</strong> live config/hook/advice reload (<kbd>SPC h r</kbd>) and supervised path, Git, and Hex extensions. <strong>Building for v0.1.0:</strong> live Save-to-activate definitions, shared composition, and Keep across sessions (<a href="/extending">see Extending Minga</a>).</p>
+              <span class="callout-title">Current release status</span>
+              <p><strong>Ships today:</strong> live config, hook, and command-wrapper reload, plus installable path, Git, and Hex extensions. <strong>In progress for v0.1.0:</strong> live save-to-activate task workflows and shared reusable definitions (<a href="/extending">see Extending Minga</a>).</p>
             </div>
           </div>
 
           <div class="code-card">
             <div class="code-header">
               <span>~/.config/minga/config.exs</span>
-              <span>Config</span>
+              <span>Optional config</span>
             </div>
             <pre><code><span class="tok-kw">use</span> <span class="tok-mod">Minga.Config</span>
 
@@ -226,27 +225,20 @@ set <span class="tok-atom">:theme</span>, <span class="tok-atom">:catppuccin_moc
 set <span class="tok-atom">:line_numbers</span>, <span class="tok-atom">:relative</span>
 set <span class="tok-atom">:tab_width</span>, <span class="tok-num">2</span>
 
+<span class="tok-comment"># Prefer standard Cmd+C/V desktop shortcuts instead of Vim?</span>
+<span class="tok-comment"># set :editing_model, :cua</span>
+
+<span class="tok-comment"># Define a custom command and bind it in Normal mode.</span>
 bind <span class="tok-atom">:normal</span>, <span class="tok-str">"SPC g s"</span>, <span class="tok-atom">:git_status</span>, <span class="tok-str">"Git status"</span>
 
-<span class="tok-comment"># Hooks run in isolated background processes so slow tools never block typing.</span>
-on <span class="tok-atom">:after_save</span>, <span class="tok-kw">fn</span> _buf, path <span class="tok-kw">-&gt;</span>
-  <span class="tok-kw">if</span> <span class="tok-mod">String</span>.ends_with?(path, <span class="tok-str">".go"</span>) <span class="tok-kw">do</span>
-    <span class="tok-mod">System</span>.cmd(<span class="tok-str">"gofmt"</span>, [<span class="tok-str">"-w"</span>, path])
-  <span class="tok-kw">end</span>
-<span class="tok-kw">end</span>
-
-<span class="tok-comment"># Wrap any command with before, after, around, or override advice.</span>
-advise <span class="tok-atom">:around</span>, <span class="tok-atom">:format_buffer</span>, <span class="tok-kw">fn</span> execute, state <span class="tok-kw">-&gt;</span>
-  errors =
-    state.buffers.active
-    |&gt; <span class="tok-mod">Minga.Diagnostics</span>.for_buffer()
-    |&gt; <span class="tok-mod">Enum</span>.count(<span class="tok-kw">fn</span> d <span class="tok-kw">-&gt;</span> d.severity == <span class="tok-atom">:error</span> <span class="tok-kw">end</span>)
-
-  <span class="tok-kw">if</span> errors == <span class="tok-num">0</span>, <span class="tok-kw">do:</span> execute.(state), <span class="tok-kw">else:</span> state
+command <span class="tok-atom">:git_status</span>, <span class="tok-str">"Show short git status"</span> <span class="tok-kw">do</span>
+  {output, _} = <span class="tok-mod">System</span>.cmd(<span class="tok-str">"git"</span>, [<span class="tok-str">"status"</span>, <span class="tok-str">"--short"</span>])
+  <span class="tok-mod">Minga.API</span>.message(output)
 <span class="tok-kw">end</span>
 
 <span class="tok-comment"># Install supervised extensions from local paths, Git, or Hex.</span>
-extension <span class="tok-atom">:minga_org</span>, git: <span class="tok-str">"https://github.com/jsmestad/minga-org"</span></code></pre>
+extension <span class="tok-atom">:minga_git_extended</span>,
+  git: <span class="tok-str">"https://github.com/jsmestad/minga-git-extended"</span></code></pre>
           </div>
         </div>
       </div>
@@ -256,30 +248,30 @@ extension <span class="tok-atom">:minga_org</span>, git: <span class="tok-str">"
       <div class="container">
         <div class="section-header">
           <p class="kicker">Under the hood</p>
-          <h2>Built on the Erlang VM so heavy agent work never stalls your editor.</h2>
-          <p>Traditional single-threaded editors were built for one person typing sequentially. Minga runs its core on the BEAM to solve four failures that show up the moment humans and autonomous agents share a workspace.</p>
+          <h2>Built on the Erlang VM so background work stays isolated from your files.</h2>
+          <p>Minga runs its core on the Erlang virtual machine (BEAM) to solve four concrete failures that appear when editing, language servers, extensions, and autonomous agents run together.</p>
         </div>
 
         <ol class="runtime-ledger">
           <li class="runtime-row">
             <div class="runtime-failure">
               <span class="runtime-index">01</span>
-              <h3>UI freezes and GC stutters</h3>
+              <h3>UI freezes and GC pauses</h3>
             </div>
             <div class="runtime-answer">
               <span class="runtime-mechanism">Preemptive scheduling + per-process heaps</span>
-              <p>The VM schedules lightweight processes preemptively and collects garbage per process instead of pausing everything at once. Streaming model output, language servers, and save hooks do not starve your keystrokes.</p>
+              <p>Every open file, language server, save hook, and agent session runs in its own lightweight process with its own garbage-collected heap, and fast model streams are batched ahead of editor input.</p>
             </div>
           </li>
 
           <li class="runtime-row">
             <div class="runtime-failure">
               <span class="runtime-index">02</span>
-              <h3>One bad plugin breaks the editor</h3>
+              <h3>One bad extension breaks your workspace</h3>
             </div>
             <div class="runtime-answer">
               <span class="runtime-mechanism">Supervision trees + process isolation</span>
-              <p>Buffers, agent sessions, language servers, and extensions run in separate processes with separate memory. When an extension callback or tool call fails, its supervisor isolates and recovers it while open buffers and undo history stay untouched.</p>
+              <p>Extensions and tool workers share no memory with your open buffers. When a callback raises or a worker crashes, its supervisor isolates and recovers it while open files and undo history stay untouched.</p>
             </div>
           </li>
 
@@ -289,8 +281,8 @@ extension <span class="tok-atom">:minga_org</span>, git: <span class="tok-str">"
               <h3>Agents clobber open files</h3>
             </div>
             <div class="runtime-answer">
-              <span class="runtime-mechanism">Buffer-aware forks + staged changesets</span>
-              <p>Every open buffer owns its own isolated process. Agent file edits stage in an in-memory fork with revision checks, inline diff review, three-way merge on publish (<kbd>SPC a p</kbd>) or discard (<kbd>SPC a P</kbd>), and real undo integration. <a href="/architecture#buffer-aware-agents">See how it works</a>.</p>
+              <span class="runtime-mechanism">Isolated staging overlays + three-way merge</span>
+              <p>Agent file edits require a full-file revision check and stay staged off your working tree until you publish or discard them. Staged drafts also persist independently so they survive editor crashes (<a href="/architecture#buffer-aware-agents">see diagram</a>).</p>
             </div>
           </li>
 
@@ -300,20 +292,20 @@ extension <span class="tok-atom">:minga_org</span>, git: <span class="tok-str">"
               <h3>Closing the window kills running work</h3>
             </div>
             <div class="runtime-answer">
-              <span class="runtime-mechanism">Headless daemon + durable sessions</span>
-              <p><code>minga --headless</code> keeps the runtime alive without a window, locally or on a remote host, so clients can attach, inspect, and detach while long agent runs keep going. See <a href="/docs/remote_agents.html">Remote Agents</a>.</p>
+              <span class="runtime-mechanism">Headless mode + remote attach</span>
+              <p><code>minga --headless</code> keeps agent sessions running without a window, locally or on a remote host, so you can attach and detach while long runs continue. See <a href="/docs/remote_agents.html">Remote Agents</a>.</p>
             </div>
           </li>
         </ol>
 
         <div class="boundary-band">
           <div class="boundary-col">
-            <h3>What the BEAM owns</h3>
-            <p>Open buffers, supervision trees, agent orchestration, extensions, and semantic UI state.</p>
+            <h3>What the Erlang VM owns</h3>
+            <p>Open files, supervision trees, agent orchestration, extensions, and high-level UI state.</p>
           </div>
           <div class="boundary-col boundary-col-native">
             <h3>Where native code takes over</h3>
-            <p>The VM never rasterizes pixels or parses syntax trees. Platform-native clients handle rendering, input, and syntax parsing across explicit process boundaries (<a href="/architecture">see full diagrams</a>).</p>
+            <p>The VM never rasterizes pixels or parses syntax trees. Separate native OS processes handle macOS rendering, terminal rendering, and syntax parsing (<a href="/architecture">see full diagrams</a>).</p>
           </div>
         </div>
       </div>
@@ -324,37 +316,35 @@ extension <span class="tok-atom">:minga_org</span>, git: <span class="tok-str">"
         <div class="section-header">
           <p class="kicker">Desktop &amp; Terminal</p>
           <h2>Native on macOS. First-class in the terminal.</h2>
-          <p>One core drives both clients with the same config, keybindings, and agent workspaces. Switch between Vim modal editing and standard CUA shortcuts, explore commands through Doom-style <kbd>SPC</kbd> menus, and connect Anthropic, OpenAI, OpenAI Codex, Google, OpenRouter, Groq, Mistral, DeepSeek, or custom model routes.</p>
+          <p>One core drives both clients with the same config, editing modes, and agent workspaces. Choose Vim modal editing or standard desktop shortcuts, discover commands through Spacebar menus, and try Minga side-by-side with your existing editor without modifying your repository.</p>
         </div>
 
         <div class="grid-2">
-          <div class="stage-frame stage-frame-compact" aria-label="macOS GUI staging media placeholder">
+          <div class="stage-frame stage-frame-compact" aria-label="macOS desktop preview slot">
             <div class="stage-bar">
               <span class="stage-dots" aria-hidden="true"><span></span><span></span><span></span></span>
               <span>Minga.app · macOS desktop</span>
-              <span class="stage-pill">Slice 5 capture</span>
+              <span class="stage-pill">Pre-release</span>
             </div>
             <div class="stage-body">
               <div class="stage-body-inner">
-                <p class="stage-label">macOS desktop capture slot</p>
-                <h3>Fast native macOS experience</h3>
-                <p>Native window chrome, ligatures, smooth trackpad scrolling, inline diff previews, and live model activity panes without Electron overhead.</p>
-                <p class="stage-spec">Planned asset: /media/macos-gui-staged-review.png (retina capture from qualified v0.1.0 RC)</p>
+                <p class="stage-label">macOS preview pending</p>
+                <h3>Native macOS desktop experience</h3>
+                <p>Platform-native window chrome, font ligatures, smooth trackpad scrolling, diff review, and agent workspaces in a signed, notarized macOS app.</p>
               </div>
             </div>
           </div>
 
-          <div class="stage-frame stage-frame-compact" aria-label="Terminal client staging media placeholder">
+          <div class="stage-frame stage-frame-compact" aria-label="Terminal client preview slot">
             <div class="stage-bar">
               <span>$ minga · Terminal client</span>
-              <span class="stage-pill">Slice 5 capture</span>
+              <span class="stage-pill">Pre-release</span>
             </div>
             <div class="stage-body">
               <div class="stage-body-inner">
-                <p class="stage-label">Terminal client capture slot</p>
+                <p class="stage-label">Terminal preview pending</p>
                 <h3>Same core, same config over SSH or tmux</h3>
                 <p>Keep your Vim motions, text objects, registers, macros, language servers, syntax highlighting, and agent workspaces inside any modern terminal on macOS or Linux.</p>
-                <p class="stage-spec">Planned asset: /media/go-tui-session.webm + poster still (recorded from qualified v0.1.0 RC)</p>
               </div>
             </div>
           </div>
@@ -365,31 +355,28 @@ extension <span class="tok-atom">:minga_org</span>, git: <span class="tok-str">"
     <section class="section" id="install">
       <div class="container">
         <div class="section-header">
-          <p class="kicker">Get started</p>
-          <h2>Install Minga or build from source.</h2>
-          <p>Minga ships rolling prerelease builds on macOS via Homebrew and builds cleanly from source on macOS and Linux. Press <kbd>SPC</kbd> in Normal mode to discover commands, or open the agent panel with <kbd>SPC a a</kbd>.</p>
+          <p class="kicker">Try it side by side</p>
+          <h2>Install on macOS or build from source.</h2>
+          <p>Apple Silicon macOS builds ship via Homebrew as signed, notarized prereleases. Minga never writes proprietary files into your repo, so you can try it alongside your current editor with zero lock-in. See <a href="/getting-started">Getting Started</a> for Linux and Intel Mac source builds.</p>
         </div>
 
         <div class="grid-2">
           <div class="code-card">
             <div class="code-header">
-              <span>macOS · Homebrew</span>
-              <button type="button" class="copy-btn" data-copy-target="cmd-brew">Copy</button>
+              <span>macOS Desktop App · Homebrew</span>
+              <button type="button" class="copy-btn" data-copy-target="cmd-brew-mac">Copy</button>
             </div>
-            <pre><code id="cmd-brew">brew install --cask jsmestad/minga/minga-mac
-brew install jsmestad/minga/minga</code></pre>
+            <pre><code id="cmd-brew-mac">brew install --cask jsmestad/minga/minga-mac
+open -a Minga</code></pre>
           </div>
 
           <div class="code-card">
             <div class="code-header">
-              <span>From source · macOS &amp; Linux</span>
-              <button type="button" class="copy-btn" data-copy-target="cmd-source">Copy</button>
+              <span>macOS Terminal Client · Homebrew</span>
+              <button type="button" class="copy-btn" data-copy-target="cmd-brew-cli">Copy</button>
             </div>
-            <pre><code id="cmd-source">git clone https://github.com/jsmestad/minga.git
-cd minga
-asdf install &amp;&amp; mix deps.get
-mix compile &amp;&amp; make native.support
-bin/minga</code></pre>
+            <pre><code id="cmd-brew-cli">brew install jsmestad/minga/minga
+minga path/to/project</code></pre>
           </div>
         </div>
 
@@ -399,42 +386,42 @@ bin/minga</code></pre>
               <span class="guide-row-title">Why Minga</span>
               <span class="guide-row-kind">Thesis</span>
             </span>
-            <span class="guide-row-desc">Where agent multiplexers break down, disposable task-shaped software, and honest early gaps.</span>
+            <span class="guide-row-desc">Where agent multiplexers hit a ceiling, how Minga compares to Zed/Cursor/Emacs/Neovim, and what is still early.</span>
           </a>
           <a class="guide-row" href="/getting-started">
             <span class="guide-row-top">
               <span class="guide-row-title">Getting Started</span>
               <span class="guide-row-kind">Guide</span>
             </span>
-            <span class="guide-row-desc">First 10 minutes: install, six core keys, connecting a model route, and your first staged diff.</span>
+            <span class="guide-row-desc">Install (Homebrew or source), zero-config defaults, Vim or desktop shortcuts, connecting a model, and your first staged diff.</span>
           </a>
           <a class="guide-row" href="/architecture">
             <span class="guide-row-top">
-              <span class="guide-row-title">Architecture &amp; Buffer-Aware Agents</span>
+              <span class="guide-row-title">Architecture &amp; Staged Edits</span>
               <span class="guide-row-kind">Diagrams</span>
             </span>
-            <span class="guide-row-desc">Visual diagrams of the runtime, native clients, staged buffer forks, and key architecture decisions.</span>
+            <span class="guide-row-desc">Visual diagrams of the Erlang VM core, native OS clients, staged overlay pipeline, and key design decisions.</span>
           </a>
           <a class="guide-row" href="/extending">
             <span class="guide-row-top">
               <span class="guide-row-title">Extending Minga</span>
               <span class="guide-row-kind">Guide</span>
             </span>
-            <span class="guide-row-desc">The three-layer customization model: config.exs, installable extensions, and disposable or kept workflows.</span>
+            <span class="guide-row-desc">Config, installable extensions, custom corporate model gateways, task-shaped workflows, and security boundaries.</span>
           </a>
           <a class="guide-row" href="/docs/configuration.html">
             <span class="guide-row-top">
               <span class="guide-row-title">Configuration &amp; Extension Reference</span>
-              <span class="guide-row-kind">ExDoc</span>
+              <span class="guide-row-kind">Reference</span>
             </span>
             <span class="guide-row-desc">Complete option tables, keymap scopes, hooks, MCP servers, and extension callbacks.</span>
           </a>
           <a class="guide-row" href="/docs/">
             <span class="guide-row-top">
               <span class="guide-row-title">Full API &amp; Protocol Docs</span>
-              <span class="guide-row-kind">ExDoc</span>
+              <span class="guide-row-kind">API Docs</span>
             </span>
-            <span class="guide-row-desc">Module reference, wire protocols, session recovery specs, and architecture decision records.</span>
+            <span class="guide-row-desc">Elixir module reference, wire protocols, session recovery specs, and architecture decision records.</span>
           </a>
         </div>
       </div>
@@ -445,14 +432,14 @@ bin/minga</code></pre>
     <div class="container footer-inner">
       <div class="footer-note">
         <p><strong>Minga</strong> is open source under the MIT license. Created by <a href="https://evalcode.com">Justin Smestad</a> in Colorado.</p>
-        <p>Pre-release staging preview ahead of v0.1.0 launch (<a href="https://github.com/jsmestad/minga/issues/3542">#3542</a>). Real captures replace staging frames once release qualification completes.</p>
+        <p>Pre-release staging preview ahead of v0.1.0.</p>
       </div>
       <nav class="footer-links" aria-label="Footer">
         <a href="/why-minga">Why Minga</a>
         <a href="/getting-started">Getting Started</a>
         <a href="/architecture">Architecture</a>
         <a href="/extending">Extending</a>
-        <a href="/docs/">ExDoc Reference</a>
+        <a href="/docs/">API Docs</a>
         <a href="/docs/changelog.html">Changelog</a>
         <a href="https://github.com/jsmestad/minga">GitHub</a>
       </nav>
