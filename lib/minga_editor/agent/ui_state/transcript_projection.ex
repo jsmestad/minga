@@ -169,20 +169,21 @@ defmodule MingaEditor.Agent.UIState.TranscriptProjection do
   def start_line(%__MODULE__{index: nil}, _id), do: nil
   def start_line(%__MODULE__{index: index}, id), do: Index.start_line(index, id)
 
+  @doc "Records a content revision. A revision changes entry bodies, not the presentation epoch."
   @spec bump_version(t()) :: t()
   def bump_version(%__MODULE__{version: version} = projection),
     do: %{projection | version: version + 1}
 
-  @doc "Identifies the installed resident transcript independently of connection availability."
+  @doc """
+  Identifies the installed resident transcript independently of connection availability.
+
+  The epoch changes only when the display changes shape: a replaced generation (reset, resume, or session switch), a moved display start, or a cleared projection. A content revision, such as a streamed text batch or a collapse toggle, keeps the epoch so the transcript stream sends the changed entries as an in-epoch delta.
+  """
   @spec presentation_epoch(t()) :: non_neg_integer()
   def presentation_epoch(%__MODULE__{generation: nil}), do: 0
 
-  def presentation_epoch(%__MODULE__{
-        generation: generation,
-        display_start: start,
-        version: version
-      }),
-      do: :erlang.phash2({generation, start, version})
+  def presentation_epoch(%__MODULE__{generation: generation, display_start: start}),
+    do: :erlang.phash2({generation, start})
 
   @spec set_display_start(t(), non_neg_integer()) :: t()
   def set_display_start(%__MODULE__{display_start: start} = projection, start), do: projection

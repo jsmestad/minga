@@ -61,6 +61,10 @@ defmodule Minga.Frontend.Adapter.GUI.AgentTranscriptEncoder do
   alias Minga.Protocol.Opcodes
   alias Minga.RenderModel.UI.AgentChat
 
+  # Within one epoch, a streamed tail is resent only when its hash changes, so use the full 32-bit
+  # range rather than phash2's default 2^27.
+  @hash_range 4_294_967_296
+
   @op_gui_agent_transcript Opcodes.gui_agent_transcript()
 
   @version 1
@@ -90,7 +94,7 @@ defmodule Minga.Frontend.Adapter.GUI.AgentTranscriptEncoder do
     epoch = model.transcript_epoch
     messages = model.resident_messages
     truncated? = model.resident_truncated?
-    fp = :erlang.phash2({epoch, messages, truncated?})
+    fp = :erlang.phash2({epoch, messages, truncated?}, @hash_range)
 
     if fp == caches.last_agent_transcript.fp do
       {nil, caches}
@@ -279,5 +283,5 @@ defmodule Minga.Frontend.Adapter.GUI.AgentTranscriptEncoder do
   defp message_body(body), do: body
 
   @spec entry_key(entry()) :: key()
-  defp entry_key({id, body_bin}), do: {id, :erlang.phash2(body_bin)}
+  defp entry_key({id, body_bin}), do: {id, :erlang.phash2(body_bin, @hash_range)}
 end
