@@ -3467,7 +3467,7 @@ defmodule MingaAgent.Providers.Native do
 
   <rules>
   - Read files before editing them and verify changes with appropriate tests.
-  - Use edit_file for one ordered batch per file. Copy expected_revision from a complete read_file result. A rejected batch commits nothing; read again after a stale revision.
+  - Use edit_file for one ordered batch per file. Copy expected_revision from a complete read_file result. An edit with an empty old_text appends new_text at the end of the file. A rejected batch commits nothing; read again after a stale revision.
   - Use write_file with mode=create and expected_revision=absent for new files, or mode=replace and a full read revision for replacements. delete_file also requires a full read revision.
   - Atomicity is one file only. Report each file's outcome separately. Never claim cross-file transactions or bypass revision checks with shell writes.
   - Use the advertised tools for discovery, inspection and changes.

@@ -42,7 +42,9 @@ defmodule Minga.Buffer.FileMutationTest do
           {"one one", [{"one", "ONE"}], {:edit_failed, 1, :ambiguous_match}},
           {"aaa", [{"aa", "b"}], {:edit_failed, 1, :ambiguous_match}},
           {"one two", [{"one", "ONE"}, {"ONE", "new"}], {:edit_failed, 2, :overlapping_edit}},
-          {"one", [{"", "new"}], {:edit_failed, 1, :invalid_edit}},
+          {"one", [{"", ""}], {:edit_failed, 1, :empty_edit}},
+          {"one", [{"", <<255>>}], {:edit_failed, 1, :invalid_text}},
+          {"one", [{"", "two"}, {"one\ntwo", "x"}], {:edit_failed, 2, :overlapping_edit}},
           {"one", [{"one", <<255>>}], {:edit_failed, 1, :invalid_text}},
           {"", [{"one", "new"}], {:edit_failed, 1, :not_found}}
         ] do
@@ -53,6 +55,25 @@ defmodule Minga.Buffer.FileMutationTest do
                  @identity,
                  FileMutation.revision(content, 0, @identity),
                  {:edit, edits}
+               )
+    end
+  end
+
+  test "an empty old text appends on a new line without doubling an existing newline" do
+    for {content, new, expected} <- [
+          {"one", "two", "one\ntwo"},
+          {"one\n", "two", "one\ntwo"},
+          {"one", "\ntwo", "one\ntwo"},
+          {"one\r\n", "two\r\n", "one\r\ntwo\r\n"},
+          {"", "two", "two"}
+        ] do
+      assert {:ok, ^expected} =
+               FileMutation.prepare(
+                 {:ok, content},
+                 0,
+                 @identity,
+                 FileMutation.revision(content, 0, @identity),
+                 {:edit, [{"", new}]}
                )
     end
   end
