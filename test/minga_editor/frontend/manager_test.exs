@@ -104,6 +104,71 @@ defmodule MingaEditor.Frontend.ManagerTest do
       assert :unwritable = Manager.send_commands(name, [])
       assert :unwritable = Manager.send_commands(name, [Protocol.encode_commit_frame(0)])
     end
+
+    test "a frame with no port is refused without retention" do
+      name = unique_name()
+      start_manager(name)
+
+      assert {:refused, :not_ready} = Manager.send_render_commands(name, frame_commands(1, 0, 1))
+      assert {:refused, :not_ready} = Manager.send_commands(name, frame_commands(2, 0, 1))
+      assert Manager.output_pressure(name).total_retained_bytes == 0
+    end
+
+    test "a frame after the transport disconnects is refused without a write" do
+      name = unique_name()
+      parent = self()
+
+      commander = fn _port, batch, [:nosuspend] ->
+        send(parent, {:port_command, batch})
+        true
+      end
+
+      {pid, fake_port} = start_connected(name, port_commander: commander)
+      mark_ready(name, pid, fake_port)
+      send(pid, {fake_port, :eof})
+      refute Manager.ready?(name)
+
+      assert {:refused, :not_ready} = Manager.send_render_commands(name, frame_commands(1, 0, 1))
+      refute_received {:port_command, _batch}
+      assert Manager.output_pressure(name).total_retained_bytes == 0
+    end
+
+    test "a frame before ready is refused without a write or retention" do
+      name = unique_name()
+      parent = self()
+
+      commander = fn _port, batch, [:nosuspend] ->
+        send(parent, {:port_command, batch})
+        true
+      end
+
+      {_pid, _fake_port} = start_connected(name, port_commander: commander)
+      refute Manager.ready?(name)
+
+      assert {:refused, :not_ready} =
+               Manager.send_render_commands(name, frame_commands(1, 0, 1))
+
+      refute_received {:port_command, _batch}
+      pressure = Manager.output_pressure(name)
+      assert pressure.current_frame_seq == nil
+      assert pressure.total_retained_bytes == 0
+    end
+
+    test "a frame under output pressure after ready stays unwritable and is retained" do
+      name = unique_name()
+
+      {pid, fake_port} =
+        start_connected(name,
+          port_commander: fn _port, _batch, [:nosuspend] -> false end,
+          output_retry_ms: 60_000,
+          output_failure_ms: 60_000
+        )
+
+      mark_ready(name, pid, fake_port)
+
+      assert :unwritable = Manager.send_render_commands(name, frame_commands(1, 0, 1))
+      assert Manager.output_pressure(name).current_frame_seq == 1
+    end
   end
 
   describe "send_lifecycle_command/2" do
@@ -296,7 +361,10 @@ defmodule MingaEditor.Frontend.ManagerTest do
 
       later_frame_commands = frame_commands(2, 1, 1)
       later_frame_batch = IO.iodata_to_binary(later_frame_commands)
-      assert :unwritable = Manager.send_render_commands(name, later_frame_commands)
+
+      assert {:refused, :not_ready} =
+               Manager.send_render_commands(name, later_frame_commands)
+
       send(pid, {:retry_frontend_output, old_retry_token})
       _state = :sys.get_state(pid)
 
@@ -350,7 +418,10 @@ defmodule MingaEditor.Frontend.ManagerTest do
 
       later_frame_commands = frame_commands(2, 1, 1)
       later_frame_batch = IO.iodata_to_binary(later_frame_commands)
-      assert :unwritable = Manager.send_render_commands(name, later_frame_commands)
+
+      assert {:refused, :not_ready} =
+               Manager.send_render_commands(name, later_frame_commands)
+
       refute_received {:mismatch_output_attempt, _admitted, ^later_frame_batch}
       refute_received {:mismatch_output_attempt, _admitted, _other_batch}
 

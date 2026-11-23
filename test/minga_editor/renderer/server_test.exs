@@ -1391,6 +1391,94 @@ defmodule MingaEditor.Renderer.ServerTest do
     end
   end
 
+  describe "frontend readiness" do
+    test "a frame refused before ready starts no acknowledgement lease and no recovery" do
+      {manager, _manager_pid, _port} =
+        start_readiness_manager(fn _port, _batch, _opts -> true end)
+
+      renderer = start_readiness_renderer(manager, ack_timeout_ms: 1)
+
+      RendererServer.cast_snapshot(renderer, Submission.full(stub_intent()), 10)
+
+      assert_receive {:readiness_frame, 10, {:refused, :not_ready}, _revision, true},
+                     @async_render_timeout
+
+      refute RendererServer.rendering?(renderer)
+      # A started lease would time out after 1 ms and re-render as recovery.
+      refute_receive {:readiness_frame, _seq, _admission, _revision, _keyframe?}, 100
+      refute_received {:wire_batch, _batch}
+      refute_received {:render_done, _receipt}
+    end
+
+    test "a frame refused after the transport disconnects starts no acknowledgement lease" do
+      {manager, manager_pid, port} = start_readiness_manager(fn _port, _batch, _opts -> true end)
+      send(manager_pid, {port, {:data, ready_packet(80, 24)}})
+      assert Manager.ready?(manager)
+      renderer = start_readiness_renderer(manager, ack_timeout_ms: 1)
+
+      send(manager_pid, {port, :eof})
+      refute Manager.ready?(manager)
+
+      RendererServer.cast_snapshot(renderer, Submission.full(stub_intent()), 10)
+
+      assert_receive {:readiness_frame, 10, {:refused, :not_ready}, _revision, true},
+                     @async_render_timeout
+
+      refute RendererServer.rendering?(renderer)
+      # A started lease would time out after 1 ms and re-render as recovery.
+      refute_receive {:readiness_frame, _seq, _admission, _revision, _keyframe?}, 100
+      refute_received {:wire_batch, _batch}
+    end
+
+    test "a frame left unwritable by output pressure keeps its acknowledgement lease" do
+      {manager, manager_pid, port} =
+        start_readiness_manager(fn _port, _batch, _opts -> false end)
+
+      send(manager_pid, {port, {:data, ready_packet(80, 24)}})
+      assert Manager.ready?(manager)
+      renderer = start_readiness_renderer(manager, ack_timeout_ms: 60_000)
+
+      RendererServer.cast_snapshot(renderer, Submission.full(stub_intent()), 10)
+      assert_receive {:readiness_frame, 10, :unwritable, _revision, true}, @async_render_timeout
+
+      assert {:awaiting_ack, %AckLease{attempt: %FrameAttempt{seq: 10}}, nil} =
+               :sys.get_state(renderer).frame_credit
+
+      assert Manager.output_pressure(manager).current_frame_seq == 10
+    end
+
+    test "the first frame after ready is one keyframe of the current intent" do
+      {manager, manager_pid, port} =
+        start_readiness_manager(fn _port, _batch, _opts -> true end)
+
+      renderer = start_readiness_renderer(manager, ack_timeout_ms: 60_000)
+
+      RendererServer.cast_snapshot(renderer, Submission.full(revised_intent(1)), 10)
+
+      assert_receive {:readiness_frame, 10, {:refused, :not_ready}, 1, true},
+                     @async_render_timeout
+
+      send(manager_pid, {port, {:data, ready_packet(80, 24)}})
+      assert Manager.ready?(manager)
+
+      # The Editor answers `ready` with a connection reset carrying its current intent.
+      :ok = RendererServer.reset_connection(renderer, Submission.full(revised_intent(2)), 20)
+
+      assert_receive {:readiness_frame, seq, :accepted, 2, true}, @async_render_timeout
+      assert_receive {:wire_batch, batch}, @async_render_timeout
+      assert {^seq, 0, generation} = frame_header(batch)
+
+      refute_receive {:readiness_frame, _seq, _admission, _revision, _keyframe?}, 50
+      refute_received {:wire_batch, _batch}
+
+      send(manager_pid, {port, {:data, <<0x0A, generation::32, seq::32>>}})
+      RendererServer.frame_status(renderer, {:frame_applied, generation, seq})
+
+      assert_receive {:render_done, %RenderReceipt{frame_seq: ^seq, keyframe?: true}},
+                     @async_render_timeout
+    end
+  end
+
   describe "resident keyframe recovery" do
     test "connection reset materializes every warm resident row then resumes targeted deltas" do
       {renderer, snapshot, buffer, epoch} = start_warm_resident_renderer(130)
@@ -2109,6 +2197,96 @@ defmodule MingaEditor.Renderer.ServerTest do
       }
     end
   end
+
+  defp start_readiness_manager(commander) do
+    parent = self()
+    manager = unique_process_name(:readiness_manager)
+
+    opener = fn _spec, _opts ->
+      port = Port.open({:spawn, "cat 2>/dev/null"}, [:binary, {:packet, 4}])
+      send(parent, {:readiness_port, port})
+      port
+    end
+
+    recording_commander = fn port, batch, opts ->
+      admitted? = commander.(port, batch, opts)
+      if admitted?, do: send(parent, {:wire_batch, batch})
+      admitted?
+    end
+
+    manager_pid =
+      start_supervised!(
+        {Manager,
+         name: manager,
+         renderer_path: "/nonexistent",
+         port_mode: :connected,
+         port_opener: opener,
+         port_commander: recording_commander,
+         output_retry_ms: 60_000,
+         output_failure_ms: 60_000},
+        id: manager
+      )
+
+    assert_receive {:readiness_port, port}, @async_render_timeout
+    {manager, manager_pid, port}
+  end
+
+  defp start_readiness_renderer(manager, opts) do
+    parent = self()
+
+    start_supervised!(
+      {RendererServer,
+       Keyword.merge(
+         [
+           name: nil,
+           editor_pid: parent,
+           frontend_manager: manager,
+           pipeline: readiness_pipeline(manager, parent),
+           require_ack?: true
+         ],
+         opts
+       )}
+    )
+  end
+
+  # Sends one frame transaction through the real Manager and records the
+  # admission on the pipeline output exactly as the Emit stage does.
+  defp readiness_pipeline(manager, parent) do
+    fn input ->
+      generation = input.caches.recovery_generation
+      frame_seq = input.frame_seq
+
+      base_frame_seq =
+        if input.intent.frame.force_keyframe?,
+          do: 0,
+          else: input.caches.last_acknowledged_frame_seq
+
+      admission =
+        Manager.send_render_commands(
+          manager,
+          connected_frame_commands(frame_seq, base_frame_seq, generation)
+        )
+
+      keyframe? = base_frame_seq == 0
+      send(parent, {:readiness_frame, frame_seq, admission, input.intent.revision, keyframe?})
+
+      caches = %{
+        input.caches
+        | last_emitted_frame_seq: frame_seq,
+          last_frame_keyframe?: keyframe?
+      }
+
+      Input.accept_emit_results(
+        input,
+        caches,
+        input.font_registry,
+        input.message_store,
+        admission
+      )
+    end
+  end
+
+  defp revised_intent(revision), do: %{stub_intent() | revision: revision}
 
   defp connected_frame_commands(frame_seq, base_frame_seq, generation) do
     [

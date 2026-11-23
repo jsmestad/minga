@@ -17,22 +17,28 @@ defmodule MingaEditor.Frontend.Emit do
   @typedoc "Emit context containing only the data emit needs."
   @type ctx :: Context.t()
 
+  @typedoc "Frontend admission of one emitted frame batch."
+  @type frame_admission :: MingaEditor.Frontend.Adapter.frame_admission()
+
   @doc """
   Converts the frame to semantic protocol command binaries and sends them to the frontend port.
 
   Also sends title and window background color when they change
   (side-channel writes). Returns updated caches, the renderer-owned font
-  registry, and the message store for write-back to the Editor process.
+  registry, the message store for write-back to the Editor process, and the
+  frontend's admission of the frame batch. The admission is `nil` when no frame
+  was submitted because encoding failed.
   """
   @spec emit(ComposedFrame.t(), ctx(), Chrome.t() | nil, Caches.t()) ::
-          {Caches.t(), FontRegistry.t(), MingaEditor.UI.Panel.MessageStore.t()}
+          {Caches.t(), FontRegistry.t(), MingaEditor.UI.Panel.MessageStore.t(),
+           frame_admission() | nil}
   def emit(frame, ctx, chrome \\ nil, caches \\ %Caches{}) do
-    {caches, ctx} = emit_semantic(frame, ctx, chrome, caches)
-    {caches, ctx.font_registry, ctx.message_store}
+    {caches, ctx, admission} = emit_semantic(frame, ctx, chrome, caches)
+    {caches, ctx.font_registry, ctx.message_store, admission}
   end
 
   @spec emit_semantic(ComposedFrame.t(), ctx(), Chrome.t() | nil, Caches.t()) ::
-          {Caches.t(), ctx()}
+          {Caches.t(), ctx(), frame_admission() | nil}
   defp emit_semantic(frame, ctx, chrome, caches) do
     {render_model, ctx} =
       Telemetry.span([:minga, :render, :ui_model_build], %{}, fn ->
@@ -81,7 +87,7 @@ defmodule MingaEditor.Frontend.Emit do
       {:error, error} ->
         Minga.Log.warning(:render, "Discarded invalid GUI frame: #{Exception.message(error)}")
 
-        {Caches.reset_frontend_state(caches, caches.recovery_generation), ctx}
+        {Caches.reset_frontend_state(caches, caches.recovery_generation), ctx, nil}
 
       {:ok, encoded_frame} ->
         emit_encoded_frame(
@@ -118,7 +124,7 @@ defmodule MingaEditor.Frontend.Emit do
           non_neg_integer(),
           non_neg_integer(),
           boolean()
-        ) :: {Caches.t(), ctx()}
+        ) :: {Caches.t(), ctx(), frame_admission() | nil}
   defp emit_encoded_frame(
          encoded_frame,
          render_model,
@@ -170,17 +176,17 @@ defmodule MingaEditor.Frontend.Emit do
       %{byte_count: byte_count, input_seq: input_seq, frame_seq: frame_seq, keyframe?: keyframe?},
       fn ->
         port_manager = ctx.intent.frame.port_manager
-        _admission = MingaEditor.Frontend.send_render_commands(port_manager, commands)
+        admission = MingaEditor.Frontend.send_render_commands(port_manager, commands)
         caches = send_title(render_model, port_manager, caches)
         caches = send_window_bg(render_model, port_manager, caches)
-        {send_link_cursor(ctx, port_manager, caches), ctx}
+        {send_link_cursor(ctx, port_manager, caches), ctx, admission}
       end
     )
   rescue
     error in [Minga.Protocol.EncodingError, Minga.Frontend.Adapter.GUI.EncodingError] ->
       Minga.Log.warning(:render, "Discarded invalid GUI frame: #{Exception.message(error)}")
 
-      {Caches.reset_frontend_state(caches, caches.recovery_generation), ctx}
+      {Caches.reset_frontend_state(caches, caches.recovery_generation), ctx, nil}
   end
 
   # Ownership is chrome state, but must precede window content on the wire.

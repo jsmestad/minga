@@ -2,7 +2,7 @@ defmodule MingaEditor.RenderPipeline.Input do
   @moduledoc """
   Renderer-local frame wrapper.
 
-  The accepted Editor-to-Renderer value is `intent`. Materialization attaches only renderer-owned working values beside it: materialized windows, mutable frame-local workspace, composed highlights, caches, font registry, message store, layout, focus tree, and frame sequence.
+  The accepted Editor-to-Renderer value is `intent`. Materialization attaches only renderer-owned working values beside it: materialized windows, mutable frame-local workspace, composed highlights, caches, font registry, message store, layout, focus tree, frame sequence, and the frontend's admission of the emitted frame.
   """
 
   alias MingaEditor.Extension.Sidebar
@@ -40,7 +40,8 @@ defmodule MingaEditor.RenderPipeline.Input do
     :message_store,
     :frame_seq,
     :composed_highlights,
-    prompt: nil
+    prompt: nil,
+    frame_admission: nil
   ]
 
   @type t :: %__MODULE__{
@@ -54,7 +55,8 @@ defmodule MingaEditor.RenderPipeline.Input do
           message_store: MessageStore.t(),
           frame_seq: non_neg_integer() | nil,
           composed_highlights: HighlightCache.highlights(),
-          prompt: MingaEditor.Agent.View.PromptFrame.t() | nil
+          prompt: MingaEditor.Agent.View.PromptFrame.t() | nil,
+          frame_admission: MingaEditor.Frontend.Adapter.frame_admission() | nil
         }
 
   @type workspace :: WorkspaceIntent.t()
@@ -171,14 +173,32 @@ defmodule MingaEditor.RenderPipeline.Input do
   def refresh_focus_tree(%__MODULE__{} = input),
     do: with_focus_tree(input, FocusTree.from_state(input))
 
-  @spec accept_emit_results(t(), Caches.t(), FontRegistry.t(), MessageStore.t()) :: t()
+  @doc """
+  Installs the emit stage's results, including the frontend's admission of the frame.
+
+  `admission` is `nil` when emit submitted no frame.
+  """
+  @spec accept_emit_results(
+          t(),
+          Caches.t(),
+          FontRegistry.t(),
+          MessageStore.t(),
+          MingaEditor.Frontend.Adapter.frame_admission() | nil
+        ) :: t()
   def accept_emit_results(
         %__MODULE__{} = input,
         %Caches{} = caches,
         %FontRegistry{} = font_registry,
-        %MessageStore{} = message_store
+        %MessageStore{} = message_store,
+        admission
       ) do
-    %{input | caches: caches, font_registry: font_registry, message_store: message_store}
+    %{
+      input
+      | caches: caches,
+        font_registry: font_registry,
+        message_store: message_store,
+        frame_admission: admission
+    }
   end
 
   @spec record_prompt(t(), MingaEditor.Agent.View.PromptFrame.t()) :: t()
