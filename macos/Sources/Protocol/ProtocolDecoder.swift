@@ -1498,7 +1498,9 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
                             iconColor: $0.iconColor, flags: $0.flags, label: $0.label,
                             description: $0.description, annotation: $0.annotation,
                             matchPositions: $0.matchPositions,
-                            activationID: $0.activationID
+                            activationID: $0.activationID,
+                            status: $0.status,
+                            statusTone: Wire.PickerStatusTone(rawValue: $0.statusTone.rawValue) ?? .absent
                         )
                     }
 

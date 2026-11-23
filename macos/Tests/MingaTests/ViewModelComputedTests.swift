@@ -102,7 +102,7 @@ struct PickerItemComputedTests {
     func iconPlainLabel() {
         let item = PickerItem(id: 0, iconColor: 0, label: "editor.ex",
                              description: "", annotation: "",
-                             matchPositions: [], isTwoLine: false, isMarked: false)
+                             matchPositions: [], isMarked: false)
         #expect(item.hasLeadingIcon == false)
         #expect(item.icon == "")
     }
@@ -111,7 +111,7 @@ struct PickerItemComputedTests {
     func iconEmpty() {
         let item = PickerItem(id: 0, iconColor: 0, label: "",
                              description: "", annotation: "",
-                             matchPositions: [], isTwoLine: false, isMarked: false)
+                             matchPositions: [], isMarked: false)
         #expect(item.icon == "")
     }
 
@@ -119,7 +119,7 @@ struct PickerItemComputedTests {
     func iconNerdFont() {
         let item = PickerItem(id: 0, iconColor: 0, label: "\u{F0256}lib",
                              description: "", annotation: "",
-                             matchPositions: [], isTwoLine: false, isMarked: false)
+                             matchPositions: [], isMarked: false)
         #expect(item.hasLeadingIcon == true)
         #expect(item.icon == "\u{F0256}")
     }
@@ -128,7 +128,7 @@ struct PickerItemComputedTests {
     func displayLabelPlainText() {
         let item = PickerItem(id: 0, iconColor: 0, label: "editor.ex",
                              description: "", annotation: "",
-                             matchPositions: [], isTwoLine: false, isMarked: false)
+                             matchPositions: [], isMarked: false)
         #expect(item.displayLabel == "editor.ex")
     }
 
@@ -136,7 +136,7 @@ struct PickerItemComputedTests {
     func displayLabelColoredPlainText() {
         let item = PickerItem(id: 0, iconColor: 0x51AFEF, label: "Workspace",
                              description: "", annotation: "",
-                             matchPositions: [], isTwoLine: false, isMarked: false)
+                             matchPositions: [], isMarked: false)
         #expect(item.hasLeadingIcon == false)
         #expect(item.displayLabel == "Workspace")
     }
@@ -145,7 +145,7 @@ struct PickerItemComputedTests {
     func displayLabelWithIconAndSpacer() {
         let item = PickerItem(id: 0, iconColor: 0x51AFEF, label: "\u{F024B} lib",
                              description: "", annotation: "",
-                             matchPositions: [], isTwoLine: false, isMarked: false)
+                             matchPositions: [], isMarked: false)
         #expect(item.displayLabel == "lib")
     }
 
@@ -153,7 +153,7 @@ struct PickerItemComputedTests {
     func displayLabelSingleChar() {
         let item = PickerItem(id: 0, iconColor: 0, label: "x",
                              description: "", annotation: "",
-                             matchPositions: [], isTwoLine: false, isMarked: false)
+                             matchPositions: [], isMarked: false)
         #expect(item.displayLabel == "x")
     }
 
@@ -161,7 +161,7 @@ struct PickerItemComputedTests {
     func matchPositionPlainLabel() {
         let item = PickerItem(id: 0, iconColor: 0, label: "editor.ex",
                              description: "", annotation: "",
-                             matchPositions: [0, 1, 4], isTwoLine: false, isMarked: false)
+                             matchPositions: [0, 1, 4], isMarked: false)
         #expect(item.displayMatchPositions == Set([0, 1, 4]))
     }
 
@@ -171,7 +171,7 @@ struct PickerItemComputedTests {
         // Match positions in the removed icon/spacer prefix are filtered out.
         let item = PickerItem(id: 0, iconColor: 0x51AFEF, label: "\u{F024B} lib",
                              description: "", annotation: "",
-                             matchPositions: [0, 2, 4], isTwoLine: false, isMarked: false)
+                             matchPositions: [0, 2, 4], isMarked: false)
         #expect(item.displayMatchPositions == Set([0, 2]))
     }
 
@@ -179,7 +179,7 @@ struct PickerItemComputedTests {
     func matchPositionEmpty() {
         let item = PickerItem(id: 0, iconColor: 0, label: "test",
                              description: "", annotation: "",
-                             matchPositions: [], isTwoLine: false, isMarked: false)
+                             matchPositions: [], isMarked: false)
         #expect(item.displayMatchPositions.isEmpty)
     }
 
@@ -187,7 +187,7 @@ struct PickerItemComputedTests {
     func matchPositionOutOfRange() {
         let item = PickerItem(id: 0, iconColor: 0, label: "ab",
                              description: "", annotation: "",
-                             matchPositions: [5], isTwoLine: false, isMarked: false)
+                             matchPositions: [5], isMarked: false)
         #expect(item.displayMatchPositions.isEmpty)
     }
 }
