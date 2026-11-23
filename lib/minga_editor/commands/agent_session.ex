@@ -11,6 +11,7 @@ defmodule MingaEditor.Commands.AgentSession do
   alias MingaAgent.Session
   alias Minga.Buffer
   alias MingaEditor.Agent.CatalogStartup
+  alias MingaEditor.Agent.SessionStart
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.UIState.Panel
   alias MingaEditor.AgentLifecycle
@@ -105,34 +106,42 @@ defmodule MingaEditor.Commands.AgentSession do
     MingaEditor.Shell.Traditional.Workflow.install_agent_cache_reset(state)
   end
 
-  @doc "Starts a new agent session and subscribes to its events."
+  @doc """
+  Shows the active Agent tab and composer in the `:starting` state and starts its session without waiting.
+
+  The tab is bound to an agent workspace first, so the start request knows where its session belongs even if the user switches away. A second call while that workspace's start is in flight does nothing. Options: `:session_start_hook_enabled?`, `:recover_interrupted_work?`, and `:follow_up`, work that runs once the session is bound (see `MingaEditor.Agent.SessionStart`).
+  """
   @spec start_agent_session(state()) :: state()
   @spec start_agent_session(state(), keyword()) :: state()
   def start_agent_session(state, opts \\ []) do
-    state
-    |> TraditionalWorkflow.install_agent_ui(
-      UIState.transition_chat(state.workspace.agent_ui, :starting)
-    )
-    |> CatalogStartup.continue(
-      {:start, Keyword.get(opts, :session_start_hook_enabled?, true),
-       Keyword.get(opts, :recover_interrupted_work?, true)}
-    )
+    {state, workspace_id} = starting_workspace(state)
+
+    if SessionStart.pending?(state, workspace_id) do
+      state
+    else
+      state
+      |> TraditionalWorkflow.install_agent_ui(
+        UIState.transition_chat(state.workspace.agent_ui, :starting)
+      )
+      |> CatalogStartup.continue(
+        {:start, Keyword.get(opts, :session_start_hook_enabled?, true),
+         Keyword.get(opts, :recover_interrupted_work?, true), Keyword.get(opts, :follow_up)}
+      )
+    end
   end
 
-  @doc false
-  @spec start_catalog_ready(state(), boolean(), boolean()) :: state()
-  def start_catalog_ready(state, hooks?, recover?) do
+  @doc "Sends the start request for the active Agent tab once the model catalog is ready."
+  @spec start_catalog_ready(state(), boolean(), boolean(), SessionStart.follow_up()) :: state()
+  def start_catalog_ready(state, hooks?, recover?, follow_up) do
     Minga.Telemetry.span([:minga, :agent, :start_agent_session], %{}, fn ->
-      do_start_agent_session(state,
-        session_start_hook_enabled?: hooks?,
-        recover_interrupted_work?: recover?
-      )
+      do_start_agent_session(state, hooks?, recover?, follow_up)
     end)
   end
 
-  @type catalog_start_result :: {:ready, boolean(), boolean()} | {:failed, String.t()}
+  @type catalog_start_result ::
+          {:ready, boolean(), boolean(), SessionStart.follow_up()} | {:failed, String.t()}
 
-  @doc "Finishes a deferred start for the exact inactive Agent tab without changing focus."
+  @doc "Starts a deferred session for the exact inactive Agent tab without changing focus."
   @spec complete_inactive_start(
           state(),
           {Tab.id() | nil, Tab.group_id() | nil, pid() | nil},
@@ -144,42 +153,37 @@ defmodule MingaEditor.Commands.AgentSession do
         result
       )
       when is_integer(tab_id) and is_integer(workspace_id) and workspace_id > 0 do
+    if SessionStart.pending?(state, workspace_id),
+      do: :stale,
+      else: complete_idle_inactive_start(state, tabs, tab_id, workspace_id, result)
+  end
+
+  def complete_inactive_start(_state, _target, _result), do: :stale
+
+  @spec complete_idle_inactive_start(
+          state(),
+          TabBar.t(),
+          Tab.id(),
+          pos_integer(),
+          catalog_start_result()
+        ) :: {:ok, state()} | :stale
+  defp complete_idle_inactive_start(state, tabs, tab_id, workspace_id, result) do
     with %Tab{kind: :agent, group_id: ^workspace_id, payload: %Agent{session: nil}} <-
            TabBar.get(tabs, tab_id),
          %Workspace{payload: %WorkspaceAgent{session: nil, remote_session: nil}} = workspace <-
            TabBar.get_workspace(tabs, workspace_id),
          {location, %UIState{chat_lifecycle: :starting} = ui} <-
            startup_ui(state, tabs, workspace) do
-      {workspace, ui} = finish_workspace_start(state, workspace, ui, result)
+      ui = prepare_workspace_start(state, ui, result)
 
-      case location do
-        :current ->
-          workspace = Workspace.set_agent_ui(workspace, nil)
-
-          state =
-            state
-            |> MingaEditor.WorkspaceWorkflow.install_tab_bar(
-              TabBar.accept_workspace(tabs, workspace)
-            )
-            |> TraditionalWorkflow.install_agent_ui(ui)
-
-          {:ok, state}
-
-        :stored ->
-          workspace = Workspace.set_agent_ui(workspace, ui)
-
-          {:ok,
-           MingaEditor.WorkspaceWorkflow.install_tab_bar(
-             state,
-             TabBar.accept_workspace(tabs, workspace)
-           )}
-      end
+      {:ok,
+       state
+       |> install_workspace_start_ui(tabs, workspace, location, ui)
+       |> request_workspace_start(workspace, ui, result)}
     else
       _stale -> :stale
     end
   end
-
-  def complete_inactive_start(_state, _target, _result), do: :stale
 
   @spec startup_ui(state(), TabBar.t(), Workspace.agent()) ::
           {:current | :stored, UIState.t() | nil}
@@ -189,34 +193,53 @@ defmodule MingaEditor.Commands.AgentSession do
       else: {:stored, stored}
   end
 
-  @spec finish_workspace_start(state(), Workspace.agent(), UIState.t(), catalog_start_result()) ::
-          {Workspace.agent(), UIState.t()}
-  defp finish_workspace_start(state, workspace, ui, {:ready, hooks?, recover?}) do
-    root = workspace.project_root
-    {project_view, created?} = session_project_view(workspace, root)
-    panel = Panel.ensure_configured_model(ui.panel, state.interaction.options_server)
-    ui = UIState.replace_panel(ui, panel)
-    opts = session_start_opts(state, panel, project_view, root, hooks?, recover?)
-
-    case start_and_subscribe(state, opts) do
-      {:ok, pid} ->
-        workspace =
-          workspace |> Workspace.set_session(pid) |> Workspace.set_project_view(project_view)
-
-        {workspace, UIState.transition_chat(ui, {:conversation, pid})}
-
-      {:error, reason} ->
-        maybe_discard_project_view(project_view, created?)
-        finish_workspace_start(state, workspace, ui, {:failed, format_session_error(reason)})
-    end
+  @spec prepare_workspace_start(state(), UIState.t(), catalog_start_result()) :: UIState.t()
+  defp prepare_workspace_start(state, ui, {:ready, _hooks?, _recover?, _follow_up}) do
+    UIState.replace_panel(
+      ui,
+      Panel.ensure_configured_model(ui.panel, state.interaction.options_server)
+    )
   end
 
-  defp finish_workspace_start(_state, workspace, ui, {:failed, reason}) do
+  defp prepare_workspace_start(_state, ui, {:failed, reason}) do
     Minga.Log.error(:agent, "[Agent] #{reason}")
-    {workspace, UIState.transition_chat(ui, {:failed, reason})}
+    UIState.transition_chat(ui, {:failed, reason})
   end
 
-  @doc false
+  @spec install_workspace_start_ui(
+          state(),
+          TabBar.t(),
+          Workspace.agent(),
+          :current | :stored,
+          UIState.t()
+        ) :: state()
+  defp install_workspace_start_ui(state, tabs, workspace, :current, ui) do
+    state
+    |> MingaEditor.WorkspaceWorkflow.install_tab_bar(
+      TabBar.accept_workspace(tabs, Workspace.set_agent_ui(workspace, nil))
+    )
+    |> TraditionalWorkflow.install_agent_ui(ui)
+  end
+
+  defp install_workspace_start_ui(state, tabs, workspace, :stored, ui) do
+    MingaEditor.WorkspaceWorkflow.install_tab_bar(
+      state,
+      TabBar.accept_workspace(tabs, Workspace.set_agent_ui(workspace, ui))
+    )
+  end
+
+  @spec request_workspace_start(state(), Workspace.agent(), UIState.t(), catalog_start_result()) ::
+          state()
+  defp request_workspace_start(state, workspace, ui, {:ready, hooks?, recover?, follow_up}) do
+    root = workspace.project_root
+    project_view = session_project_view(workspace, root)
+    opts = session_start_opts(state, ui.panel, elem(project_view, 0), root, hooks?, recover?)
+    SessionStart.request(state, workspace.id, opts, project_view, follow_up)
+  end
+
+  defp request_workspace_start(state, _workspace, _ui, {:failed, _reason}), do: state
+
+  @doc "Shows a startup failure in the active Agent tab and keeps its draft."
   @spec startup_failed(state(), String.t()) :: state()
   def startup_failed(state, message) when is_binary(message) do
     Minga.Log.error(:agent, "[Agent] #{message}")
@@ -228,8 +251,12 @@ defmodule MingaEditor.Commands.AgentSession do
     |> TraditionalWorkflow.install_agent_error(message)
   end
 
-  @spec do_start_agent_session(state(), keyword()) :: state()
-  defp do_start_agent_session(state, opts) do
+  # The panel takes its model from configuration only (#3641). With no
+  # configured model it reads "Resolving model…" until the session's
+  # connection reports the model the session resolved.
+  @spec do_start_agent_session(state(), boolean(), boolean(), SessionStart.follow_up()) ::
+          state()
+  defp do_start_agent_session(state, hooks?, recover?, follow_up) do
     panel =
       Minga.Telemetry.span([:minga, :agent, :ensure_configured_model], %{}, fn ->
         Panel.ensure_configured_model(
@@ -238,33 +265,48 @@ defmodule MingaEditor.Commands.AgentSession do
         )
       end)
 
-    state =
-      MingaEditor.Shell.Traditional.Workflow.install_agent_panel(
-        state,
-        (fn _panel -> panel end).(state.workspace.agent_ui.panel)
-      )
+    state = TraditionalWorkflow.install_agent_panel(state, panel)
 
-    {project_view, created_project_view?} = session_project_view(state)
+    case starting_workspace(state) do
+      {state, workspace_id} when is_integer(workspace_id) and workspace_id > 0 ->
+        {project_view, _created?} = view = session_project_view(state)
+        root = state.workspace.file_tree.project_root
+        opts = session_start_opts(state, panel, project_view, root, hooks?, recover?)
+        SessionStart.request(state, workspace_id, opts, view, follow_up)
 
-    session_opts =
-      session_start_opts(
-        state,
-        panel,
-        project_view,
-        state.workspace.file_tree.project_root,
-        Keyword.get(opts, :session_start_hook_enabled?, true),
-        Keyword.get(opts, :recover_interrupted_work?, true)
-      )
+      {state, _no_agent_workspace} ->
+        startup_failed(state, "No Agent workspace to start the session in.")
+    end
+  end
 
-    case start_and_subscribe(state, session_opts) do
-      {:ok, pid} ->
-        state
-        |> ensure_agent_workspace(pid, project_view)
-        |> AgentLifecycle.rebuild_agent_from_session(pid)
+  # The agent workspace the start binds to, created when needed: the active
+  # Agent workspace, else the sessionless Agent tab's workspace when the start
+  # runs in the background. The request is sent with this identity, so the
+  # reply binds there even if the user has moved elsewhere.
+  @spec starting_workspace(state()) :: {state(), non_neg_integer() | nil}
+  defp starting_workspace(%{shell_runtime: %{state: %{tab_bar: %TabBar{} = tabs}}} = state) do
+    case {TabBar.active_workspace(tabs), background_agent_workspace(tabs)} do
+      {%Workspace{id: id, kind: :agent, payload: %WorkspaceAgent{remote_session: nil}}, _} ->
+        {state, id}
 
-      {:error, reason} ->
-        maybe_discard_project_view(project_view, created_project_view?)
-        startup_failed(state, format_session_error(reason))
+      {_active, id} when is_integer(id) ->
+        {state, id}
+
+      {_active, nil} ->
+        create_agent_workspace(state, tabs)
+    end
+  end
+
+  defp starting_workspace(state), do: {state, nil}
+
+  @spec background_agent_workspace(TabBar.t()) :: pos_integer() | nil
+  defp background_agent_workspace(tabs) do
+    with %Tab{group_id: id} when id > 0 <- TabBar.find_sessionless_agent(tabs),
+         %Workspace{kind: :agent, payload: %WorkspaceAgent{session: nil}} <-
+           TabBar.get_workspace(tabs, id) do
+      id
+    else
+      _none -> nil
     end
   end
 
@@ -504,47 +546,6 @@ defmodule MingaEditor.Commands.AgentSession do
   def format_session_error(reason), do: "Failed to start session: #{inspect(reason)}"
 
   # ── Private helpers ────────────────────────────────────────────────────────
-
-  @spec start_and_subscribe(state(), keyword()) :: {:ok, pid()} | {:error, term()}
-  defp start_and_subscribe(state, opts) do
-    start_result =
-      Minga.Telemetry.span([:minga, :agent, :session_manager_start], %{}, fn ->
-        MingaAgent.SessionManager.start_session(opts)
-      end)
-
-    case start_result do
-      {:ok, _session_id, pid} ->
-        try do
-          Minga.Telemetry.span([:minga, :agent, :session_subscribe], %{}, fn ->
-            subscribe_active_session(state, pid)
-          end)
-
-          {:ok, pid}
-        catch
-          :exit, reason ->
-            MingaAgent.SessionManager.stop_session_by_pid(pid)
-            {:error, reason}
-        end
-
-      {:error, reason} ->
-        {:error, reason}
-    end
-  end
-
-  # Routes the foreground session's events through the agent stream coalescer
-  # (#2289) so token deltas are batched before reaching the Editor mailbox.
-  # Falls back to a direct Editor subscription when the coalescer is absent.
-  @spec subscribe_active_session(state(), pid()) :: :ok | {:error, term()}
-  defp subscribe_active_session(state, pid) do
-    case state.agent_connection.agent_ingest do
-      ingest when is_pid(ingest) ->
-        MingaEditor.Agent.Ingest.subscribe_session(ingest, pid, questions?: true)
-
-      _ ->
-        # minga:allow-blocking — Editor, only when Ingest is down at session start
-        Session.subscribe(pid, self(), questions?: true)
-    end
-  end
 
   @spec start_remote_session_on_node(state(), String.t(), node()) :: state()
   defp start_remote_session_on_node(state, server_name, remote_node) do
@@ -874,28 +875,6 @@ defmodule MingaEditor.Commands.AgentSession do
     Map.get(mapping, String.downcase(lang))
   end
 
-  # Creates an agent workspace when a session starts, and assigns
-  # the current agent tab to it. No-op if the session already has
-  # a workspace (e.g., session restart).
-  @spec ensure_agent_workspace(state(), pid(), ProjectView.t() | nil) :: state()
-  defp ensure_agent_workspace(
-         %{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state,
-         session_pid,
-         project_view
-       ) do
-    case TabBar.find_workspace_by_session(tb, session_pid) do
-      %Workspace{} = workspace ->
-        maybe_update_workspace_project_view(state, workspace, project_view)
-
-      nil ->
-        state
-        |> bind_session_to_agent_workspace(tb, session_pid)
-        |> maybe_update_bound_workspace_project_view(session_pid, project_view)
-    end
-  end
-
-  defp ensure_agent_workspace(state, _session_pid, _project_view), do: state
-
   @spec provider_opts(state(), Panel.t(), ProjectView.t() | nil, String.t() | nil) :: keyword()
   defp provider_opts(state, panel, project_view, root) do
     state.agent_connection.agent_provider_opts
@@ -927,63 +906,12 @@ defmodule MingaEditor.Commands.AgentSession do
 
   defp maybe_put_provider_module(opts, _provider_module), do: opts
 
-  @spec bind_session_to_agent_workspace(state(), TabBar.t(), pid()) :: state()
-  defp bind_session_to_agent_workspace(state, %TabBar{} = tb, session_pid) do
-    case reusable_agent_workspace(tb, session_pid) do
-      %Workspace{id: workspace_id} ->
-        workspace =
-          tb
-          |> TabBar.get_workspace(workspace_id)
-          |> Workspace.set_session(session_pid)
-
-        tb = TabBar.accept_workspace(tb, workspace)
-
-        tb =
-          case TabBar.active_workspace_id(tb) do
-            id when id == workspace_id -> TabBar.set_workspace_agent_ui(tb, workspace_id, nil)
-            _workspace_id -> tb
-          end
-
-        MingaEditor.WorkspaceWorkflow.install_tab_bar(state, tb)
-
-      nil ->
-        create_agent_workspace(state, tb, session_pid)
-    end
-  end
-
-  @spec reusable_agent_workspace(TabBar.t(), pid()) :: Workspace.t() | nil
-  defp reusable_agent_workspace(%TabBar{} = tb, session_pid) do
-    workspace_for_session_tab(tb, session_pid) || reusable_active_agent_workspace(tb)
-  end
-
-  @spec workspace_for_session_tab(TabBar.t(), pid()) :: Workspace.t() | nil
-  defp workspace_for_session_tab(%TabBar{} = tb, session_pid) do
-    case TabBar.find_by_session(tb, session_pid) do
-      %Tab{kind: :agent, group_id: workspace_id} when workspace_id > 0 ->
-        case TabBar.get_workspace(tb, workspace_id) do
-          %Workspace{kind: :agent} = workspace -> workspace
-          _other -> nil
-        end
-
-      _other ->
-        nil
-    end
-  end
-
-  @spec reusable_active_agent_workspace(TabBar.t()) :: Workspace.t() | nil
-  defp reusable_active_agent_workspace(%TabBar{} = tb) do
-    case TabBar.active_workspace(tb) do
-      %Workspace{kind: :agent} = workspace -> workspace
-      _workspace -> nil
-    end
-  end
-
-  @spec create_agent_workspace(state(), TabBar.t(), pid()) :: state()
-  defp create_agent_workspace(state, %TabBar{} = tb, session_pid) do
-    {tb, ws} = TabBar.add_workspace(tb, "Agent", session_pid)
+  @spec create_agent_workspace(state(), TabBar.t()) :: {state(), pos_integer()}
+  defp create_agent_workspace(state, %TabBar{} = tb) do
+    {tb, ws} = TabBar.add_workspace(tb, "Agent")
 
     tb =
-      case TabBar.find_by_session(tb, session_pid) || TabBar.find_sessionless_agent(tb) do
+      case TabBar.find_sessionless_agent(tb) do
         %Tab{id: tab_id} = tab ->
           tb
           |> TabBar.move_tab_to_workspace(tab_id, ws.id)
@@ -1002,26 +930,8 @@ defmodule MingaEditor.Commands.AgentSession do
         _workspace_id -> tb
       end
 
-    MingaEditor.WorkspaceWorkflow.install_tab_bar(state, tb)
+    {MingaEditor.WorkspaceWorkflow.install_tab_bar(state, tb), ws.id}
   end
-
-  @spec maybe_update_bound_workspace_project_view(state(), pid(), ProjectView.t() | nil) ::
-          state()
-  defp maybe_update_bound_workspace_project_view(
-         %{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state,
-         session_pid,
-         project_view
-       ) do
-    case TabBar.find_workspace_by_session(tb, session_pid) do
-      %Workspace{} = workspace ->
-        maybe_update_workspace_project_view(state, workspace, project_view)
-
-      nil ->
-        state
-    end
-  end
-
-  defp maybe_update_bound_workspace_project_view(state, _session_pid, _project_view), do: state
 
   @spec workspace_project_view(Workspace.t()) :: ProjectView.t() | nil
   defp workspace_project_view(%Workspace{
@@ -1031,17 +941,10 @@ defmodule MingaEditor.Commands.AgentSession do
 
   defp workspace_project_view(%Workspace{}), do: nil
 
-  @spec workspace_session(Workspace.t()) :: pid() | nil
-  defp workspace_session(%Workspace{payload: %WorkspaceAgent{session: session}}), do: session
-  defp workspace_session(%Workspace{}), do: nil
-
   @spec session_project_view(state()) :: {ProjectView.t() | nil, boolean()}
   defp session_project_view(%{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state) do
     session_project_view(TabBar.active_workspace(tb), state.workspace.file_tree.project_root)
   end
-
-  defp session_project_view(state),
-    do: project_view_from_root(state.workspace.file_tree.project_root)
 
   @spec session_project_view(Workspace.t() | nil, String.t() | nil) ::
           {ProjectView.t() | nil, boolean()}
@@ -1070,72 +973,5 @@ defmodule MingaEditor.Commands.AgentSession do
       {:ok, project_view} -> {project_view, true}
       {:error, _reason} -> {nil, false}
     end
-  end
-
-  @spec maybe_discard_project_view(ProjectView.t() | nil, boolean()) :: :ok
-  defp maybe_discard_project_view(%ProjectView{} = project_view, true) do
-    ProjectView.discard(project_view)
-  catch
-    :exit, _ -> :ok
-  end
-
-  defp maybe_discard_project_view(_project_view, _created?), do: :ok
-
-  @spec maybe_update_workspace_project_view(state(), Workspace.t(), ProjectView.t() | nil) ::
-          state()
-  defp maybe_update_workspace_project_view(state, %Workspace{} = workspace, project_view) do
-    case maybe_refresh_provider_project_view(workspace_session(workspace), project_view) do
-      :ok ->
-        update_workspace_project_view(state, workspace.id, project_view)
-
-      {:error, reason} ->
-        Minga.API.message("Agent editable view was not changed: #{inspect(reason)}")
-        state
-    end
-  end
-
-  @spec update_workspace_project_view(state(), non_neg_integer(), ProjectView.t() | nil) ::
-          state()
-  defp update_workspace_project_view(
-         %{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state,
-         workspace_id,
-         project_view
-       ) do
-    tb = TabBar.set_workspace_project_view(tb, workspace_id, project_view)
-
-    shell_state =
-      MingaEditor.Shell.Traditional.State.install_tab_bar(
-        MingaEditor.Shell.Runtime.state(state.shell_runtime),
-        tb
-      )
-
-    %{
-      state
-      | shell_runtime:
-          MingaEditor.Shell.Runtime.install_traditional_state(state.shell_runtime, shell_state)
-    }
-  end
-
-  defp update_workspace_project_view(state, _workspace_id, _project_view), do: state
-
-  @spec maybe_refresh_provider_project_view(pid() | nil, ProjectView.t() | nil) ::
-          :ok | {:error, term()}
-  defp maybe_refresh_provider_project_view(session, project_view) when is_pid(session) do
-    Minga.Telemetry.span([:minga, :agent, :provider_project_view_refresh], %{}, fn ->
-      refresh_provider_project_view(session, project_view)
-    end)
-  end
-
-  defp maybe_refresh_provider_project_view(_session, _project_view), do: :ok
-
-  @spec refresh_provider_project_view(pid(), ProjectView.t() | nil) :: :ok | {:error, term()}
-  defp refresh_provider_project_view(session, project_view) do
-    # minga:allow-blocking — Editor, once per agent workspace setup to refresh the provider project view
-    case Session.get_provider(session) do
-      nil -> :ok
-      provider -> MingaAgent.Providers.Native.refresh_project_view(provider, project_view)
-    end
-  catch
-    :exit, reason -> {:error, {:provider_unavailable, reason}}
   end
 end

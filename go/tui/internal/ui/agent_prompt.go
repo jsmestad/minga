@@ -240,8 +240,11 @@ func agentTurnControls(chat protocol.AgentChat, width int) [4]agentTurnControl {
 	}
 	draft := chat.PromptPresentation != 0 && chat.Prompt != ""
 	queue := active && draft && chat.QueueTarget.Sequence != 0
+	// Send waits for a live conversation: while the session starts, the draft
+	// is kept and the starting notice explains why Send is unavailable.
+	sendable := draft && !active && chat.Lifecycle == protocol.AgentChatConversation
 	return [4]agentTurnControl{
-		{labels[0], draft && !active},
+		{labels[0], sendable},
 		{labels[1], queue},
 		{labels[2], queue},
 		{labels[3], active && chat.StopTarget.SessionID != ""},

@@ -167,14 +167,15 @@ defmodule MingaEditor.Commands.InlineAskTest do
 
     state =
       InlineAskCommand.promote(state, ask,
-        session_starter: &fake_start_agent_session/1,
-        seeder: fn seed_state, seed_ask ->
-          send(parent, {:seeded, seed_ask.prompt, InlineAsk.response(seed_ask)})
-          seed_state
+        session_starter: fn start_state, follow_up ->
+          send(parent, {:start_follow_up, follow_up})
+          fake_start_agent_session(start_state)
         end
       )
 
-    assert_receive {:seeded, "What is this?", "It authenticates users."}
+    assert_receive {:start_follow_up,
+                    {:seed, [{:user, "What is this?"}, {:assistant, "It authenticates users."}]}}
+
     assert active_ask(state, buffer) == nil
     assert %EditorState{shell_runtime: %Runtime{state: %{tab_bar: tb}}} = state
     assert %{kind: :agent} = TabBar.active(tb)

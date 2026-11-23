@@ -485,7 +485,11 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
       | agent_connection: MingaEditor.State.AgentConnection.new(Minga.Test.StubProvider)
     }
 
-    state = AgentSession.restart_session(state, "Restarting agent")
+    state =
+      state
+      |> AgentSession.restart_session("Restarting agent")
+      |> Minga.Test.AgentSessionStart.settle()
+
     new_session = MingaEditor.Shell.Runtime.active_session(state.shell_runtime)
     on_exit(fn -> stop_session(new_session) end)
 
@@ -522,7 +526,11 @@ defmodule MingaEditor.State.AgentWorkspaceLifecycleTest do
     assert TabBar.active(state.shell_runtime.state.tab_bar).kind == :file
     assert TabBar.active_workspace_id(state.shell_runtime.state.tab_bar) == workspace_id
 
-    state = AgentSession.restart_session(state, "Restarting agent")
+    state =
+      state
+      |> AgentSession.restart_session("Restarting agent")
+      |> Minga.Test.AgentSessionStart.settle()
+
     new_session = MingaEditor.Shell.Runtime.active_session(state.shell_runtime)
     on_exit(fn -> stop_session(new_session) end)
 

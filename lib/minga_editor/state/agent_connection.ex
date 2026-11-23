@@ -2,13 +2,15 @@ defmodule MingaEditor.State.AgentConnection do
   @moduledoc """
   Agent provider configuration and live editor ingest connection.
 
-  Provider configuration is immutable after startup; the ingest process may be
-  replaced as the editor's supervised agent integration restarts. `route_usage`
+  Provider configuration and the session manager that starts local sessions are
+  immutable after startup; the ingest process may be replaced as the editor's
+  supervised agent integration restarts. `route_usage`
   holds the plan usage contributed model routes last reported.
   """
 
   alias MingaAgent.InferenceRoute.StatusChangedEvent
   alias MingaEditor.Agent.Arrival
+  alias MingaEditor.Agent.SessionStart
   alias MingaEditor.State.RouteUsage
 
   @type t :: %__MODULE__{
@@ -17,6 +19,8 @@ defmodule MingaEditor.State.AgentConnection do
           agent_provider_opts: keyword(),
           question_receipts: %{pid() => binary()},
           arrival: Arrival.t() | nil,
+          session_manager: GenServer.server(),
+          session_starts: %{reference() => SessionStart.t()},
           route_usage: RouteUsage.t()
         }
 
@@ -26,6 +30,8 @@ defmodule MingaEditor.State.AgentConnection do
             agent_provider_opts: [],
             question_receipts: %{},
             arrival: nil,
+            session_manager: MingaAgent.SessionManager,
+            session_starts: %{},
             route_usage: %RouteUsage{}
 
   @doc "Creates agent connection state from startup provider configuration."
@@ -58,6 +64,16 @@ defmodule MingaEditor.State.AgentConnection do
   @doc "Keeps the active tab's outstanding local Session request in the owning Editor."
   @spec install_arrival(t(), Arrival.t() | nil) :: t()
   def install_arrival(%__MODULE__{} = connection, arrival), do: %{connection | arrival: arrival}
+
+  @doc "Keeps a local Session start request the Editor sent and has not finished."
+  @spec track_session_start(t(), SessionStart.t()) :: t()
+  def track_session_start(%__MODULE__{} = connection, %SessionStart{token: token} = start),
+    do: %{connection | session_starts: Map.put(connection.session_starts, token, start)}
+
+  @doc "Forgets a finished local Session start request."
+  @spec finish_session_start(t(), reference()) :: t()
+  def finish_session_start(%__MODULE__{} = connection, token) when is_reference(token),
+    do: %{connection | session_starts: Map.delete(connection.session_starts, token)}
 
   @doc "Records a contributed route's reported status for the modeline."
   @spec record_route_status(t(), StatusChangedEvent.t()) :: t()

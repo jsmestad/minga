@@ -110,3 +110,14 @@ func TestApprovalWaitingStatusIsStaticAndStoppable(t *testing.T) {
 		t.Fatalf("approval badge is not static and truthful: %q", ansi.Strip(second))
 	}
 }
+
+func TestStartingAgentKeepsDraftButDisablesSend(t *testing.T) {
+	chat := protocol.AgentChat{Visible: true, Lifecycle: protocol.AgentChatStarting, Prompt: "typed while starting", PromptPresentation: 1}
+	if agentTurnControls(chat, 80)[0].enabled {
+		t.Fatal("Send must stay disabled while the Agent session starts")
+	}
+	chat.Lifecycle = protocol.AgentChatConversation
+	if !agentTurnControls(chat, 80)[0].enabled {
+		t.Fatal("Send must enable once the conversation is live")
+	}
+}

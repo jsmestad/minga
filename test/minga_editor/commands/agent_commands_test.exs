@@ -18,6 +18,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
   alias MingaAgent.Test.ModelSelectionFixture
   alias Minga.Editing.Scroll
   alias MingaEditor.Agent.CatalogStartup
+  alias Minga.Test.AgentSessionStart
   alias MingaEditor.Agent.Ingest
   alias Minga.Test.TranscriptFixture
   alias MingaEditor.Agent.UIState
@@ -1183,7 +1184,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
       state = source_workspace_state()
       source_workspace = TabBar.get_workspace(state.shell_runtime.state.tab_bar, 0)
 
-      new_state = AgentCommands.new_agent_session(state)
+      new_state = state |> AgentCommands.new_agent_session() |> AgentSessionStart.settle()
       tab_bar = new_state.shell_runtime.state.tab_bar
       active_workspace = TabBar.active_workspace(tab_bar)
 
@@ -1234,7 +1235,9 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
         |> install_tab_bar(tab_bar)
         |> with_agent_ingest()
 
-      state_a = MingaEditor.Commands.execute(state, :agent_new_session)
+      state_a =
+        state |> MingaEditor.Commands.execute(:agent_new_session) |> AgentSessionStart.settle()
+
       tab_a = Runtime.active_tab(state_a.shell_runtime)
       session_a = Runtime.active_session(state_a.shell_runtime)
       prompt_a = state_a.workspace.agent_ui.panel.prompt_buffer
@@ -1270,7 +1273,12 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
                "keyboard draft"
 
       {:links, links_before} = Process.info(self(), :links)
-      state_b = MingaEditor.Commands.execute(state_a, :agent_new_session)
+
+      state_b =
+        state_a
+        |> MingaEditor.Commands.execute(:agent_new_session)
+        |> AgentSessionStart.settle()
+
       tab_b = Runtime.active_tab(state_b.shell_runtime)
       session_b = Runtime.active_session(state_b.shell_runtime)
       prompt_b = state_b.workspace.agent_ui.panel.prompt_buffer
@@ -1390,7 +1398,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
       assert_receive {:effect_result, scheduler, %Outcome{value: {:completed, :ready}} = outcome},
                      2_000
 
-      other = AgentCommands.new_agent_session(pending)
+      other = pending |> AgentCommands.new_agent_session() |> AgentSessionStart.settle()
       session = Runtime.active_session(other.shell_runtime)
       assert :ok = EffectScheduler.claim(scheduler, outcome)
 
@@ -1430,7 +1438,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
             "draft before leaving"
           )
         )
-        |> CatalogStartup.defer({:start, false, false})
+        |> CatalogStartup.defer({:start, false, false, nil})
 
       departed = MingaEditor.TabWorkflow.switch(pending, source_id)
 
@@ -1459,6 +1467,8 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
       {^started, %Outcome{value: {:stale, :agent_origin_changed}}} =
         CatalogStartup.apply(started, outcome)
 
+      started = AgentSessionStart.settle(started)
+      assert Runtime.active_tab(started.shell_runtime).id == source_id
       returned = MingaEditor.TabWorkflow.switch(started, tab.id)
       session = Runtime.active_session(returned.shell_runtime)
       assert is_pid(session)
@@ -1506,7 +1516,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
       assert_receive {:effect_result, scheduler, %Outcome{value: {:completed, :ready}} = outcome},
                      2_000
 
-      opened = AgentCommands.new_agent_session(pending)
+      opened = pending |> AgentCommands.new_agent_session() |> AgentSessionStart.settle()
       session = Runtime.active_session(opened.shell_runtime)
       assert is_pid(session)
       returned = MingaEditor.TabWorkflow.switch(opened, source_id)
@@ -1537,7 +1547,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
           shell_runtime: Runtime.install_traditional_state(state.shell_runtime, shell_state)
       }
 
-      new_state = AgentCommands.new_agent_session(state)
+      new_state = state |> AgentCommands.new_agent_session() |> AgentSessionStart.settle()
       tab_bar = new_state.shell_runtime.state.tab_bar
       active_tab = TabBar.active(tab_bar)
       {_window_id, active_window} = WorkspaceState.find_agent_chat_window(new_state.workspace)
@@ -1637,7 +1647,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
       source_active_id = state.shell_runtime.state.tab_bar.active_id
       source_workspace = TabBar.get_workspace(state.shell_runtime.state.tab_bar, 0)
 
-      new_state = AgentSession.start_agent_session(state)
+      new_state = state |> AgentSession.start_agent_session() |> AgentSessionStart.settle()
       tab_bar = new_state.shell_runtime.state.tab_bar
       agent_workspaces = Enum.filter(tab_bar.workspaces, &(&1.kind == :agent))
 
@@ -1661,7 +1671,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
           |> MingaEditor.Agent.PromptBuffer.set_prompt_text("active draft")
         )
 
-      new_state = AgentSession.start_agent_session(state)
+      new_state = state |> AgentSession.start_agent_session() |> AgentSessionStart.settle()
       active_workspace = TabBar.active_workspace(new_state.shell_runtime.state.tab_bar)
 
       assert MingaEditor.Agent.PromptBuffer.input_text(new_state.workspace.agent_ui.panel) ==

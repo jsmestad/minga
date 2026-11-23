@@ -10,7 +10,6 @@ defmodule MingaEditor.Commands.AgentSplitToggleTest do
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Agent, as: AgentState
-  alias MingaEditor.State.AgentConnection
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
@@ -187,26 +186,23 @@ defmodule MingaEditor.Commands.AgentSplitToggleTest do
 
   test "a failed first Agent startup keeps the same composer and draft when returning to the file" do
     _providers = LLMDB.providers()
-
-    {ingest, monitor} = spawn_monitor(fn -> :ok end)
-    assert_receive {:DOWN, ^monitor, :process, ^ingest, :normal}
+    manager = spawn_link(fn -> reply_once({:error, :boom}) end)
 
     state =
       base_state(cold_composer: true)
       |> MingaEditor.WorkspaceWorkflow.install_tab_bar(TabBar.new(Tab.new_file(1, "test.ex")))
 
-    state = %{
-      state
-      | agent_connection: AgentConnection.connect_ingest(state.agent_connection, ingest)
-    }
+    state = %{state | agent_connection: %{state.agent_connection | session_manager: manager}}
 
     opened = AgentCommands.toggle_agent_split(state)
     composer = opened.workspace.agent_ui.panel.prompt_buffer
-
     assert is_pid(composer)
-    assert Runtime.active_session(opened.shell_runtime) == nil
-    assert TraditionalState.agent(opened.shell_runtime.state).error != nil
     :ok = BufferProcess.insert_text(composer, "draft after failed start")
+
+    opened = Minga.Test.AgentSessionStart.settle(opened)
+    assert Runtime.active_session(opened.shell_runtime) == nil
+    assert TraditionalState.agent(opened.shell_runtime.state).error =~ ":boom"
+    assert {:failed, _reason} = opened.workspace.agent_ui.chat_lifecycle
 
     returned = AgentCommands.toggle_agent_split(opened)
     assert Runtime.active_tab_kind(returned.shell_runtime) == :file
@@ -214,6 +210,15 @@ defmodule MingaEditor.Commands.AgentSplitToggleTest do
     reopened = AgentCommands.toggle_agent_split(returned)
     assert reopened.workspace.agent_ui.panel.prompt_buffer == composer
     assert BufferProcess.content(composer) == "draft after failed start"
+  end
+
+  @spec reply_once(term()) :: :ok
+  defp reply_once(reply) do
+    receive do
+      {:"$gen_call", from, {:start_session, _opts}} -> GenServer.reply(from, reply)
+    end
+
+    :ok
   end
 
   test "arriving at a background Agent tab renders its composer before further input" do

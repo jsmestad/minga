@@ -52,6 +52,10 @@ config :minga, infer_startup_project_root: false
 # Session GenServer lifecycle.
 config :minga, test_provider_module: Minga.Test.StubProvider
 
+# Do not load the model catalog in the background for every test Editor. Tests
+# that cover the preload call it directly.
+config :minga, agent_catalog_preload: false
+
 # Disable user extension loading so tests are deterministic regardless
 # of which extensions the developer has installed locally.
 config :minga, load_extensions: false

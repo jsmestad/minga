@@ -156,15 +156,47 @@ defmodule MingaEditor.Commands.Agent do
 
     case find_agent_tab(state) do
       %Tab{id: agent_id} ->
-        state
-        |> MingaEditor.TabWorkflow.switch(agent_id)
-        |> maybe_start_session()
-        |> open_session_in_tab(session_id, tool_call_id, origin, return_target)
+        state = MingaEditor.TabWorkflow.switch(state, agent_id)
+
+        case Runtime.active_session(state.shell_runtime) do
+          nil ->
+            AgentSession.start_agent_session(state,
+              follow_up: {:restore, session_id, tool_call_id, origin, return_target}
+            )
+
+          _session ->
+            open_session_in_tab(state, session_id, tool_call_id, origin, return_target)
+        end
 
       nil ->
         NoticeWorkflow.publish(state, "Could not open agent")
     end
   end
+
+  @doc """
+  Loads a saved conversation into a session that started for it.
+
+  `MingaEditor.Agent.SessionStart` runs this once the new session is bound to the active Agent workspace.
+  """
+  @spec restore_into_started_session(
+          state(),
+          pid(),
+          String.t(),
+          String.t() | nil,
+          ProvenanceJump.origin() | nil,
+          UIState.View.return_target()
+        ) :: state()
+  def restore_into_started_session(
+        state,
+        session,
+        session_id,
+        tool_call_id,
+        origin,
+        return_target
+      )
+      when is_pid(session),
+      do:
+        resume_persisted_session(state, session, session_id, tool_call_id, origin, return_target)
 
   @spec open_session_in_tab(
           state(),
@@ -1050,12 +1082,25 @@ defmodule MingaEditor.Commands.Agent do
 
   @spec prompt_readiness(UIState.t(), pid() | nil, String.t() | nil) :: prompt_readiness()
   defp prompt_readiness(%UIState{panel: panel} = ui, session, error) do
-    if model_configured?(panel.model_name) do
-      projected_prompt_readiness(ui, session, error)
-    else
-      :no_model
+    cond do
+      model_configured?(panel.model_name) -> projected_prompt_readiness(ui, session, error)
+      awaiting_session_model?(ui, session) -> :starting
+      true -> :no_model
     end
   end
+
+  # With no configured model the panel learns the model from the starting
+  # session's first connection report (#3641); until then it is starting, not
+  # unconfigured.
+  @spec awaiting_session_model?(UIState.t(), pid() | nil) :: boolean()
+  defp awaiting_session_model?(
+         %UIState{connection: %ConnectionSnapshot{target: %{session: session}}},
+         session
+       ),
+       do: false
+
+  defp awaiting_session_model?(%UIState{chat_lifecycle: lifecycle}, _session),
+    do: lifecycle == :starting
 
   @spec projected_prompt_readiness(UIState.t(), pid() | nil, String.t() | nil) ::
           prompt_readiness()

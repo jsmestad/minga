@@ -34,7 +34,12 @@ defmodule MingaEditor.Commands.AgentSessionProjectRootTest do
 
     refute project == File.cwd!()
 
-    state = AgentSession.start_catalog_ready(editor_state(project, notes), false, false)
+    state =
+      project
+      |> editor_state(notes)
+      |> AgentSession.start_catalog_ready(false, false, nil)
+      |> Minga.Test.AgentSessionStart.settle()
+
     session = started_session(state)
     on_exit(fn -> MingaAgent.SessionManager.stop_session_by_pid(session) end)
 

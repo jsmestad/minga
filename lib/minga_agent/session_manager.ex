@@ -132,6 +132,16 @@ defmodule MingaAgent.SessionManager do
     GenServer.call(manager, {:start_session, opts})
   end
 
+  @doc """
+  Sends a start request without waiting for the session to initialize.
+
+  The caller owns the returned request: it receives the `{:ok, session_id, pid} | {:error, reason}` reply, or the manager's exit, through `:gen_server.check_response/2`.
+  """
+  @spec request_start_session(GenServer.server(), keyword()) :: :gen_server.request_id()
+  def request_start_session(manager \\ __MODULE__, opts) do
+    :gen_server.send_request(manager, {:start_session, opts})
+  end
+
   @doc "Registers the provider and external effect workers owned by a managed Session."
   @spec register_effect_workers(GenServer.server(), pid(), pid(), [pid()]) ::
           :ok | {:error, :session_not_found | :provider_mismatch}
@@ -349,7 +359,12 @@ defmodule MingaAgent.SessionManager do
 
   @impl GenServer
   def handle_call({:start_session, opts}, _from, state) do
-    case start_managed_session(state, opts) do
+    result =
+      Minga.Telemetry.span([:minga, :agent, :session_manager_start], %{}, fn ->
+        start_managed_session(state, opts)
+      end)
+
+    case result do
       {:existing, session_id, pid, state} ->
         {:reply, {:ok, session_id, pid}, state}
 
@@ -864,7 +879,9 @@ defmodule MingaAgent.SessionManager do
         provider_monitor_ref: nil,
         effect_worker_refs: %{},
         token: token,
-        restart_opts: session_opts,
+        # A restarted Session is re-subscribed by its owner after the restart
+        # event; the initial subscribers and start token belong to this start only.
+        restart_opts: Keyword.drop(session_opts, [:subscribers, :start_token]),
         restart_state: nil,
         startup_delivery: nil,
         stop_pending?: false

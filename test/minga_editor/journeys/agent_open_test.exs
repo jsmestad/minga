@@ -48,14 +48,21 @@ defmodule MingaEditor.Journeys.AgentOpenTest do
   test "SPC a a opens an empty composer from an editor with only a file", %{editor_ctx: ctx} do
     refute match?(%{visible?: true}, agent_chat(ctx))
 
-    send_keys_async(ctx, "<SPC>aa")
+    assert %{visible?: true, lifecycle: :starting, prompt: "", prompt_vim_mode: 0} =
+             frame_after_open(ctx, "<SPC>a", "a")
 
     assert %{visible?: true, lifecycle: :conversation, prompt: "", prompt_vim_mode: 0} =
-             agent_chat(ctx)
+             await_conversation(ctx)
   end
 
   test "SPC a n opens a focused Insert composer", %{editor_ctx: ctx} do
-    send_keys_async(ctx, "<SPC>an")
+    assert %{
+             visible?: true,
+             lifecycle: :starting,
+             prompt: "",
+             prompt_vim_mode: 1,
+             input_focused?: true
+           } = frame_after_open(ctx, "<SPC>a", "n")
 
     assert %{
              visible?: true,
@@ -63,8 +70,26 @@ defmodule MingaEditor.Journeys.AgentOpenTest do
              prompt: "",
              prompt_vim_mode: 1,
              input_focused?: true
-           } =
-             agent_chat(ctx)
+           } = await_conversation(ctx)
+  end
+
+  test "the frame for the final open key shows the starting composer before the session exists",
+       %{editor_ctx: ctx} do
+    assert %{visible?: true, lifecycle: :starting, prompt: "", input_focused?: true} =
+             frame_after_open(ctx, "<SPC>a", "n")
+
+    assert %{visible?: true, lifecycle: :conversation} = await_conversation(ctx)
+  end
+
+  test "keys typed before the open edit the file and keys after it fill the starting draft",
+       %{editor_ctx: ctx} do
+    send_keys_async(ctx, "x<SPC>anearly draft")
+
+    assert %{visible?: true, prompt: "early draft"} = await_conversation(ctx)
+    send_keys_async(ctx, "<Esc><SPC>aa")
+
+    assert Minga.Buffer.content(editor_state(ctx).workspace.buffers.active) ==
+             " file open before Agent starts"
   end
 
   test "Ctrl+C and Escape both leave Replace mode in the composer", %{editor_ctx: ctx} do
@@ -111,6 +136,7 @@ defmodule MingaEditor.Journeys.AgentOpenTest do
   } do
     manual = Runtime.active_tab(editor_state(ctx).shell_runtime)
     send_keys_async(ctx, "<SPC>anarrival draft<Esc>")
+    assert %{prompt: "arrival draft"} = await_conversation(ctx)
     agent = Runtime.active_tab(editor_state(ctx).shell_runtime)
     assert agent.id != manual.id
 
@@ -125,7 +151,9 @@ defmodule MingaEditor.Journeys.AgentOpenTest do
              HeadlessPort.collect_frame(frame)
 
     send_keys_async(ctx, "<SPC>ansecond draft<Esc>")
-    assert %{visible?: true, lifecycle: :conversation, prompt: "second draft"} = agent_chat(ctx)
+
+    assert %{visible?: true, lifecycle: :conversation, prompt: "second draft"} =
+             await_conversation(ctx)
 
     send_gui_action(ctx, {:execute_command, "workspace_prev"})
 
@@ -314,6 +342,15 @@ defmodule MingaEditor.Journeys.AgentOpenTest do
   end
 
   defp active_tab(ctx), do: Runtime.active_tab(editor_state(ctx).shell_runtime)
+
+  # Returns the first frame committed for `final_key`, after `prefix` has been handled.
+  defp frame_after_open(ctx, prefix, final_key) do
+    send_keys_async(ctx, prefix)
+    frame = HeadlessPort.prepare_await(ctx.port)
+    send_keys_async(ctx, final_key)
+    assert {:ok, %{agent_chat: chat}} = HeadlessPort.collect_frame(frame)
+    chat
+  end
 
   defp await_conversation(ctx),
     do: await_conversation(ctx, System.monotonic_time(:millisecond) + 5_000)
