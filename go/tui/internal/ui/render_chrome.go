@@ -763,9 +763,10 @@ func (m Model) renderPickerList(title string, picker protocol.Picker, height int
 		start = selected - rowBudget + 1
 	}
 	end := min(start+rowBudget, len(picker.Items))
+	activeSlot := pickerHasActiveItem(picker.Items[start:end])
 	for index := start; index < end; index++ {
 		item := picker.Items[index]
-		row := m.renderPickerItemRow(title, item, index == selected, width)
+		row := m.renderPickerItemRow(title, item, index == selected, activeSlot, width)
 		if slot := index - start; slot < len(m.zones.picker.items) && item.ActivationID != 0 {
 			m.zones.picker.items[slot] = item.ActivationID
 			row = m.zones.Mark(pickerPointerZone(slot), row)
@@ -778,7 +779,10 @@ func (m Model) renderPickerList(title string, picker protocol.Picker, height int
 	return lines
 }
 
-func (m Model) renderPickerItemRow(title string, item protocol.PickerItem, selected bool, width int) string {
+func (m Model) renderPickerItemRow(title string, item protocol.PickerItem, selected bool, activeSlot bool, width int) string {
+	if item.HasStatus() {
+		return m.renderPickerStatusRow(item, selected, activeSlot, width)
+	}
 	theme := m.palette()
 	marker := " "
 	if item.Marked {
@@ -809,6 +813,11 @@ func (m Model) renderPickerItemRow(title string, item protocol.PickerItem, selec
 		labelStyle = labelStyle.Bold(true)
 	}
 	text := markerText + labelStyle.Render(" ")
+	if item.Active {
+		text += lipgloss.NewStyle().Foreground(theme.Accent()).Background(rowBackground).ColorWhitespace(true).Render(pickerActiveGlyph) + labelStyle.Render(" ")
+	} else if activeSlot {
+		text += labelStyle.Render(strings.Repeat(" ", pickerActiveSlotWidth))
+	}
 	if icon.glyph != "" {
 		if icon.color != "" && !selected {
 			text += lipgloss.NewStyle().Foreground(lipgloss.Color(icon.color)).Background(rowBackground).ColorWhitespace(true).Render(icon.glyph)
@@ -855,9 +864,31 @@ func (m Model) renderPickerHelp(picker protocol.Picker, width int) string {
 	textStyle := lipgloss.NewStyle().Foreground(p.PopupMutedText()).Background(p.PopupChrome()).ColorWhitespace(true)
 	leftText := textStyle.Render(left)
 	rightText := textStyle.Render(right)
+	if remedy := m.selectedPickerRemedy(picker); remedy != "" {
+		// An unusable row's description says why and what to do; the key hints give way to it.
+		room := max(width-lipgloss.Width(leftText)-pickerStatusGap-1, 1)
+		rightText = lipgloss.NewStyle().Foreground(p.PopupText()).Background(p.PopupChrome()).ColorWhitespace(true).Render(ansi.TruncateWc(remedy, room, "…") + " ")
+		leftText += textStyle.Render(strings.Repeat(" ", pickerStatusGap))
+		rowStyle := lipgloss.NewStyle().Background(p.PopupChrome()).Width(width).ColorWhitespace(true)
+		return renderPadded(rowStyle, leftText+rightText, width)
+	}
 	spacer := textStyle.Render(strings.Repeat(" ", max(width-lipgloss.Width(leftText)-lipgloss.Width(rightText), 0)))
 	rowStyle := lipgloss.NewStyle().Background(p.PopupChrome()).Width(width).ColorWhitespace(true)
 	return renderPadded(rowStyle, leftText+spacer+rightText, width)
+}
+
+// selectedPickerRemedy returns the selected row's description when its status chip is an error, such as
+// an unavailable model route whose description carries the remedy. Otherwise it returns "".
+func (m Model) selectedPickerRemedy(picker protocol.Picker) string {
+	index := m.effectivePickerIndex(picker)
+	if index < 0 || index >= len(picker.Items) {
+		return ""
+	}
+	item := picker.Items[index]
+	if !item.HasStatus() || item.StatusTone != generated.PickerStatusToneError {
+		return ""
+	}
+	return strings.TrimSpace(item.Description)
 }
 
 func (m Model) renderPickerPreview(preview protocol.PickerPreview, height int, width int) []string {
