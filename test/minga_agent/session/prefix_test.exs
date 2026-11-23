@@ -381,6 +381,48 @@ defmodule MingaAgent.Session.PrefixTest do
              PrefixStore.restore(%{data | instructions: %{id => "tampered"}})
   end
 
+  test "an omission is part of the prefix evidence and survives the codec" do
+    plain = candidate("base")
+    schemas = [schema("inspect")]
+
+    assert {:ok, same} = PrefixStore.candidate(:unknown, "base", schemas, identity(), [], [])
+    assert same == plain
+
+    assert {:ok, omitting} =
+             PrefixStore.candidate(:unknown, "base", schemas, identity(), [], [:instructions])
+
+    # The same sent text with a recorded omission is a different epoch, not a silent reuse.
+    assert omitting.omitted == [:instructions]
+    assert omitting.epoch_id != plain.epoch_id
+
+    assert {:ok, ^omitting} =
+             PrefixStore.candidate(omitting, "base", schemas, identity(), [], [:instructions])
+
+    assert {:ok, ^plain} = PrefixStore.candidate(omitting, "base", schemas, identity(), [], [])
+
+    {_request, history} = completed(omitting)
+    encoded = ContinuationCodec.encode(history)
+    assert {:ok, restored} = ContinuationCodec.decode(encoded)
+    assert PrefixStore.resolve(restored.prefixes, restored.prefixes.selected) == omitting
+
+    data = PrefixStore.dump(history.prefixes)
+    assert data.version == 2
+    assert {:error, :invalid_prefix_store} = PrefixStore.restore(%{data | version: 1})
+
+    for invalid <- [[:unknown_part], [:skills, :instructions], [:skills, :skills]] do
+      assert {:error, :invalid_prefix_candidate} =
+               PrefixStore.candidate(:unknown, "base", schemas, identity(), [], invalid)
+    end
+  end
+
+  test "a store without omissions is written as version 1 so older builds still read it" do
+    {_request, history} = completed(candidate())
+    data = PrefixStore.dump(history.prefixes)
+    assert data.version == 1
+    assert {:ok, store} = PrefixStore.restore(data)
+    assert store == history.prefixes
+  end
+
   test "restore rejects out-of-order schema names even when the stored digest matches" do
     data = PrefixStore.dump(PrefixStore.new())
     alpha = schema("alpha")

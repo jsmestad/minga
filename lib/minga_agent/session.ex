@@ -8714,7 +8714,12 @@ defmodule MingaAgent.Session do
          candidate = prefix_transition_candidate(state, operation, continuation),
          {:ok, committed} <- commit_prefix_transition(state, candidate, status),
          :ok <- GenServer.call(provider, {:commit_prefix_preview, token}) do
-      {:ok, announce_prefix_transition(committed, status), result}
+      committed =
+        committed
+        |> announce_prefix_transition(status)
+        |> disclose_prefix_omission(status, prefix)
+
+      {:ok, committed, result}
     else
       {:error, _reason} = error ->
         discard_native_prefix_preview(provider, token)
@@ -8771,6 +8776,21 @@ defmodule MingaAgent.Session do
         state,
         {:prefix_changed, %{epoch_id: state.continuation.prefixes.selected, status: :applied}}
       )
+
+  # A route that leaves instruction parts out of its prefix says so in the transcript.
+  @spec disclose_prefix_omission(state(), :applied | :unchanged, Prefix.t()) :: state()
+  defp disclose_prefix_omission(
+         %{model_selection: %ModelSelection{route: route}} = state,
+         :applied,
+         %Prefix{} = prefix
+       ) do
+    case Prefix.omission_notice(prefix, route.display_name) do
+      nil -> state
+      notice -> state |> append_system_message(notice, :info) |> notify_messages_changed()
+    end
+  end
+
+  defp disclose_prefix_omission(state, _status, _prefix), do: state
 
   @spec commit_prefix_transition(state(), state(), :unchanged | :applied) ::
           {:ok, state()} | {:error, term()}

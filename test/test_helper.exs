@@ -49,6 +49,12 @@ swift_exclude =
 # The packaged native IPC helper exists only after the macOS Xcode app build.
 macos_ipc_exclude = if System.get_env("MINGA_IPC_HELPER"), do: [], else: [:macos_ipc_helper]
 
+# The Apple Intelligence helper counts with the on-device model, which needs Apple
+# silicon, macOS 27, and a ready model. Opt in with MINGA_APPLE_INFERENCE=1 after
+# `mix native.build.apple --require`.
+apple_inference_exclude =
+  if System.get_env("MINGA_APPLE_INFERENCE") == "1", do: [], else: [:apple_inference]
+
 # `:distributed` tests boot a real peer node (Erlang distribution / epmd) and
 # are excluded by default. Run them with `mix test --include distributed`.
 # `:perf` tests drive timing-sensitive render-path benchmarks and print
@@ -57,7 +63,8 @@ macos_ipc_exclude = if System.get_env("MINGA_IPC_HELPER"), do: [], else: [:macos
 ExUnit.start(
   capture_log: true,
   assert_receive_timeout: 1_000,
-  exclude: [:pi, :distributed, :perf] ++ swift_exclude ++ macos_ipc_exclude
+  exclude:
+    [:pi, :distributed, :perf] ++ swift_exclude ++ macos_ipc_exclude ++ apple_inference_exclude
 )
 
 # Disable clipboard sync during tests to avoid race conditions from
