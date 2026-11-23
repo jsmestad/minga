@@ -131,6 +131,7 @@ defmodule MingaEditor.StatusBar.Data do
     selection_info = selection_info(mode, mode_state, buf, {line, col})
 
     agent = agent_state(state)
+    agent_status = agent_session_status(state)
     background = background_subagent_summary(state)
     workspace = workspace_modeline_summary(state)
 
@@ -155,7 +156,7 @@ defmodule MingaEditor.StatusBar.Data do
         indent: %StatusIndent{type: indent_type, size: indent_size},
         selection: selection_model(selection_info),
         agent: %SemanticStatusAgent{
-          agent_status: agent_session_status(state),
+          agent_status: agent_status,
           background_count: background.count,
           background_label: background.label,
           active_tool_name: agent.runtime.active_tool_name
@@ -169,8 +170,9 @@ defmodule MingaEditor.StatusBar.Data do
       notice: notice_message(state),
       selected_operation: OperationFeedback.selected(state.feedback.operation_feedback),
       agent_status_command: agent_status_command_content(state, agent),
-      agent_theme_colors:
-        if(agent.runtime.status, do: Theme.agent_theme(theme(state)), else: nil),
+      # Colors follow the status the modeline shows, which comes from the active
+      # workspace, not only from the live cache.
+      agent_theme_colors: if(agent_status, do: Theme.agent_theme(theme(state)), else: nil),
       git_degraded: git_degraded?,
       workspace: workspace,
       merge_conflict_count: merge_conflict_count(buf),
