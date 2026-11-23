@@ -3907,56 +3907,136 @@ private func decodeWindowContentRows(data: Data, start: Int, end: Int) throws ->
     let rowCount = Int(try readU32(data, start))
     var pos = start + 4
     guard rowCount <= (end - pos) / 23 else { throw ProtocolDecodeError.malformed }
-    try FrameDecodeAccounting.reserve(.rows, rowCount)
-    try FrameDecodeAccounting.reserve(.locatorEntries, rowCount)
+    // Resolve the accounting builder once for the section instead of once per reservation.
+    let usage = FrameDecodeAccounting.currentUsage
+    try usage?.reserve(.rows, rowCount)
+    try usage?.reserve(.locatorEntries, rowCount)
     var rows: [GUIVisualRow] = []
-    try FrameDecodeAccounting.reserve(.arrayEntries, rowCount)
+    try usage?.reserve(.arrayEntries, rowCount)
     rows.reserveCapacity(rowCount)
 
-    for _ in 0..<rowCount {
-        let row = try decodeWindowContentRow(data: data, pos: &pos, end: end)
-        try FrameDecodeAccounting.reserve(.arrayEntries, 1)
-        rows.append(row)
+    try withWindowRowBytes(data, end: end, usage: usage) { reader in
+        for _ in 0..<rowCount {
+            let row = try reader.row(at: &pos, end: end)
+            try usage?.reserve(.arrayEntries, 1)
+            rows.append(row)
+        }
     }
 
     guard pos == end else { throw ProtocolDecodeError.malformed }
     return rows
 }
 
+/// Decodes one row of a rows delta or row splice entry.
 private func decodeWindowContentRow(data: Data, pos: inout Int, end: Int) throws -> GUIVisualRow {
-    guard pos + 21 <= end else { throw ProtocolDecodeError.malformed }
-    guard let rowType = GUIVisualRowType(rawValue: data[pos]) else { throw ProtocolDecodeError.malformed }
-    let rowId = try readU64(data, pos + 1)
-    let bufLine = try readU32(data, pos + 9)
-    let contentHash = try readU32(data, pos + 13)
-    let textLen = Int(try readU32(data, pos + 17))
-    pos += 21
+    try withWindowRowBytes(data, end: end, usage: FrameDecodeAccounting.currentUsage) { reader in
+        try reader.row(at: &pos, end: end)
+    }
+}
 
-    guard pos + textLen <= end else { throw ProtocolDecodeError.malformed }
-    let text = try decodeUTF8(data[pos..<(pos + textLen)]) ?? ""
-    pos += textLen
+/// Lends a row reader over the packet bytes. `end` is the end of a validated section, so it never exceeds the packet; the guard keeps an unchecked read impossible if a caller ever breaks that.
+private func withWindowRowBytes<Result>(
+    _ data: Data, end: Int, usage: FrameResourceUsageBuilder?,
+    _ body: (WindowRowBytes) throws -> Result
+) throws -> Result {
+    guard end <= data.endIndex else {
+        throw ProtocolDecodeError.outOfBounds(offset: data.endIndex, required: end - data.endIndex, remaining: 0)
+    }
+    return try data.withUnsafeBytes { raw in
+        try raw.withMemoryRebound(to: UInt8.self) { bytes in
+            try body(WindowRowBytes(bytes: bytes, startIndex: data.startIndex, usage: usage))
+        }
+    }
+}
 
-    guard pos + 2 <= end else { throw ProtocolDecodeError.malformed }
-    let spanCount = Int(try readU16(data, pos))
-    pos += 2
+/// Reads window-content rows straight from the packet bytes (#3906).
+///
+/// Every read is covered by an explicit guard against the section `end`, which throws `ProtocolDecodeError.malformed` exactly where the `Data` helpers did. Reservations happen in the same order and amounts as through `FrameDecodeAccounting.reserve`, but through a builder the caller resolved once.
+private struct WindowRowBytes {
+    let bytes: UnsafeBufferPointer<UInt8>
+    /// Packet index of `bytes[0]`.
+    let startIndex: Int
+    let usage: FrameResourceUsageBuilder?
 
-    try FrameDecodeAccounting.reserve(.spans, spanCount)
-    var spans: [GUIHighlightSpan] = []
-    try FrameDecodeAccounting.reserve(.arrayEntries, spanCount)
-    spans.reserveCapacity(spanCount)
+    func row(at pos: inout Int, end: Int) throws -> GUIVisualRow {
+        guard pos + 21 <= end else { throw ProtocolDecodeError.malformed }
+        guard let rowType = GUIVisualRowType(rawValue: u8(pos)) else { throw ProtocolDecodeError.malformed }
+        let rowId = u64(pos + 1)
+        let bufLine = u32(pos + 9)
+        let contentHash = u32(pos + 13)
+        let textLen = Int(u32(pos + 17))
+        pos += 21
 
-    for _ in 0..<spanCount {
-        guard pos + 13 <= end else { throw ProtocolDecodeError.malformed }
-        try FrameDecodeAccounting.reserve(.arrayEntries, 1)
-        spans.append(GUIHighlightSpan(
-            startCol: try readU16(data, pos), endCol: try readU16(data, pos + 2),
-            fg: try readU24(data, pos + 4), bg: try readU24(data, pos + 7),
-            attrs: data[pos + 10], fontWeight: data[pos + 11], fontId: data[pos + 12]
-        ))
-        pos += 13
+        guard pos + textLen <= end else { throw ProtocolDecodeError.malformed }
+        let text = try self.text(at: pos, count: textLen)
+        pos += textLen
+
+        guard pos + 2 <= end else { throw ProtocolDecodeError.malformed }
+        let spanCount = Int(u16(pos))
+        pos += 2
+
+        try usage?.reserve(.spans, spanCount)
+        var spans: [GUIHighlightSpan] = []
+        try usage?.reserve(.arrayEntries, spanCount)
+        spans.reserveCapacity(spanCount)
+
+        for _ in 0..<spanCount {
+            guard pos + 13 <= end else { throw ProtocolDecodeError.malformed }
+            try usage?.reserve(.arrayEntries, 1)
+            spans.append(span(at: pos))
+            pos += 13
+        }
+
+        return GUIVisualRow(rowType: rowType, rowId: rowId, bufLine: bufLine, contentHash: contentHash, text: text, spans: spans)
     }
 
-    return GUIVisualRow(rowType: rowType, rowId: rowId, bufLine: bufLine, contentHash: contentHash, text: text, spans: spans)
+    /// Row text, with the result the previous `String(bytes:encoding: .utf8)` decode gave: one leading byte order mark is dropped, and invalid UTF-8 becomes an empty row. The wire bytes are reserved first either way.
+    private func text(at pos: Int, count: Int) throws -> String {
+        try usage?.reserve(.ownedUTF8Bytes, count)
+        var lower = pos - startIndex
+        let upper = lower + count
+        if count >= 3, bytes[lower] == 0xEF, bytes[lower + 1] == 0xBB, bytes[lower + 2] == 0xBF {
+            lower += 3
+        }
+        let utf8 = UnsafeBufferPointer(rebasing: bytes[lower..<upper])
+        return String(validating: utf8, as: UTF8.self) ?? ""
+    }
+
+    private func span(at pos: Int) -> GUIHighlightSpan {
+        let startCol: UInt16 = u16(pos)
+        let endCol: UInt16 = u16(pos + 2)
+        let fg: UInt32 = u24(pos + 4)
+        let bg: UInt32 = u24(pos + 7)
+        return GUIHighlightSpan(
+            startCol: startCol, endCol: endCol, fg: fg, bg: bg,
+            attrs: u8(pos + 10), fontWeight: u8(pos + 11), fontId: u8(pos + 12)
+        )
+    }
+
+    private func u8(_ pos: Int) -> UInt8 {
+        bytes[pos - startIndex]
+    }
+
+    private func u16(_ pos: Int) -> UInt16 {
+        let high = UInt16(u8(pos)) << 8
+        return high | UInt16(u8(pos + 1))
+    }
+
+    private func u24(_ pos: Int) -> UInt32 {
+        let high = UInt32(u8(pos)) << 16
+        let middle = UInt32(u8(pos + 1)) << 8
+        return high | middle | UInt32(u8(pos + 2))
+    }
+
+    private func u32(_ pos: Int) -> UInt32 {
+        let high = UInt32(u16(pos)) << 16
+        return high | UInt32(u16(pos + 2))
+    }
+
+    private func u64(_ pos: Int) -> UInt64 {
+        let high = UInt64(u32(pos)) << 32
+        return high | UInt64(u32(pos + 4))
+    }
 }
 
 private struct DecodedChatMessageCandidate {

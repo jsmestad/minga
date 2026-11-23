@@ -40,6 +40,8 @@ struct WindowContentBuilder {
         var contentHash: UInt32 = 12345
         var text: String = ""
         var spans: [SpanBuilder] = []
+        /// Wire bytes sent instead of `text`, for rows whose bytes are not valid UTF-8.
+        var rawText: [UInt8]? = nil
     }
 
     struct SpanBuilder {
@@ -72,7 +74,7 @@ struct WindowContentBuilder {
             appendU64(&rowsPayload, row.rowId)
             appendU32(&rowsPayload, row.bufLine)
             appendU32(&rowsPayload, row.contentHash)
-            let textBytes = Array(row.text.utf8)
+            let textBytes = row.rawText ?? Array(row.text.utf8)
             appendU32(&rowsPayload, UInt32(textBytes.count))
             rowsPayload.append(contentsOf: textBytes)
             appendU16(&rowsPayload, UInt16(row.spans.count))
