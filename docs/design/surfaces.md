@@ -41,6 +41,7 @@ Pause after `SPC`, or any prefix, and which-key opens as one panel anchored abov
 - Each entry is `key  Label`, with live counts where they matter ("Tasks · 1 needs you", "Review · 3", "Attach diagnostics · 1 error"). Counts update while the panel is open.
 - The ⌘ equivalent appears beside an entry when one exists, so the menu bar and the leader teach each other.
 - Timing: appears after the pause (`timeoutlen`), fades in within 120 ms, no fade with Reduce Motion, and never paints a frame if you type through the sequence.
+- **Groups read like leaves.** A group is written in Title Case like an action ("Session", "Queue"), drawn in the group colour role with a trailing `›`, and may show a dim count of what is inside ("Session › 7"). Leaves are plain text. Colour plus the chevron, never colour alone, so groups still read in 16 colours. Group labels never start with `+`; the which-key builder adds the chevron. The macOS menu bar's submenus use the same `›`.
 
 ## Closing things
 
@@ -60,6 +61,41 @@ Lists open in a bottom drawer: the tasks list, the review, diagnostics, the swit
 - When a drawer opens on its own (for example from a notification), single-letter actions are ignored for 300 ms, so a letter you were typing cannot approve something.
 - Selection uses the system accent while the list is focused, the muted selection when it is not.
 
+## Live prompts
+
+While a prompt has focus (find file, project search, new task, rename, the command line), typing always edits the query. Actions are reached by moving into the list: `⌃J` / `⌃K` or the arrows to move, `↩` to run, or a click. Prompts never use chords that collide with text editing (`⌃A`, `⌃E`, `⌃H`, `⌃W`, `⌃U`, `⌃K` beyond list movement).
+
+- **No results become next steps.** When project search finds nothing, the result list shows rows such as "Search ignored files too  `-- -u`", "Search hidden files too  `--hidden`", "Search all files  `-- -uu`". The first is preselected. Each row shows the ripgrep flag it adds, so the menu teaches the Doom/consult syntax (`query -- -uu`), which also works typed directly.
+- **No match in the switcher** offers "Create the file" and "Search the project for it" as rows.
+
+## Hover
+
+One surface answers "what is this?" for everything: code, diagnostics, Minga's lines, blame lines, state glyphs and modeline segments.
+
+- **Opening:** `K` from the keyboard, or resting the pointer on something for about 400 ms. A grace area lets the pointer travel into the popover.
+- **Two levels:** the first `K` shows a compact peek; `K` again moves focus into it, where `j` / `k` and `⌃D` / `⌃U` scroll, `↩` follows a link, `y` copies, and `q` or `esc` return. This is the Neovim `K K` model.
+- **Order:** the most urgent first: the diagnostic, then the signature, then the docs, then attribution ("Minga · 4 min ago · task · change 1 of 2 · unreviewed").
+- **Calm:** fixed position with no jitter, never covers the cursor line, a maximum size and then scrolling, no animation under Reduce Motion.
+- **It teaches keys:** hovering a modeline segment or a glyph shows its meaning and its key ("1 task needs you · SPC a a"). In the terminal the text goes to the echo area instead of a floating tooltip, and only when the terminal reports pointer motion.
+- **One source of actions:** the footer reads "`g.` actions" instead of carrying buttons. Content arrives as BEAM-styled spans, so markdown renders identically in both frontends.
+
+## Act menu
+
+One menu answers "what can I do with this?" for whatever is under the cursor or the pointer: a Minga change, a diagnostic, a file row, a task row, a terminal command block, a quickfix item, a symbol, a link or a selection. It replaces the separate twist-head menu, the failed-block menu, the hover action row and the picker's old `C-o` menu.
+
+- **Entry:** `g.` in Normal mode and special buffers, `⌃.` wherever you type (Insert, the composer, the terminal, pickers), and right-click. The precedent is Embark's `embark-act`.
+- **The BEAM decides what is on offer;** frontends only draw it. Target-specific actions come first, generic ones after ("Copy file:line link", "Ask Minga about this").
+- **The header names the target in words** ("Minga's change 1 of 2 · chrome_state.ex 232 to 235"), never with a mark.
+- **The most likely action is preselected,** so `↩` does the obvious thing. Typing filters.
+- **Two keys per row:** the letter that runs it inside the menu on the left, and on the right the key that runs it without the menu, so the menu teaches you to skip it. The native macOS right-click menu shows only the right-hand key.
+- **Consequences are written out** for actions that change things ("Reject · removes 4 lines, restores 1"). Destructive actions sit last and are never preselected. They are not drawn in red, because red means failure; the consequence text carries the warning.
+- **Selections and many items:** on a visual selection the actions apply to everything in it, with the count ("Keep 2 changes"). In a picker, the menu offers "Open all 12 matches" (act on all) and "Export 12 to a buffer", where Vim selection picks a subset and `g.` acts on it.
+- **Pickers do not mark.** `Tab` only completes; there is no Helm-style marking mode.
+
+## Mockup and storyboard metrics
+
+Mockups and storyboards draw at the app's real default metrics, so they never promise more air than the editor has: code at about 1.3 times the font size on macOS (13 px text on 17 to 18 px lines; the app uses the font's ascent plus descent with `line_spacing` 1.0), and terminal rows at about 1.25 times. `line_spacing` stays a user preference. The storyboard factory removes this problem by construction, since its frames come from the real renderers.
+
 ## Tasks
 
 `SPC a a` opens `*minga-tasks*`. Rows are ordered needs-you first.
@@ -76,7 +112,7 @@ Lists open in a bottom drawer: the tasks list, the review, diagnostics, the swit
 
 Two ways to review, for two situations.
 
-**In the file**, while you are working. The twist marks each change. `]h` moves between changes, `vah` selects one, `SPC g k` keeps and `SPC g r` rejects at the cursor or across a selection, `.` repeats, and `:'<,'>Minga keep` works on ranges. The modeline shows "change 1/2" while the cursor is inside a change. Clicking the twist head opens Keep, Reject, Show Diff and Open Conversation. If an unreviewed change still has an error, keeping it asks for confirmation.
+**In the file**, while you are working. The twist marks each change. `]h` moves between changes, `vah` selects one, `SPC a y` keeps and `SPC a d` rejects at the cursor or across a selection, `.` repeats, and `:'<,'>Minga keep` works on ranges. The modeline shows "change 1/2" while the cursor is inside a change. Clicking the twist head, `g.`, or a right-click opens the act menu: Keep, Reject, Show Diff, Open Conversation. If an unreviewed change still has an error, keeping it asks for confirmation.
 
 **In `*minga-review*`**, when Minga is done and you want to go through everything. `SPC a r` opens it beside the file:
 
@@ -95,7 +131,7 @@ Minga's replies are markdown, but the frontends never parse it. The BEAM sends s
 
 ## Switcher
 
-`SPC ,` (or `SPC b b`) opens a drawer with a prompt at the top: "Find file ›". You type into the prompt, so actions use control keys (see [keys](keys.md#file-switcher-spc-)).
+`SPC ,` (or `SPC b b`) opens a drawer with a prompt at the top: "Find file ›". You type into the prompt, so actions are rows you move to, or the few established picker keys (see [keys](keys.md#file-switcher-spc-)).
 
 Sections:
 
@@ -104,7 +140,7 @@ Sections:
 - **Recent**: by last visit.
 - **Terminals**: each with its cwd and last state.
 
-Files never need closing; only unsaved or unreviewed work is called out. Back and forward are ⌃⌘← and ⌃⌘→ on macOS, or a trackpad swipe.
+Files never need closing; only unsaved or unreviewed work is called out. Back and forward are Vim's jump list, `⌃O` and `⌃I` (⌘[ and ⌘] on macOS, or a trackpad swipe).
 
 ## Opening a directory
 
@@ -129,12 +165,12 @@ The block is left-aligned inside its panel. Close controls are not repeated in t
 
 ## Blame
 
-`SPC g b` adds a narrow column on the left of the code, not a new buffer.
+`SPC g B` adds a narrow column on the left of the code, not a new buffer.
 
 - **One continuous column** with its own surface tint, from the first visible line to the last.
 - **Grouped by commit.** Consecutive lines from the same commit form a group; the author and relative age show on the group's first line only, with a hairline above each group. Every line belongs to a commit, blank lines included.
 - **Minga as an author.** Lines Minga wrote form their own group in the minga role, labelled "Minga" with its age; `K` shows the task and review state, and `↩` opens that task's conversation. Uncommitted lines of yours read "You · now" in the you role.
-- `SPC g b` again or `q` closes the column.
+- `SPC g B` again or `q` closes the column.
 
 ## Diagnostics
 
@@ -142,16 +178,16 @@ See [marks](marks.md#diagnostics) for underlines and signs.
 
 - Only the cursor line shows its message, as quiet italic text after the code.
 - Hover the underline or press `K` for a popover: severity, message, source, and "Fix", "Ask Minga to Fix", "Copy".
-- `]d` and `[d` move between diagnostics; `SPC c a` lists code actions; `SPC c d` opens the list as a buffer.
+- `]e` and `[e` move between diagnostics (Doom's next-error); `g.` opens the act menu, which includes code actions; `SPC c x` opens the list as a buffer.
 - The modeline shows counts only when there is something to report.
-- **Empty answers stay in the echo area.** When there are no code actions or no references, the echo area says so and names the next step ("No code actions here · SPC a ? ask Minga", "No references found · SPC c g definition"). An empty list never opens an empty drawer.
+- **Empty answers stay in the echo area.** When there are no code actions or no references, the echo area says so and names the next step ("No code actions here · SPC a ? ask Minga", "No references found · SPC c d definition"). An empty list never opens an empty drawer.
 - If a change Minga is making produces an error, Minga fixes it as part of its work and says so in a tool step.
 
 ## Subagent peek
 
 When a task fans out into subagents, each subagent can be inspected without leaving the parent conversation. `SPC a i`, or `↩` on a "Started ◐ Fact-Check Auditor" line, opens the subagent as a split on the right:
 
-- **Header**: breadcrumb (parent task › subagent), its state and time ("Done · worked 3m"), and a sibling strip of glyphs ("◐ ◐ ● ◐  3 of 4"). `]t` and `[t` step through siblings in place; each glyph is clickable.
+- **Header**: breadcrumb (parent task › subagent), its state and time ("Done · worked 3m"), and a sibling strip of glyphs ("◐ ◐ ● ◐  3 of 4"). `]]` and `[[` step through siblings in place; each glyph is clickable.
 - **Brief**: what the parent asked, folded by default (`za`).
 - **So far**: live activity as sentences with state glyphs.
 - **Result**: what it handed back to the parent.

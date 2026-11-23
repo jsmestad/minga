@@ -291,9 +291,10 @@ exits = [
   { key = "SPC a v", click = "modeline Minga segment", to = "minga.conversation" },
   { key = "SPC a r", click = "", to = "minga.review.buffer" },
   { key = "]h", click = "twist head", to = "minga.review.in_file" },
+  { key = "K", click = "rest the pointer on a Minga line", to = "minga.hover.attribution" },
   { key = "SPC ,", click = "title bar file name", to = "files.switcher" },
   { key = "K", click = "hover the underline", to = "code.diagnostics.hover" },
-  { key = "SPC c d", click = "modeline diagnostics segment", to = "code.diagnostics.list" },
+  { key = "SPC c x", click = "modeline diagnostics segment", to = "code.diagnostics.list" },
   { key = "SPC o t", click = "", to = "terminal.drawer" },
 ]
 notes = "Same resting view as edit.plain with Minga's twist, cursor tag and modeline segments. Which-key has no click path by design (it is the keyboard's discovery surface); its targets are all reachable by click elsewhere. SPC a r and SPC o t need a click path: the menu bar Minga and View menus on macOS, TBD in the TUI."
@@ -316,7 +317,7 @@ exits = [
   { key = "SPC s p", click = "", to = "search.project" },
   { key = "SPC s r", click = "", to = "search.replace" },
   { key = "SPC s t", click = "", to = "search.todos" },
-  { key = "SPC s j", click = "", to = "search.symbols.document" },
+  { key = "SPC s i", click = "", to = "search.symbols.document" },
   { key = "SPC s w", click = "", to = "search.symbols.workspace" },
   { key = "SPC ,", click = "title bar file name", to = "files.switcher" },
   { key = "SPC SPC", click = "", to = "files.project_find" },
@@ -331,15 +332,15 @@ exits = [
   { key = "SPC c r", click = "", to = "code.rename" },
   { key = "SPC c D", click = "", to = "code.references" },
   { key = "SPC c h", click = "", to = "code.call_hierarchy" },
-  { key = "SPC c d", click = "modeline diagnostics segment", to = "code.diagnostics.list" },
-  { key = "SPC g s", click = "", to = "git.status" },
-  { key = "SPC g b", click = "", to = "git.blame" },
-  { key = "SPC t e", click = "", to = "edit.timeline" },
+  { key = "SPC c x", click = "modeline diagnostics segment", to = "code.diagnostics.list" },
+  { key = "SPC g g", click = "", to = "git.status" },
+  { key = "SPC g B", click = "", to = "git.blame" },
+  { key = "SPC s u", click = "", to = "edit.timeline" },
   { key = "SPC c l i", click = "", to = "code.lsp_info" },
   { key = "SPC c l I", click = "", to = "code.lsp_tools" },
   { key = "SPC m t o", click = "", to = "code.test_output" },
-  { key = "SPC g w", click = "", to = "git.why_line" },
-  { key = "SPC g a", click = "", to = "git.autobiography" },
+  { key = "SPC a W", click = "", to = "git.why_line" },
+  { key = "SPC a A", click = "", to = "git.autobiography" },
   { key = "SPC g c", click = "", to = "git.commit" },
   { key = "SPC g x", click = "", to = "git.conflict" },
   { key = "SPC g z", click = "", to = "git.stash" },
@@ -349,8 +350,8 @@ exits = [
   { key = "SPC a r", click = "", to = "minga.review.buffer" },
   { key = "SPC a ?", click = "", to = "minga.inline_ask" },
   { key = "SPC a e", click = "", to = "minga.inline_edit" },
-  { key = "SPC a m", click = "", to = "minga.model_picker" },
-  { key = "SPC a h", click = "", to = "minga.session_resume" },
+  { key = "SPC a S m", click = "", to = "minga.model_picker" },
+  { key = "SPC a S h", click = "", to = "minga.session_resume" },
   { key = "SPC o t", click = "", to = "terminal.drawer" },
   { key = "SPC o T", click = "", to = "terminal.window" },
   { key = "SPC w v", click = "", to = "windows.split" },
@@ -363,13 +364,13 @@ exits = [
   { key = "SPC o b", click = "", to = "settings.observatory" },
   { key = "⌘,", click = "Minga › Settings…", to = "settings.panel" },
   { key = "SPC q q", click = "", to = "start.quit.confirm" },
-  { key = "]d", click = "", to = "code.diagnostics.in_file" },
-  { key = "SPC a T", click = "", to = "minga.thinking_picker" },
-  { key = "SPC a k", click = "", to = "minga.checklist" },
-  { key = "SPC a j", click = "", to = "minga.attachments" },
-  { key = "SPC a H", click = "", to = "minga.retained_history" },
+  { key = "]e", click = "", to = "code.diagnostics.in_file" },
+  { key = "SPC a S t", click = "", to = "minga.thinking_picker" },
+  { key = "SPC a S k", click = "", to = "minga.checklist" },
+  { key = "SPC a x l", click = "", to = "minga.attachments" },
+  { key = "SPC a S H", click = "", to = "minga.retained_history" },
   { key = "SPC a p", click = "", to = "minga.publish" },
-  { key = "SPC a Q", click = "", to = "minga.question" },
+  { key = "SPC a a", click = "", to = "minga.question", note = "answered from the needs-you row in the tasks drawer; SPC a Q is retired" },
   { key = ":checkhealth", click = "", to = "terminal.capabilities" },
 ]
 notes = "Home scenario for the dead-end check. Same boards as edit.working without Minga's segments. Most clicks are empty because the macOS menu bar items and TUI click paths for these commands are not designed yet; the checker lists them."
@@ -399,13 +400,14 @@ title = "Visual selection"
 surfaces = ["editor", "modeline"]
 states = []
 frontends = ["macos", "tui"]
-status = "existing-only"
+status = "designed"
+boards = { macos = "Batch7_act_selection.dc.html", tui = "Batch7_act_selection.dc.html" }
 exits = [
   { key = "esc", click = "click elsewhere", to = "edit.plain" },
+  { key = "g.", click = "right-click the selection", to = "minga.act_menu.selection" },
   { key = "SPC a e", click = "", to = "minga.inline_edit" },
-  { key = "SPC g k", click = "", to = "edit.plain", note = "keep Minga's changes in the selection" },
+  { key = "SPC a y", click = "", to = "edit.plain", note = "keep Minga's changes in the selection" },
 ]
-
 [[scenario]]
 id = "edit.command_line"
 journey = "edit"
@@ -619,8 +621,8 @@ home = true
 reached_by = "the language server reports diagnostics"
 exits = [
   { key = "K", click = "hover the underline", to = "code.diagnostics.hover" },
-  { key = "]d", click = "", to = "code.diagnostics.in_file" },
-  { key = "SPC c d", click = "modeline diagnostics segment", to = "code.diagnostics.list" },
+  { key = "]e", click = "", to = "code.diagnostics.in_file" },
+  { key = "SPC c x", click = "modeline diagnostics segment", to = "code.diagnostics.list" },
   { key = "SPC c a", click = "hover › Fix", to = "code.actions" },
 ]
 notes = "The macOS board predates the V4.1 modeline; redraw during the storyboard."
@@ -658,17 +660,19 @@ exits = [
 [[scenario]]
 id = "code.hover"
 journey = "code"
-title = "K: hover documentation"
+title = "K on a symbol: compact hover (diagnostic, signature, first doc paragraph)"
 surfaces = ["hover_popup"]
 states = []
 frontends = ["macos", "tui"]
-status = "existing-only"
+status = "designed"
+boards = { macos = "Batch7_hover_code.dc.html", tui = "Batch7_hover_code.dc.html" }
 transient = true
 exits = [
-  { key = "esc", click = "click elsewhere", to = "edit.plain" },
-  { key = "K again", click = "", to = "code.hover", keyboard_only = "focuses the popup to scroll" },
+  { key = "K", click = "K more", to = "code.hover.focused" },
+  { key = "g.", click = "g. actions", to = "minga.act_menu" },
+  { key = "esc", click = "move the pointer away", to = "edit.plain" },
 ]
-
+notes = "Any motion also closes it. The footer names the act menu instead of carrying buttons."
 [[scenario]]
 id = "code.diagnostics.hover"
 journey = "code"
@@ -680,7 +684,7 @@ status = "designed"
 boards = { macos = "V3Diagnostics.dc.html" }
 transient = true
 exits = [
-  { key = "SPC c a", click = "Fix", to = "code.actions" },
+  { key = "g.", click = "g. actions", to = "minga.act_menu" },
   { key = "SPC a ?", click = "Ask Minga to Fix", to = "minga.inline_ask" },
   { key = "y", click = "Copy", to = "code.diagnostics.hover", keyboard_only = "copies the message" },
   { key = "esc", click = "click outside", to = "edit.plain" },
@@ -690,7 +694,7 @@ notes = "macOS board predates V4.1; TUI board missing."
 [[scenario]]
 id = "code.diagnostics.list"
 journey = "code"
-title = "SPC c d: diagnostics list"
+title = "SPC c x: diagnostics list"
 surfaces = ["drawer:diagnostics"]
 states = []
 frontends = ["macos", "tui"]
@@ -792,7 +796,7 @@ status = "designed"
 boards = { macos = "Batch4_code_empty.dc.html", tui = "Batch4_code_empty.dc.html" }
 transient = true
 exits = [
-  { key = "SPC c g", click = "", to = "edit.plain", keyboard_only = "named as text in the echo line; jumps to the definition" },
+  { key = "SPC c d", click = "", to = "edit.plain", keyboard_only = "named as text in the echo line; jumps to the definition" },
   { key = "esc", click = "click outside", to = "edit.plain" },
 ]
 notes = "Answers in the echo area, never an empty drawer: no references found, with the next step (go to definition). Any other key goes back to editing."
@@ -871,7 +875,7 @@ exits = [
   { key = "↩", click = "row", to = "edit.plain" },
   { key = "q", click = "close", to = "edit.plain" },
 ]
-notes = "Lives in the sidebar today; the Spine makes it a buffer (magit-style). SPC g s (new, free on main) opens it."
+notes = "Lives in the sidebar today; the Spine makes it a buffer (magit-style). SPC g g (Doom magit-status, free on main) opens it."
 
 [[scenario]]
 id = "git.status.clean"
@@ -968,7 +972,7 @@ exits = [
   { key = "K", click = "hover", to = "git.blame" },
   { key = "↩", click = "", to = "minga.conversation", keyboard_only = "on a Minga line: opens that task; click comes in the mouse sweep" },
   { key = "↩", click = "", to = "git.log", keyboard_only = "on a commit line: opens the commit; click comes in the mouse sweep" },
-  { key = "SPC g b", click = "", to = "edit.plain" },
+  { key = "SPC g B", click = "", to = "edit.plain" },
   { key = "q", click = "close", to = "edit.plain" },
 ]
 notes = "One continuous column on the left, grouped by commit: author and relative age on each group's first line, a hairline between groups, every line (blank ones included) belongs to a commit. Lines Minga wrote form a group labelled Minga in the minga role, with the task in the K detail; uncommitted lines read You · now in the you role."
@@ -1071,8 +1075,8 @@ status = "designed"
 boards = { macos = "V41Review.dc.html", tui = "V41TuiReview.dc.html" }
 home = true
 exits = [
-  { key = "SPC g k", click = "twist head › Keep", to = "edit.working" },
-  { key = "SPC g r", click = "twist head › Reject", to = "edit.working" },
+  { key = "SPC a y", click = "twist head › Keep", to = "edit.working" },
+  { key = "SPC a d", click = "twist head › Reject", to = "edit.working" },
   { key = "]h", click = "", to = "minga.review.in_file" },
   { key = "any motion out of the change", click = "click elsewhere", to = "edit.working" },
 ]
@@ -1124,12 +1128,12 @@ frontends = ["macos", "tui"]
 status = "designed"
 boards = { macos = "V41SubagentMac.dc.html", tui = "V41SubagentTui.dc.html" }
 exits = [
-  { key = "]t / [t", click = "sibling glyph", to = "minga.subagent.peek" },
+  { key = "]] / [[", click = "sibling glyph", to = "minga.subagent.peek" },
   { key = "za", click = "Brief header", to = "minga.subagent.peek" },
   { key = "↩", click = "open", to = "minga.conversation" },
   { key = "q", click = "close", to = "minga.conversation" },
 ]
-notes = "]t / [t are bound only in this buffer; normal-mode ]t keeps next class/module."
+notes = "]] / [[ step through sibling subagents here, as they mean next block in read-only buffers; ]t keeps next class/module."
 
 [[scenario]]
 id = "minga.tasks.list"
@@ -1180,7 +1184,7 @@ status = "designed"
 boards = { macos = "Batch1_minga_tasks_empty.dc.html", tui = "Batch1_minga_tasks_empty.dc.html" }
 transient = true
 exits = [
-  { key = "n", click = "New task", to = "minga.task.new" },
+  { key = "c", click = "New task", to = "minga.task.new" },
   { key = "q", click = "drawer close", to = "edit.plain" },
   { key = "esc", click = "", to = "edit.plain", keyboard_only = "q has the click" },
 ]
@@ -1710,6 +1714,7 @@ exits = [
   { key = "↩", click = "row", to = "edit.working" },
   { key = "⌃V", click = "", to = "windows.split" },
   { key = "⌃T", click = "pin", to = "files.switcher" },
+  { key = "⌃.", click = "right-click a row", to = "minga.act_menu", note = "open all matches (A) or export to *file-list* (E) live here" },
   { key = "esc", click = "click outside", to = "edit.working" },
 ]
 notes = "⌃V needs a click path (context menu on a row)."
@@ -2168,3 +2173,141 @@ exits = [
   { key = "esc", click = "dismiss", to = "edit.plain", note = "Normal mode only" },
 ]
 notes = "Minga opens with defaults. The notice names file:line and the error; the modeline segment \"config: defaults\" stays until the config loads and is never dropped."
+
+[[scenario]]
+id = "code.hover.focused"
+journey = "code"
+title = "K again: the hover is focused, full docs scroll in place"
+surfaces = ["hover_popup"]
+states = []
+frontends = ["macos", "tui"]
+status = "designed"
+boards = { macos = "Batch7_hover_code.dc.html", tui = "Batch7_hover_code.dc.html" }
+transient = true
+exits = [
+  { key = "j / k, ⌃D / ⌃U", click = "scroll", to = "code.hover.focused" },
+  { key = "↩", click = "a link", to = "edit.plain", note = "jumps to the linked definition" },
+  { key = "y", click = "", to = "code.hover.focused", keyboard_only = "copies the docs" },
+  { key = "q", click = "", to = "edit.plain", keyboard_only = "esc does the same" },
+  { key = "esc", click = "click outside", to = "edit.plain" },
+]
+
+[[scenario]]
+id = "minga.hover.attribution"
+journey = "minga"
+title = "Hover on a line Minga wrote: who, which task, change 1 of 2, unreviewed, age"
+surfaces = ["hover_popup"]
+states = ["unreviewed"]
+frontends = ["macos", "tui"]
+status = "designed"
+boards = { macos = "Batch7_hover_minga_and_chrome.dc.html", tui = "Batch7_hover_minga_and_chrome.dc.html" }
+transient = true
+exits = [
+  { key = "g.", click = "g. actions", to = "minga.act_menu" },
+  { key = "↩", click = "the task name", to = "minga.conversation" },
+  { key = "esc", click = "move the pointer away", to = "edit.plain" },
+]
+
+[[scenario]]
+id = "chrome.tooltip"
+journey = "edit"
+title = "Tooltip on a modeline segment or state glyph: meaning and key, e.g. 1 task needs you · SPC a a"
+surfaces = ["modeline", "tooltip"]
+states = []
+frontends = ["macos", "tui"]
+status = "designed"
+boards = { macos = "Batch7_hover_minga_and_chrome.dc.html", tui = "Batch7_hover_minga_and_chrome.dc.html" }
+transient = true
+exits = [
+  { key = "SPC a a", click = "the needs-you segment", to = "minga.tasks.needs_you" },
+  { key = "]h", click = "the change 1/2 segment", to = "minga.review.in_file" },
+  { key = "SPC a v", click = "the Minga segment", to = "minga.conversation" },
+  { key = "esc", click = "move the pointer away", to = "edit.plain" },
+]
+reached_by = "the pointer resting on a modeline segment or state glyph"
+notes = "In the TUI the text goes to the echo area, only when the terminal reports pointer motion."
+
+[[scenario]]
+id = "minga.act_menu"
+journey = "minga"
+title = "g. on a Minga change: the act menu, Keep preselected"
+surfaces = ["act_menu"]
+states = ["unreviewed"]
+frontends = ["macos", "tui"]
+status = "designed"
+boards = { macos = "Batch7_act_change.dc.html", tui = "Batch7_act_change.dc.html" }
+transient = true
+exits = [
+  { key = "y", click = "Keep", to = "minga.review.in_file" },
+  { key = "=", click = "Show diff", to = "minga.review.diff_inline" },
+  { key = "o", click = "Open conversation", to = "minga.conversation" },
+  { key = "n", click = "Reject", to = "minga.review.in_file", note = "destructive, last, never preselected" },
+  { key = "l", click = "Copy file:line link", to = "edit.plain" },
+  { key = "a", click = "Ask Minga about this", to = "minga.inline_ask" },
+  { key = "E", click = "Export to a buffer", to = "files.file_list", note = "in pickers: export the matches" },
+  { key = "typing", click = "", to = "minga.act_menu.filtered", keyboard_only = "typing filters the list" },
+  { key = "esc", click = "click outside", to = "edit.plain" },
+]
+notes = "The same menu opens on a diagnostic, a file row, a task row, a terminal command block and in pickers (Batch7_act_targets, Batch7_act_picker); right-click opens it too."
+
+[[scenario]]
+id = "minga.act_menu.filtered"
+journey = "minga"
+title = "Act menu after typing: only matching actions, the top one highlighted"
+surfaces = ["act_menu"]
+states = []
+frontends = ["macos", "tui"]
+status = "designed"
+boards = { macos = "Batch7_act_change.dc.html", tui = "Batch7_act_change.dc.html" }
+transient = true
+exits = [
+  { key = "↩", click = "a row", to = "minga.conversation", note = "runs the highlighted action" },
+  { key = "esc", click = "click outside", to = "edit.plain" },
+]
+
+[[scenario]]
+id = "minga.act_menu.selection"
+journey = "minga"
+title = "Act menu on a selection spanning two Minga changes and your code"
+surfaces = ["act_menu"]
+states = ["unreviewed"]
+frontends = ["macos", "tui"]
+status = "designed"
+boards = { macos = "Batch7_act_selection.dc.html", tui = "Batch7_act_selection.dc.html" }
+transient = true
+exits = [
+  { key = "y", click = "Keep 2 changes", to = "minga.review.in_file" },
+  { key = "a", click = "Ask Minga about the selection", to = "minga.inline_ask" },
+  { key = "e", click = "Rewrite selection", to = "minga.inline_edit" },
+  { key = "n", click = "Reject 2 changes", to = "edit.prompt", note = "confirms first" },
+  { key = "esc", click = "click outside", to = "edit.visual", note = "the selection is kept" },
+]
+
+[[scenario]]
+id = "minga.review.diff_inline"
+journey = "minga"
+title = "Inline diff of Minga's change in the file (= from the act menu or the review buffer)"
+surfaces = ["editor"]
+states = ["unreviewed"]
+frontends = ["macos", "tui"]
+status = "designed"
+boards = { macos = "Batch7_act_change.dc.html", tui = "Batch7_act_change.dc.html" }
+exits = [
+  { key = "=", click = "", to = "minga.review.in_file", keyboard_only = "toggles the diff off" },
+  { key = "esc", click = "click elsewhere", to = "minga.review.in_file" },
+]
+
+[[scenario]]
+id = "files.file_list"
+journey = "files"
+title = "*file-list*: picker results exported to a buffer, Vim selection picks a subset"
+surfaces = ["buffer:file_list"]
+states = []
+frontends = ["macos", "tui"]
+status = "designed"
+boards = { macos = "Batch7_act_picker.dc.html", tui = "Batch7_act_picker.dc.html" }
+exits = [
+  { key = "g.", click = "right-click", to = "minga.act_menu", note = "acts on the row or the selection" },
+  { key = "↩", click = "a row", to = "edit.plain" },
+  { key = "q", click = "close", to = "edit.plain" },
+]

@@ -1,6 +1,6 @@
 # Principles
 
-Ten rules. When a mockup, a review comment or a convenient shortcut disagrees with one of them, the rule wins or the rule changes through an ADR.
+Eleven rules. When a mockup, a review comment or a convenient shortcut disagrees with one of them, the rule wins or the rule changes through an ADR.
 
 ## 1. The text is the interface
 
@@ -41,6 +41,10 @@ Minga is Bavarian for Munich, and the voice shows up only at the edges: three li
 ## 10. The keyboard is how you discover
 
 Press `SPC` (or any prefix) and pause: which-key shows what comes next, with live counts. `:` runs commands. Hold ⌘ on macOS to reveal shortcuts on visible controls. Resting surfaces carry no hint lines or key legends. Transient surfaces, the ones that exist only to be acted on, show every action with its key, in the form "`y` Approve once". Not mysterious, just quiet: Neovim and Doom Emacs, with Mac polish.
+
+## 11. Keys are chords and mnemonics
+
+Keys are chords you can say out loud, not shortcuts you have to memorise. Mnemonic leader sequences come first (`SPC a r`, "Minga, review"), then Vim grammar inside buffers, then single mnemonic letters in special buffers. Modifiers appear only where letters have to type text, and only from established conventions; macOS platform keys are aliases, never the only way; three-modifier chords, ⌃⌘ and ⌥⌘ combinations and function keys are never used. **Doom first:** where Doom Emacs has a binding, Minga matches it, and Neovim conventions come second. The full grammar and the allow-list are in [keys](keys.md#the-key-grammar); a test with a shrinking baseline keeps the keymap from drifting.
 
 ## The test that keeps both frontends honest
 

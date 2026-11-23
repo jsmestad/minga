@@ -1,17 +1,33 @@
 # Keys
 
-Every key the Spine adds or changes, by context. The status column compares with today's keymap on `main`: **kept** means the binding exists and keeps its meaning, **changed** means the key exists but its meaning changes, **new** means the key is free today. Line references are to `lib/minga/keymap/defaults.ex` unless another file is named.
+Every key the Spine adds, changes or retires, by context. The status column compares with today's keymap on `main`: **kept** means the binding exists and keeps its meaning, **changed** means the key or its meaning changes, **new** means the key is free today, **retired** means the binding goes away. Line references are to `lib/minga/keymap/defaults.ex` unless another file is named.
 
 Notation: modifiers as Mac glyphs (⌃J, ⌥↩, ⌘.), leader sequences as `SPC a a`. Never `C-j`.
+
+Minga is pre-release, so keys move without deprecation aliases.
+
+## The key grammar
+
+Keys are chords and mnemonics, not shortcuts. This is [principle 11](principles.md#11-keys-are-chords-and-mnemonics), and every binding follows it, in this order:
+
+1. **Mnemonic leader sequences first.** `SPC`, then the which-key group letter, then the action letter. The groups are `a` Minga, `b` buffers, `c` code, `f` files, `g` git, `h` help, `o` open, `p` project, `q` quit and session, `s` search, `t` toggles, `w` windows.
+2. **Vim grammar inside buffers.** Operators, motions, text objects, `]x` / `[x` pairs and the `g` prefix.
+3. **Single mnemonic letters only in special buffers.** `y` yes or keep, `n` no or reject, `r` retry, `o` output, `q` quit, and so on, in buffers where letters are not text.
+4. **Modifiers only where letters must type text,** and only from established conventions. The allow-list: `⌃J` / `⌃K` to move in a list, `⌃V` / `⌃T` / `⌃Q` in pickers (Telescope), `⌥↩` in the composer, `⌃\ ⌃N` to leave the terminal, `⌃.` for the act menu. Never a chord that collides with text editing: `⌃A`, `⌃E`, `⌃H`, `⌃W`, `⌃U`, `⌃K` (outside list movement).
+5. **macOS platform keys only as aliases** of a binding that needs no modifier: ⌘S, ⌘Z, ⌘W, ⌘Q, ⌘., ⌘1 to ⌘4, ⌘[ and ⌘].
+6. **Never** three-modifier chords, ⌃⌘ or ⌥⌘ combinations, or function keys.
+
+**Doom first.** Where Doom Emacs has a binding, Minga matches it. Neovim and LazyVim conventions come second. A deliberate divergence is written down with its reason. The key-grammar test (`test/minga/keymap/grammar_test.exs`, with a baseline of today's violations that only ever shrinks) enforces all of this.
 
 ## Rules
 
 - **One key, one meaning.** Within a context, a key does one thing on every row and every surface.
-- **In a file, `y n = Y q` are always Vim.** Minga's changes are handled with leader keys, a text object and ex commands. Bare single-letter actions live only in Minga's special buffers.
-- **Typing surfaces use control keys.** Where you type into a prompt (the switcher, filters), actions use ⌃ keys so letters stay text.
+- **In a file, `y n = Y q` are always Vim.** Minga's changes are handled with leader keys, a text object and ex commands. Bare single-letter actions live only in special buffers.
+- **Live prompts move into the list.** While a prompt has focus (find file, project search, new task, rename, the command line), actions are rows you reach with `⌃J` / `⌃K` or the arrows and run with `↩`, or click. Typing always edits the query.
 - **Bulk actions confirm.** Keep all and Reject all ask "y/n" in the minibuffer first.
 - **Notices act through leader keys only.** An error notice in the echo area never takes bare keys; its actions are leader bindings such as `SPC c l r`, and `esc` dismisses it in Normal mode only.
-- **`q` closes special buffers and splits; `esc` closes anything transient.** `q` in Minga's special buffers and splits (conversation, queue, subagent peek, checklist, attachments, retained history, the observatory) returns you to the window you came from, the way `quit-window` works in Emacs `special-mode` buffers and Doom popups. `esc` cancels or dismisses any transient surface (prompts, pickers, menus, overlays). In the conversation, `q` applies in Normal mode outside the composer, where it is not text.
+- **`q` closes special buffers and splits; `esc` closes anything transient.** `q` in special buffers and splits (conversation, queue, subagent peek, checklist, attachments, retained history, the observatory) returns you to the window you came from, the way `quit-window` works in Emacs `special-mode` buffers and Doom popups. `esc` cancels or dismisses any transient surface (prompts, pickers, menus, overlays). In the conversation, `q` applies in Normal mode outside the composer, where it is not text.
+- **Groups read like leaves.** In which-key a group is written in Title Case like an action, in the group colour, with a trailing `›` and an optional dim count ("Session › 7"). Group labels never start with `+`. See [surfaces](surfaces.md#which-key).
 
 ## Leader
 
@@ -21,54 +37,134 @@ Notation: modifiers as Mac glyphs (⌃J, ⌥↩, ⌘.), leader sequences as `SPC
 | `:` | Commands; ⌘K is the macOS alias | kept (39) |
 | `SPC ,` | Switch buffer and file switcher | new |
 | `SPC b b` | Same switcher as `SPC ,` | kept (57) |
-| `SPC 1` to `SPC 4` | Jump to pinned file 1 to 4 (⌘1 to ⌘4 on macOS) | changed (186 to 189, were tabs; tabs are gone) |
-| `SPC c d` | Diagnostics list | kept (102) |
-| `SPC g k` | Keep Minga's change at the cursor or in the selection | new |
-| `SPC g r` | Reject Minga's change at the cursor or in the selection | new |
-| `SPC g s` | Git status (a magit-style buffer) | new |
-| `SPC g b` | Blame for the current line or file | new |
-| `SPC t e` | Edit timeline | new |
+| `SPC 1` to `SPC 4` | Jump to pinned file 1 to 4 (⌘1 to ⌘4 on macOS). Diverges from Doom's workspaces on `SPC 1` to `SPC 9`; which-key labels them "Pinned" | changed (186 to 189, were tabs; tabs are gone) |
+| `SPC ;` | Eval | new; replaces ⌥: (331) |
+| `SPC c x` | Diagnostics list (Doom) | changed; was `SPC c d` (102) |
+| `SPC c d` | Go to definition (Doom) | changed; was the diagnostics list (102) |
+| `SPC c g` | (retired) | retired (105); `SPC c d` is definition |
+| `SPC c D` | Find references | kept (103) |
+| `SPC c v` / `SPC c V` | Expand / shrink the selection by syntax node | kept |
+| `SPC g g` | Git status, a magit-style buffer (Doom) | new; replaces the proposed `SPC g s` |
+| `SPC g s` | Stage hunk (Doom), reserved for the git group | new |
+| `SPC g B` | Blame for the current line or file (Doom) | new; replaces the proposed `SPC g b` |
+| `SPC g b` | Switch branch (Doom), reserved for the git group | new |
+| `SPC g w` / `SPC g a` | (moved to `SPC a`) | retired (203, 204) |
+| `SPC s u` | Edit timeline, the undo history including Minga's steps (Doom) | new; replaces the proposed `SPC t e` |
+| `SPC s i` | Document symbols (Doom imenu) | changed; was `SPC s j` (46) and `SPC c j` (107) |
+| `SPC s j` | Jump list (Doom) | changed; was document symbols (46) |
+| `SPC c j` | (retired; duplicate of document symbols) | retired (107) |
 | `SPC s q` | Quickfix group: open the list (`:copen`), with `:cdo` / `:cfdo` listed as hints in which-key | new |
-| `SPC o t` | Toggle the terminal drawer | new |
+| `SPC h a` | Apropos (Doom) | changed; was a duplicate of `SPC h c` (86) |
+| `SPC o t` | Toggle the terminal drawer (Doom) | new |
+| `SPC o T` | New terminal in the current window (Doom) | new |
 | `SPC p h` | Project home (`*home*`) from anywhere | new |
 | `SPC q n` | Start fresh instead of the restored session: closes the restored files and opens the project home | new |
-| `SPC o T` | New terminal in the current window | new |
+| `SPC f o` | Open a remote file | changed; was `SPC a o` (161) |
+| `SPC b P`, `SPC b <`, `SPC b >` | (tabs are gone) | retired (69, 70, 71) |
+| `SPC b D`, `SPC b K` | Close other buffers / close all buffers | changed (63, 64; described as tabs today) |
+| `SPC TAB n`, `SPC TAB p`, `SPC TAB a` | (tabs are gone) | retired (169, 170, 172) |
 
 ## Leader `SPC a` (Minga)
+
+A dozen everyday keys at the top; the rest live in three groups.
+
+```
+SPC a  Minga
+  a  Tasks            v  Conversation      r  Review
+  n  New task         i  Inspect           w  Watch
+  s  Stop             y  Keep change       d  Reject change
+  u  Reject all…      ?  Ask about this    e  Rewrite selection
+  W  Why this line    A  Code autobiography
+  p  Publish edits…
+  q  Queue ›          x  Context ›         S  Session ›
+```
 
 | Keys | Action | Status |
 |---|---|---|
 | `SPC a a` | Tasks drawer | changed (138, was "Toggle agent split") |
-| `SPC a v` | Conversation split | kept (140) |
-| `SPC a r` | Review buffer | kept (158, "Pending reviews") |
+| `SPC a n` | New task (the minibuffer prompt) | changed (143, was "New local agent session") |
 | `SPC a s` | Stop; ⌘. on macOS | kept (141) |
-| `SPC a i` | Inspect a task or subagent in a split | new |
-| `SPC a w` | Watch Minga: a split that follows Minga's edits and shows `*minga-shell*` | new |
-| `SPC a p` | Publish edits | kept (159) |
-| `SPC a f` | Queue follow-up | kept (165) |
-| `SPC a q` | Dequeue to editor | kept (163) |
-| `SPC a J` | Queued inputs buffer | kept (154) |
 | `SPC a u` | Reject all of a task's changes, after "y/n" | kept key (166), now confirms |
+| `SPC a v` | Conversation split | kept (140) |
+| `SPC a i` | Inspect a task or subagent in a split | new |
+| `SPC a y` | Keep Minga's change at the cursor or in the selection | new; replaces the proposed `SPC g k` |
+| `SPC a d` | Reject Minga's change at the cursor or in the selection | new; replaces the proposed `SPC g r`; mirrors `y` / `n` in review |
+| `SPC a ?` | Ask about the line or selection | kept (145) |
+| `SPC a r` | Review buffer | kept (158, "Pending reviews") |
+| `SPC a w` | Watch Minga: a split that follows Minga's edits and shows `*minga-shell*` | new |
+| `SPC a e` | Rewrite selection inline | kept (146) |
+| `SPC a W` | Why is this line like this? | changed; was `SPC g w` (203) |
+| `SPC a A` | Code autobiography | changed; was `SPC g a` (204) |
+| `SPC a p` | Publish edits: one prompt that offers publish or discard | changed (159); absorbs `SPC a P` |
+| `SPC a P` | (folded into `SPC a p`) | retired (160) |
+| `SPC a t` | (duplicated the split toggle) | retired (139) |
+| `SPC a c` | (copy file to workspace; workspaces are gone) | retired (148) |
+| `SPC a Q` | (answer a question; answered from the tasks drawer row) | retired (164) |
+| `SPC a o` | (moved to `SPC f o`) | retired (161) |
 
-`SPC a t` (139) is retired. It duplicated the old split toggle, and the split stays on `SPC a v`.
+**`SPC a q` Queue ›**
 
-Minga is pre-release, so keys move without deprecation aliases.
+| Keys | Action | Status |
+|---|---|---|
+| `SPC a q q` | Open the queue buffer (`*minga-queue*`); dequeue, reorder and delete live inside it | changed; was `SPC a J` (154) and dequeue `SPC a q` (163) |
+| `SPC a q f` | Queue the composer input as a follow-up (`⌥↩` in the composer does the same) | changed; was `SPC a f` (165) |
+
+**`SPC a x` Context ›**
+
+| Keys | Action | Status |
+|---|---|---|
+| `SPC a x b` | Attach this buffer | changed; was `SPC a b` (155) |
+| `SPC a x f` | Attach a project file | changed; was `SPC a F` (156) |
+| `SPC a x d` | Attach this file's diagnostics | changed; was `SPC a D` (157) |
+| `SPC a x l` | List draft attachments | changed; was `SPC a j` (153) |
+
+**`SPC a S` Session ›**
+
+| Keys | Action | Status |
+|---|---|---|
+| `SPC a S h` | Resume a session | changed; was `SPC a h` (149) |
+| `SPC a S R` | Rename the session | changed; was `SPC a R` (150) |
+| `SPC a S m` | Pick the model | changed; was `SPC a m` (147) |
+| `SPC a S t` | Pick the thinking level | changed; was `SPC a T` (162) |
+| `SPC a S l` | Pick where the session runs | changed; was `SPC a N` (144) |
+| `SPC a S H` | Read retained messages | changed; was `SPC a H` (151) |
+| `SPC a S k` | Inspect the checklist | changed; was `SPC a k` (152) |
+| `SPC a S s` | Stop the session | changed; was `SPC a S` (142) |
 
 ## In a file
 
 | Keys | Action | Status |
 |---|---|---|
-| `]h` / `[h` | Next / previous Minga change | new, replaces `]e` |
+| `]h` / `[h` | Next / previous Minga change | new, replaces `]e` / `[e` for agent edits (`normal_prefixes.ex:56`, `65`) |
 | `ih` / `ah` | Text object: one Minga change, inner or with context | new |
-| `vah SPC g k` | Keep every change touched by the selection | new |
+| `vah SPC a y` | Keep every change touched by the selection | new |
 | `.` | Repeat the last keep or reject; counts work | new |
 | `:'<,'>Minga keep` | Keep a range; `:%Minga reject` rejects a whole file | new |
-| `]d` / `[d` | Next / previous diagnostic | kept (`normal_prefixes.ex:50`) |
-| `]c` / `[c` | Next / previous git hunk | kept (`normal_prefixes.ex:51`) |
-| `K` | Hover: diagnostic or docs | kept |
+| `]e` / `[e` | Next / previous diagnostic (Doom next-error) | changed; was `]d` / `[d` (`normal_prefixes.ex:50`) |
+| `]d` / `[d` | Next / previous git hunk (Doom diff-hl) | changed; git hunks were on `]c` / `[c` (`normal_prefixes.ex:51`) |
+| `]c` / `[c` | Next / previous change in a diff view | kept for diff buffers |
+| `]n` / `[n` | Next / previous syntax node (sibling); `SPC c v` / `SPC c V` expand and shrink | changed; ⌥h / ⌥j / ⌥k / ⌥l (286 to 289) stay only as aliases |
+| `g.` | Act menu on whatever is under the cursor | changed (`normal_prefixes.ex:27`, was "Code actions"); code actions are part of the act menu |
+| `K` | Hover; `K` again focuses it | kept |
+| `⌃O` / `⌃I` | Back / forward in the jump list (⌘[ / ⌘] on macOS) | kept Vim; replaces the proposed ⌃⌘← / ⌃⌘→ |
 | `u`, ⌘Z | Undo your own edits only | changed behavior |
+| `gt` / `gT` | (tabs are gone) | retired (`normal_prefixes.ex:34`, `35`) |
 
-`]h` replaces `]e` ("next agent edit", `normal_prefixes.ex:56`) because it pairs with the `ih` / `ah` text object. `]e` / `[e` become free; no alias is kept.
+`SPC .` stays Doom's "find file in this directory"; the act menu lives on `g.` in Normal mode and `⌃.` wherever you type.
+
+## Act menu
+
+| Keys | Action |
+|---|---|
+| `g.` | Open on the thing under the cursor (Normal mode, special buffers) |
+| `⌃.` | Open from Insert mode, the composer, the terminal and pickers |
+| Right-click | Open on the thing under the pointer |
+| Letter on the left of a row | Run it from inside the menu |
+| Typing | Filter |
+| `↩` | Run the preselected (most likely) action |
+| `esc` | Close |
+
+Each row shows two keys: the letter that works inside the menu, and on the right the key that runs the action without the menu.
 
 ## `*minga-review*`
 
@@ -89,6 +185,7 @@ Minga is pre-release, so keys move without deprecation aliases.
 | `j` / `k` | Move | all |
 | `/` | Filter | all |
 | `↩` | Open: the conversation, or the review for done rows | all |
+| `c` | New task (create, as in magit) | all |
 | `y` `a` `t` `n` | Approve once, always for this session, this turn, deny | needs-you |
 | `=` | Show the diff of the request | needs-you |
 | `r` | Retry | waiting, failed |
@@ -97,7 +194,7 @@ Minga is pre-release, so keys move without deprecation aliases.
 | `x` | Stop the task, after confirming | working |
 | `q` | Close | all |
 
-The approval keys match the agent scope today (`lib/minga/keymap/scope/agent.ex:249` to `252`: `y` or Enter approve once, `a` session, `t` turn, `n` or Esc deny).
+`n` means deny on a needs-you row, so a new task is `c`. The approval keys match the agent scope today (`lib/minga/keymap/scope/agent.ex:249` to `252`: `y` or Enter approve once, `a` session, `t` turn, `n` or Esc deny).
 
 ## Task output (`o` on a task row)
 
@@ -109,7 +206,7 @@ The approval keys match the agent scope today (`lib/minga/keymap/scope/agent.ex:
 | `f` | Ask Minga to fix it, with the output attached |
 | `q` | Close |
 
-`]]` / `[[` mean "next block in a read-only log" here, as they do for command blocks in the terminal.
+`]]` / `[[` mean "next block in a read-only buffer" here, as they do for command blocks in the terminal and siblings in the subagent peek.
 
 ## Quit prompt
 
@@ -121,23 +218,34 @@ The approval keys match the agent scope today (`lib/minga/keymap/scope/agent.ex:
 
 ## Subagent peek
 
-| Keys | Action |
-|---|---|
-| `]t` / `[t` | Next / previous sibling subagent, in this buffer only |
-| `za` | Fold or unfold the Brief |
-| `↩` | Open the full conversation |
-| `q` | Close |
-
-`]t` / `[t` are bound only inside the peek buffer. In normal mode `]t` keeps its meaning, "next class/module" (`normal_prefixes.ex:54`).
+| Keys | Action | Status |
+|---|---|---|
+| `]]` / `[[` | Next / previous sibling subagent | changed; replaces the proposed `]t` / `[t`, which keep "next class/module" (`normal_prefixes.ex:54`) |
+| `za` | Fold or unfold the Brief | |
+| `↩` | Open the full conversation | |
+| `q` | Close | |
 
 ## File switcher (`SPC ,`)
 
 | Keys | Action |
 |---|---|
-| `↩` | Open |
+| `↩` | Open; on a query with no match, the first row offers to create the file |
 | `⌃V` | Open in a split |
 | `⌃T` | Pin or unpin |
 | `⌃J` / `⌃K` | Move |
+| `⌃.` | Act menu on the highlighted row: open all matches, export to a buffer, and more |
+| `esc` | Close |
+
+`Tab` only completes. There is no marking; bulk work uses "Open all N matches" or "Export to a buffer" from the act menu, then Vim selection in that buffer.
+
+## Project search (`SPC s p`)
+
+| Keys | Action |
+|---|---|
+| Typing | Edits the query; ripgrep flags go after `--` (`limit_lable -- -uu`), as in Doom's consult-ripgrep |
+| `⌃J` / `⌃K` | Move through results, or through the next-step rows when nothing matches |
+| `↩` | Open the result, or run the next-step row ("Search ignored files too  -- -u") |
+| `⌃Q` | Send the results to quickfix |
 | `esc` | Close |
 
 ## Quickfix (`SPC s q`)
@@ -159,18 +267,20 @@ Special buffers (git status, the file tree, blame) follow the same rule as Minga
 | Git status | `q` | Close |
 | File tree | `a` / `A` | New file / new folder (the dired convention) |
 | File tree | `q` | Close |
-| Blame (`SPC g b`) | `K` | Detail: commit, or Minga's task and review state |
+| Blame (`SPC g B`) | `K` | Detail: commit, or Minga's task and review state |
 | Blame | `↩` | On a Minga line, open that task's conversation; on a commit line, open the commit |
-| Blame | `SPC g b`, `q` | Close |
+| Blame | `SPC g B`, `q` | Close |
 
 ## Composer
 
-| Keys | Action |
-|---|---|
-| `↩` in Insert | Newline |
-| `↩` in Normal, ⌘↩ | Send; steers while Minga works |
-| `⌥↩` | Queue next message |
-| `⌘.` | Stop (`SPC a s` in the terminal) |
+| Keys | Action | Status |
+|---|---|---|
+| `↩` in Insert | Newline | |
+| `↩` in Normal, ⌘↩ | Send; steers while Minga works | |
+| `⌥↩` | Queue next message | changed; was ⌃↩ (`scope/agent.ex:208`) |
+| `⌘.` | Stop (`SPC a s` in the terminal) | |
+| ⌥↑ | (dequeue moves into the queue buffer) | retired (`scope/agent.ex:210`, `211`) |
+| `⌃D` / `⌃U` while typing | (`⌃U` deletes to line start; scroll from Normal mode) | retired (`scope/agent.ex:216`, `217`) |
 
 ## Built-in terminal
 
@@ -180,5 +290,5 @@ Special buffers (git status, the file tree, blame) follow the same rule as Minga
 | `i`, `a`, `↩` on the prompt | Back to TERMINAL |
 | `]]` / `[[` | Next / previous command block |
 | `ic` / `ac` | Text object: a command's output / the whole block |
-| `↩` on a failed block | Menu: `f` ask Minga to fix, `yic` copy output, `r` rerun, `q` send to quickfix |
+| `↩` on a failed block | Menu: `f` ask Minga to fix, `yic` copy output, `r` rerun, `Q` send to quickfix (`q` always closes) |
 | `↩` on a pending Minga command | Approval in the minibuffer: `y` once, `a` always, `t` this turn, `n` deny |
