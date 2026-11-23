@@ -243,7 +243,7 @@ defmodule Minga.Buffer.Process do
   @doc """
   Shifts every line from `start_line` to `end_line` by one indentation level as one edit.
 
-  The shift is one undo step and one document rebuild. Change-log consumers and `:buffer_changed` subscribers still receive one delta per changed line, each with its own version and sequence, in the order a line-by-line edit would have produced them. See `Minga.Buffer.Operation.shift_lines/4`.
+  The shift is one undo step and one document edit. Change-log consumers and `:buffer_changed` subscribers still receive one delta per changed line, each with its own version and sequence, in the order a line-by-line edit would have produced them. See `Minga.Buffer.Operation.shift_lines/4`.
   """
   @spec shift_lines(
           GenServer.server(),
