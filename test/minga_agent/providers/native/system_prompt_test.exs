@@ -10,7 +10,7 @@ defmodule MingaAgent.Providers.Native.SystemPromptTest do
   defp measure(texts, candidates) do
     counts =
       for candidate <- candidates,
-          do: candidate |> Enum.map(&Enum.at(texts, &1)) |> Enum.join("\n\n") |> byte_size()
+          do: candidate |> Enum.map_join("\n\n", &Enum.at(texts, &1)) |> byte_size()
 
     {:ok, %{counts: counts, context: 4_096}}
   end

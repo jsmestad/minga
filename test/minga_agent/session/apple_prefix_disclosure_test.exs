@@ -32,7 +32,7 @@ defmodule MingaAgent.Session.ApplePrefixDisclosureTest do
 
       counts =
         for candidate <- candidates do
-          candidate |> Enum.map(&Enum.at(texts, &1)) |> Enum.join("\n\n") |> byte_size() |> div(4)
+          candidate |> Enum.map_join("\n\n", &Enum.at(texts, &1)) |> byte_size() |> div(4)
         end
 
       {:ok, %{counts: counts, context: 4_096}}
