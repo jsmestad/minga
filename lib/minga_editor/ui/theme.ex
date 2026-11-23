@@ -497,7 +497,7 @@ defmodule MingaEditor.UI.Theme do
 
   @doc "Returns the configured default theme name atom. Startup fails if this theme is unavailable."
   @spec default() :: atom()
-  def default, do: :astrodark
+  def default, do: :catppuccin_frappe
 
   # Folder icons have no language definition; this is their default tint when a
   # theme does not override the `:directory` key.

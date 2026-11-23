@@ -76,7 +76,7 @@ defmodule Minga.Config do
   ## Examples
 
       Config.get(:tab_width)    #=> 2
-      Config.get(:theme)        #=> :astrodark
+      Config.get(:theme)        #=> :catppuccin_frappe
   """
   @spec get(Options.option_name()) :: term()
   def get(name), do: Options.get(options_server(), name)
