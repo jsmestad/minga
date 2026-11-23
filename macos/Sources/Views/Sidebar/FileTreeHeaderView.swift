@@ -36,18 +36,38 @@ public struct FileTreeHeaderView: View {
     }
 
     public var body: some View {
-        HStack(spacing: Spacing.md) {
-            projectContext
-                .layoutPriority(2)
+        // A narrow window presents the sidebar narrower (#3933). The row then drops the branch and moves New File into the overflow menu, and finally drops the project name, so every action stays reachable.
+        // The full row qualifies whenever its labels can truncate to fit; the name-only row qualifies only when the whole name fits, so a name is never cut to one glyph.
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: Spacing.md) {
+                projectContext
+                    .layoutPriority(2)
 
-            secondaryContext
-                .layoutPriority(0)
+                secondaryContext
+                    .layoutPriority(0)
 
-            Spacer(minLength: 4)
+                Spacer(minLength: 4)
 
-            actionButtons
-                .opacity(isHovered ? 1.0 : 0.72)
-                .animation(reduceMotion ? nil : .easeInOut(duration: headerAnimationDuration), value: isHovered)
+                hoverDimmed(actionButtons)
+            }
+            .minimumAsIdealWidth()
+
+            HStack(spacing: Spacing.md) {
+                projectContext
+
+                Spacer(minLength: 4)
+
+                hoverDimmed(overflowMenu(includesNewFile: true))
+            }
+
+            HStack(spacing: Spacing.md) {
+                projectIcon
+                    .accessibilityLabel(projectName)
+
+                Spacer(minLength: 4)
+
+                hoverDimmed(overflowMenu(includesNewFile: true))
+            }
         }
         .padding(.leading, leadingPadding)
         .padding(.trailing, Spacing.md)
@@ -64,12 +84,22 @@ public struct FileTreeHeaderView: View {
         }
     }
 
+    private func hoverDimmed(_ content: some View) -> some View {
+        content
+            .opacity(isHovered ? 1.0 : 0.72)
+            .animation(reduceMotion ? nil : .easeInOut(duration: headerAnimationDuration), value: isHovered)
+    }
+
+    private var projectIcon: some View {
+        Text("\u{F0256}")
+            .font(.custom("Symbols Nerd Font Mono", size: Typography.Step.body.rawValue))
+            .foregroundStyle(theme.treeDirFg)
+    }
+
     @ViewBuilder
     private var projectContext: some View {
         HStack(spacing: Spacing.sm) {
-            Text("\u{F0256}")
-                .font(.custom("Symbols Nerd Font Mono", size: Typography.Step.body.rawValue))
-                .foregroundStyle(theme.treeDirFg)
+            projectIcon
 
             Text(projectName)
                 .font(Typography.font(.body, weight: .semibold))
@@ -109,13 +139,18 @@ public struct FileTreeHeaderView: View {
                 sendAction?(.newFile(generation: generation, parentID: ""))
             }
 
-            overflowMenu
+            overflowMenu(includesNewFile: false)
         }
     }
 
-    private var overflowMenu: some View {
+    private func overflowMenu(includesNewFile: Bool) -> some View {
         let generation = fileTreeState.generation
         return Menu {
+            if includesNewFile {
+                Button("New File…") {
+                    sendAction?(.newFile(generation: generation, parentID: ""))
+                }
+            }
             Button("New Folder…") {
                 sendAction?(.newFolder(generation: generation, parentID: ""))
             }

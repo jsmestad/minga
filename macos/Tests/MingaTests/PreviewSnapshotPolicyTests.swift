@@ -57,9 +57,11 @@ struct PreviewSnapshotPolicyTests {
     func boundedAgentWidths() throws {
         #expect(try PreviewSnapshotPolicy.agentWidth(nil) == 1200)
         #expect(try PreviewSnapshotPolicy.agentWidth("420") == 420)
+        #expect(try PreviewSnapshotPolicy.agentWidth("600") == 600)
         #expect(try PreviewSnapshotPolicy.agentWidth("800") == 800)
+        #expect(try PreviewSnapshotPolicy.agentWidth("900") == 900)
         #expect(try PreviewSnapshotPolicy.agentWidth("1200") == 1200)
-        for value in ["0", "-1", "419", "600", "801", "100000", "NaN", ""] {
+        for value in ["0", "-1", "419", "601", "801", "100000", "NaN", ""] {
             #expect(throws: PreviewSnapshotPolicy.CaptureError.self) {
                 try PreviewSnapshotPolicy.agentWidth(value)
             }

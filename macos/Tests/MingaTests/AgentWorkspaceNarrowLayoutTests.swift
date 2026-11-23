@@ -55,6 +55,131 @@ struct AgentWorkspaceNarrowLayoutTests {
         #expect(minimumWidth(compressible) < minimumWidth(rigid))
     }
 
+    @Test("With the sidebar open, the shell and its toolbar fit a 420 point window")
+    func shellWithSidebarFitsNarrowWindow() {
+        let gui = agentWorkspaceGUI()
+        showFileTreeSidebar(gui)
+
+        let shell = minimumWidth(contentView(gui))
+        #expect(shell <= narrowWindowWidth, "shell minimum width \(shell)")
+    }
+
+    @Test("Every sidebar header and body fits the narrowest presented sidebar",
+          arguments: ["file_tree", "git_status", "observatory", "unknown_kind"])
+    func sidebarFitsNarrowestWidth(kind: String) {
+        let gui = agentWorkspaceGUI()
+        showFileTreeSidebar(gui)
+        PreviewFixtures.populateGitStatus(gui.gitStatusState)
+        let item = SidebarItem(Wire.SidebarMetadata(
+            id: kind, displayName: "Sidebar", semanticKind: kind, icon: "folder",
+            order: 10, visible: true, focused: true, preferredWidth: 30, badgeCount: nil
+        ))
+        let titleBarInset: CGFloat = 36
+        let resizeHandleWidth: CGFloat = 8
+        let header = minimumWidth(NativeSidebarHeader(
+            input: gui.shellInput, item: item, sendAction: nil,
+            projectName: "minga", gitBranch: "main", leadingPadding: titleBarInset
+        ))
+        let body = minimumWidth(NativeSidebarBody(input: gui.shellInput, item: item, sendAction: nil, frameProbe: nil))
+
+        #expect(header <= SidebarSizing.narrowMinWidth + resizeHandleWidth, "header minimum width \(header)")
+        #expect(body <= SidebarSizing.narrowMinWidth, "body minimum width \(body)")
+    }
+
+    @Test("The narrow file tree header keeps New File in its overflow menu")
+    func narrowFileTreeHeaderKeepsNewFile() throws {
+        let recorder = LocalActionRecorder<FileTreeHeaderView.Action>()
+        let fileTree = FileTreeState()
+        PreviewFixtures.populateFileTree(fileTree)
+        let header = FileTreeHeaderView(fileTreeState: fileTree, sendAction: recorder.handler, branchName: "main", leadingPadding: 36)
+            .environment(\.themeColors, ThemeColors())
+        let menus = try header.inspect().findAll(ViewType.Menu.self) { menu in
+            (try? menu.accessibilityLabel().string()) == "More file tree actions"
+        }
+        let newFile = try #require(menus.lazy.compactMap { menu in
+            try? menu.find(ViewType.Button.self) { button in
+                (try? button.labelView().text().string()) == "New File…"
+            }
+        }.first)
+
+        try newFile.tap()
+
+        #expect(recorder.actions == [.newFile(generation: fileTree.generation, parentID: "")])
+    }
+
+    @Test("The narrow tab bar menu dispatches both split commands",
+          arguments: [("Split Right", "split_vertical"), ("Split Below", "split_horizontal")])
+    func narrowTabBarMenuDispatchesSplits(label: String, command: String) throws {
+        let recorder = LocalActionRecorder<TabBarView.Action>()
+        let tabs = TabBarState()
+        PreviewFixtures.populateTabBar(tabs)
+        let tabBar = TabBarView(tabBarState: tabs, sendAction: recorder.handler)
+            .environment(\.themeColors, ThemeColors())
+        let button = try tabBar.inspect().find(ViewType.Button.self) { button in
+            (try? button.find(text: label)) != nil
+        }
+
+        try button.tap()
+
+        #expect(recorder.actions == [.executeCommand(name: command)])
+    }
+
+    @Test("With the sidebar open in a 420 point window, the Agent pane keeps a readable width")
+    func agentPaneStaysReadableWithSidebar() {
+        let gui = agentWorkspaceGUI()
+        showFileTreeSidebar(gui)
+
+        let pane = editorColumnWidth(gui, windowWidth: narrowWindowWidth)
+
+        #expect(pane >= SidebarSizing.contentMinWidth, "Agent pane width \(pane)")
+        // The BEAM said the sidebar is open, so it stays presented, only narrower.
+        #expect(pane <= narrowWindowWidth - activityBarWidth - SidebarSizing.narrowMinWidth, "Agent pane width \(pane)")
+    }
+
+    @Test("With the sidebar open in a wide window, the sidebar keeps the user's width",
+          arguments: [900, 1200] as [CGFloat])
+    func wideWindowKeepsSidebarWidth(windowWidth: CGFloat) {
+        let gui = agentWorkspaceGUI()
+        showFileTreeSidebar(gui)
+        let resizeHandleWidth: CGFloat = 8
+        let fullSidebar = activityBarWidth + SidebarSizing.defaultWidth + resizeHandleWidth
+
+        #expect(editorColumnWidth(gui, windowWidth: windowWidth) == windowWidth - fullSidebar)
+    }
+
+    @Test("The sidebar column yields width only below its ideal plus the content minimum")
+    func presentedLeadingWidth() {
+        let ideal: CGFloat = 280
+        let minimum: CGFloat = 140
+        let content = SidebarSizing.contentMinWidth
+        let width = { (available: CGFloat) in
+            SidebarSizing.presentedLeadingWidth(available: available, ideal: ideal, minimum: minimum, contentMinimum: content)
+        }
+
+        #expect(width(1200) == ideal)
+        #expect(width(ideal + content) == ideal)
+        #expect(width(ideal + content - 1) == ideal - 1)
+        #expect(width(420) == 420 - content)
+        #expect(width(minimum + content) == minimum)
+        #expect(width(200) == minimum)
+    }
+
+    @Test("A resize drag keeps the saved sidebar width unless it narrows the sidebar on screen",
+          arguments: [
+              // (start on screen, saved preference, drag, expected saved width)
+              (250, 360, 30, 360),   // narrowed, rightward: the layout pins the width, keep the preference
+              (200, 300, 130, 330),  // narrowed, rightward past the preference: widen it
+              (250, 360, -40, 210),  // narrowed, leftward: narrows below the presented width and lowers the preference
+              (240, 240, 40, 280),   // not narrowed, rightward: unchanged behavior
+              (240, 240, -40, 200),  // not narrowed, leftward: unchanged behavior
+              (240, 240, -100, 180), // not narrowed, leftward past the drag minimum
+              (150, 300, 0, 300),    // below the drag minimum, zero drag: 180 does not override the preference
+              (150, 300, 20, 300),   // below the drag minimum, rightward: keeps the preference
+          ] as [(CGFloat, CGFloat, CGFloat, CGFloat)])
+    func draggedWidth(start: CGFloat, preference: CGFloat, translation: CGFloat, expected: CGFloat) {
+        #expect(SidebarSizing.draggedWidth(start: start, preference: preference, translation: translation, for: nil) == expected)
+    }
+
     @Test("The narrow header menu dispatches every header command",
           arguments: AgentChatHeaderView.HeaderCommand.allCases)
     func overflowMenuDispatchesCommands(command: AgentChatHeaderView.HeaderCommand) throws {
@@ -81,6 +206,45 @@ struct AgentWorkspaceNarrowLayoutTests {
         return gui
     }
 
+    private func contentView(_ gui: GUIState, editorSurface: some View = Color.clear) -> some View {
+        ContentView(
+            gui: gui,
+            encoder: { nil },
+            editorGeometry: { .preview },
+            chrome: .preview,
+            onAgentChatVisibleChange: { _ in }
+        ) {
+            editorSurface
+        }
+    }
+
+    private func showFileTreeSidebar(_ gui: GUIState) {
+        PreviewFixtures.populateFileTree(gui.fileTreeState)
+        gui.fileTreeState.visible = true
+        gui.sidebarHostState.update(activeId: "file_tree", sidebars: [
+            Wire.SidebarMetadata(
+                id: "file_tree", displayName: "File Tree", semanticKind: "file_tree", icon: "folder",
+                order: 10, visible: true, focused: true, preferredWidth: 30, badgeCount: nil
+            )
+        ])
+    }
+
+    /// Lays the shell out in a window of `windowWidth` and returns the width given to the editor column, which hosts the Agent pane.
+    private func editorColumnWidth(_ gui: GUIState, windowWidth: CGFloat) -> CGFloat {
+        let probe = WidthProbe()
+        let surface = Color.clear.onGeometryChange(for: CGFloat.self) { proxy in
+            proxy.size.width
+        } action: { width in
+            probe.width = width
+        }
+        let root = contentView(gui, editorSurface: surface).environment(\.themeColors, PreviewFixtures.theme())
+        let frame = NSRect(x: 0, y: 0, width: windowWidth, height: 700)
+        let hostingView = NSHostingView(rootView: root)
+        hostingView.frame = frame
+        hostingView.layoutSubtreeIfNeeded()
+        return probe.width
+    }
+
     private func minimumWidth<V: View>(_ view: V) -> CGFloat {
         width(view, offered: 1)
     }
@@ -91,4 +255,9 @@ struct AgentWorkspaceNarrowLayoutTests {
         let size = host.sizeThatFits(in: CGSize(width: offered, height: 4000))
         return size.width
     }
+}
+
+@MainActor
+private final class WidthProbe {
+    var width: CGFloat = 0
 }
