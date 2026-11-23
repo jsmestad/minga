@@ -1,0 +1,277 @@
+# Minga scenario inventory
+#
+# Every screen and state Minga can show, on macOS and in the TUI. The design
+# storyboard, the design-time flow map and (later) the storyboard factory's
+# fixtures are all built from this file. See storyboard.md.
+#
+# Schema, one [[scenario]] per screen and state:
+#
+#   id         stable dotted id, "<journey>.<screen>[.<state>]". Never reuse an id.
+#   journey    one of the journeys listed below.
+#   title      what the user sees, in words.
+#   surfaces   the surfaces on screen (see surfaces.md), e.g. ["modeline", "drawer:tasks"].
+#   states     the Minga or UI states shown, e.g. ["needs_you", "working"].
+#   frontends  ["macos", "tui"], or one of them with platform_only_reason set.
+#   status     "designed" | "existing-only" | "missing".
+#              designed:      a design board exists and follows docs/design.
+#              existing-only: the screen exists in the app but has not been redesigned.
+#              missing:       no design and no implementation.
+#   boards     design canvas board files when designed: { macos = "...", tui = "..." }.
+#   exits      every way out, by key and by click:
+#              [{ key = "SPC a a", click = "modeline needs-you segment", to = "tasks.drawer.needs_you" }]
+#              Use click = "" for keyboard-only exits and say why in a note.
+#              A "to" id that has no [[scenario]] yet is an inventory gap.
+#   notes      anything a reviewer needs; open questions.
+#
+# Journeys:
+#   start       launch, first run, open a project, quit
+#   edit        editing and navigation in a file
+#   search      search in buffer, project search, replace
+#   code        completion, hover, signature help, diagnostics, code actions, rename, references
+#   git         status, blame, hunks, conflicts, commit
+#   minga       tasks, conversation, composer, queue, review, subagents, approvals
+#   terminal    the built-in terminal and *minga-shell*
+#   files       switcher, file tree, buffers, pinned files
+#   windows     splits, drawers, focus, narrow windows
+#   settings    config, themes, keybindings, extensions, help
+#   errors      error notices, empty states, crashes, reconnects
+#
+# Status at the start of the storyboard: the scenarios below are the designed
+# ones from the V4.1 design round. existing-only and missing scenarios are added
+# during the storyboard inventory.
+
+[[scenario]]
+id = "edit.working"
+journey = "edit"
+title = "Editing while Minga works in the same file"
+surfaces = ["title_bar", "editor", "gutter", "modeline"]
+states = ["working", "needs_you"]
+frontends = ["macos", "tui"]
+status = "designed"
+boards = { macos = "V41Edit.dc.html", tui = "V41TuiEdit.dc.html" }
+exits = [
+  { key = "SPC (pause)", click = "", to = "edit.whichkey.leader" },
+  { key = "SPC a (pause)", click = "", to = "minga.whichkey" },
+  { key = "SPC a a", click = "modeline needs-you segment", to = "minga.tasks.needs_you" },
+  { key = "SPC a v", click = "modeline Minga segment", to = "minga.conversation" },
+  { key = "SPC a r", click = "", to = "minga.review.buffer" },
+  { key = "]h", click = "twist head", to = "minga.review.in_file" },
+  { key = "SPC ,", click = "title bar file name", to = "files.switcher" },
+  { key = "K", click = "hover the underline", to = "code.diagnostics.hover" },
+  { key = "SPC c d", click = "modeline diagnostics segment", to = "code.diagnostics.list" },
+  { key = "SPC o t", click = "", to = "terminal.drawer" },
+]
+notes = "Which-key has no click path by design (it is the keyboard's discovery surface); its targets are all reachable by click elsewhere. SPC a r and SPC o t need a click path: the menu bar Minga and View menus on macOS, TBD in the TUI."
+
+[[scenario]]
+id = "minga.whichkey"
+journey = "minga"
+title = "SPC a and a pause: which-key for Minga"
+surfaces = ["editor", "whichkey", "modeline"]
+states = ["working", "needs_you"]
+frontends = ["macos", "tui"]
+status = "designed"
+boards = { macos = "V41WhichKey.dc.html", tui = "V41TuiEdit.dc.html" }
+exits = [
+  { key = "a", click = "Tasks row", to = "minga.tasks.needs_you" },
+  { key = "v", click = "Conversation row", to = "minga.conversation" },
+  { key = "r", click = "Review row", to = "minga.review.buffer" },
+  { key = "i", click = "Inspect row", to = "minga.subagent.peek" },
+  { key = "w", click = "Watch row", to = "terminal.minga_shell" },
+  { key = "J", click = "Queued inputs row", to = "minga.queue" },
+  { key = "u", click = "Reject all row", to = "minga.reject_all.confirm" },
+  { key = "esc", click = "click outside", to = "edit.working" },
+  { key = "backspace", click = "breadcrumb SPC", to = "edit.whichkey.leader" },
+]
+
+[[scenario]]
+id = "minga.tasks.needs_you"
+journey = "minga"
+title = "Tasks drawer with one task that needs you"
+surfaces = ["editor", "drawer:tasks", "modeline"]
+states = ["needs_you", "working", "waiting", "failed", "done"]
+frontends = ["macos", "tui"]
+status = "designed"
+boards = { macos = "V41Tasks.dc.html", tui = "V41TuiTasks.dc.html" }
+exits = [
+  { key = "y", click = "Approve once", to = "minga.tasks.working" },
+  { key = "a", click = "Always for this session", to = "minga.tasks.working" },
+  { key = "t", click = "This turn", to = "minga.tasks.working" },
+  { key = "n", click = "Deny", to = "minga.tasks.working" },
+  { key = "=", click = "Show diff", to = "minga.approval.diff" },
+  { key = "↩", click = "row title", to = "minga.conversation" },
+  { key = "i", click = "Inspect", to = "minga.subagent.peek" },
+  { key = "r", click = "Retry now", to = "minga.tasks.working" },
+  { key = "o", click = "Output", to = "minga.task.output" },
+  { key = "↩ on a done row", click = "Review", to = "minga.review.buffer" },
+  { key = "q", click = "drawer close", to = "edit.working" },
+  { key = "esc", click = "", to = "edit.working" },
+]
+notes = "Empty state (no tasks) is not designed: see minga.tasks.empty."
+
+[[scenario]]
+id = "minga.review.buffer"
+journey = "minga"
+title = "*minga-review* beside the file, change 1 of 2"
+surfaces = ["drawer:review", "editor", "gutter", "modeline"]
+states = ["done"]
+frontends = ["macos", "tui"]
+status = "designed"
+boards = { macos = "V41Review.dc.html", tui = "V41TuiReview.dc.html" }
+exits = [
+  { key = "y", click = "Keep", to = "minga.review.buffer" },
+  { key = "n", click = "Reject", to = "minga.review.buffer" },
+  { key = "=", click = "Diff", to = "minga.review.buffer" },
+  { key = "Y", click = "Keep all", to = "minga.review.keep_all.confirm" },
+  { key = "↩", click = "change row", to = "minga.review.in_file" },
+  { key = "q", click = "close", to = "edit.working" },
+]
+notes = "After the last change is decided, the buffer needs a defined end state: see minga.review.all_decided."
+
+[[scenario]]
+id = "minga.review.in_file"
+journey = "minga"
+title = "Cursor inside one of Minga's changes in a file"
+surfaces = ["editor", "gutter", "modeline"]
+states = ["unreviewed"]
+frontends = ["macos", "tui"]
+status = "designed"
+boards = { macos = "V41Review.dc.html", tui = "V41TuiReview.dc.html" }
+exits = [
+  { key = "SPC g k", click = "twist head › Keep", to = "edit.working" },
+  { key = "SPC g r", click = "twist head › Reject", to = "edit.working" },
+  { key = "]h", click = "", to = "minga.review.in_file" },
+  { key = "any motion out of the change", click = "click elsewhere", to = "edit.working" },
+]
+notes = "]h has no click path; the twist head of the next change is the click equivalent. ]e already means next agent edit today: see ADR-0006."
+
+[[scenario]]
+id = "minga.conversation"
+journey = "minga"
+title = "Conversation split beside code, Minga working"
+surfaces = ["editor", "split:conversation", "composer", "modeline"]
+states = ["working", "failed"]
+frontends = ["macos", "tui"]
+status = "designed"
+boards = { macos = "V41Talk.dc.html", tui = "V41TuiTalkOpen.dc.html" }
+exits = [
+  { key = "↩ (Normal) or ⌘↩", click = "Send", to = "minga.conversation" },
+  { key = "⌥↩", click = "", to = "minga.queue" },
+  { key = "⌘. or SPC a s", click = "Stop", to = "minga.conversation.stopped" },
+  { key = "SPC a r", click = "2 files changed · review", to = "minga.review.buffer" },
+  { key = "↩ on a Started line", click = "Started line", to = "minga.subagent.peek" },
+  { key = "SPC a v", click = "close split", to = "edit.working" },
+]
+
+[[scenario]]
+id = "minga.queue"
+journey = "minga"
+title = "*minga-queue* with two queued messages"
+surfaces = ["split:conversation", "buffer:queue", "composer"]
+states = ["working"]
+frontends = ["macos", "tui"]
+status = "designed"
+boards = { macos = "V41Talk.dc.html", tui = "V41TuiTalkOpen.dc.html" }
+exits = [
+  { key = "dd", click = "remove", to = "minga.queue" },
+  { key = "↩", click = "edit", to = "minga.conversation" },
+  { key = "q", click = "close", to = "minga.conversation" },
+]
+
+[[scenario]]
+id = "files.switcher"
+journey = "files"
+title = "SPC , find file with pinned, changed and recent"
+surfaces = ["editor", "drawer:switcher", "modeline"]
+states = ["working"]
+frontends = ["macos", "tui"]
+status = "designed"
+boards = { macos = "V41Open.dc.html", tui = "V41TuiTalkOpen.dc.html" }
+exits = [
+  { key = "↩", click = "row", to = "edit.working" },
+  { key = "⌃V", click = "", to = "windows.split" },
+  { key = "⌃T", click = "pin", to = "files.switcher" },
+  { key = "esc", click = "click outside", to = "edit.working" },
+]
+notes = "⌃V needs a click path (context menu on a row)."
+
+[[scenario]]
+id = "code.diagnostics.in_file"
+journey = "code"
+title = "Errors and warnings in a file, cursor on the error"
+surfaces = ["editor", "gutter", "modeline"]
+states = ["error", "warning"]
+frontends = ["macos", "tui"]
+status = "designed"
+boards = { macos = "V3Diagnostics.dc.html", tui = "V41TuiEdit.dc.html" }
+exits = [
+  { key = "K", click = "hover the underline", to = "code.diagnostics.hover" },
+  { key = "]d", click = "", to = "code.diagnostics.in_file" },
+  { key = "SPC c d", click = "modeline diagnostics segment", to = "code.diagnostics.list" },
+  { key = "SPC c a", click = "hover › Fix", to = "code.actions" },
+]
+notes = "The macOS board predates the V4.1 modeline; redraw during the storyboard."
+
+[[scenario]]
+id = "terminal.drawer"
+journey = "terminal"
+title = "SPC o t terminal drawer with a passed and a failed run"
+surfaces = ["editor", "drawer:terminal", "modeline"]
+states = ["done", "failed"]
+frontends = ["macos", "tui"]
+status = "designed"
+boards = { macos = "V41ShellDrawer.dc.html", tui = "V41ShellTui.dc.html" }
+exits = [
+  { key = "⌃\\ ⌃N", click = "", to = "terminal.drawer.normal" },
+  { key = "↩ on a failed block (Normal)", click = "failed block glyph", to = "terminal.failed_block.menu" },
+  { key = "SPC o t", click = "drawer close", to = "edit.working" },
+  { key = "exit", click = "", to = "edit.working" },
+]
+
+[[scenario]]
+id = "terminal.minga_shell"
+journey = "terminal"
+title = "*minga-shell* with Minga's commands and a pending approval"
+surfaces = ["editor", "split:minga_shell", "minibuffer", "modeline"]
+states = ["working", "needs_you", "failed"]
+frontends = ["macos", "tui"]
+status = "designed"
+boards = { macos = "V41ShellMinga.dc.html", tui = "V41ShellTui.dc.html" }
+exits = [
+  { key = "↩ on the pending block", click = "pending block", to = "terminal.minga_shell.approval" },
+  { key = "↩ on a failed block", click = "failed block glyph", to = "terminal.failed_block.menu" },
+  { key = "⌃C, ⌘. or SPC a s", click = "", to = "terminal.minga_shell" },
+  { key = "q", click = "close split", to = "edit.working" },
+]
+notes = "Open: what esc does at the approval prompt."
+
+[[scenario]]
+id = "minga.subagent.peek"
+journey = "minga"
+title = "Peeking at a done subagent beside the parent conversation"
+surfaces = ["split:conversation", "split:subagent", "composer"]
+states = ["working", "done"]
+frontends = ["macos", "tui"]
+status = "designed"
+boards = { macos = "V41SubagentMac.dc.html", tui = "V41SubagentTui.dc.html" }
+exits = [
+  { key = "]t / [t", click = "sibling glyph", to = "minga.subagent.peek" },
+  { key = "za", click = "Brief header", to = "minga.subagent.peek" },
+  { key = "↩", click = "open", to = "minga.conversation" },
+  { key = "q", click = "close", to = "minga.conversation" },
+]
+notes = "]t is next class/module in normal mode today; scope it to this buffer or choose another key."
+
+[[scenario]]
+id = "terminal.capabilities"
+journey = "terminal"
+title = ":checkhealth terminal capability report"
+surfaces = ["buffer:checkhealth"]
+states = []
+frontends = ["tui"]
+platform_only_reason = "Reports terminal features; macOS has no host terminal."
+status = "designed"
+boards = { tui = "V41TuiTerminalPowers.dc.html" }
+exits = [
+  { key = "q", click = "close", to = "edit.working" },
+]
