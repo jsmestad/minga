@@ -71,7 +71,7 @@ The cache rebuilds automatically when you switch projects or detect a new one. U
 
 ## File tree visual quality
 
-The file tree is the project cockpit: it shows root context, hierarchy, active file, selection, focus, dirty buffers, git state, diagnostics, and common actions in one surface. See [File Tree Visual Spec](https://github.com/jsmestad/minga/blob/main/docs/FILE_TREE_VISUAL_SPEC.md) for the shared visual target and review checklist used by the file-tree polish epic.
+The file tree is the project cockpit: it shows root context, hierarchy, active file, selection, focus, dirty buffers, git state, diagnostics, and common actions in one surface.
 
 ## Architecture
 
