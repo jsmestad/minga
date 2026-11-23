@@ -8,21 +8,18 @@ defmodule MingaEditor.Input.FileTreeFocusTest do
   alias Minga.Config.Options
   alias Minga.Test.HeadlessPort
   alias MingaEditor.FocusOwner
-  alias MingaEditor.FocusTree.Node, as: FocusNode
-  alias MingaEditor.Input.FileTreeHandler
   alias MingaEditor.Layout
 
   @moduletag :tmp_dir
 
   # Each row focuses the tree while the composer holds focus in Insert. The
   # first command opens an unloaded tree, the second reveals a hidden loaded
-  # tree, and the sidebar and mouse rows focus a visible tree. Rows that need a
-  # loaded tree re-enter the composer with a prompt click after loading it.
+  # tree, and the sidebar row focuses a visible tree. Rows that need a loaded
+  # tree re-enter the composer with a prompt click after loading it.
   @entry_points [
     command_open: :unloaded,
     command_reveal: :hidden,
-    sidebar_activate: :visible,
-    mouse_click: :visible
+    sidebar_activate: :visible
   ]
 
   for {entry, tree} <- @entry_points do
@@ -58,6 +55,28 @@ defmodule MingaEditor.Input.FileTreeFocusTest do
 
     assert %{input_focused?: true, prompt: "draft"} = agent_chat(ctx)
     assert %{surface: :agent} = FocusOwner.derive(editor_state(ctx))
+    assert %{visible?: true, focused?: false} = file_tree(ctx)
+  end
+
+  test "SPC w l from the focused tree focuses the composer and SPC w h returns to the tree", %{
+    tmp_dir: dir
+  } do
+    ctx = open_editor(dir)
+    send_keys_sync(ctx, "<SPC>an")
+    focus_tree(ctx, :command_open)
+    assert %{focused?: true} = file_tree(ctx)
+
+    send_keys_sync(ctx, "<SPC>wl")
+
+    assert %{surface: :agent} = FocusOwner.derive(editor_state(ctx))
+    assert %{input_focused?: true} = agent_chat(ctx)
+    assert %{visible?: true, focused?: false} = file_tree(ctx)
+
+    send_keys_sync(ctx, "<SPC>wh")
+
+    assert %{surface: :file_tree} = FocusOwner.derive(editor_state(ctx))
+    assert %{input_focused?: false} = agent_chat(ctx)
+    assert %{focused?: true} = file_tree(ctx)
   end
 
   defp open_editor(dir) do
@@ -100,20 +119,6 @@ defmodule MingaEditor.Input.FileTreeFocusTest do
 
   defp focus_tree(ctx, :sidebar_activate),
     do: send_gui_action(ctx, {:sidebar_action, "file_tree", "file_tree", "activate"})
-
-  # The semantic GUI layout reports no file-tree rect, so the router never
-  # builds a tree node to hit. Drive the node handler in the Editor process
-  # with a header-row click, which focuses the tree without activating an entry.
-  defp focus_tree(ctx, :mouse_click) do
-    node = %FocusNode{id: {:sidebar, "file_tree"}, content_type: :file_tree, rect: {0, 0, 30, 20}}
-
-    :sys.replace_state(ctx.editor, fn state ->
-      {:handled, state} =
-        FileTreeHandler.handle_mouse_at_node(state, node, 0, 1, :left, 0, :press, 1)
-
-      state
-    end)
-  end
 
   # Clicks the last row of the Agent chat window, which is the composer.
   defp click_prompt(ctx) do

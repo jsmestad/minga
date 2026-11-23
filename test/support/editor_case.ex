@@ -483,6 +483,13 @@ defmodule Minga.Test.EditorCase do
     HeadlessPort.agent_chat(port)
   end
 
+  @doc "Returns the file tree sidebar decoded from the latest committed semantic frame."
+  @spec file_tree(editor_ctx()) :: map() | nil
+  def file_tree(%{port: port} = ctx) do
+    assert_rendering_enabled!(ctx, "file_tree/1")
+    HeadlessPort.file_tree(port)
+  end
+
   @doc "Sends each character in the string as a key press, waiting after each."
   @spec type_text(editor_ctx(), String.t()) :: :ok
   def type_text(ctx, text) do

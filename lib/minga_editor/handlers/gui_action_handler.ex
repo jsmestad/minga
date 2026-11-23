@@ -60,7 +60,6 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   alias MingaEditor.State.Operation
   alias MingaEditor.State.OperationFeedback
   alias MingaEditor.State.Buffers
-  alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.Search, as: SearchData
   alias MingaEditor.State.Tab
   alias MingaEditor.State.Tab.Context, as: TabContext
@@ -460,8 +459,10 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
       nil when sidebar_id == "git_status" ->
         state
 
+      # Startup registers the file tree and observatory, so every built-in
+      # sidebar has an entry and a missing id is an unsupported action.
       nil ->
-        dispatch_missing_registered_sidebar_action(state, sidebar_id, kind, action)
+        ignored_sidebar_action(state, sidebar_id, kind, action)
 
       _sidebar ->
         Sidebar.dispatch_action(sidebar_registry, state, sidebar_id, action, %{kind: kind})
@@ -860,113 +861,6 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
       state
     end
   end
-
-  @spec dispatch_missing_registered_sidebar_action(
-          EditorState.t(),
-          String.t(),
-          String.t(),
-          String.t()
-        ) ::
-          EditorState.t()
-  defp dispatch_missing_registered_sidebar_action(state, sidebar_id, kind, action) do
-    if builtin_sidebar_id?(sidebar_id) do
-      Minga.Log.warning(
-        :editor,
-        "Sidebar registry missing #{sidebar_id}; using built-in #{action} fallback"
-      )
-
-      dispatch_sidebar_action(state, sidebar_id, kind, action)
-    else
-      ignored_sidebar_action(state, sidebar_id, kind, action)
-    end
-  end
-
-  @spec builtin_sidebar_id?(String.t()) :: boolean()
-  defp builtin_sidebar_id?(sidebar_id),
-    do: sidebar_id in ["file_tree", "observatory"]
-
-  @spec dispatch_sidebar_action(EditorState.t(), String.t(), String.t(), String.t()) ::
-          EditorState.t()
-  defp dispatch_sidebar_action(state, sidebar_id, kind, "toggle") do
-    state
-    |> dispatch_sidebar_toggle(sidebar_id, kind)
-    |> remember_visible_sidebar(sidebar_id)
-  end
-
-  defp dispatch_sidebar_action(state, sidebar_id, kind, "activate") do
-    state
-    |> dispatch_sidebar_activate(sidebar_id, kind)
-    |> remember_visible_sidebar(sidebar_id)
-  end
-
-  defp dispatch_sidebar_action(state, sidebar_id, kind, action) do
-    ignored_sidebar_action(state, sidebar_id, kind, action)
-  end
-
-  @spec dispatch_sidebar_toggle(EditorState.t(), String.t(), String.t()) :: EditorState.t()
-  defp dispatch_sidebar_toggle(state, "file_tree", _kind),
-    do: Commands.FileTree.toggle(state)
-
-  defp dispatch_sidebar_toggle(state, "observatory", _kind) do
-    state
-    |> Commands.execute(:toggle_beam_observatory)
-    |> normalize_command_result()
-  end
-
-  defp dispatch_sidebar_toggle(state, sidebar_id, kind),
-    do: ignored_sidebar_action(state, sidebar_id, kind, "toggle")
-
-  @spec dispatch_sidebar_activate(EditorState.t(), String.t(), String.t()) :: EditorState.t()
-  defp dispatch_sidebar_activate(state, "file_tree", kind) do
-    if sidebar_visible?(state, "file_tree"),
-      do: focus_visible_sidebar(state, "file_tree"),
-      else: dispatch_sidebar_toggle(state, "file_tree", kind)
-  end
-
-  defp dispatch_sidebar_activate(state, "observatory", kind) do
-    if sidebar_visible?(state, "observatory"),
-      do: focus_visible_sidebar(state, "observatory"),
-      else: dispatch_sidebar_toggle(state, "observatory", kind)
-  end
-
-  defp dispatch_sidebar_activate(state, sidebar_id, kind),
-    do: ignored_sidebar_action(state, sidebar_id, kind, "activate")
-
-  @spec focus_visible_sidebar(EditorState.t(), String.t()) :: EditorState.t()
-  defp focus_visible_sidebar(state, "file_tree") do
-    state |> Commands.FileTree.focus_tree() |> Layout.invalidate()
-  end
-
-  defp focus_visible_sidebar(state, "observatory") do
-    file_tree = FileTreeState.unfocus(state.workspace.file_tree)
-
-    workspace =
-      state.workspace
-      |> State.set_file_tree(file_tree)
-      |> State.set_keymap_scope(:editor)
-
-    %{state | workspace: workspace}
-    |> Layout.invalidate()
-  end
-
-  @spec remember_visible_sidebar(EditorState.t(), String.t()) :: EditorState.t()
-  defp remember_visible_sidebar(state, sidebar_id) do
-    if sidebar_visible?(state, sidebar_id) do
-      SidebarWorkflow.select(state, sidebar_id)
-    else
-      SidebarWorkflow.select(state, nil)
-    end
-  end
-
-  @spec sidebar_visible?(EditorState.t(), String.t()) :: boolean()
-  defp sidebar_visible?(state, "file_tree") do
-    state.workspace.file_tree
-    |> FileTreeState.status()
-    |> FileTreeState.visible_status?()
-  end
-
-  defp sidebar_visible?(state, "observatory"), do: SidebarWorkflow.observatory_visible?(state)
-  defp sidebar_visible?(_state, _sidebar_id), do: false
 
   @spec ignored_sidebar_action(EditorState.t(), String.t(), String.t(), String.t()) ::
           EditorState.t()
