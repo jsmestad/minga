@@ -34,7 +34,7 @@ func TestFailedStartShowsTheBEAMRemedyAndSendsItOnClick(t *testing.T) {
 		{protocol.AgentStartRemedy{Kind: protocol.AgentStartRemedyRetry, Label: "Retry", KeyHint: "r"}, "Agent could not start"},
 		{protocol.AgentStartRemedy{Kind: protocol.AgentStartRemedySetUpProvider, Label: "Set up provider", KeyHint: "s"}, "Agent needs setup"},
 	} {
-		for _, size := range [][2]int{{80, 24}, {44, 24}} {
+		for _, size := range [][2]int{{120, 30}, {80, 24}, {44, 24}} {
 			t.Run(fmt.Sprintf("%s/%dx%d", fixture.remedy.Label, size[0], size[1]), func(t *testing.T) {
 				model, out := newFailedStartModel(t, fixture.remedy, "The Agent took too long to start.")
 				updated, _ := model.Update(tea.WindowSizeMsg{Width: size[0], Height: size[1]})
@@ -48,6 +48,12 @@ func TestFailedStartShowsTheBEAMRemedyAndSendsItOnClick(t *testing.T) {
 				}
 				if strings.Contains(text, "Error") || strings.Contains(text, "Resolving model") {
 					t.Fatalf("failed start still reads as an error:\n%s", text)
+				}
+				if strings.Contains(text, "Enter send") {
+					t.Fatalf("composer hint says Enter sends while Enter runs the remedy:\n%s", text)
+				}
+				if size[0] == 120 && !strings.Contains(text, "Enter "+strings.ToLower(fixture.remedy.Label)) {
+					t.Fatalf("composer hint does not name the remedy Enter runs:\n%s", text)
 				}
 
 				_ = model.View()

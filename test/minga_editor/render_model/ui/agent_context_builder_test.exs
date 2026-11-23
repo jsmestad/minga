@@ -109,7 +109,7 @@ defmodule MingaEditor.RenderModel.UI.AgentContextBuilderTest do
                ctx |> AgentContextBuilder.build() |> AgentContextEncoder.encode(caches)
     end
 
-    test "a failed start needs the user instead of showing an error" do
+    test "a failed start needs the user and reads its headline then its cause" do
       agent = AgentState.set_status(%AgentState{}, :error)
       shell = TraditionalState.replace_agent(%TraditionalState{}, agent)
       request = MingaEditor.Agent.StartRequest.default()
@@ -120,8 +120,15 @@ defmodule MingaEditor.RenderModel.UI.AgentContextBuilderTest do
           ] do
         ui = UIState.fail_start(UIState.new(), failure)
 
-        assert %AgentContext{visible: true, status: :needs_you, task: ^task} =
-                 AgentContextBuilder.build(context(ui, shell))
+        assert %AgentContext{
+                 visible: true,
+                 status: :needs_you,
+                 task: ^task,
+                 progress: %{active_action: action}
+               } = AgentContextBuilder.build(context(ui, shell))
+
+        # The card reads headline then cause, never the headline twice.
+        assert action == failure.message
       end
     end
 

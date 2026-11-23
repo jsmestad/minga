@@ -19,7 +19,7 @@ defmodule MingaEditor.RenderModel.UI.AgentContextBuilder do
     if visible?(activity, status) do
       %AgentContext{
         visible: true,
-        task: task(activity, status, action),
+        task: card_task(ctx, activity, status, action),
         dispatch_timestamp: activity.started_at,
         status: status,
         can_approve: false,
@@ -91,7 +91,7 @@ defmodule MingaEditor.RenderModel.UI.AgentContextBuilder do
          %Context{workspace: %{agent_ui: %{chat_lifecycle: {:failed, failure}}}},
          _activity
        ),
-       do: {:needs_you, start_failure_action(failure)}
+       do: {:needs_you, failure.message}
 
   defp status_and_action(
          %Context{intent: %{frame: %{shell_state: %TraditionalState{} = shell_state}}} = ctx,
@@ -106,10 +106,24 @@ defmodule MingaEditor.RenderModel.UI.AgentContextBuilder do
   defp status_and_action(%Context{}, activity),
     do: {:idle, active_action(activity, nil)}
 
-  @spec start_failure_action(StartFailure.t()) :: String.t()
-  defp start_failure_action(%StartFailure{remedy: :set_up_provider}), do: "Agent needs setup"
-  defp start_failure_action(%StartFailure{remedy: nil}), do: "Agent unavailable"
-  defp start_failure_action(%StartFailure{}), do: "Agent could not start"
+  # A failed start titles the card with its headline; the cause sentence is the
+  # card's action, so the two never repeat each other.
+  @spec card_task(Context.t(), Activity.t(), AgentContext.status(), String.t() | nil) ::
+          String.t()
+  defp card_task(
+         %Context{workspace: %{agent_ui: %{chat_lifecycle: {:failed, failure}}}},
+         _activity,
+         _status,
+         _action
+       ),
+       do: start_failure_headline(failure)
+
+  defp card_task(_ctx, activity, status, action), do: task(activity, status, action)
+
+  @spec start_failure_headline(StartFailure.t()) :: String.t()
+  defp start_failure_headline(%StartFailure{remedy: :set_up_provider}), do: "Agent needs setup"
+  defp start_failure_headline(%StartFailure{remedy: nil}), do: "Agent unavailable"
+  defp start_failure_headline(%StartFailure{}), do: "Agent could not start"
 
   @spec visible?(Activity.t(), AgentContext.status()) :: boolean()
   defp visible?(%Activity{}, status) when status in [:needs_you, :working, :iterating, :errored],
