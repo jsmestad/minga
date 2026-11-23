@@ -67,26 +67,28 @@ extension PreviewRegistry {
         .environment(theme)
     }
 
-    /// Model rows carry readiness and plan usage in a status chip, one row per tone, with the current model marked and its description on a second line. The setup row has a chip too; the long path row keeps its file name inline.
+    /// Model rows grouped by route under section headers, with readiness and plan usage in a status chip, one row per tone, the current model marked and its description on a second line. The setup row has a chip too; the ungrouped long path row keeps its file name inline and has no header.
     static func pickerModelRowsPreview() -> some View {
         let theme = PreviewFixtures.theme()
         let state = PickerState()
         let active: UInt8 = 0x08
         let tail = "1000k ctx · thinking medium · tools, images, streaming"
+        let claude = "Claude (subscription)"
         let rows: [Wire.PickerItem] = [
-            Wire.PickerItem(iconColor: 0, flags: active, label: "Claude Opus 4", description: "Claude (subscription) · Claude Max · 5h limit resets 3:59 PM · \(tail)", annotation: "★ favorite", matchPositions: [], activationID: 1, status: "Ready · 45%", statusTone: .ready),
-            Wire.PickerItem(iconColor: 0, flags: 0, label: "Claude Sonnet 4", description: "Claude (subscription) · Claude Max · 5h limit resets 3:40 PM · \(tail)", annotation: "", matchPositions: [], activationID: 2, status: "Ready · 82%", statusTone: .warn),
-            Wire.PickerItem(iconColor: 0, flags: 0, label: "Claude Opus 4.1", description: "Claude (subscription) · Claude Max · 5h limit resets Sun 12:32 AM · \(tail)", annotation: "", matchPositions: [], activationID: 3, status: "Limit reached", statusTone: .error),
-            Wire.PickerItem(iconColor: 0, flags: 0, label: "Claude Haiku 4", description: "Claude (subscription) · Claude Max · checking plan usage · 200k ctx · thinking fixed", annotation: "", matchPositions: [], activationID: 4, status: "Checking…", statusTone: .checking),
-            Wire.PickerItem(iconColor: 0, flags: 0, label: "Claude Haiku 3.5", description: "Claude (subscription) · Run claude login in a terminal, then reopen /model. · 200k ctx", annotation: "", matchPositions: [], activationID: 5, status: "Unavailable", statusTone: .error),
-            Wire.PickerItem(iconColor: 0, flags: 0, label: "Claude Sonnet 4 (API)", description: "Anthropic API · api@example.com · $3/15 per MTok · 200k ctx · thinking medium", annotation: "", matchPositions: [], activationID: 6, status: "Ready", statusTone: .ready),
-            Wire.PickerItem(iconColor: 0, flags: 0, label: "Fixture Model", description: "Fixture Route · 200k ctx · thinking off · tools, images, streaming", annotation: "", matchPositions: [], activationID: 7, status: "Not checked", statusTone: .neutral),
-            Wire.PickerItem(iconColor: 0, flags: 0, label: "Use Claude subscription", description: "Uses the Claude app login. Minga never sees your login. · Claude Max", annotation: "", matchPositions: [], activationID: 8, status: "Ready", statusTone: .ready),
             Wire.PickerItem(iconColor: 0x98BE65, flags: 0, label: "\u{f0e7}picker_item_row_test.exs", description: "test/minga_editor/render_model/ui/picker/agent_model_source/description_overflow/picker_item_row_test.exs", annotation: "", matchPositions: [], activationID: 9),
+            Wire.PickerItem(iconColor: 0, flags: active, label: "Claude Opus 4", description: "Claude Max · 5h limit resets 3:59 PM · \(tail)", annotation: "★ favorite", matchPositions: [], activationID: 1, status: "Ready · 45%", statusTone: .ready, group: claude),
+            Wire.PickerItem(iconColor: 0, flags: 0, label: "Claude Sonnet 4", description: "Claude Max · 5h limit resets 3:40 PM · \(tail)", annotation: "", matchPositions: [], activationID: 2, status: "Ready · 82%", statusTone: .warn, group: claude),
+            Wire.PickerItem(iconColor: 0, flags: 0, label: "Claude Opus 4.1", description: "Claude Max · 5h limit resets Sun 12:32 AM · \(tail)", annotation: "", matchPositions: [], activationID: 3, status: "Limit reached", statusTone: .error, group: claude),
+            Wire.PickerItem(iconColor: 0, flags: 0, label: "Claude Haiku 4", description: "Claude Max · checking plan usage · 200k ctx · thinking fixed", annotation: "", matchPositions: [], activationID: 4, status: "Checking…", statusTone: .checking, group: claude),
+            Wire.PickerItem(iconColor: 0, flags: 0, label: "Claude Haiku 3.5", description: "Run claude login in a terminal, then reopen /model. · 200k ctx", annotation: "", matchPositions: [], activationID: 5, status: "Unavailable", statusTone: .error, group: claude),
+            Wire.PickerItem(iconColor: 0, flags: 0, label: "Claude Sonnet 4 (API)", description: "$3/15 per MTok · 200k ctx · thinking medium", annotation: "", matchPositions: [], activationID: 6, status: "Ready", statusTone: .ready, group: "anthropic API"),
+            Wire.PickerItem(iconColor: 0, flags: 0, label: "Fixture Model", description: "200k ctx · thinking off · tools, images, streaming", annotation: "", matchPositions: [], activationID: 7, status: "Not checked", statusTone: .neutral, group: "Fixture Route"),
+            Wire.PickerItem(iconColor: 0, flags: 0, label: "Use Claude subscription", description: "Uses the Claude app login. Minga never sees your login. · Claude Max", annotation: "", matchPositions: [], activationID: 8, status: "Ready", statusTone: .ready, group: "Routes"),
+            Wire.PickerItem(iconColor: 0, flags: 0, label: "Connect another provider…", description: "Sign in, manage API keys, or retry the connection.", annotation: "", matchPositions: [], activationID: 10, group: "Connections"),
         ]
         state.update(
             visible: true,
-            selectedIndex: 1,
+            selectedIndex: 2,
             filteredCount: UInt16(rows.count),
             totalCount: UInt16(rows.count),
             markedCount: 0,
