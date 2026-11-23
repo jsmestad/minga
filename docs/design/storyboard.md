@@ -37,6 +37,30 @@ These invariants are checked in CI:
 
 A random key-walk property test runs on top: it presses keys from the current scope and asserts invariants 2 and 6 after every step.
 
+## Running the inventory checks
+
+The inventory lives in [`scenarios.toml`](scenarios.toml). Three scripts in [`design/tools/storyboard/`](../../design/tools/storyboard/) read it. They need Python 3.11 or newer and no packages.
+
+```bash
+python3 design/tools/storyboard/check.py
+OUT_DIR=/tmp/minga-boards python3 design/tools/storyboard/inventory.py
+OUT_DIR=/tmp/minga-boards python3 design/tools/storyboard/flowmap.py
+```
+
+`check.py` prints every violation of the flow invariants it can check from the inventory and exits with status 1 if there are any:
+
+- exits that point at a scenario that does not exist;
+- scenarios you cannot reach from a cold start by keys, and separately by clicks;
+- dead ends: scenarios with no way back to a resting view within 3 presses of `esc` or `q` (or an exit marked `back`, such as `⌃\ ⌃N` in a terminal);
+- lists without an empty state;
+- transient surfaces with an exit that has a key but no click, or a click but no key, unless the exit says why with `keyboard_only`.
+
+Scenarios that happen to you rather than places you go (errors, notifications, Minga asking a question) set `reached_by` and count as reachable. A list reaches its empty state the same way it is reached.
+
+`inventory.py` draws every scenario as a tile, grouped by journey and coloured by status. `flowmap.py` draws the designed scenarios as a graph: each edge carries its keys, each node lists the keys that return to editing (⤺), and dead ends, scenarios without a mouse path and scenarios without a key path are marked. Both write `.dc.html` boards for the design canvas.
+
+The checker is the design-time version of the flow-graph invariants above. When the storyboard factory exists, the same rules run against the real editor.
+
 ## Journey strips
 
 The main journeys run as scripted flow tests that also emit a strip of frames for the storyboard page:

@@ -19,6 +19,7 @@ Each script writes `.dc.html` board files to `OUT_DIR`, which defaults to `./out
 |---|---|
 | `tuigen/` | Terminal UI boards drawn on a real cell grid, the way Lip Gloss and Bubble Tea render: `edit.py` (editing and which-key), `tasks.py`, `review.py`, `talkopen.py` (conversation and find file), `powers.py` (terminal capabilities), `subagent.py`. `grid.py` holds the cell grid, borders, colour downgrades to 256 and 16 colours, and the two-tone twist. |
 | `v4gen/` | macOS boards: `gen41.py` (editing, which-key, tasks, keys), `gen_shell.py` (the built-in terminal on macOS and in the TUI). `gen.py` is the earlier V4 round, kept for comparison. |
+| `storyboard/` | The storyboard inventory tools, which read [`docs/design/scenarios.toml`](../../docs/design/scenarios.toml): `check.py` (flow invariants), `inventory.py` (the inventory board) and `flowmap.py` (the flow map). Run them from the repository root. See [storyboard.md](../../docs/design/storyboard.md#running-the-inventory-checks). |
 | `subagentgen/` | `mac.py`, the macOS subagent peek. It reads `V41Talk.dc.html` from `OUT_DIR` as its page template, so that board must exist there first. |
 
 ## Rules for changes
