@@ -241,6 +241,24 @@ defmodule Minga.Buffer.Process do
   end
 
   @doc """
+  Shifts every line from `start_line` to `end_line` by one indentation level as one edit.
+
+  The shift is one undo step and one document rebuild. Change-log consumers and `:buffer_changed` subscribers still receive one delta per changed line, each with its own version and sequence, in the order a line-by-line edit would have produced them. See `Minga.Buffer.Operation.shift_lines/4`.
+  """
+  @spec shift_lines(
+          GenServer.server(),
+          non_neg_integer(),
+          non_neg_integer(),
+          Operation.line_shift(),
+          EditSource.t()
+        ) :: :ok | {:error, :read_only}
+  def shift_lines(server, start_line, end_line, shift, source \\ EditSource.user())
+      when is_integer(start_line) and start_line >= 0 and is_integer(end_line) and
+             end_line >= start_line do
+    GenServer.call(server, {:shift_lines, start_line, end_line, shift, source})
+  end
+
+  @doc """
   Atomically finds and replaces text in the buffer.
 
   The search, ambiguity check, and replacement all happen inside a single
@@ -1428,6 +1446,24 @@ defmodule Minga.Buffer.Process do
       apply_operation(state, {:batch, doc, patches}, source, {:batch, undo_source, :clear})
 
     {:reply, :ok, state}
+  end
+
+  def handle_call(
+        {:shift_lines, _start, _end, _shift, _source},
+        _from,
+        %{read_only: true} = state
+      ) do
+    {:reply, {:error, :read_only}, state}
+  end
+
+  def handle_call({:shift_lines, start_line, end_line, shift, source}, _from, state) do
+    case Operation.shift_lines(state.document, start_line, end_line, shift) do
+      :unchanged ->
+        {:reply, :ok, state}
+
+      {:shifted, new_doc, deltas, patch} ->
+        {:reply, :ok, record_shift(state, new_doc, deltas, patch, source)}
+    end
   end
 
   # ── Find and Replace ──
@@ -2943,7 +2979,16 @@ defmodule Minga.Buffer.Process do
   # Defers a :buffer_changed broadcast with delta and source to a
   # subsequent handle_info turn. Same pattern as defer_content_replaced.
   @spec defer_buffer_changed(state(), EditDelta.t() | nil, EditSource.t()) :: :ok
-  defp defer_buffer_changed(state, delta, source) do
+  defp defer_buffer_changed(state, delta, source),
+    do: defer_buffer_changed(state, delta, source, ChangeLog.sequence(state.change_log))
+
+  @spec defer_buffer_changed(
+          state(),
+          EditDelta.t() | nil,
+          EditSource.t(),
+          ChangeLog.sequence()
+        ) :: :ok
+  defp defer_buffer_changed(state, delta, source, sequence) do
     send(
       self(),
       {:deferred_broadcast, :buffer_changed,
@@ -2952,7 +2997,7 @@ defmodule Minga.Buffer.Process do
          delta: delta,
          source: source,
          version: BufState.version(state),
-         sequence: ChangeLog.sequence(state.change_log)
+         sequence: sequence
        }}
     )
 
@@ -3115,6 +3160,40 @@ defmodule Minga.Buffer.Process do
     |> push_undo(doc, EditSource.to_undo_source(event_source), delta)
     |> mark_dirty()
     |> record_edit(delta, event_source)
+  end
+
+  # A line shift is one undo step, but subscribers see one versioned delta per
+  # changed line: LSP sync drops a delta whose version is not newer than the
+  # one before it, so each delta advances the version exactly as a separate
+  # edit would.
+  @spec record_shift(state(), Document.t(), [EditDelta.t()], UndoPatch.t(), EditSource.t()) ::
+          state()
+  defp record_shift(state, new_doc, deltas, patch, source) do
+    undo_history =
+      UndoHistory.record_edit(
+        state.undo_history,
+        BufState.version(state),
+        patch,
+        EditSource.to_undo_source(source),
+        now_ms()
+      )
+
+    first_sequence = ChangeLog.sequence(state.change_log) + 1
+
+    state = %{
+      state
+      | document: new_doc,
+        undo_history: undo_history,
+        change_log: ChangeLog.record_changes(state.change_log, deltas)
+    }
+
+    deltas
+    |> Enum.with_index(first_sequence)
+    |> Enum.reduce(state, fn {delta, sequence}, acc ->
+      acc |> BufState.mark_dirty() |> track_edit(delta, source, sequence)
+    end)
+    |> schedule_swap_write()
+    |> schedule_auto_save()
   end
 
   @spec apply_operation(state(), operation_result(), EditSource.t(), operation_opts()) :: state()
@@ -3744,10 +3823,17 @@ defmodule Minga.Buffer.Process do
 
   @spec record_edit(state(), EditDelta.t(), EditSource.t()) :: state()
   defp record_edit(state, delta, source) do
+    state = %{state | change_log: ChangeLog.record_change(state.change_log, delta)}
+    track_edit(state, delta, source, ChangeLog.sequence(state.change_log))
+  end
+
+  # Applies one recorded delta to the buffer's derived state and queues its
+  # change event under the delta's own change-log sequence.
+  @spec track_edit(state(), EditDelta.t(), EditSource.t(), ChangeLog.sequence()) :: state()
+  defp track_edit(state, delta, source, sequence) do
     state = %{
       state
-      | change_log: ChangeLog.record_change(state.change_log, delta),
-        conflict_index: ConflictIndex.apply_edit(state.conflict_index, state.document, delta)
+      | conflict_index: ConflictIndex.apply_edit(state.conflict_index, state.document, delta)
     }
 
     # Adjust decoration anchors based on the edit
@@ -3766,7 +3852,7 @@ defmodule Minga.Buffer.Process do
         %{state | decorations: adjusted}
       end
 
-    defer_buffer_changed(state, delta, source)
+    defer_buffer_changed(state, delta, source, sequence)
     state
   end
 
