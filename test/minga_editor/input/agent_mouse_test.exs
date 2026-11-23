@@ -263,6 +263,33 @@ defmodule MingaEditor.Input.AgentMouseTest do
       assert new_state.workspace.agent_ui.panel.input_focused
     end
 
+    test "a terminal click in the composer keeps Insert and Normal, and collapses Visual", %{
+      state: state,
+      rect: rect
+    } do
+      {_row, col, _w, h} = rect
+      input_row = elem(rect, 0) + h - 2
+
+      visual = %Minga.Mode.VisualState{visual_anchor: {0, 0}, visual_type: :char}
+
+      for {before, mode_state, expected} <- [
+            {:insert, nil, :insert},
+            {:normal, nil, :normal},
+            {:visual, visual, :normal}
+          ] do
+        state = %{
+          state
+          | workspace:
+              MingaEditor.Session.State.transition_mode(state.workspace, before, mode_state)
+        }
+
+        clicked = Router.dispatch_mouse(state, input_row, col + 2, :left, 0, :press, 1)
+
+        assert clicked.workspace.agent_ui.panel.input_focused
+        assert Minga.Editing.mode(clicked) == expected, "#{before} click"
+      end
+    end
+
     test "click in agent window focuses it when not active", %{state: state} do
       # The editor window should be active (not the agent)
       # Find the agent window id

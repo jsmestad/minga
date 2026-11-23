@@ -61,7 +61,7 @@ private final class PromptApertureRemovalProbeNSView: NSView {
 @MainActor
 private struct PromptModeObservationProbe: View {
     let state: AgentChatState
-    let changed: AsyncStream<PromptMode>.Continuation
+    let changed: AsyncStream<EditorMode>.Continuation
 
     var body: some View {
         Color.clear.onChange(of: state.promptMode) { _, mode in
@@ -425,7 +425,7 @@ struct AgentPromptPresentationTests {
         let apertureValues = AsyncStream.makeStream(of: CGRect.self, bufferingPolicy: .bufferingNewest(32))
         var preferences = apertureValues.stream.makeAsyncIterator()
         defer { apertureValues.continuation.finish() }
-        let modeValues = AsyncStream.makeStream(of: PromptMode.self, bufferingPolicy: .bufferingNewest(8))
+        let modeValues = AsyncStream.makeStream(of: EditorMode.self, bufferingPolicy: .bufferingNewest(8))
         var modes = modeValues.stream.makeAsyncIterator()
         defer { modeValues.continuation.finish() }
         let helpValues = AsyncStream.makeStream(of: Bool.self, bufferingPolicy: .bufferingNewest(8))
@@ -488,7 +488,7 @@ struct AgentPromptPresentationTests {
         #expect(!aperture.acceptsFirstResponder)
         #expect(!aperture.isAccessibilityElement())
         #expect(aperture.convert(aperture.bounds, to: editor) == placement.rect)
-        for mode in [PromptMode.normal, .visual, .visualLine, .operatorPending, .insert] {
+        for mode in [EditorMode.normal, .visual, .command, .operatorPending, .search, .replace, .insert] {
             gui.agentChatState.promptMode = mode
             let observedMode = await modes.next()
             try #require(observedMode == mode, "The mounted composer must process the mode change")
@@ -653,8 +653,8 @@ struct AgentPromptPresentationTests {
     }
 
     @Test("The four composer controls keep their identities and enablement across prompt modes",
-          arguments: [PromptMode.insert, .normal, .visual, .visualLine, .operatorPending])
-    func completeControls(mode: PromptMode) throws {
+          arguments: [EditorMode.insert, .normal, .visual, .operatorPending, .replace])
+    func completeControls(mode: EditorMode) throws {
         let target = AgentStopTarget(sessionID: "displayed-session", requestID: "displayed-request")
         let state = AgentChatState(prompt: "a multiline\nprompt", promptMode: mode, promptVisibleRows: 2)
         var actions: [AgentPromptView.Action] = []
@@ -683,8 +683,8 @@ struct AgentPromptPresentationTests {
     }
 
     @Test("Awaiting approval retains enabled Stop and draft in every prompt mode",
-          arguments: [PromptMode.insert, .normal, .visual, .visualLine, .operatorPending])
-    func waitingControls(mode: PromptMode) throws {
+          arguments: [EditorMode.insert, .normal, .visual, .operatorPending, .replace])
+    func waitingControls(mode: EditorMode) throws {
         let draft = "unfinished é界\nsecond line"
         let state = AgentChatState(status: .approvalWaiting, prompt: draft, promptCursorLine: 1, promptCursorCol: 4, promptMode: mode, promptVisibleRows: 2)
         let target = AgentStopTarget(sessionID: "waiting-session", requestID: "waiting-request")

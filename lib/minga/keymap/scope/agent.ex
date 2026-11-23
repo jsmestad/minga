@@ -8,7 +8,7 @@ defmodule Minga.Keymap.Scope.Agent do
   fold, go-to, and bracket navigation.
 
   In insert mode (input field focused), printable characters go to the input
-  field. Ctrl+C submits or aborts, ESC returns to normal mode.
+  field. Ctrl+C and ESC return to normal mode; Ctrl+C also aborts a streaming turn.
 
   All bindings are declared as trie data and resolved through the scope
   system. Context-dependent behavior (e.g., `y` copies a code block normally
@@ -222,7 +222,7 @@ defmodule Minga.Keymap.Scope.Agent do
        ]},
       {"Session",
        [
-         {"Ctrl-c", "Abort + restore queued (streaming) / normal mode (idle)"},
+         {"Ctrl-c", "Normal mode (also aborts and restores queued while streaming)"},
          {"Ctrl+Enter", "Queue as follow-up (or submit if idle)"},
          {"Alt+Up", "Dequeue messages back to editor"},
          {"Ctrl-l", "Clear display"},

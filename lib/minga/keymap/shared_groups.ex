@@ -91,7 +91,7 @@ defmodule Minga.Keymap.SharedGroups do
   @spec ctrl_agent_common() :: [binding()]
   def ctrl_agent_common do
     [
-      {~k(C-c), :agent_ctrl_c, "Abort (streaming) or normal mode (idle)"},
+      {~k(C-c), :agent_ctrl_c, "Normal mode (also aborts while streaming)"},
       {~k(C-d), :agent_scroll_half_down, "Scroll down"},
       {~k(C-u), :agent_scroll_half_up, "Scroll up"},
       {~k(C-l), :agent_clear_chat, "Clear chat display"},

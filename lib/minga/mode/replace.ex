@@ -4,7 +4,7 @@ defmodule Minga.Mode.Replace do
 
   Replace mode is entered from Normal mode via `R`. Every printable key
   overwrites the character under the cursor (saving the original so that
-  Backspace can restore it). Pressing **Escape** returns to Normal mode.
+  Backspace can restore it). Pressing **Escape** or **Ctrl+C** returns to Normal mode.
 
   ## Key bindings
 
@@ -13,6 +13,7 @@ defmodule Minga.Mode.Replace do
   | Printable  | Overwrite char at cursor, move forward     |
   | Backspace  | Restore previous character, move backward  |
   | Escape     | Return to Normal mode                      |
+  | Ctrl+C     | Return to Normal mode                      |
   | Arrow keys | Move cursor (without leaving Replace)      |
   """
 
@@ -23,6 +24,7 @@ defmodule Minga.Mode.Replace do
 
   # Special codepoints
   @escape 27
+  @ctrl 0x02
 
   # Arrow key codepoints sent by libvaxis
   @arrow_up 57_352
@@ -40,6 +42,11 @@ defmodule Minga.Mode.Replace do
 
   # Escape → return to Normal mode
   def handle_key({@escape, _mods}, state) do
+    {:transition, :normal, state}
+  end
+
+  # Ctrl+C → return to Normal mode, as in Vim
+  def handle_key({?c, @ctrl}, state) do
     {:transition, :normal, state}
   end
 
