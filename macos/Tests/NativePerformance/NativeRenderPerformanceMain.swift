@@ -734,6 +734,28 @@ private struct NativeRenderPerformanceMain {
             )
             return
         }
+        if CommandLine.arguments.count == 6,
+           CommandLine.arguments[1] == "--protocol-decode-replay",
+           let keyframeRepeats = Int(CommandLine.arguments[5]) {
+            try runProtocolDecodeReplay(
+                capturePath: CommandLine.arguments[2],
+                manifestPath: CommandLine.arguments[3],
+                outputURL: URL(fileURLWithPath: CommandLine.arguments[4]),
+                keyframeRepeats: keyframeRepeats
+            )
+            return
+        }
+        if CommandLine.arguments.count == 6,
+           CommandLine.arguments[1] == "--protocol-decode-loop",
+           let seconds = Int(CommandLine.arguments[5]) {
+            try runProtocolDecodeLoop(
+                capturePath: CommandLine.arguments[2],
+                manifestPath: CommandLine.arguments[3],
+                category: CommandLine.arguments[4],
+                seconds: seconds
+            )
+            return
+        }
         if CommandLine.arguments.count == 3,
            CommandLine.arguments[1] == "--accessibility-measurement-output" {
             let measurement = try accessibilityMeasurement()
@@ -746,7 +768,7 @@ private struct NativeRenderPerformanceMain {
         }
         guard CommandLine.arguments.count == 3,
               CommandLine.arguments[1] == "--measurement-output" else {
-            FileHandle.standardError.write(Data("usage: minga-native-render-performance (--measurement-output | --accessibility-measurement-output | --resource-investigation-output) OUTPUT.json | --frame-staging-replay CAPTURE.packets MANIFEST.json OUTPUT.json\n".utf8))
+            FileHandle.standardError.write(Data("usage: minga-native-render-performance (--measurement-output | --accessibility-measurement-output | --resource-investigation-output) OUTPUT.json | --frame-staging-replay CAPTURE.packets MANIFEST.json OUTPUT.json | --protocol-decode-replay CAPTURE.packets MANIFEST.json OUTPUT.json KEYFRAME_REPEATS | --protocol-decode-loop CAPTURE.packets MANIFEST.json CATEGORY SECONDS\n".utf8))
             exit(2)
         }
         guard MTLCreateSystemDefaultDevice() != nil else {

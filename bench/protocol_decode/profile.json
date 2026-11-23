@@ -1,0 +1,68 @@
+{
+  "Agent transcript delta, streaming": {
+    "samples": 6077,
+    "shares": {
+      "allocation_and_arc": 0.09116340299489879,
+      "decoder_bodies": 0.1449728484449564,
+      "model_build": 0.0,
+      "resource_accounting": 0.20585815369425703,
+      "utf8_strings": 0.27365476386374854,
+      "wire_read_helpers": 0.2843508310021392
+    }
+  },
+  "Agent transcript replace, 10,002 messages": {
+    "samples": 5733,
+    "shares": {
+      "allocation_and_arc": 0.19710448281876852,
+      "decoder_bodies": 0.10832025117739404,
+      "model_build": 0.0,
+      "resource_accounting": 0.2508285365428223,
+      "utf8_strings": 0.0927960927960928,
+      "wire_read_helpers": 0.3509506366649224
+    }
+  },
+  "Row delta, scroll": {
+    "samples": 6532,
+    "shares": {
+      "allocation_and_arc": 0.06751377832210655,
+      "decoder_bodies": 0.23285364360073485,
+      "model_build": 0.0,
+      "resource_accounting": 0.10303123086344151,
+      "utf8_strings": 0.1501837109614207,
+      "wire_read_helpers": 0.4464176362522964
+    }
+  },
+  "Row delta, typing": {
+    "samples": 6451,
+    "shares": {
+      "allocation_and_arc": 0.07115175941714463,
+      "decoder_bodies": 0.21562548442102,
+      "model_build": 0.0,
+      "resource_accounting": 0.11812122151604403,
+      "utf8_strings": 0.1488141373430476,
+      "wire_read_helpers": 0.44628739730274375
+    }
+  },
+  "Window content, 2,000-line keyframe": {
+    "samples": 4486,
+    "shares": {
+      "allocation_and_arc": 0.00780205082478823,
+      "decoder_bodies": 0.00780205082478823,
+      "model_build": 0.8765046812304949,
+      "resource_accounting": 0.024743646901471242,
+      "utf8_strings": 0.016049933125278644,
+      "wire_read_helpers": 0.06709763709317877
+    }
+  },
+  "Window content, 50,000-line keyframe": {
+    "samples": 4470,
+    "shares": {
+      "allocation_and_arc": 0.0071588366890380315,
+      "decoder_bodies": 0.006935123042505592,
+      "model_build": 0.8644295302013423,
+      "resource_accounting": 0.028635346756152126,
+      "utf8_strings": 0.021252796420581657,
+      "wire_read_helpers": 0.07158836689038031
+    }
+  }
+}
