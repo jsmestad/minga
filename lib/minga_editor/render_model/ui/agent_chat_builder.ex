@@ -14,6 +14,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
   alias MingaEditor.Agent.RetainedOutputTarget
   alias MingaEditor.Agent.SemanticUI.Registry, as: SemanticUIRegistry
   alias MingaEditor.Agent.StartFailure
+  alias MingaEditor.Agent.WorkspaceStatus
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.UIState.Panel
   alias MingaEditor.Agent.UIState.TranscriptProjection
@@ -83,7 +84,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
     %AgentChat{
       visible?: true,
       lifecycle: presentation,
-      status: chat_status(shell_agent, presentation),
+      status: chat_status(ctx.intent.frame.shell_state, agent_ui, presentation),
       model_name: UIState.model_label(agent_ui),
       thinking_level: panel.thinking_level,
       prompt: prompt_text,
@@ -237,11 +238,14 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
   defp start_remedy(kind, label, focus),
     do: %StartRemedy{kind: kind, label: label, key_hint: AgentScope.start_remedy_key_hint(focus)}
 
-  # A failed start needs the user; it is not an execution error.
-  @spec chat_status(MingaEditor.State.Agent.t(), AgentChat.lifecycle()) :: atom()
-  defp chat_status(agent, :conversation), do: MingaEditor.State.Agent.display_status(agent)
-  defp chat_status(_agent, {:failed, _reason, _remedy}), do: :needs_you
-  defp chat_status(_agent, _unavailable), do: :idle
+  # A live conversation shows the same Agent status as the workspace pill and
+  # the activity strip; a failed start needs the user; no session is idle.
+  @spec chat_status(term(), UIState.t(), AgentChat.lifecycle()) :: atom()
+  defp chat_status(shell_state, agent_ui, :conversation),
+    do: WorkspaceStatus.active(shell_state, agent_ui)
+
+  defp chat_status(_shell_state, _agent_ui, {:failed, _reason, _remedy}), do: :needs_you
+  defp chat_status(_shell_state, _agent_ui, _unavailable), do: :idle
 
   @spec submission_generation(PromptFrame.t()) :: pos_integer() | nil
   defp submission_generation(%PromptFrame{

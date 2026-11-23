@@ -2,7 +2,7 @@ defmodule MingaEditor.Agent.WorkspaceStatus do
   @moduledoc """
   Decides the one Agent status that every surface shows for a workspace.
 
-  The workspace pill, the Agent tab dot, and the Agent activity strip all read this decision, so they cannot disagree. Each surface keeps its own mapping from this status to its wire enum.
+  The workspace pill, the Agent tab dot, the Agent activity strip, the status bar's Agent indicator and the Agent chat header all read this decision, so they cannot disagree. Each surface keeps its own mapping from this status to its wire enum.
 
   The rules, in order:
 
@@ -16,6 +16,7 @@ defmodule MingaEditor.Agent.WorkspaceStatus do
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.State.Agent, as: AgentState
+  alias MingaEditor.State.TabBar
   alias MingaEditor.State.Workspace
   alias MingaEditor.State.Workspace.Agent, as: WorkspaceAgent
   alias MingaEditor.State.Workspace.RemoteSession
@@ -38,6 +39,25 @@ defmodule MingaEditor.Agent.WorkspaceStatus do
   def resolve(%Workspace{payload: %WorkspaceAgent{agent_status: status}}, nil, _ui), do: status
   def resolve(_workspace, %AgentState{} = live, _ui), do: live_status(live)
   def resolve(_workspace, nil, _ui), do: :idle
+
+  @doc """
+  Returns the Agent status of the active workspace in `shell_state`, with `ui` as its live Agent UI state.
+
+  Surfaces that show only the active workspace (the activity strip, the status bar, the chat header) call this.
+  """
+  @spec active(term(), UIState.t() | nil) :: t()
+  def active(shell_state, ui),
+    do: shell_state |> active_workspace() |> resolve(live_agent(shell_state), ui)
+
+  @spec active_workspace(term()) :: Workspace.t() | nil
+  defp active_workspace(%TraditionalState{} = shell_state) do
+    case TraditionalState.tab_bar(shell_state) do
+      %TabBar{} = tab_bar -> TabBar.active_workspace(tab_bar)
+      nil -> nil
+    end
+  end
+
+  defp active_workspace(_shell_state), do: nil
 
   @doc "Returns the live shell presentation cache from a shell state snapshot, or nil for another shell."
   @spec live_agent(term()) :: AgentState.t() | nil

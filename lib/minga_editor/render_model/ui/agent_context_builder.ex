@@ -13,8 +13,6 @@ defmodule MingaEditor.RenderModel.UI.AgentContextBuilder do
   alias MingaEditor.Frontend.Emit.Context
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.State.Agent, as: AgentState
-  alias MingaEditor.State.TabBar
-  alias MingaEditor.State.Workspace
 
   @spec build(Context.t() | term()) :: AgentContext.t()
   def build(%Context{workspace: %{agent_ui: %{chat_lifecycle: :unavailable}}}), do: hidden()
@@ -81,20 +79,9 @@ defmodule MingaEditor.RenderModel.UI.AgentContextBuilder do
   @spec workspace_status(term(), UIState.t() | nil) :: AgentContext.status()
   defp workspace_status(shell_state, ui) do
     shell_state
-    |> active_workspace()
-    |> WorkspaceStatus.resolve(WorkspaceStatus.live_agent(shell_state), ui)
+    |> WorkspaceStatus.active(ui)
     |> context_status()
   end
-
-  @spec active_workspace(term()) :: Workspace.t() | nil
-  defp active_workspace(%TraditionalState{} = shell_state) do
-    case TraditionalState.tab_bar(shell_state) do
-      %TabBar{} = tab_bar -> TabBar.active_workspace(tab_bar)
-      nil -> nil
-    end
-  end
-
-  defp active_workspace(_shell_state), do: nil
 
   # A failed start explains its cause; a pending question asks for an answer.
   @spec action(Context.t(), Activity.t()) :: String.t() | nil

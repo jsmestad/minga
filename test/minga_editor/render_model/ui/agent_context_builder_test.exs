@@ -192,6 +192,36 @@ defmodule MingaEditor.RenderModel.UI.AgentContextBuilderTest do
       assert %AgentContext{visible: true, status: :needs_you} = AgentContextBuilder.build(ctx)
     end
 
+    test "agree, with the status bar and chat header, that a pending question needs the user" do
+      {:ok, question} = MingaAgent.Question.new("Which file?", ["a.ex", "b.ex"])
+
+      target = %MingaAgent.Question.Target{
+        session_id: "pill-fixture",
+        request_id: "request",
+        checkpoint_id: "checkpoint",
+        tool_call_id: "tool-call"
+      }
+
+      asking =
+        %AgentState{}
+        |> AgentState.set_status(:thinking)
+        |> AgentState.project_question(self(), {target, question})
+
+      ctx =
+        agent_workspace_context(asking, UIState.new(), active_tab: 3, stored_status: :thinking)
+
+      assert workspace_status(ctx) == :needs_you
+      assert agent_tab_status(ctx) == :needs_you
+      assert %AgentContext{visible: true, status: :needs_you} = AgentContextBuilder.build(ctx)
+
+      # The status bar and the chat header read the active workspace's status here.
+      assert MingaEditor.Agent.WorkspaceStatus.active(
+               ctx.intent.frame.shell_state,
+               ctx.workspace.agent_ui
+             ) ==
+               :needs_you
+    end
+
     test "a background Agent workspace shows its stored status, not the live cache" do
       ctx =
         agent_workspace_context(%AgentState{}, UIState.new(),
