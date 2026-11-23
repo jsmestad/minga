@@ -49,7 +49,7 @@ Agent edit:         {:insert, code, {200, 0}}     → processed second
 
 No locks. No mutexes. No "file changed on disk" dialogs.
 
-> **Where we are today:** Agent tools currently write to the filesystem (`File.read/write`), bypassing the buffer. We're actively wiring agent tools to route through `Buffer.Process` so edits go through the same mailbox as your keystrokes, with full undo integration. See [Buffer-Aware Agents](BUFFER-AWARE-AGENTS.md) for the design.
+Agent file tools route through `MingaAgent.ToolRouter` into in-memory buffer forks and staged changesets, with explicit revision checks and three-way merge on publish (`SPC a p`) or discard (`SPC a P`). There is no blind filesystem write fallback. See [Buffer-Aware Agents](BUFFER-AWARE-AGENTS.md) for the full staging, durability, and merge contract.
 
 ### You can see what agents are doing
 
@@ -57,8 +57,8 @@ The BEAM has production-grade observability built in. You can inspect any runnin
 
 ```elixir
 # See all agent processes and their state
-Agent.Session.list()
-#=> [%{provider: :claude, status: :thinking, buffer: "main.ex"}]
+Minga.Extension.AgentAPI.list_sessions()
+#=> [%{id: "1", pid: #PID<0.1234.0>, status: :thinking, model: "claude-sonnet-4"}]
 
 # Watch messages flowing to a buffer in real-time
 :dbg.tracer()
@@ -87,9 +87,7 @@ For recovery behavior after process or application restart, see [Session Recover
 
 ### Multiple agents, no conflicts
 
-Want a code review agent on one buffer while a refactoring agent works on another? Those are just processes. The BEAM was built to run millions of them. Each agent has its own memory and communicates with buffers through message passing.
-
-> **Where we are today:** Multiple agent sessions work, and process isolation prevents them from interfering at the BEAM level. But because agent tools write directly to the filesystem, two agents editing the same file can clobber each other on disk. The planned fix is [buffer forking](BUFFER-AWARE-AGENTS.md#phase-2-buffer-forking-with-three-way-merge): each agent gets its own in-memory copy of the document, and changes merge back via three-way merge.
+Want a code review agent on one buffer while a refactoring agent works on another? Those are just processes. The BEAM was built to run millions of them. Each agent has its own memory, operates on an isolated in-memory buffer fork, and merges back through staged three-way merge without clobbering sibling edits on disk. See [Buffer-Aware Agents](BUFFER-AWARE-AGENTS.md).
 
 ---
 
@@ -101,7 +99,7 @@ Cursor is VS Code with AI bolted on. The agent runs as an extension in Electron'
 
 Cursor's "background agent" runs in a separate process, which helps, but the results still flow back into the single-threaded extension host. Buffer modifications, diagnostics, and UI updates all contend on one thread.
 
-**Minga:** Agents, buffers, and the editor run as separate BEAM processes with preemptive scheduling. There's no single thread to contend on.
+**Minga:** Agents, buffers, and the editor run as separate BEAM processes with preemptive scheduling and per-process heaps. Busy agent turns do not starve keystrokes.
 
 ### vs. Claude Code / pi / Aider (terminal agents)
 
@@ -109,9 +107,7 @@ These tools run outside your editor entirely. They read and write files on disk,
 
 Here's the thing nobody says out loud: you still open an editor. You run Claude Code in one terminal, then flip to Neovim or VS Code to audit what it did. The agent is your writer; the editor is your reviewer. You're always running two tools because neither one is complete on its own.
 
-**Minga today:** The built-in agent collapses this into one tool. You chat, watch the agent work, and review inline diffs without switching windows.
-
-**Minga next:** Agent tools are being [rewired to route through `Buffer.Process`](BUFFER-AWARE-AGENTS.md) instead of the filesystem. Agent edits will flow through the same undo system as your typing, appear instantly, and trigger incremental tree-sitter updates.
+**Minga:** Editing buffers, LSP, inline diff review, and agent sessions share one BEAM runtime. Agent edits route through in-memory buffer forks and stay staged for review (`SPC a p` to publish, `SPC a P` to discard) with three-way merge and undo integration.
 
 ### vs. Copilot / inline completions
 
@@ -157,13 +153,9 @@ Use `background: true` when the task is independent and may run for a while, suc
 
 When the agent edits a file, the diff appears in the preview pane immediately. Navigate hunks with `]c`/`[c`, accept with `y`, reject with `x`, bulk-accept with `Y`, bulk-reject with `X`. No context switching.
 
-### Agent-aware undo (planned)
+### Buffer-aware edits and staged review ✅
 
-Once agent tools [route through `Buffer.Process`](BUFFER-AWARE-AGENTS.md#phase-1-route-agent-tools-through-buffers), agent edits will participate in the undo system. Press `u` to undo an agent's changes the same way you undo your own typing. The buffer architecture supports this; the agent tools just need to be wired to use it.
-
-### Buffer forking for concurrent agents (planned)
-
-Multiple agents will edit the same file concurrently, each on their own [in-memory fork](BUFFER-AWARE-AGENTS.md#phase-2-buffer-forking-with-three-way-merge). Changes merge back via three-way merge. Conflicts go through the diff review UI.
+Agent file tools route through `MingaAgent.ToolRouter`, in-memory buffer forks, and staged changesets ([Buffer-Aware Agents](BUFFER-AWARE-AGENTS.md)). Approved edits stay staged until you publish (`SPC a p`) or discard (`SPC a P`), merge via three-way merge if you edited concurrently, and integrate with buffer undo.
 
 ### Pausable agents
 
@@ -185,9 +177,9 @@ Built-in BEAM capability. No special agent-side support needed.
 | VS Code's extension ecosystem | ✅ Extension system ships (Hex, git, local). Ecosystem is young. |
 | Cursor's inline diff view | ✅ Shipped. |
 | Copilot ghost text | Planned. |
-| Agent undo integration | Planned. Requires [buffer-routed agent tools](BUFFER-AWARE-AGENTS.md). |
-| Multi-agent concurrent editing | Planned. [Buffer forking](BUFFER-AWARE-AGENTS.md#phase-2-buffer-forking-with-three-way-merge) with three-way merge. |
-| Claude Code's autonomous mode | Future. |
+| Buffer-aware agent edits and undo integration | ✅ Shipped via `MingaAgent.ToolRouter` and staged changesets ([Buffer-Aware Agents](BUFFER-AWARE-AGENTS.md)). |
+| Multi-agent concurrent editing | ✅ Isolated in-memory forks with three-way merge on publish. |
+| Remote/headless durable sessions | ✅ Shipped via `minga --headless` ([Remote Agents](REMOTE_AGENTS.md)). |
 
 Minga isn't a drop-in replacement for Cursor today. It's building the editor architecture that AI-assisted coding actually needs.
 

@@ -27,7 +27,7 @@ framing = "custom"
 
 Run `mix codegen` after editing the schema and commit the refreshed checked-in sources. It also writes `macos/.generated/protocol/ProtocolConsumers.generated.swift` for local Swift builds. Swift dispatches through `SwiftRequiredOpcode` with an exhaustive switch, so a missing arm fails compilation. The Go guardrail probes every opcode and compares its result with `GoRequiredOpcodes` and `GoSkippedOpcodes`, so a missing arm or a decoded skip fails `go test ./...`.
 
-Only declared skips may use a sizing-only path. Unknown opcodes fail decoding instead of silently disappearing. Consumer declarations describe decoder obligations, not runtime capability negotiation. See [Add a render command](recipes/new-render-command.md) for the change workflow.
+Only declared skips may use a sizing-only path. Unknown opcodes fail decoding instead of silently disappearing. Consumer declarations describe decoder obligations, not runtime capability negotiation. See [Add a render command](https://github.com/jsmestad/minga/blob/main/docs/recipes/new-render-command.md) for the change workflow.
 
 ## Transport
 
@@ -366,7 +366,7 @@ offer:     u64 optional  nonzero offer from the committed Agent composer
 
 Total size: 10 bytes, or 18 bytes with the optional offer. A key routed to Agent submission uses the offer to verify the displayed attachment set without changing keyboard routing.
 
-**Codepoint values:** Standard Unicode codepoints for printable characters. For special keys, use the codepoint values defined by the frontend's input library (e.g., libvaxis uses values above the Unicode range for function keys, arrows, etc.). The BEAM's key handling maps these to editor actions.
+**Codepoint values:** Standard Unicode codepoints for printable characters. For special keys, use the codepoint values defined by the frontend's input library (values above the Unicode range for function keys, arrows, etc.). The BEAM's key handling maps these to editor actions.
 
 **Modifier flags:**
 

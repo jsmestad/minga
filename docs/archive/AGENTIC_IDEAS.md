@@ -1,5 +1,7 @@
 # Agentic-First UX Vision
 
+> **Archived (historical):** This March 2026 brainstorming note is retained for historical context only. See [ADR-0004](../adr/0004-products-are-root-applets-over-a-fixed-engine.md) and [#3542](https://github.com/jsmestad/minga/issues/3542) for Minga's accepted product direction.
+
 Epic tracker: [#1113](https://github.com/jsmestad/minga/issues/1113)
 Release planning: [#1119](https://github.com/jsmestad/minga/issues/1119)
 

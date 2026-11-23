@@ -4,29 +4,34 @@
 
 # Minga
 
-**Vim motions. Emacs extensibility. Built for the age of AI agents.**
+**A programmable workbench on the BEAM for editing code and working with AI agents.**
 
-[Getting Started](https://jsmestad.github.io/minga/getting-started.html) | [Documentation](https://jsmestad.github.io/minga/) | [Architecture](https://jsmestad.github.io/minga/architecture.html)
+[Getting Started](docs/GETTING-STARTED.md) | [Configuration](docs/CONFIGURATION.md) | [Architecture](docs/ARCHITECTURE.md) | [Contributing](CONTRIBUTING.md)
 
-<!-- TODO: add a screenshot or terminal recording here -->
-
-Minga is a modal text editor powered by Elixir on the BEAM VM. It runs natively in the terminal (TUI) and as a macOS desktop app (GUI). Same editor core, same config, same extensions.
-
-You get the editing model you already know (Vim motions, operators, text objects), the runtime depth you wish you had (redefine any command at runtime, hook into any lifecycle event, extend with real code), and an architecture that was designed from day one for a world where AI agents edit files alongside you.
+Minga runs Elixir on the Erlang VM (BEAM) behind native frontends: a Swift and Metal desktop app on macOS and a Go/Bubble Tea terminal client. Your editing buffers, LSP servers, agent sessions, and extensions share one supervised Elixir runtime.
 
 ### Current status
 
-Minga is pre-release. If you want to help shape what a BEAM-powered editor can be, now is a great time. Check the [issue tracker](https://github.com/jsmestad/minga/issues) for planned work.
+Minga is pre-release (building toward v0.1.0; see [#3542](https://github.com/jsmestad/minga/issues/3542) and [ADR-0004](docs/adr/0004-products-are-root-applets-over-a-fixed-engine.md)). Check the [issue tracker](https://github.com/jsmestad/minga/issues) for active work and release gates.
+
+## Why the BEAM matters
+
+Single-threaded editors were designed for one human typing sequentially in one buffer. When AI agents stream long responses, run tools, and edit files alongside you, a single event loop and shared mutable state become bottlenecks.
+
+The BEAM provides four runtime properties that fit concurrent human and agent work:
+
+- **Fair scheduling and per-process GC.** The BEAM preemptively schedules lightweight processes and runs garbage collection per process heap rather than pausing the whole editor. Busy agent streams or LSP indexing do not starve keystrokes.
+- **Fault isolation.** Buffers, agent sessions, LSP clients, and extensions run in separate processes under supervision trees. A crashed extension or failing tool call restarts its own subtree without touching your open buffers or undo history.
+- **Buffer-aware agent edits.** Every buffer is its own process, and agent file edits route through in-memory forks and staged changesets instead of blind filesystem writes. You review and publish (`SPC a p`) or discard (`SPC a P`) staged changes without clobbering unsaved edits.
+- **Headless durability.** `minga --headless` runs the runtime without a window so agent sessions keep working locally or on a remote host after clients detach.
+
+The BEAM is not used for GPU rasterization or syntax parsing: Swift and Metal draw macOS, Go draws the terminal, and Zig runs the tree-sitter parser and process-group helpers. For the full technical design, read [Architecture](docs/ARCHITECTURE.md).
 
 ## What it feels like to use
 
-Press `Space` in normal mode. A popup appears showing every command, organized by mnemonic prefix. You don't memorize anything. You read the menu, press the next key, and the popup narrows down. `SPC f f` finds files. `SPC b b` switches buffers. `SPC s p` searches your project.
+Press `Space` in Normal mode to open a mnemonic command menu (`SPC f f` finds files, `SPC b b` switches buffers, `SPC s p` searches the project). Open the agent panel with `SPC a a` or the full agent workspace with `SPC a t`.
 
-After a few sessions, these become muscle memory. The popup is always there when you forget.
-
-The AI agent is built in. Toggle the side panel with `SPC a a`, or open a full-screen agent view with `SPC a t`. The agent reads, edits, and creates files in your project. You review every change as an inline diff before it hits disk. Navigate hunks with `]c`/`[c`, accept with `y`, reject with `x`.
-
-Your config is real Elixir, the same language the editor is written in:
+Your configuration at `~/.config/minga/config.exs` is plain Elixir, the same language as the core runtime:
 
 ```elixir
 use Minga.Config
@@ -35,7 +40,7 @@ set :theme, :catppuccin_mocha
 set :line_numbers, :relative
 set :tab_width, 2
 
-# Hooks run in their own processes. This never blocks your typing.
+# Hooks run in their own processes so slow commands never block typing.
 on :after_save, fn _buf, path ->
   if String.ends_with?(path, ".ex") do
     System.cmd("mix", ["format", path])
@@ -43,111 +48,38 @@ on :after_save, fn _buf, path ->
 end
 ```
 
-That's not a limited DSL. It's the full language. Define commands, add keybindings, hook into save/open/mode-change events, wrap any command with before/after/around advice. No restart needed; press `SPC h r` to hot-reload your config.
-
-## Why the BEAM matters
-
-Every editor you use today was built on the same assumption: one human, typing sequentially, in one buffer at a time. The entire architecture (single event loop, shared memory, global state) follows from that.
-
-Then AI agents showed up. Now you have external processes making API calls, reading your files, writing to your buffers, spawning shell commands, and running for minutes at a time.
-
-You've already seen what happens. An agent streaming a large response causes UI jank because it's competing with your keystrokes for the same thread. You can't tell if the agent is thinking, stuck, or writing to the wrong file. A slow API call hangs the extension, and everything else waits.
-
-Those aren't bugs in the AI tools. They're architectural limits of editors that were designed before AI coding existed.
-
-The BEAM VM was built 30 years ago to solve exactly this class of problem. It powers telecom switches and messaging systems where "one component failing takes down everything" is not acceptable. Minga points that same runtime at a text editor.
-
-**Your typing never freezes.** The BEAM runs a preemptive scheduler that guarantees every process gets fair CPU time. An agent streaming a 2,000-line response? An LSP server parsing a huge codebase? Your keystrokes don't queue up. This isn't async with callbacks. The VM enforces fairness at the scheduler level.
-
-**Components can't corrupt each other.** Every buffer is its own process with its own memory. An agent editing line 200 while you type on line 50 isn't a race condition. Both edits arrive as messages to the buffer's process and are handled sequentially, atomically. No locks, no mutexes.
-
-**Crashes don't take down the editor.** BEAM processes are organized into supervision trees. If a plugin fails, its supervisor restarts it. Your buffers, undo history, and unsaved changes are in completely separate processes. They can't be affected because they don't share memory.
-
-For the full technical story (supervision tree, port protocol, display list IR, rendering pipeline), read the [Architecture doc](https://jsmestad.github.io/minga/architecture.html).
+Define commands, add keybindings, attach hooks, wrap commands with before/after/around advice, and install extensions from local paths, Git repositories, or Hex packages.
 
 ## What ships today
 
-- **Vim-style modal editing.** Normal, Insert, Visual, Operator-Pending, Replace, and Search modes. Motions, operators, text objects (`iw`, `i"`, `a{`), registers, macros, marks, dot repeat.
-- **Space-leader commands.** Doom-style `SPC` menus with Which-Key popup. Discoverable from day one.
-- **Tree-sitter highlighting.** 39 languages compiled in. Instant on file open.
-- **Built-in AI agent.** Native LLM integration with streaming, tool use, inline diff review, and conversation management. Supports Anthropic, OpenAI, and Google models. Agent edits route through in-memory buffer forks for isolation, with three-way merge on completion.
-- **Headless runtime.** `Minga.Runtime.start/1` boots the full runtime (buffers, config, LSP, agent sessions) without any frontend. Use it for CI pipelines, scripting, or as a backend for external tools.
-- **API gateway.** External clients connect via WebSocket + JSON-RPC to start agent sessions, execute tools, and receive streaming events. No frontend required.
-- **Extensible in Elixir.** Commands, keybindings, hooks, advice system, extensions, hot reload. The config is the same language as the editor.
-- **Native frontends.** Terminal (Go + Bubble Tea) and macOS (Swift + Metal). Same core, same config.
-- **Project management.** Auto-detected root, file finder, project search, recent files per project.
+- **Native frontends.** Swift + Metal on macOS (GUI-first) and Go + Bubble Tea in the terminal. Same core, same config, same Semantic UI protocol.
+- **Vim modal and CUA editing.** Normal, Insert, Visual, Operator-Pending, Replace, and Search modes, text objects, registers, macros, marks, dot repeat, plus CUA editing support.
+- **Space-leader command menus.** Doom-style `SPC` menus with Which-Key popups.
+- **Tree-sitter highlighting.** 50 compiled language grammars via the Zig `minga-parser` Port.
+- **Native multi-provider agent runtime.** Streaming turns, tool approvals, buffer-aware staged edits with three-way merge, session recovery, hooks, and MCP servers across Anthropic, OpenAI, OpenAI Codex, Google, OpenRouter, Groq, Mistral, and DeepSeek.
+- **Headless runtime and remote sessions.** `minga --headless` and `MingaAgent.Runtime` support remote attach/detach and WebSocket + JSON-RPC clients.
+- **Elixir extensibility.** Commands, keybindings, hooks, advice, and supervised extensions with isolated compilation and artifact validation.
+- **Project management.** Automatic project-root detection, file finder, project search, and recent files per project.
 
 ## Quick start
 
 ```bash
 git clone https://github.com/jsmestad/minga.git
 cd minga
-asdf install && mix deps.get && mix compile
+asdf install && mix deps.get && mix compile && make native.support
 bin/minga
 ```
 
-Press `Space` to see what's possible. Read the [Getting Started guide](https://jsmestad.github.io/minga/getting-started.html) for the full walkthrough.
+Press `Space` to explore commands, or read [Getting Started](docs/GETTING-STARTED.md) for Homebrew installs, macOS GUI launch, and model setup.
 
-### Terminal frontend
+## Documentation map
 
-In a terminal, `bin/minga` boots the Go/Bubble Tea renderer. It speaks Minga's Semantic UI protocol and is the only terminal frontend.
-
-The legacy Zig/libvaxis renderer was removed in [#2223](https://github.com/jsmestad/minga/issues/2223), ahead of the original 30-day escape-hatch window by owner decision; `git history` is the fallback if you need the old code. Zig now builds the tree-sitter parser only.
-
-## Where to go from here
-
-The rest of the docs are organized by what you're trying to do.
-
-**Just want to use Minga?** Start with the [Getting Started guide](https://jsmestad.github.io/minga/getting-started.html). Five minutes from install to editing. Then read [Configuration](https://jsmestad.github.io/minga/configuration.html) for themes, keybindings, formatters, and per-filetype settings.
-
-**Coming from another editor?** Pick your guide:
-
-- **[For Neovim users](https://jsmestad.github.io/minga/for-neovim-users.html):** Same modal editing, better runtime. Your muscle memory transfers directly.
-- **[For Emacs users](https://jsmestad.github.io/minga/for-emacs-users.html):** Same depth of customization, none of the single-threaded pain.
-- **[For pi users](https://jsmestad.github.io/minga/for-pi-users.html):** Minga embeds pi as a supervised Port. Everything you like about pi, plus an editor built for it.
-
-**Using AI coding tools?** Read [For AI-Assisted Developers](https://jsmestad.github.io/minga/for-ai-coders.html). It covers the architectural limitations of current editors when agents are involved and how the BEAM solves them. An honest technical comparison, not a sales pitch.
-
-**Want to extend the editor?** [Configuration](https://jsmestad.github.io/minga/configuration.html) covers commands, hooks, advice, and extensions. For the deeper "why Elixir is a real extension language" argument, read [Elixir is Minga's Elisp](https://jsmestad.github.io/minga/extensibility.html).
-
-**Want to understand the internals?** [Architecture](https://jsmestad.github.io/minga/architecture.html) covers the two-process design, supervision tree, and rendering pipeline. [Keymap Scopes](https://jsmestad.github.io/minga/keymap-scopes.html) explains how different views get different keybindings.
-
-**Want to contribute?** [Contributing](https://jsmestad.github.io/minga/contributing.html) has the build-from-source setup, testing, and how to add new commands, motions, and render features.
-
-## Contributing
-
-Bug reports, feature ideas, and code are all welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for the details.
-
-### Native macOS unit tests
-
-After generating the Xcode project (`cd macos && xcodegen generate`), run `scripts/test_macos_unit` from the repository root.
-This is the authoritative Xcode/Metal unit-test entrypoint used by CI and the Swift stage of `make done`; SwiftPM is not a substitute for this native gate.
-
-Scheme `MingaUnitTests` builds the existing `MingaTests` target for two execution contexts, without changing its source ownership.
-Production `Minga.app` builds separately and must never host or embed the unit tests.
-Production-app probes receive its explicit path through the scheme's `MINGA_TEST_PRODUCTION_APP_PATH` environment variable.
-The host compiles the existing production Metal shader so `Bundle.main` retains real shader-library coverage.
-
-The entrypoint runs ordinary tests bare with explicit empty `TEST_HOST` and `BUNDLE_LOADER` build settings, excluding the two focus suites.
-It then runs an explicit hosted `build-for-testing` phase, verifies the fresh plan and products, and executes all 13 `EditorFocusPolicyTests` functions from a pinned policy copy.
-Only accepted policy execution authorizes `FocusReplayWindowTests` in a separate host process from a replay copy of that same input.
-Both plan copies bind their original product root, select their own suite explicitly, and remove conflicting target-local skip filters.
-These exclusions route tests between execution contexts; they do not omit acceptance coverage.
-Production-window replay observes responder and positive AX identity within the same bounded wait; observation never assigns focus or substitutes an expected AX object.
-For native fields, AX identity means the exact AppKit cell installed on the expected production field, with the cell's `controlView` pointing back to that field.
-CI repeats the canonical lifecycle against the same DerivedData and retains a separate warm manifest, so hosted-to-bare reuse is exercised rather than inferred from a cache.
-Do not combine the focus selectors or run competing GUI tests concurrently: suite-local `.serialized` does not isolate application activation and key-window state from other suites.
-
-Use `--output-dir PATH` to retain evidence elsewhere (default: `macos-unit-evidence/`).
-Each invocation preserves separate action logs and `.xcresult` bundles, and writes `results.json` with the three actual result summaries/test trees, commands, exit statuses, timings, and aggregate logical-function counts.
-Global xcresult counts do not count parameterized executions; replay acceptance requires the enumerator and all seven actual named passed argument nodes.
-Evidence includes settings queried from the testing build graph, actual bare/hosted runtime identity, the hosted build command/status/log, and raw pre/post plan signatures and copies.
-For this scheme, the pinned Xcode emits format 1 with a top-level `MingaTests` target and an application-bundle `TestHostPath`; unsupported formats fail explicitly.
-The default build graph omits the test target, and `test` alone does not produce the persisted plan required for replay.
-Failed builds and missing, ambiguous, stale, or wrong-mode hosted plans block focused execution rather than fall back to cached products.
-Any ordinary failure remains an aggregate failure even if subsequent hosted diagnostics pass.
-Missing results, zero executed tests, incomplete focus coverage, or missing or reused focus test-runner PIDs fail the gate even if `xcodebuild` exits zero.
-The empty-setting transition and warm hosted-to-bare reuse require actual macOS verification; command flags alone are not native proof.
+- **Start here:** [Getting Started](docs/GETTING-STARTED.md), [Configuration](docs/CONFIGURATION.md), [Projects](docs/PROJECTS.md).
+- **Agent runtime:** [Agent Model Selection](docs/AGENT-MODEL-SELECTION.md), [Buffer-Aware Agents](docs/BUFFER-AWARE-AGENTS.md), [Session Recovery](docs/SESSION-RECOVERY.md), [Remote Agents](docs/REMOTE_AGENTS.md), [Agent Hooks](docs/HOOKS.md), [MCP Servers](docs/MCP.md).
+- **Coming from another tool:** [For Neovim Users](docs/FOR-NEOVIM-USERS.md), [For Emacs Users](docs/FOR-EMACS-USERS.md), [For AI-Assisted Developers](docs/FOR-AI-CODERS.md).
+- **Extending Minga:** [Elixir is Minga's Elisp](docs/EXTENSIBILITY.md), [Extension API](docs/EXTENSION_API.md), [Keymap Scopes](docs/KEYMAP-SCOPES.md), [Agentic View Keymap](docs/AGENTIC-KEYMAP.md).
+- **Architecture and internals:** [Architecture](docs/ARCHITECTURE.md), [Port Protocol](docs/PROTOCOL.md), [Semantic UI Protocol](docs/GUI_PROTOCOL.md), [Charm TUI Renderer](docs/CHARM_TUI.md).
+- **Contributing and operations:** [Contributing](CONTRIBUTING.md), [Native Editor Automation (minga-ipc)](docs/AUTOMATION-IPC.md), [Preparing and Verifying Builds](docs/RELEASING.md).
 
 ## License
 
@@ -155,7 +87,7 @@ MIT
 
 ## Acknowledgements
 
-A heartfelt thank you to [Henrik Lissner](https://github.com/hlissner) and all contributors to [Doom Emacs](https://github.com/doomemacs/doomemacs). Its keybinding design, leader-key UX, and relentless focus on making a powerful editor feel fast and discoverable were a direct inspiration for Minga's command model.
+Thank you to [Henrik Lissner](https://github.com/hlissner) and all contributors to [Doom Emacs](https://github.com/doomemacs/doomemacs). Its keybinding design, leader-key UX, and focus on making a deep editor fast and discoverable inspired Minga's command model.
 
 ---
 

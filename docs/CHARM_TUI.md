@@ -91,7 +91,7 @@ Inspect every size's `.txt` or `.grid.json` files, not just the exit code. The r
 
 To update the corpus after an intentional semantic change, run `mix run --no-start scripts/go_tui_capture_corpus.exs`, review the new committed frames and expectations, then run the check and actual capture again. Do not weaken an expectation to accept unexplained terminal residue. The optional developer tests run with `"$capture_root/venv/bin/python" test/scripts/go_tui_capture_test.py`; they cover emulator boundaries and failure handling, not production visual acceptance.
 
-This evidence is an emitted-text-cell capture, not pixel, color, animation or live-interaction proof. The ready-only `scripts/go_tui_boot_smoke.py`, model-only coverage tracked in #2101 and legacy Zig snapshots prove different contracts. Production capture gates Go UI acceptance, not the start of a focused repair. A user-facing change still needs its actual keyboard and mouse walkthrough, plus the relevant [screen snapshot review](recipes/update-snapshots.md).
+This evidence is an emitted-text-cell capture, not pixel, color, animation or live-interaction proof. The ready-only `scripts/go_tui_boot_smoke.py`, model-only coverage tracked in #2101 and legacy Zig snapshots prove different contracts. Production capture gates Go UI acceptance, not the start of a focused repair. A user-facing change still needs its actual keyboard and mouse walkthrough, plus the relevant [screen snapshot review](https://github.com/jsmestad/minga/blob/main/docs/recipes/update-snapshots.md).
 
 ## Time Agent opening in the packaged terminal editor
 

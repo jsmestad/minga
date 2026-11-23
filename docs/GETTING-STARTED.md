@@ -1,28 +1,29 @@
 # Getting Started
 
-Five minutes from install to editing. Let's go.
+Five minutes from install to editing and running your first agent session.
 
 ## Install
 
-### macOS
+### macOS (Homebrew)
 
-Install from Homebrew once the first [rolling prerelease](https://github.com/jsmestad/minga/releases) is published. Choose the GUI or terminal editor, or install both:
+Install the native macOS app, the terminal client, or both from Homebrew:
 
 ```bash
 brew install --cask jsmestad/minga/minga-mac  # Installs Minga.app
 brew install jsmestad/minga/minga            # Installs the minga terminal command
 ```
 
-Open the GUI from Applications or run `open -a Minga`. Run `minga` for the terminal editor. Get subsequent builds with `brew upgrade minga` or `brew upgrade --cask minga-mac`.
+Open the GUI from Applications or run `open -a Minga`. Run `minga` for the terminal client. Update rolling prereleases with `brew upgrade minga` or `brew upgrade --cask minga-mac`.
 
 ### From source
 
-You'll need Erlang, Elixir, and Zig. A version manager like [asdf](https://asdf-vm.com/) or [mise](https://mise.jdx.dev/) makes this painless:
+You need Erlang, Elixir, Go, and Zig. A version manager such as [asdf](https://asdf-vm.com/) or [mise](https://mise.jdx.dev/) installs the exact versions pinned in `.tool-versions`:
 
 ```bash
-# Install plugins if you don't have them
+# Install plugins if you do not have them
 asdf plugin add erlang
 asdf plugin add elixir
+asdf plugin add golang
 asdf plugin add zig
 
 # Clone and build
@@ -30,108 +31,34 @@ git clone https://github.com/jsmestad/minga.git
 cd minga
 asdf install          # Installs pinned versions from .tool-versions
 mix deps.get
-mix compile           # Builds both Elixir and Zig
+mix compile           # Builds Elixir and the Go terminal renderer
+make native.support   # Builds the Zig tree-sitter parser and helper binaries
 ```
 
-The first build takes a few minutes (Zig compiles tree-sitter grammars for 24 languages). After that, rebuilds are fast.
+The first build takes a few minutes while Zig compiles 50 tree-sitter grammars. Rebuilds after that are incremental.
 
-Use the source build on Linux, on Intel Macs, or when developing Minga.
-
-## Wait for a native editor result
-
-Use the bundled `minga-ipc open-ready` command when an automation needs to know that one file open reached the editor's native interaction boundary. The GUI launcher bundled in `Minga.app`, and the existing `minga-ipc open` and `minga-ipc wait` commands, keep their semantic-only completion behavior.
-
-```bash
-MINGA_IPC="/Applications/Minga.app/Contents/Resources/bin/minga-ipc"
-"$MINGA_IPC" open-ready --deadline-ms=10000 /absolute/path/to/notes.md
-```
-
-The command writes one JSON result to standard output and exits zero only when `receipt.outcome` is `ready`. Save the identity fields if a separate process must inspect the completed receipt later.
-
-```json
-{"receipt":{"app_instance_id":"...","core_instance_id":"...","operation_id":"...","phase":"terminal","outcome":"ready","target":{"path":"/absolute/path/to/notes.md","window_id":1},"application_revision":42,"evidence":{"boundary":"metal_drawable_completed","focus_ready":true},"detail":null}}
-```
-
-```bash
-"$MINGA_IPC" wait-receipt --app-instance-id "$APP_INSTANCE_ID" --core-instance-id "$CORE_INSTANCE_ID" --operation-id "$OPERATION_ID" --deadline-ms 10000
-"$MINGA_IPC" receipt --app-instance-id "$APP_INSTANCE_ID" --core-instance-id "$CORE_INSTANCE_ID" --operation-id "$OPERATION_ID"
-```
-
-`wait-receipt` only observes the original operation. It never opens the file again. A waiter has a finite deadline from 1 through 30,000 milliseconds. Disconnecting, cancelling, or timing out a waiter releases only that wait. It does not undo or repeat an editor action that the BEAM already applied.
-
-The receipt separates three facts: `admitted` means the local service accepted the request, `applied` means the BEAM opened the exact target and recorded its semantic revision, and terminal `ready` means the matching editor target reached its native boundary with the required focus. The result includes the target token, pane, revision, renderer generation, frame sequence, and focus evidence so a newer unrelated frame cannot satisfy the request.
-
-`metal_drawable_completed` is the strongest boundary the current editor surface can prove. CoreText and Metal completed the matching drawable submission, and the editor focus policy passed when focus was requested. It is not a claim that macOS composited pixels to a physical display. SwiftUI and AppKit surfaces that cannot prove their own requested readiness return `unavailable` instead of borrowing editor evidence.
-
-Terminal outcomes are explicit. `rejected` means the BEAM could not apply the request. `presentation_failed`, `hidden`, and `unavailable` distinguish failed rendering, a hidden surface, and a missing native prerequisite. `superseded` means a newer target replaced the requested target before it became ready. `timeout` and `cancelled` describe the wait rather than the editor action. `app_replaced`, `core_replaced`, `expired`, and `unknown` mean the supplied receipt identity cannot be observed in the current generation. Failed receipts include a machine-readable outcome and may include a human-readable `detail`. After admission, even timeout or transport failure output preserves the accepted receipt identity. A lost response can leave execution indeterminate, so look up the saved receipt before deciding whether to retry.
-
-Receipts are intentionally bounded. Minga accepts at most 64 active operations and 64 waiters, retains at most 128 terminal receipts for 60 seconds, and converts an operation that receives no native result within 30 seconds to `indeterminate`. Expired receipts retain no view or frame resources. The receipt includes `last_visible` when a newer attempted presentation fails, so callers can distinguish the failed target from the prior valid target, application revision, and frame.
-
-## Inspect and navigate the native editor
-
-Use `minga-ipc inspect` to obtain exact semantic targets before you navigate. The helper authenticates through the same private descriptor and AF_UNIX endpoint as `open-ready`.
-
-```bash
-"$MINGA_IPC" capabilities
-"$MINGA_IPC" inspect --choice-limit 25
-```
-
-`capabilities` lists the finite command set, coordinate convention, page limits, receipt outcomes, and 64 KiB response limit. `inspect` returns two separate views. `authoritative` is current BEAM state, including tabs, panes, buffer identities and revisions, cursor positions, bounded viewport lines, and picker choices. `presented` is the last editor frame that the macOS frontend proved at the Metal completion boundary, including native focus evidence. A committed BEAM target can be newer than the last proven native presentation.
-
-Copy identity, ids, revisions, and opaque target tokens from one inspection response. Do not derive or cache tokens across a core restart.
-
-```bash
-"$MINGA_IPC" select-tab --app-instance-id "$APP_INSTANCE_ID" --core-instance-id "$CORE_INSTANCE_ID" --tab-id 2 --target-token "$TAB_TOKEN"
-"$MINGA_IPC" focus-pane --app-instance-id "$APP_INSTANCE_ID" --core-instance-id "$CORE_INSTANCE_ID" --tab-id 2 --pane-id 4 --target-token "$PANE_TOKEN"
-"$MINGA_IPC" goto-location --app-instance-id "$APP_INSTANCE_ID" --core-instance-id "$CORE_INSTANCE_ID" --tab-id 2 --pane-id 4 --target-token "$PANE_TOKEN" --buffer-id "$BUFFER_ID" --buffer-revision 17 --line 12 --column 6
-"$MINGA_IPC" activate-picker-choice --app-instance-id "$APP_INSTANCE_ID" --core-instance-id "$CORE_INSTANCE_ID" --target-token "$PICKER_TOKEN" --picker-generation 31 --activation-id 5 --choice-kind item
-```
-
-Successful navigation prints the terminal receipt as JSON. Native editor targets normally finish as `ready`; picker activation finishes as `applied` because the BEAM-owned picker workflow is the terminal boundary.
-
-```json
-{"type":"completed","receipt":{"kind":"focus_pane","outcome":"ready","result_code":"ready","target":{"requested_token":"761","token":"928","tab_id":2,"window_id":4},"evidence":{"boundary":"metal_drawable_completed","focus_ready":true}}}
-```
-
-A stale target returns a nonzero helper status and a structured rejection that can be inspected without replaying the action.
-
-```json
-{"type":"completed","receipt":{"kind":"goto_location","outcome":"rejected","result_code":"stale_revision","rejection":{"code":"stale_revision","stale_target":true}}}
-```
-
-Lines are one-based. Columns are zero-based UTF-16 code-unit offsets. `goto-location` rejects a line outside the document, a column outside the line, and any column that is not an exact Minga caret boundary, including positions inside surrogate pairs, combining sequences, and joined emoji. It does not clamp or redirect the request. Picker activation uses the same item or Actions entry route as native UI activation.
-
-Inspection is bounded. The first response includes at most eight tabs, eight panes across that page, eight viewport lines per pane, and the requested picker choice page up to 25 choices. When `truncation.tabs`, `truncation.panes`, or `truncation.picker_choices` is true, pass the corresponding opaque value from `continuations.tabs`, `continuations.panes[tab_id]`, or `continuations.picker_choices` back to `inspect --continuation`. A continuation is valid only for the inspection revision that created it. Minga rejects it as stale after any relevant tab, pane, buffer, or picker change.
-
-Every navigation command applies against the exact inspected target inside the serialized Editor process. An old app or core identity is rejected before admission. A removed tab or pane, replaced buffer or picker, outdated buffer revision, or missing offered choice produces a terminal `rejected` receipt with `result_code` and `rejection.code`. `rejection.stale_target` tells callers that a fresh inspection is required. Receipt lookup and wait observe the admitted operation and never replay it.
-
-The endpoint accepts only the documented typed commands. It does not accept arbitrary code, selectors, key sequences, or accessibility queries. Requests and responses retain the existing 64 KiB frame limit. Invalid field types, zero-valued one-based ids, unsupported commands, and oversized responses fail explicitly.
+Use the source build on Linux, on Intel Macs, or when developing Minga itself.
 
 ## Launch
 
 ```bash
-bin/minga                  # Empty buffer
+bin/minga                  # Empty buffer in the terminal
 bin/minga path/to/file     # Open a file
 bin/minga lib/ test/       # Open multiple files or directories
+bin/minga-mac              # Launch the macOS GUI from a source checkout
 ```
 
 ## Your first 30 seconds
 
-Minga is a modal editor. If you've used Vim or Neovim, you're home. If you haven't, here's the short version: you're always in one of two modes.
+Minga supports both Vim modal editing and standard CUA editing. In Vim mode, you are always in one of two core modes:
 
-**Normal mode** is for navigating and running commands. You move with `h/j/k/l`, delete with `dd`, search with `/`. You can't type text here.
+**Normal mode** is for navigating and running commands. Move with `h/j/k/l`, delete lines with `dd`, search with `/`.
 
-**Insert mode** is for typing. Press `i` to enter it, `Esc` to leave.
-
-That's the whole mental model. Normal mode is your command center. Insert mode is your typewriter. Everything else builds on top of these two.
+**Insert mode** is for typing text. Press `i` to enter it, `Esc` to leave.
 
 ## The Space leader (your command menu)
 
-Here's the trick that makes Minga discoverable: press `Space` in Normal mode.
-
-A popup appears showing every command, organized by mnemonic prefix. You don't memorize anything. You read the menu, press the next key, and the popup narrows down. `Space` then `f` shows file commands. `Space` then `b` shows buffer commands.
-
-A few to try right now:
+Press `Space` in Normal mode to open a popup listing every command grouped by mnemonic prefix. You do not need to memorize shortcuts upfront: read the menu, press the next key, and the popup narrows down. `Space` then `f` shows file commands. `Space` then `b` shows buffer commands.
 
 | Keys | What happens |
 |------|-------------|
@@ -141,31 +68,29 @@ A few to try right now:
 | `SPC s p` | Search across your project |
 | `SPC q q` | Quit |
 
-After a few sessions, these become muscle memory. The popup is always there when you forget.
+## Configure Minga
 
-## Configure it
-
-Minga reads `~/.config/minga/init.exs` on startup. It's plain Elixir:
+Minga reads `~/.config/minga/config.exs` (or `$XDG_CONFIG_HOME/minga/config.exs`) on startup. Configuration is ordinary Elixir:
 
 ```elixir
 use Minga.Config
 
 set :theme, :catppuccin_mocha
-set :relative_number, true
+set :line_numbers, :relative
 set :tab_width, 2
 ```
 
-You don't need to know Elixir to write config. It's `set :option, value` for everything. The [Configuration guide](configuration.html) has the full list of options. Start with just a theme and line numbers; you can always add more later.
+You do not need to know Elixir to write basic config: `set :option, value` covers options, and [Configuration](CONFIGURATION.md) documents themes, keybindings, hooks, advice, and extensions.
 
-## Talk to an AI agent
+## Work with the agent
 
-Minga has a built-in AI coding agent. Toggle the panel with `SPC a a`, or open a full-screen agent view with `SPC a t`.
+Toggle the agent panel with `SPC a a`, or open the full agent workspace with `SPC a t`.
 
-If your provider uses an API key, open **Models and connections** with `/model` and choose the API key action for that provider. For example, `/auth anthropic` opens the same masked prompt. Enter the key there, not in the chat composer. Submitting the key saves it locally without sending your draft. Cancel closes the prompt without saving.
+If your model provider uses an API key, open **Models and connections** with `/model` and choose the API key action for that provider (or run `/auth anthropic` for the same masked prompt). Enter the key in that prompt, not in the chat composer. Submitting saves the credential locally without sending your draft.
 
-Open `/model` again and choose a model for the provider you connected. Each hosted model entry shows its protocol, credential profile, and capabilities. A saved session remembers the route, not the key. If you revoke its credential, Minga asks you to correct the selection instead of switching to another credential. See [Agent model selection](AGENT-MODEL-SELECTION.md) for the provider list and selection behavior.
+Open `/model` again and pick a model for the connected provider. Each hosted entry displays its protocol, credential profile, and capabilities. A saved session remembers the selected route, not the key. See [Agent model selection](AGENT-MODEL-SELECTION.md) for supported providers and route selection behavior.
 
-Type a prompt, press Enter. The agent reads, edits, and creates files in your project. You review every change as an inline diff before it hits disk.
+Type a prompt and press Enter. Agent file edits route through in-memory buffer forks and stay staged for review until you publish (`SPC a p`) or discard (`SPC a P`) them. See [Buffer-Aware Agents](BUFFER-AWARE-AGENTS.md) for the staging and merge contract.
 
 Useful slash commands:
 
@@ -173,19 +98,13 @@ Useful slash commands:
 |---------|-------------|
 | `/model <name>` | Switch models mid-conversation |
 | `/thinking high` | Turn on extended thinking |
-| `/clear` | Fresh session |
-| `/help` | See all commands |
+| `/clear` | Start a fresh session |
+| `/help` | List available slash commands |
 
 ## Where to go from here
 
-You're up and running. Here's what to read based on what you care about:
-
-**"I want to customize things."** Read the [Configuration guide](configuration.html). It covers themes, keybindings, per-filetype options, and hooks.
-
-**"How does this thing actually work?"** The [Architecture doc](architecture.html) explains the two-process design and why the BEAM matters.
-
-**"I'm coming from Neovim/Emacs."** The [Neovim](for-neovim-users.html) and [Emacs](for-emacs-users.html) migration guides explain what's the same, what's different, and what's better.
-
-**"I use AI coding tools."** Read [For AI-Assisted Developers](for-ai-coders.html). It covers why Minga's architecture matters for agentic workflows and how it compares to what you're using today.
-
-**"I want to contribute."** The [Contributing guide](contributing.html) has the build-from-source setup, testing, and how to add new commands and motions.
+- **Customize and extend:** Read [Configuration](CONFIGURATION.md) for options, themes, keybindings, hooks, and extensions, and [Elixir is Minga's Elisp](EXTENSIBILITY.md) for the extension model.
+- **Understand the runtime:** Read [Architecture](ARCHITECTURE.md) for supervision trees, buffer processes, and the multi-frontend Semantic UI pipeline.
+- **Coming from another tool:** Read [For Neovim Users](FOR-NEOVIM-USERS.md), [For Emacs Users](FOR-EMACS-USERS.md), or [For AI-Assisted Developers](FOR-AI-CODERS.md).
+- **Automate the native macOS app:** Read [Native editor automation (minga-ipc)](AUTOMATION-IPC.md) for `open-ready`, `inspect`, and typed navigation receipts.
+- **Contribute:** Read [Contributing](../CONTRIBUTING.md) for the development setup, tests, and local lint gates.

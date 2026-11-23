@@ -1,5 +1,7 @@
 # Go TUI parity audit
 
+> **Archived (historical):** This completed parity audit supported the Go/Bubble Tea terminal cutover (#2216). See [Charm TUI Renderer](../CHARM_TUI.md) for current terminal frontend guidance.
+
 This document is the parity gate for making the Go/Bubble Tea frontend the default terminal frontend (epic #2216, flip ticket #2222). It audits every semantic UI surface and input behavior the protocol defines, and records Go's status on each with file:line evidence.
 
 The parity reference is the semantic protocol, not the Zig renderer. The two authorities are `docs/protocol_schema.toml` (opcode registry, wire structures, sections) and `docs/GUI_PROTOCOL.md` (semantic chrome and the `gui_action` input contract). Zig is consulted only where the spec is ambiguous. This supersedes the Go/Charm coverage row in the #2113 inventory, which reported 9/28 components before this work landed.
