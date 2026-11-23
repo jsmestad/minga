@@ -9,8 +9,9 @@ defmodule Minga.Bench.BatchReplacements do
       `Minga.Buffer.Operation.replace_ranges_with_patches/2` (whatever the checked-out commit
       ships), in alternating order, each in a fresh process. Every sample checks that both
       return the same content, cursor, line index, and undo patches.
-    * `consumer`: the complete Buffer path that callers use. `Minga.Buffer.apply_edits/3` on a
-      started `Minga.Buffer.Process`, then one `undo/1` and one `redo/1`. The checked-out
+    * `consumer`: the complete Buffer path that callers use. The `apply_edits/3` call on a
+      started `Minga.Buffer.Process`, then one `undo/1` and one `redo/1`, each sent as the same
+      message the public function sends but without its 5 s call timeout. The checked-out
       commit decides the implementation, so run this mode once on the baseline commit and once
       on the candidate commit. It measures the middle placements and two boundary cases. Every
       sample checks content, cursor, version, undo, and redo against the commit's own pure
@@ -38,6 +39,7 @@ defmodule Minga.Bench.BatchReplacements do
   @max_samples 15
   @budget_us 20_000_000
   @consumer_max_samples 5
+  @source Minga.Buffer.EditSource.lsp(:unknown)
 
   # ── Sequential control ──────────────────────────────────────────────────────
 
@@ -266,7 +268,7 @@ defmodule Minga.Bench.BatchReplacements do
         version = BufferProcess.version(pid)
         :erlang.garbage_collect(pid)
 
-        {apply_us, :ok} = :timer.tc(fn -> BufferProcess.apply_edits(pid, edits) end)
+        {apply_us, :ok} = :timer.tc(fn -> call(pid, {:apply_edits, edits, @source}) end)
 
         unless BufferProcess.content(pid) == expected and
                  BufferProcess.cursor(pid) == expected_cursor and
@@ -308,18 +310,23 @@ defmodule Minga.Bench.BatchReplacements do
   end
 
   defp undo_redo(pid, text, expected, name) do
-    {undo_us, _} = :timer.tc(fn -> BufferProcess.undo(pid) end)
+    {undo_us, _} = :timer.tc(fn -> call(pid, :undo) end)
 
     unless BufferProcess.content(pid) == text and BufferProcess.cursor(pid) == {3, 2},
       do: raise("#{name}: undo did not restore the original")
 
-    {redo_us, _} = :timer.tc(fn -> BufferProcess.redo(pid) end)
+    {redo_us, _} = :timer.tc(fn -> call(pid, :redo) end)
 
     unless BufferProcess.content(pid) == expected,
       do: raise("#{name}: redo did not reapply the batch")
 
     {undo_us, redo_us}
   end
+
+  # The public `apply_edits/3`, `undo/1`, and `redo/1` send these messages with the default
+  # 5 s call timeout. Large sequential batches and batch undo exceed it, so the bench waits for
+  # the reply to measure the handler's real cost.
+  defp call(pid, message), do: GenServer.call(pid, message, :infinity)
 
   # Samples until the cap, or until the elapsed time passes the budget after at least one sample.
   defp sample_until_budget(fun, max_samples \\ @max_samples) do
