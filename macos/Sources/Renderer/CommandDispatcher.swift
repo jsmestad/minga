@@ -304,6 +304,9 @@ final class CommandDispatcher {
     /// window deltas are resolved during staging; commit only freezes and publishes.
     private var transactionBuilder: PreparedFrameTransactionBuilder?
 
+    /// The open `FrameStage` signpost interval. One interval covers the builder seed and every staged command of a frame within one packet; it closes at commit, rejection, or the end of the packet, so it never includes time spent waiting for the next packet.
+    private var openStageInterval: OSSignpostIntervalState?
+
     /// Font resources known to the publisher. Font id 0 is the primary font.
     private var registeredFontIds: Set<UInt8> = [0]
 
@@ -391,6 +394,7 @@ final class CommandDispatcher {
         openBaseFrameSeq = 0
         openGeneration = 0
         openGenerationIsStale = false
+        endStageInterval()
         transactionBuilder = nil
         registeredFontIds = [0]
         lastPublicationOperationCounts = nil
@@ -435,6 +439,7 @@ final class CommandDispatcher {
                 resourceWeight: decoded.resourceWeight
             )
         }
+        endStageInterval()
     }
 
     /// Dispatches one queued packet only when its handoff belongs to the live connection.
@@ -476,7 +481,7 @@ final class CommandDispatcher {
         case .setTitle, .setWindowBg, .setLinkCursor, .protocolError,
              .setFont, .setFontFallback, .registerFont, .clipboardWrite:
             if openFrameSeq != nil {
-                transactionBuilder?.stage(command, resourceWeight: resourceWeight)
+                stageInOpenTransaction(command, resourceWeight: resourceWeight)
             } else {
                 applyLocal(command)
             }
@@ -494,7 +499,7 @@ final class CommandDispatcher {
         case .presentationTarget(let target):
             if openFrameSeq != nil {
                 openPresentationTarget = target
-                transactionBuilder?.stage(command, resourceWeight: resourceWeight)
+                stageInOpenTransaction(command, resourceWeight: resourceWeight)
             } else {
                 reject(
                     .outOfTransactionCommand(opcode: opcode),
@@ -507,7 +512,7 @@ final class CommandDispatcher {
         default:
             if openFrameSeq != nil {
                 // Inside a transaction: compile into typed domain updates.
-                transactionBuilder?.stage(command, resourceWeight: resourceWeight)
+                stageInOpenTransaction(command, resourceWeight: resourceWeight)
             } else {
                 // A command arrived with no open transaction and no sanctioned
                 // out-of-band match above. Either a new BEAM out-of-band command
@@ -522,6 +527,27 @@ final class CommandDispatcher {
                 )
             }
         }
+    }
+
+    /// Compiles one command into the open transaction inside the frame's `FrameStage` interval.
+    private func stageInOpenTransaction(_ command: RenderCommand, resourceWeight: FrameResourceWeight) {
+        beginStageInterval(frameSeq: openFrameSeq ?? 0)
+        transactionBuilder?.stage(command, resourceWeight: resourceWeight)
+    }
+
+    /// Opens the `FrameStage` interval unless this frame's staging interval is already open.
+    private func beginStageInterval(frameSeq: UInt32) {
+        guard openStageInterval == nil else { return }
+        openStageInterval = frameTransactionSignposter.beginInterval(
+            "FrameStage", id: .exclusive, "frame=\(frameSeq, privacy: .public)"
+        )
+    }
+
+    /// Closes the open `FrameStage` interval, if any.
+    private func endStageInterval() {
+        guard let interval = openStageInterval else { return }
+        frameTransactionSignposter.endInterval("FrameStage", interval)
+        openStageInterval = nil
     }
 
     /// Opens a frame transaction. A second `begin_frame` before its matching
@@ -544,6 +570,7 @@ final class CommandDispatcher {
         // Seed the builder from the prior committed editor snapshot — the single
         // semantic authority — never from the resident-window backing or mutable
         // FrameState mirrors (#2999 AC6). Base-0 keyframes start empty regardless.
+        beginStageInterval(frameSeq: frameSeq)
         let priorSnapshot = committedEditorSnapshot
         transactionBuilder = PreparedFrameTransactionBuilder(
             frameSeq: frameSeq,
@@ -567,6 +594,7 @@ final class CommandDispatcher {
     /// Closes, freezes, and publishes the open transaction. Validation completes
     /// before `publish(_:)` is entered, so a rejected frame has no observable writes.
     private func commitTransaction(frameSeq: UInt32, inputSeq: UInt32) {
+        endStageInterval()
         if openGenerationIsStale {
             openFrameSeq = nil
             transactionBuilder = nil
@@ -613,7 +641,10 @@ final class CommandDispatcher {
             return
         }
 
-        switch transactionBuilder.freeze(requiredThemeSlots: Self.requiredThemeSlots, frameState: frameState, themeColors: guiState.themeColors) {
+        let freezeInterval = frameTransactionSignposter.beginInterval("FrameFreeze", id: .exclusive, "frame=\(frameSeq, privacy: .public)")
+        let frozen = transactionBuilder.freeze(requiredThemeSlots: Self.requiredThemeSlots, frameState: frameState, themeColors: guiState.themeColors)
+        frameTransactionSignposter.endInterval("FrameFreeze", freezeInterval)
+        switch frozen {
         case .failure(let rejection):
             reject(rejection, frameSeq: frameSeq, logReason: rejection.logDescription)
             return
@@ -629,7 +660,9 @@ final class CommandDispatcher {
             lastTerminalRejection = nil
             openFrameSeq = nil
             self.transactionBuilder = nil
+            let publishInterval = frameTransactionSignposter.beginInterval("FramePublish", id: .exclusive, "frame=\(frameSeq, privacy: .public)")
             publish(transaction, clearsResync: clearsResync)
+            frameTransactionSignposter.endInterval("FramePublish", publishInterval)
             openPresentationTarget = nil
         }
 
@@ -785,6 +818,7 @@ final class CommandDispatcher {
         let rejectedGeneration = generation ?? openGeneration
         let rejectedFrameSeq = frameSeq ?? 0
         let rejectedPresentationTarget = openPresentationTarget
+        endStageInterval()
         openFrameSeq = nil
         openBaseFrameSeq = 0
         transactionBuilder = nil
