@@ -34,6 +34,23 @@ defmodule Minga.Buffer.Selection do
     }
   end
 
+  @doc """
+  Builds the characterwise selection that a range replacement covers, against an existing line-indexed snapshot.
+
+  Each position is first clamped with `Minga.Buffer.Position.clamp_in/3`, so a column past its line's end means the line end and a line past the final line means the final line. The selection's cursor is then the start of its span.
+  """
+  @spec clamped_characterwise_in(Lines.snapshot(), Document.position(), Document.position()) ::
+          t()
+  def clamped_characterwise_in({line_starts, text} = snapshot, from_pos, to_pos) do
+    text_size = byte_size(text)
+
+    characterwise_in(
+      snapshot,
+      Position.clamp_in(line_starts, from_pos, text_size),
+      Position.clamp_in(line_starts, to_pos, text_size)
+    )
+  end
+
   @doc "Builds a linewise selection between two line numbers."
   @spec linewise(Document.t(), non_neg_integer(), non_neg_integer()) :: t()
   def linewise(%Document{} = doc, start_line, end_line) when start_line >= 0 and end_line >= 0 do

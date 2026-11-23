@@ -89,40 +89,54 @@ defmodule Minga.Buffer.UndoHistory do
     record_edit_batch(history, version, [patch], source, at)
   end
 
-  @doc "Returns the previous document/version and updates history, or `:empty` when undo is unavailable."
-  @spec undo(t(), version(), Document.t()) :: {:ok, Restore.t(), t()} | :empty
+  @doc """
+  Returns the previous document/version and updates history, or `:empty` when undo is unavailable.
+
+  Returns `{:error, reason}` and leaves the history unchanged when an entry's patches do not apply to `current_document`.
+  """
+  @spec undo(t(), version(), Document.t()) ::
+          {:ok, Restore.t(), t()} | :empty | {:error, UndoPatch.apply_error()}
   def undo(%__MODULE__{undo_entries: []}, _current_version, %Document{}), do: :empty
 
   def undo(%__MODULE__{} = history, current_version, %Document{} = current_document) do
     [{previous_version, patches, source} | remaining_undo] = history.undo_entries
-    {previous_document, redo_patches} = apply_patches(current_document, patches)
-    redo_entry = {current_version, redo_patches, source}
 
-    new_history = %{
-      history
-      | undo_entries: remaining_undo,
-        redo_entries: [redo_entry | history.redo_entries]
-    }
+    with {:ok, previous_document, redo_patches} <- apply_patches(current_document, patches) do
+      redo_entry = {current_version, redo_patches, source}
 
-    {:ok, Restore.new(previous_version, previous_document, source), new_history}
+      new_history = %{
+        history
+        | undo_entries: remaining_undo,
+          redo_entries: [redo_entry | history.redo_entries]
+      }
+
+      {:ok, Restore.new(previous_version, previous_document, source), new_history}
+    end
   end
 
-  @doc "Returns the next document/version and updates history, or `:empty` when redo is unavailable."
-  @spec redo(t(), version(), Document.t()) :: {:ok, Restore.t(), t()} | :empty
+  @doc """
+  Returns the next document/version and updates history, or `:empty` when redo is unavailable.
+
+  Returns `{:error, reason}` and leaves the history unchanged when an entry's patches do not apply to `current_document`.
+  """
+  @spec redo(t(), version(), Document.t()) ::
+          {:ok, Restore.t(), t()} | :empty | {:error, UndoPatch.apply_error()}
   def redo(%__MODULE__{redo_entries: []}, _current_version, %Document{}), do: :empty
 
   def redo(%__MODULE__{} = history, current_version, %Document{} = current_document) do
     [{next_version, patches, source} | remaining_redo] = history.redo_entries
-    {next_document, undo_patches} = apply_patches(current_document, patches)
-    undo_entry = {current_version, undo_patches, source}
 
-    new_history = %{
-      history
-      | redo_entries: remaining_redo,
-        undo_entries: cap_entries([undo_entry | history.undo_entries])
-    }
+    with {:ok, next_document, undo_patches} <- apply_patches(current_document, patches) do
+      undo_entry = {current_version, undo_patches, source}
 
-    {:ok, Restore.new(next_version, next_document, source), new_history}
+      new_history = %{
+        history
+        | redo_entries: remaining_redo,
+          undo_entries: cap_entries([undo_entry | history.undo_entries])
+      }
+
+      {:ok, Restore.new(next_version, next_document, source), new_history}
+    end
   end
 
   @doc """
@@ -130,10 +144,10 @@ defmodule Minga.Buffer.UndoHistory do
 
   Walks backward through the undo stack, popping every entry whose source is `:agent`, applying its patches to roll back the document, and pushing corresponding redo entries. Stops at the first non-agent entry or when the stack is empty.
 
-  Returns `{:ok, restore, updated_history, undone_count}` with the final document state after all agent entries are reversed, or `:empty` when no agent entries are on top.
+  Returns `{:ok, restore, updated_history, undone_count}` with the final document state after all agent entries are reversed, or `:empty` when no agent entries are on top. When any entry's patches do not apply, returns `{:error, reason}` and the caller keeps its history and document unchanged.
   """
   @spec undo_agent_session(t(), version(), Document.t()) ::
-          {:ok, Restore.t(), t(), pos_integer()} | :empty
+          {:ok, Restore.t(), t(), pos_integer()} | :empty | {:error, UndoPatch.apply_error()}
   def undo_agent_session(%__MODULE__{} = history, current_version, %Document{} = current_document) do
     case history.undo_entries do
       [{_version, _patches, :agent} | _rest] ->
@@ -145,12 +159,13 @@ defmodule Minga.Buffer.UndoHistory do
   end
 
   @spec do_undo_agent_session(t(), version(), Document.t(), non_neg_integer()) ::
-          {:ok, Restore.t(), t(), pos_integer()}
+          {:ok, Restore.t(), t(), pos_integer()} | {:error, UndoPatch.apply_error()}
   defp do_undo_agent_session(%__MODULE__{} = history, current_version, current_document, count) do
     case history.undo_entries do
       [{_version, _patches, :agent} | _rest] ->
-        {:ok, restore, new_history} = undo(history, current_version, current_document)
-        do_undo_agent_session(new_history, restore.version, restore.document, count + 1)
+        with {:ok, restore, new_history} <- undo(history, current_version, current_document) do
+          do_undo_agent_session(new_history, restore.version, restore.document, count + 1)
+        end
 
       _ ->
         restore = Restore.new(current_version, current_document, :agent)
@@ -186,12 +201,18 @@ defmodule Minga.Buffer.UndoHistory do
   @spec redo_count(t()) :: non_neg_integer()
   def redo_count(%__MODULE__{} = history), do: length(history.redo_entries)
 
-  @spec apply_patches(Document.t(), patches()) :: {Document.t(), patches()}
+  @spec apply_patches(Document.t(), patches()) ::
+          {:ok, Document.t(), patches()} | {:error, UndoPatch.apply_error()}
   defp apply_patches(%Document{} = document, patches) do
-    Enum.reduce(patches, {document, []}, fn patch, {current_document, inverse_patches} ->
-      inverse = UndoPatch.invert(patch, current_document)
-      next_document = UndoPatch.apply(patch, current_document)
-      {next_document, [inverse | inverse_patches]}
+    Enum.reduce_while(patches, {:ok, document, []}, fn patch, {:ok, current_document, inverses} ->
+      case UndoPatch.apply(patch, current_document) do
+        {:ok, next_document} ->
+          inverse = UndoPatch.invert(patch, current_document)
+          {:cont, {:ok, next_document, [inverse | inverses]}}
+
+        {:error, _reason} = error ->
+          {:halt, error}
+      end
     end)
   end
 

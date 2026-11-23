@@ -165,6 +165,17 @@ defmodule Minga.Buffer.UndoHistoryTest do
       assert :empty = UndoHistory.undo(history, 0, doc("current"))
       assert :empty = UndoHistory.redo(history, 0, doc("current"))
     end
+
+    test "an entry whose patch does not apply is refused and stays in the history" do
+      history = force(UndoHistory.new(), 0, "before", "after", :lsp)
+
+      # The document no longer holds what the patch recorded.
+      assert UndoHistory.undo(history, 1, doc("other")) == {:error, :patch_mismatch}
+
+      assert {:ok, restore, history} = UndoHistory.undo(history, 1, doc("after"))
+      assert UndoHistory.redo(history, 0, doc("other")) == {:error, :patch_mismatch}
+      assert {:ok, _restore, _history} = UndoHistory.redo(history, 0, restore.document)
+    end
   end
 
   describe "undo_agent_session/3" do
@@ -211,6 +222,17 @@ defmodule Minga.Buffer.UndoHistoryTest do
       assert Document.content(restore.document) == "lsp edit"
       assert UndoHistory.undo_count(new_history) == 1
       assert UndoHistory.last_undo_source(new_history) == :lsp
+    end
+
+    test "refuses the whole session when any entry's patch does not apply" do
+      history =
+        UndoHistory.new()
+        |> force(0, "", "base", :agent)
+        |> force(1, "base", "base\nmore", :agent)
+
+      # The newer entry applies, the older one does not, so nothing is undone.
+      assert UndoHistory.undo_agent_session(history, 2, doc("bad\nmore")) ==
+               {:error, :patch_mismatch}
     end
 
     test "undoes single agent entry" do

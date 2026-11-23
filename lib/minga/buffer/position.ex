@@ -50,6 +50,19 @@ defmodule Minga.Buffer.Position do
     min(point, text_size)
   end
 
+  @doc """
+  Clamps an editor position to existing text against an existing line index.
+
+  A line past the final line becomes the final line, and a column past its line's end becomes the line end. This is the line and column that `Minga.Buffer.Cursor.place/2` chooses for such a position, so the clamped position names the same place for a deletion and for an insertion.
+  """
+  @spec clamp_in(Lines.line_starts(), t(), non_neg_integer()) :: t()
+  def clamp_in(line_starts, {line, column}, text_size)
+      when is_tuple(line_starts) and line >= 0 and column >= 0 do
+    clamped_line = min(line, tuple_size(line_starts) - 1)
+    {_line_start, line_length} = Lines.span(line_starts, clamped_line, text_size)
+    {clamped_line, min(column, line_length)}
+  end
+
   @doc "Returns the on-screen column for an editor position."
   @spec display_column(Document.t(), t()) :: non_neg_integer()
   def display_column(%Document{} = doc, {line, column}) do

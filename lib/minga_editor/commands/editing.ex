@@ -325,6 +325,10 @@ defmodule MingaEditor.Commands.Editing do
       :empty ->
         Minga.Log.info(:editor, "No agent edits to undo")
         state
+
+      # The buffer logs the refused undo; nothing changed.
+      {:error, _reason} ->
+        state
     end
   end
 

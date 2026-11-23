@@ -93,6 +93,34 @@ defmodule Minga.Buffer.Document do
     }
   end
 
+  @doc """
+  Creates a gap buffer from a string with the cursor at exactly `position`.
+
+  Unlike `move_to/2`, the cursor is not moved to a grapheme boundary, and the text is not segmented. Use it when an edit already knows where it leaves the cursor, such as the end of text it inserted, as `insert_text/2` does. `position` must name an existing line and a column within that line.
+
+  ## Examples
+
+      iex> buf = Minga.Buffer.Document.new_at("ab\\ncd", {1, 1})
+      iex> Minga.Buffer.Document.cursor(buf)
+      {1, 1}
+      iex> Minga.Buffer.Document.content(buf)
+      "ab\\ncd"
+  """
+  @spec new_at(String.t(), position()) :: t()
+  def new_at(text, {line, col}) when is_binary(text) and line >= 0 and col >= 0 do
+    line_starts = Lines.build_index(text)
+    point = Lines.start(line_starts, line) + col
+
+    %__MODULE__{
+      before: binary_part(text, 0, point),
+      after: binary_part(text, point, byte_size(text) - point),
+      cursor_line: line,
+      cursor_col: col,
+      line_count: tuple_size(line_starts),
+      line_offsets: line_starts
+    }
+  end
+
   # ── Queries ──
 
   @doc "Returns the full text content of the buffer."
@@ -407,26 +435,51 @@ defmodule Minga.Buffer.Document do
   @doc false
   @spec replace_at_byte_range(t(), non_neg_integer(), non_neg_integer(), binary(), position()) ::
           t()
-  def replace_at_byte_range(
+  def replace_at_byte_range(doc, start_byte, bytes_to_remove, text_to_insert, cursor_pos) do
+    case splice_byte_range(doc, start_byte, bytes_to_remove, text_to_insert, cursor_pos) do
+      {:ok, new_doc} ->
+        new_doc
+
+      {:error, :invalid_range} ->
+        raise ArgumentError,
+              "invalid byte range: start_byte=#{start_byte}, bytes_to_remove=#{bytes_to_remove}, content_size=#{content_byte_size(doc)}"
+
+      {:error, :invalid_utf8} ->
+        raise ArgumentError, "byte range replacement produced invalid UTF-8 content"
+    end
+  end
+
+  @doc """
+  Replaces `bytes_to_remove` bytes at `start_byte` with `text_to_insert` and places the cursor at `cursor_pos`.
+
+  Returns `{:error, :invalid_range}` when the range is outside the content, and `{:error, :invalid_utf8}` when the resulting content would not be valid UTF-8. The fragments may split code points, as undo patches do, as long as the whole result is valid.
+  """
+  @spec splice_byte_range(t(), non_neg_integer(), non_neg_integer(), binary(), position()) ::
+          {:ok, t()} | {:error, :invalid_range | :invalid_utf8}
+  def splice_byte_range(
         %__MODULE__{} = doc,
         start_byte,
         bytes_to_remove,
         text_to_insert,
         cursor_pos
       )
-      when start_byte >= 0 and bytes_to_remove >= 0 and is_binary(text_to_insert) do
+      when is_integer(start_byte) and start_byte >= 0 and is_integer(bytes_to_remove) and
+             bytes_to_remove >= 0 and is_binary(text_to_insert) do
     content = content(doc)
     content_size = byte_size(content)
-    :ok = validate_byte_range(start_byte, bytes_to_remove, content_size)
-    prefix = binary_part(content, 0, start_byte)
     suffix_start = start_byte + bytes_to_remove
-    suffix = binary_part(content, suffix_start, content_size - suffix_start)
-    new_content = prefix <> text_to_insert <> suffix
 
-    new_content
-    |> validate_reconstructed_content()
-    |> new()
-    |> move_to(cursor_pos)
+    if suffix_start <= content_size do
+      prefix = binary_part(content, 0, start_byte)
+      suffix = binary_part(content, suffix_start, content_size - suffix_start)
+      new_content = prefix <> text_to_insert <> suffix
+
+      if Unicode.valid_utf8?(new_content),
+        do: {:ok, new_content |> new() |> move_to(cursor_pos)},
+        else: {:error, :invalid_utf8}
+    else
+      {:error, :invalid_range}
+    end
   end
 
   @doc """
@@ -487,15 +540,6 @@ defmodule Minga.Buffer.Document do
   defp validate_byte_range(start_byte, bytes_to_remove, content_size) do
     raise ArgumentError,
           "invalid byte range: start_byte=#{start_byte}, bytes_to_remove=#{bytes_to_remove}, content_size=#{content_size}"
-  end
-
-  @spec validate_reconstructed_content(binary()) :: binary()
-  defp validate_reconstructed_content(content) do
-    if Unicode.valid_utf8?(content) do
-      content
-    else
-      raise ArgumentError, "byte range replacement produced invalid UTF-8 content"
-    end
   end
 
   # Computes new cursor position and line_count after inserting `text` at the current cursor.

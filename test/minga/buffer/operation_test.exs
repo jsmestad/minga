@@ -335,5 +335,8 @@ defmodule Minga.Buffer.OperationTest do
     end)
   end
 
-  defp undo_with(doc, patch), do: UndoPatch.apply(patch, doc)
+  defp undo_with(doc, patch) do
+    {:ok, undone} = UndoPatch.apply(patch, doc)
+    undone
+  end
 end

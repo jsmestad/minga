@@ -577,6 +577,8 @@ Minga.Buffer.move_to(buf, {line, col})
 
 **Use `apply_edit/6` for all text changes**, even single characters. Don't loop over `insert_char` for multi-character text; that creates pathological undo stack growth and is O(n²) on the gap buffer.
 
+Ranges are inclusive, and a column past the end of its line means the line end. `apply_edits/3` is all or nothing: if any edit would leave the buffer as invalid UTF-8, for example two overlapping edits that split a character, it returns `{:error, {:edit_failed, index, :invalid_utf8}}` with `index` pointing into your list, and the buffer is unchanged.
+
 **Create a wrapper module.** Put all your `Buffer` calls behind a thin delegator module (e.g., `MyExtension.Buffer`). This isolates you from API changes and gives you a natural seam for [test stubs](#testing).
 
 ---
