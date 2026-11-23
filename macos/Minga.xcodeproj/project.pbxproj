@@ -231,6 +231,7 @@
 		72CC62FDCBD531FEFE4D07DF /* ProtocolDecoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 56750F0AAE58AF9A98BF5841 /* ProtocolDecoder.swift */; };
 		736579D9BD00265C65598DE3 /* ProtocolErrorOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0411DCA866DF30C994521EC /* ProtocolErrorOverlay.swift */; };
 		74AD4B2AD52CF461F0DC5D01 /* MinibufferStateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 82B744449C852E13511FFE8D /* MinibufferStateTests.swift */; };
+		75B3582E4AB0C058FA431C05 /* CompressibleIdealWidth.swift in Sources */ = {isa = PBXBuildFile; fileRef = E57C2A0CC1BBE8702A87B77C /* CompressibleIdealWidth.swift */; };
 		760DACD92959745AA9C61945 /* MingaUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 7D941F158B53B4D4CF4AAA4F /* MingaUI.framework */; };
 		764CA69DC904E5F1288EE12A /* MinibufferView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A84E92F596D0DDF8FF11049 /* MinibufferView.swift */; };
 		770CB643A97CD034494278F9 /* MingaIPC in Resources */ = {isa = PBXBuildFile; fileRef = 3BE22623414F870C4F22F87C /* MingaIPC */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
@@ -480,6 +481,7 @@
 		F0A2BCCA095F1CA4FBE9BE3F /* ProtocolSchemaTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3DC281B7F9F7E4C0BA793B1E /* ProtocolSchemaTests.swift */; };
 		F0B5BDD2F0982B527A05CDF8 /* BEAMProcessManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0EFEC421284D11AD2177113 /* BEAMProcessManager.swift */; };
 		F12D6284209D6D32037E6644 /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9FC2118EA77254CBCAE7B0B /* AppState.swift */; };
+		F23FAABFAC0BB0F2AF912ECF /* AgentWorkspaceNarrowLayoutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9DEA1360223702E205D2562 /* AgentWorkspaceNarrowLayoutTests.swift */; };
 		F248E3D8C3ABC76F58955B6B /* EditorGeometry+App.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F6F03841A5D97A688A35CC9 /* EditorGeometry+App.swift */; };
 		F25FB924543E14CA08076577 /* MainRunLoopAction.swift in Sources */ = {isa = PBXBuildFile; fileRef = DCE21D8CE7F63E5298CE289B /* MainRunLoopAction.swift */; };
 		F2E5F978CC1A58066AC9B27F /* EditorFocusPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1BAA3756BF689208A2691CFA /* EditorFocusPolicy.swift */; };
@@ -945,10 +947,12 @@
 		E41827D81991F10BAE2D88FF /* OperationReceiptTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OperationReceiptTypes.swift; sourceTree = "<group>"; };
 		E4DCF10EBEB51624A4A1F428 /* InlineEditField.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InlineEditField.swift; sourceTree = "<group>"; };
 		E557E349097FF119EFE0F827 /* FeedbackStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedbackStateTests.swift; sourceTree = "<group>"; };
+		E57C2A0CC1BBE8702A87B77C /* CompressibleIdealWidth.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompressibleIdealWidth.swift; sourceTree = "<group>"; };
 		E5ACBDC580464626842B6C23 /* NativeResourceInvestigation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeResourceInvestigation.swift; sourceTree = "<group>"; };
 		E8D8E70B7413F570FBAC58C1 /* MessagesContentState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessagesContentState.swift; sourceTree = "<group>"; };
 		E945E6E53217CEC4BAAECBDD /* NativeRenderResources.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeRenderResources.swift; sourceTree = "<group>"; };
 		E99B023E01A9573204B5819B /* ScreenCaptureKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = ScreenCaptureKit.framework; path = System/Library/Frameworks/ScreenCaptureKit.framework; sourceTree = SDKROOT; };
+		E9DEA1360223702E205D2562 /* AgentWorkspaceNarrowLayoutTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentWorkspaceNarrowLayoutTests.swift; sourceTree = "<group>"; };
 		EA5181B8CD0511FCA58DC662 /* minga-tui */ = {isa = PBXFileReference; path = "minga-tui"; sourceTree = "<group>"; };
 		EE173FAAAC37ACFF47EE03B8 /* EditTimelineView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EditTimelineView.swift; sourceTree = "<group>"; };
 		EE2D4BF845A8C876DB44357E /* AgentPromptPresentationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentPromptPresentationTests.swift; sourceTree = "<group>"; };
@@ -1171,6 +1175,7 @@
 		4A459EB5F16F1758002B4FF9 /* Modifiers */ = {
 			isa = PBXGroup;
 			children = (
+				E57C2A0CC1BBE8702A87B77C /* CompressibleIdealWidth.swift */,
 				FA51F390E49935563AB0AEB6 /* PointingHandModifier.swift */,
 			);
 			path = Modifiers;
@@ -1490,6 +1495,7 @@
 			children = (
 				7F5AA77E363715007C43B18F /* AgentConversationListInvalidationTests.swift */,
 				EE2D4BF845A8C876DB44357E /* AgentPromptPresentationTests.swift */,
+				E9DEA1360223702E205D2562 /* AgentWorkspaceNarrowLayoutTests.swift */,
 				5751DCC6A640CE7D5C5364D6 /* ApplicationQuitCoordinatorTests.swift */,
 				AFED73132C30A125845E8AB0 /* BEAMLaunchIsolationTests.swift */,
 				1F2A06C5BA9E3F53A59E202F /* BEAMProcessManagerTests.swift */,
@@ -2305,6 +2311,7 @@
 				B6BE99B3BFD3369D50383A45 /* ChromeTokens.swift in Sources */,
 				3CD15ED81AE384C93557B0C0 /* CompletionOverlay.swift in Sources */,
 				E8DAC5BD5013095E550BF4E8 /* CompletionState.swift in Sources */,
+				75B3582E4AB0C058FA431C05 /* CompressibleIdealWidth.swift in Sources */,
 				F3C4A9DABEF6FD369F8B1F45 /* ContentView.swift in Sources */,
 				2CFB39859AC1E448147D8C31 /* EditTimelineState.swift in Sources */,
 				2198A76504E5C0A41209CF57 /* EditTimelineView.swift in Sources */,
@@ -2404,6 +2411,7 @@
 				EEABA900F172178DB4469465 /* AgentConversationListInvalidationTests.swift in Sources */,
 				3A7AFBDD9B50086C47D27F8B /* AgentPromptAperture.swift in Sources */,
 				18100CA9081C957AA0EA19BF /* AgentPromptPresentationTests.swift in Sources */,
+				F23FAABFAC0BB0F2AF912ECF /* AgentWorkspaceNarrowLayoutTests.swift in Sources */,
 				F12D6284209D6D32037E6644 /* AppState.swift in Sources */,
 				715B62DED371AC2E5E15DE1A /* ApplicationQuitCoordinator.swift in Sources */,
 				D38FD803F967B7B0A3EDC7AE /* ApplicationQuitCoordinatorTests.swift in Sources */,

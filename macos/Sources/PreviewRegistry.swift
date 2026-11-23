@@ -78,6 +78,8 @@ enum PreviewRegistry {
             editorChromePreview()
         case "AgentChromeView":
             agentChromePreview()
+        case "AgentWorkspaceChromeView":
+            agentWorkspaceChromePreview()
         case "WorkspaceChromeView":
             workspaceChromePreview(empty: false)
         case "WorkspaceEmptyChromeView":
@@ -218,6 +220,22 @@ enum PreviewRegistry {
 
     private static func agentChromePreview() -> some View {
         previewChromeView(agentVisible: true, failureMessage: "AgentChromeView could not initialize the production editor renderer.")
+    }
+
+    // MARK: - AgentWorkspaceChromeView
+
+    /// The Agent workspace without a sidebar, as a narrow window shows it.
+    @ViewBuilder
+    private static func agentWorkspaceChromePreview() -> some View {
+        let size = PreviewSnapshotPolicy.size(named: "AgentWorkspaceChromeView")
+        if let appState = productionPreviewAppState(agentVisible: true) {
+            let _ = PreviewFixtures.populateAgentWorkspace(appState.gui)
+            productionContentView(appState)
+                .frame(width: size.width, height: size.height)
+        } else {
+            previewFailureView(message: "AgentWorkspaceChromeView could not initialize the production editor renderer.")
+                .frame(width: size.width, height: size.height)
+        }
     }
 
     // MARK: - InsertModeEditorView

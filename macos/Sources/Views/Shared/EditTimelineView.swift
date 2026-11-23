@@ -75,7 +75,11 @@ public struct EditTimelineView: View {
                             }
                             .padding(.horizontal, Spacing.md)
                             .padding(.vertical, Spacing.xs)
-                            .frame(width: fileControlWidth, height: timelineHeight)
+                            // A narrow row shrinks each control to the visible strip so the path truncates instead of being cut off.
+                            .containerRelativeFrame(.horizontal) { length, _ in
+                                min(fileControlWidth, max(0, length - 2 * Spacing.md))
+                            }
+                            .frame(height: timelineHeight)
                             .background(themeColors.editorFg.opacity(0.08))
                             .clipShape(.rect(cornerRadius: Radius.sm))
                             .contentShape(Rectangle())

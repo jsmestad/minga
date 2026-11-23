@@ -4,7 +4,7 @@ import Foundation
 
 /// Shared policy for preview screenshots and snapshot-fixture layout.
 enum PreviewSnapshotPolicy {
-    private static let fullShellViews: Set<String> = ["EditorChromeView", "AgentChromeView", "WorkspaceChromeView", "WorkspaceEmptyChromeView", "WorkspaceLongNameChromeView", "DiagnosticsEditorView", "InsertModeEditorView", "HoverEditorView", "SignatureHelpEditorView"]
+    private static let fullShellViews: Set<String> = ["EditorChromeView", "AgentChromeView", "AgentWorkspaceChromeView", "WorkspaceChromeView", "WorkspaceEmptyChromeView", "WorkspaceLongNameChromeView", "DiagnosticsEditorView", "InsertModeEditorView", "HoverEditorView", "SignatureHelpEditorView"]
     private static let renderedWindowViews = fullShellViews.union([
         "AgentChatView", "AgentChatStreaming", "AgentChatApproval",
         "AgentChatError", "AgentChatCompletion", "AgentChatSummary"
@@ -16,11 +16,12 @@ enum PreviewSnapshotPolicy {
         case unexpectedImageSize(actual: CGSize, expected: CGSize)
     }
 
-    /// Only the two reviewed workspace widths are supported, not an open matrix.
+    /// Only the reviewed workspace widths are supported, not an open matrix: 420 is the narrow window geometry (#3926).
     static func agentWidth(_ value: String?) throws -> CGFloat {
         switch value {
         case nil, "1200": return 1200
         case "800": return 800
+        case "420": return 420
         default: throw CaptureError.unsupportedAgentWidth
         }
     }
@@ -34,7 +35,7 @@ enum PreviewSnapshotPolicy {
 
     static func size(named name: String) -> CGSize {
         switch name {
-        case "AgentChromeView":
+        case "AgentChromeView", "AgentWorkspaceChromeView":
             CGSize(width: (try? agentWidth(ProcessInfo.processInfo.environment["PREVIEW_AGENT_WIDTH"])) ?? 1200, height: 704)
         case "EditorChromeView", "InsertModeEditorView", "HoverEditorView", "SignatureHelpEditorView": CGSize(width: 1200, height: 704)
         case "WorkspaceChromeView", "WorkspaceEmptyChromeView": CGSize(width: 1280, height: 800)

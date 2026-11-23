@@ -15,12 +15,15 @@ capture_dir=$(mktemp -d "${TMPDIR:-/tmp}/minga-agent-stills.XXXXXX")
 PREVIEW_OUTPUT_DIR="$capture_dir" scripts/preview.sh --agent-workspace --wall-timeout 600
 ```
 
-This uses the existing PreviewHost, production `ContentView` and editor renderer with an immutable completed transcript. It freezes motion and captures one supported theme, Doom One, at both widths:
+This uses the existing PreviewHost, production `ContentView` and editor renderer with an immutable completed transcript. It freezes motion and captures one supported theme, Doom One, at these widths:
 
 | Width in points | PNG |
 |---:|---|
+| 420 | `AgentWorkspaceChromeView-420-doom-one.png` |
 | 800 | `AgentChromeView-800-doom-one.png` |
 | 1200 | `AgentChromeView-1200-doom-one.png` |
+
+The 420 point capture is the narrow window geometry. It shows the Agent workspace the way a narrow window does, without a sidebar, with the workspace header, Agent activity bar and All Changes row. Every control must stay inside the window: titles truncate with an ellipsis, the Agent header drops its labels and then moves its commands into the More Agent actions menu, and composer buttons drop titles they cannot fit.
 
 The deadline includes protocol generation, project generation, compilation and capture. An unavailable renderer, failed command, unstable image or expired deadline is a failure, not a successful screenshot of an error panel. The command removes stale images for the selected captures before starting.
 

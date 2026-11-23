@@ -9,6 +9,7 @@ struct PreviewSnapshotPolicyTests {
     func sizeTable() {
         #expect(PreviewSnapshotPolicy.size(named: "EditorChromeView") == CGSize(width: 1200, height: 704))
         #expect(PreviewSnapshotPolicy.size(named: "AgentChromeView") == CGSize(width: 1200, height: 704))
+        #expect(PreviewSnapshotPolicy.size(named: "AgentWorkspaceChromeView") == CGSize(width: 1200, height: 704))
         #expect(PreviewSnapshotPolicy.size(named: "FileTreeView") == CGSize(width: 280, height: 600))
         #expect(PreviewSnapshotPolicy.size(named: "GitStatusView") == CGSize(width: 280, height: 600))
         #expect(PreviewSnapshotPolicy.expectedPixelSize(named: "StatusBarView", scale: 2.0) == CGSize(width: 1600, height: 56))
@@ -18,6 +19,7 @@ struct PreviewSnapshotPolicyTests {
     func renderedCapturePolicy() {
         #expect(PreviewSnapshotPolicy.shouldUseRenderedWindowCapture("EditorChromeView"))
         #expect(PreviewSnapshotPolicy.shouldUseRenderedWindowCapture("AgentChromeView"))
+        #expect(PreviewSnapshotPolicy.shouldUseRenderedWindowCapture("AgentWorkspaceChromeView"))
         #expect(PreviewSnapshotPolicy.shouldUseRenderedWindowCapture("DiagnosticsEditorView"))
         #expect(PreviewSnapshotPolicy.shouldUseRenderedWindowCapture("InsertModeEditorView"))
         #expect(PreviewSnapshotPolicy.shouldUseRenderedWindowCapture("HoverEditorView"))
@@ -54,9 +56,10 @@ struct PreviewSnapshotPolicyTests {
     @Test("agent widths reject unbounded and malformed requests")
     func boundedAgentWidths() throws {
         #expect(try PreviewSnapshotPolicy.agentWidth(nil) == 1200)
+        #expect(try PreviewSnapshotPolicy.agentWidth("420") == 420)
         #expect(try PreviewSnapshotPolicy.agentWidth("800") == 800)
         #expect(try PreviewSnapshotPolicy.agentWidth("1200") == 1200)
-        for value in ["0", "-1", "801", "100000", "NaN", ""] {
+        for value in ["0", "-1", "419", "600", "801", "100000", "NaN", ""] {
             #expect(throws: PreviewSnapshotPolicy.CaptureError.self) {
                 try PreviewSnapshotPolicy.agentWidth(value)
             }
