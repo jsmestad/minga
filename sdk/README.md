@@ -4,7 +4,7 @@ Compile-time SDK for building [Minga](https://github.com/jsmestad/minga) editor 
 
 This package provides the types, behaviours, macros, and API stubs that extension authors need to compile their code. At runtime, the real Minga modules in the editor's BEAM VM take over.
 
-The full extension guide lives in the Minga repository: [Extension API](https://github.com/jsmestad/minga/blob/main/docs/EXTENSION_API.md) covers every callback and API with examples, and [Extensibility](https://github.com/jsmestad/minga/blob/main/docs/EXTENSIBILITY.md) explains the model behind it. Module documentation for this package is on [HexDocs](https://hexdocs.pm/minga_sdk).
+The full extension guide lives in the Minga repository: [Extension API](https://github.com/jsmestad/minga/blob/main/docs/EXTENSION_API.md) covers every callback, declaration macro, lifecycle boundary, and API with examples. Module documentation for this package is on [HexDocs](https://hexdocs.pm/minga_sdk).
 
 ## Installation
 

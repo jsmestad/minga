@@ -76,8 +76,7 @@ Press `Space` to explore commands, or read [Getting Started](docs/GETTING-STARTE
 
 - **Start here:** [Getting Started](docs/GETTING-STARTED.md), [Configuration](docs/CONFIGURATION.md), [Projects](docs/PROJECTS.md).
 - **Agent runtime:** [Agent Model Selection](docs/AGENT-MODEL-SELECTION.md), [Buffer-Aware Agents](docs/BUFFER-AWARE-AGENTS.md), [Session Recovery](docs/SESSION-RECOVERY.md), [Remote Agents](docs/REMOTE_AGENTS.md), [Agent Hooks](docs/HOOKS.md), [MCP Servers](docs/MCP.md).
-- **Coming from another tool:** [For Neovim Users](docs/FOR-NEOVIM-USERS.md), [For Emacs Users](docs/FOR-EMACS-USERS.md), [For AI-Assisted Developers](docs/FOR-AI-CODERS.md).
-- **Extending Minga:** [Elixir is Minga's Elisp](docs/EXTENSIBILITY.md), [Extension API](docs/EXTENSION_API.md), [Keymap Scopes](docs/KEYMAP-SCOPES.md), [Agentic View Keymap](docs/AGENTIC-KEYMAP.md).
+- **Extending Minga:** [Extension API](docs/EXTENSION_API.md), [Keymap Scopes](docs/KEYMAP-SCOPES.md), [Agentic View Keymap](docs/AGENTIC-KEYMAP.md).
 - **Architecture and internals:** [Architecture](docs/ARCHITECTURE.md), [Port Protocol](docs/PROTOCOL.md), [Semantic UI Protocol](docs/GUI_PROTOCOL.md), [Charm TUI Renderer](docs/CHARM_TUI.md).
 - **Contributing and operations:** [Contributing](CONTRIBUTING.md), [Native Editor Automation (minga-ipc)](docs/AUTOMATION-IPC.md), [Preparing and Verifying Builds](docs/RELEASING.md).
 

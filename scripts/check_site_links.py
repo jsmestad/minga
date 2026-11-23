@@ -96,6 +96,17 @@ def resolve_local_path(site_root: Path, source_file: Path, raw_target: str) -> P
     if candidate.is_file():
         return candidate
 
+    # Match Cloudflare Workers Static Assets `html_handling: "auto-trailing-slash"`,
+    # where extensionless routes like `/why-minga` resolve to `why-minga.html`.
+    if not clean_path.endswith("/") and not candidate.suffix:
+        html_candidate = candidate.with_suffix(".html")
+        try:
+            html_candidate.relative_to(root_resolved)
+        except ValueError:
+            return None
+        if html_candidate.is_file():
+            return html_candidate
+
     return None
 
 

@@ -1480,4 +1480,4 @@ extension :tools, hex: "minga_tools", app: :minga_tools, version: "~> 0.3"
 - `Minga.Extension.Git`: git clone, fetch, update, and rollback
 - `Minga.Extension.Hex`: Hex package resolution via Mix.install
 - `Minga.Extension.Updater`: update orchestration with confirmation and rollback
-- [Elixir is Minga's Elisp](EXTENSIBILITY.md): deep dive on how the BEAM enables Emacs-level extensibility
+- [Extension API](EXTENSION_API.md): public callbacks, macros, model routes, runtime grammar loading, and lifecycle ownership

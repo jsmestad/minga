@@ -118,6 +118,43 @@ class CheckSiteLinksTest(unittest.TestCase):
             errors = check_site_links.verify_site_bundle(root, expect_noindex=True)
             self.assertTrue(any("missing ExDoc home link" in e for e in errors), errors)
 
+    def test_extensionless_html_routes_and_redirects_pass(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_valid_bundle(root)
+            (root / "why-minga.html").write_text(
+                '<!DOCTYPE html><html><head><meta name="robots" content="noindex, nofollow"></head>'
+                '<body><h2 id="the-beam">Why the BEAM</h2><a href="/">Home</a></body></html>\n',
+                encoding="utf-8",
+            )
+            (root / "index.html").write_text(
+                '<!DOCTYPE html><html><head><meta name="robots" content="noindex, nofollow"></head>'
+                '<body><a href="/why-minga">Why Minga</a><a href="/why-minga#the-beam">BEAM</a></body></html>\n',
+                encoding="utf-8",
+            )
+            (root / "_redirects").write_text(
+                "/for-ai-coders.html /why-minga 301\n/docs/for-ai-coders.html /why-minga 301\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(check_site_links.verify_site_bundle(root, expect_noindex=True), [])
+
+    def test_broken_extensionless_anchor_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_valid_bundle(root)
+            (root / "why-minga.html").write_text(
+                '<!DOCTYPE html><html><head><meta name="robots" content="noindex, nofollow"></head>'
+                '<body><h2 id="the-beam">Why the BEAM</h2></body></html>\n',
+                encoding="utf-8",
+            )
+            (root / "index.html").write_text(
+                '<!DOCTYPE html><html><head><meta name="robots" content="noindex, nofollow"></head>'
+                '<body><a href="/why-minga#missing">Bad</a></body></html>\n',
+                encoding="utf-8",
+            )
+            errors = check_site_links.verify_site_bundle(root, expect_noindex=True)
+            self.assertTrue(any("#missing" in e for e in errors), errors)
+
     def test_expect_noindex_catches_missing_opt_out(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

@@ -165,4 +165,4 @@ If you close the workspace or quit before autosave finishes, Minga cancels the c
 
 For a remote session, reattach to the original active conversation on the same daemon. When the daemon supports remote drafts, the current driver recovers the last confirmed composer and snapshots. If Minga cannot confirm an attached send, check the conversation first, then open **Draft attachments** to reload the saved context before sending again.
 
-For architecture ownership, see [Architecture](ARCHITECTURE.md#agent-conversation-persistence-and-recovery). For the provider request contract, see [For AI Coders](FOR-AI-CODERS.md#provider-turns-keep-their-durable-continuation).
+For architecture ownership, see [Architecture](ARCHITECTURE.md#agent-conversation-persistence-and-recovery). For provider route selection and native replay identity, see [Agent Model Selection](AGENT-MODEL-SELECTION.md#native-replay-identity).
