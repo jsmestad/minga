@@ -4,9 +4,10 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex, nofollow">
-  <title>Minga: A programmable workbench for code and agents</title>
-  <meta name="description" content="Minga brings native code editing, staged agent edits with three-way merge, and Elixir programmability into one concurrent workbench for macOS and the terminal.">
+  <title>minga: The text is the interface</title>
+  <meta name="description" content="A quiet, keyboard-first programmable workbench for code and agents. One Spine layout shared by macOS and the terminal, with isolated staged edits, per-author undo, and Elixir programmability.">
   <link rel="icon" type="image/svg+xml" href="/assets/minga_dark-transparent.svg">
+  <link rel="preload" href="/fonts/instrument-serif-italic.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/styles.css">
   <script>
     (() => {
@@ -25,9 +26,9 @@
   <header class="site-header">
     <div class="container header-inner">
       <a class="brand-link" href="/">
-        <img src="/assets/minga_dark-transparent.svg" alt="Minga logo" width="28" height="28">
-        <span>Minga</span>
-        <span class="brand-tag">v0.1.0 preview</span>
+        <img src="/assets/minga_dark-transparent.svg" alt="Minga logo" width="24" height="24">
+        <span class="brand-wordmark">minga</span>
+        <span class="brand-version">/ v0.1.0-pre</span>
       </a>
       <nav class="site-nav" aria-label="Primary">
         <a href="/why-minga">Why Minga</a>
@@ -45,29 +46,191 @@
     <section class="hero">
       <div class="container">
         <div class="hero-copy">
-          <p class="kicker">Pre-release · Building toward v0.1.0</p>
-          <h1>A programmable workbench that reshapes to fit the task.</h1>
-          <p class="hero-lead">Spawning coding agents is no longer the hard part; reviewing, steering, and owning the result is. Minga brings native code editing, staged agent diffs with three-way merge, and programmable Elixir workflows into one concurrent environment on macOS and in the terminal.</p>
+          <h1>The text is the interface. Everything else stays out of the way.</h1>
+          <p class="hero-lead">A programmable, keyboard-first workbench for code and agents. No icon rail, no permanent sidebar, no tab strip, and no separate agent workspace to get lost in. One layout shared by macOS and the terminal, where Vim keys stay Vim, undo is strictly yours, and Elixir lets the workbench reshape to fit the task.</p>
           <div class="actions">
             <a class="btn btn-primary" href="/getting-started">Get Started</a>
             <a class="btn" href="/why-minga">Read Why Minga</a>
             <a class="btn" href="/architecture">How It Works</a>
           </div>
-          <p class="hero-meta">Native macOS app &amp; terminal client · Vim or standard desktop shortcuts · Open source (MIT)</p>
         </div>
 
-        <div class="stage-frame" aria-label="Pre-release media preview slot">
-          <div class="stage-bar">
-            <span class="stage-dots" aria-hidden="true"><span></span><span></span><span></span></span>
-            <span>Minga.app · macOS preview</span>
-            <span class="stage-pill">Pre-release</span>
-          </div>
-          <div class="stage-body">
-            <div class="stage-body-inner">
-              <p class="stage-label">v0.1.0 capture pending</p>
-              <h3>Recorded macOS walkthrough lands here at v0.1.0</h3>
-              <p>A silent 10 to 15 second capture recorded directly from the packaged macOS app will sit here at release: editing code, reviewing staged agent hunks, and activating a custom workflow you can discard or keep across projects.</p>
+        <figure class="spine-figure">
+          <div class="spine-specimen" role="img" aria-label="The Spine resting screen: plain title bar with italic minga wordmark, code with Twist authorship gutter, and one prioritized modeline">
+            <div class="spine-titlebar">
+              <span class="spine-wordmark">minga</span>
+              <span class="spine-title-file">retry.ex <span>lib/minga_agent/retry.ex</span></span>
+              <span></span>
             </div>
+            <div class="spine-buffer">
+              <div class="spine-line">
+                <span class="spine-ln">237</span>
+                <span class="spine-sign"></span>
+                <span class="spine-gutter"></span>
+                <span class="spine-code"><span class="ckw">def</span> classify_status(status, headers) <span class="ckw">do</span></span>
+              </div>
+              <div class="spine-line spine-line-hl">
+                <span class="spine-ln">238</span>
+                <span class="spine-sign"></span>
+                <span class="spine-gutter">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="10" height="26" viewBox="0 0 10 26" aria-hidden="true"><path d="M7 5 C7 11, 3 11, 3 17 L3 26" fill="none" stroke="#6b3fa3" stroke-width="2.6" stroke-linecap="round"/><path d="M3 5 C3 11, 7 11, 7 17 L7 26" fill="none" stroke="#1a1b20" stroke-width="5" stroke-linecap="round"/><path d="M3 5 C3 11, 7 11, 7 17 L7 26" fill="none" stroke="#a463e6" stroke-width="2.6" stroke-linecap="round"/></svg>
+                </span>
+                <span class="spine-code">  <span class="ckw">case</span> status <span class="ckw">do</span></span>
+              </div>
+              <div class="spine-line spine-line-hl">
+                <span class="spine-ln">239</span>
+                <span class="spine-sign"></span>
+                <span class="spine-gutter">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="10" height="26" viewBox="0 0 10 26" aria-hidden="true"><path d="M3 0 L3 26" stroke="#6b3fa3" stroke-width="2.6"/><path d="M7 0 L7 26" stroke="#a463e6" stroke-width="2.6"/></svg>
+                </span>
+                <span class="spine-code">    <span class="cnum">429</span> -&gt; {<span class="cat">:rate_limited</span>, parse_retry_after(headers)}</span>
+              </div>
+              <div class="spine-line spine-line-hl">
+                <span class="spine-ln">240</span>
+                <span class="spine-sign"></span>
+                <span class="spine-gutter">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="10" height="26" viewBox="0 0 10 26" aria-hidden="true"><path d="M3 0 L3 26" stroke="#4f9fe0" stroke-width="2.6"/><path d="M7 0 L7 26" stroke="#a463e6" stroke-width="2.6"/></svg>
+                </span>
+                <span class="spine-code">    <span class="cnum">529</span> -&gt; {<span class="cat">:overloaded</span>, backoff_ms(<span class="cnum">2</span>)} <span class="ccm"># your edit inside Minga's change</span></span>
+              </div>
+              <div class="spine-line spine-line-hl">
+                <span class="spine-ln">241</span>
+                <span class="spine-sign"></span>
+                <span class="spine-gutter">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="10" height="26" viewBox="0 0 10 26" aria-hidden="true"><path d="M3 0 L3 19" stroke="#6b3fa3" stroke-width="2.6" stroke-linecap="round"/><path d="M7 0 L7 19" stroke="#a463e6" stroke-width="2.6" stroke-linecap="round"/></svg>
+                </span>
+                <span class="spine-code">    code <span class="ckw">when</span> code &gt;= <span class="cnum">500</span> -&gt; {<span class="cat">:retryable</span>, backoff_ms(<span class="cnum">1</span>)}</span>
+              </div>
+              <div class="spine-line">
+                <span class="spine-ln">242</span>
+                <span class="spine-sign"></span>
+                <span class="spine-gutter">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="10" height="26" viewBox="0 0 10 26" aria-hidden="true"><path d="M5 0 L5 26" stroke="#4f9fe0" stroke-width="1.6"/></svg>
+                </span>
+                <span class="spine-code">    _ -&gt; {<span class="cat">:fatal</span>, status}</span>
+              </div>
+              <div class="spine-line">
+                <span class="spine-ln">243</span>
+                <span class="spine-sign"></span>
+                <span class="spine-gutter"></span>
+                <span class="spine-code"><span class="ckw">  end</span></span>
+              </div>
+            </div>
+            <div class="spine-modeline">
+              <div class="ml-left">
+                <span class="ml-pill">NORMAL</span>
+                <span class="ml-seg ml-needs">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6" fill="#f2b544" fill-opacity="0.25"/><circle cx="8" cy="8" r="3.4" fill="#f2b544"/></svg>
+                  1 needs you
+                </span>
+                <span class="ml-file">retry.ex</span>
+                <span class="ml-minga">change 1/2</span>
+                <span>main +11</span>
+              </div>
+              <div class="ml-right">
+                <span class="ml-seg ml-minga">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5.5" fill="none" stroke="#a463e6" stroke-opacity="0.28" stroke-width="1.5"/><path d="M8 2.5 A5.5 5.5 0 0 1 13.5 8" fill="none" stroke="#a463e6" stroke-width="1.5" stroke-linecap="round"/><circle cx="13.5" cy="8" r="2.1" fill="#a463e6"/></svg>
+                  Minga here 2/3
+                </span>
+                <span class="ml-dim">elixir</span>
+                <span class="ml-dim">240:31</span>
+              </div>
+            </div>
+          </div>
+          <figcaption class="spine-caption">
+            <span>The Spine resting screen (<a href="https://github.com/jsmestad/minga/blob/main/docs/adr/0006-the-spine.md">ADR-0006</a>, migrating surface by surface toward v0.1.0): plain title bar, your code, and one modeline.</span>
+            <span>macOS &amp; Terminal · Vim or desktop keys · MIT</span>
+          </figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <section class="section" id="the-spine">
+      <div class="container">
+        <div class="section-header">
+          <p class="section-index"><span>01</span> The Spine</p>
+          <h2>Two marks carry the identity. Chrome speaks only when state changes.</h2>
+          <p>Resting screens carry no icon rail, no tab bar, no key legends, and no workspace pills. Fonts and themes belong to you; Minga's identity lives in two visual marks drawn from the same vocabulary on macOS and in the terminal.</p>
+        </div>
+
+        <div class="marks-grid">
+          <div class="mark-block">
+            <h3>The Twist: who wrote this line?</h3>
+            <p>A 10 pt authorship column replaces a separate git gutter. Its strands cross once on the first line of a change (pinning to the top of the viewport as you scroll) so the handle stays put while Minga writes.</p>
+            <ul class="twist-legend">
+              <li class="twist-row">
+                <span class="twist-swatch"><svg xmlns="http://www.w3.org/2000/svg" width="10" height="24" viewBox="0 0 10 26" aria-hidden="true"><path d="M7 5 C7 11, 3 11, 3 17 L3 26" fill="none" stroke="#6b3fa3" stroke-width="2.6" stroke-linecap="round"/><path d="M3 5 C3 11, 7 11, 7 17 L7 26" fill="none" stroke="#1a1b20" stroke-width="5" stroke-linecap="round"/><path d="M3 5 C3 11, 7 11, 7 17 L7 26" fill="none" stroke="#a463e6" stroke-width="2.6" stroke-linecap="round"/></svg></span>
+                <strong>Minga unreviewed</strong>
+                <span>Purple braided ribbon; click the crossing or use <kbd>SPC g k</kbd> / <kbd>SPC g r</kbd></span>
+              </li>
+              <li class="twist-row">
+                <span class="twist-swatch"><svg xmlns="http://www.w3.org/2000/svg" width="10" height="24" viewBox="0 0 10 26" aria-hidden="true"><path d="M3 0 L3 26" stroke="#4f9fe0" stroke-width="2.6"/><path d="M7 0 L7 26" stroke="#a463e6" stroke-width="2.6"/></svg></span>
+                <strong>Shared edit</strong>
+                <span>Editing inside Minga's change turns the shade strand blue on your lines</span>
+              </li>
+              <li class="twist-row">
+                <span class="twist-swatch"><svg xmlns="http://www.w3.org/2000/svg" width="10" height="24" viewBox="0 0 10 26" aria-hidden="true"><path d="M5 0 L5 26" stroke="#4f9fe0" stroke-width="1.8"/></svg></span>
+                <strong>Your lines</strong>
+                <span>Thin blue strand for your uncommitted edits; <kbd>u</kbd> undoes only yours</span>
+              </li>
+              <li class="twist-row">
+                <span class="twist-swatch"><svg xmlns="http://www.w3.org/2000/svg" width="10" height="24" viewBox="0 0 10 26" aria-hidden="true"><path d="M5 0 L5 26" stroke="#a463e6" stroke-opacity="0.45" stroke-width="1.6"/></svg></span>
+                <strong>Kept</strong>
+                <span>Muted single purple strand until your next commit; rejected lines vanish</span>
+              </li>
+            </ul>
+          </div>
+
+          <div class="mark-block">
+            <h3>The Orbit: what is Minga doing?</h3>
+            <p>Five distinct shapes paired with words, rendered from one BEAM value across the modeline, tasks drawer, subagent peek, and notifications. Amber is never decorative; if something is amber, Minga is waiting for you.</p>
+            <ul class="orbit-list">
+              <li class="orbit-row">
+                <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5.5" fill="none" stroke="#a463e6" stroke-opacity="0.3" stroke-width="1.5"/><path d="M8 2.5 A5.5 5.5 0 0 1 13.5 8" fill="none" stroke="#a463e6" stroke-width="1.5" stroke-linecap="round"/><circle cx="13.5" cy="8" r="2.1" fill="#a463e6"/></svg>
+                <strong class="role-minga">Working</strong>
+                <span>Orbit appears only while moving</span>
+                <span class="orbit-tui">TUI: ◐</span>
+              </li>
+              <li class="orbit-row">
+                <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6" fill="#f2b544" fill-opacity="0.28"/><circle cx="8" cy="8" r="3.4" fill="#f2b544"/></svg>
+                <strong class="role-needs">Needs you</strong>
+                <span>The only state that escalates; never steals focus</span>
+                <span class="orbit-tui">TUI: ◉</span>
+              </li>
+              <li class="orbit-row">
+                <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="3" fill="none" stroke="#8b8d94" stroke-width="1.6"/></svg>
+                <strong>Waiting</strong>
+                <span>Always names reason and countdown (e.g. retry in 40 s)</span>
+                <span class="orbit-tui">TUI: ○</span>
+              </li>
+              <li class="orbit-row">
+                <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 16 16" aria-hidden="true"><rect x="4.6" y="4.6" width="6.8" height="6.8" rx="1.2" fill="#e5707a" transform="rotate(45 8 8)"/></svg>
+                <strong class="role-fail">Failed</strong>
+                <span>Red diamond with cause and one concrete next step</span>
+                <span class="orbit-tui">TUI: ◆</span>
+              </li>
+              <li class="orbit-row">
+                <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="3.4" fill="#7fbf7a"/></svg>
+                <strong class="role-done">Done</strong>
+                <span>Ready to review ("Passt." once at completion)</span>
+                <span class="orbit-tui">TUI: ●</span>
+              </li>
+            </ul>
+          </div>
+        </div>
+
+        <div class="spine-rules">
+          <div class="spine-rule">
+            <h3>Vim keys stay Vim. Undo is yours.</h3>
+            <p>Inside a file, <kbd>y</kbd> still yanks and <kbd>n</kbd> still steps search. Handle Minga's work with <kbd>SPC g k</kbd>, <kbd>SPC g r</kbd>, text objects (<kbd>ih</kbd>/<kbd>ah</kbd>), <kbd>.</kbd>, and ex ranges. Pressing <kbd>u</kbd> or <kbd>⌘Z</kbd> undoes only your own edits; Minga's edits leave through Reject.</p>
+          </div>
+          <div class="spine-rule">
+            <h3>Lists and terminals are buffers.</h3>
+            <p>Tasks (<code>*minga-tasks*</code>), reviews (<code>*minga-review*</code>), diagnostics, subagent peeks, file switchers, and built-in terminals open in drawers or splits and close with <kbd>q</kbd> or <kbd>esc</kbd>. Every approval everywhere uses the same keys: <kbd>y</kbd> once, <kbd>a</kbd> session, <kbd>t</kbd> turn, <kbd>n</kbd> deny.</p>
+          </div>
+          <div class="spine-rule">
+            <h3>Built-in terminal with command blocks.</h3>
+            <p>Minga's shell commands run in a visible, read-only <code>*minga-shell*</code> buffer marked with the purple strand. In your own terminal buffers, <kbd>]]</kbd>/<kbd>[[</kbd> jump command blocks, <kbd>yic</kbd> copies output, and <kbd>↩</kbd> on a failed command asks Minga to fix it.</p>
           </div>
         </div>
       </div>
@@ -76,7 +239,7 @@
     <section class="section" id="the-split">
       <div class="container">
         <div class="section-header">
-          <p class="kicker">The real bottleneck</p>
+          <p class="section-index"><span>02</span> The review loop</p>
           <h2>Spawning agents is easy. Verifying and steering their code is where you lose the day.</h2>
           <p>Follow one ordinary moment: an agent finishes a 400-line refactor, and one hunk has a subtle edge-case bug.</p>
         </div>
@@ -105,7 +268,7 @@
             </div>
             <div class="loop-cell loop-cell-minga">
               <span class="loop-cell-label">Minga</span>
-              Approved edits stay staged in an isolated overlay while your working tree, open files, and undo history stay untouched until you explicitly publish or discard them.
+              Approved edits stage in an isolated overlay while your working tree, open files, and undo history stay untouched until you explicitly publish or discard them (and under the Spine, per-author undo guarantees <kbd>u</kbd> never removes Minga's work).
             </div>
           </div>
 
@@ -120,7 +283,7 @@
             </div>
             <div class="loop-cell loop-cell-minga">
               <span class="loop-cell-label">Minga</span>
-              Inspect changed files hunk by hunk in Minga's dedicated diff review pane. Background writes to other files never steal focus or jump your reading position, and updated revisions flag cleanly until you refresh.
+              Review hunk by hunk without losing focus or reading position. Only <code>Needs you</code> escalates in the modeline and background notifications; background writes never steal focus. Under ADR-0006, review works inline via the Twist gutter or across all files in <code>*minga-review*</code>.
             </div>
           </div>
 
@@ -135,7 +298,7 @@
             </div>
             <div class="loop-cell loop-cell-minga">
               <span class="loop-cell-label">Minga</span>
-              Accept good hunks, reject the bad one, and edit your open file directly with Vim or standard desktop shortcuts. If your edits overlap staged changes on publish, conflict review shows both versions side by side.
+              Keep good hunks, reject the bad one, and edit your open file directly with Vim or standard desktop shortcuts while Vim keys stay Vim. Overlapping edits open side-by-side conflict resolution on publish instead of overwriting either side.
             </div>
           </div>
 
@@ -146,11 +309,11 @@
             </div>
             <div class="loop-cell">
               <span class="loop-cell-label">Terminal multiplexers + separate editor</span>
-              Sharing unsaved edits or compiler errors with a terminal CLI requires saving to disk first, piping output, or relying on per-editor bridge plugins.
+              Sharing unsaved edits, failed test output, or compiler errors with a terminal CLI requires saving to disk first, piping output, or relying on per-editor bridge plugins.
             </div>
             <div class="loop-cell loop-cell-minga">
               <span class="loop-cell-label">Minga</span>
-              Attach a snapshot of your live unsaved buffer or published file diagnostics directly to an open agent draft, then publish staged changes with three-way merge when satisfied.
+              Attach a snapshot of your live unsaved buffer or published file diagnostics directly to an open agent draft today, or steer a running task or subagent straight from its split buffer.
             </div>
           </div>
 
@@ -165,7 +328,7 @@
             </div>
             <div class="loop-cell loop-cell-minga">
               <span class="loop-cell-label">Minga</span>
-              Customize commands, hooks, and extensions in Elixir today. <em>On the v0.1.0 roadmap:</em> write or ask the agent to build task-specific review surfaces over live buffer and agent state, then discard after the task or keep across projects.
+              Customize commands, hooks, advice, and supervised extensions in Elixir today. <em>On the v0.1.0 roadmap:</em> write or ask Minga to build task-specific buffers and review workflows over live editor and agent state, then discard when finished or keep across projects.
             </div>
           </div>
         </div>
@@ -173,11 +336,11 @@
         <div class="scope-strip">
           <div class="scope-note">
             <h3>When Herdr, tmux, or Zed is a better fit</h3>
-            <p>If you want to run Anthropic's Claude Code and OpenAI's Codex CLI side by side on flat-rate vendor subscriptions, a multiplexer like Herdr or Zed's agent protocol is built for that. If you want a fast compiled Rust editor with editable multibuffer diffs and Tab prediction today, look at Zed or Cursor. Minga is for engineers who want one programmable editor and agent runtime they own and reshape in a single language.</p>
+            <p>If you want to run Anthropic's Claude Code and OpenAI's Codex CLI side by side on flat-rate vendor subscriptions, a multiplexer like Herdr or Zed's agent protocol is built for that. If you want a compiled Rust desktop IDE with editable multibuffer diffs and Tab prediction today, look at Zed or Cursor. Minga is for engineers who want a quiet, keyboard-first workbench they own and reshape in one language.</p>
           </div>
           <div class="scope-note">
             <h3>What about Cursor and VS Code?</h3>
-            <p>VS Code and Cursor have massive extension ecosystems, polished inline Tab completion, and cloud agents. Minga trades Electron and fixed extension-host APIs for native macOS and terminal clients over a concurrent VM built from day one for isolated buffers, extensions, and custom workflows.</p>
+            <p>VS Code and Cursor have massive extension ecosystems, polished inline Tab completion, and cloud agents. Minga trades Electron, IDE sidebar sprawl, and fixed extension-host APIs for one keyboard-first layout shared by macOS and the terminal over a concurrent VM.</p>
           </div>
         </div>
       </div>
@@ -186,7 +349,7 @@
     <section class="section" id="programmable">
       <div class="container">
         <div class="section-header">
-          <p class="kicker">Programmability</p>
+          <p class="section-index"><span>03</span> Programmability</p>
           <h2>Shape the editor itself, not shell scripts wrapped around it.</h2>
           <p>Minga edits any language you write, with sensible defaults and zero config required to start. Just as Lua configures Neovim and Elisp configures Emacs, Elixir is Minga's extension language.</p>
         </div>
@@ -204,13 +367,13 @@
               </li>
               <li>
                 <strong>Disposable for one task, kept when it sticks (v0.1.0)</strong>
-                <p>Toward v0.1.0, ask Minga's agent or write source yourself to reshape the workbench for a single migration or spec review, discard it when the work lands, or keep useful definitions shared across projects.</p>
+                <p>Toward v0.1.0, ask Minga or write source yourself to reshape the workbench for a single migration or spec review, discard it when the work lands, or keep useful definitions shared across projects.</p>
               </li>
             </ul>
 
             <div class="callout">
               <span class="callout-title">Current release status</span>
-              <p><strong>Ships today:</strong> live config, hook, and command-wrapper reload, plus installable path, Git, and Hex extensions. <strong>In progress for v0.1.0:</strong> live save-to-activate task workflows and shared reusable definitions (<a href="/extending">see Extending Minga</a>).</p>
+              <p><strong>Ships on main today:</strong> live config, hook, and command-wrapper reload, installable path/Git/Hex extensions, staged edit overlays, and three-way merge. <strong>Migrating toward v0.1.0:</strong> the Spine chrome model (<a href="https://github.com/jsmestad/minga/blob/main/docs/adr/0006-the-spine.md">ADR-0006</a>), built-in terminal buffers, and live save-to-activate task workflows (<a href="/extending">see Extending Minga</a>).</p>
             </div>
           </div>
 
@@ -247,9 +410,9 @@ extension <span class="tok-atom">:minga_git_extended</span>,
     <section class="section" id="runtime">
       <div class="container">
         <div class="section-header">
-          <p class="kicker">Under the hood</p>
-          <h2>Built on the Erlang VM so background work stays isolated from your files.</h2>
-          <p>Minga runs its core on the Erlang virtual machine (BEAM) to solve four concrete failures that appear when editing, language servers, extensions, and autonomous agents run together.</p>
+          <p class="section-index"><span>04</span> Runtime</p>
+          <h2>Built on the Erlang VM so background work stays isolated and frontends never drift.</h2>
+          <p>Minga runs its core on the Erlang virtual machine (BEAM) to solve four concrete failures that appear when editing, language servers, extensions, multiple clients, and autonomous agents run together.</p>
         </div>
 
         <ol class="runtime-ledger">
@@ -301,7 +464,7 @@ extension <span class="tok-atom">:minga_git_extended</span>,
         <div class="boundary-band">
           <div class="boundary-col">
             <h3>What the Erlang VM owns</h3>
-            <p>Open files, supervision trees, agent orchestration, extensions, and high-level UI state.</p>
+            <p>Open files, supervision trees, agent orchestration, extensions, key scopes, modeline segment priority, and one canonical state value for every client.</p>
           </div>
           <div class="boundary-col boundary-col-native">
             <h3>Where native code takes over</h3>
@@ -314,39 +477,36 @@ extension <span class="tok-atom">:minga_git_extended</span>,
     <section class="section" id="frontends">
       <div class="container">
         <div class="section-header">
-          <p class="kicker">Desktop &amp; Terminal</p>
-          <h2>Native on macOS. First-class in the terminal.</h2>
-          <p>One core drives both clients with the same config, editing modes, and agent workspaces. Choose Vim modal editing or standard desktop shortcuts, discover commands through Spacebar menus, and try Minga side-by-side with your existing editor without modifying your repository.</p>
+          <p class="section-index"><span>05</span> Parity</p>
+          <h2>macOS and the terminal draw the same picture.</h2>
+          <p>The Go terminal UI is not a simplified fallback. Under ADR-0006, if a macOS screen cannot be drawn in the terminal with the same layout, the design is wrong. Rendering stays platform-native; the interaction model stays identical.</p>
         </div>
 
         <div class="grid-2">
-          <div class="stage-frame stage-frame-compact" aria-label="macOS desktop preview slot">
-            <div class="stage-bar">
-              <span class="stage-dots" aria-hidden="true"><span></span><span></span><span></span></span>
-              <span>Minga.app · macOS desktop</span>
-              <span class="stage-pill">Pre-release</span>
+          <div class="surface-panel">
+            <div class="surface-panel-head">
+              <h3>macOS Desktop App</h3>
+              <span class="surface-panel-tag">Swift + Metal</span>
             </div>
-            <div class="stage-body">
-              <div class="stage-body-inner">
-                <p class="stage-label">macOS preview pending</p>
-                <h3>Native macOS desktop experience</h3>
-                <p>Platform-native window chrome, font ligatures, smooth trackpad scrolling, diff review, and agent workspaces in a signed, notarized macOS app.</p>
-              </div>
-            </div>
+            <p>Neovim and Doom Emacs discipline with native Mac polish: smooth trackpad scrolling, CoreText typography, ligatures, system accent selection, and native menu bar and Dock notifications, without generic toolbar capsules or sidebar clutter.</p>
+            <ul>
+              <li>Signed, notarized Apple Silicon prereleases via Homebrew.</li>
+              <li>Hold <kbd>⌘</kbd> to reveal shortcuts on visible controls; every key has a click and every click teaches its key.</li>
+              <li>Background <code>Needs you</code> alerts use Dock badges and actionable macOS notifications without stealing focus.</li>
+            </ul>
           </div>
 
-          <div class="stage-frame stage-frame-compact" aria-label="Terminal client preview slot">
-            <div class="stage-bar">
-              <span>$ minga · Terminal client</span>
-              <span class="stage-pill">Pre-release</span>
+          <div class="surface-panel">
+            <div class="surface-panel-head">
+              <h3>Terminal Client</h3>
+              <span class="surface-panel-tag">Go + Lip Gloss</span>
             </div>
-            <div class="stage-body">
-              <div class="stage-body-inner">
-                <p class="stage-label">Terminal preview pending</p>
-                <h3>Same core, same config over SSH or tmux</h3>
-                <p>Keep your Vim motions, text objects, registers, macros, language servers, syntax highlighting, and agent workspaces inside any modern terminal on macOS or Linux.</p>
-              </div>
-            </div>
+            <p>Draws the exact same Spine screens, marks, and keys over SSH or tmux using floating Lip Gloss layers, one-cell padded surface tints, and tree connectors, degrading cleanly down to 16-color terminals.</p>
+            <ul>
+              <li>Auto-detects modern terminal features at startup: Kitty keyboard protocol, Kitty graphics for the exact SVG Twist (falling back to two-tone <code>▚</code>/<code>▐</code> cells), OSC 8 clickable <code>file:line</code>, OSC 9/777 notifications, OSC 9;4 tab progress, and synchronized output.</li>
+              <li>Inspect what your terminal supports anytime via <code>:checkhealth terminal</code> (landing with the Spine TUI migration).</li>
+              <li>Visual parity and key-walk invariants verified side by side with macOS in CI (<a href="/architecture#executable-parity">see Storyboard CI</a>).</li>
+            </ul>
           </div>
         </div>
       </div>
@@ -355,7 +515,7 @@ extension <span class="tok-atom">:minga_git_extended</span>,
     <section class="section" id="install">
       <div class="container">
         <div class="section-header">
-          <p class="kicker">Try it side by side</p>
+          <p class="section-index"><span>06</span> Install</p>
           <h2>Install on macOS or build from source.</h2>
           <p>Apple Silicon macOS builds ship via Homebrew as signed, notarized prereleases. Minga never writes proprietary files into your repo, so you can try it alongside your current editor with zero lock-in. See <a href="/getting-started">Getting Started</a> for Linux and Intel Mac source builds.</p>
         </div>
@@ -386,7 +546,7 @@ minga path/to/project</code></pre>
               <span class="guide-row-title">Why Minga</span>
               <span class="guide-row-kind">Thesis</span>
             </span>
-            <span class="guide-row-desc">Where agent multiplexers hit a ceiling, how Minga compares to Zed/Cursor/Emacs/Neovim, and what is still early.</span>
+            <span class="guide-row-desc">Why Minga rejects IDE chrome sprawl, how it compares to Zed, Cursor, Herdr, Emacs, and Neovim, and what is still early.</span>
           </a>
           <a class="guide-row" href="/getting-started">
             <span class="guide-row-top">
@@ -397,17 +557,17 @@ minga path/to/project</code></pre>
           </a>
           <a class="guide-row" href="/architecture">
             <span class="guide-row-top">
-              <span class="guide-row-title">Architecture &amp; Staged Edits</span>
+              <span class="guide-row-title">Architecture &amp; The Spine</span>
               <span class="guide-row-kind">Diagrams</span>
             </span>
-            <span class="guide-row-desc">Visual diagrams of the Erlang VM core, native OS clients, staged overlay pipeline, and key design decisions.</span>
+            <span class="guide-row-desc">Process boundaries, staged edit overlays, Storyboard parity CI, and all six Architecture Decision Records (including ADR-0006).</span>
           </a>
           <a class="guide-row" href="/extending">
             <span class="guide-row-top">
               <span class="guide-row-title">Extending Minga</span>
               <span class="guide-row-kind">Guide</span>
             </span>
-            <span class="guide-row-desc">Config, installable extensions, custom corporate model gateways, task-shaped workflows, and security boundaries.</span>
+            <span class="guide-row-desc">Config, installable extensions, corporate model gateways, task-shaped workflows, and security boundaries.</span>
           </a>
           <a class="guide-row" href="/docs/configuration.html">
             <span class="guide-row-top">
@@ -431,8 +591,8 @@ minga path/to/project</code></pre>
   <footer class="site-footer">
     <div class="container footer-inner">
       <div class="footer-note">
-        <p><strong>Minga</strong> is open source under the MIT license. Created by <a href="https://evalcode.com">Justin Smestad</a> in Colorado.</p>
-        <p>Pre-release staging preview ahead of v0.1.0.</p>
+        <p><span class="brand-wordmark" style="font-size:1.15rem;margin-right:0.25rem;">minga</span> is open source under the MIT license. Created by <a href="https://evalcode.com">Justin Smestad</a> in Colorado.</p>
+        <p>Pre-release staging preview ahead of v0.1.0. Servus.</p>
       </div>
       <nav class="footer-links" aria-label="Footer">
         <a href="/why-minga">Why Minga</a>

@@ -7,6 +7,7 @@
   <title>Extending Minga: Three Layers of Programmability</title>
   <meta name="description" content="Customize Minga across three layers: live-reloaded config.exs, installable extensions and corporate LLM gateways, and task-shaped v0.1.0 workflows, with clear security and reload boundaries.">
   <link rel="icon" type="image/svg+xml" href="/assets/minga_dark-transparent.svg">
+  <link rel="preload" href="/fonts/instrument-serif-italic.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/styles.css">
   <script>
     (() => {
@@ -25,9 +26,9 @@
   <header class="site-header">
     <div class="container header-inner">
       <a class="brand-link" href="/">
-        <img src="/assets/minga_dark-transparent.svg" alt="Minga logo" width="28" height="28">
-        <span>Minga</span>
-        <span class="brand-tag">v0.1.0 preview</span>
+        <img src="/assets/minga_dark-transparent.svg" alt="Minga logo" width="24" height="24">
+        <span class="brand-wordmark">minga</span>
+        <span class="brand-version">/ v0.1.0-pre</span>
       </a>
       <nav class="site-nav" aria-label="Primary">
         <a href="/why-minga">Why Minga</a>
@@ -44,9 +45,9 @@
   <main id="main">
     <header class="essay-hero">
       <div class="container">
-        <p class="kicker">Programmability</p>
+        <p class="section-index"><span>EXTENDING</span> Three Layers</p>
         <h1>Extending Minga</h1>
-        <p class="essay-subtitle">Minga works with any language you write, with no config required to start. When you want to customize it, Elixir is the extension language underneath: begin with five lines in <code>config.exs</code>, grow into installable packages, or reshape the workbench for a single task.</p>
+        <p class="essay-subtitle">Minga works with any language you write, with no config required to start. When you want to customize it, Elixir is the extension language underneath: begin with five lines in <code>config.exs</code>, grow into supervised packages, or reshape buffers and workflows for a single task.</p>
         <nav class="essay-toc" aria-label="Sections">
           <a href="#three-layers">1. Three layers</a>
           <a href="#layer-config">2. config.exs</a>
@@ -61,7 +62,7 @@
       <div class="container">
         <section class="essay-section" id="three-layers">
           <h2>1. One language across three layers</h2>
-          <p>You never outgrow a JSON schema or jump across an RPC plugin wall when your customization gets serious. Every layer shares the same Elixir runtime:</p>
+          <p>You never outgrow a JSON schema or jump across an RPC plugin wall when your customization gets serious. Every layer shares the same Elixir runtime and composes with Minga's buffers, drawers, and key scopes instead of adding competing chrome:</p>
 
           <ul class="spec-ledger">
             <li class="spec-row">
@@ -70,11 +71,11 @@
             </li>
             <li class="spec-row">
               <span class="spec-key spec-key-strong">Layer 2 · Extensions</span>
-              <span class="spec-detail"><strong>Ships today.</strong> Installable packages from local paths, Git repos, or Elixir's package registry (Hex) using <code>minga_sdk</code>: declarative commands, custom sidebars, corporate LLM gateways, and runtime-compiled syntax grammars.</span>
+              <span class="spec-detail"><strong>Ships today.</strong> Installable packages from local paths, Git repos, or Elixir's package registry (Hex) using <code>minga_sdk</code>: declarative commands, keymap scopes, custom buffer/drawer surfaces, corporate LLM gateways, and runtime-compiled syntax grammars.</span>
             </li>
             <li class="spec-row">
               <span class="spec-key spec-key-strong">Layer 3 · Task workflows</span>
-              <span class="spec-detail"><strong>v0.1.0 roadmap.</strong> Write or ask Minga's agent to author readable source over existing buffer, agent, and permission primitives; review and save to activate; discard when a one-off task ends or keep across projects.</span>
+              <span class="spec-detail"><strong>v0.1.0 roadmap.</strong> Write or ask Minga to author readable source over existing buffer, agent, Spine drawer, and permission primitives; review and save to activate; discard when a one-off task ends or keep across projects.</span>
             </li>
           </ul>
         </section>
@@ -120,7 +121,7 @@ extension <span class="tok-atom">:minga_git_extended</span>,
 
         <section class="essay-section" id="layer-extensions">
           <h2>3. Layer 2: Supervised extensions, corporate gateways, and grammars</h2>
-          <p>When a customization needs its own supervision tree, background state, sidebar surface, or distribution across machines, build a package with <code>minga_sdk</code>. Every command, keybinding, sidebar, and language entry is tagged with its owning extension so disabling it tears down everything cleanly without leaving stale state behind.</p>
+          <p>When a customization needs its own supervision tree, background state, buffer surface, or distribution across machines, build a package with <code>minga_sdk</code>. Every command, keybinding, surface, and language entry is tagged with its owning extension so disabling it tears down everything cleanly without leaving stale state behind.</p>
 
           <div class="code-card">
             <div class="code-header">
@@ -161,11 +162,11 @@ extension <span class="tok-atom">:minga_git_extended</span>,
         <section class="essay-section" id="layer-workflows">
           <h2>4. Layer 3: Task-shaped disposable and kept workflows (v0.1.0 roadmap)</h2>
           <p>The v0.1.0 milestone adds a third layer between a quick <code>config.exs</code> edit and a full packaged extension: reshaping your workbench for a single task without maintaining a massive personal config or forking the editor.</p>
-          <p><strong>Concrete example of the v0.1.0 target:</strong> suppose you are revising a design spec in Markdown and want inline review comments, explicit "Send Revision" actions, attributed suggestions you can accept or revert, and a side pane tracking token usage and latency for that document. Instead of hunting for a plugin or waiting on an editor vendor, you ask Minga's agent to author that view in readable source over Minga's existing editor and agent primitives. You inspect the diff, approve activation, collaborate on the spec, and either discard the view once the doc is done or keep it as a reusable definition across future projects.</p>
+          <p><strong>Concrete example of the v0.1.0 target:</strong> suppose you are revising a design spec in Markdown and want inline review comments, explicit "Send Revision" actions, attributed suggestions you can keep or reject, and a split buffer tracking token usage and latency for that document. Instead of hunting for a plugin or waiting on an editor vendor, you ask Minga to author that workflow in readable source over Minga's existing buffer, drawer, and agent primitives. You inspect the diff, approve activation, collaborate on the spec, and either discard the workflow once the doc is done or keep it as a reusable definition across future projects.</p>
 
           <div class="callout">
             <span class="callout-title">Release status &amp; stability</span>
-            <p>Layers 1 and 2 (<code>config.exs</code>, hooks, advice, installable extensions, custom model gateways, and runtime grammars) ship on <code>main</code> today. Layer 3 (live save-to-activate task definitions and reusable kept workflows) is in active development for v0.1.0. Before v1.0, breaking changes to config options or <code>minga_sdk</code> are documented in the <a href="/docs/changelog.html">Changelog</a>.</p>
+            <p>Layers 1 and 2 (<code>config.exs</code>, hooks, advice, installable extensions, custom model gateways, and runtime grammars) ship on <code>main</code> today. Layer 3 (live save-to-activate task definitions and reusable kept workflows) and the ADR-0006 Spine chrome migration are in active development for v0.1.0. Before v1.0, breaking changes to config options or <code>minga_sdk</code> are documented in the <a href="/docs/changelog.html">Changelog</a>.</p>
           </div>
         </section>
 
@@ -174,7 +175,7 @@ extension <span class="tok-atom">:minga_git_extended</span>,
           <p>If you are evaluating Minga for daily work on proprietary company code, here are the exact boundaries:</p>
 
           <ul>
-            <li><strong>Explicit human approval gates (no silent execution).</strong> Extensions and authored workflows run with OS-user privileges inside the Erlang VM, matching Emacs Lisp and Neovim Lua (Minga isolates callback crashes so a buggy extension does not take down the editor, which is failure containment rather than an OS sandbox). Destructive agent tools (file edits, deletes, shell commands, git writes) go through Minga's explicit tool-approval policy, first-time Git/Hex extension installs prompt for confirmation, and v0.1.0 live authoring requires an explicit revocable session grant plus human review before activation.</li>
+            <li><strong>Explicit human approval gates (no silent execution).</strong> Extensions and authored workflows run with OS-user privileges inside the Erlang VM, matching Emacs Lisp and Neovim Lua (Minga isolates callback crashes so a buggy extension does not take down the editor, which is failure containment rather than an OS sandbox). Destructive agent tools (file edits, deletes, shell commands, git writes) go through Minga's explicit tool-approval policy (<kbd>y</kbd> once, <kbd>a</kbd> session, <kbd>t</kbd> turn, <kbd>n</kbd> deny), first-time Git/Hex extension installs prompt for confirmation, and v0.1.0 live authoring requires an explicit revocable session grant plus human review before activation.</li>
             <li><strong>Local credentials, zero remote telemetry.</strong> Minga sends zero analytics or crash telemetry; network traffic goes only to the model routes, MCP servers, and language servers you configure. API keys resolve from environment variables first or save locally in <code>~/.config/minga/credentials.json</code> (<code>0600</code> permissions), never logged and never exported in transcripts.</li>
             <li><strong>Corporate gateway &amp; binary transparency.</strong> Teams can route exclusively through an internal proxy using <code>MingaAgent.InferenceRoute</code> rather than public provider endpoints. Rolling macOS desktop builds are Apple Developer ID signed and notarized, and the entire codebase is MIT open source and buildable from source.</li>
             <li><strong>Why compiled extension updates activate on restart (<a href="/docs/0003-extension-code-updates-require-a-new-vm-generation.html">ADR-0003</a>).</strong> While <kbd>SPC h r</kbd> reloads options, bindings, hooks, and advice in place, compiled extension packages can own supervisors, closures, and dependencies that cannot atomically cross a version boundary mid-session. Disabling an extension takes effect immediately; updated extension code activates cleanly on restart.</li>
@@ -193,7 +194,7 @@ extension <span class="tok-atom">:minga_git_extended</span>,
   <footer class="site-footer">
     <div class="container footer-inner">
       <div class="footer-note">
-        <p><strong>Minga</strong> is open source under the MIT license. Created by <a href="https://evalcode.com">Justin Smestad</a> in Colorado.</p>
+        <p><span class="brand-wordmark" style="font-size:1.15rem;margin-right:0.25rem;">minga</span> is open source under the MIT license. Created by <a href="https://evalcode.com">Justin Smestad</a> in Colorado.</p>
         <p>Pre-release staging preview ahead of v0.1.0.</p>
       </div>
       <nav class="footer-links" aria-label="Footer">
