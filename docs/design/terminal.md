@@ -29,7 +29,7 @@ With shell integration (OSC 133 for prompts and commands, OSC 7 for the cwd), ea
 - The authorship column uses the same strands as code: your commands get your thin blue strand, Minga's commands get the purple ribbon.
 - Minga's commands run in one shared, visible `*minga-shell*` buffer. `SPC a w` shows it in a split.
 - `*minga-shell*` is read-only to keystrokes. It opens in Normal and has no TERMINAL mode, so you cannot type into Minga's shell by accident. You can scroll, search, yank, and interrupt the running command with ⌃C, ⌘. or `SPC a s`.
-- A command that needs approval appears as a pending block with the needs-you glyph. `↩` on it, or a click, asks in the minibuffer: "Run mix ecto.reset? y once · a always · t this turn · n deny". Asking in the minibuffer keeps `y` as yank in the scrollback.
+- A command that needs approval appears as a pending block with the needs-you glyph. `↩` on it, or a click, asks in the minibuffer: "Run mix ecto.reset? y once · a always · t this turn · n deny". Asking in the minibuffer keeps `y` as yank in the scrollback. `esc` defers: the prompt closes, the request stays pending and needs-you stays lit, so a request is never denied by accident. `n` is the deliberate deny.
 
 ## Failed blocks
 
@@ -50,5 +50,4 @@ Click focuses and enters TERMINAL, the wheel scrolls back, a drag selects and co
 
 ## Still open
 
-- What `esc` does at the `*minga-shell*` approval prompt: deny, defer, or leave the request pending.
 - The emulator engine.

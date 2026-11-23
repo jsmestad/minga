@@ -46,13 +46,15 @@ Notation: modifiers as Mac glyphs (⌃J, ⌥↩, ⌘.), leader sequences as `SPC
 | `SPC a J` | Queued inputs buffer | kept (154) |
 | `SPC a u` | Reject all of a task's changes, after "y/n" | kept key (166), now confirms |
 
-`SPC a t` (139) duplicates the old split toggle and should be retired or rebound when `SPC a a` changes.
+`SPC a t` (139) is retired. It duplicated the old split toggle, and the split stays on `SPC a v`.
+
+Minga is pre-release, so keys move without deprecation aliases.
 
 ## In a file
 
 | Keys | Action | Status |
 |---|---|---|
-| `]h` / `[h` | Next / previous Minga change | new (see open question below) |
+| `]h` / `[h` | Next / previous Minga change | new, replaces `]e` |
 | `ih` / `ah` | Text object: one Minga change, inner or with context | new |
 | `vah SPC g k` | Keep every change touched by the selection | new |
 | `.` | Repeat the last keep or reject; counts work | new |
@@ -62,7 +64,7 @@ Notation: modifiers as Mac glyphs (⌃J, ⌥↩, ⌘.), leader sequences as `SPC
 | `K` | Hover: diagnostic or docs | kept |
 | `u`, ⌘Z | Undo your own edits only | changed behavior |
 
-Open question: `]e` already moves to the next agent edit (`normal_prefixes.ex:56`). Decide whether `]h` replaces it or the design adopts `]e`.
+`]h` replaces `]e` ("next agent edit", `normal_prefixes.ex:56`) because it pairs with the `ih` / `ah` text object. `]e` / `[e` become free; no alias is kept.
 
 ## `*minga-review*`
 
@@ -102,7 +104,7 @@ The approval keys match the agent scope today (`lib/minga/keymap/scope/agent.ex:
 | `↩` | Open the full conversation |
 | `q` | Close |
 
-`]t` means "next class/module" in normal mode today (`normal_prefixes.ex:54`). It is only acceptable as a binding local to the peek buffer; otherwise pick another key.
+`]t` / `[t` are bound only inside the peek buffer. In normal mode `]t` keeps its meaning, "next class/module" (`normal_prefixes.ex:54`).
 
 ## File switcher (`SPC ,`)
 
