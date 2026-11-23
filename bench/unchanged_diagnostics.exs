@@ -9,7 +9,7 @@ defmodule Minga.Bench.UnchangedDiagnostics do
     * D: 0, 100, 1,000 and 10,000 diagnostics, spread evenly across a 20,000-line file, so a viewport of R rows holds about `R * D / 20_000` visible matches K.
     * Viewport: 20 and 200 content rows.
     * Layout: one window, or two windows (vertical split) sharing the URI.
-    * Path: resident (unwrapped) and wrapped (windowed emit path).
+    * Path: `resident` and `resident_wrapped` use full-document residence (the default for this file size). `windowed` and `windowed_wrapped` set `:resident_store_max_lines` to 0, which forces the windowed emit path that files beyond the residence limits take.
     * Frame kind: cursor-only (`j`/`k` alternating), scroll (`Ctrl-e`/`Ctrl-y` alternating), and publication (republish a shifted list of the same size, then wait for the next frame).
 
   For each sample the script records wall microseconds from input (or publish call) to the committed frame, VM-wide exact reductions consumed in that interval, and call counts of `Minga.Diagnostics` reader functions. Scenario rows report p10/p50/p90 wall time, p50 reductions, reader calls per frame and the Diagnostics ETS memory in words. Raw samples go to the JSON path printed at the end.
@@ -31,8 +31,8 @@ defmodule Minga.Bench.UnchangedDiagnostics do
 
   @file_lines 20_000
   @warmup 10
-  @samples 60
-  @publish_samples 20
+  @samples 40
+  @publish_samples 10
   @ctrl 0x02
 
   @caps %Capabilities{
@@ -62,7 +62,7 @@ defmodule Minga.Bench.UnchangedDiagnostics do
     counts = if quick?, do: [0, 10_000], else: [0, 100, 1_000, 10_000]
     rows = if quick?, do: [20], else: [20, 200]
     layouts = [:single, :split]
-    paths = [:resident, :wrapped]
+    paths = [:resident, :resident_wrapped, :windowed, :windowed_wrapped]
 
     results =
       for d <- counts, r <- rows, layout <- layouts, mode <- paths do
@@ -78,7 +78,8 @@ defmodule Minga.Bench.UnchangedDiagnostics do
     :ok
   end
 
-  @spec scenario(String.t(), String.t(), non_neg_integer(), pos_integer(), atom(), atom()) :: map()
+  @spec scenario(String.t(), String.t(), non_neg_integer(), pos_integer(), atom(), atom()) ::
+          map()
   defp scenario(path, uri, d, r, layout, mode) do
     Diagnostics.clear(:bench, uri)
     Diagnostics.publish(:bench, uri, diagnostics(d, 0))
@@ -144,7 +145,7 @@ defmodule Minga.Bench.UnchangedDiagnostics do
 
   # ── Editor lifecycle ────────────────────────────────────────────────────────
 
-  @spec with_editor(String.t(), pos_integer(), :resident | :wrapped, (map() -> map())) :: map()
+  @spec with_editor(String.t(), pos_integer(), atom(), (map() -> map())) :: map()
   defp with_editor(path, content_rows, mode, fun) do
     id = System.unique_integer([:positive])
     width = 160
@@ -154,7 +155,10 @@ defmodule Minga.Bench.UnchangedDiagnostics do
     {:ok, sidebar} = Sidebar.start_link(name: sidebar_registry, notify: false)
     {:ok, port} = HeadlessPort.start_link(width: width, height: height, capabilities: @caps)
     {:ok, buffer} = BufferProcess.start_link(content: File.read!(path), file_path: path)
-    if mode == :wrapped, do: {:ok, true} = BufferProcess.set_option(buffer, :wrap, true)
+    wrap? = mode in [:resident_wrapped, :windowed_wrapped]
+    if wrap?, do: {:ok, true} = BufferProcess.set_option(buffer, :wrap, true)
+    residence = if mode in [:windowed, :windowed_wrapped], do: 0, else: 65_536
+    :ok = Minga.Config.set(:resident_store_max_lines, residence)
 
     {:ok, generation} =
       MingaEditor.GenerationSupervisor.start_editor_generation_link(
@@ -199,9 +203,13 @@ defmodule Minga.Bench.UnchangedDiagnostics do
   defp command(%{editor: editor, port: port}, name) do
     ref = HeadlessPort.prepare_await(port)
 
-    :sys.replace_state(editor, fn state ->
-      state |> MingaEditor.Commands.execute(name) |> MingaEditor.Renderer.render()
-    end, 60_000)
+    :sys.replace_state(
+      editor,
+      fn state ->
+        state |> MingaEditor.Commands.execute(name) |> MingaEditor.Renderer.render()
+      end,
+      60_000
+    )
 
     {:ok, _} = HeadlessPort.collect_frame(ref, 15_000)
     :ok
