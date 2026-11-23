@@ -3353,7 +3353,7 @@ defmodule Minga.Buffer.Process do
   @spec now_ms() :: integer()
   defp now_ms, do: System.monotonic_time(:millisecond)
 
-  # Logs undo/redo source for non-user edits (diagnostic, gated by :log_level_editor).
+  # Logs an undo or redo that was refused because its patch no longer applies.
   @spec log_history_failure(:undo | :redo | :undo_agent_session, UndoPatch.apply_error()) :: :ok
   defp log_history_failure(operation, reason) do
     Minga.Log.warning(
@@ -3362,6 +3362,7 @@ defmodule Minga.Buffer.Process do
     )
   end
 
+  # Logs undo/redo source for non-user edits (diagnostic, gated by :log_level_editor).
   @spec log_undo_source(:undo | :redo, BufState.edit_source()) :: :ok
   defp log_undo_source(_action, :user), do: :ok
 
