@@ -22,6 +22,13 @@ defmodule Minga.Buffer.Operation do
   @typedoc "Result of replacing an explicitly byte-sized range."
   @type byte_range_result :: result() | {:error, :invalid_range}
 
+  @typedoc "One indentation level to insert at, or remove from, the start of each line."
+  @type line_shift :: {:indent, String.t()} | {:dedent, pos_integer()}
+
+  @typedoc "Result of shifting lines: the new document, one delta per changed line, and one undo patch."
+  @type shift_result ::
+          :unchanged | {:shifted, Document.t(), nonempty_list(EditDelta.t()), UndoPatch.t()}
+
   @typedoc "A range replacement edit using Buffer's characterwise inclusive range semantics."
   @type range_edit :: {Document.position(), Document.position(), String.t()}
 
@@ -203,6 +210,131 @@ defmodule Minga.Buffer.Operation do
       )
 
     {:edited, new_doc, delta}
+  end
+
+  @doc """
+  Shifts each line in an inclusive range by one indentation level.
+
+  `{:indent, unit}` inserts `unit` at the start of every line, including blank lines. `{:dedent, width}` removes one leading tab, or up to `width` leading spaces, from every line; see `dedent_bytes/2`. Lines past the end of the document are ignored.
+
+  Returns one delta per changed line, in application order: each delta describes the text as it stands after the previous delta, so parser and LSP clients replay them exactly as they would replay one edit per line. Only the selected lines are read and rewritten, and the single undo patch spans them, so undoing the shift is one patch application.
+  """
+  @spec shift_lines(Document.t(), non_neg_integer(), non_neg_integer(), line_shift()) ::
+          shift_result()
+  def shift_lines(%Document{} = doc, start_line, end_line, shift)
+      when is_integer(start_line) and start_line >= 0 and is_integer(end_line) and
+             end_line >= start_line do
+    line_count = Document.line_count(doc)
+
+    if start_line >= line_count do
+      :unchanged
+    else
+      last_line = min(end_line, line_count - 1)
+      span_start = Lines.start_of(doc, start_line)
+      span_end = line_end(doc, last_line, line_count)
+      old_text = Document.slice_byte_range(doc, span_start, span_end - span_start)
+
+      old_text
+      |> :binary.split("\n", [:global])
+      |> plan_shift(start_line, span_start, shift)
+      |> apply_shift(doc, {start_line, last_line}, {span_start, span_end})
+    end
+  end
+
+  @doc "Returns how many leading bytes one dedent level removes from `line`: one tab, or up to `width` spaces."
+  @spec dedent_bytes(String.t(), pos_integer()) :: non_neg_integer()
+  def dedent_bytes(<<"\t", _rest::binary>>, _width), do: 1
+
+  def dedent_bytes(line, width) when is_binary(line) and is_integer(width) and width > 0 do
+    count_leading_spaces(line, 0, width)
+  end
+
+  @spec count_leading_spaces(binary(), non_neg_integer(), pos_integer()) :: non_neg_integer()
+  defp count_leading_spaces(_line, width, width), do: width
+
+  defp count_leading_spaces(<<" ", rest::binary>>, n, width),
+    do: count_leading_spaces(rest, n + 1, width)
+
+  defp count_leading_spaces(_line, n, _width), do: n
+
+  @spec line_end(Document.t(), non_neg_integer(), pos_integer()) :: non_neg_integer()
+  defp line_end(doc, line, line_count) when line + 1 < line_count,
+    do: Lines.start_of(doc, line + 1) - 1
+
+  defp line_end(doc, _line, _line_count), do: Document.content_byte_size(doc)
+
+  # Walks the selected lines once. `start` is each line's offset in the
+  # original document and `growth` the bytes added so far, so `start + growth`
+  # is where the line starts once the earlier deltas are applied.
+  @spec plan_shift([binary()], non_neg_integer(), non_neg_integer(), line_shift()) ::
+          {iodata(), [EditDelta.t()]}
+  defp plan_shift(lines, first_line, span_start, shift) do
+    {pieces, deltas, _line, _start, _growth} =
+      Enum.reduce(lines, {[], [], first_line, span_start, 0}, fn text,
+                                                                 {pieces, deltas, line, start,
+                                                                  growth} ->
+        {removed, inserted} = line_prefix_edit(shift, text)
+        kept = binary_part(text, removed, byte_size(text) - removed)
+        pieces = [kept, inserted, "\n" | pieces]
+        next_start = start + byte_size(text) + 1
+
+        case {removed, inserted} do
+          {0, ""} ->
+            {pieces, deltas, line + 1, next_start, growth}
+
+          _ ->
+            delta = line_start_delta(line, start + growth, removed, inserted)
+
+            {pieces, [delta | deltas], line + 1, next_start,
+             growth + byte_size(inserted) - removed}
+        end
+      end)
+
+    # Every line was preceded by a separator; the first one is not part of the span.
+    [_separator | replacement] = Enum.reverse(pieces)
+    {replacement, Enum.reverse(deltas)}
+  end
+
+  @spec line_prefix_edit(line_shift(), binary()) :: {non_neg_integer(), String.t()}
+  defp line_prefix_edit({:indent, unit}, _line), do: {0, unit}
+  defp line_prefix_edit({:dedent, width}, line), do: {dedent_bytes(line, width), ""}
+
+  @spec line_start_delta(non_neg_integer(), non_neg_integer(), non_neg_integer(), String.t()) ::
+          EditDelta.t()
+  defp line_start_delta(line, start_byte, removed, inserted) do
+    EditDelta.replacement(
+      start_byte,
+      start_byte + removed,
+      {line, 0},
+      {line, removed},
+      inserted,
+      {line, byte_size(inserted)}
+    )
+  end
+
+  @spec apply_shift(
+          {iodata(), [EditDelta.t()]},
+          Document.t(),
+          {non_neg_integer(), non_neg_integer()},
+          {non_neg_integer(), non_neg_integer()}
+        ) :: shift_result()
+  defp apply_shift({_replacement, []}, _doc, _lines, _span), do: :unchanged
+
+  defp apply_shift({replacement, deltas}, doc, {first_line, last_line}, {span_start, span_end}) do
+    replacement = IO.iodata_to_binary(replacement)
+    new_doc = Document.replace_line_span(doc, first_line, last_line, replacement)
+
+    span =
+      EditDelta.replacement(
+        span_start,
+        span_end,
+        {first_line, 0},
+        Position.from_point(doc, span_end),
+        replacement,
+        Document.cursor(new_doc)
+      )
+
+    {:shifted, new_doc, deltas, UndoPatch.from_delta(span, doc)}
   end
 
   @doc "Applies multiple range replacements from the end of the document toward the start."

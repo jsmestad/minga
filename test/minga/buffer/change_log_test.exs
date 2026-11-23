@@ -22,6 +22,29 @@ defmodule Minga.Buffer.ChangeLogTest do
     end
   end
 
+  describe "record_changes/2" do
+    test "matches recording each delta in turn, including retention past the cap" do
+      prior = ChangeLog.record_change(ChangeLog.new(), delta("seed"))
+      {:ok, cursor, []} = ChangeLog.changes_since(prior, ChangeLog.sequence(prior))
+
+      for count <- [0, 1, 3, 1_000, 1_005] do
+        deltas = for i <- 1..count//1, do: delta("d#{i}")
+        batched = ChangeLog.record_changes(prior, deltas)
+        one_by_one = Enum.reduce(deltas, prior, &ChangeLog.record_change(&2, &1))
+
+        assert ChangeLog.sequence(batched) == ChangeLog.sequence(one_by_one)
+
+        assert ChangeLog.changes_since(batched, cursor) ==
+                 ChangeLog.changes_since(one_by_one, cursor)
+
+        assert ChangeLog.changes_since(batched, 0) == ChangeLog.changes_since(one_by_one, 0)
+
+        assert ChangeLog.drain_pending_changes(batched) |> elem(0) ==
+                 ChangeLog.drain_pending_changes(one_by_one) |> elem(0)
+      end
+    end
+  end
+
   describe "take_unseen_changes/2" do
     test "readers see their own unseen changes without stealing from each other" do
       log =

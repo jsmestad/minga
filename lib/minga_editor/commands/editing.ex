@@ -8,6 +8,7 @@ defmodule MingaEditor.Commands.Editing do
 
   alias Minga.Buffer
   alias Minga.Buffer.Document
+  alias Minga.Buffer.Operation
   alias Minga.Language
   alias Minga.Parser.Manager, as: ParserManager
 
@@ -930,14 +931,14 @@ defmodule MingaEditor.Commands.Editing do
   @spec indent_range(line_target()) :: state()
   defp indent_range({state, _buf, nil}), do: state
 
+  # The cursor moves to the first shifted line before the edit so that undo
+  # restores it there, as it does for every line-shift.
   defp indent_range({state, buf, {start_line, end_line}}) do
     {indent, indent_bytes} = indent_string(buf)
     {cursor_line, cursor_col} = Buffer.cursor(buf)
 
-    for line <- start_line..end_line do
-      Buffer.move_to(buf, {line, 0})
-      Buffer.insert_text(buf, indent)
-    end
+    Buffer.move_to(buf, {start_line, 0})
+    Buffer.shift_lines(buf, start_line, end_line, {:indent, indent})
 
     new_col =
       if cursor_line >= start_line and cursor_line <= end_line,
@@ -955,9 +956,8 @@ defmodule MingaEditor.Commands.Editing do
     {cursor_line, cursor_col} = Buffer.cursor(buf)
     cursor_removed = cursor_line_chars_to_remove(buf, cursor_line, start_line, end_line)
 
-    for line <- start_line..end_line do
-      dedent_line_at(buf, line)
-    end
+    Buffer.move_to(buf, {start_line, 0})
+    Buffer.shift_lines(buf, start_line, end_line, {:dedent, tab_width(buf)})
 
     new_col = max(0, cursor_col - cursor_removed)
     Buffer.move_to(buf, {cursor_line, new_col})
@@ -981,14 +981,6 @@ defmodule MingaEditor.Commands.Editing do
     end
   end
 
-  @spec dedent_line_at(pid(), non_neg_integer()) :: :ok
-  defp dedent_line_at(buf, line) do
-    case Buffer.lines(buf, line, 1) do
-      [text] -> remove_leading_indent(buf, line, dedent_amount(buf, text))
-      _ -> :ok
-    end
-  end
-
   @spec dedent_single_line(pid(), non_neg_integer(), non_neg_integer(), String.t()) :: :ok
   defp dedent_single_line(buf, line, col, text) do
     to_remove = dedent_amount(buf, text)
@@ -997,15 +989,10 @@ defmodule MingaEditor.Commands.Editing do
     :ok
   end
 
-  # Returns the number of characters to remove for one dedent level.
-  # If the line starts with a tab, remove 1 character.
-  # Otherwise, remove up to tab_width spaces.
+  # Leading indentation is ASCII, so the bytes one dedent level removes are
+  # also the columns it removes.
   @spec dedent_amount(pid(), String.t()) :: non_neg_integer()
-  defp dedent_amount(_buf, <<"\t", _::binary>>), do: 1
-
-  defp dedent_amount(buf, text) do
-    min(count_leading_spaces(text), tab_width(buf))
-  end
+  defp dedent_amount(buf, text), do: Operation.dedent_bytes(text, tab_width(buf))
 
   @spec remove_leading_indent(pid(), non_neg_integer(), non_neg_integer()) :: :ok
   defp remove_leading_indent(_buf, _line, 0), do: :ok
@@ -1015,13 +1002,6 @@ defmodule MingaEditor.Commands.Editing do
     for _ <- 1..n, do: Buffer.delete_at(buf)
     :ok
   end
-
-  @spec count_leading_spaces(String.t()) :: non_neg_integer()
-  defp count_leading_spaces(text), do: do_count_leading_spaces(text, 0)
-
-  @spec do_count_leading_spaces(String.t(), non_neg_integer()) :: non_neg_integer()
-  defp do_count_leading_spaces(<<" ", rest::binary>>, n), do: do_count_leading_spaces(rest, n + 1)
-  defp do_count_leading_spaces(_, n), do: n
 
   @spec tab_text_at_cursor(pid()) :: String.t()
   defp tab_text_at_cursor(buf) do

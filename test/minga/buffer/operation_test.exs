@@ -1,8 +1,10 @@
 defmodule Minga.Buffer.OperationTest do
   use ExUnit.Case, async: true
+  use ExUnitProperties
 
   alias Minga.Buffer.Document
   alias Minga.Buffer.Operation
+  alias Minga.Buffer.UndoPatch
 
   describe "insert_at_cursor/2" do
     test "returns byte-based delta positions for unicode insertions" do
@@ -17,6 +19,42 @@ defmodule Minga.Buffer.OperationTest do
       assert delta.start_position == {0, 1}
       assert delta.old_end_position == {0, 1}
       assert delta.new_end_position == {0, 3}
+    end
+  end
+
+  describe "shift_lines/4" do
+    property "matches one edit per line, replays its deltas, and undoes in one patch" do
+      check all(
+              lines <- list_of(shift_line(), min_length: 1, max_length: 12),
+              trailing_newline? <- boolean(),
+              first <- integer(0..(length(lines) + 1)),
+              span <- integer(0..(length(lines) + 1)),
+              shift <- member_of([{:indent, "  "}, {:indent, "\t"}, {:dedent, 2}, {:dedent, 4}])
+            ) do
+        text = Enum.join(lines, "\n") <> if(trailing_newline?, do: "\n", else: "")
+        doc = Document.new(text)
+        last = first + span
+
+        case Operation.shift_lines(doc, first, last, shift) do
+          :unchanged ->
+            assert reference_shift(text, first, last, shift) == text
+
+          {:shifted, new_doc, deltas, patch} ->
+            shifted = Document.content(new_doc)
+            assert shifted == reference_shift(text, first, last, shift)
+            assert replay(text, deltas) == shifted
+            assert new_doc |> undo_with(patch) |> Document.content() == text
+        end
+      end
+    end
+
+    test "dedent removes one tab, or up to the width in spaces, and nothing else" do
+      assert Operation.dedent_bytes("\t\tx", 4) == 1
+      assert Operation.dedent_bytes("      x", 4) == 4
+      assert Operation.dedent_bytes("  x", 4) == 2
+      assert Operation.dedent_bytes(" \tx", 4) == 1
+      assert Operation.dedent_bytes("x", 4) == 0
+      assert Operation.dedent_bytes("", 4) == 0
     end
   end
 
@@ -262,4 +300,40 @@ defmodule Minga.Buffer.OperationTest do
 
     assert replayed == Document.content(new_doc)
   end
+
+  defp shift_line do
+    gen all(
+          indent <- member_of(["", " ", "  ", "    ", "\t", "\t  ", "  \t"]),
+          body <- member_of(["", "x", "é ✓", "世界 a", "  "])
+        ) do
+      indent <> body
+    end
+  end
+
+  defp reference_shift(text, first, last, shift) do
+    text
+    |> String.split("\n")
+    |> Enum.with_index()
+    |> Enum.map_join("\n", fn
+      {line, index} when index >= first and index <= last -> reference_line(line, shift)
+      {line, _index} -> line
+    end)
+  end
+
+  defp reference_line(line, {:indent, unit}), do: unit <> line
+
+  defp reference_line(line, {:dedent, width}) do
+    removed = Operation.dedent_bytes(line, width)
+    binary_part(line, removed, byte_size(line) - removed)
+  end
+
+  defp replay(text, deltas) do
+    Enum.reduce(deltas, text, fn delta, acc ->
+      prefix = binary_part(acc, 0, delta.start_byte)
+      suffix = binary_part(acc, delta.old_end_byte, byte_size(acc) - delta.old_end_byte)
+      prefix <> delta.inserted_text <> suffix
+    end)
+  end
+
+  defp undo_with(doc, patch), do: UndoPatch.apply(patch, doc)
 end

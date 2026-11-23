@@ -351,6 +351,23 @@ defmodule Minga.Buffer do
   defdelegate apply_edits(server, edits, source \\ Minga.Buffer.EditSource.lsp(:unknown)),
     to: BufferProcess
 
+  @doc "Shift every line in an inclusive range by one indentation level as one undo step."
+  @spec shift_lines(
+          t(),
+          non_neg_integer(),
+          non_neg_integer(),
+          Minga.Buffer.Operation.line_shift(),
+          Minga.Buffer.EditSource.t()
+        ) :: :ok | {:error, :read_only}
+  defdelegate shift_lines(
+                server,
+                start_line,
+                end_line,
+                shift,
+                source \\ Minga.Buffer.EditSource.user()
+              ),
+              to: BufferProcess
+
   @doc "Delete the character before the cursor."
   @spec delete_before(t()) :: :ok
   defdelegate delete_before(server), to: BufferProcess
