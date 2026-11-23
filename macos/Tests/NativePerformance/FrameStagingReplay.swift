@@ -25,7 +25,7 @@ struct FrameStagingReplayMeasurement: Codable {
     let revision: String
 }
 
-private struct FrameStagingManifest: Decodable {
+struct FrameStagingManifest: Decodable {
     let workload: String
     let measureFromPacket: Int
 
@@ -35,7 +35,7 @@ private struct FrameStagingManifest: Decodable {
     }
 }
 
-private func readCapturedPackets(_ url: URL) throws -> [Data] {
+func readCapturedPackets(_ url: URL) throws -> [Data] {
     let bytes = try Data(contentsOf: url)
     var packets: [Data] = []
     var offset = bytes.startIndex

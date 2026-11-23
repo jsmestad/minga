@@ -1,0 +1,258 @@
+#!/usr/bin/env python3
+"""Measure protocol decode time next to arrival-to-publish time per frame type (#3654).
+
+Replays packets captured by `bench/frame_staging_capture.exs` through the Release `NativeRenderPerformance` harness with `--protocol-decode-replay`. Each replay sends the packets through the production `ProtocolReader`, `ProtocolEventHandoff`, and `CommandDispatcher`, and records per packet the decode time on the reader thread, the handoff to the main thread, and dispatch to publish. Keyframes arrive once per session, so each run also repeats every capture's largest window-content and transcript-replace packet in fresh sessions.
+
+Raw replay JSON stays in the output directory; `summary.json` and `frames.csv` hold the aggregated figures and every measured frame.
+
+`--profile` instead runs `--protocol-decode-loop` for each frame type under `sample` and attributes the decoder's self time to components (`profile.json`), to show what a faster byte reader could and could not remove.
+"""
+
+import argparse
+import collections
+import csv
+import json
+import math
+import re
+import statistics
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+WORKLOADS = ["scroll", "typing", "agent_stream"]
+BINARY = "Build/Products/Release/minga-native-render-performance"
+GATE_SHARE = 0.05
+
+# (frame type, workload, source, category). `measured` reads the measured packets of one session; `repeats` reads the keyframe repeats.
+FRAME_TYPES = [
+    ("Window content, 50,000-line keyframe", "scroll", "repeats", "window_content"),
+    ("Window content, 2,000-line keyframe", "typing", "repeats", "window_content"),
+    ("Row delta, scroll", "scroll", "measured", "rows_delta"),
+    ("Row delta, typing", "typing", "measured", "rows_delta"),
+    ("Agent transcript replace, 10,002 messages", "agent_stream", "repeats", "agent_transcript_replace"),
+    ("Agent transcript delta, streaming", "agent_stream", "measured", "agent_transcript_delta"),
+]
+
+
+def percentile(samples, ratio):
+    ordered = sorted(samples)
+    index = min(max(math.ceil(len(ordered) * ratio) - 1, 0), len(ordered) - 1)
+    return ordered[index]
+
+
+def replay(binary, captures, workload, output, repeats):
+    command = [
+        str(binary), "--protocol-decode-replay",
+        str(captures / f"{workload}.packets"), str(captures / f"{workload}.json"), str(output), str(repeats),
+    ]
+    subprocess.run(command, check=True, stdout=subprocess.DEVNULL)
+
+
+def measure(args):
+    args.output.mkdir(parents=True, exist_ok=True)
+    binary = args.build / BINARY
+    # Interleave workloads within each run so drift over time spreads across all of them.
+    for run in range(args.first_run, args.runs + 1):
+        for workload in args.workloads:
+            replay(binary, args.captures, workload, args.output / f"{workload}-run{run}.json", args.keyframe_repeats)
+        print(f"run {run} done", file=sys.stderr)
+    report(args.output, args.runs, args.workloads)
+
+
+def frames_for(measurement, source, category):
+    if source == "repeats":
+        return [p for p in measurement["keyframeRepeats"] if p["category"] == category]
+    start = measurement["measureFromPacket"]
+    return [p for p in measurement["packets"] if p["index"] >= start and p["category"] == category]
+
+
+def run_figures(frames):
+    decode = [f["decodeCallMs"] for f in frames]
+    metric = [f["decodeMetricMs"] for f in frames]
+    handoff = [f["handoffMs"] for f in frames]
+    dispatch = [f["dispatchToPublishMs"] for f in frames]
+    total = [f["arrivalToPublishMs"] for f in frames]
+    shares = [f["decodeCallMs"] / f["arrivalToPublishMs"] for f in frames]
+    figures = {"frames": len(frames), "bytes_p50": percentile([f["bytes"] for f in frames], 0.50)}
+    for name, samples in (("decode", decode), ("decode_metric", metric), ("handoff", handoff), ("dispatch_to_publish", dispatch), ("arrival_to_publish", total), ("per_frame_share", shares)):
+        figures[name] = {"p50": percentile(samples, 0.50), "p95": percentile(samples, 0.95)}
+    figures["share_of_p95"] = figures["decode"]["p95"] / figures["arrival_to_publish"]["p95"]
+    return figures
+
+
+def report(output, runs, workloads):
+    """Writes summary.json and frames.csv from the replay JSON in `output` for the given workloads."""
+    loaded = {
+        workload: [json.loads((output / f"{workload}-run{run}.json").read_text()) for run in range(1, runs + 1)]
+        for workload in workloads
+    }
+    results = {"gate_share": GATE_SHARE, "frame_types": {}}
+    with (output / "frames.csv").open("w", newline="") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(["frame_type", "run", "packet_index", "bytes", "transcript_messages", "decode_call_ms", "decode_metric_ms", "handoff_ms", "dispatch_to_publish_ms", "arrival_to_publish_ms"])
+        for label, workload, source, category in FRAME_TYPES:
+            if workload not in loaded:
+                continue
+            per_run = []
+            for run, measurement in enumerate(loaded[workload], start=1):
+                frames = frames_for(measurement, source, category)
+                if not frames:
+                    raise SystemExit(f"{workload} run {run} has no {source} {category} frames")
+                for f in frames:
+                    values = [f["decodeCallMs"], f["decodeMetricMs"], f["handoffMs"], f["dispatchToPublishMs"], f["arrivalToPublishMs"]]
+                    writer.writerow([label, run, f["index"], f["bytes"], f["transcriptMessages"]] + [f"{v:.6f}" for v in values])
+                per_run.append(run_figures(frames))
+            results["frame_types"][label] = {"workload": workload, "source": source, "category": category, "runs": per_run}
+    results["instrumentation_overhead_ns"] = {
+        workload: [m["instrumentationOverheadNs"] for m in measurements] for workload, measurements in loaded.items()
+    }
+    results["revision"] = sorted({m["revision"] for measurements in loaded.values() for m in measurements})
+    (output / "summary.json").write_text(json.dumps(results, indent=2, sort_keys=True) + "\n")
+    print(markdown(results))
+
+
+def spread(values, digits):
+    return f"{statistics.median(values):.{digits}f} ({min(values):.{digits}f} to {max(values):.{digits}f})"
+
+
+def digits_for(value):
+    return 4 if value < 1 else 2
+
+
+def markdown(results):
+    lines = [
+        "| Frame type | Frames per run | Packet bytes p50 | Decode p50 ms | Decode p95 ms | Arrival to publish p50 ms | Arrival to publish p95 ms |",
+        "|---|---:|---:|---|---|---|---|",
+    ]
+    gate = [
+        "| Frame type | Decode p95 / arrival-to-publish p95 | Per-frame decode share p95 | Under 5% |",
+        "|---|---|---|---|",
+    ]
+    breakdown = [
+        "| Frame type | Decode metric p50 ms | Handoff p50 ms | Dispatch to publish p50 ms | Dispatch to publish p95 ms |",
+        "|---|---|---|---|---|",
+    ]
+    for label, entry in results["frame_types"].items():
+        runs = entry["runs"]
+
+        def column(name, stat):
+            values = [run[name][stat] for run in runs]
+            return spread(values, digits_for(statistics.median(values)))
+
+        lines.append(f"| {label} | {runs[0]['frames']} | {runs[0]['bytes_p50']:,} | {column('decode', 'p50')} | {column('decode', 'p95')} | {column('arrival_to_publish', 'p50')} | {column('arrival_to_publish', 'p95')} |")
+        shares = [run["share_of_p95"] * 100 for run in runs]
+        per_frame = [run["per_frame_share"]["p95"] * 100 for run in runs]
+        under = "Yes" if max(shares) < GATE_SHARE * 100 else "No"
+        gate.append(f"| {label} | {spread(shares, 1)} % | {spread(per_frame, 1)} % | {under} |")
+        breakdown.append(f"| {label} | {column('decode_metric', 'p50')} | {column('handoff', 'p50')} | {column('dispatch_to_publish', 'p50')} | {column('dispatch_to_publish', 'p95')} |")
+    return "\n".join(lines + [""] + gate + [""] + breakdown)
+
+
+# Ordered: a sample belongs to the first component whose pattern matches a frame between `decodeFrame` and the leaf.
+PROFILE_COMPONENTS = [
+    ("model_build", r"ResidentRowStore|GUIWindowContent\.init"),
+    ("resource_accounting", r"FrameDecodeAccounting\.reserve|FrameResourceUsageBuilder|FrameDecodeAccounting\.withCheckpoint|swift_task_localValueGet"),
+    ("utf8_strings", r"decodeUTF8|readRequiredUTF8|readRequiredString|String\.init<A>\(bytes|_tryFromUTF8"),
+    ("wire_read_helpers", r"^readU(8|16|24|32|64)\(|checkedCursor|ByteCursor|Data\._Representation|readSection(16|32)|Data\.subscript|in conformance Data"),
+]
+ALLOCATION = r"swift_allocObject|malloc|_xzm|swift_retain|swift_release|objc_re|_ArrayBuffer|swift_arrayInit|swift_arrayDestroy|_swift_release_dealloc|bridgeObject|_ContiguousArrayStorage|deallocating"
+NODE = re.compile(r"^(\s*[+!:| ]*)(\d+) (.*)$")
+
+
+def profile_component(path):
+    for name, pattern in PROFILE_COMPONENTS:
+        if any(re.search(pattern, frame) for frame in path):
+            return name
+    if re.search(ALLOCATION, path[-1]):
+        return "allocation_and_arc"
+    return "decoder_bodies"
+
+
+def attribute_sample_file(sample_file):
+    """Returns {component: self samples} for samples under `decodeFrame` in a `sample` call graph."""
+    lines = sample_file.read_text().split("\n")
+    start = next(i for i, line in enumerate(lines) if line.startswith("Call graph:"))
+    end = next(i for i, line in enumerate(lines) if line.startswith("Total number in stack"))
+    nodes = []
+    stack = []
+    for line in lines[start + 1:end]:
+        match = NODE.match(line)
+        if not match:
+            continue
+        depth, count = len(match.group(1)), int(match.group(2))
+        name = re.sub(r"\s+\(in .*", "", match.group(3).strip())
+        while stack and stack[-1][0] >= depth:
+            stack.pop()
+        if stack:
+            nodes[stack[-1][1]][2] += count
+        nodes.append([count, [frame for _, _, frame in stack] + [name], 0])
+        stack.append((depth, len(nodes) - 1, name))
+    totals = collections.Counter()
+    for count, path, children in nodes:
+        own = count - children
+        decode = next((i for i, frame in enumerate(path) if frame.startswith("decodeFrame(from:")), None)
+        if own > 0 and decode is not None:
+            totals[profile_component(path[decode + 1:] or path[decode:])] += own
+    return totals
+
+
+def profile(args):
+    args.output.mkdir(parents=True, exist_ok=True)
+    binary = args.build / BINARY
+    results = {}
+    for label, workload, source, category in FRAME_TYPES:
+        if workload not in args.workloads:
+            continue
+        stem = args.output / f"profile-{workload}-{category}"
+        loop = subprocess.Popen(
+            [str(binary), "--protocol-decode-loop", str(args.captures / f"{workload}.packets"), str(args.captures / f"{workload}.json"), category, str(args.profile_seconds + 4)],
+            stdout=subprocess.DEVNULL,
+        )
+        time.sleep(2)  # Let the loop select its packets before sampling starts.
+        sample_file = stem.with_suffix(".sample.txt")
+        subprocess.run(["sample", str(loop.pid), str(args.profile_seconds), "-file", str(sample_file)], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if loop.wait() != 0:
+            raise SystemExit(f"decode loop failed for {label}")
+        totals = attribute_sample_file(sample_file)
+        total = sum(totals.values())
+        results[label] = {"samples": total, "shares": {name: totals[name] / total for name in COMPONENT_ORDER}}
+        print(f"{label} profiled", file=sys.stderr)
+    (args.output / "profile.json").write_text(json.dumps(results, indent=2, sort_keys=True) + "\n")
+    header = "| Frame type | Samples | " + " | ".join(COMPONENT_ORDER) + " |"
+    rows = [header, "|---|---:|" + "---:|" * len(COMPONENT_ORDER)]
+    for label, entry in results.items():
+        rows.append(f"| {label} | {entry['samples']} | " + " | ".join(f"{entry['shares'][name] * 100:.0f}%" for name in COMPONENT_ORDER) + " |")
+    print("\n".join(rows))
+
+
+COMPONENT_ORDER = [name for name, _ in PROFILE_COMPONENTS] + ["allocation_and_arc", "decoder_bodies"]
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--build", type=Path, help="NativeRenderPerformance build directory")
+    parser.add_argument("--captures", type=Path, help="output directory of bench/frame_staging_capture.exs")
+    parser.add_argument("--runs", type=int, default=5)
+    parser.add_argument("--first-run", type=int, default=1, help="resume an interrupted measurement at this run")
+    parser.add_argument("--keyframe-repeats", type=int, default=30, help="fresh sessions per keyframe and run")
+    parser.add_argument("--workloads", nargs="+", choices=WORKLOADS, default=WORKLOADS)
+    parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--report-only", action="store_true", help="summarize an existing output directory without replaying")
+    parser.add_argument("--profile", action="store_true", help="sample a decode-only loop per frame type and attribute decode time to components")
+    parser.add_argument("--profile-seconds", type=int, default=10)
+    args = parser.parse_args()
+    if args.profile:
+        if args.build is None or args.captures is None:
+            parser.error("--profile requires --build and --captures")
+        profile(args)
+    elif args.report_only:
+        report(args.output, args.runs, args.workloads)
+    elif args.build is None or args.captures is None:
+        parser.error("--build and --captures are required unless --report-only is given")
+    else:
+        measure(args)
+
+
+if __name__ == "__main__":
+    main()
