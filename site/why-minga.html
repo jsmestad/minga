@@ -68,6 +68,10 @@
             <li><strong>Customizing a multiplexer only changes chrome around a black box.</strong> You can script tabs, status indicators, and markdown instructions around external CLIs, but you cannot build a workflow that ties live editor state and agent turns together: staging hunks into an open buffer, rejecting one hunk while hand-editing another with undo intact, attaching live diagnostics directly to a draft, or building a custom interactive review surface you keep across projects.</li>
           </ul>
           <p>Minga starts from the opposite side of that boundary: put the editor, buffers, LSP clients, and supervised agent sessions inside one programmable BEAM runtime so steering code and running agents happen in the same loop.</p>
+
+          <h3>Why stay close to the code?</h3>
+          <p>A common pushback is that if you are still reading code, you are using AI wrong. For prototypes, one-off scripts, and throwaway tools, treating the model as a black box and shipping whatever passes a smoke test works fine. If that is most of your work, you do not need Minga.</p>
+          <p>For software you own in production, debug at 3am, and evolve for years, models still write code faster than they maintain coherent architecture. Staying close to the code does not mean typing every line by hand or holding agents back; it means letting agents carry the implementation while you stay hands-on at the boundaries where correctness, data ownership, failure modes, and security actually live.</p>
         </section>
 
         <section class="essay-section" id="comparison">
