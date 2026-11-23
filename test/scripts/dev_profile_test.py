@@ -72,6 +72,37 @@ class DevProfileTest(unittest.TestCase):
         result = self.call(tree, "launch", "minga")
         self.assertEqual(json.loads(result.stdout), ["synthetic-user", "synthetic-user"])
 
+    def launched_roots(self, **overrides):
+        tree = self.worktree("roots")
+        keys = ["HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME", "XDG_STATE_HOME", "TMPDIR",
+                "MINGA_DEV_REAL_HOME", "MINGA_DEV_PROFILE"]
+        (tree / "bin" / "lib" / "minga").write_text(
+            f"#!{sys.executable}\n"
+            "import json, os\n"
+            f"print(json.dumps({{key: os.environ.get(key) for key in {keys!r}}}), flush=True)\n")
+        self.env.pop("MINGA_DEV_REAL_HOME", None)
+        self.env.update(overrides)
+        roots = json.loads(self.call(tree, "launch", "minga").stdout)
+        profile = Path(roots.pop("MINGA_DEV_PROFILE"))
+        self.assertEqual(profile.resolve(), (tree / ".minga-dev" / "profile").resolve())
+        for key, directory in {"XDG_CONFIG_HOME": "config", "XDG_DATA_HOME": "data", "XDG_CACHE_HOME": "cache",
+                               "XDG_STATE_HOME": "state", "TMPDIR": "tmp"}.items():
+            self.assertEqual(roots.pop(key), str(profile / directory))
+        return profile, roots
+
+    def test_launch_isolates_home_unless_the_real_home_is_opted_into(self):
+        for value in [None, "0", "true", ""]:
+            with self.subTest(MINGA_DEV_REAL_HOME=value):
+                overrides = {} if value is None else {"MINGA_DEV_REAL_HOME": value}
+                profile, roots = self.launched_roots(**overrides)
+                self.assertEqual(roots, {"HOME": str(profile / "home"), "MINGA_DEV_REAL_HOME": None})
+                shutil.rmtree(profile.parents[1])
+
+    def test_real_home_opt_in_keeps_the_real_home_and_passes_the_marker(self):
+        _profile, roots = self.launched_roots(MINGA_DEV_REAL_HOME="1")
+        self.assertEqual(roots, {"HOME": str(self.home), "MINGA_DEV_REAL_HOME": "1"})
+        self.assertEqual(self.sentinel.read_text(), "installed state")
+
     def test_clean_refuses_a_running_launcher_and_a_symlink(self):
         tree = self.worktree("source")
         with subprocess.Popen(self.cmd("launch", "minga", "live", "wait"), cwd=tree, env=self.env,

@@ -42,6 +42,8 @@ bin/minga path/to/file # Open a file
 
 Source launchers require Python 3 and keep Minga runtime state in `.minga-dev/profile` in the current worktree. This includes Minga config, extensions, history, sessions, and credentials. They do not import the installed app's profile or provider environment variables.
 
+By default the launch also sets `HOME` to a private directory in that profile. Claude Code keeps its `claude auth login` sign-in in the macOS login keychain, and the keychain is not reachable from that `HOME`, so the Claude bridge reports that Claude Code is not signed in. To verify the bridge or another keychain-backed tool from source, launch with `MINGA_DEV_REAL_HOME=1`, for example `MINGA_DEV_REAL_HOME=1 bin/minga-mac`. This keeps your real `HOME` for Minga and its child processes. Minga's own config, data, cache, and state still use the profile's `XDG_*` directories, and `TMPDIR` stays private. Any other value, or no value, keeps `HOME` isolated. Tools that write under `HOME` instead of XDG directories write to your real home in this mode.
+
 Quit the source editor and run `make clean` to delete that profile. The next launch starts with defaults. This command does not remove build outputs, dependencies, project files, or the installed app's profile. It refuses while a source editor is using the profile.
 
 For a one-off source smoke run that should not use the worktree profile, run `python3 scripts/dev_profile.py fresh minga path/to/file`. The launcher removes that temporary profile when the editor exits. For restart testing, use the persistent profile in a disposable worktree instead.
