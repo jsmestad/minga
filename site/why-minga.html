@@ -69,9 +69,9 @@
           </ul>
           <p>Minga starts from the opposite side of that boundary: put the editor, buffers, LSP clients, and supervised agent sessions inside one programmable BEAM runtime so steering code and running agents happen in the same loop.</p>
 
-          <h3>Why stay close to the code?</h3>
-          <p>A common pushback is that if you are still reading code, you are using AI wrong. For prototypes, one-off scripts, and throwaway tools, treating the model as a black box and shipping whatever passes a smoke test works fine. If that is most of your work, you do not need Minga.</p>
-          <p>For software you own in production, debug at 3am, and evolve for years, models still write code faster than they maintain coherent architecture. Staying close to the code does not mean typing every line by hand or holding agents back; it means letting agents carry the implementation while you stay hands-on at the boundaries where correctness, data ownership, failure modes, and security actually live.</p>
+          <h3>What if you do not want to read every line of code?</h3>
+          <p>Even if you stop reading implementation lines altogether, terminal scrollback is still a poor workbench. When your work moves up a level to specs, contracts, architecture, verification evidence, and adversarial reviews, you outgrow scrolling terminal panes faster, not slower.</p>
+          <p>The point of Minga is that the workbench reshapes itself to fit your style of work for that task, embracing disposable, customized software. Stay hands-on in the buffer with native editing, LSP, and inline hunk review when you want to work close to the code, or spin up a task-specific spec review surface, architecture view, or automated check workflow when you want to work a level above the implementation. Throw it away when the task finishes, or keep it when it earns reuse across projects.</p>
         </section>
 
         <section class="essay-section" id="comparison">

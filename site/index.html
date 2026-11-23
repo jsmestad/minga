@@ -202,8 +202,8 @@
                 <p>Real workflow code sits in readable source files you can inspect, test, and version in Git. There is no hidden prompt masquerading as a workflow engine and no proprietary fork required for personal tooling.</p>
               </li>
               <li>
-                <strong>Keep what earns reuse</strong>
-                <p>Useful definitions stay shared across tabs, restarts, and repositories without regenerating them on every session, while keeping each project's local data and settings separate.</p>
+                <strong>Disposable for one task, kept when it sticks</strong>
+                <p>Reshape Minga to fit how you work on a single migration or spec review and discard it when the work lands, or Keep useful definitions shared across tabs, restarts, and repositories without regenerating them.</p>
               </li>
             </ul>
 
@@ -258,35 +258,66 @@ extension <span class="tok-atom">:minga_org</span>, git: <span class="tok-str">"
           <p>The Erlang VM was not picked for novelty. It directly addresses four runtime failures that show up the moment humans and autonomous agents share an editor.</p>
         </div>
 
-        <div class="runtime-grid">
-          <article class="runtime-item">
-            <p class="runtime-problem">Problem: UI freezes and GC stutters</p>
-            <h3>Preemptive scheduling and per-process heaps</h3>
-            <p>The BEAM schedules lightweight processes preemptively and collects garbage per process instead of pausing the whole world. Streaming model output, LSP diagnostics, and save hooks do not starve your keystrokes.</p>
-          </article>
+        <ol class="runtime-ledger">
+          <li class="runtime-row">
+            <div class="runtime-failure">
+              <span class="runtime-index">01</span>
+              <h3>UI freezes and GC stutters</h3>
+            </div>
+            <div class="runtime-answer">
+              <span class="runtime-mechanism">Preemptive scheduling + per-process heaps</span>
+              <p>The BEAM schedules lightweight processes preemptively and collects garbage per process instead of pausing the whole world. Streaming model output, LSP diagnostics, and save hooks do not starve your keystrokes.</p>
+            </div>
+          </li>
 
-          <article class="runtime-item">
-            <p class="runtime-problem">Problem: One bad plugin breaks the editor</p>
-            <h3>OTP supervision and process isolation</h3>
-            <p>Buffers, agent sessions, LSP clients, and extensions run in separate processes with separate memory. When an extension callback or tool call fails, its supervisor isolates and recovers that subtree while open buffers and undo history stay untouched.</p>
-          </article>
+          <li class="runtime-row">
+            <div class="runtime-failure">
+              <span class="runtime-index">02</span>
+              <h3>One bad plugin breaks the editor</h3>
+            </div>
+            <div class="runtime-answer">
+              <span class="runtime-mechanism">OTP supervision + process isolation</span>
+              <p>Buffers, agent sessions, LSP clients, and extensions run in separate processes with separate memory. When an extension callback or tool call fails, its supervisor isolates and recovers that subtree while open buffers and undo history stay untouched.</p>
+            </div>
+          </li>
 
-          <article class="runtime-item">
-            <p class="runtime-problem">Problem: Agents clobber files behind your back</p>
-            <h3>Buffer-aware forks and staged changesets</h3>
-            <p>Every buffer is a GenServer process. Agent file edits route through <code>MingaAgent.ToolRouter</code> into in-memory buffer forks with revision checks, inline diff review, three-way merge on publish (<kbd>SPC a p</kbd>) or discard (<kbd>SPC a P</kbd>), and buffer undo integration. See <a href="/docs/buffer-aware-agents.html">Buffer-Aware Agents</a>.</p>
-          </article>
+          <li class="runtime-row">
+            <div class="runtime-failure">
+              <span class="runtime-index">03</span>
+              <h3>Agents clobber open files</h3>
+            </div>
+            <div class="runtime-answer">
+              <span class="runtime-mechanism">Buffer-aware forks + staged changesets</span>
+              <p>Every buffer is a GenServer process. Agent file edits route through <code>MingaAgent.ToolRouter</code> into in-memory buffer forks with revision checks, inline diff review, three-way merge on publish (<kbd>SPC a p</kbd>) or discard (<kbd>SPC a P</kbd>), and buffer undo integration. See <a href="/docs/buffer-aware-agents.html">Buffer-Aware Agents</a>.</p>
+            </div>
+          </li>
 
-          <article class="runtime-item">
-            <p class="runtime-problem">Problem: Closing the window kills running work</p>
-            <h3>Headless daemon and durable sessions</h3>
-            <p><code>minga --headless</code> runs the BEAM runtime without a window, locally or on a remote host, exposing a WebSocket and JSON-RPC gateway so clients can attach, inspect, and detach while long sessions keep running. See <a href="/docs/remote_agents.html">Remote Agents</a>.</p>
-          </article>
-        </div>
+          <li class="runtime-row">
+            <div class="runtime-failure">
+              <span class="runtime-index">04</span>
+              <h3>Closing the window kills running work</h3>
+            </div>
+            <div class="runtime-answer">
+              <span class="runtime-mechanism">Headless daemon + durable sessions</span>
+              <p><code>minga --headless</code> runs the BEAM runtime without a window, locally or on a remote host, exposing a WebSocket and JSON-RPC gateway so clients can attach, inspect, and detach while long sessions keep running. See <a href="/docs/remote_agents.html">Remote Agents</a>.</p>
+            </div>
+          </li>
+        </ol>
 
-        <div class="callout">
-          <span class="callout-title">Where we do not use the BEAM</span>
-          <p>The BEAM owns editing state, concurrency, agent orchestration, and semantic UI models. It does not rasterize pixels or parse syntax trees. <strong>Swift and Metal</strong> render the native macOS app, <strong>Go and Bubble Tea</strong> render the terminal client, and <strong>Zig</strong> runs the tree-sitter parser across 50 compiled grammars plus native process-group helpers. Read <a href="/docs/architecture.html">Architecture</a> for the full process and protocol map.</p>
+        <div class="boundary-band">
+          <div class="boundary-col">
+            <h3>What the BEAM owns</h3>
+            <p>Buffer processes, supervision trees, agent orchestration, extensions, and semantic UI models. Everything concurrent, stateful, and programmable lives in Elixir on OTP 29.</p>
+          </div>
+          <div class="boundary-col boundary-col-native">
+            <h3>Where native code takes over</h3>
+            <p>The BEAM does not rasterize pixels or parse syntax trees. Native clients handle rendering, input, and parsing across explicit port boundaries (<a href="/docs/architecture.html">Architecture</a>).</p>
+            <div class="native-stack">
+              <span class="native-chip">Swift + Metal <span>macOS GUI</span></span>
+              <span class="native-chip">Go + Bubble Tea <span>Terminal TUI</span></span>
+              <span class="native-chip">Zig <span>50 tree-sitter grammars</span></span>
+            </div>
+          </div>
         </div>
       </div>
     </section>
