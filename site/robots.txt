@@ -1,0 +1,3 @@
+# Pre-launch staging: replace with Allow: / at v0.1.0 launch cutover to mingacode.dev.
+User-agent: *
+Disallow: /

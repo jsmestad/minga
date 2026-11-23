@@ -190,3 +190,26 @@ Use the archive that matches your OS and CPU. The launcher maps `--cookie-file`,
    The file list must contain only `lib/`, `mix.exs`, `README.md`, `CHANGELOG.md`, and `LICENSE`. Stop if anything else appears.
 4. Publish from your own account with `mix hex.publish`. HexDocs source links point at `main`. Hex shows the package and docs before asking for confirmation; check the version and file list again there.
 5. Publish or update dependent extensions only after the new SDK version is visible on Hex.
+
+## Marketing site and staging previews (Cloudflare Workers Static Assets)
+
+The combined marketing site (`site/`) and ExDoc documentation (`/docs/`) assemble into `_site/` via `scripts/build_site.sh` and are validated by `python3 scripts/check_site_links.py _site --expect-noindex`. `wrangler.jsonc` configures Cloudflare Workers Static Assets to serve `_site/` directly with `_headers` and `_redirects` support and no Worker runtime script. `.github/workflows/site.yml` runs this build and link check on every pull request touching site, docs, assets, or ExDoc configuration, publishes PR previews via `wrangler preview`, and deploys `main` via `wrangler deploy` when repository secrets are available. Forked pull requests skip deployment cleanly while still running the full build and link checks.
+
+### One-time Cloudflare Workers setup
+
+Do not connect `jsmestad/minga` directly to Cloudflare's Git build UI, because Cloudflare's build image does not ship the pinned Elixir/OTP toolchain needed for `mix docs`. GitHub Actions builds `_site/` and uploads static assets directly:
+
+1. Create a Cloudflare API token using the **Edit Cloudflare Workers** template (or scoped to `Account -> Workers Scripts -> Edit` and `Account -> Account Settings -> Read`).
+2. Add `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` as GitHub Actions repository secrets on `jsmestad/minga`.
+3. The first `main` deployment (`wrangler deploy`) creates the `mingacode-site` Worker automatically; no manual dashboard app creation is needed.
+
+Until v0.1.0 launches, Cloudflare Workers deployments stay on `*.workers.dev` with crawler opt-out enforced in `site/_headers` (`X-Robots-Tag: noindex, nofollow`), `site/robots.txt` (`Disallow: /`), and `<meta name="robots" content="noindex, nofollow">` in site HTML. The existing GitHub Pages job in `.github/workflows/ci.yml` keeps serving `https://jsmestad.github.io/minga/` without interruption during pre-release.
+
+### v0.1.0 launch cutover checklist (`mingacode.dev`)
+
+Perform this cutover only after explicit v0.1.0 release approval and publication:
+
+1. Attach `mingacode.dev` as the primary custom domain on the `mingacode-site` Worker, configure `mingacode.com` to 301-redirect to `https://mingacode.dev/` (preserving path), and verify TLS issuance on both domains.
+2. Remove `X-Robots-Tag: noindex, nofollow` from `site/_headers`, remove `<meta name="robots" content="noindex, nofollow">` from `site/` HTML pages, update `site/robots.txt` to allow crawling, and drop `--expect-noindex` from `.github/workflows/site.yml`.
+3. Verify `https://mingacode.dev/`, `https://mingacode.dev/docs/`, and legacy redirects (`/getting-started.html` -> `/docs/getting-started.html`) return expected status codes and assets.
+4. Replace the legacy GitHub Pages artifact in `.github/workflows/ci.yml` with a redirect stub pointing `https://jsmestad.github.io/minga/` to `https://mingacode.dev/docs/`.

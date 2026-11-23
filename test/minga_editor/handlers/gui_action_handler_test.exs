@@ -129,11 +129,14 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
     snapshot = MingaEditor.Input.Router.capture_snapshot(state)
     revision = state.render.render_correlation.latest_intent_revision
 
+    original = Minga.Buffer.content(state.workspace.buffers.active)
+
     handled = GuiActionHandler.dispatch(state, {:space_leader_chord, ?j, 0})
 
-    {line, _col} = Minga.Buffer.cursor(handled.workspace.buffers.active)
-    assert line == 1
-    assert MingaEditor.KeystrokeHistory.size(handled.interaction.keystroke_history) == 1
+    # Vim Normal: the withheld SPC replays as a leader key, never as text.
+    assert Minga.Buffer.content(handled.workspace.buffers.active) == original
+    assert Minga.Buffer.cursor(handled.workspace.buffers.active) == {0, 0}
+    assert MingaEditor.KeystrokeHistory.size(handled.interaction.keystroke_history) == 2
     assert handled.render.render_correlation.latest_intent_revision == revision
     refute_receive {:"$gen_cast", {:render, _, _, _}}, 0
 
@@ -144,6 +147,31 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
     assert_receive {:"$gen_cast", {:render, %MingaEditor.Renderer.Submission{}, _seq, _pushed_at}}
 
     refute_receive {:"$gen_cast", {:render, _, _, _}}, 0
+  end
+
+  describe "space_leader_chord in CUA mode" do
+    test "a chord that matches a leader binding enters the leader and types nothing", %{
+      sidebar_registry: table
+    } do
+      state = cua_state(table)
+      original = Minga.Buffer.content(state.workspace.buffers.active)
+
+      handled = GuiActionHandler.dispatch(state, {:space_leader_chord, ?f, 0})
+
+      assert Minga.Buffer.content(handled.workspace.buffers.active) == original
+      assert Runtime.state(handled.shell_runtime).whichkey.node != nil
+    end
+
+    test "a chord with no leader binding types the withheld space and the key", %{
+      sidebar_registry: table
+    } do
+      state = cua_state(table)
+
+      handled = GuiActionHandler.dispatch(state, {:space_leader_chord, ?~, 0})
+
+      assert Minga.Buffer.content(handled.workspace.buffers.active) ==
+               " ~line one\nline two\nline three"
+    end
   end
 
   test "stale and unknown completion identities cannot mutate the active completion", %{
@@ -1605,6 +1633,11 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
       :error ->
         state
     end
+  end
+
+  defp cua_state(sidebar_registry) do
+    state = base_state(sidebar_registry, backend: :gui)
+    %{state | interaction: MingaEditor.State.Interaction.new(editing_model: :cua)}
   end
 
   defp clear_window_reset_pending(state), do: state

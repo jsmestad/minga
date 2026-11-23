@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Minga (Staging Preview)</title>
+  <meta name="description" content="Minga is a programmable workbench on the BEAM. Pre-launch staging preview for v0.1.0.">
+  <link rel="icon" type="image/svg+xml" href="/assets/minga_dark-transparent.svg">
+  <style>
+    :root {
+      color-scheme: dark light;
+      --bg: #111214;
+      --surface: #181a1f;
+      --border: #2a2e37;
+      --text: #e6e8ec;
+      --muted: #9aa2b1;
+      --accent: #e5a93c;
+    }
+    @media (prefers-color-scheme: light) {
+      :root {
+        --bg: #f8f8f6;
+        --surface: #ffffff;
+        --border: #dfe2e8;
+        --text: #16181d;
+        --muted: #525965;
+        --accent: #a66208;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      padding: 2rem 1.25rem;
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      line-height: 1.6;
+    }
+    main {
+      width: 100%;
+      max-width: 42rem;
+      padding: 2.25rem;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 0.85rem;
+      margin-bottom: 1.25rem;
+    }
+    .brand img {
+      width: 44px;
+      height: 44px;
+      display: block;
+    }
+    .badge {
+      display: inline-block;
+      font-size: 0.75rem;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: var(--accent);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 0.15rem 0.6rem;
+    }
+    h1 {
+      margin: 0;
+      font-size: 1.75rem;
+      line-height: 1.2;
+      letter-spacing: -0.02em;
+    }
+    p {
+      margin: 0 0 1.25rem;
+      color: var(--muted);
+    }
+    code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.9em;
+      color: var(--text);
+    }
+    nav {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem 1.25rem;
+      padding-top: 0.75rem;
+      border-top: 1px solid var(--border);
+    }
+    a {
+      color: var(--text);
+      text-decoration: underline;
+      text-decoration-color: var(--border);
+      text-underline-offset: 0.2em;
+      font-weight: 500;
+    }
+    a:hover {
+      color: var(--accent);
+      text-decoration-color: var(--accent);
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="brand">
+      <img src="/assets/minga_dark-transparent.svg" alt="Minga logo" width="44" height="44">
+      <div>
+        <h1>Minga</h1>
+        <span class="badge">v0.1.0 staging preview</span>
+      </div>
+    </div>
+    <p>Minga is a programmable workbench on the BEAM. This placeholder validates the combined Cloudflare Workers Static Assets staging deployment (<code>/</code> and <code>/docs/</code>) ahead of the v0.1.0 launch site on mingacode.dev.</p>
+    <nav aria-label="Primary links">
+      <a href="/docs/">Documentation (ExDoc)</a>
+      <a href="/docs/getting-started.html">Getting Started</a>
+      <a href="/docs/architecture.html">Architecture</a>
+      <a href="https://github.com/jsmestad/minga">GitHub</a>
+    </nav>
+  </main>
+</body>
+</html>

@@ -3,6 +3,7 @@
 /deps/
 /cover/
 /doc/
+/_site/
 *.ez
 *.beam
 minga-*.tar
