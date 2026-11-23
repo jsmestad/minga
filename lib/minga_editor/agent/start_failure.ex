@@ -4,7 +4,7 @@ defmodule MingaEditor.Agent.StartFailure do
 
   Each constructor names a cause and owns its classification: the sentence the user reads and the remedy the tab offers. A sentence never contains a raw Elixir term; the producer logs the raw reason.
 
-  A remedy is either `{:retry, target}` or `:set_up_provider`. A retry target is the `MingaEditor.Agent.StartRequest` of a start that never bound a session, which runs that start again in the same workspace, or `:provider` when the session exists and only its provider failed, which retries the provider on that session.
+  A remedy is `{:retry, target}`, `:set_up_provider`, or nil when nothing in this tab can fix the failure. A retry target is the `MingaEditor.Agent.StartRequest` of a start that never bound a session, which runs that start again in the same workspace, or `:provider` when the session exists and only its provider failed, which retries the provider on that session.
   """
 
   alias MingaAgent.Session.ConnectionSnapshot
@@ -18,7 +18,7 @@ defmodule MingaEditor.Agent.StartFailure do
 
   @type remedy :: {:retry, retry_target()} | :set_up_provider
 
-  @type t :: %__MODULE__{message: String.t(), remedy: remedy()}
+  @type t :: %__MODULE__{message: String.t(), remedy: remedy() | nil}
 
   @doc "The model catalog could not load, so the start was never requested."
   @spec catalog_unavailable(StartRequest.t()) :: t()
@@ -43,9 +43,16 @@ defmodule MingaEditor.Agent.StartFailure do
   def no_workspace(%StartRequest{} = request),
     do: retry("There was no Agent tab to start the session in.", request)
 
-  @doc "The started session stopped unexpectedly; a retry starts a new session in the same tab."
-  @spec session_crashed() :: t()
-  def session_crashed,
+  @doc """
+  The attached session stopped unexpectedly.
+
+  A local session can be replaced, so a retry starts a new session in the same tab. A session hosted on another node cannot be started from this tab, so it offers no remedy; the user reconnects through the remote session flow.
+  """
+  @spec session_crashed(pid()) :: t()
+  def session_crashed(session) when is_pid(session) and node(session) != node(),
+    do: %__MODULE__{message: "The remote Agent session stopped unexpectedly.", remedy: nil}
+
+  def session_crashed(session) when is_pid(session),
     do: retry("The Agent session stopped unexpectedly.", StartRequest.default())
 
   @doc """

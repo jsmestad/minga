@@ -33,21 +33,37 @@ defmodule Minga.Keymap.Scope.AgentStartRemedyTest do
     end
   end
 
-  test "Enter runs the remedy from the composer only while one is offered" do
+  test "Enter submits from the composer only while a remedy is offered, so slash commands still run" do
     for remedy <- @remedies do
       trie = AgentScope.start_remedy_keymap(:composer, agent_start_remedy: remedy)
-      assert Bindings.lookup(trie, {13, 0}) == {:command, :agent_start_remedy}
+      assert Bindings.lookup(trie, {13, 0}) == {:command, :agent_submit_or_newline}
     end
 
     assert Bindings.lookup(AgentScope.start_remedy_keymap(:composer, []), {13, 0}) == :not_found
   end
 
+  test "CUA binds Enter to submit during a failed start, from chat and composer alike" do
+    assert Bindings.lookup(AgentScope.keymap(:cua, []), {13, 0}) ==
+             {:command, :agent_focus_or_submit}
+
+    for remedy <- @remedies do
+      trie = AgentScope.keymap(:cua, agent_start_remedy: remedy)
+      assert Bindings.lookup(trie, {13, 0}) == {:command, :agent_submit_or_newline}
+      # Printable keys still type in the CUA composer.
+      assert Bindings.lookup(trie, {?r, 0}) == :not_found
+    end
+  end
+
   test "the key hint names the key bound at each focus" do
-    for {focus, hint, key} <- [{:chat, "r", "r"}, {:composer, "Enter", "RET"}] do
+    for {focus, hint, key, command} <- [
+          {:chat, "r", "r", :agent_start_remedy},
+          {:composer, "Enter", "RET", :agent_submit_or_newline},
+          {:cua, "Enter", "RET", :agent_submit_or_newline}
+        ] do
       assert AgentScope.start_remedy_key_hint(focus) == hint
       [bound] = KeyParser.parse!(key)
       trie = AgentScope.start_remedy_keymap(focus, agent_start_remedy: :retry)
-      assert Bindings.lookup(trie, bound) == {:command, :agent_start_remedy}
+      assert Bindings.lookup(trie, bound) == {:command, command}
     end
   end
 end

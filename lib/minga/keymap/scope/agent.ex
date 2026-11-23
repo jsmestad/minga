@@ -48,18 +48,26 @@ defmodule Minga.Keymap.Scope.Agent do
 
   def keymap(:insert, _context), do: insert_trie()
   def keymap(:input_normal, _context), do: input_normal_trie()
-  def keymap(:cua, _context), do: cua_trie()
+  def keymap(:cua, context), do: merge_trie(cua_trie(), start_remedy_keymap(:cua, context))
   def keymap(_state, _context), do: Bindings.new()
 
   @typedoc "The remedy a failed Agent start offers, passed as the `:agent_start_remedy` context."
   @type start_remedy :: :retry | :set_up_provider
 
-  @typedoc "Where keys go: chat navigation, or the composer (insert or input-normal)."
-  @type start_remedy_focus :: :chat | :composer
+  @typedoc """
+  Where keys go: Vim chat navigation, the Vim composer (insert or input-normal), or the CUA Agent view, which has one trie for chat and composer.
+  """
+  @type start_remedy_focus :: :chat | :composer | :cua
 
-  # One table names the key that runs a failed start's remedy at each focus:
-  # the binding it resolves through and the hint frontends show for it.
-  @start_remedy_keys %{chat: {"r", "r"}, composer: {"RET", "Enter"}}
+  # One table names, for each focus, the key that runs a failed start's remedy,
+  # the command it runs and the hint frontends show. Enter goes through prompt
+  # submit, which runs the remedy unless the draft is a known slash command;
+  # `r` in chat navigation has no draft to protect and runs the remedy itself.
+  @start_remedy_keys %{
+    chat: {"r", :agent_start_remedy, "r"},
+    composer: {"RET", :agent_submit_or_newline, "Enter"},
+    cua: {"RET", :agent_submit_or_newline, "Enter"}
+  }
 
   @doc """
   The key hint for running a failed start's remedy at the given focus: `r` in chat navigation, Enter in the composer.
@@ -68,26 +76,26 @@ defmodule Minga.Keymap.Scope.Agent do
   """
   @spec start_remedy_key_hint(start_remedy_focus()) :: String.t()
   def start_remedy_key_hint(focus) do
-    {_binding, hint} = Map.fetch!(@start_remedy_keys, focus)
+    {_binding, _command, hint} = Map.fetch!(@start_remedy_keys, focus)
     hint
   end
 
   @doc """
   The remedy bindings at the given focus while the context offers a remedy, otherwise an empty trie.
 
-  Chat navigation merges this into its `:normal` trie, so `r` runs the remedy and every other key, including `s` for the session switcher, keeps its meaning. The composer consults it before Vim editing in input-normal; in insert mode Enter reaches the remedy through prompt submit. Both remedies run through one command, which picks the action by kind.
+  Chat navigation merges this into its `:normal` trie, so `r` runs the remedy and every other key, including `s` for the session switcher, keeps its meaning. The Vim composer consults it before Vim editing in input-normal; in insert mode Enter already submits. CUA merges it into its single trie, so Enter submits from chat as well as from the composer. Prompt submit runs the remedy unless the draft is a known slash command.
   """
   @spec start_remedy_keymap(start_remedy_focus(), Minga.Keymap.Scope.context()) ::
           Bindings.node_t()
   def start_remedy_keymap(focus, context) do
     case Keyword.get(context, :agent_start_remedy) do
       remedy when remedy in [:retry, :set_up_provider] ->
-        {binding, _hint} = Map.fetch!(@start_remedy_keys, focus)
+        {binding, command, _hint} = Map.fetch!(@start_remedy_keys, focus)
 
         Bindings.bind(
           Bindings.new(),
           Minga.Keymap.KeyParser.parse!(binding),
-          :agent_start_remedy,
+          command,
           start_remedy_description(remedy)
         )
 

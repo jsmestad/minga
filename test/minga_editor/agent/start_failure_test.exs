@@ -7,6 +7,12 @@ defmodule MingaEditor.Agent.StartFailureTest do
 
   @request StartRequest.new(false, true, {:seed, [{:user, "hello"}]})
 
+  # A pid on another node, without starting distribution.
+  defp remote_pid do
+    node = "remote@host"
+    :erlang.binary_to_term(<<131, 88, 119, byte_size(node), node::binary, 1::32, 0::32, 1::32>>)
+  end
+
   defp connection(readiness) do
     %ConnectionSnapshot{
       target: ConnectionTarget.new(self(), "session", nil, make_ref()),
@@ -27,7 +33,8 @@ defmodule MingaEditor.Agent.StartFailureTest do
           {StartFailure.session_error(:noproc, @request), {:retry, @request}},
           {StartFailure.session_error({:badmatch, %{a: 1}}, @request), {:retry, @request}},
           {StartFailure.no_workspace(@request), {:retry, @request}},
-          {StartFailure.session_crashed(), {:retry, StartRequest.default()}},
+          {StartFailure.session_crashed(self()), {:retry, StartRequest.default()}},
+          {StartFailure.session_crashed(remote_pid()), nil},
           {StartFailure.provider_startup_failed(connection(:configured)), {:retry, :provider}},
           {StartFailure.provider_startup_failed(connection(:checking)), {:retry, :provider}},
           {StartFailure.provider_startup_failed(connection(:unconfigured)), :set_up_provider},

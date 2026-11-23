@@ -73,6 +73,8 @@ defmodule Minga.Frontend.Adapter.GUI.TabBarEncoderTest do
             {:tool_executing, 2},
             {:error, 3},
             {:plan, 4},
+            {:approval_waiting, 5},
+            {:needs_you, 6},
             {:unknown, 0}
           ] do
         model = %TabBar{

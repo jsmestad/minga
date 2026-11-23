@@ -66,7 +66,10 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
 
   defp build_visible(ctx, lifecycle) do
     agent_ui = ctx.workspace.agent_ui
-    {presentation, session} = chat_presentation(lifecycle, agent_ui)
+
+    {presentation, session} =
+      chat_presentation(lifecycle, remedy_focus(ctx.intent.frame.editing_model, agent_ui))
+
     shell_agent = TraditionalState.agent(ctx.intent.frame.shell_state)
     panel = agent_ui.panel
 
@@ -201,26 +204,29 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilder do
   defp running_tool?({_id, {:tool_call, %ToolCall{status: :running}}, _style}), do: true
   defp running_tool?(_item), do: false
 
-  @spec chat_presentation(UIState.chat_lifecycle(), UIState.t()) ::
+  @spec chat_presentation(UIState.chat_lifecycle(), AgentScope.start_remedy_focus()) ::
           {AgentChat.lifecycle(), pid() | nil}
-  defp chat_presentation({:conversation, session}, _ui), do: {:conversation, session}
+  defp chat_presentation({:conversation, session}, _focus), do: {:conversation, session}
 
-  defp chat_presentation({:failed, %StartFailure{message: message, remedy: remedy}}, ui),
-    do: {{:failed, message, start_remedy(remedy, remedy_focus(ui))}, nil}
+  defp chat_presentation({:failed, %StartFailure{message: message, remedy: remedy}}, focus),
+    do: {{:failed, message, start_remedy(remedy, focus)}, nil}
 
-  defp chat_presentation(lifecycle, _ui) when lifecycle in [:starting, :unavailable],
+  defp chat_presentation(lifecycle, _focus) when lifecycle in [:starting, :unavailable],
     do: {lifecycle, nil}
 
-  # Key dispatch sends a focused composer's keys to the prompt (Enter runs the
-  # remedy) and everything else to chat navigation (`r` runs it), so the hint
-  # follows the same focus fact.
-  @spec remedy_focus(UIState.t()) :: AgentScope.start_remedy_focus()
-  defp remedy_focus(%UIState{panel: %Panel{input_focused: true}}), do: :composer
-  defp remedy_focus(%UIState{}), do: :chat
+  # Key dispatch resolves CUA keys through one trie, a focused Vim composer's
+  # keys through the prompt (Enter runs the remedy), and other Vim keys through
+  # chat navigation (`r` runs it), so the hint follows the same facts.
+  @spec remedy_focus(atom(), UIState.t()) :: AgentScope.start_remedy_focus()
+  defp remedy_focus(:cua, _ui), do: :cua
+  defp remedy_focus(_vim, %UIState{panel: %Panel{input_focused: true}}), do: :composer
+  defp remedy_focus(_vim, %UIState{}), do: :chat
 
   # The label and key hint come from the BEAM so no frontend authors remedy copy;
   # the hint is the key the Agent scope binds at the current focus.
-  @spec start_remedy(StartFailure.remedy(), AgentScope.start_remedy_focus()) :: StartRemedy.t()
+  @spec start_remedy(StartFailure.remedy() | nil, AgentScope.start_remedy_focus()) ::
+          StartRemedy.t() | nil
+  defp start_remedy(nil, _focus), do: nil
   defp start_remedy({:retry, _target}, focus), do: start_remedy(:retry, "Retry", focus)
 
   defp start_remedy(:set_up_provider, focus),

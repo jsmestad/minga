@@ -182,17 +182,9 @@ defmodule MingaEditor.Input.Scoped do
   end
 
   defp handle_focused_input_normal(state, cp, mods) do
-    # A failed start's remedy key (Enter) runs before Vim editing; the Agent
-    # scope binds it only while the active tab offers a remedy. Otherwise
-    # normal, visual and operator-pending keys go through the Mode FSM
-    # targeting the prompt buffer.
-    remedies =
-      Minga.Keymap.Scope.Agent.start_remedy_keymap(:composer, agent_keymap_context(state))
-
-    case Keymap.Bindings.lookup(remedies, {cp, mods}) do
-      {:command, command} -> {:handled, Commands.execute(state, command)}
-      _vim_key -> {:handled, AgentPanel.dispatch_prompt_via_mode_fsm(state, cp, mods)}
-    end
+    # Normal, visual and operator-pending keys share the composer dispatch,
+    # which runs a failed start's remedy key before Vim editing.
+    {:handled, AgentPanel.dispatch_composer_normal_key(state, cp, mods)}
   end
 
   @spec cua_active?(map()) :: boolean()

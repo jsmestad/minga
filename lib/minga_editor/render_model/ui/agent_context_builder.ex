@@ -108,6 +108,7 @@ defmodule MingaEditor.RenderModel.UI.AgentContextBuilder do
 
   @spec start_failure_action(StartFailure.t()) :: String.t()
   defp start_failure_action(%StartFailure{remedy: :set_up_provider}), do: "Agent needs setup"
+  defp start_failure_action(%StartFailure{remedy: nil}), do: "Agent unavailable"
   defp start_failure_action(%StartFailure{}), do: "Agent could not start"
 
   @spec visible?(Activity.t(), AgentContext.status()) :: boolean()

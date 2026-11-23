@@ -133,7 +133,8 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
             {StartFailure.catalog_unavailable(request), @retry_remedy},
             {StartFailure.timed_out(request), @retry_remedy},
             {StartFailure.session_error(:boom, request), @retry_remedy},
-            {StartFailure.session_crashed(), @retry_remedy},
+            {StartFailure.session_crashed(self()), @retry_remedy},
+            {StartFailure.session_crashed(remote_pid()), nil},
             {StartFailure.missing_credentials(),
              %StartRemedy{kind: :set_up_provider, label: "Set up provider", key_hint: "r"}}
           ] do
@@ -149,12 +150,18 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
       session = fake_session_pid()
       failure = StartFailure.timed_out(StartRequest.default())
 
-      for {focused?, hint} <- [{false, "r"}, {true, "Enter"}] do
+      for {model, focused?, hint} <- [
+            {:vim, false, "r"},
+            {:vim, true, "Enter"},
+            {:cua, false, "Enter"},
+            {:cua, true, "Enter"}
+          ] do
         panel = %{synced_panel([]) | input_focused: focused?}
+        ctx = context(session, panel, lifecycle: {:failed, failure})
+        ctx = put_in(ctx.intent.frame.editing_model, model)
 
         assert %{lifecycle: {:failed, _message, %StartRemedy{key_hint: ^hint}}} =
-                 context(session, panel, lifecycle: {:failed, failure})
-                 |> AgentChatBuilder.build()
+                 AgentChatBuilder.build(ctx)
       end
     end
 
@@ -819,6 +826,11 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
   defp message_summary({id, {:system, text, _level}}), do: {id, :system, text}
   defp message_summary({id, {:user, text}}), do: {id, :user, text}
   defp message_summary({id, {kind, _, _}}), do: {id, kind, nil}
+
+  defp remote_pid do
+    node = "remote@host"
+    :erlang.binary_to_term(<<131, 88, 119, byte_size(node), node::binary, 1::32, 0::32, 1::32>>)
+  end
 
   defp synced_panel(messages, opts \\ []) do
     projection = TranscriptFixture.projection(messages, opts)

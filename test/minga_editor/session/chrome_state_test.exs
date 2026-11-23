@@ -81,6 +81,34 @@ defmodule MingaEditor.Session.ChromeStateTest do
     end
   end
 
+  describe "a failed Agent start" do
+    test "marks its workspace needs-you, whether it is active or in the background", %{
+      tmp_dir: tmp_dir
+    } do
+      {tb, group} = tab_bar_with_agent_workspace(tmp_dir)
+      failure = MingaEditor.Agent.StartFailure.timed_out(MingaEditor.Agent.StartRequest.default())
+      failed_ui = MingaEditor.Agent.UIState.fail_start(MingaEditor.Agent.UIState.new(), failure)
+
+      # Background: the failed UI is stored on the workspace, and the runtime
+      # status it last reported is ignored.
+      background =
+        tb
+        |> TabBar.set_workspace_agent_status(group.id, :error)
+        |> TabBar.set_workspace_agent_ui(group.id, failed_ui)
+
+      chrome = ChromeState.from_editor_state(state(tab_bar: background, project_root: tmp_dir))
+      assert chrome.active_workspace_id == 0
+      assert Enum.find(chrome.workspaces, &(&1.id == group.id)).status == :needs_you
+
+      # Active: the live UI is on the editor workspace.
+      active = state(tab_bar: TabBar.switch_to(tb, 2), project_root: tmp_dir)
+      active = %{active | workspace: SessionState.set_agent_ui(active.workspace, failed_ui)}
+      chrome = ChromeState.from_editor_state(active)
+      assert chrome.active_workspace_id == group.id
+      assert Enum.find(chrome.workspaces, &(&1.id == group.id)).status == :needs_you
+    end
+  end
+
   describe "visible_tabs" do
     test "includes active workspace content tabs", %{tmp_dir: tmp_dir} do
       {tb, group} = tab_bar_with_agent_workspace(tmp_dir)

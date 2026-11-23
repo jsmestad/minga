@@ -517,6 +517,31 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
       refute_received {:readiness_session_prompt, _prompt}
     end
 
+    test "Enter during a setup failure runs a known slash command, and plain text opens setup" do
+      session = start_supervised!({ReadinessSession, self()})
+
+      failed =
+        base_state(session: session)
+        |> project_prompt_connection(session, :unconfigured, :terminal_failure, "boom")
+
+      assert UIState.start_remedy(failed.workspace.agent_ui) == :set_up_provider
+
+      ran = failed |> AgentCommands.input_paste("/help") |> AgentCommands.submit_prompt()
+
+      assert MingaEditor.Agent.PromptBuffer.prompt_text(ran.workspace.agent_ui.panel) == ""
+      refute match?({:picker, _}, ran.shell_runtime.state.modal)
+
+      remedied = failed |> AgentCommands.input_paste("hello") |> AgentCommands.submit_prompt()
+
+      assert {:picker, %{picker_ui: %{source: MingaEditor.UI.Picker.AgentModelSource}}} =
+               remedied.shell_runtime.state.modal
+
+      assert MingaEditor.Agent.PromptBuffer.prompt_text(remedied.workspace.agent_ui.panel) ==
+               "hello"
+
+      refute_received {:readiness_session_prompt, _prompt}
+    end
+
     test "Enter in a live conversation still submits the draft" do
       session = start_supervised!({ReadinessSession, self()})
 
@@ -1631,19 +1656,21 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
                "draft to keep"
     end
 
-    defp failed_composer(state, failure, draft) do
+    # A visible panel routes a focused composer's keys through the Agent panel
+    # handler; a hidden one leaves them to the scoped handler. Both must agree.
+    defp failed_composer(state, failure, draft, visible? \\ true) do
       ui =
         state.workspace.agent_ui
         |> MingaEditor.Agent.PromptBuffer.set_prompt_text(draft)
         |> UIState.fail_start(failure)
 
+      ui = if ui.panel.visible == visible?, do: ui, else: UIState.toggle(ui)
+
       state |> Workflow.install_agent_ui(ui) |> AgentCommands.scope_focus_input()
     end
 
-    defp press_enter(state) do
-      {:handled, state} = MingaEditor.Input.Scoped.handle_key(state, 13, 0)
-      state
-    end
+    # The Editor's own key entry: every input handler in precedence order.
+    defp press_enter(state), do: MingaEditor.Input.Router.dispatch(state, 13, 0)
 
     test "Enter in the composer retries a failed start from insert and input-normal and keeps the draft" do
       {state, tab, _workspace} =
@@ -1652,15 +1679,17 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
         |> with_agent_ingest()
         |> with_active_agent_workspace()
 
-      for leave_insert? <- [false, true] do
+      for visible? <- [true, false], leave_insert? <- [false, true] do
         failure = StartFailure.timed_out(StartRequest.new(false, false, nil))
-        composer = failed_composer(state, failure, "draft to keep")
+        composer = failed_composer(state, failure, "draft to keep", visible?)
 
         composer =
           if leave_insert?, do: AgentCommands.input_to_normal(composer), else: composer
 
         assert MingaEditor.Agent.UIState.start_remedy(composer.workspace.agent_ui) == :retry
         assert Minga.Editing.inserting?(composer) == not leave_insert?
+        assert composer.workspace.agent_ui.panel.visible == visible?
+        assert composer.workspace.agent_ui.panel.input_focused
         retried = press_enter(composer)
 
         assert retried.workspace.agent_ui.chat_lifecycle == :starting
@@ -1687,13 +1716,36 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
 
       opened = press_enter(composer)
 
-      assert opened == MingaEditor.UI.Picker.AgentModelSource.open(composer)
+      # Without a session the model picker reports why it cannot open.
+      assert %{message: "Connection details are unavailable." <> _} =
+               opened.workspace.agent_ui.view.toast
 
       assert opened.workspace.agent_ui.chat_lifecycle ==
                composer.workspace.agent_ui.chat_lifecycle
 
       assert MingaEditor.Agent.PromptBuffer.prompt_text(opened.workspace.agent_ui) ==
                "draft to keep"
+    end
+
+    test "a remote session crash offers no remedy and Enter is not taken over" do
+      {state, _tab, _workspace} = with_active_agent_workspace(source_workspace_state())
+      node = "remote@host"
+
+      remote =
+        :erlang.binary_to_term(
+          <<131, 88, 119, byte_size(node), node::binary, 1::32, 0::32, 1::32>>
+        )
+
+      failure = StartFailure.session_crashed(remote)
+      assert failure.remedy == nil
+      composer = failed_composer(state, failure, "hello")
+      assert UIState.start_remedy(composer.workspace.agent_ui) == nil
+
+      submitted = press_enter(composer)
+
+      assert submitted.workspace.agent_ui.chat_lifecycle == {:failed, failure}
+      assert MingaEditor.Agent.PromptBuffer.prompt_text(submitted.workspace.agent_ui) == "hello"
+      assert AgentSession.run_start_remedy(composer) == composer
     end
 
     test "Retry does nothing unless the active tab shows a retryable failed start" do

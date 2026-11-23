@@ -633,14 +633,19 @@ defmodule MingaEditor.Commands.Agent do
   @doc """
   Submits the current input text as a prompt.
 
-  While the active tab's start has failed, nothing can be sent, so submit runs the failure's remedy instead and leaves the draft as it is. The draft is not sent after a retry; the user submits again once the session is ready.
+  While the active tab's start has failed, a prompt cannot be sent, so submit runs the failure's remedy instead and leaves the draft as it is. A known slash command such as `/login` or `/new` still runs, because it does not need the session. The draft is not sent after a retry; the user submits again once the session is ready.
   """
   @spec submit_prompt(state()) :: state()
   def submit_prompt(state) do
-    case UIState.start_remedy(state.workspace.agent_ui) do
-      nil -> submit_draft(state)
-      _remedy -> AgentSession.run_start_remedy(state)
-    end
+    if runs_start_remedy?(state.workspace.agent_ui),
+      do: AgentSession.run_start_remedy(state),
+      else: submit_draft(state)
+  end
+
+  @spec runs_start_remedy?(UIState.t()) :: boolean()
+  defp runs_start_remedy?(%UIState{panel: panel} = ui) do
+    UIState.start_remedy(ui) != nil and
+      not SlashCommand.known_command?(PromptBuffer.prompt_text(panel))
   end
 
   @spec submit_draft(state()) :: state()

@@ -158,7 +158,11 @@ defmodule MingaEditor.RenderModel.UI.StatusBarBuilder do
   defp chrome_state_input(%Context{} = ctx) do
     %{
       tab_bar: ctx.tab_bar,
-      workspace: %{file_tree: ctx.workspace.file_tree, keymap_scope: ctx.workspace.keymap_scope}
+      workspace: %{
+        file_tree: ctx.workspace.file_tree,
+        keymap_scope: ctx.workspace.keymap_scope,
+        agent_ui: ctx.workspace.agent_ui
+      }
     }
   end
 
