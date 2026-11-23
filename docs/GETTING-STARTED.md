@@ -103,8 +103,7 @@ Useful slash commands:
 
 ## Where to go from here
 
-- **Customize and extend:** Read [Configuration](CONFIGURATION.md) for options, themes, keybindings, hooks, and extensions, and [Elixir is Minga's Elisp](EXTENSIBILITY.md) for the extension model.
-- **Understand the runtime:** Read [Architecture](ARCHITECTURE.md) for supervision trees, buffer processes, and the multi-frontend Semantic UI pipeline.
-- **Coming from another tool:** Read [For Neovim Users](FOR-NEOVIM-USERS.md), [For Emacs Users](FOR-EMACS-USERS.md), or [For AI-Assisted Developers](FOR-AI-CODERS.md).
+- **Customize and extend:** Read [Configuration](CONFIGURATION.md) for options, themes, keybindings, hooks, and extensions, and [Extension API](EXTENSION_API.md) for authoring extensions and model routes.
+- **Understand the runtime:** Read [Architecture](ARCHITECTURE.md) for supervision trees, buffer processes, and the multi-frontend Semantic UI pipeline, and [Buffer-Aware Agents](BUFFER-AWARE-AGENTS.md) for staged agent edits and three-way merge.
 - **Automate the native macOS app:** Read [Native editor automation (minga-ipc)](AUTOMATION-IPC.md) for `open-ready`, `inspect`, and typed navigation receipts.
 - **Contribute:** Read [Contributing](../CONTRIBUTING.md) for the development setup, tests, and local lint gates.

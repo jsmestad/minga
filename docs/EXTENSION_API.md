@@ -1,6 +1,6 @@
 # Extension API
 
-> **First time?** This is the API reference. For a guided walkthrough of building your first extension from scratch, see the [Extension Authoring Guide](https://github.com/jsmestad/minga/issues/212). For the conceptual foundation (why Elixir is Minga's Elisp, how the BEAM makes extensions safe), read [Extensibility](EXTENSIBILITY.md).
+> **First time?** This is the API reference. For user-facing configuration and installing extensions, see [Configuration](CONFIGURATION.md#optional-extensions). For the extension code-generation boundary, see [ADR-0003](adr/0003-extension-code-updates-require-a-new-vm-generation.md).
 
 Extensions are Elixir packages that run inside the editor. They have full access to the BEAM VM, the same way Emacs Lisp packages have full access to the Emacs runtime. Declarative contributions are described at compile time, and runtime setup happens in `init/1`.
 
@@ -729,9 +729,18 @@ Minga.Language.register(
 )
 ```
 
-The grammar's `parser.c` (and optional `scanner.c`) is compiled into a shared library using the system C compiler, then cached at `~/.local/share/minga/grammars/`. Subsequent startups skip compilation. `Minga.Language.register/3` returns `{:error, reason}` for compilation or other synchronous setup failures. A successful `:ok` means the parser load request was accepted, not that every parser process has already applied it. Your `init/1` decides whether that should fail the extension or continue without highlighting.
+This single call handles the full pipeline:
 
-For more detail on what `Minga.Language.register/3` does under the hood, see the [Extensibility](EXTENSIBILITY.md#runtime-grammar-loading-for-extensions) page.
+1. **Compiles** the grammar's `parser.c` (and optional `scanner.c`) into a platform-appropriate shared library (`.dylib` on macOS, `.so` on Linux) using the system C compiler (`$CC`, or `cc`/`gcc`/`clang`).
+2. **Caches** the compiled library at `~/.local/share/minga/grammars/` (respects `$XDG_DATA_HOME`). Subsequent startups skip recompilation when the cache is newer than sources.
+3. **Loads** the shared library into the parser Port via the `load_grammar` protocol message.
+4. **Sends** highlight and injection queries to the parser.
+5. **Registers** filetype mappings so `Minga.Language.detect_filetype/1` recognizes the new file extensions.
+6. **Registers** the filetype-to-grammar mapping in `Minga.Language.Grammar` so buffers with the new filetype get syntax highlighting.
+
+`Minga.Language.register/3` returns `{:error, reason}` for compilation or other synchronous setup failures. A successful `:ok` means the parser load request was accepted, not that every parser process has already applied it. Your `init/1` decides whether that should fail the extension or continue without highlighting.
+
+The dynamic grammar registry is an ETS table (`read_concurrency: true`) initialized at application startup. Dynamic mappings take precedence over registered language definitions, so extensions can override bundled grammars when needed.
 
 ---
 
@@ -1052,6 +1061,19 @@ end
 
 - `topic` is an atom such as `:agent_session_stopped`, `:agent_hook`, or `:buffer_changed`.
 - `payload` is a typed struct specific to the topic (see `Minga.Events` for the full list of payload structs).
+
+---
+
+## Compatibility Notes
+
+The following removed Layer 2 delegates and deprecated theme keys were retired during core cleanups. Update existing extension or config code to use the canonical modules and keys:
+
+- `MingaEditor.UI.Popup.Registry` has been removed. Use `Minga.Config.popup/2` for normal popup declarations, or `Minga.Popup.Registry` for direct registry operations.
+- `MingaEditor.UI.Popup.Rule` has been removed. Use `Minga.Popup.Rule.new/2`, `%Minga.Popup.Rule{}`, or `Minga.Config.popup/2` for normal declarations.
+- `MingaEditor.UI.Highlight.InjectionRange` has been removed. Construct injection ranges with `Minga.Language.Highlight.InjectionRange.new/3` or `%Minga.Language.Highlight.InjectionRange{}` directly.
+- `MingaEditor.UI.Highlight.Grammar` has been removed. Use `Minga.Language.Grammar` for grammar registry initialization, runtime filetype registration, unregistering, filetype lookup, query lookup, query reading, and dynamic grammar paths (`Minga.Language.Grammar.query_path/1` replaces `highlight_query_path/1`).
+- Theme override sections `:picker` and `:minibuffer` have been removed. Configure picker and minibuffer chrome through `:popup` colors instead.
+- Theme fields `editor.tilde_fg`, `tree.modified_fg`, and `tree.git_conflict_fg` have been removed. Valid overrides for those deprecated keys are still parsed and ignored while invalid values still fail color validation; use live popup, tree, git, or gutter fields instead.
 
 ---
 

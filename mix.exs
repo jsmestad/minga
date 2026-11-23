@@ -81,12 +81,7 @@ defmodule Minga.MixProject do
         "docs/REMOTE_AGENTS.md",
         "docs/HOOKS.md",
         "docs/MCP.md",
-        # Coming From...
-        "docs/FOR-NEOVIM-USERS.md",
-        "docs/FOR-EMACS-USERS.md",
-        "docs/FOR-AI-CODERS.md",
         # Extending Minga
-        "docs/EXTENSIBILITY.md",
         "docs/EXTENSION_API.md",
         "docs/KEYMAP-SCOPES.md",
         "docs/AGENTIC-KEYMAP.md",
@@ -120,13 +115,7 @@ defmodule Minga.MixProject do
           "docs/HOOKS.md",
           "docs/MCP.md"
         ],
-        "Coming From...": [
-          "docs/FOR-NEOVIM-USERS.md",
-          "docs/FOR-EMACS-USERS.md",
-          "docs/FOR-AI-CODERS.md"
-        ],
         "Extending Minga": [
-          "docs/EXTENSIBILITY.md",
           "docs/EXTENSION_API.md",
           "docs/KEYMAP-SCOPES.md",
           "docs/AGENTIC-KEYMAP.md"

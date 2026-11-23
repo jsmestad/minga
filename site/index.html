@@ -4,122 +4,444 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex, nofollow">
-  <title>Minga (Staging Preview)</title>
-  <meta name="description" content="Minga is a programmable workbench on the BEAM. Pre-launch staging preview for v0.1.0.">
+  <title>Minga: A programmable workbench on the BEAM</title>
+  <meta name="description" content="Minga is a programmable workbench on the BEAM for editing code across 50 languages, running buffer-aware AI agents, and building custom workflows you inspect and keep across projects.">
   <link rel="icon" type="image/svg+xml" href="/assets/minga_dark-transparent.svg">
-  <style>
-    :root {
-      color-scheme: dark light;
-      --bg: #111214;
-      --surface: #181a1f;
-      --border: #2a2e37;
-      --text: #e6e8ec;
-      --muted: #9aa2b1;
-      --accent: #e5a93c;
-    }
-    @media (prefers-color-scheme: light) {
-      :root {
-        --bg: #f8f8f6;
-        --surface: #ffffff;
-        --border: #dfe2e8;
-        --text: #16181d;
-        --muted: #525965;
-        --accent: #a66208;
-      }
-    }
-    * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      min-height: 100vh;
-      display: grid;
-      place-items: center;
-      padding: 2rem 1.25rem;
-      background: var(--bg);
-      color: var(--text);
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-      line-height: 1.6;
-    }
-    main {
-      width: 100%;
-      max-width: 42rem;
-      padding: 2.25rem;
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 10px;
-    }
-    .brand {
-      display: flex;
-      align-items: center;
-      gap: 0.85rem;
-      margin-bottom: 1.25rem;
-    }
-    .brand img {
-      width: 44px;
-      height: 44px;
-      display: block;
-    }
-    .badge {
-      display: inline-block;
-      font-size: 0.75rem;
-      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      letter-spacing: 0.04em;
-      text-transform: uppercase;
-      color: var(--accent);
-      border: 1px solid var(--border);
-      border-radius: 999px;
-      padding: 0.15rem 0.6rem;
-    }
-    h1 {
-      margin: 0;
-      font-size: 1.75rem;
-      line-height: 1.2;
-      letter-spacing: -0.02em;
-    }
-    p {
-      margin: 0 0 1.25rem;
-      color: var(--muted);
-    }
-    code {
-      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      font-size: 0.9em;
-      color: var(--text);
-    }
-    nav {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 0.75rem 1.25rem;
-      padding-top: 0.75rem;
-      border-top: 1px solid var(--border);
-    }
-    a {
-      color: var(--text);
-      text-decoration: underline;
-      text-decoration-color: var(--border);
-      text-underline-offset: 0.2em;
-      font-weight: 500;
-    }
-    a:hover {
-      color: var(--accent);
-      text-decoration-color: var(--accent);
-    }
-  </style>
+  <link rel="stylesheet" href="/styles.css">
+  <script>
+    (() => {
+      try {
+        const saved = window.localStorage.getItem("minga-theme");
+        if (saved === "light" || saved === "dark") {
+          document.documentElement.setAttribute("data-theme", saved);
+        }
+      } catch (_) {}
+    })();
+  </script>
 </head>
 <body>
-  <main>
-    <div class="brand">
-      <img src="/assets/minga_dark-transparent.svg" alt="Minga logo" width="44" height="44">
-      <div>
-        <h1>Minga</h1>
-        <span class="badge">v0.1.0 staging preview</span>
-      </div>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="site-header">
+    <div class="container header-inner">
+      <a class="brand-link" href="/">
+        <img src="/assets/minga_dark-transparent.svg" alt="Minga logo" width="28" height="28">
+        <span>Minga</span>
+        <span class="brand-tag">v0.1.0 preview</span>
+      </a>
+      <nav class="site-nav" aria-label="Primary">
+        <a href="/why-minga">Why Minga</a>
+        <a href="/docs/">Docs</a>
+        <a href="#install">Install</a>
+        <a href="https://github.com/jsmestad/minga">GitHub</a>
+        <button type="button" class="theme-toggle" data-theme-toggle aria-label="Toggle color theme">Light</button>
+      </nav>
     </div>
-    <p>Minga is a programmable workbench on the BEAM. This placeholder validates the combined Cloudflare Workers Static Assets staging deployment (<code>/</code> and <code>/docs/</code>) ahead of the v0.1.0 launch site on mingacode.dev.</p>
-    <nav aria-label="Primary links">
-      <a href="/docs/">Documentation (ExDoc)</a>
-      <a href="/docs/getting-started.html">Getting Started</a>
-      <a href="/docs/architecture.html">Architecture</a>
-      <a href="https://github.com/jsmestad/minga">GitHub</a>
-    </nav>
+  </header>
+
+  <main id="main">
+    <section class="hero">
+      <div class="container">
+        <div class="hero-copy">
+          <p class="kicker">Pre-release · Building toward v0.1.0 · macOS &amp; Terminal</p>
+          <h1>A programmable workbench on the BEAM.</h1>
+          <p class="hero-lead">Spawning more coding agents is no longer the hard part; verifying, steering, and fixing their code is. Minga puts native code editing across 50 languages, buffer-aware agent sessions, and custom workflows you can inspect and keep in one runtime, so you stop bouncing between terminal panes, worktrees, and a second editor every two minutes.</p>
+          <div class="actions">
+            <a class="btn btn-primary" href="#install">Install Minga</a>
+            <a class="btn" href="/why-minga">Read Why Minga</a>
+            <a class="btn" href="/docs/">Explore Docs</a>
+          </div>
+          <p class="hero-meta">50 languages via tree-sitter + LSP · Swift + Metal on macOS · Go + Bubble Tea in the terminal · Powered by Elixir / OTP 29</p>
+        </div>
+
+        <div class="stage-frame" aria-label="Pre-release media placeholder">
+          <div class="stage-bar">
+            <span class="stage-dots" aria-hidden="true"><span></span><span></span><span></span></span>
+            <span>minga-mac · hero workflow capture</span>
+            <span class="stage-pill">Staging slot · Slice 5</span>
+          </div>
+          <div class="stage-body">
+            <div class="stage-body-inner">
+              <p class="stage-label">Awaiting qualified v0.1.0 release candidate capture</p>
+              <h3>Real macOS Swift + Metal capture lands here before launch</h3>
+              <p>We do not publish faked screenshots or simulated agent output. Once the v0.1.0 programmable workbench milestone (<a href="https://github.com/jsmestad/minga/issues/3542">#3542</a> and <a href="https://github.com/jsmestad/minga/issues/3662">#3662</a>) qualifies, this slot will show a silent 10 to 15 second retina clip recorded from the packaged macOS app: editing code, reviewing staged agent diffs inline, and saving a custom workflow to activate and keep across sessions.</p>
+              <p class="stage-spec">Planned asset: /media/hero-workbench.webm + poster still · silent loop with pause and reduced-motion support</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="the-split">
+      <div class="container">
+        <div class="section-header">
+          <p class="kicker">The real bottleneck</p>
+          <h2>Spawning agents is easy. Verifying and steering their code is where you lose the day.</h2>
+          <p>Follow one ordinary moment: an agent finishes a 400-line refactor, and hunk 3 has a subtle edge-case bug.</p>
+        </div>
+
+        <div class="loop-compare" role="region" aria-label="Workflow comparison: agent multiplexer versus Minga">
+          <div class="loop-head" aria-hidden="true">
+            <div class="loop-head-cell">Step</div>
+            <div class="loop-head-cell">
+              <strong>Agent multiplexer + separate editor</strong>
+              Herdr, tmux + Claude Code / Codex / pi
+            </div>
+            <div class="loop-head-cell loop-head-minga">
+              <strong>Minga</strong>
+              One programmable BEAM workbench
+            </div>
+          </div>
+
+          <div class="loop-row">
+            <div class="loop-step">
+              <span class="loop-num">01</span>
+              <span class="loop-step-title">Edits land</span>
+            </div>
+            <div class="loop-cell">
+              <span class="loop-cell-label">Agent multiplexer + separate editor</span>
+              The CLI writes straight to disk, risking overwrites and broken undo on open buffers, or forces a separate Git worktree with another build cache and cold LSP index.
+            </div>
+            <div class="loop-cell loop-cell-minga">
+              <span class="loop-cell-label">Minga</span>
+              Approved edits stay staged in an isolated in-memory overlay while disk and your open buffer remain untouched. Stay in one repo with one build and one LSP.
+            </div>
+          </div>
+
+          <div class="loop-row">
+            <div class="loop-step">
+              <span class="loop-num">02</span>
+              <span class="loop-step-title">You check the diff</span>
+            </div>
+            <div class="loop-cell">
+              <span class="loop-cell-label">Agent multiplexer + separate editor</span>
+              Terminal scrollback has no jump-to-definition and no live diagnostics. You switch to Neovim or VS Code to trace callers and find what broke.
+            </div>
+            <div class="loop-cell loop-cell-minga">
+              <span class="loop-cell-label">Minga</span>
+              Review hunks inline (<kbd>]c</kbd> / <kbd>[c</kbd>) with full tree-sitter highlighting, jump-to-definition, and live LSP diagnostics. Background writes never yank your cursor or open file.
+            </div>
+          </div>
+
+          <div class="loop-row">
+            <div class="loop-step">
+              <span class="loop-num">03</span>
+              <span class="loop-step-title">Hunk 3 is wrong</span>
+            </div>
+            <div class="loop-cell">
+              <span class="loop-cell-label">Agent multiplexer + separate editor</span>
+              You either hand-edit in your second editor and untangle collisions later, or type file paths and line numbers back into chat and wait for another full turn over a four-line fix.
+            </div>
+            <div class="loop-cell loop-cell-minga">
+              <span class="loop-cell-label">Minga</span>
+              Accept good hunks (<kbd>y</kbd>), reject hunk 3 (<kbd>x</kbd>), and edit those four lines directly in Vim or CUA with undo intact. Overlapping changes open conflict review (<strong>Keep mine</strong> / <strong>Use Agent version</strong>).
+            </div>
+          </div>
+
+          <div class="loop-row">
+            <div class="loop-step">
+              <span class="loop-num">04</span>
+              <span class="loop-step-title">Sending context back</span>
+            </div>
+            <div class="loop-cell">
+              <span class="loop-cell-label">Agent multiplexer + separate editor</span>
+              Save the file, copy compiler errors and line ranges out of your editor, and paste them into a terminal prompt hoping the agent reads the updated file.
+            </div>
+            <div class="loop-cell loop-cell-minga">
+              <span class="loop-cell-label">Minga</span>
+              Attach your live unsaved buffer (<kbd>SPC a b</kbd>) or published LSP diagnostics (<kbd>SPC a D</kbd>) straight to the agent draft, or publish staged changes cleanly (<kbd>SPC a p</kbd>).
+            </div>
+          </div>
+
+          <div class="loop-row">
+            <div class="loop-step">
+              <span class="loop-num">05</span>
+              <span class="loop-step-title">Improving the loop</span>
+            </div>
+            <div class="loop-cell">
+              <span class="loop-cell-label">Agent multiplexer + separate editor</span>
+              Customizing a multiplexer changes tabs, status bars, and shell scripts around an opaque CLI. It cannot bind buffer edits, diagnostics, and agent turns into one workflow.
+            </div>
+            <div class="loop-cell loop-cell-minga">
+              <span class="loop-cell-label">Minga</span>
+              Write it yourself or ask the agent to build a sharper review surface or check workflow in readable source over real buffer and agent state, save to activate, and keep it across projects (<a href="/docs/0004-products-are-root-applets-over-a-fixed-engine.html">ADR-0004</a>).
+            </div>
+          </div>
+        </div>
+
+        <div class="scope-strip">
+          <div class="scope-note">
+            <h3>When a PTY multiplexer is the right fit</h3>
+            <p>If your workflow is launching six unrelated CLI agents across separate repositories and checking in occasionally from a status sidebar or phone, tools like Herdr are built for that. Minga is built for engineers who stay close to the code.</p>
+          </div>
+          <div class="scope-note">
+            <h3>What about AI-retrofitted IDEs?</h3>
+            <p>Cursor and VS Code put chat beside your editor, but on a single-threaded host with fixed panels you cannot deeply reprogram. Minga keeps editing and agents together without giving up BEAM concurrency or owning your workflow.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="programmable">
+      <div class="container">
+        <div class="section-header">
+          <p class="kicker">Programmability</p>
+          <h2>Shape the actual engine, not shell panes wrapped around it.</h2>
+          <p>Minga edits any language (50 tree-sitter grammars and LSP). Just as Lua configures Neovim and Elisp configures Emacs, Elixir is Minga's extension language, and you can write it yourself or let the agent author readable source for you.</p>
+        </div>
+
+        <div class="split-layout">
+          <div>
+            <ul class="pillar-list">
+              <li>
+                <strong>Write it yourself or ask the agent</strong>
+                <p>Configure options, keybindings, concurrent hooks, command advice, and supervised extensions today in <code>~/.config/minga/config.exs</code> or packages built with <code>minga_sdk</code>. Toward v0.1.0, ask Minga's agent to author workflow and interface improvements over the same fixed buffer, agent, and permission owners.</p>
+              </li>
+              <li>
+                <strong>Save to activate, inspect the diff</strong>
+                <p>Real workflow code sits in readable source files you can inspect, test, and version in Git. There is no hidden prompt masquerading as a workflow engine and no proprietary fork required for personal tooling.</p>
+              </li>
+              <li>
+                <strong>Disposable for one task, kept when it sticks</strong>
+                <p>Reshape Minga to fit how you work on a single migration or spec review and discard it when the work lands, or Keep useful definitions shared across tabs, restarts, and repositories without regenerating them.</p>
+              </li>
+            </ul>
+
+            <div class="callout">
+              <span class="callout-title">Pre-release honesty boundary</span>
+              <p><strong>Ships on <code>main</code> today:</strong> Elixir config DSL, live config/hook/advice reload (<kbd>SPC h r</kbd>), and supervised path, Git, and Hex extensions with isolated boot compilation (<a href="/docs/0003-extension-code-updates-require-a-new-vm-generation.html">ADR-0003</a>). <strong>Building for v0.1.0:</strong> restricted live Save-to-activate definitions, shared composition, and Keep across sessions (<a href="https://github.com/jsmestad/minga/issues/3542">#3542</a>, <a href="/docs/0004-products-are-root-applets-over-a-fixed-engine.html">ADR-0004</a>).</p>
+            </div>
+          </div>
+
+          <div class="code-card">
+            <div class="code-header">
+              <span>~/.config/minga/config.exs</span>
+              <span>Elixir</span>
+            </div>
+            <pre><code><span class="tok-kw">use</span> <span class="tok-mod">Minga.Config</span>
+
+set <span class="tok-atom">:theme</span>, <span class="tok-atom">:catppuccin_mocha</span>
+set <span class="tok-atom">:line_numbers</span>, <span class="tok-atom">:relative</span>
+set <span class="tok-atom">:tab_width</span>, <span class="tok-num">2</span>
+
+bind <span class="tok-atom">:normal</span>, <span class="tok-str">"SPC g s"</span>, <span class="tok-atom">:git_status</span>, <span class="tok-str">"Git status"</span>
+
+<span class="tok-comment"># Hooks run in separate BEAM processes so slow tools never block typing.</span>
+on <span class="tok-atom">:after_save</span>, <span class="tok-kw">fn</span> _buf, path <span class="tok-kw">-&gt;</span>
+  <span class="tok-kw">if</span> <span class="tok-mod">String</span>.ends_with?(path, <span class="tok-str">".go"</span>) <span class="tok-kw">do</span>
+    <span class="tok-mod">System</span>.cmd(<span class="tok-str">"gofmt"</span>, [<span class="tok-str">"-w"</span>, path])
+  <span class="tok-kw">end</span>
+<span class="tok-kw">end</span>
+
+<span class="tok-comment"># Wrap any command with before, after, around, or override advice.</span>
+advise <span class="tok-atom">:around</span>, <span class="tok-atom">:format_buffer</span>, <span class="tok-kw">fn</span> execute, state <span class="tok-kw">-&gt;</span>
+  errors =
+    state.buffers.active
+    |&gt; <span class="tok-mod">Minga.Diagnostics</span>.for_buffer()
+    |&gt; <span class="tok-mod">Enum</span>.count(<span class="tok-kw">fn</span> d <span class="tok-kw">-&gt;</span> d.severity == <span class="tok-atom">:error</span> <span class="tok-kw">end</span>)
+
+  <span class="tok-kw">if</span> errors == <span class="tok-num">0</span>, <span class="tok-kw">do:</span> execute.(state), <span class="tok-kw">else:</span> state
+<span class="tok-kw">end</span>
+
+<span class="tok-comment"># Install supervised extensions from local paths, Git, or Hex.</span>
+extension <span class="tok-atom">:minga_org</span>, git: <span class="tok-str">"https://github.com/jsmestad/minga-org"</span></code></pre>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="runtime">
+      <div class="container">
+        <div class="section-header">
+          <p class="kicker">Runtime architecture</p>
+          <h2>Why the BEAM, and where we refuse to use it.</h2>
+          <p>The Erlang VM was not picked for novelty. It directly addresses four runtime failures that show up the moment humans and autonomous agents share an editor.</p>
+        </div>
+
+        <ol class="runtime-ledger">
+          <li class="runtime-row">
+            <div class="runtime-failure">
+              <span class="runtime-index">01</span>
+              <h3>UI freezes and GC stutters</h3>
+            </div>
+            <div class="runtime-answer">
+              <span class="runtime-mechanism">Preemptive scheduling + per-process heaps</span>
+              <p>The BEAM schedules lightweight processes preemptively and collects garbage per process instead of pausing the whole world. Streaming model output, LSP diagnostics, and save hooks do not starve your keystrokes.</p>
+            </div>
+          </li>
+
+          <li class="runtime-row">
+            <div class="runtime-failure">
+              <span class="runtime-index">02</span>
+              <h3>One bad plugin breaks the editor</h3>
+            </div>
+            <div class="runtime-answer">
+              <span class="runtime-mechanism">OTP supervision + process isolation</span>
+              <p>Buffers, agent sessions, LSP clients, and extensions run in separate processes with separate memory. When an extension callback or tool call fails, its supervisor isolates and recovers that subtree while open buffers and undo history stay untouched.</p>
+            </div>
+          </li>
+
+          <li class="runtime-row">
+            <div class="runtime-failure">
+              <span class="runtime-index">03</span>
+              <h3>Agents clobber open files</h3>
+            </div>
+            <div class="runtime-answer">
+              <span class="runtime-mechanism">Buffer-aware forks + staged changesets</span>
+              <p>Every buffer is a GenServer process. Agent file edits route through <code>MingaAgent.ToolRouter</code> into in-memory buffer forks with revision checks, inline diff review, three-way merge on publish (<kbd>SPC a p</kbd>) or discard (<kbd>SPC a P</kbd>), and buffer undo integration. See <a href="/docs/buffer-aware-agents.html">Buffer-Aware Agents</a>.</p>
+            </div>
+          </li>
+
+          <li class="runtime-row">
+            <div class="runtime-failure">
+              <span class="runtime-index">04</span>
+              <h3>Closing the window kills running work</h3>
+            </div>
+            <div class="runtime-answer">
+              <span class="runtime-mechanism">Headless daemon + durable sessions</span>
+              <p><code>minga --headless</code> runs the BEAM runtime without a window, locally or on a remote host, exposing a WebSocket and JSON-RPC gateway so clients can attach, inspect, and detach while long sessions keep running. See <a href="/docs/remote_agents.html">Remote Agents</a>.</p>
+            </div>
+          </li>
+        </ol>
+
+        <div class="boundary-band">
+          <div class="boundary-col">
+            <h3>What the BEAM owns</h3>
+            <p>Buffer processes, supervision trees, agent orchestration, extensions, and semantic UI models. Everything concurrent, stateful, and programmable lives in Elixir on OTP 29.</p>
+          </div>
+          <div class="boundary-col boundary-col-native">
+            <h3>Where native code takes over</h3>
+            <p>The BEAM does not rasterize pixels or parse syntax trees. Native clients handle rendering, input, and parsing across explicit port boundaries (<a href="/docs/architecture.html">Architecture</a>).</p>
+            <div class="native-stack">
+              <span class="native-chip">Swift + Metal <span>macOS GUI</span></span>
+              <span class="native-chip">Go + Bubble Tea <span>Terminal TUI</span></span>
+              <span class="native-chip">Zig <span>50 tree-sitter grammars</span></span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="frontends">
+      <div class="container">
+        <div class="section-header">
+          <p class="kicker">Native frontends</p>
+          <h2>Native on macOS. First-class in the terminal.</h2>
+          <p>One BEAM core drives both clients over a shared Semantic UI protocol. Switch between Vim modal editing and CUA keybindings, open Doom-style <kbd>SPC</kbd> command menus with Which-Key, and run models across Anthropic, OpenAI, OpenAI Codex, Google, OpenRouter, Groq, Mistral, and DeepSeek.</p>
+        </div>
+
+        <div class="grid-2">
+          <div class="stage-frame stage-frame-compact" aria-label="macOS GUI staging media placeholder">
+            <div class="stage-bar">
+              <span class="stage-dots" aria-hidden="true"><span></span><span></span><span></span></span>
+              <span>Minga.app · Swift + Metal</span>
+              <span class="stage-pill">Slice 5 capture</span>
+            </div>
+            <div class="stage-body">
+              <div class="stage-body-inner">
+                <p class="stage-label">macOS GUI capture slot</p>
+                <h3>CoreText shaping and Metal rendering</h3>
+                <p>Native macOS chrome, ligatures, smooth trackpad scrolling, inline diff previews, and live model activity panes driven by the BEAM core without Electron overhead.</p>
+                <p class="stage-spec">Planned asset: /media/macos-gui-staged-review.png (retina capture from qualified v0.1.0 RC)</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="stage-frame stage-frame-compact" aria-label="Go TUI staging media placeholder">
+            <div class="stage-bar">
+              <span>$ minga · Go + Bubble Tea</span>
+              <span class="stage-pill">Slice 5 capture</span>
+            </div>
+            <div class="stage-body">
+              <div class="stage-body-inner">
+                <p class="stage-label">Terminal client capture slot</p>
+                <h3>Same core, same config over SSH or tmux</h3>
+                <p>The Go terminal frontend speaks the same Semantic UI protocol as macOS. Keep your Vim motions, text objects, registers, macros, LSP, 50 tree-sitter grammars, and agent workspaces inside any modern terminal.</p>
+                <p class="stage-spec">Planned asset: /media/go-tui-session.webm + poster still (recorded from qualified v0.1.0 RC)</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="install">
+      <div class="container">
+        <div class="section-header">
+          <p class="kicker">Get started</p>
+          <h2>Install Minga or build from source.</h2>
+          <p>Minga ships rolling prerelease builds on macOS via Homebrew and builds cleanly from source on macOS and Linux. Press <kbd>SPC</kbd> in Normal mode to discover commands, or open the agent panel with <kbd>SPC a a</kbd>.</p>
+        </div>
+
+        <div class="grid-2">
+          <div class="code-card">
+            <div class="code-header">
+              <span>macOS · Homebrew</span>
+              <button type="button" class="copy-btn" data-copy-target="cmd-brew">Copy</button>
+            </div>
+            <pre><code id="cmd-brew">brew install --cask jsmestad/minga/minga-mac
+brew install jsmestad/minga/minga</code></pre>
+          </div>
+
+          <div class="code-card">
+            <div class="code-header">
+              <span>From source · macOS &amp; Linux</span>
+              <button type="button" class="copy-btn" data-copy-target="cmd-source">Copy</button>
+            </div>
+            <pre><code id="cmd-source">git clone https://github.com/jsmestad/minga.git
+cd minga
+asdf install &amp;&amp; mix deps.get &amp;&amp; mix compile &amp;&amp; make native.support
+bin/minga</code></pre>
+          </div>
+        </div>
+
+        <div class="doc-links" aria-label="Documentation links">
+          <a class="doc-link" href="/why-minga">
+            <span class="doc-link-title">Why Minga</span>
+            <span class="doc-link-desc">The full thesis: the PTY-pane ceiling of agent multiplexers, ADR-0004 programmability, BEAM tradeoffs, and early gaps.</span>
+          </a>
+          <a class="doc-link" href="/docs/getting-started.html">
+            <span class="doc-link-title">Getting Started</span>
+            <span class="doc-link-desc">Five-minute walkthrough from install and first keys to connecting a model provider.</span>
+          </a>
+          <a class="doc-link" href="/docs/configuration.html">
+            <span class="doc-link-title">Configuration</span>
+            <span class="doc-link-desc">Options, themes, keybindings, hooks, advice, and installing extensions in config.exs.</span>
+          </a>
+          <a class="doc-link" href="/docs/extension_api.html">
+            <span class="doc-link-title">Extension API</span>
+            <span class="doc-link-desc">Declarative macros, source-owned registries, model routes, runtime grammars, and AgentAPI.</span>
+          </a>
+          <a class="doc-link" href="/docs/buffer-aware-agents.html">
+            <span class="doc-link-title">Buffer-Aware Agents</span>
+            <span class="doc-link-desc">How in-memory forks, staged changesets, revision checks, and three-way merge protect your buffers.</span>
+          </a>
+          <a class="doc-link" href="/docs/architecture.html">
+            <span class="doc-link-title">Architecture &amp; ADRs</span>
+            <span class="doc-link-desc">Supervision trees, Semantic UI protocol, and the five architecture decision records.</span>
+          </a>
+        </div>
+      </div>
+    </section>
   </main>
+
+  <footer class="site-footer">
+    <div class="container footer-inner">
+      <div class="footer-note">
+        <p><strong>Minga</strong> is open source under the MIT license. Created by <a href="https://evalcode.com">Justin Smestad</a> in Colorado.</p>
+        <p>Pre-release staging preview ahead of v0.1.0 launch (<a href="https://github.com/jsmestad/minga/issues/3542">#3542</a>). Real captures replace staging frames once release qualification completes.</p>
+      </div>
+      <nav class="footer-links" aria-label="Footer">
+        <a href="/why-minga">Why Minga</a>
+        <a href="/docs/">Documentation</a>
+        <a href="/docs/architecture.html">Architecture</a>
+        <a href="/docs/changelog.html">Changelog</a>
+        <a href="/docs/contributing.html">Contributing</a>
+        <a href="https://github.com/jsmestad/minga">GitHub</a>
+      </nav>
+    </div>
+  </footer>
+
+  <script defer src="/site.js"></script>
 </body>
 </html>

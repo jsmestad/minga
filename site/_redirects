@@ -4,10 +4,15 @@
 /configuration.html /docs/configuration.html 301
 /agent-model-selection.html /docs/agent-model-selection.html 301
 /projects.html /docs/projects.html 301
-/for-neovim-users.html /docs/for-neovim-users.html 301
-/for-emacs-users.html /docs/for-emacs-users.html 301
-/for-ai-coders.html /docs/for-ai-coders.html 301
-/extensibility.html /docs/extensibility.html 301
+# Retired positioning and comparison docs redirected to /why-minga or Extension API
+/for-neovim-users.html /why-minga 301
+/docs/for-neovim-users.html /why-minga 301
+/for-emacs-users.html /why-minga 301
+/docs/for-emacs-users.html /why-minga 301
+/for-ai-coders.html /why-minga 301
+/docs/for-ai-coders.html /why-minga 301
+/extensibility.html /docs/extension_api.html 301
+/docs/extensibility.html /docs/extension_api.html 301
 /extension_api.html /docs/extension_api.html 301
 /keymap-scopes.html /docs/keymap-scopes.html 301
 /agentic-keymap.html /docs/agentic-keymap.html 301
