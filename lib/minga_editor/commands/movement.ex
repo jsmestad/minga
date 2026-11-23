@@ -736,12 +736,7 @@ defmodule MingaEditor.Commands.Movement do
   @spec maybe_focus_file_tree(state(), :left | :right | :up | :down) :: state()
   defp maybe_focus_file_tree(state, :left) do
     if FileTreeState.visible?(state.workspace.file_tree) do
-      state = update_file_tree(state, &FileTreeState.focus/1)
-
-      %{
-        state
-        | workspace: MingaEditor.Session.State.set_keymap_scope(state.workspace, :file_tree)
-      }
+      MingaEditor.Commands.FileTree.focus_tree(state)
     else
       state
     end

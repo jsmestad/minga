@@ -1982,7 +1982,11 @@ defmodule MingaEditor.Commands.Agent do
   @doc "Focuses the input field and transitions to insert mode."
   @spec scope_focus_input(state()) :: state()
   def scope_focus_input(state) do
-    state = update_agent_ui(state, &PromptBuffer.set_input_focused(&1, true))
+    state =
+      state
+      |> Commands.FileTree.leave_focus()
+      |> update_agent_ui(&PromptBuffer.set_input_focused(&1, true))
+
     %{state | workspace: MingaEditor.Session.State.transition_mode(state.workspace, :insert)}
   end
 
@@ -2036,7 +2040,9 @@ defmodule MingaEditor.Commands.Agent do
       |> UIState.set_input_focused(true)
       |> UIState.clear_prefix()
 
-    TraditionalWorkflow.install_agent_ui(state, ui)
+    state
+    |> Commands.FileTree.leave_focus()
+    |> TraditionalWorkflow.install_agent_ui(ui)
   end
 
   @doc "Switches focus between chat and file viewer panels."

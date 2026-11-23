@@ -8,6 +8,7 @@ defmodule MingaEditor.Commands.FileTree do
 
   alias Minga.Buffer
   alias MingaEditor.Commands
+  alias MingaEditor.Commands.Agent, as: AgentCommands
   alias MingaEditor.Commands.Helpers
   alias MingaEditor.Commands.FileTree.DuplicateBackend
   alias MingaEditor.Commands.FileTree.NewFileBackend
@@ -59,22 +60,52 @@ defmodule MingaEditor.Commands.FileTree do
 
   @spec focus_visible_tree(state()) :: state()
   defp focus_visible_tree(state) do
-    state = update_file_tree(state, &FileTreeState.focus/1)
-    workspace = State.set_keymap_scope(state.workspace, :file_tree)
-    state = %{state | workspace: workspace}
-
-    state |> SidebarWorkflow.select("file_tree") |> Layout.invalidate()
+    state |> focus_tree() |> SidebarWorkflow.select("file_tree") |> Layout.invalidate()
   end
+
+  @doc """
+  Moves keyboard focus into a visible file tree.
+
+  The tree always operates in Normal mode. Focusing it marks the tree focused, sets the `:file_tree` keymap scope, blurs the Agent composer, and leaves text entry, so leader keys reach the tree instead of a draft or buffer. Callers that reveal or open the tree apply that visibility transition first.
+  """
+  @spec focus_tree(state()) :: state()
+  def focus_tree(state) do
+    state = state |> update_file_tree(&FileTreeState.focus/1) |> leave_text_entry()
+    %{state | workspace: State.set_keymap_scope(state.workspace, :file_tree)}
+  end
+
+  @doc """
+  Returns keyboard focus from the file tree to the active window.
+
+  Surfaces that take focus without moving through a window, such as a click on the Agent composer, call this so the `:file_tree` scope does not keep claiming their keys. The tree stays visible.
+  """
+  @spec leave_focus(state()) :: state()
+  def leave_focus(%{workspace: %{keymap_scope: :file_tree}} = state) do
+    state = update_file_tree(state, &FileTreeState.unfocus/1)
+    %{state | workspace: State.set_keymap_scope(state.workspace, restore_scope(state))}
+  end
+
+  def leave_focus(state), do: state
+
+  @spec leave_text_entry(state()) :: state()
+  defp leave_text_entry(%{workspace: %{agent_ui: %{panel: %{input_focused: true}}}} = state),
+    do: AgentCommands.scope_unfocus_input(state)
+
+  defp leave_text_entry(%{workspace: %{editing: %{mode: mode}}} = state)
+       when mode in [:insert, :replace],
+       do: %{state | workspace: State.transition_mode(state.workspace, :normal)}
+
+  defp leave_text_entry(state), do: state
 
   # Reveals a hidden-but-loaded tree. The data, buffer, and watchers are still
   # alive, so this is a pure layout change with no filesystem rebuild (#2626).
   @spec show_tree(state()) :: state()
   defp show_tree(state) do
-    state = update_file_tree(state, &FileTreeState.show/1)
-    workspace = State.set_keymap_scope(state.workspace, :file_tree)
-    state = %{state | workspace: workspace}
-
-    state |> SidebarWorkflow.select("file_tree") |> Layout.invalidate()
+    state
+    |> update_file_tree(&FileTreeState.show/1)
+    |> focus_tree()
+    |> SidebarWorkflow.select("file_tree")
+    |> Layout.invalidate()
   end
 
   # Hides the sidebar without tearing down the tree. The backing buffer keeps
@@ -813,11 +844,12 @@ defmodule MingaEditor.Commands.FileTree do
         state = ensure_tree_open(state)
         tree = FileTree.reveal(FileTreeState.tree(file_tree_state(state)), path)
         state = sync_and_update(state, tree)
-        state = update_file_tree(state, &FileTreeState.show/1)
 
-        workspace = State.set_keymap_scope(state.workspace, :file_tree)
-        state = %{state | workspace: workspace}
-        state |> SidebarWorkflow.select("file_tree") |> Layout.invalidate()
+        state
+        |> update_file_tree(&FileTreeState.show/1)
+        |> focus_tree()
+        |> SidebarWorkflow.select("file_tree")
+        |> Layout.invalidate()
     end
   end
 
@@ -1186,13 +1218,11 @@ defmodule MingaEditor.Commands.FileTree do
         do: FileTreeState.refresh_failed(file_tree, error_reason),
         else: file_tree
 
-    workspace =
-      state.workspace
-      |> State.set_file_tree(file_tree)
-      |> State.set_keymap_scope(:file_tree)
-
-    state = %{state | workspace: workspace}
-    state |> SidebarWorkflow.select("file_tree") |> Layout.invalidate()
+    state
+    |> set_file_tree(file_tree)
+    |> focus_tree()
+    |> SidebarWorkflow.select("file_tree")
+    |> Layout.invalidate()
   end
 
   @spec install_tree_error(state(), FileTree.t(), File.posix()) :: state()

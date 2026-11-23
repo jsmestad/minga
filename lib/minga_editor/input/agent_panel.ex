@@ -45,6 +45,10 @@ defmodule MingaEditor.Input.AgentPanel do
 
   @spec route_panel_key(UIState.Panel.t(), EditorState.t(), non_neg_integer(), non_neg_integer()) ::
           MingaEditor.Input.Handler.result()
+  # The file tree always owns its keys, even if a stale composer focus survives.
+  defp route_panel_key(_panel, %{workspace: %{keymap_scope: :file_tree}} = state, _cp, _mods),
+    do: {:passthrough, state}
+
   defp route_panel_key(%{visible: true, input_focused: true}, state, cp, mods) do
     {:handled, handle_panel_input(state, cp, mods)}
   end

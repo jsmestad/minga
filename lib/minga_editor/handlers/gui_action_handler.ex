@@ -926,15 +926,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
 
   @spec focus_visible_sidebar(EditorState.t(), String.t()) :: EditorState.t()
   defp focus_visible_sidebar(state, "file_tree") do
-    file_tree = FileTreeState.focus(state.workspace.file_tree)
-
-    workspace =
-      state.workspace
-      |> State.set_file_tree(file_tree)
-      |> State.set_keymap_scope(:file_tree)
-
-    %{state | workspace: workspace}
-    |> Layout.invalidate()
+    state |> Commands.FileTree.focus_tree() |> Layout.invalidate()
   end
 
   defp focus_visible_sidebar(state, "observatory") do

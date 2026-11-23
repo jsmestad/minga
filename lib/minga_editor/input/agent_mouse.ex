@@ -174,6 +174,7 @@ defmodule MingaEditor.Input.AgentMouse do
 
     if row >= input_start_row do
       state
+      |> MingaEditor.Commands.FileTree.leave_focus()
       |> MingaEditor.Shell.Traditional.Workflow.install_agent_ui(
         PromptBuffer.set_input_focused(state.workspace.agent_ui, true)
       )
