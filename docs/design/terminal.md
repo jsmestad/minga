@@ -7,7 +7,7 @@ A terminal is a buffer. It uses the same modes, marks, drawers and yes/no gramma
 - `SPC o t` toggles the terminal drawer at the bottom, about 30% of the window. It reuses the last terminal and never spawns a second one.
 - `SPC o T` opens a new terminal in the current window.
 - Terminals are named `*terminal 1*`, `*terminal 2*`, and listed in the switcher under "Terminals" with their cwd and last state.
-- `exit` closes the buffer and the drawer. `:q` asks "Kill zsh (pid 4182)? y/n" only if a foreground job is running.
+- Typing `exit` in the drawer closes the drawer and its buffer: it is deliberate. The "Shell exited" state (scrollback kept, `↩` restart, `q` close) is for `SPC o T` windows and for shells that end on their own. `:q` asks "Kill zsh (pid 4182)? y/n" only if a foreground job is running.
 
 ## Two modes
 

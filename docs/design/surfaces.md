@@ -4,7 +4,9 @@ The resting screen has three parts: a plain title bar, your text, and the modeli
 
 ## Title bar
 
-Traffic lights, the small `minga` wordmark, and the centred file name with its path in a secondary colour. Nothing else: no capsule, no buttons, no tabs.
+Traffic lights, the small `minga` wordmark, and the centred file name followed by its project-relative directory in a secondary colour: `retry.ex  lib/minga_agent`. Never the full path after the name, which repeats it. Nothing else: no capsule, no buttons, no tabs.
+
+The title names the focused window, which is what macOS shows in the Window menu, Mission Control and ⌘` switching. The modeline's file segment names the buffer of each split, so with two splits each modeline shows its own file while the title follows the one you are in. Terminal windows show the buffer and its working directory: `*terminal 2*  ~/code/minga`. The TUI has no title bar; the terminal tab title (OSC 2) carries `retry.ex · minga`.
 
 ## Modeline
 
@@ -18,11 +20,11 @@ The modeline is the spine. It is the one place state is always visible.
 4. Change position, only when the cursor is inside one of Minga's changes: "change 1/2".
 5. Git branch and change count: "main +11".
 6. Minga: the state glyph and words. "Minga here 2/3" when Minga is working in this file, otherwise "Minga editing retry.ex 2/3".
-7. Diagnostics: error and warning marks with counts, the error count in the failure role.
+7. Diagnostics: error and warning marks with counts, the error count in the failure role. While a checker is broken, a persistent problem segment takes this slot instead ("elixir-ls failed", "config: defaults"), so a clean count is never shown when nothing is checking.
 8. Filetype.
 9. Position, always as `240:31`.
 
-**Truncation**, dropped first to last when the window narrows: filetype, position, git, then Minga's words down to the glyph and "2/3". Never dropped: mode, needs-you, the file name, diagnostics with errors.
+**Truncation**, dropped first to last when the window narrows: filetype, position, git, then Minga's words down to the glyph and "2/3". Never dropped: mode, needs-you, the file name, diagnostics with errors, and persistent problem segments.
 
 **Accessibility.** Each segment is an accessibility element with a label and an action, for example "1 task needs you. Press SPC a a." VoiceOver announces only when needs-you goes from zero to non-zero.
 
@@ -132,6 +134,17 @@ Only needs-you escalates, and nothing steals focus.
 - macOS in the background: a Dock badge with the needs-you count, one informational bounce, and a time-sensitive notification with "Approve once" and "Deny" for low-risk requests. Clicking it opens the tasks drawer on that task.
 - Terminal: see [tui.md](tui.md#terminal-capabilities) for notifications from inside the terminal, the tab title and the tab progress bar.
 - An approval answered in one place shows "Already answered in Minga" everywhere else.
+
+## Errors and notices
+
+- **Every error names its next step.** A notice says what happened and what you can do, for example "elixir-ls failed to start · SPC c l r restart · SPC c l i log".
+- **Notices act through leader keys only.** A notice in the echo area never takes bare keys, because you may be typing in a file and bare letters stay Vim there. Actions are existing bindings (`SPC c l r` restart, `SPC c l i` log, `SPC c l I` manage tools, `SPC f p` open config, `SPC h r` reload, `SPC b m` messages). `esc` dismisses a notice in Normal mode only.
+- **Problems that last stay in the modeline.** A failed language server or a config that did not load shows a persistent segment until it is fixed, and that segment is never dropped when the modeline truncates.
+- **Crash notices name what restarted.** After a supervised restart the frontend reconnects with your work still on screen, then says what restarted: "Minga's session restarted after a crash; your files and tasks are intact.", or the editor core. The BEAM reports which supervised part restarted.
+
+## Quitting
+
+`SPC q q` or ⌘Q quits at once when nothing is at stake. Otherwise a minibuffer prompt lists what is at stake ("2 unsaved files · Minga is editing chrome_state.ex") and offers `s` save all and quit, `d` discard and quit, `esc` cancel: explicit keys, no y/n ambiguity. Quitting never discards Minga's unreviewed changes: `d` drops only your unsaved edits, and Minga's work waits for review next time. The farewell is one line, "Ciao.", shown in the modeline as the macOS window fades and printed after the TUI restores the terminal so it stays in scrollback.
 
 ## Colour roles still to fix
 

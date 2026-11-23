@@ -16,6 +16,7 @@ STATUS = {
     "designed": ("#7fbf7a", "Designed"),
     "existing-only": ("#a5a39e", "Existing only"),
     "missing": ("#f2b544", "Missing"),
+    "deferred": ("#8fa3c7", "Deferred"),
     "removed": ("#6b6d75", "Removed"),
 }
 JOURNEYS = [
