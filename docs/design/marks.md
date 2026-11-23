@@ -9,17 +9,17 @@ Use the exact shapes in [`marks/`](marks/). Do not redraw them by hand; drift st
 
 ## Colour roles
 
-Each colour is a theme role, and each role means one thing. Themes choose the values; they never change the meanings. The full list of roles, where each lives in `MingaEditor.UI.Theme`, and how the reference themes fill them is in [themes.md](themes.md). The hex values below are astrodark defaults, shown only as examples. The SVGs in [`marks/`](marks/) carry the design canvas's placeholder colours; a frontend takes the shapes from them and the colours from the theme.
+Each colour is a theme role, and each role means one thing. Themes choose the values; they never change the meanings. The full list of roles, where each lives in `MingaEditor.UI.Theme`, and how the reference themes fill them is in [themes.md](themes.md). The hex values below are examples from the default theme, Catppuccin Frappé. The SVGs in [`marks/`](marks/) carry the design canvas's placeholder colours; a frontend takes the shapes from them and the colours from the theme.
 
-| Role | Means | astrodark default |
+| Role | Means | catppuccin_frappe (default) |
 |---|---|---|
-| you | Your edits, your cursor, your messages | `#50A4E9` |
-| minga | Minga, its cursor, its changes, the light twist strand | `#DD97F1` |
+| you | Your edits, your cursor, your messages | `#8CAAEE` |
+| minga | Minga, its cursor, its changes, the light twist strand | `#CA9EE6` |
 | minga_shade | The twist's shade strand (derived: minga mixed over the background) | derived |
-| needs_you | Only "Minga needs you" | `#F5983A` |
-| failure | Only errors and failed states | `#F8747E` |
-| done | Only completed states | `#75AD47` |
-| warning | Only diagnostic warnings | `#D09214` |
+| needs_you | Only "Minga needs you" | `#EF9F76` |
+| failure | Only errors and failed states | `#E78284` |
+| done | Only completed states | `#A6D189` |
+| warning | Only diagnostic warnings | `#E5C890` |
 | selection | The focused list's selected row | system accent on macOS, `editor.selection_bg` in the TUI |
 
 The needs-you colour is never a warning colour and never decorative. If something is in the needs-you colour, Minga is waiting for you.

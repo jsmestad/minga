@@ -1,6 +1,8 @@
 # Themes and colour roles
 
-Minga is themeable. Users pick a theme (`set :theme, :catppuccin_frappe`), and every colour on screen comes from it. So the design never says "purple" or `#a463e6`; it says **minga**, and each theme decides what minga looks like. The hex values on the design canvas are astrodark defaults, nothing more.
+Minga is themeable. Users pick a theme (`set :theme, :catppuccin_frappe`), and every colour on screen comes from it. So the design never says "purple" or `#a463e6`; it says **minga**, and each theme decides what minga looks like.
+
+**The default theme is Catppuccin Frappé** (`:catppuccin_frappe`), the theme closest to the design. Astrodark stays as a built-in. Every hex value quoted in these docs is a Frappé example, nothing more. (The code change that makes Frappé the default lands in its own PR.)
 
 This page lists the roles the design uses, where each one lives in `MingaEditor.UI.Theme` today, and which ones do not exist yet. It also records how the three reference themes fill them and where a theme misses the contrast targets.
 
@@ -12,7 +14,7 @@ This page lists the roles the design uses, where each one lives in `MingaEditor.
 - **Contrast targets.** Against the surface they sit on: at least **3:1** for glyphs, strands, borders and the needs-you chip (WCAG non-text contrast), and at least **4.5:1** for text. Light themes are where this fails first.
 - **Derived colours are computed, not configured.** The twist's shade strand and the diff tints are mixes of a role over the background, so a new theme gets them for free.
 - **The TUI degrades through the colour profile.** Truecolor roles map down to 256 and 16 colours (see [tui.md](tui.md#colour-profiles)); the 16-colour mapping of each role is part of the theme, not guessed per screen.
-- **Every scenario renders in more than one theme.** The storyboard factory renders each scenario in at least astrodark, catppuccin_frappe and one light theme (catppuccin_latte or one_light). See [storyboard.md](storyboard.md).
+- **Every scenario renders in more than one theme.** The storyboard factory renders each scenario in catppuccin_frappe (the default), astrodark, and one light theme (catppuccin_latte or one_light). See [storyboard.md](storyboard.md).
 
 ## Roles
 
@@ -49,36 +51,36 @@ Two existing agent fields break "one role, one meaning" and need reassigning whe
 
 ## The reference themes
 
-Values are read from the built structs (`MingaEditor.UI.Theme.AstroDark.theme/0`, `CatppuccinFrappe.theme/0`, `CatppuccinLatte.theme/0`). For the new roles, the value shown is the palette colour the theme would assign: astrodark's syntax purple and orange, and Catppuccin's mauve and peach.
+Values are read from the built structs (`MingaEditor.UI.Theme.CatppuccinFrappe.theme/0`, `AstroDark.theme/0`, `CatppuccinLatte.theme/0`). For the new roles, the value shown is the palette colour the theme would assign: Catppuccin's mauve and peach, and astrodark's syntax purple and orange.
 
-| Role | astrodark (default) | catppuccin_frappe | catppuccin_latte |
+| Role | catppuccin_frappe (default) | astrodark | catppuccin_latte |
 |---|---|---|---|
-| surface (`editor.bg`) | `#1A1D23` | `#303446` | `#EFF1F5` |
-| text (`editor.fg`) | `#ADB0BB` | `#C6D0F5` | `#4C4F69` |
-| text_muted (`gutter.fg`) | `#595C66` | `#838BA7` | `#8C8FA1` |
-| surface_raised (`popup.bg`) | `#14161B` | `#414559` | `#CCD0DA` |
-| surface_bar (`modeline.bar_bg`) | `#111317` | `#292C3C` | `#E6E9EF` |
-| you (`agent.user_label`) | `#50A4E9` | `#8CAAEE` | `#1E66F5` |
-| minga (new) | `#DD97F1` | `#CA9EE6` (mauve) | `#8839EF` (mauve) |
-| needs_you (new) | `#F5983A` | `#EF9F76` (peach) | `#FE640B` (peach) |
-| failure (`gutter.error_fg`) | `#F8747E` | `#E78284` | `#D20F39` |
-| done (new) | `#75AD47` | `#A6D189` | `#40A02B` |
-| waiting (`agent.status_idle`) | `#595C66` | `#838BA7` | `#8C8FA1` |
-| warning (`gutter.warning_fg`) | `#D09214` | `#E5C890` | `#DF8E1D` |
+| surface (`editor.bg`) | `#303446` | `#1A1D23` | `#EFF1F5` |
+| text (`editor.fg`) | `#C6D0F5` | `#ADB0BB` | `#4C4F69` |
+| text_muted (`gutter.fg`) | `#838BA7` | `#595C66` | `#8C8FA1` |
+| surface_raised (`popup.bg`) | `#414559` | `#14161B` | `#CCD0DA` |
+| surface_bar (`modeline.bar_bg`) | `#292C3C` | `#111317` | `#E6E9EF` |
+| you (`agent.user_label`) | `#8CAAEE` | `#50A4E9` | `#1E66F5` |
+| minga (new) | `#CA9EE6` (mauve) | `#DD97F1` | `#8839EF` (mauve) |
+| needs_you (new) | `#EF9F76` (peach) | `#F5983A` | `#FE640B` (peach) |
+| failure (`gutter.error_fg`) | `#E78284` | `#F8747E` | `#D20F39` |
+| done (new) | `#A6D189` | `#75AD47` | `#40A02B` |
+| waiting (`agent.status_idle`) | `#838BA7` | `#595C66` | `#8C8FA1` |
+| warning (`gutter.warning_fg`) | `#E5C890` | `#D09214` | `#DF8E1D` |
 
 ### Contrast against the editor background
 
-| Role | astrodark | catppuccin_frappe | catppuccin_latte |
+| Role | catppuccin_frappe (default) | astrodark | catppuccin_latte |
 |---|---|---|---|
-| you | 6.3 | 5.3 | 4.3 |
-| minga | 7.9 | 5.6 | 4.8 |
-| needs_you | 7.6 | 5.8 | **2.6** |
-| failure | 6.3 | 4.6 | 4.8 |
-| done | 6.3 | 7.1 | 3.0 |
-| waiting | **2.5** | 3.6 | **2.8** |
-| warning | 6.3 | 7.6 | **2.3** |
+| you | 5.3 | 6.3 | 4.3 |
+| minga | 5.6 | 7.9 | 4.8 |
+| needs_you | 5.8 | 7.6 | **2.6** |
+| failure | 4.6 | 6.3 | 4.8 |
+| done | 7.1 | 6.3 | 3.0 |
+| waiting | 3.6 | **2.5** | **2.8** |
+| warning | 7.6 | 6.3 | **2.3** |
 
-Bold values miss the 3:1 target for glyphs and strands. What that means for the light theme and for astrodark:
+Bold values miss the 3:1 target for glyphs and strands. The default theme passes everywhere. What that means for the light theme and for astrodark:
 
 - **Needs-you in Latte** cannot be a bare peach glyph. Either the theme supplies a darker value for the role, or the needs-you chip is drawn as filled peach with dark text, which passes because the text is measured against the chip.
 - **Warning in Latte** fails as an underline colour. The theme needs a darker warning value; the dotted shape still separates it from errors meanwhile.
@@ -88,4 +90,4 @@ These are theme fixes, not design changes, and the storyboard factory's light-th
 
 ## On the design canvas
 
-The canvas boards use astrodark-like defaults. The Catppuccin Frappé and Latte boards on the canvas are automatic remaps of the same boards, made to show that the design survives a theme change; they are not hand-tuned, and a few of their colours (inset strips, tints) are only approximate.
+Most canvas boards were drawn in an astrodark-like palette before Frappé became the default. The Catppuccin Frappé and Latte boards on the canvas are automatic remaps of the same boards, made to show the default and a light theme; they are not hand-tuned, and a few of their colours (inset strips, tints) are only approximate. New boards should be drawn in Frappé.
