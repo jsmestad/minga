@@ -18,6 +18,8 @@ defmodule MingaEditor.Agent.SessionStartTest do
   alias MingaEditor.State.AgentConnection
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
+  alias MingaEditor.State.Workspace
+  alias MingaEditor.Agent.UIState
 
   describe "opening the Agent" do
     test "shows the starting composer without waiting for the session manager" do
@@ -111,6 +113,53 @@ defmodule MingaEditor.Agent.SessionStartTest do
       arrived = booted |> MingaEditor.TabWorkflow.switch(agent_tab) |> collect_arrival(session)
       assert Runtime.active_session(arrived.shell_runtime) == session
       assert {:conversation, ^session} = arrived.workspace.agent_ui.chat_lifecycle
+    end
+  end
+
+  describe "a boot start beside restored workspaces" do
+    test "goes to a fresh local workspace and leaves restored remote and local ones unavailable" do
+      _catalog = LLMDB.providers()
+      unavailable = UIState.transition_chat(UIState.new(), :unavailable)
+
+      remote =
+        Workspace.new_agent(1, "Remote")
+        |> Workspace.put_remote_session("build host", "remote-session", :disconnected)
+        |> Workspace.set_agent_ui(unavailable)
+
+      saved = Workspace.new_agent(2, "Saved") |> Workspace.set_agent_ui(unavailable)
+
+      state = state(MingaAgent.SessionManager)
+
+      tabs =
+        TabBar.restore_workspaces(state.shell_runtime.state.tab_bar, [remote, saved], nil)
+
+      assert TabBar.active_workspace_id(tabs) == 0
+
+      booted =
+        state
+        |> MingaEditor.WorkspaceWorkflow.install_tab_bar(tabs)
+        |> with_agent_chat_window()
+        |> MingaEditor.AgentLifecycle.maybe_start_session()
+        |> AgentSessionStart.settle()
+
+      tabs = booted.shell_runtime.state.tab_bar
+
+      for id <- [1, 2] do
+        assert %Workspace{
+                 payload: %{session: nil, agent_ui: %UIState{chat_lifecycle: :unavailable}}
+               } =
+                 TabBar.get_workspace(tabs, id)
+      end
+
+      assert %Workspace{payload: %{remote_session: %{session_id: "remote-session"}}} =
+               TabBar.get_workspace(tabs, 1)
+
+      assert [%Workspace{id: fresh, payload: %{session: session, remote_session: nil}}] =
+               Enum.filter(tabs.workspaces, &(&1.kind == :agent and &1.id not in [1, 2]))
+
+      on_exit(fn -> MingaAgent.SessionManager.stop_session_by_pid(session) end)
+      assert is_pid(session)
+      assert [%Tab{kind: :agent}] = TabBar.tabs_in_workspace(tabs, fresh)
     end
   end
 

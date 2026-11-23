@@ -297,30 +297,51 @@ defmodule MingaEditor.Commands.AgentSession do
   # can switch to the conversation.
   @spec starting_workspace(state()) :: {state(), pos_integer() | nil}
   defp starting_workspace(%{shell_runtime: %{state: %{tab_bar: %TabBar{} = tabs}}} = state) do
-    case {TabBar.active_workspace(tabs), background_agent_workspace(tabs)} do
-      {%Workspace{id: id, kind: :agent, payload: %WorkspaceAgent{remote_session: nil}}, _} ->
+    active_tab = TabBar.active(tabs)
+
+    case TabBar.active_workspace(tabs) do
+      %Workspace{id: id, kind: :agent, payload: %WorkspaceAgent{remote_session: nil}} ->
         {state, id}
 
-      {_active, id} when is_integer(id) ->
-        {state, id}
+      _not_agent ->
+        # The active unowned Agent tab gets its own workspace; otherwise a
+        # background start reuses one a previous start made, or creates one.
+        reusable =
+          if active_tab && unowned_agent_tab?(active_tab),
+            do: nil,
+            else: background_agent_workspace(tabs)
 
-      {_active, nil} ->
-        create_agent_workspace(state, tabs)
+        case reusable do
+          id when is_integer(id) -> {state, id}
+          nil -> create_agent_workspace(state, tabs)
+        end
     end
   end
 
   defp starting_workspace(state), do: {state, nil}
 
+  # A background start reuses only a local workspace a previous start made:
+  # never a remote workspace, and never one restored from a saved session
+  # (its stored chat is `:unavailable` until the user reopens that conversation).
   @spec background_agent_workspace(TabBar.t()) :: pos_integer() | nil
-  defp background_agent_workspace(tabs) do
-    with %Tab{group_id: id} when id > 0 <- TabBar.find_sessionless_agent(tabs),
-         %Workspace{kind: :agent, payload: %WorkspaceAgent{session: nil}} <-
-           TabBar.get_workspace(tabs, id) do
-      id
-    else
-      _none -> nil
-    end
+  defp background_agent_workspace(%TabBar{tabs: tabs} = tab_bar) do
+    Enum.find_value(tabs, fn
+      %Tab{kind: :agent, group_id: id, payload: %Agent{session: nil}} when id > 0 ->
+        if startable_background_workspace?(TabBar.get_workspace(tab_bar, id)), do: id
+
+      _other ->
+        nil
+    end)
   end
+
+  @spec startable_background_workspace?(Workspace.t() | nil) :: boolean()
+  defp startable_background_workspace?(%Workspace{
+         kind: :agent,
+         payload: %WorkspaceAgent{session: nil, remote_session: nil, agent_ui: ui}
+       }),
+       do: not match?(%UIState{chat_lifecycle: :unavailable}, ui)
+
+  defp startable_background_workspace?(_workspace), do: false
 
   @spec session_start_opts(
           state(),
@@ -918,6 +939,14 @@ defmodule MingaEditor.Commands.AgentSession do
 
   defp maybe_put_provider_module(opts, _provider_module), do: opts
 
+  # A sessionless Agent tab not yet owned by an agent workspace; tabs of other
+  # (restored or remote) workspaces are never moved.
+  @spec unowned_agent_tab?(Tab.t()) :: boolean()
+  defp unowned_agent_tab?(%Tab{kind: :agent, group_id: 0, payload: %Agent{session: nil}}),
+    do: true
+
+  defp unowned_agent_tab?(%Tab{}), do: false
+
   @spec create_agent_workspace(state(), TabBar.t()) :: {state(), pos_integer()}
   defp create_agent_workspace(state, %TabBar{} = tb) do
     {tb, ws} = TabBar.add_workspace(tb, "Agent")
@@ -937,11 +966,14 @@ defmodule MingaEditor.Commands.AgentSession do
     {MingaEditor.WorkspaceWorkflow.install_tab_bar(state, tb), ws.id}
   end
 
-  # The workspace's Agent tab: an existing sessionless one, or a new inactive
+  # The workspace's Agent tab: an existing unowned sessionless one, or a new inactive
   # tab, so every agent workspace a start creates can be found and shown.
   @spec sessionless_agent_tab(state(), TabBar.t()) :: {TabBar.t(), Tab.t()}
   defp sessionless_agent_tab(state, tb) do
-    case TabBar.find_sessionless_agent(tb) do
+    active = TabBar.active(tb)
+    preferred = if active && unowned_agent_tab?(active), do: active
+
+    case preferred || Enum.find(tb.tabs, &unowned_agent_tab?/1) do
       %Tab{} = tab ->
         {tb, tab}
 
