@@ -63,12 +63,19 @@
           <h2>1. Install Minga</h2>
           <p>On <strong>Apple Silicon macOS</strong>, Homebrew installs signed, notarized rolling prereleases. The desktop app (<code>minga-mac</code>) and terminal client (<code>minga</code>) are independent; install whichever you want, or both.</p>
 
-          <div class="grid-2">
-            <div class="code-card">
-              <div class="code-header">
-                <span>Apple Silicon macOS · Homebrew</span>
+          <div class="code-tabs" data-code-tabs>
+            <div class="code-tabs-header">
+              <div class="code-tab-list" role="tablist" aria-label="Install method">
+                <button type="button" class="code-tab" role="tab" id="tab-gs-brew" aria-selected="true" aria-controls="panel-gs-brew">Apple Silicon macOS · Homebrew</button>
+                <button type="button" class="code-tab" role="tab" id="tab-gs-source" aria-selected="false" aria-controls="panel-gs-source" tabindex="-1">From source · Linux &amp; Intel macOS</button>
+              </div>
+              <div class="code-tabs-actions">
                 <button type="button" class="copy-btn" data-copy-target="gs-brew">Copy</button>
               </div>
+            </div>
+
+            <div class="code-tab-panel" role="tabpanel" id="panel-gs-brew" aria-labelledby="tab-gs-brew" data-copy-id="gs-brew">
+              <div class="code-tab-noscript">Apple Silicon macOS · Homebrew</div>
               <pre><code id="gs-brew"># Desktop app only
 brew install --cask jsmestad/minga/minga-mac
 open -a Minga
@@ -78,11 +85,8 @@ brew install jsmestad/minga/minga
 minga path/to/project</code></pre>
             </div>
 
-            <div class="code-card">
-              <div class="code-header">
-                <span>From source · Linux &amp; Intel macOS</span>
-                <button type="button" class="copy-btn" data-copy-target="gs-source">Copy</button>
-              </div>
+            <div class="code-tab-panel" role="tabpanel" id="panel-gs-source" aria-labelledby="tab-gs-source" data-copy-id="gs-source">
+              <div class="code-tab-noscript">From source · Linux &amp; Intel macOS</div>
               <pre><code id="gs-source">git clone https://github.com/jsmestad/minga.git
 cd minga
 mise install          # or: asdf install

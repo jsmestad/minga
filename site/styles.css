@@ -964,6 +964,104 @@ kbd {
   line-height: 1.55;
 }
 
+/* Tabbed Code Block (progressive enhancement) */
+
+.code-tabs {
+  background: var(--bg-code);
+  border: 1px solid var(--border);
+  border-top: 2px solid var(--border-strong);
+  overflow: hidden;
+}
+
+.essay-section > .code-tabs {
+  margin: 1.4rem 0 1.6rem;
+}
+
+.code-tabs-header {
+  display: none;
+  align-items: stretch;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0 0.95rem 0 0;
+  background: var(--bg-subtle);
+  border-bottom: 1px solid var(--border);
+}
+
+.js-enabled .code-tabs-header {
+  display: flex;
+}
+
+.code-tab-list {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+}
+
+.code-tab {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  border-right: 1px solid var(--border);
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  padding: 0.65rem 1.05rem;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color 120ms ease, background-color 120ms ease, border-color 120ms ease;
+}
+
+.code-tab:hover {
+  color: var(--text);
+}
+
+.code-tab[aria-selected="true"] {
+  background: var(--bg-code);
+  color: var(--text);
+  font-weight: 600;
+  border-bottom-color: var(--accent);
+}
+
+.code-tabs-actions {
+  display: flex;
+  align-items: center;
+  padding: 0.4rem 0;
+}
+
+.code-tab-panel[hidden] {
+  display: none;
+}
+
+.code-tab-panel + .code-tab-panel {
+  border-top: 1px solid var(--border);
+}
+
+.js-enabled .code-tab-panel + .code-tab-panel {
+  border-top: 0;
+}
+
+.code-tab-noscript {
+  padding: 0.55rem 0.95rem;
+  background: var(--bg-subtle);
+  border-bottom: 1px solid var(--border);
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  color: var(--text-muted);
+}
+
+.js-enabled .code-tab-noscript {
+  display: none;
+}
+
+.code-tabs pre {
+  margin: 0;
+  padding: 1.15rem 1.2rem;
+  overflow-x: auto;
+  line-height: 1.55;
+}
+
 .tok-kw { color: var(--tok-kw); }
 .tok-atom { color: var(--tok-atom); }
 .tok-str { color: var(--tok-str); }
