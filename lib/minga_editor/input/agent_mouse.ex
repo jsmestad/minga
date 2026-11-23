@@ -173,13 +173,11 @@ defmodule MingaEditor.Input.AgentMouse do
     input_start_row = cr + ch - input_height - PromptRenderer.input_v_gap()
 
     if row >= input_start_row do
-      state =
-        MingaEditor.Shell.Traditional.Workflow.install_agent_ui(
-          state,
-          PromptBuffer.set_input_focused(state.workspace.agent_ui, true)
-        )
-
-      %{state | workspace: MingaEditor.Session.State.transition_mode(state.workspace, :insert)}
+      state
+      |> MingaEditor.Shell.Traditional.Workflow.install_agent_ui(
+        PromptBuffer.set_input_focused(state.workspace.agent_ui, true)
+      )
+      |> MingaEditor.Agent.PromptInput.settle_mode_after_click()
     else
       MingaEditor.Shell.Traditional.Workflow.install_agent_ui(
         state,
