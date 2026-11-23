@@ -210,6 +210,11 @@ defmodule MingaEditor.State.Picker do
     %{ps | context: context}
   end
 
+  @doc "Replaces the source context of the parent that a child picker returns to."
+  @spec put_parent_context(t(), map() | nil) :: t()
+  def put_parent_context(%__MODULE__{parent: %__MODULE__{} = parent} = ps, context),
+    do: %{ps | parent: put_context(parent, context)}
+
   @doc "Updates the inner `MingaEditor.UI.Picker` instance."
   @spec update_picker(t(), MingaEditor.UI.Picker.t()) :: t()
   def update_picker(%__MODULE__{} = ps, picker) do

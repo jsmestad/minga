@@ -1626,7 +1626,9 @@ defmodule MingaEditor.PickerUI do
   end
 
   # A child picker replaces its parent in the same modal; the parent keeps its rows, query, and
-  # selection. A parent whose fetch was in flight fetches again when the child returns to it.
+  # selection. A parent whose fetch was in flight fetches again when the child returns to it; a
+  # settled parent runs its source's after-fetch hook, which lists rows again only for a change that
+  # arrived while the child was open.
   @spec open_nested(state(), module(), map() | nil) :: state()
   defp open_nested(state, source, context) do
     state = state |> cancel_current_preview() |> cancel_current_fetch()
@@ -1665,8 +1667,8 @@ defmodule MingaEditor.PickerUI do
       %PickerState{load_status: :loading, source: source, callback_source: callback_source} ->
         refresh_async_items(state, source, callback_source)
 
-      %PickerState{} ->
-        state
+      %PickerState{source: source} ->
+        after_fetch(state, source)
     end
   end
 

@@ -358,6 +358,43 @@ defmodule MingaEditor.UI.Picker.AgentModelSourceTest do
 
       refute_receive {:effect_result, ^scheduler, _outcome}, 50
     end
+
+    test "a route status change while the connection picker is open lists /model again on Escape" do
+      session = start_supervised!({ModelPickerSession, connected_candidates()})
+      task_supervisor = start_supervised!({Task.Supervisor, []})
+      scheduler = start_supervised!({EffectScheduler, task_supervisor: task_supervisor})
+      :ok = EffectScheduler.attach(scheduler, self())
+      {state, _workspace_id} = editor_state(connection(session), "GPT-4o", scheduler)
+
+      assert {:ok, state} = SlashCommand.execute(state, "/model")
+      assert {:ok, state} = land_fetch(state, scheduler)
+      connect_id = {:connection, :connect_another_provider}
+
+      state =
+        PickerUI.update_picker(state, fn ps ->
+          picker = Picker.filter(ps.picker, "connect")
+          PickerState.update_picker(ps, Picker.select_id(picker, connect_id))
+        end)
+
+      state = PickerUI.handle_key(state, 13, 0)
+      assert {:ok, state} = land_fetch(state, scheduler)
+
+      # The event arrives while the child is open; the child itself is not listed again.
+      state = AgentModelSource.route_status_changed(state)
+      assert picker_ui(state).source == AgentConnectionSource
+      assert picker_ui(state).load_status == :ready
+      refute_receive {:effect_result, ^scheduler, _outcome}, 50
+
+      state = PickerUI.handle_key(state, 27, 0)
+      assert %{source: AgentModelSource, load_status: :loading} = picker_ui(state)
+      assert %{catalog: :listed, route_status: :current} = picker_ui(state).context
+
+      assert {:ok, state} = land_fetch(state, scheduler)
+      model_picker = picker_ui(state)
+      assert model_picker.load_status == :ready
+      assert model_picker.picker.query == "connect"
+      assert Picker.selected_id(model_picker.picker) == connect_id
+    end
   end
 
   describe "contributed model routes" do

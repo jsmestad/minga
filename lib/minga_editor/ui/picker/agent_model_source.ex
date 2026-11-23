@@ -65,7 +65,7 @@ defmodule MingaEditor.UI.Picker.AgentModelSource do
   @doc """
   Lists the open chooser's rows again after a contributed route's status or plan usage changed.
 
-  The new fetch reads the registry and the Session's last discovery without checking any route again, so a usage report never starts another availability probe. A change that arrives while a fetch is in flight is listed after that fetch lands, because the fetch may have read its rows before the change. The query and the selected item stay.
+  The new fetch reads the registry and the Session's last discovery without checking any route again, so a usage report never starts another availability probe. A change that arrives while a fetch is in flight is listed after that fetch lands, because the fetch may have read its rows before the change. A change that arrives while the "Connect a provider" child picker is open is listed when Escape returns to the chooser. The query and the selected item stay.
   """
   @spec route_status_changed(EditorState.t()) :: EditorState.t()
   def route_status_changed(state) do
@@ -77,6 +77,12 @@ defmodule MingaEditor.UI.Picker.AgentModelSource do
         state
         |> put_origin(%{origin | catalog: :listed, route_status: :current})
         |> PickerUI.refresh_items()
+
+      {:parent, origin} ->
+        PickerUI.update_picker(
+          state,
+          &MingaEditor.State.Picker.put_parent_context(&1, %{origin | route_status: :changed})
+        )
 
       :closed ->
         state
@@ -93,7 +99,7 @@ defmodule MingaEditor.UI.Picker.AgentModelSource do
   end
 
   @spec open_origin(EditorState.t()) ::
-          {:ok, map(), MingaEditor.State.Picker.load_status()} | :closed
+          {:ok, map(), MingaEditor.State.Picker.load_status()} | {:parent, map()} | :closed
   defp open_origin(%{
          shell_runtime: %{
            state: %{
@@ -110,6 +116,25 @@ defmodule MingaEditor.UI.Picker.AgentModelSource do
          }
        }),
        do: {:ok, origin, load_status}
+
+  # The chooser waits behind its "Connect a provider" child picker.
+  defp open_origin(%{
+         shell_runtime: %{
+           state: %{
+             modal:
+               {:picker,
+                %{
+                  picker_ui: %{
+                    parent: %{
+                      source: __MODULE__,
+                      context: %{catalog: _catalog, route_status: _status} = origin
+                    }
+                  }
+                }}
+           }
+         }
+       }),
+       do: {:parent, origin}
 
   defp open_origin(_state), do: :closed
 
