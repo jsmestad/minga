@@ -5,7 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex, nofollow">
   <title>Architecture &amp; The Spine: minga</title>
-  <meta name="description" content="How Minga separates a concurrent Erlang VM core from native macOS, terminal, and tree-sitter OS processes, stages agent edits safely, and enforces frontend parity with Storyboard CI and ADR-0006.">
+  <meta name="description" content="How Minga separates a concurrent Erlang VM core from native macOS, terminal, and tree-sitter OS processes, stages agent edits safely, and keeps both frontends in lockstep under ADR-0006.">
+  <meta property="og:type" content="article">
+  <meta property="og:title" content="Architecture &amp; The Spine: minga">
+  <meta property="og:description" content="How Minga separates a concurrent Erlang VM core from native macOS, terminal, and tree-sitter OS processes, stages agent edits safely, and keeps both frontends in lockstep.">
+  <meta property="og:image" content="/assets/og-minga.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:image" content="/assets/og-minga.png">
   <link rel="icon" type="image/svg+xml" href="/assets/minga_dark-transparent.svg">
   <link rel="preload" href="/fonts/instrument-serif-italic.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/styles.css">
@@ -45,13 +51,13 @@
   <main id="main">
     <header class="essay-hero">
       <div class="container">
-        <p class="section-index"><span>ARCHITECTURE</span> Runtime &amp; The Spine</p>
+        <p class="section-index"><span>ARCHITECTURE</span> Runtime &amp; Clients</p>
         <h1>Architecture &amp; The Spine</h1>
-        <p class="essay-subtitle">Minga puts concurrency, isolation, state ownership, and Spine semantics in one Erlang VM core, while separate native OS processes handle macOS rendering, terminal rendering, and syntax parsing with zero shared memory.</p>
+        <p class="essay-subtitle">Minga puts concurrency, isolation, state ownership, and UI semantics in one Erlang VM (BEAM) core, while separate native OS processes handle macOS rendering, terminal rendering, and syntax parsing with zero shared memory.</p>
         <nav class="essay-toc" aria-label="Sections">
           <a href="#process-map">1. Process &amp; client boundaries</a>
           <a href="#buffer-aware-agents">2. Staged agent edits</a>
-          <a href="#executable-parity">3. Executable frontend parity</a>
+          <a href="#executable-parity">3. Frontend parity</a>
           <a href="#tradeoffs">4. Guarantees &amp; tradeoffs</a>
           <a href="#adrs">5. Key ADRs (0001-0006)</a>
         </nav>
@@ -62,7 +68,7 @@
       <div class="container">
         <section class="essay-section" id="process-map">
           <h2>1. One concurrent core, thin native OS processes</h2>
-          <p>Minga uses four languages deliberately, each behind a strict OS process boundary so nothing shares memory across them. Elixir on the Erlang VM owns everything concurrent and stateful (open files, agent sessions, language servers, extensions, key scopes, and Spine state semantics). Swift, Go, and Zig stay intentionally thin: Swift draws macOS, Go draws the terminal with Lip Gloss and Bubble Tea, and Zig parses C tree-sitter grammars.</p>
+          <p>Minga uses four languages deliberately, each behind a strict OS process boundary so nothing shares memory across them. Elixir on the Erlang VM owns everything concurrent and stateful (open files, agent sessions, language servers, extensions, key scopes, theme roles, and modeline priority). Swift, Go, and Zig stay intentionally thin: Swift draws macOS with CoreText and Metal, Go draws the terminal with Bubble Tea and Lip Gloss, and Zig parses C tree-sitter grammars.</p>
 
           <figure class="diagram-figure">
             <div class="diagram-bar">
@@ -72,7 +78,7 @@
             <div class="diagram-canvas">
               <svg class="diagram-svg" viewBox="0 0 880 412" role="img" aria-labelledby="fig1-title fig1-desc" xmlns="http://www.w3.org/2000/svg">
                 <title id="fig1-title">Minga architecture: Erlang VM core connected over pipes to macOS, terminal, and parser OS processes</title>
-                <desc id="fig1-desc">The Erlang VM isolates Editor Core, Open Files (one process per file), Agent Sessions, Language Servers and Extensions, and Crash-Safe Draft Services, plus Client Bridge and Headless Mode. Binary pipes connect to separate OS processes for the Swift and Metal macOS app, Go terminal client drawing the shared Spine layout, and Zig syntax parser.</desc>
+                <desc id="fig1-desc">The Erlang VM isolates Editor Core, Open Files (one process per file), Agent Sessions, Language Servers and Extensions, and Crash-Safe Draft Services, plus Client Bridge and Headless Mode. Binary pipes connect to separate OS processes for the Swift and Metal macOS app, Go terminal client drawing the shared layout, and Zig syntax parser.</desc>
                 <defs>
                   <marker id="arrow-accent" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
                     <path d="M 1 1 L 9 5 L 1 9 z" fill="var(--accent)"/>
@@ -84,7 +90,7 @@
 
                 <rect x="16" y="16" width="538" height="380" fill="var(--bg-subtle)" stroke="var(--accent-border)" stroke-width="1.4"/>
                 <text x="36" y="44" fill="var(--accent)" font-family="var(--font-mono)" font-size="11.5" font-weight="600" letter-spacing="0.04em">MINGA CORE · ERLANG VM (ELIXIR)</text>
-                <text x="36" y="62" fill="var(--text-muted)" font-family="var(--font-sans)" font-size="11.5">Separate lightweight processes, heaps, and one canonical Spine state model</text>
+                <text x="36" y="62" fill="var(--text-muted)" font-family="var(--font-sans)" font-size="11.5">Separate lightweight processes, heaps, and one canonical state model</text>
 
                 <rect x="36" y="80" width="224" height="206" fill="var(--bg-elevated)" stroke="var(--accent-border)" stroke-width="1.15"/>
                 <text x="52" y="106" fill="var(--text)" font-family="var(--font-sans)" font-size="13.5" font-weight="600">Editor Core</text>
@@ -105,7 +111,7 @@
                 <text x="292" y="171" fill="var(--text-muted)" font-family="var(--font-sans)" font-size="11">Tasks, subagent trees, approvals, staged diffs</text>
 
                 <rect x="276" y="188" width="258" height="46" fill="var(--bg-elevated)" stroke="var(--border)" stroke-width="1"/>
-                <text x="292" y="208" fill="var(--text)" font-family="var(--font-sans)" font-size="12.5" font-weight="600">Language Servers &amp; Extensions</text>
+                <text x="292" y="208" fill="var(--text)" font-family="var(--font-sans)" font-size="12.5" font-weight="600">Language Servers, MCP &amp; Extensions</text>
                 <text x="292" y="225" fill="var(--text-muted)" font-family="var(--font-sans)" font-size="11">Crash-isolated; restarts spare open files</text>
 
                 <rect x="276" y="242" width="258" height="44" fill="var(--bg-elevated)" stroke="var(--border)" stroke-width="1"/>
@@ -133,14 +139,14 @@
 
                 <rect x="624" y="16" width="240" height="116" fill="var(--bg-elevated)" stroke="var(--border)" stroke-width="1.15"/>
                 <text x="640" y="42" fill="var(--text)" font-family="var(--font-sans)" font-size="13" font-weight="600">macOS App (Swift + Metal)</text>
-                <text x="640" y="64" fill="var(--text-secondary)" font-family="var(--font-sans)" font-size="11.5">Draws the Spine natively:</text>
+                <text x="640" y="64" fill="var(--text-secondary)" font-family="var(--font-sans)" font-size="11.5">Draws the shared layout:</text>
                 <text x="640" y="82" fill="var(--text-secondary)" font-family="var(--font-sans)" font-size="11.5">text, marks, smooth scroll</text>
                 <text x="640" y="112" fill="var(--accent)" font-family="var(--font-mono)" font-size="10.5">Same layout &amp; keys as TUI</text>
 
                 <rect x="624" y="148" width="240" height="116" fill="var(--bg-elevated)" stroke="var(--border)" stroke-width="1.15"/>
                 <text x="640" y="174" fill="var(--text)" font-family="var(--font-sans)" font-size="13" font-weight="600">Terminal Client (Go)</text>
-                <text x="640" y="196" fill="var(--text-secondary)" font-family="var(--font-sans)" font-size="11.5">First-class Spine layout</text>
-                <text x="640" y="214" fill="var(--text-secondary)" font-family="var(--font-sans)" font-size="11.5">with floating Lip Gloss layers</text>
+                <text x="640" y="196" fill="var(--text-secondary)" font-family="var(--font-sans)" font-size="11.5">First-class Bubble Tea &amp;</text>
+                <text x="640" y="214" fill="var(--text-secondary)" font-family="var(--font-sans)" font-size="11.5">Lip Gloss floating layers</text>
                 <text x="640" y="244" fill="var(--text-muted)" font-family="var(--font-mono)" font-size="10.5">Kitty keys, OSC 8/9/52, SSH</text>
 
                 <rect x="624" y="280" width="240" height="116" fill="var(--bg-elevated)" stroke="var(--border)" stroke-width="1.15"/>
@@ -150,7 +156,7 @@
                 <text x="640" y="376" fill="var(--text-muted)" font-family="var(--font-mono)" font-size="10.5">Loads new grammars on demand</text>
               </svg>
             </div>
-            <figcaption class="diagram-caption">Each OS process has isolated memory. Under ADR-0006, the BEAM says more (ordered modeline segments with priorities, canonical state tokens, key scopes) and clients decide less: they render shared tokens natively and drop only lowest-priority segments to fit. In headless mode, the editor and parser processes do not start.</figcaption>
+            <figcaption class="diagram-caption">Each OS process has isolated memory. Under ADR-0006, the BEAM owns ordered modeline segments with priorities, theme roles, BEAM-styled markdown spans, and key scopes; clients draw shared tokens natively and drop only lowest-priority segments to fit. In headless mode, the editor and parser processes do not start.</figcaption>
           </figure>
         </section>
 
@@ -223,26 +229,27 @@
                 <text x="256" y="278" fill="var(--text-muted)" font-family="var(--font-mono)" font-size="10.5">~/.local/share/minga/staged_drafts · Restores unpublished edits on next start</text>
               </svg>
             </div>
-            <figcaption class="diagram-caption">Ordinary quit commands stop if unpublished edits remain staged; force quits (<code>:qa!</code>, <code>:cq</code>, or <code>:q!</code> on the last window) discard on purpose. As ADR-0006 lands, per-author undo groups keep your <code>u</code> / <code>⌘Z</code> history strictly separate from Minga's edits while inline Twist review and <code>*minga-review*</code> build on the same ownership model.</figcaption>
+            <figcaption class="diagram-caption">Ordinary quit commands stop if unpublished edits remain staged; force quits (<code>:qa!</code>, <code>:cq</code>, or <code>:q!</code> on the last window) discard on purpose. As ADR-0006 lands, per-author undo groups keep your <code>u</code> / <code>⌘Z</code> history strictly separate from Minga's edits while inline Twist review and <code>*minga-review*</code> build over the same ownership contract.</figcaption>
           </figure>
         </section>
 
         <section class="essay-section" id="executable-parity">
-          <h2>3. Executable frontend parity (Storyboard CI &amp; flow-graph invariants)</h2>
-          <p>Two frontends drift apart one reasonable local shortcut at a time. Prose style guides do not stop drift because nothing breaks when Swift or Go diverges. The Spine plan (<a href="https://github.com/jsmestad/minga/blob/main/docs/design/storyboard.md"><code>docs/design/storyboard.md</code></a>) turns design rules into CI checks built in sequence toward v0.1.0:</p>
+          <h2>3. Keeping macOS and the terminal in lockstep</h2>
+          <p>Two frontends drift apart one reasonable local shortcut at a time. Prose style guides do not stop drift because nothing fails when Swift or Go diverges. The parity architecture (<a href="https://github.com/jsmestad/minga/blob/main/docs/design/storyboard.md"><code>docs/design/storyboard.md</code></a>) is being built in two tracks toward v0.1.0:</p>
           <ul>
-            <li><strong>One generated vocabulary (<code>mix codegen</code>).</strong> Colour roles, the five Orbit states (shape, word, colour, terminal glyph, accessibility label), Twist variants, and voice strings live in one source file and generate code into Swift, Go, and Elixir, with a guardrail test rejecting hard-coded colours outside generated files.</li>
-            <li><strong>One scenario registry rendered by both clients.</strong> Every screen in <code>docs/design/scenarios.toml</code> builds editor state through the BEAM once, renders offscreen on macOS (wide and narrow) and in the Go TUI (truecolor and 16-colour), and publishes visual diffs against <code>main</code> on every UI pull request.</li>
-            <li><strong>Automated flow-graph and key-walk invariants.</strong> A headless explorer starts in every scenario, fires every key in the active scope, and verifies invariants in CI: every screen is reachable by keyboard alone and by mouse alone; at most three <kbd>esc</kbd> or <kbd>q</kbd> presses return to plain editing with focus restored; zero orphan keys exist; every error names a next action; empty lists always define a zero state; and <code>Needs you</code> interruptions never steal focus.</li>
+            <li><strong>Single source of truth for UI tokens (Track 1 on <code>main</code>, Track 2 building).</strong> Every color is a semantic theme role (<code>minga</code>, <code>you</code>, <code>needs_you</code>, <code>failure</code>, <code>done</code>) defined once and generated into Swift, Go, and Elixir via <code>mix codegen</code>, with a planned guardrail rejecting hard-coded colors outside generated files. Every scenario renders in Catppuccin Frappé (default), AstroDark, and a light theme (Catppuccin Latte or One Light).</li>
+            <li><strong>Side-by-side visual diffs across clients (Track 1 scenario inventory landed; Track 2 factory next).</strong> Today, <code>docs/design/scenarios.toml</code> inventories every screen and flow map with local invariant checks in <code>design/tools/storyboard/check.py</code>. Track 2 wires those scenario IDs into offscreen macOS (wide and narrow) and Go TUI (truecolor and 16-color) renders so every UI pull request publishes visual diffs against <code>main</code>.</li>
+            <li><strong>Automated keyboard and navigation checks (Track 2).</strong> A headless explorer starts in every scenario, fires every active key binding, and verifies invariants in CI: every screen reachable by keyboard alone and mouse alone, at most three <kbd>esc</kbd> or <kbd>q</kbd> presses back to plain editing with focus restored, no dead-end bindings, every error naming a next action, defined empty states, and zero focus-stealing interruptions.</li>
+            <li><strong>Progressive terminal protocol detection.</strong> The Go TUI detects modern terminal features at startup (Kitty keyboard protocol, Kitty graphics for vector gutter marks with <code>▚</code>/<code>▐</code> fallbacks, OSC 8 clickable <code>file:line</code>, OSC 9/777 notifications, OSC 9;4 tab progress, OSC 52 clipboard, mode 1004 focus dimming, mode 2026 synchronized output) and degrades quietly down to 16-color terminals, inspectable via <code>:checkhealth terminal</code>.</li>
           </ul>
         </section>
 
         <section class="essay-section" id="tradeoffs">
           <h2>4. Real runtime guarantees and real tradeoffs</h2>
           <ul>
-            <li><strong>One ordered interactive mailbox, isolated background work.</strong> Editor input stays serialized in one process so keystrokes, drawer transitions, and render frames remain strictly ordered, while open buffers, language servers, save hooks, extensions, and agent sessions each run in separate preemptively scheduled processes with separate heaps. Fast model streams are batched ahead of the editor mailbox so token deltas do not queue ahead of typing.</li>
+            <li><strong>One ordered interactive mailbox, isolated background work.</strong> Editor input stays serialized in one process so keystrokes, drawer transitions, and render frames remain strictly ordered, while open buffers, language servers, save hooks, MCP servers, extensions, and agent sessions each run in separate preemptively scheduled processes with separate heaps. Fast model streams coalesce ahead of the editor mailbox so token deltas do not queue ahead of typing.</li>
             <li><strong>Current staging tradeoffs (worth knowing).</strong> Because staged edits stay off your working tree until you publish, language servers inspect the published open buffer rather than unpublished forks, and today's diff review pane is a read-only viewer (switch to the buffer to hand-edit). When an agent runs shell commands such as tests, Minga materializes the staged overlay into a temporary directory with an isolated build path so your main build stays untouched; projects relying on untracked <code>node_modules</code> or <code>.git</code> inside shell tests should keep that boundary in mind.</li>
-            <li><strong>Crash-safe tool recording.</strong> Each agent session saves the exact provider conversation beside the visible transcript and writes a single-attempt admission record before dispatching external tool effects. If a process dies mid-tool, recovery marks that call indeterminate and never silently replays a side effect (<a href="/docs/session-recovery.html">Session Recovery Reference</a>).</li>
+            <li><strong>Crash-safe tool recording and retained logs.</strong> Each agent session saves the exact provider conversation beside the visible transcript, captures full shell output beyond the 51 KiB model preview so long test logs survive compaction and restarts, and records each tool call before executing it. If a process dies mid-tool, recovery marks that call indeterminate and never silently replays a side effect (<a href="/docs/session-recovery.html">Session Recovery Reference</a>).</li>
           </ul>
         </section>
 
@@ -265,7 +272,7 @@
             </li>
             <li class="spec-row">
               <span class="spec-key spec-key-strong"><a href="/docs/0004-products-are-root-applets-over-a-fixed-engine.html">ADR-0004</a></span>
-              <span class="spec-detail"><strong>Programmable workflows over fixed engine owners (v0.1.0 roadmap).</strong> Author readable workflows over existing buffer, agent, and permission boundaries; save to activate; discard when one-off or keep useful definitions across projects.</span>
+              <span class="spec-detail"><strong>Programmable workflows over fixed engine owners (v0.1.0 roadmap).</strong> Author readable workflows over existing buffer, agent, and permission boundaries; save to activate; discard when one-off or reuse across projects.</span>
             </li>
             <li class="spec-row">
               <span class="spec-key spec-key-strong"><a href="/docs/0005-frontend-owns-immediate-ui-feedback.html">ADR-0005</a></span>
@@ -273,7 +280,7 @@
             </li>
             <li class="spec-row">
               <span class="spec-key spec-key-strong"><a href="https://github.com/jsmestad/minga/blob/main/docs/adr/0006-the-spine.md">ADR-0006</a></span>
-              <span class="spec-detail"><strong>The Spine: one keyboard-first chrome model across every frontend (migrating toward v0.1.0).</strong> Text, a plain title bar, and one prioritized modeline at rest; buffers in drawers for lists and terminals; Twist and Orbit marks; per-author undo; Vim keys preserved in files; parity enforced via generated tokens and Storyboard CI (<a href="https://github.com/jsmestad/minga/tree/main/docs/design"><code>docs/design/</code></a>).</span>
+              <span class="spec-detail"><strong>The Spine: one keyboard-first chrome model across every frontend (Proposed; Catppuccin Frappé default and design inventory landed).</strong> Text, a plain title bar, and one prioritized modeline at rest; one drawer at a time for lists; Twist and Orbit marks (six state words on five shapes) driven by theme roles; per-author undo; BEAM-styled markdown spans; Vim keys preserved in files; safe quit; parity enforced via generated tokens and Storyboard CI (<a href="https://github.com/jsmestad/minga/tree/main/docs/design"><code>docs/design/</code></a>).</span>
             </li>
           </ul>
 
@@ -295,8 +302,7 @@
   <footer class="site-footer">
     <div class="container footer-inner">
       <div class="footer-note">
-        <p><span class="brand-wordmark" style="font-size:1.15rem;margin-right:0.25rem;">minga</span> is open source under the MIT license. Created by <a href="https://evalcode.com">Justin Smestad</a> in Colorado.</p>
-        <p>Pre-release staging preview ahead of v0.1.0.</p>
+        <p><span class="brand-wordmark" style="font-size:1.15rem;margin-right:0.25rem;">minga</span> is open source under the MIT license. Created by <a href="https://evalcode.com">Justin Smestad</a>.</p>
       </div>
       <nav class="footer-links" aria-label="Footer">
         <a href="/">Home</a>
