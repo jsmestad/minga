@@ -45,6 +45,11 @@ defmodule MingaEditor.Agent.CatalogStartup do
   @impl true
   @spec run(t()) :: {:ok, :ready} | {:error, :model_catalog_unavailable}
   def run(%__MODULE__{}) do
+    Minga.Telemetry.span([:minga, :agent, :catalog_load], %{}, &load_catalog/0)
+  end
+
+  @spec load_catalog() :: {:ok, :ready} | {:error, :model_catalog_unavailable}
+  defp load_catalog do
     _providers = LLMDB.providers()
     {:ok, :ready}
   rescue

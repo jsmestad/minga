@@ -7334,6 +7334,11 @@ defmodule MingaAgent.Session do
     CodeLease.lease(source, module, :provider, owner: self())
   end
 
+  @spec measured_start_provider(state()) :: {:ok, pid(), state()} | {:error, term(), state()}
+  defp measured_start_provider(state) do
+    Minga.Telemetry.span([:minga, :agent, :provider_start], %{}, fn -> start_provider(state) end)
+  end
+
   @spec start_provider(state()) :: {:ok, pid(), state()} | {:error, term(), state()}
   defp start_provider(%{provider: %ProviderLifecycle{source: {:bundle, _name}}} = state) do
     start_source_owned_provider(state)
@@ -7712,6 +7717,22 @@ defmodule MingaAgent.Session do
          snapshot,
          thinking_level
        ) do
+    Minga.Telemetry.span([:minga, :agent, :session_model_resolve], %{}, fn ->
+      resolve_initial_model(resolution, model, provider_opts, snapshot, thinking_level)
+    end)
+  end
+
+  defp initial_model_selection(_resolution, _model, _provider_opts, _snapshot, _thinking),
+    do: {nil, nil}
+
+  @spec resolve_initial_model(
+          ProviderResolver.resolved(),
+          String.t(),
+          keyword(),
+          CredentialSnapshot.t(),
+          String.t() | nil
+        ) :: {ModelSelection.t() | nil, ModelResolver.resolution_error() | nil}
+  defp resolve_initial_model(resolution, model, provider_opts, snapshot, thinking_level) do
     config = Keyword.get_lazy(provider_opts, :config, &AgentConfig.resolve/0)
 
     resolver_opts =
@@ -7733,9 +7754,6 @@ defmodule MingaAgent.Session do
         {nil, reason}
     end
   end
-
-  defp initial_model_selection(_resolution, _model, _provider_opts, _snapshot, _thinking),
-    do: {nil, nil}
 
   @spec maybe_apply_initial_reasoning(ModelSelection.t(), String.t() | nil) ::
           {:ok, ModelSelection.t()} | {:error, String.t()}
@@ -8080,7 +8098,7 @@ defmodule MingaAgent.Session do
       cancel_provider_retry_timer(retry_timer)
       state = %{state | provider: lifecycle}
 
-      case start_provider(state) do
+      case measured_start_provider(state) do
         {:ok, pid, state} ->
           {attach_provider(state, pid), :ok}
 
@@ -10232,6 +10250,13 @@ defmodule MingaAgent.Session do
   defp dispatch_session_start(%{session_start_hook_enabled?: false}), do: :ok
 
   defp dispatch_session_start(state) do
+    Minga.Telemetry.span([:minga, :agent, :session_start_hooks], %{}, fn ->
+      run_session_start_hooks(state)
+    end)
+  end
+
+  @spec run_session_start_hooks(state()) :: :ok
+  defp run_session_start_hooks(state) do
     payload =
       SessionStartPayload.new(
         state.session_id,
@@ -10239,10 +10264,12 @@ defmodule MingaAgent.Session do
         state.provider.provider_name
       )
 
-    HookDispatcher.session_start(
-      AgentConfig.resolve().agent_hooks,
-      SessionStartPayload.to_map(payload)
-    )
+    hooks =
+      Minga.Telemetry.span([:minga, :agent, :session_start_hook_config], %{}, fn ->
+        AgentConfig.resolve().agent_hooks
+      end)
+
+    HookDispatcher.session_start(hooks, SessionStartPayload.to_map(payload))
   rescue
     e -> Minga.Log.warning(:agent, "SessionStart hook dispatch failed: #{Exception.message(e)}")
   catch

@@ -231,8 +231,12 @@ defmodule MingaEditor.Commands.AgentSession do
   @spec do_start_agent_session(state(), keyword()) :: state()
   defp do_start_agent_session(state, opts) do
     panel =
-      state.workspace.agent_ui.panel
-      |> Panel.ensure_configured_model(state.interaction.options_server)
+      Minga.Telemetry.span([:minga, :agent, :ensure_configured_model], %{}, fn ->
+        Panel.ensure_configured_model(
+          state.workspace.agent_ui.panel,
+          state.interaction.options_server
+        )
+      end)
 
     state =
       MingaEditor.Shell.Traditional.Workflow.install_agent_panel(
@@ -511,7 +515,10 @@ defmodule MingaEditor.Commands.AgentSession do
     case start_result do
       {:ok, _session_id, pid} ->
         try do
-          subscribe_active_session(state, pid)
+          Minga.Telemetry.span([:minga, :agent, :session_subscribe], %{}, fn ->
+            subscribe_active_session(state, pid)
+          end)
+
           {:ok, pid}
         catch
           :exit, reason ->
@@ -1114,6 +1121,15 @@ defmodule MingaEditor.Commands.AgentSession do
   @spec maybe_refresh_provider_project_view(pid() | nil, ProjectView.t() | nil) ::
           :ok | {:error, term()}
   defp maybe_refresh_provider_project_view(session, project_view) when is_pid(session) do
+    Minga.Telemetry.span([:minga, :agent, :provider_project_view_refresh], %{}, fn ->
+      refresh_provider_project_view(session, project_view)
+    end)
+  end
+
+  defp maybe_refresh_provider_project_view(_session, _project_view), do: :ok
+
+  @spec refresh_provider_project_view(pid(), ProjectView.t() | nil) :: :ok | {:error, term()}
+  defp refresh_provider_project_view(session, project_view) do
     # minga:allow-blocking — Editor, once per agent workspace setup to refresh the provider project view
     case Session.get_provider(session) do
       nil -> :ok
@@ -1122,6 +1138,4 @@ defmodule MingaEditor.Commands.AgentSession do
   catch
     :exit, reason -> {:error, {:provider_unavailable, reason}}
   end
-
-  defp maybe_refresh_provider_project_view(_session, _project_view), do: :ok
 end

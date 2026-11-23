@@ -209,6 +209,36 @@ defmodule Minga.Telemetry.DevHandlerTest do
     end
   end
 
+  describe "agent session-start spans" do
+    @agent_session_start_spans [
+      :catalog_load,
+      :tab_switch,
+      :start_agent_session,
+      :ensure_configured_model,
+      :project_view_overlay,
+      :session_manager_start,
+      :session_init,
+      :session_model_resolve,
+      :session_subscribe,
+      :provider_project_view_refresh,
+      :session_snapshot_read,
+      :provider_start,
+      :session_start_hooks,
+      :session_start_hook_config
+    ]
+
+    test "every stage of opening an Agent session is logged at the :agent debug level" do
+      for span <- @agent_session_start_spans do
+        event = [:minga, :agent, span, :stop]
+
+        assert Enum.any?(:telemetry.list_handlers(event), &(&1.id == "minga-dev-handler")),
+               "#{inspect(event)} is not routed to the dev handler"
+
+        assert :ok = DevHandler.handle_event(event, %{duration: 1_000}, %{}, nil)
+      end
+    end
+  end
+
   describe "handler resilience" do
     test "catch-all clause handles unknown events without crashing" do
       assert :ok = DevHandler.handle_event([:minga, :unknown, :event], %{}, %{}, nil)
