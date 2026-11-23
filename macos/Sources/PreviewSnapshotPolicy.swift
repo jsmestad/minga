@@ -16,11 +16,13 @@ enum PreviewSnapshotPolicy {
         case unexpectedImageSize(actual: CGSize, expected: CGSize)
     }
 
-    /// Only the reviewed workspace widths are supported, not an open matrix: 420 is the narrow window geometry (#3926).
+    /// Only the reviewed workspace widths are supported, not an open matrix: 420 is the narrow window geometry (#3926), and 600 and 900 bracket the sidebar's narrow presentation (#3933).
     static func agentWidth(_ value: String?) throws -> CGFloat {
         switch value {
         case nil, "1200": return 1200
+        case "900": return 900
         case "800": return 800
+        case "600": return 600
         case "420": return 420
         default: throw CaptureError.unsupportedAgentWidth
         }

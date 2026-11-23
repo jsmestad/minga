@@ -396,7 +396,9 @@ struct FileTreeViewTests {
             .environment(\.themeColors, ThemeColors())
         let body = try sut.inspect()
         let buttons = body.findAll(ViewType.Button.self)
-        #expect(buttons.count == 4)
+        // The full, compact and narrowest header layouts (#3933) each keep New File, New Folder, Refresh and Collapse All.
+        let headerLayouts = 3
+        #expect(buttons.count == 4 * headerLayouts)
     }
 
     @Test("Header action buttons send file-tree actions")

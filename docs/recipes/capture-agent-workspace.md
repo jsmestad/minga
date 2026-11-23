@@ -20,10 +20,15 @@ This uses the existing PreviewHost, production `ContentView` and editor renderer
 | Width in points | PNG |
 |---:|---|
 | 420 | `AgentWorkspaceChromeView-420-doom-one.png` |
+| 420 | `AgentChromeView-420-doom-one.png` |
 | 800 | `AgentChromeView-800-doom-one.png` |
 | 1200 | `AgentChromeView-1200-doom-one.png` |
 
 The 420 point capture is the narrow window geometry. It shows the Agent workspace the way a narrow window does, without a sidebar, with the workspace header, Agent activity bar and All Changes row. Every control must stay inside the window: titles truncate with an ellipsis, the Agent header drops its labels and then moves its commands into the More Agent actions menu, and composer buttons drop titles they cannot fit.
+
+The 420 point `AgentChromeView` capture is the same narrow window with the file-tree sidebar open. The sidebar is presented narrower so the Agent pane keeps at least 280 points; the BEAM still decides that the sidebar is open, and the sidebar returns to its chosen width when the window widens. The sidebar header drops the branch, then the project name, and moves New File into its More file tree actions menu.
+
+`PREVIEW_AGENT_WIDTH` also accepts 600 and 900 for manual before and after comparisons around the point where the sidebar starts to narrow.
 
 The deadline includes protocol generation, project generation, compilation and capture. An unavailable renderer, failed command, unstable image or expired deadline is a failure, not a successful screenshot of an error panel. The command removes stale images for the selected captures before starting.
 

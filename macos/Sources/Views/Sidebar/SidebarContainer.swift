@@ -30,6 +30,20 @@ public enum SidebarSizing {
     public static func widthByApplyingPreferred(for item: SidebarItem?, currentWidth: CGFloat) -> CGFloat {
         clamp(max(currentWidth, preferredWidth(for: item)), for: item)
     }
+
+    /// The narrowest the sidebar is ever presented, below the 180 pt drag minimum.
+    /// It still shows file icons with short names and the header's project icon and actions.
+    public static let narrowMinWidth: CGFloat = 100
+
+    /// The width the content beside the sidebar keeps before the sidebar narrows.
+    /// 280 pt holds about 35 characters of 13 pt Agent transcript text after the card insets, which reads as prose rather than one word per line.
+    public static let contentMinWidth: CGFloat = 280
+
+    /// The presented width of the sidebar column: its ideal width when the window has room, otherwise narrower down to its minimum so the content keeps `contentMinimum`.
+    nonisolated public static func presentedLeadingWidth(available: CGFloat, ideal: CGFloat, minimum: CGFloat, contentMinimum: CGFloat) -> CGFloat {
+        let yielding = available - contentMinimum
+        return min(ideal, max(minimum, yielding))
+    }
 }
 
 public struct SidebarContainer: View {
@@ -66,6 +80,8 @@ public struct SidebarContainer: View {
 
     @State private var isDraggingResize: Bool = false
     @State private var dragStartWidth: CGFloat = 0
+    /// The width on screen, which is narrower than `sidebarWidth` in a narrow window. A drag starts from what the user sees.
+    @State private var presentedWidth: CGFloat = SidebarSizing.defaultWidth
 
     public var body: some View {
         HStack(spacing: 0) {
@@ -77,8 +93,14 @@ public struct SidebarContainer: View {
                     frameProbe: frameProbe
                 )
             }
-            .frame(width: sidebarWidth)
+            // Narrows below the user's width only when SidebarSplitLayout offers less; never wider.
+            .frame(minWidth: SidebarSizing.narrowMinWidth, idealWidth: sidebarWidth, maxWidth: sidebarWidth)
             .background(theme.treeBg)
+            .onGeometryChange(for: CGFloat.self) { proxy in
+                proxy.size.width
+            } action: { width in
+                presentedWidth = width
+            }
 
             resizeHandle
         }
@@ -102,7 +124,7 @@ public struct SidebarContainer: View {
                     .onChanged { value in
                         if !isDraggingResize {
                             isDraggingResize = true
-                            dragStartWidth = sidebarWidth
+                            dragStartWidth = min(sidebarWidth, presentedWidth)
                         }
                         let newWidth = dragStartWidth + value.translation.width
                         sidebarWidth = SidebarSizing.clamp(newWidth, for: activeSidebar)
