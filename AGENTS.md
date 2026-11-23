@@ -655,6 +655,12 @@ For fire-and-forget measurements (no duration), use `Minga.Telemetry.execute/3`.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md#performance-debugging-with-telemetry) for the full usage guide including custom handler examples.
 
+### Benchmark results stay out of the tree
+
+Commit the benchmark, not its results. A bench script under `bench/` (with any fixtures it needs in `bench/fixtures/`) is the reproducible part and belongs in the repository; so do baselines that CI reads, such as `bench/baselines/keystroke_latency.json`. Run output (samples, summaries, identity files, logs, captures, per-run folders) and write-ups of a measurement do not: they describe one machine on one day, nothing reads them after review, and they go stale with the next change to the measured path.
+
+Put the numbers where the decision is made: the PR description for a change you ship, or a comment on the issue for a measurement or a rejected approach. Include the command that produced them and the baseline and candidate commits, so anyone can rerun the script. `.gitignore` ignores everything under `bench/` except top-level `*.exs` scripts, `fixtures/` and `baselines/`; do not force-add run output past it.
+
 ### Commit Messages
 
 ```

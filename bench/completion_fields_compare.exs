@@ -1,6 +1,6 @@
 # Compares one alternating pair set written by bench/completion_fields.exs (#3497).
 #
-#     elixir bench/completion_fields/compare.exs bench/completion_fields PREFIX
+#     elixir bench/completion_fields_compare.exs bench/completion_fields PREFIX
 #
 # PREFIX selects the runs PREFIX-{a,b}-{baseline,candidate}, for example `v1` or `c3`.
 # It prints one Markdown row per item count and stage for each pair, and the response-to-popup totals.
