@@ -589,11 +589,13 @@ public enum Wire {
         /// Status chip text, rendered verbatim. Empty when the item has no chip.
         public let status: String
         public let statusTone: PickerStatusTone
+        /// The item's section, such as a model's route. Empty when the item has no section. Frontends draw a non-selectable header where the group changes.
+        public let group: String
 
         public var isMarked: Bool { flags & 0x02 != 0 }
         public var isActive: Bool { flags & 0x08 != 0 }
 
-        public init(iconColor: UInt32, flags: UInt8, label: String, description: String, annotation: String, matchPositions: [UInt16], activationID: UInt32 = 0, status: String = "", statusTone: PickerStatusTone = .absent) {
+        public init(iconColor: UInt32, flags: UInt8, label: String, description: String, annotation: String, matchPositions: [UInt16], activationID: UInt32 = 0, status: String = "", statusTone: PickerStatusTone = .absent, group: String = "") {
             self.iconColor = iconColor
             self.flags = flags
             self.label = label
@@ -603,6 +605,7 @@ public enum Wire {
             self.activationID = activationID
             self.status = status
             self.statusTone = statusTone
+            self.group = group
         }
     }
 

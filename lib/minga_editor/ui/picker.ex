@@ -18,6 +18,10 @@ defmodule MingaEditor.UI.Picker do
   - Fuzzy character-by-character match scores lower
   - Shorter candidates score higher (tighter match)
 
+  ## Groups
+
+  Items may carry a `group` (see `MingaEditor.UI.Picker.Item`), which frontends draw as a section header. The filtered list always keeps the items of one group next to each other, so each group has exactly one header. With an empty query the source order is kept, so a source lists its groups in the order it wants. With a query, the group that holds the best match comes first and items within a group stay in score order; the first row is still the best match. A group without a matching item drops out with its header. Items without a group count as one more group. Pickers without groups are unaffected.
+
   ## Usage
 
       alias MingaEditor.UI.Picker.Item
@@ -351,14 +355,14 @@ defmodule MingaEditor.UI.Picker do
   # source-ordered) items, bounded so huge sources don't materialize every item.
   @spec refilter(t()) :: t()
   defp refilter(%__MODULE__{items: items, match_query: ""} = picker) do
-    filtered = unscored_results(picker, items)
+    filtered = picker |> unscored_results(items) |> keep_groups_together()
     %{picker | filtered: filtered, selected: clamp_selection(picker.selected, length(filtered))}
   end
 
   defp refilter(%__MODULE__{candidates: candidates, match_query: match_query} = picker) do
     case split_query(match_query) do
       [] ->
-        filtered = unscored_results(picker, picker.items)
+        filtered = picker |> unscored_results(picker.items) |> keep_groups_together()
 
         %{
           picker
@@ -371,12 +375,39 @@ defmodule MingaEditor.UI.Picker do
           picker
           |> scored_results(candidates, segments)
           |> Enum.map(&highlight_winner(&1, match_query))
+          |> keep_groups_together()
 
         %{
           picker
           | filtered: filtered,
             selected: clamp_selection(picker.selected, length(filtered))
         }
+    end
+  end
+
+  # Moves every item next to the first item of its group, keeping the groups in order of first
+  # appearance and the items of a group in their current (source or score) order. Lists without any
+  # group are returned unchanged.
+  @spec keep_groups_together([Item.t()]) :: [Item.t()]
+  defp keep_groups_together(items) do
+    if Enum.any?(items, &(&1.group != nil)), do: gather_groups(items), else: items
+  end
+
+  @spec gather_groups([Item.t()]) :: [Item.t()]
+  defp gather_groups(items) do
+    {order, runs} = Enum.reduce(items, {[], %{}}, &add_to_group_run/2)
+
+    order
+    |> Enum.reverse()
+    |> Enum.flat_map(&Enum.reverse(Map.fetch!(runs, &1)))
+  end
+
+  @spec add_to_group_run(Item.t(), {[String.t() | nil], %{(String.t() | nil) => [Item.t()]}}) ::
+          {[String.t() | nil], %{(String.t() | nil) => [Item.t()]}}
+  defp add_to_group_run(%Item{group: group} = item, {order, runs}) do
+    case runs do
+      %{^group => run} -> {order, %{runs | group => [item | run]}}
+      %{} -> {[group | order], Map.put(runs, group, [item])}
     end
   end
 

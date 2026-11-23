@@ -758,14 +758,13 @@ func (m Model) renderPickerList(title string, picker protocol.Picker, height int
 	}
 	rowBudget := max(height-headerRows, 0)
 	selected := m.effectivePickerIndex(picker)
-	start := 0
-	if selected >= rowBudget && rowBudget > 0 {
-		start = selected - rowBudget + 1
-	}
-	end := min(start+rowBudget, len(picker.Items))
+	start, end, headers := pickerItemWindow(picker.Items, selected, rowBudget)
 	activeSlot := pickerHasActiveItem(picker.Items[start:end])
 	for index := start; index < end; index++ {
 		item := picker.Items[index]
+		if headers && pickerStartsSection(picker.Items, index, start) {
+			lines = append(lines, m.renderPickerSectionHeader(item.Group, width))
+		}
 		row := m.renderPickerItemRow(title, item, index == selected, activeSlot, width)
 		if slot := index - start; slot < len(m.zones.picker.items) && item.ActivationID != 0 {
 			m.zones.picker.items[slot] = item.ActivationID

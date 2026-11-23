@@ -304,6 +304,7 @@ type PickerItem struct {
 	ActivationID   uint32
 	Status         string
 	StatusTone     PickerStatusTone
+	Group          string
 }
 
 type WhichKeyBinding struct {

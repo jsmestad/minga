@@ -2019,6 +2019,7 @@ struct GUIPickerDecoderTests {
         appendU32(&items, 23)
         appendString16(&items, "Ready · 82%") // status
         items.append(2) // status_tone warn
+        appendString16(&items, "ChatGPT") // group
         // Item 2
         appendRGB(&items, 0x98, 0xBE, 0x65)
         items.append(0x02) // marked
@@ -2029,6 +2030,7 @@ struct GUIPickerDecoderTests {
         appendU32(&items, 29)
         appendString16(&items, "") // no status
         items.append(0) // status_tone none
+        appendString16(&items, "") // no group
 
         // Section 0x04: Action menu
         var actionMenu = Data()
@@ -2078,6 +2080,7 @@ struct GUIPickerDecoderTests {
         #expect(decodedItems[0].isMarked == false)
         #expect(decodedItems[0].status == "Ready · 82%")
         #expect(decodedItems[0].statusTone == .warn)
+        #expect(decodedItems[0].group == "ChatGPT")
         #expect(decodedItems[0].matchPositions == [0, 1])
         #expect(decodedItems[0].activationID == 23)
         #expect(decodedItems[1].label == "edit_delta.ex")
@@ -2085,6 +2088,7 @@ struct GUIPickerDecoderTests {
         #expect(decodedItems[1].isActive == false)
         #expect(decodedItems[1].status == "")
         #expect(decodedItems[1].statusTone == .absent)
+        #expect(decodedItems[1].group == "")
 
         #expect(decodedMenu != nil)
         #expect(decodedMenu?.actions == ["Open", "Split Right"])

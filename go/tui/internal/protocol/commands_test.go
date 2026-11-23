@@ -672,6 +672,7 @@ func TestDecodePickerChromeDoesNotSwallowFollowingCommands(t *testing.T) {
 	item = append(item, 0, 0, 0, 11)
 	item = append(item, string16("Ready")...)
 	item = append(item, 1)
+	item = append(item, string16("ChatGPT")...)
 	items := []byte{0, 1}
 	items = append(items, item...)
 	actions := []byte{1, 0, 1}
@@ -698,7 +699,7 @@ func TestDecodePickerChromeDoesNotSwallowFollowingCommands(t *testing.T) {
 	if !picker.Visible || picker.Title != "Files" || picker.Query != "main" || picker.Marked != 1 || len(picker.Items) != 1 {
 		t.Fatalf("picker decoded incorrectly: %+v", picker)
 	}
-	if got := picker.Items[0]; !got.Marked || !got.Active || got.Status != "Ready" || got.StatusTone != generated.PickerStatusToneReady || got.Label != "main.ex" || got.Description != "lib/main.ex" || got.Annotation != "modified" {
+	if got := picker.Items[0]; !got.Marked || !got.Active || got.Status != "Ready" || got.StatusTone != generated.PickerStatusToneReady || got.Group != "ChatGPT" || got.Label != "main.ex" || got.Description != "lib/main.ex" || got.Annotation != "modified" {
 		t.Fatalf("picker item decoded incorrectly: %+v", got)
 	}
 	if len(picker.Actions) != 1 || picker.Actions[0] != "open" || picker.ModePrefix != "find" {

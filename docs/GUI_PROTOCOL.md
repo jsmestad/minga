@@ -425,6 +425,7 @@ Per item:
   + desc_len(2) + desc(desc_len) + annotation_len(2) + annotation(annotation_len)
   + match_pos_count(1) + match_positions(match_pos_count * 2) + activation_id(4)
   + status_len(2) + status(status_len) + status_tone(1)
+  + group_len(2) + group(group_len)
 
 ActionMenu section 0x04 payload:
   action_visible(1)
@@ -446,6 +447,7 @@ annotation is a right-aligned string (e.g., keybinding "SPC f s", or "★ favori
 status is a short status chip (at most 24 display columns), such as a model row's readiness and plan usage ("Ready · 45%", "Limit reached"). It is empty when the item has no chip. Frontends render the text verbatim and never parse it.
 status_tone is the chip's tone: 0 none (no chip), 1 ready, 2 warn, 3 error, 4 checking, 5 neutral. Frontends map the tone to their own colors and also show it as text or a glyph, never by color alone.
 Row layout: a row with a non-empty status always shows the chip. It keeps the start of its description (macOS stacks the description on a second line; the terminal shortens the description's end). A row without a status keeps today's inline layout and keeps the end of a long description, because paths matter most at their end.
+group is the section the item belongs to, such as a model's route ("ChatGPT"). It is empty when the item has no section. A frontend draws a section header row before an item whose group is not empty and differs from the previous item's group, and before the first drawn item when its group is not empty (so a scrolled list still names the section at its top). Headers are presentation only: they are not items, they have no activation_id, and selection, keyboard movement, clicks, scroll-to-selection and the "N/M" count address items only. The BEAM sends the items of one group next to each other, so each group has one header; a group with no matching item has no header. Pickers whose items have no group render exactly as before.
 match_positions is a list of uint16 character indices for highlighting matched characters.
 has_preview indicates whether the picker source supports preview (triggers split layout).
 filtered_count and total_count enable "X/Y" display in the search field.

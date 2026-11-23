@@ -51,7 +51,8 @@ defmodule Minga.Frontend.Adapter.GUI.PickerEncoderTest do
             match_positions: [0, 2],
             activation_id: 23,
             status: "Ready · 45%",
-            status_tone: :warn
+            status_tone: :warn,
+            group: "ChatGPT"
           }
         ],
         action_menu: %ActionMenu{actions: ["Open"], selected_index: 0},
@@ -82,17 +83,19 @@ defmodule Minga.Frontend.Adapter.GUI.PickerEncoderTest do
       assert <<1::16, "o", 7::32, 11::32>> = sections[0x02]
 
       # Items (0x03): one item, flags 10, icon color, match positions [0, 2], then the status chip
-      # text and tone.
+      # text and tone, then the section group.
       <<1::16, icon_color::24, flags::8, label_len::16, label::binary-size(label_len),
         desc_len::16, desc::binary-size(desc_len), ann_len::16, ann::binary-size(ann_len),
         pos_count::8, first_pos::16, second_pos::16, activation_id::32, status_len::16,
-        status::binary-size(status_len), status_tone::8>> = sections[0x03]
+        status::binary-size(status_len), status_tone::8, group_len::16,
+        group::binary-size(group_len)>> = sections[0x03]
 
       assert icon_color == 0x123456
       assert flags == 10
       assert status == "Ready · 45%"
       # status_tone warn is 2 (none 0, ready 1, warn 2, error 3, checking 4, neutral 5).
       assert status_tone == 2
+      assert group == "ChatGPT"
       assert label == "One"
       assert desc == "First"
       assert ann == "open"
@@ -134,7 +137,8 @@ defmodule Minga.Frontend.Adapter.GUI.PickerEncoderTest do
             match_positions: [0],
             activation_id: 1,
             status: "",
-            status_tone: :none
+            status_tone: :none,
+            group: ""
           }
         ],
         action_menu: %ActionMenu{actions: ["open"], selected_index: 0},
@@ -175,7 +179,8 @@ defmodule Minga.Frontend.Adapter.GUI.PickerEncoderTest do
             match_positions: [],
             activation_id: 1,
             status: "",
-            status_tone: :none
+            status_tone: :none,
+            group: ""
           },
           %{
             icon_color: 0,
@@ -186,7 +191,8 @@ defmodule Minga.Frontend.Adapter.GUI.PickerEncoderTest do
             match_positions: [],
             activation_id: 2,
             status: "",
-            status_tone: :none
+            status_tone: :none,
+            group: ""
           }
         ]
       }
@@ -244,7 +250,8 @@ defmodule Minga.Frontend.Adapter.GUI.PickerEncoderTest do
             {:item_match_position_count, %{item | match_positions: Enum.to_list(0..255)}, 256,
              255},
             {:item_match_position, %{item | match_positions: [65_536]}, 65_536, 65_535},
-            {:item_status, %{item | status: oversized}, 65_536, 65_535}
+            {:item_status, %{item | status: oversized}, 65_536, 65_535},
+            {:item_group, %{item | group: oversized}, 65_536, 65_535}
           ] do
         assert_encoding_error(%{base | items: [changed_item]}, field, actual, max)
       end
@@ -281,7 +288,8 @@ defmodule Minga.Frontend.Adapter.GUI.PickerEncoderTest do
           match_positions: [],
           activation_id: 1,
           status: "",
-          status_tone: :none
+          status_tone: :none,
+          group: ""
         }
       ]
     }
@@ -318,6 +326,7 @@ defmodule Minga.Frontend.Adapter.GUI.PickerEncoderTest do
   defp picker_schema_path(:item_match_position_count), do: [:items, 0, :match_positions]
   defp picker_schema_path(:item_match_position), do: [:items, 0, :match_positions, 0]
   defp picker_schema_path(:item_status), do: [:items, 0, :status]
+  defp picker_schema_path(:item_group), do: [:items, 0, :group]
   defp picker_schema_path(:action_menu_selected_index), do: [:action_menu, :selected_index]
   defp picker_schema_path(:action_count), do: [:action_menu, :actions]
   defp picker_schema_path(:action_name), do: [:action_menu, :actions, 0]

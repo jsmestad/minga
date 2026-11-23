@@ -4,6 +4,8 @@ defmodule MingaEditor.UI.Picker.AgentConnectionSource do
 
   The rows check a contributed route's setup, sign in to ChatGPT, add an API key, retry the connection, or continue a setup that is in progress. `/model` lists these rows itself while no model is listed. Once a model is listed, `/model` keeps only the in-progress rows and opens this source as a child picker from its "Connect another provider…" row; Escape returns to `/model`.
 
+  Rows are grouped by what they connect: "Routes" for route setup checks, "ChatGPT" for sign-in, "API keys", "Connection" for retry, and "Setup in progress" for an operation that is under way.
+
   A provider that a listed model already uses is connected. It offers its account actions, such as signing in again or signing out, instead of a first sign-in. Every item retains its original target because the picker closes before invoking its selection callback.
   """
 
@@ -26,7 +28,8 @@ defmodule MingaEditor.UI.Picker.AgentConnectionSource do
   alias MingaEditor.UI.Picker.Item.Status
   alias MingaEditor.UI.Picker.Source
 
-  # An action row before it carries its origin: label, intent, description, and optional chip.
+  # An action row before it carries its origin and group: label, intent, description, and optional
+  # chip.
   @typep action :: {String.t(), term(), String.t(), Status.t() | nil}
 
   @impl true
@@ -70,10 +73,10 @@ defmodule MingaEditor.UI.Picker.AgentConnectionSource do
   @spec setup_items(map(), Snapshot.t()) :: [Item.t()]
   def setup_items(%{target: %{session: session}} = origin, connected)
       when node(session) == node() do
-    actions =
-      oauth_actions(Snapshot.oauth_ref(connected)) ++ api_key_actions(connected) ++ retry_action()
-
-    route_setup_items(origin) ++ Enum.map(actions, &action_item(&1, origin))
+    route_setup_items(origin) ++
+      Enum.map(oauth_actions(Snapshot.oauth_ref(connected)), &action_item(&1, "ChatGPT", origin)) ++
+      Enum.map(api_key_actions(connected), &action_item(&1, "API keys", origin)) ++
+      Enum.map(retry_action(), &action_item(&1, "Connection", origin))
   end
 
   def setup_items(_remote, _connected), do: []
@@ -86,7 +89,7 @@ defmodule MingaEditor.UI.Picker.AgentConnectionSource do
 
     (cancel_action(connection.operation) ++
        authorization_actions(prompt, connection) ++ resume_action(prompt, connection))
-    |> Enum.map(&action_item(&1, origin))
+    |> Enum.map(&action_item(&1, "Setup in progress", origin))
   end
 
   def pending_items(_remote), do: []
@@ -167,6 +170,7 @@ defmodule MingaEditor.UI.Picker.AgentConnectionSource do
       label: action.label,
       description: "#{action.description} · #{setup_detail(status)}",
       status: availability_status(status),
+      group: "Routes",
       search_text: "#{action.label} #{spec.display_name} setup"
     }
   end
@@ -274,14 +278,15 @@ defmodule MingaEditor.UI.Picker.AgentConnectionSource do
 
   defp resume_action(nil, _connection), do: []
 
-  @spec action_item(action(), map()) :: Item.t()
-  defp action_item({label, intent, description, status}, origin) do
+  @spec action_item(action(), String.t(), map()) :: Item.t()
+  defp action_item({label, intent, description, status}, group, origin) do
     with_origin(
       %Item{
         id: {:connection, intent},
         label: label,
         description: description,
         status: status,
+        group: group,
         search_text: label
       },
       origin,

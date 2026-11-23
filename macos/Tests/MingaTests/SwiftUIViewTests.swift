@@ -1925,6 +1925,48 @@ struct PickerOverlayActivationTests {
         #expect(fileRow.findAll(ViewType.Text.self).count == 2)
     }
 
+    @Test("Section headers name each group once and are never choices")
+    @MainActor func sectionHeadersAreNotChoices() throws {
+        let spy = SpyEncoder()
+        let state = PickerState()
+        let rows: [Wire.PickerItem] = [
+            Wire.PickerItem(iconColor: 0, flags: 0, label: "GPT-5", description: "", annotation: "", matchPositions: [], activationID: 41, group: "ChatGPT"),
+            Wire.PickerItem(iconColor: 0, flags: 0, label: "GPT-5 mini", description: "", annotation: "", matchPositions: [], activationID: 42, group: "ChatGPT"),
+            Wire.PickerItem(iconColor: 0, flags: 0, label: "Claude Opus 4", description: "", annotation: "", matchPositions: [], activationID: 43, group: "Claude (subscription)"),
+        ]
+        state.update(
+            visible: true, selectedIndex: 0, filteredCount: 3, totalCount: 3,
+            markedCount: 0, title: "Models and connections", query: "", hasPreview: false,
+            rawItems: rows, actionMenu: nil, activationGeneration: 99
+        )
+        let sut = PickerOverlay(state: state, sendAction: { action in _ = spy.send(FrontendActionComposition.outbound(action)) }).environment(\.themeColors, ThemeColors())
+        let body = try sut.inspect()
+
+        var texts: [String] = []
+        for text in body.findAll(ViewType.Text.self) {
+            if let value = try? text.string() { texts.append(value) }
+        }
+        #expect(texts.filter { $0 == "ChatGPT" }.count == 1)
+        #expect(texts.filter { $0 == "Claude (subscription)" }.count == 1)
+
+        var choiceLabels: [String] = []
+        for button in body.findAll(ViewType.Button.self) {
+            if let label = try? button.accessibilityLabel().string() { choiceLabels.append(label) }
+        }
+        #expect(choiceLabels.contains("GPT-5"))
+        #expect(choiceLabels.contains("GPT-5 mini"))
+        #expect(choiceLabels.contains("Claude Opus 4"))
+        #expect(!choiceLabels.contains("ChatGPT"))
+        #expect(!choiceLabels.contains("Claude (subscription)"))
+
+        // The item under the second header activates with its own offered identity.
+        let opus = try #require(body.findAll(ViewType.Button.self).first {
+            (try? $0.accessibilityLabel().string()) == "Claude Opus 4"
+        })
+        try opus.tap()
+        #expect(spy.actions == [.semanticItemActivate(surface: .picker, intent: 1, generation: 99, itemID: Data([0, 0, 0, 43]))])
+    }
+
     @Test("Picker choices expose selected marked and unavailable state")
     @MainActor func pickerAccessibilityState() throws {
         let state = PickerState()

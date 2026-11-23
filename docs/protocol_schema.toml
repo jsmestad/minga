@@ -80,7 +80,8 @@ version = "2.0.0"
 # protocol_version 39 adds renderer_shutdown, which restores the terminal before the VM stops.
 # protocol_version 40 binds Git Status actions to the displayed panel and file actions to the exact row. It also adds terminal Git Status presentation fields.
 # protocol_version 41 appends a status chip (status text and status_tone) to picker_item, adds the active flag (bit 3), and retires the two_line (bit 0) and keep_description_start (bit 2) flags.
-protocol_version = 41
+# protocol_version 42 appends a section group (string16) to picker_item. Frontends draw a non-selectable header when the group changes between adjacent items.
+protocol_version = 42
 description = "Minga port protocol opcode registry"
 
 # Directions:
@@ -1929,6 +1930,8 @@ fields = [
   # Status chip text, rendered verbatim (empty when status_tone is none).
   { name = "status", type = "string16" },
   { name = "status_tone", type = "enum", enum = "picker_status_tone" },
+  # Section header text shared by adjacent items (empty when the item has no group). Frontends draw a non-selectable header row before an item whose group differs from the previous item's, and before the first drawn item when its group is not empty.
+  { name = "group", type = "string16" },
 ]
 
 [[structures]]

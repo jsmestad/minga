@@ -131,6 +131,7 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilderTest do
         icon_color: 0x123456,
         status: MingaEditor.UI.Picker.Item.Status.new(:warn, "Ready · 82%"),
         active: true,
+        group: "ChatGPT",
         match_positions: [0, 2]
       }
 
@@ -183,7 +184,8 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilderTest do
                  match_positions: [0, 2],
                  activation_id: 1,
                  status: "Ready · 82%",
-                 status_tone: :warn
+                 status_tone: :warn,
+                 group: "ChatGPT"
                }
              ] = model.items
 
@@ -237,8 +239,10 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilderTest do
       assert wire_item.icon_color == 0
       assert wire_item.description == ""
       assert wire_item.annotation == ""
-      # No status chip and no flags: the row keeps the inline layout file and command pickers use.
+      # No status chip, no group and no flags: the row keeps the inline layout file and command
+      # pickers use, with no section header.
       assert {wire_item.status, wire_item.status_tone, wire_item.flags} == {"", :none, 0}
+      assert wire_item.group == ""
       assert Enum.count(wire_item.match_positions) == 301
       assert wire_item.match_positions == Enum.to_list(0..300)
     end

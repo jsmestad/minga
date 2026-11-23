@@ -20,7 +20,7 @@ public struct PickerActivationIdentity: Equatable, Sendable {
 }
 
 public struct PickerItem: Identifiable {
-    public init(id: Int, activation: PickerActivationIdentity = PickerActivationIdentity(generation: 0, activationID: 0), iconColor: UInt32, label: String, description: String, annotation: String, matchPositions: [UInt16], isMarked: Bool, isActive: Bool = false, status: String = "", statusTone: Wire.PickerStatusTone = .absent) {
+    public init(id: Int, activation: PickerActivationIdentity = PickerActivationIdentity(generation: 0, activationID: 0), iconColor: UInt32, label: String, description: String, annotation: String, matchPositions: [UInt16], isMarked: Bool, isActive: Bool = false, status: String = "", statusTone: Wire.PickerStatusTone = .absent, group: String = "") {
         self.id = id
         self.activation = activation
         self.iconColor = iconColor
@@ -32,6 +32,7 @@ public struct PickerItem: Identifiable {
         self.isActive = isActive
         self.status = status
         self.statusTone = statusTone
+        self.group = group
     }
     public let id: Int
     public let activation: PickerActivationIdentity
@@ -46,6 +47,8 @@ public struct PickerItem: Identifiable {
     /// BEAM-authored status chip text, such as a model row's readiness and plan usage. Rendered verbatim.
     public let status: String
     public let statusTone: Wire.PickerStatusTone
+    /// The BEAM-authored section, such as a model's route. Empty when the item has no section.
+    public let group: String
 
     /// Whether the row shows a status chip.
     public var hasStatus: Bool {
@@ -212,7 +215,8 @@ public final class PickerState {
                 isMarked: item.isMarked,
                 isActive: item.isActive,
                 status: item.status,
-                statusTone: item.statusTone
+                statusTone: item.statusTone,
+                group: item.group
             )
         }
         self.items = nextItems

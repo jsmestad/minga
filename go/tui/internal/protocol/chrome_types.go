@@ -158,6 +158,8 @@ type PickerItem struct {
 	// Status is the BEAM-authored chip text, rendered verbatim; empty means no chip.
 	Status     string
 	StatusTone generated.PickerStatusTone
+	// Group is the item's section. A non-selectable header row names it before the first drawn item of each run of items with the same group; empty means no section.
+	Group string
 }
 
 // HasStatus reports whether the row carries a status chip. Rows with a chip keep

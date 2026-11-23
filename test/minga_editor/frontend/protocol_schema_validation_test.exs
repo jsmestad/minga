@@ -496,7 +496,8 @@ defmodule MingaEditor.Frontend.ProtocolSchemaValidationTest do
         match_positions: [1, 4],
         activation_id: 23,
         status: "",
-        status_tone: :none
+        status_tone: :none,
+        group: ""
       }
 
       <<_opcode, section_count::8, sections_binary::binary>> =
@@ -507,13 +508,13 @@ defmodule MingaEditor.Frontend.ProtocolSchemaValidationTest do
       # count(u16), then one picker_item: icon_color(u24) + flags(u8) +
       # label(string16) + description(string16) + annotation(string16) +
       # match_positions(u8-counted u16) + activation_id(u32) + status(string16) +
-      # status_tone(u8).
+      # status_tone(u8) + group(string16).
       assert items_payload ==
                <<1::16, 0xAA, 0xBB, 0xCC, 0::8, 7::16, "file.ex", 4::16, "desc", 3::16, "ann",
-                 2::8, 1::16, 4::16, 23::32, 0::16, 0::8>>
+                 2::8, 1::16, 4::16, 23::32, 0::16, 0::8, 0::16>>
     end
 
-    test "picker_item lays out marked (bit 1) and active (bit 3) flags and the status chip" do
+    test "picker_item lays out marked (bit 1) and active (bit 3) flags, the status chip and the group" do
       # flags 0b1010 = 10 is computed by the builder; the shell just lays it out.
       item = %{
         icon_color: 0,
@@ -524,7 +525,8 @@ defmodule MingaEditor.Frontend.ProtocolSchemaValidationTest do
         match_positions: [],
         activation_id: 0,
         status: "Limit reached",
-        status_tone: :error
+        status_tone: :error,
+        group: "Claude (subscription)"
       }
 
       <<_opcode, section_count::8, sections_binary::binary>> =
@@ -533,10 +535,10 @@ defmodule MingaEditor.Frontend.ProtocolSchemaValidationTest do
       items_payload = extract_section_payload(sections_binary, section_count, 0x03)
 
       # count(1), icon_color(0), flags(10), label "x", empty desc/ann, 0 positions, status chip with
-      # tone error (3).
+      # tone error (3), then the section group.
       assert items_payload ==
                <<1::16, 0::24, 10::8, 1::16, "x", 0::16, 0::16, 0::8, 0::32, 13::16,
-                 "Limit reached", 3::8>>
+                 "Limit reached", 3::8, 21::16, "Claude (subscription)">>
     end
 
     test "schema models every section the picker encoder emits", %{sections: sections} do
@@ -551,7 +553,8 @@ defmodule MingaEditor.Frontend.ProtocolSchemaValidationTest do
         match_positions: [],
         activation_id: 0,
         status: "",
-        status_tone: :none
+        status_tone: :none,
+        group: ""
       }
 
       <<_opcode, section_count::8, sections_binary::binary>> =

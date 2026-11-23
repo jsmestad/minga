@@ -28,6 +28,8 @@ public struct PickerOverlay: View {
     static let itemHeight: CGFloat = 24
     /// Status rows stack their description under the label so readiness and plan usage get the full row width.
     static let stackedItemHeight: CGFloat = 40
+    /// A section header names the group of the rows below it, such as a model route.
+    static let sectionHeaderHeight: CGFloat = 22
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @AccessibilityFocusState private var accessibilityFocus: PickerAccessibilityFocus?
@@ -230,6 +232,10 @@ public struct PickerOverlay: View {
                     ScrollView(.vertical, showsIndicators: true) {
                         LazyVStack(spacing: 0) {
                             ForEach(state.items) { item in
+                                // A section header is presentation only: it is not a button, has no activation identity, and selection, scrolling and clicks address the item below it.
+                                if let header = Self.sectionHeader(state.items, at: item.id) {
+                                    PickerSectionHeader(title: header)
+                                }
                                 Button {
                                     activate(item)
                                 } label: {
@@ -379,9 +385,25 @@ public struct PickerOverlay: View {
         item.stacksDescription ? stackedItemHeight : itemHeight
     }
 
-    /// The unclipped height of every row, which bounds the scrolling list.
+    /// The group to name in a section header above `items[index]`, or nil. A header goes above an item whose group is not empty and differs from the previous item's.
+    static func sectionHeader(_ items: [PickerItem], at index: Int) -> String? {
+        guard index >= 0, index < items.count else { return nil }
+        let group = items[index].group
+        if group.isEmpty { return nil }
+        if index > 0 && items[index - 1].group == group { return nil }
+        return group
+    }
+
+    /// The unclipped height of every row and section header, which bounds the scrolling list.
     static func listContentHeight(_ items: [PickerItem]) -> CGFloat {
-        items.reduce(CGFloat(0)) { $0 + rowHeight($1) }
+        var height: CGFloat = 0
+        for index in items.indices {
+            height += rowHeight(items[index])
+            if sectionHeader(items, at: index) != nil {
+                height += sectionHeaderHeight
+            }
+        }
+        return height
     }
 
     private func pickerItemAccessibilityValue(_ item: PickerItem) -> String {
@@ -449,6 +471,31 @@ public struct PickerOverlay: View {
 private enum PickerAccessibilityFocus: Hashable {
     case item(UInt32, UInt32)
     case action(UInt32, UInt32)
+}
+
+// MARK: - Section header
+
+/// A non-selectable row that names the group of the items below it.
+private struct PickerSectionHeader: View {
+    let title: String
+
+    @Environment(\.themeColors) private var theme
+
+    var body: some View {
+        HStack(spacing: Spacing.sm) {
+            Text(title)
+                .font(Typography.font(.small, weight: .semibold))
+                .foregroundStyle(theme.popupFg.opacity(0.5))
+                .lineLimit(1)
+                .truncationMode(.tail)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, Spacing.md)
+        .padding(.top, Spacing.xs)
+        .frame(height: PickerOverlay.sectionHeaderHeight, alignment: .bottomLeading)
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isHeader)
+    }
 }
 
 // MARK: - Picker item row (separate View for observation isolation)
