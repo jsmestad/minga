@@ -68,6 +68,8 @@ enum ApplicationCommitEffect: Equatable {
     case scrollPresentationReset(windowID: UInt16)
     case titleChanged(String)
     case windowBackgroundChanged(red: UInt8, green: UInt8, blue: UInt8)
+    /// The active tab's unsaved state changed; the app projects it onto the window's close button.
+    case documentEditedChanged(Bool)
     case linkCursorChanged(Bool)
     case lineSpacingChanged(Float)
     case cursorAnimationChanged(Bool)
@@ -133,6 +135,10 @@ final class CommandDispatcher {
     /// prepared `gui_line_spacing` command replays, so a `frameState`-local delta
     /// check would always miss the change (#2999 AC6 staging).
     private var lastLineSpacing: Float = 1.0
+
+    /// The last emitted `documentEditedChanged` value. Only deduplicates the
+    /// effect; the value itself is always derived from committed tab bar state.
+    private var lastDocumentEdited = false
 
     /// All GUI chrome sub-states. Injected at init from AppDelegate.
     /// Non-optional: forgetting to wire this is a compile-time error.
@@ -379,6 +385,7 @@ final class CommandDispatcher {
         frameState = FrameState(cols: cols, rows: rows)
         lastMode = .normal
         lastLineSpacing = 1.0
+        lastDocumentEdited = false
         pendingPresentationInputSeq = 0
         textPresentationLeases.replaceConnection()
         committedEditorSnapshot = nil
@@ -406,6 +413,7 @@ final class CommandDispatcher {
         guiState.resetProtocolConnection()
         applicationEffectSink(.linkCursorChanged(false))
         applicationEffectSink(.agentChatVisibilityChanged(false))
+        applicationEffectSink(.documentEditedChanged(false))
     }
 
     /// Returns true when a queued delivery or asynchronous callback belongs to the live connection.
@@ -709,6 +717,7 @@ final class CommandDispatcher {
             for command in focus.commands { apply(command, effects: &effects) }
         }
         if clearsResync { guiState.resyncState.clear() }
+        appendDocumentEditedEffect(effects: &effects)
         replay(effects)
         guiState.presentationMetrics.beginCommitted(frame: committed, impact: finalImpact)
         publicationCount += 1
@@ -723,7 +732,18 @@ final class CommandDispatcher {
     private func applyImmediately(_ command: RenderCommand) {
         var effects: [CommitEffect] = []
         apply(command, effects: &effects)
+        appendDocumentEditedEffect(effects: &effects)
         replay(effects)
+    }
+
+    /// Emits the window's unsaved indicator once every tab command in the
+    /// publication has been installed, so a frame that carries both
+    /// `gui_tab_bar` and `gui_workspaces` emits at most one settled value.
+    private func appendDocumentEditedEffect(effects: inout [CommitEffect]) {
+        let edited = guiState.tabBarState.activeTabHasUnsavedChanges
+        guard edited != lastDocumentEdited else { return }
+        lastDocumentEdited = edited
+        effects.append(.application(.documentEditedChanged(edited)))
     }
 
     /// Applies the one hover update prepared from all hover commands in a frame.
