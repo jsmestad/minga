@@ -109,8 +109,7 @@ defmodule MingaEditor.UI.Picker.WorkspaceTargetSource do
       label: workspace.label,
       description: target_description(workspace),
       annotation: target_annotation(workspace),
-      icon_color: workspace.color,
-      two_line: true
+      icon_color: workspace.color
     }
   end
 

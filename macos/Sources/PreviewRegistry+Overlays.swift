@@ -67,26 +67,33 @@ extension PreviewRegistry {
         .environment(theme)
     }
 
-    /// Model rows lead with readiness and plan usage and keep that start; the long path row keeps its file name.
+    /// Model rows carry readiness and plan usage in a status chip, one row per tone, with the current model marked and its description on a second line. The setup row has a chip too; the long path row keeps its file name inline.
     static func pickerModelRowsPreview() -> some View {
         let theme = PreviewFixtures.theme()
         let state = PickerState()
-        let keepStart: UInt8 = 0x05
+        let active: UInt8 = 0x08
+        let tail = "1000k ctx · thinking medium · tools, images, streaming"
+        let rows: [Wire.PickerItem] = [
+            Wire.PickerItem(iconColor: 0, flags: active, label: "Claude Opus 4", description: "Claude (subscription) · Claude Max · 5h limit resets 3:59 PM · \(tail)", annotation: "★ favorite", matchPositions: [], activationID: 1, status: "Ready · 45%", statusTone: .ready),
+            Wire.PickerItem(iconColor: 0, flags: 0, label: "Claude Sonnet 4", description: "Claude (subscription) · Claude Max · 5h limit resets 3:40 PM · \(tail)", annotation: "", matchPositions: [], activationID: 2, status: "Ready · 82%", statusTone: .warn),
+            Wire.PickerItem(iconColor: 0, flags: 0, label: "Claude Opus 4.1", description: "Claude (subscription) · Claude Max · 5h limit resets Sun 12:32 AM · \(tail)", annotation: "", matchPositions: [], activationID: 3, status: "Limit reached", statusTone: .error),
+            Wire.PickerItem(iconColor: 0, flags: 0, label: "Claude Haiku 4", description: "Claude (subscription) · Claude Max · checking plan usage · 200k ctx · thinking fixed", annotation: "", matchPositions: [], activationID: 4, status: "Checking…", statusTone: .checking),
+            Wire.PickerItem(iconColor: 0, flags: 0, label: "Claude Haiku 3.5", description: "Claude (subscription) · Run claude login in a terminal, then reopen /model. · 200k ctx", annotation: "", matchPositions: [], activationID: 5, status: "Unavailable", statusTone: .error),
+            Wire.PickerItem(iconColor: 0, flags: 0, label: "Claude Sonnet 4 (API)", description: "Anthropic API · api@example.com · $3/15 per MTok · 200k ctx · thinking medium", annotation: "", matchPositions: [], activationID: 6, status: "Ready", statusTone: .ready),
+            Wire.PickerItem(iconColor: 0, flags: 0, label: "Fixture Model", description: "Fixture Route · 200k ctx · thinking off · tools, images, streaming", annotation: "", matchPositions: [], activationID: 7, status: "Not checked", statusTone: .neutral),
+            Wire.PickerItem(iconColor: 0, flags: 0, label: "Use Claude subscription", description: "Uses the Claude app login. Minga never sees your login. · Claude Max", annotation: "", matchPositions: [], activationID: 8, status: "Ready", statusTone: .ready),
+            Wire.PickerItem(iconColor: 0x98BE65, flags: 0, label: "\u{f0e7}picker_item_row_test.exs", description: "test/minga_editor/render_model/ui/picker/agent_model_source/description_overflow/picker_item_row_test.exs", annotation: "", matchPositions: [], activationID: 9),
+        ]
         state.update(
             visible: true,
             selectedIndex: 1,
-            filteredCount: 4,
-            totalCount: 4,
+            filteredCount: UInt16(rows.count),
+            totalCount: UInt16(rows.count),
             markedCount: 0,
-            title: "Choose Model",
+            title: "Models and connections",
             query: "",
             hasPreview: false,
-            rawItems: [
-                Wire.PickerItem(iconColor: 0, flags: keepStart, label: "Claude Opus 4.5", description: "Claude subscription · Ready (Claude Max) · 70% of 5h limit · resets 2:50 PM · 200k ctx · thinking medium (low/medium/high) · tools yes, images yes, streaming yes · subscription", annotation: "", matchPositions: [], activationID: 1),
-                Wire.PickerItem(iconColor: 0, flags: keepStart, label: "Claude Sonnet 4.5", description: "Claude subscription · Ready (Claude Max) · 70% of 5h limit · resets Sun 12:32 AM · 200k ctx · thinking fixed · tools yes, images yes, streaming yes · subscription", annotation: "★ favorite", matchPositions: [], activationID: 2),
-                Wire.PickerItem(iconColor: 0, flags: keepStart, label: "Use Claude subscription", description: "Uses the Claude app login. Minga never sees your login. · Ready: Claude Max", annotation: "", matchPositions: [], activationID: 3),
-                Wire.PickerItem(iconColor: 0x98BE65, flags: 0x01, label: "\u{f0e7}picker_item_row_test.exs", description: "test/minga_editor/render_model/ui/picker/agent_model_source/description_overflow/picker_item_row_test.exs", annotation: "", matchPositions: [], activationID: 4),
-            ],
+            rawItems: rows,
             actionMenu: nil,
             modePrefix: "",
             activationGeneration: 1
@@ -96,7 +103,7 @@ extension PreviewRegistry {
             theme.editorBg
             PickerOverlay(state: state, sendAction: { _ in })
         }
-        .frame(width: 680, height: 400)
+        .frame(width: 680, height: 900)
         .clipped()
         .environment(theme)
     }
@@ -327,7 +334,7 @@ private struct PickerMixedScrollFixture: View {
 
     private static let rows: [Wire.PickerItem] = (0..<16).map { index in
         if index.isMultiple(of: 2) {
-            return Wire.PickerItem(iconColor: 0, flags: 0x05, label: "Model \(index)", description: "Claude subscription · Ready (Claude Max) · \(index * 5)% of 5h limit · resets 2:50 PM", annotation: "", matchPositions: [], activationID: UInt32(index + 1))
+            return Wire.PickerItem(iconColor: 0, flags: 0, label: "Model \(index)", description: "Claude (subscription) · Claude Max · 5h limit resets 2:50 PM", annotation: "", matchPositions: [], activationID: UInt32(index + 1), status: "Ready · \(index * 5)%", statusTone: .ready)
         }
         return Wire.PickerItem(iconColor: 0x98BE65, flags: 0, label: "\u{f0e7}file_\(index).ex", description: "lib/minga_editor/render_model/ui/picker/file_\(index).ex", annotation: "", matchPositions: [], activationID: UInt32(index + 1))
     }

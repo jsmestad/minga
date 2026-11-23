@@ -2011,12 +2011,14 @@ struct GUIPickerDecoderTests {
         appendU16(&items, 2) // itemCount
         // Item 1
         appendRGB(&items, 0x51, 0xAF, 0xEF)
-        items.append(0x01) // two_line
+        items.append(0x08) // active
         appendString16(&items, "editor.ex")
         appendString16(&items, "lib/minga/editor.ex")
         appendString16(&items, "500 lines")
         items.append(2); appendU16(&items, 0); appendU16(&items, 1)
         appendU32(&items, 23)
+        appendString16(&items, "Ready · 82%") // status
+        items.append(2) // status_tone warn
         // Item 2
         appendRGB(&items, 0x98, 0xBE, 0x65)
         items.append(0x02) // marked
@@ -2025,6 +2027,8 @@ struct GUIPickerDecoderTests {
         appendString16(&items, "")
         items.append(0)
         appendU32(&items, 29)
+        appendString16(&items, "") // no status
+        items.append(0) // status_tone none
 
         // Section 0x04: Action menu
         var actionMenu = Data()
@@ -2070,11 +2074,17 @@ struct GUIPickerDecoderTests {
         #expect(hasPreview == true)
         #expect(decodedItems.count == 2)
         #expect(decodedItems[0].label == "editor.ex")
-        #expect(decodedItems[0].isTwoLine == true)
+        #expect(decodedItems[0].isActive == true)
+        #expect(decodedItems[0].isMarked == false)
+        #expect(decodedItems[0].status == "Ready · 82%")
+        #expect(decodedItems[0].statusTone == .warn)
         #expect(decodedItems[0].matchPositions == [0, 1])
         #expect(decodedItems[0].activationID == 23)
         #expect(decodedItems[1].label == "edit_delta.ex")
         #expect(decodedItems[1].isMarked == true)
+        #expect(decodedItems[1].isActive == false)
+        #expect(decodedItems[1].status == "")
+        #expect(decodedItems[1].statusTone == .absent)
 
         #expect(decodedMenu != nil)
         #expect(decodedMenu?.actions == ["Open", "Split Right"])

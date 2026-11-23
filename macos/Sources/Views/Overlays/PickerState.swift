@@ -20,7 +20,7 @@ public struct PickerActivationIdentity: Equatable, Sendable {
 }
 
 public struct PickerItem: Identifiable {
-    public init(id: Int, activation: PickerActivationIdentity = PickerActivationIdentity(generation: 0, activationID: 0), iconColor: UInt32, label: String, description: String, annotation: String, matchPositions: [UInt16], isTwoLine: Bool, isMarked: Bool, keepsDescriptionStart: Bool = false) {
+    public init(id: Int, activation: PickerActivationIdentity = PickerActivationIdentity(generation: 0, activationID: 0), iconColor: UInt32, label: String, description: String, annotation: String, matchPositions: [UInt16], isMarked: Bool, isActive: Bool = false, status: String = "", statusTone: Wire.PickerStatusTone = .absent) {
         self.id = id
         self.activation = activation
         self.iconColor = iconColor
@@ -28,9 +28,10 @@ public struct PickerItem: Identifiable {
         self.description = description
         self.annotation = annotation
         self.matchPositions = matchPositions
-        self.isTwoLine = isTwoLine
         self.isMarked = isMarked
-        self.keepsDescriptionStart = keepsDescriptionStart
+        self.isActive = isActive
+        self.status = status
+        self.statusTone = statusTone
     }
     public let id: Int
     public let activation: PickerActivationIdentity
@@ -39,14 +40,21 @@ public struct PickerItem: Identifiable {
     public let description: String
     public let annotation: String
     public let matchPositions: [UInt16]
-    public let isTwoLine: Bool
     public let isMarked: Bool
-    /// The BEAM marks status-like descriptions whose start carries the meaning (a model row's readiness and plan usage). Without the mark the description is path-like and keeps its end visible.
-    public let keepsDescriptionStart: Bool
+    /// The item is the current value, such as the current model.
+    public let isActive: Bool
+    /// BEAM-authored status chip text, such as a model row's readiness and plan usage. Rendered verbatim.
+    public let status: String
+    public let statusTone: Wire.PickerStatusTone
 
-    /// A description whose start carries the meaning gets its own line under the label; a path stays inline and keeps its end.
+    /// Whether the row shows a status chip.
+    public var hasStatus: Bool {
+        !status.isEmpty && statusTone != .absent
+    }
+
+    /// A row with a status chip puts its description on a second line and keeps the description's start. A row without one stays inline and keeps the end of a path.
     public var stacksDescription: Bool {
-        keepsDescriptionStart && !description.isEmpty
+        hasStatus && !description.isEmpty
     }
 
     /// Whether the label starts with a separate icon glyph.
@@ -201,9 +209,10 @@ public final class PickerState {
                 description: item.description,
                 annotation: item.annotation,
                 matchPositions: item.matchPositions,
-                isTwoLine: item.isTwoLine,
                 isMarked: item.isMarked,
-                keepsDescriptionStart: item.keepsDescriptionStart
+                isActive: item.isActive,
+                status: item.status,
+                statusTone: item.statusTone
             )
         }
         self.items = nextItems

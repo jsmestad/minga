@@ -105,8 +105,7 @@ defmodule MingaEditor.UI.Picker.WorkspaceSymbolSource do
     %Item{
       id: {path, line, col},
       label: label,
-      description: description,
-      two_line: true
+      description: description
     }
   end
 

@@ -232,7 +232,6 @@ defmodule MingaEditor.UI.Picker.DirectorySource do
       description: "",
       icon_color: color,
       search_text: name,
-      two_line: true,
       meta: %{filesystem_kind: kind}
     }
   end

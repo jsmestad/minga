@@ -424,6 +424,7 @@ Per item:
   icon_color(3) + flags(1) + label_len(2) + label(label_len)
   + desc_len(2) + desc(desc_len) + annotation_len(2) + annotation(annotation_len)
   + match_pos_count(1) + match_positions(match_pos_count * 2) + activation_id(4)
+  + status_len(2) + status(status_len) + status_tone(1)
 
 ActionMenu section 0x04 payload:
   action_visible(1)
@@ -437,10 +438,14 @@ ModePrefix section 0x05 payload:
 
 icon_color is a 24-bit RGB value for the item's icon.
 flags bits:
-  bit 0: two_line (render description on second line)
+  bit 0: reserved, written as 0 (was two_line before protocol_version 41)
   bit 1: marked (multi-select checkmark)
-  bit 2: keep_description_start (the description leads with its important facts, such as a model row's readiness and plan usage; when it does not fit, shorten its end. When clear, the description is path-like and its end matters most)
-annotation is a right-aligned string (e.g., keybinding "SPC f s").
+  bit 2: reserved, written as 0 (was keep_description_start before protocol_version 41)
+  bit 3: active (the item is the current value, such as the current model; frontends draw a current-value marker)
+annotation is a right-aligned string (e.g., keybinding "SPC f s", or "★ favorite" on a model row).
+status is a short status chip (at most 24 display columns), such as a model row's readiness and plan usage ("Ready · 45%", "Limit reached"). It is empty when the item has no chip. Frontends render the text verbatim and never parse it.
+status_tone is the chip's tone: 0 none (no chip), 1 ready, 2 warn, 3 error, 4 checking, 5 neutral. Frontends map the tone to their own colors and also show it as text or a glyph, never by color alone.
+Row layout: a row with a non-empty status always shows the chip. It keeps the start of its description (macOS stacks the description on a second line; the terminal shortens the description's end). A row without a status keeps today's inline layout and keeps the end of a long description, because paths matter most at their end.
 match_positions is a list of uint16 character indices for highlighting matched characters.
 has_preview indicates whether the picker source supports preview (triggers split layout).
 filtered_count and total_count enable "X/Y" display in the search field.

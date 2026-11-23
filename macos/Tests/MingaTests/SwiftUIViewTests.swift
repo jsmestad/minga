@@ -1861,15 +1861,15 @@ struct PickerOverlayActivationTests {
         #expect(!choice.isDisabled())
     }
 
-    @Test("A stacked status row still reads its description to VoiceOver")
+    @Test("A stacked status row reads its current marker, status, and description to VoiceOver")
     @MainActor func stackedRowAccessibility() throws {
-        let description = "Claude subscription · Ready (Claude Max) · 70% of 5h limit · resets 2:50 PM"
+        let description = "Claude (subscription) · Claude Max · 5h limit resets 2:50 PM"
         let state = PickerState()
         state.update(
             visible: true, selectedIndex: 0, filteredCount: 1, totalCount: 1,
             markedCount: 0, title: "Choose Model", query: "", hasPreview: false,
             rawItems: [
-                Wire.PickerItem(iconColor: 0, flags: 0x05, label: "Claude Opus 4.5", description: description, annotation: "", matchPositions: [], activationID: 41),
+                Wire.PickerItem(iconColor: 0, flags: 0x08, label: "Claude Opus 4.5", description: description, annotation: "", matchPositions: [], activationID: 41, status: "Ready · 70%", statusTone: .ready),
             ],
             actionMenu: nil, activationGeneration: 99
         )
@@ -1881,7 +1881,48 @@ struct PickerOverlayActivationTests {
             (try? $0.accessibilityLabel().string()) == "Claude Opus 4.5"
         })
 
-        #expect(try row.accessibilityValue().string() == "selected, \(description)")
+        #expect(try row.accessibilityValue().string() == "selected, current, Ready · 70%, \(description)")
+    }
+
+    @Test("A model row draws its status chip and current dot; a file row draws neither")
+    @MainActor func statusChipAndCurrentDot() throws {
+        let state = PickerState()
+        let model = Wire.PickerItem(iconColor: 0, flags: 0x08, label: "Claude Opus 4", description: "Claude Max", annotation: "★ favorite", matchPositions: [], activationID: 41, status: "Ready · 45%", statusTone: .ready)
+        let file = Wire.PickerItem(iconColor: 0, flags: 0, label: "editor.ex", description: "lib/minga", annotation: "", matchPositions: [], activationID: 42)
+        state.update(
+            visible: true, selectedIndex: 1, filteredCount: 2, totalCount: 2,
+            markedCount: 0, title: "Models and connections", query: "", hasPreview: false,
+            rawItems: [model, file],
+            actionMenu: nil, activationGeneration: 99
+        )
+        let body = try PickerOverlay(state: state, sendAction: nil)
+            .environment(\.themeColors, ThemeColors())
+            .inspect()
+        let modelRow = try #require(body.findAll(ViewType.Button.self).first {
+            (try? $0.accessibilityLabel().string()) == "Claude Opus 4"
+        })
+        let fileRow = try #require(body.findAll(ViewType.Button.self).first {
+            (try? $0.accessibilityLabel().string()) == "editor.ex"
+        })
+
+        var modelTexts: [String] = []
+        for text in modelRow.findAll(ViewType.Text.self) {
+            if let value = try? text.string() { modelTexts.append(value) }
+        }
+        var modelImages: [String] = []
+        for image in modelRow.findAll(ViewType.Image.self) {
+            if let name = try? image.actualImage().name() { modelImages.append(name) }
+        }
+        var fileImages: [String] = []
+        for image in fileRow.findAll(ViewType.Image.self) {
+            if let name = try? image.actualImage().name() { fileImages.append(name) }
+        }
+
+        #expect(modelTexts.contains("Ready · 45%"))
+        #expect(modelTexts.contains("★ favorite"))
+        #expect(modelImages.contains("circle.fill"))
+        #expect(!fileImages.contains("circle.fill"))
+        #expect(fileRow.findAll(ViewType.Text.self).count == 2)
     }
 
     @Test("Picker choices expose selected marked and unavailable state")

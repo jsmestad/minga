@@ -68,14 +68,12 @@ defmodule MingaEditor.UI.Picker.AgentQueuedInputSource do
        %Item{
          id: {:edit, origin, entry.identity},
          label: "Edit queued input",
-         description: entry_label(entry),
-         two_line: true
+         description: entry_label(entry)
        },
        %Item{
          id: {:withdraw, origin, entry.identity},
          label: "Withdraw queued input",
-         description: entry_label(entry),
-         two_line: true
+         description: entry_label(entry)
        }
      ], %{status: "This does not change the composer draft."}}
   end
@@ -185,8 +183,7 @@ defmodule MingaEditor.UI.Picker.AgentQueuedInputSource do
     %Item{
       id: {:confirm, origin, entry},
       label: entry_label(entry),
-      description: "#{entry.attachment_count} attachments",
-      two_line: true
+      description: "#{entry.attachment_count} attachments"
     }
   end
 

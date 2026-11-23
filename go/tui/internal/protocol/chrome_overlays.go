@@ -143,8 +143,8 @@ func decodePicker(payload []byte) (Picker, string, int) {
 }
 
 // mapPickerItems lowers the generated PickerItem (raw flags only) into the
-// protocol PickerItem the UI consumes, deriving the TwoLine/Marked booleans
-// from the flag bits exactly as the old hand decode did.
+// protocol PickerItem the UI consumes, deriving the Marked (bit 1) and Active
+// (bit 3) booleans from the flag bits. Bits 0 and 2 are reserved.
 func mapPickerItems(items []generated.PickerItem) []PickerItem {
 	if items == nil {
 		return nil
@@ -158,8 +158,10 @@ func mapPickerItems(items []generated.PickerItem) []PickerItem {
 			Label:        item.Label,
 			Description:  item.Description,
 			Annotation:   item.Annotation,
-			TwoLine:      item.Flags&0x01 != 0,
 			Marked:       item.Flags&0x02 != 0,
+			Active:       item.Flags&0x08 != 0,
+			Status:       item.Status,
+			StatusTone:   item.StatusTone,
 		})
 	}
 	return out

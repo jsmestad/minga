@@ -44,8 +44,7 @@ defmodule MingaEditor.UI.Picker.RemoteFileSource do
       id: {:remote_file, server_name, path},
       label: "#{icon} #{filename}",
       description: "[#{server_name}] #{rel_dir}",
-      icon_color: color,
-      two_line: true
+      icon_color: color
     }
   end
 

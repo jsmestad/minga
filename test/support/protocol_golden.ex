@@ -465,17 +465,21 @@ defmodule Minga.Test.ProtocolGolden do
         description: "desc",
         annotation: "ann",
         match_positions: [1, 4],
-        activation_id: 23
+        activation_id: 23,
+        status: "",
+        status_tone: :none
       },
       %{
-        # two_line sets bit 0, marked sets bit 1 => 0b11 = 3
+        # marked sets bit 1, active sets bit 3 => 0b1010 = 10; a warn status chip
         icon_color: 0,
-        flags: 3,
+        flags: 10,
         label: "x",
         description: "",
-        annotation: "",
+        annotation: "★ favorite",
         match_positions: [],
-        activation_id: 0
+        activation_id: 0,
+        status: "Ready · 82%",
+        status_tone: :warn
       }
     ]
 
@@ -491,7 +495,9 @@ defmodule Minga.Test.ProtocolGolden do
       description: "",
       annotation: "",
       match_positions: Enum.to_list(0..254),
-      activation_id: 0xFFFF_FFFF
+      activation_id: 0xFFFF_FFFF,
+      status: "",
+      status_tone: :none
     }
 
     payload = section_body(picker_command(picker_model(items)), 0x03)
@@ -501,7 +507,7 @@ defmodule Minga.Test.ProtocolGolden do
         name: "picker_items_list",
         decoder: "GuiPickerItems",
         payload: payload,
-        expected: items
+        expected: Enum.map(items, &picker_item_expected/1)
       },
       %{
         name: "picker_items_empty",
@@ -513,9 +519,22 @@ defmodule Minga.Test.ProtocolGolden do
         name: "picker_items_match_positions_max",
         decoder: "GuiPickerItems",
         payload: section_body(picker_command(picker_model([boundary_max])), 0x03),
-        expected: [boundary_max]
+        expected: [picker_item_expected(boundary_max)]
       }
     ]
+  end
+
+  # Decoders surface the status tone as its wire byte (none 0, ready 1, warn 2, error 3, checking 4,
+  # neutral 5), so the expectation carries the byte rather than the encoder's atom.
+  @spec picker_item_expected(map()) :: map()
+  defp picker_item_expected(item) do
+    tone =
+      Map.fetch!(
+        %{none: 0, ready: 1, warn: 2, error: 3, checking: 4, neutral: 5},
+        item.status_tone
+      )
+
+    %{item | status_tone: tone}
   end
 
   # ── Fixtures: gui_picker action menu (GuiPickerActionMenu) ────────────────

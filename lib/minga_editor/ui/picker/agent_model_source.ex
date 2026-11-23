@@ -27,6 +27,7 @@ defmodule MingaEditor.UI.Picker.AgentModelSource do
   alias MingaEditor.UI.Picker.Candidate
   alias MingaEditor.UI.Picker.Context
   alias MingaEditor.UI.Picker.Item
+  alias MingaEditor.UI.Picker.Item.Status
   alias MingaEditor.UI.Picker.Source
   @impl true
   @spec title() :: String.t()
@@ -227,17 +228,22 @@ defmodule MingaEditor.UI.Picker.AgentModelSource do
 
   defp route_setup_items(_remote), do: []
 
+  # The chip shows readiness; the description keeps the action's own words and the account or
+  # remedy.
   @spec setup_item(MingaAgent.InferenceRouteRegistry.Entry.t()) :: Item.t()
   defp setup_item(%{spec: %{setup_action: action} = spec, status: status}) do
     %Item{
       id: {:route_setup, spec.id},
       label: action.label,
-      description: "#{action.description} · #{setup_readiness(status)}",
-      search_text: "#{action.label} #{spec.display_name} setup",
-      two_line: true,
-      description_overflow: :keep_start
+      description: "#{action.description} · #{setup_detail(status)}",
+      status: availability_status(status),
+      search_text: "#{action.label} #{spec.display_name} setup"
     }
   end
+
+  @spec setup_detail(InferenceRouteStatus.t()) :: String.t()
+  defp setup_detail(%{availability: {:ready, account}}), do: account
+  defp setup_detail(status), do: setup_readiness(status)
 
   @doc "Describes a route's readiness for its setup row, using the route's own account and remedy text."
   @spec setup_readiness(MingaAgent.InferenceRoute.Status.t()) :: String.t()
@@ -415,6 +421,8 @@ defmodule MingaEditor.UI.Picker.AgentModelSource do
 
   defp status_label(_status), do: "Connection needs attention. Connect a provider or retry."
 
+  # A contributed route's readiness and plan usage live in the status chip. The description names
+  # the route, then the account, remedy or plan reset, then the model's details.
   @spec format_candidate(ModelCandidate.t()) :: Item.t()
   defp format_candidate(
          %ModelCandidate{
@@ -423,17 +431,18 @@ defmodule MingaEditor.UI.Picker.AgentModelSource do
          } = candidate
        ) do
     route = selection.route
+    policy = selection.policy
 
     description =
       [
         route_name,
-        readiness_label(status),
-        plan_usage_label(status, selection.policy),
-        format_context(selection.policy.limits.context),
-        format_thinking(selection),
-        format_capabilities(selection),
-        cost_mode_label(selection.policy)
+        route_detail(status, policy),
+        metered_cost(policy),
+        format_context(policy.limits.context),
+        compact_thinking(selection),
+        compact_capabilities(policy.capabilities)
       ]
+      |> List.flatten()
       |> Enum.reject(&(&1 in [nil, ""]))
       |> Enum.join(" · ")
 
@@ -442,9 +451,8 @@ defmodule MingaEditor.UI.Picker.AgentModelSource do
       label: route.display_name,
       description: description,
       annotation: if(candidate.favorite, do: "★ favorite", else: nil),
+      status: route_status(status, policy),
       search_text: "#{route_name} #{route.model_provider} #{route.model_id}",
-      two_line: true,
-      description_overflow: :keep_start,
       active: candidate.current
     }
   end
@@ -480,8 +488,6 @@ defmodule MingaEditor.UI.Picker.AgentModelSource do
       annotation: if(candidate.favorite, do: "★ favorite", else: nil),
       search_text:
         "#{route.model_provider} #{route.model_id} #{route.execution.wire_protocol} #{endpoint} #{credential}",
-      two_line: true,
-      description_overflow: :keep_start,
       active: candidate.current
     }
   end
@@ -522,24 +528,76 @@ defmodule MingaEditor.UI.Picker.AgentModelSource do
 
   defp format_context(_), do: ""
 
-  @spec readiness_label(MingaAgent.InferenceRoute.Status.t()) :: String.t()
-  defp readiness_label(%{availability: {:ready, account}}), do: "Ready (#{account})"
+  # Plan usage at or above this percentage of the busiest window warns before the limit is reached.
+  @warn_percent 80
 
-  defp readiness_label(%{availability: {:unavailable, _reason, remedy}}),
-    do: "Unavailable: #{remedy}"
+  @typep plan_state ::
+           :checking
+           | :unreported
+           | {:limit_reached, PlanWindow.t()}
+           | {:near_limit, PlanWindow.t()}
+           | {:within_limit, PlanWindow.t()}
 
-  defp readiness_label(%{availability: :unknown}), do: "Availability not checked"
-
-  # The busiest reported window, such as "82% of 5h limit · resets 3:40 PM"; nothing without data.
-  # A ready subscription route measures its plan beside the availability check, so until its first
-  # usage report the row says the check is under way. Metered routes have no plan to report.
-  @spec plan_usage_label(InferenceRouteStatus.t(), ModelSelection.Policy.t()) :: String.t()
-  defp plan_usage_label(%InferenceRouteStatus{plan_usage: :unreported} = status, policy) do
-    if awaits_plan_usage?(status, policy), do: "Checking plan usage…", else: ""
+  # The chip for a contributed model route: readiness and the busiest plan window's usage. A ready
+  # subscription route measures its plan beside the availability check, so until its first usage
+  # report the chip says the check is under way. Metered routes have no plan to report. A reached
+  # limit is an error, but the row stays selectable.
+  @spec route_status(InferenceRouteStatus.t(), ModelSelection.Policy.t()) :: Status.t()
+  defp route_status(%InferenceRouteStatus{availability: {:ready, _account}} = status, policy) do
+    case plan_state(status, policy) do
+      :checking -> Status.new(:checking, "Checking…")
+      :unreported -> Status.new(:ready, "Ready")
+      {:limit_reached, _window} -> Status.new(:error, "Limit reached")
+      {:near_limit, window} -> Status.new(:warn, "Ready · #{PlanWindow.percent(window)}%")
+      {:within_limit, window} -> Status.new(:ready, "Ready · #{PlanWindow.percent(window)}%")
+    end
   end
 
-  defp plan_usage_label(status, _policy),
-    do: reported_usage_label(InferenceRouteStatus.plan_windows(status))
+  defp route_status(status, _policy), do: availability_status(status)
+
+  @spec availability_status(InferenceRouteStatus.t()) :: Status.t()
+  defp availability_status(%{availability: {:ready, _account}}), do: Status.new(:ready, "Ready")
+
+  defp availability_status(%{availability: {:unavailable, _reason, _remedy}}),
+    do: Status.new(:error, "Unavailable")
+
+  defp availability_status(%{availability: :unknown}), do: Status.new(:neutral, "Not checked")
+
+  # The account with the plan detail the chip leaves out, the remedy, or only the plan detail when
+  # unchecked.
+  @spec route_detail(InferenceRouteStatus.t(), ModelSelection.Policy.t()) :: [String.t()]
+  defp route_detail(%InferenceRouteStatus{availability: {:ready, account}} = status, policy),
+    do: [account, plan_detail(plan_state(status, policy))]
+
+  defp route_detail(%{availability: {:unavailable, _reason, remedy}}, _policy), do: [remedy]
+
+  defp route_detail(%InferenceRouteStatus{availability: :unknown} = status, policy),
+    do: [plan_detail(plan_state(status, policy))]
+
+  @spec plan_detail(plan_state()) :: String.t()
+  defp plan_detail(:checking), do: "checking plan usage"
+  defp plan_detail(:unreported), do: ""
+  defp plan_detail({_state, window}), do: window_reset_label(window)
+
+  @spec plan_state(InferenceRouteStatus.t(), ModelSelection.Policy.t()) :: plan_state()
+  defp plan_state(%InferenceRouteStatus{plan_usage: :unreported} = status, policy) do
+    if awaits_plan_usage?(status, policy), do: :checking, else: :unreported
+  end
+
+  defp plan_state(status, _policy) do
+    windows = InferenceRouteStatus.plan_windows(status)
+
+    case {PlanWindow.rejected(windows), PlanWindow.busiest(windows)} do
+      {nil, nil} -> :unreported
+      {%PlanWindow{} = rejected, _busiest} -> {:limit_reached, rejected}
+      {nil, window} -> usage_state(window, PlanWindow.percent(window))
+    end
+  end
+
+  @spec usage_state(PlanWindow.t(), non_neg_integer()) :: plan_state()
+  defp usage_state(window, percent) when percent >= 100, do: {:limit_reached, window}
+  defp usage_state(window, percent) when percent >= @warn_percent, do: {:near_limit, window}
+  defp usage_state(window, _percent), do: {:within_limit, window}
 
   @spec awaits_plan_usage?(InferenceRouteStatus.t(), ModelSelection.Policy.t()) :: boolean()
   defp awaits_plan_usage?(status, %{cost_mode: :subscription}),
@@ -547,23 +605,40 @@ defmodule MingaEditor.UI.Picker.AgentModelSource do
 
   defp awaits_plan_usage?(_status, _policy), do: false
 
-  @spec reported_usage_label([PlanWindow.t()] | nil) :: String.t()
-  defp reported_usage_label(windows) do
-    case PlanWindow.busiest(windows) do
-      nil -> ""
-      window -> usage_text(window, MingaAgent.InferenceRouteRegistry.reset_label(window))
+  # "5h limit resets 3:40 PM", or "5h limit" when the route does not know the reset time.
+  @spec window_reset_label(PlanWindow.t()) :: String.t()
+  defp window_reset_label(window) do
+    limit = "#{PlanWindow.kind_label(window.kind)} limit"
+
+    case MingaAgent.InferenceRouteRegistry.reset_label(window) do
+      nil -> limit
+      reset -> "#{limit} resets #{reset}"
     end
   end
 
-  @spec usage_text(PlanWindow.t(), String.t() | nil) :: String.t()
-  defp usage_text(window, nil),
-    do: "#{PlanWindow.percent(window)}% of #{PlanWindow.kind_label(window.kind)} limit"
+  # Subscription routes are paid by the plan the chip reports, so only metered routes show a price.
+  @spec metered_cost(ModelSelection.Policy.t()) :: String.t()
+  defp metered_cost(%{cost_mode: :subscription}), do: ""
+  defp metered_cost(%{cost: cost}), do: format_cost(cost)
 
-  defp usage_text(window, reset), do: "#{usage_text(window, nil)} · resets #{reset}"
+  @spec compact_thinking(ModelSelection.t()) :: String.t()
+  defp compact_thinking(%ModelSelection{policy: %{reasoning: %{options: [_only]}}}),
+    do: "thinking fixed"
 
-  @spec cost_mode_label(ModelSelection.Policy.t()) :: String.t()
-  defp cost_mode_label(%{cost_mode: :subscription}), do: "subscription"
-  defp cost_mode_label(%{cost: cost}), do: format_cost(cost)
+  defp compact_thinking(%ModelSelection{policy: %{reasoning: reasoning}}),
+    do: "thinking #{reasoning.effort}"
+
+  # Supported capabilities by name, such as "tools, images, streaming"; others say "no images" or
+  # "images unknown".
+  @spec compact_capabilities(map()) :: String.t()
+  defp compact_capabilities(capabilities) do
+    [tools: capabilities.tools, images: capabilities.images, streaming: capabilities.streaming]
+    |> Enum.map_join(", ", fn
+      {name, true} -> "#{name}"
+      {name, false} -> "no #{name}"
+      {name, :unknown} -> "#{name} unknown"
+    end)
+  end
 
   @spec evidence_label(ModelSelection.Route.request_provider()) :: String.t()
   defp evidence_label(:apple), do: "Ready on this device"

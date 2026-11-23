@@ -368,6 +368,13 @@ public struct PickerOverlay: View {
         }
     }
 
+    /// The row's spoken label: the name, then its status, then its description.
+    static func rowAccessibilityLabel(_ item: PickerItem) -> String {
+        [item.displayLabel, item.hasStatus ? item.status : "", item.description]
+            .filter { !$0.isEmpty }
+            .joined(separator: ", ")
+    }
+
     static func rowHeight(_ item: PickerItem) -> CGFloat {
         item.stacksDescription ? stackedItemHeight : itemHeight
     }
@@ -382,6 +389,12 @@ public struct PickerOverlay: View {
         values.append(item.id == state.effectiveSelectedIndex ? "selected" : "available")
         if item.isMarked {
             values.append("marked")
+        }
+        if item.isActive {
+            values.append("current")
+        }
+        if item.hasStatus {
+            values.append(item.status)
         }
         if !item.activation.isAvailable {
             values.append("unavailable")
@@ -450,7 +463,7 @@ private struct PickerItemRow: View {
 
     var body: some View {
         HStack(spacing: Spacing.sm) {
-            itemCheckmark
+            leadingSlot
             itemIcon
             if item.stacksDescription {
                 VStack(alignment: .leading, spacing: Spacing.hairline) {
@@ -458,6 +471,7 @@ private struct PickerItemRow: View {
                         highlightedLabel
                         Spacer(minLength: 4)
                         itemAnnotation
+                        statusChip
                     }
                     highlightedDescription
                 }
@@ -470,6 +484,7 @@ private struct PickerItemRow: View {
 
                 Spacer(minLength: 4)
                 itemAnnotation
+                statusChip
             }
         }
         .padding(.horizontal, Spacing.md)
@@ -477,20 +492,57 @@ private struct PickerItemRow: View {
         .background(selectionBackground)
         .id(item.id)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(Text(item.displayLabel + (item.description.isEmpty ? "" : ", " + item.description)))
+        .accessibilityLabel(Text(PickerOverlay.rowAccessibilityLabel(item)))
         .accessibilityAddTraits(isSelected ? [.isSelected] : [])
     }
 
     // MARK: - Subviews
 
+    /// The 14pt leading slot: a checkmark for a marked row, otherwise a dot for the current value.
     @ViewBuilder
-    private var itemCheckmark: some View {
+    private var leadingSlot: some View {
         Image(systemName: "checkmark.circle.fill")
             .font(Typography.font(.small))
             .foregroundStyle(theme.accent)
             .frame(width: 14)
             .opacity(item.isMarked ? 1 : 0)
+            .overlay {
+                if !item.isMarked && item.isActive {
+                    Image(systemName: "circle.fill")
+                        .font(Typography.font(.symbol))
+                        .foregroundStyle(theme.accent)
+                }
+            }
             .accessibilityHidden(true)
+    }
+
+    /// The BEAM's status text in a tinted chip. The text always carries the meaning; the tone only colors it.
+    @ViewBuilder
+    private var statusChip: some View {
+        if item.hasStatus {
+            let tone = statusToneColor(item.statusTone)
+            Text(item.status)
+                .font(Typography.font(.small, design: .monospaced))
+                .foregroundStyle(tone)
+                .lineLimit(1)
+                .padding(.horizontal, Spacing.xs)
+                .padding(.vertical, Spacing.pixel)
+                .background(
+                    RoundedRectangle(cornerRadius: Radius.sm)
+                        .fill(tone.opacity(0.12))
+                )
+                .fixedSize()
+                .layoutPriority(1)
+        }
+    }
+
+    private func statusToneColor(_ tone: Wire.PickerStatusTone) -> Color {
+        switch tone {
+        case .ready: return theme.gitAddedFg
+        case .warn: return theme.gutterWarningFg
+        case .error: return theme.gutterErrorFg
+        case .checking, .neutral, .absent: return theme.popupFg.opacity(0.5)
+        }
     }
 
     @ViewBuilder
@@ -515,6 +567,7 @@ private struct PickerItemRow: View {
                     RoundedRectangle(cornerRadius: Radius.sm)
                         .fill(theme.popupFg.opacity(0.06))
                 )
+                .layoutPriority(item.hasStatus ? 1 : 0)
         }
     }
 
@@ -570,9 +623,9 @@ private struct PickerItemRow: View {
         }
     }
 
-    /// Paths keep their end (the file name); status text keeps its start (readiness and usage).
+    /// Paths keep their end (the file name). A row with a status chip keeps the start of its description (the route and account).
     private var descriptionTruncation: Text.TruncationMode {
-        item.keepsDescriptionStart ? .tail : .head
+        item.hasStatus ? .tail : .head
     }
 
     // MARK: - Helpers
@@ -611,7 +664,7 @@ private func pickerPreviewState() -> PickerState {
         hasPreview: false,
         rawItems: [
             Wire.PickerItem(iconColor: 0x98BE65, flags: 0, label: "\u{f0e7}editor.ex", description: "lib/minga/editor.ex", annotation: "", matchPositions: [1, 2, 3, 4]),
-            Wire.PickerItem(iconColor: 0x98BE65, flags: 0x01, label: "\u{f0e7}editor_test.exs", description: "test/minga/editor_test.exs", annotation: "test", matchPositions: [1, 2, 3, 4]),
+            Wire.PickerItem(iconColor: 0x98BE65, flags: 0, label: "\u{f0e7}editor_test.exs", description: "test/minga/editor_test.exs", annotation: "test", matchPositions: [1, 2, 3, 4]),
             Wire.PickerItem(iconColor: 0x51AFEF, flags: 0, label: "\u{f0e7}EditorNSView.swift", description: "macos/Sources/EditorNSView.swift", annotation: "swift", matchPositions: [1, 2, 3, 4]),
             Wire.PickerItem(iconColor: 0xECBE7B, flags: 0, label: "\u{f085}edit_mode.ex", description: "lib/minga/mode/edit_mode.ex", annotation: "", matchPositions: [1, 2, 3, 4]),
             Wire.PickerItem(iconColor: 0xC678DD, flags: 0, label: "\u{f0e7}editor_config.ex", description: "lib/minga/editor/config.ex", annotation: "", matchPositions: [1, 2, 3, 4]),

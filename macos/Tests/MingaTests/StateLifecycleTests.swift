@@ -204,7 +204,7 @@ struct PickerStateLifecycleTests {
     @MainActor func updateConverts() {
         let state = PickerState()
         let raw = [
-            Wire.PickerItem(iconColor: 0x51AFEF, flags: 0x01, label: "editor.ex",
+            Wire.PickerItem(iconColor: 0x51AFEF, flags: 0x00, label: "editor.ex",
                          description: "lib/minga/editor.ex", annotation: "500 lines",
                          matchPositions: [0, 3]),
             Wire.PickerItem(iconColor: 0x98BE65, flags: 0x02, label: "test.ex",
@@ -227,58 +227,79 @@ struct PickerStateLifecycleTests {
         #expect(state.totalCount == 50)
         #expect(state.markedCount == 7)
         #expect(state.items.count == 2)
-        #expect(state.items[0].isTwoLine == true)
         #expect(state.items[0].isMarked == false)
+        #expect(state.items[0].isActive == false)
         #expect(state.items[0].matchPositions == [0, 3])
         #expect(state.items[1].isMarked == true)
-        #expect(state.items[0].keepsDescriptionStart == false)
-        #expect(state.items[1].keepsDescriptionStart == false)
+        #expect(state.items[0].hasStatus == false)
+        #expect(state.items[1].hasStatus == false)
         #expect(state.actionMenu != nil)
         #expect(state.actionMenu?.actions == ["Open", "Split"])
     }
 
-    @Test("update() keeps a status description's start only when the BEAM marks it")
-    @MainActor func updateCarriesDescriptionOverflow() {
+    @Test("update() carries the status chip and the current-value flag")
+    @MainActor func updateCarriesStatusAndActive() {
         let state = PickerState()
-        let raw = [
-            Wire.PickerItem(iconColor: 0, flags: 0x05, label: "Claude Opus 4.5",
-                         description: "Claude subscription · Ready (Claude Max) · 70% of 5h limit · resets 2:50 PM",
-                         annotation: "", matchPositions: []),
-            Wire.PickerItem(iconColor: 0, flags: 0x01, label: "editor.ex",
-                         description: "lib/minga/editor.ex", annotation: "", matchPositions: [])
-        ]
+        let model = Wire.PickerItem(iconColor: 0, flags: 0x08, label: "Claude Opus 4",
+                                    description: "Claude (subscription) · Claude Max · 5h limit resets 3:59 PM",
+                                    annotation: "★ favorite", matchPositions: [], activationID: 1,
+                                    status: "Limit reached", statusTone: .error)
+        let file = Wire.PickerItem(iconColor: 0, flags: 0x02, label: "editor.ex",
+                                   description: "lib/minga/editor.ex", annotation: "", matchPositions: [],
+                                   activationID: 2)
 
         state.update(visible: true, selectedIndex: 0, filteredCount: 2,
-                     totalCount: 2, markedCount: 0, title: "Choose Model", query: "",
-                     hasPreview: false, rawItems: raw, actionMenu: nil, modePrefix: "")
+                     totalCount: 2, markedCount: 1, title: "Models and connections", query: "",
+                     hasPreview: false, rawItems: [model, file], actionMenu: nil, modePrefix: "")
 
-        #expect(state.items[0].keepsDescriptionStart == true)
-        #expect(state.items[0].isTwoLine == true)
+        #expect(state.items[0].isActive == true)
         #expect(state.items[0].isMarked == false)
-        #expect(state.items[1].keepsDescriptionStart == false)
+        #expect(state.items[0].status == "Limit reached")
+        #expect(state.items[0].statusTone == .error)
+        #expect(state.items[0].hasStatus == true)
+        #expect(state.items[1].isActive == false)
+        #expect(state.items[1].isMarked == true)
+        #expect(state.items[1].hasStatus == false)
     }
 
-    @Test("only a marked non-empty description stacks, and the list height sums each row")
+    @Test("only a row with a status chip and a description stacks, and the list height sums each row")
     @MainActor func stackedRowHeights() {
-        func item(_ id: Int, _ description: String, keepStart: Bool) -> PickerItem {
-            PickerItem(id: id, iconColor: 0, label: "row \(id)", description: description, annotation: "",
-                       matchPositions: [], isTwoLine: true, isMarked: false, keepsDescriptionStart: keepStart)
+        func item(_ id: Int, _ description: String, status: String) -> PickerItem {
+            let tone: Wire.PickerStatusTone = status.isEmpty ? .absent : .ready
+            return PickerItem(id: id, iconColor: 0, label: "row \(id)", description: description, annotation: "",
+                              matchPositions: [], isMarked: false, status: status, statusTone: tone)
         }
-        let stacked = item(0, "Ready (Claude Max) · 70% of 5h limit · resets 2:50 PM", keepStart: true)
-        let emptyStatus = item(1, "", keepStart: true)
-        let path = item(2, "lib/minga/editor.ex", keepStart: false)
+        let stacked = item(0, "Claude (subscription) · Claude Max · 5h limit resets 2:50 PM", status: "Ready · 70%")
+        let chipOnly = item(1, "", status: "Ready")
+        let path = item(2, "lib/minga/editor.ex", status: "")
+        let toneWithoutText = PickerItem(id: 3, iconColor: 0, label: "row 3", description: "detail", annotation: "",
+                                         matchPositions: [], isMarked: false, status: "", statusTone: .ready)
 
         #expect(stacked.stacksDescription == true)
-        #expect(emptyStatus.stacksDescription == false)
+        #expect(chipOnly.stacksDescription == false)
         #expect(path.stacksDescription == false)
+        #expect(toneWithoutText.hasStatus == false)
+        #expect(toneWithoutText.stacksDescription == false)
         #expect(PickerOverlay.rowHeight(stacked) == 40)
-        #expect(PickerOverlay.rowHeight(emptyStatus) == 24)
+        #expect(PickerOverlay.rowHeight(chipOnly) == 24)
         #expect(PickerOverlay.rowHeight(path) == 24)
-        let mixed = [stacked, emptyStatus, path, stacked]
+        let mixed = [stacked, chipOnly, path, stacked]
         let summed: CGFloat = 40 + 24 + 24 + 40
         #expect(PickerOverlay.listContentHeight(mixed) == summed)
         #expect(PickerOverlay.listContentHeight(mixed) == mixed.map(PickerOverlay.rowHeight).reduce(0, +))
         #expect(PickerOverlay.listContentHeight([]) == CGFloat(0))
+    }
+
+    @Test("a row's spoken label names it, then its status, then its description")
+    @MainActor func rowAccessibilityLabel() {
+        let model = PickerItem(id: 0, iconColor: 0, label: "Claude Opus 4", description: "Claude Max", annotation: "",
+                               matchPositions: [], isMarked: false, isActive: true, status: "Checking…",
+                               statusTone: .checking)
+        let file = PickerItem(id: 1, iconColor: 0, label: "editor.ex", description: "lib/minga", annotation: "",
+                              matchPositions: [], isMarked: false)
+
+        #expect(PickerOverlay.rowAccessibilityLabel(model) == "Claude Opus 4, Checking…, Claude Max")
+        #expect(PickerOverlay.rowAccessibilityLabel(file) == "editor.ex, lib/minga")
     }
 
     @Test("updatePreview() converts styled segments")

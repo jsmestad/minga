@@ -190,7 +190,6 @@ defmodule MingaEditor.UI.Picker.FileAttachmentSource do
     do: %{
       item
       | description: "#{description} · #{candidate.path}",
-        two_line: true,
         meta: Map.put(meta, :file, candidate)
     }
 end
