@@ -393,7 +393,8 @@ defmodule Minga.Credo.EditorStateOwnership.Config do
     "MingaEditor.RenderPipeline",
     "MingaEditor.Session",
     "MingaEditor.Frontend",
-    "MingaEditor.EffectScheduler"
+    "MingaEditor.EffectScheduler",
+    "LLMDB"
   ]
   @boundary_segments ~w(Workflow Workflows Registry Replay Renderer Rendering Persistence Storage Service Services)
   @value_modules [
@@ -432,6 +433,7 @@ defmodule Minga.Credo.EditorStateOwnership.Config do
     "MingaAgent.Provider.Spec",
     "MingaAgent.Redaction",
     "MingaAgent.RuntimeState",
+    "MingaAgent.Session.ConnectionSnapshot",
     "MingaAgent.Subagent.Handle",
     "MingaAgent.TodoItem",
     "MingaAgent.TokenEstimator",
@@ -440,6 +442,17 @@ defmodule Minga.Credo.EditorStateOwnership.Config do
     "MingaAgent.ToolCall",
     "MingaAgent.TurnUsage"
   ]
+
+  # The model catalog loads lazily and every accessor forces the whole load, so
+  # a catalog or model-resolver call in an Agent UI value module can freeze the
+  # Editor for seconds (#3641). These namespaces receive model names as data.
+  @catalog_modules ["LLMDB", "MingaAgent.ModelResolver"]
+  @catalog_functions [
+    {"MingaAgent.Config", :resolve},
+    {"MingaAgent.Config", :resolve_model},
+    {"MingaAgent.Config", :default_model}
+  ]
+  @catalog_free_namespaces [{"MingaEditor.Agent.UIState", "MingaEditor.Agent.UIState"}]
 
   @doc "Returns the protected Editor value ledger."
   @spec ownerships() :: [ownership()]
@@ -464,6 +477,18 @@ defmodule Minga.Credo.EditorStateOwnership.Config do
   @doc "Returns module-name segments that identify workflow or service boundaries."
   @spec boundary_segments() :: [String.t()]
   def boundary_segments, do: @boundary_segments
+
+  @doc "Returns module prefixes that read or resolve the model catalog."
+  @spec catalog_modules() :: [String.t()]
+  def catalog_modules, do: @catalog_modules
+
+  @doc "Returns exact functions that resolve a model through the catalog."
+  @spec catalog_functions() :: [{String.t(), atom()}]
+  def catalog_functions, do: @catalog_functions
+
+  @doc "Returns value namespaces that never call the catalog, with the protected struct they report."
+  @spec catalog_free_namespaces() :: [{String.t(), String.t()}]
+  def catalog_free_namespaces, do: @catalog_free_namespaces
 
   @doc "Returns pure value modules that may be called by other value owners."
   @spec value_modules() :: [String.t()]

@@ -54,7 +54,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
         |> AgentChatBuilder.build()
 
       assert model.visible?
-      assert model.model_name == "Model not resolved"
+      assert model.model_name == "Resolving model…"
     end
   end
 

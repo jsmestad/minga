@@ -49,7 +49,29 @@ defmodule Minga.Credo.EditorStateOwnership.PurityRule do
          not Policy.value_module?(policy, module) and ownership do
       [finding(module, function, arity, ast, meta, env, ownership)]
     else
-      []
+      check_catalog_call(module, function, arity, ast, meta, env, policy)
+    end
+  end
+
+  # Agent UI value modules receive model names as data; reading or resolving the
+  # catalog there runs a multi-second load inside the Editor process (#3641).
+  @spec check_catalog_call(
+          String.t(),
+          atom(),
+          non_neg_integer(),
+          Macro.t(),
+          keyword(),
+          SourceEnvironment.t(),
+          Policy.t()
+        ) :: [finding()]
+  defp check_catalog_call(module, function, arity, ast, meta, env, policy) do
+    ownership =
+      if Policy.catalog_call?(policy, module, function),
+        do: Policy.catalog_free_ownership(policy, env.module)
+
+    case ownership do
+      %Ownership{} -> [finding(module, function, arity, ast, meta, env, ownership)]
+      nil -> []
     end
   end
 

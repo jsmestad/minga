@@ -72,6 +72,7 @@ defmodule MingaEditor.Agent.UIState do
       panel
       |> Panel.set_credential_readiness(connection.credential_readiness)
       |> Panel.project_model_selection(connection.model_selection)
+      |> Panel.project_model_problem(ConnectionSnapshot.resolution_message(connection))
 
     state = retire_previous_changes(state, connection)
 
