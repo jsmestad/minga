@@ -22,10 +22,15 @@ defmodule MingaEditor.Frontend.Manager.OutputHandler do
   @doc """
   Attempts one command batch without suspending the Port owner.
 
-  A frame batch sent before the frontend is ready returns `{:refused, :not_ready}`: it is discarded, never retained, and will never be acknowledged. `:unwritable` is reserved for output the transport could not take now, which is retained or coalesced under output pressure.
+  A frame batch sent while the frontend cannot receive it, before its `ready` handshake or after the transport disconnected, returns `{:refused, :not_ready}`: it is discarded, never retained, and will never be acknowledged. `:unwritable` is reserved for output the transport could not take now, which is retained or coalesced under output pressure, and for non-frame commands without a port.
   """
   @spec admit_commands(State.t(), [binary()]) :: output_result()
-  def admit_commands(%{port: nil} = state, _commands), do: {:continue, :unwritable, state}
+  def admit_commands(%{port: nil} = state, commands) do
+    case PendingFrame.from_commands(commands) do
+      {:ok, _frame} -> {:continue, {:refused, :not_ready}, state}
+      {:error, _reason} -> {:continue, :unwritable, state}
+    end
+  end
 
   def admit_commands(state, commands) do
     log_frame_transaction_violation(commands)

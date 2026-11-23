@@ -107,11 +107,11 @@ defmodule MingaEditor.Frontend.Manager do
   end
 
   @doc """
-  Like `send_commands/2` but stamps the synchronous admission request with a monotonic send time. The receiver emits a `[:minga, :render, :hop_latency]` (`hop: :send_commands`) sample measuring the Renderer.Server to Port.Manager scheduling delay. Used only for the per-frame render batch on the keystroke path.
+  Like `send_commands/2` but stamps the synchronous admission request with a monotonic send time. The receiver emits a `[:minga, :render, :hop_latency]` (`hop: :send_commands`) sample measuring the Renderer.Server to Port.Manager scheduling delay. Used only for the per-frame render batch on the keystroke path. A `nil` server means no frontend can receive the frame, so the batch is refused with `{:refused, :not_ready}`.
   """
   @spec send_render_commands(GenServer.server() | nil, [binary()]) :: frame_admission()
   def send_render_commands(server \\ __MODULE__, commands)
-  def send_render_commands(nil, commands) when is_list(commands), do: :unwritable
+  def send_render_commands(nil, commands) when is_list(commands), do: {:refused, :not_ready}
 
   def send_render_commands(server, commands) when is_list(commands) do
     sent_at = System.monotonic_time(:microsecond)

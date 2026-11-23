@@ -105,6 +105,34 @@ defmodule MingaEditor.Frontend.ManagerTest do
       assert :unwritable = Manager.send_commands(name, [Protocol.encode_commit_frame(0)])
     end
 
+    test "a frame with no port is refused without retention" do
+      name = unique_name()
+      start_manager(name)
+
+      assert {:refused, :not_ready} = Manager.send_render_commands(name, frame_commands(1, 0, 1))
+      assert {:refused, :not_ready} = Manager.send_commands(name, frame_commands(2, 0, 1))
+      assert Manager.output_pressure(name).total_retained_bytes == 0
+    end
+
+    test "a frame after the transport disconnects is refused without a write" do
+      name = unique_name()
+      parent = self()
+
+      commander = fn _port, batch, [:nosuspend] ->
+        send(parent, {:port_command, batch})
+        true
+      end
+
+      {pid, fake_port} = start_connected(name, port_commander: commander)
+      mark_ready(name, pid, fake_port)
+      send(pid, {fake_port, :eof})
+      refute Manager.ready?(name)
+
+      assert {:refused, :not_ready} = Manager.send_render_commands(name, frame_commands(1, 0, 1))
+      refute_received {:port_command, _batch}
+      assert Manager.output_pressure(name).total_retained_bytes == 0
+    end
+
     test "a frame before ready is refused without a write or retention" do
       name = unique_name()
       parent = self()

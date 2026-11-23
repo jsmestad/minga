@@ -109,7 +109,9 @@ defmodule MingaEditor.Frontend.EmitTest do
       assert_receive_frame_commands()
 
       ctx = put_port_manager(ctx, nil)
-      assert {_caches, _font_registry, _message_store, :unwritable} = Emit.emit(frame, ctx)
+
+      assert {_caches, _font_registry, _message_store, {:refused, :not_ready}} =
+               Emit.emit(frame, ctx)
     end
 
     test "GUI config state is emitted inside the frame transaction" do

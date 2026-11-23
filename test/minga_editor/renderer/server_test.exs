@@ -1410,6 +1410,26 @@ defmodule MingaEditor.Renderer.ServerTest do
       refute_received {:render_done, _receipt}
     end
 
+    test "a frame refused after the transport disconnects starts no acknowledgement lease" do
+      {manager, manager_pid, port} = start_readiness_manager(fn _port, _batch, _opts -> true end)
+      send(manager_pid, {port, {:data, ready_packet(80, 24)}})
+      assert Manager.ready?(manager)
+      renderer = start_readiness_renderer(manager, ack_timeout_ms: 1)
+
+      send(manager_pid, {port, :eof})
+      refute Manager.ready?(manager)
+
+      RendererServer.cast_snapshot(renderer, Submission.full(stub_intent()), 10)
+
+      assert_receive {:readiness_frame, 10, {:refused, :not_ready}, _revision, true},
+                     @async_render_timeout
+
+      refute RendererServer.rendering?(renderer)
+      # A started lease would time out after 1 ms and re-render as recovery.
+      refute_receive {:readiness_frame, _seq, _admission, _revision, _keyframe?}, 100
+      refute_received {:wire_batch, _batch}
+    end
+
     test "a frame left unwritable by output pressure keeps its acknowledgement lease" do
       {manager, manager_pid, port} =
         start_readiness_manager(fn _port, _batch, _opts -> false end)
