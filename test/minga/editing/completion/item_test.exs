@@ -12,6 +12,31 @@ defmodule Minga.Editing.Completion.ItemTest do
     }
   end
 
+  describe "follow_cursor/3" do
+    test "moves a request-line range past text typed or deleted at the cursor" do
+      for {range, request_col, cursor_col, expected} <- [
+            # Nothing changed.
+            {{4, 7}, 7, 7, {4, 7}},
+            # One character typed: an end at the request column follows the cursor.
+            {{4, 7}, 7, 8, {4, 8}},
+            # One character deleted.
+            {{4, 7}, 7, 6, {4, 6}},
+            # An end past the request column keeps its distance from the cursor.
+            {{4, 9}, 7, 8, {4, 10}},
+            {{4, 9}, 7, 5, {4, 7}},
+            # An insertion at the request column also replaces what was typed after it.
+            {{7, 7}, 7, 9, {7, 9}},
+            # A start inside deleted text lands at the cursor.
+            {{6, 7}, 7, 4, {4, 4}},
+            # A range entirely after the request column moves with the cursor.
+            {{8, 10}, 7, 9, {10, 12}}
+          ] do
+        assert Item.follow_cursor(range, request_col, cursor_col) == expected,
+               "#{inspect(range)} from #{request_col} to #{cursor_col}"
+      end
+    end
+  end
+
   describe "byte_columns/4" do
     test "converts a half-open LSP range to byte columns in the provider's encoding" do
       for {encoding, range, cursor_line, expected} <- [

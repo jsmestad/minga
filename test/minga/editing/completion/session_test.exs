@@ -25,6 +25,33 @@ defmodule Minga.Editing.Completion.SessionTest do
     )
   end
 
+  test "accepted items carry the origin of the request that produced them" do
+    session = new_session()
+    old_ref = make_ref()
+    origin = {{3, 7}, "   han(1)"}
+    session = Session.register_requests(session, [{:lsp, self(), old_ref}], origin)
+
+    {:ok, session} =
+      Session.accept_batch(
+        session,
+        batch(session, :lsp, self(), old_ref, [%{"label" => "a"}], true)
+      )
+
+    assert [%Item{request_origin: ^origin}] = Session.items(session)
+
+    # A retrigger records the new origin only for the new request's batch.
+    new_ref = make_ref()
+    new_origin = {{3, 8}, "   hand(1)"}
+    session = Session.retrigger(session, 2, 8, [{:lsp, self(), new_ref}], new_origin)
+    assert [%Item{request_origin: ^origin}] = Session.items(session)
+
+    {:ok, session} =
+      Session.accept_batch(session, batch(session, :lsp, self(), new_ref, [%{"label" => "b"}]))
+
+    assert [%Item{label: "b", request_origin: ^new_origin}] = Session.items(session)
+    assert session.request_origins == %{}
+  end
+
   test "stable item IDs include provider and semantic edit identity without truncation" do
     raw = %{
       "label" => "same",

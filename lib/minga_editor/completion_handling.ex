@@ -348,8 +348,8 @@ defmodule MingaEditor.CompletionHandling do
       {:insert_text, text} ->
         state |> accept_text(completion, text) |> dismiss()
 
-      {:text_edit, edit, provider_id} ->
-        state |> apply_completion_edit(edit, provider_id) |> dismiss()
+      {:text_edit, item} ->
+        state |> apply_completion_edit(item) |> dismiss()
     end
   end
 
@@ -484,33 +484,45 @@ defmodule MingaEditor.CompletionHandling do
 
   defp accept_text(state, _completion, _text), do: state
 
-  # LSP ranges are half-open and count the provider's position units, so the range is converted
-  # to byte columns on the cursor line before the buffer replaces it. Text typed after the range
-  # end since the request is part of the word being completed, so it is replaced too.
-  @spec apply_completion_edit(EditorState.t(), Completion.text_edit(), Item.provider_id()) ::
-          EditorState.t()
-  defp apply_completion_edit(%{workspace: %{buffers: %{active: buf}}} = state, edit, provider_id)
+  # LSP ranges are half-open, count the provider's position units, and name positions in the line
+  # as it was when the request was sent. The range is converted against that line, then moved past
+  # whatever the user typed or deleted at the cursor since, before the buffer replaces it.
+  # An item without a recorded origin is placed as if requested at the cursor.
+  @spec apply_completion_edit(EditorState.t(), Item.t()) :: EditorState.t()
+  defp apply_completion_edit(
+         %{workspace: %{buffers: %{active: buf}}} = state,
+         %{text_edit: edit, provider_id: provider_id} = item
+       )
        when is_pid(buf) do
     %CursorContext{line: line, line_text: line_text, byte_column: cursor_col, version: version} =
       Buffer.cursor_context(buf)
 
-    case Item.byte_columns(edit, line, line_text, provider_encoding(provider_id)) do
-      {:ok, {start_col, end_col}} ->
-        buf
-        |> Buffer.replace_byte_range_if_version(
-          version,
-          {line, start_col},
-          max(end_col, cursor_col) - start_col,
-          edit.new_text
-        )
-        |> completion_edit_result(state)
+    {{request_line, request_col}, request_text} =
+      Map.get(item, :request_origin) || {{line, cursor_col}, line_text}
 
-      {:error, _reason} = error ->
-        completion_edit_result(error, state)
+    with :ok <- same_line(request_line, line),
+         {:ok, columns} <-
+           Item.byte_columns(edit, request_line, request_text, provider_encoding(provider_id)) do
+      {start_col, end_col} = Item.follow_cursor(columns, request_col, cursor_col)
+
+      buf
+      |> Buffer.replace_byte_range_if_version(
+        version,
+        {line, start_col},
+        end_col - start_col,
+        edit.new_text
+      )
+      |> completion_edit_result(state)
+    else
+      {:error, _reason} = error -> completion_edit_result(error, state)
     end
   end
 
-  defp apply_completion_edit(state, _edit, _provider_id), do: state
+  defp apply_completion_edit(state, _item), do: state
+
+  @spec same_line(non_neg_integer(), non_neg_integer()) :: :ok | {:error, :not_on_cursor_line}
+  defp same_line(line, line), do: :ok
+  defp same_line(_request_line, _line), do: {:error, :not_on_cursor_line}
 
   @spec completion_edit_result({:ok, non_neg_integer()} | :ok | {:error, term()}, EditorState.t()) ::
           EditorState.t()

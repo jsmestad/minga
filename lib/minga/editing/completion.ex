@@ -182,18 +182,17 @@ defmodule Minga.Editing.Completion do
   @doc """
   Returns the insert text and optional text edit for the selected item.
 
-  If the item has a `text_edit`, returns `{:text_edit, edit, provider_id}`. The edit's range is in the provider's position units (see `Minga.Editing.Completion.Item.byte_columns/4`), so the caller needs the provider to place it.
+  If the item has a `text_edit`, returns `{:text_edit, item}`. The edit's range is in the provider's position units and in the line as it was at the request, so the caller needs the item's provider and request origin to place it (see `Minga.Editing.Completion.Item.byte_columns/4`).
   Otherwise returns `{:insert_text, text}`.
   """
-  @spec accept(t()) ::
-          {:insert_text, String.t()} | {:text_edit, text_edit(), Item.provider_id()} | nil
+  @spec accept(t()) :: {:insert_text, String.t()} | {:text_edit, Item.t()} | nil
   def accept(%__MODULE__{} = completion) do
     case selected_item(completion) do
       nil ->
         nil
 
-      %{text_edit: %{} = edit, provider_id: provider_id} ->
-        {:text_edit, edit, provider_id}
+      %{text_edit: %{}} = item ->
+        {:text_edit, item}
 
       %{insert_text: text} ->
         {:insert_text, text}

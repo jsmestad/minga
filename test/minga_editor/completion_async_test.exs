@@ -124,13 +124,6 @@ defmodule MingaEditor.CompletionAsyncTest do
       assert Minga.Buffer.cursor(buffer) == {0, byte_size("    handle")}
     end
 
-    test "text typed after the range end since the request is replaced too" do
-      # The server answered at "ha|"; the user has typed "n" since.
-      {buffer, _state} = accept_text_edit("    han(1)", 7, :utf16, {4, 6}, "handle")
-
-      assert Minga.Buffer.content(buffer) == "    handle(1)"
-    end
-
     test "UTF-16 character offsets are converted to byte columns on a non-ASCII line" do
       line = "héllo 🎉 fo(x)"
       # "héllo " is 6 UTF-16 units and "🎉" is 2, so "fo" spans units 9..11 and bytes 12..14.
@@ -159,6 +152,103 @@ defmodule MingaEditor.CompletionAsyncTest do
       assert Minga.Buffer.content(buffer) == line
       assert NoticeWorkflow.message(state) == "Completion failed: :column_not_boundary"
     end
+  end
+
+  describe "accepting an LSP text edit after editing since the request" do
+    test "a character deleted since the request shortens the range, keeping the text after it" do
+      {ctx, state} = open_text_edit_menu("    han(1)", 7, {4, 7}, "handle")
+
+      :ok = Minga.Buffer.delete_before(ctx.buffer)
+      state = CompletionHandling.maybe_handle(state, true, 127, 0)
+      assert %Completion{} = completion = ModalWorkflow.completion(state)
+
+      _state = CompletionHandling.accept(state, completion)
+
+      assert Minga.Buffer.content(ctx.buffer) == "    handle(1)"
+      assert Minga.Buffer.cursor(ctx.buffer) == {0, byte_size("    handle")}
+    end
+
+    test "characters typed since the request are replaced too" do
+      {ctx, state} = open_text_edit_menu("    han(1)", 7, {4, 7}, "handle")
+
+      :ok = Minga.Buffer.insert_text(ctx.buffer, "dl")
+      state = CompletionHandling.maybe_handle(state, true, ?l, 0)
+
+      _state = CompletionHandling.accept(state, ModalWorkflow.completion(state))
+
+      assert Minga.Buffer.content(ctx.buffer) == "    handle(1)"
+    end
+
+    test "a server range ending past the cursor keeps its distance from the cursor" do
+      # The server replaces the whole word "hanxx", which extends past the request cursor.
+      {ctx, state} = open_text_edit_menu("    hanxx(1)", 7, {4, 9}, "handle")
+
+      :ok = Minga.Buffer.insert_text(ctx.buffer, "d")
+      state = CompletionHandling.maybe_handle(state, true, ?d, 0)
+
+      _state = CompletionHandling.accept(state, ModalWorkflow.completion(state))
+
+      assert Minga.Buffer.content(ctx.buffer) == "    handle(1)"
+    end
+
+    test "a deletion before a non-ASCII range end converts the end against the request line" do
+      # "é" is one UTF-16 unit and two bytes; the request was sent after "hé".
+      {ctx, state} = open_text_edit_menu("    hé(1)", byte_size("    hé"), {4, 6}, "hello")
+
+      :ok = Minga.Buffer.delete_before(ctx.buffer)
+      state = CompletionHandling.maybe_handle(state, true, 127, 0)
+
+      _state = CompletionHandling.accept(state, ModalWorkflow.completion(state))
+
+      assert Minga.Buffer.content(ctx.buffer) == "    hello(1)"
+    end
+  end
+
+  # Opens a session-backed completion menu with one text-edit item, as if a UTF-16 LSP client had
+  # answered a request sent with the cursor at `cursor_col`; the word starts at the range start.
+  defp open_text_edit_menu(line, cursor_col, {start_char, end_char}, new_text) do
+    ctx = start_editor(line)
+    state = editor_state(ctx)
+    buffer = state.workspace.buffers.active
+    :ok = Minga.Buffer.move_to(buffer, {0, cursor_col})
+    client = start_encoding_responder(:utf16)
+    provider_id = {:lsp_client, client}
+    version = Minga.Buffer.version(buffer)
+    trigger_pos = {0, start_char}
+    request_ref = make_ref()
+
+    session =
+      CompletionSession.new(make_ref(), 1, buffer, version, trigger_pos)
+      |> CompletionSession.register_requests(
+        [{provider_id, client, request_ref}],
+        {{0, cursor_col}, line}
+      )
+
+    raw = %{
+      "label" => new_text,
+      "textEdit" => %{
+        "range" => %{
+          "start" => %{"line" => 0, "character" => start_char},
+          "end" => %{"line" => 0, "character" => end_char}
+        },
+        "newText" => new_text
+      }
+    }
+
+    batch =
+      ProviderBatch.from_response(session.id, 1, provider_id, client, request_ref, [raw])
+
+    {:ok, session} = CompletionSession.accept_batch(session, batch)
+    completion = Completion.new(CompletionSession.index(session), trigger_pos, nil)
+    trigger = CompletionTrigger.new() |> CompletionTrigger.put_session(session)
+    owner = state.shell_runtime.state.tab_bar.active_id
+    payload = CompletionPayload.new(owner, completion: completion, trigger: trigger)
+
+    state =
+      %{state | workspace: SessionState.transition_mode(state.workspace, :insert)}
+      |> ModalWorkflow.open({:completion, payload})
+
+    {ctx, state}
   end
 
   # Accepts one text-edit item from an LSP client that negotiated `encoding`, with the cursor at
