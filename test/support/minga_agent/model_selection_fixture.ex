@@ -121,7 +121,7 @@ defmodule MingaAgent.Test.ModelSelectionFixture do
           opts
           |> Keyword.get(:capabilities, %{tools: true, images: true, streaming: true})
           |> Map.put_new(:tool_result_images, :unknown),
-        cost: %{}
+        cost: Keyword.get(opts, :cost, %{})
       })
 
     {:ok, selection} =

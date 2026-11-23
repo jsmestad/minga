@@ -70,7 +70,8 @@ defmodule MingaEditor.State.Picker do
           fetch_selection: fetch_selection(),
           query_generation: query_generation(),
           acknowledged_query_edit_seq: query_edit_seq(),
-          activation_offer: ActivationOffer.t()
+          activation_offer: ActivationOffer.t(),
+          parent: t() | nil
         }
 
   defstruct picker: nil,
@@ -89,7 +90,8 @@ defmodule MingaEditor.State.Picker do
             fetch_selection: :position,
             query_generation: 0,
             acknowledged_query_edit_seq: 0,
-            activation_offer: %ActivationOffer{generation: 1}
+            activation_offer: %ActivationOffer{generation: 1},
+            parent: nil
 
   @doc "Builds the semantic state for an asynchronous picker before fetching starts."
   @spec loading(
@@ -115,6 +117,36 @@ defmodule MingaEditor.State.Picker do
     }
     |> begin_query_session()
   end
+
+  @doc """
+  Opens a child picker in place of `parent` and keeps `parent` to return to.
+
+  The child starts a fresh query session so frontends show its empty query. The parent keeps its rows, query, and selection unchanged.
+  """
+  @spec nest(t(), MingaEditor.UI.Picker.t(), source_target(), map() | nil) :: t()
+  def nest(%__MODULE__{} = parent, picker, {source, callback_source, layout}, context)
+      when is_atom(source) do
+    %__MODULE__{
+      picker: picker,
+      source: source,
+      callback_source: callback_source,
+      restore: parent.restore,
+      restore_theme: parent.restore_theme,
+      context: context,
+      layout: layout,
+      parent: %{parent | action_menu: nil}
+    }
+    |> begin_query_session()
+  end
+
+  @doc """
+  Returns the parent of a child picker with its query and selection.
+
+  The parent starts a fresh query session so frontends show its query again.
+  """
+  @spec return_to_parent(t()) :: t()
+  def return_to_parent(%__MODULE__{parent: %__MODULE__{} = parent}),
+    do: begin_query_session(parent)
 
   @doc "Builds a picker session with immutable callback arguments and no built-in context."
   @spec extension_loading(Picker.t(), module(), PublicSource.owner(), Extension.t()) :: t()
@@ -177,6 +209,11 @@ defmodule MingaEditor.State.Picker do
   def put_context(%__MODULE__{} = ps, context) do
     %{ps | context: context}
   end
+
+  @doc "Replaces the source context of the parent that a child picker returns to."
+  @spec put_parent_context(t(), map() | nil) :: t()
+  def put_parent_context(%__MODULE__{parent: %__MODULE__{} = parent} = ps, context),
+    do: %{ps | parent: put_context(parent, context)}
 
   @doc "Updates the inner `MingaEditor.UI.Picker` instance."
   @spec update_picker(t(), MingaEditor.UI.Picker.t()) :: t()

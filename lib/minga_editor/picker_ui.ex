@@ -1439,6 +1439,10 @@ defmodule MingaEditor.PickerUI do
   defp stay_open_selection(state, AgentRetainedOutputSource, %Item{} = item),
     do: AgentRetainedOutputSource.on_select(item, state)
 
+  defp stay_open_selection(state, _source, {:nested, child_source, child_context})
+       when is_atom(child_source),
+       do: open_nested(state, child_source, child_context)
+
   defp stay_open_selection(state, _source, _context) do
     MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
       state,
@@ -1613,8 +1617,58 @@ defmodule MingaEditor.PickerUI do
       %PickerState{extension: %ExtensionPicker{}} ->
         close(state)
 
+      %PickerState{parent: %PickerState{}} ->
+        return_to_parent(state)
+
       %PickerState{source: source, callback_source: owner} ->
         close(Source.on_cancel(source, state, owner))
+    end
+  end
+
+  # A child picker replaces its parent in the same modal; the parent keeps its rows, query, and
+  # selection. A parent whose fetch was in flight fetches again when the child returns to it; a
+  # settled parent runs its source's after-fetch hook, which lists rows again only for a change that
+  # arrived while the child was open.
+  @spec open_nested(state(), module(), map() | nil) :: state()
+  defp open_nested(state, source, context) do
+    state = state |> cancel_current_preview() |> cancel_current_fetch()
+    callback_source = Source.source_identity(source)
+    target = {source, callback_source, Source.layout(source, callback_source)}
+    max_vis = max(state.frontend.terminal_viewport.rows - 3, 5)
+    title = Source.title(source, callback_source)
+
+    if Source.async?(source, callback_source) do
+      picker = Picker.new([], title: title, max_visible: max_vis)
+      state = update_picker(state, &PickerState.nest(&1, picker, target, context))
+      source_context = Context.from_editor_state(state)
+
+      {loading, revision} =
+        state |> picker_state() |> PickerState.begin_fetch(fetch_identity(source, source_context))
+
+      state
+      |> update_picker(fn _child -> loading end)
+      |> schedule_current_fetch(source, revision)
+    else
+      items =
+        Source.candidates(source, Context.from_editor_state(state, context), callback_source)
+
+      picker = Picker.new(items, title: title, max_visible: max_vis)
+      update_picker(state, &PickerState.nest(&1, picker, target, context))
+    end
+  end
+
+  @spec return_to_parent(state()) :: state()
+  defp return_to_parent(state) do
+    state = state |> cancel_current_preview() |> cancel_current_fetch()
+    parent = state |> picker_state() |> PickerState.return_to_parent()
+    state = update_picker(state, fn _child -> parent end)
+
+    case parent do
+      %PickerState{load_status: :loading, source: source, callback_source: callback_source} ->
+        refresh_async_items(state, source, callback_source)
+
+      %PickerState{source: source} ->
+        after_fetch(state, source)
     end
   end
 

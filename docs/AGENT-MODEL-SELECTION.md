@@ -43,9 +43,13 @@ If your browser cannot open automatically, use **Open authorization link** or **
 
 For other providers, choose the API-key action, run `/auth <provider>`, or use the provider environment variable. Open `/model` to list the routes available for the configured credentials.
 
+Once a listed model can be used, `/model` is for choosing a model. It lists the models, then one **Connect another provider…** row. Select that row to open the sign-in, API-key, route setup, and retry actions in a second picker; Escape returns to `/model` with your query and selection. A provider that a listed model already uses offers its account actions instead of a first sign-in: **Sign in to ChatGPT again** or **Sign out of ChatGPT**, and **Replace** or **Remove** for a stored API key. A key from an environment variable is not listed there, because it takes precedence over a stored key. A setup that is still in progress keeps its cancel, link, and resume rows in `/model`. Until a model can be used, every connection action stays in `/model` so first-run setup is one step.
+
 For a Codex subscription, `/model` checks the signed-in account's model list. A model in OpenAI's API catalog is not automatically available through Codex OAuth. If the check fails, the picker explains why it omitted Codex models and still shows routes for configured API keys. Reopen `/model` to refresh the account list used by slash completion.
 
-The picker and slash completion show:
+Each model row in the picker has a status chip, such as **Ready**, and a short description that leads with the route (for example, `ChatGPT` or `anthropic API`), then the price for a metered route, the context limit, the thinking level, and any capability the model lacks. The route name repeats on each row, because picker rows have no section headers. The exact endpoint and credential profile stay searchable.
+
+Slash completion shows:
 
 - model provider and wire protocol;
 - hosted endpoint and canonical protocol path;
