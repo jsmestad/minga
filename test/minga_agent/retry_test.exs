@@ -9,6 +9,41 @@ defmodule MingaAgent.RetryTest do
       assert Retry.retryable?(%{"status" => 429})
     end
 
+    test "a 429 that reports a subscription usage limit is not retried" do
+      usage_limit = %{
+        "type" => "usage_limit_reached",
+        "plan_type" => "pro",
+        "limit_window_minutes" => 10_080,
+        "resets_at" => 1_795_626_066,
+        "resets_in_seconds" => 172_541
+      }
+
+      cases = [
+        {"usage limit body", %{status: 429, response_body: usage_limit}, false},
+        {"usage limit without a reset",
+         %{status: 429, response_body: Map.drop(usage_limit, ["resets_at", "resets_in_seconds"])},
+         false},
+        {"usage limit provider code", %{status: 429, provider_code: "usage_limit_reached"},
+         false},
+        {"string-keyed usage limit", %{"status" => 429, "response_body" => usage_limit}, false},
+        {"usage limit exception text",
+         "Stream failed: %ReqLLM.Error.API.Request{provider_code: \"usage_limit_reached\"}",
+         false},
+        {"plain 429", %{status: 429, response_body: %{"type" => "rate_limit_error"}}, true},
+        {"429 with Retry-After",
+         %{
+           status: 429,
+           headers: [{"retry-after", "3"}],
+           response_body: %{"type" => "rate_limit_error"}
+         }, true},
+        {"429 with a malformed body", %{status: 429, response_body: "<html>busy</html>"}, true}
+      ]
+
+      for {name, reason, retryable} <- cases do
+        assert Retry.retryable?(reason) == retryable, name
+      end
+    end
+
     test "server errors are retryable" do
       for status <- [500, 502, 503, 529] do
         assert Retry.retryable?(%{status: status}), "expected #{status} to be retryable"

@@ -291,6 +291,34 @@ defmodule MingaEditor.UI.Picker.AgentModelSourceTest do
           do: %ModelCandidate{selection: selection, favorite: false, current: false}
     end
 
+    test "a ChatGPT route at its usage limit shows the limit chip with its reset, and stays selectable" do
+      [api, codex] = connected_candidates()
+
+      limit = %MingaAgent.UsageLimit{
+        service: "ChatGPT",
+        plan: "pro",
+        window_minutes: 10_080,
+        resets_at: DateTime.add(DateTime.utc_now(), 2 * 86_400)
+      }
+
+      limited = ModelCandidate.limited_by(codex, limit)
+      session = start_supervised!({ModelPickerSession, [api, limited]})
+      ctx = context(connection(session), 1)
+      [api_row, codex_row | _connections] = AgentModelSource.candidates(ctx)
+
+      assert api_row.status == ItemStatus.new(:ready, "Ready")
+      assert codex_row.status == ItemStatus.new(:error, "Limit reached")
+      assert codex_row.description =~ ~r/\A7d limit resets \w{3} \d{1,2}:\d{2} (AM|PM)/
+      assert AgentModelSource.selection_disposition(codex_row, ctx.picker_ui.context) == :accept
+
+      # A limit without a known reset names no time.
+      unknown = ModelCandidate.limited_by(codex, MingaAgent.UsageLimit.unknown("ChatGPT"))
+      session = start_supervised!({ModelPickerSession, [unknown]}, id: :unknown_reset)
+      [row | _connections] = AgentModelSource.candidates(context(connection(session), 1))
+      assert row.status == ItemStatus.new(:error, "Limit reached")
+      assert row.description =~ ~r/\Aplan limit ·/
+    end
+
     test "with a usable model, /model lists the models and one row for connection actions" do
       session = start_supervised!({ModelPickerSession, connected_candidates()})
       ctx = context(connection(session), 1)
