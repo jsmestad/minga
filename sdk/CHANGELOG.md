@@ -13,6 +13,7 @@ All notable changes to `minga_sdk` are documented here. The SDK is versioned sep
 ## Unreleased
 
 - `MingaAgent.InferenceRoute.Status.plan_usage` is `:unreported` until the route's first usage report, then the reported windows or nil. `/model` shows a ready subscription route's plan usage as being checked until that first report, so a route should report an empty list when its usage check finds no data or fails.
+- `MingaEditor.Extension.Picker.Item.two_line` is accepted for compatibility and no longer changes the row layout. Frontends choose it.
 
 ## 0.1.2
 

@@ -4,8 +4,9 @@ defmodule MingaEditor.Extension.Picker.Item do
   be unique across the pages of a picker. Frontends never receive these ids.
 
   The optional icon is prefixed to the display label and uses `icon_color`
-  (24-bit RGB). `search_text` adds hidden text to fuzzy matching, and `two_line`
-  places the description on a second line.
+  (24-bit RGB). `search_text` adds hidden text to fuzzy matching.
+
+  `two_line` is accepted for compatibility and has no effect. Frontends choose the row layout.
   """
 
   @enforce_keys [:id, :label]
