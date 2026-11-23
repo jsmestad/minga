@@ -16,7 +16,7 @@ defmodule Minga.RenderModel.UI.Picker do
   into this map (flags packed, nil-vs-empty defaulted, match_positions clamped),
   so the adapter passes it straight to the generated `encode_picker_item/1`.
 
-  `flags` bit 1 marks a multi-select item and bit 3 marks the current value. `status` is the chip text (empty when `status_tone` is `:none`).
+  `flags` bit 1 marks a multi-select item and bit 3 marks the current value. `status` is the chip text (empty when `status_tone` is `:none`). `group` is the item's section header text (empty when the item has no section).
   """
   @type item :: %{
           icon_color: non_neg_integer(),
@@ -27,7 +27,8 @@ defmodule Minga.RenderModel.UI.Picker do
           match_positions: [non_neg_integer()],
           activation_id: non_neg_integer(),
           status: String.t(),
-          status_tone: status_tone()
+          status_tone: status_tone(),
+          group: String.t()
         }
 
   @type t :: %__MODULE__{

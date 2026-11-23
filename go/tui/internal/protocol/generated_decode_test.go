@@ -202,6 +202,7 @@ func TestDecodePickerItemU16MatchPositions(t *testing.T) {
 		0xAA, 0xBB, 0xCC, 0, 0, 7, 'f', 'i', 'l', 'e', '.', 'e', 'x', 0, 4, 'd', 'e',
 		's', 'c', 0, 3, 'a', 'n', 'n', 2, 0, 1, 0, 4, 0, 0, 0, 23,
 		0, 5, 'R', 'e', 'a', 'd', 'y', 1,
+		0, 7, 'C', 'h', 'a', 't', 'G', 'P', 'T',
 	}
 	item, consumed, err := generated.DecodePickerItem(bytes, 0, len(bytes))
 	if err != nil {
@@ -222,12 +223,15 @@ func TestDecodePickerItemU16MatchPositions(t *testing.T) {
 	if item.Status != "Ready" || item.StatusTone != generated.PickerStatusToneReady {
 		t.Fatalf("status chip: %q tone %d", item.Status, item.StatusTone)
 	}
+	if item.Group != "ChatGPT" {
+		t.Fatalf("group: %q", item.Group)
+	}
 }
 
 func TestDecodePickerItemEmptyMatchPositions(t *testing.T) {
 	// match_positions present but count==0: icon(0), flags(0), label "x",
-	// empty desc/ann, count 0, activation_id 0, empty status, tone none.
-	bytes := []byte{0, 0, 0, 0, 0, 1, 'x', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+	// empty desc/ann, count 0, activation_id 0, empty status, tone none, empty group.
+	bytes := []byte{0, 0, 0, 0, 0, 1, 'x', 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
 	item, consumed, err := generated.DecodePickerItem(bytes, 0, len(bytes))
 	if err != nil {
 		t.Fatalf("decode error: %v", err)

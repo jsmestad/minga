@@ -1500,7 +1500,8 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
                             matchPositions: $0.matchPositions,
                             activationID: $0.activationID,
                             status: $0.status,
-                            statusTone: Wire.PickerStatusTone(rawValue: $0.statusTone.rawValue) ?? .absent
+                            statusTone: Wire.PickerStatusTone(rawValue: $0.statusTone.rawValue) ?? .absent,
+                            group: $0.group
                         )
                     }
 

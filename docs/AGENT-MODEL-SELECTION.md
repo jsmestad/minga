@@ -47,7 +47,7 @@ Once a listed model can be used, `/model` is for choosing a model. It lists the 
 
 For a Codex subscription, `/model` checks the signed-in account's model list. A model in OpenAI's API catalog is not automatically available through Codex OAuth. If the check fails, the picker explains why it omitted Codex models and still shows routes for configured API keys. Reopen `/model` to refresh the account list used by slash completion.
 
-Each model row in the picker has a status chip, such as **Ready**, and a short description that leads with the route (for example, `ChatGPT` or `anthropic API`), then the price for a metered route, the context limit, the thinking level, and any capability the model lacks. The route name repeats on each row, because picker rows have no section headers. The exact endpoint and credential profile stay searchable.
+The picker groups models by route. Each route (for example, `ChatGPT` or `anthropic API`) is a section header with its models below it, so the route name is not repeated on every row. Each model row has a status chip, such as **Ready**, and a short description with the price for a metered route, the context limit, the thinking level, and any capability the model lacks. A subscription route's rows show the account or plan reset time first. When you type a query, the route with the best match comes first and a route with no matching model drops out with its header. The route name, the exact endpoint, and the credential profile stay searchable. Connection rows follow the models under their own headers.
 
 Slash completion shows:
 

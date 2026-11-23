@@ -173,7 +173,7 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilder do
 
   # Normalize one picker source item into the wire-shaped map the generated `encode_picker_item/1`
   # consumes. All derivation lives here (ruling 4): the `flags` byte, the `icon_color || 0` /
-  # `annotation || ""` nil-vs-empty defaulting, and flattening the status chip into text and tone.
+  # `annotation || ""` / `group || ""` nil-vs-empty defaulting, and flattening the status chip into text and tone.
   # (The source `description` is already typed non-nil with a "" default, so it needs no
   # defaulting.) Wire limits are enforced by the adapter, which rejects oversized values without
   # changing this semantic model.
@@ -190,7 +190,8 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilder do
       match_positions: item.match_positions,
       activation_id: activation_id,
       status: status,
-      status_tone: status_tone
+      status_tone: status_tone,
+      group: item.group || ""
     }
   end
 

@@ -162,6 +162,7 @@ func mapPickerItems(items []generated.PickerItem) []PickerItem {
 			Active:       item.Flags&0x08 != 0,
 			Status:       item.Status,
 			StatusTone:   item.StatusTone,
+			Group:        item.Group,
 		})
 	}
 	return out

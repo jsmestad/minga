@@ -1029,18 +1029,20 @@ defmodule Minga.Integration.GUIProtocolTest do
             match_positions: [0, 1, 2],
             activation_id: 23,
             status: "",
-            status_tone: :none
+            status_tone: :none,
+            group: ""
           },
           %{
             icon_color: 0,
             flags: 8,
             label: "Claude Opus 4",
-            description: "Claude (subscription) · Claude Max · 5h limit resets 3:59 PM",
+            description: "Claude Max · 5h limit resets 3:59 PM",
             annotation: "★ favorite",
             match_positions: [],
             activation_id: 24,
             status: "Limit reached",
-            status_tone: :error
+            status_tone: :error,
+            group: "Claude (subscription)"
           }
         ],
         action_menu: nil,
@@ -1078,6 +1080,7 @@ defmodule Minga.Integration.GUIProtocolTest do
       assert item["flags"] == 2
       assert item["status"] == ""
       assert item["status_tone"] == 0
+      assert item["group"] == ""
 
       assert model_row["label"] == "Claude Opus 4"
       assert model_row["flags"] == 8
@@ -1085,6 +1088,7 @@ defmodule Minga.Integration.GUIProtocolTest do
       assert model_row["status"] == "Limit reached"
       # status_tone error is 3 (none 0, ready 1, warn 2, error 3, checking 4, neutral 5).
       assert model_row["status_tone"] == 3
+      assert model_row["group"] == "Claude (subscription)"
     end
   end
 

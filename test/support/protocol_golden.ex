@@ -467,10 +467,11 @@ defmodule Minga.Test.ProtocolGolden do
         match_positions: [1, 4],
         activation_id: 23,
         status: "",
-        status_tone: :none
+        status_tone: :none,
+        group: ""
       },
       %{
-        # marked sets bit 1, active sets bit 3 => 0b1010 = 10; a warn status chip
+        # marked sets bit 1, active sets bit 3 => 0b1010 = 10; a warn status chip and a group
         icon_color: 0,
         flags: 10,
         label: "x",
@@ -479,7 +480,8 @@ defmodule Minga.Test.ProtocolGolden do
         match_positions: [],
         activation_id: 0,
         status: "Ready · 82%",
-        status_tone: :warn
+        status_tone: :warn,
+        group: "ChatGPT"
       }
     ]
 
@@ -497,7 +499,8 @@ defmodule Minga.Test.ProtocolGolden do
       match_positions: Enum.to_list(0..254),
       activation_id: 0xFFFF_FFFF,
       status: "",
-      status_tone: :none
+      status_tone: :none,
+      group: ""
     }
 
     payload = section_body(picker_command(picker_model(items)), 0x03)

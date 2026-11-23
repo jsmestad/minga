@@ -3,6 +3,8 @@ defmodule MingaEditor.UI.Picker.AgentModelSource do
   Shared model and connection actions for one captured workspace and Session target.
 
   Catalog work runs outside the Editor. Once a listed model can be used, the chooser lists the models, any setup operation in progress, and one "Connect another provider…" row that opens `AgentConnectionSource` as a child picker. Until then, and when the catalog is unavailable, the connection actions stay in this list. Every item retains its original target because the picker closes before invoking its selection callback.
+
+  Model rows are grouped by route: the route name ("ChatGPT", "Claude (subscription)") is the item's group, which frontends draw once as a section header, so the row description does not repeat it. The route name stays searchable. Connection rows follow the models in their own groups ("Setup in progress", "Connections").
   """
 
   @behaviour MingaEditor.UI.Picker.Source
@@ -265,7 +267,8 @@ defmodule MingaEditor.UI.Picker.AgentModelSource do
       id: {:connection, :connect_another_provider},
       label: "Connect another provider…",
       description: "Sign in, manage API keys, or retry the connection.",
-      search_text: "connect another provider sign in login api key retry"
+      search_text: "connect another provider sign in login api key retry",
+      group: "Connections"
     }
 
     [with_origin(item, origin, {:connections, connected})]
@@ -346,8 +349,8 @@ defmodule MingaEditor.UI.Picker.AgentModelSource do
 
   defp status_label(_status), do: "Connection needs attention. Connect a provider or retry."
 
-  # A contributed route's readiness and plan usage live in the status chip. The description names
-  # the route, then the account, remedy or plan reset, then the model's details.
+  # A contributed route's readiness and plan usage live in the status chip, and its name is the row's
+  # group. The description names the account, remedy or plan reset, then the model's details.
   @spec format_candidate(ModelCandidate.t()) :: Item.t()
   defp format_candidate(
          %ModelCandidate{
@@ -360,7 +363,6 @@ defmodule MingaEditor.UI.Picker.AgentModelSource do
 
     description =
       [
-        route_name,
         route_detail(status, policy),
         metered_cost(policy),
         format_context(policy.limits.context),
@@ -377,14 +379,15 @@ defmodule MingaEditor.UI.Picker.AgentModelSource do
       description: description,
       annotation: if(candidate.favorite, do: "★ favorite", else: nil),
       status: route_status(status, policy),
+      group: route_name,
       search_text: "#{route_name} #{route.model_provider} #{route.model_id}",
       active: candidate.current
     }
   end
 
   # A catalog route is listed only when its credential is configured, so its chip says it is
-  # ready. The description leads with the route, then the price and context; only a capability the
-  # model lacks is named.
+  # ready. The route is the row's group. The description shows the price and context; only a
+  # capability the model lacks is named.
   defp format_candidate(%ModelCandidate{selection: selection} = candidate) do
     route = selection.route
     policy = selection.policy
@@ -394,7 +397,6 @@ defmodule MingaEditor.UI.Picker.AgentModelSource do
 
     description =
       [
-        route_name,
         metered_cost(policy),
         format_context(policy.limits.context),
         catalog_thinking(selection),
@@ -409,6 +411,7 @@ defmodule MingaEditor.UI.Picker.AgentModelSource do
       description: description,
       annotation: if(candidate.favorite, do: "★ favorite", else: nil),
       status: Status.new(:ready, "Ready"),
+      group: route_name,
       search_text:
         "#{route_name} #{route.model_provider} #{route.model_id} #{route.execution.wire_protocol} #{endpoint} #{credential}",
       active: candidate.current

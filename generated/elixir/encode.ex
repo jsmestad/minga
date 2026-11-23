@@ -377,6 +377,7 @@ defmodule Minga.Protocol.Encode do
       (fn value -> validate_uint!(command, [:activation_id | path], value, 4294967295); <<value::32>> end).(Map.fetch!(model, :activation_id)),
       (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:status | path], byte_size(bin), 65535); <<byte_size(bin)::16, bin::binary>> end).(Map.fetch!(model, :status)),
       (fn value -> validate_uint!(command, [:status_tone | path], value, 255); <<value::8>> end).(encode_picker_status_tone(Map.fetch!(model, :status_tone))),
+      (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:group | path], byte_size(bin), 65535); <<byte_size(bin)::16, bin::binary>> end).(Map.fetch!(model, :group)),
     ]
   end
 
