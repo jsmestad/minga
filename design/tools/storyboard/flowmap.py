@@ -184,7 +184,7 @@ def main():
     )
     counts = {k: len(v) for k, v in problems.items()}
     body = f"""<div style="font-size:22px;font-weight:700">Design-time flow map</div>
-<div style="color:{SUB};margin:6px 0 12px">The designed scenarios and every scenario their exits reach, by key and by click. Returns to editing are listed on each node (⤺) instead of drawn; plain editing's links to undesigned surfaces are counted, and listed in the inventory. Generated from docs/design/scenarios.toml and checked by design/tools/storyboard/check.py: {counts['dead_end']} dead ends, {counts['unreachable_by_click']} scenarios with no mouse path, {counts['unreachable_by_key']} with no key path, {counts['parity']} transient exits missing a key or a click.</div>
+<div style="color:{SUB};margin:6px 0 12px">The designed scenarios and every scenario their exits reach, by key and by click. Returns to editing are listed on each node (⤺) instead of drawn; plain editing's links to undesigned surfaces are counted, and listed in the inventory. Generated from docs/design/scenarios.toml and checked by design/tools/storyboard/check.py: {counts['dead_end']} dead ends, {counts['unreachable_by_key']} with no key path, {counts['parity']} transient exits with a click but no key. Pending the mouse sweep: {counts['unreachable_by_click']} scenarios with no mouse path and {counts['no_click']} transient exits with no click.</div>
 <div style="margin-bottom:14px">{legend}</div>
 {''.join(svg)}"""
     height = height_svg + 150

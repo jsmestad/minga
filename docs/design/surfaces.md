@@ -38,6 +38,13 @@ Pause after `SPC`, or any prefix, and which-key opens as one panel anchored abov
 - The ⌘ equivalent appears beside an entry when one exists, so the menu bar and the leader teach each other.
 - Timing: appears after the pause (`timeoutlen`), fades in within 120 ms, no fade with Reduce Motion, and never paints a frame if you type through the sequence.
 
+## Closing things
+
+One rule everywhere, so nothing traps you:
+
+- **`q` closes Minga's special buffers and splits** and returns focus to the window you came from: the conversation (in Normal mode, outside the composer), the queue, the subagent peek, the review buffer, the tasks drawer, the checklist, draft attachments, retained history and the observatory. This is the Emacs `special-mode` convention (`q` runs `quit-window` in help, Dired, `*Messages*` and Magit) and what Doom does for popups. In a file, `q` stays Vim's macro key.
+- **`esc` closes anything transient**: prompts and confirmations cancel, pickers and menus close, overlays such as the protocol error dismiss (its Reload action stays available in the notice it leaves). In a terminal in TERM mode, `esc` goes to the shell; use `⌃\ ⌃N` first.
+
 ## Drawers
 
 Lists open in a bottom drawer: the tasks list, the review, diagnostics, the switcher and the terminal. A drawer is a real split of the window, not an overlay that hides code.
@@ -74,7 +81,7 @@ Two ways to review, for two situations.
 
 ## Conversation and composer
 
-`SPC a v` opens the conversation as a split buffer. Messages are calm: a speaker label in its colour ("You" in blue, "Minga" in purple) above plain text, no bubbles. Tool steps are one sentence each with a state glyph ("Read native.ex and found where 429s are classified", "Test run failed · 1 failure"). The header shows the task's goal, its state and time, and the model.
+`SPC a v` opens the conversation as a split buffer, and `SPC a v` again or `q` in Normal mode outside the composer closes it. Messages are calm: a speaker label in its colour ("You" in blue, "Minga" in purple) above plain text, no bubbles. Tool steps are one sentence each with a state glyph ("Read native.ex and found where 429s are classified", "Test run failed · 1 failure"). The header shows the task's goal, its state and time, and the model.
 
 The composer is a real buffer. It starts in Insert; `↩` is a newline in Insert; Normal-mode `↩` or ⌘↩ sends (steering while Minga works); `⌥↩` queues the next message; ⌘. stops. Its key hints appear only while it has focus. Queued messages live in `*minga-queue*`, an editable buffer where `dd` and `p` reorder them.
 

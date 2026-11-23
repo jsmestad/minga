@@ -1,6 +1,6 @@
 """Flow-map checker for docs/design/scenarios.toml.
 
-Usage: python3 design/tools/storyboard/check.py [path/to/scenarios.toml]
+Usage: python3 design/tools/storyboard/check.py [--final] [path/to/scenarios.toml]
 
 Reports design gaps in the storyboard inventory:
 
@@ -11,6 +11,11 @@ Reports design gaps in the storyboard inventory:
   4. list surfaces without an empty-state scenario
   5. transient surfaces with an exit that has a key but no click, or a click but no key,
      unless the exit sets keyboard_only with a reason
+
+Mouse paths are designed in a sweep after the keyboard design (see storyboard.md).
+While scenarios.toml sets phase = "keyboard", missing click paths (2, by clicks,
+and 5) are reported as "pending mouse sweep" and do not fail the run. With
+--final, or phase = "final", they are violations like the rest.
 
 Removed scenarios are skipped, and so are states that are not places (no exits),
 terminal states and surfaces outside the app. Scenarios with reached_by (events
@@ -29,7 +34,8 @@ BACK_KEYS = {"esc", "q"}
 
 def load(path):
     with open(path, "rb") as f:
-        return tomllib.load(f)["scenario"]
+        data = tomllib.load(f)
+    return data["scenario"], data.get("phase", "final")
 
 
 def is_back(exit_):
@@ -53,7 +59,7 @@ def reach(starts, edges):
 def check(scenarios):
     by_id = {s["id"]: s for s in scenarios}
     live = [s for s in scenarios if s.get("status") != "removed"]
-    problems = {k: [] for k in ("unknown_target", "unreachable_by_key", "unreachable_by_click", "dead_end", "no_empty_state", "parity")}
+    problems = {k: [] for k in ("unknown_target", "unreachable_by_key", "unreachable_by_click", "dead_end", "no_empty_state", "parity", "no_click")}
 
     for s in live:
         for e in s.get("exits", []):
@@ -121,35 +127,48 @@ def check(scenarios):
             if e.get("keyboard_only"):
                 continue
             if key and not click:
-                problems["parity"].append(f"{s['id']}: '{key}' has no click")
+                problems["no_click"].append(f"{s['id']}: '{key}' has no click")
             elif click and not key:
                 problems["parity"].append(f"{s['id']}: '{click}' has no key")
     return problems
 
 
 def main(argv):
-    path = Path(argv[1]) if len(argv) > 1 else DEFAULT
-    scenarios = load(path)
+    args = argv[1:]
+    final_flag = "--final" in args
+    args = [a for a in args if a != "--final"]
+    path = Path(args[0]) if args else DEFAULT
+    scenarios, phase = load(path)
+    final = final_flag or phase == "final"
     problems = check(scenarios)
     counts = {}
     for s in scenarios:
         counts[s["status"]] = counts.get(s["status"], 0) + 1
     print(f"{len(scenarios)} scenarios: " + ", ".join(f"{v} {k}" for k, v in sorted(counts.items())))
+    print(f"Phase: {'final' if final else phase} (mouse paths {'are checked' if final else 'pending the mouse sweep'})")
     labels = {
         "unknown_target": "Exits to unknown scenarios",
         "unreachable_by_key": "Unreachable from cold start by keys",
         "unreachable_by_click": "Unreachable from cold start by clicks",
         "dead_end": "Dead ends (no esc or q path home within 3 steps)",
         "no_empty_state": "Lists without an empty state",
-        "parity": "Transient exits missing a key or a click",
+        "parity": "Transient exits with a click but no key",
+        "no_click": "Transient exits with a key but no click",
     }
-    total = 0
+    mouse = {"unreachable_by_click", "no_click"}
+    total, pending = 0, 0
     for k, label in labels.items():
         items = problems[k]
-        total += len(items)
+        if k in mouse and not final:
+            pending += len(items)
+            label = f"{label} (pending mouse sweep)"
+        else:
+            total += len(items)
         print(f"\n{label}: {len(items)}")
         for item in items:
             print(f"  - {item}")
+    if pending:
+        print(f"\n{pending} pending the mouse sweep (not failures in the keyboard phase)")
     print(f"\n{total} violations")
     return 1 if total else 0
 

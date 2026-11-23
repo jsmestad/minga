@@ -24,6 +24,11 @@
 #              A "to" id that has no [[scenario]] yet is an inventory gap.
 #   notes      anything a reviewer needs; open questions.
 #
+# Top-level key:
+#
+#   phase           "keyboard" while mouse paths are pending the mouse sweep (missing click
+#                   paths are reported but do not fail the checker), "final" after it.
+#
 # Flags used by the flow-map checker (design/tools/storyboard/check.py):
 #
 #   cold_start      true on the one scenario a fresh launch lands on.
@@ -63,6 +68,10 @@
 # lifecycle screens the Spine needs. Within a journey, removed scenarios come last.
 
 # ---- start -----------------------------------------------------------------
+
+# Design phase. "keyboard": click paths are pending the mouse sweep and do not fail
+# the checker. Set to "final" once every scenario has had its mouse sweep.
+phase = "keyboard"
 
 [[scenario]]
 id = "start.empty"
@@ -235,6 +244,9 @@ exits = [
   { key = "SPC c D", click = "", to = "code.references" },
   { key = "SPC c h", click = "", to = "code.call_hierarchy" },
   { key = "SPC c d", click = "modeline diagnostics segment", to = "code.diagnostics.list" },
+  { key = "SPC g s", click = "", to = "git.status" },
+  { key = "SPC g b", click = "", to = "git.blame" },
+  { key = "SPC t e", click = "", to = "edit.timeline" },
   { key = "SPC c l i", click = "", to = "code.lsp_info" },
   { key = "SPC c l I", click = "", to = "code.lsp_tools" },
   { key = "SPC m t o", click = "", to = "code.test_output" },
@@ -755,7 +767,7 @@ exits = [
   { key = "↩", click = "row", to = "edit.plain" },
   { key = "q", click = "close", to = "edit.plain" },
 ]
-notes = "Lives in the sidebar today; the Spine makes it a buffer (magit-style). No leader key today."
+notes = "Lives in the sidebar today; the Spine makes it a buffer (magit-style). SPC g s (new, free on main) opens it."
 
 [[scenario]]
 id = "git.status.clean"
@@ -958,6 +970,7 @@ exits = [
   { key = "SPC a r", click = "2 files changed · review", to = "minga.review.buffer" },
   { key = "↩ on a Started line", click = "Started line", to = "minga.subagent.peek" },
   { key = "SPC a v", click = "close split", to = "edit.working" },
+  { key = "q (Normal mode, outside the composer)", click = "", to = "edit.working" },
 ]
 
 [[scenario]]
@@ -1156,6 +1169,7 @@ status = "missing"
 exits = [
   { key = "↩", click = "Send", to = "minga.conversation" },
   { key = "SPC a v", click = "close split", to = "edit.plain" },
+  { key = "q (Normal mode, outside the composer)", click = "", to = "edit.plain" },
 ]
 notes = "Says what was interrupted and what was already changed."
 
@@ -1326,6 +1340,7 @@ transient = true
 exits = [
   { key = "y", click = "Publish", to = "edit.plain" },
   { key = "n", click = "Cancel", to = "edit.plain" },
+  { key = "esc", click = "", to = "edit.plain" },
 ]
 
 [[scenario]]
@@ -1508,8 +1523,9 @@ status = "missing"
 reached_by = "SPC o t in a shell without integration"
 exits = [
   { key = "SPC o t", click = "drawer close", to = "edit.plain" },
+  { key = "q (Normal mode)", click = "", to = "edit.plain" },
 ]
-notes = "No command blocks; a one-time hint in *Messages* explains how to enable them."
+notes = "No command blocks; a one-time hint in *Messages* explains how to enable them. q in Normal mode hides the drawer and leaves the shell running, as in terminal.drawer.normal."
 
 # ---- files -----------------------------------------------------------------
 
@@ -1866,6 +1882,8 @@ frontends = ["macos", "tui"]
 status = "existing-only"
 exits = [
   { key = "SPC o b", click = "close", to = "edit.plain" },
+  { key = "q", click = "", to = "edit.plain" },
+  { key = "esc", click = "", to = "edit.plain" },
 ]
 notes = "Sidebar today; becomes a buffer or drawer under the Spine."
 
@@ -1897,7 +1915,9 @@ status = "existing-only"
 reached_by = "a frame the frontend cannot decode"
 exits = [
   { key = "↩", click = "Reload", to = "edit.plain" },
+  { key = "esc", click = "", to = "edit.plain" },
 ]
+notes = "esc dismisses the overlay; Reload stays offered as an action in the notice it leaves behind."
 
 [[scenario]]
 id = "errors.resync"

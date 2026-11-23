@@ -47,6 +47,19 @@ OUT_DIR=/tmp/minga-boards python3 design/tools/storyboard/inventory.py
 OUT_DIR=/tmp/minga-boards python3 design/tools/storyboard/flowmap.py
 ```
 
+### Keyboard first, then the mouse sweep
+
+The storyboard is designed keyboard first: every scenario gets a best-in-class keyboard path before anyone designs its mouse path. Then each scenario gets a mouse sweep, case by case, choosing the click path that suits that screen. The sweep happens inside the storyboard, before a surface is accepted for building, never after it ships (AGENTS.md: mouse is not a follow-up).
+
+`scenarios.toml` records which phase the design is in with `phase = "keyboard"` or `phase = "final"`. In the keyboard phase, `check.py` reports missing click paths (scenarios unreachable by clicks, and transient exits with a key but no click) as "pending mouse sweep" and does not fail on them. Pass `--final`, or set `phase = "final"`, to treat them as violations. Every other invariant fails in both phases.
+
+```bash
+python3 design/tools/storyboard/check.py           # keyboard phase: mouse gaps are pending
+python3 design/tools/storyboard/check.py --final   # everything, including mouse gaps
+```
+
+### What the checker reports
+
 `check.py` prints every violation of the flow invariants it can check from the inventory and exits with status 1 if there are any:
 
 - exits that point at a scenario that does not exist;

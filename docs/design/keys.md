@@ -10,6 +10,7 @@ Notation: modifiers as Mac glyphs (⌃J, ⌥↩, ⌘.), leader sequences as `SPC
 - **In a file, `y n = Y q` are always Vim.** Minga's changes are handled with leader keys, a text object and ex commands. Bare single-letter actions live only in Minga's special buffers.
 - **Typing surfaces use control keys.** Where you type into a prompt (the switcher, filters), actions use ⌃ keys so letters stay text.
 - **Bulk actions confirm.** Keep all and Reject all ask "y/n" in the minibuffer first.
+- **`q` closes special buffers and splits; `esc` closes anything transient.** `q` in Minga's special buffers and splits (conversation, queue, subagent peek, checklist, attachments, retained history, the observatory) returns you to the window you came from, the way `quit-window` works in Emacs `special-mode` buffers and Doom popups. `esc` cancels or dismisses any transient surface (prompts, pickers, menus, overlays). In the conversation, `q` applies in Normal mode outside the composer, where it is not text.
 
 ## Leader
 
@@ -23,6 +24,9 @@ Notation: modifiers as Mac glyphs (⌃J, ⌥↩, ⌘.), leader sequences as `SPC
 | `SPC c d` | Diagnostics list | kept (102) |
 | `SPC g k` | Keep Minga's change at the cursor or in the selection | new |
 | `SPC g r` | Reject Minga's change at the cursor or in the selection | new |
+| `SPC g s` | Git status (a magit-style buffer) | new |
+| `SPC g b` | Blame for the current line or file | new |
+| `SPC t e` | Edit timeline | new |
 | `SPC o t` | Toggle the terminal drawer | new |
 | `SPC o T` | New terminal in the current window | new |
 
