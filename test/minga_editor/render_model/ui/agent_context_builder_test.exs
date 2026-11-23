@@ -14,9 +14,14 @@ defmodule MingaEditor.RenderModel.UI.AgentContextBuilderTest do
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Frontend.Emit.Context
   alias MingaEditor.RenderModel.UI.AgentContextBuilder
+  alias MingaEditor.RenderModel.UI.TabBarBuilder
+  alias MingaEditor.RenderModel.UI.WorkspacesBuilder
   alias MingaEditor.RenderPipeline.TestHelpers
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.State.Agent, as: AgentState
+  alias MingaEditor.State.Tab
+  alias MingaEditor.State.TabBar
+  alias MingaEditor.State.Workspace
 
   @spec approval(String.t()) :: Public.t()
   defp approval(tool_call_id) do
@@ -160,6 +165,115 @@ defmodule MingaEditor.RenderModel.UI.AgentContextBuilderTest do
       assert second.dispatch_timestamp == started_at
       assert first.dispatch_timestamp == second.dispatch_timestamp
     end
+  end
+
+  describe "the workspace pill and the activity strip" do
+    test "agree that a session errored while its workspace shows a file tab" do
+      # The workspace payload still holds the last status an event wrote; the
+      # error lives only on the live shell presentation cache.
+      errored = AgentState.set_status(%AgentState{}, :error)
+      ctx = agent_workspace_context(errored, UIState.new(), active_tab: 3, stored_status: :idle)
+
+      assert workspace_status(ctx) == :error
+      assert agent_tab_status(ctx) == :error
+      assert %AgentContext{visible: true, status: :errored} = AgentContextBuilder.build(ctx)
+    end
+
+    test "agree that a failed start needs the user while its workspace shows a file tab" do
+      failure =
+        MingaEditor.Agent.StartFailure.timed_out(MingaEditor.Agent.StartRequest.default())
+
+      failed_ui = UIState.fail_start(UIState.new(), failure)
+      errored = AgentState.set_status(%AgentState{}, :error)
+      ctx = agent_workspace_context(errored, failed_ui, active_tab: 3, stored_status: :error)
+
+      assert workspace_status(ctx) == :needs_you
+      assert agent_tab_status(ctx) == :needs_you
+      assert %AgentContext{visible: true, status: :needs_you} = AgentContextBuilder.build(ctx)
+    end
+
+    test "agree, with the status bar and chat header, that a pending question needs the user" do
+      {:ok, question} = MingaAgent.Question.new("Which file?", ["a.ex", "b.ex"])
+
+      target = %MingaAgent.Question.Target{
+        session_id: "pill-fixture",
+        request_id: "request",
+        checkpoint_id: "checkpoint",
+        tool_call_id: "tool-call"
+      }
+
+      asking =
+        %AgentState{}
+        |> AgentState.set_status(:thinking)
+        |> AgentState.project_question(self(), {target, question})
+
+      ctx =
+        agent_workspace_context(asking, UIState.new(), active_tab: 3, stored_status: :thinking)
+
+      assert workspace_status(ctx) == :needs_you
+      assert agent_tab_status(ctx) == :needs_you
+      assert %AgentContext{visible: true, status: :needs_you} = AgentContextBuilder.build(ctx)
+
+      # The status bar and the chat header read the active workspace's status here.
+      assert MingaEditor.Agent.WorkspaceStatus.active(
+               ctx.intent.frame.shell_state,
+               ctx.workspace.agent_ui
+             ) ==
+               :needs_you
+    end
+
+    test "a background Agent workspace shows its stored status, not the live cache" do
+      ctx =
+        agent_workspace_context(%AgentState{}, UIState.new(),
+          active_tab: 1,
+          stored_status: :error
+        )
+
+      assert workspace_status(ctx) == :error
+      refute AgentContextBuilder.visible?(ctx)
+    end
+  end
+
+  # Tabs: 1 is a manual file, 2 the Agent chat and 3 a file, both in Agent workspace 1.
+  defp agent_workspace_context(agent, agent_ui, opts) do
+    workspace =
+      Workspace.new_agent(1, "Agent", self())
+      |> Workspace.set_agent_status(Keyword.fetch!(opts, :stored_status))
+
+    tab_bar = %TabBar{
+      tabs: [
+        Tab.new_file(1, "manual.ex"),
+        2 |> Tab.new_agent("Agent") |> Tab.set_group(1),
+        3 |> Tab.new_file("agent.ex") |> Tab.set_group(1)
+      ],
+      active_id: Keyword.fetch!(opts, :active_tab),
+      next_id: 4,
+      workspaces: [workspace],
+      next_workspace_id: 2
+    }
+
+    shell_state =
+      %TraditionalState{}
+      |> TraditionalState.install_tab_bar(tab_bar)
+      |> TraditionalState.replace_agent(agent)
+
+    %{context(agent_ui, shell_state) | tab_bar: tab_bar}
+  end
+
+  defp workspace_status(ctx) do
+    ctx
+    |> WorkspacesBuilder.build()
+    |> Map.fetch!(:workspaces)
+    |> Enum.find(&(&1.id == 1))
+    |> Map.fetch!(:status)
+  end
+
+  defp agent_tab_status(ctx) do
+    ctx
+    |> TabBarBuilder.build()
+    |> Map.fetch!(:tabs)
+    |> Enum.find(&(&1.id == 2))
+    |> Map.fetch!(:agent_status)
   end
 
   defp context(agent_ui, shell_state) do
