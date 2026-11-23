@@ -366,11 +366,10 @@ defmodule Minga.MixProject do
 
   defp aliases do
     [
-      # Source launchers establish the isolated runtime environment before starting Mix.
+      # Source launchers prepare the profile environment first; see Minga.CLI.source_profile_env?/1.
       minga: [
         "run --no-halt --no-start -e '
-          profile = System.get_env(\"MINGA_DEV_PROFILE\")
-          unless profile && System.get_env(\"XDG_CONFIG_HOME\") == Path.join(profile, \"config\") && System.get_env(\"HOME\") == Path.join(profile, \"home\"), do: Mix.raise(\"Launch the source editor with bin/minga\")
+          unless Minga.CLI.source_profile_env?(System.get_env()), do: Mix.raise(\"Launch the source editor with bin/minga\")
           argv = System.argv()
           case Minga.CLI.info_flag_output(argv) do
             {:ok, output} ->

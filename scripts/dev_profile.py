@@ -35,6 +35,8 @@ def private_directory(path):
 
 def launch(profile, name, args, lock=None):
     home = Path.home()
+    # MINGA_DEV_REAL_HOME=1 keeps the real HOME so child tools can reach the login keychain; Minga's own roots stay private.
+    real_home = os.environ.get("MINGA_DEV_REAL_HOME") == "1"
     env = {key: value for key, value in os.environ.items() if key in INHERITED}
     for key, relative in {
         "ASDF_DATA_DIR": ".asdf", "MIX_HOME": ".mix", "HEX_HOME": ".hex",
@@ -53,6 +55,9 @@ def launch(profile, name, args, lock=None):
         "XDG_CACHE_HOME": "cache", "XDG_STATE_HOME": "state", "TMPDIR": "tmp",
     }.items():
         env[key] = private_directory(profile / directory)
+    if real_home:
+        env["HOME"] = str(home)
+        env["MINGA_DEV_REAL_HOME"] = "1"
     env["MIX_ENV"] = "dev"
     env["MINGA_DEV_PROFILE"] = str(profile)
     command = [ROOT / "bin" / "lib" / name, *args]
