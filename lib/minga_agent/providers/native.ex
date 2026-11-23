@@ -66,6 +66,7 @@ defmodule MingaAgent.Providers.Native do
   alias MingaAgent.Providers.Native.ReqLLMAdapter
   alias MingaAgent.Providers.Native.SystemPrompt
   alias MingaAgent.Providers.Native.ToolResultBound
+  alias MingaAgent.Providers.Native.UsageLimitSignal
   alias MingaAgent.Redaction
   alias MingaAgent.Retry
   alias MingaAgent.Session
@@ -78,6 +79,7 @@ defmodule MingaAgent.Providers.Native do
   alias MingaAgent.Credentials
   alias MingaAgent.Skills
   alias MingaAgent.TokenEstimator
+  alias MingaAgent.UsageLimit
   alias MingaAgent.Tool.Output
   alias MingaAgent.Tool.Invocation
   alias MingaAgent.Tool.Limitation
@@ -3670,8 +3672,19 @@ defmodule MingaAgent.Providers.Native do
   end
 
   defp error_event(message, reason, %ModelSelection{} = selection) do
-    kind = classify_error_reason(reason)
     provider = Atom.to_string(selection.route.request_provider)
+    now = DateTime.utc_now()
+
+    case UsageLimitSignal.detect(reason, usage_limit_service(provider), now) do
+      {:ok, limit} -> usage_limit_event(limit, provider, now)
+      :none -> classified_error_event(message, reason, selection, provider)
+    end
+  end
+
+  @spec classified_error_event(String.t(), term(), ModelSelection.t(), String.t()) ::
+          Event.Error.t()
+  defp classified_error_event(message, reason, selection, provider) do
+    kind = classify_error_reason(reason)
 
     %Event.Error{
       message:
@@ -3709,39 +3722,64 @@ defmodule MingaAgent.Providers.Native do
   defp contributed_error_event(lctx, reason) do
     {:contributed, route_id, _model_id} = lctx.selection.route.origin
     {kind, message} = contributed_error(lctx.inference_routes, route_id, route_failure(reason))
+    now = DateTime.utc_now()
 
-    case plan_limit_message(kind, lctx.inference_routes, route_id) do
-      {:ok, limit_message} ->
-        %Event.Error{
-          kind: kind,
-          message: limit_message,
-          provider: route_id,
-          recovery: :choose_model
-        }
-
-      :none ->
-        %Event.Error{kind: kind, message: message, provider: route_id}
+    case contributed_usage_limit(kind, lctx.inference_routes, route_id) do
+      {:window, limit} -> usage_limit_event(limit, route_id, now)
+      {:unreported, limit} -> Event.Error.usage_limit(limit, message, route_id)
+      :none -> %Event.Error{kind: kind, message: message, provider: route_id}
     end
   end
 
-  # A rate-limited route with a refusing window and a known reset gets the plan-limit sentence.
-  @spec plan_limit_message(Event.Error.kind(), GenServer.server(), String.t()) ::
-          {:ok, String.t()} | :none
-  defp plan_limit_message(:rate_limited, registry, route_id) do
-    with {:ok, entry} <- InferenceRouteRegistry.lookup(registry, route_id),
-         %PlanWindow{} = window <-
-           PlanWindow.rejected(InferenceRouteStatus.plan_windows(entry.status)),
-         reset when is_binary(reset) <- InferenceRouteRegistry.reset_label(window) do
-      {:ok,
-       "#{InferenceRouteSpec.short_name(entry.spec)} plan limit reached. Resets at #{reset}. Switch model to continue."}
-    else
-      _no_reset -> :none
+  # A route refusing requests through a `:rejected` plan window is at its usage limit. Without
+  # such a window, only a route that classifies the failure as a usage limit itself is one, and
+  # its own sentence stays.
+  @spec contributed_usage_limit(Event.Error.kind(), GenServer.server(), String.t()) ::
+          {:window | :unreported, UsageLimit.t()} | :none
+  defp contributed_usage_limit(kind, registry, route_id)
+       when kind in [:rate_limited, :usage_limit_reached] do
+    case InferenceRouteRegistry.lookup(registry, route_id) do
+      {:ok, entry} ->
+        service = InferenceRouteSpec.short_name(entry.spec)
+
+        entry.status
+        |> InferenceRouteStatus.plan_windows()
+        |> PlanWindow.rejected()
+        |> route_usage_limit(kind, service)
+
+      {:error, :not_found} ->
+        :none
     end
   catch
     :exit, _reason -> :none
   end
 
-  defp plan_limit_message(_kind, _registry, _route_id), do: :none
+  defp contributed_usage_limit(_kind, _registry, _route_id), do: :none
+
+  @spec route_usage_limit(PlanWindow.t() | nil, Event.Error.kind(), String.t()) ::
+          {:window | :unreported, UsageLimit.t()} | :none
+  defp route_usage_limit(%PlanWindow{} = window, _kind, service),
+    do: {:window, UsageLimit.from_plan_window(service, window)}
+
+  defp route_usage_limit(nil, :usage_limit_reached, service),
+    do: {:unreported, UsageLimit.unknown(service)}
+
+  defp route_usage_limit(nil, _kind, _service), do: :none
+
+  @spec usage_limit_event(UsageLimit.t(), String.t(), DateTime.t()) :: Event.Error.t()
+  defp usage_limit_event(limit, provider, now) do
+    message = UsageLimit.message(limit, now, &InferenceRouteRegistry.local_time/1)
+    Event.Error.usage_limit(limit, message, provider)
+  end
+
+  # The subscription name the user recognizes in "Your ChatGPT Pro usage limit is reached."
+  @spec usage_limit_service(String.t()) :: String.t()
+  defp usage_limit_service("openai_codex"), do: "ChatGPT"
+
+  defp usage_limit_service(provider) when provider in ["anthropic", "openai", "google"],
+    do: provider_label(provider)
+
+  defp usage_limit_service(_provider), do: "model provider"
 
   @spec route_failure(term()) :: term()
   defp route_failure(%ReqLLM.Error.API.Stream{cause: nil} = reason), do: reason

@@ -18,6 +18,7 @@ defmodule MingaEditor.UI.Picker.AgentModelSource do
   alias MingaAgent.Session
   alias MingaAgent.Session.ConnectionSnapshot
   alias MingaAgent.Session.ConnectionTarget
+  alias MingaAgent.UsageLimit
   alias MingaEditor.Agent.ConnectionAction
   alias MingaEditor.Agent.UIState
   alias MingaEditor.PickerUI
@@ -395,8 +396,9 @@ defmodule MingaEditor.UI.Picker.AgentModelSource do
   end
 
   # A catalog route is listed only when its credential is configured, so its chip says it is
-  # ready. The route is the row's group. The description shows the price and context; only a
-  # capability the model lacks is named.
+  # ready, or that its plan's usage limit was reached, with the reset first in the description. The
+  # route is the row's group. The description shows the price and context; only a capability the
+  # model lacks is named.
   defp format_candidate(%ModelCandidate{selection: selection} = candidate) do
     route = selection.route
     policy = selection.policy
@@ -406,6 +408,7 @@ defmodule MingaEditor.UI.Picker.AgentModelSource do
 
     description =
       [
+        usage_limit_detail(candidate.usage_limit),
         metered_cost(policy),
         format_context(policy.limits.context),
         catalog_thinking(selection),
@@ -419,13 +422,23 @@ defmodule MingaEditor.UI.Picker.AgentModelSource do
       label: route.display_name,
       description: description,
       annotation: if(candidate.favorite, do: "★ favorite", else: nil),
-      status: Status.new(:ready, "Ready"),
+      status: catalog_status(candidate.usage_limit),
       group: route_name,
       search_text:
         "#{route_name} #{route.model_provider} #{route.model_id} #{route.execution.wire_protocol} #{endpoint} #{credential}",
       active: candidate.current
     }
   end
+
+  # An observed usage limit uses the same chip and reset label as a contributed route's refusing
+  # plan window; the row stays selectable.
+  @spec catalog_status(UsageLimit.t() | nil) :: Status.t()
+  defp catalog_status(nil), do: Status.new(:ready, "Ready")
+  defp catalog_status(%UsageLimit{}), do: limit_reached_status()
+
+  @spec usage_limit_detail(UsageLimit.t() | nil) :: String.t()
+  defp usage_limit_detail(nil), do: ""
+  defp usage_limit_detail(limit), do: limit |> UsageLimit.plan_window() |> window_reset_label()
 
   @spec catalog_route_name(ModelSelection.Route.request_provider()) :: String.t()
   defp catalog_route_name(:apple), do: "On device"
@@ -489,13 +502,16 @@ defmodule MingaEditor.UI.Picker.AgentModelSource do
     case plan_state(status, policy) do
       :checking -> Status.new(:checking, "Checking…")
       :unreported -> Status.new(:ready, "Ready")
-      {:limit_reached, _window} -> Status.new(:error, "Limit reached")
+      {:limit_reached, _window} -> limit_reached_status()
       {:near_limit, window} -> Status.new(:warn, "Ready · #{PlanWindow.percent(window)}%")
       {:within_limit, window} -> Status.new(:ready, "Ready · #{PlanWindow.percent(window)}%")
     end
   end
 
   defp route_status(status, _policy), do: AgentConnectionSource.availability_status(status)
+
+  @spec limit_reached_status() :: Status.t()
+  defp limit_reached_status, do: Status.new(:error, "Limit reached")
 
   # The account with the plan detail the chip leaves out, the remedy, or only the plan detail when
   # unchecked.

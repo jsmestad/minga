@@ -186,6 +186,7 @@ defmodule MingaAgent.Session.Connection do
       when kind in [
              :auth_failed,
              :rate_limited,
+             :usage_limit_reached,
              :unreachable,
              :invalid_model,
              :provider_error,

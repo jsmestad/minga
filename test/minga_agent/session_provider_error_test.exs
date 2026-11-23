@@ -221,6 +221,117 @@ defmodule MingaAgent.SessionProviderErrorTest do
     end
   end
 
+  describe "subscription usage limits" do
+    # The 429 ChatGPT Pro returned on 2026-11-23 when its weekly limit was reached, as ReqLLM reports it.
+    @usage_limit_error ReqLLM.Error.API.Request.exception(
+                         reason: "The usage limit has been reached",
+                         status: 429,
+                         response_body: %{
+                           "eligible_promo" => nil,
+                           "limit_window_minutes" => 10_080,
+                           "message" => "The usage limit has been reached",
+                           "plan_type" => "pro",
+                           "resets_at" => 1_795_626_066,
+                           "resets_in_seconds" => 172_541,
+                           "type" => "usage_limit_reached"
+                         },
+                         provider_code: "usage_limit_reached",
+                         retryable: true
+                       )
+
+    @tag :tmp_dir
+    test "a usage limit names its plan and reset, is not retried or followed by queued input, and marks the route until a request succeeds",
+         %{tmp_dir: dir} do
+      test_pid = self()
+
+      # The ChatGPT account lists the model, so /model can show its route.
+      inventory = fn conn ->
+        Req.Test.json(conn, %{"models" => [%{"slug" => "gpt-6.1-sol", "visibility" => "list"}]})
+      end
+
+      session =
+        start_failing_native_session(
+          dir,
+          fn
+            0 ->
+              send(test_pid, {:usage_limit_request, 0, self()})
+
+              receive do
+                :respond -> {:error, @usage_limit_error}
+              end
+
+            count ->
+              send(test_pid, {:usage_limit_request, count, self()})
+
+              build_stream_response([
+                ReqLLM.StreamChunk.text("back again"),
+                ReqLLM.StreamChunk.meta(%{finish_reason: :stop})
+              ])
+          end,
+          plug: inventory
+        )
+
+      assert :ok = Session.send_prompt(session, "hello")
+      assert_receive {:usage_limit_request, 0, request}, @durable_workflow_timeout
+      assert {:queued, :follow_up} = Session.queue_follow_up(session, "after the limit")
+      send(request, :respond)
+
+      message = await_failed_turn(session)
+
+      assert message =~
+               ~r/\AYour ChatGPT Pro usage limit is reached\. It resets \w{3}, Nov 2[56] at \d{1,2}:\d{2} (AM|PM)\. Choose another model with \/model to continue now\.\z/
+
+      assert_received {:agent_event, ^session, {:model_limit_reached, ^message}}
+      assert error_messages(session) == [message]
+
+      # Neither an in-turn retry nor the queued follow-up reaches the provider.
+      refute_receive {:usage_limit_request, _count, _request}, 300
+      assert {[], ["after the limit"]} = Session.get_queued_messages(session)
+
+      # /model lists the route as limit-reached until the reset passes or a request succeeds.
+      assert {:ok, [limited], _notice, _validity} = Session.discover_available_models(session)
+
+      assert %MingaAgent.UsageLimit{
+               service: "ChatGPT",
+               plan: "pro",
+               window_minutes: 10_080,
+               resets_at: ~U[2026-11-25 17:01:06Z]
+             } = limited.usage_limit
+
+      # A later request that succeeds on the route lifts the limit.
+      assert :ok = Session.send_prompt(session, "try again")
+      assert_receive {:usage_limit_request, 1, _request}, @durable_workflow_timeout
+      assert_receive {:agent_event, ^session, {:status_changed, :idle}}, @durable_workflow_timeout
+      assert {:ok, [lifted], _notice, _validity} = Session.discover_available_models(session)
+      assert lifted.usage_limit == nil
+    end
+
+    test "a usage limit keeps the provider's sentence and text-only reports name no reset" do
+      limit = %MingaAgent.UsageLimit{service: "ChatGPT", plan: "pro"}
+
+      sentence =
+        "Your ChatGPT Pro usage limit is reached. Choose another model with /model to continue now."
+
+      cases = [
+        {Event.Error.usage_limit(limit, sentence, "openai_codex"), sentence},
+        {%Event.Error{
+           kind: :unknown,
+           provider: "custom",
+           message: "429 Too Many Requests: {\"type\":\"usage_limit_reached\"}"
+         },
+         "Your plan's usage limit is reached. Choose another model with /model to continue now."},
+        {%Event.Error{kind: :unknown, provider: "custom", message: "429 Too Many Requests"},
+         "The model provider is rate limiting requests. Wait a moment, then try again."}
+      ]
+
+      for {event, expected} <- cases do
+        session = start_subscribed_session()
+        send_provider_event(session, event)
+        assert error_messages(session) == [expected]
+      end
+    end
+  end
+
   describe "provider error presentation" do
     test "openai codex auth failures suggest /login instead of /auth openai_codex" do
       session = start_subscribed_session()
@@ -445,8 +556,8 @@ defmodule MingaAgent.SessionProviderErrorTest do
     end
   end
 
-  @spec start_failing_native_session(Path.t(), (non_neg_integer() -> term())) :: pid()
-  defp start_failing_native_session(dir, respond) do
+  @spec start_failing_native_session(Path.t(), (non_neg_integer() -> term()), keyword()) :: pid()
+  defp start_failing_native_session(dir, respond, extra_credential_opts \\ []) do
     call_count = :counters.new(1, [:atomics])
     oauth_path = Path.join(dir, "credentials/oauth.json")
 
@@ -461,11 +572,12 @@ defmodule MingaAgent.SessionProviderErrorTest do
                oauth_path
              )
 
-    credential_opts = [
-      config_dir: Path.join(dir, "credentials"),
-      env: %{},
-      oauth_path: oauth_path
-    ]
+    credential_opts =
+      [
+        config_dir: Path.join(dir, "credentials"),
+        env: %{},
+        oauth_path: oauth_path
+      ] ++ extra_credential_opts
 
     resolver_opts =
       MingaAgent.Test.ModelSelectionFixture.resolver_opts(model_id: "gpt-6.1-sol")

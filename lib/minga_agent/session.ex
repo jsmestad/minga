@@ -74,11 +74,13 @@ defmodule MingaAgent.Session do
   alias MingaAgent.Session.Transcript
   alias MingaAgent.Session.QueuedInputSummary
   alias MingaAgent.Session.TurnExecution
+  alias MingaAgent.Session.UsageLimits
   require ProviderLifecycle
   alias MingaAgent.SessionManager
   alias MingaAgent.SessionStore
   alias MingaAgent.SubagentContext
   alias MingaAgent.ToolApproval
+  alias MingaAgent.UsageLimit
   alias MingaAgent.ToolApproval.Public, as: PublicApproval
   alias MingaAgent.ToolApproval.Target, as: ApprovalTarget
   alias MingaAgent.ToolCall
@@ -152,6 +154,7 @@ defmodule MingaAgent.Session do
              ModelResolver.apple_availability() | nil}
             | nil,
           model_discovery_request: reference() | nil,
+          usage_limits: UsageLimits.t(),
           apple_selection_probe:
             {reference(), pid(), ConnectionTarget.t(), ModelResolver.intent()} | nil,
           pending_model_change: ModelSelection.t() | String.t() | nil,
@@ -1472,6 +1475,7 @@ defmodule MingaAgent.Session do
       unresolved_route: nil,
       model_discovery: nil,
       model_discovery_request: nil,
+      usage_limits: UsageLimits.new(),
       apple_selection_probe: nil,
       pending_model_change: nil,
       pending_thinking_level: if(model_selection, do: nil, else: initial_thinking_level),
@@ -4176,7 +4180,9 @@ defmodule MingaAgent.Session do
 
         case {outcome_result, boundary_result} do
           {:accepted, :ok} ->
-            finish_provider_turn(state, completing)
+            state
+            |> usage_limit_lifted()
+            |> finish_provider_turn(completing)
 
           {:accepted, {:error, _reason}} ->
             fail_completed_turn(
@@ -4630,6 +4636,14 @@ defmodule MingaAgent.Session do
         dispatch_notification(state, :complete, completion_notification(state))
         state |> dispatch_stop() |> send_queued_turn(contents, execution)
     end
+  end
+
+  @spec usage_limit_lifted(state()) :: state()
+  defp usage_limit_lifted(state) do
+    %{
+      state
+      | usage_limits: UsageLimits.request_succeeded(state.usage_limits, state.model_selection)
+    }
   end
 
   @spec report_turn_error(state(), String.t()) :: state()
@@ -5652,7 +5666,7 @@ defmodule MingaAgent.Session do
   end
 
   defp handle_provider_event(%Event.Error{} = event, state) do
-    state = retain_connection_error(state, event)
+    state = state |> retain_connection_error(event) |> observe_usage_limit(event)
     message = humanize_error(event, state)
 
     state
@@ -5660,7 +5674,18 @@ defmodule MingaAgent.Session do
     |> announce_model_limit(event, message)
   end
 
-  # Only an error that names a plan limit and its reset offers a model switch; the draft stays as it is.
+  # `/model` shows the route as limit-reached until the reset passes or a later request on it succeeds.
+  @spec observe_usage_limit(state(), Event.Error.t()) :: state()
+  defp observe_usage_limit(state, %Event.Error{kind: :usage_limit_reached, usage_limit: limit}) do
+    %{
+      state
+      | usage_limits: UsageLimits.observed(state.usage_limits, state.model_selection, limit)
+    }
+  end
+
+  defp observe_usage_limit(state, %Event.Error{}), do: state
+
+  # Only a usage-limit error offers a model switch; the draft stays as it is.
   @spec announce_model_limit(state(), Event.Error.t(), String.t()) :: state()
   defp announce_model_limit(state, %Event.Error{recovery: :choose_model}, message),
     do: broadcast(state, {:model_limit_reached, message})
@@ -7887,14 +7912,17 @@ defmodule MingaAgent.Session do
         nil -> {{:error, :not_loaded}, nil}
       end
 
-    ModelResolver.candidates(
-      model_resolution_opts(state,
-        current: state.model_selection,
-        credential_snapshot: snapshot,
-        apple_discovery: if(include_apple?, do: apple),
-        codex_models: codex
+    candidates =
+      ModelResolver.candidates(
+        model_resolution_opts(state,
+          current: state.model_selection,
+          credential_snapshot: snapshot,
+          apple_discovery: if(include_apple?, do: apple),
+          codex_models: codex
+        )
       )
-    )
+
+    UsageLimits.annotate(state.usage_limits, candidates, DateTime.utc_now())
   end
 
   @spec model_resolution_opts(state(), keyword()) :: keyword()
@@ -8413,6 +8441,9 @@ defmodule MingaAgent.Session do
   defp humanize_error_kind(:rate_limited, _message, _provider),
     do: "The model provider is rate limiting requests. Wait a moment, then try again."
 
+  # The provider already named the plan and its local reset time.
+  defp humanize_error_kind(:usage_limit_reached, message, _provider), do: message
+
   defp humanize_error_kind(:unreachable, _message, _provider),
     do: "Couldn't reach the model provider. Check your network connection, then try again."
 
@@ -8435,7 +8466,12 @@ defmodule MingaAgent.Session do
   end
 
   @type legacy_error_kind ::
-          :auth_failed | :rate_limited | :unreachable | :raw_dump | :passthrough
+          :auth_failed
+          | :usage_limit_reached
+          | :rate_limited
+          | :unreachable
+          | :raw_dump
+          | :passthrough
 
   @spec humanize_legacy_error(String.t(), String.t()) :: String.t()
   defp humanize_legacy_error(message, provider) when is_binary(message) do
@@ -8457,6 +8493,7 @@ defmodule MingaAgent.Session do
            "Failed to build",
            "Couldn't authenticate"
          ])},
+      {:usage_limit_reached, UsageLimit.message_signal?(message)},
       {:rate_limited,
        String.match?(message, ~r/\b429\b/) or String.contains?(message, "rate limit")},
       {:unreachable,
@@ -8481,6 +8518,10 @@ defmodule MingaAgent.Session do
   @spec humanize_legacy_error_kind(legacy_error_kind(), String.t(), String.t()) :: String.t()
   defp humanize_legacy_error_kind(:auth_failed, _message, provider),
     do: "Couldn't authenticate with #{provider_label(provider)}. #{auth_hint(provider)}"
+
+  # Text carries no reset time, so none is named.
+  defp humanize_legacy_error_kind(:usage_limit_reached, _message, _provider),
+    do: "Your plan's usage limit is reached. Choose another model with /model to continue now."
 
   defp humanize_legacy_error_kind(:rate_limited, _message, _provider),
     do: "The model provider is rate limiting requests. Wait a moment, then try again."

@@ -20,6 +20,7 @@ defmodule MingaAgent.InferenceRouteRegistry do
   @error_kinds [
     :auth_failed,
     :rate_limited,
+    :usage_limit_reached,
     :unreachable,
     :invalid_model,
     :context_transition_required,

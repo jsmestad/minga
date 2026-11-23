@@ -96,6 +96,10 @@ defmodule MingaAgent.Test.FixtureInferenceRoute do
   @impl true
   @spec classify_error(term()) :: {MingaAgent.Event.Error.kind(), String.t()}
   def classify_error(:rate_limited), do: {:rate_limited, "Fixture route is rate limited."}
+
+  def classify_error(:usage_limit_reached),
+    do: {:usage_limit_reached, "Fixture plan is out of usage until next week."}
+
   def classify_error(_reason), do: {:provider_error, "The fixture route failed."}
 
   @spec next_step(pid(), String.t(), Request.t()) :: {step() | :exhausted, pid()}

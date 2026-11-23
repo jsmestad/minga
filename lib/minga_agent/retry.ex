@@ -11,6 +11,8 @@ defmodule MingaAgent.Retry do
   headers when present.
   """
 
+  alias MingaAgent.UsageLimit
+
   @typedoc "Options for retry behavior."
   @type opts :: [
           max_retries: non_neg_integer(),
@@ -50,8 +52,26 @@ defmodule MingaAgent.Retry do
 
   @doc """
   Returns true if the given error reason is retryable.
+
+  A 429 that reports a subscription usage limit is not retryable: the limit lasts until its window resets, which can be days away. See `MingaAgent.UsageLimit`.
   """
   @spec retryable?(term()) :: boolean()
+  def retryable?(%{status: 429} = reason),
+    do:
+      not UsageLimit.reported?(
+        429,
+        Map.get(reason, :provider_code),
+        Map.get(reason, :response_body)
+      )
+
+  def retryable?(%{"status" => 429} = reason),
+    do:
+      not UsageLimit.reported?(
+        429,
+        Map.get(reason, "provider_code"),
+        Map.get(reason, "response_body")
+      )
+
   def retryable?(%{status: status}) when status in @retryable_statuses, do: true
   def retryable?(%{"status" => status}) when status in @retryable_statuses, do: true
 
@@ -67,14 +87,15 @@ defmodule MingaAgent.Retry do
   def retryable?(reason) when is_binary(reason) do
     lower = String.downcase(reason)
 
-    String.contains?(lower, "overloaded") or
-      String.contains?(lower, "rate limit") or
-      String.contains?(lower, "timeout") or
-      String.contains?(lower, "connection") or
-      String.contains?(lower, "529") or
-      String.contains?(lower, "500") or
-      String.contains?(lower, "502") or
-      String.contains?(lower, "503")
+    not UsageLimit.message_signal?(lower) and
+      (String.contains?(lower, "overloaded") or
+         String.contains?(lower, "rate limit") or
+         String.contains?(lower, "timeout") or
+         String.contains?(lower, "connection") or
+         String.contains?(lower, "529") or
+         String.contains?(lower, "500") or
+         String.contains?(lower, "502") or
+         String.contains?(lower, "503"))
   end
 
   def retryable?(%{__exception__: true} = exception) do

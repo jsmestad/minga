@@ -2689,6 +2689,147 @@ defmodule MingaAgent.Providers.NativeTest do
   end
 
   describe "send_prompt with LLM error" do
+    # The 429 ChatGPT Pro returned on 2026-11-23 when its weekly limit was reached, as ReqLLM reports it.
+    defp recorded_usage_limit_error(body_overrides \\ %{}) do
+      ReqLLM.Error.API.Request.exception(
+        reason: "The usage limit has been reached",
+        status: 429,
+        response_body:
+          Map.merge(
+            %{
+              "eligible_promo" => nil,
+              "limit_window_minutes" => 10_080,
+              "message" => "The usage limit has been reached",
+              "plan_type" => "pro",
+              "resets_at" => 1_795_626_066,
+              "resets_in_seconds" => 172_541,
+              "type" => "usage_limit_reached"
+            },
+            body_overrides
+          ),
+        headers: [{"x-codex-plan-type", "pro"}, {"x-codex-primary-reset-at", "1795626067"}],
+        provider_code: "usage_limit_reached",
+        retryable: true
+      )
+    end
+
+    defp counting_client(counter, reply) do
+      fn _model, _messages, _opts ->
+        :counters.add(counter, 1, 1)
+        reply.()
+      end
+    end
+
+    test "a usage limit that fails the stream reads as one with its reset, and is not retried",
+         %{tmp_dir: dir} do
+      calls = :counters.new(1, [:atomics])
+      failure = recorded_usage_limit_error()
+
+      failing_stream = fn ->
+        build_stream_response(
+          Stream.map([:first], fn _chunk ->
+            raise %ReqLLM.Error.API.Stream{
+              reason: "Stream failed: #{inspect(failure)}",
+              cause: failure
+            }
+          end)
+        )
+      end
+
+      {:ok, pid} =
+        start_provider(
+          tmp_dir: dir,
+          llm_client: counting_client(calls, failing_stream),
+          max_retries: 3
+        )
+
+      assert :ok = send_prompt(pid, "Hello")
+      events = collect_run_events()
+
+      assert %Event.Error{
+               kind: :usage_limit_reached,
+               provider: "openai_codex",
+               recovery: :choose_model,
+               usage_limit: %MingaAgent.UsageLimit{
+                 service: "ChatGPT",
+                 plan: "pro",
+                 window_minutes: 10_080,
+                 resets_at: ~U[2026-11-25 17:01:06Z]
+               },
+               message: message
+             } = Enum.find(events, &match?(%Event.Error{}, &1))
+
+      assert message =~
+               ~r/\AYour ChatGPT Pro usage limit is reached\. It resets \w{3}, Nov 2[56] at \d{1,2}:\d{2} (AM|PM)\. Choose another model with \/model to continue now\.\z/
+
+      assert :counters.get(calls, 1) == 1
+    end
+
+    test "a usage limit refused at dispatch is not retried", %{tmp_dir: dir} do
+      calls = :counters.new(1, [:atomics])
+
+      without_reset =
+        recorded_usage_limit_error(%{"resets_at" => nil, "resets_in_seconds" => nil})
+
+      {:ok, pid} =
+        start_provider(
+          tmp_dir: dir,
+          llm_client: counting_client(calls, fn -> {:error, without_reset} end),
+          max_retries: 3
+        )
+
+      assert :ok = send_prompt(pid, "Hello")
+      events = collect_run_events()
+
+      assert %Event.Error{kind: :usage_limit_reached, message: message} =
+               Enum.find(events, &match?(%Event.Error{}, &1))
+
+      assert message ==
+               "Your ChatGPT Pro usage limit is reached. Choose another model with /model to continue now."
+
+      refute Enum.any?(events, &match?(%Event.TextDelta{delta: "\n⏳" <> _rest}, &1))
+      assert :counters.get(calls, 1) == 1
+    end
+
+    test "a transient 429 keeps the rate-limit message", %{tmp_dir: dir} do
+      plain =
+        ReqLLM.Error.API.Request.exception(
+          reason: "Rate limit reached",
+          status: 429,
+          response_body: %{"type" => "rate_limit_error", "message" => "Rate limit reached"},
+          headers: [{"retry-after", "2"}],
+          provider_code: "rate_limit_error",
+          retryable: true
+        )
+
+      for selection <- [
+            ModelSelectionFixture.selection(request_provider: :openai_codex),
+            ModelSelectionFixture.selection(request_provider: :anthropic)
+          ] do
+        {:ok, pid} =
+          start_provider(
+            tmp_dir: dir,
+            llm_client: fake_error_client(plain),
+            max_retries: 0,
+            model_selection: selection
+          )
+
+        assert :ok = send_prompt(pid, "Hello")
+        events = collect_run_events()
+
+        assert %Event.Error{
+                 kind: :rate_limited,
+                 recovery: nil,
+                 usage_limit: nil,
+                 message: message
+               } =
+                 Enum.find(events, &match?(%Event.Error{}, &1))
+
+        assert message ==
+                 "The model provider is rate limiting requests. Wait a moment, then try again."
+      end
+    end
+
     test "emits error event on API failure", %{tmp_dir: dir} do
       client = fake_error_client("API rate limited")
 

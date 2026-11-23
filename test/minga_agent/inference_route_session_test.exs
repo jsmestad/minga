@@ -191,7 +191,8 @@ defmodule MingaAgent.InferenceRouteSessionTest do
     assert summary_request.tools == []
   end
 
-  test "a plan limit names when it resets and offers a model switch", ctx do
+  test "a refusing plan window reads as a usage limit with its reset and offers a model switch",
+       ctx do
     resets_at = DateTime.add(DateTime.utc_now(), 3_600)
 
     :ok =
@@ -207,8 +208,20 @@ defmodule MingaAgent.InferenceRouteSessionTest do
     assert_receive {:agent_event, ^session, {:error, message}}, @event_timeout
 
     assert message =~
-             ~r/\AClaude plan limit reached\. Resets at (\w{3} )?\d{1,2}:\d{2} (AM|PM)\. Switch model to continue\.\z/
+             ~r/\AYour Claude usage limit is reached\. It resets (at|\w{3}, \w{3} \d{1,2} at) \d{1,2}:\d{2} (AM|PM)\. Choose another model with \/model to continue now\.\z/
 
+    assert_receive {:agent_event, ^session, {:model_limit_reached, ^message}}, @event_timeout
+  end
+
+  test "a route that reports a usage limit itself keeps its sentence and offers a model switch",
+       ctx do
+    {:ok, _script} = FixtureInferenceRoute.script(ctx.model_id, [{:error, :usage_limit_reached}])
+
+    session = start_route_session(ctx)
+    assert :ok = Session.send_prompt(session, "hi")
+
+    assert_receive {:agent_event, ^session, {:error, message}}, @event_timeout
+    assert message == "Fixture plan is out of usage until next week."
     assert_receive {:agent_event, ^session, {:model_limit_reached, ^message}}, @event_timeout
   end
 

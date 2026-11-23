@@ -239,6 +239,7 @@ defmodule Minga.Credo.DependencyDirectionCheck do
     "MingaAgent.ToolCall",
     "MingaAgent.TranscriptEntry",
     "MingaAgent.TurnUsage",
+    "MingaAgent.UsageLimit",
     "MingaEditor.Agent.SlashCommand.Command"
   ]
 

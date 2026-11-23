@@ -241,6 +241,7 @@ defmodule MingaAgent.Event do
     @type kind ::
             :auth_failed
             | :rate_limited
+            | :usage_limit_reached
             | :unreachable
             | :invalid_model
             | :context_transition_required
@@ -251,17 +252,32 @@ defmodule MingaAgent.Event do
             | :unknown
 
     @enforce_keys [:message]
-    defstruct [:message, kind: :unknown, provider: nil, recovery: nil]
+    defstruct [:message, kind: :unknown, provider: nil, recovery: nil, usage_limit: nil]
 
     @typedoc "A recovery the user is offered alongside the message: `:choose_model` when switching models is the way forward."
     @type recovery :: :choose_model | nil
 
+    @typedoc "`usage_limit` is set exactly when `kind` is `:usage_limit_reached`; build that error with `usage_limit/3`."
     @type t :: %__MODULE__{
             message: String.t(),
             kind: kind(),
             provider: String.t() | nil,
-            recovery: recovery()
+            recovery: recovery(),
+            usage_limit: MingaAgent.UsageLimit.t() | nil
           }
+
+    @doc "Builds the error for a request a subscription usage limit refused. Switching models is the way forward."
+    @spec usage_limit(MingaAgent.UsageLimit.t(), String.t(), String.t() | nil) :: t()
+    def usage_limit(%MingaAgent.UsageLimit{} = limit, message, provider)
+        when is_binary(message) do
+      %__MODULE__{
+        kind: :usage_limit_reached,
+        message: message,
+        provider: provider,
+        recovery: :choose_model,
+        usage_limit: limit
+      }
+    end
 
     @doc "Returns safe next actions when retained native context cannot continue."
     @spec context_transition_message() :: String.t()
