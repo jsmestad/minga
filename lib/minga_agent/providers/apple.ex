@@ -9,6 +9,7 @@ defmodule MingaAgent.Providers.Apple do
 
   @helper "minga-apple-inference"
   @probe_timeout 2_000
+  @count_timeout 10_000
   @inference_timeout 120_000
   @max_frame 131_072
   @unavailable %{
@@ -27,15 +28,26 @@ defmodule MingaAgent.Providers.Apple do
           | :unsupported_locale
           | :probe_failed
   @type stream_state :: reference() | :done
-  @type admission :: (binary(), pos_integer(), pos_integer(), pos_integer() ->
+
+  @typedoc "Apple tokenizer counts for one projected request. `instructions` is the fixed prefix: the instructions entry with its tool definitions."
+  @type count :: %{
+          instructions: non_neg_integer(),
+          transcript: pos_integer(),
+          context: pos_integer()
+        }
+
+  @typedoc "Authorizes a held request from its digest, provider-counted input and prefix, encoded output cap, and live context."
+  @type admission :: (binary(), pos_integer(), non_neg_integer(), pos_integer(), pos_integer() ->
                         :ok | {:error, term()})
-  @typep port_admission :: (pos_integer(), pos_integer(), pos_integer() -> :ok | {:error, term()})
+  @typep port_admission :: (pos_integer(), non_neg_integer(), pos_integer(), pos_integer() ->
+                              :ok | {:error, term()})
 
   @doc "Probes the bundled helper without generating text or reading any credentials."
   @spec availability() :: {:ok, pos_integer()} | {:error, unavailable()}
   def availability do
     with {:ok, path} <- helper_path(),
-         {:ok, %{"status" => status} = response} <- availability_response(path) do
+         {:ok, %{"status" => status} = response} <-
+           request_frame(path, "{\"op\":\"availability\"}\n", @probe_timeout) do
       case response do
         %{"status" => "ready", "context" => context} when is_integer(context) and context > 0 ->
           {:ok, context}
@@ -46,6 +58,34 @@ defmodule MingaAgent.Providers.Apple do
     else
       {:error, reason} when reason in [:unsupported, :helper_missing] -> {:error, reason}
       _failure -> {:error, :probe_failed}
+    end
+  end
+
+  @doc """
+  Counts a request with the Apple tokenizer without generating or admitting anything.
+
+  The helper projects `messages` and `tools` exactly as an inference would and returns the provider count of the fixed prefix and of the whole transcript.
+  """
+  @spec count([ReqLLM.Message.t()], [Tool.t()], pos_integer()) ::
+          {:ok, count()} | {:error, term()}
+  def count(messages, tools, max_tokens) do
+    with {:ok, path} <- helper_path(),
+         {:ok, messages} <- project_messages(messages, []),
+         {:ok, tools} <- project_tools(tools, []),
+         {:ok, payload} <- encode_request("count", messages, tools, max_tokens),
+         {:ok, frame} <- request_frame(path, payload, @count_timeout) do
+      case frame do
+        %{"instructionsTokens" => prefix, "transcriptTokens" => total, "context" => context}
+        when is_integer(prefix) and prefix >= 0 and is_integer(total) and total >= prefix and
+               total > 0 and is_integer(context) and context > 0 ->
+          {:ok, %{instructions: prefix, transcript: total, context: context}}
+
+        %{"error" => reason} when is_binary(reason) ->
+          {:error, {:apple_inference, reason}}
+
+        _invalid ->
+          {:error, :invalid_apple_frame}
+      end
     end
   end
 
@@ -68,13 +108,14 @@ defmodule MingaAgent.Providers.Apple do
     with {:ok, path} <- helper_path(),
          {:ok, messages} <- project_messages(messages, []),
          {:ok, tools} <- project_tools(Keyword.get(opts, :tools, []), []),
-         {:ok, payload} <- encode_request(messages, tools, Keyword.get(opts, :max_tokens, 512)),
-         authorize when is_function(authorize, 4) <- Keyword.get(opts, :apple_admission) do
+         {:ok, payload} <-
+           encode_request("infer", messages, tools, Keyword.get(opts, :max_tokens, 512)),
+         authorize when is_function(authorize, 5) <- Keyword.get(opts, :apple_admission) do
       owner = self()
       digest = :crypto.hash(:sha256, payload)
 
-      admission = fn tokens, output_cap, context ->
-        authorize.(digest, tokens, output_cap, context)
+      admission = fn tokens, prefix, output_cap, context ->
+        authorize.(digest, tokens, prefix, output_cap, context)
       end
 
       worker = spawn(fn -> await_consumer(owner, path, payload, admission) end)
@@ -110,17 +151,18 @@ defmodule MingaAgent.Providers.Apple do
     end
   end
 
-  @spec availability_response(String.t()) :: {:ok, map()} | {:error, term()}
-  defp availability_response(path) do
+  # Sends one non-generating request and reads its single reply frame.
+  @spec request_frame(String.t(), iodata(), pos_integer()) :: {:ok, map()} | {:error, term()}
+  defp request_frame(path, payload, timeout) do
     with {:ok, port} <- open_helper(path) do
       try do
-        if Port.command(port, "{\"op\":\"availability\"}\n") do
+        if Port.command(port, payload) do
           receive do
             {^port, {:data, {:eol, line}}} -> decode_frame(line)
             {^port, {:data, {:noeol, _line}}} -> {:error, :oversized_apple_frame}
             {^port, {:exit_status, status}} -> {:error, {:apple_helper_exit, status}}
           after
-            @probe_timeout -> {:error, :apple_probe_timeout}
+            timeout -> {:error, :apple_probe_timeout}
           end
         else
           {:error, :apple_helper_unavailable}
@@ -192,17 +234,19 @@ defmodule MingaAgent.Providers.Apple do
 
   defp project_tools(_tools, _acc), do: {:error, :unsupported_apple_tool}
 
-  @spec encode_request([map()], [map()], term()) :: {:ok, iodata()} | {:error, term()}
-  defp encode_request(messages, tools, budget) when is_integer(budget) and budget > 0 do
+  @spec encode_request(String.t(), [map()], [map()], term()) ::
+          {:ok, iodata()} | {:error, term()}
+  defp encode_request(op, messages, tools, budget) when is_integer(budget) and budget > 0 do
     data =
-      JSON.encode!(%{op: "infer", messages: messages, tools: tools, max_output_tokens: budget})
+      JSON.encode!(%{op: op, messages: messages, tools: tools, max_output_tokens: budget})
 
     if byte_size(data) < @max_frame,
       do: {:ok, [data, "\n"]},
       else: {:error, :oversized_apple_request}
   end
 
-  defp encode_request(_messages, _tools, _budget), do: {:error, :invalid_apple_output_budget}
+  defp encode_request(_op, _messages, _tools, _budget),
+    do: {:error, :invalid_apple_output_budget}
 
   @spec open_helper(String.t()) :: {:ok, port()} | {:error, term()}
   defp open_helper(path) do
@@ -278,8 +322,8 @@ defmodule MingaAgent.Providers.Apple do
     receive do
       {^port, {:data, {:eol, line}}} ->
         case chunks(line) do
-          {:preflight, tokens, cap, context} when is_function(admission, 3) ->
-            authorize = fn -> admission.(tokens, cap, context) end
+          {:preflight, tokens, prefix, cap, context} when is_function(admission, 4) ->
+            authorize = fn -> admission.(tokens, prefix, cap, context) end
 
             case Admission.release(port, authorize, owner_ref, consumer_ref, deadline) do
               :ok ->
@@ -333,15 +377,13 @@ defmodule MingaAgent.Providers.Apple do
   end
 
   @spec chunks(binary()) ::
-          {:preflight, pos_integer(), pos_integer(), pos_integer()}
+          {:preflight, pos_integer(), non_neg_integer(), pos_integer(), pos_integer()}
           | {:delta, StreamChunk.t()}
           | {:terminal, [StreamChunk.t() | {:error, term()}]}
   defp chunks(line) do
     case decode_frame(line) do
-      {:ok, %{"inputTokens" => tokens, "outputCap" => cap, "context" => context}}
-      when is_integer(tokens) and tokens > 0 and is_integer(cap) and cap > 0 and
-             is_integer(context) and context > 0 ->
-        {:preflight, tokens, cap, context}
+      {:ok, %{"inputTokens" => _tokens} = frame} ->
+        preflight(frame)
 
       {:ok, %{"delta" => delta}} when is_binary(delta) ->
         {:delta, StreamChunk.text(delta)}
@@ -359,6 +401,23 @@ defmodule MingaAgent.Providers.Apple do
         {:terminal, [{:error, :invalid_apple_frame}]}
     end
   end
+
+  # Provider counts for the held request: input, fixed prefix within it, output cap, context.
+  @spec preflight(map()) ::
+          {:preflight, pos_integer(), non_neg_integer(), pos_integer(), pos_integer()}
+          | {:terminal, [{:error, :invalid_apple_frame}]}
+  defp preflight(%{
+         "inputTokens" => tokens,
+         "prefixTokens" => prefix,
+         "outputCap" => cap,
+         "context" => context
+       })
+       when is_integer(tokens) and tokens > 0 and is_integer(prefix) and prefix >= 0 and
+              prefix <= tokens and is_integer(cap) and cap > 0 and is_integer(context) and
+              context > 0,
+       do: {:preflight, tokens, prefix, cap, context}
+
+  defp preflight(_frame), do: {:terminal, [{:error, :invalid_apple_frame}]}
 
   @spec tool_chunks([map()], non_neg_integer(), %{optional(String.t()) => true}, [StreamChunk.t()]) ::
           [StreamChunk.t() | {:error, :invalid_apple_tool_group}]

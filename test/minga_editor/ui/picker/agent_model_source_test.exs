@@ -108,36 +108,38 @@ defmodule MingaEditor.UI.Picker.AgentModelSourceTest do
     owner = self()
 
     session =
-      start_supervised!(
-        {Session,
-         provider: Native,
-         persist?: false,
-         hooks_enabled?: false,
-         credentials_snapshot_fn: fn -> Snapshot.new(%{}, nil) end,
-         provider_opts: [
-           mcp_enabled?: false,
-           model_resolver_opts: [
-             models: [],
-             apple_availability_fn: fn ->
-               status = :atomics.get(readiness, 1)
-               send(owner, {:apple_probe, self()})
+      start_supervised!({Session,
+       provider: Native,
+       persist?: false,
+       hooks_enabled?: false,
+       credentials_snapshot_fn: fn -> Snapshot.new(%{}, nil) end,
+       provider_opts: [
+         mcp_enabled?: false,
+         # Activation counts the Apple prefix; this test is about readiness, not the tokenizer.
+         apple_counter: fn _messages, _tools, _reserve ->
+           {:ok, %{instructions: 1_600, transcript: 1_610, context: 4_096}}
+         end,
+         model_resolver_opts: [
+           models: [],
+           apple_availability_fn: fn ->
+             status = :atomics.get(readiness, 1)
+             send(owner, {:apple_probe, self()})
 
-               case status do
-                 1 ->
-                   {:ok, 4_096}
+             case status do
+               1 ->
+                 {:ok, 4_096}
 
-                 0 ->
-                   {:error, :disabled}
+               0 ->
+                 {:error, :disabled}
 
-                 2 ->
-                   receive do
-                     {:finish_apple_probe, result} -> result
-                   end
-               end
+               2 ->
+                 receive do
+                   {:finish_apple_probe, result} -> result
+                 end
              end
-           ]
-         ]}
-      )
+           end
+         ]
+       ]})
 
     %{connection: connection} = Session.editor_snapshot(session)
     assert ConnectionSnapshot.status(connection) == :unconfigured
@@ -160,7 +162,9 @@ defmodule MingaEditor.UI.Picker.AgentModelSourceTest do
     assert apple.status == ItemStatus.new(:ready, "Ready")
 
     assert apple.group == "On device"
-    assert apple.description == "4k ctx · no thinking controls · compact file tools, no images"
+
+    assert apple.description ==
+             "4k ctx · no thinking controls · compact file tools, no images, instruction files only if they fit"
 
     assert [completion] = SlashCommand.completion_candidates(state, "model apple")
     assert completion.insert == "model #{apple.id}"

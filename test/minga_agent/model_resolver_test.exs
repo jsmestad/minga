@@ -85,6 +85,8 @@ defmodule MingaAgent.ModelResolverTest do
     assert selection.policy.limits.request_output == 512
     assert selection.policy.capabilities.tools == true
     assert selection.policy.capabilities.images == false
+    assert selection.policy.compaction == :unsupported
+    assert selection.policy.usage == :none
     assert {:ok, []} = Credentials.request_options(selection.credential, [])
 
     assert {:ok, %{material: [], identity: %{kind: :none}}} =
@@ -98,6 +100,16 @@ defmodule MingaAgent.ModelResolverTest do
 
     assert {:ok, ^selection} = ModelResolver.restore(encoded, opts)
     assert {:ok, ^selection} = ModelResolver.resolve(ModelSelection.id(selection), opts)
+
+    # A selection saved before Apple declared its behavior restores with the current declaration.
+    saved_as_catalog =
+      update_in(
+        encoded,
+        ["policy"],
+        &Map.merge(&1, %{"compaction" => "native", "usage" => "tokens"})
+      )
+
+    assert {:ok, ^selection} = ModelResolver.restore(saved_as_catalog, opts)
     assert {:error, :no_available_model} = ModelResolver.resolve(nil, opts)
 
     assert {:error, :invalid_route} =

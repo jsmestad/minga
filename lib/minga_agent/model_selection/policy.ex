@@ -65,6 +65,15 @@ defmodule MingaAgent.ModelSelection.Policy do
     end
   end
 
+  @doc "Returns policy with a route's declared compaction and usage behavior."
+  @spec with_behavior(t(), %{compaction: compaction(), usage: usage()}) ::
+          {:ok, t()} | {:error, :invalid_policy}
+  def with_behavior(%__MODULE__{} = policy, %{compaction: compaction, usage: usage}) do
+    with :ok <- validate_modes(policy.cost, compaction, usage, policy.cost_mode) do
+      {:ok, %{policy | compaction: compaction, usage: usage}}
+    end
+  end
+
   @spec validate_modes(term(), term(), term(), term()) :: :ok | {:error, :invalid_policy}
   defp validate_modes(cost, compaction, usage, cost_mode)
        when is_map(cost) and compaction in [:native, :unsupported] and usage in [:tokens, :none] and

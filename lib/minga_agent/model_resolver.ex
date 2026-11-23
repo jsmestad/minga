@@ -350,7 +350,13 @@ defmodule MingaAgent.ModelResolver do
         credential -> credential
       end
 
-    case ModelSelection.build(spec, route, credential, stored.policy, stored.evidence) do
+    case ModelSelection.build(
+           spec,
+           route,
+           credential,
+           stored_policy(stored, route),
+           stored.evidence
+         ) do
       {:ok, selection} ->
         {:ok, selection}
 
@@ -463,6 +469,16 @@ defmodule MingaAgent.ModelResolver do
   end
 
   defp stored_source(_stored, _opts), do: {:error, :invalid_source}
+
+  # Apple selections saved before its route behavior was declared carry the catalog defaults.
+  # Behavior is not part of the selection identity, so the current declaration applies.
+  @spec stored_policy(Stored.t(), Route.t()) :: Policy.t()
+  defp stored_policy(%Stored{policy: policy}, %Route{request_provider: :apple}) do
+    {:ok, policy} = Policy.with_behavior(policy, route_behavior(apple_source()))
+    policy
+  end
+
+  defp stored_policy(%Stored{policy: policy}, _route), do: policy
 
   @spec stored_policy_matches?(Policy.t(), source()) :: boolean()
   defp stored_policy_matches?(policy, source) do
@@ -1151,6 +1167,8 @@ defmodule MingaAgent.ModelResolver do
         cost: cost(source)
       }
 
+      attrs = Map.merge(attrs, route_behavior(source))
+
       case Policy.new(attrs) do
         {:ok, policy} ->
           {:ok, policy}
@@ -1581,6 +1599,11 @@ defmodule MingaAgent.ModelResolver do
 
   @spec display_name(source(), String.t()) :: String.t()
   defp display_name({_kind, model}, fallback), do: value(model, "name") || fallback
+
+  # Apple's on-device model has no history compaction and reports no token usage of its own.
+  @spec route_behavior(source()) :: %{compaction: Policy.compaction(), usage: Policy.usage()}
+  defp route_behavior({:apple, _model}), do: %{compaction: :unsupported, usage: :none}
+  defp route_behavior({:catalog, _model}), do: %{compaction: :native, usage: :tokens}
 
   @spec cost(source()) :: map()
   defp cost({_kind, model}) do

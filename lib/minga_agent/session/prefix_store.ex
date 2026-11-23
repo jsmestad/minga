@@ -6,10 +6,15 @@ defmodule MingaAgent.Session.PrefixStore do
   defstruct instructions: %{}, schemas: %{}, prefixes: %{}, epochs: %{}, selected: :unknown
 
   @type epoch_ref :: String.t() | :unknown
+
+  @typedoc "Interned prefix components. A prefix that omits nothing keeps its original three-element value and identity."
+  @type prefix_value ::
+          {String.t(), String.t(), [String.t()]}
+          | {String.t(), String.t(), [String.t()], [Prefix.omittable(), ...]}
   @type t :: %__MODULE__{
           instructions: %{String.t() => String.t()},
           schemas: %{String.t() => [map()]},
-          prefixes: %{String.t() => {String.t(), String.t(), [String.t()]}},
+          prefixes: %{String.t() => prefix_value()},
           epochs: %{String.t() => {String.t(), map()}},
           selected: epoch_ref()
         }
@@ -39,43 +44,74 @@ defmodule MingaAgent.Session.PrefixStore do
   @doc "Captures the selected skill names alongside their immutable instruction value."
   @spec candidate(Prefix.t() | :unknown, String.t(), [map()], map(), [String.t()]) ::
           {:ok, Prefix.t()} | {:error, term()}
+  def candidate(previous, instructions, schemas, identity, skills),
+    do: candidate(previous, instructions, schemas, identity, skills, [])
+
+  @doc "Also records which optional instruction parts the route's prefix budget omitted."
+  @spec candidate(
+          Prefix.t() | :unknown,
+          String.t(),
+          [map()],
+          map(),
+          [String.t()],
+          [Prefix.omittable()]
+        ) :: {:ok, Prefix.t()} | {:error, term()}
   def candidate(
-        %Prefix{instructions: instructions, schemas: schemas, identity: identity, skills: skills} =
-          previous,
+        %Prefix{
+          instructions: instructions,
+          schemas: schemas,
+          identity: identity,
+          skills: skills,
+          omitted: omitted
+        } = previous,
         instructions,
         schemas,
         identity,
-        skills
+        skills,
+        omitted
       ),
       do: {:ok, previous}
 
-  def candidate(%Prefix{schemas: schemas} = previous, instructions, schemas, identity, skills)
+  def candidate(
+        %Prefix{schemas: schemas} = previous,
+        instructions,
+        schemas,
+        identity,
+        skills,
+        omitted
+      )
       when is_binary(instructions) and is_map(identity) do
-    if valid_identity?(identity) and valid_skills?(skills),
-      do: build_candidate(previous, instructions, schemas, identity, skills),
+    if valid_identity?(identity) and valid_skills?(skills) and valid_omitted?(omitted),
+      do: build_candidate(previous, instructions, schemas, identity, skills, omitted),
       else: {:error, :invalid_prefix_candidate}
   end
 
-  def candidate(previous, instructions, schemas, identity, skills)
+  def candidate(previous, instructions, schemas, identity, skills, omitted)
       when is_binary(instructions) and is_list(schemas) and is_map(identity) do
     if Enum.all?(schemas, &valid_schema?/1) and valid_identity?(identity) and
-         valid_skills?(skills) do
+         valid_skills?(skills) and valid_omitted?(omitted) do
       schemas = Enum.sort_by(schemas, & &1.name)
 
       if ordered_schema_names?(schemas),
-        do: build_candidate(previous, instructions, schemas, identity, skills),
+        do: build_candidate(previous, instructions, schemas, identity, skills, omitted),
         else: {:error, :invalid_prefix_candidate}
     else
       {:error, :invalid_prefix_candidate}
     end
   end
 
-  @spec build_candidate(Prefix.t() | :unknown, String.t(), [map()], map(), [String.t()]) ::
-          {:ok, Prefix.t()}
-  defp build_candidate(previous, instructions, schemas, identity, skills) do
+  @spec build_candidate(
+          Prefix.t() | :unknown,
+          String.t(),
+          [map()],
+          map(),
+          [String.t()],
+          [Prefix.omittable()]
+        ) :: {:ok, Prefix.t()}
+  defp build_candidate(previous, instructions, schemas, identity, skills, omitted) do
     instructions_id = component_identity(previous, :instructions, instructions)
     schemas_id = component_identity(previous, :schemas, schemas)
-    prefix_id = digest(:prefix, {instructions_id, schemas_id, skills})
+    prefix_id = digest(:prefix, prefix_value(instructions_id, schemas_id, skills, omitted))
     epoch_id = digest(:epoch, {prefix_id, identity})
 
     {:ok,
@@ -88,8 +124,18 @@ defmodule MingaAgent.Session.PrefixStore do
        schemas,
        identity,
        skills
-     )}
+     )
+     |> Prefix.omitting(omitted)}
   end
+
+  # An omission extends the prefix identity only when present, so every existing identity is unchanged.
+  @spec prefix_value(String.t(), String.t(), [String.t()], [Prefix.omittable()]) ::
+          prefix_value()
+  defp prefix_value(instructions_id, schemas_id, skills, []),
+    do: {instructions_id, schemas_id, skills}
+
+  defp prefix_value(instructions_id, schemas_id, skills, omitted),
+    do: {instructions_id, schemas_id, skills, omitted}
 
   @doc "Selects and interns a candidate, sharing instructions and schemas independently."
   @spec select(t(), Prefix.t()) :: t()
@@ -107,7 +153,7 @@ defmodule MingaAgent.Session.PrefixStore do
           Map.put_new(
             store.prefixes,
             prefix.prefix_id,
-            {instructions_id, schemas_id, prefix.skills}
+            prefix_value(instructions_id, schemas_id, prefix.skills, prefix.omitted)
           ),
         epochs: Map.put_new(store.epochs, prefix.epoch_id, {prefix.prefix_id, prefix.identity}),
         selected: prefix.epoch_id
@@ -127,7 +173,12 @@ defmodule MingaAgent.Session.PrefixStore do
 
   def resolve(%__MODULE__{} = store, epoch_id) do
     {prefix_id, identity} = Map.fetch!(store.epochs, epoch_id)
-    {instructions_id, schemas_id, skills} = Map.fetch!(store.prefixes, prefix_id)
+
+    {instructions_id, schemas_id, skills, omitted} =
+      case Map.fetch!(store.prefixes, prefix_id) do
+        {instructions_id, schemas_id, skills} -> {instructions_id, schemas_id, skills, []}
+        {_instructions_id, _schemas_id, _skills, _omitted} = value -> value
+      end
 
     Prefix.new(
       epoch_id,
@@ -139,6 +190,7 @@ defmodule MingaAgent.Session.PrefixStore do
       identity,
       skills
     )
+    |> Prefix.omitting(omitted)
   end
 
   @doc "Removes values unreachable from selected history, branches, or active work."
@@ -149,8 +201,8 @@ defmodule MingaAgent.Session.PrefixStore do
     prefixes =
       Map.take(store.prefixes, Enum.map(epochs, fn {_id, {prefix_id, _}} -> prefix_id end))
 
-    instruction_ids = Enum.map(prefixes, fn {_id, {instructions_id, _, _}} -> instructions_id end)
-    schema_ids = Enum.map(prefixes, fn {_id, {_, schemas_id, _}} -> schemas_id end)
+    instruction_ids = Enum.map(prefixes, fn {_id, value} -> elem(value, 0) end)
+    schema_ids = Enum.map(prefixes, fn {_id, value} -> elem(value, 1) end)
 
     %{
       store
@@ -163,16 +215,16 @@ defmodule MingaAgent.Session.PrefixStore do
 
   @doc "Returns a codec value containing each interned component exactly once."
   @spec dump(t()) :: map()
-  def dump(%__MODULE__{} = store), do: Map.put(Map.from_struct(store), :version, 1)
+  def dump(%__MODULE__{} = store), do: Map.put(Map.from_struct(store), :version, 2)
 
   @doc """
   Validates all digests and references before accepting current-format storage.
-  Stored schema lists must already be in strict name order.
+  Stored schema lists must already be in strict name order. Version 1 predates recorded omissions, so it accepts only prefixes that omit nothing.
   """
   @spec restore(term()) :: {:ok, t()} | {:error, :invalid_prefix_store}
   def restore(
         %{
-          version: 1,
+          version: version,
           instructions: instructions,
           schemas: schemas,
           prefixes: prefixes,
@@ -180,12 +232,12 @@ defmodule MingaAgent.Session.PrefixStore do
           selected: selected
         } = data
       )
-      when map_size(data) == 6 and is_map(instructions) and is_map(schemas) and
-             is_map(prefixes) and is_map(epochs) do
+      when version in [1, 2] and map_size(data) == 6 and is_map(instructions) and
+             is_map(schemas) and is_map(prefixes) and is_map(epochs) do
     store = struct!(__MODULE__, Map.delete(data, :version))
 
     if valid_components?(instructions, :instructions) and valid_components?(schemas, :schemas) and
-         valid_prefixes?(store) and valid_epochs?(store) and known?(store, selected) do
+         valid_prefixes?(store, version) and valid_epochs?(store) and known?(store, selected) do
       {:ok, store}
     else
       {:error, :invalid_prefix_store}
@@ -234,11 +286,16 @@ defmodule MingaAgent.Session.PrefixStore do
 
   defp valid_component?(_kind, _value), do: false
 
-  @spec valid_prefixes?(t()) :: boolean()
-  defp valid_prefixes?(store) do
+  @spec valid_prefixes?(t(), 1 | 2) :: boolean()
+  defp valid_prefixes?(store, version) do
     Enum.all?(store.prefixes, fn
       {id, {instructions_id, schemas_id, skills} = value} ->
         valid_skills?(skills) and id == digest(:prefix, value) and
+          Map.has_key?(store.instructions, instructions_id) and
+          Map.has_key?(store.schemas, schemas_id)
+
+      {id, {instructions_id, schemas_id, skills, [_ | _] = omitted} = value} when version == 2 ->
+        valid_skills?(skills) and valid_omitted?(omitted) and id == digest(:prefix, value) and
           Map.has_key?(store.instructions, instructions_id) and
           Map.has_key?(store.schemas, schemas_id)
 
@@ -246,6 +303,13 @@ defmodule MingaAgent.Session.PrefixStore do
         false
     end)
   end
+
+  # Omitted parts are known names, unique, and in the order a budget considers them.
+  @spec valid_omitted?(term()) :: boolean()
+  defp valid_omitted?(omitted) when is_list(omitted),
+    do: omitted == Enum.filter(Prefix.omittable(), &(&1 in omitted))
+
+  defp valid_omitted?(_invalid), do: false
 
   @spec valid_epochs?(t()) :: boolean()
   defp valid_epochs?(store) do

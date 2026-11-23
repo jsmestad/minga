@@ -54,6 +54,32 @@ defmodule MingaAgent.ModelSelection.Policy.RequestCapacityTest do
     end
   end
 
+  test "a provider-counted prefix names which part of the request exceeds the context" do
+    apple = limits(context: 4_096, request_output: 512)
+
+    assert {:error,
+            {:fixed_prefix_exceeded, %{prefix: 3_700, history: 30, reserve: 512, context: 4_096}}} =
+             RequestCapacity.check(apple, {:provider_count, 3_730, 3_700}, {:encoded, 512})
+
+    assert {:error,
+            {:history_exceeded, %{prefix: 1_600, history: 2_100, reserve: 512, context: 4_096}}} =
+             RequestCapacity.check(apple, {:provider_count, 3_700, 1_600}, {:encoded, 512})
+
+    assert :ok = RequestCapacity.check(apple, {:provider_count, 3_584, 1_600}, {:encoded, 512})
+
+    # The live ceiling and a larger encoded cap both tighten the split, never loosen it.
+    assert %{decision: {:error, {:history_exceeded, %{reserve: 600, context: 3_000}}}} =
+             RequestCapacity.assess(
+               apple,
+               {:provider_count, 2_500, 1_000},
+               {:encoded, 600},
+               3_000
+             )
+
+    assert {:error, {:count_acquisition_failed, :invalid_count_response}} =
+             RequestCapacity.check(apple, {:provider_count, 10, 11}, {:encoded, 512})
+  end
+
   defp limits(overrides) do
     attrs = Enum.into(overrides, %{input: nil, context: nil, output: nil, request_output: 10})
     {:ok, limits} = Limits.new(attrs)

@@ -29,7 +29,11 @@ To make it your configured model, set:
 set :agent_model, "apple:system"
 ```
 
-An explicit configuration or a restored session keeps the exact Apple route. Minga checks readiness again before inference and does not switch to a hosted model if Apple Intelligence is unavailable. The route supports text and a compact file tool set: read, find, grep, edit, and write. Normal approvals still apply. It does not support image attachments, thinking controls, or history compaction. If instructions, tool schemas, and history do not fit the model's context window, Minga reports the limit rather than trimming them. Shorten the prompt or start a new conversation.
+An explicit configuration or a restored session keeps the exact Apple route. Minga checks readiness again before inference and does not switch to a hosted model if Apple Intelligence is unavailable. The route supports text and a compact file tool set: read, find, grep, edit, and write. Normal approvals still apply. It does not support image attachments, thinking controls, or history compaction.
+
+The on-device model has a 4,096-token context, which a large `AGENTS.md` can fill on its own. Minga counts the fixed prefix (instructions and tool schemas) with Apple's tokenizer when you select the route and before each prompt. Project instruction files, active skills, and the append prompt are sent only when they leave room for the conversation. When Minga leaves one out, the transcript says so; it never drops them silently. If the base instructions and tools alone cannot fit, `/model` refuses the route and shows Apple's counts.
+
+When a prompt does not fit, Minga does not trim history. The refusal says whether the fixed prefix or the retained history and input are too large, with the token counts. Only the history case is helped by shortening the prompt or starting a new conversation. Tool results sent to Apple are limited to 2 KB; a longer result ends with a truncation marker, and the model can read further with `read_file` offset and limit.
 
 Set a hosted provider and catalog model:
 
