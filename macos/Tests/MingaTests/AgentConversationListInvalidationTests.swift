@@ -97,6 +97,59 @@ struct AgentConversationListInvalidationTests {
     }
 }
 
+@Suite("Agent transcript file change with a 10,000-message history")
+struct AgentTranscriptFileChangeTests {
+    @Test("a file-change frame keeps the draft while SwiftUI processes it at default and narrow width", arguments: [900, 420])
+    @MainActor func fileChangeKeepsDraft(width: Int) async throws {
+        let state = AgentChatState(visible: true, model: "test-model")
+        var history: [Wire.ChatMessage] = []
+        history.reserveCapacity(10_000)
+        for id in 1...10_000 {
+            history.append(Wire.ChatMessage(beamId: UInt32(id), content: id.isMultiple(of: 2) ? .assistant(text: "Reply \(id)") : .user(text: "Question \(id)")))
+        }
+        #expect(state.applyTranscript(mode: 0, epoch: 1, baseCount: 0, messages: history) == .appliedFullReplace)
+        state.update(
+            visible: true, status: .executingTool, model: "test-model", thinkingLevel: "medium",
+            prompt: "unfinished draft", promptLineCount: 1, promptCursorLine: 0, promptCursorCol: 16,
+            promptMode: .insert, promptVisibleRows: 1, promptCompletion: nil
+        )
+        let transcriptValues = AsyncStream.makeStream(of: Int.self, bufferingPolicy: .bufferingNewest(8))
+        var transcripts = transcriptValues.stream.makeAsyncIterator()
+        defer { transcriptValues.continuation.finish() }
+
+        let root = AgentChatView(state: state, isInsertMode: true, sendAction: { _ in })
+            .environment(\.themeColors, ThemeColors())
+            .background(TranscriptObservationProbe(state: state, changed: transcriptValues.continuation))
+        let hostingView = NSHostingView(rootView: AnyView(root))
+        hostingView.frame = CGRect(origin: .zero, size: CGSize(width: CGFloat(width), height: 820))
+        let window = NSWindow(contentRect: hostingView.frame, styleMask: [.titled], backing: .buffered, defer: false)
+        window.contentView = hostingView
+        defer {
+            window.orderOut(nil)
+            window.contentView = nil
+            hostingView.rootView = AnyView(EmptyView())
+        }
+        hostingView.layoutSubtreeIfNeeded()
+
+        let fileChange = Wire.ChatMessage(beamId: 10_001, content: .toolCall(
+            name: "edit_file", summary: "lib/minga/changed.ex", status: 1, isError: false, collapsed: true,
+            autoApprovedScope: 0, durationMs: 12, result: "Updated lib/minga/changed.ex", previewKind: 0, previewLines: []
+        ))
+        #expect(state.applyTranscript(mode: 1, epoch: 1, baseCount: 10_000, messages: [fileChange]) == .appliedAppend)
+        let count = await transcripts.next()
+        try #require(count == 10_001, "SwiftUI must process the file-change frame")
+        hostingView.layoutSubtreeIfNeeded()
+
+        #expect(state.prompt == "unfinished draft")
+        #expect(state.promptCursorCol == 16)
+        #expect(state.promptMode == .insert)
+        let rows = AgentTranscriptRows(state.messages)
+        #expect(rows.count == 10_001)
+        #expect(rows[10_000] == AgentTranscriptRow(id: 10_001, offset: 10_000))
+        #expect(rows[9_999] == AgentTranscriptRow(id: 10_000, offset: 9_999))
+    }
+}
+
 @Suite("Agent transcript revision")
 struct AgentTranscriptRevisionTests {
     @Test("The revision advances only when the stored transcript is replaced")

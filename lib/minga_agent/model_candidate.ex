@@ -3,13 +3,16 @@ defmodule MingaAgent.ModelCandidate do
   Typed picker candidate for one exact executable model route.
 
   Contributed route candidates also carry the route's display name and last known status, so the picker can show the route's own readiness and remedy text. A contributed candidate can be unavailable; selecting it is rejected by the resolver.
+
+  A catalog route candidate carries the subscription usage limit its Session last observed on that route, while the limit is in force. It stays selectable.
   """
 
   alias MingaAgent.InferenceRoute.Status
   alias MingaAgent.ModelSelection
+  alias MingaAgent.UsageLimit
 
   @enforce_keys [:selection, :favorite, :current]
-  defstruct [:selection, :favorite, :current, inference_route: nil]
+  defstruct [:selection, :favorite, :current, inference_route: nil, usage_limit: nil]
 
   @typedoc "Display facts about the contributed route that offers this candidate."
   @type inference_route :: %{display_name: String.t(), status: Status.t()}
@@ -18,7 +21,8 @@ defmodule MingaAgent.ModelCandidate do
           selection: ModelSelection.t(),
           favorite: boolean(),
           current: boolean(),
-          inference_route: inference_route() | nil
+          inference_route: inference_route() | nil,
+          usage_limit: UsageLimit.t() | nil
         }
 
   @doc "Builds a candidate and derives favorite/current flags from stable selection ids."
@@ -34,6 +38,11 @@ defmodule MingaAgent.ModelCandidate do
       inference_route: inference_route
     }
   end
+
+  @doc "Marks the candidate's route as refusing requests until the usage limit resets."
+  @spec limited_by(t(), UsageLimit.t()) :: t()
+  def limited_by(%__MODULE__{} = candidate, %UsageLimit{} = limit),
+    do: %{candidate | usage_limit: limit}
 
   @doc "Returns true unless a contributed route has not reported that it is ready."
   @spec selectable_by_default?(t()) :: boolean()

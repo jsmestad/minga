@@ -460,6 +460,8 @@ targets:
         type: file
       - path: Tests/NativePerformance/ProtocolDecodeReplay.swift
         type: file
+      - path: Tests/NativePerformance/AgentTranscriptViewReplay.swift
+        type: file
       - path: Sources
         type: group
         excludes:

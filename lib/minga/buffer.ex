@@ -307,7 +307,11 @@ defmodule Minga.Buffer do
   defdelegate insert_text(server, text, source \\ Minga.Buffer.EditSource.user()),
     to: BufferProcess
 
-  @doc "Replace text in a range with new text (the general-purpose edit operation)."
+  @doc """
+  Replace a characterwise inclusive range with new text (the general-purpose edit operation).
+
+  Returns `{:error, :invalid_utf8}` when the result would not be valid UTF-8 and `{:error, :malformed_edit}` for a malformed position or replacement; the buffer is unchanged on every error.
+  """
   @spec apply_edit(
           t(),
           non_neg_integer(),
@@ -316,7 +320,7 @@ defmodule Minga.Buffer do
           non_neg_integer(),
           String.t(),
           Minga.Buffer.EditSource.t()
-        ) :: :ok | {:error, :read_only}
+        ) :: :ok | {:error, :read_only | Minga.Buffer.Operation.edit_error()}
   defdelegate apply_edit(
                 server,
                 start_line,

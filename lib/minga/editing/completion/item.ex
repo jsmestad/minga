@@ -5,6 +5,8 @@ defmodule Minga.Editing.Completion.Item do
   The identifier is the full identity tuple, not a display label or truncated hash. Documentation is intentionally excluded because `completionItem/resolve` may add it without changing the candidate's identity. Detail remains part of the identity because providers commonly use it to distinguish overloads.
   """
 
+  alias Minga.Core.PositionEncoding
+
   @typedoc "Identity of the provider within one completion session."
   @type provider_id :: term()
 
@@ -71,6 +73,14 @@ defmodule Minga.Editing.Completion.Item do
           new_text: String.t()
         }
 
+  @typedoc """
+  Where the cursor was when the provider request was sent, and the text of its line then.
+
+  A provider's text edit range names positions in that line, so placing the edit after the user typed or deleted text needs both.
+  """
+  @type request_origin ::
+          {position :: {non_neg_integer(), non_neg_integer()}, line_text :: String.t()}
+
   @enforce_keys [
     :id,
     :provider_id,
@@ -95,6 +105,7 @@ defmodule Minga.Editing.Completion.Item do
             preselect: false,
             match_ranges: [],
             text_edit: nil,
+            request_origin: nil,
             raw: nil
 
   @type t :: %__MODULE__{
@@ -112,6 +123,7 @@ defmodule Minga.Editing.Completion.Item do
           preselect: boolean(),
           match_ranges: [match_range()],
           text_edit: text_edit() | nil,
+          request_origin: request_origin() | nil,
           raw: map() | nil
         }
 
@@ -173,6 +185,12 @@ defmodule Minga.Editing.Completion.Item do
     }
   end
 
+  @doc "Returns this candidate with the origin of the request that produced it, preserving its identity."
+  @spec with_request_origin(t(), request_origin()) :: t()
+  def with_request_origin(%__MODULE__{} = item, {{line, col}, line_text} = origin)
+      when is_integer(line) and is_integer(col) and is_binary(line_text),
+      do: %{item | request_origin: origin}
+
   @doc "Returns this candidate with resolved documentation while preserving its identity."
   @spec resolve(t(), String.t()) :: t()
   def resolve(%__MODULE__{} = item, documentation) when is_binary(documentation),
@@ -188,6 +206,81 @@ defmodule Minga.Editing.Completion.Item do
   def with_normalized_match_ranges(%__MODULE__{search: search} = item, ranges)
       when is_list(ranges) do
     with_match_ranges(item, map_ranges_to_label(search.filter_to_label, ranges))
+  end
+
+  @typedoc "Why a completion text edit cannot be placed on the cursor line."
+  @type text_edit_error ::
+          :malformed_range
+          | :not_on_cursor_line
+          | :column_out_of_range
+          | :column_not_boundary
+          | :inverted_range
+
+  @doc """
+  Resolves a text edit's LSP range to a half-open byte column range on the line where completion was requested.
+
+  The range's `character` offsets count units of the provider's position `encoding`: UTF-16 code units unless the server negotiated another encoding. `line_text` is the text of `cursor_line` when the request was sent; `follow_cursor/3` then moves the range onto the current text. LSP requires a completion edit to stay on the line where completion was requested, so a range on any other line, or spanning lines, is rejected. Each offset must name a code point boundary inside the line.
+  """
+  @spec byte_columns(text_edit(), non_neg_integer(), String.t(), PositionEncoding.encoding()) ::
+          {:ok, {non_neg_integer(), non_neg_integer()}} | {:error, text_edit_error()}
+  def byte_columns(
+        %{range: %{start_line: line, start_col: start_col, end_line: line, end_col: end_col}},
+        line,
+        line_text,
+        encoding
+      )
+      when is_integer(start_col) and start_col >= 0 and is_integer(end_col) and end_col >= 0 and
+             is_binary(line_text) do
+    with {:ok, start_byte} <- PositionEncoding.exact_byte_column(line_text, start_col, encoding),
+         {:ok, end_byte} <- PositionEncoding.exact_byte_column(line_text, end_col, encoding) do
+      if start_byte <= end_byte,
+        do: {:ok, {start_byte, end_byte}},
+        else: {:error, :inverted_range}
+    end
+  end
+
+  def byte_columns(
+        %{range: %{start_line: start_line, end_line: end_line}},
+        cursor_line,
+        line_text,
+        _encoding
+      )
+      when is_binary(line_text) and (start_line != cursor_line or end_line != cursor_line),
+      do: {:error, :not_on_cursor_line}
+
+  def byte_columns(_text_edit, _cursor_line, line_text, _encoding) when is_binary(line_text),
+    do: {:error, :malformed_range}
+
+  @doc """
+  Moves a byte column range on the request line to the same text on the current line.
+
+  Since the request, the user typed or deleted text at the cursor, so only the text between `request_col` and `cursor_col` changed. A column at or before both stays. A column at or after the request column moves by the net change, so an end at the request column follows the cursor and covers typed text, and an end past it keeps its distance from the cursor. A column inside deleted text lands at the cursor.
+  """
+  @spec follow_cursor(
+          {non_neg_integer(), non_neg_integer()},
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: {non_neg_integer(), non_neg_integer()}
+  def follow_cursor({start_col, end_col}, request_col, cursor_col)
+      when start_col <= end_col and is_integer(request_col) and is_integer(cursor_col) do
+    unchanged_until = min(request_col, cursor_col)
+    delta = cursor_col - request_col
+
+    start_col =
+      cond do
+        start_col <= unchanged_until -> start_col
+        start_col >= request_col -> start_col + delta
+        true -> cursor_col
+      end
+
+    end_col =
+      cond do
+        end_col >= request_col -> end_col + delta
+        end_col <= unchanged_until -> end_col
+        true -> cursor_col
+      end
+
+    {start_col, max(start_col, end_col)}
   end
 
   @doc "Returns the provider-aware semantic key used to collapse true duplicates."

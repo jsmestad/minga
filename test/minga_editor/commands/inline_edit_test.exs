@@ -172,6 +172,24 @@ defmodule MingaEditor.Commands.InlineEditTest do
     assert Buffer.content(buffer) == "one\ntwo"
   end
 
+  test "accept reports a rewrite the buffer rejects and keeps the proposal", %{tmp_dir: root} do
+    {state, buffer} = state_with_file(root, "lib/invalid.ex", "one\ntwo")
+    state = state |> put_visual_selection({0, 0}) |> InlineEditCommand.open()
+    # A rewrite that is not valid UTF-8.
+    edit = active_edit(state, buffer) |> InlineEdit.proposed(<<0xFF>>)
+
+    state =
+      MingaEditor.Shell.Traditional.Workflow.install_inline_edit(state, edit)
+
+    assert {:handled, state} = InlineEditInput.handle_key(state, ?y, 0)
+
+    assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(state) ==
+             "Inline edit failed: :invalid_utf8"
+
+    assert active_edit(state, buffer) != nil
+    assert Buffer.content(buffer) == "one\ntwo"
+  end
+
   defp fake_message_session(messages) do
     spawn(fn -> message_session_loop(messages) end)
   end

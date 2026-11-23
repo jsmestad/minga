@@ -285,6 +285,22 @@ defmodule MingaEditor.Input.PasteEventTest do
       assert Buffer.version(ctx.buffer) == version
     end
 
+    test "a replacement the buffer rejects keeps content and selection and shows why" do
+      ctx = start_editor("abc")
+      select(ctx, {0, 0}, {0, 1}, :char)
+      version = Buffer.version(ctx.buffer)
+
+      # Not valid UTF-8, so the buffer rejects the replacement.
+      state = MingaEditor.Input.Paste.handle(editor_state(ctx), <<0xFF>>)
+
+      assert Buffer.content(ctx.buffer) == "abc"
+      assert Buffer.version(ctx.buffer) == version
+      assert state.workspace.editing.mode == :visual
+
+      assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(state) ==
+               "Paste failed: :invalid_utf8"
+    end
+
     test "read-only failure preserves a linewise selection with no undo entry" do
       ctx = start_editor("zero\none\nthree")
       select(ctx, {1, 0}, {1, 0}, :line)

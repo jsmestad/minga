@@ -71,12 +71,14 @@ public enum ChatMessageEntry: Identifiable {
 public struct AgentTranscriptAccountingCounters: Sendable, Equatable {
     /// New or replacement entries measured for exact resource weight.
     public var changedEntriesMeasured = 0
-    /// Unchanged resident entries visited while preparing a transcript operation.
+    /// Entry values read while rebuilding boundary leaves. Bounded by the leaves on the rebuilt paths, never by retained history.
     public var unchangedEntriesVisited = 0
-    /// Unchanged resident entry values copied while preparing a transcript operation.
+    /// Entry values copied into rebuilt boundary leaves. Bounded by the leaves on the rebuilt paths, never by retained history.
     public var retainedEntriesCopied = 0
-    /// Persistent sequence nodes copied or created for bounded collection bookkeeping.
+    /// Persistent sequence nodes created, both new leaves and rebuilt boundary nodes.
     public var sequenceNodesCreated = 0
+    /// Child references written into created branch nodes.
+    public var branchSlotsCopied = 0
 
     /// Creates zeroed counters.
     public init() {}
@@ -87,12 +89,15 @@ public struct AgentTranscriptAccountingCounters: Sendable, Equatable {
         unchangedEntriesVisited += other.unchangedEntriesVisited
         retainedEntriesCopied += other.retainedEntriesCopied
         sequenceNodesCreated += other.sequenceNodesCreated
+        branchSlotsCopied += other.branchSlotsCopied
     }
 }
 
 nonisolated private struct WeightedChatMessageEntry {
     let message: ChatMessageEntry
     let resourceWeight: FrameResourceWeight
+    /// The message identity, stored so that identity reads do not copy the message payload.
+    let id: Int
 }
 
 nonisolated private func addingKnownValid(
@@ -106,67 +111,99 @@ nonisolated private func addingKnownValid(
     }
 }
 
-/// Immutable node in the resident transcript's persistent implicit treap. It is `nonisolated` so that releasing nodes, including the intermediate nodes a merge discards, does not pay for a main-actor isolated deinit.
+/// Child record of a branch: the child and the cumulative entry count through it.
+nonisolated private struct AgentTranscriptChild {
+    let node: AgentTranscriptNode
+    let end: Int
+}
+
+/// Immutable node of the resident transcript's persistent weighted B+ sequence.
+///
+/// Leaves (height 0) hold up to `maximumSlots` entries; branches hold up to `maximumSlots` child records. Every node except the root holds at least `minimumSlots`. The node is `nonisolated` so that releasing nodes, including discarded boundary nodes, does not pay for a main-actor isolated deinit.
 nonisolated private final class AgentTranscriptNode {
-    let entry: WeightedChatMessageEntry
-    let priority: UInt64
-    let left: AgentTranscriptNode?
-    let right: AgentTranscriptNode?
+    static let maximumSlots = 32
+    static let minimumSlots = 16
+
+    let height: Int
+    let entries: [WeightedChatMessageEntry]
+    let children: [AgentTranscriptChild]
     let count: Int
     let resourceWeight: FrameResourceWeight
 
-    init(
-        entry: WeightedChatMessageEntry,
-        priority: UInt64,
-        left: AgentTranscriptNode?,
-        right: AgentTranscriptNode?
-    ) {
-        self.entry = entry
-        self.priority = priority
-        self.left = left
-        self.right = right
-        count = (left?.count ?? 0) + 1 + (right?.count ?? 0)
-        resourceWeight = addingKnownValid(
-            addingKnownValid(
-                left?.resourceWeight ?? FrameResourceWeight(),
-                entry.resourceWeight
-            ),
-            addingKnownValid(
-                FrameResourceWeight(arrayEntries: 1),
-                right?.resourceWeight ?? FrameResourceWeight()
-            )
-        )
+    init(leaf entries: [WeightedChatMessageEntry]) {
+        precondition(!entries.isEmpty && entries.count <= Self.maximumSlots, "transcript leaf occupancy")
+        var weight = FrameResourceWeight(arrayEntries: entries.count)
+        for entry in entries {
+            weight = addingKnownValid(weight, entry.resourceWeight)
+        }
+        height = 0
+        self.entries = entries
+        children = []
+        count = entries.count
+        resourceWeight = weight
+    }
+
+    init<Nodes: Collection<AgentTranscriptNode>>(branch nodes: Nodes) {
+        precondition(nodes.count >= 2 && nodes.count <= Self.maximumSlots, "transcript branch occupancy")
+        var records: [AgentTranscriptChild] = []
+        records.reserveCapacity(nodes.count)
+        var total = 0
+        var weight = FrameResourceWeight()
+        let childHeight = nodes.first?.height ?? 0
+        for node in nodes {
+            precondition(node.height == childHeight, "transcript branch children must share a height")
+            total += node.count
+            weight = addingKnownValid(weight, node.resourceWeight)
+            records.append(AgentTranscriptChild(node: node, end: total))
+        }
+        height = childHeight + 1
+        entries = []
+        children = records
+        count = total
+        resourceWeight = weight
+    }
+
+    /// Entries in a leaf, or children in a branch.
+    var slotCount: Int { height == 0 ? entries.count : children.count }
+
+    /// Index of the child holding entry `index`, by binary search over cumulative counts.
+    func childIndex(containing index: Int) -> Int {
+        var low = 0
+        var high = children.count - 1
+        while low < high {
+            let middle = (low + high) / 2
+            if children[middle].end <= index {
+                low = middle + 1
+            } else {
+                high = middle
+            }
+        }
+        return low
+    }
+
+    /// Entries before child `index`.
+    func start(ofChild index: Int) -> Int {
+        index == 0 ? 0 : children[index - 1].end
     }
 }
 
 /// Read-only resident transcript entries with stable value semantics.
 ///
-/// The underlying persistent tree lets transcript preparation retain unchanged
-/// history without copying it. Integer indexes remain stable within a snapshot.
+/// The persistent B+ sequence lets transcript preparation retain unchanged history without copying it. Integer indexes remain stable within a snapshot; indexed access descends the tree in O(height) without allocating.
 public struct AgentTranscriptMessages: BidirectionalCollection {
     public typealias Index = Int
     public typealias Element = ChatMessageEntry
 
-    /// In-order iterator that visits each resident entry once.
+    /// In-order iterator that visits each resident entry once, leaf by leaf.
     public struct Iterator: IteratorProtocol {
-        private var stack: [AgentTranscriptNode] = []
+        private var cursor: AgentTranscriptLeafCursor
 
         fileprivate init(root: AgentTranscriptNode?) {
-            pushLeftSpine(root)
+            cursor = AgentTranscriptLeafCursor(root: root)
         }
 
         public mutating func next() -> ChatMessageEntry? {
-            guard let node = stack.popLast() else { return nil }
-            pushLeftSpine(node.right)
-            return node.entry.message
-        }
-
-        private mutating func pushLeftSpine(_ root: AgentTranscriptNode?) {
-            var node = root
-            while let current = node {
-                stack.append(current)
-                node = current.left
-            }
+            cursor.next()?.message
         }
     }
 
@@ -182,31 +219,159 @@ public struct AgentTranscriptMessages: BidirectionalCollection {
     public func makeIterator() -> Iterator { Iterator(root: root) }
 
     public subscript(index: Int) -> ChatMessageEntry {
+        let slot = leafSlot(at: index)
+        return slot.leaf.entries[slot.position].message
+    }
+
+    /// Stable message identity at `index`, read in place without copying the message payload.
+    func identity(at index: Int) -> Int {
+        let slot = leafSlot(at: index)
+        return slot.leaf.entries[slot.position].id
+    }
+
+    /// The leaf and position holding entry `index`, found by an O(height) descent that allocates nothing.
+    private func leafSlot(at index: Int) -> (leaf: AgentTranscriptNode, position: Int) {
         precondition(index >= startIndex && index < endIndex, "transcript index out of bounds")
+        guard var node = root else { preconditionFailure("valid transcript index was not present") }
         var remaining = index
-        var node = root
-        while let current = node {
-            let leftCount = current.left?.count ?? 0
-            if remaining < leftCount {
-                node = current.left
-            } else if remaining == leftCount {
-                return current.entry.message
-            } else {
-                remaining -= leftCount + 1
-                node = current.right
-            }
+        while node.height > 0 {
+            let child = node.childIndex(containing: remaining)
+            remaining -= node.start(ofChild: child)
+            node = node.children[child].node
         }
-        preconditionFailure("valid transcript index was not present")
+        return (node, remaining)
+    }
+
+    /// In-order iterator over message identities.
+    struct IdentityIterator: IteratorProtocol {
+        private var cursor: AgentTranscriptLeafCursor
+
+        fileprivate init(root: AgentTranscriptNode?) {
+            cursor = AgentTranscriptLeafCursor(root: root)
+        }
+
+        mutating func next() -> Int? {
+            cursor.next()?.id
+        }
+    }
+
+    func makeIdentityIterator() -> IdentityIterator { IdentityIterator(root: root) }
+}
+
+/// Walks the leaves of one immutable sequence in order. Each iterator owns its own stack, so independent iterators over old snapshots stay valid.
+nonisolated private struct AgentTranscriptLeafCursor {
+    private var stack: [(node: AgentTranscriptNode, next: Int)] = []
+    private var leaf: AgentTranscriptNode?
+    private var position = 0
+
+    init(root: AgentTranscriptNode?) {
+        descend(root)
+    }
+
+    mutating func next() -> WeightedChatMessageEntry? {
+        while true {
+            if let current = leaf, position < current.entries.count {
+                let entry = current.entries[position]
+                position += 1
+                return entry
+            }
+            leaf = nil
+            guard let top = stack.popLast() else { return nil }
+            if top.next + 1 < top.node.children.count {
+                stack.append((top.node, top.next + 1))
+            }
+            descend(top.node.children[top.next].node)
+        }
+    }
+
+    private mutating func descend(_ start: AgentTranscriptNode?) {
+        guard var node = start else { return }
+        while node.height > 0 {
+            if node.children.count > 1 {
+                stack.append((node, 1))
+            }
+            node = node.children[0].node
+        }
+        leaf = node
+        position = 0
     }
 }
 
+#if DEBUG
+/// Structural facts of one resident sequence, for invariant tests.
+struct AgentTranscriptStructure {
+    /// Leaf height is 0; an empty sequence reports -1.
+    let height: Int
+    /// Every node of the sequence, so tests can observe release with weak references.
+    let nodes: [AnyObject]
+    /// Broken occupancy, height, count, or weight invariants.
+    let violations: [String]
+}
+
+extension AgentTranscriptMessages {
+    /// Walks the whole sequence and reports its structure. Test-only.
+    func structure() -> AgentTranscriptStructure {
+        guard let root else { return AgentTranscriptStructure(height: -1, nodes: [], violations: []) }
+        var nodes: [AnyObject] = []
+        var violations: [String] = []
+        Self.inspect(root, isRoot: true, nodes: &nodes, violations: &violations)
+        return AgentTranscriptStructure(height: root.height, nodes: nodes, violations: violations)
+    }
+
+    private static func inspect(
+        _ node: AgentTranscriptNode,
+        isRoot: Bool,
+        nodes: inout [AnyObject],
+        violations: inout [String]
+    ) {
+        nodes.append(node)
+        let slots = node.slotCount
+        let minimum = isRoot ? (node.height == 0 ? 1 : 2) : AgentTranscriptNode.minimumSlots
+        if slots < minimum || slots > AgentTranscriptNode.maximumSlots {
+            violations.append("height \(node.height) node holds \(slots) slots")
+        }
+        if node.height == 0 {
+            var weight = FrameResourceWeight(arrayEntries: node.entries.count)
+            for entry in node.entries {
+                weight = addingKnownValid(weight, entry.resourceWeight)
+            }
+            if node.count != node.entries.count || weight != node.resourceWeight {
+                violations.append("leaf count or weight is stale")
+            }
+            return
+        }
+        var total = 0
+        var weight = FrameResourceWeight()
+        for child in node.children {
+            if child.node.height != node.height - 1 {
+                violations.append("child height \(child.node.height) under height \(node.height)")
+            }
+            total += child.node.count
+            weight = addingKnownValid(weight, child.node.resourceWeight)
+            if child.end != total {
+                violations.append("cumulative child count is stale")
+            }
+            inspect(child.node, isRoot: false, nodes: &nodes, violations: &violations)
+        }
+        if total != node.count || weight != node.resourceWeight {
+            violations.append("branch count or weight is stale")
+        }
+    }
+}
+#endif
+
+/// Canonical resident transcript storage: a persistent weighted B+ sequence with bulk replace, contiguous range retention, and suffix append.
 private struct AgentTranscriptStore {
+    private typealias Node = AgentTranscriptNode
+
     private(set) var root: AgentTranscriptNode?
-    private(set) var nextOrdinal: UInt64
 
     init() {
         root = nil
-        nextOrdinal = 0
+    }
+
+    private init(root: AgentTranscriptNode?) {
+        self.root = root
     }
 
     var count: Int { root?.count ?? 0 }
@@ -218,119 +383,29 @@ private struct AgentTranscriptStore {
         _ messages: [ChatMessageEntry],
         counters: inout AgentTranscriptAccountingCounters
     ) throws -> AgentTranscriptStore {
-        var store = AgentTranscriptStore()
         let entries = try measuredEntries(messages, counters: &counters)
-        store.root = try store.build(entries, counters: &counters)
-        return store
+        _ = try weight(of: entries)
+        return AgentTranscriptStore(root: build(entries, counters: &counters))
     }
 
+    /// Retains the `baseCount` entries after the first `trimFront`, then appends `messages`. Untouched subtrees are shared; only boundary leaves and the paths above them are rebuilt.
     func replacingResidentRange(
         trimFront: Int,
         baseCount: Int,
         with messages: [ChatMessageEntry],
         counters: inout AgentTranscriptAccountingCounters
     ) throws -> AgentTranscriptStore {
-        var ordinal = nextOrdinal
+        precondition(trimFront >= 0 && baseCount >= 0 && trimFront + baseCount <= count, "transcript range out of bounds")
         var sequenceCounters = counters
-        let (_, remainder) = Self.split(root, at: trimFront, counters: &sequenceCounters)
-        let (kept, _) = Self.split(remainder, at: baseCount, counters: &sequenceCounters)
         let entries = try Self.measuredEntries(messages, counters: &sequenceCounters)
-
-        var appendedWeight = FrameResourceWeight(arrayEntries: entries.count)
-        for entry in entries {
-            appendedWeight = try appendedWeight.adding(entry.resourceWeight)
-        }
+        let appendedWeight = try Self.weight(of: entries)
+        let afterTrim = Self.dropFirst(root, trimFront, counters: &sequenceCounters)
+        let kept = Self.takeFirst(afterTrim, baseCount, counters: &sequenceCounters)
         _ = try (kept?.resourceWeight ?? FrameResourceWeight()).adding(appendedWeight)
-
-        let appended = Self.sequence(
-            entries, firstOrdinal: ordinal, counters: &sequenceCounters
-        )
-        ordinal &+= UInt64(entries.count)
-
-        let nextRoot = Self.merge(kept, appended, counters: &sequenceCounters)
+        let appended = Self.build(entries, counters: &sequenceCounters)
+        let nextRoot = Self.concatenate(kept, appended, counters: &sequenceCounters)
         counters = sequenceCounters
-        return AgentTranscriptStore(root: nextRoot, nextOrdinal: ordinal)
-    }
-
-    private init(root: AgentTranscriptNode?, nextOrdinal: UInt64) {
-        self.root = root
-        self.nextOrdinal = nextOrdinal
-    }
-
-    private mutating func build(
-        _ entries: [WeightedChatMessageEntry],
-        counters: inout AgentTranscriptAccountingCounters
-    ) throws -> AgentTranscriptNode? {
-        var payloadWeight = FrameResourceWeight(arrayEntries: entries.count)
-        for entry in entries {
-            payloadWeight = try payloadWeight.adding(entry.resourceWeight)
-        }
-        _ = payloadWeight
-
-        let result = Self.sequence(entries, firstOrdinal: nextOrdinal, counters: &counters)
-        nextOrdinal &+= UInt64(entries.count)
-        return result
-    }
-
-    /// Builds the treap for `entries` in order, assigning consecutive ordinals from `firstOrdinal`.
-    ///
-    /// The result is the Cartesian tree of the entry priorities, which is the same tree that merging the entries one at a time produces: priorities are a bijective hash of distinct ordinals, and ties would keep the earlier entry as the ancestor exactly as `merge` does. A monotonic stack finds every parent link in O(n), then each node is created once, children first, so no intermediate nodes are allocated and discarded.
-    private static func sequence(
-        _ entries: [WeightedChatMessageEntry],
-        firstOrdinal: UInt64,
-        counters: inout AgentTranscriptAccountingCounters
-    ) -> AgentTranscriptNode? {
-        let count = entries.count
-        guard count > 0 else { return nil }
-        var priorities: [UInt64] = []
-        priorities.reserveCapacity(count)
-        var ordinal = firstOrdinal
-        for _ in 0..<count {
-            priorities.append(priority(for: ordinal))
-            ordinal &+= 1
-        }
-
-        var leftChild = [Int](repeating: -1, count: count)
-        var rightChild = [Int](repeating: -1, count: count)
-        var spine: [Int] = []
-        for index in 0..<count {
-            var lastPopped = -1
-            while let top = spine.last, priorities[top] > priorities[index] {
-                lastPopped = spine.removeLast()
-            }
-            leftChild[index] = lastPopped
-            if let top = spine.last { rightChild[top] = index }
-            spine.append(index)
-        }
-
-        return node(
-            at: spine[0], entries: entries, priorities: priorities,
-            leftChild: leftChild, rightChild: rightChild, counters: &counters
-        )
-    }
-
-    private static func node(
-        at index: Int,
-        entries: [WeightedChatMessageEntry],
-        priorities: [UInt64],
-        leftChild: [Int],
-        rightChild: [Int],
-        counters: inout AgentTranscriptAccountingCounters
-    ) -> AgentTranscriptNode {
-        let leftIndex = leftChild[index]
-        let rightIndex = rightChild[index]
-        let left: AgentTranscriptNode? = leftIndex < 0 ? nil : node(
-            at: leftIndex, entries: entries, priorities: priorities,
-            leftChild: leftChild, rightChild: rightChild, counters: &counters
-        )
-        let right: AgentTranscriptNode? = rightIndex < 0 ? nil : node(
-            at: rightIndex, entries: entries, priorities: priorities,
-            leftChild: leftChild, rightChild: rightChild, counters: &counters
-        )
-        return makeNode(
-            entry: entries[index], priority: priorities[index],
-            left: left, right: right, counters: &counters
-        )
+        return AgentTranscriptStore(root: nextRoot)
     }
 
     private static func measuredEntries(
@@ -342,80 +417,256 @@ private struct AgentTranscriptStore {
         for message in messages {
             entries.append(WeightedChatMessageEntry(
                 message: message,
-                resourceWeight: try message.resourceWeight()
+                resourceWeight: try message.resourceWeight(),
+                id: message.id
             ))
             counters.changedEntriesMeasured += 1
         }
         return entries
     }
 
-    private static func makeNode(
-        entry: WeightedChatMessageEntry,
-        priority: UInt64,
-        left: AgentTranscriptNode?,
-        right: AgentTranscriptNode?,
-        counters: inout AgentTranscriptAccountingCounters
-    ) -> AgentTranscriptNode {
-        counters.sequenceNodesCreated += 1
-        return AgentTranscriptNode(
-            entry: entry, priority: priority, left: left, right: right
-        )
-    }
-
-    private static func split(
-        _ node: AgentTranscriptNode?,
-        at index: Int,
-        counters: inout AgentTranscriptAccountingCounters
-    ) -> (AgentTranscriptNode?, AgentTranscriptNode?) {
-        guard let node else { return (nil, nil) }
-        let leftCount = node.left?.count ?? 0
-        if index <= leftCount {
-            let (before, after) = split(node.left, at: index, counters: &counters)
-            return (
-                before,
-                makeNode(
-                    entry: node.entry, priority: node.priority,
-                    left: after, right: node.right, counters: &counters
-                )
-            )
+    /// Checked aggregate weight of `entries`, including one collection entry per message.
+    private static func weight(of entries: [WeightedChatMessageEntry]) throws -> FrameResourceWeight {
+        var total = FrameResourceWeight(arrayEntries: entries.count)
+        for entry in entries {
+            total = try total.adding(entry.resourceWeight)
         }
-        let (before, after) = split(
-            node.right, at: index - leftCount - 1, counters: &counters
-        )
-        return (
-            makeNode(
-                entry: node.entry, priority: node.priority,
-                left: node.left, right: before, counters: &counters
-            ),
-            after
-        )
+        return total
     }
 
-    private static func merge(
-        _ left: AgentTranscriptNode?,
-        _ right: AgentTranscriptNode?,
+    // MARK: Construction
+
+    /// Sizes of `parts` groups that split `total` slots as evenly as possible.
+    private static func evenSizes(total: Int, parts: Int) -> [Int] {
+        let base = total / parts
+        let extra = total % parts
+        var sizes: [Int] = []
+        sizes.reserveCapacity(parts)
+        for part in 0..<parts {
+            sizes.append(part < extra ? base + 1 : base)
+        }
+        return sizes
+    }
+
+    private static func groupCount(for total: Int) -> Int {
+        (total + Node.maximumSlots - 1) / Node.maximumSlots
+    }
+
+    private static func makeLeaf<Entries: Collection<WeightedChatMessageEntry>>(
+        _ entries: Entries,
         counters: inout AgentTranscriptAccountingCounters
-    ) -> AgentTranscriptNode? {
+    ) -> Node {
+        counters.sequenceNodesCreated += 1
+        return Node(leaf: Array(entries))
+    }
+
+    private static func makeBranch<Nodes: Collection<Node>>(
+        _ nodes: Nodes,
+        counters: inout AgentTranscriptAccountingCounters
+    ) -> Node {
+        counters.sequenceNodesCreated += 1
+        counters.branchSlotsCopied += nodes.count
+        return Node(branch: nodes)
+    }
+
+    /// Builds a balanced sequence bottom-up in O(n). Evenly sized groups keep every non-root node at least half full.
+    private static func build(
+        _ entries: [WeightedChatMessageEntry],
+        counters: inout AgentTranscriptAccountingCounters
+    ) -> Node? {
+        guard !entries.isEmpty else { return nil }
+        var level: [Node] = []
+        level.reserveCapacity(groupCount(for: entries.count))
+        var offset = 0
+        for size in evenSizes(total: entries.count, parts: groupCount(for: entries.count)) {
+            level.append(makeLeaf(entries[offset..<(offset + size)], counters: &counters))
+            offset += size
+        }
+        while level.count > 1 {
+            var parents: [Node] = []
+            parents.reserveCapacity(groupCount(for: level.count))
+            offset = 0
+            for size in evenSizes(total: level.count, parts: groupCount(for: level.count)) {
+                parents.append(makeBranch(level[offset..<(offset + size)], counters: &counters))
+                offset += size
+            }
+            level = parents
+        }
+        return level[0]
+    }
+
+    /// A root holding `slots` of one level: nil when empty, the only child when a branch would hold one child.
+    private static func root(
+        leafEntries entries: ArraySlice<WeightedChatMessageEntry>,
+        counters: inout AgentTranscriptAccountingCounters
+    ) -> Node? {
+        guard !entries.isEmpty else { return nil }
+        counters.retainedEntriesCopied += entries.count
+        counters.unchangedEntriesVisited += entries.count
+        return makeLeaf(entries, counters: &counters)
+    }
+
+    private static func root(
+        children: ArraySlice<AgentTranscriptChild>,
+        counters: inout AgentTranscriptAccountingCounters
+    ) -> Node? {
+        switch children.count {
+        case 0:
+            return nil
+        case 1:
+            return children[children.startIndex].node
+        default:
+            return makeBranch(children.lazy.map { $0.node }, counters: &counters)
+        }
+    }
+
+    // MARK: Range selection
+
+    /// The sequence without its first `amount` entries.
+    private static func dropFirst(
+        _ node: Node?,
+        _ amount: Int,
+        counters: inout AgentTranscriptAccountingCounters
+    ) -> Node? {
+        guard let node else { return nil }
+        if amount == 0 { return node }
+        if amount >= node.count { return nil }
+        if node.height == 0 {
+            return root(leafEntries: node.entries[amount...], counters: &counters)
+        }
+        let child = node.childIndex(containing: amount)
+        let rest = dropFirst(
+            node.children[child].node, amount - node.start(ofChild: child), counters: &counters
+        )
+        let right = root(children: node.children[(child + 1)...], counters: &counters)
+        return concatenate(rest, right, counters: &counters)
+    }
+
+    /// The first `amount` entries of the sequence.
+    private static func takeFirst(
+        _ node: Node?,
+        _ amount: Int,
+        counters: inout AgentTranscriptAccountingCounters
+    ) -> Node? {
+        guard let node else { return nil }
+        if amount >= node.count { return node }
+        if amount == 0 { return nil }
+        if node.height == 0 {
+            return root(leafEntries: node.entries[..<amount], counters: &counters)
+        }
+        let child = node.childIndex(containing: amount - 1)
+        let left = root(children: node.children[..<child], counters: &counters)
+        let part = takeFirst(
+            node.children[child].node, amount - node.start(ofChild: child), counters: &counters
+        )
+        return concatenate(left, part, counters: &counters)
+    }
+
+    // MARK: Join
+
+    /// Joins two sequences in order. Untouched subtrees are shared; only the spine of the taller tree down to the shorter tree's height is rebuilt.
+    private static func concatenate(
+        _ left: Node?,
+        _ right: Node?,
+        counters: inout AgentTranscriptAccountingCounters
+    ) -> Node? {
         guard let left else { return right }
         guard let right else { return left }
-        if left.priority <= right.priority {
-            return makeNode(
-                entry: left.entry, priority: left.priority, left: left.left,
-                right: merge(left.right, right, counters: &counters), counters: &counters
-            )
+        let joined: [Node]
+        if left.height == right.height {
+            joined = joinSameHeight(left, right, counters: &counters)
+        } else if left.height > right.height {
+            joined = appendToRightSpine(left, right, counters: &counters)
+        } else {
+            joined = prependToLeftSpine(left, right, counters: &counters)
         }
-        return makeNode(
-            entry: right.entry, priority: right.priority,
-            left: merge(left, right.left, counters: &counters), right: right.right,
-            counters: &counters
-        )
+        if joined.count == 1 { return joined[0] }
+        return makeBranch(joined, counters: &counters)
     }
 
-    private static func priority(for ordinal: UInt64) -> UInt64 {
-        var value = ordinal &+ 0x9E37_79B9_7F4A_7C15
-        value = (value ^ (value >> 30)) &* 0xBF58_476D_1CE4_E5B9
-        value = (value ^ (value >> 27)) &* 0x94D0_49BB_1331_11EB
-        return value ^ (value >> 31)
+    /// Joins two nodes of one height into one or two nodes that are each at least half full, or one root.
+    private static func joinSameHeight(
+        _ left: Node,
+        _ right: Node,
+        counters: inout AgentTranscriptAccountingCounters
+    ) -> [Node] {
+        if left.slotCount >= Node.minimumSlots && right.slotCount >= Node.minimumSlots {
+            return [left, right]
+        }
+        let total = left.slotCount + right.slotCount
+        let parts = total <= Node.maximumSlots ? 1 : 2
+        let sizes = evenSizes(total: total, parts: parts)
+        if left.height == 0 {
+            let combined = left.entries + right.entries
+            counters.retainedEntriesCopied += total
+            counters.unchangedEntriesVisited += total
+            var nodes: [Node] = []
+            var offset = 0
+            for size in sizes {
+                nodes.append(makeLeaf(combined[offset..<(offset + size)], counters: &counters))
+                offset += size
+            }
+            return nodes
+        }
+        let combined = left.children.map { $0.node } + right.children.map { $0.node }
+        var nodes: [Node] = []
+        var offset = 0
+        for size in sizes {
+            nodes.append(makeBranch(combined[offset..<(offset + size)], counters: &counters))
+            offset += size
+        }
+        return nodes
+    }
+
+    /// Rebuilds a branch from `children`, splitting it in two when it overflows.
+    private static func branches(
+        _ children: [Node],
+        counters: inout AgentTranscriptAccountingCounters
+    ) -> [Node] {
+        if children.count <= Node.maximumSlots {
+            return [makeBranch(children, counters: &counters)]
+        }
+        let sizes = evenSizes(total: children.count, parts: 2)
+        return [
+            makeBranch(children[0..<sizes[0]], counters: &counters),
+            makeBranch(children[sizes[0]...], counters: &counters),
+        ]
+    }
+
+    /// Inserts the shorter `right` at the end of `left`'s rightmost path.
+    private static func appendToRightSpine(
+        _ left: Node,
+        _ right: Node,
+        counters: inout AgentTranscriptAccountingCounters
+    ) -> [Node] {
+        var children = left.children.map { $0.node }
+        let last = children.removeLast()
+        let replacement: [Node]
+        if last.height == right.height {
+            replacement = joinSameHeight(last, right, counters: &counters)
+        } else {
+            replacement = appendToRightSpine(last, right, counters: &counters)
+        }
+        children.append(contentsOf: replacement)
+        return branches(children, counters: &counters)
+    }
+
+    /// Inserts the shorter `left` at the start of `right`'s leftmost path.
+    private static func prependToLeftSpine(
+        _ left: Node,
+        _ right: Node,
+        counters: inout AgentTranscriptAccountingCounters
+    ) -> [Node] {
+        var children = right.children.map { $0.node }
+        let first = children.removeFirst()
+        let replacement: [Node]
+        if first.height == left.height {
+            replacement = joinSameHeight(left, first, counters: &counters)
+        } else {
+            replacement = prependToLeftSpine(left, first, counters: &counters)
+        }
+        children.insert(contentsOf: replacement, at: 0)
+        return branches(children, counters: &counters)
     }
 }
 

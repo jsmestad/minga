@@ -83,8 +83,18 @@ defmodule MingaEditor.Commands.InlineEdit do
     {first, last} = edit.selection_range
     last_col = last_line_length(edit.buffer_pid, last)
     replacement = replacement_text(edit.buffer_pid, last, InlineEdit.rewrite(edit))
-    :ok = Buffer.apply_edit(edit.buffer_pid, first, 0, last, last_col, replacement)
-    accept_success(state, edit)
+
+    case Buffer.apply_edit(edit.buffer_pid, first, 0, last, last_col, replacement) do
+      :ok ->
+        accept_success(state, edit)
+
+      # The buffer is unchanged, so the proposal stays open for another accept or a cancel.
+      {:error, reason} ->
+        MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
+          state,
+          "Inline edit failed: #{inspect(reason)}"
+        )
+    end
   end
 
   @spec accept_success(state(), InlineEdit.t()) :: state()

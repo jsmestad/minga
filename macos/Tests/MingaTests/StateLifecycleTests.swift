@@ -864,9 +864,11 @@ struct AgentChatTranscriptTests {
 
             let counters = state.transcriptSnapshot.accountingCounters
             #expect(counters.changedEntriesMeasured == 1)
-            #expect(counters.unchangedEntriesVisited == 0)
-            #expect(counters.retainedEntriesCopied == 0)
-            #expect(counters.sequenceNodesCreated < 256)
+            // Only the boundary leaf and its join with the replacement are rebuilt: at most two 32-slot leaves, and a few nodes per level of the (at most height 2) sequence.
+            #expect(counters.unchangedEntriesVisited <= 64)
+            #expect(counters.retainedEntriesCopied <= 64)
+            #expect(counters.sequenceNodesCreated <= 12)
+            #expect(counters.branchSlotsCopied <= 12 * 32)
         }
     }
 
@@ -951,8 +953,9 @@ struct AgentChatTranscriptTests {
         let snapshot: AgentTranscriptSnapshot = try result.get()
         #expect(snapshot.messages.count == 10_000)
         #expect(snapshot.accountingCounters.changedEntriesMeasured == 10_000)
-        // The keyframe builds each resident node once, with no discarded intermediate nodes.
-        #expect(snapshot.accountingCounters.sequenceNodesCreated == 10_000)
+        // The keyframe builds each node once, bottom-up: 313 leaves, 10 branches, and the root.
+        #expect(snapshot.accountingCounters.sequenceNodesCreated == 324)
+        #expect(snapshot.accountingCounters.retainedEntriesCopied == 0)
         var expectedId = 1
         var inOrder = true
         for entry in snapshot.messages {

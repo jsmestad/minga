@@ -29,13 +29,19 @@ defmodule Minga.Test.SequentialRangeReplace do
     end
   end
 
+  # `replace_range/4` rejects an edit that would leave invalid UTF-8 itself; the whole-document
+  # check stays as the independent oracle for that rejection.
   defp apply_edit({{from_pos, to_pos, replacement}, index}, {:ok, acc_doc, patches}) do
-    {:edited, new_doc, delta} = Operation.replace_range(acc_doc, from_pos, to_pos, replacement)
+    case Operation.replace_range(acc_doc, from_pos, to_pos, replacement) do
+      {:edited, new_doc, delta} ->
+        if Unicode.valid_utf8?(Document.content(new_doc)) do
+          {:cont, {:ok, new_doc, [UndoPatch.from_delta(delta, acc_doc) | patches]}}
+        else
+          {:halt, {:error, {:edit_failed, index, :invalid_utf8}}}
+        end
 
-    if Unicode.valid_utf8?(Document.content(new_doc)) do
-      {:cont, {:ok, new_doc, [UndoPatch.from_delta(delta, acc_doc) | patches]}}
-    else
-      {:halt, {:error, {:edit_failed, index, :invalid_utf8}}}
+      {:error, reason} ->
+        {:halt, {:error, {:edit_failed, index, reason}}}
     end
   end
 end

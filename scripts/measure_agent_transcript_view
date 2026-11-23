@@ -1,0 +1,57 @@
+#!/usr/bin/env python3
+"""Paired CPU comparison of two NativeRenderPerformance builds on the hosted Agent transcript view replay (#3572).
+
+Usage: scripts/measure_agent_transcript_view BEFORE_BUILD AFTER_BUILD OUTPUT_DIR PAIRS MESSAGES (default|narrow) (file_change|stream) FRAMES WARMUP
+
+Each build directory is an xcodebuild derived-data path with Build/Products/Release/minga-native-render-performance. Pairs run in counterbalanced ABBA order (before then after, then after then before). The summary reports each pair's after/before process CPU ratio, their geometric mean, and the one-sided 95% Student-t upper bound on the geometric mean, plus per-run medians of the per-frame preparation, update, and display CPU. Pass FRAMES=1 WARMUP=0 for the process-cold first frame.
+"""
+import json, math, statistics, subprocess, sys
+from pathlib import Path
+
+before, after, out = Path(sys.argv[1]), Path(sys.argv[2]), Path(sys.argv[3])
+pairs, n, geo, sc, frames, warm = int(sys.argv[4]), sys.argv[5], sys.argv[6], sys.argv[7], sys.argv[8], sys.argv[9]
+out.mkdir(parents=True, exist_ok=True)
+BIN = "Build/Products/Release/minga-native-render-performance"
+
+def run(build, tag, i):
+    path = out / f"{sc}-{geo}-{n}-{tag}-{i}.json"
+    subprocess.run([str(build / BIN), "--agent-transcript-view-replay", str(path), n, geo, sc, frames, warm], check=True, stdout=subprocess.DEVNULL)
+    return json.loads(path.read_text())
+
+def p50(xs):
+    s = sorted(xs); return s[len(s) // 2]
+
+rows = []
+for i in range(pairs):
+    order = ["b", "a"] if i % 2 == 0 else ["a", "b"]
+    res = {}
+    for tag in order:
+        res[tag] = run(before if tag == "b" else after, tag, i)
+    rows.append(res)
+
+ratios = [r["a"]["processCPUMicroseconds"] / r["b"]["processCPUMicroseconds"] for r in rows]
+logs = [math.log(x) for x in ratios]
+mean = statistics.mean(logs)
+sd = statistics.stdev(logs) if len(logs) > 1 else 0.0
+# one-sided 95% Student t critical values by df
+T = {1: 6.314, 2: 2.920, 3: 2.353, 4: 2.132, 5: 2.015, 6: 1.943, 7: 1.895, 8: 1.860, 9: 1.833, 10: 1.812, 11: 1.796, 12: 1.782, 15: 1.753, 20: 1.725}
+df = len(logs) - 1
+upper = math.exp(mean + T.get(df, 1.7) * sd / math.sqrt(len(logs))) if df > 0 else float("nan")
+summary = {
+    "scenario": sc, "geometry": geo, "messages": int(n), "pairs": pairs,
+    "ratios": ratios, "geomean_ratio": math.exp(mean), "upper95": upper,
+    "before_process_cpu_us": [r["b"]["processCPUMicroseconds"] for r in rows],
+    "after_process_cpu_us": [r["a"]["processCPUMicroseconds"] for r in rows],
+    "before_update_p50_ms": [p50(r["b"]["updateCPUSamplesMs"]) for r in rows],
+    "after_update_p50_ms": [p50(r["a"]["updateCPUSamplesMs"]) for r in rows],
+    "before_prepare_p50_ms": [p50(r["b"]["prepareCPUSamplesMs"]) for r in rows],
+    "after_prepare_p50_ms": [p50(r["a"]["prepareCPUSamplesMs"]) for r in rows],
+    "before_display_p50_ms": [p50(r["b"]["displayCPUSamplesMs"]) for r in rows],
+    "after_display_p50_ms": [p50(r["a"]["displayCPUSamplesMs"]) for r in rows],
+    "before_first_update_ms": [r["b"]["firstFrameUpdateCPUMs"] for r in rows],
+    "after_first_update_ms": [r["a"]["firstFrameUpdateCPUMs"] for r in rows],
+    "unobserved": sum(r["a"]["unobservedFrames"] + r["b"]["unobservedFrames"] for r in rows),
+}
+(out / f"summary-{sc}-{geo}-{n}.json").write_text(json.dumps(summary, indent=2))
+fmt = lambda xs: ", ".join(f"{x:.3f}" for x in xs)
+print(f"{sc} {geo} n={n}: geomean={summary['geomean_ratio']:.3f} upper95={upper:.3f} ratios=[{fmt(ratios)}] update_p50 before=[{fmt(summary['before_update_p50_ms'])}] after=[{fmt(summary['after_update_p50_ms'])}] prep before=[{fmt(summary['before_prepare_p50_ms'])}] after=[{fmt(summary['after_prepare_p50_ms'])}] unobserved={summary['unobserved']}")

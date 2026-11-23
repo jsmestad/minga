@@ -265,6 +265,34 @@ defmodule Minga.CLI do
     end
   end
 
+  @source_profile_roots [
+    {"XDG_CONFIG_HOME", "config"},
+    {"XDG_DATA_HOME", "data"},
+    {"XDG_CACHE_HOME", "cache"},
+    {"XDG_STATE_HOME", "state"},
+    {"TMPDIR", "tmp"}
+  ]
+
+  @doc """
+  Returns whether `env` is the environment a source launcher (`bin/minga`, `bin/minga-mac`) prepared.
+
+  Minga's XDG roots and `TMPDIR` must be the private directories of the `MINGA_DEV_PROFILE` profile. `HOME` must be the profile home, unless `MINGA_DEV_REAL_HOME=1` opts into the user's real `HOME` so child processes such as Claude Code can reach the login keychain.
+  """
+  @spec source_profile_env?(%{optional(String.t()) => String.t()}) :: boolean()
+  def source_profile_env?(%{"MINGA_DEV_PROFILE" => "/" <> _ = profile} = env) do
+    Enum.all?(@source_profile_roots, fn {key, directory} ->
+      Map.get(env, key) == Path.join(profile, directory)
+    end) and source_profile_home?(env, profile)
+  end
+
+  def source_profile_env?(env) when is_map(env), do: false
+
+  @spec source_profile_home?(%{optional(String.t()) => String.t()}, String.t()) :: boolean()
+  defp source_profile_home?(%{"MINGA_DEV_REAL_HOME" => "1", "HOME" => "/" <> _}, _profile),
+    do: true
+
+  defp source_profile_home?(env, profile), do: Map.get(env, "HOME") == Path.join(profile, "home")
+
   @doc "Returns the startup flags stored by the CLI, or defaults if none were set."
   @spec startup_flags() :: flags()
   def startup_flags do

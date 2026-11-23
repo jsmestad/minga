@@ -66,14 +66,18 @@ defmodule Minga.Buffer.Cursor do
 
   def move(%Document{} = doc, :down), do: place(doc, {doc.cursor_line + 1, doc.cursor_col})
 
-  @doc "Places the cursor at the nearest valid caret position for the requested editor position."
+  @doc """
+  Places the cursor at the nearest valid caret position for the requested editor position.
+
+  A line past the final line means the final line, and a column past the line's content means the line end, which is before the `\\r` of a CRLF terminator (see `Minga.Buffer.Lines.content_length/2`).
+  """
   @spec place(Document.t(), Document.position()) :: Document.t()
   def place(%Document{} = doc, {target_line, target_column})
       when target_line >= 0 and target_column >= 0 do
     {%Document{line_count: line_count} = doc, source} = indexed(doc)
     line = min(target_line, line_count - 1)
     line_start = Lines.start_of(doc, line)
-    line_length = line_stop(doc, line, line_count) - line_start
+    line_length = Lines.content_length(doc, line)
     caret_read = {line_start, caret_read_size(line_length, target_column)}
     {before, after_, column} = relocate(source, doc, caret_read, line_length, target_column)
 
@@ -149,12 +153,6 @@ defmodule Minga.Buffer.Cursor do
       nil -> {current_point, 0}
     end
   end
-
-  @spec line_stop(Document.t(), Lines.line_index(), Lines.line_count()) :: non_neg_integer()
-  defp line_stop(doc, line, line_count) when line == line_count - 1,
-    do: Document.content_byte_size(doc)
-
-  defp line_stop(doc, line, _line_count), do: Lines.start_of(doc, line + 1) - 1
 
   # UAX #29 resolves a break from the preceding text and the code point at the boundary.
   # Read through the code point holding the requested byte, never through a truncated code point.

@@ -321,7 +321,7 @@ defmodule MingaEditor.CompletionTrigger do
         bridge = supersede_session(bridge)
         session = session_for_request(bridge, gen, buffer_pid, version, trigger_pos)
 
-        session = Session.register_requests(session, requests)
+        session = Session.register_requests(session, requests, {cursor, context.line_text})
         facts = tracking_facts(requests, session)
 
         {%__MODULE__{bridge | phase: {:pending, trigger_pos}, gen: gen, session: session}, facts}
@@ -462,7 +462,14 @@ defmodule MingaEditor.CompletionTrigger do
         {provider_id, client, ref}
       end)
 
-    session = Session.retrigger(session, generation, context.version, requests)
+    session =
+      Session.retrigger(
+        session,
+        generation,
+        context.version,
+        requests,
+        {cursor, context.line_text}
+      )
 
     facts = tracking_facts(requests, session)
 

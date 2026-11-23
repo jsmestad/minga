@@ -16,7 +16,7 @@ defmodule MingaEditor.Input.Paste do
   alias MingaEditor.Shell.Traditional.NoticeWorkflow
   alias MingaEditor.State, as: EditorState
 
-  @typep paste_result :: :ok | {:error, :read_only}
+  @typep paste_result :: :ok | {:error, :read_only | Minga.Buffer.Operation.edit_error()}
 
   @doc "Applies a decoded paste to the active text input owner."
   @spec handle(EditorState.t(), String.t()) :: EditorState.t()
@@ -135,6 +135,10 @@ defmodule MingaEditor.Input.Paste do
   end
 
   defp finish_selection_paste({:error, :read_only}, state), do: read_only_notice(state)
+
+  # The buffer rejected the replacement and is unchanged, so the selection stays for another try.
+  defp finish_selection_paste({:error, reason}, state),
+    do: NoticeWorkflow.publish(state, "Paste failed: #{inspect(reason)}")
 
   @spec finish_insertion_paste(paste_result(), EditorState.t()) :: EditorState.t()
   defp finish_insertion_paste(:ok, %{workspace: %{editing: %{mode: :insert}}} = state) do
