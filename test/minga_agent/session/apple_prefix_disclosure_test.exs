@@ -19,10 +19,23 @@ defmodule MingaAgent.Session.ApplePrefixDisclosureTest do
     env = Map.new(Credentials.known_providers(), &{Credentials.env_var_for(&1), nil})
     credential_opts = [config_dir: dir, oauth_path: Path.join(dir, "oauth.json"), env: env]
 
-    # Counts one token per four bytes of system text, as a stand-in for the Apple tokenizer.
-    counter = fn [system | _rest], _tools, _reserve ->
-      [%{text: text}] = system.content
-      {:ok, %{instructions: div(byte_size(text), 4), transcript: 1, context: 4_096}}
+    # Counts one token per four bytes of each candidate, as a stand-in for the Apple tokenizer.
+    # Setting `hang` makes later counts never answer, like a stuck helper.
+    hang = :atomics.new(1, [])
+
+    counter = fn texts, candidates, _tools, _reserve ->
+      if :atomics.get(hang, 1) == 1 do
+        receive do
+          :never -> :ok
+        end
+      end
+
+      counts =
+        for candidate <- candidates do
+          candidate |> Enum.map(&Enum.at(texts, &1)) |> Enum.join("\n\n") |> byte_size() |> div(4)
+        end
+
+      {:ok, %{counts: counts, context: 4_096}}
     end
 
     session =
@@ -45,7 +58,7 @@ defmodule MingaAgent.Session.ApplePrefixDisclosureTest do
         id: make_ref()
       )
 
-    %{session: session}
+    %{session: session, root: root, hang: hang}
   end
 
   test "selecting Apple with oversized project instructions says they are not sent", %{
@@ -57,6 +70,25 @@ defmodule MingaAgent.Session.ApplePrefixDisclosureTest do
     refute notice in system_messages(session)
     assert :ok = Session.set_model(session, "apple:system")
     assert Enum.count(system_messages(session), &(&1 == notice)) == 1
+  end
+
+  test "a stuck count on a changed prefix refuses the prompt before the caller's call timeout", %{
+    session: session,
+    root: root,
+    hang: hang
+  } do
+    assert :ok = Session.set_model(session, "apple:system")
+    File.write!(Path.join(root, "AGENTS.md"), "A short rule.\n")
+    :atomics.put(hang, 1, 1)
+
+    # The Editor sends prompts with this same default 5 s GenServer.call.
+    assert {:error, reason} = Session.send_prompt(session, "hi")
+    assert reason =~ "could not count its fixed instructions and tools within 3 seconds"
+
+    assert Enum.any?(
+             system_messages(session),
+             &(&1 =~ "Prompt not sent:" and &1 =~ "Your draft is preserved.")
+           )
   end
 
   defp system_messages(session) do

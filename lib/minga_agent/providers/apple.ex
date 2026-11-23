@@ -9,7 +9,8 @@ defmodule MingaAgent.Providers.Apple do
 
   @helper "minga-apple-inference"
   @probe_timeout 2_000
-  @count_timeout 10_000
+  # A count must finish well inside the 5 s GenServer.call timeouts of its synchronous callers.
+  @count_timeout 3_000
   @inference_timeout 120_000
   @max_frame 131_072
   @unavailable %{
@@ -36,6 +37,9 @@ defmodule MingaAgent.Providers.Apple do
           context: pos_integer()
         }
 
+  @typedoc "Apple tokenizer counts of candidate prefixes, in candidate order, and the live context."
+  @type prefix_counts :: %{counts: [pos_integer()], context: pos_integer()}
+
   @typedoc "Authorizes a held request from its digest, provider-counted input and prefix, encoded output cap, and live context."
   @type admission :: (binary(), pos_integer(), non_neg_integer(), pos_integer(), pos_integer() ->
                         :ok | {:error, term()})
@@ -47,7 +51,12 @@ defmodule MingaAgent.Providers.Apple do
   def availability do
     with {:ok, path} <- helper_path(),
          {:ok, %{"status" => status} = response} <-
-           request_frame(path, "{\"op\":\"availability\"}\n", @probe_timeout) do
+           request_frame(
+             path,
+             "{\"op\":\"availability\"}\n",
+             @probe_timeout,
+             :apple_probe_timeout
+           ) do
       case response do
         %{"status" => "ready", "context" => context} when is_integer(context) and context > 0 ->
           {:ok, context}
@@ -69,22 +78,56 @@ defmodule MingaAgent.Providers.Apple do
   @spec count([ReqLLM.Message.t()], [Tool.t()], pos_integer()) ::
           {:ok, count()} | {:error, term()}
   def count(messages, tools, max_tokens) do
-    with {:ok, path} <- helper_path(),
-         {:ok, messages} <- project_messages(messages, []),
-         {:ok, tools} <- project_tools(tools, []),
-         {:ok, payload} <- encode_request("count", messages, tools, max_tokens),
-         {:ok, frame} <- request_frame(path, payload, @count_timeout) do
+    with {:ok, frame} <- count_frame(messages, tools, max_tokens, %{}) do
       case frame do
         %{"instructionsTokens" => prefix, "transcriptTokens" => total, "context" => context}
         when is_integer(prefix) and prefix >= 0 and is_integer(total) and total >= prefix and
                total > 0 and is_integer(context) and context > 0 ->
           {:ok, %{instructions: prefix, transcript: total, context: context}}
 
-        %{"error" => reason} when is_binary(reason) ->
-          {:error, {:apple_inference, reason}}
-
         _invalid ->
           {:error, :invalid_apple_frame}
+      end
+    end
+  end
+
+  @doc """
+  Counts several candidate system prompts with one helper start and no generation.
+
+  `parts` are sent once; each candidate lists the indices of the parts it joins, in order, with a blank line between them. Each count is one instructions entry with the projected `tools`, the same fixed prefix an inference sends.
+  """
+  @spec count_prefixes([String.t()], [[non_neg_integer()]], [Tool.t()], pos_integer()) ::
+          {:ok, prefix_counts()} | {:error, term()}
+  def count_prefixes(parts, candidates, tools, max_tokens)
+      when is_list(parts) and is_list(candidates) do
+    extra = %{parts: parts, candidates: candidates}
+
+    with {:ok, frame} <- count_frame([ReqLLM.Context.user("")], tools, max_tokens, extra),
+         do: prefix_counts(frame, length(candidates))
+  end
+
+  @spec prefix_counts(map(), non_neg_integer()) ::
+          {:ok, prefix_counts()} | {:error, :invalid_apple_frame}
+  defp prefix_counts(%{"candidateTokens" => counts, "context" => context}, expected)
+       when is_list(counts) and is_integer(context) and context > 0 do
+    if length(counts) == expected and Enum.all?(counts, &(is_integer(&1) and &1 > 0)),
+      do: {:ok, %{counts: counts, context: context}},
+      else: {:error, :invalid_apple_frame}
+  end
+
+  defp prefix_counts(_frame, _expected), do: {:error, :invalid_apple_frame}
+
+  @spec count_frame([ReqLLM.Message.t()], [Tool.t()], pos_integer(), map()) ::
+          {:ok, map()} | {:error, term()}
+  defp count_frame(messages, tools, max_tokens, extra) do
+    with {:ok, path} <- helper_path(),
+         {:ok, messages} <- project_messages(messages, []),
+         {:ok, tools} <- project_tools(tools, []),
+         {:ok, payload} <- encode_request("count", messages, tools, max_tokens, extra),
+         {:ok, frame} <- request_frame(path, payload, @count_timeout, :apple_count_timeout) do
+      case frame do
+        %{"error" => reason} when is_binary(reason) -> {:error, {:apple_inference, reason}}
+        frame -> {:ok, frame}
       end
     end
   end
@@ -152,8 +195,9 @@ defmodule MingaAgent.Providers.Apple do
   end
 
   # Sends one non-generating request and reads its single reply frame.
-  @spec request_frame(String.t(), iodata(), pos_integer()) :: {:ok, map()} | {:error, term()}
-  defp request_frame(path, payload, timeout) do
+  @spec request_frame(String.t(), iodata(), pos_integer(), atom()) ::
+          {:ok, map()} | {:error, term()}
+  defp request_frame(path, payload, timeout, timeout_reason) do
     with {:ok, port} <- open_helper(path) do
       try do
         if Port.command(port, payload) do
@@ -162,7 +206,7 @@ defmodule MingaAgent.Providers.Apple do
             {^port, {:data, {:noeol, _line}}} -> {:error, :oversized_apple_frame}
             {^port, {:exit_status, status}} -> {:error, {:apple_helper_exit, status}}
           after
-            timeout -> {:error, :apple_probe_timeout}
+            timeout -> {:error, timeout_reason}
           end
         else
           {:error, :apple_helper_unavailable}
@@ -234,18 +278,23 @@ defmodule MingaAgent.Providers.Apple do
 
   defp project_tools(_tools, _acc), do: {:error, :unsupported_apple_tool}
 
-  @spec encode_request(String.t(), [map()], [map()], term()) ::
+  @spec encode_request(String.t(), [map()], [map()], term(), map()) ::
           {:ok, iodata()} | {:error, term()}
-  defp encode_request(op, messages, tools, budget) when is_integer(budget) and budget > 0 do
+  defp encode_request(op, messages, tools, budget, extra \\ %{})
+
+  defp encode_request(op, messages, tools, budget, extra)
+       when is_integer(budget) and budget > 0 do
     data =
-      JSON.encode!(%{op: op, messages: messages, tools: tools, max_output_tokens: budget})
+      %{op: op, messages: messages, tools: tools, max_output_tokens: budget}
+      |> Map.merge(extra)
+      |> JSON.encode!()
 
     if byte_size(data) < @max_frame,
       do: {:ok, [data, "\n"]},
       else: {:error, :oversized_apple_request}
   end
 
-  defp encode_request(_op, _messages, _tools, _budget),
+  defp encode_request(_op, _messages, _tools, _budget, _extra),
     do: {:error, :invalid_apple_output_budget}
 
   @spec open_helper(String.t()) :: {:ok, port()} | {:error, term()}

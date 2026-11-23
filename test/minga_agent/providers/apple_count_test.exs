@@ -45,6 +45,36 @@ defmodule MingaAgent.Providers.AppleCountTest do
     assert bare > 0
   end
 
+  test "one count_prefixes call counts every candidate within the preview deadline" do
+    parts = [
+      "You are an AI coding assistant inside Minga.",
+      "Use a tool only when needed.",
+      File.read!(Path.expand("AGENTS.md"))
+    ]
+
+    tools = apple_tools()
+
+    {elapsed, result} =
+      :timer.tc(
+        fn -> Apple.count_prefixes(parts, [[0, 1], [0, 1, 2]], tools, 512) end,
+        :millisecond
+      )
+
+    assert {:ok, %{counts: [required, full], context: context}} = result
+    assert required < context and full > context
+
+    # Native refuses a count that takes longer than 3 s; a cold start of this case is well inside it.
+    assert elapsed < 3_000
+
+    # The candidate equals the same prompt sent as an inference's single system message.
+    assert {:ok, %{instructions: ^required}} =
+             Apple.count(
+               [Context.system(Enum.join(Enum.take(parts, 2), "\n\n")), Context.user("")],
+               tools,
+               512
+             )
+  end
+
   test "count measures a prefix far beyond the context instead of refusing it" do
     instructions = String.duplicate("Always follow this project rule exactly.\n", 1_500)
 

@@ -215,7 +215,14 @@ defmodule MingaAgent.Session.PrefixStore do
 
   @doc "Returns a codec value containing each interned component exactly once."
   @spec dump(t()) :: map()
-  def dump(%__MODULE__{} = store), do: Map.put(Map.from_struct(store), :version, 2)
+  def dump(%__MODULE__{} = store),
+    do: Map.put(Map.from_struct(store), :version, dump_version(store))
+
+  # Older builds read version 1, so only a store that records an omission needs version 2.
+  @spec dump_version(t()) :: 1 | 2
+  defp dump_version(%__MODULE__{prefixes: prefixes}) do
+    if Enum.any?(prefixes, fn {_id, value} -> tuple_size(value) == 4 end), do: 2, else: 1
+  end
 
   @doc """
   Validates all digests and references before accepting current-format storage.

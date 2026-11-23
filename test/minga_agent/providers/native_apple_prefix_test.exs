@@ -12,19 +12,19 @@ defmodule MingaAgent.Providers.NativeApplePrefixTest do
 
   @rules "PROJECT RULE 3911"
 
-  # A stand-in for the Apple tokenizer: one token per four bytes of system text, plus a
-  # fixed cost per declared tool. It reports what it was asked to count.
+  # A stand-in for the Apple tokenizer: one token per four bytes of each candidate prompt,
+  # plus a fixed cost per declared tool. It reports what it was asked to count.
   defp counter(owner) do
-    fn [%{role: :system} = system, %{role: :user}], tools, reserve ->
-      [%{text: text}] = system.content
-      send(owner, {:counted, Enum.map(tools, & &1.name), reserve})
+    fn texts, candidates, tools, reserve ->
+      send(owner, {:counted, Enum.map(tools, & &1.name), reserve, length(texts), candidates})
 
-      {:ok,
-       %{
-         instructions: div(byte_size(text), 4) + 250 * length(tools),
-         transcript: 1,
-         context: 4_096
-       }}
+      counts =
+        for candidate <- candidates do
+          text = candidate |> Enum.map(&Enum.at(texts, &1)) |> Enum.join("\n\n")
+          div(byte_size(text), 4) + 250 * length(tools)
+        end
+
+      {:ok, %{counts: counts, context: 4_096}}
     end
   end
 
@@ -101,11 +101,16 @@ defmodule MingaAgent.Providers.NativeApplePrefixTest do
       end
 
       if unquote(route) == :apple do
-        # The count uses the same compact tool set and output reserve a dispatch sends.
-        assert_received {:counted, tools, 512}
+        # One count covers every candidate, with the compact tool set and reserve a dispatch sends.
+        assert_received {:counted, tools, 512, parts, candidates}
+        refute_received {:counted, _tools, _reserve, _parts, _candidates}
         assert Enum.sort(tools) == ~w(edit_file find grep read_file write_file)
+
+        if text,
+          do: assert({parts, candidates} == {3, [[0, 1], [0, 1, 2]]}),
+          else: assert({parts, candidates} == {2, [[0, 1]]})
       else
-        refute_received {:counted, _tools, _reserve}
+        refute_received {:counted, _tools, _reserve, _parts, _candidates}
       end
     end
   end
@@ -113,8 +118,8 @@ defmodule MingaAgent.Providers.NativeApplePrefixTest do
   test "an Apple prefix that cannot fit its reserve refuses with Apple's counts", %{tmp_dir: dir} do
     root = project(dir, "project", nil)
 
-    oversized = fn _messages, _tools, _reserve ->
-      {:ok, %{instructions: 3_700, transcript: 3_710, context: 4_096}}
+    oversized = fn _texts, candidates, _tools, _reserve ->
+      {:ok, %{counts: Enum.map(candidates, fn _candidate -> 3_700 end), context: 4_096}}
     end
 
     assert {:error, message} = preview(apple_selection(), root, oversized)
@@ -140,11 +145,36 @@ defmodule MingaAgent.Providers.NativeApplePrefixTest do
              GenServer.call(pid, {:preview_prefix, make_ref(), :current})
 
     assert :ok = GenServer.call(pid, {:commit_prefix_preview, token})
-    assert_received {:counted, _tools, _reserve}
+    assert_received {:counted, _tools, _reserve, _parts, _candidates}
 
     assert {:ok, _prefix, _token, :ok} =
              GenServer.call(pid, {:preview_prefix, make_ref(), :current})
 
-    refute_received {:counted, _tools, _reserve}
+    refute_received {:counted, _tools, _reserve, _parts, _candidates}
+  end
+
+  test "a count that outlives its deadline is an explicit refusal well inside the caller timeout",
+       %{tmp_dir: dir} do
+    root = project(dir, "project", @rules)
+    owner = self()
+
+    hung = fn _texts, _candidates, _tools, _reserve ->
+      send(owner, {:counting, self()})
+
+      receive do
+        :never -> {:error, :unreachable}
+      end
+    end
+
+    {elapsed, result} = :timer.tc(fn -> preview(apple_selection(), root, hung) end, :millisecond)
+    assert_received {:counting, counting}
+
+    assert {:error, message} = result
+    assert message =~ "could not count its fixed instructions and tools within 3 seconds"
+    assert elapsed < 4_000
+
+    # The counting process (the helper Port's owner) is gone, so the helper is retired too.
+    monitor = Process.monitor(counting)
+    assert_receive {:DOWN, ^monitor, :process, ^counting, _reason}
   end
 end

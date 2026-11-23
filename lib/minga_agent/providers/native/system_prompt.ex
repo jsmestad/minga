@@ -18,11 +18,13 @@ defmodule MingaAgent.Providers.Native.SystemPrompt do
           optional: [{Prefix.omittable(), String.t()}]
         }
 
-  @typedoc "Provider-counted size of a candidate prefix and the context it was counted against."
-  @type measurement :: %{prefix: non_neg_integer(), context: pos_integer()}
+  @typedoc "Provider counts of candidate prefixes, in candidate order, and the context they were counted against."
+  @type counts :: %{counts: [non_neg_integer()], context: pos_integer()}
 
-  @typedoc "Counts the fixed prefix (instructions and tool declarations) for one candidate prompt."
-  @type measure :: (String.t() -> {:ok, measurement()} | {:error, term()})
+  @typedoc """
+  Counts every candidate prefix in one measurement. `texts` are the parts, each once; a candidate lists the indices of the parts it joins, in order. One call means one helper start and one deadline.
+  """
+  @type measure :: ([String.t()], [[non_neg_integer()]] -> {:ok, counts()} | {:error, term()})
 
   @typedoc "Output reserve and the minimum history room the prefix must leave."
   @type budget :: %{reserve: pos_integer(), history_floor: non_neg_integer()}
@@ -65,113 +67,110 @@ defmodule MingaAgent.Providers.Native.SystemPrompt do
   @doc """
   Chooses the largest in-order set of optional parts whose measured prefix leaves `history_floor` tokens free.
 
-  Returns `{:error, {:fixed_prefix_exceeded, overflow}}` when the required parts alone leave no room for the output reserve. A measurement error for a candidate that includes optional parts counts as not fitting only when the request was too large to encode; any other measurement error is returned.
+  Every in-order combination of optional parts is counted in one `measure` call, so the decision never waits on more than one measurement. Returns `{:error, {:fixed_prefix_exceeded, overflow}}` when the required parts alone leave no room for the output reserve. When the measurement request is too large to encode, the largest optional part is omitted and the rest are measured again; any other measurement error is returned.
   """
   @spec fit(t(), budget(), measure()) ::
           {:ok, fit()} | {:error, {:fixed_prefix_exceeded, overflow()} | term()}
   def fit(%__MODULE__{} = parts, %{reserve: reserve, history_floor: floor} = budget, measure)
       when is_integer(reserve) and reserve > 0 and is_integer(floor) and floor >= 0 and
-             is_function(measure, 1) do
-    full = text(parts)
-    measured = if parts.optional == [], do: measure.(full), else: fitting_measure(measure, full)
+             is_function(measure, 2),
+      do: fit(parts, budget, measure, [])
 
-    case measured do
-      {:ok, measurement} ->
-        if within_floor?(measurement, budget),
-          do: {:ok, fit_result(full, [], measurement)},
-          else: fit_required(parts, budget, measure, %{full => measurement})
+  @spec fit(t(), budget(), measure(), [Prefix.omittable()]) ::
+          {:ok, fit()} | {:error, term()}
+  defp fit(parts, budget, measure, too_large) do
+    required = Enum.to_list(0..(length(parts.required) - 1)//1)
+    optional = Enum.with_index(parts.optional, length(parts.required))
+    combinations = in_order_subsets(optional)
 
-      :too_large ->
-        fit_required(parts, budget, measure, %{})
+    candidates =
+      Enum.map(combinations, fn subset -> required ++ Enum.map(subset, &elem(&1, 1)) end)
+
+    texts = parts.required ++ Enum.map(parts.optional, &elem(&1, 1))
+
+    case measure.(texts, candidates) do
+      {:ok, %{counts: counts, context: context}} ->
+        with {:ok, table} <- count_table(combinations, counts),
+             do: decide(parts, budget, table, context, too_large)
+
+      {:error, :oversized_apple_request} when parts.optional != [] ->
+        {name, _text} = largest = Enum.max_by(parts.optional, &byte_size(elem(&1, 1)))
+
+        fit(%{parts | optional: List.delete(parts.optional, largest)}, budget, measure, [
+          name | too_large
+        ])
 
       {:error, _reason} = error ->
         error
     end
   end
 
-  @spec fit_required(t(), budget(), measure(), %{String.t() => measurement()}) ::
-          {:ok, fit()} | {:error, term()}
-  defp fit_required(parts, budget, measure, memo) do
-    required = join(parts.required)
+  @spec decide(t(), budget(), %{[Prefix.omittable()] => non_neg_integer()}, pos_integer(), [
+          Prefix.omittable()
+        ]) :: {:ok, fit()} | {:error, {:fixed_prefix_exceeded, overflow()}}
+  defp decide(parts, budget, table, context, too_large) do
+    required = Map.fetch!(table, [])
 
-    with {:ok, %{prefix: prefix, context: context} = measured} <-
-           memo_or(memo, required, fn -> measure.(required) end) do
-      if prefix + budget.reserve > context do
-        {:error,
-         {:fixed_prefix_exceeded,
-          %{prefix: prefix, history: 0, reserve: budget.reserve, context: context}}}
-      else
-        add_optional(parts, budget, measure, memo, measured)
-      end
+    if required + budget.reserve > context do
+      {:error,
+       {:fixed_prefix_exceeded,
+        %{prefix: required, history: 0, reserve: budget.reserve, context: context}}}
+    else
+      {sent, omitted} = choose_optional(parts.optional, table, context, budget, too_large)
+      sent = Enum.reverse(sent)
+      texts = for {name, text} <- parts.optional, name in sent, do: text
+
+      {:ok,
+       %{
+         text: join(parts.required ++ texts),
+         omitted: Enum.filter(Prefix.omittable(), &(&1 in omitted)),
+         prefix: Map.fetch!(table, sent),
+         context: context
+       }}
     end
   end
 
-  @spec add_optional(t(), budget(), measure(), %{String.t() => measurement()}, measurement()) ::
-          {:ok, fit()} | {:error, term()}
-  defp add_optional(parts, budget, measure, memo, required) do
-    context = %{budget: budget, measure: measure, memo: memo}
-    consider(parts.optional, Enum.reverse(parts.required), [], required, context)
+  @spec count_table([list()], [non_neg_integer()]) ::
+          {:ok, %{[Prefix.omittable()] => non_neg_integer()}} | {:error, :invalid_count_response}
+  defp count_table(combinations, counts) do
+    if length(counts) == length(combinations),
+      do: {:ok, combinations |> Enum.map(&names/1) |> Enum.zip(counts) |> Map.new()},
+      else: {:error, :invalid_count_response}
   end
 
-  # Walks the optional parts in order with reversed accumulators of sent text and omitted names.
-  @spec consider(
+  # Greedy in send order: a part is sent when it fits together with the parts already sent.
+  @spec choose_optional(
           [{Prefix.omittable(), String.t()}],
-          [String.t()],
-          [Prefix.omittable()],
-          measurement(),
-          map()
-        ) :: {:ok, fit()} | {:error, term()}
-  defp consider([], sent, omitted, measured, _context),
-    do: {:ok, fit_result(join(Enum.reverse(sent)), Enum.reverse(omitted), measured)}
+          %{[Prefix.omittable()] => non_neg_integer()},
+          pos_integer(),
+          budget(),
+          [Prefix.omittable()]
+        ) :: {[Prefix.omittable()], [Prefix.omittable()]}
+  defp choose_optional(optional, table, context, budget, too_large) do
+    Enum.reduce(optional, {[], too_large}, fn {name, _text}, {sent, omitted} ->
+      tokens = Map.fetch!(table, Enum.reverse([name | sent]))
 
-  defp consider([{name, text} | rest], sent, omitted, measured, context) do
-    candidate = [text | sent]
-    joined = join(Enum.reverse(candidate))
-
-    case memo_or(context.memo, joined, fn -> fitting_measure(context.measure, joined) end) do
-      {:ok, next} ->
-        if within_floor?(next, context.budget),
-          do: consider(rest, candidate, omitted, next, context),
-          else: consider(rest, sent, [name | omitted], measured, context)
-
-      :too_large ->
-        consider(rest, sent, [name | omitted], measured, context)
-
-      {:error, _reason} = error ->
-        error
-    end
+      if within_floor?(tokens, context, budget),
+        do: {[name | sent], omitted},
+        else: {sent, [name | omitted]}
+    end)
   end
 
-  @spec memo_or(%{String.t() => measurement()}, String.t(), (-> result)) ::
-          {:ok, measurement()} | result
-        when result: {:ok, measurement()} | :too_large | {:error, term()}
-  defp memo_or(memo, text, measure) do
-    case Map.fetch(memo, text) do
-      {:ok, measured} -> {:ok, measured}
-      :error -> measure.()
-    end
+  # Every combination keeps the parts' order, from none to all of them.
+  @spec in_order_subsets([elem]) :: [[elem]] when elem: term()
+  defp in_order_subsets([]), do: [[]]
+
+  defp in_order_subsets([first | rest]) do
+    subsets = in_order_subsets(rest)
+    subsets ++ Enum.map(subsets, &[first | &1])
   end
 
-  # A candidate with optional parts that is too large to encode cannot be sent, so it does not fit.
-  @spec fitting_measure(measure(), String.t()) ::
-          {:ok, measurement()} | :too_large | {:error, term()}
-  defp fitting_measure(measure, text) do
-    case measure.(text) do
-      {:error, :oversized_apple_request} -> :too_large
-      result -> result
-    end
-  end
+  @spec names([{{Prefix.omittable(), String.t()}, non_neg_integer()}]) :: [Prefix.omittable()]
+  defp names(subset), do: Enum.map(subset, fn {{name, _text}, _index} -> name end)
 
-  @spec within_floor?(measurement(), budget()) :: boolean()
-  defp within_floor?(%{prefix: prefix, context: context}, %{
-         reserve: reserve,
-         history_floor: floor
-       }),
-       do: prefix + reserve + floor <= context
-
-  @spec fit_result(String.t(), [Prefix.omittable()], measurement()) :: fit()
-  defp fit_result(text, omitted, %{prefix: prefix, context: context}),
-    do: %{text: text, omitted: omitted, prefix: prefix, context: context}
+  @spec within_floor?(non_neg_integer(), pos_integer(), budget()) :: boolean()
+  defp within_floor?(prefix, context, %{reserve: reserve, history_floor: floor}),
+    do: prefix + reserve + floor <= context
 
   @spec join([String.t()]) :: String.t()
   defp join(parts), do: Enum.join(parts, "\n\n")

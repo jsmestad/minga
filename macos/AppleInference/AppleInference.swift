@@ -35,9 +35,12 @@ private struct Inference: Decodable {
     let messages: [Message]
     let tools: [ToolDeclaration]
     let maxOutputTokens: Int
+    /// Count only: instruction texts, each sent once, and candidate prefixes as in-order part indices.
+    let parts: [String]?
+    let candidates: [[Int]]?
 
     private enum CodingKeys: String, CodingKey {
-        case messages, tools
+        case messages, tools, parts, candidates
         case maxOutputTokens = "max_output_tokens"
     }
 }
@@ -90,14 +93,14 @@ private enum Availability: String, Encodable {
 private enum Frame: Encodable {
     case availability(Availability, context: Int? = nil)
     case preflight(inputTokens: Int, prefixTokens: Int, outputCap: Int, context: Int)
-    case count(instructionsTokens: Int, transcriptTokens: Int, context: Int)
+    case count(instructionsTokens: Int, transcriptTokens: Int, candidateTokens: [Int], context: Int)
     case delta(String)
     case stop
     case calls([Call])
     case error(String)
 
     private enum CodingKeys: String, CodingKey {
-        case status, context, inputTokens, prefixTokens, outputCap, instructionsTokens, transcriptTokens
+        case status, context, inputTokens, prefixTokens, outputCap, instructionsTokens, transcriptTokens, candidateTokens
         case delta, finish, calls, error
     }
 
@@ -112,9 +115,10 @@ private enum Frame: Encodable {
             try container.encode(prefixTokens, forKey: .prefixTokens)
             try container.encode(outputCap, forKey: .outputCap)
             try container.encode(context, forKey: .context)
-        case let .count(instructionsTokens, transcriptTokens, context):
+        case let .count(instructionsTokens, transcriptTokens, candidateTokens, context):
             try container.encode(instructionsTokens, forKey: .instructionsTokens)
             try container.encode(transcriptTokens, forKey: .transcriptTokens)
+            try container.encode(candidateTokens, forKey: .candidateTokens)
             try container.encode(context, forKey: .context)
         case .delta(let delta): try container.encode(delta, forKey: .delta)
         case .stop: try container.encode("stop", forKey: .finish)
@@ -827,15 +831,34 @@ private struct AppleInference {
     }
 
     /// Projects a request exactly as `infer` does and counts it without generating or admitting anything.
+    /// Each candidate prefix is also counted as one instructions entry with the same tool definitions,
+    /// so a caller can compare several prompt compositions with one helper start.
     @available(macOS 27.0, *)
     private static func count(_ inference: Inference, with model: SystemLanguageModel) async throws -> Frame {
         let tools = try proposalTools(inference.tools, marker: "MINGA_TOOL_COUNT")
-        let transcript = try Projection(inference, tools: tools).countedTranscript
+        let projection = try Projection(inference, tools: tools)
+        let transcript = projection.countedTranscript
         let limit = model.contextSize
         let tokens = try await model.tokenCount(for: transcript)
         guard tokens > 0, limit > 0 else { throw BridgeError.tokenCountUnavailable }
         let prefix = try await instructionTokens(in: transcript, with: model)
-        return .count(instructionsTokens: prefix, transcriptTokens: tokens, context: limit)
+        let parts = inference.parts ?? []
+        var candidateTokens: [Int] = []
+        for indices in inference.candidates ?? [] {
+            guard indices.allSatisfy(parts.indices.contains) else {
+                throw BridgeError.invalidRequest("candidate part index out of range")
+            }
+            let text = indices.map { parts[$0] }.joined(separator: "\n\n")
+            let entry = Transcript.Entry.instructions(
+                .init(segments: [.text(.init(content: text))], toolDefinitions: projection.definitions)
+            )
+            let count = try await model.tokenCount(for: Transcript(entries: [entry]))
+            guard count > 0 else { throw BridgeError.tokenCountUnavailable }
+            candidateTokens.append(count)
+        }
+        return .count(
+            instructionsTokens: prefix, transcriptTokens: tokens, candidateTokens: candidateTokens, context: limit
+        )
     }
 
     @available(macOS 27.0, *)

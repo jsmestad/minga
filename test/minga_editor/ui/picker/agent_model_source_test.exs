@@ -116,8 +116,8 @@ defmodule MingaEditor.UI.Picker.AgentModelSourceTest do
        provider_opts: [
          mcp_enabled?: false,
          # Activation counts the Apple prefix; this test is about readiness, not the tokenizer.
-         apple_counter: fn _messages, _tools, _reserve ->
-           {:ok, %{instructions: 1_600, transcript: 1_610, context: 4_096}}
+         apple_counter: fn _texts, candidates, _tools, _reserve ->
+           {:ok, %{counts: Enum.map(candidates, fn _candidate -> 1_600 end), context: 4_096}}
          end,
          model_resolver_opts: [
            models: [],

@@ -415,10 +415,11 @@ defmodule MingaAgent.Session.PrefixTest do
     end
   end
 
-  test "a version 1 store without omissions still restores" do
+  test "a store without omissions is written as version 1 so older builds still read it" do
     {_request, history} = completed(candidate())
     data = PrefixStore.dump(history.prefixes)
-    assert {:ok, store} = PrefixStore.restore(%{data | version: 1})
+    assert data.version == 1
+    assert {:ok, store} = PrefixStore.restore(data)
     assert store == history.prefixes
   end
 

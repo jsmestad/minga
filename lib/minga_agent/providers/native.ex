@@ -103,9 +103,9 @@ defmodule MingaAgent.Providers.Native do
   @typedoc "Function that executes a matching hook."
   @type hook_runner :: (MingaAgent.Hooks.Hook.t(), PreToolUsePayload.t() -> HookResult.t())
 
-  @typedoc "Counts one projected Apple request with the Apple tokenizer without generating."
-  @type apple_counter :: ([ReqLLM.Message.t()], [Tool.t()], pos_integer() ->
-                            {:ok, MingaAgent.Providers.Apple.count()} | {:error, term()})
+  @typedoc "Counts candidate Apple prefixes in one helper start without generating."
+  @type apple_counter :: ([String.t()], [[non_neg_integer()]], [Tool.t()], pos_integer() ->
+                            {:ok, MingaAgent.Providers.Apple.prefix_counts()} | {:error, term()})
 
   @typedoc "Internal state for the native provider."
   @type state :: %{
@@ -367,7 +367,8 @@ defmodule MingaAgent.Providers.Native do
       schema_cache: nil,
       prefix_candidate: :unknown,
       prefix_preview: nil,
-      apple_counter: Keyword.get(opts, :apple_counter, &MingaAgent.Providers.Apple.count/3),
+      apple_counter:
+        Keyword.get(opts, :apple_counter, &MingaAgent.Providers.Apple.count_prefixes/4),
       prefix_fit: nil,
       llm_client: llm_client,
       hook_runner: hook_runner,
@@ -3373,7 +3374,12 @@ defmodule MingaAgent.Providers.Native do
     {:ok, fit, state}
   end
 
-  # Counts the instructions entry with the same tool projection a dispatch sends.
+  # Preview runs inside Session's 5 s GenServer.call, which the Editor's synchronous prompt
+  # send also waits on for 5 s. One bounded count leaves 2 s for credential binding, schema
+  # projection, and Session's own transition, so a slow helper is refused, never a timeout.
+  @apple_count_deadline 3_000
+
+  # Counts every candidate instructions entry with the same tool projection a dispatch sends.
   @spec apple_prefix_measure(apple_counter(), [map()], ModelSelection.t()) ::
           SystemPrompt.measure()
   defp apple_prefix_measure(counter, schemas, selection) do
@@ -3381,14 +3387,44 @@ defmodule MingaAgent.Providers.Native do
     reserve = selection.policy.limits.request_output
     configured = selection.policy.limits.context
 
-    fn text ->
-      case counter.([Context.system(text), Context.user("")], tools, reserve) do
-        {:ok, %{instructions: prefix, context: context}} ->
-          {:ok, %{prefix: prefix, context: min(context, configured || context)}}
+    fn texts, candidates ->
+      case within_count_deadline(fn -> counter.(texts, candidates, tools, reserve) end) do
+        {:ok, %{counts: counts, context: context}} ->
+          {:ok, %{counts: counts, context: min(context, configured || context)}}
 
         {:error, _reason} = error ->
           error
       end
+    end
+  end
+
+  # Runs the count in a process that owns the helper Port, so killing it at the deadline
+  # also closes the Port and retires the helper.
+  @spec within_count_deadline((-> result)) :: result | {:error, term()} when result: term()
+  defp within_count_deadline(count) do
+    parent = self()
+    receipt = make_ref()
+    {pid, monitor} = spawn_monitor(fn -> send(parent, {receipt, count.()}) end)
+
+    receive do
+      {^receipt, result} ->
+        Process.demonitor(monitor, [:flush])
+        result
+
+      {:DOWN, ^monitor, :process, ^pid, reason} ->
+        {:error, {:apple_count_failed, reason}}
+    after
+      @apple_count_deadline ->
+        Process.exit(pid, :kill)
+        Process.demonitor(monitor, [:flush])
+
+        receive do
+          {^receipt, _late} -> :ok
+        after
+          0 -> :ok
+        end
+
+        {:error, :apple_count_timeout}
     end
   end
 
@@ -3398,6 +3434,10 @@ defmodule MingaAgent.Providers.Native do
          selection
        ) do
     "#{selection.route.display_name} cannot hold its fixed instructions and tools: Apple counts #{format_tokens(prefix)} tokens, plus #{format_tokens(reserve)} reserved for the response, over its #{format_tokens(context)}-token context. A new conversation will not help; choose a model with a larger context"
+  end
+
+  defp prefix_refusal_message(:apple_count_timeout, selection) do
+    "#{selection.route.display_name} could not count its fixed instructions and tools within #{div(@apple_count_deadline, 1000)} seconds. Try again, or reopen /model to check availability"
   end
 
   defp prefix_refusal_message(reason, selection) do
