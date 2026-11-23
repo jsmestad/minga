@@ -47,9 +47,15 @@ The design went through four rounds on the canvas, with reviews from a Minga UX 
 - Design rules become executable: design tokens generated into Swift, Go and Elixir, a scenario registry rendered by both frontends, and flow-graph checks for dead ends. See [`storyboard.md`](../design/storyboard.md).
 - Some terminal features need a modern terminal (notifications, the Kitty keyboard protocol, graphics). Each is detected at startup and degrades quietly.
 
+## Settled while recording this
+
+- **Minga's changes in a file** use `]h` / `[h`, which pair with the `ih` / `ah` text object. They replace `]e` (`lib/minga/keymap/normal_prefixes.ex:56`) with no alias, since Minga is pre-release. `SPC a t` is retired.
+- **Sibling subagents** are stepped with `]t` / `[t` only inside the peek buffer; normal-mode `]t` keeps "next class/module" (`normal_prefixes.ex:54`).
+- **`esc` at the `*minga-shell*` approval prompt defers.** The request stays pending and needs-you stays lit; `n` is the deliberate deny.
+- **One drawer at a time.** Opening another replaces it, and closing returns to the previous one. Splits are how you see two things at once.
+- **Markdown in the conversation** arrives as BEAM-styled spans that each frontend draws. Glamour is not used.
+- **Theme fixes.** `agent.assistant_label` uses the minga role and `agent.status_thinking` the working role. Light-theme values below 3:1 (Latte's needs-you, warning and waiting; AstroDark's waiting) are raised when the new roles land.
+
 ## Open questions
 
 - **Terminal emulator engine.** libvterm, a Go or Swift VT implementation, or libghostty. The Developer Notes on #19 and #122 assume the removed Zig renderer and are stale.
-- **Markdown in the conversation.** Rendering Minga's replies with Glamour in Go would duplicate semantics on the frontend. The likely answer is BEAM-styled spans drawn with Lip Gloss and native text.
-- **`esc` at the `*minga-shell*` approval prompt.** Does it deny, defer, or leave the request pending with its needs-you state?
-- **Key overlaps found while recording this.** `]e` already moves to the next agent edit (`lib/minga/keymap/normal_prefixes.ex:56`); decide whether `]h` replaces it. `]t` is "next class/module" in normal mode (`normal_prefixes.ex:54`), so sibling navigation in the subagent peek split must be scoped to that buffer or use another key.

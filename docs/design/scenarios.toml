@@ -952,7 +952,7 @@ exits = [
   { key = "]h", click = "", to = "minga.review.in_file" },
   { key = "any motion out of the change", click = "click elsewhere", to = "edit.working" },
 ]
-notes = "]h has no click path; the twist head of the next change is the click equivalent. ]e already means next agent edit today: see ADR-0006."
+notes = "]h has no click path; the twist head of the next change is the click equivalent. ]h replaces ]e (ADR-0006)."
 
 [[scenario]]
 id = "minga.conversation"
@@ -1005,7 +1005,7 @@ exits = [
   { key = "↩", click = "open", to = "minga.conversation" },
   { key = "q", click = "close", to = "minga.conversation" },
 ]
-notes = "]t is next class/module in normal mode today; scope it to this buffer or choose another key."
+notes = "]t / [t are bound only in this buffer; normal-mode ]t keeps next class/module."
 
 [[scenario]]
 id = "minga.tasks.list"
@@ -1431,7 +1431,6 @@ exits = [
   { key = "⌃C, ⌘. or SPC a s", click = "", to = "terminal.minga_shell" },
   { key = "q", click = "close split", to = "edit.working" },
 ]
-notes = "Open: what esc does at the approval prompt."
 
 [[scenario]]
 id = "terminal.capabilities"
@@ -1496,7 +1495,7 @@ exits = [
   { key = "a", click = "always", to = "terminal.minga_shell" },
   { key = "t", click = "this turn", to = "terminal.minga_shell" },
   { key = "n", click = "deny", to = "terminal.minga_shell" },
-  { key = "esc", click = "", to = "terminal.minga_shell", keyboard_only = "open question in ADR-0006" },
+  { key = "esc", click = "", to = "terminal.minga_shell", keyboard_only = "esc defers: the request stays pending and needs-you stays lit" },
 ]
 notes = "Open: does esc deny, or leave the request pending?"
 
@@ -1687,15 +1686,16 @@ notes = "V3Narrow predates V4.1; redraw with the V4.1 modeline truncation order 
 [[scenario]]
 id = "windows.drawer_stack"
 journey = "windows"
-title = "Two drawers at once (terminal and tasks)"
-surfaces = ["drawer:terminal", "drawer:tasks"]
+title = "Opening a drawer while another is open (terminal, then tasks)"
+surfaces = ["drawer:tasks", "modeline"]
 states = []
 frontends = ["macos", "tui"]
 status = "missing"
 exits = [
-  { key = "q", click = "close", to = "edit.plain" },
+  { key = "q", click = "close", to = "terminal.drawer", back = true },
+  { key = "esc", click = "", to = "terminal.drawer", back = true },
 ]
-notes = "Open: do drawers stack, replace each other, or split the drawer area?"
+notes = "One drawer at a time: the tasks drawer replaces the terminal drawer, and closing it returns to the terminal drawer (Doom popup behaviour). Splits show two things at once."
 
 [[scenario]]
 id = "windows.focus_lost"
