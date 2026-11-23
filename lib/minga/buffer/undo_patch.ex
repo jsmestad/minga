@@ -7,6 +7,7 @@ defmodule Minga.Buffer.UndoPatch do
 
   alias Minga.Buffer.Document
   alias Minga.Buffer.EditDelta
+  alias Minga.Core.Unicode
 
   @enforce_keys [:start_byte, :old_text, :new_text, :cursor]
   defstruct [:start_byte, :old_text, :new_text, :cursor]
@@ -126,12 +127,16 @@ defmodule Minga.Buffer.UndoPatch do
 
   @doc "Returns the inverse patch for the current document state."
   @spec invert(t(), Document.t()) :: t()
-  def invert(%__MODULE__{} = patch, %Document{} = current_document) do
+  def invert(%__MODULE__{} = patch, %Document{} = current_document),
+    do: inverse(patch, Document.cursor(current_document))
+
+  @spec inverse(t(), Document.position()) :: t()
+  defp inverse(patch, cursor) do
     %__MODULE__{
       start_byte: patch.start_byte,
       old_text: patch.new_text,
       new_text: patch.old_text,
-      cursor: Document.cursor(current_document)
+      cursor: cursor
     }
   end
 
@@ -163,6 +168,160 @@ defmodule Minga.Buffer.UndoPatch do
       {:error, :patch_mismatch}
     end
   end
+
+  @doc """
+  Applies `patches` in order and returns the final document with the inverse of every patch, the inverse of the last applied patch first.
+
+  The content, the final cursor, and every error equal those of calling `apply/2` once per patch and `invert/2` before each call. A patch that does not fit returns its error, and no partial result escapes.
+
+  Repeated `apply/2` calls rebuild the whole document once per patch. Instead, this function takes the longest leading run of patches whose ranges it can locate in the document the run starts from, and assembles that run in one pass. The patches of one batch edit form such a run in both directions: a later patch in the run either ends at or before the start of the patch applied before it, or starts at or after the end of the text that patch inserted. Each patch in the run must also fit, start and end on code point boundaries of that document, and insert valid UTF-8, and the document must be valid UTF-8. Every intermediate document is then valid UTF-8, so the sequential calls could not fail. A patch outside a run is applied on its own with `apply/2`, and the next run starts after it. A single patch takes `apply/2` directly.
+
+  The cursor of an inverse patch is the cursor to restore when that inverse is applied. Inside a run, that is the cursor recorded on the previously applied patch, which `apply/2` would also have placed. Applying a patch always places its cursor in the resulting document, so the stored value only differs from `invert/2` when a recorded cursor was not already a caret position, and the restored cursor is the same.
+  """
+  @spec apply_all(nonempty_list(t()), Document.t()) ::
+          {:ok, Document.t(), nonempty_list(t())} | {:error, apply_error()}
+  def apply_all([_ | _] = patches, %Document{} = document), do: apply_all(patches, document, [])
+
+  @spec apply_all([t()], Document.t(), [t()]) ::
+          {:ok, Document.t(), [t()]} | {:error, apply_error()}
+  defp apply_all([], document, inverses), do: {:ok, document, inverses}
+  defp apply_all([patch], document, inverses), do: apply_one(patch, [], document, inverses)
+
+  defp apply_all([patch | rest] = patches, document, inverses) do
+    case take_run(patches, document) do
+      {[_, _ | _] = steps, applied, remaining} ->
+        text = Document.content(document)
+
+        if Unicode.valid_utf8?(text) do
+          next_document = assemble(steps, text, applied)
+          apply_all(remaining, next_document, run_inverses(applied, document) ++ inverses)
+        else
+          apply_one(patch, rest, document, inverses)
+        end
+
+      _no_run ->
+        apply_one(patch, rest, document, inverses)
+    end
+  end
+
+  @spec apply_one(t(), [t()], Document.t(), [t()]) ::
+          {:ok, Document.t(), [t()]} | {:error, apply_error()}
+  defp apply_one(patch, rest, document, inverses) do
+    with {:ok, next_document} <- __MODULE__.apply(patch, document) do
+      apply_all(rest, next_document, [invert(patch, document) | inverses])
+    end
+  end
+
+  # A patch located in the document its run starts from: the byte range it replaces there, and
+  # the text it inserts.
+  @typep step :: {start :: non_neg_integer(), stop :: non_neg_integer(), byte_fragment()}
+  @typep direction :: :descending | :ascending | nil
+
+  # Returns the run's steps in ascending document order, its patches with the last applied first,
+  # and the patches after the run.
+  @spec take_run(nonempty_list(t()), Document.t()) :: {[step()], [t()], [t()]}
+  defp take_run([first | rest] = patches, document) do
+    case locate(first, first.start_byte, document) do
+      {:ok, step} -> extend_run(rest, document, {nil, first, size_change(first)}, [step], [first])
+      :stop -> {[], [], patches}
+    end
+  end
+
+  # `shift` is how far the run has moved every byte after its last applied patch, so a patch
+  # after that one sits `shift` bytes later than in the run's starting document.
+  @spec extend_run(
+          [t()],
+          Document.t(),
+          {direction(), t(), integer()},
+          nonempty_list(step()),
+          nonempty_list(t())
+        ) :: {[step()], [t()], [t()]}
+  defp extend_run(
+         [patch | rest] = patches,
+         document,
+         {direction, previous, shift},
+         steps,
+         applied
+       ) do
+    with {:ok, next_direction, start} <- follow(patch, previous, direction, shift),
+         {:ok, step} <- locate(patch, start, document) do
+      state = {next_direction, patch, shift + size_change(patch)}
+      extend_run(rest, document, state, [step | steps], [patch | applied])
+    else
+      :stop -> finish_run(direction, steps, applied, patches)
+    end
+  end
+
+  defp extend_run([], _document, {direction, _previous, _shift}, steps, applied),
+    do: finish_run(direction, steps, applied, [])
+
+  # Descending runs accumulate their steps lowest first already.
+  @spec finish_run(direction(), [step()], [t()], [t()]) :: {[step()], [t()], [t()]}
+  defp finish_run(:ascending, steps, applied, rest), do: {Enum.reverse(steps), applied, rest}
+  defp finish_run(_direction, steps, applied, rest), do: {steps, applied, rest}
+
+  # Returns where `patch` starts in the run's starting document when every byte it replaces is
+  # still original text there. Equal boundaries keep application order: a later descending patch
+  # inserts before the earlier one's text, and a later ascending patch after it.
+  @spec follow(t(), t(), direction(), integer()) ::
+          {:ok, :descending | :ascending, non_neg_integer()} | :stop
+  defp follow(patch, previous, direction, shift) do
+    cond do
+      direction != :ascending and
+          patch.start_byte + byte_size(patch.new_text) <= previous.start_byte ->
+        {:ok, :descending, patch.start_byte}
+
+      direction != :descending and
+          patch.start_byte >= previous.start_byte + byte_size(previous.old_text) ->
+        {:ok, :ascending, patch.start_byte - shift}
+
+      true ->
+        :stop
+    end
+  end
+
+  @spec locate(t(), non_neg_integer(), Document.t()) :: {:ok, step()} | :stop
+  defp locate(patch, start, document) do
+    stop = start + byte_size(patch.new_text)
+
+    if fits?(document, start, patch.new_text) and code_point_boundary?(document, start) and
+         code_point_boundary?(document, stop) and Unicode.valid_utf8?(patch.old_text),
+       do: {:ok, {start, stop, patch.old_text}},
+       else: :stop
+  end
+
+  @spec code_point_boundary?(Document.t(), non_neg_integer()) :: boolean()
+  defp code_point_boundary?(document, point) do
+    point >= Document.content_byte_size(document) or
+      Bitwise.band(Document.byte_at(document, point), 0xC0) != 0x80
+  end
+
+  @spec size_change(t()) :: integer()
+  defp size_change(patch), do: byte_size(patch.old_text) - byte_size(patch.new_text)
+
+  # The cursor lands where `apply/2` would place the last applied patch's cursor.
+  @spec assemble(nonempty_list(step()), String.t(), nonempty_list(t())) :: Document.t()
+  defp assemble([{lowest_start, _stop, _text} | _higher] = steps, text, [last | _earlier]) do
+    {chunks, point} =
+      Enum.reduce(steps, {[binary_part(text, 0, lowest_start)], lowest_start}, fn
+        {start, stop, inserted}, {chunks, point} ->
+          {[inserted, binary_part(text, point, start - point) | chunks], stop}
+      end)
+
+    [binary_part(text, point, byte_size(text) - point) | chunks]
+    |> Enum.reverse()
+    |> IO.iodata_to_binary()
+    |> Document.new()
+    |> Document.move_to(last.cursor)
+  end
+
+  # Each inverse restores the cursor of the document before its patch: the run's starting cursor
+  # for the first patch, otherwise the cursor recorded on the patch applied before it.
+  @spec run_inverses(nonempty_list(t()), Document.t()) :: nonempty_list(t())
+  defp run_inverses([first], document), do: [inverse(first, Document.cursor(document))]
+
+  defp run_inverses([patch, previous | _] = applied, document),
+    do: [inverse(patch, previous.cursor) | run_inverses(tl(applied), document)]
 
   @spec fits?(Document.t(), non_neg_integer(), byte_fragment()) :: boolean()
   defp fits?(document, start_byte, expected) do

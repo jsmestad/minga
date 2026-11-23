@@ -101,7 +101,7 @@ defmodule Minga.Buffer.UndoHistory do
   def undo(%__MODULE__{} = history, current_version, %Document{} = current_document) do
     [{previous_version, patches, source} | remaining_undo] = history.undo_entries
 
-    with {:ok, previous_document, redo_patches} <- apply_patches(current_document, patches) do
+    with {:ok, previous_document, redo_patches} <- UndoPatch.apply_all(patches, current_document) do
       redo_entry = {current_version, redo_patches, source}
 
       new_history = %{
@@ -126,7 +126,7 @@ defmodule Minga.Buffer.UndoHistory do
   def redo(%__MODULE__{} = history, current_version, %Document{} = current_document) do
     [{next_version, patches, source} | remaining_redo] = history.redo_entries
 
-    with {:ok, next_document, undo_patches} <- apply_patches(current_document, patches) do
+    with {:ok, next_document, undo_patches} <- UndoPatch.apply_all(patches, current_document) do
       undo_entry = {current_version, undo_patches, source}
 
       new_history = %{
@@ -200,21 +200,6 @@ defmodule Minga.Buffer.UndoHistory do
 
   @spec redo_count(t()) :: non_neg_integer()
   def redo_count(%__MODULE__{} = history), do: length(history.redo_entries)
-
-  @spec apply_patches(Document.t(), patches()) ::
-          {:ok, Document.t(), patches()} | {:error, UndoPatch.apply_error()}
-  defp apply_patches(%Document{} = document, patches) do
-    Enum.reduce_while(patches, {:ok, document, []}, fn patch, {:ok, current_document, inverses} ->
-      case UndoPatch.apply(patch, current_document) do
-        {:ok, next_document} ->
-          inverse = UndoPatch.invert(patch, current_document)
-          {:cont, {:ok, next_document, [inverse | inverses]}}
-
-        {:error, _reason} = error ->
-          {:halt, error}
-      end
-    end)
-  end
 
   @spec cap_entries([entry()]) :: [entry()]
   defp cap_entries(entries), do: Enum.take(entries, @max_entries)
