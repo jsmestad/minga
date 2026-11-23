@@ -642,6 +642,10 @@ struct ResidentRowStoreTests {
             let reference = bulk.rebuildingLocatorsIncrementally()
 
             #expect(bulk.locatorIndexStructurallyEquals(reference))
+
+            #expect(bulk.locatorIndexHasCanonicalShape)
+
+            #expect(reference.locatorIndexHasCanonicalShape)
             #expect(bulk.validateInvariants())
             #expect(reference.validateInvariants())
             #expect(bulk.counters.locatorNodesCopied == bulk.locatorNodeCount)
@@ -660,6 +664,10 @@ struct ResidentRowStoreTests {
         let reference = bulk.rebuildingLocatorsIncrementally()
 
         #expect(bulk.locatorIndexStructurallyEquals(reference))
+
+        #expect(bulk.locatorIndexHasCanonicalShape)
+
+        #expect(reference.locatorIndexHasCanonicalShape)
         #expect(bulk.validateInvariants())
         try expectSameLookups(bulk, reference, rows: unsorted)
     }
@@ -710,6 +718,10 @@ struct ResidentRowStoreTests {
             }
 
             #expect(bulk.locatorIndexStructurallyEquals(reference))
+
+            #expect(bulk.locatorIndexHasCanonicalShape)
+
+            #expect(reference.locatorIndexHasCanonicalShape)
             #expect(bulk.counters == reference.counters)
             #expect(bulk.rows(in: 0..<bulk.count).rows == reference.rows(in: 0..<reference.count).rows)
             #expect(bulk.validateInvariants())

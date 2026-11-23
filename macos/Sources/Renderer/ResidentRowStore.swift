@@ -1492,6 +1492,10 @@ public struct ResidentRowStore: Sendable {
 
     /// Test-only count of locator index nodes and leaves.
     public var locatorNodeCount: Int { storage.locators.nodeCount() }
+
+    /// Test-only check that the locator index has its canonical path-compressed shape. Kept out of
+    /// `validateInvariants()`, which runs for every staged window frame.
+    public var locatorIndexHasCanonicalShape: Bool { storage.locators.hasCanonicalShape() }
     #endif
 
     /// Replaces the complete sequence and records one explicit full reset.
@@ -1897,7 +1901,7 @@ public struct ResidentRowStore: Sendable {
                 previousBufferLine = row.bufLine
             }
         }
-        return ids.count == count && storage.locators.count == count && storage.locators.hasCanonicalShape()
+        return ids.count == count && storage.locators.count == count
     }
 
     /// Chunk occupancies exposed for structural invariant tests.
