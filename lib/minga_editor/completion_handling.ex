@@ -17,6 +17,7 @@ defmodule MingaEditor.CompletionHandling do
   alias Minga.Editing.Completion.Session
   alias MingaEditor.CompletionTrigger
   alias MingaEditor.Shell.Traditional.ModalWorkflow
+  alias MingaEditor.Shell.Traditional.NoticeWorkflow
   alias MingaEditor.Shell.Traditional.SignatureHelpWorkflow
   alias MingaEditor.Shell.Traditional.State, as: ShellState
   alias MingaEditor.SignatureHelp
@@ -347,8 +348,8 @@ defmodule MingaEditor.CompletionHandling do
       {:insert_text, text} ->
         state |> accept_text(completion, text) |> dismiss()
 
-      {:text_edit, edit} ->
-        state |> apply_completion_edit(edit) |> dismiss()
+      {:text_edit, edit, provider_id} ->
+        state |> apply_completion_edit(edit, provider_id) |> dismiss()
     end
   end
 
@@ -457,41 +458,73 @@ defmodule MingaEditor.CompletionHandling do
     }
   end
 
+  # Replaces the text typed since the trigger, the half-open byte range from the trigger to the
+  # cursor, with the accepted text.
   @spec accept_text(EditorState.t(), Completion.t(), String.t()) :: EditorState.t()
   defp accept_text(%{workspace: %{buffers: %{active: buf}}} = state, completion, text)
        when is_pid(buf) do
     {trigger_line, trigger_col} = completion.trigger_position
-    %CursorContext{line: cursor_line, byte_column: cursor_col} = Buffer.cursor_context(buf)
+
+    %CursorContext{line: cursor_line, byte_column: cursor_col, version: version} =
+      Buffer.cursor_context(buf)
 
     if cursor_line == trigger_line and cursor_col > trigger_col do
-      Buffer.apply_edit(buf, trigger_line, trigger_col, cursor_line, cursor_col, text)
+      buf
+      |> Buffer.replace_byte_range_if_version(
+        version,
+        {trigger_line, trigger_col},
+        cursor_col - trigger_col,
+        text
+      )
+      |> completion_edit_result(state)
     else
-      Buffer.insert_text(buf, text)
+      buf |> Buffer.insert_text(text) |> completion_edit_result(state)
     end
-
-    # Buffer.Process now broadcasts :buffer_changed with delta from record_edit
-    state
   end
 
   defp accept_text(state, _completion, _text), do: state
 
-  @spec apply_completion_edit(EditorState.t(), Completion.text_edit()) :: EditorState.t()
-  defp apply_completion_edit(%{workspace: %{buffers: %{active: buf}}} = state, edit)
+  # LSP ranges are half-open and count the provider's position units, so the range is converted
+  # to byte columns on the cursor line before the buffer replaces it. Text typed after the range
+  # end since the request is part of the word being completed, so it is replaced too.
+  @spec apply_completion_edit(EditorState.t(), Completion.text_edit(), Item.provider_id()) ::
+          EditorState.t()
+  defp apply_completion_edit(%{workspace: %{buffers: %{active: buf}}} = state, edit, provider_id)
        when is_pid(buf) do
-    Buffer.apply_edit(
-      buf,
-      edit.range.start_line,
-      edit.range.start_col,
-      edit.range.end_line,
-      edit.range.end_col,
-      edit.new_text
-    )
+    %CursorContext{line: line, line_text: line_text, byte_column: cursor_col, version: version} =
+      Buffer.cursor_context(buf)
 
-    # Buffer.Process now broadcasts :buffer_changed with delta from record_edit
-    state
+    case Item.byte_columns(edit, line, line_text, provider_encoding(provider_id)) do
+      {:ok, {start_col, end_col}} ->
+        buf
+        |> Buffer.replace_byte_range_if_version(
+          version,
+          {line, start_col},
+          max(end_col, cursor_col) - start_col,
+          edit.new_text
+        )
+        |> completion_edit_result(state)
+
+      {:error, _reason} = error ->
+        completion_edit_result(error, state)
+    end
   end
 
-  defp apply_completion_edit(state, _edit), do: state
+  defp apply_completion_edit(state, _edit, _provider_id), do: state
+
+  @spec completion_edit_result({:ok, non_neg_integer()} | :ok | {:error, term()}, EditorState.t()) ::
+          EditorState.t()
+  defp completion_edit_result({:ok, _version}, state), do: state
+  defp completion_edit_result(:ok, state), do: state
+
+  defp completion_edit_result({:error, reason}, state),
+    do: NoticeWorkflow.publish(state, "Completion failed: #{inspect(reason)}")
+
+  # Completion items from an LSP client use the encoding it negotiated; other providers use
+  # Minga's byte columns.
+  @spec provider_encoding(Item.provider_id()) :: PositionEncoding.encoding()
+  defp provider_encoding({:lsp_client, client}) when is_pid(client), do: client_encoding(client)
+  defp provider_encoding(_provider_id), do: :utf8
 
   @spec maybe_update(EditorState.t(), non_neg_integer(), non_neg_integer()) :: EditorState.t()
   defp maybe_update(state, codepoint, _mods) do
@@ -826,7 +859,9 @@ defmodule MingaEditor.CompletionHandling do
       mode = completion_response_mode(role)
 
       Task.Supervisor.start_child(Minga.Eval.TaskSupervisor, fn ->
-        payload = legacy_processed_payload(mode, result, trigger_pos, prefix)
+        payload =
+          legacy_processed_payload(mode, result, {:lsp_client, client}, trigger_pos, prefix)
+
         send(editor, {:completion_processed, gen, mode, payload, trigger_pos, buffer, version})
       end)
     end
@@ -880,28 +915,32 @@ defmodule MingaEditor.CompletionHandling do
 
   defp legacy_completion_result_current?(_state, _client, _buffer, _gen), do: false
 
+  # Items carry their client as provider, so an accepted text edit is read in that client's
+  # position encoding.
   @spec legacy_processed_payload(
           :primary | :merge,
           term(),
+          Item.provider_id(),
           CompletionTrigger.position(),
           String.t()
         ) :: Completion.t() | [Completion.item()] | :failed
-  defp legacy_processed_payload(:primary, {:ok, result}, trigger_pos, prefix) do
+  defp legacy_processed_payload(:primary, {:ok, result}, provider_id, trigger_pos, prefix) do
     result
-    |> Completion.parse_response()
+    |> Completion.parse_response(provider_id)
     |> Completion.new(trigger_pos)
     |> Completion.filter(prefix)
   rescue
     _error -> :failed
   end
 
-  defp legacy_processed_payload(:merge, {:ok, result}, _trigger_pos, _prefix) do
-    Completion.parse_response(result)
+  defp legacy_processed_payload(:merge, {:ok, result}, provider_id, _trigger_pos, _prefix) do
+    Completion.parse_response(result, provider_id)
   rescue
     _error -> :failed
   end
 
-  defp legacy_processed_payload(_mode, _result, _trigger_pos, _prefix), do: :failed
+  defp legacy_processed_payload(_mode, _result, _provider_id, _trigger_pos, _prefix),
+    do: :failed
 
   @spec start_completion_task(
           pid(),

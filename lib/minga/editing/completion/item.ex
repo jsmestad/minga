@@ -5,6 +5,8 @@ defmodule Minga.Editing.Completion.Item do
   The identifier is the full identity tuple, not a display label or truncated hash. Documentation is intentionally excluded because `completionItem/resolve` may add it without changing the candidate's identity. Detail remains part of the identity because providers commonly use it to distinguish overloads.
   """
 
+  alias Minga.Core.PositionEncoding
+
   @typedoc "Identity of the provider within one completion session."
   @type provider_id :: term()
 
@@ -189,6 +191,49 @@ defmodule Minga.Editing.Completion.Item do
       when is_list(ranges) do
     with_match_ranges(item, map_ranges_to_label(search.filter_to_label, ranges))
   end
+
+  @typedoc "Why a completion text edit cannot be placed on the cursor line."
+  @type text_edit_error ::
+          :malformed_range
+          | :not_on_cursor_line
+          | :column_out_of_range
+          | :column_not_boundary
+          | :inverted_range
+
+  @doc """
+  Resolves a text edit's LSP range to a half-open byte column range on the cursor line.
+
+  The range's `character` offsets count units of the provider's position `encoding`: UTF-16 code units unless the server negotiated another encoding. `line_text` is the text of `cursor_line`. LSP requires a completion edit to stay on the line where completion was requested, so a range on any other line, or spanning lines, is rejected. Each offset must name a code point boundary inside the line.
+  """
+  @spec byte_columns(text_edit(), non_neg_integer(), String.t(), PositionEncoding.encoding()) ::
+          {:ok, {non_neg_integer(), non_neg_integer()}} | {:error, text_edit_error()}
+  def byte_columns(
+        %{range: %{start_line: line, start_col: start_col, end_line: line, end_col: end_col}},
+        line,
+        line_text,
+        encoding
+      )
+      when is_integer(start_col) and start_col >= 0 and is_integer(end_col) and end_col >= 0 and
+             is_binary(line_text) do
+    with {:ok, start_byte} <- PositionEncoding.exact_byte_column(line_text, start_col, encoding),
+         {:ok, end_byte} <- PositionEncoding.exact_byte_column(line_text, end_col, encoding) do
+      if start_byte <= end_byte,
+        do: {:ok, {start_byte, end_byte}},
+        else: {:error, :inverted_range}
+    end
+  end
+
+  def byte_columns(
+        %{range: %{start_line: start_line, end_line: end_line}},
+        cursor_line,
+        line_text,
+        _encoding
+      )
+      when is_binary(line_text) and (start_line != cursor_line or end_line != cursor_line),
+      do: {:error, :not_on_cursor_line}
+
+  def byte_columns(_text_edit, _cursor_line, line_text, _encoding) when is_binary(line_text),
+    do: {:error, :malformed_range}
 
   @doc "Returns the provider-aware semantic key used to collapse true duplicates."
   @spec semantic_key(t()) :: id()

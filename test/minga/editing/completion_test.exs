@@ -181,7 +181,7 @@ defmodule Minga.Editing.CompletionTest do
       ]
 
       comp = Completion.new(items, {0, 0})
-      assert {:text_edit, %{new_text: "testing"}} = Completion.accept(comp)
+      assert {:text_edit, %{new_text: "testing"}, _provider_id} = Completion.accept(comp)
     end
 
     test "returns nil when no items" do
