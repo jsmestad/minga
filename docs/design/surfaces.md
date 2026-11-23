@@ -64,7 +64,8 @@ Lists open in a bottom drawer: the tasks list, the review, diagnostics, the swit
 - The row that needs you expands to show the request ("Create test/minga_agent/usage_limit_test.exs +86") and its actions as text: "`y` Approve once  `a` Always for this session  `t` This turn  `n` Deny  `=` Show diff  `↩` Open conversation".
 - Every other row shows its one relevant action: `r` Retry on waiting and failed rows, `o` Output, `i` Inspect, `↩` Review on done rows.
 - A task that fans out shows its subagents beneath it as a tree (`├─`, `└─`), each with its state.
-- Empty state: still to be designed (see ADR-0006 open questions).
+- Empty state: "No one's at the table yet." with one next action, `n` New task. `q` or `esc` returns focus to the window you came from.
+- New task: `n` in the drawer (or `SPC a n`) opens a "New task ›" minibuffer prompt. The goal you type becomes the task's title; the selection is attached as context, `@` adds more, `↩` starts it, `esc` cancels.
 
 ## Review
 

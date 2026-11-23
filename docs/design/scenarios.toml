@@ -175,14 +175,14 @@ notes = "Lists what would be lost: unsaved buffers, running tasks, unreviewed ch
 [[scenario]]
 id = "start.quit.farewell"
 journey = "start"
-title = "Pfiat di: the app closes"
+title = "Ciao: the app closes"
 surfaces = ["minibuffer"]
 states = []
 frontends = ["macos", "tui"]
 status = "missing"
 terminal_state = true
 exits = []
-notes = "Bavarian voice. Terminal state: the process exits."
+notes = "Voice: \"Ciao.\" (everyday Munich speech). Terminal state: the process exits."
 
 # ---- edit ------------------------------------------------------------------
 
@@ -1031,15 +1031,16 @@ exits = [
 [[scenario]]
 id = "minga.tasks.working"
 journey = "minga"
-title = "Tasks drawer right after answering an approval"
+title = "Tasks drawer with a working task focused (after answering an approval, or right after starting a task)"
 surfaces = ["editor", "drawer:tasks", "modeline"]
 states = ["working"]
 frontends = ["macos", "tui"]
 status = "designed"
-boards = { macos = "V41Tasks.dc.html", tui = "V41TuiTasks.dc.html" }
+boards = { macos = "V41Tasks.dc.html", tui = "V41TuiTasks.dc.html", new_task = "Batch1_minga_task_new_started.dc.html" }
 transient = true
 exits = [
   { key = "↩", click = "row title", to = "minga.conversation" },
+  { key = "i", click = "Inspect", to = "minga.subagent.peek" },
   { key = "q", click = "drawer close", to = "edit.plain" },
   { key = "esc", click = "", to = "edit.plain", keyboard_only = "q has the click" },
 ]
@@ -1051,28 +1052,32 @@ title = "Tasks drawer with no tasks"
 surfaces = ["drawer:tasks"]
 states = []
 frontends = ["macos", "tui"]
-status = "missing"
+status = "designed"
+boards = { macos = "Batch1_minga_tasks_empty.dc.html", tui = "Batch1_minga_tasks_empty.dc.html" }
 transient = true
 exits = [
   { key = "n", click = "New task", to = "minga.task.new" },
   { key = "q", click = "drawer close", to = "edit.plain" },
+  { key = "esc", click = "", to = "edit.plain", keyboard_only = "q has the click" },
 ]
 notes = "Voice: \"No one's at the table yet\". Offers n New task."
 
 [[scenario]]
 id = "minga.task.new"
 journey = "minga"
-title = "SPC a n: starting a new task"
-surfaces = ["split:conversation", "composer"]
+title = "New task ›: the minibuffer prompt for a new task (n in the tasks drawer, or SPC a n)"
+surfaces = ["drawer:tasks", "minibuffer"]
 states = []
 frontends = ["macos", "tui"]
-status = "missing"
+status = "designed"
+boards = { macos = "Batch1_minga_task_new.dc.html", tui = "Batch1_minga_task_new.dc.html" }
 transient = true
 exits = [
-  { key = "⌘↩ or ↩ (Normal)", click = "Send", to = "minga.conversation" },
-  { key = "esc", click = "Cancel", to = "edit.plain" },
+  { key = "↩", click = "Start", to = "minga.tasks.working" },
+  { key = "esc", click = "Cancel", to = "minga.tasks.list" },
+  { key = "@", click = "Add context", to = "files.switcher" },
 ]
-notes = "Empty conversation with the composer focused; the task gets its title from the first message."
+notes = "The goal you type becomes the task's title. The cursor's selection is attached as context when there is one; @ adds a buffer, file or selection. The prompt never steals focus while you type."
 
 [[scenario]]
 id = "minga.approval.diff"
@@ -1109,7 +1114,8 @@ title = "Keep all 3 changes? y/n"
 surfaces = ["minibuffer"]
 states = []
 frontends = ["macos", "tui"]
-status = "missing"
+status = "designed"
+boards = { macos = "Batch1_minga_review_confirms.dc.html", tui = "Batch1_minga_review_confirms.dc.html" }
 transient = true
 exits = [
   { key = "y", click = "Keep all", to = "minga.review.all_decided" },
@@ -1122,14 +1128,15 @@ id = "minga.review.all_decided"
 journey = "minga"
 title = "Review after the last change is decided"
 surfaces = ["drawer:review"]
-states = []
+states = ["done"]
 frontends = ["macos", "tui"]
-status = "missing"
+status = "designed"
+boards = { macos = "Batch1_minga_review_all_decided.dc.html", tui = "Batch1_minga_review_all_decided.dc.html" }
 exits = [
   { key = "q", click = "close", to = "edit.plain" },
   { key = "↩", click = "Reply to Minga", to = "minga.conversation" },
 ]
-notes = "Says what was kept and rejected, offers to reply."
+notes = "Says what was kept and rejected, offers to reply. The one place the review says \"Passt.\"."
 
 [[scenario]]
 id = "minga.review.empty"
@@ -1138,10 +1145,14 @@ title = "Nothing to review"
 surfaces = ["drawer:review"]
 states = []
 frontends = ["macos", "tui"]
-status = "missing"
+status = "designed"
+boards = { macos = "Batch1_minga_review_empty.dc.html", tui = "Batch1_minga_review_empty.dc.html" }
 exits = [
   { key = "q", click = "close", to = "edit.plain" },
+  { key = "esc", click = "", to = "edit.plain", keyboard_only = "q has the click" },
+  { key = "SPC a a", click = "Tasks", to = "minga.tasks.list" },
 ]
+notes = "Empty state with the next action. No voice line."
 
 [[scenario]]
 id = "minga.reject_all.confirm"
@@ -1150,7 +1161,8 @@ title = "Reject all 3 changes? y/n"
 surfaces = ["minibuffer"]
 states = []
 frontends = ["macos", "tui"]
-status = "missing"
+status = "designed"
+boards = { macos = "Batch1_minga_review_confirms.dc.html", tui = "Batch1_minga_review_confirms.dc.html" }
 transient = true
 exits = [
   { key = "y", click = "Reject all", to = "edit.plain" },
@@ -1162,16 +1174,19 @@ exits = [
 id = "minga.conversation.stopped"
 journey = "minga"
 title = "Conversation after Stop"
-surfaces = ["split:conversation", "composer"]
-states = []
+surfaces = ["split:conversation", "composer", "modeline"]
+states = ["stopped"]
 frontends = ["macos", "tui"]
-status = "missing"
+status = "designed"
+boards = { macos = "Batch1_minga_conversation_stopped.dc.html", tui = "Batch1_minga_conversation_stopped.dc.html" }
 exits = [
-  { key = "↩", click = "Send", to = "minga.conversation" },
+  { key = "↩ (composer)", click = "Continue", to = "minga.conversation" },
+  { key = "⌥↩", click = "Queue", to = "minga.queue" },
+  { key = "SPC a r", click = "Review", to = "minga.review.buffer" },
   { key = "SPC a v", click = "close split", to = "edit.plain" },
   { key = "q (Normal mode, outside the composer)", click = "", to = "edit.plain" },
 ]
-notes = "Says what was interrupted and what was already changed."
+notes = "Says what was interrupted and what was already changed. The modeline reads \"Minga stopped\"; the queue is kept; Continue resumes the same task."
 
 [[scenario]]
 id = "minga.queue.empty"

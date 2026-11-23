@@ -13,7 +13,7 @@ Minga's chrome follows one model on macOS and in the terminal, called the Spine:
 5. **Vim keys stay Vim in a file.** Minga's changes are handled with leader keys, a text object and ex commands in file buffers. Bare single-letter actions exist only in Minga's special buffers (`*minga-tasks*`, `*minga-review*`).
 6. **Undo is yours; Reject is for Minga.** `u` and ⌘Z undo only your own edits. Minga's work leaves through Reject.
 7. **Yes and no mean the same thing everywhere Minga asks.** `y` approve or keep, `n` deny or reject, `a` always for this session, `t` this turn, matching today's approval keys.
-8. **Two marks carry Minga's identity.** The twist marks where Minga's work is in your text; the orbit and its satellite mark what Minga is doing. Five states, each a distinct shape plus a word.
+8. **Two marks carry Minga's identity.** The twist marks where Minga's work is in your text; the orbit and its satellite mark what Minga is doing. Six state words on five shapes (Waiting and Stopped share the hollow dot), always shape plus word.
 9. **The terminal UI and the GUI draw the same picture.** A design that cannot be drawn in a terminal with the same layout is probably wrong. Platform-native rendering is welcome; platform-specific interaction models are not.
 10. **A terminal is a buffer.** The built-in terminal uses the same modes, marks and yes/no grammar, with command blocks from shell integration.
 
@@ -52,5 +52,4 @@ The design went through four rounds on the canvas, with reviews from a Minga UX 
 - **Terminal emulator engine.** libvterm, a Go or Swift VT implementation, or libghostty. The Developer Notes on #19 and #122 assume the removed Zig renderer and are stale.
 - **Markdown in the conversation.** Rendering Minga's replies with Glamour in Go would duplicate semantics on the frontend. The likely answer is BEAM-styled spans drawn with Lip Gloss and native text.
 - **`esc` at the `*minga-shell*` approval prompt.** Does it deny, defer, or leave the request pending with its needs-you state?
-- **The tasks drawer with nothing in it.** It needs an empty state.
 - **Key overlaps found while recording this.** `]e` already moves to the next agent edit (`lib/minga/keymap/normal_prefixes.ex:56`); decide whether `]h` replaces it. `]t` is "next class/module" in normal mode (`normal_prefixes.ex:54`), so sibling navigation in the subagent peek split must be scoped to that buffer or use another key.
