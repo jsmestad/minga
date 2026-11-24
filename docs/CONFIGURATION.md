@@ -1,6 +1,8 @@
 # Configuration
 
-Minga is configured with real Elixir code. Your config file is `~/.config/minga/config.exs` (or `$XDG_CONFIG_HOME/minga/config.exs`). Press `SPC f p` to open it from inside the editor.
+This guide is for anyone who wants Minga to work their way: options, keys, themes, language tools, and how much the agent may do without asking. You will change settings in one file and reload them without leaving the editor.
+
+Minga is configured with real Elixir code, but setting an option takes one line and no Elixir knowledge. If Elixir is new to you, the [Elixir lesson](https://mingacode.dev/learn/elixir) on the site translates settings from other editors. Your config file is `~/.config/minga/config.exs` (or `$XDG_CONFIG_HOME/minga/config.exs`). Press `SPC f p` to open it from inside the editor.
 
 If the file doesn't exist, `SPC f p` creates it with a starter template.
 
@@ -14,7 +16,7 @@ set :line_numbers, :relative
 set :scroll_margin, 8
 ```
 
-That's it. Save the file and restart Minga. Your options take effect immediately on startup.
+That's it. Save the file and press `SPC h r`. The status bar shows "Config reloaded". Buffers you open after the reload use the new options, and `:tab_width` and `:line_numbers` also change in buffers that are already open. Minga also reads the file every time it starts. [Config reload](#config-reload) lists the few changes that need a restart.
 
 ## Options
 
@@ -1169,6 +1171,8 @@ Minga loads config in this order. Each stage can override the previous one:
 ## Extensions
 
 Extensions are reusable, self-contained editor plugins. Each extension runs under its own supervisor, so a crash in one extension never affects others or the editor.
+
+This section is the reference for installing, loading and updating extensions from your config. To decide whether you need one, read [Extending Minga](https://mingacode.dev/extending) on the site. To write one, start with [Your first extension](EXTENSION_API.md#your-first-extension) in the Extension API guide.
 
 ### Optional extensions
 

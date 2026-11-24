@@ -1,5 +1,9 @@
 # Session Recovery
 
+If Minga crashes, or you quit and come back later, your agent conversations are still there. You can reopen a saved session and continue it, and the model sees the conversation that really happened, including its tool calls and their results. Minga does not rerun a tool call that was interrupted. It marks that call's outcome as unknown in the transcript, so you can check the result before you continue.
+
+This page is for readers who want to know how that works and what its limits are. It describes what Minga stores for each session and how it restores it.
+
 A saved session must resume from the model conversation that actually completed, not from a reconstruction of the visible transcript. Minga stores the lossless provider continuation beside the editable display history and restores both as one session snapshot.
 
 ## Draft storage

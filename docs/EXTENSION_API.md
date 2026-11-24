@@ -1,10 +1,56 @@
 # Extension API
 
-> **First time?** This is the API reference. For user-facing configuration and installing extensions, see [Configuration](CONFIGURATION.md#optional-extensions). For the extension code-generation boundary, see [ADR-0003](adr/0003-extension-code-updates-require-a-new-vm-generation.md).
+This guide is for anyone who wants Minga to do something it does not do yet: a new command, a key, a modeline segment, a language, or a model route. You will write a small Elixir package, load it from your config, and run it inside the editor.
 
-Extensions are Elixir packages that run inside the editor. They have full access to the BEAM VM, the same way Emacs Lisp packages have full access to the Emacs runtime. Declarative contributions are described at compile time, and runtime setup happens in `init/1`.
+If a few lines in `config.exs` would do the job, start there. [Configuration](CONFIGURATION.md) covers options, keybindings, custom commands and advice, and [Extending Minga](https://mingacode.dev/extending) explains when a package is worth writing. To install an extension someone else wrote, see [Optional extensions](CONFIGURATION.md#optional-extensions).
 
-This page covers every public API an extension can use, with copy-pasteable examples.
+## Your first extension
+
+Extensions are Elixir packages that run inside the editor. They have full access to the BEAM VM, the same way Emacs Lisp packages have full access to the Emacs runtime. The smallest useful one is a single file that adds a command and a key for it.
+
+Create a directory with one file in it:
+
+```elixir
+# ~/code/minga_hello/extension.ex
+defmodule MingaHello do
+  use Minga.Extension.Editor
+
+  command :hello_greet, "Say hello in *Messages*", execute: {__MODULE__, :greet}
+
+  keybind :normal, "SPC o h", :hello_greet, "Say hello"
+
+  @impl true
+  def name, do: :minga_hello
+
+  @impl true
+  def description, do: "Says hello from a key"
+
+  @impl true
+  def version, do: "0.1.0"
+
+  @impl true
+  def init(_config), do: {:ok, %{}}
+
+  def greet(state) do
+    Minga.API.message("Hello from MingaHello")
+    state
+  end
+end
+```
+
+Then declare it in `~/.config/minga/config.exs`, replacing the path with your directory:
+
+```elixir
+extension :minga_hello, path: "~/code/minga_hello"
+```
+
+Restart Minga. Press `SPC o h` in normal mode, then `SPC b m` to open `*Messages*` and read the greeting.
+
+Here is what you wrote. `use Minga.Extension.Editor` brings in the `command` and `keybind` macros, which describe your contributions at compile time. The four callbacks (`name/0`, `description/0`, `version/0` and `init/1`) identify the extension and run its setup. The command's function receives the editor state and returns it.
+
+Minga compiles a path extension when it starts, so restart Minga after you edit the file. [Loading extensions](CONFIGURATION.md#loading-extensions) covers Git and Hex sources and how users pass options to your extension. [ADR-0003](adr/0003-extension-code-updates-require-a-new-vm-generation.md) explains why changed code needs a restart.
+
+The rest of this page is the reference: every public API an extension can use, with copy-pasteable examples. Read the trust model first, because an extension can do anything Minga can.
 
 ---
 

@@ -1,5 +1,37 @@
 # Agent model selection
 
+This guide is for anyone who wants to choose which model the Minga agent runs on. By the end you will have a default model for new sessions, know how to switch models in the middle of a conversation, and know what Minga does when a model is not available.
+
+If you have not connected a provider yet, [Get Started](https://mingacode.dev/getting-started) walks you through it once. Come back here when you want to change the choice.
+
+## The short version
+
+Export your provider's API key in the shell that starts Minga:
+
+```sh
+export ANTHROPIC_API_KEY="your-key"
+```
+
+Replace `your-key` with a key from your provider's dashboard. Then name the model in `~/.config/minga/config.exs`:
+
+```elixir
+use Minga.Config
+
+set :agent_model, "anthropic:claude-sonnet-4-20250514"
+```
+
+The value is the provider name, a colon, and the model name. New agent sessions start on that model.
+
+To pick from a list instead, open the agent with `SPC a a` and run `/model`. It lists the models your credentials can reach. Choosing one switches the current conversation and keeps its history.
+
+If you would rather not keep a key in your shell, run `/auth anthropic` and type the key into the masked prompt. Minga stores it in `~/.config/minga/credentials.json`, readable only by you. A key in an environment variable takes precedence over a stored one.
+
+Minga never switches models behind your back. If the model, provider or credential you chose cannot be used, you get an error and the previous choice stays active.
+
+The rest of this page is the detail: which providers are supported, the on-device Apple model, what a saved selection contains, and the rules that decide whether a model can take over a conversation.
+
+## Providers and routes
+
 Minga resolves every agent model choice to one exact route before it becomes active. The route records the backend, model identity, request provider, execution protocol, provider-facing model ID, reasoning controls, limits, and capabilities. Hosted routes also record the endpoint and credential profile. Prompt transport consumes that resolved route directly.
 
 Minga supports these named hosted providers:

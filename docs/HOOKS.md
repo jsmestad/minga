@@ -1,6 +1,8 @@
 # Agent hooks
 
-Agent hooks let your config run local policy checks around agent tool use. The first implemented event is `PreToolUse`: Minga runs your shell command before a matching agent tool executes, sends JSON about the call on stdin, and treats any non-zero exit as a veto.
+Agent hooks are for anyone who lets an agent work without watching every step and wants their own rules to apply anyway. A hook is a shell command you declare in your config; Minga runs it at a point in the agent's work and sends it JSON about what is happening. By the end of this guide you will have a hook that blocks a risky shell command before it runs.
+
+Start with `PreToolUse`, the hook that can stop a tool call: Minga runs your command before a matching agent tool executes, sends JSON about the call on stdin, and treats any non-zero exit as a veto. Minga dispatches eight events in all. `UserPromptSubmit` and `PreCompact` can also veto, and the other five only observe. The [event table](#event-taxonomy) lists each one.
 
 ## Configure a PreToolUse hook
 

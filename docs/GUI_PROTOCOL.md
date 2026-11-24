@@ -1,5 +1,7 @@
 # Semantic UI Protocol Specification
 
+The tab bar, file tree, pickers, status bar and agent conversation look and behave the same in the macOS app and in the terminal. That is because the editor core sends each frontend a description of what to show (which tabs, which rows, what is selected), and the frontend draws it in its own native way. This page specifies those descriptions. It is for people building or debugging a frontend; you do not need it to use or configure Minga.
+
 This document specifies Minga's structured Semantic UI protocol for frontend-visible chrome and editor surfaces. It covers the wire format historically named `GUI` chrome opcodes, the `gui_action` input opcode, theme color slots, and the behavioral contract a semantic frontend must satisfy.
 
 The `GUI_*` opcode and module names are historical wire names from the Swift frontend. They are not a statement that only native GUI clients may consume the contract. GUI, terminal, web, and future clients should consume the same Semantic UI models when their capabilities say they support them.
