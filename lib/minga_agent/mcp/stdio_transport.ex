@@ -20,6 +20,8 @@ defmodule MingaAgent.MCP.StdioTransport do
   @typep env_entry :: {charlist(), env_value()}
   @allowlisted_env_keys ~w(PATH HOME LANG LANGUAGE LC_ALL SSL_CERT_FILE SSL_CERT_DIR TMPDIR TEMP TMP XDG_RUNTIME_DIR)
 
+  @default_max_line_bytes 10_485_760
+
   @impl MingaAgent.MCP.Transport
   @spec start(ServerConfig.t(), pid(), keyword()) :: {:ok, t()} | {:error, term()}
   def start(%ServerConfig{} = config, _owner, _opts) do
@@ -135,25 +137,34 @@ defmodule MingaAgent.MCP.StdioTransport do
   @typep deadline :: integer() | :infinity
 
   @spec await_response(port(), term(), timeout()) :: {:ok, map()} | {:error, term()}
-  defp await_response(port, id, :infinity), do: await_response_until(port, id, :infinity, "")
+  defp await_response(port, id, :infinity),
+    do: await_response_until(port, id, :infinity, _acc = [], _acc_bytes = 0)
 
   defp await_response(port, id, timeout) when is_integer(timeout) and timeout >= 0 do
     deadline = System.monotonic_time(:millisecond) + timeout
-    await_response_until(port, id, deadline, "")
+    await_response_until(port, id, deadline, _acc = [], _acc_bytes = 0)
   end
 
-  @spec await_response_until(port(), term(), deadline(), binary()) ::
+  @spec await_response_until(port(), term(), deadline(), iodata(), non_neg_integer()) ::
           {:ok, map()} | {:error, term()}
-  defp await_response_until(port, id, deadline, buffered) do
+  defp await_response_until(port, id, deadline, acc, acc_bytes) do
     receive do
       {^port, {:data, {:noeol, chunk}}} ->
-        await_response_until(port, id, deadline, buffered <> chunk)
+        new_bytes = acc_bytes + byte_size(chunk)
+
+        if new_bytes > max_line_bytes() do
+          {:error, {:line_too_long, new_bytes}}
+        else
+          await_response_until(port, id, deadline, [chunk | acc], new_bytes)
+        end
 
       {^port, {:data, {:eol, line}}} ->
-        handle_line(port, id, buffered <> line, deadline)
+        full_line = IO.iodata_to_binary(:lists.reverse([line | acc]))
+        handle_line(port, id, full_line, deadline)
 
       {^port, {:data, line}} when is_binary(line) ->
-        handle_line(port, id, buffered <> line, deadline)
+        full_line = IO.iodata_to_binary(:lists.reverse([line | acc]))
+        handle_line(port, id, full_line, deadline)
 
       {^port, {:exit_status, status}} ->
         {:error, {:exit_status, status}}
@@ -167,10 +178,15 @@ defmodule MingaAgent.MCP.StdioTransport do
     case JSON.decode(line) do
       {:ok, %{"id" => ^id, "result" => result}} -> {:ok, result}
       {:ok, %{"id" => ^id, "error" => error}} -> {:error, error}
-      {:ok, _notification_or_other_response} -> await_response_until(port, id, deadline, "")
+      {:ok, _notification_or_other_response} -> await_response_until(port, id, deadline, [], 0)
       {:error, reason} -> {:error, {:invalid_json, reason}}
     end
   end
+
+  @doc false
+  @spec max_line_bytes() :: pos_integer()
+  def max_line_bytes,
+    do: Application.get_env(:minga, :mcp_max_line_bytes, @default_max_line_bytes)
 
   @spec remaining_ms(deadline()) :: non_neg_integer() | :infinity
   defp remaining_ms(:infinity), do: :infinity
