@@ -200,8 +200,8 @@ defmodule MingaEditor.StatusBar.Data do
 
   defp minga_progress(_state), do: nil
 
-  # The file the connected task edited last, from the same projection, and whether it is the file the active buffer
-  # visits. Both sides are file identities, so a symlinked or differently spelled path is still "here".
+  # The file the connected task edited last, from the same projection, and whether the active buffer visits it.
+  # Both sides are file identities, so a symlinked or differently spelled path is still "here".
   @spec minga_file(EditorState.t() | map(), pid() | nil) :: {String.t() | nil, boolean()}
   defp minga_file(
          %{workspace: %{agent_ui: %UIState{view: %{activity: %Activity{} = activity}} = ui}},

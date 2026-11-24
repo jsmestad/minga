@@ -474,21 +474,20 @@ defmodule Minga.Keymap.Bindings do
   @spec commands(node_t()) :: [{[key()], atom() | tuple()}]
   def commands(%Node{} = root) do
     root
-    |> collect_commands([], [])
+    |> collect_commands([])
     |> Enum.sort_by(fn {keys, _command} -> length(keys) end)
   end
 
-  @spec collect_commands(Node.t(), [key()], [{[key()], atom() | tuple()}]) ::
-          [{[key()], atom() | tuple()}]
-  defp collect_commands(%Node{} = node, path_rev, acc) do
-    acc =
-      if node.command && path_rev != [],
-        do: [{Enum.reverse(path_rev), node.command} | acc],
-        else: acc
+  # Walks like `collect_sequences/3`, so equal-length ties order as in `sequences_for_command/2`.
+  @spec collect_commands(Node.t(), [key()]) :: [{[key()], atom() | tuple()}]
+  defp collect_commands(%Node{} = node, path_rev) do
+    own =
+      if node.command && path_rev != [], do: [{Enum.reverse(path_rev), node.command}], else: []
 
-    Enum.reduce(node.children, acc, fn {key, child}, acc ->
-      collect_commands(child, [key | path_rev], acc)
-    end)
+    own ++
+      Enum.flat_map(node.children, fn {key, child} ->
+        collect_commands(child, [key | path_rev])
+      end)
   end
 
   @doc """

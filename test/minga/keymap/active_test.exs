@@ -45,7 +45,7 @@ defmodule Minga.Keymap.ActiveTest do
       for {keys, command} <- Bindings.commands(trie), is_atom(command) do
         assert Active.leader_command_at(s, keys) == command
         [shortest | _] = Bindings.sequences_for_command(trie, command)
-        assert length(Active.leader_keys_for(s, command)) == length(shortest)
+        assert Active.leader_keys_for(s, command) == shortest
       end
 
       assert Active.leader_command_at(s, [{?f, 0}, {?f, 0}]) == :find_file

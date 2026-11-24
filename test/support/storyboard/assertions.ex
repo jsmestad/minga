@@ -224,8 +224,8 @@ defmodule Minga.Test.Storyboard.Assertions do
         flunk("expected a modeline segment in the #{state} state, segments: #{summary(segments)}")
 
       segment ->
-        # The label always names the state. The words name it too, except that working Minga may say where it works
-        # instead ("Minga here", "Minga editing retry.ex").
+        # The label always names the state.
+        # The words name it too, except that working Minga may say where it works ("Minga here", "Minga editing x.ex").
         text = String.downcase(segment.text)
         says_where? = state == :working and Regex.match?(~r/\b(here|editing )/, text)
 
