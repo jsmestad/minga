@@ -45,13 +45,12 @@ defmodule Minga.Test.Storyboard.Scenarios.Edit do
             "the exits a, f and SPC are shown",
             &assert_keys_shown(&1, ["a", "f", "SPC"])
           ),
-          Check.pending("SPC , switches files", 4028, &assert_keys_shown(&1, [","])),
-          Check.pending(
+          Check.new("SPC , switches files", &assert_keys_shown(&1, [","])),
+          Check.new(
             "groups read like leaves: Title Case, no +",
-            4028,
             &assert_groups_read_like_leaves/1
           ),
-          Check.pending("the Minga group reads Minga ›", 4028, &assert_group(&1, "a", "Minga"))
+          Check.new("the Minga group reads Minga ›", &assert_group(&1, "a", "Minga"))
         ]
       ),
       Entry.built("edit.visual",

@@ -245,8 +245,9 @@ defmodule Minga.Storyboard.FlowInvariantsTest do
     [here | Enum.flat_map(children, &child_nodes(node, &1, reversed_path))]
   end
 
-  @spec child_nodes(Bindings.node_t(), {Bindings.key(), term()}, [String.t()]) :: [tuple()]
-  defp child_nodes(node, {key, _label}, reversed_path) do
+  @spec child_nodes(Bindings.node_t(), {Bindings.key(), term(), :command | :group}, [String.t()]) ::
+          [tuple()]
+  defp child_nodes(node, {key, _label, _kind}, reversed_path) do
     reversed_path = [Bindings.format_key(key) | reversed_path]
 
     case Bindings.lookup(node, key) do

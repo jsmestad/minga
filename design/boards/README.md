@@ -10,7 +10,7 @@ Each board is one self-contained HTML file. Open it in any browser; it needs no 
 |---|---|
 | `V41*` | The core of the design: editing, which-key, the tasks drawer, review, talk and find file, the terminal, the subagent peek, and the TUI version of each. `V41Keys` is the key map at a glance. |
 | `V3Diagnostics`, `V3NeedsYou` | Diagnostics in the code and the native notification. They come from an earlier round and still match the rules in [`marks.md`](../../docs/design/marks.md). |
-| `Batch1_*` to `Batch7_*` | The storyboard batches: every screen the inventory found missing, named after its scenario id (`Batch4_git_blame` is `git.blame`). `Batch7_*` holds the act menu and hover. |
+| `Batch1_*` to `Batch8_*` | The storyboard batches: every screen the inventory found missing, named after its scenario id (`Batch4_git_blame` is `git.blame`). `Batch7_*` holds the act menu and hover. `Batch8_*` completes the two scenarios whose boards covered one frontend only. |
 | `Mouse_*` | The seven mouse patterns as stills. `Mouse_Video_*` are CSS animations of the same patterns playing. |
 | `ActMenu_DirectionA`, `ActMenu_Compare` | The chosen act menu design and the comparison that chose it. |
 | `Theme_frappe_*`, `Theme_latte_*` | Four core boards in Catppuccin Frappé (the default) and Latte, to show every colour is a theme role. |
@@ -28,4 +28,6 @@ sh design/tools/rebuild_boards.sh
 
 The script regenerates every board, themes it, and writes the standalone copy here. The six hand-made boards (`V41Review`, `V41Open`, `V41Talk`, `V41Terminal`, `V3Diagnostics`, `V3NeedsYou`) have no generator; edit those files directly.
 
-When a board changes a rule, change the rule in [`docs/design/`](../../docs/design/README.md) in the same pull request. `python3 design/tools/storyboard/check.py` fails when a scenario names a board that is not in this folder.
+When a board changes a rule, change the rule in [`docs/design/`](../../docs/design/README.md) in the same pull request. `python3 design/tools/storyboard/check.py` fails when a scenario names a board that is not in this folder, and when a designed scenario has no board for a frontend it lists.
+
+Boards are structural references: which parts a surface has, their order and their words. Nobody measures them; measurements come from [`docs/design/anatomy.md`](../../docs/design/anatomy.md), and the real renders of each scenario, not the boards, are the diff baselines (see [storyboard.md](../../docs/design/storyboard.md#renders-and-baselines)).

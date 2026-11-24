@@ -48,6 +48,15 @@ defmodule MingaAgent.NotifierTest do
     refute_received {:notification, _, _}
   end
 
+  test "terminal sessions notify through the adapter for the running OS" do
+    assert Notifier.os_adapter_for({:unix, :darwin}) == MingaAgent.Notifier.OSAdapter.MacOS
+    assert Notifier.os_adapter_for({:unix, :linux}) == MingaAgent.Notifier.OSAdapter.Linux
+
+    for other <- [{:unix, :freebsd}, {:win32, :nt}] do
+      assert Notifier.os_adapter_for(other) == MingaAgent.Notifier.OSAdapter.Noop
+    end
+  end
+
   test "configured trigger filters and the master switch prevent delivery", %{options: options} do
     Options.set(options, :agent_notify_on, [:approval])
     Notifier.notify(:complete, "Filtered", @notify_opts)

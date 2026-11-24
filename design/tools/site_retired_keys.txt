@@ -17,3 +17,12 @@ SPC .	action|act menu	the act menu is g. (⌃. while typing); SPC . is find file
 gt	*	tabs are gone
 gT	*	tabs are gone
 SPC TAB *	*	tabs and workspaces are gone
+SPC c j	*	duplicate of document symbols; document symbols are SPC s i
+SPC s j	symbol	document symbols are SPC s i; SPC s j is the jump list
+SPC a c	*	copy file to workspace retired with workspaces
+SPC a Q	*	questions are answered from the tasks drawer row
+SPC a o	*	open a remote file is SPC f o
+SPC b P	*	tabs are gone
+SPC b <	*	tabs are gone
+SPC b >	*	tabs are gone
+M-:	*	eval is SPC ;

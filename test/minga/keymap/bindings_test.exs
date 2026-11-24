@@ -167,7 +167,7 @@ defmodule Minga.Keymap.BindingsTest do
       {:prefix, g_node} = Bindings.lookup(trie, key(?g))
       kids = Bindings.children(g_node)
 
-      keys = Enum.map(kids, fn {k, _} -> k end)
+      keys = Enum.map(kids, fn {k, _, _} -> k end)
       assert key(?g) in keys
       assert key(?e) in keys
       assert Enum.count(kids) == 2
@@ -177,17 +177,17 @@ defmodule Minga.Keymap.BindingsTest do
       trie =
         Bindings.new()
         |> Bindings.bind([key(?g), key(?w)], :code_why, "Why")
-        |> Bindings.bind_prefix([key(?g)], "+git")
-        |> Bindings.bind_prefix([key(?g), key(?c)], "+commit")
-        |> Bindings.bind_prefix([key(?g), key(?z), key(?q)], "+nested empty")
+        |> Bindings.bind_prefix([key(?g)], "Git")
+        |> Bindings.bind_prefix([key(?g), key(?c)], "Commit")
+        |> Bindings.bind_prefix([key(?g), key(?z), key(?q)], "Nested empty")
 
-      assert [{_git, "+git"}] = Bindings.children(trie)
+      assert [{_git, "Git", :group}] = Bindings.children(trie)
       {:prefix, g_node} = Bindings.lookup(trie, key(?g))
-      assert Bindings.children(g_node) == [{key(?w), "Why"}]
+      assert Bindings.children(g_node) == [{key(?w), "Why", :command}]
 
       filled = Bindings.bind(trie, [key(?g), key(?c), key(?c)], :commit, "Commit")
       {:prefix, g_node} = Bindings.lookup(filled, key(?g))
-      assert {key(?c), "+commit"} in Bindings.children(g_node)
+      assert {key(?c), "Commit", :group} in Bindings.children(g_node)
     end
 
     test "label for a terminal binding is the description string" do
@@ -195,8 +195,9 @@ defmodule Minga.Keymap.BindingsTest do
         Bindings.new()
         |> Bindings.bind([key(?j)], :move_down, "Move cursor down")
 
-      [{_key, label}] = Bindings.children(trie)
+      [{_key, label, kind}] = Bindings.children(trie)
       assert label == "Move cursor down"
+      assert kind == :command
     end
 
     test "returns children from the root node for which-key display" do
@@ -209,7 +210,7 @@ defmodule Minga.Keymap.BindingsTest do
 
       kids = Bindings.children(trie)
       assert Enum.count(kids) == 4
-      assert Enum.all?(kids, fn {_k, v} -> is_binary(v) end)
+      assert Enum.all?(kids, fn {_k, v, kind} -> is_binary(v) and kind == :command end)
     end
   end
 
@@ -257,7 +258,7 @@ defmodule Minga.Keymap.BindingsTest do
     end
 
     test "children of root covers all top-level keys", %{trie: trie} do
-      keys = trie |> Bindings.children() |> Enum.map(fn {k, _} -> k end)
+      keys = trie |> Bindings.children() |> Enum.map(fn {k, _, _} -> k end)
 
       # h, j, k, l, d, g, G, ctrl+s
       assert key(?h) in keys

@@ -362,6 +362,7 @@ public struct TabBarView: View {
                     .lineLimit(1)
                     .truncationMode(.middle)
                     .foregroundStyle(tab.isActive ? theme.tabActiveFg : theme.tabSecondaryFg)
+                    .anatomyPart("tabBar.tabLabel", text: tab.label, font: .body)
             }
 
             if !tab.isPinned {

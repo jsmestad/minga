@@ -223,6 +223,7 @@ defmodule MingaEditor.PickerUI do
         context,
         layout
       )
+      |> PickerState.remember_origin_cursor(picker_restore_cursor(state))
 
     {picker_state, revision} =
       PickerState.begin_fetch(picker_state, fetch_identity(source_module, source_context))
@@ -443,6 +444,7 @@ defmodule MingaEditor.PickerUI do
         layout: layout
       }
       |> PickerState.begin_query_session()
+      |> PickerState.remember_origin_cursor(picker_restore_cursor(state))
 
     MingaEditor.Shell.Traditional.ModalWorkflow.open(
       new_state,
@@ -1949,6 +1951,15 @@ defmodule MingaEditor.PickerUI do
     end
   end
 
+  # The origin cursor goes with the origin buffer: previews in the same buffer move it.
+  @spec picker_restore_cursor(state()) :: Minga.Buffer.position() | nil
+  defp picker_restore_cursor(state) do
+    case {picker_restore_index(state), state.workspace.buffers.active} do
+      {idx, buffer} when is_integer(idx) and is_pid(buffer) -> Minga.Buffer.cursor(buffer)
+      _no_origin -> nil
+    end
+  end
+
   # Restores the buffer that was active when the picker opened before promoting a preview.
   # Preview leaves the tab bar unchanged, so the outgoing tab must be snapshotted from
   # the original buffer, not the preview buffer currently shown in the window.
@@ -1963,10 +1974,10 @@ defmodule MingaEditor.PickerUI do
        do: restore_live_origin(state)
 
   defp restore_picker_origin(
-         %{shell_runtime: %{state: %{modal: {:picker, %{picker_ui: %{restore: idx}}}}}} = state
+         %{shell_runtime: %{state: %{modal: {:picker, %{picker_ui: picker_ui}}}}} = state
        )
-       when is_integer(idx) do
-    MingaEditor.BufferActivation.activate(state, idx)
+       when is_integer(picker_ui.restore) do
+    Source.restore_origin(state, picker_ui.restore, picker_ui.restore_cursor)
   end
 
   defp restore_picker_origin(state), do: state

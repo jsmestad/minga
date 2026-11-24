@@ -547,6 +547,17 @@ struct MingaMenuCommands: Commands {
             }
             .keyboardShortcut("l", modifiers: [.command, .control])
         }
+
+        // Go menu: ⌘[ and ⌘] are the macOS aliases of ⌃O and ⌃I, which walk the jump list
+        // (docs/design/keys.md). The BEAM owns the list; these items only name the command.
+        CommandMenu("Go") {
+            Button("Back") { encoder?.send(.executeCommand(name: "jump_back")) }
+                .keyboardShortcut("[", modifiers: .command)
+                .disabled(!connected)
+            Button("Forward") { encoder?.send(.executeCommand(name: "jump_forward")) }
+                .keyboardShortcut("]", modifiers: .command)
+                .disabled(!connected)
+        }
     }
 
     private func routeTextEditingCommand(_ command: NativeTextCommandRouter.Command, fallback: (OutboundActionEncoding) -> Void) {

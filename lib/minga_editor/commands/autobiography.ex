@@ -2,10 +2,10 @@ defmodule MingaEditor.Commands.Autobiography do
   @moduledoc """
   Code-provenance commands: "git blame for the agent's mind".
 
-  * `code_why` (`SPC g w`) answers "why is this line like this?" by showing the
+  * `code_why` (`SPC a W`) answers "why is this line like this?" by showing the
     agent edit-turn that wrote the line under the cursor, with the request that
     prompted it and the agent's recorded thinking.
-  * `code_autobiography` (`SPC g a`) shows the full timeline of agent edit-turns
+  * `code_autobiography` (`SPC a A`) shows the full timeline of agent edit-turns
     for the current file.
 
   Both read `MingaAgent.Autobiography`, which projects the durable agent event

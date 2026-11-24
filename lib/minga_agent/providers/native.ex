@@ -61,6 +61,8 @@ defmodule MingaAgent.Providers.Native do
   alias MingaAgent.ModelSelection
   alias MingaAgent.ModelSelection.Policy.RequestCapacity
   alias MingaAgent.ProjectView
+  alias MingaAgent.Providers.Native.ExecutionState
+  alias MingaAgent.Providers.Native.HostedAdmission
   alias MingaAgent.Providers.Native.LoopCtx
   alias MingaAgent.Providers.Native.OutputHydration
   alias MingaAgent.Providers.Native.ReqLLMAdapter
@@ -117,7 +119,7 @@ defmodule MingaAgent.Providers.Native do
           config: AgentConfig.t(),
           selection: ModelSelection.t(),
           session_manager: pid() | nil,
-          active_request: Request.t() | nil,
+          execution: ExecutionState.t(),
           tools: [term()],
           project_root: String.t(),
           project_view: ProjectView.t() | nil,
@@ -134,9 +136,6 @@ defmodule MingaAgent.Providers.Native do
           prefix_fit: {binary(), SystemPrompt.fit()} | nil,
           llm_client: llm_client(),
           hook_runner: hook_runner(),
-          task: Task.t() | nil,
-          streaming: boolean(),
-          interrupted: boolean(),
           active_skills: [Skills.skill()],
           max_turns: pos_integer(),
           max_cost: float() | nil,
@@ -156,7 +155,6 @@ defmodule MingaAgent.Providers.Native do
           mcp_registry: MCPRegistry.t() | nil,
           read_only?: boolean(),
           tool_allowlist: :all | [String.t()],
-          tool_workers: MapSet.t(pid()),
           inference_routes: GenServer.server()
         }
 
@@ -357,7 +355,7 @@ defmodule MingaAgent.Providers.Native do
       linked_parent: linked_parent,
       selection: selection,
       config: config,
-      active_request: nil,
+      execution: ExecutionState.idle(),
       tools: tools,
       project_root: project_root,
       max_retries: max_retries,
@@ -374,9 +372,6 @@ defmodule MingaAgent.Providers.Native do
       prefix_fit: nil,
       llm_client: llm_client,
       hook_runner: hook_runner,
-      task: nil,
-      streaming: false,
-      interrupted: false,
       active_skills: active_skills,
       max_turns: max_turns,
       max_cost: max_cost,
@@ -398,7 +393,6 @@ defmodule MingaAgent.Providers.Native do
       session_manager: Keyword.get(opts, :session_manager),
       read_only?: read_only?,
       tool_allowlist: tool_allowlist,
-      tool_workers: MapSet.new(),
       tool_metadata: tool_metadata
     }
 
@@ -731,64 +725,54 @@ defmodule MingaAgent.Providers.Native do
   defp validate_retained_history(_prefix, _messages), do: :ok
 
   @impl GenServer
-  def handle_call({:send_prompt, _request}, _from, %{streaming: true} = state) do
-    {:reply, {:error, :already_streaming}, state}
+  def handle_call({:send_prompt, %Request{} = request}, _from, state) do
+    cond do
+      ExecutionState.active?(state.execution) ->
+        {:reply, {:error, :already_streaming}, state}
+
+      over_budget?(state) ->
+        notify(state.subscriber, request.request_id, %Event.Error{
+          message: cost_limit_message(state.session_cost, state.max_cost)
+        })
+
+        {:reply, {:error, :cost_limit_reached}, state}
+
+      true ->
+        case validate_request_capabilities(state, request) do
+          :ok ->
+            {:reply, :ok, start_agent_turn(state, request)}
+
+          {:error, message} ->
+            {:reply, {:error, message}, state}
+        end
+    end
   end
 
-  def handle_call({:send_prompt, %Request{} = request}, _from, state) do
-    if over_budget?(state) do
-      notify(state.subscriber, request.request_id, %Event.Error{
-        message: cost_limit_message(state.session_cost, state.max_cost)
-      })
+  def handle_call(:abort, _from, state) do
+    {execution, task, workers} = ExecutionState.abort(state.execution)
+    stop_registered_tool_workers(workers)
 
-      {:reply, {:error, :cost_limit_reached}, clear_stuck_streaming(state)}
+    if task do
+      # Use a short timeout instead of :brutal_kill so the StreamServer
+      # (which traps exits) can terminate cleanly via its terminate/2 callback.
+      Task.shutdown(task, 150)
+    end
+
+    Log.info(:agent, "[Agent.Native] aborted current operation")
+    {:reply, :ok, %{state | execution: execution}}
+  end
+
+  def handle_call({:continue, %Request{} = request}, _from, state) do
+    if ExecutionState.active?(state.execution) do
+      {:reply, {:error, "Already streaming"}, state}
     else
       case validate_request_capabilities(state, request) do
         :ok ->
-          state = %{state | active_request: request, streaming: true, interrupted: false}
           {:reply, :ok, start_agent_turn(state, request)}
 
         {:error, message} ->
           {:reply, {:error, message}, state}
       end
-    end
-  end
-
-  def handle_call(:abort, _from, %{task: nil} = state) do
-    stop_registered_tool_workers(state.tool_workers)
-    {:reply, :ok, %{state | active_request: nil, streaming: false, tool_workers: MapSet.new()}}
-  end
-
-  def handle_call(:abort, _from, state) do
-    # Use a short timeout instead of :brutal_kill so the StreamServer
-    # (which traps exits) can terminate cleanly via its terminate/2 callback.
-    stop_registered_tool_workers(state.tool_workers)
-    Task.shutdown(state.task, 150)
-
-    state = %{
-      state
-      | active_request: nil,
-        task: nil,
-        streaming: false,
-        tool_workers: MapSet.new()
-    }
-
-    Log.info(:agent, "[Agent.Native] aborted current operation")
-    {:reply, :ok, state}
-  end
-
-  def handle_call({:continue, _request}, _from, %{streaming: true} = state) do
-    {:reply, {:error, "Already streaming"}, state}
-  end
-
-  def handle_call({:continue, %Request{} = request}, _from, state) do
-    case validate_request_capabilities(state, request) do
-      :ok ->
-        state = %{state | active_request: request, streaming: true, interrupted: false}
-        {:reply, :ok, start_agent_turn(state, request)}
-
-      {:error, message} ->
-        {:reply, {:error, message}, state}
     end
   end
 
@@ -931,21 +915,15 @@ defmodule MingaAgent.Providers.Native do
 
   def handle_call(:new_session, _from, state) do
     # Gracefully stop any running task and registered workers (see :abort handler comment)
-    stop_registered_tool_workers(state.tool_workers)
-
-    if state.task do
-      Task.shutdown(state.task, 150)
-    end
+    {execution, task, workers} = ExecutionState.abort(state.execution)
+    stop_registered_tool_workers(workers)
+    if task, do: Task.shutdown(task, 150)
 
     state = %{
       state
-      | active_request: nil,
-        task: nil,
-        streaming: false,
-        interrupted: false,
+      | execution: execution,
         session_cost: 0.0,
-        prefix_preview: nil,
-        tool_workers: MapSet.new()
+        prefix_preview: nil
     }
 
     Log.info(:agent, "[Agent.Native] new session started")
@@ -988,7 +966,7 @@ defmodule MingaAgent.Providers.Native do
         provider: selection.route.model_provider
       },
       model_selection: selection,
-      is_streaming: state.streaming,
+      is_streaming: ExecutionState.active?(state.execution),
       token_usage: nil,
       system_prompt: system_prompt,
       thinking_level: selection.policy.reasoning.effort,
@@ -1003,35 +981,37 @@ defmodule MingaAgent.Providers.Native do
   def handle_call({:set_thinking_level, _level}, _from, %{prefix_preview: %{}} = state),
     do: {:reply, {:error, :prefix_transition_active}, state}
 
-  def handle_call({:set_thinking_level, _level}, _from, %{active_request: %Request{}} = state),
-    do: {:reply, {:error, :request_active}, state}
-
   def handle_call({:set_thinking_level, level}, _from, state) do
-    case ModelSelection.with_reasoning(state.selection, level) do
-      {:ok, selection} ->
-        Log.info(:agent, "[Agent.Native] thinking level set to #{level}")
-        {:reply, :ok, %{state | selection: selection}}
+    if ExecutionState.request_active?(state.execution) do
+      {:reply, {:error, :request_active}, state}
+    else
+      case ModelSelection.with_reasoning(state.selection, level) do
+        {:ok, selection} ->
+          Log.info(:agent, "[Agent.Native] thinking level set to #{level}")
+          {:reply, :ok, %{state | selection: selection}}
 
-      {:error, message} ->
-        {:reply, {:error, message}, state}
+        {:error, message} ->
+          {:reply, {:error, message}, state}
+      end
     end
   end
 
   def handle_call(:cycle_thinking_level, _from, %{prefix_preview: %{}} = state),
     do: {:reply, {:error, :prefix_transition_active}, state}
 
-  def handle_call(:cycle_thinking_level, _from, %{active_request: %Request{}} = state),
-    do: {:reply, {:error, :request_active}, state}
-
   def handle_call(:cycle_thinking_level, _from, state) do
-    options = state.selection.policy.reasoning.options
-    current_effort = state.selection.policy.reasoning.effort
-    current_index = Enum.find_index(options, &(&1 == current_effort)) || 0
-    next_level = Enum.at(options, rem(current_index + 1, length(options)))
-    {:ok, selection} = ModelSelection.with_reasoning(state.selection, next_level)
+    if ExecutionState.request_active?(state.execution) do
+      {:reply, {:error, :request_active}, state}
+    else
+      options = state.selection.policy.reasoning.options
+      current_effort = state.selection.policy.reasoning.effort
+      current_index = Enum.find_index(options, &(&1 == current_effort)) || 0
+      next_level = Enum.at(options, rem(current_index + 1, length(options)))
+      {:ok, selection} = ModelSelection.with_reasoning(state.selection, next_level)
 
-    Log.info(:agent, "[Agent.Native] thinking level cycled to #{next_level}")
-    {:reply, {:ok, %{"level" => next_level}}, %{state | selection: selection}}
+      Log.info(:agent, "[Agent.Native] thinking level cycled to #{next_level}")
+      {:reply, {:ok, %{"level" => next_level}}, %{state | selection: selection}}
+    end
   end
 
   def handle_call(:get_available_models, _from, state) do
@@ -1047,7 +1027,7 @@ defmodule MingaAgent.Providers.Native do
     {:reply, {:error, compaction_unsupported_message(state.selection)}, state}
   end
 
-  def handle_call({:compact, _messages}, _from, %{streaming: true} = state) do
+  def handle_call({:compact, _messages}, _from, state) when state.execution.tag == :active do
     {:reply, {:error, "Cannot compact while streaming"}, state}
   end
 
@@ -1088,7 +1068,8 @@ defmodule MingaAgent.Providers.Native do
     {:reply, {:error, compaction_unsupported_message(state.selection)}, state}
   end
 
-  def handle_call({:compact, _messages, _opts}, _from, %{streaming: true} = state) do
+  def handle_call({:compact, _messages, _opts}, _from, state)
+      when state.execution.tag == :active do
     {:reply, {:error, "Cannot compact while streaming"}, state}
   end
 
@@ -1133,18 +1114,19 @@ defmodule MingaAgent.Providers.Native do
   def handle_call({:set_model, %ModelSelection{}}, _from, %{prefix_preview: %{}} = state),
     do: {:reply, {:error, :prefix_transition_active}, state}
 
-  def handle_call({:set_model, %ModelSelection{}}, _from, %{active_request: %Request{}} = state),
-    do: {:reply, {:error, :request_active}, state}
-
   def handle_call({:set_model, %ModelSelection{} = selection}, _from, state) do
-    route = selection.route
+    if ExecutionState.request_active?(state.execution) do
+      {:reply, {:error, :request_active}, state}
+    else
+      route = selection.route
 
-    Log.info(
-      :agent,
-      "[Agent.Native] model route set to #{route.model_provider}:#{route.model_id} via #{route.execution.wire_protocol}"
-    )
+      Log.info(
+        :agent,
+        "[Agent.Native] model route set to #{route.model_provider}:#{route.model_id} via #{route.execution.wire_protocol}"
+      )
 
-    {:reply, :ok, %{state | selection: selection}}
+      {:reply, :ok, %{state | selection: selection}}
+    end
   end
 
   def handle_call({:set_model, _unresolved}, _from, state) do
@@ -1169,11 +1151,8 @@ defmodule MingaAgent.Providers.Native do
   def handle_call({:refresh_project_view, nil}, _from, %{owned_project_view?: true} = state),
     do: {:reply, :ok, state}
 
-  def handle_call({:refresh_project_view, _view}, _from, %{streaming: true} = state),
-    do: {:reply, {:error, :request_active}, state}
-
-  def handle_call({:refresh_project_view, _view}, _from, %{active_request: request} = state)
-      when request != nil,
+  def handle_call({:refresh_project_view, _view}, _from, state)
+      when state.execution.tag == :active,
       do: {:reply, {:error, :request_active}, state}
 
   def handle_call({:refresh_project_view, project_view}, _from, state) do
@@ -1197,13 +1176,9 @@ defmodule MingaAgent.Providers.Native do
       when is_list(worker_pids) do
     case register_session_effect_workers(state, worker_pids) do
       :ok ->
-        tool_workers =
-          Enum.reduce(worker_pids, state.tool_workers, fn pid, workers ->
-            Process.link(pid)
-            MapSet.put(workers, pid)
-          end)
-
-        {:reply, :ok, %{state | tool_workers: tool_workers}}
+        Enum.each(worker_pids, &Process.link/1)
+        execution = ExecutionState.register_workers(state.execution, worker_pids)
+        {:reply, :ok, %{state | execution: execution}}
 
       {:error, reason} ->
         {:reply, {:error, reason}, state}
@@ -1212,14 +1187,12 @@ defmodule MingaAgent.Providers.Native do
 
   def handle_call({:set_max_cost, amount}, _from, state) when is_number(amount) and amount > 0 do
     Log.info(:agent, "[Agent.Native] cost budget set to $#{Float.round(amount + 0.0, 2)}")
-    state = %{state | max_cost: amount + 0.0}
-    {:reply, :ok, clear_stuck_streaming(state)}
+    {:reply, :ok, %{state | max_cost: amount + 0.0}}
   end
 
   def handle_call({:set_max_cost, nil}, _from, state) do
     Log.info(:agent, "[Agent.Native] cost budget disabled")
-    state = %{state | max_cost: nil}
-    {:reply, :ok, clear_stuck_streaming(state)}
+    {:reply, :ok, %{state | max_cost: nil}}
   end
 
   @spec start_agent_turn(state(), Request.t()) :: state()
@@ -1249,7 +1222,8 @@ defmodule MingaAgent.Providers.Native do
     }
 
     task = Task.async(fn -> run_agent_loop(loop_context, :initial) end)
-    %{state | task: task}
+    execution = ExecutionState.start(state.execution, task, request)
+    %{state | execution: execution}
   end
 
   @spec handle_cast({:discard_prefix_preview, reference(), pid()}, state()) :: {:noreply, state()}
@@ -1284,95 +1258,39 @@ defmodule MingaAgent.Providers.Native do
 
   def handle_info({:unregister_tool_workers, worker_pids}, state) when is_list(worker_pids) do
     Enum.each(worker_pids, &Process.unlink/1)
-
-    {:noreply,
-     %{state | tool_workers: MapSet.difference(state.tool_workers, MapSet.new(worker_pids))}}
+    execution = ExecutionState.unregister_workers(state.execution, worker_pids)
+    {:noreply, %{state | execution: execution}}
   end
 
-  def handle_info({ref, :ok}, %{task: %Task{ref: ref}} = state) do
-    Process.demonitor(ref, [:flush])
-
-    {:noreply,
-     %{
-       state
-       | active_request: nil,
-         task: nil,
-         streaming: false,
-         interrupted: false,
-         tool_workers: MapSet.new()
-     }}
-  end
-
-  def handle_info({ref, {:error, :stream_interrupted}}, %{task: %Task{ref: ref}} = state) do
-    Process.demonitor(ref, [:flush])
-    stop_registered_tool_workers(state.tool_workers)
-
-    {:noreply,
-     %{
-       state
-       | active_request: nil,
-         task: nil,
-         streaming: false,
-         interrupted: true,
-         tool_workers: MapSet.new()
-     }}
-  end
-
-  def handle_info({ref, {:error, :turn_limit_reached}}, %{task: %Task{ref: ref}} = state) do
-    Process.demonitor(ref, [:flush])
-    stop_registered_tool_workers(state.tool_workers)
-
-    {:noreply,
-     %{
-       state
-       | active_request: nil,
-         task: nil,
-         streaming: false,
-         interrupted: true,
-         tool_workers: MapSet.new()
-     }}
-  end
-
-  def handle_info({ref, {:error, :cost_limit_reached}}, %{task: %Task{ref: ref}} = state) do
-    Process.demonitor(ref, [:flush])
-    stop_registered_tool_workers(state.tool_workers)
-
-    {:noreply,
-     %{state | active_request: nil, task: nil, streaming: false, tool_workers: MapSet.new()}}
-  end
-
-  def handle_info({ref, {:error, {:reported, _reason}}}, %{task: %Task{ref: ref}} = state) do
-    # The agent loop already logged this error and emitted Error + AgentEnd via
-    # reported_error/3. Just clean up; re-emitting here would show the error
-    # twice in the transcript.
-    Process.demonitor(ref, [:flush])
-    stop_registered_tool_workers(state.tool_workers)
-
-    {:noreply,
-     %{state | active_request: nil, task: nil, streaming: false, tool_workers: MapSet.new()}}
-  end
-
-  def handle_info({ref, {:error, reason}}, %{task: %Task{ref: ref}} = state) do
-    # Safety net: an error reached the Task without the loop reporting it.
-    Process.demonitor(ref, [:flush])
-    stop_registered_tool_workers(state.tool_workers)
-    formatted = format_error(reason)
-    Log.error(:agent, "[Agent.Native] agent loop error: #{formatted}")
-    notify_active(state, %Event.Error{message: formatted})
-    notify_active(state, %Event.AgentEnd{usage: nil})
-
-    {:noreply,
-     %{state | active_request: nil, task: nil, streaming: false, tool_workers: MapSet.new()}}
-  end
-
-  def handle_info({:EXIT, pid, _reason}, %{task: %Task{pid: pid}} = state),
-    do: {:noreply, state}
-
-  def handle_info({:EXIT, pid, reason}, state) do
-    if pid == state.linked_parent do
-      {:stop, reason, state}
+  def handle_info({ref, :ok}, state) when is_reference(ref) do
+    if ref == ExecutionState.task_ref(state.execution) do
+      Process.demonitor(ref, [:flush])
+      {:noreply, %{state | execution: ExecutionState.complete(state.execution)}}
     else
-      {:noreply, %{state | tool_workers: MapSet.delete(state.tool_workers, pid)}}
+      {:noreply, state}
+    end
+  end
+
+  def handle_info({ref, {:error, reason}}, state) when is_reference(ref) do
+    if ref == ExecutionState.task_ref(state.execution) do
+      Process.demonitor(ref, [:flush])
+      handle_task_error(state, reason)
+    else
+      {:noreply, state}
+    end
+  end
+
+  def handle_info({:EXIT, pid, reason}, state) when is_pid(pid) do
+    cond do
+      pid == ExecutionState.task_pid(state.execution) ->
+        {:noreply, state}
+
+      pid == state.linked_parent ->
+        {:stop, reason, state}
+
+      true ->
+        execution = ExecutionState.remove_worker(state.execution, pid)
+        {:noreply, %{state | execution: execution}}
     end
   end
 
@@ -1380,39 +1298,22 @@ defmodule MingaAgent.Providers.Native do
         {:DOWN, ref, :process, subscriber, reason},
         %{subscriber: subscriber, subscriber_ref: ref} = state
       ) do
-    stop_registered_tool_workers(state.tool_workers)
+    stop_registered_tool_workers(ExecutionState.workers(state.execution))
     stop_reason = if reason in [:normal, :shutdown], do: :normal, else: {:session_down, reason}
-    {:stop, stop_reason, %{state | tool_workers: MapSet.new()}}
+    {execution, _task, _workers} = ExecutionState.abort(state.execution)
+    {:stop, stop_reason, %{state | execution: execution}}
   end
 
-  def handle_info({:DOWN, ref, :process, _pid, reason}, %{task: %Task{ref: ref}} = state) do
-    stop_registered_tool_workers(state.tool_workers)
-    Log.error(:agent, "[Agent.Native] agent task crashed: #{inspect(reason)}")
-    notify_active(state, %Event.Error{message: "Agent task crashed: #{inspect(reason)}"})
-    notify_active(state, %Event.AgentEnd{usage: nil})
-
-    {:noreply,
-     %{state | active_request: nil, task: nil, streaming: false, tool_workers: MapSet.new()}}
-  end
-
-  def handle_info({:DOWN, _ref, :process, pid, _reason}, %{fork_store: pid} = state)
-      when is_pid(pid) do
-    Log.warning(
-      :agent,
-      "[Agent.Native] fork store crashed; file mutations remain unavailable"
-    )
-
-    {:noreply, rebuild_tools(%{state | fork_store: nil})}
-  end
-
-  def handle_info({:DOWN, _ref, :process, pid, _reason}, %{changeset: pid} = state)
-      when is_pid(pid) do
-    Log.warning(
-      :agent,
-      "[Agent.Native] changeset crashed; file mutations remain unavailable"
-    )
-
-    {:noreply, rebuild_tools(%{state | changeset: nil})}
+  def handle_info({:DOWN, _ref, :process, pid, reason}, state) when is_pid(pid) do
+    if pid == ExecutionState.task_pid(state.execution) do
+      stop_registered_tool_workers(ExecutionState.workers(state.execution))
+      Log.error(:agent, "[Agent.Native] agent task crashed: #{inspect(reason)}")
+      notify_active(state, %Event.Error{message: "Agent task crashed: #{inspect(reason)}"})
+      notify_active(state, %Event.AgentEnd{usage: nil})
+      {:noreply, %{state | execution: ExecutionState.complete(state.execution)}}
+    else
+      handle_non_task_down(state, pid, reason)
+    end
   end
 
   def handle_info({:mcp_client_down, pid, server_name, reason}, state) when is_pid(pid) do
@@ -1430,7 +1331,76 @@ defmodule MingaAgent.Providers.Native do
     end
   end
 
-  def handle_info({:DOWN, _ref, :process, pid, reason}, state) when is_pid(pid) do
+  def handle_info(_msg, state) do
+    {:noreply, state}
+  end
+
+  @impl true
+  def terminate(reason, state) do
+    stop_registered_tool_workers(ExecutionState.workers(state.execution))
+    cleanup_edit_view(state, reason)
+    cleanup_mcp(state.mcp_registry)
+    :ok
+  catch
+    :exit, _ -> :ok
+  end
+
+  # ── Task result dispatch ──────────────────────────────────────────────────
+
+  @spec handle_task_error(state(), term()) :: {:noreply, state()}
+  defp handle_task_error(state, :stream_interrupted) do
+    stop_registered_tool_workers(ExecutionState.workers(state.execution))
+    {:noreply, %{state | execution: ExecutionState.interrupt(state.execution)}}
+  end
+
+  defp handle_task_error(state, :turn_limit_reached) do
+    stop_registered_tool_workers(ExecutionState.workers(state.execution))
+    {:noreply, %{state | execution: ExecutionState.interrupt(state.execution)}}
+  end
+
+  defp handle_task_error(state, :cost_limit_reached) do
+    stop_registered_tool_workers(ExecutionState.workers(state.execution))
+    {:noreply, %{state | execution: ExecutionState.complete(state.execution)}}
+  end
+
+  defp handle_task_error(state, {:reported, _reason}) do
+    # The agent loop already logged this error and emitted Error + AgentEnd via
+    # reported_error/3. Just clean up; re-emitting here would show the error
+    # twice in the transcript.
+    stop_registered_tool_workers(ExecutionState.workers(state.execution))
+    {:noreply, %{state | execution: ExecutionState.complete(state.execution)}}
+  end
+
+  defp handle_task_error(state, reason) do
+    # Safety net: an error reached the Task without the loop reporting it.
+    stop_registered_tool_workers(ExecutionState.workers(state.execution))
+    formatted = format_error(reason)
+    Log.error(:agent, "[Agent.Native] agent loop error: #{formatted}")
+    notify_active(state, %Event.Error{message: formatted})
+    notify_active(state, %Event.AgentEnd{usage: nil})
+    {:noreply, %{state | execution: ExecutionState.complete(state.execution)}}
+  end
+
+  @spec handle_non_task_down(state(), pid(), term()) :: {:noreply, state()}
+  defp handle_non_task_down(%{fork_store: pid} = state, pid, _reason) when is_pid(pid) do
+    Log.warning(
+      :agent,
+      "[Agent.Native] fork store crashed; file mutations remain unavailable"
+    )
+
+    {:noreply, rebuild_tools(%{state | fork_store: nil})}
+  end
+
+  defp handle_non_task_down(%{changeset: pid} = state, pid, _reason) when is_pid(pid) do
+    Log.warning(
+      :agent,
+      "[Agent.Native] changeset crashed; file mutations remain unavailable"
+    )
+
+    {:noreply, rebuild_tools(%{state | changeset: nil})}
+  end
+
+  defp handle_non_task_down(state, pid, reason) do
     case MCPRegistry.server_for_pid(state.mcp_registry, pid) do
       server_name when is_binary(server_name) ->
         message =
@@ -1443,20 +1413,6 @@ defmodule MingaAgent.Providers.Native do
       _other ->
         {:noreply, state}
     end
-  end
-
-  def handle_info(_msg, state) do
-    {:noreply, state}
-  end
-
-  @impl true
-  def terminate(reason, state) do
-    stop_registered_tool_workers(state.tool_workers)
-    cleanup_edit_view(state, reason)
-    cleanup_mcp(state.mcp_registry)
-    :ok
-  catch
-    :exit, _ -> :ok
   end
 
   @spec configured_mcp_servers(keyword(), AgentConfig.t(), pid(), boolean()) :: [
@@ -1948,7 +1904,8 @@ defmodule MingaAgent.Providers.Native do
            ),
          context = Context.new(canonical_messages),
          :ok <- emit_context_usage(lctx, context),
-         stream_opts = prepared_stream_opts(lctx, attempt, stream_opts),
+         {stream_opts, admission_step} = prepared_stream_opts(lctx, attempt, stream_opts),
+         :ok <- admission_step.(messages),
          {:ok, stream_response} <-
            ReqLLMAdapter.stream(
              lctx.llm_client,
@@ -1957,6 +1914,9 @@ defmodule MingaAgent.Providers.Native do
              stream_opts
            ) do
       {:ok, {context, stream_response}}
+    else
+      other ->
+        other
     end
   end
 
@@ -1982,7 +1942,8 @@ defmodule MingaAgent.Providers.Native do
     end
   end
 
-  @spec prepared_stream_opts(loop_ctx(), Dispatch.t(), keyword()) :: keyword()
+  @spec prepared_stream_opts(loop_ctx(), Dispatch.t(), keyword()) ::
+          {keyword(), (term() -> :ok | {:error, term()})}
   defp prepared_stream_opts(
          %{selection: %{route: %{request_provider: :apple}}} = lctx,
          attempt,
@@ -1997,7 +1958,8 @@ defmodule MingaAgent.Providers.Native do
       authorize_prepared_dispatch(lctx.session_pid, attempt, digest, evidence)
     end
 
-    opts |> Keyword.delete(:cache) |> Keyword.put(:apple_admission, admission)
+    prepared = opts |> Keyword.delete(:cache) |> Keyword.put(:apple_admission, admission)
+    {prepared, &noop_admission/1}
   end
 
   # A contributed route receives its registry and the Session-owned identity of this exact dispatch.
@@ -2017,13 +1979,31 @@ defmodule MingaAgent.Providers.Native do
         purpose: :turn
       )
 
-    opts
-    |> Keyword.put(:minga_conversation, conversation)
-    |> Keyword.put(:minga_reasoning, lctx.selection.policy.reasoning.effort)
-    |> Keyword.put(:inference_routes, lctx.inference_routes)
+    prepared =
+      opts
+      |> Keyword.put(:minga_conversation, conversation)
+      |> Keyword.put(:minga_reasoning, lctx.selection.policy.reasoning.effort)
+      |> Keyword.put(:inference_routes, lctx.inference_routes)
+
+    {prepared, &noop_admission/1}
   end
 
-  defp prepared_stream_opts(_lctx, _attempt, opts), do: opts
+  defp prepared_stream_opts(lctx, attempt, opts) do
+    limits = lctx.selection.policy.limits
+    output_tokens = Keyword.fetch!(opts, :max_tokens)
+
+    authorize = fn digest, evidence ->
+      authorize_prepared_dispatch(lctx.session_pid, attempt, digest, evidence)
+    end
+
+    admission = fn messages ->
+      HostedAdmission.assess(limits, output_tokens, messages, authorize)
+    end
+
+    {opts, admission}
+  end
+
+  defp noop_admission(_messages), do: :ok
 
   @spec session_id(pid()) :: String.t() | nil
   defp session_id(session) when is_pid(session) do
@@ -2263,6 +2243,11 @@ defmodule MingaAgent.Providers.Native do
   defp checkpoint_tool_group(_lctx, _messages, _tool_calls),
     do: {:error, :missing_session_checkpoint_owner}
 
+  # Maximum concurrent read-only tool tasks.
+  @max_concurrent_reads 8
+  # Per-tool-call timeout in milliseconds (5 minutes).
+  @tool_call_timeout_ms 300_000
+
   @spec execute_tools(
           loop_ctx(),
           String.t(),
@@ -2273,52 +2258,139 @@ defmodule MingaAgent.Providers.Native do
     initial_mode = approval_mode(lctx.config)
     indexed_calls = Enum.with_index(tool_calls)
 
-    {approval_calls, concurrent_calls} =
+    # Approval-gated calls need user interaction and are sequential relative
+    # to each other. Everything else uses effect-aware grouping (consecutive
+    # reads concurrent, mutating calls sequential). Both pipelines run in
+    # parallel so allowed tools start while approval is pending.
+    {approval_calls, effect_calls} =
       Enum.split_with(indexed_calls, fn {tool_call, _index} ->
         tool_call.name == "ask_user" or
           tool_requires_approval?(tool_call, lctx, initial_mode)
       end)
 
-    concurrent_tasks =
-      start_concurrent_tool_tasks(
-        lctx,
-        checkpoint_id,
-        concurrent_calls
-      )
+    runs = group_by_effect(effect_calls, lctx, initial_mode)
+
+    effect_task =
+      if runs != [] do
+        Task.async(fn -> execute_effect_runs(lctx, checkpoint_id, runs, []) end)
+      end
 
     try do
-      with {:ok, sequential_results} <-
-             execute_sequential_tool_tasks(lctx, checkpoint_id, approval_calls) do
-        results =
-          (sequential_results ++ await_concurrent_tool_tasks(lctx, concurrent_tasks))
-          |> Enum.sort_by(fn {index, _result} -> index end)
+      approval_result = execute_approval_calls(lctx, checkpoint_id, approval_calls)
 
-        case Enum.find(results, fn {_index, result} ->
-               Map.has_key?(result, :persistence_error)
-             end) do
-          nil -> :ok
-          {_index, result} -> {:error, result.persistence_error}
+      with {:ok, _} <- approval_result do
+        if effect_task do
+          Task.await(effect_task, :infinity)
+        else
+          :ok
         end
       end
     after
-      cleanup_concurrent_tool_tasks(lctx.provider_pid, concurrent_tasks)
+      if effect_task, do: Task.shutdown(effect_task, :brutal_kill)
     end
   end
 
-  @spec execute_sequential_tool_tasks(
-          loop_ctx(),
-          String.t(),
-          [indexed_tool_call()]
-        ) :: {:ok, [{non_neg_integer(), tool_execution_result()}]} | {:error, term()}
-  defp execute_sequential_tool_tasks(
-         lctx,
-         checkpoint_id,
-         calls
-       ) do
+  @spec execute_approval_calls(loop_ctx(), String.t(), [indexed_tool_call()]) ::
+          {:ok, [{non_neg_integer(), tool_execution_result()}]} | {:error, term()}
+  defp execute_approval_calls(_lctx, _checkpoint_id, []), do: {:ok, []}
+
+  defp execute_approval_calls(lctx, checkpoint_id, calls) do
     Enum.reduce_while(calls, {:ok, []}, fn call, {:ok, results} ->
       case execute_sequential_tool_task(lctx, checkpoint_id, call) do
         {_index, %{persistence_error: reason}} -> {:halt, {:error, reason}}
         result -> {:cont, {:ok, [result | results]}}
+      end
+    end)
+  end
+
+  @typep effect_run ::
+           {:concurrent, [indexed_tool_call()]}
+           | {:sequential, indexed_tool_call()}
+
+  @spec group_by_effect([indexed_tool_call()], loop_ctx(), approval_mode()) :: [effect_run()]
+  defp group_by_effect(indexed_calls, lctx, initial_mode) do
+    indexed_calls
+    |> Enum.reduce([], fn {tool_call, _index} = indexed, acc ->
+      if tool_call_sequential?(tool_call, lctx, initial_mode) do
+        [{:sequential, indexed} | acc]
+      else
+        case acc do
+          [{:concurrent, batch} | rest] -> [{:concurrent, [indexed | batch]} | rest]
+          _other -> [{:concurrent, [indexed]} | acc]
+        end
+      end
+    end)
+    |> Enum.reverse()
+    |> Enum.map(fn
+      {:concurrent, batch} -> {:concurrent, Enum.reverse(batch)}
+      {:sequential, _call} = run -> run
+    end)
+  end
+
+  @spec tool_call_sequential?(ReqLLMAdapter.ToolCall.t(), loop_ctx(), approval_mode()) ::
+          boolean()
+  defp tool_call_sequential?(tool_call, lctx, initial_mode) do
+    tool_call.name == "ask_user" or
+      tool_requires_approval?(tool_call, lctx, initial_mode) or
+      tool_effect_sequential?(tool_call.name, lctx)
+  end
+
+  @spec tool_effect_sequential?(String.t(), loop_ctx()) :: boolean()
+  defp tool_effect_sequential?(tool_name, lctx) do
+    registry = Map.get(lctx.tool_metadata, :tool_registry, ToolRegistry)
+
+    case ToolRegistry.lookup(registry, tool_name) do
+      {:ok, %ToolSpec{} = spec} -> ToolSpec.sequential?(spec)
+      :error -> false
+    end
+  end
+
+  @spec execute_effect_runs(
+          loop_ctx(),
+          String.t(),
+          [effect_run()],
+          [{non_neg_integer(), tool_execution_result()}]
+        ) :: :ok | {:error, term()}
+  defp execute_effect_runs(_lctx, _checkpoint_id, [], results) do
+    case Enum.find(results, fn {_index, result} -> Map.has_key?(result, :persistence_error) end) do
+      nil -> :ok
+      {_index, result} -> {:error, result.persistence_error}
+    end
+  end
+
+  defp execute_effect_runs(lctx, checkpoint_id, [{:concurrent, batch} | rest], results) do
+    # Cap the batch to @max_concurrent_reads parallel workers.
+    batch_results = execute_concurrent_batch(lctx, checkpoint_id, batch)
+
+    case Enum.find(batch_results, fn {_i, r} -> Map.has_key?(r, :persistence_error) end) do
+      nil -> execute_effect_runs(lctx, checkpoint_id, rest, results ++ batch_results)
+      {_index, result} -> {:error, result.persistence_error}
+    end
+  end
+
+  defp execute_effect_runs(lctx, checkpoint_id, [{:sequential, call} | rest], results) do
+    result = execute_sequential_tool_task(lctx, checkpoint_id, call)
+
+    case result do
+      {_index, %{persistence_error: reason}} -> {:error, reason}
+      _ -> execute_effect_runs(lctx, checkpoint_id, rest, [result | results])
+    end
+  end
+
+  @spec execute_concurrent_batch(loop_ctx(), String.t(), [indexed_tool_call()]) ::
+          [{non_neg_integer(), tool_execution_result()}]
+  defp execute_concurrent_batch(lctx, checkpoint_id, batch) do
+    # Chunk into sub-batches of @max_concurrent_reads to enforce the concurrency
+    # limit while keeping model order within each chunk.
+    batch
+    |> Enum.chunk_every(@max_concurrent_reads)
+    |> Enum.flat_map(fn chunk ->
+      tasks = start_concurrent_tool_tasks(lctx, checkpoint_id, chunk)
+
+      try do
+        await_concurrent_tool_tasks(lctx, tasks)
+      after
+        cleanup_concurrent_tool_tasks(lctx.provider_pid, tasks)
       end
     end)
   end
@@ -2531,6 +2603,10 @@ defmodule MingaAgent.Providers.Native do
 
       {:DOWN, ^monitor_ref, :process, _pid, reason} ->
         receive_tool_result_after_down(lctx, tool_call, result_ref, reason)
+    after
+      @tool_call_timeout_ms ->
+        Process.demonitor(monitor_ref, [:flush])
+        tool_task_failed(lctx, tool_call, :timeout)
     end
   end
 
@@ -3537,17 +3613,6 @@ defmodule MingaAgent.Providers.Native do
     session_cost >= max_cost
   end
 
-  @spec clear_stuck_streaming(state()) :: state()
-  defp clear_stuck_streaming(%{streaming: true, task: nil} = state) do
-    if over_budget?(state) do
-      state
-    else
-      %{state | streaming: false, tool_workers: MapSet.new()}
-    end
-  end
-
-  defp clear_stuck_streaming(state), do: state
-
   @spec cost_limit_message(float(), float() | nil) :: String.t()
   defp cost_limit_message(session_cost, max_cost) do
     formatted_spent = :erlang.float_to_binary(session_cost, decimals: 2)
@@ -4156,11 +4221,12 @@ defmodule MingaAgent.Providers.Native do
   end
 
   @spec notify_active(state(), Event.t()) :: Event.t()
-  defp notify_active(%{subscriber: subscriber, active_request: %Request{} = request}, event) do
-    notify(subscriber, request.request_id, event)
+  defp notify_active(state, event) do
+    case ExecutionState.request(state.execution) do
+      %Request{request_id: request_id} -> notify(state.subscriber, request_id, event)
+      nil -> notify(state.subscriber, event)
+    end
   end
-
-  defp notify_active(%{subscriber: subscriber}, event), do: notify(subscriber, event)
 
   @spec send_agent_event(pid(), Request.t(), Event.t()) :: :ok
   defp send_agent_event(provider_pid, request, event) do

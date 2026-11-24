@@ -496,8 +496,13 @@ struct KeyboardInputTests {
         guard let paste = keyEvent(keyCode: 9, modifiers: .command, characters: "v", charactersIgnoringModifiers: "v") else { return }
         guard let saveAs = keyEvent(keyCode: 1, modifiers: [.command, .shift], characters: "S", charactersIgnoringModifiers: "s") else { return }
         guard let modifiedQuit = keyEvent(keyCode: 12, modifiers: [.command, .shift], characters: "Q", charactersIgnoringModifiers: "q") else { return }
+        guard let back = keyEvent(keyCode: 33, modifiers: .command, characters: "[", charactersIgnoringModifiers: "[") else { return }
+        guard let forward = keyEvent(keyCode: 30, modifiers: .command, characters: "]", charactersIgnoringModifiers: "]") else { return }
 
         #expect(EditorNSView.shouldYieldSystemCommandShortcut(quit))
+        // ⌘[ and ⌘] reach the Go menu's Back and Forward (the jump list).
+        #expect(EditorNSView.shouldYieldSystemCommandShortcut(back))
+        #expect(EditorNSView.shouldYieldSystemCommandShortcut(forward))
         #expect(EditorNSView.shouldYieldSystemCommandShortcut(paste))
         #expect(EditorNSView.shouldYieldSystemCommandShortcut(saveAs))
         #expect(!EditorNSView.shouldYieldSystemCommandShortcut(modifiedQuit))

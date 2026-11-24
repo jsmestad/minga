@@ -11,7 +11,8 @@ Reports design gaps in the storyboard inventory:
   4. list surfaces without an empty-state scenario
   5. transient surfaces with an exit that has a key but no click, or a click but no key,
      unless the exit sets keyboard_only with a reason
-  6. board references that do not resolve to a file in design/boards/
+  6. board references that do not resolve to a file in design/boards/, and designed scenarios
+     without a board for every frontend they list
 
 Mouse paths are designed in a sweep after the keyboard design (see storyboard.md).
 While scenarios.toml sets phase = "keyboard", missing click paths (2, by clicks,
@@ -143,6 +144,11 @@ def check(scenarios, boards_dir=BOARDS):
         for name in board_files(s):
             if not (boards_dir / name).is_file():
                 problems["missing_board"].append(f"{s['id']}: {name}")
+        if s.get("status") == "designed":
+            boards = s.get("boards", {})
+            for frontend in s.get("frontends", ["macos", "tui"]):
+                if frontend not in boards:
+                    problems["missing_board"].append(f"{s['id']}: no {frontend} board")
     return problems
 
 

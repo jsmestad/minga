@@ -17,6 +17,17 @@ defmodule Minga.Storyboard.KeyWalkPropertyTest do
   @moduletag :storyboard
   @moduletag timeout: 300_000
 
+  # A walk that cannot read the keymap degrades to esc alone and passes vacuously. The leader check reads
+  # Bindings.children/1, which #4112 changed; the plain-editing check guards the key-grammar inventory.
+  test "the walk reads the leader's children and the Vim normal keys from the keymap" do
+    for {id, at_least} <- [{"edit.whichkey.leader", 10}, {Registry.home(), 20}] do
+      Explorer.with_session(fn -> Registry.drive(id) end, fn session ->
+        keys = session |> Session.model() |> KeyWalk.alphabet()
+        assert length(keys) > at_least, "#{id}: the walk can only press #{inspect(keys)}"
+      end)
+    end
+  end
+
   property "every step of a random key walk keeps a way out and lands on a defined state" do
     check all(choices <- list_of(integer(0..10_000), min_length: 1, max_length: 6), max_runs: 25) do
       walk(choices)

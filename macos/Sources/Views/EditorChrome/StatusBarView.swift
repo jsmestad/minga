@@ -19,8 +19,8 @@ private extension StatusBarUpdate.SelectionInfo {
 
     var displayText: String {
         switch mode {
-        case 1: return "\(size) chars"
-        case 2: return "\(size) lines"
+        case 1: return size == 1 ? "1 char" : "\(size) chars"
+        case 2: return size == 1 ? "1 line" : "\(size) lines"
         default: return ""
         }
     }
@@ -97,6 +97,7 @@ public struct StatusBarView: View {
             }
         }
         .frame(height: barHeight)
+        .anatomyPart("modeline")
         .background(theme.modelineBarBg)
         .focusable(false)
         .focusEffectDisabled()
@@ -628,7 +629,7 @@ public struct StatusBarView: View {
                 }
             }
             .buttonStyle(.plain)
-            .help("Show diagnostics (SPC c d)")
+            .help("Show diagnostics (SPC c x)")
             .accessibilityLabel(diagnosticsAccessibilityLabel)
             .accessibilityHint("Shows diagnostics")
             .padding(.horizontal, Spacing.xs)
@@ -840,12 +841,14 @@ public struct StatusBarView: View {
             Text(state.modeName)
                 .font(Typography.font(.caption, weight: .semibold))
                 .foregroundStyle(fg)
+                .anatomyPart("modeline.modeText", text: state.modeName, font: .caption)
                 .padding(.horizontal, Spacing.md)
                 .padding(.vertical, Spacing.hairline)
                 .background(
                     RoundedRectangle(cornerRadius: Radius.sm)
                         .fill(bg)
                 )
+                .anatomyPart("modeline.modePill", text: state.modeName)
         }
         .help(state.isSafeMode ? "Safe mode enabled, \(state.modeName) mode" : "\(state.modeName) mode")
     }
@@ -988,6 +991,7 @@ public struct StatusBarView: View {
         HStack(spacing: Spacing.md) {
             ForEach(groups) { group in
                 nativeModelineGroup(group)
+                    .anatomyPart("modeline.segment", text: "\(group.kind): \(group.segments.map(\.text).joined())")
             }
         }
         .contentShape(Rectangle())
@@ -1244,6 +1248,7 @@ private struct StatusBarIconButton: View {
                 )
         }
         .buttonStyle(.plain)
+        .anatomyPart("modeline.control")
         .help(tooltip)
         .accessibilityLabel(tooltip)
         .accessibilityHint("Toggles this panel")

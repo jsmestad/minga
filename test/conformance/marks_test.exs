@@ -102,14 +102,7 @@ defmodule Minga.Conformance.MarksTest do
       content: "one\ntwo\nthree\nfour\nfive",
       cursor: %{line: 4, col: 0},
       commands: ["gg", "''"],
-      compare: :cursor,
-      tags: [:known_divergence],
-      known_divergence: %{
-        reason:
-          "Minga does not set the '' special mark when gg is executed, so '' is a no-op and cursor stays at line 0.",
-        failures: [:cursor],
-        actual: %{line: 0, col: 0}
-      }
+      compare: :cursor
     },
     %{
       name: "marks on same line at different columns resolve independently",
