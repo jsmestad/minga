@@ -58,6 +58,7 @@ jobs:
       - uses: actions/checkout@v4
 
       # Fail fast, before the BEAM toolchain installs: the site must match the shipped keymap and docs/design.
+      # ci.yml's lint job runs the same check on every change, because code outside this path filter feeds it.
       - name: Check site copy against the keymap and design docs
         run: python3 design/tools/site_check.py
 
@@ -98,7 +99,7 @@ jobs:
       - name: Assemble combined site and ExDoc bundle
         run: scripts/build_site.sh _site
 
-      - name: Verify internal links, redirects, headers, and staging noindex
+      - name: Verify site and ExDoc extras links, redirects, headers, and staging noindex
         run: python3 scripts/check_site_links.py _site --expect-noindex
 
       - name: Determine Cloudflare Workers deploy mode

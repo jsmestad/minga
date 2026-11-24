@@ -186,6 +186,10 @@ jobs:
       - name: Check storyboard flow invariants
         run: python3 design/tools/storyboard/check.py
 
+      # site_check.py reads lib/, macos/Sources, go/tui and this workflow (see design/tools/site_claims.toml). site.yml's path filter misses most of those, so the check runs here on every change.
+      - name: Check site copy against the keymap and design docs
+        run: python3 design/tools/site_check.py
+
       - run: mix deps.get
       - run: mix format --check-formatted
       - run: mix compile --warnings-as-errors

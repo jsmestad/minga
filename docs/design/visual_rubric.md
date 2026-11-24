@@ -2,7 +2,7 @@
 
 A pull request that changes how a scenario looks is checked twice. The hard gates decide whether it merges: the semantic checks of the storyboard factory, the conformance transcripts, the snapshots, the render baselines and the layout audit. Visual review catches what those cannot see: a surface that is measured correctly and still reads badly, or one that tells a different story on each frontend. It never blocks a merge. What it raises goes to the visual follow-ups issue ([#4071](https://github.com/jsmestad/minga/issues/4071)).
 
-This page is the fixed rubric the reviewer agents and the polish critic apply. The procedure that runs them is in [Run the visual review](../recipes/visual-review.md).
+This page is the fixed rubric the reviewer agents and the polish critic apply. The procedure that runs them is in [Run the visual review](https://github.com/jsmestad/minga/blob/main/docs/recipes/visual-review.md).
 
 ## Boards are structure, never pixels
 

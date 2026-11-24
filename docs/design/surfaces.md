@@ -6,7 +6,7 @@ The resting screen has three parts: a plain title bar, your text, and the modeli
 
 Traffic lights, the small `minga` wordmark, and the centred file name followed by its project-relative directory in a secondary colour: `retry.ex  lib/minga_agent`. Never the full path after the name, which repeats it. Nothing else: no capsule, no buttons, no tabs.
 
-The title names the focused window, which is what macOS shows in the Window menu, Mission Control and ⌘` switching. The modeline's file segment names the buffer of each split, so with two splits each modeline shows its own file while the title follows the one you are in. Terminal windows show the buffer and its working directory: `*terminal 2*  ~/code/minga`. The TUI has no title bar; the terminal tab title (OSC 2) carries `retry.ex · minga`.
+The title names the focused window, which is what macOS shows in the Window menu, Mission Control and ``⌘` `` switching. The modeline's file segment names the buffer of each split, so with two splits each modeline shows its own file while the title follows the one you are in. Terminal windows show the buffer and its working directory: `*terminal 2*  ~/code/minga`. The TUI has no title bar; the terminal tab title (OSC 2) carries `retry.ex · minga`.
 
 ## Modeline
 
@@ -151,7 +151,7 @@ Minga's replies are markdown, but the frontends never parse it. The BEAM sends s
 
 ## Switcher
 
-`SPC ,` (or `SPC b b`) opens a drawer with a prompt at the top: "Find file ›". You type into the prompt, so actions are rows you move to, or the few established picker keys (see [keys](keys.md#file-switcher-spc-)).
+`SPC ,` (or `SPC b b`) opens a drawer with a prompt at the top: "Find file ›". You type into the prompt, so actions are rows you move to, or the few established picker keys (see [keys](keys.md#file-switcher)).
 
 Sections:
 

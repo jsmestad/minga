@@ -55,7 +55,7 @@ Semantic pane rows, split separators, and surface rectangles count from the firs
 
 ## Chrome tokens
 
-A gap that someone counted by hand drifts. One surface puts two spaces between a key and its label, the next puts one, and macOS uses a third value. The TUI therefore spaces its chrome from the same scale as macOS, by the same names, in `go/tui/internal/ui/chrome_tokens.go`. That file is the twin of `macos/Sources/Views/Shared/ChromeTokens.swift` (see [macOS chrome tokens](../macos/AGENTS.md#chrome-tokens)), and [`docs/design/anatomy.md`](design/anatomy.md) says which token each part of each surface uses.
+A gap that someone counted by hand drifts. One surface puts two spaces between a key and its label, the next puts one, and macOS uses a third value. The TUI therefore spaces its chrome from the same scale as macOS, by the same names, in `go/tui/internal/ui/chrome_tokens.go`. That file is the twin of `macos/Sources/Views/Shared/ChromeTokens.swift` (see [macOS chrome tokens](https://github.com/jsmestad/minga/blob/main/macos/AGENTS.md#chrome-tokens)), and [`docs/design/anatomy.md`](design/anatomy.md) says which token each part of each surface uses.
 
 Polish then becomes a token change. To widen every hint gap, you change one step; you do not search the render files for runs of spaces.
 
