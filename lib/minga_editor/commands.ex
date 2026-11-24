@@ -120,6 +120,25 @@ defmodule MingaEditor.Commands do
   # This MapSet plus the success-branch marks above are the single source of
   # truth for which commands force a discard; docs reference this location
   # rather than re-listing commands.
+  # Motions Vim counts as jumps: the place they start from goes into the jump list.
+  # A map so the dispatch guard can test membership with `is_map_key/2`.
+  @jump_commands Map.new(
+                   [
+                     :goto_line,
+                     :move_to_document_start,
+                     :move_to_document_end,
+                     :search_next,
+                     :search_prev,
+                     :search_word_under_cursor_forward,
+                     :search_word_under_cursor_backward,
+                     :confirm_search,
+                     :match_bracket,
+                     :paragraph_forward,
+                     :paragraph_backward
+                   ],
+                   &{&1, true}
+                 )
+
   @authoritative_scroll_commands MapSet.new([
                                    :scroll_center,
                                    :scroll_cursor_top,
@@ -331,7 +350,7 @@ defmodule MingaEditor.Commands do
     guard_buffer(state, fn ->
       workspace = MingaEditor.Session.State.mark_authoritative_scroll(state.workspace)
       state = %{state | workspace: workspace}
-      Movement.execute(state, cmd)
+      with_jump_recorded(state, :goto_line, &Movement.execute(&1, cmd))
     end)
   end
 
@@ -702,12 +721,14 @@ defmodule MingaEditor.Commands do
   defp execute_checked(state, cmd, %Command{execute: fun}) do
     state = maybe_mark_authoritative_scroll(state, cmd)
 
-    result =
-      Minga.Telemetry.span([:minga, :command, :execute], %{command: cmd}, fn ->
-        fun.(state)
-      end)
+    with_jump_recorded(state, cmd, fn state ->
+      result =
+        Minga.Telemetry.span([:minga, :command, :execute], %{command: cmd}, fn ->
+          fun.(state)
+        end)
 
-    normalize_registered_command_result(result, state)
+      normalize_registered_command_result(result, state)
+    end)
   end
 
   @spec normalize_registered_command_result(term(), state()) :: state() | {state(), action()}
@@ -764,6 +785,58 @@ defmodule MingaEditor.Commands do
       state
     end
   end
+
+  # Records the place a jump started from in the jump list (`⌃O` / `⌃I`).
+  # A jump is a command in @jump_commands that leaves the active buffer on another line.
+  # Asynchronous and cross-buffer jumps record in their own success branch:
+  # go to definition, location pickers, marks, and buffer activation.
+  @spec with_jump_recorded(state(), atom(), (state() -> result)) :: result
+        when result: state() | {state(), action()}
+  defp with_jump_recorded(%{workspace: %{buffers: %{active: buf}}} = state, cmd, fun)
+       when is_pid(buf) and is_map_key(@jump_commands, cmd) do
+    {from_line, _} = from = jump_origin(state, buf, cmd)
+
+    case fun.(state) do
+      %EditorState{} = new_state ->
+        record_jump_if_moved(new_state, buf, from, from_line)
+
+      {%EditorState{} = new_state, action} ->
+        {record_jump_if_moved(new_state, buf, from, from_line), action}
+    end
+  end
+
+  defp with_jump_recorded(state, _cmd, fun), do: fun.(state)
+
+  # Incremental search has already moved the cursor by the time `/pattern↩` confirms,
+  # so the jump starts where the search began.
+  @spec jump_origin(state(), pid(), atom()) :: Buffer.position()
+  defp jump_origin(
+         %{
+           workspace: %{
+             editing: %{mode_state: %Minga.Mode.SearchState{original_cursor: {_, _} = pos}}
+           }
+         },
+         _buf,
+         :confirm_search
+       ),
+       do: pos
+
+  defp jump_origin(_state, buf, _cmd), do: Buffer.cursor(buf)
+
+  @spec record_jump_if_moved(state(), pid(), Buffer.position(), non_neg_integer()) :: state()
+  defp record_jump_if_moved(
+         %{workspace: %{buffers: %{active: buf}}} = state,
+         buf,
+         from,
+         from_line
+       ) do
+    case Buffer.cursor(buf) do
+      {^from_line, _} -> state
+      _moved -> Editing.record_jump(state, buf, from)
+    end
+  end
+
+  defp record_jump_if_moved(state, _buf, _from, _from_line), do: state
 
   # ── Public buffer helpers (called directly from Editor) ───────────────────
 

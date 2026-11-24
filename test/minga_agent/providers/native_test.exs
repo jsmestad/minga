@@ -2438,7 +2438,7 @@ defmodule MingaAgent.Providers.NativeTest do
         assert_receive {:agent_provider_event, %Event.AgentStart{}}, 1_000
         assert_receive {:registration_cleanup_client_waiting, ^release_ref}, 1_000
 
-        %{task: %Task{pid: task_pid}} = :sys.get_state(pid)
+        %{execution: %{task: %Task{pid: task_pid}}} = :sys.get_state(pid)
 
         send(task_pid, {release_ref, :release})
         assert_receive {:session_effect_workers_registered, _session, ^pid, worker_pids}, 1_000

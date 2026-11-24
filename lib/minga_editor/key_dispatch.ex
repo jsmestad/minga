@@ -323,7 +323,7 @@ defmodule MingaEditor.KeyDispatch do
       {:command, :git_diff_file, _description} ->
         trie
         |> Bindings.unbind([{?g, 0}, {?d, 0}])
-        |> Bindings.bind_prefix([{?g, 0}, {?d, 0}], "+diff")
+        |> Bindings.bind_prefix([{?g, 0}, {?d, 0}], "Diff")
         |> Bindings.bind([{?g, 0}, {?d, 0}, {?f, 0}], :git_diff_file, "View diff")
 
       _ ->

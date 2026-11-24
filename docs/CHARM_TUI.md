@@ -137,7 +137,7 @@ The input model activates the final committed text presentation for each Bubble 
 
 The Agent composer keeps Send, Steer, Queue Next, and Stop in fixed positions while a turn runs. Enter sends when idle and steers during an active turn. Ctrl+Enter queues a follow-up during an active turn. The buttons take their hit cells and targets from the last view Bubble Tea flushed, not from an editor frame the terminal has not displayed. If a terminal write is active at pointer admission or begins before the click's target is selected, the TUI drops that left press instead of guessing which view it hit. Keyboard input, wheel input, and mouse releases are unaffected.
 
-Use **Queue** in the Agent header or `SPC a J` to inspect the current conversation's pending inputs. Select a row to review it, then choose **Withdraw queued input** to remove that entry. The composer and other entries do not change. If the turn consumed the entry before confirmation, open the queue again to see what is still pending.
+Use **Queue** in the Agent header or `SPC a q q` to inspect the current conversation's pending inputs. Select a row to review it, then choose **Withdraw queued input** to remove that entry. The composer and other entries do not change. If the turn consumed the entry before confirmation, open the queue again to see what is still pending.
 
 A finite wheel burst must finish without another input event. The input filter forwards each normalized wheel event to `Model.Update` with its coordinates and modifiers intact; the model reads the signed delta from that event, not shared filter state. The filter never holds wheel input for a later event. Pointer motion remains rate-limited.
 
@@ -168,6 +168,10 @@ Inspect every size's `.txt` or `.grid.json` files, not just the exit code. The r
 To update the corpus after an intentional semantic change, run `mix run --no-start scripts/go_tui_capture_corpus.exs`, review the new committed frames and expectations, then run the check and actual capture again. Do not weaken an expectation to accept unexplained terminal residue. The optional developer tests run with `"$capture_root/venv/bin/python" test/scripts/go_tui_capture_test.py`; they cover emulator boundaries and failure handling, not production visual acceptance.
 
 This evidence is an emitted-text-cell capture, not pixel, color, animation or live-interaction proof. The ready-only `scripts/go_tui_boot_smoke.py`, model-only coverage tracked in #2101 and legacy Zig snapshots prove different contracts. Production capture gates Go UI acceptance, not the start of a focused repair. A user-facing change still needs its actual keyboard and mouse walkthrough, plus the relevant [screen snapshot review](https://github.com/jsmestad/minga/blob/main/docs/recipes/update-snapshots.md).
+
+## Storyboard frames
+
+`internal/ui/storyboard_render_test.go` draws every built storyboard scenario from the packets the BEAM recorded for it, through `port.DecodePacket` and `Model.Update`, and writes each frame as a text grid with its style runs. It runs only when `MINGA_STORYBOARD_TRANSCRIPTS` is set; `design/tools/storyboard/renders.py render` sets it. The frames are the TUI baselines in `test/storyboard/baselines/`; see [Renders and baselines](design/storyboard.md#renders-and-baselines). Next to each frame it writes `*.parts.json`: the anatomy parts `storyboard_parts_test.go` finds in the drawn cells by the text the semantic model gave them (the which-key panel, its keys and labels, the modeline segments), which the [layout audit](design/anatomy.md#the-layout-audit) measures.
 
 ## Time Agent opening in the packaged terminal editor
 

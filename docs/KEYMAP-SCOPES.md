@@ -11,7 +11,7 @@ Minga ships three scopes:
 | Scope | Active when | Purpose |
 |-------|-------------|---------|
 | `:editor` | Editing files (default) | All normal vim editing. No scope-specific bindings; the full mode system (normal, insert, visual, etc.) handles everything. |
-| `:agent` | Full-screen agentic view (`SPC a t`) | Agent chat navigation, fold/collapse, copy, search, panel management. See [Agentic Keymap](AGENTIC-KEYMAP.md). |
+| `:agent` | Full-screen agentic view (`SPC a a`) | Agent chat navigation, fold/collapse, copy, search, panel management. See [Agentic Keymap](AGENTIC-KEYMAP.md). |
 | `:file_tree` | File tree panel is focused | Tree-specific keys (Enter, h/l, H, r). Unmatched keys delegate to vim motions for navigation. |
 
 ## How resolution works

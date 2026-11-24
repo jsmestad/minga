@@ -32,7 +32,6 @@ key=$(cd "$(dirname "$4")" && pwd)/$(basename "$4")
 fingerprint=$5
 output=$6
 scripts=$(cd "$(dirname "$0")" && pwd)
-repo_root=$(dirname "$scripts")
 base_url=https://packages.mingacode.dev
 # These images receive the private signing key, so they are pinned by digest.
 ubuntu_image=ubuntu:24.04@sha256:562111b88caa79c71391c0c4d3c2114a7d5c35915c20561fd893cb1e07929e6b
@@ -57,11 +56,10 @@ trap 'rm -rf "$work"' EXIT
 mkdir "$work/tree"
 
 sha() { shasum -a 256 "$1" | cut -d ' ' -f 1; }
-cp "$repo_root/LICENSE" "$work/LICENSE-$version"
 python3 "$scripts/render-aur-pkgbuild" --pkgname minga --version "$version" --source-sha "$source_sha" \
+  --sources "$work" \
   --x86-64-sha256 "$(sha "$assets/minga_${version}_linux_x86_64.tar.gz")" \
-  --aarch64-sha256 "$(sha "$assets/minga_${version}_linux_aarch64.tar.gz")" \
-  --license-sha256 "$(sha "$work/LICENSE-$version")" > "$work/PKGBUILD"
+  --aarch64-sha256 "$(sha "$assets/minga_${version}_linux_aarch64.tar.gz")" > "$work/PKGBUILD"
 
 # The client configuration that users install. scripts/test-package-repos uses these same files.
 cat > "$work/minga.sources" <<EOF
@@ -157,7 +155,8 @@ docker run --rm --platform linux/amd64 \
     for arch in x86_64 aarch64; do
       build=/home/builder/$arch
       install -d -o builder "$build"
-      cp /work/PKGBUILD "/work/LICENSE-$VERSION" "/assets/minga_${VERSION}_linux_$arch.tar.gz" "$build/"
+      cp /work/PKGBUILD "/work/LICENSE-$VERSION" "/work/minga-$VERSION.desktop" "/work/minga-$VERSION.png" \
+        "/assets/minga_${VERSION}_linux_$arch.tar.gz" "$build/"
       chown -R builder "$build"
       # The payload is prebuilt, so building for another CPU only changes the package label.
       sed "s/^CARCH=.*/CARCH=\"$arch\"/" /etc/makepkg.conf > "$build/makepkg.conf"

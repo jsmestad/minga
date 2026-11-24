@@ -526,6 +526,18 @@ pub const StructuralNavAction = enum(u8) {
     first_child = 1,
     next_sibling = 2,
     prev_sibling = 3,
+    /// Values from `ancestor_base` up name an ancestor of the deepest named node at the point: depth 0 is the node itself, depth n its n-th meaningful named parent. Smart selection walks them outward.
+    _,
+
+    /// First action value that names an ancestor depth.
+    pub const ancestor_base: u8 = 16;
+
+    /// Returns the ancestor depth this action names, or null for the four relative moves.
+    pub fn ancestorDepth(self: StructuralNavAction) ?u8 {
+        const value = @intFromEnum(self);
+        if (value < ancestor_base) return null;
+        return value - ancestor_base;
+    }
 };
 
 pub const RequestStructuralNav = struct {
@@ -1108,6 +1120,7 @@ fn decodeStructuralNavAction(action: u8) !StructuralNavAction {
         1 => .first_child,
         2 => .next_sibling,
         3 => .prev_sibling,
+        StructuralNavAction.ancestor_base...255 => @enumFromInt(action),
         else => error.Malformed,
     };
 }
@@ -3147,6 +3160,22 @@ test "decode request_structural_nav" {
             try std.testing.expectEqual(@as(u32, 11), req.col);
             try std.testing.expectEqual(StructuralNavAction.next_sibling, req.action);
         },
+        else => return error.Malformed,
+    }
+}
+
+test "decode request_structural_nav accepts ancestor depths" {
+    var data: [18]u8 = undefined;
+    data[0] = OP_REQUEST_STRUCTURAL_NAV;
+    std.mem.writeInt(u32, data[1..5], 7, .big);
+    std.mem.writeInt(u32, data[5..9], 42, .big);
+    std.mem.writeInt(u32, data[9..13], 3, .big);
+    std.mem.writeInt(u32, data[13..17], 11, .big);
+    data[17] = StructuralNavAction.ancestor_base + 2;
+
+    const cmd = try decodeCommand(&data);
+    switch (cmd) {
+        .request_structural_nav => |req| try std.testing.expectEqual(@as(?u8, 2), req.action.ancestorDepth()),
         else => return error.Malformed,
     }
 }

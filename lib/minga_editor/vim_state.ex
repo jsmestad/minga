@@ -14,6 +14,7 @@ defmodule MingaEditor.VimState do
   * `reg` — named registers and active register selection
   * `marks` — buffer-local marks (outer key is buffer pid, inner is mark name)
   * `last_jump_pos` — cursor position before the last jump
+  * `jump_list`: the places jumps started from, across buffers (`⌃O` / `⌃I`)
   * `last_find_char` — last f/F/t/T char for `;` and `,` repeat
   * `change_recorder` — tracks changes for dot repeat
   * `macro_recorder` — tracks macro recording state
@@ -21,6 +22,7 @@ defmodule MingaEditor.VimState do
 
   alias Minga.Buffer
   alias MingaEditor.ChangeRecorder
+  alias MingaEditor.JumpList
   alias MingaEditor.MacroRecorder
   alias MingaEditor.State.Registers
   alias Minga.Mode
@@ -37,6 +39,7 @@ defmodule MingaEditor.VimState do
           reg: Registers.t(),
           marks: marks(),
           last_jump_pos: Buffer.position() | nil,
+          jump_list: JumpList.t(),
           last_find_char: last_find_char(),
           desired_col: non_neg_integer() | nil,
           change_recorder: ChangeRecorder.t(),
@@ -49,6 +52,7 @@ defmodule MingaEditor.VimState do
             reg: %Registers{},
             marks: %{},
             last_jump_pos: nil,
+            jump_list: %JumpList{},
             last_find_char: nil,
             desired_col: nil,
             change_recorder: ChangeRecorder.new(),
@@ -168,6 +172,22 @@ defmodule MingaEditor.VimState do
   @spec set_last_jump_pos(t(), Buffer.position() | nil) :: t()
   def set_last_jump_pos(%__MODULE__{} = vim, pos) do
     %{vim | last_jump_pos: pos}
+  end
+
+  @doc """
+  Records a jump that started at `pos` in `buffer`.
+
+  Sets the `''` position and adds the place to the jump list that `⌃O` walks back through.
+  """
+  @spec record_jump(t(), pid(), Buffer.position()) :: t()
+  def record_jump(%__MODULE__{jump_list: jump_list} = vim, buffer, pos) when is_pid(buffer) do
+    %{vim | last_jump_pos: pos, jump_list: JumpList.record(jump_list, buffer, pos)}
+  end
+
+  @doc "Installs the jump list after a walk through it (`⌃O`, `⌃I`, or a pick from `SPC s j`)."
+  @spec walk_jump_list(t(), JumpList.t()) :: t()
+  def walk_jump_list(%__MODULE__{} = vim, %JumpList{} = jump_list) do
+    %{vim | jump_list: jump_list}
   end
 
   @doc "Records the last f/F/t/T char for ; and , repeat."

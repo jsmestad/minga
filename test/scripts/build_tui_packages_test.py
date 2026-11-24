@@ -86,6 +86,10 @@ class BuildTuiPackagesTest(unittest.TestCase):
         self.assertEqual((private / "erts-17.1.1/bin/beam.smp").read_bytes(), header(TARGETS[arch][2]))
         result = subprocess.check_output([launcher, "--version"], cwd=self.root, text=True)
         self.assertEqual(result, "fixture release received start\n")
+        self.assertEqual((root / "usr/share/applications/minga.desktop").read_bytes(),
+                         (REPO / "packaging/linux/minga.desktop").read_bytes())
+        self.assertEqual((root / "usr/share/icons/hicolor/512x512/apps/minga.png").read_bytes(),
+                         (REPO / "packaging/linux/minga.png").read_bytes())
 
     def rpm_query(self, artifact, query):
         return subprocess.check_output(["rpm", "-qp", "--nosignature", "--queryformat", query, artifact],
@@ -156,6 +160,15 @@ class BuildTuiPackagesTest(unittest.TestCase):
         for one, two in zip(first, second):
             with self.subTest(package=one.name):
                 self.assertEqual(one.read_bytes(), two.read_bytes())
+
+    @unittest.skipUnless(shutil.which("desktop-file-validate"), "desktop-file-validate is required")
+    def test_desktop_entry_is_valid_and_opens_minga_in_a_terminal(self):
+        entry = REPO / "packaging/linux/minga.desktop"
+        subprocess.run(["desktop-file-validate", entry], check=True)
+        fields = dict(line.split("=", 1) for line in entry.read_text().splitlines() if "=" in line)
+        self.assertEqual((fields["Exec"], fields["Icon"], fields["Terminal"]), ("minga %f", "minga", "true"))
+        # Freedesktop MIME types for source code, scripts, JSON and Markdown are subclasses of text/plain.
+        self.assertEqual(fields["MimeType"], "text/plain;")
 
     def test_rejects_wrong_version_architecture_and_damaged_release(self):
         self.make_fixture("x86_64")

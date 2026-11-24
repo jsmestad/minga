@@ -1,6 +1,6 @@
 # Agentic View Keymap
 
-The agentic view (`SPC a t`) is a full-screen OpenCode-style interface for interacting with AI agents. It follows Doom Emacs conventions for read-only special buffers: vim navigation motions are preserved, editing keys are repurposed for contextual actions, and multi-key sequences use standard vim prefixes.
+The agentic view (`SPC a a`) is a full-screen OpenCode-style interface for interacting with AI agents. It follows Doom Emacs conventions for read-only special buffers: vim navigation motions are preserved, editing keys are repurposed for contextual actions, and multi-key sequences use standard vim prefixes.
 
 ## Architecture
 
@@ -22,7 +22,7 @@ See `Minga.Keymap.Scope` for the behaviour contract, `MingaEditor.Input.Scoped` 
 4. **SPC leader always works.** In navigation mode, SPC delegates to the mode FSM so leader sequences and which-key popups function normally. Once a leader sequence, an operator, or the describe-key prompt (`SPC h k`) is pending, every key goes to it, so `SPC h k q` describes `q` instead of closing the chat.
 5. **The command line works, and nothing else leaks.** `:` opens the command line, so `:w`, `:qa`, and `:model` work from the chat. While the command line, search, or eval prompt is open, every key goes to it. Every other key the chat does not bind is ignored. It never edits, or moves focus to, the file buffer behind the chat.
 
-The chat and the file viewer share one rule for unbound keys: from navigation mode, only SPC, `:`, `M-:`, `/`, `n`, and `N` reach the mode FSM. The rules for pending sequences and open prompts also cover the agent side panel (`SPC a a`), so `:qa` typed from the side panel types `qa` instead of `q` closing the split. Tool approval and diff review keys (`y`, `n`, `a`, `x`, and so on) do not act while a command line or key sequence owns the key, so `:x` never rejects a hunk.
+The chat and the file viewer share one rule for unbound keys: from navigation mode, only SPC, `:`, `/`, `n`, and `N` reach the mode FSM. Eval opens from the leader with `SPC ;`. The rules for pending sequences and open prompts also cover the agent side panel (`SPC a a`), so `:qa` typed from the side panel types `qa` instead of `q` closing the split. Tool approval and diff review keys (`y`, `n`, `a`, `x`, and so on) do not act while a command line or key sequence owns the key, so `:x` never rejects a hunk.
 
 ### CUA editing model
 
@@ -112,8 +112,7 @@ When the agent finishes a turn with staged edits, a notification says, for examp
 
 | Key | Action |
 |-----|--------|
-| `SPC a p` | Publish agent edits to disk |
-| `SPC a P` | Discard unpublished agent edits |
+| `SPC a p` | Publish or discard agent edits, in one prompt |
 
 Publish writes the staged files to disk and merges them into any open buffer, then the agent keeps working in a fresh staging area. The agent itself confirms it is between turns before anything is published or discarded; if it is still working, or its staging area cannot be renewed, nothing changes and Minga says why. If you changed the same lines yourself in the meantime, Minga keeps both versions and opens the conflict review instead of overwriting your work. Discard drops the staged edits and leaves disk and buffers untouched. Both wait until the agent turn finishes; while it runs, Minga says so and changes nothing.
 
@@ -132,7 +131,7 @@ The saved copies are private to your user (`~/.local/share/minga/staged_drafts`,
 
 ### Agent Questions
 
-When the Agent pauses to ask which output to keep, choose **Answer question** or press `SPC a Q` in Normal mode. Choose a listed answer, choose **Type an answer…** to enter your own, or select **Cancel question** to resume the turn without supplying an answer. Escape closes the picker without answering. Your composer draft stays separate.
+When the Agent pauses to ask which output to keep, choose **Answer question**. Choose a listed answer, choose **Type an answer…** to enter your own, or select **Cancel question** to resume the turn without supplying an answer. Escape closes the picker without answering. Your composer draft stays separate.
 
 If the question does not fit in one preview, choose **Next question page** or **Previous question page**. Paging changes only the preview, not the pending answer or the draft.
 
@@ -176,15 +175,12 @@ See [Agent tool approval](CONFIGURATION.md#agent-tool-approval) for how to confi
 | Key | Action |
 |-----|--------|
 | `s` | Open session switcher |
-| `SPC a h` | Browse session history (load past conversations) |
+| `SPC a S h` | Browse session history (load past conversations) |
 | `SPC a r` | Pending reviews |
-| `SPC a p` | Publish agent edits to disk |
-| `SPC a P` | Discard unpublished agent edits |
+| `SPC a p` | Publish or discard agent edits, in one prompt |
 | `SPC a ?` | Ask about the current line or visual selection inline |
 | `SPC a e` | Rewrite the visual selection inline |
-| `SPC a z` | Summarize the current agent session to an artifact |
-| `SPC a m` | Pick agent model |
-| `SPC a c` | Copy file to workspace… |
+| `SPC a S m` | Pick agent model |
 
 ### Panel Management
 
@@ -215,17 +211,18 @@ See [Agent tool approval](CONFIGURATION.md#agent-tool-approval) for how to confi
 
 | Key | Action |
 |-----|--------|
+| `SPC a a` | Toggle agentic view (return to editor context) |
 | `SPC a n` | New local agent workspace |
-| `SPC a N` | Pick local or remote agent workspace |
 | `SPC a s` | Stop / abort agent |
 | `SPC a ?` | Ask about the current line or visual selection inline |
 | `SPC a e` | Rewrite the visual selection inline |
-| `SPC a m` | Pick agent model |
-| `SPC a c` | Copy file to workspace… |
 | `SPC a r` | Pending reviews |
-| `SPC a z` | Summarize the current agent session to an artifact |
-| `SPC a T` | Pick thinking level |
-| `SPC a t` | Toggle agentic view (return to editor context) |
+| `SPC a W` / `SPC a A` | Why is this line like this? / Code autobiography |
+| `SPC a q q` / `SPC a q f` | Queue: inspect queued inputs / queue the composer input as a follow-up |
+| `SPC a x b` / `SPC a x f` / `SPC a x d` / `SPC a x l` | Context: attach this buffer, a project file or this file's diagnostics, or list draft attachments |
+| `SPC a S l` | Session: pick local or remote agent workspace |
+| `SPC a S m` / `SPC a S t` | Session: pick agent model / thinking level |
+| `SPC a S h` / `SPC a S R` / `SPC a S s` | Session: resume, rename or stop the session |
 
 ## Chat Input Mode
 

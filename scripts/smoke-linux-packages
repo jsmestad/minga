@@ -6,9 +6,10 @@
 #
 # DIR must hold, for release VERSION:
 #   minga_VERSION_amd64.deb, minga-VERSION.x86_64.rpm,
-#   minga_VERSION_linux_x86_64.tar.gz, LICENSE-VERSION and the rendered PKGBUILD.
-# The Arch case builds the PKGBUILD with makepkg, which uses the local tarball
-# and LICENSE instead of downloading them and still checks their SHA-256.
+#   minga_VERSION_linux_x86_64.tar.gz, the rendered PKGBUILD and the files that
+#   scripts/render-aur-pkgbuild --sources writes (LICENSE, desktop entry, icon).
+# The Arch case builds the PKGBUILD with makepkg, which uses these local files
+# instead of downloading them and still checks their SHA-256.
 set -euo pipefail
 
 if [[ $# -ne 2 ]]; then
@@ -18,7 +19,8 @@ fi
 dir=$(cd "$1" && pwd)
 version=$2
 
-check='out=$(cd / && minga --version) && [ "$out" = "minga $VERSION" ] || { echo "unexpected minga --version output: ${out:-}" >&2; exit 1; }'
+check='out=$(cd / && minga --version) && [ "$out" = "minga $VERSION" ] || { echo "unexpected minga --version output: ${out:-}" >&2; exit 1; }
+[ -f /usr/share/applications/minga.desktop ] && [ -f /usr/share/icons/hicolor/512x512/apps/minga.png ] || { echo "missing desktop entry or icon" >&2; exit 1; }'
 removed='if [ -e /usr/lib/minga ] || [ -e /usr/bin/minga ]; then echo "package removal left files behind" >&2; exit 1; fi'
 
 run() {
@@ -48,7 +50,8 @@ run fedora:latest "
 run archlinux:base-devel "
   useradd -m builder
   install -d -o builder /home/builder/build
-  cp /packages/PKGBUILD /packages/LICENSE-\$VERSION /packages/minga_\${VERSION}_linux_x86_64.tar.gz /home/builder/build/
+  cp /packages/PKGBUILD /packages/LICENSE-\$VERSION /packages/minga-\$VERSION.desktop /packages/minga-\$VERSION.png \
+    /packages/minga_\${VERSION}_linux_x86_64.tar.gz /home/builder/build/
   chown -R builder /home/builder/build
   cd /home/builder/build
   runuser -u builder -- makepkg --noconfirm

@@ -78,7 +78,7 @@ defmodule MingaEditor.UI.Picker.LocationSource do
           EditorState.t()
   defp jump_to_location(state, path, line, col) do
     # Set jump mark before navigating
-    state = set_jump_mark(state)
+    state = MingaEditor.Editing.record_jump_here(state)
 
     current_path =
       case state.workspace.buffers.active do
@@ -114,22 +114,6 @@ defmodule MingaEditor.UI.Picker.LocationSource do
         )
     end
   end
-
-  @spec set_jump_mark(EditorState.t()) :: EditorState.t()
-  defp set_jump_mark(%{workspace: %{buffers: %{active: buf}}} = state) when is_pid(buf) do
-    pos = Buffer.cursor(buf)
-
-    %{
-      state
-      | workspace:
-          MingaEditor.Session.State.set_editing(
-            state.workspace,
-            MingaEditor.VimState.set_last_jump_pos(state.workspace.editing, pos)
-          )
-    }
-  end
-
-  defp set_jump_mark(state), do: state
 
   @spec project_root(Context.t()) :: String.t() | nil
   defp project_root(%Context{picker_ui: %{context: %{project_root: root}}})

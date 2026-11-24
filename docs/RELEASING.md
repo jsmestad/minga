@@ -30,7 +30,7 @@ The job keeps the tested packages and a record of its packaging tool versions (`
 
 After all artifacts pass the release checks and byte verification, a protected `main` push publishes a versioned GitHub prerelease without making it the latest stable release. It carries eight assets: the Apple Silicon TUI archive and DMG, both Linux archives, and the `.deb` and `.rpm` for each Linux architecture. The publisher uses the built-in GitHub token to publish and the existing `HOMEBREW_TAP_TOKEN` to advance the formula and cask together. The tap token needs Contents write access to `jsmestad/homebrew-minga`. GitHub can reject tagging an older commit if workflow files have changed since that commit. If that happens, publish a newer qualified build or configure an optional `HOMEBREW_RELEASE_TOKEN` with Contents and Workflows write access scoped to `jsmestad/minga`. No Cloudflare account is needed.
 
-After the release is public, the `publish-aur` job updates the `minga-bin` AUR package. It trusts only the public release: it renders the PKGBUILD with `scripts/render-aur-pkgbuild` from the published asset digests, builds and installs it on Arch from the public download URLs, checks `minga --version`, and then pushes `PKGBUILD` and `.SRCINFO` to `ssh://aur@aur.archlinux.org/minga-bin.git`. It skips the push when the AUR already has the same or a newer `pkgver`. The job needs the `AUR_SSH_PRIVATE_KEY` repository secret, the private half of an SSH key registered on the AUR account that maintains `minga-bin`. Without the secret, the job skips with a notice and the rest of the release is unaffected. New AUR accounts are currently restricted, so the secret is not set and Arch users install from the pacman repository below. The workflow pins the AUR's Ed25519 host key, verified against the fingerprints on the AUR home page.
+After the release is public, the `publish-aur` job updates the `minga-bin` AUR package. It trusts only the public release: it renders the PKGBUILD with `scripts/render-aur-pkgbuild` from the published asset digests, builds and installs it on Arch from the public download URLs, checks `minga --version`, and then pushes `PKGBUILD` and `.SRCINFO` to `ssh://aur@aur.archlinux.org/minga-bin.git`. It skips the push when the AUR already has the same or a newer `pkgver`. The job needs the `AUR_SSH_PRIVATE_KEY` repository secret, the private half of an SSH key registered on the AUR account that maintains `minga-bin`. Without the secret, the job skips with a notice. If the AUR does not accept the key yet, the job skips with a warning; any other SSH failure fails the job. The rest of the release is unaffected either way. New AUR accounts are currently restricted, so the secret holds a deploy key that no account has registered yet; until one does, Arch users install from the pacman repository below. When signups reopen, register an account, add the key's public half (`ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKncazJvqFH1zWhOf5OUUJY0eaPmBgUWyJ5WgcXsuwdJ`) under **My Account → SSH Public Key**, and the next release creates `minga-bin`. The workflow pins the AUR's Ed25519 host key, verified against the fingerprints on the AUR home page.
 
 ### Package repositories
 
@@ -172,19 +172,17 @@ scripts/build-tui-packages "$assets/minga_linux_aarch64.tar.gz" --version 0.1.0 
 scripts/render-tui-formula --version 0.1.0 --arm64 "$assets/minga_macos_aarch64.tar.gz" > "$assets/minga.rb"
 ```
 
-Each `build-tui-packages` call writes a `.deb` and an `.rpm`, such as `minga_0.1.0_amd64.deb` and `minga-0.1.0.x86_64.rpm`. Both install `minga` on `PATH` and keep the bundled runtime together under `/usr/lib/minga`. On macOS, the Homebrew formula installs the same runtime under Homebrew's private package directory and links `minga` into Homebrew's `bin`.
+Each `build-tui-packages` call writes a `.deb` and an `.rpm`, such as `minga_0.1.0_amd64.deb` and `minga-0.1.0.x86_64.rpm`. Both install `minga` on `PATH` and keep the bundled runtime together under `/usr/lib/minga`. Every Linux package, including the pacman ones, also installs `packaging/linux/minga.desktop` and its icon, so desktop launchers such as Omarchy's list Minga and open it in a terminal. On macOS, the Homebrew formula installs the same runtime under Homebrew's private package directory and links `minga` into Homebrew's `bin`.
 
-To install-test the x86_64 packages on Ubuntu 24.04, Debian 13, Fedora and Arch with Docker, render the AUR PKGBUILD and run the smoke script. The directory must also hold the x86_64 archive under its release name and the checkout's `LICENSE` as `LICENSE-<version>`:
+To install-test the x86_64 packages on Ubuntu 24.04, Debian 13, Fedora and Arch with Docker, render the AUR PKGBUILD and run the smoke script. Render from a checkout at `$SOURCE_SHA`: the PKGBUILD pins the digests of that commit's `LICENSE`, desktop entry and icon, and `--sources` copies them beside it. The directory must also hold the x86_64 archive under its release name:
 
 ```bash
 smoke=$(mktemp -d)
 cp "$assets/minga_0.1.0_amd64.deb" "$assets/minga-0.1.0.x86_64.rpm" "$smoke/"
 cp "$assets/minga_linux_x86_64.tar.gz" "$smoke/minga_0.1.0_linux_x86_64.tar.gz"
-cp LICENSE "$smoke/LICENSE-0.1.0"
-scripts/render-aur-pkgbuild --version 0.1.0 --source-sha "$SOURCE_SHA" \
+scripts/render-aur-pkgbuild --version 0.1.0 --source-sha "$SOURCE_SHA" --sources "$smoke" \
   --x86-64-sha256 "$(sha256sum "$assets/minga_linux_x86_64.tar.gz" | cut -d ' ' -f 1)" \
-  --aarch64-sha256 "$(sha256sum "$assets/minga_linux_aarch64.tar.gz" | cut -d ' ' -f 1)" \
-  --license-sha256 "$(sha256sum LICENSE | cut -d ' ' -f 1)" > "$smoke/PKGBUILD"
+  --aarch64-sha256 "$(sha256sum "$assets/minga_linux_aarch64.tar.gz" | cut -d ' ' -f 1)" > "$smoke/PKGBUILD"
 scripts/smoke-linux-packages "$smoke" 0.1.0
 ```
 

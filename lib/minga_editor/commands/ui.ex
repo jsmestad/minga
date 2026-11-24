@@ -22,6 +22,21 @@ defmodule MingaEditor.Commands.UI do
     execute: fn state -> PickerUI.open(state, MingaEditor.UI.Picker.CommandSource) end
   )
 
+  command(:enter_eval, "Eval expression",
+    requires_buffer: false,
+    execute: fn state ->
+      %{
+        state
+        | workspace:
+            MingaEditor.Session.State.transition_mode(
+              state.workspace,
+              :eval,
+              %Minga.Mode.EvalState{}
+            )
+      }
+    end
+  )
+
   command(:find_file, "Find file",
     requires_buffer: false,
     execute: &FindFileWorkflow.open/1

@@ -62,6 +62,7 @@ jobs:
               "test/macos/**",
               "test/minga_editor/integration/gui_protocol_test.exs",
               "test/scripts/macos_unit_results_test.py",
+              "test/scripts/macos_document_types_test.py",
               "scripts/install_xcodegen",
               "scripts/check_macos_release_optimization",
               "scripts/test_macos_unit",
@@ -106,6 +107,7 @@ jobs:
               "scripts/build-tui-packages",
               "test/scripts/build_tui_packages_test.py",
               "scripts/render-aur-pkgbuild",
+              "packaging/linux/**",
               "test/scripts/render_aur_pkgbuild_test.py",
               "scripts/smoke-linux-packages",
               "scripts/linux-packaging-toolchain",
@@ -244,10 +246,228 @@ jobs:
       - name: Check cross-language golden manifest is committed
         run: MIX_ENV="test" mix protocol.golden --check
       - run: mix native.build.support
-      - name: Run Elixir tests except the isolated compile-cache suite
-        run: mix test --warnings-as-errors --max-cases 4 --timeout 120000 --exclude system_clipboard --exclude conformance --exclude extension_compile_cache
+      - name: Run Elixir tests except the isolated compile-cache suite and the storyboard
+        run: mix test --warnings-as-errors --max-cases 4 --timeout 120000 --exclude system_clipboard --exclude conformance --exclude extension_compile_cache --exclude storyboard
       - name: Run extension compile-cache tests in an isolated BEAM
         run: mix test --warnings-as-errors test/minga/extension/compile_cache_test.exs
+
+  storyboard:
+    # The storyboard factory (#4035): every designed scenario is reachable,
+    # checkable and escapable in the real editor. Runs on its own so it is a
+    # separately required check; the main Elixir job excludes the tag.
+    # It also records every built scenario's packets and draws the TUI frames with the Go renderer (#4036);
+    # the storyboard-macos job draws the same packets on macOS and storyboard-renders judges both.
+    name: Storyboard (Elixir)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      MINGA_SKIP_GO_TUI_BUILD: "1"
+    outputs:
+      macos_required: ${{ steps.tui-diff.outputs.macos_required }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The render diff compares with the baselines on the base revision.
+          fetch-depth: 0
+
+      - uses: erlef/setup-beam@v1
+        with:
+          version-file: .tool-versions
+          version-type: strict
+
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+
+      - name: Cache deps
+        uses: actions/cache@v4
+        with:
+          path: |
+            deps
+            _build
+          key: deps-${{ runner.os }}-${{ hashFiles('.tool-versions') }}-${{ hashFiles('mix.lock') }}
+          restore-keys: deps-${{ runner.os }}-${{ hashFiles('.tool-versions') }}-
+
+      - run: mix deps.get
+      - run: mix deps.compile
+      - run: mix native.build.support
+      - name: Run the storyboard suite
+        run: mix test --warnings-as-errors --only storyboard test/storyboard
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go/tui/go.mod
+          cache-dependency-path: go/tui/go.sum
+
+      - name: Record transcripts and draw the TUI frames
+        run: python3 design/tools/storyboard/renders.py render --out "$RUNNER_TEMP/storyboard"
+
+      # Never fails: storyboard-renders judges the diff once the macOS frames exist. This decides whether macOS must draw:
+      # a macOS transcript differs from the one its baseline was promoted from, or a macOS-only input changed.
+      - name: Diff the TUI frames against the baselines
+        id: tui-diff
+        run: |
+          python3 design/tools/storyboard/renders.py diff --out "$RUNNER_TEMP/storyboard" --frontends tui \
+            --base "${{ github.event.pull_request.base.sha || github.event.before }}" --github-output "$GITHUB_OUTPUT"
+
+      - name: Upload transcripts and TUI frames
+        uses: actions/upload-artifact@v4
+        with:
+          name: storyboard-tui
+          path: ${{ runner.temp }}/storyboard
+          if-no-files-found: error
+          retention-days: 14
+
+  storyboard-macos:
+    # Draws every macOS transcript through the production decoder, ContentView and Metal editor in PreviewHost (#4036).
+    # It runs when a change can move a macOS frame: native sources, or different packets for a macOS frame.
+    name: Storyboard renders (macOS)
+    needs: [changes, storyboard]
+    if: ${{ !cancelled() && needs.storyboard.result == 'success' && (github.event_name == 'push' || needs.changes.outputs.swift == 'true' || needs.storyboard.outputs.macos_required == 'true') }}
+    runs-on: macos-15
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
+      MINGA_REQUIRE_METAL: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: erlef/setup-beam@v1
+        with:
+          version-file: .tool-versions
+          version-type: strict
+
+      - name: Restore Swift deps
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            deps
+            _build
+          key: swift-deps-${{ runner.os }}-${{ hashFiles('.tool-versions') }}-${{ hashFiles('mix.lock') }}
+          restore-keys: swift-deps-${{ runner.os }}-
+
+      - run: mix deps.get
+
+      - name: Install pinned XcodeGen
+        run: scripts/install_xcodegen "$RUNNER_TEMP/xcodegen" >> "$GITHUB_PATH"
+
+      - name: Download transcripts
+        uses: actions/download-artifact@v4
+        with:
+          name: storyboard-tui
+          path: ${{ runner.temp }}/storyboard
+
+      - name: Draw the macOS frames
+        env:
+          STORYBOARD_DERIVED_DATA: ${{ runner.temp }}/storyboard-derived
+        run: python3 design/tools/storyboard/renders.py render-macos --out "$RUNNER_TEMP/storyboard"
+
+      - name: Upload macOS frames
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: storyboard-macos
+          path: |
+            ${{ runner.temp }}/storyboard/renders/**/macos-*
+          if-no-files-found: error
+          retention-days: 14
+
+  storyboard-renders:
+    # The hard render gate (#4036): every frame matches its committed baseline, every built scenario has one, and a
+    # scenario that changed against the base revision changed on both frontends or carries a platform-specific reason.
+    # It also publishes the storyboard page. Visual review never blocks here; see docs/design/visual_rubric.md.
+    name: Storyboard renders
+    needs: [changes, storyboard, storyboard-macos]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Test the render gate, the layout audit and the visual review records
+        run: |
+          python3 -m unittest discover -s test/scripts -p 'storyboard_renders_test.py'
+          python3 -m unittest discover -s test/scripts -p 'storyboard_audit_test.py'
+          python3 -m unittest discover -s test/scripts -p 'storyboard_review_test.py'
+
+      - name: Require the renders this change needs
+        env:
+          RENDER: ${{ needs.storyboard.result }}
+          MACOS: ${{ needs.storyboard-macos.result }}
+          MACOS_REQUIRED: ${{ github.event_name == 'push' || needs.changes.outputs.swift == 'true' || needs.storyboard.outputs.macos_required == 'true' }}
+        run: |
+          printf 'TUI renders: %s; macOS renders: %s (required: %s)\n' "$RENDER" "$MACOS" "$MACOS_REQUIRED"
+          [[ "$RENDER" == success ]] || exit 1
+          [[ "$MACOS" == success || ( "$MACOS_REQUIRED" == false && "$MACOS" == skipped ) ]] || exit 1
+          # A skipped macOS job means none of its inputs changed, so its frames equal their baselines.
+          if [[ "$MACOS" == success ]]; then
+            echo "FRONTENDS=tui,macos" >> "$GITHUB_ENV"; echo "UNCHANGED=" >> "$GITHUB_ENV"
+          else
+            echo "FRONTENDS=tui" >> "$GITHUB_ENV"; echo "UNCHANGED=macos" >> "$GITHUB_ENV"
+          fi
+
+      - name: Download transcripts and TUI frames
+        uses: actions/download-artifact@v4
+        with:
+          name: storyboard-tui
+          path: ${{ runner.temp }}/storyboard
+
+      - name: Download macOS frames
+        if: needs.storyboard-macos.result == 'success'
+        uses: actions/download-artifact@v4
+        with:
+          name: storyboard-macos
+          path: ${{ runner.temp }}/storyboard/renders
+
+      - name: Diff every frame against its baseline and check parity
+        id: diff
+        run: |
+          set +e
+          python3 design/tools/storyboard/renders.py diff --out "$RUNNER_TEMP/storyboard" --frontends "$FRONTENDS" --check \
+            --assume-unchanged "$UNCHANGED" \
+            --base "${{ github.event.pull_request.base.sha || github.event.before }}"
+          status=$?
+          cat "$RUNNER_TEMP/storyboard/diff.md" >> "$GITHUB_STEP_SUMMARY"
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+
+      # The layout audit (#4036, AC 5) measures every rendered frame against docs/design/anatomy.md.
+      - name: Audit the layout of every rendered scenario
+        id: audit
+        run: |
+          set +e
+          python3 design/tools/storyboard/audit.py --out "$RUNNER_TEMP/storyboard" --frontends "$FRONTENDS" --check
+          status=$?
+          cat "$RUNNER_TEMP/storyboard/audit.md" >> "$GITHUB_STEP_SUMMARY"
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+
+      - name: Build the storyboard page
+        run: python3 design/tools/storyboard/renders.py page --out "$RUNNER_TEMP/storyboard"
+
+      - name: Publish the storyboard page
+        uses: actions/upload-artifact@v4
+        with:
+          name: storyboard-page
+          path: |
+            ${{ runner.temp }}/storyboard/page
+            ${{ runner.temp }}/storyboard/diff.json
+            ${{ runner.temp }}/storyboard/diff.md
+            ${{ runner.temp }}/storyboard/audit.json
+            ${{ runner.temp }}/storyboard/audit.md
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Fail on a stale render, a missing baseline, a parity violation or a layout violation
+        if: steps.diff.outputs.status != '0' || steps.audit.outputs.status != '0'
+        run: |
+          echo "See the job summary. Accept intended changes with design/tools/storyboard/renders.py promote (docs/design/storyboard.md)."
+          echo "Fix layout violations, or list them in test/storyboard/audit_exceptions.toml with a reason and an issue."
+          exit 1
 
   test-sdk:
     name: Test (Extension SDK)
@@ -581,8 +801,10 @@ jobs:
             test/macos/native_ipc_helper_integration_test.exs \
             --include macos_ipc_helper
 
-      - name: Test native result classification
-        run: python3 -m unittest discover -s test/scripts -p macos_unit_results_test.py
+      - name: Test native result classification and document types
+        run: |
+          python3 -m unittest discover -s test/scripts -p macos_unit_results_test.py
+          python3 -m unittest discover -s test/scripts -p macos_document_types_test.py
 
       # Timing, inverse mutations, and a second warm run live in swift-evidence.yml.
       # The canonical unit runner still executes all Metal and production-view regressions here.
@@ -865,7 +1087,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           set -euo pipefail
-          sudo apt-get install -y --no-install-recommends rpm rpm2cpio cpio
+          sudo apt-get install -y --no-install-recommends rpm rpm2cpio cpio desktop-file-utils
           python3 -B test/scripts/build_tui_packages_test.py
       - name: Build signed package repositories and install from them
         if: runner.os == 'Linux' && runner.arch == 'X64'
@@ -885,6 +1107,8 @@ jobs:
       - changes
       - lint
       - test
+      - storyboard
+      - storyboard-renders
       - test-sdk
       - test-git-extended
       - keystroke-latency-baseline

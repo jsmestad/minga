@@ -778,12 +778,13 @@ buffer_id:  u32           parser buffer id
 request_id: u32           caller-chosen correlation id
 row:        u32           0-indexed line number
 col:        u32           0-indexed byte column
-action:     u8            0=parent, 1=first child, 2=next sibling, 3=previous sibling
+action:     u8            0=parent, 1=first child, 2=next sibling, 3=previous sibling,
+                          16+n=the n-th named ancestor (16 is the node itself)
 ```
 
 Total size: 18 bytes.
 
-**Behavior:** Anonymous and punctuation nodes are skipped by starting with `ts_node_named_descendant_for_point_range` and moving through named parents, children, or siblings. If the parser has no buffer, no grammar, or no target node, it responds with `node_info` and `found = 0`. Invalid action bytes are malformed protocol commands.
+**Behavior:** Anonymous and punctuation nodes are skipped by starting with `ts_node_named_descendant_for_point_range` and moving through named parents, children, or siblings. If the parser has no buffer, no grammar, or no target node, it responds with `node_info` and `found = 0`. Actions 16 to 255 return the deepest named node itself (16) or its n-th meaningful named parent (16 + n), stopping below the root; smart selection (`SPC c v` / `SPC c V`) walks them outward when no language server serves the buffer. Action bytes 4 to 15 are malformed protocol commands.
 
 ### `0x3C` match_item_result
 

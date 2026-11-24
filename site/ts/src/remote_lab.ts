@@ -18,7 +18,11 @@ const BLOCKED_PATTERNS: readonly { readonly re: RegExp; readonly reason: string 
 
 export function evaluatePreToolUse(command: string): PreToolUseResult {
   const trimmed = command.trim();
-  const stdinJson = JSON.stringify({ event: "PreToolUse", tool: "shell", command: trimmed }, null, 2);
+  const stdinJson = JSON.stringify(
+    { event: "PreToolUse", tool_call_id: "tc_123", tool_name: "shell", arguments: { command: trimmed } },
+    null,
+    2,
+  );
   for (const rule of BLOCKED_PATTERNS) {
     if (rule.re.test(trimmed)) {
       return {
@@ -86,10 +90,10 @@ export function mountRemoteLab(root: HTMLElement): void {
         <div class="workbench-main">
           <div class="lab-toolbar" role="toolbar" aria-label="Fault-injection controls">
             <button type="button" class="lab-cmd" data-rm-action="toggle-lid">
-              <span>${attached ? "SSH" : "ATTACH"}</span> ${attached ? "Close laptop lid (detach)" : "minga attach ssh://devbox"}
+              <span>${attached ? "SSH" : "ATTACH"}</span> ${attached ? "Close laptop lid (detach)" : "minga attach ssh://devbox/work/app"}
             </button>
             <button type="button" class="lab-cmd" data-rm-action="toggle-mcp">
-              <span>${githubMcpUp ? "FAULT" : "HEAL"}</span> ${githubMcpUp ? "Crash GitHub MCP" : "Restart GitHub MCP"}
+              <span>${githubMcpUp ? "FAULT" : "SESSION"}</span> ${githubMcpUp ? "Crash GitHub MCP" : "Reconnect in new session"}
             </button>
             <button type="button" class="lab-cmd lab-cmd-muted" data-rm-action="reset">Reset</button>
           </div>
@@ -223,16 +227,16 @@ export function mountRemoteLab(root: HTMLElement): void {
         attached = true;
         if (stepTimer !== undefined) window.clearInterval(stepTimer);
         mark("detach_reattach");
-        lastEvent = `Reattached via minga attach ssh://devbox: caught up on ${detachedSteps} background steps with zero lost output.`;
+        lastEvent = `Reattached via minga attach ssh://devbox/work/app: caught up on ${detachedSteps} background steps with zero lost output.`;
       }
       render();
     } else if (action === "toggle-mcp") {
       githubMcpUp = !githubMcpUp;
       if (!githubMcpUp) {
         mark("mcp_crash");
-        lastEvent = "GitHub MCP process crashed: supervisor isolated the failure so open buffers, undo, Postgres MCP, and built-in tools stayed green.";
+        lastEvent = "GitHub MCP exited mid-turn: only mcp_github__* tools dropped out while open buffers, undo, Postgres MCP, and built-in tools stayed green.";
       } else {
-        lastEvent = "Supervisor restarted GitHub MCP cleanly; mcp_github__* tools are back online.";
+        lastEvent = "Started a fresh session with GitHub MCP healthy; crashed servers use restart: :temporary so they never loop mid-turn.";
       }
       render();
     } else if (action === "run-hook") {

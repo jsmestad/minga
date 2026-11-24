@@ -1,0 +1,719 @@
+{
+ "elements": [
+  {
+   "frame": [
+    79,
+    65,
+    1338.5,
+    825.5
+   ],
+   "label": "storyboard.ex, pane 1",
+   "role": "AXTextArea",
+   "value": "defmodule Storyboard do\n  @moduledoc \"A small file every storyboard scenario starts in.\"\n\n  def greet(name) do\n    \"Hello, \" <> name\n  end\nend\n"
+  }
+ ],
+ "grid": {
+  "cols": 177,
+  "rows": 43
+ },
+ "parts": [
+  {
+   "baseline": 21,
+   "frame": [
+    298,
+    9.5,
+    78,
+    15
+   ],
+   "part": "tabBar.tabLabel",
+   "text": "storyboard.ex"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    40,
+    43.5,
+    4,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "/"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    58,
+    43.5,
+    23,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "tmp"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    95,
+    43.5,
+    102,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "minga-storyboard"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    211,
+    43.5,
+    72,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "macos-1440"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    297,
+    43.5,
+    90,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "minga.whichkey"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    401,
+    43.5,
+    14,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "lib"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    429,
+    43.5,
+    78,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "storyboard.ex"
+  },
+  {
+   "frame": [
+    488,
+    727,
+    464,
+    193
+   ],
+   "part": "whichKey.panel"
+  },
+  {
+   "baseline": 743.5,
+   "frame": [
+    500,
+    733,
+    34,
+    14
+   ],
+   "part": "whichKey.breadcrumb",
+   "text": "SPC a"
+  },
+  {
+   "frame": [
+    498,
+    760,
+    220,
+    154
+   ],
+   "part": "whichKey.column"
+  },
+  {
+   "frame": [
+    498,
+    760,
+    220,
+    22
+   ],
+   "part": "whichKey.entry",
+   "text": "? Ask about this"
+  },
+  {
+   "frame": [
+    722,
+    760,
+    220,
+    154
+   ],
+   "part": "whichKey.column"
+  },
+  {
+   "frame": [
+    722,
+    760,
+    220,
+    22
+   ],
+   "part": "whichKey.entry",
+   "text": "p Publish edits\u2026"
+  },
+  {
+   "baseline": 774.5,
+   "frame": [
+    515,
+    764,
+    7,
+    14
+   ],
+   "part": "whichKey.entryKey",
+   "text": "?"
+  },
+  {
+   "baseline": 774.5,
+   "frame": [
+    528,
+    764,
+    75,
+    14
+   ],
+   "part": "whichKey.entryLabel",
+   "text": "Ask about this"
+  },
+  {
+   "baseline": 774.5,
+   "frame": [
+    739,
+    764,
+    7,
+    14
+   ],
+   "part": "whichKey.entryKey",
+   "text": "p"
+  },
+  {
+   "baseline": 774.5,
+   "frame": [
+    752,
+    764,
+    77,
+    14
+   ],
+   "part": "whichKey.entryLabel",
+   "text": "Publish edits\u2026"
+  },
+  {
+   "frame": [
+    498,
+    782,
+    220,
+    22
+   ],
+   "part": "whichKey.entry",
+   "text": "A Code autobiography"
+  },
+  {
+   "frame": [
+    722,
+    782,
+    220,
+    22
+   ],
+   "part": "whichKey.entry",
+   "text": "q Queue \u203a"
+  },
+  {
+   "baseline": 796.5,
+   "frame": [
+    515,
+    786,
+    7,
+    14
+   ],
+   "part": "whichKey.entryKey",
+   "text": "A"
+  },
+  {
+   "baseline": 796.5,
+   "frame": [
+    528,
+    786,
+    107,
+    14
+   ],
+   "part": "whichKey.entryLabel",
+   "text": "Code autobiography"
+  },
+  {
+   "baseline": 796.5,
+   "frame": [
+    739,
+    786,
+    7,
+    14
+   ],
+   "part": "whichKey.entryKey",
+   "text": "q"
+  },
+  {
+   "baseline": 796.5,
+   "frame": [
+    752,
+    786,
+    43,
+    14
+   ],
+   "part": "whichKey.entryLabel",
+   "text": "Queue \u203a"
+  },
+  {
+   "frame": [
+    498,
+    804,
+    220,
+    22
+   ],
+   "part": "whichKey.entry",
+   "text": "S Session \u203a"
+  },
+  {
+   "frame": [
+    722,
+    804,
+    220,
+    22
+   ],
+   "part": "whichKey.entry",
+   "text": "r Pending reviews"
+  },
+  {
+   "baseline": 818.5,
+   "frame": [
+    515,
+    808,
+    7,
+    14
+   ],
+   "part": "whichKey.entryKey",
+   "text": "S"
+  },
+  {
+   "baseline": 818.5,
+   "frame": [
+    528,
+    808,
+    49,
+    14
+   ],
+   "part": "whichKey.entryLabel",
+   "text": "Session \u203a"
+  },
+  {
+   "baseline": 818.5,
+   "frame": [
+    739,
+    808,
+    7,
+    14
+   ],
+   "part": "whichKey.entryKey",
+   "text": "r"
+  },
+  {
+   "baseline": 818.5,
+   "frame": [
+    752,
+    808,
+    86,
+    14
+   ],
+   "part": "whichKey.entryLabel",
+   "text": "Pending reviews"
+  },
+  {
+   "frame": [
+    498,
+    826,
+    220,
+    22
+   ],
+   "part": "whichKey.entry",
+   "text": "W Why this line"
+  },
+  {
+   "frame": [
+    722,
+    826,
+    220,
+    22
+   ],
+   "part": "whichKey.entry",
+   "text": "s Stop"
+  },
+  {
+   "baseline": 840.5,
+   "frame": [
+    515,
+    830,
+    7,
+    14
+   ],
+   "part": "whichKey.entryKey",
+   "text": "W"
+  },
+  {
+   "baseline": 840.5,
+   "frame": [
+    528,
+    830,
+    68,
+    14
+   ],
+   "part": "whichKey.entryLabel",
+   "text": "Why this line"
+  },
+  {
+   "baseline": 840.5,
+   "frame": [
+    739,
+    830,
+    7,
+    14
+   ],
+   "part": "whichKey.entryKey",
+   "text": "s"
+  },
+  {
+   "baseline": 840.5,
+   "frame": [
+    752,
+    830,
+    25,
+    14
+   ],
+   "part": "whichKey.entryLabel",
+   "text": "Stop"
+  },
+  {
+   "frame": [
+    498,
+    848,
+    220,
+    22
+   ],
+   "part": "whichKey.entry",
+   "text": "a Agent view"
+  },
+  {
+   "frame": [
+    722,
+    848,
+    220,
+    22
+   ],
+   "part": "whichKey.entry",
+   "text": "u Undo all agent edits"
+  },
+  {
+   "baseline": 862.5,
+   "frame": [
+    515,
+    852,
+    7,
+    14
+   ],
+   "part": "whichKey.entryKey",
+   "text": "a"
+  },
+  {
+   "baseline": 862.5,
+   "frame": [
+    528,
+    852,
+    58,
+    14
+   ],
+   "part": "whichKey.entryLabel",
+   "text": "Agent view"
+  },
+  {
+   "baseline": 862.5,
+   "frame": [
+    739,
+    852,
+    7,
+    14
+   ],
+   "part": "whichKey.entryKey",
+   "text": "u"
+  },
+  {
+   "baseline": 862.5,
+   "frame": [
+    752,
+    852,
+    105,
+    14
+   ],
+   "part": "whichKey.entryLabel",
+   "text": "Undo all agent edits"
+  },
+  {
+   "frame": [
+    498,
+    870,
+    220,
+    22
+   ],
+   "part": "whichKey.entry",
+   "text": "e Rewrite selection"
+  },
+  {
+   "frame": [
+    722,
+    870,
+    220,
+    22
+   ],
+   "part": "whichKey.entry",
+   "text": "v Conversation split"
+  },
+  {
+   "baseline": 884.5,
+   "frame": [
+    515,
+    874,
+    7,
+    14
+   ],
+   "part": "whichKey.entryKey",
+   "text": "e"
+  },
+  {
+   "baseline": 884.5,
+   "frame": [
+    528,
+    874,
+    91,
+    14
+   ],
+   "part": "whichKey.entryLabel",
+   "text": "Rewrite selection"
+  },
+  {
+   "baseline": 884.5,
+   "frame": [
+    739,
+    874,
+    7,
+    14
+   ],
+   "part": "whichKey.entryKey",
+   "text": "v"
+  },
+  {
+   "baseline": 884.5,
+   "frame": [
+    752,
+    874,
+    95,
+    14
+   ],
+   "part": "whichKey.entryLabel",
+   "text": "Conversation split"
+  },
+  {
+   "frame": [
+    498,
+    892,
+    220,
+    22
+   ],
+   "part": "whichKey.entry",
+   "text": "n New session"
+  },
+  {
+   "frame": [
+    722,
+    892,
+    220,
+    22
+   ],
+   "part": "whichKey.entry",
+   "text": "x Context \u203a"
+  },
+  {
+   "baseline": 906.5,
+   "frame": [
+    515,
+    896,
+    7,
+    14
+   ],
+   "part": "whichKey.entryKey",
+   "text": "n"
+  },
+  {
+   "baseline": 906.5,
+   "frame": [
+    528,
+    896,
+    66,
+    14
+   ],
+   "part": "whichKey.entryLabel",
+   "text": "New session"
+  },
+  {
+   "baseline": 906.5,
+   "frame": [
+    739,
+    896,
+    7,
+    14
+   ],
+   "part": "whichKey.entryKey",
+   "text": "x"
+  },
+  {
+   "baseline": 906.5,
+   "frame": [
+    752,
+    896,
+    50,
+    14
+   ],
+   "part": "whichKey.entryLabel",
+   "text": "Context \u203a"
+  },
+  {
+   "frame": [
+    0,
+    904,
+    1440,
+    24
+   ],
+   "part": "modeline"
+  },
+  {
+   "frame": [
+    0,
+    904,
+    26,
+    24
+   ],
+   "part": "modeline.control"
+  },
+  {
+   "frame": [
+    32,
+    904,
+    26,
+    24
+   ],
+   "part": "modeline.control"
+  },
+  {
+   "frame": [
+    1406,
+    904,
+    26,
+    24
+   ],
+   "part": "modeline.control"
+  },
+  {
+   "frame": [
+    114,
+    907.5,
+    61,
+    17
+   ],
+   "part": "modeline.modePill",
+   "text": "NORMAL"
+  },
+  {
+   "frame": [
+    114,
+    907.5,
+    61,
+    17
+   ],
+   "part": "modeline.segment",
+   "text": "mode:  NORMAL "
+  },
+  {
+   "frame": [
+    183,
+    909,
+    73,
+    14
+   ],
+   "part": "modeline.segment",
+   "text": "filename:  storyboard.ex "
+  },
+  {
+   "frame": [
+    1180,
+    909,
+    55,
+    14
+   ],
+   "part": "modeline.segment",
+   "text": "indent:  Spaces:2 "
+  },
+  {
+   "frame": [
+    1243,
+    909,
+    43,
+    14
+   ],
+   "part": "modeline.segment",
+   "text": "filetype:  \ue62d Elixir "
+  },
+  {
+   "frame": [
+    1294,
+    909,
+    75,
+    14
+   ],
+   "part": "modeline.segment",
+   "text": "position:  1:1 "
+  },
+  {
+   "frame": [
+    1377,
+    909,
+    21,
+    14
+   ],
+   "part": "modeline.segment",
+   "text": "percent:  0% "
+  },
+  {
+   "baseline": 919,
+   "frame": [
+    122,
+    909.5,
+    45,
+    13
+   ],
+   "part": "modeline.modeText",
+   "text": "NORMAL"
+  }
+ ],
+ "scenario": "minga.whichkey",
+ "size": "1440",
+ "theme": "catppuccin_latte",
+ "window": {
+  "height": 928,
+  "width": 1440
+ }
+}

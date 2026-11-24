@@ -616,12 +616,10 @@ jobs:
           mkdir "$smoke"
           cp "linux/packages/minga_${VERSION}_amd64.deb" "linux/packages/minga-$VERSION.x86_64.rpm" \
             "bundle/minga_${VERSION}_linux_x86_64.tar.gz" "$smoke/"
-          cp LICENSE "$smoke/LICENSE-$VERSION"
           sha() { sha256sum "$1" | cut -d ' ' -f 1; }
-          scripts/render-aur-pkgbuild --version "$VERSION" --source-sha "$SOURCE_SHA" \
+          scripts/render-aur-pkgbuild --version "$VERSION" --source-sha "$SOURCE_SHA" --sources "$smoke" \
             --x86-64-sha256 "$(sha "bundle/minga_${VERSION}_linux_x86_64.tar.gz")" \
-            --aarch64-sha256 "$(sha "bundle/minga_${VERSION}_linux_aarch64.tar.gz")" \
-            --license-sha256 "$(sha LICENSE)" > "$smoke/PKGBUILD"
+            --aarch64-sha256 "$(sha "bundle/minga_${VERSION}_linux_aarch64.tar.gz")" > "$smoke/PKGBUILD"
           scripts/smoke-linux-packages "$smoke" "$VERSION"
       - name: Retain the tested packages and the toolchain that built them
         id: upload
@@ -790,16 +788,37 @@ jobs:
         with:
           ref: ${{ github.workflow_sha }}
           persist-credentials: false
-      - name: Check for the AUR publishing key
+      # The key can exist before an AUR account accepts it (new AUR accounts are currently restricted).
+      # An unregistered key skips with a warning; any other SSH failure fails the job.
+      - name: Check that the AUR accepts the publishing key
         id: key
         env:
           AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
         run: |
-          if [ -n "$AUR_SSH_PRIVATE_KEY" ]; then
-            echo "configured=true" >> "$GITHUB_OUTPUT"
-          else
+          set -uo pipefail
+          # GitHub runs this step with bash -e, so capture ssh's failure instead of letting it end the step.
+          status=0
+          if [ -z "$AUR_SSH_PRIVATE_KEY" ]; then
             echo "::notice::AUR_SSH_PRIVATE_KEY is not configured; skipping AUR publication."
             echo "configured=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          key="$RUNNER_TEMP/aur-key"
+          known_hosts="$RUNNER_TEMP/aur-known-hosts"
+          trap 'rm -f "$key"' EXIT
+          (umask 077 && printf '%s\n' "$AUR_SSH_PRIVATE_KEY" > "$key")
+          printf '%s\n' "$AUR_KNOWN_HOSTS" > "$known_hosts"
+          ssh -i "$key" -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$known_hosts" aur@aur.archlinux.org help > "$RUNNER_TEMP/aur-ssh.log" 2>&1 || status=$?
+          if [ "$status" -eq 0 ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          elif grep -q 'Permission denied' "$RUNNER_TEMP/aur-ssh.log"; then
+            echo "::warning::The AUR does not accept AUR_SSH_PRIVATE_KEY yet; skipping AUR publication. Register its public key on the AUR account that maintains minga-bin (docs/RELEASING.md)."
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+          else
+            cat "$RUNNER_TEMP/aur-ssh.log" >&2
+            echo "::error::Could not reach the AUR over SSH (exit $status)."
+            exit 1
           fi
       - name: Render the PKGBUILD from the public release
         if: steps.key.outputs.configured == 'true'
@@ -815,8 +834,7 @@ jobs:
           mkdir aur
           scripts/render-aur-pkgbuild --version "$VERSION" --source-sha "$SOURCE_SHA" \
             --x86-64-sha256 "$(digest "minga_${VERSION}_linux_x86_64.tar.gz")" \
-            --aarch64-sha256 "$(digest "minga_${VERSION}_linux_aarch64.tar.gz")" \
-            --license-sha256 "$(sha256sum LICENSE | cut -d ' ' -f 1)" > aur/PKGBUILD
+            --aarch64-sha256 "$(digest "minga_${VERSION}_linux_aarch64.tar.gz")" > aur/PKGBUILD
       - name: Build and install the PKGBUILD from public downloads, then write .SRCINFO
         if: steps.key.outputs.configured == 'true'
         run: |
@@ -918,13 +936,14 @@ jobs:
           set -euo pipefail
           gh api "repos/$GITHUB_REPOSITORY/releases/tags/v$VERSION" > release.json
           jq -e --arg sha "$SOURCE_SHA" '.draft == false and .prerelease == true and .target_commitish == $sha' release.json
-          mkdir assets
+          # The checkout already has an assets/ directory (icons), so download outside it.
+          mkdir "$RUNNER_TEMP/release-assets"
           for name in "minga_${VERSION}_amd64.deb" "minga_${VERSION}_arm64.deb" \
             "minga-$VERSION.x86_64.rpm" "minga-$VERSION.aarch64.rpm" \
             "minga_${VERSION}_linux_x86_64.tar.gz" "minga_${VERSION}_linux_aarch64.tar.gz"; do
             digest=$(jq -er --arg name "$name" '[.assets[] | select(.name == $name and .state == "uploaded")] | select(length == 1) | .[0].digest | select(test("^sha256:[0-9a-f]{64}$")) | ltrimstr("sha256:")' release.json)
-            gh release download "v$VERSION" --repo "$GITHUB_REPOSITORY" --pattern "$name" --dir assets
-            printf '%s  assets/%s\n' "$digest" "$name" | sha256sum --check --strict
+            gh release download "v$VERSION" --repo "$GITHUB_REPOSITORY" --pattern "$name" --dir "$RUNNER_TEMP/release-assets"
+            printf '%s  %s/%s\n' "$digest" "$RUNNER_TEMP/release-assets" "$name" | sha256sum --check --strict
           done
       - name: Build the signed repositories
         if: steps.credentials.outputs.configured == 'true'
@@ -935,7 +954,7 @@ jobs:
           key="$RUNNER_TEMP/package-signing-key.asc"
           trap 'rm -f "$key"' EXIT
           (umask 077 && printf '%s\n' "$PACKAGE_SIGNING_KEY" > "$key")
-          scripts/build-package-repos assets "$VERSION" "$SOURCE_SHA" "$key" "$PACKAGE_SIGNING_FINGERPRINT" repo-tree
+          scripts/build-package-repos "$RUNNER_TEMP/release-assets" "$VERSION" "$SOURCE_SHA" "$key" "$PACKAGE_SIGNING_FINGERPRINT" repo-tree
       - name: Install from the built repositories on clean distributions
         if: steps.credentials.outputs.configured == 'true'
         run: scripts/test-package-repos repo-tree "$VERSION"

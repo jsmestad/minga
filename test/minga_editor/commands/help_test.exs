@@ -85,8 +85,8 @@ defmodule MingaEditor.Commands.HelpTest do
       assert :ok = ActiveKeymap.bind(keymap, :normal, "SPC c l", :inspect_lsp, "Inspect LSP")
 
       sections = state |> Help.bindings_content() |> binding_sections()
-      headings = for {title, _rows} <- sections, title in ["+code", "+LSP"], do: title
-      assert headings == ["+code", "+LSP"]
+      headings = for {title, _rows} <- sections, title in ["Code", "LSP"], do: title
+      assert headings == ["Code", "LSP"]
 
       lsp_bindings =
         for {title, rows} <- sections,
@@ -97,8 +97,8 @@ defmodule MingaEditor.Commands.HelpTest do
         end
 
       assert lsp_bindings == [
-               {"+LSP", ["SPC c l", "inspect_lsp", "Inspect LSP *user*"]},
-               {"+LSP", ["SPC c l i", "lsp_info", "LSP info"]}
+               {"LSP", ["SPC c l", "inspect_lsp", "Inspect LSP *user*"]},
+               {"LSP", ["SPC c l i", "lsp_info", "LSP info"]}
              ]
     end
 
@@ -114,7 +114,7 @@ defmodule MingaEditor.Commands.HelpTest do
       assert {:prefix, branch} = Bindings.lookup(ActiveKeymap.leader_trie(keymap), {?x, 0})
 
       expected =
-        for {key, description} <- Bindings.children(branch) do
+        for {key, description, _kind} <- Bindings.children(branch) do
           assert {:command, command} = Bindings.lookup(branch, key)
           ["SPC x C-x", Atom.to_string(command), description <> " *user*"]
         end
@@ -135,20 +135,35 @@ defmodule MingaEditor.Commands.HelpTest do
       BufferProcess.set_filetype(state.workspace.buffers.active, :elixir)
 
       live = state |> Help.bindings_content() |> binding_sections()
-      assert binding_keys(live, "+file") == ["SPC f F", "SPC f f", "SPC f p", "SPC f s"]
-      file_rows = binding_rows(live, "+file")
+
+      assert binding_keys(live, "Files") == [
+               "SPC f F",
+               "SPC f f",
+               "SPC f o",
+               "SPC f p",
+               "SPC f s"
+             ]
+
+      file_rows = binding_rows(live, "Files")
       assert ["SPC f s", "save", "Save file"] in Enum.map(file_rows, &binding_columns/1)
 
-      page_sections = ["Ungrouped", "+filetype :elixir", "Movement", "Text objects"]
+      page_sections = ["Ungrouped", "Filetype :elixir", "Movement", "Text objects"]
       headings = for {title, _rows} <- live, title in page_sections, do: title
       assert headings == page_sections
-      refute List.keymember?(live, "+filetype", 0)
+      refute List.keymember?(live, "Filetype", 0)
 
       :ok = GenServer.stop(state.interaction.keymap_server)
       fallback = state |> Help.bindings_content() |> binding_sections()
 
-      assert binding_keys(fallback, "+file") == ["SPC f f", "SPC f F", "SPC f s", "SPC f p"]
-      refute List.keymember?(fallback, "+filetype :elixir", 0)
+      assert binding_keys(fallback, "Files") == [
+               "SPC f f",
+               "SPC f F",
+               "SPC f o",
+               "SPC f s",
+               "SPC f p"
+             ]
+
+      refute List.keymember?(fallback, "Filetype :elixir", 0)
 
       movement = binding_rows(fallback, "Movement")
       assert movement == binding_rows(live, "Movement")
@@ -178,7 +193,7 @@ defmodule MingaEditor.Commands.HelpTest do
 
       test_rows =
         Enum.filter(
-          binding_rows(sections, "+filetype :elixir"),
+          binding_rows(sections, "Filetype :elixir"),
           &String.starts_with?(&1, ["SPC m t a ", "SPC m t t "])
         )
 

@@ -910,6 +910,13 @@ final class EditorNSView: MTKView {
         gridDimensions(width: frame.width, height: frame.height)
     }
 
+    /// The editor grid this view reports for its current size and font (ADR-0001).
+    /// The storyboard renderer checks it against the grid a transcript was laid out in.
+    var reportedGrid: (cols: UInt16, rows: UInt16) {
+        let grid = currentGridDimensions()
+        return (grid.cols, grid.rows)
+    }
+
     private func gridDimensions(width: CGFloat, height: CGFloat, cellWidth: CGFloat? = nil, cellHeight: CGFloat? = nil) -> GridDimensions {
         let resolvedCellWidth = cellWidth ?? self.cellWidth
         let resolvedCellHeight = cellHeight ?? self.cellHeight

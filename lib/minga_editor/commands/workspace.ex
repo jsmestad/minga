@@ -655,6 +655,11 @@ defmodule MingaEditor.Commands.Workspace do
     execute: &agent_edits_discard/1
   )
 
+  command(:agent_edits_decide, "Publish or discard agent edits",
+    requires_buffer: false,
+    execute: &MingaEditor.PickerUI.open(&1, MingaEditor.UI.Picker.EditPublicationSource)
+  )
+
   command(:workspace_resolve_conflicts, "Resolve workspace conflicts",
     execute: &workspace_resolve_conflicts/1
   )

@@ -2119,7 +2119,7 @@ defmodule MingaEditor.Commands.Agent do
 
   Closes the loop for "jump from code into the agent": leaves the agent view,
   reopens the origin file, and places the cursor on the line the user pressed
-  `SPC g w` on. No-op with a status message when there is no active jump.
+  `SPC a W` on. No-op with a status message when there is no active jump.
   """
   @spec scope_provenance_return(state()) :: state()
   def scope_provenance_return(state) do

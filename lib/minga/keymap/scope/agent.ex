@@ -396,7 +396,7 @@ defmodule Minga.Keymap.Scope.Agent do
       {"Jump",
        [
          {"]c / [c", "Next / prev code block"},
-         {"gb", "Back to source line (after SPC g w)"}
+         {"gb", "Back to source line (after SPC a W)"}
        ]},
       {"Copy",
        [
@@ -417,17 +417,15 @@ defmodule Minga.Keymap.Scope.Agent do
          {"Ctrl-l", "Clear display"},
          {"s", "Session switcher"},
          {"SPC a n", "New local session"},
-         {"SPC a N", "Pick local/remote session"},
          {"SPC a s", "Abort agent turn"},
-         {"SPC a S", "Stop agent session"},
-         {"SPC a q", "Dequeue to editor"},
-         {"SPC a J", "Inspect queued inputs"},
-         {"SPC a f", "Queue follow-up from input"},
-         {"SPC a m", "Pick agent model"},
-         {"SPC a k / /tasks", "Inspect the conversation checklist"},
-         {"SPC a c", "Copy file to workspace…"},
-         {"SPC a o", "Open remote file"},
-         {"SPC a T", "Pick thinking level"}
+         {"SPC a q q", "Inspect queued inputs"},
+         {"SPC a q f", "Queue follow-up from input"},
+         {"SPC a S l", "Pick local/remote session"},
+         {"SPC a S s", "Stop agent session"},
+         {"SPC a S m", "Pick agent model"},
+         {"SPC a S t", "Pick thinking level"},
+         {"SPC a S k / /tasks", "Inspect the conversation checklist"},
+         {"SPC f o", "Open remote file"}
        ]},
       {"Panel",
        [

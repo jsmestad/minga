@@ -10,13 +10,24 @@ defmodule MingaEditor.BufferActivation do
   alias MingaEditor.WorkspaceWorkflow
 
   @type state :: EditorState.t()
-  @type option :: {:notify_shell?, boolean()} | {:replace_window_content?, boolean()}
+  @type option ::
+          {:notify_shell?, boolean()}
+          | {:replace_window_content?, boolean()}
+          | {:record_jump?, boolean()}
 
-  @doc "Activates a session buffer selection and optionally synchronizes shell presentation."
+  @doc """
+  Activates a session buffer selection and optionally synchronizes shell presentation.
+
+  Leaving one buffer for another records the place you left in the jump list, as Vim does when you edit another file. Walking the jump list and restoring a picker's origin pass `record_jump?: false`, and a picker preview never records.
+  """
   @spec activate(state(), SessionState.buffer_activation()) :: state()
   @spec activate(state(), SessionState.buffer_activation(), [option()]) :: state()
   def activate(%EditorState{} = state, activation, opts \\ []) when is_list(opts) do
     old_buffer = state.workspace.buffers.active
+    # A picker preview only shows a place; the confirmed pick is the jump.
+    record_jump? =
+      Keyword.get(opts, :record_jump?, true) and
+        state.buffer_lifecycle.buffer_add_context != :preview
 
     state = %{
       state
@@ -33,7 +44,11 @@ defmodule MingaEditor.BufferActivation do
         state
       end
 
-    HighlightSync.ensure_active_buffer_presentation(state, old_buffer)
+    state = HighlightSync.ensure_active_buffer_presentation(state, old_buffer)
+
+    if record_jump?,
+      do: MingaEditor.Editing.record_buffer_leave(state, old_buffer),
+      else: state
   end
 
   @doc "Refreshes shell presentation after the active buffer changes identity in place."

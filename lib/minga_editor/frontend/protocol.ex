@@ -591,7 +591,7 @@ defmodule MingaEditor.Frontend.Protocol do
           non_neg_integer(),
           non_neg_integer(),
           non_neg_integer(),
-          0..3
+          Minga.Parser.Protocol.structural_nav_action()
         ) :: binary()
   def encode_request_structural_nav(buffer_id, request_id, row, col, action),
     do:

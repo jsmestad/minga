@@ -71,28 +71,27 @@
         <div class="stage-head">
           <div>
             <h1>Elixir for Minga</h1>
-            <p class="stage-lead">You do not need to write Elixir at work to configure Minga. Pick your current editor below to translate four everyday patterns into <code>config.exs</code>, then test themes and presets in the live playground.</p>
+            <p class="stage-lead">Pick your current editor to translate everyday patterns into <code>config.exs</code>, then test themes and presets in the live playground.</p>
           </div>
           <nav class="stage-jumps" aria-label="Lesson sections">
             <a href="#translator">Translator</a>
             <a href="#config-builder">Live Playground</a>
-            <a href="#config-dsl">6 Primitives</a>
-            <a href="#next-layers">Graduating to SDK</a>
+            <a href="#config-dsl">Core Primitives</a>
           </nav>
         </div>
 
         <div id="translator" class="lab-box" data-elixir-translator>
-          <div class="lab-noscript">Enable JavaScript for the interactive Lua/Elisp/VS Code translator, or review the six config primitives below.</div>
+          <div class="lab-noscript">Enable JavaScript for the interactive Lua/Elisp/VS Code translator, or review the core config primitives below.</div>
         </div>
       </div>
     </section>
 
-    <section class="section" id="config-builder">
+    <section class="section section-tinted" id="config-builder">
       <div class="container">
         <div class="section-header">
           <p class="section-index"><span>01</span> Playground</p>
           <h2>Live-themed <code>config.exs</code> playground.</h2>
-          <p>Start from a preset or tweak any control below. Watch the live mini-editor preview apply your theme, line-number style, and tab indentation immediately, then copy the generated config and reload live with <kbd>SPC h r</kbd>.</p>
+          <p>Pick a preset or tweak any option to preview themes and copy a live-reloadable <code>config.exs</code> (<kbd>SPC h r</kbd>).</p>
         </div>
 
         <div class="lab-box" data-elixir-playground>
@@ -158,7 +157,7 @@
 
             <div class="builder-output">
               <div class="theme-preview-box" data-theme-preview aria-live="polite"></div>
-              <div class="code-card">
+              <div class="code-card is-frappe">
                 <div class="code-header">
                   <span>~/.config/minga/config.exs</span>
                   <button type="button" class="copy-btn" data-copy-target="cfg-preview-code">Copy</button>
@@ -192,47 +191,34 @@ extension :minga_git_extended,
       <div class="container">
         <div class="section-header">
           <p class="section-index"><span>02</span> Primitives</p>
-          <h2>Six building blocks cover 95% of everyday customization.</h2>
-          <p>Press <kbd>SPC f p</kbd> to open <code>~/.config/minga/config.exs</code>, edit it, and press <kbd>SPC h r</kbd> to reload options, keybindings, hooks, and command wrappers live. Parentheses on calls are optional and the last expression in a block is its return value.</p>
+          <h2>Five building blocks cover 95% of everyday customization.</h2>
+          <p>Press <kbd>SPC f p</kbd> to open <code>~/.config/minga/config.exs</code> and <kbd>SPC h r</kbd> to reload options, keybindings, hooks, and command wrappers live.</p>
         </div>
 
         <ul class="spec-ledger">
           <li class="spec-row">
             <span class="spec-key spec-key-strong"><code>set</code></span>
-            <span class="spec-detail"><strong>Typed editor options.</strong> Minga's default theme is Catppuccin Frappé (<code>:catppuccin_frappe</code>); invalid option names or types report a clear notice instead of failing silently.</span>
+            <span class="spec-detail"><strong>Typed editor options.</strong> Default theme is Catppuccin Frappé (<code>:catppuccin_frappe</code>); invalid names or types report a clear notice.</span>
           </li>
           <li class="spec-row">
             <span class="spec-key spec-key-strong"><code>for_filetype</code></span>
-            <span class="spec-detail"><strong>Per-language option overrides.</strong> Pass the filetype atom and keyword pairs: <code>for_filetype :go, tab_width: 4, indent_with: :tabs</code>.</span>
+            <span class="spec-detail"><strong>Per-language overrides</strong> via keyword pairs (tab width, indentation, formatters).</span>
           </li>
           <li class="spec-row">
             <span class="spec-key spec-key-strong"><code>bind</code> &amp; <code>command</code></span>
-            <span class="spec-detail"><strong>Custom commands and keybindings.</strong> Define an Elixir block with <code>command :name, "Description" do ... end</code> and bind it in a scope with <code>bind :normal, "SPC m t", :name, "Description"</code>.</span>
+            <span class="spec-detail"><strong>Custom commands and keybindings</strong> scoped to any mode or filetype.</span>
           </li>
           <li class="spec-row">
             <span class="spec-key spec-key-strong"><code>on</code> &amp; <code>advise</code></span>
-            <span class="spec-detail"><strong>Isolated hooks and Emacs-style advice.</strong> Lifecycle hooks (<code>on :after_save</code>) run asynchronously in separate Erlang VM processes; <code>advise</code> wraps any built-in command (<code>:before</code>, <code>:after</code>, <code>:around</code>, <code>:override</code>) with contained exceptions.</span>
+            <span class="spec-detail"><strong>Isolated hooks and Emacs-style advice</strong> (<code>:before</code>, <code>:after</code>, <code>:around</code>, <code>:override</code>) with contained exceptions.</span>
           </li>
           <li class="spec-row">
             <span class="spec-key spec-key-strong"><code>extension</code></span>
-            <span class="spec-detail"><strong>Supervised packages from Hex, Git, or local paths.</strong> Override any extension's <code>load_policy</code> (<code>:eager</code>, <code>:deferred</code>, or <code>{:on_command, [...]}</code>) without forking it.</span>
+            <span class="spec-detail"><strong>Supervised Hex, Git, or local packages</strong> with configurable <code>load_policy</code>.</span>
           </li>
         </ul>
-      </div>
-    </section>
 
-    <section class="section" id="next-layers">
-      <div class="container">
-        <div class="boundary-band">
-          <div class="boundary-col">
-            <h3>Graduating to <code>minga_sdk</code></h3>
-            <p>Move into a packaged extension when you need an OTP supervision tree, custom buffer surfaces, an internal <code>MingaAgent.InferenceRoute</code> proxy, runtime tree-sitter grammars, or Hex/Git distribution. Compiled package updates activate cleanly on restart (<a href="/docs/0003-extension-code-updates-require-a-new-vm-generation.html">ADR-0003</a>).</p>
-          </div>
-          <div class="boundary-col boundary-col-native">
-            <h3 data-status="planned" data-since="v0.1.0">Disposable &amp; reusable task workflows</h3>
-            <p data-status="planned" data-since="v0.1.0" data-pill="off">In v0.1.0, author readable Elixir workflows over real buffer and agent owners for a single migration or audit, inspect the diff, save to activate under an explicit revocable grant, and discard when the PR lands or keep across repos. See <a href="/extending">Extending Minga</a>.</p>
-          </div>
-        </div>
+        <p class="section-foot-link">Ready for OTP supervisors, corporate proxies, or v0.1.0 task workflows? <a href="/extending">Read Extending Minga -&gt;</a></p>
 
         <nav class="lesson-pager" aria-label="Lesson navigation">
           <a class="pager-link" href="/learn/agents">

@@ -52,7 +52,7 @@ defmodule MingaEditor.UI.WhichKeyTest do
 
   describe "format_bindings/1" do
     test "formats a list of key/label pairs into binding maps" do
-      children = [{{?f, 0}, "Find file"}, {{?s, 0}, "Save file"}]
+      children = [{{?f, 0}, "Find file", :command}, {{?s, 0}, "Save file", :command}]
       result = WhichKey.format_bindings(children)
 
       assert Enum.any?(
@@ -76,15 +76,32 @@ defmodule MingaEditor.UI.WhichKeyTest do
              )
     end
 
-    test "formats :prefix atom label as '+prefix' with group kind" do
-      result = WhichKey.format_bindings([{{?f, 0}, :prefix}])
+    test "formats an unnamed group as 'More' with group kind" do
+      result = WhichKey.format_bindings([{{?f, 0}, :prefix, :group}])
 
-      assert [%MingaEditor.UI.WhichKey.Binding{key: "f", description: "+prefix", kind: :group}] =
+      assert [%MingaEditor.UI.WhichKey.Binding{key: "f", description: "More", kind: :group}] =
                result
     end
 
+    test "group labels read like leaves: a legacy '+label' becomes Title Case" do
+      result =
+        WhichKey.format_bindings([
+          {{?g, 0}, "+git", :group},
+          {{?S, 0}, "Session", :group},
+          {{?x, 0}, "+context", :group}
+        ])
+
+      assert Enum.map(result, & &1.description) == ["Git", "Session", "Context"]
+      assert Enum.all?(result, &(&1.kind == :group))
+    end
+
+    test "a command label that starts with '+' stays a command" do
+      assert [%MingaEditor.UI.WhichKey.Binding{description: "+1 line", kind: :command}] =
+               WhichKey.format_bindings([{{?+, 0}, "+1 line", :command}])
+    end
+
     test "formats :unknown atom label as '?'" do
-      result = WhichKey.format_bindings([{{?x, 0}, :unknown}])
+      result = WhichKey.format_bindings([{{?x, 0}, :unknown, :command}])
 
       assert result == [
                %MingaEditor.UI.WhichKey.Binding{
@@ -97,7 +114,7 @@ defmodule MingaEditor.UI.WhichKeyTest do
     end
 
     test "formats arbitrary atom label as its string form" do
-      result = WhichKey.format_bindings([{{?q, 0}, :quit}])
+      result = WhichKey.format_bindings([{{?q, 0}, :quit, :command}])
 
       assert result == [
                %MingaEditor.UI.WhichKey.Binding{
@@ -110,13 +127,13 @@ defmodule MingaEditor.UI.WhichKeyTest do
     end
 
     test "attaches icon to known group labels" do
-      result = WhichKey.format_bindings([{{?g, 0}, "+git"}])
+      result = WhichKey.format_bindings([{{?g, 0}, "Git", :group}])
       assert [%MingaEditor.UI.WhichKey.Binding{kind: :group, icon: icon}] = result
       assert icon != nil
     end
 
     test "returns nil icon for unknown group labels" do
-      result = WhichKey.format_bindings([{{?z, 0}, "+zzz_unknown"}])
+      result = WhichKey.format_bindings([{{?z, 0}, "Zzz unknown", :group}])
       assert [%MingaEditor.UI.WhichKey.Binding{kind: :group, icon: nil}] = result
     end
 
@@ -160,7 +177,7 @@ defmodule MingaEditor.UI.WhichKeyTest do
              )
     end
 
-    test "labels prefix-only nodes as '+prefix' with group kind" do
+    test "labels prefix-only nodes as 'More' with group kind" do
       trie =
         Bindings.new()
         |> Bindings.bind([{?f, 0}, {?s, 0}], :save, "Save")
@@ -168,7 +185,7 @@ defmodule MingaEditor.UI.WhichKeyTest do
       # The `f` child is a prefix node with no description.
       bindings = WhichKey.bindings_from_node(trie)
 
-      assert [%MingaEditor.UI.WhichKey.Binding{key: "f", description: "+prefix", kind: :group}] =
+      assert [%MingaEditor.UI.WhichKey.Binding{key: "f", description: "More", kind: :group}] =
                bindings
     end
 
@@ -176,14 +193,14 @@ defmodule MingaEditor.UI.WhichKeyTest do
       trie =
         Bindings.new()
         |> Bindings.bind([{?f, 0}, {?s, 0}], :save, "Save")
-        |> Bindings.bind_prefix([{?f, 0}], "+file")
+        |> Bindings.bind_prefix([{?f, 0}], "Files")
 
       bindings = WhichKey.bindings_from_node(trie)
 
       assert [
                %MingaEditor.UI.WhichKey.Binding{
                  key: "f",
-                 description: "+file",
+                 description: "Files",
                  kind: :group,
                  icon: "󰈔"
                }

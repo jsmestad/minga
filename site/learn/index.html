@@ -70,8 +70,8 @@
         <div class="hub-hero-grid">
           <div>
             <p class="section-index"><span>LEARN</span> Interactive Curriculum</p>
-            <h1>Learn by pressing the keys, not skimming walls of prose.</h1>
-            <p class="hero-lead">Five focused lessons with live browser labs: an adaptive quickstart runbook, a playable Mini-Minga keyboard sandbox, a live co-authoring and parallel-agent simulator, an editor-to-Elixir translator with live theme previews, and a supervision fault-injection lab.</p>
+            <h1>Interactive labs and runbooks.</h1>
+            <p class="hero-lead">Five short lessons with live browser labs. Press real keys, trigger faults, and translate your config with zero setup.</p>
           </div>
           <div class="hub-progress-box">
             <span class="hub-progress-k">CURRICULUM STATUS</span>
@@ -95,20 +95,14 @@
                 </span>
               </div>
               <h2>Install &amp; Your First Staged Edit</h2>
-              <p>Tailor the runbook to your OS, client (macOS app or Terminal CLI), and key style (Vim or CUA), connect a model provider, review your first syntax-highlighted staged diff, and copy four working recipes.</p>
-              <div class="lesson-topics">
-                <span>Adaptive OS/client filter</span>
-                <span>/model &amp; 0600 keys</span>
-                <span>Staged diff review</span>
-                <span>4 starter recipes</span>
-              </div>
+              <p>Pick your platform (macOS Homebrew, Arch/Omarchy, Ubuntu/Debian, Fedora, or source), connect a model, review a staged diff, and grab four starter recipes.</p>
               <span class="bento-cta">Open quickstart runbook <span class="bento-arrow" aria-hidden="true">-&gt;</span></span>
             </div>
             <div class="bento-motif motif-cli" aria-hidden="true">
-              <div class="motif-bar"><span>zsh · quickstart</span><span>macOS / Linux</span></div>
+              <div class="motif-bar"><span>zsh · quickstart</span><span>macOS · Arch/Omarchy · Ubuntu · Fedora</span></div>
               <div class="motif-body">
                 <div><span class="motif-dim">$</span> brew install --cask jsmestad/minga/minga-mac</div>
-                <div><span class="motif-dim">$</span> minga .</div>
+                <div><span class="motif-dim">$</span> sudo pacman -Syu minga <span class="motif-dim"># Arch &amp; Omarchy</span></div>
                 <div class="motif-ok">● Ready · 0 files written to repo</div>
               </div>
             </div>
@@ -132,7 +126,7 @@
                 </span>
               </div>
               <h2>Editing, Keys &amp; Minimal UI</h2>
-              <p>Play a live keyboard-driven Mini-Minga viewport: trigger which-key, pin files in the Switcher, open the Direction A Act Menu, toggle macOS vs Go TUI parity, and explore ADR-0007 CUA.</p>
+              <p>Drive a live Mini-Minga viewport: trigger which-key, pin files in the Switcher, open the Act Menu, toggle macOS vs. Go TUI parity, and test CUA desktop shortcuts.</p>
               <span class="bento-cta">Launch playable sandbox <span class="bento-arrow" aria-hidden="true">-&gt;</span></span>
             </div>
           </a>
@@ -155,7 +149,7 @@
                 </span>
               </div>
               <h2>Co-Authoring &amp; Parallel Agents</h2>
-              <p>Test per-author undo inside a braided Twist block, feel the 300 ms anti-misfire lockout guard, inspect siblings in Subagent Peek, and keep or reject via the Direction A Act Menu.</p>
+              <p>Test per-author undo inside a Twist block, feel the 300 ms approval lockout, inspect workers in Subagent Peek, and keep or reject hunks via the Act Menu.</p>
               <span class="bento-cta">Open co-authoring simulator <span class="bento-arrow" aria-hidden="true">-&gt;</span></span>
             </div>
           </a>
@@ -208,61 +202,7 @@
             </div>
           </a>
         </div>
-      </div>
-    </section>
-
-    <section class="section" id="deep-references">
-      <div class="container">
-        <div class="section-header">
-          <p class="section-index"><span>REFERENCE</span> Go Deeper</p>
-          <h2>Architecture, ADRs, and full technical references.</h2>
-          <p>Use the site essays and ExDoc manuals whenever you need exact option tables, wire opcodes, or contributor contracts.</p>
-        </div>
-
-        <div class="guide-index" aria-label="Technical references">
-          <a class="guide-row" href="/why-minga">
-            <span class="guide-row-top">
-              <span class="guide-row-title">Why Minga</span>
-              <span class="guide-row-kind">Thesis</span>
-            </span>
-            <span class="guide-row-desc">Tradeoffs against Cursor, Zed, Neovim, Emacs, and terminal multiplexers, plus roadmap status.</span>
-          </a>
-          <a class="guide-row" href="/architecture">
-            <span class="guide-row-top">
-              <span class="guide-row-title">Architecture &amp; The Spine</span>
-              <span class="guide-row-kind">Diagrams</span>
-            </span>
-            <span class="guide-row-desc">Erlang VM supervision, native Swift/Go/Zig boundaries, staged edit pipeline, and ADRs 0001 to 0006.</span>
-          </a>
-          <a class="guide-row" href="/extending">
-            <span class="guide-row-top">
-              <span class="guide-row-title">Extending Minga</span>
-              <span class="guide-row-kind">Guide</span>
-            </span>
-            <span class="guide-row-desc">Three customization layers, minga_sdk packages, corporate gateways, and security boundaries.</span>
-          </a>
-          <a class="guide-row" href="/docs/0006-the-spine.html">
-            <span class="guide-row-top">
-              <span class="guide-row-title">ADR-0006: The Spine</span>
-              <span class="guide-row-kind">Decision Record</span>
-            </span>
-            <span class="guide-row-desc">The full interface contract shared identically by macOS and the Go terminal client.</span>
-          </a>
-          <a class="guide-row" href="/docs/configuration.html">
-            <span class="guide-row-top">
-              <span class="guide-row-title">Configuration Reference</span>
-              <span class="guide-row-kind">ExDoc</span>
-            </span>
-            <span class="guide-row-desc">Complete typed options, per-filetype rules, keymap scopes, hooks, and MCP settings.</span>
-          </a>
-          <a class="guide-row" href="/docs/extension_api.html">
-            <span class="guide-row-top">
-              <span class="guide-row-title">Extension API &amp; Hooks</span>
-              <span class="guide-row-kind">ExDoc</span>
-            </span>
-            <span class="guide-row-desc">Extension callbacks, load policies, InferenceRoute gateways, and runtime tree-sitter grammars.</span>
-          </a>
-        </div>
+        <p class="section-foot-link" style="margin-top:2rem;">Looking for specs instead of labs? Read <a href="/why-minga">Why Minga</a> · <a href="/architecture">Architecture &amp; ADRs</a> · <a href="/extending">Extending Minga</a> · <a href="/docs/">Reference &amp; API Docs</a>.</p>
       </div>
     </section>
   </main>
