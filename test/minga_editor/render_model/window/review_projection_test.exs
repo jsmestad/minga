@@ -2,11 +2,14 @@ defmodule MingaEditor.RenderModel.Window.ReviewProjectionTest do
   use ExUnit.Case, async: true
 
   alias Minga.Core.WidthOracle.Monospace
+  alias Minga.Language.Highlight.Span, as: HighlightSpan
   alias Minga.RenderModel.Window.ContentDigest
   alias Minga.RenderModel.Window.Row
   alias Minga.RenderModel.Window.RowDelta
   alias Minga.RenderModel.Window.RowSlotAllocator
+  alias Minga.RenderModel.Window.Span
   alias MingaEditor.Agent.DiffReview
+  alias MingaEditor.Agent.ReviewHighlights
   alias MingaEditor.Agent.View.Preview
   alias MingaEditor.RenderModel.Window.ReviewLayout
   alias MingaEditor.RenderModel.Window.ReviewProjection
@@ -106,7 +109,7 @@ defmodule MingaEditor.RenderModel.Window.ReviewProjectionTest do
     assert [header, removed, %{text: "+ first"} = added] = updated.rows
     assert [^header, ^removed, original_added] = previous.rows
     assert added.row_id == original_added.row_id
-    assert added.spans == [ReviewLayout.span(styled, :added)]
+    assert [%Span{start_col: 0, end_col: 2, fg: 0x123456} | _code] = added.spans
     assert added.spans != original_added.spans
     assert added.content_hash == Row.compute_hash(added.text, added.spans)
     assert [%{start_index: 2, delete_count: 1, insert_rows: [^added]}] = delta.splices
@@ -231,6 +234,115 @@ defmodule MingaEditor.RenderModel.Window.ReviewProjectionTest do
     assert project(nil, Preview.new(), RowSlotAllocator.new()) == {:error, :review_unavailable}
   end
 
+  describe "syntax and status presentation" do
+    # Original:  "x = :old\ny = 1"   Post-image: "x = :new\ny = 1"
+    @before_text "x = :old\ny = 1"
+    @after_text "x = :new\ny = 1"
+
+    test "without a ready parse, changed lines keep flat status colors on a full-width tint" do
+      theme = Theme.get!(:minga_default)
+      preview = Preview.set_diff(Preview.new(), DiffReview.new("a.ex", @before_text, @after_text))
+      {:ok, projection, _allocator, nil} = project(nil, preview, RowSlotAllocator.new())
+
+      removed = row_with_text(projection, "- x = :old")
+      added = row_with_text(projection, "+ x = :new")
+      context = row_with_text(projection, "  y = 1")
+
+      assert [sign, code, fill] = removed.spans
+      assert %Span{start_col: 0, end_col: 2, fg: fg} = sign
+      assert fg == theme.git.deleted_fg
+      assert %Span{start_col: 2, end_col: 10, fg: ^fg} = code
+      assert %Span{start_col: 10, end_col: 80} = fill
+      assert Enum.uniq(Enum.map(removed.spans, & &1.bg)) == [tint(theme, :removed)]
+
+      assert Enum.all?(added.spans, &(&1.bg == tint(theme, :added)))
+      assert span_at(added, 79).bg == tint(theme, :added)
+      assert Enum.all?(context.spans, &(&1.bg == 0))
+      refute Enum.any?(context.spans, &(&1.end_col > String.length(context.text)))
+    end
+
+    test "the header tint differs from both line tints so hunks stay distinguishable" do
+      theme = Theme.get!(:minga_default)
+      preview = Preview.set_diff(Preview.new(), DiffReview.new("a.ex", @before_text, @after_text))
+      {:ok, projection, _allocator, nil} = project(nil, preview, RowSlotAllocator.new())
+      [header | _rows] = projection.rows
+
+      header_bg = header.spans |> Enum.map(& &1.bg) |> Enum.uniq()
+      assert [bg] = header_bg
+      refute bg in [0, tint(theme, :added), tint(theme, :removed)]
+    end
+
+    test "ready parses color removed, added, and context lines from their own side" do
+      theme = Theme.get!(:minga_default)
+      symbol_fg = Keyword.fetch!(theme.syntax["string.special.symbol"], :fg)
+      number_fg = Keyword.fetch!(theme.syntax["number"], :fg)
+      preview = Preview.set_diff(Preview.new(), DiffReview.new("a.ex", @before_text, @after_text))
+
+      # The old side highlights ":old" and the context "1"; the new side highlights ":new".
+      syntax = %{
+        old: ready(:old, [{4, 8, 0}, {13, 14, 1}]),
+        new: ready(:new, [{4, 8, 0}])
+      }
+
+      layout = ReviewLayout.new(80, %Monospace{}, theme, 4, syntax)
+      {:ok, projection, _allocator, nil} = project(nil, preview, RowSlotAllocator.new(), layout)
+
+      removed = row_with_text(projection, "- x = :old")
+      added = row_with_text(projection, "+ x = :new")
+      context = row_with_text(projection, "  y = 1")
+
+      assert span_at(removed, 6).fg == symbol_fg
+      assert span_at(removed, 6).bg == tint(theme, :removed)
+      assert span_at(removed, 0).fg == theme.git.deleted_fg
+      assert span_at(removed, 2).fg == theme.editor.fg
+
+      assert span_at(added, 6).fg == symbol_fg
+      assert span_at(added, 6).bg == tint(theme, :added)
+      assert span_at(added, 0).fg == theme.git.added_fg
+
+      assert span_at(context, 6).fg == number_fg
+      assert span_at(context, 6).bg == 0
+    end
+
+    test "a parse that arrives later restyles rows in place without new identities" do
+      theme = Theme.get!(:minga_default)
+      preview = Preview.set_diff(Preview.new(), DiffReview.new("a.ex", @before_text, @after_text))
+      {:ok, flat, allocator, nil} = project(nil, preview, RowSlotAllocator.new())
+
+      layout = ReviewLayout.new(80, %Monospace{}, theme, 4, %{new: ready(:new, [{4, 8, 0}])})
+
+      assert {:ok, highlighted, _allocator, %RowDelta{} = delta} =
+               project(flat, preview, allocator, layout)
+
+      assert Enum.map(highlighted.rows, & &1.row_id) == Enum.map(flat.rows, & &1.row_id)
+      assert apply_delta(flat.rows, delta) == highlighted.rows
+      assert row_with_text(highlighted, "+ x = :new") != row_with_text(flat, "+ x = :new")
+      assert row_with_text(highlighted, "- x = :old") == row_with_text(flat, "- x = :old")
+    end
+
+    test "syntax segments survive tab expansion and wrapping" do
+      theme = Theme.get!(:minga_default)
+      symbol_fg = Keyword.fetch!(theme.syntax["string.special.symbol"], :fg)
+      after_text = "\tx = :new"
+      preview = Preview.set_diff(Preview.new(), DiffReview.new("a.ex", "x", after_text))
+      syntax = %{new: {{"elixir", "new"}, ["string.special.symbol"], pack([{5, 9, 0}])}}
+      layout = ReviewLayout.new(8, %Monospace{}, theme, 4, syntax)
+      {:ok, projection, _allocator, nil} = project(nil, preview, RowSlotAllocator.new(), layout)
+
+      # "+ " then a tab to column 4 leaves "+   x =" on the first row and " :new" on the next.
+      assert [first, second] =
+               projection.rows
+               |> Enum.drop_while(&(not String.starts_with?(&1.text, "+ ")))
+               |> Enum.take(2)
+
+      assert {first.text, second.text} == {"+   x =", " :new"}
+      assert span_at(second, 2).fg == symbol_fg
+      assert span_at(second, 0).fg == theme.editor.fg
+      assert Enum.all?(first.spans ++ second.spans, &(&1.bg == tint(theme, :added)))
+      assert span_at(second, 7).bg == tint(theme, :added)
+    end
+  end
+
   defp project(previous, preview, allocator, layout \\ layout()) do
     ReviewProjection.refresh(previous, preview, @selection, layout, allocator, @epoch)
   end
@@ -243,6 +355,34 @@ defmodule MingaEditor.RenderModel.Window.ReviewProjectionTest do
       ThemeBuilder.apply_overrides(Theme.get!(:minga_default), %{git: %{added_fg: 0x123456}})
 
     ReviewLayout.new(80, %Monospace{}, theme, 4)
+  end
+
+  defp ready(side, spans) do
+    names = ["string.special.symbol", "number"]
+    {{"elixir", Atom.to_string(side)}, names, pack(spans)}
+  end
+
+  defp pack(spans) do
+    spans
+    |> Enum.map(fn {start, stop, capture} -> HighlightSpan.new(start, stop, capture) end)
+    |> ReviewHighlights.pack_spans()
+  end
+
+  defp row_with_text(projection, text), do: Enum.find(projection.rows, &(&1.text == text))
+
+  defp span_at(row, col), do: Enum.find(row.spans, &(&1.start_col <= col and col < &1.end_col))
+
+  # Mirrors the documented tint: 18% of the status color over the editor background.
+  defp tint(theme, kind) do
+    color = if kind == :added, do: theme.git.added_fg, else: theme.git.deleted_fg
+    bg = theme.editor.bg
+
+    for shift <- [16, 8, 0], reduce: 0 do
+      acc ->
+        base = Bitwise.band(Bitwise.bsr(bg, shift), 0xFF)
+        mixed = Bitwise.band(Bitwise.bsr(color, shift), 0xFF)
+        Bitwise.bor(acc, Bitwise.bsl(div(base * 82 + mixed * 18 + 50, 100), shift))
+    end
   end
 
   defp insertion_review(lines) do

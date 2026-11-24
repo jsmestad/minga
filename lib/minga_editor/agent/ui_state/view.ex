@@ -14,6 +14,7 @@ defmodule MingaEditor.Agent.UIState.View do
   alias MingaEditor.Agent.DiffReview
   alias MingaEditor.Agent.EditTimeline
   alias MingaEditor.Agent.Activity
+  alias MingaEditor.Agent.ReviewHighlights
   alias MingaEditor.Agent.UIState.Presentation
   alias MingaEditor.Agent.UIState.ReturnTarget
   alias MingaEditor.Agent.UIState.Compaction
@@ -52,6 +53,7 @@ defmodule MingaEditor.Agent.UIState.View do
   @type t :: %__MODULE__{
           presentation: Presentation.t(),
           preview: Preview.t(),
+          review_highlights: ReviewHighlights.t(),
           chat_width_pct: non_neg_integer(),
           help_visible: boolean(),
           search: search_state() | nil,
@@ -69,6 +71,7 @@ defmodule MingaEditor.Agent.UIState.View do
 
   defstruct presentation: %Presentation{},
             preview: Preview.new(),
+            review_highlights: ReviewHighlights.new(),
             chat_width_pct: 65,
             help_visible: false,
             search: nil,
@@ -280,6 +283,21 @@ defmodule MingaEditor.Agent.UIState.View do
   @spec replace_preview(t(), Preview.t()) :: t()
   def replace_preview(%__MODULE__{} = view, %Preview{} = preview) do
     %{view | preview: preview}
+  end
+
+  @doc "Installs the review highlight results produced by a ReviewHighlights transition."
+  @spec replace_review_highlights(t(), ReviewHighlights.t()) :: t()
+  def replace_review_highlights(%__MODULE__{} = view, %ReviewHighlights{} = highlights) do
+    %{view | review_highlights: highlights}
+  end
+
+  @doc "Drops Editor-only planning state from a renderer snapshot."
+  @spec render_snapshot(t()) :: t()
+  def render_snapshot(%__MODULE__{review_highlights: highlights} = view) do
+    case ReviewHighlights.render_snapshot(highlights) do
+      ^highlights -> view
+      snapshot -> %{view | review_highlights: snapshot}
+    end
   end
 
   @type diff_resolution_action :: :accept_current | :reject_current | :accept_all | :reject_all

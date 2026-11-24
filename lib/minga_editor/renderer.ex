@@ -17,6 +17,7 @@ defmodule MingaEditor.Renderer do
   """
 
   alias MingaEditor.Agent.Arrival
+  alias MingaEditor.Agent.ReviewHighlightWorkflow
   alias MingaEditor.RenderPipeline.Intent
   alias MingaEditor.Renderer.Submission
   alias MingaEditor.Renderer.Server, as: RendererServer
@@ -205,6 +206,8 @@ defmodule MingaEditor.Renderer do
 
   @spec prepare_submission(state(), non_neg_integer()) :: {state(), Submission.t()}
   defp prepare_submission(state, revision) do
+    # Review parses start here, off the frame: the Renderer only reads results that already arrived.
+    state = ReviewHighlightWorkflow.request(state)
     intent = Intent.from_editor_state(state, revision)
 
     {render, submission} =

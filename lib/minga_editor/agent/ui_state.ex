@@ -385,10 +385,10 @@ defmodule MingaEditor.Agent.UIState do
 
   @doc "Returns a renderer-boundary copy whose transcript travels separately as presentation changes."
   @spec render_snapshot(t()) :: t()
-  def render_snapshot(%__MODULE__{panel: panel} = state) do
-    case Panel.render_snapshot(panel) do
-      ^panel -> state
-      snapshot -> %{state | panel: snapshot}
+  def render_snapshot(%__MODULE__{panel: panel, view: view} = state) do
+    case {Panel.render_snapshot(panel), View.render_snapshot(view)} do
+      {^panel, ^view} -> state
+      {panel, view} -> %{state | panel: panel, view: view}
     end
   end
 
@@ -632,6 +632,12 @@ defmodule MingaEditor.Agent.UIState do
   @spec replace_preview(t(), Preview.t()) :: t()
   def replace_preview(%__MODULE__{view: view} = state, %Preview{} = preview) do
     %{state | view: View.replace_preview(view, preview)}
+  end
+
+  @doc "Installs the review highlight results produced by a ReviewHighlights transition."
+  @spec replace_review_highlights(t(), MingaEditor.Agent.ReviewHighlights.t()) :: t()
+  def replace_review_highlights(%__MODULE__{view: view} = state, highlights) do
+    %{state | view: View.replace_review_highlights(view, highlights)}
   end
 
   @doc "Sets the pending prefix for multi-key sequences."

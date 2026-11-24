@@ -955,6 +955,26 @@ final class CoreTextMetalRenderer {
                     let displayRow = command.displayRow
                     let presentationRow = command.presentationRow
                     let yPos = scrollableWindowRowOffset + Float(presentationRow) * displayCellH * scale
+
+                    // Span backgrounds cover their whole column range, including columns past the
+                    // row text (a Diff Review line tint), so read the unclipped resident row. The
+                    // prompt composites over SwiftUI chrome on a transparent target and keeps it.
+                    let sourceRowIndex = Int(command.rowIndex) - preparedRows.range.lowerBound
+                    if !renderingPrompt, preparedRows.rows.indices.contains(sourceRowIndex),
+                       let clippedRow = CoreTextMetalRenderer.clipVerticalQuad(y: yPos, height: displayCellH * scale, top: contentTopPx, bottom: contentBottomPx) {
+                        let rowOriginX = contentColOffset - Float(scrollLeftInt) * cellW * scale - scrollableWindowColOffset
+                        for span in preparedRows.rows[sourceRowIndex].spans where span.bg != 0 && span.endCol > span.startCol {
+                            let left = max(rowOriginX + Float(span.startCol) * cellW * scale, contentColOffset)
+                            let right = min(rowOriginX + Float(span.endCol) * cellW * scale, contentRightPx)
+                            guard right > left else { continue }
+                            var quad = QuadGPU()
+                            quad.position = SIMD2<Float>(left, clippedRow.y)
+                            quad.size = SIMD2<Float>(right - left, clippedRow.height)
+                            quad.color = colorFromU24(span.bg, default: defaultBg)
+                            quad.alpha = 1.0
+                            bgQuads.append(quad)
+                        }
+                    }
                     let textYOffset = (displayCellH - cellH) * scale * 0.5
                     let rawLineY = yPos + textYOffset
                     guard CoreTextMetalRenderer.clipVerticalQuad(y: rawLineY, height: Float(wcr.linePixelHeight), top: contentTopPx, bottom: contentBottomPx) != nil else { continue }
