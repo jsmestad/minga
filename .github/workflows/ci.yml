@@ -108,6 +108,7 @@ jobs:
               "scripts/render-aur-pkgbuild",
               "test/scripts/render_aur_pkgbuild_test.py",
               "scripts/smoke-linux-packages",
+              "scripts/linux-packaging-toolchain",
           ]
 
           def changed_paths(revision_range):
@@ -849,6 +850,7 @@ jobs:
           python3 -B test/scripts/render_aur_pkgbuild_test.py
           bash -n scripts/qualify-homebrew-upgrade
           bash -n scripts/smoke-linux-packages
+          bash -n scripts/linux-packaging-toolchain
       - name: Verify Debian and RPM package assembly
         if: runner.os == 'Linux'
         run: |

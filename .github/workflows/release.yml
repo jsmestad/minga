@@ -452,7 +452,7 @@ jobs:
     name: Verify uploaded final bytes and bind immutable candidate handle
     needs: [validate, build]
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 30
     outputs:
       recipe_artifact_id: ${{ steps.homebrew-recipes.outputs.artifact-id }}
       manifest_id: ${{ steps.manifest.outputs.artifact-id }}
@@ -554,30 +554,6 @@ jobs:
             --arm64 homebrew-input/minga_macos_aarch64.tar.gz \
             --dmg homebrew-input/Minga.dmg --output homebrew-recipes
           cp preparation-receipt.json manifest.json homebrew-recipes/
-      # The publisher rebuilds these packages from the verified tarballs and requires identical bytes,
-      # so it uploads exactly the packages installed here.
-      - name: Build Linux packages from verified payloads and install them on clean distributions
-        if: github.event_name == 'push'
-        shell: bash
-        run: |
-          set -euo pipefail
-          version=$(jq -er .version context.json)
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends rpm
-          for arch in x86_64 aarch64; do
-            scripts/build-tui-packages "homebrew-input/minga_linux_$arch.tar.gz" --version "$version" --arch "$arch" --output homebrew-recipes/linux
-          done
-          smoke="$RUNNER_TEMP/linux-smoke"
-          mkdir "$smoke"
-          cp "homebrew-recipes/linux/minga_${version}_amd64.deb" "homebrew-recipes/linux/minga-$version.x86_64.rpm" "$smoke/"
-          cp homebrew-input/minga_linux_x86_64.tar.gz "$smoke/minga_${version}_linux_x86_64.tar.gz"
-          cp LICENSE "$smoke/LICENSE-$version"
-          sha() { sha256sum "$1" | cut -d ' ' -f 1; }
-          scripts/render-aur-pkgbuild --version "$version" --source-sha "$(jq -er .source_sha context.json)" \
-            --x86-64-sha256 "$(sha homebrew-input/minga_linux_x86_64.tar.gz)" \
-            --aarch64-sha256 "$(sha homebrew-input/minga_linux_aarch64.tar.gz)" \
-            --license-sha256 "$(sha LICENSE)" > "$smoke/PKGBUILD"
-          scripts/smoke-linux-packages "$smoke" "$version"
       - name: Retain unpublished Homebrew recipes and candidate receipt
         if: github.event_name == 'push'
         id: homebrew-recipes
@@ -585,6 +561,74 @@ jobs:
         with:
           name: homebrew-recipes-${{ github.run_id }}-${{ github.run_attempt }}
           path: homebrew-recipes/
+          if-no-files-found: error
+          retention-days: ${{ env.RETENTION_DAYS }}
+          overwrite: false
+
+  # Linux packaging runs in its own job so that a Docker, mirror or distribution failure can be
+  # repaired with "Re-run failed jobs" instead of rebuilding and re-verifying the whole candidate.
+  # The publisher rebuilds these packages and requires identical bytes, so it uploads exactly
+  # the packages installed here.
+  linux-packages:
+    name: Build and install-test Linux packages
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && github.repository == 'jsmestad/minga'
+    needs: [validate, finalize]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      artifact_id: ${{ steps.upload.outputs.artifact-id }}
+    env:
+      VERSION: ${{ needs.validate.outputs.version }}
+      SOURCE_SHA: ${{ needs.validate.outputs.source_sha }}
+      CANDIDATE_CONTEXT: ${{ needs.validate.outputs.context }}
+      MANIFEST_ID: ${{ needs.finalize.outputs.manifest_id }}
+      MANIFEST_SHA: ${{ needs.finalize.outputs.manifest_sha }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          artifact-ids: ${{ needs.finalize.outputs.recipe_artifact_id }}
+          path: recipes
+          merge-multiple: true
+      - name: Stage the exact verified payloads
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/stage-homebrew-publication.py recipes bundle payload-downloads
+      - name: Build the .deb and .rpm for both architectures
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends rpm
+          for arch in x86_64 aarch64; do
+            scripts/build-tui-packages "bundle/minga_${VERSION}_linux_$arch.tar.gz" --version "$VERSION" --arch "$arch" --output linux/packages
+          done
+          scripts/linux-packaging-toolchain > linux/toolchain.txt
+      - name: Install the x86_64 packages on clean distributions
+        run: |
+          set -euo pipefail
+          smoke="$RUNNER_TEMP/linux-smoke"
+          mkdir "$smoke"
+          cp "linux/packages/minga_${VERSION}_amd64.deb" "linux/packages/minga-$VERSION.x86_64.rpm" \
+            "bundle/minga_${VERSION}_linux_x86_64.tar.gz" "$smoke/"
+          cp LICENSE "$smoke/LICENSE-$VERSION"
+          sha() { sha256sum "$1" | cut -d ' ' -f 1; }
+          scripts/render-aur-pkgbuild --version "$VERSION" --source-sha "$SOURCE_SHA" \
+            --x86-64-sha256 "$(sha "bundle/minga_${VERSION}_linux_x86_64.tar.gz")" \
+            --aarch64-sha256 "$(sha "bundle/minga_${VERSION}_linux_aarch64.tar.gz")" \
+            --license-sha256 "$(sha LICENSE)" > "$smoke/PKGBUILD"
+          scripts/smoke-linux-packages "$smoke" "$VERSION"
+      - name: Retain the tested packages and the toolchain that built them
+        id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-packages-${{ github.run_id }}-${{ github.run_attempt }}
+          path: linux/
           if-no-files-found: error
           retention-days: ${{ env.RETENTION_DAYS }}
           overwrite: false
@@ -644,7 +688,7 @@ jobs:
   publish-homebrew:
     name: Publish the rolling release and Homebrew packages
     if: github.event_name == 'push' && github.ref == 'refs/heads/main' && github.repository == 'jsmestad/minga' && needs.require-ci.outputs.publish == 'true'
-    needs: [validate, finalize, require-ci]
+    needs: [validate, finalize, linux-packages, require-ci]
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     concurrency:
@@ -672,6 +716,11 @@ jobs:
           artifact-ids: ${{ needs.finalize.outputs.recipe_artifact_id }}
           path: recipes
           merge-multiple: true
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          artifact-ids: ${{ needs.linux-packages.outputs.artifact_id }}
+          path: tested-linux
+          merge-multiple: true
       - name: Stage the exact verified payloads and recipes
         env:
           GH_TOKEN: ${{ github.token }}
@@ -681,12 +730,16 @@ jobs:
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends rpm
+          if ! scripts/linux-packaging-toolchain | diff tested-linux/toolchain.txt -; then
+            echo "::error::The packaging tools changed since the Linux packages were tested, so a rebuild cannot reproduce them. Re-run the whole workflow to build and test new packages."
+            exit 1
+          fi
           for arch in x86_64 aarch64; do
             scripts/build-tui-packages "bundle/minga_${VERSION}_linux_$arch.tar.gz" --version "$VERSION" --arch "$arch" --output linux-packages
           done
-          diff <(ls linux-packages) <(ls recipes/linux)
+          diff <(ls linux-packages) <(ls tested-linux/packages)
           for package in linux-packages/*; do
-            cmp "$package" "recipes/linux/${package##*/}"
+            cmp "$package" "tested-linux/packages/${package##*/}"
           done
           cp linux-packages/* bundle/
       - name: Preflight tap access and check its current generation

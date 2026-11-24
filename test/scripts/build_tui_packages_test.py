@@ -2,13 +2,13 @@
 """Exercise the real Debian and RPM builder; the synthetic payload does not boot ERTS."""
 
 import io
-import os
 from pathlib import Path
 import shutil
 import subprocess
 import sys
 import tarfile
 import tempfile
+import time
 import unittest
 
 from release_contents_test import header
@@ -148,8 +148,10 @@ class BuildTuiPackagesTest(unittest.TestCase):
         self.make_fixture("x86_64")
         self.pack()
         first = self.build(output=self.root / "first")
-        # A later rebuild must not pick up the current time anywhere.
-        os.utime(self.archive, (0, 0))
+        # Start the rebuild in a later clock second, so any leaked build time changes the bytes.
+        finished = int(time.time())
+        while int(time.time()) == finished:
+            time.sleep(0.05)
         second = self.build(output=self.root / "second")
         for one, two in zip(first, second):
             with self.subTest(package=one.name):
