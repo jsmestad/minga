@@ -6,15 +6,19 @@ defmodule MingaAgent.MCP.StdioTransport do
   GenServer, so this transport can wait synchronously for the matching JSON-RPC
   response while preserving simple failure handling for port exits.
 
+  ## Framing across requests
+
+  The transport value owns the frame decoder, and the client installs the value that each call returns. Port data that arrives during `request/3` and port data that arrives between requests (through `handle_transport_info/2`) pass through the same decoder in arrival order. A request that times out in the middle of a frame therefore leaves the partial frame in the decoder. The rest of that frame completes it later, and the late response is skipped because no request is waiting for its id.
+
   ## Framing limits
 
   JSON-lines framing has no header. Each message is one line, and the newline ends the frame.
 
   - **Port piece size:** the port is opened with `{:line, 65_536}`, so the runtime delivers a long line in pieces of at most 64 KiB.
   - **Frame size:** one frame, including its last piece, may hold at most `max_line_bytes` bytes. The default is 10 MiB (10_485_760 bytes). Set `:max_line_bytes` in the transport options, or the `:minga, :mcp_max_line_bytes` application environment value, to change it.
-  - **Retained incomplete-frame bytes:** `MingaAgent.MCP.LineDecoder` retains at most `max_line_bytes` bytes for a frame that has not ended.
+  - **Retained incomplete-frame bytes:** `MingaAgent.MCP.LineDecoder` retains at most `max_line_bytes` bytes for a frame that has not ended, including a frame that continues across requests.
 
-  When a frame exceeds the limit, the transport closes the port and returns `{:error, {:line_too_long, byte_count}}`. The rest of that line can no longer be framed safely, so `MingaAgent.MCP.Client` marks only this server down. Other MCP servers keep their own transports.
+  When a frame exceeds the limit, the transport closes the port and reports `{:line_too_long, byte_count}`, as a request error or as a `{:down, reason}` from `handle_transport_info/2`. The rest of that line can no longer be framed safely, so `MingaAgent.MCP.Client` marks only this server down. Other MCP servers keep their own transports.
   """
 
   @behaviour MingaAgent.MCP.Transport
@@ -25,10 +29,10 @@ defmodule MingaAgent.MCP.StdioTransport do
 
   @default_max_line_bytes 10_485_760
 
-  @enforce_keys [:port]
-  defstruct [:port, max_line_bytes: @default_max_line_bytes]
+  @enforce_keys [:port, :decoder]
+  defstruct [:port, :decoder]
 
-  @type t :: %__MODULE__{port: port(), max_line_bytes: pos_integer()}
+  @type t :: %__MODULE__{port: port(), decoder: LineDecoder.t()}
   @typep env_value :: charlist() | false
   @typep env_entry :: {charlist(), env_value()}
   @allowlisted_env_keys ~w(PATH HOME LANG LANGUAGE LC_ALL SSL_CERT_FILE SSL_CERT_DIR TMPDIR TEMP TMP XDG_RUNTIME_DIR)
@@ -47,24 +51,23 @@ defmodule MingaAgent.MCP.StdioTransport do
       ]
 
       port = Port.open({:spawn_executable, executable}, port_opts)
-
-      {:ok,
-       %__MODULE__{
-         port: port,
-         max_line_bytes: Keyword.get(opts, :max_line_bytes, max_line_bytes())
-       }}
+      {:ok, new(port, Keyword.get(opts, :max_line_bytes, max_line_bytes()))}
     end
   rescue
     error -> {:error, Redaction.format_error(Exception.message(error))}
   end
 
+  @doc "Wraps an open line-mode port whose response frames may hold at most `max_line_bytes` bytes."
+  @spec new(port(), pos_integer()) :: t()
+  def new(port, max_line_bytes) when is_port(port),
+    do: %__MODULE__{port: port, decoder: LineDecoder.new(max_line_bytes)}
+
   @impl MingaAgent.MCP.Transport
-  @spec request(t(), map(), timeout()) :: {:ok, map()} | {:error, term()}
+  @spec request(t(), map(), timeout()) :: MingaAgent.MCP.Transport.request_result()
   def request(%__MODULE__{port: port} = transport, message, timeout) when is_map(message) do
-    with :ok <- write_message(port, message) do
-      transport
-      |> await_response(Map.fetch!(message, "id"), timeout)
-      |> close_on_overflow(transport)
+    case write_message(port, message) do
+      :ok -> await_response(transport, Map.fetch!(message, "id"), deadline(timeout))
+      {:error, reason} -> {:error, reason, transport}
     end
   end
 
@@ -84,13 +87,21 @@ defmodule MingaAgent.MCP.StdioTransport do
     :exit, _ -> :ok
   end
 
+  # No request is waiting between requests, so a frame that completes here is a late response or a notification.
   @impl MingaAgent.MCP.Transport
-  @spec handle_transport_info(term(), t()) :: :ignore | {:down, term()}
+  @spec handle_transport_info(term(), t()) :: {:ok, t()} | {:down, term()}
+  def handle_transport_info({port, {:data, data}}, %__MODULE__{port: port} = transport) do
+    case accept(transport, data) do
+      {:partial, transport} -> {:ok, transport}
+      {:frame, _unrequested_frame, transport} -> {:ok, transport}
+      {:overflow, reason, _transport} -> {:down, reason}
+    end
+  end
+
   def handle_transport_info({port, {:exit_status, status}}, %__MODULE__{port: port}),
     do: {:down, {:exit_status, status}}
 
-  def handle_transport_info({_port, {:data, _line}}, %__MODULE__{}), do: :ignore
-  def handle_transport_info(_message, %__MODULE__{}), do: :ignore
+  def handle_transport_info(_message, %__MODULE__{} = transport), do: {:ok, transport}
 
   @spec resolve_executable(String.t()) :: {:ok, String.t()} | {:error, String.t()}
   defp resolve_executable(command) do
@@ -154,63 +165,72 @@ defmodule MingaAgent.MCP.StdioTransport do
   end
 
   @typep deadline :: integer() | :infinity
+  @typep accepted ::
+           {:partial, t()} | {:frame, binary(), t()} | {:overflow, LineDecoder.overflow(), t()}
 
-  @spec await_response(t(), term(), timeout()) :: {:ok, map()} | {:error, term()}
-  defp await_response(transport, id, :infinity),
-    do: await_response_until(transport, id, :infinity, LineDecoder.new(transport.max_line_bytes))
+  @spec deadline(timeout()) :: deadline()
+  defp deadline(:infinity), do: :infinity
 
-  defp await_response(transport, id, timeout) when is_integer(timeout) and timeout >= 0 do
-    deadline = System.monotonic_time(:millisecond) + timeout
-    await_response_until(transport, id, deadline, LineDecoder.new(transport.max_line_bytes))
-  end
+  defp deadline(timeout) when is_integer(timeout) and timeout >= 0,
+    do: System.monotonic_time(:millisecond) + timeout
 
-  @spec await_response_until(t(), term(), deadline(), LineDecoder.t()) ::
-          {:ok, map()} | {:error, term()}
-  defp await_response_until(%__MODULE__{port: port} = transport, id, deadline, decoder) do
+  @spec await_response(t(), term(), deadline()) :: MingaAgent.MCP.Transport.request_result()
+  defp await_response(%__MODULE__{port: port} = transport, id, deadline) do
     receive do
-      {^port, {:data, {:noeol, piece}}} ->
-        with {:ok, decoder} <- LineDecoder.push(decoder, piece) do
-          await_response_until(transport, id, deadline, decoder)
-        end
-
-      {^port, {:data, {:eol, tail}}} ->
-        with {:ok, line, decoder} <- LineDecoder.finish(decoder, tail) do
-          handle_line(transport, id, line, deadline, decoder)
+      {^port, {:data, data}} ->
+        case accept(transport, data) do
+          {:partial, transport} -> await_response(transport, id, deadline)
+          {:frame, frame, transport} -> handle_frame(transport, id, frame, deadline)
+          {:overflow, reason, transport} -> {:error, reason, transport}
         end
 
       {^port, {:exit_status, status}} ->
-        {:error, {:exit_status, status}}
+        {:error, {:exit_status, status}, transport}
     after
-      remaining_ms(deadline) -> {:error, :timeout}
+      remaining_ms(deadline) -> {:error, :timeout, transport}
     end
   end
 
-  @spec handle_line(t(), term(), binary(), deadline(), LineDecoder.t()) ::
-          {:ok, map()} | {:error, term()}
-  defp handle_line(transport, id, line, deadline, decoder) do
-    case JSON.decode(line) do
+  @spec handle_frame(t(), term(), binary(), deadline()) ::
+          MingaAgent.MCP.Transport.request_result()
+  defp handle_frame(transport, id, frame, deadline) do
+    case JSON.decode(frame) do
       {:ok, %{"id" => ^id, "result" => result}} ->
-        {:ok, result}
+        {:ok, result, transport}
 
       {:ok, %{"id" => ^id, "error" => error}} ->
-        {:error, error}
+        {:error, error, transport}
 
       {:ok, _notification_or_other_response} ->
-        await_response_until(transport, id, deadline, decoder)
+        await_response(transport, id, deadline)
 
       {:error, reason} ->
-        {:error, {:invalid_json, reason}}
+        {:error, {:invalid_json, reason}, transport}
     end
   end
 
-  # The rest of an oversized line cannot be framed, so the port is closed before the error is returned.
-  @spec close_on_overflow({:ok, map()} | {:error, term()}, t()) :: {:ok, map()} | {:error, term()}
-  defp close_on_overflow({:error, {:line_too_long, _bytes}} = error, transport) do
-    stop(transport)
-    error
+  # Every port data message goes through this decoder, during a request or between requests.
+  # The rest of an oversized line cannot be framed, so overflow closes the port and drops the retained bytes.
+  @spec accept(t(), {:noeol | :eol, binary()}) :: accepted()
+  defp accept(%__MODULE__{decoder: decoder} = transport, {:noeol, piece}) do
+    case LineDecoder.push(decoder, piece) do
+      {:ok, decoder} -> {:partial, %{transport | decoder: decoder}}
+      {:error, overflow} -> close_on_overflow(transport, overflow)
+    end
   end
 
-  defp close_on_overflow(result, _transport), do: result
+  defp accept(%__MODULE__{decoder: decoder} = transport, {:eol, tail}) do
+    case LineDecoder.finish(decoder, tail) do
+      {:ok, frame, decoder} -> {:frame, frame, %{transport | decoder: decoder}}
+      {:error, overflow} -> close_on_overflow(transport, overflow)
+    end
+  end
+
+  @spec close_on_overflow(t(), LineDecoder.overflow()) :: accepted()
+  defp close_on_overflow(%__MODULE__{decoder: decoder} = transport, overflow) do
+    stop(transport)
+    {:overflow, overflow, %{transport | decoder: LineDecoder.reset(decoder)}}
+  end
 
   @doc false
   @spec max_line_bytes() :: pos_integer()

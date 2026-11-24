@@ -3,6 +3,8 @@ defmodule MingaAgent.MCP.StdioTransportTest do
   # OS process tests must not run concurrently because of BEAM child setup races.
   use ExUnit.Case, async: false
 
+  alias MingaAgent.MCP.Client
+  alias MingaAgent.MCP.LineDecoder
   alias MingaAgent.MCP.StdioTransport
   alias MingaAgent.MCP.ServerConfig
 
@@ -99,7 +101,7 @@ defmodule MingaAgent.MCP.StdioTransportTest do
           {:env, StdioTransport.port_env(config, %{"PATH" => System.get_env("PATH")})}
         ])
 
-      transport = %StdioTransport{port: port}
+      transport = StdioTransport.new(port, StdioTransport.max_line_bytes())
 
       # We cannot use request/3 because we didn't write a request; we wrote the
       # response via the shell script. Instead, call the module's internal
@@ -111,7 +113,10 @@ defmodule MingaAgent.MCP.StdioTransportTest do
       # Actually, we can call request/3 with a matching id. The write will go
       # to sh's stdin (ignored), and the read will pick up the printf output.
       message = %{"jsonrpc" => "2.0", "id" => id, "method" => "test", "params" => %{}}
-      assert {:ok, %{"value" => value}} = StdioTransport.request(transport, message, 5_000)
+
+      assert {:ok, %{"value" => value}, _transport} =
+               StdioTransport.request(transport, message, 5_000)
+
       assert String.length(value) == 200
       assert byte_size(json_line) > line_buffer
 
@@ -135,10 +140,10 @@ defmodule MingaAgent.MCP.StdioTransportTest do
           {:env, [{~c"PATH", String.to_charlist(System.get_env("PATH"))}]}
         ])
 
-      transport = %StdioTransport{port: port, max_line_bytes: 100}
+      transport = StdioTransport.new(port, 100)
       message = %{"jsonrpc" => "2.0", "id" => "limit-1", "method" => "test", "params" => %{}}
 
-      assert {:error, {:line_too_long, exceeded}} =
+      assert {:error, {:line_too_long, exceeded}, _transport} =
                StdioTransport.request(transport, message, 5_000)
 
       assert exceeded > 100
@@ -157,11 +162,37 @@ defmodule MingaAgent.MCP.StdioTransportTest do
             {[], StdioTransport.max_line_bytes()},
             {[max_line_bytes: 100], 100}
           ] do
-        assert {:ok, %StdioTransport{max_line_bytes: ^expected} = transport} =
+        assert {:ok, %StdioTransport{decoder: %LineDecoder{max_bytes: ^expected}} = transport} =
                  StdioTransport.start(config, self(), opts)
 
         assert StdioTransport.stop(transport) == :ok
       end
+    end
+  end
+
+  describe "client over a real server" do
+    # The script reads one line per client message before it writes, so output order follows the requests.
+    # The id 3 response is longer than the 64 KiB port piece and its newline is written only after call 4 arrives.
+    test "a call that times out partway through a large response leaves the next call correctly framed" do
+      script = """
+      read line; printf '%s\\n' '{"jsonrpc":"2.0","id":1,"result":{}}'
+      read line
+      read line; printf '%s\\n' '{"jsonrpc":"2.0","id":2,"result":{"tools":[]}}'
+      read line; printf '%s' '{"jsonrpc":"2.0","id":3,"result":{"text":"'; head -c 70000 /dev/zero | tr '\\0' x
+      read line; printf '%s\\n' 'late"}}' '{"jsonrpc":"2.0","id":4,"result":{"content":[]}}'
+      cat >/dev/null
+      """
+
+      config = %ServerConfig{name: "Slow Large", command: "/bin/sh", args: ["-c", script]}
+
+      {:ok, client} =
+        Client.start(server_config: config, request_timeout: 1_000, notify_pid: self())
+
+      on_exit(fn -> stop_client(client) end)
+
+      assert {:error, :timeout} = Client.call_tool(client, "slow", %{})
+      assert {:ok, %{"content" => []}} = Client.call_tool(client, "fast", %{})
+      refute_received {:mcp_client_down, ^client, _name, _reason}
     end
   end
 
@@ -174,23 +205,78 @@ defmodule MingaAgent.MCP.StdioTransportTest do
       {:ok, port: port}
     end
 
+    test "a timeout in the middle of a frame does not misframe the next call", %{port: port} do
+      transport = StdioTransport.new(port, 1_000)
+      send(self(), {port, {:data, {:noeol, ~s({"jsonrpc":"2.0","id":7,"result":{"text":"aaaa)}}})
+
+      assert {:error, :timeout, transport} = StdioTransport.request(transport, request(7), 0)
+
+      send(self(), {port, {:data, {:eol, ~s(bbb"}})}}})
+      send(self(), {port, {:data, {:eol, ~s({"jsonrpc":"2.0","id":8,"result":{"ok":true}})}}})
+
+      assert {:ok, %{"ok" => true}, _transport} =
+               StdioTransport.request(transport, request(8), 1_000)
+    end
+
+    test "a late response that arrives between requests is framed and skipped", %{port: port} do
+      transport = StdioTransport.new(port, 1_000)
+      send(self(), {port, {:data, {:noeol, ~s({"jsonrpc":"2.0","id":7,"result":{"text":"aaaa)}}})
+
+      assert {:error, :timeout, transport} = StdioTransport.request(transport, request(7), 0)
+
+      assert {:ok, transport} =
+               StdioTransport.handle_transport_info({port, {:data, {:noeol, "bbbb"}}}, transport)
+
+      assert LineDecoder.buffered_bytes(transport.decoder) > 0
+
+      assert {:ok, transport} =
+               StdioTransport.handle_transport_info(
+                 {port, {:data, {:eol, ~s(cccc"}})}}},
+                 transport
+               )
+
+      assert LineDecoder.buffered_bytes(transport.decoder) == 0
+
+      send(self(), {port, {:data, {:eol, ~s({"jsonrpc":"2.0","id":8,"result":{"ok":true}})}}})
+
+      assert {:ok, %{"ok" => true}, _transport} =
+               StdioTransport.request(transport, request(8), 1_000)
+    end
+
+    test "a frame that grows past the limit between requests closes the port", %{port: port} do
+      transport = StdioTransport.new(port, 100)
+      send(self(), {port, {:data, {:noeol, String.duplicate("A", 64)}}})
+
+      assert {:error, :timeout, transport} = StdioTransport.request(transport, request(7), 0)
+      assert LineDecoder.buffered_bytes(transport.decoder) == 64
+
+      piece = {port, {:data, {:noeol, String.duplicate("A", 64)}}}
+
+      assert StdioTransport.handle_transport_info(piece, transport) ==
+               {:down, {:line_too_long, 128}}
+
+      assert Port.info(port) == nil
+    end
+
     test "an oversized frame closes the port so the rest of the line is never parsed as the next frame",
          %{port: port} do
-      transport = %StdioTransport{port: port, max_line_bytes: 100}
+      transport = StdioTransport.new(port, 100)
       for _piece <- 1..2, do: send(self(), {port, {:data, {:noeol, String.duplicate("A", 64)}}})
 
-      assert {:error, {:line_too_long, 128}} =
+      assert {:error, {:line_too_long, 128}, transport} =
                StdioTransport.request(transport, request(7), 1_000)
+
+      assert LineDecoder.buffered_bytes(transport.decoder) == 0
 
       assert Port.info(port) == nil
     end
 
     test "the last piece of a frame counts toward the frame limit", %{port: port} do
-      transport = %StdioTransport{port: port, max_line_bytes: 100}
+      transport = StdioTransport.new(port, 100)
       send(self(), {port, {:data, {:noeol, String.duplicate("A", 64)}}})
       send(self(), {port, {:data, {:eol, String.duplicate("A", 37)}}})
 
-      assert {:error, {:line_too_long, 101}} =
+      assert {:error, {:line_too_long, 101}, _transport} =
                StdioTransport.request(transport, request(7), 1_000)
 
       assert Port.info(port) == nil
@@ -198,7 +284,7 @@ defmodule MingaAgent.MCP.StdioTransportTest do
 
     test "a multi-piece frame for another request is skipped and the matching response is returned",
          %{port: port} do
-      transport = %StdioTransport{port: port, max_line_bytes: 1_000}
+      transport = StdioTransport.new(port, 1_000)
 
       other =
         JSON.encode!(%{
@@ -219,22 +305,30 @@ defmodule MingaAgent.MCP.StdioTransportTest do
 
       send(self(), {port, {:data, {:eol, ~s({"jsonrpc":"2.0","id":7,"result":{"ok":true}})}}})
 
-      assert {:ok, %{"ok" => true}} = StdioTransport.request(transport, request(7), 1_000)
+      assert {:ok, %{"ok" => true}, _transport} =
+               StdioTransport.request(transport, request(7), 1_000)
+
       assert Port.info(port) != nil
     end
 
     test "the request deadline fires while pieces of an unfinished frame keep arriving", %{
       port: port
     } do
-      transport = %StdioTransport{port: port, max_line_bytes: 1_000_000_000}
+      transport = StdioTransport.new(port, 1_000_000_000)
       test_pid = self()
       feeder = spawn_link(fn -> feed_pieces(test_pid, port) end)
 
-      assert {:error, :timeout} = StdioTransport.request(transport, request(7), 100)
+      assert {:error, :timeout, _transport} = StdioTransport.request(transport, request(7), 100)
 
       unlink_and_stop(feeder)
       assert Port.info(port) != nil
     end
+  end
+
+  defp stop_client(client) do
+    GenServer.stop(client)
+  catch
+    :exit, _ -> :ok
   end
 
   defp request(id), do: %{"jsonrpc" => "2.0", "id" => id, "method" => "test", "params" => %{}}
