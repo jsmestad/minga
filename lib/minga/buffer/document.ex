@@ -432,6 +432,81 @@ defmodule Minga.Buffer.Document do
     buf |> Selection.linewise(start_line, end_line) |> then(&Selection.delete(buf, &1))
   end
 
+  @doc """
+  Removes the first `count` lines from the document without materializing the full content.
+
+  Uses the existing line-offset index to find the prefix byte boundary,
+  slices the gap buffer binaries with `binary_part` (O(1) sub-binary),
+  and rebuilds the offset tuple from the resolved entries in O(remaining lines).
+
+  The cursor is adjusted by subtracting `count` from the line number.
+  When the cursor was within the removed prefix, it lands at `{0, 0}`.
+
+  Returns the document unchanged when `count` is zero. Returns an empty
+  document when `count` >= line_count.
+  """
+  @spec trim_leading_lines(t(), non_neg_integer()) :: t()
+  def trim_leading_lines(%__MODULE__{} = doc, 0), do: doc
+
+  def trim_leading_lines(%__MODULE__{line_count: lc}, count) when count >= lc do
+    new("")
+  end
+
+  def trim_leading_lines(%__MODULE__{} = doc, count) when count > 0 do
+    offsets = resolve_line_offsets(doc)
+    trim_bytes = elem(offsets, count)
+    gap = byte_size(doc.before)
+
+    {new_before, new_after} =
+      if trim_bytes <= gap do
+        {binary_part(doc.before, trim_bytes, gap - trim_bytes), doc.after}
+      else
+        after_offset = trim_bytes - gap
+        {"", binary_part(doc.after, after_offset, byte_size(doc.after) - after_offset)}
+      end
+
+    remaining = doc.line_count - count
+    old_size = tuple_size(offsets)
+
+    new_offsets =
+      for i <- 0..(remaining - 1) do
+        idx = i + count
+        if idx < old_size, do: elem(offsets, idx) - trim_bytes, else: 0
+      end
+      |> List.to_tuple()
+
+    {new_cursor_line, new_cursor_col} =
+      if doc.cursor_line >= count do
+        {doc.cursor_line - count, doc.cursor_col}
+      else
+        {0, 0}
+      end
+
+    %__MODULE__{
+      before: new_before,
+      after: new_after,
+      cursor_line: new_cursor_line,
+      cursor_col: new_cursor_col,
+      line_count: remaining,
+      line_offsets: new_offsets
+    }
+  end
+
+  # Resolves line_offsets to a clean tuple of integers, handling pending
+  # and nil states without materializing the full content when possible.
+  @spec resolve_line_offsets(t()) :: tuple()
+  defp resolve_line_offsets(%__MODULE__{line_offsets: ls})
+       when is_tuple(ls) and is_integer(elem(ls, 0)),
+       do: ls
+
+  defp resolve_line_offsets(%__MODULE__{line_offsets: {:pending, starts, adjust_after, delta}}) do
+    Lines.flush_to_tuple(starts, adjust_after, delta)
+  end
+
+  defp resolve_line_offsets(%__MODULE__{} = doc) do
+    Lines.build_index(content(doc))
+  end
+
   @doc false
   @spec replace_at_byte_range(t(), non_neg_integer(), non_neg_integer(), binary(), position()) ::
           t()

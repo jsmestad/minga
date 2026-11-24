@@ -481,6 +481,15 @@ defmodule Minga.Buffer do
   @spec append(t(), String.t()) :: :ok
   defdelegate append(server, text), to: BufferProcess
 
+  @doc """
+  Appends text at the end of the buffer and trims the oldest lines
+  to stay within `max_lines` and `max_bytes` bounds.
+
+  Operates in a single GenServer call. Bypasses read-only.
+  """
+  @spec bounded_append(t(), String.t(), pos_integer(), pos_integer()) :: :ok
+  defdelegate bounded_append(server, text, max_lines, max_bytes), to: BufferProcess
+
   # ── Undo/Redo ──────────────────────────────────────────────────────
 
   @doc "Undo the last edit."
