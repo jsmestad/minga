@@ -703,10 +703,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         self.fontManager = fm
         recordStartupPhase("fonts_ready")
 
-        // Initial grid dimensions (no gutter padding subtraction yet; the first
-        // setFrameSize call will send corrected cols once the gutter is established).
-        let cols = UInt16(max(defaultWindowWidth / CGFloat(fm.cellWidth), 1))
-        let rows = UInt16(defaultWindowHeight / CGFloat(fm.cellHeight))
+        // Initial grid dimensions via the shared formula (GridFit). No gutter
+        // padding yet; the first setFrameSize sends corrected cols once the gutter
+        // is established. Line spacing defaults to 1.0 before the BEAM sends a
+        // value, which matches the GridFit default parameter.
+        let cols = GridFit.colsThatFit(width: defaultWindowWidth, cellWidth: CGFloat(fm.cellWidth))
+        let rows = GridFit.rowsThatFit(height: defaultWindowHeight, cellHeight: CGFloat(fm.cellHeight))
 
         // CoreText renderer.
         guard let ctRenderer = CoreTextMetalRenderer(
