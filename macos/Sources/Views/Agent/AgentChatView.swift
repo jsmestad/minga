@@ -36,6 +36,8 @@ public struct AgentChatView: View {
         case composerQueue(generation: UInt64, offer: UInt64, followUp: Bool, target: AgentQueueTarget)
         case openQuestion(offer: UInt64)
         case stopTurn(AgentStopTarget)
+        /// Runs the remedy a failed start offers, as sent by the BEAM.
+        case startRemedy(AgentStartRemedy.Kind)
         case chatScrolledAwayFromBottom
         case chatReturnedToBottom
     }
@@ -65,7 +67,7 @@ public struct AgentChatView: View {
             .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { headerHeight = $0 }
 
             if state.lifecycle != .conversation {
-                lifecycleNotice
+                lifecycleNoticeView
             }
             AgentConversationList(state: state, sendAction: state.lifecycle == .conversation ? sendAction : nil)
 
@@ -109,29 +111,79 @@ public struct AgentChatView: View {
         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { availableHeight = $0 }
     }
 
-    private var lifecycleNotice: some View {
-        VStack(alignment: .leading, spacing: Spacing.xs) {
-            switch state.lifecycle {
-            case .conversation:
-                EmptyView()
-            case .starting:
-                Text("Starting Agent").font(.headline)
-            case .failed(let reason):
-                Text("Agent unavailable").font(.headline)
-                Text(reason)
-                if state.promptVisibleRows == 0 {
-                    Text("Switch away from this tab and return to reopen the composer.")
-                } else {
-                    Text("Start a new Agent session (SPC a n).")
+    /// A non-conversation chat: a glyph, a headline, the BEAM's sentence about the cause, the one action it offers, and the draft note.
+    /// The headline, action label, key hint and note are rendered exactly as sent; this view authors no notice copy.
+    private var lifecycleNoticeView: some View {
+        HStack(alignment: .firstTextBaseline, spacing: Spacing.md) {
+            lifecycleGlyph
+            VStack(alignment: .leading, spacing: Spacing.xs) {
+                Text(lifecycleCopy?.headline ?? "")
+                    .font(Typography.font(.emphasis, weight: .semibold))
+                    .foregroundStyle(theme.agentTextFg)
+                if let reason = lifecycleReason, !reason.isEmpty {
+                    Text(reason)
+                        .font(Typography.font(.body))
+                        .foregroundStyle(theme.agentSecondaryFg)
                 }
-            case .unavailable:
-                Text("Agent unavailable").font(.headline)
-                Text("Start a new Agent session (SPC a n), then reopen the conversation in Sessions.")
+                if let remedy = lifecycleRemedy {
+                    HStack(spacing: Spacing.sm) {
+                        Button(remedy.label) {
+                            sendAction?(.startRemedy(remedy.kind))
+                        }
+                        .disabled(sendAction == nil)
+                        .fixedSize()
+                        if !remedy.keyHint.isEmpty {
+                            Text(remedy.keyHint)
+                                .font(Typography.monospacedSmall)
+                                .foregroundStyle(theme.agentMutedFg)
+                        }
+                    }
+                    .padding(.top, Spacing.xs)
+                }
+                if let note = lifecycleCopy?.note, !note.isEmpty {
+                    Text(note)
+                        .font(Typography.font(.small))
+                        .foregroundStyle(theme.agentMutedFg)
+                }
             }
         }
         .fixedSize(horizontal: false, vertical: true)
         .padding(Spacing.lg)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
+        .accessibilityActions {
+            if let remedy = lifecycleRemedy, sendAction != nil {
+                Button(remedy.label) { sendAction?(.startRemedy(remedy.kind)) }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var lifecycleGlyph: some View {
+        switch state.lifecycle {
+        case .starting:
+            ProgressView()
+                .controlSize(.small)
+        case .failed, .unavailable:
+            Image(systemName: "exclamationmark.triangle")
+                .font(Typography.font(.emphasis, weight: .semibold))
+                .foregroundStyle(theme.agentStatusNeedsYou)
+                .accessibilityHidden(true)
+        case .conversation:
+            EmptyView()
+        }
+    }
+
+    private var lifecycleCopy: AgentLifecycleNotice? { state.lifecycle.notice }
+
+    private var lifecycleReason: String? {
+        if case .failed(let reason, _, _) = state.lifecycle { return reason }
+        return nil
+    }
+
+    private var lifecycleRemedy: AgentStartRemedy? {
+        if case .failed(_, let remedy, _) = state.lifecycle { return remedy }
+        return nil
     }
 
     private func childAction<ChildAction: Sendable>(_ translate: @escaping @Sendable (ChildAction) -> Action) -> ViewActionHandler<ChildAction>? {

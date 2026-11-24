@@ -137,8 +137,12 @@ func (m Model) renderAgentComposerWithLimit(chat protocol.AgentChat, width, budg
 		}
 	}
 	if placement.innerWidth >= 48 {
-		const fullHint = " · Enter send · Shift+Enter newline"
-		if lipgloss.Width(label)+len(fullHint) <= placement.innerWidth {
+		fullHint := " · Enter send · Shift+Enter newline"
+		if chat.Lifecycle == protocol.AgentChatFailed && chat.LifecycleRemedy.Kind != protocol.AgentStartRemedyNone {
+			// During a failed start Enter runs the BEAM's remedy, so name it instead of send.
+			fullHint = " · Enter " + strings.ToLower(chat.LifecycleRemedy.Label) + " · Shift+Enter newline"
+		}
+		if lipgloss.Width(label)+lipgloss.Width(fullHint) <= placement.innerWidth {
 			label += fullHint
 		} else if lipgloss.Width(label)+len(" · Shift+Enter newline") <= placement.innerWidth {
 			label += " · Shift+Enter newline"

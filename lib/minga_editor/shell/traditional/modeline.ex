@@ -45,7 +45,7 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
           :buf_index => pos_integer(),
           :buf_count => non_neg_integer(),
           :macro_recording => {true, String.t()} | false,
-          optional(:agent_status) => MingaEditor.State.Agent.status(),
+          optional(:agent_status) => MingaEditor.State.Agent.status() | :needs_you,
           optional(:active_tool_name) => String.t() | nil,
           optional(:agent_status_command) => String.t() | nil,
           optional(:agent_theme_colors) => MingaEditor.UI.Theme.Agent.t() | nil,
@@ -541,6 +541,9 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
     case {status_command, status, colors} do
       {_custom, :approval_waiting, c} ->
         [{" Awaiting approval ", c.status_tool, bar_bg, [bold: true], nil}]
+
+      {_custom, :needs_you, c} ->
+        [{" ⚠ Needs you ", c.status_tool, bar_bg, [bold: true], nil}]
 
       {custom, _status, c} when is_binary(custom) and custom != "" ->
         [{" #{custom} ", agent_status_fg(c), bar_bg, [], nil}]

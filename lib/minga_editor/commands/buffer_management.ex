@@ -1600,7 +1600,7 @@ defmodule MingaEditor.Commands.BufferManagement do
   end
 
   def handle_agent_session_down(state, session_pid, reason) do
-    lifecycle = session_end_lifecycle(reason)
+    lifecycle = session_end_lifecycle(session_pid, reason)
 
     state =
       state
@@ -1616,10 +1616,15 @@ defmodule MingaEditor.Commands.BufferManagement do
     end
   end
 
-  @spec session_end_lifecycle(term()) :: :unavailable | {:failed, String.t()}
-  defp session_end_lifecycle(reason) when reason in [:normal, :shutdown], do: :unavailable
-  defp session_end_lifecycle({:shutdown, _reason}), do: :unavailable
-  defp session_end_lifecycle(_reason), do: {:failed, "Agent session crashed"}
+  @spec session_end_lifecycle(pid(), term()) ::
+          :unavailable | {:failed, MingaEditor.Agent.StartFailure.t()}
+  defp session_end_lifecycle(_session, reason) when reason in [:normal, :shutdown],
+    do: :unavailable
+
+  defp session_end_lifecycle(_session, {:shutdown, _reason}), do: :unavailable
+
+  defp session_end_lifecycle(session, _reason),
+    do: {:failed, MingaEditor.Agent.StartFailure.session_crashed(session)}
 
   @type session_restart_ownership :: {:owned, state()} | {:stale, state()}
 

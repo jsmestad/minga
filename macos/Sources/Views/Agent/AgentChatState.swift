@@ -846,6 +846,7 @@ public final class AgentChatState {
         case .error: return "error"
         case .planning: return "planning"
         case .approvalWaiting: return "Awaiting approval"
+        case .needsYou: return "Needs you"
         case .unknown: return "unknown"
         }
     }

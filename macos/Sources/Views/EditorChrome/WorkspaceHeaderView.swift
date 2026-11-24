@@ -275,6 +275,7 @@ public struct WorkspaceHeaderView: View {
         case .error: return "Error"
         case .planning: return "Planning"
         case .approvalWaiting: return "Awaiting approval"
+        case .needsYou: return "Needs you"
         case .idle: return "Idle"
         case .unknown: return "Unknown"
         }
@@ -288,7 +289,7 @@ public struct WorkspaceHeaderView: View {
         switch status {
         case .thinking, .executingTool: return accent
         case .error: return .red
-        case .planning, .approvalWaiting: return theme.agentStatusNeedsYou
+        case .planning, .approvalWaiting, .needsYou: return theme.agentStatusNeedsYou
         case .idle, .unknown: return theme.tabInactiveFg
         }
     }

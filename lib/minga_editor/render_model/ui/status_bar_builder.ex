@@ -10,6 +10,7 @@ defmodule MingaEditor.RenderModel.UI.StatusBarBuilder do
   alias Minga.RenderModel.UI.StatusBar.Review, as: StatusReview
   alias Minga.RenderModel.UI.StatusBar.Workspace, as: StatusWorkspace
   alias MingaEditor.Agent.ReviewTarget
+  alias MingaEditor.Agent.WorkspaceStatus
   alias MingaEditor.Frontend.Emit.Context
   alias MingaEditor.Session.ChromeState
   alias MingaEditor.Session.ChromeState.WorkspaceSummary
@@ -158,7 +159,12 @@ defmodule MingaEditor.RenderModel.UI.StatusBarBuilder do
   defp chrome_state_input(%Context{} = ctx) do
     %{
       tab_bar: ctx.tab_bar,
-      workspace: %{file_tree: ctx.workspace.file_tree, keymap_scope: ctx.workspace.keymap_scope}
+      agent: WorkspaceStatus.live_agent(ctx.intent.frame.shell_state),
+      workspace: %{
+        file_tree: ctx.workspace.file_tree,
+        keymap_scope: ctx.workspace.keymap_scope,
+        agent_ui: ctx.workspace.agent_ui
+      }
     }
   end
 

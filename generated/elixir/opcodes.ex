@@ -7,7 +7,7 @@ defmodule Minga.Protocol.Opcodes do
 
   # Protocol version
   @spec protocol_version() :: non_neg_integer()
-  def protocol_version, do: 42
+  def protocol_version, do: 44
 
   # Input
   @spec key_press() :: non_neg_integer()
@@ -433,5 +433,7 @@ defmodule Minga.Protocol.Opcodes do
   def gui_action_agent_stop_turn, do: 0x6D
   @spec gui_action_agent_composer_queue() :: non_neg_integer()
   def gui_action_agent_composer_queue, do: 0x6E
+  @spec gui_action_agent_start_remedy() :: non_neg_integer()
+  def gui_action_agent_start_remedy, do: 0x6F
 
 end

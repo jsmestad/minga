@@ -8,7 +8,8 @@ defmodule MingaEditor.Session.ChromeState.WorkspaceSummary do
   alias MingaEditor.State.Workspace
 
   @type kind :: :manual | :agent
-  @type status :: Workspace.agent_status()
+  @typedoc "The workspace's agent status, or `:needs_you` while its start has failed."
+  @type status :: Workspace.agent_status() | :needs_you
 
   @type t :: %__MODULE__{
           id: non_neg_integer(),

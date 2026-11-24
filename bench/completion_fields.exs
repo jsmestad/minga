@@ -10,7 +10,7 @@ defmodule Minga.Bench.CompletionFields do
     * `visible`: building the popup model with `CompletionBuilder.build/1` and encoding it with `CompletionEncoder.encode/2`.
     * `filter`: one typed character, `Completion.filter/2` plus the popup model and its encoding. Samples cover a fixed keystroke sequence.
     * `select`: one selection move, `Completion.move_down/1`, plus the popup model and its selection encoding. Samples cover 20 moves.
-    * `accept`: `Completion.accept/1` for the selected item and the resulting `Minga.Buffer.apply_edit/6` on a started buffer.
+    * `accept`: `Completion.accept/1` for the selected item and the resulting buffer edit on a started buffer, placed as `CompletionHandling` places it.
 
   Every stage records wall microseconds and the reductions of the process doing the work (a deterministic work count). `parse` and `install` also record the flat heap size of their result in words (retained memory). The receiver checks each result and adds it to a digest: ranked wire ids, labels, match ranges, counts, the selected item and its documentation, the accepted edit and the edited buffer content. Baseline and candidate runs must report the same digest for every item count.
 
@@ -295,7 +295,7 @@ defmodule Minga.Bench.CompletionFields do
       install: install_digest,
       filters: Enum.reverse(filter_digest),
       selects: Enum.reverse(select_digest),
-      accepted: accepted,
+      accepted: accepted_digest(accepted, normalized_wire_ids(completion)),
       buffer: Minga.Buffer.content(buffer)
     }
 
@@ -344,15 +344,26 @@ defmodule Minga.Bench.CompletionFields do
     end)
   end
 
+  # The accepted item embeds the stand-in client pid, so the digest keeps its pid-free wire id
+  # and the edit it applies.
+  defp accepted_digest({:text_edit, %Item{} = item}, ids),
+    do: {:text_edit, Map.fetch!(ids, Item.wire_id(item)), item.text_edit}
+
+  defp accepted_digest(accepted, _ids), do: accepted
+
   defp apply_accepted(_buffer, _completion, nil), do: :ok
 
-  defp apply_accepted(buffer, _completion, {:text_edit, edit}) do
-    Minga.Buffer.apply_edit(
+  # Places the edit as `CompletionHandling.apply_completion_edit/2` does when the cursor has not
+  # moved since the request: LSP UTF-16 columns on the request line, as a half-open byte range.
+  defp apply_accepted(buffer, _completion, {:text_edit, %Item{text_edit: edit}}) do
+    line_text = buffer_text() |> String.split("\n") |> Enum.at(@edit_line)
+    {:ok, {start_col, end_col}} = Item.byte_columns(edit, @edit_line, line_text, :utf16)
+
+    Minga.Buffer.replace_byte_range_if_version(
       buffer,
-      edit.range.start_line,
-      edit.range.start_col,
-      edit.range.end_line,
-      edit.range.end_col,
+      Minga.Buffer.version(buffer),
+      {@edit_line, start_col},
+      end_col - start_col,
       edit.new_text
     )
   end

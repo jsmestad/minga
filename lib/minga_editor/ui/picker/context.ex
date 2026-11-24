@@ -16,6 +16,8 @@ defmodule MingaEditor.UI.Picker.Context do
   - `viewport` — viewport dimensions
   - `tab_bar` — tab bar state (tabs, active tab, workspaces)
   - `agent_session` — agent session PID (if available)
+  - `live_agent` — live Agent presentation cache of the active workspace (if any)
+  - `live_agent_ui` — live Agent UI state of the active workspace (if any)
   - `picker_ui` — picker UI state (context map for sources)
   - `document_symbols` — tree-sitter document symbols for the active window
   - `capabilities` — frontend capabilities (GUI detection, etc.)
@@ -24,8 +26,11 @@ defmodule MingaEditor.UI.Picker.Context do
   - `theme` — active theme
   """
 
+  alias MingaEditor.Agent.UIState
+  alias MingaEditor.Agent.WorkspaceStatus
   alias MingaEditor.State
   alias MingaEditor.State.Buffers
+  alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State.Picker, as: PickerState
   alias MingaEditor.State.Search
   alias MingaEditor.State.TabBar
@@ -53,6 +58,8 @@ defmodule MingaEditor.UI.Picker.Context do
     :viewport,
     :tab_bar,
     :agent_session,
+    :live_agent,
+    :live_agent_ui,
     :picker_ui,
     :capabilities,
     :keymap_server,
@@ -69,6 +76,8 @@ defmodule MingaEditor.UI.Picker.Context do
           viewport: Viewport.t(),
           tab_bar: TabBar.t(),
           agent_session: pid() | nil,
+          live_agent: AgentState.t() | nil,
+          live_agent_ui: UIState.t() | nil,
           picker_ui: map(),
           document_symbols: [Minga.Language.Symbol.t()],
           capabilities: map(),
@@ -97,6 +106,8 @@ defmodule MingaEditor.UI.Picker.Context do
       viewport: state.frontend.terminal_viewport,
       tab_bar: state.shell_runtime.state.tab_bar,
       agent_session: agent_session,
+      live_agent: WorkspaceStatus.live_agent(state.shell_runtime.state),
+      live_agent_ui: state.workspace.agent_ui,
       picker_ui: picker_ui,
       document_symbols: active_document_symbols(state),
       capabilities: state.frontend.capabilities,

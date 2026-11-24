@@ -77,7 +77,13 @@ autoresearch.*
 go/tui/minga-renderer-go
 
 # Local performance measurements
-/bench/results/
+# Benchmarks: commit the scripts, fixtures, and the baselines and budgets CI reads. Run output
+# and write-ups go in the PR or issue body, never in the tree (see AGENTS.md).
+/bench/*
+!/bench/*.exs
+!/bench/latency_budgets.json
+!/bench/fixtures/
+!/bench/baselines/
 /performance/results/
 /performance/evidence/
 /docs/performance/

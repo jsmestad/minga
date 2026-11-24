@@ -60,6 +60,7 @@ defmodule MingaEditor.Commands.Agent do
           | :starting
           | :unavailable
           | {:startup_failed, String.t()}
+          | {:start_failed, MingaEditor.Agent.StartFailure.t()}
           | :ready
   @type prompt_submit_status :: :ready | {:blocked, String.t()}
 
@@ -629,9 +630,26 @@ defmodule MingaEditor.Commands.Agent do
     AgentSession.connect_remote_session(state, server_name, session_id, remote_pid, token)
   end
 
-  @doc "Submits the current input text as a prompt."
+  @doc """
+  Submits the current input text as a prompt.
+
+  While the active tab's start has failed, a prompt cannot be sent, so submit runs the failure's remedy instead and leaves the draft as it is. A known slash command such as `/login` or `/new` still runs, because it does not need the session. The draft is not sent after a retry; the user submits again once the session is ready.
+  """
   @spec submit_prompt(state()) :: state()
   def submit_prompt(state) do
+    if runs_start_remedy?(state.workspace.agent_ui),
+      do: AgentSession.run_start_remedy(state),
+      else: submit_draft(state)
+  end
+
+  @spec runs_start_remedy?(UIState.t()) :: boolean()
+  defp runs_start_remedy?(%UIState{panel: panel} = ui) do
+    UIState.start_remedy(ui) != nil and
+      not SlashCommand.known_command?(PromptBuffer.prompt_text(panel))
+  end
+
+  @spec submit_draft(state()) :: state()
+  defp submit_draft(state) do
     panel = state.workspace.agent_ui.panel
 
     submit_prompt(
@@ -1137,8 +1155,8 @@ defmodule MingaEditor.Commands.Agent do
        ),
        do: :credentials_missing
 
-  defp connection_prompt_readiness(%ConnectionSnapshot{}, {:failed, error}, _),
-    do: {:startup_failed, error}
+  defp connection_prompt_readiness(%ConnectionSnapshot{}, {:failed, failure}, _),
+    do: {:start_failed, failure}
 
   defp connection_prompt_readiness(%ConnectionSnapshot{}, _, error)
        when is_binary(error) and error != "", do: {:startup_failed, error}
@@ -1167,6 +1185,10 @@ defmodule MingaEditor.Commands.Agent do
 
   defp prompt_readiness_submit_status({:startup_failed, error}) do
     {:blocked, provider_startup_failed_status(error)}
+  end
+
+  defp prompt_readiness_submit_status({:start_failed, failure}) do
+    {:blocked, "#{failure.message} Your prompt was preserved."}
   end
 
   @spec no_model_status() :: String.t()
@@ -2700,6 +2722,18 @@ defmodule MingaEditor.Commands.Agent do
         description: "Answer Agent question",
         requires_buffer: false,
         execute: &MingaEditor.UI.Picker.AgentQuestionSource.open/1
+      },
+      %Minga.Command{
+        name: :agent_retry_start,
+        description: "Retry the failed Agent start",
+        requires_buffer: false,
+        execute: &AgentSession.retry_start/1
+      },
+      %Minga.Command{
+        name: :agent_start_remedy,
+        description: "Run the failed Agent start's remedy",
+        requires_buffer: false,
+        execute: &AgentSession.run_start_remedy/1
       },
       %Minga.Command{
         name: :agent_pick_thinking,

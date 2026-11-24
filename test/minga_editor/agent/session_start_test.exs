@@ -10,6 +10,8 @@ defmodule MingaEditor.Agent.SessionStartTest do
   alias Minga.Test.AgentSessionStart
   alias MingaEditor.Agent.PromptBuffer
   alias MingaEditor.Agent.SessionStart
+  alias MingaEditor.Agent.StartFailure
+  alias MingaEditor.Agent.StartRequest
   alias MingaEditor.Commands.Agent, as: AgentCommands
   alias MingaEditor.Commands.AgentSession
   alias MingaEditor.RenderPipeline.TestHelpers
@@ -170,9 +172,11 @@ defmodule MingaEditor.Agent.SessionStartTest do
 
       failed = SessionStart.timeout(opened, token)
 
-      assert {:failed, reason} = failed.workspace.agent_ui.chat_lifecycle
-      assert reason =~ "did not start"
-      assert TraditionalState.agent(failed.shell_runtime.state).error == reason
+      # A new session starts without recovering interrupted work.
+      assert failed.workspace.agent_ui.chat_lifecycle ==
+               {:failed, StartFailure.timed_out(StartRequest.new(true, false, nil))}
+
+      assert TraditionalState.agent(failed.shell_runtime.state).error == nil
       assert PromptBuffer.prompt_text(failed.workspace.agent_ui) == "kept"
     end
 
@@ -182,8 +186,10 @@ defmodule MingaEditor.Agent.SessionStartTest do
 
       failed = AgentSessionStart.settle(opened)
 
-      assert {:failed, reason} = failed.workspace.agent_ui.chat_lifecycle
-      assert reason =~ ":no_capacity"
+      assert {:failed, %StartFailure{message: message, remedy: {:retry, %StartRequest{}}}} =
+               failed.workspace.agent_ui.chat_lifecycle
+
+      refute message =~ "no_capacity"
       assert PromptBuffer.prompt_text(failed.workspace.agent_ui) == "kept"
       assert failed.agent_connection.session_starts == %{}
     end
@@ -195,8 +201,10 @@ defmodule MingaEditor.Agent.SessionStartTest do
       assert_receive {:DOWN, _ref, :process, ^manager, :crashed} = down, 1_000
       assert {:handled, failed} = SessionStart.response(opened, down)
 
-      assert {:failed, reason} = failed.workspace.agent_ui.chat_lifecycle
-      assert reason =~ ":crashed"
+      assert {:failed, %StartFailure{message: message, remedy: {:retry, %StartRequest{}}}} =
+               failed.workspace.agent_ui.chat_lifecycle
+
+      refute message =~ "crashed"
       assert PromptBuffer.prompt_text(failed.workspace.agent_ui) == "kept"
     end
 

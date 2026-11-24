@@ -4,6 +4,7 @@ defmodule MingaEditor.RenderModel.UI.WorkspacesBuilder do
   alias Minga.RenderModel.UI.Workspaces
   alias Minga.RenderModel.UI.Workspaces.VisibleTab
   alias Minga.RenderModel.UI.Workspaces.Workspace
+  alias MingaEditor.Agent.WorkspaceStatus
   alias MingaEditor.Frontend.Emit.Context
   alias MingaEditor.Session.ChromeState
   alias MingaEditor.Session.ChromeState.TabSummary
@@ -67,10 +68,12 @@ defmodule MingaEditor.RenderModel.UI.WorkspacesBuilder do
   defp chrome_state_input(%Context{} = ctx) do
     %{
       tab_bar: ctx.tab_bar,
+      agent: WorkspaceStatus.live_agent(ctx.intent.frame.shell_state),
       workspace: %{
         buffers: ctx.workspace.buffers,
         file_tree: ctx.workspace.file_tree,
-        keymap_scope: ctx.workspace.keymap_scope
+        keymap_scope: ctx.workspace.keymap_scope,
+        agent_ui: ctx.workspace.agent_ui
       }
     }
   end

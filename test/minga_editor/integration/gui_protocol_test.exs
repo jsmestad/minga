@@ -345,6 +345,8 @@ defmodule Minga.Integration.GUIProtocolTest do
           %AgentChat{
             visible?: true,
             lifecycle: Map.get(d, :lifecycle, :conversation),
+            lifecycle_headline: Map.get(d, :lifecycle_headline, ""),
+            draft_note: Map.get(d, :draft_note, ""),
             status: Map.get(d, :status, :idle),
             model_name: Map.get(d, :model, ""),
             thinking_level: Map.get(d, :thinking_level, ""),
@@ -371,25 +373,65 @@ defmodule Minga.Integration.GUIProtocolTest do
   end
 
   describe "GUI chrome opcode round-trip" do
-    test "Agent availability and its reason decode independently of the existing draft", %{
-      harness: harness
-    } do
-      for {lifecycle, label, reason} <- [
-            {:conversation, "conversation", ""},
-            {:starting, "starting", ""},
-            {{:failed, "Could not connect to café"}, "failed", "Could not connect to café"},
-            {:unavailable, "unavailable", ""}
+    test "Agent availability, its reason and its remedy decode independently of the existing draft",
+         %{harness: harness} do
+      retry = %Minga.RenderModel.UI.AgentChat.StartRemedy{
+        kind: :retry,
+        label: "Retry",
+        key_hint: "r"
+      }
+
+      setup = %Minga.RenderModel.UI.AgentChat.StartRemedy{
+        kind: :set_up_provider,
+        label: "Set up provider",
+        key_hint: "s"
+      }
+
+      for {lifecycle, label, reason, remedy, action, key} <- [
+            {:conversation, "conversation", "", 0, "", ""},
+            {:starting, "starting", "", 0, "", ""},
+            {{:failed, "Could not connect to café.", retry}, "failed",
+             "Could not connect to café.", 1, "Retry", "r"},
+            {{:failed, "No Agent provider is set up yet.", setup}, "failed",
+             "No Agent provider is set up yet.", 2, "Set up provider", "s"},
+            {{:failed, "The composer is unavailable.", nil}, "failed",
+             "The composer is unavailable.", 0, "", ""},
+            {:unavailable, "unavailable", "", 0, "", ""}
           ] do
         command =
-          encode_gui_agent_chat(%{visible: true, prompt: "unfinished", lifecycle: lifecycle})
+          encode_gui_agent_chat(%{
+            visible: true,
+            prompt: "unfinished",
+            lifecycle: lifecycle,
+            lifecycle_headline: "Agent héadline",
+            draft_note: "Your draft is saved. SPC a n starts a new session."
+          })
+
+        decoded = round_trip(harness, command, "gui_agent_chat")
 
         assert %{
                  "visible" => true,
                  "prompt" => "unfinished",
                  "lifecycle" => ^label,
-                 "lifecycle_reason" => ^reason
-               } = round_trip(harness, command, "gui_agent_chat")
+                 "lifecycle_reason" => ^reason,
+                 "lifecycle_remedy" => ^remedy,
+                 "lifecycle_action_label" => ^action,
+                 "lifecycle_key_hint" => ^key
+               } = decoded
+
+        # A live conversation sends no lifecycle section, so no notice copy.
+        {headline, note} =
+          if lifecycle == :conversation,
+            do: {"", ""},
+            else: {"Agent héadline", "Your draft is saved. SPC a n starts a new session."}
+
+        assert %{"lifecycle_headline" => ^headline, "lifecycle_note" => ^note} = decoded
       end
+    end
+
+    test "a failed start's needs-you status decodes as its own status", %{harness: harness} do
+      command = encode_gui_agent_chat(%{visible: true, status: :needs_you})
+      assert %{"status" => 6} = round_trip(harness, command, "gui_agent_chat")
     end
 
     test "Agent chat reports saved attachments without changing the draft text", %{

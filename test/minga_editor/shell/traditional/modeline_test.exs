@@ -156,7 +156,8 @@ defmodule MingaEditor.Shell.Traditional.ModelineTest do
         {%{agent_status: :tool_executing, active_tool_name: "read_file"}, "Running read_file",
          []},
         {%{agent_status: :tool_executing}, "Running", ["Running read_file"]},
-        {%{agent_status: :error}, "Error", []}
+        {%{agent_status: :error}, "Error", []},
+        {%{agent_status: :needs_you}, "Needs you", ["Error"]}
       ]
 
       for {overrides, expected, unexpected} <- cases do

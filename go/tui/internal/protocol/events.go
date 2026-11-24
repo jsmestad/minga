@@ -304,6 +304,15 @@ func EncodeGUIAgentOpenQuestion(offer uint64) []byte {
 	return packet[:]
 }
 
+// EncodeGUIAgentStartRemedy runs the remedy the displayed failed Agent start
+// offers. The BEAM ignores it once the tab no longer offers that remedy.
+func EncodeGUIAgentStartRemedy(kind AgentStartRemedyKind) []byte {
+	if kind != AgentStartRemedyRetry && kind != AgentStartRemedySetUpProvider {
+		return nil
+	}
+	return []byte{generated.OPGuiAction, generated.GUIActionAgentStartRemedy, byte(kind)}
+}
+
 // EncodeGUIAgentStopTurn stops only the identified active turn.
 func EncodeGUIAgentStopTurn(target AgentStopTarget) []byte {
 	if len(target.SessionID) == 0 || len(target.SessionID) > 65535 ||

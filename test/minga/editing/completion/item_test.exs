@@ -2,6 +2,7 @@ defmodule Minga.Editing.Completion.ItemTest do
   use ExUnit.Case, async: true
 
   alias Minga.Editing.Completion.Item
+  alias Minga.Test.CallCounter
 
   @line "héllo 🎉 fo(x)"
 
@@ -56,6 +57,47 @@ defmodule Minga.Editing.Completion.ItemTest do
         assert Item.byte_columns(range, cursor_line, @line, encoding) == expected,
                "#{encoding} #{inspect(range.range)}"
       end
+    end
+  end
+
+  describe "wire_id/1" do
+    test "an item carries the wire id of its identity from either constructor" do
+      lsp = Item.from_lsp(:lsp, %{"label" => "map", "kind" => 3, "data" => %{"n" => 1}})
+      local = Item.from_fields(:local, %{label: "map", kind: :function, detail: "Enum.map/2"})
+
+      for item <- [lsp, local] do
+        assert Item.wire_id(item) == Item.wire_id(item.id)
+        assert Item.wire_id(item) =~ ~r/\A[A-Za-z0-9_-]{43}\z/
+      end
+
+      refute Item.wire_id(lsp) == Item.wire_id(local)
+    end
+
+    test "building an item hashes its identity once and reading the wire id hashes nothing" do
+      {built, item} =
+        CallCounter.count({:crypto, :hash, 2}, fn ->
+          Item.from_lsp(:lsp, %{"label" => "map"})
+        end)
+
+      {read, _wire_ids} =
+        CallCounter.count({:crypto, :hash, 2}, fn ->
+          for _ <- 1..3, do: Item.wire_id(item)
+        end)
+
+      assert {built, read} == {1, 0}
+    end
+
+    test "resolving documentation and recording the request origin keep the wire id" do
+      item = Item.from_lsp(:lsp, %{"label" => "map"})
+
+      updated =
+        item
+        |> Item.resolve("Docs.")
+        |> Item.with_request_origin({{0, 3}, "map"})
+        |> Item.with_match_ranges([{0, 1}])
+
+      assert Item.wire_id(updated) == Item.wire_id(item)
+      assert Item.wire_id(updated) == Item.wire_id(updated.id)
     end
   end
 end

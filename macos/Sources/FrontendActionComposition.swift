@@ -29,6 +29,7 @@ nonisolated public enum FrontendActionComposition {
             .agentComposerQueue(generation: generation, offer: offer, followUp: followUp, target: target)
         case .openQuestion(let offer): .agentOpenQuestion(offer: offer)
         case .stopTurn(let target): .agentStopTurn(target)
+        case .startRemedy(let kind): .agentStartRemedy(kind)
         case .chatScrolledAwayFromBottom: .chatScrolledAwayFromBottom
         case .chatReturnedToBottom: .chatReturnedToBottom
         }

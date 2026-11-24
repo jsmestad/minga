@@ -52,8 +52,7 @@ defmodule MingaEditor.RenderModel.UI.FileTreeBuilder do
     diagnostics = file_tree_diagnostics(tree.root)
 
     rows =
-      tree
-      |> Rows.from_tree(
+      Rows.from_tree(tree,
         active_path: active_path,
         dirty_paths: dirty_path_set,
         editing: FileTreeState.editing(file_tree),
@@ -63,7 +62,11 @@ defmodule MingaEditor.RenderModel.UI.FileTreeBuilder do
         heat_levels: file_tree_heat_levels(),
         selected_index: tree.cursor
       )
-      |> Enum.map(&row_model(&1, ctx.intent.frame.theme))
+
+    # One filetype read per row, against one registry snapshot for the frame.
+    filetypes = rows |> Enum.map(&filetype_subject/1) |> Language.detect_filetypes()
+    theme = ctx.intent.frame.theme
+    rows = Enum.zip_with(rows, filetypes, &row_model(&1, &2, theme))
 
     %FileTreeModel{
       root_path: tree.root,
@@ -95,14 +98,21 @@ defmodule MingaEditor.RenderModel.UI.FileTreeBuilder do
     %FileTreeModel{root_path: root_path, status: :hidden}
   end
 
-  @spec row_model(Row.t(), Theme.t()) :: FileTreeRowModel.t()
-  defp row_model(%Row{} = row, %Theme{} = theme) do
+  # Directories take their icon from the folder name, so they need no filetype.
+  @spec filetype_subject(Row.t()) :: String.t() | nil
+  defp filetype_subject(%Row{directory?: true}), do: nil
+  defp filetype_subject(%Row{name: name}), do: name
+
+  @spec row_model(Row.t(), atom(), Theme.t()) :: FileTreeRowModel.t()
+  defp row_model(%Row{} = row, filetype, %Theme{} = theme) do
+    {icon, icon_color} = row_icon_and_color(row, filetype, theme)
+
     %FileTreeRowModel{
       id: row.id,
       path: row.path,
       name: row.name,
-      icon: row_icon(row),
-      icon_color: row_icon_color(row, theme),
+      icon: icon,
+      icon_color: icon_color,
       flags: %FileTreeFlagsModel{
         directory?: row.directory?,
         expanded?: row.expanded?,
@@ -125,18 +135,12 @@ defmodule MingaEditor.RenderModel.UI.FileTreeBuilder do
   defp editing_model(%{type: type, text: text, token: token}),
     do: %FileTreeEditingModel{type: type, text: text, token: token}
 
-  @spec row_icon(Row.t()) :: String.t()
-  defp row_icon(%Row{directory?: true, name: name}),
-    do: elem(Devicon.folder_icon_and_color(name), 0)
+  @spec row_icon_and_color(Row.t(), atom(), Theme.t()) :: {String.t(), non_neg_integer()}
+  defp row_icon_and_color(%Row{directory?: true, name: name}, _filetype, _theme),
+    do: Devicon.folder_icon_and_color(name)
 
-  defp row_icon(%Row{name: name}), do: Devicon.icon(Language.detect_filetype(name))
-
-  @spec row_icon_color(Row.t(), Theme.t()) :: non_neg_integer()
-  defp row_icon_color(%Row{directory?: true, name: name}, _theme),
-    do: elem(Devicon.folder_icon_and_color(name), 1)
-
-  defp row_icon_color(%Row{name: name}, theme),
-    do: Theme.icon_color(theme, Language.detect_filetype(name))
+  defp row_icon_and_color(%Row{}, filetype, theme),
+    do: {Devicon.icon(filetype), Theme.icon_color(theme, filetype)}
 
   @spec active_buffer_path(Context.t()) :: String.t() | nil
   defp active_buffer_path(%Context{workspace: %{buffers: %{active: buf}}}) when is_pid(buf) do

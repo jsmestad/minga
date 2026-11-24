@@ -1729,13 +1729,30 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
             case 0x0F:
                 var pos = csStart + 1
                 let end = csStart + csLen
-                guard csLen >= 3 else { throw ProtocolDecodeError.malformed }
+                guard csLen >= 12 else { throw ProtocolDecodeError.malformed }
                 let reason = try readString16(data: data, pos: &pos, end: end)
+                guard pos < end else { throw ProtocolDecodeError.malformed }
+                let remedyByte = data[pos]
+                pos += 1
+                let actionLabel = try readString16(data: data, pos: &pos, end: end)
+                let keyHint = try readString16(data: data, pos: &pos, end: end)
+                let notice = AgentLifecycleNotice(
+                    headline: try readString16(data: data, pos: &pos, end: end),
+                    note: try readString16(data: data, pos: &pos, end: end)
+                )
                 guard pos == end else { throw ProtocolDecodeError.malformed }
+                let remedy: AgentStartRemedy?
+                switch remedyByte {
+                case 0: remedy = nil
+                case 1, 2:
+                    guard let kind = AgentStartRemedy.Kind(rawValue: remedyByte), !actionLabel.isEmpty else { throw ProtocolDecodeError.malformed }
+                    remedy = AgentStartRemedy(kind: kind, label: actionLabel, keyHint: keyHint)
+                default: throw ProtocolDecodeError.malformed
+                }
                 switch data[csStart] {
-                case 1: lifecycle = .starting
-                case 2: lifecycle = .failed(reason)
-                case 3: lifecycle = .unavailable
+                case 1: lifecycle = .starting(notice: notice)
+                case 2: lifecycle = .failed(reason: reason, remedy: remedy, notice: notice)
+                case 3: lifecycle = .unavailable(notice: notice)
                 default: break
                 }
 

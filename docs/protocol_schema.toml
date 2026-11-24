@@ -81,7 +81,9 @@ version = "2.0.0"
 # protocol_version 40 binds Git Status actions to the displayed panel and file actions to the exact row. It also adds terminal Git Status presentation fields.
 # protocol_version 41 appends a status chip (status text and status_tone) to picker_item, adds the active flag (bit 3), and retires the two_line (bit 0) and keep_description_start (bit 2) flags.
 # protocol_version 42 appends a section group (string16) to picker_item. Frontends draw a non-selectable header when the group changes between adjacent items.
-protocol_version = 42
+# protocol_version 43 appends a failed Agent start's remedy (u8), action label (string16) and key hint (string16) to the gui_agent_chat lifecycle section, adds agent status 6 (needs you) to the chat, status bar and workspace status bytes, and adds the agent_start_remedy gui_action.
+# protocol_version 44 appends the Agent lifecycle notice's headline (string16) and draft note (string16) to the gui_agent_chat lifecycle section, so frontends render the BEAM's copy instead of authoring their own.
+protocol_version = 44
 description = "Minga port protocol opcode registry"
 
 # Directions:
@@ -1510,6 +1512,13 @@ value = 0x6D
 name = "agent_composer_queue"
 value = 0x6E
 
+# Runs the remedy a failed Agent start offers. Payload: remedy(u8: 1 retry,
+# 2 set up provider), copied from the displayed lifecycle section. The BEAM
+# runs it only while the active Agent tab still offers that remedy.
+[[gui_actions]]
+name = "agent_start_remedy"
+value = 0x6F
+
 # ── Versioned frontend resource policy (#2801) ─────────────────────────────
 #
 # Capability payload version 2 appends these fields after the original seven
@@ -2569,7 +2578,15 @@ fields = [
 opcode = "gui_agent_chat"
 id = 0x0F
 name = "lifecycle"
-fields = [{ name = "kind", type = "u8" }, { name = "reason", type = "string16" }]
+fields = [
+  { name = "kind", type = "u8" },
+  { name = "reason", type = "string16" },
+  { name = "remedy", type = "u8" },
+  { name = "action_label", type = "string16" },
+  { name = "key_hint", type = "string16" },
+  { name = "headline", type = "string16" },
+  { name = "note", type = "string16" },
+]
 
 # gui_picker_preview (0x7D) sections
 

@@ -10,6 +10,8 @@ defmodule MingaEditor.Agent.CatalogStartup do
   alias MingaAgent.ModelCatalog
   alias MingaEditor.Agent.ProvenanceJump
   alias MingaEditor.Agent.SessionStart
+  alias MingaEditor.Agent.StartFailure
+  alias MingaEditor.Agent.StartRequest
   alias MingaEditor.Commands.{Agent, AgentSession}
   alias MingaEditor.Effect.{Outcome, Policy, Request}
   alias MingaEditor.EffectScheduler
@@ -80,15 +82,29 @@ defmodule MingaEditor.Agent.CatalogStartup do
 
   @impl true
   @spec apply(EditorState.t(), Outcome.t()) :: {EditorState.t(), Outcome.t()}
+  def apply(state, %Outcome{} = outcome) do
+    log_load_failure(outcome.value)
+    settle(state, outcome)
+  end
+
+  # The tab shows only a plain sentence, so the raw reason a load failed is
+  # kept in the log whether or not a tab still waits for the result.
+  @spec log_load_failure(Outcome.value()) :: :ok
+  defp log_load_failure({:failed, reason}),
+    do: Minga.Log.error(:agent, fn -> "[Agent] Model catalog load failed: #{inspect(reason)}" end)
+
+  defp log_load_failure(_value), do: :ok
+
   # A start carries the workspace it was requested for, so its outcome is
   # judged by that workspace, not by which tab is active now.
-  def apply(
-        state,
-        %Outcome{request: %{effect: %__MODULE__{action: {:start, _, _, _, _}}}} = outcome
-      ),
-      do: complete_start(state, outcome)
+  @spec settle(EditorState.t(), Outcome.t()) :: {EditorState.t(), Outcome.t()}
+  defp settle(
+         state,
+         %Outcome{request: %{effect: %__MODULE__{action: {:start, _, _, _, _}}}} = outcome
+       ),
+       do: complete_start(state, outcome)
 
-  def apply(state, %Outcome{request: %{effect: effect}, value: value} = outcome) do
+  defp settle(state, %Outcome{request: %{effect: effect}, value: value} = outcome) do
     current? = origin(state) == effect.origin and destination_current?(state, effect.action)
 
     case {current?, value} do
@@ -116,7 +132,9 @@ defmodule MingaEditor.Agent.CatalogStartup do
   defp start_result({:start, _workspace, hooks?, recover?, follow_up}, {:completed, :ready}),
     do: {:ready, hooks?, recover?, follow_up}
 
-  defp start_result({:start, _, _, _, _}, {:failed, _reason}), do: {:failed, catalog_failure()}
+  defp start_result({:start, _, hooks?, recover?, follow_up}, {:failed, _reason}),
+    do: {:failed, catalog_failure(hooks?, recover?, follow_up)}
+
   defp start_result({:start, _, _, _, _}, _progress_or_replaced), do: nil
 
   @spec settle_start(EditorState.t(), start(), AgentSession.catalog_start_result(), Outcome.t()) ::
@@ -181,8 +199,12 @@ defmodule MingaEditor.Agent.CatalogStartup do
   defp resume(state, action), do: Agent.resume_catalog_action(state, action)
 
   @spec publish_failure(EditorState.t(), action()) :: EditorState.t()
-  defp publish_failure(state, {:start, workspace, _hooks?, _recover?, _follow_up}) do
-    AgentSession.workspace_start_failed(state, workspace, catalog_failure())
+  defp publish_failure(state, {:start, workspace, hooks?, recover?, follow_up}) do
+    AgentSession.workspace_start_failed(
+      state,
+      workspace,
+      catalog_failure(hooks?, recover?, follow_up)
+    )
   end
 
   defp publish_failure(state, _action) do
@@ -192,6 +214,7 @@ defmodule MingaEditor.Agent.CatalogStartup do
     )
   end
 
-  @spec catalog_failure() :: String.t()
-  defp catalog_failure, do: "Could not load the Agent model catalog."
+  @spec catalog_failure(boolean(), boolean(), SessionStart.follow_up()) :: StartFailure.t()
+  defp catalog_failure(hooks?, recover?, follow_up),
+    do: StartFailure.catalog_unavailable(StartRequest.new(hooks?, recover?, follow_up))
 end

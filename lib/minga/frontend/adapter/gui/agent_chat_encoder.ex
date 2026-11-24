@@ -23,6 +23,7 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatEncoder do
   alias Minga.Protocol.Opcodes
   alias Minga.RenderModel.UI.AgentChat
   alias Minga.RenderModel.UI.AgentChat.PromptCompletion
+  alias Minga.RenderModel.UI.AgentChat.StartRemedy
 
   @op_gui_agent_chat Opcodes.gui_agent_chat()
 
@@ -121,7 +122,7 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatEncoder do
       |> add_question_section(model.pending_question)
       |> add_stop_target_section(model.stop_target)
       |> add_queue_target_section(model.queue_target)
-      |> add_lifecycle_section(model.lifecycle)
+      |> add_lifecycle_section(model)
 
     sections =
       case model.prompt_presentation do
@@ -144,25 +145,46 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatEncoder do
     |> Writer.finish()
   end
 
-  @spec add_lifecycle_section([binary()], AgentChat.lifecycle()) :: [binary()]
-  defp add_lifecycle_section(sections, :conversation), do: sections
+  @spec add_lifecycle_section([binary()], AgentChat.t()) :: [binary()]
+  defp add_lifecycle_section(sections, %AgentChat{lifecycle: :conversation}), do: sections
 
-  defp add_lifecycle_section(sections, lifecycle) do
-    {kind, reason} =
+  # kind + reason, then the failed start's remedy: remedy kind (0 none, 1
+  # retry, 2 set up provider) + action label + key hint. Other lifecycles send
+  # no remedy and empty strings. The notice headline and the draft note follow;
+  # an empty note means no note line.
+  defp add_lifecycle_section(sections, %AgentChat{lifecycle: lifecycle} = model) do
+    {kind, reason, remedy} =
       case lifecycle do
-        :starting -> {1, ""}
-        {:failed, reason} -> {2, String.byte_slice(reason, 0, 4096)}
-        :unavailable -> {3, ""}
+        :starting -> {1, "", nil}
+        {:failed, reason, remedy} -> {2, String.byte_slice(reason, 0, 4096), remedy}
+        :unavailable -> {3, "", nil}
       end
+
+    {remedy_kind, label, key_hint} = encode_start_remedy(remedy)
 
     payload =
       Writer.new(@command)
       |> Writer.uint8(:lifecycle_kind, kind)
       |> Writer.string16(:lifecycle_reason, reason)
+      |> Writer.uint8(:lifecycle_remedy, remedy_kind)
+      |> Writer.string16(:lifecycle_action_label, label)
+      |> Writer.string16(:lifecycle_key_hint, key_hint)
+      |> Writer.string16(:lifecycle_headline, model.lifecycle_headline)
+      |> Writer.string16(:lifecycle_note, model.draft_note)
       |> Writer.finish()
 
     [encode_section(@section_chat_lifecycle, payload) | sections]
   end
+
+  @spec encode_start_remedy(StartRemedy.t() | nil) :: {0..2, String.t(), String.t()}
+  defp encode_start_remedy(nil), do: {0, "", ""}
+
+  defp encode_start_remedy(%StartRemedy{kind: kind, label: label, key_hint: key_hint}),
+    do: {start_remedy_byte(kind), label, key_hint}
+
+  @spec start_remedy_byte(StartRemedy.kind()) :: 1..2
+  defp start_remedy_byte(:retry), do: 1
+  defp start_remedy_byte(:set_up_provider), do: 2
 
   @spec add_queue_target_section([binary()], {String.t(), String.t(), pos_integer()} | nil) ::
           [binary()]
@@ -273,6 +295,7 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatEncoder do
   defp encode_agent_chat_status(:error), do: 3
   defp encode_agent_chat_status(:plan), do: 4
   defp encode_agent_chat_status(:approval_waiting), do: 5
+  defp encode_agent_chat_status(:needs_you), do: 6
   defp encode_agent_chat_status(_), do: 0
 
   @spec bool_byte(boolean() | nil) :: 0 | 1

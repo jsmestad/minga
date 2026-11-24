@@ -530,11 +530,38 @@ const (
 	AgentChatUnavailable
 )
 
+// AgentStartRemedyKind names the one action a failed Agent start offers.
+type AgentStartRemedyKind byte
+
+const (
+	AgentStartRemedyNone AgentStartRemedyKind = iota
+	AgentStartRemedyRetry
+	AgentStartRemedySetUpProvider
+)
+
+// AgentStartRemedy is the failed start's action as the BEAM sends it. The
+// frontend renders Label and KeyHint verbatim and never authors remedy copy.
+type AgentStartRemedy struct {
+	Kind    AgentStartRemedyKind
+	Label   string
+	KeyHint string
+}
+
+// AgentLifecycleNotice is the BEAM's copy for a non-conversation chat: what
+// happened to the tab and the draft note under it. The frontend renders both
+// verbatim; an empty Note means no note line.
+type AgentLifecycleNotice struct {
+	Headline string
+	Note     string
+}
+
 type AgentChat struct {
 	Visible           bool
 	Status            byte
 	Lifecycle         AgentChatLifecycle
 	LifecycleReason   string
+	LifecycleRemedy   AgentStartRemedy
+	LifecycleNotice   AgentLifecycleNotice
 	ModelName         string
 	Prompt            string
 	PromptLineCount   byte

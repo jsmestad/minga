@@ -372,11 +372,11 @@ LSP status: 0=none, 1=ready, 2=initializing, 3=starting, 4=error
 
 Parser status: 0=available, 1=unavailable, 2=restarting
 
-Agent status: 0=idle, 1=thinking, 2=tool_executing, 3=error, 4=plan, 5=approval_waiting
+Agent status: 0=idle, 1=thinking, 2=tool_executing, 3=error, 4=plan, 5=approval_waiting, 6=needs_you
 
 Workspace kind: 0=manual, 1=agent. Workspace status uses the same values as agent status. Workspace flags: bit 0=attention, bit 1=closeable.
 
-Session status (agent variant): 0=idle, 1=thinking, 2=tool_executing, 3=error, 4=plan, 5=approval_waiting
+Session status (agent variant): 0=idle, 1=thinking, 2=tool_executing, 3=error, 4=plan, 5=approval_waiting, 6=needs_you. A failed Agent start reports `needs_you`, not `error`.
 
 Macro recording: 0=not recording, 1-26=recording register a-z
 
@@ -513,11 +513,13 @@ Each section uses `section_id(1) + section_len(2) + payload(section_len)`. Secti
 | 0x0C | StopTarget | `session_id(string16) + request_id(string16)`. Both IDs are nonempty. Absence clears the target and disables the displayed Stop control. |
 | 0x0D | PromptPresentation | `generation(8)`. The nonzero ID names the retained prompt displayed by both frontends and binds its workspace, saved conversation, source buffer and content revision. Absence means no pointer Send target. |
 | 0x0E | QueueTarget | `session_id(string16) + request_id(string16) + sequence(8)`. The target names one insertion position of the active saved-session queue. Absence disables Steer and Queue Next. |
-| 0x0F | ChatLifecycle | `kind(1) + reason(string16)`. Omitted for a live conversation. `1` means starting, `2` means failed with a reason, and `3` means unavailable. Starting and unavailable send an empty reason. Neither frontend shows approval controls while the conversation is not live. A zero-row prompt means the composer is unavailable. |
+| 0x0F | ChatLifecycle | `kind(1) + reason(string16) + remedy(1) + action_label(string16) + key_hint(string16) + headline(string16) + note(string16)`. Omitted for a live conversation. `1` means starting, `2` means failed, and `3` means unavailable. A failed lifecycle's `reason` is one plain sentence about the cause. `remedy` is the one action a failed start offers: `0` none, `1` retry, `2` set up provider. `action_label` is the button text and `key_hint` the key that runs the same action; frontends render both exactly as sent and never author remedy copy. Activating the action sends `agent_start_remedy` with the same remedy byte. Starting and unavailable send an empty reason, remedy `0` and empty remedy strings. `headline` names what happened to the tab, for example "Agent could not start", "Agent session stopped" or "Starting Agent", and is sent for every lifecycle in this section. `note` is the draft note shown under the notice when the composer is visible, for example "Your draft is saved. SPC a n starts a new session."; it names the new-session key bound for the current editing model, and an empty note means no note line. Frontends render `headline` and `note` exactly as sent. Neither frontend shows approval controls while the conversation is not live. A zero-row prompt means the composer is unavailable. |
 
 The Prompt section's `vim_mode` uses the status bar's mode values (0=normal, 1=insert, 2=visual, 3=command, 4=operator_pending, 5=search, 6=replace), because both indicators show the same editing mode. Frontends decode both bytes with one mapping.
 
-Status values: 0 = idle, 1 = thinking, 2 = tool_executing, 3 = error, 4 = plan, 5 = approval_waiting
+Status values: 0 = idle, 1 = thinking, 2 = tool_executing, 3 = error, 4 = plan, 5 = approval_waiting, 6 = needs_you
+
+Needs you marks an Agent whose start failed and is waiting for the user's action. It is not an execution error and not an active turn: render it with the amber needs-you treatment, without an execution animation and without Stop.
 
 Approval waiting is a presentation status, not a new execution or busy state. Render it without an execution animation, but keep Stop available because the turn is still active.
 
@@ -1314,6 +1316,7 @@ Scrolling changes only the BEAM-owned logical/continuation viewport anchor, neve
 | 0x6C | agent_open_question | offer(8) | Open the shared answer picker for the displayed clarification. The BEAM rejects a stale offer without answering a newer question. |
 | 0x6D | agent_stop_turn | session_id(string16) + request_id(string16) | Stop only the active request identified by the committed Stop control. A stale or repeated action must not recall prompts from, or stop, a replacement turn. |
 | 0x6E | agent_composer_queue | `prompt_generation(8) + attachment_offer(8) + kind(1) + session_id(string16) + request_id(string16) + sequence(8)` | Queue the displayed draft for the exact active turn. Kind `0` steers; kind `1` queues a follow-up. Echo the committed prompt, attachment, and queue identities from the same frame. A stale action does not send, queue, or clear the draft. |
+| 0x6F | agent_start_remedy | `remedy(1)` | Run the remedy the displayed failed start offers: `1` retry, `2` set up provider. The BEAM runs it only while the active Agent tab still offers that remedy, so a click on a stale notice does nothing. |
 | 0x34 | system_will_sleep | (empty) | System is about to sleep |
 | 0x35 | system_did_wake | (empty) | System woke and BEAM should refresh external state |
 | 0x36 | cmd_copy | (empty) | Execute mode-aware copy from the macOS menu |

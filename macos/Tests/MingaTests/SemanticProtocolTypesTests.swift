@@ -11,7 +11,8 @@ struct SemanticProtocolTypesTests {
             (2, .executingTool),
             (3, .error),
             (4, .planning),
-            (5, .approvalWaiting)
+            (5, .approvalWaiting),
+            (6, .needsYou)
         ]
 
         for (rawValue, expected) in known {
@@ -30,7 +31,7 @@ struct SemanticProtocolTypesTests {
             (.idle, false, false), (.thinking, true, true),
             (.executingTool, true, true), (.error, false, false),
             (.planning, false, false), (.approvalWaiting, true, false),
-            (.unknown(rawValue: 255), false, false)
+            (.needsYou, false, false), (.unknown(rawValue: 255), false, false)
         ]
         for (status, active, animated) in cases {
             #expect(status.hasActiveTurn == active)

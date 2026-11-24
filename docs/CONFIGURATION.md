@@ -30,7 +30,7 @@ That's it. Save the file and restart Minga. Your options take effect immediately
 | `:max_file_size` | positive integer | `10485760` | Maximum file size in bytes Minga will open. Larger files show a text-only "file too large" surface instead of loading a buffer; checked with a pre-read stat so the gap buffer and tree-sitter parser never touch the content. Default 10 MB. Raise it for the brave. |
 | `:resident_store_max_lines` | non-negative integer | `65536` | Maximum number of laid-out rows that can stay loaded in each frontend for immediate scrolling. Continuations count as rows. Set to `0` to disable residence. See [Fast scrolling (residence)](#fast-scrolling-residence) below. |
 | `:resident_store_max_bytes` | positive integer | `10485760` | Maximum buffer byte size that still gets full-document residence. Residence needs both this and `:resident_store_max_lines`; set `:resident_store_max_lines` to `0` to disable residence regardless of byte size. Default 10 MB. |
-| `:theme` | theme name atom | `:astrodark` | Color theme (see [Themes](#themes) below) |
+| `:theme` | theme name atom | `:catppuccin_frappe` | Color theme (see [Themes](#themes) below) |
 | `:indent_with` | `:spaces` or `:tabs` | `:spaces` | Whether to indent with spaces or tab characters |
 | `:trim_trailing_whitespace` | boolean | `false` | Strip trailing whitespace on save |
 | `:insert_final_newline` | boolean | `false` | Ensure file ends with a newline on save |
@@ -428,9 +428,9 @@ set :theme, :catppuccin_mocha
 
 | Theme | Style |
 |-------|-------|
-| `:astrodark` | Dark (default), AstroNvim |
+| `:astrodark` | Dark, AstroNvim |
 | `:doom_one` | Dark, Doom Emacs |
-| `:catppuccin_frappe` | Dark, Catppuccin family |
+| `:catppuccin_frappe` | Dark (default), Catppuccin family |
 | `:catppuccin_latte` | Light, Catppuccin family |
 | `:catppuccin_macchiato` | Dark, Catppuccin family |
 | `:catppuccin_mocha` | Dark, Catppuccin family |
@@ -970,14 +970,15 @@ Four phases are supported, matching Emacs's advice system:
 # errors, formatting often makes things worse.
 advise :around, :format_buffer, fn execute, state ->
   errors =
-    state.buffers.active
+    state
+    |> MingaEditor.Extension.EditorAPI.active_buffer()
     |> Minga.Diagnostics.for_buffer()
     |> Enum.count(fn d -> d.severity == :error end)
 
   if errors == 0 do
     execute.(state)
   else
-    %{state | status_msg: "Format skipped: #{errors} error(s)"}
+    MingaEditor.Extension.EditorAPI.notice(state, "Format skipped: #{errors} error(s)")
   end
 end
 ```
@@ -985,17 +986,25 @@ end
 `:override` replaces a command entirely. `:before` and `:after` still run around an overridden command, so you can override the core behavior while keeping other advice intact:
 
 ```elixir
-# Replace the built-in save with one that also stages the file in git
-advise :override, :save, fn state ->
-  # Run the original save logic
-  state = Minga.API.save()
+# Turn formatting off for this project: the command now only says so
+advise :override, :format_buffer, fn state ->
+  MingaEditor.Extension.EditorAPI.notice(state, "Formatting is off in this project")
+end
+```
 
-  # Then auto-stage
-  case Minga.Buffer.file_path(state.buffers.active) do
-    nil -> state
-    path ->
-      System.cmd("git", ["add", path], stderr_to_stdout: true)
-      %{state | status_msg: "Saved and staged: #{Path.basename(path)}"}
+To add behavior to a command instead of replacing it, use `:after`. Advice runs inside the editor, so call helpers that take `state` rather than `Minga.API` functions, which message the editor and would wait on themselves:
+
+```elixir
+# Stage the file in git after every save
+advise :after, :save, fn state ->
+  alias MingaEditor.Extension.EditorAPI
+
+  with buffer when is_pid(buffer) <- EditorAPI.active_buffer(state),
+       path when is_binary(path) <- Minga.Buffer.file_path(buffer),
+       {_output, 0} <- System.cmd("git", ["add", path], stderr_to_stdout: true) do
+    EditorAPI.notice(state, "Saved and staged: #{Path.basename(path)}")
+  else
+    _not_staged -> state
   end
 end
 ```
@@ -1451,7 +1460,8 @@ end
 # Skip formatting if the buffer has errors
 advise :around, :format_buffer, fn execute, state ->
   errors =
-    state.buffers.active
+    state
+    |> MingaEditor.Extension.EditorAPI.active_buffer()
     |> Minga.Diagnostics.for_buffer()
     |> Enum.count(fn d -> d.severity == :error end)
 

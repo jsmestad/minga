@@ -61,4 +61,28 @@ defmodule Minga.Language.Filetype.RuntimeRegistryTest do
       assert Filetype.detect_from_content("script", "#!/usr/bin/env python3") == :python
     end
   end
+
+  describe "detect_all/1 — runtime registry integration" do
+    test "applies runtime filename and extension overrides with detect/1 priority" do
+      Minga.Language.Filetype.Registry.register(".org", :org)
+      Minga.Language.Filetype.Registry.register("Justfile", :just)
+      Minga.Language.Filetype.Registry.register(".lock", :lock_custom)
+      Minga.Language.Filetype.Registry.register(".json", :json_custom)
+
+      paths = ["notes.org", "/repo/Justfile", "mix.lock", "yarn.lock", "data.json", "a.ex"]
+
+      assert Filetype.detect_all(paths) ==
+               [:org, :just, :elixir, :lock_custom, :json_custom, :elixir]
+
+      assert Filetype.detect_all(paths) == Enum.map(paths, &Filetype.detect/1)
+    end
+
+    test "reads overrides registered after an earlier call" do
+      assert Filetype.detect_all(["notes.org"]) == [:text]
+
+      Minga.Language.Filetype.Registry.register(".org", :org)
+
+      assert Filetype.detect_all(["notes.org"]) == [:org]
+    end
+  end
 end

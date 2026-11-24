@@ -93,9 +93,6 @@ defmodule MingaEditor.Agent.SessionEventWorkflow do
   @spec error(EditorState.t(), String.t(), :regular | :arrival) :: EditorState.t()
   def error(%EditorState{} = state, message, mode \\ :regular) when is_binary(message) do
     state
-    |> TraditionalWorkflow.install_agent_ui(
-      UIState.report_chat_start_failure(state.workspace.agent_ui, message)
-    )
     |> restore_queued_prompts_after_error(mode)
     |> TraditionalWorkflow.install_agent_error(message)
     |> MingaEditor.schedule_render(16)
@@ -123,7 +120,11 @@ defmodule MingaEditor.Agent.SessionEventWorkflow do
   def connection_changed(%EditorState{} = state, _session_pid, _connection), do: state
 
   @doc "Retires the chat attached to an exact stopped or unreachable Session."
-  @spec session_unreachable(EditorState.t(), pid() | nil, :unavailable | {:failed, String.t()}) ::
+  @spec session_unreachable(
+          EditorState.t(),
+          pid() | nil,
+          :unavailable | {:failed, MingaEditor.Agent.StartFailure.t()}
+        ) ::
           EditorState.t()
   def session_unreachable(
         %EditorState{shell_runtime: %Runtime{state: %TraditionalState{tab_bar: %TabBar{} = tabs}}} =
@@ -138,11 +139,11 @@ defmodule MingaEditor.Agent.SessionEventWorkflow do
         state
         |> TraditionalWorkflow.install_agent_cache_reset()
         |> TraditionalWorkflow.install_agent_ui(
-          UIState.transition_chat(state.workspace.agent_ui, lifecycle)
+          UIState.restore_chat(state.workspace.agent_ui, lifecycle)
         )
 
       {_active, %Workspace{id: id, payload: %WorkspaceAgent{agent_ui: %UIState{} = ui}}} ->
-        tabs = TabBar.set_workspace_agent_ui(tabs, id, UIState.transition_chat(ui, lifecycle))
+        tabs = TabBar.set_workspace_agent_ui(tabs, id, UIState.restore_chat(ui, lifecycle))
         WorkspaceWorkflow.install_tab_bar(state, tabs)
 
       _no_owner ->

@@ -39,6 +39,10 @@ defmodule Minga.RenderModel.UI.AgentChat do
   Bare body tuples (without an `id` wrapper) are also accepted and encode with
   ID `0`, matching the historical wire behaviour.
 
+  ## Lifecycle notice
+
+  A chat without a live conversation shows a notice. `lifecycle_headline` names what happened to the tab and `draft_note` tells the user the draft survives and which key starts a new session. Both are authored by the editor builder; frontends render them exactly as sent, and an empty `draft_note` means no note line. Neither is sent for a live conversation.
+
   ## Resident transcript
 
   `resident_messages` rides the dedicated `gui_agent_transcript` (0x86) stream
@@ -54,6 +58,7 @@ defmodule Minga.RenderModel.UI.AgentChat do
   alias __MODULE__.ApprovalView
   alias __MODULE__.MarkdownBlock
   alias __MODULE__.PromptCompletion
+  alias __MODULE__.StartRemedy
   alias __MODULE__.ToolCallView
   alias __MODULE__.Usage
 
@@ -82,12 +87,22 @@ defmodule Minga.RenderModel.UI.AgentChat do
   @typedoc "A message with its stable GUI identity, or a bare body that encodes with ID 0."
   @type message :: {pos_integer(), message_body()} | message_body()
 
-  @typedoc "Availability of the Agent pane, independent of turn execution."
-  @type lifecycle :: :conversation | :starting | {:failed, String.t()} | :unavailable
+  @typedoc """
+  Availability of the Agent pane, independent of turn execution.
+
+  A failed pane carries one plain sentence about the cause and the action that can fix it, or nil when no action applies.
+  """
+  @type lifecycle ::
+          :conversation
+          | :starting
+          | {:failed, String.t(), StartRemedy.t() | nil}
+          | :unavailable
 
   @type t :: %__MODULE__{
           visible?: boolean(),
           lifecycle: lifecycle(),
+          lifecycle_headline: String.t(),
+          draft_note: String.t(),
           status: atom(),
           # Chrome fields are typed `| nil` defensively: defstruct defaults are non-nil
           # and the builder always populates them, but the encoder retains `|| default`
@@ -116,6 +131,8 @@ defmodule Minga.RenderModel.UI.AgentChat do
 
   defstruct visible?: false,
             lifecycle: :conversation,
+            lifecycle_headline: "",
+            draft_note: "",
             status: :idle,
             model_name: "",
             thinking_level: "",
