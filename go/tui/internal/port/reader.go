@@ -47,6 +47,11 @@ func readPackets(reader io.Reader, send func(tea.Msg)) error {
 	}
 }
 
+// DecodePacket decodes one packet with the production command walk below, so a recorded packet replays exactly as the reader would deliver it. The storyboard renderer (#4036) replays packets the BEAM sent to a headless frontend.
+func DecodePacket(packet []byte, warn func(byte, string)) []protocol.Command {
+	return decodePacket(packet, warn)
+}
+
 // decodePacket walks a batch of concatenated commands. The schema-generated
 // generated.CommandSize is the single authority for how far to advance after
 // each command, so an opcode this build does not render still advances by the

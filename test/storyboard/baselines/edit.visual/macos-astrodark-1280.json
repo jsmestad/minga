@@ -1,0 +1,206 @@
+{
+ "elements": [
+  {
+   "frame": [
+    79,
+    65,
+    1174,
+    729.5
+   ],
+   "label": "storyboard.ex, pane 1",
+   "role": "AXTextArea",
+   "value": "defmodule Storyboard do\n  @moduledoc \"A small file every storyboard scenario starts in.\"\n\n  def greet(name) do\n    \"Hello, \" <> name\n  end\nend\n"
+  }
+ ],
+ "grid": {
+  "cols": 156,
+  "rows": 38
+ },
+ "parts": [
+  {
+   "baseline": 21,
+   "frame": [
+    259.5,
+    9.5,
+    78,
+    15
+   ],
+   "part": "tabBar.tabLabel",
+   "text": "storyboard.ex"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    40,
+    43.5,
+    4,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "/"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    58,
+    43.5,
+    22.5,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "tmp"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    94.5,
+    43.5,
+    102,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "minga-storyboard"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    210.5,
+    43.5,
+    71,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "macos-1280"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    295.5,
+    43.5,
+    57,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "edit.visual"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    366.5,
+    43.5,
+    13.5,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "lib"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    394,
+    43.5,
+    78,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "storyboard.ex"
+  },
+  {
+   "frame": [
+    0,
+    808,
+    1280,
+    24
+   ],
+   "part": "modeline"
+  },
+  {
+   "frame": [
+    114,
+    811.5,
+    54,
+    17
+   ],
+   "part": "modeline.modePill",
+   "text": "VISUAL"
+  },
+  {
+   "frame": [
+    114,
+    811.5,
+    54,
+    17
+   ],
+   "part": "modeline.segment",
+   "text": "mode:  VISUAL "
+  },
+  {
+   "frame": [
+    176,
+    813,
+    72.5,
+    14
+   ],
+   "part": "modeline.segment",
+   "text": "filename:  storyboard.ex "
+  },
+  {
+   "frame": [
+    1050.5,
+    813,
+    54.5,
+    14
+   ],
+   "part": "modeline.segment",
+   "text": "indent:  Spaces:2 "
+  },
+  {
+   "frame": [
+    1113,
+    813,
+    40.5,
+    14
+   ],
+   "part": "modeline.segment",
+   "text": "filetype:  \ue62d Elixir "
+  },
+  {
+   "frame": [
+    1161.5,
+    813,
+    48,
+    14
+   ],
+   "part": "modeline.segment",
+   "text": "position:  1 chars "
+  },
+  {
+   "frame": [
+    1217.5,
+    813,
+    20.5,
+    14
+   ],
+   "part": "modeline.segment",
+   "text": "percent:  0%% "
+  },
+  {
+   "baseline": 823,
+   "frame": [
+    122,
+    813.5,
+    38,
+    13
+   ],
+   "part": "modeline.modeText",
+   "text": "VISUAL"
+  }
+ ],
+ "scenario": "edit.visual",
+ "size": "1280",
+ "theme": "astrodark",
+ "window": {
+  "height": 832,
+  "width": 1280
+ }
+}

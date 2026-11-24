@@ -1,0 +1,895 @@
+{
+ "elements": [
+  {
+   "frame": [
+    79,
+    65,
+    1174,
+    729.5
+   ],
+   "label": "storyboard.ex, pane 1",
+   "role": "AXTextArea",
+   "value": "defmodule Storyboard do\n  @moduledoc \"A small file every storyboard scenario starts in.\"\n\n  def greet(name) do\n    \"Hello, \" <> name\n  end\nend\n"
+  }
+ ],
+ "grid": {
+  "cols": 156,
+  "rows": 38
+ },
+ "parts": [
+  {
+   "baseline": 21,
+   "frame": [
+    320.5,
+    9.5,
+    78,
+    15
+   ],
+   "part": "tabBar.tabLabel",
+   "text": "storyboard.ex"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    40,
+    43.5,
+    4,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "/"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    58,
+    43.5,
+    22.5,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "tmp"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    94.5,
+    43.5,
+    102,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "minga-storyboard"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    210.5,
+    43.5,
+    71,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "macos-1280"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    295.5,
+    43.5,
+    115,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "edit.whichkey.leader"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    424.5,
+    43.5,
+    13.5,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "lib"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    452,
+    43.5,
+    78,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "storyboard.ex"
+  },
+  {
+   "frame": [
+    408,
+    565,
+    464,
+    259
+   ],
+   "part": "whichKey.panel"
+  },
+  {
+   "baseline": 581.5,
+   "frame": [
+    420,
+    571,
+    20.5,
+    14
+   ],
+   "part": "whichKey.breadcrumb",
+   "text": "SPC"
+  },
+  {
+   "baseline": 581,
+   "frame": [
+    845.5,
+    571.5,
+    14.5,
+    13
+   ],
+   "part": "whichKey.count",
+   "text": "1/2"
+  },
+  {
+   "frame": [
+    418,
+    598,
+    220,
+    220
+   ],
+   "part": "whichKey.column"
+  },
+  {
+   "frame": [
+    418,
+    598,
+    220,
+    22
+   ],
+   "part": "whichKey.entry",
+   "text": "/ Search project"
+  },
+  {
+   "frame": [
+    642,
+    598,
+    220,
+    220
+   ],
+   "part": "whichKey.column"
+  },
+  {
+   "frame": [
+    642,
+    598,
+    220,
+    22
+   ],
+   "part": "whichKey.entry",
+   "text": ": Execute command"
+  },
+  {
+   "baseline": 612.5,
+   "frame": [
+    435,
+    602,
+    7,
+    14
+   ],
+   "part": "whichKey.entryKey",
+   "text": "/"
+  },
+  {
+   "baseline": 612.5,
+   "frame": [
+    448,
+    602,
+    77,
+    14
+   ],
+   "part": "whichKey.entryLabel",
+   "text": "Search project"
+  },
+  {
+   "baseline": 612.5,
+   "frame": [
+    659,
+    602,
+    7,
+    14
+   ],
+   "part": "whichKey.entryKey",
+   "text": ":"
+  },
+  {
+   "baseline": 612.5,
+   "frame": [
+    672,
+    602,
+    96.5,
+    14
+   ],
+   "part": "whichKey.entryLabel",
+   "text": "Execute command"
+  },
+  {
+   "frame": [
+    418,
+    620,
+    220,
+    22
+   ],
+   "part": "whichKey.entry",
+   "text": "1 Tab 1"
+  },
+  {
+   "frame": [
+    642,
+    620,
+    220,
+    22
+   ],
+   "part": "whichKey.entry",
+   "text": "SPC Find file in project"
+  },
+  {
+   "baseline": 634.5,
+   "frame": [
+    435,
+    624,
+    7,
+    14
+   ],
+   "part": "whichKey.entryKey",
+   "text": "1"
+  },
+  {
+   "baseline": 634.5,
+   "frame": [
+    448,
+    624,
+    27.5,
+    14
+   ],
+   "part": "whichKey.entryLabel",
+   "text": "Tab 1"
+  },
+  {
+   "baseline": 634.5,
+   "frame": [
+    645.5,
+    624,
+    20.5,
+    14
+   ],
+   "part": "whichKey.entryKey",
+   "text": "SPC"
+  },
+  {
+   "baseline": 634.5,
+   "frame": [
+    672,
+    624,
+    94.5,
+    14
+   ],
+   "part": "whichKey.entryLabel",
+   "text": "Find file in project"
+  },
+  {
+   "frame": [
+    418,
+    642,
+    220,
+    22
+   ],
+   "part": "whichKey.entry",
+   "text": "2 Tab 2"
+  },
+  {
+   "frame": [
+    642,
+    642,
+    220,
+    22
+   ],
+   "part": "whichKey.entry",
+   "text": "TAB +tab"
+  },
+  {
+   "baseline": 656.5,
+   "frame": [
+    435,
+    646,
+    7,
+    14
+   ],
+   "part": "whichKey.entryKey",
+   "text": "2"
+  },
+  {
+   "baseline": 656.5,
+   "frame": [
+    448,
+    646,
+    29,
+    14
+   ],
+   "part": "whichKey.entryLabel",
+   "text": "Tab 2"
+  },
+  {
+   "baseline": 656.5,
+   "frame": [
+    645.5,
+    646,
+    20.5,
+    14
+   ],
+   "part": "whichKey.entryKey",
+   "text": "TAB"
+  },
+  {
+   "baseline": 656.5,
+   "frame": [
+    672,
+    646,
+    24,
+    14
+   ],
+   "part": "whichKey.entryLabel",
+   "text": "+tab"
+  },
+  {
+   "frame": [
+    418,
+    664,
+    220,
+    22
+   ],
+   "part": "whichKey.entry",
+   "text": "3 Tab 3"
+  },
+  {
+   "frame": [
+    642,
+    664,
+    220,
+    22
+   ],
+   "part": "whichKey.entry",
+   "text": "a +ai"
+  },
+  {
+   "baseline": 678.5,
+   "frame": [
+    435,
+    668,
+    7,
+    14
+   ],
+   "part": "whichKey.entryKey",
+   "text": "3"
+  },
+  {
+   "baseline": 678.5,
+   "frame": [
+    448,
+    668,
+    29,
+    14
+   ],
+   "part": "whichKey.entryLabel",
+   "text": "Tab 3"
+  },
+  {
+   "baseline": 678.5,
+   "frame": [
+    659,
+    668,
+    7,
+    14
+   ],
+   "part": "whichKey.entryKey",
+   "text": "a"
+  },
+  {
+   "baseline": 678.5,
+   "frame": [
+    672,
+    668,
+    16,
+    14
+   ],
+   "part": "whichKey.entryLabel",
+   "text": "+ai"
+  },
+  {
+   "frame": [
+    418,
+    686,
+    220,
+    22
+   ],
+   "part": "whichKey.entry",
+   "text": "4 Tab 4"
+  },
+  {
+   "frame": [
+    642,
+    686,
+    220,
+    22
+   ],
+   "part": "whichKey.entry",
+   "text": "b +buffer"
+  },
+  {
+   "baseline": 700.5,
+   "frame": [
+    435,
+    690,
+    7,
+    14
+   ],
+   "part": "whichKey.entryKey",
+   "text": "4"
+  },
+  {
+   "baseline": 700.5,
+   "frame": [
+    448,
+    690,
+    29.5,
+    14
+   ],
+   "part": "whichKey.entryLabel",
+   "text": "Tab 4"
+  },
+  {
+   "baseline": 700.5,
+   "frame": [
+    659,
+    690,
+    7,
+    14
+   ],
+   "part": "whichKey.entryKey",
+   "text": "b"
+  },
+  {
+   "baseline": 700.5,
+   "frame": [
+    672,
+    690,
+    39,
+    14
+   ],
+   "part": "whichKey.entryLabel",
+   "text": "+buffer"
+  },
+  {
+   "frame": [
+    418,
+    708,
+    220,
+    22
+   ],
+   "part": "whichKey.entry",
+   "text": "5 Tab 5"
+  },
+  {
+   "frame": [
+    642,
+    708,
+    220,
+    22
+   ],
+   "part": "whichKey.entry",
+   "text": "c +code"
+  },
+  {
+   "baseline": 722.5,
+   "frame": [
+    435,
+    712,
+    7,
+    14
+   ],
+   "part": "whichKey.entryKey",
+   "text": "5"
+  },
+  {
+   "baseline": 722.5,
+   "frame": [
+    448,
+    712,
+    29,
+    14
+   ],
+   "part": "whichKey.entryLabel",
+   "text": "Tab 5"
+  },
+  {
+   "baseline": 722.5,
+   "frame": [
+    659,
+    712,
+    7,
+    14
+   ],
+   "part": "whichKey.entryKey",
+   "text": "c"
+  },
+  {
+   "baseline": 722.5,
+   "frame": [
+    672,
+    712,
+    33,
+    14
+   ],
+   "part": "whichKey.entryLabel",
+   "text": "+code"
+  },
+  {
+   "frame": [
+    418,
+    730,
+    220,
+    22
+   ],
+   "part": "whichKey.entry",
+   "text": "6 Tab 6"
+  },
+  {
+   "frame": [
+    642,
+    730,
+    220,
+    22
+   ],
+   "part": "whichKey.entry",
+   "text": "f +file"
+  },
+  {
+   "baseline": 744.5,
+   "frame": [
+    435,
+    734,
+    7,
+    14
+   ],
+   "part": "whichKey.entryKey",
+   "text": "6"
+  },
+  {
+   "baseline": 744.5,
+   "frame": [
+    448,
+    734,
+    29.5,
+    14
+   ],
+   "part": "whichKey.entryLabel",
+   "text": "Tab 6"
+  },
+  {
+   "baseline": 744.5,
+   "frame": [
+    659,
+    734,
+    7,
+    14
+   ],
+   "part": "whichKey.entryKey",
+   "text": "f"
+  },
+  {
+   "baseline": 744.5,
+   "frame": [
+    672,
+    734,
+    23,
+    14
+   ],
+   "part": "whichKey.entryLabel",
+   "text": "+file"
+  },
+  {
+   "frame": [
+    418,
+    752,
+    220,
+    22
+   ],
+   "part": "whichKey.entry",
+   "text": "7 Tab 7"
+  },
+  {
+   "frame": [
+    642,
+    752,
+    220,
+    22
+   ],
+   "part": "whichKey.entry",
+   "text": "g +git"
+  },
+  {
+   "baseline": 766.5,
+   "frame": [
+    435,
+    756,
+    7,
+    14
+   ],
+   "part": "whichKey.entryKey",
+   "text": "7"
+  },
+  {
+   "baseline": 766.5,
+   "frame": [
+    448,
+    756,
+    28.5,
+    14
+   ],
+   "part": "whichKey.entryLabel",
+   "text": "Tab 7"
+  },
+  {
+   "baseline": 766.5,
+   "frame": [
+    659,
+    756,
+    7,
+    14
+   ],
+   "part": "whichKey.entryKey",
+   "text": "g"
+  },
+  {
+   "baseline": 766.5,
+   "frame": [
+    672,
+    756,
+    21,
+    14
+   ],
+   "part": "whichKey.entryLabel",
+   "text": "+git"
+  },
+  {
+   "frame": [
+    418,
+    774,
+    220,
+    22
+   ],
+   "part": "whichKey.entry",
+   "text": "8 Tab 8"
+  },
+  {
+   "frame": [
+    642,
+    774,
+    220,
+    22
+   ],
+   "part": "whichKey.entry",
+   "text": "h +help"
+  },
+  {
+   "baseline": 788.5,
+   "frame": [
+    435,
+    778,
+    7,
+    14
+   ],
+   "part": "whichKey.entryKey",
+   "text": "8"
+  },
+  {
+   "baseline": 788.5,
+   "frame": [
+    448,
+    778,
+    29.5,
+    14
+   ],
+   "part": "whichKey.entryLabel",
+   "text": "Tab 8"
+  },
+  {
+   "baseline": 788.5,
+   "frame": [
+    659,
+    778,
+    7,
+    14
+   ],
+   "part": "whichKey.entryKey",
+   "text": "h"
+  },
+  {
+   "baseline": 788.5,
+   "frame": [
+    672,
+    778,
+    30,
+    14
+   ],
+   "part": "whichKey.entryLabel",
+   "text": "+help"
+  },
+  {
+   "frame": [
+    418,
+    796,
+    220,
+    22
+   ],
+   "part": "whichKey.entry",
+   "text": "9 Tab 9"
+  },
+  {
+   "frame": [
+    642,
+    796,
+    220,
+    22
+   ],
+   "part": "whichKey.entry",
+   "text": "o +open"
+  },
+  {
+   "baseline": 810.5,
+   "frame": [
+    435,
+    800,
+    7,
+    14
+   ],
+   "part": "whichKey.entryKey",
+   "text": "9"
+  },
+  {
+   "baseline": 810.5,
+   "frame": [
+    448,
+    800,
+    29.5,
+    14
+   ],
+   "part": "whichKey.entryLabel",
+   "text": "Tab 9"
+  },
+  {
+   "baseline": 810.5,
+   "frame": [
+    659,
+    800,
+    7,
+    14
+   ],
+   "part": "whichKey.entryKey",
+   "text": "o"
+  },
+  {
+   "baseline": 810.5,
+   "frame": [
+    672,
+    800,
+    33.5,
+    14
+   ],
+   "part": "whichKey.entryLabel",
+   "text": "+open"
+  },
+  {
+   "frame": [
+    0,
+    808,
+    1280,
+    24
+   ],
+   "part": "modeline"
+  },
+  {
+   "frame": [
+    114,
+    811.5,
+    61,
+    17
+   ],
+   "part": "modeline.modePill",
+   "text": "NORMAL"
+  },
+  {
+   "frame": [
+    114,
+    811.5,
+    61,
+    17
+   ],
+   "part": "modeline.segment",
+   "text": "mode:  NORMAL "
+  },
+  {
+   "frame": [
+    183,
+    813,
+    72.5,
+    14
+   ],
+   "part": "modeline.segment",
+   "text": "filename:  storyboard.ex "
+  },
+  {
+   "frame": [
+    1023.5,
+    813,
+    54.5,
+    14
+   ],
+   "part": "modeline.segment",
+   "text": "indent:  Spaces:2 "
+  },
+  {
+   "frame": [
+    1086,
+    813,
+    40.5,
+    14
+   ],
+   "part": "modeline.segment",
+   "text": "filetype:  \ue62d Elixir "
+  },
+  {
+   "frame": [
+    1134.5,
+    813,
+    75,
+    14
+   ],
+   "part": "modeline.segment",
+   "text": "position:  1:1 "
+  },
+  {
+   "frame": [
+    1217.5,
+    813,
+    20.5,
+    14
+   ],
+   "part": "modeline.segment",
+   "text": "percent:  0%% "
+  },
+  {
+   "baseline": 823,
+   "frame": [
+    122,
+    813.5,
+    45,
+    13
+   ],
+   "part": "modeline.modeText",
+   "text": "NORMAL"
+  }
+ ],
+ "scenario": "edit.whichkey.leader",
+ "size": "1280",
+ "theme": "catppuccin_latte",
+ "window": {
+  "height": 832,
+  "width": 1280
+ }
+}

@@ -169,6 +169,10 @@ To update the corpus after an intentional semantic change, run `mix run --no-sta
 
 This evidence is an emitted-text-cell capture, not pixel, color, animation or live-interaction proof. The ready-only `scripts/go_tui_boot_smoke.py`, model-only coverage tracked in #2101 and legacy Zig snapshots prove different contracts. Production capture gates Go UI acceptance, not the start of a focused repair. A user-facing change still needs its actual keyboard and mouse walkthrough, plus the relevant [screen snapshot review](https://github.com/jsmestad/minga/blob/main/docs/recipes/update-snapshots.md).
 
+## Storyboard frames
+
+`internal/ui/storyboard_render_test.go` draws every built storyboard scenario from the packets the BEAM recorded for it, through `port.DecodePacket` and `Model.Update`, and writes each frame as a text grid with its style runs. It runs only when `MINGA_STORYBOARD_TRANSCRIPTS` is set; `design/tools/storyboard/renders.py render` sets it. The frames are the TUI baselines in `test/storyboard/baselines/`; see [Renders and baselines](design/storyboard.md#renders-and-baselines).
+
 ## Time Agent opening in the packaged terminal editor
 
 Use the shipping launcher to measure what a user waits for after pressing `SPC a n`. The renderer boot smoke cannot measure this request because it does not start the BEAM or send keys. From the source checkout, run:

@@ -1,0 +1,895 @@
+{
+ "elements": [
+  {
+   "frame": [
+    79,
+    65,
+    1338.5,
+    825.5
+   ],
+   "label": "storyboard.ex, pane 1",
+   "role": "AXTextArea",
+   "value": "defmodule Storyboard do\n  @moduledoc \"A small file every storyboard scenario starts in.\"\n\n  def greet(name) do\n    \"Hello, \" <> name\n  end\nend\n"
+  }
+ ],
+ "grid": {
+  "cols": 177,
+  "rows": 43
+ },
+ "parts": [
+  {
+   "baseline": 21,
+   "frame": [
+    293.5,
+    9.5,
+    78,
+    15
+   ],
+   "part": "tabBar.tabLabel",
+   "text": "storyboard.ex"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    40,
+    43.5,
+    4,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "/"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    58,
+    43.5,
+    22.5,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "tmp"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    94.5,
+    43.5,
+    102,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "minga-storyboard"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    210.5,
+    43.5,
+    71.5,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "macos-1440"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    296,
+    43.5,
+    90,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "minga.whichkey"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    400,
+    43.5,
+    13.5,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "lib"
+  },
+  {
+   "baseline": 55,
+   "frame": [
+    427.5,
+    43.5,
+    78,
+    15
+   ],
+   "part": "breadcrumb.segment",
+   "text": "storyboard.ex"
+  },
+  {
+   "frame": [
+    488,
+    665,
+    464,
+    259
+   ],
+   "part": "whichKey.panel"
+  },
+  {
+   "baseline": 681.5,
+   "frame": [
+    500,
+    671,
+    34,
+    14
+   ],
+   "part": "whichKey.breadcrumb",
+   "text": "SPC a"
+  },
+  {
+   "baseline": 681,
+   "frame": [
+    925.5,
+    671.5,
+    14.5,
+    13
+   ],
+   "part": "whichKey.count",
+   "text": "1/2"
+  },
+  {
+   "frame": [
+    498,
+    698,
+    220,
+    220
+   ],
+   "part": "whichKey.column"
+  },
+  {
+   "frame": [
+    498,
+    698,
+    220,
+    22
+   ],
+   "part": "whichKey.entry",
+   "text": "? Ask about line or selection"
+  },
+  {
+   "frame": [
+    722,
+    698,
+    220,
+    220
+   ],
+   "part": "whichKey.column"
+  },
+  {
+   "frame": [
+    722,
+    698,
+    220,
+    22
+   ],
+   "part": "whichKey.entry",
+   "text": "T Pick thinking level"
+  },
+  {
+   "baseline": 712.5,
+   "frame": [
+    515,
+    702,
+    7,
+    14
+   ],
+   "part": "whichKey.entryKey",
+   "text": "?"
+  },
+  {
+   "baseline": 712.5,
+   "frame": [
+    528,
+    702,
+    139,
+    14
+   ],
+   "part": "whichKey.entryLabel",
+   "text": "Ask about line or selection"
+  },
+  {
+   "baseline": 712.5,
+   "frame": [
+    739,
+    702,
+    7,
+    14
+   ],
+   "part": "whichKey.entryKey",
+   "text": "T"
+  },
+  {
+   "baseline": 712.5,
+   "frame": [
+    752,
+    702,
+    94.5,
+    14
+   ],
+   "part": "whichKey.entryLabel",
+   "text": "Pick thinking level"
+  },
+  {
+   "frame": [
+    498,
+    720,
+    220,
+    22
+   ],
+   "part": "whichKey.entry",
+   "text": "D Attach file diagnostics to Agent"
+  },
+  {
+   "frame": [
+    722,
+    720,
+    220,
+    22
+   ],
+   "part": "whichKey.entry",
+   "text": "a Toggle agent split"
+  },
+  {
+   "baseline": 734.5,
+   "frame": [
+    515,
+    724,
+    7,
+    14
+   ],
+   "part": "whichKey.entryKey",
+   "text": "D"
+  },
+  {
+   "baseline": 734.5,
+   "frame": [
+    528,
+    724,
+    164.5,
+    14
+   ],
+   "part": "whichKey.entryLabel",
+   "text": "Attach file diagnostics to Agent"
+  },
+  {
+   "baseline": 734.5,
+   "frame": [
+    739,
+    724,
+    7,
+    14
+   ],
+   "part": "whichKey.entryKey",
+   "text": "a"
+  },
+  {
+   "baseline": 734.5,
+   "frame": [
+    752,
+    724,
+    94,
+    14
+   ],
+   "part": "whichKey.entryLabel",
+   "text": "Toggle agent split"
+  },
+  {
+   "frame": [
+    498,
+    742,
+    220,
+    22
+   ],
+   "part": "whichKey.entry",
+   "text": "F Attach project file to Agent"
+  },
+  {
+   "frame": [
+    722,
+    742,
+    220,
+    22
+   ],
+   "part": "whichKey.entry",
+   "text": "b Attach current buffer to Agent"
+  },
+  {
+   "baseline": 756.5,
+   "frame": [
+    515,
+    746,
+    7,
+    14
+   ],
+   "part": "whichKey.entryKey",
+   "text": "F"
+  },
+  {
+   "baseline": 756.5,
+   "frame": [
+    528,
+    746,
+    141.5,
+    14
+   ],
+   "part": "whichKey.entryLabel",
+   "text": "Attach project file to Agent"
+  },
+  {
+   "baseline": 756.5,
+   "frame": [
+    739,
+    746,
+    7,
+    14
+   ],
+   "part": "whichKey.entryKey",
+   "text": "b"
+  },
+  {
+   "baseline": 756.5,
+   "frame": [
+    752,
+    746,
+    158.5,
+    14
+   ],
+   "part": "whichKey.entryLabel",
+   "text": "Attach current buffer to Agent"
+  },
+  {
+   "frame": [
+    498,
+    764,
+    220,
+    22
+   ],
+   "part": "whichKey.entry",
+   "text": "H Read retained Agent messages"
+  },
+  {
+   "frame": [
+    722,
+    764,
+    220,
+    22
+   ],
+   "part": "whichKey.entry",
+   "text": "c Copy file to workspace\u2026"
+  },
+  {
+   "baseline": 778.5,
+   "frame": [
+    515,
+    768,
+    7,
+    14
+   ],
+   "part": "whichKey.entryKey",
+   "text": "H"
+  },
+  {
+   "baseline": 778.5,
+   "frame": [
+    528,
+    768,
+    162.5,
+    14
+   ],
+   "part": "whichKey.entryLabel",
+   "text": "Read retained Agent messages"
+  },
+  {
+   "baseline": 778.5,
+   "frame": [
+    739,
+    768,
+    7,
+    14
+   ],
+   "part": "whichKey.entryKey",
+   "text": "c"
+  },
+  {
+   "baseline": 778.5,
+   "frame": [
+    752,
+    768,
+    128.5,
+    14
+   ],
+   "part": "whichKey.entryLabel",
+   "text": "Copy file to workspace\u2026"
+  },
+  {
+   "frame": [
+    498,
+    786,
+    220,
+    22
+   ],
+   "part": "whichKey.entry",
+   "text": "J Inspect queued Agent inputs"
+  },
+  {
+   "frame": [
+    722,
+    786,
+    220,
+    22
+   ],
+   "part": "whichKey.entry",
+   "text": "e Rewrite selection inline"
+  },
+  {
+   "baseline": 800.5,
+   "frame": [
+    515,
+    790,
+    7,
+    14
+   ],
+   "part": "whichKey.entryKey",
+   "text": "J"
+  },
+  {
+   "baseline": 800.5,
+   "frame": [
+    528,
+    790,
+    151,
+    14
+   ],
+   "part": "whichKey.entryLabel",
+   "text": "Inspect queued Agent inputs"
+  },
+  {
+   "baseline": 800.5,
+   "frame": [
+    739,
+    790,
+    7,
+    14
+   ],
+   "part": "whichKey.entryKey",
+   "text": "e"
+  },
+  {
+   "baseline": 800.5,
+   "frame": [
+    752,
+    790,
+    121.5,
+    14
+   ],
+   "part": "whichKey.entryLabel",
+   "text": "Rewrite selection inline"
+  },
+  {
+   "frame": [
+    498,
+    808,
+    220,
+    22
+   ],
+   "part": "whichKey.entry",
+   "text": "N Pick agent session location"
+  },
+  {
+   "frame": [
+    722,
+    808,
+    220,
+    22
+   ],
+   "part": "whichKey.entry",
+   "text": "f Queue current input as follow-up"
+  },
+  {
+   "baseline": 822.5,
+   "frame": [
+    515,
+    812,
+    7,
+    14
+   ],
+   "part": "whichKey.entryKey",
+   "text": "N"
+  },
+  {
+   "baseline": 822.5,
+   "frame": [
+    528,
+    812,
+    143,
+    14
+   ],
+   "part": "whichKey.entryLabel",
+   "text": "Pick agent session location"
+  },
+  {
+   "baseline": 822.5,
+   "frame": [
+    739,
+    812,
+    7,
+    14
+   ],
+   "part": "whichKey.entryKey",
+   "text": "f"
+  },
+  {
+   "baseline": 822.5,
+   "frame": [
+    752,
+    812,
+    173,
+    14
+   ],
+   "part": "whichKey.entryLabel",
+   "text": "Queue current input as follow-up"
+  },
+  {
+   "frame": [
+    498,
+    830,
+    220,
+    22
+   ],
+   "part": "whichKey.entry",
+   "text": "P Discard unpublished agent edits"
+  },
+  {
+   "frame": [
+    722,
+    830,
+    220,
+    22
+   ],
+   "part": "whichKey.entry",
+   "text": "h Resume session"
+  },
+  {
+   "baseline": 844.5,
+   "frame": [
+    515,
+    834,
+    7,
+    14
+   ],
+   "part": "whichKey.entryKey",
+   "text": "P"
+  },
+  {
+   "baseline": 844.5,
+   "frame": [
+    528,
+    834,
+    169.5,
+    14
+   ],
+   "part": "whichKey.entryLabel",
+   "text": "Discard unpublished agent edits"
+  },
+  {
+   "baseline": 844.5,
+   "frame": [
+    739,
+    834,
+    7,
+    14
+   ],
+   "part": "whichKey.entryKey",
+   "text": "h"
+  },
+  {
+   "baseline": 844.5,
+   "frame": [
+    752,
+    834,
+    84.5,
+    14
+   ],
+   "part": "whichKey.entryLabel",
+   "text": "Resume session"
+  },
+  {
+   "frame": [
+    498,
+    852,
+    220,
+    22
+   ],
+   "part": "whichKey.entry",
+   "text": "Q Answer Agent question"
+  },
+  {
+   "frame": [
+    722,
+    852,
+    220,
+    22
+   ],
+   "part": "whichKey.entry",
+   "text": "j Inspect draft attachments"
+  },
+  {
+   "baseline": 866.5,
+   "frame": [
+    515,
+    856,
+    7,
+    14
+   ],
+   "part": "whichKey.entryKey",
+   "text": "Q"
+  },
+  {
+   "baseline": 866.5,
+   "frame": [
+    528,
+    856,
+    121,
+    14
+   ],
+   "part": "whichKey.entryLabel",
+   "text": "Answer Agent question"
+  },
+  {
+   "baseline": 866.5,
+   "frame": [
+    739,
+    856,
+    7,
+    14
+   ],
+   "part": "whichKey.entryKey",
+   "text": "j"
+  },
+  {
+   "baseline": 866.5,
+   "frame": [
+    752,
+    856,
+    136,
+    14
+   ],
+   "part": "whichKey.entryLabel",
+   "text": "Inspect draft attachments"
+  },
+  {
+   "frame": [
+    498,
+    874,
+    220,
+    22
+   ],
+   "part": "whichKey.entry",
+   "text": "R Rename Agent session"
+  },
+  {
+   "frame": [
+    722,
+    874,
+    220,
+    22
+   ],
+   "part": "whichKey.entry",
+   "text": "k Inspect Agent checklist"
+  },
+  {
+   "baseline": 888.5,
+   "frame": [
+    515,
+    878,
+    7,
+    14
+   ],
+   "part": "whichKey.entryKey",
+   "text": "R"
+  },
+  {
+   "baseline": 888.5,
+   "frame": [
+    528,
+    878,
+    119,
+    14
+   ],
+   "part": "whichKey.entryLabel",
+   "text": "Rename Agent session"
+  },
+  {
+   "baseline": 888.5,
+   "frame": [
+    739,
+    878,
+    7,
+    14
+   ],
+   "part": "whichKey.entryKey",
+   "text": "k"
+  },
+  {
+   "baseline": 888.5,
+   "frame": [
+    752,
+    878,
+    123,
+    14
+   ],
+   "part": "whichKey.entryLabel",
+   "text": "Inspect Agent checklist"
+  },
+  {
+   "frame": [
+    498,
+    896,
+    220,
+    22
+   ],
+   "part": "whichKey.entry",
+   "text": "S Stop agent session"
+  },
+  {
+   "frame": [
+    722,
+    896,
+    220,
+    22
+   ],
+   "part": "whichKey.entry",
+   "text": "m Pick agent model"
+  },
+  {
+   "baseline": 910.5,
+   "frame": [
+    515,
+    900,
+    7,
+    14
+   ],
+   "part": "whichKey.entryKey",
+   "text": "S"
+  },
+  {
+   "baseline": 910.5,
+   "frame": [
+    528,
+    900,
+    100.5,
+    14
+   ],
+   "part": "whichKey.entryLabel",
+   "text": "Stop agent session"
+  },
+  {
+   "baseline": 910.5,
+   "frame": [
+    739,
+    900,
+    7,
+    14
+   ],
+   "part": "whichKey.entryKey",
+   "text": "m"
+  },
+  {
+   "baseline": 910.5,
+   "frame": [
+    752,
+    900,
+    90.5,
+    14
+   ],
+   "part": "whichKey.entryLabel",
+   "text": "Pick agent model"
+  },
+  {
+   "frame": [
+    0,
+    908,
+    1440,
+    24
+   ],
+   "part": "modeline"
+  },
+  {
+   "frame": [
+    114,
+    911.5,
+    61,
+    17
+   ],
+   "part": "modeline.modePill",
+   "text": "NORMAL"
+  },
+  {
+   "frame": [
+    114,
+    911.5,
+    61,
+    17
+   ],
+   "part": "modeline.segment",
+   "text": "mode:  NORMAL "
+  },
+  {
+   "frame": [
+    183,
+    913,
+    72.5,
+    14
+   ],
+   "part": "modeline.segment",
+   "text": "filename:  storyboard.ex "
+  },
+  {
+   "frame": [
+    1183.5,
+    913,
+    54.5,
+    14
+   ],
+   "part": "modeline.segment",
+   "text": "indent:  Spaces:2 "
+  },
+  {
+   "frame": [
+    1246,
+    913,
+    40.5,
+    14
+   ],
+   "part": "modeline.segment",
+   "text": "filetype:  \ue62d Elixir "
+  },
+  {
+   "frame": [
+    1294.5,
+    913,
+    75,
+    14
+   ],
+   "part": "modeline.segment",
+   "text": "position:  1:1 "
+  },
+  {
+   "frame": [
+    1377.5,
+    913,
+    20.5,
+    14
+   ],
+   "part": "modeline.segment",
+   "text": "percent:  0%% "
+  },
+  {
+   "baseline": 923,
+   "frame": [
+    122,
+    913.5,
+    45,
+    13
+   ],
+   "part": "modeline.modeText",
+   "text": "NORMAL"
+  }
+ ],
+ "scenario": "minga.whichkey",
+ "size": "1440",
+ "theme": "catppuccin_frappe",
+ "window": {
+  "height": 932,
+  "width": 1440
+ }
+}

@@ -23,7 +23,7 @@ gen v4gen gen41.py v4
 gen v4gen gen_shell.py v4
 for t in edit powers review subagent talkopen tasks; do gen tuigen "$t.py" tui; done
 gen subagentgen mac.py v4
-for b in 1 2 3 4 5 6 7; do gen "batch$b" "b$b.py" "b$b"; done
+for b in 1 2 3 4 5 6 7 8; do gen "batch$b" "b$b.py" "b$b"; done
 gen mouse mouse.py mouse
 gen mousevid vid.py vid
 gen actbrand ab.py ab
@@ -32,7 +32,7 @@ gen actbrand ab.py ab
 export_ "$WORK/v4" 'V41*.dc.html'
 export_ "$WORK/tui" 'V41*.dc.html'
 export_ "$WORK/vid"
-for b in 1 2 3 4 5 6 7; do export_ "$WORK/b$b" --theme frappe 'Batch*.dc.html'; done
+for b in 1 2 3 4 5 6 7 8; do export_ "$WORK/b$b" --theme frappe 'Batch*.dc.html'; done
 export_ "$WORK/mouse" --theme frappe 'Mouse_*.dc.html'
 export_ "$WORK/ab" --theme frappe ActMenu_DirectionA.dc.html ActMenu_Compare.dc.html
 for th in frappe latte; do

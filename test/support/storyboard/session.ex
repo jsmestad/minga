@@ -12,6 +12,7 @@ defmodule Minga.Test.Storyboard.Session do
   alias Minga.Test.Storyboard.Model
   alias MingaEditor.Frontend.Emit.Context
   alias MingaEditor.MinibufferData
+  alias MingaEditor.State.RenderCorrelation
   alias MingaEditor.RenderModel.UI.Builder, as: UIBuilder
   alias MingaEditor.StatusBar.Data, as: StatusBarData
 
@@ -44,26 +45,36 @@ defmodule Minga.Test.Storyboard.Session do
   Starts a headless editor at the factory's cold start.
 
   Options: `:content` (the file's text), `:file_name` (relative to the project root, default `lib/storyboard.ex`), `:width` and `:height` (default 120 by 36), and `:rendering` (`:disabled` by default).
+
+  Every session runs the real tree-sitter parser and returns only once its highlights are applied, so parser-dependent keys (structural motions, text objects, folds) behave as in the app and every frame is highlighted. The parser is the suite's shared one (`shared_parser/0`) unless `:parser_manager` names another running `Minga.Parser.Manager`.
+
+  The storyboard renderer (#4036) adds four more: `:root` (a fixed project directory, so the path the chrome shows is the same on every machine; the caller keeps it unique among concurrent sessions), `:theme` (a built-in theme name such as `:astrodark`, set on a private options server before the editor starts), `:capabilities` (the `MingaEditor.Frontend.Capabilities` the frontend would report), and `:record_packets` (keep every packet for `packets/1`).
   """
   @spec start(keyword()) :: t()
   def start(opts \\ []) do
-    root = make_project()
+    root = make_project(Keyword.get(opts, :root))
     file = Path.join(root, Keyword.get(opts, :file_name, "lib/storyboard.ex"))
     content = Keyword.get(opts, :content, @default_content)
     File.mkdir_p!(Path.dirname(file))
     File.write!(file, content)
 
     child_id = make_ref()
+    parser = Keyword.get_lazy(opts, :parser_manager, &shared_parser!/0)
 
-    ctx =
-      EditorCase.start_editor(content,
+    editor_opts =
+      [
         child_id: child_id,
         file_path: file,
         project_root: root,
         width: Keyword.get(opts, :width, 120),
         height: Keyword.get(opts, :height, 36),
-        rendering: Keyword.get(opts, :rendering, :disabled)
-      )
+        rendering: Keyword.get(opts, :rendering, :disabled),
+        record_packets: Keyword.get(opts, :record_packets, false),
+        parser_manager: parser
+      ] ++ Keyword.take(opts, [:capabilities]) ++ theme_opts(Keyword.get(opts, :theme))
+
+    ctx = EditorCase.start_editor(content, editor_opts)
+    await_highlights!(ctx, parser)
 
     session = %__MODULE__{ctx: ctx, root: root, file: file, home_window: 0, child_id: child_id}
     %{session | home_window: window_id(session)}
@@ -108,6 +119,30 @@ defmodule Minga.Test.Storyboard.Session do
     :ok = Minga.Events.broadcast(:log_message, event, ctx.events_registry)
     _ = EditorCase.editor_state(ctx)
     record(session, "interrupt #{inspect(text)}")
+  end
+
+  @doc """
+  Returns every packet the editor has sent to its frontend so far, oldest first.
+
+  Requires `record_packets: true` and `rendering: :enabled`. Replaying the packets in order through a frontend's production decoder rebuilds the frame the session shows now.
+  """
+  @spec packets(t()) :: [binary()]
+  def packets(%__MODULE__{ctx: ctx}) do
+    _ = EditorCase.editor_state(ctx)
+    Minga.Test.HeadlessPort.packets(ctx.port)
+  end
+
+  @doc "The text grid the headless frontend shows now, one string per row. Requires `rendering: :enabled`."
+  @spec screen_text(t()) :: [String.t()]
+  def screen_text(%__MODULE__{ctx: ctx}) do
+    _ = EditorCase.editor_state(ctx)
+    Minga.Test.HeadlessPort.get_screen_text(ctx.port)
+  end
+
+  @doc "The number of tree-sitter highlight spans the active buffer carries now. Zero without a parser."
+  @spec highlight_span_count(t()) :: non_neg_integer()
+  def highlight_span_count(%__MODULE__{ctx: ctx}) do
+    ctx |> EditorCase.editor_state() |> highlight_spans() |> tuple_size()
   end
 
   @doc "Returns the semantic frame the editor would commit now."
@@ -176,14 +211,118 @@ defmodule Minga.Test.Storyboard.Session do
   @spec record(t(), String.t()) :: t()
   defp record(%__MODULE__{path: path} = session, label), do: %{session | path: [label | path]}
 
-  @spec make_project() :: Path.t()
-  defp make_project do
-    root =
-      Path.join(
-        System.tmp_dir!(),
-        "minga-storyboard-#{System.unique_integer([:positive])}"
+  @shared_parser Minga.Test.Storyboard.Parser
+  @highlight_deadline_ms 10_000
+  @wake_ms 20
+
+  @doc """
+  The child spec of the parser every storyboard session shares.
+
+  `test/test_helper.exs` starts it once, before any test runs, because it opens the native `minga-parser` Port and OS processes must not be spawned while async tests run. Sessions only register their buffers with it.
+  """
+  @spec shared_parser_child_spec() :: Supervisor.child_spec()
+  def shared_parser_child_spec,
+    do: Supervisor.child_spec({Minga.Parser.Manager, name: @shared_parser}, id: @shared_parser)
+
+  @spec shared_parser!() :: GenServer.server()
+  defp shared_parser! do
+    case Process.whereis(@shared_parser) do
+      nil ->
+        raise "the storyboard parser is not running; test/test_helper.exs starts it with Session.shared_parser_child_spec/0"
+
+      _pid ->
+        @shared_parser
+    end
+  end
+
+  # The parser answers asynchronously: the editor applies the spans, then schedules a render. A session is ready when
+  # the spans are applied and, when it renders, the frame that shows them has reached the headless frontend. Parser
+  # events wake the wait early; the short timeout only re-checks a render that is still in flight.
+  @spec await_highlights!(EditorCase.editor_ctx(), GenServer.server()) :: :ok
+  defp await_highlights!(ctx, parser) do
+    :ok = Minga.Parser.Manager.subscribe(parser)
+    deadline = System.monotonic_time(:millisecond) + @highlight_deadline_ms
+    wait_for_highlights!(ctx, deadline)
+    flush_parser_events()
+  end
+
+  defp wait_for_highlights!(ctx, deadline) do
+    state = EditorCase.editor_state(ctx)
+
+    cond do
+      tuple_size(highlight_spans(state)) > 0 and rendered?(ctx, state) ->
+        :ok
+
+      System.monotonic_time(:millisecond) > deadline ->
+        raise "the storyboard parser applied no highlights within #{@highlight_deadline_ms} ms; " <>
+                "is priv/minga-parser built (mix native.build.support)?"
+
+      true ->
+        receive do
+          {:minga_highlight, _event} -> :ok
+        after
+          @wake_ms -> :ok
+        end
+
+        wait_for_highlights!(ctx, deadline)
+    end
+  end
+
+  @spec rendered?(EditorCase.editor_ctx(), MingaEditor.State.t()) :: boolean()
+  defp rendered?(%{rendering: :disabled}, _state), do: true
+
+  defp rendered?(%{port: port}, state) do
+    correlation = state.render.render_correlation
+
+    settled =
+      not RenderCorrelation.scheduled?(correlation) and
+        RenderCorrelation.last_receipt_revision(correlation) >=
+          RenderCorrelation.latest_intent_revision(correlation)
+
+    # The receipt says the renderer handed the frame over; reading the port orders this after the port applied it.
+    if settled, do: Minga.Test.HeadlessPort.get_screen(port)
+    settled
+  end
+
+  @spec flush_parser_events() :: :ok
+  defp flush_parser_events do
+    receive do
+      {:minga_highlight, _event} -> flush_parser_events()
+    after
+      0 -> :ok
+    end
+  end
+
+  @spec highlight_spans(MingaEditor.State.t()) :: tuple()
+  defp highlight_spans(state), do: MingaEditor.HighlightSync.get_active_highlight(state).spans
+
+  # A private options server carries the theme, so concurrent sessions never share a theme through the global one.
+  @spec theme_opts(atom() | nil) :: keyword()
+  defp theme_opts(nil), do: []
+
+  defp theme_opts(theme) when is_atom(theme) do
+    events = :"minga_storyboard_events_#{System.unique_integer([:positive])}"
+    ExUnit.Callbacks.start_supervised!({Minga.Events, name: events}, id: events)
+
+    options =
+      ExUnit.Callbacks.start_supervised!(
+        {Minga.Config.Options, name: nil, events_registry: events},
+        id: {:storyboard_options, events}
       )
 
+    {:ok, _theme} = Minga.Config.Options.set(options, :theme, theme)
+    [events_registry: events, options_server: options]
+  end
+
+  @spec make_project(Path.t() | nil) :: Path.t()
+  defp make_project(nil) do
+    make_project(
+      Path.join(System.tmp_dir!(), "minga-storyboard-#{System.unique_integer([:positive])}")
+    )
+  end
+
+  defp make_project(root) do
+    File.rm_rf!(root)
     File.mkdir_p!(root)
     File.write!(Path.join(root, "mix.exs"), "defmodule Storyboard.MixProject do\nend\n")
     ExUnit.Callbacks.on_exit(fn -> File.rm_rf(root) end)

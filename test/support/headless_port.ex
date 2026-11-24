@@ -70,6 +70,7 @@ defmodule Minga.Test.HeadlessPort do
           | {:width, pos_integer()}
           | {:height, pos_integer()}
           | {:capabilities, MingaEditor.Frontend.Capabilities.t()}
+          | {:record_packets, boolean()}
 
   defmodule State do
     @moduledoc false
@@ -95,7 +96,8 @@ defmodule Minga.Test.HeadlessPort do
       transaction: nil,
       last_frame_seq: 0,
       recovery_generation: 0,
-      production_outcome: :unknown
+      production_outcome: :unknown,
+      packets: nil
     ]
 
     @type t :: %__MODULE__{
@@ -120,7 +122,8 @@ defmodule Minga.Test.HeadlessPort do
             last_frame_seq: non_neg_integer(),
             recovery_generation: non_neg_integer(),
             production_outcome:
-              :unknown | :accepted | :recovery_required | :stale_discarded | :rejected
+              :unknown | :accepted | :recovery_required | :stale_discarded | :rejected,
+            packets: [binary()] | nil
           }
   end
 
@@ -206,6 +209,19 @@ defmodule Minga.Test.HeadlessPort do
   @spec get_screen_text(GenServer.server()) :: [String.t()]
   def get_screen_text(server) do
     GenServer.call(server, :get_screen_text)
+  end
+
+  @doc """
+  Returns every packet the editor sent, oldest first, when the port was started with `record_packets: true`.
+
+  Each packet is the exact payload a real frontend receives as one length-prefixed frame, so the Go TUI and the macOS frontend can replay it through their production decoders (the storyboard renderer, #4036).
+  """
+  @spec packets(GenServer.server()) :: [binary()]
+  def packets(server) do
+    case GenServer.call(server, :packets) do
+      {:ok, packets} -> packets
+      :not_recording -> raise ArgumentError, "start the headless port with record_packets: true"
+    end
   end
 
   @doc "Returns the full screen snapshot."
@@ -326,7 +342,8 @@ defmodule Minga.Test.HeadlessPort do
       width: width,
       height: height,
       grid: blank_grid(width, height),
-      capabilities: Keyword.get(opts, :capabilities, MingaEditor.Frontend.Capabilities.default())
+      capabilities: Keyword.get(opts, :capabilities, MingaEditor.Frontend.Capabilities.default()),
+      packets: if(Keyword.get(opts, :record_packets, false), do: [], else: nil)
     }
 
     {:ok, state}
@@ -345,6 +362,11 @@ defmodule Minga.Test.HeadlessPort do
   def handle_call(:terminal_size, _from, state) do
     {:reply, {state.width, state.height}, state}
   end
+
+  def handle_call(:packets, _from, %State{packets: nil} = state),
+    do: {:reply, :not_recording, state}
+
+  def handle_call(:packets, _from, state), do: {:reply, {:ok, Enum.reverse(state.packets)}, state}
 
   def handle_call(:capabilities, _from, state) do
     {:reply, state.capabilities, state}
@@ -484,7 +506,17 @@ defmodule Minga.Test.HeadlessPort do
     do: {:noreply, apply_commands(state, commands)}
 
   @spec apply_commands(State.t(), [binary()]) :: State.t()
-  defp apply_commands(state, commands), do: Enum.reduce(commands, state, &apply_command/2)
+  defp apply_commands(state, commands) do
+    state = record_packet(state, commands)
+    Enum.reduce(commands, state, &apply_command/2)
+  end
+
+  # A packet is the batch one send carries; a real frontend receives it as one length-prefixed frame.
+  @spec record_packet(State.t(), [binary()]) :: State.t()
+  defp record_packet(%State{packets: nil} = state, _commands), do: state
+
+  defp record_packet(%State{packets: packets} = state, commands),
+    do: %{state | packets: [IO.iodata_to_binary(commands) | packets]}
 
   @impl true
   def handle_info({:DOWN, _ref, :process, pid, _reason}, state) do

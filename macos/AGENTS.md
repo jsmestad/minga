@@ -177,6 +177,12 @@ The base must compile on the pinned SDK before its pixels can be compared. Use i
 
 `scripts/chrome_token_migration.json` records each intentional snap by original source line, its reason, derived runtime values, and the representative fixture covering each formerly unpreviewed surface. Registered parent fixtures cover the remaining child views. The pixel manifest reports observed changes separately from source-level candidate tokens. Review every changed preview and investigate any unexplained change before approval. Do not claim a preview is pixel-identical or approved before reading that evidence.
 
+### Anatomy parts and storyboard renders
+
+The storyboard renders every built scenario on macOS (see [storyboard.md](../docs/design/storyboard.md#renders-and-baselines)). PreviewHost's storyboard mode (`PreviewRegistry+Storyboard.swift`) replays the packets the BEAM recorded for a scenario through the production decoder, `CommandDispatcher`, `ContentView` and Metal editor, captures the window, and exports every view tagged with `.anatomyPart("surface.part", text:, font:)`. The export (frames, text and baselines in window points) is the macOS baseline and what the layout audit measures against `docs/design/anatomy.md`.
+
+Tag each part a surface's anatomy names, with the anatomy's words (`whichKey.entryKey`, `modeline.segment`), on the view whose frame is the part. In the app the modifier changes nothing; it records only while `AnatomyPartRecorder.shared` is set. A new chrome surface is not done until its parts are tagged.
+
 ## Adding New Features
 
 ### New GUI chrome element (e.g., a new panel or overlay)
