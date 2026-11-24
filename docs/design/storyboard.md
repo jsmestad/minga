@@ -90,7 +90,7 @@ mix test --only storyboard test/storyboard
 
 **The cold start.** Until the home buffer lands (#4056), the factory starts every scenario from a headless editor with one Elixir file open in Normal mode, which is `edit.plain`.
 
-**The parser.** Every session runs the real tree-sitter parser, so structural motions, text objects, folds and highlighting behave as they do in the app, and a key that needs the syntax tree is never reported as doing nothing. `test/test_helper.exs` starts one shared `Minga.Parser.Manager` before any test runs (its Port is an OS process, which async tests must not spawn concurrently); each session registers its buffer with it and returns only once the highlights are applied. Build the parser with `mix native.build.support` before running the suite.
+**The parser.** Every session runs the real tree-sitter parser, so structural motions, text objects, folds and highlighting behave as they do in the app, and a key that needs the syntax tree is never reported as doing nothing. `test/test_helper.exs` starts one shared `Minga.Parser.Manager` before any test runs (its Port is an OS process, which async tests must not spawn concurrently); each session registers its buffer with it and returns only once the highlights are applied. Build the parser with `mix native.build.support` before running the suite. Each session's buffer edits reach the shared parser through `Minga.Test.Storyboard.ParserRelay`, because every session keeps its own private events registry.
 
 **Design checks.** `Minga.Test.Storyboard.Assertions` asserts against the semantic model by structure and token name, never by pixel: modeline segment order, which-key groups and counts, state words and colour roles from `Minga.Design.Tokens`, keys shown on transient surfaces, the open and focused surface, and the empty-state anatomy. A check that waits on a ticket is written with `Check.pending/3`; the suite runs it anyway and fails when it starts to pass, so the ticket that lands the surface turns it on.
 
@@ -122,7 +122,7 @@ The text-grid snapshots of the existing snapshot system (`test/storyboard/render
 **Baselines.** `test/storyboard/baselines/<scenario>/` holds one file per frontend, theme and size, and `promotion.json` records the commit that produced them. CI fails when:
 
 - a render does not match its committed baseline (a stale baseline);
-- a built scenario has no baseline;
+- a built scenario has no baseline, or a baseline has no render (a size, theme or scenario went away);
 - a scenario changed against the base branch on one frontend but not the other, unless the scenario's promotion is tagged platform-specific with a reason.
 
 A scenario's first renders become its baseline once they pass the layout audit and visual review. Pending scenarios are listed, never rendered and never failures.
@@ -145,7 +145,7 @@ python3 design/tools/storyboard/renders.py promote --macos /tmp/storyboard-macos
 
 `promote` renders the TUI locally, copies both frontends' renders into the baseline store and records the commit. macOS baselines always come from CI, because the runner's fonts and SDK decide the exact frames; without `--macos` only the TUI baselines move. When a change is meant for one frontend only, add `--platform-specific 'macos:the reason'` (or `tui:`) so the parity check accepts it. Update the text-grid snapshots in the same change with `UPDATE_SNAPSHOTS=1 mix test --only storyboard test/storyboard/render_test.exs`.
 
-**In CI.** The **Storyboard (Elixir)** job records the transcripts and draws the TUI frames. **Storyboard renders (macOS)** draws the macOS frames on `macos-15` whenever native sources changed or a TUI frame moved. **Storyboard renders** compares both with the baselines, checks parity, writes the changed scenarios to the job summary and publishes the generated storyboard page as the `storyboard-page` artifact: scenarios in rows, frontends and sizes in columns, a theme switch, and the journeys below as frame strips. It is part of the CI gate.
+**In CI.** The **Storyboard (Elixir)** job records the transcripts and draws the TUI frames. **Storyboard renders (macOS)** draws the macOS frames on `macos-15` whenever native sources changed, a macOS-only input changed (the renderer's tools, the window grid, the baselines), or the packets for a macOS frame differ from the ones its baseline was promoted from (each promotion records a digest of them). When it is skipped, its frames equal their baselines by construction, so the parity check still applies. **Storyboard renders** compares both with the baselines, checks parity, writes the changed scenarios to the job summary and publishes the generated storyboard page as the `storyboard-page` artifact: scenarios in rows, frontends and sizes in columns, a theme switch, and the journeys below as frame strips. It is part of the CI gate.
 
 ## Journey strips
 

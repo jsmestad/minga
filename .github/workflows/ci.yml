@@ -263,7 +263,7 @@ jobs:
     env:
       MINGA_SKIP_GO_TUI_BUILD: "1"
     outputs:
-      ui_changed: ${{ steps.tui-diff.outputs.ui_changed }}
+      macos_required: ${{ steps.tui-diff.outputs.macos_required }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -302,7 +302,8 @@ jobs:
       - name: Record transcripts and draw the TUI frames
         run: python3 design/tools/storyboard/renders.py render --out "$RUNNER_TEMP/storyboard"
 
-      # Never fails: storyboard-renders judges the diff once the macOS frames exist. This decides whether macOS must draw.
+      # Never fails: storyboard-renders judges the diff once the macOS frames exist. This decides whether macOS must draw:
+      # a macOS transcript differs from the one its baseline was promoted from, or a macOS-only input changed.
       - name: Diff the TUI frames against the baselines
         id: tui-diff
         run: |
@@ -319,10 +320,10 @@ jobs:
 
   storyboard-macos:
     # Draws every macOS transcript through the production decoder, ContentView and Metal editor in PreviewHost (#4036).
-    # It runs when a change can move a macOS frame: native sources, or any change that moved a TUI frame.
+    # It runs when a change can move a macOS frame: native sources, or different packets for a macOS frame.
     name: Storyboard renders (macOS)
     needs: [changes, storyboard]
-    if: ${{ !cancelled() && needs.storyboard.result == 'success' && (github.event_name == 'push' || needs.changes.outputs.swift == 'true' || needs.storyboard.outputs.ui_changed == 'true') }}
+    if: ${{ !cancelled() && needs.storyboard.result == 'success' && (github.event_name == 'push' || needs.changes.outputs.swift == 'true' || needs.storyboard.outputs.macos_required == 'true') }}
     runs-on: macos-15
     timeout-minutes: 30
     permissions:
@@ -396,12 +397,17 @@ jobs:
         env:
           RENDER: ${{ needs.storyboard.result }}
           MACOS: ${{ needs.storyboard-macos.result }}
-          MACOS_REQUIRED: ${{ github.event_name == 'push' || needs.changes.outputs.swift == 'true' || needs.storyboard.outputs.ui_changed == 'true' }}
+          MACOS_REQUIRED: ${{ github.event_name == 'push' || needs.changes.outputs.swift == 'true' || needs.storyboard.outputs.macos_required == 'true' }}
         run: |
           printf 'TUI renders: %s; macOS renders: %s (required: %s)\n' "$RENDER" "$MACOS" "$MACOS_REQUIRED"
           [[ "$RENDER" == success ]] || exit 1
           [[ "$MACOS" == success || ( "$MACOS_REQUIRED" == false && "$MACOS" == skipped ) ]] || exit 1
-          if [[ "$MACOS" == success ]]; then echo "FRONTENDS=tui,macos" >> "$GITHUB_ENV"; else echo "FRONTENDS=tui" >> "$GITHUB_ENV"; fi
+          # A skipped macOS job means none of its inputs changed, so its frames equal their baselines.
+          if [[ "$MACOS" == success ]]; then
+            echo "FRONTENDS=tui,macos" >> "$GITHUB_ENV"; echo "UNCHANGED=" >> "$GITHUB_ENV"
+          else
+            echo "FRONTENDS=tui" >> "$GITHUB_ENV"; echo "UNCHANGED=macos" >> "$GITHUB_ENV"
+          fi
 
       - name: Download transcripts and TUI frames
         uses: actions/download-artifact@v4
@@ -421,6 +427,7 @@ jobs:
         run: |
           set +e
           python3 design/tools/storyboard/renders.py diff --out "$RUNNER_TEMP/storyboard" --frontends "$FRONTENDS" --check \
+            --assume-unchanged "$UNCHANGED" \
             --base "${{ github.event.pull_request.base.sha || github.event.before }}"
           status=$?
           cat "$RUNNER_TEMP/storyboard/diff.md" >> "$GITHUB_STEP_SUMMARY"

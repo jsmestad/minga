@@ -42,8 +42,7 @@
 1 29-79 #4c4f69 #eff1f5 -
 2 0-5 #5c5f77 #eff1f5 -
 2 6-7 #4c4f69 #eff1f5 -
-2 8-8 #04a5e5 #eff1f5 -
-2 9-17 #7c7f93 #eff1f5 italic
+2 8-17 #7c7f93 #eff1f5 italic
 2 18-18 #fe640b #eff1f5 -
 2 19-69 #7c7f93 #eff1f5 italic
 2 70-79 #4c4f69 #eff1f5 -

@@ -153,6 +153,30 @@ def load_promotion(scenario_id):
     return json.loads(path.read_text()) if path.is_file() else {}
 
 
+# Inputs that change macOS frames without changing what the BEAM sends: the renderer's own tools, the window grid, and
+# the baselines themselves.
+MACOS_INPUT_PATHS = ("design/tools/storyboard", "test/storyboard/macos_geometry.json", "test/storyboard/baselines")
+
+
+def macos_required(out, manifest, base):
+    """True when macOS must draw: a macOS transcript differs from the one its baseline was promoted from, a built
+    scenario has no macOS baseline yet, or a macOS-only input changed against the base revision. Native sources are
+    decided by the CI path detector."""
+    if base is None:
+        return True
+    changed = subprocess.run(["git", "diff", "--quiet", base, "HEAD", "--", *MACOS_INPUT_PATHS], cwd=ROOT).returncode != 0
+    if changed:
+        return True
+    for scenario in manifest["scenarios"]:
+        if scenario["status"] != "built" or "macos" not in expected_frontends(scenario):
+            continue
+        promoted = load_promotion(scenario["id"]).get("macos", {}).get("transcripts", {})
+        for path in sorted((out / "transcripts" / scenario["id"]).glob("macos-*.json")):
+            if promoted.get(path.name) != json.loads(path.read_text()).get("digest"):
+                return True
+    return False
+
+
 def cmd_diff(args):
     out = args.out
     manifest = load_manifest(out)
@@ -160,7 +184,8 @@ def cmd_diff(args):
     frontends = [frontend for frontend in args.frontends.split(",") if frontend]
     base = resolve_ref(args.base)
     report = {"base": base, "frontends": frontends, "stale": [], "missing_baseline": [], "missing_render": [],
-              "changed": [], "parity_violations": [], "platform_specific": [], "pending": []}
+              "orphan_baseline": [], "changed": [], "parity_violations": [], "platform_specific": [], "pending": [],
+              "macos_required": macos_required(out, manifest, base)}
     built = [scenario for scenario in manifest["scenarios"] if scenario["status"] == "built"]
     report["pending"] = [{"scenario": s["id"], "issue": s.get("issue"), "reason": s.get("reason")}
                          for s in manifest["scenarios"] if s["status"] != "built"]
@@ -174,6 +199,8 @@ def cmd_diff(args):
             if not rendered:
                 report["missing_render"].append({"scenario": sid, "frontend": frontend})
                 continue
+            for orphan in sorted(set(render_files(BASELINES / sid, frontend)) - set(rendered)):
+                report["orphan_baseline"].append({"scenario": sid, "frontend": frontend, "file": orphan})
             targets = []
             for name in rendered:
                 current = comparable(frontend, (renders / sid / name).read_text())
@@ -191,7 +218,9 @@ def cmd_diff(args):
                 changed_on[frontend] = targets
         if changed_on:
             report["changed"].append({"scenario": sid, "frontends": changed_on})
-        both = set(expected_frontends(scenario)) == set(FRONTENDS) and set(frontends) == set(FRONTENDS)
+        # A frontend CI did not draw because none of its inputs changed is unchanged by construction.
+        judged = set(frontends) | set(args.assume_unchanged.split(",") if args.assume_unchanged else [])
+        both = set(expected_frontends(scenario)) == set(FRONTENDS) and judged >= set(FRONTENDS)
         if both and len(changed_on) == 1:
             (only,) = changed_on
             tag = load_promotion(sid).get("platform_specific")
@@ -207,8 +236,9 @@ def cmd_diff(args):
         with open(args.github_output, "a") as handle:
             ui_changed = bool(report["changed"] or report["stale"] or report["missing_baseline"])
             handle.write(f"ui_changed={'true' if ui_changed else 'false'}\n")
+            handle.write(f"macos_required={'true' if report['macos_required'] else 'false'}\n")
             handle.write(f"changed_count={len(report['changed'])}\n")
-    failed = report["stale"] or report["missing_baseline"] or report["parity_violations"]
+    failed = report["stale"] or report["missing_baseline"] or report["orphan_baseline"] or report["parity_violations"]
     if args.check and failed:
         return 1
     if args.check and report["missing_render"]:
@@ -229,6 +259,7 @@ def diff_markdown(report):
         ("stale", "Renders that do not match the committed baseline (accept with `renders.py promote`)"),
         ("missing_baseline", "Built scenarios without a baseline (promote them once the layout audit and visual review pass)"),
         ("missing_render", "Expected renders that were not produced"),
+        ("orphan_baseline", "Baselines with no render (a target or scenario went away; promote to remove them)"),
         ("parity_violations", "Changed on one frontend only, without a platform-specific reason"),
         ("platform_specific", "Changed on one frontend only, tagged platform-specific"),
     ]
@@ -288,14 +319,19 @@ def cmd_promote(args):
                 if stale not in names:
                     (target / stale).unlink()
             hashes = {}
+            transcripts = {}
             for name in names:
                 data = (source / sid / name).read_text()
                 if frontend == "macos":
+                    transcripts[name] = json.loads(data).get("transcript_digest")
                     data = comparable(frontend, data) + "\n"
                 (target / name).write_text(data)
                 hashes[name] = hashlib.sha256(data.encode()).hexdigest()
             entry = {"commit": commit, "files": hashes}
-            if promotion.get(frontend, {}).get("files") != hashes:
+            if transcripts:
+                # What the BEAM sent for each frame, so CI knows when macOS must draw again (macos_required).
+                entry["transcripts"] = transcripts
+            if {k: v for k, v in promotion.get(frontend, {}).items() if k != "commit"} != {k: v for k, v in entry.items() if k != "commit"}:
                 promotion[frontend] = entry
                 changed = True
         if tag is not None and (not wanted or sid in wanted):
@@ -549,6 +585,7 @@ def main(argv=None):
     diff.add_argument("--frontends", default="tui,macos")
     diff.add_argument("--check", action="store_true", help="exit 1 on a stale render, a missing baseline or a parity violation")
     diff.add_argument("--github-output", default=None)
+    diff.add_argument("--assume-unchanged", default="", help="frontends CI skipped because none of their inputs changed")
     add("page")
     promote = add("promote")
     promote.add_argument("--macos", default=None, help="directory with macOS renders, such as the downloaded storyboard-macos artifact")

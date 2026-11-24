@@ -139,9 +139,42 @@ defmodule Minga.Test.Storyboard.Render do
       "cols" => target.cols,
       "rows" => target.rows,
       "window" => window(target.window),
+      "digest" => digest(packets),
       "packets" => Enum.map(packets, &Base.encode64/1)
     }
   end
+
+  @doc """
+  A digest of what the packets draw, the same on every run and machine.
+
+  Frame sequence numbers, the recovery generation and the echoed input sequence count up per run, so the digest zeroes them in the begin and commit commands that open and close each frame. CI compares the macOS digests with the ones recorded at promotion to decide whether macOS must draw again.
+  """
+  @spec digest([binary()]) :: String.t()
+  def digest(packets) do
+    packets
+    |> Enum.map(&normalize_frame_header/1)
+    |> then(&:crypto.hash(:sha256, &1))
+    |> Base.encode16(case: :lower)
+  end
+
+  @begin_frame Minga.Protocol.Opcodes.begin_frame()
+  @commit_frame Minga.Protocol.Opcodes.commit_frame()
+
+  @spec normalize_frame_header(binary()) :: binary()
+  defp normalize_frame_header(<<@begin_frame, _ids::binary-size(12), rest::binary>>) do
+    body_size = byte_size(rest) - 9
+
+    case rest do
+      <<body::binary-size(body_size), @commit_frame, _seqs::binary-size(8)>>
+      when body_size >= 0 ->
+        <<@begin_frame, 0::96, body::binary, @commit_frame, 0::64>>
+
+      _unframed ->
+        <<@begin_frame, 0::96, rest::binary>>
+    end
+  end
+
+  defp normalize_frame_header(packet), do: packet
 
   @doc "The transcript file name for a target: `<frontend>-<theme>-<size>.json`."
   @spec file_name(target()) :: String.t()
@@ -154,13 +187,26 @@ defmodule Minga.Test.Storyboard.Render do
   """
   @spec export!(Path.t()) :: :ok
   def export!(dir) do
+    Enum.each(exported_scenarios(), &export_scenario!(dir, &1))
+    export_journeys!(dir)
+  end
+
+  @doc "The built, designed scenarios the export renders."
+  @spec exported_scenarios() :: [Entry.t()]
+  def exported_scenarios, do: Enum.filter(Registry.built(), &designed?(&1.id))
+
+  @doc "Writes one scenario's transcripts for every target under `dir/transcripts/<id>/`."
+  @spec export_scenario!(Path.t(), Entry.t()) :: :ok
+  def export_scenario!(dir, %Entry{} = entry) do
+    transcripts = Path.join(dir, "transcripts")
+    Enum.each(targets(), &capture!(transcripts, entry.id, entry, [], &1))
+  end
+
+  @doc "Writes the journey strips' transcripts and the manifest under `dir`."
+  @spec export_journeys!(Path.t()) :: :ok
+  def export_journeys!(dir) do
     transcripts = Path.join(dir, "transcripts")
     File.mkdir_p!(transcripts)
-
-    for entry <- Registry.built(), designed?(entry.id), target <- targets() do
-      capture!(transcripts, entry.id, entry, [], target)
-    end
-
     journeys = Enum.map(Journeys.all(), &export_journey!(transcripts, &1))
     write_json!(Path.join(dir, "manifest.json"), manifest(journeys))
   end

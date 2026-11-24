@@ -36,6 +36,7 @@ enum StoryboardCapture {
         let cols: Int
         let rows: Int
         let window: Window?
+        let digest: String?
         let packets: [String]
     }
 
@@ -125,6 +126,11 @@ enum StoryboardCapture {
         view.statusBarState = appState.gui.statusBarState
         editor = view
         appState.editorNSView = view
+        // The effect sink holds the editor and the app state; break the cycle so each capture frees its Metal renderer.
+        defer {
+            editor = nil
+            appState.editorNSView = nil
+        }
 
         for (index, encoded) in transcript.packets.enumerated() {
             guard let packet = Data(base64Encoded: encoded) else {
@@ -159,7 +165,8 @@ enum StoryboardCapture {
         window.contentView = host
         window.setContentSize(NSSize(width: size.width, height: size.height))
         window.orderFrontRegardless()
-        defer { window.orderOut(nil); window.close() }
+        // Tear the SwiftUI tree down before the editor is released, so no late body update finds it gone.
+        defer { window.orderOut(nil); window.contentView = nil; window.close() }
 
         try await waitForPresentation(of: dispatcher, view: view, host: host, scenario: transcript.scenario)
 
@@ -263,6 +270,7 @@ enum StoryboardCapture {
             "window": ["width": window.frame.width, "height": window.frame.height],
             "backing_scale": scale,
             "grid": ["cols": transcript.cols, "rows": transcript.rows],
+            "transcript_digest": transcript.digest ?? "",
             "editor_font": [
                 "postscript_name": CTFontCopyPostScriptName(fontManager.primary.ctFont) as String,
                 "size": CTFontGetSize(fontManager.primary.ctFont),

@@ -29,6 +29,7 @@ defmodule Minga.Test.Storyboard.Session do
   @type t :: %__MODULE__{
           ctx: EditorCase.editor_ctx(),
           child_id: reference(),
+          children: [term()],
           root: Path.t(),
           file: Path.t(),
           home_window: pos_integer(),
@@ -36,7 +37,7 @@ defmodule Minga.Test.Storyboard.Session do
         }
 
   @enforce_keys [:ctx, :root, :file, :home_window, :child_id]
-  defstruct [:ctx, :root, :file, :home_window, :child_id, path: []]
+  defstruct [:ctx, :root, :file, :home_window, :child_id, children: [], path: []]
 
   @typedoc "A semantic click: a mouse press at a cell, or a GUI action the frontend would send."
   @type click :: {:mouse, non_neg_integer(), non_neg_integer()} | {:gui_action, term()}
@@ -48,15 +49,14 @@ defmodule Minga.Test.Storyboard.Session do
 
   Every session runs the real tree-sitter parser and returns only once its highlights are applied, so parser-dependent keys (structural motions, text objects, folds) behave as in the app and every frame is highlighted. The parser is the suite's shared one (`shared_parser/0`) unless `:parser_manager` names another running `Minga.Parser.Manager`.
 
-  The storyboard renderer (#4036) adds four more: `:root` (a fixed project directory, so the path the chrome shows is the same on every machine; the caller keeps it unique among concurrent sessions), `:theme` (a built-in theme name such as `:astrodark`, set on a private options server before the editor starts), `:capabilities` (the `MingaEditor.Frontend.Capabilities` the frontend would report), and `:record_packets` (keep every packet for `packets/1`).
+  The storyboard renderer (#4036) adds four more: `:root` (a fixed project directory, so the path the chrome shows is the same on every machine; the caller keeps it unique among concurrent sessions in one run, and the directory is written atomically and never deleted, so concurrent runs on one machine can share it), `:theme` (a built-in theme name such as `:astrodark`, set on a private options server before the editor starts), `:capabilities` (the `MingaEditor.Frontend.Capabilities` the frontend would report), and `:record_packets` (keep every packet for `packets/1`).
   """
   @spec start(keyword()) :: t()
   def start(opts \\ []) do
-    root = make_project(Keyword.get(opts, :root))
-    file = Path.join(root, Keyword.get(opts, :file_name, "lib/storyboard.ex"))
     content = Keyword.get(opts, :content, @default_content)
-    File.mkdir_p!(Path.dirname(file))
-    File.write!(file, content)
+    file_name = Keyword.get(opts, :file_name, "lib/storyboard.ex")
+    root = make_project(Keyword.get(opts, :root), file_name, content)
+    file = Path.join(root, file_name)
 
     child_id = make_ref()
     parser = Keyword.get_lazy(opts, :parser_manager, &shared_parser!/0)
@@ -71,12 +71,28 @@ defmodule Minga.Test.Storyboard.Session do
         rendering: Keyword.get(opts, :rendering, :disabled),
         record_packets: Keyword.get(opts, :record_packets, false),
         parser_manager: parser
-      ] ++ Keyword.take(opts, [:capabilities]) ++ theme_opts(Keyword.get(opts, :theme))
+      ]
 
-    ctx = EditorCase.start_editor(content, editor_opts)
+    {theme_opts, theme_children} = theme_opts(Keyword.get(opts, :theme))
+
+    ctx =
+      EditorCase.start_editor(
+        content,
+        editor_opts ++ Keyword.take(opts, [:capabilities]) ++ theme_opts
+      )
+
+    relay = start_relay(ctx, parser)
     await_highlights!(ctx, parser)
 
-    session = %__MODULE__{ctx: ctx, root: root, file: file, home_window: 0, child_id: child_id}
+    session = %__MODULE__{
+      ctx: ctx,
+      root: root,
+      file: file,
+      home_window: 0,
+      child_id: child_id,
+      children: [relay | theme_children]
+    }
+
     %{session | home_window: window_id(session)}
   end
 
@@ -164,8 +180,9 @@ defmodule Minga.Test.Storyboard.Session do
   Callers that start many sessions in one test (the flow explorer, the key walk) stop each one when done, so idle editors do not pile up. Safe to call on a session whose editor already died.
   """
   @spec stop(t()) :: :ok
-  def stop(%__MODULE__{ctx: ctx, child_id: child_id}) do
+  def stop(%__MODULE__{ctx: ctx, child_id: child_id, children: children}) do
     _ = ExUnit.Callbacks.stop_supervised(child_id)
+    Enum.each(children, &ExUnit.Callbacks.stop_supervised/1)
 
     for pid <- [ctx.buffer, ctx.port], Process.alive?(pid) do
       unlink_and_stop(pid)
@@ -296,36 +313,63 @@ defmodule Minga.Test.Storyboard.Session do
   @spec highlight_spans(MingaEditor.State.t()) :: tuple()
   defp highlight_spans(state), do: MingaEditor.HighlightSync.get_active_highlight(state).spans
 
+  # The relay is a supervised child of the test, stopped with the session.
+  @spec start_relay(EditorCase.editor_ctx(), GenServer.server()) :: term()
+  defp start_relay(ctx, parser) do
+    id = {:storyboard_parser_relay, make_ref()}
+
+    ExUnit.Callbacks.start_supervised!(
+      {Minga.Test.Storyboard.ParserRelay, registry: ctx.events_registry, parser: parser},
+      id: id
+    )
+
+    id
+  end
+
   # A private options server carries the theme, so concurrent sessions never share a theme through the global one.
-  @spec theme_opts(atom() | nil) :: keyword()
-  defp theme_opts(nil), do: []
+  # Returns the editor options and the child ids `stop/1` stops.
+  @spec theme_opts(atom() | nil) :: {keyword(), [term()]}
+  defp theme_opts(nil), do: {[], []}
 
   defp theme_opts(theme) when is_atom(theme) do
     events = :"minga_storyboard_events_#{System.unique_integer([:positive])}"
     ExUnit.Callbacks.start_supervised!({Minga.Events, name: events}, id: events)
+    options_id = {:storyboard_options, events}
 
     options =
       ExUnit.Callbacks.start_supervised!(
         {Minga.Config.Options, name: nil, events_registry: events},
-        id: {:storyboard_options, events}
+        id: options_id
       )
 
     {:ok, _theme} = Minga.Config.Options.set(options, :theme, theme)
-    [events_registry: events, options_server: options]
+    {[events_registry: events, options_server: options], [options_id, events]}
   end
 
-  @spec make_project(Path.t() | nil) :: Path.t()
-  defp make_project(nil) do
-    make_project(
-      Path.join(System.tmp_dir!(), "minga-storyboard-#{System.unique_integer([:positive])}")
-    )
-  end
-
-  defp make_project(root) do
-    File.rm_rf!(root)
-    File.mkdir_p!(root)
-    File.write!(Path.join(root, "mix.exs"), "defmodule Storyboard.MixProject do\nend\n")
+  # Without a root, every session gets a fresh private project. A fixed root (the renderer's) is shared by every run
+  # on the machine, including concurrent runs in other worktrees, so it is never deleted: its files are written
+  # atomically with the same content every time, and a run never removes a project another run is using.
+  @spec make_project(Path.t() | nil, Path.t(), String.t()) :: Path.t()
+  defp make_project(nil, file_name, content) do
+    root = Path.join(System.tmp_dir!(), "minga-storyboard-#{System.unique_integer([:positive])}")
     ExUnit.Callbacks.on_exit(fn -> File.rm_rf(root) end)
+    write_project(root, file_name, content)
+  end
+
+  defp make_project(root, file_name, content), do: write_project(root, file_name, content)
+
+  @spec write_project(Path.t(), Path.t(), String.t()) :: Path.t()
+  defp write_project(root, file_name, content) do
+    atomic_write!(Path.join(root, "mix.exs"), "defmodule Storyboard.MixProject do\nend\n")
+    atomic_write!(Path.join(root, file_name), content)
     root
+  end
+
+  @spec atomic_write!(Path.t(), String.t()) :: :ok
+  defp atomic_write!(path, content) do
+    File.mkdir_p!(Path.dirname(path))
+    temporary = "#{path}.#{System.unique_integer([:positive])}.tmp"
+    File.write!(temporary, content)
+    File.rename!(temporary, path)
   end
 end

@@ -33,20 +33,22 @@ class RenderGateTest(unittest.TestCase):
                                   {"id": "p", "status": "pending", "issue": 1, "reason": "later"}]}
         (self.out / "manifest.json").write_text(json.dumps(manifest))
         self.base = {}
-        self.saved = (renders.BASELINES, renders.git_show, renders.resolve_ref)
+        self.saved = (renders.BASELINES, renders.git_show, renders.resolve_ref, renders.macos_required)
         renders.BASELINES = self.baselines
         renders.git_show = lambda ref, path: self.base.get(path.name)
         renders.resolve_ref = lambda ref: ref
+        renders.macos_required = lambda out, manifest, base: False
 
     def tearDown(self):
-        renders.BASELINES, renders.git_show, renders.resolve_ref = self.saved
+        renders.BASELINES, renders.git_show, renders.resolve_ref, renders.macos_required = self.saved
         self.tmp.cleanup()
 
     def write(self, where, name, text):
         (where / "s" / name).write_text(text)
 
-    def diff(self, frontends="tui,macos"):
-        args = argparse.Namespace(out=self.out, frontends=frontends, base="main", check=True, github_output=None)
+    def diff(self, frontends="tui,macos", assume_unchanged=""):
+        args = argparse.Namespace(out=self.out, frontends=frontends, base="main", check=True, github_output=None,
+                                  assume_unchanged=assume_unchanged)
         status = renders.cmd_diff(args)
         return status, json.loads((self.out / "diff.json").read_text())
 
@@ -58,6 +60,7 @@ class RenderGateTest(unittest.TestCase):
         status, report = self.diff()
         self.assertEqual(status, 0)
         self.assertEqual(report["changed"], [])
+        self.assertEqual(report["orphan_baseline"], [])
         self.assertEqual([p["scenario"] for p in report["pending"]], ["p"])
 
     def test_a_render_that_differs_from_its_committed_baseline_fails(self):
@@ -100,6 +103,41 @@ class RenderGateTest(unittest.TestCase):
         status, report = self.diff()
         self.assertEqual(status, 0)
         self.assertEqual(sorted(report["changed"][0]["frontends"]), ["macos", "tui"])
+
+    def test_a_tui_only_change_fails_parity_when_macos_was_skipped_as_unchanged(self):
+        for where in (self.out / "renders", self.baselines):
+            self.write(where, "tui-a-80x24.txt", "new grid")
+        self.write(self.baselines, "macos-a-1440.json", macos_export("NORMAL"))
+        self.base = {"tui-a-80x24.txt": "old grid"}
+        status, report = self.diff(frontends="tui", assume_unchanged="macos")
+        self.assertEqual(status, 1)
+        self.assertEqual(report["parity_violations"], [{"scenario": "s", "frontend": "tui"}])
+
+    def test_a_baseline_without_a_render_fails(self):
+        for where in (self.out / "renders", self.baselines):
+            self.write(where, "tui-a-80x24.txt", "grid")
+        self.write(self.baselines, "tui-a-150x38.txt", "gone")
+        self.base = {"tui-a-80x24.txt": "grid"}
+        status, report = self.diff(frontends="tui")
+        self.assertEqual(status, 1)
+        self.assertEqual(report["orphan_baseline"][0]["file"], "tui-a-150x38.txt")
+
+    def test_macos_must_draw_when_a_transcript_differs_from_its_promotion(self):
+        transcripts = self.out / "transcripts" / "s"
+        transcripts.mkdir(parents=True)
+        (transcripts / "macos-a-1440.json").write_text(json.dumps({"digest": "new"}))
+        self.write(self.baselines, "promotion.json", json.dumps({"macos": {"transcripts": {"macos-a-1440.json": "old"}}}))
+        manifest = json.loads((self.out / "manifest.json").read_text())
+        required = self.saved[3]
+        saved_run = renders.subprocess.run
+        renders.subprocess.run = lambda *a, **k: argparse.Namespace(returncode=0)
+        try:
+            self.assertTrue(required(self.out, manifest, "main"))
+            self.write(self.baselines, "promotion.json", json.dumps({"macos": {"transcripts": {"macos-a-1440.json": "new"}}}))
+            self.assertFalse(required(self.out, manifest, "main"))
+            self.assertTrue(required(self.out, manifest, None))
+        finally:
+            renders.subprocess.run = saved_run
 
     def test_macos_baselines_ignore_facts_about_the_machine(self):
         self.assertEqual(renders.comparable("macos", macos_export("x", scale=1)),

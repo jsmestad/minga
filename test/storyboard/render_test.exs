@@ -51,16 +51,24 @@ defmodule Minga.Storyboard.RenderTest do
     end
   end
 
-  @tag :storyboard_export
-  test "exports every transcript when MINGA_STORYBOARD_OUT is set" do
-    case System.get_env("MINGA_STORYBOARD_OUT") do
-      nil ->
-        :ok
+  # One export test per scenario keeps each test short and lets them run side by side.
+  for id <- @built do
+    @id id
+    @tag :storyboard_export
+    test "exports the transcripts of #{id} when MINGA_STORYBOARD_OUT is set" do
+      with dir when is_binary(dir) <- System.get_env("MINGA_STORYBOARD_OUT") do
+        :ok = Render.export_scenario!(dir, Registry.fetch!(@id))
+        assert length(File.ls!(Path.join([dir, "transcripts", @id]))) == length(Render.targets())
+      end
+    end
+  end
 
-      dir ->
-        :ok = Render.export!(dir)
-        manifest = dir |> Path.join("manifest.json") |> File.read!() |> JSON.decode!()
-        assert length(manifest["scenarios"]) == length(@designed)
+  @tag :storyboard_export
+  test "exports the journey strips and the manifest when MINGA_STORYBOARD_OUT is set" do
+    with dir when is_binary(dir) <- System.get_env("MINGA_STORYBOARD_OUT") do
+      :ok = Render.export_journeys!(dir)
+      manifest = dir |> Path.join("manifest.json") |> File.read!() |> JSON.decode!()
+      assert length(manifest["scenarios"]) == length(@designed)
     end
   end
 end
