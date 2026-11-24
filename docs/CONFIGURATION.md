@@ -905,7 +905,7 @@ bind {:file_tree, :normal}, "d", :tree_delete, "Delete file"
 
 ### Keymap scopes
 
-Minga uses [keymap scopes](KEYMAP-SCOPES.md) to provide view-type-specific keybindings. Three scopes ship by default: `:editor` (normal editing), `:agent` (agentic view), and `:file_tree` (file tree panel). Leader key bindings (`SPC ...`) work identically in all scopes.
+Minga uses [keymap scopes](KEYMAP-SCOPES.md) to provide view-type-specific keybindings. Six scopes ship by default: `:editor` (normal editing), `:agent` (the agent view), `:file_tree` (file tree panel), `:git_status` (Git status panel), `:picker` and `:prompt`. Leader key bindings (`SPC ...`) work identically wherever you are not typing text. The [Key reference](AGENTIC-KEYMAP.md) lists the keys each one ships with.
 
 For the full scope architecture and resolution order, see [Keymap Scopes](KEYMAP-SCOPES.md).
 

@@ -19,7 +19,7 @@ Day-to-day guides for making Minga yours.
 - [Configuration](CONFIGURATION.md): Set options, keys, themes and language tools in `config.exs`, and reload them with `SPC h r`.
 - [Projects](PROJECTS.md): How Minga finds your project root, per-repo overrides in `.minga.exs`, file finding, and switching projects.
 - [Agent Model Selection](AGENT-MODEL-SELECTION.md): Choose the model the agent runs on, switch models in the middle of a conversation, and connect provider credentials.
-- [Agentic Keymap](AGENTIC-KEYMAP.md): The keys for the agent view, approvals, and publishing or discarding the agent's edits.
+- [Key reference](AGENTIC-KEYMAP.md): What each key does in today's build, by where you are: in a file, in the agent view, in a list or picker, in a prompt or the composer, and in the terminal.
 
 ## Run Agents Unattended
 
@@ -50,7 +50,7 @@ Guides to what Minga does underneath. You do not need them to use Minga; read th
 - [Architecture](ARCHITECTURE.md): Why a slow or broken part does not freeze the editor: separate processes, supervision, and one core that every frontend draws from.
 - [Buffer-Aware Agents](BUFFER-AWARE-AGENTS.md): How agents read your unsaved buffers and stage their edits away from your working tree until you publish.
 - [Session Recovery](SESSION-RECOVERY.md): How agent conversations survive a crash or a restart, and what is restored.
-- [Keymap Scopes](KEYMAP-SCOPES.md): How Minga decides which keys are active in each kind of view.
+- [Keymap Scopes](KEYMAP-SCOPES.md): Why the same key means different things in a file, the agent view and a list, and how Minga resolves a key. Read it to rebind keys per view.
 - [Terminal Protocol](PROTOCOL.md) and [GUI Protocol](GUI_PROTOCOL.md): The messages the editor core and the frontends exchange. Read these to build or debug a frontend.
 - [Charm Terminal Frontend](CHARM_TUI.md): How the terminal client is built, run and tested.
 

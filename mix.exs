@@ -81,7 +81,8 @@ defmodule Minga.MixProject do
         "docs/CONFIGURATION.md",
         "docs/PROJECTS.md",
         "docs/AGENT-MODEL-SELECTION.md",
-        "docs/AGENTIC-KEYMAP.md",
+        # The key reference for today's build. "Keys" in the Design System group is the v0.1.0 target keymap.
+        {"docs/AGENTIC-KEYMAP.md", title: "Key reference"},
         # Run Agents Unattended
         "docs/HOOKS.md",
         "docs/MCP.md",
