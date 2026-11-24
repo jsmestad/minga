@@ -548,7 +548,7 @@ def main() -> int:
     retired = load_retired()
     claims = load_claims()
     findings: list[str] = []
-    pages = [Path(arg).resolve() for arg in sys.argv[1:]] or sorted(SITE.glob("*.html"))
+    pages = [Path(arg).resolve() for arg in sys.argv[1:]] or sorted(SITE.rglob("*.html"))
     for page in pages:
         check_page(page, keys, retired, claims, findings)
     def order(entry: str) -> tuple[str, int]:

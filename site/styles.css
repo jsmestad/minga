@@ -2400,3 +2400,517 @@ h2[data-status="planned"]:not([data-pill="off"])::before {
 .pillar-list li[data-status="planned"]:not([data-pill="off"])::before {
   margin-bottom: 0.35rem;
 }
+
+/* Learn curriculum, lesson pager, and interactive browser labs */
+
+.learn-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0 0 0.65rem;
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.learn-breadcrumb a {
+  color: var(--accent);
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.learn-breadcrumb a:hover {
+  text-decoration: underline;
+}
+
+.lesson-list {
+  margin: 1.5rem 0 0;
+  padding: 0;
+  list-style: none;
+  border-top: 2px solid var(--border-strong);
+}
+
+.lesson-card {
+  display: grid;
+  grid-template-columns: 11.5rem minmax(0, 1fr);
+  gap: 0.75rem 2rem;
+  padding: 1.5rem 0;
+  border-bottom: 1px solid var(--border);
+  align-items: start;
+}
+
+.lesson-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.45rem;
+}
+
+.lesson-num {
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+
+.lesson-tag-shipped {
+  display: inline-block;
+  padding: 0.14em 0.45em 0.12em;
+  border: 1px solid var(--border-strong);
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  line-height: 1.25;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.lesson-body {
+  min-width: 0;
+}
+
+.lesson-body h3 {
+  font-size: 1.15rem;
+  margin-bottom: 0.45rem;
+}
+
+.lesson-body h3 a {
+  text-decoration: none;
+}
+
+.lesson-body h3 a:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+.lesson-body p {
+  font-size: 0.94rem;
+  margin-bottom: 0.75rem;
+}
+
+.lesson-topics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 0.9rem;
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}
+
+.lesson-topics span::before {
+  content: "· ";
+  color: var(--accent);
+}
+
+.lesson-pager {
+  margin-top: 3rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--border);
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.pager-link {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding: 1rem 1.15rem;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  text-decoration: none;
+  transition: border-color 120ms ease;
+}
+
+.pager-link:hover {
+  border-color: var(--border-strong);
+}
+
+.pager-next {
+  text-align: right;
+}
+
+.pager-dir {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.pager-title {
+  font-size: 0.98rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.pager-link:hover .pager-title {
+  color: var(--accent);
+}
+
+/* Interactive labs (Key-Chord Trainer, Twist Review Lab, Config Builder) */
+
+.lab-box {
+  margin: 1.4rem 0 1.6rem;
+  border: 1px solid var(--border);
+  border-top: 2px solid var(--border-strong);
+  background: var(--bg-elevated);
+  min-width: 0;
+}
+
+.lab-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.35rem 1rem;
+  padding: 0.55rem 1rem;
+  background: var(--bg-subtle);
+  border-bottom: 1px solid var(--border);
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
+.lab-body {
+  padding: 1.25rem;
+}
+
+.drill-prompt {
+  font-size: 1.04rem;
+  font-weight: 600;
+  color: var(--text);
+  margin: 0 0 1rem;
+}
+
+.drill-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+
+.drill-opt {
+  appearance: none;
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0.72rem 0.9rem;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 0.84rem;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 120ms ease, background-color 120ms ease;
+}
+
+.drill-opt:hover:not(:disabled) {
+  border-color: var(--border-strong);
+  background: var(--bg-subtle);
+}
+
+.drill-opt:disabled {
+  cursor: default;
+}
+
+.drill-opt-num {
+  color: var(--text-muted);
+  font-size: 0.74rem;
+}
+
+.drill-opt-key {
+  font-weight: 600;
+}
+
+.drill-opt.is-correct {
+  border-color: var(--done);
+  background: color-mix(in srgb, var(--done) 12%, var(--bg));
+}
+
+.drill-opt.is-wrong {
+  border-color: var(--fail);
+  background: color-mix(in srgb, var(--fail) 12%, var(--bg));
+}
+
+.drill-feedback {
+  margin-top: 1rem;
+  padding: 0.75rem 0.95rem;
+  border-left: 2px solid var(--border-strong);
+  background: var(--bg-subtle);
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+}
+
+.drill-feedback.is-correct {
+  border-left-color: var(--done);
+  color: var(--text);
+}
+
+.drill-feedback.is-wrong {
+  border-left-color: var(--fail);
+  color: var(--text);
+}
+
+.lab-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  margin-top: 1rem;
+}
+
+.lab-noscript {
+  padding: 0.75rem 1rem;
+  border-top: 1px solid var(--border);
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.lab-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+}
+
+.lab-cmd {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.42rem 0.72rem;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: border-color 120ms ease, background-color 120ms ease;
+}
+
+.lab-cmd span {
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.lab-cmd:hover {
+  border-color: var(--border-strong);
+  background: var(--bg-subtle);
+}
+
+.lab-cmd-muted {
+  margin-left: auto;
+  color: var(--text-muted);
+}
+
+.lab-specimen {
+  border: 0;
+}
+
+.lab-cursor {
+  box-shadow: inset 2px 0 0 0 #8caaee;
+}
+
+.lab-line-rejected {
+  opacity: 0.36;
+  text-decoration: line-through;
+}
+
+.lab-act-menu {
+  margin: 0.75rem 1rem 0;
+  border: 1px solid #ca9ee6;
+  background: #232634;
+  color: #c6d0f5;
+}
+
+.lab-act-head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.35rem 0.75rem;
+  padding: 0.45rem 0.75rem;
+  border-bottom: 1px solid #414559;
+  font-size: 0.74rem;
+}
+
+.lab-act-decision {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.lab-act-half {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: #c6d0f5;
+  padding: 0.65rem 0.75rem;
+  text-align: center;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  font-family: var(--font-mono);
+}
+
+.lab-act-half + .lab-act-half {
+  border-left: 1px solid #414559;
+}
+
+.lab-act-keep {
+  background: rgba(202, 158, 230, 0.16);
+}
+
+.lab-act-half:hover {
+  background: rgba(202, 158, 230, 0.24);
+}
+
+.lab-act-half strong {
+  font-size: 0.82rem;
+  color: #e6ebff;
+}
+
+.lab-act-half strong span {
+  color: #ca9ee6;
+  margin-right: 0.25rem;
+}
+
+.lab-act-half small {
+  font-size: 0.7rem;
+  color: #a5adce;
+}
+
+.lab-note {
+  padding: 0.8rem 1rem;
+  border-top: 1px solid var(--border);
+  background: var(--bg-subtle);
+  font-size: 0.88rem;
+  color: var(--text-secondary);
+}
+
+.builder-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 19rem) minmax(0, 1fr);
+}
+
+.builder-controls {
+  padding: 1.1rem;
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  background: var(--bg);
+}
+
+.builder-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.builder-label {
+  font-family: var(--font-mono);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.builder-select {
+  width: 100%;
+  padding: 0.48rem 0.6rem;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+}
+
+.builder-checks {
+  border: 0;
+  padding: 0.35rem 0 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.builder-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  font-size: 0.84rem;
+  line-height: 1.4;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.builder-check input {
+  margin-top: 0.2rem;
+  accent-color: var(--accent);
+}
+
+.builder-output {
+  min-width: 0;
+  background: var(--bg-code);
+}
+
+.builder-output .code-card {
+  border: 0;
+  height: 100%;
+}
+
+@media (max-width: 768px) {
+  .lesson-card {
+    grid-template-columns: 1fr;
+    gap: 0.5rem;
+    padding: 1.25rem 0;
+  }
+  .lesson-meta {
+    flex-direction: row;
+    align-items: center;
+    gap: 0.75rem;
+  }
+  .builder-grid {
+    grid-template-columns: 1fr;
+  }
+  .builder-controls {
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+  }
+}
+
+@media (max-width: 680px) {
+  .drill-options,
+  .lesson-pager {
+    grid-template-columns: 1fr;
+  }
+  .pager-next {
+    text-align: left;
+  }
+  .lab-body {
+    padding: 1rem;
+  }
+  .lab-toolbar {
+    padding: 0.65rem 0.75rem;
+  }
+  .lab-cmd {
+    font-size: 0.76rem;
+    padding: 0.42rem 0.6rem;
+  }
+  .lab-cmd-muted {
+    margin-left: 0;
+  }
+  .lab-act-menu {
+    margin: 0.65rem 0.75rem 0;
+  }
+}

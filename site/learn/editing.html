@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Editing, Keys &amp; Quiet Chrome: Learn Minga</title>
+  <meta name="description" content="Lesson 02: Master Minga's v0.1.0 Spine layout, Doom-first Spacebar leader grammar, pinned files, bottom drawers, the decision-first Act Menu, mouse paths, and the CUA key profile.">
+  <meta property="og:type" content="article">
+  <meta property="og:title" content="Editing, Keys &amp; Quiet Chrome: Learn Minga">
+  <meta property="og:description" content="Master Minga's v0.1.0 quiet chrome model, Spacebar leader grammar, drawers, Act Menu, and CUA profile, plus an interactive Key-Chord Trainer.">
+  <meta property="og:image" content="/assets/og-minga.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:image" content="/assets/og-minga.png">
+  <link rel="icon" type="image/svg+xml" href="/assets/minga_dark-transparent.svg">
+  <link rel="preload" href="/fonts/instrument-serif-italic.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/styles.css">
+  <script>
+    (() => {
+      try {
+        const saved = window.localStorage.getItem("minga-theme");
+        if (saved === "light" || saved === "dark") {
+          document.documentElement.setAttribute("data-theme", saved);
+        }
+      } catch (_) {}
+    })();
+  </script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="site-header">
+    <div class="container header-inner">
+      <a class="brand-link" href="/">
+        <img src="/assets/minga_dark-transparent.svg" alt="Minga logo" width="24" height="24">
+        <span class="brand-wordmark">minga</span>
+        <span class="brand-version">/ v0.1.0-pre</span>
+      </a>
+      <nav class="site-nav" id="site-nav" aria-label="Primary">
+        <a href="/why-minga">Why Minga</a>
+        <a href="/learn/" aria-current="page">Learn</a>
+        <a href="/architecture">Architecture</a>
+        <a href="/extending">Extending</a>
+        <a href="/docs/">Reference</a>
+        <a href="https://github.com/jsmestad/minga">GitHub</a>
+      </nav>
+      <div class="header-controls">
+        <button type="button" class="theme-toggle" data-theme-toggle aria-label="Toggle color theme">Light</button>
+        <button type="button" class="nav-toggle" data-nav-toggle aria-expanded="false" aria-controls="site-nav" aria-label="Toggle navigation menu">Menu</button>
+      </div>
+    </div>
+  </header>
+
+  <main id="main" data-status="planned" data-since="v0.1.0" data-pill="off">
+    <header class="essay-hero">
+      <div class="container">
+        <p class="learn-breadcrumb"><a href="/learn/">Learn</a> <span>/</span> Lesson 02 of 05</p>
+        <h1 data-status="planned" data-since="v0.1.0">Editing, Keys &amp; Quiet Chrome</h1>
+        <p class="essay-subtitle">Minga's v0.1.0 interface model (<a href="/docs/0006-the-spine.html">ADR-0006</a>) strips the resting window down to a plain title bar, your text, and one modeline. Every panel opens on demand as a real buffer, every key follows a strict mnemonic grammar, and every click teaches its key.</p>
+        <nav class="essay-toc" aria-label="Sections">
+          <a href="#resting-screen">1. Resting screen &amp; navigation</a>
+          <a href="#key-grammar">2. The key grammar</a>
+          <a href="#drawers-and-act-menu">3. Drawers, Hover &amp; Act Menu</a>
+          <a href="#mouse-and-cua">4. Mouse &amp; CUA profile</a>
+          <a href="#key-drill">5. Interactive Key-Chord Trainer</a>
+        </nav>
+      </div>
+    </header>
+
+    <article class="essay-body">
+      <div class="container">
+        <div class="callout">
+          <span class="callout-title">v0.1.0 Spine design guide</span>
+          <p>This lesson teaches the canonical v0.1.0 Spine interface from <a href="/docs/0006-the-spine.html">ADR-0006</a> and <a href="https://github.com/jsmestad/minga/blob/main/docs/design/keys.md"><code>docs/design/keys.md</code></a>. For commands matching today's rolling Homebrew prerelease build, start with <a href="/getting-started">Lesson 01: Getting Started</a>.</p>
+        </div>
+
+        <section class="essay-section" id="resting-screen">
+          <h2>1. The resting screen (and why tabs are gone)</h2>
+          <p>Open a project with <code>minga .</code> and look at what is missing: no icon rail, no permanent sidebar, no tab bar across the top, and no separate agent workspace. At rest, Minga gives 100% of the window to three elements: a plain title bar naming the focused file and its project-relative directory, your text buffer, and one prioritized modeline along the bottom.</p>
+
+          <p>When you open a project you worked in before, Minga restores your open files, splits, cursors, and scroll position automatically (press <kbd>SPC q n</kbd> to start fresh at the project home <code>*home*</code> without discarding unsaved edits or Minga's unreviewed changes). On a fresh directory, <code>*home*</code> opens with numbered recent files, active tasks, and next actions; <kbd>SPC p h</kbd> brings it back anytime.</p>
+
+          <h3>Navigating without a tab strip</h3>
+          <p>Instead of hunting through 18 truncated tabs, Minga pairs an instant switcher with four pinned slots and Vim's jump list:</p>
+
+          <ul class="spec-ledger">
+            <li class="spec-row">
+              <span class="spec-key"><kbd>SPC ,</kbd> / <kbd>SPC b b</kbd></span>
+              <span class="spec-detail"><strong>Open the file and buffer switcher.</strong> Sections show <strong>Pinned</strong>, <strong>Changed</strong> (your unsaved files alongside Minga's tasks), <strong>Recent</strong>, and <strong>Terminals</strong>. Use <kbd>⌃J</kbd> / <kbd>⌃K</kbd> to move, <kbd>⌃V</kbd> to open in a split, and <kbd>⌃T</kbd> to pin or unpin.</span>
+            </li>
+            <li class="spec-row">
+              <span class="spec-key"><kbd>SPC 1</kbd> to <kbd>SPC 4</kbd></span>
+              <span class="spec-detail"><strong>Jump directly to pinned files 1 through 4</strong> (<kbd>⌘1</kbd> to <kbd>⌘4</kbd> on macOS).</span>
+            </li>
+            <li class="spec-row">
+              <span class="spec-key"><kbd>SPC SPC</kbd> / <kbd>SPC s p</kbd></span>
+              <span class="spec-detail"><strong>Find any file or search across the project.</strong> In project search, pass ripgrep flags after <code>--</code> (for example <code>retry -- -uu</code>); if nothing matches, next-step rows offer ignored or hidden files directly, and <kbd>⌃Q</kbd> sends results to quickfix (<kbd>SPC s q</kbd>).</span>
+            </li>
+            <li class="spec-row">
+              <span class="spec-key"><kbd>⌃O</kbd> / <kbd>⌃I</kbd></span>
+              <span class="spec-detail"><strong>Step back and forward through your jump list</strong> (<kbd>⌘[</kbd> / <kbd>⌘]</kbd> on macOS, or trackpad swipe).</span>
+            </li>
+            <li class="spec-row">
+              <span class="spec-key"><kbd>SPC c d</kbd> / <kbd>SPC c D</kbd></span>
+              <span class="spec-detail"><strong>Go to definition or find references.</strong> Expand and shrink syntax-node selection with <kbd>SPC c v</kbd> / <kbd>SPC c V</kbd>.</span>
+            </li>
+            <li class="spec-row">
+              <span class="spec-key"><kbd>SPC c x</kbd> / <kbd>SPC g g</kbd></span>
+              <span class="spec-detail"><strong>Open diagnostics list or git status.</strong> Step diagnostics with <kbd>]e</kbd> / <kbd>[e</kbd>, step git hunks with <kbd>]d</kbd> / <kbd>[d</kbd>, and toggle inline blame with <kbd>SPC g B</kbd>.</span>
+            </li>
+          </ul>
+        </section>
+
+        <section class="essay-section" id="key-grammar">
+          <h2>2. The key grammar: chords you can say out loud</h2>
+          <p>Every keybinding in Minga obeys one strict precedence order (Doom Emacs conventions first, Neovim second). Once you learn the five rules, you can guess bindings you have never seen before:</p>
+
+          <ol class="step-list">
+            <li class="step-item">
+              <span class="step-badge">01</span>
+              <div>
+                <h3>Mnemonic leader sequences first (<kbd>SPC</kbd>)</h3>
+                <p>Press <kbd>SPC</kbd> and pause to open <strong>which-key</strong> above the modeline. Top-level groups map to single mnemonic letters: <code>a</code> Minga, <code>b</code> buffers, <code>c</code> code, <code>f</code> files, <code>g</code> git, <code>h</code> help, <code>o</code> open, <code>p</code> project, <code>q</code> quit and session, <code>s</code> search, <code>t</code> toggles, and <code>w</code> windows. Groups appear in Title Case with a trailing <code>›</code> and live counts (for example <code>Session › 7</code> or <code>Tasks · 1 needs you</code>).</p>
+              </div>
+            </li>
+            <li class="step-item">
+              <span class="step-badge">02</span>
+              <div>
+                <h3>Vim stays Vim inside code buffers</h3>
+                <p>Inside a source file, <kbd>y</kbd> always yanks, <kbd>n</kbd> always steps search, <kbd>=</kbd> always formats, and <kbd>q</kbd> always records macros. Operators, motions, counts, <kbd>.</kbd> repeat, and bracket pairs (<kbd>]h</kbd>/<kbd>[h</kbd> Minga changes, <kbd>]e</kbd>/<kbd>[e</kbd> diagnostics, <kbd>]d</kbd>/<kbd>[d</kbd> git hunks, <kbd>]q</kbd>/<kbd>[q</kbd> quickfix) compose normally.</p>
+              </div>
+            </li>
+            <li class="step-item">
+              <span class="step-badge">03</span>
+              <div>
+                <h3>Bare mnemonic letters live only in special buffers</h3>
+                <p>In buffers where letters do not insert text (<code>*minga-tasks*</code>, <code>*minga-review*</code>, git status, file tree, blame), single letters act immediately: <kbd>y</kbd> yes/keep, <kbd>n</kbd> no/reject, <kbd>r</kbd> retry, <kbd>o</kbd> output, <kbd>q</kbd> close.</p>
+              </div>
+            </li>
+            <li class="step-item">
+              <span class="step-badge">04</span>
+              <div>
+                <h3>Modifiers only where letters must type text</h3>
+                <p>Inside prompts, pickers, Insert mode, and the composer, typing always edits text. Only established conventions use modifiers: <kbd>⌃J</kbd> / <kbd>⌃K</kbd> move in lists, <kbd>⌃V</kbd> / <kbd>⌃T</kbd> / <kbd>⌃Q</kbd> act in pickers, <kbd>⌥↩</kbd> queues a follow-up in the composer, <kbd>⌃\ ⌃N</kbd> leaves terminal mode, and <kbd>⌃.</kbd> opens the Act Menu.</p>
+              </div>
+            </li>
+            <li class="step-item">
+              <span class="step-badge">05</span>
+              <div>
+                <h3>macOS keys as aliases; zero three-modifier chords</h3>
+                <p>macOS shortcuts (<kbd>⌘S</kbd>, <kbd>⌘Z</kbd>, <kbd>⌘W</kbd>, <kbd>⌘.</kbd>, <kbd>⌘K</kbd>, <kbd>⌘1</kbd> to <kbd>⌘4</kbd>) mirror leader bindings that work identically in the terminal. Minga never binds three-modifier chords, Control+Command or Option+Command combinations, or function keys.</p>
+              </div>
+            </li>
+          </ol>
+        </section>
+
+        <section class="essay-section" id="drawers-and-act-menu">
+          <h2>3. Drawers, Hover, and the decision-first Act Menu</h2>
+          <p>Nothing traps you in a mystery mode. One rule closes everything across both macOS and the terminal: <strong><kbd>q</kbd> closes special buffers and splits</strong> (returning focus to the window you came from), and <strong><kbd>esc</kbd> cancels or dismisses anything transient</strong> (prompts, pickers, menus, overlays).</p>
+
+          <ul class="spec-ledger">
+            <li class="spec-row">
+              <span class="spec-key">One drawer at a time</span>
+              <span class="spec-detail"><strong>Lists open in a bottom drawer split, never hiding your code.</strong> Opening another drawer replaces the current one; closing it restores the previous drawer. Panels yield before code does so your editor keeps at least 100 columns.</span>
+            </li>
+            <li class="spec-row">
+              <span class="spec-key"><kbd>K</kbd> then <kbd>K</kbd></span>
+              <span class="spec-detail"><strong>Two-level Hover for anything under the cursor.</strong> The first <kbd>K</kbd> peeks at diagnostics, type signature, docs, or Minga attribution (ordered most urgent first). Press <kbd>K</kbd> again to focus the popover, scroll with <kbd>j</kbd>/<kbd>k</kbd>, copy with <kbd>y</kbd>, or close with <kbd>q</kbd>/<kbd>esc</kbd>.</span>
+            </li>
+            <li class="spec-row">
+              <span class="spec-key"><kbd>g.</kbd> / <kbd>⌃.</kbd> / Right-click</span>
+              <span class="spec-detail"><strong>The Act Menu answers "what can I do with this?"</strong> On a yes/no target (like a Minga change or pending approval), the top bar splits into two halves with written consequences (<code>y</code> Keep / <code>n</code> Reject). Below sit quieter grouped actions showing the in-menu letter on the left and the direct key on the right so the menu teaches you to skip it next time.</span>
+            </li>
+            <li class="spec-row">
+              <span class="spec-key"><kbd>SPC o t</kbd> / <kbd>SPC s u</kbd></span>
+              <span class="spec-detail"><strong>Built-in terminal drawer and edit timeline.</strong> <kbd>SPC o t</kbd> toggles the terminal drawer (step command blocks with <kbd>]]</kbd> / <kbd>[[</kbd> and select output with <kbd>ic</kbd> / <kbd>ac</kbd>), while <kbd>SPC s u</kbd> opens the edit timeline across both your edits and Minga's steps.</span>
+            </li>
+          </ul>
+        </section>
+
+        <section class="essay-section" id="mouse-and-cua">
+          <h2>4. First-class mouse paths &amp; the CUA key profile</h2>
+          <p>Minga is keyboard-first, not keyboard-only. Every screen is reachable and dismissable by mouse, and every click teaches its shortcut:</p>
+
+          <ul>
+            <li><strong>The mode pill is the front door:</strong> clicking the <code>NORMAL</code> pill in the modeline opens top-level which-key, where every group and leaf is clickable. On macOS, the native menu bar mirrors the exact same <code>SPC</code> groups.</li>
+            <li><strong>Every modeline segment is clickable:</strong> <code>needs_you</code> opens tasks, the file name opens the switcher, <code>change 1/2</code> jumps to the change, diagnostics open the list, and git opens status.</li>
+            <li><strong>Right-click opens the Act Menu</strong> (the same menu as <kbd>g.</kbd> and <kbd>⌃.</kbd>), and prompts draw clickable answer chips (<kbd>y</kbd>, <kbd>n</kbd>, <kbd>esc</kbd>). Holding <kbd>⌘</kbd> on macOS reveals shortcuts on visible controls.</li>
+          </ul>
+
+          <h3>Prefer standard desktop shortcuts? (ADR-0007)</h3>
+          <p>Set <code>set :editing_model, :cua</code> in <code>~/.config/minga/config.exs</code>. Under <a href="https://github.com/jsmestad/minga/blob/main/docs/adr/0007-cua-is-a-key-profile.md">ADR-0007</a>, CUA is a first-class key profile rather than an afterthought: standard clipboard, undo, and palette bindings (Cmd+C/V/X/Z/Shift+Z/A on macOS; Ctrl+C/V/X/Z/Y/A and Ctrl+P / Ctrl+Shift+P in the terminal; <kbd>⌃J</kbd> / <kbd>⌥↩</kbd> for composer newlines) are explicitly honored while one-meaning-per-key, live prompt movement (<kbd>⌃J</kbd> / <kbd>⌃K</kbd>), and <kbd>SPC</kbd> leader sequences remain intact.</p>
+        </section>
+
+        <section class="essay-section" id="key-drill">
+          <h2>5. Interactive Key-Chord Trainer</h2>
+          <p>Test your intuition against eight everyday v0.1.0 Minga actions. Click an option (or press <kbd>1</kbd> through <kbd>4</kbd> on your keyboard) to check your answer and see the grammar rule behind it:</p>
+
+          <div class="lab-box" data-key-drill>
+            <div class="lab-bar">
+              <span>INTERACTIVE DRILL · V0.1.0 KEY GRAMMAR</span>
+              <span data-drill-progress>Question 1 of 8 · Score 0</span>
+            </div>
+            <div class="lab-body">
+              <p class="drill-prompt" data-drill-prompt>Open the file and buffer switcher (Pinned, Changed, Recent, Terminals).</p>
+              <div class="drill-options" data-drill-options>
+                <button type="button" class="drill-opt" data-drill-idx="0"><span class="drill-opt-num">1</span><span class="drill-opt-key">SPC ,</span></button>
+                <button type="button" class="drill-opt" data-drill-idx="1"><span class="drill-opt-num">2</span><span class="drill-opt-key">SPC a a</span></button>
+                <button type="button" class="drill-opt" data-drill-idx="2"><span class="drill-opt-num">3</span><span class="drill-opt-key">SPC p h</span></button>
+                <button type="button" class="drill-opt" data-drill-idx="3"><span class="drill-opt-num">4</span><span class="drill-opt-key">SPC g g</span></button>
+              </div>
+              <div class="drill-feedback" data-drill-feedback aria-live="polite">
+                Pick the matching chord to see the mnemonic and design rule.
+              </div>
+              <div class="lab-controls">
+                <button type="button" class="btn" data-drill-next hidden>Next question -&gt;</button>
+                <button type="button" class="btn" data-drill-reset>Restart drill</button>
+              </div>
+            </div>
+            <noscript>
+              <div class="lab-noscript">Enable JavaScript to run the interactive drill, or review the key tables in sections 1 through 3 above.</div>
+            </noscript>
+          </div>
+        </section>
+
+        <nav class="lesson-pager" aria-label="Lesson navigation">
+          <a class="pager-link" href="/getting-started">
+            <span class="pager-dir">&lt;- Previous · Lesson 01</span>
+            <span class="pager-title">Install &amp; Getting Started</span>
+          </a>
+          <a class="pager-link pager-next" href="/learn/agents">
+            <span class="pager-dir">Next · Lesson 03 -&gt;</span>
+            <span class="pager-title">Co-Authoring &amp; Parallel Agents</span>
+          </a>
+        </nav>
+      </div>
+    </article>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container footer-inner">
+      <div class="footer-note">
+        <p><span class="brand-wordmark" style="font-size:1.15rem;margin-right:0.25rem;">minga</span> is open source under the MIT license. Created by <a href="https://evalcode.com">Justin Smestad</a>.</p>
+      </div>
+      <nav class="footer-links" aria-label="Footer">
+        <a href="/">Home</a>
+        <a href="/why-minga">Why Minga</a>
+        <a href="/learn/">Learn</a>
+        <a href="/getting-started">Getting Started</a>
+        <a href="/architecture">Architecture</a>
+        <a href="/extending">Extending</a>
+        <a href="/docs/">API Docs</a>
+        <a href="https://github.com/jsmestad/minga">GitHub</a>
+      </nav>
+    </div>
+  </footer>
+
+  <script defer src="/site.js"></script>
+</body>
+</html>

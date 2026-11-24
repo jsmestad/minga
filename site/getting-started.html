@@ -38,7 +38,7 @@
       </a>
       <nav class="site-nav" id="site-nav" aria-label="Primary">
         <a href="/why-minga">Why Minga</a>
-        <a href="/getting-started" aria-current="page">Getting Started</a>
+        <a href="/learn/" aria-current="page">Learn</a>
         <a href="/architecture">Architecture</a>
         <a href="/extending">Extending</a>
         <a href="/docs/">Reference</a>
@@ -54,7 +54,7 @@
   <main id="main" data-build="today">
     <header class="essay-hero">
       <div class="container">
-        <p class="section-index"><span>GUIDE</span> Quickstart</p>
+        <p class="learn-breadcrumb"><a href="/learn/">Learn</a> <span>/</span> Lesson 01 of 05</p>
         <h1>Getting Started</h1>
         <p class="essay-subtitle">Install Minga alongside your current editor with zero repo lock-in, connect a model provider, review your first staged edit, and drop starter recipes into <code>config.exs</code>.</p>
         <nav class="essay-toc" aria-label="Sections">
@@ -296,11 +296,22 @@ minga attach ssh://devbox/work/app</code></pre>
           </div>
 
           <div class="actions">
-            <a class="btn btn-primary" href="/architecture">Explore Architecture</a>
-            <a class="btn" href="/extending">Extending Minga</a>
+            <a class="btn btn-primary" href="/learn/editing">Next: Editing, Keys &amp; Quiet Chrome</a>
+            <a class="btn" href="/learn/">All Learn Lessons</a>
             <a class="btn" href="/docs/configuration.html">Configuration Reference</a>
           </div>
         </section>
+
+        <nav class="lesson-pager" aria-label="Lesson navigation">
+          <a class="pager-link" href="/learn/">
+            <span class="pager-dir">&lt;- Curriculum</span>
+            <span class="pager-title">Learn Hub</span>
+          </a>
+          <a class="pager-link pager-next" href="/learn/editing">
+            <span class="pager-dir">Next · Lesson 02 -&gt;</span>
+            <span class="pager-title">Editing, Keys &amp; Quiet Chrome</span>
+          </a>
+        </nav>
       </div>
     </article>
   </main>
@@ -313,6 +324,7 @@ minga attach ssh://devbox/work/app</code></pre>
       <nav class="footer-links" aria-label="Footer">
         <a href="/">Home</a>
         <a href="/why-minga">Why Minga</a>
+        <a href="/learn/">Learn</a>
         <a href="/architecture">Architecture</a>
         <a href="/extending">Extending</a>
         <a href="/docs/">API Docs</a>

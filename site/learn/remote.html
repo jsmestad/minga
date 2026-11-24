@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Remote Devboxes, MCP &amp; Safety Guardrails: Learn Minga</title>
+  <meta name="description" content="Lesson 05: Run Minga headlessly on remote Linux devboxes, gate agent shell tools with PreToolUse veto scripts, isolate stdio MCP servers, and route models through corporate gateways.">
+  <meta property="og:type" content="article">
+  <meta property="og:title" content="Remote Devboxes, MCP &amp; Safety Guardrails: Learn Minga">
+  <meta property="og:description" content="Run minga --headless across laptop sleep, write deterministic PreToolUse hooks, isolate MCP servers, and configure corporate LLM proxies.">
+  <meta property="og:image" content="/assets/og-minga.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:image" content="/assets/og-minga.png">
+  <link rel="icon" type="image/svg+xml" href="/assets/minga_dark-transparent.svg">
+  <link rel="preload" href="/fonts/instrument-serif-italic.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/styles.css">
+  <script>
+    (() => {
+      try {
+        const saved = window.localStorage.getItem("minga-theme");
+        if (saved === "light" || saved === "dark") {
+          document.documentElement.setAttribute("data-theme", saved);
+        }
+      } catch (_) {}
+    })();
+  </script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="site-header">
+    <div class="container header-inner">
+      <a class="brand-link" href="/">
+        <img src="/assets/minga_dark-transparent.svg" alt="Minga logo" width="24" height="24">
+        <span class="brand-wordmark">minga</span>
+        <span class="brand-version">/ v0.1.0-pre</span>
+      </a>
+      <nav class="site-nav" id="site-nav" aria-label="Primary">
+        <a href="/why-minga">Why Minga</a>
+        <a href="/learn/" aria-current="page">Learn</a>
+        <a href="/architecture">Architecture</a>
+        <a href="/extending">Extending</a>
+        <a href="/docs/">Reference</a>
+        <a href="https://github.com/jsmestad/minga">GitHub</a>
+      </nav>
+      <div class="header-controls">
+        <button type="button" class="theme-toggle" data-theme-toggle aria-label="Toggle color theme">Light</button>
+        <button type="button" class="nav-toggle" data-nav-toggle aria-expanded="false" aria-controls="site-nav" aria-label="Toggle navigation menu">Menu</button>
+      </div>
+    </div>
+  </header>
+
+  <main id="main">
+    <header class="essay-hero">
+      <div class="container">
+        <p class="learn-breadcrumb"><a href="/learn/">Learn</a> <span>/</span> Lesson 05 of 05</p>
+        <h1>Remote Devboxes, MCP &amp; Safety Guardrails</h1>
+        <p class="essay-subtitle">Shipping real work on proprietary repos means long-running devboxes, deterministic guardrails around shell tools, isolated Model Context Protocol servers, and internal model gateways. Everything in this lesson ships on <code>main</code> today.</p>
+        <nav class="essay-toc" aria-label="Sections">
+          <a href="#headless-devbox">1. Headless devboxes &amp; SSH attach</a>
+          <a href="#pretooluse-hooks">2. PreToolUse veto hooks</a>
+          <a href="#isolated-mcp">3. Crash-isolated MCP servers</a>
+          <a href="#corporate-gateways">4. Corporate gateways &amp; terminal SSH</a>
+        </nav>
+      </div>
+    </header>
+
+    <article class="essay-body">
+      <div class="container">
+        <section class="essay-section" id="headless-devbox">
+          <h2>1. Close your laptop; agents keep working on your devbox</h2>
+          <p>When your source tree and build cache live on a Linux devbox, you should not have to mirror gigabytes locally or keep an SSH terminal glued open while a test suite finishes. Run Minga as a headless daemon on the remote machine and attach from macOS or any terminal whenever you want to inspect or edit.</p>
+
+          <p>In headless mode, the Erlang VM boots only buffer, project, and agent services; the editor renderer and syntax parser OS processes do not start until a client attaches.</p>
+
+          <div class="code-card">
+            <div class="code-header">
+              <span>Remote devbox + local attach</span>
+              <button type="button" class="copy-btn" data-copy-target="cmd-remote-attach">Copy</button>
+            </div>
+            <pre><code id="cmd-remote-attach"># 1. On your Linux devbox (keep user services alive after logout):
+loginctl enable-linger "$USER"
+minga --headless
+
+# 2. From your Mac or another terminal (zero source code copied locally):
+minga attach ssh://devbox/work/app</code></pre>
+          </div>
+
+          <p>If your team automates sessions from external scripts or dashboards, headless mode also exposes an optional token-gated WebSocket JSON-RPC gateway. Full systemd and launchd unit templates live in the <a href="/docs/remote_agents.html">Remote Agents Reference</a>.</p>
+        </section>
+
+        <section class="essay-section" id="pretooluse-hooks">
+          <h2>2. Deterministic <code>PreToolUse</code> veto hooks</h2>
+          <p>Prompt instructions are advice; shell exit codes are enforcement. Minga lets you wire a local script to run before any matching agent tool call (<code>"shell"</code>, <code>"*_file"</code>, or <code>"*"</code>). Minga pipes the tool arguments as JSON on stdin, enforces a POSIX process-group timeout so runaway checks clean up cleanly, and blocks the call whenever the script exits non-zero, showing your stderr message straight to the model and in chat.</p>
+
+          <div class="code-card">
+            <div class="code-header">
+              <span>~/.config/minga/config.exs · PreToolUse registration</span>
+              <button type="button" class="copy-btn" data-copy-target="cmd-hook-cfg">Copy</button>
+            </div>
+            <pre><code id="cmd-hook-cfg">set <span class="tok-atom">:agent_hooks</span>, [
+  %{
+    event: <span class="tok-str">"PreToolUse"</span>,
+    tool: <span class="tok-str">"shell"</span>,
+    command: <span class="tok-str">"~/.config/minga/hooks/check-shell-command.sh"</span>,
+    timeout_ms: <span class="tok-num">10_000</span>
+  }
+]</code></pre>
+          </div>
+
+          <div class="code-card">
+            <div class="code-header">
+              <span>~/.config/minga/hooks/check-shell-command.sh</span>
+              <button type="button" class="copy-btn" data-copy-target="cmd-hook-sh">Copy</button>
+            </div>
+            <pre><code id="cmd-hook-sh">#!/usr/bin/env bash
+set -euo pipefail
+
+cmd=$(jq -r '.command // ""')
+
+if [[ "$cmd" == *"git push --force"* || "$cmd" == *"rm -rf /"* ]]; then
+  echo "Blocked by local safety hook: destructive command not allowed." &gt;&amp;2
+  exit 1
+fi</code></pre>
+          </div>
+
+          <p>Reload your config live with <kbd>SPC h r</kbd> and every subsequent shell call passes through your script first. See the <a href="/docs/hooks.html">Hooks Reference</a> for the full stdin schema and matcher syntax.</p>
+        </section>
+
+        <section class="essay-section" id="isolated-mcp">
+          <h2>3. Crash-isolated multi-server MCP</h2>
+          <p>Model Context Protocol (MCP) servers let agents query GitHub issues, Linear tickets, Postgres schemas, or internal tools. In Minga, each stdio MCP server runs under its own supervised Erlang VM process. If one server hangs or crashes mid-turn, only its prefixed tools (<code>mcp_&lt;server&gt;__&lt;tool&gt;</code>) drop out while your open buffers, undo history, built-in tools, and healthy MCP servers keep going.</p>
+
+          <div class="code-card">
+            <div class="code-header">
+              <span>~/.config/minga/config.exs · Multiple stdio MCP servers</span>
+              <button type="button" class="copy-btn" data-copy-target="cmd-mcp-cfg">Copy</button>
+            </div>
+            <pre><code id="cmd-mcp-cfg">set <span class="tok-atom">:agent_mcp_servers</span>, [
+  %{
+    name: <span class="tok-str">"github"</span>,
+    command: <span class="tok-str">"npx"</span>,
+    args: [<span class="tok-str">"-y"</span>, <span class="tok-str">"@modelcontextprotocol/server-github"</span>],
+    env: %{<span class="tok-str">"GITHUB_PERSONAL_ACCESS_TOKEN"</span> =&gt; <span class="tok-mod">System</span>.fetch_env!(<span class="tok-str">"GITHUB_TOKEN"</span>)}
+  },
+  %{
+    name: <span class="tok-str">"postgres"</span>,
+    command: <span class="tok-str">"npx"</span>,
+    args: [<span class="tok-str">"-y"</span>, <span class="tok-str">"@modelcontextprotocol/server-postgres"</span>, <span class="tok-mod">System</span>.fetch_env!(<span class="tok-str">"DATABASE_URL"</span>)]
+  }
+]</code></pre>
+          </div>
+
+          <p>By default, MCP tools are treated as destructive and require explicit approval (<kbd>y</kbd> once, <kbd>a</kbd> session, <kbd>t</kbd> turn, <kbd>n</kbd> deny). Notice the pattern above: read tokens from shell environment variables via <code>System.fetch_env!/1</code> so secrets never land in your dotfiles. See the <a href="/docs/mcp.html">MCP Reference</a> for per-server options.</p>
+        </section>
+
+        <section class="essay-section" id="corporate-gateways">
+          <h2>4. Corporate gateways, credentials, and terminal parity</h2>
+          <p>For company laptops and regulated environments, Minga keeps its network and credential surface small and auditable:</p>
+
+          <ul>
+            <li><strong>Internal LLM proxies (<code>MingaAgent.InferenceRoute</code>):</strong> Write a small Elixir extension implementing <code>MingaAgent.InferenceRoute</code> to route requests through your company's gateway or private endpoint. Your route only streams model responses; Minga keeps owning staged overlays, tool approvals, retries, compaction, and crash-safe session recovery (<a href="/docs/extension_api.html#model-routes">Model Routes Reference</a>).</li>
+            <li><strong>Zero telemetry &amp; local credentials:</strong> Minga sends zero analytics or crash telemetry. Prefer exported environment variables or an internal gateway on work machines; keys saved via <code>/auth</code> are written locally to <code>~/.config/minga/credentials.json</code> with <code>0600</code> permissions and excluded from logs and session exports.</li>
+            <li><strong>Retained shell logs across restarts:</strong> Long test outputs stay saved on disk beyond the 51 KiB model preview so you can inspect full failures after compaction or restarts, and every tool call is recorded before execution so crashes never silently replay side effects (<a href="/docs/session-recovery.html">Session Recovery Reference</a>).</li>
+            <li><strong>Terminal capabilities over SSH:</strong> The Go terminal client uses modern protocols where available (Kitty keyboard disambiguation, OSC 52 clipboard over SSH, mode 2026 synchronized output) and degrades quietly down to 16-color terminals. <span data-status="planned" data-since="v0.1.0">Next: Kitty graphics for vector gutter marks, clickable <code>file:line</code> links, native notifications, tab progress, and <code>:checkhealth terminal</code>.</span></li>
+          </ul>
+        </section>
+
+        <nav class="lesson-pager" aria-label="Lesson navigation">
+          <a class="pager-link" href="/learn/elixir">
+            <span class="pager-dir">&lt;- Previous · Lesson 04</span>
+            <span class="pager-title">Elixir for Minga</span>
+          </a>
+          <a class="pager-link pager-next" href="/learn/">
+            <span class="pager-dir">Back to curriculum -&gt;</span>
+            <span class="pager-title">Learn Hub &amp; Deep References</span>
+          </a>
+        </nav>
+      </div>
+    </article>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container footer-inner">
+      <div class="footer-note">
+        <p><span class="brand-wordmark" style="font-size:1.15rem;margin-right:0.25rem;">minga</span> is open source under the MIT license. Created by <a href="https://evalcode.com">Justin Smestad</a>.</p>
+      </div>
+      <nav class="footer-links" aria-label="Footer">
+        <a href="/">Home</a>
+        <a href="/why-minga">Why Minga</a>
+        <a href="/learn/">Learn</a>
+        <a href="/getting-started">Getting Started</a>
+        <a href="/architecture">Architecture</a>
+        <a href="/extending">Extending</a>
+        <a href="/docs/">API Docs</a>
+        <a href="https://github.com/jsmestad/minga">GitHub</a>
+      </nav>
+    </div>
+  </footer>
+
+  <script defer src="/site.js"></script>
+</body>
+</html>
