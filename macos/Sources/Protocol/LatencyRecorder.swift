@@ -25,6 +25,10 @@ public final class LatencyRecorder: Sendable {
         let received: DispatchTime
         var applied: DispatchTime?
         var submitted: DispatchTime?
+        /// Neighbouring pending sequences in stamp order. They make removal from
+        /// any position and oldest-first eviction O(1).
+        var older: UInt32?
+        var newer: UInt32?
     }
 
     /// Stable reason that a pending presentation sample could not reach the display path.
@@ -128,20 +132,44 @@ public final class LatencyRecorder: Sendable {
     /// Mutable recorder state; only accessed while holding `state`.
     private struct State {
         var nextSeq: UInt32 = 0
+        /// Unresolved samples, linked oldest to newest through `Pending.older` and `Pending.newer`.
         var pending: [UInt32: Pending] = [:]
-        /// Monotonic cursor for oldest-first eviction. Advances forward through
-        /// sequence numbers; each number is visited at most once across the
-        /// recorder's lifetime, giving amortized O(1) eviction.
-        var evictionCursor: UInt32 = 1
+        var oldestPending: UInt32?
+        var newestPending: UInt32?
         var applySamples: RingBuffer = RingBuffer(capacity: LatencyRecorder.ringSize)
         var presentSamples: RingBuffer = RingBuffer(capacity: LatencyRecorder.ringSize)
         var submittedCount: UInt64 = 0
         var discardCounts: [DiscardReason: UInt64] = [:]
+        /// Pending entries inspected while evicting at capacity. Read only by tests.
+        var evictionProbes: UInt64 = 0
 
-        /// Removes a pending entry by sequence number. O(1) dictionary removal
-        /// with no auxiliary array maintenance.
+        /// Appends a pending entry as the newest. O(1).
+        mutating func insertPending(_ seq: UInt32, received: DispatchTime) {
+            // A sequence number reused after UInt32 wraparound replaces its stale entry, as before.
+            _ = removePending(seq)
+            pending[seq] = Pending(received: received, older: newestPending)
+            if let newest = newestPending {
+                pending[newest]?.newer = seq
+            } else {
+                oldestPending = seq
+            }
+            newestPending = seq
+        }
+
+        /// Removes a pending entry from any position and relinks its neighbours. O(1).
         mutating func removePending(_ seq: UInt32) -> Pending? {
-            pending.removeValue(forKey: seq)
+            guard let entry = pending.removeValue(forKey: seq) else { return nil }
+            if let older = entry.older {
+                pending[older]?.newer = entry.newer
+            } else {
+                oldestPending = entry.newer
+            }
+            if let newer = entry.newer {
+                pending[newer]?.older = entry.older
+            } else {
+                newestPending = entry.older
+            }
+            return entry
         }
     }
 
@@ -156,12 +184,12 @@ public final class LatencyRecorder: Sendable {
             state.nextSeq &+= 1
             if state.nextSeq == 0 { state.nextSeq = 1 }
             let seq = state.nextSeq
-            state.pending[seq] = Pending(received: now())
-            while state.pending.count > Self.ringSize {
-                if state.pending.removeValue(forKey: state.evictionCursor) != nil {
-                    state.discardCounts[.dropped, default: 0] &+= 1
-                }
-                state.evictionCursor &+= 1
+            state.insertPending(seq, received: now())
+            // One insertion can exceed capacity by at most one entry.
+            if state.pending.count > Self.ringSize, let oldest = state.oldestPending {
+                state.evictionProbes &+= 1
+                _ = state.removePending(oldest)
+                state.discardCounts[.dropped, default: 0] &+= 1
             }
             return seq
         }
@@ -218,11 +246,17 @@ public final class LatencyRecorder: Sendable {
         state.withLock { state in
             let count = state.pending.count
             state.pending.removeAll(keepingCapacity: true)
-            state.evictionCursor = state.nextSeq &+ 1
+            state.oldestPending = nil
+            state.newestPending = nil
             if count > 0 {
                 state.discardCounts[.connectionReplaced, default: 0] &+= UInt64(count)
             }
         }
+    }
+
+    /// Total pending entries inspected by capacity eviction since creation.
+    var evictionProbeCountForTesting: UInt64 {
+        state.withLock { $0.evictionProbes }
     }
 
     /// Returns an immutable percentile and discard-count snapshot.
