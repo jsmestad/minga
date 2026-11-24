@@ -4,16 +4,16 @@ defmodule MingaAgent.TokenEstimator do
 
   Uses a character-based heuristic: roughly 1 token per 3.5 characters
   for English text, plus overhead for message framing (role tokens,
-  formatting). Accounts for all material request components: content,
-  tool calls (function name and arguments), tool call IDs, reasoning
-  details, and provider replay metadata. A large tool argument now
-  increases the estimate proportionally instead of being invisible.
+  formatting). Counts message content, tool call names, arguments and IDs,
+  and the text of reasoning details.
 
   Images, video and files count a fixed per-part cost, because providers
   bill them by dimensions or pages rather than by encoded bytes.
 
-  The result is an estimate for display, not an upper bound. Exact counts
-  need a provider tokenizer, so admission decisions must not rely on it.
+  The result is an estimate, not an upper bound: exact counts need a
+  provider tokenizer. Use it for display and soft thresholds such as
+  compaction triggers; a hosted request's admission is decided by
+  `MingaAgent.ModelSelection.Policy.RequestCapacity` from a bound.
   """
 
   @typedoc "A message-like map with content and role."

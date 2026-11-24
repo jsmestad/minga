@@ -2120,7 +2120,7 @@ defmodule MingaAgent.Providers.Native do
     updated_context = Context.append(context, assistant_message)
     normalized = normalize_usage(usage, lctx.selection)
     report_turn_cost(lctx, normalized)
-    emit_reported_context_usage(lctx, normalized)
+    emit_reported_context_usage(lctx, usage, normalized)
     outcome = Outcome.new(lctx.request, updated_context.messages)
     emit(lctx, %Event.AgentEnd{usage: normalized, outcome: outcome})
     :ok
@@ -2139,7 +2139,7 @@ defmodule MingaAgent.Providers.Native do
     normalized = normalize_usage(usage, lctx.selection)
     turn_cost = turn_cost_from_usage(normalized)
     report_turn_cost(lctx, normalized)
-    emit_reported_context_usage(lctx, normalized)
+    emit_reported_context_usage(lctx, usage, normalized)
 
     with {:ok, checkpoint_id} <-
            checkpoint_tool_group(lctx, updated_context.messages, tool_calls),
@@ -3658,20 +3658,45 @@ defmodule MingaAgent.Providers.Native do
   end
 
   # Emits a context usage event with provider-reported input tokens from the turn response.
-  @spec emit_reported_context_usage(loop_ctx(), Event.token_usage() | nil) :: :ok
-  defp emit_reported_context_usage(_lctx, nil), do: :ok
+  # Emits the provider-reported prompt size for the turn. Routes whose usage is disabled report nothing.
+  @spec emit_reported_context_usage(loop_ctx(), map() | nil, Event.token_usage() | nil) :: :ok
+  defp emit_reported_context_usage(_lctx, _usage, nil), do: :ok
 
-  defp emit_reported_context_usage(lctx, %MingaAgent.TurnUsage{input: input})
-       when is_integer(input) and input > 0 do
-    emit(lctx, %Event.ContextUsage{
-      estimated_tokens: input,
-      context_limit: lctx.selection.policy.limits.context,
-      reported_tokens: input,
-      estimation_method: :reported
-    })
+  defp emit_reported_context_usage(lctx, usage, %MingaAgent.TurnUsage{}) when is_map(usage) do
+    case reported_prompt_tokens(usage) do
+      tokens when tokens > 0 ->
+        emit(lctx, %Event.ContextUsage{
+          estimated_tokens: tokens,
+          context_limit: lctx.selection.policy.limits.context,
+          reported_tokens: tokens,
+          estimation_method: :reported
+        })
+
+      _none ->
+        :ok
+    end
   end
 
-  defp emit_reported_context_usage(_lctx, _usage), do: :ok
+  defp emit_reported_context_usage(_lctx, _usage, _normalized), do: :ok
+
+  # Some providers (Anthropic) exclude prompt-cache reads and writes from input tokens;
+  # ReqLLM flags that with `input_includes_cached: false`, so add them back for the full prompt.
+  @spec reported_prompt_tokens(map()) :: non_neg_integer()
+  defp reported_prompt_tokens(usage) do
+    input = usage_value(usage, [:input_tokens, :input], 0)
+
+    if Map.get(usage, :input_includes_cached, true) do
+      input
+    else
+      input +
+        usage_value(usage, [:cache_read_tokens, :cache_read_input_tokens, :cached_tokens], 0) +
+        usage_value(
+          usage,
+          [:cache_write_tokens, :cache_creation_input_tokens, :cache_creation_tokens],
+          0
+        )
+    end
+  end
 
   @spec emit_error_and_end(loop_ctx(), Event.Error.t()) :: :ok
   defp emit_error_and_end(lctx, %Event.Error{} = event) do
