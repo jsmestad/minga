@@ -13,6 +13,132 @@ env:
   MIX_ENV: test
 
 jobs:
+  # macOS runners are the scarce pool: GitHub runs only a few macOS jobs at once per account, so every PR that holds them queues the rest. Decide on a Linux runner which macOS-bound jobs this change can affect. Pushes to main run everything; main is the backstop for a gap in these lists.
+  changes:
+    name: Detect affected jobs
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      swift: ${{ steps.classify.outputs.swift }}
+      swift_performance: ${{ steps.classify.outputs.swift_performance }}
+      release: ${{ steps.classify.outputs.release }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Classify changed paths
+        id: classify
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          python3 - <<'PY'
+          import fnmatch
+          import os
+          import subprocess
+
+          # fnmatch's "*" also matches "/", so "dir/**" covers every file below dir.
+          ALWAYS = [".github/workflows/ci.yml", ".tool-versions", "mix.exs", "mix.lock"]
+
+          # Swift correctness and protocol integration: native sources plus every BEAM input they build or replay (protocol codegen, GUI encoders, render model, native IPC, renderer recovery, conformance corpus).
+          SWIFT = ALWAYS + [
+              "macos/**",
+              "docs/protocol_schema.toml",
+              "generated/**",
+              "mix/**",
+              "lib/mix/tasks/**",
+              "lib/minga/frontend/**",
+              "lib/minga/render_model/**",
+              "lib/minga_editor/frontend/**",
+              "lib/minga_editor/native_ipc/**",
+              "lib/minga_editor/render_model/**",
+              "lib/minga_editor/renderer/**",
+              "test/conformance/**",
+              "test/macos/**",
+              "test/minga_editor/integration/gui_protocol_test.exs",
+              "test/scripts/macos_unit_results_test.py",
+              "scripts/install_xcodegen",
+              "scripts/check_macos_release_optimization",
+              "scripts/test_macos_unit",
+              "scripts/check_conformance_recovery",
+          ]
+
+          # The render benchmarks build and measure native code against generated protocol sources only.
+          SWIFT_PERFORMANCE = ALWAYS + [
+              "macos/**",
+              "docs/protocol_schema.toml",
+              "mix/protocol_generator.ex",
+              "scripts/install_xcodegen",
+              "scripts/bench_render_performance_ab",
+              "scripts/check_render_performance",
+              "scripts/bench_native_render_performance_ab",
+          ]
+
+          # Native release producer and consumer boundaries.
+          RELEASE = ALWAYS + [
+              ".github/workflows/release.yml",
+              ".github/workflows/verify-release-candidate.yml",
+              ".github/release-targets.json",
+              "scripts/stamp-rolling-app",
+              "scripts/qualify-homebrew-upgrade",
+              "scripts/stage-homebrew-publication.py",
+              "scripts/publish-homebrew-release",
+              "scripts/publish-homebrew-tap",
+              "test/scripts/*homebrew*test.py",
+              "scripts/build-release-erts.py",
+              "scripts/release_erts_sources.json",
+              "scripts/check-release-contents",
+              "scripts/release_candidate.py",
+              "mix/release_erts.ex",
+              "mix/tasks/release.tui.ex",
+              "rel/**",
+              "macos/Resources/bin/minga-tui",
+              "test/scripts/release_erts_producer_test.py",
+              "test/scripts/release_contents_test.py",
+              "test/scripts/release_candidate_test.py",
+              "scripts/render-tui-formula",
+              "test/scripts/render_tui_formula_test.py",
+              "scripts/build-tui-deb",
+              "test/scripts/build_tui_deb_test.py",
+          ]
+
+          def changed_paths(revision_range):
+              output = subprocess.check_output(["git", "diff", "--name-only", "--no-renames", "-z", revision_range])
+              paths = [path for path in output.decode().split("\0") if path]
+              print(f"{len(paths)} changed paths in {revision_range}")
+              return paths
+
+          def affected(paths, patterns):
+              return any(fnmatch.fnmatchcase(path, pattern) for path in paths for pattern in patterns)
+
+          def commit_exists(sha):
+              return bool(sha) and subprocess.run(["git", "cat-file", "-e", f"{sha}^{{commit}}"], capture_output=True).returncode == 0
+
+          if os.environ["EVENT_NAME"] == "pull_request":
+              changed = changed_paths(f'{os.environ["BASE_SHA"]}...{os.environ["HEAD_SHA"]}')
+              decisions = {
+                  "swift": affected(changed, SWIFT),
+                  "swift_performance": affected(changed, SWIFT_PERFORMANCE),
+                  "release": affected(changed, RELEASE),
+              }
+          else:
+              # Main runs every Swift job. Release prerequisites keep their pushed-range check; an unknown range runs them.
+              before = os.environ["BEFORE_SHA"]
+              release = not commit_exists(before) or affected(changed_paths(f"{before}..HEAD"), RELEASE)
+              decisions = {"swift": True, "swift_performance": True, "release": release}
+
+          with open(os.environ["GITHUB_OUTPUT"], "a") as github_output:
+              for name, required in decisions.items():
+                  value = "true" if required else "false"
+                  github_output.write(f"{name}={value}\n")
+                  print(f"{name}: {value}")
+          PY
+
   lint:
     name: Lint & Format
     runs-on: ubuntu-latest
@@ -361,6 +487,8 @@ jobs:
 
   swift-tests:
     name: Swift (macOS correctness)
+    needs: changes
+    if: needs.changes.outputs.swift == 'true'
     runs-on: macos-15
     permissions:
       contents: read
@@ -472,6 +600,8 @@ jobs:
 
   swift-performance:
     name: Swift (macOS performance)
+    needs: changes
+    if: needs.changes.outputs.swift_performance == 'true'
     runs-on: macos-15
     permissions:
       contents: read
@@ -534,23 +664,30 @@ jobs:
           if-no-files-found: error
 
   swift:
-    # Preserve the required check name and require both macOS jobs to pass.
+    # Preserve the required check name and require both macOS jobs to pass, or to be skipped because the change cannot affect them.
     name: Swift (macOS GUI)
     if: ${{ always() }}
     runs-on: ubuntu-latest
     permissions: {}
-    needs: [swift-tests, swift-performance]
+    needs: [changes, swift-tests, swift-performance]
     steps:
       - name: Require Swift correctness and performance
         env:
+          DETECTOR: ${{ needs.changes.result }}
           CORRECTNESS: ${{ needs.swift-tests.result }}
+          CORRECTNESS_REQUIRED: ${{ needs.changes.outputs.swift }}
           PERFORMANCE: ${{ needs.swift-performance.result }}
+          PERFORMANCE_REQUIRED: ${{ needs.changes.outputs.swift_performance }}
         run: |
-          printf 'Swift correctness: %s; Swift performance: %s\n' "$CORRECTNESS" "$PERFORMANCE"
-          [[ "$CORRECTNESS" == success && "$PERFORMANCE" == success ]]
+          printf 'Detector: %s; Swift correctness: %s (required: %s); Swift performance: %s (required: %s)\n' \
+            "$DETECTOR" "$CORRECTNESS" "$CORRECTNESS_REQUIRED" "$PERFORMANCE" "$PERFORMANCE_REQUIRED"
+          accepted() { [[ "$1" == success || ( "$2" == false && "$1" == skipped ) ]]; }
+          [[ "$DETECTOR" == success ]] && accepted "$CORRECTNESS" "$CORRECTNESS_REQUIRED" && accepted "$PERFORMANCE" "$PERFORMANCE_REQUIRED"
 
   swift-integration:
     name: Swift Protocol Integration
+    needs: changes
+    if: needs.changes.outputs.swift == 'true'
     runs-on: macos-15
     env:
       MIX_ENV: test
@@ -664,6 +801,8 @@ jobs:
 
   release-prerequisites:
     name: Native release prerequisites (${{ matrix.runner }})
+    needs: changes
+    if: needs.changes.outputs.release == 'true'
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 15
     permissions:
@@ -674,40 +813,18 @@ jobs:
         runner: [macos-15, macos-15-intel, ubuntu-24.04, ubuntu-24.04-arm]
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - name: Select changed native release inputs
+      - name: Read pinned release Python
         id: inputs
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: |
           set -euo pipefail
-          changed=true
-          if [ -n "$BASE_SHA" ] && git cat-file -e "$BASE_SHA^{commit}" 2>/dev/null; then
-            if git diff --quiet "$BASE_SHA" HEAD -- \
-              .github/workflows/ci.yml .github/workflows/release.yml .github/workflows/verify-release-candidate.yml \
-              .github/release-targets.json scripts/stamp-rolling-app scripts/qualify-homebrew-upgrade \
-              scripts/stage-homebrew-publication.py scripts/publish-homebrew-release scripts/publish-homebrew-tap \
-              'test/scripts/*homebrew*test.py' \
-              .tool-versions scripts/build-release-erts.py scripts/release_erts_sources.json \
-              scripts/check-release-contents scripts/release_candidate.py \
-              mix/release_erts.ex mix/tasks/release.tui.ex mix.exs mix.lock rel macos/Resources/bin/minga-tui \
-              test/scripts/release_erts_producer_test.py test/scripts/release_contents_test.py \
-              test/scripts/release_candidate_test.py scripts/render-tui-formula test/scripts/render_tui_formula_test.py \
-              scripts/build-tui-deb test/scripts/build_tui_deb_test.py; then
-              changed=false
-            fi
-          fi
-          printf 'changed=%s\n' "$changed" >> "$GITHUB_OUTPUT"
           python_version=$(jq -er '.build_python_version | select(type == "string")' scripts/release_erts_sources.json)
           [[ "$python_version" =~ ^3\.[0-9]+\.[0-9]+$ ]]
           printf 'python_version=%s\n' "$python_version" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-python@v5
-        if: steps.inputs.outputs.changed == 'true'
         with:
           python-version: ${{ steps.inputs.outputs.python_version }}
       - name: Install and verify native Ubuntu build prerequisites
-        if: steps.inputs.outputs.changed == 'true' && runner.os == 'Linux'
+        if: runner.os == 'Linux'
         run: |
           set -euo pipefail
           . /etc/os-release
@@ -717,7 +834,6 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends build-essential binutils perl ca-certificates
       - name: Verify pinned Python and release producer/consumer boundaries
-        if: steps.inputs.outputs.changed == 'true'
         env:
           PYTHON_VERSION: ${{ steps.inputs.outputs.python_version }}
         run: |
@@ -729,10 +845,10 @@ jobs:
           python3 -B test/scripts/render_tui_formula_test.py
           bash -n scripts/qualify-homebrew-upgrade
       - name: Verify Debian package assembly
-        if: steps.inputs.outputs.changed == 'true' && runner.os == 'Linux'
+        if: runner.os == 'Linux'
         run: python3 -B test/scripts/build_tui_deb_test.py
       - name: Verify Homebrew promotion without publication credentials
-        if: steps.inputs.outputs.changed == 'true' && runner.os == 'Linux'
+        if: runner.os == 'Linux'
         run: python3 -B -m unittest discover -s test/scripts -p '*homebrew*test.py'
 
   ci-gate:
@@ -742,6 +858,7 @@ jobs:
     permissions: {}
     # Swift's required check aggregates both macOS jobs; docs deploys only on main.
     needs:
+      - changes
       - lint
       - test
       - test-sdk
@@ -766,10 +883,17 @@ jobs:
           import sys
 
           needs = json.loads(os.environ["NEEDS_JSON"])
+          # A job may be skipped only when the detector ran and decided the change cannot affect it.
+          detected = needs.get("changes", {}).get("outputs", {})
+          skippable = {
+              "swift-integration": detected.get("swift") == "false",
+              "release-prerequisites": detected.get("release") == "false",
+          }
           failed = {
               job: details.get("result")
               for job, details in needs.items()
               if details.get("result") != "success"
+              and not (details.get("result") == "skipped" and skippable.get(job, False))
           }
           if not needs or failed:
               print(f"CI gate failed: {json.dumps(failed, sort_keys=True)}")
