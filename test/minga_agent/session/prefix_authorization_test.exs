@@ -2306,7 +2306,7 @@ defmodule MingaAgent.Session.PrefixAuthorizationTest do
     assert Enum.map_join(result.content, "", & &1.text) =~ "written"
   end
 
-  test "approval can start its call while an admitted allowed sibling is still running",
+  test "an allowed write after a pending approval waits for the approved call to finish",
        context do
     owner = self()
     install_write_tool(context)
@@ -2341,20 +2341,22 @@ defmodule MingaAgent.Session.PrefixAuthorizationTest do
                     {:approval_pending, %Public{target: %Target{} = approval_target}}},
                    @timeout
 
-    assert_receive {:allowed_started, worker}, @timeout
+    # Model order: the later mutating call is not admitted while the earlier call awaits approval.
+    refute_receive {:allowed_started, _worker}, 150
     assert :ok = Session.respond_to_approval(session, approval_target, :approve)
 
     assert_receive {:agent_event, ^session, {:tool_ended, %Event.ToolEnd{name: "prefix_write"}}},
                    @timeout
 
     assert File.read!(target(context)) == "written\n"
+    assert_receive {:allowed_started, worker}, @timeout
     refute File.exists?(Path.join(context.project, "allowed.txt"))
     send(worker, :settle)
     await_done(session, "allowed_write")
     assert File.read!(Path.join(context.project, "allowed.txt")) == "allowed\n"
   end
 
-  test "an expired approval cannot retain its slot or grant trust while an allowed sibling runs",
+  test "an expired approval cannot retain its slot or grant trust before a later allowed write",
        context do
     owner = self()
     install_write_tool(context)
@@ -2573,7 +2575,7 @@ defmodule MingaAgent.Session.PrefixAuthorizationTest do
     refute_received {:agent_event, ^session, {:approval_resolved, ^target, _resolution}}
   end
 
-  test "an allowed sibling settles while another call awaits approval and can be rejected",
+  test "a rejected approval settles before a later allowed write runs",
        context do
     install_write_tool(context)
     install_write_tool(context, "allowed\n", fn -> :ok end, "allowed_write")
@@ -2599,13 +2601,15 @@ defmodule MingaAgent.Session.PrefixAuthorizationTest do
                     {:approval_pending, %Public{target: %Target{} = approval_target}}},
                    @timeout
 
-    assert_receive {:agent_event, ^session, {:tool_ended, %Event.ToolEnd{name: "allowed_write"}}},
-                   @timeout
+    # Model order: the later write has neither run nor ended while approval is pending.
+    refute_receive {:agent_event, ^session, {:tool_ended, %Event.ToolEnd{name: "allowed_write"}}},
+                   150
 
-    assert File.read!(Path.join(context.project, "allowed.txt")) == "allowed\n"
+    refute File.exists?(Path.join(context.project, "allowed.txt"))
     refute File.exists?(target(context))
     assert :ok = Session.respond_to_approval(session, approval_target, :reject)
     await_done(session)
+    assert File.read!(Path.join(context.project, "allowed.txt")) == "allowed\n"
     assert saved_tool_result(context, session).metadata.is_error == true
 
     assert {:ok, saved} =

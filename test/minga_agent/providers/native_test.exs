@@ -601,6 +601,66 @@ defmodule MingaAgent.Providers.NativeTest do
     struct!(AgentConfig, fields)
   end
 
+  # A custom tool whose Spec declares its scheduling effect explicitly.
+  defp declared_tool(name, effect, callback) do
+    Spec.new!(
+      source: :config,
+      name: name,
+      description: "#{name} test tool",
+      parameter_schema: %{},
+      callback: callback,
+      effect: effect
+    )
+  end
+
+  # A tool callback that reports its start and blocks until the test releases it by name.
+  defp gated_callback(test_pid, gate_ref, name) do
+    fn _args ->
+      send(test_pid, {gate_ref, :started, name, self()})
+
+      receive do
+        {^gate_ref, :release} -> {:ok, "#{name} result"}
+      end
+    end
+  end
+
+  defp tool_call_batch_client(tool_names) do
+    call_count = :counters.new(1, [:atomics])
+
+    fn _model, _messages, _opts ->
+      count = :counters.get(call_count, 1)
+      :counters.add(call_count, 1, 1)
+
+      chunks =
+        case count do
+          0 ->
+            tool_names
+            |> Enum.with_index()
+            |> Enum.map(fn {name, index} ->
+              ReqLLM.StreamChunk.tool_call(name, %{}, %{id: "tc_#{name}", index: index})
+            end)
+            |> Kernel.++([ReqLLM.StreamChunk.meta(%{finish_reason: :tool_use})])
+
+          _ ->
+            [ReqLLM.StreamChunk.text("done"), ReqLLM.StreamChunk.meta(%{finish_reason: :stop})]
+        end
+
+      build_stream_response(chunks)
+    end
+  end
+
+  defp assert_tool_started(gate_ref, name) do
+    assert_receive {^gate_ref, :started, ^name, worker}, 2_000
+    worker
+  end
+
+  # Bounded negative wait: proves a tool has not been admitted while an earlier effect is blocked.
+  defp refute_tool_started(gate_ref, name) do
+    refute_receive {^gate_ref, :started, ^name, _worker}, 150
+  end
+
+  defp release_tool(gate_ref, worker), do: send(worker, {gate_ref, :release})
+
   defp write_project_skill(dir, name, instructions) do
     skill_dir = Path.join([dir, ".minga", "skills", name])
     File.mkdir_p!(skill_dir)
@@ -2182,11 +2242,10 @@ defmodule MingaAgent.Providers.NativeTest do
       call_count = :counters.new(1, [:atomics])
 
       slow_tool =
-        ReqLLM.Tool.new!(
-          name: "slow_tool",
-          description: "Blocks until the test releases it",
-          parameter_schema: [],
-          callback: fn _args ->
+        declared_tool(
+          "slow_tool",
+          :read_only,
+          fn _args ->
             send(test_pid, {:tool_started, "slow_tool", self()})
 
             receive do
@@ -2198,11 +2257,10 @@ defmodule MingaAgent.Providers.NativeTest do
         )
 
       failing_tool =
-        ReqLLM.Tool.new!(
-          name: "failing_tool",
-          description: "Fails immediately",
-          parameter_schema: [],
-          callback: fn _args ->
+        declared_tool(
+          "failing_tool",
+          :read_only,
+          fn _args ->
             send(test_pid, {:tool_started, "failing_tool", self()})
             {:error, "boom"}
           end
@@ -2259,22 +2317,20 @@ defmodule MingaAgent.Providers.NativeTest do
       call_count = :counters.new(1, [:atomics])
 
       crashing_tool =
-        ReqLLM.Tool.new!(
-          name: "crashing_tool",
-          description: "Exits abnormally",
-          parameter_schema: [],
-          callback: fn _args ->
+        declared_tool(
+          "crashing_tool",
+          :read_only,
+          fn _args ->
             send(test_pid, {:tool_started, "crashing_tool"})
             Process.exit(self(), :kill)
           end
         )
 
       sibling_tool =
-        ReqLLM.Tool.new!(
-          name: "sibling_tool",
-          description: "Completes after the crashing sibling exits",
-          parameter_schema: [],
-          callback: fn _args ->
+        declared_tool(
+          "sibling_tool",
+          :read_only,
+          fn _args ->
             send(test_pid, {:tool_started, "sibling_tool", self()})
 
             receive do
@@ -2337,11 +2393,10 @@ defmodule MingaAgent.Providers.NativeTest do
       # This custom tool covers the same provider event path by emitting ToolUpdate from a
       # concurrent tool process without starting a shell.
       streaming_tool =
-        ReqLLM.Tool.new!(
-          name: "streaming_tool",
-          description: "Emits ToolUpdate events without spawning an OS shell",
-          parameter_schema: [],
-          callback: fn _args ->
+        declared_tool(
+          "streaming_tool",
+          :read_only,
+          fn _args ->
             provider_pid = Agent.get(provider_holder, & &1)
             send(test_pid, {:streaming_tool_waiting, self()})
 
@@ -2365,11 +2420,10 @@ defmodule MingaAgent.Providers.NativeTest do
         )
 
       sibling_tool =
-        ReqLLM.Tool.new!(
-          name: "stream_sibling_tool",
-          description: "Completes after the update has streamed",
-          parameter_schema: [],
-          callback: fn _args ->
+        declared_tool(
+          "stream_sibling_tool",
+          :read_only,
+          fn _args ->
             send(test_pid, {:tool_started, "stream_sibling_tool", self()})
 
             receive do
@@ -2452,11 +2506,10 @@ defmodule MingaAgent.Providers.NativeTest do
         marker_two = Path.join(dir, "registration-worker-two-ran.txt")
 
         tool_one =
-          ReqLLM.Tool.new!(
-            name: "registration_cleanup_one",
-            description: "Should never run after registration failure",
-            parameter_schema: [],
-            callback: fn _args ->
+          declared_tool(
+            "registration_cleanup_one",
+            :read_only,
+            fn _args ->
               File.write!(marker_one, "ran")
               send(test_pid, :registration_cleanup_one_ran)
               {:ok, "ran one"}
@@ -2464,11 +2517,10 @@ defmodule MingaAgent.Providers.NativeTest do
           )
 
         tool_two =
-          ReqLLM.Tool.new!(
-            name: "registration_cleanup_two",
-            description: "Should never run after registration failure",
-            parameter_schema: [],
-            callback: fn _args ->
+          declared_tool(
+            "registration_cleanup_two",
+            :read_only,
+            fn _args ->
               File.write!(marker_two, "ran")
               send(test_pid, :registration_cleanup_two_ran)
               {:ok, "ran two"}
@@ -2960,6 +3012,225 @@ defmodule MingaAgent.Providers.NativeTest do
 
       refute_receive {:agent_provider_event, %Event.Error{}}, 200
       refute_receive {:agent_provider_event, %Event.AgentEnd{}}, 50
+    end
+  end
+
+  describe "tool effect scheduling" do
+    test "an approval-gated call holds later mutating and read-only calls until it finishes", %{
+      tmp_dir: dir
+    } do
+      test_pid = self()
+      gate = make_ref()
+
+      tools = [
+        declared_tool(
+          "approval_gate",
+          :read_only,
+          gated_callback(test_pid, gate, "approval_gate")
+        ),
+        declared_tool(
+          "ordered_write",
+          :mutating,
+          gated_callback(test_pid, gate, "ordered_write")
+        ),
+        declared_tool("ordered_read", :read_only, gated_callback(test_pid, gate, "ordered_read"))
+      ]
+
+      {:ok, pid} =
+        start_provider(
+          tmp_dir: dir,
+          llm_client: tool_call_batch_client(["approval_gate", "ordered_write", "ordered_read"]),
+          tools: tools,
+          config: agent_config(tool_permissions: %{"approval_gate" => :ask})
+        )
+
+      assert :ok = send_prompt(pid, "Run the gated batch")
+      gate_worker = assert_tool_started(gate, "approval_gate")
+      refute_tool_started(gate, "ordered_write")
+      refute_tool_started(gate, "ordered_read")
+
+      release_tool(gate, gate_worker)
+      write_worker = assert_tool_started(gate, "ordered_write")
+      refute_tool_started(gate, "ordered_read")
+
+      release_tool(gate, write_worker)
+      read_worker = assert_tool_started(gate, "ordered_read")
+      release_tool(gate, read_worker)
+
+      events = collect_run_events()
+
+      for name <- ["approval_gate", "ordered_write", "ordered_read"] do
+        assert Enum.any?(events, &match?(%Event.ToolEnd{name: ^name, is_error: false}, &1))
+      end
+    end
+
+    test "mixed reads and writes overlap only adjacent reads and keep writes in model order", %{
+      tmp_dir: dir
+    } do
+      test_pid = self()
+      gate = make_ref()
+      messages_ref = make_ref()
+      names = ["mixed_read_a", "mixed_read_b", "mixed_write", "mixed_read_c"]
+      effects = [:read_only, :read_only, :mutating, :read_only]
+
+      tools =
+        Enum.zip_with(names, effects, fn name, effect ->
+          declared_tool(name, effect, gated_callback(test_pid, gate, name))
+        end)
+
+      batch_client = tool_call_batch_client(names)
+
+      client = fn model, messages, opts ->
+        send(test_pid, {messages_ref, messages})
+        batch_client.(model, messages, opts)
+      end
+
+      {:ok, pid} = start_provider(tmp_dir: dir, llm_client: client, tools: tools)
+
+      assert :ok = send_prompt(pid, "Run the mixed batch")
+      read_a = assert_tool_started(gate, "mixed_read_a")
+      read_b = assert_tool_started(gate, "mixed_read_b")
+      refute_tool_started(gate, "mixed_write")
+
+      release_tool(gate, read_a)
+      refute_tool_started(gate, "mixed_write")
+      release_tool(gate, read_b)
+
+      write = assert_tool_started(gate, "mixed_write")
+      refute_tool_started(gate, "mixed_read_c")
+      release_tool(gate, write)
+
+      read_c = assert_tool_started(gate, "mixed_read_c")
+      release_tool(gate, read_c)
+      collect_run_events()
+
+      assert_received {^messages_ref, _initial}
+      assert_received {^messages_ref, messages}
+      tool_messages = Enum.filter(messages, fn message -> message.role == :tool end)
+      assert Enum.map(tool_messages, & &1.tool_call_id) == Enum.map(names, &"tc_#{&1}")
+    end
+
+    test "more read-only calls than the concurrency limit wait for a free slot", %{tmp_dir: dir} do
+      test_pid = self()
+      gate = make_ref()
+      names = Enum.map(1..9, &"overload_read_#{&1}")
+
+      tools = Enum.map(names, &declared_tool(&1, :read_only, gated_callback(test_pid, gate, &1)))
+
+      {:ok, pid} =
+        start_provider(tmp_dir: dir, llm_client: tool_call_batch_client(names), tools: tools)
+
+      {admitted, [overflow]} = Enum.split(names, 8)
+
+      assert :ok = send_prompt(pid, "Run more reads than the limit")
+      workers = Enum.map(admitted, &assert_tool_started(gate, &1))
+      refute_tool_started(gate, overflow)
+
+      Enum.each(workers, &release_tool(gate, &1))
+      overflow_worker = assert_tool_started(gate, overflow)
+      release_tool(gate, overflow_worker)
+
+      events = collect_run_events()
+      assert Enum.count(events, &match?(%Event.ToolEnd{is_error: false}, &1)) == 9
+    end
+
+    test "SDK tools without a Minga effect declaration run one at a time", %{tmp_dir: dir} do
+      test_pid = self()
+      gate = make_ref()
+
+      tools =
+        Enum.map(["undeclared_first", "undeclared_second"], fn name ->
+          ReqLLM.Tool.new!(
+            name: name,
+            description: "Declares no effect",
+            parameter_schema: [],
+            callback: gated_callback(test_pid, gate, name)
+          )
+        end)
+
+      {:ok, pid} =
+        start_provider(
+          tmp_dir: dir,
+          llm_client: tool_call_batch_client(["undeclared_first", "undeclared_second"]),
+          tools: tools
+        )
+
+      assert :ok = send_prompt(pid, "Run undeclared tools")
+      first = assert_tool_started(gate, "undeclared_first")
+      refute_tool_started(gate, "undeclared_second")
+
+      release_tool(gate, first)
+      second = assert_tool_started(gate, "undeclared_second")
+      release_tool(gate, second)
+      collect_run_events()
+    end
+
+    test "a call to a tool no registry declares is not admitted beside a running read", %{
+      tmp_dir: dir
+    } do
+      test_pid = self()
+      gate = make_ref()
+
+      tools = [
+        declared_tool("known_reader", :read_only, gated_callback(test_pid, gate, "known_reader"))
+      ]
+
+      {:ok, pid} =
+        start_provider(
+          tmp_dir: dir,
+          llm_client: tool_call_batch_client(["known_reader", "unregistered_tool"]),
+          tools: tools
+        )
+
+      assert :ok = send_prompt(pid, "Call a known and an unknown tool")
+      reader = assert_tool_started(gate, "known_reader")
+      assert_receive {:effect_admitted, "tc_known_reader"}, 1_000
+      refute_receive {:effect_admitted, "tc_unregistered_tool"}, 150
+
+      release_tool(gate, reader)
+      collect_run_events()
+    end
+
+    test "hung concurrent calls share one batch deadline and are stopped", %{tmp_dir: dir} do
+      test_pid = self()
+      gate = make_ref()
+      timeout_ms = 250
+      names = Enum.map(1..8, &"hung_read_#{&1}")
+
+      tools = Enum.map(names, &declared_tool(&1, :read_only, gated_callback(test_pid, gate, &1)))
+
+      {:ok, pid} =
+        start_provider(
+          tmp_dir: dir,
+          llm_client: tool_call_batch_client(names),
+          tools: tools,
+          config: agent_config(tool_call_timeout_ms: timeout_ms)
+        )
+
+      {{events, elapsed, monitors}, log} =
+        with_log(fn ->
+          assert :ok = send_prompt(pid, "Run hung reads")
+
+          monitors =
+            Enum.map(names, fn name ->
+              worker = assert_tool_started(gate, name)
+              {worker, Process.monitor(worker)}
+            end)
+
+          started_at = System.monotonic_time(:millisecond)
+          events = collect_run_events()
+          {events, System.monotonic_time(:millisecond) - started_at, monitors}
+        end)
+
+      # Serial per-call waits would take at least 8 x timeout_ms (2s); one shared deadline ends near timeout_ms.
+      assert elapsed < 4 * timeout_ms
+      assert log =~ "{:tool_task_exit, :timeout}"
+      assert Enum.any?(events, &match?(%Event.Error{}, &1))
+      refute Enum.any?(events, &match?(%Event.ToolEnd{}, &1))
+
+      for {worker, ref} <- monitors do
+        assert_receive {:DOWN, ^ref, :process, ^worker, _reason}, 1_000
+      end
     end
   end
 

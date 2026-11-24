@@ -2201,8 +2201,6 @@ defmodule MingaAgent.Providers.Native do
 
   # Maximum concurrent read-only tool tasks.
   @max_concurrent_reads 8
-  # Per-tool-call timeout in milliseconds (5 minutes).
-  @tool_call_timeout_ms 300_000
 
   @spec execute_tools(
           loop_ctx(),
@@ -2211,52 +2209,13 @@ defmodule MingaAgent.Providers.Native do
         ) ::
           :ok | {:error, term()}
   defp execute_tools(lctx, checkpoint_id, tool_calls) do
-    initial_mode = approval_mode(lctx.config)
-    indexed_calls = Enum.with_index(tool_calls)
+    # One pipeline in model order: adjacent read-only calls form a bounded concurrent batch; every mutating, approval-gated, or undeclared call runs alone after everything before it has finished and before anything after it starts.
+    runs =
+      tool_calls
+      |> Enum.with_index()
+      |> group_by_effect(lctx, approval_mode(lctx.config))
 
-    # Approval-gated calls need user interaction and are sequential relative
-    # to each other. Everything else uses effect-aware grouping (consecutive
-    # reads concurrent, mutating calls sequential). Both pipelines run in
-    # parallel so allowed tools start while approval is pending.
-    {approval_calls, effect_calls} =
-      Enum.split_with(indexed_calls, fn {tool_call, _index} ->
-        tool_call.name == "ask_user" or
-          tool_requires_approval?(tool_call, lctx, initial_mode)
-      end)
-
-    runs = group_by_effect(effect_calls, lctx, initial_mode)
-
-    effect_task =
-      if runs != [] do
-        Task.async(fn -> execute_effect_runs(lctx, checkpoint_id, runs, []) end)
-      end
-
-    try do
-      approval_result = execute_approval_calls(lctx, checkpoint_id, approval_calls)
-
-      with {:ok, _} <- approval_result do
-        if effect_task do
-          Task.await(effect_task, :infinity)
-        else
-          :ok
-        end
-      end
-    after
-      if effect_task, do: Task.shutdown(effect_task, :brutal_kill)
-    end
-  end
-
-  @spec execute_approval_calls(loop_ctx(), String.t(), [indexed_tool_call()]) ::
-          {:ok, [{non_neg_integer(), tool_execution_result()}]} | {:error, term()}
-  defp execute_approval_calls(_lctx, _checkpoint_id, []), do: {:ok, []}
-
-  defp execute_approval_calls(lctx, checkpoint_id, calls) do
-    Enum.reduce_while(calls, {:ok, []}, fn call, {:ok, results} ->
-      case execute_sequential_tool_task(lctx, checkpoint_id, call) do
-        {_index, %{persistence_error: reason}} -> {:halt, {:error, reason}}
-        result -> {:cont, {:ok, [result | results]}}
-      end
-    end)
+    execute_effect_runs(lctx, checkpoint_id, runs)
   end
 
   @typep effect_run ::
@@ -2291,62 +2250,50 @@ defmodule MingaAgent.Providers.Native do
       tool_effect_sequential?(tool_call.name, lctx)
   end
 
+  # A tool runs concurrently only when its resolved Spec declares a read-only effect. A name that resolves to no Spec has unknown effects and is serialized.
   @spec tool_effect_sequential?(String.t(), loop_ctx()) :: boolean()
   defp tool_effect_sequential?(tool_name, lctx) do
-    registry = Map.get(lctx.tool_metadata, :tool_registry, ToolRegistry)
-
-    case ToolRegistry.lookup(registry, tool_name) do
+    case resolve_tool_spec(tool_name, lctx) do
       {:ok, %ToolSpec{} = spec} -> ToolSpec.sequential?(spec)
-      :error -> false
+      :error -> true
     end
   end
 
-  @spec execute_effect_runs(
-          loop_ctx(),
-          String.t(),
-          [effect_run()],
-          [{non_neg_integer(), tool_execution_result()}]
-        ) :: :ok | {:error, term()}
-  defp execute_effect_runs(_lctx, _checkpoint_id, [], results) do
-    case Enum.find(results, fn {_index, result} -> Map.has_key?(result, :persistence_error) end) do
-      nil -> :ok
-      {_index, result} -> {:error, result.persistence_error}
+  @spec execute_effect_runs(loop_ctx(), String.t(), [effect_run()]) :: :ok | {:error, term()}
+  defp execute_effect_runs(_lctx, _checkpoint_id, []), do: :ok
+
+  defp execute_effect_runs(lctx, checkpoint_id, [{:concurrent, batch} | rest]) do
+    with :ok <- execute_concurrent_batch(lctx, checkpoint_id, batch) do
+      execute_effect_runs(lctx, checkpoint_id, rest)
     end
   end
 
-  defp execute_effect_runs(lctx, checkpoint_id, [{:concurrent, batch} | rest], results) do
-    # Cap the batch to @max_concurrent_reads parallel workers.
-    batch_results = execute_concurrent_batch(lctx, checkpoint_id, batch)
-
-    case Enum.find(batch_results, fn {_i, r} -> Map.has_key?(r, :persistence_error) end) do
-      nil -> execute_effect_runs(lctx, checkpoint_id, rest, results ++ batch_results)
-      {_index, result} -> {:error, result.persistence_error}
-    end
-  end
-
-  defp execute_effect_runs(lctx, checkpoint_id, [{:sequential, call} | rest], results) do
-    result = execute_sequential_tool_task(lctx, checkpoint_id, call)
-
-    case result do
+  defp execute_effect_runs(lctx, checkpoint_id, [{:sequential, call} | rest]) do
+    case execute_sequential_tool_task(lctx, checkpoint_id, call) do
       {_index, %{persistence_error: reason}} -> {:error, reason}
-      _ -> execute_effect_runs(lctx, checkpoint_id, rest, [result | results])
+      _result -> execute_effect_runs(lctx, checkpoint_id, rest)
     end
   end
 
+  # Runs at most @max_concurrent_reads workers at a time. A chunk whose outcome is not durable stops the batch before any later chunk is admitted.
   @spec execute_concurrent_batch(loop_ctx(), String.t(), [indexed_tool_call()]) ::
-          [{non_neg_integer(), tool_execution_result()}]
+          :ok | {:error, term()}
   defp execute_concurrent_batch(lctx, checkpoint_id, batch) do
-    # Chunk into sub-batches of @max_concurrent_reads to enforce the concurrency
-    # limit while keeping model order within each chunk.
     batch
     |> Enum.chunk_every(@max_concurrent_reads)
-    |> Enum.flat_map(fn chunk ->
+    |> Enum.reduce_while(:ok, fn chunk, :ok ->
       tasks = start_concurrent_tool_tasks(lctx, checkpoint_id, chunk)
 
-      try do
-        await_concurrent_tool_tasks(lctx, tasks)
-      after
-        cleanup_concurrent_tool_tasks(lctx.provider_pid, tasks)
+      results =
+        try do
+          await_concurrent_tool_tasks(lctx, tasks)
+        after
+          cleanup_concurrent_tool_tasks(lctx.provider_pid, tasks)
+        end
+
+      case Enum.find(results, fn {_index, result} -> Map.has_key?(result, :persistence_error) end) do
+        nil -> {:cont, :ok}
+        {_index, result} -> {:halt, {:error, result.persistence_error}}
       end
     end)
   end
@@ -2446,8 +2393,11 @@ defmodule MingaAgent.Providers.Native do
           {non_neg_integer(), tool_execution_result()}
         ]
   defp await_concurrent_tool_tasks(lctx, tasks) do
+    # One deadline covers every worker started together, so N hung workers cost one timeout rather than N. Workers still running at the deadline are reported as timed out; the caller's cleanup kills them.
+    deadline = System.monotonic_time(:millisecond) + lctx.config.tool_call_timeout_ms
+
     Enum.map(tasks, fn {index, tool_call, _pid, monitor_ref, result_ref} ->
-      {index, await_tool_process(lctx, tool_call, monitor_ref, result_ref)}
+      {index, await_tool_process(lctx, tool_call, monitor_ref, result_ref, deadline)}
     end)
   end
 
@@ -2550,8 +2500,11 @@ defmodule MingaAgent.Providers.Native do
     :ok
   end
 
-  @spec await_tool_process(loop_ctx(), map(), reference(), reference()) :: tool_execution_result()
-  defp await_tool_process(lctx, tool_call, monitor_ref, result_ref) do
+  @spec await_tool_process(loop_ctx(), map(), reference(), reference(), integer()) ::
+          tool_execution_result()
+  defp await_tool_process(lctx, tool_call, monitor_ref, result_ref, deadline) do
+    remaining_ms = max(deadline - System.monotonic_time(:millisecond), 0)
+
     receive do
       {^result_ref, :tool_result, result} ->
         Process.demonitor(monitor_ref, [:flush])
@@ -2560,7 +2513,7 @@ defmodule MingaAgent.Providers.Native do
       {:DOWN, ^monitor_ref, :process, _pid, reason} ->
         receive_tool_result_after_down(lctx, tool_call, result_ref, reason)
     after
-      @tool_call_timeout_ms ->
+      remaining_ms ->
         Process.demonitor(monitor_ref, [:flush])
         tool_task_failed(lctx, tool_call, :timeout)
     end
@@ -2828,20 +2781,26 @@ defmodule MingaAgent.Providers.Native do
 
   @spec registered_tool_approval(String.t(), loop_ctx()) :: ToolSpec.approval_level() | nil
   defp registered_tool_approval(tool_name, lctx) do
+    case resolve_tool_spec(tool_name, lctx) do
+      {:ok, %ToolSpec{} = spec} -> spec_approval(spec)
+      :error -> nil
+    end
+  end
+
+  # Resolves the Spec behind a model-supplied tool name: the provider's own local declarations first, then the session tool registry for registry-backed tools.
+  @spec resolve_tool_spec(String.t(), loop_ctx()) :: {:ok, ToolSpec.t()} | :error
+  defp resolve_tool_spec(tool_name, lctx) do
     case GenServer.call(lctx.provider_pid, {:resolve_local_tool, tool_name}) do
       {:ok, %ToolSpec{} = spec, _registration, _declaration} ->
-        spec_approval(spec)
+        {:ok, spec}
 
       {:error, {:tool_not_found, ^tool_name}} ->
-        nil
+        :error
 
       {:error, {:tool_not_local, ^tool_name}} ->
-        registry = Map.get(lctx.tool_metadata, :tool_registry, ToolRegistry)
-
-        case ToolRegistry.lookup(registry, tool_name) do
-          {:ok, %ToolSpec{} = spec} -> spec_approval(spec)
-          :error -> nil
-        end
+        lctx.tool_metadata
+        |> Map.get(:tool_registry, ToolRegistry)
+        |> ToolRegistry.lookup(tool_name)
     end
   end
 

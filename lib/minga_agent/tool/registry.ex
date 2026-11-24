@@ -182,7 +182,11 @@ defmodule MingaAgent.Tool.Registry do
     {:reply, {:ok, revision(table), all(table)}, table}
   end
 
-  @doc "Converts a `ReqLLM.Tool` struct to a config-owned `MingaAgent.Tool.Spec`."
+  @doc """
+  Converts a `ReqLLM.Tool` struct to a config-owned `MingaAgent.Tool.Spec`.
+
+  A tool named like a built-in inherits that built-in's declaration. Any other SDK tool carries no Minga effect declaration, so its effects are unknown and it is classified `:mutating`: the scheduler runs it alone, in model order.
+  """
   @spec from_req_tool(ReqLLM.Tool.t()) :: Spec.t()
   def from_req_tool(%ReqLLM.Tool{} = tool) do
     metadata = canonical_metadata(tool.name)
@@ -197,6 +201,7 @@ defmodule MingaAgent.Tool.Registry do
       approval_level: metadata.approval_level,
       capabilities: metadata.capabilities,
       context_requirements: metadata.context_requirements,
+      effect: metadata.effect,
       metadata: %{sdk_input: %{tool | callback: nil}}
     )
   end
@@ -212,10 +217,16 @@ defmodule MingaAgent.Tool.Registry do
   defp canonical_metadata(name) do
     case Enum.find(MingaAgent.Tools.specs(), &(&1.name == name)) do
       %Spec{} = spec ->
-        Map.take(spec, [:category, :approval_level, :capabilities, :context_requirements])
+        Map.take(spec, [:category, :approval_level, :capabilities, :context_requirements, :effect])
 
       nil ->
-        %{category: :custom, approval_level: :auto, capabilities: [], context_requirements: []}
+        %{
+          category: :custom,
+          approval_level: :auto,
+          capabilities: [],
+          context_requirements: [],
+          effect: :mutating
+        }
     end
   end
 
