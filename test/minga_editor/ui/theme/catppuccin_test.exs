@@ -147,7 +147,10 @@ defmodule MingaEditor.UI.Theme.CatppuccinTest do
         assert theme.editor.bg == p.base
         assert theme.editor.fg == p.text
         assert theme.editor.selection_bg == p.surface2
-        assert theme.gutter.fg == p.overlay1
+        # Line numbers move up the ramp to reach the 4.5:1 text target (docs/design/themes.md).
+        assert theme.gutter.fg ==
+                 if(unquote(theme_name) == :catppuccin_latte, do: p.subtext1, else: p.overlay2)
+
         assert theme.gutter.current_fg == p.lavender
         assert theme.gutter.info_fg == p.teal
         assert theme.search.highlight_bg == p.teal

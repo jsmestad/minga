@@ -87,6 +87,8 @@ defmodule MingaEditor.UI.Theme.OneLight do
         indent_guide_active_fg: @mono_3
       },
       gutter: %{
+        # Line numbers are secondary text and need 4.5:1 against the editor background.
+        fg: @mono_2,
         current_fg: @mono_1,
         warning_fg: @hue_6,
         hint_fg: @syntax_gutter,
@@ -107,7 +109,7 @@ defmodule MingaEditor.UI.Theme.OneLight do
           search: {0xFFFFFF, @hue_1}
         }
       },
-      popup: %{bg: @syntax_guide, border_fg: @mono_3, sel_bg: @hue_2, separator_fg: @mono_2},
+      popup: %{bg: @syntax_guide, border_fg: 0x8A8A8C, sel_bg: @hue_2, separator_fg: @mono_2},
       tree: %{
         bg: @ui_bg,
         cursor_bg: @syntax_selection,

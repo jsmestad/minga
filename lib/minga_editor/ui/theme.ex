@@ -673,10 +673,11 @@ defmodule MingaEditor.UI.Theme do
   @spec role_color(t(), Tokens.color_role()) :: color()
   def role_color(%__MODULE__{} = theme, role) do
     case Tokens.color_role(role).source do
+      # A hand-built theme can leave every source field nil; the role then draws as primary text so the frontend still receives its slot.
       {:fields, fields} ->
         Enum.find_value(fields, fn {section, field} ->
           theme |> role_section(section) |> Map.fetch!(field)
-        end)
+        end) || theme.editor.fg
 
       {:mix, top, over, percent} ->
         mix_color(role_color(theme, top), role_color(theme, over), percent)

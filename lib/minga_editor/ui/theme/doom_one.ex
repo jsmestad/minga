@@ -60,7 +60,8 @@ defmodule MingaEditor.UI.Theme.DoomOne do
         link_fg: 0x61AFEF
       },
       gutter: %MingaEditor.UI.Theme.Gutter{
-        fg: @base5,
+        # Line numbers are secondary text and need 4.5:1 against the editor background.
+        fg: 0x9299A0,
         current_fg: @fg,
         error_fg: @red,
         warning_fg: @yellow,

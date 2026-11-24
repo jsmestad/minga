@@ -96,7 +96,9 @@ defmodule MingaEditor.UI.Theme.AstroDark do
         indent_guide_fg: @indent_guide,
         indent_guide_active_fg: @indent_guide_active
       },
-      popup: %{bg: @bg_float},
+      # Line numbers reach 4.5:1 and the popup border 3:1 against the editor background.
+      gutter: %{fg: 0x858892},
+      popup: %{bg: @bg_float, border_fg: @syn_comment},
       tab_bar: %{bg: @bg_statusline, inactive_bg: @bg_inactive},
       syntax: syntax_overrides(),
       icon: icon_overrides()

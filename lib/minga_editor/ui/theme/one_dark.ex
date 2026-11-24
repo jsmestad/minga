@@ -87,6 +87,8 @@ defmodule MingaEditor.UI.Theme.OneDark do
         indent_guide_active_fg: @mono_3
       },
       gutter: %{
+        # Line numbers are secondary text and need 4.5:1 against the editor background.
+        fg: 0x8A93A6,
         current_fg: @mono_1,
         warning_fg: @hue_6_2,
         hint_fg: @syntax_gutter,

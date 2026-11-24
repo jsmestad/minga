@@ -181,7 +181,12 @@ defmodule Minga.Design.Tokens do
     do: %{id: :text, slot: 0x7A, source: {:fields, [{:editor, :fg}]}, contrast: {:text, :surface}}
 
   def color_role(:text_muted),
-    do: %{id: :text_muted, slot: 0x7B, source: {:fields, [{:gutter, :fg}]}, contrast: nil}
+    do: %{
+      id: :text_muted,
+      slot: 0x7B,
+      source: {:fields, [{:gutter, :fg}]},
+      contrast: {:text, :surface}
+    }
 
   def color_role(:surface),
     do: %{id: :surface, slot: 0x7C, source: {:fields, [{:editor, :bg}]}, contrast: nil}
@@ -193,7 +198,12 @@ defmodule Minga.Design.Tokens do
     do: %{id: :surface_bar, slot: 0x7E, source: {:fields, [{:modeline, :bar_bg}]}, contrast: nil}
 
   def color_role(:border),
-    do: %{id: :border, slot: 0x7F, source: {:fields, [{:popup, :border_fg}]}, contrast: nil}
+    do: %{
+      id: :border,
+      slot: 0x7F,
+      source: {:fields, [{:popup, :border_fg}]},
+      contrast: {:glyph, :surface}
+    }
 
   def color_role(:focus),
     do: %{

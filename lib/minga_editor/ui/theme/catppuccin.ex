@@ -15,7 +15,7 @@ defmodule MingaEditor.UI.Theme.Catppuccin do
   @doc "Builds a full `MingaEditor.UI.Theme.t()` struct from a Catppuccin palette map."
   @spec build(atom(), map()) :: MingaEditor.UI.Theme.t()
   def build(name, p) do
-    Builder.from_palette(name, palette(name, p), overrides(p))
+    Builder.from_palette(name, palette(name, p), overrides(name, p))
   end
 
   @spec palette(atom(), map()) :: Palette.t()
@@ -78,11 +78,20 @@ defmodule MingaEditor.UI.Theme.Catppuccin do
   defp variant(:catppuccin_latte), do: :light
   defp variant(_name), do: :dark
 
-  @spec overrides(map()) :: map()
-  defp overrides(p) do
+  # Line numbers are secondary text, so they need 4.5:1 against `base`: overlay2 reaches it on the dark flavours and subtext1 on Latte. Latte's popup border also moves to overlay2 to reach 3:1.
+  @spec overrides(atom(), map()) :: map()
+  defp overrides(:catppuccin_latte, p) do
     %{
       syntax: syntax(p),
-      gutter: %{current_fg: p.lavender}
+      gutter: %{current_fg: p.lavender, fg: p.subtext1},
+      popup: %{border_fg: p.overlay2}
+    }
+  end
+
+  defp overrides(_name, p) do
+    %{
+      syntax: syntax(p),
+      gutter: %{current_fg: p.lavender, fg: p.overlay2}
     }
   end
 

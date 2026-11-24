@@ -114,6 +114,8 @@ means = "Primary text"
 id = "text_muted"
 slot = 0x7B
 source = "gutter.fg"
+contrast = "text"
+on = "surface"
 means = "Secondary text, line numbers, hints"
 
 [[color_roles]]
@@ -138,6 +140,8 @@ means = "The modeline"
 id = "border"
 slot = 0x7F
 source = "popup.border_fg"
+contrast = "glyph"
+on = "surface"
 means = "Quiet pane and popup borders"
 
 [[color_roles]]

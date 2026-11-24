@@ -30,7 +30,9 @@ defmodule MingaEditor.UI.Theme.OneLightTest do
     assert theme.editor.fg == p.mono_1
     assert theme.editor.selection_bg == p.syntax_selection
     assert theme.editor.cursorline_bg == p.syntax_selection
-    assert theme.gutter.fg == p.syntax_gutter
+
+    # Line numbers are lifted from syntax_gutter to reach the 4.5:1 text target (docs/design/themes.md).
+    assert theme.gutter.fg == p.mono_2
     assert theme.gutter.current_fg == p.mono_1
     assert theme.git.added_fg == p.hue_4
     assert theme.git.modified_fg == p.syntax_color_modified

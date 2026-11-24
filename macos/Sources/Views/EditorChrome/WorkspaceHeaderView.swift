@@ -290,7 +290,7 @@ public struct WorkspaceHeaderView: View {
         case .thinking, .executingTool: return theme.stateColor(SpineState.working)
         case .error: return theme.stateColor(SpineState.failed)
         case .planning, .approvalWaiting, .needsYou: return theme.stateColor(SpineState.needsYou)
-        case .idle, .unknown: return theme.tabInactiveFg
+        case .idle, .unknown: return theme.stateColor(SpineState.waiting)
         }
     }
 }
