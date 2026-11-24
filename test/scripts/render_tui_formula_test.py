@@ -23,19 +23,18 @@ class RenderTuiFormulaTest(unittest.TestCase):
         self.addCleanup(temporary.cleanup)
         root = Path(temporary.name)
         self.arm64 = root / "minga_macos_aarch64.tar.gz"
-        self.intel = root / "minga_macos_x86_64.tar.gz"
         self.dmg = root / "Minga.dmg"
         self.dmg.write_bytes(b"GUI disk image fixture")
         self.output = root / "Homebrew recipes"
-        for archive_path, data in ((self.arm64, b"arm launch fixture"), (self.intel, b"intel launch fixture")):
+        for archive_path, data in ((self.arm64, b"arm launch fixture"),):
             with tarfile.open(archive_path, "w:gz") as archive:
                 launcher = tarfile.TarInfo("minga/launchers/minga")
                 launcher.mode = 0o755
                 launcher.size = len(data)
                 archive.addfile(launcher, io.BytesIO(data))
 
-    def render(self, version=VERSION, arm64=None, intel=None, *, dmg=None, output=None):
-        args = [str(SCRIPT), "--arm64", str(arm64 or self.arm64), "--x86-64", str(intel or self.intel)]
+    def render(self, version=VERSION, arm64=None, *, dmg=None, output=None):
+        args = [str(SCRIPT), "--arm64", str(arm64 or self.arm64)]
         if version is not None:
             args += ["--version", version]
         if dmg is not None:
@@ -75,17 +74,17 @@ class RenderTuiFormulaTest(unittest.TestCase):
         self.assertEqual(result.stdout, "")
         self.assertIn(diagnostic, result.stderr)
 
-    def test_pins_both_architectures_to_the_explicit_release_and_final_bytes(self):
+    def test_pins_apple_silicon_to_the_explicit_release_and_final_bytes(self):
         result = self.render()
         self.assertEqual(result.returncode, 0, result.stderr)
         formula = result.stdout
         self.assertIn("class Minga < Formula\n", formula)
         self.assertIn(f'  version "{VERSION}"\n', formula)
-        for arch, archive in (("arm", self.arm64), ("intel", self.intel)):
-            with self.subTest(arch=arch):
-                sha256 = hashlib.sha256(archive.read_bytes()).hexdigest()
-                url = f"{RELEASE_URL}/v{VERSION}/{archive.name}"
-                self.assertIn(f'  on_{arch} do\n    url "{url}"\n    sha256 "{sha256}"\n  end\n', formula)
+        sha256 = hashlib.sha256(self.arm64.read_bytes()).hexdigest()
+        self.assertIn("  depends_on ArchRequirement => :arm64\n", formula)
+        self.assertIn(f'  url "{RELEASE_URL}/v{VERSION}/{self.arm64.name}"\n  sha256 "{sha256}"\n', formula)
+        self.assertNotIn("x86_64", formula)
+        self.assertNotIn("on_intel", formula)
         self.assertIn("  depends_on macos: :sequoia\n", formula)
         self.assertIn('    libexec.install Dir.children(".")\n    bin.install_symlink libexec/"launchers/minga"\n', formula)
         self.assertIn('    assert_equal "minga #{version}", shell_output("#{bin}/minga --version").strip\n', formula)
@@ -163,13 +162,15 @@ end'''
                 self.assert_rejected(result, "base-dev.N")
                 self.assertFalse(self.output.exists())
 
-    def test_rejects_an_archive_for_the_other_architecture(self):
-        self.assert_rejected(self.render(arm64=self.intel, intel=self.arm64), "expected minga_macos_aarch64.tar.gz")
+    def test_rejects_an_archive_for_another_architecture(self):
+        intel = self.arm64.with_name("minga_macos_x86_64.tar.gz")
+        shutil.copyfile(self.arm64, intel)
+        self.assert_rejected(self.render(arm64=intel), "expected minga_macos_aarch64.tar.gz")
 
-    def test_does_not_emit_a_partial_formula_when_the_second_archive_is_unavailable(self):
-        self.intel.unlink()
-        self.assert_rejected(self.render(), self.intel.name)
-        self.intel.touch()
+    def test_does_not_emit_a_formula_when_the_archive_is_unavailable(self):
+        self.arm64.unlink()
+        self.assert_rejected(self.render(), self.arm64.name)
+        self.arm64.touch()
         self.assert_rejected(self.render(), "not a nonempty archive file")
 
     def test_requires_dmg_and_output_together(self):

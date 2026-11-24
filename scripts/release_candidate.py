@@ -16,13 +16,21 @@ import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-MANIFEST_VERSION = 2
+# Stable manifests: version 2 also carried an Intel macOS tarball; version 5 does not.
+INTEL_MANIFEST_VERSION = 2
+MANIFEST_VERSION = 5
 PAYLOADS = {
     "Minga.dmg": {"os": "macos", "arch": "aarch64"},
     "minga_macos_aarch64.tar.gz": {"os": "macos", "arch": "aarch64"},
-    "minga_macos_x86_64.tar.gz": {"os": "macos", "arch": "x86_64"},
     "minga_linux_x86_64.tar.gz": {"os": "linux", "arch": "x86_64"},
     "minga_linux_aarch64.tar.gz": {"os": "linux", "arch": "aarch64"},
+}
+INTEL_PAYLOADS = {
+    "Minga.dmg": PAYLOADS["Minga.dmg"],
+    "minga_macos_aarch64.tar.gz": PAYLOADS["minga_macos_aarch64.tar.gz"],
+    "minga_macos_x86_64.tar.gz": {"os": "macos", "arch": "x86_64"},
+    "minga_linux_x86_64.tar.gz": PAYLOADS["minga_linux_x86_64.tar.gz"],
+    "minga_linux_aarch64.tar.gz": PAYLOADS["minga_linux_aarch64.tar.gz"],
 }
 # The former wrapper inventory is accepted by verification, never by creation.
 LEGACY_PAYLOADS = {
@@ -33,7 +41,7 @@ LEGACY_PAYLOADS = {
     "minga_linux_aarch64": {"os": "linux", "arch": "aarch64"},
 }
 TOOLCHAIN_KEYS = {"elixir": "elixir", "erlang": "otp", "golang": "go", "zig": "native_zig"}
-MANIFEST_PAYLOADS = {1: LEGACY_PAYLOADS, MANIFEST_VERSION: PAYLOADS}
+MANIFEST_PAYLOADS = {1: LEGACY_PAYLOADS, INTEL_MANIFEST_VERSION: INTEL_PAYLOADS, MANIFEST_VERSION: PAYLOADS}
 # Rolling manifests: version 3 carried only Apple Silicon; version 4 adds both Linux tarballs.
 HOMEBREW_MANIFEST_VERSION = 3
 ROLLING_MANIFEST_VERSION = 4
@@ -163,7 +171,7 @@ def validate_artifacts(artifacts, context, labels):
 
 def verification_artifacts(artifacts, context):
     """Select one complete supported generation inventory, never mixed formats."""
-    schemas = (HOMEBREW_MANIFEST_VERSION, ROLLING_MANIFEST_VERSION) if "channel" in context else (1, MANIFEST_VERSION)
+    schemas = (HOMEBREW_MANIFEST_VERSION, ROLLING_MANIFEST_VERSION) if "channel" in context else (1, INTEL_MANIFEST_VERSION, MANIFEST_VERSION)
     require(isinstance(artifacts, list) and any(len(artifacts) == len(MANIFEST_PAYLOADS[schema]) + 2 for schema in schemas),
             "missing, duplicate or unexpected artifacts")
     by_name = artifact_inventory(artifacts, context)

@@ -9,7 +9,6 @@ from pathlib import Path
 
 REPOSITORY = "https://github.com/jsmestad/minga"
 ARM64_ASSET = "minga_macos_aarch64.tar.gz"
-INTEL_ASSET = "minga_macos_x86_64.tar.gz"
 DMG_ASSET = "Minga.dmg"
 
 
@@ -31,26 +30,14 @@ def release_url(display_version, asset):
     return f"{REPOSITORY}/releases/download/v{display_version}/{asset}"
 
 
-def render_formula(display_version, package_version, arm64_sha, intel_sha):
-    arm64_asset = ARM64_ASSET
-    architecture = f'''  on_arm do
-    url "{release_url(display_version, arm64_asset)}"
-    sha256 "{arm64_sha}"
-  end
-
-  on_intel do
-    url "{release_url(display_version, INTEL_ASSET)}"
-    sha256 "{intel_sha}"
-  end'''
-    expected_version = "#{version}"
-    if package_version != display_version:
-        arm64_asset = f"minga_{display_version}_macos_aarch64.tar.gz"
-    if intel_sha is None:
-        architecture = f'''  depends_on ArchRequirement => :arm64
+def render_formula(display_version, package_version, arm64_sha):
+    # Rolling releases name their assets with the version; stable releases keep the plain name.
+    arm64_asset = ARM64_ASSET if package_version == display_version else f"minga_{display_version}_macos_aarch64.tar.gz"
+    architecture = f'''  depends_on ArchRequirement => :arm64
 
   url "{release_url(display_version, arm64_asset)}"
   sha256 "{arm64_sha}"'''
-        expected_version = display_version
+    expected_version = "#{version}" if package_version == display_version else display_version
     return f'''# frozen_string_literal: true
 
 class Minga < Formula
@@ -128,7 +115,6 @@ def main():
     )
     parser.add_argument("--version", required=True, help="release version without the v prefix (e.g. 0.1.0 or 0.1.0-dev.42)")
     parser.add_argument("--arm64", required=True, type=Path, metavar="ARCHIVE", help=ARM64_ASSET)
-    parser.add_argument("--x86-64", type=Path, metavar="ARCHIVE", help="required for stable recipes only")
     parser.add_argument("--dmg", type=Path, metavar="PATH", help=DMG_ASSET)
     parser.add_argument("--output", metavar="DIRECTORY", help="write minga.rb and minga-mac.rb without overwriting files")
     args = parser.parse_args()
@@ -152,8 +138,7 @@ def main():
 
     try:
         arm64_sha = asset_digest(args.arm64, ARM64_ASSET)
-        intel_sha = asset_digest(args.x86_64, INTEL_ASSET) if args.x86_64 and package_version == display_version else None
-        formula = render_formula(display_version, package_version, arm64_sha, intel_sha)
+        formula = render_formula(display_version, package_version, arm64_sha)
         if args.dmg is None:
             print(formula, end="")
         else:
