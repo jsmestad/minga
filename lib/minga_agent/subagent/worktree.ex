@@ -58,10 +58,117 @@ defmodule MingaAgent.Subagent.Worktree do
     end
   end
 
+  @typedoc "A single file change in a worktree: action and relative path."
+  @type change :: {:added | :modified | :deleted, String.t()}
+
   @doc "Formats the location and branch metadata for a preserved worktree."
   @spec metadata(t()) :: String.t()
   def metadata(%__MODULE__{} = worktree) do
     "\n\nWorktree: #{worktree.path}\nBranch: #{worktree.branch}"
+  end
+
+  @doc "Collects structured file changes from a worktree relative to its base SHA."
+  @spec collect_changes(t()) :: {:ok, [change()]} | {:error, String.t()}
+  def collect_changes(%__MODULE__{} = worktree) do
+    with {:ok, committed} <- committed_changes(worktree),
+         {:ok, uncommitted} <- uncommitted_changes(worktree) do
+      {:ok, merge_changes(committed, uncommitted)}
+    end
+  end
+
+  @doc "Collects changes from a worktree path and base SHA using the system backend."
+  @spec collect_changes_from(String.t(), String.t()) :: {:ok, [change()]} | {:error, String.t()}
+  def collect_changes_from(worktree_path, base_sha)
+      when is_binary(worktree_path) and is_binary(base_sha) do
+    with {:ok, committed} <- git_diff(worktree_path, base_sha, "HEAD"),
+         {:ok, uncommitted} <- git_diff(worktree_path, "HEAD", nil) do
+      {:ok, merge_changes(committed, uncommitted)}
+    end
+  end
+
+  @doc "Reads the content of a changed file from the worktree."
+  @spec read_file(t(), String.t()) :: {:ok, binary()} | {:error, String.t()}
+  def read_file(%__MODULE__{path: wt_path}, relative_path) do
+    full_path = Path.join(wt_path, relative_path)
+
+    case File.read(full_path) do
+      {:ok, content} -> {:ok, content}
+      {:error, reason} -> {:error, "Failed to read #{relative_path}: #{inspect(reason)}"}
+    end
+  end
+
+  @doc "Reads the base version of a file from the worktree's base SHA."
+  @spec read_base_file(t(), String.t()) :: {:ok, binary()} | {:error, String.t()}
+  def read_base_file(%__MODULE__{} = worktree, relative_path) do
+    case output(worktree, worktree.path, ["show", "#{worktree.base_sha}:#{relative_path}"]) do
+      {:ok, content} -> {:ok, content}
+      {:error, _reason} -> {:error, "File #{relative_path} not in base revision"}
+    end
+  end
+
+  @spec git_diff(String.t(), String.t(), String.t() | nil) ::
+          {:ok, [change()]} | {:error, String.t()}
+  defp git_diff(cwd, from, nil) do
+    case System.run(cwd, ["diff", "--name-status", from], []) do
+      {:ok, ""} -> {:ok, []}
+      {:ok, output} -> {:ok, parse_name_status(output)}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp git_diff(cwd, from, to) do
+    case System.run(cwd, ["diff", "--name-status", from, to], []) do
+      {:ok, ""} -> {:ok, []}
+      {:ok, output} -> {:ok, parse_name_status(output)}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  @spec committed_changes(t()) :: {:ok, [change()]} | {:error, String.t()}
+  defp committed_changes(%__MODULE__{} = worktree) do
+    case output(worktree, worktree.path, [
+           "diff",
+           "--name-status",
+           worktree.base_sha,
+           "HEAD"
+         ]) do
+      {:ok, ""} -> {:ok, []}
+      {:ok, diff_output} -> {:ok, parse_name_status(diff_output)}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  @spec uncommitted_changes(t()) :: {:ok, [change()]} | {:error, String.t()}
+  defp uncommitted_changes(%__MODULE__{} = worktree) do
+    case output(worktree, worktree.path, ["diff", "--name-status", "HEAD"]) do
+      {:ok, ""} -> {:ok, []}
+      {:ok, diff_output} -> {:ok, parse_name_status(diff_output)}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  @spec parse_name_status(String.t()) :: [change()]
+  defp parse_name_status(output) do
+    output
+    |> String.split("\n", trim: true)
+    |> Enum.map(fn line ->
+      case String.split(line, "\t", parts: 2) do
+        ["A", path] -> {:added, path}
+        ["M", path] -> {:modified, path}
+        ["D", path] -> {:deleted, path}
+        [status, path] when byte_size(status) > 0 -> {:modified, path}
+        _ -> nil
+      end
+    end)
+    |> Enum.reject(&is_nil/1)
+  end
+
+  @spec merge_changes([change()], [change()]) :: [change()]
+  defp merge_changes(committed, uncommitted) do
+    committed_map = Map.new(committed, fn {action, path} -> {path, action} end)
+    uncommitted_map = Map.new(uncommitted, fn {action, path} -> {path, action} end)
+    merged = Map.merge(committed_map, uncommitted_map)
+    Enum.map(merged, fn {path, action} -> {action, path} end)
   end
 
   @spec git_root(String.t(), module(), keyword()) :: {:ok, String.t()} | {:error, String.t()}

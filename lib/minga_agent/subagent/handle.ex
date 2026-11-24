@@ -7,6 +7,9 @@ defmodule MingaAgent.Subagent.Handle do
 
   @type status :: :running | :completed | :failed | :cancelled | :interrupted
 
+  @typedoc "A file change produced by a child worktree."
+  @type change :: MingaAgent.Subagent.Worktree.change()
+
   @enforce_keys [:session_id, :pid, :task, :started_at]
   defstruct [
     :session_id,
@@ -16,10 +19,13 @@ defmodule MingaAgent.Subagent.Handle do
     :task,
     :model,
     :started_at,
+    :worktree_path,
+    :worktree_base_sha,
     status: :running,
     result: nil,
     completed_at: nil,
-    generation: 1
+    generation: 1,
+    changes: nil
   ]
 
   @type t :: %__MODULE__{
@@ -30,10 +36,13 @@ defmodule MingaAgent.Subagent.Handle do
           task: String.t(),
           model: String.t() | nil,
           started_at: DateTime.t(),
+          worktree_path: String.t() | nil,
+          worktree_base_sha: String.t() | nil,
           status: status(),
           result: String.t() | nil,
           completed_at: DateTime.t() | nil,
-          generation: pos_integer()
+          generation: pos_integer(),
+          changes: [change()] | nil
         }
 
   @doc "Creates a background sub-agent handle."
@@ -88,6 +97,19 @@ defmodule MingaAgent.Subagent.Handle do
   @spec next_generation(t()) :: t()
   def next_generation(%__MODULE__{generation: gen} = handle) do
     %{handle | generation: gen + 1}
+  end
+
+  @doc "Sets the worktree metadata on a handle."
+  @spec with_worktree(t(), String.t(), String.t()) :: t()
+  def with_worktree(%__MODULE__{} = handle, path, base_sha)
+      when is_binary(path) and is_binary(base_sha) do
+    %{handle | worktree_path: path, worktree_base_sha: base_sha}
+  end
+
+  @doc "Records the collected change manifest on a finalized handle."
+  @spec with_changes(t(), [change()]) :: t()
+  def with_changes(%__MODULE__{} = handle, changes) when is_list(changes) do
+    %{handle | changes: changes}
   end
 
   @doc "Returns a copy of the handle with a different pid."

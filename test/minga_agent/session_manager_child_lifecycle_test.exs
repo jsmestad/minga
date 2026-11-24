@@ -299,6 +299,37 @@ defmodule MingaAgent.SessionManagerChildLifecycleTest do
     end
   end
 
+  describe "worktree metadata on handle" do
+    test "handle stores worktree path and base SHA", %{manager: manager} do
+      {_parent_id, parent_pid} = start_parent(manager)
+
+      {:ok, handle} =
+        SessionManager.start_background_subagent(
+          manager,
+          parent_pid,
+          "worktree child",
+          session_opts: [
+            provider: Minga.Test.StubProvider,
+            provider_opts: [],
+            persist?: false
+          ],
+          worktree_path: "/tmp/fake-worktree",
+          worktree_base_sha: "abc123"
+        )
+
+      assert handle.worktree_path == "/tmp/fake-worktree"
+      assert handle.worktree_base_sha == "abc123"
+    end
+
+    test "handle without worktree has nil path and SHA", %{manager: manager} do
+      {_parent_id, parent_pid} = start_parent(manager)
+      child_handle = start_child(manager, parent_pid)
+
+      assert child_handle.worktree_path == nil
+      assert child_handle.worktree_base_sha == nil
+    end
+  end
+
   describe "Handle transitions" do
     test "interrupt/2 marks a running handle as interrupted" do
       handle =
@@ -345,6 +376,34 @@ defmodule MingaAgent.SessionManagerChildLifecycleTest do
       assert_raise FunctionClauseError, fn ->
         apply(Handle, :complete, [completed, "again"])
       end
+    end
+
+    test "with_worktree/3 sets worktree metadata" do
+      handle =
+        Handle.new(
+          session_id: "test-1",
+          pid: self(),
+          task: "test task",
+          started_at: DateTime.utc_now()
+        )
+
+      updated = Handle.with_worktree(handle, "/tmp/wt", "deadbeef")
+      assert updated.worktree_path == "/tmp/wt"
+      assert updated.worktree_base_sha == "deadbeef"
+    end
+
+    test "with_changes/2 records change manifest" do
+      handle =
+        Handle.new(
+          session_id: "test-1",
+          pid: self(),
+          task: "test task",
+          started_at: DateTime.utc_now()
+        )
+
+      changes = [{:added, "lib/new.ex"}, {:modified, "lib/old.ex"}, {:deleted, "lib/gone.ex"}]
+      updated = Handle.with_changes(handle, changes)
+      assert updated.changes == changes
     end
 
     test "fail/2 only transitions from :running" do

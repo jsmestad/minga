@@ -234,6 +234,71 @@ defmodule MingaAgent.SessionManager do
     GenServer.call(manager, {:get_child_result, session_id})
   end
 
+  @doc """
+  Integrates a completed child's worktree changes into a parent changeset.
+
+  Reads each changed file from the child worktree, applies it to `changeset_pid`
+  through `MingaAgent.Changeset.write_file/3` or `MingaAgent.Changeset.delete_file/2`,
+  then runs `MingaAgent.Changeset.preflight_merge/1` to check for conflicts before
+  committing the merge.
+
+  Returns `{:ok, results}` for a clean integration, `{:conflict, details}` when the
+  parent workspace diverged, or `{:error, reason}` for missing handles or no changes.
+  """
+  @spec integrate_child_changes(GenServer.server(), String.t(), pid()) ::
+          {:ok, [tuple()]} | {:conflict, map()} | {:error, term()}
+  def integrate_child_changes(manager, child_session_id, changeset_pid)
+      when is_binary(child_session_id) and is_pid(changeset_pid) do
+    case get_child_result(manager, child_session_id) do
+      {:ok, %Handle{changes: nil}} ->
+        {:error, :no_changes}
+
+      {:ok, %Handle{changes: []}} ->
+        {:error, :no_changes}
+
+      {:ok, %Handle{} = handle} ->
+        apply_child_changes(handle, changeset_pid)
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  @spec apply_child_changes(Handle.t(), pid()) ::
+          {:ok, [tuple()]} | {:conflict, map()} | {:error, term()}
+  defp apply_child_changes(%Handle{changes: changes, worktree_path: wt_path}, changeset_pid) do
+    alias MingaAgent.Changeset
+
+    results =
+      Enum.map(changes, fn
+        {:deleted, path} ->
+          case Changeset.delete_file(changeset_pid, path) do
+            :ok -> {:ok, path, :deleted}
+            {:error, reason} -> {:error, path, reason}
+          end
+
+        {_action, path} ->
+          case File.read(Path.join(wt_path, path)) do
+            {:ok, content} ->
+              case Changeset.write_file(changeset_pid, path, content) do
+                :ok -> {:ok, path, :written}
+                {:error, reason} -> {:error, path, reason}
+              end
+
+            {:error, reason} ->
+              {:error, path, reason}
+          end
+      end)
+
+    errors = Enum.filter(results, &match?({:error, _, _}, &1))
+
+    if errors == [] do
+      Changeset.preflight_merge(changeset_pid)
+    else
+      {:error, {:apply_failed, errors}}
+    end
+  end
+
   @doc "Stops a session by its human-readable ID."
   @spec stop_session(String.t()) :: :ok | {:error, :not_found}
   def stop_session(session_id) when is_binary(session_id) do
@@ -823,6 +888,15 @@ defmodule MingaAgent.SessionManager do
             started_at: DateTime.utc_now()
           )
 
+        handle =
+          case {Keyword.get(opts, :worktree_path), Keyword.get(opts, :worktree_base_sha)} do
+            {path, sha} when is_binary(path) and is_binary(sha) ->
+              Handle.with_worktree(handle, path, sha)
+
+            _ ->
+              handle
+          end
+
         new_state = %{
           new_state
           | background_subagents: Map.put(new_state.background_subagents, session_id, handle)
@@ -1213,6 +1287,7 @@ defmodule MingaAgent.SessionManager do
             other -> Handle.fail(handle, other)
           end
 
+        updated_handle = collect_worktree_changes(updated_handle)
         notify_parent_of_child_completion(updated_handle)
 
         %{
@@ -1222,6 +1297,17 @@ defmodule MingaAgent.SessionManager do
 
       _ ->
         state
+    end
+  end
+
+  @spec collect_worktree_changes(Handle.t()) :: Handle.t()
+  defp collect_worktree_changes(%Handle{worktree_path: nil} = handle), do: handle
+
+  defp collect_worktree_changes(%Handle{worktree_path: path, worktree_base_sha: sha} = handle)
+       when is_binary(path) and is_binary(sha) do
+    case MingaAgent.Subagent.Worktree.collect_changes_from(path, sha) do
+      {:ok, changes} -> Handle.with_changes(handle, changes)
+      {:error, _reason} -> handle
     end
   end
 

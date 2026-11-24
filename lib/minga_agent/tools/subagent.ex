@@ -79,7 +79,11 @@ defmodule MingaAgent.Tools.Subagent do
 
     case Worktree.create(project_root, worktree_opts(opts)) do
       {:ok, worktree} ->
-        child_opts = Keyword.put(opts, :project_root, worktree.path)
+        child_opts =
+          opts
+          |> Keyword.put(:project_root, worktree.path)
+          |> Keyword.put(:worktree_path, worktree.path)
+          |> Keyword.put(:worktree_base_sha, worktree.base_sha)
 
         case do_start_background(task, child_opts) do
           {:ok, result} -> {:ok, result <> Worktree.metadata(worktree)}
@@ -97,19 +101,22 @@ defmodule MingaAgent.Tools.Subagent do
     parent_session = Keyword.get(opts, :parent_session)
     model = Keyword.get(opts, :model)
 
-    with {:ok, session_opts} <- session_opts(opts),
-         {:ok, %Handle{} = handle} <-
-           SessionManager.start_background_subagent(manager, parent_session, task,
-             session_opts: session_opts,
-             model: model
-           ) do
-      {:ok, background_result(handle)}
+    with {:ok, session_opts} <- session_opts(opts) do
+      sm_opts =
+        [session_opts: session_opts, model: model]
+        |> maybe_put(:worktree_path, Keyword.get(opts, :worktree_path))
+        |> maybe_put(:worktree_base_sha, Keyword.get(opts, :worktree_base_sha))
+
+      case SessionManager.start_background_subagent(manager, parent_session, task, sm_opts) do
+        {:ok, %Handle{} = handle} ->
+          {:ok, background_result(handle)}
+
+        {:error, reason} ->
+          {:error, "Failed to start background subagent: #{inspect(reason)}"}
+      end
     else
       {:error, {:provider_resolution_failed, reason}} ->
         {:error, "Failed to resolve subagent provider: #{reason}"}
-
-      {:error, reason} ->
-        {:error, "Failed to start background subagent: #{inspect(reason)}"}
     end
   end
 
