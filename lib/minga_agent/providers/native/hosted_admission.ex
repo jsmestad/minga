@@ -47,8 +47,9 @@ defmodule MingaAgent.Providers.Native.HostedAdmission do
       when is_integer(output_tokens) and output_tokens > 0 and is_list(tools) and
              is_function(authorize, 2) do
     tool_schemas = Enum.map(tools, &ReqLLM.Tool.to_schema(&1, schema_format(provider)))
-    digest = :crypto.hash(:sha256, encode(messages, tool_schemas))
-    tokens = measured_tokens(messages, tool_schemas, Map.get(@image_token_bounds, provider))
+    body = encode(messages, tool_schemas)
+    digest = :crypto.hash(:sha256, body)
+    tokens = measured_tokens(body, messages, tool_schemas, Map.get(@image_token_bounds, provider))
     evidence = RequestCapacity.assess(limits, {:upper_bound, tokens}, {:encoded, output_tokens})
 
     case authorize.(digest, evidence) do
@@ -84,11 +85,10 @@ defmodule MingaAgent.Providers.Native.HostedAdmission do
   end
 
   # With a documented per-image bound, images are measured as that bound instead of their bytes.
-  @spec measured_tokens([term()], [map()], pos_integer() | nil) :: non_neg_integer()
-  defp measured_tokens(messages, tool_schemas, nil),
-    do: upper_bound_tokens(encode(messages, tool_schemas))
+  @spec measured_tokens(binary(), [term()], [map()], pos_integer() | nil) :: non_neg_integer()
+  defp measured_tokens(body, _messages, _tool_schemas, nil), do: upper_bound_tokens(body)
 
-  defp measured_tokens(messages, tool_schemas, image_bound) do
+  defp measured_tokens(_body, messages, tool_schemas, image_bound) do
     {messages, images} = Enum.map_reduce(messages, 0, &strip_images/2)
     upper_bound_tokens(encode(messages, tool_schemas)) + images * image_bound
   end
