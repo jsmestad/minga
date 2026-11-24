@@ -459,6 +459,14 @@ defmodule MingaAgent.Changeset.Server do
     {:stop, :normal, :ok, state}
   end
 
+  # A buffer fork draft is staged state that changes outside this process and without a revision.
+  # The observer must still learn of the change so it can save the draft.
+  @impl GenServer
+  def handle_cast(:fork_draft_changed, state) do
+    notify_observer(state)
+    {:noreply, state}
+  end
+
   @impl GenServer
   def terminate(_reason, %{overlay: %Overlay{} = overlay}) do
     Overlay.cleanup(overlay)

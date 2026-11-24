@@ -7458,13 +7458,13 @@ defmodule MingaAgent.Session do
        ),
        do:
          {:file_edit_proposed,
-          %{
-            path: path,
-            before_content: before_content,
-            after_content: after_content,
-            tool_call_id: tool_call_id,
-            tool_name: tool_name
-          }}
+          EventLog.FileEditPayload.new(
+            path,
+            before_content,
+            after_content,
+            tool_call_id,
+            tool_name
+          )}
 
   defp event_log_entry({:approval_pending, %PublicApproval{target: target} = approval}) do
     {:approval_requested,
