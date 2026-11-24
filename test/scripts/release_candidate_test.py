@@ -43,7 +43,7 @@ class ReleaseCandidateTest(unittest.TestCase):
 
     def write_source_pins(self, go_version):
         self.source_tool_versions.write_text(
-            f"erlang 29.1.2\nelixir 1.20.5-otp-29\nzig 0.16.0\ngolang {go_version}\n"
+            f"erlang 29.1.3\nelixir 1.20.5-otp-29\nzig 0.16.0\ngolang {go_version}\n"
         )
 
     def prepare_candidate(self, go_version):
@@ -53,16 +53,16 @@ class ReleaseCandidateTest(unittest.TestCase):
         self.builds = {}
         # Build facts cover the historical Intel payload too; only current payloads are uploaded.
         for filename, target in candidate.INTEL_PAYLOADS.items():
-            tools = {"elixir": "1.20.5-otp-29", "otp": "29.1.2", "go": go_version, "native_zig": "0.16.0"}
+            tools = {"elixir": "1.20.5-otp-29", "otp": "29.1.3", "go": go_version, "native_zig": "0.16.0"}
             ids = ["package-contents", "native-architecture", "package-boot"]
             if filename == "Minga.dmg":
                 ids += ["signature", "notarization", "stapling"]
                 tools["xcode"] = "26.3"
             else:
                 ids.append("package-runtime-abi")
-                tools.update(python="3.14.10", erts="17.1.1", host_erts_arch=target["arch"] + "-fixture",
+                tools.update(python="3.14.10", erts="17.1.2", host_erts_arch=target["arch"] + "-fixture",
                              erts_source={"version": 2, "kind": "local-source-build", **target,
-                                          "otp_version": tools["otp"], "erts_version": "17.1.1"})
+                                          "otp_version": tools["otp"], "erts_version": "17.1.2"})
             build = {
                 "schema_version": 1, "context": dict(self.context),
                 "filename": filename, "target": target, "toolchains": tools,

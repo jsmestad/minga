@@ -360,14 +360,14 @@ class ReleaseContentsTest(unittest.TestCase):
         minimum = None if is_linux else "15.0"
         interpreters = {"x86_64": "/lib64/ld-linux-x86-64.so.2", "aarch64": "/lib/ld-linux-aarch64.so.1"}
         receipt = {"version": 2, "kind": "local-source-build", "os": os_name, "arch": arch,
-                   "otp_version": "29.1.2", "erts_version": "17.1.1", "minimum_macos": minimum,
+                   "otp_version": "29.1.3", "erts_version": "17.1.2", "minimum_macos": minimum,
                    "abi": {"interpreter": interpreters[arch] if is_linux else None,
                            "external_dependencies": [], "minimum_macos": minimum}}
         if is_linux:
             receipt["build_environment"] = {"kind": "native-ubuntu", "host_arch": arch, "os_id": "ubuntu",
                                             "os_version": "24.04", "glibc_version": "2.39", "cc_version": "gcc fixture"}
             receipt["abi"]["external_dependencies"] = [
-                {"file": f"erts-17.1.1/bin/{name}", "libraries": ["libc.so.6"]}
+                {"file": f"erts-17.1.2/bin/{name}", "libraries": ["libc.so.6"]}
                 for name in ("beam.smp", "erlexec")
             ]
         path = self.root / "runtime-receipt.json"
@@ -379,8 +379,6 @@ class ReleaseContentsTest(unittest.TestCase):
         arch = {"arm64": "aarch64", "aarch64": "aarch64", "x86_64": "x86_64"}[platform.machine()]
         self.target = f"{os_name}_{arch}"
         self.fixture(self.target)
-        (self.release / "erts-17.1.2").rename(self.release / "erts-17.1.1")
-        self.put(self.release / "releases/start_erl.data", b"17.1.1 0.1.0\n")
         source = self.put(self.root / "native.c", b'#include <stdio.h>\nint main(void) { puts("native ABI fixture"); return 0; }\n')
         binary = self.root / "native"
         command = ["cc", str(source), "-o", str(binary)]
@@ -389,7 +387,7 @@ class ReleaseContentsTest(unittest.TestCase):
         compiled = subprocess.run(command, capture_output=True, text=True, timeout=20)
         self.assertEqual(compiled.returncode, 0, compiled.stderr)
         sqlite = self.release / "lib/exqlite-0.27/priv/sqlite3_nif.so"
-        for path in [self.release / "erts-17.1.1/bin/beam.smp", self.release / "erts-17.1.1/bin/erlexec",
+        for path in [self.release / "erts-17.1.2/bin/beam.smp", self.release / "erts-17.1.2/bin/erlexec",
                      *(self.priv / name for name in ("minga-renderer-go", "minga-parser", "minga-hook-runner", "minga-shell-output-reader"))]:
             shutil.copy2(binary, path)
         if os_name == "linux":
@@ -458,7 +456,7 @@ class ReleaseContentsTest(unittest.TestCase):
     def test_linux_final_bytes_reject_wrong_loader_and_build_root_search_path(self):
         self.native_fixture()
         receipt = self.runtime_receipt()
-        beam = self.release / "erts-17.1.1/bin/beam.smp"
+        beam = self.release / "erts-17.1.2/bin/beam.smp"
         for option, expected in (("--dynamic-linker=/tmp/private-loader.so", "unqualified glibc interpreter"),
                                  ("-rpath,/opt/build-libs", "native library search path")):
             with self.subTest(option=option):
