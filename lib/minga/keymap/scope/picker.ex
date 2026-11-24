@@ -2,9 +2,9 @@ defmodule Minga.Keymap.Scope.Picker do
   @moduledoc """
   Keymap scope for pickers: find file, project search, the buffer switcher and every other list with a query.
 
-  Typing edits the query, so the scope binds only the established picker conventions (`docs/design/keys.md`): `⌃J` / `⌃K` and the arrows move, `↩` opens the selection, `esc` closes, `Tab` completes, `PageUp` / `PageDown` page, `⌃.` opens the act menu on the highlighted row, and `⌃V` opens a location in a vertical split. The tries come from `Minga.Keymap.PromptKeys`.
+  Typing edits the query, so the scope binds only the established picker conventions (`docs/design/keys.md`): `⌃J` / `⌃K` and the arrows move, `↩` opens the selection, `esc` closes, `Tab` completes, `PageUp` / `PageDown` page, `⌃.` opens the act menu on the highlighted row, and `⌃V` opens the highlighted buffer in a vertical split. The tries come from `Minga.Keymap.PromptKeys`.
 
-  Pickers always take text, so only the `:insert` vim state has bindings; the CUA profile never applies to a live prompt. `MingaEditor.PickerUI` resolves keys here before it edits the query, and passes `picker_split: true` in the context when the source opens a location.
+  Pickers always take text, so only the `:insert` vim state has bindings; the CUA profile never applies to a live prompt. `MingaEditor.PickerUI` resolves keys here before it edits the query, and passes `picker_split: true` in the context when the source shows its selection in the focused window (`MingaEditor.UI.Picker.Source.opens_in_window?/2`).
   """
 
   use Minga.Keymap.Scope.Builder,

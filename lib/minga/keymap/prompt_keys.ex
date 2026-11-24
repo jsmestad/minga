@@ -2,7 +2,7 @@ defmodule Minga.Keymap.PromptKeys do
   @moduledoc """
   The keys of live prompts: pickers, minibuffer prompts and the `:` command line.
 
-  While a prompt has focus, typing always edits the query, so the only bindings are the established list and picker conventions from `docs/design/keys.md`: `⌃J` / `⌃K` and the arrows move through the list, `↩` runs the selection, `esc` closes, `Tab` completes, and pickers add `⌃V` (open in a split) and `⌃.` (act menu on the highlighted row). Everything else is text editing, owned by the field: printable keys insert, and `⌃A`, `⌃E`, `⌃H`, `⌃W`, `⌃U` and `⌃K` (where `⌃K` is not list movement) edit the line through `Minga.Editing.LineEdit`.
+  While a prompt has focus, typing always edits the query, so the only bindings are the established list and picker conventions from `docs/design/keys.md`: `⌃J` / `⌃K` and the arrows move through the list, `↩` runs the selection, `esc` closes, `Tab` completes, and pickers add `⌃V` (open in a split, for the buffer switcher) and `⌃.` (act menu on the highlighted row). Everything else is text editing, owned by the field: printable keys insert, and `⌃A`, `⌃E`, `⌃H`, `⌃W`, `⌃U` and `⌃K` (where `⌃K` is not list movement) edit the line through `Minga.Editing.LineEdit`.
 
   The tries are pure data so the `:` command line (`Minga.Mode.Command`) can resolve them directly. `Minga.Keymap.Scope.Picker` and `Minga.Keymap.Scope.Prompt` publish the same tries as keymap scopes, which is how which-key, user overrides and the key-grammar guard see them.
   """
@@ -79,7 +79,7 @@ defmodule Minga.Keymap.PromptKeys do
   @doc """
   Returns the picker trie.
 
-  Pass `split: true` when the picker's source opens a location, so `⌃V` can open the selection in a vertical split.
+  Pass `split: true` when the picker's source shows its selection in the focused window (the buffer switcher), so `⌃V` can open the selection in a vertical split.
   """
   @spec picker_trie([picker_option()]) :: Bindings.node_t()
   def picker_trie(opts \\ []) do

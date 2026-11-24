@@ -66,7 +66,7 @@ defmodule MingaEditor.UI.Picker.Source do
   @doc """
   Allows a source to navigate in the current picker or reject a stale selection before close.
 
-  `{:stay_open, {:nested, child_source, child_context}}` opens `child_source` as a child picker in the same modal. Escape or `C-g` in the child returns to this picker with its query and selection; selecting a child item closes both.
+  `{:stay_open, {:nested, child_source, child_context}}` opens `child_source` as a child picker in the same modal. Escape in the child returns to this picker with its query and selection; selecting a child item closes both.
   """
   @callback selection_disposition(Picker.item(), term()) :: selection_disposition()
 
@@ -154,11 +154,11 @@ defmodule MingaEditor.UI.Picker.Source do
   @callback keep_open_on_select?() :: boolean()
 
   @doc """
-  Whether selecting an item opens a location (a file, buffer or position) in the active window.
+  Whether selecting an item shows it in the focused window, as switching buffers does.
 
-  Defaults to `false`. When `true`, the picker binds `⌃V` to open the highlighted item in a new vertical split: the picker closes, the window splits, and `on_select/2` runs in the new window.
+  Defaults to `false`. When `true`, the picker binds `⌃V` to open the highlighted item in a vertical split: the picker closes, the window splits, `on_select/2` shows the item in the focused window, and the other window keeps what it showed. A source whose selection opens a new tab must not set it, or the split would stay behind in the old tab.
   """
-  @callback opens_location?() :: boolean()
+  @callback opens_in_window?() :: boolean()
 
   @doc """
   Whether this source fetches candidates asynchronously.
@@ -218,7 +218,7 @@ defmodule MingaEditor.UI.Picker.Source do
     on_bulk_action: 3,
     layout: 0,
     keep_open_on_select?: 0,
-    opens_location?: 0,
+    opens_in_window?: 0,
     async?: 0,
     async_fetch: 1,
     enrich: 1,
@@ -507,11 +507,11 @@ defmodule MingaEditor.UI.Picker.Source do
     end
   end
 
-  @doc "Returns whether a source's selection opens a location, so `⌃V` can open it in a split."
-  @spec opens_location?(module(), ContributionCleanup.contribution_source() | nil) :: boolean()
-  def opens_location?(module, source \\ nil) do
-    if exported?(module, :opens_location?, 0) do
-      invoke_value(module, :opens_location?, [], source, &is_boolean/1, false)
+  @doc "Returns whether a source's selection shows in the focused window, so `⌃V` can open it in a split."
+  @spec opens_in_window?(module(), ContributionCleanup.contribution_source() | nil) :: boolean()
+  def opens_in_window?(module, source \\ nil) do
+    if exported?(module, :opens_in_window?, 0) do
+      invoke_value(module, :opens_in_window?, [], source, &is_boolean/1, false)
     else
       false
     end

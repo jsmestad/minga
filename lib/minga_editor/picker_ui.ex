@@ -814,12 +814,12 @@ defmodule MingaEditor.PickerUI do
 
   def handle_key(state, _cp, _mods), do: state
 
-  @doc "Returns the keymap context for the open picker: `⌃V` is bound only when its source opens a location."
+  @doc "Returns the keymap context for the open picker: `⌃V` is bound only when its source shows the selection in the focused window."
   @spec picker_keymap_context(state(), PickerState.t()) :: keyword()
   def picker_keymap_context(state, %PickerState{source: source, callback_source: owner}) do
     [
       keymap_server: state.interaction.keymap_server,
-      picker_split: Source.opens_location?(source, owner)
+      picker_split: Source.opens_in_window?(source, owner)
     ]
   end
 
@@ -950,8 +950,9 @@ defmodule MingaEditor.PickerUI do
     |> maybe_preview_selection()
   end
 
-  # Opens the item in a new vertical split.
-  # The picker closes, the window splits, and the source's selection runs in the new window.
+  # Opens the item in a vertical split.
+  # The picker closes and the window splits.
+  # The source then shows the item in the focused window, and the other window keeps what it showed.
   # A selection the source keeps open or rejects behaves as it does on Enter.
   @spec open_in_split(state(), Picker.item(), module(), PickerState.callback_source()) ::
           state() | {state(), action()}

@@ -653,6 +653,23 @@ defmodule MingaEditor.PickerUITest do
     end
   end
 
+  describe "⌃V split" do
+    test "is bound only for sources that show the selection in the focused window" do
+      state = TestHelpers.base_state(content: "x")
+
+      for {source, split?} <- [
+            {MingaEditor.UI.Picker.BufferSource, true},
+            {MingaEditor.UI.Picker.BufferAllSource, true},
+            # Opening a file creates a tab today, which would leave the split behind (#4063).
+            {MingaEditor.UI.Picker.FileSource, false},
+            {MingaEditor.UI.Picker.ProjectSearchSource, false}
+          ] do
+        context = PickerUI.picker_keymap_context(state, %PickerState{source: source})
+        assert Keyword.fetch!(context, :picker_split) == split?, inspect(source)
+      end
+    end
+  end
+
   describe "source delete action" do
     test "plain d remains query input for a generic picker that exposes delete actions" do
       picker =

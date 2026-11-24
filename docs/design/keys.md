@@ -238,7 +238,7 @@ Every picker (find file, project search, the switcher) and every minibuffer prom
 | `esc` | Close | kept; `⌃G` retired |
 | `Tab` | Complete | kept |
 | `PageDown` / `PageUp` | Page through a picker | shipped; replaces `⌃V` / `⌥V` |
-| `⌃V` | Open the highlighted file, buffer or location in a vertical split | shipped; was page down |
+| `⌃V` | Open the highlighted buffer in a vertical split (the switcher; file pickers follow when files stop opening tabs, #4063) | shipped; was page down |
 | `⌃.` | Act menu on the highlighted row | shipped; replaces `⌃O` |
 | `⌃D` | (delete moves into the act menu) | retired |
 | `⌃A` `⌃E` `⌃H` `⌃W` `⌃U` | Line start, line end, delete a character, delete a word, delete to the start | shipped; text editing, never bindings |

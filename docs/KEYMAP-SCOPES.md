@@ -14,7 +14,7 @@ Minga ships these scopes:
 | `:agent` | Full-screen agentic view (`SPC a a`) | Agent chat navigation, fold/collapse, copy, search, panel management. See [Agentic Keymap](AGENTIC-KEYMAP.md). |
 | `:file_tree` | File tree panel is focused | Tree-specific keys (Enter, h/l, H, r). Unmatched keys delegate to vim motions for navigation. |
 | `:git_status` | Git status panel is focused | Staging, committing and navigation keys for the panel. |
-| `:picker` | A picker is open (find file, project search, the buffer switcher) | `⌃J` / `⌃K` and the arrows move, `↩` opens, `esc` closes, `Tab` completes, `PageUp` / `PageDown` page, `⌃.` opens the act menu on the highlighted row, and `⌃V` opens a file, buffer or location in a split. Every other key edits the query. |
+| `:picker` | A picker is open (find file, project search, the buffer switcher) | `⌃J` / `⌃K` and the arrows move, `↩` opens, `esc` closes, `Tab` completes, `PageUp` / `PageDown` page, `⌃.` opens the act menu on the highlighted row, and `⌃V` opens the highlighted buffer in a split from the buffer switcher. Every other key edits the query. |
 | `:prompt` | A minibuffer prompt or the `:` command line has focus | `↩` runs, `esc` cancels, `Tab` completes; `⌃J` / `⌃K` move through the command line's completions. Every other key edits the text. |
 
 ### Live prompts
