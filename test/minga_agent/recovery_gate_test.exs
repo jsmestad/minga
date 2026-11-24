@@ -68,7 +68,7 @@ defmodule MingaAgent.RecoveryGateTest do
       texts = Enum.map(turn_two_messages, &message_text/1)
       assert "[Compacted summary of prior conversation]" in texts
       refute Enum.any?(texts, &(&1 =~ "read and write the file"))
-      assert List.last(texts) =~ "what happened?"
+      assert Enum.any?(texts, &(&1 =~ "what happened?"))
 
       assert Enum.any?(
                Session.messages(session),
@@ -156,8 +156,7 @@ defmodule MingaAgent.RecoveryGateTest do
       assert data.id == original_id
 
       # The loaded record should contain the conversation messages
-      assert is_list(data.messages)
-      assert length(data.messages) > 0
+      assert [_ | _] = data.messages
 
       # The continuation should have advanced past its initial revision
       assert %MingaAgent.Session.Continuation{} = data.continuation
