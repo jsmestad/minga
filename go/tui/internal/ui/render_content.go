@@ -598,6 +598,17 @@ func (m Model) renderRowAt(window protocol.WindowContent, row protocol.WindowRow
 		builder.WriteString(style.Render(text))
 		col = end
 	}
+	// A span's background covers its whole column range, including columns past the row
+	// text (for example a Diff Review line tint), so paint those cells as blanks.
+	for ; col < scrollRight; col++ {
+		span := spanAt(row.Spans, uint16(col))
+		if span.BG == 0 {
+			break
+		}
+		if col >= scrollLeft {
+			builder.WriteString(m.styleForEditorSpan(span).Render(" "))
+		}
+	}
 	if col < scrollRight {
 		if annotation := m.renderRowAnnotationsAt(window, sourceRowIndex, contentRowIndex); annotation != "" {
 			builder.WriteString(annotation)

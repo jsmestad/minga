@@ -1,19 +1,21 @@
 defmodule MingaEditor.RenderModel.Window.ReviewProjection do
   @moduledoc "Disposable resident review rows with baseline- and hunk-bound identities."
 
-  alias Minga.Core.Face
+  alias Minga.Core.WidthOracle
   alias Minga.Core.WrapMap
   alias Minga.RenderModel.Window.ContentDigest
   alias Minga.RenderModel.Window.Row
   alias Minga.RenderModel.Window.RowDelta
   alias Minga.RenderModel.Window.RowSlotAllocator
+  alias Minga.RenderModel.Window.Span
   alias MingaEditor.Agent.DiffReview
   alias MingaEditor.Agent.DiffReview.DisplayLine
   alias MingaEditor.Agent.View.Preview
   alias MingaEditor.Renderer.Composition
   alias MingaEditor.RenderModel.Window.ReviewLayout
+  alias MingaEditor.RenderModel.Window.ReviewSyntax
+  alias MingaEditor.UI.Highlight
 
-  @source_face %Face{name: "agent.review.source"}
   @enforce_keys [
     :compatibility,
     :rows_revision,
@@ -191,14 +193,25 @@ defmodule MingaEditor.RenderModel.Window.ReviewProjection do
     scope = {epoch, 0, :normal}
     fork_conflict? = not is_nil(review.fork_revision)
 
-    result =
+    lines =
       review
       |> DiffReview.to_display_lines()
-      |> Enum.reduce_while({:ok, initial}, fn line, {:ok, context} ->
-        line = label_conflict_header(line, fork_conflict?)
-        source = line_source(line.source, lineages)
+      |> Enum.map(&{label_conflict_header(&1, fork_conflict?), line_source(&1.source, lineages)})
 
-        case project_line(line, source, old_lines, layout, elem(context, 2), scope) do
+    # Only lines the cache cannot reuse need syntax, so an unchanged review skips the highlight pass.
+    syntax =
+      ReviewSyntax.segments(
+        layout,
+        review,
+        baseline,
+        for({line, source} <- lines, not cached?(old_lines, source, line), do: line)
+      )
+
+    result =
+      Enum.reduce_while(lines, {:ok, initial}, fn {line, source}, {:ok, context} ->
+        segments = Map.get(syntax, line.source)
+
+        case project_line(line, source, segments, old_lines, layout, elem(context, 2), scope) do
           {:ok, fragments, updated_allocator} ->
             {:cont, {:ok, append_line(context, line, source, fragments, updated_allocator)}}
 
@@ -281,9 +294,14 @@ defmodule MingaEditor.RenderModel.Window.ReviewProjection do
   defp line_source({:added, index, offset}, lineages),
     do: {:added, Map.fetch!(lineages, index), offset}
 
+  @spec cached?(line_cache(), term(), DisplayLine.t()) :: boolean()
+  defp cached?(old_lines, source, %DisplayLine{kind: kind, text: text}),
+    do: match?({^kind, ^text, _fragments}, Map.get(old_lines, source))
+
   @spec project_line(
           DisplayLine.t(),
           term(),
+          [Highlight.styled_segment()] | nil,
           line_cache(),
           ReviewLayout.t(),
           RowSlotAllocator.t(),
@@ -292,6 +310,7 @@ defmodule MingaEditor.RenderModel.Window.ReviewProjection do
   defp project_line(
          %DisplayLine{kind: kind, text: text},
          source,
+         segments,
          old_lines,
          layout,
          allocator,
@@ -299,20 +318,26 @@ defmodule MingaEditor.RenderModel.Window.ReviewProjection do
        ) do
     case Map.get(old_lines, source) do
       {^kind, ^text, fragments} -> {:ok, fragments, allocator}
-      _changed -> compose_line(kind, text, source, layout, allocator, scope)
+      _changed -> compose_line(kind, text, segments, source, layout, allocator, scope)
     end
   end
 
   @spec compose_line(
           DisplayLine.kind(),
           String.t(),
+          [Highlight.styled_segment()] | nil,
           term(),
           ReviewLayout.t(),
           RowSlotAllocator.t(),
           RowSlotAllocator.scope()
         ) :: {:ok, [fragment()], RowSlotAllocator.t()} | :reset_required
-  defp compose_line(kind, text, source, layout, allocator, scope) do
-    text = normalize_tabs(prefix(kind) <> text, layout.tab_width)
+  defp compose_line(kind, text, segments, source, layout, allocator, scope) do
+    styled =
+      layout
+      |> ReviewLayout.styled_line(kind, text, segments)
+      |> normalize_tabs(layout.tab_width)
+
+    text = Enum.map_join(styled, fn {part, _face} -> part end)
 
     [visual_rows] =
       WrapMap.compute([text], layout.text_width,
@@ -322,16 +347,19 @@ defmodule MingaEditor.RenderModel.Window.ReviewProjection do
         tab_width: layout.tab_width
       )
 
-    spans = [ReviewLayout.span(layout, kind)]
+    initial = {:ok, [], allocator, line_spans(styled, layout.oracle), 0}
 
     visual_rows
     |> Enum.with_index()
-    |> Enum.reduce_while({:ok, [], allocator}, fn {visual, index}, {:ok, fragments, allocator} ->
+    |> Enum.reduce_while(initial, fn {visual, index}, {:ok, fragments, allocator, pending, col} ->
       key = fragment_key(source, visual.byte_offset)
 
       case RowSlotAllocator.allocate(allocator, scope, key) do
         {:ok, slot, allocator} ->
           text = WrapMap.display_text(visual)
+          width = WidthOracle.display_width(layout.oracle, visual.source_text)
+          {spans, pending} = row_spans(pending, col, col + width, [])
+          spans = spans ++ ReviewLayout.fill(layout, kind, width)
 
           row = %Row{
             row_id: Row.stable_id(:normal, 0, slot),
@@ -343,7 +371,7 @@ defmodule MingaEditor.RenderModel.Window.ReviewProjection do
             content_hash: Row.compute_hash(text, spans)
           }
 
-          {:cont, {:ok, [{key, row} | fragments], allocator}}
+          {:cont, {:ok, [{key, row} | fragments], allocator, pending, col + width}}
 
         :reset_required ->
           {:halt, :reset_required}
@@ -352,31 +380,52 @@ defmodule MingaEditor.RenderModel.Window.ReviewProjection do
     |> finish_fragments()
   end
 
-  @spec finish_fragments({:ok, [fragment()], RowSlotAllocator.t()} | :reset_required) ::
-          {:ok, [fragment()], RowSlotAllocator.t()} | :reset_required
-  defp finish_fragments({:ok, fragments, allocator}),
+  @spec finish_fragments(
+          {:ok, [fragment()], RowSlotAllocator.t(), [Span.t()], non_neg_integer()}
+          | :reset_required
+        ) :: {:ok, [fragment()], RowSlotAllocator.t()} | :reset_required
+  defp finish_fragments({:ok, fragments, allocator, _pending, _col}),
     do: {:ok, Enum.reverse(fragments), allocator}
 
   defp finish_fragments(:reset_required), do: :reset_required
 
-  @spec normalize_tabs(String.t(), pos_integer()) :: String.t()
-  defp normalize_tabs(text, tab_width) do
-    case :binary.match(text, "\t") do
-      :nomatch ->
-        text
+  # Spans are ordered and disjoint; a span crossing a wrap boundary stays pending for the next row.
+  @spec row_spans([Span.t()], non_neg_integer(), non_neg_integer(), [Span.t()]) ::
+          {[Span.t()], [Span.t()]}
+  defp row_spans([%Span{end_col: stop} | rest], first, last, acc) when stop <= first,
+    do: row_spans(rest, first, last, acc)
 
-      _tab ->
-        [{text, @source_face}]
-        |> Composition.present_whitespace(tab_width, false, nil)
-        |> Enum.map_join(fn {part, _face} -> part end)
-    end
+  defp row_spans([%Span{start_col: start} = span | rest] = spans, first, last, acc)
+       when start < last do
+    acc = Enum.reverse(Span.rebase_to_visual_row(span, first, last, 0), acc)
+
+    if span.end_col > last,
+      do: {Enum.reverse(acc), spans},
+      else: row_spans(rest, first, last, acc)
   end
 
-  @spec prefix(DisplayLine.kind()) :: String.t()
-  defp prefix(:context), do: "  "
-  defp prefix(:added), do: "+ "
-  defp prefix(:removed), do: "- "
-  defp prefix(:hunk_header), do: ""
+  defp row_spans(spans, _first, _last, acc), do: {Enum.reverse(acc), spans}
+
+  @spec line_spans([Highlight.styled_segment()], WidthOracle.t()) :: [Span.t()]
+  defp line_spans(styled, oracle) do
+    {spans, _col} =
+      Enum.reduce(styled, {[], 0}, fn {part, face}, {spans, col} ->
+        case WidthOracle.display_width(oracle, part) do
+          0 -> {spans, col}
+          width -> {[Span.from_face(face, col, col + width) | spans], col + width}
+        end
+      end)
+
+    Enum.reverse(spans)
+  end
+
+  @spec normalize_tabs([Highlight.styled_segment()], pos_integer()) ::
+          [Highlight.styled_segment()]
+  defp normalize_tabs(styled, tab_width) do
+    if Enum.any?(styled, fn {part, _face} -> :binary.match(part, "\t") != :nomatch end),
+      do: Composition.present_whitespace(styled, tab_width, false, nil),
+      else: styled
+  end
 
   @spec row_type(non_neg_integer()) :: Row.row_type()
   defp row_type(0), do: :normal

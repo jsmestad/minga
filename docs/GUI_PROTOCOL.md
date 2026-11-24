@@ -769,6 +769,7 @@ Attrs bits: 0=bold, 1=italic, 2=underline, 3=strikethrough, 4=curl_underline
 
 Span columns are in display column coordinates (CJK/fullwidth = 2 columns).
 Colors are pre-resolved 24-bit RGB from the BEAM's theme/highlight resolver.
+A `bg` of 0 means no span background. A nonzero `bg` paints the span's whole column range, including columns past the end of the row text; foreground and attributes apply only to text. The staged Diff Review uses this to tint added, removed, and hunk-header rows to the pane edge while keeping syntax foreground colors.
 
 Selection section:
   selection_type(1): 0=none, 1=char, 2=line, 3=block
