@@ -565,10 +565,62 @@ jobs:
           retention-days: ${{ env.RETENTION_DAYS }}
           overwrite: false
 
-  publish-homebrew:
-    name: Publish rolling Homebrew packages
+  # The candidate builds while CI runs on the same push. Publication waits for that CI run and proceeds only when it succeeded, so a commit that fails any CI job never reaches Homebrew users.
+  require-ci:
+    name: Require CI success for the published commit
     if: github.event_name == 'push' && github.ref == 'refs/heads/main' && github.repository == 'jsmestad/minga'
     needs: [validate, finalize]
+    runs-on: ubuntu-24.04
+    # CI takes about 30 minutes, plus time queued for macOS runners.
+    timeout-minutes: 120
+    permissions:
+      actions: read
+    outputs:
+      publish: ${{ steps.ci.outputs.publish }}
+    steps:
+      - name: Wait for the CI run on the source commit
+        id: ci
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ needs.validate.outputs.source_sha }}
+        run: |
+          set -euo pipefail
+          while true; do
+            if ! run=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$SOURCE_SHA&event=push&branch=main&per_page=20" \
+              --jq '[.workflow_runs[] | select(.head_sha == env.SOURCE_SHA and .path == ".github/workflows/ci.yml")] | max_by(.id) // empty | {id, status, conclusion, html_url}'); then
+              echo "CI run lookup failed; retrying"
+            elif [ -z "$run" ]; then
+              echo "No CI run for $SOURCE_SHA yet"
+            elif [ "$(jq -r .status <<< "$run")" != completed ]; then
+              echo "CI run $(jq -r .html_url <<< "$run") is $(jq -r .status <<< "$run")"
+            else
+              conclusion=$(jq -r .conclusion <<< "$run")
+              url=$(jq -r .html_url <<< "$run")
+              case "$conclusion" in
+                success)
+                  echo "CI passed for $SOURCE_SHA: $url"
+                  echo "publish=true" >> "$GITHUB_OUTPUT"
+                  exit 0
+                  ;;
+                cancelled)
+                  # CI cancels a main run when a newer push arrives; that newer commit publishes instead.
+                  echo "::notice::CI was cancelled for $SOURCE_SHA ($url), usually because a newer push to main superseded it. Not publishing this commit."
+                  echo "publish=false" >> "$GITHUB_OUTPUT"
+                  exit 0
+                  ;;
+                *)
+                  echo "::error::CI concluded '$conclusion' for $SOURCE_SHA ($url). Not publishing. After a re-run of CI passes, re-run this job to publish."
+                  exit 1
+                  ;;
+              esac
+            fi
+            sleep 30
+          done
+
+  publish-homebrew:
+    name: Publish rolling Homebrew packages
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && github.repository == 'jsmestad/minga' && needs.require-ci.outputs.publish == 'true'
+    needs: [validate, finalize, require-ci]
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     concurrency:
