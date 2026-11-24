@@ -71,8 +71,8 @@ Ag│  14 bindings                                   Esc close │
 2 27-28 #dd97f1 #1a1d23 bold
 2 29-119 #adb0bb #1a1d23 -
 3 0-5 #858892 #1a1d23 -
-3 6-8 #adb0bb #1a1d23 -
-3 9-17 #696c76 #1a1d23 italic
+3 6-7 #adb0bb #1a1d23 -
+3 8-17 #696c76 #1a1d23 italic
 3 18-18 #f5983a #1a1d23 -
 3 19-69 #696c76 #1a1d23 italic
 3 70-119 #adb0bb #1a1d23 -
@@ -269,6 +269,4 @@ Ag│  14 bindings                                   Esc close │
 39 8-8 #adb0bb #50a4e9 -
 39 9-23 #adb0bb #111317 -
 39 24-38 #dd97f1 #111317 bold
-39 39-108 #adb0bb #111317 -
-39 109-114 #75ad47 #111317 -
-39 115-119 #adb0bb #111317 -
+39 39-119 #adb0bb #111317 -

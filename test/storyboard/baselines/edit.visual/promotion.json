@@ -20,17 +20,17 @@
   },
   "scenario": "edit.visual",
   "tui": {
-    "commit": "ab31148f510e909bc41a508f7f2091e60929144d",
+    "commit": "9e4452563e4ac637309ff5eb4f30a4296a6a9f8e",
     "files": {
-      "tui-astrodark-120x40.txt": "05dc42a0b84f6e3f03794ea9e40197832a5b3a44f1136665c8843556386518ec",
-      "tui-astrodark-150x38.txt": "4ca9e9125bc04f8499deaed872c94858d3322407e82c616956dce13b5096713e",
-      "tui-astrodark-80x24.txt": "25795c4b320622f5fd71e70669de818ad3c48056d254f89263548be4f0778a58",
-      "tui-catppuccin_frappe-120x40.txt": "31f0bf4ff4cf20a92ce0a35deae9f50b4b7a279d94a4b6ed50c3ca94ba1347ce",
-      "tui-catppuccin_frappe-150x38.txt": "94aaf076ba51e5805477e3d5c2dc01bbebc842b0a8869205d33cf043dd2caa5f",
-      "tui-catppuccin_frappe-80x24.txt": "67fe3fb98b13c917edbf75c927879346cbac5868cdf0035537e96c3ab52f3b57",
-      "tui-catppuccin_latte-120x40.txt": "efcbf35382b642e53b8966731fa141110d9f475bff298a223f75b4ba1c5b08f9",
-      "tui-catppuccin_latte-150x38.txt": "3f9513b944fa19c439ed90381c1dae34fa87a193c10250301c80e142fbd73d04",
-      "tui-catppuccin_latte-80x24.txt": "8c8689df40654eaeaaa46469aa452a718367656eb2f4e74316938dd515bc7ae3"
+      "tui-astrodark-120x40.txt": "35267c4dde3b431b4cd64b474131cb1fa55c419738afe32ff914f1554a2634f0",
+      "tui-astrodark-150x38.txt": "c895d148fbefb752fbf56dbd9eda2742eb28e121a57a6d0080294acdf9ed979a",
+      "tui-astrodark-80x24.txt": "85b722e338ab680ea14bfdd6dc1a547de6b56af6a7eb671525c620dfc2bae26b",
+      "tui-catppuccin_frappe-120x40.txt": "1ad600fc9f6a00b35161b55a297cc9dd450d4a97560775600df31f8a8812129b",
+      "tui-catppuccin_frappe-150x38.txt": "25a129c4c1f79466aff6cca5ba69bc28eb488ba13c46a683638916e2fd4099ce",
+      "tui-catppuccin_frappe-80x24.txt": "cf70f842520b1028b5a994d781e68363bd4dae10b85a306421a905cee4aad344",
+      "tui-catppuccin_latte-120x40.txt": "9baf26a18cb7e9a64041ad0801fd91c5eedfb609b20a845ae711f2fc01306645",
+      "tui-catppuccin_latte-150x38.txt": "34bed2af74625dccada8db820b8741784ec284268e912eeba56cfb3aed0d44ef",
+      "tui-catppuccin_latte-80x24.txt": "ccbc1c4a55f37c7df1e0f6bb0dc7f715d61c60ba0e09dda627a1ad633a911e9f"
     }
   }
 }
