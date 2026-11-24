@@ -91,4 +91,61 @@ defmodule Minga.Keymap.ScopeRegistryTest do
     assert {:error, {:duplicate_scope, :editor, :builtin, {:extension, :scope_collision}}} =
              Scope.register({:extension, :scope_collision}, :editor, Minga.Keymap.Scope.Editor)
   end
+
+  test "removing one source preserves user overrides and scopes from other sources" do
+    source_a = {:extension, :scope_test}
+    source_b = {:extension, :scope_other}
+    name_a = :scope_test_runtime
+    name_b = :scope_other_runtime
+
+    live = start_supervised!({Active, name: nil})
+
+    # Register scopes from two independent sources.
+    assert :ok = Scope.register(source_a, name_a, Minga.Keymap.Scope.Editor)
+    assert :ok = Scope.register(source_b, name_b, Minga.Keymap.Scope.Agent)
+
+    # Add source-owned bindings for each scope via Active.
+    assert :ok =
+             Active.bind(live, {name_a, :normal}, "X", :scope_a_cmd, "Source A binding",
+               source: source_a
+             )
+
+    assert :ok =
+             Active.bind(live, {name_b, :normal}, "Y", :scope_b_cmd, "Source B binding",
+               source: source_b
+             )
+
+    # Also add a user (config) override for source B's scope.
+    assert :ok =
+             Active.bind(live, {name_b, :normal}, "Z", :user_cmd, "User override for B")
+
+    # Verify both scopes and all three bindings are live.
+    assert Active.scope_declarations(live)[name_a] == Minga.Keymap.Scope.Editor
+    assert Active.scope_declarations(live)[name_b] == Minga.Keymap.Scope.Agent
+
+    scope_a_trie = Active.scope_trie(live, name_a, :normal)
+    scope_b_trie = Active.scope_trie(live, name_b, :normal)
+    assert {:command, :scope_a_cmd} = Minga.Keymap.Bindings.lookup(scope_a_trie, {?X, 0})
+    assert {:command, :scope_b_cmd} = Minga.Keymap.Bindings.lookup(scope_b_trie, {?Y, 0})
+    assert {:command, :user_cmd} = Minga.Keymap.Bindings.lookup(scope_b_trie, {?Z, 0})
+
+    # Remove source A. Source B's scope, binding, and user override must survive.
+    assert :ok = Active.unregister_source(live, source_a)
+    assert :ok = Scope.unregister_source(source_a)
+
+    refute Map.has_key?(Active.scope_declarations(live), name_a)
+    assert Active.scope_declarations(live)[name_b] == Minga.Keymap.Scope.Agent
+
+    # Source A's binding is gone.
+    scope_a_trie_after = Active.scope_trie(live, name_a, :normal)
+    assert :not_found = Minga.Keymap.Bindings.lookup(scope_a_trie_after, {?X, 0})
+
+    # Source B's binding and user override are intact.
+    scope_b_trie_after = Active.scope_trie(live, name_b, :normal)
+    assert {:command, :scope_b_cmd} = Minga.Keymap.Bindings.lookup(scope_b_trie_after, {?Y, 0})
+    assert {:command, :user_cmd} = Minga.Keymap.Bindings.lookup(scope_b_trie_after, {?Z, 0})
+
+    # Built-ins are undisturbed.
+    assert Scope.module_for(:editor) == Minga.Keymap.Scope.Editor
+  end
 end

@@ -2,9 +2,9 @@ defmodule Minga.Keymap.Scope.Registry do
   @moduledoc """
   Sole writer of the keymap scope registry.
 
-  Scope registrations arrive from several processes: extension instances during `init`, the config loader during a reload, and contribution cleanup. Each change is a read-modify-write of the registered scope names, so two unsynchronized writers can lose one update. This GenServer serializes every change and publishes the complete result as one `:persistent_term` snapshot.
+  Scope registrations arrive from several processes: extension instances during `init`, the config loader during a reload, and contribution cleanup. This GenServer serializes every mutation and publishes the complete result (scope modules and source ownership together) as one `:persistent_term` snapshot. Concurrent registrations never lose an update because every read-modify-write happens inside one `handle_call`.
 
-  Reads never call this process. Key resolution runs on every keystroke and reads the published snapshot directly with `snapshot/0`. Before the owner starts, reads see the built-in scopes.
+  Reads never call this process. Key resolution runs on every keystroke and reads the published snapshot directly with `snapshot/0`. Every snapshot is internally coherent: the `modules` and `sources` maps always have the same key set. Before the owner starts, reads see the built-in scopes.
 
   The owner makes no calls to other processes while it handles a request, so a caller that holds other locks or runs inside an extension `init` cannot deadlock with it. Callers resolve a scope module's name before they call the owner.
   """
