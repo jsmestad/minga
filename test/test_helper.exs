@@ -67,6 +67,11 @@ ExUnit.start(
     [:pi, :distributed, :perf] ++ swift_exclude ++ macos_ipc_exclude ++ apple_inference_exclude
 )
 
+# A quit command calls System.stop/1 through :shutdown_fn. A test that presses a quit key (the storyboard explorer's
+# way-out check presses q up to three times, which reaches SPC q q from the leader) would stop the VM, and ExUnit then
+# reports the run as finished with the remaining tests silently missing. Tests that check quitting install their own.
+Application.put_env(:minga, :shutdown_fn, fn _status -> :ok end)
+
 # Disable clipboard sync during tests to avoid race conditions from
 # parallel tests sharing the system clipboard. Tests that specifically
 # test clipboard behavior set clipboard: :unnamedplus in their setup.

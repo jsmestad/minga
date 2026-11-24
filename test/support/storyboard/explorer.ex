@@ -233,7 +233,7 @@ defmodule Minga.Test.Storyboard.Explorer do
           {Keys.step(), {:command, term()} | {:prefix, Bindings.node_t()}}
         ]
   defp children(node) do
-    for {{codepoint, mods} = key, _child} <- Bindings.children(node) do
+    for {{codepoint, mods} = key, _label, _kind} <- Bindings.children(node) do
       target =
         case Bindings.lookup(node, key) do
           {:command, command} -> {:command, command}
