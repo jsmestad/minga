@@ -3657,14 +3657,13 @@ defmodule MingaAgent.Providers.Native do
     })
   end
 
-  # Emits a context usage event with provider-reported input tokens from the turn response.
   # Emits the provider-reported prompt size for the turn. Routes whose usage is disabled report nothing.
   @spec emit_reported_context_usage(loop_ctx(), map() | nil, Event.token_usage() | nil) :: :ok
   defp emit_reported_context_usage(_lctx, _usage, nil), do: :ok
 
   defp emit_reported_context_usage(lctx, usage, %MingaAgent.TurnUsage{}) when is_map(usage) do
     case reported_prompt_tokens(usage) do
-      tokens when tokens > 0 ->
+      tokens when is_integer(tokens) and tokens > 0 ->
         emit(lctx, %Event.ContextUsage{
           estimated_tokens: tokens,
           context_limit: lctx.selection.policy.limits.context,
@@ -3681,20 +3680,23 @@ defmodule MingaAgent.Providers.Native do
 
   # Some providers (Anthropic) exclude prompt-cache reads and writes from input tokens;
   # ReqLLM flags that with `input_includes_cached: false`, so add them back for the full prompt.
-  @spec reported_prompt_tokens(map()) :: non_neg_integer()
+  @spec reported_prompt_tokens(map()) :: non_neg_integer() | nil
   defp reported_prompt_tokens(usage) do
     input = usage_value(usage, [:input_tokens, :input], 0)
 
     if Map.get(usage, :input_includes_cached, true) do
       input
     else
-      input +
-        usage_value(usage, [:cache_read_tokens, :cache_read_input_tokens, :cached_tokens], 0) +
+      read = usage_value(usage, [:cache_read_tokens, :cache_read_input_tokens, :cached_tokens], 0)
+
+      write =
         usage_value(
           usage,
           [:cache_write_tokens, :cache_creation_input_tokens, :cache_creation_tokens],
           0
         )
+
+      if Enum.all?([input, read, write], &is_integer/1), do: input + read + write
     end
   end
 
