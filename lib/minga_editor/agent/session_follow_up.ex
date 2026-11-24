@@ -17,7 +17,7 @@ defmodule MingaEditor.Agent.SessionFollowUp do
   alias MingaEditor.Commands.Agent, as: AgentCommands
   alias MingaEditor.Commands.InlineAsk
   alias MingaEditor.Shell.Traditional.NoticeWorkflow
-  alias MingaEditor.Shell.Traditional.State, as: TraditionalState
+  alias MingaEditor.Shell.Runtime
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Workspace
@@ -126,7 +126,7 @@ defmodule MingaEditor.Agent.SessionFollowUp do
   @spec admit_restore(EditorState.t(), non_neg_integer(), String.t()) ::
           :ok | {:error, EditorState.t()}
   defp admit_restore(state, workspace_id, saved_id) do
-    if active_workspace?(state, workspace_id),
+    if Runtime.active_workspace?(state.shell_runtime, workspace_id),
       do: MingaEditor.Agent.DraftWorkflow.before_reopen(state, saved_id),
       else: :ok
   end
@@ -251,7 +251,7 @@ defmodule MingaEditor.Agent.SessionFollowUp do
   # The restored conversation is shown in place only while its workspace is in front with this session.
   @spec shown?(EditorState.t(), t()) :: boolean()
   defp shown?(state, %__MODULE__{workspace: workspace_id, session: session}) do
-    case tab_bar(state) do
+    case Runtime.traditional_tab_bar(state.shell_runtime) do
       %TabBar{} = tabs ->
         TabBar.active_workspace_id(tabs) == workspace_id and
           match?(
@@ -286,20 +286,6 @@ defmodule MingaEditor.Agent.SessionFollowUp do
 
   defp exited_message({:seed, _messages}),
     do: "The agent session stopped before Inline Ask history was added."
-
-  @spec active_workspace?(EditorState.t(), non_neg_integer()) :: boolean()
-  defp active_workspace?(state, workspace_id) do
-    case tab_bar(state) do
-      %TabBar{} = tabs -> TabBar.active_workspace_id(tabs) == workspace_id
-      nil -> false
-    end
-  end
-
-  @spec tab_bar(EditorState.t()) :: TabBar.t() | nil
-  defp tab_bar(%EditorState{shell_runtime: %{state: %TraditionalState{} = shell}}),
-    do: TraditionalState.tab_bar(shell)
-
-  defp tab_bar(%EditorState{}), do: nil
 
   @spec cancel_timer(phase()) :: :ok
   defp cancel_timer({:awaiting, timer}) do

@@ -15,6 +15,7 @@ defmodule MingaEditor.Agent.SessionStart do
   alias MingaEditor.Agent.StartFailure
   alias MingaEditor.Agent.StartRequest
   alias MingaEditor.Agent.UIState
+  alias MingaEditor.Shell.Runtime
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.Shell.Traditional.Workflow
   alias MingaEditor.State, as: EditorState
@@ -167,7 +168,7 @@ defmodule MingaEditor.Agent.SessionStart do
 
   @spec bind(EditorState.t(), t(), pid()) :: EditorState.t()
   defp bind(state, start, session) do
-    tabs = tab_bar(state)
+    tabs = Runtime.traditional_tab_bar(state.shell_runtime)
 
     case tabs && TabBar.get_workspace(tabs, start.workspace) do
       %Workspace{payload: %WorkspaceAgent{remote_session: nil}} = workspace ->
@@ -176,7 +177,7 @@ defmodule MingaEditor.Agent.SessionStart do
           workspace
           |> Workspace.set_session(session)
           |> Workspace.set_project_view(start.project_view)
-          |> clear_stored_ui(active_workspace?(state, start.workspace))
+          |> clear_stored_ui(Runtime.active_workspace?(state.shell_runtime, start.workspace))
 
         state
         |> WorkspaceWorkflow.install_tab_bar(TabBar.accept_workspace(tabs, workspace))
@@ -198,7 +199,7 @@ defmodule MingaEditor.Agent.SessionStart do
   # until the connection event reports the provider running.
   @spec install_started_runtime(EditorState.t(), non_neg_integer(), pid()) :: EditorState.t()
   defp install_started_runtime(state, workspace_id, session) do
-    if active_workspace?(state, workspace_id) do
+    if Runtime.active_workspace?(state.shell_runtime, workspace_id) do
       agent =
         state.shell_runtime.state
         |> TraditionalState.agent()
@@ -227,7 +228,7 @@ defmodule MingaEditor.Agent.SessionStart do
   defp fail(state, start, %StartFailure{} = failure, reason) do
     Minga.Log.error(:agent, "[Agent] #{failure.message} (#{inspect(reason)})")
     discard_project_view(start)
-    tabs = tab_bar(state)
+    tabs = Runtime.traditional_tab_bar(state.shell_runtime)
 
     case tabs && TabBar.get_workspace(tabs, start.workspace) do
       %Workspace{payload: %WorkspaceAgent{}} = workspace ->
@@ -242,7 +243,7 @@ defmodule MingaEditor.Agent.SessionStart do
           EditorState.t()
   defp show_failure(state, tabs, %Workspace{id: id} = workspace, failure) do
     cond do
-      active_workspace?(state, id) ->
+      Runtime.active_workspace?(state.shell_runtime, id) ->
         Workflow.install_agent_ui(state, UIState.fail_start(state.workspace.agent_ui, failure))
 
       match?(%UIState{}, workspace.payload.agent_ui) ->
@@ -263,20 +264,6 @@ defmodule MingaEditor.Agent.SessionStart do
     do: ingest
 
   defp subscriber(%EditorState{}), do: self()
-
-  @spec active_workspace?(EditorState.t(), non_neg_integer()) :: boolean()
-  defp active_workspace?(state, workspace_id) do
-    case tab_bar(state) do
-      %TabBar{} = tabs -> TabBar.active_workspace_id(tabs) == workspace_id
-      nil -> false
-    end
-  end
-
-  @spec tab_bar(EditorState.t()) :: TabBar.t() | nil
-  defp tab_bar(%EditorState{shell_runtime: %{state: %TraditionalState{} = shell}}),
-    do: TraditionalState.tab_bar(shell)
-
-  defp tab_bar(%EditorState{}), do: nil
 
   @spec discard_project_view(t()) :: :ok
   defp discard_project_view(%__MODULE__{
