@@ -257,7 +257,7 @@
 
         <section class="essay-section" id="executable-parity">
           <h2>3. Keeping macOS and the terminal in lockstep</h2>
-          <p>Frontend parity is enforced in code and CI (<a href="https://github.com/jsmestad/minga/blob/main/docs/design/storyboard.md"><code>docs/design/storyboard.md</code></a>):</p>
+          <p>Frontend parity is enforced in code and CI (<a href="/docs/design-storyboard.html"><code>docs/design/storyboard.md</code></a>):</p>
           <ul>
             <li><strong>Generated UI tokens &amp; CI guards.</strong> Semantic roles (<code>minga</code>, <code>you</code>, <code>needs_you</code>, <code>failure</code>, <code>done</code>) generate from <code>docs/design_tokens.toml</code> into Swift, Go, and Elixir via <code>mix codegen</code>, enforced by color-literal, state-word, and WCAG contrast tests across Catppuccin Frappé (default), AstroDark, and light themes.</li>
             <li><strong>Side-by-side visual diffs.</strong> Shared scenario fixtures in <code>docs/design/scenarios.toml</code> render offscreen on macOS (wide/narrow) and in the Go TUI (truecolor/16-color) to flag drift on UI PRs (v0.1.0).</li>
@@ -302,7 +302,7 @@
             </li>
             <li class="spec-row">
               <span class="spec-key spec-key-strong"><a href="/docs/0006-the-spine.html">ADR-0006</a></span>
-              <span class="spec-detail" data-status="planned" data-since="v0.1.0" data-pill="off"><strong>The Spine (v0.1.0).</strong> One minimal layout across macOS and terminal, on-demand drawers, Twist/Orbit marks, per-author undo, Vim keys preserved in files, and generated token parity (<a href="https://github.com/jsmestad/minga/tree/main/docs/design"><code>docs/design/</code></a>).</span>
+              <span class="spec-detail" data-status="planned" data-since="v0.1.0" data-pill="off"><strong>The Spine (v0.1.0).</strong> One minimal layout across macOS and terminal, on-demand drawers, Twist/Orbit marks, per-author undo, Vim keys preserved in files, and generated token parity (<a href="/docs/design.html"><code>docs/design/</code></a>).</span>
             </li>
             <li class="spec-row">
               <span class="spec-key spec-key-strong"><a href="/docs/0007-cua-is-a-key-profile.html">ADR-0007</a></span>

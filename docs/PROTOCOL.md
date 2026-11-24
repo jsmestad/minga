@@ -508,7 +508,7 @@ Cancel and save failure return a matching `application_quit_response`, reject Ap
 
 Vertical scroll batches carry `window_id:u16, delta_rows:i16, direction:u8` after the opcode. Direction is `0` for down and `1` for up.
 
-Horizontal pan carries `window_id:u16, delta_columns:i16, input_seq:u32` after the opcode. Positive deltas move right; negative deltas move left. The pane ID, delta, and sequence must be nonzero. The frontend sends this intent only for a pane that advertises horizontal panning. The BEAM commits the displacement without moving the caret and echoes the input sequence in that pane's next scroll presentation, even when the requested movement was clamped. It may combine multiple accepted intents in one frame. See [ScrollPresentation](GUI_PROTOCOL.md#0x80--gui_window_content-len32-sectioned-format).
+Horizontal pan carries `window_id:u16, delta_columns:i16, input_seq:u32` after the opcode. Positive deltas move right; negative deltas move left. The pane ID, delta, and sequence must be nonzero. The frontend sends this intent only for a pane that advertises horizontal panning. The BEAM commits the displacement without moving the caret and echoes the input sequence in that pane's next scroll presentation, even when the requested movement was clamped. It may combine multiple accepted intents in one frame. See the ScrollPresentation section of `gui_window_content` (0x80) in [GUI_PROTOCOL.md](GUI_PROTOCOL.md).
 
 ---
 
