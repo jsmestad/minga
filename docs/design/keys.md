@@ -1,5 +1,7 @@
 # Keys
 
+This page is the plan: where keys are going for v0.1.0, including keys that are not built yet. For what each key does in the build you can install today, read the [Key reference](../AGENTIC-KEYMAP.md).
+
 Every key the Spine adds, changes or retires, by context. The status column compares with today's keymap on `main`: **kept** means the binding exists and keeps its meaning, **changed** means the key or its meaning changes, **new** means the key is free today, **retired** means the binding goes away. **shipped** marks a change or retirement that is in today's keymap; the rest of the row says what it replaced. Line references are to `lib/minga/keymap/defaults.ex` unless another file is named.
 
 Notation: modifiers as Mac glyphs (⌃J, ⌥↩, ⌘.), leader sequences as `SPC a a`. Never `C-j`.
