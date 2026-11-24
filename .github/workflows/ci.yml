@@ -244,10 +244,46 @@ jobs:
       - name: Check cross-language golden manifest is committed
         run: MIX_ENV="test" mix protocol.golden --check
       - run: mix native.build.support
-      - name: Run Elixir tests except the isolated compile-cache suite
-        run: mix test --warnings-as-errors --max-cases 4 --timeout 120000 --exclude system_clipboard --exclude conformance --exclude extension_compile_cache
+      - name: Run Elixir tests except the isolated compile-cache suite and the storyboard
+        run: mix test --warnings-as-errors --max-cases 4 --timeout 120000 --exclude system_clipboard --exclude conformance --exclude extension_compile_cache --exclude storyboard
       - name: Run extension compile-cache tests in an isolated BEAM
         run: mix test --warnings-as-errors test/minga/extension/compile_cache_test.exs
+
+  storyboard:
+    # The storyboard factory (#4035): every designed scenario is reachable,
+    # checkable and escapable in the real editor. Runs on its own so it is a
+    # separately required check; the main Elixir job excludes the tag.
+    name: Storyboard (Elixir)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      MINGA_SKIP_GO_TUI_BUILD: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: erlef/setup-beam@v1
+        with:
+          version-file: .tool-versions
+          version-type: strict
+
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+
+      - name: Cache deps
+        uses: actions/cache@v4
+        with:
+          path: |
+            deps
+            _build
+          key: deps-${{ runner.os }}-${{ hashFiles('.tool-versions') }}-${{ hashFiles('mix.lock') }}
+          restore-keys: deps-${{ runner.os }}-${{ hashFiles('.tool-versions') }}-
+
+      - run: mix deps.get
+      - run: mix deps.compile
+      - run: mix native.build.support
+      - name: Run the storyboard suite
+        run: mix test --warnings-as-errors --only storyboard test/storyboard
 
   test-sdk:
     name: Test (Extension SDK)
@@ -885,6 +921,7 @@ jobs:
       - changes
       - lint
       - test
+      - storyboard
       - test-sdk
       - test-git-extended
       - keystroke-latency-baseline

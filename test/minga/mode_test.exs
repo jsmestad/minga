@@ -12,6 +12,24 @@ defmodule Minga.ModeTest do
     end
   end
 
+  describe "cancel_leader/1" do
+    test "a cancelled leader makes the next SPC start a new sequence" do
+      initial = %{Mode.initial_state() | leader_trie: Minga.Keymap.Defaults.leader_trie()}
+      {:normal, _commands, pending} = Mode.process(:normal, {32, 0}, initial)
+      cancelled = Mode.cancel_leader(pending)
+
+      assert cancelled.leader_node == nil
+      assert cancelled.leader_keys == []
+      assert {:normal, [{:leader_start, _trie}], _} = Mode.process(:normal, {32, 0}, cancelled)
+    end
+
+    test "states without a pending leader are unchanged" do
+      assert Mode.cancel_leader(Mode.initial_state()) == Mode.initial_state()
+      search = %Minga.Mode.SearchState{direction: :forward}
+      assert Mode.cancel_leader(search) == search
+    end
+  end
+
   describe "display/1" do
     test "returns correct label for normal mode" do
       assert Mode.display(:normal) == "-- NORMAL --"

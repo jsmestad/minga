@@ -1,0 +1,12 @@
+# Storyboard flow-graph violations the real editor has today (test/storyboard/flow_explorer_test.exs).
+#
+# Rows may only be removed, never added: the test fails on a violation that is not listed and on a row that no longer happens.
+# Fix a new violation, or file a bug and fix it; see Minga.Test.Storyboard.KnownViolations.
+#
+# invariant	scenario	keys	command	issue	reason
+way_out	edit.plain	SPC TAB d	:kill_buffer	4056	closing the last buffer lands on the launchpad, which no esc or q leaves; the project home (a resting view) replaces it
+way_out	edit.plain	SPC b K	:kill_all_buffers	4056	closing the last buffer lands on the launchpad, which no esc or q leaves; the project home (a resting view) replaces it
+way_out	edit.plain	SPC b X	:force_kill_buffer	4056	closing the last buffer lands on the launchpad, which no esc or q leaves; the project home (a resting view) replaces it
+way_out	edit.plain	SPC b d	:kill_buffer	4056	closing the last buffer lands on the launchpad, which no esc or q leaves; the project home (a resting view) replaces it
+exit	edit.whichkey.leader	f	nil	4094	the inventory sends f to find file; the keymap and keys.md keep SPC f as the Files group
+exit	minga.whichkey	backspace	nil	4093	backspace closes which-key instead of going up to SPC

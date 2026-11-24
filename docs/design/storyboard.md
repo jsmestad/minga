@@ -76,7 +76,33 @@ Scenarios that happen to you rather than places you go (errors, notifications, M
 
 `check.py` also fails when a scenario's `boards` names a file that is not in `design/boards/`, so every designed scenario has an acceptance target an agent can open.
 
-The checker is the design-time version of the flow-graph invariants above. When the storyboard factory exists, the same rules run against the real editor.
+The checker is the design-time version of the flow-graph invariants above. The storyboard factory runs the same rules against the real editor.
+
+## The storyboard factory
+
+The design-time checker trusts the inventory; the factory checks the running editor. It lives in `test/support/storyboard/` (compiled in the test environment, so other suites can call it) and runs as `test/storyboard/`, tagged `:storyboard`, in the **Storyboard (Elixir)** CI job.
+
+```bash
+mix test --only storyboard test/storyboard
+```
+
+**The registry.** `Minga.Test.Storyboard.Registry` has one entry per scenario id, one module per journey under `test/support/storyboard/scenarios/`. A built entry names its key path from the cold start (`reach`), a recognizer that classifies a semantic model as that scenario, and its design checks. A pending entry names the surface ticket that builds it; the suite prints the pending list and never fails on it. `registry_test.exs` fails when a designed id in `scenarios.toml` has no entry, or when an entry names an id the inventory does not have.
+
+**The cold start.** Until the home buffer lands (#4056), the factory starts every scenario from a headless editor with one Elixir file open in Normal mode, which is `edit.plain`.
+
+**Design checks.** `Minga.Test.Storyboard.Assertions` asserts against the semantic model by structure and token name, never by pixel: modeline segment order, which-key groups and counts, state words and colour roles from `Minga.Design.Tokens`, keys shown on transient surfaces, the open and focused surface, and the empty-state anatomy. A check that waits on a ticket is written with `Check.pending/3`; the suite runs it anyway and fails when it starts to pass, so the ticket that lands the surface turns it on.
+
+**The flow explorer.** `Minga.Test.Storyboard.Explorer` presses every key the active trie offers from every built scenario (the Vim normal keys and every leader binding from `edit.plain`, every which-key child from a which-key scenario), plus the scenario's designed exits, each from a fresh editor. Keys come from the keymap, so they follow key moves. It classifies where each key lands, checks the way out within three presses of `esc` or `q`, and prints the screens it cannot classify. A random key walk (`key_walk_property_test.exs`) checks the way out and a defined state after every step. Violations that exist today are listed with their issue in `test/fixtures/storyboard/known_violations.tsv`; the list only shrinks.
+
+**Reuse.** The factory is pure data in, semantic model out, so other suites (the frame renderer in #4036) drive the same scenarios and journeys:
+
+```elixir
+session = Minga.Test.Storyboard.Registry.drive("edit.whichkey.leader", rendering: :enabled)
+model = Minga.Test.Storyboard.Session.model(session)
+{:pending, _scenario, _issue, frames} = Minga.Test.Storyboard.Journeys.run(journey)
+```
+
+`Session.model/1` returns a `Minga.Test.Storyboard.Model` (the `Minga.RenderModel.UI` plus derived facts); `Journeys.run/2` returns the frames it saw, one per step, as far as the first pending surface.
 
 ## Journey strips
 
@@ -89,7 +115,7 @@ The main journeys run as scripted flow tests that also emit a strip of frames fo
 - open a file across a multi-file change;
 - peek into a subagent and step through its siblings.
 
-A broken step fails CI; reviewers read the strip frame by frame on both frontends.
+A broken step fails CI; reviewers read the strip frame by frame on both frontends. The journeys are scripted in `Minga.Test.Storyboard.Journeys`, each step a designed exit from `scenarios.toml`, and run in `test/storyboard/journeys_test.exs` up to their first pending surface.
 
 ## Codifying the vocabulary
 
