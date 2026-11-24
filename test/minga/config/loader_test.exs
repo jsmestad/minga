@@ -109,6 +109,36 @@ defmodule Minga.Config.LoaderTest do
                ~s(Some configured keybindings need optional extensions. Add to config.exs and restart: extension :minga_knowledge_graph, git: "https://github.com/jsmestad/minga-knowledge-graph")
     end
 
+    test "the retired git porcelain declaration warns and the rest of the config still applies" do
+      ExtRegistry.reset()
+      on_exit(&ExtRegistry.reset/0)
+
+      {_dir, config_home, cleanup} =
+        make_config_dir("""
+        use Minga.Config
+
+        extension :git_porcelain
+        set :tab_width, 4
+        """)
+
+      on_exit(cleanup)
+
+      name = :"loader_retired_#{System.unique_integer([:positive])}"
+
+      {{:ok, pid}, log} =
+        ExUnit.CaptureLog.with_log(fn ->
+          Loader.start_link(name: name, config_home: config_home)
+        end)
+
+      assert Loader.load_error(pid) == nil
+      assert Options.get(test_options_server(), :tab_width) == 4
+      assert ExtRegistry.all() == []
+      assert log =~ "extension :git_porcelain is no longer bundled"
+
+      assert log =~
+               ~s(extension :minga_git_extended, git: "https://github.com/jsmestad/minga-git-extended")
+    end
+
     test "loads the built-in MCP extension and mcp_server DSL" do
       {_dir, config_home, cleanup} =
         make_config_dir("""
