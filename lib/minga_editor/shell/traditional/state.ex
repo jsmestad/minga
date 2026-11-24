@@ -625,10 +625,10 @@ defmodule MingaEditor.Shell.Traditional.State do
   def reset_click_regions(%__MODULE__{} = state),
     do: %{state | input: InputState.reset_click_regions(state.input)}
 
-  @doc "Begins a new space-leader generation."
-  @spec begin_space_leader(t()) :: {SpaceLeader.generation(), t()}
-  def begin_space_leader(%__MODULE__{} = state) do
-    {generation, input} = InputState.begin_space_leader(state.input)
+  @doc "Begins a new space-leader generation that records the buffer holding the typed space, or nil when the focused surface took no text."
+  @spec begin_space_leader(t(), pid() | nil) :: {SpaceLeader.generation(), t()}
+  def begin_space_leader(%__MODULE__{} = state, space_buffer) do
+    {generation, input} = InputState.begin_space_leader(state.input, space_buffer)
     {generation, %{state | input: input}}
   end
 
@@ -649,6 +649,10 @@ defmodule MingaEditor.Shell.Traditional.State do
   @spec space_leader_pending?(t()) :: boolean()
   def space_leader_pending?(%__MODULE__{input: input}),
     do: InputState.space_leader_pending?(input)
+
+  @doc "Returns the buffer that holds the pending window's typed space, or nil."
+  @spec space_leader_buffer(t()) :: pid() | nil
+  def space_leader_buffer(%__MODULE__{input: input}), do: InputState.space_leader_buffer(input)
 
   @doc "Returns the current space-leader timer handle."
   @spec space_leader_timer(t()) :: reference() | nil
