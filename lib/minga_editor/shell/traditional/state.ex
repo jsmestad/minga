@@ -664,11 +664,11 @@ defmodule MingaEditor.Shell.Traditional.State do
     do: %{state | input: InputState.reset_space_leader(state.input)}
 
   @doc "Records where a frontend-sent space went, or nil when the last key was not a space."
-  @spec hold_space(t(), MingaEditor.Input.CUA.SpaceTarget.t() | nil) :: t()
+  @spec hold_space(t(), MingaEditor.Input.CUA.SpaceTarget.held() | nil) :: t()
   def hold_space(%__MODULE__{} = state, target),
     do: %{state | input: InputState.hold_space(state.input, target)}
 
   @doc "Returns where the last frontend-sent space went, or nil."
-  @spec held_space(t()) :: MingaEditor.Input.CUA.SpaceTarget.t() | nil
+  @spec held_space(t()) :: MingaEditor.Input.CUA.SpaceTarget.held() | nil
   def held_space(%__MODULE__{input: input}), do: InputState.held_space(input)
 end

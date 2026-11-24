@@ -51,6 +51,8 @@ defmodule MingaEditor.Input do
 
   alias MingaEditor.Input.HandlerRegistry
 
+  # MingaEditor.Input.CUA.SpaceTarget.resolve/1 mirrors the order in which these handlers claim SPC.
+  # Update it when a handler that claims SPC is added, removed, or moved.
   @builtin_surface_handlers [
     {MentionCompletion, 10},
     {ToolApproval, 20},
