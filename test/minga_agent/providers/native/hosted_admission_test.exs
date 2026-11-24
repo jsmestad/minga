@@ -19,6 +19,92 @@ defmodule MingaAgent.Providers.Native.HostedAdmissionTest do
     limits
   end
 
+  defp encoded_request(messages), do: JSON.encode!(%{messages: messages, tools: []})
+
+  # Measures a request through assess/6 and returns its upper-bound token count.
+  defp measured(messages, tools, provider) do
+    authorize = fn digest, evidence ->
+      send(self(), {:assessed, digest, evidence})
+      :ok
+    end
+
+    :ok = HostedAdmission.assess(permissive_limits(), 4_096, messages, tools, provider, authorize)
+    assert_receive {:assessed, digest, %RequestCapacity{input: {:upper_bound, tokens}}}
+    {tokens, digest}
+  end
+
+  defp screenshot(fill),
+    do: ReqLLM.Message.ContentPart.image(:binary.copy(<<fill>>, 600_000), "image/png")
+
+  defp with_image(image) do
+    [
+      %ReqLLM.Message{
+        role: :user,
+        content: [ReqLLM.Message.ContentPart.text("what is this?"), image]
+      }
+    ]
+  end
+
+  describe "images" do
+    test "count the documented per-image maximum on Anthropic and OpenAI routes, not their bytes" do
+      text_only = [
+        %ReqLLM.Message{role: :user, content: [ReqLLM.Message.ContentPart.text("what is this?")]}
+      ]
+
+      for {provider, bound} <- [anthropic: 4_784, openai: 48_169] do
+        {base, _} = measured(text_only, [], provider)
+        {tokens, _} = measured(with_image(screenshot(1)), [], provider)
+        assert (tokens - base) in bound..(bound + 128)
+      end
+    end
+
+    test "keep the byte measure on routes without a documented maximum" do
+      {tokens, _} = measured(with_image(screenshot(1)), [], :openai_codex)
+      assert tokens > 400_000
+    end
+
+    test "still change the digest when only the image bytes differ" do
+      {_, first} = measured(with_image(screenshot(1)), [], :anthropic)
+      {_, second} = measured(with_image(screenshot(2)), [], :anthropic)
+      refute first == second
+    end
+
+    test "a 600 KB screenshot is admitted within a 200k context on Anthropic" do
+      {:ok, limits} =
+        Limits.new(%{context: 200_000, input: 200_000, output: 64_000, request_output: 4_096})
+
+      authorize = fn _digest, %RequestCapacity{decision: decision} ->
+        if decision == :ok, do: :ok, else: decision
+      end
+
+      assert :ok =
+               HostedAdmission.assess(
+                 limits,
+                 4_096,
+                 with_image(screenshot(1)),
+                 [],
+                 :anthropic,
+                 authorize
+               )
+    end
+  end
+
+  describe "tool declarations" do
+    test "add their encoded schemas to the measured size" do
+      tool =
+        ReqLLM.Tool.new!(
+          name: "read_file",
+          description: String.duplicate("Reads a file from the project. ", 200),
+          parameter_schema: [path: [type: :string, required: true, doc: "Path to read"]],
+          callback: fn _ -> {:ok, ""} end
+        )
+
+      {without, _} = measured(@sample_messages, [], :anthropic)
+      {with_tool, _} = measured(@sample_messages, [tool], :anthropic)
+      assert with_tool - without > 2_000
+    end
+  end
+
   describe "upper_bound_tokens/1" do
     test "empty body returns 0" do
       assert HostedAdmission.upper_bound_tokens("") == 0
@@ -51,7 +137,7 @@ defmodule MingaAgent.Providers.Native.HostedAdmissionTest do
         :ok
       end
 
-      assert :ok = HostedAdmission.assess(limits, 4_096, @sample_messages, authorize)
+      assert :ok = HostedAdmission.assess(limits, 4_096, @sample_messages, [], :openai, authorize)
     end
 
     test "messages exceeding capacity return an error" do
@@ -62,33 +148,32 @@ defmodule MingaAgent.Providers.Native.HostedAdmissionTest do
       end
 
       assert {:error, {:request_admission_refused, _reason}} =
-               HostedAdmission.assess(limits, 4_096, @sample_messages, authorize)
+               HostedAdmission.assess(limits, 4_096, @sample_messages, [], :openai, authorize)
     end
 
-    test "digest is the SHA-256 of the JSON-encoded messages" do
+    test "digest is the SHA-256 of the JSON-encoded request" do
       limits = permissive_limits()
-      expected_digest = :crypto.hash(:sha256, JSON.encode!(@sample_messages))
+      expected_digest = :crypto.hash(:sha256, encoded_request(@sample_messages))
 
       authorize = fn digest, _evidence ->
         send(self(), {:digest, digest})
         :ok
       end
 
-      HostedAdmission.assess(limits, 4_096, @sample_messages, authorize)
+      HostedAdmission.assess(limits, 4_096, @sample_messages, [], :openai, authorize)
       assert_receive {:digest, ^expected_digest}
     end
 
     test "evidence carries the upper-bound measurement and encoded output cap" do
       limits = permissive_limits()
-      encoded = JSON.encode!(@sample_messages)
-      expected_tokens = ceil(byte_size(encoded) / 2)
+      expected_tokens = ceil(byte_size(encoded_request(@sample_messages)) / 2)
 
       authorize = fn _digest, evidence ->
         send(self(), {:evidence, evidence})
         :ok
       end
 
-      HostedAdmission.assess(limits, 2_048, @sample_messages, authorize)
+      HostedAdmission.assess(limits, 2_048, @sample_messages, [], :openai, authorize)
       assert_receive {:evidence, %RequestCapacity{} = evidence}
       assert evidence.input == {:upper_bound, expected_tokens}
       assert evidence.output_cap == {:encoded, 2_048}
@@ -102,14 +187,7 @@ defmodule MingaAgent.Providers.Native.HostedAdmissionTest do
       end
 
       assert {:error, {:request_admission_refused, :context_reservation_exceeded}} =
-               HostedAdmission.assess(limits, 4_096, @sample_messages, authorize)
-    end
-  end
-
-  describe "RefusedError exception" do
-    test "message includes the reason" do
-      error = %HostedAdmission.RefusedError{reason: :input_limit_exceeded}
-      assert Exception.message(error) =~ "input_limit_exceeded"
+               HostedAdmission.assess(limits, 4_096, @sample_messages, [], :openai, authorize)
     end
   end
 end

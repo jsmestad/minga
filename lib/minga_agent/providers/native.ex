@@ -1947,8 +1947,11 @@ defmodule MingaAgent.Providers.Native do
       authorize_prepared_dispatch(lctx.session_pid, attempt, digest, evidence)
     end
 
+    tools = Keyword.get(opts, :tools, [])
+    provider = lctx.selection.route.request_provider
+
     admission = fn messages ->
-      HostedAdmission.assess(limits, output_tokens, messages, authorize)
+      HostedAdmission.assess(limits, output_tokens, messages, tools, provider, authorize)
     end
 
     {opts, admission}
