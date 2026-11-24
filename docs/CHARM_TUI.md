@@ -171,7 +171,7 @@ This evidence is an emitted-text-cell capture, not pixel, color, animation or li
 
 ## Storyboard frames
 
-`internal/ui/storyboard_render_test.go` draws every built storyboard scenario from the packets the BEAM recorded for it, through `port.DecodePacket` and `Model.Update`, and writes each frame as a text grid with its style runs. It runs only when `MINGA_STORYBOARD_TRANSCRIPTS` is set; `design/tools/storyboard/renders.py render` sets it. The frames are the TUI baselines in `test/storyboard/baselines/`; see [Renders and baselines](design/storyboard.md#renders-and-baselines).
+`internal/ui/storyboard_render_test.go` draws every built storyboard scenario from the packets the BEAM recorded for it, through `port.DecodePacket` and `Model.Update`, and writes each frame as a text grid with its style runs. It runs only when `MINGA_STORYBOARD_TRANSCRIPTS` is set; `design/tools/storyboard/renders.py render` sets it. The frames are the TUI baselines in `test/storyboard/baselines/`; see [Renders and baselines](design/storyboard.md#renders-and-baselines). Next to each frame it writes `*.parts.json`: the anatomy parts `storyboard_parts_test.go` finds in the drawn cells by the text the semantic model gave them (the which-key panel, its keys and labels, the modeline segments), which the [layout audit](design/anatomy.md#the-layout-audit) measures.
 
 ## Time Agent opening in the packaged terminal editor
 

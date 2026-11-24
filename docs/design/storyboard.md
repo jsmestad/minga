@@ -125,7 +125,9 @@ The text-grid snapshots of the existing snapshot system (`test/storyboard/render
 - a built scenario has no baseline, or a baseline has no render (a size, theme or scenario went away);
 - a scenario changed against the base branch on one frontend but not the other, unless the scenario's promotion is tagged platform-specific with a reason.
 
-A scenario's first renders become its baseline once they pass the layout audit and visual review. Pending scenarios are listed, never rendered and never failures.
+A scenario's first renders become its baseline once they pass the layout audit and visual review. `promote` refuses a render with an open layout-audit finding; visual review is recorded on the pull request. Pending scenarios are listed, never rendered and never failures.
+
+**The layout audit.** `design/tools/storyboard/audit.py` measures every rendered frame against [anatomy.md](anatomy.md): token gaps and row pitch, leading edges and baselines, clipping and truncation, macOS hit targets, contrast from pixels and cells (syntax colours included), and the same part measuring the same in every scenario. It reads its numbers from the token scales, never its own. The **Storyboard renders** job runs it and fails on a finding without an exception; see [The layout audit](anatomy.md#the-layout-audit) for the rules and the exceptions file.
 
 **Running it.** From the repository root, with the pinned Elixir and Go toolchains:
 

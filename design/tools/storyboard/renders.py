@@ -37,6 +37,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
 ROOT = Path(__file__).resolve().parents[3]
 BASELINES = ROOT / "test" / "storyboard" / "baselines"
 BOARDS = ROOT / "design" / "boards"
@@ -283,6 +285,29 @@ def commit_identity():
     return sha + ("-dirty" if dirty else "")
 
 
+def audit_blockers(out, sources, wanted):
+    """Open layout-audit findings in the renders about to be promoted. A render becomes a baseline only once it
+    passes the audit (docs/design/anatomy.md, "The layout audit"); visual review is the other half and is recorded
+    on the pull request."""
+    import audit  # noqa: PLC0415
+
+    staged = out / "audit-input"
+    if staged.exists():
+        shutil.rmtree(staged)
+    if (out / "renders").is_dir():
+        shutil.copytree(out / "renders", staged / "renders", ignore=shutil.ignore_patterns("*.png", "macos-*"))
+    frontends = ["tui"]
+    if sources["macos"] is not None:
+        frontends.append("macos")
+        for path in Path(sources["macos"]).glob("*/macos-*.json"):
+            (staged / "renders" / path.parent.name).mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(path, staged / "renders" / path.parent.name / path.name)
+    shutil.copyfile(out / "manifest.json", staged / "manifest.json")
+    findings, _stale = audit.evaluate(staged, frontends)
+    return [f"{f['scenario']} {f['frontend']} {f['theme']} {f['size']} {f['part']}: {f['rule']}"
+            for f in findings if f["exception"] is None and (not wanted or f["scenario"] in wanted)]
+
+
 def cmd_promote(args):
     out = args.out
     if not args.no_render:
@@ -297,6 +322,11 @@ def cmd_promote(args):
         if frontend not in FRONTENDS or not reason.strip():
             raise Failure("--platform-specific takes FRONTEND:REASON, for example 'macos:the hosting view now clips to the safe area'")
         tag = {"frontend": frontend, "reason": reason.strip()}
+    blocked = audit_blockers(out, sources, set(args.scenario or []))
+    if blocked:
+        raise Failure("these renders fail the layout audit, so they cannot become baselines; fix them or add an "
+                      "exception with its reason and issue to test/storyboard/audit_exceptions.toml:\n  "
+                      + "\n  ".join(blocked))
     commit = commit_identity()
     wanted = set(args.scenario or [])
     promoted = 0
@@ -562,6 +592,9 @@ def cmd_page(args):
                     text = "\n".join(difflib.unified_diff(previous, current, "baseline", "render", lineterm="", n=1))
                     parts.append(f"<details><summary>{html.escape(entry['scenario'])} {html.escape(frame['file'])}</summary>"
                                  f"<pre>{html.escape(text)}</pre></details>")
+    audit_report = out / "audit.md"
+    if audit_report.is_file():
+        parts.append("<h2>Layout audit</h2><details open><pre>" + html.escape(audit_report.read_text()) + "</pre></details>")
     parts.append(f"<script>{PAGE_JS}</script></body></html>")
     (page_dir / "index.html").write_text("".join(parts))
     print(f"wrote {page_dir / 'index.html'}")

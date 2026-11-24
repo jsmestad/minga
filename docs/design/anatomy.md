@@ -229,6 +229,25 @@ The message uses `body`; keys use `Typography.monospacedSmall` in the accent col
 
 The section order is diagnostic, signature, docs, attribution, as in [surfaces.md](surfaces.md#hover). Headings use `body` semibold, prose `body`, code `Typography.monospacedSmall`, attribution `caption` in the secondary colour. Pointer tooltips in the TUI go to the echo line instead of a popover.
 
+## The layout audit
+
+`design/tools/storyboard/audit.py` measures every rendered storyboard scenario against this file and fails CI on a violation (the **Storyboard renders** job). It reads each expected value from the token scales (`ChromeTokens.swift`, `chrome_tokens.go`), the row pitch from this file and the contrast targets from [themes.md](themes.md), so it carries no numbers of its own.
+
+What it measures, per frontend, theme and size:
+
+| Rule | macOS | TUI |
+|---|---|---|
+| Grid alignment: insets, gaps and row pitch equal their token | frames of the views tagged with `anatomyPart` | cell positions of the parts, found in the grid by the text the semantic model gave them |
+| One leading edge per key column; one baseline per row | within 0.5 pt, baselines from the font's ascender | exact, in cells |
+| Nothing clips; truncated text ends in `…` | a part outside its container | a label shown as a prefix without `…` |
+| Hit targets at least one row pitch tall | the modeline | not applicable |
+| Contrast: 4.5:1 for text, 3:1 for glyphs and borders | pixels under each text part and every ink colour in the editor, syntax colours included | every cell's effective colours, syntax colours included |
+| The same part measures the same everywhere | across scenarios at one theme and size | the same |
+
+Parts measured today: the which-key panel and its entries, the modeline with its segments and controls, and the tab bar and the breadcrumb (contrast only). A surface ticket that builds a part tags it on macOS (`.anatomyPart`), teaches the TUI locator in `go/tui/internal/ui/storyboard_parts_test.go` to find it by its semantic text, and adds its rules to the audit. Run it locally after `renders.py render` (and `render-macos`) with `python3 design/tools/storyboard/audit.py`.
+
+**Exceptions.** A violation that a later ticket fixes is listed in `test/storyboard/audit_exceptions.toml` with its scenario, frontend, part, rule, reason and the issue that removes it. An exception that no longer matches anything fails the audit, so the list only shrinks.
+
 ## Changing a measurement
 
 1. Change the token or the part here first, with the intent.
