@@ -1153,13 +1153,15 @@ public struct ContentView<EditorSurface: View>: View {
 
     @ViewBuilder
     private func windowOverlays(_ input: WindowOverlayHostInput) -> some View {
+        // Which-key sits above the modeline, md from the window edges (anatomy.md), never over it.
         VStack {
             Spacer()
             HStack {
-                Spacer()
+                Spacer(minLength: Spacing.md)
                 WhichKeyOverlay(state: input.whichKeyState)
-                Spacer()
+                Spacer(minLength: Spacing.md)
             }
+            .padding(.bottom, StatusBarView.height + Spacing.md)
         }
 
         PickerOverlay(

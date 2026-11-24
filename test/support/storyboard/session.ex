@@ -51,6 +51,8 @@ defmodule Minga.Test.Storyboard.Session do
 
   `:minga` puts Minga in an Agent status before the first key, for example `:thinking` for "Minga is working". The status goes into the editor's live presentation cache, the value every surface reads, so the modeline, the activity card and the rest show it the way they would for a running session. The factory has no running session, so nothing changes the status afterwards.
 
+  `:needs_you` adds that many background Minga tasks waiting for you (Agent workspaces in the Needs you status, without a running session), so needs-you counts read as they do while another task waits on you.
+
   The storyboard renderer (#4036) adds four more: `:root` (a fixed project directory, so the path the chrome shows is the same on every machine; the caller keeps it unique among concurrent sessions in one run, and the directory is written atomically and never deleted, so concurrent runs on one machine can share it), `:theme` (a built-in theme name such as `:astrodark`, set on a private options server before the editor starts), `:capabilities` (the `MingaEditor.Frontend.Capabilities` the frontend would report), and `:record_packets` (keep every packet for `packets/1`).
   """
   @spec start(keyword()) :: t()
@@ -86,6 +88,7 @@ defmodule Minga.Test.Storyboard.Session do
     relay = start_relay(ctx, parser)
     await_highlights!(ctx, parser)
     install_minga_status(ctx, Keyword.get(opts, :minga))
+    install_needs_you_tasks(ctx, Keyword.get(opts, :needs_you, 0))
 
     session = %__MODULE__{
       ctx: ctx,
@@ -108,6 +111,31 @@ defmodule Minga.Test.Storyboard.Session do
       editor,
       &MingaEditor.Shell.Traditional.Workflow.install_agent_status(&1, status)
     )
+
+    :ok
+  end
+
+  @spec install_needs_you_tasks(EditorCase.editor_ctx(), non_neg_integer()) :: :ok
+  defp install_needs_you_tasks(_ctx, 0), do: :ok
+
+  defp install_needs_you_tasks(%{editor: editor}, count) when count > 0 do
+    :sys.replace_state(editor, fn state ->
+      runtime = state.shell_runtime
+      shell = MingaEditor.Shell.Runtime.state(runtime)
+
+      tab_bar =
+        Enum.reduce(1..count, MingaEditor.Shell.Traditional.State.tab_bar(shell), fn n, tab_bar ->
+          {tab_bar, workspace} = MingaEditor.State.TabBar.add_workspace(tab_bar, "Task #{n}")
+          MingaEditor.State.TabBar.set_workspace_agent_status(tab_bar, workspace.id, :needs_you)
+        end)
+
+      shell = MingaEditor.Shell.Traditional.State.install_tab_bar(shell, tab_bar)
+
+      %{
+        state
+        | shell_runtime: MingaEditor.Shell.Runtime.install_traditional_state(runtime, shell)
+      }
+    end)
 
     :ok
   end

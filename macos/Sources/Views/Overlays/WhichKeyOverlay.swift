@@ -1,8 +1,9 @@
-/// Floating which-key popup matching Zed's overlay aesthetic.
+/// The which-key panel (docs/design/surfaces.md, docs/design/anatomy.md "Which-key panel").
 ///
-/// Shows available key continuations after a leader key press (SPC).
-/// Rounded corners, dark background, column grid layout.
-/// Anchored to the bottom of the editor view.
+/// One panel anchored above the modeline: the breadcrumb and the panel's own keys in a 24 pt header row, then one
+/// column per section the BEAM sends, each with its name dim above it and as wide as its longest entry. Rows sit on the
+/// 24 pt row pitch; keys sit in a fixed key column (the column's widest key plus `md`) in the accent colour. Fades in
+/// within 120 ms, and not at all under Reduce Motion.
 
 import SwiftUI
 import MingaProtocol
@@ -13,171 +14,207 @@ public struct WhichKeyOverlay: View {
     }
     public let state: WhichKeyState
     @Environment(\.themeColors) private var theme
-
-
-    private let columnWidth: CGFloat = 220
-    private let rowHeight: CGFloat = 22
-    private let maxColumns = 4
-
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    private var animDuration: Double {
-        reduceMotion ? 0 : 0.15
-    }
+    /// anatomy.md row pitch: every clickable row is 24 pt.
+    static let rowPitch: CGFloat = 24
+    /// A section taller than this splits into further columns, so the panel stays well inside the window.
+    static let maxRowsPerColumn = 12
+    /// The fade-in budget from surfaces.md.
+    public static let fadeDuration: Double = 0.12
 
     public var body: some View {
-        if state.visible && !state.bindings.isEmpty {
-            VStack(spacing: 0) {
-                // Prefix header
-                if !state.prefix.isEmpty {
-                    HStack {
-                        Text(state.prefix)
-                            .font(Typography.font(.small, weight: .semibold, design: .monospaced))
-                            .foregroundStyle(theme.popupKeyFg)
-                            .anatomyPart("whichKey.breadcrumb", text: state.prefix, font: .small, monospaced: true)
-                        Spacer()
-                        if state.pageCount > 1 {
-                            Text("\(state.page + 1)/\(state.pageCount)")
-                                .font(Typography.font(.caption))
-                                .foregroundStyle(theme.popupFg.opacity(0.4))
-                                .anatomyPart("whichKey.count", text: "\(state.page + 1)/\(state.pageCount)", font: .caption)
-                        }
-                    }
-                    .padding(.horizontal, Spacing.lg)
-                    .padding(.vertical, Spacing.sm)
-
-                    Rectangle()
-                        .fill(theme.popupBorder.opacity(0.3))
-                        .frame(height: 1)
-                }
-
-                // Binding grid
-                bindingGrid
-                    .padding(.horizontal, Spacing.md)
-                    .padding(.vertical, Spacing.sm)
+        if state.visible && !state.entries.isEmpty {
+            VStack(alignment: .leading, spacing: 0) {
+                header
+                columns
             }
+            .padding(.horizontal, Spacing.lg)
+            .padding(.vertical, Spacing.md)
             .background(
                 RoundedRectangle(cornerRadius: Radius.lg)
                     .fill(theme.popupBg)
-                    .shadow(color: .black.opacity(0.4), radius: 12, y: -4)
+                    .shadow(color: .black.opacity(0.25), radius: 12, y: -2)
             )
             .overlay(
                 RoundedRectangle(cornerRadius: Radius.lg)
                     .strokeBorder(theme.popupBorder.opacity(0.5), lineWidth: 1)
             )
             .anatomyPart("whichKey.panel")
-            .frame(maxWidth: columnWidth * CGFloat(min(columnCount, maxColumns)) + 24)
-            .padding(.horizontal, Spacing.xl)
-            .padding(.bottom, Spacing.md)
             .allowsHitTesting(false)
-            .transition(.opacity.animation(.easeInOut(duration: animDuration)))
+            .transition(.opacity.animation(reduceMotion ? nil : .easeOut(duration: Self.fadeDuration)))
         }
     }
 
-    private var columnCount: Int {
-        let rows = 10
-        return max(1, (state.bindings.count + rows - 1) / rows)
+    // MARK: - Header
+
+    private var header: some View {
+        HStack(spacing: Spacing.md) {
+            breadcrumb
+            Spacer(minLength: Spacing.xl)
+            ForEach(Array(state.hints.enumerated()), id: \.offset) { _, hint in
+                HStack(spacing: Spacing.xs) {
+                    Text(hint.key)
+                        .font(Typography.monospacedSmall)
+                        .foregroundStyle(theme.popupKeyFg)
+                    Text(hint.label)
+                        .font(Typography.font(.caption))
+                        .foregroundStyle(theme.popupSecondaryFg)
+                }
+                .anatomyPart("whichKey.hint", text: "\(hint.key) \(hint.label)", font: .caption)
+            }
+        }
+        .frame(height: Self.rowPitch)
     }
 
-    @ViewBuilder
-    private var bindingGrid: some View {
-        let cols = columnCount
-        let rows = max(1, (state.bindings.count + cols - 1) / cols)
+    private var breadcrumbText: String {
+        state.breadcrumb.map { $0.label.isEmpty ? $0.key : "\($0.key) \($0.label)" }.joined(separator: " › ")
+    }
 
-        HStack(alignment: .top, spacing: Spacing.xs) {
-            ForEach(0..<cols, id: \.self) { col in
-                VStack(spacing: 0) {
-                    ForEach(0..<rows, id: \.self) { row in
-                        let index = col * rows + row
-                        if index < state.bindings.count {
-                            bindingRow(state.bindings[index])
-                        }
-                    }
+    private var breadcrumb: some View {
+        HStack(spacing: Spacing.xs) {
+            ForEach(Array(state.breadcrumb.enumerated()), id: \.offset) { index, crumb in
+                if index > 0 {
+                    Text("›")
+                        .font(Typography.font(.small))
+                        .foregroundStyle(theme.popupSecondaryFg)
                 }
-                .frame(width: columnWidth)
-                .anatomyPart("whichKey.column")
+                Text(crumb.key)
+                    .font(Typography.monospacedSmall)
+                    .foregroundStyle(theme.popupKeyFg)
+                if !crumb.label.isEmpty {
+                    Text(crumb.label)
+                        .font(Typography.font(.small, weight: .semibold))
+                        .foregroundStyle(theme.popupFg)
+                }
+            }
+            if !state.count.isEmpty {
+                Text(state.count)
+                    .font(Typography.font(.caption))
+                    .foregroundStyle(theme.popupSecondaryFg)
+            }
+        }
+        .lineLimit(1)
+        .anatomyPart("whichKey.breadcrumb", text: breadcrumbText, font: .small)
+    }
+
+    // MARK: - Columns
+
+    private var columns: some View {
+        HStack(alignment: .top, spacing: Spacing.panel) {
+            ForEach(WhichKeyLayout.columns(state.sections, maxRows: Self.maxRowsPerColumn)) { column in
+                columnView(column)
             }
         }
     }
 
-    @ViewBuilder
-    private func bindingRow(_ binding: WhichKeyBinding) -> some View {
-        HStack(spacing: Spacing.sm) {
-            // Key badge
-            Text(binding.key)
+    private func columnView(_ column: WhichKeyLayout.Column) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if column.hasHeading {
+                Text(column.title)
+                    .font(Typography.font(.caption))
+                    .foregroundStyle(theme.popupSecondaryFg)
+                    .lineLimit(1)
+                    .anatomyPart("whichKey.groupName", text: column.title, font: .caption)
+                    .padding(.bottom, Spacing.xs)
+            }
+            ForEach(Array(column.entries.enumerated()), id: \.offset) { _, entry in
+                entryRow(entry, keyWidth: column.keyWidth)
+            }
+        }
+        .anatomyPart("whichKey.column")
+    }
+
+    private func entryRow(_ entry: Wire.WhichKeyEntry, keyWidth: CGFloat) -> some View {
+        HStack(spacing: 0) {
+            Text(entry.key)
                 .font(Typography.monospacedSmall)
                 .foregroundStyle(theme.popupKeyFg)
-                .anatomyPart("whichKey.entryKey", text: binding.key, font: .small, monospaced: true)
-                .frame(minWidth: 24, alignment: .trailing)
-
-            // Description. Group rows arrive from the BEAM as Title Case labels with a trailing
-            // chevron ("Session ›") and draw in the group colour role (docs/design/keys.md).
-            Text(binding.description)
-                .font(Typography.font(.small))
-                .foregroundStyle(binding.isGroup ? theme.roleColor(.group) : theme.popupFg.opacity(0.7))
-                .lineLimit(1)
-                .truncationMode(.tail)
-                .anatomyPart("whichKey.entryLabel", text: binding.description, font: .small)
-
-            Spacer(minLength: 0)
+                .anatomyPart("whichKey.entryKey", text: entry.key, font: .small, monospaced: true)
+                .frame(width: keyWidth, alignment: .leading)
+            HStack(spacing: Spacing.md) {
+                // Group rows arrive from the BEAM as Title Case labels with a trailing chevron ("Session ›") and draw
+                // in the group colour role (docs/design/keys.md); commands are plain text.
+                Text(entry.label)
+                    .font(Typography.font(.body))
+                    .foregroundStyle(entry.isGroup ? theme.roleColor(.group) : theme.popupFg)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .anatomyPart("whichKey.entryLabel", text: entry.label, font: .body)
+                if !entry.count.isEmpty {
+                    Text(entry.count)
+                        .font(Typography.font(.caption))
+                        .foregroundStyle(theme.popupSecondaryFg)
+                        .lineLimit(1)
+                        .anatomyPart("whichKey.entryCount", text: entry.count, font: .caption)
+                }
+                if !entry.platformKey.isEmpty {
+                    Text(entry.platformKey)
+                        .font(Typography.monospacedSmall)
+                        .foregroundStyle(theme.popupSecondaryFg)
+                        .anatomyPart("whichKey.platformKey", text: entry.platformKey, font: .small, monospaced: true)
+                }
+            }
         }
-        .frame(height: rowHeight)
-        .anatomyPart("whichKey.entry", text: "\(binding.key) \(binding.description)")
+        .frame(height: Self.rowPitch)
+        .anatomyPart("whichKey.entry", text: "\(entry.key) \(entry.label)")
+    }
+}
+
+/// Column layout for the which-key panel: each section becomes one column, split top to bottom into more columns
+/// when it is taller than the row budget. Each column's key slot is its widest key plus `md`, so every label in the
+/// column starts at the same edge (anatomy.md rule 2).
+public enum WhichKeyLayout {
+    public struct Column: Identifiable, Equatable {
+        public let id: Int
+        public let title: String
+        public let hasHeading: Bool
+        public let entries: [Wire.WhichKeyEntry]
+        public let keyWidth: CGFloat
+    }
+
+    public static func columns(_ sections: [WhichKeySection], maxRows: Int) -> [Column] {
+        let titled = sections.contains { !$0.title.isEmpty }
+        var columns: [Column] = []
+        for section in sections {
+            let rows = max(maxRows, 1)
+            var start = 0
+            while start < section.entries.count {
+                let chunk = Array(section.entries[start..<min(start + rows, section.entries.count)])
+                let keyWidth = chunk.map { ModelineMetrics.textWidth($0.key, weight: .medium, monospaced: true) }.max() ?? 0
+                columns.append(Column(
+                    id: columns.count,
+                    title: start == 0 ? section.title : "",
+                    hasHeading: titled,
+                    entries: chunk,
+                    keyWidth: keyWidth + Spacing.md
+                ))
+                start += rows
+            }
+        }
+        return columns
     }
 }
 
 #Preview("Which Key") {
     let theme = PreviewFixtures.theme()
-    let state = WhichKeyState()
-    state.update(
-        visible: true,
-        prefix: "SPC",
-        page: 0,
-        pageCount: 1,
-        rawBindings: [
-            Wire.WhichKeyBinding(kind: 1, key: "f", description: "Files ›", icon: ""),
-            Wire.WhichKeyBinding(kind: 1, key: "b", description: "Buffers ›", icon: ""),
-            Wire.WhichKeyBinding(kind: 1, key: "w", description: "Windows ›", icon: ""),
-            Wire.WhichKeyBinding(kind: 1, key: "g", description: "Git ›", icon: ""),
-            Wire.WhichKeyBinding(kind: 1, key: "s", description: "Search ›", icon: ""),
-            Wire.WhichKeyBinding(kind: 0, key: ":", description: "M-x command", icon: ""),
-            Wire.WhichKeyBinding(kind: 0, key: ".", description: "repeat", icon: ""),
-            Wire.WhichKeyBinding(kind: 0, key: "/", description: "search project", icon: ""),
-            Wire.WhichKeyBinding(kind: 1, key: "p", description: "Project ›", icon: ""),
-            Wire.WhichKeyBinding(kind: 1, key: "t", description: "Toggles ›", icon: ""),
-            Wire.WhichKeyBinding(kind: 1, key: "c", description: "Code ›", icon: ""),
-            Wire.WhichKeyBinding(kind: 0, key: "e", description: "file tree", icon: ""),
-        ]
-    )
-    return WhichKeyOverlay(state: state)
-        .frame(width: 520, height: 300)
-        .background(theme.editorBg)
-        .environment(theme)
-}
-
-#Preview("Which Key Paged") {
-    let theme = PreviewFixtures.theme()
-    let state = WhichKeyState()
-    state.update(
-        visible: true,
-        prefix: "SPC g",
-        page: 1,
-        pageCount: 3,
-        rawBindings: [
-            Wire.WhichKeyBinding(kind: 0, key: "s", description: "stage file", icon: ""),
-            Wire.WhichKeyBinding(kind: 0, key: "u", description: "unstage file", icon: ""),
-            Wire.WhichKeyBinding(kind: 0, key: "c", description: "commit", icon: ""),
-            Wire.WhichKeyBinding(kind: 0, key: "p", description: "push", icon: ""),
-            Wire.WhichKeyBinding(kind: 0, key: "f", description: "fetch", icon: ""),
-            Wire.WhichKeyBinding(kind: 0, key: "d", description: "diff", icon: ""),
-            Wire.WhichKeyBinding(kind: 1, key: "b", description: "Branch ›", icon: ""),
-            Wire.WhichKeyBinding(kind: 1, key: "r", description: "Rebase ›", icon: ""),
-            Wire.WhichKeyBinding(kind: 0, key: "l", description: "log", icon: ""),
-            Wire.WhichKeyBinding(kind: 0, key: "z", description: "stash", icon: ""),
-        ]
-    )
-    return WhichKeyOverlay(state: state)
-        .frame(width: 520, height: 300)
+    let entries: [Wire.WhichKeyEntry] = [
+        .init(kind: 0, key: "a", label: "Agent view", section: "Tasks", count: "· 1 needs you"),
+        .init(kind: 0, key: "n", label: "New session", section: "Tasks"),
+        .init(kind: 0, key: "s", label: "Stop", section: "Tasks"),
+        .init(kind: 0, key: "v", label: "Conversation split", section: "Conversation"),
+        .init(kind: 1, key: "q", label: "Queue ›", section: "Conversation"),
+        .init(kind: 0, key: "r", label: "Pending reviews", section: "Changes", count: "· 3"),
+        .init(kind: 1, key: "S", label: "Session ›", section: "More"),
+    ]
+    let model = Wire.WhichKey(
+        visible: true, path: "SPC a",
+        breadcrumb: [.init(key: "SPC", path: "SPC"), .init(key: "a", label: "Minga", path: "SPC a")],
+        count: "· 1 needs you",
+        hints: [.init(key: "⌫", label: "back"), .init(key: "esc", label: "close")],
+        entries: entries)
+    return WhichKeyOverlay(state: WhichKeyState(model: model))
+        .frame(width: 900, height: 320)
         .background(theme.editorBg)
         .environment(theme)
 }

@@ -108,19 +108,15 @@ type CompletionItem struct {
 	MatchRanges []generated.CompletionMatchRange
 }
 
+// WhichKey is the which-key panel (docs/GUI_PROTOCOL.md, gui_which_key). Entries arrive in display order; consecutive
+// entries with the same Section form one section.
 type WhichKey struct {
-	Visible   bool
-	Prefix    string
-	Page      byte
-	PageCount byte
-	Bindings  []WhichKeyBinding
-}
-
-type WhichKeyBinding struct {
-	Kind        byte
-	Key         string
-	Description string
-	Icon        string
+	Visible    bool
+	Path       string
+	Breadcrumb []generated.WhichKeyCrumb
+	Count      string
+	Hints      []generated.WhichKeyHint
+	Entries    []generated.WhichKeyEntry
 }
 
 type Picker struct {

@@ -625,14 +625,27 @@ func TestDecodeCompletionChromeDoesNotSwallowFollowingCommands(t *testing.T) {
 }
 
 func TestDecodeWhichKeyChromeDoesNotSwallowFollowingCommands(t *testing.T) {
-	binding := []byte{1}
-	binding = append(binding, string8("f")...)
-	binding = append(binding, string16("file")...)
-	binding = append(binding, string8("*")...)
 	packet := []byte{generated.OPGuiWhichKey, 1}
+	packet = append(packet, string16("SPC a")...)
+	packet = append(packet, 2)
+	packet = append(packet, string8("SPC")...)
+	packet = append(packet, string16("")...)
 	packet = append(packet, string16("SPC")...)
-	packet = append(packet, 0, 2, 0, 1)
-	packet = append(packet, binding...)
+	packet = append(packet, string8("a")...)
+	packet = append(packet, string16("Minga")...)
+	packet = append(packet, string16("SPC a")...)
+	packet = append(packet, string16("· 1")...)
+	packet = append(packet, 1)
+	packet = append(packet, string8("⌫")...)
+	packet = append(packet, string16("back")...)
+	packet = append(packet, 0, 1)
+	packet = append(packet, 1)
+	packet = append(packet, string8("q")...)
+	packet = append(packet, 0, 0, 0, 'q', 0)
+	packet = append(packet, string16("Queue ›")...)
+	packet = append(packet, string16("Conversation")...)
+	packet = append(packet, string16("· 2")...)
+	packet = append(packet, string8("⌘.")...)
 	packet = append(packet, generated.OPCommitFrame, 0, 0, 0, 0, 0, 0, 0, 0)
 
 	first, err := DecodeCommand(packet)
@@ -643,11 +656,14 @@ func TestDecodeWhichKeyChromeDoesNotSwallowFollowingCommands(t *testing.T) {
 		t.Fatalf("which-key size = %d, want %d", first.Size, len(packet)-9)
 	}
 	which := first.Chrome.Which
-	if !which.Visible || which.Prefix != "SPC" || which.PageCount != 2 || len(which.Bindings) != 1 {
+	if !which.Visible || which.Path != "SPC a" || which.Count != "· 1" || len(which.Breadcrumb) != 2 || len(which.Hints) != 1 || len(which.Entries) != 1 {
 		t.Fatalf("which-key decoded incorrectly: %+v", which)
 	}
-	if got := which.Bindings[0]; got.Key != "f" || got.Description != "file" || got.Icon != "*" {
-		t.Fatalf("which-key binding decoded incorrectly: %+v", got)
+	if crumb := which.Breadcrumb[1]; crumb.Key != "a" || crumb.Label != "Minga" || crumb.Path != "SPC a" {
+		t.Fatalf("which-key crumb decoded incorrectly: %+v", crumb)
+	}
+	if got := which.Entries[0]; got.Kind != 1 || got.Key != "q" || got.Codepoint != 'q' || got.Label != "Queue ›" || got.Section != "Conversation" || got.Count != "· 2" || got.PlatformKey != "⌘." {
+		t.Fatalf("which-key entry decoded incorrectly: %+v", got)
 	}
 
 	second, err := DecodeCommand(packet[first.Size:])

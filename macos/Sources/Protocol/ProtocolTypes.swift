@@ -522,18 +522,77 @@ public enum Wire {
 
     // MARK: - Which key
 
-    /// A which-key binding from gui_which_key.
-    public struct WhichKeyBinding: Sendable {
+    /// One which-key row from gui_which_key (docs/GUI_PROTOCOL.md). `key` is the formatted key and
+    /// `codepoint` with `modifiers` the raw key a click presses; `count` and `platformKey` are final
+    /// display text, empty when there is none.
+    public struct WhichKeyEntry: Sendable, Equatable {
         public let kind: UInt8  // 0 = command, 1 = group
         public let key: String
-        public let description: String
-        public let icon: String
+        public let codepoint: UInt32
+        public let modifiers: UInt8
+        public let label: String
+        public let section: String
+        public let count: String
+        public let platformKey: String
 
-        public init(kind: UInt8, key: String, description: String, icon: String) {
+        public var isGroup: Bool { kind == 1 }
+
+        public init(kind: UInt8, key: String, codepoint: UInt32 = 0, modifiers: UInt8 = 0, label: String,
+                    section: String = "", count: String = "", platformKey: String = "") {
             self.kind = kind
             self.key = key
-            self.description = description
-            self.icon = icon
+            self.codepoint = codepoint
+            self.modifiers = modifiers
+            self.label = label
+            self.section = section
+            self.count = count
+            self.platformKey = platformKey
+        }
+    }
+
+    /// One breadcrumb part: the key, the group label it opened, and the prefix a click on it returns to.
+    public struct WhichKeyCrumb: Sendable, Equatable {
+        public let key: String
+        public let label: String
+        public let path: String
+
+        public init(key: String, label: String = "", path: String) {
+            self.key = key
+            self.label = label
+            self.path = path
+        }
+    }
+
+    /// A key the which-key panel itself answers, such as `⌫ back`.
+    public struct WhichKeyHint: Sendable, Equatable {
+        public let key: String
+        public let label: String
+
+        public init(key: String, label: String) {
+            self.key = key
+            self.label = label
+        }
+    }
+
+    /// The which-key panel. The BEAM sends the words, order and sections; the view decides the columns.
+    public struct WhichKey: Sendable, Equatable {
+        public let visible: Bool
+        public let path: String
+        public let breadcrumb: [WhichKeyCrumb]
+        public let count: String
+        public let hints: [WhichKeyHint]
+        public let entries: [WhichKeyEntry]
+
+        public static let hidden = WhichKey(visible: false)
+
+        public init(visible: Bool, path: String = "", breadcrumb: [WhichKeyCrumb] = [], count: String = "",
+                    hints: [WhichKeyHint] = [], entries: [WhichKeyEntry] = []) {
+            self.visible = visible
+            self.path = path
+            self.breadcrumb = breadcrumb
+            self.count = count
+            self.hints = hints
+            self.entries = entries
         }
     }
 

@@ -26,7 +26,9 @@ public struct StatusBarView: View {
 
     public let sendAction: ViewActionHandler<Action>?
 
-    private let barHeight: CGFloat = 24
+    /// The modeline's height, a frame metric the which-key panel anchors above.
+    public static let height: CGFloat = 24
+    private let barHeight: CGFloat = StatusBarView.height
 
     public var body: some View {
         GeometryReader { proxy in

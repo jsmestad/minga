@@ -1249,9 +1249,9 @@ final class CommandDispatcher {
         case .guiCompletionSelection(let generation, let selectedItemID, let documentation):
             guiState.completionState.updateSelection(generation: generation, selectedItemID: selectedItemID, documentation: documentation)
 
-        case .guiWhichKey(let visible, let prefix, let page, let pageCount, let bindings):
-            if visible {
-                guiState.whichKeyState.update(visible: true, prefix: prefix, page: page, pageCount: pageCount, rawBindings: bindings)
+        case .guiWhichKey(let model):
+            if model.visible {
+                guiState.whichKeyState.update(model)
             } else {
                 guiState.whichKeyState.hide()
             }

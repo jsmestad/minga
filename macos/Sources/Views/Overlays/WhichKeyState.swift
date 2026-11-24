@@ -3,48 +3,47 @@
 import SwiftUI
 import MingaProtocol
 
-public struct WhichKeyBinding: Identifiable {
-    public init(id: Int, isGroup: Bool, key: String, description: String, icon: String) {
-        self.id = id
-        self.isGroup = isGroup
-        self.key = key
-        self.description = description
-        self.icon = icon
-    }
+/// One section of the which-key panel: a run of entries that share a section name, drawn as a column
+/// with the name dim above it (an empty name has no heading).
+public struct WhichKeySection: Identifiable, Equatable {
     public let id: Int
-    public let isGroup: Bool
-    public let key: String
-    public let description: String
-    public let icon: String
+    public let title: String
+    public let entries: [Wire.WhichKeyEntry]
 }
 
 @Observable
 public final class WhichKeyState {
-    public init(visible: Bool = false, prefix: String = "", page: Int = 0, pageCount: Int = 0, bindings: [WhichKeyBinding] = []) {
-        self.visible = visible
-        self.prefix = prefix
-        self.page = page
-        self.pageCount = pageCount
-        self.bindings = bindings
+    public init(model: Wire.WhichKey = .hidden) {
+        self.model = model
     }
-    public var visible: Bool = false
-    public var prefix: String = ""
-    public var page: Int = 0
-    public var pageCount: Int = 0
-    public var bindings: [WhichKeyBinding] = []
 
-    public func update(visible: Bool, prefix: String, page: UInt8, pageCount: UInt8, rawBindings: [Wire.WhichKeyBinding]) {
-        self.visible = visible
-        self.prefix = prefix
-        self.page = Int(page)
-        self.pageCount = Int(pageCount)
-        self.bindings = rawBindings.enumerated().map { i, b in
-            WhichKeyBinding(id: i, isGroup: b.kind == 1, key: b.key, description: b.description, icon: b.icon)
+    public private(set) var model: Wire.WhichKey
+
+    public var visible: Bool { model.visible }
+    public var path: String { model.path }
+    public var breadcrumb: [Wire.WhichKeyCrumb] { model.breadcrumb }
+    public var count: String { model.count }
+    public var hints: [Wire.WhichKeyHint] { model.hints }
+    public var entries: [Wire.WhichKeyEntry] { model.entries }
+
+    /// The entries grouped into sections, in the BEAM's order.
+    public var sections: [WhichKeySection] {
+        var sections: [WhichKeySection] = []
+        for entry in model.entries {
+            if let last = sections.last, last.title == entry.section {
+                sections[sections.count - 1] = WhichKeySection(id: last.id, title: last.title, entries: last.entries + [entry])
+            } else {
+                sections.append(WhichKeySection(id: sections.count, title: entry.section, entries: [entry]))
+            }
         }
+        return sections
+    }
+
+    public func update(_ model: Wire.WhichKey) {
+        if self.model != model { self.model = model }
     }
 
     public func hide() {
-        visible = false
-        bindings = []
+        if model.visible { model = .hidden }
     }
 }

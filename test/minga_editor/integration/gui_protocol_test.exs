@@ -1063,36 +1063,80 @@ defmodule Minga.Integration.GUIProtocolTest do
   end
 
   describe "gui_which_key visible" do
-    test "round-trips visible which-key with bindings", %{harness: harness} do
-      # Build raw binary: visible=1, prefix="SPC", page=0, pageCount=2, 2 bindings
-      prefix = "SPC"
+    test "round-trips the panel: path, breadcrumb, count, hints and entries", %{harness: harness} do
+      model = %Minga.RenderModel.UI.WhichKey{
+        visible: true,
+        path: "SPC a",
+        breadcrumb: [
+          %{key: "SPC", label: "", path: "SPC"},
+          %{key: "a", label: "Minga", path: "SPC a"}
+        ],
+        count: "· 1 needs you",
+        hints: [%{key: "⌫", label: "back"}, %{key: "esc", label: "close"}],
+        entries: [
+          %{
+            key: "s",
+            codepoint: ?s,
+            modifiers: 0,
+            label: "Stop",
+            kind: :command,
+            section: "Tasks",
+            count: "",
+            platform_key: "⌘."
+          },
+          %{
+            key: "q",
+            codepoint: ?q,
+            modifiers: 0,
+            label: "Queue ›",
+            kind: :group,
+            section: "Conversation",
+            count: "· 2",
+            platform_key: ""
+          }
+        ]
+      }
 
-      binding1 =
-        <<0::8, 1::8, "f"::binary, 9::16, "Find file"::binary, 0::8>>
-
-      binding2 =
-        <<1::8, 1::8, "b"::binary, 7::16, "Buffers"::binary, 0::8>>
-
-      cmd =
-        <<0x72, 1::8, byte_size(prefix)::16, prefix::binary, 0::8, 2::8, 2::16, binding1::binary,
-          binding2::binary>>
-
+      {cmd, _caches} = WhichKeyEncoder.encode(model, Caches.new())
       decoded = round_trip(harness, cmd, "gui_which_key")
 
       assert decoded["type"] == "gui_which_key"
       assert decoded["visible"] == true
-      assert decoded["prefix"] == "SPC"
-      assert decoded["page"] == 0
-      assert decoded["page_count"] == 2
-      assert Enum.count(decoded["bindings"]) == 2
+      assert decoded["path"] == "SPC a"
+      assert decoded["count"] == "· 1 needs you"
 
-      [b1, b2] = decoded["bindings"]
-      assert b1["kind"] == 0
-      assert b1["key"] == "f"
-      assert b1["description"] == "Find file"
-      assert b2["kind"] == 1
-      assert b2["key"] == "b"
-      assert b2["description"] == "Buffers"
+      assert decoded["breadcrumb"] == [
+               %{"key" => "SPC", "label" => "", "path" => "SPC"},
+               %{"key" => "a", "label" => "Minga", "path" => "SPC a"}
+             ]
+
+      assert decoded["hints"] == [
+               %{"key" => "⌫", "label" => "back"},
+               %{"key" => "esc", "label" => "close"}
+             ]
+
+      assert decoded["entries"] == [
+               %{
+                 "kind" => 0,
+                 "key" => "s",
+                 "codepoint" => ?s,
+                 "modifiers" => 0,
+                 "label" => "Stop",
+                 "section" => "Tasks",
+                 "count" => "",
+                 "platform_key" => "⌘."
+               },
+               %{
+                 "kind" => 1,
+                 "key" => "q",
+                 "codepoint" => ?q,
+                 "modifiers" => 0,
+                 "label" => "Queue ›",
+                 "section" => "Conversation",
+                 "count" => "· 2",
+                 "platform_key" => ""
+               }
+             ]
     end
   end
 

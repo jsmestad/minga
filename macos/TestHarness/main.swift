@@ -154,11 +154,15 @@ func commandToJSON(_ command: RenderCommand) -> [String: Any]? {
         }
         return ["type": "gui_completion", "visible": visible, "anchor_row": Int(anchorRow), "anchor_col": Int(anchorCol), "selected_index": Int(selectedIndex), "selected_item_id": selectedItemID, "items": itemArray, "documentation": documentation, "total_count": Int(totalCount), "matched_count": Int(matchedCount), "incomplete": incomplete, "generation": Int(generation)]
 
-    case .guiWhichKey(let visible, let prefix, let page, let pageCount, let bindings):
-        let bindingArray = bindings.map { b -> [String: Any] in
-            ["key": b.key, "description": b.description, "icon": b.icon, "kind": Int(b.kind)]
+    case .guiWhichKey(let model):
+        let entries = model.entries.map { e -> [String: Any] in
+            ["kind": Int(e.kind), "key": e.key, "codepoint": Int(e.codepoint), "modifiers": Int(e.modifiers), "label": e.label,
+             "section": e.section, "count": e.count, "platform_key": e.platformKey]
         }
-        return ["type": "gui_which_key", "visible": visible, "prefix": prefix, "page": Int(page), "page_count": Int(pageCount), "bindings": bindingArray]
+        let crumbs = model.breadcrumb.map { ["key": $0.key, "label": $0.label, "path": $0.path] }
+        let hints = model.hints.map { ["key": $0.key, "label": $0.label] }
+        return ["type": "gui_which_key", "visible": model.visible, "path": model.path, "breadcrumb": crumbs,
+                "count": model.count, "hints": hints, "entries": entries]
 
     case .guiBreadcrumb(let segments):
         return ["type": "gui_breadcrumb", "segments": segments]

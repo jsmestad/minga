@@ -817,22 +817,6 @@ func (m Model) renderCompletionItemRow(item protocol.CompletionItem, selected bo
 	return renderPadded(rowStyle, text, width)
 }
 
-func (m Model) renderWhichKey(which protocol.WhichKey) []string {
-	title := "Keys"
-	if which.Prefix != "" {
-		title += " " + which.Prefix
-	}
-	if which.PageCount > 1 {
-		title += gap(spaceXL) + fmt.Sprintf("%d/%d", which.Page+1, which.PageCount)
-	}
-	items := make([]componentItem, 0, len(which.Bindings))
-	for _, binding := range which.Bindings {
-		label := strings.TrimSpace(binding.Icon + " " + binding.Description)
-		items = append(items, componentItem{title: binding.Key, description: label})
-	}
-	return takeLines(m.charmList(title, items, 0, m.maxOverlayHeight(), true), m.maxOverlayHeight())
-}
-
 func (m Model) renderPicker(picker protocol.Picker, preview protocol.PickerPreview) []string {
 	title := picker.Title
 	if picker.Query != "" {

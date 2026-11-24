@@ -58,16 +58,6 @@ defmodule MingaEditor.Shell.Traditional.WhichKeyWorkflow do
 
   def reveal(state, _generation), do: state
 
-  @doc "Moves which-key to the next page."
-  @spec next_page(EditorState.t()) :: EditorState.t()
-  def next_page(state),
-    do: update_shell_state(state, &ShellState.next_whichkey_page/1)
-
-  @doc "Moves which-key to the previous page."
-  @spec previous_page(EditorState.t()) :: EditorState.t()
-  def previous_page(state),
-    do: update_shell_state(state, &ShellState.previous_whichkey_page/1)
-
   @spec schedule(EditorState.t()) :: EditorState.t()
   defp schedule(state) do
     generation = state.shell_runtime.state.whichkey.generation

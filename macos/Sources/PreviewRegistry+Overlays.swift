@@ -145,62 +145,49 @@ extension PreviewRegistry {
 
     // MARK: - WhichKeyOverlay
 
+    static func whichKeyModel(path: String, crumbs: [Wire.WhichKeyCrumb], count: String, entries: [Wire.WhichKeyEntry]) -> Wire.WhichKey {
+        Wire.WhichKey(visible: true, path: path, breadcrumb: crumbs, count: count,
+                      hints: [.init(key: "⌫", label: "back"), .init(key: "esc", label: "close")], entries: entries)
+    }
+
     static func whichKeyPreview() -> some View {
         let theme = PreviewFixtures.theme()
-        let state = WhichKeyState()
-        state.update(
-            visible: true,
-            prefix: "SPC",
-            page: 0,
-            pageCount: 1,
-            rawBindings: [
-                Wire.WhichKeyBinding(kind: 1, key: "f", description: "Files ›", icon: ""),
-                Wire.WhichKeyBinding(kind: 1, key: "b", description: "Buffers ›", icon: ""),
-                Wire.WhichKeyBinding(kind: 1, key: "w", description: "Windows ›", icon: ""),
-                Wire.WhichKeyBinding(kind: 1, key: "g", description: "Git ›", icon: ""),
-                Wire.WhichKeyBinding(kind: 1, key: "s", description: "Search ›", icon: ""),
-                Wire.WhichKeyBinding(kind: 0, key: ":", description: "M-x command", icon: ""),
-                Wire.WhichKeyBinding(kind: 0, key: ".", description: "repeat", icon: ""),
-                Wire.WhichKeyBinding(kind: 0, key: "/", description: "search project", icon: ""),
-                Wire.WhichKeyBinding(kind: 1, key: "p", description: "Project ›", icon: ""),
-                Wire.WhichKeyBinding(kind: 1, key: "t", description: "Toggles ›", icon: ""),
-                Wire.WhichKeyBinding(kind: 1, key: "c", description: "Code ›", icon: ""),
-                Wire.WhichKeyBinding(kind: 0, key: "e", description: "file tree", icon: ""),
-            ]
-        )
-
-        return WhichKeyOverlay(state: state)
-            .frame(width: 520, height: 300)
+        let model = whichKeyModel(path: "SPC", crumbs: [.init(key: "SPC", path: "SPC")], count: "", entries: [
+            .init(kind: 1, key: "a", label: "Minga ›", section: "Groups", count: "· 1 needs you"),
+            .init(kind: 1, key: "s", label: "Search ›", section: "Groups"),
+            .init(kind: 1, key: "c", label: "Code ›", section: "Groups", count: "· 1 error"),
+            .init(kind: 1, key: "f", label: "Files ›", section: "Groups"),
+            .init(kind: 1, key: "b", label: "Buffers ›", section: "Groups"),
+            .init(kind: 0, key: ":", label: "Execute command", section: "Groups"),
+            .init(kind: 0, key: "SPC", label: "Find file in project", section: "Often"),
+            .init(kind: 0, key: ",", label: "Switch buffer", section: "Often"),
+            .init(kind: 0, key: "/", label: "Search project", section: "Often"),
+        ])
+        return WhichKeyOverlay(state: WhichKeyState(model: model))
+            .frame(width: 720, height: 300)
             .background(theme.editorBg)
             .environment(theme)
     }
 
-    // MARK: - WhichKeyPaged
+    // MARK: - WhichKeyMinga
 
     static func whichKeyPagedPreview() -> some View {
         let theme = PreviewFixtures.theme()
-        let state = WhichKeyState()
-        state.update(
-            visible: true,
-            prefix: "SPC g",
-            page: 1,
-            pageCount: 3,
-            rawBindings: [
-                Wire.WhichKeyBinding(kind: 0, key: "s", description: "stage file", icon: ""),
-                Wire.WhichKeyBinding(kind: 0, key: "u", description: "unstage file", icon: ""),
-                Wire.WhichKeyBinding(kind: 0, key: "c", description: "commit", icon: ""),
-                Wire.WhichKeyBinding(kind: 0, key: "p", description: "push", icon: ""),
-                Wire.WhichKeyBinding(kind: 0, key: "f", description: "fetch", icon: ""),
-                Wire.WhichKeyBinding(kind: 0, key: "d", description: "diff", icon: ""),
-                Wire.WhichKeyBinding(kind: 1, key: "b", description: "Branch ›", icon: ""),
-                Wire.WhichKeyBinding(kind: 1, key: "r", description: "Rebase ›", icon: ""),
-                Wire.WhichKeyBinding(kind: 0, key: "l", description: "log", icon: ""),
-                Wire.WhichKeyBinding(kind: 0, key: "z", description: "stash", icon: ""),
-            ]
-        )
-
-        return WhichKeyOverlay(state: state)
-            .frame(width: 520, height: 300)
+        let model = whichKeyModel(
+            path: "SPC a",
+            crumbs: [.init(key: "SPC", path: "SPC"), .init(key: "a", label: "Minga", path: "SPC a")],
+            count: "· 1 needs you",
+            entries: [
+                .init(kind: 0, key: "a", label: "Agent view", section: "Tasks", count: "· 1 needs you"),
+                .init(kind: 0, key: "n", label: "New session", section: "Tasks"),
+                .init(kind: 0, key: "s", label: "Stop", section: "Tasks"),
+                .init(kind: 0, key: "v", label: "Conversation split", section: "Conversation"),
+                .init(kind: 1, key: "q", label: "Queue ›", section: "Conversation"),
+                .init(kind: 0, key: "r", label: "Pending reviews", section: "Changes", count: "· 3"),
+                .init(kind: 1, key: "S", label: "Session ›", section: "More"),
+            ])
+        return WhichKeyOverlay(state: WhichKeyState(model: model))
+            .frame(width: 900, height: 300)
             .background(theme.editorBg)
             .environment(theme)
     }

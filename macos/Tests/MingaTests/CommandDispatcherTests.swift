@@ -1115,20 +1115,19 @@ struct CommandDispatcherRoutingTests {
     @Test("guiWhichKey visible updates whichKeyState")
     @MainActor func guiWhichKeyVisible() throws {
         let (dispatcher, gui) = makeDispatcher()
-        let bindings = [Wire.WhichKeyBinding(kind: 0, key: "f", description: "Find file", icon: "")]
-        dispatcher.applyForTesting(.guiWhichKey(visible: true, prefix: "SPC",
-                                          page: 0, pageCount: 1, bindings: bindings))
+        let model = Wire.WhichKey(visible: true, path: "SPC", breadcrumb: [.init(key: "SPC", path: "SPC")],
+                                  entries: [.init(kind: 0, key: "f", label: "Find file")])
+        dispatcher.applyForTesting(.guiWhichKey(model))
 
         #expect(gui.whichKeyState.visible == true)
-        #expect(gui.whichKeyState.prefix == "SPC")
-        #expect(gui.whichKeyState.bindings.count == 1)
+        #expect(gui.whichKeyState.path == "SPC")
+        #expect(gui.whichKeyState.entries.count == 1)
     }
 
     @Test("guiWhichKey hidden clears whichKeyState")
     @MainActor func guiWhichKeyHidden() throws {
         let (dispatcher, gui) = makeDispatcher()
-        dispatcher.applyForTesting(.guiWhichKey(visible: false, prefix: "", page: 0,
-                                          pageCount: 0, bindings: []))
+        dispatcher.applyForTesting(.guiWhichKey(.hidden))
         #expect(gui.whichKeyState.visible == false)
     }
 

@@ -184,6 +184,8 @@ def which_key(audit, frame, parts, mac):
     panel = panel[0]["frame"]
     scale = audit.scale
     tolerance = MAC_TOLERANCE if mac else 0
+    trailing = by_part(parts, "whichKey.entryCount") + by_part(parts, "whichKey.platformKey")
+    headings = by_part(parts, "whichKey.groupName")
     cols = cluster_columns(keys, labels, mac)
     pitch = scale.row_pitch if mac else scale.rows("whichKeyEntryRows")
     key_to_label = scale.mac("whichKeyKeyToLabel") if mac else scale.cols("whichKeyKeyToLabel")
@@ -198,6 +200,9 @@ def which_key(audit, frame, parts, mac):
         if max(label_edges) - label_edge > tolerance:
             audit.flag(frame, "whichKey.entryLabel", "one leading edge per key column", label_edge, max(label_edges))
         for (key, _), (next_key, _) in zip(column, column[1:]):
+            if heading_between(headings, key, next_key):
+                # A new band of columns starts under its own group names (the TUI wraps sections that do not fit).
+                continue
             step = next_key["frame"][1] - key["frame"][1]
             audit.check(frame, "whichKey.entry", "entry pitch", pitch, step, tolerance)
             audit.record(frame, "whichKey.entry", "entry pitch", step)
@@ -206,13 +211,14 @@ def which_key(audit, frame, parts, mac):
                 if key.get("baseline") is not None and label.get("baseline") is not None:
                     audit.check(frame, "whichKey.entry", "one baseline per row", key["baseline"], label["baseline"], MAC_TOLERANCE)
         if index + 1 < len(cols):
-            right = max(l["frame"][0] + l["frame"][2] for _, l in column)
             next_left = min(k["frame"][0] for k, _ in cols[index + 1])
+            # The column ends after its longest entry: the label and, when shown, its count and ⌘ key.
+            right = max(row_right(label, trailing, next_left, mac) for _, label in column)
             audit.check(frame, "whichKey.column", "column gap", column_gap, next_left - right, tolerance)
     first = min(k["frame"][0] for k, _ in cols[0])
     border = 0 if mac else 1
     audit.check(frame, "whichKey.panel", "inset", inset, first - panel[0] - border, tolerance)
-    for part in keys + labels:
+    for part in keys + labels + trailing:
         x, y, w, h = part["frame"]
         if x < panel[0] or y < panel[1] or x + w > panel[0] + panel[2] or y + h > panel[1] + panel[3]:
             audit.flag(frame, part["part"], "nothing clips", "inside the panel", part["frame"])
@@ -221,21 +227,22 @@ def which_key(audit, frame, parts, mac):
             audit.flag(frame, "whichKey.entryLabel", "truncates with …", label.get("text", ""), "cut without …")
 
 
-def cluster_columns(keys, labels, mac):
-    entries = []
-    for key in keys:
-        same_row = [l for l in labels if abs(l["frame"][1] - key["frame"][1]) <= (2 if mac else 0) and l["frame"][0] > key["frame"][0]]
-        if same_row:
-            entries.append((key, min(same_row, key=lambda l: l["frame"][0])))
-    entries.sort(key=lambda e: e[1]["frame"][0])
-    groups = []
-    for entry in entries:
-        # A new column starts where a label's leading edge is past the previous column's widest label.
-        if groups and entry[0]["frame"][0] < max(l["frame"][0] + l["frame"][2] for _, l in groups[-1]):
-            groups[-1].append(entry)
-        else:
-            groups.append([entry])
-    return [sorted(group, key=lambda e: e[0]["frame"][1]) for group in groups]
+def row_right(label, trailing, before, mac):
+    """The right edge of an entry: its label, or the count or ⌘ key after it on the same row, before the next column."""
+    x, y, w, _ = label["frame"]
+    right = x + w
+    for part in trailing:
+        px, py, pw, _ = part["frame"]
+        if abs(py - y) <= (2 if mac else 0) and right <= px < before:
+            right = max(right, px + pw)
+    return right
+
+
+def heading_between(headings, key, next_key):
+    """Whether a group name sits between two entries of one column, which starts a new band of columns."""
+    top, bottom = key["frame"][1], next_key["frame"][1]
+    left = key["frame"][0]
+    return any(top < h["frame"][1] < bottom and h["frame"][0] <= left + key["frame"][2] for h in headings)
 
 
 def modeline(audit, frame, parts, mac):

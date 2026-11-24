@@ -21,7 +21,6 @@ defmodule MingaEditor.UI.WhichKey do
 
   alias Minga.Keymap.Bindings
   alias MingaEditor.UI.WhichKey.Binding
-  alias MingaEditor.UI.WhichKey.Icons
 
   @typedoc "A formatted binding entry for display."
   @type binding :: Binding.t()
@@ -56,18 +55,17 @@ defmodule MingaEditor.UI.WhichKey do
   ## Examples
 
       iex> MingaEditor.UI.WhichKey.format_bindings([{{?j, 0}, "Move cursor down", :command}])
-      [%MingaEditor.UI.WhichKey.Binding{key: "j", description: "Move cursor down", kind: :command, icon: nil}]
+      [%MingaEditor.UI.WhichKey.Binding{key: "j", codepoint: 106, modifiers: 0, description: "Move cursor down", kind: :command}]
   """
   @spec format_bindings([{Bindings.key(), String.t() | atom(), Binding.kind()}]) :: [binding()]
   def format_bindings(children) when is_list(children) do
-    Enum.map(children, fn {key, label, kind} ->
-      desc = format_label(label, kind)
-
+    Enum.map(children, fn {{codepoint, modifiers} = key, label, kind} ->
       %Binding{
         key: format_key(key),
-        description: desc,
-        kind: kind,
-        icon: if(kind == :group, do: Icons.for_group(desc))
+        codepoint: codepoint,
+        modifiers: modifiers,
+        description: format_label(label, kind),
+        kind: kind
       }
     end)
   end
@@ -81,8 +79,31 @@ defmodule MingaEditor.UI.WhichKey do
     node
     |> Bindings.children()
     |> format_bindings()
-    |> Enum.sort_by(& &1.key)
+    |> Enum.map(&with_command(&1, node))
+    |> Enum.sort_by(&sort_key/1)
   end
+
+  # Groups first, then commands; within each, case-insensitive with the lowercase key first
+  # (`a` before `A`), so both frontends read the same order.
+  @spec sort_key(binding()) :: {0 | 1, String.t(), String.t()}
+  defp sort_key(%Binding{kind: kind, key: key}) do
+    {if(kind == :group, do: 0, else: 1), String.downcase(key), swap_case(key)}
+  end
+
+  @spec swap_case(String.t()) :: String.t()
+  defp swap_case(key) do
+    if String.downcase(key) == key, do: String.upcase(key), else: String.downcase(key)
+  end
+
+  @spec with_command(binding(), Bindings.node_t()) :: binding()
+  defp with_command(%Binding{kind: :command, codepoint: cp, modifiers: mods} = binding, node) do
+    case Bindings.lookup(node, {cp, mods}) do
+      {:command, command} -> %{binding | command: command}
+      _other -> binding
+    end
+  end
+
+  defp with_command(binding, _node), do: binding
 
   # ── Private ───────────────────────────────────────────────────────────────────
 

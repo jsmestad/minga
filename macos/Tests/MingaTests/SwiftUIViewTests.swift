@@ -298,59 +298,37 @@ struct WhichKeyOverlayViewTests {
 
     @Test("Hidden which-key renders nothing")
     @MainActor func hiddenWhichKey() throws {
-        let state = WhichKeyState()
-        state.visible = false
-
-        let sut = WhichKeyOverlay(state: state)
+        let sut = WhichKeyOverlay(state: WhichKeyState())
             .environment(\.themeColors, ThemeColors())
         let body = try sut.inspect()
-        #expect(throws: Never.self) {
-            _ = try? body.find(text: "anything")
+        #expect(body.findAll(ViewInspectorQuery.text).isEmpty)
+    }
+
+    @Test("Visible which-key shows the breadcrumb, section names, keys, labels, counts, ⌘ keys and hints")
+    @MainActor func visibleWhichKey() throws {
+        let model = Wire.WhichKey(
+            visible: true, path: "SPC a",
+            breadcrumb: [.init(key: "SPC", path: "SPC"), .init(key: "a", label: "Minga", path: "SPC a")],
+            count: "· 1 needs you",
+            hints: [.init(key: "⌫", label: "back")],
+            entries: [
+                .init(kind: 0, key: "f", label: "Find file", section: "Files", count: "· 2"),
+                .init(kind: 1, key: "b", label: "Buffers ›", section: "Files", platformKey: "⌘S"),
+            ])
+        let sut = WhichKeyOverlay(state: WhichKeyState(model: model))
+            .environment(\.themeColors, ThemeColors())
+        let strings = try sut.inspect().findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
+
+        for text in ["SPC", "a", "Minga", "· 1 needs you", "⌫", "back", "Files", "f", "Find file", "· 2", "b", "Buffers ›", "⌘S"] {
+            #expect(strings.contains(text), "missing \(text)")
         }
     }
 
-    @Test("Visible which-key shows prefix and binding keys")
-    @MainActor func visibleWhichKey() throws {
-        let state = WhichKeyState()
-        state.update(
-            visible: true, prefix: "SPC", page: 0, pageCount: 1,
-            rawBindings: [
-                Wire.WhichKeyBinding(kind: 0, key: "f", description: "Find file", icon: ""),
-                Wire.WhichKeyBinding(kind: 1, key: "b", description: "Buffers", icon: ""),
-            ]
-        )
-
-        let sut = WhichKeyOverlay(state: state)
-            .environment(\.themeColors, ThemeColors())
-        let body = try sut.inspect()
-        let texts = body.findAll(ViewInspectorQuery.text)
-        let strings = texts.compactMap { try? $0.string() }
-
-        #expect(strings.contains("SPC"))
-        #expect(strings.contains("f"))
-        #expect(strings.contains("Find file"))
-        #expect(strings.contains("b"))
-        #expect(strings.contains("Buffers"))
+    @Test("The fade-in fits the 120 ms budget")
+    func fadeBudget() {
+        #expect(WhichKeyOverlay.fadeDuration <= 0.12)
     }
 
-    @Test("Which-key shows page indicator when multiple pages")
-    @MainActor func pageIndicator() throws {
-        let state = WhichKeyState()
-        state.update(
-            visible: true, prefix: "SPC", page: 0, pageCount: 3,
-            rawBindings: [
-                Wire.WhichKeyBinding(kind: 0, key: "a", description: "test", icon: ""),
-            ]
-        )
-
-        let sut = WhichKeyOverlay(state: state)
-            .environment(\.themeColors, ThemeColors())
-        let body = try sut.inspect()
-        let texts = body.findAll(ViewInspectorQuery.text)
-        let strings = texts.compactMap { try? $0.string() }
-
-        #expect(strings.contains("1/3"))
-    }
 }
 
 // MARK: - BreadcrumbBar

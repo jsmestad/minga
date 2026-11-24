@@ -277,16 +277,6 @@ defmodule MingaEditor.Shell.Traditional.State do
   def dismiss_whichkey(%__MODULE__{} = state),
     do: %{state | whichkey: WhichKey.dismiss(state.whichkey)}
 
-  @doc "Moves which-key to the next page."
-  @spec next_whichkey_page(t()) :: t()
-  def next_whichkey_page(%__MODULE__{} = state),
-    do: %{state | whichkey: WhichKey.next_page(state.whichkey)}
-
-  @doc "Moves which-key to the previous page."
-  @spec previous_whichkey_page(t()) :: t()
-  def previous_whichkey_page(%__MODULE__{} = state),
-    do: %{state | whichkey: WhichKey.previous_page(state.whichkey)}
-
   # ── Bottom panel ───────────────────────────────────────────────────────────
 
   @doc "Returns the bottom panel state."

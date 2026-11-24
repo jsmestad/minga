@@ -27,8 +27,14 @@ defmodule Minga.Test.Storyboard.Model do
           | :observatory
           | :extension_overlay
 
-  @typedoc "One which-key entry: its key, label and kind."
-  @type which_key_entry :: %{key: String.t(), label: String.t(), kind: :command | :group}
+  @typedoc "One which-key entry: its key, label, kind, section and live count."
+  @type which_key_entry :: %{
+          key: String.t(),
+          label: String.t(),
+          kind: :command | :group,
+          section: String.t(),
+          count: String.t()
+        }
 
   @typedoc "The which-key panel, when open."
   @type which_key :: %{prefix: String.t(), entries: [which_key_entry()]}
@@ -201,10 +207,14 @@ defmodule Minga.Test.Storyboard.Model do
   defp visible_field(_part, _field), do: nil
 
   @spec which_key(Minga.RenderModel.UI.WhichKey.t() | nil) :: which_key() | nil
-  defp which_key(%{visible: true, prefix: prefix, bindings: bindings}) do
+  defp which_key(%{visible: true, path: path, entries: entries}) do
     %{
-      prefix: prefix,
-      entries: Enum.map(bindings, &%{key: &1.key, label: &1.description, kind: &1.kind})
+      prefix: path,
+      entries:
+        Enum.map(
+          entries,
+          &%{key: &1.key, label: &1.label, kind: &1.kind, section: &1.section, count: &1.count}
+        )
     }
   end
 

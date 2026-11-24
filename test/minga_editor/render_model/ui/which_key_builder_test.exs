@@ -1,120 +1,156 @@
 defmodule MingaEditor.RenderModel.UI.WhichKeyBuilderTest do
   use ExUnit.Case, async: true
 
-  alias MingaEditor.RenderModel.UI.WhichKeyBuilder
+  alias Minga.Keymap.Bindings
+  alias Minga.Keymap.Defaults
   alias Minga.RenderModel.UI.WhichKey
+  alias MingaEditor.RenderModel.UI.WhichKeyBuilder
   alias MingaEditor.State.WhichKey, as: WhichKeyState
+  alias MingaEditor.UI.WhichKey.Counts
 
-  describe "build/1" do
-    test "returns hidden model when show is false" do
-      wk = %WhichKeyState{show: false}
-      model = WhichKeyBuilder.build(wk)
+  defp leader_node(path) do
+    Enum.reduce(path, Defaults.leader_trie(), fn key, node ->
+      {:prefix, child} = Bindings.lookup(node, key)
+      child
+    end)
+  end
 
-      assert %WhichKey{} = model
-      assert model.visible == false
-      assert model.bindings == []
+  # Opens which-key the way the leader does: begin at SPC, then progress one key at a time.
+  defp shown(path) do
+    state = WhichKeyState.begin(%WhichKeyState{}, Defaults.leader_trie(), ["SPC"])
+
+    path
+    |> Enum.with_index(1)
+    |> Enum.reduce(state, fn {_key, depth}, acc ->
+      keys = Enum.take(path, depth)
+      formatted = ["SPC" | Enum.map(keys, &Bindings.format_key/1)]
+      WhichKeyState.progress(acc, leader_node(keys), formatted)
+    end)
+    |> WhichKeyState.reveal(state.generation + length(path))
+  end
+
+  defp sections(%WhichKey{entries: entries}) do
+    entries
+    |> Enum.chunk_by(& &1.section)
+    |> Enum.map(fn [first | _] = chunk -> {first.section, Enum.map(chunk, & &1.key)} end)
+  end
+
+  test "a hidden or empty state builds a hidden panel" do
+    assert %WhichKey{visible: false} = WhichKeyBuilder.build(%WhichKeyState{show: false})
+
+    assert %WhichKey{visible: false} =
+             WhichKeyBuilder.build(%WhichKeyState{show: true, node: nil})
+  end
+
+  test "SPC lists Groups and Often in the declared order, the rest under More" do
+    model = WhichKeyBuilder.build(shown([]))
+
+    assert [{"Groups", groups}, {"Often", often}, {"More", more} | []] = sections(model)
+    bound = model.entries |> MapSet.new(& &1.key)
+
+    # The git extension owns SPC g, so the default trie may not bind it; declared keys that are unbound are skipped.
+    assert groups == Enum.filter(~w(a s c g f b w o h t q :), &MapSet.member?(bound, &1))
+    assert often == ["SPC", ",", "/"]
+    # Every bound root key is listed exactly once.
+    assert Enum.sort(groups ++ often ++ more) ==
+             Defaults.leader_trie()
+             |> Bindings.children()
+             |> Enum.map(&Bindings.format_key(elem(&1, 0)))
+             |> Enum.sort()
+
+    assert model.path == "SPC"
+    assert model.breadcrumb == [%{key: "SPC", label: "", path: "SPC"}]
+    assert model.hints == [%{key: "⌫", label: "back"}, %{key: "esc", label: "close"}]
+  end
+
+  test "SPC a reads Tasks, Conversation, Changes, More, with a breadcrumb back to SPC" do
+    model = WhichKeyBuilder.build(shown([{?a, 0}]))
+
+    assert Enum.map(sections(model), &elem(&1, 0)) == ["Tasks", "Conversation", "Changes", "More"]
+    assert {"More", more} = List.last(sections(model))
+    assert Enum.take(more, 2) == ["x", "S"]
+
+    assert model.path == "SPC a"
+
+    assert model.breadcrumb == [
+             %{key: "SPC", label: "", path: "SPC"},
+             %{key: "a", label: "Minga", path: "SPC a"}
+           ]
+
+    assert %{label: "Queue ›", kind: :group} = Enum.find(model.entries, &(&1.key == "q"))
+
+    assert %{label: "Stop", kind: :command, codepoint: ?s, modifiers: 0} =
+             Enum.find(model.entries, &(&1.key == "s"))
+  end
+
+  test "a prefix without declared sections lists groups first in one unnamed section" do
+    model = WhichKeyBuilder.build(shown([{?c, 0}]))
+
+    assert [{"", keys}] = sections(model)
+    assert hd(keys) == "l"
+    assert %{kind: :group, label: "LSP ›"} = hd(model.entries)
+  end
+
+  test "live counts follow the facts on every build, so they change while the panel is open" do
+    state = shown([])
+    counts = Counts.from_facts(%{needs_you_count: 1, diagnostic_counts: {2, 0, 0, 0}})
+
+    model = WhichKeyBuilder.build(state, counts: counts)
+    assert %{count: "· 1 needs you"} = Enum.find(model.entries, &(&1.key == "a"))
+    assert %{count: "· 2 errors"} = Enum.find(model.entries, &(&1.key == "c"))
+    assert %{count: ""} = Enum.find(model.entries, &(&1.key == "f"))
+
+    later = WhichKeyBuilder.build(state, counts: Counts.from_facts(%{needs_you_count: 3}))
+    assert %{count: "· 3 needs you"} = Enum.find(later.entries, &(&1.key == "a"))
+
+    minga = WhichKeyBuilder.build(shown([{?a, 0}]), counts: counts)
+    assert minga.count == "· 1 needs you"
+  end
+
+  test "platform keys show only for native GUI frontends" do
+    state = shown([{?f, 0}])
+
+    gui = WhichKeyBuilder.build(state, platform_keys?: true)
+    assert %{platform_key: "⌘S"} = Enum.find(gui.entries, &(&1.key == "s"))
+
+    tui = WhichKeyBuilder.build(state, platform_keys?: false)
+    assert Enum.all?(tui.entries, &(&1.platform_key == ""))
+  end
+
+  test "groups read like leaves: Title Case label with a trailing chevron" do
+    node =
+      Bindings.new()
+      |> Bindings.bind([{?g, 0}, {?s, 0}], :git_status, "Git status")
+      |> Bindings.bind_prefix([{?g, 0}], "+git")
+
+    state = %WhichKeyState{show: true, node: node, prefix_keys: ["SPC", "x"], labels: ["", "X"]}
+    assert [%{label: "Git ›", kind: :group}] = WhichKeyBuilder.build(state).entries
+  end
+
+  test "lists the active picker and prompt scopes' keys" do
+    picker = Minga.Keymap.Scope.Picker.keymap(:insert, picker_split: true)
+
+    labels =
+      WhichKeyBuilder.build(%WhichKeyState{show: true, node: picker}).entries
+      |> MapSet.new(& &1.label)
+
+    for label <- [
+          "Next",
+          "Previous",
+          "Open the selection",
+          "Open in a split",
+          "Act on the highlighted row",
+          "Close"
+        ] do
+      assert label in labels
     end
 
-    test "returns hidden model when show is true but node is nil" do
-      wk = %WhichKeyState{show: true, node: nil}
-      model = WhichKeyBuilder.build(wk)
+    prompt = Minga.Keymap.Scope.Prompt.keymap(:insert, prompt_list: true)
 
-      assert %WhichKey{} = model
-      assert model.visible == false
-    end
+    labels =
+      WhichKeyBuilder.build(%WhichKeyState{show: true, node: prompt}).entries
+      |> MapSet.new(& &1.label)
 
-    test "lists the active picker and prompt scopes' keys" do
-      picker = Minga.Keymap.Scope.Picker.keymap(:insert, picker_split: true)
-      wk = %WhichKeyState{show: true, node: picker, prefix_keys: [], page: 0}
-
-      descriptions =
-        WhichKeyBuilder.build(wk).bindings |> Enum.map(& &1.description) |> MapSet.new()
-
-      for label <- [
-            "Next",
-            "Previous",
-            "Open the selection",
-            "Open in a split",
-            "Act on the highlighted row",
-            "Close"
-          ] do
-        assert label in descriptions
-      end
-
-      prompt = Minga.Keymap.Scope.Prompt.keymap(:insert, prompt_list: true)
-      wk = %WhichKeyState{show: true, node: prompt, prefix_keys: [], page: 0}
-
-      descriptions =
-        WhichKeyBuilder.build(wk).bindings |> Enum.map(& &1.description) |> MapSet.new()
-
-      for label <- ["Run", "Cancel", "Complete", "Next", "Previous"] do
-        assert label in descriptions
-      end
-    end
-
-    test "returns visible model with bindings when node is present" do
-      # Build a real keymap node for testing (bind/4 takes root, keys, command, description)
-      node = Minga.Keymap.Bindings.new()
-      node = Minga.Keymap.Bindings.bind(node, [{?j, 0}], :move_down, "Move down")
-      node = Minga.Keymap.Bindings.bind(node, [{?k, 0}], :move_up, "Move up")
-
-      wk = %WhichKeyState{show: true, node: node, prefix_keys: ["SPC"], page: 0}
-      model = WhichKeyBuilder.build(wk)
-
-      assert %WhichKey{} = model
-      assert model.visible == true
-      assert model.prefix == "SPC"
-      assert model.page == 0
-      assert model.page_count >= 1
-      assert Enum.count(model.bindings) == 2
-
-      Enum.each(model.bindings, fn b ->
-        assert is_binary(b.key)
-        assert is_binary(b.description)
-        assert b.kind in [:command, :group]
-      end)
-    end
-
-    test "groups read like leaves: Title Case label with a trailing chevron, kind :group" do
-      node =
-        Minga.Keymap.Bindings.new()
-        |> Minga.Keymap.Bindings.bind(
-          [{?S, 0}, {?h, 0}],
-          :agent_session_history,
-          "Resume a session"
-        )
-        |> Minga.Keymap.Bindings.bind_prefix([{?S, 0}], "Session")
-        |> Minga.Keymap.Bindings.bind([{?g, 0}, {?s, 0}], :git_status, "Git status")
-        |> Minga.Keymap.Bindings.bind_prefix([{?g, 0}], "+git")
-        |> Minga.Keymap.Bindings.bind([{?s, 0}], :agent_abort, "Stop")
-
-      wk = %WhichKeyState{show: true, node: node, prefix_keys: ["SPC", "a"], page: 0}
-      bindings = WhichKeyBuilder.build(wk).bindings
-
-      assert %{description: "Session ›", kind: :group} = Enum.find(bindings, &(&1.key == "S"))
-      assert %{description: "Git ›", kind: :group} = Enum.find(bindings, &(&1.key == "g"))
-      assert %{description: "Stop", kind: :command} = Enum.find(bindings, &(&1.key == "s"))
-    end
-
-    test "the SPC a level shows the Queue, Context and Session groups from the default keymap" do
-      {:prefix, node} = Minga.Keymap.Bindings.lookup(Minga.Keymap.Defaults.leader_trie(), {?a, 0})
-      wk = %WhichKeyState{show: true, node: node, prefix_keys: ["SPC", "a"], page: 0}
-      model = WhichKeyBuilder.build(wk)
-
-      groups = for %{kind: :group, description: d} <- model.bindings, do: d
-      assert Enum.sort(groups) == ["Context ›", "Queue ›", "Session ›"]
-      assert model.page_count == 1
-      refute Enum.any?(model.bindings, &String.starts_with?(&1.description, "+"))
-    end
-
-    test "prefix is joined with spaces" do
-      node = Minga.Keymap.Bindings.new()
-      node = Minga.Keymap.Bindings.bind(node, [{?a, 0}], :action, "action")
-
-      wk = %WhichKeyState{show: true, node: node, prefix_keys: ["SPC", "g"], page: 0}
-      model = WhichKeyBuilder.build(wk)
-
-      assert model.prefix == "SPC g"
-    end
+    for label <- ["Run", "Cancel", "Complete", "Next", "Previous"], do: assert(label in labels)
   end
 end

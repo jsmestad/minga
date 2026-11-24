@@ -8,7 +8,7 @@ defmodule MingaEditor.State.WhichKey do
           timer: reference() | nil,
           show: boolean(),
           prefix_keys: [String.t()],
-          page: non_neg_integer()
+          labels: [String.t()]
         }
 
   defstruct generation: 0,
@@ -16,12 +16,17 @@ defmodule MingaEditor.State.WhichKey do
             timer: nil,
             show: false,
             prefix_keys: [],
-            page: 0
+            labels: []
 
   @doc "Begins a new hidden which-key generation."
   @spec begin(t(), Minga.Keymap.Bindings.node_t(), [String.t()]) :: t()
   def begin(%__MODULE__{} = whichkey, node, prefix_keys) do
-    %__MODULE__{generation: whichkey.generation + 1, node: node, prefix_keys: prefix_keys}
+    %__MODULE__{
+      generation: whichkey.generation + 1,
+      node: node,
+      prefix_keys: prefix_keys,
+      labels: labels([], node, prefix_keys)
+    }
   end
 
   @doc "Advances a leader prefix with a new generation while preserving visibility."
@@ -31,9 +36,27 @@ defmodule MingaEditor.State.WhichKey do
       generation: whichkey.generation + 1,
       node: node,
       prefix_keys: prefix_keys,
+      labels: labels(whichkey.labels, node, prefix_keys),
       show: whichkey.show
     }
   end
+
+  # One label per prefix key: the group each key opened, for the breadcrumb (`SPC`, `a Minga`).
+  # Going back up (Backspace) shortens the prefix, so the kept labels are cut to match.
+  @spec labels([String.t()], Minga.Keymap.Bindings.node_t(), [String.t()]) :: [String.t()]
+  defp labels(_labels, _node, []), do: []
+
+  defp labels(labels, node, prefix_keys) do
+    Enum.take(labels, length(prefix_keys) - 1) ++ [node_label(node, prefix_keys)]
+  end
+
+  @spec node_label(Minga.Keymap.Bindings.node_t(), [String.t()]) :: String.t()
+  defp node_label(_node, [_leader]), do: ""
+
+  defp node_label(%{description: description}, _prefix) when is_binary(description),
+    do: description
+
+  defp node_label(_node, _prefix), do: ""
 
   @doc "Records the timer handle only for the current active generation."
   @spec record_timer(t(), generation(), reference()) :: t()
@@ -59,14 +82,6 @@ defmodule MingaEditor.State.WhichKey do
   def dismiss(%__MODULE__{} = whichkey) do
     %__MODULE__{generation: whichkey.generation}
   end
-
-  @doc "Moves to the next display page."
-  @spec next_page(t()) :: t()
-  def next_page(%__MODULE__{} = whichkey), do: %{whichkey | page: whichkey.page + 1}
-
-  @doc "Moves to the previous display page."
-  @spec previous_page(t()) :: t()
-  def previous_page(%__MODULE__{} = whichkey), do: %{whichkey | page: max(whichkey.page - 1, 0)}
 
   @doc "Returns whether a leader prefix is active."
   @spec active?(t()) :: boolean()

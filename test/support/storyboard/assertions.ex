@@ -178,8 +178,19 @@ defmodule Minga.Test.Storyboard.Assertions do
   def assert_count(%Model{} = model, key, count) do
     entry = which_key_entry!(model, key)
 
-    assert String.contains?(entry.label, " · " <> count),
-           "expected #{key} to show the count #{inspect(count)}, got #{inspect(entry.label)}"
+    assert String.contains?(entry.count, count),
+           "expected #{key} to show the count #{inspect(count)}, got #{inspect(entry.count)}"
+
+    model
+  end
+
+  @doc "Asserts the which-key sections, in order, as the panel's column headings."
+  @spec assert_sections(Model.t(), [String.t()]) :: Model.t()
+  def assert_sections(%Model{which_key: %{entries: entries}} = model, expected) do
+    sections = entries |> Enum.map(& &1.section) |> Enum.dedup()
+
+    assert sections == expected,
+           "expected which-key sections #{inspect(expected)}, got #{inspect(sections)}"
 
     model
   end

@@ -218,12 +218,6 @@ defmodule MingaEditor.Commands do
   def execute(state, :leader_cancel),
     do: MingaEditor.Shell.Traditional.WhichKeyWorkflow.dismiss(state)
 
-  def execute(state, :whichkey_next_page),
-    do: MingaEditor.Shell.Traditional.WhichKeyWorkflow.next_page(state)
-
-  def execute(state, :whichkey_prev_page),
-    do: MingaEditor.Shell.Traditional.WhichKeyWorkflow.previous_page(state)
-
   # ── Eval ───────────────────────────────────────────────────────────────────
 
   def execute(state, {:eval_expression, _} = cmd), do: Eval.execute(state, cmd)
