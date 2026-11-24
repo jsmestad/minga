@@ -19,6 +19,10 @@ defmodule MingaEditor.UI.Picker.BufferSource do
   alias Minga.Language.Devicon
 
   @impl true
+  @spec opens_in_window?() :: boolean()
+  def opens_in_window?, do: true
+
+  @impl true
   @spec title() :: String.t()
   def title, do: "Switch buffer"
 

@@ -165,6 +165,10 @@ func chromeFrameScenarios() []chromeFrameScenario {
 			picker.LoadStatus = 1
 			return append(m.renderPicker(picker, protocol.PickerPreview{}), m.renderFloatingPicker(picker, protocol.PickerPreview{}))
 		}},
+		{"picker_action_menu", func(m Model) []string {
+			picker := actionMenuPicker()
+			return []string{m.renderFloatingPicker(picker, protocol.PickerPreview{}), m.renderPickerActionMenu(picker)}
+		}},
 		{"prompt_choices", func(m Model) []string {
 			return one(m.renderPromptChoices(promptChoiceFixture(1)))
 		}},

@@ -260,6 +260,23 @@ defmodule Minga.Extension.SdkContractTest do
     assert callback_signatures(runtime_handler) == callback_signatures(sdk_handler)
   end
 
+  test "every SDK behaviour mirrors the callbacks of its host module" do
+    pairs =
+      for sdk <- Path.wildcard("sdk/lib/**/*.ex"),
+          host = String.replace_prefix(sdk, "sdk/", ""),
+          File.exists?(host),
+          callback_signatures(sdk) != [] or callback_signatures(host) != [],
+          do: {sdk, host}
+
+    assert {"sdk/lib/minga_editor/extension/picker/source.ex",
+            "lib/minga_editor/extension/picker/source.ex"} in pairs
+
+    for {sdk, host} <- pairs do
+      assert callback_signatures(sdk) == callback_signatures(host),
+             "#{sdk} callbacks drifted from #{host}"
+    end
+  end
+
   test "runtime and SDK model route contracts cannot drift" do
     assert callback_signatures("lib/minga_agent/inference_route.ex") ==
              callback_signatures("sdk/lib/minga_agent/inference_route.ex")

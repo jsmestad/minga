@@ -315,7 +315,8 @@ func (m *Model) localPreviewActivationPacket(msg tea.KeyPressMsg, component stri
 		}
 	}
 	if preview, ok := m.localPresentation.identityPreview(presentationPicker); component == "picker" && ok {
-		if picker, present := m.picker(); present && picker.Visible && preview.generation == picker.Generation {
+		// While the act menu is open, ↩ runs the menu's action on the BEAM, never the previewed picker row.
+		if picker, present := m.picker(); present && picker.Visible && !picker.ActionVisible && preview.generation == picker.Generation {
 			index := pickerItemIndexByID(picker, preview.itemID)
 			if index >= 0 {
 				return pickerActivationPacket(preview.generation, picker.Items[index].ActivationID), true
@@ -344,7 +345,8 @@ func (m *Model) previewPickerNavigation(msg tea.KeyPressMsg) bool {
 	}
 
 	payload, ok := m.chrome[generated.OPGuiPicker]
-	if !ok || !payload.Picker.Visible || len(payload.Picker.Items) == 0 {
+	// The open act menu owns the list keys; the picker's highlighted row stays where it is.
+	if !ok || !payload.Picker.Visible || payload.Picker.ActionVisible || len(payload.Picker.Items) == 0 {
 		return false
 	}
 

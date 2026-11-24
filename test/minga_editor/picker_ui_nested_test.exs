@@ -115,14 +115,6 @@ defmodule MingaEditor.PickerUINestedTest do
     assert PickerUI.handle_key(returned, @escape, 0).shell_runtime.state.modal == :none
   end
 
-  test "C-g in a child picker also returns to the parent" do
-    child = PickerUI.handle_key(parent_on_more(), @enter, 0)
-    returned = PickerUI.handle_key(child, ?g, MingaEditor.Input.mod_ctrl())
-
-    assert picker_ui(returned).source == ParentSource
-    assert picker_ui(returned).picker.query == "o"
-  end
-
   test "selecting a child item closes both pickers and runs the child's selection" do
     child = PickerUI.handle_key(parent_on_more(), @enter, 0)
     closed = PickerUI.handle_key(child, @enter, 0)

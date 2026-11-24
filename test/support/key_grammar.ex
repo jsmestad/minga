@@ -79,7 +79,14 @@ defmodule Minga.Test.KeyGrammar do
 
   @typedoc "How the grammar treats keys in a scope and vim state."
   @type context ::
-          :leader | :vim_source | :vim_text | :special | :special_cua | :typing | :picker
+          :leader
+          | :vim_source
+          | :vim_text
+          | :special
+          | :special_cua
+          | :typing
+          | :picker
+          | :terminal
 
   # ── Contexts ────────────────────────────────────────────────────────────────
   #
@@ -95,7 +102,8 @@ defmodule Minga.Test.KeyGrammar do
   # * :special_cua The CUA model of a special buffer: letters act, and Vim's
   #                control keys carry no meaning.
   # * :typing      Letters type text (Agent composer insert, CUA surfaces).
-  # * :picker      A live prompt (pickers, the minibuffer): typing edits the query. Prompts resolve keys in input handlers, not tries, so no built-in scope maps here yet. The prompt rules apply when one does; the CUA profile never does.
+  # * :picker      A live prompt (pickers, the minibuffer, the command line): typing edits the query. The prompt rules apply; the CUA profile never does.
+  # * :terminal    TERMINAL mode in a terminal buffer: every key goes to the shell except ⌃\ ⌃N. No built-in scope declares it until the terminal ships (#4060).
   @contexts %{
     {:leader, :normal} => :leader,
     {:editor, :normal} => :vim_source,
@@ -107,21 +115,22 @@ defmodule Minga.Test.KeyGrammar do
     {:file_tree, :normal} => :special,
     {:file_tree, :cua} => :special_cua,
     {:git_status, :normal} => :special,
-    {:git_status, :cua} => :special_cua
+    {:git_status, :cua} => :special_cua,
+    {:picker, :insert} => :picker,
+    {:prompt, :insert} => :picker
   }
 
   @scope_states [:normal, :insert, :input_normal, :cua]
 
-  # Contexts a scope keymap is evaluated under. The Agent scope adds a remedy
-  # binding while a failed start offers one; other scopes ignore the context.
-  @scope_contexts [[], [agent_start_remedy: :retry]]
+  # Contexts a scope keymap is evaluated under.
+  # The Agent scope adds a remedy binding while a failed start offers one, the picker adds ⌃V for sources whose selection shows in the focused window, and a prompt with a list adds list movement; other scopes ignore the context.
+  @scope_contexts [[], [agent_start_remedy: :retry], [picker_split: true, prompt_list: true]]
 
   # ── Rule 4: established modifier conventions ───────────────────────────────
   #
   # {key, contexts it may appear in, allowed commands (or :any), why}.
-  # Pickers and the terminal resolve keys in input handlers, not keymap tries,
-  # so their entries document the convention for when those move into tries.
-  @list_movement [:move_down, :move_up, :picker_next, :picker_prev]
+  # ⌃T and ⌃Q document picker conventions whose features have not shipped (pins #4056, quickfix #4059); ⌃\ ⌃N waits for the terminal (#4060).
+  @list_movement [:move_down, :move_up, :picker_next, :picker_prev, :prompt_next, :prompt_prev]
 
   @modifier_conventions [
     {{?j, @ctrl}, [:typing, :special, :special_cua, :vim_text, :vim_source, :picker],
@@ -139,6 +148,14 @@ defmodule Minga.Test.KeyGrammar do
      [:leader, :vim_source, :vim_text, :special, :special_cua, :typing, :picker, :terminal], :any,
      "⌃. opens the act menu (Embark)"}
   ]
+
+  @doc "The rule 4 allow-list: `{key, contexts, allowed commands or :any, why}`."
+  @spec modifier_conventions() :: [{key(), [context()], [term()] | :any, String.t()}]
+  def modifier_conventions, do: @modifier_conventions
+
+  @doc "The grammar context of a scope and vim state, or nil when it is unclassified."
+  @spec context_for(scope(), atom()) :: context() | nil
+  def context_for(scope, state), do: Map.get(@contexts, {scope, state})
 
   # Vim's own control keys are Vim grammar (rule 2), not added modifiers, in
   # Vim buffers and in special buffers that navigate like them. CUA states do

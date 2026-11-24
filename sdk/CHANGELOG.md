@@ -12,6 +12,7 @@ All notable changes to `minga_sdk` are documented here. The SDK is versioned sep
 
 ## Unreleased
 
+- `MingaEditor.Extension.Picker.Source` drops the `shortcut_action/3` callback and its `shortcut` type. Minga no longer binds ⌃D in pickers and no longer calls `shortcut_action/3`; a source that handled delete there must return it from `actions/2`, which the picker's act menu (⌃.) lists. A source that still declares `@impl true` on `shortcut_action/3` fails to compile with `--warnings-as-errors`, so remove the callback.
 - `Minga.Language.register/3` is available as a compile-time stub, so grammar-owning extensions compile against `minga_sdk` with `--warnings-as-errors`. `Minga.Language.TreeSitter` exposes the `register_opt` type.
 - `MingaAgent.InferenceRoute.error_kind` adds `:usage_limit_reached` for a request the plan's usage limit refused. Minga does not retry it and offers a model switch. A `:rate_limited` failure while the route reports a `:rejected` plan window reads the same way.
 - `MingaAgent.InferenceRoute.Status.plan_usage` is `:unreported` until the route's first usage report, then the reported windows or nil. `/model` shows a ready subscription route's plan usage as being checked until that first report, so a route should report an empty list when its usage check finds no data or fails.

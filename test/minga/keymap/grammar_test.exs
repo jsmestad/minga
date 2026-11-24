@@ -52,6 +52,39 @@ defmodule Minga.Keymap.GrammarTest do
            "Classify these {scope, vim state} pairs in Minga.Test.KeyGrammar @contexts"
   end
 
+  # Prompt and terminal conventions whose feature has not shipped yet, with the ticket that binds each one.
+  # Remove a row when its ticket binds the key; the test fails until you do.
+  @pending_conventions MapSet.new([
+                         {{?t, @ctrl}, :picker},
+                         {{?q, @ctrl}, :picker},
+                         {{?\\, @ctrl}, :terminal},
+                         {{?n, @ctrl}, :terminal},
+                         {{?., @ctrl}, :terminal}
+                       ])
+
+  test "prompt and terminal allow-list entries match real bindings", %{inventory: inventory} do
+    bound =
+      for %{scope: scope, state: state, keys: keys, command: command, origin: :effective} <-
+            inventory,
+          context = KeyGrammar.context_for(scope, state),
+          key <- keys,
+          do: {key, context, command}
+
+    unmatched =
+      for {key, contexts, commands, _why} <- KeyGrammar.modifier_conventions(),
+          context <- contexts,
+          context in [:picker, :terminal],
+          not Enum.any?(bound, fn {bound_key, bound_context, command} ->
+            bound_key == key and bound_context == context and
+              (commands == :any or command in commands)
+          end),
+          into: MapSet.new(),
+          do: {key, context}
+
+    # ⌃T pins (#4056), ⌃Q sends to quickfix (#4059), ⌃\ ⌃N leaves the terminal and ⌃. opens its act menu (#4060).
+    assert unmatched == @pending_conventions
+  end
+
   test "rows marked matches use the Doom key itself", %{doom: doom} do
     mismatched = for %{status: :matches} = row <- doom, row.minga_key != row.doom_key, do: row
     assert mismatched == []

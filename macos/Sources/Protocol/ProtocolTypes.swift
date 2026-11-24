@@ -609,7 +609,7 @@ public enum Wire {
         }
     }
 
-    /// An action menu for the picker (C-o menu).
+    /// An action menu for the picker (the ⌃. act menu).
     public struct PickerActionMenu: Sendable {
         public let selectedIndex: UInt8
         public let actions: [String]

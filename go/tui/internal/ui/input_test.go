@@ -18,6 +18,16 @@ func TestKeyPacketPreservesCtrlLetter(t *testing.T) {
 	}
 }
 
+func TestKeyPacketPreservesCtrlPeriod(t *testing.T) {
+	packet, ok := keyPacket(tea.KeyPressMsg(tea.Key{Code: '.', Mod: tea.ModCtrl}), 0)
+	if !ok {
+		t.Fatal("ctrl-. should encode a key packet")
+	}
+	if packet[0] != generated.OPKeyPress || codepoint(packet) != '.' || packet[5] != protocol.ModCtrl {
+		t.Fatalf("ctrl-. packet = %#v", packet)
+	}
+}
+
 // TestKeyPacketStampsCorrelationSequence verifies the latency sequence (ticket
 // #2215) is appended as a big-endian u32 after the modifiers byte.
 func TestKeyPacketStampsCorrelationSequence(t *testing.T) {

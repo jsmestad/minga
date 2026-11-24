@@ -43,6 +43,20 @@ defmodule Minga.Keymap.Scope.UserOverrideTest do
                Scope.resolve_key(:agent, :normal, {?y, 0}, keymap_server: test_keymap_server())
     end
 
+    test "user override for the picker scope works" do
+      assert :not_found =
+               Scope.resolve_key(:picker, :insert, {?n, 0x02},
+                 keymap_server: test_keymap_server()
+               )
+
+      KeymapActive.bind(test_keymap_server(), {:picker, :insert}, "C-n", :picker_next, "Next")
+
+      assert {:command, :picker_next} =
+               Scope.resolve_key(:picker, :insert, {?n, 0x02},
+                 keymap_server: test_keymap_server()
+               )
+    end
+
     test "user override for file_tree scope works" do
       # q is :tree_close by default
       assert {:command, :tree_close} =

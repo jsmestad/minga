@@ -7,7 +7,7 @@ defmodule Minga.Keymap.Scope.Builder do
   module `use`s this builder and gets:
 
   - Automatic `@behaviour Minga.Keymap.Scope` implementation
-  - Default `name/0`, `display_name/0`, `on_enter/1`, `on_exit/1` callbacks
+  - Default `name/0`, `display_name/0`, `modal?/0`, `on_enter/1`, `on_exit/1` callbacks (pass `modal: true` for a scope that only a modal resolves)
   - `build_trie/1` helper for declarative group merging + scope-specific bindings
   - `groups_to_trie/1` for building a trie from groups alone (no scope bindings)
 
@@ -60,6 +60,7 @@ defmodule Minga.Keymap.Scope.Builder do
 
       @_scope_name Keyword.fetch!(opts, :name)
       @_scope_display_name Keyword.fetch!(opts, :display_name)
+      @_scope_modal Keyword.get(opts, :modal, false)
 
       @impl true
       @spec name() :: atom()
@@ -68,6 +69,10 @@ defmodule Minga.Keymap.Scope.Builder do
       @impl true
       @spec display_name() :: String.t()
       def display_name, do: @_scope_display_name
+
+      @impl true
+      @spec modal?() :: boolean()
+      def modal?, do: @_scope_modal
 
       @impl true
       @spec on_enter(term()) :: term()

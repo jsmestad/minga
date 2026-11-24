@@ -227,6 +227,24 @@ Each row shows two keys: the letter that works inside the menu, and on the right
 | `↩` | Open the full conversation | |
 | `q` | Close | |
 
+## Live prompts
+
+Every picker (find file, project search, the switcher) and every minibuffer prompt (new task, rename, the command line) shares these keys. They live in the `:picker` and `:prompt` keymap scopes (`lib/minga/keymap/prompt_keys.ex`), so which-key, user overrides and the grammar test see them. Typing always edits the query.
+
+| Keys | Action | Status |
+|---|---|---|
+| `⌃J` / `⌃K`, `↓` / `↑` | Move through the list | shipped; `⌃N` / `⌃P` retired |
+| `↩` | Run the highlighted row, or submit the prompt | kept |
+| `esc` | Close | kept; `⌃G` retired |
+| `Tab` | Complete | kept |
+| `PageDown` / `PageUp` | Page through a picker | shipped; replaces `⌃V` / `⌥V` |
+| `⌃V` | Open the highlighted buffer in a vertical split (the switcher; file pickers follow when files stop opening tabs, #4063) | shipped; was page down |
+| `⌃.` | Act menu on the highlighted row | shipped; replaces `⌃O` |
+| `⌃D` | (delete moves into the act menu) | retired |
+| `⌃A` `⌃E` `⌃H` `⌃W` `⌃U` | Line start, line end, delete a character, delete a word, delete to the start | shipped; text editing, never bindings |
+| `⌃K` | Move up where there is a list; delete to the end of the line in a prompt without one | shipped |
+| `⌃T`, `⌃Q` | Pin, send to quickfix (below) | new; arrive with pins and quickfix |
+
 ## File switcher (`SPC ,`)
 
 | Keys | Action |

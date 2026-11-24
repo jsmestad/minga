@@ -280,7 +280,7 @@ public struct PickerOverlay: View {
         .accessibilityValue(resultsAccessibilityValue)
     }
 
-    // MARK: - Action menu (C-o)
+    // MARK: - Action menu (⌃.)
 
     @ViewBuilder
     private func actionMenuOverlay(_ menu: PickerActionMenu) -> some View {
@@ -290,7 +290,7 @@ public struct PickerOverlay: View {
                     .font(Typography.font(.body, weight: .semibold))
                     .foregroundStyle(theme.popupFg.opacity(0.6))
                 Spacer()
-                Text("C-o")
+                Text("⌃.")
                     .font(Typography.font(.caption, design: .monospaced))
                     .foregroundStyle(theme.popupFg.opacity(0.3))
             }

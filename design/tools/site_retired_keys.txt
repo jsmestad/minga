@@ -26,3 +26,9 @@ SPC b P	*	tabs are gone
 SPC b <	*	tabs are gone
 SPC b >	*	tabs are gone
 M-:	*	eval is SPC ;
+C-n	picker|prompt|switcher|find file	lists move with ⌃J / ⌃K or the arrows; ⌃N is not a prompt convention
+C-p	picker|prompt|switcher|find file	lists move with ⌃J / ⌃K or the arrows; ⌃P is the CUA command palette
+C-g	picker|prompt	esc closes prompts and pickers
+C-o	action menu|picker	the picker's act menu is ⌃.; ⌃O walks the jump list
+C-d	picker|prompt	a picker's delete action lives in the act menu (⌃.)
+M-v	picker|page	PageUp pages a picker

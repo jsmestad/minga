@@ -23,7 +23,7 @@ Key notation. Keys are compared in one canonical form: tokens separated by singl
 
 Where the shipped keys come from:
 
-- `~k(...)` and `~K(...)` in lib/minga/keymap/defaults.ex, normal_prefixes.ex, shared_groups.ex and scope/*.ex. Entries inside `@leader_bindings` and `@group_prefixes` get the `SPC` prefix; entries inside `filetype_bindings/0` get `SPC m`.
+- `~k(...)` and `~K(...)` in lib/minga/keymap/defaults.ex, normal_prefixes.ex, shared_groups.ex, prompt_keys.ex and scope/*.ex. Entries inside `@leader_bindings` and `@group_prefixes` get the `SPC` prefix; entries inside `filetype_bindings/0` get `SPC m`.
 - Raw tuples such as `[{@enter, @ctrl}]` in the same files.
 - ⌘ chords from `keyboardShortcut(...)` and `keyEquivalent:` in macos/Sources (Swift menu commands).
 - Ex commands from `do_parse("...")` heads in lib/minga/command/parser.ex; slash commands from `name: "..."` in lib/minga_editor/agent/slash_command.ex.
@@ -52,6 +52,7 @@ KEYMAP_FILES = [
     KEYMAP_DIR / "defaults.ex",
     KEYMAP_DIR / "normal_prefixes.ex",
     KEYMAP_DIR / "shared_groups.ex",
+    KEYMAP_DIR / "prompt_keys.ex",
     *sorted((KEYMAP_DIR / "scope").glob("*.ex")),
 ]
 EX_PARSER = ROOT / "lib" / "minga" / "command" / "parser.ex"

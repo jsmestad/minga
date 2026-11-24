@@ -29,6 +29,8 @@ defmodule Minga.Keymap.Scope do
   * `:agent` — agent chat view or side panel
   * `:file_tree` — file tree panel
   * `:git_status` — git status panel
+  * `:picker`: a picker's query and list
+  * `:prompt`: a minibuffer prompt or the `:` command line
 
   ## Resolution layers
 
@@ -139,7 +141,14 @@ defmodule Minga.Keymap.Scope do
   """
   @callback included_groups() :: [atom() | {atom(), keyword()}]
 
-  @optional_callbacks [included_groups: 0]
+  @doc """
+  Returns whether this scope belongs to a modal (a picker or a prompt) rather than a surface.
+
+  A modal scope's keys resolve inside its modal's input handler. It is never the workspace scope, so `surface_scopes/0` leaves it out. Optional; a scope without it is a surface scope.
+  """
+  @callback modal?() :: boolean()
+
+  @optional_callbacks [included_groups: 0, modal?: 0]
 
   @doc "Called when this scope becomes active. Initialize scope-specific state."
   @callback on_enter(state :: term()) :: term()
@@ -193,6 +202,17 @@ defmodule Minga.Keymap.Scope do
   @doc "Returns all registered scope names."
   @spec all_scopes() :: [scope_name()]
   def all_scopes, do: Map.keys(ScopeRegistry.snapshot().modules)
+
+  @doc "Returns the registered scopes a surface can make active: every scope except modal ones (see `c:modal?/0`)."
+  @spec surface_scopes() :: [scope_name()]
+  def surface_scopes do
+    for {name, module} <- ScopeRegistry.snapshot().modules, not modal_module?(module), do: name
+  end
+
+  @spec modal_module?(module()) :: boolean()
+  defp modal_module?(module) do
+    Code.ensure_loaded?(module) and function_exported?(module, :modal?, 0) and module.modal?()
+  end
 
   # ── Help ────────────────────────────────────────────────────────────────────
 

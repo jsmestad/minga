@@ -23,6 +23,35 @@ defmodule MingaEditor.RenderModel.UI.WhichKeyBuilderTest do
       assert model.visible == false
     end
 
+    test "lists the active picker and prompt scopes' keys" do
+      picker = Minga.Keymap.Scope.Picker.keymap(:insert, picker_split: true)
+      wk = %WhichKeyState{show: true, node: picker, prefix_keys: [], page: 0}
+
+      descriptions =
+        WhichKeyBuilder.build(wk).bindings |> Enum.map(& &1.description) |> MapSet.new()
+
+      for label <- [
+            "Next",
+            "Previous",
+            "Open the selection",
+            "Open in a split",
+            "Act on the highlighted row",
+            "Close"
+          ] do
+        assert label in descriptions
+      end
+
+      prompt = Minga.Keymap.Scope.Prompt.keymap(:insert, prompt_list: true)
+      wk = %WhichKeyState{show: true, node: prompt, prefix_keys: [], page: 0}
+
+      descriptions =
+        WhichKeyBuilder.build(wk).bindings |> Enum.map(& &1.description) |> MapSet.new()
+
+      for label <- ["Run", "Cancel", "Complete", "Next", "Previous"] do
+        assert label in descriptions
+      end
+    end
+
     test "returns visible model with bindings when node is present" do
       # Build a real keymap node for testing (bind/4 takes root, keys, command, description)
       node = Minga.Keymap.Bindings.new()

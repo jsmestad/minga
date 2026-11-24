@@ -25,7 +25,9 @@ defmodule Minga.Keymap.Scope.Registry do
     Minga.Keymap.Scope.Editor,
     Minga.Keymap.Scope.Agent,
     Minga.Keymap.Scope.FileTree,
-    Minga.Keymap.Scope.GitStatus
+    Minga.Keymap.Scope.GitStatus,
+    Minga.Keymap.Scope.Picker,
+    Minga.Keymap.Scope.Prompt
   ]
 
   @doc "Starts the scope registry owner. It adopts a snapshot that survived a restart."

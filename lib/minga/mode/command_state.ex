@@ -50,6 +50,18 @@ defmodule Minga.Mode.CommandState do
     %{state | input: prefix <> after_cursor, cursor: String.length(prefix), candidate_index: 0}
   end
 
+  @doc "Applies a readline edit (`⌃A`, `⌃E`, `⌃W`, `⌃U`) and resets completion selection when the input changes."
+  @spec line_edit(t(), Minga.Editing.LineEdit.edit()) :: t()
+  def line_edit(%__MODULE__{input: input, cursor: cursor} = state, edit) do
+    case Minga.Editing.LineEdit.apply(edit, input, cursor) do
+      {^input, next_cursor} ->
+        %{state | cursor: next_cursor}
+
+      {next_input, next_cursor} ->
+        %{state | input: next_input, cursor: next_cursor, candidate_index: 0}
+    end
+  end
+
   @doc "Moves the cursor by one grapheme within the command input."
   @spec move_cursor(t(), :left | :right) :: t()
   def move_cursor(%__MODULE__{cursor: cursor} = state, :left) do

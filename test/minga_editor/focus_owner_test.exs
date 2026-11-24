@@ -57,7 +57,7 @@ defmodule MingaEditor.FocusOwnerTest do
     tmp_dir: root
   } do
     tags = [:none | ModalOverlay.variants()]
-    scopes = Scope.all_scopes()
+    scopes = Scope.surface_scopes()
 
     for tag <- tags do
       assert Map.has_key?(@modal_rows, tag) or Map.has_key?(@unreachable_tags, tag),
@@ -90,7 +90,7 @@ defmodule MingaEditor.FocusOwnerTest do
   test "inline edit and ask own the active buffer above ordinary modals in every scope", %{
     tmp_dir: root
   } do
-    for variant <- [:inline_edit, :inline_ask], scope <- Scope.all_scopes() do
+    for variant <- [:inline_edit, :inline_ask], scope <- Scope.surface_scopes() do
       path = Path.join(root, "#{variant}-#{scope}.txt")
       File.write!(path, "original\nsecond")
       ctx = start_editor("original\nsecond", file_path: path, project_root: root)
@@ -121,7 +121,7 @@ defmodule MingaEditor.FocusOwnerTest do
   test "active native search owns its field in every scope and yields to a modal", %{
     tmp_dir: root
   } do
-    for scope <- Scope.all_scopes() do
+    for scope <- Scope.surface_scopes() do
       ctx = start_editor("search me", project_root: root)
       state = ctx |> editor_state() |> activate_scope(scope, root)
       search = Search.focus_gui_search(state.workspace.search, false)

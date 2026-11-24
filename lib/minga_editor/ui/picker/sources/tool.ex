@@ -66,7 +66,7 @@ defmodule MingaEditor.UI.Picker.Sources.Tool do
   def on_select(%Item{id: {name, :installed}}, state) do
     MingaEditor.Shell.Traditional.NoticeWorkflow.publish(
       state,
-      "#{name} is already installed. Press C-o for actions."
+      "#{name} is already installed. Press ⌃. for actions."
     )
   end
 
