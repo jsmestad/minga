@@ -20,8 +20,12 @@ defmodule Minga.Mode.Normal do
   * **No match** — leader mode is cancelled.
 
   The FSM state carries `:leader_node` (current trie node, `nil` when not in
-  leader mode) and `:leader_keys` (list of formatted key strings accumulated so
-  far, for status-bar display).
+  leader mode), `:leader_keys` (list of formatted key strings accumulated so
+  far, for status-bar display) and `:leader_stack` (the nodes above the current
+  one, innermost first).
+
+  * **Backspace** goes up one level (`SPC a` back to `SPC`), so which-key stays
+    open on the parent group. At `SPC` itself it closes which-key.
 
   ## Supported keys
 
@@ -72,6 +76,7 @@ defmodule Minga.Mode.Normal do
   @escape 27
   @tab 9
   @space 32
+  @backspace 127
 
   # Modifier flags (mirrors MingaEditor.Frontend.Protocol)
   @ctrl 0x02
@@ -159,7 +164,7 @@ defmodule Minga.Mode.Normal do
 
   # SPC pressed while not in leader mode → start leader sequence.
   def handle_key({@space, 0}, %ModeState{leader_node: nil} = state) do
-    new_state = %{state | leader_node: state.leader_trie, leader_keys: ["SPC"]}
+    new_state = %{state | leader_node: state.leader_trie, leader_keys: ["SPC"], leader_stack: []}
     execute_discarding_count({:leader_start, state.leader_trie}, new_state)
   end
 
@@ -168,17 +173,23 @@ defmodule Minga.Mode.Normal do
   def handle_key({@space, 0}, %ModeState{leader_node: node} = state) when is_map(node) do
     case Bindings.lookup(node, {@space, 0}) do
       {:command, command} ->
-        new_state = %{state | leader_node: nil, leader_keys: []}
+        new_state = %{state | leader_node: nil, leader_keys: [], leader_stack: []}
         execute_discarding_count([command, :leader_cancel], new_state)
 
       {:prefix, sub_node} ->
-        formatted = Bindings.format_key({@space, 0})
-        new_keys = [formatted | state.leader_keys]
-        new_state = %{state | leader_node: sub_node, leader_keys: new_keys}
-        execute_discarding_count({:leader_progress, sub_node}, new_state)
+        execute_discarding_count(
+          {:leader_progress, sub_node},
+          descend(state, {@space, 0}, sub_node)
+        )
 
       :not_found ->
-        new_state = %{state | leader_node: state.leader_trie, leader_keys: ["SPC"]}
+        new_state = %{
+          state
+          | leader_node: state.leader_trie,
+            leader_keys: ["SPC"],
+            leader_stack: []
+        }
+
         execute_discarding_count([:leader_cancel, {:leader_start, state.leader_trie}], new_state)
     end
   end
@@ -193,6 +204,24 @@ defmodule Minga.Mode.Normal do
     execute_discarding_count(:whichkey_prev_page, state)
   end
 
+  # Backspace below the top of a leader sequence goes up one level and keeps
+  # which-key open on the parent group (docs/design/surfaces.md). At `SPC`
+  # itself the stack is empty, so Backspace falls through and cancels.
+  def handle_key(
+        {@backspace, 0},
+        %ModeState{leader_node: node, leader_stack: [parent | stack]} = state
+      )
+      when is_map(node) do
+    new_state = %{
+      state
+      | leader_node: parent,
+        leader_keys: tl(state.leader_keys),
+        leader_stack: stack
+    }
+
+    execute_discarding_count({:leader_progress, parent}, new_state)
+  end
+
   # Any other key while in leader mode → walk the trie.
   def handle_key(key, %ModeState{leader_node: node} = state) when is_map(node) do
     case Bindings.lookup(node, key) do
@@ -201,6 +230,7 @@ defmodule Minga.Mode.Normal do
           state
           | leader_node: nil,
             leader_keys: [],
+            leader_stack: [],
             count: nil,
             pending: nil
         }
@@ -208,13 +238,10 @@ defmodule Minga.Mode.Normal do
         execute_discarding_count(:leader_cancel, new_state)
 
       {:prefix, sub_node} ->
-        formatted = Bindings.format_key(key)
-        new_keys = [formatted | state.leader_keys]
-        new_state = %{state | leader_node: sub_node, leader_keys: new_keys}
-        execute_discarding_count({:leader_progress, sub_node}, new_state)
+        execute_discarding_count({:leader_progress, sub_node}, descend(state, key, sub_node))
 
       {:command, command} ->
-        new_state = %{state | leader_node: nil, leader_keys: []}
+        new_state = %{state | leader_node: nil, leader_keys: [], leader_stack: []}
         execute_discarding_count([command, :leader_cancel], new_state)
     end
   end
@@ -866,6 +893,17 @@ defmodule Minga.Mode.Normal do
 
   defp dispatch_prefix_command(command, state) do
     execute_discarding_count(command, state)
+  end
+
+  # Steps into a leader group, remembering the node it came from so Backspace can go back.
+  @spec descend(ModeState.t(), Bindings.key(), Bindings.node_t()) :: ModeState.t()
+  defp descend(%ModeState{} = state, key, sub_node) do
+    %{
+      state
+      | leader_node: sub_node,
+        leader_keys: [Bindings.format_key(key) | state.leader_keys],
+        leader_stack: [state.leader_node | state.leader_stack]
+    }
   end
 
   @spec execute_discarding_count(Mode.command() | [Mode.command()], ModeState.t()) ::

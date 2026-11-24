@@ -210,6 +210,32 @@ defmodule Minga.Mode.NormalTest do
       assert restarted.leader_node == leader_state.leader_node
     end
 
+    test "backspace goes up one leader level, and closes which-key at SPC" do
+      {:execute, {:leader_start, root}, at_root, :discard_count} = handle({32, 0})
+      {:execute, {:leader_progress, minga}, at_a, :discard_count} = handle({?a, 0}, at_root)
+      {:execute, {:leader_progress, queue}, at_q, :discard_count} = handle({?q, 0}, at_a)
+
+      assert at_q.leader_node == queue
+      assert at_q.leader_keys == ["q", "a", "SPC"]
+
+      {:execute, {:leader_progress, ^minga}, back_to_a, :discard_count} = handle({127, 0}, at_q)
+      assert back_to_a.leader_keys == ["a", "SPC"]
+
+      {:execute, {:leader_progress, ^root}, back_to_root, :discard_count} =
+        handle({127, 0}, back_to_a)
+
+      assert back_to_root.leader_keys == ["SPC"]
+      assert back_to_root.leader_stack == []
+
+      # The way back down again works from the parent.
+      assert {:execute, {:leader_progress, ^minga}, _state, :discard_count} =
+               handle({?a, 0}, back_to_root)
+
+      {:execute, :leader_cancel, closed, :discard_count} = handle({127, 0}, back_to_root)
+      assert closed.leader_node == nil
+      assert closed.leader_keys == []
+    end
+
     test "which-key pagination keeps leader state" do
       leader_trie = Defaults.leader_trie()
 
