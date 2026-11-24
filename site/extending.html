@@ -204,7 +204,7 @@ bind <span class="tok-atom">:normal</span>, <span class="tok-str">"SPC o h"</spa
 
         <section class="essay-section" id="extension-points">
           <h2>Four more places to plug in</h2>
-          <p>The first two are options you set in <code>config.exs</code>. The last two need a package.</p>
+          <p>The first two are options you set in <code>config.exs</code>. Model routes need a package, and grammars usually ship in one.</p>
           <ul>
             <li><strong>Agent hooks.</strong> A shell command that Minga runs at a point in an agent's work, such as before a tool call, where a non-zero exit stops the call. <a href="/docs/hooks.html">Hooks guide</a></li>
             <li><strong>MCP servers.</strong> External tool servers the agent can call over the Model Context Protocol (MCP); if one exits, only its tools drop out. <a href="/docs/mcp.html">MCP guide</a></li>
@@ -218,7 +218,7 @@ bind <span class="tok-atom">:normal</span>, <span class="tok-str">"SPC o h"</spa
           <p>The demo on the home page ends with a task board that Minga wrote from a spec. Minga does not ship a board. A task workflow is a view and its actions, written for one job, and it is what "quiet by default" means in practice: Minga shows nothing until something needs you, and then builds the one view your task needs.</p>
           <p>That view comes from a definition: a short file of ordinary Elixir source that says what the view shows and what its actions do. It sits between config and a package, and you can open it and read it like any other file. The loop has five steps:</p>
           <ol>
-            <li><strong>Ask, or write it yourself.</strong> Minga writes the definition from what your task needs, using capabilities that are already installed.</li>
+            <li><strong>Ask, or write it yourself.</strong> Ask Minga to write the definition from what your task needs, or write it yourself. Either way it uses capabilities that are already installed.</li>
             <li><strong>Save.</strong> Saving the file attempts to activate it in the running editor. The save and the activation are reported separately, so a definition that fails to activate is still saved and still readable. Activation first needs a grant from you, and you can revoke it.</li>
             <li><strong>Inspect.</strong> The source is in a normal buffer. Read it, change it, and save again.</li>
             <li><strong>Keep.</strong> Keep makes the definition available in later sessions, tabs and workspaces. It does not copy the task's data, and it does not make anything start by itself.</li>
@@ -230,7 +230,7 @@ bind <span class="tok-atom">:normal</span>, <span class="tok-str">"SPC o h"</spa
         <section class="essay-section" id="security-and-reloads">
           <h2>Trust, reloads and where your data goes</h2>
           <ul>
-            <li><strong>Trust.</strong> Config and packages run inside the editor with your user's permissions and are not sandboxed, the same model as Emacs and Vim, so read a package before you install it. <a href="/docs/extension_api.html#trust-model">Trust model</a></li>
+            <li><strong>Trust.</strong> Config and packages run inside Minga, in the same Erlang VM, with your user's permissions and are not sandboxed, the same model as Emacs and Vim, so read a package before you install it. <a href="/docs/extension_api.html#trust-model">Trust model</a></li>
             <li><strong>Reloads.</strong> <kbd>SPC h r</kbd> reloads options, key bindings, hooks and advice in place; changed package code loads only when Minga restarts, and the reload tells you when a restart is needed. <a href="/docs/0003-extension-code-updates-require-a-new-vm-generation.html">Why a restart (ADR-0003)</a></li>
             <li><strong>Where your data goes.</strong> A model route receives the conversation text and never runs a tool on your machine, and its token belongs in <code>~/.config/minga/credentials.json</code>, not in <code>config.exs</code>. <a href="/docs/extension_api.html#model-routes">Model routes</a></li>
           </ul>
