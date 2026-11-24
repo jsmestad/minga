@@ -174,7 +174,8 @@ func workspaceSpaceMetadata(space protocol.Workspace) string {
 	return strings.Join(parts, ", ")
 }
 
-func pluralCount(count uint16, label string) string {
+// pluralCount writes a count with a noun that agrees with it: "1 file", "2 files". It covers nouns that take a plain "s".
+func pluralCount[N int | uint8 | uint16 | uint32](count N, label string) string {
 	if count == 1 {
 		return fmt.Sprintf("%d %s", count, label)
 	}
@@ -603,7 +604,7 @@ func (m Model) gitSummary(git protocol.GitStatus) string {
 		parts = append(parts, fmt.Sprintf("behind %d", git.Behind))
 	}
 	if len(git.Entries) > 0 {
-		parts = append(parts, fmt.Sprintf("%d files", len(git.Entries)))
+		parts = append(parts, pluralCount(len(git.Entries), "file"))
 	}
 	if git.Toast.Visible && git.Toast.Message != "" {
 		parts = append(parts, git.Toast.Message)

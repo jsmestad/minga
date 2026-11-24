@@ -387,7 +387,7 @@ public struct PickerOverlay: View {
         )
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Actions choices")
-        .accessibilityValue("\(menu.entries.count) actions")
+        .accessibilityValue(menu.entries.count == 1 ? "1 action" : "\(menu.entries.count) actions")
     }
 
     private var pickerTitle: String {

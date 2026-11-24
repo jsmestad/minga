@@ -1,1 +1,1 @@
-  go ❯ tui ❯ render_chrome.go  ·  git main  ahead 1  1 files
+  go ❯ tui ❯ render_chrome.go  ·  git main  ahead 1  1 file

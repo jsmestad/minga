@@ -78,7 +78,7 @@ func (m Model) renderWhichKeyHeader(which protocol.WhichKey, width int) string {
 
 func (m Model) renderWhichKeyFooter(which protocol.WhichKey, width int) string {
 	p := m.palette()
-	left := fmt.Sprintf(" %d bindings", len(which.Bindings))
+	left := " " + pluralCount(len(which.Bindings), "binding")
 	right := "Esc close"
 	if which.PageCount > 1 {
 		wideRight := strings.Join([]string{"Tab next", "•", "Esc close"}, gap(spaceXL))

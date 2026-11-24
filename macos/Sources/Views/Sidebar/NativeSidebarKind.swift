@@ -159,7 +159,7 @@ private struct ObservatorySidebarHeader: View {
                 Text(item.displayName)
                     .font(Typography.font(.body, weight: .semibold))
                     .foregroundStyle(theme.tabActiveFg.opacity(0.85))
-                Text("\(state.processCount) processes")
+                Text(state.processCount == 1 ? "1 process" : "\(state.processCount) processes")
                     .font(Typography.font(.caption, weight: .regular))
                     .foregroundStyle(theme.treeFg.opacity(0.55))
             }

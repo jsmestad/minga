@@ -265,3 +265,26 @@ func TestPickerDecodesTheMovementKeysSection(t *testing.T) {
 		t.Fatalf("movement keys = %+v, want %+v", got, want)
 	}
 }
+
+func TestPluralCountAgreesWithItsNoun(t *testing.T) {
+	for count, want := range map[int]string{0: "0 files", 1: "1 file", 2: "2 files", 11: "11 files"} {
+		if got := pluralCount(count, "file"); got != want {
+			t.Fatalf("pluralCount(%d) = %q, want %q", count, got, want)
+		}
+	}
+	if got := pluralCount(uint16(1), "tab"); got != "1 tab" {
+		t.Fatalf("pluralCount(uint16(1)) = %q", got)
+	}
+}
+
+func TestWhichKeyFooterNamesOneBindingInTheSingular(t *testing.T) {
+	model := New(80, 24, nil)
+	one := ansi.Strip(model.renderWhichKeyFooter(protocol.WhichKey{Bindings: []protocol.WhichKeyBinding{{Key: "f", Description: "Find"}}}, 60))
+	two := ansi.Strip(model.renderWhichKeyFooter(protocol.WhichKey{Bindings: []protocol.WhichKeyBinding{{Key: "f"}, {Key: "g"}}}, 60))
+	if !strings.Contains(one, "1 binding ") || strings.Contains(one, "1 bindings") {
+		t.Fatalf("one binding reads %q", one)
+	}
+	if !strings.Contains(two, "2 bindings") {
+		t.Fatalf("two bindings read %q", two)
+	}
+}

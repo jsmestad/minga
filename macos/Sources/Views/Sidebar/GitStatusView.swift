@@ -244,7 +244,7 @@ public struct GitStatusView: View {
         .accessibilityAddTraits(.isButton)
         .accessibilityIdentifier("git-section-\(section.rawValue)")
         .accessibilityLabel(section.label)
-        .accessibilityValue("\(count) files, \(isCollapsed ? "collapsed" : "expanded")")
+        .accessibilityValue("\(count) \(count == 1 ? "file" : "files"), \(isCollapsed ? "collapsed" : "expanded")")
         .accessibilityHint(isCollapsed ? "Activate to expand" : "Activate to collapse")
         .accessibilityAction {
             toggleSection(section)

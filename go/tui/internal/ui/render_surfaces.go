@@ -277,7 +277,7 @@ func (m Model) renderAgentContext(context protocol.AgentContext) []string {
 	if context.Progress.ToolCount > 0 || context.Progress.FileCount > 0 || context.Progress.ActiveAction != "" {
 		items = append(items, componentItem{
 			title:       "progress",
-			description: fmt.Sprintf("%d tools / %d files / %s", context.Progress.ToolCount, context.Progress.FileCount, context.Progress.ActiveAction),
+			description: fmt.Sprintf("%s / %s / %s", pluralCount(context.Progress.ToolCount, "tool"), pluralCount(context.Progress.FileCount, "file"), context.Progress.ActiveAction),
 		})
 	}
 	for _, todo := range context.Todos {
@@ -312,7 +312,7 @@ func (m Model) renderBottomPanel(panel protocol.BottomPanel) []string {
 	height := m.bottomPanelHeight(panel)
 	p := m.palette()
 	headerLeft := fmt.Sprintf(" %s", title)
-	headerRight := fmt.Sprintf("%d messages", len(panel.Messages))
+	headerRight := pluralCount(len(panel.Messages), "message")
 	if m.bottomPanelScrollback > 0 {
 		headerRight += gap(spaceXL) + fmt.Sprintf("↑%d", m.bottomPanelScrollback)
 	}

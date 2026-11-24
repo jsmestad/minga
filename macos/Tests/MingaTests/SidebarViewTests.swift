@@ -776,7 +776,7 @@ struct GitStatusViewSectionTests {
             (try? $0.accessibilityLabel().string()) == "Modified file: editor.ex"
         })
 
-        #expect(try section.accessibilityValue().string() == "1 files, expanded")
+        #expect(try section.accessibilityValue().string() == "1 file, expanded")
         #expect(try row.accessibilityValue().string() == "Changes, lib/minga/editor.ex")
 
         state.toggleSection(.changed)
@@ -786,7 +786,7 @@ struct GitStatusViewSectionTests {
         let collapsed = try #require(collapsedBody.findAll(ViewType.HStack.self).first {
             (try? $0.accessibilityLabel().string()) == "Changes"
         })
-        #expect(try collapsed.accessibilityValue().string() == "1 files, collapsed")
+        #expect(try collapsed.accessibilityValue().string() == "1 file, collapsed")
     }
 
     @Test("Draft and collapsed sections survive Git sidebar view reconstruction")

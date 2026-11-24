@@ -476,7 +476,7 @@ func (m Model) renderAgentDetailsRail(chat protocol.AgentChat, width int, budget
 	if toolCount > 0 {
 		value := fmt.Sprintf("%d", toolCount)
 		if runningTools > 0 || erroredTools > 0 {
-			value = fmt.Sprintf("%d · %d running · %d errors", toolCount, runningTools, erroredTools)
+			value = fmt.Sprintf("%d · %d running · %s", toolCount, runningTools, pluralCount(erroredTools, "error"))
 		}
 		lines = append(lines, m.renderAgentDetailRow("Tools", value, width))
 	}
@@ -1124,7 +1124,7 @@ func (m Model) renderAgentToolPlainLines(label string, rawLines []string, width 
 		out = append(out, m.renderAgentToolLine(label, raw, index == 0, width, agentToolLineColor(raw, p), railColor))
 	}
 	if len(rawLines) > limit {
-		remaining := fmt.Sprintf("… +%d lines", len(rawLines)-limit)
+		remaining := "… +" + pluralCount(len(rawLines)-limit, "line")
 		out = append(out, m.renderAgentToolLine(label, remaining, false, width, p.Muted(), railColor))
 	}
 	return out
@@ -1140,7 +1140,7 @@ func (m Model) renderAgentToolStyledLines(label string, styledLines []protocol.A
 		out = append(out, m.renderAgentToolStyledLine(label, runs, index == 0, width, railColor))
 	}
 	if len(styledLines) > limit {
-		remaining := fmt.Sprintf("… +%d lines", len(styledLines)-limit)
+		remaining := "… +" + pluralCount(len(styledLines)-limit, "line")
 		out = append(out, m.renderAgentToolLine(label, remaining, false, width, p.Muted(), railColor))
 	}
 	return out
