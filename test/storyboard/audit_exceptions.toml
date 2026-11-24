@@ -1,0 +1,64 @@
+# Layout-audit findings that a later ticket fixes (#4036, AC 5). See docs/design/anatomy.md, "The layout audit".
+#
+# Each exception names its scenarios (an id, a list, or "*"), frontend, anatomy part and rule, optionally a theme,
+# and must give the reason and the issue that removes it. design/tools/storyboard/audit.py fails when an exception
+# no longer matches any finding, so remove an entry in the pull request that fixes it. Never add one to make a new
+# regression pass: fix the surface, or change docs/design/anatomy.md and the token scales first.
+
+# ---- TUI -----------------------------------------------------------------------------------------------------
+
+[[exception]]
+scenario = ["edit.whichkey.leader", "minga.whichkey"]
+frontend = "tui"
+part = "whichKey.column"
+rule = "column gap"
+reason = "The TUI which-key keeps its 2 │ 2 column separator and fixed-width cells; anatomy wants a panel gap after the widest entry and no rule."
+issue = 4044
+
+[[exception]]
+scenario = "minga.whichkey"
+frontend = "tui"
+part = "whichKey.entry"
+rule = "key to label"
+reason = "Single-letter keys are centred in a three-cell key column, so the label starts two cells late; the which-key rebuild sizes the column to the widest key."
+issue = 4044
+
+[[exception]]
+scenario = ["edit.whichkey.leader", "minga.whichkey"]
+frontend = "tui"
+part = "whichKey.entry"
+rule = "same metrics everywhere (key to label)"
+reason = "Follows from the centred key column above: the gap depends on the widest key in each panel."
+issue = 4044
+
+[[exception]]
+scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey"]
+frontend = "tui"
+part = "modeline.segment"
+rule = "gap between segments"
+reason = "The BEAM's modeline puts a │ separator with a space on each side between segments; anatomy wants an md gap without a rule."
+issue = 4043
+
+[[exception]]
+scenario = "edit.visual"
+frontend = "tui"
+part = "modeline"
+rule = "leading inset"
+reason = "The Visual mode segment starts with a mode glyph the locator does not count as the segment's words, so its text starts two cells in."
+issue = 4043
+
+[[exception]]
+scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey"]
+frontend = "tui"
+part = "text"
+rule = "contrast"
+reason = "Syntax colours in Latte, muted comment and gutter text, breadcrumb separators and modeline chips miss 4.5:1."
+issue = 4137
+
+[[exception]]
+scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey"]
+frontend = "tui"
+part = "glyph"
+rule = "contrast"
+reason = "Empty-line tildes, fold marks, separators and the which-key icons' One Dark colours in Latte miss 3:1."
+issue = 4137

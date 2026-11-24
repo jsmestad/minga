@@ -106,7 +106,8 @@ def contrast(fg, bg):
     return round((high + 0.05) / (low + 0.05), 2)
 
 
-GLYPH = re.compile(r"[─-▟←-⇿•›‹·~-\U000f0000-\U000fffff]")
+# Box drawing, block and geometric shapes, arrows, dingbats, bullets and Nerd Font private-use icons are glyphs (3:1).
+GLYPH = re.compile("[\\u2500-\\u25ff\\u2190-\\u21ff\\u2700-\\u27bf\\u2022\\u203a\\u2039\\u00b7~\\ue000-\\uf8ff\\U000f0000-\\U000fffff]")
 
 
 # -- findings --------------------------------------------------------------------------------------------------------
