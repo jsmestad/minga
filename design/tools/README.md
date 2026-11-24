@@ -38,7 +38,38 @@ OUT_DIR=/tmp/minga-out python3 edit.py
 | `retheme/` | `retheme.py THEME IN OUT` maps the dark generator palette onto Catppuccin Frappé or Latte by colour role. |
 | `storyboard/` | The storyboard inventory tools, which read [`docs/design/scenarios.toml`](../../docs/design/scenarios.toml): `check.py` (flow invariants, and that every designed scenario has a board per frontend), `inventory.py` (the inventory board) and `flowmap.py` (the flow map). `renders.py` draws the built scenarios on both frontends, diffs them against their baselines and builds the storyboard page. Run them from the repository root. See [storyboard.md](../../docs/design/storyboard.md#running-the-inventory-checks). |
 | `export_boards.py`, `rebuild_boards.sh` | The publish step described above. |
-| `site_check.py` | The marketing site check. It reads `site/*.html` and fails when the copy drifts from the shipped keymap, [`docs/design/keys.md`](../../docs/design/keys.md), the six state words, the voice, the Twist placement or the default theme. Text inside `data-status="planned"` is a claim about the design; everything else is a claim about today's build. `site_retired_keys.txt` lists keys the site must never teach, and `site_claims.toml` ties feature phrases to the code that proves them. Run `python3 design/tools/site_check.py` from the repository root. |
+| `site_check.py` | The marketing site check. It reads `site/*.html` and fails when the copy drifts from the shipped keymap, [`docs/design/keys.md`](../../docs/design/keys.md), the six state words, the voice, the Twist placement or the default theme. Text inside `data-status="planned"` is a claim about the design; everything else is a claim about today's build. `site_retired_keys.txt` lists keys the site must never teach, and `site_claims.toml` ties feature phrases to the code that proves them. Run `python3 design/tools/site_check.py` from the repository root. See [The site check](#the-site-check). |
+
+## The site check
+
+The staged site describes v0.1.0 before v0.1.0 exists, so a reader needs to see which features are built. `site_check.py` keeps the markup honest, and the CSS turns the markup into a label.
+
+**The label.** `data-status="planned"` is the only marker; any other value fails the check. The wording is CSS only, in `site/styles.css`:
+
+- A planned block draws a pill that reads "In development", or "In development · v0.1.0" when the block names its release in `data-since`.
+- A page that is wholly about an unreleased version shows one banner instead of a pill on every item. Put `<div class="status-banner">` first in `<main>`, with one planned paragraph inside it; the paragraph's pill is the banner's label. The `<main>` carries `data-status="planned"` and `data-pill="off"`.
+- `data-pill="off"` hides a pill. Use it only on a block that sits under a banner or that holds its own pill. No planned block is left with neither.
+
+**Page metadata.** Search results and link previews show copy that is not in the page body. The check reads the `description`, `og:description` and `twitter:description` meta tags and every `description` in a JSON-LD block, and applies the same key and claim rules. Metadata is a claim about today's build unless `<head>` carries `data-status="planned"`. A JSON-LD block that does not parse fails.
+
+**Lab copy in TypeScript.** The check does not read what a lab renders from TypeScript, so lab captions, legends and step text live in the page HTML. To stop new copy from hiding in the labs, the check scans every string literal in `site/ts/src/**/*.ts` for two things:
+
+- a leader sequence: `SPC` plus at least one key, such as `SPC a y` or the range legend `SPC 1-4`. A bare `SPC` is not counted; it is a shipped key and a common state value.
+- a phrase from `site_claims.toml`, matched as whole words, so a class name that contains it does not count.
+
+`site_ts_copy_baseline.tsv` lists what was there when the check landed: one row per file, kind and value, with a count. The baseline only shrinks. A new value, or one more occurrence than the row allows, fails. A row whose count is higher than the sources fails too, so a lab that moves its copy into the page prunes its rows in the same pull request:
+
+```bash
+python3 design/tools/site_check.py --prune-ts-baseline
+```
+
+The writer keeps only rows that are already listed and never raises a count, so it cannot add debt.
+
+The checker's own tests are in `test/scripts/site_check_test.py`:
+
+```bash
+python3 -m unittest discover -s test/scripts -p 'site_check_test.py'
+```
 
 ## Rules for changes
 

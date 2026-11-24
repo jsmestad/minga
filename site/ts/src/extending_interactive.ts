@@ -53,7 +53,7 @@ end`,
 end`,
       },
       3: {
-        badge: "Coming · v0.1.0 task workflow",
+        badge: "In development · v0.1.0 task workflow",
         filename: "workflows/pr_lint_board.exs",
         reloadRule: "Save to activate under explicit revocable session grant",
         isolation: "Restores last working generation if a candidate fails",
@@ -100,7 +100,7 @@ end`,
 end`,
       },
       3: {
-        badge: "Coming · v0.1.0 task workflow",
+        badge: "In development · v0.1.0 task workflow",
         filename: "workflows/prod_change_gate.exs",
         reloadRule: "Scoped to one release window; discard when done",
         isolation: "Explicit diff review before activating in session",
@@ -143,7 +143,7 @@ end`,
 end`,
       },
       3: {
-        badge: "Coming · v0.1.0 task workflow",
+        badge: "In development · v0.1.0 task workflow",
         filename: "workflows/cost_budget_hud.exs",
         reloadRule: "Save to activate; reusable across repos if it sticks",
         isolation: "Reads canonical agent session usage without shadow state",
@@ -181,7 +181,7 @@ end`,
   load_policy: {:on_command, [:sql_check]}`,
       },
       3: {
-        badge: "Coming · v0.1.0 disposable workflow",
+        badge: "In development · v0.1.0 disposable workflow",
         filename: "workflows/tuesday_migration_audit.exs",
         reloadRule: "Author for Tuesday's PR, discard Wednesday (or reuse)",
         isolation: "Runs identically on macOS Metal and Go Terminal UI",
@@ -223,7 +223,7 @@ export function mountLayerExplorer(root: HTMLElement): void {
     const layerBtns: readonly { readonly n: LayerNum; readonly title: string; readonly sub: string }[] = [
       { n: 1, title: "Layer 1 · config.exs", sub: "Live reload" },
       { n: 2, title: "Layer 2 · minga_sdk", sub: "Hex / Git packages" },
-      { n: 3, title: "Layer 3 · Task workflow", sub: "Coming · v0.1.0" },
+      { n: 3, title: "Layer 3 · Task workflow", sub: "In development · v0.1.0" },
     ];
 
     const tabsHtml = layerBtns

@@ -1,0 +1,54 @@
+# Lab copy baseline: key legends and claim phrases that sat in TypeScript strings when the guard landed.
+#
+# Rows may only be removed or lowered, never added or raised. The lab tickets under #4205 move this copy into the page HTML.
+# New lab copy goes in the page HTML, where design/tools/site_check.py reads it; see AGENTS.md, "Site and design docs stay in sync".
+#
+# Prune rows the sources no longer match:
+#   python3 design/tools/site_check.py --prune-ts-baseline
+# The writer keeps only rows that are already in this file and never raises a count, so it cannot add one.
+#
+# file (under site/ts/src)	kind	value	count
+arch_interactive.ts	key	SPC a p	2
+coauthor_state.ts	claim	*minga-tasks*	2
+coauthor_state.ts	claim	300 ms	3
+coauthor_state.ts	claim	Already answered	3
+coauthor_state.ts	claim	Subagent Peek	2
+coauthor_state.ts	claim	Twist	2
+coauthor_state.ts	key	SPC a a	1
+coauthor_state.ts	key	SPC a d	3
+coauthor_state.ts	key	SPC a i	2
+coauthor_state.ts	key	SPC a y	3
+coauthor_view.ts	claim	*minga-tasks*	1
+coauthor_view.ts	claim	300 ms	2
+coauthor_view.ts	claim	Subagent Peek	2
+coauthor_view.ts	key	SPC a	2
+coauthor_view.ts	key	SPC a a	2
+coauthor_view.ts	key	SPC a d	2
+coauthor_view.ts	key	SPC a i	2
+coauthor_view.ts	key	SPC a y	2
+extending_interactive.ts	key	SPC h r	5
+extending_interactive.ts	key	SPC m	2
+home_interactive.ts	claim	*minga-queue*	2
+home_interactive.ts	claim	*minga-review*	4
+home_interactive.ts	claim	*minga-tasks*	3
+home_interactive.ts	claim	Orbit	1
+home_interactive.ts	claim	Twist	3
+home_interactive.ts	key	SPC a	2
+home_interactive.ts	key	SPC a d	2
+home_interactive.ts	key	SPC a y	2
+sandbox_state.ts	claim	Twist	1
+sandbox_state.ts	claim	reveals shortcuts	1
+sandbox_state.ts	key	SPC ,	3
+sandbox_state.ts	key	SPC 1	1
+sandbox_state.ts	key	SPC 1-4	2
+sandbox_state.ts	key	SPC a	4
+sandbox_state.ts	key	SPC a d	1
+sandbox_state.ts	key	SPC a y	1
+sandbox_view.ts	key	SPC ,	5
+sandbox_view.ts	key	SPC a	1
+sandbox_view.ts	key	SPC a d	1
+sandbox_view.ts	key	SPC a y	1
+sandbox_view.ts	key	SPC b b	1
+why_interactive.ts	claim	Twist	1
+why_interactive.ts	key	SPC ,	3
+why_interactive.ts	key	SPC 1	1
