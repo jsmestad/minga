@@ -125,23 +125,20 @@ defmodule MingaAgent.SessionJobOwnerTest do
                Session.job(session, record.id)
     end
 
-    test "a background job settles with a pending notice shown at the turn boundary" do
+    test "a background job that settles while idle is delivered and shown without a prompt" do
       session = start_subscribed_session(Minga.Test.SessionMockProvider)
       {:ok, record, owner} = Session.admit_job(session, spec("make build", true))
       assert :ok = JobOwner.start_background(owner, record, @backend)
 
       assert eventually(fn ->
-               match?({:ok, %Record{notice: :pending}}, Session.job(session, record.id))
+               match?({:ok, %Record{notice: :delivered}}, Session.job(session, record.id))
              end)
 
-      assert :ok = Session.send_prompt(session, "continue")
-      await_turn_complete()
+      notice =
+        ~s|Background job job-1 (`make build`) finished: failed, exit 3. Use job_output("job-1") to read its output.|
 
-      assert {:system, "Background job job-1: failed (exit 3)", :info} in Session.messages(
-               session
-             )
-
-      assert {:ok, %Record{notice: :delivered}} = Session.job(session, record.id)
+      assert {:system, notice, :info} in Session.messages(session)
+      refute Enum.any?(Session.messages(session), &match?({:user, _}, &1))
     end
 
     test "a report from another epoch is ignored" do
@@ -165,7 +162,8 @@ defmodule MingaAgent.SessionJobOwnerTest do
 
       assert :ok = Session.cancel_job(session, record.id)
 
-      assert {:ok, %Record{status: {:terminal, :cancelled, nil}, notice: :pending}} =
+      # The idle session delivers the cancelled job's notice in the same update that settles it.
+      assert {:ok, %Record{status: {:terminal, :cancelled, nil}, notice: :delivered}} =
                Session.job(session, record.id)
 
       assert {:error, :already_terminal} = Session.cancel_job(session, record.id)
@@ -189,7 +187,7 @@ defmodule MingaAgent.SessionJobOwnerTest do
                )
              end)
 
-      assert {:ok, %Record{notice: :pending}} = Session.job(session, background.id)
+      assert {:ok, %Record{notice: :delivered}} = Session.job(session, background.id)
 
       assert {:ok, %Record{status: {:interrupted, :owner_down}, notice: :none}} =
                Session.job(session, foreground.id)

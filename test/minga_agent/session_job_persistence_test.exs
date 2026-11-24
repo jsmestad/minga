@@ -85,7 +85,7 @@ defmodule MingaAgent.SessionJobPersistenceTest do
              %Record{
                id: job_id,
                status: {:terminal, :failed, 3},
-               notice: :pending,
+               notice: :delivered,
                output_ref: reference,
                preview: "ran gated build"
              }
@@ -113,8 +113,13 @@ defmodule MingaAgent.SessionJobPersistenceTest do
     second = start_persistent_session(ctx)
     assert :ok = Session.load_session(second, id)
 
+    # Loading wakes the idle agent with the interrupted job's notice.
     assert {:ok,
-            %Record{status: {:interrupted, :restart}, notice: :pending, finished_at: %DateTime{}}} =
+            %Record{
+              status: {:interrupted, :restart},
+              notice: :delivered,
+              finished_at: %DateTime{}
+            }} =
              Session.job(second, record.id)
 
     assert Session.jobs(second) |> Enum.filter(&Record.running?/1) == []

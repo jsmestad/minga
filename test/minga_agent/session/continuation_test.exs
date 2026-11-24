@@ -231,6 +231,145 @@ defmodule MingaAgent.Session.ContinuationTest do
     assert reconciled.messages == exact
   end
 
+  describe "job notices" do
+    test "a notice freezes once between tool results and steering and survives restore" do
+      {request, checkpoint_id, completed, source, saved} = completed_checkpoint()
+      steering = Context.user("Keep the existing output")
+      notice = job_notice(["job-1", "job-2"])
+
+      exact = source ++ [saved, notice, steering]
+
+      assert {:ok, ^exact, frozen} =
+               Continuation.freeze_dispatch_source(completed, checkpoint_id, [steering], notice)
+
+      # A retried dispatch reuses the frozen source and cannot fold a second notice.
+      assert {:ok, ^exact, _same} =
+               Continuation.freeze_dispatch_source(frozen, checkpoint_id, [], nil)
+
+      assert {:error, :invalid_job_notice} =
+               Continuation.freeze_dispatch_source(frozen, checkpoint_id, [], notice)
+
+      # The next tool group and the final outcome must extend the frozen source, notice included.
+      next_call = Context.assistant("", tool_calls: [ToolCall.new("next", "shell", "{}")])
+      next_calls = [%{tool_call_id: "next", name: "shell", arguments: %{}}]
+
+      assert {:ok, _next_id, _next} =
+               Continuation.checkpoint_tool_group(
+                 frozen,
+                 request.request_id,
+                 Enum.concat(exact, [next_call]),
+                 next_calls
+               )
+
+      assert {:error, _without_notice} =
+               Continuation.checkpoint_tool_group(
+                 frozen,
+                 request.request_id,
+                 source ++ [saved, steering, next_call],
+                 next_calls
+               )
+
+      final = Enum.concat(exact, [Context.assistant("done")])
+      assert {:ok, completed_turn} = Continuation.complete(frozen, Outcome.new(request, final), 2)
+      assert completed_turn.messages == final
+
+      assert {:ok, restored} = frozen |> ContinuationCodec.encode() |> ContinuationCodec.decode()
+      assert restored.tool_checkpoint.notice == notice
+      assert {reconciled, _} = Continuation.reconcile_interrupted(restored, 2)
+      assert reconciled.messages == exact
+    end
+
+    test "a notice is refused at the initial source, as steering, and when malformed" do
+      {_request, checkpoint_id, completed, _source, _saved} = completed_checkpoint()
+      notice = job_notice(["job-1"])
+
+      {:ok, initial_request, initial} =
+        Continuation.begin_request(Continuation.new(), "r", 1, "x")
+
+      assert {:error, :stale_dispatch} =
+               Continuation.begin_dispatch(
+                 initial,
+                 initial_request.request_id,
+                 :initial,
+                 [],
+                 notice,
+                 self()
+               )
+
+      assert {:error, :invalid_steering} =
+               Continuation.freeze_dispatch_source(completed, checkpoint_id, [notice], nil)
+
+      for forged <- [
+            Context.user("Background job job-1 finished"),
+            %{notice | role: :assistant},
+            %{notice | metadata: %{minga_origin: :job_notice, job_ids: []}},
+            %{notice | metadata: %{minga_origin: :job_notice, job_ids: ["job-1", "job-1"]}}
+          ] do
+        assert {:error, :invalid_job_notice} =
+                 Continuation.freeze_dispatch_source(completed, checkpoint_id, [], forged)
+
+        assert {:error, :invalid_job_notice} =
+                 Continuation.begin_host_request(Continuation.new(), "host", 1, forged)
+      end
+    end
+
+    test "a host request appends only the notice and is refused while a request is active" do
+      notice = job_notice(["job-3"])
+
+      assert {:ok, request, active} =
+               Continuation.begin_host_request(Continuation.new(), "host", 4, notice)
+
+      assert request.messages == [notice]
+      assert request.turn_id == 4
+
+      assert {:error, :request_active} =
+               Continuation.begin_host_request(active, "again", 5, notice)
+
+      {_request, _id, with_checkpoint, _source, _saved} = completed_checkpoint()
+
+      assert {:error, :effect_reconciliation_required} =
+               Continuation.begin_host_request(
+                 Continuation.cancel(with_checkpoint),
+                 "host",
+                 6,
+                 notice
+               )
+    end
+  end
+
+  defp completed_checkpoint do
+    {:ok, request, continuation} =
+      Continuation.begin_request(Continuation.new(), "notice-request", 1, "inspect")
+
+    assistant = Context.assistant("", tool_calls: [ToolCall.new("call", "shell", "{}")])
+    source = Enum.concat(request.messages, [assistant])
+    saved = Context.tool_result_message("shell", "call", "saved")
+
+    {:ok, checkpoint_id, pending} =
+      Continuation.checkpoint_tool_group(continuation, request.request_id, source, [
+        %{tool_call_id: "call", name: "shell", arguments: %{}}
+      ])
+
+    {:ok, completed} =
+      Continuation.complete_tool_effect(pending, request.request_id, checkpoint_id, "call", saved)
+
+    {request, checkpoint_id, completed, source, saved}
+  end
+
+  defp job_notice(ids) do
+    now = DateTime.utc_now()
+
+    ids
+    |> Enum.map(fn id ->
+      spec = %{command: "make #{id}", cwd: "/tmp", background?: true, timeout_secs: 30}
+
+      id
+      |> MingaAgent.Session.JobLedger.Record.admit(1, spec, now)
+      |> MingaAgent.Session.JobLedger.Record.settle(:completed, 0, %{}, now)
+    end)
+    |> MingaAgent.Session.JobNotice.message()
+  end
+
   test "codec preserves attachments, provider-native blocks, tool groups, and reasoning signatures" do
     reasoning = %ReasoningDetails{
       text: "private reasoning",

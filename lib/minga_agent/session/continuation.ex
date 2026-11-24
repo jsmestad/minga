@@ -10,6 +10,7 @@ defmodule MingaAgent.Session.Continuation do
   alias MingaAgent.Message, as: DisplayMessage
   alias MingaAgent.ModelSelection.Policy.RequestCapacity
   alias MingaAgent.Session.Dispatch
+  alias MingaAgent.Session.JobNotice
   alias MingaAgent.Session.Outcome
   alias MingaAgent.Session.Request
   alias MingaAgent.Session.Prefix
@@ -46,7 +47,8 @@ defmodule MingaAgent.Session.Continuation do
           required(:messages) => [Message.t()],
           required(:calls) => [checkpoint_call()],
           required(:epoch_id) => PrefixStore.epoch_ref(),
-          optional(:steering) => [Message.t()]
+          optional(:steering) => [Message.t()],
+          optional(:notice) => Message.t()
         }
 
   @typep checkpoint_selection :: {tool_checkpoint(), non_neg_integer(), checkpoint_call()}
@@ -427,6 +429,37 @@ defmodule MingaAgent.Session.Continuation do
       prefix = PrefixStore.resolve(continuation.prefixes, continuation.prefixes.selected)
       request = Request.new(request_id, turn_id, continuation.revision, messages, prefix)
       {:ok, request, %{continuation | active_request: request}}
+    end
+  end
+
+  @doc """
+  Begins one host-origin request whose only new input is a job notice built by `MingaAgent.Session.JobNotice`.
+
+  The notice is appended to the last completed boundary like user content, but it never carries user provenance. A message that is not a valid job notice is refused.
+  """
+  @spec begin_host_request(t(), String.t(), pos_integer(), Message.t()) ::
+          {:ok, Request.t(), t()}
+          | {:error,
+             :request_active
+             | :effect_reconciliation_required
+             | :invalid_job_notice
+             | :invalid_attachment
+             | :invalid_message}
+  def begin_host_request(%__MODULE__{tool_checkpoint: %{}}, _request_id, _turn_id, _notice),
+    do: {:error, :effect_reconciliation_required}
+
+  def begin_host_request(%__MODULE__{active_request: %Request{}}, _request_id, _turn_id, _notice),
+    do: {:error, :request_active}
+
+  def begin_host_request(%__MODULE__{} = continuation, request_id, turn_id, notice) do
+    with :ok <- JobNotice.validate(notice) do
+      messages = Enum.concat(continuation.messages, [notice])
+
+      with :ok <- validate_messages(messages) do
+        prefix = PrefixStore.resolve(continuation.prefixes, continuation.prefixes.selected)
+        request = Request.new(request_id, turn_id, continuation.revision, messages, prefix)
+        {:ok, request, %{continuation | active_request: request}}
+      end
     end
   end
 
@@ -920,14 +953,26 @@ defmodule MingaAgent.Session.Continuation do
   def checkpoint_tool_group(%__MODULE__{}, _request_id, _messages, _calls),
     do: {:error, :stale_request}
 
-  @doc "Starts a fresh assessment for the active request's current initial or completed-checkpoint source."
-  @spec begin_dispatch(t(), String.t(), Dispatch.source(), [Message.t()], pid()) ::
+  @doc """
+  Starts a fresh assessment for the active request's current initial or completed-checkpoint source.
+
+  Steering and an optional job notice can be frozen only into a completed checkpoint that has not frozen its inputs yet. The initial source accepts neither.
+  """
+  @spec begin_dispatch(
+          t(),
+          String.t(),
+          Dispatch.source(),
+          [Message.t()],
+          Message.t() | nil,
+          pid()
+        ) ::
           {:ok, Dispatch.t(), [Message.t()], t()} | {:error, term()}
   def begin_dispatch(
         %__MODULE__{dispatch: {_owner, %Dispatch{status: {:refused, _}}}},
         _request_id,
         _source,
         _steering,
+        _notice,
         _owner_pid
       ),
       do: {:error, :assessment_refused}
@@ -940,32 +985,34 @@ defmodule MingaAgent.Session.Continuation do
         request_id,
         source,
         steering,
+        notice,
         owner
       )
       when is_nil(current) or elem(current, 0) == owner do
-    with {:ok, messages, frozen} <- dispatch_source(continuation, source, steering) do
+    with {:ok, messages, frozen} <- dispatch_source(continuation, source, steering, notice) do
       dispatch = Dispatch.begin(request, source)
       {:ok, dispatch, messages, %{frozen | dispatch: {owner, dispatch}}}
     end
   end
 
-  def begin_dispatch(%__MODULE__{}, _request_id, _source, _steering, _owner),
+  def begin_dispatch(%__MODULE__{}, _request_id, _source, _steering, _notice, _owner),
     do: {:error, :stale_dispatch}
 
-  @spec dispatch_source(t(), Dispatch.source(), [Message.t()]) ::
+  @spec dispatch_source(t(), Dispatch.source(), [Message.t()], Message.t() | nil) ::
           {:ok, [Message.t()], t()} | {:error, term()}
   defp dispatch_source(
          %__MODULE__{tool_checkpoint: nil, active_request: %Request{messages: messages}} =
            continuation,
          :initial,
-         []
+         [],
+         nil
        ),
        do: {:ok, messages, continuation}
 
-  defp dispatch_source(%__MODULE__{} = continuation, {:checkpoint, id}, steering),
-    do: freeze_dispatch_source(continuation, id, steering)
+  defp dispatch_source(%__MODULE__{} = continuation, {:checkpoint, id}, steering, notice),
+    do: freeze_dispatch_source(continuation, id, steering, notice)
 
-  defp dispatch_source(%__MODULE__{}, _source, _steering), do: {:error, :stale_dispatch}
+  defp dispatch_source(%__MODULE__{}, _source, _steering, _notice), do: {:error, :stale_dispatch}
 
   @doc "Consumes the private attempt handed to the SDK callback, which runs outside the Native worker."
   @spec assess_dispatch(t(), Dispatch.t(), binary(), RequestCapacity.t()) ::
@@ -984,45 +1031,80 @@ defmodule MingaAgent.Session.Continuation do
   def assess_dispatch(%__MODULE__{}, %Dispatch{}, _digest, _assessment),
     do: {:error, :stale_dispatch}
 
-  @doc "Freezes steering for a completed checkpoint once and returns its canonical dispatch source."
-  @spec freeze_dispatch_source(t(), String.t(), [Message.t()]) ::
+  @doc """
+  Freezes steering and an optional job notice into a completed checkpoint once, and returns its canonical dispatch source.
+
+  The source is the checkpoint messages, then the tool results, then the job notice, then the user steering. A checkpoint that already froze its inputs returns the same source again and refuses new steering or a new notice.
+  """
+  @spec freeze_dispatch_source(t(), String.t(), [Message.t()], Message.t() | nil) ::
           {:ok, [Message.t()], t()} | {:error, term()}
+  def freeze_dispatch_source(continuation, checkpoint_id, steering, notice \\ nil)
+
   def freeze_dispatch_source(
         %__MODULE__{
           active_request: %Request{request_id: request_id},
           tool_checkpoint: %{checkpoint_id: checkpoint_id, request_id: request_id} = checkpoint
         } = continuation,
         checkpoint_id,
-        steering
+        steering,
+        notice
       ) do
     with {:ok, results} <- checkpoint_result_messages(checkpoint.calls),
-         {:ok, frozen} <- freeze_checkpoint_steering(checkpoint, steering) do
-      {:ok, frozen.messages ++ results ++ frozen.steering,
+         {:ok, frozen} <- freeze_checkpoint_inputs(checkpoint, steering, notice) do
+      {:ok, frozen.messages ++ results ++ frozen_inputs(frozen),
        %{continuation | tool_checkpoint: frozen}}
     end
   end
 
-  def freeze_dispatch_source(%__MODULE__{}, _checkpoint_id, _steering),
+  def freeze_dispatch_source(%__MODULE__{}, _checkpoint_id, _steering, _notice),
     do: {:error, :stale_request}
 
-  @spec freeze_checkpoint_steering(tool_checkpoint(), [Message.t()]) ::
-          {:ok, tool_checkpoint()} | {:error, :invalid_steering}
-  defp freeze_checkpoint_steering(%{steering: _} = checkpoint, []), do: {:ok, checkpoint}
-  defp freeze_checkpoint_steering(%{steering: _}, _steering), do: {:error, :invalid_steering}
+  @spec freeze_checkpoint_inputs(tool_checkpoint(), [Message.t()], Message.t() | nil) ::
+          {:ok, tool_checkpoint()} | {:error, :invalid_steering | :invalid_job_notice}
+  defp freeze_checkpoint_inputs(%{steering: _} = checkpoint, [], nil), do: {:ok, checkpoint}
+  defp freeze_checkpoint_inputs(%{steering: _}, [], _notice), do: {:error, :invalid_job_notice}
 
-  defp freeze_checkpoint_steering(checkpoint, steering) do
-    if valid_steering?(steering),
-      do: {:ok, Map.merge(checkpoint, %{version: 2, steering: steering})},
-      else: {:error, :invalid_steering}
+  defp freeze_checkpoint_inputs(%{steering: _}, _steering, _notice),
+    do: {:error, :invalid_steering}
+
+  defp freeze_checkpoint_inputs(checkpoint, steering, notice) do
+    cond do
+      not valid_steering?(steering) ->
+        {:error, :invalid_steering}
+
+      not valid_notice?(notice) ->
+        {:error, :invalid_job_notice}
+
+      true ->
+        {:ok, checkpoint |> Map.merge(%{version: 2, steering: steering}) |> put_notice(notice)}
+    end
   end
 
+  @spec put_notice(tool_checkpoint(), Message.t() | nil) :: tool_checkpoint()
+  defp put_notice(checkpoint, nil), do: checkpoint
+  defp put_notice(checkpoint, %Message{} = notice), do: Map.put(checkpoint, :notice, notice)
+
+  # The inputs a frozen checkpoint appends after its tool results: the job notice, then user steering.
+  @spec frozen_inputs(tool_checkpoint()) :: [Message.t()]
+  defp frozen_inputs(%{notice: notice} = checkpoint),
+    do: [notice | Map.get(checkpoint, :steering, [])]
+
+  defp frozen_inputs(checkpoint), do: Map.get(checkpoint, :steering, [])
+
+  # Steering is user input, so a message that claims job-notice origin is refused here.
   @spec valid_steering?(term()) :: boolean()
   defp valid_steering?(steering) when is_list(steering),
     do:
-      Enum.all?(steering, &match?(%Message{role: :user}, &1)) and
+      Enum.all?(steering, &(match?(%Message{role: :user}, &1) and not JobNotice.notice?(&1))) and
         validate_messages(steering) == :ok
 
   defp valid_steering?(_steering), do: false
+
+  @spec valid_notice?(term()) :: boolean()
+  defp valid_notice?(nil), do: true
+
+  defp valid_notice?(notice),
+    do: JobNotice.validate(notice) == :ok and validate_messages([notice]) == :ok
 
   @spec checkpoint_result_messages([checkpoint_call()]) ::
           {:ok, [Message.t()]} | {:error, :unresolved_tool_checkpoint}
@@ -1243,18 +1325,18 @@ defmodule MingaAgent.Session.Continuation do
 
     reconciliation = Enum.reverse(reversed_reconciliation)
     revision = continuation.revision + 1
-    steering = Map.get(checkpoint, :steering, [])
+    inputs = frozen_inputs(checkpoint)
 
     boundary = %{
       transcript_id: transcript_id,
-      message_count: length(checkpoint.messages) + length(result_messages) + length(steering),
+      message_count: length(checkpoint.messages) + length(result_messages) + length(inputs),
       revision: revision,
       epoch_id: Map.get(checkpoint, :epoch_id, :unknown)
     }
 
     reconciled = %{
       continuation
-      | messages: checkpoint.messages ++ result_messages ++ steering,
+      | messages: checkpoint.messages ++ result_messages ++ inputs,
         revision: revision,
         active_request: nil,
         tool_checkpoint: nil,
@@ -1428,15 +1510,18 @@ defmodule MingaAgent.Session.Continuation do
 
   @spec validate_restored_steering(tool_checkpoint()) :: :ok | {:error, :invalid_steering}
   defp validate_restored_steering(%{version: 1} = checkpoint)
-       when not is_map_key(checkpoint, :steering),
+       when not is_map_key(checkpoint, :steering) and not is_map_key(checkpoint, :notice),
        do: :ok
 
-  defp validate_restored_steering(%{version: 2, steering: steering, calls: calls}) do
-    with {:ok, _results} <- checkpoint_result_messages(calls),
-         true <- valid_steering?(steering) do
-      :ok
-    else
-      _invalid -> {:error, :invalid_steering}
+  defp validate_restored_steering(%{version: 2, steering: steering, calls: calls} = checkpoint) do
+    case checkpoint_result_messages(calls) do
+      {:ok, _results} ->
+        if valid_steering?(steering) and valid_notice?(Map.get(checkpoint, :notice)),
+          do: :ok,
+          else: {:error, :invalid_steering}
+
+      {:error, :unresolved_tool_checkpoint} ->
+        {:error, :invalid_steering}
     end
   end
 
@@ -1507,7 +1592,7 @@ defmodule MingaAgent.Session.Continuation do
                  request_messages,
                  call_ids
                ) do
-          validate_message_prefix(remaining, results ++ Map.get(checkpoint, :steering, []))
+          validate_message_prefix(remaining, results ++ frozen_inputs(checkpoint))
         end
 
       {:error, :unresolved_tool_checkpoint} ->
@@ -1578,7 +1663,7 @@ defmodule MingaAgent.Session.Continuation do
     with {:ok, results} <- checkpoint_result_messages(checkpoint.calls) do
       validate_message_prefix(
         messages,
-        checkpoint.messages ++ results ++ Map.get(checkpoint, :steering, [])
+        checkpoint.messages ++ results ++ frozen_inputs(checkpoint)
       )
     end
   end

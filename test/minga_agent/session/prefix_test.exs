@@ -55,15 +55,15 @@ defmodule MingaAgent.Session.PrefixTest do
     {:ok, request, active} = Continuation.begin_request(initial, "request", 1, "question")
 
     assert {:error, :stale_dispatch} =
-             Continuation.begin_dispatch(active, "other", :initial, [], self())
+             Continuation.begin_dispatch(active, "other", :initial, [], nil, self())
 
     assert {:ok, first, messages, assessing} =
-             Continuation.begin_dispatch(active, "request", :initial, [], self())
+             Continuation.begin_dispatch(active, "request", :initial, [], nil, self())
 
     assert messages == request.messages
 
     assert {:ok, retry, ^messages, retrying} =
-             Continuation.begin_dispatch(assessing, "request", :initial, [], self())
+             Continuation.begin_dispatch(assessing, "request", :initial, [], nil, self())
 
     {:ok, limits} = Limits.new(%{input: nil, context: nil, output: nil, request_output: 16})
     fits = RequestCapacity.assess(limits, {:provider_count, 30}, {:encoded, 16}, 100)
@@ -77,7 +77,7 @@ defmodule MingaAgent.Session.PrefixTest do
     assert {:ok, refused} = Continuation.assess_dispatch(retrying, retry, digest, too_large)
 
     assert {:error, :assessment_refused} =
-             Continuation.begin_dispatch(refused, "request", :initial, [], self())
+             Continuation.begin_dispatch(refused, "request", :initial, [], nil, self())
 
     assert {:ok, reopened} = refused |> ContinuationCodec.encode() |> ContinuationCodec.decode()
     assert {:error, :stale_dispatch} = Continuation.assess_dispatch(reopened, retry, digest, fits)
