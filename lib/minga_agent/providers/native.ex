@@ -1019,14 +1019,6 @@ defmodule MingaAgent.Providers.Native do
     {:reply, {:ok, candidates}, state}
   end
 
-  def handle_call(
-        {:compact, _messages},
-        _from,
-        %{selection: %{policy: %{compaction: :unsupported}}} = state
-      ) do
-    {:reply, {:error, compaction_unsupported_message(state.selection)}, state}
-  end
-
   def handle_call({:compact, _messages}, _from, state) when state.execution.tag == :active do
     {:reply, {:error, "Cannot compact while streaming"}, state}
   end
@@ -1036,36 +1028,12 @@ defmodule MingaAgent.Providers.Native do
 
     case dispatch_pre_compact(context, state.config) do
       :ok ->
-        compact_opts = [
-          model: state.selection.request_model,
-          context_limit: state.selection.policy.limits.context,
-          llm_client: summary_client(state)
-        ]
-
-        case Compaction.compact(context, compact_opts) do
-          {:compacted, new_context, summary_info} ->
-            {:reply, {:ok, new_context.messages, summary_info}, state}
-
-          {:ok, unchanged} ->
-            {:reply,
-             {:ok, unchanged.messages, "Context is already small enough, no compaction needed."},
-             state}
-
-          {:error, reason} ->
-            {:reply, {:error, reason}, state}
-        end
+        result = dispatch_compact(context, state)
+        {:reply, result, state}
 
       {:error, _result} ->
         {:reply, {:error, "compaction blocked by hook"}, state}
     end
-  end
-
-  def handle_call(
-        {:compact, _messages, _opts},
-        _from,
-        %{selection: %{policy: %{compaction: :unsupported}}} = state
-      ) do
-    {:reply, {:error, compaction_unsupported_message(state.selection)}, state}
   end
 
   def handle_call({:compact, _messages, _opts}, _from, state)
@@ -1084,26 +1052,8 @@ defmodule MingaAgent.Providers.Native do
 
       case dispatch_pre_compact(context, state.config) do
         :ok ->
-          compact_opts = [
-            model: state.selection.request_model,
-            context_limit: state.selection.policy.limits.context,
-            llm_client: summary_client(state),
-            threshold: threshold,
-            keep_recent: Keyword.get(opts, :keep_recent, state.config.compaction_keep_recent)
-          ]
-
-          case maybe_compact_with_opts(context, compact_opts) do
-            {:compacted, new_context, summary_info} ->
-              {:reply, {:ok, new_context.messages, summary_info}, state}
-
-            {:ok, unchanged} ->
-              {:reply,
-               {:ok, unchanged.messages, "Context is already below the compaction threshold."},
-               state}
-
-            {:error, _reason} = error ->
-              {:reply, error, state}
-          end
+          result = dispatch_maybe_compact(context, state, opts)
+          {:reply, result, state}
 
         {:error, _result} ->
           {:reply, {:error, "compaction blocked by hook"}, state}
@@ -3124,6 +3074,121 @@ defmodule MingaAgent.Providers.Native do
       {:error, HookResult.dispatch_error(inspect(reason))}
   end
 
+  # ── Compaction dispatch ─────────────────────────────────────────────────────
+
+  @spec dispatch_compact(Context.t(), state()) ::
+          {:ok, [ReqLLM.Message.t()], String.t()} | {:error, String.t()}
+  defp dispatch_compact(context, state) do
+    case state.selection.policy.compaction do
+      :native ->
+        case native_compact(context, state) do
+          {:ok, _messages, _info} = ok ->
+            ok
+
+          {:error, reason} ->
+            Log.warning(
+              :agent,
+              "[Compaction] Native compaction failed (#{inspect(reason)}), falling back to portable summary"
+            )
+
+            portable_compact(context, state)
+        end
+
+      :unsupported ->
+        portable_compact(context, state)
+    end
+  end
+
+  @spec dispatch_maybe_compact(Context.t(), state(), keyword()) ::
+          {:ok, [ReqLLM.Message.t()], String.t()} | {:error, String.t()}
+  defp dispatch_maybe_compact(context, state, opts) do
+    threshold = Keyword.get(opts, :threshold, state.config.compaction_threshold)
+    keep_recent = Keyword.get(opts, :keep_recent, state.config.compaction_keep_recent)
+
+    compact_opts = [
+      model: state.selection.request_model,
+      context_limit: state.selection.policy.limits.context,
+      llm_client: summary_client(state),
+      threshold: threshold,
+      keep_recent: keep_recent
+    ]
+
+    case state.selection.policy.compaction do
+      :native ->
+        estimated = MingaAgent.TokenEstimator.estimate(context.messages)
+        limit = state.selection.policy.limits.context
+
+        if is_integer(limit) and limit > 0 and estimated > limit * (threshold || 0.80) do
+          case native_compact(context, state) do
+            {:ok, _messages, _info} = ok ->
+              ok
+
+            {:error, reason} ->
+              Log.warning(
+                :agent,
+                "[Compaction] Native compaction failed (#{inspect(reason)}), falling back to portable summary"
+              )
+
+              normalize_compact_result(maybe_compact_with_opts(context, compact_opts))
+          end
+        else
+          {:ok, context.messages, "Context is already below the compaction threshold."}
+        end
+
+      :unsupported ->
+        normalize_compact_result(maybe_compact_with_opts(context, compact_opts))
+    end
+  end
+
+  @spec normalize_compact_result(
+          {:compacted, Context.t(), String.t()}
+          | {:ok, Context.t()}
+          | {:error, String.t()}
+        ) :: {:ok, [ReqLLM.Message.t()], String.t()} | {:error, String.t()}
+  defp normalize_compact_result({:compacted, new_context, summary_info}),
+    do: {:ok, new_context.messages, summary_info}
+
+  defp normalize_compact_result({:ok, unchanged}),
+    do: {:ok, unchanged.messages, "Context is already below the compaction threshold."}
+
+  defp normalize_compact_result({:error, _reason} = error), do: error
+
+  @spec native_compact(Context.t(), state()) ::
+          {:ok, [ReqLLM.Message.t()], String.t()} | {:error, term()}
+  defp native_compact(context, state) do
+    model = state.selection.request_model
+
+    case ReqLLM.compact_context(model, context) do
+      {:ok, response} ->
+        new_messages = response.context.messages
+        {:ok, new_messages, "Context compacted via native provider endpoint"}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  @spec portable_compact(Context.t(), state()) ::
+          {:ok, [ReqLLM.Message.t()], String.t()} | {:error, String.t()}
+  defp portable_compact(context, state) do
+    compact_opts = [
+      model: state.selection.request_model,
+      context_limit: state.selection.policy.limits.context,
+      llm_client: summary_client(state)
+    ]
+
+    case Compaction.compact(context, compact_opts) do
+      {:compacted, new_context, summary_info} ->
+        {:ok, new_context.messages, summary_info}
+
+      {:ok, unchanged} ->
+        {:ok, unchanged.messages, "Context is already small enough, no compaction needed."}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
   # ── Helpers ─────────────────────────────────────────────────────────────────
 
   @spec initial_selection!(keyword(), AgentConfig.t(), String.t(), String.t() | nil) ::
@@ -3224,11 +3289,6 @@ defmodule MingaAgent.Providers.Native do
   @spec summary_epoch(Prefix.t() | :unknown) :: String.t() | nil
   defp summary_epoch(%Prefix{epoch_id: epoch_id}) when is_binary(epoch_id), do: epoch_id
   defp summary_epoch(_prefix), do: nil
-
-  @spec compaction_unsupported_message(ModelSelection.t()) :: String.t()
-  defp compaction_unsupported_message(selection),
-    do:
-      "#{selection.route.display_name} does not compact history. Start a new conversation to clear its context."
 
   @spec inference_route_registry(keyword()) :: GenServer.server()
   defp inference_route_registry(opts) do
