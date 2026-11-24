@@ -407,7 +407,7 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
 
     assert text =~ "Pick a model"
     assert text =~ "/model"
-    assert text =~ "SPC a m"
+    assert text =~ "SPC a S m"
     refute text =~ "Session started"
   end
 

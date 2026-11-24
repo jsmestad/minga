@@ -46,7 +46,7 @@ After the runtime starts, opt in to read-only memory discovery with `MingaAgent.
 
 ## Resume unfinished tasks
 
-Open **Tasks** in the Agent workspace, press `SPC a k` in Normal mode, or run `/tasks` in the composer. Choose a row to inspect its status, blocker or result note, and any retained result. Enter copies the selected task details, including the reference token when one is available. An empty checklist reports that there are no tasks in this conversation. An active task remains active after cancellation or restart; that status does not mean the agent is currently working on it.
+Open **Tasks** in the Agent workspace, press `SPC a S k` in Normal mode, or run `/tasks` in the composer. Choose a row to inspect its status, blocker or result note, and any retained result. Enter copies the selected task details, including the reference token when one is available. An empty checklist reports that there are no tasks in this conversation. An active task remains active after cancellation or restart; that status does not mean the agent is currently working on it.
 
 The model uses `todo_read` with no arguments to get the first page and its revision. If the result includes `next_offset`, pass it as `offset` with the same `expected_revision`. A null `next_offset` ends the list. If a revision changes while reading, start again at the first page.
 
@@ -73,25 +73,25 @@ Managed Session restart also waits for the prior provider and every registered e
 
 Open the destination Agent workspace, then select text in a file in your local editor. In Vim Visual mode, press `A` and choose the destination Agent workspace. On macOS, you can also choose **Attach Selection to Agent Draft** from the editor context menu. For a remote destination, check the server and session ID before confirming. The snapshot will be stored on that daemon.
 
-To capture the whole current buffer, including changes you have not saved, press `SPC a b` from the editor or choose **Attach Current Buffer to Agent Draft** in the macOS editor context menu. Choose the destination Agent workspace. The attachment is labeled **Buffer snapshot** and does not read the file from disk. The limit is 32 KiB per snapshot.
+To capture the whole current buffer, including changes you have not saved, press `SPC a x b` from the editor or choose **Attach Current Buffer to Agent Draft** in the macOS editor context menu. Choose the destination Agent workspace. The attachment is labeled **Buffer snapshot** and does not read the file from disk. The limit is 32 KiB per snapshot.
 
-To attach a saved project file without opening it, press `SPC a F` or choose **Attach project file** under **Draft attachments**. Select the file, then choose the destination Agent workspace. The **File snapshot** contains the saved text from disk, not any unsaved edits in an open buffer. Inspect or remove it from **Draft attachments** before sending. Only nonempty UTF-8 text up to 32 KiB can be attached this way.
+To attach a saved project file without opening it, press `SPC a x f` or choose **Attach project file** under **Draft attachments**. Select the file, then choose the destination Agent workspace. The **File snapshot** contains the saved text from disk, not any unsaved edits in an open buffer. Inspect or remove it from **Draft attachments** before sending. Only nonempty UTF-8 text up to 32 KiB can be attached this way.
 
-To attach the diagnostics already published for the current file, press `SPC a D` or choose **Attach File Diagnostics to Agent Draft** in the macOS editor context menu, then choose the destination Agent workspace. A **Diagnostics snapshot** records the messages, severities, producers, and locations at capture time. It does not run a compiler or refresh diagnostics. A file with no published diagnostics has nothing to attach. If the complete snapshot exceeds 32 KiB, the editor rejects it rather than sending a partial list.
+To attach the diagnostics already published for the current file, press `SPC a x d` or choose **Attach File Diagnostics to Agent Draft** in the macOS editor context menu, then choose the destination Agent workspace. A **Diagnostics snapshot** records the messages, severities, producers, and locations at capture time. It does not run a compiler or refresh diagnostics. A file with no published diagnostics has nothing to attach. If the complete snapshot exceeds 32 KiB, the editor rejects it rather than sending a partial list.
 
-In the destination composer, the paperclip on macOS or **Attachments** in the terminal shows the number of saved snapshots. Open it, or press `SPC a j` in Normal mode. Select a snapshot to inspect its saved text. Choose **Remove snapshot** and confirm to remove it from the draft. Editing the source afterward does not change the snapshot.
+In the destination composer, the paperclip on macOS or **Attachments** in the terminal shows the number of saved snapshots. Open it, or press `SPC a x l` in Normal mode. Select a snapshot to inspect its saved text. Choose **Remove snapshot** and confirm to remove it from the draft. Editing the source afterward does not change the snapshot.
 
 An unsent snapshot stays with its original conversation after restart. Sending an attached prompt from an idle conversation saves the displayed snapshot with the accepted request and clears the unsent draft. If the displayed attachment set became stale or the route cannot accept it, Minga keeps the draft.
 
 ## Keep follow-up input across a restart
 
-In a local Agent conversation that saves drafts, type the next instruction while a turn is running. Press `Ctrl+Enter`, or use `SPC a f` in Normal mode, to queue it for the next turn. Pressing `Enter` while editing steers the running turn instead. Minga clears the submitted draft only after the queue accepts it, including the snapshots shown in the composer. Typing after submission does not change what was queued.
+In a local Agent conversation that saves drafts, type the next instruction while a turn is running. Press `Ctrl+Enter`, or use `SPC a q f` in Normal mode, to queue it for the next turn. Pressing `Enter` while editing steers the running turn instead. Minga clears the submitted draft only after the queue accepts it, including the snapshots shown in the composer. Typing after submission does not change what was queued.
 
 If the Session process restarts before the composer receives the result, the replacement checks the original submission. It confirms the saved queue entry or reports that the queue did not accept the draft. This check does not submit the prompt again. Newer edits stay in the composer in either case.
 
-Use `SPC a q` in Normal mode to recall pending input before the Agent consumes it. Minga puts the recalled text ahead of your current draft and keeps its captured snapshots. Image mentions return as editable `@path` text. If you send them again, Minga resolves them again.
+Press `Alt+Up` in the composer to recall pending input before the Agent consumes it. To edit or withdraw one queued entry instead, open the queue with `SPC a q q`. Minga puts the recalled text ahead of your current draft and keeps its captured snapshots. Image mentions return as editable `@path` text. If you send them again, Minga resolves them again.
 
-If the draft changes while recall is finishing, Minga keeps your visible edits and saves the recalled copy separately in the original conversation. Copy the visible text somewhere safe, clear the composer, then select the same conversation in Sessions (`SPC a h`) to reload the recalled draft.
+If the draft changes while recall is finishing, Minga keeps your visible edits and saves the recalled copy separately in the original conversation. Copy the visible text somewhere safe, clear the composer, then select the same conversation in Sessions (`SPC a S h`) to reload the recalled draft.
 
 Reopening a saved conversation does not automatically start a queued turn. A prompt that already crossed into the saved continuation does not appear in the pending queue again. A session configured not to save its state has no restart guarantee for queued input.
 
@@ -145,7 +145,7 @@ An application restart does not make an admitted effect safe to replay. If the s
 
 ### Name a saved session
 
-Open the local saved conversation, then press `SPC a R` or choose **Rename Agent session** from the command palette. Give it a short name that helps you find it in **Sessions**, such as `Release checklist`. Renaming does not send or discard your current draft.
+Open the local saved conversation, then press `SPC a S R` or choose **Rename Agent session** from the command palette. Give it a short name that helps you find it in **Sessions**, such as `Release checklist`. Renaming does not send or discard your current draft.
 
 ### Archive a saved session
 

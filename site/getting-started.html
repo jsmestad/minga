@@ -198,7 +198,7 @@ bin/minga             # builds and starts terminal client</code></pre>
             </li>
             <li class="spec-row">
               <span class="spec-key"><kbd>SPC a p</kbd></span>
-              <span class="spec-detail"><strong>Publish staged edits</strong> (or click <strong>Discard</strong> to drop). <span data-status="planned" data-since="v0.1.0">Opens one <em>Publish edits…</em> prompt offering publish or discard.</span></span>
+              <span class="spec-detail"><strong>Publish or discard staged edits</strong> in one <em>Publish edits…</em> prompt, or click <strong>Publish</strong> or <strong>Discard</strong> on the turn-end notice.</span>
             </li>
             <li class="spec-row">
               <span class="spec-key"><kbd>SPC f p</kbd> / <kbd>SPC h r</kbd></span>
@@ -270,15 +270,15 @@ set <span class="tok-atom">:tab_width</span>, <span class="tok-num">2</span></co
               <span class="step-badge">02</span>
               <div>
                 <h3>Review staged hunks or attach buffer context</h3>
-                <p>Click <strong>Review</strong> for syntax-highlighted hunks (<kbd>]c</kbd>/<kbd>[c</kbd> step, <kbd>y</kbd>/<kbd>Y</kbd> accept, <kbd>x</kbd>/<kbd>X</kbd> reject). To edit directly or attach context, switch to your open buffer and press <kbd>SPC a b</kbd> (buffer snapshot) or <kbd>SPC a D</kbd> (diagnostics).</p>
-                <p data-status="planned" data-since="v0.1.0"><code>*minga-review*</code> moves hunks to <kbd>]h</kbd>/<kbd>[h</kbd>, <kbd>y</kbd> keep, <kbd>n</kbd> reject, and moves context under <kbd>SPC a x b</kbd> / <kbd>SPC a x d</kbd>.</p>
+                <p>Click <strong>Review</strong> for syntax-highlighted hunks (<kbd>]c</kbd>/<kbd>[c</kbd> step, <kbd>y</kbd>/<kbd>Y</kbd> accept, <kbd>x</kbd>/<kbd>X</kbd> reject). To edit directly or attach context, switch to your open buffer and press <kbd>SPC a x b</kbd> (buffer snapshot) or <kbd>SPC a x d</kbd> (diagnostics); the rest of the context keys live under <kbd>SPC a x</kbd>.</p>
+                <p data-status="planned" data-since="v0.1.0"><code>*minga-review*</code> moves hunks to <kbd>]h</kbd>/<kbd>[h</kbd>, <kbd>y</kbd> keep, <kbd>n</kbd> reject.</p>
               </div>
             </li>
             <li class="step-item">
               <span class="step-badge">03</span>
               <div>
                 <h3>Publish with three-way merge</h3>
-                <p>Press <kbd>SPC a p</kbd> to merge into open buffers and disk with undo intact, or click <strong>Discard</strong>. Overlapping edits open conflict resolution (<kbd>x</kbd> keep mine, <kbd>y</kbd> agent version).</p>
+                <p>Press <kbd>SPC a p</kbd> and pick <strong>Publish</strong> to merge into open buffers and disk with undo intact, or pick <strong>Discard</strong>. Overlapping edits open conflict resolution (<kbd>x</kbd> keep mine, <kbd>y</kbd> agent version).</p>
               </div>
             </li>
           </ol>

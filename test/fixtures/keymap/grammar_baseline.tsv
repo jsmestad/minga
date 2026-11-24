@@ -16,10 +16,6 @@ duplicate_key	agent	cua	Up	agent_input_up | move_up	2 meanings for one key
 duplicate_key	agent	cua	Up(kitty)	agent_input_up | move_up	2 meanings for one key
 duplicate_key	git_status	cua	⌃c	copy_or_interrupt | git_commit_open	2 meanings for one key
 duplicate_key	git_status	cua	⌘c	git_commit_open | yank_visual_selection	2 meanings for one key
-duplicate_leader_command	leader	normal	SPC TAB d, SPC b d	kill_buffer	one command on 2 leader keys without a declared alias
-duplicate_leader_command	leader	normal	SPC a a, SPC a t	toggle_agentic_view	one command on 2 leader keys without a declared alias
-duplicate_leader_command	leader	normal	SPC c j, SPC s j	document_symbols	one command on 2 leader keys without a declared alias
-duplicate_leader_command	leader	normal	SPC h a, SPC h c	describe_command	one command on 2 leader keys without a declared alias
 duplicate_leader_command	leader	normal	SPC m t a, SPC p T	test_all	one command on 2 leader keys without a declared alias
 editing_collision	agent	insert	⌃u	agent_scroll_half_up	text-editing control key where you type
 normal_mode_modifier	agent	input_normal	⌃c	agent_ctrl_c	modifier where letters are not text
@@ -27,11 +23,6 @@ normal_mode_modifier	agent	input_normal	⌃l	agent_clear_chat	modifier where let
 normal_mode_modifier	agent	input_normal	⌃q	agent_unfocus_and_quit	modifier where letters are not text
 normal_mode_modifier	agent	input_normal	⌃s	agent_save_buffer	modifier where letters are not text
 normal_mode_modifier	agent	normal	⌃l	agent_clear_chat	modifier where letters are not text
-normal_mode_modifier	editor	normal	⌥:	enter_eval	modifier where letters are not text
-normal_mode_modifier	editor	normal	⌥h	nav_parent	modifier where letters are not text
-normal_mode_modifier	editor	normal	⌥j	nav_next_sibling	modifier where letters are not text
-normal_mode_modifier	editor	normal	⌥k	nav_prev_sibling	modifier where letters are not text
-normal_mode_modifier	editor	normal	⌥l	nav_first_child	modifier where letters are not text
 normal_mode_modifier	git_status	cua	⌃c	git_commit_open	modifier where letters are not text
 platform_key	git_status	cua	⌘c	git_commit_open	not an allow-listed macOS platform key
 unconventional_modifier	agent	insert	⌃RET	agent_queue_follow_up	modifier where you type is not an established convention

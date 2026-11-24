@@ -58,6 +58,7 @@ defmodule MingaEditor.State.Picker do
           source: module() | nil,
           callback_source: callback_source(),
           restore: non_neg_integer() | nil,
+          restore_cursor: Minga.Buffer.position() | nil,
           restore_theme: MingaEditor.UI.Theme.t() | nil,
           action_menu: action_menu(),
           context: map() | nil,
@@ -78,6 +79,7 @@ defmodule MingaEditor.State.Picker do
             source: nil,
             callback_source: nil,
             restore: nil,
+            restore_cursor: nil,
             restore_theme: nil,
             action_menu: nil,
             context: nil,
@@ -119,6 +121,15 @@ defmodule MingaEditor.State.Picker do
   end
 
   @doc """
+  Remembers the cursor of the buffer the picker restores, so restoring the origin also returns the cursor that a preview moved.
+
+  It is also where a confirmed pick's jump starts in the jump list.
+  """
+  @spec remember_origin_cursor(t(), Minga.Buffer.position() | nil) :: t()
+  def remember_origin_cursor(%__MODULE__{} = picker_state, cursor),
+    do: %{picker_state | restore_cursor: cursor}
+
+  @doc """
   Opens a child picker in place of `parent` and keeps `parent` to return to.
 
   The child starts a fresh query session so frontends show its empty query. The parent keeps its rows, query, and selection unchanged.
@@ -131,6 +142,7 @@ defmodule MingaEditor.State.Picker do
       source: source,
       callback_source: callback_source,
       restore: parent.restore,
+      restore_cursor: parent.restore_cursor,
       restore_theme: parent.restore_theme,
       context: context,
       layout: layout,

@@ -2,7 +2,7 @@ defmodule MingaEditor.Commands.EditTimeline do
   @moduledoc """
   Commands for navigating agent edit history.
 
-  `]e` jumps to the next edit point, `[e` to the previous.
+  `]h` jumps to the next edit point, `[h` to the previous.
   When scrubbing, the timeline viewing index tracks the position.
   """
 

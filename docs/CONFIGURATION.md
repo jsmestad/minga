@@ -359,7 +359,7 @@ If you prefer the traditional file editing experience on startup, set `:startup_
 set :startup_view, :editor
 ```
 
-This restores the pre-1.0 behavior: Minga opens with a file buffer (or scratch buffer) and the agentic view is a toggle away via `SPC a t`.
+This restores the pre-1.0 behavior: Minga opens with a file buffer (or scratch buffer) and the agentic view is a toggle away via `SPC a a`.
 
 ### Controlling auto-context
 

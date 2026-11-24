@@ -16,13 +16,15 @@ defmodule Minga.Mode.NormalTest do
   defp handle(key, state \\ fresh_state()), do: Normal.handle_key(key, state)
 
   describe "mode transitions" do
-    test "insert, command, eval, visual, and replace transitions" do
+    test "insert, command, visual, and replace transitions" do
       transition_cases = [
         {{?i, 0}, :insert},
         {{?:, 0}, :command},
-        {{?:, 0x04}, :eval},
         {{?R, 0}, :replace}
       ]
+
+      # ⌥: is retired; eval opens from the leader with SPC ; (docs/design/keys.md).
+      refute match?({:transition, :eval, _}, handle({?:, 0x04}))
 
       for {key, mode} <- transition_cases do
         assert {:transition, ^mode, _state} = handle(key)
@@ -58,8 +60,8 @@ defmodule Minga.Mode.NormalTest do
         {{?j, 0}, :move_down},
         {{?k, 0}, :move_up},
         {{?l, 0}, :move_right},
-        {{?h, 0x04}, :nav_parent},
-        {{?l, 0x04}, :nav_first_child},
+        {{?h, 0x04}, :selection_expand},
+        {{?l, 0x04}, :selection_shrink},
         {{?j, 0x04}, :nav_next_sibling},
         {{?k, 0x04}, :nav_prev_sibling},
         {{?0, 0}, :move_to_line_start},
@@ -83,6 +85,9 @@ defmodule Minga.Mode.NormalTest do
         {{?b, 0x02}, :page_up},
         {{?u, 0}, :undo},
         {{?r, 0x02}, :redo},
+        {{?o, 0x02}, :jump_back},
+        {{?i, 0x02}, :jump_forward},
+        {{9, 0}, :jump_forward},
         {{?D, 0}, {:delete_motion, :line_end}},
         {{?., 0}, {:dot_repeat, nil}}
       ]

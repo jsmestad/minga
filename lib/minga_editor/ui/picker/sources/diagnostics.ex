@@ -2,7 +2,7 @@ defmodule MingaEditor.UI.Picker.Sources.Diagnostics do
   @moduledoc """
   Picker source for listing buffer diagnostics.
 
-  Invoked via `SPC c d` — shows all diagnostics for the current buffer
+  Invoked via `SPC c x`: shows all diagnostics for the current buffer
   with severity, location, and message. Selecting a diagnostic jumps
   the cursor to that position.
   """

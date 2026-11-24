@@ -9,9 +9,9 @@
 # doom_key	doom_meaning	minga_key	minga_command	status	reason
 SPC SPC	Find file in project	SPC SPC	project_find_file	matches	Doom's top-level project file finder
 SPC .	Find file	SPC f f	find_file	diverges	SPC . is unbound; find_file lives on SPC f f, which Doom also binds
-SPC ,	Switch workspace buffer	-	-	diverges	Unbound today; docs/design/keys.md plans SPC , as the buffer and file switcher
+SPC ,	Switch workspace buffer	SPC ,	buffer_list	matches	Declared alias of SPC b b; docs/design/keys.md grows it into the buffer and file switcher
 SPC :	M-x (execute command)	SPC :	command_palette	matches	The command palette is Minga's M-x
-SPC ;	Eval expression	-	-	diverges	Unbound; eval is M-: in Normal mode
+SPC ;	Eval expression	SPC ;	enter_eval	matches	Same key, same meaning; it replaces ⌥: in Normal mode
 SPC /	Search project	SPC /	search_project	matches	Declared alias of SPC s p
 SPC f f	Find file	SPC f f	find_file	matches	Same key, same meaning
 SPC f s	Save file	SPC f s	save	matches	Same key, same meaning
@@ -31,24 +31,24 @@ SPC w k	Window up	SPC w k	window_up	matches	Same key, same meaning
 SPC w l	Window right	SPC w l	window_right	matches	Same key, same meaning
 SPC s p	Search project	SPC s p	search_project	matches	Same key, same meaning
 SPC s s	Search buffer	SPC s s	search_buffer	matches	Same key, same meaning
-SPC s i	Jump to symbol (imenu)	SPC s j	document_symbols	diverges	Document symbols sit on SPC s j
-SPC s j	Jump list	SPC s j	document_symbols	diverges	Minga uses SPC s j for document symbols; the jump list is ⌃O and ⌃I
+SPC s i	Jump to symbol (imenu)	SPC s i	document_symbols	matches	Same key, same meaning
+SPC s j	Jump list	SPC s j	jump_list	matches	Same key, same meaning; ⌃O and ⌃I walk the same list
 SPC s r	Jump to mark	SPC s r	search_and_replace	diverges	Minga uses SPC s r for search and replace
-SPC s u	Undo history	-	-	diverges	No undo tree view yet
+SPC s u	Undo history	SPC s u	timeline_toggle	diverges	Opens the edit timeline of Minga's edits; your own undo steps join it when buffers track who wrote each line (#4048)
 SPC c a	Code actions	SPC c a	code_action	matches	Same key, same meaning
-SPC c d	Jump to definition	SPC c g	goto_definition	diverges	SPC c d is the diagnostics list (docs/design/keys.md); definition is SPC c g and gd
-SPC c x	List errors	SPC c d	diagnostics_list	diverges	The diagnostics list sits on SPC c d
+SPC c d	Jump to definition	SPC c d	goto_definition	matches	Same key, same meaning
+SPC c x	List errors	SPC c x	diagnostics_list	matches	Same key, same meaning
 SPC c D	Jump to references	SPC c D	find_references	matches	Same key, same meaning
 SPC c f	Format buffer	SPC c f	format_buffer	matches	Same key, same meaning
 SPC c i	Find implementations	SPC c i	goto_implementation	matches	Same key, same meaning
 SPC c k	Jump to documentation	SPC c k	hover	matches	Same key, same meaning
 SPC c r	Rename	SPC c r	rename_symbol	matches	Same key, same meaning
 SPC c t	Find type definition	SPC c t	goto_type_definition	matches	Same key, same meaning
-SPC g g	Magit status	-	-	diverges	No magit buffer yet; git status is planned on SPC g s (docs/design/keys.md)
-SPC g s	Stage hunk	-	-	diverges	docs/design/keys.md plans SPC g s as the git status buffer
-SPC g b	Switch branch	-	-	diverges	docs/design/keys.md plans SPC g b as blame
-SPC g B	Blame	-	-	diverges	Blame is planned on SPC g b
-SPC h a	Apropos	SPC h a	describe_command	matches	Searches command help
+SPC g g	Magit status	-	-	diverges	Core leaves SPC g to the git extension, which binds SPC g g to Git status
+SPC g s	Stage hunk	-	-	diverges	Core leaves SPC g to the git extension; docs/design/keys.md reserves SPC g s for staging a hunk
+SPC g b	Switch branch	-	-	diverges	Core leaves SPC g to the git extension; docs/design/keys.md reserves SPC g b for switching branch
+SPC g B	Blame	-	-	diverges	Core leaves SPC g to the git extension; docs/design/keys.md reserves SPC g B for blame
+SPC h a	Apropos	SPC h a	apropos	matches	Searches commands and options in one picker
 SPC h f	Describe function	SPC h f	describe_function	matches	Same key, same meaning
 SPC h k	Describe key	SPC h k	describe_key	matches	Same key, same meaning
 SPC h v	Describe variable	SPC h v	describe_option	matches	Options are Minga's variables
@@ -66,8 +66,8 @@ SPC p T	Test project	SPC p T	test_all	matches	Same key, same meaning
 SPC q q	Quit Emacs	SPC q q	quit_all	matches	Same key, same meaning
 SPC t l	Line numbers	SPC t l	cycle_line_numbers	matches	Same key, same meaning
 SPC t w	Soft line wrapping	SPC t w	toggle_wrap	matches	Same key, same meaning
-SPC TAB n	New workspace	SPC TAB n	tab_next	diverges	Minga's SPC TAB group mixes tabs and workspaces
-SPC TAB d	Delete workspace	SPC TAB d	kill_buffer	diverges	Minga's SPC TAB group mixes tabs and workspaces
+SPC TAB n	New workspace	-	-	diverges	Unbound; the tab keys retired with tabs (docs/design/keys.md) and workspaces go away with the Spine
+SPC TAB d	Delete workspace	-	-	diverges	Unbound; the tab keys retired with tabs (docs/design/keys.md) and workspaces go away with the Spine
 SPC TAB r	Rename workspace	SPC TAB r	workspace_rename	matches	Same key, same meaning
 SPC 1	Switch to workspace 1	SPC 1	tab_goto_1	diverges	Tabs today; docs/design/keys.md moves SPC 1 to SPC 4 to pinned files
 SPC 2	Switch to workspace 2	SPC 2	tab_goto_2	diverges	Tabs today; docs/design/keys.md moves SPC 1 to SPC 4 to pinned files
