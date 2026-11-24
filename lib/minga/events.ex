@@ -151,7 +151,7 @@ defmodule Minga.Events do
   end
 
   defmodule ProjectRebuildFailedEvent do
-    @moduledoc "Payload for `:project_rebuild_failed` events. Published when the file cache rebuild fails, times out, or the worker crashes."
+    @moduledoc "Payload for `:project_rebuild_failed` events. Published when the file cache rebuild fails, times out, refuses to start, or the worker crashes."
     @enforce_keys [:root, :reason]
     defstruct [:root, :reason]
 

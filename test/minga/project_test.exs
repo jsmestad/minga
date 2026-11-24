@@ -38,6 +38,13 @@ defmodule Minga.ProjectTest do
   # prior casts have been handled.
   defp flush(name), do: :sys.get_state(name)
 
+  # An isolated event bus, so failure events from other tests cannot satisfy an assertion here.
+  defp start_events_registry do
+    registry = :"project_events_#{System.unique_integer([:positive])}"
+    start_supervised!(Minga.Events.child_spec(name: registry), id: registry)
+    registry
+  end
+
   # Waits for the async rebuild Task to complete.
   # Subscribes to :project_rebuilt and uses assert_receive if the
   # GenServer is still rebuilding. Pins root to avoid consuming
@@ -475,6 +482,62 @@ defmodule Minga.ProjectTest do
       GenServer.stop(project_pid)
 
       assert_receive {:DOWN, ^ref, :process, ^worker, :normal}, 1_000
+    end
+
+    test "a rebuild that refuses to start after a cancelled rebuild broadcasts :project_rebuild_failed",
+         %{tmp_dir: tmp} do
+      project = Path.join(tmp, "refused_after_cancel")
+      File.mkdir_p!(project)
+      {:ok, root} = Root.directory(project)
+      events = start_events_registry()
+      Minga.Events.subscribe(:project_rebuilt, events)
+      Minga.Events.subscribe(:project_rebuild_failed, events)
+
+      {_pid, name} =
+        start_project!(file_find_module: Minga.Project.RefusableFileFind, events_registry: events)
+
+      assert {:ok, %WorkspaceSnapshot{rebuilding?: true}} = Project.activate(name, root)
+      first_worker = flush(name).rebuild_pid
+      first_ref = Process.monitor(first_worker)
+
+      :ok = Minga.Project.RefusableFileFind.refuse(project)
+      Project.invalidate(name)
+      state = flush(name)
+      reason = Minga.Project.RefusableFileFind.reason()
+
+      assert_receive {:DOWN, ^first_ref, :process, ^first_worker, :normal}, 1_000
+
+      assert_receive {:minga_event, :project_rebuild_failed,
+                      %Minga.Events.ProjectRebuildFailedEvent{root: ^project, reason: ^reason}},
+                     1_000
+
+      refute_receive {:minga_event, :project_rebuilt, _}, 100
+      assert state.rebuild_pid == nil
+
+      assert %WorkspaceSnapshot{rebuilding?: false, inventory_error: ^reason} =
+               Project.snapshot(name)
+    end
+
+    test "an activation whose rebuild refuses to start broadcasts :project_rebuild_failed",
+         %{tmp_dir: tmp} do
+      project = Path.join(tmp, "refused_activation")
+      File.mkdir_p!(project)
+      :ok = Minga.Project.RefusableFileFind.refuse(project)
+      {:ok, root} = Root.directory(project)
+      events = start_events_registry()
+      Minga.Events.subscribe(:project_rebuild_failed, events)
+
+      {_pid, name} =
+        start_project!(file_find_module: Minga.Project.RefusableFileFind, events_registry: events)
+
+      reason = Minga.Project.RefusableFileFind.reason()
+
+      assert {:ok, %WorkspaceSnapshot{rebuilding?: false, inventory_error: ^reason}} =
+               Project.activate(name, root)
+
+      assert_receive {:minga_event, :project_rebuild_failed,
+                      %Minga.Events.ProjectRebuildFailedEvent{root: ^project, reason: ^reason}},
+                     1_000
     end
   end
 

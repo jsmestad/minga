@@ -474,11 +474,7 @@ defmodule Minga.Project do
         )
 
       {:error, reason} ->
-        Minga.Events.broadcast(
-          :project_rebuild_failed,
-          %Minga.Events.ProjectRebuildFailedEvent{root: root, reason: to_string(reason)},
-          state.events_registry
-        )
+        broadcast_rebuild_failed(state, root, to_string(reason))
     end
 
     {:noreply, %{state | workspace: workspace}}
@@ -496,14 +492,7 @@ defmodule Minga.Project do
     state = clear_rebuild(state)
     workspace = fail_workspace_rebuild(state.workspace, "Project file cache rebuild failed")
 
-    Minga.Events.broadcast(
-      :project_rebuild_failed,
-      %Minga.Events.ProjectRebuildFailedEvent{
-        root: root,
-        reason: "Project file cache rebuild failed: #{inspect(reason)}"
-      },
-      state.events_registry
-    )
+    broadcast_rebuild_failed(state, root, "Project file cache rebuild failed: #{inspect(reason)}")
 
     {:noreply, %{state | workspace: workspace}}
   end
@@ -515,14 +504,7 @@ defmodule Minga.Project do
     state = clear_rebuild(state)
     workspace = fail_workspace_rebuild(state.workspace, "Project file cache rebuild timed out")
 
-    Minga.Events.broadcast(
-      :project_rebuild_failed,
-      %Minga.Events.ProjectRebuildFailedEvent{
-        root: root,
-        reason: "Project file cache rebuild timed out"
-      },
-      state.events_registry
-    )
+    broadcast_rebuild_failed(state, root, "Project file cache rebuild timed out")
 
     {:noreply, %{state | workspace: workspace}}
   end
@@ -690,10 +672,22 @@ defmodule Minga.Project do
             rebuild_timer_ref: timer_ref
         }
 
+      # A refused start is a failed rebuild too: a picker that waited on a cancelled rebuild must leave loading.
       {:error, reason} ->
-        Minga.Log.warning(:editor, "Project file cache rebuild rejected: #{reason}")
-        %{state | workspace: fail_workspace_rebuild(state.workspace, to_string(reason))}
+        message = to_string(reason)
+        Minga.Log.warning(:editor, "Project file cache rebuild rejected: #{message}")
+        broadcast_rebuild_failed(state, workspace_path(state.workspace), message)
+        %{state | workspace: fail_workspace_rebuild(state.workspace, message)}
     end
+  end
+
+  @spec broadcast_rebuild_failed(t(), String.t() | nil, String.t()) :: :ok
+  defp broadcast_rebuild_failed(state, root, reason) do
+    Minga.Events.broadcast(
+      :project_rebuild_failed,
+      %Minga.Events.ProjectRebuildFailedEvent{root: root, reason: reason},
+      state.events_registry
+    )
   end
 
   @spec cancel_rebuild(t()) :: t()
