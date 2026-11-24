@@ -96,6 +96,7 @@ defmodule Minga.MixProject do
         "docs/adr/0003-extension-code-updates-require-a-new-vm-generation.md",
         "docs/adr/0004-products-are-root-applets-over-a-fixed-engine.md",
         "docs/adr/0005-frontend-owns-immediate-ui-feedback.md",
+        "docs/adr/0006-the-spine.md",
         # Development
         "CONTRIBUTING.md",
         "docs/AUTOMATION-IPC.md",
@@ -131,7 +132,8 @@ defmodule Minga.MixProject do
           "docs/adr/0002-editor-state-transitions-have-explicit-owners.md",
           "docs/adr/0003-extension-code-updates-require-a-new-vm-generation.md",
           "docs/adr/0004-products-are-root-applets-over-a-fixed-engine.md",
-          "docs/adr/0005-frontend-owns-immediate-ui-feedback.md"
+          "docs/adr/0005-frontend-owns-immediate-ui-feedback.md",
+          "docs/adr/0006-the-spine.md"
         ],
         Development: [
           "CONTRIBUTING.md",
