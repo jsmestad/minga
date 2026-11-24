@@ -28,18 +28,31 @@ export interface LabKeycast {
   update(state: KeycastState): void;
 }
 
-/** Builds the two keycast nodes once inside the host. Later updates change text and one class. */
-export function mountKeycast(host: HTMLElement): LabKeycast {
-  const recent = document.createElement("span");
-  recent.className = "lab-keycast-recent";
+/**
+ * Builds the keycast nodes once inside the host: one element for each recent sequence, then one for the pending keys.
+ * Each sequence has its own element, so two sequences never read as one. Later updates change text and visibility only.
+ */
+export function mountKeycast(host: HTMLElement, limit: number = KEYCAST_RECENT_LIMIT): LabKeycast {
+  const recent = Array.from({ length: limit }, () => {
+    const el = document.createElement("span");
+    el.className = "lab-keycast-recent";
+    el.hidden = true;
+    return el;
+  });
   const pending = document.createElement("span");
   pending.className = "lab-keycast-pending";
-  host.replaceChildren(recent, pending);
+  host.replaceChildren(...recent, pending);
 
   return {
     update(state) {
-      recent.textContent = state.recent.map(keycastText).join("  ");
+      const shown = state.recent.slice(-limit);
+      recent.forEach((el, i) => {
+        const keys = shown[i];
+        el.hidden = keys === undefined;
+        el.textContent = keys ? keycastText(keys) : "";
+      });
       pending.textContent = keycastText(state.pending);
+      pending.hidden = state.pending.length === 0;
       host.classList.toggle("is-pending", state.pending.length > 0);
     },
   };

@@ -30,7 +30,18 @@
  *   data-lab-text="id"     a named string used elsewhere in the stage (a prompt, for example). It may sit anywhere in the lab root.
  *
  * The contract does not use <template>, <script> or attribute values for copy, because the checker does not read them.
- * A mounted lab adds the class "lab-live" to its root; the stylesheet then hides the list, and the caption line shows one caption at a time.
+ * mountLab reads the copy and adds the class "lab-live" to the root; the stylesheet then hides the list, and the caption line shows one caption at a time.
+ *
+ * Chrome classes in site/styles.css ("Lab kit"). A lab uses these and adds only its own stage styles:
+ *
+ *   lab-live               on the root once the lab is mounted (set by mountLab). Hides [data-lab-steps] and shows the live chrome.
+ *   lab-head               the row above the stage: lab-labels (lab-title, lab-sim-label) and lab-stepper.
+ *   lab-caption            the caption line, directly under the stage.
+ *   lab-timeline-controls  the row of timeline buttons under the caption; each button is a lab-control.
+ *   lab-keycast            the pending and recent keys. lab-focus-cue is the "click here, then press keys" hint.
+ *   is-stage-focused       on the root while focus is inside the stage (set by mountStage).
+ *   lab-sr                 text for screen readers only.
+ *   [data-lab-stage]       the stage. It shows a focus ring when the keyboard put focus on it.
  */
 
 export interface LabStep {
@@ -49,6 +60,13 @@ export interface LabCopy {
 
 function cleanText(el: Element | null): string {
   return (el?.textContent ?? "").replace(/\s+/g, " ").trim();
+}
+
+/** Mounts a lab: reads its copy from the page and marks the root live, so the step list gives way to the caption line. Every lab starts here. */
+export function mountLab(root: HTMLElement): LabCopy {
+  const copy = readLabCopy(root);
+  root.classList.add("lab-live");
+  return copy;
 }
 
 export function readLabCopy(root: ParentNode): LabCopy {

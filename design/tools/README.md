@@ -96,7 +96,22 @@ This check runs only on a full run. `python3 design/tools/site_check.py site/ind
 - `data-lab-caption="id"` is one caption. A step holds one or more, and caption ids are unique in the lab. Lab state names a caption by id; the caption line under the stage shows a copy of that element's content, links included.
 - `data-lab-text="id"` marks a named string used elsewhere in the stage, such as a prompt that the lab types out. It may sit anywhere in the lab root.
 
-The list is ordinary visible HTML, never a `<template>`, a `<script>` or an attribute value, so this check reads it. It is also what a reader sees with JavaScript off, so write it to read well as a plain list. A mounted lab adds the class `lab-live` to its root, and the stylesheet then hides the list. Words that belong to the stage itself (a button label, the text of a specimen) sit in the stage markup. `site/ts/src/lab/copy.ts` documents the same contract next to the code that reads it; the home page demo (`[data-spec-board-demo]` in `site/index.html`) is the reference use.
+The list is ordinary visible HTML, never a `<template>`, a `<script>` or an attribute value, so this check reads it. It is also what a reader sees with JavaScript off, so write it to read well as a plain list. `mountLab` in `copy.ts` reads the copy and adds the class `lab-live` to the root, and the stylesheet then hides the list. Words that belong to the stage itself (a button label, the text of a specimen) sit in the stage markup. `site/ts/src/lab/copy.ts` documents the same contract next to the code that reads it; the home page demo (`[data-spec-board-demo]` in `site/index.html`) is the reference use.
+
+The kit's chrome classes are in `site/styles.css` under "Lab kit". A lab uses these and adds only its own stage styles:
+
+| Class or attribute | Where | What it does |
+|---|---|---|
+| `lab-live` | the lab root, set by `mountLab` | Hides `[data-lab-steps]` and shows the live chrome. A browser that runs scripts lays the figure out this way before the lab mounts (`@media (scripting: enabled)`), so mounting does not move the page. |
+| `lab-head` | the row above the stage | Holds `lab-labels` (`lab-title`, `lab-sim-label`) and `lab-stepper`. |
+| `lab-caption` | the caption line, directly under the stage | The one line of narration. It keeps a minimum height so the controls under it do not move. |
+| `lab-timeline-controls`, `lab-control` | the row of timeline buttons, and each button | Replay, Next and Back. The buttons are in the page with `hidden`; the kit shows the ones that apply. |
+| `lab-keycast`, `lab-focus-cue` | labs that take keys | The pending and recent keys, and the "click here, then press keys" hint. |
+| `is-stage-focused` | the lab root, set by `mountStage` | Present while focus is inside the stage. |
+| `[data-lab-stage]` | the stage | Shows a focus ring when the keyboard put focus on it. |
+| `lab-sr` | anywhere | Text for screen readers only. |
+
+A lab's state test proves that the page has words for every id the state can emit. `site/ts/test/support/page_copy.ts` reads the contract from a page without a DOM; `site/ts/test/spec_board_state.test.ts` shows the use.
 
 The checker's own tests are in `test/scripts/site_check_test.py`:
 

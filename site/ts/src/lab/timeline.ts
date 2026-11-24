@@ -9,6 +9,8 @@
  * The reducer is pure. The runner adds the one timer and is the only place a lab's timed demo waits on the clock.
  */
 
+import type { LabStage } from "./stage.ts";
+
 export interface TimelineFrame {
   /** Timed mode: how long the frame holds. For a prompt frame, how long the visitor has before the timeline answers. The last frame ignores it. */
   readonly holdMs: number;
@@ -156,17 +158,24 @@ export interface TimelineControls {
 /**
  * Wires the page's own buttons to a timeline and returns the function that shows the right ones for a state.
  * Replay shows when a run has ended. Next and Back show only in stepped mode. The buttons are never rebuilt; a button with nothing to do is hidden.
+ *
+ * A state change can hide the button that has focus (the prompt's timeout hides its answer button). Pass the stage, and focus then moves to the
+ * next button that is still visible (Next, then Replay, then Back), or to the stage when none is.
  */
-export function bindTimelineControls(timeline: Timeline, controls: TimelineControls): (state: TimelineState) => void {
+export function bindTimelineControls(timeline: Timeline, controls: TimelineControls, stage?: Pick<LabStage, "rescueFocus">): (state: TimelineState) => void {
   controls.replay?.addEventListener("click", () => timeline.send({ type: "replay" }));
   controls.next?.addEventListener("click", () => timeline.send({ type: "next" }));
   controls.back?.addEventListener("click", () => timeline.send({ type: "back" }));
   controls.answer?.addEventListener("click", () => timeline.send({ type: "answer" }));
 
+  const order = [controls.next, controls.replay, controls.back, controls.answer].filter((el): el is HTMLButtonElement => el != null);
+
   return (state) => {
+    const focused = order.find((el) => el === document.activeElement);
     if (controls.replay) controls.replay.hidden = state.phase !== "ended";
     if (controls.next) controls.next.hidden = !canGoNext(state);
     if (controls.back) controls.back.hidden = !canGoBack(state);
     if (controls.answer) controls.answer.hidden = state.phase !== "prompt";
+    if (focused?.hidden) stage?.rescueFocus(focused, order);
   };
 }

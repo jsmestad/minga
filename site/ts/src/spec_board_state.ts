@@ -29,6 +29,9 @@ export const LINE_IDS: readonly LineId[] = ["title", "gap_1", "intro", "gap_2", 
 /** Each card is one requirement line of the spec, so a card and its line share an id. */
 export const CARD_IDS: readonly CardId[] = ["save", "sync", "retry", "status"];
 export const COLUMNS: readonly Column[] = ["waiting", "working", "done"];
+export const STATUS_WORDS: readonly StatusWord[] = ["working", "done"];
+export const PROMPT_IDS: readonly PromptId[] = ["prompt_edit", "prompt_board"];
+export const CAPTION_IDS: readonly CaptionId[] = ["rest", "ask_edit", "minga_edits", "your_turn", "your_turn_done", "ask_board", "board_builds", "done"];
 
 type CardColumns = readonly [Column, Column, Column, Column];
 

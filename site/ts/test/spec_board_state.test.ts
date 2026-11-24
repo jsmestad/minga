@@ -1,8 +1,15 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { canGoNext, createTimeline, timelineTimerMs } from "../src/lab/timeline.ts";
+import { missing, readPageLab } from "./support/page_copy.ts";
 import {
   BEATS,
+  CAPTION_IDS,
+  CARD_IDS,
+  COLUMNS,
+  LINE_IDS,
+  PROMPT_IDS,
+  STATUS_WORDS,
   boardCards,
   captionId,
   columnCount,
@@ -185,5 +192,47 @@ describe("spec to board demo: when it starts", () => {
     assert.equal(stageInView(0.49, 300, 900), false);
     assert.equal(stageInView(0.3, 420, 800), true);
     assert.equal(stageInView(0, 0, 0), false);
+  });
+});
+
+describe("spec to board demo: the page holds the words for every id the state emits", () => {
+  const page = readPageLab("index.html", "data-spec-board-demo");
+  const everyFrame: SpecBoardState[] = SPEC_BOARD_FRAMES.map((_, index) => ({ mode: "timed", index, phase: "holding" }));
+
+  it("the declared id lists are exactly what the frames emit", () => {
+    assert.deepEqual([...new Set(everyFrame.map(captionId))].sort(), [...CAPTION_IDS].sort());
+    assert.deepEqual([...new Set(everyFrame.map(promptId).filter((id) => id !== null))].sort(), [...PROMPT_IDS].sort());
+    assert.deepEqual([...new Set(everyFrame.map(statusWord).filter((id) => id !== null))].sort(), [...STATUS_WORDS].sort());
+  });
+
+  it("every beat is a step, and every caption and prompt has its words in the step list", () => {
+    assert.deepEqual(page.steps, BEATS);
+    assert.deepEqual(missing(CAPTION_IDS, page.captions), []);
+    assert.deepEqual(missing(PROMPT_IDS, page.texts), []);
+    assert.deepEqual(missing(PROMPT_IDS, page.attr("data-sb-prompt")), []);
+    assert.equal(new Set(page.captions).size, page.captions.length, "caption ids are unique");
+  });
+
+  it("every spec line, card, column count and status word has its node in the stage", () => {
+    assert.deepEqual(page.attr("data-line"), LINE_IDS);
+    assert.deepEqual(page.attr("data-card"), CARD_IDS);
+    assert.deepEqual(missing(COLUMNS, page.attr("data-sb-count")), []);
+    assert.deepEqual(missing(STATUS_WORDS, page.attr("data-sb-status")), []);
+  });
+
+  it("every card names its state in words for a screen reader, one word per column", () => {
+    assert.deepEqual(page.attr("data-sb-card-status"), CARD_IDS.flatMap(() => COLUMNS));
+    assert.equal(page.html.split('class="lab-sr"').length - 1, CARD_IDS.length);
+  });
+
+  it("the page marks the step list the way the kit and the stylesheet look for it", () => {
+    assert.match(page.html, /<ol data-lab-steps>/);
+    assert.match(page.html, /data-lab-stage/);
+    assert.match(page.html, /data-lab-caption-line/);
+    for (const control of ["data-lab-answer", "data-lab-back", "data-lab-next", "data-lab-replay"]) assert.ok(page.html.includes(` ${control}`), control);
+  });
+
+  it("fails loudly on a page or root that does not exist", () => {
+    assert.throws(() => readPageLab("index.html", "data-no-such-lab"), /no element/);
   });
 });

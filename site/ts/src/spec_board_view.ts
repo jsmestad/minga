@@ -6,7 +6,7 @@
  */
 
 import { mountCaption } from "./lab/caption.ts";
-import { readLabCopy } from "./lab/copy.ts";
+import { mountLab } from "./lab/copy.ts";
 import { mountStage } from "./lab/stage.ts";
 import { mountStepper } from "./lab/stepper.ts";
 import { bindTimelineControls, createTimeline, prefersReducedMotion } from "./lab/timeline.ts";
@@ -67,10 +67,10 @@ export function mountSpecBoardDemo(root: HTMLElement): void {
   if (!stageEl || !captionLine || !stepperHost || !boardEl) return;
   const board: HTMLElement = boardEl;
 
-  const copy = readLabCopy(root);
+  const copy = mountLab(root);
   const caption = mountCaption(captionLine, copy);
   const stepper = mountStepper(stepperHost, copy.steps);
-  mountStage(root, { stage: stageEl });
+  const stage = mountStage(root, { stage: stageEl });
 
   const lines = new Map<string, HTMLElement>();
   for (const el of root.querySelectorAll<HTMLElement>("[data-line]")) lines.set(el.dataset.line ?? "", el);
@@ -104,6 +104,7 @@ export function mountSpecBoardDemo(root: HTMLElement): void {
       if (!el) continue;
       el.dataset.col = card.column;
       el.style.setProperty("--col", String(COLUMNS.indexOf(card.column)));
+      for (const word of el.querySelectorAll<HTMLElement>("[data-sb-card-status]")) word.hidden = word.dataset.sbCardStatus !== card.column;
     }
     for (const column of COLUMNS) {
       const el = counts.get(column);
@@ -131,11 +132,10 @@ export function mountSpecBoardDemo(root: HTMLElement): void {
     next: root.querySelector<HTMLButtonElement>("[data-lab-next]"),
     back: root.querySelector<HTMLButtonElement>("[data-lab-back]"),
     answer: root.querySelector<HTMLButtonElement>("[data-lab-answer]"),
-  });
+  }, stage);
 
   root.dataset.mode = timeline.state().mode;
   root.style.setProperty("--sb-turn-ms", `${YOUR_TURN_TIMEOUT_MS}ms`);
-  root.classList.add("lab-live");
   render(timeline.state());
   syncControls(timeline.state());
   startWhenInView(stageEl, () => timeline.send({ type: "start" }));

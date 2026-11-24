@@ -4167,7 +4167,7 @@ td [data-status="planned"]:not([data-pill="off"])::before {
   display: none;
 }
 
-.lab-steps {
+[data-lab-steps] {
   margin: 1rem 0 0;
   padding-left: 1.4rem;
   max-width: var(--measure);
@@ -4175,26 +4175,64 @@ td [data-status="planned"]:not([data-pill="off"])::before {
   font-size: 0.92rem;
 }
 
-.lab-steps li + li {
+[data-lab-steps] li + li {
   margin-top: 0.6rem;
 }
 
-.lab-steps p {
+[data-lab-steps] p {
   margin: 0;
 }
 
-.lab-steps [data-lab-instruction] {
+[data-lab-steps] [data-lab-instruction] {
   color: var(--text);
   font-weight: 600;
 }
 
-.lab-live .lab-steps {
+.lab-live [data-lab-steps] {
   display: none;
+}
+
+/* Before a lab mounts, a browser that runs scripts already lays the figure out as the live lab (list hidden, caption and controls rows reserved), so mounting does not move the content below it. With scripting off none of this applies, and the step list shows. */
+@media (scripting: enabled) {
+  [data-lab-steps] {
+    display: none;
+  }
+
+  .lab-caption:empty {
+    display: block;
+  }
+
+  .lab-timeline-controls {
+    display: flex;
+  }
+}
+
+.lab-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* The stage shows a ring when the keyboard put focus on it, including focus moved there after a control went away. */
+[data-lab-stage]:focus {
+  outline: none;
+}
+
+[data-lab-stage]:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
 }
 
 .lab-keycast {
   display: inline-flex;
-  gap: 0.75rem;
+  flex-wrap: wrap;
+  gap: 0.3rem 1.25rem;
   min-height: 1.5em;
   font-family: var(--font-mono);
   font-size: 0.78rem;
@@ -4230,6 +4268,9 @@ td [data-status="planned"]:not([data-pill="off"])::before {
   --sb-waiting: #a5adce;
   --sb-gap: 0.5rem;
   --sb-turn-ms: 4000ms;
+  /* The height of one spec line. The gutter column, the braid and the thin strand all scale from it, so the marks keep the proportions of the 10 by 26 drawings in docs/design/marks. */
+  --sb-u: 42px;
+  --sb-font: 1.06rem;
 }
 
 .sb-demo [hidden] {
@@ -4240,15 +4281,11 @@ td [data-status="planned"]:not([data-pill="off"])::before {
   position: absolute;
 }
 
-.sb-stage:focus {
-  outline: none;
-}
-
 /* The panes keep the final frame's height from the start, so the caption under the stage never moves. */
 .sb-panes {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  min-height: 24rem;
+  min-height: 33.5rem;
 }
 
 .sb-pane {
@@ -4264,13 +4301,14 @@ td [data-status="planned"]:not([data-pill="off"])::before {
 .sb-buffer {
   flex: 1;
   padding: 0.85rem 0;
+  font-size: var(--sb-font);
 }
 
 .sb-line {
   display: grid;
-  grid-template-columns: 2.6rem 16px minmax(0, 1fr);
-  min-height: 26px;
-  line-height: 26px;
+  grid-template-columns: 2.6rem calc(var(--sb-u) * 16 / 26) minmax(0, 1fr);
+  min-height: var(--sb-u);
+  line-height: var(--sb-u);
   padding-right: 0.85rem;
 }
 
@@ -4291,7 +4329,7 @@ td [data-status="planned"]:not([data-pill="off"])::before {
 
 .sb-you-strand {
   flex: 1;
-  width: 1.5px;
+  width: calc(var(--sb-u) * 1.5 / 26);
   background: var(--sb-you);
 }
 
@@ -4303,11 +4341,17 @@ td [data-status="planned"]:not([data-pill="off"])::before {
 .sb-braid {
   display: block;
   flex: none;
+  width: calc(var(--sb-u) * 10 / 26);
 }
 
-/* The straight segment stretches with a wrapped line, so the crossing stays in the first 26px and the ribbon stays joined. */
+.sb-braid-cap {
+  height: var(--sb-u);
+}
+
+/* The straight segment stretches with a wrapped line, so the crossing stays in the first line box and the ribbon stays joined. */
 .sb-braid-fill {
   flex: 1 1 0;
+  height: auto;
   min-height: 0;
 }
 
@@ -4358,6 +4402,7 @@ td [data-status="planned"]:not([data-pill="off"])::before {
 }
 
 .sb-demo[data-rewritten="false"] ins[data-sb-rev="minga"],
+.sb-demo[data-rewritten="true"] del[data-sb-rev="minga"],
 .sb-demo[data-edited="false"] ins[data-sb-rev="you"],
 .sb-demo[data-edited="true"] del[data-sb-rev="you"] {
   display: none;
@@ -4409,8 +4454,9 @@ td [data-status="planned"]:not([data-pill="off"])::before {
   display: none;
   align-items: flex-start;
   gap: 0.65rem;
-  min-height: 4.1rem;
-  padding: 0.6rem 0.85rem;
+  min-height: 4.4rem;
+  padding: 0.7rem 0.95rem;
+  font-size: 0.95rem;
   border-top: 1px solid var(--sb-rule);
   background: var(--sb-mantle);
   line-height: 1.5;
@@ -4418,6 +4464,17 @@ td [data-status="planned"]:not([data-pill="off"])::before {
 
 .lab-live .sb-composer {
   display: flex;
+}
+
+/* Before the demo mounts, a browser that runs scripts shows the final frame laid out as the live stage: the composer row is there and the replaced words are gone, so no line wraps differently once it mounts. */
+@media (scripting: enabled) {
+  .sb-composer {
+    display: flex;
+  }
+
+  .sb-demo:not(.lab-live) .sb-text del {
+    display: none;
+  }
 }
 
 .sb-composer-who {
@@ -4543,7 +4600,7 @@ td [data-status="planned"]:not([data-pill="off"])::before {
   padding: 0.4rem 0.5rem;
   border: 1px solid var(--sb-rule);
   background: var(--sb-bg);
-  font-size: 0.72rem;
+  font-size: 0.8rem;
   line-height: 1.35;
   transform: translateX(calc(var(--col) * (100% + var(--sb-gap))));
   transition: transform var(--lab-move) var(--lab-ease), border-color var(--lab-quick) ease;
@@ -4576,7 +4633,7 @@ td [data-status="planned"]:not([data-pill="off"])::before {
   justify-content: space-between;
   gap: 0 0.4rem;
   color: var(--sb-dim);
-  font-size: 0.66rem;
+  font-size: 0.7rem;
 }
 
 .sb-card:not([data-col="done"]) .sb-card-files {
@@ -4627,22 +4684,33 @@ td [data-status="planned"]:not([data-pill="off"])::before {
   to { transform: rotate(360deg); }
 }
 
-/* Between phone and desktop the cards wrap to more lines, so the reserved height is larger. */
-@media (min-width: 761px) and (max-width: 1040px) {
+/* Between phone and desktop the panes are narrower, so the type steps down and the cards wrap to more lines. */
+@media (min-width: 901px) and (max-width: 1040px) {
+  .sb-demo {
+    --sb-u: 32px;
+    --sb-font: 0.86rem;
+  }
+
   .sb-panes {
-    min-height: 30.5rem;
+    min-height: 28rem;
+  }
+
+  .sb-card {
+    font-size: 0.72rem;
   }
 }
 
-/* At phone width the order is spec, then board. The empty pane keeps the board's height, so the caption does not move when the board opens. */
-@media (max-width: 760px) {
+/* When the two panes would be too narrow side by side (phones and small tablets), the order is spec, then board. Before the board opens, the spec shows whole and the empty pane is short. When the board opens, the spec folds to its Requirements block (heading and task lines, marks intact) and the composer goes, so the spec lines, the board and the caption fit one phone screen. The two states have the same height, so the caption does not move. */
+@media (max-width: 900px) {
+  .sb-demo {
+    --sb-u: 26px;
+    --sb-font: 0.81rem;
+    --sb-gap: 0.35rem;
+  }
+
   .sb-panes {
     grid-template-columns: minmax(0, 1fr);
     min-height: 0;
-  }
-
-  .sb-buffer {
-    min-height: 19.5rem;
   }
 
   .sb-pane-spec {
@@ -4650,13 +4718,36 @@ td [data-status="planned"]:not([data-pill="off"])::before {
     border-bottom: 1px solid var(--sb-rule);
   }
 
+  .sb-buffer {
+    min-height: 17.95rem;
+  }
+
+  .sb-composer {
+    min-height: 4.1rem;
+    padding: 0.6rem 0.85rem;
+    font-size: inherit;
+  }
+
   .sb-pane-board {
-    min-height: 25.5rem;
+    min-height: 8.5rem;
     padding: 0.75rem 0.6rem;
   }
 
-  .sb-demo {
-    --sb-gap: 0.35rem;
+  .sb-demo[data-beat="board_builds"] .sb-line:not([data-line="heading"], [data-line="save"], [data-line="sync"], [data-line="retry"], [data-line="status"]),
+  .sb-demo[data-beat="done"] .sb-line:not([data-line="heading"], [data-line="save"], [data-line="sync"], [data-line="retry"], [data-line="status"]),
+  .sb-demo[data-beat="board_builds"] .sb-composer,
+  .sb-demo[data-beat="done"] .sb-composer {
+    display: none;
+  }
+
+  .sb-demo[data-beat="board_builds"] .sb-buffer,
+  .sb-demo[data-beat="done"] .sb-buffer {
+    min-height: 9.85rem;
+  }
+
+  .sb-demo[data-beat="board_builds"] .sb-pane-board,
+  .sb-demo[data-beat="done"] .sb-pane-board {
+    min-height: 20.7rem;
   }
 
   .sb-card {
@@ -4664,8 +4755,55 @@ td [data-status="planned"]:not([data-pill="off"])::before {
     font-size: 0.68rem;
   }
 
+  .sb-card-meta {
+    font-size: 0.66rem;
+  }
+
   .lab-caption {
     min-height: 6.2em;
+  }
+
+  /* The step label changes length from beat to beat. On its own row it cannot rewrap the head. */
+  .lab-stepper {
+    flex-basis: 100%;
+    height: 1.7em;
+  }
+}
+
+/* A phone column is about 100px wide. The card drops its mark there so the title has the width; the column, the working card's border and the card's screen-reader word still give the state. */
+@media (max-width: 480px) {
+  .sb-card .sb-mark {
+    display: none !important;
+  }
+
+  .sb-card {
+    padding: 0.35rem;
+    font-size: 0.64rem;
+  }
+
+  .sb-card-meta {
+    font-size: 0.6rem;
+  }
+
+  .sb-pane-board {
+    padding-left: 0.4rem;
+    padding-right: 0.4rem;
+  }
+}
+
+/* The figure before it mounts, in a browser that runs scripts: the same phone layout as the final frame, so mounting does not change its height. */
+@media (max-width: 900px) and (scripting: enabled) {
+  .sb-demo:not(.lab-live) .sb-line:not([data-line="heading"], [data-line="save"], [data-line="sync"], [data-line="retry"], [data-line="status"]),
+  .sb-demo:not(.lab-live) .sb-composer {
+    display: none;
+  }
+
+  .sb-demo:not(.lab-live) .sb-buffer {
+    min-height: 9.85rem;
+  }
+
+  .sb-demo:not(.lab-live) .sb-pane-board {
+    min-height: 20.7rem;
   }
 }
 

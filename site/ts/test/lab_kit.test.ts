@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { esc } from "../src/lab/esc.ts";
 import { createKeycast, keycastPush, keycastText } from "../src/lab/keycast.ts";
-import { capturesKey, normalizeKey, stepPrefix } from "../src/lab/stage.ts";
+import { capturesKey, focusAfterControlClick, nextVisible, normalizeKey, stepPrefix } from "../src/lab/stage.ts";
 import { stepperModel } from "../src/lab/stepper.ts";
 import {
   canGoBack,
@@ -38,16 +38,82 @@ describe("lab kit: key names", () => {
       [{ key: "Shift" }, null],
       [{ key: "Meta", metaKey: true }, null],
     ];
+    for (const key of ["Control", "Alt", "AltGraph", "OS", "Hyper", "Super", "Symbol", "CapsLock", "NumLock", "ScrollLock", "Fn"]) {
+      assert.equal(normalizeKey({ key }), null, key);
+    }
     for (const [event, name] of cases) assert.equal(normalizeKey(event), name, JSON.stringify(event));
   });
 
-  it("keeps a plain key in the focused stage and leaves Tab and browser shortcuts to the browser", () => {
+  it("names a character typed with AltGr as the character, not as a Control and Option chord", () => {
+    const altGraph = (name: string): boolean => name === "AltGraph";
+    assert.equal(normalizeKey({ key: "@", ctrlKey: true, altKey: true, getModifierState: altGraph }), "@");
+    assert.equal(normalizeKey({ key: "€", altKey: true, getModifierState: altGraph }), "€");
+    assert.equal(normalizeKey({ key: "Enter", ctrlKey: true, altKey: true, getModifierState: altGraph }), "C-M-RET");
+    assert.equal(normalizeKey({ key: "q", ctrlKey: true, altKey: true, getModifierState: () => false }), "C-M-q");
+    assert.equal(capturesKey({ key: "@", ctrlKey: true, altKey: true, getModifierState: altGraph }, false), true);
+  });
+
+  it("keeps a plain key in the focused stage", () => {
     assert.equal(capturesKey({ key: " " }, false), true);
     assert.equal(capturesKey({ key: "x" }, false), true);
-    assert.equal(capturesKey({ key: "Tab" }, false), false);
+    assert.equal(capturesKey({ key: "x" }, true), true);
+    assert.equal(capturesKey({ key: "Escape" }, false), true);
+  });
+
+  it("never keeps Tab, Shift+Tab, or a Control or Command chord, even when the lab handled the key", () => {
+    for (const handled of [false, true]) {
+      assert.equal(capturesKey({ key: "Tab" }, handled), false, `Tab handled=${handled}`);
+      assert.equal(capturesKey({ key: "Tab", shiftKey: true } as Parameters<typeof capturesKey>[0], handled), false, `Shift+Tab handled=${handled}`);
+      assert.equal(capturesKey({ key: "r", metaKey: true }, handled), false, `Cmd+r handled=${handled}`);
+      assert.equal(capturesKey({ key: "j", ctrlKey: true }, handled), false, `Ctrl+j handled=${handled}`);
+      assert.equal(capturesKey({ key: "l", ctrlKey: true, metaKey: true }, handled), false, `Ctrl+Cmd+l handled=${handled}`);
+    }
+    assert.equal(normalizeKey({ key: "Tab" }), "TAB");
+  });
+
+  it("keeps an Option chord or a function key only when the lab handled it", () => {
     assert.equal(capturesKey({ key: "F5" }, false), false);
-    assert.equal(capturesKey({ key: "r", metaKey: true }, false), false);
-    assert.equal(capturesKey({ key: "j", ctrlKey: true }, true), true);
+    assert.equal(capturesKey({ key: "F5" }, true), true);
+    assert.equal(capturesKey({ key: "Enter", altKey: true }, false), false);
+    assert.equal(capturesKey({ key: "Enter", altKey: true }, true), true);
+  });
+});
+
+describe("lab kit: focus when a control goes away", () => {
+  const controls = ["next", "replay", "back", "answer"];
+  const visible = (...shown: string[]) => (id: string): boolean => shown.includes(id);
+
+  it("moves to the next visible control after the lost one, wrapping round", () => {
+    assert.equal(nextVisible(controls, "answer", visible("next", "back")), "next");
+    assert.equal(nextVisible(controls, "next", visible("replay", "back")), "replay");
+    assert.equal(nextVisible(controls, "replay", visible("next")), "next");
+    assert.equal(nextVisible(controls, "back", visible("next", "answer")), "answer");
+  });
+
+  it("has no control to offer when none is visible, so focus goes to the stage", () => {
+    assert.equal(nextVisible(controls, "answer", visible()), null);
+    assert.equal(nextVisible(controls, "answer", visible("answer")), null);
+    assert.equal(nextVisible([], "answer", visible("next")), null);
+  });
+
+  it("searches every control when the lost one is not in the order", () => {
+    assert.equal(nextVisible(controls, "other", visible("back")), "back");
+  });
+
+  it("after a control click: a keyed lab takes a pointer click back to the stage, and a keyboard press keeps the control", () => {
+    const table: readonly [keyed: boolean, pointer: boolean, gone: boolean, want: string][] = [
+      [true, true, false, "stage"],
+      [true, true, true, "stage"],
+      [true, false, false, "stay"],
+      [true, false, true, "rescue"],
+      [false, true, false, "stay"],
+      [false, true, true, "rescue"],
+      [false, false, false, "stay"],
+      [false, false, true, "rescue"],
+    ];
+    for (const [keyed, pointer, gone, want] of table) {
+      assert.equal(focusAfterControlClick({ keyed, pointer, gone }), want, JSON.stringify({ keyed, pointer, gone }));
+    }
   });
 });
 
@@ -85,7 +151,9 @@ describe("lab kit: keycast", () => {
     cast = keycastPush(cast, step);
     assert.deepEqual(cast, { pending: [], recent: [["SPC", ","]] });
     cast = keycastPush(cast, stepPrefix(sequences, cast.pending, "x"));
+    // Two sequences stay two entries; the renderer gives each its own element, so they never read as one.
     assert.deepEqual(cast.recent.map(keycastText), ["SPC ,", "x"]);
+    assert.equal(cast.recent.length, 2);
   });
 
   it("keeps only the newest sequences", () => {

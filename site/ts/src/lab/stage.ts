@@ -2,7 +2,8 @@
  * The lab stage: the one element of a lab that takes keys.
  *
  * - Keys are heard on the stage element only, so the page keeps its own keys (the space bar scrolls) whenever the stage does not have focus.
- * - A click on a lab control must not leave focus on <body>. A lab that takes keys gets focus back on its stage after every control click. A lab that takes no keys gets it back only when the clicked control went away (hidden or disabled).
+ * - Focus must never fall to <body> when a control goes away (hidden or disabled), whether a click or a timer removed it. Focus then moves to the next control that is still visible, and to the stage when there is none.
+ * - A lab that takes keys also gets focus on its stage after a pointer click on a control, so the next key press lands in the stage. A control worked from the keyboard keeps focus, so it can be pressed again.
  * - The root carries the class "is-stage-focused" while focus is inside the stage, so the stylesheet can show a "click here, then press keys" cue when it is not.
  *
  * Key names and prefix tracking are pure, so a lab's state tests can drive them without a DOM.
@@ -13,6 +14,8 @@ export interface KeyLike {
   readonly ctrlKey?: boolean;
   readonly metaKey?: boolean;
   readonly altKey?: boolean;
+  /** KeyboardEvent.getModifierState. Used to tell AltGr typing from a Control and Option chord. */
+  getModifierState?(name: string): boolean;
 }
 
 const NAMED_KEYS: Readonly<Record<string, string>> = {
@@ -28,7 +31,29 @@ const NAMED_KEYS: Readonly<Record<string, string>> = {
   ArrowDown: "DOWN",
 };
 
-const MODIFIER_KEYS: ReadonlySet<string> = new Set(["Shift", "Control", "Alt", "Meta", "CapsLock", "Fn", "Dead", "Unidentified", "Process"]);
+const MODIFIER_KEYS: ReadonlySet<string> = new Set([
+  "Shift",
+  "Control",
+  "Alt",
+  "AltGraph",
+  "Meta",
+  "OS",
+  "Hyper",
+  "Super",
+  "Symbol",
+  "CapsLock",
+  "NumLock",
+  "ScrollLock",
+  "Fn",
+  "Dead",
+  "Unidentified",
+  "Process",
+]);
+
+/** AltGr types a character on many layouts, and some systems report it as Control plus Option. That press is the character, not a chord. */
+function typedWithAltGraph(event: KeyLike): boolean {
+  return event.getModifierState?.("AltGraph") === true && Array.from(event.key).length === 1;
+}
 
 /**
  * Names a key press the way the site writes keys: a printable key as itself (Shift is already in the character), named keys in capitals,
@@ -37,18 +62,22 @@ const MODIFIER_KEYS: ReadonlySet<string> = new Set(["Shift", "Control", "Alt", "
 export function normalizeKey(event: KeyLike): string | null {
   if (MODIFIER_KEYS.has(event.key)) return null;
   const base = NAMED_KEYS[event.key] ?? event.key;
-  const mods = `${event.ctrlKey ? "C-" : ""}${event.altKey ? "M-" : ""}${event.metaKey ? "D-" : ""}`;
+  const altGraph = typedWithAltGraph(event);
+  const mods = `${event.ctrlKey && !altGraph ? "C-" : ""}${event.altKey && !altGraph ? "M-" : ""}${event.metaKey ? "D-" : ""}`;
   return `${mods}${base}`;
 }
 
 /**
- * Whether a focused stage keeps this key from the page. Tab always leaves the stage, and browser shortcuts (Control or Command chords, function keys)
- * stay with the browser unless the lab handled the key.
+ * Whether a focused stage keeps this key from the page. Tab always leaves the stage, and a Control or Command chord always stays with the browser,
+ * even when the lab handled the key. An Option chord or a function key is kept only when the lab handled it.
  */
 export function capturesKey(event: KeyLike, handled: boolean): boolean {
+  if (event.key === "Tab" || event.metaKey) return false;
+  const altGraph = typedWithAltGraph(event);
+  if (event.ctrlKey && !altGraph) return false;
   if (handled) return true;
-  if (event.key === "Tab" || /^F\d+$/.test(event.key)) return false;
-  return !(event.ctrlKey || event.metaKey || event.altKey);
+  if (/^F\d+$/.test(event.key)) return false;
+  return !event.altKey || altGraph;
 }
 
 export type PrefixStatus = "pending" | "matched" | "unknown";
@@ -80,17 +109,45 @@ export function stepPrefix(sequences: readonly (readonly string[])[], pending: r
   return { status: "unknown", pending: [], keys };
 }
 
+/** The next item after the lost one that is still visible, searching in order and wrapping round. Null when none is. */
+export function nextVisible<T>(order: readonly T[], lost: T, isVisible: (item: T) => boolean): T | null {
+  const start = order.indexOf(lost);
+  for (let i = 1; i <= order.length; i += 1) {
+    const candidate = order[(start + i) % order.length] as T;
+    if (candidate !== lost && isVisible(candidate)) return candidate;
+  }
+  return null;
+}
+
+export type ClickFocus = "stage" | "rescue" | "stay";
+
+/**
+ * Where focus goes after a click on a lab control. A pointer click in a lab that takes keys returns focus to the stage. Otherwise focus stays on the
+ * control, unless the control went away; then it is rescued (next visible control, else the stage).
+ */
+export function focusAfterControlClick(click: { readonly keyed: boolean; readonly pointer: boolean; readonly gone: boolean }): ClickFocus {
+  if (click.keyed && click.pointer) return "stage";
+  return click.gone ? "rescue" : "stay";
+}
+
 export interface StageOptions {
   /** The focusable element. It keeps its identity for the life of the lab. */
   readonly stage: HTMLElement;
-  /** Called for each named key pressed in the focused stage. Return true when the lab handled it. Omit it for a lab that takes no keys. */
+  /** Called for each named key pressed in the focused stage, Tab included. Return true when the lab handled it. Omit it for a lab that takes no keys. */
   readonly onKey?: (key: string, event: KeyboardEvent) => boolean | void;
 }
 
 export interface LabStage {
   focus(): void;
   hasFocus(): boolean;
+  /**
+   * Call when a control that had focus went away. Focus moves to the next visible control and, when there is none, to the stage.
+   * The order to search defaults to the lab's controls in document order.
+   */
+  rescueFocus(lost: HTMLElement, order?: readonly HTMLElement[]): void;
 }
+
+const CONTROLS = "button, [data-lab-control]";
 
 function isGone(control: HTMLElement): boolean {
   return !control.isConnected || control.closest("[hidden]") !== null || control.matches(":disabled");
@@ -104,6 +161,17 @@ export function mountStage(root: HTMLElement, options: StageOptions): LabStage {
   const focus = (): void => stage.focus({ preventScroll: true });
   const syncFocus = (): void => {
     root.classList.toggle("is-stage-focused", stage.contains(document.activeElement));
+  };
+  const rescueFocus = (lost: HTMLElement, order?: readonly HTMLElement[]): void => {
+    const controls = order ?? Array.from(root.querySelectorAll<HTMLElement>(CONTROLS));
+    const target = nextVisible(controls, lost, (control) => !isGone(control));
+    if (target) target.focus({ preventScroll: true });
+    else focus();
+  };
+  /** Focus sits on something in the lab that is still there, so there is nothing to rescue. */
+  const focusIsSafe = (): boolean => {
+    const active = document.activeElement;
+    return active instanceof HTMLElement && active !== document.body && root.contains(active) && !isGone(active);
   };
 
   stage.addEventListener("focusin", syncFocus);
@@ -121,11 +189,13 @@ export function mountStage(root: HTMLElement, options: StageOptions): LabStage {
 
   // Control handlers run first (they sit on the control or below the root), so by now the lab has redrawn and a control may be hidden.
   root.addEventListener("click", (event) => {
-    const control = (event.target as HTMLElement | null)?.closest<HTMLElement>("button, [data-lab-control]");
+    const control = (event.target as HTMLElement | null)?.closest<HTMLElement>(CONTROLS);
     if (!control || !root.contains(control)) return;
-    if (onKey || isGone(control)) focus();
+    const action = focusAfterControlClick({ keyed: onKey !== undefined, pointer: event.detail > 0, gone: isGone(control) });
+    if (action === "stage") focus();
+    else if (action === "rescue" && !focusIsSafe()) rescueFocus(control);
   });
 
   syncFocus();
-  return { focus, hasFocus: () => stage.contains(document.activeElement) };
+  return { focus, hasFocus: () => stage.contains(document.activeElement), rescueFocus };
 }
