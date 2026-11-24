@@ -552,19 +552,8 @@ defmodule Minga.Buffer.Lines do
     (kept ++ new_entries ++ shifted) |> List.to_tuple()
   end
 
-  @spec remove_and_shift(line_starts(), non_neg_integer(), non_neg_integer()) :: line_starts()
-  defp remove_and_shift(starts, 0, char_size) do
-    total = tuple_size(starts)
-
-    if total <= 1 do
-      starts
-    else
-      for i <- 1..(total - 1), do: elem(starts, i) - char_size
-    end
-    |> List.to_tuple()
-  end
-
-  defp remove_and_shift(starts, remove_line, char_size) do
+  @spec remove_and_shift(line_starts(), pos_integer(), non_neg_integer()) :: line_starts()
+  defp remove_and_shift(starts, remove_line, char_size) when remove_line >= 1 do
     total = tuple_size(starts)
     kept = for i <- 0..(remove_line - 1)//1, do: elem(starts, i)
 
