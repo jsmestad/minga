@@ -24,6 +24,10 @@ defmodule Minga.Tool.Installer.Stub do
   `gate_latest_versions/1` activates a gate: every `latest_version/1` call
   blocks and sends `{:latest_version_blocked, ref, worker_pid}` to the
   test process. Release individual workers with `release_latest_version/2`.
+
+  ## Per-recipe scripts
+
+  `script_latest_version/2` sets the `latest_version/1` behavior for one recipe name and takes precedence over the global settings. Tests that use unique recipe names can script their lookups without affecting other tests, so they can run with `async: true`.
   """
 
   @behaviour Minga.Tool.Installer
@@ -132,6 +136,34 @@ defmodule Minga.Tool.Installer.Stub do
     :ok
   end
 
+  @typedoc """
+  Scripted `latest_version/1` behavior for one recipe.
+
+  `{:gate, test_pid}` blocks the lookup, sends `{:latest_version_blocked, name, worker_pid}` to `test_pid`, and returns the result passed to `release_scripted/2`.
+  """
+  @type latest_version_script :: {:ok, String.t()} | {:error, term()} | :crash | {:gate, pid()}
+
+  @doc "Scripts `latest_version/1` for one recipe name."
+  @spec script_latest_version(atom(), latest_version_script()) :: :ok
+  def script_latest_version(name, script) when is_atom(name) do
+    :ets.insert(@table, {{:latest_version_script, name}, script})
+    :ok
+  end
+
+  @doc "Removes the script for one recipe name."
+  @spec clear_latest_version_script(atom()) :: :ok
+  def clear_latest_version_script(name) when is_atom(name) do
+    :ets.delete(@table, {:latest_version_script, name})
+    :ok
+  end
+
+  @doc "Releases a lookup blocked by a `{:gate, pid}` script with the result it should return."
+  @spec release_scripted(pid(), {:ok, String.t()} | {:error, term()}) :: :ok
+  def release_scripted(worker_pid, result) when is_pid(worker_pid) do
+    send(worker_pid, {:scripted_latest_version, result})
+    :ok
+  end
+
   @doc "When true, `latest_version/1` raises instead of returning a result."
   @spec set_latest_version_crash(boolean()) :: :ok
   def set_latest_version_crash(crash?) when is_boolean(crash?) do
@@ -197,7 +229,29 @@ defmodule Minga.Tool.Installer.Stub do
 
   @impl true
   @spec latest_version(Recipe.t()) :: {:ok, String.t()} | {:error, term()}
-  def latest_version(_recipe) do
+  def latest_version(%Recipe{name: name}) do
+    case get_value({:latest_version_script, name}, nil) do
+      nil -> unscripted_latest_version()
+      script -> run_latest_version_script(name, script)
+    end
+  end
+
+  @spec run_latest_version_script(atom(), latest_version_script()) ::
+          {:ok, String.t()} | {:error, term()}
+  defp run_latest_version_script(_name, :crash), do: raise("simulated crash in latest_version")
+
+  defp run_latest_version_script(name, {:gate, test_pid}) do
+    send(test_pid, {:latest_version_blocked, name, self()})
+
+    receive do
+      {:scripted_latest_version, result} -> result
+    end
+  end
+
+  defp run_latest_version_script(_name, result), do: result
+
+  @spec unscripted_latest_version() :: {:ok, String.t()} | {:error, term()}
+  defp unscripted_latest_version do
     if get_value(:latest_version_crash, false) do
       raise "simulated crash in latest_version"
     end
@@ -251,7 +305,7 @@ defmodule Minga.Tool.Installer.Stub do
     end
   end
 
-  @spec get_value(atom(), term()) :: term()
+  @spec get_value(term(), term()) :: term()
   defp get_value(key, default) do
     case :ets.lookup(@table, key) do
       [{^key, value}] -> value

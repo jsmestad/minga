@@ -338,6 +338,9 @@ defmodule Minga.Events do
           | :tool_install_complete
           | :tool_install_failed
           | :tool_uninstall_complete
+          | :tool_update_check_started
+          | :tool_update_check_complete
+          | :tool_update_check_cancelled
           | :tool_missing
           | :project_rebuilt
           | :command_done

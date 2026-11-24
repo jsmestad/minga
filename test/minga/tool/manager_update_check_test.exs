@@ -1,331 +1,405 @@
 defmodule Minga.Tool.ManagerUpdateCheckTest do
-  use ExUnit.Case, async: false
+  @moduledoc """
+  Lifecycle tests for Tool Manager update checks.
+
+  Each test starts a private Manager with its own ETS table, tools directory, and event registry, and uses recipes with unique names whose lookups are scripted per recipe. Lookups block on explicit gates, so no assertion depends on wall-clock timing.
+  """
+  use ExUnit.Case, async: true
 
   alias Minga.Events
-  alias Minga.Tool.Manager
+  alias Minga.Tool.Installation
   alias Minga.Tool.Installer.Stub
+  alias Minga.Tool.Manager
+  alias Minga.Tool.Recipe
+  alias Minga.Tool.Recipe.Registry, as: RecipeRegistry
 
-  @moduletag timeout: 15_000
-  # Exercises the singleton Manager with async update check tasks.
-  # Excluded from test.llm; runs in test.heavy and full suite.
-  @moduletag :heavy
+  @moduletag :tmp_dir
 
-  setup do
-    Stub.reset()
+  @topics [
+    :tool_install_complete,
+    :tool_update_check_started,
+    :tool_update_check_complete,
+    :tool_update_check_cancelled
+  ]
 
-    # Short per-check timeout for deterministic timeout tests
-    prev_timeout = Application.get_env(:minga, :update_check_timeout)
-    Application.put_env(:minga, :update_check_timeout, 500)
+  setup %{tmp_dir: tmp_dir} do
+    unique = System.unique_integer([:positive])
+    events = :"tool_update_events_#{unique}"
+    start_supervised!({Events, name: events})
+    for topic <- @topics, do: Events.subscribe(topic, registry: events)
 
-    # Subscribe to events before any action
-    Events.subscribe(:tool_install_complete)
-    Events.subscribe(:tool_install_failed)
-    Events.subscribe(:tool_update_check_started)
-    Events.subscribe(:tool_update_check_complete)
+    source = {:extension, :"tool_update_test_#{unique}"}
+    on_exit(fn -> RecipeRegistry.unregister_source(source) end)
 
-    # Clean up tools installed by previous tests
-    for inst <- Manager.all_installed() do
-      Manager.uninstall(inst.name)
+    %{
+      unique: unique,
+      events: events,
+      source: source,
+      tools_dir: tmp_dir,
+      server: :"tool_manager_#{unique}",
+      table: :"tool_manager_table_#{unique}"
+    }
+  end
+
+  describe "check_updates/1" do
+    test "replies before any lookup finishes and status, install, and uninstall stay responsive",
+         ctx do
+      [a, b] = start_manager(ctx, [{"a", "1.0.0", :gate}, {"b", "1.0.0", :gate}])
+      extra = register_recipe(ctx, "extra")
+
+      assert :ok = Manager.check_updates(ctx.server)
+      worker_a = await_blocked(a)
+      worker_b = await_blocked(b)
+
+      assert Manager.update_check_active?(ctx.server)
+      assert [_ | _] = Manager.tool_status_list(ctx.server)
+      assert Manager.installed?(a, ctx.table)
+
+      assert :ok = Manager.install(extra, ctx.server)
+      assert_receive {:minga_event, :tool_install_complete, %{name: ^extra}}, 5_000
+      assert :ok = Manager.uninstall(extra, ctx.server)
+
+      Stub.release_scripted(worker_a, {:ok, "2.0.0"})
+      Stub.release_scripted(worker_b, {:ok, "1.0.0"})
+
+      assert %{updates: [{^a, "1.0.0", "2.0.0"}], errors: []} = await_complete(1)
+      refute Manager.update_check_active?(ctx.server)
     end
 
-    Manager.cancel_update_check()
+    test "an empty installation completes at once", ctx do
+      start_manager(ctx, [])
 
-    on_exit(fn ->
-      if prev_timeout do
-        Application.put_env(:minga, :update_check_timeout, prev_timeout)
-      else
-        Application.delete_env(:minga, :update_check_timeout)
-      end
-    end)
-
-    :ok
-  end
-
-  defp install_tool(name) do
-    Stub.set_install_result({:ok, "1.0.0"})
-    :ok = Manager.install(name)
-    assert_receive {:minga_event, :tool_install_complete, %{name: ^name}}, 2_000
-  end
-
-  defp await_update_check(timeout \\ 5_000) do
-    assert_receive {:minga_event, :tool_update_check_complete, payload}, timeout
-    payload
-  end
-
-  describe "check_updates/0 returns promptly" do
-    test "returns :ok without blocking on network calls" do
-      install_tool(:pyright)
-      gate_ref = Stub.gate_latest_versions()
-
-      assert :ok = Manager.check_updates()
-      assert_receive {:latest_version_blocked, ^gate_ref, worker_pid}, 2_000
-
-      # Manager is responsive while check is blocked
-      assert Manager.update_check_active?()
-      assert is_list(Manager.tool_status_list())
-      assert Manager.installed?(:pyright)
-
-      Stub.release_latest_version(worker_pid, gate_ref)
-      await_update_check()
-    end
-  end
-
-  describe "responsiveness during update checks" do
-    test "tool_status_list responds while checks are blocked" do
-      install_tool(:gopls)
-      install_tool(:pyright)
-      gate_ref = Stub.gate_latest_versions()
-
-      Manager.check_updates()
-
-      # Collect blocked workers
-      assert_receive {:latest_version_blocked, ^gate_ref, w1}, 2_000
-      assert_receive {:latest_version_blocked, ^gate_ref, w2}, 2_000
-
-      # Status queries still work
-      statuses = Manager.tool_status_list()
-      assert length(statuses) >= 2
-
-      # Install queries still work
-      assert Manager.installed?(:gopls)
-      assert Manager.installed?(:pyright)
-
-      # Installing new tools still works
-      Stub.set_install_result({:ok, "1.0.0"})
-      assert :ok = Manager.install(:stylua)
-      assert_receive {:minga_event, :tool_install_complete, %{name: :stylua}}, 2_000
-
-      Stub.release_latest_version(w1, gate_ref)
-      Stub.release_latest_version(w2, gate_ref)
-      # stylua was installed after the snapshot, so it may also be checked
-      # depending on timing. Drain any extra blocked worker.
-      receive do
-        {:latest_version_blocked, ^gate_ref, w3} ->
-          Stub.release_latest_version(w3, gate_ref)
-      after
-        200 -> :ok
-      end
-
-      await_update_check()
+      assert :ok = Manager.check_updates(ctx.server)
+      assert_receive {:minga_event, :tool_update_check_started, %{generation: 1, count: 0}}
+      assert %{updates: [], errors: []} = await_complete(1)
     end
   end
 
-  describe "update result caching" do
-    test "cached_updates returns results after check completes" do
-      install_tool(:pyright)
-      Stub.set_latest_version({:ok, "2.0.0"})
+  describe "concurrency" do
+    test "at most four lookups run at once and queued lookups start as others finish", ctx do
+      names = start_manager(ctx, for(i <- 1..6, do: {"t#{i}", "1.0.0", :gate}))
 
-      Manager.check_updates()
-      payload = await_update_check()
+      :ok = Manager.check_updates(ctx.server)
+      first = for _ <- 1..4, do: await_any_blocked(names)
+      refute_receive {:latest_version_blocked, _, _}, 100
 
-      assert [{:pyright, "1.0.0", "2.0.0"}] = payload.updates
-      assert [] = payload.errors
-      assert [{:pyright, "1.0.0", "2.0.0"}] = Manager.cached_updates()
-    end
+      [{_, w1} | rest] = first
+      Stub.release_scripted(w1, {:ok, "1.0.0"})
+      fifth = await_any_blocked(names)
+      refute_receive {:latest_version_blocked, _, _}, 100
 
-    test "tools at current version are not reported as updates" do
-      install_tool(:pyright)
-      Stub.set_latest_version({:ok, "1.0.0"})
+      for {_name, worker} <- [fifth | rest], do: Stub.release_scripted(worker, {:ok, "1.0.0"})
+      sixth = await_any_blocked(names)
+      Stub.release_scripted(elem(sixth, 1), {:ok, "1.0.0"})
 
-      Manager.check_updates()
-      payload = await_update_check()
-
-      assert [] = payload.updates
-      assert [] = Manager.cached_updates()
-    end
-
-    test "empty installed set completes immediately" do
-      Manager.check_updates()
-      payload = await_update_check()
-
-      assert [] = payload.updates
-      assert [] = payload.errors
+      started = Enum.map([sixth, fifth | first], &elem(&1, 0))
+      assert Enum.sort(started) == Enum.sort(names)
+      assert %{updates: [], errors: []} = await_complete(1)
     end
   end
 
-  describe "concurrency bounds" do
-    test "at most 4 update checks run simultaneously" do
-      # Install 6 tools
-      tools = [:pyright, :gopls, :black, :stylua, :clangd, :zls]
-      for tool <- tools, do: install_tool(tool)
+  describe "failures" do
+    test "a lookup that exceeds its timeout is killed and reported", ctx do
+      [a] = start_manager(ctx, [{"a", "1.0.0", :gate}], update_check_timeout: 50)
 
-      gate_ref = Stub.gate_latest_versions()
-      Manager.check_updates()
+      :ok = Manager.check_updates(ctx.server)
+      worker = await_blocked(a)
+      ref = Process.monitor(worker)
 
-      # Exactly 4 workers should be blocked (max concurrency)
-      workers =
-        for _ <- 1..4 do
-          assert_receive {:latest_version_blocked, ^gate_ref, pid}, 2_000
-          pid
-        end
-
-      # 5th should not arrive yet (queued)
-      refute_receive {:latest_version_blocked, ^gate_ref, _}, 200
-
-      # Release one worker, the 5th should start
-      Stub.release_latest_version(hd(workers), gate_ref)
-      assert_receive {:latest_version_blocked, ^gate_ref, w5}, 2_000
-
-      # Release another, the 6th should start
-      Stub.release_latest_version(Enum.at(workers, 1), gate_ref)
-      assert_receive {:latest_version_blocked, ^gate_ref, w6}, 2_000
-
-      # Release remaining
-      for w <- Enum.drop(workers, 2) ++ [w5, w6] do
-        Stub.release_latest_version(w, gate_ref)
-      end
-
-      await_update_check()
-      refute Manager.update_check_active?()
+      assert %{errors: [{^a, "timeout"}], updates: []} = await_complete(1)
+      # The monitor can be set after the kill under load, which reports :noproc instead.
+      assert_receive {:DOWN, ^ref, :process, ^worker, reason} when reason in [:killed, :noproc]
     end
-  end
 
-  describe "per-check timeouts" do
-    test "timed-out checks report errors and do not block completion" do
-      install_tool(:pyright)
-      install_tool(:gopls)
+    test "a crashed lookup is reported and the next check succeeds", ctx do
+      [a] = start_manager(ctx, [{"a", "1.0.0", :crash}])
 
-      # Gate so checks never complete; the 500ms config timeout will fire
-      _gate_ref = Stub.gate_latest_versions()
-
-      Manager.check_updates()
-      payload = await_update_check(5_000)
-
-      # Both should time out
-      assert length(payload.errors) == 2
-      error_names = Enum.map(payload.errors, fn {name, _reason} -> name end)
-      assert :pyright in error_names
-      assert :gopls in error_names
-
-      for {_name, reason} <- payload.errors do
-        assert reason == "timeout"
-      end
-
-      # Manager is functional afterward
-      refute Manager.update_check_active?()
-      assert is_list(Manager.tool_status_list())
-    end
-  end
-
-  describe "worker crash handling" do
-    test "crashed update check worker reports error and completes" do
-      install_tool(:pyright)
-      Stub.set_latest_version_crash(true)
-
-      Manager.check_updates()
-      payload = await_update_check()
-
-      assert [] = payload.updates
-      assert [{:pyright, reason}] = payload.errors
+      :ok = Manager.check_updates(ctx.server)
+      assert %{errors: [{^a, reason}], updates: []} = await_complete(1)
       assert reason =~ "simulated crash"
 
-      refute Manager.update_check_active?()
+      Stub.script_latest_version(a, {:ok, "2.0.0"})
+      :ok = Manager.check_updates(ctx.server)
+      assert %{errors: [], updates: [{^a, "1.0.0", "2.0.0"}]} = await_complete(2)
+    end
+
+    test "an installation with an unknown version never shows an update", ctx do
+      [_a] = start_manager(ctx, [{"a", "unknown", {:ok, "2.0.0"}}])
+
+      :ok = Manager.check_updates(ctx.server)
+      assert %{errors: [], updates: []} = await_complete(1)
+    end
+
+    test "a failed lookup is reported as an error", ctx do
+      [a] = start_manager(ctx, [{"a", "1.0.0", {:error, "registry down"}}])
+
+      :ok = Manager.check_updates(ctx.server)
+      assert %{errors: [{^a, "registry down"}], updates: []} = await_complete(1)
     end
   end
 
   describe "cancellation" do
-    test "cancel_update_check stops in-flight checks" do
-      install_tool(:pyright)
-      gate_ref = Stub.gate_latest_versions()
+    test "cancel_update_check kills lookups and reports the cancelled generation", ctx do
+      [a] = start_manager(ctx, [{"a", "1.0.0", :gate}])
 
-      Manager.check_updates()
-      assert_receive {:latest_version_blocked, ^gate_ref, _worker}, 2_000
+      :ok = Manager.check_updates(ctx.server)
+      ref = a |> await_blocked() |> Process.monitor()
 
-      :ok = Manager.cancel_update_check()
-      refute Manager.update_check_active?()
+      assert :ok = Manager.cancel_update_check(ctx.server)
+      assert_receive {:DOWN, ^ref, :process, _, :killed}
 
-      # No complete event fires for the cancelled check
-      refute_receive {:minga_event, :tool_update_check_complete, _}, 300
+      assert_receive {:minga_event, :tool_update_check_cancelled,
+                      %{generation: 1, reason: :cancelled}}
+
+      refute Manager.update_check_active?(ctx.server)
+
+      Stub.script_latest_version(a, {:ok, "2.0.0"})
+      :ok = Manager.check_updates(ctx.server)
+      assert %{updates: [{^a, "1.0.0", "2.0.0"}]} = await_complete(2)
+      refute_received {:minga_event, :tool_update_check_complete, %{generation: 1}}
     end
 
-    test "new check_updates cancels the previous in-flight check" do
-      install_tool(:pyright)
-      gate_ref = Stub.gate_latest_versions()
+    test "a new check supersedes the in-flight check", ctx do
+      [a] = start_manager(ctx, [{"a", "1.0.0", :gate}])
 
-      Manager.check_updates()
-      assert_receive {:latest_version_blocked, ^gate_ref, _worker1}, 2_000
+      :ok = Manager.check_updates(ctx.server)
+      ref = a |> await_blocked() |> Process.monitor()
 
-      # Start event for the first check
-      assert_receive {:minga_event, :tool_update_check_started, %{count: 1}}, 1_000
+      :ok = Manager.check_updates(ctx.server)
+      assert_receive {:DOWN, ^ref, :process, _, :killed}
 
-      # Second check cancels the first and starts fresh
-      Manager.check_updates()
-      assert_receive {:minga_event, :tool_update_check_started, %{count: 1}}, 1_000
+      assert_receive {:minga_event, :tool_update_check_cancelled,
+                      %{generation: 1, reason: :superseded}}
 
-      # A new worker appears for the second check
-      assert_receive {:latest_version_blocked, ^gate_ref, worker2}, 2_000
-      Stub.release_latest_version(worker2, gate_ref)
+      Stub.release_scripted(await_blocked(a), {:ok, "3.0.0"})
+      assert %{updates: [{^a, "1.0.0", "3.0.0"}]} = await_complete(2)
+      refute_received {:minga_event, :tool_update_check_complete, %{generation: 1}}
+    end
 
-      payload = await_update_check()
-      assert is_list(payload.updates)
+    test "the check is cancelled when the requesting caller exits", ctx do
+      [a] = start_manager(ctx, [{"a", "1.0.0", :gate}])
+      test_pid = self()
+
+      caller =
+        spawn(fn ->
+          send(test_pid, {:requested, Manager.check_updates(ctx.server)})
+
+          receive do
+            :exit -> :ok
+          end
+        end)
+
+      assert_receive {:requested, :ok}
+      ref = a |> await_blocked() |> Process.monitor()
+      send(caller, :exit)
+
+      assert_receive {:DOWN, ^ref, :process, _, :killed}
+
+      assert_receive {:minga_event, :tool_update_check_cancelled,
+                      %{generation: 1, reason: :requester_down}}
+
+      Stub.script_latest_version(a, {:ok, "2.0.0"})
+      :ok = Manager.check_updates(ctx.server)
+      assert %{updates: [{^a, "1.0.0", "2.0.0"}]} = await_complete(2)
+    end
+
+    test "stopping the Manager kills its lookups and a restarted Manager starts clean", ctx do
+      names = start_manager(ctx, [{"a", "1.0.0", :gate}, {"b", "1.0.0", :gate}])
+      manager = GenServer.whereis(ctx.server)
+
+      :ok = Manager.check_updates(ctx.server)
+      refs = for name <- names, do: name |> await_blocked() |> Process.monitor()
+
+      Process.exit(manager, :kill)
+
+      for ref <- refs, do: assert_receive({:DOWN, ^ref, :process, _, _})
+
+      await_restart(ctx.server, manager)
+      refute Manager.update_check_active?(ctx.server)
+      assert Manager.cached_updates(ctx.table) == []
+
+      for name <- names, do: Stub.script_latest_version(name, {:ok, "2.0.0"})
+      :ok = Manager.check_updates(ctx.server)
+      assert %{updates: updates, errors: []} = await_complete(1)
+      assert updates == Enum.sort(for name <- names, do: {name, "1.0.0", "2.0.0"})
     end
   end
 
-  describe "stale completion" do
-    test "result from cancelled generation does not update cache" do
-      install_tool(:pyright)
-      Stub.set_latest_version({:ok, "9.9.9"})
+  describe "result correlation" do
+    test "an accepted update is cached until the installation changes", ctx do
+      [a] = start_manager(ctx, [{"a", "1.0.0", {:ok, "2.0.0"}}])
 
-      gate_ref = Stub.gate_latest_versions()
-      Manager.check_updates()
-      assert_receive {:latest_version_blocked, ^gate_ref, _worker}, 2_000
+      :ok = Manager.check_updates(ctx.server)
+      await_complete(1)
 
-      # Cancel the check before the result arrives.
-      # Cancellation preserves the cache from any prior completed check,
-      # so verify the stale 9.9.9 version never landed.
-      Manager.cancel_update_check()
-      cached_before = Manager.cached_updates()
+      assert Manager.cached_updates(ctx.table) == [{a, "1.0.0", "2.0.0"}]
+      assert Manager.available_update(a, ctx.table) == {"1.0.0", "2.0.0"}
+      assert status_of(ctx, a) == {:update_available, "1.0.0"}
 
-      refute Enum.any?(cached_before, fn {name, _, latest} ->
-               name == :pyright and latest == "9.9.9"
-             end)
+      assert :ok = Manager.uninstall(a, ctx.server)
+      assert Manager.cached_updates(ctx.table) == []
+      assert Manager.available_update(a, ctx.table) == nil
+      assert status_of(ctx, a) == {:not_installed, nil}
+    end
 
-      # Start a new check with a different version
-      Stub.ungate_latest_versions()
-      Stub.set_latest_version({:ok, "3.0.0"})
-      Manager.check_updates()
-      payload = await_update_check()
+    test "a result for a tool uninstalled during the check is discarded", ctx do
+      [a] = start_manager(ctx, [{"a", "1.0.0", :gate}])
 
-      assert [{:pyright, "1.0.0", "3.0.0"}] = payload.updates
-      assert [{:pyright, "1.0.0", "3.0.0"}] = Manager.cached_updates()
+      :ok = Manager.check_updates(ctx.server)
+      worker = await_blocked(a)
+      assert :ok = Manager.uninstall(a, ctx.server)
+      Stub.release_scripted(worker, {:ok, "9.9.9"})
+
+      assert %{updates: [], errors: []} = await_complete(1)
+      assert Manager.cached_updates(ctx.table) == []
+      assert status_of(ctx, a) == {:not_installed, nil}
+    end
+
+    test "a result for a tool reinstalled during the check is discarded", ctx do
+      [a] = start_manager(ctx, [{"a", "1.0.0", :gate}])
+
+      :ok = Manager.check_updates(ctx.server)
+      worker = await_blocked(a)
+      assert :ok = Manager.update(a, ctx.server)
+      assert_receive {:minga_event, :tool_install_complete, %{name: ^a}}, 5_000
+      Stub.release_scripted(worker, {:ok, "9.9.9"})
+
+      assert %{updates: [], errors: []} = await_complete(1)
+      assert Manager.available_update(a, ctx.table) == nil
+      assert {:installed, _version} = status_of(ctx, a)
+    end
+
+    test "a result for a recipe registered again during the check is discarded", ctx do
+      [a] = start_manager(ctx, [{"a", "1.0.0", :gate}])
+
+      :ok = Manager.check_updates(ctx.server)
+      worker = await_blocked(a)
+      register_recipe(ctx, "a", "replacement-package")
+      Stub.release_scripted(worker, {:ok, "9.9.9"})
+
+      assert %{updates: [], errors: []} = await_complete(1)
+      assert Manager.cached_updates(ctx.table) == []
+      assert status_of(ctx, a) == {:installed, "1.0.0"}
+    end
+
+    test "a cached update becomes invisible when its recipe changes", ctx do
+      [a] = start_manager(ctx, [{"a", "1.0.0", {:ok, "2.0.0"}}])
+
+      :ok = Manager.check_updates(ctx.server)
+      await_complete(1)
+      assert Manager.available_update(a, ctx.table) == {"1.0.0", "2.0.0"}
+
+      register_recipe(ctx, "a", "replacement-package")
+      assert Manager.available_update(a, ctx.table) == nil
+      assert status_of(ctx, a) == {:installed, "1.0.0"}
     end
   end
 
-  describe "recovery after failures" do
-    test "manager accepts new update checks after all workers fail" do
-      install_tool(:pyright)
+  # ── Helpers ──────────────────────────────────────────────────────────────
 
-      # First check: crash
-      Stub.set_latest_version_crash(true)
-      Manager.check_updates()
-      payload1 = await_update_check()
-      assert length(payload1.errors) == 1
+  # Registers recipes, writes their receipts, scripts their lookups, and starts a private Manager.
+  defp start_manager(ctx, tools, opts \\ []) do
+    names =
+      for {suffix, version, script} <- tools do
+        name = register_recipe(ctx, suffix)
+        write_receipt(ctx, name, version)
+        Stub.script_latest_version(name, script_for(script))
+        on_exit(fn -> Stub.clear_latest_version_script(name) end)
+        name
+      end
 
-      # Second check: success
-      Stub.set_latest_version_crash(false)
-      Stub.set_latest_version({:ok, "2.0.0"})
-      Manager.check_updates()
-      payload2 = await_update_check()
+    start_supervised!(
+      {Manager,
+       Keyword.merge(
+         [
+           name: ctx.server,
+           table: ctx.table,
+           tools_dir: ctx.tools_dir,
+           events_registry: ctx.events,
+           update_check_timeout: 60_000
+         ],
+         opts
+       )}
+    )
 
-      assert [{:pyright, "1.0.0", "2.0.0"}] = payload2.updates
-      assert [] = payload2.errors
-    end
+    names
+  end
 
-    test "manager accepts new update checks after timeouts" do
-      install_tool(:gopls)
-      _gate_ref = Stub.gate_latest_versions()
+  defp script_for(:gate), do: {:gate, self()}
+  defp script_for(script), do: script
 
-      Manager.check_updates()
-      payload1 = await_update_check(5_000)
-      assert [{:gopls, "timeout"}] = payload1.errors
+  defp register_recipe(ctx, suffix, package \\ "test-package") do
+    name = :"tool_#{ctx.unique}_#{suffix}"
 
-      # New check with ungated stub
-      Stub.ungate_latest_versions()
-      Stub.set_latest_version({:ok, "5.0.0"})
-      Manager.check_updates()
-      payload2 = await_update_check()
+    recipe = %Recipe{
+      name: name,
+      label: "Tool #{suffix}",
+      description: "Update check test tool",
+      provides: ["tool-#{ctx.unique}-#{suffix}"],
+      method: :npm,
+      package: package
+    }
 
-      assert [{:gopls, "1.0.0", "5.0.0"}] = payload2.updates
+    :ok = RecipeRegistry.register(recipe, ctx.source)
+    name
+  end
+
+  defp write_receipt(ctx, name, version) do
+    dir = Path.join(ctx.tools_dir, Atom.to_string(name))
+    File.mkdir_p!(dir)
+
+    installation = %Installation{
+      name: name,
+      version: version,
+      installed_at: ~U[2026-01-01 00:00:00Z],
+      method: :npm,
+      path: dir
+    }
+
+    File.write!(
+      Path.join(dir, "receipt.json"),
+      installation |> Installation.to_receipt() |> :json.format()
+    )
+  end
+
+  defp await_blocked(name) do
+    assert_receive {:latest_version_blocked, ^name, worker}, 5_000
+    worker
+  end
+
+  defp await_any_blocked(names) do
+    assert_receive {:latest_version_blocked, name, worker}, 5_000
+    assert name in names
+    {name, worker}
+  end
+
+  defp await_complete(generation) do
+    assert_receive {:minga_event, :tool_update_check_complete,
+                    %{generation: ^generation} = payload},
+                   5_000
+
+    payload
+  end
+
+  defp status_of(ctx, name) do
+    row = ctx.server |> Manager.tool_status_list() |> Enum.find(&(&1.recipe.name == name))
+    {row.status, row.installed_version}
+  end
+
+  # The test supervisor restarts the killed Manager; wait until the new process owns the name.
+  defp await_restart(name, old_pid, attempts \\ 500) do
+    case GenServer.whereis(name) do
+      pid when is_pid(pid) and pid != old_pid ->
+        pid
+
+      _ when attempts > 0 ->
+        receive do
+        after
+          5 -> await_restart(name, old_pid, attempts - 1)
+        end
+
+      _ ->
+        flunk("Manager #{inspect(name)} did not restart")
     end
   end
 end

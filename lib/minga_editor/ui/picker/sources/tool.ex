@@ -110,6 +110,10 @@ defmodule MingaEditor.UI.Picker.Sources.Tool do
     [{"Uninstall", :uninstall}, {"Update", :update}]
   end
 
+  def actions(%Item{id: {_name, :update_available}}) do
+    [{"Update", :update}, {"Uninstall", :uninstall}]
+  end
+
   def actions(%Item{id: {_name, :not_installed}}) do
     [{"Install", :install}]
   end

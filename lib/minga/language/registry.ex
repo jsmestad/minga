@@ -20,6 +20,10 @@ defmodule Minga.Language.Registry do
   ## Language registration
 
   Extensions register languages via `register/2` with `{:extension, name}` as the source. Reload and unload paths remove the whole `%Minga.Language{}` record, so its names, extensions, filenames, shebangs, devicons, grammar metadata, formatter, and LSP defaults disappear together.
+
+  ## Private tables
+
+  Every public function has a version that uses the application table and a version that takes an explicit table name as its last argument. Production callers use the short form. Tests start a private registry with a unique `:name` and `:table` (see `start_link/1`) and pass that table, so they never mutate the application registry and can run concurrently. This follows `Minga.Config.Advice` and `Minga.Popup.Registry`.
   """
 
   use GenServer
@@ -37,14 +41,27 @@ defmodule Minga.Language.Registry do
 
   @type register_error :: {:duplicate_key, term(), contribution_source(), contribution_source()}
 
+  @typedoc "Name of the ETS table that backs a registry instance."
+  @type table :: atom()
+
   # ── Client API ─────────────────────────────────────────────────────────────
 
-  @doc "Starts the language registry."
+  @doc """
+  Starts the language registry.
+
+  Options:
+  - `:name`: process name, defaults to `#{inspect(__MODULE__)}`
+  - `:table`: ETS table name, defaults to `default_table/0`
+  """
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts \\ []) do
     name = Keyword.get(opts, :name, __MODULE__)
     GenServer.start_link(__MODULE__, opts, name: name)
   end
+
+  @doc "Returns the ETS table name used by the application registry."
+  @spec default_table() :: table()
+  def default_table, do: @table
 
   @doc """
   Returns the language definition for a name atom, or `nil` if unknown.
@@ -58,8 +75,9 @@ defmodule Minga.Language.Registry do
       iex> Minga.Language.Registry.get(:unknown_language)
       nil
   """
-  @spec get(atom()) :: Language.t() | nil
-  def get(name) when is_atom(name), do: lookup_language({:name, name})
+  @spec get(atom(), table()) :: Language.t() | nil
+  def get(name, table \\ @table) when is_atom(name) and is_atom(table),
+    do: lookup_language({:name, name}, table)
 
   @doc """
   Returns the canonical tree-sitter grammar name for a language label.
@@ -103,8 +121,9 @@ defmodule Minga.Language.Registry do
       iex> lang.name
       :elixir
   """
-  @spec for_extension(String.t()) :: Language.t() | nil
-  def for_extension(ext) when is_binary(ext), do: lookup_language({:ext, String.downcase(ext)})
+  @spec for_extension(String.t(), table()) :: Language.t() | nil
+  def for_extension(ext, table \\ @table) when is_binary(ext) and is_atom(table),
+    do: lookup_language({:ext, String.downcase(ext)}, table)
 
   @doc """
   Returns the language definition for an exact filename, or `nil`.
@@ -115,8 +134,9 @@ defmodule Minga.Language.Registry do
       iex> lang.name
       :make
   """
-  @spec for_filename(String.t()) :: Language.t() | nil
-  def for_filename(filename) when is_binary(filename), do: lookup_language({:filename, filename})
+  @spec for_filename(String.t(), table()) :: Language.t() | nil
+  def for_filename(filename, table \\ @table) when is_binary(filename) and is_atom(table),
+    do: lookup_language({:filename, filename}, table)
 
   @doc """
   Returns the language definition for a shebang interpreter, or `nil`.
@@ -127,9 +147,9 @@ defmodule Minga.Language.Registry do
       iex> lang.name
       :python
   """
-  @spec for_shebang(String.t()) :: Language.t() | nil
-  def for_shebang(interpreter) when is_binary(interpreter),
-    do: lookup_language({:shebang, interpreter})
+  @spec for_shebang(String.t(), table()) :: Language.t() | nil
+  def for_shebang(interpreter, table \\ @table) when is_binary(interpreter) and is_atom(table),
+    do: lookup_language({:shebang, interpreter}, table)
 
   # ── Runtime override API ───────────────────────────────────────────────────
 
@@ -151,32 +171,34 @@ defmodule Minga.Language.Registry do
   @spec register_override(String.t(), atom() | nil) :: :ok
   def register_override(pattern, filetype), do: register_override(pattern, filetype, :runtime)
 
-  @doc "Registers a filetype override with an explicit source."
-  @spec register_override(String.t(), atom() | nil, contribution_source()) :: :ok
-  def register_override("." <> ext, nil, _source) do
-    :ets.delete(@table, {:override_ext, String.downcase(ext)})
+  @doc "Registers a filetype override with an explicit source, in the given registry table."
+  @spec register_override(String.t(), atom() | nil, contribution_source(), table()) :: :ok
+  def register_override(pattern, filetype, source, table \\ @table)
+
+  def register_override("." <> ext, nil, _source, table) do
+    :ets.delete(table, {:override_ext, String.downcase(ext)})
     :ok
   rescue
     ArgumentError -> :ok
   end
 
-  def register_override("." <> ext, filetype, source) when is_atom(filetype) do
-    :ets.insert(@table, {{:override_ext, String.downcase(ext)}, filetype, source})
+  def register_override("." <> ext, filetype, source, table) when is_atom(filetype) do
+    :ets.insert(table, {{:override_ext, String.downcase(ext)}, filetype, source})
     :ok
   rescue
     ArgumentError -> :ok
   end
 
-  def register_override(filename, nil, _source) when is_binary(filename) do
-    :ets.delete(@table, {:override_filename, filename})
+  def register_override(filename, nil, _source, table) when is_binary(filename) do
+    :ets.delete(table, {:override_filename, filename})
     :ok
   rescue
     ArgumentError -> :ok
   end
 
-  def register_override(filename, filetype, source)
+  def register_override(filename, filetype, source, table)
       when is_binary(filename) and is_atom(filetype) do
-    :ets.insert(@table, {{:override_filename, filename}, filetype, source})
+    :ets.insert(table, {{:override_filename, filename}, filetype, source})
     :ok
   rescue
     ArgumentError -> :ok
@@ -191,43 +213,47 @@ defmodule Minga.Language.Registry do
   def register_shebang_override(interpreter, filetype),
     do: register_shebang_override(interpreter, filetype, :runtime)
 
-  @doc "Registers a shebang override with an explicit source."
-  @spec register_shebang_override(String.t(), atom() | nil, contribution_source()) :: :ok
-  def register_shebang_override(interpreter, nil, _source) when is_binary(interpreter) do
-    :ets.delete(@table, {:override_shebang, interpreter})
+  @doc "Registers a shebang override with an explicit source, in the given registry table."
+  @spec register_shebang_override(String.t(), atom() | nil, contribution_source(), table()) :: :ok
+  def register_shebang_override(interpreter, filetype, source, table \\ @table)
+
+  def register_shebang_override(interpreter, nil, _source, table) when is_binary(interpreter) do
+    :ets.delete(table, {:override_shebang, interpreter})
     :ok
   rescue
     ArgumentError -> :ok
   end
 
-  def register_shebang_override(interpreter, filetype, source)
+  def register_shebang_override(interpreter, filetype, source, table)
       when is_binary(interpreter) and is_atom(filetype) do
-    :ets.insert(@table, {{:override_shebang, interpreter}, filetype, source})
+    :ets.insert(table, {{:override_shebang, interpreter}, filetype, source})
     :ok
   rescue
     ArgumentError -> :ok
   end
 
   @doc "Returns the override filetype for a file extension (without dot, already downcased), or `nil`."
-  @spec lookup_override_extension(String.t()) :: atom() | nil
-  def lookup_override_extension(ext) when is_binary(ext) do
-    :ets.lookup_element(@table, {:override_ext, ext}, 2, nil)
+  @spec lookup_override_extension(String.t(), table()) :: atom() | nil
+  def lookup_override_extension(ext, table \\ @table) when is_binary(ext) and is_atom(table) do
+    :ets.lookup_element(table, {:override_ext, ext}, 2, nil)
   rescue
     ArgumentError -> nil
   end
 
   @doc "Returns the override filetype for an exact filename, or `nil`."
-  @spec lookup_override_filename(String.t()) :: atom() | nil
-  def lookup_override_filename(filename) when is_binary(filename) do
-    :ets.lookup_element(@table, {:override_filename, filename}, 2, nil)
+  @spec lookup_override_filename(String.t(), table()) :: atom() | nil
+  def lookup_override_filename(filename, table \\ @table)
+      when is_binary(filename) and is_atom(table) do
+    :ets.lookup_element(table, {:override_filename, filename}, 2, nil)
   rescue
     ArgumentError -> nil
   end
 
   @doc "Returns the override filetype for a shebang interpreter, or `nil`."
-  @spec lookup_override_shebang(String.t()) :: atom() | nil
-  def lookup_override_shebang(interpreter) when is_binary(interpreter) do
-    :ets.lookup_element(@table, {:override_shebang, interpreter}, 2, nil)
+  @spec lookup_override_shebang(String.t(), table()) :: atom() | nil
+  def lookup_override_shebang(interpreter, table \\ @table)
+      when is_binary(interpreter) and is_atom(table) do
+    :ets.lookup_element(table, {:override_shebang, interpreter}, 2, nil)
   rescue
     ArgumentError -> nil
   end
@@ -237,15 +263,15 @@ defmodule Minga.Language.Registry do
 
   Returns a map with `:extensions` and `:filenames` keys, each mapping pattern strings to filetype atoms.
   """
-  @spec override_path_entries() :: %{
+  @spec override_path_entries(table()) :: %{
           extensions: %{String.t() => atom()},
           filenames: %{String.t() => atom()}
         }
-  def override_path_entries do
-    exts = :ets.select(@table, [{{{:override_ext, :"$1"}, :"$2", :_}, [], [{{:"$1", :"$2"}}]}])
+  def override_path_entries(table \\ @table) when is_atom(table) do
+    exts = :ets.select(table, [{{{:override_ext, :"$1"}, :"$2", :_}, [], [{{:"$1", :"$2"}}]}])
 
     fnames =
-      :ets.select(@table, [{{{:override_filename, :"$1"}, :"$2", :_}, [], [{{:"$1", :"$2"}}]}])
+      :ets.select(table, [{{{:override_filename, :"$1"}, :"$2", :_}, [], [{{:"$1", :"$2"}}]}])
 
     %{extensions: Map.new(exts), filenames: Map.new(fnames)}
   rescue
@@ -257,9 +283,9 @@ defmodule Minga.Language.Registry do
   @doc """
   Returns all registered language definitions.
   """
-  @spec all() :: [Language.t()]
-  def all do
-    :ets.select(@table, [{{{:name, :_}, :"$1", :_}, [], [:"$1"]}])
+  @spec all(table()) :: [Language.t()]
+  def all(table \\ @table) when is_atom(table) do
+    :ets.select(table, [{{{:name, :_}, :"$1", :_}, [], [:"$1"]}])
   rescue
     ArgumentError -> []
   end
@@ -267,9 +293,9 @@ defmodule Minga.Language.Registry do
   @doc """
   Returns all language names that have definitions.
   """
-  @spec supported_names() :: [atom()]
-  def supported_names do
-    :ets.select(@table, [{{{:name, :"$1"}, :_, :_}, [], [:"$1"]}])
+  @spec supported_names(table()) :: [atom()]
+  def supported_names(table \\ @table) when is_atom(table) do
+    :ets.select(table, [{{{:name, :"$1"}, :_, :_}, [], [:"$1"]}])
   rescue
     ArgumentError -> []
   end
@@ -282,33 +308,34 @@ defmodule Minga.Language.Registry do
   @spec register(Language.t()) :: :ok | {:error, register_error()}
   def register(%Language{} = lang), do: register(lang, :config)
 
-  @doc "Registers a language with an explicit source."
-  @spec register(Language.t(), contribution_source()) :: :ok | {:error, register_error()}
-  def register(%Language{} = lang, source) do
+  @doc "Registers a language with an explicit source, in the given registry table."
+  @spec register(Language.t(), contribution_source(), table()) ::
+          :ok | {:error, register_error()}
+  def register(%Language{} = lang, source, table \\ @table) when is_atom(table) do
     keys = Language.identity_keys(lang)
 
-    with :ok <- validate_source_keys(keys, source) do
-      case get(lang.name) do
-        %Language{} = old -> remove_index_entries(old)
+    with :ok <- validate_source_keys(keys, source, table) do
+      case get(lang.name, table) do
+        %Language{} = old -> remove_index_entries(old, table)
         nil -> :ok
       end
 
-      Enum.each(keys, &:ets.insert(@table, {&1, lang, source}))
+      Enum.each(keys, &:ets.insert(table, {&1, lang, source}))
     end
   end
 
   @doc "Returns the contribution source for a registry key, or `nil` if the key is unknown."
-  @spec source_for(term()) :: contribution_source() | nil
-  def source_for(key) do
-    :ets.lookup_element(@table, key, 3, nil)
+  @spec source_for(term(), table()) :: contribution_source() | nil
+  def source_for(key, table \\ @table) when is_atom(table) do
+    :ets.lookup_element(table, key, 3, nil)
   rescue
     ArgumentError -> nil
   end
 
   @doc "Removes every language and lookup index contributed by a source."
-  @spec unregister_source(contribution_source()) :: :ok
-  def unregister_source(source) do
-    :ets.select_delete(@table, [{{:_, :_, :"$1"}, [{:"=:=", :"$1", {:const, source}}], [true]}])
+  @spec unregister_source(contribution_source(), table()) :: :ok
+  def unregister_source(source, table \\ @table) when is_atom(table) do
+    :ets.select_delete(table, [{{:_, :_, :"$1"}, [{:"=:=", :"$1", {:const, source}}], [true]}])
     :ok
   rescue
     ArgumentError -> :ok
@@ -318,8 +345,8 @@ defmodule Minga.Language.Registry do
 
   @impl true
   @spec init(keyword()) :: {:ok, :no_state}
-  def init(_opts) do
-    :ets.new(@table, [
+  def init(opts) do
+    :ets.new(Keyword.get(opts, :table, @table), [
       :named_table,
       :set,
       :public,
@@ -331,17 +358,18 @@ defmodule Minga.Language.Registry do
 
   # ── Private ────────────────────────────────────────────────────────────────
 
-  @spec lookup_language(term()) :: Language.t() | nil
-  defp lookup_language(key) do
-    :ets.lookup_element(@table, key, 2, nil)
+  @spec lookup_language(term(), table()) :: Language.t() | nil
+  defp lookup_language(key, table) do
+    :ets.lookup_element(table, key, 2, nil)
   rescue
     ArgumentError -> nil
   end
 
-  @spec validate_source_keys([term()], contribution_source()) :: :ok | {:error, register_error()}
-  defp validate_source_keys(keys, source) do
+  @spec validate_source_keys([term()], contribution_source(), table()) ::
+          :ok | {:error, register_error()}
+  defp validate_source_keys(keys, source, table) do
     Enum.reduce_while(keys, :ok, fn key, :ok ->
-      case :ets.lookup_element(@table, key, 3, nil) do
+      case :ets.lookup_element(table, key, 3, nil) do
         nil -> {:cont, :ok}
         ^source -> {:cont, :ok}
         existing_source -> {:halt, {:error, {:duplicate_key, key, existing_source, source}}}
@@ -349,9 +377,9 @@ defmodule Minga.Language.Registry do
     end)
   end
 
-  @spec remove_index_entries(Language.t()) :: :ok
-  defp remove_index_entries(%Language{} = lang) do
+  @spec remove_index_entries(Language.t(), table()) :: :ok
+  defp remove_index_entries(%Language{} = lang, table) do
     [{:name, _} | secondary_keys] = Language.identity_keys(lang)
-    Enum.each(secondary_keys, &:ets.delete(@table, &1))
+    Enum.each(secondary_keys, &:ets.delete(table, &1))
   end
 end

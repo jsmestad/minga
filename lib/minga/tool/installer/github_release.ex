@@ -26,6 +26,7 @@ defmodule Minga.Tool.Installer.GitHubRelease do
 
   @behaviour Minga.Tool.Installer
 
+  alias Minga.Tool.Installer
   alias Minga.Tool.Recipe
 
   @github_api "https://api.github.com"
@@ -329,7 +330,9 @@ defmodule Minga.Tool.Installer.GitHubRelease do
     header_args =
       Enum.flat_map(headers, fn {k, v} -> ["-H", "#{k}: #{v}"] end)
 
-    case System.cmd("curl", ["-fsSL" | header_args] ++ [url], stderr_to_stdout: true) do
+    args = ["-fsSL" | Installer.curl_timeout_args()] ++ header_args ++ [url]
+
+    case System.cmd("curl", args, stderr_to_stdout: true) do
       {body, 0} ->
         {:ok, body}
 

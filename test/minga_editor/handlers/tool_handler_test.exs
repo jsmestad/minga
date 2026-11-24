@@ -110,6 +110,22 @@ defmodule MingaEditor.Handlers.ToolHandlerTest do
     end
   end
 
+  describe "tool_update_check_complete" do
+    test "refreshes the tool picker so update badges appear" do
+      state = base_state()
+
+      event =
+        {:minga_event, :tool_update_check_complete,
+         %{generation: 1, updates: [{:ripgrep, "14.0", "14.1"}], errors: []}}
+
+      {new_state, effects} = ToolHandler.handle(state, event)
+
+      assert new_state == state
+      assert {:refresh_tool_picker} in effects
+      assert :render in effects
+    end
+  end
+
   describe "legacy clear_tool_status delivery" do
     test "cannot dismiss newer tool-like notices" do
       for message <- ["Installing fd...", "✓ fd v9 installed"] do

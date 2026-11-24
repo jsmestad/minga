@@ -11,6 +11,7 @@ defmodule Minga.Tool.Installer.Npm do
 
   @behaviour Minga.Tool.Installer
 
+  alias Minga.Tool.Installer
   alias Minga.Tool.Recipe
 
   @impl true
@@ -55,7 +56,10 @@ defmodule Minga.Tool.Installer.Npm do
   @impl true
   @spec latest_version(Recipe.t()) :: {:ok, String.t()} | {:error, term()}
   def latest_version(%Recipe{package: package}) do
-    case System.cmd("npm", ["view", package, "version"], stderr_to_stdout: true) do
+    timeout_ms = Integer.to_string(Installer.latest_version_timeout_seconds() * 1_000)
+    args = ["view", package, "version", "--fetch-timeout=#{timeout_ms}", "--fetch-retries=0"]
+
+    case System.cmd("npm", args, stderr_to_stdout: true) do
       {version, 0} -> {:ok, String.trim(version)}
       {output, _} -> {:error, "npm view failed: #{String.slice(output, 0..200)}"}
     end
