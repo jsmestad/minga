@@ -293,6 +293,10 @@ defmodule MingaAgent.Providers.NativeTest do
         GenServer.reply(from, remember_request(request))
         provider_subscriber_loop(owner, owner_ref, store)
 
+      {:"$gen_call", from, {:assess_native_dispatch, _attempt, _digest, evidence}} ->
+        GenServer.reply(from, evidence.decision)
+        provider_subscriber_loop(owner, owner_ref, store)
+
       {:"$gen_call", from, {:begin_native_dispatch, request_id, source}} ->
         GenServer.reply(from, begin_test_dispatch(request_id, source))
         provider_subscriber_loop(owner, owner_ref, store)
@@ -541,6 +545,17 @@ defmodule MingaAgent.Providers.NativeTest do
 
       {:"$gen_call", from, {:register_test_request, request}} ->
         GenServer.reply(from, remember_request(request))
+
+        effect_barrier_subscriber_loop(
+          owner,
+          owner_ref,
+          checkpoint_reply,
+          admission_reply,
+          terminal_replies
+        )
+
+      {:"$gen_call", from, {:assess_native_dispatch, _attempt, _digest, evidence}} ->
+        GenServer.reply(from, evidence.decision)
 
         effect_barrier_subscriber_loop(
           owner,
@@ -1553,7 +1568,7 @@ defmodule MingaAgent.Providers.NativeTest do
       events = collect_run_events()
       assert_received :artifact_store_requested
       refute_received :artifact_store_requested
-      assert_received {:supported_image_wire, wire}
+      assert_receive {:supported_image_wire, wire}, 1_000
       results = List.last(JSON.decode!(wire)["messages"])["content"]
       assert Enum.map(results, & &1["tool_use_id"]) == ["tc_image_first", "tc_image_second"]
 

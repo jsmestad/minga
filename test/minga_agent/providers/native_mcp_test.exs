@@ -149,6 +149,10 @@ defmodule MingaAgent.Providers.NativeMCPTest do
         GenServer.reply(from, :ok)
         provider_subscriber_loop(owner, owner_ref, store)
 
+      {:"$gen_call", from, {:assess_native_dispatch, _attempt, _digest, evidence}} ->
+        GenServer.reply(from, evidence.decision)
+        provider_subscriber_loop(owner, owner_ref, store)
+
       {:"$gen_call", from, {:begin_native_dispatch, id, :initial}} ->
         request = Process.get({:fixture_request, id})
         GenServer.reply(from, {:ok, Dispatch.begin(request, :initial), request.messages})
