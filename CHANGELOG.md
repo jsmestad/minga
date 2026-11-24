@@ -161,6 +161,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- After the macOS app reconnects to a restarted editor core, it reports the window size with your configured line spacing and gutter, so the editor no longer lays out rows or columns that the window cannot show until the next resize.
 - Staged agent edits survive an editor crash or restart. After the editor restarts on its own they come back to their workspace; after Minga exits without publishing or discarding them, the next start for the project restores them, says so in `*Messages*`, and offers **Publish** and **Discard** again. A file that changed on disk in the meantime is merged or kept as a conflict, never overwritten, and a saved edit that cannot be restored is reported as lost by name. The saved copies are private files that are deleted on publish or discard.
 - Approved edits from an agent session started in the editor no longer vanish. They are staged until you publish them: when the turn ends, a notification offers **Publish** and **Discard** (clickable on macOS and in the terminal), `SPC a p` publishes and `SPC a P` discards, and publishing updates the file on disk and any open buffer. `:q`, `:wq`, `:qa`, `:wqa`, and quitting the macOS app stop while edits are staged; `:q!`, `:qa!` and `:cq` discard them on purpose.
 - The macOS startup screen shows the Minga logo and loading phrases again. **Quit Minga** appears after ten seconds.

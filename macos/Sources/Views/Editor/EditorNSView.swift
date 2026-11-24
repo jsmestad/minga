@@ -924,7 +924,7 @@ final class EditorNSView: MTKView {
             return GridDimensions(cols: 1, rows: 1)
         }
 
-        let gutterPad: CGFloat = (dispatcher.committedEditorSnapshot?.gutterCol ?? 0) > 0 ? CoreTextMetalRenderer.gutterPixelPaddingPt : 0
+        let gutterPad: CGFloat = dispatcher.gridFitReservesGutter ? CoreTextMetalRenderer.gutterPixelPaddingPt : 0
         let cols = GridFit.colsThatFit(width: width, cellWidth: resolvedCellWidth, gutterPadding: gutterPad)
         let rows = rowsThatFit(height: height, cellHeight: resolvedCellHeight, lineSpacing: dispatcher.frameState.lineSpacing)
         return GridDimensions(cols: cols, rows: rows)
