@@ -142,21 +142,27 @@ defmodule Minga.ProjectTest do
              } = Project.snapshot(name)
     end
 
-    test "failed discovery records an explicit inventory error instead of installing an empty result",
+    test "failed discovery records an explicit inventory error and broadcasts :project_rebuild_failed",
          %{tmp_dir: tmp} do
       project = Path.join(tmp, "failed_discovery")
       File.mkdir_p!(project)
       {:ok, root} = Root.directory(project)
       {_pid, name} = start_project!(file_find_module: Minga.Project.SlowFileFind)
       Minga.Events.subscribe(:project_rebuilt)
+      Minga.Events.subscribe(:project_rebuild_failed)
 
       assert {:ok, %WorkspaceSnapshot{rebuilding?: true}} = Project.activate(name, root)
       worker = flush(name).rebuild_pid
       :ok = Minga.Project.SlowFileFind.complete(worker, {:error, "permission denied"})
 
-      assert_receive {:minga_event, :project_rebuilt,
-                      %Minga.Events.ProjectRebuiltEvent{root: ^project}},
+      assert_receive {:minga_event, :project_rebuild_failed,
+                      %Minga.Events.ProjectRebuildFailedEvent{
+                        root: ^project,
+                        reason: "permission denied"
+                      }},
                      1_000
+
+      refute_receive {:minga_event, :project_rebuilt, _}, 100
 
       assert %WorkspaceSnapshot{
                files: [],
@@ -338,18 +344,34 @@ defmodule Minga.ProjectTest do
       assert Project.snapshot(name) == nil
     end
 
-    test "discovery timeout cancels the worker", %{tmp_dir: tmp} do
+    test "discovery timeout cancels the worker and broadcasts :project_rebuild_failed", %{
+      tmp_dir: tmp
+    } do
       root = Path.join(tmp, "timeout")
       File.mkdir_p!(root)
 
       {_project_pid, name} =
         start_project!(file_find_module: Minga.Project.SlowFileFind, rebuild_timeout_ms: 10)
 
+      Minga.Events.subscribe(:project_rebuild_failed)
+      Minga.Events.subscribe(:project_rebuilt)
+
       Project.switch(name, root)
       worker = flush(name).rebuild_pid
       ref = Process.monitor(worker)
 
       assert_receive {:DOWN, ^ref, :process, ^worker, :normal}, 1_000
+      _ = flush(name)
+
+      assert_receive {:minga_event, :project_rebuild_failed,
+                      %Minga.Events.ProjectRebuildFailedEvent{
+                        root: ^root,
+                        reason: "Project file cache rebuild timed out"
+                      }},
+                     1_000
+
+      refute_receive {:minga_event, :project_rebuilt, _}, 100
+
       state = flush(name)
 
       assert %WorkspaceSnapshot{
@@ -359,6 +381,86 @@ defmodule Minga.ProjectTest do
              } = state.workspace
 
       assert state.rebuild_pid == nil
+    end
+
+    test "worker crash broadcasts :project_rebuild_failed", %{tmp_dir: tmp} do
+      root = Path.join(tmp, "crash")
+      File.mkdir_p!(root)
+      {_project_pid, name} = start_project!(file_find_module: Minga.Project.SlowFileFind)
+      Minga.Events.subscribe(:project_rebuild_failed)
+      Minga.Events.subscribe(:project_rebuilt)
+
+      Project.switch(name, root)
+      worker = flush(name).rebuild_pid
+
+      Process.exit(worker, :kill)
+      # Wait for the DOWN message to be processed by the Project GenServer.
+      Process.sleep(50)
+      _ = flush(name)
+
+      assert_receive {:minga_event, :project_rebuild_failed,
+                      %Minga.Events.ProjectRebuildFailedEvent{root: ^root}},
+                     1_000
+
+      refute_receive {:minga_event, :project_rebuilt, _}, 100
+    end
+
+    test "successful rebuild broadcasts :project_rebuilt and not :project_rebuild_failed", %{
+      tmp_dir: tmp
+    } do
+      project = Path.join(tmp, "success_event")
+      File.mkdir_p!(project)
+      {:ok, root} = Root.directory(project)
+      {_pid, name} = start_project!(file_find_module: Minga.Project.SlowFileFind)
+      Minga.Events.subscribe(:project_rebuilt)
+      Minga.Events.subscribe(:project_rebuild_failed)
+
+      assert {:ok, %WorkspaceSnapshot{rebuilding?: true}} = Project.activate(name, root)
+      worker = flush(name).rebuild_pid
+      :ok = Minga.Project.SlowFileFind.complete(worker, {:ok, ["lib/app.ex"]})
+
+      assert_receive {:minga_event, :project_rebuilt,
+                      %Minga.Events.ProjectRebuiltEvent{root: ^project}},
+                     1_000
+
+      refute_receive {:minga_event, :project_rebuild_failed, _}, 100
+
+      assert %WorkspaceSnapshot{files: ["lib/app.ex"], rebuilding?: false} =
+               Project.snapshot(name)
+    end
+
+    test "successful rebuild after a failure correctly updates the file list", %{tmp_dir: tmp} do
+      project = Path.join(tmp, "recovery")
+      File.mkdir_p!(project)
+      {:ok, root} = Root.directory(project)
+      {_pid, name} = start_project!(file_find_module: Minga.Project.SlowFileFind)
+      Minga.Events.subscribe(:project_rebuilt)
+      Minga.Events.subscribe(:project_rebuild_failed)
+
+      # First activation fails
+      assert {:ok, %WorkspaceSnapshot{rebuilding?: true}} = Project.activate(name, root)
+      worker = flush(name).rebuild_pid
+      :ok = Minga.Project.SlowFileFind.complete(worker, {:error, "disk error"})
+
+      assert_receive {:minga_event, :project_rebuild_failed, _}, 1_000
+
+      assert %WorkspaceSnapshot{files: [], inventory_error: "disk error"} =
+               Project.snapshot(name)
+
+      # Invalidate triggers a new rebuild that succeeds
+      Project.invalidate(name)
+      worker2 = flush(name).rebuild_pid
+      :ok = Minga.Project.SlowFileFind.complete(worker2, {:ok, ["src/main.ex"]})
+
+      assert_receive {:minga_event, :project_rebuilt,
+                      %Minga.Events.ProjectRebuiltEvent{root: ^project}},
+                     1_000
+
+      assert %WorkspaceSnapshot{
+               files: ["src/main.ex"],
+               rebuilding?: false,
+               inventory_error: nil
+             } = Project.snapshot(name)
     end
 
     test "project shutdown cancels the worker", %{tmp_dir: tmp} do

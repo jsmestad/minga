@@ -465,11 +465,21 @@ defmodule Minga.Project do
     root = workspace_path(state.workspace)
     workspace = complete_discovery(state.workspace, result)
 
-    Minga.Events.broadcast(
-      :project_rebuilt,
-      %Minga.Events.ProjectRebuiltEvent{root: root},
-      state.events_registry
-    )
+    case result do
+      {:ok, _files} ->
+        Minga.Events.broadcast(
+          :project_rebuilt,
+          %Minga.Events.ProjectRebuiltEvent{root: root},
+          state.events_registry
+        )
+
+      {:error, reason} ->
+        Minga.Events.broadcast(
+          :project_rebuild_failed,
+          %Minga.Events.ProjectRebuildFailedEvent{root: root, reason: to_string(reason)},
+          state.events_registry
+        )
+    end
 
     {:noreply, %{state | workspace: workspace}}
   end
@@ -482,16 +492,38 @@ defmodule Minga.Project do
       Minga.Log.warning(:editor, "Project file cache rebuild failed: #{inspect(reason)}")
     end
 
+    root = workspace_path(state.workspace)
     state = clear_rebuild(state)
     workspace = fail_workspace_rebuild(state.workspace, "Project file cache rebuild failed")
+
+    Minga.Events.broadcast(
+      :project_rebuild_failed,
+      %Minga.Events.ProjectRebuildFailedEvent{
+        root: root,
+        reason: "Project file cache rebuild failed: #{inspect(reason)}"
+      },
+      state.events_registry
+    )
+
     {:noreply, %{state | workspace: workspace}}
   end
 
   def handle_info({:rebuild_timeout, pid}, %{rebuild_pid: pid} = state) do
     cancel_discovery(state, pid)
     Minga.Log.warning(:editor, "Project file cache rebuild timed out")
+    root = workspace_path(state.workspace)
     state = clear_rebuild(state)
     workspace = fail_workspace_rebuild(state.workspace, "Project file cache rebuild timed out")
+
+    Minga.Events.broadcast(
+      :project_rebuild_failed,
+      %Minga.Events.ProjectRebuildFailedEvent{
+        root: root,
+        reason: "Project file cache rebuild timed out"
+      },
+      state.events_registry
+    )
+
     {:noreply, %{state | workspace: workspace}}
   end
 
