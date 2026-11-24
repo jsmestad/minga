@@ -317,7 +317,7 @@ defmodule Minga.Buffer.UndoPatch do
 
     [binary_part(text, point, byte_size(text) - point) | chunks]
     |> Enum.reverse()
-    |> IO.iodata_to_binary()
+    |> :erlang.iolist_to_binary()
     |> Document.new()
     |> Document.move_to(last.cursor)
   end
