@@ -373,7 +373,7 @@ defmodule MingaEditor.State.Tab.Context do
   end
 
   @spec valid_field?(field_name(), term()) :: boolean()
-  defp valid_field?(:keymap_scope, value) when is_atom(value), do: value in Scope.all_scopes()
+  defp valid_field?(:keymap_scope, value) when is_atom(value), do: value in Scope.surface_scopes()
   defp valid_field?(:keymap_scope, _value), do: false
   defp valid_field?(:buffers, %Buffers{}), do: true
   defp valid_field?(:windows, %Windows{}), do: true

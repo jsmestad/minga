@@ -19,8 +19,10 @@ defmodule MingaEditor.PromptUI do
       {state, action} = PromptUI.handle_key(state, key, mods)
   """
 
+  alias Minga.Editing.LineEdit
   alias Minga.Extension.CallbackInvoker
   alias Minga.Extension.CodeLease
+  alias Minga.Keymap
   alias MingaEditor.Extension.Prompt
   alias MingaEditor.MinibufferData
   alias MingaEditor.Shell.Runtime
@@ -31,9 +33,12 @@ defmodule MingaEditor.PromptUI do
   alias MingaEditor.State.ModalOverlay.Prompt, as: PromptPayload
   alias MingaEditor.State.Prompt, as: PromptState
 
+  import Bitwise
+
+  @ctrl 0x02
+  @cmd 0x08
+
   @escape 27
-  @enter 13
-  @tab 9
   @backspace 127
   @arrow_left 57_350
   @arrow_right 57_351
@@ -149,17 +154,25 @@ defmodule MingaEditor.PromptUI do
   @doc """
   Handles a key event while the prompt is active.
 
+  A text prompt resolves the key through the `:prompt` keymap scope (`Minga.Keymap.Scope.Prompt`) first: `↩` submits, `esc` cancels and `Tab` completes. Any other key edits the text: printable keys insert, the arrows and Delete move and delete, and the readline keys in `Minga.Editing.LineEdit` edit the line. A confirmation prompt takes `y` or `n`.
+
   Returns `{state, action}` where action is always nil (prompts don't
   produce deferred actions like the picker does).
   """
   @spec handle_key(state(), non_neg_integer(), non_neg_integer()) :: {state(), action()}
-  def handle_key(state, key, _mods) do
+  def handle_key(state, key, mods) do
     {:prompt, payload} = state.shell_runtime.state.modal
-    {handle_prompt_key(state, payload, key), nil}
+    {handle_prompt_key(state, payload, key, mods), nil}
   end
 
-  @spec handle_prompt_key(state(), PromptPayload.t(), non_neg_integer()) :: state()
-  defp handle_prompt_key(state, %PromptPayload{prompt_ui: %{kind: :confirm}} = payload, key) do
+  @spec handle_prompt_key(state(), PromptPayload.t(), non_neg_integer(), non_neg_integer()) ::
+          state()
+  defp handle_prompt_key(
+         state,
+         %PromptPayload{prompt_ui: %{kind: :confirm}} = payload,
+         key,
+         _mods
+       ) do
     case key do
       yes when yes in [?y, ?Y] -> do_submit(state, payload)
       no when no in [?n, ?N, @escape] -> do_cancel(state, payload)
@@ -167,31 +180,36 @@ defmodule MingaEditor.PromptUI do
     end
   end
 
-  defp handle_prompt_key(state, %PromptPayload{prompt_ui: prompt} = payload, key) do
-    case key do
-      @escape ->
-        do_cancel(state, payload)
+  defp handle_prompt_key(state, %PromptPayload{prompt_ui: prompt} = payload, key, mods) do
+    context = [keymap_server: state.interaction.keymap_server, prompt_list: false]
 
-      @enter ->
-        do_submit(state, payload)
+    case Keymap.resolve_scoped_key(:prompt, :insert, {key, mods}, context) do
+      {:command, :prompt_submit} -> do_submit(state, payload)
+      {:command, :prompt_cancel} -> do_cancel(state, payload)
+      {:command, :prompt_complete} -> do_tab(state, payload)
+      # A user override may bind a prompt key to a command this scope does not run.
+      {:command, _other} -> state
+      _unbound -> edit_text(state, prompt, key, mods)
+    end
+  end
 
-      @tab ->
-        do_tab(state, payload)
+  @spec edit_text(state(), PromptState.t(), non_neg_integer(), non_neg_integer()) :: state()
+  defp edit_text(state, prompt, key, _mods) when key in [8, @backspace],
+    do: install_changed_prompt(state, prompt, PromptState.backspace(prompt))
 
-      @backspace ->
-        install_changed_prompt(state, prompt, PromptState.backspace(prompt))
+  defp edit_text(state, prompt, @delete, _mods),
+    do: install_changed_prompt(state, prompt, PromptState.delete_forward(prompt))
 
-      @delete ->
-        install_changed_prompt(state, prompt, PromptState.delete_forward(prompt))
+  defp edit_text(state, prompt, @arrow_left, _mods),
+    do: install_prompt(state, PromptState.move_left(prompt))
 
-      @arrow_left ->
-        install_prompt(state, PromptState.move_left(prompt))
+  defp edit_text(state, prompt, @arrow_right, _mods),
+    do: install_prompt(state, PromptState.move_right(prompt))
 
-      @arrow_right ->
-        install_prompt(state, PromptState.move_right(prompt))
-
-      _ ->
-        do_insert(state, prompt, key)
+  defp edit_text(state, prompt, key, mods) do
+    case LineEdit.edit_for_key({key, mods}) do
+      nil -> do_insert(state, prompt, key, mods)
+      edit -> install_changed_prompt(state, prompt, PromptState.line_edit(prompt, edit))
     end
   end
 
@@ -364,11 +382,13 @@ defmodule MingaEditor.PromptUI do
 
   defp do_tab(state, _payload), do: state
 
-  @spec do_insert(state(), PromptState.t(), non_neg_integer()) :: state()
-  defp do_insert(state, prompt, key)
-       when key >= 32 and key <= 0x10FFFF and not (key >= 0xD800 and key <= 0xDFFF) do
+  # Shift and Option produce text; Control and Command never insert their letter.
+  @spec do_insert(state(), PromptState.t(), non_neg_integer(), non_neg_integer()) :: state()
+  defp do_insert(state, prompt, key, mods)
+       when key >= 32 and key <= 0x10FFFF and not (key >= 0xD800 and key <= 0xDFFF) and
+              band(mods, @ctrl ||| @cmd) == 0 do
     install_prompt(state, PromptState.insert_text(prompt, <<key::utf8>>))
   end
 
-  defp do_insert(state, _prompt, _key), do: state
+  defp do_insert(state, _prompt, _key, _mods), do: state
 end

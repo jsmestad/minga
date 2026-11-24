@@ -176,6 +176,19 @@ defmodule Minga.Mode.CommandTest do
       assert {:execute, [{:accept_command_candidate}], ^state} = Command.handle_key({9, 0}, state)
     end
 
+    test "⌃J and ⌃K move through the completion list; the retired ⌃N and ⌃P do nothing" do
+      state = CommandState.new("w") |> CommandState.move_candidate(2)
+
+      assert {:continue, %CommandState{candidate_index: 3}} =
+               Command.handle_key({?j, 0x02}, state)
+
+      assert {:continue, %CommandState{candidate_index: 1}} =
+               Command.handle_key({?k, 0x02}, state)
+
+      assert {:continue, ^state} = Command.handle_key({?n, 0x02}, state)
+      assert {:continue, ^state} = Command.handle_key({?p, 0x02}, state)
+    end
+
     test "typing a character resets candidate_index to 0" do
       state = CommandState.new("w") |> CommandState.move_candidate(3)
       assert {:continue, new_state} = Command.handle_key({?r, 0}, state)
@@ -257,6 +270,39 @@ defmodule Minga.Mode.CommandTest do
   end
 
   # ── Normal → Command integration via Mode.process ────────────────────────────
+
+  describe "readline keys" do
+    test "each readline key edits the input instead of inserting its letter" do
+      cases = [
+        {?a, "e foo/bar", 0},
+        {?e, "e foo/bar", 9},
+        {?w, "e ", 2},
+        {?u, "", 0}
+      ]
+
+      for {letter, input, cursor} <- cases do
+        assert {:continue, %CommandState{input: ^input, cursor: ^cursor}} =
+                 Command.handle_key({letter, 0x02}, fresh_state("e foo/bar"))
+      end
+    end
+
+    test "⌃H deletes like backspace and leaves the command line when the input empties" do
+      assert {:continue, %CommandState{input: "w"}} =
+               Command.handle_key({?h, 0x02}, fresh_state("wq"))
+
+      assert {:transition, :normal, _state} = Command.handle_key({?h, 0x02}, fresh_state("w"))
+    end
+
+    test "an edit that changes the input resets the completion selection" do
+      state = CommandState.new("e foo") |> CommandState.move_candidate(2)
+
+      assert {:continue, %CommandState{candidate_index: 0}} =
+               Command.handle_key({?w, 0x02}, state)
+
+      assert {:continue, %CommandState{candidate_index: 2}} =
+               Command.handle_key({?a, 0x02}, state)
+    end
+  end
 
   describe "Normal → : → command mode integration" do
     test "pressing : in normal mode transitions to command mode" do

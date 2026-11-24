@@ -22,6 +22,10 @@ defmodule MingaEditor.UI.Picker.FileSource do
   alias MingaEditor.UI.Picker.Source
 
   @impl true
+  @spec opens_location?() :: boolean()
+  def opens_location?, do: true
+
+  @impl true
   @spec title() :: String.t()
   def title, do: "Find file"
 

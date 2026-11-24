@@ -75,11 +75,6 @@ defmodule MingaEditor.UI.Picker.PublicSource do
     optional(owner, module, :actions, [item, args], &valid_actions?/1, [])
   end
 
-  @spec shortcut_action(owner(), module(), PublicItem.t(), Source.shortcut(), term()) :: term()
-  def shortcut_action(owner, module, item, shortcut, args) do
-    optional(owner, module, :shortcut_action, [item, shortcut, args], fn _id -> true end, nil)
-  end
-
   @spec on_select(owner(), module(), EditorState.t(), PublicItem.t(), term()) :: EditorState.t()
   def on_select(owner, module, state, item, args) do
     invoke_state(owner, module, :on_select, state, [item, args])

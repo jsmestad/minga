@@ -108,11 +108,6 @@ defmodule MingaEditor.Extension.PickerTest do
     def actions(%Item{}, _args), do: []
 
     @impl true
-    @spec shortcut_action(Item.t(), Source.shortcut(), map()) :: atom() | nil
-    def shortcut_action(%Item{id: :first}, {:ctrl, ?d}, _args), do: :delete
-    def shortcut_action(%Item{}, _shortcut, _args), do: nil
-
-    @impl true
     @spec on_select(EditorAPI.state(), Item.t(), map()) :: EditorAPI.state()
     def on_select(state, item, args) do
       send(args.test_pid, {:selected, item, args, state.shell_runtime.state.modal})
@@ -144,7 +139,7 @@ defmodule MingaEditor.Extension.PickerTest do
     %{state: TestHelpers.base_state(effect_scheduler: scheduler, port_manager: nil)}
   end
 
-  test "selection, menu and shortcut callbacks receive the captured args after close", %{
+  test "selection and act menu callbacks receive the captured args after close", %{
     state: state
   } do
     args = args(:ordinary)
@@ -160,7 +155,7 @@ defmodule MingaEditor.Extension.PickerTest do
     assert selected.shell_runtime.state.modal == :none
 
     state = selected |> open(args) |> apply_result(:picker_fetch)
-    menu = PickerUI.handle_key(state, ?o, @ctrl)
+    menu = PickerUI.handle_key(state, ?., @ctrl)
     assert_receive {:offered_actions, ^args, :first}
     assert %{actions: ["Keep"], activation_ids: [action_id]} = picker_model(menu).action_menu
     model = picker_model(menu)
@@ -171,10 +166,6 @@ defmodule MingaEditor.Extension.PickerTest do
     acted = PickerUI.activate_action(menu, model.activation_generation, action_id)
     assert_receive {:action, :keep, %Item{id: :first}, ^args, :none}
     assert acted.shell_runtime.state.modal == :none
-
-    state = acted |> open(args) |> apply_result(:picker_fetch)
-    assert %EditorState{} = PickerUI.handle_key(state, ?d, @ctrl)
-    assert_receive {:action, :delete, %Item{id: :first}, ^args, :none}
   end
 
   test "activating a continuation keeps committed rows until the final page lands", %{

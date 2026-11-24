@@ -105,7 +105,7 @@ public struct PickerActionEntry: Identifiable {
     public let activation: PickerActivationIdentity
 }
 
-/// Action menu state for the picker (C-o menu).
+/// Action menu state for the picker (the ⌃. act menu).
 public struct PickerActionMenu {
     public init(selectedIndex: Int, entries: [PickerActionEntry]) {
         self.selectedIndex = selectedIndex

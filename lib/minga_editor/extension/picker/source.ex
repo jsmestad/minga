@@ -16,7 +16,6 @@ defmodule MingaEditor.Extension.Picker.Source do
   @type styled_lines :: [[preview_segment()]]
   @type preview :: :none | {:file, Path.t()} | {:lines, styled_lines()} | {:error, String.t()}
   @type action_entry :: {label :: String.t(), action_id :: term()}
-  @type shortcut :: {:ctrl, non_neg_integer()}
 
   @callback title() :: String.t()
 
@@ -39,9 +38,6 @@ defmodule MingaEditor.Extension.Picker.Source do
   @doc "Offers secondary actions in menu order."
   @callback actions(Item.t(), args :: term()) :: [action_entry()]
 
-  @doc "Resolves a picker shortcut independently of menu eligibility. Currently Ctrl-D is routed."
-  @callback shortcut_action(Item.t(), shortcut(), args :: term()) :: term() | nil
-
   @callback on_action(EditorAPI.state(), action_id :: term(), Item.t(), args :: term()) ::
               EditorAPI.state()
 
@@ -49,6 +45,5 @@ defmodule MingaEditor.Extension.Picker.Source do
                       preview: 2,
                       live_file_preview?: 0,
                       actions: 2,
-                      shortcut_action: 3,
                       on_action: 4
 end

@@ -112,21 +112,15 @@ defmodule MingaEditor.UI.Picker.Source do
   @typedoc "An alternative action: display name and action identifier."
   @type action_entry :: {name :: String.t(), action_id :: term()}
 
-  @typedoc "A normalized picker keyboard shortcut."
-  @type shortcut :: {:ctrl, non_neg_integer()}
-
   @doc """
   Returns the list of alternative actions available for a picker item.
   The first entry is conventionally the default action.
   """
   @callback actions(Picker.item()) :: [action_entry()]
 
-  @doc "Returns the action identifier for a source-owned keyboard shortcut, or nil."
-  @callback shortcut_action(Picker.item(), shortcut()) :: term() | nil
-
   @doc """
   Executes an alternative action on a picker item.
-  Called when the user selects an action from the C-o menu.
+  Called when the user runs an action from the act menu (`⌃.`).
 
   Like `on_select/2`, this runs *after* the picker has been closed. Any
   context required must travel with the `Picker.item()`; do not read
@@ -158,6 +152,13 @@ defmodule MingaEditor.UI.Picker.Source do
   user can see updated state (e.g., tool install status changes).
   """
   @callback keep_open_on_select?() :: boolean()
+
+  @doc """
+  Whether selecting an item opens a location (a file, buffer or position) in the active window.
+
+  Defaults to `false`. When `true`, the picker binds `⌃V` to open the highlighted item in a new vertical split: the picker closes, the window splits, and `on_select/2` runs in the new window.
+  """
+  @callback opens_location?() :: boolean()
 
   @doc """
   Whether this source fetches candidates asynchronously.
@@ -211,13 +212,13 @@ defmodule MingaEditor.UI.Picker.Source do
     gui_preview?: 0,
     preview: 2,
     actions: 1,
-    shortcut_action: 2,
     on_action: 3,
     on_bulk_select: 2,
     bulk_actions: 1,
     on_bulk_action: 3,
     layout: 0,
     keep_open_on_select?: 0,
+    opens_location?: 0,
     async?: 0,
     async_fetch: 1,
     enrich: 1,
@@ -418,36 +419,6 @@ defmodule MingaEditor.UI.Picker.Source do
     end
   end
 
-  @doc "Returns the source action for a keyboard shortcut, with a common delete fallback."
-  @spec shortcut_action(
-          module(),
-          Picker.item(),
-          shortcut(),
-          ContributionCleanup.contribution_source() | nil
-        ) :: term() | nil
-  def shortcut_action(module, item, shortcut, source \\ nil) do
-    if exported?(module, :shortcut_action, 2) do
-      invoke_value(module, :shortcut_action, [item, shortcut], source, fn _value -> true end, nil)
-    else
-      default_shortcut_action(module, item, shortcut, source)
-    end
-  end
-
-  @spec default_shortcut_action(
-          module(),
-          Picker.item(),
-          shortcut(),
-          ContributionCleanup.contribution_source() | nil
-        ) :: term() | nil
-  defp default_shortcut_action(module, item, {:ctrl, ?d}, source) do
-    case List.keyfind(actions(module, item, source), :delete, 1) do
-      {_label, :delete} -> :delete
-      nil -> nil
-    end
-  end
-
-  defp default_shortcut_action(_module, _item, _shortcut, _source), do: nil
-
   @doc "Runs a validated alternative action."
   @spec on_action(
           module(),
@@ -531,6 +502,16 @@ defmodule MingaEditor.UI.Picker.Source do
   def keep_open_on_select?(module, source \\ nil) do
     if exported?(module, :keep_open_on_select?, 0) do
       invoke_value(module, :keep_open_on_select?, [], source, &is_boolean/1, false)
+    else
+      false
+    end
+  end
+
+  @doc "Returns whether a source's selection opens a location, so `⌃V` can open it in a split."
+  @spec opens_location?(module(), ContributionCleanup.contribution_source() | nil) :: boolean()
+  def opens_location?(module, source \\ nil) do
+    if exported?(module, :opens_location?, 0) do
+      invoke_value(module, :opens_location?, [], source, &is_boolean/1, false)
     else
       false
     end

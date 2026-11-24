@@ -424,15 +424,15 @@ defmodule MingaEditor.PickerUITest do
   end
 
   @spec preview_a(EditorState.t()) :: EditorState.t()
-  defp preview_a(state), do: PickerUI.handle_key(state, ?n, MingaEditor.Input.mod_ctrl())
+  defp preview_a(state), do: PickerUI.handle_key(state, ?j, MingaEditor.Input.mod_ctrl())
 
   @spec select_target(EditorState.t()) :: EditorState.t()
-  defp select_target(state), do: PickerUI.handle_key(state, ?p, MingaEditor.Input.mod_ctrl())
+  defp select_target(state), do: PickerUI.handle_key(state, ?k, MingaEditor.Input.mod_ctrl())
 
   @spec choose_open_action(EditorState.t()) :: EditorState.t()
   defp choose_open_action(state) do
     state
-    |> PickerUI.handle_key(?o, MingaEditor.Input.mod_ctrl())
+    |> PickerUI.handle_key(?., MingaEditor.Input.mod_ctrl())
     |> PickerUI.handle_key(13, 0)
   end
 
@@ -542,10 +542,10 @@ defmodule MingaEditor.PickerUITest do
   end
 
   describe "bulk picker actions" do
-    test "C-o shows source bulk actions when items are marked" do
+    test "⌃. shows source bulk actions when items are marked" do
       state = picker_state_with_buffers(["alpha", "beta", "gamma"])
 
-      new_state = PickerUI.handle_key(state, ?o, MingaEditor.Input.mod_ctrl())
+      new_state = PickerUI.handle_key(state, ?., MingaEditor.Input.mod_ctrl())
 
       {:picker, %{picker_ui: %{action_menu: {actions, 0, _item}}}} =
         new_state.shell_runtime.state.modal
@@ -584,7 +584,76 @@ defmodule MingaEditor.PickerUITest do
     end
   end
 
-  describe "branch delete shortcut" do
+  describe "query editing keys" do
+    @ctrl 0x02
+
+    defp type_keys(state, keys) do
+      Enum.reduce(keys, state, fn
+        {cp, mods}, state ->
+          PickerUI.handle_key(state, cp, mods)
+
+        text, state ->
+          text |> String.to_charlist() |> Enum.reduce(state, &PickerUI.handle_key(&2, &1, 0))
+      end)
+    end
+
+    defp query(state) do
+      {:picker, %{picker_ui: %{picker: picker}}} = state.shell_runtime.state.modal
+      picker.query
+    end
+
+    test "⌃H, ⌃W and ⌃U edit the query; ⌃A and ⌃E never type their letter" do
+      state = tab_picker_state(NoBulkActionsSource)
+
+      assert state |> type_keys(["fir st", {?h, @ctrl}]) |> query() == "fir s"
+      assert state |> type_keys(["fir st", {?w, @ctrl}]) |> query() == "fir "
+      assert state |> type_keys(["fir st", {?u, @ctrl}]) |> query() == ""
+      assert state |> type_keys(["fir", {?a, @ctrl}, {?e, @ctrl}]) |> query() == "fir"
+    end
+
+    test "PageDown and PageUp page through the list; the retired ⌃V and ⌥V chords do not" do
+      items = for n <- 1..30, do: %Item{id: n, label: "item #{n}"}
+
+      state =
+        picker_state_for_source(TestHelpers.base_state(content: "x"), NoBulkActionsSource, items)
+
+      selected = fn state ->
+        {:picker, %{picker_ui: %{picker: picker}}} = state.shell_runtime.state.modal
+        Picker.selected_id(picker)
+      end
+
+      paged = PickerUI.handle_key(state, 57_363, 0)
+      assert selected.(paged) != selected.(state)
+      assert selected.(PickerUI.handle_key(paged, 57_362, 0)) == selected.(state)
+
+      # NoBulkActionsSource does not open a location, so ⌃V is unbound here.
+      assert selected.(PickerUI.handle_key(state, ?v, @ctrl)) == selected.(state)
+      assert selected.(PickerUI.handle_key(state, ?v, 0x04)) == selected.(state)
+    end
+
+    test "the act menu takes ⌃J / ⌃K, ↩ and esc, and ignores typing" do
+      state = tab_picker_state(NoBulkActionsSource)
+      menu = PickerUI.handle_key(state, ?., @ctrl)
+
+      assert {:picker, %{picker_ui: %{action_menu: {_actions, 0, _item}}}} =
+               menu.shell_runtime.state.modal
+
+      moved = PickerUI.handle_key(menu, ?j, @ctrl)
+
+      assert {:picker, %{picker_ui: %{action_menu: {_actions, 1, _item}}}} =
+               moved.shell_runtime.state.modal
+
+      assert PickerUI.handle_key(moved, ?x, 0) == moved
+
+      assert {:picker, %{picker_ui: %{action_menu: nil}}} =
+               PickerUI.handle_key(moved, 27, 0).shell_runtime.state.modal
+
+      ran = PickerUI.handle_key(moved, 13, 0)
+      assert ran.shell_runtime.state.modal == :none
+    end
+  end
+
+  describe "source delete action" do
     test "plain d remains query input for a generic picker that exposes delete actions" do
       picker =
         Picker.new([%Item{id: :delete_me, label: "Delete me"}], title: "Delete Action Test")
@@ -613,7 +682,7 @@ defmodule MingaEditor.PickerUITest do
       assert result.workspace.editing.mode == :normal
     end
 
-    test "C-d invokes a generic source-declared delete action" do
+    test "the act menu offers a source-declared delete action and runs it" do
       picker =
         Picker.new([%Item{id: :delete_me, label: "Delete me"}], title: "Delete Action Test")
 
@@ -633,7 +702,12 @@ defmodule MingaEditor.PickerUITest do
           )
       }
 
-      result = PickerUI.handle_key(state, ?d, MingaEditor.Input.mod_ctrl())
+      menu = PickerUI.handle_key(state, ?., MingaEditor.Input.mod_ctrl())
+
+      assert {:picker, %{picker_ui: %{action_menu: {[{"Delete", :delete}], 0, _item}}}} =
+               menu.shell_runtime.state.modal
+
+      result = PickerUI.handle_key(menu, 13, 0)
 
       assert result.shell_runtime.state.modal == :none
       assert result.shell_runtime.state.notice.message == "Deleted via action"
@@ -642,7 +716,7 @@ defmodule MingaEditor.PickerUITest do
 
   describe "Find file actions" do
     @tag :tmp_dir
-    test "C-d is a no-op that keeps the picker open and preserves disk bytes", %{
+    test "the retired ⌃D chord is a no-op that keeps the picker open and preserves disk bytes", %{
       tmp_dir: tmp_dir
     } do
       {state, path, bytes} = file_picker_state(tmp_dir)
@@ -662,7 +736,7 @@ defmodule MingaEditor.PickerUITest do
       {state, path, bytes} = file_picker_state(tmp_dir)
 
       assert {:handled, menu_state} =
-               PickerInput.handle_key(state, ?o, MingaEditor.Input.mod_ctrl())
+               PickerInput.handle_key(state, ?., MingaEditor.Input.mod_ctrl())
 
       assert {:picker, %{picker_ui: %{action_menu: {[{"Open", :open}], 0, _item}}}} =
                menu_state.shell_runtime.state.modal
@@ -702,7 +776,7 @@ defmodule MingaEditor.PickerUITest do
       refute Map.has_key?(new_state, :bulk_selected)
     end
 
-    test "C-o falls back to normal per-item actions and Enter dispatches on_action" do
+    test "⌃. falls back to normal per-item actions and Enter dispatches on_action" do
       state = TestHelpers.base_state(content: "initial")
 
       picker_state =
@@ -711,7 +785,7 @@ defmodule MingaEditor.PickerUITest do
           %Item{id: :second, label: "second"}
         ])
 
-      menu_state = PickerUI.handle_key(picker_state, ?o, MingaEditor.Input.mod_ctrl())
+      menu_state = PickerUI.handle_key(picker_state, ?., MingaEditor.Input.mod_ctrl())
 
       assert {:picker, %{picker_ui: %{action_menu: {actions, 0, _item}}}} =
                menu_state.shell_runtime.state.modal
@@ -915,7 +989,7 @@ defmodule MingaEditor.PickerUITest do
       state =
         TestHelpers.base_state(content: "initial")
         |> ModalWorkflow.open({:picker, PickerPayload.new(picker_state)})
-        |> PickerUI.handle_key(?o, MingaEditor.Input.mod_ctrl())
+        |> PickerUI.handle_key(?., MingaEditor.Input.mod_ctrl())
 
       {:picker, %{picker_ui: live_picker}} = state.shell_runtime.state.modal
       generation = live_picker.activation_offer.generation
@@ -943,7 +1017,7 @@ defmodule MingaEditor.PickerUITest do
              |> PickerState.begin_query_session()
            )}
         )
-        |> PickerUI.handle_key(?o, MingaEditor.Input.mod_ctrl())
+        |> PickerUI.handle_key(?., MingaEditor.Input.mod_ctrl())
         |> PickerUI.update_picker(fn picker_state ->
           PickerState.update_picker(picker_state, Picker.select_index(picker_state.picker, 1))
         end)
@@ -973,7 +1047,7 @@ defmodule MingaEditor.PickerUITest do
              |> PickerState.begin_query_session()
            )}
         )
-        |> PickerUI.handle_key(?o, MingaEditor.Input.mod_ctrl())
+        |> PickerUI.handle_key(?., MingaEditor.Input.mod_ctrl())
 
       {:picker, %{picker_ui: live_picker}} = state.shell_runtime.state.modal
       generation = live_picker.activation_offer.generation

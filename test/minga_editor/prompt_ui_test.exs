@@ -625,4 +625,62 @@ defmodule MingaEditor.PromptUITest do
       refute PromptUI.open?(state)
     end
   end
+
+  describe "handle_key/3 — readline keys keep their text-editing meaning" do
+    @ctrl 0x02
+
+    defp keys(state, keys) do
+      Enum.reduce(keys, state, fn {cp, mods}, state ->
+        {state, nil} = PromptUI.handle_key(state, cp, mods)
+        state
+      end)
+    end
+
+    test "each readline key edits the line instead of inserting its letter" do
+      cases = [
+        {{?a, @ctrl}, "foo bar", 0},
+        {{?e, @ctrl}, "foo bar", 7},
+        {{?h, @ctrl}, "foo ba", 6},
+        {{?w, @ctrl}, "foo ", 4},
+        {{?u, @ctrl}, "", 0},
+        {{?k, @ctrl}, "foo bar", 7}
+      ]
+
+      for {key, text, cursor} <- cases do
+        state = base_state() |> PromptUI.open(TestHandler, default: "foo bar") |> keys([key])
+
+        assert {prompt_state(state).text, prompt_state(state).cursor} == {text, cursor},
+               inspect(key)
+      end
+    end
+
+    test "⌃K deletes to the end of the line in a prompt without a list" do
+      state =
+        base_state()
+        |> PromptUI.open(TestHandler, default: "foo bar")
+        |> keys([{?a, @ctrl}, {@arrow_right, 0}, {?k, @ctrl}])
+
+      assert prompt_state(state).text == "f"
+    end
+
+    test "⌃U deletes from the start of the line to the cursor" do
+      state =
+        base_state()
+        |> PromptUI.open(TestHandler, default: "foo bar")
+        |> move_left(3)
+        |> keys([{?u, @ctrl}])
+
+      assert {prompt_state(state).text, prompt_state(state).cursor} == {"bar", 0}
+    end
+
+    test "↩ submits and esc cancels through the prompt keymap scope" do
+      state = base_state() |> PromptUI.open(TestHandler, default: "hello") |> keys([{@enter, 0}])
+      assert Process.get(:submitted) == "hello"
+      refute PromptUI.open?(state)
+
+      state = base_state() |> PromptUI.open(TestHandler) |> keys([{@escape, 0}])
+      assert Process.get(:cancelled)
+      refute PromptUI.open?(state)
+    end
+  end
 end

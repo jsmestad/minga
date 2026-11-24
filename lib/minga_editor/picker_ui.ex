@@ -20,6 +20,8 @@ defmodule MingaEditor.PickerUI do
   The caller (`Editor`) is responsible for dispatching that action.
   """
 
+  alias Minga.Editing.LineEdit
+  alias Minga.Keymap
   alias MingaEditor.Effect.Request
   alias MingaEditor.EffectScheduler
   alias MingaEditor.State, as: EditorState
@@ -45,16 +47,6 @@ defmodule MingaEditor.PickerUI do
   alias MingaEditor.UI.Picker.Item
   alias MingaEditor.UI.Picker.PublicSource
   alias MingaEditor.UI.Picker.Source
-
-  import Bitwise
-
-  @ctrl MingaEditor.Input.mod_ctrl()
-  @alt MingaEditor.Input.mod_alt()
-
-  @escape 27
-  @enter 13
-  @arrow_down 57_353
-  @arrow_up 57_352
 
   @typedoc "Internal editor state."
   @type state :: EditorState.t()
@@ -796,54 +788,73 @@ defmodule MingaEditor.PickerUI do
   @doc """
   Handles a key event while the picker is open.
 
+  The key resolves through the `:picker` keymap scope (`Minga.Keymap.Scope.Picker`) first; a bound key runs its picker command. Any other key edits the query: printable keys insert, backspace and `⌃H` delete, `⌃W` deletes a word and `⌃U` clears the query. While the act menu is open, the same commands move through and run its actions, and typing does nothing.
+
   Returns either `state` or `{state, action}` when the caller must dispatch
   a command (e.g. command-palette selection).
   """
   @spec handle_key(state(), non_neg_integer(), non_neg_integer()) ::
           state() | {state(), action()}
-
-  # ── Action menu handlers (when C-o menu is open) ────────────────────────────
-
-  # Esc or C-g in action menu → close menu, return to picker
   def handle_key(
-        %{
-          shell_runtime: %{
-            state: %{modal: {:picker, %{picker_ui: %{action_menu: {_actions, _sel, _item}}}}}
-          }
-        } =
+        %{shell_runtime: %{state: %{modal: {:picker, %PickerPayload{picker_ui: picker_state}}}}} =
           state,
-        @escape,
-        _mods
-      ) do
-    update_picker(state, &PickerState.close_action_menu/1)
-  end
-
-  def handle_key(
-        %{
-          shell_runtime: %{
-            state: %{modal: {:picker, %{picker_ui: %{action_menu: {_actions, _sel, _item}}}}}
-          }
-        } =
-          state,
-        ?g,
+        codepoint,
         mods
-      )
-      when band(mods, @ctrl) != 0 do
-    update_picker(state, &PickerState.close_action_menu/1)
+      ) do
+    case Keymap.resolve_scoped_key(
+           :picker,
+           :insert,
+           {codepoint, mods},
+           picker_keymap_context(state, picker_state)
+         ) do
+      {:command, command} -> run_command(state, picker_state, command)
+      _unbound -> edit_query(state, picker_state, codepoint, mods)
+    end
   end
 
-  # Enter in action menu → execute selected action
-  def handle_key(
-        %{
-          shell_runtime: %{
-            state: %{
-              modal: {:picker, %{picker_ui: %{action_menu: {actions, sel, item}, source: source}}}
-            }
-          }
-        } = state,
-        @enter,
-        _mods
-      ) do
+  def handle_key(state, _cp, _mods), do: state
+
+  @doc "Returns the keymap context for the open picker: `⌃V` is bound only when its source opens a location."
+  @spec picker_keymap_context(state(), PickerState.t()) :: keyword()
+  def picker_keymap_context(state, %PickerState{source: source, callback_source: owner}) do
+    [
+      keymap_server: state.interaction.keymap_server,
+      picker_split: Source.opens_location?(source, owner)
+    ]
+  end
+
+  # ── Picker commands ─────────────────────────────────────────────────────────
+
+  @typedoc "A command bound in the `:picker` keymap scope."
+  @type picker_command ::
+          :picker_next
+          | :picker_prev
+          | :picker_select
+          | :picker_cancel
+          | :picker_complete
+          | :picker_page_down
+          | :picker_page_up
+          | :picker_act_menu
+          | :picker_open_split
+
+  @spec run_command(state(), PickerState.t(), picker_command() | atom()) ::
+          state() | {state(), action()}
+
+  # The act menu owns the list keys while it is open.
+  defp run_command(state, %PickerState{action_menu: {_actions, _sel, _item}}, :picker_cancel),
+    do: update_picker(state, &PickerState.close_action_menu/1)
+
+  defp run_command(state, %PickerState{action_menu: {_actions, _sel, _item}}, :picker_next),
+    do: update_picker(state, &PickerState.move_action_menu_selection(&1, :next))
+
+  defp run_command(state, %PickerState{action_menu: {_actions, _sel, _item}}, :picker_prev),
+    do: update_picker(state, &PickerState.move_action_menu_selection(&1, :previous))
+
+  defp run_command(
+         state,
+         %PickerState{action_menu: {actions, sel, item}, source: source},
+         :picker_select
+       ) do
     case Enum.at(actions, sel) do
       nil ->
         update_picker(state, &PickerState.close_action_menu/1)
@@ -855,172 +866,43 @@ defmodule MingaEditor.PickerUI do
     end
   end
 
-  # Arrow down / C-j / C-n in action menu → move selection down
-  def handle_key(
-        %{
-          shell_runtime: %{
-            state: %{modal: {:picker, %{picker_ui: %{action_menu: {_actions, _sel, _item}}}}}
-          }
-        } = state,
-        cp,
-        mods
-      )
-      when (cp == ?j and band(mods, @ctrl) != 0) or
-             (cp == ?n and band(mods, @ctrl) != 0) or
-             cp == @arrow_down do
-    update_picker(state, &PickerState.move_action_menu_selection(&1, :next))
-  end
+  defp run_command(state, %PickerState{action_menu: {_actions, _sel, _item}}, _command), do: state
 
-  # Arrow up / C-k / C-p in action menu → move selection up
-  def handle_key(
-        %{
-          shell_runtime: %{
-            state: %{modal: {:picker, %{picker_ui: %{action_menu: {_actions, _sel, _item}}}}}
-          }
-        } = state,
-        cp,
-        mods
-      )
-      when (cp == ?k and band(mods, @ctrl) != 0) or
-             (cp == ?p and band(mods, @ctrl) != 0) or
-             cp == @arrow_up do
-    update_picker(state, &PickerState.move_action_menu_selection(&1, :previous))
-  end
+  defp run_command(state, %PickerState{}, :picker_cancel), do: cancel_picker(state)
 
-  # Ignore all other keys while action menu is open
-  def handle_key(
-        %{
-          shell_runtime: %{
-            state: %{modal: {:picker, %{picker_ui: %{action_menu: {_actions, _sel, _item}}}}}
-          }
-        } =
-          state,
-        _cp,
-        _mods
-      ),
-      do: state
-
-  # ── Normal picker handlers ─────────────────────────────────────────────────
-
-  def handle_key(
-        %{shell_runtime: %{state: %{modal: {:picker, %PickerPayload{}}}}} = state,
-        @escape,
-        _mods
-      ),
-      do: cancel_picker(state)
-
-  # C-g → cancel (Emacs-style)
-  def handle_key(
-        %{shell_runtime: %{state: %{modal: {:picker, %PickerPayload{}}}}} = state,
-        ?g,
-        mods
-      )
-      when band(mods, @ctrl) != 0 do
-    cancel_picker(state)
-  end
-
-  def handle_key(
-        %{
-          shell_runtime: %{
-            state: %{
-              modal:
-                {:picker,
-                 %{
-                   picker_ui: %{
-                     picker: picker,
-                     source: source,
-                     callback_source: callback_source
-                   }
-                 }}
-            }
-          }
-        } = state,
-        @enter,
-        _mods
-      ) do
+  defp run_command(
+         state,
+         %PickerState{picker: picker, source: source, callback_source: callback_source},
+         :picker_select
+       ) do
     case Picker.selected_item(picker) do
       nil -> state |> restore_picker_origin() |> close()
       item -> select_item(state, picker, item, source, callback_source)
     end
   end
 
-  # C-j, C-n, or arrow down → move selection down
-  def handle_key(
-        %{shell_runtime: %{state: %{modal: {:picker, %{picker_ui: %{picker: picker}}}}}} = state,
-        cp,
-        mods
-      )
-      when (cp == ?j and band(mods, @ctrl) != 0) or
-             (cp == ?n and band(mods, @ctrl) != 0) or
-             cp == @arrow_down do
-    new_picker = Picker.move_down(picker)
-    state = update_picker(state, &PickerState.update_picker(&1, new_picker))
-    maybe_preview_selection(state)
-  end
+  defp run_command(state, %PickerState{picker: picker}, :picker_next),
+    do: move_selection(state, Picker.move_down(picker))
 
-  # C-k, C-p, or arrow up → move selection up
-  def handle_key(
-        %{shell_runtime: %{state: %{modal: {:picker, %{picker_ui: %{picker: picker}}}}}} = state,
-        cp,
-        mods
-      )
-      when (cp == ?k and band(mods, @ctrl) != 0) or
-             (cp == ?p and band(mods, @ctrl) != 0) or
-             cp == @arrow_up do
-    new_picker = Picker.move_up(picker)
-    state = update_picker(state, &PickerState.update_picker(&1, new_picker))
-    maybe_preview_selection(state)
-  end
+  defp run_command(state, %PickerState{picker: picker}, :picker_prev),
+    do: move_selection(state, Picker.move_up(picker))
 
-  # C-v → page down
-  def handle_key(
-        %{shell_runtime: %{state: %{modal: {:picker, %{picker_ui: %{picker: picker}}}}}} = state,
-        ?v,
-        mods
-      )
-      when band(mods, @ctrl) != 0 do
-    new_picker = Picker.page_down(picker)
-    state = update_picker(state, &PickerState.update_picker(&1, new_picker))
-    maybe_preview_selection(state)
-  end
+  defp run_command(state, %PickerState{picker: picker}, :picker_page_down),
+    do: move_selection(state, Picker.page_down(picker))
 
-  # M-v (Alt+v) → page up
-  def handle_key(
-        %{shell_runtime: %{state: %{modal: {:picker, %{picker_ui: %{picker: picker}}}}}} = state,
-        ?v,
-        mods
-      )
-      when band(mods, @alt) != 0 do
-    new_picker = Picker.page_up(picker)
-    state = update_picker(state, &PickerState.update_picker(&1, new_picker))
-    maybe_preview_selection(state)
-  end
+  defp run_command(state, %PickerState{picker: picker}, :picker_page_up),
+    do: move_selection(state, Picker.page_up(picker))
 
   # Tab completes the highlighted item when the source completes, marks it when the source
   # confirms marked items, and otherwise does nothing.
-  def handle_key(
-        %{
-          shell_runtime: %{
-            state: %{modal: {:picker, %{picker_ui: %{extension: %ExtensionPicker{}}}}}
-          }
-        } = state,
-        9,
-        _mods
-      ),
-      do: state
+  defp run_command(state, %PickerState{extension: %ExtensionPicker{}}, :picker_complete),
+    do: state
 
-  def handle_key(
-        %{
-          shell_runtime: %{
-            state: %{
-              modal:
-                {:picker, %{picker_ui: %PickerState{picker: %Picker{} = picker, source: source}}}
-            }
-          }
-        } = state,
-        9,
-        _mods
-      ) do
+  defp run_command(
+         state,
+         %PickerState{picker: %Picker{} = picker, source: source},
+         :picker_complete
+       ) do
     cond do
       Source.completes?(source) ->
         complete_selected_item(state)
@@ -1034,106 +916,114 @@ defmodule MingaEditor.PickerUI do
     end
   end
 
-  # C-o → open action menu for the selected item
-  def handle_key(
-        %{
-          shell_runtime: %{
-            state: %{
-              modal:
-                {:picker,
-                 %{
-                   picker_ui: %{
-                     picker: picker,
-                     source: source,
-                     callback_source: callback_source
-                   }
-                 }}
-            }
-          }
-        } = state,
-        ?o,
-        mods
-      )
-      when band(mods, @ctrl) != 0 do
-    case Picker.selected_item(picker) do
-      nil ->
-        state
-
-      item ->
-        actions = current_item_actions(state, source, picker, item, callback_source)
-
-        case actions do
-          [] -> state
-          actions -> update_picker(state, &PickerState.open_action_menu(&1, actions, item))
-        end
+  defp run_command(
+         state,
+         %PickerState{picker: picker, source: source, callback_source: callback_source},
+         :picker_act_menu
+       ) do
+    with %Item{} = item <- Picker.selected_item(picker),
+         [_ | _] = actions <- current_item_actions(state, source, picker, item, callback_source) do
+      update_picker(state, &PickerState.open_action_menu(&1, actions, item))
+    else
+      _no_item_or_actions -> state
     end
   end
 
-  # C-d invokes a source-declared delete action. Sources that do not expose
-  # delete keep printable `d` available for normal picker filtering.
-  def handle_key(
-        %{
-          shell_runtime: %{
-            state: %{modal: {:picker, %{picker_ui: %{picker: picker, source: source}}}}
-          }
-        } = state,
-        ?d,
-        mods
-      )
-      when band(mods, @ctrl) != 0 do
+  defp run_command(
+         state,
+         %PickerState{picker: picker, source: source, callback_source: callback_source},
+         :picker_open_split
+       ) do
     case Picker.selected_item(picker) do
-      %Item{} = item ->
-        callback_source = current_callback_source(state)
+      nil -> state
+      item -> open_in_split(state, item, source, callback_source)
+    end
+  end
 
-        case current_shortcut_action(state, source, item, {:ctrl, ?d}, callback_source) do
-          nil -> state
-          action -> run_source_action_and_close(state, source, action, item)
-        end
+  # A user override may bind a picker key to a command this scope does not run.
+  defp run_command(state, %PickerState{}, _command), do: state
 
-      nil ->
+  @spec move_selection(state(), Picker.t()) :: state()
+  defp move_selection(state, new_picker) do
+    state
+    |> update_picker(&PickerState.update_picker(&1, new_picker))
+    |> maybe_preview_selection()
+  end
+
+  # Opens the item in a new vertical split.
+  # The picker closes, the window splits, and the source's selection runs in the new window.
+  # A selection the source keeps open or rejects behaves as it does on Enter.
+  @spec open_in_split(state(), Picker.item(), module(), PickerState.callback_source()) ::
+          state() | {state(), action()}
+  defp open_in_split(state, item, source, callback_source) do
+    context = picker_state(state).context
+
+    case Source.selection_disposition(source, item, context, callback_source) do
+      :accept ->
+        state
+        |> restore_picker_origin()
+        |> close()
+        |> MingaEditor.Commands.Movement.execute(:split_vertical)
+        |> then(&Source.on_select(source, item, &1, callback_source))
+
+      _stay_open_or_reject ->
+        select_single_item(state, item, source, callback_source)
+    end
+  end
+
+  # ── Query editing ───────────────────────────────────────────────────────────
+
+  @spec edit_query(state(), PickerState.t(), non_neg_integer(), non_neg_integer()) :: state()
+  defp edit_query(state, %PickerState{action_menu: {_actions, _sel, _item}}, _cp, _mods),
+    do: state
+
+  defp edit_query(state, %PickerState{} = picker_state, cp, _mods) when cp in [8, 127],
+    do: delete_backward(state, picker_state)
+
+  defp edit_query(state, %PickerState{} = picker_state, codepoint, 0)
+       when codepoint >= 32 and codepoint <= 0x10FFFF do
+    case printable_char(codepoint) do
+      nil -> state
+      char -> type_printable_char(state, picker_state, char)
+    end
+  end
+
+  defp edit_query(state, %PickerState{} = picker_state, codepoint, mods) do
+    case LineEdit.edit_for_key({codepoint, mods}) do
+      :delete_backward ->
+        delete_backward(state, picker_state)
+
+      edit when edit in [:delete_word_backward, :delete_to_start] ->
+        line_edit(state, picker_state, edit)
+
+      # The query has no cursor of its own, so ⌃A and ⌃E have nothing to move.
+      _no_query_edit ->
         state
     end
+  end
+
+  @spec printable_char(non_neg_integer()) :: String.t() | nil
+  defp printable_char(codepoint) do
+    <<codepoint::utf8>>
+  rescue
+    ArgumentError -> nil
   end
 
   # Backspace returns to the original source when it empties a switched picker.
-  def handle_key(
-        %{
-          shell_runtime: %{
-            state: %{
-              modal:
-                {:picker,
-                 %{
-                   picker_ui:
-                     %PickerState{
-                       picker: %Picker{} = picker,
-                       source: DirectorySource,
-                       acknowledged_query_edit_seq: edit_seq
-                     } = picker_state
-                 }}
-            }
-          }
-        } = state,
-        cp,
-        _mods
-      )
-      when cp in [8, 127] do
+  @spec delete_backward(state(), PickerState.t()) :: state()
+  defp delete_backward(
+         state,
+         %PickerState{
+           picker: %Picker{} = picker,
+           source: DirectorySource,
+           acknowledged_query_edit_seq: edit_seq
+         } = picker_state
+       ) do
     next_query = String.slice(picker.query, 0, max(String.length(picker.query) - 1, 0))
     replace_current_query(state, picker_state, next_query, edit_seq + 1)
   end
 
-  def handle_key(
-        %{
-          shell_runtime: %{
-            state: %{
-              modal:
-                {:picker, %{picker_ui: %PickerState{picker: %Picker{} = picker} = picker_state}}
-            }
-          }
-        } = state,
-        cp,
-        _mods
-      )
-      when cp in [8, 127] do
+  defp delete_backward(state, %PickerState{picker: %Picker{} = picker} = picker_state) do
     case {Picker.backspace(picker), picker_state.source_switch} do
       {%Picker{query: ""}, {:switched, _original_source, _prefix}} ->
         switch_back_to_original(state)
@@ -1146,35 +1036,29 @@ defmodule MingaEditor.PickerUI do
     end
   end
 
-  # Printable characters → filter (with mode-switch detection)
-  def handle_key(
-        %{
-          shell_runtime: %{
-            state: %{modal: {:picker, %{picker_ui: %PickerState{} = picker_state}}}
-          }
-        } = state,
-        codepoint,
-        0
-      )
-      when codepoint >= 32 and codepoint <= 0x10FFFF do
-    char =
-      try do
-        <<codepoint::utf8>>
-      rescue
-        ArgumentError -> nil
-      end
+  defp delete_backward(state, %PickerState{}), do: state
 
-    case char do
-      nil ->
+  # ⌃W and ⌃U edit the query after any mode prefix, so a switched source stays switched.
+  @spec line_edit(state(), PickerState.t(), LineEdit.edit()) :: state()
+  defp line_edit(
+         state,
+         %PickerState{picker: %Picker{query: query}, acknowledged_query_edit_seq: edit_seq} =
+           picker_state,
+         edit
+       ) do
+    {next_query, _cursor} = LineEdit.apply(edit, query, String.length(query))
+
+    case next_query do
+      ^query ->
         state
 
-      c ->
-        type_printable_char(state, picker_state, c)
+      _changed ->
+        query = PickerState.mode_prefix(picker_state) <> next_query
+        replace_current_query(state, picker_state, query, edit_seq + 1)
     end
   end
 
-  # Ignore all other keys
-  def handle_key(state, _cp, _mods), do: state
+  defp line_edit(state, %PickerState{}, _edit), do: state
 
   @doc "Activates the exact picker item offered to a native frontend."
   @spec activate_item(state(), non_neg_integer(), non_neg_integer()) ::
@@ -1400,27 +1284,6 @@ defmodule MingaEditor.PickerUI do
 
       {%PickerState{}, _item} ->
         action_menu_actions(source, picker, item, owner)
-    end
-  end
-
-  @spec current_shortcut_action(
-          state(),
-          module(),
-          Item.t(),
-          Source.shortcut(),
-          PickerState.callback_source()
-        ) :: term()
-  defp current_shortcut_action(state, source, item, shortcut, owner) do
-    case {picker_state(state), item} do
-      {%PickerState{extension: %ExtensionPicker{args: args}},
-       %Item{meta: %{extension_item: public_item}}} ->
-        PublicSource.shortcut_action(owner, source, public_item, shortcut, args)
-
-      {%PickerState{extension: %ExtensionPicker{}}, _item} ->
-        nil
-
-      {%PickerState{}, _item} ->
-        Source.shortcut_action(source, item, shortcut, owner)
     end
   end
 

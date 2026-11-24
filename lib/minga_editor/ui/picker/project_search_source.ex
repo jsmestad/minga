@@ -24,6 +24,10 @@ defmodule MingaEditor.UI.Picker.ProjectSearchSource do
   @truncated_status "Results truncated to #{ProjectSearch.max_results()}"
 
   @impl true
+  @spec opens_location?() :: boolean()
+  def opens_location?, do: true
+
+  @impl true
   @spec title() :: String.t()
   def title, do: "Search project"
 

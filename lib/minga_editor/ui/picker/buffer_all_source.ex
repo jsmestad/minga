@@ -15,6 +15,10 @@ defmodule MingaEditor.UI.Picker.BufferAllSource do
   alias MingaEditor.UI.Picker.BufferSource
 
   @impl true
+  @spec opens_location?() :: boolean()
+  def opens_location?, do: true
+
+  @impl true
   @spec title() :: String.t()
   def title, do: "Switch buffer (all)"
 

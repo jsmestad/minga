@@ -6,13 +6,22 @@ If you're coming from **Emacs**, keymap scopes are Minga's equivalent of major m
 
 ## Built-in scopes
 
-Minga ships three scopes:
+Minga ships these scopes:
 
 | Scope | Active when | Purpose |
 |-------|-------------|---------|
 | `:editor` | Editing files (default) | All normal vim editing. No scope-specific bindings; the full mode system (normal, insert, visual, etc.) handles everything. |
 | `:agent` | Full-screen agentic view (`SPC a a`) | Agent chat navigation, fold/collapse, copy, search, panel management. See [Agentic Keymap](AGENTIC-KEYMAP.md). |
 | `:file_tree` | File tree panel is focused | Tree-specific keys (Enter, h/l, H, r). Unmatched keys delegate to vim motions for navigation. |
+| `:git_status` | Git status panel is focused | Staging, committing and navigation keys for the panel. |
+| `:picker` | A picker is open (find file, project search, the buffer switcher) | `⌃J` / `⌃K` and the arrows move, `↩` opens, `esc` closes, `Tab` completes, `PageUp` / `PageDown` page, `⌃.` opens the act menu on the highlighted row, and `⌃V` opens a file, buffer or location in a split. Every other key edits the query. |
+| `:prompt` | A minibuffer prompt or the `:` command line has focus | `↩` runs, `esc` cancels, `Tab` completes; `⌃J` / `⌃K` move through the command line's completions. Every other key edits the text. |
+
+### Live prompts
+
+Pickers and prompts are live prompts: typing always edits the query, so their scopes bind only the established list conventions from the [key design](design/keys.md). The readline keys are text editing, not bindings: `⌃A` and `⌃E` move to the start and end of the line, `⌃H` deletes a character, `⌃W` the word before the cursor, `⌃U` everything before it, and `⌃K` everything after it in a prompt without a list. Both scopes declare their keys only in the `:insert` vim state, because a prompt always takes text and the CUA profile never applies to one.
+
+`MingaEditor.PickerUI` and `MingaEditor.PromptUI` resolve keys through these scopes, so a user override such as `bind {:picker, :insert}, "C-n", :picker_next, "Next"` works there. The `:` command line is a pure mode and reads the default `:prompt` trie directly, so overrides do not reach it.
 
 ## How resolution works
 

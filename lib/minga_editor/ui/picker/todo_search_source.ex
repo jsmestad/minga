@@ -30,6 +30,10 @@ defmodule MingaEditor.UI.Picker.TodoSearchSource do
   @type output_format :: :git | :grep
 
   @impl true
+  @spec opens_location?() :: boolean()
+  def opens_location?, do: true
+
+  @impl true
   @spec title() :: String.t()
   def title, do: "Search TODOs"
 

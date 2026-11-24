@@ -7,23 +7,40 @@ struct PickerQueryKeyCommand: Equatable {
 }
 
 enum PickerQueryKeyRouting {
+    /// Readline edits the native field performs itself, so the local caret stays authoritative while you type.
+    enum LineEdit: Equatable {
+        case deleteWordBackward
+        case deleteToLineStart
+    }
+
+    /// Forwards the picker keymap scope's chords (`Minga.Keymap.PromptKeys`): ⌃J / ⌃K move, ⌃V opens a split, ⌃. opens the act menu.
+    /// Text-editing chords (⌃A, ⌃E, ⌃H, ⌃W, ⌃U) stay with the field.
     static func controlBinding(characters: String?, modifiers: NSEvent.ModifierFlags) -> PickerQueryKeyCommand? {
         let flags = modifiers.intersection(.deviceIndependentFlagsMask)
 
-        if flags.contains(.control), !flags.contains(.command), let character = characters?.lowercased() {
-            switch character {
-            case "g", "j", "k", "n", "o", "p", "v", "d":
-                return PickerQueryKeyCommand(codepoint: character.unicodeScalars.first?.value ?? 0, modifiers: 0x02)
-            default:
-                return nil
-            }
-        }
+        guard flags.contains(.control), !flags.contains(.command), !flags.contains(.option),
+              let character = characters?.lowercased()
+        else { return nil }
 
-        if flags.contains(.option), !flags.contains(.command), characters?.lowercased() == "v" {
-            return PickerQueryKeyCommand(codepoint: 118, modifiers: 0x04)
+        switch character {
+        case "j", "k", "v", ".":
+            return PickerQueryKeyCommand(codepoint: character.unicodeScalars.first?.value ?? 0, modifiers: 0x02)
+        default:
+            return nil
         }
+    }
 
-        return nil
+    /// Returns the readline edit for ⌃W or ⌃U, which Cocoa's field editor does not bind by default.
+    static func lineEdit(characters: String?, modifiers: NSEvent.ModifierFlags) -> LineEdit? {
+        let flags = modifiers.intersection(.deviceIndependentFlagsMask)
+
+        guard flags.contains(.control), !flags.contains(.command), !flags.contains(.option) else { return nil }
+
+        switch characters?.lowercased() {
+        case "w": return .deleteWordBackward
+        case "u": return .deleteToLineStart
+        default: return nil
+        }
     }
 
     static func selectorBinding(_ selectorName: String, fieldIsEmpty: Bool) -> PickerQueryKeyCommand? {
@@ -33,9 +50,9 @@ enum PickerQueryKeyRouting {
         case "moveDown:":
             return PickerQueryKeyCommand(codepoint: 57_353, modifiers: 0)
         case "pageUp:", "scrollPageUp:":
-            return PickerQueryKeyCommand(codepoint: 118, modifiers: 0x04)
+            return PickerQueryKeyCommand(codepoint: 57_362, modifiers: 0)
         case "pageDown:", "scrollPageDown:":
-            return PickerQueryKeyCommand(codepoint: 118, modifiers: 0x02)
+            return PickerQueryKeyCommand(codepoint: 57_363, modifiers: 0)
         case "insertNewline:", "insertNewlineIgnoringFieldEditor:":
             return PickerQueryKeyCommand(codepoint: 13, modifiers: 0)
         case "insertTab:", "insertTabIgnoringFieldEditor:":
@@ -193,6 +210,16 @@ struct PickerQueryField: NSViewRepresentable {
                let command = PickerQueryKeyRouting.controlBinding(characters: event.charactersIgnoringModifiers, modifiers: event.modifierFlags)
             {
                 sendAction?(.keyPress(codepoint: command.codepoint, modifiers: command.modifiers, sequence: 0))
+                return true
+            }
+
+            if let event = NSApp.currentEvent,
+               let edit = PickerQueryKeyRouting.lineEdit(characters: event.charactersIgnoringModifiers, modifiers: event.modifierFlags)
+            {
+                switch edit {
+                case .deleteWordBackward: textView.deleteWordBackward(nil)
+                case .deleteToLineStart: textView.deleteToBeginningOfLine(nil)
+                }
                 return true
             }
 

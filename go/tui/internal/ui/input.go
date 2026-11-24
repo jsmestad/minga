@@ -15,7 +15,8 @@ var sgrMouseTailPattern = regexp.MustCompile(`^<?(\d+);(\d+);(\d+)([Mm])$`)
 // commit_frame can resolve a keystroke-to-write sample. Paste packets carry no sequence.
 func keyPacket(msg tea.KeyPressMsg, seq uint32, composer ...uint64) ([]byte, bool) {
 	key := msg.Key()
-	if key.Mod.Contains(tea.ModCtrl) && key.Code >= 'a' && key.Code <= 'z' {
+	// ⌃. opens the act menu; terminals report it only with the kitty keyboard protocol.
+	if key.Mod.Contains(tea.ModCtrl) && ((key.Code >= 'a' && key.Code <= 'z') || key.Code == '.') {
 		return protocol.EncodeKeyPress(key.Code, keyModifiers(key), seq), true
 	}
 

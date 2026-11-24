@@ -110,6 +110,15 @@ defmodule MingaEditor.State.Prompt do
     end
   end
 
+  @doc "Applies a readline edit (`⌃A`, `⌃E`, `⌃H`, `⌃W`, `⌃U`, `⌃K`) to the text and cursor."
+  @spec line_edit(t(), Minga.Editing.LineEdit.edit()) :: t()
+  def line_edit(%__MODULE__{kind: :confirm} = prompt, _edit), do: prompt
+
+  def line_edit(%__MODULE__{text: text, cursor: cursor} = prompt, edit) do
+    {text, cursor} = Minga.Editing.LineEdit.apply(edit, text, cursor)
+    %{prompt | text: text, cursor: cursor}
+  end
+
   @doc "Replaces changed text and moves the cursor to the end; identical text is a no-op."
   @spec replace_text(t(), String.t()) :: t()
   def replace_text(%__MODULE__{text: text} = prompt, text), do: prompt
