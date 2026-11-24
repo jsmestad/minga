@@ -24,6 +24,7 @@ defmodule MingaEditor.UI.Picker.FetchEffect do
   alias MingaEditor.UI.Picker.FilesystemContext
   alias MingaEditor.UI.Picker.PublicSource
   alias MingaEditor.UI.Picker.Source
+  alias MingaEditor.UI.Picker.WorkspaceSymbolSource
 
   @enforce_keys [:source, :callback_source, :context, :revision]
   defstruct [:source, :callback_source, :context, :revision, :fetch_identity]
@@ -204,6 +205,9 @@ defmodule MingaEditor.UI.Picker.FetchEffect do
     do: MingaEditor.UI.Picker.FileAttachmentSource.fetch_identity(context)
 
   defp fetch_identity(FileSource, %Context{} = context), do: FileSource.fetch_identity(context)
+
+  defp fetch_identity(WorkspaceSymbolSource, %Context{} = context),
+    do: WorkspaceSymbolSource.fetch_identity(context)
 
   defp fetch_identity(_source, %Context{}), do: nil
 end
