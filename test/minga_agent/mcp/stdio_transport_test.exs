@@ -1,8 +1,6 @@
 defmodule MingaAgent.MCP.StdioTransportTest do
-  # Spawns a real /bin/sh child to verify process-boundary env isolation
-  # and MCP line accumulation. OS process tests must not run concurrently
-  # because of BEAM child setup races. The size-limit test also mutates
-  # Application env (:minga, :mcp_max_line_bytes).
+  # Spawns real /bin/sh children to verify process-boundary env isolation and MCP framing.
+  # OS process tests must not run concurrently because of BEAM child setup races.
   use ExUnit.Case, async: false
 
   alias MingaAgent.MCP.StdioTransport
@@ -123,20 +121,8 @@ defmodule MingaAgent.MCP.StdioTransportTest do
     end
 
     test "line_too_long error when accumulated noeol chunks exceed the limit" do
-      # Set a tiny limit so we can trigger it without generating megabytes.
-      prev = Application.get_env(:minga, :mcp_max_line_bytes)
-
-      on_exit(fn ->
-        if prev,
-          do: Application.put_env(:minga, :mcp_max_line_bytes, prev),
-          else: Application.delete_env(:minga, :mcp_max_line_bytes)
-      end)
-
-      Application.put_env(:minga, :mcp_max_line_bytes, 100)
-
-      # Emit 200 bytes without a newline, then exit. The port driver will
-      # deliver these as noeol chunks (line buffer = 32), and the accumulator
-      # should bail once total bytes > 100.
+      # Emit 200 bytes without a newline. The port driver delivers them as noeol pieces (line buffer = 32).
+      # The request fails once the frame passes 100 bytes.
       data = String.duplicate("A", 200)
 
       port =
@@ -149,7 +135,7 @@ defmodule MingaAgent.MCP.StdioTransportTest do
           {:env, [{~c"PATH", String.to_charlist(System.get_env("PATH"))}]}
         ])
 
-      transport = %StdioTransport{port: port}
+      transport = %StdioTransport{port: port, max_line_bytes: 100}
       message = %{"jsonrpc" => "2.0", "id" => "limit-1", "method" => "test", "params" => %{}}
 
       assert {:error, {:line_too_long, exceeded}} =
@@ -161,6 +147,132 @@ defmodule MingaAgent.MCP.StdioTransportTest do
     catch
       :exit, _ -> :ok
     end
+  end
+
+  describe "start/3" do
+    test "takes the frame limit from the transport options, or from the default when none is given" do
+      config = %ServerConfig{name: "drain", command: "/bin/sh", args: ["-c", "cat >/dev/null"]}
+
+      for {opts, expected} <- [
+            {[], StdioTransport.max_line_bytes()},
+            {[max_line_bytes: 100], 100}
+          ] do
+        assert {:ok, %StdioTransport{max_line_bytes: ^expected} = transport} =
+                 StdioTransport.start(config, self(), opts)
+
+        assert StdioTransport.stop(transport) == :ok
+      end
+    end
+  end
+
+  # These tests deliver port messages to the test process directly, because request/3 receives in its caller.
+  # The child only drains stdin, so the port stays open until the transport or the test closes it.
+  describe "framing against a live port" do
+    setup do
+      port = open_draining_port()
+      on_exit(fn -> close_port(port) end)
+      {:ok, port: port}
+    end
+
+    test "an oversized frame closes the port so the rest of the line is never parsed as the next frame",
+         %{port: port} do
+      transport = %StdioTransport{port: port, max_line_bytes: 100}
+      for _piece <- 1..2, do: send(self(), {port, {:data, {:noeol, String.duplicate("A", 64)}}})
+
+      assert {:error, {:line_too_long, 128}} =
+               StdioTransport.request(transport, request(7), 1_000)
+
+      assert Port.info(port) == nil
+    end
+
+    test "the last piece of a frame counts toward the frame limit", %{port: port} do
+      transport = %StdioTransport{port: port, max_line_bytes: 100}
+      send(self(), {port, {:data, {:noeol, String.duplicate("A", 64)}}})
+      send(self(), {port, {:data, {:eol, String.duplicate("A", 37)}}})
+
+      assert {:error, {:line_too_long, 101}} =
+               StdioTransport.request(transport, request(7), 1_000)
+
+      assert Port.info(port) == nil
+    end
+
+    test "a multi-piece frame for another request is skipped and the matching response is returned",
+         %{port: port} do
+      transport = %StdioTransport{port: port, max_line_bytes: 1_000}
+
+      other =
+        JSON.encode!(%{
+          "jsonrpc" => "2.0",
+          "id" => 6,
+          "result" => %{"text" => String.duplicate("x", 150)}
+        })
+
+      for piece <- chunk_every(other, 64) |> Enum.drop(-1),
+          do: send(self(), {port, {:data, {:noeol, piece}}})
+
+      send(self(), {port, {:data, {:eol, other |> chunk_every(64) |> List.last()}}})
+
+      send(
+        self(),
+        {port, {:data, {:eol, ~s({"jsonrpc":"2.0","method":"notifications/progress"})}}}
+      )
+
+      send(self(), {port, {:data, {:eol, ~s({"jsonrpc":"2.0","id":7,"result":{"ok":true}})}}})
+
+      assert {:ok, %{"ok" => true}} = StdioTransport.request(transport, request(7), 1_000)
+      assert Port.info(port) != nil
+    end
+
+    test "the request deadline fires while pieces of an unfinished frame keep arriving", %{
+      port: port
+    } do
+      transport = %StdioTransport{port: port, max_line_bytes: 1_000_000_000}
+      test_pid = self()
+      feeder = spawn_link(fn -> feed_pieces(test_pid, port) end)
+
+      assert {:error, :timeout} = StdioTransport.request(transport, request(7), 100)
+
+      unlink_and_stop(feeder)
+      assert Port.info(port) != nil
+    end
+  end
+
+  defp request(id), do: %{"jsonrpc" => "2.0", "id" => id, "method" => "test", "params" => %{}}
+
+  defp chunk_every(binary, size) when byte_size(binary) <= size, do: [binary]
+
+  defp chunk_every(binary, size) do
+    <<piece::binary-size(^size), rest::binary>> = binary
+    [piece | chunk_every(rest, size)]
+  end
+
+  defp open_draining_port do
+    Port.open({:spawn_executable, "/bin/sh"}, [
+      :binary,
+      :exit_status,
+      :use_stdio,
+      {:line, 64},
+      {:args, ["-c", "cat >/dev/null"]},
+      {:env, [{~c"PATH", String.to_charlist(System.get_env("PATH"))}]}
+    ])
+  end
+
+  # Sends one unfinished-frame piece every few milliseconds until stopped.
+  defp feed_pieces(test_pid, port) do
+    send(test_pid, {port, {:data, {:noeol, String.duplicate("A", 64)}}})
+
+    receive do
+      :stop -> :ok
+    after
+      5 -> feed_pieces(test_pid, port)
+    end
+  end
+
+  defp unlink_and_stop(pid) do
+    Process.unlink(pid)
+    ref = Process.monitor(pid)
+    send(pid, :stop)
+    assert_receive {:DOWN, ^ref, :process, ^pid, _reason}
   end
 
   # The shell exits as soon as it has printed, so the port may already be closed when the test is done with it.

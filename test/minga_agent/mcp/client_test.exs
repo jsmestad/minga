@@ -142,6 +142,38 @@ defmodule MingaAgent.MCP.ClientTest do
     assert Client.list_tools(client) == {:error, message}
   end
 
+  test "an oversized response marks down only the client whose transport sent it" do
+    {:ok, offending} =
+      Client.start_link(
+        server_config: server_config(),
+        transport: FakeTransport,
+        transport_opts: [
+          tools: [tool_def()],
+          request_errors: %{"echo-text" => {:line_too_long, 10_485_761}}
+        ],
+        notify_pid: self()
+      )
+
+    {:ok, healthy} =
+      Client.start_link(
+        server_config: %ServerConfig{name: "Other Tools", command: "ignored"},
+        transport: FakeTransport,
+        transport_opts: [tools: [tool_def()]],
+        notify_pid: self()
+      )
+
+    assert {:error, {:line_too_long, 10_485_761}} =
+             Client.call_tool(offending, "echo-text", %{"text" => "hi"})
+
+    assert_receive {:mcp_client_down, ^offending, "Local Tools", {:line_too_long, 10_485_761}}
+
+    assert {:error, message} = Client.call_tool(offending, "echo-text", %{"text" => "hi"})
+    assert message =~ "Local Tools is unavailable"
+
+    assert {:ok, _result} = Client.call_tool(healthy, "echo-text", %{"text" => "hi"})
+    refute_received {:mcp_client_down, ^healthy, _name, _reason}
+  end
+
   test "call_tool returns an error when the client process is gone" do
     {:ok, client} =
       Client.start(
