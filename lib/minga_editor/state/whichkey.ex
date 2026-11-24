@@ -47,7 +47,9 @@ defmodule MingaEditor.State.WhichKey do
   defp labels(_labels, _node, []), do: []
 
   defp labels(labels, node, prefix_keys) do
-    Enum.take(labels, length(prefix_keys) - 1) ++ [node_label(node, prefix_keys)]
+    labels
+    |> Enum.take(length(prefix_keys) - 1)
+    |> List.insert_at(-1, node_label(node, prefix_keys))
   end
 
   @spec node_label(Minga.Keymap.Bindings.node_t(), [String.t()]) :: String.t()

@@ -66,9 +66,8 @@ defmodule MingaEditor.RenderModel.UI.WhichKeyBuilderTest do
   test "SPC a reads Tasks, Conversation, Changes, More, with a breadcrumb back to SPC" do
     model = WhichKeyBuilder.build(shown([{?a, 0}]))
 
-    assert Enum.map(sections(model), &elem(&1, 0)) == ["Tasks", "Conversation", "Changes", "More"]
-    assert {"More", more} = List.last(sections(model))
-    assert Enum.take(more, 2) == ["x", "S"]
+    assert [{"Tasks", _}, {"Conversation", _}, {"Changes", _}, {"More", ["x", "S" | _]}] =
+             sections(model)
 
     assert model.path == "SPC a"
 

@@ -34,7 +34,7 @@ public struct WhichKeyOverlay: View {
             .background(
                 RoundedRectangle(cornerRadius: Radius.lg)
                     .fill(theme.popupBg)
-                    .shadow(color: .black.opacity(0.25), radius: 12, y: -2)
+                    .shadow(color: .black.opacity(0.4), radius: 12, y: -4)
             )
             .overlay(
                 RoundedRectangle(cornerRadius: Radius.lg)
@@ -199,7 +199,7 @@ public enum WhichKeyLayout {
 #Preview("Which Key") {
     let theme = PreviewFixtures.theme()
     let entries: [Wire.WhichKeyEntry] = [
-        .init(kind: 0, key: "a", label: "Agent view", section: "Tasks", count: "· 1 needs you"),
+        .init(kind: 0, key: "a", label: "Agent view", section: "Tasks", count: "· 2"),
         .init(kind: 0, key: "n", label: "New session", section: "Tasks"),
         .init(kind: 0, key: "s", label: "Stop", section: "Tasks"),
         .init(kind: 0, key: "v", label: "Conversation split", section: "Conversation"),
@@ -210,7 +210,7 @@ public enum WhichKeyLayout {
     let model = Wire.WhichKey(
         visible: true, path: "SPC a",
         breadcrumb: [.init(key: "SPC", path: "SPC"), .init(key: "a", label: "Minga", path: "SPC a")],
-        count: "· 1 needs you",
+        count: "· 2",
         hints: [.init(key: "⌫", label: "back"), .init(key: "esc", label: "close")],
         entries: entries)
     return WhichKeyOverlay(state: WhichKeyState(model: model))
