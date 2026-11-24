@@ -913,19 +913,14 @@ jobs:
           print("Every substantive CI job succeeded.")
           PY
 
+  # Build and deploy run as separate jobs, as in GitHub's Pages starter workflow. Deploying in the job
+  # that uploaded the artifact fails intermittently: the artifact lookup can miss an upload made a second earlier.
   docs:
-    name: Deploy Docs
+    name: Build Docs
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
-    concurrency:
-      group: pages
-      cancel-in-progress: true
     permissions:
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+      contents: read
     steps:
       - uses: actions/checkout@v4
 
@@ -948,5 +943,21 @@ jobs:
       - uses: actions/upload-pages-artifact@v3
         with:
           path: doc/
+
+  docs-deploy:
+    name: Deploy Docs
+    needs: docs
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    concurrency:
+      group: pages
+      cancel-in-progress: true
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
       - id: deployment
         uses: actions/deploy-pages@v4
