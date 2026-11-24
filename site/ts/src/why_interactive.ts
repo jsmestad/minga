@@ -1,5 +1,7 @@
 /* Why Minga interactive widgets: Layout Width Comparator + Personalized "I Currently Use..." Comparison Lens. */
 
+import { highlightElixirLine } from "./highlight.ts";
+
 export type LayoutMode = "ide" | "minga_rest" | "minga_drawer";
 export type EditorLensId = "all" | "cursor" | "zed" | "herdr" | "neovim" | "emacs";
 
@@ -123,56 +125,94 @@ export function mountLayoutComparator(root: HTMLElement): void {
 
   function render(): void {
     const m = LAYOUT_MODES[mode];
+    const mingaLines: readonly { readonly ln: number; readonly hl?: boolean; readonly text: string }[] = [
+      { ln: 234, text: "defmodule MingaAgent.Retry do" },
+      { ln: 235, text: "  @max_backoff_ms 30_000" },
+      { ln: 236, text: "" },
+      { ln: 237, text: "  def classify_status(status, headers) do" },
+      { ln: 238, hl: true, text: "    case status do" },
+      { ln: 239, hl: true, text: "      429 -> {:rate_limited, parse_retry_after(headers)}" },
+      { ln: 240, hl: true, text: "      529 -> {:overloaded, backoff_ms(2)}  # 164 unobstructed columns" },
+      { ln: 241, hl: true, text: "      code when code >= 500 -> {:retryable, backoff_ms(1)}" },
+      { ln: 242, text: "      _ -> {:fatal, status}" },
+      { ln: 243, text: "    end" },
+      { ln: 244, text: "  end" },
+      { ln: 245, text: "" },
+      { ln: 246, text: "  defp backoff_ms(attempt), do: min(@max_backoff_ms, 250 * attempt)" },
+      { ln: 247, text: "end" },
+    ];
+
+    const visibleLines = mode === "minga_drawer" ? mingaLines.slice(3, 11) : mingaLines;
+    const mingaCodeHtml = visibleLines
+      .map(
+        (l) =>
+          `<div class="${l.hl ? "wf-hl" : ""}"><span class="wf-ln">${l.ln}</span>${l.text ? highlightElixirLine(l.text) : "&nbsp;"}</div>`,
+      )
+      .join("");
+
     const wireframe =
       mode === "ide"
         ? `
           <div class="wf-ide">
-            <div class="wf-rail">Rail<br>48px</div>
+            <div class="wf-rail">
+              <span>Files</span>
+              <span>Search</span>
+              <span>Git</span>
+              <span>Debug</span>
+              <span>Exts</span>
+              <span>AI</span>
+            </div>
             <div class="wf-tree">
-              <strong>EXPLORER</strong>
+              <strong class="wf-panel-head">EXPLORER</strong>
               <span>▾ lib/</span>
-              <span>&nbsp; retry.ex</span>
-              <span>&nbsp; router.ex</span>
+              <span>&nbsp; ▾ minga_agent/</span>
+              <span class="wf-file-active">&nbsp;&nbsp;&nbsp; retry.ex</span>
+              <span>&nbsp;&nbsp;&nbsp; router.ex</span>
+              <span>&nbsp;&nbsp;&nbsp; session.ex</span>
               <span>▾ test/</span>
+              <span>&nbsp; retry_test.exs</span>
+              <span>▸ config/</span>
+              <span>▸ docs/</span>
             </div>
             <div class="wf-center">
-              <div class="wf-tabs"><span>retry.ex ×</span><span>router.ex ×</span><span>config.exs ×</span><span>+6</span></div>
+              <div class="wf-tabs"><span>retry.ex ×</span><span>router.ex ×</span><span>session.ex ×</span><span>+8</span></div>
               <div class="wf-code is-cramped">
-                <div>238  case status do</div>
-                <div>239    429 -&gt; {:rate_limited,</div>
-                <div>       parse_retry_after(...)}</div>
-                <div>240    529 -&gt; {:overloaded, ...}</div>
+                <div><span class="wf-ln">237</span>${highlightElixirLine("def classify_status(status,")}</div>
+                <div><span class="wf-ln">   </span>${highlightElixirLine("    headers) do")}</div>
+                <div><span class="wf-ln">238</span>${highlightElixirLine("  case status do")}</div>
+                <div><span class="wf-ln">239</span>${highlightElixirLine("    429 -> {:rate_limited,")}</div>
+                <div><span class="wf-ln">   </span>${highlightElixirLine("      parse_retry_after(...)}")}</div>
+                <div><span class="wf-ln">240</span>${highlightElixirLine("    529 -> {:overloaded,")}</div>
+                <div><span class="wf-ln">   </span>${highlightElixirLine("      backoff_ms(2)}")}</div>
               </div>
-              <div class="wf-term">TERMINAL · PROBLEMS · OUTPUT · DEBUG (24% height)</div>
+              <div class="wf-term">
+                <div class="wf-term-tabs"><span>PROBLEMS (3)</span><span>OUTPUT</span><span class="is-on">TERMINAL</span><span>DEBUG</span></div>
+                <div>$ mix test test/minga_agent/retry_test.exs</div>
+                <div class="wf-term-dim">Running ExUnit... (bottom dock takes 28% height)</div>
+              </div>
             </div>
             <div class="wf-chat">
-              <strong>AI CHAT DOCK</strong>
-              <span>360px permanent</span>
-              <span>sidebar eating</span>
-              <span>code columns</span>
+              <strong class="wf-panel-head">AI CHAT SIDEBAR</strong>
+              <div class="wf-chat-msg">User: Handle HTTP 529 overloaded responses.</div>
+              <div class="wf-chat-msg is-ai">Agent: Applying edits across 2 files...</div>
+              <div class="wf-chat-box">Ask anything... (360px permanent dock)</div>
             </div>
           </div>`
         : `
           <div class="wf-minga">
-            <div class="wf-m-title"><span>minga</span><span>retry.ex · lib/minga_agent</span></div>
-            <div class="wf-code is-wide">
-              <div><span class="wf-ln">237</span> def classify_status(status, headers) do</div>
-              <div class="wf-hl"><span class="wf-ln">238</span>   case status do</div>
-              <div class="wf-hl"><span class="wf-ln">239</span>     429 -&gt; {:rate_limited, parse_retry_after(headers)}</div>
-              <div class="wf-hl"><span class="wf-ln">240</span>     529 -&gt; {:overloaded, backoff_ms(2)} <span class="wf-muted"># 164 unobstructed columns</span></div>
-              <div class="wf-hl"><span class="wf-ln">241</span>     code when code &gt;= 500 -&gt; {:retryable, backoff_ms(1)}</div>
-              <div><span class="wf-ln">242</span>     _ -&gt; {:fatal, status}</div>
-            </div>
+            <div class="wf-m-title"><span>minga</span><span>retry.ex · lib/minga_agent/retry.ex</span></div>
+            <div class="wf-code is-wide">${mingaCodeHtml}</div>
             ${
               mode === "minga_drawer"
                 ? `<div class="wf-drawer">
-                    <div class="wf-drawer-head"><strong>Switcher (SPC ,)</strong><span>q / esc returns to 94% code area</span></div>
-                    <div class="wf-drawer-row"><strong>retry.ex</strong> · Changed · Minga change 1/2</div>
-                    <div class="wf-drawer-row"><strong>router.ex</strong> · Pinned · SPC 1</div>
+                    <div class="wf-drawer-head"><span class="wf-drawer-title">Switcher (SPC ,)</span><span>q / esc returns to 94% code area</span></div>
+                    <div class="wf-drawer-row"><span class="wf-drawer-file">retry.ex</span> <span class="wf-drawer-meta">· Changed · Minga change 1/2</span></div>
+                    <div class="wf-drawer-row"><span class="wf-drawer-file">router.ex</span> <span class="wf-drawer-meta">· Pinned · SPC 1</span></div>
+                    <div class="wf-drawer-row"><span class="wf-drawer-file">config.exs</span> <span class="wf-drawer-meta">· Recent · 2m ago</span></div>
                   </div>`
                 : ""
             }
-            <div class="wf-m-modeline"><span>NORMAL</span><span>retry.ex</span><span>change 1/2</span><span>elixir · 240:31</span></div>
+            <div class="wf-m-modeline"><span>NORMAL</span><span>retry.ex</span><span class="ml-minga">change 1/2</span><span>elixir · 240:31</span></div>
           </div>`;
 
     root.innerHTML = `

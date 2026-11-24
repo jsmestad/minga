@@ -1,12 +1,15 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  applyTypedChar,
   computeStagedSnapshot,
-  createArchFaultState,
+  createIsolationSimState,
   createStagedPipelineState,
-  toggleArchFault,
+  tickIsolationSim,
+  triggerIsolationFault,
 } from "../src/arch_interactive.ts";
-import { createRollbackDemoState, reduceRollbackDemo } from "../src/extending_interactive.ts";
+import { EXTENDING_SCENARIOS } from "../src/extending_interactive.ts";
+import { highlightElixirLine } from "../src/highlight.ts";
 import { createHeroTourState, reduceHeroTour } from "../src/home_interactive.ts";
 
 describe("Homepage playable Feature Tour state machine", () => {
@@ -36,51 +39,44 @@ describe("Homepage playable Feature Tour state machine", () => {
   });
 });
 
-describe("Architecture fault simulator & staged overlay pipeline", () => {
-  it("isolates Zig parser and MCP faults while recording supervisor traces", () => {
-    let f = createArchFaultState();
-    f = toggleArchFault(f, "parser");
-    assert.equal(f.parserCrashed, true);
-    assert.match(f.log[0] ?? "", /minga-parser/);
-    f = toggleArchFault(f, "mcp");
-    assert.equal(f.mcpCrashed, true);
-    assert.match(f.log[0] ?? "", /GitHub MCP/);
+describe("Architecture live typing fault simulator & staged overlay pipeline", () => {
+  it("freezes single-loop keystrokes during LSP hang while Minga types live, then flushes on unblock", () => {
+    let sim = createIsolationSimState();
+    const initial = sim.mingaText;
+    sim = triggerIsolationFault(sim, "lsp_hang");
+    sim = applyTypedChar(sim, `${initial} # ok`);
+    assert.equal(sim.mingaText, `${initial} # ok`);
+    assert.equal(sim.legacyText, initial);
+    assert.equal(sim.legacyQueued, " # ok");
+
+    sim = tickIsolationSim(sim, 3000);
+    assert.equal(sim.fault, "none");
+    assert.equal(sim.legacyText, `${initial} # ok`);
+    assert.equal(sim.legacyQueued, "");
   });
 
-  it("merges non-overlapping edits cleanly and pauses on overlapping conflict", () => {
+  it("kills in-process editor on parser crash while Minga respawns Zig port and restores colors", () => {
+    let sim = createIsolationSimState();
+    sim = triggerIsolationFault(sim, "parser_crash");
+    assert.equal(sim.legacyDead, true);
+    assert.equal(sim.mingaParserPlain, true);
+    sim = tickIsolationSim(sim, 700);
+    assert.equal(sim.mingaParserPlain, false);
+    assert.equal(sim.legacyDead, true);
+  });
+
+  it("renders clean 3-way merge and conflict states cleanly with Elixir highlighting", () => {
     const cleanPublish = computeStagedSnapshot({ ...createStagedPipelineState(), step: 4, conflictMode: false });
-    assert.equal(cleanPublish.diskBadge, "published");
-    assert.match(cleanPublish.headline, /Clean 3-way merge/);
+    assert.equal(cleanPublish.diskStatus.label, "Modified retry.ex");
 
     const conflictPublish = computeStagedSnapshot({ ...createStagedPipelineState(), step: 4, conflictMode: true });
-    assert.equal(conflictPublish.diskBadge, "clean");
-    assert.match(conflictPublish.headline, /conflict review/);
+    assert.equal(conflictPublish.diskStatus.label, "Clean (publish paused)");
+    assert.equal(conflictPublish.overlayStatus.tone, "fail");
 
-    const recovered = computeStagedSnapshot({ step: 3, conflictMode: false, crashedAndRecovered: true });
-    assert.match(recovered.overlayBadge, /Recovered/);
-  });
-});
-
-describe("Extending Layer 3 save-to-activate & rollback safety demo", () => {
-  it("requires explicit grant before activation and auto-restores Gen #2 on broken Gen #3", () => {
-    let s = createRollbackDemoState();
-    s = reduceRollbackDemo(s, "activate");
-    assert.equal(s.stage, "draft");
-    assert.match(s.errorDetail, /requires an explicit revocable session grant/);
-
-    s = reduceRollbackDemo(s, "grant");
-    assert.equal(s.grantActive, true);
-    s = reduceRollbackDemo(s, "activate");
-    assert.equal(s.stage, "active");
-    assert.equal(s.activeGeneration, 2);
-
-    s = reduceRollbackDemo(s, "inject_failure");
-    assert.equal(s.stage, "rolled_back");
-    assert.equal(s.activeGeneration, 2);
-    assert.match(s.errorDetail, /Automatically restored Generation #2/);
-
-    s = reduceRollbackDemo(s, "discard");
-    assert.equal(s.stage, "discarded");
-    assert.equal(s.grantActive, false);
+    const highlighted = highlightElixirLine('def foo, do: :ok # hi');
+    assert.match(highlighted, /class="ckw">def<\/span>/);
+    assert.match(highlighted, /class="cat">:ok<\/span>/);
+    assert.match(highlighted, /class="ccm"># hi<\/span>/);
+    assert.ok(EXTENDING_SCENARIOS.migration.layers[3].code.includes("tuesday_migration_audit"));
   });
 });

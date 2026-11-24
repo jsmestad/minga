@@ -1,106 +1,122 @@
-/* Architecture interactive visualizers: BEAM Fault-Injection Process Map + 4-Step Staged Overlay & 3-Way Merge Stepper. */
+/* Architecture interactive demos:
+   1. Live side-by-side typing fault simulator (Single-Loop Editor vs Minga BEAM Isolation).
+   2. Airy, syntax-highlighted 4-step Staged Overlay & 3-Way Merge visualizer. */
 
-export type ArchNodeId = "parser" | "lsp" | "mcp" | "hook" | "frontend" | "agent";
+import { highlightElixirLine } from "./highlight.ts";
 
-export interface ArchFaultState {
-  readonly parserCrashed: boolean;
-  readonly lspHung: boolean;
-  readonly mcpCrashed: boolean;
-  readonly hookRaised: boolean;
-  readonly frontendDetached: boolean;
-  readonly agentCrashed: boolean;
-  readonly log: readonly string[];
+export type FaultKind = "none" | "lsp_hang" | "parser_crash" | "hook_error";
+
+export interface IsolationSimState {
+  readonly fault: FaultKind;
+  readonly remainingMs: number;
+  readonly mingaText: string;
+  readonly legacyText: string;
+  readonly legacyQueued: string;
+  readonly legacyDead: boolean;
+  readonly mingaParserPlain: boolean;
+  readonly notice: string;
 }
 
-export function createArchFaultState(): ArchFaultState {
+const DEFAULT_LINE = 'def retry_after(429), do: {:backoff, 250}';
+
+export function createIsolationSimState(): IsolationSimState {
   return {
-    parserCrashed: false,
-    lspHung: false,
-    mcpCrashed: false,
-    hookRaised: false,
-    frontendDetached: false,
-    agentCrashed: false,
-    log: ["[BEAM] All 8 process boundaries healthy. Editor Core mailbox: <1ms latency."],
+    fault: "none",
+    remainingMs: 0,
+    mingaText: DEFAULT_LINE,
+    legacyText: DEFAULT_LINE,
+    legacyQueued: "",
+    legacyDead: false,
+    mingaParserPlain: false,
+    notice: "Type below or click a fault trigger to feel how BEAM isolation protects keystrokes.",
   };
 }
 
-export function toggleArchFault(state: ArchFaultState, node: ArchNodeId): ArchFaultState {
-  const push = (entry: string): readonly string[] => [entry, ...state.log].slice(0, 4);
-
-  switch (node) {
-    case "parser": {
-      const next = !state.parserCrashed;
-      return {
-        ...state,
-        parserCrashed: next,
-        log: push(
-          next
-            ? "[Supervisor] minga-parser (Zig OS port) segfaulted on malformed grammar. Supervisor respawned it in 14ms; open buffers and typing never stalled."
-            : "[Supervisor] minga-parser healthy; visible lines re-highlighted cleanly.",
-        ),
-      };
-    }
-    case "lsp": {
-      const next = !state.lspHung;
-      return {
-        ...state,
-        lspHung: next,
-        log: push(
-          next
-            ? "[LSP Isolation] ElixirLS blocked for 10s on full workspace reindex. Runs in its own BEAM process; Editor Core keystrokes stay <1ms."
-            : "[LSP Isolation] ElixirLS responsive again; diagnostics stream resumed.",
-        ),
-      };
-    }
-    case "mcp": {
-      const next = !state.mcpCrashed;
-      return {
-        ...state,
-        mcpCrashed: next,
-        log: push(
-          next
-            ? "[MCP Supervisor] GitHub MCP stdio process exited (SIGKILL). Only mcp_github__* tools dropped out; built-in file tools and open buffers stayed live."
-            : "[MCP Supervisor] GitHub MCP restarted cleanly; tools re-registered.",
-        ),
-      };
-    }
-    case "hook": {
-      const next = !state.hookRaised;
-      return {
-        ...state,
-        hookRaised: next,
-        log: push(
-          next
-            ? "[Hook Isolation] User :after_save callback raised MatchError. Exception contained in background Task; buffer save succeeded and editor kept running."
-            : "[Hook Isolation] Cleared :after_save error state.",
-        ),
-      };
-    }
-    case "frontend": {
-      const next = !state.frontendDetached;
-      return {
-        ...state,
-        frontendDetached: next,
-        log: push(
-          next
-            ? "[Client Bridge] macOS Metal UI process disconnected. BEAM core, open buffers, undo trees, and running agent turns stayed alive waiting for reattach."
-            : "[Client Bridge] Reattached client; full viewport state streamed back immediately.",
-        ),
-      };
-    }
-    case "agent": {
-      const next = !state.agentCrashed;
-      return {
-        ...state,
-        agentCrashed: next,
-        log: push(
-          next
-            ? "[Draft Durability] Agent turn process crashed mid-stream. Unpublished overlay stayed persisted in staged_drafts; open buffers and undo stayed intact."
-            : "[Draft Durability] Agent session recovered with staged drafts intact.",
-        ),
-      };
-    }
+export function triggerIsolationFault(state: IsolationSimState, fault: FaultKind): IsolationSimState {
+  if (fault === "none") {
+    return createIsolationSimState();
   }
+  if (fault === "lsp_hang") {
+    return {
+      ...state,
+      fault: "lsp_hang",
+      remainingMs: 3000,
+      legacyDead: false,
+      mingaParserPlain: false,
+      notice: "ElixirLS blocked for 3.0s. Keep typing: the single-loop editor freezes while Minga stays instant.",
+    };
+  }
+  if (fault === "parser_crash") {
+    return {
+      ...state,
+      fault: "parser_crash",
+      remainingMs: 700,
+      legacyDead: true,
+      legacyQueued: "",
+      mingaParserPlain: true,
+      notice: "Malformed grammar segfaulted the C parser. In-process editor crashed; Minga respawned its Zig port in 14ms with 0 text lost.",
+    };
+  }
+  return {
+    ...state,
+    fault: "hook_error",
+    remainingMs: 2200,
+    legacyDead: false,
+    mingaParserPlain: false,
+    notice: "User :after_save hook raised MatchError. Single-loop save aborted; Minga contained the exception in a background Task.",
+  };
+}
+
+export function applyTypedChar(state: IsolationSimState, nextText: string): IsolationSimState {
+  const mingaText = nextText;
+  if (state.legacyDead) {
+    return { ...state, mingaText };
+  }
+  if (state.fault === "lsp_hang" && state.remainingMs > 0) {
+    const added = nextText.length >= state.mingaText.length ? nextText.slice(state.mingaText.length) : "⌫";
+    return {
+      ...state,
+      mingaText,
+      legacyQueued: state.legacyQueued + added,
+    };
+  }
+  return {
+    ...state,
+    mingaText,
+    legacyText: nextText,
+  };
+}
+
+export function tickIsolationSim(state: IsolationSimState, deltaMs: number): IsolationSimState {
+  if (state.remainingMs <= 0) return state;
+  const nextRem = Math.max(0, state.remainingMs - deltaMs);
+  if (nextRem > 0) {
+    return { ...state, remainingMs: nextRem };
+  }
+  if (state.fault === "lsp_hang") {
+    return {
+      ...state,
+      fault: "none",
+      remainingMs: 0,
+      legacyText: state.mingaText,
+      legacyQueued: "",
+      notice: "LSP unblocked after 3.0s. Single-loop editor finally flushed its stalled keystrokes; Minga never missed a frame.",
+    };
+  }
+  if (state.fault === "parser_crash") {
+    return {
+      ...state,
+      remainingMs: 0,
+      mingaParserPlain: false,
+      notice: "Minga's Zig parser port respawned cleanly and restored syntax highlighting; the in-process editor is still dead until restart.",
+    };
+  }
+  return {
+    ...state,
+    fault: "none",
+    remainingMs: 0,
+    notice: "Hook error cleared. Minga saved cleanly without blocking typing.",
+  };
 }
 
 export type StagedStep = 1 | 2 | 3 | 4;
@@ -108,161 +124,126 @@ export type StagedStep = 1 | 2 | 3 | 4;
 export interface StagedPipelineState {
   readonly step: StagedStep;
   readonly conflictMode: boolean;
-  readonly crashedAndRecovered: boolean;
 }
 
-export function createStagedPipelineState(): StagedPipelineState {
-  return { step: 1, conflictMode: false, crashedAndRecovered: false };
+export interface StagedCodeRow {
+  readonly ln: string;
+  readonly kind: "normal" | "add" | "you" | "conflict";
+  readonly code: string;
 }
 
 export interface StagedViewSnapshot {
-  readonly headline: string;
-  readonly diskStatus: string;
-  readonly diskBadge: "clean" | "published";
-  readonly diskLines: readonly string[];
-  readonly bufferBadge: string;
-  readonly bufferLines: readonly string[];
-  readonly overlayBadge: string;
-  readonly overlayLines: readonly string[];
-  readonly explanation: string;
+  readonly title: string;
+  readonly summary: string;
+  readonly editorHeader: string;
+  readonly rows: readonly StagedCodeRow[];
+  readonly diskStatus: { readonly label: string; readonly tone: "ok" | "warn" };
+  readonly bufferStatus: { readonly label: string; readonly tone: "ok" | "warn" };
+  readonly overlayStatus: { readonly label: string; readonly tone: "ok" | "warn" | "fail" };
+}
+
+export function createStagedPipelineState(): StagedPipelineState {
+  return { step: 1, conflictMode: false };
 }
 
 export function computeStagedSnapshot(state: StagedPipelineState): StagedViewSnapshot {
-  const baseDisk = [
-    "238 def classify(status) do",
-    "239   if status >= 500, do: :retry, else: :fatal",
-    "240 end",
-    "241 def timeout_ms, do: 5_000",
-  ];
-
   if (state.step === 1) {
     return {
-      headline: "Step 1: Revision-checked read and edit proposal",
-      diskStatus: "git status: clean (0 files modified)",
-      diskBadge: "clean",
-      diskLines: baseDisk,
-      bufferBadge: "rev: 42 · untouched",
-      bufferLines: baseDisk,
-      overlayBadge: "Reading rev: 42 -> proposing +3 lines",
-      overlayLines: [
-        "Tool call: edit_file(path: \"retry.ex\", base_rev: 42)",
-        "✓ Revision matches current buffer (42 == 42)",
-        "Preparing isolated overlay fork (no disk write)...",
+      title: "1. Revision check before any edit",
+      summary: "The agent reads retry.ex at rev 42 and attaches that token to its edit call. Stale proposals reject before touching a byte.",
+      editorHeader: "retry.ex · rev 42 (read verified)",
+      rows: [
+        { ln: "238", kind: "normal", code: "def classify(status) do" },
+        { ln: "239", kind: "normal", code: "  if status >= 500, do: :retry, else: :fatal" },
+        { ln: "240", kind: "normal", code: "end" },
+        { ln: "241", kind: "normal", code: "def timeout_ms, do: 5_000" },
       ],
-      explanation: "Agent tools must pass the file's revision token from a full read. Stale edits reject cleanly before mutating anything.",
+      diskStatus: { label: "Clean (0 modified)", tone: "ok" },
+      bufferStatus: { label: "rev 42 · untouched", tone: "ok" },
+      overlayStatus: { label: "Token rev 42 matched", tone: "ok" },
     };
   }
 
   if (state.step === 2) {
-    const humanLine = state.conflictMode
-      ? "239*  if status >= 500, do: :backoff, else: :fatal # yours"
-      : "241* def timeout_ms, do: 15_000  # your edit";
-    const bufferLines = state.conflictMode
-      ? [baseDisk[0]!, humanLine, baseDisk[2]!, baseDisk[3]!]
-      : [baseDisk[0]!, baseDisk[1]!, baseDisk[2]!, humanLine];
-
     return {
-      headline: state.conflictMode
-        ? "Step 2: Agent stages in overlay while you edit the SAME line"
-        : "Step 2: Agent stages in overlay while you keep coding",
-      diskStatus: "git status: clean (disk untouched)",
-      diskBadge: "clean",
-      diskLines: baseDisk,
-      bufferBadge: "rev: 43 · your edit live",
-      bufferLines,
-      overlayBadge: "Staged fork (base rev: 42)",
-      overlayLines: [
-        "238 def classify(status) do",
-        "+239  case status do",
-        "+240    429 -> :rate_limited",
-        "+241    code when code >= 500 -> :retry",
-        "242 end",
+      title: "2. Agent stages off disk in an isolated overlay",
+      summary: "Approved agent edits land in memory + ~/.local/share/minga/staged_drafts. Your Git working tree stays completely clean.",
+      editorHeader: "Staged overlay fork · base rev 42",
+      rows: [
+        { ln: "238", kind: "normal", code: "def classify(status) do" },
+        { ln: "+239", kind: "add", code: "  case status do" },
+        { ln: "+240", kind: "add", code: "    429 -> :rate_limited" },
+        { ln: "+241", kind: "add", code: "    code when code >= 500 -> :retry" },
+        { ln: "242", kind: "normal", code: "  end" },
+        { ln: "243", kind: "normal", code: "def timeout_ms, do: 5_000" },
       ],
-      explanation: "Approved agent edits land in an isolated overlay. Your open buffer, cursor, undo stack, and disk working tree never race with the agent.",
+      diskStatus: { label: "Clean (untouched)", tone: "ok" },
+      bufferStatus: { label: "rev 42 · cursor free", tone: "ok" },
+      overlayStatus: { label: "+3 staged · draft saved", tone: "warn" },
     };
   }
 
   if (state.step === 3) {
-    const humanLine = state.conflictMode
-      ? "239*  if status >= 500, do: :backoff, else: :fatal # yours"
-      : "241* def timeout_ms, do: 15_000  # your edit";
-    const bufferLines = state.conflictMode
-      ? [baseDisk[0]!, humanLine, baseDisk[2]!, baseDisk[3]!]
-      : [baseDisk[0]!, baseDisk[1]!, baseDisk[2]!, humanLine];
-
+    const rows: readonly StagedCodeRow[] = state.conflictMode
+      ? [
+          { ln: "238", kind: "normal", code: "def classify(status) do" },
+          { ln: "239", kind: "you", code: "  if status >= 500, do: :backoff, else: :fatal  # your edit" },
+          { ln: "240", kind: "normal", code: "end" },
+          { ln: "241", kind: "normal", code: "def timeout_ms, do: 5_000" },
+        ]
+      : [
+          { ln: "238", kind: "normal", code: "def classify(status) do" },
+          { ln: "239", kind: "normal", code: "  if status >= 500, do: :retry, else: :fatal" },
+          { ln: "240", kind: "normal", code: "end" },
+          { ln: "241", kind: "you", code: "def timeout_ms, do: 15_000  # your concurrent edit" },
+        ];
     return {
-      headline: state.crashedAndRecovered
-        ? "Step 3: Editor restarted and restored staged draft automatically"
-        : "Step 3: Syntax-highlighted review + crash-safe draft persistence",
-      diskStatus: "git status: clean (still unpublished)",
-      diskBadge: "clean",
-      diskLines: baseDisk,
-      bufferBadge: state.crashedAndRecovered ? "Restored rev: 43 · intact" : "rev: 43 · focus stays here",
-      bufferLines,
-      overlayBadge: state.crashedAndRecovered
-        ? "Recovered from ~/.local/share/minga/staged_drafts"
-        : "Persisted atomically in staged_drafts",
-      overlayLines: [
-        state.crashedAndRecovered
-          ? "✓ Editor crashed & restarted: draft reloaded with base_rev: 42"
-          : "Saved private draft: ~/.local/share/minga/staged_drafts/retry.ex",
-        "Hunk 1/1: +3 -1 lines (syntax-highlighted diff viewer)",
-        "Ordinary :q warns if unpublished; ready for SPC a p publish.",
-      ],
-      explanation: state.crashedAndRecovered
-        ? "Because draft durability lives in an independent service outside the editor process, killing the editor never loses unpublished agent work."
-        : "Staged diffs open quietly without stealing focus. Drafts persist atomically outside the editor process so restarts never lose work.",
+      title: state.conflictMode ? "3. You edit the same line (line 239)" : "3. You keep editing another line (line 241)",
+      summary: state.conflictMode
+        ? "Your open buffer moves to rev 43 on line 239 while the agent's overlay stays safely isolated at base rev 42."
+        : "Your open buffer advances to rev 43 on line 241. The overlay stays separate and survives editor restarts.",
+      editorHeader: "Your open buffer · rev 43 (overlay isolated)",
+      rows,
+      diskStatus: { label: "Clean (untouched)", tone: "ok" },
+      bufferStatus: { label: "rev 43 · your edit live", tone: "ok" },
+      overlayStatus: { label: state.conflictMode ? "Overlaps line 239" : "Persisted · ready", tone: state.conflictMode ? "fail" : "warn" },
     };
   }
 
-  // Step 4: Publish / 3-way merge
   if (state.conflictMode) {
     return {
-      headline: "Step 4: Overlapping edit detected -> safe conflict review",
-      diskStatus: "git status: clean (publish paused for conflict)",
-      diskBadge: "clean",
-      diskLines: baseDisk,
-      bufferBadge: "rev: 43 · protected (not overwritten)",
-      bufferLines: [
-        baseDisk[0]!,
-        "239*  if status >= 500, do: :backoff, else: :fatal # preserved!",
-        baseDisk[2]!,
-        baseDisk[3]!,
+      title: "4. Publish pauses for safe conflict review",
+      summary: "Both you and the agent edited line 239. 3-way merge refuses to overwrite your edit and opens explicit conflict review.",
+      editorHeader: "Conflict review · line 239 protected",
+      rows: [
+        { ln: "238", kind: "normal", code: "def classify(status) do" },
+        { ln: "<<<", kind: "conflict", code: "<<<<<<< your buffer (rev 43)" },
+        { ln: "239", kind: "you", code: "  if status >= 500, do: :backoff, else: :fatal" },
+        { ln: "===", kind: "conflict", code: "=======" },
+        { ln: "+239", kind: "add", code: "  case status do 429 -> :rate_limited; _ -> :retry end" },
+        { ln: ">>>", kind: "conflict", code: ">>>>>>> agent overlay (base rev 42)" },
       ],
-      overlayBadge: "Conflict on line 239 · manual resolution",
-      overlayLines: [
-        "<<<<<<< your buffer (rev 43)",
-        "  if status >= 500, do: :backoff, else: :fatal",
-        "=======",
-        "  case status do 429 -> :rate_limited; code when code >= 500 -> :retry end",
-        ">>>>>>> agent overlay (base rev 42)",
-      ],
-      explanation: "Because both you and the agent edited line 239, 3-way merge refuses to silently overwrite your edit and opens explicit conflict review instead.",
+      diskStatus: { label: "Clean (publish paused)", tone: "ok" },
+      bufferStatus: { label: "rev 43 · never clobbered", tone: "ok" },
+      overlayStatus: { label: "Conflict review open", tone: "fail" },
     };
   }
 
-  const merged = [
-    "238 def classify(status) do",
-    "239   case status do",
-    "240     429 -> :rate_limited",
-    "241     code when code >= 500 -> :retry",
-    "242   end",
-    "243 def timeout_ms, do: 15_000  # your edit preserved!",
-  ];
   return {
-    headline: "Step 4: Clean 3-way merge published via SPC a p",
-    diskStatus: "git status: modified retry.ex (published cleanly)",
-    diskBadge: "published",
-    diskLines: merged,
-    bufferBadge: "rev: 44 · merged cleanly (1 undo step)",
-    bufferLines: merged,
-    overlayBadge: "Overlay cleared · draft removed",
-    overlayLines: [
-      "✓ 3-way merge applied agent hunk (lines 238–242) + kept your line 243 edit",
-      "✓ Written cleanly to buffer and working tree",
-      "✓ Undo stack intact if you want to revert",
+    title: "4. Clean 3-way merge via SPC a p",
+    summary: "Non-overlapping edits merge cleanly into your buffer and disk in one undoable step, keeping your line 243 edit intact.",
+    editorHeader: "retry.ex · rev 44 (published cleanly)",
+    rows: [
+      { ln: "238", kind: "normal", code: "def classify(status) do" },
+      { ln: "239", kind: "add", code: "  case status do" },
+      { ln: "240", kind: "add", code: "    429 -> :rate_limited" },
+      { ln: "241", kind: "add", code: "    code when code >= 500 -> :retry" },
+      { ln: "242", kind: "normal", code: "  end" },
+      { ln: "243", kind: "you", code: "def timeout_ms, do: 15_000  # preserved!" },
     ],
-    explanation: "Non-overlapping edits merge cleanly via 3-way merge into both your open buffer and disk in one atomic step, preserving your undo history.",
+    diskStatus: { label: "Modified retry.ex", tone: "warn" },
+    bufferStatus: { label: "rev 44 · 1 undo step", tone: "ok" },
+    overlayStatus: { label: "Cleared cleanly", tone: "ok" },
   };
 }
 
@@ -275,166 +256,173 @@ function esc(value: string): string {
 }
 
 export function mountArchFaultMap(root: HTMLElement): void {
-  let state = createArchFaultState();
+  let state = createIsolationSimState();
+  let tickTimer: number | null = null;
+  let autoTypeTimer: number | null = null;
 
-  function render(): void {
-    const anyFault =
-      state.parserCrashed ||
-      state.lspHung ||
-      state.mcpCrashed ||
-      state.hookRaised ||
-      state.frontendDetached ||
-      state.agentCrashed;
+  function stopTimers(): void {
+    if (tickTimer !== null) {
+      window.clearInterval(tickTimer);
+      tickTimer = null;
+    }
+    if (autoTypeTimer !== null) {
+      window.clearInterval(autoTypeTimer);
+      autoTypeTimer = null;
+    }
+  }
 
-    const coreNodes = [
-      {
-        name: "Editor Core",
-        boundary: "BEAM GenServer",
-        statusLabel: "ALIVE · <1ms",
-        detail: anyFault ? "Keystrokes unaffected despite downstream fault" : "Orders every keystroke, drawer, and modeline frame",
-      },
-      {
-        name: "Open Buffers & Undo",
-        boundary: "1 process / file",
-        statusLabel: "100% INTACT",
-        detail: "Isolated per-file heaps; zero unsaved text lost",
-      },
-    ];
+  function startAutoTypeBurst(): void {
+    if (autoTypeTimer !== null) {
+      window.clearInterval(autoTypeTimer);
+      autoTypeTimer = null;
+    }
+    const phrase = " # fast!";
+    let idx = 0;
+    autoTypeTimer = window.setInterval(() => {
+      if (idx >= phrase.length) {
+        if (autoTypeTimer !== null) window.clearInterval(autoTypeTimer);
+        autoTypeTimer = null;
+        return;
+      }
+      state = applyTypedChar(state, state.mingaText + phrase[idx]!);
+      idx += 1;
+      syncLivePanels();
+    }, 190);
+  }
 
-    const faultNodes: readonly {
-      readonly id: ArchNodeId;
-      readonly name: string;
-      readonly boundary: string;
-      readonly status: "ok" | "fail" | "warn";
-      readonly statusLabel: string;
-      readonly detail: string;
-      readonly btnLabel: string;
-    }[] = [
-      {
-        id: "parser",
-        name: "Syntax Parser (Zig)",
-        boundary: "Separate OS Port",
-        status: state.parserCrashed ? "fail" : "ok",
-        statusLabel: state.parserCrashed ? "RESPAWNED (14ms)" : "HEALTHY",
-        detail: state.parserCrashed ? "Segfault isolated to OS Port; restarted cleanly" : "50 compiled tree-sitter grammars outside BEAM",
-        btnLabel: state.parserCrashed ? "Clear fault" : "Crash Zig parser",
-      },
-      {
-        id: "lsp",
-        name: "ElixirLS (LSP)",
-        boundary: "Isolated BEAM Port",
-        status: state.lspHung ? "warn" : "ok",
-        statusLabel: state.lspHung ? "BLOCKED 10s" : "HEALTHY",
-        detail: state.lspHung ? "Slow index isolated; editor mailbox never waits" : "Async diagnostics, hover, and completions",
-        btnLabel: state.lspHung ? "Unblock LSP" : "Hang LSP 10s",
-      },
-      {
-        id: "mcp",
-        name: "GitHub MCP (stdio)",
-        boundary: "Supervised Child",
-        status: state.mcpCrashed ? "fail" : "ok",
-        statusLabel: state.mcpCrashed ? "EXITED" : "HEALTHY",
-        detail: state.mcpCrashed ? "Only mcp_github__* dropped; other tools alive" : "Crash-isolated tool process with prefixing",
-        btnLabel: state.mcpCrashed ? "Restart MCP" : "Crash MCP",
-      },
-      {
-        id: "hook",
-        name: "User :after_save Hook",
-        boundary: "Async BEAM Task",
-        status: state.hookRaised ? "fail" : "ok",
-        statusLabel: state.hookRaised ? "RAISED ERROR" : "HEALTHY",
-        detail: state.hookRaised ? "Exception contained; file save completed cleanly" : "Runs off the editor thread in separate Task",
-        btnLabel: state.hookRaised ? "Clear error" : "Raise in hook",
-      },
-      {
-        id: "frontend",
-        name: "macOS Metal / Go TUI",
-        boundary: "Client OS Process",
-        status: state.frontendDetached ? "warn" : "ok",
-        statusLabel: state.frontendDetached ? "DETACHED" : "CONNECTED",
-        detail: state.frontendDetached ? "Core & agents stay running; ready to reattach" : "Streams UI tokens over binary pipes / SSH",
-        btnLabel: state.frontendDetached ? "Reattach UI" : "Disconnect UI",
-      },
-      {
-        id: "agent",
-        name: "Agent Turn & Drafts",
-        boundary: "Supervised Session",
-        status: state.agentCrashed ? "fail" : "ok",
-        statusLabel: state.agentCrashed ? "DRAFT SAVED" : "HEALTHY",
-        detail: state.agentCrashed ? "Unpublished overlay survived in staged_drafts" : "Separate session process + crash-safe draft store",
-        btnLabel: state.agentCrashed ? "Recover turn" : "Crash agent turn",
-      },
-    ];
+  function startFault(kind: FaultKind): void {
+    stopTimers();
+    state = triggerIsolationFault(state, kind);
+    renderFull();
+    if (kind === "none") return;
 
-    const coreHtml = coreNodes
-      .map(
-        (n) => `
-          <div class="af-node is-ok">
-            <div class="af-node-top">
-              <div>
-                <strong>${esc(n.name)}</strong>
-                <span class="af-boundary">${esc(n.boundary)}</span>
-              </div>
-              <span class="topo-pill is-ok">${esc(n.statusLabel)}</span>
-            </div>
-            <p class="af-detail">${esc(n.detail)}</p>
-          </div>`,
-      )
-      .join("");
+    if (kind === "lsp_hang") {
+      startAutoTypeBurst();
+    }
 
-    const cardsHtml = faultNodes
-      .map(
-        (n) => `
-          <div class="af-node is-${n.status}">
-            <div class="af-node-top">
-              <div>
-                <strong>${esc(n.name)}</strong>
-                <span class="af-boundary">${esc(n.boundary)}</span>
-              </div>
-              <span class="topo-pill is-${n.status === "ok" ? "ok" : n.status === "warn" ? "warn" : "fail"}">${esc(n.statusLabel)}</span>
-            </div>
-            <p class="af-detail">${esc(n.detail)}</p>
-            <button type="button" class="af-btn" data-af-node="${n.id}">${esc(n.btnLabel)}</button>
-          </div>`,
-      )
-      .join("");
+    tickTimer = window.setInterval(() => {
+      state = tickIsolationSim(state, 100);
+      syncLivePanels();
+      if (state.remainingMs <= 0 && tickTimer !== null) {
+        window.clearInterval(tickTimer);
+        tickTimer = null;
+      }
+    }, 100);
+  }
 
-    const logsHtml = state.log.map((entry) => `<div>${esc(entry)}</div>`).join("");
+  function syncLivePanels(): void {
+    const input = root.querySelector<HTMLInputElement>("[data-iso-input]");
+    if (input && document.activeElement !== input) {
+      input.value = state.mingaText;
+    }
 
+    const legacyPane = root.querySelector<HTMLElement>("[data-iso-legacy]");
+    const mingaPane = root.querySelector<HTMLElement>("[data-iso-minga]");
+    const noticeEl = root.querySelector<HTMLElement>("[data-iso-notice]");
+
+    if (noticeEl) noticeEl.textContent = state.notice;
+
+    const secs = (state.remainingMs / 1000).toFixed(1);
+    const frozen = state.fault === "lsp_hang" && state.remainingMs > 0;
+    const hookErr = state.fault === "hook_error" && state.remainingMs > 0;
+
+    if (legacyPane) {
+      let badge = '<span class="topo-pill is-ok">0.6ms · Ready</span>';
+      let body = `<div class="iso-code-line">${highlightElixirLine(state.legacyText)}<span class="iso-caret"></span></div>`;
+      let foot = "Shared main loop: editor, plugins, and LSP share one thread.";
+
+      if (state.legacyDead) {
+        badge = '<span class="topo-pill is-fail">CRASHED · SIGSEGV</span>';
+        body = `<div class="iso-dead">Process terminated (signal 11). Unsaved buffer changes lost.</div>`;
+        foot = "In-process C parser took down the entire editor process.";
+      } else if (frozen) {
+        badge = `<span class="topo-pill is-fail">FROZEN · ${secs}s LEFT</span>`;
+        body = `<div class="iso-code-line is-frozen">${highlightElixirLine(state.legacyText)}</div><div class="iso-stall">UI thread blocked · ${state.legacyQueued.length} keystroke${state.legacyQueued.length === 1 ? "" : "s"} stalled in queue...</div>`;
+        foot = "Cursor stopped responding until LSP finishes blocking.";
+      } else if (hookErr) {
+        badge = '<span class="topo-pill is-fail">SAVE ABORTED</span>';
+        body = `<div class="iso-code-line">${highlightElixirLine(state.legacyText)}</div><div class="iso-stall">Unhandled MatchError in :after_save interrupted buffer save.</div>`;
+        foot = "Uncaught hook exception surfaced directly on the editor loop.";
+      }
+
+      legacyPane.className = `iso-editor ${state.legacyDead || frozen || hookErr ? "is-broken" : ""}`;
+      legacyPane.innerHTML = `
+        <div class="iso-ed-head"><strong>Single-Loop Editor</strong>${badge}</div>
+        <div class="iso-ed-body">${body}</div>
+        <div class="iso-ed-foot">${foot}</div>
+      `;
+    }
+
+    if (mingaPane) {
+      let badge = '<span class="topo-pill is-ok">0.4ms · INSTANT</span>';
+      let sideStatus = "All BEAM supervisors healthy";
+      if (frozen) {
+        badge = '<span class="topo-pill is-ok">0.4ms · INSTANT</span>';
+        sideStatus = `ElixirLS reindexing in separate process (${secs}s) · typing unaffected`;
+      } else if (state.mingaParserPlain) {
+        badge = '<span class="topo-pill is-warn">RESPAWNING ZIG PORT</span>';
+        sideStatus = "Highlighting paused for 14ms while Zig port respawns · buffer 100% intact";
+      } else if (state.fault === "parser_crash" && !state.mingaParserPlain) {
+        badge = '<span class="topo-pill is-ok">PORT RESPAWNED (14ms)</span>';
+        sideStatus = "Syntax colors restored automatically · 0 characters lost";
+      } else if (hookErr) {
+        badge = '<span class="topo-pill is-ok">SAVED ✓ · TASK ISOLATED</span>';
+        sideStatus = "Hook MatchError caught in async BEAM Task · typing unaffected";
+      }
+
+      const renderedCode = state.mingaParserPlain ? esc(state.mingaText) : highlightElixirLine(state.mingaText);
+      mingaPane.innerHTML = `
+        <div class="iso-ed-head"><strong>Minga (BEAM Isolated)</strong>${badge}</div>
+        <div class="iso-ed-body"><div class="iso-code-line">${renderedCode}<span class="iso-caret is-alive"></span></div></div>
+        <div class="iso-ed-foot">${esc(sideStatus)}</div>
+      `;
+    }
+  }
+
+  function renderFull(): void {
     root.innerHTML = `
-      <div class="story-box">
+      <div class="story-box iso-box">
         <div class="story-bar">
-          <span>INTERACTIVE FAULT SIMULATOR · CLICK ANY BOUNDARY TO BREAK IT</span>
-          <button type="button" class="seg-btn" data-af-reset>Reset all healthy</button>
+          <span>LIVE ISOLATION DEMO · FIRE A FAULT &amp; TYPE BELOW</span>
+          <div class="seg-group" role="group" aria-label="Inject real-time faults">
+            <button type="button" class="seg-btn ${state.fault === "lsp_hang" ? "is-active" : ""}" data-iso-fault="lsp_hang">Hang LSP (3s)</button>
+            <button type="button" class="seg-btn ${state.fault === "parser_crash" ? "is-active" : ""}" data-iso-fault="parser_crash">Crash Parser</button>
+            <button type="button" class="seg-btn ${state.fault === "hook_error" ? "is-active" : ""}" data-iso-fault="hook_error">Crash :after_save</button>
+            <button type="button" class="seg-btn" data-iso-fault="none">Reset</button>
+          </div>
         </div>
-        <div class="af-core-strip">${coreHtml}</div>
-        <div class="af-grid">${cardsHtml}</div>
-        <div class="af-log" aria-live="polite">${logsHtml}</div>
+        <div class="iso-input-bar">
+          <label for="iso-live-input">Type here while faults run:</label>
+          <input id="iso-live-input" class="iso-input" type="text" data-iso-input value="${esc(state.mingaText)}" spellcheck="false" autocomplete="off">
+        </div>
+        <div class="iso-compare">
+          <div class="iso-editor" data-iso-legacy></div>
+          <div class="iso-editor is-minga" data-iso-minga></div>
+        </div>
+        <div class="iso-notice" data-iso-notice aria-live="polite">${esc(state.notice)}</div>
       </div>
     `;
+    syncLivePanels();
   }
 
   root.addEventListener("click", (event) => {
-    const target = event.target as HTMLElement | null;
-    if (!target) return;
-
-    if (target.closest("[data-af-reset]")) {
-      state = createArchFaultState();
-      render();
-      return;
-    }
-
-    const nodeBtn = target.closest<HTMLElement>("[data-af-node]");
-    if (nodeBtn) {
-      const id = nodeBtn.getAttribute("data-af-node") as ArchNodeId | null;
-      if (id === "parser" || id === "lsp" || id === "mcp" || id === "hook" || id === "frontend" || id === "agent") {
-        state = toggleArchFault(state, id);
-        render();
-      }
+    const btn = (event.target as HTMLElement | null)?.closest<HTMLElement>("[data-iso-fault]");
+    if (!btn) return;
+    const f = btn.getAttribute("data-iso-fault") as FaultKind | null;
+    if (f === "none" || f === "lsp_hang" || f === "parser_crash" || f === "hook_error") {
+      startFault(f);
     }
   });
 
-  render();
+  root.addEventListener("input", (event) => {
+    const target = event.target as HTMLInputElement | null;
+    if (target?.matches("[data-iso-input]")) {
+      state = applyTypedChar(state, target.value);
+      syncLivePanels();
+    }
+  });
+
+  renderFull();
 }
 
 export function mountStagedStepper(root: HTMLElement): void {
@@ -444,9 +432,9 @@ export function mountStagedStepper(root: HTMLElement): void {
     const snap = computeStagedSnapshot(state);
     const steps: readonly { readonly n: StagedStep; readonly label: string }[] = [
       { n: 1, label: "1. Revision check" },
-      { n: 2, label: "2. Overlay + your edit" },
-      { n: 3, label: "3. Draft & review" },
-      { n: 4, label: "4. 3-way publish" },
+      { n: 2, label: "2. Stage off disk" },
+      { n: 3, label: "3. Your edit" },
+      { n: 4, label: "4. Publish (SPC a p)" },
     ];
 
     const stepBtns = steps
@@ -456,46 +444,44 @@ export function mountStagedStepper(root: HTMLElement): void {
       )
       .join("");
 
+    const codeRows = snap.rows
+      .map((r) => {
+        const html = r.kind === "conflict" ? `<span class="st-cmark">${esc(r.code)}</span>` : highlightElixirLine(r.code);
+        return `<div class="st-row is-${r.kind}"><span class="st-ln">${esc(r.ln)}</span><span class="st-code">${html}</span></div>`;
+      })
+      .join("");
+
     root.innerHTML = `
       <div class="story-box">
         <div class="story-bar">
-          <span>INTERACTIVE PIPELINE · SCRUB EACH STAGE</span>
-          <div class="st-toggles">
-            <label class="st-check">
-              <input type="checkbox" data-st-conflict ${state.conflictMode ? "checked" : ""}>
-              <span>Simulate overlapping edit conflict</span>
-            </label>
-            <button type="button" class="seg-btn" data-st-crash>${state.crashedAndRecovered ? "Recovered ✓" : "Simulate editor crash"}</button>
+          <span>STAGED OVERLAY PIPELINE</span>
+          <div class="seg-group" role="group" aria-label="Merge scenario">
+            <button type="button" class="seg-btn ${!state.conflictMode ? "is-active" : ""}" data-st-conflict-mode="clean">Clean 3-way merge</button>
+            <button type="button" class="seg-btn ${state.conflictMode ? "is-active" : ""}" data-st-conflict-mode="conflict">Same-line conflict</button>
           </div>
         </div>
-        <div class="st-step-row" role="group" aria-label="Staged overlay pipeline steps">${stepBtns}</div>
-        <div class="st-headline">
-          <strong>${esc(snap.headline)}</strong>
-          <p>${esc(snap.explanation)}</p>
-        </div>
-        <div class="st-panes">
-          <div class="st-pane">
-            <div class="st-pane-head">
-              <strong>Working Tree (Disk)</strong>
-              <span class="topo-pill ${snap.diskBadge === "clean" ? "is-ok" : "is-warn"}">${esc(snap.diskStatus)}</span>
-            </div>
-            <pre><code>${esc(snap.diskLines.join("\n"))}</code></pre>
+        <div class="st-step-row" role="group" aria-label="Staged overlay steps">${stepBtns}</div>
+        <div class="st-clean-layout">
+          <div class="st-editor">
+            <div class="st-ed-bar"><span>${esc(snap.editorHeader)}</span><span>Elixir</span></div>
+            <div class="st-ed-body">${codeRows}</div>
           </div>
-          <div class="st-pane">
-            <div class="st-pane-head">
-              <strong>Open Buffer (Memory)</strong>
-              <span class="topo-pill is-ok">${esc(snap.bufferBadge)}</span>
+          <div class="st-ledger">
+            <div class="st-stat">
+              <span class="lens-k">GIT ON DISK</span>
+              <span class="topo-pill is-${snap.diskStatus.tone}">${esc(snap.diskStatus.label)}</span>
             </div>
-            <pre><code>${esc(snap.bufferLines.join("\n"))}</code></pre>
-          </div>
-          <div class="st-pane is-accent">
-            <div class="st-pane-head">
-              <strong>Staged Overlay &amp; Draft</strong>
-              <span class="topo-pill ${state.conflictMode && state.step === 4 ? "is-fail" : "is-ok"}">${esc(snap.overlayBadge)}</span>
+            <div class="st-stat">
+              <span class="lens-k">OPEN BUFFER</span>
+              <span class="topo-pill is-${snap.bufferStatus.tone}">${esc(snap.bufferStatus.label)}</span>
             </div>
-            <pre><code>${esc(snap.overlayLines.join("\n"))}</code></pre>
+            <div class="st-stat">
+              <span class="lens-k">STAGED OVERLAY</span>
+              <span class="topo-pill is-${snap.overlayStatus.tone}">${esc(snap.overlayStatus.label)}</span>
+            </div>
           </div>
         </div>
+        <div class="st-foot"><strong>${esc(snap.title)}:</strong> ${esc(snap.summary)}</div>
       </div>
     `;
   }
@@ -508,22 +494,16 @@ export function mountStagedStepper(root: HTMLElement): void {
     if (stepBtn) {
       const n = Number(stepBtn.getAttribute("data-st-step"));
       if (n === 1 || n === 2 || n === 3 || n === 4) {
-        state = { ...state, step: n, crashedAndRecovered: n === 3 ? state.crashedAndRecovered : false };
+        state = { ...state, step: n };
         render();
       }
       return;
     }
 
-    if (target.closest("[data-st-crash]")) {
-      state = { ...state, step: 3, crashedAndRecovered: true };
-      render();
-    }
-  });
-
-  root.addEventListener("change", (event) => {
-    const target = event.target as HTMLInputElement | null;
-    if (target?.matches("[data-st-conflict]")) {
-      state = { ...state, conflictMode: target.checked };
+    const modeBtn = target.closest<HTMLElement>("[data-st-conflict-mode]");
+    if (modeBtn) {
+      const m = modeBtn.getAttribute("data-st-conflict-mode");
+      state = { ...state, conflictMode: m === "conflict" };
       render();
     }
   });
