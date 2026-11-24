@@ -775,6 +775,18 @@ defmodule MingaEditor.Shell.Traditional.ModelineTest do
       assert String.contains?(text, "42 chars")
       refute String.contains?(text, "1:1")
     end
+
+    test "a selection of one reads in the singular" do
+      assert segments_text(Map.put(@base_data, :selection_info, {:chars, 1})) =~ " 1 char "
+      assert segments_text(Map.put(@base_data, :selection_info, {:lines, 1})) =~ " 1 line "
+      assert segments_text(Map.put(@base_data, :selection_info, {:lines, 3})) =~ " 3 lines "
+    end
+
+    test "the scroll position reads as one percent sign" do
+      text = segments_text(%{@base_data | cursor_line: 9})
+      assert text =~ "100%"
+      refute text =~ "%%"
+    end
   end
 
   # ── Helpers ────────────────────────────────────────────────────────────────

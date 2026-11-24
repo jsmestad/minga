@@ -836,3 +836,4 @@ When adding chrome data (diagnostic counts, indent info, selection size, etc.), 
 - **New or modified agent tool:** `docs/recipes/new-agent-tool.md`
 - **New render command:** `docs/recipes/new-render-command.md`
 - **New tree-sitter grammar:** `docs/recipes/new-grammar.md`
+- **A change that moves a storyboard render:** accept it with `design/tools/storyboard/renders.py promote` ([Renders and baselines](docs/design/storyboard.md#renders-and-baselines)), then run the visual review before marking the PR ready: `docs/recipes/visual-review.md`

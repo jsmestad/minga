@@ -19,8 +19,8 @@ private extension StatusBarUpdate.SelectionInfo {
 
     var displayText: String {
         switch mode {
-        case 1: return "\(size) chars"
-        case 2: return "\(size) lines"
+        case 1: return size == 1 ? "1 char" : "\(size) chars"
+        case 2: return size == 1 ? "1 line" : "\(size) lines"
         default: return ""
         }
     }

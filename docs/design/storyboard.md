@@ -149,6 +149,12 @@ python3 design/tools/storyboard/renders.py promote --macos /tmp/storyboard-macos
 
 **In CI.** The **Storyboard (Elixir)** job records the transcripts and draws the TUI frames. **Storyboard renders (macOS)** draws the macOS frames on `macos-15` whenever native sources changed, a macOS-only input changed (the renderer's tools, the window grid, the baselines), or the packets for a macOS frame differ from the ones its baseline was promoted from (each promotion records a digest of them). When it is skipped, its frames equal their baselines by construction, so the parity check still applies. **Storyboard renders** compares both with the baselines, checks parity, writes the changed scenarios to the job summary and publishes the generated storyboard page as the `storyboard-page` artifact: scenarios in rows, frontends and sizes in columns, a theme switch, and the journeys below as frame strips. It is part of the CI gate.
 
+## Visual review
+
+Hard gates decide whether a pull request merges: the semantic checks, the conformance transcripts, the snapshots, the render baselines and the layout audit. Visual review catches what they cannot, and never blocks. Every pull request that changes a scenario's renders, or promotes a scenario's first baselines, gets one before it is marked ready: two independent reviewer agents check structure against the scenario's board and polish against [anatomy.md](anatomy.md), using the fixed [rubric](visual_rubric.md); a polish critic then runs at most three rounds. Their verdicts are posted on the pull request as one "Visual review" comment with the number of changed scenarios reviewed, and every concern, disagreement and open critic item is appended to the visual follow-ups issue ([#4071](https://github.com/jsmestad/minga/issues/4071)).
+
+CI does not run agents, so the Minga ticket runner runs the review after CI has rendered the storyboard. The procedure, the inputs script and the record format are in [Run the visual review](../recipes/visual-review.md).
+
 ## Journey strips
 
 The main journeys run as scripted flow tests that also emit a strip of frames for the storyboard page:
