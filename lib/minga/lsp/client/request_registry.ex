@@ -41,6 +41,10 @@ defmodule Minga.LSP.Client.RequestRegistry do
   @spec fetch(t(), integer()) :: {:ok, pending_entry()} | :error
   def fetch(%__MODULE__{} = registry, id), do: Map.fetch(registry.pending, id)
 
+  @doc "Returns every pending request entry."
+  @spec pending_entries(t()) :: [pending_entry()]
+  def pending_entries(%__MODULE__{} = registry), do: Map.values(registry.pending)
+
   @doc "Returns the JSON-RPC id for an opaque caller request reference."
   @spec id_for_ref(t(), reference()) :: {:ok, integer()} | :error
   def id_for_ref(%__MODULE__{} = registry, ref), do: Map.fetch(registry.ids_by_ref, ref)

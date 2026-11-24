@@ -345,6 +345,89 @@ defmodule Minga.LSP.ClientTest do
       assert Client.validate_document_version(client, @uri, 1, first_buffer, 9) ==
                {:error, :version_mismatch}
     end
+
+    test "reopening a document for its open buffer reconciles without a second didOpen", %{
+      client: client
+    } do
+      buffer = self()
+
+      Client.did_open(client, @uri, "elixir", "first", buffer, 3)
+      Client.did_open(client, @uri, "elixir", "first", buffer, 3)
+      Client.did_open(client, @uri, "elixir", "second", buffer, 5)
+      Client.did_open(client, @uri, "elixir", "stale", buffer, 4)
+
+      assert Client.validate_document_version(client, @uri, 2, buffer, 5) == :ok
+      transcript = transcript(client)
+
+      assert document_events(transcript, @uri) == [
+               {"textDocument/didOpen", 1},
+               {"textDocument/didChange", 2}
+             ]
+
+      assert transcript["documents"][@uri]["text"] == "second"
+    end
+
+    test "opening a document for another buffer closes the previous document first", %{
+      client: client
+    } do
+      first_buffer = spawn(fn -> receive do: (:stop -> :ok) end)
+      second_buffer = spawn(fn -> receive do: (:stop -> :ok) end)
+
+      on_exit(fn ->
+        send(first_buffer, :stop)
+        send(second_buffer, :stop)
+      end)
+
+      Client.did_open(client, @uri, "elixir", "first", first_buffer, 9)
+      Client.did_open(client, @uri, "elixir", "second", second_buffer, 3)
+
+      assert Client.validate_document_version(client, @uri, 1, second_buffer, 3) == :ok
+      transcript = transcript(client)
+
+      assert document_events(transcript, @uri) == [
+               {"textDocument/didOpen", 1},
+               {"textDocument/didClose", nil},
+               {"textDocument/didOpen", 1}
+             ]
+
+      assert transcript["documents"][@uri]["text"] == "second"
+    end
+  end
+
+  describe "client exit" do
+    @tag :capture_log
+    test "a framing-limit exit fails every pending caller", %{diag_server: diag_server} do
+      root = Path.join(System.tmp_dir!(), "framing_lsp_#{System.unique_integer([:positive])}")
+      File.mkdir_p!(root)
+      root_uri = "file://#{root}"
+
+      client =
+        start_supervised!(
+          Supervisor.child_spec(
+            {Client,
+             server_config: MockLSPServer.server_config(),
+             root_path: root,
+             diagnostics: diag_server},
+            id: :framing_lsp_client,
+            restart: :temporary
+          )
+        )
+
+      if Client.status(client) != :ready do
+        assert_receive {:minga_event, :lsp_status_changed,
+                        %Minga.Events.LspStatusEvent{status: :ready, uri: ^root_uri}},
+                       @ready_timeout
+      end
+
+      stalled_ref = Client.request(client, "mock/stall", %{})
+      monitor = Process.monitor(client)
+      trigger_ref = Client.request(client, "mock/oversized_frame", %{})
+      reason = {:framing_error, {:body_too_large, 60_000_000}}
+
+      assert_receive {:DOWN, ^monitor, :process, ^client, ^reason}, @event_timeout
+      assert_receive {:lsp_response, ^stalled_ref, {:error, {:client_exited, ^reason}}}
+      assert_receive {:lsp_response, ^trigger_ref, {:error, {:client_exited, ^reason}}}
+    end
   end
 
   describe "workspace/configuration" do
@@ -499,6 +582,17 @@ defmodule Minga.LSP.ClientTest do
 
     assert [%{code: "CANCEL"}] =
              Diagnostics.for_uri(diag_server, "file:///tmp/cancel-request-test.ex")
+  end
+
+  defp transcript(client) do
+    ref = Client.request(client, "mock/transcript", %{})
+    assert_receive {:lsp_response, ^ref, {:ok, transcript}}, @event_timeout
+    transcript
+  end
+
+  defp document_events(transcript, uri) do
+    for %{"uri" => ^uri} = event <- transcript["events"],
+        do: {event["method"], event["version"]}
   end
 
   defp wait_until_ready(client) do

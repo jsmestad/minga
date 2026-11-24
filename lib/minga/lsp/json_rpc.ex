@@ -177,6 +177,11 @@ defmodule Minga.LSP.JsonRpc do
       [headers_section, _body_and_rest] ->
         {:error, {:headers_too_large, byte_size(headers_section)}}
 
+      # Without a blank line, every retained byte belongs to the header block.
+      # Only the header limit plus a partial terminator can still become a valid header block.
+      [partial] when byte_size(partial) > @max_header_bytes + 3 ->
+        {:error, {:headers_too_large, byte_size(partial)}}
+
       [_partial] ->
         :incomplete
     end
