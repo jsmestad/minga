@@ -96,7 +96,9 @@ defmodule Minga.Core.Diff do
       else: :over_budget
   end
 
-  # Myers' greedy shortest-edit-script search, measuring only the distance. Round `edits` extends the furthest-reaching path on every diagonal `k = x - y` that `edits` deletions and insertions can reach; `reach` maps each diagonal to the base index its path has consumed.
+  # Myers' greedy shortest-edit-script search, measuring only the distance.
+  # Round `edits` extends the furthest-reaching path on every diagonal `k = x - y` within reach.
+  # `reach` maps each diagonal to the base index its path has consumed.
   @spec edits_within?(tuple(), tuple(), non_neg_integer()) :: boolean()
   defp edits_within?(base, current, max_edits) do
     abs(tuple_size(base) - tuple_size(current)) <= max_edits and

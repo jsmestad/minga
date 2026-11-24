@@ -2302,7 +2302,8 @@ defmodule Minga.Buffer.Process do
   def handle_call({:bounded_append, text, max_lines, max_bytes}, _from, state) do
     doc = state.document
 
-    # Append at the end even when the reader moved the cursor up (`gg` in *Messages*), so the front trim below never removes the new entry.
+    # Append at the end even when the reader moved the cursor up (`gg` in *Messages*).
+    # The front trim below then never removes the new entry.
     doc = Document.append_text(doc, text)
 
     total_lines = Document.line_count(doc)
