@@ -724,7 +724,21 @@ defmodule Minga.Config do
     end
   end
 
+  # Source-free names that Minga once shipped, mapped to the declaration that replaces them.
+  # Earlier releases told users to add these lines, so they warn instead of aborting the config.
+  @retired_extensions %{
+    git_porcelain:
+      ~s(extension :minga_git_extended, git: "https://github.com/jsmestad/minga-git-extended")
+  }
+
   @spec register_module_extension(module(), keyword()) :: :ok
+  defp register_module_extension(name, _opts) when is_map_key(@retired_extensions, name) do
+    Minga.Log.warning(
+      :config,
+      "extension #{inspect(name)} is no longer bundled and was skipped. Replace it with `#{@retired_extensions[name]}` and restart."
+    )
+  end
+
   defp register_module_extension(module, opts) when is_atom(module) and is_list(opts) do
     if Code.ensure_loaded?(module) and function_exported?(module, :name, 0) do
       ExtRegistry.register_module(module.name(), module, opts)
