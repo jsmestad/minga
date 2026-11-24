@@ -511,29 +511,29 @@ defmodule MingaEditor.LspActions do
 
   def selection_range(%{workspace: %{buffers: %{active: buf}}} = state) do
     case lsp_client_for(state, buf) do
+      nil -> NoticeWorkflow.publish(state, "No language server")
+      client -> request_selection_range(state, buf, client)
+    end
+  end
+
+  @spec request_selection_range(state(), pid(), pid()) :: state()
+  defp request_selection_range(state, buf, client) do
+    case Buffer.file_path(buf) do
       nil ->
-        NoticeWorkflow.publish(state, "No language server")
+        NoticeWorkflow.publish(state, "Buffer has no file path")
 
-      client ->
-        file_path = Buffer.file_path(buf)
+      path ->
+        uri = SyncServer.path_to_uri(path)
+        {line, col} = Buffer.cursor(buf)
 
-        case file_path do
-          nil ->
-            NoticeWorkflow.publish(state, "Buffer has no file path")
+        params = %{
+          "textDocument" => %{"uri" => uri},
+          "positions" => [%{"line" => line, "character" => col}]
+        }
 
-          path ->
-            uri = SyncServer.path_to_uri(path)
-            {line, col} = Buffer.cursor(buf)
+        ref = Client.request(client, "textDocument/selectionRange", params)
 
-            params = %{
-              "textDocument" => %{"uri" => uri},
-              "positions" => [%{"line" => line, "character" => col}]
-            }
-
-            ref = Client.request(client, "textDocument/selectionRange", params)
-
-            track_response_request(state, ref, :selection_range, client, buf, {line, col})
-        end
+        track_response_request(state, ref, :selection_range, client, buf, {line, col})
     end
   end
 
@@ -545,16 +545,18 @@ defmodule MingaEditor.LspActions do
   @spec selection_expand(state()) :: state()
   def selection_expand(%{lsp: %{selection_ranges: ranges, selection_range_index: idx}} = state)
       when is_list(ranges) do
+    next = Enum.at(ranges, idx + 1)
+
     cond do
       not on_selection_step?(state, Enum.at(ranges, idx)) ->
         start_selection_chain(%{state | lsp: LSPState.clear_selection_ranges(state.lsp)})
 
-      idx + 1 < Enum.count(ranges) ->
+      next != nil and encloses_selection?(state, next) ->
         state = %{state | lsp: LSPState.expand_selection(state.lsp)}
-        apply_selection_range(state, Enum.at(ranges, idx + 1))
+        apply_selection_range(state, next)
 
       true ->
-        start_selection_chain(state)
+        start_selection_chain(%{state | lsp: LSPState.clear_selection_ranges(state.lsp)})
     end
   end
 
@@ -587,7 +589,7 @@ defmodule MingaEditor.LspActions do
   end
 
   def selection_shrink(%{workspace: %{buffers: %{active: buf}}} = state) when is_pid(buf) do
-    with nil <- lsp_client_for(state, buf),
+    with nil <- selection_range_client(buf),
          %{} = child <-
            SyntaxSelection.first_child(buf, Buffer.cursor(buf), state.parser.parser_manager) do
       apply_selection_range(state, child)
@@ -604,9 +606,9 @@ defmodule MingaEditor.LspActions do
   # The language server answers when one serves the buffer; otherwise the syntax tree does.
   @spec start_selection_chain(state()) :: state()
   defp start_selection_chain(%{workspace: %{buffers: %{active: buf}}} = state) when is_pid(buf) do
-    case lsp_client_for(state, buf) do
+    case selection_range_client(buf) do
       nil -> start_syntax_selection(state, buf)
-      _client -> selection_range(state)
+      client -> request_selection_range(state, buf, client)
     end
   end
 
@@ -634,6 +636,27 @@ defmodule MingaEditor.LspActions do
       nil -> {cursor, cursor}
     end
   end
+
+  # The first language server on the buffer that answers selectionRange.
+  # Linters and other servers without it do not count.
+  @spec selection_range_client(pid()) :: pid() | nil
+  defp selection_range_client(buf) do
+    buf
+    |> SyncServer.clients_for_buffer()
+    |> Enum.find(&supports_capability?(&1, "selectionRangeProvider"))
+  end
+
+  # The next step must still cover what is selected now; a selection grown by hand past it starts a new chain.
+  @spec encloses_selection?(state(), map()) :: boolean()
+  defp encloses_selection?(%{workspace: %{buffers: %{active: buf}}} = state, range)
+       when is_pid(buf) do
+    {sel_start, sel_end} = current_selection(state, buf)
+
+    {range.start_line, range.start_col} <= sel_start and
+      {range.end_line, range.end_col} >= sel_end
+  end
+
+  defp encloses_selection?(_state, _range), do: true
 
   # A stored chain only continues while Visual still starts where its step did; leaving Visual starts over.
   # The cursor end is not compared: the buffer may clamp a server's exclusive end.

@@ -92,6 +92,26 @@ defmodule MingaEditor.Commands.StructuralNavigationTest do
       assert selection(state, buffer) == {{0, 9}, {0, 11}}
     end
 
+    test "after the selection grows by hand, expand never drops what is selected" do
+      {editor, buffer} = start_editor("f(a, b, c);")
+      BufferProcess.move_to(buffer, {0, 2})
+
+      state = run_command(editor, "selection_expand")
+      assert selection(state, buffer) == {{0, 1}, {0, 9}}
+
+      send_key(editor, ?$)
+      state = run_command(editor, "selection_expand")
+      assert selection(state, buffer) == {{0, 0}, {0, 10}}
+    end
+
+    test "a multibyte last character ends the selection on that character" do
+      {editor, buffer} = start_editor("const π = 1;\n")
+      BufferProcess.move_to(buffer, {0, 6})
+
+      state = run_command(editor, "selection_expand")
+      assert selection(state, buffer) == {{0, 6}, {0, 11}}
+    end
+
     test "shrink with nothing to step back to selects the first child of the node at the cursor" do
       {editor, buffer} = start_editor("function add(a, b) { return a + b; }\n")
       BufferProcess.move_to(buffer, {0, 0})

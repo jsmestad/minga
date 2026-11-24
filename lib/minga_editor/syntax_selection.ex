@@ -8,6 +8,7 @@ defmodule MingaEditor.SyntaxSelection do
   """
 
   alias Minga.Buffer
+  alias Minga.Buffer.Cursor
   alias Minga.Parser.Manager, as: ParserManager
   alias Minga.Parser.StructuralNavResult
 
@@ -40,7 +41,7 @@ defmodule MingaEditor.SyntaxSelection do
       end
     end)
     |> Enum.reverse()
-    |> Enum.dedup()
+    |> nested()
     |> Enum.filter(&strictly_encloses?(&1, selection))
   end
 
@@ -53,7 +54,7 @@ defmodule MingaEditor.SyntaxSelection do
     end
   end
 
-  # Tree-sitter ends are exclusive; a Visual selection ends on its last character.
+  # Tree-sitter ends are exclusive byte columns; a Visual selection ends on the first byte of its last character.
   @spec to_range(pid(), StructuralNavResult.t()) :: range()
   defp to_range(buffer, %StructuralNavResult{} = node) do
     {end_line, end_col} = inclusive_end(buffer, node)
@@ -67,19 +68,51 @@ defmodule MingaEditor.SyntaxSelection do
   end
 
   @spec inclusive_end(pid(), StructuralNavResult.t()) :: Buffer.position()
-  defp inclusive_end(_buffer, %StructuralNavResult{end_row: row, end_col: col}) when col > 0,
-    do: {row, col - 1}
+  defp inclusive_end(buffer, %StructuralNavResult{end_row: row, end_col: col}) when col > 0,
+    do: {row, last_character_start(buffer, row, col)}
 
   defp inclusive_end(buffer, %StructuralNavResult{start_row: start_row, end_row: row})
        when row > start_row do
-    case Buffer.lines(buffer, row - 1, 1) do
-      [line | _] -> {row - 1, max(byte_size(line) - 1, 0)}
-      _ -> {row - 1, 0}
-    end
+    {row - 1, last_character_start(buffer, row - 1, :line_end)}
   end
 
   defp inclusive_end(_buffer, %StructuralNavResult{start_row: row, start_col: col}),
     do: {row, col}
+
+  # The byte column where the character before `exclusive_end` starts, so a multibyte last character is not split.
+  @spec last_character_start(pid(), non_neg_integer(), non_neg_integer() | :line_end) ::
+          non_neg_integer()
+  defp last_character_start(buffer, row, exclusive_end) do
+    line =
+      case Buffer.lines(buffer, row, 1) do
+        [text | _] -> text
+        _ -> ""
+      end
+
+    exclusive_end = if exclusive_end == :line_end, do: byte_size(line), else: exclusive_end
+    Cursor.caret_column(line, max(exclusive_end - 1, 0))
+  end
+
+  # Drops repeats and any range that does not contain the one before it.
+  # A reparse between two requests could produce one.
+  @spec nested([range()]) :: [range()]
+  defp nested(ranges) do
+    ranges
+    |> Enum.reduce([], fn
+      range, [] ->
+        [range]
+
+      range, [inner | _] = acc ->
+        if contains?(range, inner) and range != inner, do: [range | acc], else: acc
+    end)
+    |> Enum.reverse()
+  end
+
+  @spec contains?(range(), range()) :: boolean()
+  defp contains?(outer, inner) do
+    {outer.start_line, outer.start_col} <= {inner.start_line, inner.start_col} and
+      {outer.end_line, outer.end_col} >= {inner.end_line, inner.end_col}
+  end
 
   @spec strictly_encloses?(range(), selection()) :: boolean()
   defp strictly_encloses?(range, {sel_start, sel_end}) do
