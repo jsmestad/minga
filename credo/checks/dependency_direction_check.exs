@@ -44,6 +44,7 @@ defmodule Minga.Credo.DependencyDirectionCheck do
   # Entire directories (Minga.Core, Minga.Mode) are Layer 0.
   # Individual modules from mixed directories (buffer/, editing/) are listed explicitly.
   @layer_0_prefixes [
+    "Minga.Buffer.Author",
     "Minga.Buffer.ChangeLog",
     "Minga.Buffer.ConflictIndex",
     "Minga.Buffer.Cursor",
