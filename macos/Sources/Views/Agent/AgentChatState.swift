@@ -839,16 +839,7 @@ public final class AgentChatState {
 
     public var statusLabel: String {
         if question != nil { return "Waiting for your answer" }
-        switch status {
-        case .idle: return "idle"
-        case .thinking: return "thinking"
-        case .executingTool: return "running tool"
-        case .error: return SpineState.failed.word
-        case .planning: return "planning"
-        case .approvalWaiting: return "Awaiting approval"
-        case .needsYou: return SpineState.needsYou.word
-        case .unknown: return "unknown"
-        }
+        return status.label
     }
 
     public var isThinking: Bool { question == nil && status.isWorking }

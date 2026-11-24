@@ -62,18 +62,12 @@ func cardSpineState(status byte) (generated.SpineState, bool) {
 }
 
 // cardStatusLabel returns the word an agent context-card status is shown with, matching macOS CardStatus.label.
-// States use their design token word; idle, iterating and unknown statuses are not states and keep their own words.
+// Every status that shows a state uses the state's design token word, so the card names it the way the modeline does; the rest read Idle.
 func cardStatusLabel(status byte) string {
-	switch status {
-	case 0:
-		return "Idle"
-	case 2:
-		return "Iterating"
-	}
 	if state, ok := cardSpineState(status); ok {
 		return state.Token().Word
 	}
-	return "Unknown"
+	return "Idle"
 }
 
 // cardStatusRole returns the colour role an agent context-card status is drawn in, matching macOS CardStatus.role.

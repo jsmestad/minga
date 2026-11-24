@@ -123,6 +123,32 @@ public enum SpineState: String, CaseIterable, Sendable {
         case .done: "Minga is done"
         }
     }
+
+    /// The state a GUI section's state byte names, or nil for 0 (no state) and unknown bytes.
+    public init?(wire: UInt8) {
+        switch wire {
+        case 1: self = .working
+        case 2: self = .needsYou
+        case 3: self = .waiting
+        case 4: self = .stopped
+        case 5: self = .failed
+        case 6: self = .done
+        default: return nil
+        }
+    }
+
+    /// The state an Agent status byte (gui_status_bar and gui_workspaces) speaks as, or nil when it shows none.
+    public init?(agentStatus wire: UInt8) {
+        switch wire {
+        case 1: self = .working // thinking
+        case 2: self = .working // tool_executing
+        case 3: self = .failed // error
+        case 4: self = .working // plan
+        case 5: self = .needsYou // approval_waiting
+        case 6: self = .needsYou // needs_you
+        default: return nil
+        }
+    }
 }
 
 /// A variant of the twist mark in the code gutter.

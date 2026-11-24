@@ -53,6 +53,11 @@ func TestAgentStatusWordsComeFromStateTokens(t *testing.T) {
 	if got := agentChatStatusLabel(3); got != generated.StateFailed.Token().Word {
 		t.Fatalf("error label = %q, want the failed token word", got)
 	}
+	for wire, want := range map[byte]string{0: "Idle", 1: "Working", 2: "Working", 4: "Working", 5: "Needs you", 6: "Needs you"} {
+		if got := agentChatStatusLabel(wire); got != want {
+			t.Fatalf("status %d label = %q, want %q from the shared state table", wire, got, want)
+		}
+	}
 	frames := generated.StateWorking.Token().Frames
 	panel := agentPanel{}
 	for i, want := range frames {
@@ -71,11 +76,11 @@ func TestAgentContextCardStatusMatchesMacOSCardStatus(t *testing.T) {
 	}{
 		{0, "Idle", generated.ColorRoleWaiting},
 		{1, generated.StateWorking.Token().Word, generated.ColorRoleMinga},
-		{2, "Iterating", generated.ColorRoleMinga},
+		{2, generated.StateWorking.Token().Word, generated.ColorRoleMinga},
 		{3, generated.StateNeedsYou.Token().Word, generated.ColorRoleNeedsYou},
 		{4, generated.StateDone.Token().Word, generated.ColorRoleDone},
 		{5, generated.StateFailed.Token().Word, generated.ColorRoleFailure},
-		{9, "Unknown", generated.ColorRoleWaiting},
+		{9, "Idle", generated.ColorRoleWaiting},
 	}
 	for _, tc := range cases {
 		if got := cardStatusLabel(tc.status); got != tc.label {

@@ -3,6 +3,7 @@ defmodule Minga.Frontend.Adapter.GUI.WorkspacesEncoder do
 
   import Bitwise
 
+  alias Minga.Design.Tokens
   alias Minga.Frontend.Adapter.GUI.Caches
   alias Minga.Frontend.Adapter.GUI.Wire
   alias Minga.Frontend.Adapter.GUI.Wire.Writer
@@ -70,7 +71,7 @@ defmodule Minga.Frontend.Adapter.GUI.WorkspacesEncoder do
     writer
     |> Writer.uint16(:workspace_id, workspace.id)
     |> Writer.uint8(:workspace_kind, encode_workspace_kind(workspace.kind))
-    |> Writer.uint8(:workspace_agent_status, encode_agent_status(workspace.status))
+    |> Writer.uint8(:workspace_agent_status, Tokens.agent_status_wire(workspace.status))
     |> Writer.uint16(:workspace_entry_flags, encode_workspace_entry_flags(workspace))
     |> Writer.rgb24(:workspace_color, workspace.color)
     |> Writer.uint16(:workspace_tab_count, workspace.tab_count)
@@ -136,14 +137,4 @@ defmodule Minga.Frontend.Adapter.GUI.WorkspacesEncoder do
   @spec maybe_workspace_flag(non_neg_integer(), boolean(), non_neg_integer()) :: non_neg_integer()
   defp maybe_workspace_flag(flags, true, bit), do: flags ||| bit
   defp maybe_workspace_flag(flags, false, _bit), do: flags
-
-  @spec encode_agent_status(Workspace.status()) :: non_neg_integer()
-  defp encode_agent_status(:idle), do: 0
-  defp encode_agent_status(:thinking), do: 1
-  defp encode_agent_status(:tool_executing), do: 2
-  defp encode_agent_status(:error), do: 3
-  defp encode_agent_status(:plan), do: 4
-  defp encode_agent_status(:approval_waiting), do: 5
-  defp encode_agent_status(:needs_you), do: 6
-  defp encode_agent_status(_), do: 0
 end

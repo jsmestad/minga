@@ -212,17 +212,4 @@ public final class StatusBarState {
             blue: Double(iconColorB) / 255.0
         )
     }
-
-    public var sessionStatusName: String {
-        switch sessionStatus {
-        case .idle: return "idle"
-        case .thinking: return "thinking"
-        case .executingTool: return "executing"
-        case .error: return "error"
-        case .planning: return "plan"
-        case .approvalWaiting: return "Awaiting approval"
-        case .needsYou: return SpineState.needsYou.word
-        case .unknown: return "unknown"
-        }
-    }
 }

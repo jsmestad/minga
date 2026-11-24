@@ -1,6 +1,7 @@
 defmodule MingaEditor.RenderModel.UI.AgentContextBuilderTest do
   use ExUnit.Case, async: true
 
+  alias Minga.Design.Tokens
   alias Minga.Frontend.Adapter.GUI.{AgentContextEncoder, Caches}
   alias Minga.RenderModel.UI.AgentContext
   alias Minga.RenderModel.UI.AgentContext.Todo
@@ -12,6 +13,7 @@ defmodule MingaEditor.RenderModel.UI.AgentContextBuilderTest do
   alias MingaEditor.Agent.Events, as: AgentEvents
   alias MingaEditor.Agent.PendingApproval
   alias MingaEditor.Agent.UIState
+  alias MingaEditor.Agent.WorkspaceStatus
   alias MingaEditor.Frontend.Emit.Context
   alias MingaEditor.RenderModel.UI.AgentContextBuilder
   alias MingaEditor.RenderModel.UI.TabBarBuilder
@@ -223,6 +225,36 @@ defmodule MingaEditor.RenderModel.UI.AgentContextBuilderTest do
                ctx.workspace.agent_ui
              ) ==
                :needs_you
+    end
+
+    test "speak, with the status bar and chat header, the state the token table gives each status" do
+      # The card names a running tool iterating only to say what the working state is doing.
+      card_states = %{
+        working: :working,
+        iterating: :working,
+        needs_you: :needs_you,
+        errored: :failed,
+        idle: nil
+      }
+
+      for status <- [:idle, :thinking, :tool_executing, :error, :plan] do
+        ctx =
+          agent_workspace_context(AgentState.set_status(%AgentState{}, status), UIState.new(),
+            active_tab: 2,
+            stored_status: status
+          )
+
+        # The workspace pill, the status bar and the chat header read one status and
+        # name it through the token table, in Elixir, Swift and Go alike.
+        assert workspace_status(ctx) == status
+
+        assert WorkspaceStatus.active(ctx.intent.frame.shell_state, ctx.workspace.agent_ui) ==
+                 status
+
+        expected = Tokens.agent_status_state(status)
+        card = AgentContextBuilder.build(ctx).status
+        assert Map.fetch!(card_states, card) == expected, "#{status} shows #{card} on the card"
+      end
     end
 
     test "a background Agent workspace shows its stored status, not the live cache" do

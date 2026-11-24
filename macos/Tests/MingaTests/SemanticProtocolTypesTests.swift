@@ -70,7 +70,7 @@ struct SemanticProtocolTypesTests {
         let unknown = CardStatus(rawValue: 0xFD)
         #expect(unknown == .unknown(rawValue: 0xFD))
         #expect(unknown.rawValue == 0xFD)
-        #expect(unknown.label == "Unknown")
+        #expect(unknown.label == "Idle")
     }
 
     @Test("Editor modes preserve known and future values")

@@ -269,16 +269,7 @@ public struct WorkspaceHeaderView: View {
     }
 
     private func agentStatusLabel(_ status: AgentStatus) -> String {
-        switch status {
-        case .thinking: return "Thinking"
-        case .executingTool: return "Using tools"
-        case .error: return SpineState.failed.word
-        case .planning: return "Planning"
-        case .approvalWaiting: return "Awaiting approval"
-        case .needsYou: return SpineState.needsYou.word
-        case .idle: return "Idle"
-        case .unknown: return "Unknown"
-        }
+        status.label
     }
 
     private func agentStatusHelp(_ status: AgentStatus) -> String {

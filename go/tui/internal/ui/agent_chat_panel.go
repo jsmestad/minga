@@ -638,25 +638,16 @@ func agentPresentationStatus(chat protocol.AgentChat) byte {
 	return chat.Status
 }
 
+// agentChatStatusLabel names an Agent status with the state the shared token table gives it, the word the modeline and every other surface use.
+// A pending question says what it waits for; a status without a state reads Idle.
 func agentChatStatusLabel(status byte) string {
-	switch status {
-	case 1:
-		return "thinking"
-	case 2:
-		return "using tools"
-	case 3:
-		return generated.StateFailed.Token().Word
-	case 4:
-		return "planning"
-	case 5:
-		return "Awaiting approval"
-	case agentStatusNeedsYou:
-		return generated.StateNeedsYou.Token().Word
-	case agentStatusQuestionWaiting:
+	if status == agentStatusQuestionWaiting {
 		return "Waiting for your answer"
-	default:
-		return "idle"
 	}
+	if state, ok := generated.SpineStateForAgentStatus(status); ok {
+		return state.Token().Word
+	}
+	return "Idle"
 }
 
 func agentHasActiveTurn(status byte) bool {

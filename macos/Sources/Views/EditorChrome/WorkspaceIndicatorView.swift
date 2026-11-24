@@ -187,16 +187,7 @@ public struct WorkspaceIndicatorView: View {
     }
 
     private var agentStatusLabel: String {
-        switch workspace.agentStatus {
-        case .thinking: "Thinking"
-        case .executingTool: "Using tools"
-        case .error: SpineState.failed.word
-        case .planning: "Planning"
-        case .approvalWaiting: "Awaiting approval"
-        case .needsYou: SpineState.needsYou.word
-        case .idle: "Idle"
-        case .unknown: "Unknown"
-        }
+        workspace.agentStatus.label
     }
 
 }

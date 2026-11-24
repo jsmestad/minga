@@ -29,6 +29,7 @@ defmodule Minga.Mix.DesignTokenGenerator do
 
   @type state :: %{
           id: String.t(),
+          wire: pos_integer(),
           word: String.t(),
           shape: String.t(),
           role: String.t(),
@@ -36,6 +37,8 @@ defmodule Minga.Mix.DesignTokenGenerator do
           tui_frames: [String.t()],
           accessibility_label: String.t()
         }
+
+  @type agent_status :: %{id: String.t(), wire: byte(), state: String.t() | nil}
 
   @type twist :: %{
           id: String.t(),
@@ -49,6 +52,7 @@ defmodule Minga.Mix.DesignTokenGenerator do
           contrast: %{String.t() => float()},
           roles: [role()],
           states: [state()],
+          agent_statuses: [agent_status()],
           twist: [twist()],
           voice: [{String.t(), String.t()}]
         }
@@ -92,7 +96,16 @@ defmodule Minga.Mix.DesignTokenGenerator do
     Enum.each(roles, &validate_role_refs!(&1, role_ids))
 
     states = parse_list!(raw, "states", &parse_state!(&1, role_ids))
-    unique_ids!(states, "states")
+    state_ids = unique_ids!(states, "states")
+    validate_wires!(states, "states")
+
+    agent_statuses = parse_list!(raw, "agent_statuses", &parse_agent_status!(&1, state_ids))
+    unique_ids!(agent_statuses, "agent_statuses")
+    validate_wires!(agent_statuses, "agent_statuses")
+
+    unless Enum.any?(agent_statuses, &(&1.id == "idle")) do
+      invalid!("agent_statuses must define idle, the status unknown statuses encode as")
+    end
 
     twist = parse_list!(raw, "twist", &parse_twist!(&1, role_ids))
     unique_ids!(twist, "twist")
@@ -101,6 +114,7 @@ defmodule Minga.Mix.DesignTokenGenerator do
       contrast: contrast,
       roles: roles,
       states: states,
+      agent_statuses: agent_statuses,
       twist: twist,
       voice: parse_voice!(Map.get(raw, "voice"))
     }
@@ -245,6 +259,7 @@ defmodule Minga.Mix.DesignTokenGenerator do
   defp parse_state!(
          %{
            "id" => id,
+           "wire" => wire,
            "word" => word,
            "shape" => shape,
            "role" => role,
@@ -256,6 +271,10 @@ defmodule Minga.Mix.DesignTokenGenerator do
     validate_id!(id, "states")
     Enum.each([word, glyph, label], &validate_text!(&1, "state #{id}"))
 
+    unless is_integer(wire) and wire in 1..255 do
+      invalid!("state #{id} wire must be a byte from 1 to 255, got #{inspect(wire)}")
+    end
+
     unless shape in @shapes do
       invalid!("state #{id} shape must be one of #{inspect(@shapes)}, got #{inspect(shape)}")
     end
@@ -266,6 +285,7 @@ defmodule Minga.Mix.DesignTokenGenerator do
 
     %{
       id: id,
+      wire: wire,
       word: word,
       shape: shape,
       role: role,
@@ -277,8 +297,35 @@ defmodule Minga.Mix.DesignTokenGenerator do
 
   defp parse_state!(raw, _role_ids) do
     invalid!(
-      "state needs id, word, shape, role, tui_glyph and accessibility_label: #{inspect(raw)}"
+      "state needs id, wire, word, shape, role, tui_glyph and accessibility_label: #{inspect(raw)}"
     )
+  end
+
+  @spec parse_agent_status!(map(), MapSet.t(String.t())) :: agent_status()
+  defp parse_agent_status!(%{"id" => id, "wire" => wire} = raw, state_ids)
+       when is_integer(wire) and wire in 0..255 do
+    validate_id!(id, "agent_statuses")
+    state = Map.get(raw, "state")
+
+    if state != nil and not MapSet.member?(state_ids, state) do
+      invalid!("agent status #{id} names unknown state #{inspect(state)}")
+    end
+
+    %{id: id, wire: wire, state: state}
+  end
+
+  defp parse_agent_status!(raw, _state_ids) do
+    invalid!("agent status needs an id and a wire byte: #{inspect(raw)}")
+  end
+
+  @spec validate_wires!([%{id: String.t(), wire: byte()}], String.t()) :: :ok
+  defp validate_wires!(entries, label) do
+    entries
+    |> Enum.group_by(& &1.wire, & &1.id)
+    |> Enum.each(fn
+      {_wire, [_id]} -> :ok
+      {wire, ids} -> invalid!("#{label} wire byte #{wire} is shared by #{Enum.join(ids, ", ")}")
+    end)
   end
 
   @spec parse_twist!(map(), MapSet.t(String.t())) :: twist()
@@ -382,6 +429,7 @@ defmodule Minga.Mix.DesignTokenGenerator do
     role_ids = Enum.map(tokens.roles, & &1.id)
     state_ids = Enum.map(tokens.states, & &1.id)
     twist_ids = Enum.map(tokens.twist, & &1.id)
+    agent_status_ids = Enum.map(tokens.agent_statuses, & &1.id)
 
     source = """
     defmodule Minga.Design.Tokens do
@@ -401,6 +449,9 @@ defmodule Minga.Mix.DesignTokenGenerator do
 
       @typedoc "A state's shape. Waiting and Stopped share the hollow dot."
       @type state_shape :: #{atom_union(@shapes)}
+
+      @typedoc "An Agent status the BEAM reports, as `MingaEditor.Agent.WorkspaceStatus` resolves it."
+      @type agent_status :: #{atom_union(agent_status_ids)}
 
       @typedoc "A twist variant id."
       @type twist_variant :: #{atom_union(twist_ids)}
@@ -476,6 +527,29 @@ defmodule Minga.Mix.DesignTokenGenerator do
       @spec state_role(state_id()) :: color_role()
       def state_role(state), do: state(state).role
 
+      @doc "The byte a GUI section carries for a state; 0 means no state."
+      @spec state_wire(state_id() | nil) :: byte()
+    #{Enum.map_join(tokens.states, "\n", &"  def state_wire(:#{&1.id}), do: #{&1.wire}")}
+      def state_wire(nil), do: 0
+
+      @doc "Every Agent status, in token-file order."
+      @spec agent_statuses() :: [agent_status()]
+      def agent_statuses, do: #{inspect(atoms(agent_status_ids))}
+
+      @doc "The Agent status byte gui_status_bar and gui_workspaces carry; unknown statuses and nil encode as idle."
+      @spec agent_status_wire(agent_status() | atom() | nil) :: byte()
+    #{Enum.map_join(tokens.agent_statuses, "\n", &"  def agent_status_wire(:#{&1.id}), do: #{&1.wire}")}
+      def agent_status_wire(_status), do: #{Enum.find(tokens.agent_statuses, &(&1.id == "idle")).wire}
+
+      @doc \"\"\"
+      The state an Agent status speaks as, or nil when it shows none.
+
+      Every surface that shows Minga's state reads it through this table, in Elixir, Swift and Go, so no two surfaces name the same status differently.
+      \"\"\"
+      @spec agent_status_state(agent_status() | nil) :: state_id() | nil
+    #{Enum.map_join(tokens.agent_statuses, "\n", &"  def agent_status_state(:#{&1.id}), do: #{elixir_optional_atom(&1.state)}")}
+      def agent_status_state(nil), do: nil
+
       @doc "Every twist variant id, in token-file order."
       @spec twist_variants() :: [twist_variant()]
       def twist_variants, do: #{inspect(atoms(twist_ids))}
@@ -520,6 +594,10 @@ defmodule Minga.Mix.DesignTokenGenerator do
   defp elixir_state_clause(state) do
     "  def state(:#{state.id}), do: %{id: :#{state.id}, word: #{inspect(state.word)}, shape: :#{state.shape}, role: :#{state.role}, tui_glyph: #{inspect(state.tui_glyph)}, tui_frames: #{inspect(state.tui_frames)}, accessibility_label: #{inspect(state.accessibility_label)}}"
   end
+
+  @spec elixir_optional_atom(String.t() | nil) :: String.t()
+  defp elixir_optional_atom(nil), do: "nil"
+  defp elixir_optional_atom(id), do: ":#{id}"
 
   @spec elixir_twist_clause(twist()) :: String.t()
   defp elixir_twist_clause(twist) do
@@ -596,6 +674,22 @@ defmodule Minga.Mix.DesignTokenGenerator do
         public var accessibilityLabel: String {
             switch self {
     #{swift_state_cases(tokens.states, &swift_string(&1.accessibility_label))}
+            }
+        }
+
+        /// The state a GUI section's state byte names, or nil for 0 (no state) and unknown bytes.
+        public init?(wire: UInt8) {
+            switch wire {
+    #{Enum.map_join(tokens.states, "\n", &"        case #{&1.wire}: self = .#{camel(&1.id)}")}
+            default: return nil
+            }
+        }
+
+        /// The state an Agent status byte (gui_status_bar and gui_workspaces) speaks as, or nil when it shows none.
+        public init?(agentStatus wire: UInt8) {
+            switch wire {
+    #{tokens.agent_statuses |> Enum.filter(& &1.state) |> Enum.map_join("\n", &"        case #{&1.wire}: self = .#{camel(&1.state)} // #{&1.id}")}
+            default: return nil
             }
         }
     }
@@ -711,6 +805,24 @@ defmodule Minga.Mix.DesignTokenGenerator do
     #{Enum.map_join(tokens.states, "\n", &go_state_case/1)}
     \tdefault:
     \t\treturn StateToken{}
+    \t}
+    }
+
+    // SpineStateFromWire returns the state a GUI section's state byte names; ok is false for 0 (no state) and unknown bytes.
+    func SpineStateFromWire(wire byte) (state SpineState, ok bool) {
+    \tswitch wire {
+    #{Enum.map_join(tokens.states, "\n", &"\tcase #{&1.wire}:\n\t\treturn #{go_name("State", &1.id)}, true")}
+    \tdefault:
+    \t\treturn 0, false
+    \t}
+    }
+
+    // SpineStateForAgentStatus returns the state an Agent status byte (gui_status_bar and gui_workspaces) speaks as; ok is false when it shows none.
+    func SpineStateForAgentStatus(wire byte) (state SpineState, ok bool) {
+    \tswitch wire {
+    #{tokens.agent_statuses |> Enum.filter(& &1.state) |> Enum.map_join("\n", &"\tcase #{&1.wire}: // #{&1.id}\n\t\treturn #{go_name("State", &1.state)}, true")}
+    \tdefault:
+    \t\treturn 0, false
     \t}
     }
 

@@ -415,28 +415,13 @@ public struct StatusBarView: View {
 
     private var agentStatusText: String? {
         switch state.agentStatus {
-        case .idle: return "Idle"
-        case .thinking: return "Thinking"
-        case .executingTool: return state.activeToolName.isEmpty ? "Running" : "Running \(state.activeToolName)"
-        case .error: return SpineState.failed.word
-        case .planning: return "PLAN"
-        case .approvalWaiting: return state.activeToolName.isEmpty ? "Awaiting approval" : "Awaiting approval for \(state.activeToolName)"
-        case .needsYou: return SpineState.needsYou.word
         case .unknown: return nil
+        default: return state.agentStatus.label
         }
     }
 
     private var agentStatusHelpText: String {
-        switch state.agentStatus {
-        case .idle: return "Agent idle"
-        case .thinking: return "Agent thinking"
-        case .executingTool: return state.activeToolName.isEmpty ? "Agent executing tools" : "Agent running \(state.activeToolName)"
-        case .error: return "Agent error"
-        case .planning: return "Agent plan mode"
-        case .approvalWaiting: return state.activeToolName.isEmpty ? "Agent awaiting approval" : "Agent awaiting approval for \(state.activeToolName)"
-        case .needsYou: return "Agent needs you"
-        case .unknown: return "Agent status"
-        }
+        state.agentStatus.spineState?.accessibilityLabel ?? "Agent status: \(state.agentStatus.label)"
     }
 
     @ViewBuilder

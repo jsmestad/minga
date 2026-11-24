@@ -1,6 +1,7 @@
 defmodule MingaEditor.RenderModel.UI.AgentContextBuilder do
   @moduledoc false
 
+  alias Minga.Design.Tokens
   alias Minga.RenderModel.UI.AgentContext
   alias Minga.RenderModel.UI.AgentContext.Progress
   alias Minga.RenderModel.UI.AgentContext.Todo
@@ -132,15 +133,17 @@ defmodule MingaEditor.RenderModel.UI.AgentContextBuilder do
   defp task(_activity, :working, _action), do: "Thinking"
   defp task(_activity, _status, _action), do: "Agent activity"
 
+  # The card speaks the state the design tokens give the status, like the modeline. Running a
+  # tool is the working state; the card names it iterating only to say what Minga is doing.
   @spec context_status(WorkspaceStatus.t()) :: AgentContext.status()
-  defp context_status(status) when status in [:approval_waiting, :needs_you, :needs_review],
-    do: :needs_you
-
-  defp context_status(:thinking), do: :working
   defp context_status(:tool_executing), do: :iterating
-  defp context_status(:error), do: :errored
-  defp context_status(:done), do: :done
-  defp context_status(status) when status in [:idle, :plan, :stopped, nil], do: :idle
+  defp context_status(status), do: status |> Tokens.agent_status_state() |> card_status()
+
+  @spec card_status(Tokens.state_id() | nil) :: AgentContext.status()
+  defp card_status(:working), do: :working
+  defp card_status(:needs_you), do: :needs_you
+  defp card_status(:failed), do: :errored
+  defp card_status(nil), do: :idle
 
   @spec active_action(Activity.t(), MingaAgent.ToolApproval.Public.t() | nil) :: String.t() | nil
   defp active_action(_activity, %MingaAgent.ToolApproval.Public{name: name}),

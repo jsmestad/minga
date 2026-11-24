@@ -587,7 +587,7 @@ struct AgentChatStateLifecycleTests {
         #expect(state.prompt == "fix bug")
         #expect(state.messages.count == 1)
         #expect(state.isThinking == true)
-        #expect(state.statusLabel == "thinking")
+        #expect(state.statusLabel == SpineState.working.word)
     }
 
     @Test("hide() clears all state")
@@ -607,11 +607,13 @@ struct AgentChatStateLifecycleTests {
     @Test("statusLabel maps all status values")
     @MainActor func statusLabels() {
         let state = AgentChatState()
-        state.status = .idle; #expect(state.statusLabel == "idle")
-        state.status = .thinking; #expect(state.statusLabel == "thinking")
-        state.status = .executingTool; #expect(state.statusLabel == "running tool")
+        state.status = .idle; #expect(state.statusLabel == "Idle")
+        state.status = .thinking; #expect(state.statusLabel == SpineState.working.word)
+        state.status = .executingTool; #expect(state.statusLabel == SpineState.working.word)
+        state.status = .planning; #expect(state.statusLabel == SpineState.working.word)
+        state.status = .approvalWaiting; #expect(state.statusLabel == SpineState.needsYou.word)
         state.status = .error; #expect(state.statusLabel == SpineState.failed.word)
-        state.status = .unknown(rawValue: 255); #expect(state.statusLabel == "unknown")
+        state.status = .unknown(rawValue: 255); #expect(state.statusLabel == "Idle")
     }
 }
 
