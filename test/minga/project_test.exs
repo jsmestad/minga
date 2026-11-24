@@ -162,7 +162,7 @@ defmodule Minga.ProjectTest do
                       }},
                      1_000
 
-      refute_receive {:minga_event, :project_rebuilt, _}, 100
+      refute_receive {:minga_event, :project_rebuilt, %{root: ^project}}, 100
 
       assert %WorkspaceSnapshot{
                files: [],
@@ -370,7 +370,7 @@ defmodule Minga.ProjectTest do
                       }},
                      1_000
 
-      refute_receive {:minga_event, :project_rebuilt, _}, 100
+      refute_receive {:minga_event, :project_rebuilt, %{root: ^root}}, 100
 
       state = flush(name)
 
@@ -402,7 +402,7 @@ defmodule Minga.ProjectTest do
                       %Minga.Events.ProjectRebuildFailedEvent{root: ^root}},
                      1_000
 
-      refute_receive {:minga_event, :project_rebuilt, _}, 100
+      refute_receive {:minga_event, :project_rebuilt, %{root: ^root}}, 100
     end
 
     test "successful rebuild broadcasts :project_rebuilt and not :project_rebuild_failed", %{
@@ -423,7 +423,7 @@ defmodule Minga.ProjectTest do
                       %Minga.Events.ProjectRebuiltEvent{root: ^project}},
                      1_000
 
-      refute_receive {:minga_event, :project_rebuild_failed, _}, 100
+      refute_receive {:minga_event, :project_rebuild_failed, %{root: ^project}}, 100
 
       assert %WorkspaceSnapshot{files: ["lib/app.ex"], rebuilding?: false} =
                Project.snapshot(name)
