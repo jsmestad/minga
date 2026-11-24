@@ -3076,68 +3076,25 @@ defmodule MingaAgent.Providers.Native do
 
   # ── Compaction dispatch ─────────────────────────────────────────────────────
 
+  # Every route compacts through the portable summary, which sends history only through the
+  # route's bound credentials and keeps the system prompt. Provider-native compaction must
+  # meet both guarantees before it can be routed here again (#3434).
   @spec dispatch_compact(Context.t(), state()) ::
           {:ok, [ReqLLM.Message.t()], String.t()} | {:error, String.t()}
-  defp dispatch_compact(context, state) do
-    case state.selection.policy.compaction do
-      :native ->
-        case native_compact(context, state) do
-          {:ok, _messages, _info} = ok ->
-            ok
-
-          {:error, reason} ->
-            Log.warning(
-              :agent,
-              "[Compaction] Native compaction failed (#{inspect(reason)}), falling back to portable summary"
-            )
-
-            portable_compact(context, state)
-        end
-
-      :unsupported ->
-        portable_compact(context, state)
-    end
-  end
+  defp dispatch_compact(context, state), do: portable_compact(context, state)
 
   @spec dispatch_maybe_compact(Context.t(), state(), keyword()) ::
           {:ok, [ReqLLM.Message.t()], String.t()} | {:error, String.t()}
   defp dispatch_maybe_compact(context, state, opts) do
-    threshold = Keyword.get(opts, :threshold, state.config.compaction_threshold)
-    keep_recent = Keyword.get(opts, :keep_recent, state.config.compaction_keep_recent)
-
     compact_opts = [
       model: state.selection.request_model,
       context_limit: state.selection.policy.limits.context,
       llm_client: summary_client(state),
-      threshold: threshold,
-      keep_recent: keep_recent
+      threshold: Keyword.get(opts, :threshold, state.config.compaction_threshold),
+      keep_recent: Keyword.get(opts, :keep_recent, state.config.compaction_keep_recent)
     ]
 
-    case state.selection.policy.compaction do
-      :native ->
-        estimated = MingaAgent.TokenEstimator.estimate(context.messages)
-        limit = state.selection.policy.limits.context
-
-        if is_integer(limit) and limit > 0 and estimated > limit * (threshold || 0.80) do
-          case native_compact(context, state) do
-            {:ok, _messages, _info} = ok ->
-              ok
-
-            {:error, reason} ->
-              Log.warning(
-                :agent,
-                "[Compaction] Native compaction failed (#{inspect(reason)}), falling back to portable summary"
-              )
-
-              normalize_compact_result(maybe_compact_with_opts(context, compact_opts))
-          end
-        else
-          {:ok, context.messages, "Context is already below the compaction threshold."}
-        end
-
-      :unsupported ->
-        normalize_compact_result(maybe_compact_with_opts(context, compact_opts))
-    end
+    normalize_compact_result(maybe_compact_with_opts(context, compact_opts))
   end
 
   @spec normalize_compact_result(
@@ -3152,21 +3109,6 @@ defmodule MingaAgent.Providers.Native do
     do: {:ok, unchanged.messages, "Context is already below the compaction threshold."}
 
   defp normalize_compact_result({:error, _reason} = error), do: error
-
-  @spec native_compact(Context.t(), state()) ::
-          {:ok, [ReqLLM.Message.t()], String.t()} | {:error, term()}
-  defp native_compact(context, state) do
-    model = state.selection.request_model
-
-    case ReqLLM.compact_context(model, context) do
-      {:ok, response} ->
-        new_messages = response.context.messages
-        {:ok, new_messages, "Context compacted via native provider endpoint"}
-
-      {:error, reason} ->
-        {:error, reason}
-    end
-  end
 
   @spec portable_compact(Context.t(), state()) ::
           {:ok, [ReqLLM.Message.t()], String.t()} | {:error, String.t()}
