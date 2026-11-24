@@ -2,7 +2,7 @@ defmodule MingaEditor.Commands.Diagnostics do
   @moduledoc """
   Commands for navigating diagnostics.
 
-  `]d` jumps to the next diagnostic, `[d` to the previous.
+  `]e` jumps to the next diagnostic, `[e` to the previous.
   Both wrap around at buffer boundaries.
   """
 

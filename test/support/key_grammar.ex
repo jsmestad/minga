@@ -143,7 +143,7 @@ defmodule Minga.Test.KeyGrammar do
   # Vim's own control keys are Vim grammar (rule 2), not added modifiers, in
   # Vim buffers and in special buffers that navigate like them. CUA states do
   # not get this allowance.
-  @vim_ctrl_keys MapSet.new(~c"dufbeyrovaxw", &{&1, @ctrl})
+  @vim_ctrl_keys MapSet.new(~c"dufbeyroivaxw", &{&1, @ctrl})
 
   # Control keys that edit text in a prompt, insert mode or the composer
   # (readline and Emacs). Binding them there breaks typing.
@@ -198,6 +198,17 @@ defmodule Minga.Test.KeyGrammar do
   @leader_aliases [
     {"SPC /", "SPC s p", "Doom binds both SPC / and SPC s p to project search"},
     {"SPC SPC", "SPC p f", "Doom binds both SPC SPC and SPC p f to find file in project"}
+  ]
+
+  # ── Normal mode aliases ─────────────────────────────────────────────────────
+  #
+  # {alias, canonical, why}. A ⌃ or ⌥ chord in a Vim buffer is allowed when it is declared here as an alias of a binding without modifiers that runs the same command, the way rule 5 allows platform keys.
+  # docs/design/keys.md keeps ⌥h ⌥j ⌥k ⌥l only as aliases of the syntax-node keys.
+  @normal_aliases [
+    {"⌥h", "SPC c v", "⌥h expands the selection by syntax node, as SPC c v does"},
+    {"⌥l", "SPC c V", "⌥l shrinks the selection by syntax node, as SPC c V does"},
+    {"⌥j", "] n", "⌥j moves to the next syntax node, as ]n does"},
+    {"⌥k", "[ n", "⌥k moves to the previous syntax node, as [n does"}
   ]
 
   # ── Key names ───────────────────────────────────────────────────────────────
@@ -516,6 +527,9 @@ defmodule Minga.Test.KeyGrammar do
       convention?(key, context, command) ->
         nil
 
+      context == :vim_source and declared_normal_alias?(key, command) ->
+        nil
+
       context in [:vim_source, :vim_text, :special] and MapSet.member?(@vim_ctrl_keys, key) ->
         nil
 
@@ -528,6 +542,26 @@ defmodule Minga.Test.KeyGrammar do
       true ->
         {:normal_mode_modifier, "modifier where letters are not text"}
     end
+  end
+
+  # A declared alias passes only while its canonical keys run the same command.
+  @spec declared_normal_alias?(key(), term()) :: boolean()
+  defp declared_normal_alias?(key, command) do
+    formatted = format_key(key)
+
+    Enum.any?(@normal_aliases, fn {alias_key, canonical, _why} ->
+      alias_key == formatted and Map.get(plain_bindings(), canonical) == command
+    end)
+  end
+
+  # Leader and Vim normal bindings without ⌃ ⌥ ⌘, keyed by their formatted keys.
+  @spec plain_bindings() :: %{String.t() => term()}
+  defp plain_bindings do
+    for %{scope: scope, keys: keys, command: command} <- inventory(),
+        scope in [:leader, :editor],
+        Enum.all?(keys, fn {_cp, mods} -> band(mods, @chord_mods) == 0 end),
+        into: %{},
+        do: {format_keys(keys), command}
   end
 
   @spec convention?(key(), context(), term()) :: boolean()

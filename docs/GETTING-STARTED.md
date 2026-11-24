@@ -103,13 +103,13 @@ You do not need to know Elixir to write basic config: `set :option, value` cover
 
 ## Work with the agent
 
-Toggle the agent panel with `SPC a a`, or open the full agent workspace with `SPC a t`.
+Open the agent view with `SPC a a`, or the conversation split with `SPC a v`. Every Minga key lives under `SPC a`; the less frequent ones sit in three groups, `SPC a q` Queue, `SPC a x` Context and `SPC a S` Session.
 
 If your model provider uses an API key, open **Models and connections** with `/model` and choose the API key action for that provider (or run `/auth anthropic` for the same masked prompt). Enter the key in that prompt, not in the chat composer. Submitting saves the credential locally without sending your draft.
 
 Open `/model` again and pick a model for the connected provider. Each hosted entry displays its protocol, credential profile, and capabilities. A saved session remembers the selected route, not the key. See [Agent model selection](AGENT-MODEL-SELECTION.md) for supported providers and route selection behavior.
 
-Type a prompt and press Enter. Agent file edits route through in-memory buffer forks and stay staged for review until you publish (`SPC a p`) or discard (`SPC a P`) them. See [Buffer-Aware Agents](BUFFER-AWARE-AGENTS.md) for the staging and merge contract.
+Type a prompt and press Enter. Agent file edits route through in-memory buffer forks and stay staged for review until you publish or discard them; `SPC a p` offers both in one prompt. See [Buffer-Aware Agents](BUFFER-AWARE-AGENTS.md) for the staging and merge contract.
 
 Useful slash commands:
 

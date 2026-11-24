@@ -226,9 +226,9 @@ public struct AgentChatHeaderView: View {
 
         var help: String {
             switch self {
-            case .checklist: "Inspect Agent checklist (SPC a k)"
-            case .queuedInputs: "Inspect queued Agent inputs (SPC a J)"
-            case .retainedHistory: "Read retained messages (SPC a H)"
+            case .checklist: "Inspect Agent checklist (SPC a S k)"
+            case .queuedInputs: "Inspect queued Agent inputs (SPC a q q)"
+            case .retainedHistory: "Read retained messages (SPC a S H)"
             case .help: "Keyboard shortcuts (?)"
             }
         }
@@ -274,7 +274,7 @@ public struct AgentChatHeaderView: View {
         }
         .buttonStyle(.plain)
         .allowsHitTesting(!state.hasActiveTurn)
-        .help("Pick model (SPC a m)")
+        .help("Pick model (SPC a S m)")
         .accessibilityLabel("Agent model")
         .accessibilityValue(state.displayModel.isEmpty ? "Agent" : state.displayModel)
         .accessibilityHint(state.hasActiveTurn ? "Disabled while the agent turn is active" : "Opens the model picker")
@@ -289,7 +289,7 @@ public struct AgentChatHeaderView: View {
     private func thinkingLevelMenu(compact: Bool) -> some View {
         if state.hasActiveTurn {
             thinkingLevelLabel(compact: compact)
-                .help("Pick thinking level (SPC a T)")
+                .help("Pick thinking level (SPC a S t)")
                 .accessibilityLabel("Agent thinking level")
                 .accessibilityValue(state.thinkingLabel)
                 .accessibilityHint("Disabled while the agent turn is active")
@@ -315,7 +315,7 @@ public struct AgentChatHeaderView: View {
             }
             .menuStyle(.borderlessButton)
             .fixedSize()
-            .help("Pick thinking level (SPC a T)")
+            .help("Pick thinking level (SPC a S t)")
             .accessibilityLabel("Agent thinking level")
             .accessibilityValue(state.thinkingLabel)
             .accessibilityHint("Opens a menu of thinking levels")

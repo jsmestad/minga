@@ -628,7 +628,7 @@ public struct StatusBarView: View {
                 }
             }
             .buttonStyle(.plain)
-            .help("Show diagnostics (SPC c d)")
+            .help("Show diagnostics (SPC c x)")
             .accessibilityLabel(diagnosticsAccessibilityLabel)
             .accessibilityHint("Shows diagnostics")
             .padding(.horizontal, Spacing.xs)

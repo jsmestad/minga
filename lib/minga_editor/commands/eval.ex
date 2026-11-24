@@ -1,6 +1,6 @@
 defmodule MingaEditor.Commands.Eval do
   @moduledoc """
-  Eval command: evaluates Elixir expressions from the `M-:` prompt.
+  Eval command: evaluates Elixir expressions from the `SPC ;` prompt.
 
   Evaluation runs in a supervised `Task` under `Minga.Buffer.Supervisor`
   with a 5-second timeout. Results and errors are displayed on the status

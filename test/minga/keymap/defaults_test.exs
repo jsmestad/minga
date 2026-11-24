@@ -1,252 +1,189 @@
 defmodule Minga.Keymap.DefaultsTest do
+  @moduledoc """
+  The default keymap's contract with `docs/design/keys.md`: where each key lives, which keys are retired, and how which-key groups are labelled.
+  """
+
   use ExUnit.Case, async: true
+
+  import Minga.Keymap.Sigil
 
   alias Minga.Keymap.Bindings
   alias Minga.Keymap.Defaults
   alias Minga.Keymap.NormalPrefixes
 
-  describe "normal prefix trie" do
-    test "zC and zO route to recursive fold commands" do
-      trie = NormalPrefixes.trie()
-      assert {:prefix, z_node} = Bindings.lookup(trie, {?z, 0})
-      assert {:command, :fold_close_recursive} = Bindings.lookup(z_node, {?C, 0})
-      assert {:command, :fold_open_recursive} = Bindings.lookup(z_node, {?O, 0})
-    end
-  end
+  # {keys after SPC, command}. Moved and new rows cite docs/design/keys.md.
+  @leader_homes [
+    # Kept neighbours
+    {~k(SPC), :project_find_file},
+    {~k(:), :command_palette},
+    {~k(/), :search_project},
+    {~k(f f), :find_file},
+    {~k(f F), :find_file_other_window},
+    {~k(f s), :save},
+    {~k(f p), :open_config},
+    {~k(b b), :buffer_list},
+    {~k(b d), :kill_buffer},
+    {~k(b X), :force_kill_buffer},
+    {~k(b D), :kill_other_buffers},
+    {~k(b K), :kill_all_buffers},
+    {~k(w h), :window_left},
+    {~k(w j), :window_down},
+    {~k(w k), :window_up},
+    {~k(w l), :window_right},
+    {~k(w v), :split_vertical},
+    {~k(w s), :split_horizontal},
+    {~k(q q), :quit_all},
+    {~k(h c), :describe_command},
+    {~k(h f), :describe_function},
+    {~k(h k), :describe_key},
+    {~k(c h), :call_hierarchy},
+    {~k(c H), :call_hierarchy_outgoing},
+    {~k(c v), :selection_expand},
+    {~k(c V), :selection_shrink},
+    {~k(c D), :find_references},
+    {~k(s s), :search_buffer},
+    {~k(s r), :search_and_replace},
+    {~k(p f), :project_find_file},
+    {~k(p p), :project_switch},
+    {~k(p a), :project_add},
+    {~k(p d), :project_remove},
+    {~k(p i), :project_invalidate},
+    {~k(p r), :project_recent_files},
+    {~k(p .), :project_browse},
+    {~k(p T), :test_all},
+    {~k(TAB TAB), :workspace_toggle},
+    {~k(TAB D), :workspace_close},
+    # Moved to their mnemonic homes
+    {~k(;), :enter_eval},
+    {~k(c x), :diagnostics_list},
+    {~k(c d), :goto_definition},
+    {~k(s i), :document_symbols},
+    {~k(s j), :jump_list},
+    {~k(s u), :timeline_toggle},
+    {~k(h a), :apropos},
+    {~k(f o), :remote_find_file},
+    # SPC a: everyday keys
+    {~k(a a), :toggle_agentic_view},
+    {~k(a n), :agent_new_session},
+    {~k(a s), :agent_abort},
+    {~k(a u), :undo_agent_session},
+    {~k(a v), :toggle_agent_split},
+    {~k(a ?), :inline_ask},
+    {~k(a r), :workspace_pending_reviews},
+    {~k(a e), :inline_edit},
+    {~k(a W), :code_why},
+    {~k(a A), :code_autobiography},
+    {~k(a p), :agent_edits_decide},
+    # SPC a q: Queue
+    {~k(a q q), :agent_queued_inputs},
+    {~k(a q f), :agent_queue_follow_up},
+    # SPC a x: Context
+    {~k(a x b), :agent_attach_buffer},
+    {~k(a x f), :agent_attach_file},
+    {~k(a x d), :agent_attach_diagnostics},
+    {~k(a x l), :agent_draft_attachments},
+    # SPC a S: Session
+    {~k(a S h), :agent_session_history},
+    {~k(a S R), :agent_session_rename},
+    {~k(a S m), :agent_pick_model},
+    {~k(a S t), :agent_pick_thinking},
+    {~k(a S l), :agent_start_session_picker},
+    {~k(a S H), :agent_retained_history},
+    {~k(a S k), :agent_checklist},
+    {~k(a S s), :agent_stop_session}
+  ]
+
+  # Keys docs/design/keys.md retires: they do nothing and are gone from which-key.
+  @retired [
+    ~k(a t),
+    ~k(a P),
+    ~k(a c),
+    ~k(a Q),
+    ~k(a o),
+    ~k(a J),
+    ~k(a f),
+    ~k(a b),
+    ~k(a F),
+    ~k(a D),
+    ~k(a j),
+    ~k(a h),
+    ~k(a R),
+    ~k(a m),
+    ~k(a T),
+    ~k(a N),
+    ~k(a k),
+    ~k(a H),
+    ~k(b P),
+    ~k(b <),
+    ~k(b >),
+    ~k(TAB n),
+    ~k(TAB p),
+    ~k(TAB a),
+    ~k(TAB d),
+    ~k(c g),
+    ~k(c j),
+    ~k(g w),
+    ~k(g a)
+  ]
+
+  @groups [
+    {~k(a), "Minga"},
+    {~k(a q), "Queue"},
+    {~k(a x), "Context"},
+    {~k(a S), "Session"},
+    {~k(f), "Files"},
+    {~k(b), "Buffers"},
+    {~k(w), "Windows"},
+    {~k(q), "Quit"},
+    {~k(h), "Help"},
+    {~k(m), "Filetype"},
+    {~k(TAB), "Workspace"}
+  ]
 
   describe "leader_trie/0" do
-    test "returns a non-empty trie node" do
+    test "every key resolves to the command at its home in docs/design/keys.md" do
       trie = Defaults.leader_trie()
-      assert map_size(trie.children) > 0
+
+      for {keys, command} <- @leader_homes do
+        assert {:command, ^command, _description} = Bindings.lookup_sequence(trie, keys),
+               "SPC #{Bindings.format_sequence(keys)} should run #{command}"
+      end
     end
 
-    test "SPC f is a prefix node labelled '+file'" do
+    test "retired keys resolve to nothing" do
       trie = Defaults.leader_trie()
-      assert {:prefix, f_node} = Bindings.lookup(trie, {?f, 0})
-      # The prefix node should have the '+file' description.
-      assert f_node.description == "+file"
+
+      for keys <- @retired do
+        refute match?({:command, _, _}, Bindings.lookup_sequence(trie, keys)),
+               "SPC #{Bindings.format_sequence(keys)} is retired"
+      end
     end
 
-    test "SPC b is a prefix node labelled '+buffer'" do
-      trie = Defaults.leader_trie()
-      assert {:prefix, b_node} = Bindings.lookup(trie, {?b, 0})
-      assert b_node.description == "+buffer"
+    test "SPC a keeps about a dozen everyday keys and three groups" do
+      {:prefix, a_node} = Bindings.lookup(Defaults.leader_trie(), {?a, 0})
+      children = Bindings.children(a_node)
+
+      groups = for {key, label, :group} <- children, do: {key, label}
+      commands = for {_key, _label, :command} <- children, do: :command
+
+      assert Enum.sort(groups) ==
+               Enum.sort([{{?q, 0}, "Queue"}, {{?x, 0}, "Context"}, {{?S, 0}, "Session"}])
+
+      assert length(commands) in 10..14
     end
 
-    test "SPC w is a prefix node labelled '+window'" do
+    test "groups carry Title Case labels and never a leading +" do
       trie = Defaults.leader_trie()
-      assert {:prefix, w_node} = Bindings.lookup(trie, {?w, 0})
-      assert w_node.description == "+window"
-    end
 
-    test "SPC q is a prefix node labelled '+quit'" do
-      trie = Defaults.leader_trie()
-      assert {:prefix, q_node} = Bindings.lookup(trie, {?q, 0})
-      assert q_node.description == "+quit"
-    end
+      for {keys, label} <- @groups do
+        assert {:prefix, node} = Bindings.lookup_sequence(trie, keys)
+        assert node.description == label
+      end
 
-    test "SPC h is a prefix node labelled '+help'" do
-      trie = Defaults.leader_trie()
-      assert {:prefix, h_node} = Bindings.lookup(trie, {?h, 0})
-      assert h_node.description == "+help"
-    end
-
-    test "SPC m is a prefix node labelled '+filetype'" do
-      trie = Defaults.leader_trie()
-      assert {:prefix, m_node} = Bindings.lookup(trie, {?m, 0})
-      assert m_node.description == "+filetype"
-    end
-
-    # ── File bindings ──────────────────────────────────────────────────────────
-
-    test "SPC f keeps file neighbors" do
-      trie = Defaults.leader_trie()
-      {:prefix, f_node} = Bindings.lookup(trie, {?f, 0})
-
-      assert {:command, :find_file} = Bindings.lookup(f_node, {?f, 0})
-      assert {:command, :find_file_other_window} = Bindings.lookup(f_node, {?F, 0})
-      assert {:command, :save} = Bindings.lookup(f_node, {?s, 0})
-      assert {:command, :open_config} = Bindings.lookup(f_node, {?p, 0})
-      assert :not_found = Bindings.lookup(f_node, {?d, 0})
-    end
-
-    # ── Buffer bindings ────────────────────────────────────────────────────────
-
-    test "SPC b b → :buffer_list" do
-      trie = Defaults.leader_trie()
-      {:prefix, b_node} = Bindings.lookup(trie, {?b, 0})
-      assert {:command, :buffer_list} = Bindings.lookup(b_node, {?b, 0})
-    end
-
-    test "SPC b d and SPC b X bind ordinary and force buffer kills" do
-      trie = Defaults.leader_trie()
-      {:prefix, b_node} = Bindings.lookup(trie, {?b, 0})
-      assert {:command, :kill_buffer} = Bindings.lookup(b_node, {?d, 0})
-      assert {:command, :force_kill_buffer} = Bindings.lookup(b_node, {?X, 0})
-    end
-
-    test "SPC TAB d → :kill_buffer" do
-      trie = Defaults.leader_trie()
-      {:prefix, tab_node} = Bindings.lookup(trie, {9, 0})
-      assert {:command, :kill_buffer} = Bindings.lookup(tab_node, {?d, 0})
-    end
-
-    test "SPC b tab management bindings route to tab commands" do
-      trie = Defaults.leader_trie()
-      {:prefix, b_node} = Bindings.lookup(trie, {?b, 0})
-
-      assert {:command, :pin_tab} = Bindings.lookup(b_node, {?P, 0})
-      assert {:command, :move_tab_left} = Bindings.lookup(b_node, {?<, 0})
-      assert {:command, :move_tab_right} = Bindings.lookup(b_node, {?>, 0})
-    end
-
-    # ── Tab / workspace bindings ───────────────────────────────────────────────
-
-    test "SPC t routes workspace bindings to workspace commands" do
-      trie = Defaults.leader_trie()
-      {:prefix, t_node} = Bindings.lookup(trie, {9, 0})
-
-      assert t_node.description == "+tab"
-      assert {:command, :workspace_toggle} = Bindings.lookup(t_node, {9, 0})
-      assert {:command, :workspace_next} = Bindings.lookup(t_node, {?N, 0})
-      assert {:command, :workspace_prev} = Bindings.lookup(t_node, {?P, 0})
-      assert {:command, :workspace_next_agent} = Bindings.lookup(t_node, {?A, 0})
-      assert {:command, :manual_workspace} = Bindings.lookup(t_node, {?m, 0})
-      assert {:command, :workspace_list} = Bindings.lookup(t_node, {?l, 0})
-      assert {:command, :workspace_rename} = Bindings.lookup(t_node, {?r, 0})
-      assert {:command, :workspace_set_icon} = Bindings.lookup(t_node, {?i, 0})
-      assert {:command, :workspace_close} = Bindings.lookup(t_node, {?D, 0})
-    end
-
-    # ── Window bindings ────────────────────────────────────────────────────────
-
-    test "SPC w h → :window_left" do
-      trie = Defaults.leader_trie()
-      {:prefix, w_node} = Bindings.lookup(trie, {?w, 0})
-      assert {:command, :window_left} = Bindings.lookup(w_node, {?h, 0})
-    end
-
-    test "SPC w j → :window_down" do
-      trie = Defaults.leader_trie()
-      {:prefix, w_node} = Bindings.lookup(trie, {?w, 0})
-      assert {:command, :window_down} = Bindings.lookup(w_node, {?j, 0})
-    end
-
-    test "SPC w k → :window_up" do
-      trie = Defaults.leader_trie()
-      {:prefix, w_node} = Bindings.lookup(trie, {?w, 0})
-      assert {:command, :window_up} = Bindings.lookup(w_node, {?k, 0})
-    end
-
-    test "SPC w l → :window_right" do
-      trie = Defaults.leader_trie()
-      {:prefix, w_node} = Bindings.lookup(trie, {?w, 0})
-      assert {:command, :window_right} = Bindings.lookup(w_node, {?l, 0})
-    end
-
-    test "SPC w v → :split_vertical" do
-      trie = Defaults.leader_trie()
-      {:prefix, w_node} = Bindings.lookup(trie, {?w, 0})
-      assert {:command, :split_vertical} = Bindings.lookup(w_node, {?v, 0})
-    end
-
-    test "SPC w s → :split_horizontal" do
-      trie = Defaults.leader_trie()
-      {:prefix, w_node} = Bindings.lookup(trie, {?w, 0})
-      assert {:command, :split_horizontal} = Bindings.lookup(w_node, {?s, 0})
-    end
-
-    # ── Quit bindings ──────────────────────────────────────────────────────────
-
-    test "SPC q q → :quit_all" do
-      trie = Defaults.leader_trie()
-      {:prefix, q_node} = Bindings.lookup(trie, {?q, 0})
-      assert {:command, :quit_all} = Bindings.lookup(q_node, {?q, 0})
-    end
-
-    # ── Help bindings ──────────────────────────────────────────────────────────
-
-    test "SPC h f → :describe_function" do
-      trie = Defaults.leader_trie()
-      {:prefix, h_node} = Bindings.lookup(trie, {?h, 0})
-      assert {:command, :describe_function} = Bindings.lookup(h_node, {?f, 0})
-    end
-
-    test "SPC h k → :describe_key" do
-      trie = Defaults.leader_trie()
-      {:prefix, h_node} = Bindings.lookup(trie, {?h, 0})
-      assert {:command, :describe_key} = Bindings.lookup(h_node, {?k, 0})
-    end
-
-    # ── Code / LSP bindings ───────────────────────────────────────────────────
-
-    test "SPC c h → :call_hierarchy" do
-      trie = Defaults.leader_trie()
-      {:prefix, c_node} = Bindings.lookup(trie, {?c, 0})
-      assert {:command, :call_hierarchy} = Bindings.lookup(c_node, {?h, 0})
-    end
-
-    test "SPC c H → :call_hierarchy_outgoing" do
-      trie = Defaults.leader_trie()
-      {:prefix, c_node} = Bindings.lookup(trie, {?c, 0})
-      assert {:command, :call_hierarchy_outgoing} = Bindings.lookup(c_node, {?H, 0})
-    end
-
-    test "SPC c v → :selection_expand" do
-      trie = Defaults.leader_trie()
-      {:prefix, c_node} = Bindings.lookup(trie, {?c, 0})
-      assert {:command, :selection_expand} = Bindings.lookup(c_node, {?v, 0})
-    end
-
-    test "SPC c V → :selection_shrink" do
-      trie = Defaults.leader_trie()
-      {:prefix, c_node} = Bindings.lookup(trie, {?c, 0})
-      assert {:command, :selection_shrink} = Bindings.lookup(c_node, {?V, 0})
-    end
-
-    # ── AI agent bindings ─────────────────────────────────────────────────────
-
-    test "SPC a h → :agent_session_history" do
-      trie = Defaults.leader_trie()
-      {:prefix, a_node} = Bindings.lookup(trie, {?a, 0})
-      assert {:command, :agent_session_history} = Bindings.lookup(a_node, {?h, 0})
-    end
-
-    test "SPC a r → :workspace_pending_reviews" do
-      trie = Defaults.leader_trie()
-      {:prefix, a_node} = Bindings.lookup(trie, {?a, 0})
-      assert {:command, :workspace_pending_reviews} = Bindings.lookup(a_node, {?r, 0})
-    end
-
-    test "SPC a p publishes and SPC a P discards staged agent edits" do
-      trie = Defaults.leader_trie()
-      {:prefix, a_node} = Bindings.lookup(trie, {?a, 0})
-      assert {:command, :agent_edits_publish} = Bindings.lookup(a_node, {?p, 0})
-      assert {:command, :agent_edits_discard} = Bindings.lookup(a_node, {?P, 0})
-    end
-
-    test "SPC a m → :agent_pick_model" do
-      trie = Defaults.leader_trie()
-      {:prefix, a_node} = Bindings.lookup(trie, {?a, 0})
-      assert {:command, :agent_pick_model} = Bindings.lookup(a_node, {?m, 0})
-    end
-
-    test "SPC a c → :workspace_copy_file" do
-      trie = Defaults.leader_trie()
-      {:prefix, a_node} = Bindings.lookup(trie, {?a, 0})
-      assert {:command, :workspace_copy_file} = Bindings.lookup(a_node, {?c, 0})
-    end
-
-    test "SPC a T → :agent_pick_thinking" do
-      trie = Defaults.leader_trie()
-      {:prefix, a_node} = Bindings.lookup(trie, {?a, 0})
-      assert {:command, :agent_pick_thinking} = Bindings.lookup(a_node, {?T, 0})
-    end
-
-    test "SPC a e → :inline_edit" do
-      trie = Defaults.leader_trie()
-      {:prefix, a_node} = Bindings.lookup(trie, {?a, 0})
-      assert {:command, :inline_edit} = Bindings.lookup(a_node, {?e, 0})
+      for {_keys, label} <- Defaults.group_prefixes() ++ Defaults.filetype_group_prefixes() do
+        refute String.starts_with?(label, "+"), "group label #{inspect(label)} starts with +"
+        assert label == String.capitalize(String.first(label)) <> String.slice(label, 1..-1//1)
+      end
     end
 
     test "leader bindings do not define duplicate key sequences" do
@@ -259,87 +196,43 @@ defmodule Minga.Keymap.DefaultsTest do
       assert duplicates == []
     end
 
-    # ── Project bindings (Doom-aligned) ──────────────────────────────────────────
-
-    test "SPC SPC → :project_find_file" do
-      trie = Defaults.leader_trie()
-      assert {:command, :project_find_file} = Bindings.lookup(trie, {32, 0})
-    end
-
-    test "SPC p r → :project_recent_files" do
-      trie = Defaults.leader_trie()
-      {:prefix, p_node} = Bindings.lookup(trie, {?p, 0})
-      assert {:command, :project_recent_files} = Bindings.lookup(p_node, {?r, 0})
-    end
-
-    test "SPC p . → :project_browse" do
-      trie = Defaults.leader_trie()
-      {:prefix, p_node} = Bindings.lookup(trie, {?p, 0})
-      assert {:command, :project_browse} = Bindings.lookup(p_node, {?., 0})
-    end
-
-    test "SPC p T → :test_all" do
-      trie = Defaults.leader_trie()
-      {:prefix, p_node} = Bindings.lookup(trie, {?p, 0})
-      assert {:command, :test_all} = Bindings.lookup(p_node, {?T, 0})
-    end
-
-    test "existing project bindings still resolve to their current commands" do
-      trie = Defaults.leader_trie()
-      {:prefix, p_node} = Bindings.lookup(trie, {?p, 0})
-
-      assert {:command, :project_find_file} = Bindings.lookup(p_node, {?f, 0})
-      assert {:command, :project_switch} = Bindings.lookup(p_node, {?p, 0})
-      assert {:command, :project_add} = Bindings.lookup(p_node, {?a, 0})
-      assert {:command, :project_remove} = Bindings.lookup(p_node, {?d, 0})
-      assert {:command, :project_invalidate} = Bindings.lookup(p_node, {?i, 0})
-    end
-
-    # ── Search bindings ─────────────────────────────────────────────────────────
-
-    test "SPC s s → :search_buffer" do
-      trie = Defaults.leader_trie()
-      {:prefix, s_node} = Bindings.lookup(trie, {?s, 0})
-      assert {:command, :search_buffer} = Bindings.lookup(s_node, {?s, 0})
-    end
-
-    test "SPC s r → :search_and_replace" do
-      trie = Defaults.leader_trie()
-      {:prefix, s_node} = Bindings.lookup(trie, {?s, 0})
-      assert {:command, :search_and_replace} = Bindings.lookup(s_node, {?r, 0})
-    end
-
-    test "SPC s j → :document_symbols" do
-      trie = Defaults.leader_trie()
-      {:prefix, s_node} = Bindings.lookup(trie, {?s, 0})
-      assert {:command, :document_symbols} = Bindings.lookup(s_node, {?j, 0})
-    end
-
-    # ── Negative cases ─────────────────────────────────────────────────────────
-
-    test "SPC p R does not resolve to :project_recent_files" do
-      trie = Defaults.leader_trie()
-      {:prefix, p_node} = Bindings.lookup(trie, {?p, 0})
-      result = Bindings.lookup(p_node, {?R, 0})
-      refute match?({:command, :project_recent_files}, result)
-    end
-
     test "unknown leader prefix returns :not_found" do
-      trie = Defaults.leader_trie()
-      assert :not_found = Bindings.lookup(trie, {?x, 0})
+      assert :not_found = Bindings.lookup(Defaults.leader_trie(), {?x, 0})
     end
   end
 
-  describe "group_prefixes/0" do
-    test "includes SPC m as +filetype" do
-      assert Enum.any?(Defaults.group_prefixes(), fn {keys, label} ->
-               keys == [{?m, 0}] and label == "+filetype"
-             end)
+  describe "normal prefix trie" do
+    test "bracket pairs and g keys follow docs/design/keys.md" do
+      trie = NormalPrefixes.trie()
+
+      for {keys, command} <- [
+            {~k(] e), :next_diagnostic},
+            {~k([ e), :prev_diagnostic},
+            {~k(] d), :next_git_hunk},
+            {~k([ d), :prev_git_hunk},
+            {~k(] c), :next_git_hunk},
+            {~k([ c), :prev_git_hunk},
+            {~k(] h), :timeline_next_edit},
+            {~k([ h), :timeline_prev_edit},
+            {~k(] n), :nav_next_sibling},
+            {~k([ n), :nav_prev_sibling},
+            {~k(z C), :fold_close_recursive},
+            {~k(z O), :fold_open_recursive}
+          ] do
+        assert {:command, ^command, _} = Bindings.lookup_sequence(trie, keys),
+               "#{Bindings.format_sequence(keys)} should run #{command}"
+      end
+    end
+
+    test "gt and gT are retired with tabs" do
+      trie = NormalPrefixes.trie()
+      assert :not_found = Bindings.lookup_sequence(trie, ~k(g t))
+      assert :not_found = Bindings.lookup_sequence(trie, ~k(g T))
     end
   end
 
-  describe "filetype_bindings/0" do
-    test "includes representative built-in SPC m leaf bindings" do
+  describe "filetype bindings" do
+    test "include representative built-in SPC m leaf bindings" do
       bindings = Defaults.filetype_bindings()
 
       assert {:elixir, [{?a, 0}], :alternate_file, "Alternate file"} in bindings
@@ -347,11 +240,9 @@ defmodule Minga.Keymap.DefaultsTest do
       assert {:elixir, [{?t, 0}, {?a, 0}], :test_all, "Test all"} in bindings
       assert {:swift, [{?t, 0}, {?o, 0}], :test_output, "Show test output"} in bindings
     end
-  end
 
-  describe "filetype_group_prefixes/0" do
-    test "labels the test submenu as +test" do
-      assert Defaults.filetype_group_prefixes() == [{[{?t, 0}], "+test"}]
+    test "label the test submenu Test" do
+      assert Defaults.filetype_group_prefixes() == [{[{?t, 0}], "Test"}]
     end
   end
 
@@ -362,13 +253,9 @@ defmodule Minga.Keymap.DefaultsTest do
   end
 
   describe "all_bindings/0" do
-    test "returns a non-empty list of binding tuples" do
-      bindings = Defaults.all_bindings()
-      assert is_list(bindings)
-      assert match?([_ | _], bindings)
-    end
-
     test "each binding is a {keys, command, description} tuple" do
+      assert [_ | _] = Defaults.all_bindings()
+
       for {keys, command, description} <- Defaults.all_bindings() do
         assert is_list(keys)
         assert is_atom(command)
@@ -378,46 +265,45 @@ defmodule Minga.Keymap.DefaultsTest do
   end
 
   describe "normal_bindings/0" do
-    test "returns a non-empty map" do
+    test "lists the Vim keys describe-key reports" do
       bindings = Defaults.normal_bindings()
-      assert is_map(bindings)
-      assert map_size(bindings) > 0
-    end
 
-    test "contains core movement keys" do
-      bindings = Defaults.normal_bindings()
-      assert {_, _} = bindings[{?h, 0}]
-      assert {_, _} = bindings[{?j, 0}]
-      assert {_, _} = bindings[{?k, 0}]
-      assert {_, _} = bindings[{?l, 0}]
-    end
+      for key <- [
+            {?h, 0},
+            {?j, 0},
+            {?k, 0},
+            {?l, 0},
+            {?d, 0x02},
+            {?u, 0x02},
+            {?d, 0},
+            {?c, 0},
+            {?y, 0}
+          ] do
+        assert {_command, _description} = bindings[key]
+      end
 
-    test "contains Ctrl+ bindings" do
-      bindings = Defaults.normal_bindings()
-      assert {_, _} = bindings[{?d, 0x02}]
-      assert {_, _} = bindings[{?u, 0x02}]
-    end
-
-    test "contains structural navigation Alt+ bindings" do
-      bindings = Defaults.normal_bindings()
-      assert {:nav_parent, _} = bindings[{?h, 0x04}]
-      assert {:nav_first_child, _} = bindings[{?l, 0x04}]
-      assert {:nav_next_sibling, _} = bindings[{?j, 0x04}]
-      assert {:nav_prev_sibling, _} = bindings[{?k, 0x04}]
-    end
-
-    test "contains operator keys" do
-      bindings = Defaults.normal_bindings()
-      assert {_, _} = bindings[{?d, 0}]
-      assert {_, _} = bindings[{?c, 0}]
-      assert {_, _} = bindings[{?y, 0}]
-    end
-
-    test "each entry is {command_atom, description_string}" do
-      for {_key, {command, description}} <- Defaults.normal_bindings() do
+      for {_key, {command, description}} <- bindings do
         assert is_atom(command)
         assert is_binary(description)
       end
+    end
+
+    test "⌥h ⌥j ⌥k ⌥l alias SPC c v, ]n, [n and SPC c V, and ⌥: is gone" do
+      bindings = Defaults.normal_bindings()
+
+      assert {:selection_expand, _} = bindings[{?h, 0x04}]
+      assert {:nav_next_sibling, _} = bindings[{?j, 0x04}]
+      assert {:nav_prev_sibling, _} = bindings[{?k, 0x04}]
+      assert {:selection_shrink, _} = bindings[{?l, 0x04}]
+      refute Map.has_key?(bindings, {?:, 0x04})
+    end
+
+    test "⌃O and ⌃I (and Tab, which terminals send for ⌃I) walk the jump list" do
+      bindings = Defaults.normal_bindings()
+
+      assert {:jump_back, _} = bindings[{?o, 0x02}]
+      assert {:jump_forward, _} = bindings[{?i, 0x02}]
+      assert {:jump_forward, _} = bindings[{9, 0}]
     end
   end
 end

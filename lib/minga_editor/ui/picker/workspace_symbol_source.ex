@@ -118,17 +118,11 @@ defmodule MingaEditor.UI.Picker.WorkspaceSymbolSource do
   end
 
   @spec set_jump_mark(EditorState.t()) :: EditorState.t()
-  defp set_jump_mark(%{workspace: %{buffers: %{active: buf}}} = state) when is_pid(buf) do
-    pos = Buffer.cursor(buf)
+  # A preview only shows the location; the confirmed pick records the jump.
+  defp set_jump_mark(%{buffer_lifecycle: %{buffer_add_context: :preview}} = state), do: state
 
-    %{
-      state
-      | workspace:
-          MingaEditor.Session.State.set_editing(
-            state.workspace,
-            MingaEditor.VimState.set_last_jump_pos(state.workspace.editing, pos)
-          )
-    }
+  defp set_jump_mark(%{workspace: %{buffers: %{active: buf}}} = state) when is_pid(buf) do
+    MingaEditor.Editing.record_jump(state, buf, Buffer.cursor(buf))
   end
 
   defp set_jump_mark(state), do: state

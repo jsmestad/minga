@@ -93,7 +93,7 @@ defmodule MingaEditor.Agent.ApprovedEditKeysTest do
     assert editor_mode(ctx) == :normal
 
     ref = Process.monitor(session)
-    send_keys_sync(ctx, "<SPC>aS")
+    send_keys_sync(ctx, "<SPC>aSs")
     assert_receive {:DOWN, ^ref, :process, ^session, _reason}, @event_timeout
 
     send_keys_sync(ctx, ":")

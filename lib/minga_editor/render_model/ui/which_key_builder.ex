@@ -1,5 +1,9 @@
 defmodule MingaEditor.RenderModel.UI.WhichKeyBuilder do
-  @moduledoc false
+  @moduledoc """
+  Builds the semantic which-key model from the pending key trie node.
+
+  Group rows carry their Title Case label with a trailing `›`; frontends render the description verbatim and colour group rows with the `group` colour role.
+  """
 
   alias Minga.RenderModel.UI.WhichKey
   alias MingaEditor.State.WhichKey, as: WhichKeyState
@@ -25,7 +29,7 @@ defmodule MingaEditor.RenderModel.UI.WhichKeyBuilder do
       bindings
       |> Enum.slice(page * @page_size, @page_size)
       |> Enum.map(fn b ->
-        %{key: b.key, description: b.description, kind: b.kind, icon: b.icon}
+        %{key: b.key, description: description(b), kind: b.kind, icon: b.icon}
       end)
 
     %WhichKey{
@@ -36,4 +40,10 @@ defmodule MingaEditor.RenderModel.UI.WhichKeyBuilder do
       bindings: page_bindings
     }
   end
+
+  # Groups read like leaves with a trailing chevron ("Session ›"), so both
+  # frontends draw the same label from the model instead of inventing it.
+  @spec description(WhichKeyUI.binding()) :: String.t()
+  defp description(%{kind: :group, description: description}), do: description <> " ›"
+  defp description(%{description: description}), do: description
 end

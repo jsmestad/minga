@@ -1,6 +1,6 @@
 # Keys
 
-Every key the Spine adds, changes or retires, by context. The status column compares with today's keymap on `main`: **kept** means the binding exists and keeps its meaning, **changed** means the key or its meaning changes, **new** means the key is free today, **retired** means the binding goes away. Line references are to `lib/minga/keymap/defaults.ex` unless another file is named.
+Every key the Spine adds, changes or retires, by context. The status column compares with today's keymap on `main`: **kept** means the binding exists and keeps its meaning, **changed** means the key or its meaning changes, **new** means the key is free today, **retired** means the binding goes away. **shipped** marks a change or retirement that is in today's keymap; the rest of the row says what it replaced. Line references are to `lib/minga/keymap/defaults.ex` unless another file is named.
 
 Notation: modifiers as Mac glyphs (⌃J, ⌥↩, ⌘.), leader sequences as `SPC a a`. Never `C-j`.
 
@@ -40,31 +40,31 @@ Keys are chords and mnemonics, not shortcuts. This is [principle 11](principles.
 | `SPC ,` | Switch buffer and file switcher | new |
 | `SPC b b` | Same switcher as `SPC ,` | kept (57) |
 | `SPC 1` to `SPC 4` | Jump to pinned file 1 to 4 (⌘1 to ⌘4 on macOS). Diverges from Doom's workspaces on `SPC 1` to `SPC 9`; which-key labels them "Pinned" | changed (186 to 189, were tabs; tabs are gone) |
-| `SPC ;` | Eval | new; replaces ⌥: (331) |
-| `SPC c x` | Diagnostics list (Doom) | changed; was `SPC c d` (102) |
-| `SPC c d` | Go to definition (Doom) | changed; was the diagnostics list (102) |
-| `SPC c g` | (retired) | retired (105); `SPC c d` is definition |
+| `SPC ;` | Eval | shipped; replaces ⌥: (331), which is gone |
+| `SPC c x` | Diagnostics list (Doom) | shipped; was `SPC c d` (102) |
+| `SPC c d` | Go to definition (Doom) | shipped; was the diagnostics list (102) |
+| `SPC c g` | (retired) | shipped, retired (105); `SPC c d` is definition |
 | `SPC c D` | Find references | kept (103) |
 | `SPC c v` / `SPC c V` | Expand / shrink the selection by syntax node | kept |
-| `SPC g g` | Git status, a magit-style buffer (Doom) | new; replaces the proposed `SPC g s` |
+| `SPC g g` | Git status, a magit-style buffer (Doom) | new; replaces the proposed `SPC g s`. The git extension owns `SPC g` and binds this today |
 | `SPC g s` | Stage hunk (Doom), reserved for the git group | new |
-| `SPC g B` | Blame for the current line or file (Doom) | new; replaces the proposed `SPC g b` |
+| `SPC g B` | Blame for the current line or file (Doom) | new; replaces the proposed `SPC g b`. The git extension owns `SPC g`; it still binds blame on `SPC g b` |
 | `SPC g b` | Switch branch (Doom), reserved for the git group | new |
-| `SPC g w` / `SPC g a` | (moved to `SPC a`) | retired (203, 204) |
-| `SPC s u` | Edit timeline, the undo history including Minga's steps (Doom) | new; replaces the proposed `SPC t e` |
-| `SPC s i` | Document symbols (Doom imenu) | changed; was `SPC s j` (46) and `SPC c j` (107) |
-| `SPC s j` | Jump list (Doom) | changed; was document symbols (46) |
-| `SPC c j` | (retired; duplicate of document symbols) | retired (107) |
+| `SPC g w` / `SPC g a` | (moved to `SPC a`) | shipped, retired (203, 204) |
+| `SPC s u` | Edit timeline, the undo history including Minga's steps (Doom) | shipped; opens today's timeline of Minga's edits, and your own steps join it with #4048 |
+| `SPC s i` | Document symbols (Doom imenu) | shipped; was `SPC s j` (46) and `SPC c j` (107) |
+| `SPC s j` | Jump list (Doom) | shipped; was document symbols (46) |
+| `SPC c j` | (retired; duplicate of document symbols) | shipped, retired (107) |
 | `SPC s q` | Quickfix group: open the list (`:copen`), with `:cdo` / `:cfdo` listed as hints in which-key | new |
-| `SPC h a` | Apropos (Doom) | changed; was a duplicate of `SPC h c` (86) |
+| `SPC h a` | Apropos (Doom): commands and options in one search | shipped; was a duplicate of `SPC h c` (86) |
 | `SPC o t` | Toggle the terminal drawer (Doom) | new |
 | `SPC o T` | New terminal in the current window (Doom) | new |
 | `SPC p h` | Project home (`*home*`) from anywhere | new |
 | `SPC q n` | Start fresh instead of the restored session: closes the restored files and opens the project home | new |
-| `SPC f o` | Open a remote file | changed; was `SPC a o` (161) |
-| `SPC b P`, `SPC b <`, `SPC b >` | (tabs are gone) | retired (69, 70, 71) |
-| `SPC b D`, `SPC b K` | Close other buffers / close all buffers | changed (63, 64; described as tabs today) |
-| `SPC TAB n`, `SPC TAB p`, `SPC TAB a` | (tabs are gone) | retired (169, 170, 172) |
+| `SPC f o` | Open a remote file | shipped; was `SPC a o` (161) |
+| `SPC b P`, `SPC b <`, `SPC b >` | (tabs are gone) | shipped, retired (69, 70, 71) |
+| `SPC b D`, `SPC b K` | Close other buffers / close all buffers | shipped (63, 64; were described as tabs) |
+| `SPC TAB n`, `SPC TAB p`, `SPC TAB a`, `SPC TAB d` | (tabs are gone) | shipped, retired (169 to 172) |
 
 ## Leader `SPC a` (Minga)
 
@@ -95,62 +95,62 @@ SPC a  Minga
 | `SPC a r` | Review buffer | kept (158, "Pending reviews") |
 | `SPC a w` | Watch Minga: a split that follows Minga's edits and shows `*minga-shell*` | new |
 | `SPC a e` | Rewrite selection inline | kept (146) |
-| `SPC a W` | Why is this line like this? | changed; was `SPC g w` (203) |
-| `SPC a A` | Code autobiography | changed; was `SPC g a` (204) |
-| `SPC a p` | Publish edits: one prompt that offers publish or discard | changed (159); absorbs `SPC a P` |
-| `SPC a P` | (folded into `SPC a p`) | retired (160) |
-| `SPC a t` | (duplicated the split toggle) | retired (139) |
-| `SPC a c` | (copy file to workspace; workspaces are gone) | retired (148) |
-| `SPC a Q` | (answer a question; answered from the tasks drawer row) | retired (164) |
-| `SPC a o` | (moved to `SPC f o`) | retired (161) |
+| `SPC a W` | Why is this line like this? | shipped; was `SPC g w` (203) |
+| `SPC a A` | Code autobiography | shipped; was `SPC g a` (204) |
+| `SPC a p` | Publish edits: one prompt that offers publish or discard | shipped (159); absorbs `SPC a P` |
+| `SPC a P` | (folded into `SPC a p`) | shipped, retired (160) |
+| `SPC a t` | (duplicated the split toggle) | shipped, retired (139) |
+| `SPC a c` | (copy file to workspace; workspaces are gone) | shipped, retired (148) |
+| `SPC a Q` | (answer a question; answered from the tasks drawer row) | shipped, retired (164) |
+| `SPC a o` | (moved to `SPC f o`) | shipped, retired (161) |
 
 **`SPC a q` Queue ›**
 
 | Keys | Action | Status |
 |---|---|---|
-| `SPC a q q` | Open the queue buffer (`*minga-queue*`); dequeue, reorder and delete live inside it | changed; was `SPC a J` (154) and dequeue `SPC a q` (163) |
-| `SPC a q f` | Queue the composer input as a follow-up (`⌥↩` in the composer does the same) | changed; was `SPC a f` (165) |
+| `SPC a q q` | Open the queue buffer (`*minga-queue*`); dequeue, reorder and delete live inside it | shipped; was `SPC a J` (154) and dequeue `SPC a q` (163); opens today's queued-inputs list |
+| `SPC a q f` | Queue the composer input as a follow-up (`⌥↩` in the composer does the same) | shipped; was `SPC a f` (165) |
 
 **`SPC a x` Context ›**
 
 | Keys | Action | Status |
 |---|---|---|
-| `SPC a x b` | Attach this buffer | changed; was `SPC a b` (155) |
-| `SPC a x f` | Attach a project file | changed; was `SPC a F` (156) |
-| `SPC a x d` | Attach this file's diagnostics | changed; was `SPC a D` (157) |
-| `SPC a x l` | List draft attachments | changed; was `SPC a j` (153) |
+| `SPC a x b` | Attach this buffer | shipped; was `SPC a b` (155) |
+| `SPC a x f` | Attach a project file | shipped; was `SPC a F` (156) |
+| `SPC a x d` | Attach this file's diagnostics | shipped; was `SPC a D` (157) |
+| `SPC a x l` | List draft attachments | shipped; was `SPC a j` (153) |
 
 **`SPC a S` Session ›**
 
 | Keys | Action | Status |
 |---|---|---|
-| `SPC a S h` | Resume a session | changed; was `SPC a h` (149) |
-| `SPC a S R` | Rename the session | changed; was `SPC a R` (150) |
-| `SPC a S m` | Pick the model | changed; was `SPC a m` (147) |
-| `SPC a S t` | Pick the thinking level | changed; was `SPC a T` (162) |
-| `SPC a S l` | Pick where the session runs | changed; was `SPC a N` (144) |
-| `SPC a S H` | Read retained messages | changed; was `SPC a H` (151) |
-| `SPC a S k` | Inspect the checklist | changed; was `SPC a k` (152) |
-| `SPC a S s` | Stop the session | changed; was `SPC a S` (142) |
+| `SPC a S h` | Resume a session | shipped; was `SPC a h` (149) |
+| `SPC a S R` | Rename the session | shipped; was `SPC a R` (150) |
+| `SPC a S m` | Pick the model | shipped; was `SPC a m` (147) |
+| `SPC a S t` | Pick the thinking level | shipped; was `SPC a T` (162) |
+| `SPC a S l` | Pick where the session runs | shipped; was `SPC a N` (144) |
+| `SPC a S H` | Read retained messages | shipped; was `SPC a H` (151) |
+| `SPC a S k` | Inspect the checklist | shipped; was `SPC a k` (152) |
+| `SPC a S s` | Stop the session | shipped; was `SPC a S` (142) |
 
 ## In a file
 
 | Keys | Action | Status |
 |---|---|---|
-| `]h` / `[h` | Next / previous Minga change | new, replaces `]e` / `[e` for agent edits (`normal_prefixes.ex:56`, `65`) |
+| `]h` / `[h` | Next / previous Minga change | shipped; replaces `]e` / `[e` for agent edits and steps today's agent edit timeline until #4050 lands per-change navigation |
 | `ih` / `ah` | Text object: one Minga change, inner or with context | new |
 | `vah SPC a y` | Keep every change touched by the selection | new |
 | `.` | Repeat the last keep or reject; counts work | new |
 | `:'<,'>Minga keep` | Keep a range; `:%Minga reject` rejects a whole file | new |
-| `]e` / `[e` | Next / previous diagnostic (Doom next-error) | changed; was `]d` / `[d` (`normal_prefixes.ex:50`) |
-| `]d` / `[d` | Next / previous git hunk (Doom diff-hl) | changed; git hunks were on `]c` / `[c` (`normal_prefixes.ex:51`) |
+| `]e` / `[e` | Next / previous diagnostic (Doom next-error) | shipped; was `]d` / `[d` |
+| `]d` / `[d` | Next / previous git hunk (Doom diff-hl) | shipped; git hunks were on `]c` / `[c` |
 | `]c` / `[c` | Next / previous change in a diff view | kept for diff buffers |
-| `]n` / `[n` | Next / previous syntax node (sibling); `SPC c v` / `SPC c V` expand and shrink | changed; ⌥h / ⌥j / ⌥k / ⌥l (286 to 289) stay only as aliases |
+| `]n` / `[n` | Next / previous syntax node (sibling); `SPC c v` / `SPC c V` expand and shrink | shipped; ⌥j / ⌥k alias `]n` / `[n` and ⌥h / ⌥l alias `SPC c v` / `SPC c V` |
 | `g.` | Act menu on whatever is under the cursor | changed (`normal_prefixes.ex:27`, was "Code actions"); code actions are part of the act menu |
 | `K` | Hover; `K` again focuses it | kept |
-| `⌃O` / `⌃I` | Back / forward in the jump list (⌘[ / ⌘] on macOS) | kept Vim; replaces the proposed ⌃⌘← / ⌃⌘→ |
+| `⌃O` / `⌃I` | Back / forward in the jump list (⌘[ / ⌘] on macOS; Tab is ⌃I, as in Vim) | shipped; replaces the proposed ⌃⌘← / ⌃⌘→ |
 | `u`, ⌘Z | Undo your own edits only | changed behavior |
-| `gt` / `gT` | (tabs are gone) | retired (`normal_prefixes.ex:34`, `35`) |
+| `gt` / `gT` | (tabs are gone) | shipped, retired |
 
 `SPC .` stays Doom's "find file in this directory"; the act menu lives on `g.` in Normal mode and `⌃.` wherever you type.
 

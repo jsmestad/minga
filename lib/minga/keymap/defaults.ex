@@ -3,26 +3,27 @@ defmodule Minga.Keymap.Defaults do
   Doom Emacs-style default leader keybindings for Minga.
 
   All bindings are rooted at the **SPC** (space) leader key in Normal mode.
-  Group prefix nodes are labelled with `+group` descriptions so that the
-  which-key popup can display them meaningfully.
+  Group prefix nodes carry Title Case labels ("Files", "Session"); which-key
+  renders them as groups with a trailing `›`. `docs/design/keys.md` is the
+  authority for where each key lives.
 
   ## Key groups
 
   | Prefix    | Group       |
   |-----------|-------------|
-  | `SPC f`   | +file       |
-  | `SPC b`   | +buffer     |
-  | `SPC w`   | +window     |
-  | `SPC s`   | +search     |
-  | `SPC c`   | +code       |
-  | `SPC g`   | +git        |
-  | `SPC o`   | +open       |
-  | `SPC a`   | +ai         |
-  | `SPC t`   | +toggle     |
-  | `SPC p`   | +project    |
-  | `SPC q`   | +quit       |
-  | `SPC h`   | +help       |
-  | `SPC m`   | +filetype   |
+  | `SPC f`   | Files       |
+  | `SPC b`   | Buffers     |
+  | `SPC w`   | Windows     |
+  | `SPC s`   | Search      |
+  | `SPC c`   | Code        |
+  | `SPC g`   | Git         |
+  | `SPC o`   | Open        |
+  | `SPC a`   | Minga       |
+  | `SPC t`   | Toggles     |
+  | `SPC p`   | Project     |
+  | `SPC q`   | Quit        |
+  | `SPC h`   | Help        |
+  | `SPC m`   | Filetype    |
   """
 
   alias Minga.Keymap.Bindings
@@ -38,18 +39,24 @@ defmodule Minga.Keymap.Defaults do
     # ── Command palette ──────────────────────────────────────────────────────
     {~k(:), :command_palette, "Execute command"},
 
+    # ── Eval ──────────────────────────────────────────────────────────────────
+    {~k(;), :enter_eval, "Eval expression"},
+
     # ── Search ─────────────────────────────────────────────────────────────────
     {~k(s p), :search_project, "Search project"},
     {~k(s s), :search_buffer, "Search in buffer"},
     {~k(s t), :search_todos, "Search TODOs"},
     {~k(s r), :search_and_replace, "Search and replace"},
-    {~k(s j), :document_symbols, "Search document symbols"},
+    {~k(s i), :document_symbols, "Document symbols"},
+    {~k(s j), :jump_list, "Jump list"},
+    {~k(s u), :timeline_toggle, "Edit timeline"},
     {~k(s w), :workspace_symbols, "Search workspace symbols"},
     {~k(/), :search_project, "Search project"},
 
     # ── File ──────────────────────────────────────────────────────────────────
     {~k(f f), :find_file, "Find file"},
     {~k(f F), :find_file_other_window, "Find file other window"},
+    {~k(f o), :remote_find_file, "Open remote file"},
     {~k(f s), :save, "Save file"},
     {~k(f p), :open_config, "Open config file"},
 
@@ -60,15 +67,12 @@ defmodule Minga.Keymap.Defaults do
     {~k(b p), :buffer_prev, "Previous buffer"},
     {~k(b d), :kill_buffer, "Kill buffer"},
     {~k(b X), :force_kill_buffer, "Force kill buffer"},
-    {~k(b D), :kill_other_buffers, "Close other tabs"},
-    {~k(b K), :kill_all_buffers, "Close all tabs"},
+    {~k(b D), :kill_other_buffers, "Close other buffers"},
+    {~k(b K), :kill_all_buffers, "Close all buffers"},
     {~k(b m), :view_messages, "View messages"},
     {~k(b W), :view_warnings, "View warnings"},
     {~k(b N), :new_buffer, "New buffer"},
     {~k(b l), :set_language, "Set language"},
-    {~k(b P), :pin_tab, "Pin/unpin tab"},
-    {~k(b <), :move_tab_left, "Move tab left"},
-    {~k(b >), :move_tab_right, "Move tab right"},
 
     # ── Window ────────────────────────────────────────────────────────────────
     {~k(w h), :window_left, "Window left"},
@@ -83,7 +87,7 @@ defmodule Minga.Keymap.Defaults do
     {~k(q q), :quit_all, "Quit editor"},
 
     # ── Help ──────────────────────────────────────────────────────────────────
-    {~k(h a), :describe_command, "Search command help"},
+    {~k(h a), :apropos, "Apropos"},
     {~k(h b), :describe_bindings, "Describe bindings"},
     {~k(h c), :describe_command, "Describe command"},
     {~k(h f), :describe_function, "Describe function"},
@@ -99,19 +103,18 @@ defmodule Minga.Keymap.Defaults do
 
     # ── Code ────────────────────────────────────────────────────────────────────
     {~k(c a), :code_action, "Code actions"},
-    {~k(c d), :diagnostics_list, "List diagnostics"},
+    {~k(c d), :goto_definition, "Go to definition"},
     {~k(c D), :find_references, "Find references"},
     {~k(c f), :format_buffer, "Format buffer"},
-    {~k(c g), :goto_definition, "Go to definition"},
     {~k(c i), :goto_implementation, "Go to implementation"},
-    {~k(c j), :document_symbols, "Document symbols"},
     {~k(c k), :hover, "Hover documentation"},
     {~k(c r), :rename_symbol, "Rename symbol"},
     {~k(c t), :goto_type_definition, "Go to type definition"},
+    {~k(c x), :diagnostics_list, "List diagnostics"},
     {~k(c h), :call_hierarchy, "Call hierarchy (incoming)"},
     {~k(c H), :call_hierarchy_outgoing, "Call hierarchy (outgoing)"},
-    {~k(c v), :selection_expand, "Smart selection expand"},
-    {~k(c V), :selection_shrink, "Smart selection shrink"},
+    {~k(c v), :selection_expand, "Expand selection"},
+    {~k(c V), :selection_shrink, "Shrink selection"},
     {~k(c l i), :lsp_info, "LSP info"},
     {~k(c l r), :lsp_restart, "Restart LSP"},
     {~k(c l s), :lsp_stop, "Stop LSP"},
@@ -134,48 +137,44 @@ defmodule Minga.Keymap.Defaults do
     {~k(o p), :toggle_file_tree, "Toggle file tree"},
     {~k(o r), :tree_reveal_active, "Reveal file in tree"},
 
-    # ── AI agent ─────────────────────────────────────────────────────────────
-    {~k(a a), :toggle_agentic_view, "Toggle agent split"},
-    {~k(a t), :toggle_agentic_view, "Toggle agent split"},
-    {~k(a v), :toggle_agent_split, "Toggle agent split pane"},
-    {~k(a s), :agent_abort, "Abort agent turn"},
-    {~k(a S), :agent_stop_session, "Stop agent session"},
-    {~k(a n), :agent_new_session, "New local agent session"},
-    {~k(a N), :agent_start_session_picker, "Pick agent session location"},
-    {~k(a ?), :inline_ask, "Ask about line or selection"},
-    {~k(a e), :inline_edit, "Rewrite selection inline"},
-    {~k(a m), :agent_pick_model, "Pick agent model"},
-    {~k(a c), :workspace_copy_file, "Copy file to workspace…"},
-    {~k(a h), :agent_session_history, "Resume session"},
-    {~k(a R), :agent_session_rename, "Rename Agent session"},
-    {~k(a H), :agent_retained_history, "Read retained Agent messages"},
-    {~k(a k), :agent_checklist, "Inspect Agent checklist"},
-    {~k(a j), :agent_draft_attachments, "Inspect draft attachments"},
-    {~k(a J), :agent_queued_inputs, "Inspect queued Agent inputs"},
-    {~k(a b), :agent_attach_buffer, "Attach current buffer to Agent"},
-    {~k(a F), :agent_attach_file, "Attach project file to Agent"},
-    {~k(a D), :agent_attach_diagnostics, "Attach file diagnostics to Agent"},
-    {~k(a r), :workspace_pending_reviews, "Pending reviews"},
-    {~k(a p), :agent_edits_publish, "Publish agent edits to disk"},
-    {~k(a P), :agent_edits_discard, "Discard unpublished agent edits"},
-    {~k(a o), :remote_find_file, "Open remote file"},
-    {~k(a T), :agent_pick_thinking, "Pick thinking level"},
-    {~k(a q), :agent_dequeue, "Dequeue queued messages to editor"},
-    {~k(a Q), :agent_answer_question, "Answer Agent question"},
-    {~k(a f), :agent_queue_follow_up, "Queue current input as follow-up"},
+    # ── Minga (SPC a): everyday keys at the top, the rest in three groups ────
+    {~k(a a), :toggle_agentic_view, "Agent view"},
+    {~k(a n), :agent_new_session, "New session"},
+    {~k(a s), :agent_abort, "Stop"},
     {~k(a u), :undo_agent_session, "Undo all agent edits"},
+    {~k(a v), :toggle_agent_split, "Conversation split"},
+    {~k(a ?), :inline_ask, "Ask about this"},
+    {~k(a r), :workspace_pending_reviews, "Pending reviews"},
+    {~k(a e), :inline_edit, "Rewrite selection"},
+    {~k(a W), :code_why, "Why this line"},
+    {~k(a A), :code_autobiography, "Code autobiography"},
+    {~k(a p), :agent_edits_decide, "Publish edits…"},
 
-    # ── Tab ──────────────────────────────────────────────────────────────────
-    {~k(TAB n), :tab_next, "Next tab"},
-    {~k(TAB p), :tab_prev, "Previous tab"},
-    {~k(TAB d), :kill_buffer, "Close tab"},
-    {~k(TAB a), :cycle_agent_tabs, "Next agent tab"},
+    # SPC a q: Queue
+    {~k(a q q), :agent_queued_inputs, "Open queue"},
+    {~k(a q f), :agent_queue_follow_up, "Queue as follow-up"},
 
-    # ── Workspace (SPC TAB prefix, shared with tab) ──────────────────────────
+    # SPC a x: Context
+    {~k(a x b), :agent_attach_buffer, "Attach this buffer"},
+    {~k(a x f), :agent_attach_file, "Attach a project file"},
+    {~k(a x d), :agent_attach_diagnostics, "Attach diagnostics"},
+    {~k(a x l), :agent_draft_attachments, "List attachments"},
+
+    # SPC a S: Session
+    {~k(a S h), :agent_session_history, "Resume a session"},
+    {~k(a S R), :agent_session_rename, "Rename session"},
+    {~k(a S m), :agent_pick_model, "Pick model"},
+    {~k(a S t), :agent_pick_thinking, "Pick thinking level"},
+    {~k(a S l), :agent_start_session_picker, "Pick where it runs"},
+    {~k(a S H), :agent_retained_history, "Read retained messages"},
+    {~k(a S k), :agent_checklist, "Inspect checklist"},
+    {~k(a S s), :agent_stop_session, "Stop session"},
+
+    # ── Workspace (SPC TAB) ──────────────────────────────────────────────────
     {~k(TAB TAB), :workspace_toggle, "Toggle workspace"},
     {~k(TAB N), :workspace_next, "Next workspace"},
     {~k(TAB P), :workspace_prev, "Previous workspace"},
-    {~k(TAB A), :workspace_next_agent, "Next workspace"},
+    {~k(TAB A), :workspace_next_agent, "Next agent workspace"},
     {~k(TAB m), :manual_workspace, "Manual workspace"},
     {~k(TAB l), :workspace_list, "Workspace picker"},
     {~k(TAB r), :workspace_rename, "Rename workspace"},
@@ -197,34 +196,34 @@ defmodule Minga.Keymap.Defaults do
     {~k(t l), :cycle_line_numbers, "Toggle line numbers"},
     {~k(t p), :toggle_bottom_panel, "Toggle bottom panel"},
     {~k(t i), :toggle_invisible, "Toggle invisible chars"},
-    {~k(t w), :toggle_wrap, "Toggle word wrap"},
-
-    # ── Code provenance ─────────────────────────────────────────────────────────
-    {~k(g w), :code_why, "Why is this line like this?"},
-    {~k(g a), :code_autobiography, "Code autobiography"}
+    {~k(t w), :toggle_wrap, "Toggle word wrap"}
   ]
 
-  # Group prefix descriptions shown in which-key at the SPC level.
+  # Group labels shown in which-key. They read like leaves: Title Case, never a
+  # leading `+`. The which-key builder marks them as groups and adds the `›`.
   @group_prefixes [
-    {~k(TAB), "+tab"},
-    {~k(s), "+search"},
-    {~k(f), "+file"},
-    {~k(b), "+buffer"},
-    {~k(p), "+project"},
-    {~k(c), "+code"},
-    {~k(c l), "+LSP"},
-    {~k(g), "+git"},
-    {~k(g c), "+commit"},
-    {~k(g x), "+conflict"},
-    {~k(g z), "+stash"},
-    {~k(w), "+window"},
-    {~k(q), "+quit"},
-    {~k(h), "+help"},
-    {~k(h e), "+extensions"},
-    {~k(o), "+open"},
-    {~k(a), "+ai"},
-    {~k(t), "+toggle"},
-    {~k(m), "+filetype"}
+    {~k(TAB), "Workspace"},
+    {~k(s), "Search"},
+    {~k(f), "Files"},
+    {~k(b), "Buffers"},
+    {~k(p), "Project"},
+    {~k(c), "Code"},
+    {~k(c l), "LSP"},
+    {~k(g), "Git"},
+    {~k(g c), "Commit"},
+    {~k(g x), "Conflict"},
+    {~k(g z), "Stash"},
+    {~k(w), "Windows"},
+    {~k(q), "Quit"},
+    {~k(h), "Help"},
+    {~k(h e), "Extensions"},
+    {~k(o), "Open"},
+    {~k(a), "Minga"},
+    {~k(a q), "Queue"},
+    {~k(a x), "Context"},
+    {~k(a S), "Session"},
+    {~k(t), "Toggles"},
+    {~k(m), "Filetype"}
   ]
 
   # ---------------------------------------------------------------------------
@@ -283,10 +282,11 @@ defmodule Minga.Keymap.Defaults do
       ~K(j) => {:move_down, "Move cursor down"},
       ~K(k) => {:move_up, "Move cursor up"},
       ~K(l) => {:move_right, "Move cursor right"},
-      ~K(M-h) => {:nav_parent, "Move to parent AST node"},
-      ~K(M-l) => {:nav_first_child, "Move to first child AST node"},
-      ~K(M-j) => {:nav_next_sibling, "Move to next sibling AST node"},
-      ~K(M-k) => {:nav_prev_sibling, "Move to previous sibling AST node"},
+      # ⌥h ⌥j ⌥k ⌥l alias SPC c v, ] n, [ n and SPC c V (docs/design/keys.md).
+      ~K(M-h) => {:selection_expand, "Expand selection (SPC c v)"},
+      ~K(M-l) => {:selection_shrink, "Shrink selection (SPC c V)"},
+      ~K(M-j) => {:nav_next_sibling, "Next syntax node (]n)"},
+      ~K(M-k) => {:nav_prev_sibling, "Previous syntax node ([n)"},
       ~K(0) => {:move_to_line_start, "Move to line start"},
       ~K($) => {:move_to_line_end, "Move to line end"},
       ~K(^) => {:move_to_first_non_blank, "First non-blank character"},
@@ -328,7 +328,6 @@ defmodule Minga.Keymap.Defaults do
       ~K(V) => {:enter_visual_line, "Visual mode (linewise)"},
       ~K(R) => {:enter_replace_mode, "Replace mode"},
       ~K(:) => {:enter_command, "Command mode"},
-      ~K(M-:) => {:enter_eval, "Eval mode (M-:)"},
       # ── Operators ─────────────────────────────────────────────────────────
       ~K(d) => {:operator_delete, "Delete (d{motion})"},
       ~K(c) => {:operator_change, "Change (c{motion})"},
@@ -350,6 +349,10 @@ defmodule Minga.Keymap.Defaults do
       # ── Undo / Redo ───────────────────────────────────────────────────────
       ~K(u) => {:undo, "Undo"},
       ~K(C-r) => {:redo, "Redo"},
+      # ── Jump list ─────────────────────────────────────────────────────────
+      ~K(C-o) => {:jump_back, "Jump back (jump list)"},
+      ~K(C-i) => {:jump_forward, "Jump forward (jump list)"},
+      ~K(TAB) => {:jump_forward, "Jump forward (jump list)"},
       # ── Search ────────────────────────────────────────────────────────────
       ~K(/) => {:search_forward, "Search forward"},
       ~K(?) => {:search_backward, "Search backward"},
@@ -424,12 +427,12 @@ defmodule Minga.Keymap.Defaults do
   Returns group prefixes for filetype-scoped bindings.
 
   These add labels to intermediate keys so which-key shows them
-  (e.g., `t` → `+test` under `SPC m`).
+  (e.g., `t` → "Test" under `SPC m`).
   """
   @spec filetype_group_prefixes() :: [{[Bindings.key()], String.t()}]
   def filetype_group_prefixes do
     [
-      {~k(t), "+test"}
+      {~k(t), "Test"}
     ]
   end
 end

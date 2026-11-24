@@ -1,8 +1,8 @@
 defmodule Minga.Mode.Eval do
   @moduledoc """
-  Eval mode (`M-:`) key handler.
+  Eval mode (`SPC ;`) key handler.
 
-  Eval mode is entered from Normal mode when `Alt+:` is pressed. The user
+  Eval mode is entered from Normal mode with the `SPC ;` leader key. The user
   types an Elixir expression that is accumulated in the FSM state under the
   `:input` key. Pressing **Enter** evaluates the expression, then returns
   to Normal mode. Pressing **Escape** (or **Backspace** on an empty buffer)
