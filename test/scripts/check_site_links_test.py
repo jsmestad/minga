@@ -57,8 +57,18 @@ def write_valid_bundle(root: Path) -> None:
         encoding="utf-8",
     )
     (root / "docs" / "getting-started.html").write_text(
-        '<!DOCTYPE html><html><body><h2 id="install">Install</h2></body></html>\n',
+        exdoc_extras_page('<h2 id="install">Install</h2><a href="reference.html">Reference</a>'),
         encoding="utf-8",
+    )
+    (root / "docs" / "getting-started.md").write_text("# Getting started\n", encoding="utf-8")
+
+
+def exdoc_extras_page(body: str) -> str:
+    """An ExDoc extras page: it loads the hexdocs-only docs_config.js and links to its own markdown copy."""
+    return (
+        '<!DOCTYPE html><html><head><script src="docs_config.js"></script></head><body>'
+        f'<main class="content page-extra" id="main" data-type="extras">{body}'
+        '<a href="getting-started.md">View markdown</a></main></body></html>\n'
     )
 
 
@@ -154,6 +164,58 @@ class CheckSiteLinksTest(unittest.TestCase):
             )
             errors = check_site_links.verify_site_bundle(root, expect_noindex=True)
             self.assertTrue(any("#missing" in e for e in errors), errors)
+
+    def test_exdoc_extras_link_to_unpublished_markdown_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_valid_bundle(root)
+            (root / "docs" / "0006-the-spine.html").write_text(
+                exdoc_extras_page('<a href="../design/keys.md">keys</a>'),
+                encoding="utf-8",
+            )
+            errors = check_site_links.verify_site_bundle(root, expect_noindex=True)
+            self.assertTrue(
+                any("0006-the-spine.html" in e and "unpublished markdown link '../design/keys.md'" in e for e in errors),
+                errors,
+            )
+
+    def test_exdoc_extras_markdown_link_cannot_resolve_to_another_pages_copy(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_valid_bundle(root)
+            (root / "docs" / "design.html").write_text(
+                exdoc_extras_page('<a href="getting-started.md">guide</a>'),
+                encoding="utf-8",
+            )
+            errors = check_site_links.verify_site_bundle(root, expect_noindex=True)
+            self.assertTrue(any("design.html" in e and "unpublished markdown link" in e for e in errors), errors)
+
+    def test_exdoc_extras_broken_link_and_anchor_fail(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_valid_bundle(root)
+            (root / "docs" / "design.html").write_text(
+                exdoc_extras_page(
+                    '<a href="design-marks/">marks</a><img src="marks/twist-head.svg">'
+                    '<a href="getting-started.html#missing">install</a>'
+                ),
+                encoding="utf-8",
+            )
+            errors = check_site_links.verify_site_bundle(root, expect_noindex=True)
+            self.assertTrue(any("broken href target 'design-marks/'" in e for e in errors), errors)
+            self.assertTrue(any("broken src target 'marks/twist-head.svg'" in e for e in errors), errors)
+            self.assertTrue(any("design.html" in e and "#missing" in e for e in errors), errors)
+
+    def test_exdoc_module_pages_are_not_checked(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            write_valid_bundle(root)
+            (root / "docs" / "Minga.API.html").write_text(
+                '<!DOCTYPE html><html><body><main class="content" id="main" data-type="modules">'
+                '<a href="#missing/1">missing</a><a href="Minga.Gone.html">gone</a></main></body></html>\n',
+                encoding="utf-8",
+            )
+            self.assertEqual(check_site_links.verify_site_bundle(root, expect_noindex=True), [])
 
     def test_expect_noindex_catches_missing_opt_out(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
