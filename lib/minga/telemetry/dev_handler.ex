@@ -30,10 +30,11 @@ defmodule Minga.Telemetry.DevHandler do
   | `[:minga, :agent, :transcript_sync]` | `:agent` | `[agent:transcript_sync] unchanged (0 entries read)` |
   | `[:minga, :agent, span, :stop]` for each Agent session-start span below | `:agent` | `[agent:session_subscribe] 85µs` |
 
-  The Agent session-start spans cover the stages of opening a local Agent session, in the Editor (`catalog_load` runs in a `MingaAgent.ModelCatalog` task, triggered by the launch preload or a cold start request), in `MingaAgent.SessionManager` (`session_manager_start`), in the new session process (`session_init`, `session_model_resolve`, `session_subscribe` for the initial subscribers, `provider_start`), and in the SessionStart hook task (`session_start_hooks`, `session_start_hook_config`): `catalog_load`, `tab_switch`, `start_agent_session`, `ensure_configured_model`, `project_view_overlay`, `session_manager_start`, `session_init`, `session_model_resolve`, `session_subscribe`, `provider_project_view_refresh`, `session_snapshot_read`, `provider_start`, `session_start_hooks`, and `session_start_hook_config`. `bench/agent_first_open.md` attributes the first-open wait to them.
+  The Agent session-start spans cover the stages of opening a local Agent session, in the Editor (`catalog_load` runs in a `MingaAgent.ModelCatalog` task, triggered by the launch preload or a cold start request), in `MingaAgent.SessionManager` (`session_manager_start`), in the new session process (`session_init`, `session_model_resolve`, `session_subscribe` for the initial subscribers, `provider_start`), and in the SessionStart hook task (`session_start_hooks`, `session_start_hook_config`): `catalog_load`, `tab_switch`, `start_agent_session`, `ensure_configured_model`, `project_view_overlay`, `session_manager_start`, `session_init`, `session_model_resolve`, `session_subscribe`, `provider_project_view_refresh`, `session_snapshot_read`, `provider_start`, `session_start_hooks`, and `session_start_hook_config`. The measurement in [#3610](https://github.com/jsmestad/minga/issues/3610) attributes the first-open wait to them.
   """
 
   @handler_id "minga-dev-handler"
+  @slow_command_threshold_ms 100
 
   @agent_session_start_spans [
     :catalog_load,
@@ -159,7 +160,16 @@ defmodule Minga.Telemetry.DevHandler do
   def handle_event([:minga, :command, :execute, :stop], measurements, metadata, _config) do
     duration = measurements.duration
     command = Map.get(metadata, :command, :unknown)
-    Minga.Log.debug(:editor, fn -> "[command:#{command}] #{to_microseconds(duration)}µs" end)
+    ms = System.convert_time_unit(duration, :native, :millisecond)
+
+    if ms >= @slow_command_threshold_ms do
+      Minga.Log.warning(
+        :editor,
+        "[command:#{command}] took #{ms}ms (threshold: #{@slow_command_threshold_ms}ms)"
+      )
+    else
+      Minga.Log.debug(:editor, fn -> "[command:#{command}] #{to_microseconds(duration)}µs" end)
+    end
   end
 
   def handle_event(

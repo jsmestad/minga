@@ -266,7 +266,7 @@ func commandToJSON(_ command: RenderCommand) -> [String: Any]? {
         switch lifecycle {
         case .conversation: (phase, reason) = ("conversation", "")
         case .starting: (phase, reason) = ("starting", "")
-        case .failed(let message, let remedy): (phase, reason, startRemedy) = ("failed", message, remedy)
+        case .failed(let message, let remedy, _): (phase, reason, startRemedy) = ("failed", message, remedy)
         case .unavailable: (phase, reason) = ("unavailable", "")
         }
         let result: [String: Any] = [
@@ -278,6 +278,8 @@ func commandToJSON(_ command: RenderCommand) -> [String: Any]? {
             "lifecycle_remedy": Int(startRemedy?.kind.rawValue ?? 0),
             "lifecycle_action_label": startRemedy?.label ?? "",
             "lifecycle_key_hint": startRemedy?.keyHint ?? "",
+            "lifecycle_headline": lifecycle.notice?.headline ?? "",
+            "lifecycle_note": lifecycle.notice?.note ?? "",
             "model": model,
             "thinking_level": thinkingLevel,
             "prompt": prompt,

@@ -190,7 +190,7 @@
 
 ; Module attributes
 (unary_operator
-  operator: "@"
+  operator: "@" @constant
   operand: [
     (identifier)
     (call
@@ -199,7 +199,7 @@
 
 ; Documentation
 (unary_operator
-  operator: "@"
+  operator: "@" @comment.documentation
   operand: (call
     target: ((identifier) @_identifier
       (#any-of? @_identifier "moduledoc" "typedoc" "shortdoc" "doc")) @comment.documentation

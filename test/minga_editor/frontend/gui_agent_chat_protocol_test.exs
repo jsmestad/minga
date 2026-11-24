@@ -82,14 +82,15 @@ defmodule MingaEditor.Frontend.GUIAgentChatProtocolTest do
 
     test "appends the remedy, its label and its key hint after the reason" do
       for {lifecycle, expected} <- [
-            {:starting, <<1, 0::16, 0, 0::16, 0::16>>},
-            {:unavailable, <<3, 0::16, 0, 0::16, 0::16>>},
-            {{:failed, "Composer gone.", nil}, <<2, 14::16, "Composer gone.", 0, 0::16, 0::16>>},
+            {:starting, <<1, 0::16, 0, 0::16, 0::16, 0::16, 0::16>>},
+            {:unavailable, <<3, 0::16, 0, 0::16, 0::16, 0::16, 0::16>>},
+            {{:failed, "Composer gone.", nil},
+             <<2, 14::16, "Composer gone.", 0, 0::16, 0::16, 0::16, 0::16>>},
             {{:failed, "Too slow.", %StartRemedy{kind: :retry, label: "Retry", key_hint: "r"}},
-             <<2, 9::16, "Too slow.", 1, 5::16, "Retry", 1::16, "r">>},
+             <<2, 9::16, "Too slow.", 1, 5::16, "Retry", 1::16, "r", 0::16, 0::16>>},
             {{:failed, "No provider.",
               %StartRemedy{kind: :set_up_provider, label: "Set up provider", key_hint: "s"}},
-             <<2, 12::16, "No provider.", 2, 15::16, "Set up provider", 1::16, "s">>}
+             <<2, 12::16, "No provider.", 2, 15::16, "Set up provider", 1::16, "s", 0::16, 0::16>>}
           ] do
         {binary, _caches} =
           AgentChatEncoder.encode(
@@ -99,6 +100,23 @@ defmodule MingaEditor.Frontend.GUIAgentChatProtocolTest do
 
         assert lifecycle_section(binary) == expected
       end
+    end
+
+    test "appends the notice headline and the draft note after the key hint" do
+      {binary, _caches} =
+        AgentChatEncoder.encode(
+          %AgentChat{
+            visible?: true,
+            lifecycle: {:failed, "Gone.", nil},
+            lifecycle_headline: "Agent session stopped",
+            draft_note: "Your draft is saved."
+          },
+          Caches.new()
+        )
+
+      assert lifecycle_section(binary) ==
+               <<2, 5::16, "Gone.", 0, 0::16, 0::16, 21::16, "Agent session stopped", 20::16,
+                 "Your draft is saved.">>
     end
 
     test "a live conversation sends no lifecycle section" do

@@ -129,6 +129,44 @@ defmodule Minga.Telemetry.DevHandlerTest do
                  nil
                )
     end
+
+    test "slow command (>100ms) logs at warning level" do
+      import ExUnit.CaptureLog
+
+      slow_duration = System.convert_time_unit(150, :millisecond, :native)
+
+      log =
+        capture_log(fn ->
+          DevHandler.handle_event(
+            [:minga, :command, :execute, :stop],
+            %{duration: slow_duration},
+            %{command: :slow_test_command},
+            nil
+          )
+        end)
+
+      assert log =~ "[warning]"
+      assert log =~ "slow_test_command"
+      assert log =~ "threshold"
+    end
+
+    test "fast command (<100ms) does not log at warning level" do
+      import ExUnit.CaptureLog
+
+      fast_duration = System.convert_time_unit(10, :millisecond, :native)
+
+      log =
+        capture_log(fn ->
+          DevHandler.handle_event(
+            [:minga, :command, :execute, :stop],
+            %{duration: fast_duration},
+            %{command: :fast_test_command},
+            nil
+          )
+        end)
+
+      refute log =~ "[warning]"
+    end
   end
 
   describe "render emit prepare events" do

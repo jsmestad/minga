@@ -19,6 +19,7 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
   alias MingaEditor.Editing
   alias MingaEditor.Extension.Sidebar
   alias MingaEditor.FileTree.Feature, as: FileTreeFeature
+  alias MingaEditor.Sidebar.BuiltinSurfaces
   alias MingaEditor.Frontend.Capabilities
   alias MingaEditor.Frontend.Emit.Context
   alias MingaEditor.GitStatus.Panel, as: GitStatusPanel
@@ -436,6 +437,9 @@ defmodule MingaEditor.Handlers.GuiActionHandlerTest do
 
   test "activating visible sidebars updates focus and keyboard scope", %{sidebar_registry: table} do
     file_tree_state = FileTreeState.loading(%FileTreeState{})
+    # Startup registers both built-in sidebars, so actions route through their owners.
+    assert :ok = FileTreeFeature.sync_sidebar(file_tree_state, table)
+    assert :ok = BuiltinSurfaces.register_contributions(table)
 
     state = base_state(table)
     state = %{state | workspace: SessionState.set_file_tree(state.workspace, file_tree_state)}

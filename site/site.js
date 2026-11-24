@@ -1,7 +1,42 @@
-/* Minimal progressive enhancement for theme preference and install copy buttons. */
+/* Minimal progressive enhancement for theme preference, mobile nav, tabs, and copy buttons. */
 (() => {
   const root = document.documentElement;
   root.classList.add("js-enabled");
+
+  const header = document.querySelector(".site-header");
+  const navToggle = document.querySelector("[data-nav-toggle]");
+  const navEl = document.getElementById("site-nav");
+  if (header && navToggle && navEl) {
+    function setNavOpen(open) {
+      header.classList.toggle("nav-open", open);
+      navToggle.setAttribute("aria-expanded", String(open));
+      navToggle.textContent = open ? "Close" : "Menu";
+    }
+
+    navToggle.addEventListener("click", () => {
+      setNavOpen(!header.classList.contains("nav-open"));
+    });
+
+    for (const link of navEl.querySelectorAll("a")) {
+      link.addEventListener("click", () => setNavOpen(false));
+    }
+
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && header.classList.contains("nav-open")) {
+        setNavOpen(false);
+        navToggle.focus();
+      }
+    });
+
+    const desktopMedia = window.matchMedia("(min-width: 861px)");
+    if (typeof desktopMedia.addEventListener === "function") {
+      desktopMedia.addEventListener("change", (event) => {
+        if (event.matches) {
+          setNavOpen(false);
+        }
+      });
+    }
+  }
 
   const storageKey = "minga-theme";
   const media = window.matchMedia("(prefers-color-scheme: light)");
@@ -41,6 +76,54 @@
     media.addEventListener("change", syncThemeButtons);
   }
   syncThemeButtons();
+
+  for (const group of document.querySelectorAll("[data-code-tabs]")) {
+    const tabs = Array.from(group.querySelectorAll("[role=\"tab\"]"));
+    const panels = Array.from(group.querySelectorAll("[role=\"tabpanel\"]"));
+    const copyBtn = group.querySelector("[data-copy-target]");
+
+    function activate(tab) {
+      const targetId = tab.getAttribute("aria-controls");
+      for (const item of tabs) {
+        const selected = item === tab;
+        item.setAttribute("aria-selected", String(selected));
+        item.setAttribute("tabindex", selected ? "0" : "-1");
+      }
+      for (const panel of panels) {
+        const active = panel.id === targetId;
+        panel.hidden = !active;
+        if (active && copyBtn) {
+          const copyId = panel.getAttribute("data-copy-id");
+          if (copyId) {
+            copyBtn.setAttribute("data-copy-target", copyId);
+            copyBtn.textContent = "Copy";
+          }
+        }
+      }
+    }
+
+    for (const tab of tabs) {
+      tab.addEventListener("click", () => activate(tab));
+      tab.addEventListener("keydown", (event) => {
+        const idx = tabs.indexOf(tab);
+        let nextIdx = -1;
+        if (event.key === "ArrowRight") nextIdx = (idx + 1) % tabs.length;
+        else if (event.key === "ArrowLeft") nextIdx = (idx - 1 + tabs.length) % tabs.length;
+        else if (event.key === "Home") nextIdx = 0;
+        else if (event.key === "End") nextIdx = tabs.length - 1;
+        if (nextIdx >= 0) {
+          event.preventDefault();
+          activate(tabs[nextIdx]);
+          tabs[nextIdx].focus();
+        }
+      });
+    }
+
+    const initial = tabs.find((item) => item.getAttribute("aria-selected") === "true") || tabs[0];
+    if (initial) {
+      activate(initial);
+    }
+  }
 
   for (const button of document.querySelectorAll("[data-copy-target]")) {
     button.addEventListener("click", async () => {

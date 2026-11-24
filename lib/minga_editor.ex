@@ -1236,6 +1236,15 @@ defmodule MingaEditor do
     end
   end
 
+  # A Diff Review parse finished off the Editor process. Install it and render
+  # only when the current review still wants that text.
+  def handle_info({:agent_review_highlight, key, result}, state) do
+    case MingaEditor.Agent.ReviewHighlightWorkflow.complete(state, key, result) do
+      {:accepted, new_state} -> {:noreply, Renderer.render_or_async(new_state)}
+      :stale -> {:noreply, state}
+    end
+  end
+
   # ── Handler-delegated bare atom events ─────────────────────────────────────
   # Bare atom messages routed to HighlightHandler or SessionHandler via a module
   # attribute map (guard-safe via is_map_key/2).

@@ -644,6 +644,8 @@ type GuiAgentChatLifecycle struct {
 	Remedy      uint8
 	ActionLabel string
 	KeyHint     string
+	Headline    string
+	Note        string
 }
 
 type GuiPickerPreviewHeader struct {

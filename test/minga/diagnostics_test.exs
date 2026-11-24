@@ -570,4 +570,52 @@ defmodule Minga.DiagnosticsTest do
                      50
     end
   end
+
+  describe "for_buffer/2" do
+    setup do
+      path = Path.join(System.tmp_dir!(), "diag_buffer_#{System.unique_integer([:positive])}.ex")
+      File.write!(path, "defmodule Diag do\nend\n")
+      on_exit(fn -> File.rm(path) end)
+      %{path: path}
+    end
+
+    test "returns the diagnostics published for the buffer's file path", %{server: s, path: path} do
+      buffer = start_supervised!({Minga.Buffer, file_path: path})
+      uri = Minga.LSP.SyncServer.path_to_uri(path)
+
+      Diagnostics.publish(s, :server_a, uri, [make_diag(message: "undefined variable")])
+
+      assert [%Diagnostic{message: "undefined variable", severity: :error}] =
+               Diagnostics.for_buffer(s, buffer)
+    end
+
+    test "merges diagnostics from every source for the buffer's file", %{server: s, path: path} do
+      buffer = start_supervised!({Minga.Buffer, file_path: path})
+      uri = Minga.LSP.SyncServer.path_to_uri(path)
+
+      Diagnostics.publish(s, :server_a, uri, [make_diag(line: 2, message: "late")])
+      Diagnostics.publish(s, :server_b, uri, [make_diag(line: 0, message: "early")])
+
+      assert ["early", "late"] = s |> Diagnostics.for_buffer(buffer) |> Enum.map(& &1.message)
+    end
+
+    test "returns [] for a buffer without a file path, even when other files have diagnostics", %{
+      server: s
+    } do
+      buffer = start_supervised!({Minga.Buffer, content: "scratch"})
+      Diagnostics.publish(s, :server_a, @uri, [make_diag()])
+
+      assert Diagnostics.for_buffer(s, buffer) == []
+    end
+
+    test "returns [] for a file-backed buffer with no published diagnostics", %{
+      server: s,
+      path: path
+    } do
+      buffer = start_supervised!({Minga.Buffer, file_path: path})
+      Diagnostics.publish(s, :server_a, @uri, [make_diag()])
+
+      assert Diagnostics.for_buffer(s, buffer) == []
+    end
+  end
 end

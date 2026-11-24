@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Architecture &amp; The Spine: Minga</title>
+  <meta name="description" content="How Minga separates a concurrent Erlang VM core from native macOS, terminal, and tree-sitter OS processes, stages agent edits safely, and keeps both frontends in lockstep under ADR-0006.">
+  <meta property="og:type" content="article">
+  <meta property="og:title" content="Architecture &amp; The Spine: Minga">
+  <meta property="og:description" content="How Minga separates a concurrent Erlang VM core from native macOS, terminal, and tree-sitter OS processes, stages agent edits safely, and keeps both frontends in lockstep.">
+  <meta property="og:image" content="/assets/og-minga.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:image" content="/assets/og-minga.png">
+  <link rel="icon" type="image/svg+xml" href="/assets/minga_dark-transparent.svg">
+  <link rel="preload" href="/fonts/instrument-serif-italic.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/styles.css">
+  <script>
+    (() => {
+      try {
+        const saved = window.localStorage.getItem("minga-theme");
+        if (saved === "light" || saved === "dark") {
+          document.documentElement.setAttribute("data-theme", saved);
+        }
+      } catch (_) {}
+    })();
+  </script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="site-header">
+    <div class="container header-inner">
+      <a class="brand-link" href="/">
+        <img src="/assets/minga_dark-transparent.svg" alt="Minga logo" width="24" height="24">
+        <span class="brand-wordmark">minga</span>
+        <span class="brand-version">/ v0.1.0-pre</span>
+      </a>
+      <nav class="site-nav" id="site-nav" aria-label="Primary">
+        <a href="/why-minga">Why Minga</a>
+        <a href="/getting-started">Getting Started</a>
+        <a href="/architecture" aria-current="page">Architecture</a>
+        <a href="/extending">Extending</a>
+        <a href="/docs/">Reference</a>
+        <a href="https://github.com/jsmestad/minga">GitHub</a>
+      </nav>
+      <div class="header-controls">
+        <button type="button" class="theme-toggle" data-theme-toggle aria-label="Toggle color theme">Light</button>
+        <button type="button" class="nav-toggle" data-nav-toggle aria-expanded="false" aria-controls="site-nav" aria-label="Toggle navigation menu">Menu</button>
+      </div>
+    </div>
+  </header>
+
+  <main id="main">
+    <header class="essay-hero">
+      <div class="container">
+        <p class="section-index"><span>ARCHITECTURE</span> Runtime &amp; Clients</p>
+        <h1>Architecture &amp; The Spine</h1>
+        <p class="essay-subtitle">Minga puts concurrency, isolation, state ownership, and UI semantics in one Erlang VM (BEAM) core, while separate native OS processes handle macOS rendering, terminal rendering, and syntax parsing with zero shared memory.</p>
+        <nav class="essay-toc" aria-label="Sections">
+          <a href="#process-map">1. Process &amp; client boundaries</a>
+          <a href="#buffer-aware-agents">2. Staged agent edits</a>
+          <a href="#executable-parity">3. Frontend parity</a>
+          <a href="#tradeoffs">4. Guarantees &amp; tradeoffs</a>
+          <a href="#adrs">5. Key ADRs (0001-0006)</a>
+        </nav>
+      </div>
+    </header>
+
+    <article class="essay-body">
+      <div class="container">
+        <section class="essay-section" id="process-map">
+          <h2>1. One concurrent core, thin native OS processes</h2>
+          <p>Minga uses four languages deliberately, each behind a strict OS process boundary so nothing shares memory across them. Elixir on the Erlang VM owns everything concurrent and stateful (open files, agent sessions, language servers, extensions, key scopes, theme roles, and modeline priority). Swift, Go, and Zig stay intentionally thin: Swift draws macOS with CoreText and Metal, Go draws the terminal with Bubble Tea and Lip Gloss, and Zig parses C tree-sitter grammars.</p>
+
+          <figure class="diagram-figure">
+            <div class="diagram-bar">
+              <span>Figure 1 · Process isolation &amp; client boundaries</span>
+              <span>Erlang VM &lt;-&gt; Native OS processes</span>
+            </div>
+            <div class="scroll-hint" aria-hidden="true">Scroll diagram horizontally -&gt;</div>
+            <div class="diagram-canvas">
+              <svg class="diagram-svg" viewBox="0 0 880 412" role="img" aria-labelledby="fig1-title fig1-desc" xmlns="http://www.w3.org/2000/svg">
+                <title id="fig1-title">Minga architecture: Erlang VM core connected over pipes to macOS, terminal, and parser OS processes</title>
+                <desc id="fig1-desc">The Erlang VM isolates Editor Core, Open Files (one process per file), Agent Sessions, Language Servers and Extensions, and Crash-Safe Draft Services, plus Client Bridge and Headless Mode. Binary pipes connect to separate OS processes for the Swift and Metal macOS app, Go terminal client drawing the shared layout, and Zig syntax parser.</desc>
+                <defs>
+                  <marker id="arrow-accent" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                    <path d="M 1 1 L 9 5 L 1 9 z" fill="var(--accent)"/>
+                  </marker>
+                  <marker id="arrow-muted" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                    <path d="M 1 1 L 9 5 L 1 9 z" fill="var(--text-muted)"/>
+                  </marker>
+                </defs>
+
+                <rect x="16" y="16" width="538" height="380" fill="var(--bg-subtle)" stroke="var(--accent-border)" stroke-width="1.4"/>
+                <text x="36" y="44" fill="var(--accent)" font-family="var(--font-mono)" font-size="11.5" font-weight="600" letter-spacing="0.04em">MINGA CORE · ERLANG VM (ELIXIR)</text>
+                <text x="36" y="62" fill="var(--text-muted)" font-family="var(--font-sans)" font-size="11.5">Separate lightweight processes, heaps, and one canonical state model</text>
+
+                <rect x="36" y="80" width="224" height="206" fill="var(--bg-elevated)" stroke="var(--accent-border)" stroke-width="1.15"/>
+                <text x="52" y="106" fill="var(--text)" font-family="var(--font-sans)" font-size="13.5" font-weight="600">Editor Core</text>
+                <text x="52" y="130" fill="var(--text-secondary)" font-family="var(--font-sans)" font-size="11.5">Orders every keystroke,</text>
+                <text x="52" y="148" fill="var(--text-secondary)" font-family="var(--font-sans)" font-size="11.5">drawer, and buffer switch</text>
+                <text x="52" y="176" fill="var(--text-secondary)" font-family="var(--font-sans)" font-size="11.5">Owns modeline priority,</text>
+                <text x="52" y="194" fill="var(--text-secondary)" font-family="var(--font-sans)" font-size="11.5">key scopes, and state words</text>
+                <text x="52" y="222" fill="var(--text-secondary)" font-family="var(--font-sans)" font-size="11.5">Sibling renderer streams</text>
+                <text x="52" y="240" fill="var(--text-secondary)" font-family="var(--font-sans)" font-size="11.5">tokens to attached clients</text>
+                <text x="52" y="270" fill="var(--accent)" font-family="var(--font-mono)" font-size="10.5">Skipped in --headless mode</text>
+
+                <rect x="276" y="80" width="258" height="46" fill="var(--bg-elevated)" stroke="var(--border)" stroke-width="1"/>
+                <text x="292" y="100" fill="var(--text)" font-family="var(--font-sans)" font-size="12.5" font-weight="600">Open Files (Buffers)</text>
+                <text x="292" y="117" fill="var(--text-muted)" font-family="var(--font-sans)" font-size="11">One isolated process and heap per file</text>
+
+                <rect x="276" y="134" width="258" height="46" fill="var(--bg-elevated)" stroke="var(--border)" stroke-width="1"/>
+                <text x="292" y="154" fill="var(--text)" font-family="var(--font-sans)" font-size="12.5" font-weight="600">Agent Sessions</text>
+                <text x="292" y="171" fill="var(--text-muted)" font-family="var(--font-sans)" font-size="11">Tasks, subagent trees, approvals, staged diffs</text>
+
+                <rect x="276" y="188" width="258" height="46" fill="var(--bg-elevated)" stroke="var(--border)" stroke-width="1"/>
+                <text x="292" y="208" fill="var(--text)" font-family="var(--font-sans)" font-size="12.5" font-weight="600">Language Servers, MCP &amp; Extensions</text>
+                <text x="292" y="225" fill="var(--text-muted)" font-family="var(--font-sans)" font-size="11">Crash-isolated; restarts spare open files</text>
+
+                <rect x="276" y="242" width="258" height="44" fill="var(--bg-elevated)" stroke="var(--border)" stroke-width="1"/>
+                <text x="292" y="261" fill="var(--text)" font-family="var(--font-sans)" font-size="12.5" font-weight="600">Draft Durability &amp; Services</text>
+                <text x="292" y="277" fill="var(--text-muted)" font-family="var(--font-sans)" font-size="11">Persists staged edits across editor restarts</text>
+
+                <rect x="36" y="302" width="224" height="76" fill="var(--bg-elevated)" stroke="var(--border)" stroke-width="1"/>
+                <text x="52" y="326" fill="var(--text)" font-family="var(--font-sans)" font-size="12.5" font-weight="600">Client Bridge</text>
+                <text x="52" y="345" fill="var(--text-secondary)" font-family="var(--font-sans)" font-size="11">Streams structured UI updates</text>
+                <text x="52" y="362" fill="var(--text-muted)" font-family="var(--font-sans)" font-size="10.5">and keystrokes over binary pipes</text>
+
+                <rect x="276" y="302" width="258" height="76" fill="var(--bg-elevated)" stroke="var(--border)" stroke-width="1"/>
+                <text x="292" y="326" fill="var(--text)" font-family="var(--font-sans)" font-size="12.5" font-weight="600">Headless Mode (minga --headless)</text>
+                <text x="292" y="345" fill="var(--text-secondary)" font-family="var(--font-sans)" font-size="11">Attach remotely over Erlang distribution</text>
+                <text x="292" y="362" fill="var(--text-muted)" font-family="var(--font-sans)" font-size="10.5">Optional token-gated JSON-RPC gateway</text>
+
+                <line x1="554" y1="74" x2="618" y2="74" stroke="var(--accent)" stroke-width="1.5" marker-start="url(#arrow-accent)" marker-end="url(#arrow-accent)"/>
+                <text x="586" y="64" text-anchor="middle" fill="var(--text-muted)" font-family="var(--font-mono)" font-size="9.5">UI + input</text>
+
+                <line x1="554" y1="206" x2="618" y2="206" stroke="var(--accent)" stroke-width="1.5" marker-start="url(#arrow-accent)" marker-end="url(#arrow-accent)"/>
+                <text x="586" y="196" text-anchor="middle" fill="var(--text-muted)" font-family="var(--font-mono)" font-size="9.5">UI + input</text>
+
+                <line x1="554" y1="338" x2="618" y2="338" stroke="var(--text-muted)" stroke-width="1.5" marker-start="url(#arrow-muted)" marker-end="url(#arrow-muted)"/>
+                <text x="586" y="328" text-anchor="middle" fill="var(--text-muted)" font-family="var(--font-mono)" font-size="9.5">syntax</text>
+
+                <rect x="624" y="16" width="240" height="116" fill="var(--bg-elevated)" stroke="var(--border)" stroke-width="1.15"/>
+                <text x="640" y="42" fill="var(--text)" font-family="var(--font-sans)" font-size="13" font-weight="600">macOS App (Swift + Metal)</text>
+                <text x="640" y="64" fill="var(--text-secondary)" font-family="var(--font-sans)" font-size="11.5">Draws the shared layout:</text>
+                <text x="640" y="82" fill="var(--text-secondary)" font-family="var(--font-sans)" font-size="11.5">text, marks, smooth scroll</text>
+                <text x="640" y="112" fill="var(--accent)" font-family="var(--font-mono)" font-size="10.5">Same layout &amp; keys as TUI</text>
+
+                <rect x="624" y="148" width="240" height="116" fill="var(--bg-elevated)" stroke="var(--border)" stroke-width="1.15"/>
+                <text x="640" y="174" fill="var(--text)" font-family="var(--font-sans)" font-size="13" font-weight="600">Terminal Client (Go)</text>
+                <text x="640" y="196" fill="var(--text-secondary)" font-family="var(--font-sans)" font-size="11.5">First-class Bubble Tea &amp;</text>
+                <text x="640" y="214" fill="var(--text-secondary)" font-family="var(--font-sans)" font-size="11.5">Lip Gloss floating layers</text>
+                <text x="640" y="244" fill="var(--text-muted)" font-family="var(--font-mono)" font-size="10.5">Kitty keys, OSC 52, SSH</text>
+
+                <rect x="624" y="280" width="240" height="116" fill="var(--bg-elevated)" stroke="var(--border)" stroke-width="1.15"/>
+                <text x="640" y="306" fill="var(--text)" font-family="var(--font-sans)" font-size="13" font-weight="600">Syntax Parser (Zig)</text>
+                <text x="640" y="328" fill="var(--text-secondary)" font-family="var(--font-sans)" font-size="11.5">50 compiled tree-sitter</text>
+                <text x="640" y="346" fill="var(--text-secondary)" font-family="var(--font-sans)" font-size="11.5">grammars in a separate process</text>
+                <text x="640" y="376" fill="var(--text-muted)" font-family="var(--font-mono)" font-size="10.5">Loads new grammars on demand</text>
+              </svg>
+            </div>
+            <figcaption class="diagram-caption">Each OS process has isolated memory. Under ADR-0006, the BEAM owns ordered modeline segments with priorities, theme roles, BEAM-styled markdown spans, and key scopes; clients draw shared tokens natively and drop only lowest-priority segments to fit. In headless mode, the editor and parser processes do not start.</figcaption>
+          </figure>
+        </section>
+
+        <section class="essay-section" id="buffer-aware-agents">
+          <h2>2. How staged agent edits protect your open files</h2>
+          <p>Agent file tools in Minga have no blind filesystem write fallback. Approved edits land in an isolated staging overlay while your open buffers and working tree remain untouched until you explicitly publish or discard them.</p>
+
+          <figure class="diagram-figure">
+            <div class="diagram-bar">
+              <span>Figure 2 · Staged edit, review, and recovery pipeline</span>
+              <span>Revision Check -&gt; Staging Overlay -&gt; 3-Way Merge</span>
+            </div>
+            <div class="scroll-hint" aria-hidden="true">Scroll diagram horizontally -&gt;</div>
+            <div class="diagram-canvas">
+              <svg class="diagram-svg" viewBox="0 0 880 318" role="img" aria-labelledby="fig2-title fig2-desc" xmlns="http://www.w3.org/2000/svg">
+                <title id="fig2-title">Staged agent edit pipeline with revision checks, diff review, three-way merge, and crash recovery</title>
+                <desc id="fig2-desc">Four stages left to right: 01 Revision-Checked Edit requiring a full read revision token, 02 Isolated Staging Overlay keeping open buffers and working tree untouched (materializing a temp copy only when shell tools run), 03 Diff Review for hunk-by-hunk accept or reject without stealing focus, and 04 Publish or Discard via three-way merge or conflict review. Below, your open buffer and disk stay untouched until publish, while crash-safe draft recovery persists staged edits outside the editor process so they survive crashes.</desc>
+                <defs>
+                  <marker id="arrow-flow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+                    <path d="M 1 1 L 9 5 L 1 9 z" fill="var(--accent)"/>
+                  </marker>
+                  <marker id="arrow-down" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+                    <path d="M 1 1 L 9 5 L 1 9 z" fill="var(--text-muted)"/>
+                  </marker>
+                </defs>
+
+                <rect x="16" y="22" width="182" height="136" fill="var(--bg-elevated)" stroke="var(--border)" stroke-width="1.2"/>
+                <text x="32" y="46" fill="var(--accent)" font-family="var(--font-mono)" font-size="10.5" font-weight="600">01 · REVISION CHECK</text>
+                <text x="32" y="68" fill="var(--text)" font-family="var(--font-sans)" font-size="13" font-weight="600">Atomic file edit</text>
+                <text x="32" y="90" fill="var(--text-secondary)" font-family="var(--font-sans)" font-size="11.5">Agent reads the full file</text>
+                <text x="32" y="108" fill="var(--text-secondary)" font-family="var(--font-sans)" font-size="11.5">and sends its revision token.</text>
+                <text x="32" y="138" fill="var(--text-muted)" font-family="var(--font-mono)" font-size="10">Stale edits reject cleanly</text>
+
+                <line x1="198" y1="90" x2="232" y2="90" stroke="var(--accent)" stroke-width="1.5" marker-end="url(#arrow-flow)"/>
+
+                <rect x="238" y="22" width="188" height="136" fill="var(--bg-elevated)" stroke="var(--border)" stroke-width="1.2"/>
+                <text x="254" y="46" fill="var(--accent)" font-family="var(--font-mono)" font-size="10.5" font-weight="600">02 · STAGING OVERLAY</text>
+                <text x="254" y="68" fill="var(--text)" font-family="var(--font-sans)" font-size="13" font-weight="600">Isolated fork</text>
+                <text x="254" y="90" fill="var(--text-secondary)" font-family="var(--font-sans)" font-size="11.5">Edits stage off your working</text>
+                <text x="254" y="108" fill="var(--text-secondary)" font-family="var(--font-sans)" font-size="11.5">tree (temp copy for shell runs).</text>
+                <text x="254" y="138" fill="var(--text-muted)" font-family="var(--font-mono)" font-size="10">No blind disk writes</text>
+
+                <line x1="426" y1="90" x2="460" y2="90" stroke="var(--accent)" stroke-width="1.5" marker-end="url(#arrow-flow)"/>
+
+                <rect x="466" y="22" width="188" height="136" fill="var(--accent-soft)" stroke="var(--accent-border)" stroke-width="1.4"/>
+                <text x="482" y="46" fill="var(--accent)" font-family="var(--font-mono)" font-size="10.5" font-weight="600">03 · DIFF REVIEW</text>
+                <text x="482" y="68" fill="var(--text)" font-family="var(--font-sans)" font-size="13" font-weight="600">Hunk-by-hunk review</text>
+                <text x="482" y="90" fill="var(--text-secondary)" font-family="var(--font-sans)" font-size="11.5">Read-only viewer today;</text>
+                <text x="482" y="108" fill="var(--text-secondary)" font-family="var(--font-sans)" font-size="11.5">Twist + *minga-review* next.</text>
+                <text x="482" y="138" fill="var(--accent)" font-family="var(--font-mono)" font-size="10">Background writes stay quiet</text>
+
+                <line x1="654" y1="90" x2="688" y2="90" stroke="var(--accent)" stroke-width="1.5" marker-end="url(#arrow-flow)"/>
+
+                <rect x="694" y="22" width="170" height="136" fill="var(--bg-elevated)" stroke="var(--border)" stroke-width="1.2"/>
+                <text x="710" y="46" fill="var(--accent)" font-family="var(--font-mono)" font-size="10.5" font-weight="600">04 · PUBLISH</text>
+                <text x="710" y="68" fill="var(--text)" font-family="var(--font-sans)" font-size="13" font-weight="600">3-way merge or drop</text>
+                <text x="710" y="90" fill="var(--text-secondary)" font-family="var(--font-sans)" font-size="11.5">SPC a p merges into open</text>
+                <text x="710" y="108" fill="var(--text-secondary)" font-family="var(--font-sans)" font-size="11.5">buffers &amp; disk with undo.</text>
+                <text x="710" y="138" fill="var(--text-muted)" font-family="var(--font-mono)" font-size="10">Overlap -&gt; conflict review</text>
+
+                <line x1="332" y1="158" x2="332" y2="204" stroke="var(--text-muted)" stroke-width="1.4" stroke-dasharray="4 3" marker-end="url(#arrow-down)"/>
+
+                <rect x="16" y="208" width="182" height="92" fill="var(--bg-subtle)" stroke="var(--border)" stroke-width="1.15"/>
+                <text x="32" y="234" fill="var(--text)" font-family="var(--font-sans)" font-size="12.5" font-weight="600">Open Buffer &amp; Disk</text>
+                <text x="32" y="256" fill="var(--text-secondary)" font-family="var(--font-sans)" font-size="11.5">Untouched until publish.</text>
+                <text x="32" y="278" fill="var(--text-muted)" font-family="var(--font-mono)" font-size="10">Your undo stays intact</text>
+
+                <rect x="238" y="208" width="626" height="92" fill="var(--bg-subtle)" stroke="var(--border)" stroke-width="1.15"/>
+                <text x="256" y="234" fill="var(--text)" font-family="var(--font-sans)" font-size="12.5" font-weight="600">Crash-Safe Draft Recovery (Independent of the Editor Process)</text>
+                <text x="256" y="256" fill="var(--text-secondary)" font-family="var(--font-sans)" font-size="11.5">Survives editor restarts and crashes. Saves private atomic drafts with each file's base revision</text>
+                <text x="256" y="278" fill="var(--text-muted)" font-family="var(--font-mono)" font-size="10.5">~/.local/share/minga/staged_drafts · Restores unpublished edits on next start</text>
+              </svg>
+            </div>
+            <figcaption class="diagram-caption">Ordinary quit commands stop if unpublished edits remain staged; force quits (<code>:qa!</code>, <code>:cq</code>, or <code>:q!</code> on the last window) discard on purpose. <span data-status="planned" data-since="v0.1.0" data-pill="off">As ADR-0006 lands, per-author undo groups keep your <code>u</code> / <code>⌘Z</code> history strictly separate from Minga's edits while inline Twist review and <code>*minga-review*</code> build over the same ownership contract.</span></figcaption>
+          </figure>
+        </section>
+
+        <section class="essay-section" id="executable-parity">
+          <h2>3. Keeping macOS and the terminal in lockstep</h2>
+          <p>Two frontends drift apart one reasonable local shortcut at a time. Prose style guides do not stop drift because nothing fails when Swift or Go diverges. The parity architecture (<a href="https://github.com/jsmestad/minga/blob/main/docs/design/storyboard.md"><code>docs/design/storyboard.md</code></a>) is being built in two tracks toward v0.1.0:</p>
+          <ul>
+            <li><strong>Single source of truth for UI tokens (Track 1 on <code>main</code>, Track 2 building).</strong> Every color is a semantic theme role (<code>minga</code>, <code>you</code>, <code>needs_you</code>, <code>failure</code>, <code>done</code>) defined once and generated into Swift, Go, and Elixir via <code>mix codegen</code>, with a planned guardrail rejecting hard-coded colors outside generated files. Every scenario renders in Catppuccin Frappé (default), AstroDark, and a light theme (Catppuccin Latte or One Light).</li>
+            <li><strong>Side-by-side visual diffs across clients (Track 1 scenario inventory landed; Track 2 factory next).</strong> Today, <code>docs/design/scenarios.toml</code> inventories every screen and flow map with local invariant checks in <code>design/tools/storyboard/check.py</code>. Track 2 wires those scenario IDs into offscreen macOS (wide and narrow) and Go TUI (truecolor and 16-color) renders so every UI pull request publishes visual diffs against <code>main</code>.</li>
+            <li data-status="planned" data-since="v0.1.0"><strong>Automated keyboard and navigation checks (Track 2).</strong> A headless explorer starts in every scenario, fires every active key binding, and verifies invariants in CI: every screen reachable by keyboard alone and mouse alone, at most three <kbd>esc</kbd> or <kbd>q</kbd> presses back to plain editing with focus restored, no dead-end bindings, every error naming a next action, defined empty states, and zero focus-stealing interruptions.</li>
+            <li><strong>Progressive terminal protocol detection.</strong> The Go TUI uses modern terminal features (Kitty keyboard protocol, OSC 52 clipboard, mode 2026 synchronized output) and degrades quietly down to 16-color terminals. <span data-status="planned" data-since="v0.1.0">Next: Kitty graphics for vector gutter marks with two-tone block fallbacks, OSC 8 clickable <code>file:line</code>, OSC 9/777 notifications, OSC 9;4 tab progress, mode 1004 focus dimming, and <code>:checkhealth terminal</code> to inspect what was detected.</span></li>
+          </ul>
+        </section>
+
+        <section class="essay-section" id="tradeoffs">
+          <h2>4. Real runtime guarantees and real tradeoffs</h2>
+          <ul>
+            <li><strong>One ordered interactive mailbox, isolated background work.</strong> Editor input stays serialized in one process so keystrokes, drawer transitions, and render frames remain strictly ordered, while open buffers, language servers, save hooks, MCP servers, extensions, and agent sessions each run in separate preemptively scheduled processes with separate heaps. Fast model streams coalesce ahead of the editor mailbox so token deltas do not queue ahead of typing.</li>
+            <li><strong>Current staging tradeoffs (worth knowing).</strong> Because staged edits stay off your working tree until you publish, language servers inspect the published open buffer rather than unpublished forks, and today's diff review pane is a syntax-highlighted read-only viewer (switch to the buffer to hand-edit). When an agent runs shell commands such as tests, Minga materializes the staged overlay into a temporary directory with an isolated build path so your main build stays untouched; projects relying on untracked <code>node_modules</code> or <code>.git</code> inside shell tests should keep that boundary in mind.</li>
+            <li><strong>Crash-safe tool recording and retained logs.</strong> Each agent session saves the exact provider conversation beside the visible transcript, captures full shell output beyond the 51 KiB model preview so long test logs survive compaction and restarts, and records each tool call before executing it. If a process dies mid-tool, recovery marks that call indeterminate and never silently replays a side effect (<a href="/docs/session-recovery.html">Session Recovery Reference</a>).</li>
+          </ul>
+        </section>
+
+        <section class="essay-section" id="adrs">
+          <h2>5. Key architectural decisions</h2>
+          <p>Minga documents six structural invariants as Architecture Decision Records in the repository:</p>
+
+          <ul class="spec-ledger">
+            <li class="spec-row">
+              <span class="spec-key spec-key-strong"><a href="/docs/0001-frontend-owns-row-fit.html">ADR-0001</a></span>
+              <span class="spec-detail"><strong>Clients measure their own viewport rows.</strong> Swift and Go calculate how many rows fit their pixel or terminal area once and report that count; the core never guesses rows from pixel math or line spacing.</span>
+            </li>
+            <li class="spec-row">
+              <span class="spec-key spec-key-strong"><a href="/docs/0002-editor-state-transitions-have-explicit-owners.html">ADR-0002</a></span>
+              <span class="spec-detail"><strong>Explicit state owners.</strong> Each sub-state has one owning module that performs its updates, while interactive commands stay serialized in one editor mailbox.</span>
+            </li>
+            <li class="spec-row">
+              <span class="spec-key spec-key-strong"><a href="/docs/0003-extension-code-updates-require-a-new-vm-generation.html">ADR-0003</a></span>
+              <span class="spec-detail"><strong>Extension code updates activate on restart.</strong> Config reloads apply options, bindings, hooks, and advice in place; compiled extension packages activate cleanly on restart rather than mixing old and new module code mid-session.</span>
+            </li>
+            <li class="spec-row">
+              <span class="spec-key spec-key-strong"><a href="/docs/0004-products-are-root-applets-over-a-fixed-engine.html">ADR-0004</a></span>
+              <span class="spec-detail"><strong>Programmable workflows over fixed engine owners (v0.1.0 roadmap).</strong> Author readable workflows over existing buffer, agent, and permission boundaries; save to activate; discard when one-off or reuse across projects.</span>
+            </li>
+            <li class="spec-row">
+              <span class="spec-key spec-key-strong"><a href="/docs/0005-frontend-owns-immediate-ui-feedback.html">ADR-0005</a></span>
+              <span class="spec-detail"><strong>Clients own immediate visual motion.</strong> Native clients handle smooth trackpad scrolling and local previews over committed layout data while text edits and cursor position remain authoritative in the core.</span>
+            </li>
+            <li class="spec-row">
+              <span class="spec-key spec-key-strong"><a href="/docs/0006-the-spine.html">ADR-0006</a></span>
+              <span class="spec-detail" data-status="planned" data-since="v0.1.0" data-pill="off"><strong>The Spine: one keyboard-first chrome model across every frontend (Proposed; Catppuccin Frappé default and design inventory landed).</strong> Text, a plain title bar, and one prioritized modeline at rest; one drawer at a time for lists; Twist and Orbit marks (six state words on five shapes) driven by theme roles; per-author undo; BEAM-styled markdown spans; Vim keys preserved in files; safe quit; parity enforced via generated tokens and Storyboard CI (<a href="https://github.com/jsmestad/minga/tree/main/docs/design"><code>docs/design/</code></a>).</span>
+            </li>
+          </ul>
+
+          <div class="callout">
+            <span class="callout-title">Deep engineering reference</span>
+            <p>For wire opcodes, supervision trees, and contributor contracts, see the <a href="/docs/architecture.html">Full Architecture Spec</a>, <a href="/docs/buffer-aware-agents.html">Buffer-Aware Agents Contract</a>, <a href="/docs/protocol.html">Port Protocol</a>, <a href="/docs/gui_protocol.html">UI Wire Protocol</a>, <a href="/docs/charm_tui.html">Go TUI Architecture</a>, and <a href="/docs/remote_agents.html">Remote Agents</a>.</p>
+          </div>
+
+          <div class="actions">
+            <a class="btn btn-primary" href="/extending">Extending Minga</a>
+            <a class="btn" href="/getting-started">Getting Started</a>
+            <a class="btn" href="/docs/architecture.html">Full API &amp; Spec Docs</a>
+          </div>
+        </section>
+      </div>
+    </article>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container footer-inner">
+      <div class="footer-note">
+        <p><span class="brand-wordmark" style="font-size:1.15rem;margin-right:0.25rem;">minga</span> is open source under the MIT license. Created by <a href="https://evalcode.com">Justin Smestad</a>.</p>
+      </div>
+      <nav class="footer-links" aria-label="Footer">
+        <a href="/">Home</a>
+        <a href="/why-minga">Why Minga</a>
+        <a href="/getting-started">Getting Started</a>
+        <a href="/extending">Extending</a>
+        <a href="/docs/">API Docs</a>
+        <a href="/docs/changelog.html">Changelog</a>
+        <a href="https://github.com/jsmestad/minga">GitHub</a>
+      </nav>
+    </div>
+  </footer>
+
+  <script defer src="/site.js"></script>
+</body>
+</html>

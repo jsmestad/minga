@@ -5,16 +5,21 @@ defmodule MingaEditor.RenderModel.UI.AgentContextBuilder do
   alias Minga.RenderModel.UI.AgentContext.Progress
   alias Minga.RenderModel.UI.AgentContext.Todo
   alias MingaEditor.Agent.Activity
-  alias MingaEditor.Agent.StartFailure
+  alias MingaEditor.Agent.PendingApproval
+  alias MingaEditor.Agent.PendingQuestion
+  alias MingaEditor.Agent.UIState
+  alias MingaEditor.Agent.WorkspaceStatus
   alias MingaEditor.Frontend.Emit.Context
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
+  alias MingaEditor.State.Agent, as: AgentState
 
   @spec build(Context.t() | term()) :: AgentContext.t()
   def build(%Context{workspace: %{agent_ui: %{chat_lifecycle: :unavailable}}}), do: hidden()
 
   def build(%Context{} = ctx) do
     activity = get_activity(ctx)
-    {status, action} = status_and_action(ctx, activity)
+    status = status(ctx)
+    action = action(ctx, activity)
 
     if visible?(activity, status) do
       %AgentContext{
@@ -36,16 +41,10 @@ defmodule MingaEditor.RenderModel.UI.AgentContextBuilder do
   @spec visible?(Context.t() | map()) :: boolean()
   def visible?(%{workspace: %{agent_ui: %{chat_lifecycle: :unavailable}}}), do: false
 
-  def visible?(%Context{} = ctx) do
-    activity = get_activity(ctx)
-    {status, _action} = status_and_action(ctx, activity)
-    visible?(activity, status)
-  end
+  def visible?(%Context{} = ctx), do: visible?(get_activity(ctx), status(ctx))
 
-  def visible?(%{workspace: %{agent_ui: %{chat_lifecycle: {:failed, _failure}}}}), do: true
-
-  def visible?(state) when is_map(state) do
-    visible?(get_activity_from_state(state), context_status(agent_status_from_state(state)))
+  def visible?(%{workspace: %{agent_ui: %UIState{} = ui}} = state) do
+    visible?(ui.view.activity, workspace_status(shell_state(state), ui))
   end
 
   @spec hidden() :: AgentContext.t()
@@ -61,50 +60,45 @@ defmodule MingaEditor.RenderModel.UI.AgentContextBuilder do
 
   defp get_activity(_ctx), do: Activity.new()
 
-  @spec get_activity_from_state(map()) :: Activity.t()
-  defp get_activity_from_state(state), do: state.workspace.agent_ui.view.activity
-
-  @spec agent_status(Context.t()) :: atom()
-  defp agent_status(%Context{
-         intent: %{frame: %{shell_state: %TraditionalState{} = shell_state}}
-       }),
-       do: MingaEditor.State.Agent.display_status(TraditionalState.agent(shell_state))
-
-  defp agent_status(%Context{}), do: :idle
-
-  @spec agent_status_from_state(map()) :: atom()
-  defp agent_status_from_state(state),
-    do: MingaEditor.State.Agent.display_status(TraditionalState.agent(shell_state(state)))
-
-  @spec shell_state(map()) :: TraditionalState.t()
+  @spec shell_state(map()) :: TraditionalState.t() | nil
   defp shell_state(%MingaEditor.RenderPipeline.Input{
          intent: %{frame: %{shell_state: %TraditionalState{} = shell_state}}
        }),
        do: shell_state
 
   defp shell_state(%{shell_runtime: %{state: %TraditionalState{} = shell_state}}), do: shell_state
+  defp shell_state(_state), do: nil
 
-  @spec status_and_action(Context.t(), Activity.t()) ::
-          {AgentContext.status(), String.t() | nil}
-  # A failed start needs the user, not an error badge, whatever the runtime last reported.
-  defp status_and_action(
-         %Context{workspace: %{agent_ui: %{chat_lifecycle: {:failed, failure}}}},
-         _activity
-       ),
-       do: {:needs_you, failure.message}
+  # The strip shows the same workspace status as the workspace pill; only the
+  # mapping to the card's status enum is local.
+  @spec status(Context.t()) :: AgentContext.status()
+  defp status(%Context{intent: %{frame: %{shell_state: shell_state}}} = ctx),
+    do: workspace_status(shell_state, ctx.workspace.agent_ui)
 
-  defp status_and_action(
-         %Context{intent: %{frame: %{shell_state: %TraditionalState{} = shell_state}}} = ctx,
-         activity
-       ) do
-    case TraditionalState.agent(shell_state).pending_question do
-      %MingaEditor.Agent.PendingQuestion{} -> {:needs_you, "Waiting for your answer"}
-      nil -> {context_status(agent_status(ctx)), active_action(activity, pending_approval(ctx))}
-    end
+  @spec workspace_status(term(), UIState.t() | nil) :: AgentContext.status()
+  defp workspace_status(shell_state, ui) do
+    shell_state
+    |> WorkspaceStatus.active(ui)
+    |> context_status()
   end
 
-  defp status_and_action(%Context{}, activity),
-    do: {:idle, active_action(activity, nil)}
+  # A failed start explains its cause; a pending question asks for an answer.
+  @spec action(Context.t(), Activity.t()) :: String.t() | nil
+  defp action(%Context{workspace: %{agent_ui: %{chat_lifecycle: {:failed, failure}}}}, _activity),
+    do: failure.message
+
+  defp action(%Context{intent: %{frame: %{shell_state: shell_state}}}, activity) do
+    case WorkspaceStatus.live_agent(shell_state) do
+      %AgentState{pending_question: %PendingQuestion{}} ->
+        "Waiting for your answer"
+
+      %AgentState{pending_approval: approval} ->
+        active_action(activity, PendingApproval.public(approval))
+
+      nil ->
+        active_action(activity, nil)
+    end
+  end
 
   # A failed start titles the card with its headline; the cause sentence is the
   # card's action, so the two never repeat each other.
@@ -116,14 +110,9 @@ defmodule MingaEditor.RenderModel.UI.AgentContextBuilder do
          _status,
          _action
        ),
-       do: start_failure_headline(failure)
+       do: failure.headline
 
   defp card_task(_ctx, activity, status, action), do: task(activity, status, action)
-
-  @spec start_failure_headline(StartFailure.t()) :: String.t()
-  defp start_failure_headline(%StartFailure{remedy: :set_up_provider}), do: "Agent needs setup"
-  defp start_failure_headline(%StartFailure{remedy: nil}), do: "Agent unavailable"
-  defp start_failure_headline(%StartFailure{}), do: "Agent could not start"
 
   @spec visible?(Activity.t(), AgentContext.status()) :: boolean()
   defp visible?(%Activity{}, status) when status in [:needs_you, :working, :iterating, :errored],
@@ -143,25 +132,15 @@ defmodule MingaEditor.RenderModel.UI.AgentContextBuilder do
   defp task(_activity, :working, _action), do: "Thinking"
   defp task(_activity, _status, _action), do: "Agent activity"
 
-  @spec context_status(atom()) :: AgentContext.status()
-  defp context_status(:approval_waiting), do: :needs_you
+  @spec context_status(WorkspaceStatus.t()) :: AgentContext.status()
+  defp context_status(status) when status in [:approval_waiting, :needs_you, :needs_review],
+    do: :needs_you
+
   defp context_status(:thinking), do: :working
   defp context_status(:tool_executing), do: :iterating
   defp context_status(:error), do: :errored
-  defp context_status(:idle), do: :idle
-  defp context_status(:plan), do: :idle
-  defp context_status(nil), do: :idle
-
-  @spec pending_approval(Context.t()) :: MingaAgent.ToolApproval.Public.t() | nil
-  defp pending_approval(%Context{
-         intent: %{frame: %{shell_state: %TraditionalState{} = shell_state}}
-       }),
-       do:
-         MingaEditor.Agent.PendingApproval.public(
-           TraditionalState.agent(shell_state).pending_approval
-         )
-
-  defp pending_approval(%Context{}), do: nil
+  defp context_status(:done), do: :done
+  defp context_status(status) when status in [:idle, :plan, :stopped, nil], do: :idle
 
   @spec active_action(Activity.t(), MingaAgent.ToolApproval.Public.t() | nil) :: String.t() | nil
   defp active_action(_activity, %MingaAgent.ToolApproval.Public{name: name}),

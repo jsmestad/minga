@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Extending Minga: Three Layers of Programmability</title>
+  <meta name="description" content="Customize Minga across three layers: live-reloaded config.exs, supervised Hex/Git extensions, PreToolUse hooks, crash-isolated MCP, corporate LLM gateways, and task-shaped v0.1.0 workflows.">
+  <meta property="og:type" content="article">
+  <meta property="og:title" content="Extending Minga: Three Layers of Programmability">
+  <meta property="og:description" content="Customize Minga across three layers: live-reloaded config.exs, supervised Hex/Git extensions, PreToolUse hooks, crash-isolated MCP, corporate LLM gateways, and task-shaped workflows.">
+  <meta property="og:image" content="/assets/og-minga.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:image" content="/assets/og-minga.png">
+  <link rel="icon" type="image/svg+xml" href="/assets/minga_dark-transparent.svg">
+  <link rel="preload" href="/fonts/instrument-serif-italic.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/styles.css">
+  <script>
+    (() => {
+      try {
+        const saved = window.localStorage.getItem("minga-theme");
+        if (saved === "light" || saved === "dark") {
+          document.documentElement.setAttribute("data-theme", saved);
+        }
+      } catch (_) {}
+    })();
+  </script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="site-header">
+    <div class="container header-inner">
+      <a class="brand-link" href="/">
+        <img src="/assets/minga_dark-transparent.svg" alt="Minga logo" width="24" height="24">
+        <span class="brand-wordmark">minga</span>
+        <span class="brand-version">/ v0.1.0-pre</span>
+      </a>
+      <nav class="site-nav" id="site-nav" aria-label="Primary">
+        <a href="/why-minga">Why Minga</a>
+        <a href="/getting-started">Getting Started</a>
+        <a href="/architecture">Architecture</a>
+        <a href="/extending" aria-current="page">Extending</a>
+        <a href="/docs/">Reference</a>
+        <a href="https://github.com/jsmestad/minga">GitHub</a>
+      </nav>
+      <div class="header-controls">
+        <button type="button" class="theme-toggle" data-theme-toggle aria-label="Toggle color theme">Light</button>
+        <button type="button" class="nav-toggle" data-nav-toggle aria-expanded="false" aria-controls="site-nav" aria-label="Toggle navigation menu">Menu</button>
+      </div>
+    </div>
+  </header>
+
+  <main id="main">
+    <header class="essay-hero">
+      <div class="container">
+        <p class="section-index"><span>EXTENDING</span> Three Layers</p>
+        <h1>Extending Minga</h1>
+        <p class="essay-subtitle">Minga works with any language you write, with no config required to start. When you want to customize it, Elixir is the extension language underneath: begin with five lines in <code>config.exs</code>, grow into supervised packages, or reshape buffers and workflows for a single task.</p>
+        <nav class="essay-toc" aria-label="Sections">
+          <a href="#three-layers">1. Three layers</a>
+          <a href="#layer-config">2. config.exs</a>
+          <a href="#layer-extensions">3. Extensions, hooks &amp; gateways</a>
+          <a href="#layer-workflows">4. Task-shaped workflows (v0.1.0)</a>
+          <a href="#security-and-reloads">5. Security, privacy &amp; reloads</a>
+        </nav>
+      </div>
+    </header>
+
+    <article class="essay-body">
+      <div class="container">
+        <section class="essay-section" id="three-layers">
+          <h2>1. One language across three layers</h2>
+          <p>You never outgrow a JSON schema or jump across an RPC plugin wall when your customization gets serious. Every layer shares the same Elixir runtime and composes with Minga's buffers, drawers, and key scopes instead of adding competing chrome:</p>
+
+          <ul class="spec-ledger">
+            <li class="spec-row">
+              <span class="spec-key spec-key-strong">Layer 1 · config.exs</span>
+              <span class="spec-detail"><strong>Ships today, reloads live (<kbd>SPC h r</kbd>).</strong> Typed options, themes, per-filetype rules, keybindings, custom commands, background save hooks, <code>PreToolUse</code> shell veto hooks, crash-isolated stdio MCP servers, and command wrappers (<code>advise</code>: run code before, after, around, or instead of any built-in command).</span>
+            </li>
+            <li class="spec-row">
+              <span class="spec-key spec-key-strong">Layer 2 · Extensions</span>
+              <span class="spec-detail"><strong>Ships today.</strong> Installable packages from Elixir's package registry (Hex), Git repos, or local paths using <code>minga_sdk</code>: declarative commands, keymap scopes, lazy <code>load_policy</code> overrides, custom buffer/drawer surfaces, corporate LLM gateways, and runtime-compiled syntax grammars.</span>
+            </li>
+            <li class="spec-row">
+              <span class="spec-key spec-key-strong">Layer 3 · Task workflows</span>
+              <span class="spec-detail"><strong>v0.1.0 roadmap.</strong> Write or ask Minga to author readable source over existing buffer, drawer, agent, and permission primitives; inspect the diff and save to activate; discard when a one-off task ends or reuse across projects.</span>
+            </li>
+          </ul>
+        </section>
+
+        <section class="essay-section" id="layer-config">
+          <h2>2. Layer 1: Everyday customization in config.exs</h2>
+          <p><code>~/.config/minga/config.exs</code> is ordinary Elixir with typed option validation (bad values report a clear error rather than failing silently). Lifecycle hooks run asynchronously in separate processes so slow CLI formatters or linters never block typing, and command wrappers contain exceptions so a bug in your handler never crashes the editor.</p>
+
+          <div class="code-card">
+            <div class="code-header">
+              <span>~/.config/minga/config.exs</span>
+              <span>Elixir</span>
+            </div>
+            <pre><code><span class="tok-kw">use</span> <span class="tok-mod">Minga.Config</span>
+
+set <span class="tok-atom">:theme</span>, <span class="tok-atom">:catppuccin_frappe</span>
+set <span class="tok-atom">:line_numbers</span>, <span class="tok-atom">:hybrid</span>
+set <span class="tok-atom">:scroll_margin</span>, <span class="tok-num">6</span>
+
+<span class="tok-comment"># Per-filetype option overrides take a plain keyword list.</span>
+for_filetype <span class="tok-atom">:go</span>, tab_width: <span class="tok-num">4</span>, indent_with: <span class="tok-atom">:tabs</span>
+
+<span class="tok-comment"># Background save hooks run in separate processes and never stall typing.</span>
+on <span class="tok-atom">:after_save</span>, <span class="tok-kw">fn</span> _buf, path <span class="tok-kw">-&gt;</span>
+  <span class="tok-kw">if</span> <span class="tok-mod">String</span>.ends_with?(path, <span class="tok-str">".go"</span>) <span class="tok-kw">do</span>
+    <span class="tok-mod">System</span>.cmd(<span class="tok-str">"gofmt"</span>, [<span class="tok-str">"-w"</span>, path])
+  <span class="tok-kw">end</span>
+<span class="tok-kw">end</span>
+
+<span class="tok-comment"># Wrap any built-in command with :before, :after, :around, or :override advice.</span>
+advise <span class="tok-atom">:after</span>, <span class="tok-atom">:save</span>, <span class="tok-kw">fn</span> state <span class="tok-kw">-&gt;</span>
+  <span class="tok-mod">Minga.API</span>.message(<span class="tok-str">"Saved"</span>)
+  state
+<span class="tok-kw">end</span>
+
+<span class="tok-comment"># Install supervised extensions from Hex, Git, or local paths (with optional lazy loading).</span>
+extension <span class="tok-atom">:minga_git_extended</span>, hex: <span class="tok-str">"minga_git_extended"</span>, version: <span class="tok-str">"~&gt; 0.1"</span></code></pre>
+          </div>
+
+          <p>See the <a href="/docs/configuration.html">Configuration Reference</a> for every typed option, theme token, formatter override, hook, and MCP server setting.</p>
+        </section>
+
+        <section class="essay-section" id="layer-extensions">
+          <h2>3. Layer 2: Supervised extensions, hooks, MCP, and gateways</h2>
+          <p>When a customization needs its own supervision tree, background state, buffer surface, or distribution across machines, build a package with <code>minga_sdk</code>. Every command, keybinding, surface, and language entry is tagged with its owning extension so disabling it tears down everything cleanly without leaving stale state behind. Users can also override any extension's <code>load_policy</code> (<code>:eager</code>, <code>:deferred</code>, or <code>{:on_command, [...]}</code>) in <code>config.exs</code> without forking the package.</p>
+
+          <div class="code-card">
+            <div class="code-header">
+              <span>lib/my_extension.ex · minga_sdk</span>
+              <span>Elixir</span>
+            </div>
+            <pre><code><span class="tok-kw">defmodule</span> <span class="tok-mod">MyExtension</span> <span class="tok-kw">do</span>
+  <span class="tok-kw">use</span> <span class="tok-mod">Minga.Extension.Editor</span>
+
+  option <span class="tok-atom">:enabled</span>, <span class="tok-atom">:boolean</span>, default: <span class="tok-atom">true</span>, description: <span class="tok-str">"Enable extension"</span>
+
+  command <span class="tok-atom">:run_check</span>, <span class="tok-str">"Run custom project check"</span>,
+    execute: {<span class="tok-mod">MyExtension.Commands</span>, <span class="tok-atom">:run</span>}
+
+  keybind <span class="tok-atom">:normal</span>, <span class="tok-str">"SPC m c"</span>, <span class="tok-atom">:run_check</span>, <span class="tok-str">"Run custom check"</span>, filetype: <span class="tok-atom">:go</span>
+
+  @impl <span class="tok-atom">true</span>
+  <span class="tok-kw">def</span> name, <span class="tok-kw">do:</span> <span class="tok-atom">:my_extension</span>
+
+  @impl <span class="tok-atom">true</span>
+  <span class="tok-kw">def</span> description, <span class="tok-kw">do:</span> <span class="tok-str">"Project-specific check runner"</span>
+
+  @impl <span class="tok-atom">true</span>
+  <span class="tok-kw">def</span> version, <span class="tok-kw">do:</span> <span class="tok-str">"0.1.0"</span>
+
+  @impl <span class="tok-atom">true</span>
+  <span class="tok-kw">def</span> init(_config), <span class="tok-kw">do:</span> {<span class="tok-atom">:ok</span>, %{}}
+<span class="tok-kw">end</span></code></pre>
+          </div>
+
+          <h3>Four integration seams that ship today</h3>
+          <ul>
+            <li><strong>Custom corporate LLM gateways (<code>MingaAgent.InferenceRoute</code>).</strong> Connect an internal company proxy, private endpoint, or custom subscription route to <code>/model</code>. Your route only streams model replies; Minga keeps running tool approvals, staged overlays, retries, context compaction, and session history (<a href="/docs/extension_api.html#model-routes">Model Routes Reference</a>).</li>
+            <li><strong>Deterministic <code>PreToolUse</code> veto hooks (<code>:agent_hooks</code>).</strong> Run a local shell script before any matching tool (<code>"shell"</code>, <code>"*_file"</code>, or <code>"*"</code>) with JSON call arguments on stdin and POSIX process-group timeout cleanup; any non-zero exit blocks the tool and surfaces stderr in chat (<a href="/docs/hooks.html">Hooks Reference</a>).</li>
+            <li><strong>Crash-isolated multi-server MCP (<code>:agent_mcp_servers</code>).</strong> Attach multiple stdio Model Context Protocol servers (GitHub, Linear, Postgres, browsers) to each agent session. Each server's tools are safely prefixed (<code>mcp_&lt;server&gt;__&lt;tool&gt;</code>) and default to destructive approval; if one server exits mid-turn, only its tools drop out while built-in tools and healthy servers keep running (<a href="/docs/mcp.html">MCP Reference</a>).</li>
+            <li><strong>Runtime syntax grammars (<code>Minga.Language.register</code>).</strong> Ship tree-sitter grammar sources and Minga compiles them on demand at runtime, caches the shared library in <code>~/.local/share/minga/grammars/</code>, and wires highlight queries without rebuilding Minga (<a href="/docs/extension_api.html#tree-sitter-grammars">Tree-Sitter Grammars Reference</a>).</li>
+          </ul>
+        </section>
+
+        <section class="essay-section" id="layer-workflows">
+          <h2>4. Layer 3: Disposable and reusable task workflows (v0.1.0 roadmap)</h2>
+          <p>The v0.1.0 milestone adds a third layer between a quick <code>config.exs</code> edit and a full packaged extension: reshaping your workbench for a single task without maintaining a massive personal config or forking the editor.</p>
+          <p><strong>Concrete example of the v0.1.0 target:</strong> suppose you are revising a design spec in Markdown or auditing a risky migration and want inline review comments, explicit "Send Revision" actions, attributed suggestions you can accept or reject, and a split buffer tracking check status and token usage for that task. Instead of hunting for a plugin or waiting on an editor vendor, you write or ask Minga to author that workflow in readable Elixir over Minga's existing buffer, drawer, and agent primitives. You inspect the diff, save to activate under an explicit revocable grant (with automatic restore if a candidate fails), run it identically on macOS and in the terminal, and either discard the workflow once the PR lands or save it to reuse across future projects.</p>
+
+          <div class="callout">
+            <span class="callout-title">Release status &amp; stability</span>
+            <p>Layers 1 and 2 (<code>config.exs</code>, hooks, advice, Hex/Git/path extensions, <code>PreToolUse</code> hooks, MCP servers, custom model gateways, and runtime grammars) ship on <code>main</code> today. Layer 3 (save-to-activate disposable and reusable workflows) and the ADR-0006 quiet chrome model are in active development for v0.1.0. Before v1.0, breaking changes to config options or <code>minga_sdk</code> are documented in the <a href="/docs/changelog.html">Changelog</a>.</p>
+          </div>
+        </section>
+
+        <section class="essay-section" id="security-and-reloads">
+          <h2>5. Security, privacy, and reload boundaries</h2>
+          <p>If you are evaluating Minga for daily work on proprietary company code, here are the exact boundaries:</p>
+
+          <ul>
+            <li><strong>Explicit approval gates and extension updates.</strong> Extensions and authored workflows run with OS-user privileges inside the Erlang VM, matching Emacs Lisp and Neovim Lua (Minga isolates callback crashes so a buggy extension does not take down the editor, which is failure containment rather than an OS sandbox). Destructive agent tools (file edits, deletes, shell commands, git writes, and MCP tools by default) require explicit approval; initial extension installs run only for sources you explicitly declare in <code>config.exs</code>, while extension updates (<kbd>SPC h e u</kbd>) prompt for confirmation with git log inspection before applying; and v0.1.0 live authoring requires an explicit revocable session grant plus human review before activation.</li>
+            <li><strong>Local credentials, temp overlays, and zero remote telemetry.</strong> Minga sends zero analytics or crash telemetry; network traffic goes only to the model routes, MCP servers, and language servers you configure. API keys resolve from environment variables first or save locally in <code>~/.config/minga/credentials.json</code> (<code>0600</code> permissions), never logged and never exported in transcripts. On work laptops, prefer shell environment variables or an internal <code>MingaAgent.InferenceRoute</code> proxy over storing keys on disk. Temporary shell-run overlays copy project files while skipping <code>.git</code> and <code>node_modules</code> and clean up after execution; unpublished staged drafts persist locally under <code>~/.local/share/minga/staged_drafts</code>.</li>
+            <li><strong>Corporate gateway &amp; binary transparency.</strong> Teams can route exclusively through an internal proxy using <code>MingaAgent.InferenceRoute</code> rather than public provider endpoints. Rolling macOS desktop builds are Apple Developer ID signed and notarized, and the entire codebase is MIT open source and buildable from source.</li>
+            <li><strong>Why compiled extension updates activate on restart (<a href="/docs/0003-extension-code-updates-require-a-new-vm-generation.html">ADR-0003</a>).</strong> While <kbd>SPC h r</kbd> reloads options, bindings, hooks, and advice in place, compiled extension packages can own supervisors, closures, and dependencies that cannot atomically cross a version boundary mid-session. Disabling an extension takes effect immediately; updated extension code activates cleanly on restart.</li>
+          </ul>
+
+          <div class="actions">
+            <a class="btn btn-primary" href="/docs/extension_api.html">Full Extension API Reference</a>
+            <a class="btn" href="/docs/configuration.html">Configuration Reference</a>
+            <a class="btn" href="https://hexdocs.pm/minga_sdk">minga_sdk on HexDocs</a>
+          </div>
+        </section>
+      </div>
+    </article>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container footer-inner">
+      <div class="footer-note">
+        <p><span class="brand-wordmark" style="font-size:1.15rem;margin-right:0.25rem;">minga</span> is open source under the MIT license. Created by <a href="https://evalcode.com">Justin Smestad</a>.</p>
+      </div>
+      <nav class="footer-links" aria-label="Footer">
+        <a href="/">Home</a>
+        <a href="/why-minga">Why Minga</a>
+        <a href="/getting-started">Getting Started</a>
+        <a href="/architecture">Architecture</a>
+        <a href="/docs/">API Docs</a>
+        <a href="/docs/changelog.html">Changelog</a>
+        <a href="https://github.com/jsmestad/minga">GitHub</a>
+      </nav>
+    </div>
+  </footer>
+
+  <script defer src="/site.js"></script>
+</body>
+</html>

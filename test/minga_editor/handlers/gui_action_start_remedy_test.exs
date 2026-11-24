@@ -17,7 +17,12 @@ defmodule MingaEditor.Handlers.GuiActionStartRemedyTest do
           {{:conversation, self()}, :retry},
           {{:failed, StartFailure.missing_credentials()}, :retry},
           {{:failed, StartFailure.timed_out(StartRequest.default())}, :set_up_provider},
-          {{:failed, %StartFailure{message: "Remote session stopped.", remedy: nil}}, :retry}
+          {{:failed,
+            %StartFailure{
+              headline: "Agent session stopped",
+              message: "Remote session stopped.",
+              remedy: nil
+            }}, :retry}
         ] do
       shown =
         Workflow.install_agent_ui(

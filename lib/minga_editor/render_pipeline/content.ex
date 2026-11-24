@@ -29,6 +29,7 @@ defmodule MingaEditor.RenderPipeline.Content do
   alias MingaEditor.RenderModel.Window.Builder, as: WindowModelBuilder
   alias MingaEditor.RenderModel.Window.BuildResult
   alias MingaEditor.RenderModel.Window.ResidentBuild
+  alias MingaEditor.Agent.ReviewHighlights
   alias MingaEditor.RenderModel.Window.ReviewBuilder
   alias MingaEditor.RenderModel.Window.ReviewLayout
   alias MingaEditor.Shell.Runtime
@@ -403,12 +404,14 @@ defmodule MingaEditor.RenderPipeline.Content do
        ) do
     {_row, _col, width, _height} = win_layout.content
     frame = st.intent.frame
-    layout = ReviewLayout.new(width, %Monospace{}, frame.theme, Config.get(:tab_width))
+    view = st.workspace.agent_ui.view
+    syntax = ReviewHighlights.sides(view.review_highlights)
+    layout = ReviewLayout.new(width, %Monospace{}, frame.theme, Config.get(:tab_width), syntax)
     scope = Runtime.review_scope(frame.shell, frame.shell_state)
 
     result =
       Telemetry.span([:minga, :render, :window_model_build], %{window_id: win_id}, fn ->
-        ReviewBuilder.build(window, st.workspace.agent_ui.view.preview, win_layout, layout, scope)
+        ReviewBuilder.build(window, view.preview, win_layout, layout, scope)
       end)
 
     case result do

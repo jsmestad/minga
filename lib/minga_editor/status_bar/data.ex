@@ -28,6 +28,7 @@ defmodule MingaEditor.StatusBar.Data do
   alias MingaAgent.Session.ConnectionTarget
   alias MingaAgent.StatusCommand
   alias MingaEditor.Agent.UIState
+  alias MingaEditor.Agent.WorkspaceStatus
   alias MingaEditor.Agent.UIState.Panel
   alias MingaEditor.Editing
   alias MingaEditor.Session.ChromeState
@@ -130,6 +131,7 @@ defmodule MingaEditor.StatusBar.Data do
     selection_info = selection_info(mode, mode_state, buf, {line, col})
 
     agent = agent_state(state)
+    agent_status = agent_session_status(state)
     background = background_subagent_summary(state)
     workspace = workspace_modeline_summary(state)
 
@@ -154,7 +156,7 @@ defmodule MingaEditor.StatusBar.Data do
         indent: %StatusIndent{type: indent_type, size: indent_size},
         selection: selection_model(selection_info),
         agent: %SemanticStatusAgent{
-          agent_status: agent_session_status(state.workspace.agent_ui, agent),
+          agent_status: agent_status,
           background_count: background.count,
           background_label: background.label,
           active_tool_name: agent.runtime.active_tool_name
@@ -168,8 +170,9 @@ defmodule MingaEditor.StatusBar.Data do
       notice: notice_message(state),
       selected_operation: OperationFeedback.selected(state.feedback.operation_feedback),
       agent_status_command: agent_status_command_content(state, agent),
-      agent_theme_colors:
-        if(agent.runtime.status, do: Theme.agent_theme(theme(state)), else: nil),
+      # Colors follow the status the modeline shows, which comes from the active
+      # workspace, not only from the live cache.
+      agent_theme_colors: if(agent_status, do: Theme.agent_theme(theme(state)), else: nil),
       git_degraded: git_degraded?,
       workspace: workspace,
       merge_conflict_count: merge_conflict_count(buf),
@@ -358,25 +361,40 @@ defmodule MingaEditor.StatusBar.Data do
   # cannot stall the frame.
   @spec build_agent_data(EditorState.t() | map()) :: t()
   defp build_agent_data(state) do
-    agent = agent_state(state)
     panel = state.workspace.agent_ui.panel
 
     %__MODULE__{
       common: state |> build_common_data("[no file]") |> apply_agent_modeline_theme(state),
       content: %StatusAgent{
         model_name: if(panel.model_name != "", do: panel.model_name, else: "Agent"),
-        session_status: agent_session_status(state.workspace.agent_ui, agent),
+        session_status: agent_session_status(state),
         message_count: UIState.TranscriptProjection.turn_count(panel.transcript)
       }
     }
   end
 
-  # A failed start needs the user, whatever the runtime last reported.
-  @spec agent_session_status(UIState.t(), AgentState.t()) :: StatusAgent.session_status()
-  defp agent_session_status(%UIState{chat_lifecycle: {:failed, _failure}}, _agent),
-    do: :needs_you
+  # The status bar shows the same Agent status as the workspace pill and the
+  # activity strip; statuses it has no indicator for read as idle.
+  @spec agent_session_status(EditorState.t() | map()) :: StatusAgent.session_status()
+  defp agent_session_status(state) do
+    state
+    |> shell_state()
+    |> WorkspaceStatus.active(state.workspace.agent_ui)
+    |> status_bar_status()
+  end
 
-  defp agent_session_status(_agent_ui, agent), do: AgentState.display_status(agent)
+  @spec status_bar_status(WorkspaceStatus.t()) :: StatusAgent.session_status()
+  defp status_bar_status(status)
+       when status in [:idle, :thinking, :tool_executing, :error, :plan, :approval_waiting] or
+              status in [:needs_you, nil],
+       do: status
+
+  defp status_bar_status(_status_without_indicator), do: :idle
+
+  @spec shell_state(EditorState.t() | map()) :: term()
+  defp shell_state(%EditorState{shell_runtime: %{state: shell_state}}), do: shell_state
+  defp shell_state(%{shell_state: shell_state}), do: shell_state
+  defp shell_state(_state), do: nil
 
   @spec apply_agent_modeline_theme(Common.t(), EditorState.t() | map()) :: Common.t()
   defp apply_agent_modeline_theme(%Common{} = common, state) do

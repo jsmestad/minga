@@ -1,0 +1,152 @@
+# Code-backed claims on the marketing site, checked by design/tools/site_check.py.
+#
+# Each entry names a phrase the site may use and a regex that must exist in the named paths (relative to the repository root) before the phrase can appear outside a data-status="planned" block. When the feature ships, the pattern starts matching and the phrase may move out of its planned block; until then, the check fails on any unmarked mention.
+#
+# phrase:  case-insensitive text to look for in the visible copy
+# pattern: Python regex searched in every file under paths
+# paths:   files or directories, relative to the repository root
+# reason:  what is missing, for the failure message
+
+[[claim]]
+phrase = ":checkhealth terminal"
+pattern = "checkhealth"
+paths = ["lib", "go/tui"]
+reason = "no :checkhealth ex command"
+
+[[claim]]
+phrase = "clickable file:line"
+pattern = "\\]8;|Hyperlink"
+paths = ["go/tui"]
+reason = "the TUI does not emit OSC 8 links"
+
+[[claim]]
+phrase = "OSC 8"
+pattern = "\\]8;|Hyperlink"
+paths = ["go/tui"]
+reason = "the TUI does not emit OSC 8 links"
+
+[[claim]]
+phrase = "tab progress"
+pattern = "\\]9;4|ProgressBar"
+paths = ["go/tui"]
+reason = "the TUI does not emit OSC 9;4 progress"
+
+[[claim]]
+phrase = "focus dimming"
+pattern = "1004|ReportFocus|FocusMsg"
+paths = ["go/tui"]
+reason = "the TUI does not track focus (mode 1004)"
+
+[[claim]]
+phrase = "Dock badge"
+pattern = "badgeLabel"
+paths = ["macos/Sources"]
+reason = "the macOS app sets no Dock badge"
+
+[[claim]]
+phrase = "reveals shortcuts"
+pattern = "revealShortcut|ShortcutReveal"
+paths = ["macos/Sources"]
+reason = "holding ⌘ does not reveal shortcuts yet"
+
+[[claim]]
+phrase = "Already answered"
+pattern = "Already answered"
+paths = ["lib", "macos/Sources", "go/tui"]
+reason = "answers do not sync an Already answered state yet"
+
+[[claim]]
+phrase = "vector gutter marks"
+pattern = "\\x1b_G|kittyGraphics|KittyGraphics"
+paths = ["go/tui"]
+reason = "the TUI draws no Kitty graphics gutter marks"
+
+[[claim]]
+phrase = "Twist"
+pattern = "[Tt]wist"
+paths = ["lib", "macos/Sources", "go/tui"]
+reason = "the Twist gutter is not in the code yet"
+
+[[claim]]
+phrase = "Orbit"
+pattern = "[Oo]rbit"
+paths = ["lib", "macos/Sources", "go/tui"]
+reason = "the Orbit marks are not in the code yet"
+
+[[claim]]
+phrase = "per-author undo"
+pattern = "per_author|author_undo"
+paths = ["lib"]
+reason = "undo is not split by author yet"
+
+[[claim]]
+phrase = "undoes only your"
+pattern = "per_author|author_undo"
+paths = ["lib"]
+reason = "undo is not split by author yet"
+
+[[claim]]
+phrase = "Subagent Peek"
+pattern = "subagent_peek|SubagentPeek"
+paths = ["lib"]
+reason = "the subagent peek is not in the code yet"
+
+[[claim]]
+phrase = "*minga-review*"
+pattern = "minga-review"
+paths = ["lib"]
+reason = "the *minga-review* buffer is not in the code yet"
+
+[[claim]]
+phrase = "*minga-tasks*"
+pattern = "minga-tasks"
+paths = ["lib"]
+reason = "the *minga-tasks* buffer is not in the code yet"
+
+[[claim]]
+phrase = "*minga-queue*"
+pattern = "minga-queue"
+paths = ["lib"]
+reason = "the *minga-queue* buffer is not in the code yet"
+
+[[claim]]
+phrase = ":Minga review"
+pattern = "\"Minga\""
+paths = ["lib/minga/command/parser.ex"]
+reason = "no :Minga ex command"
+
+[[claim]]
+phrase = "live counts"
+pattern = "which_key_count|whichkey_count|live_count"
+paths = ["lib"]
+reason = "which-key shows no live counts yet"
+
+[[claim]]
+phrase = "300 ms"
+pattern = "misfire_lockout|approval_lockout"
+paths = ["lib"]
+reason = "no approval lockout on auto-open yet"
+
+[[claim]]
+phrase = "100 columns"
+pattern = "min_code_columns|code_min_columns"
+paths = ["lib"]
+reason = "panels do not yield to keep 100 code columns yet"
+
+[[claim]]
+phrase = "pinned files"
+pattern = "pinned_file|pin_file"
+paths = ["lib"]
+reason = "pinned files replace tabs in the design; not in the code yet"
+
+[[claim]]
+phrase = "Servus."
+pattern = "Servus\\."
+paths = ["lib", "macos/Sources", "go/tui"]
+reason = "the voice strings are not in the code yet"
+
+[[claim]]
+phrase = "tested together in CI"
+pattern = "storyboard|parity"
+paths = [".github/workflows/ci.yml"]
+reason = "no cross-client parity job in CI yet"

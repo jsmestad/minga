@@ -688,7 +688,7 @@ struct AgentPromptPresentationTests {
         var actions: [AgentPromptView.Action] = []
         let control = AgentPromptActionButtons(state: state, sendAction: { actions.append($0) })
             .environment(\.themeColors, ThemeColors())
-        state.update(visible: true, status: .idle, model: "", thinkingLevel: "", prompt: state.prompt, promptLineCount: 1, promptCursorLine: 0, promptCursorCol: 20, promptMode: .insert, promptVisibleRows: 1, promptCompletion: nil, promptPresentation: 7, lifecycle: .starting)
+        state.update(visible: true, status: .idle, model: "", thinkingLevel: "", prompt: state.prompt, promptLineCount: 1, promptCursorLine: 0, promptCursorCol: 20, promptMode: .insert, promptVisibleRows: 1, promptCompletion: nil, promptPresentation: 7, lifecycle: .starting(notice: AgentLifecycleNotice(headline: "Starting Agent", note: "")))
         #expect(try control.inspect().findAll(ViewType.Button.self)[0].isDisabled())
         #expect(state.prompt == "typed while starting")
         state.update(visible: true, status: .idle, model: "", thinkingLevel: "", prompt: state.prompt, promptLineCount: 1, promptCursorLine: 0, promptCursorCol: 20, promptMode: .insert, promptVisibleRows: 1, promptCompletion: nil, promptPresentation: 7, lifecycle: .conversation)

@@ -8,6 +8,8 @@ defmodule MingaEditor.Session.ChromeState do
   alias Minga.Buffer
   alias Minga.Language
   alias MingaEditor.Agent.UIState
+  alias MingaEditor.Agent.WorkspaceStatus
+  alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.Session.State, as: SessionState
   alias MingaEditor.State.FileTree, as: FileTreeState
   alias MingaEditor.State.Workspace
@@ -16,7 +18,6 @@ defmodule MingaEditor.Session.ChromeState do
   alias MingaEditor.State.Tab
   alias MingaEditor.State.Tab.Agent, as: TabAgent
   alias MingaEditor.State.Tab.Context, as: TabContext
-  alias MingaEditor.State.Workspace.Agent, as: WorkspaceAgent
   alias MingaEditor.State.TabBar
   alias Minga.Language.Devicon
   alias MingaEditor.Session.ChromeState.TabSummary
@@ -98,7 +99,12 @@ defmodule MingaEditor.Session.ChromeState do
   defp workspace_summaries(state, %TabBar{} = tb, active_workspace_id) do
     [
       manual_workspace_summary(state, tb)
-      | agent_workspace_summaries(tb, live_agent_ui(state), active_workspace_id)
+      | agent_workspace_summaries(
+          tb,
+          live_agent_ui(state),
+          live_agent(state),
+          active_workspace_id
+        )
     ]
   end
 
@@ -110,6 +116,17 @@ defmodule MingaEditor.Session.ChromeState do
   @spec live_agent_ui(map()) :: UIState.t() | nil
   defp live_agent_ui(%{workspace: %{agent_ui: %UIState{} = ui}}), do: ui
   defp live_agent_ui(_state), do: nil
+
+  # The live Agent presentation cache belongs to the active workspace only.
+  # Renderer builders pass it explicitly; a full editor state carries it on
+  # the shell runtime.
+  @spec live_agent(map()) :: AgentState.t() | nil
+  defp live_agent(%{agent: %AgentState{} = agent}), do: agent
+
+  defp live_agent(%{shell_runtime: %{state: shell_state}}),
+    do: WorkspaceStatus.live_agent(shell_state)
+
+  defp live_agent(_state), do: nil
 
   @spec manual_workspace_summary(map(), TabBar.t() | nil) :: WorkspaceSummary.t()
   defp manual_workspace_summary(state, tb) do
@@ -193,22 +210,25 @@ defmodule MingaEditor.Session.ChromeState do
 
   defp project_label(_root), do: "Files"
 
-  @spec agent_workspace_summaries(TabBar.t(), UIState.t() | nil, non_neg_integer()) ::
-          [WorkspaceSummary.t()]
-  defp agent_workspace_summaries(%TabBar{} = tb, live_ui, active_workspace_id) do
+  @spec agent_workspace_summaries(
+          TabBar.t(),
+          UIState.t() | nil,
+          AgentState.t() | nil,
+          non_neg_integer()
+        ) :: [WorkspaceSummary.t()]
+  defp agent_workspace_summaries(%TabBar{} = tb, live_ui, live_agent, active_workspace_id) do
     tb.workspaces
     |> Enum.filter(&(&1.kind == :agent))
-    |> Enum.map(&agent_workspace_summary(tb, &1, workspace_ui(&1, live_ui, active_workspace_id)))
+    |> Enum.map(fn workspace ->
+      status = WorkspaceStatus.resolve_in(workspace, active_workspace_id, live_agent, live_ui)
+
+      agent_workspace_summary(tb, workspace, status)
+    end)
   end
 
-  @spec workspace_ui(Workspace.t(), UIState.t() | nil, non_neg_integer()) :: UIState.t() | nil
-  defp workspace_ui(%Workspace{id: id}, live_ui, id), do: live_ui
-  defp workspace_ui(%Workspace{payload: %WorkspaceAgent{agent_ui: ui}}, _live_ui, _active), do: ui
-  defp workspace_ui(%Workspace{}, _live_ui, _active), do: nil
-
-  @spec agent_workspace_summary(TabBar.t(), Workspace.t(), UIState.t() | nil) ::
+  @spec agent_workspace_summary(TabBar.t(), Workspace.t(), WorkspaceStatus.t()) ::
           WorkspaceSummary.t()
-  defp agent_workspace_summary(%TabBar{} = tb, %Workspace{} = group, ui) do
+  defp agent_workspace_summary(%TabBar{} = tb, %Workspace{} = group, status) do
     tabs = workspace_tabs(tb, group.id)
 
     WorkspaceSummary.new(
@@ -217,12 +237,12 @@ defmodule MingaEditor.Session.ChromeState do
       label: group.label,
       icon: group.icon || "cpu",
       color: group.color,
-      status: workspace_agent_status(group, ui),
+      status: status,
       attention?: Enum.any?(tabs, &tab_attention?/1),
       tab_count: Enum.count(tabs),
       draft_count: workspace_draft_count(group),
       conflict_count: workspace_conflict_count(group),
-      running_background_count: running_background_count(group),
+      running_background_count: running_background_count(status),
       closeable?: true
     )
   end
@@ -249,23 +269,9 @@ defmodule MingaEditor.Session.ChromeState do
 
   defp workspace_conflict_count(_workspace), do: 0
 
-  # A failed start needs the user, whatever the runtime last reported, so its
-  # workspace dot is amber, not idle or errored.
-  @spec workspace_agent_status(Workspace.t(), UIState.t() | nil) :: WorkspaceSummary.status()
-  defp workspace_agent_status(%Workspace{}, %UIState{chat_lifecycle: {:failed, _failure}}),
-    do: :needs_you
-
-  defp workspace_agent_status(%Workspace{payload: %WorkspaceAgent{agent_status: status}}, _ui),
-    do: status
-
-  defp workspace_agent_status(%Workspace{}, _ui), do: nil
-
-  @spec running_background_count(Workspace.t()) :: non_neg_integer()
-  defp running_background_count(%Workspace{payload: %WorkspaceAgent{agent_status: status}})
-       when status in [:thinking, :tool_executing],
-       do: 1
-
-  defp running_background_count(%Workspace{}), do: 0
+  @spec running_background_count(WorkspaceStatus.t()) :: non_neg_integer()
+  defp running_background_count(status) when status in [:thinking, :tool_executing], do: 1
+  defp running_background_count(_status), do: 0
 
   @spec visible_tabs(map(), TabBar.t() | nil, non_neg_integer()) :: [TabSummary.t()]
   defp visible_tabs(_state, nil, _active_workspace_id), do: []

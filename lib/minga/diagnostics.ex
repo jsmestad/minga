@@ -28,6 +28,7 @@ defmodule Minga.Diagnostics do
   The display layer queries merged diagnostics:
 
       Diagnostics.for_uri("file:///path/to/file.ex")  # sorted, all sources
+      Diagnostics.for_buffer(buffer_pid)               # same, from a buffer's file path
       Diagnostics.severity_by_line("file:///...")       # highest per line
       Diagnostics.next("file:///...", current_line)     # next diagnostic
       Diagnostics.count("file:///...")                  # {error: N, ...}
@@ -43,6 +44,7 @@ defmodule Minga.Diagnostics do
   use GenServer
 
   alias Minga.Diagnostics.Diagnostic
+  alias Minga.LSP.SyncServer
 
   @typedoc "A diagnostic source identifier (e.g., `:expert`, `:mix_compile`)."
   @type source :: atom()
@@ -123,6 +125,31 @@ defmodule Minga.Diagnostics do
     server
     |> table_name()
     |> merged_for_uri(uri)
+  end
+
+  @doc """
+  Returns all diagnostics for a buffer, merged from all sources and sorted like `for_uri/2`.
+
+  Pass the buffer pid. The helper reads the buffer's file path and converts it
+  to a `file://` URI, so callers never build URIs. A buffer without a file path
+  (a scratch buffer) has no published diagnostics and returns `[]`.
+
+  The buffer call exits when the pid is not alive.
+
+  ## Examples
+
+      errors =
+        buffer_pid
+        |> Minga.Diagnostics.for_buffer()
+        |> Enum.count(&(&1.severity == :error))
+  """
+  @spec for_buffer(pid()) :: [Diagnostic.t()]
+  @spec for_buffer(GenServer.server(), pid()) :: [Diagnostic.t()]
+  def for_buffer(server \\ __MODULE__, buffer_pid) when is_pid(buffer_pid) do
+    case Minga.Buffer.file_path(buffer_pid) do
+      nil -> []
+      path -> for_uri(server, SyncServer.path_to_uri(path))
+    end
   end
 
   @doc "Returns one committed revision and its merged URI list, read atomically from the same row."

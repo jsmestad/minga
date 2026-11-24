@@ -206,8 +206,9 @@ func (m Model) renderAgentMainColumn(chat protocol.AgentChat, width int, budget 
 
 // renderAgentLifecycleNotice draws a non-conversation chat: a glyph and
 // headline, the BEAM's sentence about the cause, the one action it offers as a
-// clickable zone with its key hint, then a muted note that the draft is kept.
-// The action label and key hint are rendered exactly as sent.
+// clickable zone with its key hint, then the muted draft note. The headline,
+// action label, key hint and note are rendered exactly as sent; an empty note
+// draws no line.
 func (m Model) renderAgentLifecycleNotice(chat protocol.AgentChat, width, budget int) []string {
 	if budget <= 0 {
 		return nil
@@ -225,7 +226,7 @@ func (m Model) renderAgentLifecycleNotice(chat protocol.AgentChat, width, budget
 	if chat.Lifecycle == protocol.AgentChatStarting {
 		glyph = lipgloss.NewStyle().Foreground(p.AgentStatusWorking()).Background(p.SurfaceAlt()).Render(m.agentSpinner())
 	}
-	lines := []string{row(glyph + surface.Render(" ") + headline.Render(agentLifecycleHeadline(chat)))}
+	lines := []string{row(glyph + surface.Render(" ") + headline.Render(chat.LifecycleNotice.Headline))}
 	indent := surface.Render("  ")
 	wrapWidth := max(width-3, 1)
 	appendWrapped := func(text string, style lipgloss.Style) bool {
@@ -253,31 +254,10 @@ func (m Model) renderAgentLifecycleNotice(chat protocol.AgentChat, width, budget
 		}
 		lines = append(lines, row(indent+action))
 	}
-	if (chat.Lifecycle == protocol.AgentChatFailed || chat.Lifecycle == protocol.AgentChatUnavailable) &&
-		chat.PromptVisibleRows > 0 {
-		appendWrapped("Your draft is saved. SPC a n starts a new session.", muted)
+	if note := chat.LifecycleNotice.Note; note != "" {
+		appendWrapped(note, muted)
 	}
 	return lines
-}
-
-func agentLifecycleHeadline(chat protocol.AgentChat) string {
-	switch chat.Lifecycle {
-	case protocol.AgentChatStarting:
-		return "Starting Agent"
-	case protocol.AgentChatUnavailable:
-		return "No active Agent session"
-	case protocol.AgentChatFailed:
-		switch chat.LifecycleRemedy.Kind {
-		case protocol.AgentStartRemedySetUpProvider:
-			return "Agent needs setup"
-		case protocol.AgentStartRemedyRetry:
-			return "Agent could not start"
-		default:
-			return "Agent unavailable"
-		}
-	default:
-		return ""
-	}
 }
 
 func agentMainColumnBudgets(chat protocol.AgentChat, composerRows int, budget int) (composerHeight int, statusHeight int, contentBudget int, messageBudget int) {

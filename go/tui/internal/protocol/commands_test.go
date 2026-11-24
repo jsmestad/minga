@@ -1588,24 +1588,26 @@ func TestDecodeAgentChatInputFocusedSectionRoundTripAndDefault(t *testing.T) {
 func TestDecodeAgentChatKeepsDraftAndExplicitAvailability(t *testing.T) {
 	retry := AgentStartRemedy{Kind: AgentStartRemedyRetry, Label: "Retry", KeyHint: "r"}
 	setUp := AgentStartRemedy{Kind: AgentStartRemedySetUpProvider, Label: "Set up provider", KeyHint: "s"}
+	saved := "Your draft is saved. SPC a n starts a new session."
 	for _, fixture := range []struct {
 		kind   AgentChatLifecycle
 		reason string
 		remedy AgentStartRemedy
+		notice AgentLifecycleNotice
 	}{
-		{AgentChatConversation, "", AgentStartRemedy{}},
-		{AgentChatStarting, "", AgentStartRemedy{}},
-		{AgentChatFailed, "Could not connect to café.", retry},
-		{AgentChatFailed, "No Agent provider is set up yet.", setUp},
-		{AgentChatFailed, "The composer is unavailable.", AgentStartRemedy{}},
-		{AgentChatUnavailable, "", AgentStartRemedy{}},
+		{AgentChatConversation, "", AgentStartRemedy{}, AgentLifecycleNotice{}},
+		{AgentChatStarting, "", AgentStartRemedy{}, AgentLifecycleNotice{Headline: "Starting Agent"}},
+		{AgentChatFailed, "Could not connect to café.", retry, AgentLifecycleNotice{Headline: "Agent session stopped", Note: saved}},
+		{AgentChatFailed, "No Agent provider is set up yet.", setUp, AgentLifecycleNotice{Headline: "Agent needs setup", Note: "Your draft is saved."}},
+		{AgentChatFailed, "The composer is unavailable.", AgentStartRemedy{}, AgentLifecycleNotice{Headline: "Agent unavailable"}},
+		{AgentChatUnavailable, "", AgentStartRemedy{}, AgentLifecycleNotice{Headline: "No active Agent session", Note: saved}},
 	} {
 		payload := []byte{generated.OPGuiAgentChat, 2}
 		payload = append(payload, section(0x01, []byte{1, 0})...)
 		payload = append(payload, section(0x03, string16("unfinished"))...)
 		if fixture.kind != AgentChatConversation {
 			payload[1]++
-			payload = append(payload, section(0x0F, lifecycleBody(fixture.kind, fixture.reason, fixture.remedy))...)
+			payload = append(payload, section(0x0F, lifecycleBody(fixture.kind, fixture.reason, fixture.remedy, fixture.notice))...)
 		}
 		cmd, err := DecodeCommand(payload)
 		if err != nil {
@@ -1614,7 +1616,7 @@ func TestDecodeAgentChatKeepsDraftAndExplicitAvailability(t *testing.T) {
 		chat := cmd.Chrome.AgentChat
 		if cmd.Size != len(payload) || !chat.Visible || chat.Prompt != "unfinished" ||
 			chat.Lifecycle != fixture.kind || chat.LifecycleReason != fixture.reason ||
-			chat.LifecycleRemedy != fixture.remedy {
+			chat.LifecycleRemedy != fixture.remedy || chat.LifecycleNotice != fixture.notice {
 			t.Fatalf("expected %v with the draft preserved, got %+v", fixture.kind, chat)
 		}
 	}
@@ -1622,13 +1624,15 @@ func TestDecodeAgentChatKeepsDraftAndExplicitAvailability(t *testing.T) {
 
 func TestDecodeAgentChatIgnoresMalformedLifecycle(t *testing.T) {
 	retry := AgentStartRemedy{Kind: AgentStartRemedyRetry, Label: "Retry", KeyHint: "r"}
-	valid := lifecycleBody(AgentChatFailed, "The Agent took too long to start.", retry)
+	notice := AgentLifecycleNotice{Headline: "Agent could not start", Note: "Your draft is saved."}
+	valid := lifecycleBody(AgentChatFailed, "The Agent took too long to start.", retry, notice)
 	for name, body := range map[string][]byte{
-		"truncated remedy":     valid[:len(valid)-1],
+		"truncated note":       valid[:len(valid)-1],
 		"trailing byte":        append(append([]byte{}, valid...), 0),
-		"unknown remedy":       lifecycleBody(AgentChatFailed, "x.", AgentStartRemedy{Kind: 3, Label: "Go"}),
-		"remedy without label": lifecycleBody(AgentChatFailed, "x.", AgentStartRemedy{Kind: AgentStartRemedyRetry}),
+		"unknown remedy":       lifecycleBody(AgentChatFailed, "x.", AgentStartRemedy{Kind: 3, Label: "Go"}, notice),
+		"remedy without label": lifecycleBody(AgentChatFailed, "x.", AgentStartRemedy{Kind: AgentStartRemedyRetry}, notice),
 		"reason only (v42)":    append([]byte{byte(AgentChatFailed)}, string16("old")...),
+		"no notice (v43)":      valid[:len(valid)-len(string16(notice.Headline))-len(string16(notice.Note))],
 	} {
 		payload := []byte{generated.OPGuiAgentChat, 1}
 		payload = append(payload, section(0x0F, body)...)
@@ -1636,7 +1640,8 @@ func TestDecodeAgentChatIgnoresMalformedLifecycle(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if chat := cmd.Chrome.AgentChat; chat.Lifecycle != AgentChatConversation || chat.LifecycleRemedy != (AgentStartRemedy{}) {
+		if chat := cmd.Chrome.AgentChat; chat.Lifecycle != AgentChatConversation || chat.LifecycleRemedy != (AgentStartRemedy{}) ||
+			chat.LifecycleNotice != (AgentLifecycleNotice{}) {
 			t.Fatalf("%s: expected the malformed lifecycle to be ignored, got %+v", name, chat)
 		}
 	}
@@ -1655,11 +1660,13 @@ func TestEncodeGUIAgentStartRemedySendsOnlyKnownRemedies(t *testing.T) {
 	}
 }
 
-func lifecycleBody(kind AgentChatLifecycle, reason string, remedy AgentStartRemedy) []byte {
+func lifecycleBody(kind AgentChatLifecycle, reason string, remedy AgentStartRemedy, notice AgentLifecycleNotice) []byte {
 	body := append([]byte{byte(kind)}, string16(reason)...)
 	body = append(body, byte(remedy.Kind))
 	body = append(body, string16(remedy.Label)...)
-	return append(body, string16(remedy.KeyHint)...)
+	body = append(body, string16(remedy.KeyHint)...)
+	body = append(body, string16(notice.Headline)...)
+	return append(body, string16(notice.Note)...)
 }
 
 func TestDecodeAgentTimelineChrome(t *testing.T) {

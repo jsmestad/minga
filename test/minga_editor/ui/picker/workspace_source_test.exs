@@ -3,7 +3,13 @@ defmodule MingaEditor.UI.Picker.WorkspaceSourceTest do
 
   alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Mode
+  alias MingaAgent.Question
+  alias MingaAgent.Question.Target, as: QuestionTarget
+  alias MingaEditor.Agent.StartFailure
+  alias MingaEditor.Agent.StartRequest
+  alias MingaEditor.Agent.UIState
   alias MingaEditor.Shell.Runtime
+  alias MingaEditor.State.Agent, as: AgentState
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.State.Buffers
   alias MingaEditor.State.Search
@@ -90,6 +96,97 @@ defmodule MingaEditor.UI.Picker.WorkspaceSourceTest do
       }
 
       assert WorkspaceSource.candidates(ctx) == []
+    end
+  end
+
+  describe "Agent status rows" do
+    # The active Agent workspace takes its status from the live Agent state
+    # (WorkspaceStatus); a background workspace keeps its stored status.
+    setup do
+      tb = TabBar.new(Tab.new_file(1, "a.ex"))
+      {tb, active_tab} = TabBar.add(tb, :agent, "Agent")
+      {tb, group} = TabBar.add_workspace(tb, "Agent", self())
+      tb = TabBar.move_tab_to_workspace(tb, active_tab.id, group.id)
+      tb = TabBar.set_workspace_agent_status(tb, group.id, :idle)
+      tb = TabBar.switch_to_workspace(tb, group.id)
+
+      {:ok, tb: tb, group: group}
+    end
+
+    defp status_row(ctx, group_id) do
+      Enum.find(WorkspaceSource.candidates(ctx), &(&1.id == group_id))
+    end
+
+    test "active workspace shows a pending question from the live Agent state", %{
+      tb: tb,
+      group: group
+    } do
+      {:ok, question} = Question.new("Which file?", ["a.ex", "b.ex"])
+
+      target = %QuestionTarget{
+        session_id: "picker-fixture",
+        request_id: "request",
+        checkpoint_id: "checkpoint",
+        tool_call_id: "tool-call"
+      }
+
+      live = AgentState.project_question(%AgentState{}, self(), {target, question})
+      ctx = %{fake_context(tb) | live_agent: live, live_agent_ui: UIState.new()}
+
+      row = status_row(ctx, group.id)
+      assert row.annotation == "! needs you"
+      assert row.description =~ "! needs you"
+    end
+
+    test "active workspace shows a live error over its stale stored status", %{
+      tb: tb,
+      group: group
+    } do
+      live = AgentState.set_status(%AgentState{}, :error)
+      ctx = %{fake_context(tb) | live_agent: live, live_agent_ui: UIState.new()}
+
+      row = status_row(ctx, group.id)
+      assert row.annotation == "⚠ error"
+      assert row.description =~ "⚠ error"
+    end
+
+    test "active workspace with a failed start needs you", %{tb: tb, group: group} do
+      failed_ui =
+        UIState.fail_start(UIState.new(), StartFailure.timed_out(StartRequest.default()))
+
+      ctx = %{fake_context(tb) | live_agent: nil, live_agent_ui: failed_ui}
+
+      row = status_row(ctx, group.id)
+      assert row.annotation == "! needs you"
+    end
+
+    test "background workspace keeps its stored status even when a live cache is set", %{
+      tb: tb,
+      group: group
+    } do
+      tb = TabBar.set_workspace_agent_status(tb, group.id, :thinking)
+      tb = TabBar.switch_to_workspace(tb, 0)
+      live = AgentState.set_status(%AgentState{}, :error)
+      ctx = %{fake_context(tb) | live_agent: live, live_agent_ui: UIState.new()}
+
+      row = status_row(ctx, group.id)
+      assert row.annotation == "↻ thinking"
+      assert row.description =~ "↻ thinking"
+    end
+
+    test "background workspace with a failed start needs you from its stored UI", %{
+      tb: tb,
+      group: group
+    } do
+      failed_ui =
+        UIState.fail_start(UIState.new(), StartFailure.timed_out(StartRequest.default()))
+
+      tb = TabBar.set_workspace_agent_ui(tb, group.id, failed_ui)
+      tb = TabBar.switch_to_workspace(tb, 0)
+      ctx = %{fake_context(tb) | live_agent: nil, live_agent_ui: UIState.new()}
+
+      row = status_row(ctx, group.id)
+      assert row.annotation == "! needs you"
     end
   end
 

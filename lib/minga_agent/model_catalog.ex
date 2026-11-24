@@ -17,10 +17,15 @@ defmodule MingaAgent.ModelCatalog do
   @typep state :: %{
            task_supervisor: GenServer.server(),
            load: {reference(), [GenServer.from()]} | nil,
-           loader: (-> result())
+           loader: (-> result()),
+           loaded?: (-> boolean())
          }
 
-  @doc "Starts the catalog load owner."
+  @doc """
+  Starts the catalog load owner.
+
+  Options: `:name`, `:task_supervisor`, `:loader` (the load function) and `:loaded?` (the readiness probe the owner checks before starting a load).
+  """
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts \\ []) do
     GenServer.start_link(__MODULE__, opts, name: Keyword.get(opts, :name, __MODULE__))
@@ -41,7 +46,12 @@ defmodule MingaAgent.ModelCatalog do
   def load(server \\ __MODULE__, timeout \\ :infinity) do
     if loaded?(), do: {:ok, :ready}, else: GenServer.call(server, :load, timeout)
   catch
-    :exit, _reason -> {:error, :model_catalog_unavailable}
+    :exit, reason ->
+      Minga.Log.warning(:agent, fn ->
+        "[Agent] Model catalog owner unavailable: #{inspect(reason)}"
+      end)
+
+      {:error, :model_catalog_unavailable}
   end
 
   @impl GenServer
@@ -51,7 +61,8 @@ defmodule MingaAgent.ModelCatalog do
      %{
        task_supervisor: Keyword.get(opts, :task_supervisor, Minga.Eval.TaskSupervisor),
        load: nil,
-       loader: Keyword.get(opts, :loader, &load_packaged_catalog/0)
+       loader: Keyword.get(opts, :loader, &load_packaged_catalog/0),
+       loaded?: Keyword.get(opts, :loaded?, &loaded?/0)
      }}
   end
 
@@ -60,7 +71,7 @@ defmodule MingaAgent.ModelCatalog do
 
   @impl GenServer
   def handle_call(:load, from, state) do
-    if loaded?(),
+    if state.loaded?.(),
       do: {:reply, {:ok, :ready}, state},
       else: {:noreply, begin_load(state, :start, from)}
   end
@@ -71,8 +82,10 @@ defmodule MingaAgent.ModelCatalog do
     {:noreply, finish(state, waiters, result)}
   end
 
-  def handle_info({:DOWN, ref, :process, _pid, _reason}, %{load: {ref, waiters}} = state),
-    do: {:noreply, finish(state, waiters, {:error, :model_catalog_unavailable})}
+  def handle_info({:DOWN, ref, :process, _pid, reason}, %{load: {ref, waiters}} = state) do
+    Minga.Log.error(:agent, fn -> "[Agent] Model catalog load crashed: #{inspect(reason)}" end)
+    {:noreply, finish(state, waiters, {:error, :model_catalog_unavailable})}
+  end
 
   def handle_info(_message, state), do: {:noreply, state}
 
@@ -87,7 +100,10 @@ defmodule MingaAgent.ModelCatalog do
       Task.Supervisor.async_nolink(state.task_supervisor, fn ->
         # Background work: the Editor, renderer and input keep their priority.
         Process.flag(:priority, :low)
-        Minga.Telemetry.span([:minga, :agent, :catalog_load], %{trigger: trigger}, loader)
+
+        Minga.Telemetry.span([:minga, :agent, :catalog_load], %{trigger: trigger}, fn ->
+          run_loader(loader)
+        end)
       end)
 
     %{state | load: {task.ref, add_waiter([], from)}}
@@ -103,11 +119,23 @@ defmodule MingaAgent.ModelCatalog do
     %{state | load: nil}
   end
 
+  # llm_db raises its load failure on the first query. Callers see only the
+  # public error; the cause goes to the log.
+  @spec run_loader((-> result())) :: result()
+  defp run_loader(loader) do
+    loader.()
+  rescue
+    error in LLMDB.LoadError ->
+      Minga.Log.error(:agent, fn ->
+        "[Agent] Model catalog load failed: #{Exception.message(error)}"
+      end)
+
+      {:error, :model_catalog_unavailable}
+  end
+
   @spec load_packaged_catalog() :: result()
   defp load_packaged_catalog do
     _providers = LLMDB.providers()
     {:ok, :ready}
-  rescue
-    LLMDB.LoadError -> {:error, :model_catalog_unavailable}
   end
 end
