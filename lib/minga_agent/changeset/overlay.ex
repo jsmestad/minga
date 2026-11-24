@@ -4,7 +4,9 @@ defmodule MingaAgent.Changeset.Overlay do
 
   The overlay starts as an empty writable directory. Reads can resolve from the project root through higher-level callers, while writes, deletes, and command preparation materialize only the affected paths into the overlay. Shell commands can request a writable materialized view without making session startup copy the whole project.
 
-  Build artifact and cache directories are skipped. `MIX_BUILD_PATH` points inside the overlay, while `MIX_DEPS_PATH` reuses the project deps path.
+  Build artifact and cache directories are skipped. `MIX_BUILD_PATH` and `CARGO_TARGET_DIR` point inside the overlay, while `MIX_DEPS_PATH` reuses the project deps path. A Rust `target` directory is skipped only when it sits next to a `Cargo.toml`, because `target` is an ordinary source directory name in other ecosystems.
+
+  Installed JavaScript dependencies are linked, not copied. Materialization creates a real `node_modules` directory owned by the overlay and symlinks each installed package (and `.bin` and `.pnpm`) to the project's copy. Node's upward `node_modules` lookup then resolves packages from the overlay, while tool caches (`node_modules/.vite`, `node_modules/.cache`), package-manager metadata, and newly installed packages land in the overlay instead of the project. Writes inside an already-installed package directory still follow its link into the project.
   """
 
   import Bitwise, only: [band: 2]
@@ -28,7 +30,8 @@ defmodule MingaAgent.Changeset.Overlay do
   @type materialization_stats :: %{
           copied_files: non_neg_integer(),
           copied_bytes: non_neg_integer(),
-          skipped_dirs: non_neg_integer()
+          skipped_dirs: non_neg_integer(),
+          linked_entries: non_neg_integer()
         }
 
   @enforce_keys [:overlay_dir, :project_root, :build_dir, :link_mode]
@@ -40,7 +43,12 @@ defmodule MingaAgent.Changeset.Overlay do
                ~w(_build .git .elixir_ls .expert .zig-cache zig-cache node_modules .hex .cache .gradle .swiftpm DerivedData deps)
              )
 
-  @empty_stats %{copied_files: 0, copied_bytes: 0, skipped_dirs: 0}
+  # Dot entries in node_modules are tool caches and package-manager metadata, so
+  # they stay out of the link set and their writes land in the overlay. `.bin`
+  # holds package executables and `.pnpm` holds pnpm's package tree.
+  @linked_dependency_dot_entries ~w(.bin .pnpm)
+
+  @empty_stats %{copied_files: 0, copied_bytes: 0, skipped_dirs: 0, linked_entries: 0}
 
   @doc """
   Creates a private lazy overlay directory for the project.
@@ -317,6 +325,7 @@ defmodule MingaAgent.Changeset.Overlay do
     [
       {"MIX_BUILD_PATH", overlay.build_dir},
       {"MIX_DEPS_PATH", Path.join(overlay.project_root, "deps")},
+      {"CARGO_TARGET_DIR", Path.join(overlay.build_dir, "cargo")},
       {"PAGER", "cat"},
       {"GIT_PAGER", "cat"},
       {"TERM", "dumb"}
@@ -520,24 +529,139 @@ defmodule MingaAgent.Changeset.Overlay do
   @spec materialize_entries([String.t()], t(), String.t(), String.t(), materialization_stats()) ::
           {:ok, materialization_stats()} | {:error, term()}
   defp materialize_entries(entries, overlay, source_dir, target_dir, stats) do
-    Enum.reduce_while(entries, {:ok, stats}, fn entry, {:ok, acc} ->
-      case materialize_entry(overlay, source_dir, target_dir, entry, acc) do
-        {:ok, next} -> {:cont, {:ok, next}}
-        {:error, reason} -> {:halt, {:error, reason}}
-      end
-    end)
+    reduce_stats(entries, stats, &materialize_entry(overlay, source_dir, target_dir, &1, &2))
   end
 
   @spec materialize_entry(t(), String.t(), String.t(), String.t(), materialization_stats()) ::
           {:ok, materialization_stats()} | {:error, term()}
   defp materialize_entry(overlay, source_dir, target_dir, entry, stats) do
-    if MapSet.member?(@skip_dirs, entry) do
-      {:ok, increment_skipped(stats)}
-    else
-      source_path = Path.join(source_dir, entry)
-      target_path = Path.join(target_dir, entry)
-      materialize_path(overlay, source_path, target_path, stats)
+    source_path = Path.join(source_dir, entry)
+    target_path = Path.join(target_dir, entry)
+
+    case entry_disposition(entry, source_dir) do
+      :link_dependencies -> link_dependencies(overlay, source_path, target_path, stats)
+      :skip -> {:ok, increment_skipped(stats)}
+      :copy -> materialize_path(overlay, source_path, target_path, stats)
     end
+  end
+
+  @spec entry_disposition(String.t(), String.t()) :: :link_dependencies | :skip | :copy
+  defp entry_disposition("node_modules", _source_dir), do: :link_dependencies
+
+  defp entry_disposition("target", source_dir) do
+    if File.regular?(Path.join(source_dir, "Cargo.toml")), do: :skip, else: :copy
+  end
+
+  defp entry_disposition(entry, _source_dir) do
+    if MapSet.member?(@skip_dirs, entry), do: :skip, else: :copy
+  end
+
+  # Builds an overlay-owned node_modules whose package entries link to the
+  # project's installed packages. A node_modules that is not a real directory
+  # in the project is skipped.
+  @spec link_dependencies(t(), String.t(), String.t(), materialization_stats()) ::
+          {:ok, materialization_stats()} | {:error, term()}
+  defp link_dependencies(overlay, source_path, target_path, stats) do
+    case File.lstat(source_path) do
+      {:ok, %{type: :directory}} ->
+        stats = increment_skipped(stats)
+
+        with {:ok, entries} <- prepare_link_directory(overlay, source_path, target_path) do
+          entries
+          |> Enum.filter(&linked_dependency_entry?/1)
+          |> reduce_stats(
+            stats,
+            &link_dependency_entry(overlay, source_path, target_path, &1, &2)
+          )
+        end
+
+      {:ok, _other} ->
+        {:ok, increment_skipped(stats)}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  @spec link_dependency_entry(t(), String.t(), String.t(), String.t(), materialization_stats()) ::
+          {:ok, materialization_stats()} | {:error, term()}
+  defp link_dependency_entry(overlay, source_dir, target_dir, "@" <> _ = scope, stats) do
+    source_path = Path.join(source_dir, scope)
+    target_path = Path.join(target_dir, scope)
+
+    case File.lstat(source_path) do
+      {:ok, %{type: :directory}} ->
+        link_scope_packages(overlay, source_path, target_path, stats)
+
+      {:ok, _other} ->
+        link_entry(source_path, target_path, stats)
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp link_dependency_entry(_overlay, source_dir, target_dir, entry, stats) do
+    link_entry(Path.join(source_dir, entry), Path.join(target_dir, entry), stats)
+  end
+
+  # A scope directory is overlay-owned so a newly installed scoped package
+  # lands in the overlay; each existing scoped package is linked.
+  @spec link_scope_packages(t(), String.t(), String.t(), materialization_stats()) ::
+          {:ok, materialization_stats()} | {:error, term()}
+  defp link_scope_packages(overlay, source_path, target_path, stats) do
+    with {:ok, entries} <- prepare_link_directory(overlay, source_path, target_path) do
+      reduce_stats(entries, stats, fn entry, acc ->
+        link_entry(Path.join(source_path, entry), Path.join(target_path, entry), acc)
+      end)
+    end
+  end
+
+  @spec prepare_link_directory(t(), String.t(), String.t()) ::
+          {:ok, [String.t()]} | {:error, term()}
+  defp prepare_link_directory(overlay, source_path, target_path) do
+    with :ok <- reject_materialization_symlink(overlay, target_path),
+         :ok <- File.mkdir_p(target_path) do
+      File.ls(source_path)
+    end
+  end
+
+  @spec linked_dependency_entry?(String.t()) :: boolean()
+  defp linked_dependency_entry?("." <> _ = entry), do: entry in @linked_dependency_dot_entries
+  defp linked_dependency_entry?(_entry), do: true
+
+  # An existing overlay entry wins, so repeated materialization keeps links,
+  # replacements made by earlier commands, and overlay-installed packages.
+  @spec link_entry(String.t(), String.t(), materialization_stats()) ::
+          {:ok, materialization_stats()} | {:error, term()}
+  defp link_entry(source_path, target_path, stats) do
+    case File.lstat(target_path) do
+      {:ok, _existing} ->
+        {:ok, stats}
+
+      {:error, :enoent} ->
+        with :ok <- File.ln_s(Path.expand(source_path), target_path) do
+          {:ok, %{stats | linked_entries: stats.linked_entries + 1}}
+        end
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  @spec reduce_stats(
+          [String.t()],
+          materialization_stats(),
+          (String.t(), materialization_stats() ->
+             {:ok, materialization_stats()} | {:error, term()})
+        ) :: {:ok, materialization_stats()} | {:error, term()}
+  defp reduce_stats(entries, stats, fun) do
+    Enum.reduce_while(entries, {:ok, stats}, fn entry, {:ok, acc} ->
+      case fun.(entry, acc) do
+        {:ok, next} -> {:cont, {:ok, next}}
+        {:error, reason} -> {:halt, {:error, reason}}
+      end
+    end)
   end
 
   @spec materialize_path(t(), String.t(), String.t(), materialization_stats()) ::
