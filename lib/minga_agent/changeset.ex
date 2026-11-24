@@ -4,7 +4,7 @@ defmodule MingaAgent.Changeset do
 
   A changeset tracks file edits without modifying the original project. Edits are held in memory and materialized into a temporary overlay directory (`MingaAgent.Changeset.Overlay`), where external tools (compilers, test runners, linters) see a coherent view of the project with changes applied.
 
-  The overlay copies the project files it needs and never hardlinks them, so a tool that rewrites a copied file changes only the overlay. Build and cache directories such as `_build`, `deps`, `.git` and `node_modules` are not copied, and two of them stay shared with the project. Commands use the project's `deps` directory through `MIX_DEPS_PATH`, so a command that fetches or changes dependencies changes the project's `deps`. Each installed `node_modules` package is a link to the project's copy, so a command that writes inside an installed package, such as a postinstall script or `patch-package`, changes the project's package. Agent file tools never write through such a link.
+  The overlay copies the project files it needs and never hardlinks them, so a tool that rewrites a copied file changes only the overlay. Build and cache directories such as `_build`, `deps`, `.git` and `node_modules` are not copied, and `deps` stays shared with the project. Commands use the project's `deps` directory through `MIX_DEPS_PATH`, so a command that fetches or changes dependencies changes the project's `deps`. Installed `node_modules` trees are copy-on-write clones of the project's, so a command that writes inside an installed package, such as a postinstall script or `patch-package`, changes only the overlay. When the filesystem cannot clone them, the packages are links to the project's copies instead, and a command that writes inside one changes the project's package; the overlay notes that fallback in `*Messages*`. Agent file tools never write through such a link.
 
   ## Lifecycle
 
@@ -58,20 +58,20 @@ defmodule MingaAgent.Changeset do
   @spec write_file(changeset(), String.t(), binary()) :: :ok | {:error, term()}
   def write_file(cs, relative_path, content)
       when is_binary(relative_path) and is_binary(content) do
-    GenServer.call(cs, {:write_file, relative_path, content})
+    GenServer.call(cs, {:write_file, relative_path, content}, :infinity)
   end
 
   @doc "Edits a file by replacing `old_text` with `new_text`."
   @spec edit_file(changeset(), String.t(), String.t(), String.t()) :: :ok | {:error, term()}
   def edit_file(cs, relative_path, old_text, new_text)
       when is_binary(relative_path) and is_binary(old_text) and is_binary(new_text) do
-    GenServer.call(cs, {:edit_file, relative_path, old_text, new_text})
+    GenServer.call(cs, {:edit_file, relative_path, old_text, new_text}, :infinity)
   end
 
   @doc "Deletes a file from the changeset's view."
   @spec delete_file(changeset(), String.t()) :: :ok | {:error, term()}
   def delete_file(cs, relative_path) when is_binary(relative_path) do
-    GenServer.call(cs, {:delete_file, relative_path})
+    GenServer.call(cs, {:delete_file, relative_path}, :infinity)
   end
 
   @doc "Validates a full-source revision and commits one complete file mutation atomically."
@@ -120,7 +120,7 @@ defmodule MingaAgent.Changeset do
   @doc "Makes a fork tombstone visible to commands without publishing it to the project."
   @spec materialize_command_deletion(changeset(), String.t()) :: :ok | {:error, term()}
   def materialize_command_deletion(cs, relative_path) when is_binary(relative_path) do
-    GenServer.call(cs, {:materialize_command_deletion, relative_path})
+    GenServer.call(cs, {:materialize_command_deletion, relative_path}, :infinity)
   end
 
   @doc "Reads a file (changeset version if modified, otherwise from project)."
@@ -162,13 +162,13 @@ defmodule MingaAgent.Changeset do
   @doc "Undoes the last edit to a specific file."
   @spec undo(changeset(), String.t()) :: :ok | {:error, :nothing_to_undo | term()}
   def undo(cs, relative_path) when is_binary(relative_path) do
-    GenServer.call(cs, {:undo, relative_path})
+    GenServer.call(cs, {:undo, relative_path}, :infinity)
   end
 
   @doc "Resets the entire changeset, restoring all files to their original state."
   @spec reset(changeset()) :: :ok | {:error, term()}
   def reset(cs) do
-    GenServer.call(cs, :reset)
+    GenServer.call(cs, :reset, :infinity)
   end
 
   @doc """
@@ -273,7 +273,7 @@ defmodule MingaAgent.Changeset do
   @spec materialize_command_file(changeset(), String.t(), binary()) :: :ok | {:error, term()}
   def materialize_command_file(cs, relative_path, content)
       when is_binary(relative_path) and is_binary(content) do
-    GenServer.call(cs, {:materialize_command_file, relative_path, content})
+    GenServer.call(cs, {:materialize_command_file, relative_path, content}, :infinity)
   end
 
   @doc "Returns the project root this changeset was created against."
@@ -350,7 +350,7 @@ defmodule MingaAgent.Changeset do
   """
   @spec restore_draft(changeset(), Minga.Session.StagedDraft.t()) :: :ok | {:error, term()}
   def restore_draft(cs, %Minga.Session.StagedDraft{} = draft) do
-    GenServer.call(cs, {:restore_draft, draft})
+    GenServer.call(cs, {:restore_draft, draft}, :infinity)
   end
 
   @doc "Returns the current attempt count and budget."

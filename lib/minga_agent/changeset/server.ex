@@ -55,7 +55,10 @@ defmodule MingaAgent.Changeset.Server do
     project_root = Keyword.fetch!(opts, :project_root)
     budget = Keyword.get(opts, :budget, :unlimited)
 
-    case Overlay.create(project_root) do
+    # `:overlay_cloner` replaces the overlay's package cloner, for tests.
+    overlay_opts = for {:overlay_cloner, cloner} <- opts, do: {:cloner, cloner}
+
+    case Overlay.create(project_root, overlay_opts) do
       {:ok, overlay} ->
         state = %{
           project_root: project_root,
