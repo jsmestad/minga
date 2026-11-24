@@ -110,9 +110,10 @@ defmodule MingaEditor.Session.ChromeStateTest do
   end
 
   describe "needs_you_count/2" do
-    test "counts background Agent workspaces that need you, then the active status", %{
-      tmp_dir: tmp_dir
-    } do
+    test "counts each Agent workspace that needs you once, whatever the manual workspace shows",
+         %{
+           tmp_dir: tmp_dir
+         } do
       {tb, group} = tab_bar_with_agent_workspace(tmp_dir)
 
       for {status, background} <- [
@@ -126,9 +127,9 @@ defmodule MingaEditor.Session.ChromeStateTest do
         tb = tb |> TabBar.set_workspace_agent_status(group.id, status) |> TabBar.switch_to(1)
         chrome = ChromeState.from_editor_state(state(tab_bar: tb, project_root: tmp_dir))
 
-        # The manual workspace is active: its status comes from the live Agent, passed in.
+        # The manual workspace is active. The live status it shows is an Agent workspace's, so it never counts twice.
         assert ChromeState.needs_you_count(chrome, :idle) == background
-        assert ChromeState.needs_you_count(chrome, :approval_waiting) == background + 1
+        assert ChromeState.needs_you_count(chrome, :approval_waiting) == max(background, 1)
         assert ChromeState.needs_you_count(chrome, nil) == background
       end
     end

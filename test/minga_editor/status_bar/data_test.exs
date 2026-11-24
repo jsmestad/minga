@@ -561,9 +561,12 @@ defmodule MingaEditor.StatusBar.DataTest do
   end
 
   describe "modeline facts" do
-    test "needs-you counts the active status, and the Minga state follows the same value" do
+    test "needs-you counts the active Agent workspace's status, and the Minga state follows the same value" do
+      session = spawn(fn -> Process.sleep(:infinity) end)
+      on_exit(fn -> Process.exit(session, :kill) end)
+
       state =
-        state_with_tab_bar(TabBar.new(Tab.new_file(1, "main.ex")))
+        state_with_tab_bar(agent_tab_bar(session))
         |> MingaEditor.Shell.Traditional.Workflow.install_agent_status(:needs_you)
 
       %Data{common: %Common{} = common} = data = Data.from_state(state)
