@@ -212,7 +212,7 @@ defmodule MingaEditor.StatusBar.DataTest do
 
     text = modeline_text(segments)
 
-    assert String.contains?(text, "sonnet | thinking")
+    assert String.contains?(text, "Minga working sonnet | thinking")
     refute String.contains?(text, "Thinking")
   end
 
@@ -247,7 +247,7 @@ defmodule MingaEditor.StatusBar.DataTest do
     assert same_content == data.content
 
     assert Enum.find_value(left ++ right, fn
-             {:status_bar_data_modeline_test, text, _fg, _bg, _opts, _target} -> text
+             %{id: :status_bar_data_modeline_test, text: text} -> text
              _segment -> nil
            end) == " NIL_DIAGS "
   end
@@ -287,7 +287,8 @@ defmodule MingaEditor.StatusBar.DataTest do
              content: %StatusBuffer{}
            } = segmented
 
-    assert String.contains?(modeline_text(segments), "[2/2]")
+    # The file segment names the file only; the buffer count lives in the switcher.
+    refute String.contains?(modeline_text(segments), "[2/2]")
   end
 
   test "projects running background subagent count and active label" do
@@ -557,6 +558,43 @@ defmodule MingaEditor.StatusBar.DataTest do
     assert Data.to_modeline_data(data).selection_info == {:lines, 3}
   end
 
+  describe "modeline facts" do
+    test "needs-you counts the active status, and the Minga state follows the same value" do
+      state =
+        state_with_tab_bar(TabBar.new(Tab.new_file(1, "main.ex")))
+        |> MingaEditor.Shell.Traditional.Workflow.install_agent_status(:needs_you)
+
+      %Data{common: %Common{} = common} = data = Data.from_state(state)
+      assert common.needs_you_count == 1
+      assert common.status.agent.agent_status == :needs_you
+
+      %Data{common: %Common{status: %SemanticStatusData{modeline_segments: segments}}} =
+        Data.with_modeline_segments(data, state.appearance.theme)
+
+      ids = Enum.map(segments.left, & &1.id)
+      assert :needs_you in ids
+      assert Enum.find(segments.left, &(&1.id == :minga)).state == :needs_you
+
+      idle =
+        state
+        |> MingaEditor.Shell.Traditional.Workflow.install_agent_status(:idle)
+        |> Data.from_state()
+
+      assert idle.common.needs_you_count == 0
+    end
+
+    test "a crashed language server is named for the problem segment" do
+      state = state_with_tab_bar(TabBar.new(Tab.new_file(1, "main.ex")))
+
+      state = %{
+        state
+        | lsp: MingaEditor.State.LSP.update_server_status(state.lsp, :elixir_ls, :crashed)
+      }
+
+      assert Data.from_state(state).common.failed_language_servers == ["elixir_ls"]
+    end
+  end
+
   defp state_with_tab_bar(tab_bar) do
     %EditorState{
       frontend: %MingaEditor.State.Frontend{port_manager: self()},
@@ -659,7 +697,7 @@ defmodule MingaEditor.StatusBar.DataTest do
   end
 
   defp modeline_text(%{left: left, right: right}) do
-    Enum.map_join(left ++ right, fn {_name, text, _fg, _bg, _opts, _target} -> text end)
+    Enum.map_join(left ++ right, " ", & &1.text)
   end
 
   defp handle(session_id, task) do

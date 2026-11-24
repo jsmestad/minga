@@ -1,6 +1,7 @@
 defmodule Minga.Frontend.Adapter.GUI.StatusBarEncoderTest do
   use ExUnit.Case, async: true
 
+  alias Minga.Design.Tokens
   alias Minga.Frontend.Adapter.GUI.Caches
   alias Minga.Frontend.Adapter.GUI.EncodingError
   alias Minga.Frontend.Adapter.GUI.StatusBarEncoder
@@ -16,6 +17,7 @@ defmodule Minga.Frontend.Adapter.GUI.StatusBarEncoderTest do
   alias Minga.RenderModel.UI.StatusBar.Operation
   alias Minga.RenderModel.UI.StatusBar.Selection
   alias Minga.RenderModel.UI.StatusBar.Review
+  alias Minga.RenderModel.UI.StatusBar.Segment
   alias Minga.RenderModel.UI.StatusBar.Workspace
 
   @op_gui_status_bar Minga.Protocol.Opcodes.gui_status_bar()
@@ -53,12 +55,31 @@ defmodule Minga.Frontend.Adapter.GUI.StatusBarEncoderTest do
       assert Bitwise.band(flags, 0x01) == 0x01
     end
 
-    test "encodes configured v2 modeline segments exactly" do
+    test "encodes format 3 modeline segments exactly, with drop rank, state, compact form, key and label" do
+      minga = %Segment{
+        id: :minga,
+        text: "Minga working 2/3",
+        fg: 0xC678DD,
+        bg: 0x282C34,
+        style: [bold: true],
+        target: :toggle_agent_split,
+        drop: 5,
+        compact: "2/3",
+        state: :working,
+        key: "SPC a v",
+        label: "Minga is working, step 2 of 3"
+      }
+
       data = %{
         status_data()
         | modeline_segments: %{
-            left: [{:mode, " NORMAL ", 0xBBC2CF, 0x51AFEF, [bold: true], nil}],
-            right: [{:filetype, " Elixir ", 0xC678DD, 0x282C34, [], :set_language}]
+            left: [
+              %Segment{id: :mode, text: "NORMAL", fg: 0xBBC2CF, bg: 0x51AFEF, style: [bold: true]}
+            ],
+            right: [
+              minga,
+              %Segment{id: :filetype, text: "Elixir", fg: 1, bg: 2, drop: 2, compact: ""}
+            ]
           }
       }
 
@@ -68,22 +89,43 @@ defmodule Minga.Frontend.Adapter.GUI.StatusBarEncoderTest do
       entries = decode_section_entries(cmd)
       assert Enum.map(entries, &elem(&1, 0)) == [1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 9]
 
-      <<2::8, 1::16, 1::16, segments::binary>> = entries |> Map.new() |> Map.fetch!(0x0B)
-      {left, rest} = take_modeline_segment(segments)
-      {right, ""} = take_modeline_segment(rest)
+      <<3::8, 1::16, 2::16, segments::binary>> = entries |> Map.new() |> Map.fetch!(0x0B)
+      {mode, rest} = take_modeline_segment(segments)
+      {minga, rest} = take_modeline_segment(rest)
+      {filetype, ""} = take_modeline_segment(rest)
 
-      assert left.name == "mode"
-      assert left.text == " NORMAL "
-      assert left.fg == 0xBBC2CF
-      assert left.bg == 0x51AFEF
-      assert left.attrs == 0x01
-      assert left.target == ""
-      assert right.name == "filetype"
-      assert right.text == " Elixir "
-      assert right.fg == 0xC678DD
-      assert right.bg == 0x282C34
-      assert right.attrs == 0x00
-      assert right.target == "set_language"
+      assert mode == %{
+               name: "mode",
+               fg: 0xBBC2CF,
+               bg: 0x51AFEF,
+               attrs: 0x01,
+               text: "NORMAL",
+               target: "",
+               drop: 0,
+               flags: 0,
+               state: 0,
+               compact: "",
+               key: "",
+               label: ""
+             }
+
+      assert minga == %{
+               name: "minga",
+               fg: 0xC678DD,
+               bg: 0x282C34,
+               attrs: 0x01,
+               text: "Minga working 2/3",
+               target: "toggle_agent_split",
+               drop: 5,
+               flags: 0x01,
+               state: Tokens.state_wire(:working),
+               compact: "2/3",
+               key: "SPC a v",
+               label: "Minga is working, step 2 of 3"
+             }
+
+      # An empty compact form still collapses (to the mark alone); nil means the segment drops.
+      assert {filetype.flags, filetype.compact} == {0x01, ""}
     end
 
     test "omits pending_keys section (0x0E) when empty" do
@@ -251,7 +293,7 @@ defmodule Minga.Frontend.Adapter.GUI.StatusBarEncoderTest do
       assert Bitwise.band(flags, 0x08) == 0x08
     end
 
-    test "nil modeline data is omitted and explicit empty data emits an empty v2 section" do
+    test "nil modeline data is omitted and explicit empty data emits an empty format 3 section" do
       nil_model = %StatusBar{content_kind: :buffer, data: status_data()}
       empty_data = %{status_data() | modeline_segments: %{left: [], right: []}}
       empty_model = %StatusBar{content_kind: :buffer, data: empty_data}
@@ -260,11 +302,11 @@ defmodule Minga.Frontend.Adapter.GUI.StatusBarEncoderTest do
       {empty_cmd, _caches} = StatusBarEncoder.encode(empty_model, Caches.new())
 
       refute nil_cmd |> decode_sections() |> Map.has_key?(0x0B)
-      assert <<2, 0::16, 0::16>> = empty_cmd |> decode_sections() |> Map.fetch!(0x0B)
+      assert <<3, 0::16, 0::16>> = empty_cmd |> decode_sections() |> Map.fetch!(0x0B)
     end
 
     test "encodes every wire-valid modeline segment instead of taking only 128" do
-      segment = {:mode, "N", 0xFFFFFF, 0x000000, [], nil}
+      segment = %Segment{id: :mode, text: "N", fg: 0xFFFFFF, bg: 0x000000}
 
       data = %{
         status_data()
@@ -276,7 +318,7 @@ defmodule Minga.Frontend.Adapter.GUI.StatusBarEncoderTest do
       {cmd, _caches} = StatusBarEncoder.encode(model, Caches.new())
       sections = decode_sections(cmd)
 
-      assert <<2::8, 129::16, 0::16, _segments::binary>> = sections[0x0B]
+      assert <<3::8, 129::16, 0::16, _segments::binary>> = sections[0x0B]
     end
 
     test "rejects oversized modeline strings and sections instead of truncating or dropping entries" do
@@ -284,7 +326,14 @@ defmodule Minga.Frontend.Adapter.GUI.StatusBarEncoderTest do
         %{
           status_data()
           | modeline_segments: %{
-              left: [{:custom, String.duplicate("x", 65_536), 0xBBC2CF, 0x51AFEF, [], nil}],
+              left: [
+                %Segment{
+                  id: :custom,
+                  text: String.duplicate("x", 65_536),
+                  fg: 0xBBC2CF,
+                  bg: 0x51AFEF
+                }
+              ],
               right: []
             }
         }
@@ -303,7 +352,7 @@ defmodule Minga.Frontend.Adapter.GUI.StatusBarEncoderTest do
                  )
                end)
 
-      segment = {:custom, "x", 0xBBC2CF, 0x51AFEF, [], nil}
+      segment = %Segment{id: :custom, text: "x", fg: 0xBBC2CF, bg: 0x51AFEF}
 
       oversized_section = %{
         status_data()
@@ -313,7 +362,7 @@ defmodule Minga.Frontend.Adapter.GUI.StatusBarEncoderTest do
       assert %{
                command: :gui_status_bar,
                field: :section_payload,
-               actual: 76_005,
+               actual: 108_005,
                min: 0,
                max: 65_535
              } =
@@ -326,8 +375,14 @@ defmodule Minga.Frontend.Adapter.GUI.StatusBarEncoderTest do
     end
 
     test "validates segment fields before checking the combined modeline section length" do
-      segment = {:custom, String.duplicate("x", 65_535), 0xBBC2CF, 0x51AFEF, [], nil}
-      invalid = {:custom, "x", 0x1000000, 0x51AFEF, [], nil}
+      segment = %Segment{
+        id: :custom,
+        text: String.duplicate("x", 65_535),
+        fg: 0xBBC2CF,
+        bg: 0x51AFEF
+      }
+
+      invalid = %Segment{id: :custom, text: "x", fg: 0x1000000, bg: 0x51AFEF}
 
       data = %{
         status_data()
@@ -483,10 +538,24 @@ defmodule Minga.Frontend.Adapter.GUI.StatusBarEncoderTest do
   @spec take_modeline_segment(binary()) :: {map(), binary()}
   defp take_modeline_segment(
          <<name_len::8, name::binary-size(name_len), fg::24, bg::24, attrs::8, text_len::16,
-           text::binary-size(text_len), target_len::16, target::binary-size(target_len),
-           rest::binary>>
+           text::binary-size(text_len), target_len::16, target::binary-size(target_len), drop::8,
+           flags::8, state::8, compact_len::16, compact::binary-size(compact_len), key_len::8,
+           key::binary-size(key_len), label_len::16, label::binary-size(label_len), rest::binary>>
        ) do
-    {%{name: name, fg: fg, bg: bg, attrs: attrs, text: text, target: target}, rest}
+    {%{
+       name: name,
+       fg: fg,
+       bg: bg,
+       attrs: attrs,
+       text: text,
+       target: target,
+       drop: drop,
+       flags: flags,
+       state: state,
+       compact: compact,
+       key: key,
+       label: label
+     }, rest}
   end
 
   @spec decode_sections(binary()) :: %{non_neg_integer() => binary()}

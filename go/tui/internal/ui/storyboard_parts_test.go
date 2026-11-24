@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	uv "github.com/charmbracelet/ultraviolet"
+	"github.com/jsmestad/minga/go/tui/internal/generated"
 	"github.com/jsmestad/minga/go/tui/internal/protocol"
 )
 
@@ -229,6 +230,15 @@ func modelineParts(status protocol.StatusBar, grid cellGrid) []storyboardPart {
 		if index == 0 {
 			start = min(start, firstInk(grid, y, 0, at))
 		}
+		// The mode pill's padding is part of the pill (anatomy.md: Mode pill padding), so its frame spans it.
+		if segment.Name == "mode" {
+			pad := modelinePillPaddingH.cols()
+			start, end = max(start-pad, 0), end+pad
+		}
+		// A segment's mark (a state glyph, or E and W before diagnostic counts) is part of the segment.
+		if mark := modelineMarkWidth(segment); mark > 0 && start-mark >= 0 {
+			start -= mark
+		}
 		parts = append(parts, storyboardPart{Part: "modeline.segment", Frame: [4]int{start, y, end - start, 1}, Text: segment.Name + ": " + text})
 		x = end
 	}
@@ -243,6 +253,14 @@ func modelineParts(status protocol.StatusBar, grid cellGrid) []storyboardPart {
 		}
 	}
 	return parts
+}
+
+// modelineMarkWidth is the cells a segment's mark and its gap take before the segment's words.
+func modelineMarkWidth(segment protocol.StatusSegment) int {
+	if _, ok := generated.SpineStateFromWire(segment.State); ok || segment.Name == "errors" || segment.Name == "warnings" {
+		return 1 + modelineGlyphToWords.cols()
+	}
+	return 0
 }
 
 // A surface the semantic model says is on screen but the locator cannot find is reported missing, so the audit fails

@@ -156,6 +156,18 @@ defmodule MingaEditor.Agent.Activity do
     %{activity | file_paths: MapSet.put(activity.file_paths, path)}
   end
 
+  @doc """
+  How far through its visible plan Minga is, as `{step, steps}`, or nil without a plan.
+
+  The step is the last one Minga has reached: every done item, plus the one in progress or blocked.
+  """
+  @spec progress(t()) :: {non_neg_integer(), pos_integer()} | nil
+  def progress(%__MODULE__{todos: []}), do: nil
+
+  def progress(%__MODULE__{todos: todos}) do
+    {Enum.count(todos, &(&1.status != :pending)), Enum.count(todos)}
+  end
+
   @doc "Returns the number of touched files in the current projection."
   @spec file_count(t()) :: non_neg_integer()
   def file_count(%__MODULE__{} = activity), do: MapSet.size(activity.file_paths)

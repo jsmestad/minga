@@ -64,12 +64,12 @@ defmodule MingaEditor.StatusBar.PlanLimitSegmentTest do
 
     state = report(state, ctx, utilization: 0.82)
     assert_receive {:debounced_render, _timer}
-    assert {" Claude 82% · 5h ", fg, _bg, [], :agent_pick_model} = plan_limit_segment(state)
+    assert {"Claude 82% · 5h", fg, _bg, [], :agent_pick_model} = plan_limit_segment(state)
     assert fg == state.appearance.theme.gutter.warning_fg
 
     state = report(state, ctx, utilization: 1.0, status: :rejected, resets_at: nil)
 
-    assert {" Claude limit ", fg, _bg, [bold: true], :agent_pick_model} =
+    assert {"Claude limit", fg, _bg, [bold: true], :agent_pick_model} =
              plan_limit_segment(state)
 
     assert fg == state.appearance.theme.gutter.error_fg
@@ -110,7 +110,7 @@ defmodule MingaEditor.StatusBar.PlanLimitSegmentTest do
       state |> Data.from_state() |> Data.with_modeline_segments(state.appearance.theme)
 
     Enum.find_value(left ++ right, fn
-      {:plan_limit, text, fg, bg, opts, target} -> {text, fg, bg, opts, target}
+      %{id: :plan_limit} = s -> {s.text, s.fg, s.bg, s.style, s.target}
       _segment -> nil
     end)
   end

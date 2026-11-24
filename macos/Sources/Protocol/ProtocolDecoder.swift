@@ -1261,10 +1261,10 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
                 guard sectionLen >= 2 else { break }
                 indent = StatusBarUpdate.IndentInfo(kind: data[sStart], size: data[sStart + 1])
 
-            case 0x0B: // ModelineSegments: version(1) + left_count(2) + right_count(2) + segments...
+            case 0x0B: // ModelineSegments: format(1) + left_count(2) + right_count(2) + segments...
                 guard sectionLen >= 5 else { throw ProtocolDecodeError.malformed }
                 let version = data[sStart]
-                guard version == 1 || version == 2 else { break }
+                guard version == 3 else { break }
                 modelineSegmentsPresent = true
                 let leftCount = Int(try readU16(data, sStart + 1))
                 let rightCount = Int(try readU16(data, sStart + 3))
@@ -3515,21 +3515,18 @@ private func readRequiredUTF8(_ data: Data.SubSequence) throws -> String {
     return string
 }
 
+/// Decodes format 3 modeline segments: name, colours, attrs, text and target, then drop rank, flags (bit 0: has a compact form), state, compact text, key and label.
 private func decodeStatusBarSegments(data: Data, pos: inout Int, count: Int, end: Int, version: UInt8) throws -> [Wire.StatusBarSegment] {
     var segments: [Wire.StatusBarSegment] = []
     try FrameDecodeAccounting.reserve(.arrayEntries, count)
     segments.reserveCapacity(count)
 
     for index in 0..<count {
-        var kind = "custom"
-        if version >= 2 {
-            guard pos + 1 <= end else { throw ProtocolDecodeError.malformed }
-            let kindLen = Int(data[pos]); pos += 1
-            guard pos + kindLen <= end else { throw ProtocolDecodeError.malformed }
-            guard let decodedKind = try decodeUTF8(data[pos..<(pos + kindLen)]) else { throw ProtocolDecodeError.malformed }
-            kind = decodedKind
-            pos += kindLen
-        }
+        guard pos + 1 <= end else { throw ProtocolDecodeError.malformed }
+        let kindLen = Int(data[pos]); pos += 1
+        guard pos + kindLen <= end else { throw ProtocolDecodeError.malformed }
+        guard let kind = try decodeUTF8(data[pos..<(pos + kindLen)]) else { throw ProtocolDecodeError.malformed }
+        pos += kindLen
 
         guard pos + 9 <= end else { throw ProtocolDecodeError.malformed }
         let fg = try readU24(data, pos); pos += 3
@@ -3543,8 +3540,25 @@ private func decodeStatusBarSegments(data: Data, pos: inout Int, count: Int, end
         guard pos + commandLen <= end else { throw ProtocolDecodeError.malformed }
         guard let command = try decodeUTF8(data[pos..<(pos + commandLen)]) else { throw ProtocolDecodeError.malformed }
         pos += commandLen
+        guard pos + 5 <= end else { throw ProtocolDecodeError.malformed }
+        let drop = data[pos]
+        let hasCompact = data[pos + 1] & 0x01 != 0
+        let state = SpineState(wire: data[pos + 2])
+        pos += 3
+        let compactLen = Int(try readU16(data, pos)); pos += 2
+        guard pos + compactLen + 1 <= end else { throw ProtocolDecodeError.malformed }
+        guard let compact = try decodeUTF8(data[pos..<(pos + compactLen)]) else { throw ProtocolDecodeError.malformed }
+        pos += compactLen
+        let keyLen = Int(data[pos]); pos += 1
+        guard pos + keyLen + 2 <= end else { throw ProtocolDecodeError.malformed }
+        guard let key = try decodeUTF8(data[pos..<(pos + keyLen)]) else { throw ProtocolDecodeError.malformed }
+        pos += keyLen
+        let labelLen = Int(try readU16(data, pos)); pos += 2
+        guard pos + labelLen <= end else { throw ProtocolDecodeError.malformed }
+        guard let label = try decodeUTF8(data[pos..<(pos + labelLen)]) else { throw ProtocolDecodeError.malformed }
+        pos += labelLen
         try FrameDecodeAccounting.reserve(.arrayEntries, 1)
-        segments.append(Wire.StatusBarSegment(id: index, kind: kind, text: text, fgColor: fg, bgColor: bg, attrs: attrs, command: command))
+        segments.append(Wire.StatusBarSegment(id: index, kind: kind, text: text, fgColor: fg, bgColor: bg, attrs: attrs, command: command, drop: drop, compact: hasCompact ? compact : nil, state: state, key: key, label: label))
     }
 
     return segments

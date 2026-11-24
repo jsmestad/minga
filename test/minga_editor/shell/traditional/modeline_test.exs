@@ -2,16 +2,20 @@ defmodule MingaEditor.Shell.Traditional.ModelineTest do
   use ExUnit.Case, async: true
 
   import ExUnit.CaptureLog
+  import Minga.Keymap.Sigil
 
   alias Minga.Config.ModelineSegments
   alias Minga.Config.Options
+  alias Minga.Design.Tokens
+  alias Minga.Keymap.Bindings
   alias Minga.Mode
+  alias Minga.RenderModel.UI.StatusBar.Segment
   alias MingaEditor.Shell.Traditional.Modeline
+  alias MingaEditor.StatusBar.PlanLimit
+  alias MingaEditor.UI.Theme
 
-  # The cell-grid `Modeline.render/5` painter was removed in #2311; the live
-  # surface is `gui_segments/2,3`, which the GUI status-bar adapter (0x76)
-  # consumes. These tests assert on the semantic segment text and click targets
-  # the modeline produces, not on cell-grid draw geometry.
+  # `gui_segments/2,3` is the live surface: the semantic status bar (0x76) carries its segments to both frontends.
+  # These tests assert on segment ids, words, drop ranks, states and click targets.
 
   @base_data %{
     mode: :normal,
@@ -27,205 +31,347 @@ defmodule MingaEditor.Shell.Traditional.ModelineTest do
     macro_recording: false
   }
 
-  describe "segments" do
-    test "renders for all modes without crashing" do
-      for mode <- [:normal, :insert, :visual, :operator_pending, :command, :replace] do
-        data = Map.put(@base_data, :mode, mode)
-        assert segments_text(data) != "", "Expected segments for mode #{mode}"
+  # A modeline with everything to say: the board's "editing while Minga works" frame.
+  @full_data Map.merge(@base_data, %{
+               file_name: "retry.ex",
+               dirty_marker: " ● ",
+               cursor_line: 239,
+               cursor_col: 30,
+               needs_you_count: 1,
+               change_position: {1, 2},
+               git_branch: "main",
+               git_diff_summary: {5, 3, 3},
+               agent_status: :thinking,
+               minga_progress: {2, 3},
+               diagnostic_counts: {1, 2, 0, 0}
+             })
+
+  @theme Theme.get!(Theme.default())
+
+  describe "order" do
+    test "segments follow the design: mode, needs-you, file, change, git, Minga, diagnostics, filetype, position" do
+      %{left: left, right: right} = Modeline.gui_segments(@full_data, @theme)
+
+      assert Enum.map(left, & &1.id) ==
+               [:mode, :needs_you, :filename, :change, :git, :minga, :errors, :warnings]
+
+      assert Enum.map(right, & &1.id) == [:filetype, :position]
+    end
+
+    test "a resting file shows only mode, file, filetype and position" do
+      assert ids(@base_data) == [:mode, :filename, :filetype, :position]
+    end
+
+    test "segments carry words without padding; the frontends own the gaps" do
+      assert segment_text(segments(@full_data)) ==
+               "NORMAL Needs you retry.ex ● change 1/2 main +11 Minga working 2/3 1 2 Elixir 240:31"
+    end
+
+    test "the zero-buffers launchpad shows no file segment" do
+      refute :filename in ids(%{@base_data | file_name: ""})
+    end
+  end
+
+  describe "truncation ranks" do
+    test "filetype, position and git drop in that order, then Minga shrinks, then warnings" do
+      ranks = Map.new(segments(@full_data), &{&1.id, &1.drop})
+
+      assert ranks.filetype > 0
+      assert ranks.filetype < ranks.position
+      assert ranks.position < ranks.git
+      assert ranks.git < ranks.minga
+      assert ranks.minga < ranks.warnings
+    end
+
+    test "mode, needs-you, the file name, change position, errors and problems never drop" do
+      data = Map.merge(@full_data, %{lsp_status: :error, parser_status: :unavailable})
+      never = for s <- segments(data), s.drop == 0, do: s.id
+
+      assert never == [:mode, :needs_you, :filename, :change, :errors, :problem, :problem]
+    end
+
+    test "Minga's words shrink to its state mark and step count instead of dropping" do
+      assert segment(@full_data, :minga).compact == "2/3"
+      assert segment(Map.delete(@full_data, :minga_progress), :minga).compact == ""
+    end
+
+    test "optional and custom segments give way first" do
+      data = Map.merge(@full_data, %{background_subagent_count: 2, merge_conflict_count: 1})
+      ranks = Map.new(segments(data), &{&1.id, &1.drop})
+
+      assert ranks.background_agent < ranks.filetype
+      assert ranks.merge_conflict < ranks.filetype
+    end
+  end
+
+  describe "mode" do
+    test "names every mode, operator-pending as NORMAL" do
+      for {mode, badge} <- [
+            normal: "NORMAL",
+            insert: "INSERT",
+            visual: "VISUAL",
+            operator_pending: "NORMAL",
+            command: "COMMAND",
+            replace: "REPLACE"
+          ] do
+        assert segment(%{@base_data | mode: mode}, :mode).text == badge
       end
     end
 
     test "the eval prompt names itself in the mode pill (#4092)" do
       data = %{@base_data | mode: :eval, mode_state: %Minga.Mode.EvalState{}}
-      assert String.contains?(segments_text(data), "EVAL")
+      assert segment(data, :mode).text == "EVAL"
     end
 
-    test "operator_pending mode shows NORMAL badge, not OPERATOR" do
-      text = segments_text(Map.put(@base_data, :mode, :operator_pending))
-
-      assert String.contains?(text, "NORMAL"),
-             "Expected NORMAL badge in operator_pending mode, got: #{inspect(text)}"
-
-      refute String.contains?(text, "OPERATOR"),
-             "Should not show OPERATOR badge in operator_pending mode"
+    test "safe mode prepends a visible mode badge and the label reads as words" do
+      assert segment(Map.put(@base_data, :safe_mode, true), :mode).text == "[SAFE] NORMAL"
+      assert segment(@base_data, :mode).label == "Normal mode"
     end
+  end
 
-    test "safe mode prepends a visible mode badge" do
-      text = segments_text(Map.put(@base_data, :safe_mode, true))
-      assert String.contains?(text, "[SAFE] NORMAL")
-    end
+  describe "Minga's state" do
+    test "every Agent status speaks as its token state, in the state's colour role" do
+      for status <- Tokens.agent_statuses() do
+        data = Map.put(@base_data, :agent_status, status)
 
-    test "renders common file state variants" do
-      for data <- [
-            Map.put(@base_data, :dirty_marker, " ● "),
-            Map.merge(@base_data, %{buf_index: 2, buf_count: 3}),
-            Map.merge(@base_data, %{buf_index: 1, buf_count: 1}),
-            Map.merge(@base_data, %{cursor_line: 0, line_count: 1})
-          ] do
-        assert segments_text(data) != ""
-      end
-    end
+        case Tokens.agent_status_state(status) do
+          nil ->
+            refute :minga in ids(data)
 
-    test "file segment is clickable with buffer_list target" do
-      assert :buffer_list in segment_targets(@base_data)
-    end
-
-    test "shows running background subagent count and active label" do
-      data =
-        Map.merge(@base_data, %{
-          background_subagent_count: 2,
-          active_background_subagent_label: "session-3: tests"
-        })
-
-      assert String.contains?(segments_text(data), "bg:2")
-      assert String.contains?(segments_text(data), "session-3: tests")
-      assert :agent_session_switcher in segment_targets(data)
-      refute :agent_session_picker in segment_targets(data)
-    end
-
-    test "omits background subagent segment when none are running" do
-      data =
-        Map.merge(@base_data, %{
-          background_subagent_count: 0,
-          active_background_subagent_label: "unique-bg-label"
-        })
-
-      refute String.contains?(segments_text(data), "unique-bg-label")
-    end
-
-    test "renders active file merge conflict count when configured" do
-      with_options(fn options ->
-        Options.set(options, :modeline_right_segments, [:merge_conflict])
-
-        data = Map.put(@base_data, :merge_conflict_count, 2)
-
-        assert String.contains?(segments_text(data), "X2")
-        assert :next_merge_conflict in segment_targets(data)
-      end)
-    end
-
-    test "always renders workspace identity and review counters when configured" do
-      with_options(fn options ->
-        Options.set(options, :modeline_left_segments, [:mode, :workspace, :filename])
-        Options.set(options, :modeline_right_segments, [:draft, :conflict])
-
-        data =
-          Map.merge(@base_data, %{
-            workspace_label: "Agent: tests",
-            workspace_draft_count: 2,
-            workspace_conflict_count: 1
-          })
-
-        text = segments_text(data)
-        assert String.contains?(text, "W:Agent: tests")
-        assert String.contains?(text, "D2")
-        assert String.contains?(text, "C1")
-        assert :workspace_list in segment_targets(data)
-      end)
-    end
-
-    test "filetype segment includes devicon for known filetype" do
-      {icon, _color} = Minga.Language.Devicon.icon_and_color(:elixir)
-      assert String.contains?(segments_text(@base_data), icon)
-    end
-
-    test "filetype segment is clickable with filetype_menu target" do
-      assert :filetype_menu in segment_targets(@base_data)
-    end
-
-    test "agent status command replaces built-in agent label" do
-      theme = MingaEditor.UI.Theme.get!(:doom_one)
-      agent_colors = MingaEditor.UI.Theme.agent_theme(theme)
-
-      data =
-        Map.merge(@base_data, %{
-          agent_status: :thinking,
-          agent_status_command: "sonnet | thinking",
-          agent_theme_colors: agent_colors
-        })
-
-      text = segments_text(data, theme)
-
-      assert String.contains?(text, "sonnet | thinking")
-      refute String.contains?(text, "Thinking")
-    end
-
-    test "agent status indicators show text labels" do
-      theme = MingaEditor.UI.Theme.get!(:doom_one)
-      agent_colors = MingaEditor.UI.Theme.agent_theme(theme)
-
-      cases = [
-        {%{agent_status: :idle}, "Idle", []},
-        {%{agent_status: :plan}, "PLAN", []},
-        {%{agent_status: :thinking}, "Thinking", []},
-        {%{agent_status: :tool_executing, active_tool_name: "read_file"}, "Running read_file",
-         []},
-        {%{agent_status: :tool_executing}, "Running", ["Running read_file"]},
-        {%{agent_status: :error}, "Error", []},
-        {%{agent_status: :needs_you}, "Needs you", ["Error"]}
-      ]
-
-      for {overrides, expected, unexpected} <- cases do
-        data = Map.merge(@base_data, Map.put(overrides, :agent_theme_colors, agent_colors))
-        combined = segments_text(data, theme)
-
-        assert String.contains?(combined, "NORMAL")
-        assert String.contains?(combined, expected)
-
-        for absent <- unexpected do
-          refute String.contains?(combined, absent)
+          state ->
+            minga = segment(data, :minga)
+            assert minga.state == state
+            assert minga.text == "Minga " <> String.downcase(Tokens.state_word(state))
+            assert minga.fg == Theme.state_color(@theme, state)
+            assert minga.label == Tokens.state(state).accessibility_label
         end
       end
     end
 
-    test "LSP indicator reflects status and click target" do
-      for {status, marker} <- [ready: "●", initializing: "⟳", starting: "◯", error: "✗"] do
-        data = Map.put(@base_data, :lsp_status, status)
+    test "the step through Minga's plan follows the words and the label" do
+      minga = segment(@full_data, :minga)
+      assert minga.text == "Minga working 2/3"
+      assert minga.label == "Minga is working, step 2 of 3"
+    end
 
-        assert String.contains?(segments_text(data), marker)
-        assert :lsp_info in segment_targets(data)
+    test "the user's status command text follows the state, or stands alone without one" do
+      data = Map.merge(@base_data, %{agent_status: :thinking, agent_status_command: " 42 tok "})
+      assert segment(data, :minga).text == "Minga working 42 tok"
+
+      alone = Map.merge(@base_data, %{agent_status: :idle, agent_status_command: "42 tok"})
+      assert %Segment{text: "42 tok", state: nil, compact: nil} = segment(alone, :minga)
+    end
+
+    test "configs that still list :agent get the Minga segment" do
+      with_options(fn options ->
+        Options.set(options, :modeline_left_segments, [:mode, :agent])
+        Options.set(options, :modeline_right_segments, [])
+        assert ids(Map.put(@base_data, :agent_status, :error)) == [:mode, :minga]
+      end)
+    end
+  end
+
+  describe "needs-you" do
+    test "shows only when non-zero, once, in the needs-you role" do
+      refute :needs_you in ids(@base_data)
+
+      one = segment(@full_data, :needs_you)
+      assert %Segment{text: "Needs you", state: :needs_you, label: "1 task needs you"} = one
+      assert one.fg == Theme.state_color(@theme, :needs_you)
+
+      two = segment(%{@full_data | needs_you_count: 2}, :needs_you)
+      assert %Segment{text: "Needs you 2", label: "2 tasks need you"} = two
+    end
+  end
+
+  describe "file, change, git, diagnostics, filetype and position" do
+    test "the file name carries a dot while unsaved" do
+      assert segment(@full_data, :filename).text == "retry.ex ●"
+      assert segment(@full_data, :filename).label == "retry.ex, unsaved"
+      assert segment(@base_data, :filename).text == "test.ex"
+    end
+
+    test "change position reads change n/m in the minga role" do
+      change = segment(@full_data, :change)
+      assert change.text == "change 1/2"
+      assert change.fg == Theme.role_color(@theme, :minga)
+      refute :change in ids(@base_data)
+    end
+
+    test "git reads branch and changed-line count, and says when status is partial" do
+      assert segment(@full_data, :git).text == "main +11"
+      assert segment(%{@full_data | git_diff_summary: {0, 0, 0}}, :git).text == "main"
+
+      degraded = segment(Map.put(@full_data, :git_degraded, true), :git)
+      assert degraded.text == "main +11 (partial)"
+      assert degraded.label =~ "status incomplete"
+      refute :git in ids(Map.put(@base_data, :git_branch, ""))
+    end
+
+    test "errors and warnings are separate counts in the failure and warning roles" do
+      errors = segment(@full_data, :errors)
+      warnings = segment(@full_data, :warnings)
+
+      assert {errors.text, errors.label, errors.fg} ==
+               {"1", "1 error", Theme.role_color(@theme, :failure)}
+
+      assert {warnings.text, warnings.label, warnings.fg} ==
+               {"2", "2 warnings", Theme.role_color(@theme, :warning)}
+
+      refute :errors in ids(Map.put(@base_data, :diagnostic_counts, {0, 0, 3, 1}))
+      refute :errors in ids(Map.put(@base_data, :diagnostic_counts, nil))
+    end
+
+    test "a failed language server or parser is a persistent problem in the failure role" do
+      lsp = Map.merge(@base_data, %{lsp_status: :error, failed_language_servers: ["elixir_ls"]})
+
+      assert %Segment{id: :problem, text: "elixir_ls failed", target: :lsp_info} =
+               segment(lsp, :problem)
+
+      assert segment(Map.put(@base_data, :lsp_status, :error), :problem).text ==
+               "Language server failed"
+
+      parser = Map.put(@base_data, :parser_status, :unavailable)
+      assert %Segment{text: "Parser failed", target: :parser_restart} = segment(parser, :problem)
+
+      for status <- [:ready, :initializing, :starting, :none] do
+        refute :problem in ids(Map.put(@base_data, :lsp_status, status))
+      end
+
+      restarting = segment(Map.put(@base_data, :parser_status, :restarting), :parser)
+      assert restarting.text == "Parser restarting"
+      assert restarting.drop > 0
+    end
+
+    test "filetype reads its language name without an icon" do
+      assert segment(@base_data, :filetype).text == "Elixir"
+      assert segment(@base_data, :filetype).target == :filetype_menu
+    end
+
+    test "position is always line:col, in Visual mode too" do
+      data = Map.merge(@full_data, %{mode: :visual, selection_info: {:chars, 42}})
+      assert segment(data, :position).text == "240:31"
+      assert segment(data, :position).label == "Line 240, column 31"
+    end
+  end
+
+  describe "clicks and keys" do
+    test "designed segments do what their leader key does and name that key" do
+      expected = [
+        needs_you: {"SPC a a", :toggle_agentic_view},
+        filename: {"SPC ,", :buffer_list},
+        minga: {"SPC a v", :toggle_agent_split},
+        errors: {"SPC c x", :diagnostics_list},
+        warnings: {"SPC c x", :diagnostics_list}
+      ]
+
+      for {id, {key, target}} <- expected do
+        assert {segment(@full_data, id).key, segment(@full_data, id).target} == {key, target},
+               "#{id} should run #{target} and name #{key}"
       end
     end
 
-    test "LSP indicator is omitted when status is absent or none" do
-      for data <- [@base_data, Map.put(@base_data, :lsp_status, :none)] do
-        text = segments_text(data)
+    test "a rebinding moves the click and the hint together" do
+      trie =
+        Bindings.new()
+        |> Bindings.bind(~k(g g), :git_status_test_command, "Git status")
+        |> Bindings.bind(~k(o b), :buffer_list, "Switch buffer")
 
-        refute String.contains?(text, "●")
-        refute String.contains?(text, "⟳")
-        refute String.contains?(text, "✗")
+      data = Map.put(@full_data, :leader_trie, trie)
+
+      assert {segment(data, :git).key, segment(data, :git).target} ==
+               {"SPC g g", :git_status_test_command}
+
+      # SPC , is unbound in this trie: no click and no key for the file segment.
+      assert {segment(data, :filename).key, segment(data, :filename).target} == {"", nil}
+    end
+
+    test "with no reachable leader the click stays and the hint goes" do
+      data = Map.put(@full_data, :key_hints?, false)
+      assert segment(data, :needs_you).target == :toggle_agentic_view
+      assert segment(data, :needs_you).key == ""
+    end
+
+    test "every clickable segment says what it means" do
+      for segment <- segments(@full_data), segment.target != nil do
+        assert segment.label != "", "#{segment.id} has a click but no label"
       end
     end
   end
 
-  describe "git branch and diff summary" do
-    test "renders branch and diff variants" do
-      cases = [
-        {%{git_branch: "main"}, ["main", ""], []},
-        {%{git_branch: "feat/x", git_diff_summary: {3, 2, 1}}, ["+3", "~2", "-1"], []},
-        {%{git_branch: "main", git_diff_summary: {5, 0, 0}}, ["+5"], ["~0", "-0"]},
-        {%{git_branch: "main", git_diff_summary: {0, 0, 0}}, ["main"], ["+", "~"]},
-        {%{}, [], [""]},
-        {%{git_branch: ""}, [], [""]}
-      ]
+  describe "optional segments" do
+    test "render only when configured, in their configured order" do
+      with_options(fn options ->
+        Options.set(options, :modeline_left_segments, [:mode, :indent, :percent, :workspace])
+        Options.set(options, :modeline_right_segments, [])
 
-      for {overrides, includes, excludes} <- cases do
-        data = Map.merge(@base_data, overrides)
-        text = segments_text(data)
+        data =
+          Map.merge(@base_data, %{
+            indent_type: :tabs,
+            indent_size: 4,
+            line_count: 1,
+            workspace_label: "Review"
+          })
 
-        for expected <- includes, do: assert(String.contains?(text, expected))
-        for unexpected <- excludes, do: refute(String.contains?(text, unexpected))
-      end
+        assert segment_text(segments(data)) == "NORMAL Tabs:4 Top W:Review"
+        assert segment(data, :indent).target == :indent_picker
+      end)
+
+      refute :percent in ids(%{@base_data | cursor_line: 9})
+      refute :indent in ids(Map.merge(@base_data, %{indent_type: :spaces, indent_size: 2}))
     end
 
-    test "renders a degraded warning indicator when git status is degraded" do
-      degraded_icon = "\u{F071}"
+    test "the scroll position reads as one percent sign" do
+      with_options(fn options ->
+        Options.set(options, :modeline_left_segments, [:percent])
+        Options.set(options, :modeline_right_segments, [])
+        assert segment(%{@base_data | cursor_line: 9}, :percent).text == "100%"
+      end)
+    end
 
-      degraded = segments_text(Map.merge(@base_data, %{git_branch: "main", git_degraded: true}))
-      assert String.contains?(degraded, degraded_icon)
+    test "background subagents, plan limits and conflicts show only when present" do
+      refute :background_agent in ids(@base_data)
 
-      healthy = segments_text(Map.merge(@base_data, %{git_branch: "main", git_degraded: false}))
-      refute String.contains?(healthy, degraded_icon)
+      bg =
+        Map.merge(@base_data, %{
+          background_subagent_count: 2,
+          active_background_subagent_label: "tests"
+        })
+
+      assert %Segment{text: "bg:2 tests", target: :agent_session_switcher} =
+               segment(bg, :background_agent)
+
+      limit = %PlanLimit{level: :rejected, text: "Plan limit reached"}
+      plan = segment(Map.put(@base_data, :plan_limit, limit), :plan_limit)
+
+      assert {plan.text, plan.fg, plan.target} ==
+               {"Plan limit reached", Theme.role_color(@theme, :failure), :agent_pick_model}
+
+      assert segment(Map.put(@base_data, :merge_conflict_count, 3), :merge_conflict).text == "X3"
+      refute :merge_conflict in ids(@base_data)
+    end
+
+    test "the selection segment name renders nothing and indent stays built in" do
+      table = start_segment_registry()
+
+      register_segment(table, :indent, [side: :left], fn _ctx ->
+        flunk("the custom indent callback should not run")
+      end)
+
+      with_options(fn options ->
+        Options.set(options, :modeline_left_segments, [:selection, :indent])
+        Options.set(options, :modeline_right_segments, [])
+        data = Map.merge(@base_data, %{indent_type: :spaces, indent_size: 2})
+
+        {segments, log} = with_log(fn -> registry_segments(table, data) end)
+
+        assert %{
+                 left: [%Segment{id: :indent, text: "Spaces:2", target: :indent_picker}],
+                 right: []
+               } = segments
+
+        refute log =~ "Unknown modeline segment :selection"
+      end)
     end
   end
 
@@ -235,9 +381,7 @@ defmodule MingaEditor.Shell.Traditional.ModelineTest do
         Options.set(options, :modeline_left_segments, [:mode, :filename])
         data = Map.put(@base_data, :git_branch, "main")
 
-        text = segments_text(data)
-        refute String.contains?(text, "main")
-        refute String.contains?(text, "")
+        refute :git in ids(data)
       end)
     end
 
@@ -246,8 +390,7 @@ defmodule MingaEditor.Shell.Traditional.ModelineTest do
         Options.set(options, :modeline_left_segments, [:filename, :mode])
         Options.set(options, :modeline_right_segments, [])
 
-        text = segments_text(@base_data)
-        assert text_index(text, "test.ex") < text_index(text, "NORMAL")
+        assert ids(@base_data) == [:filename, :mode]
       end)
     end
 
@@ -260,7 +403,7 @@ defmodule MingaEditor.Shell.Traditional.ModelineTest do
           {" #{ctx.data.filetype}W ", ctx.info_fg, ctx.bar_bg, [], nil}
         end)
 
-        assert String.contains?(segments_text(@base_data), "elixirW")
+        assert segment_text(segments(@base_data)) =~ "elixirW"
       after
         ModelineSegments.unregister(segment_name)
       end
@@ -271,9 +414,7 @@ defmodule MingaEditor.Shell.Traditional.ModelineTest do
         Options.set(options, :modeline_left_segments, [:mode, :missing_segment, :filename])
         Options.set(options, :modeline_right_segments, [])
 
-        text = segments_text(@base_data)
-        assert String.contains?(text, "NORMAL")
-        assert String.contains?(text, "test.ex")
+        assert ids(@base_data) == [:mode, :filename]
       end)
     end
 
@@ -289,13 +430,8 @@ defmodule MingaEditor.Shell.Traditional.ModelineTest do
 
         segments = Modeline.gui_segments(@base_data)
 
-        assert Enum.any?(segments.left, fn {name, text, _fg, _bg, _opts, _target} ->
-                 name == segment_name and text == " LEFTY "
-               end)
-
-        refute Enum.any?(segments.right, fn {_name, text, _fg, _bg, _opts, _target} ->
-                 text == " LEFTY "
-               end)
+        assert Enum.any?(segments.left, &(&1.id == segment_name and &1.text == " LEFTY "))
+        refute Enum.any?(segments.right, &(&1.text == " LEFTY "))
       after
         ModelineSegments.unregister(segment_name)
       end
@@ -321,8 +457,8 @@ defmodule MingaEditor.Shell.Traditional.ModelineTest do
         Options.set(options, :modeline_right_segments, [:moved, :filename, :moved])
 
         assert %{left: left, right: right} = registry_segments(table)
-        assert Enum.map(left, &elem(&1, 0)) == [:high_priority, :alpha, :beta]
-        assert Enum.map(right, &elem(&1, 0)) == [:moved, :filename, :moved, :right_default]
+        assert Enum.map(left, & &1.id) == [:high_priority, :alpha, :beta]
+        assert Enum.map(right, & &1.id) == [:moved, :filename, :moved, :right_default]
       end)
     end
 
@@ -349,7 +485,7 @@ defmodule MingaEditor.Shell.Traditional.ModelineTest do
         Options.set(options, :modeline_left_segments, [:changing, :changing])
         Options.set(options, :modeline_right_segments, [])
 
-        assert registry_segments(table) == %{
+        assert tuples(registry_segments(table)) == %{
                  left: [{:changing, "first", 0, 0, [], nil}, {:changing, "second", 0, 0, [], nil}],
                  right: [{:later, "replacement", 0, 0, [], nil}]
                }
@@ -380,7 +516,7 @@ defmodule MingaEditor.Shell.Traditional.ModelineTest do
 
         {segments, log} = with_log(fn -> registry_segments(table) end)
 
-        assert segments == %{
+        assert tuples(segments) == %{
                  left: [
                    {:nested_modeline_test, "first", 1, 2, [], :workspace_list},
                    {:nested_modeline_test, "second", 3, 4, [], nil},
@@ -432,7 +568,7 @@ defmodule MingaEditor.Shell.Traditional.ModelineTest do
 
         {segments, log} = with_log(fn -> registry_segments(table) end)
 
-        assert segments == %{
+        assert tuples(segments) == %{
                  left: [{:compatible_opts_modeline_test, "valid", 0, 0, opts, nil}],
                  right: []
                }
@@ -699,96 +835,6 @@ defmodule MingaEditor.Shell.Traditional.ModelineTest do
     end
   end
 
-  describe "parser status indicator" do
-    test "reflects parser status and restart click target" do
-      data = Map.put(@base_data, :parser_status, :available)
-      refute String.contains?(segments_text(data), "🌳")
-
-      for {status, marker} <- [unavailable: "🌳✗", restarting: "🌳⟳"] do
-        data = Map.put(@base_data, :parser_status, status)
-
-        assert String.contains?(segments_text(data), marker)
-        assert :parser_restart in segment_targets(data)
-      end
-    end
-  end
-
-  describe "diagnostic counts" do
-    test "shows counts and diagnostic picker target" do
-      cases = [
-        {{3, 0, 0, 0}, ["3"]},
-        {{0, 5, 0, 0}, ["5"]},
-        {{2, 3, 0, 0}, ["2", "3"]}
-      ]
-
-      for {counts, expected_counts} <- cases do
-        data = Map.put(@base_data, :diagnostic_counts, counts)
-        text = segments_text(data)
-
-        for expected <- expected_counts, do: assert(String.contains?(text, expected))
-        assert :diagnostic_picker in segment_targets(data)
-      end
-    end
-
-    test "shows nothing when no diagnostics" do
-      with_diag = segment_targets(Map.put(@base_data, :diagnostic_counts, nil))
-      without = segment_targets(@base_data)
-      refute :diagnostic_picker in with_diag
-      refute :diagnostic_picker in without
-    end
-  end
-
-  describe "indent and selection segments" do
-    test "shows indentation and exposes indent picker click target" do
-      for {type, size, label} <- [{:spaces, 2, "Spaces:2"}, {:tabs, 4, "Tabs:4"}] do
-        data = Map.merge(@base_data, %{indent_type: type, indent_size: size})
-
-        assert String.contains?(segments_text(data), label)
-        assert :indent_picker in segment_targets(data)
-      end
-    end
-
-    test "indent stays builtin and selection emits no standalone segment" do
-      table = start_segment_registry()
-
-      register_segment(table, :indent, [side: :left], fn _ctx ->
-        flunk("the custom indent callback should not run")
-      end)
-
-      with_options(fn options ->
-        Options.set(options, :modeline_left_segments, [:selection, :indent])
-        Options.set(options, :modeline_right_segments, [])
-        data = Map.merge(@base_data, %{indent_type: :spaces, indent_size: 2})
-
-        {segments, log} = with_log(fn -> registry_segments(table, data) end)
-
-        assert %{left: [{:indent, text, _, _, _, :indent_picker}], right: []} = segments
-        assert text =~ "Spaces:2"
-        refute log =~ "Unknown modeline segment :selection"
-      end)
-    end
-
-    test "selection info replaces cursor position" do
-      data = Map.merge(@base_data, %{selection_info: {:chars, 42}})
-      text = segments_text(data)
-
-      assert String.contains?(text, "42 chars")
-      refute String.contains?(text, "1:1")
-    end
-
-    test "a selection of one reads in the singular" do
-      assert segments_text(Map.put(@base_data, :selection_info, {:chars, 1})) =~ " 1 char "
-      assert segments_text(Map.put(@base_data, :selection_info, {:lines, 1})) =~ " 1 line "
-      assert segments_text(Map.put(@base_data, :selection_info, {:lines, 3})) =~ " 3 lines "
-    end
-
-    test "the scroll position reads as one percent sign" do
-      text = segments_text(%{@base_data | cursor_line: 9})
-      assert text =~ "100%"
-      refute text =~ "%%"
-    end
-  end
-
   # ── Helpers ────────────────────────────────────────────────────────────────
 
   defp with_options(fun) when is_function(fun, 1) do
@@ -820,30 +866,19 @@ defmodule MingaEditor.Shell.Traditional.ModelineTest do
     Modeline.gui_segments(data, MingaEditor.UI.Theme.get!(:doom_one), table)
   end
 
-  defp gui_segments(data, nil), do: Modeline.gui_segments(data)
-  defp gui_segments(data, theme), do: Modeline.gui_segments(data, theme)
+  defp gui_segments(data, nil), do: Modeline.gui_segments(data, @theme)
 
-  defp segments_text(data, theme \\ nil) do
-    %{left: left, right: right} = gui_segments(data, theme)
-    segment_text(left ++ right)
-  end
+  defp segment_text(segments), do: Enum.map_join(segments, " ", & &1.text)
 
-  defp segment_targets(data, theme \\ nil) do
-    %{left: left, right: right} = gui_segments(data, theme)
+  defp segments(data), do: data |> gui_segments(nil) |> then(&(&1.left ++ &1.right))
 
-    (left ++ right)
-    |> Enum.map(fn {_name, _text, _fg, _bg, _opts, target} -> target end)
-    |> Enum.reject(&is_nil/1)
-  end
+  defp segment(data, id), do: data |> segments() |> Enum.find(&(&1.id == id))
 
-  defp segment_text(segments) do
-    Enum.map_join(segments, fn {_name, text, _fg, _bg, _opts, _target} -> text end)
-  end
+  defp ids(data), do: data |> segments() |> Enum.map(& &1.id)
 
-  defp text_index(text, needle) do
-    case :binary.match(text, needle) do
-      {start, _len} -> start
-      :nomatch -> nil
-    end
-  end
+  # Custom segments keep the tuple shape their render callbacks return; compare in that shape.
+  defp tuples(%{left: left, right: right}),
+    do: %{left: Enum.map(left, &tuple/1), right: Enum.map(right, &tuple/1)}
+
+  defp tuple(%Segment{} = s), do: {s.id, s.text, s.fg, s.bg, s.style, s.target}
 end

@@ -598,9 +598,7 @@ defmodule Minga.Test.EditorCase do
     modeline_data = StatusBarData.to_modeline_data(status_data)
     %{left: left, right: right} = Modeline.gui_segments(modeline_data, state.appearance.theme)
 
-    (left ++ right)
-    |> Enum.map(fn {_name, text, _fg, _bg, _opts, _target} -> text end)
-    |> Enum.join()
+    Enum.map_join(left ++ right, " ", & &1.text)
   end
 
   @doc "Returns the semantic minibuffer or echo-area text."

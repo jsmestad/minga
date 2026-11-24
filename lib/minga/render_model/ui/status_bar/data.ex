@@ -8,6 +8,7 @@ defmodule Minga.RenderModel.UI.StatusBar.Data do
   alias Minga.RenderModel.UI.StatusBar.Git
   alias Minga.RenderModel.UI.StatusBar.Indent
   alias Minga.RenderModel.UI.StatusBar.Language
+  alias Minga.RenderModel.UI.StatusBar.Segment
   alias Minga.RenderModel.UI.StatusBar.Selection
 
   @type mode ::
@@ -26,10 +27,7 @@ defmodule Minga.RenderModel.UI.StatusBar.Data do
           | :extension_confirm
           | :tool_confirm
           | :delete_confirm
-  @type modeline_segment ::
-          {atom() | String.t(), String.t(), non_neg_integer(), non_neg_integer(), keyword(),
-           atom() | nil}
-  @type modeline_segments :: %{left: [modeline_segment()], right: [modeline_segment()]} | nil
+  @type modeline_segments :: %{left: [Segment.t()], right: [Segment.t()]} | nil
 
   @type t :: %__MODULE__{
           mode: mode(),

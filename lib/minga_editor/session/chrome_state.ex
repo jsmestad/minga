@@ -6,6 +6,7 @@ defmodule MingaEditor.Session.ChromeState do
   """
 
   alias Minga.Buffer
+  alias Minga.Design.Tokens
   alias Minga.Language
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.WorkspaceStatus
@@ -72,6 +73,23 @@ defmodule MingaEditor.Session.ChromeState do
       draft_count: total_draft_count(workspaces),
       conflict_count: total_conflict_count(workspaces)
     }
+  end
+
+  @doc """
+  How many of Minga's tasks need you: each background Agent workspace whose status speaks as Needs you, plus the active workspace when `active_status` does.
+
+  `active_status` is the active workspace's `MingaEditor.Agent.WorkspaceStatus`, the value the modeline's Minga segment shows, so the count and that segment never disagree. Statuses speak through `Minga.Design.Tokens.agent_status_state/1`.
+  """
+  @spec needs_you_count(t(), WorkspaceStatus.t() | nil) :: non_neg_integer()
+  def needs_you_count(%__MODULE__{} = chrome_state, active_status) do
+    background =
+      Enum.count(chrome_state.workspaces, fn workspace ->
+        workspace.kind == :agent and workspace.id != chrome_state.active_workspace_id and
+          Tokens.agent_status_state(workspace.status) == :needs_you
+      end)
+
+    active = if Tokens.agent_status_state(active_status) == :needs_you, do: 1, else: 0
+    background + active
   end
 
   @doc "Returns the manual workspace id."

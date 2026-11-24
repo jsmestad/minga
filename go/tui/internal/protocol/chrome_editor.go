@@ -448,8 +448,11 @@ func decodeStatusAgent(section []byte) *StatusAgent {
 	return &StatusAgent{MessageCount: u32(section, offset)}
 }
 
+// modelineFormat is the modeline section format this decoder reads: format 3 adds each segment's drop rank, flags, state, compact text, key and label.
+const modelineFormat = 3
+
 func decodeStatusSegments(section []byte) ([]StatusSegment, []StatusSegment) {
-	if len(section) < 5 {
+	if len(section) < 5 || section[0] != modelineFormat {
 		return nil, nil
 	}
 	offset := 1
@@ -482,11 +485,23 @@ func decodeStatusSegment(section []byte, offset int) (StatusSegment, int, bool) 
 	}
 	segment := StatusSegment{Name: name, FG: u24(section, offset), BG: u24(section, offset+3), Attrs: section[offset+6]}
 	offset += 7
-	segment.Text, offset, ok = readString16(section, offset)
-	if !ok {
+	if segment.Text, offset, ok = readString16(section, offset); !ok {
 		return StatusSegment{}, offset, false
 	}
-	segment.Command, offset, ok = readString16(section, offset)
+	if segment.Command, offset, ok = readString16(section, offset); !ok || len(section) < offset+3 {
+		return StatusSegment{}, offset, false
+	}
+	segment.Drop = section[offset]
+	segment.HasCompact = section[offset+1]&0x01 != 0
+	segment.State = section[offset+2]
+	offset += 3
+	if segment.Compact, offset, ok = readString16(section, offset); !ok {
+		return StatusSegment{}, offset, false
+	}
+	if segment.Key, offset, ok = readString8(section, offset); !ok {
+		return StatusSegment{}, offset, false
+	}
+	segment.Label, offset, ok = readString16(section, offset)
 	return segment, offset, ok
 }
 

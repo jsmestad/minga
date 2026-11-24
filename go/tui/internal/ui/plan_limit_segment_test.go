@@ -46,7 +46,7 @@ func TestPlanLimitSegmentRendersCommittedTextAndOpensModelPicker(t *testing.T) {
 				t.Fatalf("status line should show %q at width %d:\n%s", strings.TrimSpace(tc.text), tc.width, ansi.Strip(view.Content))
 			}
 
-			zone := waitForZone(t, model, zoneIDModelineCommand("agent_pick_model"))
+			zone := waitForZone(t, model, zoneIDModelineSegment(2))
 			packet, ok := model.semanticMousePacket(tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft, X: zone.StartX + 1, Y: zone.StartY}))
 			if !ok || !bytes.Equal(packet, protocol.EncodeGUIExecuteCommand("agent_pick_model")) {
 				t.Fatalf("clicking the plan segment should open the model picker, ok=%v packet=%v", ok, packet)

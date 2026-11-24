@@ -35,20 +35,11 @@ issue = 4044
 [[exception]]
 scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey"]
 frontend = "tui"
-part = "modeline.segment"
-rule = "gap between segments"
-reason = "The BEAM's modeline puts a │ separator with a space on each side between segments; anatomy wants an md gap without a rule."
-issue = 4043
-
-[[exception]]
-scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey"]
-frontend = "tui"
 part = "glyph"
 rule = "contrast"
 theme = "astrodark"
 pairs = [
   "#3a3e47 on #1a1d23",
-  "#595c66 on #111317",
   "#595c66 on #1a1d23",
   "#595c66 on #1e222a",
 ]
@@ -56,14 +47,13 @@ reason = "Empty-line tildes, fold marks, separators and icon colours miss 3:1 in
 issue = 4137
 
 [[exception]]
-scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey"]
+scenario = ["edit.visual", "edit.whichkey.leader", "minga.whichkey"]
 frontend = "tui"
 part = "glyph"
 rule = "contrast"
 theme = "catppuccin_frappe"
 pairs = [
   "#838ba7 on #414559",
-  "#9b59b6 on #292c3c",
 ]
 reason = "Empty-line tildes, fold marks, separators and icon colours miss 3:1 in this theme."
 issue = 4137
@@ -79,10 +69,8 @@ pairs = [
   "#61afef on #ccd0da",
   "#7c7f93 on #ccd0da",
   "#8c8fa1 on #ccd0da",
-  "#8c8fa1 on #e6e9ef",
   "#8c8fa1 on #eff1f5",
   "#98c379 on #ccd0da",
-  "#a074c4 on #e6e9ef",
   "#c678dd on #ccd0da",
   "#e5c07b on #ccd0da",
 ]
@@ -111,7 +99,6 @@ theme = "catppuccin_frappe"
 pairs = [
   "#81c8be on #626880",
   "#838ba7 on #303446",
-  "#c6d0f5 on #838ba7",
   "#ca9ee6 on #626880",
 ]
 reason = "Syntax colours, muted comment and gutter text, separators and chips miss 4.5:1 in this theme."
@@ -130,7 +117,6 @@ pairs = [
   "#1e66f5 on #eff1f5",
   "#40a02b on #e6e9ef",
   "#40a02b on #eff1f5",
-  "#4c4f69 on #8c8fa1",
   "#7287fd on #ccd0da",
   "#7c7f93 on #eff1f5",
   "#8839ef on #acb0be",
@@ -174,14 +160,6 @@ part = "whichKey.panel"
 rule = "inset"
 reason = "The entry block is centred in the panel, so its inset is not the panel inset token."
 issue = 4044
-
-[[exception]]
-scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey"]
-frontend = "macos"
-part = "modeline"
-rule = "leading inset"
-reason = "The modeline's leading controls start at the window edge with no inset."
-issue = 4043
 
 [[exception]]
 scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey"]

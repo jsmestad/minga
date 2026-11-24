@@ -494,13 +494,46 @@ func DecodeModelineSegment(data []byte, offset int, windowEnd int) (ModelineSegm
 	if err != nil {
 		return ModelineSegment{}, offset, err
 	}
+	if err := decodeRequireWindow(windowEnd, pos+1, "drop"); err != nil {
+		return ModelineSegment{}, offset, err
+	}
+	drop := data[pos]
+	pos++
+	if err := decodeRequireWindow(windowEnd, pos+1, "flags"); err != nil {
+		return ModelineSegment{}, offset, err
+	}
+	flags := data[pos]
+	pos++
+	if err := decodeRequireWindow(windowEnd, pos+1, "state"); err != nil {
+		return ModelineSegment{}, offset, err
+	}
+	state := data[pos]
+	pos++
+	compact, pos, err := decodeString16Window(data, pos, windowEnd)
+	if err != nil {
+		return ModelineSegment{}, offset, err
+	}
+	key, pos, err := decodeString8Window(data, pos, windowEnd)
+	if err != nil {
+		return ModelineSegment{}, offset, err
+	}
+	label, pos, err := decodeString16Window(data, pos, windowEnd)
+	if err != nil {
+		return ModelineSegment{}, offset, err
+	}
 	return ModelineSegment{
-		Name:   name,
-		FG:     fg,
-		BG:     bg,
-		Attrs:  attrs,
-		Text:   text,
-		Target: target,
+		Name:    name,
+		FG:      fg,
+		BG:      bg,
+		Attrs:   attrs,
+		Text:    text,
+		Target:  target,
+		Drop:    drop,
+		Flags:   flags,
+		State:   state,
+		Compact: compact,
+		Key:     key,
+		Label:   label,
 	}, pos, nil
 }
 

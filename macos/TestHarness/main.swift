@@ -535,11 +535,17 @@ func commandToJSON(_ command: RenderCommand) -> [String: Any]? {
 func statusBarSegmentsToJSON(_ segments: [Wire.StatusBarSegment]) -> [[String: Any]] {
     return segments.map { segment in
         [
+            "name": segment.kind,
             "text": segment.text,
             "fg_color": Int(segment.fgColor),
             "bg_color": Int(segment.bgColor),
             "attrs": Int(segment.attrs),
-            "command": segment.command
+            "command": segment.command,
+            "drop": Int(segment.drop),
+            "compact": segment.compact as Any? ?? NSNull(),
+            "state": segment.state?.rawValue as Any? ?? NSNull(),
+            "key": segment.key,
+            "label": segment.label
         ]
     }
 }

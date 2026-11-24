@@ -16,6 +16,7 @@ defmodule Minga.Frontend.Adapter.GUI.StatusBarEncoder do
   alias Minga.RenderModel.UI.StatusBar.Language
   alias Minga.RenderModel.UI.StatusBar.Operation
   alias Minga.RenderModel.UI.StatusBar.Review
+  alias Minga.RenderModel.UI.StatusBar.Segment
   alias Minga.RenderModel.UI.StatusBar.Selection
   alias Minga.RenderModel.UI.StatusBar.Workspace
 
@@ -39,6 +40,9 @@ defmodule Minga.Frontend.Adapter.GUI.StatusBarEncoder do
   @section_review 0x10
   @section_review_conflict 0x11
   @section_review_conflict_keys 0x12
+
+  # Modeline section format 3 adds each segment's drop rank, flags, state, compact text, key and label.
+  @modeline_format 3
 
   @spec encode(StatusBar.t(), Caches.t()) :: {binary(), Caches.t()}
   def encode(%StatusBar{} = model, %Caches{} = caches), do: {encode_command(model), caches}
@@ -340,10 +344,10 @@ defmodule Minga.Frontend.Adapter.GUI.StatusBarEncoder do
     [Writer.to_iodata(writer)]
   end
 
-  @spec encode_modeline_segments(%{left: [tuple()], right: [tuple()]}) :: iolist()
+  @spec encode_modeline_segments(%{left: [Segment.t()], right: [Segment.t()]}) :: iolist()
   defp encode_modeline_segments(%{left: left, right: right}) do
     Writer.new(@command)
-    |> Writer.uint8(:modeline_version, 2)
+    |> Writer.uint8(:modeline_version, @modeline_format)
     |> Writer.uint16(:modeline_left_count, Enum.count(left))
     |> Writer.uint16(:modeline_right_count, Enum.count(right))
     |> Writer.append(Enum.map(left, &encode_modeline_segment/1))
@@ -351,20 +355,28 @@ defmodule Minga.Frontend.Adapter.GUI.StatusBarEncoder do
     |> Writer.to_iodata()
   end
 
-  @spec encode_modeline_segment(tuple()) :: iolist()
-  defp encode_modeline_segment({name, text, fg, bg, opts, target}) do
+  @spec encode_modeline_segment(Segment.t()) :: iolist()
+  defp encode_modeline_segment(%Segment{} = segment) do
     Writer.new(@command)
-    |> Writer.string8(:modeline_segment_name, to_string(name))
-    |> Writer.rgb24(:modeline_segment_fg, fg)
-    |> Writer.rgb24(:modeline_segment_bg, bg)
-    |> Writer.uint8(:modeline_segment_attrs, encode_modeline_attrs(opts))
-    |> Writer.string16(:modeline_segment_text, text)
-    |> Writer.string16(:modeline_segment_target, encode_modeline_target(target))
+    |> Writer.string8(:modeline_segment_name, Atom.to_string(segment.id))
+    |> Writer.rgb24(:modeline_segment_fg, segment.fg)
+    |> Writer.rgb24(:modeline_segment_bg, segment.bg)
+    |> Writer.uint8(:modeline_segment_attrs, encode_modeline_attrs(segment.style))
+    |> Writer.string16(:modeline_segment_text, segment.text)
+    |> Writer.string16(:modeline_segment_target, encode_modeline_target(segment.target))
+    |> Writer.uint8(:modeline_segment_drop, segment.drop)
+    |> Writer.uint8(:modeline_segment_flags, modeline_segment_flags(segment))
+    |> Writer.uint8(:modeline_segment_state, Tokens.state_wire(segment.state))
+    |> Writer.string16(:modeline_segment_compact, segment.compact || "")
+    |> Writer.string8(:modeline_segment_key, segment.key)
+    |> Writer.string16(:modeline_segment_label, segment.label)
     |> Writer.to_iodata()
   end
 
-  defp encode_modeline_segment({text, fg, bg, opts, target}),
-    do: encode_modeline_segment({:custom, text, fg, bg, opts, target})
+  # Bit 0: the segment collapses to its state mark and `compact` text at its drop rank instead of dropping.
+  @spec modeline_segment_flags(Segment.t()) :: non_neg_integer()
+  defp modeline_segment_flags(%Segment{compact: nil}), do: 0
+  defp modeline_segment_flags(%Segment{}), do: 0x01
 
   @spec encode_modeline_target(atom() | nil) :: String.t()
   defp encode_modeline_target(nil), do: ""

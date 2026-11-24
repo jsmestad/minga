@@ -1129,13 +1129,7 @@ public struct ContentView<EditorSurface: View>: View {
         StatusBarView(
             state: input.statusBarState,
             feedbackState: input.feedbackState,
-            sendAction: translatedAction(FrontendActionComposition.outbound),
-            isFileTreeVisible: input.fileTreeState.visible,
-            isGitStatusVisible: input.gitStatusState.snapshot.visible,
-            isBottomPanelVisible: input.bottomPanelState.visible,
-            isAgentChatVisible: input.agentChatState.visible,
-            gitSyncing: input.gitStatusState.snapshot.syncing,
-            hasGitStatusControl: input.sidebarHostState.sidebars.contains { $0.semanticKind == .gitStatus }
+            sendAction: translatedAction(FrontendActionComposition.outbound)
         )
     }
 

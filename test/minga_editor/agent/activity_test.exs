@@ -4,6 +4,24 @@ defmodule MingaEditor.Agent.ActivityTest do
   alias MingaAgent.TodoItem
   alias MingaEditor.Agent.Activity
 
+  describe "progress/1" do
+    test "is the step Minga has reached through its plan, or nil without one" do
+      assert Activity.progress(Activity.new()) == nil
+
+      todos =
+        for {status, id} <- Enum.with_index([:done, :in_progress, :pending]),
+            do: %TodoItem{id: "#{id}", description: "step #{id}", status: status}
+
+      assert Activity.progress(Activity.set_todos(Activity.new(), todos)) == {2, 3}
+
+      blocked = List.replace_at(todos, 1, %{Enum.at(todos, 1) | status: :blocked})
+      assert Activity.progress(Activity.set_todos(Activity.new(), blocked)) == {2, 3}
+
+      done = Enum.map(todos, &%{&1 | status: :done})
+      assert Activity.progress(Activity.set_todos(Activity.new(), done)) == {3, 3}
+    end
+  end
+
   describe "turn projection" do
     test "tracks tool and file progress while preserving todos" do
       todo = %TodoItem{id: "1", description: "Inspect files", status: :in_progress}

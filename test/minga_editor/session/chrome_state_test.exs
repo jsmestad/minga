@@ -109,6 +109,43 @@ defmodule MingaEditor.Session.ChromeStateTest do
     end
   end
 
+  describe "needs_you_count/2" do
+    test "counts background Agent workspaces that need you, then the active status", %{
+      tmp_dir: tmp_dir
+    } do
+      {tb, group} = tab_bar_with_agent_workspace(tmp_dir)
+
+      for {status, background} <- [
+            idle: 0,
+            thinking: 0,
+            plan: 0,
+            error: 0,
+            approval_waiting: 1,
+            needs_review: 1
+          ] do
+        tb = tb |> TabBar.set_workspace_agent_status(group.id, status) |> TabBar.switch_to(1)
+        chrome = ChromeState.from_editor_state(state(tab_bar: tb, project_root: tmp_dir))
+
+        # The manual workspace is active: its status comes from the live Agent, passed in.
+        assert ChromeState.needs_you_count(chrome, :idle) == background
+        assert ChromeState.needs_you_count(chrome, :approval_waiting) == background + 1
+        assert ChromeState.needs_you_count(chrome, nil) == background
+      end
+    end
+
+    test "counts the active Agent workspace once, through the status passed in", %{
+      tmp_dir: tmp_dir
+    } do
+      {tb, group} = tab_bar_with_agent_workspace(tmp_dir)
+      tb = tb |> TabBar.set_workspace_agent_status(group.id, :needs_you) |> TabBar.switch_to(2)
+      chrome = ChromeState.from_editor_state(state(tab_bar: tb, project_root: tmp_dir))
+
+      assert chrome.active_workspace_id == group.id
+      assert ChromeState.needs_you_count(chrome, :needs_you) == 1
+      assert ChromeState.needs_you_count(chrome, :thinking) == 0
+    end
+  end
+
   describe "visible_tabs" do
     test "includes active workspace content tabs", %{tmp_dir: tmp_dir} do
       {tb, group} = tab_bar_with_agent_workspace(tmp_dir)
