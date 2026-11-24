@@ -79,7 +79,7 @@ func TestCommittedToolOutcomesOverrideCompatibilityError(t *testing.T) {
 func TestApprovalWaitingStatusIsStaticAndStoppable(t *testing.T) {
 	model := New(100, 30, nil)
 	working := generated.StateWorking.Token().Word
-	labels := []string{"Idle", working, working, generated.StateFailed.Token().Word, working, generated.StateNeedsYou.Token().Word}
+	labels := []string{"Idle", working, working, generated.StateFailed.Token().Word, "Idle", generated.StateNeedsYou.Token().Word}
 	for status, label := range labels {
 		if got := agentChatStatusLabel(byte(status)); got != label {
 			t.Fatalf("status %d label = %q, want %q", status, got, label)

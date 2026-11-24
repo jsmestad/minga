@@ -377,7 +377,7 @@ Parser status: 0=available, 1=unavailable, 2=restarting
 
 Agent status: 0=idle, 1=thinking, 2=tool_executing, 3=error, 4=plan, 5=approval_waiting, 6=needs_you, 7=stopped, 8=needs_review, 9=done
 
-The `[[agent_statuses]]` table in `docs/design_tokens.toml` owns these bytes and the state each one speaks as (thinking, tool_executing and plan are Working; approval_waiting, needs_you and needs_review are Needs you; error is Failed; stopped is Stopped; done is Done; idle shows no state). Frontends name a status through the generated `SpineState(agentStatus:)` (Swift) and `generated.SpineStateForAgentStatus` (Go), never with their own words, so the modeline, the workspace pill, the chat header and the activity card agree.
+The `[[agent_statuses]]` table in `docs/design_tokens.toml` owns these bytes and the state each one speaks as (thinking and tool_executing are Working; approval_waiting, needs_you and needs_review are Needs you; error is Failed; stopped is Stopped; done is Done; idle and plan show no state, because plan mode is reported whether or not a turn runs). Frontends name a status through the generated `SpineState(agentStatus:)` (Swift) and `generated.SpineStateForAgentStatus` (Go), never with their own words, so the modeline, the workspace pill, the chat header and the activity card agree.
 
 Workspace kind: 0=manual, 1=agent. Workspace status uses the same values as agent status. Workspace flags: bit 0=attention, bit 1=closeable.
 

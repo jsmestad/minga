@@ -143,7 +143,6 @@ public enum SpineState: String, CaseIterable, Sendable {
         case 1: self = .working // thinking
         case 2: self = .working // tool_executing
         case 3: self = .failed // error
-        case 4: self = .working // plan
         case 5: self = .needsYou // approval_waiting
         case 6: self = .needsYou // needs_you
         case 7: self = .stopped // stopped

@@ -610,7 +610,7 @@ struct AgentChatStateLifecycleTests {
         state.status = .idle; #expect(state.statusLabel == "Idle")
         state.status = .thinking; #expect(state.statusLabel == SpineState.working.word)
         state.status = .executingTool; #expect(state.statusLabel == SpineState.working.word)
-        state.status = .planning; #expect(state.statusLabel == SpineState.working.word)
+        state.status = .planning; #expect(state.statusLabel == "Idle")
         state.status = .approvalWaiting; #expect(state.statusLabel == SpineState.needsYou.word)
         state.status = .error; #expect(state.statusLabel == SpineState.failed.word)
         state.status = .unknown(rawValue: 255); #expect(state.statusLabel == "Idle")

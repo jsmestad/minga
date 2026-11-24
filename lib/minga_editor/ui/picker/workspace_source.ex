@@ -8,6 +8,7 @@ defmodule MingaEditor.UI.Picker.WorkspaceSource do
 
   @behaviour MingaEditor.UI.Picker.Source
 
+  alias Minga.Design.Tokens
   alias MingaEditor.Agent.WorkspaceStatus
   alias MingaEditor.UI.Picker.Context
   alias MingaEditor.UI.Picker.Item
@@ -93,23 +94,20 @@ defmodule MingaEditor.UI.Picker.WorkspaceSource do
 
   defp row_status(%Workspace{}, _tb, _ctx), do: nil
 
+  # The row names the status with the state's mark and word from the token table, like the modeline.
   @spec status_text(WorkspaceStatus.t() | nil) :: String.t()
-  defp status_text(:thinking), do: " ↻ thinking"
-  defp status_text(:tool_executing), do: " ⚙ executing"
-  defp status_text(:approval_waiting), do: " awaiting approval"
-  defp status_text(:plan), do: " ✎ plan"
-  defp status_text(:needs_you), do: " ! needs you"
-  defp status_text(:error), do: " ⚠ error"
-  defp status_text(:idle), do: " ✓ idle"
-  defp status_text(_status), do: ""
+  defp status_text(status) do
+    case status_annotation(status) do
+      nil -> ""
+      annotation -> " " <> annotation
+    end
+  end
 
   @spec status_annotation(WorkspaceStatus.t() | nil) :: String.t() | nil
-  defp status_annotation(:thinking), do: "↻ thinking"
-  defp status_annotation(:tool_executing), do: "⚙ executing"
-  defp status_annotation(:approval_waiting), do: "awaiting approval"
-  defp status_annotation(:plan), do: "✎ plan"
-  defp status_annotation(:needs_you), do: "! needs you"
-  defp status_annotation(:error), do: "⚠ error"
-  defp status_annotation(:idle), do: "✓ idle"
-  defp status_annotation(_status), do: nil
+  defp status_annotation(status) do
+    case Tokens.agent_status_state(status) do
+      nil -> nil
+      state -> "#{Tokens.state(state).tui_glyph} #{Tokens.state_word(state)}"
+    end
+  end
 end

@@ -53,7 +53,7 @@ func TestAgentStatusWordsComeFromStateTokens(t *testing.T) {
 	if got := agentChatStatusLabel(3); got != generated.StateFailed.Token().Word {
 		t.Fatalf("error label = %q, want the failed token word", got)
 	}
-	for wire, want := range map[byte]string{0: "Idle", 1: "Working", 2: "Working", 4: "Working", 5: "Needs you", 6: "Needs you"} {
+	for wire, want := range map[byte]string{0: "Idle", 1: "Working", 2: "Working", 3: "Failed", 4: "Idle", 5: "Needs you", 6: "Needs you", 7: "Stopped", 8: "Needs you", 9: "Done", 42: "Idle"} {
 		if got := agentChatStatusLabel(wire); got != want {
 			t.Fatalf("status %d label = %q, want %q from the shared state table", wire, got, want)
 		}

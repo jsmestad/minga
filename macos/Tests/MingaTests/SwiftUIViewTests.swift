@@ -782,13 +782,17 @@ struct StatusBarViewViewTests {
             try? $0.accessibilityLabel().string()
         }
 
-        #expect(planTexts.contains(SpineState.working.word))
-        #expect(planAccessibilityLabels.contains(SpineState.working.accessibilityLabel))
+        // Plan mode is reported whether or not a turn runs, so it claims no state.
+        #expect(planTexts.contains("Idle"))
+        #expect(planAccessibilityLabels.contains("Agent status: Idle"))
     }
 
     @Test("Every surface names an Agent status with the state the shared token table gives it")
     func agentStatusWordsAgree() {
-        let expected: [UInt8: SpineState?] = [0: nil, 1: .working, 2: .working, 3: .failed, 4: .working, 5: .needsYou, 6: .needsYou]
+        let expected: [UInt8: SpineState?] = [
+            0: nil, 1: .working, 2: .working, 3: .failed, 4: nil, 5: .needsYou, 6: .needsYou,
+            7: .stopped, 8: .needsYou, 9: .done, 42: nil
+        ]
         for (wire, state) in expected {
             let status = AgentStatus(rawValue: wire)
             #expect(status.spineState == state)

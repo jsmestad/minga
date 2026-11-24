@@ -234,10 +234,10 @@ id = "error"
 wire = 3
 state = "failed"
 
+# A session in plan mode reports plan whether or not a turn is running, so plan claims no state: the orbit appears only while Minga is moving.
 [[agent_statuses]]
 id = "plan"
 wire = 4
-state = "working"
 
 [[agent_statuses]]
 id = "approval_waiting"

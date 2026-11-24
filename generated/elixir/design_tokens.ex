@@ -365,7 +365,7 @@ defmodule Minga.Design.Tokens do
   def agent_status_state(:thinking), do: :working
   def agent_status_state(:tool_executing), do: :working
   def agent_status_state(:error), do: :failed
-  def agent_status_state(:plan), do: :working
+  def agent_status_state(:plan), do: nil
   def agent_status_state(:approval_waiting), do: :needs_you
   def agent_status_state(:needs_you), do: :needs_you
   def agent_status_state(:stopped), do: :stopped

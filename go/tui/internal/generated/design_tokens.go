@@ -152,8 +152,6 @@ func SpineStateForAgentStatus(wire byte) (state SpineState, ok bool) {
 		return StateWorking, true
 	case 3: // error
 		return StateFailed, true
-	case 4: // plan
-		return StateWorking, true
 	case 5: // approval_waiting
 		return StateNeedsYou, true
 	case 6: // needs_you
