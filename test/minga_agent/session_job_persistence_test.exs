@@ -203,17 +203,30 @@ defmodule MingaAgent.SessionJobPersistenceTest do
     runtime
   end
 
-  # Saves are debounced timers and job reports come from other processes, so poll the public query.
-  @spec eventually((-> boolean()), non_neg_integer()) :: boolean()
-  defp eventually(fun, attempts \\ 300)
-  defp eventually(_fun, 0), do: false
+  # Saves are debounced timers and job reports come from other processes, so poll the saved record.
+  # Each read takes the record lock that the Session's save takes, and :global retries a lost lock
+  # after a random backoff whose bound doubles each time. A tight poll can hold off the save for seconds,
+  # so poll sparsely and against a wall-clock deadline.
+  @poll_interval_ms 100
+  @poll_deadline_ms 10_000
 
-  defp eventually(fun, attempts) do
-    if fun.() do
-      true
-    else
-      Process.sleep(10)
-      eventually(fun, attempts - 1)
+  @spec eventually((-> boolean())) :: boolean()
+  defp eventually(fun) do
+    poll_until(fun, System.monotonic_time(:millisecond) + @poll_deadline_ms)
+  end
+
+  @spec poll_until((-> boolean()), integer()) :: boolean()
+  defp poll_until(fun, deadline) do
+    cond do
+      fun.() ->
+        true
+
+      System.monotonic_time(:millisecond) >= deadline ->
+        false
+
+      true ->
+        Process.sleep(@poll_interval_ms)
+        poll_until(fun, deadline)
     end
   end
 end
