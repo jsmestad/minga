@@ -470,9 +470,9 @@ defmodule Minga.Buffer.Provenance do
   @doc """
   Merges the oldest draft's step into the newer step of the same task that overwrote it, across the stretch around that draft, with `absorb/4`.
 
-  A draft is a tombstone a Minga step wrote that a newer step of the same task deleted, both still applied: text the task wrote and then rewrote itself. Returns `{:ok, provenance, old_group, runs_examined}`, or `:none` when there are no drafts.
+  A draft is a tombstone a Minga step wrote that a newer step of the same task deleted, both still applied: text the task wrote and then rewrote itself. Returns `{:ok, provenance, {old_group, new_group}, runs_examined}`, or `:none` when there are no drafts.
   """
-  @spec compact_oldest(t()) :: {:ok, t(), group_id(), pos_integer()} | :none
+  @spec compact_oldest(t()) :: {:ok, t(), {group_id(), group_id()}, pos_integer()} | :none
   def compact_oldest(%__MODULE__{} = prov) do
     if :gb_sets.is_empty(prov.drafts) do
       :none
@@ -489,7 +489,7 @@ defmodule Minga.Buffer.Provenance do
         )
 
       {prov, examined} = absorb_stretch(prov, old, new, first, last)
-      {:ok, prov, old, examined}
+      {:ok, prov, {old, new}, examined}
     end
   end
 
@@ -1854,7 +1854,8 @@ defmodule Minga.Buffer.Provenance do
   # its writer and deleters came, `old` and `new` are next to each other, or not both there.
   @spec merge_safe?(Run.t(), group_id(), group_id()) :: boolean()
   defp merge_safe?(run, old, new) do
-    order = [run.group | Enum.reverse(run.deletions)]
+    # An inert run names its writer among its deleters too; it counts once, so a chain of steps keeps folding.
+    order = Enum.uniq([run.group | Enum.reverse(run.deletions)])
 
     case {Enum.find_index(order, &(&1 == old)), Enum.find_index(order, &(&1 == new))} do
       {nil, _new} -> true

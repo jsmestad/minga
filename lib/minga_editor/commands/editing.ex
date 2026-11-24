@@ -327,6 +327,10 @@ defmodule MingaEditor.Commands.Editing do
         Log.info(:editor, "No Minga task edits to revert in this buffer")
         state
 
+      # The buffer names the task and the line of the edit that holds it in *Messages*; nothing changed.
+      {:blocked, _overlap} ->
+        state
+
       # The buffer logs the refused undo; nothing changed.
       {:error, _reason} ->
         state

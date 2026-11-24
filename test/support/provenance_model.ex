@@ -171,7 +171,7 @@ defmodule Minga.Test.ProvenanceModel do
 
   # Old and new are next to each other in the order the byte's writer and deleters came, or not both there.
   defp merge_safe?(entry, old, new) do
-    order = [entry.group | Enum.reverse(entry.deletions)]
+    order = Enum.uniq([entry.group | Enum.reverse(entry.deletions)])
 
     case {Enum.find_index(order, &(&1 == old)), Enum.find_index(order, &(&1 == new))} do
       {nil, _new} -> true

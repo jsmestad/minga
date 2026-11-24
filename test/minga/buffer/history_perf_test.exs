@@ -37,9 +37,12 @@ defmodule Minga.Buffer.HistoryPerfTest do
   end
 
   # Compaction runs in slices between messages; wait until the buffer has no slice left to run.
-  defp settled(buffer) do
+  defp settled(buffer, attempts \\ 100_000)
+  defp settled(_buffer, 0), do: flunk("compaction never settled")
+
+  defp settled(buffer, attempts) do
     case :sys.get_state(buffer) do
-      %{compaction_scheduled: true} -> settled(buffer)
+      %{compaction_scheduled: true} -> settled(buffer, attempts - 1)
       _idle -> buffer
     end
   end
@@ -100,7 +103,13 @@ defmodule Minga.Buffer.HistoryPerfTest do
     :erlang.garbage_collect(buffer)
     :ok = BufferProcess.move_to(buffer, {6000, 10})
     {first_key, :ok} = ms(fn -> BufferProcess.insert_text(buffer, "h") end)
-    IO.puts("\n[perf10] first_key_ms=#{first_key}")
-    assert first_key < 50
+
+    # The same keystroke in a buffer with no history, so the bound separates history cost from document and load cost.
+    fresh = start_supervised!({BufferProcess, content: file(12_000)}, id: make_ref())
+    :erlang.garbage_collect(fresh)
+    :ok = BufferProcess.move_to(fresh, {6000, 10})
+    {baseline, :ok} = ms(fn -> BufferProcess.insert_text(fresh, "h") end)
+    IO.puts("\n[perf10] first_key_ms=#{first_key} baseline_ms=#{baseline}")
+    assert first_key < baseline + 50
   end
 end

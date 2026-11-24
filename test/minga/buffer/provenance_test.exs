@@ -399,7 +399,7 @@ defmodule Minga.Buffer.ProvenanceTest do
   defp compact_all(prov) do
     case Provenance.compact_oldest(prov) do
       :none -> prov
-      {:ok, prov, _old, _examined} -> compact_all(prov)
+      {:ok, prov, _merged, _examined} -> compact_all(prov)
     end
   end
 
@@ -472,7 +472,7 @@ defmodule Minga.Buffer.ProvenanceTest do
         assert ProvenanceModel.drafts(model) == []
         state
 
-      {:ok, compacted, _old, examined} ->
+      {:ok, compacted, _merged, examined} ->
         assert examined > 0
         model = ProvenanceModel.compact_oldest(model)
         assert Provenance.run_count(compacted) <= Provenance.run_count(prov)
@@ -748,7 +748,7 @@ defmodule Minga.Buffer.ProvenanceTest do
         false
 
       _some ->
-        order = [run.group | Enum.reverse(run.deletions)]
+        order = Enum.uniq([run.group | Enum.reverse(run.deletions)])
         new = Enum.min(partners)
 
         abs(Enum.find_index(order, &(&1 == run.group)) - Enum.find_index(order, &(&1 == new))) ==

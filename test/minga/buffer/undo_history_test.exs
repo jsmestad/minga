@@ -673,6 +673,34 @@ defmodule Minga.Buffer.UndoHistoryTest do
       IO.puts("\n[compaction] history slices run: #{Process.get(:slices, 0)}")
     end
 
+    # The final review: steps that arrive faster than slices run left merged runs that no later slice could reach.
+    test "compaction lagging several steps behind still folds a task's whole chain of drafts" do
+      lines = for n <- 1..20, do: "value_#{n} = beta\n"
+
+      lagging =
+        Enum.reduce(1..8, world(Enum.join(lines), run_budget: 30), fn round, world ->
+          content = text(world)
+
+          world =
+            edit(
+              world,
+              {:minga, "task-1", "s#{round}"},
+              0,
+              byte_size(content),
+              String.replace(content, ~r/beta\d*/, "beta#{round}")
+            )
+
+          case UndoHistory.compact_slice(want_compaction(world).history, 5) do
+            {_status, history, _slice} -> %{world | history: history}
+          end
+        end)
+
+      settled = lagging |> want_compaction() |> compact_fully(500)
+      provenance = UndoHistory.provenance(settled.history)
+      assert Provenance.draft_count(provenance) == 0
+      assert Provenance.run_count(provenance) <= 3 * length(lines) + 1
+    end
+
     test "compaction reports a history still over budget once, when no drafts are left" do
       world =
         Enum.reduce(1..6, world("a\nb\nc\n", run_budget: 4), fn n, world ->

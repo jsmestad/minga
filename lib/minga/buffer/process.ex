@@ -3188,11 +3188,10 @@ defmodule Minga.Buffer.Process do
     state = %{state | undo_history: history}
     name = display_name_from_state(state)
 
-    if slice.merged > 0 do
+    if slice.merged != [] do
       log_to_messages(
         state,
-        "Compacted Minga's history in #{name}: merged #{slice.merged} overwritten step draft(s), " <>
-          "#{slice.runs} runs remain",
+        "Compacted Minga's history in #{name}: merged #{merged_steps(slice.merged)}; #{slice.runs} runs remain",
         :info
       )
     end
@@ -3923,6 +3922,21 @@ defmodule Minga.Buffer.Process do
   end
 
   defp schedule_compaction(state), do: state
+
+  # Names the steps a compaction slice merged, the first few in full.
+  @spec merged_steps([{UndoHistory.minga_group(), UndoHistory.minga_group()}]) :: String.t()
+  defp merged_steps(pairs) do
+    {shown, rest} = Enum.split(pairs, 3)
+
+    named =
+      Enum.map_join(shown, ", ", fn {old, new} -> "#{step_label(old)} into #{step_label(new)}" end)
+
+    if rest == [], do: named, else: named <> " and #{length(rest)} more"
+  end
+
+  @spec step_label(UndoHistory.minga_group()) :: String.t()
+  defp step_label({:minga, task_id, step_id}), do: "task #{task_id} step #{step_id}"
+  defp step_label({:untasked, n}), do: "untasked edit #{n}"
 
   # Tasks that depend on each other revert together; see `UndoHistory.next_reject/1`.
   @spec tasks_label([UndoHistory.task(), ...]) :: String.t()

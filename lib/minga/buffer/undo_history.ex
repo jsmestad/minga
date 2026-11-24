@@ -11,7 +11,7 @@ defmodule Minga.Buffer.UndoHistory do
 
   `reject_task/4` and `undo_agent_session/3` revert all of a task's steps together, and a revert is exact or refused, never wrong text. A task that started later and rewrote the task's text blocks it until it is reverted first. So does an edit that deleted part of one of the task's replacements (text a step wrote in place of other text), because the revert could not tell which part of the replaced text that edit stands for. `undo_agent_session/3` follows these dependencies and reverts a whole unit of tasks that depend on each other; see `next_reject/1`. A group of yours joins that unit only when Minga rewrote all of its text after it, so its undo is blocked and none of its text is visible; it then leaves your undo stack. An edit of yours with visible text inside a task's change holds that task until you undo it. Per-change keep and reject (#4049) may refine these rules to single steps.
 
-  Every Minga step is checked against a run budget. Past it, `compaction_wanted?/1` asks the owner to run `compact_slice/2`, which merges drafts (text a step wrote that a newer step of the same task rewrote) into the step that overwrote them. Your undo and redo, every reject, and the document are unchanged; compaction can only free one of your groups whose sole blocker was such a draft, and flipping that group then changes nothing there.
+  Every Minga step is checked against a run budget. Past it, `compaction_wanted?/1` asks the owner to run `compact_slice/2`, which merges drafts (text a step wrote that a newer step of the same task rewrote) into the step that overwrote them. At that moment the document, the text of your undo and redo and of every reject, and whether each is blocked are unchanged; a step merges only where no other group touched a run between the two steps.
 
   `reload/3` takes in content changed on disk without losing Minga's unreviewed steps.
 
@@ -46,10 +46,12 @@ defmodule Minga.Buffer.UndoHistory do
   @typedoc "Monotonic timestamp in milliseconds, supplied by the caller so this module stays clock-free."
   @type at :: integer()
 
-  @typedoc "What one compaction slice did; see `compact_slice/2`."
+  @typedoc """
+  What one compaction slice did; see `compact_slice/2`. `merged` names each step merged into a newer step of its task, as `{older, newer}`, in the order they merged.
+  """
   @type slice :: %{
           examined: non_neg_integer(),
-          merged: non_neg_integer(),
+          merged: [{minga_group(), minga_group()}],
           runs: non_neg_integer(),
           drafts: non_neg_integer()
         }
@@ -298,19 +300,19 @@ defmodule Minga.Buffer.UndoHistory do
   @doc """
   Merges drafts, oldest step first, until about `max_runs` runs were examined, the history is at 75% of its run budget, or no drafts remain.
 
-  A draft is text a Minga step wrote that a newer step of the same task rewrote, with both steps still unreviewed. Merging the older step into the newer one across the stretch around the draft drops the draft and keeps every outcome you can reach: your undo and redo, rejecting or keeping any task, and the document itself. Only reverting the newer step alone, which no command does, now also reverts the older one there. A step left with no text leaves the history.
+  A draft is text a Minga step wrote that a newer step of the same task rewrote, with both steps still unreviewed. Merging the older step into the newer one across the stretch around the draft drops the draft and keeps, at that moment, the document, the text of every undo, redo and reject, and every refusal (though a refusal may name the newer step). Only reverting the newer step alone, which no command does, now also reverts the older one there. A step left with no text leaves the history.
 
   Returns `{:more, history, slice}` while there is more to do, or `{:done, history, slice}`; `{:over_budget, history, slice}` the first time the history is still over budget with no drafts left, so the owner can warn once per history.
   """
   @spec compact_slice(t(), pos_integer()) :: {:more | :done | :over_budget, t(), slice()}
   def compact_slice(%__MODULE__{} = history, max_runs)
       when is_integer(max_runs) and max_runs > 0 do
-    {history, examined, merged} = compact_until(history, max_runs, 0, 0)
+    {history, examined, merged} = compact_until(history, max_runs, 0, [])
     provenance = history.provenance
 
     slice = %{
       examined: examined,
-      merged: merged,
+      merged: Enum.reverse(merged),
       runs: Provenance.run_count(provenance),
       drafts: Provenance.draft_count(provenance)
     }
@@ -327,8 +329,8 @@ defmodule Minga.Buffer.UndoHistory do
     end
   end
 
-  @spec compact_until(t(), pos_integer(), non_neg_integer(), non_neg_integer()) ::
-          {t(), non_neg_integer(), non_neg_integer()}
+  @spec compact_until(t(), pos_integer(), non_neg_integer(), [{minga_group(), minga_group()}]) ::
+          {t(), non_neg_integer(), [{minga_group(), minga_group()}]}
   defp compact_until(history, max_runs, examined, merged) do
     if examined >= max_runs or under_target?(history) do
       {history, examined, merged}
@@ -337,9 +339,12 @@ defmodule Minga.Buffer.UndoHistory do
         :none ->
           {history, examined, merged}
 
-        {:ok, provenance, old, runs} ->
+        {:ok, provenance, {old, new}, runs} ->
+          pair =
+            {Provenance.group_key(history.provenance, old), Provenance.group_key(provenance, new)}
+
           history = forget_empty_step(history, old, provenance)
-          compact_until(history, max_runs, examined + runs, merged + 1)
+          compact_until(history, max_runs, examined + runs, [pair | merged])
       end
     end
   end

@@ -231,7 +231,10 @@ defmodule Minga.Buffer.AuthorshipTest do
         )
       end
 
-      assert_receive {:minga_event, :log_message, %{text: "Compacted Minga's history in " <> _}}
+      assert_receive {:minga_event, :log_message,
+                      %{text: "Compacted Minga's history in " <> compacted}}
+
+      assert compacted =~ "task t step s1 into task t step s2"
       %{undo_history: history} = :sys.get_state(buffer)
       provenance = UndoHistory.provenance(history)
       assert Provenance.run_count(provenance) <= 45 or Provenance.draft_count(provenance) == 0
