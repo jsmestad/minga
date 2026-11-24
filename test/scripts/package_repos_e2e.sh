@@ -15,7 +15,8 @@ export GNUPGHOME="$work/gnupg"
 mkdir -m 700 "$GNUPGHOME"
 gpg --batch --quiet --passphrase '' --quick-generate-key 'Minga Test <test@invalid>' rsa3072 sign never
 gpg --batch --pinentry-mode loopback --passphrase '' --armor --export-secret-keys > "$work/key.asc"
+fingerprint=$(gpg --list-secret-keys --with-colons | awk -F: '/^fpr/ { print $10; exit }')
 gpgconf --kill gpg-agent
 
-scripts/build-package-repos "$work/assets" "$version" "$(git rev-parse HEAD)" "$work/key.asc" "$work/tree" > /dev/null
+scripts/build-package-repos "$work/assets" "$version" "$(git rev-parse HEAD)" "$work/key.asc" "$fingerprint" "$work/tree" > /dev/null
 scripts/test-package-repos "$work/tree" "$version"

@@ -46,7 +46,7 @@ class UploadPackageReposTest(unittest.TestCase):
     def fake_aws(self, *args, capture=False):
         if args[:2] == ("s3api", "put-object"):
             self.uploads.append(args[args.index("--key") + 1])
-            self.assertIn(args[args.index("--cache-control") + 1], (uploader.IMMUTABLE, uploader.REVALIDATE))
+            self.assertEqual(args[args.index("--cache-control") + 1], uploader.REVALIDATE)
         elif args[:2] == ("s3api", "list-objects-v2"):
             return json.dumps({"Contents": self.remote})
         elif args[:2] == ("s3api", "delete-object"):
@@ -86,6 +86,15 @@ class UploadPackageReposTest(unittest.TestCase):
         self.assertEqual(sorted(reversed(order), key=uploader.release_order), order)
         with self.assertRaises(ValueError):
             uploader.release_order("0.1.0-rc.1")
+
+    def test_check_served_accepts_this_or_a_newer_version_only(self):
+        for served, expected in (("0.1.0-dev.8", True), ("0.1.0-dev.10", True), ("0.1.0", True),
+                                 ("0.1.0-dev.7", False)):
+            with self.subTest(served=served), \
+                    mock.patch.object(uploader, "published_manifest", return_value={"version": served}):
+                self.assertEqual(uploader.serves_at_least("0.1.0-dev.8")[0], expected)
+        with mock.patch.object(uploader, "published_manifest", return_value=None):
+            self.assertFalse(uploader.serves_at_least("0.1.0-dev.8")[0])
 
     def test_keeps_the_previous_version_and_recent_files_and_deletes_older_versions(self):
         old = (NOW - timedelta(days=3)).isoformat()

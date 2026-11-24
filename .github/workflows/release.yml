@@ -878,9 +878,15 @@ jobs:
       queue: max
     permissions:
       contents: read
+    # bash adds pipefail, so the upload's exit status survives the pipe to the step summary.
+    defaults:
+      run:
+        shell: bash
     env:
       VERSION: ${{ needs.validate.outputs.version }}
       SOURCE_SHA: ${{ needs.validate.outputs.source_sha }}
+      # The fingerprint the install docs tell users to trust; a different signing key fails the build.
+      PACKAGE_SIGNING_FINGERPRINT: 2C5D2396B82C1278D4596A0965711C0C3853857B
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -929,26 +935,34 @@ jobs:
           key="$RUNNER_TEMP/package-signing-key.asc"
           trap 'rm -f "$key"' EXIT
           (umask 077 && printf '%s\n' "$PACKAGE_SIGNING_KEY" > "$key")
-          scripts/build-package-repos assets "$VERSION" "$SOURCE_SHA" "$key" repo-tree
+          scripts/build-package-repos assets "$VERSION" "$SOURCE_SHA" "$key" "$PACKAGE_SIGNING_FINGERPRINT" repo-tree
       - name: Install from the built repositories on clean distributions
         if: steps.credentials.outputs.configured == 'true'
         run: scripts/test-package-repos repo-tree "$VERSION"
       - name: Upload to packages.mingacode.dev
+        id: upload
         if: steps.credentials.outputs.configured == 'true'
         env:
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: scripts/upload-package-repos repo-tree | tee -a "$GITHUB_STEP_SUMMARY"
-      - name: Check that packages.mingacode.dev serves what was uploaded
+      - name: Check that packages.mingacode.dev serves this version or a newer one
         if: steps.credentials.outputs.configured == 'true'
+        env:
+          PUBLISHED: ${{ steps.upload.outputs.published }}
         run: |
           set -euo pipefail
-          served=$(curl -fsSL https://packages.mingacode.dev/repo.json | jq -er .version)
-          if [ "$served" != "$VERSION" ]; then
-            echo "::notice::packages.mingacode.dev serves $served, so this run did not replace it."
-            exit 0
+          curl -fsSL https://packages.mingacode.dev/repo.json > served.json
+          if [ "$PUBLISHED" = true ]; then
+            # This run uploaded: the public endpoint must serve exactly these signed indexes.
+            jq -e --arg version "$VERSION" --arg sha "$SOURCE_SHA" '.version == $version and .source_sha == $sha' served.json
+            for path in apt/dists/stable/InRelease rpm/x86_64/repodata/repomd.xml arch/x86_64/minga.db; do
+              curl -fsSL "https://packages.mingacode.dev/$path" | cmp - "repo-tree/$path"
+            done
+          else
+            # The uploader skipped because this or a newer version is already served (a rerun or an out-of-order run).
+            scripts/upload-package-repos --check-served "$VERSION"
+            served=$(jq -er .version served.json)
+            echo "::notice::packages.mingacode.dev already serves $served; this run did not replace it."
           fi
-          for path in apt/dists/stable/InRelease rpm/x86_64/repodata/repomd.xml arch/x86_64/minga.db; do
-            curl -fsSL "https://packages.mingacode.dev/$path" | cmp - "repo-tree/$path"
-          done

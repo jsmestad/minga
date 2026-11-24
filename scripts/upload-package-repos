@@ -26,7 +26,7 @@ import urllib.request
 BUCKET = "minga-packages"
 PUBLIC_URL = "https://packages.mingacode.dev"
 GRACE = timedelta(hours=1)
-IMMUTABLE = "public, max-age=31536000, immutable"
+# Everything revalidates. A rerun for the same version re-signs, so even package bytes can change.
 REVALIDATE = "no-cache"
 CONTENT_TYPES = {
     ".asc": "text/plain", ".sig": "application/pgp-signature", ".gpg": "application/pgp-signature",
@@ -90,7 +90,7 @@ def upload(tree, key):
     content_type = next((value for suffix, value in CONTENT_TYPES.items() if key.endswith(suffix)),
                         "application/octet-stream")
     aws("s3api", "put-object", "--bucket", BUCKET, "--key", key, "--body", str(path),
-        "--content-type", content_type, "--cache-control", IMMUTABLE if wave(key) == 0 else REVALIDATE,
+        "--content-type", content_type, "--cache-control", REVALIDATE,
         capture=True)
 
 
@@ -124,12 +124,32 @@ def publish(tree, now):
     return True
 
 
+def serves_at_least(version):
+    manifest = published_manifest()
+    return manifest is not None and release_order(manifest["version"]) >= release_order(version), manifest
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("tree", type=Path)
+    parser.add_argument("tree", type=Path, nargs="?")
+    parser.add_argument("--check-served", metavar="VERSION",
+                        help=f"exit 0 if {PUBLIC_URL} serves VERSION or newer, 1 otherwise; uploads nothing")
     args = parser.parse_args()
+    if args.check_served:
+        try:
+            current, manifest = serves_at_least(args.check_served)
+        except (OSError, ValueError, KeyError, urllib.error.URLError) as error:
+            print(f"{parser.prog}: {error}", file=sys.stderr)
+            return 1
+        print(f"{PUBLIC_URL} serves {manifest['version'] if manifest else 'nothing'}")
+        return 0 if current else 1
+    if args.tree is None:
+        parser.error("TREE is required unless --check-served is given")
     try:
-        publish(args.tree, datetime.now(timezone.utc))
+        published = publish(args.tree, datetime.now(timezone.utc))
+        if "GITHUB_OUTPUT" in os.environ:
+            with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+                output.write(f"published={'true' if published else 'false'}\n")
     except (OSError, ValueError, KeyError, subprocess.CalledProcessError, urllib.error.URLError) as error:
         print(f"{parser.prog}: {error}", file=sys.stderr)
         return 1
