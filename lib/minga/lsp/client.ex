@@ -674,11 +674,21 @@ defmodule Minga.LSP.Client do
 
   def handle_info({port, {:data, data}}, %{port: port} = state) do
     buffer = state.buffer <> data
-    {messages, remaining} = JsonRpc.decode(buffer)
-    state = %{state | buffer: remaining}
 
-    state = Enum.reduce(messages, state, &handle_message/2)
-    {:noreply, state}
+    case JsonRpc.decode(buffer) do
+      {messages, remaining} when is_list(messages) ->
+        state = %{state | buffer: remaining}
+        state = Enum.reduce(messages, state, &handle_message/2)
+        {:noreply, state}
+
+      {:error, reason} ->
+        Log.warning(
+          :lsp,
+          "LSP #{state.server_config.name} framing error: #{inspect(reason)}, stopping client"
+        )
+
+        {:stop, {:framing_error, reason}, %{state | buffer: ""}}
+    end
   end
 
   # Normal exit after deliberate shutdown: :stopped was already broadcast.

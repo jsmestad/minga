@@ -22,6 +22,14 @@ defmodule Minga.LSP.JsonRpc do
   * **Response** — has `id` and either `result` or `error`
   """
 
+  # ── Limits ──────────────────────────────────────────────────────────────────
+
+  @max_header_bytes 8_192
+  @max_body_bytes 50_000_000
+  @max_buffer_bytes 52_000_000
+
+  # ── Types ───────────────────────────────────────────────────────────────────
+
   @typedoc "A decoded JSON-RPC message as a map."
   @type message :: map()
 
@@ -31,6 +39,12 @@ defmodule Minga.LSP.JsonRpc do
   @typedoc "A JSON value that can be encoded in a JSON-RPC message."
   @type json_value ::
           nil | boolean() | number() | String.t() | [json_value()] | %{String.t() => json_value()}
+
+  @typedoc "Reason returned when a frame exceeds safety limits."
+  @type decode_error ::
+          :buffer_overflow
+          | {:body_too_large, non_neg_integer()}
+          | {:headers_too_large, non_neg_integer()}
 
   @doc """
   Encodes a JSON-RPC request (has an `id`, expects a response).
@@ -118,9 +132,13 @@ defmodule Minga.LSP.JsonRpc do
       iex> rest
       ""
   """
-  @spec decode(binary()) :: {[message()], binary()}
+  @spec decode(binary()) :: {[message()], binary()} | {:error, decode_error()}
   def decode(buffer) when is_binary(buffer) do
-    decode_loop(buffer, [])
+    if byte_size(buffer) > @max_buffer_bytes do
+      {:error, :buffer_overflow}
+    else
+      decode_loop(buffer, [])
+    end
   end
 
   # ── Private ────────────────────────────────────────────────────────────────
@@ -132,7 +150,7 @@ defmodule Minga.LSP.JsonRpc do
     ["Content-Length: ", Integer.to_string(length), "\r\n\r\n", json]
   end
 
-  @spec decode_loop(binary(), [message()]) :: {[message()], binary()}
+  @spec decode_loop(binary(), [message()]) :: {[message()], binary()} | {:error, decode_error()}
   defp decode_loop(buffer, acc) do
     case extract_one(buffer) do
       {:ok, msg, rest} ->
@@ -141,16 +159,23 @@ defmodule Minga.LSP.JsonRpc do
       {:drop, rest} ->
         decode_loop(rest, acc)
 
+      {:error, reason} ->
+        {:error, reason}
+
       :incomplete ->
         {Enum.reverse(acc), buffer}
     end
   end
 
-  @spec extract_one(binary()) :: {:ok, message(), binary()} | {:drop, binary()} | :incomplete
+  @spec extract_one(binary()) ::
+          {:ok, message(), binary()} | {:drop, binary()} | {:error, decode_error()} | :incomplete
   defp extract_one(buffer) do
     case :binary.split(buffer, "\r\n\r\n") do
-      [headers_section, body_and_rest] ->
+      [headers_section, body_and_rest] when byte_size(headers_section) <= @max_header_bytes ->
         extract_with_headers(headers_section, body_and_rest)
+
+      [headers_section, _body_and_rest] ->
+        {:error, {:headers_too_large, byte_size(headers_section)}}
 
       [_partial] ->
         :incomplete
@@ -158,11 +183,14 @@ defmodule Minga.LSP.JsonRpc do
   end
 
   @spec extract_with_headers(binary(), binary()) ::
-          {:ok, message(), binary()} | {:drop, binary()} | :incomplete
+          {:ok, message(), binary()} | {:drop, binary()} | {:error, decode_error()} | :incomplete
   defp extract_with_headers(headers_section, body_and_rest) do
     case parse_content_length(headers_section) do
-      {:ok, content_length} ->
+      {:ok, content_length} when content_length <= @max_body_bytes ->
         extract_body(content_length, body_and_rest)
+
+      {:ok, content_length} ->
+        {:error, {:body_too_large, content_length}}
 
       :error ->
         Minga.Log.warning(
