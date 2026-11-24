@@ -6,7 +6,7 @@ defmodule MingaEditor.Agent.EditPublication do
 
   * `record_edit/3` and `turn_finished/2` keep the workspace review state in step with agent file events. They are pure state transitions, safe on the Editor mailbox.
   * `publish/2` and `discard/2` refresh the review from the authoritative `ProjectView.diff/1`, then promote or discard the view. A successful promote or discard stops the view's changeset, so a live session's provider is first moved to a fresh overlay, and the workspace adopts it.
-  * `before_quit/1` is the editor's exit gate: it blocks while any workspace still holds staged edits and offers Publish or Discard. `discard_all/1` is the explicit discard for force and abort exits.
+  * `before_quit/1` is the editor's exit gate: it blocks while any workspace still holds staged edits and offers Publish or Discard. `discard_all/1` is the explicit discard for force and abort exits. `before_close/2` is the same gate for closing one workspace, which ends its agent session.
   * `request_recovery/1` and `recovered/3` reconnect staged edits after a restart. `MingaAgent.StagedDraftKeeper` keeps every staged view durable; a starting Editor asks it for the project's staged views and installs each one in its workspace, so the edits can be published or discarded again.
 
   Publication runs while the agent is between turns. The provider is the authority: it refuses the move to a fresh overlay while a request is active, and then nothing is published or discarded. After a failed or conflicted publication the provider returns to the original view, which still holds the staged edits.
@@ -170,13 +170,7 @@ defmodule MingaEditor.Agent.EditPublication do
         {:ok, state}
 
       staged ->
-        state =
-          Enum.reduce(staged, state, fn {workspace, count}, state ->
-            state
-            |> install_workspace(tab_bar(state), workspace)
-            |> Notifications.agent_edits_unpublished(workspace.id, workspace.label, count)
-          end)
-
+        state = Enum.reduce(staged, state, &offer_publication(&2, &1))
         total = staged |> Enum.map(&elem(&1, 1)) |> Enum.sum()
 
         {:blocked,
@@ -184,6 +178,28 @@ defmodule MingaEditor.Agent.EditPublication do
            state,
            "#{Notifications.agent_edits_title(total)}. Publish or discard them (SPC a p) before quitting. :qa!, :q! and :cq quit and discard them."
          )}
+    end
+  end
+
+  @doc """
+  Checks one workspace for staged agent edits before it closes, which also ends its agent session.
+
+  Returns `{:ok, state}` when nothing is staged. Otherwise posts the workspace's Publish/Discard card and a notice, and returns `{:blocked, state}`, so the workspace stays open with its edits reachable.
+  """
+  @spec before_close(EditorState.t(), non_neg_integer()) ::
+          {:ok, EditorState.t()} | {:blocked, EditorState.t()}
+  def before_close(%EditorState{} = state, workspace_id) when is_integer(workspace_id) do
+    with %TabBar{} = tb <- tab_bar(state),
+         %Workspace{} = workspace <- TabBar.get_workspace(tb, workspace_id),
+         {%Workspace{} = staged, count} <- staged_edits(workspace) do
+      {:blocked,
+       state
+       |> offer_publication({staged, count})
+       |> NoticeWorkflow.publish(
+         "#{Notifications.agent_edits_title(count)}. Publish or discard them before closing #{staged.label}."
+       )}
+    else
+      _nothing_staged -> {:ok, state}
     end
   end
 
@@ -695,17 +711,41 @@ defmodule MingaEditor.Agent.EditPublication do
   defp staged_workspaces(state) do
     case tab_bar(state) do
       %TabBar{workspaces: workspaces} ->
-        for %Workspace{payload: %WorkspaceAgent{project_view: %ProjectView{} = view}} = ws <-
-              workspaces,
-            ProjectView.active?(view),
-            {:ok, %Workspace{} = refreshed} <- [refresh_review(ws)],
-            count <- [WorkspaceReview.draft_count(refreshed.review)],
-            count > 0,
-            do: {refreshed, count}
+        for %Workspace{} = ws <- workspaces,
+            {%Workspace{}, _count} = staged <- [staged_edits(ws)],
+            do: staged
 
       _no_tab_bar ->
         []
     end
+  end
+
+  # Reads the staged edit count from the view's authoritative diff, not from the
+  # review state, which agent events may not have advanced yet.
+  @spec staged_edits(Workspace.t()) :: {Workspace.t(), pos_integer()} | :none
+  defp staged_edits(
+         %Workspace{payload: %WorkspaceAgent{project_view: %ProjectView{} = view}} = workspace
+       ) do
+    if ProjectView.active?(view), do: counted_edits(workspace), else: :none
+  end
+
+  defp staged_edits(%Workspace{}), do: :none
+
+  @spec counted_edits(Workspace.t()) :: {Workspace.t(), pos_integer()} | :none
+  defp counted_edits(workspace) do
+    with {:ok, %Workspace{} = refreshed} <- refresh_review(workspace),
+         count when count > 0 <- WorkspaceReview.draft_count(refreshed.review) do
+      {refreshed, count}
+    else
+      _unreadable_or_clean -> :none
+    end
+  end
+
+  @spec offer_publication(EditorState.t(), {Workspace.t(), pos_integer()}) :: EditorState.t()
+  defp offer_publication(state, {%Workspace{} = workspace, count}) do
+    state
+    |> install_workspace(tab_bar(state), workspace)
+    |> Notifications.agent_edits_unpublished(workspace.id, workspace.label, count)
   end
 
   # ── Presentation and installation ───────────────────────────────────────
