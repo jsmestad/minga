@@ -53,8 +53,14 @@ defmodule MingaEditor.FocusOwner do
 
   defp modal_owner(:prompt, _modal, _state), do: {:editor_view, :prompt, 0}
 
-  defp modal_owner(:picker, {:picker, %{picker_ui: picker}}, _state),
-    do: {:picker_query, :picker, picker.activation_offer.generation}
+  # A picker with nothing to filter takes no text.
+  # The editor view keeps the keyboard, so its list keys reach the picker.
+  defp modal_owner(:picker, {:picker, %{picker_ui: picker}}, _state) do
+    responder =
+      if MingaEditor.UI.Picker.list_keys?(picker.picker), do: :editor_view, else: :picker_query
+
+    {responder, :picker, picker.activation_offer.generation}
+  end
 
   # Pending trigger bookkeeping also uses the completion tag, but does not
   # claim input until the completion value has arrived.

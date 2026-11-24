@@ -419,6 +419,8 @@ Fuzzy finder / command palette state. Uses sectioned envelope: `opcode(1) + sect
 | 0x03 | Items | item_count + items (positional per item) |
 | 0x04 | ActionMenu | visible flag + selected + actions + activation IDs |
 | 0x05 | ModePrefix | mode prefix string |
+| 0x06 | LoadStatus | ready, loading, or an error message |
+| 0x07 | Empty | the empty-state header (an `empty_list`) and list_keys, present only while the picker offers next steps instead of results |
 
 ```
 When visible:
@@ -455,6 +457,14 @@ ActionMenu section 0x04 payload:
 ModePrefix section 0x05 payload:
   mode_prefix_len(2) + mode_prefix(mode_prefix_len)
 
+Empty section 0x07 payload (protocol_version 45):
+  empty_list + list_keys(1)
+
+empty_list (shared by every surface that shows an empty state):
+  glyph_len(1) + glyph + title_len(2) + title + why_len(2) + why
+  + selected(1) + action_count(1) + actions...
+  Per action: id_len(1) + id + key_len(2) + key + label_len(2) + label
+
 icon_color is a 24-bit RGB value for the item's icon.
 flags bits:
   bit 0: reserved, written as 0 (was two_line before protocol_version 41)
@@ -473,6 +483,8 @@ marked_count is authoritative across the full picker item set, including marked 
 action menu shows source-specific actions (e.g., "Open", "Delete", "Open in split").
 activation_generation and activation IDs form opaque source-owned identities. Retained semantic items keep their IDs across reorder and refilter within the same activation generation. Native frontends must return those values unchanged and must not derive authority from row positions, labels, paths, or source action names.
 mode prefix badges show switched picker sources like command, buffer, or project search.
+The empty section says what happened when nothing matches (docs/design/anatomy.md, "Empty state"): the title (with the state glyph if there is one) and one muted why line, drawn on the row labels' leading edge above the items. Its items are then the source's next steps ("Search ignored files too", annotation "-- -u"), selected, moved, run and clicked like any row; frontends draw no file icon on them. A picker sends an empty_list with no actions because its next steps are items. list_keys is 1 when the picker has nothing to filter: it takes no text, the BEAM moves keyboard focus to the editor view, frontends hide the query field and show "j k move, ↩ run, q close", and plain keys go to the BEAM. With list_keys 0 the field stays live and the hints read "⌃J ⌃K move, ↩ run, esc close".
+An empty_list action's id is the registered command it runs; a surface that draws actions sends a click as the `execute_command` gui_action (0x16) with that id. `selected` is the preselected action.
 
 Native frontends may optimistically edit the query with a platform text control so caret movement, selection, paste, cut, copy, undo, and IME composition remain local and immediate. Query semantics remain BEAM-owned. The frontend sends each complete field value with the current `generation` and a monotonically increasing edit sequence. The BEAM echoes the accepted sequence as `acknowledged_edit_seq`; the frontend must not replace a newer unacknowledged local value with an older echo. A new generation replaces all pending local edits.
 

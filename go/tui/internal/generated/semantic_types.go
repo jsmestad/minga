@@ -313,6 +313,20 @@ type PickerItem struct {
 	Group          string
 }
 
+type EmptyListAction struct {
+	ID    string
+	Key   string
+	Label string
+}
+
+type EmptyList struct {
+	Glyph    string
+	Title    string
+	Why      string
+	Selected uint8
+	Actions  []EmptyListAction
+}
+
 type WhichKeyBinding struct {
 	Kind uint8
 	Key  string
@@ -622,6 +636,11 @@ type GuiPickerModePrefix struct {
 type GuiPickerLoadStatus struct {
 	Status  uint8
 	Message string
+}
+
+type GuiPickerEmpty struct {
+	Empty    EmptyList
+	ListKeys uint8
 }
 
 type GuiAgentChatHeader struct {

@@ -249,6 +249,8 @@ Every picker (find file, project search, the switcher) and every minibuffer prom
 | `⌃K` | Move up where there is a list; delete to the end of the line in a prompt without one | shipped |
 | `⌃T`, `⌃Q` | Pin, send to quickfix (below) | new; arrive with pins and quickfix |
 
+When nothing matches, the picker says so and offers its next steps as rows in the list (see [surfaces.md](surfaces.md#empty-states-and-notices-with-actions)): move to one with `⌃J` / `⌃K` and run it with `↩`, or click it. Typing keeps editing the query. A picker with nothing to filter at all (no projects yet, no extensions installed) takes no text, so it is a list like a special buffer: `j` / `k` move, `↩` runs, `q` or `esc` closes.
+
 ## File switcher
 
 `SPC ,` opens the switcher.

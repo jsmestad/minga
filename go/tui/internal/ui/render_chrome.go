@@ -874,6 +874,12 @@ func (m Model) renderPickerList(title string, picker protocol.Picker, height int
 		lines = append(lines, renderPadded(sepStyle, strings.Repeat("─", max(width, 1)), width))
 		headerRows = 2
 	}
+	if picker.Empty != nil {
+		header := emptyListHeader(*picker.Empty, width, m.pickerEmptyColors(), theme)
+		header = header[:min(len(header), max(height-headerRows-1, 0))]
+		lines = append(lines, header...)
+		headerRows += len(header)
+	}
 	rowBudget := max(height-headerRows, 0)
 	selected := m.effectivePickerIndex(picker)
 	start, end, headers := pickerItemWindow(picker.Items, selected, rowBudget)
@@ -883,7 +889,7 @@ func (m Model) renderPickerList(title string, picker protocol.Picker, height int
 		if headers && pickerStartsSection(picker.Items, index, start) {
 			lines = append(lines, m.renderPickerSectionHeader(item.Group, width))
 		}
-		row := m.renderPickerItemRow(title, item, index == selected, activeSlot, width)
+		row := m.renderPickerItemRow(title, item, index == selected, activeSlot, picker.Empty != nil, width)
 		if slot := index - start; slot < len(m.zones.picker.items) && item.ActivationID != 0 {
 			m.zones.picker.items[slot] = item.ActivationID
 			row = m.zones.Mark(pickerPointerZone(slot), row)
@@ -896,7 +902,8 @@ func (m Model) renderPickerList(title string, picker protocol.Picker, height int
 	return lines
 }
 
-func (m Model) renderPickerItemRow(title string, item protocol.PickerItem, selected bool, activeSlot bool, width int) string {
+// nextStep rows are an empty picker's actions, not files, so they draw no file icon.
+func (m Model) renderPickerItemRow(title string, item protocol.PickerItem, selected bool, activeSlot bool, nextStep bool, width int) string {
 	if item.HasStatus() {
 		return m.renderPickerStatusRow(item, selected, activeSlot, width)
 	}
@@ -913,6 +920,9 @@ func (m Model) renderPickerItemRow(title string, item protocol.PickerItem, selec
 		detail = item.Annotation
 	}
 	icon := pickerItemIcon(title, item)
+	if nextStep {
+		icon = uiIcon{}
+	}
 	rowBackground := theme.PopupSurface()
 	rowForeground := theme.PopupText()
 	if selected {
@@ -970,7 +980,38 @@ func (m Model) renderPickerWithSidePreview(title string, picker protocol.Picker,
 	return lines
 }
 
+// pickerEmptyColors are the colour roles an empty picker's header is drawn in: the popup's.
+func (m Model) pickerEmptyColors() emptyListColors {
+	theme := m.palette()
+	return emptyListColors{
+		surface:       theme.PopupSurface(),
+		text:          theme.PopupText(),
+		muted:         theme.PopupMutedText(),
+		accent:        theme.Accent(),
+		selection:     theme.PopupSelection(),
+		selectionText: theme.PopupSelectionText(),
+	}
+}
+
+// renderPickerEmptyHelp names the keys of the next-step rows: the list keys while nothing can be typed, the prompt's
+// list movement otherwise.
+func (m Model) renderPickerEmptyHelp(picker protocol.Picker, width int) string {
+	p := m.palette()
+	hints := []string{"⌃J ⌃K move", "↩ run", "esc close"}
+	if picker.ListKeys {
+		hints = []string{"j k move", "↩ run", "q close"}
+	}
+	text := strings.Join(hints, gap(spaceXL)) + " "
+	textStyle := lipgloss.NewStyle().Foreground(p.PopupMutedText()).Background(p.PopupChrome()).ColorWhitespace(true)
+	spacer := textStyle.Render(strings.Repeat(" ", max(width-ansi.StringWidth(text), 0)))
+	rowStyle := lipgloss.NewStyle().Background(p.PopupChrome()).Width(width).ColorWhitespace(true)
+	return renderPadded(rowStyle, spacer+textStyle.Render(text), width)
+}
+
 func (m Model) renderPickerHelp(picker protocol.Picker, width int) string {
+	if picker.Empty != nil {
+		return m.renderPickerEmptyHelp(picker, width)
+	}
 	p := m.palette()
 	selected := 0
 	if len(picker.Items) > 0 {

@@ -621,6 +621,37 @@ public enum Wire {
         }
     }
 
+    /// One next step of an empty list: the id echoed back when it runs, the key that runs it, and its label.
+    public struct EmptyListAction: Sendable, Equatable {
+        public let id: String
+        public let key: String
+        public let label: String
+
+        public init(id: String, key: String, label: String) {
+            self.id = id
+            self.key = key
+            self.label = label
+        }
+    }
+
+    /// The empty-state anatomy of a list surface (docs/design/anatomy.md, "Empty state"): what happened, why, and the next steps.
+    /// A picker sends no actions: its next steps are its item rows.
+    public struct EmptyList: Sendable, Equatable {
+        public let glyph: String
+        public let title: String
+        public let why: String
+        public let selected: UInt8
+        public let actions: [EmptyListAction]
+
+        public init(glyph: String = "", title: String, why: String = "", selected: UInt8 = 0, actions: [EmptyListAction] = []) {
+            self.glyph = glyph
+            self.title = title
+            self.why = why
+            self.selected = selected
+            self.actions = actions
+        }
+    }
+
     /// An action menu for the picker (the ⌃. act menu).
     public struct PickerActionMenu: Sendable {
         public let selectedIndex: UInt8

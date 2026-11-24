@@ -83,7 +83,8 @@ version = "2.0.0"
 # protocol_version 42 appends a section group (string16) to picker_item. Frontends draw a non-selectable header when the group changes between adjacent items.
 # protocol_version 43 appends a failed Agent start's remedy (u8), action label (string16) and key hint (string16) to the gui_agent_chat lifecycle section, adds agent status 6 (needs you) to the chat, status bar and workspace status bytes, and adds the agent_start_remedy gui_action.
 # protocol_version 44 appends the Agent lifecycle notice's headline (string16) and draft note (string16) to the gui_agent_chat lifecycle section, so frontends render the BEAM's copy instead of authoring their own.
-protocol_version = 44
+# protocol_version 45 adds the empty_list structure (the empty-state anatomy: glyph, title, why line, selected action and actions) and the gui_picker empty section (0x07) that carries it when a picker offers next steps instead of results. An action's id is the command it runs; a click sends the existing execute_command gui_action with it.
+protocol_version = 45
 description = "Minga port protocol opcode registry"
 
 # Directions:
@@ -1949,6 +1950,26 @@ fields = [
   { name = "group", type = "string16" },
 ]
 
+# One next step of an empty list: the opaque id a frontend echoes back, the key that runs it, and its label.
+[[structures]]
+name = "empty_list_action"
+fields = [
+  { name = "id", type = "string8" },
+  { name = "key", type = "string16" },
+  { name = "label", type = "string16" },
+]
+
+# The empty-state anatomy (docs/design/anatomy.md, "Empty state"): what happened (glyph and title), why (one muted line), and the next steps with the preselected one. A picker sends no actions: its next steps are its item rows.
+[[structures]]
+name = "empty_list"
+fields = [
+  { name = "glyph", type = "string8" },
+  { name = "title", type = "string16" },
+  { name = "why", type = "string16" },
+  { name = "selected", type = "u8" },
+  { name = "actions", type = "counted_array", count_type = "u8", element = "empty_list_action" },
+]
+
 [[structures]]
 name = "which_key_binding"
 fields = [
@@ -2549,6 +2570,17 @@ fields = [{ name = "status", type = "u8" }]
 conditional_tail = { guard = "status == 2", fields = [
   { name = "message", type = "string16" },
 ] }
+
+# picker_encoder.ex: present only while the picker offers a source's next steps instead of results. The items section then holds the next-step rows.
+# list_keys is 1 when the picker has nothing to filter: it takes no text, so frontends hide the query field and the picker's list keys (j and k move, q closes) apply.
+[[sections]]
+opcode = "gui_picker"
+id = 0x07
+name = "empty"
+fields = [
+  { name = "empty", type = "struct", element = "empty_list" },
+  { name = "list_keys", type = "u8" },
+]
 
 # gui_agent_chat (0x78) sections
 

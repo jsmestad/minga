@@ -48,10 +48,12 @@ defmodule MingaEditor.UI.Picker do
             max_visible: 10,
             results: :bounded,
             title: "",
-            marked: %{}
+            marked: %{},
+            empty: nil
 
   alias Minga.Core.SelectionWindow
   alias MingaEditor.UI.Picker.Candidate
+  alias MingaEditor.UI.Picker.Empty
   alias MingaEditor.UI.Picker.Item
   alias MingaEditor.UI.Picker.Scorer
 
@@ -73,7 +75,8 @@ defmodule MingaEditor.UI.Picker do
           max_visible: pos_integer(),
           results: :bounded | :all,
           title: String.t(),
-          marked: %{optional(term()) => true}
+          marked: %{optional(term()) => true},
+          empty: Empty.t() | nil
         }
 
   @type option ::
@@ -159,6 +162,27 @@ defmodule MingaEditor.UI.Picker do
     do: %{picker | filtered: [item], selected: 0}
 
   def offer_fallback(%__MODULE__{} = picker, _item), do: picker
+
+  @doc """
+  Offers a source's next steps when nothing matches: the rows take the place of results, the first one selected, and the header is kept for the frontends.
+
+  The offer lasts until the next filter or item change, which replaces it with real results.
+  """
+  @spec offer_empty(t(), Empty.t()) :: t()
+  def offer_empty(%__MODULE__{filtered: []} = picker, %Empty{rows: rows} = empty),
+    do: %{picker | filtered: rows, selected: 0, empty: %{empty | rows: []}}
+
+  def offer_empty(%__MODULE__{} = picker, %Empty{}), do: picker
+
+  @doc "True while the picker has nothing to filter, so it takes list keys instead of text."
+  @spec list_keys?(t()) :: boolean()
+  def list_keys?(%__MODULE__{empty: %Empty{typing?: false}}), do: true
+  def list_keys?(%__MODULE__{}), do: false
+
+  @doc "True while the picker shows a source's next steps instead of results."
+  @spec offering_next_steps?(t()) :: boolean()
+  def offering_next_steps?(%__MODULE__{empty: %Empty{}}), do: true
+  def offering_next_steps?(%__MODULE__{}), do: false
 
   # ── Navigation ──────────────────────────────────────────────────────────────
 
@@ -266,6 +290,8 @@ defmodule MingaEditor.UI.Picker do
   @doc "Toggles the mark on the currently selected item (for multi-select)."
   @spec toggle_mark(t()) :: t()
   def toggle_mark(%__MODULE__{filtered: []} = picker), do: picker
+  # Next-step rows are not results, so they cannot be marked.
+  def toggle_mark(%__MODULE__{empty: %Empty{}} = picker), do: picker
 
   def toggle_mark(%__MODULE__{marked: marked} = picker) do
     case selected_item(picker) do
@@ -354,12 +380,16 @@ defmodule MingaEditor.UI.Picker do
   # Empty query: no scoring, just present the leading slice of the (already
   # source-ordered) items, bounded so huge sources don't materialize every item.
   @spec refilter(t()) :: t()
-  defp refilter(%__MODULE__{items: items, match_query: ""} = picker) do
+  defp refilter(%__MODULE__{} = picker), do: filter_results(%{picker | empty: nil})
+
+  @spec filter_results(t()) :: t()
+
+  defp filter_results(%__MODULE__{items: items, match_query: ""} = picker) do
     filtered = picker |> unscored_results(items) |> keep_groups_together()
     %{picker | filtered: filtered, selected: clamp_selection(picker.selected, length(filtered))}
   end
 
-  defp refilter(%__MODULE__{candidates: candidates, match_query: match_query} = picker) do
+  defp filter_results(%__MODULE__{candidates: candidates, match_query: match_query} = picker) do
     case split_query(match_query) do
       [] ->
         filtered = picker |> unscored_results(picker.items) |> keep_groups_together()

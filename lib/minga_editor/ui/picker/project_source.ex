@@ -11,6 +11,7 @@ defmodule MingaEditor.UI.Picker.ProjectSource do
   alias MingaEditor.FileTree.Freshness, as: FileTreeFreshness
   alias MingaEditor.PickerUI
   alias MingaEditor.UI.Picker.Context
+  alias MingaEditor.UI.Picker.Empty
   alias MingaEditor.UI.Picker.FileSource
   alias MingaEditor.UI.Picker.Item
 
@@ -38,8 +39,36 @@ defmodule MingaEditor.UI.Picker.ProjectSource do
     :exit, _ -> []
   end
 
+  @doc """
+  With no known projects, says how Minga learns them and offers to add a folder or open a file; with a query that matches none, says so and offers the same.
+  """
+  @impl true
+  @spec empty(Empty.request()) :: Empty.t()
+  def empty(%{query: query, total: total}) do
+    {title, why} =
+      case {total, String.trim(query)} do
+        {0, _query} ->
+          {"No projects yet.", "Minga remembers folders you open."}
+
+        {_total, name} ->
+          {"No project matches #{Empty.quoted(name)}.", "Minga remembers folders you open."}
+      end
+
+    %Empty{
+      typing?: total > 0,
+      title: title,
+      why: why,
+      rows: [
+        Empty.command_row(:project_add, "Add a folder"),
+        Empty.command_row(:find_file, "Open a file")
+      ]
+    }
+  end
+
   @impl true
   @spec on_select(Item.t(), term()) :: term()
+  def on_select(%Item{id: {:next_step, _step}} = item, state), do: Empty.run_command(item, state)
+
   def on_select(%Item{id: root_path}, state) do
     case Root.directory(root_path) do
       {:ok, root} -> activate_project(root, state)

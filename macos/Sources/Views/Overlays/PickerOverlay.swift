@@ -25,6 +25,8 @@ public struct PickerOverlay: View {
     public let sendAction: ViewActionHandler<Action>?
 
     private let panelWidth: CGFloat = 600
+    /// Where a row's label starts: the row inset, the 14pt leading slot and its gap. An empty state's title shares this leading edge.
+    static let rowTextLeading: CGFloat = Spacing.md + 14 + Spacing.sm
     static let itemHeight: CGFloat = 24
     /// Status rows stack their description under the label so readiness and plan usage get the full row width.
     static let stackedItemHeight: CGFloat = 40
@@ -145,6 +147,13 @@ public struct PickerOverlay: View {
                 modePrefixBadge
             }
 
+            if state.listKeys {
+                // Nothing to filter, so there is no query to type: the title stands in for the field and the editor view keeps the keyboard.
+                Text(pickerTitle)
+                    .font(Typography.font(.body))
+                    .foregroundStyle(theme.popupFg)
+                    .frame(maxWidth: .infinity, minHeight: 20, alignment: .leading)
+            } else {
             PickerQueryField(
                 authoritativeText: state.query,
                 generation: state.queryGeneration,
@@ -160,6 +169,16 @@ public struct PickerOverlay: View {
                 sendAction: queryFieldAction
             )
             .frame(maxWidth: .infinity, minHeight: 20, alignment: .leading)
+            }
+
+            if state.empty != nil {
+                Text(state.listKeys ? "j k move   ↩ run   q close" : "⌃J ⌃K move   ↩ run   esc close")
+                    .font(Typography.font(.small))
+                    .foregroundStyle(theme.popupFg.opacity(0.5))
+                    .lineLimit(1)
+                    .fixedSize()
+                    .anatomyPart("picker.hints", text: "move run close", font: .small)
+            }
 
             if state.markedCount > 0 {
                 Text("\(state.markedCount) marked")
@@ -220,7 +239,15 @@ public struct PickerOverlay: View {
                     .frame(minHeight: 48)
             }
 
-            if case .ready = state.loadStatus, state.items.isEmpty && !state.query.isEmpty {
+            if let empty = state.empty {
+                EmptyListHeader(empty: empty, textColor: theme.popupFg, mutedColor: theme.popupFg.opacity(0.6))
+                    .padding(.leading, Self.rowTextLeading)
+                    .padding(.trailing, Spacing.md)
+                    .padding(.top, EmptyStateMetrics.inset)
+                    .padding(.bottom, EmptyStateMetrics.whyToActions)
+            }
+
+            if case .ready = state.loadStatus, state.empty == nil, state.items.isEmpty && !state.query.isEmpty {
                 Text("No matches")
                     .font(Typography.font(.emphasis))
                     .foregroundStyle(theme.popupFg.opacity(0.35))

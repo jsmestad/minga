@@ -4,6 +4,7 @@ defmodule Minga.Frontend.Adapter.GUI.PickerEncoderTest do
   alias Minga.Frontend.Adapter.GUI.Caches
   alias Minga.Protocol.EncodingError
   alias Minga.Frontend.Adapter.GUI.PickerEncoder
+  alias Minga.RenderModel.UI.EmptyList
   alias Minga.RenderModel.UI.Picker
   alias Minga.RenderModel.UI.Picker.ActionMenu
 
@@ -115,6 +116,35 @@ defmodule Minga.Frontend.Adapter.GUI.PickerEncoderTest do
       # Preview: visible, one line, one bold white "hello" segment.
       assert <<@op_gui_picker_preview, 1::8, 1::16, 1::8, 0xFFFFFF::24, 1::8, 5::16, "hello">> =
                preview
+    end
+
+    test "a picker offering next steps adds the empty section after the six it always sends" do
+      model = %Picker{
+        visible?: true,
+        title: "Search project",
+        items: [],
+        empty: %EmptyList{
+          title: "No results for “limit_lable”.",
+          why: "Ignored and hidden files were skipped."
+        },
+        list_keys?: true
+      }
+
+      {cmd, _caches} = PickerEncoder.encode(model, Caches.new())
+      <<@op_gui_picker, 7::8, picker_rest::binary>> = cmd
+      {sections, _preview} = take_sections(picker_rest, 7, %{})
+
+      title = "No results for “limit_lable”."
+      why = "Ignored and hidden files were skipped."
+
+      expected =
+        <<0::8, byte_size(title)::16, title::binary, byte_size(why)::16, why::binary, 0::8, 0::8,
+          1::8>>
+
+      assert sections[0x07] == expected
+
+      {plain, _caches} = PickerEncoder.encode(%{model | empty: nil}, Caches.new())
+      assert <<@op_gui_picker, 6::8, _rest::binary>> = plain
     end
 
     test "encodes open picker with action menu and preview" do

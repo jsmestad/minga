@@ -77,7 +77,8 @@ defmodule Minga.Keymap.PromptKeysTest do
                PromptKeys.picker_trie(split: true)
 
       assert Scope.Prompt.keymap(:insert, prompt_list: true) == PromptKeys.prompt_trie(list: true)
-      assert Scope.Picker.keymap(:normal, []) == Bindings.new()
+      assert Scope.Picker.keymap(:normal, []) == PromptKeys.picker_list_trie()
+      assert Scope.Picker.keymap(:cua, []) == Bindings.new()
       assert Scope.Prompt.keymap(:insert, []) == PromptKeys.prompt_trie()
       assert Scope.Prompt.keymap(:cua, []) == Bindings.new()
     end

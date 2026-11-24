@@ -133,6 +133,12 @@ func decodePicker(payload []byte) (Picker, string, int) {
 					picker.LoadError = s.Message
 				}
 			}
+		case 0x07: // Empty state: the picker offers next steps instead of results
+			if e, _, err := generated.DecodeGuiPickerEmpty(payload, sectionStart, sectionEnd); err == nil {
+				empty := e.Empty
+				picker.Empty = &empty
+				picker.ListKeys = e.ListKeys != 0
+			}
 		}
 	}
 	summary := picker.Title

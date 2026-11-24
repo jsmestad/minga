@@ -4,6 +4,7 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilder do
   import Bitwise
 
   alias Minga.Buffer
+  alias Minga.RenderModel.UI.EmptyList
   alias Minga.RenderModel.UI.Picker, as: PickerModel
   alias Minga.RenderModel.UI.Picker.ActionMenu
   alias MingaEditor.Extension.Picker.Source, as: PublicSource
@@ -12,6 +13,7 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilder do
   alias MingaEditor.State.Picker.ActivationOffer
   alias MingaEditor.State.Picker.Extension, as: ExtensionPicker
   alias MingaEditor.UI.Picker
+  alias MingaEditor.UI.Picker.Empty
   alias MingaEditor.UI.Picker.FilePreview
   alias MingaEditor.UI.Picker.FileSource
   alias MingaEditor.UI.Picker.ProjectFileCandidate
@@ -48,7 +50,11 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilder do
            activation_offer: activation_offer
          } = picker_state
        ) do
-    {has_preview, preview_lines} = picker_preview(ctx, picker_state)
+    {has_preview, preview_lines} =
+      if Picker.offering_next_steps?(picker),
+        do: {false, nil},
+        else: picker_preview(ctx, picker_state)
+
     display_source = if picker_state.extension, do: nil, else: source
 
     offered_items = ActivationOffer.offered_items(activation_offer)
@@ -84,9 +90,17 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilder do
       action_menu: action_menu_model(action_menu, activation_offer),
       mode_prefix: PickerState.mode_prefix(picker_state),
       load_status: load_status,
-      preview_lines: preview_lines
+      preview_lines: preview_lines,
+      empty: empty_model(picker.empty),
+      list_keys?: Picker.list_keys?(picker)
     }
   end
+
+  @spec empty_model(Empty.t() | nil) :: EmptyList.t() | nil
+  defp empty_model(nil), do: nil
+
+  defp empty_model(%Empty{} = empty),
+    do: %EmptyList{glyph: empty.glyph, title: empty.title, why: empty.why}
 
   @spec picker_preview(Context.t(), PickerState.t()) ::
           {boolean(), [[PickerModel.preview_segment()]] | nil}

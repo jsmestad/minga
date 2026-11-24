@@ -108,6 +108,20 @@ defmodule Minga.Test.Storyboard.Model do
   @spec open?(t(), surface()) :: boolean()
   def open?(%__MODULE__{surfaces: surfaces}, surface), do: surface in surfaces
 
+  @doc "The title of the empty state an open picker shows instead of results, or `nil`."
+  @spec picker_empty_title(t()) :: String.t() | nil
+  def picker_empty_title(%__MODULE__{ui: %UI{picker: %{visible?: true, empty: %{title: title}}}}),
+    do: title
+
+  def picker_empty_title(%__MODULE__{}), do: nil
+
+  @doc "True when an open picker titled like `title` shows an empty state titled like `empty`."
+  @spec empty_picker?(t(), Regex.t(), Regex.t()) :: boolean()
+  def empty_picker?(%__MODULE__{} = model, title, empty) do
+    empty_title = picker_empty_title(model)
+    is_binary(empty_title) and model.picker_title =~ title and empty_title =~ empty
+  end
+
   @doc "True when any transient surface is open."
   @spec transient_open?(t()) :: boolean()
   def transient_open?(%__MODULE__{surfaces: surfaces}),

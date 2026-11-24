@@ -18,6 +18,7 @@ defmodule MingaEditor.UI.Picker.Source do
   - `preview/2` — optional source-provided GUI preview content for the selected item, called with the render context
   - `title/0` — the picker title shown in the separator bar
   - `complete/2`: optionally completes the highlighted item into the picker query when the user presses Tab
+  - `empty/1`: optionally says what happened when nothing matches and offers the next steps as rows (`MingaEditor.UI.Picker.Empty`)
 
   ## Example
 
@@ -43,6 +44,7 @@ defmodule MingaEditor.UI.Picker.Source do
   alias MingaEditor.Frontend.Emit.Context, as: EmitContext
   alias MingaEditor.UI.Picker
   alias MingaEditor.UI.Picker.Context
+  alias MingaEditor.UI.Picker.Empty
 
   @doc "Returns the display title for this picker source."
   @callback title() :: String.t()
@@ -205,6 +207,13 @@ defmodule MingaEditor.UI.Picker.Source do
   """
   @callback enrich([Picker.item()]) :: [Picker.item()]
 
+  @doc """
+  Says what happened when nothing matches, and offers the next steps as rows.
+
+  Called whenever the loaded picker has no result for its query, including an empty query with no candidates; returning `nil` leaves the list empty. A source that implements it opens even with no candidates. It runs on the editor process after every query edit, so it must not do I/O. Selecting a row calls `on_select/2` with an item whose id is `{:next_step, step}`.
+  """
+  @callback empty(Empty.request()) :: Empty.t() | nil
+
   @optional_callbacks [
     on_cancel: 1,
     preview?: 0,
@@ -223,7 +232,8 @@ defmodule MingaEditor.UI.Picker.Source do
     async_fetch: 1,
     enrich: 1,
     selection_disposition: 2,
-    complete: 2
+    complete: 2,
+    empty: 1
   ]
 
   @doc """
@@ -313,6 +323,19 @@ defmodule MingaEditor.UI.Picker.Source do
       )
     else
       :accept
+    end
+  end
+
+  @doc "Returns whether a source offers next steps when nothing matches."
+  @spec offers_next_steps?(module()) :: boolean()
+  def offers_next_steps?(module), do: exported?(module, :empty, 1)
+
+  @doc "Returns the source's next-step offer for a picker with nothing to show, or `nil`."
+  @spec empty(module(), Empty.request(), ContributionCleanup.contribution_source() | nil) ::
+          Empty.t() | nil
+  def empty(module, request, source \\ nil) do
+    if offers_next_steps?(module) do
+      invoke_value(module, :empty, [request], source, &(is_nil(&1) or is_struct(&1, Empty)), nil)
     end
   end
 

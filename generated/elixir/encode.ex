@@ -387,6 +387,32 @@ defmodule Minga.Protocol.Encode do
     ]
   end
 
+  @spec encode_empty_list_action(map()) :: iodata()
+  def encode_empty_list_action(model), do: encode_empty_list_action(model, :empty_list_action, [])
+
+  @spec encode_empty_list_action(map(), atom(), [atom() | non_neg_integer()]) :: iodata()
+  defp encode_empty_list_action(model, command, path) do
+    [
+      (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:id | path], byte_size(bin), 255); <<byte_size(bin)::8, bin::binary>> end).(Map.fetch!(model, :id)),
+      (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:key | path], byte_size(bin), 65535); <<byte_size(bin)::16, bin::binary>> end).(Map.fetch!(model, :key)),
+      (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:label | path], byte_size(bin), 65535); <<byte_size(bin)::16, bin::binary>> end).(Map.fetch!(model, :label)),
+    ]
+  end
+
+  @spec encode_empty_list(map()) :: iodata()
+  def encode_empty_list(model), do: encode_empty_list(model, :empty_list, [])
+
+  @spec encode_empty_list(map(), atom(), [atom() | non_neg_integer()]) :: iodata()
+  defp encode_empty_list(model, command, path) do
+    [
+      (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:glyph | path], byte_size(bin), 255); <<byte_size(bin)::8, bin::binary>> end).(Map.fetch!(model, :glyph)),
+      (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:title | path], byte_size(bin), 65535); <<byte_size(bin)::16, bin::binary>> end).(Map.fetch!(model, :title)),
+      (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:why | path], byte_size(bin), 65535); <<byte_size(bin)::16, bin::binary>> end).(Map.fetch!(model, :why)),
+      (fn value -> validate_uint!(command, [:selected | path], value, 255); <<value::8>> end).(Map.fetch!(model, :selected)),
+      (fn items -> count = Enum.count(items); validate_uint!(command, [:actions | path], count, 255); [<<count::8>> | Enum.map(Stream.with_index(items), fn {value, index} -> encode_empty_list_action(value, command, [index | [:actions | path]]) end)] end).(Map.fetch!(model, :actions)),
+    ]
+  end
+
   @spec encode_which_key_binding(map()) :: iodata()
   def encode_which_key_binding(model), do: encode_which_key_binding(model, :which_key_binding, [])
 
@@ -1050,6 +1076,17 @@ defmodule Minga.Protocol.Encode do
       else
         []
       end
+    ]
+  end
+
+  @spec encode_gui_picker_empty(map()) :: iodata()
+  def encode_gui_picker_empty(model), do: encode_gui_picker_empty(model, :gui_picker, [:empty])
+
+  @spec encode_gui_picker_empty(map(), atom(), [atom() | non_neg_integer()]) :: iodata()
+  defp encode_gui_picker_empty(model, command, path) do
+    [
+      encode_empty_list(Map.fetch!(model, :empty), command, [:empty | path]),
+      (fn value -> validate_uint!(command, [:list_keys | path], value, 255); <<value::8>> end).(Map.fetch!(model, :list_keys)),
     ]
   end
 

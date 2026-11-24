@@ -187,9 +187,15 @@ public final class PickerState {
     public var items: [PickerItem] = []
     public var previewLines: [PreviewLine] = []
     public var actionMenu: PickerActionMenu? = nil
+    /// Set while the picker offers its source's next steps instead of results: the header says what happened and why, and `items` are the next-step rows.
+    public var empty: Wire.EmptyList? = nil
+    /// True while the picker has nothing to filter: it takes no text, so the query field steps aside and the editor view's keys (j and k move, q closes) reach the picker.
+    public var listKeys: Bool = false
 
-    public func update(visible: Bool, selectedIndex: UInt16, filteredCount: UInt16, totalCount: UInt16, markedCount: UInt16, title: String, query: String, hasPreview: Bool, rawItems: [Wire.PickerItem], actionMenu: Wire.PickerActionMenu?, modePrefix: String = "", loadStatus: Wire.PickerLoadStatus = .ready, queryGeneration: UInt32 = 0, acknowledgedQueryEditSeq: UInt32 = 0, activationGeneration: UInt32 = 0) {
+    public func update(visible: Bool, selectedIndex: UInt16, filteredCount: UInt16, totalCount: UInt16, markedCount: UInt16, title: String, query: String, hasPreview: Bool, rawItems: [Wire.PickerItem], actionMenu: Wire.PickerActionMenu?, modePrefix: String = "", loadStatus: Wire.PickerLoadStatus = .ready, queryGeneration: UInt32 = 0, acknowledgedQueryEditSeq: UInt32 = 0, activationGeneration: UInt32 = 0, empty: Wire.EmptyList? = nil, listKeys: Bool = false) {
         self.visible = visible
+        self.empty = empty
+        self.listKeys = listKeys
         self.filteredCount = Int(filteredCount)
         self.totalCount = Int(totalCount)
         self.markedCount = Int(markedCount)
@@ -308,6 +314,8 @@ public final class PickerState {
         activationGeneration = 0
         modePrefix = ""
         hasPreview = false
+        empty = nil
+        listKeys = false
         loadStatus = .ready
         actionMenu = nil
     }

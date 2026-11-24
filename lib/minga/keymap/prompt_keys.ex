@@ -48,6 +48,15 @@ defmodule Minga.Keymap.PromptKeys do
 
   @picker_split {[{?v, @ctrl}], :picker_open_split, "Open in a split"}
 
+  # A picker with nothing to filter takes no text, so it is a list: its letters act, as in a special buffer.
+  @picker_list_bindings [
+    {[{@enter, 0}], :picker_select, "Run the selection"},
+    {[{@escape, 0}], :picker_cancel, "Close"},
+    {[{?q, 0}], :picker_cancel, "Close"},
+    {[{?j, 0}], :picker_next, "Next"},
+    {[{?k, 0}], :picker_prev, "Previous"}
+  ]
+
   @prompt_bindings [
     {[{@enter, 0}], :prompt_submit, "Run"},
     {[{@escape, 0}], :prompt_cancel, "Cancel"},
@@ -73,6 +82,7 @@ defmodule Minga.Keymap.PromptKeys do
                        @picker_split
                        | @picker_bindings ++ list_movement.(:picker_next, :picker_prev)
                      ])
+  @picker_list_trie build.(@picker_list_bindings ++ list_movement.(:picker_next, :picker_prev))
   @prompt_trie build.(@prompt_bindings)
   @prompt_list_trie build.(@prompt_bindings ++ list_movement.(:prompt_next, :prompt_prev))
 
@@ -85,6 +95,14 @@ defmodule Minga.Keymap.PromptKeys do
   def picker_trie(opts \\ []) do
     if Keyword.get(opts, :split, false), do: @picker_split_trie, else: @picker_trie
   end
+
+  @doc """
+  Returns the trie of a picker with nothing to filter: no candidates, so it offers only its next steps (`MingaEditor.UI.Picker.Empty`).
+
+  Nothing is typed there, so the list keys of a special buffer apply: `j` / `k` (and `⌃J` / `⌃K`, the arrows) move, `↩` runs the selected step, `q` and `esc` close.
+  """
+  @spec picker_list_trie() :: Bindings.node_t()
+  def picker_list_trie, do: @picker_list_trie
 
   @doc """
   Returns the minibuffer prompt trie.
