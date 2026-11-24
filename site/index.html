@@ -38,15 +38,18 @@
         <span class="brand-wordmark">minga</span>
         <span class="brand-version">/ v0.1.0-pre</span>
       </a>
-      <nav class="site-nav" aria-label="Primary">
+      <nav class="site-nav" id="site-nav" aria-label="Primary">
         <a href="/why-minga">Why Minga</a>
         <a href="/getting-started">Getting Started</a>
         <a href="/architecture">Architecture</a>
         <a href="/extending">Extending</a>
         <a href="/docs/">Reference</a>
         <a href="https://github.com/jsmestad/minga">GitHub</a>
-        <button type="button" class="theme-toggle" data-theme-toggle aria-label="Toggle color theme">Light</button>
       </nav>
+      <div class="header-controls">
+        <button type="button" class="theme-toggle" data-theme-toggle aria-label="Toggle color theme">Light</button>
+        <button type="button" class="nav-toggle" data-nav-toggle aria-expanded="false" aria-controls="site-nav" aria-label="Toggle navigation menu">Menu</button>
+      </div>
     </div>
   </header>
 
@@ -89,7 +92,7 @@
         <figure class="spine-figure" data-code-tabs>
           <div class="showcase-header">
             <span>Interface tour · Select a feature to preview</span>
-            <span>Catppuccin Frappé default · ← / → keys</span>
+            <span>Catppuccin Frappé default<span class="desktop-only"> · ← / → keys</span></span>
           </div>
 
           <div class="showcase-nav" role="tablist" aria-label="Minga interface feature tour">
