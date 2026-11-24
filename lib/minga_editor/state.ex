@@ -209,6 +209,48 @@ defmodule MingaEditor.State do
     %{state | agent_connection: connection}
   end
 
+  @doc "Applies one session event to the task it belongs to, at wall-clock time `now`."
+  @spec observe_agent_task_event(t(), pid(), term(), integer()) :: t()
+  def observe_agent_task_event(%__MODULE__{} = state, session, event, now) do
+    connection = AgentConnection.observe_task_event(state.agent_connection, session, event, now)
+    %{state | agent_connection: connection}
+  end
+
+  @doc "Follows a session as a task. Options as `MingaEditor.Agent.Tasks.follow/4`."
+  @spec follow_agent_task(t(), pid(), integer(), keyword()) :: t()
+  def follow_agent_task(%__MODULE__{} = state, session, now, opts) do
+    connection = AgentConnection.follow_task(state.agent_connection, session, now, opts)
+    %{state | agent_connection: connection}
+  end
+
+  @doc "Names a task by the goal it was given, when it has none yet."
+  @spec name_agent_task(t(), pid(), String.t()) :: t()
+  def name_agent_task(%__MODULE__{} = state, session, title) do
+    connection = AgentConnection.name_task(state.agent_connection, session, title)
+    %{state | agent_connection: connection}
+  end
+
+  @doc "Carries a task over to the session that replaced its crashed one."
+  @spec replace_agent_task_session(t(), pid(), pid()) :: t()
+  def replace_agent_task_session(%__MODULE__{} = state, old, new) do
+    connection = AgentConnection.replace_task_session(state.agent_connection, old, new)
+    %{state | agent_connection: connection}
+  end
+
+  @doc "Stops following a session that ended."
+  @spec forget_agent_task(t(), pid()) :: t()
+  def forget_agent_task(%__MODULE__{} = state, session) do
+    connection = AgentConnection.forget_task(state.agent_connection, session)
+    %{state | agent_connection: connection}
+  end
+
+  @doc "Clears a task's approval once its session accepted an answer or said none is pending."
+  @spec resolve_agent_task_approval(t(), pid(), MingaAgent.ToolApproval.Target.t()) :: t()
+  def resolve_agent_task_approval(%__MODULE__{} = state, session, target) do
+    connection = AgentConnection.resolve_task_approval(state.agent_connection, session, target)
+    %{state | agent_connection: connection}
+  end
+
   @doc "Commits an extension snapshot transition unless semantic Editor state superseded it."
   @spec accept_extension_event_result(t(), t(), t()) :: {:ok, t()} | :stale
   def accept_extension_event_result(

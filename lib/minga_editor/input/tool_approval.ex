@@ -4,8 +4,7 @@ defmodule MingaEditor.Input.ToolApproval do
 
   Active when `agent.pending_approval` is non-nil, the panel
   input is not focused, and neither a command line, search, or eval prompt nor a pending key sequence owns the key. Handles y or Enter (approve), a (trust this tool for the session),
-  t (trust this tool for the current turn), n or Esc (deny), and lets unrelated keys continue
-  through normal editor routing.
+  t (trust this tool for the current turn) and n (deny). Esc defers: it continues through normal editor routing and leaves the request pending, so it stays answerable from the conversation and the tasks drawer. Unrelated keys continue the same way.
   """
 
   @behaviour MingaEditor.Input.Handler
@@ -45,6 +44,5 @@ defmodule MingaEditor.Input.ToolApproval do
     do: {:handled, Commands.execute(state, :agent_trust_tool_turn)}
 
   defp dispatch_approval(state, ?n), do: {:handled, Commands.execute(state, :agent_deny_tool)}
-  defp dispatch_approval(state, 27), do: {:handled, Commands.execute(state, :agent_deny_tool)}
   defp dispatch_approval(state, _cp), do: {:passthrough, state}
 end

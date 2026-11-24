@@ -240,7 +240,10 @@ defmodule MingaEditor.Handlers.EventDispatcher do
       ) do
     case subscribe_to_session(state, handle.pid) do
       :ok ->
-        state = Workflow.ensure_available(state)
+        state =
+          state
+          |> Workflow.ensure_available()
+          |> MingaEditor.Agent.TaskWorkflow.follow_subagent(handle)
 
         {runtime, workspace} =
           Runtime.route_event(
@@ -271,6 +274,8 @@ defmodule MingaEditor.Handlers.EventDispatcher do
         %SessionManager.SessionRestartedEvent{} = event,
         _msg
       ) do
+    state = MingaEditor.Agent.TaskWorkflow.restarted(state, event.old_pid, event.new_pid)
+
     case handle_agent_session_restarted(state, event) do
       {:ok, state} -> MingaEditor.schedule_render(state, 16)
       {:stale, state} -> state
@@ -293,6 +298,7 @@ defmodule MingaEditor.Handlers.EventDispatcher do
     end
 
     state
+    |> MingaEditor.Agent.TaskWorkflow.stopped(pid)
     |> MingaEditor.Agent.Arrival.retire(pid)
     |> MingaEditor.Agent.QuestionResponse.retire_remote_attachment(pid)
     |> Commands.BufferManagement.handle_agent_session_down(pid, reason)
