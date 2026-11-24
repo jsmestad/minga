@@ -173,7 +173,7 @@
   },
   {
    "frame": [
-    1047,
+    1054,
     809,
     55,
     14
@@ -183,7 +183,7 @@
   },
   {
    "frame": [
-    1110,
+    1117,
     809,
     43,
     14
@@ -193,13 +193,13 @@
   },
   {
    "frame": [
-    1161,
+    1168,
     809,
-    48,
+    41,
     14
    ],
    "part": "modeline.segment",
-   "text": "position:  1 chars "
+   "text": "position:  1 char "
   },
   {
    "frame": [
@@ -209,7 +209,7 @@
     14
    ],
    "part": "modeline.segment",
-   "text": "percent:  0%% "
+   "text": "percent:  0% "
   },
   {
    "baseline": 819,
