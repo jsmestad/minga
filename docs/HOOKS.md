@@ -89,7 +89,7 @@ The hook config includes an explicit event name because hooks will cover more ag
 | `UserPromptSubmit` | Yes | Yes | Before a user prompt is sent to the model. | `event`, `session_id`, `prompt` |
 | `Stop` | Yes | No | When the main agent turn stops. | `event`, `session_id`, `reason`, `last_message` |
 | `SubagentStop` | No | No | When a sub-agent finishes. | `event`, `parent_session_id`, `subagent_session_id`, `result`, `is_error` |
-| `PreCompact` | Yes | Yes | Before conversation compaction runs. | `event`, `session_id`, `message_count` |
+| `PreCompact` | Yes | Yes | Before conversation compaction runs. | `event`, `session_id` (always `null` today), `message_count` |
 | `Notification` | Yes | No | When the agent sends a user notification. | `event`, `session_id`, `kind`, `message` |
 
-The payload fields for `SubagentStop` are a planned contract, not a runtime guarantee. The `PreToolUse` payload above is the only one this guide documents field by field.
+The payload fields for `SubagentStop` are a planned contract, not a runtime guarantee. Only `PreToolUse` has a worked example in this guide.
