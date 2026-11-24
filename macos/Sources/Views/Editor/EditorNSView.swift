@@ -918,7 +918,7 @@ final class EditorNSView: MTKView {
         }
 
         let gutterPad: CGFloat = (dispatcher.committedEditorSnapshot?.gutterCol ?? 0) > 0 ? CoreTextMetalRenderer.gutterPixelPaddingPt : 0
-        let cols = UInt16(max((width - gutterPad) / resolvedCellWidth, 1))
+        let cols = GridFit.colsThatFit(width: width, cellWidth: resolvedCellWidth, gutterPadding: gutterPad)
         let rows = rowsThatFit(height: height, cellHeight: resolvedCellHeight, lineSpacing: dispatcher.frameState.lineSpacing)
         return GridDimensions(cols: cols, rows: rows)
     }
@@ -926,9 +926,9 @@ final class EditorNSView: MTKView {
     /// The one and only row-fit floor (ADR-0001): content pixels divided by the
     /// spaced cell height, floored once, in the layer that owns the pixels. The
     /// BEAM consumes this verbatim and never re-derives a row count from spacing.
+    /// Delegates to `GridFit.rowsThatFit` so the formula has one definition.
     private func rowsThatFit(height: CGFloat, cellHeight: CGFloat, lineSpacing: Float) -> UInt16 {
-        let spacedCellHeight = cellHeight * CGFloat(max(lineSpacing, 1.0))
-        return UInt16(max(floor(height / spacedCellHeight), 1))
+        GridFit.rowsThatFit(height: height, cellHeight: cellHeight, lineSpacing: lineSpacing)
     }
 
     // MARK: - Font update

@@ -87,6 +87,8 @@ targets:
         type: file
       - path: Sources/Views/Shared/EditorGeometry.swift
         type: file
+      - path: Sources/Views/Shared/GridFit.swift
+        type: file
       - path: Sources/Views/Shared/GUIFramePresentationMetrics.swift
         type: file
       - path: Sources/Views/Shared/GUIFrameCorrelation.swift
@@ -178,6 +180,7 @@ targets:
           - "PreviewFixtures.swift"
           - "ContentView.swift"
           - "Views/Shared/EditorGeometry.swift"
+          - "Views/Shared/GridFit.swift"
           - "Views/Agent/**"
           - "Views/EditorChrome/**"
           - "Views/Extensions/**"
@@ -358,6 +361,7 @@ targets:
           - "PreviewFixtures.swift"
           - "ContentView.swift"
           - "Views/Shared/EditorGeometry.swift"
+          - "Views/Shared/GridFit.swift"
           - "Views/Agent/**"
           - "Views/EditorChrome/**"
           - "Views/Extensions/**"
@@ -494,6 +498,7 @@ targets:
           - "PreviewFixtures.swift"
           - "ContentView.swift"
           - "Views/Shared/EditorGeometry.swift"
+          - "Views/Shared/GridFit.swift"
           - "Views/Agent/**"
           - "Views/EditorChrome/**"
           - "Views/Extensions/**"
@@ -578,6 +583,7 @@ targets:
           - "PreviewFixtures.swift"
           - "ContentView.swift"
           - "Views/Shared/EditorGeometry.swift"
+          - "Views/Shared/GridFit.swift"
           - "Views/Agent/**"
           - "Views/EditorChrome/**"
           - "Views/Extensions/**"

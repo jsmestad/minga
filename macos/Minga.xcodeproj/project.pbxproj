@@ -49,6 +49,7 @@
 		172D7B7EC516CC0CA76797AC /* WorkspaceHeaderView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D0D4C9BE8CA9DC30BCE6ED49 /* WorkspaceHeaderView.swift */; };
 		1808E0AC241B5757FC71497F /* ApplicationQuitCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA4E6DE435D18BF410FFA386 /* ApplicationQuitCoordinator.swift */; };
 		18100CA9081C957AA0EA19BF /* AgentPromptPresentationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE2D4BF845A8C876DB44357E /* AgentPromptPresentationTests.swift */; };
+		188B998355069AA15567E272 /* GridFit.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D15B9E42B7BF9D0DE6D26BF /* GridFit.swift */; };
 		18F0DDA03D08C0B4302DCCF4 /* BitmapRasterizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42375D2D8B25AF31BEB11AB5 /* BitmapRasterizer.swift */; };
 		1936219891B87FD4AB49795B /* StatusBarState.swift in Sources */ = {isa = PBXBuildFile; fileRef = 575815EBAD4E1DFE0BE3DE57 /* StatusBarState.swift */; };
 		199BEA8FC7B5C8696014027F /* DecodedFrame.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F42C05E1FECBE9422C61790 /* DecodedFrame.swift */; };
@@ -100,6 +101,7 @@
 		2F0A0D75FA309989C48B32EF /* WindowContent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 790F7E20F30FEEFC552B3685 /* WindowContent.swift */; };
 		2F4FB995976CC56CF10C2BEA /* TextPresentationLeases.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9970A025C2DDE0D2DC8B22FD /* TextPresentationLeases.swift */; };
 		2FE07FE013FC3DE8FD01DF39 /* BottomPanelState.swift in Sources */ = {isa = PBXBuildFile; fileRef = A583EB0DCE480D1A5FC7E440 /* BottomPanelState.swift */; };
+		2FEDFFFA852E4907553697BF /* GridFitTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E0CA209649C98A5248FD0539 /* GridFitTests.swift */; };
 		30AF3AD9C1C7F46956940CEC /* FontManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79F5D551302873BE8F7240ED /* FontManager.swift */; };
 		30E31170A79F30413D15D858 /* GUIChromeDecoderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 754C68BAFE0C4DB553BFD06A /* GUIChromeDecoderTests.swift */; };
 		310AFFC13B7C85D248C21371 /* InlineEditField.swift in Sources */ = {isa = PBXBuildFile; fileRef = E4DCF10EBEB51624A4A1F428 /* InlineEditField.swift */; };
@@ -859,6 +861,7 @@
 		8AD9302C5E00767815DD10A7 /* ExtensionOverlayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExtensionOverlayView.swift; sourceTree = "<group>"; };
 		8B5BCE92FB25F74D3ECD6B19 /* WindowRowDecodeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WindowRowDecodeTests.swift; sourceTree = "<group>"; };
 		8BEB8DC845D4EFF9A458AFED /* FrontendViewAction.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FrontendViewAction.swift; sourceTree = "<group>"; };
+		8D15B9E42B7BF9D0DE6D26BF /* GridFit.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GridFit.swift; sourceTree = "<group>"; };
 		8D450D75A36486FD84AD6BB8 /* StatusBarUpdate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusBarUpdate.swift; sourceTree = "<group>"; };
 		8E15F1EAA861D1AAC8832D56 /* ScrollSettleReconcileTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScrollSettleReconcileTests.swift; sourceTree = "<group>"; };
 		912C5F808709BABFF3126DEE /* AppearanceSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppearanceSettingsView.swift; sourceTree = "<group>"; };
@@ -942,6 +945,7 @@
 		DDC33BF84E7C25CE9D6B27E5 /* MingaApprovalGeometry */ = {isa = PBXFileReference; includeInIndex = 0; path = MingaApprovalGeometry; sourceTree = BUILT_PRODUCTS_DIR; };
 		DF40BCB1722FAD446E1E6E52 /* PreviewRegistry+Chrome.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "PreviewRegistry+Chrome.swift"; sourceTree = "<group>"; };
 		DF91AF0F9C9069644555108E /* AccessibilityClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccessibilityClient.swift; sourceTree = "<group>"; };
+		E0CA209649C98A5248FD0539 /* GridFitTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GridFitTests.swift; sourceTree = "<group>"; };
 		E156287E8ABA1AB91EBF4014 /* LatencyRecorderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LatencyRecorderTests.swift; sourceTree = "<group>"; };
 		E1AF508EECAEFEA4ADC41409 /* RecoveryManagerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecoveryManagerTests.swift; sourceTree = "<group>"; };
 		E1E4036EB5EED196E5F367CC /* SignatureHelpState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignatureHelpState.swift; sourceTree = "<group>"; };
@@ -1310,6 +1314,7 @@
 				EE173FAAAC37ACFF47EE03B8 /* EditTimelineView.swift */,
 				2F9726FEBA64A746BB5A80EC /* FocusOwnerState.swift */,
 				8BEB8DC845D4EFF9A458AFED /* FrontendViewAction.swift */,
+				8D15B9E42B7BF9D0DE6D26BF /* GridFit.swift */,
 				4A9C41D4B8B3DCF4A06CDF44 /* GUIFrameCorrelation.swift */,
 				18683C638D0F417500DAF924 /* GUIFramePresentationMetrics.swift */,
 				644384B6B8FE5F11CD0DB713 /* GUIState.swift */,
@@ -1538,6 +1543,7 @@
 				01BF1616E1F36ACCECE34309 /* FocusTestApplicationScope.swift */,
 				7E044272E18086A0797FABC0 /* FocusWriterGuardrailTests.swift */,
 				BD2DE335B00721CBB29329F9 /* FontTests.swift */,
+				E0CA209649C98A5248FD0539 /* GridFitTests.swift */,
 				E2C629D58FF3305F579BA5E2 /* GUIActionEncoderTests.swift */,
 				754C68BAFE0C4DB553BFD06A /* GUIChromeDecoderTests.swift */,
 				485DB41F09E703BBC203DBD0 /* GUIFrameRoutingAndMetricsTests.swift */,
@@ -2353,6 +2359,7 @@
 				45B4C421739CB97B638B385C /* GitStatusHeaderView.swift in Sources */,
 				BA87497E73BB694BE1FCE77E /* GitStatusState.swift in Sources */,
 				9F615B0B1750281E84BD25C1 /* GitStatusView.swift in Sources */,
+				188B998355069AA15567E272 /* GridFit.swift in Sources */,
 				83ACC5A2A0BF5F5F3BA34894 /* HoverPopupOverlay.swift in Sources */,
 				51666BAFCCF8E47DA25B6E80 /* HoverPopupState.swift in Sources */,
 				310AFFC13B7C85D248C21371 /* InlineEditField.swift in Sources */,
@@ -2489,6 +2496,7 @@
 				CD0AC714E46D3F95FE9AAE6F /* GUIFrameRoutingAndMetricsTests.swift in Sources */,
 				4D276F4F3C0C19A3E184D09B /* GUIFrameSwiftUIInvalidationTests.swift in Sources */,
 				A5D751F67D30FAD01858C3E5 /* GUIObservationGuardrailTests.swift in Sources */,
+				2FEDFFFA852E4907553697BF /* GridFitTests.swift in Sources */,
 				312DC4940992B35ED9EE7648 /* IMEComposition.swift in Sources */,
 				1631D7B76B33CD897C48F263 /* IMECompositionTests.swift in Sources */,
 				25B21FDC79D3F65CAA270C99 /* Instrumentation.swift in Sources */,
