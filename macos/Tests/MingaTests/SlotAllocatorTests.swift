@@ -321,3 +321,118 @@ struct SlotAllocatorEdgeCaseTests {
         #expect(s0 != s1)
     }
 }
+
+@Suite("SlotAllocator — Eviction scaling")
+struct SlotAllocatorEvictionScalingTests {
+    /// Independent LRU model: the victim is the occupied slot with the oldest
+    /// write frame, and the lowest slot index wins a tie.
+    private struct ReferenceAtlas {
+        var owners: [AtlasKey?]
+        var lastFrames: [UInt64]
+
+        init(capacity: Int) {
+            owners = Array(repeating: nil, count: capacity)
+            lastFrames = Array(repeating: 0, count: capacity)
+        }
+
+        mutating func write(slot: Int, key: AtlasKey, frame: UInt64) {
+            owners[slot] = key
+            lastFrames[slot] = frame
+        }
+
+        func victim() -> (slot: Int, key: AtlasKey)? {
+            var best: Int?
+            for slot in owners.indices where owners[slot] != nil {
+                if best == nil || lastFrames[slot] < lastFrames[best!] { best = slot }
+            }
+            return best.flatMap { slot in owners[slot].map { (slot, $0) } }
+        }
+    }
+
+    private struct Eviction: Equatable {
+        let slot: Int
+        let evicted: AtlasKey
+    }
+
+    private func rowKey(_ row: UInt64) -> AtlasKey {
+        AtlasKey.bufferRow(windowId: 1, rowId: row)
+    }
+
+    @Test("evicting from a full atlas scans each occupied slot once and keeps the LRU victim order",
+          arguments: [128, 256, 512, 1_024])
+    func evictionIsOneLinearPass(capacity: Int) {
+        var allocator = SlotAllocator()
+        allocator.ensureCapacity(maxSlots: capacity)
+        var model = ReferenceAtlas(capacity: capacity)
+        var frame: UInt64 = 0
+        var nextRow: UInt64 = 0
+        var fillScans: [Int] = []
+
+        // Fill two keys per frame so equal frames exercise the lowest-index tie-break.
+        for index in 0..<capacity {
+            if index.isMultiple(of: 2) { allocator.beginFrame(); frame += 1 }
+            let key = rowKey(nextRow)
+            nextRow += 1
+            let (result, scanned) = allocator.lookupOrReserveCountingEvictionScan(key: key, contentHash: Int(key.row))
+            fillScans.append(scanned)
+            guard case .reserved(let slot, .newKey) = result else {
+                Issue.record("Expected a free slot while filling, got \(result)")
+                return
+            }
+            allocator.markUploaded(slotIndex: slot, contentHash: Int(key.row), pixelWidth: 10)
+            model.write(slot: slot, key: key, frame: frame)
+        }
+        #expect(allocator.occupiedCount == capacity)
+        #expect(Set(fillScans) == [0])
+
+        // Refresh every third resident key so the LRU order differs from the fill order.
+        allocator.beginFrame()
+        frame += 1
+        var refreshScans: [Int] = []
+        for slot in stride(from: 0, to: capacity, by: 3) {
+            guard let key = model.owners[slot] else { continue }
+            let (result, scanned) = allocator.lookupOrReserveCountingEvictionScan(key: key, contentHash: Int(key.row))
+            refreshScans.append(scanned)
+            #expect(result == .hit(slotIndex: slot))
+            model.write(slot: slot, key: key, frame: frame)
+        }
+        #expect(Set(refreshScans) == [0])
+
+        // Churn twice the capacity through the full atlas, four new keys per frame.
+        var expected: [Eviction] = []
+        var actual: [Eviction] = []
+        var evictionScans: [Int] = []
+        for index in 0..<(2 * capacity) {
+            if index.isMultiple(of: 4) { allocator.beginFrame(); frame += 1 }
+            guard let victim = model.victim() else {
+                Issue.record("Reference atlas unexpectedly empty")
+                return
+            }
+            expected.append(Eviction(slot: victim.slot, evicted: victim.key))
+            let key = rowKey(nextRow)
+            nextRow += 1
+            let (result, scanned) = allocator.lookupOrReserveCountingEvictionScan(key: key, contentHash: Int(key.row))
+            evictionScans.append(scanned)
+            guard case .reserved(let slot, .evicted(let evicted)) = result else {
+                Issue.record("Expected an eviction from the full atlas, got \(result)")
+                return
+            }
+            actual.append(Eviction(slot: slot, evicted: evicted))
+            allocator.markUploaded(slotIndex: slot, contentHash: Int(key.row), pixelWidth: 10)
+            model.write(slot: slot, key: key, frame: frame)
+        }
+
+        #expect(actual == expected)
+        // Each eviction inspects every occupied slot exactly once, so its cost is linear in capacity.
+        #expect(Set(evictionScans) == [capacity])
+        #expect(allocator.occupiedCount == capacity)
+    }
+
+    @Test("a zero-capacity atlas reports full without scanning")
+    func zeroCapacityDoesNotScan() {
+        var allocator = SlotAllocator()
+        let (result, scanned) = allocator.lookupOrReserveCountingEvictionScan(key: rowKey(0), contentHash: 1)
+        #expect(result == .full)
+        #expect(scanned == 0)
+    }
+}
