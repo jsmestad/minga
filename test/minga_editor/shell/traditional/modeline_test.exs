@@ -191,6 +191,11 @@ defmodule MingaEditor.Shell.Traditional.ModelineTest do
       assert Enum.map(spoken, & &1.id) == [:needs_you]
     end
 
+    test "Minga's words are regular weight, like the file name; its colour role carries the emphasis" do
+      assert segment(@full_data, :minga).style == []
+      assert segment(@full_data, :filename).style == []
+    end
+
     test "the step through Minga's plan follows the words and the label" do
       minga = segment(@full_data, :minga)
       assert minga.text == "Minga working 2/3"

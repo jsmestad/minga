@@ -592,9 +592,9 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
     segment = %Segment{
       id: :minga,
       text: Enum.join(words, " "),
+      # Regular weight, like the file name: the state's colour role carries the emphasis (docs/design/anatomy.md).
       fg: Theme.state_color(ctx.theme, state),
       bg: ctx.bar_bg,
-      style: [bold: true],
       drop: @drop_minga,
       compact: step || "",
       state: state,
