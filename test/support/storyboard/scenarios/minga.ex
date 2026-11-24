@@ -38,9 +38,11 @@ defmodule Minga.Test.Storyboard.Scenarios.Minga do
             4044,
             &assert_count(&1, "a", "1 needs you")
           ),
+          # Starting this scenario with `minga: :thinking` passes this check today, but the TUI then draws the
+          # activity card over the modeline and the which-key panel (#4157), so the renders lose both.
           Check.pending(
             "the modeline says Minga is working, in the minga role",
-            4043,
+            4157,
             &assert_state(&1, :modeline, :working)
           )
         ]
