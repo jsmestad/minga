@@ -3,7 +3,11 @@ defmodule MingaAgent.Tool.Context do
   Per-session runtime context for building executable agent tools.
 
   This is a narrow capability object. It gives tool builders the project root, routed workspace access, command working directory data, and correlation ids without exposing raw session state.
+
+  A context bound to an admitted Session invocation also names who its edits belong to: the task is the Session's id (`session_id`) and the step is the tool call. Its routing context carries that author key (`Minga.Buffer.EditSource.minga/2`) to every buffer and fork it edits.
   """
+
+  alias Minga.Buffer.EditSource
 
   alias MingaAgent.ToolRouter
   alias MingaAgent.Tool.Invocation
@@ -78,10 +82,27 @@ defmodule MingaAgent.Tool.Context do
     }
   end
 
-  @doc "Binds the admitted invocation to the Session that authorized it."
-  @spec bind_session_invocation(t(), GenServer.server(), Invocation.t()) :: t()
-  def bind_session_invocation(%__MODULE__{} = context, session, %Invocation{} = invocation) do
-    %{context | session_invocation: {session, invocation}}
+  @doc """
+  Binds the admitted invocation to the Session that authorized it, in the task `task_id`.
+
+  The invocation's edits are attributed to Minga in that task, with the tool call as their step.
+  """
+  @spec bind_session_invocation(t(), GenServer.server(), Invocation.t(), String.t()) :: t()
+  def bind_session_invocation(
+        %__MODULE__{} = context,
+        session,
+        %Invocation{} = invocation,
+        task_id
+      )
+      when is_binary(task_id) do
+    source = EditSource.minga(task_id, invocation.call_id)
+
+    %{
+      context
+      | session_invocation: {session, invocation},
+        session_id: task_id,
+        router_context: RouterContext.attribute(context.router_context, source)
+    }
   end
 
   @doc "Returns opts accepted by `MingaAgent.Tools.all/1`."

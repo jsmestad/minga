@@ -54,7 +54,7 @@ defmodule MingaAgent.Tool.Executor do
 
     start = fn ->
       case GenServer.call(session, {:start_tool_invocation, invocation}, 30_000) do
-        {:ok, spec, store} ->
+        {:ok, spec, store, task_id} ->
           context =
             Context.for_tool_call(
               Keyword.fetch!(opts, :tool_context),
@@ -62,7 +62,7 @@ defmodule MingaAgent.Tool.Executor do
               invocation.checkpoint_id,
               invocation.call_id
             )
-            |> Context.bind_session_invocation(session, invocation)
+            |> Context.bind_session_invocation(session, invocation, task_id)
 
           spec
           |> execute_current(invocation.arguments, context)

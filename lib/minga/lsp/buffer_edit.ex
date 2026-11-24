@@ -5,13 +5,17 @@ defmodule Minga.LSP.BufferEdit do
   alias Minga.LSP.PositionEncoding
   alias Minga.LSP.TextEdit
 
-  @doc "Applies the edits and replaces the buffer only if its revision still matches the snapshot."
+  @doc """
+  Applies the edits and replaces the buffer only if its revision still matches the snapshot.
+
+  `source` is the edit's author: `:lsp`, Minga's author key, or the legacy unattributed `:agent`.
+  """
   @spec apply(
           pid(),
           {String.t(), non_neg_integer()},
           [map()],
           PositionEncoding.encoding(),
-          :agent | :lsp
+          :agent | :lsp | Minga.Buffer.Author.key()
         ) ::
           {:ok, non_neg_integer()} | {:error, TextEdit.error() | :read_only | :stale}
   def apply(pid, {content, revision}, edits, encoding, source) do

@@ -4,6 +4,8 @@ defmodule MingaAgent.Tools.ReadFileTest do
   alias MingaAgent.Tools.ReadFile
   alias Minga.Buffer
 
+  @minga Minga.Buffer.EditSource.minga("task-1", "call-1")
+
   @moduletag :tmp_dir
 
   describe "execute/1" do
@@ -207,7 +209,7 @@ defmodule MingaAgent.Tools.ReadFileTest do
       Minga.Events.subscribe(:buffer_changed)
 
       # Apply an agent edit via find_and_replace (same path as agent tools)
-      {:ok, _msg} = Buffer.Process.find_and_replace(pid, "hello", "goodbye")
+      {:ok, _msg} = Buffer.Process.find_and_replace(pid, "hello", "goodbye", @minga)
 
       # The buffer should broadcast a :buffer_changed event that the parser
       # would use for tree-sitter incremental updates

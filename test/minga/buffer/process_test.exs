@@ -4,10 +4,13 @@ defmodule Minga.Buffer.ProcessTest do
 
   alias Minga.Buffer
   alias Minga.Buffer.Document
+  alias Minga.Buffer.EditSource
   alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Config.Options
 
   @moduletag :tmp_dir
+
+  @minga EditSource.minga("task-1", "call-1")
 
   defp consume_edit_deltas(buffer, consumer_id) do
     case BufferProcess.consume_edit_deltas(buffer, consumer_id) do
@@ -1155,9 +1158,9 @@ defmodule Minga.Buffer.ProcessTest do
     test "edits tag undo source by caller" do
       cases = [
         {:user, "hello", fn pid -> BufferProcess.insert_char(pid, "X") end},
-        {:agent, "hello world",
-         fn pid -> BufferProcess.find_and_replace(pid, "hello", "goodbye") end},
-        {:agent, "hello world", fn pid -> conditional_batch(pid, [{"hello", "goodbye"}]) end},
+        {@minga, "hello world",
+         fn pid -> BufferProcess.find_and_replace(pid, "hello", "goodbye", @minga) end},
+        {@minga, "hello world", fn pid -> conditional_batch(pid, [{"hello", "goodbye"}]) end},
         {:lsp, "hello",
          fn pid -> BufferProcess.apply_edits(pid, [{{0, 0}, {0, 5}, "goodbye"}]) end}
       ]
@@ -1179,21 +1182,21 @@ defmodule Minga.Buffer.ProcessTest do
 
     test "source metadata survives undo/redo round-trip" do
       pid = start_supervised!({BufferProcess, content: "hello world"})
-      BufferProcess.find_and_replace(pid, "hello", "goodbye")
+      BufferProcess.find_and_replace(pid, "hello", "goodbye", @minga)
 
       # Undo pops the agent entry and creates a redo entry carrying the source
       BufferProcess.undo(pid)
-      assert BufferProcess.last_redo_source(pid) == :agent
+      assert BufferProcess.last_redo_source(pid) == @minga
 
       # Redo pushes it back to undo history
       BufferProcess.redo(pid)
-      assert BufferProcess.last_undo_source(pid) == :agent
+      assert BufferProcess.last_undo_source(pid) == @minga
     end
 
     test "find_and_replace redo reapplies multiline replacements" do
       pid = start_supervised!({BufferProcess, content: "alpha\nbeta\ngamma"})
 
-      assert {:ok, _} = BufferProcess.find_and_replace(pid, "beta", "one\ntwo")
+      assert {:ok, _} = BufferProcess.find_and_replace(pid, "beta", "one\ntwo", @minga)
       assert BufferProcess.content(pid) == "alpha\none\ntwo\ngamma"
 
       BufferProcess.undo(pid)
@@ -1361,8 +1364,8 @@ defmodule Minga.Buffer.ProcessTest do
       BufferProcess.break_undo_coalescing(pid)
       assert BufferProcess.last_undo_source(pid) == :user
 
-      BufferProcess.find_and_replace(pid, "Xhello", "goodbye")
-      assert BufferProcess.last_undo_source(pid) == :agent
+      BufferProcess.find_and_replace(pid, "Xhello", "goodbye", @minga)
+      assert BufferProcess.last_undo_source(pid) == @minga
 
       # Undo the agent edit; the user entry below should now be at the head.
       BufferProcess.undo(pid)
@@ -1412,7 +1415,7 @@ defmodule Minga.Buffer.ProcessTest do
       content = "<<<<<<< HEAD\nours\n=======\ntheirs\n>>>>>>> branch"
       pid = start_supervised!({BufferProcess, content: content})
 
-      assert {:ok, _message} = BufferProcess.find_and_replace(pid, "=======", "changed")
+      assert {:ok, _message} = BufferProcess.find_and_replace(pid, "=======", "changed", @minga)
       assert Buffer.conflict_count(pid) == 0
     end
 
@@ -1939,7 +1942,8 @@ defmodule Minga.Buffer.ProcessTest do
                BufferProcess.find_and_replace(
                  pid,
                  "def hello, do: :world",
-                 "def hello, do: :earth"
+                 "def hello, do: :earth",
+                 @minga
                )
 
       assert BufferProcess.content(pid) =~ "def hello, do: :earth"
@@ -1960,7 +1964,7 @@ defmodule Minga.Buffer.ProcessTest do
 
       for {name, content, old_text, new_text, expected} <- cases do
         {:ok, pid} = BufferProcess.start_link(content: content)
-        assert {:ok, _} = BufferProcess.find_and_replace(pid, old_text, new_text), name
+        assert {:ok, _} = BufferProcess.find_and_replace(pid, old_text, new_text, @minga), name
         assert BufferProcess.content(pid) == expected, name
       end
     end
@@ -1975,7 +1979,10 @@ defmodule Minga.Buffer.ProcessTest do
 
       for {name, content, opts, old_text, new_text, expected_message} <- cases do
         {:ok, pid} = BufferProcess.start_link(Keyword.merge([content: content], opts))
-        assert {:error, msg} = BufferProcess.find_and_replace(pid, old_text, new_text), name
+
+        assert {:error, msg} = BufferProcess.find_and_replace(pid, old_text, new_text, @minga),
+               name
+
         assert msg =~ expected_message, name
         assert BufferProcess.content(pid) == content, name
       end
@@ -1983,7 +1990,7 @@ defmodule Minga.Buffer.ProcessTest do
 
     test "replacing text creates a single undo entry" do
       {:ok, pid} = BufferProcess.start_link(content: "aaa bbb ccc")
-      BufferProcess.find_and_replace(pid, "bbb", "BBB")
+      BufferProcess.find_and_replace(pid, "bbb", "BBB", @minga)
       assert BufferProcess.content(pid) == "aaa BBB ccc"
 
       BufferProcess.undo(pid)
@@ -1992,8 +1999,8 @@ defmodule Minga.Buffer.ProcessTest do
 
     test "two rapid find_and_replace calls produce two independent undo entries" do
       {:ok, pid} = BufferProcess.start_link(content: "aaa bbb ccc")
-      BufferProcess.find_and_replace(pid, "aaa", "AAA")
-      BufferProcess.find_and_replace(pid, "ccc", "CCC")
+      BufferProcess.find_and_replace(pid, "aaa", "AAA", @minga)
+      BufferProcess.find_and_replace(pid, "ccc", "CCC", @minga)
       assert BufferProcess.content(pid) == "AAA bbb CCC"
 
       BufferProcess.undo(pid)
@@ -2007,8 +2014,8 @@ defmodule Minga.Buffer.ProcessTest do
       content = "aaa\nbbb\nccc\nddd\neee"
       {:ok, pid} = BufferProcess.start_link(content: content)
 
-      task_a = Task.async(fn -> BufferProcess.find_and_replace(pid, "aaa", "AAA") end)
-      task_b = Task.async(fn -> BufferProcess.find_and_replace(pid, "eee", "EEE") end)
+      task_a = Task.async(fn -> BufferProcess.find_and_replace(pid, "aaa", "AAA", @minga) end)
+      task_b = Task.async(fn -> BufferProcess.find_and_replace(pid, "eee", "EEE", @minga) end)
 
       results = Task.await_many([task_a, task_b])
       assert Enum.all?(results, &match?({:ok, _}, &1))
@@ -2180,7 +2187,11 @@ defmodule Minga.Buffer.ProcessTest do
 
       for {name, content, old_text, new_text, boundary, expected_fragment} <- cases do
         {:ok, pid} = BufferProcess.start_link(content: content)
-        assert {:ok, _} = BufferProcess.find_and_replace(pid, old_text, new_text, boundary), name
+
+        assert {:ok, _} =
+                 BufferProcess.find_and_replace(pid, old_text, new_text, @minga, boundary),
+               name
+
         assert BufferProcess.content(pid) =~ expected_fragment, name
       end
     end
@@ -2196,7 +2207,8 @@ defmodule Minga.Buffer.ProcessTest do
       for {name, content, old_text, new_text, boundary, messages} <- cases do
         {:ok, pid} = BufferProcess.start_link(content: content)
 
-        assert {:error, msg} = BufferProcess.find_and_replace(pid, old_text, new_text, boundary),
+        assert {:error, msg} =
+                 BufferProcess.find_and_replace(pid, old_text, new_text, @minga, boundary),
                name
 
         assert Enum.all?(messages, &String.contains?(msg, &1)), name
@@ -2207,7 +2219,7 @@ defmodule Minga.Buffer.ProcessTest do
     test "ambiguous match returns ambiguous error, not boundary error" do
       {:ok, pid} = BufferProcess.start_link(content: "foo\nfoo")
 
-      assert {:error, msg} = BufferProcess.find_and_replace(pid, "foo", "bar", {0, 0})
+      assert {:error, msg} = BufferProcess.find_and_replace(pid, "foo", "bar", @minga, {0, 0})
       assert msg =~ "2 times"
     end
   end
@@ -2216,6 +2228,6 @@ defmodule Minga.Buffer.ProcessTest do
     {content, version} = BufferProcess.content_with_version(pid)
     identity = {:buffer, "/conditional-batch-test"}
     expected = Minga.Buffer.FileMutation.revision(content, version, identity)
-    BufferProcess.conditional_mutate(pid, expected, {:edit, edits}, identity)
+    BufferProcess.conditional_mutate(pid, expected, {:edit, edits}, identity, @minga)
   end
 end

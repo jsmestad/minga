@@ -1054,10 +1054,12 @@ receive do
   {:minga_event, :agent_session_stopped, %MingaAgent.SessionManager.SessionStoppedEvent{} = event} ->
     IO.inspect(event.session_id)
 
-  {:minga_event, :buffer_changed, %Minga.Events.BufferChangedEvent{source: {:agent, _pid, _call_id}} = event} ->
-    IO.inspect(event.path)
+  {:minga_event, :buffer_changed, %Minga.Events.BufferChangedEvent{source: {:minga, task_id, step}} = event} ->
+    IO.inspect({event.buffer, task_id, step})
 end
 ```
+
+An edit Minga makes during a task carries the author key `{:minga, task_id, step}` (see `Minga.Buffer.Author`): the task is the agent session, and the step is the tool call that made the edit. An agent edit made outside a task carries the legacy `{:agent, pid, call_id}` source.
 
 - `topic` is an atom such as `:agent_session_stopped`, `:agent_hook`, or `:buffer_changed`.
 - `payload` is a typed struct specific to the topic (see `Minga.Events` for the full list of payload structs).

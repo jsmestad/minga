@@ -2,8 +2,11 @@ defmodule Minga.Buffer.ConditionalMutationTest do
   use ExUnit.Case, async: true
 
   alias Minga.Buffer
+  alias Minga.Buffer.EditSource
   alias Minga.Buffer.FileMutation
   alias Minga.Buffer.Fork
+
+  @source EditSource.minga("task-1", "call-1")
 
   for owner <- [:buffer, :fork] do
     describe "#{owner} conditional mutation" do
@@ -141,7 +144,13 @@ defmodule Minga.Buffer.ConditionalMutationTest do
         expected = FileMutation.revision(Buffer.content(ctx.server), nil, identity)
 
         assert {:ok, %FileMutation.Receipt{after: "view"}} =
-                 ctx.api.conditional_mutate(ctx.server, expected, {:replace, "view"}, identity)
+                 ctx.api.conditional_mutate(
+                   ctx.server,
+                   expected,
+                   {:replace, "view"},
+                   identity,
+                   @source
+                 )
 
         assert Buffer.content_with_version(ctx.server) == {"view", 1}
       end
@@ -163,7 +172,7 @@ defmodule Minga.Buffer.ConditionalMutationTest do
 
     assert :ok = mutate(ctx, revision(ctx), {:edit, [{"one", "1"}, {"three", "3"}]})
     assert Buffer.version(server) == 1
-    assert Minga.Buffer.Process.last_undo_source(server) == :agent
+    assert Minga.Buffer.Process.last_undo_source(server) == @source
     assert :ok = Buffer.undo(server)
     assert Buffer.content(server) == "one two three"
     refute Buffer.dirty?(server)
@@ -200,7 +209,7 @@ defmodule Minga.Buffer.ConditionalMutationTest do
     assert {:ok, "agent\ntwo\nhuman"} = Fork.publish(fork)
     assert Buffer.content(parent) == "agent\ntwo\nhuman"
     assert Buffer.version(parent) == version + 1
-    assert Minga.Buffer.Process.last_undo_source(parent) == :agent
+    assert Minga.Buffer.Process.last_undo_source(parent) == @source
     Buffer.undo(parent)
     assert Buffer.content(parent) == "one\ntwo\nhuman"
     Buffer.undo(parent)
@@ -504,7 +513,7 @@ defmodule Minga.Buffer.ConditionalMutationTest do
       send(
         fork,
         {:"$gen_call", {self(), mutation_tag},
-         {:conditional_mutate, expected, queued_operation, ctx.identity}}
+         {:conditional_mutate, expected, queued_operation, ctx.identity, @source}}
       )
 
       send(parent, :complete_publication)
@@ -550,7 +559,7 @@ defmodule Minga.Buffer.ConditionalMutationTest do
     send(
       fork,
       {:"$gen_call", {self(), mutation_tag},
-       {:conditional_mutate, expected, {:replace, "agent"}, ctx.identity}}
+       {:conditional_mutate, expected, {:replace, "agent"}, ctx.identity, @source}}
     )
 
     assert {:ok, "agent"} =
@@ -574,7 +583,7 @@ defmodule Minga.Buffer.ConditionalMutationTest do
   end
 
   defp mutate(ctx, expected, operation) do
-    case ctx.api.conditional_mutate(ctx.server, expected, operation, ctx.identity) do
+    case ctx.api.conditional_mutate(ctx.server, expected, operation, ctx.identity, @source) do
       {:ok, %FileMutation.Receipt{}} -> :ok
       {:error, _reason} = error -> error
     end

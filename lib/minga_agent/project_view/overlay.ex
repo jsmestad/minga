@@ -213,7 +213,7 @@ defmodule MingaAgent.ProjectView.Overlay do
     with :ok <- ensure_changeset_available(view),
          :ok <- fork_store_available(fork_store(view)),
          {:ok, source} <- resolve_source(view, relative_path) do
-      mutate_source(source, expected, operation)
+      mutate_source(source, expected, operation, view.edit_source)
     end
   end
 
@@ -243,23 +243,30 @@ defmodule MingaAgent.ProjectView.Overlay do
         operation
       ) do
     case ProjectView.resolve_source(view, relative_path) do
-      {:ok, ^reviewed} -> mutate_source(reviewed, expected, operation)
+      {:ok, ^reviewed} -> mutate_source(reviewed, expected, operation, :user)
       {:ok, %Source{}} -> {:error, :review_source_changed}
       {:error, _reason} = error -> error
     end
   end
 
+  # Changeset drafts never reach an open buffer, so only a fork mutation records its source.
   @spec mutate_source(
           Source.t(),
           Minga.Buffer.FileMutation.expectation(),
-          Minga.Buffer.FileMutation.operation()
+          Minga.Buffer.FileMutation.operation(),
+          Minga.Buffer.EditSource.undo_source()
         ) :: {:ok, Minga.Buffer.FileMutation.Receipt.t()} | {:error, term()}
-  defp mutate_source(%Source{source_id: id, owner: {:changeset, cs, path}}, expected, operation) do
+  defp mutate_source(
+         %Source{source_id: id, owner: {:changeset, cs, path}},
+         expected,
+         operation,
+         _edit_source
+       ) do
     Changeset.conditional_mutate(cs, path, expected, operation, {:project_view, id})
   end
 
-  defp mutate_source(%Source{source_id: id, owner: {:fork, fork}}, expected, operation) do
-    Minga.Buffer.Fork.conditional_mutate(fork, expected, operation, {:project_view, id})
+  defp mutate_source(%Source{source_id: id, owner: {:fork, fork}}, expected, operation, source) do
+    Minga.Buffer.Fork.conditional_mutate(fork, expected, operation, {:project_view, id}, source)
   end
 
   @impl true
@@ -370,7 +377,7 @@ defmodule MingaAgent.ProjectView.Overlay do
             expected =
               Minga.Buffer.FileMutation.revision(content, nil, {:project_view, source.source_id})
 
-            mutate_source(source, expected, :delete)
+            mutate_source(source, expected, :delete, view.edit_source)
           end
       end
     end

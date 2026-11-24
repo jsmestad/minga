@@ -569,11 +569,11 @@ defmodule MingaAgent.Providers.NativeTest do
   defp current_test_tool(name, store) do
     case GenServer.call(Process.get(:native_provider), {:resolve_local_tool, name}) do
       {:ok, spec, _registration, _declaration} ->
-        {:ok, spec, store}
+        {:ok, spec, store, "test-task"}
 
       {:error, {:tool_not_local, ^name}} ->
         case ToolRegistry.resolve_execution(name) do
-          {:ok, spec, _registration} -> {:ok, spec, store}
+          {:ok, spec, _registration} -> {:ok, spec, store, "test-task"}
           error -> error
         end
 

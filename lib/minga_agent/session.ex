@@ -2990,7 +2990,8 @@ defmodule MingaAgent.Session do
          :ok <- Options.validate_version(state.tool_authority.options, stamp) do
       entries = Map.put(state.tool_authority.invocations, key, %{entry | started: true})
       authority = %{state.tool_authority | invocations: entries}
-      {:reply, {:ok, selected, store}, %{state | tool_authority: authority}}
+      # The session id names the task this invocation's edits belong to.
+      {:reply, {:ok, selected, store, state.session_id}, %{state | tool_authority: authority}}
     else
       false ->
         {:reply, {:refused, :tool_declaration_changed}, state}

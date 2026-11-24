@@ -8,9 +8,13 @@ defmodule Minga.Buffer.UndoHistory do
   """
 
   alias Minga.Buffer.Document
+  alias Minga.Buffer.Author
   alias Minga.Buffer.EditSource
   alias Minga.Buffer.UndoHistory.Restore
   alias Minga.Buffer.UndoPatch
+
+  require Author
+  import EditSource, only: [is_undo_source: 1]
 
   @max_entries 1000
   @coalesce_ms 300
@@ -53,7 +57,7 @@ defmodule Minga.Buffer.UndoHistory do
         source,
         at
       )
-      when source in [:user, :agent, :lsp, :recovery] and is_integer(at) and
+      when is_undo_source(source) and is_integer(at) and
              last != 0 and at - last < @coalesce_ms do
     %{
       history
@@ -64,14 +68,14 @@ defmodule Minga.Buffer.UndoHistory do
   end
 
   def record_edit(%__MODULE__{} = history, version, patch, source, at)
-      when source in [:user, :agent, :lsp, :recovery] and is_integer(at) do
+      when is_undo_source(source) and is_integer(at) do
     record_edit_batch(history, version, [patch], source, at)
   end
 
   @doc "Records one undo entry containing all patches in the batch, stamped at monotonic time `at`."
   @spec record_edit_batch(t(), version(), patches(), edit_source(), at()) :: t()
   def record_edit_batch(%__MODULE__{} = history, version, [_patch | _rest] = patches, source, at)
-      when source in [:user, :agent, :lsp, :recovery] and is_integer(at) do
+      when is_undo_source(source) and is_integer(at) do
     entry = {version, patches, source}
 
     %{
@@ -85,7 +89,7 @@ defmodule Minga.Buffer.UndoHistory do
   @doc "Records an undo patch without time-based coalescing, stamped at monotonic time `at`."
   @spec record_edit_force(t(), version(), UndoPatch.t(), edit_source(), at()) :: t()
   def record_edit_force(%__MODULE__{} = history, version, patch, source, at)
-      when source in [:user, :agent, :lsp, :recovery] and is_integer(at) do
+      when is_undo_source(source) and is_integer(at) do
     record_edit_batch(history, version, [patch], source, at)
   end
 
@@ -140,9 +144,9 @@ defmodule Minga.Buffer.UndoHistory do
   end
 
   @doc """
-  Undoes all consecutive `:agent`-sourced entries from the top of the undo stack.
+  Undoes all consecutive agent entries from the top of the undo stack.
 
-  Walks backward through the undo stack, popping every entry whose source is `:agent`, applying its patches to roll back the document, and pushing corresponding redo entries. Stops at the first non-agent entry or when the stack is empty.
+  An agent entry is one whose source is `:agent` or a Minga author key. Walks backward through the undo stack, popping every agent entry, applying its patches to roll back the document, and pushing corresponding redo entries. Stops at the first non-agent entry or when the stack is empty.
 
   Returns `{:ok, restore, updated_history, undone_count}` with the final document state after all agent entries are reversed, or `:empty` when no agent entries are on top. When any entry's patches do not apply, returns `{:error, reason}` and the caller keeps its history and document unchanged.
   """
@@ -150,7 +154,7 @@ defmodule Minga.Buffer.UndoHistory do
           {:ok, Restore.t(), t(), pos_integer()} | :empty | {:error, UndoPatch.apply_error()}
   def undo_agent_session(%__MODULE__{} = history, current_version, %Document{} = current_document) do
     case history.undo_entries do
-      [{_version, _patches, :agent} | _rest] ->
+      [{_version, _patches, source} | _rest] when source == :agent or Author.is_key(source) ->
         do_undo_agent_session(history, current_version, current_document, 0)
 
       _ ->
@@ -162,7 +166,7 @@ defmodule Minga.Buffer.UndoHistory do
           {:ok, Restore.t(), t(), pos_integer()} | {:error, UndoPatch.apply_error()}
   defp do_undo_agent_session(%__MODULE__{} = history, current_version, current_document, count) do
     case history.undo_entries do
-      [{_version, _patches, :agent} | _rest] ->
+      [{_version, _patches, source} | _rest] when source == :agent or Author.is_key(source) ->
         with {:ok, restore, new_history} <- undo(history, current_version, current_document) do
           do_undo_agent_session(new_history, restore.version, restore.document, count + 1)
         end

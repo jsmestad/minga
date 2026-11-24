@@ -182,11 +182,14 @@ defmodule Minga.Extension.AgentAPI do
 
   After calling this, the process receives `:buffer_changed` events
   for all buffer edits, including agent-sourced ones. To isolate
-  agent edits, pattern-match on the `source` field inside the struct:
+  Minga's edits, pattern-match on the `source` field inside the struct.
+  An edit Minga makes during a task carries the author key
+  `{:minga, task_id, step}` (see `Minga.Buffer.Author`); an agent edit made
+  outside a task carries the legacy `{:agent, pid, tool_call_id}` source:
 
       receive do
-        {:minga_event, :buffer_changed, %Minga.Events.BufferChangedEvent{source: {:agent, session_pid, tool_call_id}} = event} ->
-          # this edit came from an agent session
+        {:minga_event, :buffer_changed, %Minga.Events.BufferChangedEvent{source: {:minga, task_id, step}} = event} ->
+          # Minga made this edit in task `task_id`, during tool call `step`
       end
   """
   @spec subscribe_edits() :: :ok

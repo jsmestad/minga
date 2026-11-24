@@ -8,6 +8,8 @@ defmodule Minga.Buffer.UndoHistory.Restore do
   alias Minga.Buffer.Document
   alias Minga.Buffer.EditSource
 
+  import EditSource, only: [is_undo_source: 1]
+
   @enforce_keys [:version, :document, :source]
   defstruct [:version, :document, :source]
 
@@ -20,7 +22,7 @@ defmodule Minga.Buffer.UndoHistory.Restore do
   @doc "Creates a restore snapshot."
   @spec new(non_neg_integer(), Document.t(), EditSource.undo_source()) :: t()
   def new(version, %Document{} = document, source)
-      when source in [:user, :agent, :lsp, :recovery] do
+      when is_undo_source(source) do
     %__MODULE__{version: version, document: document, source: source}
   end
 end

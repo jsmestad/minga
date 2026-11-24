@@ -14,6 +14,133 @@ defmodule Minga.Buffer.UndoPatchTest do
     applied
   end
 
+  describe "changes/2" do
+    test "three separated changed regions become three whole-line patches, nearest the start first" do
+      old = Document.move_to(doc("a\nkeep 1\nb\nkeep 2\nc\n"), {1, 2})
+      new = doc("A\nkeep 1\nB1\nB2\nkeep 2\n")
+
+      patches = UndoPatch.changes(old, new)
+
+      assert [{0, "a\n", "A\n"}, {9, "b\n", "B1\nB2\n"}, {18, "c\n", ""}] ==
+               Enum.map(patches, &{&1.start_byte, &1.old_text, &1.new_text})
+
+      {:ok, undone, redo} = UndoPatch.apply_all(patches, new)
+      assert Document.content(undone) == Document.content(old)
+      assert Document.cursor(undone) == {1, 2}
+
+      {:ok, redone, _undo} = UndoPatch.apply_all(redo, undone)
+      assert Document.content(redone) == Document.content(new)
+    end
+
+    test "equal contents produce no patches" do
+      assert UndoPatch.changes(doc("same\ntext"), doc("same\ntext")) == []
+      assert UndoPatch.changes(doc(""), doc("")) == []
+    end
+
+    test "covers insertions, deletions and changes at either end of the document" do
+      for {old_text, new_text, expected} <- [
+            {"", "new", [{0, "", "new"}]},
+            {"gone", "", [{0, "gone", ""}]},
+            {"a\nb", "a\nb\n", [{2, "b", "b\n"}]},
+            {"a\nb\n", "a\nb", [{2, "b\n", "b"}]},
+            {"a\nc\n", "a\nb\nc\n", [{2, "", "b\n"}]},
+            {"x\na\n", "a\n", [{0, "x\n", ""}]}
+          ] do
+        patches = UndoPatch.changes(doc(old_text), doc(new_text))
+
+        assert Enum.map(patches, &{&1.start_byte, &1.old_text, &1.new_text}) == expected,
+               inspect({old_text, new_text})
+      end
+    end
+
+    test "a large file keeps distant edits as separate regions" do
+      lines = for n <- 1..20_000, do: "line #{n}\n"
+      old = doc(Enum.join(lines))
+
+      new =
+        lines
+        |> List.replace_at(9, "changed 10\n")
+        |> List.replace_at(19_000, "changed 19001\n")
+        |> Enum.join()
+        |> doc()
+
+      assert [%{old_text: "line 10\n"}, %{old_text: "line 19001\n"}] =
+               UndoPatch.changes(old, new)
+    end
+
+    test "rewriting every line of a large file records the rewritten span as one region" do
+      lines = for n <- 1..3_000, do: "line #{n}\n"
+      old = doc("header\n" <> Enum.join(lines) <> "footer\n")
+      new = doc("header\n" <> Enum.map_join(lines, &("  " <> &1)) <> "footer\n")
+
+      assert [patch] = UndoPatch.changes(old, new)
+      assert patch.start_byte == byte_size("header\n")
+      assert patch.old_text == Enum.join(lines)
+
+      {:ok, undone, _redo} = UndoPatch.apply_all([patch], new)
+      assert Document.content(undone) == Document.content(old)
+    end
+
+    # The per-change patches record the same edit as the whole-document patch: undoing either
+    # from the new content restores the old content and cursor, and redoing restores the new.
+    property "rebuild the new content exactly and undo to the same document as one whole patch" do
+      check all(
+              old_lines <- list_of(line_gen(), max_length: 12),
+              new_lines <- edited_lines_gen(old_lines),
+              trailing_old <- boolean(),
+              trailing_new <- boolean(),
+              cursor_pick <- integer(0..60),
+              max_runs: 500
+            ) do
+        old_text = join_lines(old_lines, trailing_old)
+        new_text = join_lines(new_lines, trailing_new)
+        old = Document.move_to(doc(old_text), {div(cursor_pick, 5), rem(cursor_pick, 5)})
+        new = Document.move_to(doc(new_text), Document.cursor(old))
+
+        case UndoPatch.changes(old, new) do
+          [] ->
+            assert old_text == new_text
+
+          patches ->
+            whole = [UndoPatch.from_documents(old, new)]
+            {:ok, undone, redo} = UndoPatch.apply_all(patches, new)
+            {:ok, whole_undone, _redo} = UndoPatch.apply_all(whole, new)
+
+            assert Document.content(undone) == old_text
+            assert Document.content(undone) == Document.content(whole_undone)
+            assert Document.cursor(undone) == Document.cursor(whole_undone)
+
+            {:ok, redone, _undo} = UndoPatch.apply_all(redo, undone)
+            assert Document.content(redone) == new_text
+
+            starts = Enum.map(patches, & &1.start_byte)
+            assert starts == Enum.sort(starts)
+        end
+      end
+    end
+  end
+
+  defp line_gen, do: member_of(["", "a", "b", "é", "keep", "λx", "  end"])
+
+  # Keeps most old lines so the diff finds separated regions, and edits the rest.
+  defp edited_lines_gen(old_lines) do
+    old_lines
+    |> Enum.map(fn line ->
+      frequency([
+        {6, constant([line])},
+        {1, constant([])},
+        {1, map(line_gen(), &[&1])},
+        {1, map(line_gen(), &[line, &1])}
+      ])
+    end)
+    |> fixed_list()
+    |> map(&List.flatten/1)
+  end
+
+  defp join_lines([], _trailing?), do: ""
+  defp join_lines(lines, true), do: Enum.join(lines, "\n") <> "\n"
+  defp join_lines(lines, false), do: Enum.join(lines, "\n")
+
   describe "apply/2" do
     test "refuses a patch whose replaced bytes the document does not hold" do
       # The patch says "Z" sits at byte 5, but byte 5 of "abZ\ncd" is "d".

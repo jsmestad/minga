@@ -37,6 +37,7 @@ defmodule Minga.Buffer.Process do
     UndoPatch
   }
 
+  alias Minga.Buffer.Author
   alias Minga.Buffer.EditDelta
   alias Minga.Buffer.EditSource
   alias Minga.Buffer.Persistence.SystemFileSystem
@@ -52,6 +53,9 @@ defmodule Minga.Buffer.Process do
   alias Minga.Language
 
   alias Minga.Buffer.State, as: BufState
+
+  require Author
+  import EditSource, only: [is_undo_source: 1]
 
   @typedoc "Options for starting a buffer server."
   @type start_opt ::
@@ -90,7 +94,8 @@ defmodule Minga.Buffer.Process do
            {:delta, Document.t(), EditDelta.t()}
            | {:full, Document.t()}
            | {:batch, Document.t(), [UndoPatch.t()]}
-  @typep operation_undo :: :full | :batch | :force_delta | :force_full
+           | {:changes, Document.t(), nonempty_list(UndoPatch.t())}
+  @typep operation_undo :: :full | :batch | :changes | :force_delta | :force_full
   @typep operation_sync :: :record_delta | :clear
   @typep operation_opts :: {operation_undo(), BufState.edit_source(), operation_sync()}
 
@@ -268,67 +273,88 @@ defmodule Minga.Buffer.Process do
   end
 
   @doc """
-  Atomically finds and replaces text in the buffer.
+  Atomically finds and replaces text in the buffer, recording `source` as the edit's author.
 
   The search, ambiguity check, and replacement all happen inside a single
   `handle_call`, so there is no TOCTOU race between reading content and
   applying the edit. Returns `{:ok, message}` on success, or `{:error, reason}`
   if the text is not found, is ambiguous (multiple matches), or the buffer
-  is read-only.
+  is read-only. Minga passes its author key (`Minga.Buffer.EditSource.minga/2`).
   """
   @typedoc "An edit boundary as `{start_line, end_line}` (both inclusive, 0-indexed), or nil for unbounded."
   @type boundary :: {non_neg_integer(), non_neg_integer()} | nil
 
-  @spec find_and_replace(GenServer.server(), String.t(), String.t(), boundary()) ::
-          {:ok, String.t()} | {:error, String.t()}
-  def find_and_replace(server, old_text, new_text, boundary \\ nil) do
-    GenServer.call(server, {:find_and_replace, old_text, new_text, boundary})
+  @spec find_and_replace(
+          GenServer.server(),
+          String.t(),
+          String.t(),
+          BufState.edit_source(),
+          boundary()
+        ) :: {:ok, String.t()} | {:error, String.t()}
+  def find_and_replace(server, old_text, new_text, source, boundary \\ nil)
+      when is_undo_source(source) do
+    GenServer.call(server, {:find_and_replace, old_text, new_text, boundary, source})
   end
 
   @doc """
   Checks the full source revision and prepares and commits a file mutation in
-  the owning callback. A successful batch is one agent undo entry; errors leave
-  content, version and undo history unchanged. Buffer creation and deletion
-  require the changeset lifecycle and are not supported here.
+  the owning callback. A successful mutation is one undo entry attributed to
+  `source`, with one patch per changed region; errors leave content, version
+  and undo history unchanged. Buffer creation and deletion require the
+  changeset lifecycle and are not supported here.
   """
   @spec conditional_mutate(
           GenServer.server(),
           FileMutation.expectation(),
           FileMutation.operation(),
-          FileMutation.identity()
+          FileMutation.identity(),
+          BufState.edit_source()
         ) :: {:ok, FileMutation.Receipt.t()} | {:error, term()}
-  def conditional_mutate(server, expected, operation, identity) do
-    GenServer.call(server, {:conditional_mutate, expected, operation, identity}, :infinity)
+  def conditional_mutate(server, expected, operation, identity, source)
+      when is_undo_source(source) do
+    GenServer.call(
+      server,
+      {:conditional_mutate, expected, operation, identity, source},
+      :infinity
+    )
   end
 
   @doc """
   Merges fork content against the current parent, optionally staging the raw fork
   draft before installing the merge. Staging runs under parent ownership and
-  failure leaves the parent unchanged.
+  failure leaves the parent unchanged. The merge is one undo entry attributed
+  to `source`, with one patch per changed region.
   """
   @spec merge_fork(
           GenServer.server(),
           String.t(),
           String.t(),
+          BufState.edit_source(),
           (String.t() -> :ok | {:conflict, term()} | {:error, term()}) | nil
         ) :: {:ok, String.t()} | {:conflict, term()} | {:error, term()}
-  def merge_fork(server, ancestor, fork_content, staging \\ nil)
-      when is_nil(staging) or is_function(staging, 1) do
-    GenServer.call(server, {:merge_fork, ancestor, fork_content, staging}, :infinity)
+  def merge_fork(server, ancestor, fork_content, source, staging \\ nil)
+      when is_undo_source(source) and (is_nil(staging) or is_function(staging, 1)) do
+    GenServer.call(server, {:merge_fork, ancestor, fork_content, staging, source}, :infinity)
   end
 
-  @doc "Installs a resolved fork only at the reviewed parent revision, after staging succeeds."
+  @doc """
+  Installs a resolved fork only at the reviewed parent revision, after staging succeeds.
+
+  The installation is one undo entry attributed to `source`, with one patch per changed region.
+  """
   @spec install_fork_resolution(
           GenServer.server(),
           non_neg_integer(),
           String.t(),
           String.t(),
-          (String.t() -> :ok | {:conflict, term()} | {:error, term()})
+          (String.t() -> :ok | {:conflict, term()} | {:error, term()}),
+          BufState.edit_source()
         ) :: {:ok, String.t()} | {:conflict, term()} | {:error, term()}
-  def install_fork_resolution(server, version, merged, fork_content, staging) do
+  def install_fork_resolution(server, version, merged, fork_content, staging, source)
+      when is_undo_source(source) do
     GenServer.call(
       server,
-      {:install_fork_resolution, version, merged, fork_content, staging},
+      {:install_fork_resolution, version, merged, fork_content, staging, source},
       :infinity
     )
   end
@@ -504,7 +530,7 @@ defmodule Minga.Buffer.Process do
         ) :: {:ok, non_neg_integer()} | {:error, :read_only | :stale}
   def replace_content_if_version(server, expected_version, new_content, source \\ :user)
       when is_integer(expected_version) and expected_version >= 0 and is_binary(new_content) and
-             source in [:user, :agent, :lsp, :recovery] do
+             is_undo_source(source) do
     GenServer.call(server, {:replace_content_if_version, expected_version, new_content, source})
   end
 
@@ -1485,17 +1511,26 @@ defmodule Minga.Buffer.Process do
 
   # ── Find and Replace ──
 
-  def handle_call({:find_and_replace, _old, _new, _boundary}, _from, %{read_only: true} = state) do
+  def handle_call(
+        {:find_and_replace, _old, _new, _boundary, _source},
+        _from,
+        %{read_only: true} = state
+      ) do
     {:reply, {:error, "buffer is read-only"}, state}
   end
 
-  def handle_call({:find_and_replace, old_text, new_text, boundary}, _from, state) do
+  def handle_call({:find_and_replace, old_text, new_text, boundary, source}, _from, state) do
     case Replace.apply_with_delta(state.document, old_text, new_text, boundary) do
       {:ok, new_doc, delta, msg} ->
-        source = EditSource.agent(self(), "unknown")
+        event_source = EditSource.from_undo_source(source)
 
         state =
-          apply_operation(state, {:delta, new_doc, delta}, source, {:force_delta, :agent, :clear})
+          apply_operation(
+            state,
+            {:delta, new_doc, delta},
+            event_source,
+            {:force_delta, source, :clear}
+          )
 
         {:reply, {:ok, msg}, state}
 
@@ -1505,19 +1540,19 @@ defmodule Minga.Buffer.Process do
   end
 
   def handle_call(
-        {:conditional_mutate, _expected, _operation, _identity},
+        {:conditional_mutate, _expected, _operation, _identity, _source},
         _from,
         %{read_only: true} = state
       ) do
     {:reply, {:error, :read_only}, state}
   end
 
-  def handle_call({:conditional_mutate, _expected, operation, _identity}, _from, state)
+  def handle_call({:conditional_mutate, _expected, operation, _identity, _source}, _from, state)
       when operation == :delete or elem(operation, 0) == :create do
     {:reply, {:error, :unsupported_operation}, state}
   end
 
-  def handle_call({:conditional_mutate, expected, operation, identity}, _from, state) do
+  def handle_call({:conditional_mutate, expected, operation, identity, source}, _from, state) do
     content = Document.content(state.document)
     generation = mutation_generation(identity, state)
 
@@ -1525,8 +1560,7 @@ defmodule Minga.Buffer.Process do
       {:ok, new_content} when is_binary(new_content) ->
         receipt = FileMutation.Receipt.committed({:ok, content}, new_content)
 
-        {:reply, {:ok, receipt},
-         replace_content_preserving_cursor_state(state, new_content, :agent)}
+        {:reply, {:ok, receipt}, replace_content_by_changes(state, new_content, source)}
 
       {:error, _} = error ->
         {:reply, error, state}
@@ -1534,14 +1568,14 @@ defmodule Minga.Buffer.Process do
   end
 
   def handle_call(
-        {:merge_fork, _ancestor, _fork_content, _staging},
+        {:merge_fork, _ancestor, _fork_content, _staging, _source},
         _from,
         %{read_only: true} = state
       ) do
     {:reply, {:error, :read_only}, state}
   end
 
-  def handle_call({:merge_fork, ancestor, fork_content, staging}, _from, state) do
+  def handle_call({:merge_fork, ancestor, fork_content, staging, source}, _from, state) do
     parent_content = Document.content(state.document)
 
     case Minga.Core.Diff.merge3(
@@ -1553,7 +1587,7 @@ defmodule Minga.Buffer.Process do
         case stage_fork_content(staging, fork_content) do
           :ok ->
             merged = Enum.join(lines, "\n")
-            new_state = replace_content_preserving_cursor_state(state, merged, :agent)
+            new_state = replace_content_by_changes(state, merged, source)
             {:reply, {:ok, merged}, new_state}
 
           {:error, _} = error ->
@@ -1568,18 +1602,18 @@ defmodule Minga.Buffer.Process do
     end
   end
 
-  def handle_call({:install_fork_resolution, _, _, _, _}, _from, %{read_only: true} = state) do
+  def handle_call({:install_fork_resolution, _, _, _, _, _}, _from, %{read_only: true} = state) do
     {:reply, {:error, :read_only}, state}
   end
 
   def handle_call(
-        {:install_fork_resolution, version, merged, fork_content, staging},
+        {:install_fork_resolution, version, merged, fork_content, staging, source},
         _from,
         state
       ) do
     with ^version <- BufState.version(state),
          :ok <- stage_fork_content(staging, fork_content) do
-      {:reply, {:ok, merged}, replace_content_preserving_cursor_state(state, merged, :agent)}
+      {:reply, {:ok, merged}, replace_content_by_changes(state, merged, source)}
     else
       {:error, _} = error -> {:reply, error, state}
       {:conflict, _} = conflict -> {:reply, conflict, state}
@@ -1824,7 +1858,7 @@ defmodule Minga.Buffer.Process do
       ) do
     case BufState.version(state) do
       ^expected_version ->
-        new_state = replace_content_preserving_cursor_state(state, new_content, source)
+        new_state = replace_content_at_version(state, new_content, source)
         {:reply, {:ok, BufState.version(new_state)}, new_state}
 
       _other_version ->
@@ -3175,6 +3209,40 @@ defmodule Minga.Buffer.Process do
     replace_content_document_state(state, new_document, source)
   end
 
+  # An agent replacement records its changed regions; any other keeps the whole-buffer patch.
+  @spec replace_content_at_version(state(), String.t(), BufState.edit_source()) :: state()
+  defp replace_content_at_version(state, new_content, source)
+       when source == :agent or Author.is_key(source),
+       do: replace_content_by_changes(state, new_content, source)
+
+  defp replace_content_at_version(state, new_content, source),
+    do: replace_content_preserving_cursor_state(state, new_content, source)
+
+  # Records an agent's whole-content replacement as one undo entry with one patch per changed
+  # region, so each change keeps its author and step. The document, cursor, decorations, dirty
+  # state, version and change event match `replace_content_preserving_cursor_state/3`, and an
+  # unchanged replacement still records one empty patch, as that path does.
+  @spec replace_content_by_changes(state(), String.t(), BufState.edit_source()) :: state()
+  defp replace_content_by_changes(state, new_content, source) do
+    new_document =
+      new_content
+      |> Document.new()
+      |> Document.move_to(Document.cursor(state.document))
+
+    patches =
+      case UndoPatch.changes(state.document, new_document) do
+        [] -> [UndoPatch.from_documents(state.document, new_document)]
+        changes -> changes
+      end
+
+    apply_operation(
+      state,
+      {:changes, new_document, patches},
+      EditSource.from_undo_source(source),
+      {:changes, source, :clear}
+    )
+  end
+
   @spec replace_content_document_state(state(), Document.t(), BufState.edit_source()) :: state()
   defp replace_content_document_state(state, new_document, source) do
     event_source = EditSource.from_undo_source(source)
@@ -3255,6 +3323,19 @@ defmodule Minga.Buffer.Process do
     |> push_undo_force(new_buf, undo_source, delta)
     |> mark_dirty()
     |> clear_edits(delta, source)
+  end
+
+  defp apply_operation(
+         state,
+         {:changes, new_buf, patches},
+         source,
+         {:changes, undo_source, :clear}
+       ) do
+    state
+    |> push_undo_batch(new_buf, undo_source, patches)
+    |> mark_dirty()
+    |> clear_edits(source)
+    |> Map.put(:decorations, Decorations.new())
   end
 
   defp apply_operation(state, {:full, new_buf}, source, {:force_full, undo_source, :clear}) do
@@ -3371,12 +3452,16 @@ defmodule Minga.Buffer.Process do
   defp log_undo_source(_action, :user), do: :ok
 
   defp log_undo_source(:undo, source) do
-    Minga.Log.debug(:editor, "Undo: #{source} edit")
+    Minga.Log.debug(:editor, "Undo: #{undo_source_label(source)} edit")
   end
 
   defp log_undo_source(:redo, source) do
-    Minga.Log.debug(:editor, "Redo: #{source} edit")
+    Minga.Log.debug(:editor, "Redo: #{undo_source_label(source)} edit")
   end
+
+  @spec undo_source_label(BufState.edit_source()) :: String.t()
+  defp undo_source_label({kind, task_id, step}), do: "#{kind} (task #{task_id}, step #{step})"
+  defp undo_source_label(source), do: Atom.to_string(source)
 
   @swap_debounce_ms 5_000
 
