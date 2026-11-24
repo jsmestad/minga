@@ -484,7 +484,8 @@ defmodule Minga.Keymap.Active do
     :ok
   end
 
-  # The trie and its index change together: a row per bound sequence, and rows per command with its shortest sequence and the one empty states teach.
+  # The trie and its index change together: a row per bound sequence, and rows per command.
+  # A command's rows hold its shortest sequence and the one empty states teach.
   # New rows go in before stale rows come out, so a reader mid-update sees the old or the new binding, never none.
   @spec put_leader_trie(:ets.table(), Bindings.node_t()) :: :ok
   defp put_leader_trie(table, trie) do
