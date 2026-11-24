@@ -6,7 +6,9 @@ defmodule MingaAgent.Changeset.Overlay do
 
   Build artifact and cache directories are skipped. `MIX_BUILD_PATH` and `CARGO_TARGET_DIR` point inside the overlay, while `MIX_DEPS_PATH` reuses the project deps path. A Rust `target` directory is skipped only when it sits next to a `Cargo.toml`, because `target` is an ordinary source directory name in other ecosystems.
 
-  Installed JavaScript dependencies are linked, not copied. Materialization creates a real `node_modules` directory owned by the overlay and symlinks each installed package (and `.bin` and `.pnpm`) to the project's copy. Node's upward `node_modules` lookup then resolves packages from the overlay, while tool caches (`node_modules/.vite`, `node_modules/.cache`), package-manager metadata, and newly installed packages land in the overlay instead of the project. Writes inside an already-installed package directory still follow its link into the project.
+  Installed JavaScript dependencies are linked, not copied. Materialization creates a real `node_modules` directory owned by the overlay and symlinks each installed package to the project's copy. `.bin`, `@scope`, and pnpm's `.pnpm` directories are real overlay directories whose existing entries are linked or, for small regular files such as shims, copied one by one. Node's upward `node_modules` lookup then resolves packages from the overlay, while tool caches (`node_modules/.vite`, `node_modules/.cache`), package-manager metadata, and newly installed packages land in the overlay instead of the project. Writes inside an already-installed package directory still follow its link into the project.
+
+  Paths the changeset server deletes, writes, or renames come from `artifact_path/3`, which refuses a path that passes through a symlink, so discard and undo never reach project files through a linked package.
   """
 
   import Bitwise, only: [band: 2]
@@ -42,11 +44,6 @@ defmodule MingaAgent.Changeset.Overlay do
   @skip_dirs MapSet.new(
                ~w(_build .git .elixir_ls .expert .zig-cache zig-cache node_modules .hex .cache .gradle .swiftpm DerivedData deps)
              )
-
-  # Dot entries in node_modules are tool caches and package-manager metadata, so
-  # they stay out of the link set and their writes land in the overlay. `.bin`
-  # holds package executables and `.pnpm` holds pnpm's package tree.
-  @linked_dependency_dot_entries ~w(.bin .pnpm)
 
   @empty_stats %{copied_files: 0, copied_bytes: 0, skipped_dirs: 0, linked_entries: 0}
 
@@ -361,6 +358,17 @@ defmodule MingaAgent.Changeset.Overlay do
     end
   end
 
+  @doc """
+  Returns the overlay path for `relative_path` plus an optional artifact `suffix`, such as a tombstone or backup suffix.
+
+  The path is refused when it leaves the overlay or passes through a symlink. Materialized `node_modules` entries are symlinks into the project, so a caller that deletes, writes, or renames the returned path cannot reach a project file.
+  """
+  @spec artifact_path(t(), String.t(), String.t()) ::
+          {:ok, String.t()} | {:error, :invalid_path | :path_traversal | :symlink_traversal}
+  def artifact_path(%__MODULE__{} = overlay, relative_path, suffix \\ "") do
+    safe_target(overlay, relative_path <> suffix)
+  end
+
   @doc "Removes the overlay directory and all its contents."
   @spec cleanup(t()) :: :ok
   def cleanup(%__MODULE__{overlay_dir: dir}) do
@@ -556,24 +564,22 @@ defmodule MingaAgent.Changeset.Overlay do
     if MapSet.member?(@skip_dirs, entry), do: :skip, else: :copy
   end
 
-  # Builds an overlay-owned node_modules whose package entries link to the
-  # project's installed packages. A node_modules that is not a real directory
-  # in the project is skipped.
+  # Builds an overlay-owned node_modules. Package entries link to the project's
+  # installed packages, while every directory a package manager or tool adds
+  # entries to stays a real overlay directory so its writes land here. A
+  # node_modules that is not a real directory in the project is skipped.
   @spec link_dependencies(t(), String.t(), String.t(), materialization_stats()) ::
           {:ok, materialization_stats()} | {:error, term()}
   defp link_dependencies(overlay, source_path, target_path, stats) do
     case File.lstat(source_path) do
       {:ok, %{type: :directory}} ->
-        stats = increment_skipped(stats)
-
-        with {:ok, entries} <- prepare_link_directory(overlay, source_path, target_path) do
-          entries
-          |> Enum.filter(&linked_dependency_entry?/1)
-          |> reduce_stats(
-            stats,
-            &link_dependency_entry(overlay, source_path, target_path, &1, &2)
-          )
-        end
+        build_link_farm(
+          overlay,
+          :node_modules,
+          source_path,
+          target_path,
+          increment_skipped(stats)
+        )
 
       {:ok, _other} ->
         {:ok, increment_skipped(stats)}
@@ -583,52 +589,69 @@ defmodule MingaAgent.Changeset.Overlay do
     end
   end
 
-  @spec link_dependency_entry(t(), String.t(), String.t(), String.t(), materialization_stats()) ::
+  @typep link_farm_kind :: :node_modules | :entries | :pnpm_store
+
+  @spec build_link_farm(t(), link_farm_kind(), String.t(), String.t(), materialization_stats()) ::
           {:ok, materialization_stats()} | {:error, term()}
-  defp link_dependency_entry(overlay, source_dir, target_dir, "@" <> _ = scope, stats) do
-    source_path = Path.join(source_dir, scope)
-    target_path = Path.join(target_dir, scope)
+  defp build_link_farm(overlay, kind, source_dir, target_dir, stats) do
+    with :ok <- reject_materialization_symlink(overlay, target_dir),
+         :ok <- File.mkdir_p(target_dir),
+         {:ok, entries} <- File.ls(source_dir) do
+      reduce_stats(
+        entries,
+        stats,
+        &link_farm_entry(overlay, kind, source_dir, target_dir, &1, &2)
+      )
+    end
+  end
 
-    case File.lstat(source_path) do
-      {:ok, %{type: :directory}} ->
-        link_scope_packages(overlay, source_path, target_path, stats)
+  @spec link_farm_entry(
+          t(),
+          link_farm_kind(),
+          String.t(),
+          String.t(),
+          String.t(),
+          materialization_stats()
+        ) :: {:ok, materialization_stats()} | {:error, term()}
+  defp link_farm_entry(overlay, kind, source_dir, target_dir, entry, stats) do
+    source_path = Path.join(source_dir, entry)
+    target_path = Path.join(target_dir, entry)
 
-      {:ok, _other} ->
+    case {link_farm_disposition(kind, entry), File.lstat(source_path)} do
+      {:skip, _stat} ->
+        {:ok, stats}
+
+      {{:own, child_kind}, {:ok, %{type: :directory}}} ->
+        build_link_farm(overlay, child_kind, source_path, target_path, stats)
+
+      {_disposition, {:ok, %{type: :regular}}} ->
+        materialize_regular_file(overlay, source_path, target_path, stats)
+
+      {_disposition, {:ok, _other}} ->
         link_entry(source_path, target_path, stats)
 
-      {:error, reason} ->
+      {_disposition, {:error, reason}} ->
         {:error, reason}
     end
   end
 
-  defp link_dependency_entry(_overlay, source_dir, target_dir, entry, stats) do
-    link_entry(Path.join(source_dir, entry), Path.join(target_dir, entry), stats)
-  end
-
-  # A scope directory is overlay-owned so a newly installed scoped package
-  # lands in the overlay; each existing scoped package is linked.
-  @spec link_scope_packages(t(), String.t(), String.t(), materialization_stats()) ::
-          {:ok, materialization_stats()} | {:error, term()}
-  defp link_scope_packages(overlay, source_path, target_path, stats) do
-    with {:ok, entries} <- prepare_link_directory(overlay, source_path, target_path) do
-      reduce_stats(entries, stats, fn entry, acc ->
-        link_entry(Path.join(source_path, entry), Path.join(target_path, entry), acc)
-      end)
-    end
-  end
-
-  @spec prepare_link_directory(t(), String.t(), String.t()) ::
-          {:ok, [String.t()]} | {:error, term()}
-  defp prepare_link_directory(overlay, source_path, target_path) do
-    with :ok <- reject_materialization_symlink(overlay, target_path),
-         :ok <- File.mkdir_p(target_path) do
-      File.ls(source_path)
-    end
-  end
-
-  @spec linked_dependency_entry?(String.t()) :: boolean()
-  defp linked_dependency_entry?("." <> _ = entry), do: entry in @linked_dependency_dot_entries
-  defp linked_dependency_entry?(_entry), do: true
+  # `.bin` (package executables), `@scope` directories, `.pnpm` (pnpm's package
+  # tree), and its hoisted `.pnpm/node_modules` are owned by the overlay; their
+  # existing entries are linked one by one. Other dot entries in node_modules
+  # are tool caches and package-manager metadata such as `.vite`, `.cache`,
+  # `.package-lock.json`, and pnpm's `.modules.yaml`. They are not carried over,
+  # so their writes land in the overlay. Without `.modules.yaml`, pnpm treats
+  # the overlay's node_modules as not installed by pnpm and reinstalls into the
+  # overlay instead of incrementally relinking packages inside linked
+  # directories that belong to the project.
+  @spec link_farm_disposition(link_farm_kind(), String.t()) ::
+          :skip | :link | {:own, link_farm_kind()}
+  defp link_farm_disposition(:node_modules, "@" <> _), do: {:own, :entries}
+  defp link_farm_disposition(:node_modules, ".bin"), do: {:own, :entries}
+  defp link_farm_disposition(:node_modules, ".pnpm"), do: {:own, :pnpm_store}
+  defp link_farm_disposition(:node_modules, "." <> _), do: :skip
+  defp link_farm_disposition(:pnpm_store, "node_modules"), do: {:own, :node_modules}
+  defp link_farm_disposition(_kind, _entry), do: :link
 
   # An existing overlay entry wins, so repeated materialization keeps links,
   # replacements made by earlier commands, and overlay-installed packages.

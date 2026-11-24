@@ -24,6 +24,7 @@ defmodule MingaAgent.Changeset.Server do
   alias MingaAgent.Changeset.SourceRead
 
   @tombstone_suffix ".__changeset_deleted__"
+  @restore_tmp_suffix ".__restore_tmp__"
 
   @typep pending_change :: binary() | :deleted
   @typep change :: pending_change() | :unmodified
@@ -941,24 +942,64 @@ defmodule MingaAgent.Changeset.Server do
 
   @spec clear_deleted_marker(state(), String.t(), change()) :: :ok | {:error, term()}
   defp clear_deleted_marker(state, path, :deleted) do
-    remove_overlay_artifact(
-      Path.join(state.overlay.overlay_dir, path) <> ".__changeset_deleted__"
-    )
+    with_overlay_artifacts(state, path, [@tombstone_suffix], :clear_deleted_marker, fn
+      [tombstone_path] -> remove_overlay_artifact(tombstone_path)
+    end)
   end
 
   defp clear_deleted_marker(_state, _path, _change), do: :ok
 
   @spec restore_deleted_overlay(state(), String.t()) :: :ok | {:error, term()}
   defp restore_deleted_overlay(state, path) do
-    overlay_path = Path.join(state.overlay.overlay_dir, path)
-    tombstone_path = overlay_path <> ".__changeset_deleted__"
+    with_overlay_artifacts(state, path, ["", @tombstone_suffix], :undo, fn
+      [overlay_path, tombstone_path] -> write_deleted_overlay(overlay_path, tombstone_path)
+    end)
+  end
 
+  @spec write_deleted_overlay(String.t(), String.t()) :: :ok | {:error, term()}
+  defp write_deleted_overlay(overlay_path, tombstone_path) do
     with :ok <- remove_overlay_artifact(overlay_path),
          :ok <- File.mkdir_p(Path.dirname(tombstone_path)),
          :ok <- File.write(tombstone_path, "") do
       :ok
     else
       {:error, reason} -> {:error, {:deleted_restore_failed, reason}}
+    end
+  end
+
+  # Runs `fun` with the checked overlay paths for `path` and each suffix. A
+  # path that passes through a symlink, such as a materialized node_modules
+  # package linked to the project, is left untouched: the overlay holds no
+  # artifact there, and following the link would delete or write project files.
+  @spec with_overlay_artifacts(
+          state(),
+          String.t(),
+          [String.t()],
+          atom(),
+          ([String.t()] -> :ok | {:error, term()})
+        ) :: :ok | {:error, term()}
+  defp with_overlay_artifacts(state, path, suffixes, operation, fun) do
+    suffixes
+    |> Enum.reduce_while({:ok, []}, fn suffix, {:ok, acc} ->
+      case Overlay.artifact_path(state.overlay, path, suffix) do
+        {:ok, artifact} -> {:cont, {:ok, [artifact | acc]}}
+        {:error, reason} -> {:halt, {:error, reason}}
+      end
+    end)
+    |> case do
+      {:ok, artifacts} ->
+        fun.(Enum.reverse(artifacts))
+
+      {:error, :symlink_traversal} ->
+        Minga.Log.warning(
+          :agent,
+          "Changeset #{operation}: #{path} resolves through a symlink in the overlay; left the filesystem untouched"
+        )
+
+        :ok
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 
@@ -973,10 +1014,20 @@ defmodule MingaAgent.Changeset.Server do
   @spec restore_original_with_backup(state(), String.t(), String.t()) ::
           :ok | {:error, term()}
   defp restore_original_with_backup(state, path, backup_suffix) do
-    overlay_path = Path.join(state.overlay.overlay_dir, path)
-    tombstone_path = overlay_path <> ".__changeset_deleted__"
-    backup_path = overlay_path <> backup_suffix
+    with_overlay_artifacts(
+      state,
+      path,
+      ["", @tombstone_suffix, backup_suffix, @restore_tmp_suffix],
+      :restore_original,
+      fn [overlay_path, tombstone_path, backup_path, _temp_path] ->
+        restore_original_paths(state, path, {overlay_path, tombstone_path, backup_path})
+      end
+    )
+  end
 
+  @spec restore_original_paths(state(), String.t(), {String.t(), String.t(), String.t()}) ::
+          :ok | {:error, term()}
+  defp restore_original_paths(state, path, {overlay_path, tombstone_path, backup_path}) do
     case restorable_project_file(state, path) do
       {:ok, project_file} ->
         restore_from_project(
@@ -1086,24 +1137,30 @@ defmodule MingaAgent.Changeset.Server do
   defp prune_empty_overlay_dir(".", _state), do: :ok
 
   defp prune_empty_overlay_dir(relative_dir, state) do
-    overlay_dir = Path.join(state.overlay.overlay_dir, relative_dir)
     project_dir = Path.join(state.project_root, relative_dir)
 
     if File.dir?(project_dir) do
       :ok
     else
-      case File.rmdir(overlay_dir) do
-        :ok -> relative_dir |> Path.dirname() |> prune_empty_overlay_dir(state)
-        {:error, :enoent} -> relative_dir |> Path.dirname() |> prune_empty_overlay_dir(state)
-        {:error, :enotempty} -> :ok
-        {:error, reason} -> {:error, reason}
-      end
+      with_overlay_artifacts(state, relative_dir, [""], :prune, fn [overlay_dir] ->
+        remove_empty_overlay_dir(overlay_dir, relative_dir, state)
+      end)
+    end
+  end
+
+  @spec remove_empty_overlay_dir(String.t(), String.t(), state()) :: :ok | {:error, term()}
+  defp remove_empty_overlay_dir(overlay_dir, relative_dir, state) do
+    case File.rmdir(overlay_dir) do
+      :ok -> relative_dir |> Path.dirname() |> prune_empty_overlay_dir(state)
+      {:error, :enoent} -> relative_dir |> Path.dirname() |> prune_empty_overlay_dir(state)
+      {:error, :enotempty} -> :ok
+      {:error, reason} -> {:error, reason}
     end
   end
 
   @spec restore_project_file(String.t(), String.t(), String.t()) :: :ok | {:error, term()}
   defp restore_project_file(project_file, overlay_path, backup_path) do
-    temp_path = overlay_path <> ".__restore_tmp__"
+    temp_path = overlay_path <> @restore_tmp_suffix
 
     with :ok <- remove_overlay_artifact(temp_path),
          :ok <- File.cp(project_file, temp_path) do

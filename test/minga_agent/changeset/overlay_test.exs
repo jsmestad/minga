@@ -142,8 +142,9 @@ defmodule MingaAgent.Changeset.OverlayTest do
       File.write!(Path.join(project, "package.json"), ~s({"name": "app"}))
       write_package(project, "node_modules/left-pad")
       write_package(project, "node_modules/@scope/util")
+      File.write!(Path.join(project, "node_modules/left-pad/cli.js"), "#!/usr/bin/env node\n")
       File.mkdir_p!(Path.join(project, "node_modules/.bin"))
-      File.write!(Path.join(project, "node_modules/.bin/left-pad"), "#!/bin/sh\n")
+      File.ln_s!("../left-pad/cli.js", Path.join(project, "node_modules/.bin/left-pad"))
       write_package(project, "packages/web/node_modules/react")
 
       {:ok, overlay} = Overlay.create(project)
@@ -151,7 +152,7 @@ defmodule MingaAgent.Changeset.OverlayTest do
 
       assert {:ok, %{copied_files: 3, linked_entries: 4}} = Overlay.materialize_project(overlay)
 
-      for package <- ["left-pad", "@scope/util", ".bin"] do
+      for package <- ["left-pad", "@scope/util", ".bin/left-pad"] do
         overlay_path = Path.join([overlay.overlay_dir, "node_modules", package])
         project_path = Path.join([project, "node_modules", package])
         assert File.read_link!(overlay_path) == Path.expand(project_path)
@@ -159,6 +160,7 @@ defmodule MingaAgent.Changeset.OverlayTest do
 
       assert resolved_from_project?(overlay, project, "node_modules/left-pad/package.json")
       assert resolved_from_project?(overlay, project, "node_modules/@scope/util/package.json")
+      assert resolved_from_project?(overlay, project, "node_modules/.bin/left-pad")
 
       assert resolved_from_project?(
                overlay,
@@ -166,10 +168,75 @@ defmodule MingaAgent.Changeset.OverlayTest do
                "packages/web/node_modules/react/package.json"
              )
 
-      # The overlay owns node_modules and each scope directory, so new
-      # packages and tool caches are created in the overlay, not the project.
-      assert File.lstat!(Path.join(overlay.overlay_dir, "node_modules")).type == :directory
-      assert File.lstat!(Path.join(overlay.overlay_dir, "node_modules/@scope")).type == :directory
+      # The overlay owns node_modules, each scope directory, and .bin, so new
+      # packages, bin shims, and tool caches are created in the overlay.
+      for dir <- ["node_modules", "node_modules/@scope", "node_modules/.bin"] do
+        assert File.lstat!(Path.join(overlay.overlay_dir, dir)).type == :directory
+      end
+    end
+
+    test "owns pnpm and bin directories so package-manager writes stay in the overlay", %{
+      project: project
+    } do
+      store = "node_modules/.pnpm/left-pad@1.3.0/node_modules/left-pad"
+      write_package(project, store)
+
+      File.ln_s!(
+        ".pnpm/left-pad@1.3.0/node_modules/left-pad",
+        Path.join(project, "node_modules/left-pad")
+      )
+
+      File.mkdir_p!(Path.join(project, "node_modules/.pnpm/node_modules"))
+
+      File.ln_s!(
+        "../left-pad@1.3.0/node_modules/left-pad",
+        Path.join(project, "node_modules/.pnpm/node_modules/left-pad")
+      )
+
+      File.write!(Path.join(project, "node_modules/.pnpm/lock.yaml"), "lockfileVersion: '9.0'\n")
+      File.write!(Path.join(project, "node_modules/.modules.yaml"), "layoutVersion: 5\n")
+      File.mkdir_p!(Path.join(project, "node_modules/.bin"))
+      File.write!(Path.join(project, "node_modules/.bin/left-pad"), "#!/bin/sh\n")
+
+      before = project_listing(project, "node_modules")
+
+      {:ok, overlay} = Overlay.create(project)
+      on_exit(fn -> Overlay.cleanup(overlay) end)
+
+      assert {:ok, _stats} = Overlay.materialize_project(overlay)
+
+      for dir <- ["node_modules/.bin", "node_modules/.pnpm", "node_modules/.pnpm/node_modules"] do
+        assert File.lstat!(Path.join(overlay.overlay_dir, dir)).type == :directory
+      end
+
+      refute File.exists?(Path.join(overlay.overlay_dir, "node_modules/.modules.yaml"))
+      assert resolved_from_project?(overlay, project, "node_modules/left-pad/package.json")
+      assert resolved_from_project?(overlay, project, Path.join(store, "package.json"))
+
+      assert resolved_from_project?(
+               overlay,
+               project,
+               "node_modules/.pnpm/node_modules/left-pad/package.json"
+             )
+
+      # Small regular files such as pnpm bin shims and store metadata are copies.
+      assert File.read!(Path.join(overlay.overlay_dir, "node_modules/.bin/left-pad")) ==
+               "#!/bin/sh\n"
+
+      refute resolved_from_project?(overlay, project, "node_modules/.bin/left-pad")
+      refute resolved_from_project?(overlay, project, "node_modules/.pnpm/lock.yaml")
+
+      File.write!(Path.join(overlay.overlay_dir, "node_modules/.bin/new-tool"), "#!/bin/sh\n")
+      File.write!(Path.join(overlay.overlay_dir, "node_modules/.bin/left-pad"), "changed")
+      File.mkdir_p!(Path.join(overlay.overlay_dir, "node_modules/.pnpm/new-dep@1.0.0"))
+      File.mkdir_p!(Path.join(overlay.overlay_dir, "node_modules/.pnpm/node_modules/new-dep"))
+      File.write!(Path.join(overlay.overlay_dir, "node_modules/.pnpm/lock.yaml"), "changed")
+
+      assert project_listing(project, "node_modules") == before
+      assert File.read!(Path.join(project, "node_modules/.bin/left-pad")) == "#!/bin/sh\n"
+
+      assert File.read!(Path.join(project, "node_modules/.pnpm/lock.yaml")) ==
+               "lockfileVersion: '9.0'\n"
     end
 
     test "keeps tool caches and new installs in the overlay without touching the project", %{
@@ -511,6 +578,26 @@ defmodule MingaAgent.Changeset.OverlayTest do
       Overlay.cleanup(overlay)
       refute File.dir?(overlay.overlay_dir)
     end
+  end
+
+  # Every path under `relative_dir` without following symlinks, with each
+  # regular file's content, so any write into the project is visible.
+  defp project_listing(root, relative_dir) do
+    dir = Path.join(root, relative_dir)
+
+    dir
+    |> File.ls!()
+    |> Enum.sort()
+    |> Enum.flat_map(fn entry ->
+      path = Path.join(dir, entry)
+      relative = Path.join(relative_dir, entry)
+
+      case File.lstat!(path).type do
+        :directory -> [relative | project_listing(root, relative)]
+        :regular -> [{relative, File.read!(path)}]
+        :symlink -> [{relative, File.read_link!(path)}]
+      end
+    end)
   end
 
   defp write_package(root, relative_dir) do
