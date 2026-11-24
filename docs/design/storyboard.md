@@ -53,8 +53,10 @@ The storyboard is designed keyboard first: every scenario gets a best-in-class k
 
 `scenarios.toml` records which phase the design is in with `phase = "keyboard"` or `phase = "final"`. In the keyboard phase, `check.py` reports missing click paths (scenarios unreachable by clicks, and transient exits with a key but no click) as "pending mouse sweep" and does not fail on them. Pass `--final`, or set `phase = "final"`, to treat them as violations. Every other invariant fails in both phases.
 
+The mouse sweep is done and the inventory is in the final phase: every scenario is reachable by click from a cold start, and a new screen without a click path fails the checker. The seven patterns are in [surfaces.md](surfaces.md#mouse).
+
 ```bash
-python3 design/tools/storyboard/check.py           # keyboard phase: mouse gaps are pending
+python3 design/tools/storyboard/check.py           # uses the phase in scenarios.toml (final)
 python3 design/tools/storyboard/check.py --final   # everything, including mouse gaps
 ```
 
