@@ -183,6 +183,21 @@ defmodule Minga.Buffer.UndoPatchTest do
       end
     end
 
+    test "applies a run one patch at a time to a document that is not valid UTF-8" do
+      invalid = doc(<<"Ab", 0xFF, "cd">>)
+
+      patches = [
+        UndoPatch.replacement(2, "x", <<0xFF>>, {0, 0}),
+        UndoPatch.replacement(0, "a", "A", {0, 0})
+      ]
+
+      assert {{:ok, repaired, _inverses}, 2} =
+               count_document_builds(fn -> UndoPatch.apply_all(patches, invalid) end)
+
+      assert Document.content(repaired) == "abxcd"
+      assert_same_as_sequential(patches, invalid)
+    end
+
     test "refuses a run whose intermediate document would not be valid UTF-8" do
       restore_b = UndoPatch.replacement(3, "B", "b", {0, 0})
 

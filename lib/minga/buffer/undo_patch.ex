@@ -174,7 +174,7 @@ defmodule Minga.Buffer.UndoPatch do
 
   The content, the final cursor, and every error equal those of calling `apply/2` once per patch and `invert/2` before each call. A patch that does not fit returns its error, and no partial result escapes.
 
-  Repeated `apply/2` calls rebuild the whole document once per patch. Instead, this function takes the longest leading run of patches whose ranges it can locate in the document the run starts from, and assembles that run in one pass. The patches of one batch edit form such a run in both directions: a later patch in the run either ends at or before the start of the patch applied before it, or starts at or after the end of the text that patch inserted. Each patch in the run must also fit, start and end on code point boundaries of that document, and insert valid UTF-8, and the document must be valid UTF-8. Every intermediate document is then valid UTF-8, so the sequential calls could not fail. A patch outside a run is applied on its own with `apply/2`, and the next run starts after it. A single patch takes `apply/2` directly.
+  Repeated `apply/2` calls rebuild the whole document once per patch. Instead, this function takes the longest leading run of patches whose ranges it can locate in the document the run starts from, and assembles that run in one pass. The patches of one batch edit form such a run in both directions: a later patch in the run either ends at or before the start of the patch applied before it, or starts at or after the end of the text that patch inserted. Each patch in the run must also fit, start and end on code point boundaries of that document, and insert valid UTF-8, and the document must be valid UTF-8. Every intermediate document is then valid UTF-8, so the sequential calls could not fail. A patch outside a run is applied on its own with `apply/2`, and the next run starts after it. When the document is not valid UTF-8, every patch of the run is applied with `apply/2` instead, because a patch may repair the content. A single patch takes `apply/2` directly.
 
   The cursor of an inverse patch is the cursor to restore when that inverse is applied. Inside a run, that is the cursor recorded on the previously applied patch, which `apply/2` would also have placed. Applying a patch always places its cursor in the resulting document, so the stored value only differs from `invert/2` when a recorded cursor was not already a caret position, and the restored cursor is the same.
   """
@@ -185,30 +185,37 @@ defmodule Minga.Buffer.UndoPatch do
   @spec apply_all([t()], Document.t(), [t()]) ::
           {:ok, Document.t(), [t()]} | {:error, apply_error()}
   defp apply_all([], document, inverses), do: {:ok, document, inverses}
-  defp apply_all([patch], document, inverses), do: apply_one(patch, [], document, inverses)
+
+  defp apply_all([_patch] = patches, document, inverses),
+    do: apply_each(patches, [], document, inverses)
 
   defp apply_all([patch | rest] = patches, document, inverses) do
     case take_run(patches, document) do
       {[_, _ | _] = steps, applied, remaining} ->
         text = Document.content(document)
 
+        # A document that is not valid UTF-8 can still accept the run one patch at a time. The
+        # whole located run takes that path, so the run is not located again from each patch.
         if Unicode.valid_utf8?(text) do
           next_document = assemble(steps, text, applied)
           apply_all(remaining, next_document, run_inverses(applied, document) ++ inverses)
         else
-          apply_one(patch, rest, document, inverses)
+          apply_each(Enum.reverse(applied), remaining, document, inverses)
         end
 
       _no_run ->
-        apply_one(patch, rest, document, inverses)
+        apply_each([patch], rest, document, inverses)
     end
   end
 
-  @spec apply_one(t(), [t()], Document.t(), [t()]) ::
+  # Applies `patches` one `apply/2` call at a time, then continues with `rest`.
+  @spec apply_each([t()], [t()], Document.t(), [t()]) ::
           {:ok, Document.t(), [t()]} | {:error, apply_error()}
-  defp apply_one(patch, rest, document, inverses) do
+  defp apply_each([], rest, document, inverses), do: apply_all(rest, document, inverses)
+
+  defp apply_each([patch | patches], rest, document, inverses) do
     with {:ok, next_document} <- __MODULE__.apply(patch, document) do
-      apply_all(rest, next_document, [invert(patch, document) | inverses])
+      apply_each(patches, rest, next_document, [invert(patch, document) | inverses])
     end
   end
 

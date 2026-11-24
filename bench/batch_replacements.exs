@@ -365,30 +365,27 @@ defmodule Minga.Bench.BatchReplacements do
     ]
 
     sample_until_budget(fn index ->
-      Enum.flat_map(steps, fn {step, control, candidate} ->
-        runs = [{"#{step} per-patch", control}, {"#{step} one-pass", candidate}]
-        ordered = if rem(index, 2) == 0, do: runs, else: Enum.reverse(runs)
-        results = Map.new(ordered, fn {impl, fun} -> {impl, isolated(fun)} end)
-
-        {{control_doc, _inverses}, _, _} = results["#{step} per-patch"]
-        {{:ok, %{document: candidate_doc}, _history}, _, _} = results["#{step} one-pass"]
-
-        unless Document.content(candidate_doc) == Document.content(control_doc) and
-                 Document.cursor(candidate_doc) == Document.cursor(control_doc) and
-                 Lines.snapshot(candidate_doc) == Lines.snapshot(control_doc),
-               do: raise("#{workload.name}: #{step} differs from the per-patch control")
-
-        for {impl, {_result, wall_us, reductions}} <- results do
-          %{
-            workload: workload.name,
-            impl: impl,
-            index: index,
-            wall_us: wall_us,
-            reductions: reductions
-          }
-        end
-      end)
+      Enum.flat_map(steps, &history_step(workload.name, index, &1))
     end)
+  end
+
+  # Runs one undo or redo step through the control and the candidate, in alternating order.
+  defp history_step(name, index, {step, control, candidate}) do
+    runs = [{"#{step} per-patch", control}, {"#{step} one-pass", candidate}]
+    ordered = if rem(index, 2) == 0, do: runs, else: Enum.reverse(runs)
+    results = Map.new(ordered, fn {impl, fun} -> {impl, isolated(fun)} end)
+
+    {{control_doc, _inverses}, _, _} = results["#{step} per-patch"]
+    {{:ok, %{document: candidate_doc}, _history}, _, _} = results["#{step} one-pass"]
+
+    unless Document.content(candidate_doc) == Document.content(control_doc) and
+             Document.cursor(candidate_doc) == Document.cursor(control_doc) and
+             Lines.snapshot(candidate_doc) == Lines.snapshot(control_doc),
+           do: raise("#{name}: #{step} differs from the per-patch control")
+
+    for {impl, {_result, wall_us, reductions}} <- results do
+      %{workload: name, impl: impl, index: index, wall_us: wall_us, reductions: reductions}
+    end
   end
 
   defp undo_redo(pid, text, expected, name) do
