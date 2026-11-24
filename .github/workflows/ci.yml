@@ -814,7 +814,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: [macos-15, macos-15-intel, ubuntu-24.04, ubuntu-24.04-arm]
+        runner: [macos-15, ubuntu-24.04, ubuntu-24.04-arm]
     steps:
       - uses: actions/checkout@v4
       - name: Read pinned release Python

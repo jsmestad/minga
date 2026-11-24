@@ -53,11 +53,10 @@ Every preparation uses this complete inventory:
 |---|---|---|
 | `Minga.dmg` | Apple Silicon macOS GUI, declared minimum macOS 15.0 | `macos-15` |
 | `minga_macos_aarch64.tar.gz` | Apple Silicon macOS TUI | `macos-15` |
-| `minga_macos_x86_64.tar.gz` | Intel macOS TUI | `macos-15-intel` |
 | `minga_linux_x86_64.tar.gz` | Linux x86_64 TUI, Ubuntu 24.04 glibc baseline | `ubuntu-24.04` |
 | `minga_linux_aarch64.tar.gz` | Linux ARM64 TUI, Ubuntu 24.04 glibc baseline | `ubuntu-24.04-arm` |
 
-Runner labels are configuration, not architecture evidence. Each job checks its actual host, ERTS, Go renderer, parser, hook runner and packaged native libraries. There is no Intel GUI, Linux GUI or Windows artifact in this matrix. A missing target or DMG fails preparation rather than producing a smaller candidate.
+Runner labels are configuration, not architecture evidence. Each job checks its actual host, ERTS, Go renderer, parser, hook runner and packaged native libraries. There is no Intel macOS, Linux GUI or Windows artifact in this matrix; Intel Macs build from source. A missing target or DMG fails preparation rather than producing a smaller candidate.
 
 ### Toolchains and app construction
 
@@ -105,7 +104,7 @@ A configured secret name does not prove the credential works. The actual build m
 
 A candidate handle is the manifest Actions artifact ID plus the SHA256 of `manifest.json`, not the ZIP checksum. The manifest does not contain its own final artifact ID or hash.
 
-The versioned manifest binds the repository, full source SHA, source/app version, producing workflow path/revision, run ID and attempt. It records names, targets, sizes, SHA256 values, immutable artifact IDs and ZIP digests for the four rolling payloads (two Apple Silicon, two Linux) or all five stable preparation payloads, plus toolchains and validation evidence. `SHA256SUMS.txt` covers exactly that inventory.
+The versioned manifest binds the repository, full source SHA, source/app version, producing workflow path/revision, run ID and attempt. It records names, targets, sizes, SHA256 values, immutable artifact IDs and ZIP digests for the four rolling payloads (two Apple Silicon, two Linux) or all four stable preparation payloads, plus toolchains and validation evidence. `SHA256SUMS.txt` covers exactly that inventory.
 
 Payload archives contain only the named payload and its build-facts JSON. Checksums and the manifest have separate immutable archives. The verifier hashes the actual downloaded ZIP bytes and each final payload. It checks the entire archive inventory without extracting or executing downloaded files.
 
@@ -155,7 +154,7 @@ From the source checkout, use the release workflow's pinned Python and set `asse
 assets=/absolute/path/to/verified/assets
 scripts/build-tui-packages "$assets/minga_linux_x86_64.tar.gz" --version 0.1.0 --arch x86_64 --output "$assets"
 scripts/build-tui-packages "$assets/minga_linux_aarch64.tar.gz" --version 0.1.0 --arch aarch64 --output "$assets"
-scripts/render-tui-formula --version 0.1.0 --arm64 "$assets/minga_macos_aarch64.tar.gz" --x86-64 "$assets/minga_macos_x86_64.tar.gz" > "$assets/minga.rb"
+scripts/render-tui-formula --version 0.1.0 --arm64 "$assets/minga_macos_aarch64.tar.gz" > "$assets/minga.rb"
 ```
 
 Each `build-tui-packages` call writes a `.deb` and an `.rpm`, such as `minga_0.1.0_amd64.deb` and `minga-0.1.0.x86_64.rpm`. Both install `minga` on `PATH` and keep the bundled runtime together under `/usr/lib/minga`. On macOS, the Homebrew formula installs the same runtime under Homebrew's private package directory and links `minga` into Homebrew's `bin`.
@@ -174,7 +173,7 @@ scripts/render-aur-pkgbuild --version 0.1.0 --source-sha "$SOURCE_SHA" \
 scripts/smoke-linux-packages "$smoke" 0.1.0
 ```
 
-Before release approval, also install and remove the ARM64 `.deb` and `.rpm` on clean ARM64 hosts. Test the generated formula on both macOS architectures against the exact assets it names. Do not update the tap or the AUR until those assets are available and their SHA-256 hashes match the recipes.
+Before release approval, also install and remove the ARM64 `.deb` and `.rpm` on clean ARM64 hosts. Test the generated formula on Apple Silicon against the exact asset it names. Do not update the tap or the AUR until those assets are available and their SHA-256 hashes match the recipes.
 
 ## Running the standalone TUI
 

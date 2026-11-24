@@ -2,6 +2,5 @@
   {"runner":"ubuntu-24.04","os":"linux","arch":"x86_64","uname":"x86_64","goarch":"amd64","filename":"minga_linux_x86_64.tar.gz","gui":false},
   {"runner":"ubuntu-24.04-arm","os":"linux","arch":"aarch64","uname":"aarch64","goarch":"arm64","filename":"minga_linux_aarch64.tar.gz","gui":false},
   {"runner":"macos-15","os":"macos","arch":"aarch64","uname":"arm64","goarch":"arm64","filename":"minga_macos_aarch64.tar.gz","gui":false},
-  {"runner":"macos-15-intel","os":"macos","arch":"x86_64","uname":"x86_64","goarch":"amd64","filename":"minga_macos_x86_64.tar.gz","gui":false},
   {"runner":"macos-15","os":"macos","arch":"aarch64","uname":"arm64","goarch":"arm64","filename":"Minga.dmg","gui":true}
 ]
