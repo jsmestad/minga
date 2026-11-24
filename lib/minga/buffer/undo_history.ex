@@ -5,7 +5,7 @@ defmodule Minga.Buffer.UndoHistory do
   Every change to the document is recorded in a `Minga.Buffer.Provenance` value, which knows the author of every byte and keeps deleted text as tombstones. This module decides which history group each change belongs to:
 
   * **Yours.** Edits from you (`:user`), from a language server or formatter you invoked (`:lsp`), and from swap recovery (`:recovery`) form your undo stack. Rapid edits from the same source coalesce into one group within `coalesce_ms/0`. The stack keeps your last 1000 groups; an older group becomes permanent text that keeps its author.
-  * **Minga's.** Each step of a Minga task (an author key, `Minga.Buffer.Author.key/0`) is its own group, never coalesced with another step or task and never evicted. An agent edit without a task (`:agent`) is a group of its own whose text is unattributed. Minga's groups never enter your stacks.
+  * **Minga's.** Each step of a Minga task (an author key, `Minga.Buffer.Author.key/0`) is its own group, never coalesced with another step or task and never evicted. An agent edit without a task (`:agent`) is a group of its own whose text is unattributed; the last 1000 such groups stay revertable, and an older one becomes permanent unattributed text, as your evicted groups do. Minga's groups never enter your stacks.
 
   `undo/3` and `redo/3` move only your groups. They find a group's text by its runs, not by byte offsets, so they stay exact when Minga edited above, below, or inside your text since. When flipping your group would change text that a later Minga step rewrote, they change nothing and return `{:blocked, {:overlaps, minga_group}}`. Minga's edits never clear your redo stack.
 
@@ -69,6 +69,8 @@ defmodule Minga.Buffer.UndoHistory do
             undo_size: 0,
             redo_entries: [],
             minga: [],
+            untasked: :queue.new(),
+            untasked_size: 0,
             steps: %{},
             task_run: nil,
             tick: 0,
@@ -80,7 +82,9 @@ defmodule Minga.Buffer.UndoHistory do
             undo_entries: [Entry.t()],
             undo_size: non_neg_integer(),
             redo_entries: [Entry.t()],
-            minga: [{Provenance.group_id(), minga_group()}],
+            minga: [{Provenance.group_id(), Author.key()}],
+            untasked: :queue.queue(Provenance.group_id()),
+            untasked_size: non_neg_integer(),
             steps: %{Author.key() => Provenance.group_id()},
             task_run: task_run() | nil,
             tick: Entry.tick(),
@@ -158,12 +162,12 @@ defmodule Minga.Buffer.UndoHistory do
     {group, history} = minga_group(history, source)
     {tick, history} = advance(history)
 
-    %{
+    cap_untasked(%{
       history
       | provenance: replay(history.provenance, group, patches),
         tick: tick,
         task_run: %{task_run | tick_after: tick}
-    }
+    })
   end
 
   @doc "Records an edit's patch as a group of its own, stamped at monotonic time `at`. Later edits may still coalesce into it."
@@ -238,30 +242,10 @@ defmodule Minga.Buffer.UndoHistory do
   """
   @spec undo_agent_session(t(), version(), Document.t()) ::
           {:ok, Restore.t(), t(), pos_integer()} | :empty | {:error, UndoPatch.apply_error()}
-  def undo_agent_session(%__MODULE__{minga: []}, _current_version, %Document{}), do: :empty
-
-  def undo_agent_session(%__MODULE__{minga: [{_group, newest} | _]} = history, _version, document) do
-    task = task_of(newest)
-    {steps, others} = Enum.split_with(history.minga, fn {_group, key} -> task_of(key) == task end)
-
-    with {:ok, reverted, first, provenance} <-
-           revert_steps(steps, history.provenance, document, nil) do
-      provenance =
-        Enum.reduce(steps, provenance, fn {group, _key}, acc -> Provenance.discard(acc, group) end)
-
-      {version, tick, history} = settle_task(history, task)
-
-      history = %{
-        history
-        | provenance: provenance,
-          minga: others,
-          steps: Map.drop(history.steps, Enum.map(steps, &elem(&1, 1))),
-          tick: tick,
-          task_run: nil
-      }
-
-      document = place_cursor(reverted, first, Document.cursor(document))
-      {:ok, Restore.new(version, document, :agent), history, length(steps)}
+  def undo_agent_session(%__MODULE__{} = history, _version, %Document{} = document) do
+    case newest_task(history) do
+      nil -> :empty
+      task -> revert_task(history, task, document)
     end
   end
 
@@ -293,6 +277,57 @@ defmodule Minga.Buffer.UndoHistory do
   @doc "Returns how many groups you can redo."
   @spec redo_count(t()) :: non_neg_integer()
   def redo_count(%__MODULE__{redo_entries: entries}), do: length(entries)
+
+  # The task of the newest remaining Minga-side group: group ids grow, so the larger id is newer.
+  @spec newest_task(t()) :: Author.t() | :agent | nil
+  defp newest_task(history) do
+    tasked =
+      case history.minga do
+        [{group, key} | _] -> [{group, Author.author(key)}]
+        [] -> []
+      end
+
+    untasked =
+      case :queue.peek_r(history.untasked) do
+        {:value, group} -> [{group, :agent}]
+        :empty -> []
+      end
+
+    case Enum.max_by(tasked ++ untasked, &elem(&1, 0), fn -> nil end) do
+      {_group, task} -> task
+      nil -> nil
+    end
+  end
+
+  @spec revert_task(t(), Author.t() | :agent, Document.t()) ::
+          {:ok, Restore.t(), t(), pos_integer()} | {:error, UndoPatch.apply_error()}
+  defp revert_task(history, task, document) do
+    {steps, rest} = take_task(history, task)
+
+    with {:ok, reverted, first, provenance} <-
+           revert_steps(steps, history.provenance, document, nil) do
+      provenance = Enum.reduce(steps, provenance, &Provenance.discard(&2, elem(&1, 0)))
+      {version, tick, rest} = settle_task(rest, task)
+      rest = %{rest | provenance: provenance, tick: tick, task_run: nil}
+      document = place_cursor(reverted, first, Document.cursor(document))
+      {:ok, Restore.new(version, document, :agent), rest, length(steps)}
+    end
+  end
+
+  # Returns the task's remaining groups, newest first, and the history without them.
+  @spec take_task(t(), Author.t() | :agent) :: {[{Provenance.group_id(), minga_group()}], t()}
+  defp take_task(history, :agent) do
+    steps = history.untasked |> :queue.to_list() |> Enum.reverse() |> Enum.map(&{&1, :agent})
+    {steps, %{history | untasked: :queue.new(), untasked_size: 0}}
+  end
+
+  defp take_task(history, task) do
+    {steps, others} =
+      Enum.split_with(history.minga, fn {_group, key} -> Author.author(key) == task end)
+
+    {steps,
+     %{history | minga: others, steps: Map.drop(history.steps, Enum.map(steps, &elem(&1, 1)))}}
+  end
 
   # ── Recording ───────────────────────────────────────────────────────
 
@@ -338,7 +373,37 @@ defmodule Minga.Buffer.UndoHistory do
       version: version,
       tick_before: history.tick,
       tick_after: history.tick,
-      fresh: not Enum.any?(history.minga, fn {_group, key} -> task_of(key) == task end)
+      fresh: not has_steps?(history, task)
+    }
+  end
+
+  @spec has_steps?(t(), Author.t() | :agent) :: boolean()
+  defp has_steps?(history, :agent), do: history.untasked_size > 0
+
+  defp has_steps?(history, task),
+    do: Enum.any?(history.minga, fn {_group, key} -> Author.author(key) == task end)
+
+  # Agent edits without a task keep their last 1000 groups, like your stack.
+  # An older one becomes permanent unattributed text, and a revert can no longer return to the version before it.
+  @spec cap_untasked(t()) :: t()
+  defp cap_untasked(%__MODULE__{untasked_size: size} = history) when size <= @max_entries,
+    do: history
+
+  defp cap_untasked(history) do
+    {{:value, oldest}, untasked} = :queue.out(history.untasked)
+
+    task_run =
+      case history.task_run do
+        %{task: :agent} = run -> %{run | fresh: false}
+        run -> run
+      end
+
+    %{
+      history
+      | provenance: Provenance.discard(history.provenance, oldest),
+        untasked: untasked,
+        untasked_size: history.untasked_size - 1,
+        task_run: task_run
     }
   end
 
@@ -369,12 +434,28 @@ defmodule Minga.Buffer.UndoHistory do
   end
 
   @spec open_minga_group(t(), Provenance.author(), minga_group()) :: {Provenance.group_id(), t()}
-  defp open_minga_group(history, author, key) do
-    {group, provenance} = Provenance.open_group(history.provenance, author, key)
-    steps = if key == :agent, do: history.steps, else: Map.put(history.steps, key, group)
+  defp open_minga_group(history, author, :agent) do
+    {group, provenance} = Provenance.open_group(history.provenance, author, :agent)
 
     {group,
-     %{history | provenance: provenance, minga: [{group, key} | history.minga], steps: steps}}
+     %{
+       history
+       | provenance: provenance,
+         untasked: :queue.in(group, history.untasked),
+         untasked_size: history.untasked_size + 1
+     }}
+  end
+
+  defp open_minga_group(history, author, key) do
+    {group, provenance} = Provenance.open_group(history.provenance, author, key)
+
+    {group,
+     %{
+       history
+       | provenance: provenance,
+         minga: [{group, key} | history.minga],
+         steps: Map.put(history.steps, key, group)
+     }}
   end
 
   # Patches are in undo order, so the document saw them last to first.

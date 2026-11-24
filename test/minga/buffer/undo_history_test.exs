@@ -269,6 +269,31 @@ defmodule Minga.Buffer.UndoHistoryTest do
       assert text(reject_newest_task(world)) == ""
     end
 
+    test "untasked agent edits keep their last 1000 groups, and older ones stay as unattributed text" do
+      world = edit(world(""), @step_one, 0, 0, "task\n")
+
+      world =
+        Enum.reduce(1..1100, world, fn n, world ->
+          edit(world, :agent, byte_size(text(world)), 0, "x", at: @t0 + n)
+        end)
+
+      provenance = UndoHistory.provenance(world.history)
+      assert provenance |> Provenance.runs() |> Enum.count() <= 1002
+      assert Provenance.author_at(provenance, 5) == :unattributed
+
+      {:ok, restore, history, 1000} =
+        UndoHistory.undo_agent_session(world.history, world.version, world.doc)
+
+      assert restore.version == :advance
+      assert Document.content(restore.document) == "task\n" <> String.duplicate("x", 100)
+      assert [{@step_one, [{0, 5}]}] = UndoHistory.minga_changes(history, "task-1")
+      assert history |> UndoHistory.provenance() |> Provenance.author_at(104) == :unattributed
+
+      # The tasked step is never evicted and still reverts on its own.
+      assert {:ok, _restore, _history, 1} =
+               UndoHistory.undo_agent_session(history, world.version + 1, restore.document)
+    end
+
     test "undo_agent_session is :empty without Minga steps" do
       assert UndoHistory.undo_agent_session(UndoHistory.new(), 0, Document.new("")) == :empty
     end
@@ -379,7 +404,7 @@ defmodule Minga.Buffer.UndoHistoryTest do
 
   defp command do
     StreamData.tuple({
-      StreamData.member_of([:user, :user, :minga, :minga, :undo, :redo]),
+      StreamData.member_of([:user, :user, :minga, :minga, :agent, :undo, :redo]),
       StreamData.integer(0..1_000),
       StreamData.integer(0..3),
       StreamData.string([?a..?c, ?\n], max_length: 4),
@@ -394,7 +419,14 @@ defmodule Minga.Buffer.UndoHistoryTest do
     size = byte_size(text(world))
     start = rem(a, size + 1)
     removed = min(b, size - start)
-    source = if author == :user, do: :user, else: {:minga, "task-#{rem(n, 2)}", "call-#{n}"}
+
+    source =
+      case author do
+        :user -> :user
+        :agent -> :agent
+        :minga -> {:minga, "task-#{rem(n, 2)}", "call-#{n}"}
+      end
+
     # Spaced past the coalescing window, so every edit of yours is a group of its own.
     edit(world, source, start, removed, inserted, at: @t0 + world.version * @window)
   end
