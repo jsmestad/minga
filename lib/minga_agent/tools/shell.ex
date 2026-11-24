@@ -13,6 +13,7 @@ defmodule MingaAgent.Tools.Shell do
   @typedoc "Options for shell execution."
   @type execute_opts :: [
           on_output: (String.t() -> :ok),
+          on_exit_status: (integer() -> :ok),
           running_indicator_ms: pos_integer(),
           env: [{String.t(), String.t()}],
           artifact_store: GenServer.server() | nil,
@@ -47,6 +48,9 @@ defmodule MingaAgent.Tools.Shell do
       Debounced to at most one call every #{@debounce_ms}ms. If the command
       produces no output for #{@running_indicator_ms}ms, a "running..."
       indicator is sent.
+    - `:on_exit_status` — callback invoked once with the command's exit code when it
+      finishes before the deadline. Not invoked on timeout, start failure, or when
+      uncaptured output reaches the byte limit and the command is stopped.
     - `:running_indicator_ms` — override the silence threshold before sending
       a "running..." indicator (default: #{@running_indicator_ms})
     - `:env` — additional environment variables to include in the command process.
@@ -81,6 +85,7 @@ defmodule MingaAgent.Tools.Shell do
     state = %{
       deadline: now + timeout_secs * 1_000,
       on_output: Keyword.get(opts, :on_output),
+      on_exit_status: Keyword.get(opts, :on_exit_status),
       indicator_ms: Keyword.get(opts, :running_indicator_ms, @running_indicator_ms),
       acc: empty_output_state(),
       pending: empty_output_state(),
@@ -147,6 +152,7 @@ defmodule MingaAgent.Tools.Shell do
   @typep collect_state :: %{
            deadline: integer(),
            on_output: (String.t() -> :ok) | nil,
+           on_exit_status: (integer() -> :ok) | nil,
            indicator_ms: pos_integer(),
            acc: output_state(),
            pending: output_state(),
@@ -266,6 +272,7 @@ defmodule MingaAgent.Tools.Shell do
     if System.monotonic_time(:millisecond) >= state.deadline do
       timeout_result(port, state)
     else
+      if state.on_exit_status, do: state.on_exit_status.(exit_code)
       finish_exit(state, exit_code)
     end
   end

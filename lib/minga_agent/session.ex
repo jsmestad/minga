@@ -92,6 +92,7 @@ defmodule MingaAgent.Session do
   alias MingaAgent.Tool.Invocation
   alias MingaAgent.Tool.Registry, as: ToolRegistry
   alias MingaAgent.Tool.Spec, as: ToolSpec
+  alias MingaAgent.Tools.JobOwner
   alias MingaAgent.Providers.Native.ReqLLMAdapter
   alias ReqLLM.Context
 
@@ -168,7 +169,10 @@ defmodule MingaAgent.Session do
           session_store_dir: String.t() | nil,
           session_manager: pid() | nil,
           created_at: DateTime.t(),
-          credentials_configured: boolean()
+          credentials_configured: boolean(),
+          job_owner: pid() | nil,
+          job_owner_ref: reference() | nil,
+          job_completions: [JobOwner.completion()]
         }
 
   @provider_stop_timeout_ms 1_000
@@ -1489,8 +1493,13 @@ defmodule MingaAgent.Session do
       session_store_dir: Keyword.get(opts, :session_store_dir),
       session_manager: Keyword.get(opts, :session_manager),
       created_at: now,
-      credentials_configured: credentials_configured?
+      credentials_configured: credentials_configured?,
+      job_owner: nil,
+      job_owner_ref: nil,
+      job_completions: []
     }
+
+    state = maybe_start_job_owner(state, Keyword.get(opts, :start_job_owner?, true))
 
     maybe_mark_interrupted_work(state, Keyword.get(opts, :recover_interrupted_work?, true))
 
@@ -3929,6 +3938,19 @@ defmodule MingaAgent.Session do
     {:noreply, state}
   end
 
+  def handle_info({:job_completion, completion}, state) do
+    {:noreply, %{state | job_completions: [completion | state.job_completions]}}
+  end
+
+  def handle_info(
+        {:DOWN, ref, :process, _pid, _reason},
+        %{job_owner_ref: ref} = state
+      )
+      when is_reference(ref) do
+    Process.demonitor(ref, [:flush])
+    {:noreply, %{state | job_owner: nil, job_owner_ref: nil}}
+  end
+
   def handle_info({:DOWN, ref, :process, pid, reason}, state) do
     {:noreply, handle_question_worker_down(state, pid, ref, reason)}
   end
@@ -4628,6 +4650,7 @@ defmodule MingaAgent.Session do
       {:idle, execution} ->
         state =
           state
+          |> drain_job_completions()
           |> notify(:complete, completion_notification(state))
           |> dispatch_stop()
           |> announce_turn_status(execution)
@@ -5933,6 +5956,43 @@ defmodule MingaAgent.Session do
   @spec exec_mode_message() :: String.t()
   defp exec_mode_message do
     "Execution mode enabled. Destructive tools can run again after normal approval checks. Use /plan to return to planning."
+  end
+
+  # ── JobOwner lifecycle ────────────────────────────────────────────────────
+
+  @spec maybe_start_job_owner(state(), boolean()) :: state()
+  defp maybe_start_job_owner(state, false), do: state
+
+  defp maybe_start_job_owner(state, true) do
+    {:ok, pid} = JobOwner.start_link(session_id: state.session_id, notify: self())
+    ref = Process.monitor(pid)
+    %{state | job_owner: pid, job_owner_ref: ref}
+  end
+
+  @spec reap_job_owner(pid() | nil) :: :ok
+  defp reap_job_owner(nil), do: :ok
+
+  defp reap_job_owner(pid) when is_pid(pid) do
+    if Process.alive?(pid) do
+      JobOwner.reap_all(pid)
+      GenServer.stop(pid, :shutdown)
+    end
+
+    :ok
+  end
+
+  @spec drain_job_completions(state()) :: state()
+  defp drain_job_completions(%{job_completions: []} = state), do: state
+
+  defp drain_job_completions(state) do
+    lines =
+      state.job_completions
+      |> Enum.reverse()
+      |> Enum.map_join("\n", fn {job_id, _generation, outcome, _exit_code} ->
+        "Background job #{job_id}: #{outcome}"
+      end)
+
+    append_system_message(%{state | job_completions: []}, lines, :info)
   end
 
   # ── Subscriber lifecycle ──────────────────────────────────────────────────
@@ -7518,6 +7578,7 @@ defmodule MingaAgent.Session do
         {MingaAgent.Providers.Native, manager} ->
           state.provider.opts
           |> Keyword.put(:session_checklist?, true)
+          |> Keyword.put(:job_owner, state.job_owner)
           |> maybe_put_session_manager(manager)
 
         _provider ->
@@ -10269,6 +10330,7 @@ defmodule MingaAgent.Session do
     })
 
     dispatch_session_end(state, reason)
+    reap_job_owner(state.job_owner)
     retire_connection_dependencies(state.connection, :cancel)
     state = release_subscriber_lifecycle(state)
     _stopped_state = stop_provider_lifecycle(state)

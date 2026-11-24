@@ -194,6 +194,23 @@ defmodule MingaAgent.Tools.ShellTest do
     end
   end
 
+  describe "execute/4 exit status" do
+    test "reports the command's exit code through on_exit_status", %{tmp_dir: dir} do
+      test_pid = self()
+
+      assert {:ok, output} =
+               Shell.execute("echo PASS; exit 42", dir, @external_command_timeout_seconds,
+                 on_exit_status: fn code ->
+                   send(test_pid, {:exit_status, code})
+                   :ok
+                 end
+               )
+
+      assert output =~ "PASS"
+      assert_received {:exit_status, 42}
+    end
+  end
+
   describe "execute/4 with streaming" do
     test "invokes on_output callback as output arrives", %{tmp_dir: dir} do
       test_pid = self()

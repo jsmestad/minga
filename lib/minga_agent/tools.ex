@@ -79,7 +79,7 @@ defmodule MingaAgent.Tools do
 
   @default_destructive_tools ~w(write_file edit_file delete_file shell git_stage git_commit rename)
   @file_read_tools ~w(read_file list_directory find grep)
-  @read_only_tools ~w(read_file memory_read fetch_output list_directory find grep fetch_url git_status git_diff git_log diagnostics definition references hover document_symbols workspace_symbols describe_runtime describe_tools produce_rewrite)
+  @read_only_tools ~w(read_file memory_read fetch_output list_directory find grep fetch_url git_status git_diff git_log diagnostics definition references hover document_symbols workspace_symbols describe_runtime describe_tools produce_rewrite job_status job_output)
   @max_symlink_depth 40
 
   @doc """
@@ -139,6 +139,9 @@ defmodule MingaAgent.Tools do
       grep(),
       fetch_url(),
       shell(),
+      job_status(),
+      job_output(),
+      job_cancel(),
       subagent(),
       git_status(),
       git_diff(),
@@ -691,6 +694,9 @@ defmodule MingaAgent.Tools do
       Use this for running tests, linters, git commands, etc.
       Use find and grep for broad file discovery and content search.
       Do not use for interactive commands that require user input.
+      Pass background: true to start the command and return a job handle
+      immediately without waiting for completion. Use job_status and
+      job_output to inspect background jobs.
       """,
       parameter_schema: %{
         "type" => "object",
@@ -702,6 +708,11 @@ defmodule MingaAgent.Tools do
           "timeout" => %{
             "type" => "integer",
             "description" => "Timeout in seconds (default: 30, max: 300)"
+          },
+          "background" => %{
+            "type" => "boolean",
+            "description" =>
+              "When true, start the command in the background and return a stable job handle immediately. Use job_status and job_output to inspect the result. Defaults to false."
           }
         },
         "required" => ["command"]
@@ -716,9 +727,11 @@ defmodule MingaAgent.Tools do
         router_ctx = context.router_context
         shell_output_callback = Map.get(context.metadata, :shell_output_callback)
         process_backend = Map.get(context.metadata, :process_backend, SystemProcessBackend)
+        job_owner = Map.get(context.metadata, :job_owner)
 
         fn args ->
           timeout_secs = normalize_shell_timeout(args["timeout"])
+          background? = args["background"] == true
 
           with {:ok, cwd} <- ToolRouter.working_dir_result(router_ctx),
                {:ok, env} <- ToolRouter.command_env_result(router_ctx) do
@@ -728,19 +741,219 @@ defmodule MingaAgent.Tools do
               flush_before_shell()
             end
 
-            process_backend.shell(args["command"], shell_root, timeout_secs,
+            shell_opts = [
               env: env,
-              on_output: shell_output_callback,
               artifact_store: context.artifact_store,
               capture_key: context.capture_key
-            )
-            |> retained_process_result(context)
+            ]
+
+            # A background job outlives this tool call, so it must not stream into the call's output.
+            if background? and job_owner != nil do
+              execute_background_shell(
+                job_owner,
+                args["command"],
+                shell_root,
+                timeout_secs,
+                shell_opts
+              )
+            else
+              shell_opts = Keyword.put(shell_opts, :on_output, shell_output_callback)
+
+              process_backend.shell(args["command"], shell_root, timeout_secs, shell_opts)
+              |> retained_process_result(context)
+            end
           else
             {:error, reason} -> {:error, inspect(reason)}
           end
         end
       end
     )
+  end
+
+  @spec execute_background_shell(
+          GenServer.server(),
+          String.t(),
+          String.t(),
+          pos_integer(),
+          keyword()
+        ) :: {:ok, String.t()} | {:error, term()}
+  defp execute_background_shell(job_owner, command, cwd, timeout_secs, opts) do
+    alias MingaAgent.Tools.JobOwner
+
+    case JobOwner.start_background(job_owner, command, cwd, timeout_secs, opts) do
+      {:ok, job_id} ->
+        {:ok,
+         "Background job started: #{job_id}\nUse job_status(\"#{job_id}\") to check progress."}
+
+      {:error, reason} ->
+        {:error, "Failed to start background job: #{inspect(reason)}"}
+    end
+  end
+
+  # ── Job management tools ──────────────────────────────────────────────────
+
+  @spec job_status() :: Spec.t()
+  defp job_status do
+    Spec.new!(
+      name: "job_status",
+      description: """
+      Check the status of a background shell job. Returns the job's current
+      lifecycle state (starting, running, completed, failed, timeout,
+      cancelled, crashed, interrupted), exit code, and timing information.
+      """,
+      parameter_schema: %{
+        "type" => "object",
+        "properties" => %{
+          "job_id" => %{
+            "type" => "string",
+            "description" => "The job handle returned by shell with background: true"
+          }
+        },
+        "required" => ["job_id"]
+      },
+      source: :builtin,
+      category: :shell,
+      approval_level: :auto,
+      capabilities: [],
+      context_requirements: [:tool_context],
+      build: fn context ->
+        job_owner = Map.get(context.metadata, :job_owner)
+
+        fn args ->
+          if job_owner == nil do
+            {:error, "No job owner available. Background jobs require a session context."}
+          else
+            case MingaAgent.Tools.JobOwner.job_status(job_owner, args["job_id"]) do
+              {:ok, job} ->
+                {:ok, format_job_status(job)}
+
+              {:error, :job_not_found} ->
+                {:error, "Job not found: #{args["job_id"]}"}
+            end
+          end
+        end
+      end
+    )
+  end
+
+  @spec job_output() :: Spec.t()
+  defp job_output do
+    Spec.new!(
+      name: "job_output",
+      description: """
+      Retrieve the output of a completed background shell job. Returns the
+      combined stdout/stderr text. The job must have reached a terminal state.
+      """,
+      parameter_schema: %{
+        "type" => "object",
+        "properties" => %{
+          "job_id" => %{
+            "type" => "string",
+            "description" => "The job handle returned by shell with background: true"
+          }
+        },
+        "required" => ["job_id"]
+      },
+      source: :builtin,
+      category: :shell,
+      approval_level: :auto,
+      capabilities: [],
+      context_requirements: [:tool_context],
+      build: fn context ->
+        job_owner = Map.get(context.metadata, :job_owner)
+
+        fn args ->
+          if job_owner == nil do
+            {:error, "No job owner available. Background jobs require a session context."}
+          else
+            case MingaAgent.Tools.JobOwner.job_output(job_owner, args["job_id"]) do
+              {:ok, text} ->
+                {:ok, text}
+
+              {:error, :job_not_found} ->
+                {:error, "Job not found: #{args["job_id"]}"}
+
+              {:error, :job_still_running} ->
+                {:error,
+                 "Job is still running. Wait for completion or use job_status to check progress."}
+            end
+          end
+        end
+      end
+    )
+  end
+
+  @spec job_cancel() :: Spec.t()
+  defp job_cancel do
+    Spec.new!(
+      name: "job_cancel",
+      description: """
+      Cancel a running background shell job. The job's process tree is
+      terminated and the job transitions to the cancelled terminal state.
+      """,
+      parameter_schema: %{
+        "type" => "object",
+        "properties" => %{
+          "job_id" => %{
+            "type" => "string",
+            "description" => "The job handle returned by shell with background: true"
+          }
+        },
+        "required" => ["job_id"]
+      },
+      source: :builtin,
+      category: :shell,
+      approval_level: :ask,
+      capabilities: [:run_shell],
+      context_requirements: [:tool_context],
+      build: fn context ->
+        job_owner = Map.get(context.metadata, :job_owner)
+
+        fn args ->
+          if job_owner == nil do
+            {:error, "No job owner available. Background jobs require a session context."}
+          else
+            case MingaAgent.Tools.JobOwner.cancel(job_owner, args["job_id"]) do
+              :ok ->
+                {:ok, "Job #{args["job_id"]} cancelled."}
+
+              {:error, :job_not_found} ->
+                {:error, "Job not found: #{args["job_id"]}"}
+
+              {:error, :already_terminal} ->
+                {:error, "Job already finished. Use job_output to retrieve its result."}
+            end
+          end
+        end
+      end
+    )
+  end
+
+  @spec format_job_status(MingaAgent.Tools.Job.t()) :: String.t()
+  defp format_job_status(job) do
+    alias MingaAgent.Tools.Job
+
+    status = Job.summary_status(job)
+
+    elapsed =
+      if job.finished_at,
+        do: job.finished_at - job.started_at,
+        else: System.monotonic_time(:millisecond) - job.started_at
+
+    mode = if job.background?, do: "background", else: "foreground"
+
+    lines =
+      [
+        "Job: #{job.id}",
+        "Status: #{status}",
+        "Command: #{job.command}",
+        "Elapsed: #{elapsed}ms",
+        if(job.exit_code != nil, do: "Exit code: #{job.exit_code}"),
+        "Mode: #{mode}"
+      ]
+      |> Enum.reject(&is_nil/1)
+
+    Enum.join(lines, "\n")
   end
 
   @spec subagent() :: Spec.t()
