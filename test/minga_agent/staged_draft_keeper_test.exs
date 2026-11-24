@@ -592,6 +592,99 @@ defmodule MingaAgent.StagedDraftKeeperTest do
       assert StagedDrafts.load(root, store) == {:ok, []}
       refute File.exists?(dir)
     end
+
+    test "after a partial publish, the published draft is not offered at the next start",
+         %{root: root, store: store, keeper: keeper} do
+      {:ok, view} = ProjectView.overlay(root)
+      StagedDraftKeeper.persist(keeper, view, 1)
+      :ok = ProjectView.write_file(view, "lib/a.ex", "ONE\ntwo\nthree\n")
+      :ok = ProjectView.write_file(view, "lib/b.ex", "alpha\nBETA\n")
+      eventually(keeper, fn -> map_size(stored(root, store)) == 2 end)
+      File.write!(Path.join(root, "lib/b.ex"), "alpha\nbeta-human\n")
+      dir = block_cleanup(root, view, store)
+
+      # lib/a.ex is published; lib/b.ex conflicts and stays staged. Loading
+      # the store would make the view directory writable again, so wait on
+      # the keeper's retry instead.
+      capture_log(fn ->
+        assert {:conflict, _details} = ProjectView.promote(view, :project_root)
+        eventually(keeper, fn -> :sys.get_state(keeper).tracked[view.id].retry_pending end)
+      end)
+
+      full_shutdown(view)
+      File.chmod!(dir, 0o700)
+
+      fresh = start_keeper(store, :second)
+      :ok = StagedDraftKeeper.recover(fresh, root, self())
+
+      assert_receive {:staged_drafts_recovered, ^root, [%Recovery{} = recovery]}, 2_000
+      assert Enum.map(recovery.changes, & &1.path) == ["lib/b.ex"]
+
+      # The next save of the restored view finishes the deletion.
+      published = StagedDrafts.draft_file(root, view.id, "lib/a.ex", store)
+      assert File.exists?(published)
+      :ok = ProjectView.write_file(recovery.view, "lib/b.ex", "alpha\nBETA!\n")
+      eventually(fresh, fn -> not File.exists?(published) end)
+      assert Map.keys(stored(root, store)) == [{1, "lib/b.ex"}]
+    end
+
+    test "a view left with only drafts whose deletion failed is removed at the next start",
+         %{root: root, store: store, keeper: keeper} do
+      {:ok, view} = ProjectView.overlay(root)
+      StagedDraftKeeper.persist(keeper, view, 1)
+      :ok = ProjectView.write_file(view, "lib/a.ex", "ONE\ntwo\nthree\n")
+      eventually(keeper, fn -> map_size(stored(root, store)) == 1 end)
+      dir = block_cleanup(root, view, store)
+
+      # The view stays open with nothing staged, and deleting its drafts fails.
+      capture_log(fn ->
+        :ok = ProjectView.discard_file(view, "lib/a.ex")
+        eventually(keeper, fn -> :sys.get_state(keeper).tracked[view.id].retry_pending end)
+      end)
+
+      full_shutdown(view)
+      File.chmod!(dir, 0o700)
+
+      fresh = start_keeper(store, :second)
+      :ok = StagedDraftKeeper.recover(fresh, root, self())
+      :sys.get_state(fresh)
+
+      refute_received {:staged_drafts_recovered, _, _}
+      refute File.exists?(dir)
+      assert File.ls!(Path.dirname(dir)) == []
+    end
+
+    test "a draft staged again for a path whose deletion is pending is offered at the next start",
+         %{root: root, store: store, keeper: keeper} do
+      {:ok, view} = ProjectView.overlay(root)
+      StagedDraftKeeper.persist(keeper, view, 1)
+      :ok = ProjectView.write_file(view, "lib/a.ex", "ONE\ntwo\nthree\n")
+      :ok = ProjectView.write_file(view, "lib/b.ex", "alpha\nBETA\n")
+      eventually(keeper, fn -> map_size(stored(root, store)) == 2 end)
+      dir = block_cleanup(root, view, store)
+
+      capture_log(fn ->
+        :ok = ProjectView.discard_file(view, "lib/a.ex")
+        eventually(keeper, fn -> :sys.get_state(keeper).tracked[view.id].retry_pending end)
+      end)
+
+      # The agent stages lib/a.ex again once the store is writable.
+      File.chmod!(dir, 0o700)
+      :ok = ProjectView.write_file(view, "lib/a.ex", "ONE again\n")
+
+      eventually(keeper, fn ->
+        match?(%{{1, "lib/a.ex"} => %{content: "ONE again\n"}}, stored(root, store))
+      end)
+
+      full_shutdown(view)
+
+      fresh = start_keeper(store, :second)
+      :ok = StagedDraftKeeper.recover(fresh, root, self())
+
+      assert_receive {:staged_drafts_recovered, ^root, [%Recovery{} = recovery]}, 2_000
+      assert recovery.changes |> Enum.map(& &1.path) |> Enum.sort() == ["lib/a.ex", "lib/b.ex"]
+      assert ProjectView.read_file(recovery.view, "lib/a.ex") == {:ok, "ONE again\n"}
+    end
   end
 
   describe "two Minga instances on one project" do

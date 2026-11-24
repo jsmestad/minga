@@ -2,14 +2,9 @@ defmodule MingaAgent.Changeset do
   @moduledoc """
   In-memory changesets with filesystem overlays for agent editing.
 
-  A changeset tracks file edits without modifying the original project.
-  Edits are held in memory and materialized into a temporary overlay
-  directory (`MingaAgent.Changeset.Overlay`), where external tools
-  (compilers, test runners, linters) see a coherent view of the project
-  with changes applied. The overlay copies only the paths it needs, never
-  hardlinks them, so a tool writing through the overlay cannot change the
-  original files. Build and cache directories such as `_build`, `deps`,
-  `.git` and `node_modules` are not copied.
+  A changeset tracks file edits without modifying the original project. Edits are held in memory and materialized into a temporary overlay directory (`MingaAgent.Changeset.Overlay`), where external tools (compilers, test runners, linters) see a coherent view of the project with changes applied.
+
+  The overlay copies the project files it needs and never hardlinks them, so a tool that rewrites a copied file changes only the overlay. Build and cache directories such as `_build`, `deps`, `.git` and `node_modules` are not copied, and two of them stay shared with the project. Commands use the project's `deps` directory through `MIX_DEPS_PATH`, so a command that fetches or changes dependencies changes the project's `deps`. Each installed `node_modules` package is a link to the project's copy, so a command that writes inside an installed package, such as a postinstall script or `patch-package`, changes the project's package. Agent file tools never write through such a link.
 
   ## Lifecycle
 
