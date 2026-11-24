@@ -96,8 +96,9 @@ func (m Model) renderAgentComposerWithLimit(chat protocol.AgentChat, width, budg
 		if chat.QuestionOffer != 0 {
 			title = " Question: " + strings.Join(strings.Fields(chat.QuestionPrompt), " ") + " "
 		}
-		title = fit(title, max(width-2, 0))
-		lines = append(lines, base.Render(border.Render("╭"+title+strings.Repeat("─", max(width-2-lipgloss.Width(title), 0))+"╮")))
+		rounded := lipgloss.RoundedBorder()
+		title = fit(title, max(width-lipgloss.Width(rounded.TopLeft+rounded.TopRight), 0))
+		lines = append(lines, base.Render(border.Render(rounded.TopLeft+title+strings.Repeat(rounded.Top, max(width-lipgloss.Width(rounded.TopLeft+title+rounded.TopRight), 0))+rounded.TopRight)))
 	}
 	window, committed := m.windows[protocol.AgentPromptWindowID]
 	start := m.presentationSourceStart(window, placement.rows)

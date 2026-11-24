@@ -1,0 +1,9 @@
+
+  Minga is ready  Ask in plain language, or start with a slash command.
+
+  Suggested next moves
+  /explain Explain this file             /tests Find failing tests
+  /review Review changes                 /edit Edit current buffer
+  /run Run a command                     /plan Draft a plan
+  Start an agent turn from this prompt, or use /help for slash commands.
+  Tool calls, approvals, thinking, and usage will appear here as structured card

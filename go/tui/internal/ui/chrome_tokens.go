@@ -304,7 +304,7 @@ const (
 
 // Interim metrics for surfaces whose anatomy part has not landed yet. Each keeps today's cells by choosing the step that converts to them; the surface's own ticket replaces it with an anatomy part.
 const (
-	// agentTranscriptInset is the two columns before a transcript marker or rail (❯, ◇, │, ├─).
+	// agentTranscriptInset is the two columns before a transcript marker or rail (❯, ◇, │, ├─), kept clear after a row's text at the right edge as well.
 	agentTranscriptInset = spaceXL
 	// agentTranscriptBodyIndent indents a user message body and the turn separator under the speaker label.
 	agentTranscriptBodyIndent = spaceSection

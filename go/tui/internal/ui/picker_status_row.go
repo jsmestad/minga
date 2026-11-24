@@ -180,7 +180,7 @@ func (m Model) renderPickerStatusRow(item protocol.PickerItem, selected bool, ac
 	text.WriteString(labelStyle.Render(" "))
 	if layout.active {
 		text.WriteString(style(theme.Accent()).Render(pickerActiveGlyph))
-		text.WriteString(labelStyle.Render(" "))
+		text.WriteString(labelStyle.Render(gap(listRowGlyphToTitle)))
 	} else if layout.activeSlot {
 		text.WriteString(labelStyle.Render(strings.Repeat(" ", pickerActiveSlotWidth)))
 	}

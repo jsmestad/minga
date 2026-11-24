@@ -20,6 +20,11 @@ var agentToolBranch = gap(agentTranscriptInset) + "├─"
 // agentToolRail continues a tool card under its branch.
 var agentToolRail = gap(agentTranscriptInset) + "│"
 
+// agentTranscriptTextWidth is the columns left for text after lead on a transcript row width columns wide. The transcript inset stays clear at the right edge as well as the left, and the budget never drops under eight columns.
+func agentTranscriptTextWidth(width int, lead string) int {
+	return max(width-lipgloss.Width(lead)-agentTranscriptInset.cols(), 8)
+}
+
 const agentProseTabWidth = 4
 
 // Source offsets for wrapped blocks only. Text and style stay in the resident message.

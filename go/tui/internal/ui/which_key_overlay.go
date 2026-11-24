@@ -22,15 +22,16 @@ func (m Model) floatingWhichKeyLayer() *lipgloss.Layer {
 	if popup == "" {
 		return nil
 	}
-	x := 2
+	// The panel sits two columns in, or flush left when a narrow terminal leaves no room for the offset.
+	x := max(min(2, m.width-lipgloss.Width(popup)), 0)
 	y := max(m.height-lipgloss.Height(popup)-2, 0)
 	return lipgloss.NewLayer(popup).X(x).Y(y).Z(9)
 }
 
 func (m Model) renderFloatingWhichKey(which protocol.WhichKey) string {
 	popupWidth := m.whichKeyWidth()
-	contentWidth := max(popupWidth-2, 1)
-	inner := max(contentWidth-2, 1)
+	frame := m.whichKeyFrame()
+	inner := frame.contentWidth(popupWidth)
 	columns := m.whichKeyColumns(inner, len(which.Bindings))
 	gutter := m.whichKeyColumnGutter()
 	gutterWidth := lipgloss.Width(gutter)
@@ -53,8 +54,7 @@ func (m Model) renderFloatingWhichKey(which protocol.WhichKey) string {
 	}
 	lines = append(lines, m.renderWhichKeyFooter(which, inner))
 
-	content := strings.Join(lines, "\n")
-	return lipgloss.NewStyle().Width(contentWidth).Padding(padding(whichKeyInsetV, whichKeyInsetH)).Border(lipgloss.RoundedBorder()).BorderForeground(m.palette().PopupBorder()).BorderBackground(m.palette().PopupSurface()).Background(m.palette().PopupSurface()).ColorWhitespace(true).Render(content)
+	return frame.render(popupWidth, strings.Join(lines, "\n"))
 }
 
 func (m Model) renderWhichKeyHeader(which protocol.WhichKey, width int) string {

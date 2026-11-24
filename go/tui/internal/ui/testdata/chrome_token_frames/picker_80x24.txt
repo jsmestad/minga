@@ -1,0 +1,16 @@
+ Models and connections claude  marked 1  ⠋ loading
+────────────────────────────────────────────────────────────────────────────────
+  Claude (subscription)
+ ▌ ● Claude Opus 4  ★ favorite  Claude Max · 5h limit resets 3:…  ✓ Ready · 45%
+     Claude Sonnet 4  Claude Max · 5h limit resets 3:40 PM · 20…  ! Ready · 82%
+     Claude Haiku 4  Run claude login in a terminal, then reope…  ✗ Unavailable
+ 1/4                                            ↑↓ move  Enter choose  Esc close
+╭──────────────────────────────────────────────────────────────────────╮
+│  Models and connections claude  marked 1  ⠋ loading                  │
+│ ──────────────────────────────────────────────────────────────────── │
+│   Claude (subscription)                                              │
+│  ▌ ● Claude Opus 4  ★ favorite  Claude Max · 5h lim…  ✓ Ready · 45%  │
+│      Claude Sonnet 4  Claude Max · 5h limit resets …  ! Ready · 82%  │
+│      Claude Haiku 4  Run claude login in a terminal…  ✗ Unavailable  │
+│  1/4                                ↑↓ move  Enter choose  Esc close │
+╰──────────────────────────────────────────────────────────────────────╯

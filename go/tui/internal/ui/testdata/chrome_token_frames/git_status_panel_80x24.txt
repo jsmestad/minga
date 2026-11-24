@@ -1,0 +1,10 @@
+git main  3 files
+▾ Staged (1)
+  lib/a.ex
+▾ Changes (1)
+  lib/b.ex
+▾ Untracked (1)
+  new.txt
+
+
+

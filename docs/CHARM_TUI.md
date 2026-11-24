@@ -98,6 +98,14 @@ chip := lipgloss.NewStyle().Padding(padding(spaceHairline, spaceSM)).Render(key)
 fill := strings.Repeat(" ", max(width-lipgloss.Width(left)-lipgloss.Width(right), 0))
 ```
 
+A width budget is the outer width minus what is drawn beside the text, measured or named, never counted. Measure the lead you drew (`width-lipgloss.Width(lead)`) or name the step it came from (`width-spaceXL.cols()`). A bordered popup goes further: it renders through a `popupFrame` (`m.popoverFrame()` for the picker and the notification center, `m.whichKeyFrame()` for which-key), and takes its content budget from the same frame with `frame.contentWidth(outer)` and `frame.contentHeight(outer)`. The budget then follows the border and the inset tokens, so raising an inset cannot make fitted rows wrap.
+
+```go
+frame := m.popoverFrame()
+contentWidth := frame.contentWidth(popupWidth) // popupWidth minus the border and popoverRowInset on each side
+return frame.render(popupWidth, strings.Join(rowsFittedTo(contentWidth), "\n"))
+```
+
 When a surface has a part in `anatomy.md`, use the part metric instead of a raw step. Part metrics live in the same file, one block per part, named by part: `listRowTitleToMeta`, `whichKeyColumnGap`, `modelineSegmentGap`, `promptLabelToQuery`, `decisionBarRows`, and so on. A surface whose anatomy part has not landed yet uses the step that keeps its current cells, or an interim metric such as `agentTranscriptInset`, until its own ticket reshapes it.
 
 ### The guard
@@ -105,12 +113,15 @@ When a surface has a part in `anatomy.md`, use the part metric instead of a raw 
 `chrome_token_guardrail_test.go` is the twin of `ChromeTokenGuardrailTests` on macOS. It parses every non-test Go file in `internal/ui` and fails on:
 
 - an integer literal other than `0` anywhere in the arguments of a Lip Gloss `Padding*`, `Margin*`, `Width`, `Height`, `MaxWidth` or `MaxHeight` call, including nested calls and arithmetic offsets;
-- `strings.Repeat(" ", n)` when `n` is a literal or a literal added to or subtracted from a value;
+- the same literal in the width argument of `fit`, `renderPadded`, `firstCompactLine`, `ansi.Truncate`, `ansi.TruncateWc`, `ansi.Wrap` or `lipgloss.PlaceHorizontal`;
+- `strings.Repeat(s, n)` when `s` is a string literal of spaces, in any quoting (`" "`, a raw-string space, `"\x20"`), and `n` is a literal or a literal added to or subtracted from a value;
 - a string literal with two or more consecutive spaces.
 
-Layout arithmetic passes: a literal that is a direct argument of a `min` or `max` clamp (`max(width, 1)`), an operand of `*` or `/` (`available/2`), or an index. A literal offset such as `width-3` fails; give it a name from the scale. `chrome_tokens.go` owns the constants and is not scanned. The test keeps a fixed list of excluded editor-cell files, each with a reason; it is empty today because editor-cell code in this package names its cell widths (`gutterSignCells`, `scrollbarCells`). The migration allowlist is empty, and a stale or unexplained entry fails.
+Layout arithmetic passes: a literal that is a direct argument of a `min` or `max` clamp (`max(width, 1)`), an operand of `*` or `/` (`available/2`), or an index. A literal offset such as `width-3` fails; give it a name from the scale or measure what it stands for.
 
-`chrome_tokens_test.go` asserts each step's columns and rows, each part metric against the TUI column of `anatomy.md`, and parity with `ChromeTokens.swift`: it fails when a step exists on one frontend only or when the two disagree about its points. `TestChromeTokenFrames` renders every chrome surface at 80x24 and 120x40; set `MINGA_TUI_FRAME_DIR` to write the text grids, then diff them before and after a token change. `go/tui/chrome_token_migration.json` records each intentional snap made when the scale was introduced.
+The guard reads call shapes, not data flow. It does not check a budget computed into a local variable before the call (`wrapWidth := width-3` followed by `ansi.Wrap(text, wrapWidth, "")`), a padding width in a `fmt.Sprintf` verb (`%-4s`, `%*s`), a run of spaces built by concatenating single spaces or repeating a variable string, or a Lip Gloss method called through a method value. Review those shapes by hand; the frame grids below catch the cells they produce. `chrome_tokens.go` owns the constants and is not scanned. The test keeps a fixed list of excluded editor-cell files, each with a reason; it is empty today because editor-cell code in this package names its cell widths (`gutterSignCells`, `scrollbarCells`). The migration allowlist is empty, and a stale or unexplained entry fails.
+
+`chrome_tokens_test.go` asserts each step's columns and rows, each part metric against the TUI column of `anatomy.md`, and parity with `ChromeTokens.swift`: it fails when a step exists on one frontend only, when the two disagree about its points, or when a `static let`, `static var` or `case` line in the Swift `Spacing`, `Radius` or `Typography.Step` body is written in a form the parity parser does not read (a trailing comment, a `Double` type, two cases on one line). `TestChromeTokenFrames` renders every chrome surface at 80x24 and 120x40 and compares each 80x24 grid with its committed golden in `go/tui/internal/ui/testdata/chrome_token_frames/`, so a character that moves fails the test. After an intentional change, rewrite the goldens with `go test ./internal/ui/ -run TestChromeTokenFrames -update`, review the diff, and record the change in `go/tui/chrome_token_migration.json`. Set `MINGA_TUI_FRAME_DIR` to also write the 120x40 grids for a before and after diff. `TestPopupFrameBudgetFollowsEveryInsetStep` raises each popup inset to every step of the scale and shows that fitted rows never wrap.
 
 ### Extending the scale
 

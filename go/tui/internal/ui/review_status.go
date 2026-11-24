@@ -74,7 +74,8 @@ func (m Model) renderReviewStatus(review protocol.StatusReview) string {
 	if review.ConflictIndex != 0 {
 		controlWidth += len(mine) + len(agent) + 2*len(separator)
 	}
-	state = fit(state, min(len(state), max(m.width-controlWidth-1, 0)))
+	stateSeparator := gap(spaceXS)
+	state = fit(state, min(len(state), max(m.width-controlWidth-lipgloss.Width(stateSeparator), 0)))
 	style := lipgloss.NewStyle().Foreground(m.palette().ChromeText()).Background(m.palette().ChromeSurface())
 	back := m.zones.Mark(zoneIDReviewControl(review, 1), style.Render(labels[0]))
 	refreshStyle := style
@@ -95,7 +96,7 @@ func (m Model) renderReviewStatus(review protocol.StatusReview) string {
 	}
 	content := controls
 	if state != "" {
-		content = style.Render(state) + " " + controls
+		content = style.Render(state) + stateSeparator + controls
 	}
 	// Optional path comes strictly after the state and all controls.
 	remaining := m.width - lipgloss.Width(content) - spaceXL.cols()

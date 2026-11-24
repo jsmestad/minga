@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -15,13 +16,22 @@ import (
 // chromeFrameSizes are the terminal sizes the chrome token migration records frames at.
 var chromeFrameSizes = []struct{ width, height uint16 }{{80, 24}, {120, 40}}
 
+// chromeFrameGoldenSize is the size whose grids are committed under chromeFrameGoldenDir and compared cell for cell on every run.
+var chromeFrameGoldenSize = struct{ width, height uint16 }{80, 24}
+
+// chromeFrameGoldenDir holds one plain text grid per chrome surface at chromeFrameGoldenSize.
+const chromeFrameGoldenDir = "testdata/chrome_token_frames"
+
+// updateChromeFrames rewrites the committed golden grids: go test ./internal/ui/ -run TestChromeTokenFrames -update.
+var updateChromeFrames = flag.Bool("update", false, "rewrite the committed chrome token frame grids in "+chromeFrameGoldenDir)
+
 // chromeFrameScenario renders one chrome surface to text lines at the model's size.
 type chromeFrameScenario struct {
 	name   string
 	render func(m Model) []string
 }
 
-// TestChromeTokenFrames renders every chrome surface that uses the token scale at 80x24 and 120x40. It always checks that each surface renders, and it writes plain text grids to $MINGA_TUI_FRAME_DIR when that variable is set, so a token change can be diffed cell by cell (docs/CHARM_TUI.md#chrome-tokens).
+// TestChromeTokenFrames renders every chrome surface that uses the token scale at 80x24 and 120x40. It checks that each surface renders, compares each 80x24 grid with its committed golden in testdata/chrome_token_frames (rewrite them with -update), and writes every plain text grid to $MINGA_TUI_FRAME_DIR when that variable is set, so a token change can be diffed cell by cell (docs/CHARM_TUI.md#chrome-tokens).
 func TestChromeTokenFrames(t *testing.T) {
 	dir := os.Getenv("MINGA_TUI_FRAME_DIR")
 	for _, size := range chromeFrameSizes {
@@ -34,20 +44,64 @@ func TestChromeTokenFrames(t *testing.T) {
 				if len(lines) == 0 {
 					t.Fatalf("%s rendered no rows", scenario.name)
 				}
-				var grid strings.Builder
-				for _, line := range lines {
-					for _, row := range strings.Split(line, "\n") {
-						grid.WriteString(strings.TrimRight(ansi.Strip(row), " "))
-						grid.WriteByte('\n')
-					}
+				grid := chromeFrameGrid(lines)
+				if size == chromeFrameGoldenSize {
+					checkChromeFrameGolden(t, name, grid)
 				}
 				if dir == "" {
 					return
 				}
-				if err := os.WriteFile(filepath.Join(dir, name+".txt"), []byte(grid.String()), 0o644); err != nil {
+				if err := os.WriteFile(filepath.Join(dir, name+".txt"), []byte(grid), 0o644); err != nil {
 					t.Fatal(err)
 				}
 			})
+		}
+	}
+}
+
+// chromeFrameGrid flattens rendered rows to plain text, one terminal row per line, with trailing blanks trimmed.
+func chromeFrameGrid(lines []string) string {
+	var grid strings.Builder
+	for _, line := range lines {
+		for _, row := range strings.Split(line, "\n") {
+			grid.WriteString(strings.TrimRight(ansi.Strip(row), " "))
+			grid.WriteByte('\n')
+		}
+	}
+	return grid.String()
+}
+
+// checkChromeFrameGolden fails when grid differs from the committed golden for name, naming the first row that differs.
+func checkChromeFrameGolden(t *testing.T, name, grid string) {
+	t.Helper()
+	path := filepath.Join(chromeFrameGoldenDir, name+".txt")
+	if *updateChromeFrames {
+		if err := os.MkdirAll(chromeFrameGoldenDir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(grid), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	want, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("%v; record intentional frames with: go test ./internal/ui/ -run TestChromeTokenFrames -update", err)
+	}
+	if grid == string(want) {
+		return
+	}
+	got, wanted := strings.Split(grid, "\n"), strings.Split(string(want), "\n")
+	for row := range max(len(got), len(wanted)) {
+		var g, w string
+		if row < len(got) {
+			g = got[row]
+		}
+		if row < len(wanted) {
+			w = wanted[row]
+		}
+		if g != w {
+			t.Fatalf("%s differs from %s at row %d:\n got: %q\nwant: %q\nRecord an intentional change with -update and in go/tui/chrome_token_migration.json.", name, path, row+1, g, w)
 		}
 	}
 }

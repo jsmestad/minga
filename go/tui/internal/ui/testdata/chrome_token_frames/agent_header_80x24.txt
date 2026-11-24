@@ -1,0 +1,4 @@
+󰚩 Agent  anthropic / claude-sonnet-4      ◐ thinking   ◌ medium [History] [Help]
+    ────────────────────────────────────────────────────────────────────────────
+Queued  next prompt waits
+│ Enter  send                          │

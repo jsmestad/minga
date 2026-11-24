@@ -234,6 +234,9 @@ func TestChromeTokenScaleMatchesMacOS(t *testing.T) {
 		t.Fatal(err)
 	}
 	swift := swiftChromeScales(t, string(source))
+	for _, line := range swiftUnparsedSteps(string(source), swiftChromeScaleEnums...) {
+		t.Errorf("ChromeTokens.swift declares a step the parity parser cannot read: %s", line)
+	}
 	goScales := goChromeScales(t, chromeTokenOwner)
 	for _, scale := range []struct{ swiftEnum, goType string }{{"Spacing", "space"}, {"Radius", "radius"}, {"Step", "textStep"}} {
 		want, got := swift[scale.swiftEnum], goScales[scale.goType]
@@ -262,6 +265,26 @@ func TestChromeTokenParityParsersReadBothSources(t *testing.T) {
 	if swift["Spacing"]["xs"] != 4 || swift["Step"]["caption"] != 10 || swift["Radius"]["lg"] != 8 || len(swift["Typography"]) != 0 {
 		t.Errorf("Swift parser read %v", swift)
 	}
+	for _, line := range []string{
+		"    public static let xs: CGFloat = 4 // tight",
+		"    public static var md: CGFloat = 8",
+		"    static let lg = 12.0",
+		"    public static let xl: Double = 16",
+		"    nonisolated public static let panel: CGFloat = 24",
+		"        case a = 1, b = 2",
+		"        case heading",
+	} {
+		for _, enum := range swiftChromeScaleEnums {
+			source := "public enum " + enum + " {\n" + line + "\n    public static func helper() -> CGFloat { 0 }\n}\n"
+			if unparsed := swiftUnparsedSteps(source, enum); len(unparsed) != 1 || unparsed[0] != strings.TrimSpace(line) {
+				t.Errorf("%s: unparsed step %q reported as %q", enum, line, unparsed)
+			}
+		}
+	}
+	strict := "public enum Spacing {\n    /// 4pt: tight.\n    public static let xs: CGFloat = 4\n    static let sm: CGFloat = 6\n}\npublic enum Typography {\n    public enum Step: CGFloat, Sendable {\n        case caption = 10\n    }\n    public static let monospacedSmall = font(.small)\n}\n"
+	if unparsed := swiftUnparsedSteps(strict, swiftChromeScaleEnums...); len(unparsed) != 0 {
+		t.Errorf("strict steps reported as unparsed: %q", unparsed)
+	}
 	if got := goTokenName("space", "spaceXXL"); got != "xxl" {
 		t.Errorf("spaceXXL maps to %q, want xxl", got)
 	}
@@ -270,8 +293,12 @@ func TestChromeTokenParityParsersReadBothSources(t *testing.T) {
 	}
 }
 
+// swiftChromeScaleEnums are the ChromeTokens.swift enums whose steps the TUI mirrors: Spacing, Radius and Typography.Step.
+var swiftChromeScaleEnums = []string{"Spacing", "Radius", "Step"}
+
 var (
 	swiftEnumPattern  = regexp.MustCompile(`enum (\w+)\b[^{]*\{`)
+	swiftDeclPattern  = regexp.MustCompile(`(?m)^\s*(?:\w+\s+)*(?:static\s+(?:let|var)|case)\b.*$`)
 	swiftStepPattern  = regexp.MustCompile(`(?m)^\s*(?:public )?static let (\w+): CGFloat = ([0-9.]+)\s*$|^\s*case (\w+) = ([0-9.]+)\s*$`)
 	goScalePrefixes   = map[string]string{"space": "space", "radius": "radius", "textStep": "text"}
 	goUppercaseSuffix = regexp.MustCompile(`^[A-Z]+$`)
@@ -299,6 +326,26 @@ func swiftChromeScales(t *testing.T, source string) map[string]map[string]int {
 		scales[name] = steps
 	}
 	return scales
+}
+
+// swiftUnparsedSteps returns each `static let`, `static var` or `case` line directly inside the named enums that swiftStepPattern does not read, so a step written another way fails parity instead of disappearing from it.
+func swiftUnparsedSteps(source string, enums ...string) []string {
+	wanted := map[string]bool{}
+	for _, name := range enums {
+		wanted[name] = true
+	}
+	var unparsed []string
+	for _, match := range swiftEnumPattern.FindAllStringSubmatchIndex(source, -1) {
+		if !wanted[source[match[2]:match[3]]] {
+			continue
+		}
+		for _, line := range swiftDeclPattern.FindAllString(swiftDirectBody(source[match[1]:]), -1) {
+			if !swiftStepPattern.MatchString(line) {
+				unparsed = append(unparsed, strings.TrimSpace(line))
+			}
+		}
+	}
+	return unparsed
 }
 
 // swiftDirectBody returns the text of an enum body at nesting depth one, dropping nested type bodies.
