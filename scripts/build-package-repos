@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
 # Build signed apt, dnf and pacman repositories for one published Linux release.
 #
-# Usage: scripts/build-package-repos ASSETS VERSION SOURCE_SHA KEY OUTPUT
+# Usage: scripts/build-package-repos ASSETS VERSION SOURCE_SHA KEY FINGERPRINT OUTPUT
 #
 # ASSETS holds the release's own Linux assets under their release names:
 #   minga_VERSION_{amd64,arm64}.deb, minga-VERSION.{x86_64,aarch64}.rpm and
 #   minga_VERSION_linux_{x86_64,aarch64}.tar.gz.
-# KEY is the armored private signing key. OUTPUT must not exist; it receives
+# KEY is the armored private signing key and FINGERPRINT the fingerprint users
+# are told to trust; a different key fails the build. OUTPUT must not exist; it receives
 # the complete tree that scripts/upload-package-repos publishes:
 #
 #   minga.asc, repo.json
@@ -20,21 +21,26 @@
 # PKGBUILD, so makepkg checks the tarball SHA-256 digests.
 set -euo pipefail
 
-if [[ $# -ne 5 ]]; then
-  echo "usage: $0 ASSETS VERSION SOURCE_SHA KEY OUTPUT" >&2
+if [[ $# -ne 6 ]]; then
+  echo "usage: $0 ASSETS VERSION SOURCE_SHA KEY FINGERPRINT OUTPUT" >&2
   exit 2
 fi
 assets=$(cd "$1" && pwd)
 version=$2
 source_sha=$3
 key=$(cd "$(dirname "$4")" && pwd)/$(basename "$4")
-output=$5
+fingerprint=$5
+output=$6
 scripts=$(cd "$(dirname "$0")" && pwd)
 repo_root=$(dirname "$scripts")
 base_url=https://packages.mingacode.dev
+# These images receive the private signing key, so they are pinned by digest.
+ubuntu_image=ubuntu:24.04@sha256:562111b88caa79c71391c0c4d3c2114a7d5c35915c20561fd893cb1e07929e6b
+arch_image=archlinux:base-devel@sha256:949ecb1661609ab7e8f6854ba03efd62792e7a796313738e94b040c095c20d91
 
 [[ $version =~ ^[0-9]+\.[0-9]+\.[0-9]+(-dev\.[1-9][0-9]*)?$ ]] || { echo "invalid version: $version" >&2; exit 2; }
 [[ $source_sha =~ ^[0-9a-f]{40}$ ]] || { echo "invalid source SHA: $source_sha" >&2; exit 2; }
+[[ $fingerprint =~ ^[0-9A-F]{40}$ ]] || { echo "invalid fingerprint (40 uppercase hex characters): $fingerprint" >&2; exit 2; }
 [[ -f $key ]] || { echo "missing signing key: $key" >&2; exit 2; }
 if [[ -e $output ]]; then
   echo "output already exists: $output" >&2
@@ -83,13 +89,15 @@ EOF
 # apt and dnf: Ubuntu 24.04, the same image family as the release runners.
 docker run --rm --platform linux/amd64 \
   -v "$assets:/assets:ro" -v "$key:/key.asc:ro" -v "$work:/work" \
-  -e VERSION="$version" -e SOURCE_SHA="$source_sha" -e OWNER="$(id -u):$(id -g)" ubuntu:24.04 bash -euo pipefail -c '
+  -e VERSION="$version" -e SOURCE_SHA="$source_sha" -e EXPECTED="$fingerprint" -e OWNER="$(id -u):$(id -g)" \
+  "$ubuntu_image" bash -euo pipefail -c '
     apt-get update -qq >/dev/null
     DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
       apt-utils createrepo-c rpm gnupg >/dev/null
     export GNUPGHOME=$(mktemp -d)
     gpg --batch --quiet --import /key.asc
     fpr=$(gpg --list-secret-keys --with-colons | awk -F: "/^fpr/ { print \$10; exit }")
+    [ "$fpr" = "$EXPECTED" ] || { echo "signing key $fpr is not the published key $EXPECTED" >&2; exit 1; }
     sign() { gpg --batch --yes --quiet --pinentry-mode loopback --passphrase "" --local-user "$fpr" "$@"; }
     tree=/work/tree
     gpg --armor --export "$fpr" > "$tree/minga.asc"
@@ -111,6 +119,7 @@ docker run --rm --platform linux/amd64 \
       -o APT::FTPArchive::Release::Suite=stable -o APT::FTPArchive::Release::Codename=stable \
       -o APT::FTPArchive::Release::Architectures="amd64 arm64" -o APT::FTPArchive::Release::Components=main \
       -o APT::FTPArchive::Release::Description="Minga rolling builds" \
+      -o APT::FTPArchive::DoByHash=true \
       release dists/stable > /tmp/Release
     mv /tmp/Release dists/stable/Release
     sign --clearsign -o dists/stable/InRelease dists/stable/Release
@@ -136,10 +145,12 @@ docker run --rm --platform linux/amd64 \
 # pacman: Arch itself builds, signs and indexes the packages.
 docker run --rm --platform linux/amd64 \
   -v "$assets:/assets:ro" -v "$key:/key.asc:ro" -v "$work:/work" \
-  -e VERSION="$version" -e OWNER="$(id -u):$(id -g)" archlinux:base-devel bash -euo pipefail -c '
+  -e VERSION="$version" -e EXPECTED="$fingerprint" -e OWNER="$(id -u):$(id -g)" \
+  "$arch_image" bash -euo pipefail -c '
     export GNUPGHOME=$(mktemp -d)
     gpg --batch --quiet --import /key.asc
     fpr=$(gpg --list-secret-keys --with-colons | awk -F: "/^fpr/ { print \$10; exit }")
+    [ "$fpr" = "$EXPECTED" ] || { echo "signing key $fpr is not the published key $EXPECTED" >&2; exit 1; }
     useradd -m builder
     mkdir -p /work/tree/arch
     cp /work/minga.conf /work/tree/arch/
