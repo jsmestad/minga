@@ -13,6 +13,19 @@ defmodule Minga.Parser.ProtocolStructuralNavTest do
                Protocol.encode_request_structural_nav(7, 42, 3, 11, 2)
     end
 
+    test "encodes an ancestor depth as 16 plus the depth" do
+      assert Protocol.ancestor_action(0) == 16
+
+      assert <<@op_request_structural_nav, 7::32, 42::32, 3::32, 11::32, 18>> =
+               Protocol.encode_request_structural_nav(7, 42, 3, 11, Protocol.ancestor_action(2))
+    end
+
+    test "rejects action bytes between the relative moves and the ancestor depths" do
+      assert_raise FunctionClauseError, fn ->
+        Protocol.encode_request_structural_nav(7, 42, 3, 11, 4)
+      end
+    end
+
     test "decodes a found node_info response" do
       payload =
         <<@op_node_info, 42::32, 1, 1::32, 2::32, 3::32, 4::32, 15::16, "call_expression">>

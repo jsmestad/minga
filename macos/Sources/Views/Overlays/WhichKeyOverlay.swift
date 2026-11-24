@@ -34,11 +34,13 @@ public struct WhichKeyOverlay: View {
                         Text(state.prefix)
                             .font(Typography.font(.small, weight: .semibold, design: .monospaced))
                             .foregroundStyle(theme.popupKeyFg)
+                            .anatomyPart("whichKey.breadcrumb", text: state.prefix, font: .small, monospaced: true)
                         Spacer()
                         if state.pageCount > 1 {
                             Text("\(state.page + 1)/\(state.pageCount)")
                                 .font(Typography.font(.caption))
                                 .foregroundStyle(theme.popupFg.opacity(0.4))
+                                .anatomyPart("whichKey.count", text: "\(state.page + 1)/\(state.pageCount)", font: .caption)
                         }
                     }
                     .padding(.horizontal, Spacing.lg)
@@ -63,6 +65,7 @@ public struct WhichKeyOverlay: View {
                 RoundedRectangle(cornerRadius: Radius.lg)
                     .strokeBorder(theme.popupBorder.opacity(0.5), lineWidth: 1)
             )
+            .anatomyPart("whichKey.panel")
             .frame(maxWidth: columnWidth * CGFloat(min(columnCount, maxColumns)) + 24)
             .padding(.horizontal, Spacing.xl)
             .padding(.bottom, Spacing.md)
@@ -92,6 +95,7 @@ public struct WhichKeyOverlay: View {
                     }
                 }
                 .frame(width: columnWidth)
+                .anatomyPart("whichKey.column")
             }
         }
     }
@@ -103,18 +107,22 @@ public struct WhichKeyOverlay: View {
             Text(binding.key)
                 .font(Typography.monospacedSmall)
                 .foregroundStyle(theme.popupKeyFg)
+                .anatomyPart("whichKey.entryKey", text: binding.key, font: .small, monospaced: true)
                 .frame(minWidth: 24, alignment: .trailing)
 
-            // Description
+            // Description. Group rows arrive from the BEAM as Title Case labels with a trailing
+            // chevron ("Session ›") and draw in the group colour role (docs/design/keys.md).
             Text(binding.description)
                 .font(Typography.font(.small))
-                .foregroundStyle(binding.isGroup ? theme.popupGroupFg : theme.popupFg.opacity(0.7))
+                .foregroundStyle(binding.isGroup ? theme.roleColor(.group) : theme.popupFg.opacity(0.7))
                 .lineLimit(1)
                 .truncationMode(.tail)
+                .anatomyPart("whichKey.entryLabel", text: binding.description, font: .small)
 
             Spacer(minLength: 0)
         }
         .frame(height: rowHeight)
+        .anatomyPart("whichKey.entry", text: "\(binding.key) \(binding.description)")
     }
 }
 
@@ -127,17 +135,17 @@ public struct WhichKeyOverlay: View {
         page: 0,
         pageCount: 1,
         rawBindings: [
-            Wire.WhichKeyBinding(kind: 1, key: "f", description: "+file", icon: ""),
-            Wire.WhichKeyBinding(kind: 1, key: "b", description: "+buffer", icon: ""),
-            Wire.WhichKeyBinding(kind: 1, key: "w", description: "+window", icon: ""),
-            Wire.WhichKeyBinding(kind: 1, key: "g", description: "+git", icon: ""),
-            Wire.WhichKeyBinding(kind: 1, key: "s", description: "+search", icon: ""),
+            Wire.WhichKeyBinding(kind: 1, key: "f", description: "Files ›", icon: ""),
+            Wire.WhichKeyBinding(kind: 1, key: "b", description: "Buffers ›", icon: ""),
+            Wire.WhichKeyBinding(kind: 1, key: "w", description: "Windows ›", icon: ""),
+            Wire.WhichKeyBinding(kind: 1, key: "g", description: "Git ›", icon: ""),
+            Wire.WhichKeyBinding(kind: 1, key: "s", description: "Search ›", icon: ""),
             Wire.WhichKeyBinding(kind: 0, key: ":", description: "M-x command", icon: ""),
             Wire.WhichKeyBinding(kind: 0, key: ".", description: "repeat", icon: ""),
             Wire.WhichKeyBinding(kind: 0, key: "/", description: "search project", icon: ""),
-            Wire.WhichKeyBinding(kind: 1, key: "p", description: "+project", icon: ""),
-            Wire.WhichKeyBinding(kind: 1, key: "t", description: "+toggle", icon: ""),
-            Wire.WhichKeyBinding(kind: 1, key: "c", description: "+code", icon: ""),
+            Wire.WhichKeyBinding(kind: 1, key: "p", description: "Project ›", icon: ""),
+            Wire.WhichKeyBinding(kind: 1, key: "t", description: "Toggles ›", icon: ""),
+            Wire.WhichKeyBinding(kind: 1, key: "c", description: "Code ›", icon: ""),
             Wire.WhichKeyBinding(kind: 0, key: "e", description: "file tree", icon: ""),
         ]
     )
@@ -162,8 +170,8 @@ public struct WhichKeyOverlay: View {
             Wire.WhichKeyBinding(kind: 0, key: "p", description: "push", icon: ""),
             Wire.WhichKeyBinding(kind: 0, key: "f", description: "fetch", icon: ""),
             Wire.WhichKeyBinding(kind: 0, key: "d", description: "diff", icon: ""),
-            Wire.WhichKeyBinding(kind: 1, key: "b", description: "+branch", icon: ""),
-            Wire.WhichKeyBinding(kind: 1, key: "r", description: "+rebase", icon: ""),
+            Wire.WhichKeyBinding(kind: 1, key: "b", description: "Branch ›", icon: ""),
+            Wire.WhichKeyBinding(kind: 1, key: "r", description: "Rebase ›", icon: ""),
             Wire.WhichKeyBinding(kind: 0, key: "l", description: "log", icon: ""),
             Wire.WhichKeyBinding(kind: 0, key: "z", description: "stash", icon: ""),
         ]

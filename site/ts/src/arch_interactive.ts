@@ -43,7 +43,7 @@ export function triggerIsolationFault(state: IsolationSimState, fault: FaultKind
       remainingMs: 3000,
       legacyDead: false,
       mingaParserPlain: false,
-      notice: "ElixirLS blocked for 3.0s. Keep typing: the single-loop editor freezes while Minga stays instant.",
+      notice: "A synchronous plugin blocked for 3.0s. Keep typing: the shared-loop editor freezes while Minga keeps typing isolated in its own BEAM process.",
     };
   }
   if (fault === "parser_crash") {
@@ -54,7 +54,7 @@ export function triggerIsolationFault(state: IsolationSimState, fault: FaultKind
       legacyDead: true,
       legacyQueued: "",
       mingaParserPlain: true,
-      notice: "Malformed grammar segfaulted the C parser. In-process editor crashed; Minga respawned its Zig port in 14ms with 0 text lost.",
+      notice: "Malformed grammar segfaulted the C parser. In-process editor crashed; Minga respawned its Zig parser port cleanly with zero text lost.",
     };
   }
   return {
@@ -63,7 +63,7 @@ export function triggerIsolationFault(state: IsolationSimState, fault: FaultKind
     remainingMs: 2200,
     legacyDead: false,
     mingaParserPlain: false,
-    notice: "User :after_save hook raised MatchError. Single-loop save aborted; Minga contained the exception in a background Task.",
+    notice: "User :after_save hook raised MatchError. Shared-loop post-save chain broke; Minga isolated the exception in a background Task.",
   };
 }
 
@@ -100,7 +100,7 @@ export function tickIsolationSim(state: IsolationSimState, deltaMs: number): Iso
       remainingMs: 0,
       legacyText: state.mingaText,
       legacyQueued: "",
-      notice: "LSP unblocked after 3.0s. Single-loop editor finally flushed its stalled keystrokes; Minga never missed a frame.",
+      notice: "Plugin unblocked after 3.0s. Shared-loop editor flushed its stalled keystrokes; Minga never missed a frame.",
     };
   }
   if (state.fault === "parser_crash") {
@@ -327,9 +327,9 @@ export function mountArchFaultMap(root: HTMLElement): void {
     const hookErr = state.fault === "hook_error" && state.remainingMs > 0;
 
     if (legacyPane) {
-      let badgeText = "0.6ms · Ready";
+      let badgeText = "READY";
       let badgeCls = "is-ok";
-      let foot = "Shared main loop: editor, plugins, and LSP share one thread.";
+      let foot = "Shared scripting loop: editor UI and synchronous plugins share one thread.";
       let stallText = "";
 
       if (state.legacyDead) {
@@ -339,18 +339,18 @@ export function mountArchFaultMap(root: HTMLElement): void {
       } else if (frozen) {
         badgeText = `FROZEN · ${secs}s LEFT`;
         badgeCls = "is-fail";
-        stallText = `UI thread blocked · ${state.legacyQueued.length} keystroke${state.legacyQueued.length === 1 ? "" : "s"} stalled in queue...`;
-        foot = "Cursor stopped responding until LSP finishes blocking.";
+        stallText = `Scripting thread blocked · ${state.legacyQueued.length} keystroke${state.legacyQueued.length === 1 ? "" : "s"} stalled in queue...`;
+        foot = "Cursor stopped responding until the synchronous plugin finishes.";
       } else if (hookErr) {
-        badgeText = "SAVE ABORTED";
+        badgeText = "HOOK CHAIN FAILED";
         badgeCls = "is-fail";
-        stallText = "Unhandled MatchError in :after_save interrupted buffer save.";
+        stallText = "Unhandled MatchError in :after_save interrupted downstream hooks.";
         foot = "Uncaught hook exception surfaced directly on the editor loop.";
       }
 
       legacyPane.className = `iso-editor ${state.legacyDead || frozen || hookErr ? "is-broken" : ""}`;
       legacyPane.innerHTML = `
-        <div class="iso-ed-head"><strong>Single-Loop Editor</strong><span class="topo-pill ${badgeCls}" data-iso-lbadge></span></div>
+        <div class="iso-ed-head"><strong>Shared-Loop Editor</strong><span class="topo-pill ${badgeCls}" data-iso-lbadge></span></div>
         <div class="iso-ed-body" data-iso-lbody></div>
         <div class="iso-ed-foot" data-iso-lfoot></div>
       `;
@@ -386,21 +386,21 @@ export function mountArchFaultMap(root: HTMLElement): void {
     }
 
     if (mingaPane) {
-      let badgeText = "0.4ms · INSTANT";
+      let badgeText = "RESPONSIVE";
       let badgeCls = "is-ok";
       let sideStatus = "All BEAM supervisors healthy";
       if (frozen) {
-        sideStatus = `ElixirLS reindexing in separate process (${secs}s) · typing unaffected`;
+        sideStatus = `Heavy extension running in separate process (${secs}s) · typing unaffected`;
       } else if (state.mingaParserPlain) {
         badgeText = "RESPAWNING ZIG PORT";
         badgeCls = "is-warn";
-        sideStatus = "Highlighting paused for 14ms while Zig port respawns · buffer 100% intact";
+        sideStatus = "Brief plain-text fallback while Zig port respawns · buffer 100% intact";
       } else if (state.fault === "parser_crash" && !state.mingaParserPlain) {
-        badgeText = "PORT RESPAWNED (14ms)";
-        sideStatus = "Syntax colors restored automatically · 0 characters lost";
+        badgeText = "PORT RESPAWNED";
+        sideStatus = "Syntax colors restored automatically · zero characters lost";
       } else if (hookErr) {
-        badgeText = "SAVED ✓ · TASK ISOLATED";
-        sideStatus = "Hook MatchError caught in async BEAM Task · typing unaffected";
+        badgeText = "HOOK ISOLATED";
+        sideStatus = "Hook MatchError caught in async BEAM Task · other hooks & typing unaffected";
       }
 
       mingaPane.innerHTML = `
@@ -431,7 +431,7 @@ export function mountArchFaultMap(root: HTMLElement): void {
         <div class="story-bar">
           <span>LIVE ISOLATION DEMO · FIRE A FAULT &amp; TYPE BELOW</span>
           <div class="seg-group" role="group" aria-label="Inject real-time faults">
-            <button type="button" class="seg-btn ${state.fault === "lsp_hang" ? "is-active" : ""}" data-iso-fault="lsp_hang">Hang LSP (3s)</button>
+            <button type="button" class="seg-btn ${state.fault === "lsp_hang" ? "is-active" : ""}" data-iso-fault="lsp_hang">Block Plugin (3s)</button>
             <button type="button" class="seg-btn ${state.fault === "parser_crash" ? "is-active" : ""}" data-iso-fault="parser_crash">Crash Parser</button>
             <button type="button" class="seg-btn ${state.fault === "hook_error" ? "is-active" : ""}" data-iso-fault="hook_error">Crash :after_save</button>
             <button type="button" class="seg-btn" data-iso-fault="none">Reset</button>

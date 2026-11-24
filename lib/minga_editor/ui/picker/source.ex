@@ -233,12 +233,30 @@ defmodule MingaEditor.UI.Picker.Source do
   @spec restore_or_keep(MingaEditor.State.t()) :: MingaEditor.State.t()
   def restore_or_keep(%MingaEditor.State{} = state) do
     case state.shell_runtime.state.modal do
-      {:picker, %{picker_ui: %{restore: idx}}} when is_integer(idx) ->
-        MingaEditor.BufferActivation.activate(state, idx)
+      {:picker, %{picker_ui: %{restore: idx} = picker_ui}} when is_integer(idx) ->
+        restore_origin(state, idx, picker_ui.restore_cursor)
 
       _ ->
         state
     end
+  end
+
+  @doc """
+  Returns to the buffer and cursor that were active when the picker opened.
+
+  Restoring is not a jump, so it never adds to the jump list; previews only showed other places.
+  """
+  @spec restore_origin(MingaEditor.State.t(), non_neg_integer(), Minga.Buffer.position() | nil) ::
+          MingaEditor.State.t()
+  def restore_origin(%MingaEditor.State{} = state, index, cursor) when is_integer(index) do
+    state = MingaEditor.BufferActivation.activate(state, index, record_jump?: false)
+
+    case {state.workspace.buffers.active, cursor} do
+      {buffer, {_, _}} when is_pid(buffer) -> Minga.Buffer.move_to(buffer, cursor)
+      _no_cursor -> :ok
+    end
+
+    state
   end
 
   @doc "Returns the authoritative contribution source installed at callback invocation."

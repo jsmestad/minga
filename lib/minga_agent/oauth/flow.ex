@@ -112,6 +112,8 @@ defmodule MingaAgent.OAuth.Flow do
   - `{:manual_required, url, ref}` if the browser could not be opened and the server is waiting for paste-back completion
   - `{:error, reason}` on any failure
 
+  The callback server binds `:port` and falls back to `:fallback_port` when the first port is already in use. Both default to the ports in `MingaAgent.OAuth.openai_config/0`.
+
   The caller is responsible for wrapping this in a Task if async
   execution is needed.
   """
@@ -121,8 +123,12 @@ defmodule MingaAgent.OAuth.Flow do
     state = generate_state()
     config = OAuth.openai_config()
 
+    ports =
+      {Keyword.get(opts, :port, config.port),
+       Keyword.get(opts, :fallback_port, config.fallback_port)}
+
     case register_flow() do
-      :ok -> run_registered_flow(pkce, state, config, opts)
+      :ok -> run_registered_flow(pkce, state, ports, opts)
       {:error, reason} -> {:error, reason}
     end
   end
@@ -270,8 +276,8 @@ defmodule MingaAgent.OAuth.Flow do
     |> Base.url_encode64(padding: false)
   end
 
-  defp run_registered_flow(pkce, state, config, opts) do
-    case start_server(config.port, config.fallback_port) do
+  defp run_registered_flow(pkce, state, {port, fallback_port}, opts) do
+    case start_server(port, fallback_port) do
       {:ok, bandit_pid, port} ->
         try do
           url = OAuth.openai_authorize_url(pkce.challenge, state, port)
@@ -386,20 +392,53 @@ defmodule MingaAgent.OAuth.Flow do
   end
 
   defp start_server_on_port(port) do
-    case Bandit.start_link(
-           plug: MingaAgent.OAuth.CallbackHandler,
-           port: port,
-           ip: {127, 0, 0, 1},
-           thousand_island_options: [num_acceptors: 1]
-         ) do
+    case start_linked_server(port) do
       {:ok, pid} ->
         {:ok, pid}
 
-      {:error, {:shutdown, {:failed_to_start_child, :listener, {:listen, :eaddrinuse}}}} ->
+      # ThousandIsland stops its listener with the bare `:gen_tcp.listen/2` reason.
+      # This is the only busy-port shape the locked Bandit and ThousandIsland versions produce.
+      # The fallback tests bind a real busy port, so a dependency upgrade that changes it fails them.
+      {:error, {:shutdown, {:failed_to_start_child, :listener, :eaddrinuse}}} ->
         {:error, :eaddrinuse}
 
       {:error, reason} ->
         {:error, {:start_failed, reason}}
+    end
+  end
+
+  # Bandit links its server supervisor to the caller, and a listener that cannot bind exits that supervisor.
+  # Trapping exits for the start alone makes OTP return `{:error, reason}` and consume the exit signal.
+  # The flow can then fall back to the second port instead of crashing.
+  # Another linked process's exit signal that arrives during the start is delivered again after the restore.
+  @spec start_linked_server(pos_integer()) :: Supervisor.on_start()
+  defp start_linked_server(port) do
+    trapping? = Process.flag(:trap_exit, true)
+
+    try do
+      Bandit.start_link(
+        plug: MingaAgent.OAuth.CallbackHandler,
+        port: port,
+        ip: {127, 0, 0, 1},
+        thousand_island_options: [num_acceptors: 1]
+      )
+    after
+      Process.flag(:trap_exit, trapping?)
+      if not trapping?, do: redeliver_exit_signals()
+    end
+  end
+
+  @spec redeliver_exit_signals() :: :ok
+  defp redeliver_exit_signals do
+    receive do
+      {:EXIT, _from, :normal} ->
+        redeliver_exit_signals()
+
+      {:EXIT, _from, reason} ->
+        Process.exit(self(), reason)
+        :ok
+    after
+      0 -> :ok
     end
   end
 

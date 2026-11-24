@@ -31,11 +31,11 @@ defmodule MingaEditor.Commands.AutobiographyCommandTest do
     end
   end
 
-  test "SPC g w resolves to :code_why and SPC g a to :code_autobiography" do
+  test "SPC a W resolves to :code_why and SPC a A to :code_autobiography" do
     trie = Defaults.leader_trie()
-    {:prefix, g_node} = Bindings.lookup(trie, {?g, 0})
-    assert {:command, :code_why} = Bindings.lookup(g_node, {?w, 0})
-    assert {:command, :code_autobiography} = Bindings.lookup(g_node, {?a, 0})
+    {:prefix, a_node} = Bindings.lookup(trie, {?a, 0})
+    assert {:command, :code_why} = Bindings.lookup(a_node, {?W, 0})
+    assert {:command, :code_autobiography} = Bindings.lookup(a_node, {?A, 0})
   end
 
   describe "why_markdown/2" do

@@ -246,7 +246,7 @@ defmodule MingaEditor.Agent.EditPublicationTest do
     assert {:blocked, blocked} = EditPublication.before_quit(state)
 
     assert NoticeWorkflow.message(blocked) ==
-             "1 agent-edited file is not on disk. Publish (SPC a p) or discard (SPC a P) them before quitting. :qa!, :q! and :cq quit and discard them."
+             "1 agent-edited file is not on disk. Publish or discard them (SPC a p) before quitting. :qa!, :q! and :cq quit and discard them."
 
     assert notification(blocked, id).title == "1 agent-edited file is not on disk"
     assert workspace(blocked, id).review.state == :needs_review
@@ -372,7 +372,7 @@ defmodule MingaEditor.Agent.EditPublicationTest do
         )
 
       assert EditPublication.recovery_messages(recovery, ws) == [
-               "Agent: restored staged agent edits in 2 files from the previous run. Publish (SPC a p) or discard (SPC a P) them.",
+               "Agent: restored staged agent edits in 2 files from the previous run. Publish or discard them (SPC a p).",
                "Staged agent edit for lib/a.ex was made against an older version of the file. Publishing merges it with the file on disk, or keeps it staged and reports a conflict.",
                "Staged agent edit for lib/gone.ex from the previous run was lost: :invalid_format",
                "Staged agent edit for lib/later.ex from the previous run could not be restored (:enospc). It stays saved and is offered again at the next start."

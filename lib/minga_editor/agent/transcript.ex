@@ -118,7 +118,7 @@ defmodule MingaEditor.Agent.Transcript do
      """
      Pick a model
 
-     Use the model picker button, /model, or SPC a m to choose a configured model before starting a chat.
+     Use the model picker button, /model, or SPC a S m to choose a configured model before starting a chat.
      """, :info}
   end
 

@@ -582,7 +582,7 @@ defmodule MingaAgent.SessionLifecycleTest do
   end
 
   describe "set_model/2" do
-    test "preserves conversation messages when switching models" do
+    test "rejects model switch for non-Native providers without corrupting state" do
       session = start_subscribed_session()
       :ok = Session.send_prompt(session, "Hello before model switch")
       await_turn_complete()
@@ -590,10 +590,11 @@ defmodule MingaAgent.SessionLifecycleTest do
       messages_before = Session.messages(session)
       assert Enum.count(messages_before) >= 3
 
-      assert :ok = Session.set_model(session, "openai:gpt-4o")
+      assert {:error, message} = Session.set_model(session, "openai:gpt-4o")
+      assert message =~ "Native provider"
 
       messages_after = Session.messages(session)
-      # All prior messages should still be there
+      # Rejected switch must not alter conversation state
       assert messages_before == messages_after
     end
   end

@@ -182,7 +182,7 @@ defmodule MingaEditor.Agent.EditPublication do
         {:blocked,
          NoticeWorkflow.publish(
            state,
-           "#{Notifications.agent_edits_title(total)}. Publish (SPC a p) or discard (SPC a P) them before quitting. :qa!, :q! and :cq quit and discard them."
+           "#{Notifications.agent_edits_title(total)}. Publish or discard them (SPC a p) before quitting. :qa!, :q! and :cq quit and discard them."
          )}
     end
   end
@@ -310,12 +310,12 @@ defmodule MingaEditor.Agent.EditPublication do
 
   defp headline(:live, %Workspace{label: label, review: review}),
     do: [
-      "#{label}: staged agent edits in #{files_copy(WorkspaceReview.draft_count(review))} survived the editor restart. Publish (SPC a p) or discard (SPC a P) them."
+      "#{label}: staged agent edits in #{files_copy(WorkspaceReview.draft_count(review))} survived the editor restart. Publish or discard them (SPC a p)."
     ]
 
   defp headline(:disk, %Workspace{label: label, review: review}),
     do: [
-      "#{label}: restored staged agent edits in #{files_copy(WorkspaceReview.draft_count(review))} from the previous run. Publish (SPC a p) or discard (SPC a P) them."
+      "#{label}: restored staged agent edits in #{files_copy(WorkspaceReview.draft_count(review))} from the previous run. Publish or discard them (SPC a p)."
     ]
 
   @spec project_root(EditorState.t()) :: String.t() | nil

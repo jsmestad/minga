@@ -60,6 +60,7 @@ defmodule MingaEditor.Handlers.BufferRegistry do
       state
       |> WorkspaceWorkflow.persist_changes(transitioned)
       |> HighlightSync.ensure_active_buffer_presentation(old_buffer)
+      |> record_jump_unless_preview(context, old_buffer)
 
     log_buffer_shell_transition(state, next_state, metadata)
 
@@ -68,6 +69,18 @@ defmodule MingaEditor.Handlers.BufferRegistry do
       {:monitor, monitored_pid} -> monitor_buffer(next_state, monitored_pid)
     end
   end
+
+  # A picker preview only shows a buffer; the confirmed pick is the jump.
+  @spec record_jump_unless_preview(
+          EditorState.t(),
+          MingaEditor.Shell.buffer_add_context(),
+          pid() | nil
+        ) ::
+          EditorState.t()
+  defp record_jump_unless_preview(state, :preview, _old_buffer), do: state
+
+  defp record_jump_unless_preview(state, _context, old_buffer),
+    do: MingaEditor.Editing.record_buffer_leave(state, old_buffer)
 
   @doc "Runs external cleanup around the pure retired-buffer root transition."
   @spec retire_dead_buffer(state(), pid()) :: state()

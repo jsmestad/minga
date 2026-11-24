@@ -12,6 +12,7 @@ defmodule Minga.Application do
       Minga.Supervisor (rest_for_one)
       ├── Minga.Extension.ContributionCleanup (serialized cleanup-callback registration)
       ├── MingaEditor.Shell.Registry         (serialized shell publication)
+      ├── MingaEditor.Input.HandlerRegistry  (serialized input-handler publication)
       ├── Minga.Foundation.Supervisor (rest_for_one)
       │   ├── Minga.Language.Registry
       │   ├── Minga.Extensions.LanguagePacks  (sync, no process)
@@ -130,9 +131,11 @@ defmodule Minga.Application do
 
     base_children =
       [
-        # First: Shell.Registry, Foundation registries, and bundled packs register cleanup callbacks while they start.
+        # Shell.Registry, HandlerRegistry, Foundation registries, and bundled
+        # packs register cleanup callbacks while they start.
         Minga.Extension.ContributionCleanup,
         MingaEditor.Shell.Registry,
+        MingaEditor.Input.HandlerRegistry,
         Minga.Foundation.Supervisor,
         {Registry, keys: :unique, name: Minga.Buffer.Registry},
         {Registry, keys: :duplicate, name: Minga.Buffer.FileRegistry},

@@ -87,15 +87,15 @@
       </div>
     </section>
 
-    <section class="section" id="headless-devbox">
+    <section class="section section-tinted" id="headless-devbox">
       <div class="container">
         <div class="section-header">
           <p class="section-index"><span>01</span> Headless</p>
           <h2>Keep agents working across laptop sleep on your devbox.</h2>
-          <p>In headless mode, the Erlang VM boots only buffer, project, and agent services; the editor renderer and syntax parser OS processes start only when a client attaches. Full systemd and launchd units live in the <a href="/docs/remote_agents.html">Remote Agents Reference</a>.</p>
+          <p>In headless mode, the server runs only buffer, project, and agent services (no editor, renderer, or parser OS processes). When you run <code>minga attach</code>, your local client renders the UI and subscribes over Erlang distribution with a shared <code>RELEASE_COOKIE</code> (<a href="/docs/remote_agents.html">Remote Agents</a>).</p>
         </div>
 
-        <div class="code-card">
+        <div class="code-card is-frappe">
           <div class="code-header">
             <span>Remote devbox + local attach</span>
             <button type="button" class="copy-btn" data-copy-target="cmd-remote-attach">Copy</button>
@@ -115,11 +115,11 @@ minga attach ssh://devbox/work/app</code></pre>
         <div class="section-header">
           <p class="section-index"><span>02</span> Guardrails</p>
           <h2>Deterministic <code>PreToolUse</code> shell veto hooks.</h2>
-          <p>Prompt instructions are advice; shell exit codes are enforcement. Minga pipes JSON call arguments on stdin, enforces a POSIX process-group timeout, blocks on any non-zero exit, and surfaces stderr directly in chat (<a href="/docs/hooks.html">Hooks Reference</a>). Reload live with <kbd>SPC h r</kbd>.</p>
+          <p>Prompts suggest; shell exit codes enforce. Non-zero exit blocks the tool and surfaces stderr in chat (<a href="/docs/hooks.html">Hooks</a>). Reload live with <kbd>SPC h r</kbd>.</p>
         </div>
 
         <div class="grid-2">
-          <div class="code-card">
+          <div class="code-card is-frappe">
             <div class="code-header">
               <span>~/.config/minga/config.exs · Hook registration</span>
               <button type="button" class="copy-btn" data-copy-target="cmd-hook-cfg">Copy</button>
@@ -134,7 +134,7 @@ minga attach ssh://devbox/work/app</code></pre>
 ]</code></pre>
           </div>
 
-          <div class="code-card">
+          <div class="code-card is-frappe">
             <div class="code-header">
               <span>~/.config/minga/hooks/check-shell-command.sh</span>
               <button type="button" class="copy-btn" data-copy-target="cmd-hook-sh">Copy</button>
@@ -142,7 +142,7 @@ minga attach ssh://devbox/work/app</code></pre>
             <pre><code id="cmd-hook-sh">#!/usr/bin/env bash
 set -euo pipefail
 
-cmd=$(jq -r '.command // ""')
+cmd=$(jq -r '.arguments.command // ""')
 
 if [[ "$cmd" == *"git push --force"* || "$cmd" == *"rm -rf /"* ]]; then
   echo "Blocked by local safety hook: destructive command not allowed." &gt;&amp;2
@@ -153,15 +153,15 @@ fi</code></pre>
       </div>
     </section>
 
-    <section class="section" id="isolated-mcp">
+    <section class="section section-tinted" id="isolated-mcp">
       <div class="container">
         <div class="section-header">
           <p class="section-index"><span>03</span> MCP &amp; Gateways</p>
-          <h2>Crash-isolated stdio MCP servers and corporate LLM routes.</h2>
-          <p>Each stdio MCP server runs in its own supervised process with prefixed tools (<code>mcp_&lt;server&gt;__&lt;tool&gt;</code>) and destructive approval by default (<a href="/docs/mcp.html">MCP Reference</a>). Read secrets from environment variables so tokens never enter dotfiles.</p>
+          <h2>Crash-isolated stdio MCP servers.</h2>
+          <p>Each stdio MCP server runs isolated with prefixed tools (<code>mcp_&lt;server&gt;__&lt;tool&gt;</code>) and destructive approval by default (<a href="/docs/mcp.html">MCP</a>). Read secrets from env vars so tokens never enter dotfiles.</p>
         </div>
 
-        <div class="code-card">
+        <div class="code-card is-frappe">
           <div class="code-header">
             <span>~/.config/minga/config.exs · Multiple stdio MCP servers</span>
             <button type="button" class="copy-btn" data-copy-target="cmd-mcp-cfg">Copy</button>
@@ -181,16 +181,7 @@ fi</code></pre>
 ]</code></pre>
         </div>
 
-        <div class="boundary-band">
-          <div class="boundary-col">
-            <h3>Corporate gateways &amp; local credentials</h3>
-            <p>Implement <code>MingaAgent.InferenceRoute</code> to stream through an internal proxy while Minga keeps owning staged overlays, approvals, compaction, and crash-safe logs (<a href="/docs/extension_api.html#model-routes">Model Routes Reference</a>). Zero telemetry is sent; keys saved via <code>/auth</code> live locally in <code>0600</code> <code>credentials.json</code>.</p>
-          </div>
-          <div class="boundary-col boundary-col-native">
-            <h3>Terminal parity over SSH</h3>
-            <p>The Go TUI uses Kitty keyboard disambiguation, OSC 52 clipboard over SSH, and mode 2026 synchronized output, degrading quietly down to 16-color terminals. <span data-status="planned" data-since="v0.1.0">Next: Kitty vector gutter marks, clickable <code>file:line</code> links, native notifications, tab progress, and <code>:checkhealth terminal</code>.</span></p>
-          </div>
-        </div>
+        <p class="section-foot-link">For corporate LLM proxies (<code>MingaAgent.InferenceRoute</code>) and credential boundaries, see <a href="/extending#security-and-reloads">Extending Minga</a>; for terminal protocol support over SSH, see <a href="/architecture#executable-parity">Architecture</a>.</p>
 
         <nav class="lesson-pager" aria-label="Lesson navigation">
           <a class="pager-link" href="/learn/elixir">

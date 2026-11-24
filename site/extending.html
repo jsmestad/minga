@@ -69,13 +69,13 @@
       <div class="container">
         <p class="section-index"><span>EXTENDING</span> Three Layers</p>
         <h1>Extending Minga</h1>
-        <p class="essay-subtitle">Minga works with any language you write, with no config required to start. When you want to customize it, Elixir is the extension language underneath: begin with five lines in <code>config.exs</code>, grow into supervised packages, or reshape buffers and workflows for a single task.</p>
+        <p class="essay-subtitle">Elixir configures every layer of Minga, from five lines in <code>config.exs</code> to supervised packages and corporate LLM gateways.</p>
         <nav class="essay-toc" aria-label="Sections">
           <a href="#three-layers">1. Three layers</a>
           <a href="#layer-config">2. config.exs</a>
           <a href="#layer-extensions">3. Extensions, hooks &amp; gateways</a>
-          <a href="#layer-workflows">4. Task-shaped workflows (v0.1.0)</a>
-          <a href="#security-and-reloads">5. Security, privacy &amp; reloads</a>
+          <a href="#layer-workflows">4. Task workflows (v0.1.0)</a>
+          <a href="#security-and-reloads">5. Security &amp; reloads</a>
         </nav>
       </div>
     </header>
@@ -84,20 +84,20 @@
       <div class="container">
         <section class="essay-section" id="three-layers">
           <h2>1. One language across three layers</h2>
-          <p>You never outgrow a JSON schema or jump across an RPC plugin wall when your customization gets serious. Every layer shares the same Elixir runtime and composes with Minga's buffers, drawers, and key scopes instead of adding competing panels:</p>
+          <p>Every layer shares one Elixir runtime over Minga's buffers, drawers, and key scopes, trading OS-level plugin sandboxing and hot-patching of compiled packages (<a href="/docs/0003-extension-code-updates-require-a-new-vm-generation.html">ADR-0003</a>) for unified programmability:</p>
 
           <ul class="spec-ledger">
             <li class="spec-row">
               <span class="spec-key spec-key-strong">Layer 1 · config.exs</span>
-              <span class="spec-detail"><strong>Reloads live (<kbd>SPC h r</kbd>).</strong> Typed options, themes, per-filetype rules, keybindings, custom commands, background save hooks, <code>PreToolUse</code> shell veto hooks, crash-isolated stdio MCP servers, and command wrappers (<code>advise</code>: run code before, after, around, or instead of any built-in command).</span>
+              <span class="spec-detail"><strong>Reloads live (<kbd>SPC h r</kbd>).</strong> Typed options, keybindings, custom commands, save hooks, and <code>advise</code> command wrappers.</span>
             </li>
             <li class="spec-row">
               <span class="spec-key spec-key-strong">Layer 2 · Extensions</span>
-              <span class="spec-detail"><strong>Supervised packages.</strong> Installable packages from Elixir's package registry (Hex), Git repos, or local paths using <code>minga_sdk</code>: declarative commands, keymap scopes, lazy <code>load_policy</code> overrides, custom buffer/drawer surfaces, corporate LLM gateways, and runtime-compiled syntax grammars.</span>
+              <span class="spec-detail"><strong>Supervised packages (<code>minga_sdk</code>).</strong> Hex, Git, or local packages for supervisors, custom buffers, corporate LLM routes, and runtime grammars.</span>
             </li>
             <li class="spec-row">
               <span class="spec-key spec-key-strong">Layer 3 · Task workflows</span>
-              <span class="spec-detail"><strong>v0.1.0 roadmap.</strong> Write or ask Minga to author readable source over existing buffer, drawer, agent, and permission primitives; inspect the diff and save to activate; discard when a one-off task ends or reuse across projects.</span>
+              <span class="spec-detail"><strong>v0.1.0 roadmap.</strong> Author readable Elixir workflows over buffers and agents, activate under a revocable grant, then discard or reuse.</span>
             </li>
           </ul>
 
@@ -106,9 +106,9 @@
 
         <section class="essay-section" id="layer-config">
           <h2>2. Layer 1: Everyday customization in config.exs</h2>
-          <p><code>~/.config/minga/config.exs</code> is ordinary Elixir with typed option validation (bad values report a clear error rather than failing silently). Lifecycle hooks run asynchronously in separate processes so slow CLI formatters or linters never block typing, and command wrappers contain exceptions so a bug in your handler never crashes the editor.</p>
+          <p><code>~/.config/minga/config.exs</code> is plain Elixir with typed validation. Hooks run in background processes; command wrappers catch exceptions.</p>
 
-          <div class="code-card">
+          <div class="code-card is-frappe">
             <div class="code-header">
               <span>~/.config/minga/config.exs</span>
               <span>Elixir</span>
@@ -143,10 +143,10 @@ extension <span class="tok-atom">:minga_git_extended</span>, hex: <span class="t
         </section>
 
         <section class="essay-section" id="layer-extensions">
-          <h2>3. Layer 2: Supervised extensions, hooks, MCP, and gateways</h2>
-          <p>When a customization needs its own supervision tree, background state, buffer surface, or distribution across machines, build a package with <code>minga_sdk</code>. Every command, keybinding, surface, and language entry is tagged with its owning extension so disabling it tears down everything cleanly without leaving stale state behind. Users can also override any extension's <code>load_policy</code> (<code>:eager</code>, <code>:deferred</code>, or <code>{:on_command, [...]}</code>) in <code>config.exs</code> without forking the package.</p>
+          <h2>3. Layer 2: Supervised extensions and integration seams</h2>
+          <p>Build a <code>minga_sdk</code> package when a customization needs its own supervision tree, custom buffer surface, or Git/Hex distribution. Disabling an extension tears down all registrations cleanly, and users can override <code>load_policy</code> (<code>:eager</code>, <code>:deferred</code>, <code>{:on_command, [...]}</code>) in <code>config.exs</code> without forking.</p>
 
-          <div class="code-card">
+          <div class="code-card is-frappe">
             <div class="code-header">
               <span>lib/my_extension.ex · minga_sdk</span>
               <span>Elixir</span>
@@ -175,35 +175,27 @@ extension <span class="tok-atom">:minga_git_extended</span>, hex: <span class="t
 <span class="tok-kw">end</span></code></pre>
           </div>
 
-          <h3>Four integration seams</h3>
+          <h3>Four runtime integration seams</h3>
           <ul>
-            <li><strong>Custom corporate LLM gateways (<code>MingaAgent.InferenceRoute</code>).</strong> Connect an internal company proxy, private endpoint, or custom subscription route to <code>/model</code>. Your route only streams model replies; Minga keeps running tool approvals, staged overlays, retries, context compaction, and session history (<a href="/docs/extension_api.html#model-routes">Model Routes Reference</a>).</li>
-            <li><strong>Deterministic <code>PreToolUse</code> veto hooks (<code>:agent_hooks</code>).</strong> Run a local shell script before any matching tool (<code>"shell"</code>, <code>"*_file"</code>, or <code>"*"</code>) with JSON call arguments on stdin and POSIX process-group timeout cleanup; any non-zero exit blocks the tool and surfaces stderr in chat (<a href="/docs/hooks.html">Hooks Reference</a>).</li>
-            <li><strong>Crash-isolated multi-server MCP (<code>:agent_mcp_servers</code>).</strong> Attach multiple stdio Model Context Protocol servers (GitHub, Linear, Postgres, browsers) to each agent session. Each server's tools are safely prefixed (<code>mcp_&lt;server&gt;__&lt;tool&gt;</code>) and default to destructive approval; if one server exits mid-turn, only its tools drop out while built-in tools and healthy servers keep running (<a href="/docs/mcp.html">MCP Reference</a>).</li>
-            <li><strong>Runtime syntax grammars (<code>Minga.Language.register</code>).</strong> Ship tree-sitter grammar sources and Minga compiles them on demand at runtime, caches the shared library in <code>~/.local/share/minga/grammars/</code>, and wires highlight queries without rebuilding Minga (<a href="/docs/extension_api.html#tree-sitter-grammars">Tree-Sitter Grammars Reference</a>).</li>
+            <li><strong>Corporate LLM gateways (<code>MingaAgent.InferenceRoute</code>).</strong> Stream through an internal proxy in <code>/model</code> while Minga owns approvals, staged overlays, compaction, and history (<a href="/docs/extension_api.html#model-routes">Model Routes</a>).</li>
+            <li><strong>Deterministic <code>PreToolUse</code> hooks (<code>:agent_hooks</code>).</strong> Pipe JSON arguments on stdin with process-group timeouts; non-zero exit blocks the tool and surfaces stderr in chat (<a href="/docs/hooks.html">Hooks</a>).</li>
+            <li><strong>Crash-isolated MCP (<code>:agent_mcp_servers</code>).</strong> Attach stdio MCP servers with prefixed tools (<code>mcp_&lt;server&gt;__&lt;tool&gt;</code>); if one exits mid-turn, only its tools drop out (<a href="/docs/mcp.html">MCP</a>).</li>
+            <li><strong>Runtime syntax grammars (<code>Minga.Language.register</code>).</strong> Compile and cache tree-sitter grammars under <code>~/.local/share/minga/grammars/</code> without rebuilding Minga (<a href="/docs/extension_api.html#tree-sitter-grammars">Grammars</a>).</li>
           </ul>
         </section>
 
         <section class="essay-section" id="layer-workflows">
-          <h2>4. Layer 3: Disposable and reusable task workflows (v0.1.0 roadmap)</h2>
-          <p>The v0.1.0 milestone adds a third layer between a quick <code>config.exs</code> edit and a full packaged extension: reshaping your workbench for a single task without maintaining a massive personal config or forking the editor.</p>
-          <p><strong>Concrete example of the v0.1.0 target:</strong> suppose you are revising a design spec in Markdown or auditing a risky migration and want inline review comments, explicit "Send Revision" actions, attributed suggestions you can accept or reject, and a split buffer tracking check status and token usage for that task. Instead of hunting for a plugin or waiting on an editor vendor, you write or ask Minga to author that workflow in readable Elixir over Minga's existing buffer, drawer, and agent primitives. You inspect the diff, save to activate under an explicit revocable grant (with automatic restore if a candidate fails), run it identically on macOS and in the terminal, and either discard the workflow once the PR lands or save it to reuse across future projects.</p>
-
-          <div class="callout">
-            <span class="callout-title">Release status &amp; stability</span>
-            <p>Layers 1 and 2 (<code>config.exs</code>, hooks, advice, Hex/Git/path extensions, <code>PreToolUse</code> hooks, MCP servers, custom model gateways, and runtime grammars) ship on <code>main</code> today. Layer 3 (save-to-activate disposable and reusable workflows) and the ADR-0006 minimal UI model are in active development for v0.1.0. Before v1.0, breaking changes to config options or <code>minga_sdk</code> are documented in the <a href="/docs/changelog.html">Changelog</a>.</p>
-          </div>
+          <h2>4. Layer 3: Task workflows (v0.1.0 roadmap)</h2>
+          <p>Between <code>config.exs</code> and a packaged extension, Layer 3 lets you or Minga author a task-specific review surface or check board in readable Elixir over real buffer, drawer, and agent primitives. Inspect the diff, activate under a revocable grant (with rollback on failure), then discard it when the PR lands or reuse it across repos. Pre-v1.0 config or <code>minga_sdk</code> breaking changes are tracked in the <a href="/docs/changelog.html">Changelog</a>.</p>
         </section>
 
         <section class="essay-section" id="security-and-reloads">
           <h2>5. Security, privacy, and reload boundaries</h2>
-          <p>If you are evaluating Minga for daily work on proprietary company code, here are the exact boundaries:</p>
-
           <ul>
-            <li><strong>Explicit approval gates and extension updates.</strong> Extensions and authored workflows run with OS-user privileges inside the Erlang VM, matching Emacs Lisp and Neovim Lua (Minga isolates callback crashes so a buggy extension does not take down the editor, which is failure containment rather than an OS sandbox). Destructive agent tools (file edits, deletes, shell commands, git writes, and MCP tools by default) require explicit approval; initial extension installs run only for sources you explicitly declare in <code>config.exs</code>, while extension updates (<kbd>SPC h e u</kbd>) prompt for confirmation with git log inspection before applying; and v0.1.0 live authoring requires an explicit revocable session grant plus human review before activation.</li>
-            <li><strong>Local credentials, temp overlays, and zero remote telemetry.</strong> Minga sends zero analytics or crash telemetry; network traffic goes only to the model routes, MCP servers, and language servers you configure. API keys resolve from environment variables first or save locally in <code>~/.config/minga/credentials.json</code> (<code>0600</code> permissions), never logged and never exported in transcripts. On work laptops, prefer shell environment variables or an internal <code>MingaAgent.InferenceRoute</code> proxy over storing keys on disk. Temporary shell-run overlays copy project files while skipping <code>.git</code> and <code>node_modules</code> and clean up after execution; unpublished staged drafts persist locally under <code>~/.local/share/minga/staged_drafts</code>.</li>
-            <li><strong>Corporate gateway &amp; binary transparency.</strong> Teams can route exclusively through an internal proxy using <code>MingaAgent.InferenceRoute</code> rather than public provider endpoints. Rolling macOS desktop builds are Apple Developer ID signed and notarized, and the entire codebase is MIT open source and buildable from source.</li>
-            <li><strong>Why compiled extension updates activate on restart (<a href="/docs/0003-extension-code-updates-require-a-new-vm-generation.html">ADR-0003</a>).</strong> While <kbd>SPC h r</kbd> reloads options, bindings, hooks, and advice in place, compiled extension packages can own supervisors, closures, and dependencies that cannot atomically cross a version boundary mid-session. Disabling an extension takes effect immediately; updated extension code activates cleanly on restart.</li>
+            <li><strong>Trust model.</strong> Extensions run with your OS-user privileges (like Neovim Lua and Emacs Lisp); BEAM isolation contains crashes, not malicious code.</li>
+            <li><strong>Approvals &amp; updates.</strong> Destructive agent tools (edits, deletes, shell, git writes, MCP tools by default) require approval; <kbd>SPC h e u</kbd> shows git history before updating extensions; v0.1.0 live authoring requires a revocable grant.</li>
+            <li><strong>Data, keys &amp; proxies.</strong> Zero telemetry. Keys resolve from env vars first or save locally in <code>~/.config/minga/credentials.json</code> (<code>0600</code>), never logged or exported. Route exclusively through an internal proxy via <code>MingaAgent.InferenceRoute</code>; macOS builds are Apple Developer ID signed and notarized.</li>
+            <li><strong>Reloads (<a href="/docs/0003-extension-code-updates-require-a-new-vm-generation.html">ADR-0003</a>).</strong> <kbd>SPC h r</kbd> reloads options, bindings, hooks, and advice in place; disabling an extension takes effect immediately; compiled extension updates activate cleanly on restart.</li>
           </ul>
 
           <div class="actions">

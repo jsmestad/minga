@@ -43,7 +43,9 @@ end`,
         code: `defmodule MyFmtExtension do
   use Minga.Extension.Editor
 
-  option :gofmt_flags, :list, default: ["-s", "-w"]
+  option :gofmt_flags, :string_list,
+    default: ["-s", "-w"],
+    description: "Flags passed to gofmt"
   command :format_workspace, "Format Go files",
     execute: {__MODULE__, :run}
   keybind :normal, "SPC m f", :format_workspace,
@@ -76,9 +78,9 @@ end`,
         code: `set :agent_hooks, [
   %{
     event: "PreToolUse",
-    matcher: "shell",
+    tool: "shell",
     command: "~/.config/minga/hooks/block_destructive.sh",
-    timeout: 5_000
+    timeout_ms: 5_000
   }
 ]`,
       },
@@ -90,8 +92,9 @@ end`,
         code: `defmodule CorpGuardrails do
   use Minga.Extension.Editor
 
-  option :blocked_patterns, :list,
-    default: ["git push --force", "terraform destroy"]
+  option :blocked_patterns, :string_list,
+    default: ["git push --force", "terraform destroy"],
+    description: "Shell patterns vetoed before execution"
   command :audit_blocked, "Show veto audit log",
     execute: {__MODULE__, :show_log}
 end`,
@@ -134,8 +137,8 @@ end`,
   @behaviour MingaAgent.InferenceRoute
 
   @impl true
-  def stream(request, opts) do
-    AcmeProxy.stream_chat(request.messages, model: opts[:model])
+  def stream(%MingaAgent.InferenceRoute.Request{} = req) do
+    AcmeProxy.stream_chat(req.messages, model: req.model)
   end
 end`,
       },

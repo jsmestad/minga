@@ -45,6 +45,7 @@ defmodule MingaEditor.Commands.Help do
   command(:indent_picker, "Open indent settings picker", requires_buffer: false)
   command(:describe_lossage, "Show keystroke history", requires_buffer: false)
   command(:describe_function, "Describe function", requires_buffer: false)
+  command(:apropos, "Search commands and options", requires_buffer: false)
 
   @spec execute(state(), Mode.command()) :: state()
   def execute(state, {:describe_key_result, key_str, command, description}) do
@@ -83,6 +84,10 @@ defmodule MingaEditor.Commands.Help do
 
   def execute(state, :describe_lossage) do
     show_in_buffer(state, "*Keystrokes*", lossage_content(state))
+  end
+
+  def execute(state, :apropos) do
+    PickerUI.open(state, MingaEditor.UI.Picker.AproposSource)
   end
 
   def execute(state, :describe_function) do
@@ -205,7 +210,7 @@ defmodule MingaEditor.Commands.Help do
 
     case filetype_rows(state, filetype) do
       [] -> []
-      rows -> [format_section("+filetype #{inspect(filetype)}", rows)]
+      rows -> [format_section("Filetype #{inspect(filetype)}", rows)]
     end
   end
 

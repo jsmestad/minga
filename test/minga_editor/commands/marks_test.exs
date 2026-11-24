@@ -9,6 +9,7 @@ defmodule MingaEditor.Commands.MarksTest do
 
   alias Minga.Buffer.Process, as: BufferProcess
   alias MingaEditor.Commands.Marks
+  alias MingaEditor.JumpList
   alias MingaEditor.State, as: EditorState
   alias MingaEditor.VimState
   alias MingaEditor.Session.State, as: SessionState
@@ -277,6 +278,67 @@ defmodule MingaEditor.Commands.MarksTest do
       state = Marks.execute(state, :jump_to_last_pos_exact)
       assert BufferProcess.cursor(buf) == {0, 3}
       assert state.workspace.editing.last_jump_pos == {2, 1}
+    end
+  end
+
+  # ── jump list walk ─────────────────────────────────────────────────────
+
+  describe "walking the jump list past a closed buffer" do
+    # One open buffer and one closed buffer; entries alternate so a step lands on the closed one.
+    defp walk_state do
+      buf = start_buffer(Enum.map_join(0..9, "\n", &"line #{&1}"))
+      closed = spawn(fn -> :ok end)
+
+      jump_list =
+        JumpList.new()
+        |> JumpList.record(buf, {0, 0})
+        |> JumpList.record(closed, {1, 0})
+        |> JumpList.record(closed, {2, 0})
+        |> JumpList.record(buf, {3, 0})
+
+      state = make_state(buf)
+
+      state = %{
+        state
+        | workspace:
+            SessionState.set_editing(
+              %{state.workspace | buffers: %MingaEditor.State.Buffers{active: buf, list: [buf]}},
+              VimState.walk_jump_list(state.workspace.editing, jump_list)
+            )
+      }
+
+      {state, buf}
+    end
+
+    test "⌃I skips every entry of the closed buffer and reaches the next live one" do
+      {state, buf} = walk_state()
+      {:ok, _entry, at_first} = JumpList.go_to(state.workspace.editing.jump_list, 0)
+      _state = Marks.execute(put_jump_list(state, at_first), :jump_forward)
+
+      assert BufferProcess.cursor(buf) == {3, 0}
+    end
+
+    test "⌃O skips every entry of the closed buffer and reaches the previous live one" do
+      {state, buf} = walk_state()
+      {:ok, _entry, at_last} = JumpList.go_to(state.workspace.editing.jump_list, 3)
+      BufferProcess.move_to(buf, {3, 0})
+      state = Marks.execute(put_jump_list(state, at_last), :jump_back)
+
+      assert BufferProcess.cursor(buf) == {0, 0}
+
+      assert {[{^buf, {0, 0}}, {^buf, {3, 0}}], 0} =
+               JumpList.entries(state.workspace.editing.jump_list)
+    end
+
+    defp put_jump_list(state, jump_list) do
+      %{
+        state
+        | workspace:
+            SessionState.set_editing(
+              state.workspace,
+              VimState.walk_jump_list(state.workspace.editing, jump_list)
+            )
+      }
     end
   end
 end
