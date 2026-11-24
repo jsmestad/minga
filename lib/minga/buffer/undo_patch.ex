@@ -86,7 +86,7 @@ defmodule Minga.Buffer.UndoPatch do
 
   The region nearest the start of the document comes first, the order `Minga.Buffer.UndoHistory.record_edit_batch/5` expects for a batch whose regions were applied from the end of the document to its start. Returns `[]` when both documents hold the same content.
 
-  The cost stays bounded. Leading and trailing lines the documents share are skipped before diffing. The line diff costs time proportional to the remaining line count times the number of differing lines, so when a lower bound of that product (the remaining line count times the lines one side holds and the other lacks) exceeds a fixed budget, as in a rewrite or reindent of a large file, the remaining span becomes one region instead. A few distant edits in a large file stay separate regions.
+  The cost stays bounded. Leading and trailing lines the documents share are skipped before diffing. The line diff costs time proportional to the remaining line count times the number of differing lines, so when that product would exceed a fixed budget, as in a rewrite, reindent, or reorder of a large file, the remaining span becomes one region instead. `Minga.Core.Diff.diff_lines_within/3` measures the differing lines and stops at the budget, so the check itself stays bounded even when every line still occurs on both sides. A few distant edits in a large file stay separate regions.
   """
   @spec changes(Document.t(), Document.t()) :: [t()]
   def changes(%Document{} = old_document, %Document{} = new_document) do
@@ -124,12 +124,17 @@ defmodule Minga.Buffer.UndoPatch do
     old_count = length(old_middle)
     new_count = length(new_middle)
 
-    if (old_count + new_count) * unmatched_lines(old_middle, new_middle) > @diff_budget do
-      [{0, old_count, 0, new_count}]
-    else
-      old_middle
-      |> Diff.diff_lines(new_middle)
-      |> Enum.map(&{&1.old_start, &1.old_count, &1.start_line, &1.count})
+    max_edits = div(@diff_budget, old_count + new_count)
+
+    # The line-count bound rejects a rewrite in linear time; a reorder passes it and reaches the capped search.
+    diff =
+      if unmatched_lines(old_middle, new_middle) > max_edits,
+        do: :over_budget,
+        else: Diff.diff_lines_within(old_middle, new_middle, max_edits)
+
+    case diff do
+      {:ok, hunks} -> Enum.map(hunks, &{&1.old_start, &1.old_count, &1.start_line, &1.count})
+      :over_budget -> [{0, old_count, 0, new_count}]
     end
   end
 

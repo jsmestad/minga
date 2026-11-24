@@ -88,6 +88,25 @@ defmodule Minga.Core.DiffPropertyTest do
     end
   end
 
+  # The edit count of a shortest script: every hunk deletes its old lines and inserts its new ones.
+  property "diff_lines_within matches diff_lines exactly when the edit count fits the cap" do
+    check all(
+            base <- list_of(member_of(["a", "b", "c", "d"]), max_length: 12),
+            current <- list_of(member_of(["a", "b", "c", "d"]), max_length: 12),
+            max_edits <- integer(0..30),
+            max_runs: 500
+          ) do
+      hunks = Diff.diff_lines(base, current)
+      edits = Enum.sum(Enum.map(hunks, &(&1.old_count + &1.count)))
+
+      if edits <= max_edits do
+        assert Diff.diff_lines_within(base, current, max_edits) == {:ok, hunks}
+      else
+        assert Diff.diff_lines_within(base, current, max_edits) == :over_budget
+      end
+    end
+  end
+
   property "identical content produces no hunks" do
     check all(lines <- line_list(), max_runs: 100) do
       hunks = Diff.diff_lines(lines, lines)
