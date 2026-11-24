@@ -996,7 +996,7 @@ defmodule MingaAgent.Changeset.Server do
           "Changeset #{operation}: #{path} resolves through a symlink in the overlay; left the filesystem untouched"
         )
 
-        :ok
+        if operation == :undo, do: {:error, :symlink_traversal}, else: :ok
 
       {:error, reason} ->
         {:error, reason}

@@ -225,10 +225,11 @@ defmodule MingaAgent.Changeset.ServerTest do
       assert GenServer.call(server, :summary) == []
     end
 
-    test "undo to a deletion leaves the project file untouched", %{
-      project: project,
-      source_file: source
-    } do
+    test "undo to a deletion through a re-linked path returns an error instead of recording a phantom deletion",
+         %{
+           project: project,
+           source_file: source
+         } do
       server = start_server(project)
       before = source_fingerprint(project, source)
 
@@ -236,10 +237,13 @@ defmodule MingaAgent.Changeset.ServerTest do
       assert :ok = GenServer.call(server, {:write_file, "node_modules/pkg/index.js", "draft"})
       relink_tracked_dependency(server)
 
-      assert :ok = GenServer.call(server, {:undo, "node_modules/pkg/index.js"})
+      assert {:error, :symlink_traversal} =
+               GenServer.call(server, {:undo, "node_modules/pkg/index.js"})
+
       assert source_fingerprint(project, source) == before
 
-      assert [%{path: "node_modules/pkg/index.js", kind: :deleted}] =
+      # The changeset still holds the draft, not a phantom deletion.
+      assert [%{path: "node_modules/pkg/index.js", kind: :modified}] =
                GenServer.call(server, :summary)
     end
   end
