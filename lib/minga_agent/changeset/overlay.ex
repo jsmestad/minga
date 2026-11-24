@@ -614,24 +614,80 @@ defmodule MingaAgent.Changeset.Overlay do
           materialization_stats()
         ) :: {:ok, materialization_stats()} | {:error, term()}
   defp link_farm_entry(overlay, kind, source_dir, target_dir, entry, stats) do
-    source_path = Path.join(source_dir, entry)
-    target_path = Path.join(target_dir, entry)
-
-    case {link_farm_disposition(kind, entry), File.lstat(source_path)} do
-      {:skip, _stat} ->
+    case link_farm_disposition(kind, entry) do
+      :skip ->
         {:ok, stats}
 
-      {{:own, child_kind}, {:ok, %{type: :directory}}} ->
+      disposition ->
+        source_path = Path.join(source_dir, entry)
+        target_path = Path.join(target_dir, entry)
+
+        with {:ok, %{type: source_type}} <- File.lstat(source_path) do
+          place_link_farm_entry(
+            overlay,
+            disposition,
+            source_type,
+            source_path,
+            target_path,
+            stats
+          )
+        end
+    end
+  end
+
+  # An existing overlay entry wins whatever the source entry is now, so a
+  # source that changed type between materializations never fails a command.
+  # One exception: an owned directory must be a real overlay directory, so a
+  # link that materialization made to the project's entry is replaced once that
+  # entry is a real directory. A link a command made is kept. A kept symlink is
+  # never written through, because nothing is copied or created at its path.
+  @spec place_link_farm_entry(
+          t(),
+          :link | {:own, link_farm_kind()},
+          :device | :directory | :regular | :symlink | :other,
+          String.t(),
+          String.t(),
+          materialization_stats()
+        ) :: {:ok, materialization_stats()} | {:error, term()}
+  defp place_link_farm_entry(overlay, disposition, source_type, source_path, target_path, stats) do
+    case {disposition, source_type, File.lstat(target_path)} do
+      {{:own, child_kind}, :directory, {:ok, %{type: :directory}}} ->
         build_link_farm(overlay, child_kind, source_path, target_path, stats)
 
-      {_disposition, {:ok, %{type: :regular}}} ->
+      {{:own, child_kind}, :directory, {:error, :enoent}} ->
+        build_link_farm(overlay, child_kind, source_path, target_path, stats)
+
+      {{:own, child_kind}, :directory, {:ok, %{type: :symlink}}} ->
+        own_linked_directory(overlay, child_kind, source_path, target_path, stats)
+
+      {_disposition, _source_type, {:ok, _existing}} ->
+        {:ok, stats}
+
+      {_disposition, :regular, {:error, :enoent}} ->
         materialize_regular_file(overlay, source_path, target_path, stats)
 
-      {_disposition, {:ok, _other}} ->
+      {_disposition, _source_type, {:error, :enoent}} ->
         link_entry(source_path, target_path, stats)
 
-      {_disposition, {:error, reason}} ->
+      {_disposition, _source_type, {:error, reason}} ->
         {:error, reason}
+    end
+  end
+
+  @spec own_linked_directory(
+          t(),
+          link_farm_kind(),
+          String.t(),
+          String.t(),
+          materialization_stats()
+        ) :: {:ok, materialization_stats()} | {:error, term()}
+  defp own_linked_directory(overlay, kind, source_path, target_path, stats) do
+    if File.read_link(target_path) == {:ok, Path.expand(source_path)} do
+      with :ok <- File.rm(target_path) do
+        build_link_farm(overlay, kind, source_path, target_path, stats)
+      end
+    else
+      {:ok, stats}
     end
   end
 

@@ -4,7 +4,7 @@ Minga is themeable. Users pick a theme (`set :theme, :catppuccin_frappe`), and e
 
 **The default theme is Catppuccin Frappé** (`:catppuccin_frappe`), the theme closest to the design. Astrodark stays as a built-in. Every hex value quoted in these docs is a Frappé example, nothing more. (The code change that makes Frappé the default lands in its own PR.)
 
-This page lists the roles the design uses, where each one lives in `MingaEditor.UI.Theme`, and how the reference themes fill them. The roles themselves are defined once, in [`docs/design_tokens.toml`](../design_tokens.toml), together with the six state words and shapes, the twist variants and the voice lines. `mix codegen` turns that file into `Minga.Design.Tokens` (Elixir), `DesignTokens.generated.swift` (macOS) and `design_tokens.go` (TUI), so both frontends draw the same word, shape and role for every state.
+This page lists the roles the design uses, where each one lives in `MingaEditor.UI.Theme`, and how the reference themes fill them. The roles themselves are defined once, in [`docs/design_tokens.toml`](https://github.com/jsmestad/minga/blob/main/docs/design_tokens.toml), together with the six state words and shapes, the twist variants and the voice lines. `mix codegen` turns that file into `Minga.Design.Tokens` (Elixir), `DesignTokens.generated.swift` (macOS) and `design_tokens.go` (TUI), so both frontends draw the same word, shape and role for every state.
 
 ## The rules
 

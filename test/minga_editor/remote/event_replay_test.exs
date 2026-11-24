@@ -350,6 +350,16 @@ defmodule MingaEditor.Remote.EventReplayTest do
          "tool_call_id" => "tc1",
          "tool_name" => "write_file"
        }, {:file_changed, "lib/a.ex", "old", "new", "tc1", "write_file"}},
+      {:file_edit_proposed,
+       %{
+         "path" => "lib/gone.ex",
+         "before_content" => "absent",
+         "before_exists" => true,
+         "after_content" => "",
+         "after_exists" => false,
+         "tool_call_id" => "tc2",
+         "tool_name" => "delete_file"
+       }, {:file_changed, "lib/gone.ex", "absent", :absent, "tc2", "delete_file"}},
       {:todo_plan_updated,
        %{"todos" => [%{"id" => "1", "description" => "Inspect files", "status" => "done"}]},
        {:todo_plan_updated, [%TodoItem{id: "1", description: "Inspect files", status: :done}]}},

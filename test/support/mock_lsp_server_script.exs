@@ -144,12 +144,22 @@ defmodule MockServer do
     :ok
   end
 
-  defp handle_message(%{"method" => "textDocument/didClose"}) do
-    :ok
+  defp handle_message(%{"method" => "textDocument/didClose", "params" => params}) do
+    uri = get_in(params, ["textDocument", "uri"])
+    Process.put(:documents, Map.delete(Process.get(:documents, %{}), uri))
+    record_transcript("textDocument/didClose", %{"uri" => uri})
   end
 
   defp handle_message(%{"method" => "mock/stall", "id" => _id}) do
     :ok
+  end
+
+  # Declares a body larger than the client's framing limit without sending it, so the client stops on the header.
+  # A one-shot request, unlike a startup flag, keeps the restarted mock healthy.
+  defp handle_message(%{"method" => "mock/oversized_frame", "id" => _id}) do
+    IO.binwrite(:stdio, "Content-Length: 60000000\r\n\r\n")
+  rescue
+    ErlangError -> :ok
   end
 
   defp handle_message(%{"method" => "mock/transcript", "id" => id}) do

@@ -20,13 +20,16 @@ defmodule Minga.LSP.SyncServerTest do
     start_supervised!(Events.child_spec(name: events))
     start_supervised!({Registry, keys: :unique, name: buffers}, id: :buffer_registry)
     options = start_supervised!({Options, name: nil, events_registry: events}, id: :options)
+    lsp_supervisor = :"sync_server_test_lsp_#{id}"
+    start_supervised!({Minga.LSP.Supervisor, name: lsp_supervisor})
 
     sync = %{
       name: :"sync_server_test_#{id}",
       table: :"sync_server_test_registry_#{id}",
       events: events,
       buffers: buffers,
-      options: options
+      options: options,
+      lsp_supervisor: lsp_supervisor
     }
 
     start_sync_server(sync)
@@ -522,7 +525,8 @@ defmodule Minga.LSP.SyncServerTest do
     :sys.replace_state(sync.name, fn state ->
       ref = Process.monitor(client)
       send(parent, {:sync_server_monitor, ref})
-      %{state | client_monitors: Map.put(state.client_monitors, ref, {buf, client})}
+      entry = {buf, client, {:test_server, "/test-root"}}
+      %{state | client_monitors: Map.put(state.client_monitors, ref, entry)}
     end)
 
     assert_receive {:sync_server_monitor, ref}
@@ -536,7 +540,8 @@ defmodule Minga.LSP.SyncServerTest do
        table: sync.table,
        events_registry: sync.events,
        buffer_registry: sync.buffers,
-       options_server: sync.options},
+       options_server: sync.options,
+       lsp_supervisor: sync.lsp_supervisor},
       id: :sync_server
     )
   end

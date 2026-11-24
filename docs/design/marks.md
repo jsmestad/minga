@@ -5,11 +5,11 @@ Two marks make Minga look like Minga. Both come from the band in the app icon. F
 - **The twist** says where Minga's work is in your text.
 - **The orbit** says what Minga is doing.
 
-Use the exact shapes in [`marks/`](marks/). Do not redraw them by hand; drift starts there.
+Use the exact shapes in [`marks/`](https://github.com/jsmestad/minga/tree/main/docs/design/marks). Do not redraw them by hand; drift starts there.
 
 ## Colour roles
 
-Each colour is a theme role, and each role means one thing. Themes choose the values; they never change the meanings. The full list of roles, where each lives in `MingaEditor.UI.Theme`, and how the reference themes fill them is in [themes.md](themes.md). The hex values below are examples from the default theme, Catppuccin Frappé. The SVGs in [`marks/`](marks/) carry the design canvas's placeholder colours; a frontend takes the shapes from them and the colours from the theme.
+Each colour is a theme role, and each role means one thing. Themes choose the values; they never change the meanings. The full list of roles, where each lives in `MingaEditor.UI.Theme`, and how the reference themes fill them is in [themes.md](themes.md). The hex values below are examples from the default theme, Catppuccin Frappé. The SVGs in [`marks/`](https://github.com/jsmestad/minga/tree/main/docs/design/marks) carry the design canvas's placeholder colours; a frontend takes the shapes from them and the colours from the theme.
 
 | Role | Means | catppuccin_frappe (default) |
 |---|---|---|

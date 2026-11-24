@@ -66,7 +66,13 @@ defmodule Minga.MixProject do
       main: "reference",
       logo: "assets/minga_dark-transparent.svg",
       favicon: "assets/minga_dark-transparent.svg",
-      assets: %{"assets" => "assets", "docs/exdoc" => "exdoc"},
+      # Extras link to these directories relative to their own page, so each keeps its name in the output.
+      assets: %{
+        "assets" => "assets",
+        "docs/exdoc" => "exdoc",
+        "docs/images" => "images",
+        "docs/design/marks" => "marks"
+      },
       extras: [
         # Overview
         {"docs/REFERENCE.md", title: "Reference"},
@@ -97,7 +103,19 @@ defmodule Minga.MixProject do
         "docs/adr/0005-frontend-owns-immediate-ui-feedback.md",
         "docs/adr/0006-the-spine.md",
         "docs/adr/0007-cua-is-a-key-profile.md",
-        "docs/adr/0008-terminal-engine.md"
+        "docs/adr/0008-terminal-engine.md",
+        # Design System. ExDoc writes every extra to one flat directory, so each page gets a design- prefix.
+        {"docs/design/README.md", filename: "design"},
+        {"docs/design/principles.md", filename: "design-principles"},
+        {"docs/design/marks.md", filename: "design-marks"},
+        {"docs/design/themes.md", filename: "design-themes"},
+        {"docs/design/keys.md", filename: "design-keys"},
+        {"docs/design/surfaces.md", filename: "design-surfaces"},
+        {"docs/design/anatomy.md", filename: "design-anatomy"},
+        {"docs/design/terminal.md", filename: "design-terminal"},
+        {"docs/design/tui.md", filename: "design-tui"},
+        {"docs/design/storyboard.md", filename: "design-storyboard"},
+        {"docs/design/visual_rubric.md", filename: "design-visual-rubric"}
       ],
       groups_for_extras: [
         "Configuration & Agents": [
@@ -130,6 +148,19 @@ defmodule Minga.MixProject do
           "docs/adr/0006-the-spine.md",
           "docs/adr/0007-cua-is-a-key-profile.md",
           "docs/adr/0008-terminal-engine.md"
+        ],
+        "Design System": [
+          "docs/design/README.md",
+          "docs/design/principles.md",
+          "docs/design/marks.md",
+          "docs/design/themes.md",
+          "docs/design/keys.md",
+          "docs/design/surfaces.md",
+          "docs/design/anatomy.md",
+          "docs/design/terminal.md",
+          "docs/design/tui.md",
+          "docs/design/storyboard.md",
+          "docs/design/visual_rubric.md"
         ]
       ],
       before_closing_head_tag: %{
