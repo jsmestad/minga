@@ -3,6 +3,7 @@ package ui
 import (
 	"fmt"
 	"net/url"
+	"strings"
 	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
@@ -18,11 +19,16 @@ func zoneIDReviewControl(review protocol.StatusReview, intent byte) string {
 	return fmt.Sprintf("review:control:%d:%d:%s", intent, review.Generation, url.QueryEscape(review.ItemID))
 }
 
+// padToWidthOf pads a stale state label to the width of its current twin, so the controls after it do not move when freshness changes.
+func padToWidthOf(label, twin string) string {
+	return label + strings.Repeat(" ", max(lipgloss.Width(twin)-lipgloss.Width(label), 0))
+}
+
 func (m Model) renderReviewStatus(review protocol.StatusReview) string {
 	labels := [3]string{"[Back to chat]", "[Review latest]", "[Help]"}
 	state := "Read-only current"
 	if review.Freshness == protocol.ReviewStale {
-		state = "Read-only stale  "
+		state = padToWidthOf("Read-only stale", state)
 	}
 	separator := " "
 	switch {
@@ -31,13 +37,13 @@ func (m Model) renderReviewStatus(review protocol.StatusReview) string {
 		separator = ""
 		state = "RO current"
 		if review.Freshness == protocol.ReviewStale {
-			state = "RO stale  "
+			state = padToWidthOf("RO stale", state)
 		}
 	case m.width < 23:
 		labels = [3]string{"<", "R", "?"}
 		state = "RO current"
 		if review.Freshness == protocol.ReviewStale {
-			state = "RO stale  "
+			state = padToWidthOf("RO stale", state)
 		}
 	case m.width < 42:
 		labels = [3]string{"<", "R", "?"}
@@ -48,7 +54,7 @@ func (m Model) renderReviewStatus(review protocol.StatusReview) string {
 	if review.ConflictIndex != 0 {
 		state = fmt.Sprintf("Conflict %d", review.ConflictIndex)
 		if review.Freshness == protocol.ReviewStale {
-			state = fmt.Sprintf("Stale #%d  ", review.ConflictIndex)
+			state = padToWidthOf(fmt.Sprintf("Stale #%d", review.ConflictIndex), state)
 		}
 		if m.width < 94 {
 			labels = [3]string{"[Back]", "[Refresh]", "[Help]"}
@@ -92,9 +98,9 @@ func (m Model) renderReviewStatus(review protocol.StatusReview) string {
 		content = style.Render(state) + " " + controls
 	}
 	// Optional path comes strictly after the state and all controls.
-	remaining := m.width - lipgloss.Width(content) - 2
+	remaining := m.width - lipgloss.Width(content) - spaceXL.cols()
 	if remaining > 0 {
-		content += style.Render("  " + fit(review.Path, remaining))
+		content += style.Render(gap(spaceXL) + fit(review.Path, remaining))
 	}
 	return content
 }

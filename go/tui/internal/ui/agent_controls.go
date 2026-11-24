@@ -136,12 +136,12 @@ func (m Model) renderAgentApprovalActions(message protocol.AgentChatMessage, wid
 	}
 	var lines [2]string
 	for rowIndex, row := range rows {
-		compact := lipgloss.Width(row[0].label)+2+lipgloss.Width(row[1].label) > width
+		compact := lipgloss.Width(row[0].label)+spaceXL.cols()+lipgloss.Width(row[1].label) > width
 		used := 0
 		for index, action := range row {
 			if index != 0 {
-				lines[rowIndex] += muted.Render("  ")
-				used += 2
+				lines[rowIndex] += muted.Render(gap(spaceXL))
+				used += spaceXL.cols()
 			}
 			label := action.label
 			if compact {

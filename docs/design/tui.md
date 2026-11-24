@@ -1,6 +1,6 @@
 # The terminal UI
 
-The Go TUI is not a fallback that gets a simplified design. It draws the same screens as macOS, with the same marks and keys, using Bubble Tea v2, Bubbles v2, Lip Gloss v2 and Ultraviolet (see [`docs/CHARM_TUI.md`](../CHARM_TUI.md)). Separation comes from borders, surface tints and padding, not from extra lines of text.
+The Go TUI is not a fallback that gets a simplified design. It draws the same screens as macOS, with the same marks and keys, using Bubble Tea v2, Bubbles v2, Lip Gloss v2 and Ultraviolet (see [`docs/CHARM_TUI.md`](../CHARM_TUI.md)). Separation comes from borders, surface tints and padding, not from extra lines of text. Every gap, inset and corner comes from the chrome token scale shared with macOS (see [Charm TUI chrome tokens](../CHARM_TUI.md#chrome-tokens) and [anatomy.md](anatomy.md)), never from a hand-counted run of spaces.
 
 ## Visual rules
 

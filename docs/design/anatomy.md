@@ -2,7 +2,7 @@
 
 The boards in `design/boards/` fix structure: which parts a surface has, their order, and what they say. They are not pixel specs, and nobody should measure them. This file fixes polish: how far apart the parts sit, how tall a row is, where the leading edge falls, and which text step each part uses, on macOS and in the TUI. When a board and this file disagree about a measurement, this file wins. When they disagree about structure, the board wins and this file is updated in the same pull request.
 
-Every measurement here is a token. macOS draws it from `ChromeTokens.swift` (see [macOS chrome tokens](../../macos/AGENTS.md#chrome-tokens)); the TUI draws the same token, by the same name, from `go/tui/internal/ui/chrome_tokens.go` (see [Charm TUI chrome tokens](../CHARM_TUI.md), added by #4040). A part that needs a value no token has gets a new token with an intent, never a literal. The automatic layout audit in the storyboard factory checks real renders against this file, and real renders, not boards, become the baselines once they pass.
+Every measurement here is a token. macOS draws it from `ChromeTokens.swift` (see [macOS chrome tokens](../../macos/AGENTS.md#chrome-tokens)); the TUI draws the same token, by the same name, from `go/tui/internal/ui/chrome_tokens.go` (see [Charm TUI chrome tokens](../CHARM_TUI.md#chrome-tokens)). A part that needs a value no token has gets a new token with an intent, never a literal. The automatic layout audit in the storyboard factory checks real renders against this file, and real renders, not boards, become the baselines once they pass.
 
 ## The scale on both frontends
 

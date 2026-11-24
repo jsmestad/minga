@@ -203,8 +203,8 @@ func (m Model) renderWindowRows(window protocol.WindowContent) []string {
 	if margin > 0 && !sb.active {
 		blankMargin = lipgloss.NewStyle().Background(m.editorBackground()).Render(strings.Repeat(" ", margin))
 	}
-	if margin > 1 && sb.active {
-		marginPrefix = lipgloss.NewStyle().Background(m.editorBackground()).Render(strings.Repeat(" ", margin-1))
+	if margin > scrollbarCells && sb.active {
+		marginPrefix = lipgloss.NewStyle().Background(m.editorBackground()).Render(strings.Repeat(" ", margin-scrollbarCells))
 	}
 	// Composed-line cache (#2288): a row that arrived as a ref (unchanged
 	// content_hash) under an unchanged window render context reuses its
@@ -425,6 +425,9 @@ func (m Model) windowRenderDimensions(window protocol.WindowContent, hasGutter b
 	return width, min(height, availableRows)
 }
 
+// scrollbarCells is the width of the window scrollbar, in editor cells.
+const scrollbarCells = 1
+
 // windowRowComposition honors an authored trailing margin without reserving a second scrollbar cell.
 func windowRowComposition(window protocol.WindowContent, paneWidth, viewportHeight, sourceStart int) (width, margin int, sb scrollbarState) {
 	sb = computeScrollbar(window, viewportHeight, sourceStart)
@@ -438,7 +441,7 @@ func windowRowComposition(window protocol.WindowContent, paneWidth, viewportHeig
 		margin = min(max(contentRight-textRight, 0), paneWidth-1)
 	}
 	if margin == 0 && sb.active {
-		margin = 1
+		margin = scrollbarCells
 	}
 	return paneWidth - margin, margin, sb
 }
@@ -1107,9 +1110,12 @@ func (m Model) gutterLineNumber(gutter protocol.Gutter, entry protocol.GutterEnt
 	return strings.Repeat(" ", width-len(text)) + text
 }
 
+// gutterSignCells is the width of the gutter sign column, in editor cells.
+const gutterSignCells = 2
+
 func (m Model) gutterSign(entry protocol.GutterEntry) string {
 	if entry.SignType == 8 && entry.SignText != "" {
-		return fit(entry.SignText, 2)
+		return fit(entry.SignText, gutterSignCells)
 	}
 	if entry.SignType == 9 {
 		return "- "
@@ -1123,7 +1129,7 @@ func (m Model) gutterSign(entry protocol.GutterEntry) string {
 	if entry.DisplayType == 4 {
 		return "▾ "
 	}
-	return "  "
+	return strings.Repeat(" ", gutterSignCells)
 }
 
 // fileTreeRowGuides holds precomputed guide characters for a single file tree row.
@@ -1205,7 +1211,7 @@ func (m Model) renderFileTree(tree protocol.FileTree, width int, height int, ski
 	lines := []string{}
 	if !skipHeader {
 		headerStyle := lipgloss.NewStyle().Foreground(theme.TreeHeaderText()).Background(theme.TreeHeader()).Width(width)
-		header := headerStyle.Bold(true).Render(fit(" 󰙅 Files  "+tree.Root, width))
+		header := headerStyle.Bold(true).Render(fit(" 󰙅 Files"+gap(spaceXL)+tree.Root, width))
 		lines = append(lines, header)
 	}
 

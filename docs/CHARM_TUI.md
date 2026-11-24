@@ -53,6 +53,71 @@ The TUI reports its full terminal width and the number of rows below the local h
 
 Semantic pane rows, split separators, and surface rectangles count from the first row below the header. The TUI translates those rows for screen composition and applies the inverse to raw pointer events. Native terminal chrome zones still use physical screen coordinates. A terminal too short to draw a body reports at least one grid row for the protocol but does not draw through the header or footer.
 
+## Chrome tokens
+
+A gap that someone counted by hand drifts. One surface puts two spaces between a key and its label, the next puts one, and macOS uses a third value. The TUI therefore spaces its chrome from the same scale as macOS, by the same names, in `go/tui/internal/ui/chrome_tokens.go`. That file is the twin of `macos/Sources/Views/Shared/ChromeTokens.swift` (see [macOS chrome tokens](../macos/AGENTS.md#chrome-tokens)), and [`docs/design/anatomy.md`](design/anatomy.md) says which token each part of each surface uses.
+
+Polish then becomes a token change. To widen every hint gap, you change one step; you do not search the render files for runs of spaces.
+
+### The scale
+
+Each step stores its macOS point value and converts to cells when it is read, so the conversion lives in one place:
+
+- **Columns** are `floor(points / 8)`, with a minimum of 1 for any step of 4 pt or more. A gap between two pieces of content never vanishes.
+- **Rows** are `floor(points / 18)`. A row is the smallest vertical unit, so padding inside a row does not exist in the terminal.
+
+| Go constant | macOS | Columns | Rows |
+|---|---|---|---|
+| `spacePixel` | 1 pt | 0 | 0 |
+| `spaceHairline` | 2 pt | 0 | 0 |
+| `spaceXS` | 4 pt | 1 | 0 |
+| `spaceSM` | 6 pt | 1 | 0 |
+| `spaceMD` | 8 pt | 1 | 0 |
+| `spaceLG` | 12 pt | 1 | 0 |
+| `spaceXL` | 16 pt | 2 | 0 |
+| `spaceXXL` | 20 pt | 2 | 1 |
+| `spacePanel` | 24 pt | 3 | 1 |
+| `spaceSection` | 32 pt | 4 | 1 |
+
+**What collapses.** `pixel` and `hairline` are zero cells; the TUI draws a glyph or a tint instead. `xs` through `lg` are one column, `xl` and `xxl` are two, and everything up to `xl` is zero rows. The collapse keeps the order of gaps (a key sits closer to its label than one hint sits to the next) without half cells.
+
+Radius steps (`radiusAccent`, `radiusSM`, `radiusMD`, `radiusLG`, `radiusXL`) collapse to two treatments. `accent`, `sm` and `md` are square: a tinted block without a border. `lg` and `xl` are Lip Gloss's rounded border, which `radius.border()` returns. The twelve typography steps (`textTiny` through `textAction`) collapse to a one-cell glyph or one of three treatments: faint (the `text.faint` role), normal and bold. `textStep.style(palette)` returns the treatment with its colour from the palette, never a literal.
+
+### Using it
+
+Never count spaces. Use the helpers:
+
+```go
+// Hints xl apart; inside each hint the key sits one column from its word.
+hints := strings.Join([]string{"↑↓ move", "Enter choose", "Esc close"}, gap(spaceXL))
+
+// A chip: sm horizontal padding, hairline vertical padding.
+chip := lipgloss.NewStyle().Padding(padding(spaceHairline, spaceSM)).Render(key)
+
+// A fill computed from measured widths is layout arithmetic, not spacing.
+fill := strings.Repeat(" ", max(width-lipgloss.Width(left)-lipgloss.Width(right), 0))
+```
+
+When a surface has a part in `anatomy.md`, use the part metric instead of a raw step. Part metrics live in the same file, one block per part, named by part: `listRowTitleToMeta`, `whichKeyColumnGap`, `modelineSegmentGap`, `promptLabelToQuery`, `decisionBarRows`, and so on. A surface whose anatomy part has not landed yet uses the step that keeps its current cells, or an interim metric such as `agentTranscriptInset`, until its own ticket reshapes it.
+
+### The guard
+
+`chrome_token_guardrail_test.go` is the twin of `ChromeTokenGuardrailTests` on macOS. It parses every non-test Go file in `internal/ui` and fails on:
+
+- an integer literal other than `0` anywhere in the arguments of a Lip Gloss `Padding*`, `Margin*`, `Width`, `Height`, `MaxWidth` or `MaxHeight` call, including nested calls and arithmetic offsets;
+- `strings.Repeat(" ", n)` when `n` is a literal or a literal added to or subtracted from a value;
+- a string literal with two or more consecutive spaces.
+
+Layout arithmetic passes: a literal that is a direct argument of a `min` or `max` clamp (`max(width, 1)`), an operand of `*` or `/` (`available/2`), or an index. A literal offset such as `width-3` fails; give it a name from the scale. `chrome_tokens.go` owns the constants and is not scanned. The test keeps a fixed list of excluded editor-cell files, each with a reason; it is empty today because editor-cell code in this package names its cell widths (`gutterSignCells`, `scrollbarCells`). The migration allowlist is empty, and a stale or unexplained entry fails.
+
+`chrome_tokens_test.go` asserts each step's columns and rows, each part metric against the TUI column of `anatomy.md`, and parity with `ChromeTokens.swift`: it fails when a step exists on one frontend only or when the two disagree about its points. `TestChromeTokenFrames` renders every chrome surface at 80x24 and 120x40; set `MINGA_TUI_FRAME_DIR` to write the text grids, then diff them before and after a token change. `go/tui/chrome_token_migration.json` records each intentional snap made when the scale was introduced.
+
+### Extending the scale
+
+1. Change `docs/design/anatomy.md` first: the token or part, with its intent.
+2. Change `ChromeTokens.swift` and `chrome_tokens.go` in the same pull request. The parity test fails if only one side moves.
+3. Add or update the part metric and its row in `TestChromeTokenPartMetricsMatchAnatomy`, then record the frames that changed.
+
 ## Editor pointer input
 
 The TUI resolves text clicks and drags from the committed row store, terminal grapheme widths, clipping, and local scroll transform used to render the editor. It sends `editor_text_event` with the presentation ID, absolute row-store rank, row ID, and composed UTF-16 offset. The renderer maps that position to source bytes; the BEAM owns selection and editing behavior.

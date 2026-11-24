@@ -40,7 +40,7 @@ func agentComposerAllocation(chat protocol.AgentChat, width, budget int) agentCo
 	}
 	p.innerWidth = max(width-2*p.border, 1)
 	if p.innerWidth >= 24 {
-		p.prefix = lipgloss.Width(" ❯ " + agentPromptModeName(chat.PromptVimMode) + "  ")
+		p.prefix = lipgloss.Width(" ❯ " + agentPromptModeName(chat.PromptVimMode) + gap(spaceXL))
 	} else if p.innerWidth >= 4 {
 		p.prefix = 1
 	}
@@ -104,7 +104,7 @@ func (m Model) renderAgentComposerWithLimit(chat protocol.AgentChat, width, budg
 	for index := range placement.rows {
 		prefix := strings.Repeat(" ", placement.prefix)
 		if index == 0 && placement.prefix > 1 {
-			prefix = lipgloss.NewStyle().Bold(true).Foreground(p.Accent()).Background(bg).Render(" ❯ " + agentPromptModeName(chat.PromptVimMode) + "  ")
+			prefix = lipgloss.NewStyle().Bold(true).Foreground(p.Accent()).Background(bg).Render(" ❯ " + agentPromptModeName(chat.PromptVimMode) + gap(spaceXL))
 		}
 		text := ""
 		if committed {

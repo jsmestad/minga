@@ -104,7 +104,7 @@ func (m Model) compositeHeaderWithSidebar(mainLines []string, tree protocol.File
 		if i == 0 {
 			left = headerStyle.Bold(true).Render(fit(" 󰙅 "+projectName, sidebarWidth))
 		} else {
-			left = fillStyle.Render(strings.Repeat(" ", max(sidebarWidth-1, 1)))
+			left = fillStyle.Render(strings.Repeat(" ", max(sidebarWidth-lipgloss.Width(sep), 1)))
 		}
 		left = replaceVisibleCell(left, max(sidebarWidth-1, 0), sep)
 		lines[i] = lipgloss.JoinHorizontal(lipgloss.Top, left, main)
@@ -185,8 +185,8 @@ func (m Model) renderTabs(tabBar protocol.TabBar, width int) string {
 	chromeBG := theme.Surface()
 	editorBG := m.editorBackground()
 	rowStyle := lipgloss.NewStyle().Background(chromeBG).Width(width)
-	activeStyle := lipgloss.NewStyle().Bold(true).Foreground(theme.TabActiveText()).Background(editorBG).Padding(0, 1)
-	inactiveStyle := lipgloss.NewStyle().Foreground(theme.TabInactiveText()).Background(chromeBG).Padding(0, 1)
+	activeStyle := lipgloss.NewStyle().Bold(true).Foreground(theme.TabActiveText()).Background(editorBG).Padding(padding(spaceHairline, spaceSM))
+	inactiveStyle := lipgloss.NewStyle().Foreground(theme.TabInactiveText()).Background(chromeBG).Padding(padding(spaceHairline, spaceSM))
 	rendered := make([]string, 0, len(tabBar.Tabs))
 	for _, tab := range tabBar.Tabs {
 		tabBG := chromeBG
@@ -237,9 +237,9 @@ func (m Model) renderBreadcrumb(crumb protocol.Breadcrumb, width int) string {
 		segments = append(segments, style.Render(segment))
 	}
 	separator := lipgloss.NewStyle().Foreground(m.palette().BreadcrumbSeparator()).Background(bg).Render(" ❯ ")
-	text := "  " + strings.Join(segments, separator)
+	text := gap(spaceXL) + strings.Join(segments, separator)
 	if git, ok := m.gitStatus(); ok && git.Branch != "" {
-		gitText := lipgloss.NewStyle().Foreground(m.palette().Muted()).Background(bg).Render("  ·  " + m.gitSummary(git))
+		gitText := lipgloss.NewStyle().Foreground(m.palette().Muted()).Background(bg).Render(gap(spaceXL) + "·" + gap(spaceXL) + m.gitSummary(git))
 		if lipgloss.Width(text)+lipgloss.Width(gitText) <= width {
 			text += gitText
 		}
@@ -267,19 +267,19 @@ func (m Model) footerLines() []string {
 			if icon.glyph != "" {
 				prefix = icon.glyph + " " + chromeStatus.Filename
 			}
-			status = fmt.Sprintf("%s  %d:%d", prefix, chromeStatus.Line, chromeStatus.Column)
+			status = prefix + gap(modelineSegmentGap) + fmt.Sprintf("%d:%d", chromeStatus.Line, chromeStatus.Column)
 			if message := m.renderStatusMessage(chromeStatus.Message); message != "" {
-				status += "  " + message
+				status += gap(modelineSegmentGap) + message
 			}
 		} else if message := m.renderStatusMessage(chromeStatus.Message); message != "" {
 			status = message
 		}
 	}
 	if search, ok := m.searchState(); ok && search.Active {
-		status += fmt.Sprintf("  search %d/%d", search.CurrentIndex, search.Count)
+		status += gap(modelineSegmentGap) + fmt.Sprintf("search %d/%d", search.CurrentIndex, search.Count)
 	}
 	if ext := m.extensionRuntimeStatus(); ext != "" {
-		status += "  " + ext
+		status += gap(modelineSegmentGap) + ext
 	}
 	if m.resyncPending {
 		// A frame transaction was discarded and the model asked the BEAM for a
@@ -288,7 +288,7 @@ func (m Model) footerLines() []string {
 		// when a valid commit applies. Styled with the muted error tone at low
 		// intensity rather than the loud full-screen surface.
 		badge := lipgloss.NewStyle().Faint(true).Foreground(m.palette().Warning()).Background(m.palette().Base()).Render("resync…")
-		status += "  " + badge
+		status += gap(modelineSegmentGap) + badge
 	}
 	lines := []string{
 		lipgloss.NewStyle().Foreground(m.palette().Muted()).Background(m.palette().Base()).Width(m.width).Render(fitStyled(status, m.width)),
@@ -326,7 +326,7 @@ func (m Model) renderStatusSegments(status protocol.StatusBar) string {
 	// within the right cluster; the BEAM clears it (empty string) when the
 	// sequence resolves, aborts, or which-key opens, so no timer lives here.
 	if status.PendingKeys != "" {
-		pending := lipgloss.NewStyle().Faint(true).Foreground(m.palette().Muted()).Background(m.palette().ChromeSurface()).Render(status.PendingKeys + "  ")
+		pending := lipgloss.NewStyle().Faint(true).Foreground(m.palette().Muted()).Background(m.palette().ChromeSurface()).Render(status.PendingKeys + gap(modelineSegmentGap))
 		right = pending + right
 	}
 	rightWidth := lipgloss.Width(right)
@@ -490,7 +490,7 @@ func (m Model) gitSummary(git protocol.GitStatus) string {
 	if git.Toast.Visible && git.Toast.Message != "" {
 		parts = append(parts, git.Toast.Message)
 	}
-	return strings.Join(parts, "  ")
+	return strings.Join(parts, gap(spaceXL))
 }
 
 func (m Model) renderGitStatusPanel(git protocol.GitStatus, style, selected lipgloss.Style, width, height int, hits *gitStatusHits) []string {
@@ -564,7 +564,7 @@ func (m Model) renderGitStatusPanel(git protocol.GitStatus, style, selected lipg
 					break
 				}
 				if entry.Section == section {
-					drawRow("  "+entry.Path, &entry)
+					drawRow(gap(spaceXL)+entry.Path, &entry)
 				}
 			}
 		}
@@ -587,7 +587,7 @@ func (m Model) renderMinibuffer(mini protocol.Minibuffer) string {
 	}
 	value := mini.Input
 	if mini.Context != "" {
-		value += "  " + mini.Context
+		value += gap(spaceXL) + mini.Context
 	}
 	return m.charmInput(prompt, value, mini.CursorPos)
 }
@@ -662,13 +662,13 @@ func (m Model) renderCompletionDocPane(doc string, width int, budget int) []stri
 	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(theme.PopupMutedText()).Background(theme.PopupChrome()).Width(width).ColorWhitespace(true)
 	bodyStyle := lipgloss.NewStyle().Foreground(theme.PopupText()).Background(theme.PopupSurface()).Width(width).ColorWhitespace(true)
 
-	lines := []string{renderPadded(titleStyle, " Documentation", width)}
-	wrapped := lipgloss.NewStyle().Width(max(width-1, 1)).Render(doc)
+	lines := []string{renderPadded(titleStyle, gap(spaceXS)+"Documentation", width)}
+	wrapped := lipgloss.NewStyle().Width(max(width-spaceXS.cols(), 1)).Render(doc)
 	for _, line := range strings.Split(wrapped, "\n") {
 		if len(lines) >= paneBudget {
 			break
 		}
-		lines = append(lines, renderPadded(bodyStyle, " "+line, width))
+		lines = append(lines, renderPadded(bodyStyle, gap(spaceXS)+line, width))
 	}
 	return lines
 }
@@ -692,7 +692,7 @@ func (m Model) renderCompletionItemRow(item protocol.CompletionItem, selected bo
 	markerStyle := lipgloss.NewStyle().Foreground(theme.Accent()).Background(rowBackground).ColorWhitespace(true)
 	text := markerStyle.Render(marker) + labelStyle.Render(" "+item.Label)
 	if strings.TrimSpace(item.Detail) != "" {
-		text += lipgloss.NewStyle().Foreground(theme.PopupMutedText()).Background(rowBackground).ColorWhitespace(true).Render("  " + strings.TrimSpace(item.Detail))
+		text += lipgloss.NewStyle().Foreground(theme.PopupMutedText()).Background(rowBackground).ColorWhitespace(true).Render(gap(listRowTitleToMeta) + strings.TrimSpace(item.Detail))
 	}
 	rowStyle := lipgloss.NewStyle().Background(rowBackground).Width(width).ColorWhitespace(true)
 	return renderPadded(rowStyle, text, width)
@@ -704,7 +704,7 @@ func (m Model) renderWhichKey(which protocol.WhichKey) []string {
 		title += " " + which.Prefix
 	}
 	if which.PageCount > 1 {
-		title += fmt.Sprintf("  %d/%d", which.Page+1, which.PageCount)
+		title += gap(spaceXL) + fmt.Sprintf("%d/%d", which.Page+1, which.PageCount)
 	}
 	items := make([]componentItem, 0, len(which.Bindings))
 	for _, binding := range which.Bindings {
@@ -717,15 +717,15 @@ func (m Model) renderWhichKey(which protocol.WhichKey) []string {
 func (m Model) renderPicker(picker protocol.Picker, preview protocol.PickerPreview) []string {
 	title := picker.Title
 	if picker.Query != "" {
-		title += "  " + picker.Query
+		title += gap(promptLabelToQuery) + picker.Query
 	}
 	if picker.Marked > 0 {
-		title += fmt.Sprintf("  marked %d", picker.Marked)
+		title += gap(spaceXL) + fmt.Sprintf("marked %d", picker.Marked)
 	}
 	if picker.LoadStatus == 1 {
-		title += "  " + m.feedback.spinner() + " loading"
+		title += gap(spaceXL) + m.feedback.spinner() + " loading"
 	} else if picker.LoadStatus == 2 && picker.LoadError != "" {
-		title += "  " + picker.LoadError
+		title += gap(spaceXL) + picker.LoadError
 	}
 
 	height := m.maxOverlayHeight()
@@ -827,7 +827,7 @@ func (m Model) renderPickerItemRow(title string, item protocol.PickerItem, selec
 	}
 	text += labelStyle.Render(item.Label)
 	if strings.TrimSpace(detail) != "" {
-		text += lipgloss.NewStyle().Foreground(theme.PopupMutedText()).Background(rowBackground).ColorWhitespace(true).Render("  " + strings.TrimSpace(detail))
+		text += lipgloss.NewStyle().Foreground(theme.PopupMutedText()).Background(rowBackground).ColorWhitespace(true).Render(gap(listRowTitleToMeta) + strings.TrimSpace(detail))
 	}
 	rowStyle := lipgloss.NewStyle().Background(rowBackground).Width(width).ColorWhitespace(true)
 	return renderPadded(rowStyle, " "+text, width)
@@ -859,7 +859,7 @@ func (m Model) renderPickerHelp(picker protocol.Picker, width int) string {
 		selected = min(max(int(picker.Selected)+1, 1), len(picker.Items))
 	}
 	left := fmt.Sprintf(" %d/%d", selected, len(picker.Items))
-	right := "↑↓ move  Enter choose  Esc close"
+	right := strings.Join([]string{"↑↓ move", "Enter choose", "Esc close"}, gap(spaceXL))
 	textStyle := lipgloss.NewStyle().Foreground(p.PopupMutedText()).Background(p.PopupChrome()).ColorWhitespace(true)
 	leftText := textStyle.Render(left)
 	rightText := textStyle.Render(right)

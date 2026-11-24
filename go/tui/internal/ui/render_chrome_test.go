@@ -135,3 +135,15 @@ func TestRenderStatusMessageUsesSemanticPaletteRoles(t *testing.T) {
 		})
 	}
 }
+
+func TestModelineSegmentsSitOneModelineGapApart(t *testing.T) {
+	model := New(80, 24, nil)
+	model.chrome[generated.OPGuiStatusBar] = protocol.ChromePayload{Opcode: generated.OPGuiStatusBar, Status: protocol.StatusBar{Filename: "main.go", Line: 12, Column: 4, Message: "saved"}}
+	model.chrome[generated.OPGuiSearchState] = protocol.ChromePayload{Opcode: generated.OPGuiSearchState, Search: protocol.SearchState{Active: true, Count: 4, CurrentIndex: 2}}
+	footer := ansi.Strip(model.footerLines()[0])
+	segmentGap := gap(modelineSegmentGap)
+	want := "main.go" + segmentGap + "12:4" + segmentGap + "saved" + segmentGap + "search 2/4"
+	if !strings.Contains(footer, want) {
+		t.Fatalf("modeline segments should sit modelineSegmentGap apart (anatomy.md Modeline segments): %q", footer)
+	}
+}
