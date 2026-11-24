@@ -655,6 +655,12 @@ For fire-and-forget measurements (no duration), use `Minga.Telemetry.execute/3`.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md#performance-debugging-with-telemetry) for the full usage guide including custom handler examples.
 
+### Benchmark results stay out of the tree
+
+Commit the benchmark, not its results. A bench script under `bench/` (with any fixtures it needs in `bench/fixtures/`) is the reproducible part and belongs in the repository; so do baselines that CI reads, such as `bench/baselines/keystroke_latency.json`. Run output (samples, summaries, identity files, logs, captures, per-run folders) and write-ups of a measurement do not: they describe one machine on one day, nothing reads them after review, and they go stale with the next change to the measured path.
+
+Put the numbers where the decision is made: the PR description for a change you ship, or a comment on the issue for a measurement or a rejected approach. Include the command that produced them and the baseline and candidate commits, so anyone can rerun the script. `.gitignore` ignores everything under `bench/` except top-level `*.exs` scripts, `fixtures/` and `baselines/`; do not force-add run output past it.
+
 ### Commit Messages
 
 ```
@@ -735,6 +741,21 @@ The tradeoff: scopes can't automatically inherit bindings from a parent scope. I
 - **Adding a new command:** Register it in the command provider. Bind it in the appropriate scope trie. Don't add context guards inside the command function.
 - **Adding a new scope:** Create a new `Minga.Keymap.Scope.*` module implementing the `Minga.Keymap.Scope` behaviour. Declare its tries. Include shared groups for common bindings. Register it in `@builtin_scopes` in `lib/minga/keymap/scope.ex`.
 - **Debugging "key does nothing":** Look at the active scope module's trie for that vim state. If the key isn't there, it's not bound. No need to trace through handler stacks or check command guards.
+
+### Key grammar
+
+Every built-in binding follows six rules (design principle 11):
+
+1. **Mnemonic leader sequences first:** `SPC` + which-key group letter + action letter. Match Doom where Doom has a binding, and record each match or deliberate divergence in `test/fixtures/keymap/doom_conventions.tsv`.
+2. **Vim grammar inside buffers.** Printable keys in a Vim normal state keep their Vim meaning.
+3. **Single mnemonic letters only in special buffers** (conversation navigation, file tree, git status), never where letters type text.
+4. **Modifiers only where letters must type text, and only established conventions:** ⌃J/⌃K list movement, ⌃V/⌃T/⌃Q in pickers, ⌥↩ in the composer, ⌃\ ⌃N to leave the terminal, ⌃. for the act menu. Never bind ⌃A ⌃E ⌃H ⌃W ⌃U ⌃K in a prompt, insert state, or the composer, except for list movement.
+5. **macOS platform keys** (⌘S ⌘Z ⌘W ⌘Q ⌘. ⌘1 to ⌘4 ⌘[ ⌘]) only as aliases of a binding without modifiers.
+6. **Never** three-modifier chords, two of ⌃ ⌥ ⌘ together (⌃⌘, ⌥⌘, ⌃⌥), or function keys.
+
+Also: one key has one meaning per scope and vim state, a command sits on two leader keys only when one is a declared alias, and every leader binding lives under a declared which-key group.
+
+`test/minga/keymap/grammar_test.exs` enforces these rules with named rule ids through the pure classifier in `test/support/key_grammar.ex`, which also holds the rule 4 and 5 allow-lists and the leader aliases. Violations that existed when the guard landed are listed in `test/fixtures/keymap/grammar_baseline.tsv`. **Never add baseline rows;** fix the binding instead. When you fix a listed violation, remove its row: the test fails on stale rows.
 
 ## Mouse Support (first-class citizen)
 

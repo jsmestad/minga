@@ -13,7 +13,7 @@ Minga's chrome follows one model on macOS and in the terminal, called the Spine:
 5. **Vim keys stay Vim in a file.** Minga's changes are handled with leader keys, a text object and ex commands in file buffers. Bare single-letter actions exist only in Minga's special buffers (`*minga-tasks*`, `*minga-review*`).
 6. **Undo is yours; Reject is for Minga.** `u` and ⌘Z undo only your own edits. Minga's work leaves through Reject.
 7. **Yes and no mean the same thing everywhere Minga asks.** `y` approve or keep, `n` deny or reject, `a` always for this session, `t` this turn, matching today's approval keys.
-8. **Two marks carry Minga's identity.** The twist marks where Minga's work is in your text; the orbit and its satellite mark what Minga is doing. Five states, each a distinct shape plus a word.
+8. **Two marks carry Minga's identity.** The twist marks where Minga's work is in your text; the orbit and its satellite mark what Minga is doing. Six state words on five shapes (Waiting and Stopped share the hollow dot), always shape plus word.
 9. **The terminal UI and the GUI draw the same picture.** A design that cannot be drawn in a terminal with the same layout is probably wrong. Platform-native rendering is welcome; platform-specific interaction models are not.
 10. **A terminal is a buffer.** The built-in terminal uses the same modes, marks and yes/no grammar, with command blocks from shell integration.
 
@@ -46,11 +46,21 @@ The design went through four rounds on the canvas, with reviews from a Minga UX 
 - The BEAM must say more: ordered modeline segments with priorities, per-author undo groups, task trees with subagents, command blocks for terminals. Frontends decide less: they draw tokens the BEAM sends and drop the lowest-priority segments to fit.
 - Design rules become executable: design tokens generated into Swift, Go and Elixir, a scenario registry rendered by both frontends, and flow-graph checks for dead ends. See [`storyboard.md`](../design/storyboard.md).
 - Some terminal features need a modern terminal (notifications, the Kitty keyboard protocol, graphics). Each is detected at startup and degrades quietly.
+- `minga .` and `minga <directory>` open the project home, or the restored session when one exists, instead of the agentic view. Migration: `resolve_auto_view_mode_for_directory` in `lib/minga/cli.ex` stops routing directories to the agentic view, and the `--editor` and `--no-context` flags are revisited (both exist only to steer that view). See [`surfaces.md`](../design/surfaces.md#opening-a-directory).
+- Every colour is a theme role, never a literal; Minga is themeable and users keep their theme. Catppuccin Frappé becomes the default theme (astrodark stays as a built-in); the code change lands separately. The design canvas shows Frappé and Latte renders of the boards. Three roles are new (minga, needs_you, done), and two existing agent fields (`assistant_label`, `status_thinking`) move to keep one meaning per colour. The storyboard factory renders each scenario in catppuccin_frappe (the default), astrodark, and a light theme (catppuccin_latte or one_light). See [`themes.md`](../design/themes.md).
+- **Keys are chords and mnemonics (principle 11), Doom first.** Mnemonic leader sequences first, Vim grammar in buffers, single letters only in special buffers, modifiers only where letters type text and only from an allow-list, macOS keys as aliases, and never three-modifier or ⌃⌘ / ⌥⌘ chords or function keys. Where Doom has a binding Minga matches it. This moves several keys: git status `SPC g g`, blame `SPC g B`, edit timeline `SPC s u`, diagnostics list `SPC c x` and definition `SPC c d`, diagnostics `]e` / `[e`, git hunks `]d` / `[d`, the act menu on `g.` and `⌃.` (so `SPC .` stays find-file), keep and reject on `SPC a y` / `SPC a d`, back and forward on `⌃O` / `⌃I`, and `SPC a` regrouped into a dozen keys plus Queue ›, Context › and Session ›. Which-key groups read like leaves: Title Case, a group colour and a trailing `›`, never `+`. See [keys](../design/keys.md).
+- **A key-grammar guard keeps the keymap from drifting.** `test/minga/keymap/grammar_test.exs` walks every binding and fails on any violation of principle 11 that is not in a checked-in baseline; the baseline lists today's violations, may only shrink, and each migration ticket deletes its rows. A Doom conventions table records the Doom bindings Minga matches and every deliberate divergence with its reason.
+- **Hover and the act menu are single surfaces.** One hover (`K`, `K` again to focus) answers "what is this?" everywhere; one act menu (`g.`, `⌃.`, right-click) answers "what can I do with it?" and replaces the twist-head menu, the failed-block menu, the hover action row and the picker's `C-o` menu. Pickers stop marking items: `Tab` only completes, and bulk work uses "act on all matches" or "export to a buffer".
+
+## Settled while recording this
+
+- **Minga's changes in a file** use `]h` / `[h`, which pair with the `ih` / `ah` text object. They replace `]e` (`lib/minga/keymap/normal_prefixes.ex:56`) with no alias, since Minga is pre-release; `]e` / `[e` then move between diagnostics, as in Doom. `SPC a t` is retired.
+- **Sibling subagents** are stepped with `]]` / `[[` inside the peek buffer, the same keys that mean "next block" in every read-only buffer; normal-mode `]t` keeps "next class/module" (`normal_prefixes.ex:54`).
+- **`esc` at the `*minga-shell*` approval prompt defers.** The request stays pending and needs-you stays lit; `n` is the deliberate deny.
+- **One drawer at a time.** Opening another replaces it, and closing returns to the previous one. Splits are how you see two things at once.
+- **Markdown in the conversation** arrives as BEAM-styled spans that each frontend draws. Glamour is not used.
+- **Theme fixes.** `agent.assistant_label` uses the minga role and `agent.status_thinking` the working role. Light-theme values below 3:1 (Latte's needs-you, warning and waiting; AstroDark's waiting) are raised when the new roles land.
 
 ## Open questions
 
 - **Terminal emulator engine.** libvterm, a Go or Swift VT implementation, or libghostty. The Developer Notes on #19 and #122 assume the removed Zig renderer and are stale.
-- **Markdown in the conversation.** Rendering Minga's replies with Glamour in Go would duplicate semantics on the frontend. The likely answer is BEAM-styled spans drawn with Lip Gloss and native text.
-- **`esc` at the `*minga-shell*` approval prompt.** Does it deny, defer, or leave the request pending with its needs-you state?
-- **The tasks drawer with nothing in it.** It needs an empty state.
-- **Key overlaps found while recording this.** `]e` already moves to the next agent edit (`lib/minga/keymap/normal_prefixes.ex:56`); decide whether `]h` replaces it. `]t` is "next class/module" in normal mode (`normal_prefixes.ex:54`), so sibling navigation in the subagent peek split must be scoped to that buffer or use another key.

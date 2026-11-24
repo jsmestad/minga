@@ -10,7 +10,7 @@ The Go TUI is not a fallback that gets a simplified design. It draws the same sc
 - **Overlays float.** Which-key, the tasks drawer, the switcher and menus are layers over the editor (`lipgloss.NewLayer` and the canvas compositor, already used in `go/tui`), with a soft drop shadow of dim half-blocks on the right and bottom. The code stays visible underneath; while a drawer has focus, the editor dims slightly.
 - **Selection.** A full-width background bar on the selected row, plus a `▌` in the row's state colour.
 - **Modeline.** Segments are coloured blocks with one-cell gaps, no powerline arrows. The mode pill is the only fully saturated block.
-- **Diff.** Removed lines on a faint red-tinted background, added lines on a faint green one.
+- **Diff.** Removed lines on a faint tint of `git.deleted_fg`, added lines on a faint tint of `git.added_fg` (the derived diff tints in [themes.md](themes.md)).
 - **Trees.** The review buffer, the tasks drawer's subagents and the file tree use `lipgloss/tree` connectors (`├─`, `└─`, `│`) instead of hand-drawn arrows.
 - **Working.** The working state animates with a Bubbles spinner using the frames `◐ ◓ ◑ ◒`, static when reduced motion is requested.
 
@@ -18,7 +18,7 @@ The glyphs for states, the twist and diagnostics are in [marks.md](marks.md).
 
 ## Colour profiles
 
-Colours come from theme roles, never literals, and each role is a light and dark pair (`lipgloss.LightDark`) chosen from the detected terminal background. Lip Gloss's colour profile maps truecolor down to 256 and 16 colours. Because every state is a shape plus a word, nothing depends on hue surviving the downgrade.
+Colours come from theme roles ([themes.md](themes.md)), never literals, and each role is a light and dark pair (`lipgloss.LightDark`) chosen from the detected terminal background. Lip Gloss's colour profile maps truecolor down to 256 and 16 colours. Because every state is a shape plus a word, nothing depends on hue surviving the downgrade.
 
 ## Terminal capabilities
 

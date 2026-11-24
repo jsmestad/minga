@@ -1,1 +1,0 @@
-{"label":"x-c3","otp":"29","schedulers":4,"elixir":"1.20.5","arch":"aarch64-apple-darwin27.2.0","commit":"ff8b7737e5e6983955013bfb306f399f487bf3b0","counts":[0,100,1000,10000],"lib_dirty":[],"completion_sources_sha256":"060631F35D2934DB257B81B9603198ABC74CD272639D90EB8EB0E6A52E076529","mix_env":"test"}

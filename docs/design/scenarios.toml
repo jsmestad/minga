@@ -12,16 +12,44 @@
 #   surfaces   the surfaces on screen (see surfaces.md), e.g. ["modeline", "drawer:tasks"].
 #   states     the Minga or UI states shown, e.g. ["needs_you", "working"].
 #   frontends  ["macos", "tui"], or one of them with platform_only_reason set.
-#   status     "designed" | "existing-only" | "missing".
+#   status     "designed" | "existing-only" | "missing" | "deferred" | "removed".
 #              designed:      a design board exists and follows docs/design.
 #              existing-only: the screen exists in the app but has not been redesigned.
 #              missing:       no design and no implementation.
+#              deferred:      needs a rethink before it is designed; the board, if any, is a placeholder.
+#              removed:       exists today; the Spine takes it away (notes say where its job goes).
 #   boards     design canvas board files when designed: { macos = "...", tui = "..." }.
 #   exits      every way out, by key and by click:
-#              [{ key = "SPC a a", click = "modeline needs-you segment", to = "tasks.drawer.needs_you" }]
+#              [{ key = "SPC a a", click = "modeline needs-you segment", to = "minga.tasks.needs_you" }]
 #              Use click = "" for keyboard-only exits and say why in a note.
 #              A "to" id that has no [[scenario]] yet is an inventory gap.
 #   notes      anything a reviewer needs; open questions.
+#
+# Top-level key:
+#
+#   phase           "keyboard" while mouse paths are pending the mouse sweep (missing click
+#                   paths are reported but do not fail the checker), "final" after it.
+#
+# Flags used by the flow-map checker (design/tools/storyboard/check.py):
+#
+#   cold_start      true on the one scenario a fresh launch lands on.
+#   home            true on resting views (plain editing and its variants). Every
+#                   other scenario must reach a home scenario within 3 presses of
+#                   esc or q, or of an exit marked back = true (no dead ends).
+#   reached_by      for scenarios that happen to you rather than places you go to
+#                   (errors, notifications, Minga asking): the event that shows it.
+#                   The checker treats these as reachable.
+#   outside_app     true for system surfaces such as a desktop notification.
+#   transient       true for surfaces that exist to be acted on and closed
+#                   (drawers, pickers, menus, prompts, which-key). Every exit on a
+#                   transient surface needs both a key and a click, unless the exit
+#                   sets keyboard_only = "<reason>".
+#   list            true when the surface lists things. It must name its
+#                   empty_state, a scenario id for the zero case.
+#   terminal_state  true when the scenario ends the session (quit).
+#   exit fields     key, click, to, plus optional keyboard_only (reason), back
+#                   (true for an escape that is not esc or q, such as ⌃\ ⌃N in a
+#                   terminal or ⌘W on a window) and note.
 #
 # Journeys:
 #   start       launch, first run, open a project, quit
@@ -36,9 +64,215 @@
 #   settings    config, themes, keybindings, extensions, help
 #   errors      error notices, empty states, crashes, reconnects
 #
-# Status at the start of the storyboard: the scenarios below are the designed
-# ones from the V4.1 design round. existing-only and missing scenarios are added
-# during the storyboard inventory.
+# The inventory covers every screen and state found in the semantic UI builders,
+# the macOS views, the Go TUI and the leader keymap, plus the empty states and
+# lifecycle screens the Spine needs. Within a journey, removed scenarios come last.
+
+# ---- start -----------------------------------------------------------------
+
+# Design phase. "keyboard": click paths are pending the mouse sweep and do not fail
+# the checker. Set to "final" once every scenario has had its mouse sweep.
+phase = "keyboard"
+
+[[scenario]]
+id = "start.empty"
+journey = "start"
+title = "minga outside any project: home with recent projects"
+surfaces = ["home", "modeline"]
+states = []
+frontends = ["macos", "tui"]
+status = "designed"
+boards = { macos = "Batch6_start_empty.dc.html", tui = "Batch6_start_empty.dc.html" }
+cold_start = true
+home = true
+exits = [
+  { key = "1-9", click = "project row", to = "start.open_dir.restored" },
+  { key = "↩", click = "project row", to = "start.open_dir.restored" },
+  { key = "SPC SPC", click = "Find file", to = "files.project_find" },
+  { key = "SPC p p", click = "Open project", to = "start.project_switcher" },
+  { key = "SPC p a", click = "Add project", to = "start.project_switcher" },
+  { key = "SPC p r", click = "Recent file", to = "start.recent_files" },
+  { key = "SPC f f", click = "", to = "files.switcher" },
+  { key = "SPC ,", click = "", to = "files.switcher" },
+  { key = "SPC h T", click = "Tutorial", to = "settings.tutorial" },
+  { key = "SPC q q", click = "", to = "start.quit.confirm" },
+]
+notes = "The cold-start scenario for reachability. *home* outside a project lists recent projects, numbered; 1 to 9 open one (restored session when it has one, otherwise its project home). A resting view: q does nothing."
+
+[[scenario]]
+id = "start.open_dir.home"
+journey = "start"
+title = "minga . in a project opened for the first time: project home"
+surfaces = ["home", "modeline"]
+states = ["working"]
+frontends = ["macos", "tui"]
+status = "designed"
+boards = { macos = "Batch6_start_open_dir_home.dc.html", tui = "Batch6_start_open_dir_home.dc.html" }
+home = true
+reached_by = "minga . (or minga with no arguments) inside a project with no saved session"
+exits = [
+  { key = "1-9", click = "recent file row", to = "edit.plain" },
+  { key = "↩", click = "file row", to = "edit.plain" },
+  { key = "↩", click = "task row", to = "minga.conversation" },
+  { key = "SPC SPC", click = "Find file", to = "files.project_find" },
+  { key = "SPC a n", click = "New task", to = "minga.task.new" },
+  { key = "SPC o p", click = "File tree", to = "files.tree" },
+  { key = "SPC p p", click = "Switch project", to = "start.project_switcher" },
+]
+notes = "*home*: project name and path, branch and change count, Recent in this project (1 to 9), this project's Minga tasks with state glyphs, next actions as an action list. A resting view: q does nothing. SPC p h returns here from anywhere."
+
+[[scenario]]
+id = "start.open_dir.restored"
+journey = "start"
+title = "minga . in a project with a saved session: picks up where you left off"
+surfaces = ["editor", "modeline", "echo"]
+states = ["working"]
+frontends = ["macos", "tui"]
+status = "designed"
+boards = { macos = "Batch6_start_open_dir_restored.dc.html", tui = "Batch6_start_open_dir_restored.dc.html" }
+home = true
+reached_by = "minga . inside a project with a saved session"
+exits = [
+  { key = "SPC q n", click = "Start fresh", to = "start.open_dir.home" },
+  { key = "SPC p h", click = "Project home", to = "start.open_dir.home" },
+  { key = "any key", click = "", to = "edit.working" },
+]
+notes = "Files, splits, cursors and scroll come back; the echo says \"Restored 3 files from last time\" with SPC q n to start fresh. Start fresh closes the restored files and keeps Minga's tasks, unsaved edits and unreviewed changes. Minga's tasks are not part of the window session."
+
+[[scenario]]
+id = "start.open_dir.subdir"
+journey = "start"
+title = "minga lib/minga_agent inside a project: root found above, switcher filtered"
+surfaces = ["drawer:switcher", "modeline"]
+states = []
+frontends = ["macos", "tui"]
+status = "designed"
+boards = { macos = "Batch6_start_open_dir_subdir.dc.html", tui = "Batch6_start_open_dir_subdir.dc.html" }
+transient = true
+reached_by = "minga <subdirectory> inside a project"
+exits = [
+  { key = "↩", click = "file row", to = "edit.plain" },
+  { key = "⌃V", click = "", to = "windows.split" },
+  { key = "typing", click = "", to = "files.switcher", keyboard_only = "typing narrows the filter; backspace widens it to the whole project" },
+  { key = "esc", click = "", to = "start.open_dir.home", back = true },
+]
+notes = "The root is the nearest project marker above the directory; the switcher opens filtered to the subdirectory."
+
+[[scenario]]
+id = "start.open_dir.not_project"
+journey = "start"
+title = "minga . in a directory with no project markers"
+surfaces = ["home", "modeline"]
+states = []
+frontends = ["macos", "tui"]
+status = "designed"
+boards = { macos = "Batch6_start_open_dir_not_project.dc.html", tui = "Batch6_start_open_dir_not_project.dc.html" }
+home = true
+reached_by = "minga . in a directory with no project markers"
+exits = [
+  { key = "SPC o p", click = "File tree", to = "files.tree" },
+  { key = "SPC SPC", click = "Find file", to = "files.project_find" },
+  { key = "SPC p a", click = "Add as project", to = "start.project_switcher" },
+  { key = "SPC a n", click = "New task", to = "minga.task.new" },
+]
+notes = "Opens with the directory itself as the root; the home buffer carries a one-line note and the file tree action."
+
+[[scenario]]
+id = "start.first_run"
+journey = "start"
+title = "First run: onboarding (deferred)"
+surfaces = ["welcome"]
+states = []
+frontends = ["macos", "tui"]
+status = "deferred"
+boards = { macos = "Batch2_start_first_run.dc.html", tui = "Batch2_start_first_run.dc.html" }
+reached_by = "the first launch"
+transient = true
+exits = [
+  { key = "↩", click = "Continue", to = "start.empty" },
+  { key = "esc", click = "Skip", to = "start.empty" },
+]
+notes = "Deferred: onboarding needs a rethink (a walkthrough or an interactive tutorial that teaches SPC and Minga by doing; SPC h T exists to build on). Batch2_start_first_run is a placeholder, not the design. Voice: Servus."
+
+[[scenario]]
+id = "start.project_switcher"
+journey = "start"
+title = "SPC p p: switch project"
+surfaces = ["picker"]
+states = []
+frontends = ["macos", "tui"]
+status = "existing-only"
+transient = true
+list = true
+empty_state = "start.project_switcher.empty"
+exits = [
+  { key = "↩", click = "row", to = "edit.plain" },
+  { key = "esc", click = "click outside", to = "edit.plain" },
+  { key = "SPC p a", click = "", to = "start.project_switcher", note = "add known project" },
+]
+
+[[scenario]]
+id = "start.project_switcher.empty"
+journey = "start"
+title = "Project switcher with no known projects"
+surfaces = ["picker"]
+states = []
+frontends = ["macos", "tui"]
+status = "designed"
+boards = { macos = "Batch4_files_empty.dc.html", tui = "Batch4_files_empty.dc.html" }
+transient = true
+exits = [
+  { key = "SPC p a", click = "", to = "start.project_switcher", keyboard_only = "add a known project; click comes in the mouse sweep" },
+  { key = "esc", click = "click outside", to = "edit.plain" },
+]
+
+[[scenario]]
+id = "start.recent_files"
+journey = "start"
+title = "SPC p r: recent files in project"
+surfaces = ["picker"]
+states = []
+frontends = ["macos", "tui"]
+status = "existing-only"
+transient = true
+list = true
+empty_state = "files.switcher.no_match"
+exits = [
+  { key = "↩", click = "row", to = "edit.plain" },
+  { key = "esc", click = "click outside", to = "edit.plain" },
+]
+
+[[scenario]]
+id = "start.quit.confirm"
+journey = "start"
+title = "Quit with unsaved files or Minga working: confirm"
+surfaces = ["minibuffer"]
+states = []
+frontends = ["macos", "tui"]
+status = "designed"
+boards = { macos = "Batch2_start_quit_confirm.dc.html", tui = "Batch2_start_quit_confirm.dc.html" }
+transient = true
+exits = [
+  { key = "s", click = "Save all and quit", to = "start.quit.farewell" },
+  { key = "d", click = "Discard and quit", to = "start.quit.farewell" },
+  { key = "esc", click = "click outside", to = "edit.plain" },
+]
+notes = "Shown by SPC q q or ⌘Q only when something is at stake. Lists it: unsaved buffers, running tasks, unreviewed changes. s saves all first; d drops only your unsaved edits. Quitting never discards Minga's unreviewed changes: they wait for review next time. Explicit s and d, no y/n ambiguity."
+
+[[scenario]]
+id = "start.quit.farewell"
+journey = "start"
+title = "Ciao: the app closes"
+surfaces = ["minibuffer"]
+states = []
+frontends = ["macos", "tui"]
+status = "designed"
+boards = { macos = "Batch2_start_quit_farewell.dc.html", tui = "Batch2_start_quit_farewell.dc.html" }
+terminal_state = true
+exits = []
+notes = "Voice: \"Ciao.\" (everyday Munich speech), with an optional one-line summary. macOS: the modeline shows it while the window fades. TUI: printed after the terminal is restored, so it stays in scrollback. Terminal state: the process exits."
+
+# ---- edit ------------------------------------------------------------------
 
 [[scenario]]
 id = "edit.working"
@@ -49,6 +283,7 @@ states = ["working", "needs_you"]
 frontends = ["macos", "tui"]
 status = "designed"
 boards = { macos = "V41Edit.dc.html", tui = "V41TuiEdit.dc.html" }
+home = true
 exits = [
   { key = "SPC (pause)", click = "", to = "edit.whichkey.leader" },
   { key = "SPC a (pause)", click = "", to = "minga.whichkey" },
@@ -56,12 +291,707 @@ exits = [
   { key = "SPC a v", click = "modeline Minga segment", to = "minga.conversation" },
   { key = "SPC a r", click = "", to = "minga.review.buffer" },
   { key = "]h", click = "twist head", to = "minga.review.in_file" },
+  { key = "K", click = "rest the pointer on a Minga line", to = "minga.hover.attribution" },
   { key = "SPC ,", click = "title bar file name", to = "files.switcher" },
   { key = "K", click = "hover the underline", to = "code.diagnostics.hover" },
-  { key = "SPC c d", click = "modeline diagnostics segment", to = "code.diagnostics.list" },
+  { key = "SPC c x", click = "modeline diagnostics segment", to = "code.diagnostics.list" },
   { key = "SPC o t", click = "", to = "terminal.drawer" },
 ]
-notes = "Which-key has no click path by design (it is the keyboard's discovery surface); its targets are all reachable by click elsewhere. SPC a r and SPC o t need a click path: the menu bar Minga and View menus on macOS, TBD in the TUI."
+notes = "Same resting view as edit.plain with Minga's twist, cursor tag and modeline segments. Which-key has no click path by design (it is the keyboard's discovery surface); its targets are all reachable by click elsewhere. SPC a r and SPC o t need a click path: the menu bar Minga and View menus on macOS, TBD in the TUI."
+
+[[scenario]]
+id = "edit.plain"
+journey = "edit"
+title = "Editing a file, nothing else happening"
+surfaces = ["title_bar", "editor", "gutter", "modeline"]
+states = []
+frontends = ["macos", "tui"]
+status = "designed"
+boards = { macos = "V41Edit.dc.html", tui = "V41TuiEdit.dc.html" }
+home = true
+exits = [
+  { key = "SPC (pause)", click = "", to = "edit.whichkey.leader", keyboard_only = "which-key is the keyboard's discovery surface" },
+  { key = ":", click = "", to = "edit.command_line" },
+  { key = "v", click = "drag to select", to = "edit.visual" },
+  { key = "/", click = "", to = "search.buffer" },
+  { key = "SPC s p", click = "", to = "search.project" },
+  { key = "SPC s r", click = "", to = "search.replace" },
+  { key = "SPC s t", click = "", to = "search.todos" },
+  { key = "SPC s i", click = "", to = "search.symbols.document" },
+  { key = "SPC s w", click = "", to = "search.symbols.workspace" },
+  { key = "SPC ,", click = "title bar file name", to = "files.switcher" },
+  { key = "SPC SPC", click = "", to = "files.project_find" },
+  { key = "SPC o p", click = "", to = "files.tree" },
+  { key = "SPC b m", click = "", to = "files.messages" },
+  { key = "SPC b W", click = "", to = "files.warnings" },
+  { key = "SPC p p", click = "", to = "start.project_switcher" },
+  { key = "SPC p r", click = "", to = "start.recent_files" },
+  { key = "insert mode typing", click = "", to = "code.completion" },
+  { key = "K", click = "hover a symbol", to = "code.hover" },
+  { key = "SPC c a", click = "", to = "code.actions" },
+  { key = "SPC c r", click = "", to = "code.rename" },
+  { key = "SPC c D", click = "", to = "code.references" },
+  { key = "SPC c h", click = "", to = "code.call_hierarchy" },
+  { key = "SPC c x", click = "modeline diagnostics segment", to = "code.diagnostics.list" },
+  { key = "SPC g g", click = "", to = "git.status" },
+  { key = "SPC g B", click = "", to = "git.blame" },
+  { key = "SPC s u", click = "", to = "edit.timeline" },
+  { key = "SPC c l i", click = "", to = "code.lsp_info" },
+  { key = "SPC c l I", click = "", to = "code.lsp_tools" },
+  { key = "SPC m t o", click = "", to = "code.test_output" },
+  { key = "SPC a W", click = "", to = "git.why_line" },
+  { key = "SPC a A", click = "", to = "git.autobiography" },
+  { key = "SPC g c", click = "", to = "git.commit" },
+  { key = "SPC g x", click = "", to = "git.conflict" },
+  { key = "SPC g z", click = "", to = "git.stash" },
+  { key = "SPC a a", click = "", to = "minga.tasks.list" },
+  { key = "SPC a n", click = "", to = "minga.task.new" },
+  { key = "SPC a v", click = "", to = "minga.conversation" },
+  { key = "SPC a r", click = "", to = "minga.review.buffer" },
+  { key = "SPC a ?", click = "", to = "minga.inline_ask" },
+  { key = "SPC a e", click = "", to = "minga.inline_edit" },
+  { key = "SPC a S m", click = "", to = "minga.model_picker" },
+  { key = "SPC a S h", click = "", to = "minga.session_resume" },
+  { key = "SPC o t", click = "", to = "terminal.drawer" },
+  { key = "SPC o T", click = "", to = "terminal.window" },
+  { key = "SPC w v", click = "", to = "windows.split" },
+  { key = "SPC h t", click = "", to = "settings.theme_picker" },
+  { key = "SPC h b", click = "", to = "settings.describe" },
+  { key = "SPC h a", click = "", to = "settings.command_help" },
+  { key = "SPC h T", click = "", to = "settings.tutorial" },
+  { key = "SPC h e l", click = "", to = "settings.extensions" },
+  { key = "SPC h l", click = "", to = "settings.keystroke_history" },
+  { key = "SPC o b", click = "", to = "settings.observatory" },
+  { key = "⌘,", click = "Minga › Settings…", to = "settings.panel" },
+  { key = "SPC q q", click = "", to = "start.quit.confirm" },
+  { key = "]e", click = "", to = "code.diagnostics.in_file" },
+  { key = "SPC a S t", click = "", to = "minga.thinking_picker" },
+  { key = "SPC a S k", click = "", to = "minga.checklist" },
+  { key = "SPC a x l", click = "", to = "minga.attachments" },
+  { key = "SPC a S H", click = "", to = "minga.retained_history" },
+  { key = "SPC a p", click = "", to = "minga.publish" },
+  { key = "SPC a a", click = "", to = "minga.question", note = "answered from the needs-you row in the tasks drawer; SPC a Q is retired" },
+  { key = ":checkhealth", click = "", to = "terminal.capabilities" },
+]
+notes = "Home scenario for the dead-end check. Same boards as edit.working without Minga's segments. Most clicks are empty because the macOS menu bar items and TUI click paths for these commands are not designed yet; the checker lists them."
+
+[[scenario]]
+id = "edit.whichkey.leader"
+journey = "edit"
+title = "SPC and a pause: top-level which-key"
+surfaces = ["editor", "whichkey", "modeline"]
+states = []
+frontends = ["macos", "tui"]
+status = "designed"
+boards = { macos = "V41WhichKey.dc.html", tui = "V41TuiEdit.dc.html" }
+transient = true
+exits = [
+  { key = "a", click = "Minga row", to = "minga.whichkey" },
+  { key = "f", click = "Files row", to = "files.project_find" },
+  { key = ",", click = "Switch buffer row", to = "files.switcher" },
+  { key = "SPC", click = "Find file row", to = "files.project_find" },
+  { key = "esc", click = "click outside", to = "edit.plain" },
+]
+
+[[scenario]]
+id = "edit.visual"
+journey = "edit"
+title = "Visual selection"
+surfaces = ["editor", "modeline"]
+states = []
+frontends = ["macos", "tui"]
+status = "designed"
+boards = { macos = "Batch7_act_selection.dc.html", tui = "Batch7_act_selection.dc.html" }
+exits = [
+  { key = "esc", click = "click elsewhere", to = "edit.plain" },
+  { key = "g.", click = "right-click the selection", to = "minga.act_menu.selection" },
+  { key = "SPC a e", click = "", to = "minga.inline_edit" },
+  { key = "SPC a y", click = "", to = "edit.plain", note = "keep Minga's changes in the selection" },
+]
+[[scenario]]
+id = "edit.command_line"
+journey = "edit"
+title = ": command line in the minibuffer"
+surfaces = ["minibuffer"]
+states = []
+frontends = ["macos", "tui"]
+status = "existing-only"
+transient = true
+exits = [
+  { key = "↩", click = "", to = "edit.plain" },
+  { key = "esc", click = "", to = "edit.plain", keyboard_only = "the command line is a keyboard surface" },
+]
+notes = "Command palette today (defaults.ex:39). ⌘K is the macOS click alias."
+
+[[scenario]]
+id = "edit.prompt"
+journey = "edit"
+title = "Minibuffer prompt or y/n confirmation"
+surfaces = ["minibuffer"]
+states = []
+frontends = ["macos", "tui"]
+status = "existing-only"
+reached_by = "a command that asks"
+transient = true
+exits = [
+  { key = "↩ or y", click = "", to = "edit.plain" },
+  { key = "esc or n", click = "", to = "edit.plain" },
+]
+notes = "Needs a click form: the prompt choices rendered as clickable text."
+
+[[scenario]]
+id = "edit.timeline"
+journey = "edit"
+title = "Edit timeline"
+surfaces = ["edit_timeline"]
+states = []
+frontends = ["macos", "tui"]
+status = "existing-only"
+transient = true
+exits = [
+  { key = "q", click = "close", to = "edit.plain" },
+  { key = "esc", click = "click outside", to = "edit.plain" },
+]
+notes = "Exists as a semantic surface (edit_timeline_builder); Spine placement undecided."
+
+# ---- search ----------------------------------------------------------------
+
+[[scenario]]
+id = "search.buffer"
+journey = "search"
+title = "/ search in buffer"
+surfaces = ["editor", "search_toolbar", "modeline"]
+states = []
+frontends = ["macos", "tui"]
+status = "existing-only"
+transient = true
+list = true
+empty_state = "search.buffer.no_results"
+exits = [
+  { key = "↩", click = "", to = "edit.plain" },
+  { key = "n / N", click = "", to = "search.buffer" },
+  { key = "esc", click = "search field close", to = "edit.plain" },
+]
+notes = "macOS has a SearchToolbar; the Spine wants the minibuffer form on both frontends."
+
+[[scenario]]
+id = "search.buffer.no_results"
+journey = "search"
+title = "Buffer search with no match"
+surfaces = ["editor", "search_toolbar"]
+states = []
+frontends = ["macos", "tui"]
+status = "designed"
+boards = { macos = "Batch4_search_empty.dc.html", tui = "Batch4_search_empty.dc.html" }
+transient = true
+exits = [
+  { key = "SPC s p", click = "", to = "search.project", keyboard_only = "the echo line offers it as text; click comes in the mouse sweep" },
+  { key = "esc", click = "search field close", to = "edit.plain" },
+]
+notes = "The minibuffer says no matches and names the next step: search the project with the same query."
+
+[[scenario]]
+id = "search.project"
+journey = "search"
+title = "SPC s p: search project"
+surfaces = ["picker"]
+states = []
+frontends = ["macos", "tui"]
+status = "existing-only"
+transient = true
+list = true
+empty_state = "search.project.no_results"
+exits = [
+  { key = "↩", click = "row", to = "edit.plain" },
+  { key = "esc", click = "click outside", to = "edit.plain" },
+  { key = "⌃Q", click = "", to = "search.quickfix", note = "send results to quickfix" },
+]
+
+[[scenario]]
+id = "search.project.no_results"
+journey = "search"
+title = "Project search with no results"
+surfaces = ["picker"]
+states = []
+frontends = ["macos", "tui"]
+status = "designed"
+boards = { macos = "Batch4_search_empty.dc.html", tui = "Batch4_search_empty.dc.html" }
+transient = true
+exits = [
+  { key = "⌃A", click = "", to = "search.project", keyboard_only = "rerun including ignored files; click comes in the mouse sweep" },
+  { key = "⌃H", click = "", to = "search.project", keyboard_only = "rerun including hidden files; click comes in the mouse sweep" },
+  { key = "esc", click = "click outside", to = "edit.plain" },
+]
+
+[[scenario]]
+id = "search.quickfix"
+journey = "search"
+title = "Quickfix list"
+surfaces = ["drawer:quickfix"]
+states = []
+frontends = ["macos", "tui"]
+status = "designed"
+boards = { macos = "Batch4_search_quickfix.dc.html", tui = "Batch4_search_quickfix.dc.html" }
+transient = true
+list = true
+empty_state = "search.project.no_results"
+exits = [
+  { key = "↩", click = "row", to = "edit.plain" },
+  { key = "]q / [q", click = "", to = "edit.plain", keyboard_only = "Vim quickfix motions; keep working after the drawer closes" },
+  { key = ":cdo / :cfdo", click = "", to = "edit.plain", keyboard_only = "ex commands, listed in which-key under SPC s q" },
+  { key = "q", click = "close", to = "edit.plain" },
+  { key = "esc", click = "click outside", to = "edit.plain" },
+]
+notes = "Filled by :Minga review or project search. Items from :Minga review carry the twist mark. ↩ jumps and the drawer stays open."
+
+[[scenario]]
+id = "search.replace"
+journey = "search"
+title = "SPC s r: search and replace"
+surfaces = ["minibuffer"]
+states = []
+frontends = ["macos", "tui"]
+status = "existing-only"
+transient = true
+exits = [
+  { key = "↩", click = "Replace", to = "edit.plain" },
+  { key = "esc", click = "click outside", to = "edit.plain" },
+]
+
+[[scenario]]
+id = "search.todos"
+journey = "search"
+title = "SPC s t: TODOs"
+surfaces = ["picker"]
+states = []
+frontends = ["macos", "tui"]
+status = "existing-only"
+transient = true
+list = true
+empty_state = "search.project.no_results"
+exits = [
+  { key = "↩", click = "row", to = "edit.plain" },
+  { key = "esc", click = "click outside", to = "edit.plain" },
+]
+
+[[scenario]]
+id = "search.symbols.document"
+journey = "search"
+title = "SPC s j: document symbols"
+surfaces = ["picker"]
+states = []
+frontends = ["macos", "tui"]
+status = "existing-only"
+transient = true
+list = true
+empty_state = "search.project.no_results"
+exits = [
+  { key = "↩", click = "row", to = "edit.plain" },
+  { key = "esc", click = "click outside", to = "edit.plain" },
+]
+
+[[scenario]]
+id = "search.symbols.workspace"
+journey = "search"
+title = "SPC s w: workspace symbols"
+surfaces = ["picker"]
+states = []
+frontends = ["macos", "tui"]
+status = "existing-only"
+transient = true
+list = true
+empty_state = "search.project.no_results"
+exits = [
+  { key = "↩", click = "row", to = "edit.plain" },
+  { key = "esc", click = "click outside", to = "edit.plain" },
+]
+
+# ---- code ------------------------------------------------------------------
+
+[[scenario]]
+id = "code.diagnostics.in_file"
+journey = "code"
+title = "Errors and warnings in a file, cursor on the error"
+surfaces = ["editor", "gutter", "modeline"]
+states = ["error", "warning"]
+frontends = ["macos", "tui"]
+status = "designed"
+boards = { macos = "V3Diagnostics.dc.html", tui = "V41TuiEdit.dc.html" }
+home = true
+reached_by = "the language server reports diagnostics"
+exits = [
+  { key = "K", click = "hover the underline", to = "code.diagnostics.hover" },
+  { key = "]e", click = "", to = "code.diagnostics.in_file" },
+  { key = "SPC c x", click = "modeline diagnostics segment", to = "code.diagnostics.list" },
+  { key = "SPC c a", click = "hover › Fix", to = "code.actions" },
+]
+notes = "The macOS board predates the V4.1 modeline; redraw during the storyboard."
+
+[[scenario]]
+id = "code.completion"
+journey = "code"
+title = "Completion popup while typing"
+surfaces = ["completion"]
+states = []
+frontends = ["macos", "tui"]
+status = "existing-only"
+reached_by = "typing in Insert mode"
+transient = true
+exits = [
+  { key = "↩ or Tab", click = "row", to = "edit.plain" },
+  { key = "esc", click = "click elsewhere", to = "edit.plain" },
+]
+notes = "Issues #2753 (one coherent edit) and #3952 (hash once) touch it."
+
+[[scenario]]
+id = "code.signature_help"
+journey = "code"
+title = "Signature help while typing arguments"
+surfaces = ["signature_help"]
+states = []
+frontends = ["macos", "tui"]
+status = "existing-only"
+reached_by = "typing inside an argument list"
+transient = true
+exits = [
+  { key = "esc", click = "click elsewhere", to = "edit.plain" },
+]
+
+[[scenario]]
+id = "code.hover"
+journey = "code"
+title = "K on a symbol: compact hover (diagnostic, signature, first doc paragraph)"
+surfaces = ["hover_popup"]
+states = []
+frontends = ["macos", "tui"]
+status = "designed"
+boards = { macos = "Batch7_hover_code.dc.html", tui = "Batch7_hover_code.dc.html" }
+transient = true
+exits = [
+  { key = "K", click = "K more", to = "code.hover.focused" },
+  { key = "g.", click = "g. actions", to = "minga.act_menu" },
+  { key = "esc", click = "move the pointer away", to = "edit.plain" },
+]
+notes = "Any motion also closes it. The footer names the act menu instead of carrying buttons."
+[[scenario]]
+id = "code.diagnostics.hover"
+journey = "code"
+title = "Hover on a diagnostic with Fix and Ask Minga"
+surfaces = ["hover_popup"]
+states = []
+frontends = ["macos", "tui"]
+status = "designed"
+boards = { macos = "V3Diagnostics.dc.html" }
+transient = true
+exits = [
+  { key = "g.", click = "g. actions", to = "minga.act_menu" },
+  { key = "SPC a ?", click = "Ask Minga to Fix", to = "minga.inline_ask" },
+  { key = "y", click = "Copy", to = "code.diagnostics.hover", keyboard_only = "copies the message" },
+  { key = "esc", click = "click outside", to = "edit.plain" },
+]
+notes = "macOS board predates V4.1; TUI board missing."
+
+[[scenario]]
+id = "code.diagnostics.list"
+journey = "code"
+title = "SPC c x: diagnostics list"
+surfaces = ["drawer:diagnostics"]
+states = []
+frontends = ["macos", "tui"]
+status = "existing-only"
+transient = true
+list = true
+empty_state = "code.diagnostics.none"
+exits = [
+  { key = "↩", click = "row", to = "edit.plain" },
+  { key = "q", click = "close", to = "edit.plain" },
+  { key = "esc", click = "click outside", to = "edit.plain" },
+]
+
+[[scenario]]
+id = "code.diagnostics.none"
+journey = "code"
+title = "Diagnostics list with nothing to report"
+surfaces = ["drawer:diagnostics"]
+states = []
+frontends = ["macos", "tui"]
+status = "designed"
+boards = { macos = "Batch4_code_empty.dc.html", tui = "Batch4_code_empty.dc.html" }
+transient = true
+exits = [
+  { key = "q", click = "close", to = "edit.plain" },
+  { key = "esc", click = "click outside", to = "edit.plain" },
+]
+
+[[scenario]]
+id = "code.actions"
+journey = "code"
+title = "SPC c a: code actions"
+surfaces = ["picker"]
+states = []
+frontends = ["macos", "tui"]
+status = "existing-only"
+transient = true
+list = true
+empty_state = "code.actions.none"
+exits = [
+  { key = "↩", click = "row", to = "edit.plain" },
+  { key = "esc", click = "click outside", to = "edit.plain" },
+]
+
+[[scenario]]
+id = "code.actions.none"
+journey = "code"
+title = "No code actions here"
+surfaces = ["minibuffer"]
+states = []
+frontends = ["macos", "tui"]
+status = "designed"
+boards = { macos = "Batch4_code_empty.dc.html", tui = "Batch4_code_empty.dc.html" }
+transient = true
+exits = [
+  { key = "SPC a ?", click = "", to = "minga.inline_ask", keyboard_only = "named as text in the echo line" },
+  { key = "esc", click = "click outside", to = "edit.plain" },
+]
+notes = "Answers in the echo area, never an empty drawer: no code actions here, with the next step (ask Minga). Any other key goes back to editing."
+
+[[scenario]]
+id = "code.rename"
+journey = "code"
+title = "SPC c r: rename symbol"
+surfaces = ["minibuffer"]
+states = []
+frontends = ["macos", "tui"]
+status = "existing-only"
+transient = true
+exits = [
+  { key = "↩", click = "", to = "edit.plain" },
+  { key = "esc", click = "", to = "edit.plain", keyboard_only = "minibuffer input" },
+]
+
+[[scenario]]
+id = "code.references"
+journey = "code"
+title = "SPC c D: references"
+surfaces = ["picker"]
+states = []
+frontends = ["macos", "tui"]
+status = "existing-only"
+transient = true
+list = true
+empty_state = "code.references.none"
+exits = [
+  { key = "↩", click = "row", to = "edit.plain" },
+  { key = "esc", click = "click outside", to = "edit.plain" },
+]
+
+[[scenario]]
+id = "code.references.none"
+journey = "code"
+title = "No references found"
+surfaces = ["minibuffer"]
+states = []
+frontends = ["macos", "tui"]
+status = "designed"
+boards = { macos = "Batch4_code_empty.dc.html", tui = "Batch4_code_empty.dc.html" }
+transient = true
+exits = [
+  { key = "SPC c d", click = "", to = "edit.plain", keyboard_only = "named as text in the echo line; jumps to the definition" },
+  { key = "esc", click = "click outside", to = "edit.plain" },
+]
+notes = "Answers in the echo area, never an empty drawer: no references found, with the next step (go to definition). Any other key goes back to editing."
+
+[[scenario]]
+id = "code.call_hierarchy"
+journey = "code"
+title = "SPC c h: call hierarchy"
+surfaces = ["picker"]
+states = []
+frontends = ["macos", "tui"]
+status = "existing-only"
+transient = true
+list = true
+empty_state = "code.references.none"
+exits = [
+  { key = "↩", click = "row", to = "edit.plain" },
+  { key = "esc", click = "click outside", to = "edit.plain" },
+]
+
+[[scenario]]
+id = "code.lsp_info"
+journey = "code"
+title = "SPC c l i: LSP info"
+surfaces = ["buffer:lsp_info"]
+states = []
+frontends = ["macos", "tui"]
+status = "existing-only"
+exits = [
+  { key = "q", click = "close", to = "edit.plain" },
+  { key = "SPC c l r", click = "Restart", to = "code.lsp_info" },
+]
+notes = "Where an LSP that failed to start should send you (errors.lsp_failed)."
+
+[[scenario]]
+id = "code.lsp_tools"
+journey = "code"
+title = "SPC c l I: manage tools"
+surfaces = ["buffer:tools"]
+states = []
+frontends = ["macos", "tui"]
+status = "existing-only"
+transient = true
+exits = [
+  { key = "q", click = "close", to = "edit.plain" },
+  { key = "esc", click = "click outside", to = "edit.plain" },
+]
+
+[[scenario]]
+id = "code.test_output"
+journey = "code"
+title = "SPC m t o: test output"
+surfaces = ["buffer:test_output"]
+states = []
+frontends = ["macos", "tui"]
+status = "existing-only"
+exits = [
+  { key = "q", click = "close", to = "edit.plain" },
+  { key = "SPC a ?", click = "Ask Minga to fix", to = "minga.inline_ask" },
+]
+notes = "Overlaps the terminal command blocks; decide whether test runs go through the built-in terminal."
+
+# ---- git -------------------------------------------------------------------
+
+[[scenario]]
+id = "git.status"
+journey = "git"
+title = "Git status"
+surfaces = ["sidebar:git_status"]
+states = []
+frontends = ["macos", "tui"]
+status = "existing-only"
+list = true
+empty_state = "git.status.clean"
+exits = [
+  { key = "↩", click = "row", to = "edit.plain" },
+  { key = "q", click = "close", to = "edit.plain" },
+]
+notes = "Lives in the sidebar today; the Spine makes it a buffer (magit-style). SPC g g (Doom magit-status, free on main) opens it."
+
+[[scenario]]
+id = "git.status.clean"
+journey = "git"
+title = "Git status with a clean tree"
+surfaces = ["buffer:git_status"]
+states = []
+frontends = ["macos", "tui"]
+status = "designed"
+boards = { macos = "Batch4_git_ext_queue_empty.dc.html", tui = "Batch4_git_ext_queue_empty.dc.html" }
+exits = [
+  { key = "l", click = "", to = "git.log", keyboard_only = "bare key in a special buffer; click comes in the mouse sweep" },
+  { key = "q", click = "close", to = "edit.plain" },
+]
+
+[[scenario]]
+id = "git.why_line"
+journey = "git"
+title = "SPC g w: why is this line like this?"
+surfaces = ["float_popup"]
+states = []
+frontends = ["macos", "tui"]
+status = "existing-only"
+transient = true
+exits = [
+  { key = "esc", click = "click outside", to = "edit.plain" },
+]
+
+[[scenario]]
+id = "git.autobiography"
+journey = "git"
+title = "SPC g a: code autobiography"
+surfaces = ["buffer:autobiography"]
+states = []
+frontends = ["macos", "tui"]
+status = "existing-only"
+exits = [
+  { key = "q", click = "close", to = "edit.plain" },
+  { key = "esc", click = "click outside", to = "edit.plain" },
+]
+
+[[scenario]]
+id = "git.commit"
+journey = "git"
+title = "SPC g c: commit"
+surfaces = ["buffer:commit"]
+states = []
+frontends = ["macos", "tui"]
+status = "existing-only"
+exits = [
+  { key = "⌃C ⌃C or :wq", click = "Commit", to = "edit.plain" },
+  { key = "q", click = "close", to = "edit.plain" },
+]
+
+[[scenario]]
+id = "git.conflict"
+journey = "git"
+title = "SPC g x: resolving a conflict"
+surfaces = ["editor", "gutter"]
+states = []
+frontends = ["macos", "tui"]
+status = "existing-only"
+exits = [
+  { key = "SPC g x ...", click = "", to = "edit.plain" },
+  { key = "esc", click = "click outside", to = "edit.plain" },
+]
+
+[[scenario]]
+id = "git.stash"
+journey = "git"
+title = "SPC g z: stash"
+surfaces = ["picker"]
+states = []
+frontends = ["macos", "tui"]
+status = "existing-only"
+transient = true
+list = true
+empty_state = "git.status.clean"
+exits = [
+  { key = "↩", click = "row", to = "edit.plain" },
+  { key = "esc", click = "click outside", to = "edit.plain" },
+]
+
+[[scenario]]
+id = "git.blame"
+journey = "git"
+title = "Blame for the current line or file"
+surfaces = ["editor", "gutter"]
+states = []
+frontends = ["macos", "tui"]
+status = "designed"
+boards = { macos = "Batch4_git_blame.dc.html", tui = "Batch4_git_blame.dc.html" }
+exits = [
+  { key = "K", click = "hover", to = "git.blame" },
+  { key = "↩", click = "", to = "minga.conversation", keyboard_only = "on a Minga line: opens that task; click comes in the mouse sweep" },
+  { key = "↩", click = "", to = "git.log", keyboard_only = "on a commit line: opens the commit; click comes in the mouse sweep" },
+  { key = "SPC g B", click = "", to = "edit.plain" },
+  { key = "q", click = "close", to = "edit.plain" },
+]
+notes = "One continuous column on the left, grouped by commit: author and relative age on each group's first line, a hairline between groups, every line (blank ones included) belongs to a commit. Lines Minga wrote form a group labelled Minga in the minga role, with the task in the K detail; uncommitted lines read You · now in the you role."
+
+[[scenario]]
+id = "git.log"
+journey = "git"
+title = "Git log for the project or a commit"
+surfaces = ["buffer:git_log"]
+states = []
+frontends = ["macos", "tui"]
+status = "existing-only"
+exits = [
+  { key = "q", click = "close", to = "edit.plain" },
+]
+notes = "Reached from l in git status and ↩ on a commit line in blame. Needs a redesign under the Spine rules when its migration ticket touches it."
+
+
+# ---- minga -----------------------------------------------------------------
 
 [[scenario]]
 id = "minga.whichkey"
@@ -72,6 +1002,7 @@ states = ["working", "needs_you"]
 frontends = ["macos", "tui"]
 status = "designed"
 boards = { macos = "V41WhichKey.dc.html", tui = "V41TuiEdit.dc.html" }
+transient = true
 exits = [
   { key = "a", click = "Tasks row", to = "minga.tasks.needs_you" },
   { key = "v", click = "Conversation row", to = "minga.conversation" },
@@ -93,6 +1024,9 @@ states = ["needs_you", "working", "waiting", "failed", "done"]
 frontends = ["macos", "tui"]
 status = "designed"
 boards = { macos = "V41Tasks.dc.html", tui = "V41TuiTasks.dc.html" }
+transient = true
+list = true
+empty_state = "minga.tasks.empty"
 exits = [
   { key = "y", click = "Approve once", to = "minga.tasks.working" },
   { key = "a", click = "Always for this session", to = "minga.tasks.working" },
@@ -105,7 +1039,7 @@ exits = [
   { key = "o", click = "Output", to = "minga.task.output" },
   { key = "↩ on a done row", click = "Review", to = "minga.review.buffer" },
   { key = "q", click = "drawer close", to = "edit.working" },
-  { key = "esc", click = "", to = "edit.working" },
+  { key = "esc", click = "", to = "edit.working", keyboard_only = "q has the click (drawer close); esc is the keyboard twin" },
 ]
 notes = "Empty state (no tasks) is not designed: see minga.tasks.empty."
 
@@ -118,6 +1052,8 @@ states = ["done"]
 frontends = ["macos", "tui"]
 status = "designed"
 boards = { macos = "V41Review.dc.html", tui = "V41TuiReview.dc.html" }
+list = true
+empty_state = "minga.review.empty"
 exits = [
   { key = "y", click = "Keep", to = "minga.review.buffer" },
   { key = "n", click = "Reject", to = "minga.review.buffer" },
@@ -137,13 +1073,14 @@ states = ["unreviewed"]
 frontends = ["macos", "tui"]
 status = "designed"
 boards = { macos = "V41Review.dc.html", tui = "V41TuiReview.dc.html" }
+home = true
 exits = [
-  { key = "SPC g k", click = "twist head › Keep", to = "edit.working" },
-  { key = "SPC g r", click = "twist head › Reject", to = "edit.working" },
+  { key = "SPC a y", click = "twist head › Keep", to = "edit.working" },
+  { key = "SPC a d", click = "twist head › Reject", to = "edit.working" },
   { key = "]h", click = "", to = "minga.review.in_file" },
   { key = "any motion out of the change", click = "click elsewhere", to = "edit.working" },
 ]
-notes = "]h has no click path; the twist head of the next change is the click equivalent. ]e already means next agent edit today: see ADR-0006."
+notes = "]h has no click path; the twist head of the next change is the click equivalent. ]h replaces ]e (ADR-0006)."
 
 [[scenario]]
 id = "minga.conversation"
@@ -161,6 +1098,7 @@ exits = [
   { key = "SPC a r", click = "2 files changed · review", to = "minga.review.buffer" },
   { key = "↩ on a Started line", click = "Started line", to = "minga.subagent.peek" },
   { key = "SPC a v", click = "close split", to = "edit.working" },
+  { key = "q (Normal mode, outside the composer)", click = "", to = "edit.working" },
 ]
 
 [[scenario]]
@@ -172,6 +1110,8 @@ states = ["working"]
 frontends = ["macos", "tui"]
 status = "designed"
 boards = { macos = "V41Talk.dc.html", tui = "V41TuiTalkOpen.dc.html" }
+list = true
+empty_state = "minga.queue.empty"
 exits = [
   { key = "dd", click = "remove", to = "minga.queue" },
   { key = "↩", click = "edit", to = "minga.conversation" },
@@ -179,38 +1119,425 @@ exits = [
 ]
 
 [[scenario]]
-id = "files.switcher"
-journey = "files"
-title = "SPC , find file with pinned, changed and recent"
-surfaces = ["editor", "drawer:switcher", "modeline"]
+id = "minga.subagent.peek"
+journey = "minga"
+title = "Peeking at a done subagent beside the parent conversation"
+surfaces = ["split:conversation", "split:subagent", "composer"]
+states = ["working", "done"]
+frontends = ["macos", "tui"]
+status = "designed"
+boards = { macos = "V41SubagentMac.dc.html", tui = "V41SubagentTui.dc.html" }
+exits = [
+  { key = "]] / [[", click = "sibling glyph", to = "minga.subagent.peek" },
+  { key = "za", click = "Brief header", to = "minga.subagent.peek" },
+  { key = "↩", click = "open", to = "minga.conversation" },
+  { key = "q", click = "close", to = "minga.conversation" },
+]
+notes = "]] / [[ step through sibling subagents here, as they mean next block in read-only buffers; ]t keeps next class/module."
+
+[[scenario]]
+id = "minga.tasks.list"
+journey = "minga"
+title = "Tasks drawer with nothing waiting on you"
+surfaces = ["editor", "drawer:tasks", "modeline"]
+states = ["working", "waiting", "failed", "done"]
+frontends = ["macos", "tui"]
+status = "designed"
+boards = { macos = "V41Tasks.dc.html", tui = "V41TuiTasks.dc.html" }
+transient = true
+list = true
+empty_state = "minga.tasks.empty"
+exits = [
+  { key = "↩", click = "row title", to = "minga.conversation" },
+  { key = "i", click = "Inspect", to = "minga.subagent.peek" },
+  { key = "r", click = "Retry now", to = "minga.tasks.list" },
+  { key = "o", click = "Output", to = "minga.task.output" },
+  { key = "q", click = "drawer close", to = "edit.plain" },
+  { key = "esc", click = "", to = "edit.plain", keyboard_only = "q has the click" },
+]
+
+[[scenario]]
+id = "minga.tasks.working"
+journey = "minga"
+title = "Tasks drawer with a working task focused (after answering an approval, or right after starting a task)"
+surfaces = ["editor", "drawer:tasks", "modeline"]
 states = ["working"]
 frontends = ["macos", "tui"]
 status = "designed"
-boards = { macos = "V41Open.dc.html", tui = "V41TuiTalkOpen.dc.html" }
+boards = { macos = "V41Tasks.dc.html", tui = "V41TuiTasks.dc.html", new_task = "Batch1_minga_task_new_started.dc.html" }
+transient = true
 exits = [
-  { key = "↩", click = "row", to = "edit.working" },
-  { key = "⌃V", click = "", to = "windows.split" },
-  { key = "⌃T", click = "pin", to = "files.switcher" },
-  { key = "esc", click = "click outside", to = "edit.working" },
+  { key = "↩", click = "row title", to = "minga.conversation" },
+  { key = "i", click = "Inspect", to = "minga.subagent.peek" },
+  { key = "q", click = "drawer close", to = "edit.plain" },
+  { key = "esc", click = "", to = "edit.plain", keyboard_only = "q has the click" },
 ]
-notes = "⌃V needs a click path (context menu on a row)."
 
 [[scenario]]
-id = "code.diagnostics.in_file"
-journey = "code"
-title = "Errors and warnings in a file, cursor on the error"
-surfaces = ["editor", "gutter", "modeline"]
-states = ["error", "warning"]
+id = "minga.tasks.empty"
+journey = "minga"
+title = "Tasks drawer with no tasks"
+surfaces = ["drawer:tasks"]
+states = []
 frontends = ["macos", "tui"]
 status = "designed"
-boards = { macos = "V3Diagnostics.dc.html", tui = "V41TuiEdit.dc.html" }
+boards = { macos = "Batch1_minga_tasks_empty.dc.html", tui = "Batch1_minga_tasks_empty.dc.html" }
+transient = true
 exits = [
-  { key = "K", click = "hover the underline", to = "code.diagnostics.hover" },
-  { key = "]d", click = "", to = "code.diagnostics.in_file" },
-  { key = "SPC c d", click = "modeline diagnostics segment", to = "code.diagnostics.list" },
-  { key = "SPC c a", click = "hover › Fix", to = "code.actions" },
+  { key = "c", click = "New task", to = "minga.task.new" },
+  { key = "q", click = "drawer close", to = "edit.plain" },
+  { key = "esc", click = "", to = "edit.plain", keyboard_only = "q has the click" },
 ]
-notes = "The macOS board predates the V4.1 modeline; redraw during the storyboard."
+notes = "Voice: \"No one's at the table yet\". Offers n New task."
+
+[[scenario]]
+id = "minga.task.new"
+journey = "minga"
+title = "New task ›: the minibuffer prompt for a new task (n in the tasks drawer, or SPC a n)"
+surfaces = ["drawer:tasks", "minibuffer"]
+states = []
+frontends = ["macos", "tui"]
+status = "designed"
+boards = { macos = "Batch1_minga_task_new.dc.html", tui = "Batch1_minga_task_new.dc.html" }
+transient = true
+exits = [
+  { key = "↩", click = "Start", to = "minga.tasks.working" },
+  { key = "esc", click = "Cancel", to = "minga.tasks.list" },
+  { key = "@", click = "Add context", to = "files.switcher" },
+]
+notes = "The goal you type becomes the task's title. The cursor's selection is attached as context when there is one; @ adds a buffer, file or selection. The prompt never steals focus while you type."
+
+[[scenario]]
+id = "minga.approval.diff"
+journey = "minga"
+title = "Show diff of what an approval would change"
+surfaces = ["drawer:tasks", "diff"]
+states = ["needs_you"]
+frontends = ["macos", "tui"]
+status = "designed"
+boards = { macos = "Batch2_minga_approval_diff.dc.html", tui = "Batch2_minga_approval_diff.dc.html" }
+transient = true
+exits = [
+  { key = "y", click = "Approve once", to = "minga.tasks.working" },
+  { key = "a", click = "Always for this session", to = "minga.tasks.working" },
+  { key = "t", click = "This turn", to = "minga.tasks.working" },
+  { key = "n", click = "Deny", to = "minga.tasks.working" },
+  { key = "]h / [h", click = "", to = "minga.approval.diff", keyboard_only = "moves between changes when the request edits several places" },
+  { key = "esc", click = "close", to = "minga.tasks.needs_you" },
+  { key = "q", click = "close", to = "minga.tasks.needs_you" },
+]
+notes = "Opened with = on the needs-you row (= is Show diff in the drawer and in review). The approval stays answerable while you read the diff."
+
+[[scenario]]
+id = "minga.task.output"
+journey = "minga"
+title = "A task's output or log"
+surfaces = ["buffer:task_output"]
+states = ["failed"]
+frontends = ["macos", "tui"]
+status = "designed"
+boards = { macos = "Batch2_minga_task_output.dc.html", tui = "Batch2_minga_task_output.dc.html" }
+exits = [
+  { key = "r", click = "Retry", to = "minga.tasks.working" },
+  { key = "f", click = "Ask Minga to fix", to = "minga.conversation" },
+  { key = "↩", click = "file:line link", to = "edit.plain", note = "on a file:line" },
+  { key = "]] / [[", click = "", to = "minga.task.output", note = "next or previous failure" },
+  { key = "q", click = "close", to = "minga.tasks.list" },
+]
+notes = "Opened with o on a failed or waiting row. Read-only buffer: the error is highlighted, file:line are links, f attaches the output to the conversation."
+
+[[scenario]]
+id = "minga.review.keep_all.confirm"
+journey = "minga"
+title = "Keep all 3 changes? y/n"
+surfaces = ["minibuffer"]
+states = []
+frontends = ["macos", "tui"]
+status = "designed"
+boards = { macos = "Batch1_minga_review_confirms.dc.html", tui = "Batch1_minga_review_confirms.dc.html" }
+transient = true
+exits = [
+  { key = "y", click = "Keep all", to = "minga.review.all_decided" },
+  { key = "n", click = "Cancel", to = "minga.review.buffer" },
+  { key = "esc", click = "", to = "minga.review.buffer", keyboard_only = "minibuffer prompt" },
+]
+
+[[scenario]]
+id = "minga.review.all_decided"
+journey = "minga"
+title = "Review after the last change is decided"
+surfaces = ["drawer:review"]
+states = ["done"]
+frontends = ["macos", "tui"]
+status = "designed"
+boards = { macos = "Batch1_minga_review_all_decided.dc.html", tui = "Batch1_minga_review_all_decided.dc.html" }
+exits = [
+  { key = "q", click = "close", to = "edit.plain" },
+  { key = "↩", click = "Reply to Minga", to = "minga.conversation" },
+]
+notes = "Says what was kept and rejected, offers to reply. The one place the review says \"Passt.\"."
+
+[[scenario]]
+id = "minga.review.empty"
+journey = "minga"
+title = "Nothing to review"
+surfaces = ["drawer:review"]
+states = []
+frontends = ["macos", "tui"]
+status = "designed"
+boards = { macos = "Batch1_minga_review_empty.dc.html", tui = "Batch1_minga_review_empty.dc.html" }
+exits = [
+  { key = "q", click = "close", to = "edit.plain" },
+  { key = "esc", click = "", to = "edit.plain", keyboard_only = "q has the click" },
+  { key = "SPC a a", click = "Tasks", to = "minga.tasks.list" },
+]
+notes = "Empty state with the next action. No voice line."
+
+[[scenario]]
+id = "minga.reject_all.confirm"
+journey = "minga"
+title = "Reject all 3 changes? y/n"
+surfaces = ["minibuffer"]
+states = []
+frontends = ["macos", "tui"]
+status = "designed"
+boards = { macos = "Batch1_minga_review_confirms.dc.html", tui = "Batch1_minga_review_confirms.dc.html" }
+transient = true
+exits = [
+  { key = "y", click = "Reject all", to = "edit.plain" },
+  { key = "n", click = "Cancel", to = "edit.plain" },
+  { key = "esc", click = "", to = "edit.plain", keyboard_only = "minibuffer prompt" },
+]
+
+[[scenario]]
+id = "minga.conversation.stopped"
+journey = "minga"
+title = "Conversation after Stop"
+surfaces = ["split:conversation", "composer", "modeline"]
+states = ["stopped"]
+frontends = ["macos", "tui"]
+status = "designed"
+boards = { macos = "Batch1_minga_conversation_stopped.dc.html", tui = "Batch1_minga_conversation_stopped.dc.html" }
+exits = [
+  { key = "↩ (composer)", click = "Continue", to = "minga.conversation" },
+  { key = "⌥↩", click = "Queue", to = "minga.queue" },
+  { key = "SPC a r", click = "Review", to = "minga.review.buffer" },
+  { key = "SPC a v", click = "close split", to = "edit.plain" },
+  { key = "q (Normal mode, outside the composer)", click = "", to = "edit.plain" },
+]
+notes = "Says what was interrupted and what was already changed. The modeline reads \"Minga stopped\"; the queue is kept; Continue resumes the same task."
+
+[[scenario]]
+id = "minga.queue.empty"
+journey = "minga"
+title = "Queue with nothing queued"
+surfaces = ["buffer:queue"]
+states = []
+frontends = ["macos", "tui"]
+status = "designed"
+boards = { macos = "Batch4_git_ext_queue_empty.dc.html", tui = "Batch4_git_ext_queue_empty.dc.html" }
+exits = [
+  { key = "q", click = "close", to = "minga.conversation" },
+]
+
+[[scenario]]
+id = "minga.question"
+journey = "minga"
+title = "Minga asks you a question (SPC a Q)"
+surfaces = ["composer"]
+states = ["needs_you"]
+frontends = ["macos", "tui"]
+status = "existing-only"
+reached_by = "Minga asks a question"
+transient = true
+exits = [
+  { key = "↩", click = "Answer", to = "minga.conversation" },
+  { key = "esc", click = "click outside", to = "minga.conversation" },
+]
+notes = "A needs-you state that is not an approval; must surface in the tasks drawer and the modeline like approvals."
+
+[[scenario]]
+id = "minga.model_picker"
+journey = "minga"
+title = "SPC a m: pick model"
+surfaces = ["picker"]
+states = []
+frontends = ["macos", "tui"]
+status = "existing-only"
+transient = true
+list = true
+empty_state = "files.switcher.no_match"
+exits = [
+  { key = "↩", click = "row", to = "edit.plain" },
+  { key = "esc", click = "click outside", to = "edit.plain" },
+]
+
+[[scenario]]
+id = "minga.thinking_picker"
+journey = "minga"
+title = "SPC a T: thinking level"
+surfaces = ["picker"]
+states = []
+frontends = ["macos", "tui"]
+status = "existing-only"
+transient = true
+list = true
+empty_state = "files.switcher.no_match"
+exits = [
+  { key = "↩", click = "row", to = "edit.plain" },
+  { key = "esc", click = "click outside", to = "edit.plain" },
+]
+
+[[scenario]]
+id = "minga.session_resume"
+journey = "minga"
+title = "SPC a h: resume a session"
+surfaces = ["picker"]
+states = []
+frontends = ["macos", "tui"]
+status = "existing-only"
+transient = true
+list = true
+empty_state = "minga.tasks.empty"
+exits = [
+  { key = "↩", click = "row", to = "edit.plain" },
+  { key = "esc", click = "click outside", to = "edit.plain" },
+]
+
+[[scenario]]
+id = "minga.checklist"
+journey = "minga"
+title = "SPC a k: Minga's checklist"
+surfaces = ["buffer:checklist"]
+states = []
+frontends = ["macos", "tui"]
+status = "existing-only"
+exits = [
+  { key = "q", click = "close", to = "minga.conversation" },
+]
+
+[[scenario]]
+id = "minga.attachments"
+journey = "minga"
+title = "SPC a j: draft attachments"
+surfaces = ["buffer:attachments"]
+states = []
+frontends = ["macos", "tui"]
+status = "existing-only"
+exits = [
+  { key = "q", click = "close", to = "minga.conversation" },
+]
+
+[[scenario]]
+id = "minga.retained_history"
+journey = "minga"
+title = "SPC a H: retained messages"
+surfaces = ["buffer:history"]
+states = []
+frontends = ["macos", "tui"]
+status = "existing-only"
+exits = [
+  { key = "q", click = "close", to = "minga.conversation" },
+]
+
+[[scenario]]
+id = "minga.inline_ask"
+journey = "minga"
+title = "SPC a ?: ask about the line or selection"
+surfaces = ["float_popup", "composer"]
+states = []
+frontends = ["macos", "tui"]
+status = "existing-only"
+transient = true
+exits = [
+  { key = "↩", click = "Send", to = "minga.conversation" },
+  { key = "esc", click = "click outside", to = "edit.plain" },
+]
+
+[[scenario]]
+id = "minga.inline_edit"
+journey = "minga"
+title = "SPC a e: rewrite selection inline"
+surfaces = ["float_popup", "composer"]
+states = []
+frontends = ["macos", "tui"]
+status = "existing-only"
+transient = true
+exits = [
+  { key = "↩", click = "Send", to = "minga.review.in_file" },
+  { key = "esc", click = "click outside", to = "edit.plain" },
+]
+
+[[scenario]]
+id = "minga.start_failed"
+journey = "minga"
+title = "Minga could not start: cause and one action"
+surfaces = ["split:conversation"]
+states = ["failed"]
+frontends = ["macos", "tui"]
+status = "existing-only"
+reached_by = "Minga fails to start"
+exits = [
+  { key = "↩", click = "the offered action", to = "minga.conversation" },
+  { key = "q", click = "close", to = "edit.plain" },
+]
+notes = "Shipped in #3959/#3958; restyle with the failed state glyph."
+
+[[scenario]]
+id = "minga.publish"
+journey = "minga"
+title = "SPC a p / P: publish or discard unpublished edits"
+surfaces = ["minibuffer"]
+states = []
+frontends = ["macos", "tui"]
+status = "existing-only"
+transient = true
+exits = [
+  { key = "y", click = "Publish", to = "edit.plain" },
+  { key = "n", click = "Cancel", to = "edit.plain" },
+  { key = "esc", click = "", to = "edit.plain" },
+]
+
+[[scenario]]
+id = "minga.notification"
+journey = "minga"
+title = "Background notification when Minga needs you"
+surfaces = ["os_notification"]
+states = ["needs_you"]
+frontends = ["macos", "tui"]
+status = "designed"
+boards = { macos = "V3NeedsYou.dc.html", tui = "V41TuiTerminalPowers.dc.html" }
+reached_by = "Minga needs you while the app is in the background"
+outside_app = true
+exits = [
+  { key = "", click = "Approve", to = "minga.tasks.working" },
+  { key = "", click = "notification body", to = "minga.tasks.needs_you" },
+]
+notes = "Not an in-app screen; reachability comes from Minga's state, not a key. macOS board predates V4.1."
+
+[[scenario]]
+id = "minga.context_bar"
+journey = "minga"
+title = "Agent context bar"
+surfaces = ["agent_context"]
+states = []
+frontends = ["macos", "tui"]
+status = "removed"
+exits = []
+notes = "Job moves to the composer's @ Context and the conversation header."
+
+[[scenario]]
+id = "removed.agent_activity_strip"
+journey = "minga"
+title = "Agent activity strip and chat header status"
+surfaces = ["agent_chat_header"]
+states = []
+frontends = ["macos", "tui"]
+status = "removed"
+exits = []
+notes = "Job moves to the modeline Minga segment."
+
+# ---- terminal --------------------------------------------------------------
 
 [[scenario]]
 id = "terminal.drawer"
@@ -222,10 +1549,11 @@ frontends = ["macos", "tui"]
 status = "designed"
 boards = { macos = "V41ShellDrawer.dc.html", tui = "V41ShellTui.dc.html" }
 exits = [
-  { key = "⌃\\ ⌃N", click = "", to = "terminal.drawer.normal" },
+  { key = "⌃\\ ⌃N", click = "", to = "terminal.drawer.normal", back = true },
   { key = "↩ on a failed block (Normal)", click = "failed block glyph", to = "terminal.failed_block.menu" },
   { key = "SPC o t", click = "drawer close", to = "edit.working" },
   { key = "exit", click = "", to = "edit.working" },
+  { key = "SPC a a", click = "", to = "windows.drawer_stack" },
 ]
 
 [[scenario]]
@@ -243,24 +1571,6 @@ exits = [
   { key = "⌃C, ⌘. or SPC a s", click = "", to = "terminal.minga_shell" },
   { key = "q", click = "close split", to = "edit.working" },
 ]
-notes = "Open: what esc does at the approval prompt."
-
-[[scenario]]
-id = "minga.subagent.peek"
-journey = "minga"
-title = "Peeking at a done subagent beside the parent conversation"
-surfaces = ["split:conversation", "split:subagent", "composer"]
-states = ["working", "done"]
-frontends = ["macos", "tui"]
-status = "designed"
-boards = { macos = "V41SubagentMac.dc.html", tui = "V41SubagentTui.dc.html" }
-exits = [
-  { key = "]t / [t", click = "sibling glyph", to = "minga.subagent.peek" },
-  { key = "za", click = "Brief header", to = "minga.subagent.peek" },
-  { key = "↩", click = "open", to = "minga.conversation" },
-  { key = "q", click = "close", to = "minga.conversation" },
-]
-notes = "]t is next class/module in normal mode today; scope it to this buffer or choose another key."
 
 [[scenario]]
 id = "terminal.capabilities"
@@ -274,4 +1584,730 @@ status = "designed"
 boards = { tui = "V41TuiTerminalPowers.dc.html" }
 exits = [
   { key = "q", click = "close", to = "edit.working" },
+]
+
+[[scenario]]
+id = "terminal.drawer.normal"
+journey = "terminal"
+title = "Terminal drawer in Normal mode, scrolled back"
+surfaces = ["drawer:terminal", "modeline"]
+states = []
+frontends = ["macos", "tui"]
+status = "designed"
+boards = { macos = "Batch3_terminal_drawer_normal.dc.html", tui = "Batch3_terminal_drawer_normal.dc.html" }
+transient = true
+exits = [
+  { key = "i / a", click = "click the live prompt", to = "terminal.drawer" },
+  { key = "↩", click = "click the live prompt", to = "terminal.drawer", note = "on the live prompt line" },
+  { key = "]] / [[", click = "", to = "terminal.drawer.normal" },
+  { key = "yic / yac", click = "", to = "terminal.drawer.normal", keyboard_only = "text objects copy a command's output or whole block" },
+  { key = "↩", click = "click the failed glyph", to = "terminal.failed_block.menu", note = "on a failed block" },
+  { key = "q", click = "drawer close", to = "edit.plain", note = "hides the drawer; the shell keeps running" },
+  { key = "SPC o t", click = "drawer close", to = "edit.plain" },
+]
+notes = "Shows the ↓ N new lines marker; the view holds still while output arrives."
+
+[[scenario]]
+id = "terminal.failed_block.menu"
+journey = "terminal"
+title = "Menu on a failed command block"
+surfaces = ["menu"]
+states = []
+frontends = ["macos", "tui"]
+status = "designed"
+boards = { macos = "V41ShellMinga.dc.html", tui = "V41ShellTui.dc.html" }
+transient = true
+exits = [
+  { key = "f", click = "Ask Minga to Fix", to = "minga.conversation" },
+  { key = "yic", click = "Copy Output", to = "terminal.drawer.normal" },
+  { key = "r", click = "Rerun", to = "terminal.drawer" },
+  { key = "q", click = "Send to Quickfix", to = "search.quickfix" },
+  { key = "esc", click = "click outside", to = "terminal.drawer.normal" },
+]
+
+[[scenario]]
+id = "terminal.minga_shell.approval"
+journey = "terminal"
+title = "Run mix ecto.reset? y once · a always · t this turn · n deny"
+surfaces = ["minibuffer"]
+states = ["needs_you"]
+frontends = ["macos", "tui"]
+status = "designed"
+boards = { macos = "V41ShellMinga.dc.html", tui = "V41ShellTui.dc.html" }
+transient = true
+exits = [
+  { key = "y", click = "once", to = "terminal.minga_shell" },
+  { key = "a", click = "always", to = "terminal.minga_shell" },
+  { key = "t", click = "this turn", to = "terminal.minga_shell" },
+  { key = "n", click = "deny", to = "terminal.minga_shell" },
+  { key = "esc", click = "", to = "terminal.minga_shell", keyboard_only = "esc defers: the request stays pending and needs-you stays lit" },
+]
+notes = "Open: does esc deny, or leave the request pending?"
+
+[[scenario]]
+id = "terminal.window"
+journey = "terminal"
+title = "SPC o T: a terminal in the current window"
+surfaces = ["editor:terminal", "modeline"]
+states = []
+frontends = ["macos", "tui"]
+status = "designed"
+boards = { macos = "Batch3_terminal_window.dc.html", tui = "Batch3_terminal_window.dc.html" }
+exits = [
+  { key = "⌃\\ ⌃N", click = "", to = "terminal.drawer.normal", keyboard_only = "terminal mode passes every key to the shell", back = true },
+  { key = "SPC ,", click = "", to = "files.switcher", note = "terminals are listed under Terminals" },
+  { key = ":q", click = "", to = "edit.plain" },
+  { key = "exit", click = "", to = "terminal.exited", note = "the shell ends; the window keeps its scrollback" },
+]
+notes = "The title bar shows the buffer and its working directory (\"*terminal 2*  ~/code/minga\")."
+
+[[scenario]]
+id = "terminal.exited"
+journey = "terminal"
+title = "Shell exited: what is left of the terminal"
+surfaces = ["editor:terminal"]
+states = []
+frontends = ["macos", "tui"]
+status = "designed"
+boards = { macos = "Batch3_terminal_exited.dc.html", tui = "Batch3_terminal_exited.dc.html" }
+reached_by = "the shell ends in an SPC o T window, or dies on its own"
+exits = [
+  { key = "↩", click = "Restart shell", to = "terminal.window" },
+  { key = "q", click = "close", to = "edit.plain" },
+  { key = "yic / /", click = "", to = "terminal.exited", note = "the scrollback stays searchable and copyable" },
+]
+notes = "Shows \"Shell exited (code 0) · ↩ restart · q close\". Typing exit in the drawer closes the drawer and its buffer instead; this state is for SPC o T windows and shells that end on their own."
+
+[[scenario]]
+id = "terminal.plain"
+journey = "terminal"
+title = "Terminal without shell integration"
+surfaces = ["drawer:terminal"]
+states = []
+frontends = ["macos", "tui"]
+status = "designed"
+boards = { macos = "Batch3_terminal_plain.dc.html", tui = "Batch3_terminal_plain.dc.html" }
+reached_by = "SPC o t in a shell without integration"
+exits = [
+  { key = "SPC o t", click = "drawer close", to = "edit.plain" },
+  { key = "⌃\\ ⌃N", click = "", to = "terminal.drawer.normal", keyboard_only = "terminal mode passes every key to the shell", back = true },
+  { key = "q (Normal mode)", click = "", to = "edit.plain" },
+  { key = "SPC b m", click = "", to = "files.messages", note = "the one-time hint" },
+]
+notes = "No command blocks; a one-time hint in *Messages* explains how to enable them. q in Normal mode hides the drawer and leaves the shell running."
+
+# ---- files -----------------------------------------------------------------
+
+[[scenario]]
+id = "files.switcher"
+journey = "files"
+title = "SPC , find file with pinned, changed and recent"
+surfaces = ["editor", "drawer:switcher", "modeline"]
+states = ["working"]
+frontends = ["macos", "tui"]
+status = "designed"
+boards = { macos = "V41Open.dc.html", tui = "V41TuiTalkOpen.dc.html" }
+transient = true
+list = true
+empty_state = "files.switcher.no_match"
+exits = [
+  { key = "↩", click = "row", to = "edit.working" },
+  { key = "⌃V", click = "", to = "windows.split" },
+  { key = "⌃T", click = "pin", to = "files.switcher" },
+  { key = "⌃.", click = "right-click a row", to = "minga.act_menu", note = "open all matches (A) or export to *file-list* (E) live here" },
+  { key = "esc", click = "click outside", to = "edit.working" },
+]
+notes = "⌃V needs a click path (context menu on a row)."
+
+[[scenario]]
+id = "files.switcher.no_match"
+journey = "files"
+title = "Switcher with no match"
+surfaces = ["drawer:switcher"]
+states = []
+frontends = ["macos", "tui"]
+status = "designed"
+boards = { macos = "Batch4_files_empty.dc.html", tui = "Batch4_files_empty.dc.html" }
+transient = true
+exits = [
+  { key = "⌃N", click = "", to = "edit.plain", keyboard_only = "creates the typed file; click comes in the mouse sweep" },
+  { key = "esc", click = "click outside", to = "edit.plain" },
+]
+
+[[scenario]]
+id = "files.project_find"
+journey = "files"
+title = "SPC SPC: find file in project"
+surfaces = ["picker"]
+states = []
+frontends = ["macos", "tui"]
+status = "existing-only"
+transient = true
+list = true
+empty_state = "files.switcher.no_match"
+exits = [
+  { key = "↩", click = "row", to = "edit.plain" },
+  { key = "esc", click = "click outside", to = "edit.plain" },
+]
+
+[[scenario]]
+id = "files.tree"
+journey = "files"
+title = "File tree"
+surfaces = ["sidebar:file_tree"]
+states = []
+frontends = ["macos", "tui"]
+status = "existing-only"
+list = true
+empty_state = "files.tree.empty"
+exits = [
+  { key = "↩", click = "row", to = "edit.plain" },
+  { key = "q", click = "close", to = "edit.plain" },
+]
+notes = "A sidebar today; the Spine makes it a transient drawer buffer that closes when a file opens. Bugs #3961 and #3964."
+
+[[scenario]]
+id = "files.tree.empty"
+journey = "files"
+title = "File tree for an empty folder"
+surfaces = ["drawer:file_tree"]
+states = []
+frontends = ["macos", "tui"]
+status = "designed"
+boards = { macos = "Batch4_files_empty.dc.html", tui = "Batch4_files_empty.dc.html" }
+exits = [
+  { key = "a", click = "", to = "files.tree", keyboard_only = "new file prompt (dired convention); click comes in the mouse sweep" },
+  { key = "A", click = "", to = "files.tree", keyboard_only = "new folder prompt; click comes in the mouse sweep" },
+  { key = "q", click = "close", to = "edit.plain" },
+]
+
+[[scenario]]
+id = "files.messages"
+journey = "files"
+title = "SPC b m: *Messages*"
+surfaces = ["buffer:messages"]
+states = []
+frontends = ["macos", "tui"]
+status = "existing-only"
+exits = [
+  { key = "q", click = "close", to = "edit.plain" },
+]
+
+[[scenario]]
+id = "files.warnings"
+journey = "files"
+title = "SPC b W: warnings"
+surfaces = ["buffer:warnings"]
+states = []
+frontends = ["macos", "tui"]
+status = "existing-only"
+exits = [
+  { key = "q", click = "close", to = "edit.plain" },
+]
+
+[[scenario]]
+id = "files.buffers"
+journey = "files"
+title = "SPC b b: switch buffer"
+surfaces = ["picker"]
+states = []
+frontends = ["macos", "tui"]
+status = "removed"
+exits = []
+notes = "SPC b b opens the same switcher as SPC , (files.switcher)."
+
+# ---- windows ---------------------------------------------------------------
+
+[[scenario]]
+id = "windows.split"
+journey = "windows"
+title = "Two splits side by side"
+surfaces = ["editor", "split_separators"]
+states = []
+frontends = ["macos", "tui"]
+status = "existing-only"
+home = true
+exits = [
+  { key = "SPC w d", click = "", to = "edit.plain" },
+  { key = "SPC w h/l", click = "click a split", to = "windows.split" },
+]
+notes = "Needs a close click path (a split's close affordance or menu)."
+
+[[scenario]]
+id = "windows.narrow"
+journey = "windows"
+title = "A narrow window: modeline and panes collapse"
+surfaces = ["modeline"]
+states = []
+frontends = ["macos", "tui"]
+status = "designed"
+boards = { macos = "Batch4_windows_narrow.dc.html", tui = "Batch4_windows_narrow.dc.html" }
+exits = []
+notes = "A state of other scenarios, not a place: narrowing changes presentation only, every key keeps its meaning. Modeline drops filetype, position, git, then Minga's words (to glyph and 2/3); mode, needs-you, file, change position and errors never drop. Breakpoints are starting values: macOS about 1360, 1180, 1000 pt; TUI 140, 120, 100, 80 columns."
+
+[[scenario]]
+id = "windows.drawer_stack"
+journey = "windows"
+title = "Opening a drawer while another is open (terminal, then tasks)"
+surfaces = ["drawer:tasks", "modeline"]
+states = []
+frontends = ["macos", "tui"]
+status = "designed"
+boards = { macos = "Batch5_windows_drawer_stack.dc.html", tui = "Batch5_windows_drawer_stack.dc.html" }
+exits = [
+  { key = "q", click = "close", to = "terminal.drawer", back = true },
+  { key = "esc", click = "", to = "terminal.drawer", back = true },
+  { key = "SPC o t", click = "", to = "terminal.drawer" },
+]
+notes = "One drawer at a time: the tasks drawer replaces the terminal drawer (header: \"terminal 1 hidden · q returns\"), and closing it returns to the terminal drawer with its shell still running (Doom popup behaviour). Splits show two things at once."
+
+[[scenario]]
+id = "windows.focus_lost"
+journey = "windows"
+title = "The app or terminal lost focus"
+surfaces = ["editor", "modeline"]
+states = []
+frontends = ["macos", "tui"]
+status = "designed"
+boards = { tui = "V41TuiTerminalPowers.dc.html" }
+exits = []
+notes = "A state, not a place. macOS board missing."
+
+[[scenario]]
+id = "removed.workspaces"
+journey = "windows"
+title = "Workspaces and the workspace capsule (SPC TAB)"
+surfaces = ["workspaces"]
+states = []
+frontends = ["macos", "tui"]
+status = "removed"
+exits = []
+notes = "Jobs move to buffers, the tasks drawer and the switcher. SPC TAB group retires."
+
+[[scenario]]
+id = "removed.tab_bar"
+journey = "windows"
+title = "Tab bar"
+surfaces = ["tab_bar"]
+states = []
+frontends = ["macos", "tui"]
+status = "removed"
+exits = []
+notes = "Jobs move to the switcher and pinned files (SPC 1 to SPC 4)."
+
+[[scenario]]
+id = "removed.activity_bar"
+journey = "windows"
+title = "Activity bar and permanent sidebar"
+surfaces = ["sidebars"]
+states = []
+frontends = ["macos", "tui"]
+status = "removed"
+exits = []
+notes = "Jobs move to SPC groups and drawers."
+
+[[scenario]]
+id = "removed.bottom_panel"
+journey = "windows"
+title = "Bottom panel toggle (SPC t p)"
+surfaces = ["bottom_panel"]
+states = []
+frontends = ["macos", "tui"]
+status = "removed"
+exits = []
+notes = "Jobs move to drawers."
+
+[[scenario]]
+id = "removed.breadcrumb"
+journey = "windows"
+title = "Breadcrumb bar"
+surfaces = ["breadcrumb"]
+states = []
+frontends = ["macos", "tui"]
+status = "removed"
+exits = []
+notes = "Job moves to the title bar path."
+
+# ---- settings --------------------------------------------------------------
+
+[[scenario]]
+id = "settings.panel"
+journey = "settings"
+title = "Settings window"
+surfaces = ["settings_window"]
+states = []
+frontends = ["macos"]
+platform_only_reason = "Native Settings window; the TUI edits the config file (SPC f p)."
+status = "existing-only"
+exits = [
+  { key = "⌘W", click = "close", to = "edit.plain", back = true },
+]
+
+[[scenario]]
+id = "settings.theme_picker"
+journey = "settings"
+title = "SPC h t: pick theme"
+surfaces = ["picker"]
+states = []
+frontends = ["macos", "tui"]
+status = "existing-only"
+transient = true
+list = true
+empty_state = "files.switcher.no_match"
+exits = [
+  { key = "↩", click = "row", to = "edit.plain" },
+  { key = "esc", click = "click outside", to = "edit.plain" },
+]
+
+[[scenario]]
+id = "settings.describe"
+journey = "settings"
+title = "SPC h b/c/f/k/v: describe bindings, command, key, option"
+surfaces = ["buffer:help"]
+states = []
+frontends = ["macos", "tui"]
+status = "existing-only"
+exits = [
+  { key = "q", click = "close", to = "edit.plain" },
+]
+
+[[scenario]]
+id = "settings.command_help"
+journey = "settings"
+title = "SPC h a: search command help"
+surfaces = ["picker"]
+states = []
+frontends = ["macos", "tui"]
+status = "existing-only"
+transient = true
+list = true
+empty_state = "files.switcher.no_match"
+exits = [
+  { key = "↩", click = "row", to = "edit.plain" },
+  { key = "esc", click = "click outside", to = "edit.plain" },
+]
+
+[[scenario]]
+id = "settings.tutorial"
+journey = "settings"
+title = "SPC h T: interactive tutorial"
+surfaces = ["buffer:tutorial"]
+states = []
+frontends = ["macos", "tui"]
+status = "existing-only"
+exits = [
+  { key = "q", click = "close", to = "edit.plain" },
+]
+
+[[scenario]]
+id = "settings.extensions"
+journey = "settings"
+title = "SPC h e l: extensions"
+surfaces = ["extension_panel"]
+states = []
+frontends = ["macos", "tui"]
+status = "existing-only"
+list = true
+empty_state = "settings.extensions.none"
+exits = [
+  { key = "q", click = "close", to = "edit.plain" },
+]
+
+[[scenario]]
+id = "settings.extensions.none"
+journey = "settings"
+title = "No extensions installed"
+surfaces = ["extension_panel"]
+states = []
+frontends = ["macos", "tui"]
+status = "designed"
+boards = { macos = "Batch4_git_ext_queue_empty.dc.html", tui = "Batch4_git_ext_queue_empty.dc.html" }
+exits = [
+  { key = "SPC h e l", click = "", to = "settings.extensions", keyboard_only = "named as text in the empty state" },
+  { key = "q", click = "close", to = "edit.plain" },
+]
+
+[[scenario]]
+id = "settings.extension_overlay"
+journey = "settings"
+title = "An extension's own overlay"
+surfaces = ["extension_overlay"]
+states = []
+frontends = ["macos", "tui"]
+status = "existing-only"
+reached_by = "an extension opens it"
+transient = true
+exits = [
+  { key = "esc", click = "click outside", to = "edit.plain" },
+]
+
+[[scenario]]
+id = "settings.keystroke_history"
+journey = "settings"
+title = "SPC h l: keystroke history"
+surfaces = ["buffer:keystrokes"]
+states = []
+frontends = ["macos", "tui"]
+status = "existing-only"
+exits = [
+  { key = "q", click = "close", to = "edit.plain" },
+]
+
+[[scenario]]
+id = "settings.observatory"
+journey = "settings"
+title = "SPC o b: BEAM observatory"
+surfaces = ["sidebar:observatory"]
+states = []
+frontends = ["macos", "tui"]
+status = "existing-only"
+exits = [
+  { key = "SPC o b", click = "close", to = "edit.plain" },
+  { key = "q", click = "", to = "edit.plain" },
+  { key = "esc", click = "", to = "edit.plain" },
+]
+notes = "Sidebar today; becomes a buffer or drawer under the Spine."
+
+# ---- errors ----------------------------------------------------------------
+
+[[scenario]]
+id = "errors.notice"
+journey = "errors"
+title = "A notice in the notification center"
+surfaces = ["notifications"]
+states = []
+frontends = ["macos", "tui"]
+status = "existing-only"
+reached_by = "anything that posts a notice"
+transient = true
+exits = [
+  { key = "esc", click = "dismiss", to = "edit.plain" },
+]
+notes = "Every notice must name its next action (flow invariant 4)."
+
+[[scenario]]
+id = "errors.protocol_error"
+journey = "errors"
+title = "Protocol error overlay"
+surfaces = ["overlay:protocol_error"]
+states = []
+frontends = ["macos", "tui"]
+status = "existing-only"
+reached_by = "a frame the frontend cannot decode"
+exits = [
+  { key = "↩", click = "Reload", to = "edit.plain" },
+  { key = "esc", click = "", to = "edit.plain" },
+]
+notes = "esc dismisses the overlay; Reload stays offered as an action in the notice it leaves behind."
+
+[[scenario]]
+id = "errors.resync"
+journey = "errors"
+title = "Resyncing with the editor core"
+surfaces = ["overlay:resync"]
+states = []
+frontends = ["macos", "tui"]
+status = "existing-only"
+exits = []
+notes = "Transient by nature: it clears itself when the frame resyncs."
+
+[[scenario]]
+id = "errors.latency_hud"
+journey = "errors"
+title = "Latency HUD (developer)"
+surfaces = ["overlay:latency"]
+states = []
+frontends = ["macos"]
+platform_only_reason = "Developer diagnostic in the native renderer."
+status = "existing-only"
+exits = []
+
+[[scenario]]
+id = "errors.crash_reconnect"
+journey = "errors"
+title = "The core restarted: reconnecting, then a notice"
+surfaces = ["overlay", "notifications"]
+states = []
+frontends = ["macos", "tui"]
+status = "designed"
+boards = { macos = "Batch3_errors_crash_reconnect.dc.html", tui = "Batch3_errors_crash_reconnect.dc.html" }
+reached_by = "a supervised part of the core restarts"
+exits = [
+  { key = "(reconnected)", click = "", to = "edit.plain", keyboard_only = "happens on its own when the frontend reconnects" },
+  { key = "SPC b m", click = "", to = "files.messages" },
+  { key = "esc", click = "dismiss", to = "edit.plain", note = "Normal mode only" },
+]
+notes = "Your work stays on screen while it reconnects. The notice names what restarted: \"Minga's session restarted after a crash; your files and tasks are intact.\" or the editor core. The BEAM reports which supervised part restarted."
+
+[[scenario]]
+id = "errors.lsp_failed"
+journey = "errors"
+title = "A language server failed to start"
+surfaces = ["notifications", "modeline"]
+states = ["failed"]
+frontends = ["macos", "tui"]
+status = "designed"
+boards = { macos = "Batch3_errors_lsp_failed.dc.html", tui = "Batch3_errors_lsp_failed.dc.html" }
+reached_by = "a language server fails to start or crashes"
+exits = [
+  { key = "SPC c l r", click = "Restart", to = "edit.plain" },
+  { key = "SPC c l i", click = "Details", to = "code.lsp_info" },
+  { key = "SPC c l I", click = "Manage tools", to = "code.lsp_tools" },
+  { key = "esc", click = "dismiss", to = "edit.plain", note = "Normal mode only" },
+]
+notes = "Editing continues. The modeline segment \"elixir-ls failed\" replaces the diagnostics count while the server is down and is never dropped. Notice actions use leader keys, never bare keys."
+
+[[scenario]]
+id = "errors.config_error"
+journey = "errors"
+title = "Config failed to load"
+surfaces = ["notifications", "modeline"]
+states = ["failed"]
+frontends = ["macos", "tui"]
+status = "designed"
+boards = { macos = "Batch3_errors_config_error.dc.html", tui = "Batch3_errors_config_error.dc.html" }
+reached_by = "the config fails to load"
+exits = [
+  { key = "SPC f p", click = "Open config", to = "edit.plain", note = "opens config.exs at the failing line" },
+  { key = "SPC h r", click = "Reload", to = "edit.plain" },
+  { key = "esc", click = "dismiss", to = "edit.plain", note = "Normal mode only" },
+]
+notes = "Minga opens with defaults. The notice names file:line and the error; the modeline segment \"config: defaults\" stays until the config loads and is never dropped."
+
+[[scenario]]
+id = "code.hover.focused"
+journey = "code"
+title = "K again: the hover is focused, full docs scroll in place"
+surfaces = ["hover_popup"]
+states = []
+frontends = ["macos", "tui"]
+status = "designed"
+boards = { macos = "Batch7_hover_code.dc.html", tui = "Batch7_hover_code.dc.html" }
+transient = true
+exits = [
+  { key = "j / k, ⌃D / ⌃U", click = "scroll", to = "code.hover.focused" },
+  { key = "↩", click = "a link", to = "edit.plain", note = "jumps to the linked definition" },
+  { key = "y", click = "", to = "code.hover.focused", keyboard_only = "copies the docs" },
+  { key = "q", click = "", to = "edit.plain", keyboard_only = "esc does the same" },
+  { key = "esc", click = "click outside", to = "edit.plain" },
+]
+
+[[scenario]]
+id = "minga.hover.attribution"
+journey = "minga"
+title = "Hover on a line Minga wrote: who, which task, change 1 of 2, unreviewed, age"
+surfaces = ["hover_popup"]
+states = ["unreviewed"]
+frontends = ["macos", "tui"]
+status = "designed"
+boards = { macos = "Batch7_hover_minga_and_chrome.dc.html", tui = "Batch7_hover_minga_and_chrome.dc.html" }
+transient = true
+exits = [
+  { key = "g.", click = "g. actions", to = "minga.act_menu" },
+  { key = "↩", click = "the task name", to = "minga.conversation" },
+  { key = "esc", click = "move the pointer away", to = "edit.plain" },
+]
+
+[[scenario]]
+id = "chrome.tooltip"
+journey = "edit"
+title = "Tooltip on a modeline segment or state glyph: meaning and key, e.g. 1 task needs you · SPC a a"
+surfaces = ["modeline", "tooltip"]
+states = []
+frontends = ["macos", "tui"]
+status = "designed"
+boards = { macos = "Batch7_hover_minga_and_chrome.dc.html", tui = "Batch7_hover_minga_and_chrome.dc.html" }
+transient = true
+exits = [
+  { key = "SPC a a", click = "the needs-you segment", to = "minga.tasks.needs_you" },
+  { key = "]h", click = "the change 1/2 segment", to = "minga.review.in_file" },
+  { key = "SPC a v", click = "the Minga segment", to = "minga.conversation" },
+  { key = "esc", click = "move the pointer away", to = "edit.plain" },
+]
+reached_by = "the pointer resting on a modeline segment or state glyph"
+notes = "In the TUI the text goes to the echo area, only when the terminal reports pointer motion."
+
+[[scenario]]
+id = "minga.act_menu"
+journey = "minga"
+title = "g. on a Minga change: the act menu, Keep preselected"
+surfaces = ["act_menu"]
+states = ["unreviewed"]
+frontends = ["macos", "tui"]
+status = "designed"
+boards = { macos = "Batch7_act_change.dc.html", tui = "Batch7_act_change.dc.html" }
+transient = true
+exits = [
+  { key = "y", click = "Keep", to = "minga.review.in_file" },
+  { key = "=", click = "Show diff", to = "minga.review.diff_inline" },
+  { key = "o", click = "Open conversation", to = "minga.conversation" },
+  { key = "n", click = "Reject", to = "minga.review.in_file", note = "destructive, last, never preselected" },
+  { key = "l", click = "Copy file:line link", to = "edit.plain" },
+  { key = "a", click = "Ask Minga about this", to = "minga.inline_ask" },
+  { key = "E", click = "Export to a buffer", to = "files.file_list", note = "in pickers: export the matches" },
+  { key = "typing", click = "", to = "minga.act_menu.filtered", keyboard_only = "typing filters the list" },
+  { key = "esc", click = "click outside", to = "edit.plain" },
+]
+notes = "The same menu opens on a diagnostic, a file row, a task row, a terminal command block and in pickers (Batch7_act_targets, Batch7_act_picker); right-click opens it too."
+
+[[scenario]]
+id = "minga.act_menu.filtered"
+journey = "minga"
+title = "Act menu after typing: only matching actions, the top one highlighted"
+surfaces = ["act_menu"]
+states = []
+frontends = ["macos", "tui"]
+status = "designed"
+boards = { macos = "Batch7_act_change.dc.html", tui = "Batch7_act_change.dc.html" }
+transient = true
+exits = [
+  { key = "↩", click = "a row", to = "minga.conversation", note = "runs the highlighted action" },
+  { key = "esc", click = "click outside", to = "edit.plain" },
+]
+
+[[scenario]]
+id = "minga.act_menu.selection"
+journey = "minga"
+title = "Act menu on a selection spanning two Minga changes and your code"
+surfaces = ["act_menu"]
+states = ["unreviewed"]
+frontends = ["macos", "tui"]
+status = "designed"
+boards = { macos = "Batch7_act_selection.dc.html", tui = "Batch7_act_selection.dc.html" }
+transient = true
+exits = [
+  { key = "y", click = "Keep 2 changes", to = "minga.review.in_file" },
+  { key = "a", click = "Ask Minga about the selection", to = "minga.inline_ask" },
+  { key = "e", click = "Rewrite selection", to = "minga.inline_edit" },
+  { key = "n", click = "Reject 2 changes", to = "edit.prompt", note = "confirms first" },
+  { key = "esc", click = "click outside", to = "edit.visual", note = "the selection is kept" },
+]
+
+[[scenario]]
+id = "minga.review.diff_inline"
+journey = "minga"
+title = "Inline diff of Minga's change in the file (= from the act menu or the review buffer)"
+surfaces = ["editor"]
+states = ["unreviewed"]
+frontends = ["macos", "tui"]
+status = "designed"
+boards = { macos = "Batch7_act_change.dc.html", tui = "Batch7_act_change.dc.html" }
+exits = [
+  { key = "=", click = "", to = "minga.review.in_file", keyboard_only = "toggles the diff off" },
+  { key = "esc", click = "click elsewhere", to = "minga.review.in_file" },
+]
+
+[[scenario]]
+id = "files.file_list"
+journey = "files"
+title = "*file-list*: picker results exported to a buffer, Vim selection picks a subset"
+surfaces = ["buffer:file_list"]
+states = []
+frontends = ["macos", "tui"]
+status = "designed"
+boards = { macos = "Batch7_act_picker.dc.html", tui = "Batch7_act_picker.dc.html" }
+exits = [
+  { key = "g.", click = "right-click", to = "minga.act_menu", note = "acts on the row or the selection" },
+  { key = "↩", click = "a row", to = "edit.plain" },
+  { key = "q", click = "close", to = "edit.plain" },
 ]
