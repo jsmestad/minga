@@ -39,7 +39,7 @@ defmodule MingaEditor.Commands.Editing do
     {:replace_restore, "Restore replaced character", true},
     {:undo, "Undo the last change", true},
     {:redo, "Redo the last undone change", true},
-    {:undo_agent_session, "Revert the newest Minga task's edits in this buffer", true},
+    {:undo_agent_session, "Revert a Minga task's edits in this buffer, newest first", true},
     {:paste_before, "Paste before cursor", true},
     {:paste_after, "Paste after cursor", true},
     {:indent_line, "Indent line", true},

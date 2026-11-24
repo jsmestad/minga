@@ -570,7 +570,7 @@ defmodule Minga.Buffer do
           | {:error, Minga.Buffer.UndoPatch.apply_error()}
   defdelegate redo(server), to: BufferProcess
 
-  @doc "Revert every remaining step of the Minga task that edited this buffer most recently, keeping your edits."
+  @doc "Revert every remaining step of the Minga task that edited this buffer most recently, or of the newer task that blocks it, keeping your edits."
   @spec undo_agent_session(t()) ::
           {:ok, non_neg_integer()} | :empty | {:error, Minga.Buffer.UndoPatch.apply_error()}
   defdelegate undo_agent_session(server), to: BufferProcess

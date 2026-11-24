@@ -247,7 +247,7 @@ defmodule Minga.Buffer.UndoPatch do
   @doc """
   Returns the smallest byte changes a forward patch makes, in document order, as `{start, removed, inserted}`.
 
-  When the old and new text have the same number of lines, each pair of lines is compared on its own; otherwise the whole text is one pair. Each pair loses the bytes both sides share at the start and the end, on code point boundaries, and what remains is compared word by word, so a line that changes two words records two changes and the text between them stays out. The word comparison runs only while its cost stays within a fixed budget; past it, the trimmed pair is one change. Everything else is linear in the patch's bytes. Offsets are in the document the patch applies to, so applying the changes from the last to the first gives the patch's result.
+  When the old and new text have the same number of lines, each pair of lines is compared on its own; otherwise the whole text is one pair. Each pair loses the bytes both sides share at the start and the end, on code point boundaries, and what remains is compared word by word, so a line that changes two words records two changes and the text between them stays out. The word comparison runs only when the trimmed pair holds at most 512 words in all, which bounds its cost whatever the words are; past that, the trimmed pair is one change. Everything else is linear in the patch's bytes. Offsets are in the document the patch applies to, so applying the changes from the last to the first gives the patch's result.
 
   `Minga.Buffer.UndoHistory` records changes this precise, so an edit that rewrites whole lines only takes authorship of the bytes it changed.
   """
@@ -280,8 +280,9 @@ defmodule Minga.Buffer.UndoPatch do
     end
   end
 
-  # Upper bound on (words on both sides) x (words one side holds and the other lacks) for one word diff.
-  @word_budget 20_000
+  # A word diff costs at most (words on both sides) squared, so this bound caps it at a few milliseconds whatever the
+  # words are, including the same words reordered.
+  @max_words 512
 
   @spec word_changes(non_neg_integer(), binary(), binary()) :: [
           {non_neg_integer(), byte_fragment(), byte_fragment()}
@@ -312,15 +313,8 @@ defmodule Minga.Buffer.UndoPatch do
   defp words(text), do: ~r/\w+|\s+|[^\w\s]/u |> Regex.scan(text) |> List.flatten()
 
   @spec within_word_budget?([String.t()], [String.t()]) :: boolean()
-  defp within_word_budget?(old_words, new_words) do
-    counts =
-      Enum.reduce(new_words, Enum.frequencies(old_words), fn word, acc ->
-        Map.update(acc, word, -1, &(&1 - 1))
-      end)
-
-    unmatched = Enum.reduce(counts, 0, fn {_word, count}, sum -> sum + abs(count) end)
-    (length(old_words) + length(new_words)) * unmatched <= @word_budget
-  end
+  defp within_word_budget?(old_words, new_words),
+    do: length(old_words) + length(new_words) <= @max_words
 
   # Turns an edit script over words into changes located in the old text, in document order.
   @spec script_changes([{:eq | :del | :ins, [String.t()]}], non_neg_integer()) :: [

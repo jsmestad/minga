@@ -30,6 +30,18 @@ defmodule Minga.Buffer.UndoPatchTest do
       assert UndoPatch.precise_changes(patch) == [{5, "foo", "FOO"}, {15, "baz", "BAZ"}]
     end
 
+    test "the same words reordered on a long line stay one change and stay fast" do
+      words = Enum.map(1..4_000, &"word#{&1}")
+      old = Enum.join(words, " ") <> "\n"
+      new = (words |> Enum.reverse() |> Enum.join(" ")) <> "\n"
+
+      {micros, changes} =
+        :timer.tc(fn -> UndoPatch.precise_changes(UndoPatch.replacement(0, old, new, {0, 0})) end)
+
+      assert [{_at, _removed, _inserted}] = changes
+      assert micros < 1_000_000
+    end
+
     test "trimming keeps whole code points" do
       patch = UndoPatch.replacement(0, "é", "è", {0, 0})
       assert UndoPatch.precise_changes(patch) == [{0, "é", "è"}]
