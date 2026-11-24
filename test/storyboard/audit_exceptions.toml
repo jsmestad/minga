@@ -41,14 +41,6 @@ reason = "The BEAM's modeline puts a │ separator with a space on each side bet
 issue = 4043
 
 [[exception]]
-scenario = "edit.visual"
-frontend = "tui"
-part = "modeline"
-rule = "leading inset"
-reason = "The Visual mode segment starts with a mode glyph the locator does not count as the segment's words, so its text starts two cells in."
-issue = 4043
-
-[[exception]]
 scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey"]
 frontend = "tui"
 part = "glyph"

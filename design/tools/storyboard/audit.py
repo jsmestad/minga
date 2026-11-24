@@ -287,6 +287,8 @@ def tui_contrast(audit, frame, path):
 
 def mac_contrast(audit, frame, export):
     """Text parts against the 4.5:1 text target; every syntax ink in the editor against the same target."""
+    if not export.get("samples") or not (export.get("code") or {}).get("inks"):
+        audit.flag(frame, "editor.code", "pixels sampled", "colours under the text parts and in the editor", "none")
     for sample in export.get("samples", []):
         for ink in sample["inks"]:
             ratio = contrast(ink, sample["bg"])

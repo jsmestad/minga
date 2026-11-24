@@ -110,6 +110,10 @@ class RuleTest(unittest.TestCase):
         audit.mac_contrast(self.audit, FRAME, export)
         self.assertEqual([f["pair"] for f in self.audit.findings], ["#aaaaaa on #ffffff"])
 
+    def test_a_macos_frame_without_pixel_samples_is_a_finding(self):
+        audit.mac_contrast(self.audit, FRAME, {"samples": [], "code": {}})
+        self.assertEqual(self.rules(), {("editor.code", "pixels sampled")})
+
     def test_a_part_the_locator_could_not_find_is_a_finding(self):
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp)

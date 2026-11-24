@@ -216,15 +216,21 @@ func modelineParts(status protocol.StatusBar, grid cellGrid) []storyboardPart {
 	}
 	parts := []storyboardPart{{Part: "modeline", Frame: [4]int{0, y, len(grid[y]), 1}}}
 	x := 0
-	for _, segment := range left {
+	for index, segment := range left {
 		text := strings.TrimSpace(segment.Text)
 		at := grid.find(y, x, len(grid[y]), text)
 		if at < 0 {
 			parts = append(parts, storyboardPart{Part: "modeline.segment", Text: segment.Name + ": " + text, Missing: true})
 			continue
 		}
-		parts = append(parts, storyboardPart{Part: "modeline.segment", Frame: [4]int{at, y, len([]rune(text)), 1}, Text: segment.Name + ": " + text})
-		x = at + len([]rune(text))
+		start, end := at, at+len([]rune(text))
+		// The first segment's words can follow a mode glyph the frontend draws itself; the segment starts at the row's
+		// first ink, so the leading inset is measured to what the user sees first.
+		if index == 0 {
+			start = min(start, firstInk(grid, y, 0, at))
+		}
+		parts = append(parts, storyboardPart{Part: "modeline.segment", Frame: [4]int{start, y, end - start, 1}, Text: segment.Name + ": " + text})
+		x = end
 	}
 	for _, segment := range status.Right {
 		text := strings.TrimSpace(segment.Text)
