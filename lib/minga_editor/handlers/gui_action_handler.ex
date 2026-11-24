@@ -24,6 +24,7 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   alias Minga.LSP.SyncServer, as: LspSyncServer
 
   alias MingaEditor.Agent.DraftWorkflow
+  alias MingaEditor.Agent.EditPublication
   alias MingaEditor.Agent.SemanticUI.Registry, as: SemanticUIRegistry
   alias MingaEditor.Agent.UIState
   alias MingaEditor.CompletionHandling
@@ -599,17 +600,18 @@ defmodule MingaEditor.Handlers.GuiActionHandler do
   defp dispatch_action(state, {:git_fetch, panel_id}),
     do: remote_from_panel(state, panel_id, :fetch)
 
+  # Closing a workspace ends its agent session, so composer drafts and staged agent edits are
+  # checked first, the same gates the keyboard quit path uses.
   defp dispatch_action(state, {:workspace_close, owner} = action) do
-    case DraftWorkflow.before_close(state, owner) do
-      {:ok, state} ->
-        transitioned = handle_shell_gui_action(state, action)
+    with {:ok, state} <- DraftWorkflow.before_close(state, owner),
+         {:ok, state} <- EditPublication.before_close(state, owner) do
+      transitioned = handle_shell_gui_action(state, action)
 
-        state
-        |> WorkspaceWorkflow.persist_changes(transitioned)
-        |> MingaEditor.TabWorkflow.sync_active_workspace_agent_ui()
-
-      {:error, state} ->
-        state
+      state
+      |> WorkspaceWorkflow.persist_changes(transitioned)
+      |> MingaEditor.TabWorkflow.sync_active_workspace_agent_ui()
+    else
+      {_refused, state} -> state
     end
   end
 

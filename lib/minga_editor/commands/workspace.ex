@@ -322,9 +322,12 @@ defmodule MingaEditor.Commands.Workspace do
 
   @spec close_active_workspace(state()) :: state()
   defp close_active_workspace(%{shell_runtime: %{state: %{tab_bar: %TabBar{} = tb}}} = state) do
-    case DraftWorkflow.before_close(state, :active) do
-      {:ok, state} -> close_workspace(state, tb)
-      {:error, state} -> state
+    # Staged edits come from the view's diff; the review state can still read :clean.
+    with {:ok, state} <- DraftWorkflow.before_close(state, :active),
+         {:ok, state} <- EditPublication.before_close(state, TabBar.active_workspace_id(tb)) do
+      close_workspace(state, tb)
+    else
+      {_refused, state} -> state
     end
   end
 

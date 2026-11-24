@@ -1778,6 +1778,67 @@ struct ContentViewTests {
         window.contentView = nil
     }
 
+    /// #2816: a BEAM reconnect announces the grid an unchanged normal resize reports for the same
+    /// geometry, line spacing, and gutter, and later resizes keep the configured spacing.
+    @Test(
+        "BEAM reconnect reports the same grid as a normal resize",
+        arguments: [Float(1), Float(1.5)], [CGFloat(600), CGFloat(613.7)]
+    )
+    func reconnectReportsNormalResizeGrid(spacing: Float, height: CGFloat) throws {
+        let gui = GUIState()
+        let dispatcher = CommandDispatcher(cols: 80, rows: 24, guiState: gui)
+        dispatcher.replaceConnection(with: 1)
+        let firstConnection = SpyEncoder()
+        let view = try makeEditorNSView(gui: gui, dispatcher: dispatcher, encoder: firstConnection)
+        try commitSpacedGutterFrame(dispatcher, spacing: spacing)
+        #expect(dispatcher.committedEditorSnapshot?.gutterCol == 5)
+
+        // Fractional width: the gutter padding changes the column count at this width.
+        let width: CGFloat = 803.5
+        view.setFrameSize(NSSize(width: width + 40, height: height + 40))
+        view.setFrameSize(NSSize(width: width, height: height))
+        let normal = try #require(firstConnection.resizeCalls.last)
+        let paddedCols = GridFit.colsThatFit(
+            width: width, cellWidth: view.cellWidth, gutterPadding: CoreTextMetalRenderer.gutterPixelPaddingPt)
+        #expect(normal.rows == GridFit.rowsThatFit(height: height, cellHeight: view.cellHeight, lineSpacing: spacing))
+        #expect(normal.cols == paddedCols)
+        #expect(paddedCols != GridFit.colsThatFit(width: width, cellWidth: view.cellWidth))
+
+        // Production reconnect order from MingaApp's invalidate closure, then the new encoder's ready.
+        dispatcher.replaceConnection(with: 2)
+        view.invalidateConnection()
+        let secondConnection = SpyEncoder()
+        view.installConnectionEncoder(secondConnection)
+        view.announceReadyIfLaidOut()
+
+        let ready = try #require(secondConnection.readyCalls.first)
+        #expect(secondConnection.readyCalls.count == 1)
+        #expect(ready.cols == normal.cols)
+        #expect(ready.rows == normal.rows)
+
+        // A new BEAM that repeats the configured spacing does not re-fit the grid.
+        try commitSpacedGutterFrame(dispatcher, spacing: spacing)
+        view.lineSpacingChanged(spacing)
+        #expect(secondConnection.resizeCalls.isEmpty)
+
+        // A resize after reconnect still fits rows with the configured spacing.
+        let resizedHeight = height + 97.3
+        view.setFrameSize(NSSize(width: width, height: resizedHeight))
+        let resized = try #require(secondConnection.resizeCalls.last)
+        #expect(resized.rows == GridFit.rowsThatFit(
+            height: resizedHeight, cellHeight: view.cellHeight, lineSpacing: spacing))
+        #expect(resized.cols == paddedCols)
+    }
+
+    private func commitSpacedGutterFrame(_ dispatcher: CommandDispatcher, spacing: Float) throws {
+        dispatcher.dispatch(.beginFrame(frameSeq: 1, baseFrameSeq: 0, generation: 1))
+        dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
+        dispatcher.dispatch(.guiLineSpacing(spacing: spacing))
+        dispatcher.dispatch(.guiGutterSeparator(col: 5, r: 0x33, g: 0x33, b: 0x33))
+        dispatcher.dispatch(.guiWindowContent(data: try nativeInteractionContent()))
+        dispatcher.dispatch(.commitFrame(frameSeq: 1, seq: 0))
+    }
+
     @Test("conformance scroll publication consumes only the newly drawn echo")
     func conformanceScrollPublicationUsesCapturedCommit() throws {
         let gui = GUIState()

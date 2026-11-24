@@ -252,6 +252,58 @@ defmodule MingaEditor.Agent.EditPublicationTest do
     assert workspace(blocked, id).review.state == :needs_review
   end
 
+  describe "closing a workspace with the GUI close button" do
+    test "staged edits keep the workspace open and offer Publish and Discard until they are discarded",
+         %{state: state, view: view, path: path, workspace_id: id} do
+      # The review state is still :clean: no agent event recorded the edit.
+      :ok = stage_edit(view)
+      assert workspace(state, id).review.state == :clean
+
+      blocked = GuiActionHandler.dispatch(state, {:workspace_close, id})
+
+      assert %{review: %{state: :needs_review}} = workspace(blocked, id)
+
+      assert NoticeWorkflow.message(blocked) ==
+               "1 agent-edited file is not on disk. Publish or discard them before closing Agent."
+
+      assert [%{id: "publish"}, %{id: "discard"}] = notification(blocked, id).actions
+
+      discarded =
+        GuiActionHandler.dispatch(
+          blocked,
+          {:notification_action, "agent:unpublished_edits:#{id}", "discard"}
+        )
+
+      closed = GuiActionHandler.dispatch(discarded, {:workspace_close, id})
+
+      assert workspace(closed, id) == nil
+      assert File.read!(path) == "one\ntwo\n"
+    end
+
+    test "a workspace without staged edits closes at once", %{state: state, workspace_id: id} do
+      closed = GuiActionHandler.dispatch(state, {:workspace_close, id})
+
+      assert workspace(closed, id) == nil
+      assert notification(closed, id) == nil
+    end
+
+    test "before_close ignores other workspaces' staged edits",
+         %{state: state, view: view, workspace_id: id} do
+      :ok = stage_edit(view)
+      tb = state.shell_runtime.state.tab_bar
+      {tb, other} = TabBar.add_workspace(tb, "Other")
+      shell_state = TraditionalState.install_tab_bar(state.shell_runtime.state, tb)
+
+      state = %{
+        state
+        | shell_runtime: Runtime.install_traditional_state(state.shell_runtime, shell_state)
+      }
+
+      assert {:ok, ^state} = EditPublication.before_close(state, other.id)
+      assert {:blocked, _blocked} = EditPublication.before_close(state, id)
+    end
+  end
+
   describe "staged edits after a restart" do
     # A restarted Editor restores its workspaces from disk without a staging
     # area or session.

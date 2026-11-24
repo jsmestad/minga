@@ -1465,6 +1465,69 @@ struct AgentChatViewTests {
         #expect(strings.contains("High"))
     }
 
+    /// #3782: the BEAM sends a contributed route's display name as the provider half of `model`.
+    @Test("Header names the provider the session uses, including an extension route",
+          arguments: [
+            ("Claude (subscription):haiku", "Claude (subscription)", "haiku"),
+            ("Anthropic:claude-sonnet-4", "Anthropic", "claude-sonnet-4"),
+          ])
+    @MainActor func headerNamesSessionProvider(model: String, provider: String, name: String) throws {
+        let state = AgentChatState()
+        state.visible = true
+        state.model = model
+        state.status = .idle
+        #expect(state.displayProvider == provider)
+        #expect(state.displayModel == name)
+
+        let body = try AgentChatView(state: state, isInsertMode: false, sendAction: nil)
+            .environment(\.themeColors, ThemeColors())
+            .inspect()
+        let strings = body.findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
+        #expect(strings.contains(provider))
+        #expect(strings.contains(name))
+        #expect(!strings.contains(model))
+
+        // Every header row width uses this one model button, so its label carries the provider.
+        let modelButtons = body.findAll(ViewType.Button.self).filter {
+            (try? $0.accessibilityLabel().string()) == "Agent model"
+        }
+        #expect(!modelButtons.isEmpty)
+        for modelButton in modelButtons {
+            let label = try modelButton.labelView().findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
+            #expect(label.contains(provider))
+            #expect(label.contains(name))
+            #expect(try modelButton.accessibilityValue().string() == "\(name), \(provider)")
+        }
+    }
+
+    /// The BEAM sends status text with an empty provider (`:text`) when the text contains `:`.
+    @Test("Status text in place of a model shows no provider label",
+          arguments: [
+            ("Resolving model…", "Resolving model…"),
+            (":Model \"anthropic:claude-x\" is not in the catalog", "Model \"anthropic:claude-x\" is not in the catalog"),
+          ])
+    @MainActor func headerWithoutProvider(model: String, text: String) throws {
+        let state = AgentChatState()
+        state.visible = true
+        state.model = model
+        state.status = .idle
+        #expect(state.displayProvider.isEmpty)
+        #expect(state.displayModel == text)
+
+        let body = try AgentChatView(state: state, isInsertMode: false, sendAction: nil)
+            .environment(\.themeColors, ThemeColors())
+            .inspect()
+        let modelButtons = body.findAll(ViewType.Button.self).filter {
+            (try? $0.accessibilityLabel().string()) == "Agent model"
+        }
+        #expect(!modelButtons.isEmpty)
+        for modelButton in modelButtons {
+            let label = try modelButton.labelView().findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
+            #expect(label == [text])
+            #expect(try modelButton.accessibilityValue().string() == text)
+        }
+    }
+
     @Test("Header controls dispatch named commands with the composer in insert mode")
     @MainActor func headerControlsDispatchCommands() throws {
         let spy = SpyEncoder()
