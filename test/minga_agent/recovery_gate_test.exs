@@ -207,10 +207,8 @@ defmodule MingaAgent.RecoveryGateTest do
       assert Enum.any?(restored, &match?({:user, "persist me"}, &1))
       assert Enum.any?(restored, &match?({:assistant, "Persisted answer."}, &1))
 
-      # The loaded session should have a working provider and be ready
       assert is_pid(Session.get_provider(session_2))
 
-      # Verify the continuation state transferred correctly
       state = :sys.get_state(session_2)
       assert state.continuation.revision > 0
       assert state.continuation.active_request == nil
