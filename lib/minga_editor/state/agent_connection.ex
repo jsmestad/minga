@@ -9,6 +9,7 @@ defmodule MingaEditor.State.AgentConnection do
 
   alias MingaAgent.InferenceRoute.StatusChangedEvent
   alias MingaEditor.Agent.Arrival
+  alias MingaEditor.Agent.SessionFollowUp
   alias MingaEditor.Agent.SessionStart
   alias MingaEditor.State.RouteUsage
 
@@ -23,6 +24,7 @@ defmodule MingaEditor.State.AgentConnection do
           arrival: Arrival.t() | nil,
           session_manager: GenServer.server(),
           session_starts: %{reference() => SessionStart.t()},
+          session_follow_ups: %{reference() => SessionFollowUp.t()},
           route_usage: RouteUsage.t()
         }
 
@@ -35,6 +37,7 @@ defmodule MingaEditor.State.AgentConnection do
             arrival: nil,
             session_manager: MingaAgent.SessionManager,
             session_starts: %{},
+            session_follow_ups: %{},
             route_usage: %RouteUsage{}
 
   @doc "The production local arrival budget in milliseconds."
@@ -87,6 +90,22 @@ defmodule MingaEditor.State.AgentConnection do
   @spec finish_session_start(t(), reference()) :: t()
   def finish_session_start(%__MODULE__{} = connection, token) when is_reference(token),
     do: %{connection | session_starts: Map.delete(connection.session_starts, token)}
+
+  @doc "Keeps a follow-up request the Editor sent to a newly started Session and has not settled."
+  @spec track_session_follow_up(t(), SessionFollowUp.t()) :: t()
+  def track_session_follow_up(
+        %__MODULE__{} = connection,
+        %SessionFollowUp{token: token} = follow_up
+      ),
+      do: %{
+        connection
+        | session_follow_ups: Map.put(connection.session_follow_ups, token, follow_up)
+      }
+
+  @doc "Forgets a settled follow-up request."
+  @spec finish_session_follow_up(t(), reference()) :: t()
+  def finish_session_follow_up(%__MODULE__{} = connection, token) when is_reference(token),
+    do: %{connection | session_follow_ups: Map.delete(connection.session_follow_ups, token)}
 
   @doc "Records a contributed route's reported status for the modeline."
   @spec record_route_status(t(), StatusChangedEvent.t()) :: t()

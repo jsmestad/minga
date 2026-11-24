@@ -51,4 +51,38 @@ defmodule MingaEditor.Agent.ActivityTest do
       assert activity.active_action == "Thinking"
     end
   end
+
+  describe "apply_status/2" do
+    setup do
+      %{running: Activity.start_tool(Activity.new(), "call-1", "shell")}
+    end
+
+    test "every Session status maps to its turn transition", %{running: running} do
+      idle = Activity.finish_turn(running)
+
+      for {status, from, expected} <- [
+            {:thinking, Activity.new(), Activity.start_turn(Activity.new())},
+            {:tool_executing, Activity.new(), Activity.start_turn(Activity.new())},
+            {:thinking, running, running},
+            {:idle, running, idle},
+            {:error, Activity.finish_tool(running, "call-1"), idle},
+            {:plan, Activity.finish_tool(running, "call-1"), idle},
+            {:error, running, running},
+            {:plan, running, running},
+            {:approval_waiting, running, running}
+          ] do
+        assert strip_time(Activity.apply_status(from, status)) == strip_time(expected),
+               "#{status} from #{inspect(from.active_action)}"
+      end
+    end
+
+    test "a turn after an idle status counts its tools from zero", %{running: running} do
+      next = running |> Activity.apply_status(:idle) |> Activity.apply_status(:thinking)
+
+      assert next.active_action == "Thinking"
+      assert next.tool_count == 0
+    end
+  end
+
+  defp strip_time(activity), do: %{activity | started_at: activity.started_at && :set}
 end

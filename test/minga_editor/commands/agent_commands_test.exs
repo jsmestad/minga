@@ -1065,6 +1065,7 @@ defmodule MingaEditor.Commands.AgentCommandsTest do
         original
         |> with_model_name("Previous Model")
         |> AgentCommands.open_session("saved-session")
+        |> AgentSessionStart.settle_follow_ups()
 
       assert state.workspace.agent_ui.panel.model_name == "Restored Model"
       assert state.workspace.agent_ui.panel.provider_name == "anthropic"
