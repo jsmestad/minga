@@ -351,17 +351,20 @@ export function mountCoAuthorSim(root: HTMLElement): void {
     }
   });
 
-  root.addEventListener("keydown", (event) => {
-    const target = event.target as HTMLElement | null;
-    if (!target || target.matches("input, textarea, select")) return;
+  window.addEventListener("keydown", (event) => {
+    const activeEl = document.activeElement as HTMLElement | null;
+    if (activeEl?.matches("input, textarea, select, [contenteditable]")) return;
     if (event.metaKey || event.ctrlKey || event.altKey) return;
+    const rect = root.getBoundingClientRect();
+    const visible = rect.bottom > 80 && rect.top < window.innerHeight - 80;
+    const focusedInside = activeEl ? root.contains(activeEl) : false;
+    if (!visible && !focusedInside) return;
     const key = event.key;
 
     const finish = (next: CoAuthorState): void => {
       event.preventDefault();
       pending = "";
       update(next);
-      root.querySelector<HTMLElement>("[data-ca-stage]")?.focus();
     };
 
     if (key === "Escape" || key === "q") {

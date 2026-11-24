@@ -4,6 +4,7 @@ import { mountArchFaultMap, mountStagedStepper } from "./arch_interactive.ts";
 import { mountCoAuthorSim } from "./coauthor_view.ts";
 import { mountElixirPlayground, mountElixirTranslator } from "./elixir_lab.ts";
 import { mountLayerExplorer } from "./extending_interactive.ts";
+import { highlightStaticShellBlocks } from "./highlight.ts";
 import { mountHeroTour, mountMarksThemeSwitcher } from "./home_interactive.ts";
 import { mountLearnHub } from "./hub_view.ts";
 import { mountRemoteLab } from "./remote_lab.ts";
@@ -53,6 +54,8 @@ function init(): void {
 
   const layerExp = document.querySelector<HTMLElement>("[data-layer-explorer]");
   if (layerExp) mountLayerExplorer(layerExp);
+
+  highlightStaticShellBlocks();
 }
 
 if (document.readyState === "loading") {

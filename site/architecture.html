@@ -75,7 +75,7 @@
           <a href="#buffer-aware-agents">2. Staged agent edits</a>
           <a href="#executable-parity">3. Frontend parity</a>
           <a href="#tradeoffs">4. Guarantees &amp; tradeoffs</a>
-          <a href="#adrs">5. Key ADRs (0001-0006)</a>
+          <a href="#adrs">5. Key ADRs (0001-0008)</a>
         </nav>
       </div>
     </header>
@@ -173,7 +173,7 @@
                 <text x="640" y="376" fill="var(--text-muted)" font-family="var(--font-mono)" font-size="10.5">Loads new grammars on demand</text>
               </svg>
             </div>
-            <figcaption class="diagram-caption">Each OS process has isolated memory. Under ADR-0006, the BEAM owns ordered modeline segments with priorities, theme roles, BEAM-styled markdown spans, and key scopes; clients draw shared tokens natively and drop only lowest-priority segments to fit. In headless mode, the editor and parser processes do not start.</figcaption>
+            <figcaption class="diagram-caption">The BEAM owns modeline segment priority, theme roles, and key scopes so Swift and Go only draw native tokens. In headless mode, the editor and parser OS processes do not start.</figcaption>
           </figure>
 
           <div data-arch-fault-map></div>
@@ -249,7 +249,7 @@
                 <text x="256" y="278" fill="var(--text-muted)" font-family="var(--font-mono)" font-size="10.5">~/.local/share/minga/staged_drafts · Restores unpublished edits on next start</text>
               </svg>
             </div>
-            <figcaption class="diagram-caption">Ordinary quit commands stop if unpublished edits remain staged; force quits (<code>:qa!</code>, <code>:cq</code>, or <code>:q!</code> on the last window) discard on purpose. <span data-status="planned" data-since="v0.1.0" data-pill="off">As ADR-0006 lands, per-author undo groups keep your <code>u</code> / <code>⌘Z</code> history strictly separate from Minga's edits while inline Twist review and <code>*minga-review*</code> build over the same ownership contract.</span></figcaption>
+            <figcaption class="diagram-caption">Ordinary quit stops if unpublished edits remain; force quits (<code>:qa!</code>, <code>:cq</code>, or <code>:q!</code>) discard on purpose. <span data-status="planned" data-since="v0.1.0" data-pill="off">In v0.1.0, per-author undo keeps <code>u</code> / <code>⌘Z</code> separate from Minga's edits.</span></figcaption>
           </figure>
 
           <div data-staged-stepper></div>
@@ -257,64 +257,68 @@
 
         <section class="essay-section" id="executable-parity">
           <h2>3. Keeping macOS and the terminal in lockstep</h2>
-          <p>Two frontends drift apart one reasonable local shortcut at a time. Prose style guides do not stop drift because nothing fails when Swift or Go diverges. The parity architecture (<a href="https://github.com/jsmestad/minga/blob/main/docs/design/storyboard.md"><code>docs/design/storyboard.md</code></a>) is being built in two tracks toward v0.1.0:</p>
+          <p>Frontend parity is enforced in code and CI (<a href="https://github.com/jsmestad/minga/blob/main/docs/design/storyboard.md"><code>docs/design/storyboard.md</code></a>):</p>
           <ul>
-            <li><strong>Single source of truth for UI tokens (Track 1 on <code>main</code>, Track 2 building).</strong> Every color is a semantic theme role (<code>minga</code>, <code>you</code>, <code>needs_you</code>, <code>failure</code>, <code>done</code>) defined once and generated into Swift, Go, and Elixir via <code>mix codegen</code>, with a planned guardrail rejecting hard-coded colors outside generated files. Every scenario renders in Catppuccin Frappé (default), AstroDark, and a light theme (Catppuccin Latte or One Light).</li>
-            <li><strong>Side-by-side visual diffs across clients (Track 1 scenario inventory landed; Track 2 factory next).</strong> Today, <code>docs/design/scenarios.toml</code> inventories every screen and flow map with local invariant checks in <code>design/tools/storyboard/check.py</code>. Track 2 wires those scenario IDs into offscreen macOS (wide and narrow) and Go TUI (truecolor and 16-color) renders so every UI pull request publishes visual diffs against <code>main</code>.</li>
-            <li data-status="planned" data-since="v0.1.0"><strong>Automated keyboard and navigation checks (Track 2).</strong> A headless explorer starts in every scenario, fires every active key binding, and verifies invariants in CI: every screen reachable by keyboard alone and mouse alone, at most three <kbd>esc</kbd> or <kbd>q</kbd> presses back to plain editing with focus restored, no dead-end bindings, every error naming a next action, defined empty states, and zero focus-stealing interruptions.</li>
-            <li><strong>Progressive terminal protocol detection.</strong> The Go TUI uses modern terminal features (Kitty keyboard protocol, OSC 52 clipboard, mode 2026 synchronized output) and degrades quietly down to 16-color terminals. <span data-status="planned" data-since="v0.1.0">Next: Kitty graphics for vector gutter marks with two-tone block fallbacks, OSC 8 clickable <code>file:line</code>, OSC 9/777 notifications, OSC 9;4 tab progress, mode 1004 focus dimming, and <code>:checkhealth terminal</code> to inspect what was detected.</span></li>
+            <li><strong>Generated UI tokens &amp; CI guards.</strong> Semantic roles (<code>minga</code>, <code>you</code>, <code>needs_you</code>, <code>failure</code>, <code>done</code>) generate from <code>docs/design_tokens.toml</code> into Swift, Go, and Elixir via <code>mix codegen</code>, enforced by color-literal, state-word, and WCAG contrast tests across Catppuccin Frappé (default), AstroDark, and light themes.</li>
+            <li><strong>Side-by-side visual diffs.</strong> Shared scenario fixtures in <code>docs/design/scenarios.toml</code> render offscreen on macOS (wide/narrow) and in the Go TUI (truecolor/16-color) to flag drift on UI PRs (v0.1.0).</li>
+            <li data-status="planned" data-since="v0.1.0"><strong>Automated keyboard checks.</strong> Headless tests verify keyboard/mouse reachability, &lt;= 3 <kbd>esc</kbd>/<kbd>q</kbd> presses back to editing, defined empty states, and zero focus theft.</li>
+            <li><strong>Progressive terminal support.</strong> Uses Kitty keyboard, OSC 52 clipboard, and mode 2026 sync down to 16-color terminals; <span data-status="planned" data-since="v0.1.0">vector gutter marks, OSC 8 links, OSC 9/777 alerts, OSC 9;4 tab progress, mode 1004 focus dimming, and <code>:checkhealth terminal</code> follow for v0.1.0.</span></li>
           </ul>
         </section>
 
         <section class="essay-section" id="tradeoffs">
-          <h2>4. Real runtime guarantees and real tradeoffs</h2>
+          <h2>4. Runtime guarantees and tradeoffs</h2>
           <ul>
-            <li><strong>One ordered interactive mailbox, isolated background work.</strong> Editor input stays serialized in one process so keystrokes, drawer transitions, and render frames remain strictly ordered, while open buffers, language servers, save hooks, MCP servers, extensions, and agent sessions each run in separate preemptively scheduled processes with separate heaps. Fast model streams coalesce ahead of the editor mailbox so token deltas do not queue ahead of typing.</li>
-            <li><strong>Current staging tradeoffs (worth knowing).</strong> Because staged edits stay off your working tree until you publish, language servers inspect the published open buffer rather than unpublished forks, and today's diff review pane is a syntax-highlighted read-only viewer (switch to the buffer to hand-edit). When an agent runs shell commands such as tests, Minga materializes the staged overlay into a temporary directory with an isolated build path so your main build stays untouched; projects relying on untracked <code>node_modules</code> or <code>.git</code> inside shell tests should keep that boundary in mind.</li>
-            <li><strong>Crash-safe tool recording and retained logs.</strong> Each agent session saves the exact provider conversation beside the visible transcript, captures full shell output beyond the 51 KiB model preview so long test logs survive compaction and restarts, and records each tool call before executing it. If a process dies mid-tool, recovery marks that call indeterminate and never silently replays a side effect (<a href="/docs/session-recovery.html">Session Recovery Reference</a>).</li>
+            <li><strong>Ordered input, isolated background work.</strong> Interactive input stays serialized in one editor mailbox while buffers, LSPs, hooks, MCP servers, extensions, and agents run in preemptive BEAM processes with separate heaps; fast model streams coalesce ahead of typing.</li>
+            <li><strong>Staging boundaries.</strong> Today's review pane is read-only and LSPs inspect published buffers; agent shell commands materialize the overlay into a temp directory skipping <code>.git</code> and <code>node_modules</code>.</li>
+            <li><strong>Crash-safe tools and retained logs.</strong> Tool calls write ahead to disk before execution (never replayed on crash), and full shell output persists beyond the 51 KiB model preview across compactions and restarts (<a href="/docs/session-recovery.html">Session Recovery</a>).</li>
           </ul>
         </section>
 
         <section class="essay-section" id="adrs">
-          <h2>5. Key architectural decisions</h2>
-          <p>Minga documents six structural invariants as Architecture Decision Records in the repository:</p>
+          <h2>5. Architecture Decision Records (0001-0008)</h2>
+          <p>Eight structural invariants recorded in the repository:</p>
 
           <ul class="spec-ledger">
             <li class="spec-row">
               <span class="spec-key spec-key-strong"><a href="/docs/0001-frontend-owns-row-fit.html">ADR-0001</a></span>
-              <span class="spec-detail"><strong>Clients measure their own viewport rows.</strong> Swift and Go calculate how many rows fit their pixel or terminal area once and report that count; the core never guesses rows from pixel math or line spacing.</span>
+              <span class="spec-detail"><strong>Clients own viewport row fit.</strong> Swift and Go measure visible rows and report that count; the core never guesses rows from pixel math.</span>
             </li>
             <li class="spec-row">
               <span class="spec-key spec-key-strong"><a href="/docs/0002-editor-state-transitions-have-explicit-owners.html">ADR-0002</a></span>
-              <span class="spec-detail"><strong>Explicit state owners.</strong> Each sub-state has one owning module that performs its updates, while interactive commands stay serialized in one editor mailbox.</span>
+              <span class="spec-detail"><strong>Explicit state owners.</strong> Each sub-state has one owning writer module while interactive commands serialize in one editor mailbox.</span>
             </li>
             <li class="spec-row">
               <span class="spec-key spec-key-strong"><a href="/docs/0003-extension-code-updates-require-a-new-vm-generation.html">ADR-0003</a></span>
-              <span class="spec-detail"><strong>Extension code updates activate on restart.</strong> Config reloads apply options, bindings, hooks, and advice in place; compiled extension packages activate cleanly on restart rather than mixing old and new module code mid-session.</span>
+              <span class="spec-detail"><strong>Compiled extensions activate on restart.</strong> Config reloads live; compiled packages activate in a fresh VM generation to prevent split-version bugs.</span>
             </li>
             <li class="spec-row">
               <span class="spec-key spec-key-strong"><a href="/docs/0004-products-are-root-applets-over-a-fixed-engine.html">ADR-0004</a></span>
-              <span class="spec-detail"><strong>Programmable workflows over fixed engine owners (v0.1.0 roadmap).</strong> Author readable workflows over existing buffer, agent, and permission boundaries; save to activate; discard when one-off or reuse across projects.</span>
+              <span class="spec-detail"><strong>Task workflows over fixed owners (v0.1.0).</strong> Readable Elixir workflows compose real buffer, agent, and permission primitives without shadow state.</span>
             </li>
             <li class="spec-row">
               <span class="spec-key spec-key-strong"><a href="/docs/0005-frontend-owns-immediate-ui-feedback.html">ADR-0005</a></span>
-              <span class="spec-detail"><strong>Clients own immediate visual motion.</strong> Native clients handle smooth trackpad scrolling and local previews over committed layout data while text edits and cursor position remain authoritative in the core.</span>
+              <span class="spec-detail"><strong>Clients own immediate motion.</strong> Smooth trackpad scrolling and local previews stay native while edits and cursors stay authoritative in the core.</span>
             </li>
             <li class="spec-row">
               <span class="spec-key spec-key-strong"><a href="/docs/0006-the-spine.html">ADR-0006</a></span>
-              <span class="spec-detail" data-status="planned" data-since="v0.1.0" data-pill="off"><strong>The Spine: one keyboard-first UI model across every frontend (Proposed; Catppuccin Frappé default and design inventory landed).</strong> Text, a plain title bar, and one prioritized modeline at rest; one drawer at a time for lists; Twist and Orbit marks (six state words on five shapes) driven by theme roles; per-author undo; BEAM-styled markdown spans; Vim keys preserved in files; safe quit; parity enforced via generated tokens and Storyboard CI (<a href="https://github.com/jsmestad/minga/tree/main/docs/design"><code>docs/design/</code></a>).</span>
+              <span class="spec-detail" data-status="planned" data-since="v0.1.0" data-pill="off"><strong>The Spine (v0.1.0).</strong> One minimal layout across macOS and terminal, on-demand drawers, Twist/Orbit marks, per-author undo, Vim keys preserved in files, and generated token parity (<a href="https://github.com/jsmestad/minga/tree/main/docs/design"><code>docs/design/</code></a>).</span>
+            </li>
+            <li class="spec-row">
+              <span class="spec-key spec-key-strong"><a href="/docs/0007-cua-is-a-key-profile.html">ADR-0007</a></span>
+              <span class="spec-detail"><strong>CUA is a key profile.</strong> Standard desktop shortcuts live in a named allow-list profile without altering core editing commands.</span>
+            </li>
+            <li class="spec-row">
+              <span class="spec-key spec-key-strong"><a href="/docs/0008-terminal-engine.html">ADR-0008</a></span>
+              <span class="spec-detail"><strong>Terminal engine (Proposed).</strong> Selects <code>libghostty-vt</code> in a Zig helper process (<code>libvterm</code> fallback) with the BEAM owning terminal buffers.</span>
             </li>
           </ul>
 
-          <div class="callout">
-            <span class="callout-title">Deep engineering reference</span>
-            <p>For wire opcodes, supervision trees, and contributor contracts, see the <a href="/docs/architecture.html">Full Architecture Spec</a>, <a href="/docs/buffer-aware-agents.html">Buffer-Aware Agents Contract</a>, <a href="/docs/protocol.html">Port Protocol</a>, <a href="/docs/gui_protocol.html">UI Wire Protocol</a>, <a href="/docs/charm_tui.html">Go TUI Architecture</a>, and <a href="/docs/remote_agents.html">Remote Agents</a>.</p>
-          </div>
+          <p class="section-foot-link">Full specs: <a href="/docs/architecture.html">Architecture</a> · <a href="/docs/buffer-aware-agents.html">Buffer-Aware Agents</a> · <a href="/docs/protocol.html">Port Protocol</a> · <a href="/docs/gui_protocol.html">GUI Protocol</a> · <a href="/docs/charm_tui.html">Go TUI</a> · <a href="/docs/remote_agents.html">Remote Agents</a></p>
 
           <div class="actions">
             <a class="btn btn-primary" href="/extending">Extending Minga</a>
             <a class="btn" href="/getting-started">Getting Started</a>
-            <a class="btn" href="/docs/architecture.html">Full API &amp; Spec Docs</a>
           </div>
         </section>
       </div>
