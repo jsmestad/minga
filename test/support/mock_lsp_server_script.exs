@@ -78,7 +78,7 @@ defmodule MockServer do
         "positionEncoding" => position_encoding(),
         "textDocumentSync" => %{
           "openClose" => true,
-          "change" => 1,
+          "change" => if(incremental_sync?(), do: 2, else: 1),
           "save" => true
         },
         "diagnosticProvider" => %{
@@ -323,6 +323,10 @@ defmodule MockServer do
     "--show-message-request" in System.argv()
   end
 
+  defp incremental_sync? do
+    "--incremental-sync" in System.argv()
+  end
+
   defp report_cancellations? do
     "--report-cancellations" in System.argv()
   end
@@ -344,7 +348,9 @@ defmodule MockServer do
     Process.put(:transcript, [event | Process.get(:transcript, [])])
   end
 
-  defp changed_document_text(_uri, [%{"text" => text}]), do: text
+  defp changed_document_text(_uri, [%{"text" => text} = change])
+       when not is_map_key(change, "range"),
+       do: text
 
   defp changed_document_text(uri, changes) do
     document = Process.get(:documents, %{}) |> Map.fetch!(uri)
