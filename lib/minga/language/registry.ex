@@ -1,17 +1,23 @@
 defmodule Minga.Language.Registry do
   @moduledoc """
-  Provides O(1) language catalog lookups for `%Minga.Language{}` definitions registered by config and extension-owned language packs.
+  Single authority for language definitions and filetype detection overrides.
 
-  Backed by ETS with `read_concurrency: true` for lock-free reads on every keystroke, render frame, and comment toggle. Each lookup key stores the language and its contribution source in the same row. The GenServer owns the table lifecycle; reads go directly to ETS.
+  Backed by ETS with `read_concurrency: true` for lock-free reads on every keystroke, render frame, and comment toggle. Each lookup key stores the language (or override filetype) and its contribution source in the same row. The GenServer owns the table lifecycle; reads go directly to ETS.
 
-  ## Lookup functions
+  ## Language lookups
 
   - `get/1` — lookup by language name atom (e.g., `:elixir`)
   - `for_extension/1` — lookup by file extension string (e.g., `"ex"`)
   - `for_filename/1` — lookup by exact filename (e.g., `"Makefile"`)
   - `for_shebang/1` — lookup by shebang interpreter (e.g., `"python3"`)
 
-  ## Runtime registration
+  ## Runtime overrides
+
+  Config and extensions register lightweight filetype overrides via `register_override/2` and `register_shebang_override/2`. Override entries map a pattern directly to a filetype atom without requiring a full `%Minga.Language{}` definition. They live in a separate key namespace (`{:override_ext, _}`, `{:override_filename, _}`, `{:override_shebang, _}`) so they never collide with language-pack entries. Detection checks overrides first, then falls back to language-pack entries.
+
+  Overrides are source-tagged for group removal: `unregister_source/1` removes both language definitions and overrides from the given source, while leaving entries from other sources intact.
+
+  ## Language registration
 
   Extensions register languages via `register/2` with `{:extension, name}` as the source. Reload and unload paths remove the whole `%Minga.Language{}` record, so its names, extensions, filenames, shebangs, devicons, grammar metadata, formatter, and LSP defaults disappear together.
   """
@@ -27,7 +33,7 @@ defmodule Minga.Language.Registry do
   @grammar_aliases Minga.Language.GeneratedAliases.grammar_aliases()
 
   @typedoc "Source that contributed registry entries."
-  @type contribution_source :: :builtin | :config | {:extension, atom()}
+  @type contribution_source :: :builtin | :config | :runtime | {:extension, atom()}
 
   @type register_error :: {:duplicate_key, term(), contribution_source(), contribution_source()}
 
@@ -124,6 +130,129 @@ defmodule Minga.Language.Registry do
   @spec for_shebang(String.t()) :: Language.t() | nil
   def for_shebang(interpreter) when is_binary(interpreter),
     do: lookup_language({:shebang, interpreter})
+
+  # ── Runtime override API ───────────────────────────────────────────────────
+
+  @doc """
+  Registers a runtime filetype override for an extension or exact filename.
+
+  `pattern` can be:
+  - An extension string starting with `.` (e.g., `".astro"`), case-insensitive
+  - An exact filename string (e.g., `"Justfile"`), case-sensitive
+
+  Pass `nil` as the filetype to remove the override.
+
+  ## Examples
+
+      Minga.Language.Registry.register_override(".astro", :astro)
+      Minga.Language.Registry.register_override("Justfile", :just)
+      Minga.Language.Registry.register_override(".astro", nil)
+  """
+  @spec register_override(String.t(), atom() | nil) :: :ok
+  def register_override(pattern, filetype), do: register_override(pattern, filetype, :runtime)
+
+  @doc "Registers a filetype override with an explicit source."
+  @spec register_override(String.t(), atom() | nil, contribution_source()) :: :ok
+  def register_override("." <> ext, nil, _source) do
+    :ets.delete(@table, {:override_ext, String.downcase(ext)})
+    :ok
+  rescue
+    ArgumentError -> :ok
+  end
+
+  def register_override("." <> ext, filetype, source) when is_atom(filetype) do
+    :ets.insert(@table, {{:override_ext, String.downcase(ext)}, filetype, source})
+    :ok
+  rescue
+    ArgumentError -> :ok
+  end
+
+  def register_override(filename, nil, _source) when is_binary(filename) do
+    :ets.delete(@table, {:override_filename, filename})
+    :ok
+  rescue
+    ArgumentError -> :ok
+  end
+
+  def register_override(filename, filetype, source)
+      when is_binary(filename) and is_atom(filetype) do
+    :ets.insert(@table, {{:override_filename, filename}, filetype, source})
+    :ok
+  rescue
+    ArgumentError -> :ok
+  end
+
+  @doc """
+  Registers a runtime shebang interpreter override.
+
+  `interpreter` is the basename of the interpreter (e.g., `"deno"`). Pass `nil` to remove.
+  """
+  @spec register_shebang_override(String.t(), atom() | nil) :: :ok
+  def register_shebang_override(interpreter, filetype),
+    do: register_shebang_override(interpreter, filetype, :runtime)
+
+  @doc "Registers a shebang override with an explicit source."
+  @spec register_shebang_override(String.t(), atom() | nil, contribution_source()) :: :ok
+  def register_shebang_override(interpreter, nil, _source) when is_binary(interpreter) do
+    :ets.delete(@table, {:override_shebang, interpreter})
+    :ok
+  rescue
+    ArgumentError -> :ok
+  end
+
+  def register_shebang_override(interpreter, filetype, source)
+      when is_binary(interpreter) and is_atom(filetype) do
+    :ets.insert(@table, {{:override_shebang, interpreter}, filetype, source})
+    :ok
+  rescue
+    ArgumentError -> :ok
+  end
+
+  @doc "Returns the override filetype for a file extension (without dot, already downcased), or `nil`."
+  @spec lookup_override_extension(String.t()) :: atom() | nil
+  def lookup_override_extension(ext) when is_binary(ext) do
+    :ets.lookup_element(@table, {:override_ext, ext}, 2, nil)
+  rescue
+    ArgumentError -> nil
+  end
+
+  @doc "Returns the override filetype for an exact filename, or `nil`."
+  @spec lookup_override_filename(String.t()) :: atom() | nil
+  def lookup_override_filename(filename) when is_binary(filename) do
+    :ets.lookup_element(@table, {:override_filename, filename}, 2, nil)
+  rescue
+    ArgumentError -> nil
+  end
+
+  @doc "Returns the override filetype for a shebang interpreter, or `nil`."
+  @spec lookup_override_shebang(String.t()) :: atom() | nil
+  def lookup_override_shebang(interpreter) when is_binary(interpreter) do
+    :ets.lookup_element(@table, {:override_shebang, interpreter}, 2, nil)
+  rescue
+    ArgumentError -> nil
+  end
+
+  @doc """
+  Returns all extension and filename overrides in one read, for batch detection.
+
+  Returns a map with `:extensions` and `:filenames` keys, each mapping pattern strings to filetype atoms.
+  """
+  @spec override_path_entries() :: %{
+          extensions: %{String.t() => atom()},
+          filenames: %{String.t() => atom()}
+        }
+  def override_path_entries do
+    exts = :ets.select(@table, [{{{:override_ext, :"$1"}, :"$2", :_}, [], [{{:"$1", :"$2"}}]}])
+
+    fnames =
+      :ets.select(@table, [{{{:override_filename, :"$1"}, :"$2", :_}, [], [{{:"$1", :"$2"}}]}])
+
+    %{extensions: Map.new(exts), filenames: Map.new(fnames)}
+  rescue
+    ArgumentError -> %{extensions: %{}, filenames: %{}}
+  end
+
+  # ── Language catalog API ──────────────────────────────────────────────────
 
   @doc """
   Returns all registered language definitions.

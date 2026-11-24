@@ -2,17 +2,17 @@ defmodule Minga.Language.Filetype do
   @moduledoc """
   Detects a file's language from its path and content.
 
-  Detection priority follows Neovim-style behavior:
+  Detection priority follows Neovim-style behavior, using `Minga.Language.Registry` as the single authority for both runtime overrides and language-pack entries:
 
-  1. Runtime exact filename overrides from `Minga.Language.Filetype.Registry`
-  2. Source-owned exact filename entries from `Minga.Language.Registry`
-  3. Runtime extension overrides from `Minga.Language.Filetype.Registry`
-  4. Source-owned extension entries from `Minga.Language.Registry`
+  1. Runtime exact filename overrides
+  2. Language-pack exact filename entries
+  3. Runtime extension overrides
+  4. Language-pack extension entries
   5. `.env*` / `.envrc*` pattern when `:bash` is still registered
-  6. Shebang line from the first line of content
+  6. Shebang line from the first line of content (runtime override, then language-pack)
   7. Fall back to `:text`
 
-  Built-in language mappings come from registered language definitions in `Minga.Language.Registry`. Runtime overrides stay separate so config and extensions can temporarily redirect a pattern without owning a full language definition.
+  All lookups go through `Minga.Language.Registry` ETS reads. Runtime overrides live in a separate key namespace (`{:override_ext, _}`, `{:override_filename, _}`, `{:override_shebang, _}`) and are checked before language-pack entries.
   """
 
   alias Minga.Language.Registry, as: LangRegistry
@@ -33,34 +33,62 @@ defmodule Minga.Language.Filetype do
   def detect(file_path) when is_binary(file_path) do
     file_path
     |> Path.basename()
-    |> detect_basename(&lookup_registry_filename/1, &lookup_registry_extension/1)
+    |> detect_basename()
   end
 
   @doc """
   Detects the languages of many paths, in input order, with the same priority as `detect/1`.
 
-  Reads the runtime overrides from `Minga.Language.Filetype.Registry` once for the whole list instead of once per path, so a caller that labels thousands of paths for one frame does not make thousands of registry calls.
+  Reads the runtime overrides from `Minga.Language.Registry` once for the whole list instead of once per path, so a caller that labels thousands of paths for one frame does not make thousands of ETS select calls.
   """
   @spec detect_all([String.t() | nil]) :: [filetype()]
   def detect_all(paths) when is_list(paths) do
-    %{filenames: filenames, extensions: extensions} =
-      Minga.Language.Filetype.Registry.path_overrides()
+    %{filenames: filenames, extensions: extensions} = LangRegistry.override_path_entries()
 
     filename_override = &Map.get(filenames, &1, :miss)
     extension_override = &lookup_extension_in(extensions, &1)
 
     Enum.map(paths, fn
-      nil -> :text
-      path -> path |> Path.basename() |> detect_basename(filename_override, extension_override)
+      nil ->
+        :text
+
+      path ->
+        path |> Path.basename() |> detect_basename_with(filename_override, extension_override)
     end)
   end
 
-  @spec detect_basename(
+  @doc """
+  Detects the language from a file path and the first line of content.
+
+  Tries `detect/1` first. If that returns `:text`, attempts shebang detection from `first_line`. Returns `:text` if nothing matches.
+  """
+  @spec detect_from_content(String.t() | nil, String.t() | nil) :: filetype()
+  def detect_from_content(file_path, first_line) do
+    case detect(file_path) do
+      :text -> parse_shebang(first_line)
+      filetype -> filetype
+    end
+  end
+
+  # ── Private ────────────────────────────────────────────────────────────────
+
+  @spec detect_basename(String.t()) :: filetype()
+  defp detect_basename(basename) do
+    with :miss <- lookup_override_filename(basename),
+         :miss <- lookup_lang_registry_filename(basename),
+         :miss <- lookup_override_extension(basename),
+         :miss <- lookup_lang_registry_extension(basename),
+         :miss <- detect_env_pattern(basename) do
+      :text
+    end
+  end
+
+  @spec detect_basename_with(
           String.t(),
           (String.t() -> filetype() | :miss),
           (String.t() -> filetype() | :miss)
         ) :: filetype()
-  defp detect_basename(basename, filename_override, extension_override) do
+  defp detect_basename_with(basename, filename_override, extension_override) do
     with :miss <- filename_override.(basename),
          :miss <- lookup_lang_registry_filename(basename),
          :miss <- extension_override.(basename),
@@ -78,32 +106,27 @@ defmodule Minga.Language.Filetype do
     end
   end
 
-  @doc """
-  Detects the language from a file path and the first line of content.
-
-  Tries `detect/1` first. If that returns `:text`, attempts shebang detection from `first_line`. Returns `:text` if nothing matches.
-  """
-  @spec detect_from_content(String.t() | nil, String.t() | nil) :: filetype()
-  def detect_from_content(file_path, first_line) do
-    case detect(file_path) do
-      :text -> parse_shebang(first_line)
+  @spec lookup_override_filename(String.t()) :: filetype() | :miss
+  defp lookup_override_filename(basename) do
+    case LangRegistry.lookup_override_filename(basename) do
+      nil -> :miss
       filetype -> filetype
     end
   end
 
-  @doc "Returns runtime filename overrides. Registered language definitions live in `Minga.Language.Registry`, so this map is empty in normal builds."
-  @spec filenames() :: %{String.t() => filetype()}
-  def filenames, do: %{}
+  @spec lookup_override_extension(String.t()) :: filetype() | :miss
+  defp lookup_override_extension(basename) do
+    case Path.extname(basename) do
+      "" ->
+        :miss
 
-  @doc "Returns runtime extension overrides. Registered language definitions live in `Minga.Language.Registry`, so this map is empty in normal builds."
-  @spec extensions() :: %{String.t() => filetype()}
-  def extensions, do: %{}
-
-  @doc "Returns runtime shebang overrides. Registered language definitions live in `Minga.Language.Registry`, so this map is empty in normal builds."
-  @spec shebang_interpreters() :: %{String.t() => filetype()}
-  def shebang_interpreters, do: %{}
-
-  # ── Private ────────────────────────────────────────────────────────────────
+      "." <> ext ->
+        case LangRegistry.lookup_override_extension(String.downcase(ext)) do
+          nil -> :miss
+          filetype -> filetype
+        end
+    end
+  end
 
   @spec lookup_lang_registry_filename(String.t()) :: filetype() | :miss
   defp lookup_lang_registry_filename(basename) do
@@ -125,32 +148,6 @@ defmodule Minga.Language.Filetype do
         case LangRegistry.for_extension(String.downcase(ext)) do
           %{name: name} -> name
           nil -> :miss
-        end
-    end
-  rescue
-    ArgumentError -> :miss
-  end
-
-  @spec lookup_registry_filename(String.t()) :: filetype() | :miss
-  defp lookup_registry_filename(basename) do
-    case Minga.Language.Filetype.Registry.lookup_filename(basename) do
-      nil -> :miss
-      filetype -> filetype
-    end
-  rescue
-    ArgumentError -> :miss
-  end
-
-  @spec lookup_registry_extension(String.t()) :: filetype() | :miss
-  defp lookup_registry_extension(basename) do
-    case Path.extname(basename) do
-      "" ->
-        :miss
-
-      "." <> ext ->
-        case Minga.Language.Filetype.Registry.lookup_extension(String.downcase(ext)) do
-          nil -> :miss
-          filetype -> filetype
         end
     end
   rescue
@@ -179,7 +176,7 @@ defmodule Minga.Language.Filetype do
       |> String.trim()
       |> extract_interpreter()
 
-    case Minga.Language.Filetype.Registry.lookup_shebang(interpreter) do
+    case LangRegistry.lookup_override_shebang(interpreter) do
       nil -> lookup_lang_registry_shebang(interpreter)
       filetype -> filetype
     end
