@@ -36,9 +36,9 @@ defmodule Minga.Tool.Manager do
   - `:tool_install_complete` — `%{name: atom(), version: String.t()}`
   - `:tool_install_failed` — `%{name: atom(), reason: term()}`
   - `:tool_uninstall_complete` — `%{name: atom()}`
-  - `:tool_update_check_started` — `%{generation: pos_integer(), count: non_neg_integer()}`
-  - `:tool_update_check_complete` — `%{generation: pos_integer(), updates: [update_result()], errors: [update_error()]}`
-  - `:tool_update_check_cancelled` — `%{generation: pos_integer(), reason: cancel_reason()}`
+  - `:tool_update_check_started`: `%{generation: pos_integer(), count: non_neg_integer()}`
+  - `:tool_update_check_complete`: `%{generation: pos_integer(), updates: [update_result()], errors: [update_error()]}`
+  - `:tool_update_check_cancelled`: `%{generation: pos_integer(), reason: cancel_reason()}`
   """
 
   use GenServer
