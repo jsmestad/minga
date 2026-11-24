@@ -29,19 +29,19 @@
       ~
       ~
       ~
+      ~
+      ~
+      ~
   ╭──────────────────────────────────────────────────────────╮
-  │  Keys SPC a                                         1/2  │
-  │ ?    Ask about line or s  │  D   󰈞 Attach file diagnos  │
-  │ F   󰈞 Attach project file  │  H   󰚩 Read retained Agent  │
-  │ J   󰚩 Inspect queued Agen  │  N   󰚩 Pick agent session   │
-  │ P   󰚩 Discard unpublished  │  Q   󰚩 Answer Agent questi  │
-  │ R   󰚩 Rename Agent sessio  │  S   󰚩 Stop agent session   │
-  │ T   • Pick thinking level  │  a    Toggle agent split   │
-  │ b   󰓩 Attach current buff  │  c   󰈞 Copy file to worksp  │
-  │ e   • Rewrite selection i  │  f   • Queue current input  │
-  │ h   • Resume session       │  j   • Inspect draft attac  │
-  │ k   󰚩 Inspect Agent check  │  m   󰚩 Pick agent model     │
-  │  20 bindings                      Tab next  •  Esc close │
+  │  Keys SPC a                                              │
+  │ ?    Ask about this       │  A   • Code autobiography   │
+  │ S   • Session ›            │  W   • Why this line        │
+  │ a   󰚩 Agent view           │  e   • Rewrite selection    │
+  │ n   • New session          │  p   • Publish edits…       │
+  │ q   • Queue ›              │  r   • Pending reviews      │
+  │ s   • Stop                 │  u   󰚩 Undo all agent edi…  │
+  │ v    Conversation split   │  x   • Context ›            │
+  │  14 bindings                                   Esc close │
   ╰──────────────────────────────────────────────────────────╯
 
  NORMAL │ storyboard.ex                                                               Spaces:2 │ │ Elixir │ 1:1 │ 0%%
@@ -134,65 +134,22 @@
 22 6-119 #8c8fa1 #eff1f5 -
 23 0-5 #5c5f77 #eff1f5 -
 23 6-119 #8c8fa1 #eff1f5 -
-24 0-1 #5c5f77 #eff1f5 -
-24 2-61 #7c7f93 #ccd0da -
-24 62-119 #8c8fa1 #eff1f5 -
-25 0-1 #5c5f77 #eff1f5 -
-25 2-2 #7c7f93 #ccd0da -
-25 3-3 #4c4f69 #ccd0da -
-25 4-9 #4c4f69 #e6e9ef -
-25 10-14 #1e66f5 #e6e9ef bold
-25 15-55 #4c4f69 #eff1f5 -
-25 56-59 #4c4f69 #e6e9ef -
-25 60-60 #4c4f69 #ccd0da -
-25 61-61 #7c7f93 #ccd0da -
-25 62-62 #4c4f69 #000000 -
-25 63-119 #8c8fa1 #eff1f5 -
-26 0-1 #5c5f77 #eff1f5 -
-26 2-2 #7c7f93 #ccd0da -
-26 3-3 #4c4f69 #ccd0da -
-26 4-6 #179299 #acb0be bold
-26 7-7 #4c4f69 #eff1f5 -
-26 8-8 #51afef #ccd0da -
-26 9-28 #4c4f69 #eff1f5 -
-26 29-33 #7c7f93 #ccd0da -
-26 34-36 #179299 #acb0be bold
-26 37-37 #4c4f69 #eff1f5 -
-26 38-38 #61afef #ccd0da -
-26 39-58 #4c4f69 #eff1f5 -
-26 59-60 #4c4f69 #ccd0da -
-26 61-61 #7c7f93 #ccd0da -
-26 62-62 #4c4f69 #000000 -
-26 63-119 #8c8fa1 #eff1f5 -
+24 0-5 #5c5f77 #eff1f5 -
+24 6-119 #8c8fa1 #eff1f5 -
+25 0-5 #5c5f77 #eff1f5 -
+25 6-119 #8c8fa1 #eff1f5 -
+26 0-5 #5c5f77 #eff1f5 -
+26 6-119 #8c8fa1 #eff1f5 -
 27 0-1 #5c5f77 #eff1f5 -
-27 2-2 #7c7f93 #ccd0da -
-27 3-3 #4c4f69 #ccd0da -
-27 4-6 #179299 #acb0be bold
-27 7-7 #4c4f69 #eff1f5 -
-27 8-8 #61afef #ccd0da -
-27 9-28 #4c4f69 #eff1f5 -
-27 29-33 #7c7f93 #ccd0da -
-27 34-36 #179299 #acb0be bold
-27 37-37 #4c4f69 #eff1f5 -
-27 38-38 #e5c07b #ccd0da -
-27 39-58 #4c4f69 #eff1f5 -
-27 59-60 #4c4f69 #ccd0da -
-27 61-61 #7c7f93 #ccd0da -
-27 62-62 #4c4f69 #000000 -
-27 63-119 #8c8fa1 #eff1f5 -
+27 2-61 #7c7f93 #ccd0da -
+27 62-119 #8c8fa1 #eff1f5 -
 28 0-1 #5c5f77 #eff1f5 -
 28 2-2 #7c7f93 #ccd0da -
 28 3-3 #4c4f69 #ccd0da -
-28 4-6 #179299 #acb0be bold
-28 7-7 #4c4f69 #eff1f5 -
-28 8-8 #e5c07b #ccd0da -
-28 9-28 #4c4f69 #eff1f5 -
-28 29-33 #7c7f93 #ccd0da -
-28 34-36 #179299 #acb0be bold
-28 37-37 #4c4f69 #eff1f5 -
-28 38-38 #e5c07b #ccd0da -
-28 39-58 #4c4f69 #eff1f5 -
-28 59-60 #4c4f69 #ccd0da -
+28 4-9 #4c4f69 #e6e9ef -
+28 10-14 #1e66f5 #e6e9ef bold
+28 15-59 #4c4f69 #eff1f5 -
+28 60-60 #4c4f69 #ccd0da -
 28 61-61 #7c7f93 #ccd0da -
 28 62-62 #4c4f69 #000000 -
 28 63-119 #8c8fa1 #eff1f5 -
@@ -201,30 +158,24 @@
 29 3-3 #4c4f69 #ccd0da -
 29 4-6 #179299 #acb0be bold
 29 7-7 #4c4f69 #eff1f5 -
-29 8-8 #e5c07b #ccd0da -
-29 9-28 #4c4f69 #eff1f5 -
+29 8-8 #51afef #ccd0da -
+29 9-28 #4c4f69 #ccd0da -
 29 29-33 #7c7f93 #ccd0da -
 29 34-36 #179299 #acb0be bold
 29 37-37 #4c4f69 #eff1f5 -
-29 38-38 #e5c07b #ccd0da -
-29 39-58 #4c4f69 #eff1f5 -
-29 59-60 #4c4f69 #ccd0da -
+29 38-60 #4c4f69 #ccd0da -
 29 61-61 #7c7f93 #ccd0da -
 29 62-62 #4c4f69 #000000 -
 29 63-119 #8c8fa1 #eff1f5 -
 30 0-1 #5c5f77 #eff1f5 -
 30 2-2 #7c7f93 #ccd0da -
-30 3-3 #4c4f69 #ccd0da -
-30 4-6 #179299 #acb0be bold
+30 3-6 #4c4f69 #ccd0da -
 30 7-7 #4c4f69 #eff1f5 -
-30 8-8 #e5c07b #ccd0da -
-30 9-28 #4c4f69 #eff1f5 -
+30 8-28 #1650c0 #ccd0da -
 30 29-33 #7c7f93 #ccd0da -
 30 34-36 #179299 #acb0be bold
 30 37-37 #4c4f69 #eff1f5 -
-30 38-38 #e5c07b #ccd0da -
-30 39-58 #4c4f69 #eff1f5 -
-30 59-60 #4c4f69 #ccd0da -
+30 38-60 #4c4f69 #ccd0da -
 30 61-61 #7c7f93 #ccd0da -
 30 62-62 #4c4f69 #000000 -
 30 63-119 #8c8fa1 #eff1f5 -
@@ -233,13 +184,12 @@
 31 3-3 #4c4f69 #ccd0da -
 31 4-6 #179299 #acb0be bold
 31 7-7 #4c4f69 #eff1f5 -
-31 8-28 #4c4f69 #ccd0da -
+31 8-8 #e5c07b #ccd0da -
+31 9-28 #4c4f69 #ccd0da -
 31 29-33 #7c7f93 #ccd0da -
 31 34-36 #179299 #acb0be bold
 31 37-37 #4c4f69 #eff1f5 -
-31 38-38 #98c379 #ccd0da -
-31 39-58 #4c4f69 #eff1f5 -
-31 59-60 #4c4f69 #ccd0da -
+31 38-60 #4c4f69 #ccd0da -
 31 61-61 #7c7f93 #ccd0da -
 31 62-62 #4c4f69 #000000 -
 31 63-119 #8c8fa1 #eff1f5 -
@@ -248,23 +198,19 @@
 32 3-3 #4c4f69 #ccd0da -
 32 4-6 #179299 #acb0be bold
 32 7-7 #4c4f69 #eff1f5 -
-32 8-8 #c678dd #ccd0da -
-32 9-28 #4c4f69 #eff1f5 -
+32 8-28 #4c4f69 #ccd0da -
 32 29-33 #7c7f93 #ccd0da -
 32 34-36 #179299 #acb0be bold
 32 37-37 #4c4f69 #eff1f5 -
-32 38-38 #61afef #ccd0da -
-32 39-58 #4c4f69 #eff1f5 -
-32 59-60 #4c4f69 #ccd0da -
+32 38-60 #4c4f69 #ccd0da -
 32 61-61 #7c7f93 #ccd0da -
 32 62-62 #4c4f69 #000000 -
 32 63-119 #8c8fa1 #eff1f5 -
 33 0-1 #5c5f77 #eff1f5 -
 33 2-2 #7c7f93 #ccd0da -
-33 3-3 #4c4f69 #ccd0da -
-33 4-6 #179299 #acb0be bold
+33 3-6 #4c4f69 #ccd0da -
 33 7-7 #4c4f69 #eff1f5 -
-33 8-28 #4c4f69 #ccd0da -
+33 8-28 #1650c0 #ccd0da -
 33 29-33 #7c7f93 #ccd0da -
 33 34-36 #179299 #acb0be bold
 33 37-37 #4c4f69 #eff1f5 -
@@ -281,7 +227,8 @@
 34 29-33 #7c7f93 #ccd0da -
 34 34-36 #179299 #acb0be bold
 34 37-37 #4c4f69 #eff1f5 -
-34 38-60 #4c4f69 #ccd0da -
+34 38-38 #e5c07b #ccd0da -
+34 39-60 #4c4f69 #ccd0da -
 34 61-61 #7c7f93 #ccd0da -
 34 62-62 #4c4f69 #000000 -
 34 63-119 #8c8fa1 #eff1f5 -
@@ -290,13 +237,12 @@
 35 3-3 #4c4f69 #ccd0da -
 35 4-6 #179299 #acb0be bold
 35 7-7 #4c4f69 #eff1f5 -
-35 8-8 #e5c07b #ccd0da -
-35 9-28 #4c4f69 #eff1f5 -
+35 8-8 #98c379 #ccd0da -
+35 9-28 #4c4f69 #ccd0da -
 35 29-33 #7c7f93 #ccd0da -
-35 34-36 #179299 #acb0be bold
+35 34-36 #4c4f69 #ccd0da -
 35 37-37 #4c4f69 #eff1f5 -
-35 38-38 #e5c07b #ccd0da -
-35 39-58 #4c4f69 #eff1f5 -
+35 38-58 #1650c0 #ccd0da -
 35 59-60 #4c4f69 #ccd0da -
 35 61-61 #7c7f93 #ccd0da -
 35 62-62 #4c4f69 #000000 -
@@ -305,8 +251,8 @@
 36 2-2 #7c7f93 #ccd0da -
 36 3-3 #4c4f69 #ccd0da -
 36 4-15 #4c4f69 #e6e9ef -
-36 16-37 #4c4f69 #eff1f5 -
-36 38-59 #4c4f69 #e6e9ef -
+36 16-50 #4c4f69 #eff1f5 -
+36 51-59 #4c4f69 #e6e9ef -
 36 60-60 #4c4f69 #ccd0da -
 36 61-61 #7c7f93 #ccd0da -
 36 62-62 #4c4f69 #000000 -
