@@ -65,6 +65,11 @@ defmodule MingaEditor.Shell.Traditional.ModelineTest do
                "NORMAL Needs you retry.ex ● change 1/2 main +11 Minga working 2/3 1 2 Elixir 240:31"
     end
 
+    test "the filetype is plain modeline text, not the success green that means done" do
+      assert segment(@base_data, :filetype).fg == @theme.modeline.info_fg
+      refute segment(@base_data, :filetype).fg == @theme.modeline.filetype_fg
+    end
+
     test "the zero-buffers launchpad shows no file segment" do
       refute :filename in ids(%{@base_data | file_name: ""})
     end

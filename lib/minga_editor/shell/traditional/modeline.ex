@@ -753,10 +753,11 @@ defmodule MingaEditor.Shell.Traditional.Modeline do
   defp filetype_segment(ctx) do
     label = filetype_label(ctx.data.filetype)
 
+    # Plain modeline text: the theme's filetype colour is its success green, and green means done (docs/design/themes.md).
     segment = %Segment{
       id: :filetype,
       text: label,
-      fg: ctx.theme.modeline.filetype_fg,
+      fg: ctx.info_fg,
       bg: ctx.bar_bg,
       drop: @drop_filetype,
       label: label

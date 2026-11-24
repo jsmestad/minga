@@ -115,7 +115,6 @@ pairs = [
   "#179299 on #acb0be",
   "#1e66f5 on #e6e9ef",
   "#1e66f5 on #eff1f5",
-  "#40a02b on #e6e9ef",
   "#40a02b on #eff1f5",
   "#7287fd on #ccd0da",
   "#7c7f93 on #eff1f5",
@@ -162,7 +161,7 @@ reason = "The entry block is centred in the panel, so its inset is not the panel
 issue = 4044
 
 [[exception]]
-scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey"]
+scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader"]
 frontend = "macos"
 part = "breadcrumb.segment"
 rule = "contrast"
@@ -174,7 +173,7 @@ reason = "The breadcrumb.segment text misses 4.5:1 in this theme."
 issue = 4137
 
 [[exception]]
-scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey"]
+scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader"]
 frontend = "macos"
 part = "breadcrumb.segment"
 rule = "contrast"
@@ -186,7 +185,7 @@ reason = "The breadcrumb.segment text misses 4.5:1 in this theme."
 issue = 4137
 
 [[exception]]
-scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey"]
+scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader"]
 frontend = "macos"
 part = "breadcrumb.segment"
 rule = "contrast"
@@ -257,45 +256,12 @@ scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey
 frontend = "macos"
 part = "modeline.segment"
 rule = "contrast"
-theme = "astrodark"
-pairs = [
-  "#676971 on #111317",
-  "#6f7179 on #111317",
-  "#767982 on #111317",
-  "#9b59b6 on #111317",
-]
-reason = "The modeline.segment text misses 4.5:1 in this theme."
-issue = 4137
-
-[[exception]]
-scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey"]
-frontend = "macos"
-part = "modeline.segment"
-rule = "contrast"
-theme = "catppuccin_frappe"
-pairs = [
-  "#7f86a1 on #292c3c",
-  "#878eab on #292c3c",
-  "#9b59b6 on #292c3c",
-]
-reason = "The modeline.segment text misses 4.5:1 in this theme."
-issue = 4137
-
-[[exception]]
-scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey"]
-frontend = "macos"
-part = "modeline.segment"
-rule = "contrast"
 theme = "catppuccin_latte"
 pairs = [
-  "#7a7d91 on #e6e9ef",
-  "#828598 on #e6e9ef",
-  "#8a8d9f on #e6e9ef",
-  "#9194a5 on #e6e9ef",
-  "#9b59b6 on #e6e9ef",
+  "#8839ef on #e6e9ef",
   "#eff1f5 on #1e66f5",
 ]
-reason = "The modeline.segment text misses 4.5:1 in this theme."
+reason = "The modeline.segment text misses 4.5:1 in this theme: the mode pill, and Minga's words in the minga role (4.45:1)."
 issue = 4137
 
 [[exception]]
