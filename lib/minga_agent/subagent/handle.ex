@@ -8,7 +8,7 @@ defmodule MingaAgent.Subagent.Handle do
   @type status :: :running | :completed | :failed | :cancelled | :interrupted
 
   @typedoc "A file change produced by a child worktree."
-  @type change :: MingaAgent.Subagent.Worktree.change()
+  @type change :: {:added | :modified | :deleted, String.t()}
 
   @enforce_keys [:session_id, :pid, :task, :started_at]
   defstruct [

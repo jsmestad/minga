@@ -17,7 +17,6 @@ defmodule MingaAgent.ChildWorkflowIntegrationTest do
   @moduletag timeout: 30_000
 
   setup do
-    # Create a temp git repo as the "project"
     tmp = Path.join(System.tmp_dir!(), "minga-e2e-#{System.unique_integer([:positive])}")
     File.mkdir_p!(tmp)
 
@@ -156,8 +155,7 @@ defmodule MingaAgent.ChildWorkflowIntegrationTest do
       assert reader_result.changes == nil
 
       # Writer has collected changes from the worktree
-      assert is_list(writer_result.changes)
-      assert length(writer_result.changes) > 0
+      assert [_ | _] = writer_result.changes
 
       change_paths = Enum.map(writer_result.changes, fn {_action, path} -> path end)
       assert "lib/app.ex" in change_paths
@@ -173,7 +171,6 @@ defmodule MingaAgent.ChildWorkflowIntegrationTest do
                  changeset
                )
 
-      # Verify the changeset reflects the child's work
       assert {:ok, content} = Changeset.read_file(changeset, "lib/app.ex")
       assert content =~ ":updated"
 

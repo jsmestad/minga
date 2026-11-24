@@ -374,7 +374,7 @@ defmodule MingaAgent.SessionManagerChildLifecycleTest do
       assert completed.status == :completed
 
       assert_raise FunctionClauseError, fn ->
-        apply(Handle, :complete, [completed, "again"])
+        Handle.complete(completed, "again")
       end
     end
 
@@ -419,7 +419,7 @@ defmodule MingaAgent.SessionManagerChildLifecycleTest do
       assert failed.status == :failed
 
       assert_raise FunctionClauseError, fn ->
-        apply(Handle, :fail, [failed, :crash_again])
+        Handle.fail(failed, :crash_again)
       end
     end
   end

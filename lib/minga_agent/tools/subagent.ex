@@ -101,20 +101,21 @@ defmodule MingaAgent.Tools.Subagent do
     parent_session = Keyword.get(opts, :parent_session)
     model = Keyword.get(opts, :model)
 
-    with {:ok, session_opts} <- session_opts(opts) do
-      sm_opts =
-        [session_opts: session_opts, model: model]
-        |> maybe_put(:worktree_path, Keyword.get(opts, :worktree_path))
-        |> maybe_put(:worktree_base_sha, Keyword.get(opts, :worktree_base_sha))
+    case session_opts(opts) do
+      {:ok, session_opts} ->
+        sm_opts =
+          [session_opts: session_opts, model: model]
+          |> maybe_put(:worktree_path, Keyword.get(opts, :worktree_path))
+          |> maybe_put(:worktree_base_sha, Keyword.get(opts, :worktree_base_sha))
 
-      case SessionManager.start_background_subagent(manager, parent_session, task, sm_opts) do
-        {:ok, %Handle{} = handle} ->
-          {:ok, background_result(handle)}
+        case SessionManager.start_background_subagent(manager, parent_session, task, sm_opts) do
+          {:ok, %Handle{} = handle} ->
+            {:ok, background_result(handle)}
 
-        {:error, reason} ->
-          {:error, "Failed to start background subagent: #{inspect(reason)}"}
-      end
-    else
+          {:error, reason} ->
+            {:error, "Failed to start background subagent: #{inspect(reason)}"}
+        end
+
       {:error, {:provider_resolution_failed, reason}} ->
         {:error, "Failed to resolve subagent provider: #{reason}"}
     end

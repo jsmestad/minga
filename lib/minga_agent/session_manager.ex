@@ -278,15 +278,11 @@ defmodule MingaAgent.SessionManager do
           end
 
         {_action, path} ->
-          case File.read(Path.join(wt_path, path)) do
-            {:ok, content} ->
-              case Changeset.write_file(changeset_pid, path, content) do
-                :ok -> {:ok, path, :written}
-                {:error, reason} -> {:error, path, reason}
-              end
-
-            {:error, reason} ->
-              {:error, path, reason}
+          with {:ok, content} <- File.read(Path.join(wt_path, path)),
+               :ok <- Changeset.write_file(changeset_pid, path, content) do
+            {:ok, path, :written}
+          else
+            {:error, reason} -> {:error, path, reason}
           end
       end)
 
