@@ -33,7 +33,7 @@ reason = "Follows from the centred key column above: the gap depends on the wide
 issue = 4044
 
 [[exception]]
-scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey"]
+scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey", "start.project_switcher.empty"]
 frontend = "tui"
 part = "glyph"
 rule = "contrast"
@@ -47,7 +47,7 @@ reason = "Empty-line tildes, fold marks, separators and icon colours miss 3:1 in
 issue = 4137
 
 [[exception]]
-scenario = ["edit.visual", "edit.whichkey.leader", "minga.whichkey"]
+scenario = ["edit.visual", "edit.whichkey.leader", "minga.whichkey", "start.project_switcher.empty"]
 frontend = "tui"
 part = "glyph"
 rule = "contrast"
@@ -59,7 +59,7 @@ reason = "Empty-line tildes, fold marks, separators and icon colours miss 3:1 in
 issue = 4137
 
 [[exception]]
-scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey"]
+scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey", "start.project_switcher.empty"]
 frontend = "tui"
 part = "glyph"
 rule = "contrast"
@@ -78,7 +78,7 @@ reason = "Empty-line tildes, fold marks, separators and icon colours miss 3:1 in
 issue = 4137
 
 [[exception]]
-scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey"]
+scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey", "start.project_switcher.empty"]
 frontend = "tui"
 part = "text"
 rule = "contrast"
@@ -91,7 +91,7 @@ reason = "Syntax colours, muted comment and gutter text, separators and chips mi
 issue = 4137
 
 [[exception]]
-scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey"]
+scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey", "start.project_switcher.empty"]
 frontend = "tui"
 part = "text"
 rule = "contrast"
@@ -105,7 +105,7 @@ reason = "Syntax colours, muted comment and gutter text, separators and chips mi
 issue = 4137
 
 [[exception]]
-scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey"]
+scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey", "start.project_switcher.empty"]
 frontend = "tui"
 part = "text"
 rule = "contrast"
@@ -124,6 +124,46 @@ pairs = [
   "#eff1f5 on #1e66f5",
 ]
 reason = "Syntax colours, muted comment and gutter text, separators and chips miss 4.5:1 in this theme."
+issue = 4137
+
+[[exception]]
+scenario = "start.project_switcher.empty"
+frontend = "tui"
+part = "glyph"
+rule = "contrast"
+theme = "catppuccin_frappe"
+pairs = ["#8caaee on #626880"]
+reason = "The picker's selected-row marker misses 3:1 on the popup selection colour in this theme."
+issue = 4137
+
+[[exception]]
+scenario = "start.project_switcher.empty"
+frontend = "tui"
+part = "text"
+rule = "contrast"
+theme = "catppuccin_frappe"
+pairs = ["#c6d0f5 on #626880"]
+reason = "The picker's selected-row text misses 4.5:1 on the popup selection colour in this theme."
+issue = 4137
+
+[[exception]]
+scenario = "start.project_switcher.empty"
+frontend = "tui"
+part = "glyph"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = ["#1e66f5 on #acb0be"]
+reason = "The picker's selected-row marker misses 3:1 on the popup selection colour in this theme."
+issue = 4137
+
+[[exception]]
+scenario = "start.project_switcher.empty"
+frontend = "tui"
+part = "text"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = ["#4c4f69 on #acb0be"]
+reason = "The picker's selected-row text misses 4.5:1 on the popup selection colour in this theme."
 issue = 4137
 
 # ---- macOS ---------------------------------------------------------------------------------------------------
