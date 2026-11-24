@@ -44,7 +44,7 @@ Press `SPC` (or any prefix) and pause: which-key shows what comes next, with liv
 
 ## 11. Keys are chords and mnemonics
 
-Keys are chords you can say out loud, not shortcuts you have to memorise. Mnemonic leader sequences come first (`SPC a r`, "Minga, review"), then Vim grammar inside buffers, then single mnemonic letters in special buffers. Modifiers appear only where letters have to type text, and only from established conventions; macOS platform keys are aliases, never the only way; three-modifier chords, ⌃⌘ and ⌥⌘ combinations and function keys are never used. **Doom first:** where Doom Emacs has a binding, Minga matches it, and Neovim conventions come second. The full grammar and the allow-list are in [keys](keys.md#the-key-grammar); a test with a shrinking baseline keeps the keymap from drifting.
+Keys are chords you can say out loud, not shortcuts you have to memorise. Mnemonic leader sequences come first (`SPC a r`, "Minga, review"), then Vim grammar inside buffers, then single mnemonic letters in special buffers. Modifiers appear only where letters have to type text, and only from established conventions; macOS platform keys are aliases, never the only way; three-modifier chords, ⌃⌘ and ⌥⌘ combinations and function keys are never used. **Doom first:** where Doom Emacs has a binding, Minga matches it, and Neovim conventions come second. The full grammar and the allow-list are in [keys](keys.md#the-key-grammar); a test with a shrinking baseline keeps the keymap from drifting. Users who choose the CUA editing model get desktop conventions as a documented profile ([ADR-0007](../adr/0007-cua-is-a-key-profile.md)).
 
 ## The test that keeps both frontends honest
 
