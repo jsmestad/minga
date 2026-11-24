@@ -1,6 +1,10 @@
+import os as _os
+TOOLS = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+BOARDS = _os.environ.get("BOARDS_DIR", _os.path.join(TOOLS, "..", "boards"))  # committed boards, read only
+OUT_DIR = _os.environ.get("OUT_DIR", _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "out"))
+_os.makedirs(OUT_DIR, exist_ok=True)
 import os
-OUT=os.path.join(os.environ.get("OUT_DIR","./out"),"")
-os.makedirs(OUT,exist_ok=True)
+OUT=OUT_DIR+'/'
 P="#a463e6";A="#f2b544";G="#a5a39e";R="#e5707a";D="#7fbf7a";BG="#1e1f24"
 def st(lab,size=14):
     body={
@@ -10,10 +14,10 @@ def st(lab,size=14):
     "Failed":f'<rect x="4.6" y="4.6" width="6.8" height="6.8" rx="1.2" fill="{R}" transform="rotate(45 8 8)"/>',
     "Done":f'<circle cx="8" cy="8" r="3.4" fill="{D}"/>'}[lab]
     return f'<svg width="{size}" height="{size}" viewBox="0 0 16 16" aria-label="{lab}" style="flex:none">{body}</svg>'
-H=26
-def tw_head(bg=BG): return f'<svg width="10" height="{H}" viewBox="0 0 10 {H}" aria-label="Minga changed these lines" style="display:block;overflow:visible"><path d="M7 5 C7 11, 3 11, 3 17 L3 {H}" fill="none" stroke="#6b3fa3" stroke-width="2.6" stroke-linecap="round"/><path d="M3 5 C3 11, 7 11, 7 17 L7 {H}" fill="none" stroke="{bg}" stroke-width="5" stroke-linecap="round"/><path d="M3 5 C3 11, 7 11, 7 17 L7 {H}" fill="none" stroke="#a463e6" stroke-width="2.6" stroke-linecap="round"/></svg>'
+H=18
+def tw_head(bg=BG): return f'<svg width="10" height="{H}" viewBox="0 0 10 {H}" aria-label="Minga changed these lines" style="display:block;overflow:visible"><path d="M7 3 C7 7.5, 3 7.5, 3 12 L3 {H}" fill="none" stroke="#6b3fa3" stroke-width="2.6" stroke-linecap="round"/><path d="M3 3 C3 7.5, 7 7.5, 7 12 L7 {H}" fill="none" stroke="{bg}" stroke-width="5" stroke-linecap="round"/><path d="M3 3 C3 7.5, 7 7.5, 7 12 L7 {H}" fill="none" stroke="#a463e6" stroke-width="2.6" stroke-linecap="round"/></svg>'
 def tw_body(shade="#6b3fa3"): return f'<svg width="10" height="{H}" viewBox="0 0 10 {H}" aria-hidden="true" style="display:block"><path d="M3 0 L3 {H}" stroke="{shade}" stroke-width="2.6"/><path d="M7 0 L7 {H}" stroke="#a463e6" stroke-width="2.6"/></svg>'
-def tw_last(shade="#6b3fa3"): return f'<svg width="10" height="{H}" viewBox="0 0 10 {H}" aria-hidden="true" style="display:block"><path d="M3 0 L3 19" stroke="{shade}" stroke-width="2.6" stroke-linecap="round"/><path d="M7 0 L7 19" stroke="#a463e6" stroke-width="2.6" stroke-linecap="round"/></svg>'
+def tw_last(shade="#6b3fa3"): return f'<svg width="10" height="{H}" viewBox="0 0 10 {H}" aria-hidden="true" style="display:block"><path d="M3 0 L3 13" stroke="{shade}" stroke-width="2.6" stroke-linecap="round"/><path d="M7 0 L7 13" stroke="#a463e6" stroke-width="2.6" stroke-linecap="round"/></svg>'
 def you(): return f'<svg width="10" height="{H}" viewBox="0 0 10 {H}" aria-label="Your uncommitted change" style="display:block"><path d="M5 0 L5 {H}" stroke="#4f9fe0" stroke-width="1.5"/></svg>'
 def kw(t): return f'<span style="color:#ff7ab2">{t}</span>'
 def mod(t): return f'<span style="color:#dabaff">{t}</span>'
@@ -48,14 +52,14 @@ def code_lines(n=None, cursor_msg=True):
     rows=CODE if n is None else CODE[:n]
     for num,flag,mark,text,extra in rows:
         sign=''
-        if flag=="err": sign=f'<span style="display:block;width:3px;height:12px;border-radius:1.5px;background:{R};margin:0 auto"></span>'
+        if flag=="err": sign=f'<span style="display:block;width:3px;height:11px;border-radius:1.5px;background:{R};margin:0 auto"></span>'
         cur=''
         bg=''
         if extra=='minga':
-            cur=f'<span style="display:inline-block;width:2px;height:16px;background:{P};vertical-align:-3px;margin-left:1px"></span><span style="margin-left:6px;padding:0 6px;border-radius:4px;background:{P};color:#fff;font-family:-apple-system,sans-serif;font-size:10.5px;line-height:16px;vertical-align:1px">Minga</span>'
+            cur=f'<span style="display:inline-block;width:2px;height:15px;background:{P};vertical-align:-3px;margin-left:1px"></span><span style="margin-left:6px;padding:0 6px;border-radius:4px;background:{P};color:#fff;font-family:-apple-system,sans-serif;font-size:10px;line-height:14px;vertical-align:1px">Minga</span>'
         if extra=='you':
             bg='background:rgba(255,255,255,0.035);'
-            cur=f'<span style="display:inline-block;width:8px;height:17px;background:#6cb8f5;opacity:0.85;vertical-align:-4px;margin-left:1px"></span>'
+            cur=f'<span style="display:inline-block;width:8px;height:15px;background:#6cb8f5;opacity:0.85;vertical-align:-3px;margin-left:1px"></span>'
             if cursor_msg: cur+=f'<span style="margin-left:28px;color:#8e8e93;font-style:italic;font-family:-apple-system,sans-serif;font-size:12px">elixir: undefined function limit_label/1</span>'
         numc = "#c9c7c2" if extra=='you' else "#7a7c85"
         out.append(f'<div class="ln" style="{bg}"><span class="num" style="color:{numc}">{num}</span><span class="sign">{sign}</span><span class="bar">{mark}</span><span class="code">{text}{cur}</span></div>')
@@ -101,10 +105,10 @@ HEAD='''<!doctype html>
 <style>
 body{{margin:0}}
 a{{color:#ecebe8;text-decoration:none}}a:hover{{color:#ffffff}}
-.ln{{display:flex;align-items:center;height:26px}}
+.ln{{display:flex;align-items:center;height:18px}}
 .num{{width:56px;text-align:right;padding-right:8px;flex:none}}
 .sign{{width:8px;flex:none;display:flex;align-items:center}}
-.bar{{width:10px;height:26px;flex:none;margin:0 4px 0 2px;position:relative}}
+.bar{{width:10px;height:18px;flex:none;margin:0 4px 0 2px;position:relative}}
 .code{{padding-left:10px;white-space:pre}}
 .wk{{display:flex;align-items:baseline;gap:10px;height:25px;font-size:13px}}
 .wk .k{{font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:13px;width:22px;text-align:right;flex:none}}

@@ -18,7 +18,7 @@
 #              missing:       no design and no implementation.
 #              deferred:      needs a rethink before it is designed; the board, if any, is a placeholder.
 #              removed:       exists today; the Spine takes it away (notes say where its job goes).
-#   boards     design canvas board files when designed: { macos = "...", tui = "..." }, plus
+#   boards     board files in design/boards/ when designed (check.py fails on a missing file): { macos = "...", tui = "..." }, plus
 #              optional mouse / mouse_tui boards that show the screen's mouse path playing, and an
 #              optional reference board for the surface's chosen visual design.
 #   exits      every way out, by key and by click:

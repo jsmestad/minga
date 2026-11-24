@@ -1,3 +1,8 @@
+import os as _os
+TOOLS = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+BOARDS = _os.environ.get("BOARDS_DIR", _os.path.join(TOOLS, "..", "boards"))  # committed boards, read only
+OUT_DIR = _os.environ.get("OUT_DIR", _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "out"))
+_os.makedirs(OUT_DIR, exist_ok=True)
 import sys; sys.path.insert(0,'.')
 from grid import *
 W,H=150,38
@@ -12,16 +17,16 @@ g.segs(4,2,[("│",T)])
 g.segs(5,2,[("├",T),("─",T),(" Unreviewed",TXT,None,"b"),("  2 changes in 2 files",DIM)])
 SEL="#2b3646"
 g.bgrow(6,1,LW-2,SEL); g.put(6,1,"▌",BLUE,SEL)
-g.segs(6,2,[("│",T),("  ",None),("├",T),("─",T),(" ",None),("╳",PURPLED),(" ",None),("session/chrome_state.ex",TXT,None,"b")]); g.put(6,LW-4,"1",SUB)
+g.segs(6,2,[("│",T),("  ",None),("├",T),("─",T),(" ",None),("session/chrome_state.ex",TXT,None,"b")]); g.put(6,LW-4,"1",SUB)
 g.segs(7,2,[("│",T),("  ",None),("│",T),("  ",None),("└",T),("─",T),(" @@ 231 ",DIM),("replaced 1 line with 3",SUB)]); g.put(7,LW-10,"current",BLUE)
-g.segs(8,2,[("│",T),("  ",None),("└",T),("─",T),(" ",None),("╳",PURPLED),(" ",None),("minga_agent/usage_limit.ex",TXT)]); g.put(8,LW-6,"new",GREEN)
+g.segs(8,2,[("│",T),("  ",None),("└",T),("─",T),(" ",None),("minga_agent/usage_limit.ex",TXT)]); g.put(8,LW-6,"new",GREEN)
 g.segs(9,2,[("│",T)])
 g.segs(10,2,[("└",T),("─",T),(" Kept",TXT,None,"b"),("  2 changes",DIM)])
-g.segs(11,2,[("   ",None),("├",T),("─",T),(" ",None),("│",GHOST),(" ",None),("minga_agent/retry.ex",SUB)]); g.segs(11,LW-9,[("+6",GREEN),(" −9",RED)])
-g.segs(12,2,[("   ",None),("└",T),("─",T),(" ",None),("│",GHOST),(" ",None),("session/chrome_state.ex",SUB)]); g.put(12,LW-8,"@@ 239",DIM)
+g.segs(11,2,[("   ",None),("├",T),("─",T),(" ",None),("minga_agent/retry.ex",SUB)]); g.segs(11,LW-9,[("+6",GREEN),(" −9",RED)])
+g.segs(12,2,[("   ",None),("└",T),("─",T),(" ",None),("session/chrome_state.ex",SUB)]); g.put(12,LW-8,"@@ 239",DIM)
 g.put(14,2,"─"*(LW-4),"#33353d")
 g.put(15,2,"Also in the quickfix list:",DIM); g.segs(15,29,[(":copen",PURPLE)])
-g.put(16,2,"In a file: ",DIM); g.segs(16,13,[("]h",TXT,None,"b"),(" next  ",DIM),("SPC g k",TXT,None,"b"),(" keep",DIM)])
+g.put(16,2,"In a file: ",DIM); g.segs(16,13,[("]h",TXT,None,"b"),(" next  ",DIM),("SPC a y",TXT,None,"b"),(" keep",DIM)])
 # right pane
 RX=LW
 g.box(0,RX,36,W-RX,BORDER,BG,title=[("chrome_state.ex",TXT,"b"),("  ",DIM),("lib/minga_editor/session",DIM,"lk")],right=[("change 1 of 2",PURPLE)])
@@ -53,8 +58,8 @@ body=term(g.html(),"SPC a r: review as a buffer","two panes, one border style, f
 annot="""<h4>What renders what</h4>
 <div class="it"><span class="k">Two panes</span> each a <code>RoundedBorder</code>. Only the focused pane's border takes the focus colour; the other stays <code>PopupBorder</code>. That is the whole separation scheme, everywhere.</div>
 <div class="it"><span class="k">Header path</span> <code>lib/minga_editor/session</code> is an OSC 8 hyperlink (Lip Gloss v2 <code>Hyperlink</code>) to the folder.</div>
-<div class="it"><span class="k">Review tree</span> <code>lipgloss/tree</code> with <code>tree.RoundedEnumerator</code>-style connectors (├─ └─ │) for task › section › file › change, in a dim enumerator style. Files fold with <code>za</code> like any Vim fold. The two-tone twist cell marks Minga's unreviewed work; a faint │ marks kept work.</div>
+<div class="it"><span class="k">Review tree</span> <code>lipgloss/tree</code> with <code>tree.RoundedEnumerator</code>-style connectors (├─ └─ │) for task › section › file › change, in a dim enumerator style. Files fold with <code>za</code> like any Vim fold. Every row is Minga's work, so list rows carry no twist; the twist lives only in the code gutter. The section names say what is unreviewed and what is kept.</div>
 <div class="it"><span class="k">Diff</span> rendered in place: removed lines on a red-tinted background, added lines on a green tint, the twist ribbon in the authorship column. Tints come from the theme's diff roles, so they survive 256 colours.</div>
 <div class="it"><span class="k">Keys</span> in the bottom border of the review buffer only. In the file, y n = q stay Vim.</div>
 <div class="it"><span class="k">Header</span> file name bold, path dim, change position in Minga's purple, all inside the top border.</div>"""
-open(os.path.join(OUT_DIR,"V41TuiReview.dc.html"),"w").write(page("TUI: review",body,annot))
+open(OUT_DIR+"/V41TuiReview.dc.html","w").write(page("TUI: review",body,annot))

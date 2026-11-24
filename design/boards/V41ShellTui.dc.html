@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>V4.1: the built-in terminal in the TUI</title>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#ecebe8;text-decoration:none}a:hover{color:#ffffff}
+.mono{font-family:ui-monospace,'SF Mono',Menlo,monospace}
+</style>
+</helmet>
+<div style="width:1440px;height:900px;box-sizing:border-box;background:#17181c;color:#ecebe8;font-family:-apple-system,'SF Pro Text',system-ui,sans-serif;border-radius:12px;overflow:hidden;padding:22px 26px">
+  <div style="display:flex;align-items:baseline;gap:14px;margin-bottom:14px"><span style="font-size:17px;font-weight:700">The terminal in the terminal</span><span style="color:#8f8d88;font-size:12.5px">Go TUI · Bubble Tea and Lip Gloss · same blocks, glyphs and strands as macOS</span></div>
+  <div style="display:flex;gap:20px;align-items:flex-start">
+    <div style="width:700px;background:#101115;border-radius:10px;padding:10px 12px;box-shadow:0 0 0 1px rgba(255,255,255,0.08)">
+  <div style="font-size:11px;color:#8f8d88;margin-bottom:6px;font-family:-apple-system,sans-serif">SPC o t · your terminal drawer, a failed run</div>
+  <div style="font-family:Menlo,monospace;font-size:12.5px;line-height:16px;white-space:pre;color:#c9c7c2"><span style="color:#55575f">  24 </span><span style="color:#ff7ab2">test</span><span style="color:#a6d189"> "the message names the plan and the reset time"</span><span style="color:#ff7ab2"> do</span>
+<span style="color:#55575f">  25 </span>    assert UsageLimit.message(error()) =~ <span style="color:#a6d189">"resets at"</span>
+<span style="background:#212227"><span style="color:#6cb8f5"> NORMAL </span> usage_limit_test.exs<span style="color:#55575f"> │ </span>main +11                                        25:7 </span>
+<span style="color:#5b5d66">╭─ </span><span style="color:#ecebe8">terminal 1 · ~/code/minga</span><span style="color:#5b5d66"> ──────────────────────────────────────────────────────╮</span>
+<span style="color:#5b5d66">│ </span><span style="color:#7fbf7a">●</span> <span style="color:#4f9fe0">│</span> <span style="color:#6cb8f5">~/code/minga</span> <span style="color:#8f8d88">main</span> <span style="color:#7fbf7a">❯</span> <span style="color:#ecebe8">mix test test/minga_agent/retry_test.exs</span>        <span style="color:#8f8d88">● 0 1.8s</span><span style="color:#5b5d66"> │</span>
+<span style="color:#5b5d66">│ </span>  <span style="color:#4f9fe0"> </span> <span style="color:#8f8d88">12 tests, 0 failures</span>                                                        <span style="color:#5b5d66"> │</span>
+<span style="color:#5b5d66">│ </span><span style="color:#55575f">────────────────────────────────────────────────────────────────────────────────</span><span style="color:#5b5d66"> │</span>
+<span style="color:#5b5d66">│ </span><span style="background:#2a1d22"><span style="color:#e5707a">◆</span> <span style="color:#4f9fe0">│</span> <span style="color:#6cb8f5">~/code/minga</span> <span style="color:#8f8d88">main</span> <span style="color:#7fbf7a">❯</span> <span style="color:#ecebe8">mix test test/minga_agent/usage_limit_test.exs</span>  <span style="color:#e5707a">◆ 2 2.3s</span></span><span style="color:#5b5d66"> │</span>
+<span style="color:#5b5d66">│ </span>    <span style="color:#e5707a">1) test the message names the plan and the reset time</span>                       <span style="color:#5b5d66"> │</span>
+<span style="color:#5b5d66">│ </span>       <span style="color:#c9c7c2;text-decoration:underline;text-decoration-color:color-mix(in srgb,#c9c7c2 45%,transparent);text-underline-offset:3px">test/minga_agent/usage_limit_test.exs:25</span>                                 <span style="color:#5b5d66"> │</span>
+<span style="color:#5b5d66">│ </span>       <span style="color:#c9c7c2">Assertion with =~ failed</span>                                                 <span style="color:#5b5d66"> │</span>
+<span style="color:#5b5d66">│ </span>    <span style="color:#e5707a">9 tests, 1 failure</span>                                                          <span style="color:#5b5d66"> │</span>
+<span style="color:#5b5d66">│ </span><span style="color:#55575f">────────────────────────────────────────────────────────────────────────────────</span><span style="color:#5b5d66"> │</span>
+<span style="color:#5b5d66">│ </span>    <span style="color:#6cb8f5">~/code/minga</span> <span style="color:#8f8d88">main</span> <span style="color:#7fbf7a">❯</span> <span style="color:#ecebe8">█</span>                                                       <span style="color:#5b5d66"> │</span>
+<span style="color:#5b5d66">╰─ </span><span style="color:#6cb8f5">⌃\ ⌃N</span><span style="color:#8f8d88"> normal · </span><span style="color:#6cb8f5">]]</span><span style="color:#8f8d88"> next · </span><span style="color:#6cb8f5">SPC o t</span><span style="color:#8f8d88"> hide</span><span style="color:#5b5d66"> ──────────────────────────────────────────╯</span>
+<span style="background:#25262c"><span style="background:#7fbf7a"><span style="color:#101115"> TERM </span></span> <span style="color:#ecebe8">*terminal 1*</span><span style="color:#55575f"> │ </span>~/code/minga<span style="color:#55575f"> │ </span><span style="color:#e5707a">◆ exit 2</span> <span style="color:#8f8d88">mix test</span>                      <span style="color:#8f8d88">zsh 4182</span> </span></div></div>
+    <div style="width:700px;background:#101115;border-radius:10px;padding:10px 12px;box-shadow:0 0 0 1px rgba(255,255,255,0.08)">
+  <div style="font-size:11px;color:#8f8d88;margin-bottom:6px;font-family:-apple-system,sans-serif">SPC a w · *minga-shell*, a pending approval, menu open on the failed block</div>
+  <div style="font-family:Menlo,monospace;font-size:12.5px;line-height:16px;white-space:pre;color:#c9c7c2"><span style="color:#5b5d66">╭─ </span><span style="color:#ecebe8">minga-shell · read only</span><span style="color:#5b5d66"> ────────────────────────────────────────────────────────╮</span>
+<span style="color:#5b5d66">│ </span><span style="color:#7fbf7a">●</span> <span style="color:#4f9fe0">│</span> <span style="color:#6cb8f5">you</span> <span style="color:#7fbf7a">❯</span> <span style="color:#ecebe8">git stash list</span>                                                <span style="color:#8f8d88">● 0 0.1s</span><span style="color:#5b5d66"> │</span>
+<span style="color:#5b5d66">│ </span><span style="color:#55575f">────────────────────────────────────────────────────────────────────────────────</span><span style="color:#5b5d66"> │</span>
+<span style="color:#5b5d66">│ </span><span style="color:#7fbf7a">●</span> <span style="display:inline-block;width:1ch;height:16px;vertical-align:top;background-image:linear-gradient(to right,#a463e6 50%,#4a2c75 50%),linear-gradient(to right,#4a2c75 50%,#a463e6 50%);background-size:100% 50%,100% 50%;background-position:top,bottom;background-repeat:no-repeat"> </span> <span style="color:#b98cf0">minga</span> <span style="color:#b98cf0">❯</span> <span style="color:#ecebe8">mix compile --warnings-as-errors</span>                            <span style="color:#8f8d88">● 0 3.1s</span><span style="color:#5b5d66"> │</span>
+<span style="color:#5b5d66">│ </span><span style="color:#55575f">────────────────────────────────────────────────────────────────────────────────</span><span style="color:#5b5d66"> │</span>
+<span style="color:#5b5d66">│ </span><span style="background:#2a1d22"><span style="color:#e5707a">◆</span> <span style="display:inline-block;width:1ch;height:16px;vertical-align:top;background-image:linear-gradient(to right,#a463e6 50%,#4a2c75 50%),linear-gradient(to right,#4a2c75 50%,#a463e6 50%);background-size:100% 50%,100% 50%;background-position:top,bottom;background-repeat:no-repeat"> </span> <span style="color:#b98cf0">minga</span> <span style="color:#b98cf0">❯</span> <span style="color:#ecebe8">mix test test/minga_agent/retry_test.exs</span>                    <span style="color:#e5707a">◆ 2 2.0s</span></span><span style="color:#5b5d66"> │</span>
+<span style="color:#5b5d66">│ </span>  <span style="display:inline-block;width:1ch;height:16px;vertical-align:top;background-image:linear-gradient(to right,#4a2c75 50%,#a463e6 50%)"> </span>  <span style="color:#e5707a">1) test 5xx errors are retried</span>   <span style="color:#c9c7c2;text-decoration:underline;text-decoration-color:color-mix(in srgb,#c9c7c2 45%,transparent);text-underline-offset:3px">retry_test.exs:31</span>                         <span style="color:#5b5d66"> │</span>
+<span style="color:#5b5d66">│ </span><span style="color:#55575f">────────────────────────────────────────────────────────────────────────────────</span><span style="color:#5b5d66"> │</span>
+<span style="color:#5b5d66">│ </span><span style="color:#a463e6">◐</span> <span style="display:inline-block;width:1ch;height:16px;vertical-align:top;background-image:linear-gradient(to right,#a463e6 50%,#4a2c75 50%),linear-gradient(to right,#4a2c75 50%,#a463e6 50%);background-size:100% 50%,100% 50%;background-position:top,bottom;background-repeat:no-repeat"> </span> <span style="color:#b98cf0">minga</span> <span style="color:#b98cf0">❯</span> <span style="color:#ecebe8">mix test test/minga_agent/retry_test.exs:31</span>               <span style="color:#b98cf0">running 4s</span><span style="color:#5b5d66"> │</span>
+<span style="color:#5b5d66">│ </span><span style="color:#55575f">────────────────────────────────────────────────────────────────────────────────</span><span style="color:#5b5d66"> │</span>
+<span style="color:#5b5d66">│ </span><span style="background:#2b2617"><span style="color:#f2b544">◉</span> <span style="display:inline-block;width:1ch;height:16px;vertical-align:top;background-image:linear-gradient(to right,#a463e6 50%,#4a2c75 50%),linear-gradient(to right,#4a2c75 50%,#a463e6 50%);background-size:100% 50%,100% 50%;background-position:top,bottom;background-repeat:no-repeat"> </span> <span style="color:#b98cf0">minga</span> <span style="color:#b98cf0">❯</span> <span style="color:#ecebe8">mix ecto.reset</span>                                       <span style="color:#f2b544">waiting for you</span></span><span style="color:#5b5d66"> │</span>
+<span style="color:#5b5d66">│ </span><span style="background:#2b2617">  <span style="display:inline-block;width:1ch;height:16px;vertical-align:top;background-image:linear-gradient(to right,#4a2c75 50%,#a463e6 50%)"> </span>  <span style="color:#c9c7c2">Minga wants to reset the dev database.  </span><span style="color:#6cb8f5">↩</span><span style="color:#c9c7c2"> to answer</span>                        </span><span style="color:#5b5d66"> │</span>
+<span style="color:#5b5d66">╰─ </span><span style="color:#6cb8f5">]]</span><span style="color:#8f8d88"> next · </span><span style="color:#6cb8f5">↩</span><span style="color:#8f8d88"> act on block · </span><span style="color:#6cb8f5">⌃C</span><span style="color:#8f8d88"> interrupt</span><span style="color:#5b5d66"> ────────────────────────────────────────╯</span>
+<span style="background:#25262c"><span style="background:#6cb8f5"><span style="color:#101115"> NORMAL </span></span> <span style="background:#3a3020"><span style="color:#f2b544"> ◉ Needs you </span></span> <span style="color:#ecebe8">*minga-shell*</span><span style="color:#55575f"> │ </span><span style="color:#a463e6">◐</span> <span style="color:#b98cf0">mix test 4s</span>                              <span style="color:#8f8d88">read only</span> </span>
+<span style="color:#f2b544">Run </span><span style="color:#ecebe8">mix ecto.reset</span><span style="color:#f2b544">?  </span><span style="color:#6cb8f5">y</span> once  <span style="color:#6cb8f5">a</span> always  <span style="color:#6cb8f5">t</span> this turn  <span style="color:#6cb8f5">n</span> deny</div></div>
+  </div>
+  <div style="display:flex;gap:20px;margin-top:16px">
+    <div style="width:700px;font-size:12px;color:#a5a39e;line-height:18px">
+      <div style="color:#8f8d88;font-size:11px;margin-bottom:6px">Board note: keys</div>
+      <span class="mono" style="color:#6cb8f5">⌃\ ⌃N</span> leaves TERM for NORMAL; <span class="mono" style="color:#6cb8f5">i</span> goes back. Esc and ⌃C always reach the shell in TERM.
+      In NORMAL: <span class="mono" style="color:#6cb8f5">]] [[</span> commands, <span class="mono" style="color:#6cb8f5">yic</span> copy output, <span class="mono" style="color:#6cb8f5">yac</span> copy block, <span class="mono" style="color:#6cb8f5">↩</span> on a failed block opens its menu.
+      *minga-shell* has no TERM mode: you watch, scroll and interrupt, you never type into Minga's shell.
+    </div>
+    <div style="width:330px;font-size:12px;color:#a5a39e;line-height:18px;font-family:-apple-system,sans-serif">
+  <div style="color:#8f8d88;font-size:11px;margin-bottom:6px">Board note: how Lip Gloss draws it</div>
+  <div style="margin-bottom:8px"><span style="color:#ecebe8">Drawer</span>: <span class="mono">lipgloss.RoundedBorder()</span> with the title set into the top border and the key help in the bottom border, so no extra hint line sits above the modeline.</div>
+  <div style="margin-bottom:8px"><span style="color:#ecebe8">Surfaces</span>: drawer background one step darker than the editor; a failed block gets a faint red row tint, a pending one a faint amber tint.</div>
+  <div style="margin-bottom:8px"><span style="color:#ecebe8">Blocks</span>: separated by a dim rule, not blank lines. Gutter: state glyph (◐ ● ◆ ◉), then authorship: <span style="color:#4f9fe0">│</span> yours, and for Minga's a two-tone cell: <span style="color:#a463e6">▐</span> light over shade on each line, <span style="color:#a463e6">▚</span> on the first line so the strands cross.</div>
+  <div style="margin-bottom:8px"><span style="color:#ecebe8">Links</span>: <span class="mono">file:line</span> in test and shell output is an OSC 8 hyperlink (Lip Gloss v2 <span class="mono">Hyperlink</span>); click opens the file at the line.</div>
+  <div style="margin-bottom:8px"><span style="color:#ecebe8">Running</span>: the ◐ is a <span class="mono">bubbles/spinner</span> with frames ◐ ◓ ◑ ◒.</div>
+  <div style="margin-bottom:8px"><span style="color:#ecebe8">Modeline</span>: segments are background blocks, not text separated by pipes; the mode pill is the only saturated block.</div>
+  <div><span style="color:#ecebe8">Menu</span>: a bordered overlay with a full-width selection bar, the same component as completion.</div>
+</div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

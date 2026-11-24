@@ -1,3 +1,8 @@
+import os as _os
+TOOLS = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+BOARDS = _os.environ.get("BOARDS_DIR", _os.path.join(TOOLS, "..", "boards"))  # committed boards, read only
+OUT_DIR = _os.environ.get("OUT_DIR", _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "out"))
+_os.makedirs(OUT_DIR, exist_ok=True)
 import sys; sys.path.insert(0,'.')
 from grid import *
 W=150
@@ -49,7 +54,7 @@ ff.bgrow(4,1,FW-2,SEL); ff.put(4,1,"▌",BLUE,SEL)
 ff.segs(4,3,[("1 ",DIM),("chro",BLUE,None,"bu"),("me_state.ex",TXT,None,"b"),("  lib/minga_editor/session",DIM)])
 ff.segs(5,3,[("2 ",DIM),("chro",BLUE,None,"bu"),("me_state_test.exs",TXT),("  test/minga_editor/session",DIM)])
 ff.put(6,2,"Changed",DIM,None,"b")
-ff.segs(7,3,[("◐ ",PURPLED),("Show the plan limit instead of “rate limited”",SUB),("   ",DIM),("╳",PURPLED),(" ",DIM),("chro",BLUE,None,"bu"),("me_state.ex",TXT),("  2 changes",DIM)])
+ff.segs(7,3,[("◐ ",PURPLED),("Show the plan limit instead of “rate limited”",SUB),("   ",DIM),("chro",BLUE,None,"bu"),("me_state.ex",TXT),("  2 changes",DIM)])
 ff.segs(7,FW-16,[("editing now",PURPLE)])
 ff.put(8,2,"Recent",DIM,None,"b")
 ff.segs(9,3,[("  ",DIM),("chro",BLUE,None,"bu"),("me_state_bench.exs",TXT),("  bench",DIM)]); ff.put(9,FW-10,"2 min",DIM)
@@ -65,4 +70,4 @@ annot="""<h4>What renders what</h4>
 <div class="it"><span class="k">Links</span> file names and <code>file:line</code> in tool steps are OSC 8 hyperlinks (Lip Gloss v2 <code>Hyperlink</code>).</div>
 <div class="it"><span class="k">Find file</span> floats as a layer over the dimmed editor with a soft half-block drop shadow (<code>lipgloss.NewLayer</code> / <code>Canvas</code>, already used in go/tui). <code>bubbles/textinput</code> prompt, results as a sectioned list, matched characters bold and underlined in your blue, full-width selection bar.</div>
 <div class="it"><span class="k">Editor behind</span> dimmed while a drawer has focus.</div>"""
-open(os.path.join(OUT_DIR,"V41TuiTalkOpen.dc.html"),"w").write(page("TUI: talk and find file",body,annot))
+open(OUT_DIR+"/V41TuiTalkOpen.dc.html","w").write(page("TUI: talk and find file",body,annot))

@@ -1,3 +1,8 @@
+import os as _os
+TOOLS = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+BOARDS = _os.environ.get("BOARDS_DIR", _os.path.join(TOOLS, "..", "boards"))  # committed boards, read only
+OUT_DIR = _os.environ.get("OUT_DIR", _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "out"))
+_os.makedirs(OUT_DIR, exist_ok=True)
 import sys; sys.path.insert(0,'.')
 from grid import *
 W,H=150,38
@@ -67,4 +72,4 @@ annot="""<h4>What renders what</h4>
 <div class="it"><span class="k">Working</span> ◐ is a <code>bubbles/spinner</code> with <code>Frames: ◐ ◓ ◑ ◒</code>, 8 fps, static when motion is reduced.</div>
 <div class="it"><span class="k">Dimmed editor</span> foreground faded while focus is in the drawer, so the eye goes to the drawer. Restored on <code>q</code>.</div>
 <div class="it"><span class="k">One key, one meaning</span> <code>r</code> only retries, <code>o</code> shows output, <code>↩</code> opens.</div>"""
-open(os.path.join(OUT_DIR,"V41TuiTasks.dc.html"),"w").write(page("TUI: tasks drawer",body,annot))
+open(OUT_DIR+"/V41TuiTasks.dc.html","w").write(page("TUI: tasks drawer",body,annot))
