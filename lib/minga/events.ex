@@ -39,6 +39,7 @@ defmodule Minga.Events do
   | `:diagnostics_updated` | `DiagnosticsUpdatedEvent` | `uri: String.t(), source: atom()` |
   | `:lsp_status_changed` | `LspStatusEvent` | `name: atom(), status: atom(), uri: String.t() \| nil` |
   | `:project_rebuilt` | `ProjectRebuiltEvent` | `root: String.t()` |
+  | `:project_rebuild_failed` | `ProjectRebuildFailedEvent` | `root: String.t() \| nil, reason: String.t()` |
   | `:command_done`    | `CommandDoneEvent`    | `name: String.t(), exit_code: non_neg_integer()` |
   | `:log_message`     | `LogMessageEvent`     | `text: String.t(), level: :debug \| :info \| :warning \| :error` |
   | `:agent_hook`      | `AgentHookEvent`        | `event, phase, tool_name, tool_call_id, tool_pattern` |
@@ -142,11 +143,19 @@ defmodule Minga.Events do
   end
 
   defmodule ProjectRebuiltEvent do
-    @moduledoc "Payload for `:project_rebuilt` events. Published when the file cache rebuild completes."
+    @moduledoc "Payload for `:project_rebuilt` events. Published when the file cache rebuild completes successfully."
     @enforce_keys [:root]
     defstruct [:root]
 
     @type t :: %__MODULE__{root: String.t()}
+  end
+
+  defmodule ProjectRebuildFailedEvent do
+    @moduledoc "Payload for `:project_rebuild_failed` events. Published when the file cache rebuild fails, times out, or the worker crashes."
+    @enforce_keys [:root, :reason]
+    defstruct [:root, :reason]
+
+    @type t :: %__MODULE__{root: String.t() | nil, reason: String.t()}
   end
 
   defmodule CommandDoneEvent do
@@ -356,6 +365,7 @@ defmodule Minga.Events do
           | :extension_restart_required
           | :extension_deferred_batch_complete
           | :ghost_cursor_removed
+          | :project_rebuild_failed
 
   @typedoc "Typed event payloads. Each topic has a specific struct."
   @type payload ::
@@ -366,6 +376,7 @@ defmodule Minga.Events do
           | ModeEvent.t()
           | ToolMissingEvent.t()
           | ProjectRebuiltEvent.t()
+          | ProjectRebuildFailedEvent.t()
           | CommandDoneEvent.t()
           | GitStatusEvent.t()
           | DiagnosticsUpdatedEvent.t()
@@ -495,6 +506,7 @@ defmodule Minga.Events do
   @spec broadcast(:mode_changed, ModeEvent.t()) :: :ok
   @spec broadcast(:tool_missing, ToolMissingEvent.t()) :: :ok
   @spec broadcast(:project_rebuilt, ProjectRebuiltEvent.t()) :: :ok
+  @spec broadcast(:project_rebuild_failed, ProjectRebuildFailedEvent.t()) :: :ok
   @spec broadcast(:command_done, CommandDoneEvent.t()) :: :ok
   @spec broadcast(:git_status_changed, GitStatusEvent.t()) :: :ok
   @spec broadcast(:diagnostics_updated, DiagnosticsUpdatedEvent.t()) :: :ok
