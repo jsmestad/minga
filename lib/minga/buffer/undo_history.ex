@@ -1040,12 +1040,33 @@ defmodule Minga.Buffer.UndoHistory do
     end
   end
 
+  # Each anchor goes to the occurrence nearest where the length change so far puts it. When that choice leaves a later
+  # anchor with no place, the cut is made again taking each anchor's first occurrence in order, which finds a place for
+  # every anchor whenever one exists; the cut that keeps more anchors wins.
   @spec cut_around(non_neg_integer(), binary(), binary(), [{non_neg_integer(), pos_integer()}]) ::
           [change()]
   defp cut_around(start, old, new, anchors) do
-    {changes, old_from, new_from} =
-      Enum.reduce(anchors, {[], 0, 0}, fn anchor, acc ->
-        cut_at_anchor(acc, anchor, start, old, new)
+    total = length(anchors)
+    {changes, kept} = cut_with(:nearest, start, old, new, anchors)
+
+    if kept == total do
+      changes
+    else
+      case cut_with(:first, start, old, new, anchors) do
+        {first_changes, first_kept} when first_kept > kept -> first_changes
+        _fewer -> changes
+      end
+    end
+  end
+
+  @spec cut_with(:nearest | :first, non_neg_integer(), binary(), binary(), [
+          {non_neg_integer(), pos_integer()}
+        ]) ::
+          {[change()], non_neg_integer()}
+  defp cut_with(strategy, start, old, new, anchors) do
+    {changes, old_from, new_from, kept} =
+      Enum.reduce(anchors, {[], 0, 0, 0}, fn anchor, acc ->
+        cut_at_anchor(acc, anchor, strategy, {start, old, new})
       end)
 
     last =
@@ -1056,20 +1077,24 @@ defmodule Minga.Buffer.UndoHistory do
         true
       )
 
-    [last | changes] |> Enum.reverse() |> Enum.concat()
+    {[last | changes] |> Enum.reverse() |> Enum.concat(), kept}
   end
 
   @spec cut_at_anchor(
-          {[[change()]], non_neg_integer(), non_neg_integer()},
+          {[[change()]], non_neg_integer(), non_neg_integer(), non_neg_integer()},
           {non_neg_integer(), pos_integer()},
-          non_neg_integer(),
-          binary(),
-          binary()
-        ) :: {[[change()]], non_neg_integer(), non_neg_integer()}
-  defp cut_at_anchor({changes, old_from, new_from} = acc, {at, length}, start, old, new) do
+          :nearest | :first,
+          {non_neg_integer(), binary(), binary()}
+        ) :: {[[change()]], non_neg_integer(), non_neg_integer(), non_neg_integer()}
+  defp cut_at_anchor(
+         {changes, old_from, new_from, kept} = acc,
+         {at, length},
+         strategy,
+         {start, old, new}
+       ) do
     bytes = binary_part(old, at, length)
 
-    case find_anchor(new, bytes, new_from, at + (new_from - old_from)) do
+    case find_anchor(strategy, new, bytes, new_from, at + (new_from - old_from)) do
       nil ->
         acc
 
@@ -1082,30 +1107,47 @@ defmodule Minga.Buffer.UndoHistory do
             true
           )
 
-        {[segment | changes], at + length, found + length}
+        {[segment | changes], at + length, found + length, kept + 1}
     end
   end
 
-  # The occurrence at or after the place the length change so far implies, or else the first one after the previous
-  # anchor; anchors stay in order. Linear in the new text, with no cap.
-  @spec find_anchor(binary(), binary(), non_neg_integer(), integer()) :: non_neg_integer() | nil
-  defp find_anchor(new, bytes, new_from, expected) do
-    from = min(max(new_from, expected), byte_size(new))
+  # `:nearest` takes the occurrence closest to `expected`, the earlier one on a tie; `:first`, the first one. Both look
+  # only after the previous anchor, so anchors stay in order.
+  @spec find_anchor(:nearest | :first, binary(), binary(), non_neg_integer(), integer()) ::
+          non_neg_integer() | nil
+  defp find_anchor(:first, new, bytes, new_from, _expected), do: match_from(new, bytes, new_from)
 
+  defp find_anchor(:nearest, new, bytes, new_from, expected) do
+    from = min(max(new_from, expected), byte_size(new))
+    after_expected = match_from(new, bytes, from)
+    before_expected = last_match_before(new, bytes, new_from, from)
+
+    case {before_expected, after_expected} do
+      {nil, found} -> found
+      {found, nil} -> found
+      {before, later} -> if from - before <= later - from, do: before, else: later
+    end
+  end
+
+  @spec match_from(binary(), binary(), non_neg_integer()) :: non_neg_integer() | nil
+  defp match_from(new, bytes, from) do
     case :binary.match(new, bytes, scope: {from, byte_size(new) - from}) do
       {found, _length} -> found
-      :nomatch -> first_match(new, bytes, new_from, from)
+      :nomatch -> nil
     end
   end
 
-  @spec first_match(binary(), binary(), non_neg_integer(), non_neg_integer()) ::
+  # The last occurrence that starts in [new_from, before), searching only that stretch.
+  @spec last_match_before(binary(), binary(), non_neg_integer(), non_neg_integer()) ::
           non_neg_integer() | nil
-  defp first_match(_new, _bytes, new_from, new_from), do: nil
+  defp last_match_before(_new, _bytes, new_from, before) when before <= new_from, do: nil
 
-  defp first_match(new, bytes, new_from, _from) do
-    case :binary.match(new, bytes, scope: {new_from, byte_size(new) - new_from}) do
-      {found, _length} -> found
-      :nomatch -> nil
+  defp last_match_before(new, bytes, new_from, before) do
+    stop = min(before + byte_size(bytes) - 1, byte_size(new))
+
+    case :binary.matches(new, bytes, scope: {new_from, stop - new_from}) do
+      [] -> nil
+      matches -> matches |> List.last() |> elem(0)
     end
   end
 

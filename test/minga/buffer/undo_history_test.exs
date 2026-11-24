@@ -617,6 +617,85 @@ defmodule Minga.Buffer.UndoHistoryTest do
       assert {:done, _history, _slice} = UndoHistory.compact_slice(history, 100)
     end
 
+    # A1: your whole-region rewrite never takes another author's bytes that survive in order, wherever they are.
+    property "Minga's bytes that survive your rewrite in order keep their author, and the reject is exact or refused" do
+      check all(
+              pieces <-
+                StreamData.list_of(
+                  StreamData.tuple(
+                    {StreamData.boolean(),
+                     StreamData.string([?a..?c, ?\s], min_length: 1, max_length: 4)}
+                  ),
+                  min_length: 1,
+                  max_length: 8
+                ),
+              edits <-
+                StreamData.list_of(
+                  StreamData.tuple(
+                    {StreamData.boolean(), StreamData.string([?a..?c, ?\s, ?\n], max_length: 3)}
+                  ),
+                  length: 9
+                ),
+              max_runs: runs(500)
+            ) do
+        # Build the document from base and Minga pieces: Minga writes its pieces into a base made of the rest.
+        base = pieces |> Enum.reject(&elem(&1, 0)) |> Enum.map_join(&elem(&1, 1))
+        world = world(base <> "\n")
+
+        {world, _offset} =
+          Enum.reduce(pieces, {world, 0}, fn
+            {true, text}, {world, offset} ->
+              {edit(world, @step_one, offset, 0, text), offset + byte_size(text)}
+
+            {false, text}, {world, offset} ->
+              {world, offset + byte_size(text)}
+          end)
+
+        # Your rewrite keeps every Minga span whole and in order and changes only the text between spans. Adjacent Minga
+        # pieces are one span, so nothing is inserted between them.
+        previous = [false | Enum.map(pieces, &elem(&1, 0))]
+
+        {new_text, minga_positions} =
+          pieces
+          |> Enum.zip(edits)
+          |> Enum.zip(previous)
+          |> Enum.map(fn {pair, after_minga?} -> {pair, after_minga?} end)
+          |> Enum.reduce({"", []}, fn
+            {{{true, text}, {_drop, extra}}, after_minga?}, {acc, positions} ->
+              extra = if after_minga?, do: "", else: extra
+              {acc <> extra <> text, [{byte_size(acc <> extra), text} | positions]}
+
+            {{{false, text}, {drop, extra}}, _after_minga?}, {acc, positions} ->
+              {acc <> if(drop, do: extra, else: text <> extra), positions}
+          end)
+
+        old_size = byte_size(text(world)) - 1
+        world = edit(world, :user, 0, old_size, new_text)
+
+        # Where equal bytes could anchor in more than one place the choice is free; what survives is Minga's text, in
+        # order and whole.
+        minga_text =
+          for {from, to, {:minga, "task-1"}, _key} <-
+                Provenance.spans(UndoHistory.provenance(world.history), 0, byte_size(text(world))),
+              into: <<>>,
+              do: binary_part(text(world), from, to - from)
+
+        assert minga_text == minga_positions |> Enum.reverse() |> Enum.map_join(&elem(&1, 1))
+
+        case UndoHistory.reject_task(world.history, {:minga, "task-1"}, world.version, world.doc) do
+          {:ok, restore, _history, _count} ->
+            assert Document.content(restore.document) ==
+                     UnitModel.reverted_text(world.history, text(world), [{:minga, "task-1"}])
+
+          {:blocked, _reason} ->
+            refute UnitModel.exact?(world.history, [{:minga, "task-1"}])
+
+          :empty ->
+            assert minga_positions == []
+        end
+      end
+    end
+
     property "repeated SPC a u leaves only tasks your visible edits hold" do
       check all(commands <- StreamData.list_of(command(), max_length: 40), max_runs: runs(200)) do
         world = Enum.reduce(commands, world("abc\ndef\n"), &run/2)
