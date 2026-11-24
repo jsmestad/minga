@@ -37,7 +37,7 @@ Every role below is a token in `docs/design_tokens.toml`. "Theme field" is the `
 | surface | Editor background | `editor.bg` | |
 | surface_raised | Drawers, which-key, menus, popups | `popup.bg` | |
 | surface_bar | The modeline | `modeline.bar_bg` | |
-| border | Quiet pane and popup borders | `popup.border_fg` | 3:1 |
+| border | Quiet pane and popup borders | `popup.border_fg` (sent as the role slot); pane splits draw `editor.split_border_fg`, held to the same target | 3:1 |
 | focus | The focused pane's border and the global accent | `popup.title_fg`, else `modeline.filetype_fg` | 3:1 |
 | selection | The selected row in a focused list | macOS: system accent. TUI: `editor.selection_bg` | not a token: it is platform-specific |
 | diff_added_tint, diff_removed_tint | Review and diff line backgrounds | derived: `git.added_fg` and `git.deleted_fg` mixed over `editor.bg` | not a token yet |
@@ -107,10 +107,10 @@ Ratios against the surface each role sits on (the editor background, or surface_
 
 Every built-in theme now meets its targets. The fixes that got there:
 
-- **Latte** darkens needs-you (`#D35400`), warning (`#A86D10`), done (`#388E25`) and group (`#1650C0`), moves waiting and the popup border up one step on the neutral ramp to overlay2, and draws line numbers in subtext1. Each keeps its Catppuccin hue.
-- **astrodark** moves waiting and the popup border up one step on its neutral ramp, to the comment grey `#696C76`, and lifts line numbers to `#858892`.
+- **Latte** darkens needs-you (`#D35400`), warning (`#A86D10`), done (`#388E25`) and group (`#1650C0`), moves waiting and the popup and pane borders up one step on the neutral ramp to overlay2, and draws line numbers in subtext1. Each keeps its Catppuccin hue.
+- **astrodark** moves waiting and the popup and pane borders up one step on its neutral ramp, to the comment grey `#696C76`, and lifts line numbers to `#858892`.
 - **Catppuccin Frappé, Macchiato and Mocha** draw group labels in lavender, which reads at 4.5:1 on the popup surface, and line numbers in overlay2.
-- **doom_one, one_dark and one_light** move waiting to a value that reaches 3:1 and lift line numbers to 4.5:1; one_dark and one_light lift group labels to 4.5:1, and one_light darkens its popup border to 3:1. The minimal fallback theme lifts its muted grey and border the same way.
+- **doom_one, one_dark and one_light** move waiting to a value that reaches 3:1 and lift line numbers to 4.5:1; one_dark and one_light lift group labels to 4.5:1, one_light darkens its popup border, and all three raise pane split borders to 3:1. The minimal fallback theme lifts its muted grey and border the same way.
 
 These are theme fixes, not design changes, and the storyboard factory's light-theme renders are how they stay fixed.
 

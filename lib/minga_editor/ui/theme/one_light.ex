@@ -84,7 +84,9 @@ defmodule MingaEditor.UI.Theme.OneLight do
         highlight_write_bg: 0xE8D8B8,
         whitespace_fg: @syntax_gutter,
         indent_guide_fg: @syntax_guide,
-        indent_guide_active_fg: @mono_3
+        indent_guide_active_fg: @mono_3,
+        # Pane splits reach the 3:1 border target against the editor background.
+        split_border_fg: 0x8A8A8C
       },
       gutter: %{
         # Line numbers are secondary text and need 4.5:1 against the editor background.

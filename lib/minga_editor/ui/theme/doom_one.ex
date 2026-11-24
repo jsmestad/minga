@@ -47,7 +47,8 @@ defmodule MingaEditor.UI.Theme.DoomOne do
       editor: %MingaEditor.UI.Theme.Editor{
         bg: @bg,
         fg: @fg,
-        split_border_fg: @base5,
+        # Pane splits reach the 3:1 border target against the editor background.
+        split_border_fg: @base6,
         cursorline_bg: 0x2C323C,
         nav_flash_bg: 0x3E4451,
         yank_flash_bg: 0x4B5263,

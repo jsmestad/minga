@@ -94,7 +94,9 @@ defmodule MingaEditor.UI.Theme.AstroDark do
         cursorline_bg: @bg_current_line,
         highlight_read_bg: @ui_highlight,
         indent_guide_fg: @indent_guide,
-        indent_guide_active_fg: @indent_guide_active
+        indent_guide_active_fg: @indent_guide_active,
+        # Pane splits reach the 3:1 border target against the editor background.
+        split_border_fg: @syn_comment
       },
       # Line numbers reach 4.5:1 and the popup border 3:1 against the editor background.
       gutter: %{fg: 0x858892},

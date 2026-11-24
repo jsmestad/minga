@@ -50,6 +50,21 @@ defmodule MingaEditor.UI.Theme.RoleContrastTest do
     end
   end
 
+  # The border role is sent as popup.border_fg; pane splits draw editor.split_border_fg and are held to the same target.
+  test "pane split borders meet the border role's contrast target in every theme" do
+    {class, on} = Tokens.color_role(:border).contrast
+
+    failures =
+      for module <- @theme_modules,
+          theme = module.theme(),
+          ratio = contrast(theme.editor.split_border_fg, Theme.role_color(theme, on)),
+          ratio < Tokens.contrast_target(class) do
+        "#{theme.name}: split border #{Float.round(ratio, 2)} < #{Tokens.contrast_target(class)}"
+      end
+
+    assert failures == [], Enum.join(failures, "\n")
+  end
+
   test "needs_you, failure and done keep distinct colours in every theme" do
     for module <- @theme_modules do
       theme = module.theme()
