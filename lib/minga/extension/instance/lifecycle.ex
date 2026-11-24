@@ -130,24 +130,7 @@ defmodule Minga.Extension.Instance.Lifecycle do
       source: artifact.source,
       module: artifact.module,
       manifest: artifact.manifest,
-      root: extension_root(state.declaration, artifact.module)
+      root: Minga.Extension.Entry.root(state.declaration)
     })
-  end
-
-  @spec extension_root(Minga.Extension.Entry.t(), module()) :: String.t() | nil
-  def extension_root(%{path: path}, _module) when is_binary(path), do: Path.expand(path)
-
-  def extension_root(%{hex: %{app: app}}, _module) when is_atom(app) do
-    case :code.lib_dir(app) do
-      path when is_list(path) -> List.to_string(path)
-      _other -> nil
-    end
-  end
-
-  def extension_root(_declaration, module) do
-    case :code.which(module) do
-      path when is_list(path) -> path |> List.to_string() |> Path.dirname() |> Path.dirname()
-      _other -> nil
-    end
   end
 end
