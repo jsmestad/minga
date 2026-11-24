@@ -504,7 +504,7 @@ end
 
 From a command callback, call `MingaEditor.Extension.Picker.open(state, MyExtension.NotesPicker, absolute_paths)`. The picker passes the original arguments to the source. Capture the path or repository at open time, not after the user selects an item.
 
-`candidates/2` and `preview/2` run outside the editor process. For a long list, return `{:more, cursor, item}` instead of `:done`. The editor requests `{:continue, cursor}` only when the user activates that row. It keeps the existing results. Selection and alternative actions run after dismissal. See [`Picker.Source`](https://hexdocs.pm/minga_sdk/MingaEditor.Extension.Picker.Source.html) for preview, fallback, and shortcut callbacks.
+`candidates/2` and `preview/2` run outside the editor process. For a long list, return `{:more, cursor, item}` instead of `:done`. The editor requests `{:continue, cursor}` only when the user activates that row. It keeps the existing results. Selection and alternative actions run after dismissal. See [`Picker.Source`](https://hexdocs.pm/minga_sdk/MingaEditor.Extension.Picker.Source.html) for preview, fallback, and the secondary actions (`actions/2`) the picker's act menu (`⌃.`) lists.
 
 ---
 
