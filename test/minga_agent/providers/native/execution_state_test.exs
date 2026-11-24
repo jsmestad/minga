@@ -107,7 +107,7 @@ defmodule MingaAgent.Providers.Native.ExecutionStateTest do
       task = make_task()
       active = ExecutionState.start(ExecutionState.idle(), task, make_request())
       Task.await(task)
-      active = ExecutionState.register_workers(active, [self()])
+      {:ok, active} = ExecutionState.register_workers(active, 1, [self()])
 
       {new_state, cleanup_task, cleanup_workers} = ExecutionState.abort(active)
 
@@ -130,26 +130,131 @@ defmodule MingaAgent.Providers.Native.ExecutionStateTest do
     end
   end
 
-  describe "register_workers/2" do
-    test "adds PIDs to the worker set in active state" do
+  describe "rejected source tags" do
+    test "start, complete, interrupt and next_generation refuse every invalid source tag" do
+      task = make_task()
+      active = ExecutionState.start(ExecutionState.idle(), task, make_request())
+      Task.await(task)
+      interrupted = ExecutionState.interrupt(active)
+      other_task = make_task()
+      Task.await(other_task)
+
+      rejected = [
+        {:start, active, fn state -> ExecutionState.start(state, other_task, make_request()) end},
+        {:next_generation, active, &ExecutionState.next_generation/1},
+        {:complete, ExecutionState.idle(), &ExecutionState.complete/1},
+        {:complete, interrupted, &ExecutionState.complete/1},
+        {:interrupt, ExecutionState.idle(), &ExecutionState.interrupt/1},
+        {:interrupt, interrupted, &ExecutionState.interrupt/1}
+      ]
+
+      for {transition, source, apply} <- rejected do
+        result =
+          try do
+            {:accepted, apply.(source)}
+          rescue
+            FunctionClauseError -> :rejected
+          end
+
+        assert {transition, source.tag, result} == {transition, source.tag, :rejected}
+      end
+    end
+  end
+
+  describe "next_generation/1" do
+    test "names the generation the next start admits from every startable tag" do
+      task = make_task()
+      active = ExecutionState.start(ExecutionState.idle(), task, make_request())
+      Task.await(task)
+      interrupted = ExecutionState.interrupt(active)
+      completed = ExecutionState.complete(active)
+
+      for {source, expected} <- [{ExecutionState.idle(), 1}, {interrupted, 2}, {completed, 2}] do
+        assert ExecutionState.next_generation(source) == expected
+        next_task = make_task()
+        started = ExecutionState.start(source, next_task, make_request())
+        Task.await(next_task)
+        assert ExecutionState.generation(started) == expected
+      end
+    end
+  end
+
+  describe "cancel/2" do
+    test "cancels only active work admitted for the named request, from every tag" do
+      task = make_task()
+      request = make_request()
+      active = ExecutionState.start(ExecutionState.idle(), task, request)
+      Task.await(task)
+      worker = spawn(fn -> :ok end)
+      {:ok, active} = ExecutionState.register_workers(active, 1, [worker])
+
+      assert {:cancelled, idle, ^task, workers} =
+               ExecutionState.cancel(active, request.request_id)
+
+      assert idle.tag == :idle
+      assert idle.generation == 1
+      assert workers == MapSet.new([worker])
+
+      interrupted = ExecutionState.interrupt(active)
+
+      for source <- [ExecutionState.idle(), interrupted, idle] do
+        assert ExecutionState.cancel(source, request.request_id) == :stale
+      end
+
+      assert ExecutionState.cancel(active, make_request().request_id) == :stale
+    end
+
+    test "a cancellation for a replaced request cannot stop its replacement" do
+      first_task = make_task()
+      first = make_request()
+      active = ExecutionState.start(ExecutionState.idle(), first_task, first)
+      Task.await(first_task)
+
+      second_task = make_task()
+      second = make_request()
+
+      replacement =
+        active |> ExecutionState.complete() |> ExecutionState.start(second_task, second)
+
+      Task.await(second_task)
+
+      assert ExecutionState.cancel(replacement, first.request_id) == :stale
+
+      assert {:cancelled, _idle, ^second_task, _workers} =
+               ExecutionState.cancel(replacement, second.request_id)
+    end
+  end
+
+  describe "register_workers/3" do
+    test "adds PIDs only to the active generation that admitted them" do
       task = make_task()
       active = ExecutionState.start(ExecutionState.idle(), task, make_request())
       Task.await(task)
 
       pid1 = spawn(fn -> :ok end)
       pid2 = spawn(fn -> :ok end)
-      updated = ExecutionState.register_workers(active, [pid1, pid2])
+      assert {:ok, updated} = ExecutionState.register_workers(active, 1, [pid1, pid2])
 
       assert MapSet.member?(updated.workers, pid1)
       assert MapSet.member?(updated.workers, pid2)
     end
 
-    test "adds PIDs in idle state for pre-turn registration" do
-      idle = ExecutionState.idle()
+    test "refuses workers from a stale generation and from every non-active tag" do
+      task = make_task()
+      active = ExecutionState.start(ExecutionState.idle(), task, make_request())
+      Task.await(task)
       pid = spawn(fn -> :ok end)
-      updated = ExecutionState.register_workers(idle, [pid])
 
-      assert MapSet.member?(updated.workers, pid)
+      assert ExecutionState.register_workers(active, 0, [pid]) == {:error, :stale_generation}
+
+      for source <- [
+            ExecutionState.idle(),
+            ExecutionState.interrupt(active),
+            ExecutionState.complete(active)
+          ] do
+        assert ExecutionState.register_workers(source, ExecutionState.generation(source), [pid]) ==
+                 {:error, :stale_generation}
+      end
     end
   end
 
@@ -160,7 +265,7 @@ defmodule MingaAgent.Providers.Native.ExecutionStateTest do
       Task.await(task)
 
       pid = spawn(fn -> :ok end)
-      active = ExecutionState.register_workers(active, [pid])
+      {:ok, active} = ExecutionState.register_workers(active, 1, [pid])
       updated = ExecutionState.unregister_workers(active, [pid])
 
       refute MapSet.member?(updated.workers, pid)
@@ -180,7 +285,7 @@ defmodule MingaAgent.Providers.Native.ExecutionStateTest do
       Task.await(task)
 
       pid = spawn(fn -> :ok end)
-      active = ExecutionState.register_workers(active, [pid])
+      {:ok, active} = ExecutionState.register_workers(active, 1, [pid])
       updated = ExecutionState.remove_worker(active, pid)
 
       refute MapSet.member?(updated.workers, pid)

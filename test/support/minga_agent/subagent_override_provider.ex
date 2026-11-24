@@ -13,9 +13,9 @@ defmodule Minga.Test.SubagentOverrideProvider do
   @impl MingaAgent.Provider
   def send_prompt(pid, text), do: SubagentRecordingProvider.send_prompt(pid, text)
 
-  @spec abort(GenServer.server()) :: :ok
+  @spec abort(GenServer.server(), String.t()) :: :ok
   @impl MingaAgent.Provider
-  def abort(pid), do: SubagentRecordingProvider.abort(pid)
+  def abort(pid, request_id), do: SubagentRecordingProvider.abort(pid, request_id)
 
   @spec new_session(GenServer.server()) :: :ok
   @impl MingaAgent.Provider

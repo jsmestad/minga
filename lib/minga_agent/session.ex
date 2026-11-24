@@ -5073,15 +5073,21 @@ defmodule MingaAgent.Session do
     {[Context.user(content)], [display]}
   end
 
+  # Cancels only the provider work admitted for the active request.
+  # Without an active request the provider holds no Session-owned work, so there is nothing to cancel.
   @spec abort_provider(state()) :: state()
-  defp abort_provider(state) do
+  defp abort_provider(
+         %{continuation: %Continuation{active_request: %Request{request_id: request_id}}} = state
+       ) do
     case ProviderLifecycle.pid(state.provider) do
-      pid when is_pid(pid) -> state.provider.module.abort(pid)
+      pid when is_pid(pid) -> state.provider.module.abort(pid, request_id)
       nil -> :ok
     end
 
     state
   end
+
+  defp abort_provider(state), do: state
 
   @spec abort_active_tools(state(), TurnExecution.t(), boolean()) :: state()
   defp abort_active_tools(state, execution, notify?) do

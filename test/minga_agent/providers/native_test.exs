@@ -154,7 +154,7 @@ defmodule MingaAgent.Providers.NativeTest do
 
   defp start_provider(opts) do
     store = start_retention_store(opts[:tmp_dir] || System.tmp_dir!())
-    subscriber = start_provider_subscriber(self(), store)
+    subscriber = start_provider_subscriber(self(), store, Keyword.get(opts, :approval_tools, []))
 
     defaults = [
       subscriber: subscriber,
@@ -221,9 +221,11 @@ defmodule MingaAgent.Providers.NativeTest do
     ]
   end
 
-  defp start_provider_subscriber(owner, store) do
+  # `approval_tools` names tools whose live Session policy requires approval, whatever the provider's scheduling hint.
+  defp start_provider_subscriber(owner, store, approval_tools) do
     spawn_link(fn ->
       owner_ref = Process.monitor(owner)
+      Process.put(:approval_tools, approval_tools)
       provider_subscriber_loop(owner, owner_ref, store)
     end)
   end
@@ -259,8 +261,11 @@ defmodule MingaAgent.Providers.NativeTest do
         GenServer.reply(from, result)
         provider_subscriber_loop(owner, owner_ref, store)
 
-      {:"$gen_call", from, {:prepare_tool_invocation, _invocation}} ->
-        GenServer.reply(from, {:ok, :ready})
+      {:"$gen_call", from, {:prepare_tool_invocation, invocation}} ->
+        if invocation.name in Process.get(:approval_tools, []),
+          do: GenServer.reply(from, {:ok, :approval_required}),
+          else: GenServer.reply(from, {:ok, :ready})
+
         provider_subscriber_loop(owner, owner_ref, store)
 
       {:"$gen_call", from, {:checkpoint_tool_group, request_id, messages, calls}} ->
@@ -660,6 +665,11 @@ defmodule MingaAgent.Providers.NativeTest do
   end
 
   defp release_tool(gate_ref, worker), do: send(worker, {gate_ref, :release})
+
+  defp abort_active(pid) do
+    request = Process.get({__MODULE__, pid, :active_request})
+    Native.abort(pid, request.request_id)
+  end
 
   defp write_project_skill(dir, name, instructions) do
     skill_dir = Path.join([dir, ".minga", "skills", name])
@@ -1812,7 +1822,7 @@ defmodule MingaAgent.Providers.NativeTest do
           start_provider(
             tmp_dir: root,
             model_selection: selection,
-            subscriber: start_provider_subscriber(self(), delivery_store),
+            subscriber: start_provider_subscriber(self(), delivery_store, []),
             llm_client: client
           )
 
@@ -3234,6 +3244,73 @@ defmodule MingaAgent.Providers.NativeTest do
     end
   end
 
+  describe "tool-call timeout scope" do
+    test "a read held for Session approval does not spend its tool-call timeout waiting", %{
+      tmp_dir: dir
+    } do
+      test_pid = self()
+
+      reader =
+        declared_tool("approved_read", :read_only, fn _args ->
+          send(test_pid, :approved_read_ran)
+          {:ok, "read"}
+        end)
+
+      {:ok, pid} =
+        start_provider(
+          tmp_dir: dir,
+          llm_client: tool_call_batch_client(["approved_read"]),
+          tools: [reader],
+          approval_tools: ["approved_read"],
+          config: agent_config(tool_call_timeout_ms: 1_500, approval_timeout_ms: 10_000)
+        )
+
+      assert :ok = send_prompt(pid, "Read with approval")
+
+      assert_receive {:agent_provider_event,
+                      %Event.ToolApproval{tool_call_id: "tc_approved_read", reply_to: worker}},
+                     2_000
+
+      # Wait past the tool-call timeout before answering; the approval wait is not tool execution.
+      refute_receive {:agent_provider_event, %Event.ToolEnd{}}, 1_700
+      send(worker, {:tool_approval_response, "tc_approved_read", :approve})
+
+      events = collect_run_events()
+      assert_received :approved_read_ran
+
+      assert Enum.any?(
+               events,
+               &match?(%Event.ToolEnd{name: "approved_read", is_error: false}, &1)
+             )
+    end
+
+    test "a sequential call runs past the tool-call timeout until it finishes", %{tmp_dir: dir} do
+      test_pid = self()
+      gate = make_ref()
+
+      tool = declared_tool("long_write", :mutating, gated_callback(test_pid, gate, "long_write"))
+
+      {:ok, pid} =
+        start_provider(
+          tmp_dir: dir,
+          llm_client: tool_call_batch_client(["long_write"]),
+          tools: [tool],
+          config: agent_config(tool_call_timeout_ms: 50)
+        )
+
+      assert :ok = send_prompt(pid, "Run one long write")
+      worker = assert_tool_started(gate, "long_write")
+      worker_ref = Process.monitor(worker)
+
+      # Sequential effects (writes, approvals, questions) are not killed mid-effect by the read timeout.
+      refute_receive {:DOWN, ^worker_ref, :process, ^worker, _reason}, 150
+      release_tool(gate, worker)
+
+      events = collect_run_events()
+      assert Enum.any?(events, &match?(%Event.ToolEnd{name: "long_write", is_error: false}, &1))
+    end
+  end
+
   describe "abort" do
     test "stops a running prompt", %{tmp_dir: dir} do
       {slow_stream, stream_ref} = blocking_text_stream()
@@ -3243,7 +3320,7 @@ defmodule MingaAgent.Providers.NativeTest do
       :ok = send_prompt(pid, "Tell me a very long story")
       assert_streaming_started(pid, stream_ref)
 
-      assert :ok = Native.abort(pid)
+      assert :ok = abort_active(pid)
       assert {:ok, %{is_streaming: false}} = Native.get_state(pid)
     end
 
@@ -3302,7 +3379,7 @@ defmodule MingaAgent.Providers.NativeTest do
       assert_receive {:abort_blocking_tool_started, worker_pid}, 5_000
       worker_ref = Process.monitor(worker_pid)
 
-      assert :ok = Native.abort(pid)
+      assert :ok = abort_active(pid)
       assert {:ok, %{is_streaming: false}} = Native.get_state(pid)
       assert_receive {:DOWN, ^worker_ref, :process, ^worker_pid, _reason}, 5_000
 
@@ -3311,30 +3388,84 @@ defmodule MingaAgent.Providers.NativeTest do
       refute File.exists?(marker_path)
     end
 
-    test "aborting with no active task still stops registered tool workers", %{tmp_dir: dir} do
-      marker_path = Path.join(dir, "abort-nil-task-worker-continued.txt")
-      test_pid = self()
-      release_ref = make_ref()
-
-      worker_pid =
-        spawn(fn ->
-          receive do
-            {^release_ref, :release} ->
-              File.write!(marker_path, "continued")
-              send(test_pid, :abort_nil_task_worker_continued)
-          end
-        end)
-
+    test "a worker registration outside the active generation is refused", %{tmp_dir: dir} do
+      worker_pid = spawn(fn -> receive do: (:never -> :ok) end)
       worker_ref = Process.monitor(worker_pid)
       {:ok, pid} = start_provider(tmp_dir: dir)
-      :ok = GenServer.call(pid, {:register_tool_workers, [worker_pid]})
 
-      assert :ok = Native.abort(pid)
-      assert_receive {:DOWN, ^worker_ref, :process, ^worker_pid, _reason}, 1_000
+      assert {:error, :stale_generation} =
+               GenServer.call(pid, {:register_tool_workers, 0, [worker_pid]})
 
-      send(worker_pid, {release_ref, :release})
-      refute_receive :abort_nil_task_worker_continued, 50
-      refute File.exists?(marker_path)
+      # A refused worker is not owned by the provider, so stopping the provider leaves it alone.
+      assert :ok = Native.new_session(pid)
+      refute_receive {:DOWN, ^worker_ref, :process, ^worker_pid, _reason}, 50
+      Process.exit(worker_pid, :kill)
+    end
+
+    test "an abort for a replaced request leaves the replacement's tools running", %{tmp_dir: dir} do
+      test_pid = self()
+      gate = make_ref()
+      call_count = :counters.new(1, [:atomics])
+
+      tool =
+        declared_tool(
+          "replacement_tool",
+          :read_only,
+          gated_callback(test_pid, gate, "replacement_tool")
+        )
+
+      client = fn _model, _messages, _opts ->
+        count = :counters.get(call_count, 1)
+        :counters.add(call_count, 1, 1)
+
+        chunks =
+          case count do
+            0 ->
+              [ReqLLM.StreamChunk.text("first"), ReqLLM.StreamChunk.meta(%{finish_reason: :stop})]
+
+            1 ->
+              [
+                ReqLLM.StreamChunk.tool_call("replacement_tool", %{}, %{
+                  id: "tc_replacement",
+                  index: 0
+                }),
+                ReqLLM.StreamChunk.meta(%{finish_reason: :tool_use})
+              ]
+
+            _ ->
+              [ReqLLM.StreamChunk.text("done"), ReqLLM.StreamChunk.meta(%{finish_reason: :stop})]
+          end
+
+        build_stream_response(chunks)
+      end
+
+      {:ok, pid} = start_provider(tmp_dir: dir, llm_client: client, tools: [tool])
+
+      assert :ok = send_prompt(pid, "First request")
+      first = Process.get({__MODULE__, pid, :active_request})
+      collect_run_events()
+
+      assert :ok = send_prompt(pid, "Replacement request")
+      worker = assert_tool_started(gate, "replacement_tool")
+      worker_ref = Process.monitor(worker)
+
+      # The delayed cancellation names the finished request, so the replacement keeps running.
+      assert :ok = Native.abort(pid, first.request_id)
+      assert {:ok, %{is_streaming: true}} = Native.get_state(pid)
+      refute_receive {:DOWN, ^worker_ref, :process, ^worker, _reason}, 50
+
+      release_tool(gate, worker)
+      events = collect_run_events()
+
+      assert Enum.any?(
+               events,
+               &match?(%Event.ToolEnd{name: "replacement_tool", is_error: false}, &1)
+             )
+
+      # Repeating the replacement's own cancellation after it finished is a no-op.
+      replacement = Process.get({__MODULE__, pid, :active_request})
+      assert :ok = Native.abort(pid, replacement.request_id)
+      assert {:ok, %{is_streaming: false}} = Native.get_state(pid)
     end
 
     test "new_session stops concurrent tool workers", %{tmp_dir: dir} do
@@ -3677,7 +3808,7 @@ defmodule MingaAgent.Providers.NativeTest do
       request = Process.get({__MODULE__, pid, :active_request})
       assert {:error, "Already streaming"} = Native.continue(pid, request)
 
-      Native.abort(pid)
+      abort_active(pid)
     end
 
     test "small partial text does not trigger recovery", %{tmp_dir: dir} do
@@ -3720,7 +3851,7 @@ defmodule MingaAgent.Providers.NativeTest do
       request = Process.get({__MODULE__, pid, :active_request})
       assert {:error, :already_streaming} = Native.send_prompt(pid, request)
 
-      Native.abort(pid)
+      abort_active(pid)
     end
   end
 

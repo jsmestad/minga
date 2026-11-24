@@ -165,4 +165,18 @@ defmodule MingaAgent.Tool.SpecEffectTest do
       refute Spec.sequential?(reader)
     end
   end
+
+  describe "built-in declarations" do
+    test "every built-in that changes state is scheduled sequentially" do
+      # A side-effecting tool classified read-only would run concurrently and break model order.
+      side_effecting =
+        ~w(todo_write subagent shell write_file edit_file delete_file git_stage git_commit rename)
+
+      for spec <- MingaAgent.Tools.specs(), spec.name in side_effecting do
+        assert {spec.name, Spec.sequential?(spec)} == {spec.name, true}
+      end
+
+      refute Spec.sequential?(MingaAgent.Tools.Checklist.read_spec())
+    end
+  end
 end

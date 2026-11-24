@@ -15,7 +15,7 @@ defmodule Minga.Test.SubagentWorktreeProvider do
   def send_prompt(pid, request), do: GenServer.call(pid, {:prompt, request})
 
   @impl MingaAgent.Provider
-  def abort(_pid), do: :ok
+  def abort(_pid, _request_id), do: :ok
 
   @impl MingaAgent.Provider
   def new_session(_pid), do: :ok
