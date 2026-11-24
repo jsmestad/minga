@@ -92,6 +92,9 @@ defmodule MingaAgent.Session do
   alias MingaAgent.Tool.Invocation
   alias MingaAgent.Tool.Registry, as: ToolRegistry
   alias MingaAgent.Tool.Spec, as: ToolSpec
+  alias MingaAgent.Session.JobLedger
+  alias MingaAgent.Session.JobLedger.Record, as: JobRecord
+  alias MingaAgent.Session.JobNotice
   alias MingaAgent.Tools.JobOwner
   alias MingaAgent.Providers.Native.ReqLLMAdapter
   alias ReqLLM.Context
@@ -172,7 +175,9 @@ defmodule MingaAgent.Session do
           credentials_configured: boolean(),
           job_owner: pid() | nil,
           job_owner_ref: reference() | nil,
-          job_completions: [JobOwner.completion()]
+          job_epoch: non_neg_integer(),
+          job_ledger: JobLedger.t(),
+          job_admissions: %{reference() => JobRecord.id()}
         }
 
   @provider_stop_timeout_ms 1_000
@@ -732,6 +737,43 @@ defmodule MingaAgent.Session do
   @spec session_id(GenServer.server()) :: String.t()
   def session_id(session) do
     GenServer.call(session, :session_id)
+  end
+
+  @typedoc "Why the Session refused to admit a shell job."
+  @type job_admission_error :: :no_job_owner | JobLedger.limit_error()
+
+  @doc """
+  Admits a shell job in this session's job ledger.
+
+  Allocates the job id, records the job as running under the current JobOwner epoch, and returns the record with the JobOwner that must run it. The caller then passes the record to `JobOwner.start_foreground/3` or `JobOwner.start_background/3`. If the caller exits before a background job starts, or before a foreground job ends, the Session cancels the job so it cannot hold a running slot.
+  """
+  @spec admit_job(GenServer.server(), JobRecord.spec()) ::
+          {:ok, JobRecord.t(), pid()} | {:error, job_admission_error()}
+  def admit_job(
+        session,
+        %{command: command, cwd: cwd, background?: background?, timeout_secs: timeout_secs} =
+          spec
+      )
+      when is_binary(command) and is_binary(cwd) and is_boolean(background?) and
+             is_integer(timeout_secs) and timeout_secs > 0 do
+    GenServer.call(session, {:admit_job, spec}, 30_000)
+  end
+
+  @doc "Returns one job record from this session's ledger."
+  @spec job(GenServer.server(), JobRecord.id()) :: {:ok, JobRecord.t()} | {:error, :job_not_found}
+  def job(session, job_id) when is_binary(job_id) do
+    GenServer.call(session, {:job, job_id})
+  end
+
+  @doc "Returns every retained job record, oldest admission first."
+  @spec jobs(GenServer.server()) :: [JobRecord.t()]
+  def jobs(session), do: GenServer.call(session, :jobs)
+
+  @doc "Cancels a running job through this session's JobOwner."
+  @spec cancel_job(GenServer.server(), JobRecord.id()) ::
+          :ok | {:error, :job_not_found | :already_terminal}
+  def cancel_job(session, job_id) when is_binary(job_id) do
+    GenServer.call(session, {:cancel_job, job_id})
   end
 
   @doc """
@@ -1496,7 +1538,9 @@ defmodule MingaAgent.Session do
       credentials_configured: credentials_configured?,
       job_owner: nil,
       job_owner_ref: nil,
-      job_completions: []
+      job_epoch: 0,
+      job_ledger: JobLedger.new(),
+      job_admissions: %{}
     }
 
     state = maybe_start_job_owner(state, Keyword.get(opts, :start_job_owner?, true))
@@ -1775,6 +1819,36 @@ defmodule MingaAgent.Session do
 
   def handle_call(:session_id, _from, state) do
     {:reply, state.session_id, state}
+  end
+
+  def handle_call({:admit_job, _spec}, _from, %{job_owner: nil} = state),
+    do: {:reply, {:error, :no_job_owner}, state}
+
+  def handle_call({:admit_job, spec}, {caller, _tag}, state) do
+    case JobLedger.admit(state.job_ledger, spec, state.job_epoch, DateTime.utc_now()) do
+      {:ok, record, ledger} ->
+        # The caller's exit cancels the job until a background job starts or a foreground job ends.
+        admissions = Map.put(state.job_admissions, Process.monitor(caller), record.id)
+
+        {:reply, {:ok, record, state.job_owner},
+         schedule_save(%{state | job_ledger: ledger, job_admissions: admissions})}
+
+      {:error, _limit} = error ->
+        {:reply, error, state}
+    end
+  end
+
+  def handle_call({:job, job_id}, _from, state),
+    do: {:reply, JobLedger.fetch(state.job_ledger, job_id), state}
+
+  def handle_call(:jobs, _from, state), do: {:reply, JobLedger.list(state.job_ledger), state}
+
+  def handle_call({:cancel_job, job_id}, _from, state) do
+    case JobLedger.fetch(state.job_ledger, job_id) do
+      {:ok, %JobRecord{status: :running}} -> {:reply, cancel_owned_job(state, job_id), state}
+      {:ok, %JobRecord{}} -> {:reply, {:error, :already_terminal}, state}
+      {:error, :job_not_found} = error -> {:reply, error, state}
+    end
   end
 
   def handle_call(:enter_plan, _from, state) do
@@ -3673,6 +3747,8 @@ defmodule MingaAgent.Session do
         tool_authority: %{state.tool_authority | revision: make_ref(), invocations: %{}}
     }
 
+    state = install_job_ledger(state, JobLedger.new())
+
     record_critical_event(state, :session_started, %{
       model: state.provider.model_name,
       provider: state.provider.provider_name,
@@ -3938,8 +4014,33 @@ defmodule MingaAgent.Session do
     {:noreply, state}
   end
 
-  def handle_info({:job_completion, completion}, state) do
-    {:noreply, %{state | job_completions: [completion | state.job_completions]}}
+  def handle_info({:job_started, job_id, _epoch}, state) do
+    case JobLedger.fetch(state.job_ledger, job_id) do
+      # A foreground job ends with its caller, so its caller stays monitored until the job settles.
+      {:ok, %JobRecord{status: :running, background?: false}} -> {:noreply, state}
+      _background_or_ended -> {:noreply, release_job_admission(state, job_id)}
+    end
+  end
+
+  def handle_info({:job_settled, job_id, epoch, outcome, exit_code, output}, state) do
+    ledger =
+      JobLedger.settle(
+        state.job_ledger,
+        job_id,
+        epoch,
+        outcome,
+        exit_code,
+        output,
+        DateTime.utc_now()
+      )
+
+    # A job can settle while the session is idle, after its last save.
+    {:noreply,
+     state
+     |> Map.put(:job_ledger, ledger)
+     |> release_job_admission(job_id)
+     |> schedule_save()
+     |> wake_for_job_notices()}
   end
 
   def handle_info(
@@ -3947,8 +4048,17 @@ defmodule MingaAgent.Session do
         %{job_owner_ref: ref} = state
       )
       when is_reference(ref) do
-    Process.demonitor(ref, [:flush])
-    {:noreply, %{state | job_owner: nil, job_owner_ref: nil}}
+    {:noreply, state |> replace_job_owner() |> wake_for_job_notices()}
+  end
+
+  def handle_info({:job_unstarted, job_id}, state) do
+    {:noreply, state |> settle_unstarted_job(job_id) |> wake_for_job_notices()}
+  end
+
+  def handle_info({:DOWN, ref, :process, _pid, _reason}, %{job_admissions: admissions} = state)
+      when is_map_key(admissions, ref) do
+    {job_id, admissions} = Map.pop!(admissions, ref)
+    {:noreply, abandon_job(%{state | job_admissions: admissions}, job_id)}
   end
 
   def handle_info({:DOWN, ref, :process, pid, reason}, state) do
@@ -4650,12 +4760,11 @@ defmodule MingaAgent.Session do
       {:idle, execution} ->
         state =
           state
-          |> drain_job_completions()
           |> notify(:complete, completion_notification(state))
           |> dispatch_stop()
           |> announce_turn_status(execution)
 
-        %{state | turn_execution: execution}
+        wake_for_job_notices(%{state | turn_execution: execution})
 
       {:send_next, contents, execution} ->
         dispatch_notification(state, :complete, completion_notification(state))
@@ -5966,11 +6075,118 @@ defmodule MingaAgent.Session do
 
   @spec maybe_start_job_owner(state(), boolean()) :: state()
   defp maybe_start_job_owner(state, false), do: state
+  defp maybe_start_job_owner(state, true), do: start_job_owner(state)
 
-  defp maybe_start_job_owner(state, true) do
-    {:ok, pid} = JobOwner.start_link(session_id: state.session_id, notify: self())
+  # Each JobOwner runs under a new epoch, so a report from an earlier owner can never settle a newer job.
+  @spec start_job_owner(state()) :: state()
+  defp start_job_owner(state) do
+    epoch = state.job_epoch + 1
+    {:ok, pid} = JobOwner.start_link(session: self(), epoch: epoch)
     ref = Process.monitor(pid)
-    %{state | job_owner: pid, job_owner_ref: ref}
+    %{state | job_owner: pid, job_owner_ref: ref, job_epoch: epoch}
+  end
+
+  # The dead owner's tasks died with it, so its running jobs have no observed end.
+  @spec replace_job_owner(state()) :: state()
+  defp replace_job_owner(state) do
+    Enum.each(Map.keys(state.job_admissions), &Process.demonitor(&1, [:flush]))
+    ledger = JobLedger.interrupt_running(state.job_ledger, :owner_down, DateTime.utc_now())
+
+    %{state | job_owner: nil, job_owner_ref: nil, job_ledger: ledger, job_admissions: %{}}
+    |> start_job_owner()
+    |> schedule_save()
+  end
+
+  # Installs the job ledger of the conversation that replaces the current one.
+  #
+  # Live jobs belong to the replaced conversation, so they are reaped. A replacement JobOwner runs
+  # under a new epoch, so a report still in flight from the reaped owner is stale and cannot settle
+  # a job of the installed ledger, even one that reuses an id.
+  @spec install_job_ledger(state(), JobLedger.t()) :: state()
+  defp install_job_ledger(state, %JobLedger{} = ledger) do
+    Enum.each(Map.keys(state.job_admissions), &Process.demonitor(&1, [:flush]))
+    state = %{state | job_ledger: ledger, job_admissions: %{}}
+
+    case state.job_owner do
+      nil ->
+        state
+
+      owner ->
+        Process.demonitor(state.job_owner_ref, [:flush])
+        reap_job_owner(owner)
+        start_job_owner(%{state | job_owner: nil, job_owner_ref: nil})
+    end
+  end
+
+  @spec release_job_admission(state(), JobRecord.id()) :: state()
+  defp release_job_admission(state, job_id) do
+    case Enum.find(state.job_admissions, fn {_ref, id} -> id == job_id end) do
+      {ref, _id} ->
+        Process.demonitor(ref, [:flush])
+        %{state | job_admissions: Map.delete(state.job_admissions, ref)}
+
+      nil ->
+        state
+    end
+  end
+
+  # The caller exited before a background job started or before a foreground job ended. A start
+  # it sent before exiting is already queued at the owner ahead of this cancel, so the owner
+  # cancels the job and reports the end.
+  @spec abandon_job(state(), JobRecord.id()) :: state()
+  defp abandon_job(state, job_id) do
+    case JobLedger.fetch(state.job_ledger, job_id) do
+      {:ok, %JobRecord{status: :running}} ->
+        case cancel_owned_job(state, job_id) do
+          :ok ->
+            state
+
+          {:error, :already_terminal} ->
+            # Anything the owner reported about this job is already queued ahead of this check.
+            send(self(), {:job_unstarted, job_id})
+            state
+        end
+
+      _ended_or_evicted ->
+        state
+    end
+  end
+
+  # Runs after every earlier owner report, so a job still running here never reached the owner.
+  @spec settle_unstarted_job(state(), JobRecord.id()) :: state()
+  defp settle_unstarted_job(state, job_id) do
+    case JobLedger.fetch(state.job_ledger, job_id) do
+      {:ok, %JobRecord{status: :running, epoch: epoch}} ->
+        ledger =
+          JobLedger.settle(
+            state.job_ledger,
+            job_id,
+            epoch,
+            :cancelled,
+            nil,
+            %{reference: nil, preview: nil},
+            DateTime.utc_now()
+          )
+
+        schedule_save(%{state | job_ledger: ledger})
+
+      _ended_or_evicted ->
+        state
+    end
+  end
+
+  # A not-found owner reply means the job already ended and its settled report is queued here.
+  @spec cancel_owned_job(state(), JobRecord.id()) :: :ok | {:error, :already_terminal}
+  defp cancel_owned_job(%{job_owner: nil}, _job_id), do: {:error, :already_terminal}
+
+  defp cancel_owned_job(%{job_owner: owner}, job_id) do
+    case JobOwner.cancel(owner, job_id) do
+      :ok -> :ok
+      {:error, :job_not_found} -> {:error, :already_terminal}
+    end
+  catch
+    # The owner died; its DOWN message interrupts the job.
+    :exit, _reason -> {:error, :already_terminal}
   end
 
   @spec reap_job_owner(pid() | nil) :: :ok
@@ -5985,19 +6201,121 @@ defmodule MingaAgent.Session do
     :ok
   end
 
-  @spec drain_job_completions(state()) :: state()
-  defp drain_job_completions(%{job_completions: []} = state), do: state
+  # Starts a host-origin request that carries every pending job notice, so an idle agent learns
+  # that its background jobs ended without the user typing. The notices stay pending while a
+  # turn, an approval, a question or a failure is outstanding; an active turn receives them at
+  # its next checkpoint dispatch instead.
+  @spec wake_for_job_notices(state()) :: state()
+  defp wake_for_job_notices(state) do
+    case JobLedger.pending_notices(state.job_ledger) do
+      [] ->
+        state
 
-  defp drain_job_completions(state) do
-    lines =
-      state.job_completions
-      |> Enum.reverse()
-      |> Enum.map_join("\n", fn {job_id, _generation, outcome, _exit_code} ->
-        "Background job #{job_id}: #{outcome}"
-      end)
-
-    append_system_message(%{state | job_completions: []}, lines, :info)
+      records ->
+        if notice_wake_ready?(state), do: start_job_notice_turn(state, records), else: state
+    end
   end
+
+  @spec notice_wake_ready?(state()) :: boolean()
+  defp notice_wake_ready?(%{credential_readiness: :checking}), do: false
+  defp notice_wake_ready?(%{credentials_configured: false}), do: false
+
+  defp notice_wake_ready?(%{provider: provider}) when ProviderLifecycle.is_detached(provider),
+    do: false
+
+  defp notice_wake_ready?(
+         %{continuation: %Continuation{active_request: nil, tool_checkpoint: nil}} = state
+       ),
+       do: TurnExecution.phase(state.turn_execution) == :idle
+
+  defp notice_wake_ready?(_state), do: false
+
+  @spec start_job_notice_turn(state(), [JobRecord.t(), ...]) :: state()
+  defp start_job_notice_turn(state, records) do
+    {:ok, execution} = TurnExecution.begin_turn(state.turn_execution)
+
+    with {:ok, prepared} <- prepare_provider_request(state),
+         turn_id = prepared.transcript.next_id,
+         candidate = deliver_job_notices(prepared, records),
+         {:ok, request, admitted} <-
+           admit_host_request(prepared, candidate, JobNotice.message(records), turn_id) do
+      case state.provider.module.send_prompt(ProviderLifecycle.pid(state.provider), request) do
+        :ok ->
+          admitted =
+            admitted |> publish_job_notices(records) |> announce_display_status(execution)
+
+          %{admitted | turn_execution: execution}
+
+        {:error, reason} ->
+          retract_job_notice_request(prepared, admitted, reason)
+      end
+    else
+      {:error, reason} -> hold_job_notices(state, reason)
+      {:error, reason, failed} -> hold_job_notices(failed, reason)
+    end
+  end
+
+  # The provider refused the host request, so the model never saw the notices. The admission is
+  # withdrawn as a whole: no active request, no notice entry, and the notices pending again. The
+  # session reports a failure, so the notices wait for the next turn boundary instead of waking
+  # the agent again at once.
+  @spec retract_job_notice_request(state(), state(), term()) :: state()
+  defp retract_job_notice_request(prepared, admitted, reason) do
+    retracted = %{
+      admitted
+      | continuation: Continuation.cancel(admitted.continuation),
+        job_ledger: prepared.job_ledger,
+        transcript: prepared.transcript
+    }
+
+    state =
+      case persist_session_transition(retracted) do
+        {:ok, committed} -> committed
+        {:error, save_reason} -> report_session_transition_failure(retracted, save_reason)
+      end
+
+    report_turn_error(
+      state,
+      "Could not deliver background job results to the agent: #{format_error(reason)}. They will be retried at the next turn boundary."
+    )
+  end
+
+  # The admission did not commit, so the notices are still pending for the next boundary.
+  @spec hold_job_notices(state(), term()) :: state()
+  defp hold_job_notices(state, reason) do
+    Minga.Log.warning(
+      :agent,
+      "[Agent.Session] background job notices held: #{inspect(reason)}"
+    )
+
+    state
+  end
+
+  # Marks the notices delivered and shows them as one system entry, in the state update that
+  # freezes them into a dispatch or begins their host request, so they are saved together.
+  @spec deliver_job_notices(state(), [JobRecord.t()]) :: state()
+  defp deliver_job_notices(state, []), do: state
+
+  defp deliver_job_notices(state, records) do
+    ledger = JobLedger.mark_notices_delivered(state.job_ledger, Enum.map(records, & &1.id))
+    append_msg(%{state | job_ledger: ledger}, Message.system(JobNotice.display_text(records)))
+  end
+
+  @spec publish_job_notices(state(), [JobRecord.t()]) :: state()
+  defp publish_job_notices(state, []), do: state
+
+  defp publish_job_notices(state, records) do
+    record_critical_event(state, :system_message, %{
+      message: JobNotice.display_text(records),
+      level: :info
+    })
+
+    notify_messages_changed(state)
+  end
+
+  @spec job_notice_message([JobRecord.t()]) :: ReqLLM.Message.t() | nil
+  defp job_notice_message([]), do: nil
+  defp job_notice_message(records), do: JobNotice.message(records)
 
   # ── Subscriber lifecycle ──────────────────────────────────────────────────
 
@@ -7140,13 +7458,13 @@ defmodule MingaAgent.Session do
        ),
        do:
          {:file_edit_proposed,
-          %{
-            path: path,
-            before_content: before_content,
-            after_content: after_content,
-            tool_call_id: tool_call_id,
-            tool_name: tool_name
-          }}
+          EventLog.FileEditPayload.new(
+            path,
+            before_content,
+            after_content,
+            tool_call_id,
+            tool_name
+          )}
 
   defp event_log_entry({:approval_pending, %PublicApproval{target: target} = approval}) do
     {:approval_requested,
@@ -7327,28 +7645,61 @@ defmodule MingaAgent.Session do
         ) :: {:ok, Request.t(), state()} | {:error, term(), state()}
   defp admit_provider_request(previous, candidate, content, draft_revision \\ :preserve) do
     with {:ok, turn_id} <- request_turn_id(candidate),
-         request_id = Base.url_encode64(:crypto.strong_rand_bytes(18), padding: false),
          {:ok, request, continuation} <-
-           Continuation.begin_request(candidate.continuation, request_id, turn_id, content) do
-      candidate = %{candidate | continuation: continuation}
-
-      {persisted, save_result} =
-        if Persistence.enabled?(candidate.persistence) do
-          durable = %{candidate | continuation: Continuation.mark_durable(continuation)}
-          persist_boundary_candidate(previous, durable, draft_revision)
-        else
-          {candidate, :ok}
-        end
-
-      case save_result do
-        :ok ->
-          {:ok, request, persisted}
-
-        {:error, reason} ->
-          {:error, {:conversation_persistence_failed, reason}, persisted}
-      end
+           Continuation.begin_request(candidate.continuation, new_request_id(), turn_id, content) do
+      commit_admitted_request(previous, candidate, request, continuation, draft_revision)
     else
       {:error, reason} -> {:error, reason, previous}
+    end
+  end
+
+  # The turn id is the job-notice display entry, so a boundary recorded for this request never
+  # points before an earlier boundary.
+  @spec admit_host_request(state(), state(), ReqLLM.Message.t(), pos_integer()) ::
+          {:ok, Request.t(), state()} | {:error, term(), state()}
+  defp admit_host_request(previous, candidate, notice, turn_id) do
+    case Continuation.begin_host_request(
+           candidate.continuation,
+           new_request_id(),
+           turn_id,
+           notice
+         ) do
+      {:ok, request, continuation} ->
+        commit_admitted_request(previous, candidate, request, continuation, :preserve)
+
+      {:error, reason} ->
+        {:error, reason, previous}
+    end
+  end
+
+  @spec new_request_id() :: String.t()
+  defp new_request_id, do: Base.url_encode64(:crypto.strong_rand_bytes(18), padding: false)
+
+  @spec commit_admitted_request(
+          state(),
+          state(),
+          Request.t(),
+          Continuation.t(),
+          draft_admission()
+        ) ::
+          {:ok, Request.t(), state()} | {:error, term(), state()}
+  defp commit_admitted_request(previous, candidate, request, continuation, draft_revision) do
+    candidate = %{candidate | continuation: continuation}
+
+    {persisted, save_result} =
+      if Persistence.enabled?(candidate.persistence) do
+        durable = %{candidate | continuation: Continuation.mark_durable(continuation)}
+        persist_boundary_candidate(previous, durable, draft_revision)
+      else
+        {candidate, :ok}
+      end
+
+    case save_result do
+      :ok ->
+        {:ok, request, persisted}
+
+      {:error, reason} ->
+        {:error, {:conversation_persistence_failed, reason}, persisted}
     end
   end
 
@@ -7591,7 +7942,7 @@ defmodule MingaAgent.Session do
         {MingaAgent.Providers.Native, manager} ->
           state.provider.opts
           |> Keyword.put(:session_checklist?, true)
-          |> Keyword.put(:job_owner, state.job_owner)
+          |> Keyword.put(:session_jobs?, true)
           |> maybe_put_session_manager(manager)
 
         _provider ->
@@ -9087,16 +9438,30 @@ defmodule MingaAgent.Session do
   @spec begin_native_dispatch(state(), pid(), String.t(), Dispatch.source()) ::
           {:reply, {:ok, Dispatch.t(), [ReqLLM.Message.t()]} | {:error, term()}, state()}
   defp begin_native_dispatch(state, worker, request_id, source) do
-    {steering, execution} = dispatch_steering(state, source)
-
+    {steering, notices, execution} = dispatch_inputs(state, source)
     {canonical, display} = steering_inputs(steering)
+    notice = job_notice_message(notices)
 
     with {:ok, dispatch, messages, continuation} <-
-           Continuation.begin_dispatch(state.continuation, request_id, source, canonical, worker),
+           Continuation.begin_dispatch(
+             state.continuation,
+             request_id,
+             source,
+             canonical,
+             notice,
+             worker
+           ),
          candidate =
-           install_dispatch_source(state, continuation, execution, display),
+           state
+           |> deliver_job_notices(notices)
+           |> install_dispatch_source(continuation, execution, display),
          {:ok, committed} <- persist_dispatch_source(state, candidate) do
-      {:reply, {:ok, dispatch, messages}, publish_dispatched_steering(committed, display)}
+      committed =
+        committed
+        |> publish_job_notices(notices)
+        |> publish_dispatched_steering(display)
+
+      {:reply, {:ok, dispatch, messages}, committed}
     else
       {:error, reason} -> {:reply, {:error, {:request_admission_failed, reason}}, state}
     end
@@ -9123,15 +9488,19 @@ defmodule MingaAgent.Session do
 
   defp persist_dispatch_source(_state, candidate), do: {:ok, candidate}
 
-  @spec dispatch_steering(state(), Dispatch.source()) ::
-          {[TurnExecution.content()], TurnExecution.t()}
-  defp dispatch_steering(
+  # Queued steering and pending job notices enter only the first dispatch after a checkpoint, which
+  # freezes them once. A retry against the frozen checkpoint takes neither, so notices stay pending.
+  @spec dispatch_inputs(state(), Dispatch.source()) ::
+          {[TurnExecution.content()], [JobRecord.t()], TurnExecution.t()}
+  defp dispatch_inputs(
          %{continuation: %Continuation{tool_checkpoint: %{checkpoint_id: id, version: 1}}} = state,
          {:checkpoint, id}
-       ),
-       do: TurnExecution.dequeue_steering(state.turn_execution)
+       ) do
+    {steering, execution} = TurnExecution.dequeue_steering(state.turn_execution)
+    {steering, JobLedger.pending_notices(state.job_ledger), execution}
+  end
 
-  defp dispatch_steering(state, _source), do: {[], state.turn_execution}
+  defp dispatch_inputs(state, _source), do: {[], [], state.turn_execution}
 
   @spec publish_dispatched_steering(state(), [Message.t()]) :: state()
   defp publish_dispatched_steering(state, []), do: state
@@ -9199,6 +9568,7 @@ defmodule MingaAgent.Session do
         checklist: state.checklist,
         checklist_archive: state.checklist_archive,
         file_changes: state.file_changes,
+        job_ledger: state.job_ledger,
         pending_inputs: TurnExecution.pending_inputs(state.turn_execution),
         continuation: state.continuation
       }
@@ -9507,7 +9877,8 @@ defmodule MingaAgent.Session do
               continuation: Continuation.reset(state.continuation),
               checklist: Checklist.new(),
               checklist_archive: ChecklistArchive.new(),
-              file_changes: []
+              file_changes: [],
+              job_ledger: JobLedger.new()
           }
 
           {:ok, restored} = install_loaded_session_state(state, staged, execution, now)
@@ -9708,6 +10079,8 @@ defmodule MingaAgent.Session do
         checklist: Map.get(data, :checklist, Checklist.new()),
         checklist_archive: Map.get(data, :checklist_archive, ChecklistArchive.new()),
         file_changes: Map.get(data, :file_changes, []),
+        job_ledger:
+          JobLedger.restore(Map.get(data, :job_ledger, JobLedger.new()), DateTime.utc_now()),
         provider: lifecycle,
         credential_readiness: credential_readiness,
         credentials_configured: credentials_configured,
@@ -9904,6 +10277,7 @@ defmodule MingaAgent.Session do
         created_at: loaded_at
     }
 
+    loaded = install_job_ledger(loaded, staged.job_ledger)
     loaded = invalidate_connection(loaded, :conversation)
     loaded = retain_resolution_problem(loaded, staged.connection.resolver_problem)
     loaded = settle_loaded_provider(loaded, state.provider)
@@ -9936,7 +10310,9 @@ defmodule MingaAgent.Session do
     state = publish_connection(state)
     broadcast(state, {:status_changed, :idle})
     broadcast(state, :messages_changed)
-    {:ok, publish_checklist(state)}
+
+    # A restored ledger can owe notices, for example for jobs that a restart interrupted.
+    {:ok, state |> publish_checklist() |> wake_for_job_notices()}
   end
 
   @spec reconcile_loaded_checkpoint(state()) ::

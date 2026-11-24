@@ -39,8 +39,10 @@ defmodule MingaAgent.Tools do
   """
 
   alias MingaAgent.ProjectView
+  alias MingaAgent.Session.JobLedger.Record, as: JobRecord
   alias MingaAgent.Tool.Context
   alias MingaAgent.Tool.Output
+  alias MingaAgent.Tool.Output.Codec, as: OutputCodec
   alias MingaAgent.Tool.Spec
   alias MingaAgent.ToolRouter
   alias MingaAgent.Tools.DirectoryListing
@@ -48,6 +50,7 @@ defmodule MingaAgent.Tools do
   alias MingaAgent.Tools.FetchOutput
   alias MingaAgent.Tools.FetchUrl
   alias MingaAgent.Tools.Git, as: GitTools
+  alias MingaAgent.Tools.JobOwner
   alias MingaAgent.Tools.ListDirectory
   alias MingaAgent.Tools.LspCodeActions
   alias MingaAgent.Tools.LspDefinition
@@ -79,6 +82,7 @@ defmodule MingaAgent.Tools do
 
   @default_destructive_tools ~w(write_file edit_file delete_file shell git_stage git_commit rename)
   @file_read_tools ~w(read_file list_directory find grep)
+  @no_job_session "Jobs are unavailable: this tool call has no owning agent session."
   @read_only_tools ~w(read_file memory_read fetch_output list_directory find grep fetch_url git_status git_diff git_log diagnostics definition references hover document_symbols workspace_symbols describe_runtime describe_tools produce_rewrite job_status job_output)
   @max_symlink_depth 40
 
@@ -727,7 +731,7 @@ defmodule MingaAgent.Tools do
         router_ctx = context.router_context
         shell_output_callback = Map.get(context.metadata, :shell_output_callback)
         process_backend = Map.get(context.metadata, :process_backend, SystemProcessBackend)
-        job_owner = Map.get(context.metadata, :job_owner)
+        job_session = job_session(context)
 
         fn args ->
           timeout_secs = normalize_shell_timeout(args["timeout"])
@@ -741,27 +745,25 @@ defmodule MingaAgent.Tools do
               flush_before_shell()
             end
 
+            spec = %{
+              command: args["command"],
+              cwd: shell_root,
+              background?: background?,
+              timeout_secs: timeout_secs
+            }
+
             shell_opts = [
+              process_backend: process_backend,
               env: env,
               artifact_store: context.artifact_store,
               capture_key: context.capture_key
             ]
 
-            # A background job outlives this tool call, so it must not stream into the call's output.
-            if background? and job_owner != nil do
-              execute_background_shell(
-                job_owner,
-                args["command"],
-                shell_root,
-                timeout_secs,
-                shell_opts
-              )
-            else
-              shell_opts = Keyword.put(shell_opts, :on_output, shell_output_callback)
-
-              process_backend.shell(args["command"], shell_root, timeout_secs, shell_opts)
-              |> retained_process_result(context)
-            end
+            run_shell_job(job_session, spec,
+              shell_opts: shell_opts,
+              on_output: shell_output_callback,
+              context: context
+            )
           else
             {:error, reason} -> {:error, inspect(reason)}
           end
@@ -770,25 +772,82 @@ defmodule MingaAgent.Tools do
     )
   end
 
-  @spec execute_background_shell(
-          GenServer.server(),
-          String.t(),
-          String.t(),
-          pos_integer(),
-          keyword()
-        ) :: {:ok, String.t()} | {:error, term()}
-  defp execute_background_shell(job_owner, command, cwd, timeout_secs, opts) do
-    alias MingaAgent.Tools.JobOwner
+  # The owning Session runs jobs only when it started this provider; nothing else may stand in for it.
+  @spec job_session(Context.t()) :: GenServer.server() | nil
+  defp job_session(%Context{metadata: %{session_jobs?: true, parent_session: nil}}), do: nil
 
-    case JobOwner.start_background(job_owner, command, cwd, timeout_secs, opts) do
-      {:ok, job_id} ->
+  defp job_session(%Context{metadata: %{session_jobs?: true, parent_session: session}}),
+    do: session
+
+  defp job_session(%Context{}), do: nil
+
+  # Every shell command is a job admitted by the owning Session and run by its JobOwner:
+  # background returns the job's handle, foreground waits for the same job's outcome.
+  @spec run_shell_job(GenServer.server() | nil, JobRecord.spec(), keyword()) ::
+          {:ok, term()} | {:error, term()}
+  defp run_shell_job(nil, _spec, _opts),
+    do: {:error, "Shell is unavailable: this tool call has no owning agent session to run jobs."}
+
+  defp run_shell_job(session, spec, opts) do
+    case admit_job(session, spec) do
+      {:ok, record, owner} -> start_job(owner, record, opts)
+      {:error, reason} -> {:error, job_admission_message(reason)}
+    end
+  end
+
+  @typep admission_error :: MingaAgent.Session.job_admission_error() | :session_unavailable
+
+  @spec admit_job(GenServer.server(), JobRecord.spec()) ::
+          {:ok, JobRecord.t(), pid()} | {:error, admission_error()}
+  defp admit_job(session, spec) do
+    MingaAgent.Session.admit_job(session, spec)
+  catch
+    :exit, _reason -> {:error, :session_unavailable}
+  end
+
+  @spec start_job(pid(), JobRecord.t(), keyword()) :: {:ok, term()} | {:error, term()}
+  defp start_job(owner, %JobRecord{background?: true} = record, opts) do
+    # A background job outlives this tool call, so it must not stream into the call's output.
+    case JobOwner.start_background(owner, record, Keyword.fetch!(opts, :shell_opts)) do
+      :ok ->
         {:ok,
-         "Background job started: #{job_id}\nUse job_status(\"#{job_id}\") to check progress."}
+         "Background job started: #{record.id}\nUse job_status(\"#{record.id}\") to check progress."}
 
       {:error, reason} ->
         {:error, "Failed to start background job: #{inspect(reason)}"}
     end
+  catch
+    :exit, reason -> {:error, "Shell job owner is unavailable: #{inspect(reason)}"}
   end
+
+  defp start_job(owner, %JobRecord{background?: false} = record, opts) do
+    shell_opts = Keyword.put(Keyword.fetch!(opts, :shell_opts), :on_output, opts[:on_output])
+
+    case JobOwner.start_foreground(owner, record, shell_opts) do
+      {:error, reason} when reason in [:stale_epoch, :already_running, :cancelled] ->
+        {:error, "Failed to start shell job: #{inspect(reason)}"}
+
+      result ->
+        retained_process_result(result, Keyword.fetch!(opts, :context))
+    end
+  catch
+    :exit, reason -> {:error, "Shell job owner is unavailable: #{inspect(reason)}"}
+  end
+
+  @spec job_admission_message(admission_error()) :: String.t()
+  defp job_admission_message({:job_limit, :session, limit}),
+    do:
+      "Job limit reached: this session already runs #{limit} jobs. Wait for one to finish or cancel one with job_cancel."
+
+  defp job_admission_message({:job_limit, :retained, limit}),
+    do:
+      "Job limit reached: this session retains #{limit} jobs that are still running or have undelivered results."
+
+  defp job_admission_message(:no_job_owner),
+    do: "Shell is unavailable: this session has no job owner."
+
+  defp job_admission_message(:session_unavailable),
+    do: "Shell is unavailable: the owning agent session is not responding."
 
   # ── Job management tools ──────────────────────────────────────────────────
 
@@ -797,39 +856,22 @@ defmodule MingaAgent.Tools do
     Spec.new!(
       name: "job_status",
       description: """
-      Check the status of a background shell job. Returns the job's current
-      lifecycle state (starting, running, completed, failed, timeout,
-      cancelled, crashed, interrupted), exit code, and timing information.
+      Check the status of a shell job. Returns the job's current lifecycle
+      state (running, completed, failed, timeout, cancelled, crashed,
+      interrupted), exit code, and timing information.
       """,
-      parameter_schema: %{
-        "type" => "object",
-        "properties" => %{
-          "job_id" => %{
-            "type" => "string",
-            "description" => "The job handle returned by shell with background: true"
-          }
-        },
-        "required" => ["job_id"]
-      },
+      parameter_schema: job_id_schema(),
       source: :builtin,
       category: :shell,
       approval_level: :auto,
       capabilities: [],
       context_requirements: [:tool_context],
       build: fn context ->
-        job_owner = Map.get(context.metadata, :job_owner)
+        job_session = job_session(context)
 
         fn args ->
-          if job_owner == nil do
-            {:error, "No job owner available. Background jobs require a session context."}
-          else
-            case MingaAgent.Tools.JobOwner.job_status(job_owner, args["job_id"]) do
-              {:ok, job} ->
-                {:ok, format_job_status(job)}
-
-              {:error, :job_not_found} ->
-                {:error, "Job not found: #{args["job_id"]}"}
-            end
+          with {:ok, record} <- fetch_job(job_session, args["job_id"]) do
+            {:ok, format_job_status(record)}
           end
         end
       end
@@ -841,42 +883,30 @@ defmodule MingaAgent.Tools do
     Spec.new!(
       name: "job_output",
       description: """
-      Retrieve the output of a completed background shell job. Returns the
-      combined stdout/stderr text. The job must have reached a terminal state.
+      Retrieve the output of a finished shell job. Returns a bounded preview
+      and, when the output was retained, a reference to pass to fetch_output
+      for exact byte ranges of the full output. The job must have finished.
       """,
-      parameter_schema: %{
-        "type" => "object",
-        "properties" => %{
-          "job_id" => %{
-            "type" => "string",
-            "description" => "The job handle returned by shell with background: true"
-          }
-        },
-        "required" => ["job_id"]
-      },
+      parameter_schema: job_id_schema(),
       source: :builtin,
       category: :shell,
       approval_level: :auto,
       capabilities: [],
       context_requirements: [:tool_context],
       build: fn context ->
-        job_owner = Map.get(context.metadata, :job_owner)
+        job_session = job_session(context)
 
         fn args ->
-          if job_owner == nil do
-            {:error, "No job owner available. Background jobs require a session context."}
-          else
-            case MingaAgent.Tools.JobOwner.job_output(job_owner, args["job_id"]) do
-              {:ok, text} ->
-                {:ok, text}
+          case fetch_job(job_session, args["job_id"]) do
+            {:ok, %JobRecord{status: :running}} ->
+              {:error,
+               "Job is still running. Wait for completion or use job_status to check progress."}
 
-              {:error, :job_not_found} ->
-                {:error, "Job not found: #{args["job_id"]}"}
+            {:ok, record} ->
+              {:ok, format_job_output(record)}
 
-              {:error, :job_still_running} ->
-                {:error,
-                 "Job is still running. Wait for completion or use job_status to check progress."}
-            end
+            {:error, _message} = error ->
+              error
           end
         end
       end
@@ -888,72 +918,122 @@ defmodule MingaAgent.Tools do
     Spec.new!(
       name: "job_cancel",
       description: """
-      Cancel a running background shell job. The job's process tree is
-      terminated and the job transitions to the cancelled terminal state.
+      Cancel a running shell job. The job's process tree is terminated and
+      the job transitions to the cancelled terminal state.
       """,
-      parameter_schema: %{
-        "type" => "object",
-        "properties" => %{
-          "job_id" => %{
-            "type" => "string",
-            "description" => "The job handle returned by shell with background: true"
-          }
-        },
-        "required" => ["job_id"]
-      },
+      parameter_schema: job_id_schema(),
       source: :builtin,
       category: :shell,
       approval_level: :ask,
       capabilities: [:run_shell],
       context_requirements: [:tool_context],
       build: fn context ->
-        job_owner = Map.get(context.metadata, :job_owner)
+        job_session = job_session(context)
 
-        fn args ->
-          if job_owner == nil do
-            {:error, "No job owner available. Background jobs require a session context."}
-          else
-            case MingaAgent.Tools.JobOwner.cancel(job_owner, args["job_id"]) do
-              :ok ->
-                {:ok, "Job #{args["job_id"]} cancelled."}
-
-              {:error, :job_not_found} ->
-                {:error, "Job not found: #{args["job_id"]}"}
-
-              {:error, :already_terminal} ->
-                {:error, "Job already finished. Use job_output to retrieve its result."}
-            end
-          end
-        end
+        fn args -> cancel_job(job_session, args["job_id"]) end
       end
     )
   end
 
-  @spec format_job_status(MingaAgent.Tools.Job.t()) :: String.t()
-  defp format_job_status(job) do
-    alias MingaAgent.Tools.Job
+  @spec job_id_schema() :: map()
+  defp job_id_schema do
+    %{
+      "type" => "object",
+      "properties" => %{
+        "job_id" => %{
+          "type" => "string",
+          "description" => "The job handle returned by shell"
+        }
+      },
+      "required" => ["job_id"]
+    }
+  end
 
-    status = Job.summary_status(job)
+  @spec fetch_job(GenServer.server() | nil, term()) :: {:ok, JobRecord.t()} | {:error, String.t()}
+  defp fetch_job(nil, _job_id), do: {:error, @no_job_session}
 
-    elapsed =
-      if job.finished_at,
-        do: job.finished_at - job.started_at,
-        else: System.monotonic_time(:millisecond) - job.started_at
+  defp fetch_job(session, job_id) when is_binary(job_id) do
+    case MingaAgent.Session.job(session, job_id) do
+      {:ok, record} -> {:ok, record}
+      {:error, :job_not_found} -> {:error, "Job not found: #{job_id}"}
+    end
+  catch
+    :exit, _reason -> {:error, job_admission_message(:session_unavailable)}
+  end
 
-    mode = if job.background?, do: "background", else: "foreground"
+  defp fetch_job(_session, job_id), do: {:error, "Job not found: #{inspect(job_id)}"}
 
-    lines =
+  @spec cancel_job(GenServer.server() | nil, term()) :: {:ok, String.t()} | {:error, String.t()}
+  defp cancel_job(nil, _job_id), do: {:error, @no_job_session}
+
+  defp cancel_job(session, job_id) when is_binary(job_id) do
+    case MingaAgent.Session.cancel_job(session, job_id) do
+      :ok ->
+        {:ok, "Job #{job_id} cancelled."}
+
+      {:error, :job_not_found} ->
+        {:error, "Job not found: #{job_id}"}
+
+      {:error, :already_terminal} ->
+        {:error, "Job already finished. Use job_output to retrieve its result."}
+    end
+  catch
+    :exit, _reason -> {:error, job_admission_message(:session_unavailable)}
+  end
+
+  defp cancel_job(_session, job_id), do: {:error, "Job not found: #{inspect(job_id)}"}
+
+  @spec format_job_status(JobRecord.t()) :: String.t()
+  defp format_job_status(%JobRecord{} = record) do
+    elapsed_ms =
+      DateTime.diff(record.finished_at || DateTime.utc_now(), record.started_at, :millisecond)
+
+    mode = if record.background?, do: "background", else: "foreground"
+    exit_code = JobRecord.exit_code(record)
+
+    [
+      "Job: #{record.id}",
+      "Status: #{JobRecord.status_name(record)}",
+      "Command: #{record.command}",
+      "Started: #{DateTime.to_iso8601(record.started_at)}",
+      "Elapsed: #{elapsed_ms}ms",
+      if(exit_code != nil, do: "Exit code: #{exit_code}"),
+      "Mode: #{mode}"
+    ]
+    |> Enum.reject(&is_nil/1)
+    |> Enum.join("\n")
+  end
+
+  # The reference is printed in the exact shape fetch_output accepts.
+  @spec format_job_output(JobRecord.t()) :: String.t()
+  defp format_job_output(%JobRecord{} = record) do
+    reference_line =
+      case record.output_ref do
+        nil ->
+          "Full output: not retained; only the preview below is available."
+
+        reference ->
+          "Full output reference for fetch_output: " <>
+            JSON.encode!(OutputCodec.encode_reference(reference))
+      end
+
+    preview =
+      case record.preview do
+        nil -> "(no output captured)"
+        "" -> "(no output)"
+        text -> text
+      end
+
+    Enum.join(
       [
-        "Job: #{job.id}",
-        "Status: #{status}",
-        "Command: #{job.command}",
-        "Elapsed: #{elapsed}ms",
-        if(job.exit_code != nil, do: "Exit code: #{job.exit_code}"),
-        "Mode: #{mode}"
-      ]
-      |> Enum.reject(&is_nil/1)
-
-    Enum.join(lines, "\n")
+        "Job: #{record.id}",
+        "Status: #{JobRecord.status_name(record)}",
+        reference_line,
+        "Preview (at most #{JobRecord.preview_bytes()} bytes):",
+        preview
+      ],
+      "\n"
+    )
   end
 
   @spec subagent() :: Spec.t()

@@ -914,6 +914,7 @@ defmodule MingaEditor do
     # Record the input correlation sequence (ticket #2215) so the render that
     # this keystroke triggers echoes it on commit_frame for latency resolution.
     state = %{state | frontend: MingaEditor.State.Frontend.correlate_input(state.frontend, seq)}
+    state = Input.CUA.SpaceLeader.note_key(state, codepoint, modifiers)
 
     new_state =
       Minga.Telemetry.span([:minga, :input, :dispatch], %{input_seq: seq}, fn ->
@@ -944,6 +945,7 @@ defmodule MingaEditor do
         {:minga_input, {:mouse_event, row, col, button, mods, event_type, click_count}},
         state
       ) do
+    state = Input.CUA.SpaceLeader.clear_held_space(state)
     snapshot = Input.Router.capture_snapshot(state)
 
     new_state =
@@ -974,6 +976,8 @@ defmodule MingaEditor do
         %{render: %{text_interaction_reader: reader}} = state
       )
       when reader != nil do
+    state = Input.CUA.SpaceLeader.clear_held_space(state)
+
     target =
       if event.event_type == :release do
         nil
@@ -996,6 +1000,7 @@ defmodule MingaEditor do
           %MingaEditor.Mouse.TextEvent{button: :left, event_type: :release} = event}},
         state
       ) do
+    state = Input.CUA.SpaceLeader.clear_held_space(state)
     snapshot = Input.Router.capture_snapshot(state)
     new_state = MingaEditor.Mouse.handle_text_event(state, event, nil)
     new_state = Input.Router.post_action_housekeeping(new_state, snapshot)

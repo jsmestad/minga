@@ -1,26 +1,27 @@
 defmodule MingaAgent.Tools.JobOwner do
   @moduledoc """
-  Owns running verification jobs for one agent session.
+  Supervises the running shell jobs of one agent session.
 
-  Each session that needs job execution starts one JobOwner. The owner
-  spawns monitored processes for shell commands, tracks bounded
-  concurrency, and delivers terminal outcomes to the owning session.
+  The Session admits each job in its `MingaAgent.Session.JobLedger` and passes the admitted record here. The owner runs the command in a linked task through the injected process backend, reports `{:job_started, id, epoch}` once the task exists, and reports exactly one `{:job_settled, id, epoch, outcome, exit_code, output}` for every job, foreground or background. It keeps only live task bookkeeping; job identity and recorded status belong to the Session.
 
-  Foreground jobs block the caller until terminal. Background jobs
-  return a stable handle immediately and buffer completion
-  notifications for the session to deliver at a safe turn boundary.
+  When an artifact store is available, job output is retained through it and the settled report carries the output reference. A foreground job captures under its tool call's capture key, because the job's output is the call's result. A background job captures under a key derived from its job id, because the start call stores its own handle text under the call's key.
+
+  Foreground starts block the caller until the job ends and return the shell result. Background starts return once the task is running. Job tasks are linked, so they die with the owner, and `terminate/2` kills any still running.
+
+  The owner only sends to the Session and never calls it, so Session calls into the owner (cancel, reap) cannot deadlock.
   """
 
   use GenServer
 
-  alias MingaAgent.Tools.Job
+  alias MingaAgent.Session.JobLedger.Record
+  alias MingaAgent.Tool.Output
+  alias MingaAgent.Tools.OutputCapture
+  alias MingaAgent.Tools.ProcessBackend.System, as: SystemProcessBackend
   alias MingaAgent.Tools.Shell
 
-  @max_concurrent 8
-  @max_retained 64
-
-  @typedoc "Options for starting a job."
+  @typedoc "Options for running a job."
   @type start_opts :: [
+          process_backend: module(),
           on_output: (String.t() -> :ok),
           env: [{String.t(), String.t()}],
           artifact_store: GenServer.server() | nil,
@@ -28,72 +29,53 @@ defmodule MingaAgent.Tools.JobOwner do
           helper_path: String.t()
         ]
 
-  @typedoc "Completion notification for a background job."
-  @type completion :: {Job.id(), Job.generation(), Job.outcome(), non_neg_integer() | nil}
+  @typedoc "Why the owner refused to run an admitted record."
+  @type start_error :: :stale_epoch | :already_running
 
-  @type init_opts :: [session_id: String.t(), notify: pid()]
+  @typedoc "Message sent to the Session when a job's task is running."
+  @type started_message :: {:job_started, Record.id(), Record.epoch()}
+
+  @typedoc "Message sent to the Session when a job ends."
+  @type settled_message ::
+          {:job_settled, Record.id(), Record.epoch(), Record.outcome(), integer() | nil,
+           Record.output()}
+
+  @type init_opts :: [session: pid(), epoch: Record.epoch()]
 
   # ── Public API ──────────────────────────────────────────────────────────────
 
-  @doc "Starts a JobOwner for the given session."
+  @doc "Starts a JobOwner that reports to `session` under the given epoch."
   @spec start_link(init_opts()) :: GenServer.on_start()
   def start_link(opts) when is_list(opts) do
     GenServer.start_link(__MODULE__, opts)
   end
 
   @doc """
-  Starts a foreground job and blocks until it completes.
+  Runs an admitted foreground job and blocks until it ends.
 
-  Returns the shell result directly, as if `Shell.execute/4` or
-  `Shell.capture/4` were called. The job lifecycle is tracked
-  internally for status queries and output retention.
+  Returns the shell result as `Shell.execute/4` or `Shell.capture/4` would. The Session also receives the job's settled report.
   """
-  @spec start_foreground(GenServer.server(), String.t(), String.t(), pos_integer(), start_opts()) ::
-          Shell.result()
-  def start_foreground(owner, command, cwd, timeout_secs, opts \\ []) do
-    timeout_ms = (timeout_secs + 5) * 1_000
-
-    GenServer.call(
-      owner,
-      {:start_foreground, command, cwd, timeout_secs, opts},
-      timeout_ms
-    )
+  @spec start_foreground(GenServer.server(), Record.t(), start_opts()) ::
+          Shell.result() | {:error, start_error()}
+  def start_foreground(owner, %Record{background?: false} = record, opts \\ []) do
+    timeout_ms = (record.timeout_secs + 5) * 1_000
+    GenServer.call(owner, {:start, record, opts}, timeout_ms)
   end
 
-  @doc """
-  Starts a background job and returns a stable handle immediately.
-
-  The owning session receives a completion notification when the job
-  reaches a terminal state.
-  """
-  @spec start_background(GenServer.server(), String.t(), String.t(), pos_integer(), start_opts()) ::
-          {:ok, Job.id()} | {:error, :too_many_jobs}
-  def start_background(owner, command, cwd, timeout_secs, opts \\ []) do
-    GenServer.call(owner, {:start_background, command, cwd, timeout_secs, opts})
+  @doc "Runs an admitted background job and returns once its task is running."
+  @spec start_background(GenServer.server(), Record.t(), start_opts()) ::
+          :ok | {:error, start_error()}
+  def start_background(owner, %Record{background?: true} = record, opts \\ []) do
+    GenServer.call(owner, {:start, record, opts})
   end
 
-  @doc "Returns the current status of a job."
-  @spec job_status(GenServer.server(), Job.id()) ::
-          {:ok, Job.t()} | {:error, :job_not_found}
-  def job_status(owner, job_id) when is_binary(job_id) do
-    GenServer.call(owner, {:job_status, job_id})
-  end
-
-  @doc "Returns the retained output text for a terminal job."
-  @spec job_output(GenServer.server(), Job.id()) ::
-          {:ok, String.t()} | {:error, :job_not_found | :job_still_running}
-  def job_output(owner, job_id) when is_binary(job_id) do
-    GenServer.call(owner, {:job_output, job_id})
-  end
-
-  @doc "Cancels a running job."
-  @spec cancel(GenServer.server(), Job.id()) ::
-          :ok | {:error, :job_not_found | :already_terminal}
+  @doc "Kills a running job. The Session receives a `:cancelled` settled report."
+  @spec cancel(GenServer.server(), Record.id()) :: :ok | {:error, :job_not_found}
   def cancel(owner, job_id) when is_binary(job_id) do
     GenServer.call(owner, {:cancel, job_id})
   end
 
-  @doc "Reaps all running jobs and marks them interrupted. Called during session teardown."
+  @doc "Kills every running job without reporting. Called during session teardown."
   @spec reap_all(GenServer.server()) :: :ok
   def reap_all(owner) do
     GenServer.call(owner, :reap_all)
@@ -102,20 +84,18 @@ defmodule MingaAgent.Tools.JobOwner do
   # ── Server callbacks ────────────────────────────────────────────────────────
 
   @typep live_entry :: %{
-           job: Job.t(),
+           record: Record.t(),
            task_pid: pid(),
            monitor_ref: reference(),
            from: GenServer.from() | nil
          }
 
   @typep state :: %{
-           session_id: String.t(),
-           notify: pid(),
-           next_generation: Job.generation(),
-           live: %{Job.id() => live_entry()},
-           retained: %{Job.id() => Job.t()},
-           retained_order: [Job.id()],
-           tasks: MapSet.t(pid())
+           session: pid(),
+           epoch: Record.epoch(),
+           live: %{Record.id() => live_entry()},
+           tasks: MapSet.t(pid()),
+           cancelled_unstarted: MapSet.t(Record.id())
          }
 
   @impl GenServer
@@ -124,60 +104,33 @@ defmodule MingaAgent.Tools.JobOwner do
     # Job tasks are linked so they die with the owner; trapping keeps a task exit from stopping it.
     Process.flag(:trap_exit, true)
 
-    state = %{
-      session_id: Keyword.fetch!(opts, :session_id),
-      notify: Keyword.fetch!(opts, :notify),
-      next_generation: 1,
-      live: %{},
-      retained: %{},
-      retained_order: [],
-      tasks: MapSet.new()
-    }
-
-    {:ok, state}
+    {:ok,
+     %{
+       session: Keyword.fetch!(opts, :session),
+       epoch: Keyword.fetch!(opts, :epoch),
+       live: %{},
+       tasks: MapSet.new(),
+       cancelled_unstarted: MapSet.new()
+     }}
   end
 
   @impl GenServer
-  def handle_call({:start_foreground, command, cwd, timeout_secs, opts}, from, state) do
-    case admit_job(state, command, cwd, timeout_secs, false) do
-      {:ok, job, state} ->
-        state = spawn_job(state, job, opts, from)
-        {:noreply, state}
-
-      {:error, reason} ->
-        {:reply, {:error, reason}, state}
-    end
+  def handle_call({:start, %Record{epoch: epoch}, _opts}, _from, %{epoch: current} = state)
+      when epoch != current do
+    {:reply, {:error, :stale_epoch}, state}
   end
 
-  def handle_call({:start_background, command, cwd, timeout_secs, opts}, _from, state) do
-    case admit_job(state, command, cwd, timeout_secs, true) do
-      {:ok, job, state} ->
-        state = spawn_job(state, job, opts, nil)
-        {:reply, {:ok, job.id}, state}
+  def handle_call({:start, %Record{id: id} = record, opts}, from, state) do
+    cond do
+      Map.has_key?(state.live, id) ->
+        {:reply, {:error, :already_running}, state}
 
-      {:error, reason} ->
-        {:reply, {:error, reason}, state}
-    end
-  end
+      MapSet.member?(state.cancelled_unstarted, id) ->
+        cancelled = MapSet.delete(state.cancelled_unstarted, id)
+        {:reply, {:error, :cancelled}, %{state | cancelled_unstarted: cancelled}}
 
-  def handle_call({:job_status, job_id}, _from, state) do
-    case find_job(state, job_id) do
-      {:ok, job} -> {:reply, {:ok, job}, state}
-      :not_found -> {:reply, {:error, :job_not_found}, state}
-    end
-  end
-
-  def handle_call({:job_output, job_id}, _from, state) do
-    case find_job(state, job_id) do
-      {:ok, %Job{} = job} ->
-        if Job.finished?(job) do
-          {:reply, {:ok, job.output_text || ""}, state}
-        else
-          {:reply, {:error, :job_still_running}, state}
-        end
-
-      :not_found ->
-        {:reply, {:error, :job_not_found}, state}
+      true ->
+        start_job(state, record, job_opts(record, opts), from)
     end
   end
 
@@ -185,39 +138,33 @@ defmodule MingaAgent.Tools.JobOwner do
     case Map.fetch(state.live, job_id) do
       {:ok, entry} ->
         Process.exit(entry.task_pid, :kill)
-        job = Job.terminate(entry.job, :cancelled, nil)
-        state = finish_job(state, job_id, entry, job)
-        {:reply, :ok, state}
 
+        {:reply, :ok,
+         settle(state, entry, :cancelled, nil, no_output(), {:error, "job cancelled"})}
+
+      # Session cancels a job whose caller died; if its start has not arrived yet, refuse it later.
       :error ->
-        case Map.fetch(state.retained, job_id) do
-          {:ok, _job} -> {:reply, {:error, :already_terminal}, state}
-          :error -> {:reply, {:error, :job_not_found}, state}
-        end
+        cancelled = MapSet.put(state.cancelled_unstarted, job_id)
+        {:reply, {:error, :job_not_found}, %{state | cancelled_unstarted: cancelled}}
     end
   end
 
   def handle_call(:reap_all, _from, state) do
-    state =
-      Enum.reduce(state.live, state, fn {job_id, entry}, acc ->
-        Process.exit(entry.task_pid, :kill)
-        Process.demonitor(entry.monitor_ref, [:flush])
-        job = Job.interrupt(entry.job)
+    Enum.each(state.live, fn {_job_id, entry} ->
+      Process.exit(entry.task_pid, :kill)
+      Process.demonitor(entry.monitor_ref, [:flush])
+      if entry.from, do: GenServer.reply(entry.from, {:error, :session_terminated})
+    end)
 
-        if entry.from, do: GenServer.reply(entry.from, {:error, :session_terminated})
-
-        retain_job(%{acc | live: Map.delete(acc.live, job_id)}, job)
-      end)
-
-    {:reply, :ok, state}
+    {:reply, :ok, %{state | live: %{}}}
   end
 
   @impl GenServer
   def handle_info({:DOWN, ref, :process, pid, reason}, state) do
     case find_live_by_monitor(state, ref) do
-      {job_id, entry} when entry.task_pid == pid ->
-        state = handle_job_exit(state, job_id, entry, reason)
-        {:noreply, state}
+      %{task_pid: ^pid} = entry ->
+        result = {:error, "job process exited: #{inspect(reason)}"}
+        {:noreply, settle(state, entry, :crashed, nil, no_output(), result)}
 
       _other ->
         {:noreply, state}
@@ -227,9 +174,8 @@ defmodule MingaAgent.Tools.JobOwner do
   def handle_info({:job_result, job_id, result, exit_code}, state) do
     case Map.fetch(state.live, job_id) do
       {:ok, entry} ->
-        {job, shell_result} = process_shell_result(entry.job, result, exit_code)
-        state = finish_job(state, job_id, entry, job, shell_result)
-        {:noreply, state}
+        {outcome, exit_code, output} = classify_result(result, exit_code)
+        {:noreply, settle(state, entry, outcome, exit_code, output, result)}
 
       :error ->
         {:noreply, state}
@@ -254,38 +200,21 @@ defmodule MingaAgent.Tools.JobOwner do
 
   # ── Private ─────────────────────────────────────────────────────────────────
 
-  @spec admit_job(state(), String.t(), String.t(), pos_integer(), boolean()) ::
-          {:ok, Job.t(), state()} | {:error, :too_many_jobs}
-  defp admit_job(state, command, cwd, timeout_secs, background?) do
-    if map_size(state.live) >= @max_concurrent do
-      {:error, :too_many_jobs}
-    else
-      gen = state.next_generation
-      id = generate_id()
+  # Foreground callers wait for the settled result; background callers get :ok once the task runs.
+  @spec start_job(state(), Record.t(), start_opts(), GenServer.from()) ::
+          {:noreply, state()} | {:reply, :ok, state()}
+  defp start_job(state, %Record{background?: background?} = record, opts, from) do
+    waiter = if background?, do: nil, else: from
+    state = spawn_job(state, record, opts, waiter)
+    send(state.session, {:job_started, record.id, record.epoch})
 
-      job =
-        Job.new(
-          id: id,
-          session_id: state.session_id,
-          command: command,
-          cwd: cwd,
-          timeout_secs: timeout_secs,
-          generation: gen,
-          started_at: System.monotonic_time(:millisecond),
-          background?: background?
-        )
-
-      {:ok, job, %{state | next_generation: gen + 1}}
-    end
+    if background?, do: {:reply, :ok, state}, else: {:noreply, state}
   end
 
-  @spec spawn_job(state(), Job.t(), start_opts(), GenServer.from() | nil) :: state()
-  defp spawn_job(state, job, opts, from) do
+  @spec spawn_job(state(), Record.t(), start_opts(), GenServer.from() | nil) :: state()
+  defp spawn_job(state, record, opts, from) do
     owner = self()
-    job_id = job.id
-    command = job.command
-    cwd = job.cwd
-    timeout_secs = job.timeout_secs
+    %Record{id: job_id, command: command, cwd: cwd, timeout_secs: timeout_secs} = record
 
     task_pid =
       spawn_link(fn ->
@@ -297,22 +226,61 @@ defmodule MingaAgent.Tools.JobOwner do
         end
 
         result =
-          run_shell(command, cwd, timeout_secs, Keyword.put(opts, :on_exit_status, report_exit))
+          command
+          |> run_shell(cwd, timeout_secs, Keyword.put(opts, :on_exit_status, report_exit))
+          |> retain_text_result(opts)
 
         send(owner, {:job_result, job_id, result, received_exit_status()})
       end)
 
-    ref = Process.monitor(task_pid)
-    job = Job.mark_running(job)
-
     entry = %{
-      job: job,
+      record: record,
       task_pid: task_pid,
-      monitor_ref: ref,
+      monitor_ref: Process.monitor(task_pid),
       from: from
     }
 
-    %{state | live: Map.put(state.live, job.id, entry), tasks: MapSet.put(state.tasks, task_pid)}
+    %{state | live: Map.put(state.live, job_id, entry), tasks: MapSet.put(state.tasks, task_pid)}
+  end
+
+  # A background job outlives the tool call that started it, and that call stores its own result
+  # under the call's capture key. The job therefore captures under a key derived from its id, in
+  # the same checkpoint, so the two captures can never resume each other.
+  @spec job_opts(Record.t(), start_opts()) :: start_opts()
+  defp job_opts(%Record{background?: false}, opts), do: opts
+
+  defp job_opts(%Record{background?: true, id: id}, opts) do
+    case Keyword.get(opts, :capture_key) do
+      {:delivery, checkpoint, _call_id} ->
+        Keyword.put(opts, :capture_key, {:delivery, checkpoint, "job:" <> id})
+
+      _no_capture ->
+        opts
+    end
+  end
+
+  # A backend that returns text instead of a retained Output still has its bytes stored through the
+  # artifact store when one is available, so the settled record and the caller share one reference.
+  @spec retain_text_result(Shell.result(), start_opts()) :: Shell.result()
+  defp retain_text_result({:ok, text} = result, opts) when is_binary(text),
+    do: capture_text(result, text, [], opts)
+
+  defp retain_text_result({:error, {:incomplete, reason, text}} = result, opts)
+       when is_atom(reason) and is_binary(text),
+       do: capture_text(result, text, [capture_status: {:incomplete, reason}], opts)
+
+  defp retain_text_result(result, _opts), do: result
+
+  @spec capture_text(Shell.result(), String.t(), OutputCapture.capture_opts(), start_opts()) ::
+          Shell.result()
+  defp capture_text(result, text, capture_opts, opts) do
+    case {Keyword.get(opts, :artifact_store), Keyword.get(opts, :capture_key)} do
+      {nil, _key} -> result
+      {_store, nil} -> result
+      {store, key} -> OutputCapture.bytes(store, key, text, capture_opts)
+    end
+  catch
+    :exit, reason -> {:error, {:retention_unavailable, reason}}
   end
 
   # Shell reports the exit code through its callback in this same process before it returns.
@@ -327,167 +295,62 @@ defmodule MingaAgent.Tools.JobOwner do
 
   @spec run_shell(String.t(), String.t(), pos_integer(), start_opts()) :: Shell.result()
   defp run_shell(command, cwd, timeout_secs, opts) do
-    if Keyword.has_key?(opts, :artifact_store) and Keyword.get(opts, :artifact_store) != nil do
-      Shell.capture(command, cwd, timeout_secs, opts)
-    else
-      Shell.execute(command, cwd, timeout_secs, opts)
-    end
+    {backend, opts} = Keyword.pop(opts, :process_backend, SystemProcessBackend)
+    backend.shell(command, cwd, timeout_secs, opts)
   end
 
-  @spec handle_job_exit(state(), Job.id(), live_entry(), term()) :: state()
-  defp handle_job_exit(state, job_id, entry, reason) do
-    # If we already got a :job_result message, the job was processed.
-    # The DOWN message arrives after the process exits.
-    case Map.fetch(state.live, job_id) do
-      {:ok, ^entry} ->
-        {outcome, exit_code} = exit_reason_to_outcome(reason)
-        job = Job.terminate(entry.job, outcome, exit_code)
-        result = {:error, "job process exited: #{inspect(reason)}"}
-        finish_job(state, job_id, entry, job, result)
+  @spec classify_result(Shell.result(), integer() | nil) ::
+          {Record.outcome(), integer() | nil, Record.output()}
+  defp classify_result({:ok, text}, exit_code) when is_binary(text),
+    do: {exit_outcome(exit_code), exit_code, %{reference: nil, preview: text}}
 
-      _already_removed ->
-        state
-    end
-  end
+  defp classify_result({:ok, %Output{} = output}, exit_code),
+    do: {exit_outcome(exit_code), exit_code, output_facts(output)}
 
-  @spec process_shell_result(Job.t(), Shell.result(), integer() | nil) ::
-          {Job.t(), Shell.result()}
-  defp process_shell_result(job, {:ok, text} = result, exit_code) when is_binary(text) do
-    job =
-      job
-      |> Job.terminate(exit_outcome(exit_code), exit_code)
-      |> Job.set_output(nil, text)
+  defp classify_result({:error, {:incomplete, :timeout, text}}, _exit_code) when is_binary(text),
+    do: {:timeout, nil, %{reference: nil, preview: text}}
 
-    {job, result}
-  end
+  defp classify_result({:error, %Output{capture: {:incomplete, :timeout}} = output}, _exit_code),
+    do: {:timeout, nil, output_facts(output)}
 
-  defp process_shell_result(job, {:ok, %MingaAgent.Tool.Output{} = output} = result, exit_code) do
-    job =
-      job
-      |> Job.terminate(exit_outcome(exit_code), exit_code)
-      |> Job.set_output(output.reference, output.view)
+  defp classify_result({:error, %Output{} = output}, exit_code),
+    do: {:failed, exit_code, output_facts(output)}
 
-    {job, result}
-  end
+  defp classify_result({:error, reason}, exit_code) when is_binary(reason),
+    do: {:failed, exit_code, %{reference: nil, preview: reason}}
 
-  defp process_shell_result(job, {:error, {:incomplete, :timeout, text}} = result, _exit_code) do
-    job =
-      job
-      |> Job.terminate(:timeout, nil)
-      |> Job.set_output(nil, text)
-
-    {job, result}
-  end
-
-  defp process_shell_result(
-         job,
-         {:error, %MingaAgent.Tool.Output{capture: {:incomplete, reason}} = output} = result,
-         _exit_code
-       ) do
-    outcome = if reason == :timeout, do: :timeout, else: :failed
-
-    job =
-      job
-      |> Job.terminate(outcome, nil)
-      |> Job.set_output(output.reference, output.view)
-
-    {job, result}
-  end
-
-  defp process_shell_result(job, {:error, _reason} = result, _exit_code) do
-    job = Job.terminate(job, :failed, nil)
-    {job, result}
-  end
+  defp classify_result({:error, _reason}, exit_code), do: {:failed, exit_code, no_output()}
 
   @spec exit_outcome(integer() | nil) :: :completed | :failed
   defp exit_outcome(0), do: :completed
   defp exit_outcome(_nonzero_or_unknown), do: :failed
 
-  @spec finish_job(state(), Job.id(), live_entry(), Job.t()) :: state()
-  defp finish_job(state, job_id, entry, job) do
-    finish_job(state, job_id, entry, job, nil)
-  end
+  @spec output_facts(Output.t()) :: Record.output()
+  defp output_facts(%Output{reference: reference, view: view}),
+    do: %{reference: reference, preview: view}
 
-  @spec finish_job(state(), Job.id(), live_entry(), Job.t(), Shell.result() | nil) :: state()
-  defp finish_job(state, job_id, entry, job, shell_result) do
+  @spec no_output() :: Record.output()
+  defp no_output, do: %{reference: nil, preview: nil}
+
+  # Reports the end to the Session before replying, so a caller that queries the Session next sees it.
+  @spec settle(
+          state(),
+          live_entry(),
+          Record.outcome(),
+          integer() | nil,
+          Record.output(),
+          Shell.result()
+        ) :: state()
+  defp settle(state, entry, outcome, exit_code, output, result) do
+    %Record{id: id, epoch: epoch} = entry.record
     Process.demonitor(entry.monitor_ref, [:flush])
-
-    if entry.from do
-      result = shell_result || {:error, "job #{Job.summary_status(job)}"}
-      GenServer.reply(entry.from, result)
-    end
-
-    state = %{state | live: Map.delete(state.live, job_id)}
-    state = retain_job(state, job)
-
-    if job.background? do
-      notify_completion(state.notify, {job.id, job.generation, Job.outcome(job), job.exit_code})
-    end
-
-    state
+    send(state.session, {:job_settled, id, epoch, outcome, exit_code, output})
+    if entry.from, do: GenServer.reply(entry.from, result)
+    %{state | live: Map.delete(state.live, id)}
   end
 
-  @spec retain_job(state(), Job.t()) :: state()
-  defp retain_job(state, job) do
-    state = evict_oldest_retained(state)
-
-    %{
-      state
-      | retained: Map.put(state.retained, job.id, job),
-        # credo:disable-for-next-line Credo.Check.Refactor.AppendSingleItem
-        retained_order: state.retained_order ++ [job.id]
-    }
-  end
-
-  @spec evict_oldest_retained(state()) :: state()
-  defp evict_oldest_retained(state) do
-    if map_size(state.retained) >= @max_retained do
-      case state.retained_order do
-        [oldest | rest] ->
-          %{state | retained: Map.delete(state.retained, oldest), retained_order: rest}
-
-        [] ->
-          state
-      end
-    else
-      state
-    end
-  end
-
-  @spec notify_completion(pid(), completion()) :: :ok
-  defp notify_completion(notify_pid, completion) do
-    send(notify_pid, {:job_completion, completion})
-    :ok
-  end
-
-  @spec find_job(state(), Job.id()) :: {:ok, Job.t()} | :not_found
-  defp find_job(state, job_id) do
-    case Map.fetch(state.live, job_id) do
-      {:ok, entry} -> {:ok, entry.job}
-      :error -> find_retained(state, job_id)
-    end
-  end
-
-  @spec find_retained(state(), Job.id()) :: {:ok, Job.t()} | :not_found
-  defp find_retained(state, job_id) do
-    case Map.fetch(state.retained, job_id) do
-      {:ok, job} -> {:ok, job}
-      :error -> :not_found
-    end
-  end
-
-  @spec find_live_by_monitor(state(), reference()) :: {Job.id(), live_entry()} | nil
+  @spec find_live_by_monitor(state(), reference()) :: live_entry() | nil
   defp find_live_by_monitor(state, ref) do
-    Enum.find(state.live, fn {_id, entry} -> entry.monitor_ref == ref end)
-  end
-
-  @spec exit_reason_to_outcome(term()) :: {Job.outcome(), non_neg_integer() | nil}
-  defp exit_reason_to_outcome(:normal), do: {:completed, 0}
-  defp exit_reason_to_outcome(:killed), do: {:cancelled, nil}
-  defp exit_reason_to_outcome(_reason), do: {:crashed, nil}
-
-  @spec generate_id() :: Job.id()
-  defp generate_id do
-    :crypto.strong_rand_bytes(12) |> Base.url_encode64(padding: false)
+    Enum.find_value(state.live, fn {_id, entry} -> if entry.monitor_ref == ref, do: entry end)
   end
 end

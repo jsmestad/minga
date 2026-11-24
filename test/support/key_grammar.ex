@@ -126,6 +126,13 @@ defmodule Minga.Test.KeyGrammar do
   # The Agent scope adds a remedy binding while a failed start offers one, the picker adds ⌃V for sources whose selection shows in the focused window, and a prompt with a list adds list movement; other scopes ignore the context.
   @scope_contexts [[], [agent_start_remedy: :retry], [picker_split: true, prompt_list: true]]
 
+  # Contexts that bind keys the full grammar does not classify yet.
+  # A focused staged Diff Review (`agent_diff_review: true`) rebinds Vim `y` and `Y` over copy.
+  # It also binds CUA chords that ADR-0007 does not list.
+  # Until those get a grammar decision, `overlay_inventory/0` lets the guard hold rule 6 there.
+  # No profile relaxes rule 6.
+  @overlay_contexts [[agent_diff_review: true]]
+
   # ── Rule 4: established modifier conventions ───────────────────────────────
   #
   # {key, contexts it may appear in, allowed commands (or :any), why}.
@@ -254,6 +261,17 @@ defmodule Minga.Test.KeyGrammar do
   @spec inventory() :: [binding()]
   def inventory do
     leader_bindings() ++ vim_normal_bindings() ++ scope_bindings()
+  end
+
+  @doc "Every scope binding under the overlay contexts the full inventory does not classify yet, such as a focused staged Diff Review."
+  @spec overlay_inventory() :: [binding()]
+  def overlay_inventory do
+    for module <- ScopeRegistry.builtin_modules(),
+        state <- @scope_states,
+        context <- @overlay_contexts,
+        {keys, command} <- walk(module.keymap(state, context)),
+        uniq: true,
+        do: effective(module.name(), state, keys, command)
   end
 
   @doc "Scope and vim state pairs in the inventory that have no grammar context."

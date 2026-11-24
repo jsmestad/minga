@@ -64,7 +64,10 @@ defmodule MingaAgent.Session.ContinuationCodec do
                     :cancelled,
                     :error,
                     :approval_timeout,
-                    :codex_responses_exact_prefix_v1
+                    :codex_responses_exact_prefix_v1,
+                    :minga_origin,
+                    :job_notice,
+                    :job_ids
                   ],
                   &{Atom.to_string(&1), &1}
                 )
@@ -377,10 +380,19 @@ defmodule MingaAgent.Session.ContinuationCodec do
     }
 
     case checkpoint do
-      %{version: 2, steering: steering} -> Map.put(fields, "steering", encode_term(steering))
-      %{version: 1} -> fields
+      %{version: 2, steering: steering} ->
+        fields |> Map.put("steering", encode_term(steering)) |> put_encoded_notice(checkpoint)
+
+      %{version: 1} ->
+        fields
     end
   end
+
+  @spec put_encoded_notice(map(), Continuation.tool_checkpoint()) :: map()
+  defp put_encoded_notice(fields, %{notice: notice}),
+    do: Map.put(fields, "notice", encode_term(notice))
+
+  defp put_encoded_notice(fields, _checkpoint), do: fields
 
   @spec encode_checkpoint_call(Continuation.checkpoint_call()) :: map()
   defp encode_checkpoint_call(call) do
@@ -438,17 +450,28 @@ defmodule MingaAgent.Session.ContinuationCodec do
   @spec decode_checkpoint_steering(Continuation.tool_checkpoint(), map()) ::
           {:ok, Continuation.tool_checkpoint()} | {:error, :invalid_steering}
   defp decode_checkpoint_steering(%{version: 1} = checkpoint, encoded)
-       when not is_map_key(encoded, "steering"),
+       when not is_map_key(encoded, "steering") and not is_map_key(encoded, "notice"),
        do: {:ok, checkpoint}
 
-  defp decode_checkpoint_steering(%{version: 2} = checkpoint, %{"steering" => encoded}) do
-    case decode_terms(encoded) do
-      {:ok, steering} -> {:ok, Map.put(checkpoint, :steering, steering)}
+  defp decode_checkpoint_steering(%{version: 2} = checkpoint, %{"steering" => encoded} = fields) do
+    with {:ok, steering} <- decode_terms(encoded),
+         {:ok, checkpoint} <- decode_checkpoint_notice(checkpoint, fields) do
+      {:ok, Map.put(checkpoint, :steering, steering)}
+    else
       {:error, _reason} -> {:error, :invalid_steering}
     end
   end
 
   defp decode_checkpoint_steering(_checkpoint, _encoded), do: {:error, :invalid_steering}
+
+  # Continuation validates the decoded notice when it restores the checkpoint.
+  @spec decode_checkpoint_notice(Continuation.tool_checkpoint(), map()) ::
+          {:ok, Continuation.tool_checkpoint()} | {:error, term()}
+  defp decode_checkpoint_notice(checkpoint, %{"notice" => encoded}) do
+    with {:ok, notice} <- decode_term(encoded), do: {:ok, Map.put(checkpoint, :notice, notice)}
+  end
+
+  defp decode_checkpoint_notice(checkpoint, _fields), do: {:ok, checkpoint}
 
   @spec decode_checkpoint_call(term()) ::
           {:ok, Continuation.checkpoint_call()} | {:error, term()}

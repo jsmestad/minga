@@ -95,6 +95,8 @@ jobs:
               "scripts/release_erts_sources.json",
               "scripts/check-release-contents",
               "scripts/release_candidate.py",
+              "scripts/fetch-run-artifact",
+              "test/scripts/fetch_run_artifact_test.py",
               "mix/release_erts.ex",
               "mix/tasks/release.tui.ex",
               "rel/**",
@@ -183,6 +185,10 @@ jobs:
 
       - name: Check storyboard flow invariants
         run: python3 design/tools/storyboard/check.py
+
+      # site_check.py reads lib/, macos/Sources, go/tui and this workflow (see design/tools/site_claims.toml). site.yml's path filter misses most of those, so the check runs here on every change.
+      - name: Check site copy against the keymap and design docs
+        run: python3 design/tools/site_check.py
 
       - run: mix deps.get
       - run: mix format --check-formatted
@@ -1076,10 +1082,12 @@ jobs:
           python3 test/scripts/release_erts_producer_test.py
           python3 test/scripts/release_contents_test.py
           python3 test/scripts/release_candidate_test.py
+          python3 -B test/scripts/fetch_run_artifact_test.py
           python3 -B test/scripts/render_tui_formula_test.py
           python3 -B test/scripts/render_aur_pkgbuild_test.py
           python3 -B test/scripts/upload_package_repos_test.py
           bash -n scripts/qualify-homebrew-upgrade
+          bash -n scripts/fetch-run-artifact
           bash -n scripts/smoke-linux-packages
           bash -n scripts/linux-packaging-toolchain
           bash -n scripts/build-package-repos scripts/test-package-repos test/scripts/package_repos_e2e.sh

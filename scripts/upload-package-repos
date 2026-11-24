@@ -25,6 +25,8 @@ import urllib.request
 
 BUCKET = "minga-packages"
 PUBLIC_URL = "https://packages.mingacode.dev"
+# Cloudflare in front of PUBLIC_URL rejects urllib's default Python-urllib/x.y agent with HTTP 403 (error 1010).
+USER_AGENT = "minga-release-uploader/1"
 GRACE = timedelta(hours=1)
 # Everything revalidates. A rerun for the same version re-signs, so even package bytes can change.
 REVALIDATE = "no-cache"
@@ -59,13 +61,17 @@ def release_order(version):
 
 
 def published_manifest():
+    """The served repo.json, or None before the first publication. Any other HTTP status is an error."""
+    url = f"{PUBLIC_URL}/repo.json"
+    request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     try:
-        with urllib.request.urlopen(f"{PUBLIC_URL}/repo.json", timeout=30) as response:
+        with urllib.request.urlopen(request, timeout=30) as response:
             return json.load(response)
     except urllib.error.HTTPError as error:
         if error.code == 404:
             return None
-        raise
+        # OSError, so main reports it without a traceback. Never read a refusal as "nothing published".
+        raise OSError(f"GET {url} returned HTTP {error.code} {error.reason}; cannot tell which version is published") from error
 
 
 def aws(*args, capture=False):

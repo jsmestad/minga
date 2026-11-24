@@ -55,6 +55,8 @@ defmodule Minga.Test.SessionContinuationProvider do
        requests: %{},
        model_result: Keyword.get(opts, :model_result, :ok),
        compacted_messages: Keyword.get(opts, :compacted_messages),
+       # Scripted replies to successive prompts; once exhausted, every prompt is accepted.
+       send_results: Keyword.get(opts, :send_results, []),
        system_prompt: Keyword.get(opts, :system_prompt)
      }}
   end
@@ -79,9 +81,22 @@ defmodule Minga.Test.SessionContinuationProvider do
     {:reply, {:ok, compacted_messages, "test context compaction"}, state}
   end
 
+  def handle_call(
+        {:send_prompt, %Request{}},
+        _from,
+        %{send_results: [{:error, _} = error | rest]} = state
+      ),
+      do: {:reply, error, %{state | send_results: rest}}
+
   def handle_call({:send_prompt, %Request{} = request}, _from, state) do
     send(state.test_pid, {:continuation_request, request})
-    {:reply, :ok, %{state | requests: Map.put(state.requests, request.request_id, request)}}
+
+    {:reply, :ok,
+     %{
+       state
+       | requests: Map.put(state.requests, request.request_id, request),
+         send_results: Enum.drop(state.send_results, 1)
+     }}
   end
 
   def handle_call({:complete, %Request{} = request, messages}, _from, state) do

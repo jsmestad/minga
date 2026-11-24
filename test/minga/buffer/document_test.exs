@@ -59,6 +59,50 @@ defmodule Minga.Buffer.DocumentTest do
     end
   end
 
+  describe "append_text/2" do
+    property "appends at the end, keeps a cursor before the end, and matches a rebuilt line index" do
+      check all(
+              lines <-
+                list_of(member_of(["", "a", "é世", "\tx", "  yz"]), min_length: 1, max_length: 10),
+              cursor_line <- integer(0..(length(lines) - 1)),
+              cursor_col <- integer(0..4),
+              pending? <- boolean(),
+              appended_lines <- list_of(member_of(["", "b", "✓✓", "  q"]), min_length: 1)
+            ) do
+        doc =
+          lines
+          |> Enum.join("\n")
+          |> Document.new()
+          |> Document.move_to({cursor_line, cursor_col})
+
+        doc = if pending?, do: Document.insert_text(doc, "p"), else: doc
+        old_content = Document.content(doc)
+        at_end? = Document.cursor_offset(doc) == byte_size(old_content)
+        text = Enum.join(appended_lines, "\n")
+
+        new_doc = Document.append_text(doc, text)
+
+        expected = old_content <> text
+        rebuilt = Document.new(expected)
+        assert Document.content(new_doc) == expected
+        assert Document.line_count(new_doc) == Document.line_count(rebuilt)
+
+        if at_end? do
+          last_line = Document.line_count(rebuilt) - 1
+          last_width = expected |> String.split("\n") |> List.last() |> byte_size()
+          assert Document.cursor(new_doc) == {last_line, last_width}
+        else
+          assert Document.cursor(new_doc) == Document.cursor(doc)
+          assert Document.cursor_offset(new_doc) == Document.cursor_offset(doc)
+        end
+
+        for line <- 0..(Document.line_count(rebuilt) - 1) do
+          assert Lines.start_of(new_doc, line) == Lines.start_of(rebuilt, line)
+        end
+      end
+    end
+  end
+
   describe "new/1" do
     test "creates an empty buffer" do
       buf = Document.new()

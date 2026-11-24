@@ -6,7 +6,7 @@ defmodule Minga.Session.StagedDrafts do
 
       $XDG_DATA_HOME/minga/staged_drafts/<project key>/<view key>/<path key>.json
 
-  The keys are SHA-256 hashes, so file names never reveal project paths. Files are grouped by the identity of the staging view (`MingaAgent.ProjectView` id), not by workspace: two views that claim the same workspace never overwrite or delete each other's drafts. The workspace id is an attribute stored in each draft. A published or discarded view is retired: a content-free `<view key>.retired` tombstone beside its directory marks it until the deletion finishes, so a failed deletion never brings its drafts back.
+  The keys are SHA-256 hashes, so file names never reveal project paths. Files are grouped by the identity of the staging view (`MingaAgent.ProjectView` id), not by workspace: two views that claim the same workspace never overwrite or delete each other's drafts. The workspace id is an attribute stored in each draft. A published or discarded view is retired: a content-free `<view key>.retired` tombstone beside its directory marks it until the deletion finishes, so a failed deletion never brings its drafts back. Deleting single drafts (`prune/4`) or a whole view that stays in use (`delete_view/3`) works the same way at draft granularity: a `<view key>.pending` record beside the directory names each draft file whose deletion started, `load/2` skips the named files, and writing a draft under a named file clears its name first.
 
   Each draft is one JSON file, written atomically (temporary file, then rename), so a crash leaves either the previous complete draft or the new one. The file carries a `version` field. The project root, view id, and path are Base64-encoded, because names can be arbitrary bytes that JSON cannot hold, and so are the base and staged bytes. A `base_sha256` fingerprint guards the base against corruption.
 
@@ -26,6 +26,8 @@ defmodule Minga.Session.StagedDrafts do
   @current_version 1
   @extension ".json"
   @retired ".retired"
+  @pending ".pending"
+  @max_pending_bytes 1024 * 1024
   @owner_file "owner"
   @aside ".aside"
   @owner_format "minga-staged-draft-owner"
@@ -60,7 +62,7 @@ defmodule Minga.Session.StagedDrafts do
   @typedoc """
   The stored drafts of one staging view.
 
-  A retired view (`retired: true`) was published or discarded, and its deletion has not finished. It has no entries and must never be offered again; its directory is removed with `retire_view_dir/1`.
+  A retired view (`retired: true`) was published or discarded, or holds only drafts whose deletion is pending, and its deletion has not finished. It has no entries and must never be offered again; its directory is removed with `retire_view_dir/1`.
   """
   @type stored_view :: %{
           dir: String.t(),
@@ -163,8 +165,11 @@ defmodule Minga.Session.StagedDrafts do
   defp publish(project_root, view_id, opts, target, json) do
     tmp = "#{target}.#{System.unique_integer([:positive, :monotonic])}.tmp"
 
+    # The pending name is cleared only once the new draft is ready to replace
+    # the old file, so a failed write leaves the old file recorded as pending.
     with :ok <- ensure_private_dirs(project_root, view_id, opts),
          :ok <- write_private(tmp, json),
+         :ok <- unmark_pending(Path.dirname(target), Path.basename(target)),
          :ok <- File.rename(tmp, target) do
       :ok
     else
@@ -177,7 +182,7 @@ defmodule Minga.Session.StagedDrafts do
   @doc """
   Deletes every stored draft of one view except the drafts for `keep_paths`, plus leftover temporary files.
 
-  Only the owner of the view (the process that writes its drafts) may call this, and never while one of its own writes is in progress: temporary files are removed here, not when loading, because a temporary file can belong to a write that is still running.
+  A draft whose removal fails is recorded as pending deletion, so `load/2` never returns it, and the next prune retries it. Only the owner of the view (the process that writes its drafts) may call this, and never while one of its own writes is in progress: temporary files are removed here, not when loading, because a temporary file can belong to a write that is still running.
   """
   @spec prune(String.t(), String.t(), [String.t()], keyword()) :: :ok | {:error, term()}
   def prune(project_root, view_id, keep_paths, opts \\ []) when is_list(keep_paths) do
@@ -186,11 +191,8 @@ defmodule Minga.Session.StagedDrafts do
 
     case File.ls(dir) do
       {:ok, names} ->
-        names
-        |> Enum.filter(&stale_name?(&1, keep))
-        |> Enum.reduce(:ok, fn name, result ->
-          first_error(result, remove_file(Path.join(dir, name)))
-        end)
+        stale = Enum.filter(names, &stale_name?(&1, keep))
+        remove_drafts(dir, stale)
 
       {:error, :enoent} ->
         :ok
@@ -198,6 +200,24 @@ defmodule Minga.Session.StagedDrafts do
       {:error, _reason} = error ->
         error
     end
+  end
+
+  # Stale drafts are recorded as pending deletion before they are removed, so
+  # a draft whose removal fails is never loaded again. The record is only a
+  # safeguard: the removal's result is what decides whether pruning is done.
+  @spec remove_drafts(String.t(), [String.t()]) :: :ok | {:error, term()}
+  defp remove_drafts(_dir, []), do: :ok
+
+  defp remove_drafts(dir, names) do
+    _ = mark_pending(dir, Enum.filter(names, &String.ends_with?(&1, @extension)))
+
+    removed =
+      Enum.reduce(names, :ok, fn name, result ->
+        first_error(result, remove_file(Path.join(dir, name)))
+      end)
+
+    _ = settle_pending(dir)
+    removed
   end
 
   @spec stale_name?(String.t(), MapSet.t(String.t())) :: boolean()
@@ -471,7 +491,7 @@ defmodule Minga.Session.StagedDrafts do
 
     case File.lstat(dir) do
       {:error, :enoent} ->
-        remove_file(tombstone)
+        with :ok <- remove_file(pending_file(dir)), do: remove_file(tombstone)
 
       _exists ->
         # A failed tombstone only matters if the deletion fails too; the
@@ -495,17 +515,31 @@ defmodule Minga.Session.StagedDrafts do
   @doc """
   Deletes every stored draft of one view.
 
+  The drafts are recorded as pending deletion first, so a deletion that fails part way never brings them back at the next `load/2`.
+
   The project directory is left in place, even when empty: removing it could race with another writer (another view, or another Minga instance) that has just checked it and is about to create its own view directory inside it.
   """
   @spec delete_view(String.t(), String.t(), keyword()) :: :ok | {:error, term()}
   def delete_view(project_root, view_id, opts \\ []) do
-    project_root |> view_dir(view_id, opts) |> remove_dir()
+    dir = view_dir(project_root, view_id, opts)
+
+    case File.ls(dir) do
+      {:ok, names} ->
+        _ = mark_pending(dir, Enum.filter(names, &String.ends_with?(&1, @extension)))
+
+      {:error, _reason} ->
+        :ok
+    end
+
+    remove_dir(dir)
   end
 
+  # The pending-deletion record beside the directory goes last, once nothing
+  # it names is left.
   @spec remove_dir(String.t()) :: :ok | {:error, term()}
   defp remove_dir(dir) do
     case File.rm_rf(dir) do
-      {:ok, _removed} -> :ok
+      {:ok, _removed} -> remove_file(pending_file(dir))
       {:error, reason, _path} -> {:error, reason}
     end
   end
@@ -523,7 +557,7 @@ defmodule Minga.Session.StagedDrafts do
   @doc """
   Loads every stored draft of a project, grouped by staging view.
 
-  A draft that can never be restored is returned as `{:lost, file, name, reason}`; one that cannot be read now is `{:retained, file, name, reason}`. A view with a retirement tombstone is returned with `retired: true` and no entries; its drafts are not read. `name` is the draft's path when the file still names it. Temporary files are skipped and left alone: one may belong to a write that is still in progress (`prune/4` removes leftovers for the view's owner). Returns `{:error, reason}` without reading anything when a store directory fails the privacy check.
+  A draft that can never be restored is returned as `{:lost, file, name, reason}`; one that cannot be read now is `{:retained, file, name, reason}`. A view with a retirement tombstone is returned with `retired: true` and no entries; its drafts are not read. A draft recorded as pending deletion is skipped, and a view left with only such drafts is returned as retired; if that record cannot be read, every draft of its view is retained. `name` is the draft's path when the file still names it. Temporary files are skipped and left alone: one may belong to a write that is still in progress (`prune/4` removes leftovers for the view's owner). Returns `{:error, reason}` without reading anything when a store directory fails the privacy check.
   """
   @spec load(String.t(), keyword()) :: {:ok, [stored_view()]} | {:error, term()}
   def load(project_root, opts \\ []) when is_binary(project_root) do
@@ -560,9 +594,14 @@ defmodule Minga.Session.StagedDrafts do
         String.replace_suffix(name, @retired, "")
       end
 
-    live = Enum.reject(names, &(String.ends_with?(&1, @retired) or MapSet.member?(retired, &1)))
+    live = Enum.filter(names, &(view_key?(&1) and not MapSet.member?(retired, &1)))
     {retired |> MapSet.to_list() |> Enum.sort(), live}
   end
+
+  # View directories are named by a hash key without a dot. Tombstones,
+  # pending-deletion records, and their temporary files beside them have one.
+  @spec view_key?(String.t()) :: boolean()
+  defp view_key?(name), do: not String.contains?(name, ".")
 
   @spec retired_view(String.t()) :: stored_view()
   defp retired_view(dir),
@@ -590,20 +629,9 @@ defmodule Minga.Session.StagedDrafts do
 
   @spec load_view(String.t(), String.t(), keyword()) :: stored_view() | nil
   defp load_view(dir, project_root, opts) do
-    entries =
-      case File.ls(dir) do
-        {:ok, names} ->
-          names
-          |> Enum.sort()
-          |> Enum.flat_map(&load_entry(Path.join(dir, &1), project_root, opts))
-
-        {:error, _reason} ->
-          []
-      end
-
-    case entries do
-      [] -> nil
-      entries -> stored_view(dir, entries)
+    case File.ls(dir) do
+      {:ok, names} -> load_names(dir, Enum.sort(names), project_root, opts)
+      {:error, _reason} -> nil
     end
   end
 
@@ -622,6 +650,33 @@ defmodule Minga.Session.StagedDrafts do
       entries: Enum.map(decoded, &elem(&1, 0)),
       retired: false
     }
+  end
+
+  # A draft whose deletion is pending is never loaded. A view that holds only
+  # such drafts is reported as retired, so its deletion is finished. When the
+  # record of pending deletions cannot be read, every draft of the view is
+  # retained, so the view waits for a later start instead of offering a
+  # deleted draft.
+  @spec load_names(String.t(), [String.t()], String.t(), keyword()) :: stored_view() | nil
+  defp load_names(dir, names, project_root, opts) do
+    case read_pending(dir) do
+      {:ok, pending} ->
+        {skipped, kept} = Enum.split_with(names, &MapSet.member?(pending, &1))
+
+        case {Enum.flat_map(kept, &load_entry(Path.join(dir, &1), project_root, opts)), skipped} do
+          {[], []} -> nil
+          {[], _pending_only} -> retired_view(dir)
+          {entries, _skipped} -> stored_view(dir, entries)
+        end
+
+      {:error, reason} ->
+        retained =
+          for name <- names, String.ends_with?(name, @extension) do
+            {{:retained, Path.join(dir, name), name, {:read_failed, reason}}, nil, nil}
+          end
+
+        if retained == [], do: nil, else: stored_view(dir, retained)
+    end
   end
 
   @spec load_entry(String.t(), String.t(), keyword()) :: [
@@ -889,6 +944,76 @@ defmodule Minga.Session.StagedDrafts do
   @spec first_error(:ok | {:error, term()}, :ok | {:error, term()}) :: :ok | {:error, term()}
   defp first_error(:ok, result), do: result
   defp first_error({:error, _reason} = error, _result), do: error
+
+  # ── Pending deletions ───────────────────────────────────────────────────
+  #
+  # `<view key>.pending` beside a view directory names the draft files of that
+  # view whose deletion was started but may not have finished. It sits outside
+  # the view directory, so it can be written when that directory cannot. It
+  # holds one draft file name (a hash) per line and no content or paths.
+
+  @spec pending_file(String.t()) :: String.t()
+  defp pending_file(dir), do: dir <> @pending
+
+  @spec read_pending(String.t()) :: {:ok, MapSet.t(String.t())} | {:error, term()}
+  defp read_pending(dir) do
+    case SecureFile.read(pending_file(dir), @max_pending_bytes) do
+      {:ok, data} -> {:ok, data |> String.split("\n", trim: true) |> MapSet.new()}
+      {:error, {:file_read_failed, _path, :enoent}} -> {:ok, MapSet.new()}
+      {:error, {:file_read_failed, _path, reason}} -> {:error, {:pending_record, reason}}
+      {:error, reason} -> {:error, {:pending_record, reason}}
+    end
+  end
+
+  @spec mark_pending(String.t(), [String.t()]) :: :ok | {:error, term()}
+  defp mark_pending(_dir, []), do: :ok
+
+  defp mark_pending(dir, names) do
+    with {:ok, pending} <- read_pending(dir) do
+      write_pending(dir, MapSet.union(pending, MapSet.new(names)))
+    end
+  end
+
+  # A draft written again under a pending name is staged again: the name is
+  # cleared first, and the write fails when it cannot be cleared.
+  @spec unmark_pending(String.t(), String.t()) :: :ok | {:error, term()}
+  defp unmark_pending(dir, name) do
+    with {:ok, pending} <- read_pending(dir) do
+      if MapSet.member?(pending, name),
+        do: write_pending(dir, MapSet.delete(pending, name)),
+        else: :ok
+    end
+  end
+
+  # Names whose files are gone are dropped from the record.
+  @spec settle_pending(String.t()) :: :ok | {:error, term()}
+  defp settle_pending(dir) do
+    with {:ok, pending} <- read_pending(dir) do
+      remaining = MapSet.filter(pending, &match?({:ok, _}, File.lstat(Path.join(dir, &1))))
+      if remaining == pending, do: :ok, else: write_pending(dir, remaining)
+    end
+  end
+
+  @spec write_pending(String.t(), MapSet.t(String.t())) :: :ok | {:error, term()}
+  defp write_pending(dir, pending) do
+    target = pending_file(dir)
+
+    if MapSet.size(pending) == 0 do
+      remove_file(target)
+    else
+      tmp = "#{target}.#{System.unique_integer([:positive, :monotonic])}.tmp"
+      data = pending |> Enum.sort() |> Enum.map_join("", &(&1 <> "\n"))
+
+      with :ok <- write_private(tmp, data),
+           :ok <- File.rename(tmp, target) do
+        :ok
+      else
+        {:error, _reason} = error ->
+          _ = File.rm(tmp)
+          error
+      end
+    end
+  end
 
   @spec hash(String.t()) :: String.t()
   defp hash(value),

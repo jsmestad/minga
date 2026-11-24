@@ -4,6 +4,7 @@ defmodule MingaEditor.Remote.EventReplay do
   alias MingaEditor.Agent.Events
   alias MingaEditor.State, as: EditorState
   alias MingaAgent.EventLog.EventRecord
+  alias MingaAgent.EventLog.FileEditPayload
   alias MingaAgent.Tool.Output.Codec, as: OutputCodec
 
   @type event :: term()
@@ -66,8 +67,8 @@ defmodule MingaEditor.Remote.EventReplay do
   end
 
   def to_agent_event(%EventRecord{event_type: :file_edit_proposed, payload: payload}) do
-    {:file_changed, string_payload(payload, "path"), string_payload(payload, "before_content"),
-     string_payload(payload, "after_content"), string_payload(payload, "tool_call_id"),
+    {:file_changed, string_payload(payload, "path"), file_side(payload, "before"),
+     file_side(payload, "after"), string_payload(payload, "tool_call_id"),
      string_payload(payload, "tool_name")}
   end
 
@@ -167,6 +168,14 @@ defmodule MingaEditor.Remote.EventReplay do
       value when is_atom(value) -> Atom.to_string(value)
       value -> to_string(value)
     end
+  end
+
+  @spec file_side(map(), String.t()) :: FileEditPayload.side()
+  defp file_side(payload, side) do
+    FileEditPayload.decode_side(
+      payload_value(payload, side <> "_content"),
+      payload_value(payload, side <> "_exists")
+    )
   end
 
   @spec map_payload(map(), String.t()) :: map()

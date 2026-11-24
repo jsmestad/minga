@@ -24,6 +24,7 @@ defmodule MingaAgent.SessionStore do
   alias MingaAgent.Session.Continuation
   alias MingaAgent.Session.ContinuationCodec
   alias MingaAgent.Session.FileChange
+  alias MingaAgent.Session.JobLedger
   alias MingaAgent.Session.Transcript
   alias MingaAgent.Session.TurnExecution
   alias MingaAgent.ToolApproval.Preview
@@ -93,6 +94,7 @@ defmodule MingaAgent.SessionStore do
           optional(:checklist) => Checklist.t(),
           optional(:checklist_archive) => ChecklistArchive.t(),
           optional(:file_changes) => [FileChange.t()],
+          optional(:job_ledger) => JobLedger.t(),
           optional(:pending_inputs) => TurnExecution.pending_inputs()
         }
 
@@ -1034,7 +1036,19 @@ defmodule MingaAgent.SessionStore do
       ContinuationCodec.pending_input_references(candidate["pending_inputs"]) ++
       checklist_references(candidate["checklist"]) ++
       checklist_archive_references(candidate["checklist_archive"]) ++
-      file_change_references(candidate["file_changes"])
+      file_change_references(candidate["file_changes"]) ++
+      job_references(candidate["jobs"])
+  end
+
+  # Retained job output stays pinned by every snapshot that names its job.
+  @spec job_references(term()) :: [Reference.t()]
+  defp job_references(nil), do: []
+
+  defp job_references(encoded) do
+    case JobLedger.decode(encoded) do
+      {:ok, ledger} -> JobLedger.references(ledger)
+      {:error, :invalid_job_ledger} -> []
+    end
   end
 
   @spec file_change_references(term()) :: [Reference.t()]
@@ -2052,7 +2066,15 @@ defmodule MingaAgent.SessionStore do
     |> put_checklist(Map.get(data, :checklist))
     |> put_checklist_archive(Map.get(data, :checklist_archive))
     |> put_file_changes(Map.get(data, :file_changes, []))
+    |> put_jobs(Map.get(data, :job_ledger))
     |> put_pending_inputs(Map.get(data, :pending_inputs))
+  end
+
+  @spec put_jobs(map(), JobLedger.t() | nil) :: map()
+  defp put_jobs(data, nil), do: data
+
+  defp put_jobs(data, ledger) do
+    if JobLedger.empty?(ledger), do: data, else: Map.put(data, "jobs", JobLedger.encode(ledger))
   end
 
   @spec put_file_changes(map(), [FileChange.t()]) :: map()
@@ -2164,10 +2186,19 @@ defmodule MingaAgent.SessionStore do
          session = data |> deserialize_legacy(transcript) |> Map.put(:continuation, continuation),
          {:ok, session} <- restore_checklist(session, data),
          {:ok, session} <- restore_checklist_archive(session, data),
-         {:ok, changes} <- decode_file_changes(data["file_changes"]) do
-      restore_pending_inputs(Map.put(session, :file_changes, changes), data)
+         {:ok, changes} <- decode_file_changes(data["file_changes"]),
+         {:ok, ledger} <- decode_jobs(data["jobs"]) do
+      session
+      |> Map.put(:file_changes, changes)
+      |> Map.put(:job_ledger, ledger)
+      |> restore_pending_inputs(data)
     end
   end
+
+  # A record written before jobs were persisted has no jobs section and loads an empty ledger.
+  @spec decode_jobs(term()) :: {:ok, JobLedger.t()} | {:error, :invalid_job_ledger}
+  defp decode_jobs(nil), do: {:ok, JobLedger.new()}
+  defp decode_jobs(encoded), do: JobLedger.decode(encoded)
 
   @spec decode_file_changes(term()) :: {:ok, [FileChange.t()]} | {:error, :invalid_file_change}
   defp decode_file_changes(nil), do: {:ok, []}

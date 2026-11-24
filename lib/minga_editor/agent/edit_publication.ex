@@ -49,7 +49,7 @@ defmodule MingaEditor.Agent.EditPublication do
            TabBar.find_workspace_by_session(tb, session),
          {:ok, %FileRef{} = file_ref} <- FileRef.from_path(view.project_root, path),
          {:ok, updated} <- Workspace.transition_review(workspace, :agent_edited, file_ref) do
-      # Fork drafts change without a changeset revision; save them now.
+      # Make sure the keeper tracks this view. It saves every later fork or changeset edit itself.
       StagedDraftKeeper.persist(view, updated.id)
       install_workspace(state, tb, updated)
     else

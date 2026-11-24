@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Verify internal links, assets, redirects, headers, and ExDoc integration in a built site bundle.
 
+Site pages are checked in full. Under docs/, the ExDoc extras pages (the markdown files listed in mix.exs, including the ADR and design pages) are checked too, because their relative links are written by hand and ExDoc only rewrites links to other published extras. Module pages are generated from lib/ and are not checked here.
+
 Usage:
   python3 scripts/check_site_links.py _site [--expect-noindex]
 """
@@ -15,6 +17,8 @@ from urllib.parse import unquote, urldefrag, urlsplit
 
 EXTERNAL_SCHEMES = ("http", "https", "mailto", "tel", "data", "javascript")
 VALID_REDIRECT_CODES = {"200", "301", "302", "303", "307", "308"}
+# ExDoc pages load docs_config.js for the hexdocs.pm version menu. Hexdocs serves it; a self-hosted build has none.
+EXDOC_OPTIONAL_FILES = frozenset({"docs_config.js"})
 REQUIRED_FILES = (
     "index.html",
     "_headers",
@@ -33,6 +37,7 @@ class SiteHTMLInspector(HTMLParser):
         self.refs: list[tuple[str, str, int]] = []
         self.anchors: set[str] = set()
         self.meta_robots: list[str] = []
+        self.exdoc_page_type: str | None = None
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         attr_map = {k.lower(): (v or "") for k, v in attrs}
@@ -42,6 +47,9 @@ class SiteHTMLInspector(HTMLParser):
             self.anchors.add(attr_map["id"])
         if tag == "a" and "name" in attr_map and attr_map["name"]:
             self.anchors.add(attr_map["name"])
+
+        if tag == "main" and "data-type" in attr_map:
+            self.exdoc_page_type = attr_map["data-type"]
 
         if tag == "meta" and attr_map.get("name", "").lower() == "robots":
             self.meta_robots.append(attr_map.get("content", "").lower())
@@ -235,23 +243,76 @@ def check_site_html(
         if expect_noindex and not any("noindex" in val for val in inspector.meta_robots):
             errors.append(f"{rel_source}: expected <meta name=\"robots\" content=\"noindex...\"> during pre-launch staging")
 
+        errors.extend(check_refs(site_root, html_path, inspector.refs, cache))
+
+    return errors
+
+
+def check_refs(
+    site_root: Path,
+    html_path: Path,
+    refs: list[tuple[str, str, int]],
+    cache: dict[Path, SiteHTMLInspector],
+) -> list[str]:
+    """Check that every internal reference on one page resolves to a file, and every fragment to an anchor."""
+    errors: list[str] = []
+    rel_source = html_path.relative_to(site_root)
+
+    for attr_name, raw_ref, lineno in refs:
+        if is_external_url(raw_ref):
+            continue
+
+        url_without_frag, fragment = urldefrag(raw_ref)
+        target = resolve_local_path(site_root, html_path, url_without_frag)
+        if target is None:
+            errors.append(f"{rel_source}:{lineno}: broken {attr_name} target '{raw_ref}'")
+            continue
+
+        if fragment and target.suffix.lower() == ".html":
+            target_inspector = parse_html(target, cache)
+            if unquote(fragment) not in target_inspector.anchors:
+                rel_target = target.relative_to(site_root.resolve())
+                errors.append(
+                    f"{rel_source}:{lineno}: broken anchor '#{fragment}' not found in {rel_target}"
+                )
+
+    return errors
+
+
+def check_exdoc_extras_html(site_root: Path, cache: dict[Path, SiteHTMLInspector]) -> list[str]:
+    """Check the hand-written links on every ExDoc extras page.
+
+    ExDoc rewrites a link to a published extra from `name.md` to that page's `.html` file. A relative `.md` href that survives means the target is not published, even when ExDoc's markdown copy of some page happens to share its name. The only `.md` href ExDoc writes itself is a page's link to its own markdown copy.
+    """
+    errors: list[str] = []
+    docs_root = site_root / "docs"
+
+    for html_path in sorted(docs_root.glob("*.html")):
+        inspector = parse_html(html_path, cache)
+        if inspector.exdoc_page_type != "extras":
+            continue
+
+        rel_source = html_path.relative_to(site_root)
+        own_markdown = f"{html_path.stem}.md"
+        checked_refs: list[tuple[str, str, int]] = []
+
         for attr_name, raw_ref, lineno in inspector.refs:
-            if is_external_url(raw_ref):
+            if is_external_url(raw_ref) or raw_ref.startswith("/"):
+                checked_refs.append((attr_name, raw_ref, lineno))
                 continue
 
-            url_without_frag, fragment = urldefrag(raw_ref)
-            target = resolve_local_path(site_root, html_path, url_without_frag)
-            if target is None:
-                errors.append(f"{rel_source}:{lineno}: broken {attr_name} target '{raw_ref}'")
+            ref_path = unquote(urlsplit(raw_ref).path)
+            if ref_path in EXDOC_OPTIONAL_FILES:
                 continue
+            if ref_path.lower().endswith(".md") and ref_path != own_markdown:
+                errors.append(
+                    f"{rel_source}:{lineno}: unpublished markdown link '{raw_ref}' "
+                    "(add the target to ExDoc extras in mix.exs, or link to it on GitHub)"
+                )
+                continue
+            checked_refs.append((attr_name, raw_ref, lineno))
 
-            if fragment and target.suffix.lower() == ".html":
-                target_inspector = parse_html(target, cache)
-                if unquote(fragment) not in target_inspector.anchors:
-                    rel_target = target.relative_to(site_root.resolve())
-                    errors.append(
-                        f"{rel_source}:{lineno}: broken anchor '#{fragment}' not found in {rel_target}"
-                    )
+        errors.extend(check_refs(site_root, html_path, checked_refs, cache))
 
     return errors
 
@@ -286,6 +347,7 @@ def verify_site_bundle(site_root: Path, expect_noindex: bool = False) -> list[st
     errors.extend(check_robots(site_root / "robots.txt", expect_noindex=expect_noindex))
     errors.extend(check_site_html(site_root, cache, expect_noindex=expect_noindex))
     errors.extend(check_exdoc_home_link(site_root, cache))
+    errors.extend(check_exdoc_extras_html(site_root, cache))
     return errors
 
 

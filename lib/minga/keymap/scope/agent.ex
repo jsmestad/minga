@@ -40,8 +40,6 @@ defmodule Minga.Keymap.Scope.Agent do
   @arrow_down 57_353
   @ns_arrow_up 0xF700
   @ns_arrow_down 0xF701
-  # F7 (Kitty protocol). The macOS GUI sends it; the terminal frontend does not.
-  @f7 57_370
 
   # Group specs for each vim state.
   @insert_groups [:ctrl_agent_common, :newline_variants]
@@ -140,17 +138,16 @@ defmodule Minga.Keymap.Scope.Agent do
   # names a bound key. On a fork conflict, accept means "Use Agent version" and
   # reject means "Keep mine".
   #
-  # CUA choices: Alt+Down/Alt+Up step through hunks in both frontends (F7 and
-  # Shift+F7, the JetBrains and VS Code accessible-diff keys, also work where the
-  # frontend sends F-keys). Cmd/Ctrl+Enter accepts and Cmd/Ctrl+Backspace rejects,
-  # the keep/undo pair Cursor and VS Code agent edits use; Shift widens either to
-  # every hunk. None of these chords types text or has another meaning in the
-  # Agent scope, and Cmd+N (New Buffer) stays free.
+  # CUA choices: Alt+Down/Alt+Up step through hunks in both frontends; function
+  # keys such as F7 are never bound (key grammar rule 6). Cmd/Ctrl+Enter accepts
+  # and Cmd/Ctrl+Backspace rejects, the keep/undo pair Cursor and VS Code agent
+  # edits use; Shift widens either to every hunk. None of these chords types text
+  # or has another meaning in the Agent scope, and Cmd+N (New Buffer) stays free.
   @diff_review_keys [
     {:next_hunk, :agent_next_code_block, "Next hunk", {[[{?], 0}, {?c, 0}]], "]c"},
-     {[[{@arrow_down, @alt}], [{@ns_arrow_down, @alt}], [{@f7, 0}]], "Alt+Down", "Alt+Down"}},
+     {[[{@arrow_down, @alt}], [{@ns_arrow_down, @alt}]], "Alt+Down", "Alt+Down"}},
     {:previous_hunk, :agent_prev_code_block, "Previous hunk", {[[{?[, 0}, {?c, 0}]], "[c"},
-     {[[{@arrow_up, @alt}], [{@ns_arrow_up, @alt}], [{@f7, @shift}]], "Alt+Up", "Alt+Up"}},
+     {[[{@arrow_up, @alt}], [{@ns_arrow_up, @alt}]], "Alt+Up", "Alt+Up"}},
     {:accept_hunk, :agent_accept_hunk, "Accept hunk (Use Agent version)", {[[{?y, 0}]], "y"},
      {[[{@enter, @cmd}], [{@enter, @ctrl}]], "Cmd+Enter", "Ctrl+Enter"}},
     {:reject_hunk, :agent_reject_hunk, "Reject hunk (Keep mine)", {[[{?x, 0}]], "x"},

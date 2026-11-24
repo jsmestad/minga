@@ -2,14 +2,9 @@ defmodule MingaAgent.Changeset do
   @moduledoc """
   In-memory changesets with filesystem overlays for agent editing.
 
-  A changeset tracks file edits without modifying the original project.
-  Edits are held in memory and materialized into a temporary overlay
-  directory (`MingaAgent.Changeset.Overlay`), where external tools
-  (compilers, test runners, linters) see a coherent view of the project
-  with changes applied. The overlay copies only the paths it needs, never
-  hardlinks them, so a tool writing through the overlay cannot change the
-  original files. Build and cache directories such as `_build`, `deps`,
-  `.git` and `node_modules` are not copied.
+  A changeset tracks file edits without modifying the original project. Edits are held in memory and materialized into a temporary overlay directory (`MingaAgent.Changeset.Overlay`), where external tools (compilers, test runners, linters) see a coherent view of the project with changes applied.
+
+  The overlay copies the project files it needs and never hardlinks them, so a tool that rewrites a copied file changes only the overlay. Build and cache directories such as `_build`, `deps`, `.git` and `node_modules` are not copied, and two of them stay shared with the project. Commands use the project's `deps` directory through `MIX_DEPS_PATH`, so a command that fetches or changes dependencies changes the project's `deps`. Each installed `node_modules` package is a link to the project's copy, so a command that writes inside an installed package, such as a postinstall script or `patch-package`, changes the project's package. Agent file tools never write through such a link.
 
   ## Lifecycle
 
@@ -332,6 +327,14 @@ defmodule MingaAgent.Changeset do
   def observe(cs, observer, registration \\ nil) when is_pid(observer) do
     GenServer.call(cs, {:observe, observer, registration})
   end
+
+  @doc """
+  Tells the observer that a buffer fork draft of this changeset's view changed.
+
+  Fork drafts change without a changeset revision, so the code that edits a fork calls this after each successful edit. The observer receives `{:changeset_revised, changeset}` as it does after a staged change. The changeset's revision does not change.
+  """
+  @spec fork_draft_changed(changeset()) :: :ok
+  def fork_draft_changed(cs), do: GenServer.cast(cs, :fork_draft_changed)
 
   @doc "Returns the staging registration value given to `observe/3`, or `nil`."
   @spec staging(changeset()) :: term() | nil

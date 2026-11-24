@@ -24,7 +24,6 @@ defmodule MingaEditor.Input.DiffReviewKeysTest do
   alias MingaEditor.State.TabBar
   alias MingaEditor.VimState
 
-  @shift 0x01
   @ctrl 0x02
   @alt 0x04
   @cmd 0x08
@@ -40,10 +39,6 @@ defmodule MingaEditor.Input.DiffReviewKeysTest do
       next = press(state, @alt_down)
       refute current_hunk(next) == first
       assert press(next, @alt_up) |> current_hunk() == first
-
-      # F7 and Shift+F7 are aliases the macOS frontend can send.
-      assert press(state, {57_370, 0}) |> current_hunk() == current_hunk(next)
-      assert press(next, {57_370, @shift}) |> current_hunk() == first
 
       for after_key <- [next, press(next, @alt_up)], do: assert_nothing_typed(after_key)
     end

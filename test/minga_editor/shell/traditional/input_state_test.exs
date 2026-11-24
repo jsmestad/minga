@@ -25,10 +25,10 @@ defmodule MingaEditor.Shell.Traditional.InputStateTest do
   end
 
   test "a stale leader generation cannot expire its replacement" do
-    {first_generation, input} = InputState.begin_space_leader(%InputState{})
+    {first_generation, input} = InputState.begin_space_leader(%InputState{}, nil)
     input = InputState.install_space_leader_timer(input, first_generation, make_ref())
     input = InputState.reset_space_leader(input)
-    {replacement_generation, input} = InputState.begin_space_leader(input)
+    {replacement_generation, input} = InputState.begin_space_leader(input, nil)
 
     assert {:stale, unchanged} = InputState.expire_space_leader(input, first_generation)
     assert unchanged == input
@@ -41,11 +41,24 @@ defmodule MingaEditor.Shell.Traditional.InputStateTest do
     assert InputState.space_leader_timer(expired) == nil
   end
 
+  test "a leader window remembers the buffer that took its space until the window ends" do
+    buffer = self()
+    {generation, typed} = InputState.begin_space_leader(%InputState{}, buffer)
+    {_generation, untyped} = InputState.begin_space_leader(%InputState{}, nil)
+
+    assert InputState.space_leader_buffer(typed) == buffer
+    assert InputState.space_leader_buffer(untyped) == nil
+    assert InputState.space_leader_buffer(InputState.reset_space_leader(typed)) == nil
+
+    assert {:expired, expired} = InputState.expire_space_leader(typed, generation)
+    assert InputState.space_leader_buffer(expired) == nil
+  end
+
   test "Editor timeout delivery ignores an old generation and expires the current one" do
     shell_state = %TraditionalState{}
-    {old_generation, shell_state} = TraditionalState.begin_space_leader(shell_state)
+    {old_generation, shell_state} = TraditionalState.begin_space_leader(shell_state, nil)
     shell_state = TraditionalState.reset_space_leader(shell_state)
-    {current_generation, shell_state} = TraditionalState.begin_space_leader(shell_state)
+    {current_generation, shell_state} = TraditionalState.begin_space_leader(shell_state, nil)
 
     state = install_shell_state(base_state(), shell_state)
 

@@ -625,10 +625,10 @@ defmodule MingaEditor.Shell.Traditional.State do
   def reset_click_regions(%__MODULE__{} = state),
     do: %{state | input: InputState.reset_click_regions(state.input)}
 
-  @doc "Begins a new space-leader generation."
-  @spec begin_space_leader(t()) :: {SpaceLeader.generation(), t()}
-  def begin_space_leader(%__MODULE__{} = state) do
-    {generation, input} = InputState.begin_space_leader(state.input)
+  @doc "Begins a new space-leader generation that records the buffer holding the typed space, or nil when the focused surface took no text."
+  @spec begin_space_leader(t(), pid() | nil) :: {SpaceLeader.generation(), t()}
+  def begin_space_leader(%__MODULE__{} = state, space_buffer) do
+    {generation, input} = InputState.begin_space_leader(state.input, space_buffer)
     {generation, %{state | input: input}}
   end
 
@@ -650,6 +650,10 @@ defmodule MingaEditor.Shell.Traditional.State do
   def space_leader_pending?(%__MODULE__{input: input}),
     do: InputState.space_leader_pending?(input)
 
+  @doc "Returns the buffer that holds the pending window's typed space, or nil."
+  @spec space_leader_buffer(t()) :: pid() | nil
+  def space_leader_buffer(%__MODULE__{input: input}), do: InputState.space_leader_buffer(input)
+
   @doc "Returns the current space-leader timer handle."
   @spec space_leader_timer(t()) :: reference() | nil
   def space_leader_timer(%__MODULE__{input: input}), do: InputState.space_leader_timer(input)
@@ -658,4 +662,13 @@ defmodule MingaEditor.Shell.Traditional.State do
   @spec reset_space_leader(t()) :: t()
   def reset_space_leader(%__MODULE__{} = state),
     do: %{state | input: InputState.reset_space_leader(state.input)}
+
+  @doc "Records where a frontend-sent space went, or nil when the last key was not a space."
+  @spec hold_space(t(), MingaEditor.Input.CUA.SpaceTarget.held() | nil) :: t()
+  def hold_space(%__MODULE__{} = state, target),
+    do: %{state | input: InputState.hold_space(state.input, target)}
+
+  @doc "Returns where the last frontend-sent space went, or nil."
+  @spec held_space(t()) :: MingaEditor.Input.CUA.SpaceTarget.held() | nil
+  def held_space(%__MODULE__{input: input}), do: InputState.held_space(input)
 end

@@ -116,6 +116,31 @@ defmodule Minga.Extension.Entry do
   def source_path(%__MODULE__{source: {:git, %{path: path}}}), do: path
   def source_path(%__MODULE__{}), do: nil
 
+  @doc """
+  Returns the directory that holds the extension's own files, or nil when it cannot be located.
+
+  Manifest paths such as skill directories are relative to this root. Path sources use the declared directory and Git sources use the resolved checkout, never the compile cache that holds their BEAM files. Hex sources use the application directory, and module sources use the application directory that holds the module's BEAM file. An unresolved Git source has no root.
+  """
+  @spec root(t()) :: String.t() | nil
+  def root(%__MODULE__{source: {:path, path}}), do: Path.expand(path)
+  def root(%__MODULE__{source: {:git, %{path: path}}}) when is_binary(path), do: Path.expand(path)
+  def root(%__MODULE__{source: {:git, %{path: nil}}}), do: nil
+  def root(%__MODULE__{source: {:hex, %{app: app}}}), do: application_dir(:code.lib_dir(app))
+
+  def root(%__MODULE__{source: {:module, module}}),
+    do: module_application_dir(:code.which(module))
+
+  @spec application_dir(charlist() | {:error, :bad_name}) :: String.t() | nil
+  defp application_dir(path) when is_list(path), do: List.to_string(path)
+  defp application_dir({:error, _reason}), do: nil
+
+  @spec module_application_dir(charlist() | atom()) :: String.t() | nil
+  defp module_application_dir(beam_path) when is_list(beam_path) do
+    beam_path |> List.to_string() |> Path.dirname() |> Path.dirname()
+  end
+
+  defp module_application_dir(_not_a_file), do: nil
+
   @doc "Returns git-specific source options, nil for non-git entries."
   @spec git_opts(t()) :: git_opts() | nil
   def git_opts(%__MODULE__{source: {:git, opts}}), do: opts

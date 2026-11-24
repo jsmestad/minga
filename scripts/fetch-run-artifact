@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+# Fetch a workflow artifact's metadata and zip archive by ID.
+#
+# The GitHub artifacts API lags behind actions/upload-artifact: a lookup made under a second after the upload finalized can return HTTP 404 for an artifact that exists. Only HTTP 404 is retried, with a bounded backoff; any other failure stops at once. Each output file is written only after its request succeeds, so an error body never stands in for an artifact.
+#
+# Usage: scripts/fetch-run-artifact ARTIFACT_ID METADATA_OUTPUT ZIP_OUTPUT
+# Requires gh, GH_TOKEN and GITHUB_REPOSITORY. FETCH_RUN_ARTIFACT_DELAYS lists the waits in seconds between attempts (default "1 2 4 8 15 30", about one minute in total).
+set -euo pipefail
+
+program=$(basename "$0")
+if [ $# -ne 3 ]; then
+  echo "usage: $program ARTIFACT_ID METADATA_OUTPUT ZIP_OUTPUT" >&2
+  exit 2
+fi
+if ! [[ $1 =~ ^[0-9]+$ ]]; then
+  echo "$program: invalid artifact ID: $1" >&2
+  exit 2
+fi
+if [ -z "${GITHUB_REPOSITORY:-}" ]; then
+  echo "$program: GITHUB_REPOSITORY is not set" >&2
+  exit 2
+fi
+read -r -a delays <<< "${FETCH_RUN_ARTIFACT_DELAYS:-1 2 4 8 15 30}"
+
+fetch() {
+  local endpoint=$1 output=$2 partial="$2.partial" errors attempt=1
+  errors=$(mktemp)
+  while true; do
+    if gh api "$endpoint" > "$partial" 2> "$errors"; then
+      rm -f "$errors"
+      mv "$partial" "$output"
+      return 0
+    fi
+    cat "$errors" >&2
+    # Match any HTTP 404 wording, not only gh's "Not Found (HTTP 404)", so a 404 from the zip download's redirect also retries.
+    if ! grep -q 'HTTP 404' "$errors"; then
+      rm -f "$errors" "$partial"
+      echo "$program: GET $endpoint failed with a response other than HTTP 404; not retrying" >&2
+      return 1
+    fi
+    if [ "$attempt" -gt "${#delays[@]}" ]; then
+      rm -f "$errors" "$partial"
+      echo "$program: GET $endpoint still returned HTTP 404 after $attempt attempts" >&2
+      return 1
+    fi
+    echo "$program: GET $endpoint returned HTTP 404 on attempt $attempt; retrying in ${delays[attempt - 1]}s" >&2
+    sleep "${delays[attempt - 1]}"
+    attempt=$((attempt + 1))
+  done
+}
+
+fetch "repos/$GITHUB_REPOSITORY/actions/artifacts/$1" "$2"
+fetch "repos/$GITHUB_REPOSITORY/actions/artifacts/$1/zip" "$3"
