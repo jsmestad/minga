@@ -4559,15 +4559,15 @@ td [data-status="planned"]:not([data-pill="off"])::before {
 
 /* Shared Catppuccin Frappé syntax tokens for TS-highlighted dark specimens */
 
-.iso-code-line .ckw, .st-code .ckw, .le-code.is-frappe .ckw { color: #ca9ee6; }
-.iso-code-line .cat, .st-code .cat, .le-code.is-frappe .cat { color: #8caaee; }
-.iso-code-line .cmod, .st-code .cmod, .le-code.is-frappe .cmod { color: #e5c890; }
-.iso-code-line .cst, .st-code .cst, .le-code.is-frappe .cst { color: #a6d189; }
-.iso-code-line .cnum, .st-code .cnum, .le-code.is-frappe .cnum { color: #ef9f76; }
-.iso-code-line .cop, .st-code .cop, .le-code.is-frappe .cop { color: #81c8be; }
-.iso-code-line .ccm, .st-code .ccm, .le-code.is-frappe .ccm { color: #838ba7; font-style: italic; }
+.iso-code-line .ckw, .st-code .ckw { color: #ca9ee6; }
+.iso-code-line .cat, .st-code .cat { color: #8caaee; }
+.iso-code-line .cmod, .st-code .cmod { color: #e5c890; }
+.iso-code-line .cst, .st-code .cst { color: #a6d189; }
+.iso-code-line .cnum, .st-code .cnum { color: #ef9f76; }
+.iso-code-line .cop, .st-code .cop { color: #81c8be; }
+.iso-code-line .ccm, .st-code .ccm { color: #838ba7; font-style: italic; }
 
-/* Small mono label used by the Architecture stepper and the Extending explorer. */
+/* Small mono label used by the Architecture stepper. */
 .lens-k {
   display: block;
   font-family: var(--font-mono);
@@ -4842,128 +4842,43 @@ td [data-status="planned"]:not([data-pill="off"])::before {
   color: var(--text);
 }
 
-/* Extending: Single-Row Scenarios + Frappé Syntax-Highlighted 3-Layer Explorer */
+/* Extending: the config and package cards sit side by side and may run wider than the essay column. */
 
-.le-scenarios {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  border-bottom: 1px solid var(--border);
-  background: var(--bg);
+.hero-code {
+  margin: 1.5rem 0;
 }
 
-.le-sc-btn {
-  padding: 0.65rem 0.75rem;
-  border: 0;
-  border-right: 1px solid var(--border);
-  background: transparent;
-  color: var(--text-secondary);
-  font-family: var(--font-mono);
-  font-size: 0.75rem;
-  cursor: pointer;
+.essay-hero kbd,
+.essay-section kbd {
   white-space: nowrap;
-  text-align: center;
-  transition: background 120ms ease, color 120ms ease;
 }
 
-.le-sc-btn:last-child {
-  border-right: 0;
-}
-
-.le-sc-btn:hover {
-  background: var(--bg-subtle);
-  color: var(--text);
-}
-
-.le-sc-btn.is-active {
-  background: var(--text);
-  color: var(--bg);
-  font-weight: 600;
-}
-
-.le-layers {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  border-bottom: 1px solid var(--border);
-}
-
-.le-layer-btn {
-  text-align: left;
-  padding: 0.75rem 1rem;
-  border: 0;
-  border-right: 1px solid var(--border);
-  background: var(--bg);
-  cursor: pointer;
-  display: flex;
-  flex-direction: column;
-  gap: 0.15rem;
-}
-
-.le-layer-btn:last-child {
-  border-right: 0;
-}
-
-.le-layer-btn strong {
-  font-size: 0.84rem;
-  color: var(--text);
-}
-
-.le-layer-btn span {
-  font-family: var(--font-mono);
-  font-size: 0.69rem;
-  color: var(--text-muted);
-}
-
-.le-layer-btn.is-active {
-  background: var(--accent-soft);
-  box-shadow: inset 0 -2px 0 var(--accent);
-}
-
-.le-layer-btn.is-active strong {
-  color: var(--accent);
-}
-
-.le-body {
-  display: grid;
-  grid-template-columns: minmax(0, 0.72fr) minmax(0, 1.48fr);
-  gap: 1rem;
-  padding: 1rem;
+.essay-section > .code-pair {
+  grid-template-columns: 1fr;
   align-items: start;
 }
 
-.le-meta {
-  display: flex;
-  flex-direction: column;
-  gap: 0.85rem;
+@media (min-width: 1240px) {
+  .essay-section > .code-pair {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    margin-left: -8rem;
+    margin-right: -8rem;
+  }
 }
 
-.le-meta strong {
-  display: block;
-  margin-top: 0.2rem;
-  font-size: 0.86rem;
-  font-weight: 500;
-  color: var(--text);
+.planned-block {
+  padding: 1.5rem 1.5rem 1.25rem;
+  border: 1px dashed var(--accent-border);
 }
 
-.le-code {
-  margin: 0;
+.planned-block > ol {
+  margin: 0.75rem 0 1.25rem;
+  padding-left: 1.25rem;
+  color: var(--text-secondary);
 }
 
-.le-code.is-frappe {
-  background: #303446;
-  border-color: #414559;
-  color: #c6d0f5;
-}
-
-.le-code.is-frappe .code-header {
-  background: #292c3c;
-  border-bottom-color: #414559;
-  color: #a5adce;
-}
-
-.le-code.is-frappe pre,
-.le-code.is-frappe pre code {
-  background: #303446;
-  color: #c6d0f5;
+.planned-block > ol > li {
+  margin-bottom: 0.55rem;
 }
 
 /* Responsive breakpoints for new interactive story islands */
@@ -4974,8 +4889,7 @@ td [data-status="planned"]:not([data-pill="off"])::before {
     border-bottom: 1px solid var(--border);
   }
   .iso-compare,
-  .st-clean-layout,
-  .le-body {
+  .st-clean-layout {
     grid-template-columns: 1fr;
   }
   .iso-editor {
@@ -4994,23 +4908,11 @@ td [data-status="planned"]:not([data-pill="off"])::before {
 }
 
 @media (max-width: 680px) {
-  .st-step-row,
-  .le-scenarios {
+  .st-step-row {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
-  .st-step-row .seg-btn,
-  .le-sc-btn {
+  .st-step-row .seg-btn {
     border-bottom: 1px solid var(--border);
-  }
-  .le-layers {
-    grid-template-columns: 1fr;
-  }
-  .le-layer-btn {
-    border-right: 0;
-    border-bottom: 1px solid var(--border);
-  }
-  .le-layer-btn:last-child {
-    border-bottom: 0;
   }
 }
 
