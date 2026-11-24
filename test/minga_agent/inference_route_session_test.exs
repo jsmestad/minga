@@ -213,6 +213,24 @@ defmodule MingaAgent.InferenceRouteSessionTest do
     assert_receive {:agent_event, ^session, {:model_limit_reached, ^message}}, @event_timeout
   end
 
+  test "a refusing plan window whose reset has passed leaves a rate limit transient", ctx do
+    resets_at = DateTime.add(DateTime.utc_now(), -60)
+
+    :ok =
+      InferenceRouteRegistry.report_usage(ctx.registry, ctx.reporter, [
+        %{kind: "five_hour", utilization: 1.0, resets_at: resets_at, status: :rejected}
+      ])
+
+    {:ok, _script} = FixtureInferenceRoute.script(ctx.model_id, [{:error, :rate_limited}])
+
+    session = start_route_session(ctx)
+    assert :ok = Session.send_prompt(session, "hi")
+
+    assert_receive {:agent_event, ^session, {:error, message}}, @event_timeout
+    assert message == "Fixture route is rate limited."
+    refute_receive {:agent_event, ^session, {:model_limit_reached, _message}}, 200
+  end
+
   test "a route that reports a usage limit itself keeps its sentence and offers a model switch",
        ctx do
     {:ok, _script} = FixtureInferenceRoute.script(ctx.model_id, [{:error, :usage_limit_reached}])

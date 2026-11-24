@@ -222,27 +222,35 @@ defmodule MingaAgent.SessionProviderErrorTest do
   end
 
   describe "subscription usage limits" do
-    # The 429 ChatGPT Pro returned on 2026-11-23 when its weekly limit was reached, as ReqLLM reports it.
-    @usage_limit_error ReqLLM.Error.API.Request.exception(
-                         reason: "The usage limit has been reached",
-                         status: 429,
-                         response_body: %{
-                           "eligible_promo" => nil,
-                           "limit_window_minutes" => 10_080,
-                           "message" => "The usage limit has been reached",
-                           "plan_type" => "pro",
-                           "resets_at" => 1_795_626_066,
-                           "resets_in_seconds" => 172_541,
-                           "type" => "usage_limit_reached"
-                         },
-                         provider_code: "usage_limit_reached",
-                         retryable: true
-                       )
+    # The 429 ChatGPT Pro returned on 2026-11-23 when its weekly limit was reached, as ReqLLM reports
+    # it. Only the reset moves, so the limit is still in force whenever this test runs.
+    defp usage_limit_error(%DateTime{} = resets_at) do
+      ReqLLM.Error.API.Request.exception(
+        reason: "The usage limit has been reached",
+        status: 429,
+        response_body: %{
+          "eligible_promo" => nil,
+          "limit_window_minutes" => 10_080,
+          "message" => "The usage limit has been reached",
+          "plan_type" => "pro",
+          "resets_at" => DateTime.to_unix(resets_at),
+          "resets_in_seconds" => 172_541,
+          "type" => "usage_limit_reached"
+        },
+        provider_code: "usage_limit_reached",
+        retryable: true
+      )
+    end
 
     @tag :tmp_dir
-    test "a usage limit names its plan and reset, is not retried or followed by queued input, and marks the route until a request succeeds",
+    test "a usage limit names its plan and reset, is not retried or followed by queued input, and marks the route in every session until a request succeeds",
          %{tmp_dir: dir} do
       test_pid = self()
+      resets_at = DateTime.utc_now() |> DateTime.add(2 * 86_400) |> DateTime.truncate(:second)
+
+      # Both sessions share one route registry, as every session in the editor does.
+      registry = :"usage_limit_routes_#{System.unique_integer([:positive])}"
+      start_supervised!({MingaAgent.InferenceRouteRegistry, name: registry})
 
       # The ChatGPT account lists the model, so /model can show its route.
       inventory = fn conn ->
@@ -251,24 +259,37 @@ defmodule MingaAgent.SessionProviderErrorTest do
 
       session =
         start_failing_native_session(
-          dir,
+          Path.join(dir, "limited"),
           fn
             0 ->
               send(test_pid, {:usage_limit_request, 0, self()})
 
               receive do
-                :respond -> {:error, @usage_limit_error}
+                :respond -> {:error, usage_limit_error(resets_at)}
               end
 
             count ->
               send(test_pid, {:usage_limit_request, count, self()})
-
-              build_stream_response([
-                ReqLLM.StreamChunk.text("back again"),
-                ReqLLM.StreamChunk.meta(%{finish_reason: :stop})
-              ])
+              build_stream_response([ReqLLM.StreamChunk.text("unexpected")])
           end,
-          plug: inventory
+          [plug: inventory],
+          inference_routes: registry
+        )
+
+      # Another session signed in to the same ChatGPT account.
+      other =
+        start_failing_native_session(
+          Path.join(dir, "other"),
+          fn count ->
+            send(test_pid, {:other_request, count})
+
+            build_stream_response([
+              ReqLLM.StreamChunk.text("back again"),
+              ReqLLM.StreamChunk.meta(%{finish_reason: :stop})
+            ])
+          end,
+          [plug: inventory],
+          inference_routes: registry
         )
 
       assert :ok = Session.send_prompt(session, "hello")
@@ -279,7 +300,7 @@ defmodule MingaAgent.SessionProviderErrorTest do
       message = await_failed_turn(session)
 
       assert message =~
-               ~r/\AYour ChatGPT Pro usage limit is reached\. It resets \w{3}, Nov 2[56] at \d{1,2}:\d{2} (AM|PM)\. Choose another model with \/model to continue now\.\z/
+               ~r/\AYour ChatGPT Pro usage limit is reached\. It resets \w{3}, \w{3} \d{1,2} at \d{1,2}:\d{2} (AM|PM)\. Choose another model with \/model to continue now\.\z/
 
       assert_received {:agent_event, ^session, {:model_limit_reached, ^message}}
       assert error_messages(session) == [message]
@@ -288,24 +309,30 @@ defmodule MingaAgent.SessionProviderErrorTest do
       refute_receive {:usage_limit_request, _count, _request}, 300
       assert {[], ["after the limit"]} = Session.get_queued_messages(session)
 
-      # /model lists the route as limit-reached until the reset passes or a request succeeds.
-      assert {:ok, candidates, _notice, _validity} = Session.discover_available_models(session)
-      assert [limited] = remote_candidates(candidates)
+      # /model in either session lists the route as limit-reached until the reset passes or a
+      # request succeeds.
+      for owner <- [session, other] do
+        assert {:ok, candidates, _notice, _validity} = Session.discover_available_models(owner)
+        assert [limited] = remote_candidates(candidates)
 
-      assert %MingaAgent.UsageLimit{
-               service: "ChatGPT",
-               plan: "pro",
-               window_minutes: 10_080,
-               resets_at: ~U[2026-11-25 17:01:06Z]
-             } = limited.usage_limit
+        assert %MingaAgent.UsageLimit{
+                 service: "ChatGPT",
+                 plan: "pro",
+                 window_minutes: 10_080,
+                 resets_at: ^resets_at
+               } = limited.usage_limit
+      end
 
-      # A later request that succeeds on the route lifts the limit.
-      assert :ok = Session.send_prompt(session, "try again")
-      assert_receive {:usage_limit_request, 1, _request}, @durable_workflow_timeout
-      assert_receive {:agent_event, ^session, {:status_changed, :idle}}, @durable_workflow_timeout
-      assert {:ok, candidates, _notice, _validity} = Session.discover_available_models(session)
-      assert [lifted] = remote_candidates(candidates)
-      assert lifted.usage_limit == nil
+      # A later request that succeeds on the route, from any session, lifts the limit for both.
+      assert :ok = Session.send_prompt(other, "try again")
+      assert_receive {:other_request, 0}, @durable_workflow_timeout
+      assert_receive {:agent_event, ^other, {:status_changed, :idle}}, @durable_workflow_timeout
+
+      for owner <- [session, other] do
+        assert {:ok, candidates, _notice, _validity} = Session.discover_available_models(owner)
+        assert [lifted] = remote_candidates(candidates)
+        assert lifted.usage_limit == nil
+      end
     end
 
     test "a usage limit keeps the provider's sentence and text-only reports name no reset" do
@@ -326,8 +353,16 @@ defmodule MingaAgent.SessionProviderErrorTest do
          "The model provider is rate limiting requests. Wait a moment, then try again."}
       ]
 
+      # The observed limit goes to this case's own route registry, never to the shared one.
+      registry = :"sentence_routes_#{System.unique_integer([:positive])}"
+      start_supervised!({MingaAgent.InferenceRouteRegistry, name: registry})
+
       for {event, expected} <- cases do
-        session = start_subscribed_session()
+        session =
+          start_subscribed_session(Minga.Test.SessionMockProvider,
+            model_resolver_opts: [inference_routes: registry]
+          )
+
         send_provider_event(session, event)
         assert error_messages(session) == [expected]
       end
@@ -558,8 +593,18 @@ defmodule MingaAgent.SessionProviderErrorTest do
     end
   end
 
-  @spec start_failing_native_session(Path.t(), (non_neg_integer() -> term()), keyword()) :: pid()
-  defp start_failing_native_session(dir, respond, extra_credential_opts \\ []) do
+  @spec start_failing_native_session(
+          Path.t(),
+          (non_neg_integer() -> term()),
+          keyword(),
+          keyword()
+        ) :: pid()
+  defp start_failing_native_session(
+         dir,
+         respond,
+         extra_credential_opts \\ [],
+         extra_resolver_opts \\ []
+       ) do
     call_count = :counters.new(1, [:atomics])
     oauth_path = Path.join(dir, "credentials/oauth.json")
 
@@ -584,15 +629,17 @@ defmodule MingaAgent.SessionProviderErrorTest do
     resolver_opts =
       MingaAgent.Test.ModelSelectionFixture.resolver_opts(model_id: "gpt-6.1-sol")
       |> Keyword.delete(:credential_snapshot)
+      |> Keyword.merge(extra_resolver_opts)
+
+    suffix = System.unique_integer([:positive])
 
     # Keep tool-effect admission on this case's own durability queue.
     event_log =
       start_supervised!(
         {MingaAgent.EventLog,
-         name: nil, db_dir: Path.join(dir, "events"), retention_sweep?: false, health_check: :none}
+         name: nil, db_dir: Path.join(dir, "events"), retention_sweep?: false, health_check: :none},
+        id: {:failed_turn_event_log, suffix}
       )
-
-    suffix = System.unique_integer([:positive])
 
     artifact_opts = [
       name: nil,
@@ -602,7 +649,10 @@ defmodule MingaAgent.SessionProviderErrorTest do
       store_supervisor: Module.concat(__MODULE__, "FailedTurnArtifactStores#{suffix}")
     ]
 
-    start_supervised!({MingaAgent.ArtifactSupervisor, artifact_opts})
+    start_supervised!({MingaAgent.ArtifactSupervisor, artifact_opts},
+      id: {:failed_turn_artifacts, suffix}
+    )
+
     {:ok, artifact_runtime} = MingaAgent.ArtifactSupervisor.runtime(artifact_opts)
 
     llm_client = fn _model, _messages, _opts ->
