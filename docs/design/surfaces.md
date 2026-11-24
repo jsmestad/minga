@@ -1,6 +1,6 @@
 # Surfaces
 
-The resting screen has three parts: a plain title bar, your text, and the modeline. Everything else is a buffer that appears when you ask for it, in a bottom drawer or a split, and goes away with `q` or `esc`. The same surfaces exist on macOS and in the TUI; [tui.md](tui.md) covers how the terminal draws them.
+The resting screen has three parts: a plain title bar, your text, and the modeline. Everything else is a buffer that appears when you ask for it, in a bottom drawer or a split, and goes away with `q` or `esc`. The same surfaces exist on macOS and in the TUI; [tui.md](tui.md) covers how the terminal draws them. This file says what each surface contains and how it behaves; [anatomy.md](anatomy.md) gives every part's measurements in tokens on both frontends.
 
 ## Title bar
 
