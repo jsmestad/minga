@@ -73,5 +73,10 @@ defmodule MingaAgent.Providers.Native.HostedAdmission do
   defp to_encodable(%{__struct__: _} = struct), do: struct |> Map.from_struct() |> to_encodable()
   defp to_encodable(%{} = map), do: Map.new(map, fn {k, v} -> {k, to_encodable(v)} end)
   defp to_encodable(list) when is_list(list), do: Enum.map(list, &to_encodable/1)
+
+  defp to_encodable(bin) when is_binary(bin) do
+    if String.valid?(bin), do: bin, else: Base.encode64(bin)
+  end
+
   defp to_encodable(other), do: other
 end

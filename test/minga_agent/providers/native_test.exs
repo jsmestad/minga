@@ -1568,7 +1568,7 @@ defmodule MingaAgent.Providers.NativeTest do
       events = collect_run_events()
       assert_received :artifact_store_requested
       refute_received :artifact_store_requested
-      assert_received {:supported_image_wire, wire}
+      assert_receive {:supported_image_wire, wire}, 1_000
       results = List.last(JSON.decode!(wire)["messages"])["content"]
       assert Enum.map(results, & &1["tool_use_id"]) == ["tc_image_first", "tc_image_second"]
 
