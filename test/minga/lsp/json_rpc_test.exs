@@ -304,6 +304,23 @@ defmodule Minga.LSP.JsonRpcTest do
       assert {:error, {:headers_too_large, _}} = JsonRpc.decode(buffer)
     end
 
+    test "rejects an unterminated header block once it exceeds the header limit" do
+      # No blank line has arrived, so every retained byte belongs to the header block.
+      buffer = "Content-Length: 2\r\nX-Pad: " <> :binary.copy("a", 8_192)
+
+      assert {:error, {:headers_too_large, size}} = JsonRpc.decode(buffer)
+      assert size == byte_size(buffer)
+    end
+
+    test "keeps an unterminated header block that is still within the header limit" do
+      # The limit plus a partial terminator is the longest prefix of a valid header block.
+      buffer = "Content-Length: 2\r\nX-Pad: " <> :binary.copy("a", 8_192 - 26) <> "\r\n\r"
+      assert byte_size(buffer) == 8_192 + 3
+
+      assert {[], ^buffer} = JsonRpc.decode(buffer)
+      assert {[%{}], ""} = JsonRpc.decode(buffer <> "\n{}")
+    end
+
     test "accepts normal messages within all limits" do
       encoded = IO.iodata_to_binary(JsonRpc.encode_notification("test", %{"ok" => true}))
 
