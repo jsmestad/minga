@@ -235,11 +235,11 @@ defmodule Minga.Buffer.AuthorshipTest do
     end
 
     test "adjacent replacements reject the same whether one step or two made them" do
-      for {position, length, text} <- [
-            {{0, 1}, 1, ""},
-            {{0, 1}, 1, "z"},
-            {{0, 0}, 1, ""},
-            {{0, 0}, 1, "z"}
+      for {position, length, text, expected} <- [
+            {{0, 1}, 1, "", "a"},
+            {{0, 1}, 1, "z", "az"},
+            {{0, 0}, 1, "", "b"},
+            {{0, 0}, 1, "z", "zb"}
           ] do
         results =
           for steps <- [["s", "s"], ["s1", "s2"]] do
@@ -251,7 +251,7 @@ defmodule Minga.Buffer.AuthorshipTest do
             BufferProcess.content(buffer)
           end
 
-        assert [same, same] = results
+        assert results == [expected, expected]
       end
     end
 
