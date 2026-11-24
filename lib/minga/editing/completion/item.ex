@@ -3,6 +3,8 @@ defmodule Minga.Editing.Completion.Item do
   One completion candidate with stable provider and semantic edit identity.
 
   The identifier is the full identity tuple, not a display label or truncated hash. Documentation is intentionally excluded because `completionItem/resolve` may add it without changing the candidate's identity. Detail remains part of the identity because providers commonly use it to distinguish overloads.
+
+  The constructors also compute the compact wire id of that identity once and carry it on the item. Items are built in the completion Task, so ranking, snapshots, selection and encoding on the Editor process read the carried value instead of hashing the identity again.
   """
 
   alias Minga.Core.PositionEncoding
@@ -83,6 +85,7 @@ defmodule Minga.Editing.Completion.Item do
 
   @enforce_keys [
     :id,
+    :wire_id,
     :provider_id,
     :source,
     :label,
@@ -92,6 +95,7 @@ defmodule Minga.Editing.Completion.Item do
     :search
   ]
   defstruct id: nil,
+            wire_id: nil,
             provider_id: nil,
             source: "",
             label: "",
@@ -110,6 +114,7 @@ defmodule Minga.Editing.Completion.Item do
 
   @type t :: %__MODULE__{
           id: id(),
+          wire_id: String.t(),
           provider_id: provider_id(),
           source: String.t(),
           label: String.t(),
@@ -136,9 +141,11 @@ defmodule Minga.Editing.Completion.Item do
     filter_text = Map.get(raw, "filterText", label)
     sort_text = Map.get(raw, "sortText", label)
     detail = Map.get(raw, "detail", "") || ""
+    id = identity(provider_id, raw, label, insert_text, text_edit, detail)
 
     %__MODULE__{
-      id: identity(provider_id, raw, label, insert_text, text_edit, detail),
+      id: id,
+      wire_id: wire_id(id),
       provider_id: provider_id,
       source: source_label(provider_id),
       label: label,
@@ -166,9 +173,11 @@ defmodule Minga.Editing.Completion.Item do
     sort_text = Map.get(fields, :sort_text, label)
     detail = Map.get(fields, :detail, "") || ""
     kind = Map.get(fields, :kind, :text)
+    id = {provider_id, {label, insert_text, text_edit, nil, kind, nil, detail}}
 
     %__MODULE__{
-      id: {provider_id, {label, insert_text, text_edit, nil, kind, nil, detail}},
+      id: id,
+      wire_id: wire_id(id),
       provider_id: provider_id,
       source: Map.get(fields, :source, source_label(provider_id)),
       label: label,
@@ -287,9 +296,13 @@ defmodule Minga.Editing.Completion.Item do
   @spec semantic_key(t()) :: id()
   def semantic_key(%__MODULE__{id: id}), do: id
 
-  @doc "Returns a compact stable identifier suitable for native protocol payloads."
+  @doc """
+  Returns a compact stable identifier suitable for native protocol payloads.
+
+  For an item this returns the wire id computed when the item was built, without hashing. For a bare identity it hashes the identity, which yields the same value an item with that identity carries.
+  """
   @spec wire_id(t() | id()) :: String.t()
-  def wire_id(%__MODULE__{id: id}), do: wire_id(id)
+  def wire_id(%__MODULE__{wire_id: wire_id}), do: wire_id
 
   def wire_id(id) do
     id

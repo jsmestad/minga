@@ -1,9 +1,11 @@
 defmodule Minga.Editing.Completion.SessionTest do
   use ExUnit.Case, async: true
 
+  alias Minga.Editing.Completion
   alias Minga.Editing.Completion.Item
   alias Minga.Editing.Completion.ProviderBatch
   alias Minga.Editing.Completion.Session
+  alias Minga.Test.CallCounter
 
   defp new_session(generation \\ 1) do
     Session.new(make_ref(), generation, self(), 7, {3, 5})
@@ -323,5 +325,50 @@ defmodule Minga.Editing.Completion.SessionTest do
     assert timers == [resolve_timer]
 
     Process.cancel_timer(resolve_timer)
+  end
+
+  test "parsing hashes each item once; installing, filtering and selecting hash nothing" do
+    raw_items =
+      for n <- 1..300 do
+        %{"label" => "handle_#{n}", "sortText" => String.pad_leading("#{n}", 4, "0")}
+      end
+
+    client = self()
+    session = new_session()
+    {session, ref} = register(session, :lsp, client)
+
+    # Parsing runs in the completion Task in production; CallCounter runs each step in its own process.
+    {parse_hashes, batch} =
+      CallCounter.count({:crypto, :hash, 2}, fn ->
+        batch(session, :lsp, client, ref, raw_items)
+      end)
+
+    {editor_hashes, completion} =
+      CallCounter.count({:crypto, :hash, 2}, fn ->
+        {:ok, session} = Session.accept_batch(session, batch)
+
+        completion =
+          session
+          |> Session.index()
+          |> Completion.new({3, 5}, session.selected_item_id)
+          |> Completion.filter("h")
+          |> Completion.filter("handle_1")
+          |> Completion.move_down()
+
+        third = Enum.at(completion.filtered, 2)
+        {:ok, completion} = Completion.select_wire_id(completion, Item.wire_id(third))
+        completion
+      end)
+
+    assert {parse_hashes, editor_hashes} == {300, 0}
+
+    # The carried wire ids are the identity hashes, so ranking and selection are unchanged.
+    assert Enum.map(completion.filtered, &Item.wire_id/1) ==
+             Enum.map(completion.filtered, &Item.wire_id(&1.id))
+
+    assert Enum.take(Enum.map(completion.filtered, & &1.label), 3) ==
+             ["handle_1", "handle_10", "handle_11"]
+
+    assert Completion.selected_item(completion).label == "handle_11"
   end
 end
