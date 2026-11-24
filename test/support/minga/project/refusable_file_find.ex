@@ -2,9 +2,7 @@ defmodule Minga.Project.RefusableFileFind do
   @moduledoc """
   A controllable file-discovery backend that refuses to start while the workspace root holds a refusal marker.
 
-  Without the marker it behaves like `Minga.Project.SlowFileFind`, so a test can start one rebuild,
-  write the marker, and make the next rebuild refuse. The marker lives in the test's own root, so no
-  global state is shared between tests.
+  Without the marker it behaves like `Minga.Project.SlowFileFind`, so a test can start one rebuild, write the marker, and make the next rebuild refuse. The marker lives in the test's own root, so no global state is shared between tests.
   """
 
   alias Minga.Project.Root
