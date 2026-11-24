@@ -974,9 +974,10 @@ struct GUIStatusBarDecoderTests {
         identity.append(0); identity.append(0); identity.append(0)
 
         var modelineSegments = Data()
-        modelineSegments.append(1)
+        modelineSegments.append(3) // format
         appendU16(&modelineSegments, 1)
         appendU16(&modelineSegments, 0)
+        modelineSegments.append(4); modelineSegments.append(contentsOf: Data("mode".utf8)) // name
         appendU24(&modelineSegments, 0xBBC2CF)
         appendU24(&modelineSegments, 0x51AFEF)
         modelineSegments.append(0x00)
@@ -1005,9 +1006,10 @@ struct GUIStatusBarDecoderTests {
         identity.append(0); identity.append(0); identity.append(0)
 
         var modelineSegments = Data()
-        modelineSegments.append(1)
+        modelineSegments.append(3) // format
         appendU16(&modelineSegments, 1)
         appendU16(&modelineSegments, 0)
+        modelineSegments.append(4); modelineSegments.append(contentsOf: Data("mode".utf8)) // name
         appendU24(&modelineSegments, 0xBBC2CF)
         appendU24(&modelineSegments, 0x51AFEF)
         modelineSegments.append(0x00)
@@ -1036,9 +1038,10 @@ struct GUIStatusBarDecoderTests {
         identity.append(0); identity.append(0); identity.append(0)
 
         var modelineSegments = Data()
-        modelineSegments.append(1) // version
+        modelineSegments.append(3) // format
         appendU16(&modelineSegments, 1) // left count
         appendU16(&modelineSegments, 0) // right count
+        modelineSegments.append(4); modelineSegments.append(contentsOf: Data("mode".utf8)) // name
         appendU24(&modelineSegments, 0xBBC2CF)
         appendU24(&modelineSegments, 0x51AFEF)
         modelineSegments.append(0x00)

@@ -74,6 +74,7 @@ struct GUIObservationGuardrailTests {
         "Sources/Views/EditorChrome/FeedbackState.swift: @ObservationIgnored private var lastMessage = \"\"": "feedback timing cache; rendered fields remain observed",
         "Sources/Views/EditorChrome/FeedbackState.swift: @ObservationIgnored private var showTask: Task<Void, Never>?": "task lifecycle handle, not rendered state",
         "Sources/Views/EditorChrome/FeedbackState.swift: @ObservationIgnored private var spinnerOnTime: ContinuousClock.Instant?": "timing bookkeeping, not rendered state",
+        "Sources/Views/EditorChrome/StatusBarState.swift: @ObservationIgnored public var announce: @MainActor (String) -> Void = { message in": "VoiceOver announcement callback that tests replace, not rendered state",
         "Sources/Views/Overlays/CompletionState.swift: @ObservationIgnored private let localPresentationStore: LocalPresentationStore": "stable local presentation dependency; owned preview fields remain observed",
         "Sources/Views/Overlays/PickerState.swift: @ObservationIgnored private let localPresentationStore: LocalPresentationStore": "stable local presentation dependency; owned preview fields remain observed",
         "Sources/Views/Shared/GUIState.swift: @ObservationIgnored private let themeBacking = GUIThemeBacking()": "stable dependency reference; backing fields are observed",
