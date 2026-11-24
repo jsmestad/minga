@@ -145,7 +145,7 @@ func chromeFrameScenarios() []chromeFrameScenario {
 			return m.footerLines()
 		}},
 		{"footer_segments", func(m Model) []string {
-			return one(m.renderStatusSegments(protocol.StatusBar{Filename: "main.go", PendingKeys: "SPC f", Left: []protocol.StatusSegment{{Text: " NORMAL "}}, Right: []protocol.StatusSegment{{Text: "12:4"}}}))
+			return one(m.renderStatusSegments(protocol.StatusBar{Filename: "main.go", PendingKeys: "SPC f", Left: []protocol.StatusSegment{{Name: "mode", Text: "NORMAL"}}, Right: []protocol.StatusSegment{{Name: "position", Text: "12:4"}}}))
 		}},
 		{"minibuffer", func(m Model) []string {
 			return one(m.renderMinibuffer(protocol.Minibuffer{Visible: true, Prompt: ":", Input: "write", Context: "E32: No file name"}))

@@ -45,7 +45,7 @@ func (m Model) floatingPickerLayer() *lipgloss.Layer {
 	y := max((m.height-height)/2, 0)
 	m.zones.picker.box = uiRect{X: x, Y: y, Width: width, Height: height}
 	m.zones.picker.generation = picker.Generation
-	return lipgloss.NewLayer(m.zones.ScanInto(popup, x, y)).X(x).Y(y).Z(10)
+	return lipgloss.NewLayer(m.zones.ScanInto(popup, x, y)).X(x).Y(y).Z(pickerLayerZ)
 }
 
 func (m Model) renderFloatingPicker(picker protocol.Picker, preview protocol.PickerPreview) string {

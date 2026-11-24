@@ -97,24 +97,30 @@ Use `set :agent_notifications, false` to turn off agent alerts. `:agent_notify_d
 
 ## Modeline
 
-The modeline configuration builds the editor's global status line from named segments, so you can hide noisy information, move the important parts closer to the edge, or add your own project-specific status. The same segment configuration drives the semantic native GUI status bar and terminal status/modeline presentation; the GUI renders known built-ins with compact SwiftUI controls and renders custom segments as native chips instead of terminal-style color blocks.
+The modeline is the one place Minga's state is always visible. It is built from named segments, so you can hide information, move it, or add your own project-specific status. The same segments drive the macOS status bar and the terminal modeline: both draw the words the editor sends, in the order it sends them.
+
+By default it reads, left to right: the mode, needs-you (only when a task needs you), the file with a dot when unsaved, your position among Minga's changes, git, Minga's state in words, diagnostics or a persistent problem, then the filetype and position on the right. Every segment you can click does what its key does, and hovering it names the key (in the terminal, the echo line says it when your terminal reports pointer motion).
 
 ### Built-in segments
 
 | Segment | Shows |
 |---------|-------|
 | `:mode` | Current editing mode, such as `NORMAL`, `INSERT`, or `VISUAL` |
-| `:filename` | Buffer name, dirty marker, buffer index, and macro recording indicator |
-| `:git` | Git branch and diff counts when the buffer is in a Git repository |
-| `:agent` | Foreground agent status, such as plan, thinking, tool, or error |
+| `:needs_you` | How many of Minga's tasks need you, only when one does. Click or `SPC a a` opens them. It is the only segment that says "needs you": the `:minga` segment then shows just its mark and "Minga", so without `:needs_you` only that mark says it |
+| `:filename` | Buffer name, with a dot when unsaved. Click or `SPC ,` opens the switcher |
+| `:change` | Your position among Minga's changes in this file ("change 1/2"), while the cursor is inside one |
+| `:git` | Git branch and changed-line count ("main +11"). Click runs whatever `SPC g g` runs |
+| `:minga` | Minga's state with its mark and words: "Minga here 2/3" while it works in the file you are in, "Minga editing retry.ex 2/3" while it works in another, otherwise the state's word ("Minga needs you"). Click or `SPC a v` opens the conversation. `:agent` is its old name and still works |
 | `:background_agent` | Running background subagent count and active background task label |
 | `:plan_limit` | Subscription plan usage for the active agent model, only at 80% or more of a limit window (`Claude 82% · 5h`) or once the limit is reached (`Claude limit · resets 3:40 PM`). Click it to choose another model. Hidden under normal usage and when the route reports no usage. |
-| `:diagnostics` | Error, warning, and info diagnostic counts |
-| `:parser` | Tree-sitter parser restart or unavailable indicator |
-| `:lsp` | LSP connection status |
-| `:filetype` | Filetype icon and label |
-| `:position` | Cursor line and column |
-| `:percent` | Cursor position as a file percentage |
+| `:diagnostics` | Error and warning counts. Click or `SPC c x` opens the list |
+| `:config` | A config that did not load, as a persistent problem ("config: defaults") until a reload succeeds. Click or `SPC f p` opens the config file |
+| `:parser` | A failed tree-sitter parser, as a persistent problem, or a restart in progress |
+| `:lsp` | A failed language server, as a persistent problem ("elixir_ls failed"). Nothing while servers are healthy |
+| `:filetype` | Filetype label |
+| `:position` | Cursor line and column, always as `240:31` |
+| `:percent` | Cursor position as a file percentage (not shown by default) |
+| `:indent` | Indentation style and width (not shown by default) |
 | `:selection` | Reserved for visual selection details |
 
 ### Choosing segment order
@@ -122,21 +128,24 @@ The modeline configuration builds the editor's global status line from named seg
 Use `:modeline_left_segments` and `:modeline_right_segments` to choose which segments appear. Omitting a segment hides it. The list order is the render order for that side.
 
 ```elixir
-set :modeline_left_segments, [:mode, :filename, :git, :agent, :background_agent, :plan_limit]
-set :modeline_right_segments, [:diagnostics, :parser, :lsp, :filetype, :position, :percent]
+set :modeline_left_segments, [
+  :mode, :needs_you, :filename, :change, :git, :minga, :diagnostics, :config, :lsp, :parser,
+  :background_agent, :plan_limit, :draft, :conflict, :merge_conflict
+]
+set :modeline_right_segments, [:filetype, :position]
 ```
 
 Move any built-in segment by putting it on the other side:
 
 ```elixir
-# Put cursor position beside the filename and hide percent.
-set :modeline_left_segments, [:mode, :filename, :position, :git]
-set :modeline_right_segments, [:diagnostics, :lsp, :filetype]
+# Put cursor position beside the filename and show indentation on the right.
+set :modeline_left_segments, [:mode, :needs_you, :filename, :position, :git, :minga, :diagnostics]
+set :modeline_right_segments, [:indent, :filetype]
 ```
 
 ### Agent status command
 
-Set `:agent_status_command` to replace the built-in `:agent` segment text with stdout from a shell command. Minga reruns it every `:agent_status_interval_ms` milliseconds, default `5000`; values below `1000` are treated as `1000`. Failed commands or empty output fall back to the built-in agent status and log one `*Messages*` entry.
+Set `:agent_status_command` to add stdout from a shell command to the `:minga` segment, after Minga's state ("Minga working sonnet | 42k"). The state word always stays, so the modeline never disagrees with the rest of the screen; while Minga has no state the command's text stands alone. Minga reruns it every `:agent_status_interval_ms` milliseconds, default `5000`; values below `1000` are treated as `1000`. Failed commands or empty output fall back to the built-in words and log one `*Messages*` entry.
 
 ```elixir
 set :agent_status_command, ~s(echo "$MINGA_MODEL | $MINGA_STATUS")
@@ -219,7 +228,7 @@ Extension segments are removed automatically when the owning extension stops or 
 
 ### Responsive truncation
 
-Each segment has a priority. When the window is too narrow, Minga drops the lowest-priority visible segment first, then recalculates the line. Built-in priorities keep mode, filename, position, filetype, and diagnostics longer than parser, percent, and background-agent details. Custom segments default to priority `50`; pass `priority:` to make them more or less important.
+When the window is too narrow, segments give way in a fixed order: first custom and optional segments (background agents, plan limit, indentation and so on), then the filetype, the position and git, then Minga's words shrink to its state mark and step count ("2/3"), then warnings. Mode, needs-you, the file name, change position, errors and persistent problems never drop. Each frontend measures its own width and applies this order, so narrowing changes presentation only and every key keeps its meaning. A custom segment's `priority:` does not change when it gives way.
 
 ## Agent model routes
 

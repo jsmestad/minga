@@ -539,7 +539,9 @@ public enum Wire {
 
     // MARK: - Status bar
 
-    /// A configured modeline segment from the gui_status_bar modeline segment section.
+    /// A modeline segment from the gui_status_bar modeline section (format 3), in the BEAM's order.
+    ///
+    /// `drop` is the segment's rank when the window narrows (0 never drops); a segment with a `compact` form collapses to its state mark and that text at its rank instead of dropping. `state` is the design-token state the segment speaks in, `key` the key that does what a click does, and `label` what the segment means, for tooltips and VoiceOver.
     public struct StatusBarSegment: Sendable, Equatable, Identifiable {
         public let id: Int
         public let kind: String
@@ -548,8 +550,13 @@ public enum Wire {
         public let bgColor: UInt32
         public let attrs: UInt8
         public let command: String
+        public let drop: UInt8
+        public let compact: String?
+        public let state: SpineState?
+        public let key: String
+        public let label: String
 
-        public init(id: Int, kind: String = "custom", text: String, fgColor: UInt32, bgColor: UInt32, attrs: UInt8, command: String) {
+        public init(id: Int, kind: String = "custom", text: String, fgColor: UInt32, bgColor: UInt32, attrs: UInt8, command: String, drop: UInt8 = 0, compact: String? = nil, state: SpineState? = nil, key: String = "", label: String = "") {
             self.id = id
             self.kind = kind
             self.text = text
@@ -557,6 +564,11 @@ public enum Wire {
             self.bgColor = bgColor
             self.attrs = attrs
             self.command = command
+            self.drop = drop
+            self.compact = compact
+            self.state = state
+            self.key = key
+            self.label = label
         }
 
         public var isBold: Bool { attrs & 0x01 != 0 }

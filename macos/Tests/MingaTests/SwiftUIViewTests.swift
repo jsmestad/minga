@@ -393,322 +393,162 @@ struct BreadcrumbBarViewTests {
 @Suite("StatusBarView View Structure")
 struct StatusBarViewViewTests {
 
-    private func segment(_ id: Int, _ text: String, kind: String = "custom", command: String = "") -> Wire.StatusBarSegment {
-        Wire.StatusBarSegment(id: id, kind: kind, text: text, fgColor: 0xFFFFFF, bgColor: 0x000000, attrs: 0, command: command)
+    private func segment(_ id: Int, _ text: String, kind: String = "custom", command: String = "", drop: UInt8 = 0, compact: String? = nil, state: SpineState? = nil, key: String = "", label: String = "") -> Wire.StatusBarSegment {
+        Wire.StatusBarSegment(id: id, kind: kind, text: text, fgColor: 0xFFFFFF, bgColor: 0x000000, attrs: 0, command: command, drop: drop, compact: compact, state: state, key: key, label: label)
+    }
+
+    /// The "editing while Minga works" modeline as the BEAM sends it.
+    private var boardLeft: [Wire.StatusBarSegment] {
+        [
+            segment(0, "NORMAL", kind: "mode", label: "Normal mode"),
+            segment(1, "Needs you", kind: "needs_you", command: "toggle_agentic_view", state: .needsYou, key: "SPC a a", label: "1 task needs you"),
+            segment(2, "chrome_state.ex ●", kind: "filename", command: "buffer_list", key: "SPC ,", label: "chrome_state.ex, unsaved"),
+            segment(3, "change 1/2", kind: "change", label: "Minga's change 1 of 2"),
+            segment(4, "main +11", kind: "git", drop: 4, label: "Branch main, 11 changed lines"),
+            segment(5, "Minga working 2/3", kind: "minga", command: "toggle_agent_split", drop: 5, compact: "2/3", state: .working, key: "SPC a v", label: "Minga is working, step 2 of 3"),
+            segment(6, "1", kind: "errors", command: "diagnostics_list", key: "SPC c x", label: "1 error"),
+            segment(7, "2", kind: "warnings", command: "diagnostics_list", drop: 6, key: "SPC c x", label: "2 warnings")
+        ]
+    }
+
+    private var boardRight: [Wire.StatusBarSegment] {
+        [
+            segment(0, "Elixir", kind: "filetype", drop: 2, label: "Elixir"),
+            segment(1, "240:31", kind: "position", drop: 3, label: "Line 240, column 31")
+        ]
     }
 
     @MainActor private func statusBarState(
         message: String = "",
-        diagnosticHint: String = "",
         leftSegments: [Wire.StatusBarSegment] = [],
-        rightSegments: [Wire.StatusBarSegment] = [],
-        agentStatus: AgentStatus = .idle,
-        activeToolName: String = "",
-        safeMode: Bool = false
+        rightSegments: [Wire.StatusBarSegment] = []
     ) -> StatusBarState {
         let state = StatusBarState()
-        state.update(from: StatusBarUpdate(
-            contentKind: 0, mode: 0, cursorLine: 42, cursorCol: 9,
-            lineCount: 500, flags: safeMode ? 0x08 : 0, lspStatus: 0, gitBranch: "",
-            message: message, filetype: "elixir", errorCount: 0, warningCount: 0,
-            modelName: "", messageCount: 0, sessionStatus: 0,
-            infoCount: 0, hintCount: 0, macroRecording: 0, parserStatus: 0, agentStatus: agentStatus.rawValue,
-            activeToolName: activeToolName,
-            gitAdded: 0, gitModified: 0, gitDeleted: 0,
-            icon: "", iconColorR: 0, iconColorG: 0, iconColorB: 0, filename: "", diagnosticHint: diagnosticHint,
-            backgroundSubagentCount: 0, backgroundSubagentLabel: "",
-            modelineLeftSegments: leftSegments,
-            modelineRightSegments: rightSegments
-        ))
+        state.announce = { _ in }
+        state.update(from: statusBarUpdate(message: message, leftSegments: leftSegments, rightSegments: rightSegments))
         return state
     }
 
-    @Test("Buffer mode shows configured modeline segments")
-    @MainActor func bufferMode() throws {
-        let state = StatusBarState()
-        state.update(from: StatusBarUpdate(
+    private func statusBarUpdate(
+        message: String = "",
+        leftSegments: [Wire.StatusBarSegment] = [],
+        rightSegments: [Wire.StatusBarSegment] = []
+    ) -> StatusBarUpdate {
+        StatusBarUpdate(
             contentKind: 0, mode: 0, cursorLine: 42, cursorCol: 9,
             lineCount: 500, flags: 0, lspStatus: 0, gitBranch: "",
-            message: "", filetype: "elixir", errorCount: 0, warningCount: 0,
+            message: message, filetype: "elixir", errorCount: 0, warningCount: 0,
             modelName: "", messageCount: 0, sessionStatus: 0,
             infoCount: 0, hintCount: 0, macroRecording: 0, parserStatus: 0, agentStatus: 0,
+            activeToolName: "",
             gitAdded: 0, gitModified: 0, gitDeleted: 0,
             icon: "", iconColorR: 0, iconColorG: 0, iconColorB: 0, filename: "", diagnosticHint: "",
             backgroundSubagentCount: 0, backgroundSubagentLabel: "",
-            modelineLeftSegments: [segment(0, " NORMAL ", kind: "mode")],
-            modelineRightSegments: [segment(0, " Elixir ", kind: "filetype"), segment(1, " 42:9 ", kind: "position")]
-        ))
-
-        let sut = StatusBarView(state: state, sendAction: nil)
-        let body = try sut.environment(\.themeColors, ThemeColors()).inspect()
-        let texts = body.findAll(ViewInspectorQuery.text)
-        let strings = texts.compactMap { try? $0.string() }
-
-        #expect(strings.contains("NORMAL"))
-        #expect(strings.contains("Elixir"))
-        #expect(strings.contains("Ln 42, Col 9"))
-    }
-
-    @Test("Fallback native status bar renders default built-ins without modeline segments")
-    @MainActor func fallbackNativeStatusBarRendersDefaultBuiltins() throws {
-        let state = statusBarState()
-        let sut = StatusBarView(state: state, sendAction: nil)
-        let body = try sut.environment(\.themeColors, ThemeColors()).inspect()
-        let strings = body.findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
-
-        #expect(strings.contains("NORMAL"))
-        #expect(strings.contains("Elixir"))
-        #expect(strings.contains("Ln 42, Col 9"))
-        #expect(strings.contains("Spaces:2"))
-    }
-
-    @Test("Safe mode badge remains visible without the mode group")
-    @MainActor func safeModeBadgeRemainsVisibleWithoutModeGroup() throws {
-        let state = statusBarState(
-            rightSegments: [
-                segment(1, " Elixir ", kind: "filetype"),
-                segment(2, " Ln 42, Col 9 ", kind: "position")
-            ],
-            safeMode: true
+            modelineSegmentsPresent: true,
+            modelineLeftSegments: leftSegments,
+            modelineRightSegments: rightSegments
         )
+    }
+
+    private func width(_ segment: Wire.StatusBarSegment, _ compact: Bool) -> CGFloat {
+        CGFloat((compact ? (segment.compact ?? "") : segment.text).count) * 10
+    }
+
+    @Test("The modeline keeps the BEAM's order and draws its words")
+    @MainActor func modelineOrder() throws {
+        let state = statusBarState(leftSegments: boardLeft, rightSegments: boardRight)
         let sut = StatusBarView(state: state, sendAction: nil)
-        let body = try sut.environment(\.themeColors, ThemeColors()).inspect()
-        let strings = body.findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
+        let fitted = sut.fittedSegments(width: 2000)
+        #expect(fitted.kinds == ["mode", "needs_you", "filename", "change", "git", "minga", "errors", "warnings", "filetype", "position"])
 
-        #expect(strings.contains("[SAFE]"))
-        #expect(!strings.contains("NORMAL"))
-        #expect(strings.contains("Elixir"))
-        #expect(strings.contains("Ln 42, Col 9"))
+        // ViewInspector does not lay out the GeometryReader, so draw each kept segment as the row does at this width.
+        var strings: [String] = []
+        for kept in fitted.left + fitted.right {
+            let view = ModelineSegmentView(segment: kept.segment, compact: kept.compact, mode: .normal, barHeight: 24, sendAction: nil)
+            strings += try view.environment(\.themeColors, ThemeColors()).inspect().findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
+        }
+        for words in ["NORMAL", "Needs you", "chrome_state.ex ●", "change 1/2", "main +11", "Minga working 2/3", "Elixir", "240:31"] {
+            #expect(strings.contains(words), "missing \(words)")
+        }
     }
 
-    @Test("Filename group uses BEAM modeline text for native rendering")
-    @MainActor func filenameGroupUsesModelineText() throws {
-        let state = statusBarState(leftSegments: [segment(1, " main.ex [1/2] recording @q ", kind: "filename")])
-        state.filename = "main.ex"
-        let sut = StatusBarView(state: state, sendAction: nil)
-        let body = try sut.environment(\.themeColors, ThemeColors()).inspect()
-        let strings = body.findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
+    @Test("Narrowing drops filetype, position and git in order, then shrinks Minga, then warnings")
+    @MainActor func dropLadder() {
+        let segments = boardLeft + boardRight
+        let full = ModelineFit.fit(segments, leftCount: boardLeft.count, width: 10_000, gap: 8, measure: width)
+        #expect(full.kinds.count == 10)
 
-        #expect(strings.contains("main.ex [1/2] recording @q"))
-    }
-
-    @Test("Fallback built-in status bar controls emit default commands")
-    @MainActor func fallbackBuiltinControlsEmitDefaultCommands() throws {
-        let spy = SpyEncoder()
-        let state = statusBarState()
-        let sut = StatusBarView(state: state, sendAction: { action in _ = spy.send(FrontendActionComposition.outbound(action)) })
-        let buttons = try sut.environment(\.themeColors, ThemeColors()).inspect().findAll(ViewType.Button.self)
-
-        for button in buttons {
-            try button.tap()
+        var widths: [CGFloat] = []
+        for drop in [2, 3, 4, 5, 6] as [UInt8] {
+            // The narrowest width at which every segment of a lower rank has already given way.
+            let kept = segments.filter { $0.drop == 0 || $0.drop > drop || ($0.drop == drop && $0.compact != nil) }
+            widths.append(kept.reduce(0) { $0 + width($1, $1.drop != 0 && $1.drop <= drop) } + CGFloat(kept.count) * 8)
         }
 
-        #expect(spy.actions.contains(.executeCommand(name: "set_language")))
-        #expect(spy.actions.contains(.executeCommand(name: "indent_picker")))
+        let noFiletype = ModelineFit.fit(segments, leftCount: boardLeft.count, width: widths[0], gap: 8, measure: width)
+        #expect(!noFiletype.kinds.contains("filetype"))
+        #expect(noFiletype.kinds.contains("position"))
+
+        let noGit = ModelineFit.fit(segments, leftCount: boardLeft.count, width: widths[2], gap: 8, measure: width)
+        #expect(!noGit.kinds.contains("git"))
+        #expect(!noGit.kinds.contains("position"))
+        #expect(noGit.left.first { $0.segment.kind == "minga" }?.compact == false)
+
+        let tiny = ModelineFit.fit(segments, leftCount: boardLeft.count, width: 10, gap: 8, measure: width)
+        #expect(tiny.kinds == ["mode", "needs_you", "filename", "change", "minga", "errors"])
+        #expect(tiny.left.first { $0.segment.kind == "minga" }?.compact == true)
     }
 
-    @Test("Configured built-in controls prefer BEAM command override")
-    @MainActor func configuredBuiltinControlsPreferBeamCommandOverride() throws {
+    @Test("Each clickable segment runs its key's command and names its meaning and key")
+    @MainActor func clickAndTooltip() throws {
         let spy = SpyEncoder()
-        let state = statusBarState(rightSegments: [segment(1, " Elixir ", kind: "filetype", command: "filetype_menu")])
-        let sut = StatusBarView(state: state, sendAction: { action in _ = spy.send(FrontendActionComposition.outbound(action)) })
-        let buttons = try sut.environment(\.themeColors, ThemeColors()).inspect().findAll(ViewType.Button.self)
-
-        for button in buttons {
-            try button.tap()
-        }
-
-        #expect(spy.actions.contains(.executeCommand(name: "filetype_menu")))
-        #expect(!spy.actions.contains(.executeCommand(name: "set_language")))
-    }
-
-    @Test("Filename control emits fallback buffer list command")
-    @MainActor func filenameControlEmitsFallbackBufferListCommand() throws {
-        let spy = SpyEncoder()
-        let state = statusBarState(leftSegments: [segment(1, " main.ex ", kind: "filename")])
-        let sut = StatusBarView(state: state, sendAction: { action in _ = spy.send(FrontendActionComposition.outbound(action)) })
-        let buttons = try sut.environment(\.themeColors, ThemeColors()).inspect().findAll(ViewType.Button.self)
-
-        for button in buttons {
-            try button.tap()
-        }
-
-        #expect(spy.actions.contains(.executeCommand(name: "buffer_list")))
-    }
-
-    @Test("Filename control prefers BEAM command override")
-    @MainActor func filenameControlPrefersBeamCommandOverride() throws {
-        let spy = SpyEncoder()
-        let state = statusBarState(leftSegments: [segment(1, " main.ex ", kind: "filename", command: "custom_buffer_picker")])
-        let sut = StatusBarView(state: state, sendAction: { action in _ = spy.send(FrontendActionComposition.outbound(action)) })
-        let buttons = try sut.environment(\.themeColors, ThemeColors()).inspect().findAll(ViewType.Button.self)
-
-        for button in buttons {
-            try button.tap()
-        }
-
-        #expect(spy.actions.contains(.executeCommand(name: "custom_buffer_picker")))
-        #expect(!spy.actions.contains(.executeCommand(name: "buffer_list")))
-    }
-
-    @Test("Custom unknown status bar segment remains visible and clickable")
-    @MainActor func customUnknownStatusBarSegmentVisibleAndClickable() throws {
-        let spy = SpyEncoder()
-        let state = statusBarState(leftSegments: [segment(1, " 42W ", kind: "word_count", command: "word_count")])
+        let state = statusBarState(leftSegments: boardLeft, rightSegments: boardRight)
         let sut = StatusBarView(state: state, sendAction: { action in _ = spy.send(FrontendActionComposition.outbound(action)) })
         let body = try sut.environment(\.themeColors, ThemeColors()).inspect()
-        let strings = body.findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
-        let buttons = body.findAll(ViewType.Button.self)
 
-        #expect(strings.contains("42W"))
-
-        for button in buttons {
+        for button in body.findAll(ViewType.Button.self) {
             try button.tap()
         }
+        for command in ["toggle_agentic_view", "buffer_list", "toggle_agent_split", "diagnostics_list"] {
+            #expect(spy.actions.contains(.executeCommand(name: command)), "no click for \(command)")
+        }
 
-        #expect(spy.actions.contains(.executeCommand(name: "word_count")))
+        let labels = body.findAll(ViewType.Button.self).compactMap { try? $0.accessibilityLabel().string() }
+        #expect(labels.contains("1 task needs you"))
+        let hints = body.findAll(ViewType.Button.self).compactMap { try? $0.accessibilityHint().string() }
+        #expect(hints.contains("Press SPC a a"))
     }
 
-    @Test("Configured modeline groups receive bounded budgets")
-    @MainActor func configuredModelineGroupsReceiveBoundedBudgets() throws {
-        let longLeftSegments = (0..<20).map { segment($0, " LEFT-SEGMENT-WITH-LONG-TEXT-\($0) ") }
-        let longRightSegments = [segment(100, " CLICKABLE-RIGHT-SEGMENT-WITH-LONG-TEXT ", command: "buffer_list")] +
-            (0..<20).map { segment(101 + $0, " RIGHT-SEGMENT-WITH-LONG-TEXT-\($0) ") }
-        let state = statusBarState(
-            message: "A very long center status message that must stay inside its budget",
-            leftSegments: longLeftSegments,
-            rightSegments: longRightSegments
-        )
-
-        let sut = StatusBarView(state: state, sendAction: nil)
-        let layout = sut.modelineLayout(totalWidth: 360)
-
-        #expect(layout.centerRect.width > 0)
-        #expect(layout.centerRect.width <= 320)
-        #expect(layout.leftModelineWidth > 0)
-        #expect(layout.rightModelineWidth > 0)
-        #expect(layout.centerIsProtected)
-        #expect(layout.leftRect.maxX <= layout.centerRect.minX)
-        #expect(layout.rightRect.minX >= layout.centerRect.maxX)
-        #expect(layout.leftRect.width + layout.centerRect.width + layout.rightRect.width <= 360.5)
-
-        let body = try sut.environment(\.themeColors, ThemeColors()).inspect()
-        let strings = body.findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
-        #expect(strings.contains("CLICKABLE-RIGHT-SEGMENT-WITH-LONG-TEXT"))
-    }
-
-    @Test("Layout protects center lane with huge left and tiny right groups")
-    @MainActor func layoutProtectsCenterWithHugeLeftTinyRight() {
-        let state = statusBarState(
-            message: "Indexing project",
-            leftSegments: (0..<40).map { segment($0, " LEFT-SEGMENT-\($0)-WITH-LONG-TEXT ") },
-            rightSegments: [segment(200, " R ")]
-        )
-        let sut = StatusBarView(state: state, sendAction: nil)
-        let layout = sut.modelineLayout(totalWidth: 720)
-
-        #expect(layout.centerRect.width > 0)
-        #expect(layout.centerIsProtected)
-        #expect(layout.leftRect.maxX <= layout.centerRect.minX)
-        #expect(layout.rightRect.minX >= layout.centerRect.maxX)
-    }
-
-    @Test("Layout protects center lane with tiny left and huge right groups")
-    @MainActor func layoutProtectsCenterWithTinyLeftHugeRight() {
-        let state = statusBarState(
-            message: "Saving buffer",
-            leftSegments: [segment(1, " L ")],
-            rightSegments: (0..<40).map { segment($0, " RIGHT-SEGMENT-\($0)-WITH-LONG-TEXT ") }
-        )
-        let sut = StatusBarView(state: state, sendAction: nil)
-        let layout = sut.modelineLayout(totalWidth: 720)
-
-        #expect(layout.centerRect.width > 0)
-        #expect(layout.centerIsProtected)
-        #expect(layout.leftRect.maxX <= layout.centerRect.minX)
-        #expect(layout.rightRect.minX >= layout.centerRect.maxX)
-    }
-
-    @Test("Layout collapses center before fixed controls in narrow windows")
-    @MainActor func layoutCollapsesCenterInNarrowWindow() {
-        let state = statusBarState(
-            message: "Long center message",
-            leftSegments: [segment(1, " LEFT ")],
-            rightSegments: [segment(2, " RIGHT ")]
-        )
-        let sut = StatusBarView(state: state, sendAction: nil)
-        let layout = sut.modelineLayout(totalWidth: 180)
-
-        #expect(layout.centerRect.width == 0)
-        #expect(layout.centerIsProtected)
-        #expect(layout.leftRect.width + layout.rightRect.width <= 180.5)
-    }
-
-    @Test("Layout preserves bounded fixed zones at app minimum width")
-    @MainActor func layoutPreservesBoundedFixedZonesAtAppMinimumWidth() {
-        let state = statusBarState(
-            message: "Long center message",
-            leftSegments: [segment(1, " LEFT ")],
-            rightSegments: [segment(2, " RIGHT ")]
-        )
-        let sut = StatusBarView(state: state, sendAction: nil)
-        let layout = sut.modelineLayout(totalWidth: 160)
-
-        #expect(layout.totalWidth == 160)
-        #expect(layout.centerRect.width == 0)
-        #expect(layout.centerIsProtected)
-        #expect(layout.leftRect.minX == 0)
-        #expect(layout.rightRect.maxX <= 160.5)
-        #expect(layout.leftModelineWidth >= 0)
-        #expect(layout.rightModelineWidth >= 0)
-        #expect(layout.leftModelineWidth <= 8)
-        #expect(layout.rightModelineWidth <= 8)
-    }
-
-    @Test("Layout uses side budgets when no center message is present")
-    @MainActor func layoutWithoutCenterMessageUsesSideBudgets() {
-        let state = statusBarState(
-            leftSegments: (0..<10).map { segment($0, " LEFT-\($0) ") },
-            rightSegments: [segment(20, " RIGHT ")]
-        )
-        let sut = StatusBarView(state: state, sendAction: nil)
-        let layout = sut.modelineLayout(totalWidth: 480)
-
-        #expect(layout.centerRect.width == 0)
-        #expect(layout.centerIsProtected)
-        #expect(layout.leftModelineWidth > layout.rightModelineWidth)
-        #expect(layout.leftRect.width + layout.rightRect.width <= 480.5)
-    }
-
-    @Test("Clickable configured modeline segment emits execute command")
-    @MainActor func clickableConfiguredModelineSegmentEmitsCommand() throws {
+    @Test("A segment without a command is not a button")
+    @MainActor func passiveSegment() throws {
         let spy = SpyEncoder()
-        let state = statusBarState(leftSegments: [segment(1, " Buffers ", command: "buffer_list")])
+        let state = statusBarState(leftSegments: [segment(0, "Passive", label: "Passive")])
         let sut = StatusBarView(state: state, sendAction: { action in _ = spy.send(FrontendActionComposition.outbound(action)) })
         let buttons = try sut.environment(\.themeColors, ThemeColors()).inspect().findAll(ViewType.Button.self)
-
-        for button in buttons {
-            try button.tap()
-        }
-
-        #expect(spy.actions.contains(.executeCommand(name: "buffer_list")))
+        #expect(buttons.isEmpty)
+        #expect(spy.actions.isEmpty)
     }
 
-    // ViewInspector verifies structure, deterministic layout budgets, and Button action wiring, but it does not exercise AppKit pixel hit regions after SwiftUI clipping. An NSHostingView smoke test did not dispatch SwiftUI Button actions reliably in this noninteractive harness, so clipped-region hit-test regressions still need AppKit/UI coverage.
-    @Test("Passive configured modeline segment does not emit execute command")
-    @MainActor func passiveConfiguredModelineSegmentDoesNotEmitCommand() throws {
-        let spy = SpyEncoder()
-        let state = statusBarState(leftSegments: [segment(1, " Passive ")])
-        let sut = StatusBarView(state: state, sendAction: { action in _ = spy.send(FrontendActionComposition.outbound(action)) })
-        let buttons = try sut.environment(\.themeColors, ThemeColors()).inspect().findAll(ViewType.Button.self)
+    @Test("VoiceOver announces needs-you only when it goes from zero to non-zero")
+    @MainActor func needsYouAnnouncement() {
+        var said: [String] = []
+        let state = StatusBarState()
+        state.announce = { said.append($0) }
+        let mode = segment(0, "NORMAL", kind: "mode")
+        let one = segment(1, "Needs you", kind: "needs_you", state: .needsYou, label: "1 task needs you")
+        let two = segment(1, "Needs you 2", kind: "needs_you", state: .needsYou, label: "2 tasks need you")
 
-        for button in buttons {
-            try button.tap()
+        func send(_ left: [Wire.StatusBarSegment]) {
+            state.update(from: statusBarUpdate(leftSegments: left))
         }
 
-        #expect(!spy.actions.contains(.executeCommand(name: "")))
-        #expect(!spy.actions.contains(.executeCommand(name: "Passive")))
-        #expect(!spy.actions.contains(.executeCommand(name: "buffer_list")))
+        send([mode])
+        send([mode, one])
+        send([mode, two])
+        send([mode])
+        send([mode, one])
+        #expect(said == ["1 task needs you", "1 task needs you"])
+        #expect(StatusBarState.needsYouAnnouncement(previous: "1 task needs you", current: "2 tasks need you") == nil)
     }
 
     @Test("Private-use glyph detection covers Nerd Font symbols")
@@ -717,7 +557,6 @@ struct StatusBarViewViewTests {
         #expect(StatusBarModelineFont.containsPrivateUseGlyph("branch \u{F0001} ahead"))
         #expect(StatusBarModelineFont.containsPrivateUseGlyph("wide \u{100001}"))
         #expect(!StatusBarModelineFont.containsPrivateUseGlyph("Elixir"))
-
     }
 
     @Test("Filetype display is titleized")
@@ -736,57 +575,6 @@ struct StatusBarViewViewTests {
         #expect(state.filetypeDisplay == "")
     }
 
-    @Test("Agent mode shows message count and mode badge (model name is in agent chat header, not status bar)")
-    @MainActor func agentMode() throws {
-        let state = StatusBarState()
-        state.update(from: StatusBarUpdate(
-            contentKind: 1, mode: 0, cursorLine: 0, cursorCol: 0,
-            lineCount: 0, flags: 0, lspStatus: 0, gitBranch: "",
-            message: "", filetype: "", errorCount: 0, warningCount: 0,
-            modelName: "claude-3-5-sonnet", messageCount: 7, sessionStatus: 0,
-            infoCount: 0, hintCount: 0, macroRecording: 0, parserStatus: 0, agentStatus: 0,
-            activeToolName: "",
-            gitAdded: 0, gitModified: 0, gitDeleted: 0,
-            icon: "", iconColorR: 0, iconColorG: 0, iconColorB: 0, filename: "", diagnosticHint: "",
-            backgroundSubagentCount: 0, backgroundSubagentLabel: "",
-            modelineLeftSegments: [segment(0, " NORMAL ", kind: "mode")],
-            modelineRightSegments: [segment(0, " 7 msgs ", kind: "position")]
-        ))
-
-        let sut = StatusBarView(state: state, sendAction: nil)
-        let body = try sut.environment(\.themeColors, ThemeColors()).inspect()
-        let texts = body.findAll(ViewInspectorQuery.text)
-        let strings = texts.compactMap { try? $0.string() }
-
-        // Model name no longer appears in the status bar (lives in agent chat header only)
-        #expect(!strings.contains("claude-3-5-sonnet"))
-        #expect(strings.contains("7 msgs"))
-        #expect(strings.contains("NORMAL"))
-    }
-
-    @Test("Agent status speaks the state word the design tokens give it")
-    @MainActor func agentStatusLabels() throws {
-        let running = statusBarState(agentStatus: .executingTool, activeToolName: "read_file")
-        let runningTexts = try StatusBarView(state: running, sendAction: nil)
-            .environment(\.themeColors, ThemeColors())
-            .inspect()
-            .findAll(ViewInspectorQuery.text)
-            .compactMap { try? $0.string() }
-
-        #expect(runningTexts.contains(SpineState.working.word))
-
-        let plan = statusBarState(agentStatus: .planning)
-        let planBody = try StatusBarView(state: plan, sendAction: nil).environment(\.themeColors, ThemeColors()).inspect()
-        let planTexts = planBody.findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
-        let planAccessibilityLabels = try planBody.findAll(ViewType.HStack.self).compactMap {
-            try? $0.accessibilityLabel().string()
-        }
-
-        // Plan mode is reported whether or not a turn runs, so it claims no state.
-        #expect(planTexts.contains("Idle"))
-        #expect(planAccessibilityLabels.contains("Agent status: Idle"))
-    }
-
     @Test("Every surface names an Agent status with the state the shared token table gives it")
     func agentStatusWordsAgree() {
         let expected: [UInt8: SpineState?] = [
@@ -798,126 +586,6 @@ struct StatusBarViewViewTests {
             #expect(status.spineState == state)
             #expect(status.label == (state?.word ?? "Idle"))
         }
-    }
-
-    @Test("Git branch click opens branch picker")
-    @MainActor func gitBranchClickOpensBranchPicker() throws {
-        let spy = SpyEncoder()
-        let state = StatusBarState()
-        state.update(from: StatusBarUpdate(
-            contentKind: 0, mode: 0, cursorLine: 1, cursorCol: 1,
-            lineCount: 1, flags: 0x02, lspStatus: 0, gitBranch: "main",
-            message: "", filetype: "", errorCount: 0, warningCount: 0,
-            modelName: "", messageCount: 0, sessionStatus: 0,
-            infoCount: 0, hintCount: 0, macroRecording: 0, parserStatus: 0, agentStatus: 0,
-            gitAdded: 0, gitModified: 0, gitDeleted: 0,
-            icon: "", iconColorR: 0, iconColorG: 0, iconColorB: 0, filename: "", diagnosticHint: "",
-            backgroundSubagentCount: 0, backgroundSubagentLabel: "",
-            modelineLeftSegments: [segment(0, " main ", kind: "git")], modelineRightSegments: []
-        ))
-
-        let sut = StatusBarView(state: state, sendAction: { action in _ = spy.send(FrontendActionComposition.outbound(action)) })
-        let buttons = try sut.environment(\.themeColors, ThemeColors()).inspect().findAll(ViewType.Button.self)
-
-        for button in buttons {
-            try button.tap()
-        }
-
-        #expect(spy.actions.contains(.executeCommand(name: "git_branch_picker")))
-    }
-
-    @Test("Git branch shown when flag is set")
-    @MainActor func gitBranch() throws {
-        let state = StatusBarState()
-        state.update(from: StatusBarUpdate(
-            contentKind: 0, mode: 0, cursorLine: 1, cursorCol: 1,
-            lineCount: 1, flags: 0x02, lspStatus: 0, gitBranch: "main",
-            message: "", filetype: "", errorCount: 0, warningCount: 0,
-            modelName: "", messageCount: 0, sessionStatus: 0,
-            infoCount: 0, hintCount: 0, macroRecording: 0, parserStatus: 0, agentStatus: 0,
-            gitAdded: 0, gitModified: 0, gitDeleted: 0,
-            icon: "", iconColorR: 0, iconColorG: 0, iconColorB: 0, filename: "", diagnosticHint: "",
-            backgroundSubagentCount: 0, backgroundSubagentLabel: "",
-            modelineLeftSegments: [segment(0, " main ", kind: "git")], modelineRightSegments: []
-        ))
-
-        let sut = StatusBarView(state: state, sendAction: nil)
-        let body = try sut.environment(\.themeColors, ThemeColors()).inspect()
-        let texts = body.findAll(ViewInspectorQuery.text)
-        let strings = texts.compactMap { try? $0.string() }
-
-        #expect(strings.contains("main"))
-    }
-
-    @Test("Diagnostic counts shown when non-zero")
-    @MainActor func diagnosticCounts() throws {
-        let state = StatusBarState()
-        state.update(from: StatusBarUpdate(
-            contentKind: 0, mode: 0, cursorLine: 1, cursorCol: 1,
-            lineCount: 1, flags: 0, lspStatus: 0, gitBranch: "",
-            message: "", filetype: "", errorCount: 3, warningCount: 7,
-            modelName: "", messageCount: 0, sessionStatus: 0,
-            infoCount: 0, hintCount: 0, macroRecording: 0, parserStatus: 0, agentStatus: 0,
-            gitAdded: 0, gitModified: 0, gitDeleted: 0,
-            icon: "", iconColorR: 0, iconColorG: 0, iconColorB: 0, filename: "", diagnosticHint: "",
-            backgroundSubagentCount: 0, backgroundSubagentLabel: "",
-            modelineLeftSegments: [], modelineRightSegments: [segment(0, " 3 ", kind: "diagnostics"), segment(1, " 7 ", kind: "diagnostics")]
-        ))
-
-        let sut = StatusBarView(state: state, sendAction: nil)
-        let body = try sut.environment(\.themeColors, ThemeColors()).inspect()
-        let texts = body.findAll(ViewInspectorQuery.text)
-        let strings = texts.compactMap { try? $0.string() }
-
-        #expect(strings.contains("3"))
-        #expect(strings.contains("7"))
-    }
-
-    @Test("Background subagent segment shows count and label")
-    @MainActor func backgroundSubagentsShown() throws {
-        let state = StatusBarState()
-        state.update(from: StatusBarUpdate(
-            contentKind: 0, mode: 0, cursorLine: 1, cursorCol: 1,
-            lineCount: 1, flags: 0, lspStatus: 0, gitBranch: "",
-            message: "", filetype: "", errorCount: 0, warningCount: 0,
-            modelName: "", messageCount: 0, sessionStatus: 0,
-            infoCount: 0, hintCount: 0, macroRecording: 0, parserStatus: 0, agentStatus: 0,
-            gitAdded: 0, gitModified: 0, gitDeleted: 0,
-            icon: "", iconColorR: 0, iconColorG: 0, iconColorB: 0, filename: "", diagnosticHint: "",
-            backgroundSubagentCount: 2, backgroundSubagentLabel: "session-2: tests",
-            modelineLeftSegments: [segment(0, " bg:2 session-2: tests", kind: "background_agent")], modelineRightSegments: []
-        ))
-
-        let sut = StatusBarView(state: state, sendAction: nil)
-        let body = try sut.environment(\.themeColors, ThemeColors()).inspect()
-        let texts = body.findAll(ViewInspectorQuery.text)
-        let strings = texts.compactMap { try? $0.string() }
-
-        #expect(strings.contains("bg:2 session-2: tests"))
-    }
-
-    @Test("Background subagent segment is hidden when count is zero")
-    @MainActor func backgroundSubagentsHidden() throws {
-        let state = StatusBarState()
-        state.update(from: StatusBarUpdate(
-            contentKind: 0, mode: 0, cursorLine: 1, cursorCol: 1,
-            lineCount: 1, flags: 0, lspStatus: 0, gitBranch: "",
-            message: "", filetype: "", errorCount: 0, warningCount: 0,
-            modelName: "", messageCount: 0, sessionStatus: 0,
-            infoCount: 0, hintCount: 0, macroRecording: 0, parserStatus: 0, agentStatus: 0,
-            gitAdded: 0, gitModified: 0, gitDeleted: 0,
-            icon: "", iconColorR: 0, iconColorG: 0, iconColorB: 0, filename: "", diagnosticHint: "",
-            backgroundSubagentCount: 0, backgroundSubagentLabel: "session-2: hidden",
-            modelineLeftSegments: [], modelineRightSegments: []
-        ))
-
-        let sut = StatusBarView(state: state, sendAction: nil)
-        let body = try sut.environment(\.themeColors, ThemeColors()).inspect()
-        let texts = body.findAll(ViewInspectorQuery.text)
-        let strings = texts.compactMap { try? $0.string() }
-
-        #expect(!strings.contains("bg:0 session-2: hidden"))
-        #expect(!strings.contains("session-2: hidden"))
     }
 }
 

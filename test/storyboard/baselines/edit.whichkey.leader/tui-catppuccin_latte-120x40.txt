@@ -44,7 +44,7 @@
   │  20 bindings                      Tab next  •  Esc close │
   ╰──────────────────────────────────────────────────────────╯
 
- NORMAL │ storyboard.ex                                                                Spaces:2 │ │ Elixir │ 1:1 │ 0%
+  NORMAL  storyboard.ex                                                                                      Elixir 1:1
 ## styles (row start-end fg bg attrs)
 0 0-0 #4c4f69 #eff1f5 -
 0 1-1 #1e66f5 #eff1f5 bold
@@ -307,17 +307,8 @@
 38 0-2 #5c5f77 #eff1f5 -
 38 3-62 #4c4f69 #000000 -
 38 63-119 #8c8fa1 #eff1f5 -
-39 0-7 #eff1f5 #1e66f5 bold
-39 8-8 #8c8fa1 #e6e9ef -
-39 9-23 #4c4f69 #8c8fa1 -
-39 24-84 #4c4f69 #e6e9ef -
-39 85-86 #a074c4 #e6e9ef -
-39 87-96 #4c4f69 #8c8fa1 -
-39 97-97 #8c8fa1 #e6e9ef -
-39 98-99 #9b59b6 #e6e9ef -
-39 100-100 #8c8fa1 #e6e9ef -
-39 101-108 #40a02b #e6e9ef -
-39 109-109 #8c8fa1 #e6e9ef -
-39 110-114 #4c4f69 #8c8fa1 -
-39 115-115 #8c8fa1 #e6e9ef -
-39 116-119 #eff1f5 #1e66f5 bold
+39 0-0 #8c8fa1 #e6e9ef -
+39 1-1 #4c4f69 #1e66f5 -
+39 2-7 #eff1f5 #1e66f5 bold
+39 8-8 #4c4f69 #1e66f5 -
+39 9-119 #4c4f69 #e6e9ef -

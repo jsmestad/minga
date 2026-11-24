@@ -25,10 +25,10 @@
   │ q   • Queue ›        │  r   • Pending revi…  │
   │ s   • Stop           │  u   󰚩 Undo all age…  │
   │ v    Conversation…  │  x   • Context ›      │
-  │  14 bindings                       Esc close │
-  ╰──────────────────────────────────────────────╯
-
- NORMAL │ storyboard.ex                        Spaces:2 │ │ Elixir │ 1:1 │ 0%
+Ag│  14 bindings                       Esc close │
+ W╰──────────────────────────────────────────────╯
+ Th
+  NORMAL  storyboard.ex ◐ Minga working                              Elixir 1:1
 ## styles (row start-end fg bg attrs)
 0 0-0 #4c4f69 #eff1f5 -
 0 1-1 #1e66f5 #eff1f5 bold
@@ -188,7 +188,7 @@
 19 49-49 #7c7f93 #ccd0da -
 19 50-50 #4c4f69 #000000 -
 19 51-79 #8c8fa1 #eff1f5 -
-20 0-1 #5c5f77 #eff1f5 -
+20 0-1 #1e66f5 #ccd0da bold
 20 2-2 #7c7f93 #ccd0da -
 20 3-3 #4c4f69 #ccd0da -
 20 4-15 #4c4f69 #e6e9ef -
@@ -197,25 +197,19 @@
 20 48-48 #4c4f69 #ccd0da -
 20 49-49 #7c7f93 #ccd0da -
 20 50-50 #4c4f69 #000000 -
-20 51-79 #8c8fa1 #eff1f5 -
-21 0-1 #5c5f77 #eff1f5 -
+20 51-79 #4c4f69 #ccd0da -
+21 0-0 #4c4f69 #acb0be -
+21 1-1 #8839ef #acb0be bold
 21 2-49 #7c7f93 #ccd0da -
 21 50-50 #4c4f69 #000000 -
-21 51-79 #8c8fa1 #eff1f5 -
-22 0-2 #5c5f77 #eff1f5 -
+21 51-79 #4c4f69 #eff1f5 -
+22 0-2 #4c4f69 #acb0be -
 22 3-50 #4c4f69 #000000 -
-22 51-79 #8c8fa1 #eff1f5 -
-23 0-7 #eff1f5 #1e66f5 bold
-23 8-8 #8c8fa1 #e6e9ef -
-23 9-23 #4c4f69 #8c8fa1 -
-23 24-44 #4c4f69 #e6e9ef -
-23 45-46 #a074c4 #e6e9ef -
-23 47-56 #4c4f69 #8c8fa1 -
-23 57-57 #8c8fa1 #e6e9ef -
-23 58-59 #9b59b6 #e6e9ef -
-23 60-60 #8c8fa1 #e6e9ef -
-23 61-68 #40a02b #e6e9ef -
-23 69-69 #8c8fa1 #e6e9ef -
-23 70-74 #4c4f69 #8c8fa1 -
-23 75-75 #8c8fa1 #e6e9ef -
-23 76-79 #eff1f5 #1e66f5 bold
+22 51-79 #4c4f69 #eff1f5 -
+23 0-0 #8c8fa1 #e6e9ef -
+23 1-1 #4c4f69 #1e66f5 -
+23 2-7 #eff1f5 #1e66f5 bold
+23 8-8 #4c4f69 #1e66f5 -
+23 9-23 #4c4f69 #e6e9ef -
+23 24-38 #8839ef #e6e9ef -
+23 39-79 #4c4f69 #e6e9ef -

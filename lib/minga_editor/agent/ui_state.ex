@@ -139,6 +139,18 @@ defmodule MingaEditor.Agent.UIState do
   def diff_review_focused?(%__MODULE__{panel: %Panel{input_focused: true}}), do: false
   def diff_review_focused?(%__MODULE__{view: view}), do: View.agent_body(view) == :review
 
+  @doc """
+  The id of the connected Session's task, or nil before a connection is known.
+
+  It is the task id the Session's tool edits carry into buffers as their author, `Minga.Buffer.Author.minga/1` (#4047).
+  """
+  @spec task_id(t()) :: String.t() | nil
+  def task_id(%__MODULE__{connection: %{target: %{session_id: session_id}}})
+      when is_binary(session_id),
+      do: session_id
+
+  def task_id(%__MODULE__{}), do: nil
+
   @doc "Caches canonical connection facts without changing draft, focus, history or scroll."
   @spec project_connection(t(), ConnectionSnapshot.t()) :: t()
   def project_connection(%__MODULE__{panel: panel} = state, %ConnectionSnapshot{} = connection) do

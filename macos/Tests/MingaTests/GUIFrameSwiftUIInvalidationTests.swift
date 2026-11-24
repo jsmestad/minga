@@ -936,7 +936,9 @@ struct GUIFrameSwiftUIInvalidationTests {
             ("BottomPanelState", "Sources/Views/EditorChrome/BottomPanelState.swift", []),
             ("EmptyStateState", "Sources/Views/EditorChrome/EmptyStateState.swift", []),
             ("SearchState", "Sources/Views/EditorChrome/SearchState.swift", []),
-            ("StatusBarState", "Sources/Views/EditorChrome/StatusBarState.swift", []),
+            ("StatusBarState", "Sources/Views/EditorChrome/StatusBarState.swift", [
+                "@ObservationIgnored public var announce: @MainActor (String) -> Void = { message in",
+            ]),
             ("TabBarState", "Sources/Views/EditorChrome/TabBarState.swift", []),
             ("WorkspaceState", "Sources/Views/EditorChrome/WorkspaceState.swift", []),
             ("BreadcrumbState", "Sources/Views/EditorChrome/BreadcrumbBar.swift", []),
@@ -987,6 +989,7 @@ struct GUIFrameSwiftUIInvalidationTests {
             "@ObservationIgnored private var decoders: [String: Decoder] = [:]": "decoder",
             "@ObservationIgnored private var viewBuilders: [String: ViewBuilder] = [:]": "builder",
             "@ObservationIgnored private let localPresentationStore: LocalPresentationStore": "dependency",
+            "@ObservationIgnored public var announce: @MainActor (String) -> Void = { message in": "callback",
         ]
         let allowedIgnoredReasons: Set<String> = ["task", "callback", "clock", "cache", "decoder", "builder", "dependency"]
         #expect(owners.count == 30)

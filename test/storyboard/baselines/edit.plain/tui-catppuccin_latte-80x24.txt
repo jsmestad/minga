@@ -28,7 +28,7 @@
       ~
       ~
       ~
- NORMAL │ storyboard.ex                        Spaces:2 │ │ Elixir │ 1:1 │ 0%
+  NORMAL  storyboard.ex                                              Elixir 1:1
 ## styles (row start-end fg bg attrs)
 0 0-0 #4c4f69 #eff1f5 -
 0 1-1 #1e66f5 #eff1f5 bold
@@ -104,17 +104,8 @@
 21 6-79 #8c8fa1 #eff1f5 -
 22 0-5 #5c5f77 #eff1f5 -
 22 6-79 #8c8fa1 #eff1f5 -
-23 0-7 #eff1f5 #1e66f5 bold
-23 8-8 #8c8fa1 #e6e9ef -
-23 9-23 #4c4f69 #8c8fa1 -
-23 24-44 #4c4f69 #e6e9ef -
-23 45-46 #a074c4 #e6e9ef -
-23 47-56 #4c4f69 #8c8fa1 -
-23 57-57 #8c8fa1 #e6e9ef -
-23 58-59 #9b59b6 #e6e9ef -
-23 60-60 #8c8fa1 #e6e9ef -
-23 61-68 #40a02b #e6e9ef -
-23 69-69 #8c8fa1 #e6e9ef -
-23 70-74 #4c4f69 #8c8fa1 -
-23 75-75 #8c8fa1 #e6e9ef -
-23 76-79 #eff1f5 #1e66f5 bold
+23 0-0 #8c8fa1 #e6e9ef -
+23 1-1 #4c4f69 #1e66f5 -
+23 2-7 #eff1f5 #1e66f5 bold
+23 8-8 #4c4f69 #1e66f5 -
+23 9-79 #4c4f69 #e6e9ef -

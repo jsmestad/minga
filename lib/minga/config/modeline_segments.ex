@@ -13,10 +13,14 @@ defmodule Minga.Config.ModelineSegments do
   @warnings_table Module.concat(__MODULE__, Warnings)
   @reserved_names [
     :mode,
+    :needs_you,
     :workspace,
     :filename,
+    :change,
     :git,
+    :minga,
     :agent,
+    :config,
     :background_agent,
     :plan_limit,
     :diagnostics,

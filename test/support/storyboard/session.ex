@@ -49,6 +49,8 @@ defmodule Minga.Test.Storyboard.Session do
 
   Every session runs the real tree-sitter parser and returns only once its highlights are applied, so parser-dependent keys (structural motions, text objects, folds) behave as in the app and every frame is highlighted. The parser is the suite's shared one (`shared_parser/0`) unless `:parser_manager` names another running `Minga.Parser.Manager`.
 
+  `:minga` puts Minga in an Agent status before the first key, for example `:thinking` for "Minga is working". The status goes into the editor's live presentation cache, the value every surface reads, so the modeline, the activity card and the rest show it the way they would for a running session. The factory has no running session, so nothing changes the status afterwards.
+
   The storyboard renderer (#4036) adds four more: `:root` (a fixed project directory, so the path the chrome shows is the same on every machine; the caller keeps it unique among concurrent sessions in one run, and the directory is written atomically and never deleted, so concurrent runs on one machine can share it), `:theme` (a built-in theme name such as `:astrodark`, set on a private options server before the editor starts), `:capabilities` (the `MingaEditor.Frontend.Capabilities` the frontend would report), and `:record_packets` (keep every packet for `packets/1`).
   """
   @spec start(keyword()) :: t()
@@ -83,6 +85,7 @@ defmodule Minga.Test.Storyboard.Session do
 
     relay = start_relay(ctx, parser)
     await_highlights!(ctx, parser)
+    install_minga_status(ctx, Keyword.get(opts, :minga))
 
     session = %__MODULE__{
       ctx: ctx,
@@ -94,6 +97,19 @@ defmodule Minga.Test.Storyboard.Session do
     }
 
     %{session | home_window: window_id(session)}
+  end
+
+  @spec install_minga_status(EditorCase.editor_ctx(), Minga.Design.Tokens.agent_status() | nil) ::
+          :ok
+  defp install_minga_status(_ctx, nil), do: :ok
+
+  defp install_minga_status(%{editor: editor}, status) do
+    :sys.replace_state(
+      editor,
+      &MingaEditor.Shell.Traditional.Workflow.install_agent_status(&1, status)
+    )
+
+    :ok
   end
 
   @doc "Presses a key path in inventory notation, or already parsed key steps. Raises if the editor dies."

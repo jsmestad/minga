@@ -489,6 +489,7 @@
 		F0A2BCCA095F1CA4FBE9BE3F /* ProtocolSchemaTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3DC281B7F9F7E4C0BA793B1E /* ProtocolSchemaTests.swift */; };
 		F0B5BDD2F0982B527A05CDF8 /* BEAMProcessManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0EFEC421284D11AD2177113 /* BEAMProcessManager.swift */; };
 		F12D6284209D6D32037E6644 /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9FC2118EA77254CBCAE7B0B /* AppState.swift */; };
+		F15FCFA5D4136559A34DD9AD /* ModelineSegmentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 054692319F304AECF26D0555 /* ModelineSegmentView.swift */; };
 		F23FAABFAC0BB0F2AF912ECF /* AgentWorkspaceNarrowLayoutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E9DEA1360223702E205D2562 /* AgentWorkspaceNarrowLayoutTests.swift */; };
 		F248E3D8C3ABC76F58955B6B /* EditorGeometry+App.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F6F03841A5D97A688A35CC9 /* EditorGeometry+App.swift */; };
 		F25FB924543E14CA08076577 /* MainRunLoopAction.swift in Sources */ = {isa = PBXBuildFile; fileRef = DCE21D8CE7F63E5298CE289B /* MainRunLoopAction.swift */; };
@@ -684,6 +685,7 @@
 		04A71F99681A2F8E46E87159 /* ApplicationServices.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = ApplicationServices.framework; path = System/Library/Frameworks/ApplicationServices.framework; sourceTree = SDKROOT; };
 		050C6F47BA44B920060A4775 /* AppKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AppKit.framework; path = System/Library/Frameworks/AppKit.framework; sourceTree = SDKROOT; };
 		053D515EC453DEBFF51FB6CB /* DecoderFuzzTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DecoderFuzzTests.swift; sourceTree = "<group>"; };
+		054692319F304AECF26D0555 /* ModelineSegmentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelineSegmentView.swift; sourceTree = "<group>"; };
 		06166256AD58B3F987847537 /* PreviewRegistry+StoryboardPixels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "PreviewRegistry+StoryboardPixels.swift"; sourceTree = "<group>"; };
 		07B59F66E6260DE4B09FB563 /* FloatPopupState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FloatPopupState.swift; sourceTree = "<group>"; };
 		08297E994D0956F8C8C66EF8 /* FrontendActionComposition.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FrontendActionComposition.swift; sourceTree = "<group>"; };
@@ -1468,6 +1470,7 @@
 				6E4C2A382CDA31A4CE61AFE8 /* EmptyStateState.swift */,
 				B6F41F2EB3E50F072FC68B88 /* EmptyStateView.swift */,
 				EF185FF7AFC2D9E5430B6B65 /* FeedbackState.swift */,
+				054692319F304AECF26D0555 /* ModelineSegmentView.swift */,
 				6725FA389D1B96B14892C684 /* SearchQueryField.swift */,
 				F6104336F33C41EBE21B10F6 /* SearchState.swift */,
 				7740BB367B27DD4B53FFB853 /* SearchToolbar.swift */,
@@ -2385,6 +2388,7 @@
 				CA07A054C4AD25FADA35DAF7 /* MinibufferState.swift in Sources */,
 				764CA69DC904E5F1288EE12A /* MinibufferView.swift in Sources */,
 				B3980F94B879DB7C2D68F54B /* MinimumAsIdealWidth.swift in Sources */,
+				F15FCFA5D4136559A34DD9AD /* ModelineSegmentView.swift in Sources */,
 				5769288EBD18236C6BBF80BE /* NativeSidebarKind.swift in Sources */,
 				4ECF7F97FFFD5B2A74914AAB /* NotificationCenterState.swift in Sources */,
 				7AFD153489353DC030087B75 /* NotificationCenterView.swift in Sources */,

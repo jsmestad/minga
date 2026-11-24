@@ -826,6 +826,23 @@ defmodule Minga.Buffer.Process do
     end
   end
 
+  @doc """
+  Returns the identity of the file at `path`: the key `Minga.Buffer.FileRegistry` registers a buffer visiting it under.
+
+  The path is resolved through every symlink, and a missing tail keeps its names under its resolved parent, so every spelling of one file has one identity. It reads the file system; compute it once, off the render path.
+  """
+  @spec file_identity(String.t()) :: String.t()
+  def file_identity(path) when is_binary(path), do: file_key(path)
+
+  @doc """
+  Returns the identities `buffer` is registered under for its file, or `[]` for a buffer with no file.
+
+  It reads `Minga.Buffer.FileRegistry` only, without calling the buffer or the file system, so it is cheap enough for render. Compare with `file_identity/1`.
+  """
+  @spec file_identities(pid()) :: [String.t()]
+  def file_identities(buffer) when is_pid(buffer),
+    do: Registry.keys(Minga.Buffer.FileRegistry, buffer)
+
   # Buffers registered through a symlink or a missing tail store their path as
   # the registry value; their key may have changed on disk since registration.
   @spec resolved_indirect_pids(String.t()) :: [pid()]

@@ -15,11 +15,22 @@ defmodule MingaEditor.State.Feedback do
 
   @type t :: %__MODULE__{
           notifications: NotificationCenter.t(),
-          operation_feedback: OperationFeedback.t()
+          operation_feedback: OperationFeedback.t(),
+          config_problem: String.t() | nil
         }
 
   defstruct notifications: NotificationCenter.new(),
-            operation_feedback: OperationFeedback.new()
+            operation_feedback: OperationFeedback.new(),
+            config_problem: nil
+
+  @doc """
+  Records how the user config last loaded: nil when it loaded, otherwise the error that left the editor on its defaults.
+
+  The modeline shows a recorded error as a persistent problem ("config: defaults") until a load succeeds.
+  """
+  @spec report_config_load(t(), String.t() | nil) :: t()
+  def report_config_load(%__MODULE__{} = feedback, error) when is_binary(error) or is_nil(error),
+    do: %{feedback | config_problem: error}
 
   @doc "Adds or replaces a native notification."
   @spec upsert_notification(t(), Notification.t()) :: t()

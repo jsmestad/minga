@@ -307,6 +307,12 @@ defmodule Minga.Protocol.Encode do
       (fn value -> validate_uint!(command, [:attrs | path], value, 255); <<value::8>> end).(Map.fetch!(model, :attrs)),
       (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:text | path], byte_size(bin), 65535); <<byte_size(bin)::16, bin::binary>> end).(Map.fetch!(model, :text)),
       (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:target | path], byte_size(bin), 65535); <<byte_size(bin)::16, bin::binary>> end).(Map.fetch!(model, :target)),
+      (fn value -> validate_uint!(command, [:drop | path], value, 255); <<value::8>> end).(Map.fetch!(model, :drop)),
+      (fn value -> validate_uint!(command, [:flags | path], value, 255); <<value::8>> end).(Map.fetch!(model, :flags)),
+      (fn value -> validate_uint!(command, [:state | path], value, 255); <<value::8>> end).(Map.fetch!(model, :state)),
+      (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:compact | path], byte_size(bin), 65535); <<byte_size(bin)::16, bin::binary>> end).(Map.fetch!(model, :compact)),
+      (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:key | path], byte_size(bin), 255); <<byte_size(bin)::8, bin::binary>> end).(Map.fetch!(model, :key)),
+      (fn value -> bin = :erlang.iolist_to_binary([value]); validate_uint!(command, [:label | path], byte_size(bin), 65535); <<byte_size(bin)::16, bin::binary>> end).(Map.fetch!(model, :label)),
     ]
   end
 

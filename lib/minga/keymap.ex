@@ -47,6 +47,14 @@ defmodule Minga.Keymap do
   @spec leader_trie(server()) :: Bindings.node_t()
   defdelegate leader_trie(server \\ @default_server), to: Active
 
+  @doc "Returns the command the leader sequence `keys` (without the leader key) runs, or nil. Cheap enough for render."
+  @spec leader_command_at(server(), [Bindings.key()]) :: atom() | tuple() | nil
+  defdelegate leader_command_at(server \\ @default_server, keys), to: Active
+
+  @doc "Returns the shortest leader sequence (without the leader key) bound to `command`, or nil."
+  @spec leader_keys_for(server(), atom() | tuple()) :: [Bindings.key()] | nil
+  defdelegate leader_keys_for(server \\ @default_server, command), to: Active
+
   @doc "Returns the merged normal-mode single-key bindings."
   @spec normal_bindings(server()) :: %{Bindings.key() => {atom(), String.t()}}
   defdelegate normal_bindings(server \\ @default_server), to: Active

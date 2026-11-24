@@ -3,7 +3,7 @@
   {
    "frame": [
     79,
-    65,
+    67,
     1174,
     729.5
    ],
@@ -26,83 +26,6 @@
     15
    ],
    "part": "tabBar.tabLabel",
-   "text": "storyboard.ex"
-  },
-  {
-   "baseline": 55,
-   "frame": [
-    40,
-    43.5,
-    4,
-    15
-   ],
-   "part": "breadcrumb.segment",
-   "text": "/"
-  },
-  {
-   "baseline": 55,
-   "frame": [
-    58,
-    43.5,
-    23,
-    15
-   ],
-   "part": "breadcrumb.segment",
-   "text": "tmp"
-  },
-  {
-   "baseline": 55,
-   "frame": [
-    95,
-    43.5,
-    102,
-    15
-   ],
-   "part": "breadcrumb.segment",
-   "text": "minga-storyboard"
-  },
-  {
-   "baseline": 55,
-   "frame": [
-    211,
-    43.5,
-    71,
-    15
-   ],
-   "part": "breadcrumb.segment",
-   "text": "macos-1280"
-  },
-  {
-   "baseline": 55,
-   "frame": [
-    296,
-    43.5,
-    90,
-    15
-   ],
-   "part": "breadcrumb.segment",
-   "text": "minga.whichkey"
-  },
-  {
-   "baseline": 55,
-   "frame": [
-    400,
-    43.5,
-    14,
-    15
-   ],
-   "part": "breadcrumb.segment",
-   "text": "lib"
-  },
-  {
-   "baseline": 55,
-   "frame": [
-    428,
-    43.5,
-    78,
-    15
-   ],
-   "part": "breadcrumb.segment",
    "text": "storyboard.ex"
   },
   {
@@ -602,108 +525,71 @@
   },
   {
    "frame": [
-    0,
+    6,
     804,
-    26,
-    24
-   ],
-   "part": "modeline.control"
-  },
-  {
-   "frame": [
-    32,
-    804,
-    26,
-    24
-   ],
-   "part": "modeline.control"
-  },
-  {
-   "frame": [
-    1246,
-    804,
-    26,
-    24
-   ],
-   "part": "modeline.control"
-  },
-  {
-   "frame": [
-    114,
-    807.5,
     61,
-    17
+    24
+   ],
+   "part": "modeline.segment",
+   "text": "mode: NORMAL"
+  },
+  {
+   "frame": [
+    75,
+    804,
+    73,
+    24
+   ],
+   "part": "modeline.segment",
+   "text": "filename: storyboard.ex"
+  },
+  {
+   "frame": [
+    156,
+    804,
+    90,
+    24
+   ],
+   "part": "modeline.segment",
+   "text": "minga: Minga working"
+  },
+  {
+   "frame": [
+    1226,
+    804,
+    26,
+    24
+   ],
+   "part": "modeline.segment",
+   "text": "filetype: Elixir"
+  },
+  {
+   "frame": [
+    1260,
+    804,
+    14,
+    24
+   ],
+   "part": "modeline.segment",
+   "text": "position: 1:1"
+  },
+  {
+   "frame": [
+    6,
+    807,
+    61,
+    18
    ],
    "part": "modeline.modePill",
    "text": "NORMAL"
   },
   {
+   "baseline": 819.5,
    "frame": [
-    114,
-    807.5,
-    61,
-    17
-   ],
-   "part": "modeline.segment",
-   "text": "mode:  NORMAL "
-  },
-  {
-   "frame": [
-    183,
+    12,
     809,
-    73,
+    49,
     14
-   ],
-   "part": "modeline.segment",
-   "text": "filename:  storyboard.ex "
-  },
-  {
-   "frame": [
-    1020,
-    809,
-    55,
-    14
-   ],
-   "part": "modeline.segment",
-   "text": "indent:  Spaces:2 "
-  },
-  {
-   "frame": [
-    1083,
-    809,
-    43,
-    14
-   ],
-   "part": "modeline.segment",
-   "text": "filetype:  \ue62d Elixir "
-  },
-  {
-   "frame": [
-    1134,
-    809,
-    75,
-    14
-   ],
-   "part": "modeline.segment",
-   "text": "position:  1:1 "
-  },
-  {
-   "frame": [
-    1217,
-    809,
-    21,
-    14
-   ],
-   "part": "modeline.segment",
-   "text": "percent:  0% "
-  },
-  {
-   "baseline": 819,
-   "frame": [
-    122,
-    809.5,
-    45,
-    13
    ],
    "part": "modeline.modeText",
    "text": "NORMAL"

@@ -8,6 +8,7 @@ defmodule MingaEditor.Agent.Activity do
   """
 
   alias MingaAgent.TodoItem
+  alias MingaEditor.Agent.TaskFiles
   alias MingaAgent.Session.TurnExecution
 
   @type t :: %__MODULE__{
@@ -17,7 +18,8 @@ defmodule MingaEditor.Agent.Activity do
           tool_count: non_neg_integer(),
           running_tools: %{String.t() => {pos_integer(), String.t()}},
           active_tool_id: String.t() | nil,
-          file_paths: MapSet.t(String.t())
+          file_paths: MapSet.t(String.t()),
+          task_files: TaskFiles.t()
         }
 
   defstruct todos: [],
@@ -26,7 +28,8 @@ defmodule MingaEditor.Agent.Activity do
             tool_count: 0,
             running_tools: %{},
             active_tool_id: nil,
-            file_paths: MapSet.new()
+            file_paths: MapSet.new(),
+            task_files: TaskFiles.new()
 
   @doc "Creates an empty activity projection."
   @spec new() :: t()
@@ -150,10 +153,40 @@ defmodule MingaEditor.Agent.Activity do
     name
   end
 
-  @doc "Records a touched file path for the current turn."
-  @spec record_file(t(), String.t()) :: t()
-  def record_file(%__MODULE__{} = activity, path) when is_binary(path) do
-    %{activity | file_paths: MapSet.put(activity.file_paths, path)}
+  @doc """
+  Records a file the task's tools changed: once for the current turn's file count, and in the task's ordered files.
+
+  `author` names the task (`Minga.Buffer.Author.minga/1`), or nil when it is not known yet. `identity` is the file's `Minga.Buffer.file_identity/1`. The task's files outlive the turn, so the modeline can say which file Minga is editing between turns.
+  """
+  @spec record_file(t(), Minga.Buffer.Author.t() | nil, String.t(), String.t()) :: t()
+  def record_file(%__MODULE__{} = activity, author, path, identity)
+      when is_binary(path) and is_binary(identity) do
+    %{
+      activity
+      | file_paths: MapSet.put(activity.file_paths, path),
+        task_files: TaskFiles.record(activity.task_files, author, path, identity)
+    }
+  end
+
+  @doc "The file `author`'s task edited last, as `{identity, path}`, or nil before its first edit."
+  @spec current_file(t(), Minga.Buffer.Author.t() | nil) :: TaskFiles.entry() | nil
+  def current_file(%__MODULE__{task_files: files}, author), do: TaskFiles.current(files, author)
+
+  @doc "The author of task `task_id`'s edits, or nil for a task not known yet."
+  @spec task_author(String.t() | nil) :: Minga.Buffer.Author.t() | nil
+  def task_author(nil), do: nil
+  def task_author(task_id) when is_binary(task_id), do: Minga.Buffer.Author.minga(task_id)
+
+  @doc """
+  How far through its visible plan Minga is, as `{step, steps}`, or nil without a plan.
+
+  The step is the last one Minga has reached: every done item, plus the one in progress or blocked.
+  """
+  @spec progress(t()) :: {non_neg_integer(), pos_integer()} | nil
+  def progress(%__MODULE__{todos: []}), do: nil
+
+  def progress(%__MODULE__{todos: todos}) do
+    {Enum.count(todos, &(&1.status != :pending)), Enum.count(todos)}
   end
 
   @doc "Returns the number of touched files in the current projection."

@@ -37,6 +37,7 @@ defmodule Minga.Test.Storyboard.Inventory do
           | :parity
           | :no_click
           | :missing_board
+          | :state_with_exits
 
   @categories [
     :unknown_target,
@@ -46,7 +47,8 @@ defmodule Minga.Test.Storyboard.Inventory do
     :no_empty_state,
     :parity,
     :no_click,
-    :missing_board
+    :missing_board,
+    :state_with_exits
   ]
 
   @doc "Path of the inventory file."
@@ -70,10 +72,16 @@ defmodule Minga.Test.Storyboard.Inventory do
   @spec scenarios() :: [scenario()]
   def scenarios, do: @inventory.scenarios
 
-  @doc "Ids of every scenario with `status = \"designed\"`, in file order."
+  @doc """
+  Ids of every designed place, in file order: scenarios with `status = "designed"` that are not `state_of` another scenario.
+
+  A `state_of` scenario (a narrow window) is a state the designed places can be in. It has no registry entry and no renders; the places it applies to prove it.
+  """
   @spec designed_ids() :: [String.t()]
   def designed_ids do
-    for %{"status" => "designed", "id" => id} <- scenarios(), do: id
+    for %{"status" => "designed", "id" => id} = scenario <- scenarios(),
+        not Map.get(scenario, "state_of", false),
+        do: id
   end
 
   @doc "Looks up one scenario by id."
@@ -116,7 +124,7 @@ defmodule Minga.Test.Storyboard.Inventory do
   @doc """
   Runs the design-time flow checks over the scenarios and returns every problem by category.
 
-  Mirrors `check.py`: removed scenarios are skipped, states that are not places (no exits) are not checked for reachability or dead ends, and scenarios with `reached_by` count as reachable.
+  Mirrors `check.py`: removed scenarios are skipped, a state of other scenarios (`state_of`) may not list exits of its own, states that are not places (no exits) are not checked for reachability or dead ends, and scenarios with `reached_by` count as reachable.
   """
   @spec flow_problems([scenario()], Path.t()) :: %{category() => [String.t()]}
   def flow_problems(scenarios, boards_dir \\ @boards_dir) do
@@ -129,7 +137,8 @@ defmodule Minga.Test.Storyboard.Inventory do
       dead_end: dead_ends(live, by_id),
       parity: transient_gaps(live, :click_without_key),
       no_click: transient_gaps(live, :key_without_click),
-      missing_board: missing_boards(live, boards_dir)
+      missing_board: missing_boards(live, boards_dir),
+      state_with_exits: for(s <- live, s["state_of"] == true, exits(s) != [], do: s["id"])
     }
     |> Map.merge(unreachable(live, by_id))
   end

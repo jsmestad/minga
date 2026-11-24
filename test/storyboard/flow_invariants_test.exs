@@ -83,6 +83,10 @@ defmodule Minga.Storyboard.FlowInvariantsTest do
       if inventory.phase == "final", do: assert(problems.no_click == [])
     end
 
+    test "a state of other scenarios is not a place with exits of its own", %{problems: problems} do
+      assert problems.state_with_exits == []
+    end
+
     test "every designed scenario names board files that exist", %{problems: problems} do
       assert problems.missing_board == []
     end
@@ -119,6 +123,13 @@ defmodule Minga.Storyboard.FlowInvariantsTest do
           "id" => "island",
           "status" => "designed",
           "exits" => [%{"key" => "esc", "click" => "x", "to" => "home"}]
+        },
+        %{
+          "id" => "narrow",
+          "status" => "designed",
+          "state_of" => true,
+          "reached_by" => "any scenario at 80 columns",
+          "exits" => [%{"key" => "esc", "click" => "x", "to" => "home"}]
         }
       ]
 
@@ -132,6 +143,7 @@ defmodule Minga.Storyboard.FlowInvariantsTest do
       assert problems.no_click == ["list: 'k' has no click"]
       assert problems.parity == ["list: 'c' has no key"]
       assert problems.missing_board == ["trap: missing.dc.html"]
+      assert problems.state_with_exits == ["narrow"]
     end
   end
 

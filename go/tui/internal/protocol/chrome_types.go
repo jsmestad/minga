@@ -240,13 +240,22 @@ type StatusAgent struct {
 	MessageCount uint32
 }
 
+// StatusSegment is one modeline segment in the order the BEAM sends it.
+// Drop is its rank when the window narrows (0 never drops); a segment with HasCompact collapses to its state mark and Compact text at that rank instead of dropping.
+// State is a design-token state byte (0 for none), Key the key that does what a click does, and Label what the segment means, for hover text.
 type StatusSegment struct {
-	Name    string
-	FG      uint32
-	BG      uint32
-	Attrs   byte
-	Text    string
-	Command string
+	Name       string
+	FG         uint32
+	BG         uint32
+	Attrs      byte
+	Text       string
+	Command    string
+	Drop       byte
+	HasCompact bool
+	State      byte
+	Compact    string
+	Key        string
+	Label      string
 }
 
 type Theme struct {

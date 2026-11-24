@@ -8,6 +8,8 @@ defmodule MingaEditor.StatusBar.DataTest do
   alias Minga.Config.Options
   alias Minga.Mode.VisualState
   alias MingaAgent.Subagent.Handle
+  alias MingaEditor.Agent.Activity
+  alias MingaEditor.Agent.UIState
   alias MingaEditor.Shell.Traditional.WhichKeyWorkflow
   alias MingaEditor.StatusBar.Data
   alias Minga.RenderModel.UI.StatusBar.Cursor, as: StatusCursor
@@ -212,7 +214,7 @@ defmodule MingaEditor.StatusBar.DataTest do
 
     text = modeline_text(segments)
 
-    assert String.contains?(text, "sonnet | thinking")
+    assert String.contains?(text, "Minga working sonnet | thinking")
     refute String.contains?(text, "Thinking")
   end
 
@@ -247,7 +249,7 @@ defmodule MingaEditor.StatusBar.DataTest do
     assert same_content == data.content
 
     assert Enum.find_value(left ++ right, fn
-             {:status_bar_data_modeline_test, text, _fg, _bg, _opts, _target} -> text
+             %{id: :status_bar_data_modeline_test, text: text} -> text
              _segment -> nil
            end) == " NIL_DIAGS "
   end
@@ -287,7 +289,8 @@ defmodule MingaEditor.StatusBar.DataTest do
              content: %StatusBuffer{}
            } = segmented
 
-    assert String.contains?(modeline_text(segments), "[2/2]")
+    # The file segment names the file only; the buffer count lives in the switcher.
+    refute String.contains?(modeline_text(segments), "[2/2]")
   end
 
   test "projects running background subagent count and active label" do
@@ -557,6 +560,133 @@ defmodule MingaEditor.StatusBar.DataTest do
     assert Data.to_modeline_data(data).selection_info == {:lines, 3}
   end
 
+  describe "modeline facts" do
+    test "needs-you counts the active Agent workspace's status, and the Minga state follows the same value" do
+      session = spawn(fn -> Process.sleep(:infinity) end)
+      on_exit(fn -> Process.exit(session, :kill) end)
+
+      state =
+        state_with_tab_bar(agent_tab_bar(session))
+        |> MingaEditor.Shell.Traditional.Workflow.install_agent_status(:needs_you)
+
+      %Data{common: %Common{} = common} = data = Data.from_state(state)
+      assert common.needs_you_count == 1
+      assert common.status.agent.agent_status == :needs_you
+
+      # A private segment table: another async module registers custom segments in the default one.
+      table = :"status_bar_data_needs_you_#{System.unique_integer([:positive])}"
+      start_supervised!({ModelineSegments, name: table})
+
+      %Data{common: %Common{status: %SemanticStatusData{modeline_segments: segments}}} =
+        Data.with_modeline_segments(data, state.appearance.theme, table)
+
+      ids = Enum.map(segments.left, & &1.id)
+      assert :needs_you in ids
+      assert Enum.find(segments.left, &(&1.id == :minga)).state == :needs_you
+
+      idle =
+        state
+        |> MingaEditor.Shell.Traditional.Workflow.install_agent_status(:idle)
+        |> Data.from_state()
+
+      assert idle.common.needs_you_count == 0
+    end
+
+    @tag :tmp_dir
+    test "Minga is here when its file is the active buffer's file, however each path is spelled",
+         %{tmp_dir: dir} do
+      real = Path.join(dir, "real")
+      File.mkdir_p!(real)
+      File.write!(Path.join(real, "retry.ex"), "")
+      File.ln_s!(real, Path.join(dir, "link"))
+
+      buf =
+        start_supervised!(
+          {BufferProcess,
+           [
+             file_path: Path.join([dir, "link", "retry.ex"]),
+             events_registry: :"data_test_events_#{System.unique_integer([:positive])}"
+           ]},
+          id: :symlinked_buffer
+        )
+
+      task = Minga.Buffer.Author.minga("task-1")
+      tool_path = Path.join(real, "retry.ex")
+
+      activity =
+        Activity.record_file(%Activity{}, task, tool_path, Minga.Buffer.file_identity(tool_path))
+
+      ui =
+        %SessionState{}.agent_ui
+        |> UIState.project_connection(connection("task-1"))
+        |> UIState.replace_activity(activity)
+
+      state = %EditorState{
+        frontend: %MingaEditor.State.Frontend{port_manager: self()},
+        workspace: %{workspace_with_buffer(buf) | agent_ui: ui},
+        shell_runtime:
+          Runtime.new(Registry.get(:traditional), %MingaEditor.Shell.Traditional.State{})
+      }
+
+      common = Data.from_state(state).common
+      assert {common.minga_file, common.minga_here?} == {tool_path, true}
+    end
+
+    test "a config that did not load is carried to the problem segment until a load succeeds" do
+      state = state_with_tab_bar(TabBar.new(Tab.new_file(1, "main.ex")))
+      assert Data.from_state(state).common.config_problem == nil
+
+      failed = %{
+        state
+        | feedback: MingaEditor.State.Feedback.report_config_load(state.feedback, "bad config")
+      }
+
+      assert Data.from_state(failed).common.config_problem == "bad config"
+
+      cleared = MingaEditor.ConfigReloadEffect.finish(failed, :ok)
+      assert Data.from_state(cleared).common.config_problem == nil
+    end
+
+    test "a failed reload reports the global config's state, and a rejected or crashed one keeps the last" do
+      state = state_with_tab_bar(TabBar.new(Tab.new_file(1, "main.ex")))
+      error = {:error, "Config reload error"}
+
+      eval_failed = MingaEditor.ConfigReloadEffect.finish(state, error, {:loaded, "bad config"})
+      assert Data.from_state(eval_failed).common.config_problem == "bad config"
+
+      rejected = MingaEditor.ConfigReloadEffect.finish(eval_failed, error, :unchanged)
+      assert Data.from_state(rejected).common.config_problem == "bad config"
+
+      # A project or extension error after the global config evaluated is not "defaults".
+      evaluated = MingaEditor.ConfigReloadEffect.finish(eval_failed, error, {:loaded, nil})
+      assert Data.from_state(evaluated).common.config_problem == nil
+      assert MingaEditor.ConfigReloadEffect.finish(state, error).feedback.config_problem == nil
+    end
+
+    test "a crashed language server is named for the problem segment" do
+      state = state_with_tab_bar(TabBar.new(Tab.new_file(1, "main.ex")))
+
+      state = %{
+        state
+        | lsp: MingaEditor.State.LSP.update_server_status(state.lsp, :elixir_ls, :crashed)
+      }
+
+      assert Data.from_state(state).common.failed_language_servers == ["elixir_ls"]
+    end
+  end
+
+  defp connection(session_id) do
+    %MingaAgent.Session.ConnectionSnapshot{
+      target: MingaAgent.Session.ConnectionTarget.new(self(), session_id, nil, make_ref()),
+      conversation: make_ref(),
+      credential_readiness: :checking,
+      model_selection: nil,
+      provider_phase: :running,
+      operation: :idle,
+      problem: nil
+    }
+  end
+
   defp state_with_tab_bar(tab_bar) do
     %EditorState{
       frontend: %MingaEditor.State.Frontend{port_manager: self()},
@@ -659,7 +789,7 @@ defmodule MingaEditor.StatusBar.DataTest do
   end
 
   defp modeline_text(%{left: left, right: right}) do
-    Enum.map_join(left ++ right, fn {_name, text, _fg, _bg, _opts, _target} -> text end)
+    Enum.map_join(left ++ right, " ", & &1.text)
   end
 
   defp handle(session_id, task) do

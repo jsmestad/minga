@@ -69,7 +69,12 @@ def board_files(scenario):
 def check(scenarios, boards_dir=BOARDS):
     by_id = {s["id"]: s for s in scenarios}
     live = [s for s in scenarios if s.get("status") != "removed"]
-    problems = {k: [] for k in ("unknown_target", "unreachable_by_key", "unreachable_by_click", "dead_end", "no_empty_state", "parity", "no_click", "missing_board")}
+    problems = {k: [] for k in ("unknown_target", "unreachable_by_key", "unreachable_by_click", "dead_end", "no_empty_state", "parity", "no_click", "missing_board", "state_with_exits")}
+
+    # A state other scenarios can be in is not a place: it has no way in or out of its own.
+    for s in live:
+        if s.get("state_of") and s.get("exits"):
+            problems["state_with_exits"].append(s["id"])
 
     for s in live:
         for e in s.get("exits", []):
@@ -174,6 +179,7 @@ def main(argv):
         "parity": "Transient exits with a click but no key",
         "no_click": "Transient exits with a key but no click",
         "missing_board": "Board references with no file in design/boards",
+        "state_with_exits": "States of other scenarios (state_of) that list exits",
     }
     mouse = {"unreachable_by_click", "no_click"}
     total, pending = 0, 0

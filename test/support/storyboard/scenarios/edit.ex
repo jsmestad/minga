@@ -24,10 +24,13 @@ defmodule Minga.Test.Storyboard.Scenarios.Edit do
           Check.new("a resting view: nothing transient, nothing pending", &assert_resting/1),
           Check.new("the editor owns the keyboard", &assert_focus(&1, :editor)),
           Check.new("the mode pill says NORMAL", &assert_mode(&1, :normal)),
-          Check.pending(
+          Check.new(
             "modeline segments in design order: mode, file, filetype, position",
-            4043,
             &assert_modeline_order(&1, [:mode, :file, :filetype, :position])
+          ),
+          Check.new(
+            "a narrow window drops filetype, then position; mode and file never drop",
+            &assert_drop_order(&1, [:filetype, :position], [:mode, :file])
           )
         ]
       ),
@@ -60,10 +63,11 @@ defmodule Minga.Test.Storyboard.Scenarios.Edit do
         checks: [
           Check.new("the mode pill says VISUAL", &assert_mode(&1, :visual)),
           Check.new("the editor owns the keyboard", &assert_focus(&1, :editor)),
-          Check.pending(
+          Check.new(
             "modeline segments in design order, position as line:col",
-            4043,
-            &assert_modeline_order(&1, [:mode, :file, :filetype, :position])
+            &(&1
+              |> assert_modeline_order([:mode, :file, :filetype, :position])
+              |> assert_position_line_col())
           )
         ]
       ),

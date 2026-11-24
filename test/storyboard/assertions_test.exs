@@ -15,6 +15,7 @@ defmodule Minga.Storyboard.AssertionsTest do
   alias Minga.RenderModel.UI.FocusOwner
   alias Minga.RenderModel.UI.Notifications
   alias Minga.RenderModel.UI.StatusBar
+  alias Minga.RenderModel.UI.StatusBar.Segment
   alias Minga.RenderModel.UI.WhichKey
   alias Minga.Test.Storyboard.Model
   alias MingaEditor.UI.Theme
@@ -31,7 +32,7 @@ defmodule Minga.Storyboard.AssertionsTest do
         {:filetype, " Elixir "}
       ])
 
-    colored = for {name, text} <- segments, do: {name, text, 0, 0, [], nil}
+    colored = for {id, text} <- segments, do: %Segment{id: id, text: text, fg: 0, bg: 0}
     colored = colored ++ Keyword.get(opts, :colored, [])
 
     data = %StatusBar.Data{
@@ -63,6 +64,19 @@ defmodule Minga.Storyboard.AssertionsTest do
     }
 
   describe "modeline" do
+    test "a state's word is said by one segment only" do
+      fg = Theme.state_color(@theme, :needs_you)
+      chip = %Segment{id: :needs_you, text: "Needs you", fg: fg, bg: 0, state: :needs_you}
+      minga = %Segment{id: :minga, text: "Minga", fg: fg, bg: 0, state: :needs_you}
+      assert_spoken_once(model(colored: [chip, minga]), :modeline, :needs_you)
+
+      twice = model(colored: [chip, %{minga | text: "Minga needs you"}])
+
+      assert_raise ExUnit.AssertionError, ~r/2 times/, fn ->
+        assert_spoken_once(twice, :modeline, :needs_you)
+      end
+    end
+
     test "segments in design order pass, an extra segment fails" do
       assert_modeline_order(model(), [:mode, :file, :filetype])
 
@@ -80,28 +94,83 @@ defmodule Minga.Storyboard.AssertionsTest do
     end
 
     test "state words come from the tokens and draw in the state's colour role" do
-      working = Tokens.state_word(:working)
+      working = String.downcase(Tokens.state_word(:working))
       fg = Theme.state_color(@theme, :working)
-      ok = model(colored: [{:minga, " ◐ Minga #{working} ", fg, 0, [], nil}])
+      spoken = Tokens.state(:working).accessibility_label
+
+      minga = %Segment{
+        id: :minga,
+        text: "Minga #{working} 2/3",
+        fg: fg,
+        bg: 0,
+        state: :working,
+        label: spoken
+      }
+
+      ok = model(colored: [minga])
       assert_state(ok, :modeline, :working)
 
-      wrong =
-        model(
-          colored: [
-            {:minga, " Minga #{working} ", Theme.role_color(@theme, :failure), 0, [], nil}
-          ]
-        )
+      wrong = model(colored: [%{minga | fg: Theme.role_color(@theme, :failure)}])
 
       assert_raise ExUnit.AssertionError, ~r/minga role/, fn ->
         assert_state(wrong, :modeline, :working)
       end
 
+      here = %{minga | text: "Minga here 2/3", label: spoken <> ", in this file"}
+      assert_state(model(colored: [here]), :modeline, :working)
+
+      unlabelled = model(colored: [%{minga | label: ""}])
+
+      assert_raise ExUnit.AssertionError, ~r/label/, fn ->
+        assert_state(unlabelled, :modeline, :working)
+      end
+
+      wordless = model(colored: [%{minga | text: "Minga 2/3"}])
+
+      assert_raise ExUnit.AssertionError, ~r/not "Working"/, fn ->
+        assert_state(wordless, :modeline, :working)
+      end
+
+      stateless = model(colored: [%{minga | state: nil}])
+
+      assert_raise ExUnit.AssertionError, ~r/working state/, fn ->
+        assert_state(stateless, :modeline, :working)
+      end
+
       assert_raise ArgumentError, fn -> assert_state(ok, :modeline, :busy) end
+    end
+
+    test "drop ranks give way in the design's order, Minga shrinks, the rest never drops" do
+      segments = [
+        %Segment{id: :mode, text: "NORMAL", fg: 0, bg: 0},
+        %Segment{id: :filename, text: "a.ex", fg: 0, bg: 0},
+        %Segment{id: :git, text: "main", fg: 0, bg: 0, drop: 4},
+        %Segment{id: :minga, text: "Minga working", fg: 0, bg: 0, drop: 5, compact: ""},
+        %Segment{id: :errors, text: "1", fg: 0, bg: 0},
+        %Segment{id: :filetype, text: "Elixir", fg: 0, bg: 0, drop: 2},
+        %Segment{id: :position, text: "1:1", fg: 0, bg: 0, drop: 3}
+      ]
+
+      ok = model(segments: [], colored: segments)
+      assert_drop_order(ok, [:filetype, :position, :git, :minga], [:mode, :file, :diagnostics])
+
+      swapped = model(segments: [], colored: List.update_at(segments, 2, &%{&1 | drop: 1}))
+
+      assert_raise ExUnit.AssertionError, ~r/must rise/, fn ->
+        assert_drop_order(swapped, [:filetype, :position, :git, :minga], [])
+      end
+
+      dropping_file = model(segments: [], colored: List.update_at(segments, 1, &%{&1 | drop: 1}))
+
+      assert_raise ExUnit.AssertionError, ~r/filename must never drop/, fn ->
+        assert_drop_order(dropping_file, [:filetype], [:file])
+      end
     end
 
     test "a segment's colour role is checked by token name" do
       fg = Theme.role_color(@theme, :needs_you)
-      assert_role(model(colored: [{:needs_you, " 1 ", fg, 0, [], nil}]), :needs_you, :needs_you)
+      needs_you = %Segment{id: :needs_you, text: "Needs you", fg: fg, bg: 0, state: :needs_you}
+      assert_role(model(colored: [needs_you]), :needs_you, :needs_you)
       assert_raise ArgumentError, fn -> assert_role(model(), :mode, :not_a_role) end
     end
   end

@@ -27,6 +27,7 @@ defmodule MingaEditor.StatusBar.Data do
   alias MingaAgent.Session.ConnectionSnapshot
   alias MingaAgent.Session.ConnectionTarget
   alias MingaAgent.StatusCommand
+  alias MingaEditor.Agent.Activity
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.WorkspaceStatus
   alias MingaEditor.Agent.UIState.Panel
@@ -124,6 +125,7 @@ defmodule MingaEditor.StatusBar.Data do
     git_degraded? = git_degraded?(file_path)
     diagnostic_counts = diagnostic_modeline_data_from_path(file_path)
     diagnostic_hint = cursor_line_diagnostic_hint_from_path(file_path, line)
+    {minga_path, minga_here?} = minga_file(state, buf)
 
     mode = Minga.Editing.mode(state)
     mode_state = Editing.mode_state(state)
@@ -133,7 +135,8 @@ defmodule MingaEditor.StatusBar.Data do
     agent = agent_state(state)
     agent_status = agent_session_status(state)
     background = background_subagent_summary(state)
-    workspace = workspace_modeline_summary(state)
+    chrome_state = ChromeState.from_editor_state(state)
+    workspace = workspace_modeline_summary(chrome_state)
 
     %Common{
       status: %SemanticStatusData{
@@ -176,9 +179,64 @@ defmodule MingaEditor.StatusBar.Data do
       git_degraded: git_degraded?,
       workspace: workspace,
       merge_conflict_count: merge_conflict_count(buf),
-      plan_limit: plan_limit(state)
+      plan_limit: plan_limit(state),
+      needs_you_count: ChromeState.needs_you_count(chrome_state, agent_status),
+      minga_progress: minga_progress(state),
+      minga_file: minga_path,
+      minga_here?: minga_here?,
+      failed_language_servers: failed_language_servers(state),
+      config_problem: config_problem(state),
+      keymap_server: keymap_server(state),
+      key_hints?: key_hints?(state)
     }
   end
+
+  # The plan of the active workspace's Minga, read from the Editor's own projection.
+  @spec minga_progress(EditorState.t() | map()) :: {non_neg_integer(), pos_integer()} | nil
+  defp minga_progress(%{
+         workspace: %{agent_ui: %UIState{view: %{activity: %Activity{} = activity}}}
+       }),
+       do: Activity.progress(activity)
+
+  defp minga_progress(_state), do: nil
+
+  # The file the connected task edited last, from the same projection, and whether the active buffer visits it.
+  # Both sides are file identities, so a symlinked or differently spelled path is still "here".
+  @spec minga_file(EditorState.t() | map(), pid() | nil) :: {String.t() | nil, boolean()}
+  defp minga_file(
+         %{workspace: %{agent_ui: %UIState{view: %{activity: %Activity{} = activity}} = ui}},
+         buf
+       ) do
+    case Activity.current_file(activity, Activity.task_author(UIState.task_id(ui))) do
+      {identity, path} -> {path, is_pid(buf) and identity in Minga.Buffer.file_identities(buf)}
+      nil -> {nil, false}
+    end
+  end
+
+  defp minga_file(_state, _buf), do: {nil, false}
+
+  @spec config_problem(EditorState.t() | map()) :: String.t() | nil
+  defp config_problem(%{feedback: %{config_problem: problem}}), do: problem
+  defp config_problem(_state), do: nil
+
+  @spec failed_language_servers(EditorState.t() | map()) :: [String.t()]
+  defp failed_language_servers(%{lsp: %{server_statuses: statuses}}) do
+    for {name, :crashed} <- statuses, do: to_string(name)
+  end
+
+  defp failed_language_servers(_state), do: []
+
+  # Clicks resolve through the same keymap the keys do, so a segment does what its key does.
+  @spec keymap_server(EditorState.t() | map()) :: Minga.Keymap.server()
+  defp keymap_server(%EditorState{interaction: %{keymap_server: server}}), do: server
+  defp keymap_server(_state), do: Minga.Keymap.default_server()
+
+  # CUA with the space leader turned off has no key for a leader binding, so segments name none.
+  @spec key_hints?(EditorState.t() | map()) :: boolean()
+  defp key_hints?(%EditorState{interaction: %{editing_model: :cua}}),
+    do: Minga.Config.get(:space_leader) != :off
+
+  defp key_hints?(_state), do: true
 
   # Reads only route usage the Editor already recorded from events; no registry call on render.
   @spec plan_limit(EditorState.t() | map()) :: MingaEditor.StatusBar.PlanLimit.t() | nil
@@ -392,13 +450,8 @@ defmodule MingaEditor.StatusBar.Data do
     %{common | agent_theme_colors: Theme.agent_theme(theme(state))}
   end
 
+  # A pending approval needs no text of its own: the status speaks as Needs you.
   @spec agent_status_command_content(EditorState.t() | map(), AgentState.t()) :: String.t() | nil
-  defp agent_status_command_content(
-         _state,
-         %AgentState{pending_approval: %MingaEditor.Agent.PendingApproval{}}
-       ),
-       do: "Awaiting approval"
-
   defp agent_status_command_content(state, agent) do
     StatusCommand.content(agent_status_command_context(state, agent))
   end
@@ -599,7 +652,16 @@ defmodule MingaEditor.StatusBar.Data do
       workspace_draft_count: workspace.draft_count,
       workspace_conflict_count: workspace.conflict_count,
       merge_conflict_count: common.merge_conflict_count,
-      plan_limit: common.plan_limit
+      plan_limit: common.plan_limit,
+      needs_you_count: common.needs_you_count,
+      minga_progress: common.minga_progress,
+      minga_file: common.minga_file,
+      minga_here?: common.minga_here?,
+      change_position: common.change_position,
+      failed_language_servers: common.failed_language_servers,
+      config_problem: common.config_problem,
+      keymap_server: common.keymap_server,
+      key_hints?: common.key_hints?
     }
   end
 
@@ -608,10 +670,8 @@ defmodule MingaEditor.StatusBar.Data do
   defp modeline_selection_info(%StatusSelection{mode: :lines, size: count}), do: {:lines, count}
   defp modeline_selection_info(%StatusSelection{}), do: nil
 
-  @spec workspace_modeline_summary(EditorState.t() | map()) :: StatusWorkspace.t() | nil
-  defp workspace_modeline_summary(state) do
-    chrome_state = ChromeState.from_editor_state(state)
-
+  @spec workspace_modeline_summary(ChromeState.t()) :: StatusWorkspace.t() | nil
+  defp workspace_modeline_summary(%ChromeState{} = chrome_state) do
     chrome_state.workspaces
     |> Enum.find(fn workspace -> workspace.id == chrome_state.active_workspace_id end)
     |> workspace_model(chrome_state)

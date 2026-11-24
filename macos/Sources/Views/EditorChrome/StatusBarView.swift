@@ -1,36 +1,9 @@
-/// Native status bar at the bottom of the editor window.
+/// The modeline: the one place Minga's state is always visible.
 ///
-/// Matches Zed's compact bottom bar: left icons, center message, right
-/// position + mode indicator. All colors driven by BEAM theme.
+/// The BEAM sends ordered segments with drop ranks (`Wire.StatusBarSegment`). This view measures the width it has (ADR-0001) and applies the ranks, lowest first, until the row fits. Mode, needs-you, the file name, change position, errors and persistent problems never drop. Each segment is a button that does what its key does, with a tooltip naming its meaning and key, and a VoiceOver label and hint. See docs/design/surfaces.md (Modeline) and docs/design/anatomy.md (Modeline segments).
 
 import SwiftUI
 import MingaProtocol
-
-private extension StatusBarUpdate.IndentInfo {
-    var label: String {
-        kind == 1 ? "Tabs" : "Spaces"
-    }
-}
-
-private extension StatusBarUpdate.SelectionInfo {
-    var isActive: Bool {
-        mode != 0 && size > 0
-    }
-
-    var displayText: String {
-        switch mode {
-        case 1: return size == 1 ? "1 char" : "\(size) chars"
-        case 2: return size == 1 ? "1 line" : "\(size) lines"
-        default: return ""
-        }
-    }
-}
-
-private struct StatusBarSegmentGroup: Identifiable {
-    let id: String
-    let kind: String
-    var segments: [Wire.StatusBarSegment]
-}
 
 public struct StatusBarView: View {
     public enum Action: Equatable, Sendable {
@@ -42,58 +15,25 @@ public struct StatusBarView: View {
         case reviewUseAgentVersion(generation: UInt32, itemID: String)
     }
 
-    public init(state: StatusBarState, feedbackState: FeedbackState? = nil, sendAction: ViewActionHandler<Action>?, isFileTreeVisible: Bool = false, isGitStatusVisible: Bool = false, isBottomPanelVisible: Bool = false, isAgentChatVisible: Bool = false, gitSyncing: Bool = false, hasGitStatusControl: Bool = true) {
+    public init(state: StatusBarState, feedbackState: FeedbackState? = nil, sendAction: ViewActionHandler<Action>?) {
         self.state = state
         self.feedbackState = feedbackState
         self.sendAction = sendAction
-        self.isFileTreeVisible = isFileTreeVisible
-        self.isGitStatusVisible = isGitStatusVisible
-        self.hasGitStatusControl = hasGitStatusControl
-        self.isBottomPanelVisible = isBottomPanelVisible
-        self.isAgentChatVisible = isAgentChatVisible
-        self.gitSyncing = gitSyncing
     }
     public let state: StatusBarState
     public var feedbackState: FeedbackState?
     @Environment(\.themeColors) private var theme
 
     public let sendAction: ViewActionHandler<Action>?
-    public var isFileTreeVisible: Bool = false
-    public var isGitStatusVisible: Bool = false
-    private var hasGitStatusControl: Bool
-    public var isBottomPanelVisible: Bool = false
-    public var isAgentChatVisible: Bool = false
-    public var gitSyncing: Bool = false
 
     private let barHeight: CGFloat = 24
-    private let sideSpacing: CGFloat = Spacing.md
-    private let leftFixedControlsWidth: CGFloat = 106
-    private let rightFixedControlsWidth: CGFloat = 34
-    private let maxCenterStatusWidth: CGFloat = 320
 
     public var body: some View {
         GeometryReader { proxy in
             if let review = state.review {
                 reviewStatus(review, width: proxy.size.width)
             } else {
-                let layout = modelineLayout(totalWidth: proxy.size.width)
-                HStack(spacing: 0) {
-                    leftStatusZone(layout)
-                        .frame(width: layout.leftRect.width, height: barHeight, alignment: .leading)
-                        .clipped()
-                        .contentShape(Rectangle())
-
-                    centerSegment
-                        .frame(width: layout.centerRect.width, height: barHeight, alignment: .center)
-                        .clipped()
-                        .contentShape(Rectangle())
-
-                    rightStatusZone(layout)
-                        .frame(width: layout.rightRect.width, height: barHeight, alignment: .trailing)
-                        .clipped()
-                        .contentShape(Rectangle())
-                }
-                .frame(width: layout.totalWidth, height: barHeight, alignment: .leading)
+                modelineRow(width: proxy.size.width)
             }
         }
         .frame(height: barHeight)
@@ -102,6 +42,87 @@ public struct StatusBarView: View {
         .focusable(false)
         .focusEffectDisabled()
     }
+
+    // MARK: - Segments
+
+    /// The segments the modeline keeps at `width`: the BEAM's order with its drop ranks applied, after room for the echo text and pending keys.
+    public func fittedSegments(width: CGFloat) -> ModelineFit.Result {
+        let budget = max(0, width - 2 * Spacing.sm - echoWidth(in: width) - pendingWidth)
+        return ModelineFit.fit(
+            state.modelineLeftSegments + state.modelineRightSegments,
+            leftCount: state.modelineLeftSegments.count,
+            width: budget,
+            gap: Spacing.md,
+            measure: ModelineMetrics.width
+        )
+    }
+
+    /// The left cluster at the leading inset, the echo text between, then pending keys and the right cluster at the trailing inset.
+    private func modelineRow(width: CGFloat) -> some View {
+        let fitted = fittedSegments(width: width)
+        let echo = echoWidth(in: width)
+
+        return HStack(spacing: 0) {
+            cluster(fitted.left)
+            Spacer(minLength: Spacing.md)
+            if echo > 0 {
+                // The spacers on either side take the echo's two gaps, so the text gets the rest.
+                centerSegment
+                    .frame(maxWidth: max(0, echo - 2 * Spacing.md))
+                    .clipped()
+                Spacer(minLength: Spacing.md)
+            }
+            if !state.pendingKeys.isEmpty {
+                showcmdBadge
+                    .padding(.trailing, Spacing.md)
+            }
+            cluster(fitted.right)
+        }
+        .padding(.horizontal, Spacing.sm)
+        .frame(width: width, height: barHeight, alignment: .leading)
+        .clipped()
+    }
+
+    private func cluster(_ fitted: [ModelineFit.Fitted]) -> some View {
+        HStack(spacing: Spacing.md) {
+            ForEach(fitted) { kept in
+                ModelineSegmentView(segment: kept.segment, compact: kept.compact, mode: state.mode, barHeight: barHeight, sendAction: sendAction)
+            }
+        }
+        .fixedSize(horizontal: true, vertical: false)
+    }
+
+    /// Room for the echo text: what it needs, at most a third of the bar, nothing when there is no text.
+    private func echoWidth(in width: CGFloat) -> CGFloat {
+        guard hasCenterStatus else { return 0 }
+        return min(ModelineMetrics.textWidth(centerText) + 2 * Spacing.md, width * 0.34)
+    }
+
+    private var pendingWidth: CGFloat {
+        state.pendingKeys.isEmpty ? 0 : ModelineMetrics.textWidth(state.pendingKeys, monospaced: true) + Spacing.md
+    }
+
+    private var hasCenterStatus: Bool {
+        state.isRecordingMacro || !state.message.isEmpty || !state.diagnosticHint.isEmpty
+    }
+
+    private var centerText: String {
+        if state.isRecordingMacro, let reg = state.macroRegister { return "recording @\(String(reg))" }
+        return state.message.isEmpty ? state.diagnosticHint : state.message
+    }
+
+    @ViewBuilder
+    private var showcmdBadge: some View {
+        Text(state.pendingKeys)
+            .font(Typography.font(.small, design: .monospaced))
+            .monospacedDigit()
+            .foregroundStyle(theme.modelineBarFg.opacity(0.45))
+            .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false)
+            .help("Pending keys: \(state.pendingKeys)")
+            .accessibilityLabel("Pending keys \(state.pendingKeys)")
+    }
+
 
     /// Protected Review chrome bypasses the bounded generic modeline groups.
     /// The compact form fits the supported 160pt minimum without hiding any action.
@@ -241,103 +262,6 @@ public struct StatusBarView: View {
         }
     }
 
-    private var leftModelineGroups: [StatusBarSegmentGroup] {
-        statusBarGroups(
-            from: state.modelineLeftSegments,
-            fallbackKinds: ["agent", "background_agent", "git", "diagnostics"],
-            side: "left"
-        )
-    }
-
-    private var rightModelineGroups: [StatusBarSegmentGroup] {
-        var groups = statusBarGroups(
-            from: state.modelineRightSegments,
-            fallbackKinds: ["parser", "lsp", "indent", "filetype", "position", "mode"],
-            side: "right"
-        )
-
-        if state.isSafeMode && !groups.contains(where: { $0.kind == "mode" }) {
-            groups.insert(StatusBarSegmentGroup(id: "right-safe-mode", kind: "safe", segments: []), at: 0)
-        }
-
-        // showcmd: echo pending keys as a dim, right-aligned segment (issue #2666).
-        // Placed leftmost within the right cluster; the BEAM clears it (empty
-        // string) when the sequence resolves, aborts, or which-key opens.
-        if !state.pendingKeys.isEmpty {
-            groups.insert(StatusBarSegmentGroup(id: "right-showcmd", kind: "showcmd", segments: []), at: 0)
-        }
-
-        return groups
-    }
-
-    private func statusBarGroups(from segments: [Wire.StatusBarSegment], fallbackKinds: [String], side: String) -> [StatusBarSegmentGroup] {
-        guard state.modelineSegmentsPresent else {
-            return fallbackKinds.enumerated().map { index, kind in
-                StatusBarSegmentGroup(id: "fallback-\(side)-\(index)-\(kind)", kind: kind, segments: [])
-            }
-        }
-
-        var groups: [StatusBarSegmentGroup] = []
-        for segment in segments {
-            let kind = segment.kind.isEmpty ? "custom" : segment.kind
-            if let lastIndex = groups.indices.last, groups[lastIndex].kind == kind {
-                groups[lastIndex].segments.append(segment)
-            } else {
-                groups.append(StatusBarSegmentGroup(id: "\(side)-\(groups.count)-\(kind)", kind: kind, segments: [segment]))
-            }
-        }
-        return groups
-    }
-
-    private func command(in group: StatusBarSegmentGroup) -> String? {
-        group.segments.first { !$0.command.isEmpty }?.command
-    }
-
-    @ViewBuilder
-    private func commandButton<Content: View>(command: String?, tooltip: String, @ViewBuilder content: () -> Content) -> some View {
-        if let command {
-            Button(action: { sendAction?(.executeCommand(name: command)) }) {
-                content()
-            }
-            .buttonStyle(.plain)
-            .help(tooltip)
-            .accessibilityLabel(tooltip)
-            .accessibilityHint("Runs the status bar action")
-            .pointingHandCursor()
-        } else {
-            content()
-                .help(tooltip)
-                .accessibilityLabel(tooltip)
-        }
-    }
-
-    public func modelineLayout(totalWidth: CGFloat) -> StatusBarModelineLayout {
-        StatusBarModelineLayout.compute(
-            totalWidth: totalWidth,
-            barHeight: barHeight,
-            hasCenter: hasCenterStatus,
-            leftFixedWidth: leftFixedControlsWidth,
-            rightFixedWidth: rightFixedControlsWidth,
-            sideSpacing: sideSpacing,
-            maxCenterWidth: maxCenterStatusWidth,
-            leftWeight: segmentTextWeight(state.modelineLeftSegments),
-            rightWeight: segmentTextWeight(state.modelineRightSegments)
-        )
-    }
-
-    public func modelineLayoutBudgets(totalWidth: CGFloat) -> (leftModeline: CGFloat, rightModeline: CGFloat, center: CGFloat) {
-        let layout = modelineLayout(totalWidth: totalWidth)
-        return (layout.leftModelineWidth, layout.rightModelineWidth, layout.centerRect.width)
-    }
-
-    private var hasCenterStatus: Bool {
-        state.isRecordingMacro || !state.message.isEmpty || !state.diagnosticHint.isEmpty
-    }
-
-    private func segmentTextWeight(_ segments: [Wire.StatusBarSegment]) -> CGFloat {
-        CGFloat(max(0, segments.reduce(0) { $0 + $1.text.count }))
-    }
-
     // MARK: - Center segment (transient indicators)
 
     @ViewBuilder
@@ -374,686 +298,7 @@ public struct StatusBarView: View {
                 .truncationMode(.tail)
         }
     }
-
-    // MARK: - Native configured groups
-
-    @ViewBuilder
-    private func nativeModelineGroup(_ group: StatusBarSegmentGroup) -> some View {
-        switch group.kind {
-        case "mode":
-            modeBadge
-        case "showcmd":
-            showcmdBadge
-        case "safe":
-            safeModeBadge
-        case "filename":
-            filenameSegment(group: group, command: command(in: group))
-        case "git":
-            if state.hasGit && !state.gitBranch.isEmpty { gitSegment(command: command(in: group)) }
-        case "agent":
-            agentStatusIcon
-        case "background_agent":
-            if state.hasRunningBackgroundSubagents { backgroundSubagentSegment }
-        case "diagnostics":
-            diagnosticIndicators(command: command(in: group))
-        case "parser":
-            parserStatusIcon(command: command(in: group))
-        case "lsp":
-            if state.hasLsp { lspIndicator(command: command(in: group)) }
-        case "filetype":
-            if !state.filetype.isEmpty { filetypeSegment(command: command(in: group)) }
-        case "position":
-            positionSegment
-        case "percent":
-            percentSegment
-        case "indent":
-            indentSegment(command: command(in: group))
-        default:
-            customModelineGroup(group)
-        }
-    }
-
-    private var agentStatusText: String? {
-        state.agentStatus.label
-    }
-
-    private var agentStatusHelpText: String {
-        state.agentStatus.spineState?.accessibilityLabel ?? "Agent status: \(state.agentStatus.label)"
-    }
-
-    @ViewBuilder
-    private var agentStatusIcon: some View {
-        if let label = agentStatusText {
-            HStack(spacing: Spacing.xs) {
-                agentStatusGlyph
-                Text(label)
-                    .font(Typography.font(.small))
-                    .foregroundStyle(theme.modelineBarFg.opacity(0.7))
-                    .lineLimit(1)
-            }
-            .frame(height: barHeight)
-            .help(agentStatusHelpText)
-            .accessibilityLabel(agentStatusHelpText)
-        } else {
-            EmptyView()
-        }
-    }
-
-    /// The status's mark, chosen and coloured by the state it speaks as, so the mark never contradicts the word beside it.
-    @ViewBuilder
-    private var agentStatusGlyph: some View {
-        switch state.agentStatus.spineState {
-        case .working:
-            ProgressView()
-                .scaleEffect(0.45)
-                .frame(width: 14, height: barHeight)
-                .tint(theme.stateColor(.working))
-        case .some(let spineState):
-            Text(spineState.tuiGlyph)
-                .font(Typography.font(.small))
-                .foregroundStyle(theme.stateColor(spineState))
-                .frame(width: 14, height: barHeight)
-        case .none:
-            Text("◯")
-                .font(Typography.font(.small))
-                .foregroundStyle(theme.modelineBarFg.opacity(0.55))
-        }
-    }
-
-    @ViewBuilder
-    private var backgroundSubagentSegment: some View {
-        Button(action: {
-            sendAction?(.executeCommand(name: "agent_session_switcher"))
-        }) {
-            HStack(spacing: Spacing.xs) {
-                Image(systemName: "person.2.wave.2.fill")
-                    .font(Typography.font(.micro, weight: .medium))
-                Text(backgroundSubagentText)
-                    .font(Typography.font(.small))
-                    .lineLimit(1)
-            }
-            .foregroundStyle(theme.modelineBarFg.opacity(0.65))
-        }
-        .buttonStyle(.plain)
-        .help("Background sub-agents")
-        .accessibilityLabel(backgroundSubagentText)
-        .accessibilityHint("Switches to a background sub-agent session")
-        .padding(.horizontal, Spacing.sm)
-        .pointingHandCursor()
-    }
-
-    private var backgroundSubagentText: String {
-        if state.backgroundSubagentLabel.isEmpty {
-            return "bg:\(state.backgroundSubagentCount)"
-        }
-
-        return "bg:\(state.backgroundSubagentCount) \(state.backgroundSubagentLabel)"
-    }
-
-    @ViewBuilder
-    private func gitSegment(command: String?) -> some View {
-        Button(action: {
-            sendAction?(.executeCommand(name: command ?? "git_branch_picker"))
-        }) {
-            HStack(spacing: Spacing.xs) {
-                Image(systemName: "arrow.triangle.branch")
-                    .font(Typography.font(.micro, weight: .medium))
-                Text(state.gitBranch)
-                    .font(Typography.font(.small))
-                    .lineLimit(1)
-
-                if gitSyncing {
-                    ProgressView()
-                        .controlSize(.mini)
-                        .scaleEffect(0.45)
-                        .frame(width: 12, height: barHeight)
-                }
-
-                if state.hasGitDiffStats {
-                    HStack(spacing: Spacing.xs) {
-                        if state.gitAdded > 0 {
-                            Text("+\(state.gitAdded)")
-                                .font(Typography.font(.small, design: .monospaced))
-                                .foregroundStyle(theme.gitAddedFg)
-                        }
-                        if state.gitModified > 0 {
-                            Text("~\(state.gitModified)")
-                                .font(Typography.font(.small, design: .monospaced))
-                                .foregroundStyle(theme.gitModifiedFg)
-                        }
-                        if state.gitDeleted > 0 {
-                            Text("-\(state.gitDeleted)")
-                                .font(Typography.font(.small, design: .monospaced))
-                                .foregroundStyle(theme.gitDeletedFg)
-                        }
-                    }
-                }
-            }
-            .foregroundStyle(theme.modelineBarFg.opacity(0.6))
-        }
-        .buttonStyle(.plain)
-        .help("Open branch picker")
-        .accessibilityLabel("Git branch \(state.gitBranch)")
-        .accessibilityHint("Opens the branch picker")
-        .padding(.horizontal, Spacing.sm)
-        .pointingHandCursor()
-    }
-
-    @ViewBuilder
-    private func diagnosticIndicators(command: String? = nil) -> some View {
-        let hasAny = state.errorCount > 0 || state.warningCount > 0 || state.infoCount > 0 || state.hintCount > 0
-        if hasAny {
-            Button(action: {
-                if let command {
-                    sendAction?(.executeCommand(name: command))
-                } else {
-                    sendAction?(.togglePanel(panel: 1))
-                }
-            }) {
-                HStack(spacing: Spacing.sm) {
-                    if state.errorCount > 0 {
-                        HStack(spacing: Spacing.hairline) {
-                            Image(systemName: "xmark.circle.fill")
-                                .font(Typography.font(.micro))
-                            Text("\(state.errorCount)")
-                                .font(Typography.font(.small))
-                        }
-                        .foregroundStyle(theme.gutterErrorFg)
-                    }
-                    if state.warningCount > 0 {
-                        HStack(spacing: Spacing.hairline) {
-                            Image(systemName: "exclamationmark.triangle.fill")
-                                .font(Typography.font(.micro))
-                            Text("\(state.warningCount)")
-                                .font(Typography.font(.small))
-                        }
-                        .foregroundStyle(theme.gutterWarningFg)
-                    }
-                    if state.infoCount > 0 {
-                        HStack(spacing: Spacing.hairline) {
-                            Image(systemName: "info.circle.fill")
-                                .font(Typography.font(.micro))
-                            Text("\(state.infoCount)")
-                                .font(Typography.font(.small))
-                        }
-                        .foregroundStyle(theme.gutterInfoFg)
-                    }
-                    if state.hintCount > 0 {
-                        HStack(spacing: Spacing.hairline) {
-                            Image(systemName: "lightbulb.fill")
-                                .font(Typography.font(.micro))
-                            Text("\(state.hintCount)")
-                                .font(Typography.font(.small))
-                        }
-                        .foregroundStyle(theme.gutterHintFg)
-                    }
-                }
-            }
-            .buttonStyle(.plain)
-            .help("Show diagnostics (SPC c x)")
-            .accessibilityLabel(diagnosticsAccessibilityLabel)
-            .accessibilityHint("Shows diagnostics")
-            .padding(.horizontal, Spacing.xs)
-            .pointingHandCursor()
-        }
-    }
-
-    private var diagnosticsAccessibilityLabel: String {
-        var parts: [String] = []
-        if state.errorCount > 0 { parts.append("\(state.errorCount) errors") }
-        if state.warningCount > 0 { parts.append("\(state.warningCount) warnings") }
-        if state.infoCount > 0 { parts.append("\(state.infoCount) info") }
-        if state.hintCount > 0 { parts.append("\(state.hintCount) hints") }
-        return parts.isEmpty ? "Diagnostics" : "Diagnostics: \(parts.joined(separator: ", "))"
-    }
-
-    @ViewBuilder
-    private func parserStatusIcon(command: String? = nil) -> some View {
-        switch state.parserStatus {
-        case 1:
-            commandButton(command: command, tooltip: "Tree-sitter parser unavailable") {
-                Image(systemName: "leaf.fill")
-                    .font(Typography.font(.micro))
-                    .foregroundStyle(theme.gutterErrorFg)
-            }
-        case 2:
-            commandButton(command: command, tooltip: "Tree-sitter parser restarting") {
-                Image(systemName: "leaf.fill")
-                    .font(Typography.font(.micro))
-                    .foregroundStyle(theme.gutterWarningFg)
-            }
-        default:
-            EmptyView()
-        }
-    }
-
-    @ViewBuilder
-    private func lspIndicator(command: String? = nil) -> some View {
-        let info = lspInfo(state.lspStatus)
-        commandButton(command: command, tooltip: info.tooltip) {
-            Image(systemName: info.icon)
-                .font(Typography.font(.micro))
-                .foregroundStyle(info.color)
-                .padding(.horizontal, Spacing.xs)
-        }
-    }
-
-    private func lspInfo(_ status: UInt8) -> (icon: String, tooltip: String, color: Color) {
-        switch status {
-        case 1:  return ("checkmark.circle.fill",         "LSP: ready",         theme.gitAddedFg)
-        case 2:  return ("arrow.triangle.2.circlepath",   "LSP: initializing…", theme.modelineBarFg.opacity(0.5))
-        case 3:  return ("arrow.triangle.2.circlepath",   "LSP: starting…",     theme.modelineBarFg.opacity(0.5))
-        case 4:  return ("exclamationmark.triangle.fill", "LSP: error",         theme.gutterErrorFg)
-        default: return ("circle",                        "LSP: inactive",      theme.modelineBarFg.opacity(0.3))
-        }
-    }
-
-    @ViewBuilder
-    private func indentSegment(command: String? = nil) -> some View {
-        Button(action: {
-            sendAction?(.executeCommand(name: command ?? "indent_picker"))
-        }) {
-            Text("\(state.indent.label):\(state.indent.size)")
-                .font(Typography.font(.small, design: .monospaced))
-                .foregroundStyle(theme.modelineBarFg.opacity(0.65))
-        }
-        .buttonStyle(.plain)
-        .help("Indent settings")
-        .accessibilityLabel("Indent settings: \(state.indent.label) \(state.indent.size)")
-        .accessibilityHint("Changes indentation settings")
-        .pointingHandCursor()
-    }
-
-    @ViewBuilder
-    private func filetypeSegment(command: String? = nil) -> some View {
-        Button(action: {
-            sendAction?(.executeCommand(name: command ?? "set_language"))
-        }) {
-            HStack(spacing: Spacing.xs) {
-                if !state.icon.isEmpty {
-                    Text(state.icon)
-                        .font(.custom("Symbols Nerd Font Mono", size: Typography.Step.small.rawValue))
-                        .foregroundStyle(state.iconColor)
-                }
-                Text(state.filetypeDisplay)
-                    .font(Typography.font(.small))
-                    .foregroundStyle(theme.modelineBarFg.opacity(0.6))
-            }
-        }
-        .buttonStyle(.plain)
-        .help("Change language mode (SPC b l)")
-        .accessibilityLabel("Language mode \(state.filetypeDisplay)")
-        .accessibilityHint("Changes language mode")
-        .pointingHandCursor()
-    }
-
-    @ViewBuilder
-    private func filenameSegment(group: StatusBarSegmentGroup? = nil, command: String? = nil) -> some View {
-        let modelineText = group.map(filenameText(in:)) ?? ""
-        let displayText = modelineText.isEmpty ? state.filename : modelineText
-
-        if !displayText.isEmpty {
-            Button(action: {
-                sendAction?(.executeCommand(name: command ?? "buffer_list"))
-            }) {
-                HStack(spacing: Spacing.xs) {
-                    Text(displayText)
-                        .font(Typography.font(.small))
-                        .foregroundStyle(theme.modelineBarFg.opacity(0.65))
-                        .lineLimit(1)
-                    if modelineText.isEmpty && state.isDirty {
-                        Circle()
-                            .fill(theme.statusbarAccentFg.opacity(0.9))
-                            .frame(width: 5, height: 5)
-                    }
-                }
-            }
-            .buttonStyle(.plain)
-            .help("Buffer list")
-            .accessibilityLabel("Buffer \(displayText)")
-            .accessibilityHint("Opens the buffer list")
-            .pointingHandCursor()
-        }
-    }
-
-    private func filenameText(in group: StatusBarSegmentGroup) -> String {
-        group.segments
-            .map(\.text)
-            .joined()
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    @ViewBuilder
-    private var positionSegment: some View {
-        if state.isAgentWindow {
-            Text("\(state.messageCount) msgs")
-                .font(Typography.font(.small, design: .monospaced))
-                .foregroundStyle(theme.modelineBarFg.opacity(0.7))
-        } else if state.selection.isActive {
-            Text(state.selection.displayText)
-                .font(Typography.font(.small, design: .monospaced))
-                .monospacedDigit()
-                .contentTransition(.numericText())
-                .foregroundStyle(theme.modelineBarFg.opacity(0.7))
-                .help(state.selection.displayText)
-        } else {
-            Text("Ln \(state.cursorLine), Col \(state.cursorCol)")
-                .font(Typography.font(.small, design: .monospaced))
-                .foregroundStyle(theme.modelineBarFg.opacity(0.7))
-                .help("Line \(state.cursorLine), Column \(state.cursorCol)")
-        }
-    }
-
-    @ViewBuilder
-    private var percentSegment: some View {
-        Text(percentText)
-            .font(Typography.font(.small, design: .monospaced))
-            .foregroundStyle(theme.modelineBarFg.opacity(0.55))
-            .help("Position in file")
-    }
-
-    private var percentText: String {
-        if state.lineCount <= 1 || state.cursorLine <= 1 {
-            return "Top"
-        }
-        if state.cursorLine >= state.lineCount {
-            return "Bot"
-        }
-        let numerator = max(0, Int(state.cursorLine) - 1) * 100
-        let denominator = max(1, Int(state.lineCount) - 1)
-        return "\(numerator / denominator)%"
-    }
-
-    @ViewBuilder
-    private var showcmdBadge: some View {
-        Text(state.pendingKeys)
-            .font(Typography.font(.small, design: .monospaced))
-            .monospacedDigit()
-            .foregroundStyle(theme.modelineBarFg.opacity(0.45))
-            .lineLimit(1)
-            .fixedSize(horizontal: true, vertical: false)
-            .help("Pending keys: \(state.pendingKeys)")
-            .accessibilityLabel("Pending keys \(state.pendingKeys)")
-    }
-
-    @ViewBuilder
-    private var safeModeBadge: some View {
-        Text("[SAFE]")
-            .font(Typography.font(.caption, weight: .semibold))
-            .foregroundStyle(theme.modelineInfoFg)
-            .padding(.horizontal, Spacing.sm)
-            .padding(.vertical, Spacing.hairline)
-            .background(
-                RoundedRectangle(cornerRadius: Radius.sm)
-                    .fill(theme.modelineInfoBg)
-            )
-            .help("Safe mode enabled")
-            .accessibilityLabel("Safe mode enabled")
-    }
-
-    @ViewBuilder
-    private var modeBadge: some View {
-        let (bg, fg) = modeColors(state.mode)
-        HStack(spacing: Spacing.xs) {
-            if state.isSafeMode {
-                safeModeBadge
-            }
-
-            Text(state.modeName)
-                .font(Typography.font(.caption, weight: .semibold))
-                .foregroundStyle(fg)
-                .anatomyPart("modeline.modeText", text: state.modeName, font: .caption)
-                .padding(.horizontal, Spacing.md)
-                .padding(.vertical, Spacing.hairline)
-                .background(
-                    RoundedRectangle(cornerRadius: Radius.sm)
-                        .fill(bg)
-                )
-                .anatomyPart("modeline.modePill", text: state.modeName)
-        }
-        .help(state.isSafeMode ? "Safe mode enabled, \(state.modeName) mode" : "\(state.modeName) mode")
-    }
-
-    private func modeColors(_ mode: EditorMode) -> (Color, Color) {
-        switch mode {
-        case .normal: return (theme.modeNormalBg, theme.modeNormalFg)
-        case .insert: return (theme.modeInsertBg, theme.modeInsertFg)
-        case .visual: return (theme.modeVisualBg, theme.modeVisualFg)
-        case .command, .operatorPending, .search, .replace, .unknown:
-            return (theme.modelineInfoBg, theme.modelineInfoFg)
-        }
-    }
-
-    @ViewBuilder
-    private func customModelineGroup(_ group: StatusBarSegmentGroup) -> some View {
-        HStack(spacing: Spacing.hairline) {
-            ForEach(group.segments) { segment in
-                StatusBarModelineSegmentView(segment: segment, sendAction: sendAction)
-            }
-        }
-    }
-
-    // MARK: - Left fixed controls
-
-    @ViewBuilder
-    private var leftFixedControls: some View {
-        HStack(spacing: Spacing.sm) {
-            // File tree toggle
-            StatusBarIconButton(
-                icon: "sidebar.leading",
-                isActive: isFileTreeVisible,
-                accentFg: theme.statusbarAccentFg,
-                barHeight: barHeight,
-                barFg: theme.modelineBarFg,
-                tooltip: "Toggle file tree (SPC o p)"
-            ) {
-                sendAction?(.togglePanel(panel: 0))
-            }
-
-            if hasGitStatusControl {
-                StatusBarIconButton(
-                    icon: "point.3.filled.connected.trianglepath.dotted",
-                    isActive: isGitStatusVisible,
-                    accentFg: theme.statusbarAccentFg,
-                    barHeight: barHeight,
-                    barFg: theme.modelineBarFg,
-                    tooltip: "Git status (SPC g g)"
-                ) {
-                    sendAction?(.togglePanel(panel: 2))
-                }
-            }
-
-            // Bottom panel toggle
-            StatusBarIconButton(
-                icon: "rectangle.bottomhalf.inset.filled",
-                isActive: isBottomPanelVisible,
-                accentFg: theme.statusbarAccentFg,
-                barHeight: barHeight,
-                barFg: theme.modelineBarFg,
-                tooltip: "Toggle messages (SPC b m)"
-            ) {
-                sendAction?(.togglePanel(panel: 1))
-            }
-
-            // Divider between toggle icons and informational segments
-            Rectangle()
-                .fill(theme.modelineBarFg.opacity(0.1))
-                .frame(width: 1, height: 14)
-                .padding(.horizontal, Spacing.sm)
-        }
-    }
-
-    // MARK: - Right fixed controls
-
-    @ViewBuilder
-    private var rightFixedControls: some View {
-        HStack(spacing: 0) {
-            // Agent chat toggle
-            StatusBarIconButton(
-                icon: "bubble.left.and.text.bubble.right",
-                isActive: isAgentChatVisible,
-                accentFg: theme.statusbarAccentFg,
-                barHeight: barHeight,
-                barFg: theme.modelineBarFg,
-                tooltip: "Toggle agent chat (SPC a a)"
-            ) {
-                sendAction?(.togglePanel(panel: 3))
-            }
-        }
-        .padding(.trailing, Spacing.md)
-    }
-
-    private func leftStatusZone(_ layout: StatusBarModelineLayout) -> some View {
-        HStack(spacing: sideSpacing) {
-            leftFixedControls
-                .frame(width: min(leftFixedControlsWidth, layout.leftRect.width), height: barHeight, alignment: .leading)
-                .clipped()
-                .contentShape(Rectangle())
-
-            boundedNativeModelineGroups(
-                leftModelineGroups,
-                width: layout.leftModelineWidth,
-                alignment: .leading
-            )
-        }
-        .frame(width: layout.leftRect.width, height: barHeight, alignment: .leading)
-        .clipped()
-        .contentShape(Rectangle())
-    }
-
-    private func rightStatusZone(_ layout: StatusBarModelineLayout) -> some View {
-        HStack(spacing: sideSpacing) {
-            boundedNativeModelineGroups(
-                rightModelineGroups,
-                width: layout.rightModelineWidth,
-                alignment: .trailing
-            )
-
-            rightFixedControls
-                .frame(width: min(rightFixedControlsWidth, layout.rightRect.width), height: barHeight, alignment: .trailing)
-                .clipped()
-                .contentShape(Rectangle())
-        }
-        .frame(width: layout.rightRect.width, height: barHeight, alignment: .trailing)
-        .clipped()
-        .contentShape(Rectangle())
-    }
-
-    private func boundedNativeModelineGroups(_ groups: [StatusBarSegmentGroup], width: CGFloat, alignment: Alignment) -> some View {
-        nativeModelineGroups(groups)
-            .lineLimit(1)
-            .truncationMode(.tail)
-            .frame(width: width, height: barHeight, alignment: alignment)
-            .contentShape(Rectangle())
-            .clipped()
-    }
-
-    private func nativeModelineGroups(_ groups: [StatusBarSegmentGroup]) -> some View {
-        HStack(spacing: Spacing.md) {
-            ForEach(groups) { group in
-                nativeModelineGroup(group)
-                    .anatomyPart("modeline.segment", text: "\(group.kind): \(group.segments.map(\.text).joined())")
-            }
-        }
-        .contentShape(Rectangle())
-    }
-
 }
-
-public struct StatusBarModelineLayout: Equatable {
-    public init(totalWidth: CGFloat, leftRect: CGRect, centerRect: CGRect, rightRect: CGRect, leftModelineWidth: CGFloat, rightModelineWidth: CGFloat) {
-        self.totalWidth = totalWidth
-        self.leftRect = leftRect
-        self.centerRect = centerRect
-        self.rightRect = rightRect
-        self.leftModelineWidth = leftModelineWidth
-        self.rightModelineWidth = rightModelineWidth
-    }
-    public let totalWidth: CGFloat
-    public let leftRect: CGRect
-    public let centerRect: CGRect
-    public let rightRect: CGRect
-    public let leftModelineWidth: CGFloat
-    public let rightModelineWidth: CGFloat
-
-    public var centerIsProtected: Bool {
-        leftRect.maxX <= centerRect.minX && rightRect.minX >= centerRect.maxX
-    }
-
-    public static func compute(
-        totalWidth: CGFloat,
-        barHeight: CGFloat,
-        hasCenter: Bool,
-        leftFixedWidth: CGFloat,
-        rightFixedWidth: CGFloat,
-        sideSpacing: CGFloat,
-        maxCenterWidth: CGFloat,
-        leftWeight: CGFloat,
-        rightWeight: CGFloat
-    ) -> StatusBarModelineLayout {
-        let safeWidth = max(0, totalWidth)
-        let leftMinimum = leftFixedWidth + sideSpacing
-        let rightMinimum = rightFixedWidth + sideSpacing
-        let sideMinimum = max(leftMinimum, rightMinimum)
-        let centerCapacity = max(0, safeWidth - (sideMinimum * 2))
-        let centerWidth = hasCenter ? min(maxCenterWidth, safeWidth * 0.34, centerCapacity) : 0
-
-        if centerWidth > 0 {
-            let sideWidth = max(0, (safeWidth - centerWidth) / 2)
-            let centerX = sideWidth
-            let rightX = centerX + centerWidth
-            return StatusBarModelineLayout(
-                totalWidth: safeWidth,
-                leftRect: CGRect(x: 0, y: 0, width: sideWidth, height: barHeight),
-                centerRect: CGRect(x: centerX, y: 0, width: centerWidth, height: barHeight),
-                rightRect: CGRect(x: rightX, y: 0, width: max(0, safeWidth - rightX), height: barHeight),
-                leftModelineWidth: max(0, sideWidth - leftMinimum),
-                rightModelineWidth: max(0, sideWidth - rightMinimum)
-            )
-        }
-
-        let leftZoneWidth = noCenterLeftZoneWidth(
-            safeWidth: safeWidth,
-            leftMinimum: leftMinimum,
-            rightMinimum: rightMinimum,
-            leftWeight: leftWeight,
-            rightWeight: rightWeight
-        )
-        let rightZoneWidth = max(0, safeWidth - leftZoneWidth)
-
-        return StatusBarModelineLayout(
-            totalWidth: safeWidth,
-            leftRect: CGRect(x: 0, y: 0, width: leftZoneWidth, height: barHeight),
-            centerRect: CGRect(x: leftZoneWidth, y: 0, width: 0, height: barHeight),
-            rightRect: CGRect(x: leftZoneWidth, y: 0, width: rightZoneWidth, height: barHeight),
-            leftModelineWidth: max(0, leftZoneWidth - leftMinimum),
-            rightModelineWidth: max(0, rightZoneWidth - rightMinimum)
-        )
-    }
-
-    private static func noCenterLeftZoneWidth(
-        safeWidth: CGFloat,
-        leftMinimum: CGFloat,
-        rightMinimum: CGFloat,
-        leftWeight: CGFloat,
-        rightWeight: CGFloat
-    ) -> CGFloat {
-        if safeWidth <= leftMinimum {
-            return safeWidth
-        }
-
-        if safeWidth <= leftMinimum + rightMinimum {
-            return leftMinimum
-        }
-
-        let flexibleWidth = safeWidth - leftMinimum - rightMinimum
-        let totalWeight = leftWeight + rightWeight
-        let leftFlexibleWidth = totalWeight > 0 ? flexibleWidth * (leftWeight / totalWeight) : flexibleWidth / 2
-        return leftMinimum + leftFlexibleWidth
-    }
-}
-
-// MARK: - Configured modeline segment
 
 public enum StatusBarModelineFont {
     public static func containsPrivateUseGlyph(_ text: String) -> Bool {
@@ -1066,163 +311,6 @@ public enum StatusBarModelineFont {
         (value >= 0xE000 && value <= 0xF8FF) ||
             (value >= 0xF0000 && value <= 0xFFFFD) ||
             (value >= 0x100000 && value <= 0x10FFFD)
-    }
-}
-
-private struct StatusBarModelineSegmentView: View {
-    let segment: Wire.StatusBarSegment
-    let sendAction: ViewActionHandler<StatusBarView.Action>?
-
-    var body: some View {
-        if segment.command.isEmpty {
-            segmentText
-                .contentShape(Rectangle())
-                .accessibilityLabel(trimmedDisplayText)
-        } else {
-            Button(action: {
-                sendAction?(.executeCommand(name: segment.command))
-            }) {
-                segmentText
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .contentShape(Rectangle())
-            .help(accessibilityHelp)
-            .accessibilityLabel(trimmedDisplayText)
-            .accessibilityHint(accessibilityHint)
-            .pointingHandCursor()
-        }
-    }
-
-    @ViewBuilder
-    private var segmentText: some View {
-        let displayText = trimmedDisplayText
-        let text = Text(displayText)
-            .font(segmentFont)
-            .fontWeight(segmentFontWeight)
-            .foregroundStyle(color(segment.fgColor))
-            .lineLimit(1)
-            .truncationMode(.tail)
-            .underline(segment.isUnderline)
-
-        if segment.isItalic {
-            text
-                .italic()
-                .padding(.horizontal, Spacing.sm)
-                .frame(height: 18, alignment: .center)
-                .background(customBackground)
-                .contentShape(Rectangle())
-                .clipped()
-        } else {
-            text
-                .padding(.horizontal, Spacing.sm)
-                .frame(height: 18, alignment: .center)
-                .background(customBackground)
-                .contentShape(Rectangle())
-                .clipped()
-        }
-    }
-
-    private var trimmedDisplayText: String {
-        let trimmed = segment.text.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? segment.text : trimmed
-    }
-
-    private var customBackground: some View {
-        RoundedRectangle(cornerRadius: Radius.sm)
-            .fill(color(segment.bgColor).opacity(0.18))
-    }
-
-    private var accessibilityHelp: String {
-        if segment.command.isEmpty {
-            return trimmedDisplayText
-        }
-        return "\(trimmedDisplayText) (\(segment.command))"
-    }
-
-    private var accessibilityHint: String {
-        segment.command.isEmpty ? "Status bar segment" : "Runs \(segment.command)"
-    }
-
-    private var segmentFont: Font {
-        if StatusBarModelineFont.containsPrivateUseGlyph(segment.text) {
-            return .custom("Symbols Nerd Font Mono", size: Typography.Step.small.rawValue)
-        }
-
-        return Typography.font(.small)
-    }
-
-    private var segmentFontWeight: Font.Weight {
-        segment.isBold ? .semibold : .regular
-    }
-
-    private func color(_ value: UInt32) -> Color {
-        Color(
-            red: Double((value >> 16) & 0xFF) / 255.0,
-            green: Double((value >> 8) & 0xFF) / 255.0,
-            blue: Double(value & 0xFF) / 255.0
-        )
-    }
-}
-
-// MARK: - Reusable toolbar-style icon button with hover highlight
-
-/// A compact icon button that shows a subtle rounded-rect fill on hover,
-/// matching the Xcode / VS Code toolbar button aesthetic. Supports an
-/// active/inactive state for panel toggle icons: active shows the accent
-/// color at full opacity, inactive dims to 0.45 opacity.
-private struct StatusBarIconButton: View {
-    let icon: String
-    var isActive: Bool = false
-    var accentFg: Color = .accentColor
-    let barHeight: CGFloat
-    let barFg: Color
-    var tooltip: String = ""
-    let action: () -> Void
-
-    @State private var isHovered = false
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    private var iconColor: Color {
-        if isActive {
-            return accentFg
-        }
-        return barFg.opacity(isHovered ? 0.78 : 0.58)
-    }
-
-    var body: some View {
-
-        Button(action: action) {
-            Image(systemName: icon)
-                .font(Typography.font(.small, weight: .medium))
-                .foregroundStyle(iconColor)
-                .frame(width: 26, height: barHeight)
-                .contentShape(Rectangle())
-                .background(
-                    RoundedRectangle(cornerRadius: Radius.sm)
-                        .fill(barFg.opacity(isHovered ? 0.08 : 0))
-                        .padding(.horizontal, Spacing.hairline)
-                )
-                .animation(
-                    reduceMotion ? nil : .easeInOut(duration: 0.15),
-                    value: isActive
-                )
-        }
-        .buttonStyle(.plain)
-        .anatomyPart("modeline.control")
-        .help(tooltip)
-        .accessibilityLabel(tooltip)
-        .accessibilityHint("Toggles this panel")
-        .onHover { hovering in
-            if reduceMotion {
-                isHovered = hovering
-            } else {
-                withAnimation(.easeInOut(duration: 0.12)) {
-                    isHovered = hovering
-                }
-            }
-        }
-        .pointingHandCursor()
     }
 }
 
@@ -1251,6 +339,6 @@ private func statusBarAgentPreviewState() -> StatusBarState {
 }
 
 #Preview("Status Bar – Agent Running", traits: .mingaChrome) {
-    StatusBarView(state: statusBarAgentPreviewState(), sendAction: { _ in }, isAgentChatVisible: true)
+    StatusBarView(state: statusBarAgentPreviewState(), sendAction: { _ in })
         .frame(width: 800, height: 28)
 }

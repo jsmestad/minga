@@ -132,6 +132,8 @@ type Model struct {
 	// subtle footer indicator while the BEAM performs typed-status recovery, and
 	// clears when a valid commit applies.
 	resyncPending bool
+	// modelineHoverSegment is the 1-based index of the modeline segment under the pointer, 0 for none: a local hover preview whose text is read from the current segments.
+	modelineHoverSegment int
 	// lastFrameOutcome is set by the production transaction gate itself. Corpus
 	// tests observe it after submission; they never infer or pre-populate status.
 	lastFrameOutcome      frameOutcome
@@ -330,6 +332,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.PasteMsg:
 		m.send(pastePacket(msg))
 	case tea.MouseMsg:
+		if _, motion := msg.(tea.MouseMotionMsg); motion && msg.Mouse().Button == tea.MouseNone {
+			m.modelineHoverSegment = m.modelineSegmentUnder(msg)
+		}
 		hit := m.presentedClick.take()
 		if m.textDrag != nil && isEditorTextDragContinuation(msg) {
 			updated, packet, handled := m.handleEditorTextMouse(msg)

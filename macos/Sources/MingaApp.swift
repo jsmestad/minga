@@ -523,6 +523,13 @@ struct MingaMenuCommands: Commands {
             Button("Toggle File Tree") { encoder?.send(.togglePanel(panel: 0)) }
                 .keyboardShortcut("b", modifiers: .command)
                 .disabled(!connected)
+            // The modeline carries state, not panel toggles; these panels open from here by mouse and from their leader keys.
+            Button("Toggle Git Status") { encoder?.send(.togglePanel(panel: 2)) }
+                .disabled(!connected)
+            Button("Toggle Messages") { encoder?.send(.togglePanel(panel: 1)) }
+                .disabled(!connected)
+            Button("Toggle Conversation") { encoder?.send(.togglePanel(panel: 3)) }
+                .disabled(!connected)
 
             Divider()
 

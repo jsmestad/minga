@@ -8,6 +8,7 @@ defmodule Minga.Test.Storyboard.Model do
   """
 
   alias Minga.RenderModel.UI
+  alias Minga.RenderModel.UI.StatusBar.Segment
 
   @typedoc "A surface that is open in the frame, by its semantic name."
   @type surface ::
@@ -137,31 +138,23 @@ defmodule Minga.Test.Storyboard.Model do
   defp status_data(%UI{status_bar: %{data: data}}), do: data
   defp status_data(%UI{}), do: nil
 
-  @doc "The modeline segments as `{name, text, fg}`, left to right."
-  @spec modeline_segments(t()) :: [{atom(), String.t(), non_neg_integer()}]
+  @doc "The modeline segments, left to right, as the BEAM sends them."
+  @spec modeline_segments(t()) :: [Segment.t()]
   def modeline_segments(%__MODULE__{ui: ui}) do
     case status_data(ui) do
-      %{modeline_segments: %{left: left, right: right}} ->
-        for {name, text, fg, _bg, _opts, _target} <- left ++ right,
-            do: {segment_name(name), text, fg}
-
-      _ ->
-        []
+      %{modeline_segments: %{left: left, right: right}} -> left ++ right
+      _ -> []
     end
   end
 
   @spec modeline_order(Minga.RenderModel.UI.StatusBar.Data.t() | nil) :: [atom()]
   defp modeline_order(%{modeline_segments: %{left: left, right: right}}) do
     (left ++ right)
-    |> Enum.map(fn segment -> segment |> elem(0) |> segment_name() end)
+    |> Enum.map(& &1.id)
     |> Enum.dedup()
   end
 
   defp modeline_order(_data), do: []
-
-  @spec segment_name(atom() | String.t()) :: atom()
-  defp segment_name(name) when is_atom(name), do: name
-  defp segment_name(name) when is_binary(name), do: String.to_existing_atom(name)
 
   @spec open_surfaces(UI.t()) :: [surface()]
   defp open_surfaces(%UI{} = ui) do

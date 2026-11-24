@@ -39,10 +39,10 @@
   │ q   • Queue ›                      │  r   • Pending reviews             │
   │ s   • Stop                         │  u   󰚩 Undo all agent edits        │
   │ v    Conversation split           │  x   • Context ›                   │
-  │  14 bindings                                                  Esc close │
-  ╰─────────────────────────────────────────────────────────────────────────╯
-
- NORMAL │ storyboard.ex                                                                                              Spaces:2 │ │ Elixir │ 1:1 │ 0%
+Ag│  14 bindings                                                  Esc close │
+ W╰─────────────────────────────────────────────────────────────────────────╯
+ Th
+  NORMAL  storyboard.ex ◐ Minga working                                                                                                    Elixir 1:1
 ## styles (row start-end fg bg attrs)
 0 0-0 #4c4f69 #eff1f5 -
 0 1-1 #1e66f5 #eff1f5 bold
@@ -241,7 +241,7 @@
 33 76-76 #7c7f93 #ccd0da -
 33 77-77 #4c4f69 #000000 -
 33 78-149 #8c8fa1 #eff1f5 -
-34 0-1 #5c5f77 #eff1f5 -
+34 0-1 #1e66f5 #ccd0da bold
 34 2-2 #7c7f93 #ccd0da -
 34 3-3 #4c4f69 #ccd0da -
 34 4-15 #4c4f69 #e6e9ef -
@@ -250,25 +250,19 @@
 34 75-75 #4c4f69 #ccd0da -
 34 76-76 #7c7f93 #ccd0da -
 34 77-77 #4c4f69 #000000 -
-34 78-149 #8c8fa1 #eff1f5 -
-35 0-1 #5c5f77 #eff1f5 -
+34 78-149 #4c4f69 #ccd0da -
+35 0-0 #4c4f69 #acb0be -
+35 1-1 #8839ef #acb0be bold
 35 2-76 #7c7f93 #ccd0da -
 35 77-77 #4c4f69 #000000 -
-35 78-149 #8c8fa1 #eff1f5 -
-36 0-2 #5c5f77 #eff1f5 -
+35 78-149 #4c4f69 #eff1f5 -
+36 0-2 #4c4f69 #acb0be -
 36 3-77 #4c4f69 #000000 -
-36 78-149 #8c8fa1 #eff1f5 -
-37 0-7 #eff1f5 #1e66f5 bold
-37 8-8 #8c8fa1 #e6e9ef -
-37 9-23 #4c4f69 #8c8fa1 -
-37 24-114 #4c4f69 #e6e9ef -
-37 115-116 #a074c4 #e6e9ef -
-37 117-126 #4c4f69 #8c8fa1 -
-37 127-127 #8c8fa1 #e6e9ef -
-37 128-129 #9b59b6 #e6e9ef -
-37 130-130 #8c8fa1 #e6e9ef -
-37 131-138 #40a02b #e6e9ef -
-37 139-139 #8c8fa1 #e6e9ef -
-37 140-144 #4c4f69 #8c8fa1 -
-37 145-145 #8c8fa1 #e6e9ef -
-37 146-149 #eff1f5 #1e66f5 bold
+36 78-149 #4c4f69 #eff1f5 -
+37 0-0 #8c8fa1 #e6e9ef -
+37 1-1 #4c4f69 #1e66f5 -
+37 2-7 #eff1f5 #1e66f5 bold
+37 8-8 #4c4f69 #1e66f5 -
+37 9-23 #4c4f69 #e6e9ef -
+37 24-38 #8839ef #e6e9ef -
+37 39-149 #4c4f69 #e6e9ef -

@@ -30,13 +30,12 @@ defmodule Minga.Test.Storyboard.Assertions do
     :position
   ]
 
-  # Today's segment names, mapped to the design's segment roles. Unmapped names keep their own name, so a segment the design does not list fails `assert_modeline_order/2`.
+  # Segment ids, mapped to the design's segment roles. Errors, warnings and a persistent problem share the diagnostics slot. Unmapped ids keep their own name, so a segment the design does not list fails `assert_modeline_order/2`.
   @segment_roles %{
     filename: :file,
-    git_branch: :git,
-    git: :git,
-    lines: :position,
-    chars: :position
+    errors: :diagnostics,
+    warnings: :diagnostics,
+    problem: :diagnostics
   }
 
   @typedoc "One action row of an empty state or notice: its key and label."
@@ -210,7 +209,7 @@ defmodule Minga.Test.Storyboard.Assertions do
   end
 
   @doc """
-  Asserts a state is spoken in the modeline the way the tokens define it: the state's word (`Minga.Design.Tokens.state_word/1`) in a segment drawn in the state's colour role (`MingaEditor.UI.Theme.state_color/2`).
+  Asserts a state is spoken in the modeline the way the tokens define it: a segment carries the state (so frontends draw its mark), says the state's word (`Minga.Design.Tokens.state_word/1`, in any case, as in "Minga working 2/3") or, when its words say where Minga works ("Minga here"), labels itself with the state's accessibility label, and is drawn in the state's colour role (`MingaEditor.UI.Theme.state_color/2`).
   """
   @spec assert_state(Model.t(), :modeline, Tokens.state_id()) :: Model.t()
   def assert_state(%Model{} = model, :modeline, state) do
@@ -220,40 +219,122 @@ defmodule Minga.Test.Storyboard.Assertions do
     word = Tokens.state_word(state)
     segments = Model.modeline_segments(model)
 
-    case Enum.find(segments, fn {_name, text, _fg} -> String.contains?(text, word) end) do
+    case Enum.find(segments, &(&1.state == state)) do
       nil ->
-        flunk("expected the modeline to say #{inspect(word)}, segments: #{inspect(segments)}")
+        flunk("expected a modeline segment in the #{state} state, segments: #{summary(segments)}")
 
-      {name, _text, fg} ->
+      segment ->
+        # The label always names the state.
+        # The words name it too, except that working Minga may say where it works ("Minga here", "Minga editing x.ex").
+        text = String.downcase(segment.text)
+        says_where? = state == :working and Regex.match?(~r/\b(here|editing )/, text)
+
+        assert String.contains?(text, String.downcase(word)) or says_where?,
+               "modeline #{segment.id} is #{state} but says #{inspect(segment.text)}, not #{inspect(word)}"
+
+        assert String.contains?(String.downcase(segment.label), String.downcase(word)),
+               "modeline #{segment.id} is #{state} but its label #{inspect(segment.label)} does not say #{inspect(word)}"
+
         expected = Theme.state_color(theme!(model), state)
 
-        assert fg == expected,
-               "modeline #{name} says #{inspect(word)} in #{hex(fg)}, " <>
+        assert segment.fg == expected,
+               "modeline #{segment.id} says #{inspect(word)} in #{hex(segment.fg)}, " <>
                  "expected the #{Tokens.state_role(state)} role #{hex(expected)}"
     end
 
     model
   end
 
+  @doc """
+  Asserts the modeline says a state's word once: exactly one segment's words contain it (`Minga.Design.Tokens.state_word/1`, in any case).
+
+  Other segments may carry the state, so frontends draw its mark in its colour, but they do not repeat the word.
+  """
+  @spec assert_spoken_once(Model.t(), :modeline, Tokens.state_id()) :: Model.t()
+  def assert_spoken_once(%Model{} = model, :modeline, state) do
+    unless state in Tokens.state_ids(),
+      do: raise(ArgumentError, "unknown state token #{inspect(state)}")
+
+    word = String.downcase(Tokens.state_word(state))
+    segments = Model.modeline_segments(model)
+    speaking = Enum.filter(segments, &String.contains?(String.downcase(&1.text), word))
+
+    assert length(speaking) == 1,
+           "the modeline says #{inspect(word)} #{length(speaking)} times, expected once: #{summary(segments)}"
+
+    model
+  end
+
   @doc "Asserts a modeline segment is drawn in a design-token colour role."
   @spec assert_role(Model.t(), atom(), Tokens.color_role()) :: Model.t()
-  def assert_role(%Model{} = model, segment, role) do
+  def assert_role(%Model{} = model, segment_id, role) do
     unless role in Tokens.color_roles(),
       do: raise(ArgumentError, "unknown colour role #{inspect(role)}")
 
-    case List.keyfind(Model.modeline_segments(model), segment, 0) do
+    case Enum.find(Model.modeline_segments(model), &(&1.id == segment_id)) do
       nil ->
-        flunk("no modeline segment #{segment} in #{inspect(model.modeline)}")
+        flunk("no modeline segment #{segment_id} in #{inspect(model.modeline)}")
 
-      {^segment, _text, fg} ->
+      segment ->
         expected = Theme.role_color(theme!(model), role)
 
-        assert fg == expected,
-               "modeline #{segment} is #{hex(fg)}, expected the #{role} role #{hex(expected)}"
+        assert segment.fg == expected,
+               "modeline #{segment_id} is #{hex(segment.fg)}, expected the #{role} role #{hex(expected)}"
     end
 
     model
   end
+
+  @doc """
+  Asserts how the modeline gives way in a narrow window: the segment roles in `drops` go in that order (one rank each, lowest first), Minga's words shrink to a compact form instead of dropping, and every role in `never` holds rank 0.
+
+  Frontends measure their own width and apply the ranks (ADR-0001); this checks the ranks the BEAM sends.
+  """
+  @spec assert_drop_order(Model.t(), [atom()], [atom()]) :: Model.t()
+  def assert_drop_order(%Model{} = model, drops, never) do
+    by_role =
+      Enum.group_by(Model.modeline_segments(model), &Map.get(@segment_roles, &1.id, &1.id))
+
+    ranks =
+      for role <- drops do
+        segments =
+          Map.get(by_role, role) ||
+            flunk("no #{role} segment to drop: #{inspect(model.modeline)}")
+
+        segments |> Enum.map(& &1.drop) |> Enum.min()
+      end
+
+    assert Enum.all?(ranks, &(&1 > 0)) and ranks == Enum.sort(ranks) and ranks == Enum.uniq(ranks),
+           "drop ranks for #{inspect(drops)} must rise in that order, got #{inspect(ranks)}"
+
+    for %{id: :minga} = minga <- Model.modeline_segments(model) do
+      assert is_binary(minga.compact), "Minga's words must shrink to a compact form, not drop"
+    end
+
+    for role <- never, segment <- Map.get(by_role, role, []), segment.id != :warnings do
+      assert segment.drop == 0, "#{segment.id} must never drop, got rank #{segment.drop}"
+    end
+
+    model
+  end
+
+  @doc "Asserts the position segment reads `line:col`, in every mode (`docs/design/surfaces.md`)."
+  @spec assert_position_line_col(Model.t()) :: Model.t()
+  def assert_position_line_col(%Model{} = model) do
+    case Enum.find(Model.modeline_segments(model), &(&1.id == :position)) do
+      nil ->
+        flunk("no position segment in #{inspect(model.modeline)}")
+
+      segment ->
+        assert segment.text =~ ~r/^\d+:\d+$/,
+               "position reads #{inspect(segment.text)}, not line:col"
+    end
+
+    model
+  end
+
+  @spec summary([Minga.RenderModel.UI.StatusBar.Segment.t()]) :: String.t()
+  defp summary(segments), do: inspect(Enum.map(segments, &{&1.id, &1.text, &1.state}))
 
   @doc "Asserts every error notification names its next step: at least one action."
   @spec assert_errors_name_next_step(Model.t()) :: Model.t()

@@ -258,12 +258,18 @@ type GutterEntry struct {
 }
 
 type ModelineSegment struct {
-	Name   string
-	FG     uint32
-	BG     uint32
-	Attrs  uint8
-	Text   string
-	Target string
+	Name    string
+	FG      uint32
+	BG      uint32
+	Attrs   uint8
+	Text    string
+	Target  string
+	Drop    uint8
+	Flags   uint8
+	State   uint8
+	Compact string
+	Key     string
+	Label   string
 }
 
 type TabEntry struct {

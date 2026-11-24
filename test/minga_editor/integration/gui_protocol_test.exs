@@ -39,6 +39,7 @@ defmodule Minga.Integration.GUIProtocolTest do
   alias Minga.RenderModel.UI.StatusBar.Git
   alias Minga.RenderModel.UI.StatusBar.Indent
   alias Minga.RenderModel.UI.StatusBar.Language
+  alias Minga.RenderModel.UI.StatusBar.Segment
   alias Minga.RenderModel.UI.StatusBar.Selection
   alias Minga.Test.GUIHarness
   alias MingaEditor.RenderModel.UI.BreadcrumbBuilder
@@ -584,8 +585,37 @@ defmodule Minga.Integration.GUIProtocolTest do
           selection: %Selection{mode: :chars, size: 42},
           agent: %Agent{agent_status: :thinking, active_tool_name: "read_file"},
           modeline_segments: %{
-            left: [{" NORMAL ", 0xBBC2CF, 0x51AFEF, [bold: true], nil}],
-            right: [{" Elixir ", 0xC678DD, 0x282C34, [], :set_language}]
+            left: [
+              %Segment{
+                id: :mode,
+                text: "NORMAL",
+                fg: 0xBBC2CF,
+                bg: 0x51AFEF,
+                style: [bold: true]
+              },
+              %Segment{
+                id: :minga,
+                text: "Minga working 2/3",
+                fg: 0xC678DD,
+                bg: 0x282C34,
+                target: :toggle_agent_split,
+                drop: 5,
+                compact: "2/3",
+                state: :working,
+                key: "SPC a v",
+                label: "Minga is working, step 2 of 3"
+              }
+            ],
+            right: [
+              %Segment{
+                id: :filetype,
+                text: "Elixir",
+                fg: 0xC678DD,
+                bg: 0x282C34,
+                target: :set_language,
+                drop: 2
+              }
+            ]
           }
         }
       }
@@ -620,10 +650,27 @@ defmodule Minga.Integration.GUIProtocolTest do
       assert decoded["indent_type"] == 0
       assert decoded["indent_size"] == 2
 
-      assert [%{"text" => " NORMAL ", "attrs" => 1, "command" => ""}] =
-               decoded["modeline_left_segments"]
+      assert [
+               %{
+                 "name" => "mode",
+                 "text" => "NORMAL",
+                 "attrs" => 1,
+                 "command" => "",
+                 "drop" => 0
+               },
+               %{
+                 "name" => "minga",
+                 "text" => "Minga working 2/3",
+                 "command" => "toggle_agent_split",
+                 "drop" => 5,
+                 "compact" => "2/3",
+                 "state" => "working",
+                 "key" => "SPC a v",
+                 "label" => "Minga is working, step 2 of 3"
+               }
+             ] = decoded["modeline_left_segments"]
 
-      assert [%{"text" => " Elixir ", "command" => "set_language"}] =
+      assert [%{"text" => "Elixir", "command" => "set_language", "drop" => 2, "compact" => nil}] =
                decoded["modeline_right_segments"]
 
       assert decoded["selection_mode"] == 1

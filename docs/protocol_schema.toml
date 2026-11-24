@@ -1889,6 +1889,12 @@ fields = [
   { name = "attrs", type = "u8" },
   { name = "text", type = "string16" },
   { name = "target", type = "string16" },
+  { name = "drop", type = "u8" },
+  { name = "flags", type = "u8" },
+  { name = "state", type = "u8" },
+  { name = "compact", type = "string16" },
+  { name = "key", type = "string8" },
+  { name = "label", type = "string16" },
 ]
 
 [[structures]]

@@ -63,6 +63,7 @@ defmodule Minga.Config.Loader do
   @typep load_report :: %{
            config_path: String.t(),
            load_error: String.t() | nil,
+           config_eval_error: String.t() | nil,
            migration_notice: String.t() | nil,
            loaded_modules: [module()],
            modules_errors: [String.t()],
@@ -163,6 +164,16 @@ defmodule Minga.Config.Loader do
   @spec load_error(GenServer.server()) :: String.t() | nil
   def load_error, do: load_error(__MODULE__)
   def load_error(server), do: Agent.get(server, & &1.report.load_error)
+
+  @doc """
+  Returns why the global config file did not evaluate in the loaded config, or `nil` when it evaluated (or does not exist).
+
+  Unlike `load_error/1`, this is only the failure that leaves the editor on its defaults: project config, MCP, plugin and extension errors are not in it, and a reload the loader rejects does not change it, because the last loaded config stays in place.
+  """
+  @spec config_eval_error() :: String.t() | nil
+  @spec config_eval_error(GenServer.server()) :: String.t() | nil
+  def config_eval_error, do: config_eval_error(__MODULE__)
+  def config_eval_error(server), do: Agent.get(server, & &1.report.config_eval_error)
 
   @doc "Returns the startup notice for saved bindings that need an opt-in extension."
   @spec migration_notice() :: String.t() | nil
@@ -541,7 +552,7 @@ defmodule Minga.Config.Loader do
         # 3. Eval global config
         custom_config? = cli_config_file() != nil
 
-        load_error =
+        config_eval_error =
           case {custom_config?, File.exists?(config_path)} do
             {true, false} ->
               "Custom config not found: #{config_path} (using defaults)"
@@ -551,10 +562,11 @@ defmodule Minga.Config.Loader do
           end
 
         load_error =
-          if custom_config? and load_error == nil and not String.ends_with?(config_path, ".exs") do
+          if custom_config? and config_eval_error == nil and
+               not String.ends_with?(config_path, ".exs") do
             "Custom config path does not end in .exs: #{config_path} (file was loaded, but may not be valid Elixir)"
           else
-            load_error
+            config_eval_error
           end
 
         StartupTimer.mark(:config_global_eval)
@@ -605,6 +617,7 @@ defmodule Minga.Config.Loader do
         %{
           config_path: config_path,
           load_error: load_error,
+          config_eval_error: config_eval_error,
           migration_notice: extension_migration_notice(),
           loaded_modules: loaded_modules,
           modules_errors: modules_errors,
@@ -634,6 +647,7 @@ defmodule Minga.Config.Loader do
     %{
       config_path: config_path,
       load_error: nil,
+      config_eval_error: nil,
       migration_notice: nil,
       loaded_modules: [],
       modules_errors: [],

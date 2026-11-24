@@ -258,7 +258,16 @@ defmodule MingaEditor.Agent.FileEventWorkflow do
   @spec record_file_activity(EditorState.t(), String.t()) :: EditorState.t()
   defp record_file_activity(state, path) do
     ui = state.workspace.agent_ui
-    activity = Activity.record_file(ui.view.activity, path)
+    identity = Minga.Buffer.file_identity(path)
+
+    activity =
+      Activity.record_file(
+        ui.view.activity,
+        Activity.task_author(UIState.task_id(ui)),
+        path,
+        identity
+      )
+
     TraditionalWorkflow.install_agent_ui(state, UIState.replace_activity(ui, activity))
   end
 

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"unicode"
 
+	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/jsmestad/minga/go/tui/internal/generated"
@@ -301,45 +302,218 @@ func (m Model) footerLines() []string {
 	return lines
 }
 
+// renderStatusSegments draws the modeline: the left cluster from the leading inset, the right cluster at the trailing inset, and the echo text between them.
+// The BEAM sends the segments in order with drop ranks; this frontend measures its own width (ADR-0001) and applies the ranks, lowest first, until everything fits.
+// The echo text reserves at most a third of the row, as on macOS, and a rank-0 segment never drops, so a long notice is cut to the room that is left instead of replacing the modeline.
 func (m Model) renderStatusSegments(status protocol.StatusBar) string {
+	surface := lipgloss.NewStyle().Background(m.palette().ChromeSurface())
 	message := m.renderStatusMessage(status.Message)
-	messageWidth := lipgloss.Width(message)
-	left := m.renderSegmentList(status.Left)
-	leftWidth := lipgloss.Width(left)
-	if messageWidth > 0 && messageWidth > m.width-leftWidth {
-		return fitStyled(message, m.width)
+	reserved := 0
+	if width := lipgloss.Width(message); width > 0 {
+		reserved = min(width+2*modelineSegmentGap.cols(), m.width*34/100)
 	}
-	right := m.renderSegmentList(status.Right)
-	// Prepend a devicon for the current file type before the right segments.
-	if status.Filename != "" {
-		icon := devIconForPath(status.Filename, false)
-		if icon.glyph != "" {
-			fileStyle := lipgloss.NewStyle().Foreground(m.palette().ChromeText()).Background(m.palette().ChromeSurface())
-			if icon.color != "" {
-				fileStyle = fileStyle.Foreground(lipgloss.Color(icon.color))
-			}
-			right = fileStyle.Render(icon.glyph+" ") + right
+	// Hover text is a local preview: it fills only the room the segments leave and never moves them.
+	if message == "" {
+		if hover := m.modelineHoverText(status); hover != "" {
+			message = lipgloss.NewStyle().Foreground(m.palette().Muted()).Background(m.palette().ChromeSurface()).Render(sanitizeTerminalText(hover))
 		}
 	}
-	// showcmd: echo the pending key sequence as a dim, right-aligned segment so
-	// every keypress is acknowledged instantly (issue #2666). Rendered leftmost
-	// within the right cluster; the BEAM clears it (empty string) when the
-	// sequence resolves, aborts, or which-key opens, so no timer lives here.
+	// showcmd: echo the pending key sequence as a dim segment at the head of the right cluster so every keypress is acknowledged instantly (issue #2666).
+	// The BEAM clears it (empty string) when the sequence resolves, aborts, or which-key opens, so no timer lives here.
+	pending := ""
 	if status.PendingKeys != "" {
-		pending := lipgloss.NewStyle().Faint(true).Foreground(m.palette().Muted()).Background(m.palette().ChromeSurface()).Render(status.PendingKeys + gap(modelineSegmentGap))
-		right = pending + right
+		pending = lipgloss.NewStyle().Faint(true).Foreground(m.palette().Muted()).Background(m.palette().ChromeSurface()).Render(status.PendingKeys) + surface.Render(gap(modelineSegmentGap))
 	}
-	rightWidth := lipgloss.Width(right)
-	if messageWidth > 0 && messageWidth > m.width-leftWidth-rightWidth {
-		// Keep the notice readable before optional file and cursor statistics.
-		right = ""
-		rightWidth = 0
+	inset := modelineInset.cols()
+	budget := max(m.width-2*inset-lipgloss.Width(pending), 0)
+	fitted := fitModeline(append(append([]protocol.StatusSegment{}, status.Left...), status.Right...), len(status.Left), budget-reserved, m.modelineSegmentWidth)
+	left := m.renderModelineCluster(fitted.left)
+	right := pending + m.renderModelineCluster(fitted.right)
+	available := max(m.width-2*inset-lipgloss.Width(left)-lipgloss.Width(right), 0)
+	if lipgloss.Width(message) > max(available-2*modelineSegmentGap.cols(), 0) {
+		message = fitStyled(message, max(available-2*modelineSegmentGap.cols(), 0))
 	}
-	available := max(m.width-leftWidth-rightWidth, 1)
+	messageWidth := lipgloss.Width(message)
 	leftSpacer := strings.Repeat(" ", max((available-messageWidth)/2, 0))
-	rightSpacer := strings.Repeat(" ", max(available-messageWidth-lipgloss.Width(leftSpacer), 0))
-	spacerStyle := lipgloss.NewStyle().Background(m.palette().ChromeSurface())
-	return left + spacerStyle.Render(leftSpacer) + message + spacerStyle.Render(rightSpacer) + right
+	rightSpacer := strings.Repeat(" ", max(available-messageWidth-len(leftSpacer), 0))
+	edge := surface.Render(gap(modelineInset))
+	// Only segments that never drop are left when the row is still too wide; the terminal edge cuts them.
+	return fitStyled(edge+left+surface.Render(leftSpacer)+message+surface.Render(rightSpacer)+right+edge, m.width)
+}
+
+// fittedSegment is one segment the modeline keeps: its index in the BEAM's order and whether it shows its compact form (the state mark and compact text).
+type fittedSegment struct {
+	index   int
+	segment protocol.StatusSegment
+	compact bool
+}
+
+type fittedModeline struct {
+	left  []fittedSegment
+	right []fittedSegment
+}
+
+// fitModeline applies the BEAM's drop ranks in ascending order until the segments, with one segment gap between neighbours in each cluster, fit in width.
+// Every segment at the current rank goes at once; a segment with a compact form collapses instead and stays. Rank 0 never drops.
+func fitModeline(segments []protocol.StatusSegment, leftCount int, width int, measure func(protocol.StatusSegment, bool) int) fittedModeline {
+	compact := make([]bool, len(segments))
+	dropped := make([]bool, len(segments))
+	total := func() int {
+		sum := 0
+		clusters := [2]int{}
+		for i, segment := range segments {
+			if dropped[i] {
+				continue
+			}
+			sum += measure(segment, compact[i])
+			if i < leftCount {
+				clusters[0]++
+			} else {
+				clusters[1]++
+			}
+		}
+		for _, count := range clusters {
+			if count > 1 {
+				sum += (count - 1) * modelineSegmentGap.cols()
+			}
+		}
+		if clusters[0] > 0 && clusters[1] > 0 {
+			sum += modelineSegmentGap.cols()
+		}
+		return sum
+	}
+	for _, rank := range modelineDropRanks(segments) {
+		if total() <= width {
+			break
+		}
+		for i, segment := range segments {
+			if segment.Drop != rank {
+				continue
+			}
+			if segment.HasCompact {
+				compact[i] = true
+			} else {
+				dropped[i] = true
+			}
+		}
+	}
+	var fitted fittedModeline
+	for i, segment := range segments {
+		if dropped[i] {
+			continue
+		}
+		kept := fittedSegment{index: i, segment: segment, compact: compact[i]}
+		if i < leftCount {
+			fitted.left = append(fitted.left, kept)
+		} else {
+			fitted.right = append(fitted.right, kept)
+		}
+	}
+	return fitted
+}
+
+// modelineDropRanks lists the nonzero drop ranks present, lowest first.
+func modelineDropRanks(segments []protocol.StatusSegment) []byte {
+	seen := map[byte]bool{}
+	ranks := []byte{}
+	for _, segment := range segments {
+		if segment.Drop != 0 && !seen[segment.Drop] {
+			seen[segment.Drop] = true
+			ranks = append(ranks, segment.Drop)
+		}
+	}
+	sort.Slice(ranks, func(a, b int) bool { return ranks[a] < ranks[b] })
+	return ranks
+}
+
+func (m Model) modelineSegmentWidth(segment protocol.StatusSegment, compact bool) int {
+	return lipgloss.Width(m.renderModelineSegment(segment, compact))
+}
+
+// renderModelineCluster draws kept segments one segment gap apart.
+// Each segment is its own mouse zone, so a click runs its command and pointer motion over it echoes what it means and its key.
+func (m Model) renderModelineCluster(segments []fittedSegment) string {
+	surface := lipgloss.NewStyle().Background(m.palette().ChromeSurface())
+	parts := make([]string, 0, len(segments))
+	for _, kept := range segments {
+		parts = append(parts, m.zones.Mark(zoneIDModelineSegment(kept.index), m.renderModelineSegment(kept.segment, kept.compact)))
+	}
+	return strings.Join(parts, surface.Render(gap(modelineSegmentGap)))
+}
+
+// renderModelineSegment draws one segment: the mode pill as the one saturated block, a state's glyph before its words, E and W as the marks of error and warning counts, and the compact form as the state glyph and its compact text.
+func (m Model) renderModelineSegment(segment protocol.StatusSegment, compact bool) string {
+	theme := m.palette()
+	style := lipgloss.NewStyle().Foreground(theme.ChromeText()).Background(theme.ChromeSurface())
+	if segment.Name == "mode" {
+		bg, fg := m.modeColors(segment.Text)
+		style = style.Background(bg).Foreground(fg).Bold(true).Padding(0, modelinePillPaddingH.cols())
+	}
+	if segment.FG != 0 {
+		style = style.Foreground(lipgloss.Color(fmt.Sprintf("#%06X", segment.FG)))
+	}
+	if segment.BG != 0 {
+		style = style.Background(lipgloss.Color(fmt.Sprintf("#%06X", segment.BG)))
+	}
+	if segment.Attrs&0x01 != 0 {
+		style = style.Bold(true)
+	}
+	if segment.Attrs&0x02 != 0 {
+		style = style.Underline(true)
+	}
+	if segment.Attrs&0x04 != 0 {
+		style = style.Italic(true)
+	}
+	words := sanitizeTerminalText(segment.Text)
+	if compact {
+		words = sanitizeTerminalText(segment.Compact)
+	}
+	mark := ""
+	if state, ok := generated.SpineStateFromWire(segment.State); ok {
+		mark = state.Token().Glyph
+	} else if segment.Name == "errors" {
+		mark = "E"
+	} else if segment.Name == "warnings" {
+		mark = "W"
+	}
+	switch {
+	case mark == "":
+		return style.Render(words)
+	case words == "":
+		return style.Render(mark)
+	default:
+		return style.Render(mark + gap(modelineGlyphToWords) + words)
+	}
+}
+
+// modelineHoverText is what the echo line says while the pointer rests on a modeline segment: its meaning and the key that does what a click does ("1 task needs you · SPC a a").
+// It is read from the current segments, so a segment that changes or goes away takes its hover text with it.
+func (m Model) modelineHoverText(status protocol.StatusBar) string {
+	index := m.modelineHoverSegment - 1
+	segments := append(append([]protocol.StatusSegment{}, status.Left...), status.Right...)
+	if index < 0 || index >= len(segments) {
+		return ""
+	}
+	segment := segments[index]
+	if segment.Label != "" && segment.Key != "" {
+		return segment.Label + " · " + segment.Key
+	}
+	return segment.Label
+}
+
+// modelineSegmentUnder returns the 1-based index of the modeline segment under the pointer, or 0 for none.
+// Terminals that report pointer motion only during a drag never call it, as the design allows.
+func (m Model) modelineSegmentUnder(msg tea.MouseMsg) int {
+	status, ok := m.statusBar()
+	if !ok {
+		return 0
+	}
+	for index := range len(status.Left) + len(status.Right) {
+		if zoneInfo := m.zones.Get(zoneIDModelineSegment(index)); zoneInfo != nil && zoneInfo.InBounds(msg) {
+			return index + 1
+		}
+	}
+	return 0
 }
 
 // extensionRuntimeStatus returns a compact, deterministic summary of the active
@@ -398,62 +572,6 @@ func sanitizeTerminalText(text string) string {
 		}
 		return r
 	}, ansi.Strip(text))
-}
-
-func (m Model) renderSegmentList(segments []protocol.StatusSegment) string {
-	sep := lipgloss.NewStyle().Foreground(m.palette().Muted()).Background(m.palette().ChromeSurface()).Render("│")
-	parts := make([]string, 0, len(segments))
-	theme := m.palette()
-	for _, segment := range segments {
-		text := segment.Text
-		if text == "" {
-			continue
-		}
-		style := lipgloss.NewStyle().Foreground(theme.ChromeText()).Background(theme.ChromeSurface())
-
-		// Apply semantic styling based on segment name. Mode segments become
-		// colored pill badges; info segments use the modeline-info palette;
-		// other segments can inherit the statusbar accent for bold emphasis.
-		// Inline FG/BG from the BEAM still win when present so the editor can
-		// override theme defaults per-segment.
-		switch segment.Name {
-		case "mode":
-			bg, fg := m.modeColors(text)
-			style = style.Background(bg).Foreground(fg).Bold(true)
-		case "info":
-			style = style.Background(theme.ModelineInfo()).Foreground(theme.ModelineInfoText())
-		default:
-			if segment.Attrs&0x01 != 0 && segment.FG == 0 {
-				style = style.Foreground(theme.StatusbarAccent())
-			}
-		}
-
-		if segment.FG != 0 {
-			style = style.Foreground(lipgloss.Color(fmt.Sprintf("#%06X", segment.FG)))
-		}
-		if segment.BG != 0 {
-			style = style.Background(lipgloss.Color(fmt.Sprintf("#%06X", segment.BG)))
-		}
-		if segment.Attrs&0x01 != 0 {
-			style = style.Bold(true)
-		}
-		if segment.Attrs&0x02 != 0 {
-			style = style.Underline(true)
-		}
-		if segment.Attrs&0x04 != 0 {
-			style = style.Italic(true)
-		}
-		// Prepend a nerd font icon when the segment carries a vi mode name.
-		if icon := modeIcon(strings.TrimSpace(text)); icon != "" {
-			text = strings.Replace(text, strings.TrimSpace(text), icon+" "+strings.TrimSpace(text), 1)
-		}
-		rendered := style.Render(text)
-		if segment.Command != "" {
-			rendered = m.zones.Mark(zoneIDModelineCommand(segment.Command), rendered)
-		}
-		parts = append(parts, rendered)
-	}
-	return strings.Join(parts, sep)
 }
 
 // modeColors returns the background and foreground colors for a vi mode pill

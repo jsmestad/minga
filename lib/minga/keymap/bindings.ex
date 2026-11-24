@@ -462,6 +462,35 @@ defmodule Minga.Keymap.Bindings do
   end
 
   @doc """
+  Every bound sequence in the trie with its command, shortest sequences first.
+
+  ## Examples
+
+      iex> trie = Minga.Keymap.Bindings.new()
+      iex> trie = Minga.Keymap.Bindings.bind(trie, [{?f, 0}, {?f, 0}], :find_file, "Find file")
+      iex> Minga.Keymap.Bindings.commands(trie)
+      [{[{?f, 0}, {?f, 0}], :find_file}]
+  """
+  @spec commands(node_t()) :: [{[key()], atom() | tuple()}]
+  def commands(%Node{} = root) do
+    root
+    |> collect_commands([])
+    |> Enum.sort_by(fn {keys, _command} -> length(keys) end)
+  end
+
+  # Walks like `collect_sequences/3`, so equal-length ties order as in `sequences_for_command/2`.
+  @spec collect_commands(Node.t(), [key()]) :: [{[key()], atom() | tuple()}]
+  defp collect_commands(%Node{} = node, path_rev) do
+    own =
+      if node.command && path_rev != [], do: [{Enum.reverse(path_rev), node.command}], else: []
+
+    own ++
+      Enum.flat_map(node.children, fn {key, child} ->
+        collect_commands(child, [key | path_rev])
+      end)
+  end
+
+  @doc """
   Formats a key sequence as a space-separated human-readable string.
 
   ## Examples

@@ -907,16 +907,24 @@ func TestDecodeStatusOperationUsesGeneratedMappingAndKeepsNoticeSeparate(t *test
 }
 
 func TestDecodeStatusModelineSegments(t *testing.T) {
-	left := []byte{2, 0, 1, 0, 1}
-	left = append(left, string8("mode")...)
+	left := []byte{3, 0, 1, 0, 1}
+	left = append(left, string8("minga")...)
 	left = append(left, 0xAA, 0xBB, 0xCC, 0x11, 0x22, 0x33, 1)
-	left = append(left, string16(" NORMAL ")...)
-	left = append(left, string16("set_mode")...)
+	left = append(left, string16("Minga working 2/3")...)
+	left = append(left, string16("toggle_agent_split")...)
+	left = append(left, 5, 0x01, 1)
+	left = append(left, string16("2/3")...)
+	left = append(left, string8("SPC a v")...)
+	left = append(left, string16("Minga is working, step 2 of 3")...)
 	right := []byte{}
 	right = append(right, string8("position")...)
 	right = append(right, 0, 0, 0, 0, 0, 0, 0)
-	right = append(right, string16("1:1 Top")...)
+	right = append(right, string16("1:1")...)
 	right = append(right, string16("")...)
+	right = append(right, 3, 0, 0)
+	right = append(right, string16("")...)
+	right = append(right, string8("")...)
+	right = append(right, string16("Line 1, column 1")...)
 	packet := []byte{generated.OPGuiStatusBar, 1}
 	packet = append(packet, section(0x0B, append(left, right...))...)
 
@@ -925,8 +933,29 @@ func TestDecodeStatusModelineSegments(t *testing.T) {
 		t.Fatalf("DecodeCommand returned error: %v", err)
 	}
 	status := command.Chrome.Status
-	if len(status.Left) != 1 || len(status.Right) != 1 || status.Left[0].Name != "mode" || status.Left[0].Text != " NORMAL " || status.Left[0].Command != "set_mode" || status.Right[0].Text != "1:1 Top" {
+	want := StatusSegment{Name: "minga", FG: 0xAABBCC, BG: 0x112233, Attrs: 1, Text: "Minga working 2/3", Command: "toggle_agent_split", Drop: 5, HasCompact: true, State: 1, Compact: "2/3", Key: "SPC a v", Label: "Minga is working, step 2 of 3"}
+	if len(status.Left) != 1 || len(status.Right) != 1 || status.Left[0] != want {
 		t.Fatalf("modeline segments decoded incorrectly: %+v", status)
+	}
+	if right := status.Right[0]; right.Text != "1:1" || right.Drop != 3 || right.HasCompact || right.Label != "Line 1, column 1" {
+		t.Fatalf("right segment decoded incorrectly: %+v", right)
+	}
+}
+
+func TestDecodeStatusModelineIgnoresAnotherFormat(t *testing.T) {
+	section2 := []byte{2, 0, 1, 0, 0}
+	section2 = append(section2, string8("mode")...)
+	section2 = append(section2, 0, 0, 0, 0, 0, 0, 0)
+	section2 = append(section2, string16("NORMAL")...)
+	section2 = append(section2, string16("")...)
+	packet := []byte{generated.OPGuiStatusBar, 1}
+	packet = append(packet, section(0x0B, section2)...)
+	command, err := DecodeCommand(packet)
+	if err != nil {
+		t.Fatalf("DecodeCommand returned error: %v", err)
+	}
+	if status := command.Chrome.Status; len(status.Left) != 0 {
+		t.Fatalf("a format this decoder does not read must not misparse: %+v", status.Left)
 	}
 }
 

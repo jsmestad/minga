@@ -4,6 +4,24 @@ defmodule MingaEditor.Agent.ActivityTest do
   alias MingaAgent.TodoItem
   alias MingaEditor.Agent.Activity
 
+  describe "progress/1" do
+    test "is the step Minga has reached through its plan, or nil without one" do
+      assert Activity.progress(Activity.new()) == nil
+
+      todos =
+        for {status, id} <- Enum.with_index([:done, :in_progress, :pending]),
+            do: %TodoItem{id: "#{id}", description: "step #{id}", status: status}
+
+      assert Activity.progress(Activity.set_todos(Activity.new(), todos)) == {2, 3}
+
+      blocked = List.replace_at(todos, 1, %{Enum.at(todos, 1) | status: :blocked})
+      assert Activity.progress(Activity.set_todos(Activity.new(), blocked)) == {2, 3}
+
+      done = Enum.map(todos, &%{&1 | status: :done})
+      assert Activity.progress(Activity.set_todos(Activity.new(), done)) == {3, 3}
+    end
+  end
+
   describe "turn projection" do
     test "tracks tool and file progress while preserving todos" do
       todo = %TodoItem{id: "1", description: "Inspect files", status: :in_progress}
@@ -14,9 +32,9 @@ defmodule MingaEditor.Agent.ActivityTest do
         |> Activity.set_todos([todo])
         |> Activity.start_turn(started_at)
         |> Activity.start_tool("call-1", "shell")
-        |> Activity.record_file("lib/a.ex")
-        |> Activity.record_file("lib/a.ex")
-        |> Activity.record_file("lib/b.ex")
+        |> Activity.record_file(nil, "lib/a.ex", "/p/lib/a.ex")
+        |> Activity.record_file(nil, "lib/a.ex", "/p/lib/a.ex")
+        |> Activity.record_file(nil, "lib/b.ex", "/p/lib/b.ex")
 
       assert activity.todos == [todo]
       assert activity.started_at == started_at
@@ -29,7 +47,7 @@ defmodule MingaEditor.Agent.ActivityTest do
       activity =
         Activity.new()
         |> Activity.start_tool("call-1", "read_file")
-        |> Activity.record_file("lib/a.ex")
+        |> Activity.record_file(nil, "lib/a.ex", "/p/lib/a.ex")
         |> Activity.finish_turn()
 
       assert activity.started_at == nil

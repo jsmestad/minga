@@ -128,10 +128,29 @@ public final class StatusBarState {
         if self.indent != data.indent { self.indent = data.indent }
         let hasModelineSegments = data.modelineSegmentsPresent || !data.modelineLeftSegments.isEmpty || !data.modelineRightSegments.isEmpty
         if self.modelineSegmentsPresent != hasModelineSegments { self.modelineSegmentsPresent = hasModelineSegments }
+        let previousNeedsYou = Self.needsYouLabel(in: self.modelineLeftSegments + self.modelineRightSegments)
         if self.modelineLeftSegments != data.modelineLeftSegments { self.modelineLeftSegments = data.modelineLeftSegments }
         if self.modelineRightSegments != data.modelineRightSegments { self.modelineRightSegments = data.modelineRightSegments }
         if self.selection != data.selection { self.selection = data.selection }
         if self.pendingKeys != data.pendingKeys { self.pendingKeys = data.pendingKeys }
+        if let announcement = Self.needsYouAnnouncement(previous: previousNeedsYou, current: Self.needsYouLabel(in: data.modelineLeftSegments + data.modelineRightSegments)) {
+            announce(announcement)
+        }
+    }
+
+    /// Posts a VoiceOver announcement. Tests replace it to observe what would be said.
+    @ObservationIgnored public var announce: @MainActor (String) -> Void = { message in
+        AccessibilityNotification.Announcement(message).post()
+    }
+
+    /// What VoiceOver says when the modeline's needs-you segment appears: only when needs-you goes from zero to non-zero, never while it stays non-zero or as its count changes.
+    public static func needsYouAnnouncement(previous: String?, current: String?) -> String? {
+        guard previous == nil, let current, !current.isEmpty else { return nil }
+        return current
+    }
+
+    private static func needsYouLabel(in segments: [Wire.StatusBarSegment]) -> String? {
+        segments.first { $0.kind == "needs_you" }?.label
     }
 
     /// Clears status and mode authority when the BEAM connection is replaced.

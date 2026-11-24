@@ -582,6 +582,50 @@ defmodule MingaEditor.Agent.EventRoutingTest do
       end
     end
 
+    test "each file Minga's tools change becomes the task's current file, for the modeline" do
+      pid = self()
+
+      connection = %MingaAgent.Session.ConnectionSnapshot{
+        target: MingaAgent.Session.ConnectionTarget.new(pid, "task-7", nil, make_ref()),
+        conversation: make_ref(),
+        credential_readiness: :checking,
+        model_selection: nil,
+        provider_phase: :running,
+        operation: :idle,
+        problem: nil
+      }
+
+      state = background_input_state(keymap_scope: :agent, agentic_active: true)
+      ui = UIState.project_connection(state.workspace.agent_ui, connection)
+
+      state =
+        state
+        |> TraditionalWorkflow.install_agent_ui(ui)
+        |> Events.dispatch(pid, {:file_changed, "/tmp/agent-a.ex", "a0", "a1", "t1", "edit"})
+        |> Events.dispatch(pid, {:file_changed, "/tmp/agent-b.ex", "b0", "b1", "t2", "edit"})
+
+      task = Minga.Buffer.Author.minga("task-7")
+      activity = state.workspace.agent_ui.view.activity
+      identity = Minga.Buffer.file_identity("/tmp/agent-b.ex")
+      assert Activity.current_file(activity, task) == {identity, "/tmp/agent-b.ex"}
+      assert activity.task_files.author == task
+      assert MingaEditor.StatusBar.Data.from_state(state).common.minga_file == "/tmp/agent-b.ex"
+
+      # A new task on the same Session process names nothing until it edits a file of its own.
+      next = %{
+        connection
+        | target: MingaAgent.Session.ConnectionTarget.new(pid, "task-8", nil, make_ref())
+      }
+
+      state =
+        TraditionalWorkflow.install_agent_ui(
+          state,
+          UIState.project_connection(state.workspace.agent_ui, next)
+        )
+
+      assert MingaEditor.StatusBar.Data.from_state(state).common.minga_file == nil
+    end
+
     test "same-process conversation restore clears the old review and ignores a queued file change" do
       pid = self()
       path = "/tmp/agent-a.ex"

@@ -490,13 +490,33 @@ func TestFooterKeepsNarrowNoticeReadableBesideMode(t *testing.T) {
 	model := New(60, 24, nil)
 	model.chrome[generated.OPGuiStatusBar] = protocol.ChromePayload{Status: protocol.StatusBar{
 		Message: "API key saved.",
-		Left:    []protocol.StatusSegment{{Text: " [SAFE] NORMAL [no file] Idle "}},
-		Right:   []protocol.StatusSegment{{Text: "Spaces:2 Text 1:1 Top"}},
+		Left:    []protocol.StatusSegment{{Name: "mode", Text: "[SAFE] NORMAL"}, {Name: "filename", Text: "[no file]"}},
+		Right:   []protocol.StatusSegment{{Name: "filetype", Text: "Plain Text", Drop: 2}, {Name: "position", Text: "1:1", Drop: 3}},
 	}}
 
 	footer := ansi.Strip(model.footerLines()[0])
-	if !strings.Contains(footer, "API key saved.") || !strings.Contains(footer, "NORMAL") {
-		t.Fatalf("narrow footer hides the save notice or editing mode: %q", footer)
+	if !strings.Contains(footer, "API key saved.") || !strings.Contains(footer, "NORMAL") || !strings.Contains(footer, "[no file]") {
+		t.Fatalf("narrow footer hides the save notice, the mode or the file: %q", footer)
+	}
+}
+
+// A notice too long for the room left keeps the segments that never drop and is cut instead.
+func TestFooterLongNoticeNeverDisplacesModeOrFile(t *testing.T) {
+	model := New(40, 24, nil)
+	model.chrome[generated.OPGuiStatusBar] = protocol.ChromePayload{Status: protocol.StatusBar{
+		Message: strings.Repeat("a very long notice ", 8),
+		Left:    []protocol.StatusSegment{{Name: "mode", Text: "NORMAL"}, {Name: "needs_you", Text: "Needs you", State: 2}, {Name: "filename", Text: "retry.ex"}},
+		Right:   []protocol.StatusSegment{{Name: "position", Text: "240:31", Drop: 3}},
+	}}
+
+	footer := ansi.Strip(model.footerLines()[0])
+	for _, kept := range []string{"NORMAL", "◉ Needs you", "retry.ex", "a very"} {
+		if !strings.Contains(footer, kept) {
+			t.Fatalf("footer lost %q to a long notice: %q", kept, footer)
+		}
+	}
+	if strings.Contains(footer, "240:31") {
+		t.Fatalf("position should give way to the notice: %q", footer)
 	}
 }
 
@@ -733,24 +753,24 @@ func TestFooterRendersModeIconBeforeModeText(t *testing.T) {
 	}
 }
 
-func TestFooterRendersFileIconBeforeFilename(t *testing.T) {
+// The modeline draws the words the BEAM sends; it adds no file-type icon of its own.
+func TestFooterSegmentsAddNoFileIcon(t *testing.T) {
 	model := New(80, 24, nil)
 	model.chrome = map[byte]protocol.ChromePayload{
 		generated.OPGuiStatusBar: {
 			Status: protocol.StatusBar{
 				Filename: "main.go",
-				Left:     []protocol.StatusSegment{{Text: " NORMAL "}},
-				Right:    []protocol.StatusSegment{{Text: "1:1"}},
+				Left:     []protocol.StatusSegment{{Name: "mode", Text: "NORMAL"}},
+				Right:    []protocol.StatusSegment{{Name: "filetype", Text: "Go"}, {Name: "position", Text: "1:1"}},
 			},
 		},
 	}
 	footer := ansi.Strip(strings.Join(model.footerLines(), "\n"))
-	icon := devIconForPath("main.go", false)
-	if icon.glyph == "" {
-		t.Fatal("expected devicon for main.go")
+	if icon := devIconForPath("main.go", false); strings.Contains(footer, icon.glyph) {
+		t.Fatalf("footer invented a file icon: %q", footer)
 	}
-	if !strings.Contains(footer, icon.glyph) {
-		t.Fatalf("footer should render file type icon for filename: %q (want glyph %q)", footer, icon.glyph)
+	if !strings.HasSuffix(strings.TrimRight(footer, " "), "Go 1:1") {
+		t.Fatalf("right cluster should read the BEAM's words one gap apart: %q", footer)
 	}
 }
 
@@ -2854,7 +2874,7 @@ func TestSemanticMouseRoutesModelineAndFileTreeZones(t *testing.T) {
 	model.viewport.SetContent(model.content())
 	_ = model.View()
 
-	saveZone := waitForZone(t, model, zoneIDModelineCommand("save"))
+	saveZone := waitForZone(t, model, zoneIDModelineSegment(0))
 	cmd, ok := model.semanticMousePacket(tea.MouseClickMsg(tea.Mouse{Button: tea.MouseLeft, X: saveZone.StartX + 1, Y: saveZone.StartY}))
 	if !ok || !bytes.Equal(cmd, protocol.EncodeGUIExecuteCommand("save")) {
 		t.Fatalf("modeline click should route execute command, ok=%v packet=%v", ok, cmd)

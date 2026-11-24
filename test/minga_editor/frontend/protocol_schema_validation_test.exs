@@ -329,7 +329,8 @@ defmodule MingaEditor.Frontend.ProtocolSchemaValidationTest do
   end
 
   describe "gui_status_bar modeline encoding" do
-    test "v2 segments include names, text, and click targets", _context do
+    test "format 3 segments include names, text, targets, drop ranks, states, keys and labels",
+         _context do
       model = full_status_bar_model()
       binary = StatusBarEncoder.encode_command(model)
 
@@ -337,9 +338,10 @@ defmodule MingaEditor.Frontend.ProtocolSchemaValidationTest do
       payload = extract_section_payload(sections_binary, section_count, 0x0B)
 
       assert payload ==
-               <<2::8, 1::16, 1::16, 4::8, "mode", 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x01::8,
-                 6::16, "NORMAL", 0::16, 4::8, "file", 0xCC, 0xCC, 0xCC, 0x00, 0x00, 0x00, 0::8,
-                 7::16, "test.ex", 0::16>>
+               <<3::8, 1::16, 1::16, 4::8, "mode", 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x01::8,
+                 6::16, "NORMAL", 0::16, 0::8, 0::8, 0::8, 0::16, 0::8, 0::16, 4::8, "file", 0xCC,
+                 0xCC, 0xCC, 0x00, 0x00, 0x00, 0::8, 7::16, "test.ex", 11::16, "buffer_list",
+                 2::8, 0x01::8, 1::8, 0::16, 5::8, "SPC ,", 7::16, "test.ex">>
     end
   end
 
@@ -861,8 +863,29 @@ defmodule MingaEditor.Frontend.ProtocolSchemaValidationTest do
       safe_mode?: false,
       indent: %Indent{type: :spaces, size: 2},
       modeline_segments: %{
-        left: [{:mode, "NORMAL", 0xFFFFFF, 0x000000, [bold: true], nil}],
-        right: [{:file, "test.ex", 0xCCCCCC, 0x000000, [], nil}]
+        left: [
+          %Minga.RenderModel.UI.StatusBar.Segment{
+            id: :mode,
+            text: "NORMAL",
+            fg: 0xFFFFFF,
+            bg: 0x000000,
+            style: [bold: true]
+          }
+        ],
+        right: [
+          %Minga.RenderModel.UI.StatusBar.Segment{
+            id: :file,
+            text: "test.ex",
+            fg: 0xCCCCCC,
+            bg: 0x000000,
+            target: :buffer_list,
+            drop: 2,
+            compact: "",
+            state: :working,
+            key: "SPC ,",
+            label: "test.ex"
+          }
+        ]
       },
       selection: %Selection{mode: :chars, size: 10},
       pending_keys: "\"a2d",

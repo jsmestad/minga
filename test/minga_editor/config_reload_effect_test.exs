@@ -124,7 +124,7 @@ defmodule MingaEditor.ConfigReloadEffectTest do
 
     replacement_before = :sys.get_state(replacement.editor)
     request = ConfigReloadEffect.request(ReloadProbe, [self()])
-    delayed_old_outcome = Outcome.completed(request, :ok)
+    delayed_old_outcome = Outcome.completed(request, {:ok, :unchanged})
     send(replacement.editor, {:effect_result, old_scheduler, delayed_old_outcome})
     replacement_after = :sys.get_state(replacement.editor)
 

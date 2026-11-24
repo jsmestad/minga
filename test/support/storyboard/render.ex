@@ -24,6 +24,10 @@ defmodule Minga.Test.Storyboard.Render do
   @themes [:catppuccin_frappe, :astrodark, :catppuccin_latte]
   @strip_theme :catppuccin_frappe
   @tui_sizes [{80, 24}, {120, 40}, {150, 38}]
+  # The TUI draws its header above the grid it reports to the BEAM (`Model.reportGridResize` in go/tui/internal/ui/model.go): the tab bar, and the breadcrumb from 100 columns up (`headerChrome` in render_chrome.go).
+  # Sessions lay out for that grid.
+  # The Go renderer checks its own grid against the transcript's `grid_rows` and fails when they differ.
+  @tui_breadcrumb_min_cols 100
   @strip_tui_size "120x40"
   @strip_macos_size "1440"
   @macos_geometry_path "test/storyboard/macos_geometry.json"
@@ -36,7 +40,7 @@ defmodule Minga.Test.Storyboard.Render do
   @typedoc """
   One render target: a frontend, a theme and a size.
 
-  `size` names the target in file names: `80x24` for a terminal, the window width in points (`1440`) for macOS. `cols` and `rows` are the editor grid the frontend reports for that size; on macOS they come from `test/storyboard/macos_geometry.json`, which the macOS renderer checks against its own row fit.
+  `size` names the target in file names: `80x24` for a terminal, the window width in points (`1440`) for macOS. On macOS, `cols` and `rows` are the editor grid the frontend reports for that size; they come from `test/storyboard/macos_geometry.json`, which the macOS renderer checks against its own row fit. In the TUI, `cols` and `rows` are the terminal size, and `grid_rows` is the grid the TUI reports below its header; the session lays out for that grid.
   """
   @type target :: %{
           frontend: frontend(),
@@ -44,6 +48,7 @@ defmodule Minga.Test.Storyboard.Render do
           size: String.t(),
           cols: pos_integer(),
           rows: pos_integer(),
+          grid_rows: pos_integer(),
           window: {pos_integer(), pos_integer()} | nil
         }
 
@@ -112,7 +117,7 @@ defmodule Minga.Test.Storyboard.Render do
         theme: target.theme,
         capabilities: capabilities(target.frontend),
         width: target.cols,
-        height: target.rows
+        height: target.grid_rows
       )
 
     Enum.reduce(keys, session, &Session.press(&2, &1))
@@ -138,6 +143,7 @@ defmodule Minga.Test.Storyboard.Render do
       "size" => target.size,
       "cols" => target.cols,
       "rows" => target.rows,
+      "grid_rows" => target.grid_rows,
       "window" => window(target.window),
       "digest" => digest(packets),
       "packets" => Enum.map(packets, &Base.encode64/1)
@@ -295,17 +301,35 @@ defmodule Minga.Test.Storyboard.Render do
   defp size_targets do
     tui =
       for {cols, rows} <- @tui_sizes do
-        %{frontend: :tui, size: "#{cols}x#{rows}", cols: cols, rows: rows, window: nil}
+        %{
+          frontend: :tui,
+          size: "#{cols}x#{rows}",
+          cols: cols,
+          rows: rows,
+          grid_rows: rows - tui_header_rows(cols),
+          window: nil
+        }
       end
 
     macos =
       for %{"width" => width, "height" => height, "cols" => cols, "rows" => rows} <-
             @macos_geometry["windows"] do
-        %{frontend: :macos, size: "#{width}", cols: cols, rows: rows, window: {width, height}}
+        %{
+          frontend: :macos,
+          size: "#{width}",
+          cols: cols,
+          rows: rows,
+          grid_rows: rows,
+          window: {width, height}
+        }
       end
 
     tui ++ macos
   end
+
+  @spec tui_header_rows(pos_integer()) :: pos_integer()
+  defp tui_header_rows(cols) when cols >= @tui_breadcrumb_min_cols, do: 2
+  defp tui_header_rows(_cols), do: 1
 
   @spec target_json(target()) :: map()
   defp target_json(target) do

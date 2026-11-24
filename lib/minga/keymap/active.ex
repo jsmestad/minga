@@ -142,6 +142,22 @@ defmodule Minga.Keymap.Active do
     ets_get(server, @leader_trie_key, Defaults.leader_trie())
   end
 
+  @doc """
+  Returns the command the leader sequence `keys` (without the leader key) runs, or nil.
+
+  Reads one row of an index kept beside the leader trie, so a caller on the render path does not copy the whole trie.
+  """
+  @spec leader_command_at(GenServer.server(), [Bindings.key()]) :: atom() | tuple() | nil
+  def leader_command_at(server, keys) when is_list(keys) do
+    ets_get(server, {:leader_command_at, keys}, nil)
+  end
+
+  @doc "Returns the shortest leader sequence (without the leader key) bound to `command`, or nil."
+  @spec leader_keys_for(GenServer.server(), atom() | tuple()) :: [Bindings.key()] | nil
+  def leader_keys_for(server, command) do
+    ets_get(server, {:leader_keys_for, command}, nil)
+  end
+
   @doc "Returns this owner's named scope declarations from its required source selector."
   @spec scope_declarations(GenServer.server()) :: %{Scope.scope_name() => module()}
   def scope_declarations(server) do
@@ -430,7 +446,7 @@ defmodule Minga.Keymap.Active do
   defp table_name(name) when is_atom(name), do: :"#{name}_ets"
   defp table_name(pid) when is_pid(pid), do: GenServer.call(pid, :table_name)
 
-  @spec ets_get(GenServer.server(), atom(), term()) :: term()
+  @spec ets_get(GenServer.server(), atom() | {atom(), term()}, term()) :: term()
   defp ets_get(server, key, default) do
     table = table_name(server)
 
@@ -438,6 +454,40 @@ defmodule Minga.Keymap.Active do
       [{^key, value}] -> value
       [] -> default
     end
+  end
+
+  @spec update_leader_trie(GenServer.server(), (Bindings.node_t() -> Bindings.node_t())) :: :ok
+  defp update_leader_trie(server, fun) do
+    table = table_name(server)
+    put_leader_trie(table, fun.(ets_get(server, @leader_trie_key, Defaults.leader_trie())))
+    :ok
+  end
+
+  # The trie and its index change together: a row per bound sequence, and a row per command with its shortest one.
+  # New rows go in before stale rows come out, so a reader mid-update sees the old or the new binding, never none.
+  @spec put_leader_trie(:ets.table(), Bindings.node_t()) :: :ok
+  defp put_leader_trie(table, trie) do
+    commands = Bindings.commands(trie)
+
+    # The first sequence of each command is its shortest: `Bindings.commands/1` sorts by length.
+    shortest =
+      Enum.reduce(commands, %{}, fn {keys, command}, acc -> Map.put_new(acc, command, keys) end)
+
+    rows =
+      Enum.map(commands, fn {keys, command} -> {{:leader_command_at, keys}, command} end) ++
+        Enum.map(shortest, fn {command, keys} -> {{:leader_keys_for, command}, keys} end)
+
+    current = MapSet.new(rows, &elem(&1, 0))
+
+    stale =
+      for {key, _value} <-
+            :ets.match_object(table, {{:leader_command_at, :_}, :_}) ++
+              :ets.match_object(table, {{:leader_keys_for, :_}, :_}),
+          not MapSet.member?(current, key),
+          do: key
+
+    :ets.insert(table, [{@leader_trie_key, trie} | rows])
+    Enum.each(stale, &:ets.delete(table, &1))
   end
 
   @spec ets_update(GenServer.server(), atom(), term(), (term() -> term())) :: :ok
@@ -450,8 +500,9 @@ defmodule Minga.Keymap.Active do
 
   @spec seed_defaults(:ets.table()) :: true
   defp seed_defaults(table) do
+    put_leader_trie(table, Defaults.leader_trie())
+
     :ets.insert(table, [
-      {@leader_trie_key, Defaults.leader_trie()},
       {@normal_overrides_key, %{}},
       {@scope_overrides_key, %{}},
       {@filetype_tries_key, build_default_filetype_tries()},
@@ -757,9 +808,7 @@ defmodule Minga.Keymap.Active do
 
   # Normal mode: leader sequences (SPC + more keys)
   defp do_bind(server, :normal, [{32, 0} | rest], command, description) when rest != [] do
-    ets_update(server, @leader_trie_key, Defaults.leader_trie(), fn trie ->
-      bind_configured(trie, rest, command, description)
-    end)
+    update_leader_trie(server, &bind_configured(&1, rest, command, description))
   end
 
   # Normal mode: single-key binding
@@ -852,9 +901,7 @@ defmodule Minga.Keymap.Active do
 
   # Normal mode: leader sequences (SPC + more keys)
   defp do_unbind(server, :normal, [{32, 0} | rest]) when rest != [] do
-    ets_update(server, @leader_trie_key, Defaults.leader_trie(), fn trie ->
-      Bindings.unbind(trie, rest)
-    end)
+    update_leader_trie(server, &Bindings.unbind(&1, rest))
   end
 
   # Normal mode: single-key binding
