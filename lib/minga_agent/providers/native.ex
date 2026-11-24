@@ -61,6 +61,7 @@ defmodule MingaAgent.Providers.Native do
   alias MingaAgent.ModelSelection
   alias MingaAgent.ModelSelection.Policy.RequestCapacity
   alias MingaAgent.ProjectView
+  alias MingaAgent.Providers.Native.HostedAdmission
   alias MingaAgent.Providers.Native.LoopCtx
   alias MingaAgent.Providers.Native.OutputHydration
   alias MingaAgent.Providers.Native.ReqLLMAdapter
@@ -1948,7 +1949,8 @@ defmodule MingaAgent.Providers.Native do
            ),
          context = Context.new(canonical_messages),
          :ok <- emit_context_usage(lctx, context),
-         stream_opts = prepared_stream_opts(lctx, attempt, stream_opts),
+         {stream_opts, admission_step} = prepared_stream_opts(lctx, attempt, stream_opts),
+         :ok <- admission_step.(messages),
          {:ok, stream_response} <-
            ReqLLMAdapter.stream(
              lctx.llm_client,
@@ -1957,6 +1959,9 @@ defmodule MingaAgent.Providers.Native do
              stream_opts
            ) do
       {:ok, {context, stream_response}}
+    else
+      other ->
+        other
     end
   end
 
@@ -1982,7 +1987,8 @@ defmodule MingaAgent.Providers.Native do
     end
   end
 
-  @spec prepared_stream_opts(loop_ctx(), Dispatch.t(), keyword()) :: keyword()
+  @spec prepared_stream_opts(loop_ctx(), Dispatch.t(), keyword()) ::
+          {keyword(), (term() -> :ok | {:error, term()})}
   defp prepared_stream_opts(
          %{selection: %{route: %{request_provider: :apple}}} = lctx,
          attempt,
@@ -1997,7 +2003,8 @@ defmodule MingaAgent.Providers.Native do
       authorize_prepared_dispatch(lctx.session_pid, attempt, digest, evidence)
     end
 
-    opts |> Keyword.delete(:cache) |> Keyword.put(:apple_admission, admission)
+    prepared = opts |> Keyword.delete(:cache) |> Keyword.put(:apple_admission, admission)
+    {prepared, &noop_admission/1}
   end
 
   # A contributed route receives its registry and the Session-owned identity of this exact dispatch.
@@ -2017,13 +2024,31 @@ defmodule MingaAgent.Providers.Native do
         purpose: :turn
       )
 
-    opts
-    |> Keyword.put(:minga_conversation, conversation)
-    |> Keyword.put(:minga_reasoning, lctx.selection.policy.reasoning.effort)
-    |> Keyword.put(:inference_routes, lctx.inference_routes)
+    prepared =
+      opts
+      |> Keyword.put(:minga_conversation, conversation)
+      |> Keyword.put(:minga_reasoning, lctx.selection.policy.reasoning.effort)
+      |> Keyword.put(:inference_routes, lctx.inference_routes)
+
+    {prepared, &noop_admission/1}
   end
 
-  defp prepared_stream_opts(_lctx, _attempt, opts), do: opts
+  defp prepared_stream_opts(lctx, attempt, opts) do
+    limits = lctx.selection.policy.limits
+    output_tokens = Keyword.fetch!(opts, :max_tokens)
+
+    authorize = fn digest, evidence ->
+      authorize_prepared_dispatch(lctx.session_pid, attempt, digest, evidence)
+    end
+
+    admission = fn messages ->
+      HostedAdmission.assess(limits, output_tokens, messages, authorize)
+    end
+
+    {opts, admission}
+  end
+
+  defp noop_admission(_messages), do: :ok
 
   @spec session_id(pid()) :: String.t() | nil
   defp session_id(session) when is_pid(session) do
