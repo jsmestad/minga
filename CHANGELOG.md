@@ -161,6 +161,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- The macOS agent header names the session's provider before the model, including an extension route's name such as "Claude (subscription)", as the terminal already does.
 - Closing an agent workspace with its close button on macOS no longer drops its staged agent edits. The workspace stays open and offers **Publish** and **Discard** until you choose one.
 - After the macOS app reconnects to a restarted editor core, it reports the window size with your configured line spacing and gutter, so the editor no longer lays out rows or columns that the window cannot show until the next resize.
 - Staged agent edits survive an editor crash or restart. After the editor restarts on its own they come back to their workspace; after Minga exits without publishing or discarding them, the next start for the project restores them, says so in `*Messages*`, and offers **Publish** and **Discard** again. A file that changed on disk in the meantime is merged or kept as a conflict, never overwritten, and a saved edit that cannot be restored is reported as lost by name. The saved copies are private files that are deleted on publish or discard.

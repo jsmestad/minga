@@ -37,6 +37,8 @@ struct AgentWorkspaceNarrowLayoutTests {
         let chat = gui.agentChatState
 
         #expect(minimumWidth(AgentChatHeaderView(state: chat, sendAction: nil)) <= pane)
+        chat.model = "Claude (subscription):claude-haiku-4-5"
+        #expect(minimumWidth(AgentChatHeaderView(state: chat, sendAction: nil)) <= pane)
         #expect(minimumWidth(AgentPromptView(state: chat, isInsertMode: true, sendAction: nil)) <= pane)
         #expect(minimumWidth(AgentChatView(state: chat, isInsertMode: true, sendAction: nil)) <= pane)
         #expect(minimumWidth(AgentContextBar(state: gui.agentContextBarState, onReview: { _ in })) <= pane)
