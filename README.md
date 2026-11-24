@@ -23,58 +23,21 @@ Minga is a native macOS and terminal code editor built on Elixir and the Erlang 
 
 ## Try it in 60 seconds
 
-**macOS (Apple Silicon, signed & notarized Homebrew prereleases):**
+**macOS (Apple Silicon, signed and notarized Homebrew prereleases):**
 
 ```bash
-# Desktop App (Minga.app)
 brew install --cask jsmestad/minga/minga-mac && open -a Minga
-
-# Terminal Client
-brew install jsmestad/minga/minga && minga .
 ```
 
-**Arch Linux & Omarchy (signed `pacman` repo, x86_64/ARM64):**
+**Linux (Arch and Omarchy, Ubuntu 24.04+, Debian 13+, Fedora; x86_64 and ARM64):** add Minga's signed package repository first, using the commands in [Get Started](https://mingacode.dev/getting-started#install). Then install with your package manager:
 
 ```bash
-curl -fsSL https://packages.mingacode.dev/minga.asc | sudo pacman-key --add -
-sudo pacman-key --lsign-key 2C5D2396B82C1278D4596A0965711C0C3853857B
-curl -fsSL https://packages.mingacode.dev/arch/minga.conf | sudo tee -a /etc/pacman.conf > /dev/null
-sudo pacman -Syu minga
+sudo apt install minga   # or: sudo dnf install minga, sudo pacman -Syu minga
 ```
 
-Signing key: `Minga Packages <packages@mingacode.dev>`, fingerprint `2C5D 2396 B82C 1278 D459 6A09 6571 1C0C 3853 857B`.
+[Get Started](https://mingacode.dev/getting-started#install) is the one place install steps live. It has the repository setup and signing key for each distribution, the terminal client for macOS, and the source build for older Linux and Intel Macs.
 
-<details>
-<summary>Ubuntu 24.04+, Debian 13+, Fedora, and building from source</summary>
-
-**Ubuntu & Debian (`apt`):**
-
-```bash
-sudo install -d -m 0755 /etc/apt/keyrings
-curl -fsSL https://packages.mingacode.dev/minga.asc | sudo tee /etc/apt/keyrings/minga.asc > /dev/null
-curl -fsSL https://packages.mingacode.dev/apt/minga.sources | sudo tee /etc/apt/sources.list.d/minga.sources > /dev/null
-sudo apt update && sudo apt install minga
-```
-
-**Fedora (`dnf`):**
-
-```bash
-sudo curl -fsSLo /etc/yum.repos.d/minga.repo https://packages.mingacode.dev/rpm/minga.repo
-sudo dnf install minga
-```
-
-**From source (older Linux or Intel Mac):**
-
-```bash
-git clone https://github.com/jsmestad/minga.git && cd minga
-mise install # or: asdf install
-mix deps.get && mix compile && make native.support
-bin/minga
-```
-
-</details>
-
-Press `Space` in Normal mode to open mnemonic menus (`SPC f f` find file, `SPC b b` switch buffer, `SPC s p` project search, `SPC a a` agent). Full platform setup and model configuration: [Quickstart](https://mingacode.dev/getting-started).
+Press `Space` in Normal mode to open mnemonic menus (`SPC f f` find file, `SPC b b` switch buffer, `SPC s p` project search, `SPC a a` agent). Get Started continues from there: connect a model and review your first staged edit.
 
 ## Explore the interactive site
 
@@ -118,11 +81,17 @@ Wrap built-in commands with `advise`, graduate to supervised Hex/Git/local packa
 
 ## Documentation map
 
-- **Start here:** [Getting Started](docs/GETTING-STARTED.md) · [Configuration](docs/CONFIGURATION.md) · [Projects](docs/PROJECTS.md)
-- **Agent runtime:** [Model Selection](docs/AGENT-MODEL-SELECTION.md) · [Buffer-Aware Agents](docs/BUFFER-AWARE-AGENTS.md) · [Session Recovery](docs/SESSION-RECOVERY.md) · [Remote Agents](docs/REMOTE_AGENTS.md) · [Hooks](docs/HOOKS.md) · [MCP Servers](docs/MCP.md)
-- **Extending Minga:** [Extension API](docs/EXTENSION_API.md) · [Keymap Scopes](docs/KEYMAP-SCOPES.md) · [Agentic View Keymap](docs/AGENTIC-KEYMAP.md)
-- **Architecture & protocols:** [Architecture](docs/ARCHITECTURE.md) · [Port Protocol](docs/PROTOCOL.md) · [GUI Protocol](docs/GUI_PROTOCOL.md) · [Go TUI Renderer](docs/CHARM_TUI.md) · [Architecture Decisions (ADRs)](https://github.com/jsmestad/minga/tree/main/docs/adr)
-- **Contributing:** [Contributing](CONTRIBUTING.md) · [Automation IPC](docs/AUTOMATION-IPC.md) · [Releasing](docs/RELEASING.md)
+Read in this order:
+
+1. **[Get Started](https://mingacode.dev/getting-started):** install Minga, connect a model, and review your first staged edit.
+2. **[Learn](https://mingacode.dev/learn/):** hands-on lessons that pick up where Get Started ends.
+3. **Reference, by task:** look up what you need when you need it. The [reference index](docs/REFERENCE.md) lists every published doc.
+   - **Configure:** [Configuration](docs/CONFIGURATION.md) · [Projects](docs/PROJECTS.md)
+   - **Run agents:** [Model Selection](docs/AGENT-MODEL-SELECTION.md) · [Buffer-Aware Agents](docs/BUFFER-AWARE-AGENTS.md) · [Session Recovery](docs/SESSION-RECOVERY.md) · [Remote Agents](docs/REMOTE_AGENTS.md) · [Hooks](docs/HOOKS.md) · [MCP Servers](docs/MCP.md)
+   - **Extend Minga:** [Extension API](docs/EXTENSION_API.md) · [Keymap Scopes](docs/KEYMAP-SCOPES.md) · [Agentic View Keymap](docs/AGENTIC-KEYMAP.md)
+   - **Understand the runtime:** [Architecture](docs/ARCHITECTURE.md) · [Port Protocol](docs/PROTOCOL.md) · [GUI Protocol](docs/GUI_PROTOCOL.md) · [Go TUI Renderer](docs/CHARM_TUI.md) · [Architecture Decisions (ADRs)](https://github.com/jsmestad/minga/tree/main/docs/adr) · [Design System](docs/design/README.md)
+
+Working on Minga itself? [Contributing](CONTRIBUTING.md) is the index for contributor docs: testing, performance gates, releasing, and the step-by-step recipes.
 
 ## License & acknowledgements
 

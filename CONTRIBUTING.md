@@ -101,6 +101,9 @@ See `AGENTS.md` (in the repo root) for the full project structure, coding standa
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Supervision tree, layer rules, and rendering pipeline |
 | [docs/AUTOMATION-IPC.md](docs/AUTOMATION-IPC.md) | Native macOS `minga-ipc` readiness and navigation receipts |
 | [docs/MACOS_ACCESSIBILITY_TESTING.md](https://github.com/jsmestad/minga/blob/main/docs/MACOS_ACCESSIBILITY_TESTING.md) | Real launched-app macOS accessibility validation |
+| [docs/SNAPSHOT_TESTING.md](docs/SNAPSHOT_TESTING.md) | Screen snapshot tests: what they catch, the file format, and how to write one |
+| [docs/PERFORMANCE.md](docs/PERFORMANCE.md) | Rendering performance gates and how to read them |
+| [docs/RELEASING.md](docs/RELEASING.md) | Preparing, verifying and publishing builds and the site |
 | `AGENTS.md` | Coding standards, project structure, how to add features |
 
 ## How to Add Things
@@ -113,6 +116,7 @@ Step-by-step recipes live under `docs/recipes/`:
 - **New or modified agent tool:** [docs/recipes/new-agent-tool.md](https://github.com/jsmestad/minga/blob/main/docs/recipes/new-agent-tool.md)
 - **New render command:** [docs/recipes/new-render-command.md](https://github.com/jsmestad/minga/blob/main/docs/recipes/new-render-command.md)
 - **New tree-sitter grammar:** [docs/recipes/new-grammar.md](https://github.com/jsmestad/minga/blob/main/docs/recipes/new-grammar.md)
+- **Update screen snapshots:** [docs/recipes/update-snapshots.md](https://github.com/jsmestad/minga/blob/main/docs/recipes/update-snapshots.md)
 
 ## Performance Debugging with Telemetry
 

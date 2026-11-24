@@ -45,7 +45,7 @@ If this run uploaded, its last step compares the served signed indexes byte for 
 
 The job needs four repository secrets: `PACKAGE_SIGNING_KEY` (the armored private key), `R2_ACCESS_KEY_ID` and `R2_SECRET_ACCESS_KEY` (an R2 API token with Object Read & Write on `minga-packages` only), and the existing `CLOUDFLARE_ACCOUNT_ID`. Without them, the job skips with a notice. `test/scripts/package_repos_e2e.sh` runs steps 2 and 3 in CI with fixture packages and a throwaway key.
 
-The signing key is `Minga Packages <packages@mingacode.dev>`, fingerprint `2C5D 2396 B82C 1278 D459  6A09 6571 1C0C 3853 857B`. It is RSA 4096 and does not expire. The maintainer keeps the private key and its revocation certificate outside GitHub, because the secret cannot be read back. If the key leaks, publish the revocation certificate, generate a new key, replace `PACKAGE_SIGNING_KEY`, and update the fingerprint in this guide, `docs/GETTING-STARTED.md`, `README.md` and the site. Every user then has to import the new key.
+The signing key is `Minga Packages <packages@mingacode.dev>`, fingerprint `2C5D 2396 B82C 1278 D459  6A09 6571 1C0C 3853 857B`. It is RSA 4096 and does not expire. The maintainer keeps the private key and its revocation certificate outside GitHub, because the secret cannot be read back. If the key leaks, publish the revocation certificate, generate a new key, replace `PACKAGE_SIGNING_KEY`, and update the fingerprint in this guide, `site/getting-started.html` and `site/index.html`. Every user then has to import the new key.
 
 If a build or upload fails, the tap keeps its current version. If publication succeeds but the tap push fails, rerun only the failed publishing job so it reuses the original verified artifacts. Do not rerun the build to replace released bytes. A stale run cannot replace a newer formula and cask. Check the public release and `brew upgrade` on Apple Silicon to confirm delivery; package boot checks are not native upgrade evidence.
 
@@ -237,5 +237,5 @@ Perform this cutover only after explicit v0.1.0 release approval and publication
 
 1. Attach `mingacode.dev` as the primary custom domain on the `mingacode-site` Worker, configure `mingacode.com` to 301-redirect to `https://mingacode.dev/` (preserving path), and verify TLS issuance on both domains.
 2. Remove `X-Robots-Tag: noindex, nofollow` from `site/_headers`, remove `<meta name="robots" content="noindex, nofollow">` from `site/` HTML pages, update `site/robots.txt` to allow crawling, and drop `--expect-noindex` from `.github/workflows/site.yml`.
-3. Verify `https://mingacode.dev/`, `https://mingacode.dev/docs/`, and legacy redirects (`/getting-started.html` -> `/docs/getting-started.html`) return expected status codes and assets.
+3. Verify `https://mingacode.dev/`, `https://mingacode.dev/docs/`, and legacy redirects (`/getting-started.html` and `/docs/getting-started.html` -> `/getting-started`) return expected status codes and assets.
 4. Replace the legacy GitHub Pages artifact in `.github/workflows/ci.yml` with a redirect stub pointing `https://jsmestad.github.io/minga/` to `https://mingacode.dev/docs/`.

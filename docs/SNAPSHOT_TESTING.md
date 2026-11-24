@@ -2,23 +2,9 @@
 
 Minga uses plain-text screen snapshots to catch UI regressions. Each snapshot captures the full terminal screen (text content, cursor position, cursor shape, mode) at a specific point during a test. When the UI changes, the test diffs the current output against the saved baseline and fails if they don't match.
 
-## Quick reference
+To run the tests, read a failure, and regenerate baselines, follow [Update screen snapshots](recipes/update-snapshots.md). That recipe is the one procedure; this page explains what snapshots are and how to write a test that uses them.
 
-```bash
-# Run snapshot tests
-mix test.llm test/minga_editor/integration/
-
-# Update ALL baselines after an intentional UI change
-UPDATE_SNAPSHOTS=1 mix test test/minga_editor/integration/
-
-# Update baselines for a single test file
-UPDATE_SNAPSHOTS=1 mix test test/minga_editor/integration/snapshot_test.exs
-
-# Update a single test's baseline
-UPDATE_SNAPSHOTS=1 mix test test/minga_editor/integration/snapshot_test.exs:21
-```
-
-## When to update snapshots
+## When a baseline should change
 
 **Update when** the UI intentionally changes:
 - Modeline format changed (added a segment, changed spacing)
@@ -28,28 +14,16 @@ UPDATE_SNAPSHOTS=1 mix test test/minga_editor/integration/snapshot_test.exs:21
 - Theme color names changed (snapshots don't capture colors, but cursor shape names appear in metadata)
 - New chrome elements added (status indicators, breadcrumbs)
 
-**Don't update when** a test fails unexpectedly. That's the snapshot catching a real bug. Read the diff first.
+**Don't update when** a test fails unexpectedly. That's the snapshot catching a real bug. Read the diff first. The failure message shows exactly what changed:
 
-## Workflow for UI changes
-
-1. Make your UI change in the editor code.
-2. Run `mix test.llm test/minga_editor/integration/`. Some snapshot tests will fail.
-3. Read each diff carefully. The failure message shows exactly what changed:
-   ```
-   Diff (- expected, + actual):
-     # Cursor: (1, 3) block
-     # Mode: normal
-     ────────────────────────────────────────
-   - 22│ NORMAL  [scratch]        Text  1:1  Top
-   + 22│ NORMAL  [scratch]    ●   Text  1:1  Top
-   ```
-4. If every diff looks correct (matches your intentional change), update the baselines:
-   ```bash
-   UPDATE_SNAPSHOTS=1 mix test test/minga_editor/integration/
-   ```
-5. Verify the updated baselines pass: `mix test.llm test/minga_editor/integration/`
-6. `git diff test/snapshots/` to review what changed. The diffs should be reviewable in a PR.
-7. Commit the updated `.snap` files alongside the code change.
+```
+Diff (- expected, + actual):
+  # Cursor: (1, 3) block
+  # Mode: normal
+  ────────────────────────────────────────
+- 22│ NORMAL  [scratch]        Text  1:1  Top
++ 22│ NORMAL  [scratch]    ●   Text  1:1  Top
+```
 
 ## Snapshot file format
 
@@ -98,7 +72,7 @@ end
 
 The snapshot name must be unique within the module. **Avoid names that differ only by case** (e.g., `insert_a` vs `insert_A`) because macOS has a case-insensitive filesystem and they'll collide.
 
-When you first run a new test, it will fail because no baseline exists. Run with `UPDATE_SNAPSHOTS=1` to create the initial baseline, then verify it looks right before committing.
+When you first run a new test, it will fail because no baseline exists. Create the initial baseline with the focused update in [Update screen snapshots](recipes/update-snapshots.md), then verify it looks right before committing.
 
 ## When NOT to use snapshots
 

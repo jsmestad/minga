@@ -78,18 +78,18 @@ set :agent_hooks, [
 
 ## Event taxonomy
 
-The hook config includes an explicit event name because hooks will cover more agent lifecycle points over time. Only `PreToolUse` is active today. Other names are reserved so future config and docs have a stable vocabulary, but declaring them is rejected until they are implemented.
+The hook config includes an explicit event name because hooks will cover more agent lifecycle points over time. Minga dispatches every event marked Implemented below. `PreToolUse`, `UserPromptSubmit` and `PreCompact` can veto. The rest only observe: Minga logs a non-zero exit and continues. `SubagentStop` is reserved so config and docs have a stable name for it, but declaring it is rejected until it is implemented.
 
 | Event | Implemented | Can veto | When it runs | Payload fields |
 | --- | --- | --- | --- | --- |
 | `PreToolUse` | Yes | Yes | Before a matching tool callback executes. | `event`, `tool_call_id`, `tool_name`, `arguments` |
-| `PostToolUse` | No | No | After a tool completes. | `event`, `tool_call_id`, `tool_name`, `arguments`, `result`, `is_error` |
-| `SessionStart` | No | No | When an agent session starts. | `event`, `session_id`, `model`, `provider`, `project_root` |
-| `SessionEnd` | No | No | When an agent session ends or is cleared. | `event`, `session_id`, `reason`, `status` |
-| `UserPromptSubmit` | No | Yes | Before a user prompt is sent to the model. | `event`, `session_id`, `prompt`, `attachments` |
-| `Stop` | No | No | When the main agent turn stops. | `event`, `session_id`, `reason`, `last_message` |
+| `PostToolUse` | Yes | No | After a tool completes. | `event`, `tool_call_id`, `tool_name`, `arguments`, `result`, `output`, `is_error` |
+| `SessionStart` | Yes | No | When an agent session starts. | `event`, `session_id`, `model`, `provider`, `project_root` |
+| `SessionEnd` | Yes | No | When an agent session ends or is cleared. | `event`, `session_id`, `reason`, `status` |
+| `UserPromptSubmit` | Yes | Yes | Before a user prompt is sent to the model. | `event`, `session_id`, `prompt` |
+| `Stop` | Yes | No | When the main agent turn stops. | `event`, `session_id`, `reason`, `last_message` |
 | `SubagentStop` | No | No | When a sub-agent finishes. | `event`, `parent_session_id`, `subagent_session_id`, `result`, `is_error` |
-| `PreCompact` | No | Yes | Before conversation compaction runs. | `event`, `session_id`, `message_count`, `token_estimate` |
-| `Notification` | No | No | When the agent sends a user notification. | `event`, `session_id`, `kind`, `message` |
+| `PreCompact` | Yes | Yes | Before conversation compaction runs. | `event`, `session_id` (always `null` today), `message_count` |
+| `Notification` | Yes | No | When the agent sends a user notification. | `event`, `session_id`, `kind`, `message` |
 
-Payload fields for reserved events are a planned contract, not a runtime guarantee in this ticket. The implemented `PreToolUse` payload above is the only schema user scripts can rely on today.
+The payload fields for `SubagentStop` are a planned contract, not a runtime guarantee. Only `PreToolUse` has a worked example in this guide.

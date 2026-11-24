@@ -642,7 +642,7 @@ These run before format-on-save, so the formatter gets clean input.
 
 ## Syntax highlighting
 
-Minga uses [tree-sitter](https://tree-sitter.github.io/) for syntax highlighting. 39 languages are supported out of the box. Highlighting activates automatically when a file's type is detected. No configuration needed.
+Minga uses [tree-sitter](https://tree-sitter.github.io/) for syntax highlighting. It bundles 50 tree-sitter grammars, which cover the languages below out of the box. Highlighting activates automatically when a file's type is detected. No configuration needed.
 
 ### Supported languages
 
@@ -652,6 +652,7 @@ Minga uses [tree-sitter](https://tree-sitter.github.io/) for syntax highlighting
 | C | `.c`, `.h` |
 | C# | `.cs`, `.csx` |
 | C++ | `.cpp`, `.cc`, `.cxx`, `.hpp` |
+| Clojure | `.clj`, `.cljs`, `.cljc`, `.edn` |
 | CSS | `.css` |
 | Dart | `.dart` |
 | Diff | `.diff`, `.patch` |
@@ -659,6 +660,7 @@ Minga uses [tree-sitter](https://tree-sitter.github.io/) for syntax highlighting
 | Elisp | `.el` |
 | Elixir | `.ex`, `.exs` |
 | Erlang | `.erl`, `.hrl` |
+| Fish | `.fish` |
 | Gleam | `.gleam` |
 | Go | `.go` |
 | GraphQL | `.graphql`, `.gql` |
@@ -666,6 +668,7 @@ Minga uses [tree-sitter](https://tree-sitter.github.io/) for syntax highlighting
 | HCL / Terraform | `.tf`, `.tfvars`, `.hcl` |
 | HEEx | `.heex`, `.leex` |
 | HTML | `.html`, `.htm` |
+| INI | `.ini`, `.editorconfig`, `.gitconfig`, `.gitmodules` |
 | Java | `.java` |
 | JavaScript | `.js`, `.mjs`, `.cjs`, `.jsx` |
 | JSON | `.json`, `.jsonc` |
@@ -674,19 +677,28 @@ Minga uses [tree-sitter](https://tree-sitter.github.io/) for syntax highlighting
 | Make | `Makefile`, `.mk`, `.mak` |
 | Markdown | `.md`, `.markdown` |
 | Nix | `.nix` |
+| Objective-C | `.m`, `.mm` |
 | OCaml | `.ml`, `.mli` |
+| Perl | `.pl`, `.pm`, `.t` |
 | PHP | `.php`, `.phtml` |
+| Protobuf | `.proto` |
 | Python | `.py`, `.pyi` |
 | R | `.r`, `.rmd` |
 | Ruby | `.rb`, `.rake`, `.gemspec` |
 | Rust | `.rs` |
 | Scala | `.scala`, `.sbt`, `.sc` |
 | SCSS | `.scss`, `.sass` |
+| SQL | `.sql` |
+| Swift | `.swift` |
 | TOML | `.toml` |
 | TSX | `.tsx` |
 | TypeScript | `.ts`, `.mts`, `.cts` |
+| Vim script | `.vim`, `.vimrc` |
+| XML | `.xml`, `.svg` |
 | YAML | `.yaml`, `.yml` |
 | Zig | `.zig`, `.zon` |
+
+Each row is one grammar, except Markdown, which uses two: one for block structure and one for inline spans.
 
 ### Customizing highlight colors
 
