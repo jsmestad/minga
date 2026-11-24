@@ -15,7 +15,18 @@ defmodule Minga.Log.MessagesBuffer do
     broadcast entry to that buffer with a timestamp prefix.
   - Drains any entries the `Minga.LoggerHandler` ETS pre-subscribe
     buffer captured before this process was up.
-  - Trims the buffer to `@max_lines` lines so it stays bounded.
+  - Trims the buffer to `@max_lines` lines and `@max_bytes` total bytes
+    using a single atomic `Buffer.bounded_append/4` call per entry.
+
+  ## Bounds
+
+  Three independent limits keep the buffer from growing without bound:
+
+  - `@max_lines` (1000) — newest N entries retained, oldest dropped.
+  - `@max_bytes` (512 KB) — total retained bytes; additional oldest
+    lines are dropped when the byte limit is reached before the line limit.
+  - `@max_entry_bytes` (8 KB) — individual entries are truncated at a
+    UTF-8 boundary before they reach the buffer.
 
   ## Boot order
 
@@ -33,6 +44,8 @@ defmodule Minga.Log.MessagesBuffer do
   alias Minga.LoggerHandler
 
   @max_lines 1000
+  @max_bytes 512_000
+  @max_entry_bytes 8_192
 
   @doc """
   Returns the pid of the singleton `*Messages*` buffer, or `nil` if the
@@ -43,6 +56,18 @@ defmodule Minga.Log.MessagesBuffer do
   """
   @spec pid() :: pid() | nil
   def pid, do: :persistent_term.get(__MODULE__, nil)
+
+  @doc "Maximum number of lines retained in the buffer."
+  @spec max_lines() :: pos_integer()
+  def max_lines, do: @max_lines
+
+  @doc "Maximum total bytes retained in the buffer."
+  @spec max_bytes() :: pos_integer()
+  def max_bytes, do: @max_bytes
+
+  @doc "Maximum bytes per individual entry before truncation."
+  @spec max_entry_bytes() :: pos_integer()
+  def max_entry_bytes, do: @max_entry_bytes
 
   @doc false
   @spec start_link(keyword()) :: GenServer.on_start()
@@ -107,22 +132,15 @@ defmodule Minga.Log.MessagesBuffer do
   @spec append(pid(), String.t()) :: :ok
   defp append(buffer, text) do
     time = Calendar.strftime(DateTime.utc_now(), "%H:%M:%S")
-    Buffer.append(buffer, "[#{time}] #{text}\n")
-    maybe_trim(buffer)
+    entry = truncate_entry("[#{time}] #{text}")
+    Buffer.bounded_append(buffer, entry <> "\n", @max_lines, @max_bytes)
     :ok
   end
 
-  @spec maybe_trim(pid()) :: :ok
-  defp maybe_trim(buffer) do
-    line_count = Buffer.line_count(buffer)
+  @spec truncate_entry(String.t()) :: String.t()
+  defp truncate_entry(text) when byte_size(text) <= @max_entry_bytes, do: text
 
-    if line_count > @max_lines do
-      excess = line_count - @max_lines
-      content = Buffer.content(buffer)
-      trimmed = content |> String.split("\n") |> Enum.drop(excess) |> Enum.join("\n")
-      Buffer.replace_generated_content(buffer, trimmed)
-    end
-
-    :ok
+  defp truncate_entry(text) do
+    String.byte_slice(text, 0, @max_entry_bytes) <> "...[truncated]"
   end
 end

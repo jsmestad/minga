@@ -983,6 +983,22 @@ defmodule Minga.Buffer.Process do
     GenServer.call(server, {:append, text})
   end
 
+  @doc """
+  Appends text at the end of the buffer, then trims the oldest lines
+  to stay within `max_lines` and `max_bytes` limits.
+
+  Bypasses read-only. Work is proportional to the appended text and
+  removed prefix, not the full buffer: the gap buffer insert is O(text),
+  and `trim_leading_lines` slices binaries without materializing content.
+
+  Designed for bounded log buffers like `*Messages*`.
+  """
+  @spec bounded_append(GenServer.server(), String.t(), pos_integer(), pos_integer()) :: :ok
+  def bounded_append(server, text, max_lines, max_bytes)
+      when is_binary(text) and max_lines > 0 and max_bytes > 0 do
+    GenServer.call(server, {:bounded_append, text, max_lines, max_bytes})
+  end
+
   alias Minga.Buffer.RenderSnapshot
   alias Minga.Buffer.RendererConsume
   alias Minga.Buffer.SyncSnapshot
@@ -2248,6 +2264,37 @@ defmodule Minga.Buffer.Process do
 
     new_buf = Cursor.place(new_buf, {last_line, last_col})
     new_state = rebuild_conflict_index(%{state | document: new_buf})
+    {:reply, :ok, new_state}
+  end
+
+  def handle_call({:bounded_append, text, max_lines, max_bytes}, _from, state) do
+    doc = state.document
+
+    # Insert at the current cursor position. For bounded-append buffers the
+    # cursor stays at the end after each call, so insert_text appends in
+    # O(|text|) without materializing the existing content.
+    doc = Document.insert_text(doc, text)
+
+    total_lines = Document.line_count(doc)
+    total_bytes = Document.content_byte_size(doc)
+
+    lines_to_drop = max(0, total_lines - max_lines)
+
+    lines_to_drop =
+      if total_bytes > max_bytes do
+        max(lines_to_drop, lines_for_byte_target(doc, total_bytes - max_bytes))
+      else
+        lines_to_drop
+      end
+
+    doc =
+      if lines_to_drop > 0 do
+        Document.trim_leading_lines(doc, lines_to_drop)
+      else
+        doc
+      end
+
+    new_state = rebuild_conflict_index(%{state | document: doc})
     {:reply, :ok, new_state}
   end
 
@@ -3924,6 +3971,27 @@ defmodule Minga.Buffer.Process do
   @spec rebuild_conflict_index(state()) :: state()
   defp rebuild_conflict_index(state) do
     %{state | conflict_index: ConflictIndex.new(state.document)}
+  end
+
+  # Returns the minimum number of leading lines whose cumulative byte
+  # offset reaches `min_bytes`. Used by bounded_append to satisfy a byte
+  # capacity limit after the line-count trim.
+  @spec lines_for_byte_target(Document.t(), non_neg_integer()) :: non_neg_integer()
+  defp lines_for_byte_target(_doc, min_bytes) when min_bytes <= 0, do: 0
+
+  defp lines_for_byte_target(doc, min_bytes) do
+    total = Document.line_count(doc)
+    do_lines_for_byte_target(doc, min_bytes, 1, total)
+  end
+
+  defp do_lines_for_byte_target(_doc, _target, line, total) when line >= total, do: total
+
+  defp do_lines_for_byte_target(doc, target, line, total) do
+    if Lines.start_of(doc, line) >= target do
+      line
+    else
+      do_lines_for_byte_target(doc, target, line + 1, total)
+    end
   end
 
   @spec sync_snapshot_changes(state(), :full | ChangeLog.sequence()) :: SyncSnapshot.changes()
