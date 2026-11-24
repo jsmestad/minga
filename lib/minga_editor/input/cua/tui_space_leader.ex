@@ -31,8 +31,8 @@ defmodule MingaEditor.Input.CUA.TUISpaceLeader do
   @behaviour MingaEditor.Input.Handler
 
   alias Minga.Buffer
-  alias MingaEditor.BottomPanel
   alias MingaEditor.Commands
+  alias MingaEditor.Input.CUA.SpaceTarget
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.State, as: EditorState
@@ -42,8 +42,6 @@ defmodule MingaEditor.Input.CUA.TUISpaceLeader do
   @space 32
   @timeout_ms 200
 
-  @typep space_target :: {:buffer, pid()} | :composer | :no_text
-
   @impl true
   @spec handle_key(EditorState.t(), non_neg_integer(), non_neg_integer()) ::
           MingaEditor.Input.Handler.result()
@@ -51,7 +49,7 @@ defmodule MingaEditor.Input.CUA.TUISpaceLeader do
   # SPC with no modifiers: the focused surface decides what the space is.
   def handle_key(state, @space, 0) do
     if active?(state) and not pending?(state) do
-      handle_space(state, space_target(state))
+      handle_space(state, SpaceTarget.resolve(state))
     else
       {:passthrough, state}
     end
@@ -63,11 +61,12 @@ defmodule MingaEditor.Input.CUA.TUISpaceLeader do
     handle_non_space_key(state, cp, mods, pending?(state), active_leader_node(state))
   end
 
-  # A focused composer owns its text in a lower handler; SPC is a plain space there.
-  # Otherwise type the space into the focused file buffer, if any, and open the
-  # retract window.
-  @spec handle_space(EditorState.t(), space_target()) :: MingaEditor.Input.Handler.result()
-  defp handle_space(state, :composer), do: {:passthrough, state}
+  # A focused composer or overlay owns its text in another handler; SPC is a plain
+  # space there. Otherwise type the space into the focused file buffer, if any,
+  # and open the retract window.
+  @spec handle_space(EditorState.t(), SpaceTarget.t()) :: MingaEditor.Input.Handler.result()
+  defp handle_space(state, {:composer, _prompt}), do: {:passthrough, state}
+  defp handle_space(state, :overlay), do: {:passthrough, state}
 
   defp handle_space(state, target) do
     {generation, state} = begin_window(state, type_space(target))
@@ -164,25 +163,6 @@ defmodule MingaEditor.Input.CUA.TUISpaceLeader do
     do: TraditionalState.space_leader_buffer(shell_state)
 
   defp space_buffer(_state), do: nil
-
-  # Where a space goes: into the focused file buffer, to a focused Agent composer,
-  # or nowhere on a surface without text (Agent chat navigation, a focused bottom
-  # panel), whose hidden file buffer must not change.
-  @spec space_target(EditorState.t()) :: space_target()
-  defp space_target(%EditorState{} = state) do
-    %TraditionalState{bottom_panel: panel} = Runtime.state(state.shell_runtime)
-    if BottomPanel.focused?(panel), do: :no_text, else: surface_space_target(state.workspace)
-  end
-
-  @spec surface_space_target(MingaEditor.Session.State.t()) :: space_target()
-  defp surface_space_target(%{keymap_scope: :agent, agent_ui: %{panel: %{input_focused: true}}}),
-    do: :composer
-
-  defp surface_space_target(%{keymap_scope: :editor, buffers: %{active: buf}})
-       when is_pid(buf),
-       do: {:buffer, buf}
-
-  defp surface_space_target(_workspace), do: :no_text
 
   @spec type_space({:buffer, pid()} | :no_text) :: pid() | nil
   defp type_space(:no_text), do: nil

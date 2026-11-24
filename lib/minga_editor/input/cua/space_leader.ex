@@ -11,7 +11,14 @@ defmodule MingaEditor.Input.CUA.SpaceLeader do
     space leader is inactive or the key matches no leader binding, replay
     the withheld space and the key through the input router.
   - `space_leader_retract`: fallback chord after the grace period.
-    A space was already sent. Delete it, then enter leader mode.
+    A space was already sent as an ordinary key. Delete it from the
+    surface that took it, then enter leader mode.
+
+  `note_key/3` runs at key ingress and records where each such space
+  goes (`CUA.SpaceTarget`), so the retract deletes it from that surface
+  only. A file buffer hidden behind Agent chat or a focused bottom panel
+  never loses a character, and a space typed into an overlay stays there
+  with the next key.
 
   The Swift side handles all timing and keyUp tracking. The BEAM side
   is stateless: it receives gui_actions and reacts.
@@ -24,6 +31,10 @@ defmodule MingaEditor.Input.CUA.SpaceLeader do
 
   alias Minga.Buffer
   alias MingaEditor.Commands
+  alias MingaEditor.Commands.Agent, as: AgentCommands
+  alias MingaEditor.Input.CUA.SpaceTarget
+  alias MingaEditor.Shell.Runtime
+  alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.State, as: EditorState
   alias Minga.Keymap
 
@@ -65,24 +76,30 @@ defmodule MingaEditor.Input.CUA.SpaceLeader do
   """
   @spec handle_retract(EditorState.t(), non_neg_integer(), non_neg_integer()) :: EditorState.t()
   def handle_retract(state, codepoint, modifiers) do
+    held = held_space(state)
+    state = hold_space(state, nil)
+
     if active?(state) do
-      trie = leader_trie(state)
-
-      case lookup_leader(trie, codepoint, modifiers) do
-        {:match, node} ->
-          state = retract_space(state)
-          enter_leader(state, node)
-
-        :no_match ->
-          # Key doesn't match. Leave the space, process key normally.
-          dispatch_key_normally(state, codepoint, modifiers)
-      end
+      retract_into_leader(state, held, codepoint, modifiers)
     else
       # Space leader not active. The grace timer already fired and sent
       # the space, so it's in the buffer. Just dispatch the key normally.
       dispatch_key_normally(state, codepoint, modifiers)
     end
   end
+
+  @doc """
+  Records where a frontend-sent SPC goes, before the key is routed.
+
+  The macOS frontend sends a held SPC as an ordinary key and the next key as a `space_leader_retract`. Recording the target here lets `handle_retract/3` remove the space from the surface that took it. Every other key clears the record, so a retract never acts on an older space. The terminal frontend keeps its own window in `CUA.TUISpaceLeader`.
+  """
+  @spec note_key(EditorState.t(), non_neg_integer(), non_neg_integer()) :: EditorState.t()
+  def note_key(%EditorState{frontend: %{backend: backend}} = state, ?\s, 0)
+      when backend != :tui do
+    if active?(state), do: hold_space(state, SpaceTarget.resolve(state)), else: state
+  end
+
+  def note_key(%EditorState{} = state, _codepoint, _modifiers), do: hold_space(state, nil)
 
   @doc """
   Returns true when the space leader feature is active.
@@ -116,19 +133,78 @@ defmodule MingaEditor.Input.CUA.SpaceLeader do
     |> dispatch_key_normally(codepoint, modifiers)
   end
 
-  @spec retract_space(EditorState.t()) :: EditorState.t()
-  defp retract_space(state) do
-    buf = state.workspace.buffers.active
+  # A leader key retracts the space from the surface that took it and starts the
+  # leader. With no recorded space, or a space an overlay took as text, the key
+  # goes to the focused surface like any other.
+  @spec retract_into_leader(
+          EditorState.t(),
+          SpaceTarget.t() | nil,
+          non_neg_integer(),
+          non_neg_integer()
+        ) :: EditorState.t()
+  defp retract_into_leader(state, held, codepoint, modifiers) when held in [nil, :overlay],
+    do: dispatch_key_normally(state, codepoint, modifiers)
 
-    if is_pid(buf) do
-      Buffer.break_undo_coalescing(buf)
-      Buffer.delete_before(buf)
-      Buffer.break_undo_coalescing(buf)
+  defp retract_into_leader(state, held, codepoint, modifiers) do
+    case lookup_leader(leader_trie(state), codepoint, modifiers) do
+      {:match, node} ->
+        state
+        |> retract_space(held)
+        |> enter_leader(node)
+
+      :no_match ->
+        # Key doesn't match. Leave the space, process key normally.
+        dispatch_key_normally(state, codepoint, modifiers)
     end
+  end
 
+  @spec retract_space(EditorState.t(), SpaceTarget.t()) :: EditorState.t()
+  defp retract_space(state, {:buffer, buf}) do
+    Buffer.break_undo_coalescing(buf)
+    Buffer.delete_before(buf)
+    Buffer.break_undo_coalescing(buf)
     state
   catch
     :exit, _ -> state
+  end
+
+  # Only the composer that took the space loses it; a composer swapped in since
+  # then is left alone.
+  defp retract_space(
+         %{workspace: %{agent_ui: %{panel: %{prompt_buffer: prompt}}}} = state,
+         {:composer, prompt}
+       )
+       when is_pid(prompt),
+       do: AgentCommands.input_backspace(state)
+
+  defp retract_space(state, _no_text_or_stale_composer), do: state
+
+  @spec held_space(EditorState.t()) :: SpaceTarget.t() | nil
+  defp held_space(%EditorState{} = state) do
+    case Runtime.state(state.shell_runtime) do
+      %TraditionalState{} = shell_state -> TraditionalState.held_space(shell_state)
+      _extension_state -> nil
+    end
+  end
+
+  @spec hold_space(EditorState.t(), SpaceTarget.t() | nil) :: EditorState.t()
+  defp hold_space(%EditorState{} = state, target) do
+    case Runtime.state(state.shell_runtime) do
+      %TraditionalState{} = shell_state ->
+        if TraditionalState.held_space(shell_state) == target do
+          state
+        else
+          shell_state = TraditionalState.hold_space(shell_state, target)
+
+          %{
+            state
+            | shell_runtime: Runtime.install_traditional_state(state.shell_runtime, shell_state)
+          }
+        end
+
+      _extension_state ->
+        state
+    end
   end
 
   @spec dispatch_key_normally(EditorState.t(), non_neg_integer(), non_neg_integer()) ::

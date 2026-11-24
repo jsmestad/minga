@@ -662,4 +662,13 @@ defmodule MingaEditor.Shell.Traditional.State do
   @spec reset_space_leader(t()) :: t()
   def reset_space_leader(%__MODULE__{} = state),
     do: %{state | input: InputState.reset_space_leader(state.input)}
+
+  @doc "Records where a frontend-sent space went, or nil when the last key was not a space."
+  @spec hold_space(t(), MingaEditor.Input.CUA.SpaceTarget.t() | nil) :: t()
+  def hold_space(%__MODULE__{} = state, target),
+    do: %{state | input: InputState.hold_space(state.input, target)}
+
+  @doc "Returns where the last frontend-sent space went, or nil."
+  @spec held_space(t()) :: MingaEditor.Input.CUA.SpaceTarget.t() | nil
+  def held_space(%__MODULE__{input: input}), do: InputState.held_space(input)
 end

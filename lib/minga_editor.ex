@@ -913,6 +913,7 @@ defmodule MingaEditor do
     # Record the input correlation sequence (ticket #2215) so the render that
     # this keystroke triggers echoes it on commit_frame for latency resolution.
     state = %{state | frontend: MingaEditor.State.Frontend.correlate_input(state.frontend, seq)}
+    state = Input.CUA.SpaceLeader.note_key(state, codepoint, modifiers)
 
     new_state =
       Minga.Telemetry.span([:minga, :input, :dispatch], %{input_seq: seq}, fn ->
