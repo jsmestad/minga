@@ -51,7 +51,7 @@
     </div>
   </header>
 
-  <main id="main">
+  <main id="main" data-build="today">
     <header class="essay-hero">
       <div class="container">
         <p class="section-index"><span>GUIDE</span> Quickstart</p>
@@ -125,7 +125,7 @@ bin/minga             # builds and starts terminal client</code></pre>
           </ul>
 
           <h3>Vim modal default (with optional desktop shortcuts)</h3>
-          <p>Minga is Vim-first by default: pressing <strong>Spacebar</strong> (written <kbd>SPC</kbd>) in Normal mode opens an interactive command menu that narrows as you type (<code>f</code> for files, <code>b</code> for buffers, <code>s</code> for search, <code>a</code> for agent). Prefer standard desktop shortcuts (<kbd>Cmd+C</kbd>/<kbd>Cmd+V</kbd>/<kbd>Cmd+S</kbd>, arrows, no modes)? Create or edit <code>~/.config/minga/config.exs</code> (or press <kbd>SPC f p</kbd> in Vim mode) and set <code>:editing_model</code> to <code>:cua</code> (note that CUA shortcuts for staged diff review are still being completed for v0.1.0):</p>
+          <p>Minga is Vim-first by default: pressing <strong>Spacebar</strong> (written <kbd>SPC</kbd>) in Normal mode opens an interactive command menu that narrows as you type (<code>f</code> for files, <code>b</code> for buffers, <code>s</code> for search, <code>a</code> for agent). Prefer standard desktop shortcuts (<kbd>⌘C</kbd>/<kbd>⌘V</kbd>/<kbd>⌘S</kbd>, arrows, no modes)? Create or edit <code>~/.config/minga/config.exs</code> (or press <kbd>SPC f p</kbd> in Vim mode) and set <code>:editing_model</code> to <code>:cua</code> (note that CUA shortcuts for staged diff review are still being completed for v0.1.0):</p>
 
           <div class="code-card">
             <div class="code-header">
@@ -154,11 +154,11 @@ set <span class="tok-atom">:tab_width</span>, <span class="tok-num">2</span></co
             </li>
             <li class="spec-row">
               <span class="spec-key"><kbd>SPC a a</kbd></span>
-              <span class="spec-detail"><strong>Open or close the Agent view</strong> (<code>SPC a t</code> is an alias on today's build).</span>
+              <span class="spec-detail"><strong>Open or close the Agent view.</strong> <span data-status="planned" data-since="v0.1.0"><kbd>SPC a a</kbd> opens the tasks drawer and <kbd>SPC a v</kbd> opens the conversation.</span></span>
             </li>
             <li class="spec-row">
-              <span class="spec-key"><kbd>SPC a p</kbd> / <kbd>SPC a P</kbd></span>
-              <span class="spec-detail"><strong>Publish or discard staged agent edits</strong> once a turn finishes.</span>
+              <span class="spec-key"><kbd>SPC a p</kbd></span>
+              <span class="spec-detail"><strong>Publish staged agent edits</strong> once a turn finishes, or click <strong>Discard</strong> on the same notice to drop them. <span data-status="planned" data-since="v0.1.0"><kbd>SPC a p</kbd> opens one <em>Publish edits…</em> prompt that offers publish or discard.</span></span>
             </li>
             <li class="spec-row">
               <span class="spec-key"><kbd>SPC f p</kbd> / <kbd>SPC h r</kbd></span>
@@ -215,13 +215,14 @@ set <span class="tok-atom">:tab_width</span>, <span class="tok-num">2</span></co
               <div>
                 <h3>Review staged hunks or edit your buffer directly</h3>
                 <p>Click <strong>Review</strong> on any changed file in the Agent view to open the read-only diff viewer. In Vim Normal mode with the viewer focused, jump between hunks with <kbd>]c</kbd> / <kbd>[c</kbd>, accept a hunk with <kbd>y</kbd> (or all with <kbd>Y</kbd>), or reject with <kbd>x</kbd> (or all with <kbd>X</kbd>). Need to edit directly or send more context? Switch to your open file buffer, edit with full LSP and undo intact, and press <kbd>SPC a b</kbd> (current unsaved buffer snapshot) or <kbd>SPC a D</kbd> (published file diagnostics) to attach context to an open draft.</p>
+                <p data-status="planned" data-since="v0.1.0"><code>*minga-review*</code> replaces this viewer: <kbd>]h</kbd> / <kbd>[h</kbd> move between changes, <kbd>y</kbd> keeps, <kbd>n</kbd> rejects, and <kbd>Y</kbd> keeps all after a y/n confirm. Context moves under <kbd>SPC a x</kbd>: <kbd>SPC a x b</kbd> attaches this buffer and <kbd>SPC a x d</kbd> this file's diagnostics.</p>
               </div>
             </li>
             <li class="step-item">
               <span class="step-badge">03</span>
               <div>
                 <h3>Publish with three-way merge</h3>
-                <p>Press <kbd>SPC a p</kbd> (or click <strong>Publish</strong> in the turn-end notice) to merge staged edits into open buffers and disk with undo intact, or <kbd>SPC a P</kbd> to discard them. If you edited overlapping lines yourself, Review opens conflict resolution (<kbd>x</kbd> for <strong>Keep mine</strong>, <kbd>y</kbd> for <strong>Use Agent version</strong>) instead of overwriting either change.</p>
+                <p>Press <kbd>SPC a p</kbd> (or click <strong>Publish</strong> in the turn-end notice) to merge staged edits into open buffers and disk with undo intact, or click <strong>Discard</strong> to drop them. If you edited overlapping lines yourself, Review opens conflict resolution (<kbd>x</kbd> for <strong>Keep mine</strong>, <kbd>y</kbd> for <strong>Use Agent version</strong>) instead of overwriting either change.</p>
               </div>
             </li>
           </ol>

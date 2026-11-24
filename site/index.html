@@ -58,7 +58,7 @@
       <div class="container">
         <div class="hero-copy">
           <h1>A programmable workbench where text is the interface.</h1>
-          <p class="hero-lead">Code editing, parallel agents, and Elixir workflows in one quiet, keyboard-first environment shared identically by macOS and the terminal. Built on the Erlang VM so every open file, language server, extension, and agent stays isolated, undo stays strictly yours, and chrome disappears until state changes.</p>
+          <p class="hero-lead">Code editing, parallel agents, and Elixir workflows in one quiet, keyboard-first environment shared identically by macOS and the terminal. Built on the Erlang VM so every open file, language server, extension, and agent stays isolated. <span data-status="planned" data-since="v0.1.0">Undo stays strictly yours, and chrome disappears until state changes.</span></p>
           <div class="actions">
             <a class="btn btn-primary" href="/getting-started">Get Started</a>
             <a class="btn" href="/why-minga">Why Minga</a>
@@ -89,9 +89,9 @@
           </div>
         </div>
 
-        <figure class="spine-figure" data-code-tabs>
+        <figure class="spine-figure" data-code-tabs data-status="planned" data-since="v0.1.0" data-pill="off">
           <div class="showcase-header">
-            <span>Interface tour · Select a feature to preview</span>
+            <span data-status="planned" data-since="v0.1.0">Interface tour · Select a feature to preview</span>
             <span>Catppuccin Frappé default<span class="desktop-only"> · ← / → keys</span></span>
           </div>
 
@@ -206,7 +206,7 @@
 
           <!-- FEATURE 2: SUBAGENT PEEK -->
           <div class="showcase-panel" role="tabpanel" id="panel-spec-peek" aria-labelledby="tab-spec-peek">
-            <p class="showcase-explain"><strong>Feature 02: Subagent Peek.</strong> Press <kbd>SPC a i</kbd> (or <kbd>↩</kbd> on a worker line) to inspect a running subagent in a split on the right. Step through siblings in place with <kbd>]t</kbd> / <kbd>[t</kbd> or message a subagent directly while your main thread and unsent draft stay untouched.</p>
+            <p class="showcase-explain"><strong>Feature 02: Subagent Peek.</strong> Press <kbd>SPC a i</kbd> (or <kbd>↩</kbd> on a worker line) to inspect a working subagent in a split on the right. Step through siblings in place with <kbd>]]</kbd> / <kbd>[[</kbd> or message a subagent directly while your main thread and unsent draft stay untouched.</p>
             <div class="spine-specimen" role="img" aria-label="Subagent peek split: parent conversation on left, subagent split on right with sibling glyph strip and direct composer">
               <div class="spine-titlebar">
                 <span class="spine-wordmark">minga</span>
@@ -242,10 +242,10 @@
                 <div class="ml-left">
                   <span class="ml-pill">NORMAL</span>
                   <span class="ml-file">*minga-subagent*</span>
-                  <span class="ml-dim">]t / [t siblings · q close</span>
+                  <span class="ml-dim">]] / [[ siblings · q close</span>
                 </div>
                 <div class="ml-right">
-                  <span class="ml-minga">◐ 3 running · 1 done</span>
+                  <span class="ml-minga">◐ 3 working · 1 done</span>
                 </div>
               </div>
             </div>
@@ -323,9 +323,9 @@
                       <span>*minga-review* · 2 files · +40 -12</span>
                       <span>Go Terminal UI</span>
                     </div>
-                    <div><span class="ml-minga">▚</span> lib/minga_agent/retry.ex</div>
-                    <div><span class="ml-minga">▐</span> &nbsp;├─ @@ 238 replaced 1 line with 4</div>
-                    <div><span class="ml-done">●</span> &nbsp;└─ test/retry_test.exs (+28)</div>
+                    <div>lib/minga_agent/retry.ex</div>
+                    <div>&nbsp;├─ @@ 238 replaced 1 line with 4</div>
+                    <div>&nbsp;└─ test/retry_test.exs (+28)</div>
                     <div class="specimen-tui-foot">y keep · n reject · = diff · Y keep all · q close</div>
                   </div>
                 </div>
@@ -351,11 +351,11 @@
       </div>
     </section>
 
-    <section class="section" id="marks">
+    <section class="section" id="marks" data-status="planned" data-since="v0.1.0" data-pill="off">
       <div class="container">
         <div class="section-header">
           <p class="section-index"><span>01</span> Interface</p>
-          <h2>Two visual marks carry the identity. Chrome speaks only when state changes.</h2>
+          <h2 data-status="planned" data-since="v0.1.0">Two visual marks carry the identity. Chrome speaks only when state changes.</h2>
           <p>Resting screens carry no icon rail, no permanent sidebar, no tab bar, and no separate agent workspace. Every color is a semantic theme role (<code>minga</code>, <code>you</code>, <code>needs_you</code>, <code>failure</code>, <code>done</code>) mapped by your chosen theme, defaulting to Catppuccin Frappé.</p>
         </div>
 
@@ -367,7 +367,7 @@
               <li class="twist-row">
                 <span class="twist-swatch"><svg xmlns="http://www.w3.org/2000/svg" width="10" height="24" viewBox="0 0 10 26" aria-hidden="true"><path d="M7 5 C7 11, 3 11, 3 17 L3 26" fill="none" stroke="#74628d" stroke-width="2.6" stroke-linecap="round"/><path d="M3 5 C3 11, 7 11, 7 17 L7 26" fill="none" stroke="#303446" stroke-width="5" stroke-linecap="round"/><path d="M3 5 C3 11, 7 11, 7 17 L7 26" fill="none" stroke="#ca9ee6" stroke-width="2.6" stroke-linecap="round"/></svg></span>
                 <strong>Minga unreviewed</strong>
-                <span>Braided <code>minga</code> strands (mauve in Frappé); click the crossing or press Spacebar + <kbd>g k</kbd> / <kbd>g r</kbd></span>
+                <span>Braided <code>minga</code> strands (mauve in Frappé); click the crossing or press <kbd>SPC a y</kbd> to keep and <kbd>SPC a d</kbd> to reject</span>
               </li>
               <li class="twist-row">
                 <span class="twist-swatch"><svg xmlns="http://www.w3.org/2000/svg" width="10" height="24" viewBox="0 0 10 26" aria-hidden="true"><path d="M3 0 L3 26" stroke="#8caaee" stroke-width="2.6"/><path d="M7 0 L7 26" stroke="#ca9ee6" stroke-width="2.6"/></svg></span>
@@ -428,7 +428,7 @@
         <div class="spine-rules">
           <div class="spine-rule">
             <h3>Vim keys stay Vim inside code.</h3>
-            <p>Inside a file, <kbd>y</kbd> always yanks and <kbd>n</kbd> always steps search. Review changes with leader keys (<kbd>SPC g k</kbd> / <kbd>SPC g r</kbd>), change text objects (<kbd>ih</kbd>/<kbd>ah</kbd>), <kbd>.</kbd> repeat, and line ranges. Bare single-letter actions live only in special buffers like <code>*minga-review*</code>.</p>
+            <p>Inside a file, <kbd>y</kbd> always yanks and <kbd>n</kbd> always steps search. Review changes with leader keys (<kbd>SPC a y</kbd> / <kbd>SPC a d</kbd>), change text objects (<kbd>ih</kbd>/<kbd>ah</kbd>), <kbd>.</kbd> repeat, and line ranges. Bare single-letter actions live only in special buffers like <code>*minga-review*</code>.</p>
           </div>
           <div class="spine-rule">
             <h3>One drawer at a time; code keeps its width.</h3>
@@ -450,27 +450,27 @@
           <p>Spawning agents is easy. Steering parallel runs, keeping partial diffs, and fixing edge cases without fighting your own editor is where you save the day.</p>
         </div>
 
-        <div class="feature-grid">
+        <div class="feature-grid" data-status="planned" data-since="v0.1.0" data-pill="off">
           <div class="feature-cell">
-            <span class="feature-k">01 / Authorship &amp; Undo</span>
+            <span class="feature-k" data-status="planned" data-since="v0.1.0">01 / Authorship &amp; Undo</span>
             <h3>Per-author undo and shared edits</h3>
             <p>Pressing <kbd>u</kbd> or <kbd>⌘Z</kbd> undoes only your own edits, never deleting Minga's work out from under you. Agent changes are grouped per step behind revision checks and crash-safe staging, surface cleanly through the Twist gutter and <code>*minga-review*</code>, fill standard quickfix via <code>:Minga review</code>, and prompt before accepting a hunk that still has an LSP error.</p>
           </div>
 
           <div class="feature-cell">
-            <span class="feature-k">02 / Parallel Agents</span>
+            <span class="feature-k" data-status="planned" data-since="v0.1.0">02 / Parallel Agents</span>
             <h3>Subagent trees and live peek in place</h3>
             <p>When a task fans out, <code>*minga-tasks*</code> renders the subagent tree with live state shapes. Press <kbd>SPC a i</kbd> to peek at any worker in a right split with a sibling strip (<code>◐ ◐ ● ◐  3 of 4</code>), folded brief, live steps, and a direct composer to message that subagent without retargeting your main thread or discarding an unsent draft.</p>
           </div>
 
           <div class="feature-cell">
-            <span class="feature-k">03 / Buffers All the Way Down</span>
+            <span class="feature-k" data-status="planned" data-since="v0.1.0">03 / Buffers All the Way Down</span>
             <h3>Steer mid-flight or edit your prompt queue like code</h3>
-            <p>Send a message in Normal mode (<kbd>↩</kbd> or <kbd>⌘↩</kbd>) to steer a running agent immediately, or press <kbd>⌥↩</kbd> to queue follow-ups in <code>*minga-queue*</code>, an ordinary editable buffer where <kbd>dd</kbd> and <kbd>p</kbd> reorder upcoming prompts. Pause after Spacebar (<kbd>SPC</kbd>) anytime to see live counts right inside which-key.</p>
+            <p>Send a message in Normal mode (<kbd>↩</kbd> or <kbd>⌘↩</kbd>) to steer Minga while it works, or press <kbd>⌥↩</kbd> to queue follow-ups in <code>*minga-queue*</code>, an ordinary editable buffer where <kbd>dd</kbd> and <kbd>p</kbd> reorder upcoming prompts. Pause after Spacebar (<kbd>SPC</kbd>) anytime to see live counts right inside which-key.</p>
           </div>
 
           <div class="feature-cell">
-            <span class="feature-k">04 / Anti-Misfire Craft</span>
+            <span class="feature-k" data-status="planned" data-since="v0.1.0">04 / Anti-Misfire Craft</span>
             <h3>Interrupt by need, never by focus</h3>
             <p>You are mid-sentence in Insert mode when a background task asks to run a destructive command. Your cursor never jumps. Only <code>needs_you</code> lights up in the modeline and background notifications, an auto-opened drawer locks single-letter approval keys for 300 ms so a keystroke in flight can never hit <kbd>y</kbd>, and answering in one place syncs <em>Already answered</em> everywhere else.</p>
           </div>
@@ -499,7 +499,7 @@
                 <strong>Readable source with explicit grants</strong>
                 <p>Every customization lives in plain Elixir files you diff, test, and version in Git. Tune any installed extension's <code>load_policy</code> (eager, deferred, or on-command) directly from your config without forking it.</p>
               </li>
-              <li>
+              <li data-status="planned" data-since="v0.1.0">
                 <strong>Disposable for one task, reusable when it sticks</strong>
                 <p>Author or ask Minga to build a task-specific Elixir review surface or check workflow over real buffer and agent owners. Inspect the source diff, save to activate under an explicit revocable grant (with automatic restore if a candidate fails), run it identically on macOS and in the terminal, then discard it when the PR lands or save it to reuse across repos.</p>
               </li>
@@ -507,7 +507,7 @@
 
             <div class="callout">
               <span class="callout-title">Release status</span>
-              <p><strong>Shipping on main today:</strong> live config, hook, and command-wrapper reload, Hex/Git/path extensions, custom LLM gateways, runtime grammars, and staged overlays. <strong>Landing for v0.1.0:</strong> the quiet chrome model, Twist/Orbit marks, per-author undo, and save-to-activate reusable workflows (<a href="/extending">see Extending Minga</a>).</p>
+              <p><strong>Shipping on main today:</strong> live config, hook, and command-wrapper reload, Hex/Git/path extensions, custom LLM gateways, runtime grammars, and staged overlays. <span data-status="planned" data-since="v0.1.0" data-pill="off"><strong>Landing for v0.1.0:</strong> the quiet chrome model, Twist/Orbit marks, per-author undo, and save-to-activate reusable workflows (<a href="/extending">see Extending Minga</a>).</span></p>
             </div>
           </div>
 
@@ -624,8 +624,8 @@ extension <span class="tok-atom">:minga_git_extended</span>, hex: <span class="t
             <p>Neovim and Doom Emacs discipline with native Mac polish: smooth trackpad scrolling, crisp CoreText typography, ligatures, system accent selection, and native menu bar and notifications without toolbar or sidebar bloat.</p>
             <ul>
               <li>Signed, notarized Apple Silicon prereleases via Homebrew.</li>
-              <li>Every visible action works by keyboard or click, and holding <kbd>⌘</kbd> reveals shortcuts on visible controls.</li>
-              <li>Background <code>needs_you</code> alerts surface via Dock badges and actionable macOS notifications without stealing focus.</li>
+              <li>Every visible action works by keyboard or click. <span data-status="planned" data-since="v0.1.0">Holding <kbd>⌘</kbd> reveals shortcuts on visible controls.</span></li>
+              <li>Background agent alerts surface as actionable macOS notifications without stealing focus. <span data-status="planned" data-since="v0.1.0">A <code>needs_you</code> Dock badge joins them.</span></li>
             </ul>
           </div>
 
@@ -636,9 +636,9 @@ extension <span class="tok-atom">:minga_git_extended</span>, hex: <span class="t
             </div>
             <p>Draws the exact same layout, marks, and keys over SSH or tmux with floating drawers, crisp box geometry, and clean degradation all the way down to 16-color terminals.</p>
             <ul>
-              <li>Auto-detects modern terminal capabilities (Ghostty, Kitty, WezTerm, iTerm2): disambiguated shortcuts, crisp vector gutter marks (with two-tone block fallbacks), clickable <code>file:line</code> links, native notifications, tab progress, and flicker-free frames.</li>
-              <li>Run <code>:checkhealth terminal</code> anytime to inspect detected features and active fallbacks.</li>
-              <li>Layout and keyboard parity with macOS are tested together in CI (<a href="/architecture#executable-parity">see Architecture</a>).</li>
+              <li>Uses modern terminal capabilities (Ghostty, Kitty, WezTerm, iTerm2): disambiguated shortcuts, clipboard over SSH, and flicker-free frames. <span data-status="planned" data-since="v0.1.0">Crisp vector gutter marks (with two-tone block fallbacks), clickable <code>file:line</code> links, native notifications, and tab progress.</span></li>
+              <li data-status="planned" data-since="v0.1.0">Run <code>:checkhealth terminal</code> anytime to inspect detected features and active fallbacks.</li>
+              <li data-status="planned" data-since="v0.1.0">Layout and keyboard parity with macOS are tested together in CI (<a href="/architecture#executable-parity">see Architecture</a>).</li>
             </ul>
           </div>
         </div>

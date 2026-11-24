@@ -151,7 +151,7 @@
                 <text x="640" y="174" fill="var(--text)" font-family="var(--font-sans)" font-size="13" font-weight="600">Terminal Client (Go)</text>
                 <text x="640" y="196" fill="var(--text-secondary)" font-family="var(--font-sans)" font-size="11.5">First-class Bubble Tea &amp;</text>
                 <text x="640" y="214" fill="var(--text-secondary)" font-family="var(--font-sans)" font-size="11.5">Lip Gloss floating layers</text>
-                <text x="640" y="244" fill="var(--text-muted)" font-family="var(--font-mono)" font-size="10.5">Kitty keys, OSC 8/9/52, SSH</text>
+                <text x="640" y="244" fill="var(--text-muted)" font-family="var(--font-mono)" font-size="10.5">Kitty keys, OSC 52, SSH</text>
 
                 <rect x="624" y="280" width="240" height="116" fill="var(--bg-elevated)" stroke="var(--border)" stroke-width="1.15"/>
                 <text x="640" y="306" fill="var(--text)" font-family="var(--font-sans)" font-size="13" font-weight="600">Syntax Parser (Zig)</text>
@@ -234,7 +234,7 @@
                 <text x="256" y="278" fill="var(--text-muted)" font-family="var(--font-mono)" font-size="10.5">~/.local/share/minga/staged_drafts · Restores unpublished edits on next start</text>
               </svg>
             </div>
-            <figcaption class="diagram-caption">Ordinary quit commands stop if unpublished edits remain staged; force quits (<code>:qa!</code>, <code>:cq</code>, or <code>:q!</code> on the last window) discard on purpose. As ADR-0006 lands, per-author undo groups keep your <code>u</code> / <code>⌘Z</code> history strictly separate from Minga's edits while inline Twist review and <code>*minga-review*</code> build over the same ownership contract.</figcaption>
+            <figcaption class="diagram-caption">Ordinary quit commands stop if unpublished edits remain staged; force quits (<code>:qa!</code>, <code>:cq</code>, or <code>:q!</code> on the last window) discard on purpose. <span data-status="planned" data-since="v0.1.0" data-pill="off">As ADR-0006 lands, per-author undo groups keep your <code>u</code> / <code>⌘Z</code> history strictly separate from Minga's edits while inline Twist review and <code>*minga-review*</code> build over the same ownership contract.</span></figcaption>
           </figure>
         </section>
 
@@ -244,8 +244,8 @@
           <ul>
             <li><strong>Single source of truth for UI tokens (Track 1 on <code>main</code>, Track 2 building).</strong> Every color is a semantic theme role (<code>minga</code>, <code>you</code>, <code>needs_you</code>, <code>failure</code>, <code>done</code>) defined once and generated into Swift, Go, and Elixir via <code>mix codegen</code>, with a planned guardrail rejecting hard-coded colors outside generated files. Every scenario renders in Catppuccin Frappé (default), AstroDark, and a light theme (Catppuccin Latte or One Light).</li>
             <li><strong>Side-by-side visual diffs across clients (Track 1 scenario inventory landed; Track 2 factory next).</strong> Today, <code>docs/design/scenarios.toml</code> inventories every screen and flow map with local invariant checks in <code>design/tools/storyboard/check.py</code>. Track 2 wires those scenario IDs into offscreen macOS (wide and narrow) and Go TUI (truecolor and 16-color) renders so every UI pull request publishes visual diffs against <code>main</code>.</li>
-            <li><strong>Automated keyboard and navigation checks (Track 2).</strong> A headless explorer starts in every scenario, fires every active key binding, and verifies invariants in CI: every screen reachable by keyboard alone and mouse alone, at most three <kbd>esc</kbd> or <kbd>q</kbd> presses back to plain editing with focus restored, no dead-end bindings, every error naming a next action, defined empty states, and zero focus-stealing interruptions.</li>
-            <li><strong>Progressive terminal protocol detection.</strong> The Go TUI detects modern terminal features at startup (Kitty keyboard protocol, Kitty graphics for vector gutter marks with <code>▚</code>/<code>▐</code> fallbacks, OSC 8 clickable <code>file:line</code>, OSC 9/777 notifications, OSC 9;4 tab progress, OSC 52 clipboard, mode 1004 focus dimming, mode 2026 synchronized output) and degrades quietly down to 16-color terminals, inspectable via <code>:checkhealth terminal</code>.</li>
+            <li data-status="planned" data-since="v0.1.0"><strong>Automated keyboard and navigation checks (Track 2).</strong> A headless explorer starts in every scenario, fires every active key binding, and verifies invariants in CI: every screen reachable by keyboard alone and mouse alone, at most three <kbd>esc</kbd> or <kbd>q</kbd> presses back to plain editing with focus restored, no dead-end bindings, every error naming a next action, defined empty states, and zero focus-stealing interruptions.</li>
+            <li><strong>Progressive terminal protocol detection.</strong> The Go TUI uses modern terminal features (Kitty keyboard protocol, OSC 52 clipboard, mode 2026 synchronized output) and degrades quietly down to 16-color terminals. <span data-status="planned" data-since="v0.1.0">Next: Kitty graphics for vector gutter marks with two-tone block fallbacks, OSC 8 clickable <code>file:line</code>, OSC 9/777 notifications, OSC 9;4 tab progress, mode 1004 focus dimming, and <code>:checkhealth terminal</code> to inspect what was detected.</span></li>
           </ul>
         </section>
 
@@ -285,7 +285,7 @@
             </li>
             <li class="spec-row">
               <span class="spec-key spec-key-strong"><a href="https://github.com/jsmestad/minga/blob/main/docs/adr/0006-the-spine.md">ADR-0006</a></span>
-              <span class="spec-detail"><strong>The Spine: one keyboard-first chrome model across every frontend (Proposed; Catppuccin Frappé default and design inventory landed).</strong> Text, a plain title bar, and one prioritized modeline at rest; one drawer at a time for lists; Twist and Orbit marks (six state words on five shapes) driven by theme roles; per-author undo; BEAM-styled markdown spans; Vim keys preserved in files; safe quit; parity enforced via generated tokens and Storyboard CI (<a href="https://github.com/jsmestad/minga/tree/main/docs/design"><code>docs/design/</code></a>).</span>
+              <span class="spec-detail" data-status="planned" data-since="v0.1.0" data-pill="off"><strong>The Spine: one keyboard-first chrome model across every frontend (Proposed; Catppuccin Frappé default and design inventory landed).</strong> Text, a plain title bar, and one prioritized modeline at rest; one drawer at a time for lists; Twist and Orbit marks (six state words on five shapes) driven by theme roles; per-author undo; BEAM-styled markdown spans; Vim keys preserved in files; safe quit; parity enforced via generated tokens and Storyboard CI (<a href="https://github.com/jsmestad/minga/tree/main/docs/design"><code>docs/design/</code></a>).</span>
             </li>
           </ul>
 

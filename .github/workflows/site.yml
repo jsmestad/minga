@@ -14,6 +14,10 @@ on:
       - "scripts/build_site.sh"
       - "scripts/check_site_links.py"
       - "test/scripts/check_site_links_test.py"
+      - "design/**"
+      - "lib/minga/keymap/**"
+      - "lib/minga/command/parser.ex"
+      - "lib/minga_editor/agent/slash_command.ex"
       - ".github/workflows/site.yml"
   push:
     branches: [main]
@@ -29,6 +33,10 @@ on:
       - "scripts/build_site.sh"
       - "scripts/check_site_links.py"
       - "test/scripts/check_site_links_test.py"
+      - "design/**"
+      - "lib/minga/keymap/**"
+      - "lib/minga/command/parser.ex"
+      - "lib/minga_editor/agent/slash_command.ex"
       - ".github/workflows/site.yml"
   workflow_dispatch:
 
@@ -48,6 +56,13 @@ jobs:
       MINGA_SKIP_GO_TUI_BUILD: "1"
     steps:
       - uses: actions/checkout@v4
+
+      # Fail fast, before the BEAM toolchain installs: the site must match the shipped keymap and docs/design.
+      - name: Check site copy against the keymap and design docs
+        run: python3 design/tools/site_check.py
+
+      - name: Check storyboard flow invariants
+        run: python3 design/tools/storyboard/check.py --final
 
       - uses: erlef/setup-beam@v1
         with:
