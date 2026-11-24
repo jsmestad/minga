@@ -280,8 +280,21 @@ defmodule MingaAgent.SessionManagerChildLifecycleTest do
 
       assert :ok = SessionManager.stop_session(manager, child.session_id)
 
-      assert {:ok, %Handle{status: :cancelled, completed_at: %DateTime{}}} =
-               SessionManager.get_child_result(manager, child.session_id)
+      assert %Handle{status: :cancelled, completed_at: %DateTime{}} =
+               await_settled(manager, child.session_id)
+    end
+  end
+
+  # The child's provider may still be alive when the stop lands, so the handle settles on its DOWN.
+  @spec await_settled(GenServer.server(), String.t(), non_neg_integer()) :: Handle.t()
+  defp await_settled(manager, session_id, attempts \\ 100) do
+    case SessionManager.get_child_result(manager, session_id) do
+      {:ok, %Handle{status: :running}} when attempts > 0 ->
+        Process.sleep(10)
+        await_settled(manager, session_id, attempts - 1)
+
+      {:ok, %Handle{} = handle} ->
+        handle
     end
   end
 
