@@ -131,6 +131,69 @@ defmodule MingaAgent.Tools.ShellTest do
     refute File.exists?(Path.join(dir, "owner-exit-effect"))
   end
 
+  test "orphaned children that close stdout are terminated when the shell exits normally", %{
+    tmp_dir: dir
+  } do
+    # The background child redirects stdout so the FIFO drains immediately.
+    # Without process-group cleanup on the normal-exit path, it would survive
+    # indefinitely and write the sentinel file.
+    command = """
+    (trap '' TERM; exec >/dev/null 2>&1; printf ready > orphan-ready; sleep 2; printf late > orphan-effect) &
+    while [ ! -f orphan-ready ]; do sleep 0.01; done
+    exit 0
+    """
+
+    assert {:ok, _output} = Shell.execute(command, dir, @external_command_timeout_seconds)
+    assert File.exists?(Path.join(dir, "orphan-ready"))
+
+    # Wait past the orphan's scheduled write.
+    Process.sleep(2_500)
+    refute File.exists?(Path.join(dir, "orphan-effect"))
+  end
+
+  test "aborting a shell task kills its descendant tree", %{tmp_dir: dir} do
+    ready_path = Path.join(dir, "abort-ready")
+    effect_path = Path.join(dir, "abort-effect")
+
+    command = """
+    (trap '' TERM; printf ready > #{inspect(ready_path)}; sleep 2; printf late > #{inspect(effect_path)}) &
+    wait
+    """
+
+    task =
+      Task.async(fn ->
+        Shell.execute(command, dir, @external_command_timeout_seconds)
+      end)
+
+    # Wait for the background child to signal readiness.
+    assert poll_file(ready_path, 3_000), "background child did not start"
+
+    # Abort the task (simulates session cancellation / worker death).
+    Task.shutdown(task, :brutal_kill)
+
+    # Wait past the child's scheduled write.
+    Process.sleep(2_500)
+    refute File.exists?(effect_path)
+  end
+
+  defp poll_file(path, timeout_ms) do
+    deadline = System.monotonic_time(:millisecond) + timeout_ms
+    poll_file_loop(path, deadline)
+  end
+
+  defp poll_file_loop(path, deadline) do
+    if File.exists?(path) do
+      true
+    else
+      if System.monotonic_time(:millisecond) >= deadline do
+        false
+      else
+        Process.sleep(50)
+        poll_file_loop(path, deadline)
+      end
+    end
+  end
+
   describe "execute/4 with streaming" do
     test "invokes on_output callback as output arrives", %{tmp_dir: dir} do
       test_pid = self()
