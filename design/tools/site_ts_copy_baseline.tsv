@@ -10,22 +10,20 @@
 # The writer keeps only rows that are already in this file and never raises a count, so it cannot add one.
 #
 # kind	value	count
-claim	*minga-queue*	2
-claim	*minga-review*	4
-claim	*minga-tasks*	6
+claim	*minga-tasks*	3
 claim	300 ms	5
 claim	Already answered	3
 claim	Orbit	1
 claim	Subagent Peek	4
-claim	Twist	8
+claim	Twist	6
 claim	reveals shortcuts	1
 key	SPC ,	8
 key	SPC 1	1
 key	SPC 1-4	2
-key	SPC a	9
+key	SPC a	7
 key	SPC a a	3
-key	SPC a d	9
+key	SPC a d	7
 key	SPC a i	4
 key	SPC a p	2
-key	SPC a y	9
+key	SPC a y	7
 key	SPC b b	1

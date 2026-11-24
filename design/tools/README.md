@@ -79,6 +79,25 @@ The writer keeps only rows that are already listed and never raises a count, so 
 
 This check runs only on a full run. `python3 design/tools/site_check.py site/index.html` checks that page and skips the lab sources.
 
+**Where lab copy goes instead.** Every lab is built on the lab kit in `site/ts/src/lab/`, and the kit reads its words from the page. A lab root holds one ordered list of steps:
+
+```html
+<ol data-lab-steps>
+  <li data-step="open">
+    <p data-lab-instruction>Open the file</p>
+    <p data-lab-caption="open">The file is open.</p>
+    <p data-lab-caption="open_wrong">That key does nothing here.</p>
+  </li>
+</ol>
+```
+
+- `data-step` is the step id. Steps keep their document order.
+- `data-lab-instruction` is the step's short label, which the stepper shows.
+- `data-lab-caption="id"` is one caption. A step holds one or more, and caption ids are unique in the lab. Lab state names a caption by id; the caption line under the stage shows a copy of that element's content, links included.
+- `data-lab-text="id"` marks a named string used elsewhere in the stage, such as a prompt that the lab types out. It may sit anywhere in the lab root.
+
+The list is ordinary visible HTML, never a `<template>`, a `<script>` or an attribute value, so this check reads it. It is also what a reader sees with JavaScript off, so write it to read well as a plain list. A mounted lab adds the class `lab-live` to its root, and the stylesheet then hides the list. Words that belong to the stage itself (a button label, the text of a specimen) sit in the stage markup. `site/ts/src/lab/copy.ts` documents the same contract next to the code that reads it; the home page demo (`[data-spec-board-demo]` in `site/index.html`) is the reference use.
+
 The checker's own tests are in `test/scripts/site_check_test.py`:
 
 ```bash
