@@ -24,8 +24,6 @@ macos/Sources/Views/Agent/AgentApprovalCard.swift	.foregroundStyle(Color.orange)
 macos/Sources/Views/Agent/AgentApprovalCard.swift	return Color.green.opacity(0.75)
 macos/Sources/Views/Agent/AgentApprovalCard.swift	return Color.red.opacity(0.75)
 macos/Sources/Views/Agent/AgentApprovalCard.swift	RoundedRectangle(cornerRadius: Radius.lg).stroke(Color.orange.opacity(0.5), lineWidth: 1)
-macos/Sources/Views/Agent/AgentChatHeaderView.swift	case .executingTool: return Color.orange
-macos/Sources/Views/Agent/AgentChatHeaderView.swift	case .error: return Color.red
 macos/Sources/Views/Agent/AgentChatView.swift	.foregroundStyle(isError ? Color.red.opacity(0.7) : theme.agentTextFg.opacity(0.4))
 macos/Sources/Views/Agent/AgentContextBar.swift	color: Color(red: 0.2, green: 0.8, blue: 0.4),
 macos/Sources/Views/Agent/AgentContextBar.swift	color: Color(red: 1.0, green: 0.75, blue: 0.2),
@@ -78,7 +76,6 @@ macos/Sources/Views/EditorChrome/TabIconColors.swift	"dockerfile": 0x384D54,
 macos/Sources/Views/EditorChrome/TabIconColors.swift	"proto": 0x6D8086,
 macos/Sources/Views/EditorChrome/TabIconColors.swift	"erl": 0xB83998,
 macos/Sources/Views/EditorChrome/TabIconColors.swift	"hrl": 0xB83998,
-macos/Sources/Views/EditorChrome/WorkspaceIndicatorView.swift	case .error: return Color.red
 macos/Sources/Views/Extensions/ExtensionOverlayView.swift	let color = Color(red: r, green: g, blue: b)
 macos/Sources/Views/Overlays/HoverPopupOverlay.swift	Wire.HoverSegment(style: .syntaxHighlighted, fgColor: 0xC678DD, flags: 1, text: "@spec "),
 macos/Sources/Views/Overlays/HoverPopupOverlay.swift	Wire.HoverSegment(style: .syntaxHighlighted, fgColor: 0x61AFEF, flags: 0, text: "open"),
@@ -119,8 +116,6 @@ go/tui/internal/ui/model.go	Background(lipgloss.Color("#1f2335")).
 go/tui/internal/ui/model.go	Foreground(lipgloss.Color("#7aa2f7")).
 go/tui/internal/ui/overlay_stack.go	line := lipgloss.NewStyle().Background(lipgloss.Color("#000000")).Render(strings.Repeat(" ", w))
 # Literals below already existed on main when the pattern learned .white, .black, .gray, Color(white:, NSColor(white: and leading-dot named colours such as `return .red`; they were newly detected, not newly written.
-macos/Sources/Views/Agent/AgentChatHeaderView.swift	case .idle: return Color.gray
-macos/Sources/Views/Agent/AgentChatHeaderView.swift	case .unknown: return Color.gray
 macos/Sources/Views/Agent/AgentPromptView.swift	.shadow(color: .black.opacity(0.2), radius: 8, y: -4)
 macos/Sources/Views/Agent/AgentToolCallCard.swift	case .running, .denied, .approvalExpired: .orange
 macos/Sources/Views/Agent/AgentToolCallCard.swift	case .complete: .green

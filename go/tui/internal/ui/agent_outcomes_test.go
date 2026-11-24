@@ -78,7 +78,8 @@ func TestCommittedToolOutcomesOverrideCompatibilityError(t *testing.T) {
 
 func TestApprovalWaitingStatusIsStaticAndStoppable(t *testing.T) {
 	model := New(100, 30, nil)
-	labels := []string{"idle", "thinking", "using tools", generated.StateFailed.Token().Word, "planning", "Awaiting approval"}
+	working := generated.StateWorking.Token().Word
+	labels := []string{"Idle", working, working, generated.StateFailed.Token().Word, "Idle", generated.StateNeedsYou.Token().Word}
 	for status, label := range labels {
 		if got := agentChatStatusLabel(byte(status)); got != label {
 			t.Fatalf("status %d label = %q, want %q", status, got, label)
@@ -107,7 +108,7 @@ func TestApprovalWaitingStatusIsStaticAndStoppable(t *testing.T) {
 	}
 	first := model.renderAgentStatusBadge(5)
 	model.agent.animationFrame++
-	if second := model.renderAgentStatusBadge(5); second != first || !strings.Contains(ansi.Strip(second), "Awaiting approval") {
+	if second := model.renderAgentStatusBadge(5); second != first || !strings.Contains(ansi.Strip(second), generated.StateNeedsYou.Token().Word) {
 		t.Fatalf("approval badge is not static and truthful: %q", ansi.Strip(second))
 	}
 }

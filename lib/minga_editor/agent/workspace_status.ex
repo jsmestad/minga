@@ -2,7 +2,7 @@ defmodule MingaEditor.Agent.WorkspaceStatus do
   @moduledoc """
   Decides the one Agent status that every surface shows for a workspace.
 
-  The workspace pill, the Agent tab dot, the Agent activity strip, the status bar's Agent indicator and the Agent chat header all read this decision, so they cannot disagree. Each surface keeps its own mapping from this status to its wire enum.
+  The workspace pill, the Agent tab dot, the Agent activity strip, the status bar's Agent indicator and the Agent chat header all read this decision, so they cannot disagree. Every surface names the status through the `[[agent_statuses]]` table in `docs/design_tokens.toml` (`Minga.Design.Tokens.agent_status_state/1` and `agent_status_wire/1`, generated for Swift and Go too), so the words agree as well.
 
   The rules, in order:
 

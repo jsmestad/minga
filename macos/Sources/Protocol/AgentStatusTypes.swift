@@ -87,6 +87,13 @@ public enum AgentStatus: Equatable, Sendable {
         }
     }
 
+    /// The design-token state this status speaks as, from the table in docs/design_tokens.toml, or nil when it shows none.
+    /// Every surface that shows an Agent status names it through this, so the modeline, the workspace pill, the chat header and the activity card agree.
+    public var spineState: SpineState? { SpineState(agentStatus: rawValue) }
+
+    /// The word every surface shows for this status: its state's word, or "Idle" when Minga shows no state.
+    public var label: String { spineState?.word ?? "Idle" }
+
     /// Whether execution should animate (approval waiting is deliberately static).
     public var isWorking: Bool {
         switch self {

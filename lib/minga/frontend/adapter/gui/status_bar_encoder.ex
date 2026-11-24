@@ -3,6 +3,7 @@ defmodule Minga.Frontend.Adapter.GUI.StatusBarEncoder do
 
   import Bitwise
 
+  alias Minga.Design.Tokens
   alias Minga.Frontend.Adapter.GUI.Caches
   alias Minga.Frontend.Adapter.GUI.Wire.VimMode
   alias Minga.Frontend.Adapter.GUI.Wire.Writer
@@ -222,7 +223,7 @@ defmodule Minga.Frontend.Adapter.GUI.StatusBarEncoder do
     Writer.new(@command)
     |> Writer.uint16(:workspace_id, workspace.id)
     |> Writer.uint8(:workspace_kind, encode_workspace_kind(workspace.kind))
-    |> Writer.uint8(:workspace_status, encode_agent_session_status(workspace.status))
+    |> Writer.uint8(:workspace_status, Tokens.agent_status_wire(workspace.status))
     |> Writer.uint16(:workspace_flags, encode_workspace_entry_flags(workspace))
     |> Writer.uint16(:workspace_draft_count, workspace.draft_count)
     |> Writer.uint16(:workspace_conflict_count, workspace.conflict_count)
@@ -239,8 +240,8 @@ defmodule Minga.Frontend.Adapter.GUI.StatusBarEncoder do
       Writer.new(@command)
       |> Writer.string8(:agent_model_name, agent.model_name)
       |> Writer.uint32(:agent_message_count, agent.message_count)
-      |> Writer.uint8(:agent_session_status, encode_agent_session_status(agent.session_status))
-      |> Writer.uint8(:agent_status, encode_agent_session_status(agent.agent_status))
+      |> Writer.uint8(:agent_session_status, Tokens.agent_status_wire(agent.session_status))
+      |> Writer.uint8(:agent_status, Tokens.agent_status_wire(agent.agent_status))
       |> Writer.uint16(:agent_background_count, agent.background_count)
       |> Writer.string16(:agent_background_label, agent.background_label || "")
       |> Writer.string8(:agent_active_tool_name, agent.active_tool_name || "")
@@ -252,7 +253,7 @@ defmodule Minga.Frontend.Adapter.GUI.StatusBarEncoder do
   defp agent_section(:buffer, %Agent{} = agent) do
     payload =
       Writer.new(@command)
-      |> Writer.uint8(:agent_status, encode_agent_session_status(agent.agent_status))
+      |> Writer.uint8(:agent_status, Tokens.agent_status_wire(agent.agent_status))
       |> Writer.uint16(:agent_background_count, agent.background_count)
       |> Writer.string16(:agent_background_label, agent.background_label || "")
       |> Writer.string8(:agent_active_tool_name, agent.active_tool_name || "")
@@ -419,16 +420,6 @@ defmodule Minga.Frontend.Adapter.GUI.StatusBarEncoder do
     safe_mode = if data.safe_mode?, do: 1, else: 0
     bor(has_lsp, bor(bsl(has_git, 1), bor(bsl(is_dirty, 2), bsl(safe_mode, 3))))
   end
-
-  @spec encode_agent_session_status(Agent.status() | Workspace.status()) :: non_neg_integer()
-  defp encode_agent_session_status(:idle), do: 0
-  defp encode_agent_session_status(:thinking), do: 1
-  defp encode_agent_session_status(:tool_executing), do: 2
-  defp encode_agent_session_status(:error), do: 3
-  defp encode_agent_session_status(:plan), do: 4
-  defp encode_agent_session_status(:approval_waiting), do: 5
-  defp encode_agent_session_status(:needs_you), do: 6
-  defp encode_agent_session_status(_), do: 0
 
   @spec encode_workspace_kind(Workspace.kind()) :: non_neg_integer()
   defp encode_workspace_kind(:manual), do: 0

@@ -320,6 +320,7 @@ struct ThemeColorsSlotMappingTests {
         #expect(CardStatus.errored.label == SpineState.failed.word)
         #expect(CardStatus.done.role == SpineState.done.role)
         #expect(CardStatus.iterating.spineState == .working)
+        #expect(CardStatus.iterating.label == SpineState.working.word)
         #expect(CardStatus.idle.spineState == nil)
         #expect(CardStatus.idle.role == .waiting)
     }

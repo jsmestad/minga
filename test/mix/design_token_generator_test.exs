@@ -99,6 +99,56 @@ defmodule Minga.Mix.DesignTokenGeneratorTest do
     assert_raise Mix.Error, ~r/needs a source/, fn -> DesignTokenGenerator.parse!(raw) end
   end
 
+  test "every Agent status speaks as a state, or none, and the encoders send its wire byte" do
+    assert for(status <- Tokens.agent_statuses(), do: Tokens.agent_status_state(status)) ==
+             [nil, :working, :working, :failed, nil, :needs_you, :needs_you] ++
+               [:stopped, :needs_you, :done]
+
+    assert for(status <- Tokens.agent_statuses(), do: Tokens.agent_status_wire(status)) ==
+             Enum.to_list(0..9)
+
+    assert Tokens.agent_status_wire(:unknown_status) == Tokens.agent_status_wire(:idle)
+    assert Tokens.agent_status_state(:unknown_status) == nil
+    assert Tokens.state_wire(nil) == 0
+    assert Enum.map(Tokens.state_ids(), &Tokens.state_wire/1) == [1, 2, 3, 4, 5, 6]
+  end
+
+  test "rejects an Agent status that names an unknown state", %{raw: raw} do
+    [first | rest] = raw["agent_statuses"]
+    raw = %{raw | "agent_statuses" => [Map.put(first, "state", "sleeping") | rest]}
+
+    assert_raise Mix.Error, ~r/unknown state "sleeping"/, fn ->
+      DesignTokenGenerator.parse!(raw)
+    end
+  end
+
+  test "rejects a wire byte shared by two Agent statuses", %{raw: raw} do
+    [first, second | rest] = raw["agent_statuses"]
+    raw = %{raw | "agent_statuses" => [first, %{second | "wire" => first["wire"]} | rest]}
+
+    assert_raise Mix.Error, ~r/agent_statuses wire byte 0 is shared/, fn ->
+      DesignTokenGenerator.parse!(raw)
+    end
+  end
+
+  test "rejects Agent statuses without idle", %{raw: raw} do
+    raw = %{raw | "agent_statuses" => Enum.reject(raw["agent_statuses"], &(&1["id"] == "idle"))}
+
+    assert_raise Mix.Error, ~r/must define idle/, fn -> DesignTokenGenerator.parse!(raw) end
+  end
+
+  test "rejects a state wire byte that is 0 or shared", %{raw: raw} do
+    [first, second | rest] = raw["states"]
+
+    assert_raise Mix.Error, ~r/wire must be a byte from 1 to 255/, fn ->
+      DesignTokenGenerator.parse!(%{raw | "states" => [%{first | "wire" => 0}, second | rest]})
+    end
+
+    assert_raise Mix.Error, ~r/states wire byte 1 is shared/, fn ->
+      DesignTokenGenerator.parse!(%{raw | "states" => [first, %{second | "wire" => 1} | rest]})
+    end
+  end
+
   test "rejects a fourth voice line", %{raw: raw} do
     raw = put_in(raw, ["voice", "greeting"], "Grüß Gott.")
 

@@ -375,11 +375,13 @@ LSP status: 0=none, 1=ready, 2=initializing, 3=starting, 4=error
 
 Parser status: 0=available, 1=unavailable, 2=restarting
 
-Agent status: 0=idle, 1=thinking, 2=tool_executing, 3=error, 4=plan, 5=approval_waiting, 6=needs_you
+Agent status: 0=idle, 1=thinking, 2=tool_executing, 3=error, 4=plan, 5=approval_waiting, 6=needs_you, 7=stopped, 8=needs_review, 9=done
+
+The `[[agent_statuses]]` table in `docs/design_tokens.toml` owns these bytes and the state each one speaks as (thinking and tool_executing are Working; approval_waiting, needs_you and needs_review are Needs you; error is Failed; stopped is Stopped; done is Done; idle and plan show no state, because plan mode is reported whether or not a turn runs). Frontends name a status through the generated `SpineState(agentStatus:)` (Swift) and `generated.SpineStateForAgentStatus` (Go), never with their own words, so the modeline, the workspace pill, the chat header and the activity card agree.
 
 Workspace kind: 0=manual, 1=agent. Workspace status uses the same values as agent status. Workspace flags: bit 0=attention, bit 1=closeable.
 
-Session status (agent variant): 0=idle, 1=thinking, 2=tool_executing, 3=error, 4=plan, 5=approval_waiting, 6=needs_you. A failed Agent start reports `needs_you`, not `error`.
+Session status (agent variant): the same Agent status bytes, 0=idle through 9=done. A failed Agent start reports `needs_you`, not `error`.
 
 Macro recording: 0=not recording, 1-26=recording register a-z
 
@@ -520,7 +522,7 @@ Each section uses `section_id(1) + section_len(2) + payload(section_len)`. Secti
 
 The Prompt section's `vim_mode` uses the status bar's mode values (0=normal, 1=insert, 2=visual, 3=command, 4=operator_pending, 5=search, 6=replace), because both indicators show the same editing mode. Frontends decode both bytes with one mapping.
 
-Status values: 0 = idle, 1 = thinking, 2 = tool_executing, 3 = error, 4 = plan, 5 = approval_waiting, 6 = needs_you
+Status values: the Agent status bytes of gui_status_bar section 0x09, 0 = idle through 9 = done
 
 Needs you marks an Agent whose start failed and is waiting for the user's action. It is not an execution error and not an active turn: render it with the amber needs-you treatment, without an execution animation and without Stop.
 
@@ -1177,7 +1179,7 @@ Per visible tab:
   + path_len(2) + path(path_len) + tint_color_rgb(4)
 ```
 
-`version` is currently 2. Version 2 adds `tint_color_rgb` to each visible tab entry and bit 5 for pinned tabs. `mode`: 0 = editor, 1 = agent, 2 = file_tree, 3 = other. Workspace `kind`: 0 = manual, 1 = agent. Visible tab `kind`: 0 = file, 1 = agent. `status`: 0 = idle, 1 = thinking, 2 = tool_executing, 3 = error, 4 = plan, 5 = approval_waiting. Workspace flags: bit 0 = attention, bit 1 = closeable. Visible tab flags: bit 0 = dirty, bit 1 = attention, bit 2 = draft, bit 3 = draft_elsewhere, bit 4 = conflict, bit 5 = pinned, bit 6 = ephemeral (file tab backed by no file on disk, e.g. Untitled-1). `tint_color_rgb` is `0` for no tint, otherwise `0xRRGGBB`.
+`version` is currently 2. Version 2 adds `tint_color_rgb` to each visible tab entry and bit 5 for pinned tabs. `mode`: 0 = editor, 1 = agent, 2 = file_tree, 3 = other. Workspace `kind`: 0 = manual, 1 = agent. Visible tab `kind`: 0 = file, 1 = agent. `status`: the Agent status byte of section 0x09 above (0 = idle through 9 = done), named through the same token table. Workspace flags: bit 0 = attention, bit 1 = closeable. Visible tab flags: bit 0 = dirty, bit 1 = attention, bit 2 = draft, bit 3 = draft_elsewhere, bit 4 = conflict, bit 5 = pinned, bit 6 = ephemeral (file tab backed by no file on disk, e.g. Untitled-1). `tint_color_rgb` is `0` for no tint, otherwise `0xRRGGBB`.
 
 The workspace list includes the manual project workspace and all agent workspaces. The visible tab list includes the active workspace's agent tab first when present, followed by its file tabs. Agent view remains a workspace zoom surface, so it is not encoded as a normal file tab.
 

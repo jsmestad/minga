@@ -764,7 +764,7 @@ struct StatusBarViewViewTests {
         #expect(strings.contains("NORMAL"))
     }
 
-    @Test("Agent status shows readable labels and active tool names")
+    @Test("Agent status speaks the state word the design tokens give it")
     @MainActor func agentStatusLabels() throws {
         let running = statusBarState(agentStatus: .executingTool, activeToolName: "read_file")
         let runningTexts = try StatusBarView(state: running, sendAction: nil)
@@ -773,17 +773,7 @@ struct StatusBarViewViewTests {
             .findAll(ViewInspectorQuery.text)
             .compactMap { try? $0.string() }
 
-        #expect(runningTexts.contains("Running read_file"))
-
-        let fallback = statusBarState(agentStatus: .executingTool)
-        let fallbackTexts = try StatusBarView(state: fallback, sendAction: nil)
-            .environment(\.themeColors, ThemeColors())
-            .inspect()
-            .findAll(ViewInspectorQuery.text)
-            .compactMap { try? $0.string() }
-
-        #expect(fallbackTexts.contains("Running"))
-        #expect(!fallbackTexts.contains("Running read_file"))
+        #expect(runningTexts.contains(SpineState.working.word))
 
         let plan = statusBarState(agentStatus: .planning)
         let planBody = try StatusBarView(state: plan, sendAction: nil).environment(\.themeColors, ThemeColors()).inspect()
@@ -792,8 +782,22 @@ struct StatusBarViewViewTests {
             try? $0.accessibilityLabel().string()
         }
 
-        #expect(planTexts.contains("PLAN"))
-        #expect(planAccessibilityLabels.contains("Agent plan mode"))
+        // Plan mode is reported whether or not a turn runs, so it claims no state.
+        #expect(planTexts.contains("Idle"))
+        #expect(planAccessibilityLabels.contains("Agent status: Idle"))
+    }
+
+    @Test("Every surface names an Agent status with the state the shared token table gives it")
+    func agentStatusWordsAgree() {
+        let expected: [UInt8: SpineState?] = [
+            0: nil, 1: .working, 2: .working, 3: .failed, 4: nil, 5: .needsYou, 6: .needsYou,
+            7: .stopped, 8: .needsYou, 9: .done, 42: nil
+        ]
+        for (wire, state) in expected {
+            let status = AgentStatus(rawValue: wire)
+            #expect(status.spineState == state)
+            #expect(status.label == (state?.word ?? "Idle"))
+        }
     }
 
     @Test("Git branch click opens branch picker")
@@ -1320,7 +1324,7 @@ struct WorkspaceHeaderViewTests {
         let strings = try sut.environment(\.themeColors, ThemeColors()).inspect().findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
 
         #expect(strings.contains("Review"))
-        #expect(strings.contains("Using tools"))
+        #expect(strings.contains(SpineState.working.word))
         #expect(strings.contains("⚡1"))
         #expect(strings.contains("✓1"))
         #expect(strings.contains("⚠︎1"))
@@ -1437,7 +1441,7 @@ struct AgentChatViewTests {
 
         // Header shows model name and status
         #expect(strings.contains("claude-sonnet-4"))
-        #expect(strings.contains("idle"))
+        #expect(strings.contains("Idle"))
         // NORMAL mode indicator shown in prompt border
         #expect(strings.contains("NORMAL"))
     }
@@ -2131,7 +2135,7 @@ struct AgentToolOutcomeViewTests {
         let header = AgentChatHeaderView(state: state, sendAction: nil)
             .environment(\.themeColors, ThemeColors())
         let body = try header.inspect()
-        #expect(body.findAll(ViewType.Text.self).contains { (try? $0.string()) == "Awaiting approval" })
+        #expect(body.findAll(ViewType.Text.self).contains { (try? $0.string()) == SpineState.needsYou.word })
         #expect(body.findAll(ViewType.ProgressView.self).isEmpty)
     }
 }
