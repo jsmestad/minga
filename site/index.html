@@ -58,7 +58,7 @@
       <div class="container">
         <div class="hero-copy">
           <h1>A programmable workbench where text is the interface.</h1>
-          <p class="hero-lead">Code editing, parallel agents, and Elixir workflows in one quiet, keyboard-first environment shared identically by macOS and the terminal. Built on the Erlang VM so every open file, language server, extension, and agent stays isolated. <span data-status="planned" data-since="v0.1.0">Undo stays strictly yours, and chrome disappears until state changes.</span></p>
+          <p class="hero-lead">Code editing, parallel agents, and Elixir workflows in one keyboard-first workbench shared by macOS and the terminal. Built on the Erlang VM so every open file, language server, extension, and agent runs isolated, while agent edits stage off your working tree with syntax-highlighted diff review until you publish.</p>
           <div class="actions">
             <a class="btn btn-primary" href="/getting-started">Get Started</a>
             <a class="btn" href="/why-minga">Why Minga</a>
@@ -446,31 +446,31 @@
       <div class="container">
         <div class="section-header">
           <p class="section-index"><span>02</span> Co-authoring</p>
-          <h2>Work alongside parallel agents without surrendering your buffer, undo, or focus.</h2>
+          <h2 data-status="planned" data-since="v0.1.0">Work alongside parallel agents without surrendering your buffer, undo, or focus.</h2>
           <p>Spawning agents is easy. Steering parallel runs, keeping partial diffs, and fixing edge cases without fighting your own editor is where you save the day.</p>
         </div>
 
         <div class="feature-grid" data-status="planned" data-since="v0.1.0" data-pill="off">
           <div class="feature-cell">
-            <span class="feature-k" data-status="planned" data-since="v0.1.0">01 / Authorship &amp; Undo</span>
+            <span class="feature-k">01 / Authorship &amp; Undo</span>
             <h3>Per-author undo and shared edits</h3>
             <p>Pressing <kbd>u</kbd> or <kbd>⌘Z</kbd> undoes only your own edits, never deleting Minga's work out from under you. Agent changes are grouped per step behind revision checks and crash-safe staging, surface cleanly through the Twist gutter and <code>*minga-review*</code>, fill standard quickfix via <code>:Minga review</code>, and prompt before accepting a hunk that still has an LSP error.</p>
           </div>
 
           <div class="feature-cell">
-            <span class="feature-k" data-status="planned" data-since="v0.1.0">02 / Parallel Agents</span>
+            <span class="feature-k">02 / Parallel Agents</span>
             <h3>Subagent trees and live peek in place</h3>
             <p>When a task fans out, <code>*minga-tasks*</code> renders the subagent tree with live state shapes. Press <kbd>SPC a i</kbd> to peek at any worker in a right split with a sibling strip (<code>◐ ◐ ● ◐  3 of 4</code>), folded brief, live steps, and a direct composer to message that subagent without retargeting your main thread or discarding an unsent draft.</p>
           </div>
 
           <div class="feature-cell">
-            <span class="feature-k" data-status="planned" data-since="v0.1.0">03 / Buffers All the Way Down</span>
+            <span class="feature-k">03 / Buffers All the Way Down</span>
             <h3>Steer mid-flight or edit your prompt queue like code</h3>
             <p>Send a message in Normal mode (<kbd>↩</kbd> or <kbd>⌘↩</kbd>) to steer Minga while it works, or press <kbd>⌥↩</kbd> to queue follow-ups in <code>*minga-queue*</code>, an ordinary editable buffer where <kbd>dd</kbd> and <kbd>p</kbd> reorder upcoming prompts. Pause after Spacebar (<kbd>SPC</kbd>) anytime to see live counts right inside which-key.</p>
           </div>
 
           <div class="feature-cell">
-            <span class="feature-k" data-status="planned" data-since="v0.1.0">04 / Anti-Misfire Craft</span>
+            <span class="feature-k">04 / Anti-Misfire Craft</span>
             <h3>Interrupt by need, never by focus</h3>
             <p>You are mid-sentence in Insert mode when a background task asks to run a destructive command. Your cursor never jumps. Only <code>needs_you</code> lights up in the modeline and background notifications, an auto-opened drawer locks single-letter approval keys for 300 ms so a keystroke in flight can never hit <kbd>y</kbd>, and answering in one place syncs <em>Already answered</em> everywhere else.</p>
           </div>

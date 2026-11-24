@@ -2365,24 +2365,24 @@ td:first-child {
   }
 }
 
-/* Planned features. Copy inside [data-status="planned"] describes something that has not shipped yet; design/tools/site_check.py treats everything outside it as a claim about today's build. data-pill="off" keeps the marking for the check without drawing a pill, for containers whose layout a pill would break or copy that already says "for v0.1.0". */
+/* Planned features. Copy inside [data-status="planned"] describes something that has not shipped yet; design/tools/site_check.py treats everything outside it as a claim about today's build. data-pill="off" keeps the marking for the check without drawing a badge, for containers whose layout a badge would break or copy that already states its release target. */
 [data-status="planned"]:not([data-pill="off"])::before {
   content: "Coming";
   display: inline-block;
   margin-right: 0.45em;
-  padding: 0.18em 0.55em 0.16em;
+  padding: 0.14em 0.45em 0.12em;
   border: 1px solid var(--accent-border);
-  border-radius: 999px;
+  border-radius: 0;
   background: var(--accent-soft);
   color: var(--accent);
   font-family: var(--font-mono);
-  font-size: 0.66rem;
+  font-size: 0.65rem;
   font-style: normal;
-  font-weight: 500;
-  letter-spacing: 0.03em;
-  line-height: 1.2;
-  text-transform: none;
-  vertical-align: 0.14em;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  line-height: 1.25;
+  text-transform: uppercase;
+  vertical-align: 0.12em;
   white-space: nowrap;
 }
 
@@ -2390,7 +2390,13 @@ td:first-child {
   content: "Coming · " attr(data-since);
 }
 
-h1[data-status="planned"]::before,
-h2[data-status="planned"]::before {
-  vertical-align: 0.4em;
+h1[data-status="planned"]:not([data-pill="off"])::before,
+h2[data-status="planned"]:not([data-pill="off"])::before {
+  display: table;
+  margin: 0 0 0.55rem;
+  vertical-align: baseline;
+}
+
+.pillar-list li[data-status="planned"]:not([data-pill="off"])::before {
+  margin-bottom: 0.35rem;
 }
