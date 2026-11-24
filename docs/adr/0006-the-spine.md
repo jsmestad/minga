@@ -63,4 +63,4 @@ The design went through four rounds on the canvas, with reviews from a Minga UX 
 
 ## Open questions
 
-- **Terminal emulator engine.** libvterm, a Go or Swift VT implementation, or libghostty. The Developer Notes on #19 and #122 assume the removed Zig renderer and are stale.
+- **Terminal emulator engine.** Answered by [ADR-0008](0008-terminal-engine.md) (Proposed): libghostty-vt in a helper process, with the BEAM owning the terminal buffer. The Developer Notes on #19 and #122 assume the removed Zig renderer and are stale.
