@@ -215,7 +215,7 @@ func commandToJSON(_ command: RenderCommand) -> [String: Any]? {
         }
         return result
 
-    case .guiPicker(let visible, let selectedIndex, let filteredCount, let totalCount, let markedCount, let title, let query, let hasPreview, let items, let actionMenu, let modePrefix, let loadStatus, let queryGeneration, let acknowledgedQueryEditSeq, let activationGeneration):
+    case .guiPicker(let visible, let selectedIndex, let filteredCount, let totalCount, let markedCount, let title, let query, let hasPreview, let items, let actionMenu, let modePrefix, let loadStatus, let queryGeneration, let acknowledgedQueryEditSeq, let activationGeneration, let empty, let listKeys):
         let itemArray = items.map { i -> [String: Any] in
             ["label": i.label, "description": i.description, "icon_color": Int(i.iconColor), "annotation": i.annotation, "flags": Int(i.flags), "match_positions": i.matchPositions.map { Int($0) }, "activation_id": Int(i.activationID), "status": i.status, "status_tone": Int(i.statusTone.rawValue), "group": i.group]
         }
@@ -240,6 +240,14 @@ func commandToJSON(_ command: RenderCommand) -> [String: Any]? {
         case .loading: result["load_status"] = "loading"
         case .error(let msg): result["load_status"] = "error"; result["load_status_error"] = msg
         }
+        if let empty {
+            let actions: [[String: Any]] = empty.actions.map { ["id": $0.id, "key": $0.key, "label": $0.label] }
+            var emptyResult: [String: Any] = ["glyph": empty.glyph, "title": empty.title, "why": empty.why]
+            emptyResult["selected"] = Int(empty.selected)
+            emptyResult["actions"] = actions
+            result["empty"] = emptyResult
+        }
+        result["list_keys"] = listKeys
         return result
 
     case .guiPickerPreview(let visible, let lines):

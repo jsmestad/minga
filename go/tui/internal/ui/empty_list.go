@@ -19,8 +19,7 @@ type emptyListColors struct {
 	selectionText color.Color
 }
 
-// emptyListHeader draws what happened and why (docs/design/anatomy.md, "Empty state"): the panel inset row, the title
-// with its glyph, the why line, and the gap before the action list. The BEAM writes the copy; this only lays it out.
+// emptyListHeader draws what happened and why (docs/design/anatomy.md, "Empty state"): the panel inset row, the title with its glyph, the why line, and the gap before the action list. The BEAM writes the copy; this only lays it out.
 func emptyListHeader(empty generated.EmptyList, width int, colors emptyListColors, p palette) []string {
 	base := lipgloss.NewStyle().Background(colors.surface).ColorWhitespace(true)
 	inset := gap(emptyStateInset)
@@ -52,8 +51,7 @@ func emptyListHeader(empty generated.EmptyList, width int, colors emptyListColor
 	return lines
 }
 
-// emptyListActions draws the action list: a fixed key column in the accent colour, then the label. The selected row is
-// a full-width selection bar whose key is a reverse-video chip.
+// emptyListActions draws the action list: a fixed key column in the accent colour, then the label. The selected row is a full-width selection bar whose key is a reverse-video chip.
 func emptyListActions(empty generated.EmptyList, width int, colors emptyListColors) []string {
 	keyWidth := 0
 	for _, action := range empty.Actions {

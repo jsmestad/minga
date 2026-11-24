@@ -5,7 +5,10 @@ defmodule MingaEditor.UI.Picker.NextStepsTest do
 
   use ExUnit.Case, async: true
 
+  alias Minga.RenderModel.UI.EmptyList
   alias Minga.Test.NextStepsPickerSource
+  alias MingaEditor.Frontend.Emit.Context
+  alias MingaEditor.RenderModel.UI.PickerBuilder
   alias MingaEditor.FocusOwner
   alias MingaEditor.PickerUI
   alias MingaEditor.RenderPipeline.TestHelpers
@@ -58,6 +61,36 @@ defmodule MingaEditor.UI.Picker.NextStepsTest do
       assert closed.shell_runtime.state.modal == :none
     end
 
+    test "a paste or a late native edit types nothing into it" do
+      state = open([])
+      pasted = PickerUI.append_query(state, "zz")
+      {:picker, %{picker_ui: picker_state}} = state.shell_runtime.state.modal
+
+      edited =
+        PickerUI.replace_query(
+          state,
+          picker_state.query_generation,
+          picker_state.acknowledged_query_edit_seq + 1,
+          "zz"
+        )
+
+      assert picker(pasted).query == ""
+      assert picker(edited).query == ""
+    end
+
+    test "the render model carries the header, list keys, and counts no matches" do
+      model = open([]) |> Context.from_editor_state() |> PickerBuilder.build()
+
+      assert %EmptyList{title: "Nothing here yet.", actions: []} = model.empty
+      assert model.list_keys?
+      assert model.filtered_count == 0
+
+      assert Enum.map(model.items, &{&1.label, &1.annotation}) == [
+               {"Add a folder", "SPC p a"},
+               {"Open a file", "SPC f f"}
+             ]
+    end
+
     test "q and esc close it" do
       for key <- [?q, @escape] do
         assert PickerUI.handle_key(open([]), key, 0).shell_runtime.state.modal == :none
@@ -103,7 +136,7 @@ defmodule MingaEditor.UI.Picker.NextStepsTest do
         |> Picker.offer_empty(empty)
 
       assert [%{label: "One"}] = offered.filtered
-      assert offered.empty == %{empty | rows: []}
+      assert offered.empty == Empty.header(empty)
       assert Picker.filter(offered, "al").empty == nil
 
       assert Picker.offer_empty(Picker.filter(offered, "al"), empty).filtered

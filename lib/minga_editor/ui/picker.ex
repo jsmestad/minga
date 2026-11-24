@@ -170,7 +170,7 @@ defmodule MingaEditor.UI.Picker do
   """
   @spec offer_empty(t(), Empty.t()) :: t()
   def offer_empty(%__MODULE__{filtered: []} = picker, %Empty{rows: rows} = empty),
-    do: %{picker | filtered: rows, selected: 0, empty: %{empty | rows: []}}
+    do: %{picker | filtered: rows, selected: 0, empty: Empty.header(empty)}
 
   def offer_empty(%__MODULE__{} = picker, %Empty{}), do: picker
 

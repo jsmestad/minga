@@ -9,6 +9,7 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilder do
   alias Minga.RenderModel.UI.Picker.ActionMenu
   alias MingaEditor.Extension.Picker.Source, as: PublicSource
   alias MingaEditor.Frontend.Emit.Context
+  alias MingaEditor.RenderModel.UI.EmptyStateBuilder
   alias MingaEditor.State.Picker, as: PickerState
   alias MingaEditor.State.Picker.ActivationOffer
   alias MingaEditor.State.Picker.Extension, as: ExtensionPicker
@@ -79,7 +80,9 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilder do
       query_generation: query_generation,
       acknowledged_query_edit_seq: acknowledged_query_edit_seq,
       selected_index: selected_index,
-      filtered_count: length(picker.filtered),
+      # Next-step rows are not matches, so a picker offering them counts none.
+      filtered_count:
+        if(Picker.offering_next_steps?(picker), do: 0, else: length(picker.filtered)),
       total_count: length(picker.items),
       marked_count: Picker.marked_count(picker),
       activation_generation: activation_offer.generation,
@@ -99,8 +102,9 @@ defmodule MingaEditor.RenderModel.UI.PickerBuilder do
   @spec empty_model(Empty.t() | nil) :: EmptyList.t() | nil
   defp empty_model(nil), do: nil
 
+  # A picker's next steps are its rows, so its empty list carries no actions.
   defp empty_model(%Empty{} = empty),
-    do: %EmptyList{glyph: empty.glyph, title: empty.title, why: empty.why}
+    do: EmptyStateBuilder.empty_list(empty.title, empty.why, [], glyph: empty.glyph)
 
   @spec picker_preview(Context.t(), PickerState.t()) ::
           {boolean(), [[PickerModel.preview_segment()]] | nil}

@@ -192,7 +192,7 @@ public struct PickerOverlay: View {
                     )
             }
 
-            if state.totalCount > 0 {
+            if state.totalCount > 0 && state.empty == nil {
                 Text("\(state.filteredCount)/\(state.totalCount)")
                     .font(Typography.font(.small, design: .monospaced))
                     .foregroundStyle(theme.popupFg.opacity(0.35))

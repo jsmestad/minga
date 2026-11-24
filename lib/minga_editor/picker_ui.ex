@@ -473,7 +473,9 @@ defmodule MingaEditor.PickerUI do
         query
       )
       when is_binary(query) do
-    if PickerState.current_query_edit?(picker_state, generation, edit_seq) do
+    # A picker with nothing to filter takes no text, so a late native edit changes nothing.
+    if PickerState.current_query_edit?(picker_state, generation, edit_seq) and
+         not Picker.list_keys?(picker_state.picker) do
       replace_current_query(state, picker_state, query, edit_seq)
     else
       state
@@ -505,8 +507,13 @@ defmodule MingaEditor.PickerUI do
         } = state,
         text
       ) do
-    query = PickerState.mode_prefix(picker_state) <> picker.query <> text
-    replace_current_query(state, picker_state, query, edit_seq + 1)
+    # A picker with nothing to filter takes no text, pasted or typed.
+    if Picker.list_keys?(picker) do
+      state
+    else
+      query = PickerState.mode_prefix(picker_state) <> picker.query <> text
+      replace_current_query(state, picker_state, query, edit_seq + 1)
+    end
   end
 
   def append_query(state, _text), do: state

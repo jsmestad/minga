@@ -26,6 +26,10 @@ defmodule MingaEditor.UI.Picker.Empty do
   @enforce_keys [:title, :rows]
   defstruct glyph: "", title: "", why: "", rows: [], typing?: true
 
+  @doc "The offer without its rows: what the picker keeps once the rows have taken the place of results."
+  @spec header(t()) :: t()
+  def header(%__MODULE__{} = empty), do: %{empty | rows: []}
+
   @doc "A next-step row: `step` comes back in the item id on selection, `key` is shown beside the label."
   @spec row(term(), String.t(), String.t()) :: Item.t()
   def row(step, label, key) when is_binary(label) and is_binary(key),

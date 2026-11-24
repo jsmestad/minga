@@ -37,8 +37,7 @@ struct EmptyListHeader: View {
     }
 }
 
-/// What you can do: the action list of an empty panel. A fixed key column in the accent colour, then the label;
-/// the preselected row carries the list-row selection, and every row is a native button with a hover highlight.
+/// What you can do: the action list of an empty panel. A fixed key column in the accent colour, then the label; the preselected row carries the list-row selection, and every row is a native button with a hover highlight.
 struct EmptyListActions: View {
     let empty: Wire.EmptyList
     let textColor: Color

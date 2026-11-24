@@ -993,8 +993,7 @@ func (m Model) pickerEmptyColors() emptyListColors {
 	}
 }
 
-// renderPickerEmptyHelp names the keys of the next-step rows: the list keys while nothing can be typed, the prompt's
-// list movement otherwise.
+// renderPickerEmptyHelp names the keys of the next-step rows: the list keys while nothing can be typed, the prompt's list movement otherwise.
 func (m Model) renderPickerEmptyHelp(picker protocol.Picker, width int) string {
 	p := m.palette()
 	hints := []string{"⌃J ⌃K move", "↩ run", "esc close"}
