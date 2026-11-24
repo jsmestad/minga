@@ -14,9 +14,9 @@ defmodule Minga.Application do
       ├── MingaEditor.Shell.Registry         (serialized shell publication)
       ├── Minga.Foundation.Supervisor (rest_for_one)
       │   ├── Minga.Language.Registry
-      │   ├── Minga.Extensions.LanguagePacks
+      │   ├── Minga.Extensions.LanguagePacks  (sync, no process)
       │   ├── Minga.Config.ThemeRegistry      (sole writer of theme registrations)
-      │   ├── Minga.Extensions.ThemePacks
+      │   ├── Minga.Extensions.ThemePacks     (sync, no process)
       │   ├── Minga.Events (Registry, :duplicate)
       │   ├── Minga.Config.Options
       │   ├── Minga.Keymap.Scope.Registry

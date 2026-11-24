@@ -1,11 +1,11 @@
 defmodule Minga.Extensions.RecipePacks do
   @moduledoc """
-  Starts bundled recipe packs and registers their tool recipes through extension-owned sources.
+  Bundled recipe packs registered through extension-owned sources.
 
   Bundled packs use the same `Minga.Tool.Recipe.Registry.register/2` path as third-party recipe packs. Each pack module provides a `recipes/0` function returning a list of `%Recipe{}` structs. Stopping or reloading a pack removes all its recipes (and their command-index entries) from the registry without affecting other packs' recipes or user-supplied recipes.
-  """
 
-  use Agent
+  Registration runs synchronously during supervision startup. No idle registrar process remains afterward.
+  """
 
   alias Minga.Extensions.PackLoader
   alias Minga.Tool.Recipe
@@ -13,9 +13,6 @@ defmodule Minga.Extensions.RecipePacks do
 
   @typedoc "A module that implements the recipe-pack extension callbacks."
   @type pack_module :: module()
-
-  @typedoc "Runtime state for the bundled pack starter."
-  @type state :: %{loaded: [atom()], failed: [{atom(), term()}]}
 
   @packs [
     Minga.Extensions.RecipePacks.Elixir,
@@ -26,14 +23,28 @@ defmodule Minga.Extensions.RecipePacks do
     Minga.Extensions.RecipePacks.Misc
   ]
 
-  @doc "Starts the bundled recipe pack loader."
-  @spec start_link(keyword()) :: Agent.on_start()
-  def start_link(opts \\ []) do
-    name = Keyword.get(opts, :name, __MODULE__)
-    packs = Keyword.get(opts, :packs, @packs)
-    disabled = Keyword.get(opts, :disabled, disabled_pack_names())
+  @doc false
+  @spec child_spec(keyword()) :: Supervisor.child_spec()
+  def child_spec(opts) do
+    %{
+      id: __MODULE__,
+      start: {__MODULE__, :start_link, [opts]},
+      type: :worker,
+      restart: :temporary
+    }
+  end
 
-    Agent.start_link(fn -> load_packs(packs, disabled) end, name: name)
+  @doc "Loads bundled recipe packs synchronously and returns `:ignore` (no process remains)."
+  @spec start_link(keyword()) :: :ignore
+  def start_link(opts \\ []) do
+    PackLoader.start_link(
+      opts,
+      @packs,
+      :disabled_recipe_packs,
+      &register_pack/1,
+      &unregister_pack/1,
+      "Recipe"
+    )
   end
 
   @doc "Returns bundled recipe pack modules in startup order."
@@ -43,7 +54,7 @@ defmodule Minga.Extensions.RecipePacks do
   @doc "Registers all recipes owned by a pack, replacing stale entries from an earlier load."
   @spec register_pack(pack_module()) :: :ok | {:error, term()}
   def register_pack(pack_module) when is_atom(pack_module) do
-    source = source_for(pack_module)
+    source = PackLoader.source_for(pack_module)
     RecipeRegistry.unregister_source(source)
 
     pack_module.recipes()
@@ -59,7 +70,7 @@ defmodule Minga.Extensions.RecipePacks do
   @doc "Unregisters all recipes owned by a pack."
   @spec unregister_pack(pack_module()) :: :ok
   def unregister_pack(pack_module) when is_atom(pack_module) do
-    RecipeRegistry.unregister_source(source_for(pack_module))
+    RecipeRegistry.unregister_source(PackLoader.source_for(pack_module))
   end
 
   @doc "Reloads a pack by removing its previous source-owned entries, then registering its current recipes."
@@ -68,15 +79,7 @@ defmodule Minga.Extensions.RecipePacks do
 
   @doc "Returns the contribution source used for a pack."
   @spec source_for(pack_module()) :: {:extension, atom()}
-  def source_for(pack_module) when is_atom(pack_module), do: {:extension, pack_module.name()}
-
-  @spec load_packs([pack_module()], [atom()]) :: state()
-  defp load_packs(packs, disabled), do: PackLoader.load(packs, disabled, __MODULE__, "Recipe")
-
-  @spec disabled_pack_names() :: [atom()]
-  defp disabled_pack_names do
-    Application.get_env(:minga, :disabled_recipe_packs, [])
-  end
+  def source_for(pack_module) when is_atom(pack_module), do: PackLoader.source_for(pack_module)
 
   @spec cleanup_failed_register(:ok | {:error, term()}, RecipeRegistry.contribution_source()) ::
           :ok | {:error, term()}

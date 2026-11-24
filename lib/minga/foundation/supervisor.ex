@@ -12,11 +12,11 @@ defmodule Minga.Foundation.Supervisor do
 
       Foundation.Supervisor (rest_for_one)
       ├── Minga.Language.Registry        ETS, language definitions
-      ├── Minga.Extensions.LanguagePacks Bundled language catalog loader
+      ├── Minga.Extensions.LanguagePacks Bundled language catalog (sync, no process)
       ├── Minga.Config.ThemeRegistry     Sole writer of theme registrations
-      ├── Minga.Extensions.ThemePacks    Bundled theme pack loader
+      ├── Minga.Extensions.ThemePacks    Bundled theme packs (sync, no process)
       ├── Minga.Tool.Recipe.Registry     ETS, tool install recipes
-      ├── Minga.Extensions.RecipePacks   Bundled recipe pack loader
+      ├── Minga.Extensions.RecipePacks   Bundled recipe packs (sync, no process)
       ├── Minga.Events                   Registry(:duplicate), pub/sub bus
       ├── Minga.Config.Options           GenServer, typed options
       ├── Minga.Keymap.Scope.Registry    Sole writer of keymap scope registrations

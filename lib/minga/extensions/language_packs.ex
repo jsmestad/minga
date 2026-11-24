@@ -1,11 +1,11 @@
 defmodule Minga.Extensions.LanguagePacks do
   @moduledoc """
-  Starts bundled language packs and registers their catalog data through extension-owned sources.
+  Bundled language packs registered through extension-owned sources.
 
   Bundled packs use the same `Minga.Language.Registry.register/2` path as third-party language packs. Each `%Minga.Language{}` carries its own extensions, filenames, shebangs, devicon, grammar, formatter, and LSP defaults, so stopping or reloading a pack removes the whole language record from the registry instead of leaving stale derived data behind.
-  """
 
-  use Agent
+  Registration runs synchronously during supervision startup. No idle registrar process remains afterward. Language packs layer extra validation (duplicate-key detection across language modules within a pack) on top of the shared `PackLoader` lifecycle.
+  """
 
   alias Minga.Extensions.PackLoader
   alias Minga.Language
@@ -14,22 +14,33 @@ defmodule Minga.Extensions.LanguagePacks do
   @typedoc "A module that implements the language-pack extension callbacks."
   @type pack_module :: module()
 
-  @typedoc "Runtime state for the bundled pack starter."
-  @type state :: %{loaded: [atom()], failed: [{atom(), term()}]}
-
   @typedoc "Pack validation error when two language definitions claim the same key."
   @type pack_validation_error :: {:duplicate_pack_key, term(), module(), module()}
 
   @packs [Minga.Extensions.LanguagePacks.Bundled]
 
-  @doc "Starts the bundled language pack loader."
-  @spec start_link(keyword()) :: Agent.on_start()
-  def start_link(opts \\ []) do
-    name = Keyword.get(opts, :name, __MODULE__)
-    packs = Keyword.get(opts, :packs, @packs)
-    disabled = Keyword.get(opts, :disabled, disabled_pack_names())
+  @doc false
+  @spec child_spec(keyword()) :: Supervisor.child_spec()
+  def child_spec(opts) do
+    %{
+      id: __MODULE__,
+      start: {__MODULE__, :start_link, [opts]},
+      type: :worker,
+      restart: :temporary
+    }
+  end
 
-    Agent.start_link(fn -> load_packs(packs, disabled) end, name: name)
+  @doc "Loads bundled language packs synchronously and returns `:ignore` (no process remains)."
+  @spec start_link(keyword()) :: :ignore
+  def start_link(opts \\ []) do
+    PackLoader.start_link(
+      opts,
+      @packs,
+      :disabled_language_packs,
+      &register_pack/1,
+      &unregister_pack/1,
+      "Language"
+    )
   end
 
   @doc "Returns bundled language pack modules in startup order."
@@ -39,7 +50,7 @@ defmodule Minga.Extensions.LanguagePacks do
   @doc "Registers all languages owned by a pack, replacing stale entries from an earlier load."
   @spec register_pack(pack_module()) :: :ok | {:error, term()}
   def register_pack(pack_module) when is_atom(pack_module) do
-    source = source_for(pack_module)
+    source = PackLoader.source_for(pack_module)
 
     case collect_pack_languages(pack_module) do
       {:ok, languages} -> register_collected_pack(languages, source)
@@ -50,7 +61,7 @@ defmodule Minga.Extensions.LanguagePacks do
   @doc "Unregisters all language catalog data owned by a pack."
   @spec unregister_pack(pack_module()) :: :ok
   def unregister_pack(pack_module) when is_atom(pack_module) do
-    LanguageRegistry.unregister_source(source_for(pack_module))
+    LanguageRegistry.unregister_source(PackLoader.source_for(pack_module))
   end
 
   @doc "Reloads a pack by removing its previous source-owned entries, then registering its current modules."
@@ -59,15 +70,7 @@ defmodule Minga.Extensions.LanguagePacks do
 
   @doc "Returns the contribution source used for a pack."
   @spec source_for(pack_module()) :: {:extension, atom()}
-  def source_for(pack_module) when is_atom(pack_module), do: {:extension, pack_module.name()}
-
-  @spec load_packs([pack_module()], [atom()]) :: state()
-  defp load_packs(packs, disabled), do: PackLoader.load(packs, disabled, __MODULE__, "Language")
-
-  @spec disabled_pack_names() :: [atom()]
-  defp disabled_pack_names do
-    Application.get_env(:minga, :disabled_language_packs, [])
-  end
+  def source_for(pack_module) when is_atom(pack_module), do: PackLoader.source_for(pack_module)
 
   @spec register_collected_pack([Language.t()], LanguageRegistry.contribution_source()) ::
           :ok | {:error, term()}

@@ -5,6 +5,7 @@ defmodule Minga.Extensions.LanguagePacksTest do
 
   alias Minga.Extensions.LanguagePacks
   alias Minga.Extensions.LanguagePacks.Bundled
+  alias Minga.Extensions.PackLoader
   alias Minga.Language
   alias Minga.Language.Devicon
   alias Minga.Language.Registry
@@ -119,8 +120,13 @@ defmodule Minga.Extensions.LanguagePacksTest do
   test "disabled bundled packs remove any previously loaded entries and leave safe text fallbacks" do
     assert %Language{name: :elixir} = Registry.get(:elixir)
 
-    name = :language_packs_disabled_test
-    start_supervised!({LanguagePacks, name: name, disabled: [:minga_language_pack]})
+    PackLoader.load(
+      LanguagePacks.packs(),
+      [:minga_language_pack],
+      &LanguagePacks.register_pack/1,
+      &LanguagePacks.unregister_pack/1,
+      "Language"
+    )
 
     assert Registry.get(:elixir) == nil
     assert Registry.for_extension("ex") == nil
