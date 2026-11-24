@@ -1836,6 +1836,19 @@ td:first-child {
   white-space: nowrap;
 }
 
+/* Why Minga: the switch table. Three prose columns, so the first one wraps. Widths sit on the header cells, which the stacked phone layout hides. */
+.table-decide td:first-child {
+  white-space: normal;
+}
+
+.table-decide th:first-child {
+  width: 27%;
+}
+
+.table-decide th:nth-child(2) {
+  width: 39%;
+}
+
 /* Footer */
 
 .site-footer {
@@ -2303,17 +2316,6 @@ td:first-child {
   .table-wrap {
     -webkit-overflow-scrolling: touch;
   }
-  .table-compare {
-    min-width: 56rem;
-  }
-  .table-compare th,
-  .table-compare td {
-    min-width: 11.5rem;
-  }
-  .table-compare th:first-child,
-  .table-compare td:first-child {
-    min-width: 7.5rem;
-  }
   th, td {
     padding: 0.68rem 0.75rem;
     font-size: 0.84rem;
@@ -2346,6 +2348,16 @@ td:first-child {
     margin-bottom: 0.3rem;
     font-size: 0.92rem;
     color: var(--text);
+  }
+  .table-stack td[data-label]::before {
+    content: attr(data-label);
+    display: block;
+    margin-top: 0.6rem;
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--text-muted);
   }
   .site-footer {
     padding: 2rem 0 2.5rem;
@@ -4547,330 +4559,21 @@ td [data-status="planned"]:not([data-pill="off"])::before {
 
 /* Shared Catppuccin Frappé syntax tokens for TS-highlighted dark specimens */
 
-.wf-code .ckw, .iso-code-line .ckw, .st-code .ckw, .le-code.is-frappe .ckw { color: #ca9ee6; }
-.wf-code .cat, .iso-code-line .cat, .st-code .cat, .le-code.is-frappe .cat { color: #8caaee; }
-.wf-code .cmod, .iso-code-line .cmod, .st-code .cmod, .le-code.is-frappe .cmod { color: #e5c890; }
-.wf-code .cst, .iso-code-line .cst, .st-code .cst, .le-code.is-frappe .cst { color: #a6d189; }
-.wf-code .cnum, .iso-code-line .cnum, .st-code .cnum, .le-code.is-frappe .cnum { color: #ef9f76; }
-.wf-code .cop, .iso-code-line .cop, .st-code .cop, .le-code.is-frappe .cop { color: #81c8be; }
-.wf-code .ccm, .iso-code-line .ccm, .st-code .ccm, .le-code.is-frappe .ccm { color: #838ba7; font-style: italic; }
+.iso-code-line .ckw, .st-code .ckw, .le-code.is-frappe .ckw { color: #ca9ee6; }
+.iso-code-line .cat, .st-code .cat, .le-code.is-frappe .cat { color: #8caaee; }
+.iso-code-line .cmod, .st-code .cmod, .le-code.is-frappe .cmod { color: #e5c890; }
+.iso-code-line .cst, .st-code .cst, .le-code.is-frappe .cst { color: #a6d189; }
+.iso-code-line .cnum, .st-code .cnum, .le-code.is-frappe .cnum { color: #ef9f76; }
+.iso-code-line .cop, .st-code .cop, .le-code.is-frappe .cop { color: #81c8be; }
+.iso-code-line .ccm, .st-code .ccm, .le-code.is-frappe .ccm { color: #838ba7; font-style: italic; }
 
-/* Why Minga: Layout Width Comparator */
-
-.wf-stage {
-  padding: 1rem;
-  background: var(--bg-code);
-  border-bottom: 1px solid var(--border);
-}
-
-.wf-ide {
-  display: grid;
-  grid-template-columns: 46px 136px minmax(0, 1fr) 172px;
-  min-height: 360px;
-  border: 1px solid #414559;
-  background: #232634;
-  color: #c6d0f5;
-  font-family: var(--font-mono);
-  font-size: 0.71rem;
-}
-
-.wf-rail {
-  border-right: 1px solid #414559;
-  background: #1e2030;
-  color: #737994;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0.85rem;
-  padding: 0.75rem 0.25rem;
-  font-size: 0.62rem;
-}
-
-.wf-tree,
-.wf-chat {
-  padding: 0.7rem 0.7rem;
-  background: #292c3c;
-  display: flex;
-  flex-direction: column;
-  gap: 0.32rem;
-  color: #a5adce;
-}
-
-.wf-tree {
-  border-right: 1px solid #414559;
-}
-
-.wf-chat {
-  border-left: 1px solid #414559;
-}
-
-.wf-panel-head,
-.essay-body .wf-panel-head {
-  font-size: 0.64rem;
-  letter-spacing: 0.05em;
-  color: #ef9f76;
-  margin-bottom: 0.2rem;
-}
-
-.wf-file-active {
-  color: #ffffff;
-  background: rgba(140, 170, 238, 0.16);
-  padding: 0.1rem 0.25rem;
-}
-
-.wf-chat-msg {
-  padding: 0.42rem 0.5rem;
-  background: #232634;
-  border: 1px solid #414559;
-  color: #c6d0f5;
-  font-size: 0.68rem;
-  line-height: 1.45;
-}
-
-.wf-chat-msg.is-ai {
-  border-left: 2px solid #ca9ee6;
-}
-
-.wf-chat-box {
-  margin-top: auto;
-  padding: 0.45rem 0.5rem;
-  background: #1e2030;
-  border: 1px solid #51576d;
-  color: #838ba7;
-  font-size: 0.67rem;
-}
-
-.wf-center {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-
-.wf-tabs {
-  display: flex;
-  gap: 0.45rem;
-  padding: 0.42rem 0.6rem;
-  background: #1e2030;
-  border-bottom: 1px solid #414559;
-  color: #838ba7;
-  overflow: hidden;
-  white-space: nowrap;
-}
-
-.wf-tabs span:first-child {
-  color: #ffffff;
-}
-
-.wf-code {
-  padding: 0.75rem 0.85rem;
-  background: #303446;
-  color: #c6d0f5;
-  line-height: 1.62;
-  flex: 1;
-  overflow-x: auto;
-  white-space: pre;
-}
-
-.wf-code.is-cramped {
-  border-left: 2px solid #e78284;
-}
-
-.wf-code.is-wide {
-  border-left: 2px solid #ca9ee6;
-}
-
-.wf-ln {
-  display: inline-block;
-  width: 2.2rem;
-  color: #737994;
-  user-select: none;
-}
-
-.wf-hl {
-  background: rgba(202, 158, 230, 0.13);
-}
-
-.wf-term {
-  padding: 0.55rem 0.65rem;
-  background: #1e2030;
-  border-top: 1px solid #414559;
-  color: #b5bfe2;
-  font-size: 0.67rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-}
-
-.wf-term-tabs {
-  display: flex;
-  gap: 0.6rem;
-  font-size: 0.62rem;
-  color: #737994;
-  border-bottom: 1px solid #303446;
-  padding-bottom: 0.28rem;
-}
-
-.wf-term-tabs .is-on {
-  color: #c6d0f5;
-}
-
-.wf-term-dim {
-  color: #737994;
-}
-
-.wf-minga {
-  display: flex;
-  flex-direction: column;
-  min-height: 360px;
-  border: 1px solid #414559;
-  background: #303446;
-  color: #c6d0f5;
-  font-family: var(--font-mono);
-  font-size: 0.75rem;
-}
-
-.wf-m-title {
-  display: flex;
-  justify-content: space-between;
-  padding: 0.45rem 0.85rem;
-  background: #292c3c;
-  border-bottom: 1px solid #414559;
-  color: #a5adce;
-  font-size: 0.71rem;
-}
-
-.wf-drawer {
-  border-top: 1px solid #ca9ee6;
-  background: #232634;
-  padding: 0.7rem 0.85rem;
-}
-
-.wf-drawer-head {
-  display: flex;
-  justify-content: space-between;
-  gap: 0.5rem;
-  margin-bottom: 0.45rem;
-  font-size: 0.72rem;
-  color: #ca9ee6;
-}
-
-.wf-drawer-title {
-  font-weight: 600;
-  color: #ffffff;
-}
-
-.wf-drawer-row {
-  padding: 0.22rem 0;
-  color: #b5bfe2;
-}
-
-.wf-drawer-file {
-  font-weight: 600;
-  color: #e6ecf8;
-}
-
-.wf-drawer-meta {
-  color: #949cbb;
-}
-
-.wf-m-modeline {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.4rem 0.9rem;
-  padding: 0.42rem 0.85rem;
-  background: #292c3c;
-  border-top: 1px solid #414559;
-  font-size: 0.71rem;
-  color: #a5adce;
-}
-
-.wf-m-modeline span:first-child {
-  color: #8caaee;
-  font-weight: 600;
-}
-
-.wf-metrics {
-  display: grid;
-  grid-template-columns: auto auto minmax(0, 1fr);
-  align-items: center;
-  gap: 0.75rem 1.5rem;
-  padding: 0.9rem 1rem;
-}
-
-.wf-metric {
-  display: flex;
-  flex-direction: column;
-  gap: 0.12rem;
-}
-
-.wf-metric span {
-  font-family: var(--font-mono);
-  font-size: 0.64rem;
-  letter-spacing: 0.06em;
-  color: var(--text-muted);
-}
-
-.wf-metric strong {
-  font-family: var(--font-mono);
-  font-size: 0.9rem;
-  color: var(--text);
-}
-
-.wf-metric strong.is-warn { color: var(--fail); }
-.wf-metric strong.is-good { color: var(--done); }
-
-.wf-summary {
-  margin: 0;
-  font-size: 0.86rem;
-  color: var(--text-secondary);
-}
-
-/* Why Minga: Personalized Comparison Lens */
-
-.lens-box {
-  margin-bottom: 1.25rem;
-}
-
-.lens-card {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 1rem;
-  padding: 1rem;
-}
-
-.lens-col p {
-  margin: 0.3rem 0 0;
-  font-size: 0.86rem;
-  line-height: 1.52;
-  color: var(--text-secondary);
-}
-
+/* Small mono label used by the Architecture stepper and the Extending explorer. */
 .lens-k {
   display: block;
   font-family: var(--font-mono);
   font-size: 0.66rem;
   letter-spacing: 0.06em;
   color: var(--accent);
-}
-
-.lens-foot {
-  grid-column: 1 / -1;
-  padding-top: 0.75rem;
-  border-top: 1px solid var(--border);
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.5rem;
-  font-size: 0.82rem;
-  color: var(--text-muted);
-}
-
-.table-compare .is-lens-focus {
-  background: var(--accent-soft);
-}
-
-.table-compare .is-lens-dim {
-  opacity: 0.42;
 }
 
 /* Architecture: Live Side-by-Side Typing Isolation Demo */
@@ -5270,25 +4973,6 @@ td [data-status="planned"]:not([data-pill="off"])::before {
     order: -1;
     border-bottom: 1px solid var(--border);
   }
-  .wf-ide {
-    grid-template-columns: 38px 104px minmax(0, 1fr);
-    min-height: 320px;
-  }
-  .wf-minga {
-    min-height: 320px;
-  }
-  .wf-chat {
-    grid-column: 1 / -1;
-    border-left: 0;
-    border-top: 1px solid #414559;
-  }
-  .wf-metrics {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-  .wf-summary {
-    grid-column: 1 / -1;
-  }
-  .lens-card,
   .iso-compare,
   .st-clean-layout,
   .le-body {
@@ -5327,13 +5011,6 @@ td [data-status="planned"]:not([data-pill="off"])::before {
   }
   .le-layer-btn:last-child {
     border-bottom: 0;
-  }
-  .wf-ide {
-    grid-template-columns: 1fr;
-  }
-  .wf-rail,
-  .wf-tree {
-    display: none;
   }
 }
 
