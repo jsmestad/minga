@@ -1,10 +1,10 @@
 defmodule MingaEditor.Input.WhichKey do
   @moduledoc """
-  Gives an active which-key sequence first ownership of Escape, and walks a leader sequence that no editing model owns.
+  Gives an active which-key sequence first ownership of Escape, and walks the CUA space leader sequence.
 
   Escape closes which-key and cancels the pending leader sequence in the editing model, so the next `SPC` opens which-key again instead of continuing the old sequence (#4078).
 
-  Vim walks its own leader sequence in the Normal mode state. The CUA space leader keeps none: the macOS chord and retract (`CUA.SpaceLeader`) and the terminal retract window (`CUA.TUISpaceLeader`) start the sequence with `{:leader_start, node}`, so the which-key node is its only record. This handler resolves the next key inside that node before any surface sees it: a command runs, a prefix advances, and any other key closes which-key and passes through to the focused surface.
+  Vim walks its own leader sequence in the Normal mode state, so in Vim this handler passes every other key through. The CUA space leader keeps none: the macOS chord and retract (`CUA.SpaceLeader`) and the terminal retract window (`CUA.TUISpaceLeader`) start the sequence with `{:leader_start, node}`, so the which-key node is its only record. This handler resolves the next key inside that node before any surface sees it: a command runs, a prefix advances, and any other key closes which-key and passes through to the focused surface.
   """
 
   @behaviour MingaEditor.Input.Handler
@@ -38,12 +38,20 @@ defmodule MingaEditor.Input.WhichKey do
         modifiers
       )
       when node != nil do
-    if Minga.Editing.in_leader?(state),
-      do: {:passthrough, state},
-      else: continue_leader(state, node, {codepoint, modifiers})
+    if cua_leader?(state),
+      do: continue_leader(state, node, {codepoint, modifiers}),
+      else: {:passthrough, state}
   end
 
   def handle_key(state, _codepoint, _modifiers), do: {:passthrough, state}
+
+  # Only the CUA space leader leaves its sequence to which-key. A Vim which-key node without a mode
+  # leader is stale (a click resets the mode), so the key belongs to the mode, not to the group.
+  @spec cua_leader?(state()) :: boolean()
+  defp cua_leader?(state) do
+    Minga.Editing.active_model(state) == Minga.Editing.Model.CUA and
+      not Minga.Editing.in_leader?(state)
+  end
 
   @spec continue_leader(state(), Bindings.node_t(), Bindings.key()) ::
           MingaEditor.Input.Handler.result()
