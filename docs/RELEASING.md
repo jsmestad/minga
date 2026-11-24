@@ -75,7 +75,7 @@ Runner labels are configuration, not architecture evidence. Each job checks its 
 
 ### Toolchains and app construction
 
-`.tool-versions` is the source pin: Elixir `1.20.5-otp-29`, OTP `29.1.2`, Go `1.26.11` and native Zig `0.16.0`. Preparation selects Go explicitly; the `go/tui/go.mod` directive sets the minimum Go version for the terminal renderer. macOS jobs select Xcode 26.3 explicitly and verify the actual native host.
+`.tool-versions` is the source pin: Elixir `1.20.5-otp-29`, OTP `29.1.3`, Go `1.26.11` and native Zig `0.16.0`. Preparation selects Go explicitly; the `go/tui/go.mod` directive sets the minimum Go version for the terminal renderer. macOS jobs select Xcode 26.3 explicitly and verify the actual native host.
 
 The TUI ships as a native Mix release tarball. The GUI still embeds the plain `minga_macos` release in `Minga.dmg`.
 
