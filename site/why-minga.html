@@ -85,7 +85,7 @@
           <p>In Minga the same moment goes differently. The agent reads the file as it is in your editor, unsaved change included. When you approve its edit, the edit is staged: <strong>Review files</strong> lists it, and both the file on disk and your open copy keep the old text. In a session you start from the editor, staged edits land only when you publish them, with <kbd>SPC a p</kbd> (<kbd>SPC</kbd> is the space bar, which opens Minga's command menu). If you changed the same lines in the meantime, Minga keeps both versions and opens a conflict review.</p>
           <p>The same gap, two tools that each hold part of the work, shows up in three more places:</p>
           <ul>
-            <li><strong>Review comes after the write.</strong> A terminal agent writes an approved edit into your working tree, and you read the result afterwards with <code>git diff</code>. In Minga, approving and publishing are separate steps, so you read every staged edit before your files change. <span data-status="planned" data-since="v0.1.0">A review buffer you can reshape for the task is planned.</span></li>
+            <li><strong>Review comes after the write.</strong> A terminal agent writes an approved edit into your working tree, and you read the result afterwards with <code>git diff</code>. In a Minga session you start from the editor, approving and publishing are separate steps, so you can read every staged edit before your files change. <span data-status="planned" data-since="v0.1.0">A review buffer you can reshape for the task is planned.</span></li>
             <li><strong>Undo has two histories.</strong> The agent's writes are not in your editor's undo history, so you take them back with Git or with the agent's own rewind command, where it has one. <span data-status="planned" data-since="v0.1.0">Minga's undo will be split by author: <kbd>u</kbd> undoes only your edits, and you remove an agent's change by rejecting it.</span></li>
             <li><strong>Scripting stops at the pane.</strong> A multiplexer works on panes: it can start them and send them keys, but a file or an agent's tool call is outside its reach. Your editor config, your agent's hooks and your pane layout live in three places. In Minga, key bindings, editor commands and agent hooks (commands that run before an agent's tool call and can veto it) are set in one Elixir file. <span data-status="planned" data-since="v0.1.0">Task workflows, which let you or Minga write a review surface or a task board for one job, build on that (<a href="/extending#layer-workflows">Extending Minga</a>).</span></li>
           </ul>
@@ -101,7 +101,7 @@
 
         <section class="essay-section" id="comparison">
           <h2>Should you switch?</h2>
-          <p>Not always. Minga is a pre-release, and several tools do things it does not do. These are the points that usually decide it.</p>
+          <p>Not always. Minga is a pre-release, and several tools do things it does not do. These are the points that usually decide it, compared as of November 2026.</p>
 
           <div class="table-wrap">
             <table class="table-stack table-decide">
@@ -145,7 +145,7 @@
                 </tr>
                 <tr>
                   <td>A large extension catalogue</td>
-                  <td data-label="Minga today">No. Extensions are Elixir packages installed from Hex, Git or a local path, and few exist yet.</td>
+                  <td data-label="Minga today">No. Extensions are Elixir packages installed from Hex (Elixir's package registry), Git or a local path, and few exist yet.</td>
                   <td data-label="Otherwise">VS Code's marketplace, or the Neovim and Emacs plugin ecosystems.</td>
                 </tr>
               </tbody>
@@ -208,7 +208,7 @@
             </li>
             <li class="spec-row">
               <span class="spec-key spec-key-strong">Changes</span>
-              <span class="spec-detail">The agent is Minga's own, not the vendor's. Its approved edits are staged, not written into your working tree, and it reads your unsaved changes.</span>
+              <span class="spec-detail">The agent is Minga's own, not the vendor's. Its approved edits are staged until you publish them, or until a headless session ends, and it reads your unsaved changes.</span>
             </li>
             <li class="spec-row">
               <span class="spec-key spec-key-strong">Stay if</span>

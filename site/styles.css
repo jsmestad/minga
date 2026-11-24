@@ -4567,6 +4567,15 @@ td [data-status="planned"]:not([data-pill="off"])::before {
 .iso-code-line .cop, .st-code .cop, .le-code.is-frappe .cop { color: #81c8be; }
 .iso-code-line .ccm, .st-code .ccm, .le-code.is-frappe .ccm { color: #838ba7; font-style: italic; }
 
+/* Small mono label used by the Architecture stepper and the Extending explorer. */
+.lens-k {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+}
+
 /* Architecture: Live Side-by-Side Typing Isolation Demo */
 
 .iso-input-bar {
