@@ -78,7 +78,9 @@ defmodule MingaEditor.UI.Theme.Catppuccin do
   defp variant(:catppuccin_latte), do: :light
   defp variant(_name), do: :dark
 
-  # Line numbers are secondary text, so they need 4.5:1 against `base`: overlay2 reaches it on the dark flavours and subtext1 on Latte. Latte's popup and pane borders also move to overlay2 to reach 3:1.
+  # Line numbers are secondary text, so they need 4.5:1 against `base`.
+  # overlay2 reaches it on the dark flavours and subtext1 on Latte.
+  # Latte's popup and pane borders also move to overlay2 to reach 3:1.
   @spec overrides(atom(), map()) :: map()
   defp overrides(:catppuccin_latte, p) do
     %{
