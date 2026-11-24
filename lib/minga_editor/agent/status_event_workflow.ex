@@ -107,21 +107,8 @@ defmodule MingaEditor.Agent.StatusEventWorkflow do
   end
 
   @spec update_turn_activity(EditorState.t(), Tab.agent_status()) :: EditorState.t()
-  defp update_turn_activity(state, status) when status in [:thinking, :tool_executing],
-    do: update_activity(state, &Activity.start_turn/1)
-
-  defp update_turn_activity(state, :idle), do: update_activity(state, &Activity.finish_turn/1)
-
-  defp update_turn_activity(state, status) when status in [:error, :plan] do
-    update_activity(state, fn activity ->
-      case Activity.active_tool_name(activity) do
-        nil -> Activity.finish_turn(activity)
-        _running -> activity
-      end
-    end)
-  end
-
-  defp update_turn_activity(state, _status), do: state
+  defp update_turn_activity(state, status),
+    do: update_activity(state, &Activity.apply_status(&1, status))
 
   @spec update_spinner(EditorState.t(), Tab.agent_status()) :: EditorState.t()
   defp update_spinner(state, status),

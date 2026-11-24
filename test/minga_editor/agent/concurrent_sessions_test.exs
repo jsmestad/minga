@@ -95,6 +95,10 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
     updated
   end
 
+  defp tool_end(id, name) do
+    %MingaAgent.Event.ToolEnd{tool_call_id: id, name: name, result: "done", outcome: :complete}
+  end
+
   defp start_session(id) do
     start_supervised!(
       {Session, provider: Minga.Test.StubProvider, persist?: false, hooks_enabled?: false},
@@ -500,6 +504,38 @@ defmodule MingaEditor.Agent.ConcurrentSessionsTest do
 
       assert arrived.workspace.agent_ui.view.preview.content ==
                {:shell, "printf local", "complete", :done}
+    end
+
+    test "a turn that finishes in the background shows idle on return and the next turn counts from zero" do
+      a = start_supervised!({StubServer, []}, id: :foreground)
+      b = start_supervised!({StubServer, []}, id: :background)
+
+      state =
+        [agent_tab(1, "A", a), agent_tab(2, "B", b)]
+        |> base_state(1)
+        |> connect_arrivals([a, b])
+        |> arrive(2, b)
+        |> handle({:agent_event, b, {:status_changed, :thinking}})
+        |> handle({:agent_event, b, {:tool_started, "read-1", "read_file", %{}}})
+
+      assert %{active_action: "Running read_file", tool_count: 1} =
+               state.workspace.agent_ui.view.activity
+
+      returned =
+        state
+        |> arrive(1, a)
+        |> handle({:agent_event, b, {:tool_ended, tool_end("read-1", "read_file")}})
+        |> handle({:agent_event, b, {:status_changed, :idle}})
+        |> arrive(2, b)
+
+      assert %{active_action: "", started_at: nil, running_tools: running} =
+               returned.workspace.agent_ui.view.activity
+
+      assert running == %{}
+
+      next = handle(returned, {:agent_event, b, {:status_changed, :thinking}})
+
+      assert %{active_action: "Thinking", tool_count: 0} = next.workspace.agent_ui.view.activity
     end
 
     test "error recall stays with the volatile conversation after leaving a busy arrival" do
