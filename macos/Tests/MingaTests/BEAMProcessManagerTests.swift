@@ -494,3 +494,255 @@ struct BEAMProcessManagerTerminationTests {
         #expect(recoveryPresented == false)
     }
 }
+
+/// Startup stop watchdog, restart delay, and termination identity, driven by a manual clock.
+/// Children are real short-lived processes; only elapsed time is simulated.
+@Suite("BEAMProcessManager shutdown watchdog", .serialized, .timeLimit(.minutes(1)))
+@MainActor
+struct BEAMProcessManagerWatchdogTests {
+    /// A core that ignores SIGTERM and exits only after a line arrives on stdin.
+    private struct UnresponsiveCore {
+        let input: FileHandle
+
+        /// Lets the core exit normally, whatever state the manager is in.
+        func release() throws {
+            try input.write(contentsOf: Data("\n".utf8))
+        }
+    }
+
+    private func catConfiguration() -> BEAMLaunchConfiguration {
+        BEAMLaunchConfiguration(
+            executableURL: URL(fileURLWithPath: "/bin/cat"), arguments: [],
+            environment: [:], workingDirectoryURL: URL(fileURLWithPath: "/private/tmp")
+        )
+    }
+
+    /// Starts a core that has installed its TERM trap before this returns.
+    private func startUnresponsiveCore(_ manager: BEAMProcessManager) throws -> UnresponsiveCore {
+        manager.start(configuration: BEAMLaunchConfiguration(
+            executableURL: URL(fileURLWithPath: "/bin/sh"),
+            arguments: ["-c", "trap '' TERM; printf x; IFS= read -r line"],
+            environment: [:],
+            workingDirectoryURL: FileManager.default.temporaryDirectory
+        ))
+        let input = try #require(manager.writeHandle)
+        let output = try #require(manager.readHandle)
+        try #require(output.read(upToCount: 1) == Data([120]))
+        return UnresponsiveCore(input: input)
+    }
+
+    /// Runs a process to completion so its termination status can be read.
+    private func finishedProcess() async throws -> Process {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/true")
+        let (exits, exit) = AsyncStream<Void>.makeStream()
+        process.terminationHandler = { _ in
+            exit.yield()
+            exit.finish()
+        }
+        try process.run()
+        var iterator = exits.makeAsyncIterator()
+        _ = await iterator.next()
+        return process
+    }
+
+    @Test("a genuinely unresponsive core times out exactly at the deadline and stays owned")
+    func unresponsiveCoreTimesOut() async throws {
+        let clock = ManualClock()
+        let manager = BEAMProcessManager(clock: clock)
+        let (exits, exit) = AsyncStream<Int32>.makeStream()
+        manager.onTermination = { status in exit.yield(status); return false }
+        let core = try startUnresponsiveCore(manager)
+        let original = try #require(manager.process)
+        let (failures, report) = AsyncStream<BEAMProcessManager.StartupFailure>.makeStream()
+        var reported: [BEAMProcessManager.StartupFailure] = []
+
+        // The retry returns at once: waiting for exit never blocks the main actor.
+        manager.retryStartup(stopTimeout: 3) { reported.append($0); report.yield($0) }
+        await clock.waitForSleepers(1)
+        clock.advance(by: .milliseconds(2_999))
+        #expect(clock.sleeperCount == 1)
+        #expect(reported.isEmpty)
+
+        clock.advance(by: .milliseconds(1))
+        var results = failures.makeAsyncIterator()
+        #expect(await results.next() == .previousCoreStopTimedOut)
+        #expect(manager.process === original)
+        #expect(manager.hasLiveProcess)
+        #expect(manager.writeHandle === core.input)
+
+        try core.release()
+        var observedExits = exits.makeAsyncIterator()
+        #expect(await observedExits.next() == 0)
+        #expect(manager.process == nil)
+        #expect(manager.exitIntent == .startupFailed)
+        #expect(reported == [.previousCoreStopTimedOut])
+    }
+
+    @Test("a core that exits before the stop timeout is replaced and its watchdog is cancelled")
+    func exitBeforeTimeoutCancelsWatchdog() async throws {
+        try #require(!BEAMProcessManager.isBundleMode)
+        let clock = ManualClock()
+        let manager = BEAMProcessManager(clock: clock)
+        defer { manager.abortStartup() }
+        let core = try startUnresponsiveCore(manager)
+        let (failures, report) = AsyncStream<BEAMProcessManager.StartupFailure>.makeStream()
+        var reported: [BEAMProcessManager.StartupFailure] = []
+
+        manager.retryStartup(stopTimeout: 3) { reported.append($0); report.yield($0) }
+        await clock.waitForSleepers(1)
+        clock.advance(by: .seconds(1))
+        try core.release()
+
+        // The test host has no embedded release, so the replacement launch reports a missing release.
+        var results = failures.makeAsyncIterator()
+        #expect(await results.next() == .missingRelease)
+        #expect(clock.sleeperCount == 0)
+        clock.advance(by: .seconds(10))
+        #expect(clock.sleeperCount == 0)
+        #expect(reported == [.missingRelease])
+        #expect(manager.process == nil)
+    }
+
+    @Test("a core restarted before the old stop deadline is never treated as the stopping core")
+    func restartBeforeTimeoutKeepsReplacement() async throws {
+        try #require(!BEAMProcessManager.isBundleMode)
+        let clock = ManualClock()
+        let manager = BEAMProcessManager(clock: clock)
+        defer { manager.abortStartup() }
+        let core = try startUnresponsiveCore(manager)
+        let (failures, report) = AsyncStream<BEAMProcessManager.StartupFailure>.makeStream()
+        var reported: [BEAMProcessManager.StartupFailure] = []
+
+        manager.retryStartup(stopTimeout: 3) { reported.append($0); report.yield($0) }
+        await clock.waitForSleepers(1)
+        try core.release()
+        var results = failures.makeAsyncIterator()
+        #expect(await results.next() == .missingRelease)
+
+        manager.start(configuration: catConfiguration())
+        let replacement = try #require(manager.process)
+        let replacementInput = try #require(manager.writeHandle)
+        clock.advance(by: .seconds(10))
+
+        #expect(clock.sleeperCount == 0)
+        #expect(manager.process === replacement)
+        #expect(manager.hasLiveProcess)
+        #expect(manager.writeHandle === replacementInput)
+        #expect(manager.exitIntent == .running)
+        #expect(reported == [.missingRelease])
+    }
+
+    @Test("a new start before the crash restart delay elapses cancels the delayed restart")
+    func newStartCancelsRestartDelay() async throws {
+        let clock = ManualClock()
+        let manager = BEAMProcessManager(clock: clock)
+        defer { manager.abortStartup() }
+
+        manager.handleTermination(status: 1, reason: .exit)
+        #expect(manager.exitIntent == .restartScheduled)
+        await clock.waitForSleepers(1)
+
+        manager.start(configuration: catConfiguration())
+        let replacement = try #require(manager.process)
+        #expect(clock.sleeperCount == 0)
+        clock.advance(by: .seconds(1))
+        #expect(manager.process === replacement)
+        #expect(manager.exitIntent == .running)
+    }
+
+    @Test("app shutdown cancels a parked watchdog before its deadline", arguments: [false, true])
+    func shutdownCancelsWatchdog(abort: Bool) async throws {
+        let clock = ManualClock()
+        let manager = BEAMProcessManager(clock: clock)
+        let (exits, exit) = AsyncStream<Int32>.makeStream()
+        manager.onTermination = { status in exit.yield(status); return false }
+        let core = try startUnresponsiveCore(manager)
+        var reported: [BEAMProcessManager.StartupFailure] = []
+
+        manager.retryStartup(stopTimeout: 3) { reported.append($0) }
+        await clock.waitForSleepers(1)
+        if abort {
+            manager.abortStartup()
+        } else {
+            manager.beginAppShutdown()
+        }
+        #expect(clock.sleeperCount == 0)
+        clock.advance(by: .seconds(10))
+        #expect(reported.isEmpty)
+        #expect(manager.exitIntent == .appShutdown)
+
+        if !abort { try core.release() }
+        var observedExits = exits.makeAsyncIterator()
+        #expect(await observedExits.next() != nil)
+        #expect(manager.process == nil)
+        #expect(reported.isEmpty)
+    }
+
+    @Test("an exit handled after the deadline but before the watchdog runs reports one timeout")
+    func exitAfterDeadlineBeforeWatchdogRuns() async throws {
+        let clock = ManualClock()
+        let manager = BEAMProcessManager(clock: clock)
+        defer { manager.abortStartup() }
+        // Handling the exit below closes the core's stdin, which lets it exit.
+        _ = try startUnresponsiveCore(manager)
+        var reported: [BEAMProcessManager.StartupFailure] = []
+
+        manager.retryStartup(stopTimeout: 3) { reported.append($0) }
+        await clock.waitForSleepers(1)
+        // Wake the watchdog, then handle the exit in the same main-actor turn, before the watchdog runs.
+        clock.advance(by: .seconds(3))
+        manager.handleTermination(status: 0, reason: .exit)
+        #expect(reported == [.previousCoreStopTimedOut])
+        #expect(manager.process == nil)
+        #expect(manager.exitIntent == .startupFailed)
+    }
+
+    @Test("a termination callback from an unrelated process leaves the current core untouched")
+    func unrelatedCallbackIsIgnored() async throws {
+        let manager = BEAMProcessManager(clock: ManualClock())
+        defer { manager.abortStartup() }
+        var terminations: [Int32] = []
+        manager.onTermination = { status in terminations.append(status); return false }
+        manager.start(configuration: catConfiguration())
+        let current = try #require(manager.process)
+        let input = try #require(manager.writeHandle)
+        let output = try #require(manager.readHandle)
+
+        manager.processDidTerminate(try await finishedProcess())
+
+        #expect(manager.process === current)
+        #expect(manager.hasLiveProcess)
+        #expect(manager.writeHandle === input)
+        #expect(manager.readHandle === output)
+        #expect(manager.exitIntent == .running)
+        #expect(terminations.isEmpty)
+    }
+
+    @Test("a late callback from a replaced core cannot clear its replacement")
+    func lateCallbackFromReplacedCoreIsIgnored() async throws {
+        let clock = ManualClock()
+        let manager = BEAMProcessManager(clock: clock)
+        defer { manager.abortStartup() }
+        let (exits, exit) = AsyncStream<Int32>.makeStream()
+        manager.onTermination = { status in exit.yield(status); return false }
+        manager.start(configuration: catConfiguration())
+        let original = try #require(manager.process)
+
+        original.terminate()
+        var observedExits = exits.makeAsyncIterator()
+        #expect(await observedExits.next() == SIGTERM)
+        #expect(manager.exitIntent == .restartScheduled)
+
+        manager.start(configuration: catConfiguration())
+        let replacement = try #require(manager.process)
+        let input = try #require(manager.writeHandle)
+        manager.processDidTerminate(original)
+
+        #expect(manager.process === replacement)
+        #expect(manager.hasLiveProcess)
+        #expect(manager.writeHandle === input)
+        #expect(manager.exitIntent == .running)
+        #expect(clock.sleeperCount == 0)
+    }
+}

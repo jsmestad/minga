@@ -37,13 +37,20 @@ final class BEAMProcessManager {
     /// File handle for writing protocol messages to the BEAM (BEAM's stdin).
     private(set) var writeHandle: FileHandle?
 
-    /// The running BEAM child process.
-    private var process: Process?
+    /// The running BEAM child process. Its identity decides whether a termination callback is current.
+    private(set) var process: Process?
     private var pendingStartupRetry: StartupRetry?
     private(set) var isSafeMode = false
 
+    /// Elapsed time on the injected clock, used for startup stop deadlines.
+    private let elapsed: @Sendable () -> Duration
+
+    /// Suspends for a delay on the injected clock. Throws when the waiting task is cancelled.
+    private let sleep: @Sendable (Duration) async throws -> Void
+
     private struct StartupRetry {
-        let deadline: DispatchTime
+        /// Elapsed time on the injected clock after which the stopping core has timed out.
+        let deadline: Duration
         let inSafeMode: Bool
         let onFailure: (StartupFailure) -> Void
     }
@@ -105,6 +112,14 @@ final class BEAMProcessManager {
 
     /// Whether a BEAM child is currently running.
     var hasLiveProcess: Bool { process?.isRunning ?? false }
+
+    /// Creates a manager whose stop deadlines, watchdog, and restart delays use `clock`.
+    /// Production uses the continuous clock; tests inject a manually advanced clock.
+    init<C: Clock<Duration>>(clock: C = ContinuousClock()) {
+        let origin = clock.now
+        elapsed = { origin.duration(to: clock.now) }
+        sleep = { try await clock.sleep(for: $0) }
+    }
 
     /// Whether the app is responsible for launching its editor core.
     static var isBundleMode: Bool {
@@ -168,11 +183,7 @@ final class BEAMProcessManager {
 
         proc.terminationHandler = { [weak self] process in
             MainRunLoopAction {
-                guard let self, self.process === process else { return }
-                self.handleTermination(
-                    status: process.terminationStatus,
-                    reason: process.terminationReason
-                )
+                self?.processDidTerminate(process)
             }.enqueue()
         }
 
@@ -270,13 +281,13 @@ final class BEAMProcessManager {
         }
 
         exitIntent = .startupFailed
-        let deadline = DispatchTime.now() + stopTimeout
+        let deadline = elapsed() + .seconds(stopTimeout)
         pendingStartupRetry = StartupRetry(deadline: deadline, inSafeMode: inSafeMode, onFailure: onFailure)
         if stopping.isRunning { stopping.terminate() }
         shutdownWatchdogTask?.cancel()
-        shutdownWatchdogTask = Task { [weak self] in
+        shutdownWatchdogTask = Task { [weak self, sleep] in
             do {
-                try await Task.sleep(for: .seconds(stopTimeout))
+                try await sleep(.seconds(stopTimeout))
             } catch {
                 return
             }
@@ -439,6 +450,13 @@ final class BEAMProcessManager {
         return BEAMLaunchConfiguration.build(from: inputs, forceSafeMode: isSafeMode)
     }
 
+    /// Applies a termination callback only when it belongs to the current child.
+    /// A callback from a replaced or already handled process is stale and changes nothing.
+    func processDidTerminate(_ terminated: Process) {
+        guard process === terminated else { return }
+        handleTermination(status: terminated.terminationStatus, reason: terminated.terminationReason)
+    }
+
     /// Handles BEAM exit. Kept non-`private` so the termination path can be
     /// exercised directly in tests that assert the main actor is not blocked.
     func handleTermination(status: Int32, reason: Process.TerminationReason) {
@@ -453,7 +471,7 @@ final class BEAMProcessManager {
         if let retry = pendingStartupRetry {
             PortLogger.report(level, message, to: beamLog)
             pendingStartupRetry = nil
-            if DispatchTime.now() < retry.deadline {
+            if elapsed() < retry.deadline {
                 startStartupReplacement(inSafeMode: retry.inSafeMode, onFailure: retry.onFailure)
             } else {
                 retry.onFailure(.previousCoreStopTimedOut)
@@ -495,9 +513,9 @@ final class BEAMProcessManager {
             exitIntent = .restartScheduled
             PortLogger.report(.warning, "Restarting BEAM in \(delay)s", to: beamLog)
             restartDelayTask?.cancel()
-            restartDelayTask = Task { [weak self] in
+            restartDelayTask = Task { [weak self, sleep] in
                 do {
-                    try await Task.sleep(for: .seconds(delay))
+                    try await sleep(.seconds(delay))
                 } catch {
                     return
                 }
