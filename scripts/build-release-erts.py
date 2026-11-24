@@ -300,6 +300,9 @@ def linux_closure(commands, root, files, baseline, arch):
             result = commands.run([interpreter, "--inhibit-cache", "--list", path], seconds=30)
             resolved = set()
             for line in result.splitlines():
+                # The ARM64 loader also lists an unnamed map with only its address. It names no library.
+                if re.fullmatch(r"\(0x[0-9a-f]+\)", line.strip()):
+                    continue
                 mapping = line.strip().split(" (", 1)[0]
                 if mapping == "linux-vdso.so.1":
                     continue
