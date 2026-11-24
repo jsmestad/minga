@@ -92,6 +92,22 @@ One menu answers "what can I do with this?" for whatever is under the cursor or 
 - **Selections and many items:** on a visual selection the actions apply to everything in it, with the count ("Keep 2 changes"). In a picker, the menu offers "Open all 12 matches" (act on all) and "Export 12 to a buffer", where Vim selection picks a subset and `g.` acts on it.
 - **Pickers do not mark.** `Tab` only completes; there is no Helm-style marking mode.
 
+## Mouse
+
+Every screen can be reached and left by mouse, and every click teaches its key. The design was done keyboard first, then each scenario got a mouse path from one of seven patterns. Watch them playing on the design canvas: `Mouse_Video_ModePill`, `Mouse_Video_Modeline_MenuBar`, `Mouse_Video_ActMenu_Chips` and `Mouse_Video_TUI`.
+
+1. **The mode pill is the front door.** Clicking the mode pill opens the top-level which-key; every group, row and breadcrumb in it is clickable, so anything under `SPC` is two or three clicks away. This one pattern covers most leader-only screens.
+2. **The macOS menu bar mirrors the `SPC` groups.** The Minga menu and its siblings list the same groups and actions as which-key, with the key sequence dimmed in each item title (a native menu cannot draw a key sequence as a shortcut). Both come from the same scope tries, so they cannot drift. The terminal has no menu bar; the mode pill is its path.
+3. **Every modeline segment is clickable.** Needs-you opens the tasks drawer, the file name opens the switcher, `change 1/2` jumps to the change, Minga opens the conversation, diagnostics open the list, git opens status. On macOS a hover shows what the segment means and its key ("1 task needs you · SPC a a"); in the terminal the echo line says it instead.
+4. **Right-click opens the act menu,** the same menu as `g.` and `⌃.`, on whatever is under the pointer. There is no separate context menu.
+5. **Prompts show clickable chips.** Confirmations and minibuffer prompts draw their answers as chips (`y Reject`, `n Keep it`, `esc Cancel`, `s` / `d` on quit). Prompts are transient, so showing keys there keeps principle 10.
+6. **Drawer header hints are buttons,** and lists get `‹ ›` arrows for next and previous (quickfix, search matches, command blocks). Clicking outside a transient closes it.
+7. **Quitting by mouse:** the window close button, ⌘Q or Minga › Quit on macOS; the `q Quit` row in which-key in the terminal.
+
+**Keyboard only, by design:** composed Vim grammar is not a place you go, so it has no click: operators with motions, counts and `.` repeat, text objects (`ih`, `ah`, `ic`, `ac`), ex ranges and commands (`:'<,'>Minga keep`, `:cdo`) and macros and registers. What they do is still reachable by mouse: select, then right-click and pick the action.
+
+**Terminal caveats.** Hover needs the terminal to stream pointer motion, so the terminal UI asks for motion events only while a panel that uses hover is open. There are no floating tooltips in the terminal; the echo line names the action instead. Minga never takes the terminal's own modifier for native text selection, so selecting text to copy always works.
+
 ## Mockup and storyboard metrics
 
 Mockups and storyboards draw at the app's real default metrics, so they never promise more air than the editor has: code at about 1.3 times the font size on macOS (13 px text on 17 to 18 px lines; the app uses the font's ascent plus descent with `line_spacing` 1.0), and terminal rows at about 1.25 times. `line_spacing` stays a user preference. The storyboard factory removes this problem by construction, since its frames come from the real renderers.

@@ -18,7 +18,8 @@
 #              missing:       no design and no implementation.
 #              deferred:      needs a rethink before it is designed; the board, if any, is a placeholder.
 #              removed:       exists today; the Spine takes it away (notes say where its job goes).
-#   boards     design canvas board files when designed: { macos = "...", tui = "..." }.
+#   boards     design canvas board files when designed: { macos = "...", tui = "..." }, plus
+#              optional mouse / mouse_tui boards that show the screen's mouse path playing.
 #   exits      every way out, by key and by click:
 #              [{ key = "SPC a a", click = "modeline needs-you segment", to = "minga.tasks.needs_you" }]
 #              Use click = "" for keyboard-only exits and say why in a note.
@@ -70,9 +71,9 @@
 
 # ---- start -----------------------------------------------------------------
 
-# Design phase. "keyboard": click paths are pending the mouse sweep and do not fail
-# the checker. Set to "final" once every scenario has had its mouse sweep.
-phase = "keyboard"
+# Design phase. "final" since the mouse sweep: every scenario has a click path, and
+# missing click paths fail the checker. "keyboard" was the phase before the sweep.
+phase = "final"
 
 [[scenario]]
 id = "start.empty"
@@ -92,10 +93,10 @@ exits = [
   { key = "SPC p p", click = "Open project", to = "start.project_switcher" },
   { key = "SPC p a", click = "Add project", to = "start.project_switcher" },
   { key = "SPC p r", click = "Recent file", to = "start.recent_files" },
-  { key = "SPC f f", click = "", to = "files.switcher" },
-  { key = "SPC ,", click = "", to = "files.switcher" },
+  { key = "SPC f f", click = "Switch file", to = "files.switcher" },
+  { key = "SPC ,", click = "Switch file", to = "files.switcher" },
   { key = "SPC h T", click = "Tutorial", to = "settings.tutorial" },
-  { key = "SPC q q", click = "", to = "start.quit.confirm" },
+  { key = "SPC q q", click = "window close button, ⌘Q or Minga › Quit (TUI: mode pill › Quit)", to = "start.quit.confirm" },
 ]
 notes = "The cold-start scenario for reachability. *home* outside a project lists recent projects, numbered; 1 to 9 open one (restored session when it has one, otherwise its project home). A resting view: q does nothing."
 
@@ -152,9 +153,9 @@ transient = true
 reached_by = "minga <subdirectory> inside a project"
 exits = [
   { key = "↩", click = "file row", to = "edit.plain" },
-  { key = "⌃V", click = "", to = "windows.split" },
+  { key = "⌃V", click = "Open in split button", to = "windows.split" },
   { key = "typing", click = "", to = "files.switcher", keyboard_only = "typing narrows the filter; backspace widens it to the whole project" },
-  { key = "esc", click = "", to = "start.open_dir.home", back = true },
+  { key = "esc", click = "click outside", to = "start.open_dir.home", back = true },
 ]
 notes = "The root is the nearest project marker above the directory; the switcher opens filtered to the subdirectory."
 
@@ -208,7 +209,7 @@ empty_state = "start.project_switcher.empty"
 exits = [
   { key = "↩", click = "row", to = "edit.plain" },
   { key = "esc", click = "click outside", to = "edit.plain" },
-  { key = "SPC p a", click = "", to = "start.project_switcher", note = "add known project" },
+  { key = "SPC p a", click = "Add project button", to = "start.project_switcher", note = "add known project" },
 ]
 
 [[scenario]]
@@ -222,7 +223,7 @@ status = "designed"
 boards = { macos = "Batch4_files_empty.dc.html", tui = "Batch4_files_empty.dc.html" }
 transient = true
 exits = [
-  { key = "SPC p a", click = "", to = "start.project_switcher", keyboard_only = "add a known project; click comes in the mouse sweep" },
+  { key = "SPC p a", click = "mode pill › Project › Switch project (macOS: also the menu bar)", to = "start.project_switcher" },
   { key = "esc", click = "click outside", to = "edit.plain" },
 ]
 
@@ -250,7 +251,7 @@ surfaces = ["minibuffer"]
 states = []
 frontends = ["macos", "tui"]
 status = "designed"
-boards = { macos = "Batch2_start_quit_confirm.dc.html", tui = "Batch2_start_quit_confirm.dc.html" }
+boards = { macos = "Batch2_start_quit_confirm.dc.html", tui = "Batch2_start_quit_confirm.dc.html", mouse = "Mouse_Video_ActMenu_Chips.dc.html" }
 transient = true
 exits = [
   { key = "s", click = "Save all and quit", to = "start.quit.farewell" },
@@ -286,16 +287,16 @@ boards = { macos = "V41Edit.dc.html", tui = "V41TuiEdit.dc.html" }
 home = true
 exits = [
   { key = "SPC (pause)", click = "", to = "edit.whichkey.leader" },
-  { key = "SPC a (pause)", click = "", to = "minga.whichkey" },
+  { key = "SPC a (pause)", click = "mode pill › Minga (macOS: also the Minga menu)", to = "minga.whichkey" },
   { key = "SPC a a", click = "modeline needs-you segment", to = "minga.tasks.needs_you" },
   { key = "SPC a v", click = "modeline Minga segment", to = "minga.conversation" },
-  { key = "SPC a r", click = "", to = "minga.review.buffer" },
+  { key = "SPC a r", click = "mode pill › Minga › Review (macOS: also the menu bar)", to = "minga.review.buffer" },
   { key = "]h", click = "twist head", to = "minga.review.in_file" },
   { key = "K", click = "rest the pointer on a Minga line", to = "minga.hover.attribution" },
   { key = "SPC ,", click = "title bar file name", to = "files.switcher" },
   { key = "K", click = "hover the underline", to = "code.diagnostics.hover" },
   { key = "SPC c x", click = "modeline diagnostics segment", to = "code.diagnostics.list" },
-  { key = "SPC o t", click = "", to = "terminal.drawer" },
+  { key = "SPC o t", click = "mode pill › Open › Terminal (macOS: also the menu bar)", to = "terminal.drawer" },
 ]
 notes = "Same resting view as edit.plain with Minga's twist, cursor tag and modeline segments. Which-key has no click path by design (it is the keyboard's discovery surface); its targets are all reachable by click elsewhere. SPC a r and SPC o t need a click path: the menu bar Minga and View menus on macOS, TBD in the TUI."
 
@@ -307,71 +308,71 @@ surfaces = ["title_bar", "editor", "gutter", "modeline"]
 states = []
 frontends = ["macos", "tui"]
 status = "designed"
-boards = { macos = "V41Edit.dc.html", tui = "V41TuiEdit.dc.html" }
+boards = { macos = "V41Edit.dc.html", tui = "V41TuiEdit.dc.html", mouse = "Mouse_ModelineChips.dc.html" }
 home = true
 exits = [
-  { key = "SPC (pause)", click = "", to = "edit.whichkey.leader", keyboard_only = "which-key is the keyboard's discovery surface" },
-  { key = ":", click = "", to = "edit.command_line" },
+  { key = "SPC (pause)", click = "mode pill", to = "edit.whichkey.leader" },
+  { key = ":", click = "mode pill › Commands", to = "edit.command_line" },
   { key = "v", click = "drag to select", to = "edit.visual" },
-  { key = "/", click = "", to = "search.buffer" },
-  { key = "SPC s p", click = "", to = "search.project" },
-  { key = "SPC s r", click = "", to = "search.replace" },
-  { key = "SPC s t", click = "", to = "search.todos" },
-  { key = "SPC s i", click = "", to = "search.symbols.document" },
-  { key = "SPC s w", click = "", to = "search.symbols.workspace" },
+  { key = "/", click = "mode pill › Search › Search in buffer", to = "search.buffer" },
+  { key = "SPC s p", click = "mode pill › Search › Search project (macOS: also the menu bar)", to = "search.project" },
+  { key = "SPC s r", click = "mode pill › Search › Search and replace (macOS: also the menu bar)", to = "search.replace" },
+  { key = "SPC s t", click = "mode pill › Search › TODOs (macOS: also the menu bar)", to = "search.todos" },
+  { key = "SPC s i", click = "mode pill › Search › Document symbols (macOS: also the menu bar)", to = "search.symbols.document" },
+  { key = "SPC s w", click = "mode pill › Search › Workspace symbols (macOS: also the menu bar)", to = "search.symbols.workspace" },
   { key = "SPC ,", click = "title bar file name", to = "files.switcher" },
   { key = "SPC SPC", click = "", to = "files.project_find" },
-  { key = "SPC o p", click = "", to = "files.tree" },
-  { key = "SPC b m", click = "", to = "files.messages" },
-  { key = "SPC b W", click = "", to = "files.warnings" },
-  { key = "SPC p p", click = "", to = "start.project_switcher" },
-  { key = "SPC p r", click = "", to = "start.recent_files" },
+  { key = "SPC o p", click = "mode pill › Open › File tree (macOS: also the menu bar)", to = "files.tree" },
+  { key = "SPC b m", click = "mode pill › Buffers › *Messages* (macOS: also the menu bar)", to = "files.messages" },
+  { key = "SPC b W", click = "mode pill › Buffers › Warnings (macOS: also the menu bar)", to = "files.warnings" },
+  { key = "SPC p p", click = "mode pill › Project › Switch project (macOS: also the menu bar)", to = "start.project_switcher" },
+  { key = "SPC p r", click = "mode pill › Project › Recent files in project (macOS: also the menu bar)", to = "start.recent_files" },
   { key = "insert mode typing", click = "", to = "code.completion" },
   { key = "K", click = "hover a symbol", to = "code.hover" },
-  { key = "SPC c a", click = "", to = "code.actions" },
-  { key = "SPC c r", click = "", to = "code.rename" },
-  { key = "SPC c D", click = "", to = "code.references" },
-  { key = "SPC c h", click = "", to = "code.call_hierarchy" },
+  { key = "SPC c a", click = "mode pill › Code › Code actions (macOS: also the menu bar)", to = "code.actions" },
+  { key = "SPC c r", click = "mode pill › Code › Rename symbol (macOS: also the menu bar)", to = "code.rename" },
+  { key = "SPC c D", click = "mode pill › Code › References (macOS: also the menu bar)", to = "code.references" },
+  { key = "SPC c h", click = "mode pill › Code › Call hierarchy (macOS: also the menu bar)", to = "code.call_hierarchy" },
   { key = "SPC c x", click = "modeline diagnostics segment", to = "code.diagnostics.list" },
-  { key = "SPC g g", click = "", to = "git.status" },
-  { key = "SPC g B", click = "", to = "git.blame" },
-  { key = "SPC s u", click = "", to = "edit.timeline" },
-  { key = "SPC c l i", click = "", to = "code.lsp_info" },
-  { key = "SPC c l I", click = "", to = "code.lsp_tools" },
-  { key = "SPC m t o", click = "", to = "code.test_output" },
-  { key = "SPC a W", click = "", to = "git.why_line" },
-  { key = "SPC a A", click = "", to = "git.autobiography" },
-  { key = "SPC g c", click = "", to = "git.commit" },
-  { key = "SPC g x", click = "", to = "git.conflict" },
-  { key = "SPC g z", click = "", to = "git.stash" },
-  { key = "SPC a a", click = "", to = "minga.tasks.list" },
-  { key = "SPC a n", click = "", to = "minga.task.new" },
-  { key = "SPC a v", click = "", to = "minga.conversation" },
-  { key = "SPC a r", click = "", to = "minga.review.buffer" },
-  { key = "SPC a ?", click = "", to = "minga.inline_ask" },
-  { key = "SPC a e", click = "", to = "minga.inline_edit" },
-  { key = "SPC a S m", click = "", to = "minga.model_picker" },
-  { key = "SPC a S h", click = "", to = "minga.session_resume" },
-  { key = "SPC o t", click = "", to = "terminal.drawer" },
-  { key = "SPC o T", click = "", to = "terminal.window" },
-  { key = "SPC w v", click = "", to = "windows.split" },
-  { key = "SPC h t", click = "", to = "settings.theme_picker" },
-  { key = "SPC h b", click = "", to = "settings.describe" },
-  { key = "SPC h a", click = "", to = "settings.command_help" },
-  { key = "SPC h T", click = "", to = "settings.tutorial" },
-  { key = "SPC h e l", click = "", to = "settings.extensions" },
-  { key = "SPC h l", click = "", to = "settings.keystroke_history" },
-  { key = "SPC o b", click = "", to = "settings.observatory" },
+  { key = "SPC g g", click = "modeline git segment", to = "git.status" },
+  { key = "SPC g B", click = "mode pill › Git › Blame for the current line or file (macOS: also the menu bar)", to = "git.blame" },
+  { key = "SPC s u", click = "mode pill › Search › Edit timeline (macOS: also the menu bar)", to = "edit.timeline" },
+  { key = "SPC c l i", click = "mode pill › Code › LSP › LSP info (macOS: also the menu bar)", to = "code.lsp_info" },
+  { key = "SPC c l I", click = "mode pill › Code › LSP › Manage tools (macOS: also the menu bar)", to = "code.lsp_tools" },
+  { key = "SPC m t o", click = "mode pill › Filetype › Test › Test output (macOS: also the menu bar)", to = "code.test_output" },
+  { key = "SPC a W", click = "mode pill › Minga › Why is this line like this? (macOS: also the menu bar)", to = "git.why_line" },
+  { key = "SPC a A", click = "mode pill › Minga › Code autobiography (macOS: also the menu bar)", to = "git.autobiography" },
+  { key = "SPC g c", click = "mode pill › Git › Commit (macOS: also the menu bar)", to = "git.commit" },
+  { key = "SPC g x", click = "mode pill › Git › Conflicts (macOS: also the menu bar)", to = "git.conflict" },
+  { key = "SPC g z", click = "mode pill › Git › Stash (macOS: also the menu bar)", to = "git.stash" },
+  { key = "SPC a a", click = "modeline needs-you segment, or mode pill › Minga › Tasks", to = "minga.tasks.list" },
+  { key = "SPC a n", click = "mode pill › Minga › New task (macOS: also the menu bar)", to = "minga.task.new" },
+  { key = "SPC a v", click = "modeline Minga segment", to = "minga.conversation" },
+  { key = "SPC a r", click = "mode pill › Minga › Review (macOS: also the menu bar)", to = "minga.review.buffer" },
+  { key = "SPC a ?", click = "mode pill › Minga › Ask about the line or selection (macOS: also the menu bar)", to = "minga.inline_ask" },
+  { key = "SPC a e", click = "mode pill › Minga › Rewrite selection inline (macOS: also the menu bar)", to = "minga.inline_edit" },
+  { key = "SPC a S m", click = "mode pill › Minga › Session › Pick model (macOS: also the menu bar)", to = "minga.model_picker" },
+  { key = "SPC a S h", click = "mode pill › Minga › Session › Resume a session (macOS: also the menu bar)", to = "minga.session_resume" },
+  { key = "SPC o t", click = "mode pill › Open › Terminal (macOS: also the menu bar)", to = "terminal.drawer" },
+  { key = "SPC o T", click = "mode pill › Open › A terminal in the current window (macOS: also the menu bar)", to = "terminal.window" },
+  { key = "SPC w v", click = "mode pill › Windows › Two splits side by side (macOS: also the menu bar)", to = "windows.split" },
+  { key = "SPC h t", click = "mode pill › Help › Pick theme (macOS: also the menu bar)", to = "settings.theme_picker" },
+  { key = "SPC h b", click = "mode pill › Help › Describe bindings, command, key, option (macOS: also the menu bar)", to = "settings.describe" },
+  { key = "SPC h a", click = "mode pill › Help › Search command help (macOS: also the menu bar)", to = "settings.command_help" },
+  { key = "SPC h T", click = "mode pill › Help › Interactive tutorial (macOS: also the menu bar)", to = "settings.tutorial" },
+  { key = "SPC h e l", click = "mode pill › Help › Extensions › List extensions (macOS: also the menu bar)", to = "settings.extensions" },
+  { key = "SPC h l", click = "mode pill › Help › Keystroke history (macOS: also the menu bar)", to = "settings.keystroke_history" },
+  { key = "SPC o b", click = "mode pill › Open › BEAM observatory (macOS: also the menu bar)", to = "settings.observatory" },
   { key = "⌘,", click = "Minga › Settings…", to = "settings.panel" },
-  { key = "SPC q q", click = "", to = "start.quit.confirm" },
-  { key = "]e", click = "", to = "code.diagnostics.in_file" },
-  { key = "SPC a S t", click = "", to = "minga.thinking_picker" },
-  { key = "SPC a S k", click = "", to = "minga.checklist" },
-  { key = "SPC a x l", click = "", to = "minga.attachments" },
-  { key = "SPC a S H", click = "", to = "minga.retained_history" },
-  { key = "SPC a p", click = "", to = "minga.publish" },
-  { key = "SPC a a", click = "", to = "minga.question", note = "answered from the needs-you row in the tasks drawer; SPC a Q is retired" },
-  { key = ":checkhealth", click = "", to = "terminal.capabilities" },
+  { key = "SPC q q", click = "window close button, ⌘Q or Minga › Quit (TUI: mode pill › Quit)", to = "start.quit.confirm" },
+  { key = "]e", click = "click an underlined diagnostic", to = "code.diagnostics.in_file" },
+  { key = "SPC a S t", click = "mode pill › Minga › Session › Thinking level (macOS: also the menu bar)", to = "minga.thinking_picker" },
+  { key = "SPC a S k", click = "mode pill › Minga › Session › Minga's checklist (macOS: also the menu bar)", to = "minga.checklist" },
+  { key = "SPC a x l", click = "mode pill › Minga › Context › Draft attachments (macOS: also the menu bar)", to = "minga.attachments" },
+  { key = "SPC a S H", click = "mode pill › Minga › Session › Retained messages (macOS: also the menu bar)", to = "minga.retained_history" },
+  { key = "SPC a p", click = "mode pill › Minga › Publish or discard unpublished edits (macOS: also the menu bar)", to = "minga.publish" },
+  { key = "SPC a a", click = "modeline needs-you segment › the question row in the tasks drawer", to = "minga.question", note = "answered from the needs-you row in the tasks drawer; SPC a Q is retired" },
+  { key = ":checkhealth", click = "mode pill › Commands › checkhealth", to = "terminal.capabilities" },
 ]
 notes = "Home scenario for the dead-end check. Same boards as edit.working without Minga's segments. Most clicks are empty because the macOS menu bar items and TUI click paths for these commands are not designed yet; the checker lists them."
 
@@ -383,7 +384,7 @@ surfaces = ["editor", "whichkey", "modeline"]
 states = []
 frontends = ["macos", "tui"]
 status = "designed"
-boards = { macos = "V41WhichKey.dc.html", tui = "V41TuiEdit.dc.html" }
+boards = { macos = "V41WhichKey.dc.html", tui = "V41TuiEdit.dc.html", mouse = "Mouse_Video_ModePill.dc.html", mouse_tui = "Mouse_Video_TUI.dc.html" }
 transient = true
 exits = [
   { key = "a", click = "Minga row", to = "minga.whichkey" },
@@ -405,8 +406,8 @@ boards = { macos = "Batch7_act_selection.dc.html", tui = "Batch7_act_selection.d
 exits = [
   { key = "esc", click = "click elsewhere", to = "edit.plain" },
   { key = "g.", click = "right-click the selection", to = "minga.act_menu.selection" },
-  { key = "SPC a e", click = "", to = "minga.inline_edit" },
-  { key = "SPC a y", click = "", to = "edit.plain", note = "keep Minga's changes in the selection" },
+  { key = "SPC a e", click = "mode pill › Minga › Rewrite selection inline (macOS: also the menu bar)", to = "minga.inline_edit" },
+  { key = "SPC a y", click = "mode pill › Minga › Keep change (macOS: also the menu bar)", to = "edit.plain", note = "keep Minga's changes in the selection" },
 ]
 [[scenario]]
 id = "edit.command_line"
@@ -418,8 +419,8 @@ frontends = ["macos", "tui"]
 status = "existing-only"
 transient = true
 exits = [
-  { key = "↩", click = "", to = "edit.plain" },
-  { key = "esc", click = "", to = "edit.plain", keyboard_only = "the command line is a keyboard surface" },
+  { key = "↩", click = "Run chip", to = "edit.plain" },
+  { key = "esc", click = "Cancel chip", to = "edit.plain" },
 ]
 notes = "Command palette today (defaults.ex:39). ⌘K is the macOS click alias."
 
@@ -434,8 +435,8 @@ status = "existing-only"
 reached_by = "a command that asks"
 transient = true
 exits = [
-  { key = "↩ or y", click = "", to = "edit.plain" },
-  { key = "esc or n", click = "", to = "edit.plain" },
+  { key = "↩ or y", click = "y chip", to = "edit.plain" },
+  { key = "esc or n", click = "n chip", to = "edit.plain" },
 ]
 notes = "Needs a click form: the prompt choices rendered as clickable text."
 
@@ -468,8 +469,8 @@ transient = true
 list = true
 empty_state = "search.buffer.no_results"
 exits = [
-  { key = "↩", click = "", to = "edit.plain" },
-  { key = "n / N", click = "", to = "search.buffer" },
+  { key = "↩", click = "result row", to = "edit.plain" },
+  { key = "n / N", click = "‹ › arrows", to = "search.buffer" },
   { key = "esc", click = "search field close", to = "edit.plain" },
 ]
 notes = "macOS has a SearchToolbar; the Spine wants the minibuffer form on both frontends."
@@ -485,7 +486,7 @@ status = "designed"
 boards = { macos = "Batch4_search_empty.dc.html", tui = "Batch4_search_empty.dc.html" }
 transient = true
 exits = [
-  { key = "SPC s p", click = "", to = "search.project", keyboard_only = "the echo line offers it as text; click comes in the mouse sweep" },
+  { key = "SPC s p", click = "mode pill › Search › Search project (macOS: also the menu bar)", to = "search.project" },
   { key = "esc", click = "search field close", to = "edit.plain" },
 ]
 notes = "The minibuffer says no matches and names the next step: search the project with the same query."
@@ -504,7 +505,7 @@ empty_state = "search.project.no_results"
 exits = [
   { key = "↩", click = "row", to = "edit.plain" },
   { key = "esc", click = "click outside", to = "edit.plain" },
-  { key = "⌃Q", click = "", to = "search.quickfix", note = "send results to quickfix" },
+  { key = "⌃Q", click = "To quickfix button", to = "search.quickfix", note = "send results to quickfix" },
 ]
 
 [[scenario]]
@@ -518,8 +519,8 @@ status = "designed"
 boards = { macos = "Batch4_search_empty.dc.html", tui = "Batch4_search_empty.dc.html" }
 transient = true
 exits = [
-  { key = "⌃A", click = "", to = "search.project", keyboard_only = "rerun including ignored files; click comes in the mouse sweep" },
-  { key = "⌃H", click = "", to = "search.project", keyboard_only = "rerun including hidden files; click comes in the mouse sweep" },
+  { key = "⌃J ↩", click = "Search ignored files too row", to = "search.project", note = "rerun with -- -u; a result row, not a chord, so typing keeps editing the query" },
+  { key = "⌃J ⌃J ↩", click = "Search hidden files too row", to = "search.project", note = "rerun with --hidden" },
   { key = "esc", click = "click outside", to = "edit.plain" },
 ]
 
@@ -750,7 +751,7 @@ status = "designed"
 boards = { macos = "Batch4_code_empty.dc.html", tui = "Batch4_code_empty.dc.html" }
 transient = true
 exits = [
-  { key = "SPC a ?", click = "", to = "minga.inline_ask", keyboard_only = "named as text in the echo line" },
+  { key = "SPC a ?", click = "mode pill › Minga › Ask about the line or selection (macOS: also the menu bar)", to = "minga.inline_ask" },
   { key = "esc", click = "click outside", to = "edit.plain" },
 ]
 notes = "Answers in the echo area, never an empty drawer: no code actions here, with the next step (ask Minga). Any other key goes back to editing."
@@ -765,8 +766,8 @@ frontends = ["macos", "tui"]
 status = "existing-only"
 transient = true
 exits = [
-  { key = "↩", click = "", to = "edit.plain" },
-  { key = "esc", click = "", to = "edit.plain", keyboard_only = "minibuffer input" },
+  { key = "↩", click = "Rename chip", to = "edit.plain" },
+  { key = "esc", click = "Cancel chip", to = "edit.plain" },
 ]
 
 [[scenario]]
@@ -796,7 +797,7 @@ status = "designed"
 boards = { macos = "Batch4_code_empty.dc.html", tui = "Batch4_code_empty.dc.html" }
 transient = true
 exits = [
-  { key = "SPC c d", click = "", to = "edit.plain", keyboard_only = "named as text in the echo line; jumps to the definition" },
+  { key = "SPC c d", click = "mode pill › Code › Go to definition (macOS: also the menu bar)", to = "edit.plain" },
   { key = "esc", click = "click outside", to = "edit.plain" },
 ]
 notes = "Answers in the echo area, never an empty drawer: no references found, with the next step (go to definition). Any other key goes back to editing."
@@ -887,7 +888,7 @@ frontends = ["macos", "tui"]
 status = "designed"
 boards = { macos = "Batch4_git_ext_queue_empty.dc.html", tui = "Batch4_git_ext_queue_empty.dc.html" }
 exits = [
-  { key = "l", click = "", to = "git.log", keyboard_only = "bare key in a special buffer; click comes in the mouse sweep" },
+  { key = "l", click = "Show log row", to = "git.log" },
   { key = "q", click = "close", to = "edit.plain" },
 ]
 
@@ -939,7 +940,7 @@ states = []
 frontends = ["macos", "tui"]
 status = "existing-only"
 exits = [
-  { key = "SPC g x ...", click = "", to = "edit.plain" },
+  { key = "SPC g x ...", click = "Accept ours / Accept theirs buttons on the conflict", to = "edit.plain" },
   { key = "esc", click = "click outside", to = "edit.plain" },
 ]
 
@@ -970,9 +971,9 @@ status = "designed"
 boards = { macos = "Batch4_git_blame.dc.html", tui = "Batch4_git_blame.dc.html" }
 exits = [
   { key = "K", click = "hover", to = "git.blame" },
-  { key = "↩", click = "", to = "minga.conversation", keyboard_only = "on a Minga line: opens that task; click comes in the mouse sweep" },
-  { key = "↩", click = "", to = "git.log", keyboard_only = "on a commit line: opens the commit; click comes in the mouse sweep" },
-  { key = "SPC g B", click = "", to = "edit.plain" },
+  { key = "↩", click = "click a Minga group in the blame column", to = "minga.conversation", note = "on a Minga line: opens that task" },
+  { key = "↩", click = "click a commit group in the blame column", to = "git.log", note = "on a commit line: opens the commit" },
+  { key = "SPC g B", click = "Close blame button in the column header", to = "edit.plain" },
   { key = "q", click = "close", to = "edit.plain" },
 ]
 notes = "One continuous column on the left, grouped by commit: author and relative age on each group's first line, a hairline between groups, every line (blank ones included) belongs to a commit. Lines Minga wrote form a group labelled Minga in the minga role, with the task in the K detail; uncommitted lines read You · now in the you role."
@@ -1001,7 +1002,7 @@ surfaces = ["editor", "whichkey", "modeline"]
 states = ["working", "needs_you"]
 frontends = ["macos", "tui"]
 status = "designed"
-boards = { macos = "V41WhichKey.dc.html", tui = "V41TuiEdit.dc.html" }
+boards = { macos = "V41WhichKey.dc.html", tui = "V41TuiEdit.dc.html", mouse = "Mouse_Video_ModePill.dc.html" }
 transient = true
 exits = [
   { key = "a", click = "Tasks row", to = "minga.tasks.needs_you" },
@@ -1023,7 +1024,7 @@ surfaces = ["editor", "drawer:tasks", "modeline"]
 states = ["needs_you", "working", "waiting", "failed", "done"]
 frontends = ["macos", "tui"]
 status = "designed"
-boards = { macos = "V41Tasks.dc.html", tui = "V41TuiTasks.dc.html" }
+boards = { macos = "V41Tasks.dc.html", tui = "V41TuiTasks.dc.html", mouse = "Mouse_Video_ModePill.dc.html", mouse_tui = "Mouse_Video_TUI.dc.html" }
 transient = true
 list = true
 empty_state = "minga.tasks.empty"
@@ -1051,7 +1052,7 @@ surfaces = ["drawer:review", "editor", "gutter", "modeline"]
 states = ["done"]
 frontends = ["macos", "tui"]
 status = "designed"
-boards = { macos = "V41Review.dc.html", tui = "V41TuiReview.dc.html" }
+boards = { macos = "V41Review.dc.html", tui = "V41TuiReview.dc.html", mouse = "Mouse_Video_Modeline_MenuBar.dc.html" }
 list = true
 empty_state = "minga.review.empty"
 exits = [
@@ -1495,7 +1496,7 @@ transient = true
 exits = [
   { key = "y", click = "Publish", to = "edit.plain" },
   { key = "n", click = "Cancel", to = "edit.plain" },
-  { key = "esc", click = "", to = "edit.plain" },
+  { key = "esc", click = "Cancel chip", to = "edit.plain" },
 ]
 
 [[scenario]]
@@ -1553,7 +1554,7 @@ exits = [
   { key = "↩ on a failed block (Normal)", click = "failed block glyph", to = "terminal.failed_block.menu" },
   { key = "SPC o t", click = "drawer close", to = "edit.working" },
   { key = "exit", click = "", to = "edit.working" },
-  { key = "SPC a a", click = "", to = "windows.drawer_stack" },
+  { key = "SPC a a", click = "mode pill › Minga › Tasks, opened over the terminal drawer (macOS: also the menu bar)", to = "windows.drawer_stack" },
 ]
 
 [[scenario]]
@@ -1599,7 +1600,7 @@ transient = true
 exits = [
   { key = "i / a", click = "click the live prompt", to = "terminal.drawer" },
   { key = "↩", click = "click the live prompt", to = "terminal.drawer", note = "on the live prompt line" },
-  { key = "]] / [[", click = "", to = "terminal.drawer.normal" },
+  { key = "]] / [[", click = "‹ › arrows in the drawer header", to = "terminal.drawer.normal" },
   { key = "yic / yac", click = "", to = "terminal.drawer.normal", keyboard_only = "text objects copy a command's output or whole block" },
   { key = "↩", click = "click the failed glyph", to = "terminal.failed_block.menu", note = "on a failed block" },
   { key = "q", click = "drawer close", to = "edit.plain", note = "hides the drawer; the shell keeps running" },
@@ -1674,7 +1675,7 @@ reached_by = "the shell ends in an SPC o T window, or dies on its own"
 exits = [
   { key = "↩", click = "Restart shell", to = "terminal.window" },
   { key = "q", click = "close", to = "edit.plain" },
-  { key = "yic / /", click = "", to = "terminal.exited", note = "the scrollback stays searchable and copyable" },
+  { key = "yic / /", click = "", to = "terminal.exited", note = "the scrollback stays searchable and copyable", keyboard_only = "composed Vim grammar (operator, text object, ex range or macro); select then right-click for the same action" },
 ]
 notes = "Shows \"Shell exited (code 0) · ↩ restart · q close\". Typing exit in the drawer closes the drawer and its buffer instead; this state is for SPC o T windows and shells that end on their own."
 
@@ -1692,7 +1693,7 @@ exits = [
   { key = "SPC o t", click = "drawer close", to = "edit.plain" },
   { key = "⌃\\ ⌃N", click = "", to = "terminal.drawer.normal", keyboard_only = "terminal mode passes every key to the shell", back = true },
   { key = "q (Normal mode)", click = "", to = "edit.plain" },
-  { key = "SPC b m", click = "", to = "files.messages", note = "the one-time hint" },
+  { key = "SPC b m", click = "mode pill › Buffers › *Messages* (macOS: also the menu bar)", to = "files.messages", note = "the one-time hint" },
 ]
 notes = "No command blocks; a one-time hint in *Messages* explains how to enable them. q in Normal mode hides the drawer and leaves the shell running."
 
@@ -1712,7 +1713,7 @@ list = true
 empty_state = "files.switcher.no_match"
 exits = [
   { key = "↩", click = "row", to = "edit.working" },
-  { key = "⌃V", click = "", to = "windows.split" },
+  { key = "⌃V", click = "Open in split button", to = "windows.split" },
   { key = "⌃T", click = "pin", to = "files.switcher" },
   { key = "⌃.", click = "right-click a row", to = "minga.act_menu", note = "open all matches (A) or export to *file-list* (E) live here" },
   { key = "esc", click = "click outside", to = "edit.working" },
@@ -1730,7 +1731,7 @@ status = "designed"
 boards = { macos = "Batch4_files_empty.dc.html", tui = "Batch4_files_empty.dc.html" }
 transient = true
 exits = [
-  { key = "⌃N", click = "", to = "edit.plain", keyboard_only = "creates the typed file; click comes in the mouse sweep" },
+  { key = "↩", click = "Create row", to = "edit.plain", note = "the first result row creates the typed file; no chord while typing" },
   { key = "esc", click = "click outside", to = "edit.plain" },
 ]
 
@@ -1776,8 +1777,8 @@ frontends = ["macos", "tui"]
 status = "designed"
 boards = { macos = "Batch4_files_empty.dc.html", tui = "Batch4_files_empty.dc.html" }
 exits = [
-  { key = "a", click = "", to = "files.tree", keyboard_only = "new file prompt (dired convention); click comes in the mouse sweep" },
-  { key = "A", click = "", to = "files.tree", keyboard_only = "new folder prompt; click comes in the mouse sweep" },
+  { key = "a", click = "New file row", to = "files.tree", note = "new file prompt (dired convention)" },
+  { key = "A", click = "New folder row", to = "files.tree", note = "new folder prompt" },
   { key = "q", click = "close", to = "edit.plain" },
 ]
 
@@ -1828,7 +1829,7 @@ frontends = ["macos", "tui"]
 status = "existing-only"
 home = true
 exits = [
-  { key = "SPC w d", click = "", to = "edit.plain" },
+  { key = "SPC w d", click = "mode pill › Windows › Close window (macOS: also the menu bar)", to = "edit.plain" },
   { key = "SPC w h/l", click = "click a split", to = "windows.split" },
 ]
 notes = "Needs a close click path (a split's close affordance or menu)."
@@ -1857,7 +1858,7 @@ boards = { macos = "Batch5_windows_drawer_stack.dc.html", tui = "Batch5_windows_
 exits = [
   { key = "q", click = "close", to = "terminal.drawer", back = true },
   { key = "esc", click = "", to = "terminal.drawer", back = true },
-  { key = "SPC o t", click = "", to = "terminal.drawer" },
+  { key = "SPC o t", click = "mode pill › Open › Terminal (macOS: also the menu bar)", to = "terminal.drawer" },
 ]
 notes = "One drawer at a time: the tasks drawer replaces the terminal drawer (header: \"terminal 1 hidden · q returns\"), and closing it returns to the terminal drawer with its shell still running (Doom popup behaviour). Splits show two things at once."
 
@@ -2023,7 +2024,7 @@ frontends = ["macos", "tui"]
 status = "designed"
 boards = { macos = "Batch4_git_ext_queue_empty.dc.html", tui = "Batch4_git_ext_queue_empty.dc.html" }
 exits = [
-  { key = "SPC h e l", click = "", to = "settings.extensions", keyboard_only = "named as text in the empty state" },
+  { key = "SPC h e l", click = "mode pill › Help › Extensions › List extensions (macOS: also the menu bar)", to = "settings.extensions" },
   { key = "q", click = "close", to = "edit.plain" },
 ]
 
@@ -2134,7 +2135,7 @@ boards = { macos = "Batch3_errors_crash_reconnect.dc.html", tui = "Batch3_errors
 reached_by = "a supervised part of the core restarts"
 exits = [
   { key = "(reconnected)", click = "", to = "edit.plain", keyboard_only = "happens on its own when the frontend reconnects" },
-  { key = "SPC b m", click = "", to = "files.messages" },
+  { key = "SPC b m", click = "mode pill › Buffers › *Messages* (macOS: also the menu bar)", to = "files.messages" },
   { key = "esc", click = "dismiss", to = "edit.plain", note = "Normal mode only" },
 ]
 notes = "Your work stays on screen while it reconnects. The notice names what restarted: \"Minga's session restarted after a crash; your files and tasks are intact.\" or the editor core. The BEAM reports which supervised part restarted."
@@ -2235,7 +2236,7 @@ surfaces = ["act_menu"]
 states = ["unreviewed"]
 frontends = ["macos", "tui"]
 status = "designed"
-boards = { macos = "Batch7_act_change.dc.html", tui = "Batch7_act_change.dc.html" }
+boards = { macos = "Batch7_act_change.dc.html", tui = "Batch7_act_change.dc.html", mouse = "Mouse_Video_ActMenu_Chips.dc.html" }
 transient = true
 exits = [
   { key = "y", click = "Keep", to = "minga.review.in_file" },
@@ -2245,7 +2246,7 @@ exits = [
   { key = "l", click = "Copy file:line link", to = "edit.plain" },
   { key = "a", click = "Ask Minga about this", to = "minga.inline_ask" },
   { key = "E", click = "Export to a buffer", to = "files.file_list", note = "in pickers: export the matches" },
-  { key = "typing", click = "", to = "minga.act_menu.filtered", keyboard_only = "typing filters the list" },
+  { key = "typing", click = "click the filter field, then type", to = "minga.act_menu.filtered" },
   { key = "esc", click = "click outside", to = "edit.plain" },
 ]
 notes = "The same menu opens on a diagnostic, a file row, a task row, a terminal command block and in pickers (Batch7_act_targets, Batch7_act_picker); right-click opens it too."

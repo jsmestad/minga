@@ -21,7 +21,7 @@ def tile(s):
     title_style = f"color:{FAINT};text-decoration:line-through" if removed else f"color:{TXT}"
     fronts = " · ".join("macOS" if f == "macos" else "TUI" for f in s.get("frontends", []))
     boards = s.get("boards") or {}
-    board_txt = " · ".join(f"{'macOS' if k == 'macos' else 'TUI'}: {esc(v.replace('.dc.html', ''))}" for k, v in boards.items())
+    board_txt = " · ".join(f"{ {'macos': 'macOS', 'tui': 'TUI', 'mouse': 'Mouse', 'mouse_tui': 'Mouse (TUI)'}.get(k, k) }: {esc(v.replace('.dc.html', ''))}" for k, v in boards.items())
     link = f'<div style="color:#7fbf7a;font-size:11px;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{board_txt}</div>' if board_txt else ""
     return f"""<div style="height:{TILE_H}px;box-sizing:border-box;background:{SURF};border-radius:8px;border-left:3px solid {color};padding:9px 12px;overflow:hidden">
 <div style="display:flex;align-items:center;gap:8px"><span style="font-size:10.5px;font-weight:600;color:{color};text-transform:none">{label}</span><span style="flex:1"></span><span style="font-size:10.5px;color:{FAINT}">{fronts}</span></div>
