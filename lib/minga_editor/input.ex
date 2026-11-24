@@ -49,7 +49,8 @@ defmodule MingaEditor.Input do
   @typedoc "Input handler dispatched by the active shell."
   @type dispatch_handler :: module() | sourced_handler()
 
-  @handler_registry_key {__MODULE__, :surface_handlers}
+  alias MingaEditor.Input.HandlerRegistry
+
   @builtin_surface_handlers [
     {MentionCompletion, 10},
     {ToolApproval, 20},
@@ -70,6 +71,10 @@ defmodule MingaEditor.Input do
   @builtin_handler_entries (for {module, priority} <- @builtin_surface_handlers do
                               {module, :builtin, priority}
                             end)
+
+  @doc "Returns the built-in handler entries. Used by `HandlerRegistry` on init."
+  @spec builtin_handler_entries() :: [handler_entry()]
+  def builtin_handler_entries, do: @builtin_handler_entries
 
   @doc """
   Returns interactive transient handlers in precedence order above the active surface.
@@ -98,45 +103,21 @@ defmodule MingaEditor.Input do
   @spec register_handler(contribution_source(), module(), keyword()) :: :ok
   def register_handler(source, module, opts \\ []) when is_atom(module) and is_list(opts) do
     Minga.Extension.ContributionCleanup.register(:input_handlers, &__MODULE__.unregister_source/1)
-    ensure_handler_registry!()
-    priority = Keyword.get(opts, :priority, 100)
-    entry = {module, source, priority}
-
-    entries =
-      @handler_registry_key
-      |> :persistent_term.get([])
-      |> Enum.reject(fn {entry_module, entry_source, _priority} ->
-        entry_module == module and entry_source == source
-      end)
-
-    :persistent_term.put(@handler_registry_key, [entry | entries])
-    :ok
+    HandlerRegistry.register(source, module, opts)
   end
 
   @doc "Removes every input handler contributed by a source."
   @spec unregister_source(contribution_source()) :: :ok
-  def unregister_source(:builtin) do
-    ensure_handler_registry!()
-    :ok
-  end
+  def unregister_source(:builtin), do: :ok
 
   def unregister_source(source) do
-    ensure_handler_registry!()
-
-    entries =
-      @handler_registry_key
-      |> :persistent_term.get([])
-      |> Enum.reject(fn {_module, entry_source, _priority} -> entry_source == source end)
-
-    :persistent_term.put(@handler_registry_key, entries)
-    :ok
+    HandlerRegistry.unregister_source(source)
   end
 
   @doc "Resets the surface handler registry to built-ins only."
   @spec reset_handlers() :: :ok
   def reset_handlers do
-    seed_builtin_handlers!()
-    :ok
+    HandlerRegistry.reset()
   end
 
   @doc """
@@ -211,28 +192,7 @@ defmodule MingaEditor.Input do
 
   @spec registered_surface_handler_entries() :: [sourced_handler()]
   defp registered_surface_handler_entries do
-    ensure_handler_registry!()
-
-    @handler_registry_key
-    |> :persistent_term.get([])
-    |> Enum.sort_by(fn {module, _source, priority} ->
-      {priority, Atom.to_string(module)}
-    end)
-    |> Enum.map(fn {module, source, _priority} -> {module, source} end)
-  end
-
-  @spec ensure_handler_registry!() :: :ok
-  defp ensure_handler_registry! do
-    case :persistent_term.get(@handler_registry_key, :missing) do
-      :missing -> seed_builtin_handlers!()
-      _entries -> :ok
-    end
-  end
-
-  @spec seed_builtin_handlers!() :: :ok
-  defp seed_builtin_handlers! do
-    :persistent_term.put(@handler_registry_key, @builtin_handler_entries)
-    :ok
+    HandlerRegistry.snapshot()
   end
 
   # ── Modifier constants ───────────────────────────────────────────────────
