@@ -10,8 +10,9 @@ defmodule MingaEditor.Input.Scoped do
   side panel is visible, in which case panel-specific handling applies.
 
   For the `:agent` scope, keys are resolved against the agent scope trie.
-  Context-dependent sub-states (search input, mention completion, tool
-  approval, diff review) are handled before trie lookup. The leader key
+  Context-dependent sub-states (mention completion, tool approval) are
+  handled before trie lookup; Diff Review keys come from the trie through
+  the keymap context. The leader key
   (SPC) always passes through to the mode FSM for which-key integration.
 
   For the `:file_tree` scope, tree-specific keys are handled via scope
@@ -132,8 +133,9 @@ defmodule MingaEditor.Input.Scoped do
   defp dispatch_agent_key_inner(state, cp, mods) do
     panel = state.workspace.agent_ui.panel
 
-    # Sub-state handlers (search, mention, approval, diff review) are separate
-    # Input.Handler modules in the surface handler list. They run before Scoped.
+    # Sub-state handlers (mention, approval) are separate Input.Handler modules
+    # in the surface handler list. They run before Scoped. Diff Review keys are
+    # scope bindings derived from the keymap context.
 
     # CUA mode: resolve all keys through the :cua trie. No vim modes.
     if cua_active?(state) do
@@ -281,12 +283,14 @@ defmodule MingaEditor.Input.Scoped do
   end
 
   # The Agent scope binds a failed start's remedy key only while the active tab
-  # offers that remedy, so the binding follows from what the tab shows.
+  # offers that remedy, and the Diff Review keys only while a staged review has
+  # focus, so the bindings follow from what the tab shows.
   @spec agent_keymap_context(EditorState.t()) :: keyword()
   defp agent_keymap_context(state) do
     [
       keymap_server: state.interaction.keymap_server,
-      agent_start_remedy: UIState.start_remedy(state.workspace.agent_ui)
+      agent_start_remedy: UIState.start_remedy(state.workspace.agent_ui),
+      agent_diff_review: UIState.diff_review_focused?(state.workspace.agent_ui)
     ]
   end
 
@@ -313,8 +317,7 @@ defmodule MingaEditor.Input.Scoped do
     {:handled, AgentPanel.dispatch_prompt_via_mode_fsm(state, cp, mods)}
   end
 
-  # Tool approval and diff review sub-state handlers moved to
-  # MingaEditor.Input.ToolApproval and MingaEditor.Input.DiffReview modules.
+  # The tool approval sub-state handler lives in MingaEditor.Input.ToolApproval.
 
   # Agent side panel (editor scope) extracted to MingaEditor.Input.AgentPanel.
 

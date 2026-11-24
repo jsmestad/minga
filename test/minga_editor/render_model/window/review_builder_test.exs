@@ -25,7 +25,7 @@ defmodule MingaEditor.RenderModel.Window.ReviewBuilderTest do
     rects = %{content: {2, 4, 16, 3}, total: {2, 4, 16, 4}}
     layout = ReviewLayout.new(16, %Monospace{}, Theme.get!(:minga_default), 4)
     scope = {1, nil}
-    assert {:ok, first, window} = ReviewBuilder.build(window, preview, rects, layout, scope)
+    assert {:ok, first, window} = ReviewBuilder.build(window, preview, rects, layout, scope, :vim)
     assert first.content_kind == :agent_review
     refute first.cursor_visible
     assert first.full_refresh
@@ -50,7 +50,9 @@ defmodule MingaEditor.RenderModel.Window.ReviewBuilderTest do
 
     preview = Preview.scroll_down(preview, offset)
 
-    assert {:ok, scrolled, window} = ReviewBuilder.build(window, preview, rects, layout, scope)
+    assert {:ok, scrolled, window} =
+             ReviewBuilder.build(window, preview, rects, layout, scope, :vim)
+
     assert scrolled.geometry.viewport.top == offset
     assert scrolled.geometry.viewport.visual_row_offset == 0
     refute scrolled.full_refresh
@@ -77,7 +79,7 @@ defmodule MingaEditor.RenderModel.Window.ReviewBuilderTest do
       layout = ReviewLayout.new(pane_width, %Monospace{}, Theme.get!(:minga_default), 4)
 
       assert {:ok, model, _window} =
-               ReviewBuilder.build(render_window(), preview, rects, layout, {1, nil})
+               ReviewBuilder.build(render_window(), preview, rects, layout, {1, nil}, :vim)
 
       assert model.geometry.content_rect == {2, 4, pane_width, height}
       assert model.geometry.text_rect == {2, 4, text_width, height}
@@ -96,10 +98,10 @@ defmodule MingaEditor.RenderModel.Window.ReviewBuilderTest do
     preview = Preview.set_diff(Preview.new(), DiffReview.new("selected.ex", "before", "after"))
 
     assert {:error, :review_unavailable} =
-             ReviewBuilder.build(window, Preview.new(), rects, layout, {1, nil})
+             ReviewBuilder.build(window, Preview.new(), rects, layout, {1, nil}, :vim)
 
     assert {:error, :review_unavailable} =
-             ReviewBuilder.build(window, preview, rects, layout, nil)
+             ReviewBuilder.build(window, preview, rects, layout, nil, :vim)
 
     assert :not_visible =
              ReviewBuilder.build(
@@ -107,7 +109,8 @@ defmodule MingaEditor.RenderModel.Window.ReviewBuilderTest do
                preview,
                %{rects | content: {2, 4, 0, 3}},
                layout,
-               {1, nil}
+               {1, nil},
+               :vim
              )
 
     assert :not_visible =
@@ -116,7 +119,8 @@ defmodule MingaEditor.RenderModel.Window.ReviewBuilderTest do
                preview,
                %{rects | content: {2, 4, 16, 0}},
                layout,
-               {1, nil}
+               {1, nil},
+               :vim
              )
 
     assert ReviewObservation.from_window(window) == nil
@@ -136,21 +140,50 @@ defmodule MingaEditor.RenderModel.Window.ReviewBuilderTest do
     scope = {1, nil}
 
     assert {:ok, first, window} =
-             ReviewBuilder.build(render_window(), preview, rects, layout, scope)
+             ReviewBuilder.build(render_window(), preview, rects, layout, scope, :vim)
 
     assert first.accessibility_label =~ "Conflict 1 selected"
     assert Enum.any?(first.rows, &String.starts_with?(&1.text, "Conflict 1 "))
     assert Enum.any?(first.rows, &String.starts_with?(&1.text, "Conflict 2 "))
 
     next = Preview.navigate_hunk(preview, :next)
-    assert {:ok, navigated, window} = ReviewBuilder.build(window, next, rects, layout, scope)
+
+    assert {:ok, navigated, window} =
+             ReviewBuilder.build(window, next, rects, layout, scope, :vim)
+
     assert navigated.accessibility_label =~ "Conflict 2 selected"
     assert navigated.row_delta == nil
 
     decided = Preview.replace_diff(next, DiffReview.accept_current(Preview.diff_review(next)))
-    assert {:ok, advanced, _window} = ReviewBuilder.build(window, decided, rects, layout, scope)
+
+    assert {:ok, advanced, _window} =
+             ReviewBuilder.build(window, decided, rects, layout, scope, :vim)
+
     assert advanced.accessibility_label =~ "Conflict 1 selected"
     assert DiffReview.resolution_at(Preview.diff_review(decided), 1) == :accepted
+  end
+
+  test "the conflict label names the accept and reject keys of the active editing model" do
+    review =
+      DiffReview.from_fork_snapshot("note.txt", {self(), 2, 1}, [
+        {:conflict, ["Agent A"], ["Human A"], []}
+      ])
+
+    preview = Preview.set_diff(Preview.new(), review)
+    rects = %{content: {2, 4, 60, 30}, total: {2, 4, 60, 30}}
+    layout = ReviewLayout.new(60, %Monospace{}, Theme.get!(:minga_default), 4)
+
+    for {keys, accept, reject} <- [
+          {:vim, "y", "x"},
+          {:cua_cmd, "Cmd+Enter", "Cmd+Backspace"},
+          {:cua_ctrl, "Ctrl+Enter", "Ctrl+Backspace"}
+        ] do
+      assert {:ok, model, _window} =
+               ReviewBuilder.build(render_window(), preview, rects, layout, {1, nil}, keys)
+
+      assert model.accessibility_label =~
+               "#{accept} uses the Agent version; #{reject} keeps your version."
+    end
   end
 
   defp render_window do

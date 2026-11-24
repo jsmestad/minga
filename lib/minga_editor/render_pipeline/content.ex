@@ -411,7 +411,7 @@ defmodule MingaEditor.RenderPipeline.Content do
 
     result =
       Telemetry.span([:minga, :render, :window_model_build], %{window_id: win_id}, fn ->
-        ReviewBuilder.build(window, view.preview, win_layout, layout, scope)
+        ReviewBuilder.build(window, view.preview, win_layout, layout, scope, review_keys(frame))
       end)
 
     case result do
@@ -429,6 +429,16 @@ defmodule MingaEditor.RenderPipeline.Content do
 
   defp maybe_render_agent_window(_window, _win_id, _win_layout, frames, cursor, st) do
     {frames, cursor, st}
+  end
+
+  # The review names the keys of the active editing model, spelled for this frontend.
+  @spec review_keys(MingaEditor.RenderPipeline.FrameIntent.t()) ::
+          Minga.Keymap.Scope.Agent.diff_review_key_set()
+  defp review_keys(frame) do
+    Minga.Keymap.Scope.Agent.diff_review_key_set(
+      frame.editing_model,
+      MingaEditor.Frontend.Capabilities.gui?(frame.capabilities)
+    )
   end
 
   @spec warn_unavailable_prompt(state(), Window.t(), Window.id(), :missing | :unavailable) ::

@@ -1,7 +1,8 @@
 defmodule MingaEditor.Input.SubStateHandlersTest do
   @moduledoc """
   Tests for the extracted sub-state Input.Handler modules:
-  MentionCompletion, ToolApproval, DiffReview.
+  MentionCompletion and ToolApproval. Diff Review keys are Agent scope
+  bindings; see `MingaEditor.Input.DiffReviewKeysTest`.
 
   These modules were extracted from Input.Scoped in Phase 4 of the
   Surface refactoring. Each test verifies the handler intercepts the
@@ -16,9 +17,7 @@ defmodule MingaEditor.Input.SubStateHandlersTest do
   alias MingaAgent.ToolApproval.Public
   alias MingaAgent.ToolApproval.Target
   alias MingaEditor.Agent.PendingApproval
-  alias MingaEditor.Agent.DiffReview, as: DiffReviewData
   alias MingaEditor.Agent.UIState
-  alias MingaEditor.Agent.View.Preview
   alias Minga.Buffer.Process, as: BufferProcess
   alias Minga.Editing.Scroll
   alias MingaEditor.Shell.Runtime
@@ -28,7 +27,6 @@ defmodule MingaEditor.Input.SubStateHandlersTest do
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
   alias MingaEditor.VimState
-  alias MingaEditor.Input.DiffReview
   alias MingaEditor.Input.MentionCompletion
   alias MingaEditor.Input.ToolApproval
 
@@ -198,84 +196,6 @@ defmodule MingaEditor.Input.SubStateHandlersTest do
         )
 
       {:passthrough, _} = ToolApproval.handle_key(state, ?y, 0)
-    end
-  end
-
-  # ══════════════════════════════════════════════════════════════════════════
-  # DiffReview
-  # ══════════════════════════════════════════════════════════════════════════
-
-  describe "DiffReview.handle_key/3" do
-    @describetag :tmp_dir
-
-    setup %{tmp_dir: dir} do
-      review = DiffReviewData.new(Path.join(dir, "test.ex"), "old line\n", "new line\n")
-
-      state = base_state(keymap_scope: :agent, agentic_active: true, focus: :file_viewer)
-
-      state =
-        MingaEditor.Shell.Traditional.Workflow.install_agent_view(
-          state,
-          (fn v ->
-             %{v | preview: %Preview{content: {:diff, review}}}
-           end).(state.workspace.agent_ui.view)
-        )
-
-      {:ok, state: state}
-    end
-
-    test "y accepts hunk", %{state: state} do
-      {:handled, _} = DiffReview.handle_key(state, ?y, 0)
-    end
-
-    test "x rejects hunk", %{state: state} do
-      {:handled, _} = DiffReview.handle_key(state, ?x, 0)
-    end
-
-    test "Y accepts all hunks", %{state: state} do
-      {:handled, _} = DiffReview.handle_key(state, ?Y, 0)
-    end
-
-    test "X rejects all hunks", %{state: state} do
-      {:handled, _} = DiffReview.handle_key(state, ?X, 0)
-    end
-
-    test "navigation keys resolve through scope trie", %{state: state} do
-      result = DiffReview.handle_key(state, ?j, 0)
-      assert elem(result, 0) in [:handled, :passthrough]
-    end
-
-    test "modified decisions, scope prefixes and navigation reach their owning handlers", %{
-      state: state
-    } do
-      for {cp, mods} <- [
-            {?y, 0x02},
-            {?x, 0x08},
-            {?Y, 0x04},
-            {?X, 0x08},
-            {?j, 0},
-            {?k, 0},
-            {?], 0},
-            {?g, 0},
-            {9, 0}
-          ] do
-        assert {:passthrough, ^state} = DiffReview.handle_key(state, cp, mods)
-      end
-    end
-
-    test "passes through when not in file_viewer focus" do
-      state = base_state(keymap_scope: :agent, agentic_active: true, focus: :chat)
-      {:passthrough, _} = DiffReview.handle_key(state, ?y, 0)
-    end
-
-    test "passes through when input is focused", %{state: state} do
-      state =
-        MingaEditor.Shell.Traditional.Workflow.install_agent_panel(
-          state,
-          (fn p -> %{p | input_focused: true} end).(state.workspace.agent_ui.panel)
-        )
-
-      {:passthrough, _} = DiffReview.handle_key(state, ?y, 0)
     end
   end
 end

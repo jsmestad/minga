@@ -99,6 +99,19 @@ struct ReviewChromeViewTests {
         #expect(try buttons[1].isDisabled())
     }
 
+    @Test("Conflict decisions name the keys the BEAM binds for the active editing model", arguments: [("x", "y"), ("Cmd+Backspace", "Cmd+Enter")])
+    @MainActor func conflictKeyLabels(keys: (String, String)) throws {
+        let conflict = StatusBarUpdate.Review(path: "note.txt", freshness: .current, generation: 9, itemID: "hunk", conflictIndex: 1, keepMineKey: keys.0, useAgentKey: keys.1)
+        let sut = StatusBarView.ReviewButtons(review: conflict, compact: false, sendAction: { _ in })
+        let buttons = try sut.inspect().findAll(ViewType.Button.self)
+        #expect(try buttons.prefix(2).map { try $0.labelView().find(ViewType.Text.self).string() } == [
+            "Keep mine (\(keys.0))", "Use Agent version (\(keys.1))"
+        ])
+        #expect(try buttons.prefix(2).map { try $0.accessibilityLabel().string() } == [
+            "Keep my version (\(keys.0))", "Use Agent version (\(keys.1))"
+        ])
+    }
+
     @Test("Freshness changes preserve the intrinsic space before Review controls", arguments: [false, true])
     @MainActor func stableFreshnessAllocation(compact: Bool) {
         let current = NSHostingView(rootView: StatusBarView.ReviewFreshnessLabel(freshness: .current, compact: compact))

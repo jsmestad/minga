@@ -69,8 +69,12 @@ defmodule MingaEditor.Input.AgentHelpTest do
     state = Workflow.install_agent_ui(state, ui)
     opened = GuiActionHandler.dispatch(state, {:execute_command, "agent_toggle_help"})
 
-    assert %{visible?: true, groups: [_ | _]} =
+    # Help over a review leads with its keys in the active editing model.
+    assert %{visible?: true, groups: [{"Diff Review", review_keys} | _]} =
              AgentHelpBuilder.build(Context.from_editor_state(opened))
+
+    assert {"y", "Accept hunk (Use Agent version)"} in review_keys
+    assert {"x", "Reject hunk (Keep mine)"} in review_keys
 
     assert opened.workspace.windows == state.workspace.windows
     assert opened.workspace.agent_ui.view.preview == preview

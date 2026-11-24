@@ -195,12 +195,13 @@ public struct StatusBarView: View {
             .fixedSize()
         }
 
+        /// Conflict decisions name the BEAM-authored key for the active editing model.
         private var conflictButtons: some View {
             HStack(spacing: 0) {
-                reviewButton(compact ? "Keep mine" : "Keep mine (x)", symbol: nil, accessibility: "Keep my version (x)", key: "x") {
+                reviewButton(compact ? "Keep mine" : Self.withKey("Keep mine", review.keepMineKey), symbol: nil, accessibility: Self.withKey("Keep my version", review.keepMineKey), key: review.keepMineKey) {
                     sendAction?(.reviewKeepMine(generation: review.generation, itemID: review.itemID))
                 }
-                reviewButton(compact ? "Use Agent" : "Use Agent version (y)", symbol: nil, accessibility: "Use Agent version (y)", key: "y") {
+                reviewButton(compact ? "Use Agent" : Self.withKey("Use Agent version", review.useAgentKey), symbol: nil, accessibility: Self.withKey("Use Agent version", review.useAgentKey), key: review.useAgentKey) {
                     sendAction?(.reviewUseAgentVersion(generation: review.generation, itemID: review.itemID))
                 }
             }
@@ -208,10 +209,15 @@ public struct StatusBarView: View {
             .opacity(review.freshness == .stale ? 0.4 : 1)
         }
 
+        static func withKey(_ title: String, _ key: String) -> String {
+            key.isEmpty ? title : "\(title) (\(key))"
+        }
+
         private func reviewButton(_ title: String, symbol: String?, accessibility: String, key: String? = nil, action: @escaping () -> Void) -> some View {
             Button(action: action) {
                 Group {
-                    if tight, let key {
+                    // A one-character key (Vim) stands in for the title; a chord does not fit.
+                    if tight, let key, key.count == 1 {
                         Text(key)
                             .frame(width: 24, height: 24)
                     } else if compact, let symbol {

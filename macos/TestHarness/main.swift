@@ -209,7 +209,8 @@ func commandToJSON(_ command: RenderCommand) -> [String: Any]? {
             result["review"] = [
                 "path": review.path, "freshness": Int(review.freshness.rawValue),
                 "generation": Int(review.generation), "item_id": review.itemID,
-                "conflict_index": Int(review.conflictIndex ?? 0)
+                "conflict_index": Int(review.conflictIndex ?? 0),
+                "keep_mine_key": review.keepMineKey, "use_agent_key": review.useAgentKey
             ]
         }
         return result

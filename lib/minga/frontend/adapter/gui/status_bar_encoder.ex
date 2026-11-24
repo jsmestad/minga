@@ -37,6 +37,7 @@ defmodule Minga.Frontend.Adapter.GUI.StatusBarEncoder do
   @section_operation 0x0F
   @section_review 0x10
   @section_review_conflict 0x11
+  @section_review_conflict_keys 0x12
 
   @spec encode(StatusBar.t(), Caches.t()) :: {binary(), Caches.t()}
   def encode(%StatusBar{} = model, %Caches{} = caches), do: {encode_command(model), caches}
@@ -192,7 +193,17 @@ defmodule Minga.Frontend.Adapter.GUI.StatusBarEncoder do
         payload =
           Writer.new(@command) |> Writer.uint32(:conflict_index, number) |> Writer.finish()
 
-        [encoded, section(@section_review_conflict, payload)]
+        keys =
+          Writer.new(@command)
+          |> Writer.string16(:keep_mine_key, review.keep_mine_key)
+          |> Writer.string16(:use_agent_key, review.use_agent_key)
+          |> Writer.finish()
+
+        [
+          encoded,
+          section(@section_review_conflict, payload),
+          section(@section_review_conflict_keys, keys)
+        ]
     end
   end
 

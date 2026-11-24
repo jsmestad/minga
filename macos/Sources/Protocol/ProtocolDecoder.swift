@@ -1179,6 +1179,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         var pendingKeys = ""
         var review: StatusBarUpdate.Review? = nil
         var conflictIndex: UInt32?
+        var conflictKeys: (keepMine: String, useAgent: String)?
 
         for _ in 0..<sectionCount {
             let section = try readSection16(data, at: pos, containingEnd: data.endIndex)
@@ -1333,6 +1334,13 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
                 guard index > 0 else { throw ProtocolDecodeError.malformed }
                 conflictIndex = index
 
+            case 0x12: // BEAM-authored key hints: keep_mine_key:string16, use_agent_key:string16.
+                var keysPos = sStart
+                let keepMine = try readString16(data: data, pos: &keysPos, end: section.end)
+                let useAgent = try readString16(data: data, pos: &keysPos, end: section.end)
+                guard keysPos == section.end else { throw ProtocolDecodeError.malformed }
+                conflictKeys = (keepMine, useAgent)
+
             default:
                 break // Skip unknown sections (forward compatibility)
             }
@@ -1343,7 +1351,7 @@ private func decodeCommandForRendering(data: Data, offset: Int) throws -> (Rende
         if let conflictIndex {
             guard let offer = review, offer.generation != 0, !offer.itemID.isEmpty
             else { throw ProtocolDecodeError.malformed }
-            review = .init(path: offer.path, freshness: offer.freshness, generation: offer.generation, itemID: offer.itemID, conflictIndex: conflictIndex)
+            review = .init(path: offer.path, freshness: offer.freshness, generation: offer.generation, itemID: offer.itemID, conflictIndex: conflictIndex, keepMineKey: conflictKeys?.keepMine ?? "", useAgentKey: conflictKeys?.useAgent ?? "")
         }
 
         if let agentSectionRange {

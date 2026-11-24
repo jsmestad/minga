@@ -345,6 +345,7 @@ opcode(1) + section_count(1) + [section_id(1) + section_len(2) + payload(section
 | 0x0F | Operation | operation_id(8) + kind(1) + status(1) + flags(1) + message_len(2) + message + queue_position(2) + queue_total(2) + progress_current(4) + progress_total(4) |
 | 0x10 | Review | path_len(2) + path + freshness(1: 0=current, 1=stale) + generation(4) + item_id_len(2) + item_id |
 | 0x11 | ReviewConflict | `conflict_index:u32` (one-based). Requires a Review section in the same update with a nonzero generation and nonempty item ID. |
+| 0x12 | ReviewConflictKeys | `keep_mine_key:string16` + `use_agent_key:string16`. Sent with every ReviewConflict section. The BEAM-authored key hints for the two conflict decisions in the active editing model (`x`/`y` in Vim; `Cmd+Backspace`/`Cmd+Enter` in a native GUI and `Ctrl+Backspace`/`Ctrl+Enter` in a terminal in CUA). Frontends label the decisions with these strings and never author key hints. A frontend that predates the section skips it. |
 
 The Operation section is omitted when the Editor-global operation store is empty. It is independent of the Message section, so a structured-only payload remains discoverable. Operation selection prefers the newest active (`pending`, `queued`, or `running`) record and otherwise the newest retained terminal record. An older terminal outcome never displaces a newer active operation.
 

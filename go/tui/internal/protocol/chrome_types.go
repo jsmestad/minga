@@ -490,8 +490,12 @@ type StatusReview struct {
 	Path          string
 	Freshness     ReviewFreshness
 	ConflictIndex uint32 // one-based; zero means read-only Review
-	Generation    uint32
-	ItemID        string
+	// KeepMineKey and UseAgentKey are the BEAM-authored key hints for the two
+	// conflict decisions in the active editing model; empty when not offered.
+	KeepMineKey string
+	UseAgentKey string
+	Generation  uint32
+	ItemID      string
 }
 
 type AgentHelp struct {

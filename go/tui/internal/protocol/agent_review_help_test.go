@@ -89,6 +89,30 @@ func TestConflictStatusRequiresAValidExactReviewOffer(t *testing.T) {
 	}
 }
 
+func TestConflictStatusCarriesTheBEAMAuthoredDecisionKeys(t *testing.T) {
+	section := append(reviewHelpString16("note.txt"), byte(ReviewCurrent))
+	section = binary.BigEndian.AppendUint32(section, 9)
+	section = append(section, reviewHelpString16("hunk-B")...)
+	keys := append(reviewHelpString16("Ctrl+Backspace"), reviewHelpString16("Ctrl+Enter")...)
+	packet := reviewStatusPacket(section)
+	packet[1] = 3
+	packet = append(packet, 0x11, 0, 4, 0, 0, 0, 2)
+	packet = append(packet, 0x12, 0, byte(len(keys)))
+	packet = append(packet, keys...)
+	command, err := DecodeCommand(packet)
+	if err != nil || command.Chrome.Status.Review == nil {
+		t.Fatalf("conflict keys lost the offer: %+v, %v", command, err)
+	}
+	review := command.Chrome.Status.Review
+	if review.KeepMineKey != "Ctrl+Backspace" || review.UseAgentKey != "Ctrl+Enter" {
+		t.Fatalf("conflict keys = %q/%q", review.KeepMineKey, review.UseAgentKey)
+	}
+	truncated := append(packet[:len(packet)-len(keys)-3:len(packet)-len(keys)-3], 0x12, 0, 3, 0, 5, 'x')
+	if _, err := DecodeCommand(truncated); err == nil {
+		t.Fatalf("malformed conflict keys were accepted: %x", truncated)
+	}
+}
+
 func TestAgentHelpDecodesIndependentLen32GroupsAndHiddenReset(t *testing.T) {
 	body := []byte{1, 1, 2}
 	body = append(body, reviewHelpString16("Review é")...)
