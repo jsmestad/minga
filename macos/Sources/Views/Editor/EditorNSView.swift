@@ -150,6 +150,8 @@ final class EditorNSView: MTKView {
     /// snapshot, drawable, encoder, or input correlation.
     private(set) var hasPendingCapacityRedraw = false
     private(set) var capacityRetryScheduleCount = 0
+    /// Draws that requested the next cursor animation step. Redraw-loop tests read this because AppKit does not report `needsDisplay` reliably outside its display cycle.
+    private(set) var cursorAnimationRedrawRequestCount = 0
     private var pendingCapacityRedrawStartedAt: CFTimeInterval?
     private var capacityRetryTask: Task<Void, Never>?
     private var presentationAvailabilityEpoch: UInt64 = 0
@@ -799,7 +801,9 @@ final class EditorNSView: MTKView {
         if coreTextRenderer.cursorAnimationGeneration != cursorAnimationGeneration {
             resetCursorBlink()
         }
-        if coreTextRenderer.cursorAnimating, submissionOutcome != .deferredCapacity {
+        // Only a submitted frame advances the cursor animation. A deferred attempt retries through the capacity redraw, and a failed attempt must not re-run every vsync.
+        if coreTextRenderer.cursorAnimating, submissionOutcome == .submitted {
+            cursorAnimationRedrawRequestCount += 1
             needsDisplay = true
         }
         os_signpost(.event, log: renderLog, name: "DrawComplete")

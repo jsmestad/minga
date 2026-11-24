@@ -141,6 +141,10 @@ private final class NativeCompletionQueue {
         completions[index](true, Int(MTLCommandBufferStatus.completed.rawValue))
     }
 
+    func fail(_ index: Int) {
+        completions[index](false, Int(MTLCommandBufferStatus.error.rawValue))
+    }
+
     func present(_ drawable: CAMetalDrawable) {
         presentationCount += 1
         drawable.present()
@@ -153,6 +157,10 @@ private struct NativeSaturationFixture {
     let view: EditorNSView
     let window: ControlledPresentationWindow
     let completions: NativeCompletionQueue
+}
+
+private enum ContentViewInjectedFailure: Error {
+    case submission
 }
 
 enum NativeSurfaceCancellation: CaseIterable {
@@ -195,7 +203,7 @@ struct ContentViewTests {
         scrollSeq: UInt32 = 0, resident: Bool = true, extraRows: Int = 0,
         windowID: UInt16 = 1, paneCol: UInt16 = 0, paneCols: UInt16 = 80, anchorLeft: UInt16 = 0,
         layoutGeneration: UInt32 = 1, canPanHorizontally: Bool = true, horizontalPanAck: UInt32 = 0,
-        horizontalPanLimit: UInt16 = 24
+        horizontalPanLimit: UInt16 = 24, cursorCol: UInt16 = 0
     ) throws -> GUIWindowContent {
         var rows: [GUIVisualRow] = []
         rows.reserveCapacity(100)
@@ -256,7 +264,7 @@ struct ContentViewTests {
             fullRefresh: fullRefresh,
             contentEpoch: contentEpoch,
             cursorRow: 0,
-            cursorCol: 0,
+            cursorCol: cursorCol,
             cursorShape: .block,
             scrollLeft: anchorLeft,
             rows: rows,
@@ -1381,18 +1389,23 @@ struct ContentViewTests {
         _ dispatcher: CommandDispatcher,
         frameSeq: UInt32,
         anchorTop: UInt32,
-        inputSeq: UInt32 = 0
+        inputSeq: UInt32 = 0,
+        cursorCol: UInt16 = 0
     ) throws -> CommittedEditorSnapshot {
         dispatcher.dispatch(.beginFrame(frameSeq: frameSeq, baseFrameSeq: frameSeq - 1, generation: 1))
         if frameSeq == 1 {
             dispatcher.dispatch(.guiTheme(slots: completeThemeSlots()))
         }
-        dispatcher.dispatch(.guiWindowContent(data: try nativeInteractionContent(anchorTop: anchorTop)))
+        dispatcher.dispatch(.guiWindowContent(data: try nativeInteractionContent(anchorTop: anchorTop, cursorCol: cursorCol)))
         dispatcher.dispatch(.commitFrame(frameSeq: frameSeq, seq: inputSeq))
         return try #require(dispatcher.committedEditorSnapshot)
     }
 
-    private func makeNativeSaturationFixture() throws -> NativeSaturationFixture {
+    /// Pass `mountedInWindow: false` when the test awaits yields: AppKit never draws an unmounted view on its own, so the test owns every draw.
+    private func makeNativeSaturationFixture(
+        mountedInWindow: Bool = true,
+        configure: (inout NativeRenderFactories) -> Void = { _ in }
+    ) throws -> NativeSaturationFixture {
         let device = try #require(MTLCreateSystemDefaultDevice())
         let size = CGSize(width: 640, height: 480)
         let descriptor = MTLTextureDescriptor.texture2DDescriptor(
@@ -1411,6 +1424,7 @@ struct ContentViewTests {
         }
         factories.observeCompletion = { _, completion in completions.append(completion) }
         factories.present = { completions.present($0) }
+        configure(&factories)
 
         let gui = GUIState()
         let dispatcher = CommandDispatcher(cols: 80, rows: 24, guiState: gui)
@@ -1429,8 +1443,10 @@ struct ContentViewTests {
             backing: .buffered,
             defer: false
         )
-        window.contentView = view
-        window.makeKeyAndOrderFront(nil)
+        if mountedInWindow {
+            window.contentView = view
+            window.makeKeyAndOrderFront(nil)
+        }
         view.drawableSize = size
         return NativeSaturationFixture(
             dispatcher: dispatcher,
@@ -1697,6 +1713,147 @@ struct ContentViewTests {
         if transition == .hidden {
             fixture.window.contentView = nil
         }
+    }
+
+    /// Saturates all three native slots with frame 1, defers frame 2, then commits frame 3. Returns the stamped input sequence of frame 3, which the deferred redraw must still own.
+    private func saturateWithNewestCommitPending(_ fixture: NativeSaturationFixture) throws -> UInt32 {
+        let firstInput = fixture.dispatcher.latency.stamp()
+        _ = try commitScrollFrame(fixture.dispatcher, frameSeq: 1, anchorTop: 10, inputSeq: firstInput)
+        for _ in 0..<3 { fixture.view.draw(fixture.view.bounds) }
+        #expect(fixture.completions.completions.count == 3)
+        #expect(fixture.view.inFlightNativePresentationCountForTesting == 3)
+        #expect(fixture.dispatcher.capturePresentationInputSeq() == 0)
+
+        let deferredInput = fixture.dispatcher.latency.stamp()
+        _ = try commitScrollFrame(fixture.dispatcher, frameSeq: 2, anchorTop: 10, inputSeq: deferredInput)
+        fixture.view.draw(fixture.view.bounds)
+        #expect(fixture.view.hasPendingCapacityRedraw)
+        #expect(fixture.completions.completions.count == 3)
+        #expect(fixture.dispatcher.capturePresentationInputSeq() == deferredInput)
+
+        let latestInput = fixture.dispatcher.latency.stamp()
+        _ = try commitScrollFrame(fixture.dispatcher, frameSeq: 3, anchorTop: 10, inputSeq: latestInput)
+        #expect(fixture.view.hasPendingCapacityRedraw)
+        #expect(fixture.dispatcher.capturePresentationInputSeq() == latestInput)
+        return latestInput
+    }
+
+    private func awaitCapacityRetry(_ fixture: NativeSaturationFixture) async {
+        for _ in 0..<20 where fixture.view.capacityRetryScheduleCount == 0 {
+            await Task.yield()
+        }
+    }
+
+    @Test("a failed first-stage completion during saturation retries once and presents the newest commit")
+    func failedCompletionDuringSaturationRetriesNewestCommit() async throws {
+        let fixture = try makeNativeSaturationFixture(mountedInWindow: false)
+        let latestInput = try saturateWithNewestCommitPending(fixture)
+
+        fixture.completions.fail(0)
+        #expect(fixture.completions.completions.count == 3, "A failed render must not queue its drawable copy")
+        #expect(fixture.view.inFlightNativePresentationCountForTesting == 2)
+        await awaitCapacityRetry(fixture)
+        #expect(fixture.view.capacityRetryScheduleCount == 1)
+        #expect(fixture.dispatcher.capturePresentationInputSeq() == latestInput)
+        #expect(fixture.dispatcher.visibleEditorSnapshot == nil)
+
+        fixture.view.draw(fixture.view.bounds)
+        #expect(fixture.completions.completions.count == 4)
+        #expect(!fixture.view.hasPendingCapacityRedraw)
+        #expect(fixture.dispatcher.capturePresentationInputSeq() == 0)
+
+        fixture.completions.complete(3)
+        #expect(fixture.completions.completions.count == 5)
+        fixture.completions.complete(4)
+        #expect(fixture.dispatcher.visibleEditorSnapshot?.frameSeq == 3)
+        #expect(fixture.completions.presentationCount == 1)
+
+        // Releasing the remaining slots must not start a second retry.
+        fixture.completions.fail(1)
+        fixture.completions.fail(2)
+        for _ in 0..<10 { await Task.yield() }
+        #expect(fixture.view.inFlightNativePresentationCountForTesting == 0)
+        #expect(fixture.view.capacityRetryScheduleCount == 1)
+        #expect(!fixture.view.hasPendingCapacityRedraw)
+        #expect(fixture.dispatcher.visibleEditorSnapshot?.frameSeq == 3)
+    }
+
+    @Test("a retry that fails before submission keeps the newest commit pending and schedules no further retry")
+    func failedRetryKeepsNewestCommitPendingWithoutLoop() async throws {
+        var refuseSubmission = false
+        let fixture = try makeNativeSaturationFixture(mountedInWindow: false) { factories in
+            factories.preSubmit = { _ in
+                if refuseSubmission { throw ContentViewInjectedFailure.submission }
+            }
+        }
+        let latestInput = try saturateWithNewestCommitPending(fixture)
+
+        fixture.completions.fail(0)
+        await awaitCapacityRetry(fixture)
+        try #require(fixture.view.capacityRetryScheduleCount == 1)
+
+        refuseSubmission = true
+        fixture.view.draw(fixture.view.bounds)
+        #expect(fixture.completions.completions.count == 3, "The refused retry must not reach Metal completion")
+        #expect(fixture.view.inFlightNativePresentationCountForTesting == 2)
+        #expect(!fixture.view.hasPendingCapacityRedraw)
+        #expect(!fixture.view.hasCapacityRetryTaskForTesting)
+        #expect(fixture.view.cursorAnimationRedrawRequestCount == 0)
+        #expect(fixture.dispatcher.capturePresentationInputSeq() == latestInput)
+        #expect(fixture.dispatcher.pendingPresentationFrame()?.frameSeq == 3)
+
+        // An older attempt still presents, and every slot release stays quiet.
+        fixture.completions.complete(1)
+        #expect(fixture.completions.completions.count == 4)
+        fixture.completions.complete(3)
+        #expect(fixture.dispatcher.visibleEditorSnapshot?.frameSeq == 1)
+        fixture.completions.fail(2)
+        for _ in 0..<10 { await Task.yield() }
+        #expect(fixture.view.inFlightNativePresentationCountForTesting == 0)
+        #expect(fixture.view.capacityRetryScheduleCount == 1)
+        #expect(!fixture.view.hasCapacityRetryTaskForTesting)
+        #expect(fixture.completions.presentationCount == 1)
+        #expect(fixture.dispatcher.capturePresentationInputSeq() == latestInput)
+        #expect(fixture.dispatcher.pendingPresentationFrame()?.frameSeq == 3)
+    }
+
+    @Test("an atlas failure during a cursor animation does not request another draw")
+    func atlasFailureDuringCursorAnimationRequestsNoRedraw() throws {
+        var refuseAtlasGrowth = false
+        var reports: [NativePresentationFailure] = []
+        let fixture = try makeNativeSaturationFixture(mountedInWindow: false) { factories in
+            let makeTexture = factories.makeTexture
+            factories.makeTexture = { device, descriptor in
+                if refuseAtlasGrowth, descriptor.usage == .shaderRead { return nil }
+                return makeTexture(device, descriptor)
+            }
+            factories.reportFailure = { reports.append($0) }
+        }
+        let renderer = fixture.view.coreTextRenderer
+
+        _ = try commitScrollFrame(fixture.dispatcher, frameSeq: 1, anchorTop: 10)
+        fixture.view.draw(fixture.view.bounds)
+        try #require(fixture.completions.completions.count == 1)
+        #expect(!renderer.cursorAnimating)
+        #expect(fixture.view.cursorAnimationRedrawRequestCount == 0)
+
+        _ = try commitScrollFrame(fixture.dispatcher, frameSeq: 2, anchorTop: 10, cursorCol: 4)
+        fixture.view.draw(fixture.view.bounds)
+        try #require(fixture.completions.completions.count == 2)
+        try #require(renderer.cursorAnimating)
+        #expect(fixture.view.cursorAnimationRedrawRequestCount == 1, "A submitted animation frame requests the next step")
+
+        // The held completions keep slots 0 and 1, so this attempt takes slot 2. That slot has no atlas texture yet, so its candidate must grow and the refusal fails it.
+        refuseAtlasGrowth = true
+        fixture.view.draw(fixture.view.bounds)
+
+        #expect(reports.count == 1)
+        #expect(reports.first?.phase == .atlas)
+        #expect(reports.first?.dimension == .texture)
+        #expect(fixture.completions.completions.count == 2)
+        #expect(renderer.cursorAnimating, "The failure exits before the animation advances")
+        #expect(!fixture.view.hasPendingCapacityRedraw)
+        #expect(fixture.view.cursorAnimationRedrawRequestCount == 1, "A failed attempt must not re-run every vsync")
     }
 
     @Test("draw reconciles a live trackpad prediction against its captured committed snapshot exactly once")
