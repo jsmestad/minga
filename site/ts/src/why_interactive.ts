@@ -18,12 +18,12 @@ export interface LayoutMetrics {
 export const LAYOUT_MODES: Record<LayoutMode, LayoutMetrics> = {
   ide: {
     mode: "ide",
-    title: "Typical AI IDE (Default layout)",
+    title: "Docked IDE (Tree + Chat + Terminal open)",
     codeWidthPct: 48,
     codeHeightPct: 68,
     areaPct: 33,
     columnsAt1440: 78,
-    summary: "Activity rail, permanent file tree, tab strip, right chat dock, and bottom terminal leave under a third of your monitor for actual code.",
+    summary: "With file tree, chat dock, and bottom terminal open at 1440px, code shrinks to ~33% of the screen. You can hide docks, but desktop panels remain the default workflow.",
   },
   minga_rest: {
     mode: "minga_rest",
@@ -69,9 +69,9 @@ export const EDITOR_LENSES: Record<EditorLensId, EditorLensCard> = {
     id: "cursor",
     label: "Cursor / VS Code",
     tableColIndex: 1,
-    transfers: "Enable CUA desktop shortcuts (Cmd+C/V/X/Z/Shift+Z, Cmd+P, Cmd+S) and click any visible control with the mouse.",
-    whatChanges: "Replaces Electron and permanent panels with native macOS + SSH terminal clients, isolated BEAM processes, and Elixir customization without an RPC extension wall.",
-    whenToStay: "Stay on Cursor or VS Code if you rely daily on inline Tab autocomplete prediction, cloud background agents, or niche VS Code marketplace extensions.",
+    transfers: "Enable CUA desktop shortcuts (Cmd+C/V/X/Z/Shift+Z/S and Ctrl+P) and click any visible control with the mouse.",
+    whatChanges: "Replaces Electron and docked panels with native macOS + SSH terminal clients, isolated BEAM processes, and Elixir customization.",
+    whenToStay: "Stay on Cursor or VS Code if you rely daily on inline Tab prediction, cloud background agents, or VS Code marketplace extensions.",
     starterConfig: "set :editing_model, :cua",
   },
   zed: {
@@ -87,17 +87,17 @@ export const EDITOR_LENSES: Record<EditorLensId, EditorLensCard> = {
     id: "herdr",
     label: "tmux / Herdr",
     tableColIndex: 3,
-    transfers: "Persistent headless remote sessions (minga --headless + minga attach ssh://), keyboard-driven workflows, and multi-agent status views.",
-    whatChanges: "Agents edit against your open buffers via revision-checked staged overlays and 3-way merge instead of writing blind on disk or forcing separate Git worktrees.",
+    transfers: "Persistent headless remote sessions (minga --headless + minga attach ssh://devbox/work/app), keyboard-driven workflows, and multi-agent status views.",
+    whatChanges: "Agents stage revision-checked edits off disk with three-way merge instead of mutating your working tree directly (trading away native .git and node_modules inside overlay shell runs).",
     whenToStay: "Stay on Herdr or tmux if your top priority is running Anthropic Claude Code and OpenAI Codex CLI directly on flat-rate vendor subscriptions.",
-    starterConfig: "minga --headless && minga attach ssh://devbox",
+    starterConfig: "minga attach ssh://devbox/work/app",
   },
   neovim: {
     id: "neovim",
     label: "Neovim",
     tableColIndex: null,
     transfers: "Vim motions, text objects (iw, i\", a{), registers, macros, counts, dot repeat, LSP, and first-class terminal usage carry straight over.",
-    whatChanges: "Replaces a single Lua event loop and a dozen glued plugins with native macOS + Go TUI parity, Erlang process isolation, and built-in staged agent review.",
+    whatChanges: "Replaces CPU-shared Lua plugins with isolated BEAM processes, native macOS Metal + Go TUI parity, and built-in staged agent review.",
     whenToStay: "Stay on Neovim if you rely on 15ms LuaJIT startup on remote Linux boxes and a mature plugin stack (fugitive, oil.nvim, telescope, gitsigns) you already tuned.",
     starterConfig: "set :line_numbers, :relative",
   },
@@ -106,7 +106,7 @@ export const EDITOR_LENSES: Record<EditorLensId, EditorLensCard> = {
     label: "Emacs / Doom",
     tableColIndex: null,
     transfers: "Spacebar leader menus (SPC), command advice (:before, :after, :around, :override), hooks, special review buffers, and configuring the editor in its own language.",
-    whatChanges: "Moves from one Lisp thread to preemptive BEAM processes per file, hook, extension, and MCP server so slow background work never stalls typing.",
+    whatChanges: "Moves CPU-bound hooks, extensions, and MCP supervision off a single Lisp thread into preemptive BEAM processes with separate heaps.",
     whenToStay: "Stay on Emacs if you live inside org-mode, magit, TRAMP, or live eval-defun patching of already-loaded packages (Minga reloads compiled extensions on restart per ADR-0003).",
     starterConfig: "set :theme, :doom_one",
   },
@@ -195,7 +195,7 @@ export function mountLayoutComparator(root: HTMLElement): void {
               <strong class="wf-panel-head">AI CHAT SIDEBAR</strong>
               <div class="wf-chat-msg">User: Handle HTTP 529 overloaded responses.</div>
               <div class="wf-chat-msg is-ai">Agent: Applying edits across 2 files...</div>
-              <div class="wf-chat-box">Ask anything... (360px permanent dock)</div>
+              <div class="wf-chat-box">Ask anything... (360px side dock)</div>
             </div>
           </div>`
         : `

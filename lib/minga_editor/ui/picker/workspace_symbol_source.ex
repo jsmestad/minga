@@ -58,7 +58,7 @@ defmodule MingaEditor.UI.Picker.WorkspaceSymbolSource do
   @impl true
   @spec on_select(Item.t(), term()) :: term()
   def on_select(%Item{id: {path, line, col}}, state) do
-    state = set_jump_mark(state)
+    state = MingaEditor.Editing.record_jump_here(state)
     state = open_or_switch_to_file(state, path)
 
     case state.workspace.buffers.active do
@@ -116,22 +116,6 @@ defmodule MingaEditor.UI.Picker.WorkspaceSymbolSource do
       [] -> nil
     end
   end
-
-  @spec set_jump_mark(EditorState.t()) :: EditorState.t()
-  defp set_jump_mark(%{workspace: %{buffers: %{active: buf}}} = state) when is_pid(buf) do
-    pos = Buffer.cursor(buf)
-
-    %{
-      state
-      | workspace:
-          MingaEditor.Session.State.set_editing(
-            state.workspace,
-            MingaEditor.VimState.set_last_jump_pos(state.workspace.editing, pos)
-          )
-    }
-  end
-
-  defp set_jump_mark(state), do: state
 
   @spec open_or_switch_to_file(EditorState.t(), String.t()) :: EditorState.t()
   defp open_or_switch_to_file(state, file_path) do

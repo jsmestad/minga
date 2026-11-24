@@ -17,12 +17,14 @@ defmodule MingaAgent.Tools.Shell do
           env: [{String.t(), String.t()}],
           artifact_store: GenServer.server() | nil,
           capture_key: term() | nil,
-          helper_path: String.t()
+          helper_path: String.t(),
+          sandbox: MingaAgent.Tools.SandboxPolicy.t()
         ]
 
   alias MingaAgent.ArtifactStore.Capture
   alias MingaAgent.Tool.Output
   alias MingaAgent.Tools.OutputCapture
+  alias MingaAgent.Tools.SandboxBackend.Resolver, as: SandboxResolver
   alias MingaAgent.Tools.OutputLimit
   alias MingaAgent.Tools.Shell.OutputReader
 
@@ -103,9 +105,23 @@ defmodule MingaAgent.Tools.Shell do
           execute_opts()
         ) :: {:ok, transport()} | {:error, term()}
   defp open_output(command, cwd, env, _capture, deadline, opts) do
-    OutputReader.open(command, cwd, safe_env_charlist(env), deadline, opts)
+    case apply_sandbox(command, opts) do
+      {:ok, wrapped} ->
+        OutputReader.open(wrapped, cwd, safe_env_charlist(env), deadline, opts)
+
+      {:error, reason} ->
+        {:error, reason}
+    end
   rescue
     error -> {:error, Exception.message(error)}
+  end
+
+  @spec apply_sandbox(String.t(), execute_opts()) :: {:ok, String.t()} | {:error, term()}
+  defp apply_sandbox(command, opts) do
+    case Keyword.get(opts, :sandbox) do
+      nil -> {:ok, command}
+      policy -> SandboxResolver.wrap(policy, command)
+    end
   end
 
   @spec failed_start(collect_state(), term()) :: result()

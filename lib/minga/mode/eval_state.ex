@@ -1,6 +1,6 @@
 defmodule Minga.Mode.EvalState do
   @moduledoc """
-  FSM state for Eval (`M-:`) mode.
+  FSM state for Eval (`SPC ;`) mode.
 
   Carries the eval input string typed so far, plus the standard
   count/leader fields.

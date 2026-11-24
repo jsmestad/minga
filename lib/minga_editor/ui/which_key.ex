@@ -48,26 +48,26 @@ defmodule MingaEditor.UI.WhichKey do
   # ── Binding display ───────────────────────────────────────────────────────────
 
   @doc """
-  Formats a list of `{key, label}` pairs (as returned by `Minga.Keymap.Bindings.children/1`)
+  Formats `{key, label, kind}` entries (as returned by `Minga.Keymap.Bindings.children/1`)
   into a list of `t:binding/0` maps suitable for rendering in a which-key popup.
+
+  Group labels read like leaves: Title Case without a leading `+`. A label written the old way (`"+git"`, from an extension or a user config) is normalized to `"Git"`.
 
   ## Examples
 
-      iex> MingaEditor.UI.WhichKey.format_bindings([{{?j, 0}, "Move cursor down"}])
+      iex> MingaEditor.UI.WhichKey.format_bindings([{{?j, 0}, "Move cursor down", :command}])
       [%MingaEditor.UI.WhichKey.Binding{key: "j", description: "Move cursor down", kind: :command, icon: nil}]
   """
-  @spec format_bindings([{Bindings.key(), String.t() | atom()}]) :: [binding()]
+  @spec format_bindings([{Bindings.key(), String.t() | atom(), Binding.kind()}]) :: [binding()]
   def format_bindings(children) when is_list(children) do
-    Enum.map(children, fn {key, label} ->
-      desc = format_label(label)
-      kind = if group_label?(desc), do: :group, else: :command
-      icon = if kind == :group, do: Icons.for_group(desc)
+    Enum.map(children, fn {key, label, kind} ->
+      desc = format_label(label, kind)
 
       %Binding{
         key: format_key(key),
         description: desc,
         kind: kind,
-        icon: icon
+        icon: if(kind == :group, do: Icons.for_group(desc))
       }
     end)
   end
@@ -86,13 +86,22 @@ defmodule MingaEditor.UI.WhichKey do
 
   # ── Private ───────────────────────────────────────────────────────────────────
 
-  @spec format_label(String.t() | atom()) :: String.t()
-  defp format_label(label) when is_binary(label), do: label
-  defp format_label(:prefix), do: "+prefix"
-  defp format_label(:unknown), do: "?"
-  defp format_label(label) when is_atom(label), do: Atom.to_string(label)
+  @spec format_label(String.t() | atom(), Binding.kind()) :: String.t()
+  defp format_label(:prefix, _kind), do: "More"
+  defp format_label(:unknown, _kind), do: "?"
 
-  @spec group_label?(String.t()) :: boolean()
-  defp group_label?("+" <> _), do: true
-  defp group_label?(_), do: false
+  defp format_label(label, kind) when is_atom(label),
+    do: format_label(Atom.to_string(label), kind)
+
+  defp format_label("+" <> label, :group), do: group_label(label)
+  defp format_label(label, :group), do: group_label(label)
+  defp format_label(label, :command) when is_binary(label), do: label
+
+  @spec group_label(String.t()) :: String.t()
+  defp group_label(label) do
+    case String.next_grapheme(label) do
+      {first, rest} -> String.upcase(first) <> rest
+      nil -> label
+    end
+  end
 end

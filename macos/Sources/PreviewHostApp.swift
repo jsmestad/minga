@@ -39,11 +39,17 @@ struct PreviewHostApp: App {
     }
 
     @MainActor
+    @ViewBuilder
     func previewContent() -> some View {
         let viewName = ProcessInfo.processInfo.environment["PREVIEW_VIEW"] ?? "StatusBarView"
-        let size = PreviewRegistry.size(named: viewName)
-        return PreviewRegistry.view(named: viewName)
-            .frame(width: size.width, height: size.height, alignment: .topLeading)
+        if viewName == "Storyboard" {
+            // StoryboardCapture opens its own window per transcript. It is not a registered preview, so --all never selects it.
+            Color.clear.frame(width: 64, height: 64)
+        } else {
+            let size = PreviewRegistry.size(named: viewName)
+            PreviewRegistry.view(named: viewName)
+                .frame(width: size.width, height: size.height, alignment: .topLeading)
+        }
     }
 }
 
@@ -93,6 +99,16 @@ final class PreviewHostDelegate: NSObject, NSApplicationDelegate {
         guard !started else { return }
         started = true
         window.ignoresMouseEvents = true
+        if ProcessInfo.processInfo.environment["PREVIEW_VIEW"] == "Storyboard" {
+            // The storyboard renderer opens one window per transcript; the launch window stays out of the way.
+            window.orderOut(nil)
+            Task { @MainActor in
+                let failures = await StoryboardCapture.runAll()
+                for failure in failures { fputs("error: \(failure)\n", stderr) }
+                exit(failures.isEmpty ? 0 : 1)
+            }
+            return
+        }
         Task { @MainActor in
             await captureAndExitAsync(window: window, fixtureView: fixtureView)
         }

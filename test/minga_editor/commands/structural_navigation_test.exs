@@ -19,21 +19,22 @@ defmodule MingaEditor.Commands.StructuralNavigationTest do
     :ok
   end
 
-  test "Alt+h moves to parent AST node and reports the node type" do
+  # In Normal mode ⌥h and ⌥l alias SPC c v / SPC c V (docs/design/keys.md); parent and child stay commands.
+  test "nav_parent moves to parent AST node and reports the node type" do
     {editor, buffer} = start_editor("function add(a, b) {\n  return a + b;\n}\n")
     BufferProcess.move_to(buffer, {0, 20})
 
-    state = send_key(editor, ?h, @alt)
+    state = run_command(editor, "nav_parent")
 
     assert BufferProcess.cursor(buffer) == {0, 0}
     assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(state) == "→ function_declaration"
   end
 
-  test "Alt+l moves to the first child AST node" do
+  test "nav_first_child moves to the first child AST node" do
     {editor, buffer} = start_editor("function add(a, b) { return a + b; }\n")
     BufferProcess.move_to(buffer, {0, 0})
 
-    state = send_key(editor, ?l, @alt)
+    state = run_command(editor, "nav_first_child")
 
     assert BufferProcess.cursor(buffer) == {0, 9}
     assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(state) == "→ identifier"
@@ -65,6 +66,64 @@ defmodule MingaEditor.Commands.StructuralNavigationTest do
     assert MingaEditor.Editing.visual_anchor(state) == {0, 0}
     assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(state) == "→ identifier"
   end
+
+  describe "smart selection without a language server" do
+    # No LSP client serves these buffers, so SPC c v / SPC c V (and ⌥h / ⌥l) fall back to the syntax tree.
+    test "expand selects the next larger syntax node each time and shrink steps back" do
+      {editor, buffer} = start_editor("f(a, b, c);")
+      BufferProcess.move_to(buffer, {0, 2})
+
+      state = run_command(editor, "selection_expand")
+      assert Minga.Editing.mode(state) == :visual
+      assert selection(state, buffer) == {{0, 1}, {0, 9}}
+
+      state = run_command(editor, "selection_expand")
+      assert selection(state, buffer) == {{0, 0}, {0, 9}}
+
+      state = run_command(editor, "selection_shrink")
+      assert selection(state, buffer) == {{0, 1}, {0, 9}}
+    end
+
+    test "⌥h expands like SPC c v, starting from the node under the cursor" do
+      {editor, buffer} = start_editor("function add(a, b) { return a + b; }\n")
+      BufferProcess.move_to(buffer, {0, 9})
+
+      state = send_key(editor, ?h, @alt)
+      assert selection(state, buffer) == {{0, 9}, {0, 11}}
+    end
+
+    test "after the selection grows by hand, expand never drops what is selected" do
+      {editor, buffer} = start_editor("f(a, b, c);")
+      BufferProcess.move_to(buffer, {0, 2})
+
+      state = run_command(editor, "selection_expand")
+      assert selection(state, buffer) == {{0, 1}, {0, 9}}
+
+      send_key(editor, ?$)
+      state = run_command(editor, "selection_expand")
+      assert selection(state, buffer) == {{0, 0}, {0, 10}}
+    end
+
+    test "a multibyte last character ends the selection on that character" do
+      {editor, buffer} = start_editor("const π = 1;\n")
+      BufferProcess.move_to(buffer, {0, 6})
+
+      state = run_command(editor, "selection_expand")
+      assert selection(state, buffer) == {{0, 6}, {0, 11}}
+    end
+
+    test "shrink with nothing to step back to selects the first child of the node at the cursor" do
+      {editor, buffer} = start_editor("function add(a, b) { return a + b; }\n")
+      BufferProcess.move_to(buffer, {0, 0})
+
+      state = send_key(editor, ?l, @alt)
+      assert Minga.Editing.mode(state) == :visual
+      assert selection(state, buffer) == {{0, 9}, {0, 11}}
+    end
+  end
+
+  defp selection(state, buffer),
+    do: {MingaEditor.Editing.visual_anchor(state), BufferProcess.cursor(buffer)}
 
   defp start_editor(content) do
     id = :erlang.unique_integer([:positive])
@@ -115,6 +174,11 @@ defmodule MingaEditor.Commands.StructuralNavigationTest do
 
   defp send_key(editor, codepoint, mods \\ 0) do
     send(editor, {:minga_input, {:key_press, codepoint, mods}})
+    :sys.get_state(editor, @sync_timeout)
+  end
+
+  defp run_command(editor, name) do
+    send(editor, {:minga_input, {:gui_action, {:execute_command, name}}})
     :sys.get_state(editor, @sync_timeout)
   end
 

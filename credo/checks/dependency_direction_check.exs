@@ -167,8 +167,8 @@ defmodule Minga.Credo.DependencyDirectionCheck do
     "Minga.Mode" => ["Minga.Tool.Recipe.Registry"],
     # Editing facade preserves existing macro-recorder helpers until that UI state moves behind a lower-level query.
     "Minga.Editing" => ["MingaEditor.MacroRecorder"],
-    # Application supervisor starts shell registry at the OTP boundary.
-    "Minga.Application" => ["MingaEditor.Shell.Registry"],
+    # Application supervisor starts shell and handler registries at the OTP boundary.
+    "Minga.Application" => ["MingaEditor.Shell.Registry", "MingaEditor.Input.HandlerRegistry"],
     # Session persistence currently references the editor state snapshot type.
     "Minga.Session" => ["MingaEditor.State"],
     # Diagnostics decoration maps severities to presentation gutter faces.

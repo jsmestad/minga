@@ -254,6 +254,8 @@ When hidden:
   opcode(1) + 0(1)
 ```
 
+`kind` alone says whether a row is a group; frontends never infer it from the text. A group's `desc` is final display text: a Title Case label with a trailing chevron, such as `Session ›`, never a `+label`. Frontends render `desc` verbatim and draw group rows in the `group` colour role (`docs/design/keys.md`, "Groups read like leaves").
+
 ### 0x73 — gui_completion
 
 Completion popup with LSP/buffer completion items.

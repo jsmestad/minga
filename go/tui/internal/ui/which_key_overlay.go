@@ -5,6 +5,8 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
+	"github.com/jsmestad/minga/go/tui/internal/generated"
 	"github.com/jsmestad/minga/go/tui/internal/protocol"
 )
 
@@ -95,6 +97,7 @@ func (m Model) renderWhichKeyFooter(which protocol.WhichKey, width int) string {
 	return lipgloss.NewStyle().Background(p.PopupChrome()).Width(width).Render(fitStyled(leftText+spacer+rightText, width))
 }
 
+// renderWhichKeyCell draws one entry. Group rows arrive from the BEAM as Title Case labels with a trailing chevron ("Session ›"); they draw in the group colour role, and the label is never rewritten here.
 func (m Model) renderWhichKeyCell(binding protocol.WhichKeyBinding, width int, keyWidth int) string {
 	p := m.palette()
 	group := whichKeyGroup(binding)
@@ -103,32 +106,41 @@ func (m Model) renderWhichKeyCell(binding protocol.WhichKeyBinding, width int, k
 	iconBackground := p.PopupSurface()
 	if group {
 		keyStyle = lipgloss.NewStyle().Foreground(p.PopupMutedText()).Background(p.PopupSurface()).Width(keyWidth).Align(lipgloss.Center)
-		descStyle = lipgloss.NewStyle().Bold(true).Foreground(p.Accent()).Background(p.PopupSurface())
+		descStyle = lipgloss.NewStyle().Foreground(p.Role(generated.ColorRoleGroup)).Background(p.PopupSurface())
 	}
 	key := strings.TrimSpace(binding.Key)
 	icon := whichKeyIcon(binding)
-	iconText := icon.glyph
-	if icon.color != "" && !group {
-		iconText = lipgloss.NewStyle().Foreground(lipgloss.Color(icon.color)).Background(iconBackground).Render(icon.glyph)
-	} else if group {
-		iconText = lipgloss.NewStyle().Foreground(p.PopupMutedText()).Background(iconBackground).Render("›")
-	}
-	label := strings.TrimSpace(iconText + " " + binding.Description)
-	if group && !strings.HasSuffix(label, "›") {
-		label += " ›"
+	iconStyle := lipgloss.NewStyle().Foreground(p.PopupText()).Background(iconBackground)
+	if group {
+		iconStyle = iconStyle.Foreground(p.Role(generated.ColorRoleGroup))
+	} else if icon.color != "" {
+		iconStyle = iconStyle.Foreground(lipgloss.Color(icon.color))
 	}
 	keyPart := keyStyle.Render(fit(key, keyWidth))
-	remaining := max(width-lipgloss.Width(keyPart)-1, 0)
 	cell := keyPart
-	if remaining > 0 {
-		cell += " " + descStyle.Render(fit(label, remaining))
+	// The icon and the label render separately so the icon's reset never strips the label's colour.
+	if remaining := width - lipgloss.Width(keyPart) - 1; remaining > 0 {
+		cell += " "
+		if glyph := strings.TrimSpace(icon.glyph); glyph != "" && displayWidth(glyph)+1 < remaining {
+			cell += iconStyle.Render(glyph) + descStyle.Render(" ")
+			remaining -= displayWidth(glyph) + 1
+		}
+		label := strings.TrimSpace(binding.Description)
+		if displayWidth(label) > remaining {
+			label = ansi.TruncateWc(label, remaining, "…")
+		}
+		cell += descStyle.Render(fit(label, remaining))
 	}
 	return lipgloss.NewStyle().Background(p.PopupSurface()).Width(width).Render(fitStyled(cell, width))
 }
 
+// whichKeyGroup reports whether the entry leads to more keys. The BEAM says so in the binding kind; the label's text never decides it.
 func whichKeyGroup(binding protocol.WhichKeyBinding) bool {
-	return strings.HasPrefix(strings.TrimSpace(binding.Description), "+")
+	return binding.Kind == whichKeyKindGroup
 }
+
+// whichKeyKindGroup is the binding kind the BEAM sends for a group (docs/GUI_PROTOCOL.md, gui_which_key).
+const whichKeyKindGroup byte = 1
 
 func whichKeyKeyWidth(bindings []protocol.WhichKeyBinding) int {
 	width := 3

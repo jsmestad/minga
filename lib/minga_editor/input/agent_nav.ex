@@ -16,7 +16,7 @@ defmodule MingaEditor.Input.AgentNav do
 
   ## Unclaimed keys
 
-  The chat and the file viewer apply one rule. Keys not claimed by earlier scope handlers stop here so the read-only surface cannot edit an underlying human buffer. The mode entry keys (SPC, `:`, `M-:`, `/`, `n`, `N`) pass through to the mode FSM, and every key passes through while a key sequence is pending or a command line, search, or eval prompt is open.
+  The chat and the file viewer apply one rule. Keys not claimed by earlier scope handlers stop here so the read-only surface cannot edit an underlying human buffer. The mode entry keys (SPC, `:`, `/`, `n`, `N`) pass through to the mode FSM (eval opens from the leader, `SPC ;`), and every key passes through while a key sequence is pending or a command line, search, or eval prompt is open.
 
   ## Side panel usage
 
@@ -35,11 +35,10 @@ defmodule MingaEditor.Input.AgentNav do
   alias MingaEditor.State, as: EditorState
 
   @ctrl MingaEditor.Input.mod_ctrl()
-  @alt MingaEditor.Input.mod_alt()
 
   # Normal-mode keys the chat hands to the mode FSM: leader, command line,
   # eval line, and transcript search.
-  @mode_fsm_entry_keys [{?\s, 0}, {?:, 0}, {?:, @alt}, {?/, 0}, {?n, 0}, {?N, 0}]
+  @mode_fsm_entry_keys [{?\s, 0}, {?:, 0}, {?/, 0}, {?n, 0}, {?N, 0}]
 
   @impl true
   @spec handle_key(state(), non_neg_integer(), non_neg_integer()) ::

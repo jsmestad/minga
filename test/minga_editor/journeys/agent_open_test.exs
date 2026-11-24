@@ -128,14 +128,15 @@ defmodule MingaEditor.Journeys.AgentOpenTest do
     assert %{visible?: true, prompt: "unfinished"} = await_conversation(ctx, prompt: "unfinished")
   end
 
-  test "Next agent tab from the file reopens the existing draft", %{editor_ctx: ctx} do
+  # SPC TAB a retired with tabs (docs/design/keys.md); the command stays reachable by name.
+  test "the next agent tab command from the file reopens the existing draft", %{editor_ctx: ctx} do
     send_keys_async(ctx, "<SPC>anexisting<Esc>")
     assert %{visible?: true, prompt: "existing"} = agent_chat(ctx)
 
     send_keys_async(ctx, "<SPC>aa")
     refute match?(%{visible?: true}, agent_chat(ctx))
 
-    send_keys_async(ctx, "<SPC>\ta")
+    send_gui_action(ctx, {:execute_command, "cycle_agent_tabs"})
     assert %{visible?: true, prompt: "existing"} = await_conversation(ctx, prompt: "existing")
   end
 

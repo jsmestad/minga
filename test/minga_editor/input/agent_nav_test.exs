@@ -13,7 +13,6 @@ defmodule MingaEditor.Input.AgentNavTest do
   alias MingaEditor.Window
 
   @ctrl MingaEditor.Frontend.Protocol.mod_ctrl()
-  @alt MingaEditor.Frontend.Protocol.mod_alt()
   @super MingaEditor.Frontend.Protocol.mod_super()
 
   defp make_state(opts) do
@@ -129,9 +128,9 @@ defmodule MingaEditor.Input.AgentNavTest do
   end
 
   describe "keys owned by the mode FSM" do
-    test "leader, command line, eval, and search entry keys reach the mode FSM from chat and the viewer" do
+    test "leader, command line, and search entry keys reach the mode FSM from chat and the viewer" do
       for state <- [make_state(focus: :chat), make_state(focus: :file_viewer)],
-          {cp, mods} <- [{?\s, 0}, {?:, 0}, {?:, @alt}, {?/, 0}, {?n, 0}, {?N, 0}] do
+          {cp, mods} <- [{?\s, 0}, {?:, 0}, {?/, 0}, {?n, 0}, {?N, 0}] do
         assert {:passthrough, ^state} = AgentNav.handle_key(state, cp, mods)
       end
     end

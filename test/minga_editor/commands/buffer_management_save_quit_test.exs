@@ -135,17 +135,17 @@ defmodule MingaEditor.Commands.BufferManagementSaveQuitTest do
     c_buffer = active_buffer(ctx)
     :ok = MingaEditor.open_file(ctx.editor, b_path)
     b_buffer = active_buffer(ctx)
-    send_keys_sync(ctx, "gT")
+    run_command(ctx, "tab_prev")
     assert active_buffer(ctx) == c_buffer
-    send_keys_sync(ctx, "gT")
+    run_command(ctx, "tab_prev")
     assert active_buffer(ctx) == first_buffer
 
     send_ex_sync(ctx, "wq")
 
     assert_receive {:format_request, ref, _caller}
     assert File.read!(first_path) == "first"
-    send_keys_sync(ctx, "gt")
-    send_keys_sync(ctx, "gt")
+    run_command(ctx, "tab_next")
+    run_command(ctx, "tab_next")
     assert active_buffer(ctx) == b_buffer
 
     send(ctx.editor, {:lsp_format_timeout, ref})
@@ -179,9 +179,9 @@ defmodule MingaEditor.Commands.BufferManagementSaveQuitTest do
     c_buffer = active_buffer(ctx)
     state = put_inactive_agent_tab(ctx, "Agent B")
     agent_tab_id = state.shell_runtime.state.tab_bar.active_id
-    send_keys_sync(ctx, "gT")
+    run_command(ctx, "tab_prev")
     assert active_buffer(ctx) == c_buffer
-    send_keys_sync(ctx, "gT")
+    run_command(ctx, "tab_prev")
     assert active_buffer(ctx) == first_buffer
 
     send_ex_sync(ctx, "wq")
@@ -259,8 +259,8 @@ defmodule MingaEditor.Commands.BufferManagementSaveQuitTest do
     c_tab_id = editor_state(ctx).shell_runtime.state.tab_bar.active_id
     :ok = MingaEditor.open_file(ctx.editor, b_path)
     b_tab_id = editor_state(ctx).shell_runtime.state.tab_bar.active_id
-    send_keys_sync(ctx, "gT")
-    send_keys_sync(ctx, "gT")
+    run_command(ctx, "tab_prev")
+    run_command(ctx, "tab_prev")
     assert active_buffer(ctx) == first_buffer
 
     send_ex_sync(ctx, "wq")
@@ -304,12 +304,12 @@ defmodule MingaEditor.Commands.BufferManagementSaveQuitTest do
     origin_tab_id = :sys.get_state(ctx.editor).shell_runtime.state.tab_bar.active_id
     :ok = MingaEditor.open_file(ctx.editor, second_path)
     second_buffer = active_buffer(ctx)
-    send_keys_sync(ctx, "gT")
+    run_command(ctx, "tab_prev")
 
     send_ex_sync(ctx, "wq")
 
     assert_receive {:format_request, ref, _caller}
-    send_keys_sync(ctx, "gt")
+    run_command(ctx, "tab_next")
     assert active_buffer(ctx) == second_buffer
 
     :sys.replace_state(ctx.editor, fn state ->
@@ -956,7 +956,7 @@ defmodule MingaEditor.Commands.BufferManagementSaveQuitTest do
       assert {:ok, [%{path: "notes.md"}]} = ProjectView.diff(view)
 
       assert notice_message(ctx) ==
-               "1 agent-edited file is not on disk. Publish (SPC a p) or discard (SPC a P) them before quitting. :qa!, :q! and :cq quit and discard them."
+               "1 agent-edited file is not on disk. Publish or discard them (SPC a p) before quitting. :qa!, :q! and :cq quit and discard them."
     end
 
     test "native application quit is cancelled while edits are staged", %{tmp_dir: root} do
@@ -1213,5 +1213,11 @@ defmodule MingaEditor.Commands.BufferManagementSaveQuitTest do
 
   defp state_notice_message(state) do
     MingaEditor.Shell.Traditional.NoticeWorkflow.message(state)
+  end
+
+  # gt / gT retired with tabs (docs/design/keys.md); the tab commands stay reachable by name.
+  defp run_command(%{editor: editor}, name) do
+    send(editor, {:minga_input, {:gui_action, {:execute_command, name}}})
+    :sys.get_state(editor)
   end
 end

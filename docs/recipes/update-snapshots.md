@@ -27,4 +27,6 @@ mix test.debug test/minga_editor/integration/snapshot_test.exs
 
 See [Snapshot Testing](../SNAPSHOT_TESTING.md) for the file format and `assert_screen_snapshot` examples.
 
+Storyboard scenarios have baselines on both frontends as well as text-grid snapshots. Accept a change to them with `design/tools/storyboard/renders.py promote`, which also updates their snapshots; see [Renders and baselines](../design/storyboard.md#renders-and-baselines).
+
 For production-view agent stills and the separate real native keyboard/mouse proof, use [Capture the native agent workspace](capture-agent-workspace.md). Preview images do not replace live-session evidence.

@@ -201,18 +201,28 @@ defmodule Minga.Parser.Protocol do
     <<@op_request_match_item, buffer_id::32, request_id::32, row::32, col::32>>
   end
 
+  @typedoc """
+  A structural navigation action: `0` parent, `1` first child, `2` next sibling, `3` previous sibling, or `16 + n` for the n-th meaningful named ancestor of the deepest named node at the point (`16` is the node itself).
+  """
+  @type structural_nav_action :: 0..3 | 16..255
+
+  @doc "The action value that names an ancestor depth (`16 + depth`)."
+  @spec ancestor_action(0..239) :: 16..255
+  def ancestor_action(depth) when is_integer(depth) and depth >= 0 and depth <= 239,
+    do: 16 + depth
+
   @doc "Encodes a request_structural_nav command: buffer_id(4) + request_id(4) + row(4) + col(4) + action(1)."
   @spec encode_request_structural_nav(
           non_neg_integer(),
           non_neg_integer(),
           non_neg_integer(),
           non_neg_integer(),
-          0..3
+          structural_nav_action()
         ) :: binary()
   def encode_request_structural_nav(buffer_id, request_id, row, col, action)
       when is_integer(buffer_id) and buffer_id >= 0 and
              is_integer(request_id) and is_integer(row) and is_integer(col) and
-             is_integer(action) and action >= 0 and action <= 3 do
+             is_integer(action) and (action in 0..3 or action in 16..255) do
     <<@op_request_structural_nav, buffer_id::32, request_id::32, row::32, col::32, action::8>>
   end
 
