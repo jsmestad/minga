@@ -1500,12 +1500,32 @@ struct AgentChatViewTests {
         }
     }
 
-    @Test("A model without a provider shows no provider label")
-    @MainActor func headerWithoutProvider() {
+    /// The BEAM sends status text with an empty provider (`:text`) when the text contains `:`.
+    @Test("Status text in place of a model shows no provider label",
+          arguments: [
+            ("Resolving model…", "Resolving model…"),
+            (":Model \"anthropic:claude-x\" is not in the catalog", "Model \"anthropic:claude-x\" is not in the catalog"),
+          ])
+    @MainActor func headerWithoutProvider(model: String, text: String) throws {
         let state = AgentChatState()
-        state.model = "Resolving model…"
+        state.visible = true
+        state.model = model
+        state.status = .idle
         #expect(state.displayProvider.isEmpty)
-        #expect(state.displayModel == "Resolving model…")
+        #expect(state.displayModel == text)
+
+        let body = try AgentChatView(state: state, isInsertMode: false, sendAction: nil)
+            .environment(\.themeColors, ThemeColors())
+            .inspect()
+        let modelButtons = body.findAll(ViewType.Button.self).filter {
+            (try? $0.accessibilityLabel().string()) == "Agent model"
+        }
+        #expect(!modelButtons.isEmpty)
+        for modelButton in modelButtons {
+            let label = try modelButton.labelView().findAll(ViewInspectorQuery.text).compactMap { try? $0.string() }
+            #expect(label == [text])
+            #expect(try modelButton.accessibilityValue().string() == text)
+        }
     }
 
     @Test("Header controls dispatch named commands with the composer in insert mode")
