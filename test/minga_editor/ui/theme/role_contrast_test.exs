@@ -73,6 +73,18 @@ defmodule MingaEditor.UI.Theme.RoleContrastTest do
     end
   end
 
+  test "every role keeps a colour when a theme leaves optional fields nil" do
+    theme = Theme.CatppuccinFrappe.theme()
+    theme = %{theme | agent: nil, popup: %{theme.popup | title_fg: nil, group_fg: nil}}
+
+    for role <- Tokens.color_roles() do
+      assert is_integer(Theme.role_color(theme, role)), "no colour for #{role}"
+    end
+
+    assert Theme.role_color(theme, :focus) == theme.modeline.filetype_fg
+    assert Theme.role_color(theme, :group) == theme.popup.fg
+  end
+
   test "states resolve through their colour role" do
     theme = Theme.CatppuccinFrappe.theme()
 

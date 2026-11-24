@@ -668,13 +668,15 @@ defmodule MingaEditor.UI.Theme do
   @doc """
   Returns the colour a theme gives a design-token colour role.
 
-  Roles are named in `docs/design_tokens.toml` (see `Minga.Design.Tokens`). A role reads one theme field, or is derived by mixing one role over another, so a new theme gets derived roles such as `:minga_shade` for free.
+  Roles are named in `docs/design_tokens.toml` (see `Minga.Design.Tokens`). A role reads the first non-nil theme field in its source list, or is derived by mixing one role over another, so a new theme gets derived roles such as `:minga_shade` for free.
   """
   @spec role_color(t(), Tokens.color_role()) :: color()
   def role_color(%__MODULE__{} = theme, role) do
     case Tokens.color_role(role).source do
-      {:field, section, field} ->
-        theme |> role_section(section) |> Map.fetch!(field)
+      {:fields, fields} ->
+        Enum.find_value(fields, fn {section, field} ->
+          theme |> role_section(section) |> Map.fetch!(field)
+        end)
 
       {:mix, top, over, percent} ->
         mix_color(role_color(theme, top), role_color(theme, over), percent)

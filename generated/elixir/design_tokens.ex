@@ -44,9 +44,9 @@ defmodule Minga.Design.Tokens do
   @typedoc "A contrast target class."
   @type contrast_class :: :text | :glyph
 
-  @typedoc "Where a role's colour comes from: a theme field, or a mix of one role over another at a percentage."
+  @typedoc "Where a role's colour comes from: the first non-nil theme field in a list, or a mix of one role over another at a percentage."
   @type role_source ::
-          {:field, section :: atom(), field :: atom()}
+          {:fields, [{section :: atom(), field :: atom()}, ...]}
           | {:mix, color_role(), over :: color_role(), percent :: 0..100}
 
   @typedoc "A colour role token."
@@ -106,7 +106,7 @@ defmodule Minga.Design.Tokens do
     do: %{
       id: :you,
       slot: 0x70,
-      source: {:field, :agent, :user_label},
+      source: {:fields, [{:agent, :user_label}]},
       contrast: {:glyph, :surface}
     }
 
@@ -114,7 +114,7 @@ defmodule Minga.Design.Tokens do
     do: %{
       id: :minga,
       slot: 0x71,
-      source: {:field, :agent, :minga_fg},
+      source: {:fields, [{:agent, :minga_fg}]},
       contrast: {:glyph, :surface}
     }
 
@@ -125,7 +125,7 @@ defmodule Minga.Design.Tokens do
     do: %{
       id: :needs_you,
       slot: 0x73,
-      source: {:field, :agent, :attention_fg},
+      source: {:fields, [{:agent, :attention_fg}]},
       contrast: {:glyph, :surface}
     }
 
@@ -133,7 +133,7 @@ defmodule Minga.Design.Tokens do
     do: %{
       id: :failure,
       slot: 0x74,
-      source: {:field, :gutter, :error_fg},
+      source: {:fields, [{:gutter, :error_fg}]},
       contrast: {:glyph, :surface}
     }
 
@@ -141,7 +141,7 @@ defmodule Minga.Design.Tokens do
     do: %{
       id: :done,
       slot: 0x75,
-      source: {:field, :agent, :status_done},
+      source: {:fields, [{:agent, :status_done}]},
       contrast: {:glyph, :surface}
     }
 
@@ -149,7 +149,7 @@ defmodule Minga.Design.Tokens do
     do: %{
       id: :warning,
       slot: 0x76,
-      source: {:field, :gutter, :warning_fg},
+      source: {:fields, [{:gutter, :warning_fg}]},
       contrast: {:glyph, :surface}
     }
 
@@ -157,7 +157,7 @@ defmodule Minga.Design.Tokens do
     do: %{
       id: :waiting,
       slot: 0x77,
-      source: {:field, :agent, :status_idle},
+      source: {:fields, [{:agent, :status_idle}]},
       contrast: {:glyph, :surface}
     }
 
@@ -165,7 +165,7 @@ defmodule Minga.Design.Tokens do
     do: %{
       id: :info,
       slot: 0x78,
-      source: {:field, :gutter, :info_fg},
+      source: {:fields, [{:gutter, :info_fg}]},
       contrast: {:glyph, :surface}
     }
 
@@ -173,33 +173,33 @@ defmodule Minga.Design.Tokens do
     do: %{
       id: :group,
       slot: 0x79,
-      source: {:field, :popup, :group_fg},
+      source: {:fields, [{:popup, :group_fg}, {:popup, :fg}]},
       contrast: {:text, :surface_raised}
     }
 
   def color_role(:text),
-    do: %{id: :text, slot: 0x7A, source: {:field, :editor, :fg}, contrast: {:text, :surface}}
+    do: %{id: :text, slot: 0x7A, source: {:fields, [{:editor, :fg}]}, contrast: {:text, :surface}}
 
   def color_role(:text_muted),
-    do: %{id: :text_muted, slot: 0x7B, source: {:field, :gutter, :fg}, contrast: nil}
+    do: %{id: :text_muted, slot: 0x7B, source: {:fields, [{:gutter, :fg}]}, contrast: nil}
 
   def color_role(:surface),
-    do: %{id: :surface, slot: 0x7C, source: {:field, :editor, :bg}, contrast: nil}
+    do: %{id: :surface, slot: 0x7C, source: {:fields, [{:editor, :bg}]}, contrast: nil}
 
   def color_role(:surface_raised),
-    do: %{id: :surface_raised, slot: 0x7D, source: {:field, :popup, :bg}, contrast: nil}
+    do: %{id: :surface_raised, slot: 0x7D, source: {:fields, [{:popup, :bg}]}, contrast: nil}
 
   def color_role(:surface_bar),
-    do: %{id: :surface_bar, slot: 0x7E, source: {:field, :modeline, :bar_bg}, contrast: nil}
+    do: %{id: :surface_bar, slot: 0x7E, source: {:fields, [{:modeline, :bar_bg}]}, contrast: nil}
 
   def color_role(:border),
-    do: %{id: :border, slot: 0x7F, source: {:field, :popup, :border_fg}, contrast: nil}
+    do: %{id: :border, slot: 0x7F, source: {:fields, [{:popup, :border_fg}]}, contrast: nil}
 
   def color_role(:focus),
     do: %{
       id: :focus,
       slot: 0x80,
-      source: {:field, :popup, :title_fg},
+      source: {:fields, [{:popup, :title_fg}, {:modeline, :filetype_fg}]},
       contrast: {:glyph, :surface}
     }
 

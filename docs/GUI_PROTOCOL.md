@@ -1486,14 +1486,14 @@ One slot per colour role in `docs/design_tokens.toml`. The slot IDs, role names 
 | 0x76 | warning | `gutter.warning_fg` |
 | 0x77 | waiting | `agent.status_idle` |
 | 0x78 | info | `gutter.info_fg` |
-| 0x79 | group | `popup.group_fg` |
+| 0x79 | group | `popup.group_fg`, else `popup.fg` |
 | 0x7A | text | `editor.fg` |
 | 0x7B | text_muted | `gutter.fg` |
 | 0x7C | surface | `editor.bg` |
 | 0x7D | surface_raised | `popup.bg` |
 | 0x7E | surface_bar | `modeline.bar_bg` |
 | 0x7F | border | `popup.border_fg` |
-| 0x80 | focus | `popup.title_fg` |
+| 0x80 | focus | `popup.title_fg`, else `modeline.filetype_fg` |
 
 ## Forward-Compatibility: Skip-Length for Unknown Opcodes
 

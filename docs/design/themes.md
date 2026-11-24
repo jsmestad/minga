@@ -31,14 +31,14 @@ Every role below is a token in `docs/design_tokens.toml`. "Theme field" is the `
 | warning | Diagnostic warnings only | `gutter.warning_fg` | 3:1 |
 | waiting | The hollow dot of Waiting and Stopped, and its words | `agent.status_idle` | 3:1 |
 | info | Diagnostic info and hints | `gutter.info_fg` | 3:1 |
-| group | Which-key and menu group labels, with their chevron | `popup.group_fg` | 4.5:1 on surface_raised |
+| group | Which-key and menu group labels, with their chevron | `popup.group_fg`, else `popup.fg` | 4.5:1 on surface_raised |
 | text | Primary text | `editor.fg` | 4.5:1 |
 | text_muted | Secondary text, line numbers, hints | `gutter.fg` | none |
 | surface | Editor background | `editor.bg` | |
 | surface_raised | Drawers, which-key, menus, popups | `popup.bg` | |
 | surface_bar | The modeline | `modeline.bar_bg` | |
 | border | Quiet pane borders | `popup.border_fg` | none |
-| focus | The focused pane's border and the global accent | `popup.title_fg` | 3:1 |
+| focus | The focused pane's border and the global accent | `popup.title_fg`, else `modeline.filetype_fg` | 3:1 |
 | selection | The selected row in a focused list | macOS: system accent. TUI: `editor.selection_bg` | not a token: it is platform-specific |
 | diff_added_tint, diff_removed_tint | Review and diff line backgrounds | derived: `git.added_fg` and `git.deleted_fg` mixed over `editor.bg` | not a token yet |
 | mode pills | NORMAL, INSERT, and so on | `modeline.mode_colors` | not a token |

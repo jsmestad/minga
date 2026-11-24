@@ -16,7 +16,7 @@ glyph = 3.0
 # Colour roles.
 #
 # - `slot` is the gui_theme (0x74) slot ID the BEAM sends the role's colour in. Role slots occupy 0x70-0x8F.
-# - `source` is the `MingaEditor.UI.Theme` field that supplies the value, as `section.field`.
+# - `source` is the `MingaEditor.UI.Theme` field that supplies the value, as `section.field`. `fallback` names the field used when a theme leaves `source` nil, so every role always has a colour.
 # - `mix`, `over` and `percent` describe a derived role: `mix` blended over `over` at `percent` percent.
 # - `contrast` is the target class (`text` or `glyph`) and `on` is the role it is measured against.
 #   Roles without `contrast` are surfaces or derived tints and carry no target.
@@ -97,6 +97,7 @@ means = "Diagnostic info and hints"
 id = "group"
 slot = 0x79
 source = "popup.group_fg"
+fallback = "popup.fg"
 contrast = "text"
 on = "surface_raised"
 means = "Which-key and menu group labels, always paired with a trailing chevron"
@@ -143,6 +144,7 @@ means = "Quiet pane and popup borders"
 id = "focus"
 slot = 0x80
 source = "popup.title_fg"
+fallback = "modeline.filetype_fg"
 contrast = "glyph"
 on = "surface"
 means = "The focused pane's border and the global accent"

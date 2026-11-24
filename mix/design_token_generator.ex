@@ -16,7 +16,8 @@ defmodule Minga.Mix.DesignTokenGenerator do
   @voice_lines ~w(welcome done farewell)
   @id_pattern ~r/^[a-z][a-z0-9_]*$/
 
-  @type role_source :: {:field, String.t(), String.t()} | {:mix, String.t(), String.t(), 0..100}
+  @type role_source ::
+          {:fields, [{String.t(), String.t()}, ...]} | {:mix, String.t(), String.t(), 0..100}
 
   @type role :: %{
           id: String.t(),
@@ -167,15 +168,19 @@ defmodule Minga.Mix.DesignTokenGenerator do
   defp parse_source!(id, %{"source" => source} = raw) when is_binary(source) do
     if Map.has_key?(raw, "mix"), do: invalid!("colour role #{id} has both source and mix")
 
-    case String.split(source, ".") do
-      [section, field] when section != "" and field != "" ->
-        validate_id!(section, "colour role #{id} source section")
-        validate_id!(field, "colour role #{id} source field")
-        {:field, section, field}
+    fallbacks =
+      case Map.get(raw, "fallback") do
+        nil ->
+          []
 
-      _ ->
-        invalid!("colour role #{id} source must be section.field, got #{inspect(source)}")
-    end
+        fallback when is_binary(fallback) ->
+          [fallback]
+
+        other ->
+          invalid!("colour role #{id} fallback must be section.field, got #{inspect(other)}")
+      end
+
+    {:fields, Enum.map([source | fallbacks], &parse_field!(id, &1))}
   end
 
   defp parse_source!(_id, %{"mix" => mix, "over" => over, "percent" => percent})
@@ -185,6 +190,19 @@ defmodule Minga.Mix.DesignTokenGenerator do
 
   defp parse_source!(id, _raw) do
     invalid!("colour role #{id} needs a source, or mix, over and percent (0..100)")
+  end
+
+  @spec parse_field!(String.t(), String.t()) :: {String.t(), String.t()}
+  defp parse_field!(id, path) do
+    case String.split(path, ".") do
+      [section, field] when section != "" and field != "" ->
+        validate_id!(section, "colour role #{id} source section")
+        validate_id!(field, "colour role #{id} source field")
+        {section, field}
+
+      _ ->
+        invalid!("colour role #{id} source must be section.field, got #{inspect(path)}")
+    end
   end
 
   @spec parse_role_contrast!(String.t(), map()) :: {String.t(), String.t()} | nil
@@ -206,7 +224,7 @@ defmodule Minga.Mix.DesignTokenGenerator do
     refs =
       case role.source do
         {:mix, mix, over, _percent} -> [mix, over]
-        {:field, _section, _field} -> []
+        {:fields, _fields} -> []
       end
 
     refs = if role.contrast, do: [elem(role.contrast, 1) | refs], else: refs
@@ -393,9 +411,9 @@ defmodule Minga.Mix.DesignTokenGenerator do
       @typedoc "A contrast target class."
       @type contrast_class :: #{atom_union(@contrast_classes)}
 
-      @typedoc "Where a role's colour comes from: a theme field, or a mix of one role over another at a percentage."
+      @typedoc "Where a role's colour comes from: the first non-nil theme field in a list, or a mix of one role over another at a percentage."
       @type role_source ::
-              {:field, section :: atom(), field :: atom()}
+              {:fields, [{section :: atom(), field :: atom()}, ...]}
               | {:mix, color_role(), over :: color_role(), percent :: 0..100}
 
       @typedoc "A colour role token."
@@ -480,8 +498,13 @@ defmodule Minga.Mix.DesignTokenGenerator do
   defp elixir_role_clause(role) do
     source =
       case role.source do
-        {:field, section, field} -> "{:field, :#{section}, :#{field}}"
-        {:mix, mix, over, percent} -> "{:mix, :#{mix}, :#{over}, #{percent}}"
+        {:fields, fields} ->
+          "{:fields, [" <>
+            Enum.map_join(fields, ", ", fn {section, field} -> "{:#{section}, :#{field}}" end) <>
+            "]}"
+
+        {:mix, mix, over, percent} ->
+          "{:mix, :#{mix}, :#{over}, #{percent}}"
       end
 
     contrast =
