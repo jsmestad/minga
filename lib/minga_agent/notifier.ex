@@ -41,7 +41,7 @@ defmodule MingaAgent.Notifier do
   @moduledoc """
   Sends OS-level notifications when the agent needs user attention.
 
-  The native app receives only the event kind. Terminal sessions keep the bell and, on macOS, the script notification.
+  The native app receives only the event kind. Terminal sessions keep the bell and send a desktop notification through the OS adapter for the running system: `osascript` on macOS, `notify-send` on Linux.
 
   Completion and failure are debounced independently. Approval requests bypass the debounce because the agent cannot continue without an answer.
 
@@ -56,11 +56,9 @@ defmodule MingaAgent.Notifier do
 
   @triggers [:approval, :complete, :error]
 
-  @os_adapter Application.compile_env(
-                :minga,
-                :os_notify_adapter,
-                MingaAgent.Notifier.OSAdapter.MacOS
-              )
+  # A configured adapter (the test suite's Noop) wins. Otherwise the running OS decides; a compile-time default put the
+  # macOS adapter into the Linux release.
+  @configured_os_adapter Application.compile_env(:minga, :os_notify_adapter)
 
   # ── Public API ──────────────────────────────────────────────────────────────
 
@@ -94,6 +92,12 @@ defmodule MingaAgent.Notifier do
     Process.delete({__MODULE__, :error})
     :ok
   end
+
+  @doc "Returns the OS notification adapter for an `:os.type/0` result."
+  @spec os_adapter_for({atom(), atom()}) :: module()
+  def os_adapter_for({:unix, :darwin}), do: MingaAgent.Notifier.OSAdapter.MacOS
+  def os_adapter_for({:unix, :linux}), do: MingaAgent.Notifier.OSAdapter.Linux
+  def os_adapter_for(_os_type), do: MingaAgent.Notifier.OSAdapter.Noop
 
   # ── Private ─────────────────────────────────────────────────────────────────
 
@@ -148,11 +152,14 @@ defmodule MingaAgent.Notifier do
   defp deliver(_backend, trigger, opts) do
     unless debounced?(trigger) do
       maybe_send_bell(Keyword.get(opts, :bell, true))
-      send_os_notification(trigger, Keyword.get(opts, :os_adapter, @os_adapter))
+      send_os_notification(trigger, Keyword.get_lazy(opts, :os_adapter, &os_adapter/0))
     end
 
     :ok
   end
+
+  @spec os_adapter() :: module()
+  defp os_adapter, do: @configured_os_adapter || os_adapter_for(:os.type())
 
   @spec new_session_key({module(), :session_key}) :: <<_::128>>
   defp new_session_key(key) do
