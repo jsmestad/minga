@@ -12,7 +12,7 @@ This page covers every public API an extension can use, with copy-pasteable exam
 
 Extensions run in the same BEAM VM as the editor. They can call any module, access any ETS table, and exec system commands. There's no sandboxing, no capability system, no permission flags. This is the same trust model as Emacs and Vim: the security boundary is at install time, not runtime.
 
-When a user writes `extension :my_ext, git: "..."` in their config, they're choosing to trust that code. A confirmation prompt appears for first-time installs from git/hex sources. Pin git extensions to a specific `ref:` for reproducibility.
+When a user writes `extension :my_ext, git: "..."` in their config, they're choosing to trust that code. First-time installs run automatically at boot for declared `git:` and `hex:` sources because the config declaration is the explicit consent. Updates (`SPC h e u`) prompt for confirmation with a git log inspection before applying. Pin git extensions to a specific `ref:` for reproducibility.
 
 Runtime containment is not a sandbox. Minga does contain failures when extension-owned code enters an Editor callback surface, which keeps one broken optional callback from crashing the Editor process. Built-in and core callbacks do not use that containment and keep normal OTP supervision behavior.
 
