@@ -562,6 +562,15 @@ defmodule Minga.Tool.Manager do
       latest == task.installation.version ->
         state
 
+      # A backend records "unknown" when it cannot read the installed version, so no comparison is meaningful.
+      task.installation.version == "unknown" ->
+        Minga.Log.debug(
+          :editor,
+          "[Tool.Manager] Skipped update check for unknown version: #{task.name}"
+        )
+
+        state
+
       true ->
         %{state | update_results: [{task.name, entry} | state.update_results]}
     end

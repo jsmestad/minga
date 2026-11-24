@@ -107,7 +107,8 @@ defmodule Minga.Tool.ManagerUpdateCheckTest do
       ref = Process.monitor(worker)
 
       assert %{errors: [{^a, "timeout"}], updates: []} = await_complete(1)
-      assert_receive {:DOWN, ^ref, :process, ^worker, :killed}
+      # The monitor can be set after the kill under load, which reports :noproc instead.
+      assert_receive {:DOWN, ^ref, :process, ^worker, reason} when reason in [:killed, :noproc]
     end
 
     test "a crashed lookup is reported and the next check succeeds", ctx do
@@ -120,6 +121,13 @@ defmodule Minga.Tool.ManagerUpdateCheckTest do
       Stub.script_latest_version(a, {:ok, "2.0.0"})
       :ok = Manager.check_updates(ctx.server)
       assert %{errors: [], updates: [{^a, "1.0.0", "2.0.0"}]} = await_complete(2)
+    end
+
+    test "an installation with an unknown version never shows an update", ctx do
+      [_a] = start_manager(ctx, [{"a", "unknown", {:ok, "2.0.0"}}])
+
+      :ok = Manager.check_updates(ctx.server)
+      assert %{errors: [], updates: []} = await_complete(1)
     end
 
     test "a failed lookup is reported as an error", ctx do
