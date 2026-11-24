@@ -1,0 +1,248 @@
+#!/usr/bin/env python3
+"""Repackage a qualified Ubuntu 24.04 TUI archive as Debian and RPM packages.
+
+Both packages are a pure function of the archive bytes: every file time is set
+to the release's own build time, so a rebuild from the same archive reproduces
+the same package bytes. The publisher relies on that to prove it uploads the
+packages that were installed and tested.
+"""
+
+import argparse
+import gzip
+import os
+from pathlib import Path
+import re
+import shutil
+import subprocess
+import sys
+import tarfile
+import tempfile
+import zlib
+from shutil import copyfile
+
+
+# Release target architecture -> (Debian architecture, RPM architecture, checker target).
+TARGETS = {
+    "x86_64": ("amd64", "x86_64", "linux_x86_64"),
+    "aarch64": ("arm64", "aarch64", "linux_aarch64"),
+}
+CHECKER = Path(__file__).resolve().with_name("check-release-contents")
+LICENSE = CHECKER.parent.parent / "LICENSE"
+SUMMARY = "Minga modal editor (terminal interface)"
+HOMEPAGE = "https://github.com/jsmestad/minga"
+
+# The Ubuntu 24.04 runtime receipt and checker allow only the system loader
+# and glibc SONAMEs. OpenSSL and SQLite are bundled; the shell and its tools
+# are Debian Essential packages and do not need to be declared here.
+CONTROL = """Package: minga
+Version: {version}
+Architecture: {arch}
+Section: editors
+Priority: optional
+Maintainer: Minga contributors <16150+jsmestad@users.noreply.github.com>
+Depends: libc6 (>= 2.39)
+Homepage: {homepage}
+Description: {summary}
+"""
+
+# The payload is prebuilt and already qualified: no stripping, debug packages,
+# build-id links or automatic dependency scanning. Fedora and openSUSE both
+# name the C library package glibc.
+SPEC = """Name: minga
+Version: {version}
+Release: 1
+Summary: {summary}
+License: MIT
+URL: {homepage}
+AutoReqProv: no
+Requires: glibc >= 2.39
+
+%description
+Minga is a BEAM-powered modal text editor. This package installs the terminal
+interface and its bundled Erlang runtime under /usr/lib/minga.
+
+%install
+cp -a "%{{minga_stage}}/." "%{{buildroot}}/"
+
+%files
+%defattr(-,root,root,-)
+/usr/bin/minga
+/usr/lib/minga
+/usr/share/licenses/minga/LICENSE
+"""
+
+RPM_DEFINES = {
+    "debug_package": "%{nil}",
+    "__os_install_post": "%{nil}",
+    "__arch_install_post": "%{nil}",
+    "_build_id_links": "none",
+    "_binary_payload": "w19.zstdio",
+    "_buildhost": "minga.invalid",
+    "source_date_epoch_from_changelog": "0",
+    "use_source_date_epoch_as_buildtime": "1",
+    "clamp_mtime_to_source_date_epoch": "1",
+}
+
+
+def package_version(release_version):
+    """Map a release version to one that sorts correctly in dpkg and rpm.
+
+    A rolling build 0.1.0-dev.N must sort before the stable 0.1.0. Both package
+    managers sort a tilde before anything, including the end of the string.
+    """
+    match = re.fullmatch(r"([0-9]+\.[0-9]+\.[0-9]+)(?:-dev\.([1-9][0-9]*))?", release_version)
+    if not match:
+        raise ValueError("Version must be X.Y.Z or a rolling X.Y.Z-dev.N")
+    base, build = match.groups()
+    return base if build is None else f"{base}~dev.{build}"
+
+
+def unpack_release(source, destination):
+    seen = set()
+    payload_bytes = 0
+
+    def release_member(member, root):
+        nonlocal payload_bytes
+        parts = member.name.split("/")
+        if (parts[0] != "minga" or any(part in ("", ".", "..") for part in parts)
+                or any(ord(character) < 32 for character in member.name)):
+            raise ValueError(f"Unsafe archive path: {member.name!r}")
+        if member.name in seen:
+            raise ValueError(f"Duplicate archive path: {member.name!r}")
+        if (member.type not in (tarfile.DIRTYPE, tarfile.REGTYPE, tarfile.AREGTYPE)
+                or member.issparse() or member.mode & 0o7000):
+            raise ValueError(f"Archive contains links, special files or privileged modes: {member.name!r}")
+        if len(parts) == 1 and not member.isdir():
+            raise ValueError("Archive root must be the minga directory")
+        if member.size < 0 or (member.isdir() and member.size != 0):
+            raise ValueError(f"Invalid archive member size: {member.name!r}")
+        payload_bytes += member.size
+        if len(seen) >= 200_000 or payload_bytes > 4 * 1024**3:
+            raise ValueError("Archive exceeds release extraction limits")
+        seen.add(member.name)
+        mode = 0o755 if member.isdir() or member.mode & 0o100 else 0o644
+        return tarfile.data_filter(member, root).replace(mode=mode)
+
+    if not source.is_file():
+        raise ValueError(f"Not a release archive file: {source}")
+    with gzip.open(source, "rb") as compressed:
+        with tarfile.open(fileobj=compressed, mode="r:", errorlevel=2) as archive:
+            for member in archive:
+                archive.extract(member, destination, filter=release_member)
+            # tarfile stops at the first end marker. Read through the gzip
+            # trailer and require a complete tar end marker, with only padding.
+            compressed.seek(archive.offset)
+            block = tarfile.BLOCKSIZE
+            max_tail = tarfile.RECORDSIZE + block
+            tail = compressed.read(max_tail + 1)
+            if not 2 * block <= len(tail) <= max_tail or len(tail) % block or any(tail):
+                raise ValueError("Invalid end of release archive")
+    if "minga" not in seen:
+        raise ValueError("Archive is missing the minga root directory")
+
+
+def stage_tree(source, release_version, checker_target, root):
+    """Lay out the installed file tree and return the release build time."""
+    private = root / "usr/lib"
+    private.mkdir(parents=True)
+    unpack_release(source, private)
+    release = private / "minga"
+    # The checker reports on stdout; keep stdout for the package paths alone.
+    subprocess.run([sys.executable, CHECKER, release, "--target", checker_target], check=True, stdout=sys.stderr)
+    start_erl = release / "releases/start_erl.data"
+    _, archive_version = start_erl.read_text().split()
+    if archive_version != release_version:
+        raise ValueError(f"Archive version {archive_version!r} does not match --version {release_version!r}")
+    epoch = int(start_erl.stat().st_mtime)
+
+    public = root / "usr/bin"
+    public.mkdir()
+    (public / "minga").symlink_to("../lib/minga/launchers/minga")
+    license_file = root / "usr/share/licenses/minga/LICENSE"
+    license_file.parent.mkdir(parents=True)
+    copyfile(LICENSE, license_file)
+    return epoch
+
+
+def set_times(root, epoch):
+    for directory, subdirectories, files in os.walk(root):
+        for name in subdirectories + files:
+            os.utime(Path(directory) / name, (epoch, epoch), follow_symlinks=False)
+    os.utime(root, (epoch, epoch))
+
+
+def build_deb(tree, version, arch, epoch, destination):
+    with tempfile.TemporaryDirectory(prefix="minga-deb-") as temporary:
+        package = Path(temporary) / "package"
+        shutil.copytree(tree, package, symlinks=True)
+        shutil.rmtree(package / "usr/share/licenses")
+        copyright_file = package / "usr/share/doc/minga/copyright"
+        copyright_file.parent.mkdir(parents=True)
+        copyfile(LICENSE, copyright_file)
+        control = package / "DEBIAN"
+        control.mkdir()
+        (control / "control").write_text(
+            CONTROL.format(version=version, arch=arch, homepage=HOMEPAGE, summary=SUMMARY), encoding="utf-8")
+        set_times(package, epoch)
+        environment = {**os.environ, "SOURCE_DATE_EPOCH": str(epoch)}
+        subprocess.run(["dpkg-deb", "--root-owner-group", "-Zxz", "--build", package, destination],
+                       check=True, env=environment, stdout=subprocess.DEVNULL)
+
+
+def build_rpm(tree, version, arch, epoch, destination):
+    with tempfile.TemporaryDirectory(prefix="minga-rpm-") as temporary:
+        top = Path(temporary)
+        spec = top / "minga.spec"
+        spec.write_text(SPEC.format(version=version, homepage=HOMEPAGE, summary=SUMMARY), encoding="utf-8")
+        defines = {**RPM_DEFINES, "_topdir": str(top), "_rpmdir": str(top / "out"),
+                   "_rpmfilename": "minga.rpm", "minga_stage": str(tree)}
+        command = ["rpmbuild", "-bb", "--nodeps", "--quiet", "--target", f"{arch}-linux"]
+        for name, value in defines.items():
+            command += ["--define", f"{name} {value}"]
+        environment = {**os.environ, "SOURCE_DATE_EPOCH": str(epoch)}
+        subprocess.run([*command, spec], check=True, env=environment, stdout=subprocess.DEVNULL)
+        (top / "out/minga.rpm").replace(destination)
+
+
+def build(source, release_version, arch, output):
+    version = package_version(release_version)
+    deb_arch, rpm_arch, checker_target = TARGETS[arch]
+    # Make staging directories accessible after installation regardless of the
+    # caller's umask. TemporaryDirectory itself stays private.
+    os.umask(0o022)
+    finals = (output / f"minga_{release_version}_{deb_arch}.deb",
+              output / f"minga-{release_version}.{rpm_arch}.rpm")
+    with tempfile.TemporaryDirectory(prefix="minga-packages-") as temporary:
+        tree = Path(temporary) / "tree"
+        epoch = stage_tree(source, release_version, checker_target, tree)
+        set_times(tree, epoch)
+        output.mkdir(parents=True, exist_ok=True)
+        # Publish only completed packages, keeping any previous output intact on failure.
+        with tempfile.TemporaryDirectory(prefix=".minga-packages-", dir=output) as build_dir:
+            staged = [Path(build_dir) / final.name for final in finals]
+            build_deb(tree, version, deb_arch, epoch, staged[0])
+            build_rpm(tree, version, rpm_arch, epoch, staged[1])
+            for path, final in zip(staged, finals):
+                path.replace(final)
+    return finals
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("archive", type=Path, help="final native Linux TUI .tar.gz")
+    parser.add_argument("--version", required=True, help="the version in the release metadata")
+    parser.add_argument("--arch", required=True, choices=TARGETS, help="release target architecture")
+    parser.add_argument("--output", type=Path, required=True, help="output directory")
+    args = parser.parse_args()
+    try:
+        for path in build(args.archive, args.version, args.arch, args.output):
+            print(path)
+    except (OSError, ValueError, EOFError, OverflowError, tarfile.TarError,
+            zlib.error, subprocess.CalledProcessError) as error:
+        print(f"Linux package build failed: {error}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

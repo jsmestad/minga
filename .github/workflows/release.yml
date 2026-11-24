@@ -88,7 +88,7 @@ jobs:
             test "$SOURCE_SHA" = "$WORKFLOW_SHA"
             context=$(jq -c '. + {channel:"homebrew"}' <<< "$context")
           fi
-          matrix=$(jq -c --arg event "$GITHUB_EVENT_NAME" '{include: (if $event == "push" then map(select(.os == "macos" and .arch == "aarch64")) else . end)}' .github/release-targets.json)
+          matrix=$(jq -c --arg event "$GITHUB_EVENT_NAME" '{include: (if $event == "push" then map(select((.os == "macos" and .arch == "aarch64") or .os == "linux")) else . end)}' .github/release-targets.json)
           {
             printf 'matrix=%s\n' "$matrix"
             printf 'source_sha=%s\nversion=%s\ncontext=%s\n' "$SOURCE_SHA" "$SOURCE_VERSION" "$context"
@@ -452,7 +452,7 @@ jobs:
     name: Verify uploaded final bytes and bind immutable candidate handle
     needs: [validate, build]
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 45
     outputs:
       recipe_artifact_id: ${{ steps.homebrew-recipes.outputs.artifact-id }}
       manifest_id: ${{ steps.manifest.outputs.artifact-id }}
@@ -554,6 +554,30 @@ jobs:
             --arm64 homebrew-input/minga_macos_aarch64.tar.gz \
             --dmg homebrew-input/Minga.dmg --output homebrew-recipes
           cp preparation-receipt.json manifest.json homebrew-recipes/
+      # The publisher rebuilds these packages from the verified tarballs and requires identical bytes,
+      # so it uploads exactly the packages installed here.
+      - name: Build Linux packages from verified payloads and install them on clean distributions
+        if: github.event_name == 'push'
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(jq -er .version context.json)
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends rpm
+          for arch in x86_64 aarch64; do
+            scripts/build-tui-packages "homebrew-input/minga_linux_$arch.tar.gz" --version "$version" --arch "$arch" --output homebrew-recipes/linux
+          done
+          smoke="$RUNNER_TEMP/linux-smoke"
+          mkdir "$smoke"
+          cp "homebrew-recipes/linux/minga_${version}_amd64.deb" "homebrew-recipes/linux/minga-$version.x86_64.rpm" "$smoke/"
+          cp homebrew-input/minga_linux_x86_64.tar.gz "$smoke/minga_${version}_linux_x86_64.tar.gz"
+          cp LICENSE "$smoke/LICENSE-$version"
+          sha() { sha256sum "$1" | cut -d ' ' -f 1; }
+          scripts/render-aur-pkgbuild --version "$version" --source-sha "$(jq -er .source_sha context.json)" \
+            --x86-64-sha256 "$(sha homebrew-input/minga_linux_x86_64.tar.gz)" \
+            --aarch64-sha256 "$(sha homebrew-input/minga_linux_aarch64.tar.gz)" \
+            --license-sha256 "$(sha LICENSE)" > "$smoke/PKGBUILD"
+          scripts/smoke-linux-packages "$smoke" "$version"
       - name: Retain unpublished Homebrew recipes and candidate receipt
         if: github.event_name == 'push'
         id: homebrew-recipes
@@ -618,7 +642,7 @@ jobs:
           done
 
   publish-homebrew:
-    name: Publish rolling Homebrew packages
+    name: Publish the rolling release and Homebrew packages
     if: github.event_name == 'push' && github.ref == 'refs/heads/main' && github.repository == 'jsmestad/minga' && needs.require-ci.outputs.publish == 'true'
     needs: [validate, finalize, require-ci]
     runs-on: ubuntu-24.04
@@ -630,6 +654,8 @@ jobs:
     permissions:
       actions: read
       contents: write
+    outputs:
+      tap_state: ${{ steps.tap.outputs.state }}
     env:
       VERSION: ${{ needs.validate.outputs.version }}
       SOURCE_SHA: ${{ needs.validate.outputs.source_sha }}
@@ -650,6 +676,19 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: python3 scripts/stage-homebrew-publication.py recipes bundle payload-downloads
+      - name: Rebuild the Linux packages and require the installed and tested bytes
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends rpm
+          for arch in x86_64 aarch64; do
+            scripts/build-tui-packages "bundle/minga_${VERSION}_linux_$arch.tar.gz" --version "$VERSION" --arch "$arch" --output linux-packages
+          done
+          diff <(ls linux-packages) <(ls recipes/linux)
+          for package in linux-packages/*; do
+            cmp "$package" "recipes/linux/${package##*/}"
+          done
+          cp linux-packages/* bundle/
       - name: Preflight tap access and check its current generation
         id: tap
         env:
@@ -672,3 +711,100 @@ jobs:
         env:
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: scripts/publish-homebrew-tap push bundle "$VERSION" "$SOURCE_SHA" "$RUNNER_TEMP/homebrew-tap"
+
+  # The AUR job trusts only the public release: it renders the PKGBUILD from the published asset digests,
+  # then builds and installs it from the public URLs before pushing.
+  publish-aur:
+    name: Publish the AUR package
+    # A stale tap means a newer build already published its own release; this version has none.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && github.repository == 'jsmestad/minga' && needs.require-ci.outputs.publish == 'true' && needs.publish-homebrew.outputs.tap_state != 'stale'
+    needs: [validate, require-ci, publish-homebrew]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    concurrency:
+      group: rolling-aur-publication
+      cancel-in-progress: false
+      queue: max
+    permissions:
+      contents: read
+    env:
+      VERSION: ${{ needs.validate.outputs.version }}
+      SOURCE_SHA: ${{ needs.validate.outputs.source_sha }}
+      # Verified against the fingerprints published on https://aur.archlinux.org/.
+      AUR_KNOWN_HOSTS: aur.archlinux.org ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEuBKrPzbawxA/k2g6NcyV5jmqwJ2s+zpgZGZ7tpLIcN
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - name: Check for the AUR publishing key
+        id: key
+        env:
+          AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+        run: |
+          if [ -n "$AUR_SSH_PRIVATE_KEY" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::AUR_SSH_PRIVATE_KEY is not configured; skipping AUR publication."
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Render the PKGBUILD from the public release
+        if: steps.key.outputs.configured == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/v$VERSION" > release.json
+          jq -e --arg sha "$SOURCE_SHA" '.draft == false and .prerelease == true and .target_commitish == $sha' release.json
+          digest() {
+            jq -er --arg name "$1" '[.assets[] | select(.name == $name and .state == "uploaded")] | select(length == 1) | .[0].digest | select(test("^sha256:[0-9a-f]{64}$")) | ltrimstr("sha256:")' release.json
+          }
+          mkdir aur
+          scripts/render-aur-pkgbuild --version "$VERSION" --source-sha "$SOURCE_SHA" \
+            --x86-64-sha256 "$(digest "minga_${VERSION}_linux_x86_64.tar.gz")" \
+            --aarch64-sha256 "$(digest "minga_${VERSION}_linux_aarch64.tar.gz")" \
+            --license-sha256 "$(sha256sum LICENSE | cut -d ' ' -f 1)" > aur/PKGBUILD
+      - name: Build and install the PKGBUILD from public downloads, then write .SRCINFO
+        if: steps.key.outputs.configured == 'true'
+        run: |
+          set -euo pipefail
+          docker run --rm -v "$PWD/aur:/aur" -e VERSION archlinux:base-devel bash -euo pipefail -c '
+            useradd -m builder
+            install -d -o builder /home/builder/build
+            cp /aur/PKGBUILD /home/builder/build/
+            cd /home/builder/build
+            runuser -u builder -- makepkg --noconfirm
+            pacman -U --noconfirm minga-bin-*-x86_64.pkg.tar.zst
+            out=$(cd / && minga --version)
+            [ "$out" = "minga $VERSION" ] || { echo "unexpected minga --version output: $out" >&2; exit 1; }
+            runuser -u builder -- makepkg --printsrcinfo > /aur/.SRCINFO'
+      - name: Push the package to the AUR unless it already has this or a newer version
+        if: steps.key.outputs.configured == 'true'
+        env:
+          AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          key="$RUNNER_TEMP/aur-key"
+          known_hosts="$RUNNER_TEMP/aur-known-hosts"
+          trap 'rm -f "$key"' EXIT
+          (umask 077 && printf '%s\n' "$AUR_SSH_PRIVATE_KEY" > "$key")
+          printf '%s\n' "$AUR_KNOWN_HOSTS" > "$known_hosts"
+          export GIT_SSH_COMMAND="ssh -i $key -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$known_hosts"
+          git clone ssh://aur@aur.archlinux.org/minga-bin.git aur-repo
+          pkgver=$(awk '$1 == "pkgver" { print $3 }' aur/.SRCINFO)
+          if [ -f aur-repo/.SRCINFO ]; then
+            current=$(awk '$1 == "pkgver" { print $3 }' aur-repo/.SRCINFO)
+            [ -n "$current" ] || { echo "The AUR .SRCINFO has no pkgver" >&2; exit 1; }
+            order=$(docker run --rm archlinux:base-devel vercmp "$pkgver" "$current")
+            if [ "$order" -le 0 ]; then
+              echo "Skipped: the AUR already has minga-bin $current." >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+          fi
+          cp aur/PKGBUILD aur/.SRCINFO aur-repo/
+          cd aur-repo
+          git add PKGBUILD .SRCINFO
+          git -c user.name="Minga release" -c user.email="16150+jsmestad@users.noreply.github.com" \
+            commit -m "Update to $VERSION" -m "Built from https://github.com/$GITHUB_REPOSITORY/commit/$SOURCE_SHA"
+          git push origin HEAD:master
+          echo "Published minga-bin $pkgver to the AUR." >> "$GITHUB_STEP_SUMMARY"

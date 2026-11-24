@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Stage the exact verified Homebrew candidate without executing its contents."""
+"""Stage the exact verified rolling candidate without executing its contents."""
 
 import argparse
 import os
@@ -20,14 +20,21 @@ def stage(recipes, output, manifest_id, manifest_sha, expected_context, download
     context = candidate.validate_context(manifest["context"])
     candidate.require(context == expected_context and context.get("channel") == "homebrew",
                       "wrong rolling candidate context")
-    candidate.require(manifest["schema_version"] == candidate.HOMEBREW_MANIFEST_VERSION,
-                      "not a rolling Homebrew manifest")
+    candidate.require(manifest["schema_version"] == candidate.ROLLING_MANIFEST_VERSION,
+                      "not a rolling manifest")
     receipt_path = recipes / "preparation-receipt.json"
     receipt = candidate.read_json(receipt_path)
     candidate.require(receipt["result"] == "verified" and receipt["context"] == context and receipt["handle"] == {
         "manifest_artifact_id": manifest_id, "manifest_sha256": manifest_sha,
     }, "preparation receipt does not match candidate")
-    names = ("minga_macos_aarch64.tar.gz", "Minga.dmg")
+    version = context["version"]
+    # Candidate manifest name -> versioned public release asset name.
+    names = {
+        "minga_macos_aarch64.tar.gz": f"minga_{version}_macos_aarch64.tar.gz",
+        "Minga.dmg": f"Minga_{version}.dmg",
+        "minga_linux_x86_64.tar.gz": f"minga_{version}_linux_x86_64.tar.gz",
+        "minga_linux_aarch64.tar.gz": f"minga_{version}_linux_aarch64.tar.gz",
+    }
     payloads = manifest["payloads"]
     candidate.require(len(payloads) == len(names) and {p["filename"] for p in payloads} == set(names),
                       "wrong rolling payload inventory")
@@ -49,15 +56,14 @@ def stage(recipes, output, manifest_id, manifest_sha, expected_context, download
                               f"wrong payload bytes: {name}")
     subprocess.run([
         sys.executable, str(Path(__file__).with_name("render-tui-formula")),
-        "--version", context["version"], "--arm64", str(output / names[0]),
-        "--dmg", str(output / names[1]), "--output", str(output),
+        "--version", version, "--arm64", str(output / "minga_macos_aarch64.tar.gz"),
+        "--dmg", str(output / "Minga.dmg"), "--output", str(output),
     ], check=True)
     for name in ("minga.rb", "minga-mac.rb"):
         candidate.require((recipes / name).read_bytes() == (output / name).read_bytes(),
                           f"recipe does not match payloads: {name}")
-    version = context["version"]
-    (output / names[0]).rename(output / f"minga_{version}_macos_aarch64.tar.gz")
-    (output / names[1]).rename(output / f"Minga_{version}.dmg")
+    for name, published in names.items():
+        (output / name).rename(output / published)
     shutil.copyfile(receipt_path, output / receipt_path.name)
 
 
@@ -77,7 +83,7 @@ def main():
                           "invalid manifest handle")
         stage(args.recipes, args.output, int(manifest_id), manifest_sha, context, args.downloads)
     except (OSError, ValueError, KeyError, TypeError, subprocess.CalledProcessError) as error:
-        parser.exit(1, f"Homebrew candidate unavailable: {error}\n")
+        parser.exit(1, f"Rolling candidate unavailable: {error}\n")
 
 
 if __name__ == "__main__":

@@ -4,13 +4,13 @@ Prepare installable builds before deciding whether to release them. Candidate pr
 
 Stable preparation and independent verification only upload GitHub Actions artifacts. They do not create tags, publish GitHub Releases, update the Homebrew tap, or edit the changelog.
 
-## Rolling Homebrew publication
+## Rolling publication
 
-Each push to protected `main` prepares the Apple Silicon macOS TUI archive and signed, notarized GUI DMG. The workflow builds the pushed commit, assigns version `0.1.0-dev.N` (where `N` is the workflow run number), and uploads an immutable candidate handle and a separate `homebrew-recipes` artifact. A rerun has a distinct attempt but retains the same version. It must never replace an already published set of bytes.
+Each push to protected `main` prepares the Apple Silicon macOS TUI archive, the signed and notarized GUI DMG, and the x86_64 and ARM64 Linux TUI archives. The workflow builds the pushed commit, assigns version `0.1.0-dev.N` (where `N` is the workflow run number), and uploads an immutable candidate handle and a separate `homebrew-recipes` artifact. A rerun has a distinct attempt but retains the same version. It must never replace an already published set of bytes.
 
 When a new `main` push reaches the build stage, it can cancel the previous push's queued or running job for the same package. This keeps superseded builds from using macOS runners. Manual candidates and reruns do not compete with new pushes, and a newer push does not interrupt a publication already in progress.
 
-`minga --version` reports `0.1.0-dev.N`. Homebrew recipes use `0.1.0betaN` so Homebrew orders successive builds correctly and upgrades to the first `0.1.0` stable release. The formula installs `minga`; the cask installs `Minga.app` without adding a second shell command. Recipes point to versioned release filenames, such as `minga_0.1.0-dev.123_macos_aarch64.tar.gz` and `Minga_0.1.0-dev.123.dmg`. Candidate files keep the unversioned names in their manifest; rename only the files that an approved publisher uploads, not the tested contents.
+`minga --version` reports `0.1.0-dev.N`. Each package manager needs its own spelling so that successive builds sort in order and the first `0.1.0` stable release sorts after all of them: Homebrew recipes use `0.1.0betaN`, `.deb` and `.rpm` packages use `0.1.0~dev.N`, and the AUR package uses `pkgver=0.1.0dev.N`. Do not change the AUR form to `0.1.0_devN` or `0.1.0.devN`: pacman sorts both of those after `0.1.0`, which would block the upgrade to stable. The formula installs `minga`; the cask installs `Minga.app` without adding a second shell command. Recipes point to versioned release filenames, such as `minga_0.1.0-dev.123_macos_aarch64.tar.gz` and `Minga_0.1.0-dev.123.dmg`. Candidate files keep the unversioned names in their manifest; rename only the files that an approved publisher uploads, not the tested contents.
 
 To rehearse an upgrade without publishing, independently verify two completed candidates using the exact run/attempt and manifest handles. On a clean Mac with Homebrew 7 or newer and `jq`, put each candidate's verified payloads (under their manifest names), generated recipes and the independent verifier's `receipt.json` (named `verification-receipt.json`) in a separate directory.
 
@@ -20,7 +20,17 @@ scripts/qualify-homebrew-upgrade /path/to/previous /path/to/next
 
 On Apple Silicon, the script verifies both payloads against the independent receipts, regenerates the recipes to confirm they match, and rehearses the formula and cask upgrades through a disposable local tap and isolated download cache. It checks the installed runtime version and cask signature without bypassing Gatekeeper. Record native GUI launch and interaction separately. Before the first stable cut, rehearse from the last rolling build to the first stable candidate, generating Apple Silicon-only stable recipes with `--arm64`, `--dmg`, and `--output`.
 
-After the macOS artifacts pass the release checks and byte verification, a protected `main` push publishes a versioned GitHub prerelease without making it the latest stable release. The publisher uses the built-in GitHub token to publish and the existing `HOMEBREW_TAP_TOKEN` to advance the formula and cask together. The tap token needs Contents write access to `jsmestad/homebrew-minga`. GitHub can reject tagging an older commit if workflow files have changed since that commit. If that happens, publish a newer qualified build or configure an optional `HOMEBREW_RELEASE_TOKEN` with Contents and Workflows write access scoped to `jsmestad/minga`. No Cloudflare account is needed.
+### Linux packages
+
+After byte verification, the preparation workflow builds a `.deb` and an `.rpm` for each Linux architecture with `scripts/build-tui-packages`. Each package is a pure function of its tarball: every file time comes from the release's own build time, so rebuilding from the same tarball reproduces identical bytes. The workflow then runs `scripts/smoke-linux-packages`, which installs the x86_64 packages on clean Ubuntu 24.04, Debian 13 and current Fedora containers, builds the AUR PKGBUILD with `makepkg` on Arch, runs `minga --version` from `PATH` on each, and removes the package again. ARM64 packages get the same content checks but no install test, because the runner is x86_64.
+
+The publisher rebuilds the packages from the staged, verified tarballs and requires byte-identical results before it uploads anything. A mismatch fails publication, so the release always carries the exact packages that passed the install test.
+
+### Release assets and the AUR
+
+After all artifacts pass the release checks and byte verification, a protected `main` push publishes a versioned GitHub prerelease without making it the latest stable release. It carries eight assets: the Apple Silicon TUI archive and DMG, both Linux archives, and the `.deb` and `.rpm` for each Linux architecture. The publisher uses the built-in GitHub token to publish and the existing `HOMEBREW_TAP_TOKEN` to advance the formula and cask together. The tap token needs Contents write access to `jsmestad/homebrew-minga`. GitHub can reject tagging an older commit if workflow files have changed since that commit. If that happens, publish a newer qualified build or configure an optional `HOMEBREW_RELEASE_TOKEN` with Contents and Workflows write access scoped to `jsmestad/minga`. No Cloudflare account is needed.
+
+After the release is public, the `publish-aur` job updates the `minga-bin` AUR package. It trusts only the public release: it renders the PKGBUILD with `scripts/render-aur-pkgbuild` from the published asset digests, builds and installs it on Arch from the public download URLs, checks `minga --version`, and then pushes `PKGBUILD` and `.SRCINFO` to `ssh://aur@aur.archlinux.org/minga-bin.git`. It skips the push when the AUR already has the same or a newer `pkgver`. The job needs the `AUR_SSH_PRIVATE_KEY` repository secret, the private half of an SSH key registered on the AUR account that maintains `minga-bin`. Without the secret, the job skips with a notice and the rest of the release is unaffected. The workflow pins the AUR's Ed25519 host key, verified against the fingerprints on the AUR home page.
 
 If a build or upload fails, the tap keeps its current version. If publication succeeds but the tap push fails, rerun only the failed publishing job so it reuses the original verified artifacts. Do not rerun the build to replace released bytes. A stale run cannot replace a newer formula and cask. Check the public release and `brew upgrade` on Apple Silicon to confirm delivery; package boot checks are not native upgrade evidence.
 
@@ -95,7 +105,7 @@ A configured secret name does not prove the credential works. The actual build m
 
 A candidate handle is the manifest Actions artifact ID plus the SHA256 of `manifest.json`, not the ZIP checksum. The manifest does not contain its own final artifact ID or hash.
 
-The versioned manifest binds the repository, full source SHA, source/app version, producing workflow path/revision, run ID and attempt. It records names, targets, sizes, SHA256 values, immutable artifact IDs and ZIP digests for the two rolling Apple Silicon payloads or all five stable preparation payloads, plus toolchains and validation evidence. `SHA256SUMS.txt` covers exactly that inventory.
+The versioned manifest binds the repository, full source SHA, source/app version, producing workflow path/revision, run ID and attempt. It records names, targets, sizes, SHA256 values, immutable artifact IDs and ZIP digests for the four rolling payloads (two Apple Silicon, two Linux) or all five stable preparation payloads, plus toolchains and validation evidence. `SHA256SUMS.txt` covers exactly that inventory.
 
 Payload archives contain only the named payload and its build-facts JSON. Checksums and the manifest have separate immutable archives. The verifier hashes the actual downloaded ZIP bytes and each final payload. It checks the entire archive inventory without extracting or executing downloaded files.
 
@@ -139,28 +149,32 @@ Stable release approval must name the exact source, candidate handle, run/attemp
 
 Use the verified standalone tarballs as inputs, not a separately rebuilt release. Ubuntu packages install `minga` on `PATH` and keep the bundled runtime together under `/usr/lib/minga`. On macOS, the Homebrew formula installs the same runtime under Homebrew's private package directory and links `minga` into Homebrew's `bin`.
 
-From the source checkout, use the release workflow's pinned Python and set `assets` to the directory containing the verified tarballs. Install `dpkg-deb` (provided by `dpkg` on Ubuntu) to build the Debian packages. Use the candidate's version in each command:
+From the source checkout, use the release workflow's pinned Python and set `assets` to the directory containing the verified tarballs. On Ubuntu, install `dpkg-deb` (from `dpkg`) and `rpmbuild` (from `rpm`). Use the candidate's version in each command:
 
 ```bash
 assets=/absolute/path/to/verified/assets
-scripts/build-tui-deb "$assets/minga_linux_x86_64.tar.gz" --version 0.1.0 --arch amd64 --output "$assets"
-scripts/build-tui-deb "$assets/minga_linux_aarch64.tar.gz" --version 0.1.0 --arch arm64 --output "$assets"
+scripts/build-tui-packages "$assets/minga_linux_x86_64.tar.gz" --version 0.1.0 --arch x86_64 --output "$assets"
+scripts/build-tui-packages "$assets/minga_linux_aarch64.tar.gz" --version 0.1.0 --arch aarch64 --output "$assets"
 scripts/render-tui-formula --version 0.1.0 --arm64 "$assets/minga_macos_aarch64.tar.gz" --x86-64 "$assets/minga_macos_x86_64.tar.gz" > "$assets/minga.rb"
 ```
 
-Install a local Ubuntu package with `sudo apt install "$assets/minga_0.1.0_amd64.deb"`. After publication, macOS users can install from the tap with `brew install jsmestad/minga/minga`.
+Each `build-tui-packages` call writes a `.deb` and an `.rpm`, such as `minga_0.1.0_amd64.deb` and `minga-0.1.0.x86_64.rpm`. Both install `minga` on `PATH` and keep the bundled runtime together under `/usr/lib/minga`. On macOS, the Homebrew formula installs the same runtime under Homebrew's private package directory and links `minga` into Homebrew's `bin`.
 
-Before release approval, install and remove the `.deb` on clean Ubuntu 24.04 hosts of both supported architectures and run `minga --version` from `PATH`. Test the generated formula on both macOS architectures against the exact assets it names. Do not update the tap until those assets are available and their SHA-256 hashes match the formula.
-
-For Arch Linux and Omarchy on x86-64, build a local pacman package on an Arch host with `base-devel` installed. In an empty build directory, place `packaging/arch/PKGBUILD`, the checkout's `LICENSE`, and the verified `minga_linux_x86_64.tar.gz` and `SHA256SUMS.txt`. Set `pkgver` to the candidate version. Then run:
+To install-test the x86_64 packages on Ubuntu 24.04, Debian 13, Fedora and Arch with Docker, render the AUR PKGBUILD and run the smoke script. The directory must also hold the x86_64 archive under its release name and the checkout's `LICENSE` as `LICENSE-<version>`:
 
 ```bash
-makepkg --cleanbuild
-sudo pacman -U ./minga-0.1.0-1-x86_64.pkg.tar.zst
-minga --version
+smoke=$(mktemp -d)
+cp "$assets/minga_0.1.0_amd64.deb" "$assets/minga-0.1.0.x86_64.rpm" "$smoke/"
+cp "$assets/minga_linux_x86_64.tar.gz" "$smoke/minga_0.1.0_linux_x86_64.tar.gz"
+cp LICENSE "$smoke/LICENSE-0.1.0"
+scripts/render-aur-pkgbuild --version 0.1.0 --source-sha "$SOURCE_SHA" \
+  --x86-64-sha256 "$(sha256sum "$assets/minga_linux_x86_64.tar.gz" | cut -d ' ' -f 1)" \
+  --aarch64-sha256 "$(sha256sum "$assets/minga_linux_aarch64.tar.gz" | cut -d ' ' -f 1)" \
+  --license-sha256 "$(sha256sum LICENSE | cut -d ' ' -f 1)" > "$smoke/PKGBUILD"
+scripts/smoke-linux-packages "$smoke" 0.1.0
 ```
 
-Use `sudo pacman -R minga` to remove it. Qualify the installed package on Arch or Omarchy before offering it for download. This recipe does not publish to the AUR.
+Before release approval, also install and remove the ARM64 `.deb` and `.rpm` on clean ARM64 hosts. Test the generated formula on both macOS architectures against the exact assets it names. Do not update the tap or the AUR until those assets are available and their SHA-256 hashes match the recipes.
 
 ## Running the standalone TUI
 

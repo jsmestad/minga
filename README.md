@@ -35,7 +35,17 @@ brew install --cask jsmestad/minga/minga-mac && open -a Minga
 brew install jsmestad/minga/minga && minga .
 ```
 
-**Build from source (Linux or Intel Mac):**
+**Linux Terminal Client (x86_64 and ARM64, glibc 2.39 or newer):**
+
+```bash
+yay -S minga-bin                                # Arch Linux, from the AUR
+sudo apt install ./minga_<version>_amd64.deb    # Ubuntu 24.04+ and Debian 13+
+sudo dnf install ./minga-<version>.x86_64.rpm   # Fedora
+```
+
+Download the `.deb` or `.rpm` for your architecture from the newest [release](https://github.com/jsmestad/minga/releases).
+
+**Build from source (older Linux or Intel Mac):**
 
 ```bash
 git clone https://github.com/jsmestad/minga.git && cd minga

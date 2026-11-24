@@ -18,6 +18,9 @@ publisher = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(publisher)
 
 
+PAYLOADS = ("minga_macos_aarch64.tar.gz", "Minga.dmg", "minga_linux_x86_64.tar.gz", "minga_linux_aarch64.tar.gz")
+
+
 class StageHomebrewPublicationTest(unittest.TestCase):
     def setUp(self):
         temporary = tempfile.TemporaryDirectory()
@@ -34,7 +37,7 @@ class StageHomebrewPublicationTest(unittest.TestCase):
             "run_started_at": datetime.now(timezone.utc).isoformat(),
         }
         self.payloads = []
-        for identity, name in enumerate(("minga_macos_aarch64.tar.gz", "Minga.dmg"), 1):
+        for identity, name in enumerate(PAYLOADS, 1):
             payload = self.root / name
             payload.write_bytes(f"fixture bytes: {name}".encode())
             transport = self.root / f"{identity}.zip"
@@ -53,7 +56,7 @@ class StageHomebrewPublicationTest(unittest.TestCase):
 
     def write_manifest(self):
         manifest = self.recipes / "manifest.json"
-        manifest.write_text(json.dumps({"schema_version": 3, "context": self.context, "payloads": self.payloads}))
+        manifest.write_text(json.dumps({"schema_version": 4, "context": self.context, "payloads": self.payloads}))
         self.manifest_sha = publisher.candidate.digest_file(manifest)[1]
         (self.recipes / "preparation-receipt.json").write_text(json.dumps({
             "result": "verified", "context": self.context,
@@ -67,7 +70,7 @@ class StageHomebrewPublicationTest(unittest.TestCase):
             if args[0] != "gh":
                 return real_run(args, **kwargs)
             self.assertEqual(args[:2], ["gh", "api"])
-            self.assertIn(args[2], ("repos/jsmestad/minga/actions/artifacts/1/zip", "repos/jsmestad/minga/actions/artifacts/2/zip"))
+            self.assertIn(args[2], [f"repos/jsmestad/minga/actions/artifacts/{n}/zip" for n in range(1, len(PAYLOADS) + 1)])
             identity = args[2].split("/")[-2]
             kwargs["stdout"].write((self.root / f"{identity}.zip").read_bytes())
 
@@ -77,8 +80,11 @@ class StageHomebrewPublicationTest(unittest.TestCase):
     def test_stages_original_bytes_under_the_public_names(self):
         self.stage()
         for original, published in (("minga_macos_aarch64.tar.gz", "minga_0.1.0-dev.123_macos_aarch64.tar.gz"),
-                                    ("Minga.dmg", "Minga_0.1.0-dev.123.dmg")):
+                                    ("Minga.dmg", "Minga_0.1.0-dev.123.dmg"),
+                                    ("minga_linux_x86_64.tar.gz", "minga_0.1.0-dev.123_linux_x86_64.tar.gz"),
+                                    ("minga_linux_aarch64.tar.gz", "minga_0.1.0-dev.123_linux_aarch64.tar.gz")):
             self.assertEqual((self.output / published).read_bytes(), (self.root / original).read_bytes())
+        self.assertFalse(any((self.output / original).exists() for original in PAYLOADS))
         self.assertEqual((self.output / "minga-mac.rb").read_bytes(), (self.recipes / "minga-mac.rb").read_bytes())
 
     def test_rejects_transport_substitution(self):
@@ -89,6 +95,12 @@ class StageHomebrewPublicationTest(unittest.TestCase):
     def test_rejects_recipe_generated_from_different_payloads(self):
         (self.recipes / "minga-mac.rb").write_text("different recipe for the same version")
         with self.assertRaisesRegex(publisher.candidate.CandidateError, "recipe does not match payloads"):
+            self.stage()
+
+    def test_rejects_a_rolling_manifest_without_the_linux_payloads(self):
+        self.payloads = self.payloads[:2]
+        self.write_manifest()
+        with self.assertRaisesRegex(publisher.candidate.CandidateError, "wrong rolling payload inventory"):
             self.stage()
 
     def test_rejects_manifest_from_another_attempt(self):
