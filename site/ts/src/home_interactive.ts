@@ -294,13 +294,113 @@ function twistSingleSvg(color: string, opacity = 1, width = 1.6): string {
   return `<svg xmlns="http://www.w3.org/2000/svg" width="10" height="26" viewBox="0 0 10 26" aria-hidden="true"><path d="M5 0 L5 26" stroke="${color}" stroke-opacity="${opacity}" stroke-width="${width}"/></svg>`;
 }
 
+export type HeroTourTabId = "panel-spec-twist" | "panel-spec-peek" | "panel-spec-tasks" | "panel-spec-parity";
+
+export interface HeroTourKeyResult {
+  readonly state: HeroTourState;
+  readonly pending: string;
+  readonly handled: boolean;
+}
+
+export function handleHeroTourKey(
+  state: HeroTourState,
+  tabId: HeroTourTabId,
+  pending: string,
+  key: string,
+): HeroTourKeyResult {
+  if (key === "Escape") {
+    return { state, pending: "", handled: pending.length > 0 };
+  }
+
+  if (tabId === "panel-spec-twist") {
+    if (pending === "SPC") {
+      if (key === "a") return { state, pending: "SPC a", handled: true };
+      return { state, pending: "", handled: true };
+    }
+    if (pending === "SPC a") {
+      if (key === "y") return { state: reduceHeroTour(state, { type: "keep_twist" }), pending: "", handled: true };
+      if (key === "d") return { state: reduceHeroTour(state, { type: "reject_twist" }), pending: "", handled: true };
+      return { state, pending: "", handled: true };
+    }
+    if (key === " ") return { state, pending: "SPC", handled: true };
+    if (key === "u") return { state: reduceHeroTour(state, { type: "undo_yours" }), pending: "", handled: true };
+    if (key === "i") return { state: reduceHeroTour(state, { type: "toggle_edit" }), pending: "", handled: true };
+    if (key === "r") return { state: reduceHeroTour(state, { type: "reset_twist" }), pending: "", handled: true };
+    return { state, pending: "", handled: false };
+  }
+
+  if (tabId === "panel-spec-peek") {
+    if (pending === "]") {
+      if (key === "]") return { state: reduceHeroTour(state, { type: "peek_step", delta: 1 }), pending: "", handled: true };
+      return { state, pending: "", handled: false };
+    }
+    if (pending === "[") {
+      if (key === "[") return { state: reduceHeroTour(state, { type: "peek_step", delta: -1 }), pending: "", handled: true };
+      return { state, pending: "", handled: false };
+    }
+    if (pending === "z") {
+      if (key === "a") return { state: reduceHeroTour(state, { type: "peek_toggle_brief" }), pending: "", handled: true };
+      return { state, pending: "", handled: false };
+    }
+    if (key === "]" || key === "[" || key === "z") return { state, pending: key, handled: true };
+    return { state, pending: "", handled: false };
+  }
+
+  if (tabId === "panel-spec-tasks") {
+    if (pending === "d") {
+      if (key === "d") return { state: reduceHeroTour(state, { type: "queue_drop_top" }), pending: "", handled: true };
+      return { state, pending: "", handled: false };
+    }
+    if (key === "d") return { state, pending: "d", handled: true };
+    if (key === "y") return { state: reduceHeroTour(state, { type: "approve", choice: "y" }), pending: "", handled: true };
+    if (key === "a") return { state: reduceHeroTour(state, { type: "approve", choice: "a" }), pending: "", handled: true };
+    if (key === "t") return { state: reduceHeroTour(state, { type: "approve", choice: "t" }), pending: "", handled: true };
+    if (key === "n") return { state: reduceHeroTour(state, { type: "approve", choice: "n" }), pending: "", handled: true };
+    if (key === "=") return { state: reduceHeroTour(state, { type: "toggle_diff" }), pending: "", handled: true };
+    if (key === "p") return { state: reduceHeroTour(state, { type: "queue_swap" }), pending: "", handled: true };
+    if (key === "o") return { state: reduceHeroTour(state, { type: "queue_add" }), pending: "", handled: true };
+    if (key === "r") return { state: reduceHeroTour(state, { type: "approve", choice: "reset" }), pending: "", handled: true };
+    return { state, pending: "", handled: false };
+  }
+
+  // panel-spec-parity
+  if (key === "1") return { state: reduceHeroTour(state, { type: "set_parity_orbit", orbit: "working" }), pending: "", handled: true };
+  if (key === "2") return { state: reduceHeroTour(state, { type: "set_parity_orbit", orbit: "needs_you" }), pending: "", handled: true };
+  if (key === "3") return { state: reduceHeroTour(state, { type: "set_parity_orbit", orbit: "failed" }), pending: "", handled: true };
+  if (key === "4") return { state: reduceHeroTour(state, { type: "set_parity_orbit", orbit: "done" }), pending: "", handled: true };
+  if (key === "s") return { state: reduceHeroTour(state, { type: "set_parity_view", view: "split" }), pending: "", handled: true };
+  if (key === "m") return { state: reduceHeroTour(state, { type: "set_parity_view", view: "macos" }), pending: "", handled: true };
+  if (key === "t") return { state: reduceHeroTour(state, { type: "set_parity_view", view: "tui_16" }), pending: "", handled: true };
+  return { state, pending: "", handled: false };
+}
+
 export function mountHeroTour(root: HTMLElement): void {
   let state = createHeroTourState();
+  let pendingChord = "";
 
   const twistPanel = root.querySelector<HTMLElement>("#panel-spec-twist");
   const peekPanel = root.querySelector<HTMLElement>("#panel-spec-peek");
   const tasksPanel = root.querySelector<HTMLElement>("#panel-spec-tasks");
   const parityPanel = root.querySelector<HTMLElement>("#panel-spec-parity");
+
+  [twistPanel, peekPanel, tasksPanel, parityPanel].forEach((panel) => {
+    const sp = panel?.querySelector<HTMLElement>(".spine-specimen");
+    if (sp) {
+      sp.setAttribute("tabindex", "0");
+      sp.setAttribute("role", "region");
+    }
+  });
+
+  function activeTabId(): HeroTourTabId {
+    if (peekPanel && !peekPanel.hidden) return "panel-spec-peek";
+    if (tasksPanel && !tasksPanel.hidden) return "panel-spec-tasks";
+    if (parityPanel && !parityPanel.hidden) return "panel-spec-parity";
+    return "panel-spec-twist";
+  }
+
+  function pendingBadge(): string {
+    return pendingChord ? `<span class="tour-pending-pill">${esc(pendingChord)} …</span>` : "";
+  }
 
   function renderTwist(): void {
     if (!twistPanel) return;
@@ -345,7 +445,7 @@ export function mountHeroTour(root: HTMLElement): void {
 
     specimen.innerHTML = `
       <div class="tour-live-bar">
-        <span class="tour-live-label">TRY IT LIVE</span>
+        <span class="tour-live-label">TRY IT LIVE · CLICK OR FOCUS &amp; TYPE KEYS ${pendingBadge()}</span>
         <div class="tour-live-actions">
           <button type="button" class="tour-chip" data-ht-act="undo_yours"><span>u</span> Undo yours</button>
           <button type="button" class="tour-chip" data-ht-act="toggle_edit"><span>i</span> ${state.userEditPresent ? "Re-edit 240" : "Edit line 240"}</button>
@@ -393,7 +493,7 @@ export function mountHeroTour(root: HTMLElement): void {
 
     specimen.innerHTML = `
       <div class="tour-live-bar">
-        <span class="tour-live-label">TRY IT LIVE · CLICK SIBLINGS OR EDIT YOUR DRAFT</span>
+        <span class="tour-live-label">TRY IT LIVE · TYPE [[ / ]] / za OR CLICK ${pendingBadge()}</span>
         <div class="tour-live-actions">
           <button type="button" class="tour-chip" data-ht-act="peek_prev"><span>[[</span> Prev</button>
           <button type="button" class="tour-chip" data-ht-act="peek_next"><span>]]</span> Next</button>
@@ -474,7 +574,7 @@ export function mountHeroTour(root: HTMLElement): void {
 
     specimen.innerHTML = `
       <div class="tour-live-bar">
-        <span class="tour-live-label">TRY IT LIVE · APPROVE OR REORDER QUEUE</span>
+        <span class="tour-live-label">TRY IT LIVE · TYPE y / n / = / dd / p / o OR CLICK ${pendingBadge()}</span>
         <div class="tour-live-actions">
           <button type="button" class="tour-chip" data-ht-approve="y"><span>y</span> Approve</button>
           <button type="button" class="tour-chip" data-ht-approve="n"><span>n</span> Deny</button>
@@ -695,6 +795,29 @@ export function mountHeroTour(root: HTMLElement): void {
     if (target?.matches("[data-ht-draft]")) {
       state = reduceHeroTour(state, { type: "set_draft", text: target.value });
     }
+  });
+
+  root.addEventListener("keydown", (event) => {
+    const target = event.target as HTMLElement | null;
+    if (!target) return;
+    if (target.matches("input, textarea, select")) return;
+    if (event.metaKey || event.ctrlKey || event.altKey) return;
+    if (target.closest(".showcase-nav")) return;
+
+    const tabId = activeTabId();
+    const res = handleHeroTourKey(state, tabId, pendingChord, event.key);
+    if (!res.handled) return;
+
+    event.preventDefault();
+    state = res.state;
+    pendingChord = res.pending;
+    if (tabId === "panel-spec-twist") renderTwist();
+    else if (tabId === "panel-spec-peek") renderPeek();
+    else if (tabId === "panel-spec-tasks") renderTasks();
+    else renderParity();
+
+    const activePanel = root.querySelector<HTMLElement>(`#${tabId}`);
+    activePanel?.querySelector<HTMLElement>(".spine-specimen")?.focus();
   });
 
   renderAll();

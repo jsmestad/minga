@@ -10,7 +10,7 @@ import {
 } from "../src/arch_interactive.ts";
 import { EXTENDING_SCENARIOS } from "../src/extending_interactive.ts";
 import { highlightElixirLine } from "../src/highlight.ts";
-import { createHeroTourState, reduceHeroTour } from "../src/home_interactive.ts";
+import { createHeroTourState, handleHeroTourKey, reduceHeroTour } from "../src/home_interactive.ts";
 
 describe("Homepage playable Feature Tour state machine", () => {
   it("undoes only the human edit while preserving braided Twist, then keeps cleanly", () => {
@@ -36,6 +36,31 @@ describe("Homepage playable Feature Tour state machine", () => {
 
     s = reduceHeroTour(s, { type: "approve", choice: "y" });
     assert.equal(s.approvalState, "approved_once");
+  });
+
+  it("handles real keyboard chords across Feature Tour tabs (SPC a y, ]], za, y, dd, p, o)", () => {
+    let s = createHeroTourState();
+    let res = handleHeroTourKey(s, "panel-spec-twist", "", "u");
+    assert.equal(res.handled, true);
+    assert.equal(res.state.userEditPresent, false);
+
+    res = handleHeroTourKey(res.state, "panel-spec-twist", "", " ");
+    assert.equal(res.pending, "SPC");
+    res = handleHeroTourKey(res.state, "panel-spec-twist", res.pending, "a");
+    assert.equal(res.pending, "SPC a");
+    res = handleHeroTourKey(res.state, "panel-spec-twist", res.pending, "y");
+    assert.equal(res.state.twistStatus, "kept");
+
+    res = handleHeroTourKey(res.state, "panel-spec-tasks", "", "y");
+    assert.equal(res.state.approvalState, "approved_once");
+
+    const lenBefore = res.state.queueItems.length;
+    res = handleHeroTourKey(res.state, "panel-spec-tasks", "", "d");
+    res = handleHeroTourKey(res.state, "panel-spec-tasks", res.pending, "d");
+    assert.equal(res.state.queueItems.length, lenBefore - 1);
+
+    res = handleHeroTourKey(res.state, "panel-spec-tasks", "", "o");
+    assert.equal(res.state.queueItems.length, lenBefore);
   });
 });
 

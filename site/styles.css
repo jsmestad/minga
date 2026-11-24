@@ -4276,6 +4276,24 @@ h2[data-status="planned"]:not([data-pill="off"])::before {
   font-size: 0.66rem;
   letter-spacing: 0.06em;
   color: #a5adce;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.tour-pending-pill {
+  padding: 0.1rem 0.4rem;
+  border: 1px solid #ca9ee6;
+  background: rgba(202, 158, 230, 0.22);
+  color: #ffffff;
+  font-size: 0.68rem;
+  font-weight: 600;
+}
+
+[data-hero-tour] .spine-specimen:focus-visible,
+[data-ca-stage]:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px #ca9ee6;
 }
 
 .tour-live-actions {
