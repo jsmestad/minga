@@ -87,6 +87,8 @@
               <span class="spec-detail"><strong>v0.1.0 roadmap.</strong> Write or ask Minga to author readable source over existing buffer, drawer, agent, and permission primitives; inspect the diff and save to activate; discard when a one-off task ends or reuse across projects.</span>
             </li>
           </ul>
+
+          <div data-layer-explorer></div>
         </section>
 
         <section class="essay-section" id="layer-config">
@@ -174,6 +176,8 @@ extension <span class="tok-atom">:minga_git_extended</span>, hex: <span class="t
           <p>The v0.1.0 milestone adds a third layer between a quick <code>config.exs</code> edit and a full packaged extension: reshaping your workbench for a single task without maintaining a massive personal config or forking the editor.</p>
           <p><strong>Concrete example of the v0.1.0 target:</strong> suppose you are revising a design spec in Markdown or auditing a risky migration and want inline review comments, explicit "Send Revision" actions, attributed suggestions you can accept or reject, and a split buffer tracking check status and token usage for that task. Instead of hunting for a plugin or waiting on an editor vendor, you write or ask Minga to author that workflow in readable Elixir over Minga's existing buffer, drawer, and agent primitives. You inspect the diff, save to activate under an explicit revocable grant (with automatic restore if a candidate fails), run it identically on macOS and in the terminal, and either discard the workflow once the PR lands or save it to reuse across future projects.</p>
 
+          <div data-workflow-rollback data-status="planned" data-since="v0.1.0" data-pill="off"></div>
+
           <div class="callout">
             <span class="callout-title">Release status &amp; stability</span>
             <p>Layers 1 and 2 (<code>config.exs</code>, hooks, advice, Hex/Git/path extensions, <code>PreToolUse</code> hooks, MCP servers, custom model gateways, and runtime grammars) ship on <code>main</code> today. Layer 3 (save-to-activate disposable and reusable workflows) and the ADR-0006 minimal UI model are in active development for v0.1.0. Before v1.0, breaking changes to config options or <code>minga_sdk</code> are documented in the <a href="/docs/changelog.html">Changelog</a>.</p>
@@ -220,5 +224,6 @@ extension <span class="tok-atom">:minga_git_extended</span>, hex: <span class="t
   </footer>
 
   <script defer src="/site.js"></script>
+  <script type="module" src="/assets/learn-labs.js"></script>
 </body>
 </html>

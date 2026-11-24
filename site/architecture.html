@@ -162,6 +162,8 @@
             </div>
             <figcaption class="diagram-caption">Each OS process has isolated memory. Under ADR-0006, the BEAM owns ordered modeline segments with priorities, theme roles, BEAM-styled markdown spans, and key scopes; clients draw shared tokens natively and drop only lowest-priority segments to fit. In headless mode, the editor and parser processes do not start.</figcaption>
           </figure>
+
+          <div data-arch-fault-map></div>
         </section>
 
         <section class="essay-section" id="buffer-aware-agents">
@@ -236,6 +238,8 @@
             </div>
             <figcaption class="diagram-caption">Ordinary quit commands stop if unpublished edits remain staged; force quits (<code>:qa!</code>, <code>:cq</code>, or <code>:q!</code> on the last window) discard on purpose. <span data-status="planned" data-since="v0.1.0" data-pill="off">As ADR-0006 lands, per-author undo groups keep your <code>u</code> / <code>⌘Z</code> history strictly separate from Minga's edits while inline Twist review and <code>*minga-review*</code> build over the same ownership contract.</span></figcaption>
           </figure>
+
+          <div data-staged-stepper></div>
         </section>
 
         <section class="essay-section" id="executable-parity">
@@ -323,5 +327,6 @@
   </footer>
 
   <script defer src="/site.js"></script>
+  <script type="module" src="/assets/learn-labs.js"></script>
 </body>
 </html>
