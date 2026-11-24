@@ -4,13 +4,16 @@ defmodule MingaAgent.TokenEstimator do
 
   Uses a character-based heuristic: roughly 1 token per 3.5 characters
   for English text, plus overhead for message framing (role tokens,
-  formatting). This is accurate to within ~20% of actual usage for
-  typical code-heavy conversations.
+  formatting). Counts message content, tool call names, arguments and IDs,
+  and the text of reasoning details.
 
-  The estimator is intentionally simple. Exact token counting requires
-  a tokenizer (tiktoken for OpenAI, Anthropic's tokenizer for Claude),
-  which adds dependencies and complexity. The heuristic is good enough
-  for context bar display and compaction trigger decisions.
+  Images, video and files count a fixed per-part cost, because providers
+  bill them by dimensions or pages rather than by encoded bytes.
+
+  The result is an estimate, not an upper bound: exact counts need a
+  provider tokenizer. Use it for display and soft thresholds such as
+  compaction triggers; a hosted request's admission is decided by
+  `MingaAgent.ModelSelection.Policy.RequestCapacity` from a bound.
   """
 
   @typedoc "A message-like map with content and role."
@@ -20,21 +23,23 @@ defmodule MingaAgent.TokenEstimator do
           optional(atom()) => term()
         }
 
-  # Average characters per token for English/code mix.
   @chars_per_token 3.5
 
-  # Overhead tokens per message for role framing, special tokens, etc.
   @message_overhead 4
 
-  # Extra overhead for the system prompt (Anthropic caches system separately).
   @system_overhead 8
+
+  # Per tool call: id token, type token, function name token, JSON framing.
+  @tool_call_overhead 6
+
+  # Typical provider cost of one image, video frame set or file attachment.
+  @media_part_tokens 1_600
 
   @doc """
   Estimates the total token count for a list of messages.
 
-  Each message's content is measured by character count divided by
-  #{@chars_per_token}, plus #{@message_overhead} tokens of overhead for
-  role framing. System messages get an extra #{@system_overhead} tokens.
+  Accounts for content text, tool call names and arguments, tool call
+  IDs, reasoning details, and message framing overhead.
 
   ## Examples
 
@@ -68,9 +73,11 @@ defmodule MingaAgent.TokenEstimator do
 
   @spec estimate_message(message()) :: number()
   defp estimate_message(msg) do
-    content_tokens = content_token_count(msg)
-    overhead = base_overhead(msg)
-    content_tokens + overhead
+    content_token_count(msg) +
+      tool_calls_token_count(msg) +
+      tool_call_id_token_count(msg) +
+      reasoning_token_count(msg) +
+      base_overhead(msg)
   end
 
   @spec content_token_count(message()) :: number()
@@ -86,6 +93,40 @@ defmodule MingaAgent.TokenEstimator do
 
   defp content_token_count(_), do: 0
 
+  @spec tool_calls_token_count(message()) :: number()
+  defp tool_calls_token_count(%{tool_calls: calls}) when is_list(calls) and calls != [] do
+    Enum.reduce(calls, 0, fn call, acc ->
+      func = Map.get(call, :function, %{})
+      name = Map.get(func, :name, "")
+      args = Map.get(func, :arguments, "")
+
+      name_tokens = if is_binary(name), do: String.length(name) / @chars_per_token, else: 0
+      args_tokens = if is_binary(args), do: String.length(args) / @chars_per_token, else: 0
+
+      acc + name_tokens + args_tokens + @tool_call_overhead
+    end)
+  end
+
+  defp tool_calls_token_count(_), do: 0
+
+  @spec tool_call_id_token_count(message()) :: number()
+  defp tool_call_id_token_count(%{tool_call_id: id}) when is_binary(id) and id != "" do
+    String.length(id) / @chars_per_token
+  end
+
+  defp tool_call_id_token_count(_), do: 0
+
+  @spec reasoning_token_count(message()) :: number()
+  defp reasoning_token_count(%{reasoning_details: details}) when is_list(details) do
+    Enum.reduce(details, 0, fn detail, acc ->
+      text = Map.get(detail, :text, nil)
+      text_tokens = if is_binary(text), do: String.length(text) / @chars_per_token, else: 0
+      acc + text_tokens
+    end)
+  end
+
+  defp reasoning_token_count(_), do: 0
+
   @spec part_token_count(map()) :: number()
   defp part_token_count(%{text: text}) when is_binary(text) do
     String.length(text) / @chars_per_token
@@ -94,6 +135,9 @@ defmodule MingaAgent.TokenEstimator do
   defp part_token_count(%{content: text}) when is_binary(text) do
     String.length(text) / @chars_per_token
   end
+
+  defp part_token_count(%{type: type}) when type in [:image, :image_url, :video_url, :file],
+    do: @media_part_tokens
 
   defp part_token_count(_), do: 0
 

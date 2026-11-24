@@ -5683,7 +5683,11 @@ defmodule MingaAgent.Session do
   end
 
   defp handle_provider_event(%Event.ContextUsage{} = event, state) do
-    broadcast(state, {:context_usage, event.estimated_tokens, event.context_limit})
+    broadcast(
+      state,
+      {:context_usage, event.estimated_tokens, event.context_limit, event.reported_tokens,
+       event.estimation_method}
+    )
   end
 
   defp handle_provider_event(%Event.TurnLimitReached{current: current, limit: limit}, state) do
@@ -7180,8 +7184,17 @@ defmodule MingaAgent.Session do
   defp event_log_entry(:messages_changed), do: nil
   defp event_log_entry({:error, message}), do: {:error, %{message: message}}
 
-  defp event_log_entry({:context_usage, estimated_tokens, context_limit}),
-    do: {:context_usage, %{estimated_tokens: estimated_tokens, context_limit: context_limit}}
+  defp event_log_entry(
+         {:context_usage, estimated_tokens, context_limit, reported_tokens, method}
+       ),
+       do:
+         {:context_usage,
+          %{
+            estimated_tokens: estimated_tokens,
+            context_limit: context_limit,
+            reported_tokens: reported_tokens,
+            estimation_method: method
+          }}
 
   defp event_log_entry({:turn_limit_reached, current, limit}),
     do: {:turn_limit_reached, %{current: current, limit: limit}}

@@ -110,7 +110,7 @@ defmodule MingaEditor.Remote.EventReplayTest do
 
     assert EventReplay.to_agent_event(
              record(:context_usage, %{"estimated_tokens" => "bad", "context_limit" => nil})
-           ) == {:context_usage, 0, 0}
+           ) == {:context_usage, 0, 0, nil, :unknown}
 
     assert EventReplay.to_agent_event(
              record(:todo_plan_updated, %{
@@ -380,7 +380,7 @@ defmodule MingaEditor.Remote.EventReplayTest do
       {:message_changed, %{}, :messages_changed},
       {:error, %{"message" => "provider failed"}, {:error, "provider failed"}},
       {:context_usage, %{"estimated_tokens" => "12", "context_limit" => 100},
-       {:context_usage, 12, 100}},
+       {:context_usage, 12, 100, nil, :unknown}},
       {:turn_limit_reached, %{"current" => 3, "limit" => "5"}, {:turn_limit_reached, 3, 5}},
       {:driver_changed, %{}, nil}
     ]
