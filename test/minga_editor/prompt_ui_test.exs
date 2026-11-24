@@ -626,7 +626,7 @@ defmodule MingaEditor.PromptUITest do
     end
   end
 
-  describe "handle_key/3 — readline keys keep their text-editing meaning" do
+  describe "handle_key/3: readline keys keep their text-editing meaning" do
     @ctrl 0x02
 
     defp keys(state, keys) do

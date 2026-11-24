@@ -21,7 +21,7 @@ Minga ships these scopes:
 
 Pickers and prompts are live prompts: typing always edits the query, so their scopes bind only the established list conventions from the [key design](design/keys.md). The readline keys are text editing, not bindings: `⌃A` and `⌃E` move to the start and end of the line, `⌃H` deletes a character, `⌃W` the word before the cursor, `⌃U` everything before it, and `⌃K` everything after it in a prompt without a list. Both scopes declare their keys only in the `:insert` vim state, because a prompt always takes text and the CUA profile never applies to one.
 
-`MingaEditor.PickerUI` and `MingaEditor.PromptUI` resolve keys through these scopes, so a user override such as `bind {:picker, :insert}, "C-n", :picker_next, "Next"` works there. The `:` command line is a pure mode and reads the default `:prompt` trie directly, so overrides do not reach it.
+`MingaEditor.PickerUI` and `MingaEditor.PromptUI` resolve keys through these scopes, so a user override such as `bind {:picker, :insert}, "C-n", :picker_next, "Next"` works there. On macOS the native picker query field forwards only the picker conventions (`⌃J`, `⌃K`, `⌃V`, `⌃.`) and keeps other control keys for itself, so an override on another chord reaches the BEAM only from the terminal frontend. The `:` command line is a pure mode and reads the default `:prompt` trie directly, so overrides do not reach it.
 
 ## How resolution works
 

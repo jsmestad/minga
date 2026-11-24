@@ -122,17 +122,14 @@ defmodule Minga.Test.KeyGrammar do
 
   @scope_states [:normal, :insert, :input_normal, :cua]
 
-  # Contexts a scope keymap is evaluated under. The Agent scope adds a remedy
-  # binding while a failed start offers one, the picker adds ⌃V for sources
-  # that open a location, and a prompt with a list adds list movement; other
-  # scopes ignore the context.
+  # Contexts a scope keymap is evaluated under.
+  # The Agent scope adds a remedy binding while a failed start offers one, the picker adds ⌃V for sources whose selection shows in the focused window, and a prompt with a list adds list movement; other scopes ignore the context.
   @scope_contexts [[], [agent_start_remedy: :retry], [picker_split: true, prompt_list: true]]
 
   # ── Rule 4: established modifier conventions ───────────────────────────────
   #
   # {key, contexts it may appear in, allowed commands (or :any), why}.
-  # ⌃T and ⌃Q document picker conventions whose features have not shipped
-  # (pins #4056, quickfix #4059); ⌃\ ⌃N waits for the terminal (#4060).
+  # ⌃T and ⌃Q document picker conventions whose features have not shipped (pins #4056, quickfix #4059); ⌃\ ⌃N waits for the terminal (#4060).
   @list_movement [:move_down, :move_up, :picker_next, :picker_prev, :prompt_next, :prompt_prev]
 
   @modifier_conventions [

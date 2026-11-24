@@ -26,7 +26,7 @@ defmodule Minga.Keymap.PromptKeysTest do
       assert Bindings.lookup(trie, {?v, @ctrl}) == {:command, :picker_open_split}
     end
 
-    test "binds ⌃V only for sources that open a location" do
+    test "binds ⌃V only for sources whose selection shows in the focused window" do
       assert Bindings.lookup(PromptKeys.picker_trie(), {?v, @ctrl}) == :not_found
     end
 

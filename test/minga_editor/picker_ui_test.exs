@@ -626,7 +626,7 @@ defmodule MingaEditor.PickerUITest do
       assert selected.(paged) != selected.(state)
       assert selected.(PickerUI.handle_key(paged, 57_362, 0)) == selected.(state)
 
-      # NoBulkActionsSource does not open a location, so ⌃V is unbound here.
+      # NoBulkActionsSource does not show its selection in the window, so ⌃V is unbound here.
       assert selected.(PickerUI.handle_key(state, ?v, @ctrl)) == selected.(state)
       assert selected.(PickerUI.handle_key(state, ?v, 0x04)) == selected.(state)
     end

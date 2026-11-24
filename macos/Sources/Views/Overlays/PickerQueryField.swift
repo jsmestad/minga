@@ -43,6 +43,12 @@ enum PickerQueryKeyRouting {
         }
     }
 
+    /// Cocoa maps ⌃N and ⌃P to moveDown: and moveUp:. Pickers retired those chords for ⌃J / ⌃K, so they must not move the list.
+    static func isRetiredListChord(_ selectorName: String, modifiers: NSEvent.ModifierFlags) -> Bool {
+        let flags = modifiers.intersection(.deviceIndependentFlagsMask)
+        return flags.contains(.control) && (selectorName == "moveDown:" || selectorName == "moveUp:")
+    }
+
     static func selectorBinding(_ selectorName: String, fieldIsEmpty: Bool) -> PickerQueryKeyCommand? {
         switch selectorName {
         case "moveUp:":
@@ -224,6 +230,13 @@ struct PickerQueryField: NSViewRepresentable {
             }
 
             let selectorName = NSStringFromSelector(commandSelector)
+
+            if let event = NSApp.currentEvent,
+               PickerQueryKeyRouting.isRetiredListChord(selectorName, modifiers: event.modifierFlags)
+            {
+                return true
+            }
+
             guard let command = PickerQueryKeyRouting.selectorBinding(selectorName, fieldIsEmpty: textView.string.isEmpty) else { return false }
             sendAction?(.keyPress(codepoint: command.codepoint, modifiers: command.modifiers, sequence: 0))
             return true
