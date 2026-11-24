@@ -298,6 +298,83 @@ defmodule Minga.LSP.SyncServerTest do
     end
   end
 
+  describe "restart reconstruction" do
+    test "stale ETS entries do not survive SyncServer restart", %{tmp_dir: dir} do
+      path = Path.join(dir, "stale.txt")
+      buf = start_buffer(content: "hello", file_path: path)
+      stale_client = start_client()
+      SyncServer.put_clients(buf, [stale_client])
+      assert SyncServer.clients_for_buffer(buf) == [stale_client]
+
+      restart_sync_server()
+
+      assert SyncServer.clients_for_buffer(buf) == []
+    end
+
+    test "stale pending_changes and monitors do not survive restart", %{tmp_dir: dir} do
+      path = Path.join(dir, "pending.txt")
+      buf = start_buffer(content: "hello", file_path: path)
+      client = start_client()
+      SyncServer.put_clients(buf, [client])
+      _ref = monitor_client_in_sync_server(buf, client)
+
+      :sys.replace_state(SyncServer, fn state ->
+        %{state | pending_changes: Map.put(state.pending_changes, buf, {1, :full_sync})}
+      end)
+
+      restart_sync_server()
+
+      state = :sys.get_state(SyncServer)
+      assert state.pending_changes == %{}
+      assert state.client_monitors == %{}
+      assert state.debounce_timers == %{}
+    end
+
+    test "edit synchronization works after restart with reattached clients", %{tmp_dir: dir} do
+      path = Path.join(dir, "sync-after-restart.txt")
+      File.write!(path, "hello")
+      buf = start_buffer(file_path: path)
+      client = start_client(:incremental)
+
+      restart_sync_server()
+
+      # Reattach the client (simulates what reconstruction does when servers are available)
+      SyncServer.put_clients(buf, [client])
+
+      delta = EditDelta.insertion(0, {0, 0}, "x", {0, 1})
+
+      flush_batch(buf, [
+        changed_event(buf, delta, EditSource.user(), 1)
+      ])
+
+      assert_receive {:client_cast, ^client,
+                      {:did_change_incremental, _uri, [{0, 0, 0, 0, "x"}], ^buf, 1}},
+                     1_000
+    end
+
+    test "request_document rejects stale client identity after restart", %{tmp_dir: dir} do
+      path = Path.join(dir, "stale-request.txt")
+      File.write!(path, "hello")
+      buf = start_buffer(file_path: path)
+      stale_client = start_client(:full)
+      SyncServer.put_clients(buf, [stale_client])
+
+      restart_sync_server()
+
+      # The stale client is no longer in the reconstructed ETS
+      revision = BufferProcess.version(buf)
+
+      assert {:error, :client_replaced} =
+               SyncServer.request_document(
+                 buf,
+                 stale_client,
+                 revision,
+                 "textDocument/hover",
+                 %{}
+               )
+    end
+  end
+
   describe "client monitoring" do
     test "client DOWN removes it while survivors remain", %{tmp_dir: dir} do
       path = Path.join(dir, "monitor.txt")
@@ -410,6 +487,29 @@ defmodule Minga.LSP.SyncServerTest do
   defp sync_server do
     :sys.get_state(SyncServer)
     :ok
+  end
+
+  defp restart_sync_server do
+    old_pid = Process.whereis(SyncServer)
+    ref = Process.monitor(old_pid)
+    Process.exit(old_pid, :kill)
+    assert_receive {:DOWN, ^ref, :process, ^old_pid, :killed}
+
+    # Wait for the supervisor to restart SyncServer with a new pid.
+    poll_until(fn -> Process.whereis(SyncServer) not in [nil, old_pid] end)
+    sync_server()
+  end
+
+  defp poll_until(fun, attempts \\ 50)
+  defp poll_until(_fun, 0), do: flunk("SyncServer did not restart in time")
+
+  defp poll_until(fun, attempts) do
+    if fun.() do
+      :ok
+    else
+      Process.sleep(10)
+      poll_until(fun, attempts - 1)
+    end
   end
 
   defp reset_sync_server do
