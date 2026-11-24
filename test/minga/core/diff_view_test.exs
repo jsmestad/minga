@@ -78,6 +78,35 @@ defmodule Minga.Core.DiffViewTest do
       assert fold.fold_count > 0
     end
 
+    test "a fold that hides one line names one line in both layouts" do
+      base_lines = Enum.map(1..9, &"line #{&1}")
+
+      current_lines =
+        base_lines |> List.replace_at(0, "changed 1") |> List.replace_at(8, "changed 9")
+
+      base = Enum.join(base_lines, "\n")
+      current = Enum.join(current_lines, "\n")
+
+      unified = DiffView.build(base, current)
+      side = DiffView.build_side_by_side(base, current)
+
+      assert [%{fold_count: 1}] = Enum.filter(unified.line_metadata, &(&1.type == :fold))
+      assert "  1 unchanged line" in String.split(unified.text, "\n")
+      assert side.text =~ "1 unchanged line"
+      refute side.text =~ "1 unchanged lines"
+    end
+
+    test "a fold that hides several lines stays plural" do
+      base_lines = Enum.map(1..10, &"line #{&1}")
+
+      current_lines =
+        base_lines |> List.replace_at(0, "changed 1") |> List.replace_at(9, "changed 10")
+
+      unified = DiffView.build(Enum.join(base_lines, "\n"), Enum.join(current_lines, "\n"))
+
+      assert "  2 unchanged lines" in String.split(unified.text, "\n")
+    end
+
     test "tracks hunk line indices" do
       base = "aaa\nbbb\nccc\n"
       current = "aaa\nXXX\nccc\n"

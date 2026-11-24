@@ -9,6 +9,7 @@ defmodule MingaEditor.Agent.View.PromptProjection do
 
   alias Minga.Buffer
   alias Minga.Core.Decorations
+  alias Minga.Core.Plural
   alias Minga.Core.Unicode
   alias Minga.Core.WidthOracle
   alias Minga.Core.WidthOracle.Monospace
@@ -210,7 +211,7 @@ defmodule MingaEditor.Agent.View.PromptProjection do
 
       index ->
         count = UIState.paste_block_line_count(panel.pasted_blocks, index)
-        text = "󰆏 [pasted #{count} lines]"
+        text = "󰆏 [pasted #{Plural.count(count, "line", "lines")}]"
 
         {_id, decorations} =
           Decorations.add_conceal(

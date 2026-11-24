@@ -22,6 +22,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
   alias Minga.Core.Decorations.HighlightRange
   alias Minga.Core.HlTodo
   alias Minga.Core.IndentGuide
+  alias Minga.Core.Plural
   alias Minga.Core.Unicode
   alias Minga.Core.WrapMap
   alias Minga.Diagnostics.Diagnostic
@@ -2376,7 +2377,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
          font_registry
        ) do
     hidden = FoldRegion.hidden_count(fold)
-    text = " ··· #{hidden} lines"
+    text = " ··· #{Plural.count(hidden, "line", "lines")}"
 
     {%Row{
        row_id:
@@ -2470,7 +2471,7 @@ defmodule MingaEditor.RenderModel.Window.Builder do
   @spec append_fold_summary(String.t(), [Span.t()], non_neg_integer(), Context.t()) ::
           {String.t(), [Span.t()]}
   defp append_fold_summary(composed, spans, hidden_count, ctx) do
-    suffix = " ··· #{hidden_count} lines"
+    suffix = " ··· #{Plural.count(hidden_count, "line", "lines")}"
     start_col = Unicode.display_width(composed)
     end_col = start_col + Unicode.display_width(suffix)
 

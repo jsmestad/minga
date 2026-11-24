@@ -1498,6 +1498,23 @@ defmodule MingaEditor.RenderModel.Window.BuilderTest do
                TextPresentation.resolve(presentation, 0, fold_row.row_id, 8)
     end
 
+    test "a fold that hides one line names one line" do
+      state = gui_state(content: "line 1\nline 2\nline 3")
+      buffer = state.workspace.buffers.active
+      assert {:ok, false} = BufferProcess.set_option(buffer, :wrap, false)
+
+      :ok =
+        BufferProcess.batch_decorations(buffer, fn decs ->
+          {_id, decs} = Decorations.add_fold_region(decs, 0, 1, closed: true)
+          decs
+        end)
+
+      {[wf], _cursor, _input} = build_content(state)
+
+      [fold_row] = Enum.filter(wf.window_model.rows, &(&1.row_type == :fold_start))
+      assert fold_row.text == " ··· 1 line"
+    end
+
     test "first windowed wrapped paint does not advertise an exact document extent" do
       content = Enum.map_join(1..10, "\n", fn _idx -> "abcdefghijABCDEFGHIJ" end)
       state = gui_state(rows: 4, cols: 20, content: content)

@@ -17,6 +17,7 @@ defmodule MingaEditor.Commands.Search do
   alias Minga.Buffer
   alias Minga.Buffer.Document
   alias Minga.Core.Decorations
+  alias Minga.Core.Plural
   alias Minga.Core.Unicode
   alias Minga.Editing.Search.Match
   alias MingaEditor.PickerUI
@@ -256,7 +257,7 @@ defmodule MingaEditor.Commands.Search do
         msg =
           case length(accepted) do
             1 -> "1 substitution"
-            count -> "#{count} of #{total} substitutions"
+            count -> "#{count} of #{Plural.count(total, "substitution", "substitutions")}"
           end
 
         state

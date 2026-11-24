@@ -122,7 +122,7 @@ defmodule MingaAgent.InstructionsTest do
       File.write!(Path.join(dir, "AGENTS.md"), "Some content here")
 
       result = Instructions.summary(dir)
-      assert result =~ "Loaded 1 instruction file(s)"
+      assert result =~ "Loaded 1 instruction file:"
       assert result =~ "✓ Project Instructions"
       assert result =~ "chars"
     end

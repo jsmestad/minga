@@ -15,6 +15,11 @@ defmodule Minga.Mode.DeleteConfirmDisplayTest do
       assert Mode.display(:delete_confirm, state) == "Delete 'mydir/' and 12 files? (y/n)"
     end
 
+    test "directory trash prompt names one file in the singular" do
+      state = DeleteConfirmState.new("/tmp/mydir", "mydir", true, 1)
+      assert Mode.display(:delete_confirm, state) == "Delete 'mydir/' and 1 file? (y/n)"
+    end
+
     test "permanent delete fallback prompt" do
       state =
         DeleteConfirmState.new("/tmp/foo.ex", "foo.ex", false)

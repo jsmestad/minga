@@ -8,6 +8,7 @@ defmodule MingaEditor.UI.Picker.AgentSessionSource do
   @behaviour MingaEditor.UI.Picker.Source
 
   alias Minga.Distribution.ConnectionManager
+  alias Minga.Core.Plural
   alias MingaEditor.Remote.SessionClient
   alias MingaEditor.UI.Picker.Context
   alias MingaEditor.UI.Picker.Item
@@ -285,7 +286,7 @@ defmodule MingaEditor.UI.Picker.AgentSessionSource do
     provider = Map.fetch!(meta, :provider_name)
     model = Map.fetch!(meta, :model_name)
     message_count = Map.fetch!(meta, :message_count)
-    "#{provider}/#{model} · #{message_count} msgs · #{created}"
+    "#{provider}/#{model} · #{Plural.count(message_count, "msg", "msgs")} · #{created}"
   end
 
   @spec unavailable_reason_text(MingaAgent.SessionListing.unavailable_reason()) :: String.t()
@@ -493,7 +494,7 @@ defmodule MingaEditor.UI.Picker.AgentSessionSource do
     parts = [
       "#{meta.provider_name}/#{meta.model_name}",
       format_turn_count(meta.turn_count),
-      "#{meta.message_count} msgs",
+      Plural.count(meta.message_count, "msg", "msgs"),
       "$#{cost}",
       time
     ]

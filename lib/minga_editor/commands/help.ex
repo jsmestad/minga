@@ -10,6 +10,7 @@ defmodule MingaEditor.Commands.Help do
   alias Minga.Buffer
   alias Minga.Command
   alias Minga.Config.Options
+  alias Minga.Core.Plural
   alias Minga.Keymap
   alias Minga.Keymap.Bindings
   alias Minga.Keymap.Defaults
@@ -651,7 +652,7 @@ defmodule MingaEditor.Commands.Help do
         lines = format_keystroke_groups(groups)
 
         [
-          "# Keystroke History (last #{length(entries)} keys)",
+          "# Keystroke History (last #{Plural.count(length(entries), "key", "keys")})",
           "",
           String.pad_trailing("Time", 13) <>
             String.pad_trailing("Mode", 18) <>
@@ -761,7 +762,7 @@ defmodule MingaEditor.Commands.Help do
         String.pad_trailing(format_timestamp(first.timestamp), 13) <>
           String.pad_trailing("insert", 18) <>
           String.pad_trailing(inspect(display), 20) <>
-          "(#{count} chars)"
+          "(#{Plural.count(count, "char", "chars")})"
       ]
     else
       format_entries(entries)

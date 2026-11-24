@@ -22,6 +22,7 @@ defmodule MingaEditor.Agent.SlashCommand do
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Remote.SessionClient
   alias Minga.Config
+  alias Minga.Core.Plural
   alias Minga.Log
   alias MingaEditor.Commands.Agent, as: AgentCommands
   alias MingaEditor.Shell.Runtime
@@ -1029,10 +1030,14 @@ defmodule MingaEditor.Agent.SlashCommand do
     summary_parts = [
       "**Base prompt:** #{if custom_base == "", do: "(default)", else: "custom"}",
       if(instructions,
-        do: "**Instructions:** #{String.length(instructions)} chars from AGENTS.md files",
+        do:
+          "**Instructions:** #{Plural.count(String.length(instructions), "char", "chars")} from AGENTS.md files",
         else: nil
       ),
-      if(append != "", do: "**Append:** #{String.length(append)} chars from config", else: nil)
+      if(append != "",
+        do: "**Append:** #{Plural.count(String.length(append), "char", "chars")} from config",
+        else: nil
+      )
     ]
 
     summary = Enum.reject(summary_parts, &is_nil/1) |> Enum.join("\n")

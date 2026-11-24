@@ -196,7 +196,7 @@ defmodule Minga.Mode do
 
   def display(:delete_confirm, %Minga.Mode.DeleteConfirmState{phase: :trash} = s) do
     if s.dir? do
-      "Delete '#{s.name}/' and #{s.child_count} files? (y/n)"
+      "Delete '#{s.name}/' and #{Minga.Core.Plural.count(s.child_count, "file", "files")}? (y/n)"
     else
       "Delete '#{s.name}'? (y/n)"
     end
@@ -322,7 +322,7 @@ defmodule Minga.Mode do
   end
 
   defp format_update_label(%{source_type: :git} = u) do
-    "#{u.name}: #{u.old_ref} → #{u.new_ref} (#{u.commit_count} commits on #{u.branch})"
+    "#{u.name}: #{u.old_ref} → #{u.new_ref} (#{Minga.Core.Plural.count(u.commit_count, "commit", "commits")} on #{u.branch})"
   end
 
   defp format_update_label(%{source_type: :hex} = u) do
