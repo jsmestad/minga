@@ -155,14 +155,38 @@ defmodule Minga.LSP.SyncServer do
     Events.subscribe(:tool_install_complete, events_registry)
     Events.subscribe(:file_written, events_registry)
 
-    {:ok,
-     %{
-       debounce_timers: %{},
-       client_monitors: %{},
-       pending_tool_buffers: %{},
-       pending_changes: %{},
-       events_registry: events_registry
-     }}
+    state = %{
+      debounce_timers: %{},
+      client_monitors: %{},
+      pending_tool_buffers: %{},
+      pending_changes: %{},
+      events_registry: events_registry
+    }
+
+    state = reconstruct_attachments(state)
+
+    {:ok, state}
+  end
+
+  # Enumerates all open buffers from the Buffer.Registry and re-runs the
+  # document-open path for each one, rebuilding the ETS projection with
+  # current client identities and monitors. Called during init so a restarted
+  # SyncServer reconnects LSP features without the user reopening files.
+  @spec reconstruct_attachments(state()) :: state()
+  defp reconstruct_attachments(state) do
+    state =
+      Minga.Buffer.Registry
+      |> Registry.select([{{:_, :"$1", :_}, [], [:"$1"]}])
+      |> Enum.filter(&Process.alive?/1)
+      |> Enum.reduce(state, &do_buffer_open(&2, &1))
+
+    count = :ets.info(@registry_table, :size)
+
+    if count > 0 do
+      Minga.Log.info(:lsp, "SyncServer reconstructed #{count} buffer attachment(s) after restart")
+    end
+
+    state
   end
 
   @impl true
