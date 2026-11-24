@@ -136,6 +136,42 @@ defmodule Minga.Session.StagedDraftsTest do
       assert File.ls!(Path.dirname(dir)) == []
     end
 
+    test "a draft whose prune fails is not loaded again until its path is written again",
+         %{opts: opts, root: root} do
+      for path <- ~w(a b),
+          do: :ok = StagedDrafts.write(root, "v", 1, StagedDraft.new(path, "", "x"), opts)
+
+      dir = StagedDrafts.view_dir(root, "v", opts)
+      File.chmod!(dir, 0o500)
+      on_exit(fn -> File.chmod(dir, 0o700) end)
+
+      assert {:error, _reason} = StagedDrafts.prune(root, "v", ["b"], opts)
+      assert File.exists?(StagedDrafts.draft_file(root, "v", "a", opts))
+      # Loading makes the view directory private (0700) again.
+      assert [%{path: "b"}] = root |> load!(opts) |> drafts()
+
+      :ok = StagedDrafts.write(root, "v", 1, StagedDraft.new("a", "", "again"), opts)
+      assert root |> load!(opts) |> drafts() |> Enum.map(& &1.path) |> Enum.sort() == ~w(a b)
+
+      :ok = StagedDrafts.prune(root, "v", ["a"], opts)
+      assert [%{path: "a", content: "again"}] = root |> load!(opts) |> drafts()
+      assert File.ls!(Path.dirname(dir)) == [Path.basename(dir)]
+    end
+
+    test "a view whose deletion fails loads none of its drafts", %{opts: opts, root: root} do
+      :ok = StagedDrafts.write(root, "v", 1, StagedDraft.new("a", "", "x"), opts)
+      dir = StagedDrafts.view_dir(root, "v", opts)
+      File.chmod!(dir, 0o500)
+      on_exit(fn -> File.chmod(dir, 0o700) end)
+
+      assert {:error, _reason} = StagedDrafts.delete_view(root, "v", opts)
+      assert load!(root, opts) == []
+
+      File.chmod!(dir, 0o700)
+      assert StagedDrafts.delete_view(root, "v", opts) == :ok
+      assert File.ls!(Path.dirname(dir)) == []
+    end
+
     test "deleting a view removes all its drafts", %{opts: opts, root: root} do
       :ok = StagedDrafts.write(root, "v", 1, StagedDraft.new("a", "", "x"), opts)
       :ok = StagedDrafts.delete_view(root, "v", opts)
