@@ -46,7 +46,7 @@ Agent scope bindings are trie data in `Minga.Keymap.Scope.Agent`, with one trie 
 Several handlers run before `Input.Scoped` reaches that trie:
 
 - **Tool approval and @-mention completion** are separate handlers, so `y` on a pending approval never reaches the copy binding. Diff review is not a handler: its keys are context bindings in the agent trie, as described above.
-- **`MingaEditor.Input.AgentPanel`** owns the composer. While the composer is focused it resolves the `:insert` or `:input_normal` bindings and applies text input, in the agent view and in any layout that shows an agent chat pane beside a file. In Normal, Visual and operator-pending states it routes keys through the standard mode FSM against the prompt buffer, which is why Vim motions and operators edit a draft.
+- **`MingaEditor.Input.AgentPanel`** owns the composer. While the composer is focused in Insert mode, or with desktop shortcuts, it resolves the `:insert` or `:cua` bindings and applies text input, in the agent view and in any layout that shows an agent chat pane beside a file. In Normal, Visual and operator-pending states only Tab and a failed start's remedy key resolve first; every other key goes through the standard mode FSM against the prompt buffer, which is why Vim motions and operators edit a draft and why `q` records a macro there.
 
 Scrolling keys (`j`, `k`, `G`, `⌃D`, `⌃U`) are deliberately not in the agent trie. They pass through to `MingaEditor.Input.AgentNav`, which updates the transcript's scroll state. The `?` help overlay content comes from `Scope.Agent.help_groups/1`.
 
@@ -178,7 +178,7 @@ Each scope is a module implementing the `Minga.Keymap.Scope` behaviour:
 
 Bindings are declared as trie data (using `Minga.Keymap.Bindings`) and resolved through `Minga.Keymap.Scope.resolve_key/4`. The `context` parameter in `keymap/2` carries facts about the focused surface that change the trie, such as `agent_diff_review`, `agent_start_remedy`, `picker_split` and `prompt_list`.
 
-The `Input.Scoped` handler sits in the shell's surface handler list and routes remaining scope-owned keys through the appropriate scope based on `state.keymap_scope`. The full shell handler order is broader than the scope system: overlay handlers run first, dedicated surface and sub-state handlers such as mention completion, tool approval, diff review, agent panel, sidebar, popup, and CUA space-leader may consume input before `Input.Scoped`, then later surface handlers such as agent navigation, global bindings, bottom panel, agent mouse, and the editing-model fallback run after it.
+The `Input.Scoped` handler sits in the shell's surface handler list and routes remaining scope-owned keys through the appropriate scope based on `state.keymap_scope`. The full shell handler order is broader than the scope system: overlay handlers run first, dedicated surface and sub-state handlers such as mention completion, tool approval, agent panel, sidebar, popup, and CUA space-leader may consume input before `Input.Scoped`, then later surface handlers such as agent navigation, global bindings, bottom panel, agent mouse, and the editing-model fallback run after it.
 
 ```
 Overlay handlers → earlier surface/sub-state handlers → Input.Scoped → later surface handlers → editing-model fallback

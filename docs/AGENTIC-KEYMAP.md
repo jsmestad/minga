@@ -293,7 +293,7 @@ These apply while the composer is not focused.
 | Keys | Action |
 |------|--------|
 | `j` / `k` | Scroll down / up one line |
-| `⌃D` / `⌃U` | Scroll down / up half a page |
+| `⌃D` / `⌃U` | Scroll down / up ten lines |
 | `gg` / `G` | Go to the top / bottom |
 | `/` | Search the conversation |
 | `n` / `N` | Next / previous match |
@@ -319,7 +319,7 @@ These apply while the composer is not focused.
 | `q` | Return to where you were |
 | `esc` | Close whatever is open on top (Help, search). With nothing open, return to where you were |
 
-Leader keys work here too, and `:` opens the command line, so `:w`, `:qa` and `:model` work from the conversation. While a leader sequence, the command line or a search is waiting for input, every key goes to it: `SPC h k` followed by `q` describes `q` and does not close the view, and `:x` never rejects a change.
+Leader keys work here too, and `:` opens the command line, so `:w`, `:qa` and `:agent-models` work from the conversation. While a leader sequence, the command line or a search is waiting for input, every key goes to it: `SPC h k` followed by `q` describes `q` and does not close the view, and `:x` never rejects a change.
 
 Any other key does nothing. The conversation is not a file, so a stray key never edits, or moves focus to, the file behind it. The same holds with desktop shortcuts: an undo or paste key pressed here is ignored. On macOS, `⌘S`, `⌘Z`, `⌘X`, `⌘C` and `⌘V` are menu commands and act as they do everywhere else.
 
@@ -330,7 +330,7 @@ Press `Tab` from the conversation to focus it.
 | Keys | Action |
 |------|--------|
 | `j` / `k` | Scroll down / up one line |
-| `⌃D` / `⌃U` | Scroll down / up half a page |
+| `⌃D` / `⌃U` | Scroll down / up ten lines |
 | `gg` / `G` | Go to the top / bottom |
 | `Tab` | Back to the conversation |
 | `}` / `{` / `=` | Resize or reset the split |
@@ -510,7 +510,7 @@ The usual line-editing keys work in prompts and in the picker's query line: `⌃
 
 ### The agent composer
 
-The composer is where you write to the agent. Focus it with `i`, `a` or `↩` from the conversation. It is a small Vim buffer: you start in Insert mode, and `esc` takes you to Normal mode, where motions, operators and Visual mode edit your draft.
+The composer is where you write to the agent. Focus it with `i`, `a` or `↩` from the conversation. It is a small Vim buffer: you start in Insert mode, and `esc` takes you to Normal mode, where motions, operators and Visual mode edit your draft. The keys in this table work in Insert mode.
 
 | Keys | Action |
 |------|--------|
@@ -519,12 +519,12 @@ The composer is where you write to the agent. Focus it with `i`, `a` or `↩` fr
 | `⌃↩` | While the agent is working, queue the message as a follow-up. Otherwise send it |
 | `⌥↑` | Pull queued messages back into the composer |
 | Up / Down | Move within the draft. At its first or last line, recall earlier messages |
-| `⌃D` / `⌃U` | Scroll the conversation half a page while you type |
-| `⌃C` | Stop the agent's turn if one is running. Otherwise go to Normal mode |
+| `⌃D` / `⌃U` | Scroll the conversation ten lines while you type |
+| `⌃C` | Go to Normal mode. While the agent is working, also stop its turn |
 | `⌃L` | Clear the conversation display |
 | `⌃S` | Save the file |
 | `⌃Q` | Leave the composer and close the agent view |
-| `esc` | Go to Normal mode. From Normal mode, `esc` or `q` leaves the composer |
+| `esc` | Go to Normal mode. From Normal mode, `esc` leaves the composer |
 | `SPC` | Types a space while you are in Insert mode. Press `esc` first to use leader keys |
 
 Shift with an arrow key keeps its Vim meaning here and does not start a selection. To select, press `esc`, then `v`, and use Vim motions. With desktop shortcuts, `↩` sends, the newline keys above still work, and Up and Down recall earlier messages.
