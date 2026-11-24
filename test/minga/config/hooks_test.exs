@@ -14,7 +14,7 @@ defmodule Minga.Config.HooksTest do
 
     start_supervised!({Hooks, name: hooks, events_registry: registry, task_supervisor: task_sup})
 
-    {:ok, registry: registry, hooks: hooks}
+    {:ok, registry: registry, hooks: hooks, task_sup: task_sup}
   end
 
   describe "register/3" do
@@ -326,6 +326,75 @@ defmodule Minga.Config.HooksTest do
       :sys.get_state(hooks)
 
       refute_receive {^ref, :should_not_fire}, 100
+    end
+
+    test "an event after reset waits for the runner that was in flight before reset", %{
+      hooks: hooks,
+      task_sup: task_sup
+    } do
+      test_pid = self()
+      gate = make_ref()
+
+      Hooks.register(hooks, :after_save, fn _buf, path ->
+        send(test_pid, {gate, :old_started, path, self()})
+
+        receive do
+          {^gate, :release} -> :ok
+        end
+
+        send(test_pid, {gate, :effect, {:old, path}})
+      end)
+
+      Hooks.run(hooks, :after_save, [:buf, "/before-reload"])
+      assert_receive {^gate, :old_started, "/before-reload", old_runner}, 500
+
+      Hooks.reset(hooks)
+
+      Hooks.register(hooks, :after_save, fn _buf, path ->
+        send(test_pid, {gate, :effect, {:new, path}})
+      end)
+
+      Hooks.run(hooks, :after_save, [:buf, "/after-reload"])
+      :sys.get_state(hooks)
+
+      assert [^old_runner] = Task.Supervisor.children(task_sup)
+      refute_received {^gate, :effect, _}
+
+      send(old_runner, {gate, :release})
+      assert_receive {^gate, :effect, first}, 500
+      assert_receive {^gate, :effect, second}, 500
+      assert [first, second] == [{:old, "/before-reload"}, {:new, "/after-reload"}]
+    end
+
+    test "reset discards invocations queued before reset", %{hooks: hooks} do
+      test_pid = self()
+      gate = make_ref()
+
+      Hooks.register(hooks, :after_save, fn _buf, path ->
+        send(test_pid, {gate, :old_started, path, self()})
+
+        receive do
+          {^gate, :release} -> :ok
+        end
+      end)
+
+      Hooks.run(hooks, :after_save, [:buf, "/running"])
+      assert_receive {^gate, :old_started, "/running", old_runner}, 500
+      Hooks.run(hooks, :after_save, [:buf, "/queued-before-reset"])
+
+      Hooks.reset(hooks)
+
+      Hooks.register(hooks, :after_save, fn _buf, path ->
+        send(test_pid, {gate, :new_started, path})
+      end)
+
+      Hooks.run(hooks, :after_save, [:buf, "/after-reload"])
+      :sys.get_state(hooks)
+
+      send(old_runner, {gate, :release})
+      assert_receive {^gate, :new_started, "/after-reload"}, 500
+      :sys.get_state(hooks)
+      refute_received {^gate, :new_started, "/queued-before-reset"}
     end
   end
 

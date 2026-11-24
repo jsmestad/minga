@@ -28,6 +28,8 @@ defmodule Minga.Config.Hooks do
   | `:after_open`    | `[buffer_pid, file_path]`  | After opening a file      |
   | `:on_mode_change`| `[old_mode, new_mode]`     | When the editor mode changes |
 
+  `reset/1` (used by config reload) clears hooks and queued invocations but does not interrupt a runner that is already executing. Later invocations of that event wait for it, so effects from before and after a reload never interleave.
+
   ## Admission policy
 
   Each event type admits at most `max_pending` queued invocations while a
@@ -123,7 +125,11 @@ defmodule Minga.Config.Hooks do
   @spec valid_events() :: [event()]
   def valid_events, do: @valid_events
 
-  @doc "Removes all registered hooks and drains pending queues."
+  @doc """
+  Removes all registered hooks and discards queued invocations.
+
+  A runner that is already executing finishes its current invocation with the hooks it started with. Reset keeps tracking that runner, so an event fired after reset queues behind it and runs the newly registered hooks only after it exits. At most one runner per event type runs at any time, including across a config reload. A hook that never returns therefore still blocks later invocations of its event after reset.
+  """
   @spec reset() :: :ok
   @spec reset(GenServer.server()) :: :ok
   def reset, do: reset(__MODULE__)
@@ -152,8 +158,8 @@ defmodule Minga.Config.Hooks do
   end
 
   def handle_call(:reset, _from, state) do
-    demonitor_all_runners(state.runners)
-    {:reply, :ok, initial_state(state.events_registry, state.task_supervisor, state.max_pending)}
+    fresh = initial_state(state.events_registry, state.task_supervisor, state.max_pending)
+    {:reply, :ok, %{fresh | runners: state.runners}}
   end
 
   @impl true
@@ -281,15 +287,6 @@ defmodule Minga.Config.Hooks do
       {event, _ref} -> {:ok, event}
       nil -> :error
     end
-  end
-
-  @spec demonitor_all_runners(%{event() => reference()}) :: :ok
-  defp demonitor_all_runners(runners) do
-    for {_event, ref} <- runners do
-      Process.demonitor(ref, [:flush])
-    end
-
-    :ok
   end
 
   @spec subscribe_to_events(state()) :: :ok
