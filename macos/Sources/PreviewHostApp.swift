@@ -330,7 +330,7 @@ final class PreviewHostDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    nonisolated static func captureRenderedWindow(windowID: CGWindowID, width: Int, height: Int) async throws -> CGImage {
+    private nonisolated static func captureRenderedWindow(windowID: CGWindowID, width: Int, height: Int) async throws -> CGImage {
         let content = try await SCShareableContent.currentProcess
         guard let shareableWindow = content.windows.first(where: { $0.windowID == windowID }) else {
             throw PreviewCaptureError.windowNotShareable

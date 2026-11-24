@@ -11,6 +11,7 @@
 
 import AppKit
 import MingaProtocol
+import ScreenCaptureKit
 import MingaUI
 import SwiftUI
 
@@ -234,7 +235,7 @@ enum StoryboardCapture {
         for _ in 0..<30 {
             host.layoutSubtreeIfNeeded()
             host.display()
-            let image = try await PreviewHostDelegate.captureRenderedWindow(
+            let image = try await captureWindow(
                 windowID: CGWindowID(window.windowNumber), width: width, height: height)
             guard let png = NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:]) else {
                 throw Failure.rejected("PNG encoding failed")
@@ -245,6 +246,22 @@ enum StoryboardCapture {
             try await Task.sleep(for: .milliseconds(80))
         }
         throw Failure.notPresented("the window did not settle to three identical frames")
+    }
+
+    /// The window as the compositor draws it, Metal editor included. PreviewHost's own capture transport stays private
+    /// to its delegate, so the chrome preview evidence can share it between revisions unchanged.
+    private nonisolated static func captureWindow(windowID: CGWindowID, width: Int, height: Int) async throws -> CGImage {
+        let content = try await SCShareableContent.currentProcess
+        guard let window = content.windows.first(where: { $0.windowID == windowID }) else {
+            throw Failure.notPresented("the storyboard window is not shareable with ScreenCaptureKit")
+        }
+        let configuration = SCStreamConfiguration()
+        configuration.width = width
+        configuration.height = height
+        configuration.showsCursor = false
+        configuration.ignoreShadowsSingleWindow = true
+        return try await SCScreenshotManager.captureImage(
+            contentFilter: SCContentFilter(desktopIndependentWindow: window), configuration: configuration)
     }
 
     /// The accessibility tree as a flat list in document order, frames in window points with a top-left origin, rounded to half a point.
