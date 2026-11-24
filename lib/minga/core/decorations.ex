@@ -516,18 +516,6 @@ defmodule Minga.Core.Decorations do
     {id, %{decs | fold_regions: [fold | decs.fold_regions], version: decs.version + 1}}
   end
 
-  @doc "Removes a fold region by ID."
-  @spec remove_fold_region(t(), reference()) :: t()
-  def remove_fold_region(%__MODULE__{} = decs, id) do
-    new_folds = Enum.reject(decs.fold_regions, fn f -> f.id == id end)
-
-    if Enum.count(new_folds) == Enum.count(decs.fold_regions) do
-      decs
-    else
-      %{decs | fold_regions: new_folds, version: decs.version + 1}
-    end
-  end
-
   @doc "Toggles a fold region's open/closed state by ID."
   @spec toggle_fold_region(t(), reference()) :: t()
   def toggle_fold_region(%__MODULE__{} = decs, id) do
@@ -831,36 +819,6 @@ defmodule Minga.Core.Decorations do
      }}
   end
 
-  @doc "Removes a line annotation by ID."
-  @spec remove_annotation(t(), reference()) :: t()
-  def remove_annotation(%__MODULE__{} = decs, id) do
-    case take_annotation(decs.annotations, id) do
-      :not_found ->
-        decs
-
-      {annotation, remaining} ->
-        %{
-          decs
-          | annotations: remaining,
-            version: decs.version + 1,
-            annotation_version: decs.annotation_version + 1,
-            ann_line_cache: delete_annotation_cache(decs.ann_line_cache, annotation, remaining)
-        }
-    end
-  end
-
-  @spec take_annotation([LineAnnotation.t()], reference()) ::
-          :not_found | {LineAnnotation.t(), [LineAnnotation.t()]}
-  defp take_annotation([], _id), do: :not_found
-  defp take_annotation([%LineAnnotation{id: id} = annotation | rest], id), do: {annotation, rest}
-
-  defp take_annotation([annotation | rest], id) do
-    case take_annotation(rest, id) do
-      :not_found -> :not_found
-      {taken, remaining} -> {taken, [annotation | remaining]}
-    end
-  end
-
   @spec put_annotation_cache(
           %{non_neg_integer() => [LineAnnotation.t()]} | nil,
           LineAnnotation.t()
@@ -884,22 +842,6 @@ defmodule Minga.Core.Decorations do
 
   # The source list is newest first, so the newest annotation wins priority ties.
   defp insert_sorted_annotation(line_annotations, annotation), do: [annotation | line_annotations]
-
-  @spec delete_annotation_cache(
-          %{non_neg_integer() => [LineAnnotation.t()]} | nil,
-          LineAnnotation.t(),
-          [LineAnnotation.t()]
-        ) :: %{non_neg_integer() => [LineAnnotation.t()]}
-  defp delete_annotation_cache(nil, _annotation, remaining), do: annotation_cache(remaining)
-
-  defp delete_annotation_cache(cache, %LineAnnotation{id: id, line: line}, _remaining) do
-    {_annotation, line_annotations} = cache |> Map.fetch!(line) |> take_annotation(id)
-
-    case line_annotations do
-      [] -> Map.delete(cache, line)
-      [_ | _] -> Map.put(cache, line, line_annotations)
-    end
-  end
 
   @spec annotation_cache([LineAnnotation.t()]) :: %{
           non_neg_integer() => [LineAnnotation.t()]

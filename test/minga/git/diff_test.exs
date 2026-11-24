@@ -218,47 +218,6 @@ defmodule Minga.Core.DiffTest do
     end
   end
 
-  # ── next_hunk_line/2 and prev_hunk_line/2 ──────────────────────────────────
-
-  describe "navigation" do
-    setup do
-      hunks = [
-        %{type: :added, start_line: 3, count: 2, old_start: 3, old_count: 0, old_lines: []},
-        %{
-          type: :modified,
-          start_line: 10,
-          count: 1,
-          old_start: 8,
-          old_count: 1,
-          old_lines: ["x"]
-        },
-        %{type: :deleted, start_line: 20, count: 0, old_start: 18, old_count: 1, old_lines: ["y"]}
-      ]
-
-      %{hunks: hunks}
-    end
-
-    test "next_hunk_line finds the next hunk", %{hunks: hunks} do
-      assert Diff.next_hunk_line(hunks, 0) == 3
-      assert Diff.next_hunk_line(hunks, 5) == 10
-      assert Diff.next_hunk_line(hunks, 15) == 20
-    end
-
-    test "next_hunk_line returns nil at end", %{hunks: hunks} do
-      assert Diff.next_hunk_line(hunks, 20) == nil
-    end
-
-    test "prev_hunk_line finds the previous hunk", %{hunks: hunks} do
-      assert Diff.prev_hunk_line(hunks, 25) == 20
-      assert Diff.prev_hunk_line(hunks, 15) == 10
-      assert Diff.prev_hunk_line(hunks, 5) == 3
-    end
-
-    test "prev_hunk_line returns nil at start", %{hunks: hunks} do
-      assert Diff.prev_hunk_line(hunks, 0) == nil
-    end
-  end
-
   # ── revert_hunk/2 ─────────────────────────────────────────────────────────
 
   describe "revert_hunk/2" do
@@ -391,32 +350,6 @@ defmodule Minga.Core.DiffTest do
       {del_ranges, ins_ranges} = Diff.word_diff_ranges(old, new)
       assert del_ranges == [{0, 501}]
       assert ins_ranges == [{0, 501}]
-    end
-  end
-
-  # ── generate_patch/4 ───────────────────────────────────────────────────────
-
-  describe "generate_patch/4" do
-    test "generates valid unified diff format" do
-      base = ["a", "b", "c", "d", "e"]
-      current = ["a", "b", "x", "d", "e"]
-
-      hunk = %{
-        type: :modified,
-        start_line: 2,
-        count: 1,
-        old_start: 2,
-        old_count: 1,
-        old_lines: ["c"]
-      }
-
-      patch = Diff.generate_patch("test.ex", base, current, hunk)
-
-      assert String.contains?(patch, "--- a/test.ex")
-      assert String.contains?(patch, "+++ b/test.ex")
-      assert String.contains?(patch, "@@")
-      assert String.contains?(patch, "-c")
-      assert String.contains?(patch, "+x")
     end
   end
 end

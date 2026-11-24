@@ -12,15 +12,12 @@ defmodule Minga.Core.DecorationsAnnotationVersionTest do
 
     assert with_highlight.annotation_version == 0
 
-    {annotation, with_annotation} = Decorations.add_annotation(with_highlight, 3, "note")
+    {_annotation, with_annotation} = Decorations.add_annotation(with_highlight, 3, "note")
     assert with_annotation.annotation_version == 1
 
     shifted = Decorations.adjust_for_edit(with_annotation, {0, 0}, {0, 0}, {1, 0})
     assert shifted.annotation_version == 1
     assert [%{line: 4}] = shifted.annotations
-
-    removed = Decorations.remove_annotation(shifted, annotation)
-    assert removed.annotation_version == 2
   end
 
   test "dense annotation range queries use the line cache and return only the requested rows" do

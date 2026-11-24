@@ -158,35 +158,6 @@ defmodule Minga.Core.Diff do
   end
 
   @doc """
-  Finds the start line of the next hunk after the given line.
-  Returns `nil` if no hunk follows.
-  """
-  @spec next_hunk_line([hunk()], non_neg_integer()) :: non_neg_integer() | nil
-  def next_hunk_line(hunks, line) do
-    hunks
-    |> Enum.filter(fn h -> h.start_line > line end)
-    |> case do
-      [] -> nil
-      [first | _] -> first.start_line
-    end
-  end
-
-  @doc """
-  Finds the start line of the previous hunk before the given line.
-  Returns `nil` if no hunk precedes.
-  """
-  @spec prev_hunk_line([hunk()], non_neg_integer()) :: non_neg_integer() | nil
-  def prev_hunk_line(hunks, line) do
-    hunks
-    |> Enum.filter(fn h -> h.start_line < line end)
-    |> Enum.at(-1)
-    |> case do
-      nil -> nil
-      hunk -> hunk.start_line
-    end
-  end
-
-  @doc """
   Returns buffer lines with the given hunk reverted to base content.
 
   For added hunks: removes the added lines.
@@ -209,38 +180,6 @@ defmodule Minga.Core.Diff do
   def revert_hunk(current_lines, %{type: :deleted, start_line: start} = hunk) do
     {before, after_} = Enum.split(current_lines, start)
     before ++ hunk.old_lines ++ after_
-  end
-
-  @doc """
-  Generates a unified diff patch for a single hunk.
-
-  The patch can be fed to `git apply --cached` to stage just this hunk.
-  Uses the standard unified diff format with `a/` and `b/` path prefixes.
-  """
-  @spec generate_patch(String.t(), [String.t()], [String.t()], hunk()) :: String.t()
-  def generate_patch(relative_path, base_lines, current_lines, hunk) do
-    # Context lines around the hunk (standard 3 lines)
-    ctx = 3
-
-    {old_start, old_end} = base_range(hunk, Enum.count(base_lines), ctx)
-    {new_start, new_end} = current_range(hunk, Enum.count(current_lines), ctx)
-
-    old_context_lines = Enum.slice(base_lines, old_start..(old_end - 1)//1)
-    new_context_lines = Enum.slice(current_lines, new_start..(new_end - 1)//1)
-
-    # Build unified diff body
-    diff_body = unified_diff_body(old_context_lines, new_context_lines)
-
-    old_count = old_end - old_start
-    new_count = new_end - new_start
-
-    header = [
-      "--- a/#{relative_path}\n",
-      "+++ b/#{relative_path}\n",
-      "@@ -#{old_start + 1},#{old_count} +#{new_start + 1},#{new_count} @@\n"
-    ]
-
-    :binary.list_to_bin([header | diff_body])
   end
 
   # ── Private: word-level diff helpers ────────────────────────────────────────
@@ -689,33 +628,5 @@ defmodule Minga.Core.Diff do
     {unchanged, remaining} = consume_ancestor_region(lines, pos, start, start + count)
     acc = Enum.reverse(replacement, Enum.reverse(unchanged, acc))
     apply_region_edits(remaining, start + count, edits, acc)
-  end
-
-  # ── Private: patch generation ──────────────────────────────────────────────
-
-  @spec base_range(hunk(), non_neg_integer(), non_neg_integer()) ::
-          {non_neg_integer(), non_neg_integer()}
-  defp base_range(hunk, base_len, ctx) do
-    start = max(0, hunk.old_start - ctx)
-    end_ = min(base_len, hunk.old_start + hunk.old_count + ctx)
-    {start, end_}
-  end
-
-  @spec current_range(hunk(), non_neg_integer(), non_neg_integer()) ::
-          {non_neg_integer(), non_neg_integer()}
-  defp current_range(hunk, cur_len, ctx) do
-    start = max(0, hunk.start_line - ctx)
-    end_ = min(cur_len, hunk.start_line + hunk.count + ctx)
-    {start, end_}
-  end
-
-  @spec unified_diff_body([String.t()], [String.t()]) :: iodata()
-  defp unified_diff_body(old_lines, new_lines) do
-    List.myers_difference(old_lines, new_lines)
-    |> Enum.flat_map(fn
-      {:eq, lines} -> Enum.map(lines, &" #{&1}\n")
-      {:del, lines} -> Enum.map(lines, &"-#{&1}\n")
-      {:ins, lines} -> Enum.map(lines, &"+#{&1}\n")
-    end)
   end
 end
