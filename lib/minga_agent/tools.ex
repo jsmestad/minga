@@ -795,8 +795,10 @@ defmodule MingaAgent.Tools do
     end
   end
 
+  @typep admission_error :: MingaAgent.Session.job_admission_error() | :session_unavailable
+
   @spec admit_job(GenServer.server(), JobRecord.spec()) ::
-          {:ok, JobRecord.t(), pid()} | {:error, term()}
+          {:ok, JobRecord.t(), pid()} | {:error, admission_error()}
   defp admit_job(session, spec) do
     MingaAgent.Session.admit_job(session, spec)
   catch
@@ -832,7 +834,7 @@ defmodule MingaAgent.Tools do
     :exit, reason -> {:error, "Shell job owner is unavailable: #{inspect(reason)}"}
   end
 
-  @spec job_admission_message(term()) :: String.t()
+  @spec job_admission_message(admission_error()) :: String.t()
   defp job_admission_message({:job_limit, :session, limit}),
     do:
       "Job limit reached: this session already runs #{limit} jobs. Wait for one to finish or cancel one with job_cancel."
@@ -846,8 +848,6 @@ defmodule MingaAgent.Tools do
 
   defp job_admission_message(:session_unavailable),
     do: "Shell is unavailable: the owning agent session is not responding."
-
-  defp job_admission_message(reason), do: "Shell job was not admitted: #{inspect(reason)}"
 
   # ── Job management tools ──────────────────────────────────────────────────
 

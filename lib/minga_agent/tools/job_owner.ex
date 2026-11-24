@@ -4,6 +4,8 @@ defmodule MingaAgent.Tools.JobOwner do
 
   The Session admits each job in its `MingaAgent.Session.JobLedger` and passes the admitted record here. The owner runs the command in a linked task through the injected process backend, reports `{:job_started, id, epoch}` once the task exists, and reports exactly one `{:job_settled, id, epoch, outcome, exit_code, output}` for every job, foreground or background. It keeps only live task bookkeeping; job identity and recorded status belong to the Session.
 
+  When an artifact store is available, job output is retained through it and the settled report carries the output reference. A foreground job captures under its tool call's capture key, because the job's output is the call's result. A background job captures under a key derived from its job id, because the start call stores its own handle text under the call's key.
+
   Foreground starts block the caller until the job ends and return the shell result. Background starts return once the task is running. Job tasks are linked, so they die with the owner, and `terminate/2` kills any still running.
 
   The owner only sends to the Session and never calls it, so Session calls into the owner (cancel, reap) cannot deadlock.
@@ -13,6 +15,7 @@ defmodule MingaAgent.Tools.JobOwner do
 
   alias MingaAgent.Session.JobLedger.Record
   alias MingaAgent.Tool.Output
+  alias MingaAgent.Tools.OutputCapture
   alias MingaAgent.Tools.ProcessBackend.System, as: SystemProcessBackend
   alias MingaAgent.Tools.Shell
 
@@ -127,7 +130,7 @@ defmodule MingaAgent.Tools.JobOwner do
         {:reply, {:error, :cancelled}, %{state | cancelled_unstarted: cancelled}}
 
       true ->
-        start_job(state, record, opts, from)
+        start_job(state, record, job_opts(record, opts), from)
     end
   end
 
@@ -223,7 +226,9 @@ defmodule MingaAgent.Tools.JobOwner do
         end
 
         result =
-          run_shell(command, cwd, timeout_secs, Keyword.put(opts, :on_exit_status, report_exit))
+          command
+          |> run_shell(cwd, timeout_secs, Keyword.put(opts, :on_exit_status, report_exit))
+          |> retain_text_result(opts)
 
         send(owner, {:job_result, job_id, result, received_exit_status()})
       end)
@@ -236,6 +241,46 @@ defmodule MingaAgent.Tools.JobOwner do
     }
 
     %{state | live: Map.put(state.live, job_id, entry), tasks: MapSet.put(state.tasks, task_pid)}
+  end
+
+  # A background job outlives the tool call that started it, and that call stores its own result
+  # under the call's capture key. The job therefore captures under a key derived from its id, in
+  # the same checkpoint, so the two captures can never resume each other.
+  @spec job_opts(Record.t(), start_opts()) :: start_opts()
+  defp job_opts(%Record{background?: false}, opts), do: opts
+
+  defp job_opts(%Record{background?: true, id: id}, opts) do
+    case Keyword.get(opts, :capture_key) do
+      {:delivery, checkpoint, _call_id} ->
+        Keyword.put(opts, :capture_key, {:delivery, checkpoint, "job:" <> id})
+
+      _no_capture ->
+        opts
+    end
+  end
+
+  # A backend that returns text instead of a retained Output still has its bytes stored through the
+  # artifact store when one is available, so the settled record and the caller share one reference.
+  @spec retain_text_result(Shell.result(), start_opts()) :: Shell.result()
+  defp retain_text_result({:ok, text} = result, opts) when is_binary(text),
+    do: capture_text(result, text, [], opts)
+
+  defp retain_text_result({:error, {:incomplete, reason, text}} = result, opts)
+       when is_atom(reason) and is_binary(text),
+       do: capture_text(result, text, [capture_status: {:incomplete, reason}], opts)
+
+  defp retain_text_result(result, _opts), do: result
+
+  @spec capture_text(Shell.result(), String.t(), OutputCapture.capture_opts(), start_opts()) ::
+          Shell.result()
+  defp capture_text(result, text, capture_opts, opts) do
+    case {Keyword.get(opts, :artifact_store), Keyword.get(opts, :capture_key)} do
+      {nil, _key} -> result
+      {_store, nil} -> result
+      {store, key} -> OutputCapture.bytes(store, key, text, capture_opts)
+    end
+  catch
+    :exit, reason -> {:error, {:retention_unavailable, reason}}
   end
 
   # Shell reports the exit code through its callback in this same process before it returns.

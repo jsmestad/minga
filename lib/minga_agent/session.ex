@@ -1830,7 +1830,7 @@ defmodule MingaAgent.Session do
         admissions = Map.put(state.job_admissions, Process.monitor(caller), record.id)
 
         {:reply, {:ok, record, state.job_owner},
-         %{state | job_ledger: ledger, job_admissions: admissions}}
+         schedule_save(%{state | job_ledger: ledger, job_admissions: admissions})}
 
       {:error, _limit} = error ->
         {:reply, error, state}
@@ -3746,6 +3746,8 @@ defmodule MingaAgent.Session do
         tool_authority: %{state.tool_authority | revision: make_ref(), invocations: %{}}
     }
 
+    state = install_job_ledger(state, JobLedger.new())
+
     record_critical_event(state, :session_started, %{
       model: state.provider.model_name,
       provider: state.provider.provider_name,
@@ -4031,7 +4033,9 @@ defmodule MingaAgent.Session do
         DateTime.utc_now()
       )
 
-    {:noreply, release_job_admission(%{state | job_ledger: ledger}, job_id)}
+    # A job can settle while the session is idle, after its last save.
+    {:noreply,
+     state |> Map.put(:job_ledger, ledger) |> release_job_admission(job_id) |> schedule_save()}
   end
 
   def handle_info(
@@ -6080,13 +6084,30 @@ defmodule MingaAgent.Session do
     Enum.each(Map.keys(state.job_admissions), &Process.demonitor(&1, [:flush]))
     ledger = JobLedger.interrupt_running(state.job_ledger, :owner_down, DateTime.utc_now())
 
-    start_job_owner(%{
-      state
-      | job_owner: nil,
-        job_owner_ref: nil,
-        job_ledger: ledger,
-        job_admissions: %{}
-    })
+    %{state | job_owner: nil, job_owner_ref: nil, job_ledger: ledger, job_admissions: %{}}
+    |> start_job_owner()
+    |> schedule_save()
+  end
+
+  # Installs the job ledger of the conversation that replaces the current one.
+  #
+  # Live jobs belong to the replaced conversation, so they are reaped. A replacement JobOwner runs
+  # under a new epoch, so a report still in flight from the reaped owner is stale and cannot settle
+  # a job of the installed ledger, even one that reuses an id.
+  @spec install_job_ledger(state(), JobLedger.t()) :: state()
+  defp install_job_ledger(state, %JobLedger{} = ledger) do
+    Enum.each(Map.keys(state.job_admissions), &Process.demonitor(&1, [:flush]))
+    state = %{state | job_ledger: ledger, job_admissions: %{}}
+
+    case state.job_owner do
+      nil ->
+        state
+
+      owner ->
+        Process.demonitor(state.job_owner_ref, [:flush])
+        reap_job_owner(owner)
+        start_job_owner(%{state | job_owner: nil, job_owner_ref: nil})
+    end
   end
 
   @spec release_job_admission(state(), JobRecord.id()) :: state()
@@ -6139,7 +6160,7 @@ defmodule MingaAgent.Session do
             DateTime.utc_now()
           )
 
-        %{state | job_ledger: ledger}
+        schedule_save(%{state | job_ledger: ledger})
 
       _ended_or_evicted ->
         state
@@ -6182,7 +6203,11 @@ defmodule MingaAgent.Session do
       records ->
         lines = Enum.map_join(records, "\n", &job_notice_line/1)
         ledger = JobLedger.mark_notices_delivered(state.job_ledger, Enum.map(records, & &1.id))
-        append_system_message(%{state | job_ledger: ledger}, lines, :info)
+
+        # The delivered state is saved so a reload does not show the same notice again.
+        %{state | job_ledger: ledger}
+        |> append_system_message(lines, :info)
+        |> schedule_save()
     end
   end
 
@@ -9388,6 +9413,7 @@ defmodule MingaAgent.Session do
         checklist: state.checklist,
         checklist_archive: state.checklist_archive,
         file_changes: state.file_changes,
+        job_ledger: state.job_ledger,
         pending_inputs: TurnExecution.pending_inputs(state.turn_execution),
         continuation: state.continuation
       }
@@ -9696,7 +9722,8 @@ defmodule MingaAgent.Session do
               continuation: Continuation.reset(state.continuation),
               checklist: Checklist.new(),
               checklist_archive: ChecklistArchive.new(),
-              file_changes: []
+              file_changes: [],
+              job_ledger: JobLedger.new()
           }
 
           {:ok, restored} = install_loaded_session_state(state, staged, execution, now)
@@ -9897,6 +9924,8 @@ defmodule MingaAgent.Session do
         checklist: Map.get(data, :checklist, Checklist.new()),
         checklist_archive: Map.get(data, :checklist_archive, ChecklistArchive.new()),
         file_changes: Map.get(data, :file_changes, []),
+        job_ledger:
+          JobLedger.restore(Map.get(data, :job_ledger, JobLedger.new()), DateTime.utc_now()),
         provider: lifecycle,
         credential_readiness: credential_readiness,
         credentials_configured: credentials_configured,
@@ -10093,6 +10122,7 @@ defmodule MingaAgent.Session do
         created_at: loaded_at
     }
 
+    loaded = install_job_ledger(loaded, staged.job_ledger)
     loaded = invalidate_connection(loaded, :conversation)
     loaded = retain_resolution_problem(loaded, staged.connection.resolver_problem)
     loaded = settle_loaded_provider(loaded, state.provider)

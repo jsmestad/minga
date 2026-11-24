@@ -80,7 +80,40 @@ defmodule MingaAgent.Tools.ShellJobPathTest do
 
     assert {:ok, output} = tool_callback(ctx, "job_output", metadata).(%{"job_id" => id})
     assert output =~ "probe output"
-    assert output =~ "not retained"
+    assert output =~ "Full output reference for fetch_output"
+  end
+
+  test "a background job captures under its own key, apart from the start call's result", ctx do
+    metadata = JobSessionStub.metadata(ctx.session)
+    capture_key = {:delivery, "checkpoint", "call-background"}
+
+    assert {:ok, _message} =
+             shell_callback(ctx, metadata, capture_key).(%{
+               "command" => "make build",
+               "background" => true
+             })
+
+    [%Record{id: id}] = Session.jobs(ctx.session)
+    assert {:ok, %Record{output_ref: reference}} = await_terminal(ctx.session, id)
+    assert %MingaAgent.Tool.Output.Reference{} = reference
+
+    assert {:ok, stored} =
+             ArtifactStore.lookup_delivery(ctx.store, {:delivery, "checkpoint", "job:" <> id})
+
+    assert stored.reference == reference
+    assert {:error, :unknown_delivery} = ArtifactStore.lookup_delivery(ctx.store, capture_key)
+  end
+
+  # The background task settles asynchronously, so poll the public query.
+  defp await_terminal(session, id, attempts \\ 100) do
+    case Session.job(session, id) do
+      {:ok, %Record{status: :running}} when attempts > 0 ->
+        Process.sleep(10)
+        await_terminal(session, id, attempts - 1)
+
+      result ->
+        result
+    end
   end
 
   test "without an owning session the shell refuses instead of running the command", ctx do
@@ -103,14 +136,16 @@ defmodule MingaAgent.Tools.ShellJobPathTest do
     end
   end
 
-  defp shell_callback(ctx, metadata), do: tool_callback(ctx, "shell", metadata)
+  defp shell_callback(ctx, metadata, capture_key \\ nil),
+    do: tool_callback(ctx, "shell", metadata, capture_key)
 
-  defp tool_callback(ctx, name, metadata) do
+  defp tool_callback(ctx, name, metadata, capture_key \\ nil) do
     context =
       Context.new(
         project_root: ctx.root,
         artifact_store: ctx.store,
-        capture_key: {:delivery, "checkpoint", "call-#{System.unique_integer([:positive])}"},
+        capture_key:
+          capture_key || {:delivery, "checkpoint", "call-#{System.unique_integer([:positive])}"},
         metadata: Map.put(metadata, :process_backend, ProbeBackend)
       )
 

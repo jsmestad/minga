@@ -3,6 +3,7 @@ defmodule MingaAgent.Session.JobLedgerTest do
 
   alias MingaAgent.Session.JobLedger
   alias MingaAgent.Session.JobLedger.Record
+  alias MingaAgent.Tool.Output.Reference
 
   @now ~U[2026-11-24 10:00:00Z]
   @later ~U[2026-11-24 10:01:00Z]
@@ -138,6 +139,197 @@ defmodule MingaAgent.Session.JobLedgerTest do
   test "fetch/2 rejects unknown and non-string ids" do
     assert {:error, :job_not_found} = JobLedger.fetch(JobLedger.new(), "job-1")
     assert {:error, :job_not_found} = JobLedger.fetch(JobLedger.new(), 1)
+  end
+
+  describe "encode/1 and decode/1" do
+    test "round-trip every status tag and notice state through JSON" do
+      reference = reference()
+
+      {owner_down, ledger} = admit!(JobLedger.new(), background?: true)
+      ledger = JobLedger.interrupt_running(ledger, :owner_down, @later)
+      {restarted, ledger} = admit!(ledger, background?: true)
+      ledger = JobLedger.restore(ledger, @later)
+
+      {running, ledger} = admit!(ledger)
+      {completed, ledger} = admit!(ledger)
+      {failed, ledger} = admit!(ledger, background?: true)
+      {timed_out, ledger} = admit!(ledger)
+      {cancelled, ledger} = admit!(ledger, background?: true)
+      {crashed, ledger} = admit!(ledger)
+
+      ledger =
+        ledger
+        |> JobLedger.settle(
+          completed.id,
+          1,
+          :completed,
+          0,
+          %{reference: reference, preview: "ok"},
+          @later
+        )
+        |> JobLedger.settle(failed.id, 1, :failed, 42, %{reference: nil, preview: "PASS"}, @later)
+        |> JobLedger.settle(
+          timed_out.id,
+          1,
+          :timeout,
+          nil,
+          %{reference: nil, preview: nil},
+          @later
+        )
+        |> JobLedger.settle(cancelled.id, 1, :cancelled, nil, @output, @later)
+        |> JobLedger.settle(crashed.id, 1, :crashed, nil, @output, @later)
+        |> JobLedger.mark_notices_delivered([cancelled.id])
+
+      assert {:ok, decoded} = round_trip(ledger)
+      assert decoded == ledger
+
+      expected = [
+        {owner_down.id, {:interrupted, :owner_down}, :pending},
+        {restarted.id, {:interrupted, :restart}, :pending},
+        {running.id, :running, :none},
+        {completed.id, {:terminal, :completed, 0}, :none},
+        {failed.id, {:terminal, :failed, 42}, :pending},
+        {timed_out.id, {:terminal, :timeout, nil}, :none},
+        {cancelled.id, {:terminal, :cancelled, nil}, :delivered},
+        {crashed.id, {:terminal, :crashed, nil}, :none}
+      ]
+
+      assert Enum.map(JobLedger.list(decoded), &{&1.id, &1.status, &1.notice}) == expected
+      assert {:ok, %Record{output_ref: ^reference}} = JobLedger.fetch(decoded, completed.id)
+    end
+
+    test "round-trip a running record and keep next_seq" do
+      {record, ledger} = admit!(JobLedger.new(), epoch: 3)
+      {_ended, ledger} = admit!(ledger)
+
+      assert {:ok, decoded} = round_trip(ledger)
+      assert decoded == ledger
+      assert {:ok, ^record} = JobLedger.fetch(decoded, record.id)
+      assert {:ok, %Record{id: "job-3"}, _ledger} = JobLedger.admit(decoded, spec(), 3, @now)
+    end
+
+    test "reject malformed ledgers" do
+      {record, ledger} = admit!(JobLedger.new())
+      encoded = JobLedger.encode(ledger)
+      [entry] = encoded["records"]
+      record_map = entry["record"]
+
+      invalid = [
+        nil,
+        %{encoded | "version" => 2},
+        %{encoded | "next_seq" => 1},
+        %{encoded | "records" => [entry, entry]},
+        %{encoded | "next_seq" => 3, "records" => [entry, %{entry | "seq" => 2}]},
+        %{
+          encoded
+          | "records" => [
+              %{entry | "record" => %{record_map | "status" => %{"state" => "paused"}}}
+            ]
+        },
+        %{encoded | "records" => [%{entry | "record" => %{record_map | "notice" => "maybe"}}]},
+        %{
+          encoded
+          | "records" => [%{entry | "record" => %{record_map | "started_at" => "yesterday"}}]
+        },
+        %{
+          encoded
+          | "records" => [
+              %{entry | "record" => %{record_map | "finished_at" => DateTime.to_iso8601(@later)}}
+            ]
+        },
+        %{
+          encoded
+          | "records" => [%{entry | "record" => Map.put(record_map, "pid", "#PID<0.1.0>")}]
+        },
+        %{
+          encoded
+          | "records" => [%{entry | "record" => %{record_map | "output_ref" => %{"token" => 1}}}]
+        }
+      ]
+
+      for value <- invalid do
+        assert {:error, :invalid_job_ledger} = JobLedger.decode(value), inspect(value)
+      end
+
+      assert record.id == record_map["id"]
+    end
+
+    test "references lists every retained output reference" do
+      reference = reference()
+      {first, ledger} = admit!(JobLedger.new())
+      {second, ledger} = admit!(ledger)
+
+      ledger =
+        ledger
+        |> JobLedger.settle(
+          first.id,
+          1,
+          :completed,
+          0,
+          %{reference: reference, preview: "ok"},
+          @later
+        )
+        |> JobLedger.settle(second.id, 1, :completed, 0, @output, @later)
+
+      assert JobLedger.references(ledger) == [reference]
+    end
+  end
+
+  describe "restore/2" do
+    test "interrupts running records for restart and keeps ended ones unchanged" do
+      cases = [
+        {[background?: true], :running, {:interrupted, :restart}, :pending},
+        {[background?: false], :running, {:interrupted, :restart}, :none},
+        {[background?: true], :completed, {:terminal, :completed, 0}, :pending},
+        {[background?: false], :completed, {:terminal, :completed, 0}, :none},
+        {[background?: true], :owner_down, {:interrupted, :owner_down}, :pending}
+      ]
+
+      for {opts, before, status, notice} <- cases do
+        {record, ledger} = admit!(JobLedger.new(), opts)
+        ledger = put_status(ledger, record, before)
+
+        restored = JobLedger.restore(ledger, @later)
+
+        assert {:ok, %Record{status: ^status, notice: ^notice}} =
+                 JobLedger.fetch(restored, record.id),
+               inspect({opts, before})
+
+        assert JobLedger.running_count(restored) == 0
+        assert restored.next_seq == ledger.next_seq
+      end
+    end
+  end
+
+  describe "empty?/1" do
+    test "is true only for a ledger that never admitted a job" do
+      assert JobLedger.empty?(JobLedger.new())
+      {_record, ledger} = admit!(JobLedger.new())
+      refute JobLedger.empty?(ledger)
+    end
+  end
+
+  defp put_status(ledger, _record, :running), do: ledger
+  defp put_status(ledger, record, :completed), do: settle(ledger, record)
+
+  defp put_status(ledger, _record, :owner_down),
+    do: JobLedger.interrupt_running(ledger, :owner_down, @later)
+
+  defp round_trip(ledger),
+    do: ledger |> JobLedger.encode() |> JSON.encode!() |> JSON.decode!() |> JobLedger.decode()
+
+  defp reference do
+    {:ok, token} = Reference.token("job-ledger-test", String.duplicate("a", 32))
+
+    {:ok, reference} =
+      Reference.new(
+        token: token,
+        media_type: "text/plain",
+        bytes: 2,
+        sha256: Reference.digest("ok")
+      )
+
+    reference
   end
 
   # Fills retention with ended records, settling each so the running limit is not reached.

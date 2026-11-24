@@ -12,6 +12,7 @@ defmodule MingaAgent.SessionStoreTest do
   alias MingaAgent.ModelSelection
   alias MingaAgent.Session.Continuation
   alias MingaAgent.Session.ContinuationCodec
+  alias MingaAgent.Session.JobLedger
   alias MingaAgent.Tool.Output
   alias MingaAgent.Tool.Output.Attachment
   alias MingaAgent.Tool.Output.Range
@@ -2564,6 +2565,86 @@ defmodule MingaAgent.SessionStoreTest do
   end
 
   # ── Delete ──────────────────────────────────────────────────────────────────
+
+  describe "job ledger" do
+    test "job output named only by the ledger stays pinned and loads with its record", %{
+      tmp_dir: dir
+    } do
+      id = "job-ledger-evidence"
+      runtime = start_artifact_runtime(Path.join(dir, "artifacts"))
+      opts = [artifact_runtime: runtime]
+      {:ok, store} = ArtifactStores.ensure_record(id, runtime)
+      {output, delivery} = store_output(store, "job-output", "PASS\n", "text/plain")
+      ledger = settled_ledger(output.reference)
+
+      assert :ok = SessionStore.save(Map.put(sample_data(id), :job_ledger, ledger), dir, opts)
+      assert :ok = ArtifactStore.release(store, delivery)
+      assert {:ok, 0} = ArtifactStore.cleanup_unreferenced(store)
+
+      assert {:ok, %{bytes: "PASS\n"}} =
+               ArtifactStore.fetch(store, output.reference, output.selection)
+
+      assert {:ok, %{job_ledger: ^ledger}} = SessionStore.load(id, dir, opts)
+    end
+
+    test "a record without a jobs section loads an empty ledger, bare or enveloped", %{
+      tmp_dir: dir
+    } do
+      assert :ok = SessionStore.save(sample_data("bare-without-jobs"), dir)
+      refute Map.has_key?(read_saved_record(dir, "bare-without-jobs"), "jobs")
+      assert {:ok, %{job_ledger: bare}} = SessionStore.load("bare-without-jobs", dir)
+      assert bare == JobLedger.new()
+
+      id = "enveloped-without-jobs"
+      assert {:ok, 1} = SessionStore.save_presentation(id, 0, draft_snapshot("draft"), dir)
+      assert :ok = SessionStore.save(sample_data(id), dir)
+      assert %{"version" => 7, "conversation" => conversation} = read_saved_record(dir, id)
+      refute Map.has_key?(conversation, "jobs")
+      assert {:ok, %{job_ledger: enveloped}} = SessionStore.load(id, dir)
+      assert enveloped == JobLedger.new()
+    end
+
+    test "a ledger saved inside a draft envelope loads unchanged", %{tmp_dir: dir} do
+      id = "enveloped-jobs"
+      ledger = settled_ledger(nil)
+      assert {:ok, 1} = SessionStore.save_presentation(id, 0, draft_snapshot("draft"), dir)
+      assert :ok = SessionStore.save(Map.put(sample_data(id), :job_ledger, ledger), dir)
+
+      assert %{"conversation" => %{"jobs" => %{"next_seq" => 2}}} = read_saved_record(dir, id)
+      assert {:ok, %{job_ledger: ^ledger}} = SessionStore.load(id, dir)
+    end
+
+    test "an invalid jobs section rejects the record instead of dropping history", %{
+      tmp_dir: dir
+    } do
+      id = "invalid-jobs"
+
+      assert :ok =
+               SessionStore.save(Map.put(sample_data(id), :job_ledger, settled_ledger(nil)), dir)
+
+      path = Path.join(SessionStore.sessions_dir(dir), "#{id}.json")
+      record = read_saved_record(dir, id)
+      File.write!(path, JSON.encode!(put_in(record, ["jobs", "version"], 99)))
+
+      assert {:error, :invalid_job_ledger} = SessionStore.load(id, dir)
+    end
+  end
+
+  defp settled_ledger(reference) do
+    now = ~U[2026-11-24 10:00:00Z]
+    spec = %{command: "make test", cwd: "/project", background?: true, timeout_secs: 30}
+    {:ok, record, ledger} = JobLedger.admit(JobLedger.new(), spec, 1, now)
+    output = %{reference: reference, preview: "PASS"}
+    JobLedger.settle(ledger, record.id, 1, :failed, 42, output, now)
+  end
+
+  defp read_saved_record(dir, id) do
+    dir
+    |> SessionStore.sessions_dir()
+    |> Path.join("#{id}.json")
+    |> File.read!()
+    |> JSON.decode!()
+  end
 
   describe "delete/2" do
     test "deletes a saved session", %{tmp_dir: dir} do
