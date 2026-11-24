@@ -324,8 +324,8 @@ final class EditorNSView: MTKView {
         resetSmoothScrollState()
         scrollerStyleTask?.cancel()
         scrollerStyleTask = nil
-        scrollFadeWorkItem?.cancel()
-        scrollFadeWorkItem = nil
+        scrollFadeTask?.cancel()
+        scrollFadeTask = nil
         scrollIndicatorDragOffset = nil
         scrollIndicatorTarget = nil
         isDraggingScrollIndicator = false
@@ -2168,8 +2168,8 @@ final class EditorNSView: MTKView {
 
     // MARK: - Scroll indicator fade
 
-    /// Pending work item that fades the scroll indicator after idle.
-    private var scrollFadeWorkItem: DispatchWorkItem?
+    /// Pending scroll indicator fade animation.
+    private var scrollFadeTask: Task<Void, Never>?
 
     /// Whether the system prefers always-visible scrollers.
     private var alwaysShowScrollbar: Bool = false
@@ -2180,43 +2180,40 @@ final class EditorNSView: MTKView {
         coreTextRenderer.scrollIndicatorAlpha = 1.0
         setNeedsDisplay(bounds)
 
-        // Cancel any pending fade.
-        scrollFadeWorkItem?.cancel()
-        scrollFadeWorkItem = nil
+        // Cancel any pending fade (both the idle delay and any in-progress steps).
+        scrollFadeTask?.cancel()
+        scrollFadeTask = nil
 
         // Don't fade if system preference is "Always show".
         guard !alwaysShowScrollbar else { return }
 
-        let work = DispatchWorkItem { [weak self] in
-            guard let self else { return }
-            // Animate fade out over 0.3s using a simple step approach.
-            // We could use CADisplayLink for smoother animation, but
-            // a timer with 3 steps is sufficient for a scroll indicator.
-            self.fadeScrollIndicator(steps: 6)
-        }
-        scrollFadeWorkItem = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5, execute: work)
-    }
+        scrollFadeTask = Task { [weak self] in
+            // Initial delay before fade begins.
+            do {
+                try await Task.sleep(for: .milliseconds(1500))
+            } catch {
+                return  // Cancelled during idle delay.
+            }
 
-    /// Gradually fades the scroll indicator alpha to zero.
-    private func fadeScrollIndicator(steps remaining: Int) {
-        guard !alwaysShowScrollbar else {
-            scrollFadeWorkItem?.cancel()
-            scrollFadeWorkItem = nil
-            coreTextRenderer.scrollIndicatorAlpha = 1.0
-            setNeedsDisplay(bounds)
-            return
-        }
-        guard remaining > 0 else {
-            coreTextRenderer.scrollIndicatorAlpha = 0.0
-            setNeedsDisplay(bounds)
-            return
-        }
-        coreTextRenderer.scrollIndicatorAlpha = Float(remaining) / 6.0
-        setNeedsDisplay(bounds)
-
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
-            self?.fadeScrollIndicator(steps: remaining - 1)
+            // 6 fade steps, 50ms apart, total 300ms.
+            for step in stride(from: 5, through: 0, by: -1) {
+                guard let self else { return }
+                if Task.isCancelled { return }
+                if self.alwaysShowScrollbar {
+                    self.coreTextRenderer.scrollIndicatorAlpha = 1.0
+                    self.setNeedsDisplay(self.bounds)
+                    return
+                }
+                self.coreTextRenderer.scrollIndicatorAlpha = Float(step) / 6.0
+                self.setNeedsDisplay(self.bounds)
+                if step > 0 {
+                    do {
+                        try await Task.sleep(for: .milliseconds(50))
+                    } catch {
+                        return  // Cancelled during fade step.
+                    }
+                }
+            }
         }
     }
 
@@ -2233,8 +2230,8 @@ final class EditorNSView: MTKView {
                 guard let self else { return }
                 self.alwaysShowScrollbar = NSScroller.preferredScrollerStyle == .legacy
                 if self.alwaysShowScrollbar {
-                    self.scrollFadeWorkItem?.cancel()
-                    self.scrollFadeWorkItem = nil
+                    self.scrollFadeTask?.cancel()
+                    self.scrollFadeTask = nil
                     self.coreTextRenderer.scrollIndicatorAlpha = 1.0
                     self.setNeedsDisplay(self.bounds)
                 } else {
