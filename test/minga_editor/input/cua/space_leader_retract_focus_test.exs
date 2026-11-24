@@ -12,11 +12,13 @@ defmodule MingaEditor.Input.CUA.SpaceLeaderRetractFocusTest do
   alias MingaEditor.Agent.UIState
   alias MingaEditor.BottomPanel
   alias MingaEditor.Commands
+  alias MingaEditor.Extension.Sidebar
   alias MingaEditor.FocusOwner
   alias MingaEditor.Session.State, as: SessionState
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
   alias MingaEditor.Shell.Traditional.Workflow
+  alias MingaEditor.Sidebar.BuiltinSurfaces
 
   @moduletag :tmp_dir
 
@@ -77,6 +79,42 @@ defmodule MingaEditor.Input.CUA.SpaceLeaderRetractFocusTest do
     assert leader_prefix_open?(ctx)
   end
 
+  test "on a focused BEAM Observatory sidebar, SPC held into f leaves the file unchanged", %{
+    tmp_dir: dir
+  } do
+    ctx = cua_gui_editor(dir)
+    :ok = BuiltinSurfaces.sync_observatory(true, ctx.sidebar_registry)
+    assert %{input_handler: nil, focused?: true} = Sidebar.active_left(ctx.sidebar_registry)
+
+    held_space_then(ctx, ?f)
+
+    assert buffer_content(ctx) == "focus"
+  end
+
+  test "a mouse event between the space and the retract makes the next key plain text", %{
+    tmp_dir: dir
+  } do
+    ctx = cua_gui_editor(dir)
+
+    send_keys_sync(ctx, "<SPC>")
+    send_mouse(ctx, editor_row(ctx), 2, :left)
+    send_gui_action(ctx, {:space_leader_retract, ?f, 0})
+
+    # The space stays and f is typed as text wherever the click left the cursor.
+    assert String.length(buffer_content(ctx)) == String.length("focus f")
+    refute leader_prefix_open?(ctx)
+  end
+
+  test "a cursor that moved off the space keeps the file's characters", %{tmp_dir: dir} do
+    ctx = cua_gui_editor(dir)
+
+    send_keys_sync(ctx, "<SPC>")
+    Minga.Buffer.move_to(ctx.buffer, {0, 3})
+    send_gui_action(ctx, {:space_leader_retract, ?f, 0})
+
+    assert buffer_content(ctx) == "focus "
+  end
+
   test "on a focused file tree, SPC held into f leaves the file unchanged", %{tmp_dir: dir} do
     ctx = cua_gui_editor(dir)
     :sys.replace_state(ctx.editor, &Commands.execute(&1, :toggle_file_tree))
@@ -104,6 +142,9 @@ defmodule MingaEditor.Input.CUA.SpaceLeaderRetractFocusTest do
     send_keys_sync(ctx, "<SPC>")
     send_gui_action(ctx, {:space_leader_retract, codepoint, 0})
   end
+
+  # The first row of the editor body, below the tab bar the headless port stacks above it.
+  defp editor_row(ctx), do: Minga.Test.HeadlessPort.editor_row_offset(ctx.port)
 
   defp leader_prefix_open?(ctx),
     do: Runtime.state(editor_state(ctx).shell_runtime).whichkey.node != nil

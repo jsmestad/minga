@@ -7,10 +7,11 @@ defmodule MingaEditor.Input.CUA.SpaceTarget do
   - `{:buffer, pid}`: the focused file window takes the space as text.
   - `{:composer, pid}`: the focused Agent composer takes the space into that prompt buffer (nil before the composer has one).
   - `:overlay`: a picker, prompt, search, completion or other overlay owns the key and its text.
-  - `:no_text`: the focused surface takes no text (Agent chat navigation, a focused bottom panel, the file tree, Git status, the empty state).
+  - `:no_text`: the focused surface takes no text (Agent chat navigation, a focused bottom panel, a focused sidebar such as the BEAM Observatory, the file tree, Git status, the empty state).
   """
 
   alias MingaEditor.BottomPanel
+  alias MingaEditor.Extension.Sidebar
   alias MingaEditor.FocusOwner
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
@@ -18,17 +19,53 @@ defmodule MingaEditor.Input.CUA.SpaceTarget do
 
   @type t :: {:buffer, pid()} | {:composer, pid() | nil} | :overlay | :no_text
 
+  @typedoc "A recorded space: its target and the position it was typed at, or nil when no text buffer took it."
+  @type held :: {t(), Minga.Buffer.position() | nil}
+
   # FocusOwner surfaces that own their keys below the overlays.
   @surfaces [:editor, :agent, :file_tree, :git_status, :empty_state]
 
-  @doc "Resolves where a space typed now would go, in the order the input handlers claim it."
+  @doc """
+  Resolves where a space typed now would go.
+
+  The clauses follow the claim order of `MingaEditor.Input` surface handlers, so a change to that order must change this function too.
+  """
   @spec resolve(EditorState.t()) :: t()
-  def resolve(%EditorState{} = state) do
-    if FocusOwner.derive(state).surface in @surfaces,
-      do: surface_target(state.workspace, bottom_panel_focused?(state)),
-      else: :overlay
+  def resolve(%EditorState{workspace: workspace} = state) do
+    surface = FocusOwner.derive(state).surface
+
+    cond do
+      surface not in @surfaces -> :overlay
+      side_panel_composer?(workspace) -> {:composer, workspace.agent_ui.panel.prompt_buffer}
+      generic_sidebar_focused?(state) -> :no_text
+      surface == :empty_state -> :no_text
+      agent_composer?(workspace) -> {:composer, workspace.agent_ui.panel.prompt_buffer}
+      bottom_panel_focused?(state) -> :no_text
+      true -> file_target(workspace)
+    end
   end
 
+  # Input.AgentPanel (priority 40) claims keys for a focused side panel composer over any scope but the file tree.
+  @spec side_panel_composer?(MingaEditor.Session.State.t()) :: boolean()
+  defp side_panel_composer?(%{keymap_scope: scope, agent_ui: %{panel: panel}}),
+    do: scope != :file_tree and panel.visible and panel.input_focused
+
+  # Input.Sidebar (priority 45) claims every key for a focused left sidebar without its own input handler,
+  # such as the BEAM Observatory, and hands it to the sidebar's action handler.
+  @spec generic_sidebar_focused?(EditorState.t()) :: boolean()
+  defp generic_sidebar_focused?(%EditorState{extension_surfaces: %{sidebar_registry: registry}}) do
+    case Sidebar.active_left(registry) do
+      %{focused?: true, input_handler: handler} -> handler in [nil, MingaEditor.Input.Sidebar]
+      _no_focused_sidebar -> false
+    end
+  end
+
+  # Input.Scoped (priority 100) claims keys for a focused composer in the Agent scope.
+  @spec agent_composer?(MingaEditor.Session.State.t()) :: boolean()
+  defp agent_composer?(%{keymap_scope: scope, agent_ui: %{panel: panel}}),
+    do: scope == :agent and panel.input_focused
+
+  # Input.BottomPanel (priority 125) swallows keys while the panel has focus.
   @spec bottom_panel_focused?(EditorState.t()) :: boolean()
   defp bottom_panel_focused?(state) do
     case Runtime.state(state.shell_runtime) do
@@ -37,19 +74,10 @@ defmodule MingaEditor.Input.CUA.SpaceTarget do
     end
   end
 
-  # A focused composer claims keys in the Agent scope, and in the side panel over
-  # any scope but the file tree (Input.AgentPanel, Input.Scoped), before a focused
-  # bottom panel (Input.BottomPanel) can.
-  @spec surface_target(MingaEditor.Session.State.t(), boolean()) :: t()
-  defp surface_target(
-         %{keymap_scope: scope, agent_ui: %{panel: %{input_focused: true} = panel}},
-         _bottom_panel_focused?
-       )
-       when scope == :agent or (scope != :file_tree and panel.visible),
-       do: {:composer, panel.prompt_buffer}
-
-  defp surface_target(%{keymap_scope: :editor, buffers: %{active: buf}}, false) when is_pid(buf),
+  # The mode FSM types into the active buffer only when the file window has focus.
+  @spec file_target(MingaEditor.Session.State.t()) :: t()
+  defp file_target(%{keymap_scope: :editor, buffers: %{active: buf}}) when is_pid(buf),
     do: {:buffer, buf}
 
-  defp surface_target(_workspace, _bottom_panel_focused?), do: :no_text
+  defp file_target(_workspace), do: :no_text
 end
