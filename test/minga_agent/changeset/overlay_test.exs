@@ -2,6 +2,7 @@ defmodule MingaAgent.Changeset.OverlayTest do
   use ExUnit.Case, async: true
 
   alias MingaAgent.Changeset.Overlay
+  alias MingaAgent.Test.Overlay.CopyCloner
 
   setup do
     dir = Path.join(System.tmp_dir!(), "overlay-test-#{System.unique_integer([:positive])}")
@@ -418,6 +419,131 @@ defmodule MingaAgent.Changeset.OverlayTest do
       assert {:ok, _stats} = Overlay.materialize_project(overlay)
       assert File.read_link!(scope_path) == elsewhere
       assert File.ls!(elsewhere) == []
+    end
+  end
+
+  describe "installed JavaScript packages with clone support" do
+    setup %{project: project} do
+      write_package(project, "node_modules/left-pad")
+      File.write!(Path.join(project, "node_modules/left-pad/index.js"), "original\n")
+      File.mkdir_p!(Path.join(project, "node_modules/.bin"))
+      File.ln_s!("../left-pad/index.js", Path.join(project, "node_modules/.bin/left-pad"))
+      write_package(project, "packages/web/node_modules/react")
+
+      {:ok, overlay} = Overlay.create(project, cloner: CopyCloner)
+      on_exit(fn -> Overlay.cleanup(overlay) end)
+      %{overlay: overlay, source: Path.join(project, "node_modules/left-pad/index.js")}
+    end
+
+    test "each node_modules tree is cloned whole, so a command writing inside a package changes only the overlay",
+         %{overlay: overlay, source: source} do
+      assert {:ok, %{cloned_entries: 2, linked_entries: 0, clone_fallbacks: 0}} =
+               Overlay.materialize_project(overlay)
+
+      package = Path.join(overlay.overlay_dir, "node_modules/left-pad")
+      assert File.lstat!(package).type == :directory
+
+      assert File.read_link!(Path.join(overlay.overlay_dir, "node_modules/.bin/left-pad")) ==
+               "../left-pad/index.js"
+
+      File.write!(Path.join(package, "index.js"), "patched\n")
+      assert File.read!(source) == "original\n"
+
+      assert File.read!(Path.join(overlay.overlay_dir, "node_modules/.bin/left-pad")) ==
+               "patched\n"
+
+      # A second materialization keeps the clone and the command's change.
+      assert {:ok, %{cloned_entries: 0}} = Overlay.materialize_project(overlay)
+      assert File.read!(Path.join(package, "index.js")) == "patched\n"
+    end
+
+    test "a package installed in the project later is cloned into the existing tree",
+         %{project: project, overlay: overlay} do
+      assert {:ok, _stats} = Overlay.materialize_project(overlay)
+      write_package(project, "node_modules/is-even")
+
+      assert {:ok, %{cloned_entries: 1}} = Overlay.materialize_project(overlay)
+
+      assert File.lstat!(Path.join(overlay.overlay_dir, "node_modules/is-even")).type ==
+               :directory
+    end
+
+    test "a tool write before materialization gets the whole package, not a stub",
+         %{overlay: overlay, source: source} do
+      assert :ok =
+               Overlay.materialize_file(overlay, "node_modules/left-pad/index.js", "patched\n")
+
+      package = Path.join(overlay.overlay_dir, "node_modules/left-pad")
+      assert Enum.sort(File.ls!(package)) == ["index.js", "package.json"]
+      assert File.read!(Path.join(package, "index.js")) == "patched\n"
+      assert File.read!(source) == "original\n"
+
+      assert {:ok, _stats} = Overlay.materialize_project(overlay)
+      assert File.read!(Path.join(package, "index.js")) == "patched\n"
+    end
+
+    test "a tool write through a package link that materialization made replaces the link with a clone",
+         %{project: project, overlay: overlay, source: source} do
+      File.mkdir_p!(Path.join(overlay.overlay_dir, "node_modules"))
+      package = Path.join(overlay.overlay_dir, "node_modules/left-pad")
+      File.ln_s!(Path.join(project, "node_modules/left-pad"), package)
+
+      assert :ok = Overlay.commit_file(overlay, "node_modules/left-pad/index.js", "patched\n")
+
+      assert File.lstat!(package).type == :directory
+      assert File.read!(Path.join(package, "index.js")) == "patched\n"
+      assert File.read!(Path.join(package, "package.json")) =~ "left-pad"
+      assert File.read!(source) == "original\n"
+    end
+
+    test "a tool write through any other link is refused", %{project: project, overlay: overlay} do
+      elsewhere = Path.join(project, "vendor/left-pad")
+      File.mkdir_p!(elsewhere)
+      File.mkdir_p!(Path.join(overlay.overlay_dir, "node_modules"))
+      package = Path.join(overlay.overlay_dir, "node_modules/left-pad")
+      File.ln_s!(elsewhere, package)
+
+      assert {:error, :symlink_traversal} =
+               Overlay.materialize_file(overlay, "node_modules/left-pad/index.js", "patched\n")
+
+      assert File.read_link!(package) == elsewhere
+      assert File.ls!(elsewhere) == []
+    end
+  end
+
+  describe "installed JavaScript packages without clone support" do
+    test "packages are linked and still resolve, and a tool write inside one is refused",
+         %{project: project} do
+      write_package(project, "node_modules/left-pad")
+      source = Path.join(project, "node_modules/left-pad/index.js")
+      File.write!(source, "original\n")
+
+      {:ok, overlay} = Overlay.create(project)
+      on_exit(fn -> Overlay.cleanup(overlay) end)
+
+      assert {:ok, %{cloned_entries: 0, linked_entries: 1, clone_fallbacks: 1}} =
+               Overlay.materialize_project(overlay)
+
+      assert resolved_from_project?(overlay, project, "node_modules/left-pad/package.json")
+
+      assert {:error, :symlink_traversal} =
+               Overlay.materialize_file(overlay, "node_modules/left-pad/index.js", "patched\n")
+
+      assert File.lstat!(Path.join(overlay.overlay_dir, "node_modules/left-pad")).type == :symlink
+      assert File.read!(source) == "original\n"
+    end
+
+    test "a tool write before materialization is refused instead of leaving a stub package",
+         %{project: project} do
+      write_package(project, "node_modules/left-pad")
+
+      {:ok, overlay} = Overlay.create(project)
+      on_exit(fn -> Overlay.cleanup(overlay) end)
+
+      assert {:error, :symlink_traversal} =
+               Overlay.materialize_file(overlay, "node_modules/left-pad/index.js", "patched\n")
+
+      assert resolved_from_project?(overlay, project, "node_modules/left-pad/package.json")
     end
   end
 

@@ -3,6 +3,7 @@ defmodule MingaAgent.Changeset.ServerTest do
 
   alias MingaAgent.Changeset
   alias MingaAgent.Changeset.Server
+  alias MingaAgent.Test.Overlay.CopyCloner
 
   setup do
     dir = Path.join(System.tmp_dir!(), "changeset-test-#{System.unique_integer([:positive])}")
@@ -182,15 +183,16 @@ defmodule MingaAgent.Changeset.ServerTest do
       %{source_file: Path.join(package_dir, "index.js")}
     end
 
-    # The agent stages a change, a shell command removes the overlay's
-    # node_modules, and the next materialization links the package back to
-    # the project. Cleanup must not follow that link.
-    defp relink_tracked_dependency(server) do
-      assert {:ok, _stats} = GenServer.call(server, :materialize_for_command)
+    # The agent's write clones the package into the overlay. A shell command
+    # then replaces the overlay's package with a link to the project's copy,
+    # as materialization does when cloning is not possible. Cleanup must not
+    # follow that link.
+    defp relink_tracked_dependency(server, project) do
       overlay = GenServer.call(server, :overlay_path)
-      File.rm_rf!(Path.join(overlay, "node_modules"))
-      assert {:ok, _stats} = GenServer.call(server, :materialize_for_command)
-      assert File.lstat!(Path.join(overlay, "node_modules/pkg")).type == :symlink
+      package = Path.join(overlay, "node_modules/pkg")
+      assert File.lstat!(package).type == :directory
+      File.rm_rf!(package)
+      File.ln_s!(Path.join(project, "node_modules/pkg"), package)
     end
 
     defp source_fingerprint(project, source_file) do
@@ -199,11 +201,11 @@ defmodule MingaAgent.Changeset.ServerTest do
     end
 
     test "discard leaves the project file untouched", %{project: project, source_file: source} do
-      server = start_server(project)
+      server = start_server(project, overlay_cloner: CopyCloner)
       before = source_fingerprint(project, source)
 
       assert :ok = GenServer.call(server, {:write_file, "node_modules/pkg/index.js", "draft"})
-      relink_tracked_dependency(server)
+      relink_tracked_dependency(server, project)
 
       assert :ok = GenServer.call(server, {:discard_file, "node_modules/pkg/index.js"})
       assert source_fingerprint(project, source) == before
@@ -214,11 +216,11 @@ defmodule MingaAgent.Changeset.ServerTest do
       project: project,
       source_file: source
     } do
-      server = start_server(project)
+      server = start_server(project, overlay_cloner: CopyCloner)
       before = source_fingerprint(project, source)
 
       assert :ok = GenServer.call(server, {:write_file, "node_modules/pkg/index.js", "draft"})
-      relink_tracked_dependency(server)
+      relink_tracked_dependency(server, project)
 
       assert :ok = GenServer.call(server, {:undo, "node_modules/pkg/index.js"})
       assert source_fingerprint(project, source) == before
@@ -230,12 +232,12 @@ defmodule MingaAgent.Changeset.ServerTest do
            project: project,
            source_file: source
          } do
-      server = start_server(project)
+      server = start_server(project, overlay_cloner: CopyCloner)
       before = source_fingerprint(project, source)
 
       assert :ok = GenServer.call(server, {:delete_file, "node_modules/pkg/index.js"})
       assert :ok = GenServer.call(server, {:write_file, "node_modules/pkg/index.js", "draft"})
-      relink_tracked_dependency(server)
+      relink_tracked_dependency(server, project)
 
       assert {:error, :symlink_traversal} =
                GenServer.call(server, {:undo, "node_modules/pkg/index.js"})

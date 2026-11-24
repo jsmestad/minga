@@ -6,14 +6,19 @@ defmodule MingaAgent.Changeset.Overlay do
 
   Build artifact and cache directories are skipped. `MIX_BUILD_PATH` and `CARGO_TARGET_DIR` point inside the overlay, while `MIX_DEPS_PATH` reuses the project deps path. A Rust `target` directory is skipped only when it sits next to a `Cargo.toml`, because `target` is an ordinary source directory name in other ecosystems.
 
-  Installed JavaScript dependencies are linked, not copied. Materialization creates a real `node_modules` directory owned by the overlay and symlinks each installed package to the project's copy. `.bin`, `@scope`, and pnpm's `.pnpm` directories are real overlay directories whose existing entries are linked or, for small regular files such as shims, copied one by one. Node's upward `node_modules` lookup then resolves packages from the overlay, while tool caches (`node_modules/.vite`, `node_modules/.cache`), package-manager metadata, and newly installed packages land in the overlay instead of the project. Writes inside an already-installed package directory still follow its link into the project.
+  Installed JavaScript dependencies are cloned, not copied. The first materialization clones each project `node_modules` tree into the overlay with one copy-on-write clone (`MingaAgent.Changeset.Overlay.Cloner`, `cp -c` on APFS or `cp --reflink=always` on Linux), which shares data blocks with the project until either side writes. Node's upward `node_modules` lookup resolves packages from the overlay, and every write inside the tree, including changes inside an installed package by a postinstall script or `patch-package`, lands in the overlay. Links inside the tree are copied as links, so pnpm's relative links resolve inside the clone; a link with an absolute target, such as an `npm link`, still reaches that target. A later materialization keeps the existing tree and adds only entries it is missing, cloning each one.
 
-  Paths the changeset server deletes, writes, or renames come from `artifact_path/3`, which refuses a path that passes through a symlink, so discard and undo never reach project files through a linked package.
+  When a tree cannot be cloned (the overlay and the project are on different volumes, or the filesystem cannot share blocks), the overlay never copies its bytes. It builds a real `node_modules` directory instead and symlinks each installed package to the project's copy. `.bin`, `@scope`, and pnpm's `.pnpm` directories are real overlay directories whose existing entries are linked or, for small regular files such as shims, copied one by one. Tool caches (`node_modules/.vite`, `node_modules/.cache`), package-manager metadata, and newly installed packages land in the overlay, but a command that writes inside an installed package follows its link into the project. Each materialization that falls back says so once in `*Messages*`.
+
+  A tool write, delete, or commit under a project `node_modules` first gets the dependency tree a command would see. A package link on its path that points at the project's copy is then replaced with a clone of that package. When the package cannot be cloned, the write is refused with `:symlink_traversal`, so a tool never writes through a link and never leaves a partial package behind.
+
+  Paths the changeset server deletes, writes, or renames for cleanup come from `artifact_path/3`, which refuses a path that passes through a symlink, so discard and undo never reach project files through a linked package.
   """
 
   import Bitwise, only: [band: 2]
 
   alias Minga.Buffer.Persistence.SystemFileSystem
+  alias MingaAgent.Changeset.Overlay.SystemCloner
   alias MingaAgent.Changeset.PublicationTarget
 
   @typedoc "Overlay state."
@@ -21,7 +26,8 @@ defmodule MingaAgent.Changeset.Overlay do
           overlay_dir: String.t(),
           project_root: String.t(),
           build_dir: String.t(),
-          link_mode: :copy
+          link_mode: :copy,
+          cloner: module()
         }
 
   @typedoc "Why a project read was refused or failed. The refusal names the project-relative path."
@@ -33,11 +39,17 @@ defmodule MingaAgent.Changeset.Overlay do
           copied_files: non_neg_integer(),
           copied_bytes: non_neg_integer(),
           skipped_dirs: non_neg_integer(),
-          linked_entries: non_neg_integer()
+          linked_entries: non_neg_integer(),
+          cloned_entries: non_neg_integer(),
+          clone_fallbacks: non_neg_integer(),
+          clone_fallback_reason: term()
         }
 
-  @enforce_keys [:overlay_dir, :project_root, :build_dir, :link_mode]
-  defstruct [:overlay_dir, :project_root, :build_dir, :link_mode]
+  @typedoc "Creation options. `:cloner` replaces the `MingaAgent.Changeset.Overlay.Cloner` implementation."
+  @type create_opt :: {:cloner, module()}
+
+  @enforce_keys [:overlay_dir, :project_root, :build_dir, :link_mode, :cloner]
+  defstruct [:overlay_dir, :project_root, :build_dir, :link_mode, :cloner]
 
   @tombstone_suffix ".__changeset_deleted__"
 
@@ -45,32 +57,45 @@ defmodule MingaAgent.Changeset.Overlay do
                ~w(_build .git .elixir_ls .expert .zig-cache zig-cache node_modules .hex .cache .gradle .swiftpm DerivedData deps)
              )
 
-  @empty_stats %{copied_files: 0, copied_bytes: 0, skipped_dirs: 0, linked_entries: 0}
+  @empty_stats %{
+    copied_files: 0,
+    copied_bytes: 0,
+    skipped_dirs: 0,
+    linked_entries: 0,
+    cloned_entries: 0,
+    clone_fallbacks: 0,
+    clone_fallback_reason: nil
+  }
 
   @doc """
   Creates a private lazy overlay directory for the project.
 
   The project tree is not copied during creation. Files are materialized when written or when command execution asks for a writable view.
   """
-  @spec create(String.t()) :: {:ok, t()} | {:error, term()}
-  def create(project_root) do
+  @spec create(String.t(), [create_opt()]) :: {:ok, t()} | {:error, term()}
+  def create(project_root, opts \\ []) do
+    cloner = Keyword.get_lazy(opts, :cloner, &default_cloner/0)
+
     Minga.Telemetry.span_with_stop_metadata([:minga, :overlay, :create], %{lazy: true}, fn ->
-      result = create_result(project_root)
+      result = create_result(project_root, cloner)
       {result, create_metadata(result)}
     end)
   end
 
-  @spec create_result(String.t()) :: {:ok, t()} | {:error, term()}
-  defp create_result(project_root) do
+  @spec default_cloner() :: module()
+  defp default_cloner, do: Application.get_env(:minga, :overlay_cloner, SystemCloner)
+
+  @spec create_result(String.t(), module()) :: {:ok, t()} | {:error, term()}
+  defp create_result(project_root, cloner) do
     if File.dir?(project_root) do
-      create_overlay(project_root)
+      create_overlay(project_root, cloner)
     else
       {:error, {:invalid_project_root, project_root}}
     end
   end
 
-  @spec create_overlay(String.t()) :: {:ok, t()} | {:error, term()}
-  defp create_overlay(project_root) do
+  @spec create_overlay(String.t(), module()) :: {:ok, t()} | {:error, term()}
+  defp create_overlay(project_root, cloner) do
     id = Base.encode16(:crypto.strong_rand_bytes(8), case: :lower)
     overlay_dir = Path.join(System.tmp_dir!(), "minga-overlay-#{id}")
     build_dir = Path.join(overlay_dir, "_build")
@@ -84,7 +109,8 @@ defmodule MingaAgent.Changeset.Overlay do
                overlay_dir: overlay_dir,
                project_root: project_root,
                build_dir: build_dir,
-               link_mode: :copy
+               link_mode: :copy,
+               cloner: cloner
              }}
 
           {:error, reason} ->
@@ -114,6 +140,7 @@ defmodule MingaAgent.Changeset.Overlay do
   @spec materialize_file(t(), String.t(), binary()) :: :ok | {:error, term()}
   def materialize_file(%__MODULE__{} = overlay, relative_path, content) do
     with :ok <- reject_tombstone_relative_path(relative_path),
+         :ok <- unshare_dependencies(overlay, relative_path),
          {:ok, target} <- safe_target(overlay, relative_path),
          :ok <- File.mkdir_p(Path.dirname(target)) do
       File.rm(tombstone_path(target))
@@ -139,6 +166,7 @@ defmodule MingaAgent.Changeset.Overlay do
   @spec commit_file(t(), String.t(), binary() | :deleted) :: :ok | {:error, term()}
   def commit_file(%__MODULE__{} = overlay, relative_path, prepared) do
     with :ok <- reject_tombstone_relative_path(relative_path),
+         :ok <- unshare_dependencies(overlay, relative_path),
          {:ok, target} <- safe_target(overlay, relative_path),
          :ok <- File.mkdir_p(Path.dirname(target)),
          :ok <- regular_or_absent(target),
@@ -252,6 +280,7 @@ defmodule MingaAgent.Changeset.Overlay do
         result =
           materialize_directory(overlay, overlay.project_root, overlay.overlay_dir, @empty_stats)
 
+        report_clone_fallback(result)
         {result, materialize_metadata(result)}
       end
     )
@@ -265,6 +294,7 @@ defmodule MingaAgent.Changeset.Overlay do
   @spec delete_file(t(), String.t()) :: :ok | {:error, term()}
   def delete_file(%__MODULE__{} = overlay, relative_path) do
     with :ok <- reject_tombstone_relative_path(relative_path),
+         :ok <- unshare_dependencies(overlay, relative_path),
          {:ok, target} <- safe_target(overlay, relative_path),
          {:ok, source} <- safe_project_path(overlay, relative_path),
          :ok <- ensure_deletable(target, source),
@@ -369,11 +399,180 @@ defmodule MingaAgent.Changeset.Overlay do
     safe_target(overlay, relative_path <> suffix)
   end
 
-  @doc "Removes the overlay directory and all its contents."
+  @doc """
+  Removes the overlay directory and all its contents.
+
+  The directory is renamed aside at once, so the overlay is gone when this returns, and its contents are removed in the background. A cloned `node_modules` can hold tens of thousands of entries, and removing them must not hold up a publish or discard. Links inside the overlay are removed, never followed.
+  """
   @spec cleanup(t()) :: :ok
-  def cleanup(%__MODULE__{overlay_dir: dir}) do
-    File.rm_rf!(dir)
-    :ok
+  def cleanup(%__MODULE__{overlay_dir: dir, cloner: cloner}) do
+    removing = "#{dir}.#{System.unique_integer([:positive])}.removing"
+
+    case File.rename(dir, removing) do
+      :ok -> remove_in_background(cloner, removing)
+      {:error, :enoent} -> :ok
+      {:error, _reason} -> remove_now(cloner, dir)
+    end
+  end
+
+  @spec remove_in_background(module(), String.t()) :: :ok
+  defp remove_in_background(cloner, path) do
+    case Task.Supervisor.start_child(Minga.Eval.TaskSupervisor, fn -> remove_now(cloner, path) end) do
+      {:ok, _pid} -> :ok
+      {:error, _reason} -> remove_now(cloner, path)
+    end
+  catch
+    :exit, _reason -> remove_now(cloner, path)
+  end
+
+  @spec remove_now(module(), String.t()) :: :ok
+  defp remove_now(cloner, path) do
+    case cloner.remove(path) do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        Minga.Log.warning(
+          :agent,
+          "Agent overlay #{path} could not be removed: #{inspect(reason)}"
+        )
+    end
+  end
+
+  # A tool write under a project node_modules first gets the dependency tree a
+  # command would see. Then every package link on the path that points at the
+  # project's copy of that path is replaced by a clone, so the write stays in
+  # the overlay. A link that cannot be cloned is left alone, and the write is
+  # refused with :symlink_traversal.
+  @spec unshare_dependencies(t(), String.t()) :: :ok | {:error, term()}
+  defp unshare_dependencies(%__MODULE__{} = overlay, relative_path) do
+    root = Path.expand(overlay.overlay_dir)
+    target = root |> Path.join(relative_path) |> Path.expand()
+
+    with {:ok, target} <- validate_target_without_symlink_check(root, target) do
+      target |> Path.relative_to(root) |> Path.split() |> unshare_components(overlay)
+    end
+  end
+
+  @spec unshare_components([String.t()], t()) :: :ok | {:error, term()}
+  defp unshare_components(components, overlay) do
+    case dependency_prefix(components) do
+      nil ->
+        :ok
+
+      prefix ->
+        with :ok <- place_enclosing_dependencies(overlay, Path.join(prefix)) do
+          unshare_package_links(overlay, components)
+        end
+    end
+  end
+
+  # The outermost node_modules that the path lies inside, as path components.
+  @spec dependency_prefix([String.t()]) :: [String.t()] | nil
+  defp dependency_prefix(components) do
+    case Enum.split_while(components, &(&1 != "node_modules")) do
+      {outside, ["node_modules", _inside | _rest]} -> Enum.take(components, length(outside) + 1)
+      _not_inside -> nil
+    end
+  end
+
+  @spec place_enclosing_dependencies(t(), String.t()) :: :ok | {:error, term()}
+  defp place_enclosing_dependencies(overlay, relative_dir) do
+    project = Path.expand(overlay.project_root)
+    source = Path.join(project, relative_dir)
+    target = Path.join(Path.expand(overlay.overlay_dir), relative_dir)
+
+    if absent?(target) and real_project_directory?(project, source) do
+      result = place_dependencies(overlay, source, target, @empty_stats)
+      report_clone_fallback(result)
+
+      with {:ok, _stats} <- result, do: :ok
+    else
+      :ok
+    end
+  end
+
+  @spec absent?(String.t()) :: boolean()
+  defp absent?(path), do: match?({:error, :enoent}, File.lstat(path))
+
+  # A project directory reached without following any symlink.
+  @spec real_project_directory?(String.t(), String.t()) :: boolean()
+  defp real_project_directory?(project, path) do
+    match?({:ok, %{type: :directory}}, File.lstat(path)) and not symlink_traversal?(project, path)
+  end
+
+  # The written file itself is never unshared: only the directories above it.
+  @spec unshare_package_links(t(), [String.t()]) :: :ok | {:error, term()}
+  defp unshare_package_links(overlay, components) do
+    start = {Path.expand(overlay.overlay_dir), Path.expand(overlay.project_root)}
+
+    components
+    |> Enum.drop(-1)
+    |> Enum.reduce_while(start, fn component, {overlay_parent, project_parent} ->
+      overlay_path = Path.join(overlay_parent, component)
+      project_path = Path.join(project_parent, component)
+
+      case unshare_link(overlay, overlay_path, project_path) do
+        :ok -> {:cont, {overlay_path, project_path}}
+        :stop -> {:halt, :ok}
+        {:error, _reason} = error -> {:halt, error}
+      end
+    end)
+    |> unshare_result()
+  end
+
+  @spec unshare_result({String.t(), String.t()} | :ok | {:error, term()}) ::
+          :ok | {:error, term()}
+  defp unshare_result({_overlay_path, _project_path}), do: :ok
+  defp unshare_result(result), do: result
+
+  # Only a link that points at the project's copy of the same path, as
+  # materialization creates them, is replaced, and only by a clone of a real
+  # project directory.
+  @spec unshare_link(t(), String.t(), String.t()) :: :ok | :stop | {:error, term()}
+  defp unshare_link(overlay, overlay_path, project_path) do
+    case File.lstat(overlay_path) do
+      {:ok, %{type: :directory}} ->
+        :ok
+
+      {:ok, %{type: :symlink}} ->
+        if File.read_link(overlay_path) == {:ok, project_path} and
+             real_project_directory?(Path.expand(overlay.project_root), project_path),
+           do: replace_link_with_clone(overlay, overlay_path, project_path),
+           else: :stop
+
+      _other ->
+        :stop
+    end
+  end
+
+  @spec replace_link_with_clone(t(), String.t(), String.t()) :: :ok | {:error, term()}
+  defp replace_link_with_clone(overlay, link, project_path) do
+    unique = System.unique_integer([:positive])
+    clone = Path.join(Path.dirname(link), ".#{Path.basename(link)}.#{unique}.clone")
+
+    case clone_entry(overlay, project_path, clone) do
+      :ok -> swap_clone_for_link(clone, link, project_path)
+      {:fallback, _reason} -> {:error, :symlink_traversal}
+      {:error, _reason} = error -> error
+    end
+  end
+
+  # A directory cannot be renamed over a symlink, so the link goes first. If
+  # the rename fails, the link is put back.
+  @spec swap_clone_for_link(String.t(), String.t(), String.t()) :: :ok | {:error, term()}
+  defp swap_clone_for_link(clone, link, project_path) do
+    with :ok <- File.rm(link) do
+      case File.rename(clone, link) do
+        :ok ->
+          :ok
+
+        {:error, reason} ->
+          _ = File.ln_s(project_path, link)
+          _ = File.rm_rf(clone)
+          {:error, reason}
+      end
+    end
   end
 
   @spec safe_target(t(), String.t()) ::
@@ -564,22 +763,14 @@ defmodule MingaAgent.Changeset.Overlay do
     if MapSet.member?(@skip_dirs, entry), do: :skip, else: :copy
   end
 
-  # Builds an overlay-owned node_modules. Package entries link to the project's
-  # installed packages, while every directory a package manager or tool adds
-  # entries to stays a real overlay directory so its writes land here. A
-  # node_modules that is not a real directory in the project is skipped.
+  # Builds an overlay-owned node_modules. A node_modules that is not a real
+  # directory in the project is skipped.
   @spec link_dependencies(t(), String.t(), String.t(), materialization_stats()) ::
           {:ok, materialization_stats()} | {:error, term()}
   defp link_dependencies(overlay, source_path, target_path, stats) do
     case File.lstat(source_path) do
       {:ok, %{type: :directory}} ->
-        build_link_farm(
-          overlay,
-          :node_modules,
-          source_path,
-          target_path,
-          increment_skipped(stats)
-        )
+        place_dependencies(overlay, source_path, target_path, increment_skipped(stats))
 
       {:ok, _other} ->
         {:ok, increment_skipped(stats)}
@@ -589,31 +780,134 @@ defmodule MingaAgent.Changeset.Overlay do
     end
   end
 
+  # A node_modules the overlay does not have yet is cloned whole, with one
+  # cloner call. When cloning fails, it becomes a link farm instead: package
+  # entries link to the project's installed packages, while every directory a
+  # package manager or tool adds entries to stays a real overlay directory.
+  # An existing tree is kept, and only entries it is missing are added.
+  @spec place_dependencies(t(), String.t(), String.t(), materialization_stats()) ::
+          {:ok, materialization_stats()} | {:error, term()}
+  defp place_dependencies(overlay, source_path, target_path, stats) do
+    case File.lstat(target_path) do
+      {:error, :enoent} ->
+        clone_or_farm(overlay, :node_modules, source_path, target_path, stats)
+
+      _existing ->
+        build_link_farm(overlay, :node_modules, :clone, source_path, target_path, stats)
+    end
+  end
+
   @typep link_farm_kind :: :node_modules | :entries | :pnpm_store
 
-  @spec build_link_farm(t(), link_farm_kind(), String.t(), String.t(), materialization_stats()) ::
-          {:ok, materialization_stats()} | {:error, term()}
-  defp build_link_farm(overlay, kind, source_dir, target_dir, stats) do
+  # How a missing entry is added: `:clone` tries the cloner first, `:link`
+  # goes straight to links, after cloning the enclosing tree already failed.
+  @typep placement :: :clone | :link
+
+  @spec build_link_farm(
+          t(),
+          link_farm_kind(),
+          placement(),
+          String.t(),
+          String.t(),
+          materialization_stats()
+        ) :: {:ok, materialization_stats()} | {:error, term()}
+  defp build_link_farm(overlay, kind, placement, source_dir, target_dir, stats) do
     with :ok <- reject_materialization_symlink(overlay, target_dir),
          :ok <- File.mkdir_p(target_dir),
          {:ok, entries} <- File.ls(source_dir) do
       reduce_stats(
         entries,
         stats,
-        &link_farm_entry(overlay, kind, source_dir, target_dir, &1, &2)
+        &link_farm_entry(overlay, {kind, placement}, source_dir, target_dir, &1, &2)
       )
     end
   end
 
+  @spec clone_or_farm(t(), link_farm_kind(), String.t(), String.t(), materialization_stats()) ::
+          {:ok, materialization_stats()} | {:error, term()}
+  defp clone_or_farm(overlay, kind, source_path, target_path, stats) do
+    case clone_entry(overlay, source_path, target_path) do
+      :ok ->
+        {:ok, %{stats | cloned_entries: stats.cloned_entries + 1}}
+
+      {:fallback, reason} ->
+        stats = record_clone_fallback(stats, reason)
+        build_link_farm(overlay, kind, :link, source_path, target_path, stats)
+
+      {:error, _reason} = error ->
+        error
+    end
+  end
+
+  @spec clone_or_link(t(), String.t(), String.t(), materialization_stats()) ::
+          {:ok, materialization_stats()} | {:error, term()}
+  defp clone_or_link(overlay, source_path, target_path, stats) do
+    case clone_entry(overlay, source_path, target_path) do
+      :ok ->
+        {:ok, %{stats | cloned_entries: stats.cloned_entries + 1}}
+
+      {:fallback, reason} ->
+        link_entry(source_path, target_path, record_clone_fallback(stats, reason))
+
+      {:error, _reason} = error ->
+        error
+    end
+  end
+
+  # Clones a project entry to an overlay path that does not exist yet. Every
+  # overlay ancestor is checked first, so a clone never lands outside the
+  # overlay. A failed clone's partial output is removed; removal deletes links
+  # inside it, never their targets.
+  @spec clone_entry(t(), String.t(), String.t()) ::
+          :ok | {:fallback, term()} | {:error, term()}
+  defp clone_entry(overlay, source_path, target_path) do
+    with :ok <- reject_materialization_symlink(overlay, target_path),
+         :ok <- File.mkdir_p(Path.dirname(target_path)) do
+      case overlay.cloner.clone(source_path, target_path) do
+        :ok -> :ok
+        {:error, reason} -> discard_partial_clone(target_path, reason)
+      end
+    end
+  end
+
+  @spec discard_partial_clone(String.t(), term()) :: {:fallback, term()} | {:error, term()}
+  defp discard_partial_clone(target_path, reason) do
+    case File.rm_rf(target_path) do
+      {:ok, _removed} -> {:fallback, reason}
+      {:error, cleanup, _path} -> {:error, {:clone_cleanup_failed, reason, cleanup}}
+    end
+  end
+
+  @spec record_clone_fallback(materialization_stats(), term()) :: materialization_stats()
+  defp record_clone_fallback(stats, reason) do
+    %{
+      stats
+      | clone_fallbacks: stats.clone_fallbacks + 1,
+        clone_fallback_reason: stats.clone_fallback_reason || reason
+    }
+  end
+
+  # Said once per materialization, however many trees fell back.
+  @spec report_clone_fallback({:ok, materialization_stats()} | {:error, term()}) :: :ok
+  defp report_clone_fallback({:ok, %{clone_fallbacks: count, clone_fallback_reason: reason}})
+       when count > 0 do
+    Minga.Log.warning(
+      :agent,
+      "Agent overlay: installed JavaScript packages could not be cloned (#{inspect(reason)}), so they are linked to the project. A command that writes inside an installed package changes the project's copy."
+    )
+  end
+
+  defp report_clone_fallback(_result), do: :ok
+
   @spec link_farm_entry(
           t(),
-          link_farm_kind(),
+          {link_farm_kind(), placement()},
           String.t(),
           String.t(),
           String.t(),
           materialization_stats()
         ) :: {:ok, materialization_stats()} | {:error, term()}
-  defp link_farm_entry(overlay, kind, source_dir, target_dir, entry, stats) do
+  defp link_farm_entry(overlay, {kind, placement}, source_dir, target_dir, entry, stats) do
     case link_farm_disposition(kind, entry) do
       :skip ->
         {:ok, stats}
@@ -625,7 +919,7 @@ defmodule MingaAgent.Changeset.Overlay do
         with {:ok, %{type: source_type}} <- File.lstat(source_path) do
           place_link_farm_entry(
             overlay,
-            disposition,
+            {disposition, placement},
             source_type,
             source_path,
             target_path,
@@ -641,55 +935,76 @@ defmodule MingaAgent.Changeset.Overlay do
   # link that materialization made to the project's entry is replaced once that
   # entry is a real directory. A link a command made is kept. A kept symlink is
   # never written through, because nothing is copied or created at its path.
+  # A missing entry is cloned when the placement allows, and otherwise linked;
+  # small regular files such as shims are copied.
   @spec place_link_farm_entry(
           t(),
-          :link | {:own, link_farm_kind()},
+          {:link | {:own, link_farm_kind()}, placement()},
           :device | :directory | :regular | :symlink | :other,
           String.t(),
           String.t(),
           materialization_stats()
         ) :: {:ok, materialization_stats()} | {:error, term()}
-  defp place_link_farm_entry(overlay, disposition, source_type, source_path, target_path, stats) do
-    case {disposition, source_type, File.lstat(target_path)} do
-      {{:own, child_kind}, :directory, {:ok, %{type: :directory}}} ->
-        build_link_farm(overlay, child_kind, source_path, target_path, stats)
+  defp place_link_farm_entry(overlay, entry, source_type, source_path, target_path, stats) do
+    case {entry, source_type, File.lstat(target_path)} do
+      {{{:own, child_kind}, placement}, :directory, {:ok, %{type: :directory}}} ->
+        build_link_farm(overlay, child_kind, placement, source_path, target_path, stats)
 
-      {{:own, child_kind}, :directory, {:error, :enoent}} ->
-        build_link_farm(overlay, child_kind, source_path, target_path, stats)
+      {{{:own, child_kind}, :clone}, :directory, {:error, :enoent}} ->
+        clone_or_farm(overlay, child_kind, source_path, target_path, stats)
 
-      {{:own, child_kind}, :directory, {:ok, %{type: :symlink}}} ->
-        own_linked_directory(overlay, child_kind, source_path, target_path, stats)
+      {{{:own, child_kind}, :link}, :directory, {:error, :enoent}} ->
+        build_link_farm(overlay, child_kind, :link, source_path, target_path, stats)
 
-      {_disposition, _source_type, {:ok, _existing}} ->
+      {{{:own, child_kind}, placement}, :directory, {:ok, %{type: :symlink}}} ->
+        own_linked_directory(overlay, {child_kind, placement}, source_path, target_path, stats)
+
+      {_entry, _source_type, {:ok, _existing}} ->
         {:ok, stats}
 
-      {_disposition, :regular, {:error, :enoent}} ->
+      {_entry, :regular, {:error, :enoent}} ->
         materialize_regular_file(overlay, source_path, target_path, stats)
 
-      {_disposition, _source_type, {:error, :enoent}} ->
+      {{_disposition, :clone}, _source_type, {:error, :enoent}} ->
+        clone_or_link(overlay, source_path, target_path, stats)
+
+      {{_disposition, :link}, _source_type, {:error, :enoent}} ->
         link_entry(source_path, target_path, stats)
 
-      {_disposition, _source_type, {:error, reason}} ->
+      {_entry, _source_type, {:error, reason}} ->
         {:error, reason}
     end
   end
 
   @spec own_linked_directory(
           t(),
-          link_farm_kind(),
+          {link_farm_kind(), placement()},
           String.t(),
           String.t(),
           materialization_stats()
         ) :: {:ok, materialization_stats()} | {:error, term()}
-  defp own_linked_directory(overlay, kind, source_path, target_path, stats) do
+  defp own_linked_directory(overlay, {kind, placement}, source_path, target_path, stats) do
     if File.read_link(target_path) == {:ok, Path.expand(source_path)} do
       with :ok <- File.rm(target_path) do
-        build_link_farm(overlay, kind, source_path, target_path, stats)
+        own_directory(overlay, {kind, placement}, source_path, target_path, stats)
       end
     else
       {:ok, stats}
     end
   end
+
+  @spec own_directory(
+          t(),
+          {link_farm_kind(), placement()},
+          String.t(),
+          String.t(),
+          materialization_stats()
+        ) :: {:ok, materialization_stats()} | {:error, term()}
+  defp own_directory(overlay, {kind, :clone}, source_path, target_path, stats),
+    do: clone_or_farm(overlay, kind, source_path, target_path, stats)
+
+  defp own_directory(overlay, {kind, :link}, source_path, target_path, stats),
+    do: build_link_farm(overlay, kind, :link, source_path, target_path, stats)
 
   # `.bin` (package executables), `@scope` directories, `.pnpm` (pnpm's package
   # tree), and its hoisted `.pnpm/node_modules` are owned by the overlay; their
