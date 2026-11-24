@@ -8,11 +8,11 @@ defmodule MingaEditor.UI.Picker.WorkspaceSource do
 
   @behaviour MingaEditor.UI.Picker.Source
 
+  alias MingaEditor.Agent.WorkspaceStatus
   alias MingaEditor.UI.Picker.Context
   alias MingaEditor.UI.Picker.Item
 
   alias MingaEditor.State.Workspace
-  alias MingaEditor.State.Workspace.Agent, as: WorkspaceAgent
   alias MingaEditor.State.TabBar
 
   @impl true
@@ -21,7 +21,7 @@ defmodule MingaEditor.UI.Picker.WorkspaceSource do
 
   @impl true
   @spec candidates(Context.t()) :: [Item.t()]
-  def candidates(%Context{tab_bar: %TabBar{} = tb}) do
+  def candidates(%Context{tab_bar: %TabBar{} = tb} = ctx) do
     # Filter out workspaces with no tabs (empty manual workspace)
     tb.workspaces
     |> Enum.filter(fn ws ->
@@ -33,7 +33,7 @@ defmodule MingaEditor.UI.Picker.WorkspaceSource do
       active_marker = if ws.id == TabBar.active_workspace_id(tb), do: " \u{2022}", else: ""
       tabs = TabBar.tabs_in_workspace(tb, ws.id)
       tab_count = Enum.count(tabs)
-      status = agent_status_text(ws)
+      status = row_status(ws, tb, ctx)
 
       # Show file names inline for context
       file_names =
@@ -41,7 +41,9 @@ defmodule MingaEditor.UI.Picker.WorkspaceSource do
         |> Enum.filter(&(&1.kind == :file))
         |> Enum.map_join(", ", & &1.label)
 
-      desc_parts = ["#{tab_count} tab#{if tab_count == 1, do: "", else: "s"}#{status}"]
+      desc_parts = [
+        "#{tab_count} tab#{if tab_count == 1, do: "", else: "s"}#{status_text(status)}"
+      ]
 
       desc_parts =
         if file_names != "", do: Enum.concat(desc_parts, [file_names]), else: desc_parts
@@ -52,7 +54,7 @@ defmodule MingaEditor.UI.Picker.WorkspaceSource do
         id: ws.id,
         label: "#{label}#{active_marker}",
         description: desc,
-        annotation: status_annotation(ws),
+        annotation: status_annotation(status),
         icon_color: ws.color
       }
     end)
@@ -77,39 +79,37 @@ defmodule MingaEditor.UI.Picker.WorkspaceSource do
   @spec group_icon(Workspace.t()) :: String.t()
   defp group_icon(%Workspace{}), do: "\u{F0256}"
 
-  @spec agent_status_text(Workspace.t()) :: String.t()
-  defp agent_status_text(%Workspace{payload: %WorkspaceAgent{agent_status: :thinking}}),
-    do: " ↻ thinking"
+  # Agent workspaces show the status that every other surface shows (WorkspaceStatus).
+  # Manual workspaces have no Agent status.
+  @spec row_status(Workspace.t(), TabBar.t(), Context.t()) :: WorkspaceStatus.t() | nil
+  defp row_status(%Workspace{kind: :agent} = ws, %TabBar{} = tb, %Context{} = ctx) do
+    WorkspaceStatus.resolve_in(
+      ws,
+      TabBar.active_workspace_id(tb),
+      ctx.live_agent,
+      ctx.live_agent_ui
+    )
+  end
 
-  defp agent_status_text(%Workspace{payload: %WorkspaceAgent{agent_status: :tool_executing}}),
-    do: " ⚙ executing"
+  defp row_status(%Workspace{}, _tb, _ctx), do: nil
 
-  defp agent_status_text(%Workspace{payload: %WorkspaceAgent{agent_status: :approval_waiting}}),
-    do: " awaiting approval"
+  @spec status_text(WorkspaceStatus.t() | nil) :: String.t()
+  defp status_text(:thinking), do: " ↻ thinking"
+  defp status_text(:tool_executing), do: " ⚙ executing"
+  defp status_text(:approval_waiting), do: " awaiting approval"
+  defp status_text(:plan), do: " ✎ plan"
+  defp status_text(:needs_you), do: " ! needs you"
+  defp status_text(:error), do: " ⚠ error"
+  defp status_text(:idle), do: " ✓ idle"
+  defp status_text(_status), do: ""
 
-  defp agent_status_text(%Workspace{payload: %WorkspaceAgent{agent_status: :plan}}), do: " ✎ plan"
-
-  defp agent_status_text(%Workspace{payload: %WorkspaceAgent{agent_status: :error}}),
-    do: " ⚠ error"
-
-  defp agent_status_text(%Workspace{payload: %WorkspaceAgent{agent_status: :idle}}), do: " ✓ idle"
-  defp agent_status_text(%Workspace{}), do: ""
-
-  @spec status_annotation(Workspace.t()) :: String.t() | nil
-  defp status_annotation(%Workspace{payload: %WorkspaceAgent{agent_status: :thinking}}),
-    do: "↻ thinking"
-
-  defp status_annotation(%Workspace{payload: %WorkspaceAgent{agent_status: :tool_executing}}),
-    do: "⚙ executing"
-
-  defp status_annotation(%Workspace{payload: %WorkspaceAgent{agent_status: :approval_waiting}}),
-    do: "awaiting approval"
-
-  defp status_annotation(%Workspace{payload: %WorkspaceAgent{agent_status: :plan}}), do: "✎ plan"
-
-  defp status_annotation(%Workspace{payload: %WorkspaceAgent{agent_status: :error}}),
-    do: "⚠ error"
-
-  defp status_annotation(%Workspace{payload: %WorkspaceAgent{agent_status: :idle}}), do: "✓ idle"
-  defp status_annotation(%Workspace{}), do: nil
+  @spec status_annotation(WorkspaceStatus.t() | nil) :: String.t() | nil
+  defp status_annotation(:thinking), do: "↻ thinking"
+  defp status_annotation(:tool_executing), do: "⚙ executing"
+  defp status_annotation(:approval_waiting), do: "awaiting approval"
+  defp status_annotation(:plan), do: "✎ plan"
+  defp status_annotation(:needs_you), do: "! needs you"
+  defp status_annotation(:error), do: "⚠ error"
+  defp status_annotation(:idle), do: "✓ idle"
+  defp status_annotation(_status), do: nil
 end

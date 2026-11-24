@@ -41,6 +41,32 @@ defmodule MingaEditor.Agent.WorkspaceStatus do
   def resolve(_workspace, nil, _ui), do: :idle
 
   @doc """
+  Returns the Agent status of `workspace` as one row of a workspace list.
+
+  `active_workspace_id` names the active workspace. Only that workspace receives the live shell presentation cache `live_agent` and the live Agent UI `live_ui`. Every other workspace receives no live cache and uses its stored payload UI. A non-Agent workspace resolves from the stored UI only, so callers should filter to Agent workspaces when they show an Agent status.
+  """
+  @spec resolve_in(
+          Workspace.t(),
+          non_neg_integer() | nil,
+          AgentState.t() | nil,
+          UIState.t() | nil
+        ) ::
+          t()
+  def resolve_in(%Workspace{id: id} = workspace, id, live_agent, live_ui),
+    do: resolve(workspace, live_agent, live_ui)
+
+  def resolve_in(
+        %Workspace{payload: %WorkspaceAgent{agent_ui: ui}} = workspace,
+        _active,
+        _live,
+        _live_ui
+      ),
+      do: resolve(workspace, nil, ui)
+
+  def resolve_in(%Workspace{} = workspace, _active, _live, _live_ui),
+    do: resolve(workspace, nil, nil)
+
+  @doc """
   Returns the Agent status of the active workspace in `shell_state`, with `ui` as its live Agent UI state.
 
   Surfaces that show only the active workspace (the activity strip, the status bar, the chat header) call this.
