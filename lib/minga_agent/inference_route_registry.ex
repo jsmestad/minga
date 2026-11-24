@@ -1,10 +1,12 @@
 defmodule MingaAgent.InferenceRouteRegistry do
   @moduledoc """
-  Source-owned registry for contributed model routes.
+  Source-owned registry for contributed model routes, and the shared record of usage limits on catalog routes.
 
   The registry owns registered route declarations, their offered models, and each route's last known `Status`. A source may replace its own routes, but a route id another source owns is rejected and the first route keeps working. When a source stops, `ContributionCleanup` drops its routes through the `:inference_routes` family.
 
   Route callbacks never run inside the registry process. `register/3` lists models in the caller, and `refresh_availability/2` checks availability and lists models again in bounded worker processes spawned by the caller, so the Editor must never call it. Every change to a route's status publishes `:inference_route_status_changed` on `Minga.Events`. A privately named registry publishes only to the event registry passed as `:events`, so tests never touch the global bus.
+
+  A catalog route, such as the ChatGPT subscription, has no route process to report its plan. When a Session's request on one is refused by the plan's usage limit, the Session records the limit here with `usage_limit_observed/3`, and a later successful request on that route clears it with `usage_limit_lifted/2`. Every Session reads the same record through `usage_limits/1`, so `/model` shows the limit on that route whichever session hit it.
   """
 
   use GenServer
@@ -14,6 +16,9 @@ defmodule MingaAgent.InferenceRouteRegistry do
   alias MingaAgent.InferenceRoute.{Model, PlanWindow, Reporter, Spec, Status}
   alias MingaAgent.InferenceRoute.StatusChangedEvent
   alias MingaAgent.InferenceRouteRegistry.Entry
+  alias MingaAgent.InferenceRouteRegistry.UsageLimits
+  alias MingaAgent.ModelSelection
+  alias MingaAgent.UsageLimit
 
   @default_availability_timeout 5_000
 
@@ -49,6 +54,7 @@ defmodule MingaAgent.InferenceRouteRegistry do
   @type state :: %{
           routes: %{String.t() => Entry.t()},
           reporters: %{String.t() => Reporter.t()},
+          usage_limits: UsageLimits.t(),
           events: Minga.Events.registry() | nil
         }
 
@@ -137,10 +143,19 @@ defmodule MingaAgent.InferenceRouteRegistry do
     :exit, _reason -> {:unreachable, unregistered_message(route_id)}
   end
 
-  @doc "Formats when a plan window resets in this machine's local time, such as `3:40 PM`."
-  @spec reset_label(PlanWindow.t()) :: String.t() | nil
-  def reset_label(%PlanWindow{} = window),
-    do: PlanWindow.reset_label(window, DateTime.utc_now(), &local_time/1)
+  @doc "Records that a usage limit refused a request on the selection's catalog route, for every session on it."
+  @spec usage_limit_observed(server(), ModelSelection.t() | nil, UsageLimit.t()) :: :ok
+  def usage_limit_observed(server, selection, %UsageLimit{} = limit),
+    do: GenServer.cast(server, {:usage_limit_observed, selection, limit})
+
+  @doc "Clears the usage limit on the selection's route after a request on it succeeded."
+  @spec usage_limit_lifted(server(), ModelSelection.t() | nil) :: :ok
+  def usage_limit_lifted(server, selection),
+    do: GenServer.cast(server, {:usage_limit_lifted, selection})
+
+  @doc "Returns the usage limits sessions observed on catalog routes."
+  @spec usage_limits(server()) :: UsageLimits.t()
+  def usage_limits(server), do: GenServer.call(server, :usage_limits)
 
   @doc "Converts a UTC time to this machine's local calendar time, the clock `PlanWindow.reset_label/3` formats."
   @spec local_time(DateTime.t()) :: :calendar.datetime()
@@ -209,7 +224,14 @@ defmodule MingaAgent.InferenceRouteRegistry do
   @spec init(keyword()) :: {:ok, state()}
   def init(opts) do
     maybe_register_cleanup_callback(Keyword.get(opts, :name, __MODULE__))
-    {:ok, %{routes: %{}, reporters: %{}, events: Keyword.fetch!(opts, :events)}}
+
+    {:ok,
+     %{
+       routes: %{},
+       reporters: %{},
+       usage_limits: UsageLimits.new(),
+       events: Keyword.fetch!(opts, :events)
+     }}
   end
 
   @impl true
@@ -244,6 +266,8 @@ defmodule MingaAgent.InferenceRouteRegistry do
   def handle_call(:list, _from, state) do
     {:reply, state.routes |> Map.values() |> Enum.sort_by(& &1.spec.id), state}
   end
+
+  def handle_call(:usage_limits, _from, state), do: {:reply, state.usage_limits, state}
 
   def handle_call(
         {:report_status, %Reporter{route_id: route_id} = reporter, status},
@@ -305,6 +329,17 @@ defmodule MingaAgent.InferenceRouteRegistry do
        | routes: Map.drop(state.routes, removed),
          reporters: Map.drop(state.reporters, removed)
      }}
+  end
+
+  @impl true
+  def handle_cast({:usage_limit_observed, selection, limit}, state) do
+    {:noreply,
+     %{state | usage_limits: UsageLimits.observed(state.usage_limits, selection, limit)}}
+  end
+
+  def handle_cast({:usage_limit_lifted, selection}, state) do
+    {:noreply,
+     %{state | usage_limits: UsageLimits.request_succeeded(state.usage_limits, selection)}}
   end
 
   # Publishes only real changes, so chrome re-renders when what it shows changed.

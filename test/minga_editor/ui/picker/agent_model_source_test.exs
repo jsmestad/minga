@@ -863,6 +863,35 @@ defmodule MingaEditor.UI.Picker.AgentModelSourceTest do
       end
     end
 
+    test "a plan window whose reset has passed no longer reads as the limit", ctx do
+      reporter = ctx.reporters[ctx.setup_id]
+      InferenceRouteRegistry.refresh_availability(ctx.registry)
+      :ok = InferenceRouteRegistry.report_status(ctx.registry, reporter, {:ready, "Claude Max"})
+      passed = DateTime.add(DateTime.utc_now(), -60)
+      later = DateTime.add(DateTime.utc_now(), 3 * 86_400)
+
+      expired = fn utilization, status ->
+        %{kind: "five_hour", utilization: utilization, resets_at: passed, status: status}
+      end
+
+      week = %{kind: "seven_day", utilization: 0.31, resets_at: later, status: :allowed}
+
+      cases = [
+        {[expired.(1.0, :rejected)], ItemStatus.new(:ready, "Ready")},
+        {[expired.(1.0, :warning)], ItemStatus.new(:ready, "Ready")},
+        {[expired.(1.0, :rejected), week], ItemStatus.new(:ready, "Ready · 31%")}
+      ]
+
+      for {windows, chip} <- cases do
+        :ok = InferenceRouteRegistry.report_usage(ctx.registry, reporter, windows)
+        row = route_items(ctx.registry)["Setup Fixture"]
+        assert row.status == chip, "#{inspect(windows)} gave #{inspect(row.status)}"
+        # The passed reset is never shown; a window still in force keeps its own reset.
+        refute row.description =~ "5h"
+        assert length(windows) == 2 == (row.description =~ ~r/7d limit resets \w{3} /)
+      end
+    end
+
     test "a ready subscription route says it is checking plan usage until its first report",
          ctx do
       {:ok, _reporter} =

@@ -14,6 +14,7 @@ defmodule MingaEditor do
   use GenServer
 
   alias MingaEditor.Agent.Arrival
+  alias MingaEditor.Agent.SessionFollowUp
   alias MingaEditor.Agent.SessionStart
   alias MingaEditor.Agent.Events
   alias MingaEditor.Agent.UIState
@@ -348,6 +349,7 @@ defmodule MingaEditor do
     EventBus.subscribe(:buffer_changed, events_registry)
     EventBus.subscribe(:file_written, events_registry)
     EventBus.subscribe(:project_rebuilt, events_registry)
+    EventBus.subscribe(:project_rebuild_failed, events_registry)
     EventBus.subscribe(:git_status_changed, events_registry)
     EventBus.subscribe(:command_done, events_registry)
 
@@ -944,6 +946,7 @@ defmodule MingaEditor do
         {:minga_input, {:mouse_event, row, col, button, mods, event_type, click_count}},
         state
       ) do
+    state = Input.CUA.SpaceLeader.clear_held_space(state)
     snapshot = Input.Router.capture_snapshot(state)
 
     new_state =
@@ -974,6 +977,8 @@ defmodule MingaEditor do
         %{render: %{text_interaction_reader: reader}} = state
       )
       when reader != nil do
+    state = Input.CUA.SpaceLeader.clear_held_space(state)
+
     target =
       if event.event_type == :release do
         nil
@@ -996,6 +1001,7 @@ defmodule MingaEditor do
           %MingaEditor.Mouse.TextEvent{button: :left, event_type: :release} = event}},
         state
       ) do
+    state = Input.CUA.SpaceLeader.clear_held_space(state)
     snapshot = Input.Router.capture_snapshot(state)
     new_state = MingaEditor.Mouse.handle_text_event(state, event, nil)
     new_state = Input.Router.post_action_housekeeping(new_state, snapshot)
@@ -1380,6 +1386,10 @@ defmodule MingaEditor do
     {:noreply, state |> SessionStart.timeout(token) |> schedule_render(16)}
   end
 
+  def handle_info({:agent_session_follow_up_timeout, token}, state) do
+    {:noreply, state |> SessionFollowUp.timeout(token) |> schedule_render(16)}
+  end
+
   def handle_info({:volatile_queue_recalled, session, conversation, workspace, queued}, state) do
     {:noreply,
      MingaEditor.Agent.DraftWorkflow.apply_volatile_recall(
@@ -1533,17 +1543,16 @@ defmodule MingaEditor do
     end
   end
 
-  @spec render_session_start({:handled, state()} | :unrelated) ::
-          {:handled, state()} | :unrelated
-  defp render_session_start({:handled, state}), do: {:handled, schedule_render(state, 16)}
-  defp render_session_start(:unrelated), do: :unrelated
+  @spec render_handled({:handled, state()} | :unrelated) :: {:handled, state()} | :unrelated
+  defp render_handled({:handled, state}), do: {:handled, schedule_render(state, 16)}
+  defp render_handled(:unrelated), do: :unrelated
 
   # Replies and request monitors for the Editor's outstanding local Session requests.
   @spec agent_request_response(state(), term()) :: {:handled, state()} | :unrelated
   defp agent_request_response(state, message) do
-    case Arrival.response(state, message) do
-      {:handled, _updated} = handled -> handled
-      :unrelated -> SessionStart.response(state, message) |> render_session_start()
+    with :unrelated <- Arrival.response(state, message),
+         :unrelated <- SessionStart.response(state, message) |> render_handled() do
+      SessionFollowUp.response(state, message) |> render_handled()
     end
   end
 

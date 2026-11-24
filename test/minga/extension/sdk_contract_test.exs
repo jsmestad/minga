@@ -132,6 +132,7 @@ defmodule Minga.Extension.SdkContractTest do
       {:new_list, 1} => :host_construction,
       {:busiest, 1} => :render_read,
       {:rejected, 1} => :render_read,
+      {:in_force, 2} => :render_read,
       {:kind_label, 1} => :render_read,
       {:percent, 1} => :render_read,
       {:reset_label, 3} => :render_read

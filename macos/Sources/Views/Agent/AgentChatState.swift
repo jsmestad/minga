@@ -845,9 +845,18 @@ public final class AgentChatState {
     public var isThinking: Bool { question == nil && status.isWorking }
     public var hasActiveTurn: Bool { status.hasActiveTurn }
 
+    /// The model name after the provider the BEAM puts before the first `:` of `model`.
     public var displayModel: String {
         guard let separator = model.firstIndex(of: ":") else { return model }
         return String(model[model.index(after: separator)...])
+    }
+
+    /// The provider the BEAM names before the first `:` of `model`, such as an extension
+    /// route's display name ("Claude (subscription)") or a catalog provider; empty when the
+    /// model carries none. The same split the Go TUI's session panel uses.
+    public var displayProvider: String {
+        guard let separator = model.firstIndex(of: ":") else { return "" }
+        return String(model[..<separator])
     }
 
     public var thinkingLabel: String {

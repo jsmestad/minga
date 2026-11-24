@@ -24,8 +24,10 @@ defmodule MingaEditor.UI.Picker.AgentSessionSource do
   alias MingaEditor.State.TabBar
   alias MingaEditor.Commands.Agent
   alias MingaEditor.Agent.DraftWorkflow
+  alias MingaEditor.Agent.SessionFollowUp
 
-  @typep saved_kind :: :disk | :draft_only | :legacy_import
+  @typedoc "How a saved record reopens: a conversation, an unsent draft, or a legacy import."
+  @type saved_kind :: :disk | :draft_only | :legacy_import
   @typep saved_origin :: {non_neg_integer(), pid(), String.t()}
 
   @doc "Opens Sessions with the exact displayed conversation for organization actions."
@@ -104,11 +106,11 @@ defmodule MingaEditor.UI.Picker.AgentSessionSource do
         %{shell_runtime: %{state: %{tab_bar: %TabBar{} = tab_bar}}} = state
       )
       when kind in [:disk, :draft_only, :legacy_import] do
+    # The session itself rejects the reopen when it no longer shows `origin_id`.
     with ^owner <- TabBar.active_workspace_id(tab_bar),
          ^session <- MingaEditor.Shell.Runtime.active_session(state.shell_runtime),
-         true <- current_tab_session?(origin_id, tab_bar.active_id, session),
          :ok <- DraftWorkflow.before_reopen(state, session_id) do
-      reopen_saved(state, session, origin_id, session_id, kind)
+      SessionFollowUp.run(state, owner, session, {:reopen, session_id, origin_id, kind})
     else
       {:error, updated} -> updated
       _changed -> NoticeWorkflow.publish(state, "Session changed. Reopen Sessions.")
@@ -119,9 +121,14 @@ defmodule MingaEditor.UI.Picker.AgentSessionSource do
       when kind in [:disk, :draft_only, :legacy_import],
       do: NoticeWorkflow.publish(state, "Open an Agent workspace, then reopen Sessions.")
 
-  @spec reopen_saved(term(), pid(), String.t(), String.t(), saved_kind()) :: term()
-  defp reopen_saved(state, session, origin_id, id, kind) do
-    case restore_saved(session, id, origin_id, kind) do
+  @doc """
+  Finishes a Sessions picker reopen once `session` answered it.
+
+  `MingaEditor.Agent.SessionFollowUp` sends the reopen without waiting and runs this with the answer, while the workspace is in front or when the reopen failed.
+  """
+  @spec reopened(State.t(), pid(), String.t(), saved_kind(), :ok | {:error, term()}) :: State.t()
+  def reopened(state, session, id, kind, result) do
+    case result do
       :ok ->
         ui = MingaEditor.Agent.UIState.reset_edit_timeline(state.workspace.agent_ui)
 
@@ -132,9 +139,6 @@ defmodule MingaEditor.UI.Picker.AgentSessionSource do
 
       {:error, :stale_session} ->
         NoticeWorkflow.publish(state, "Session changed. Reopen Sessions.")
-
-      {:error, :restore_unconfirmed} ->
-        NoticeWorkflow.publish(state, "Could not confirm that the saved Agent session opened.")
 
       {:error, reason} when kind == :legacy_import ->
         Minga.Log.warning(
@@ -147,19 +151,6 @@ defmodule MingaEditor.UI.Picker.AgentSessionSource do
       {:error, _reason} ->
         NoticeWorkflow.publish(state, "Could not open saved Agent session.")
     end
-  end
-
-  @spec restore_saved(pid(), String.t(), String.t(), saved_kind()) :: :ok | {:error, term()}
-  defp restore_saved(session, id, origin_id, kind) do
-    case kind do
-      # minga:allow-blocking — Editor, user picks a legacy session; one-shot import (#2450)
-      :legacy_import -> Session.import_legacy_session(session, id, origin_id)
-      # minga:allow-blocking — Editor, user picks a saved session; one-shot restore (#2450)
-      _saved -> Session.load_session(session, id, origin_id)
-    end
-  catch
-    :exit, {:timeout, _call} -> {:error, :restore_unconfirmed}
-    :exit, _reason -> {:error, :stale_session}
   end
 
   # ── Private ─────────────────────────────────────────────────────────────────

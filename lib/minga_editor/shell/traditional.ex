@@ -21,6 +21,7 @@ defmodule MingaEditor.Shell.Traditional do
 
   @behaviour MingaEditor.Shell
 
+  alias MingaEditor.Agent.Activity
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Commands.AgentSession
   alias MingaEditor.GitStatus.TUIState
@@ -434,7 +435,8 @@ defmodule MingaEditor.Shell.Traditional do
         tb
       end
 
-    {ShellState.install_tab_bar(shell_state, tb), workspace}
+    {ShellState.install_tab_bar(shell_state, record_turn_status(tb, session_pid, status)),
+     workspace}
   end
 
   def on_agent_event(
@@ -463,6 +465,20 @@ defmodule MingaEditor.Shell.Traditional do
 
   def on_agent_event(shell_state, workspace, _session_pid, _event) do
     {shell_state, workspace}
+  end
+
+  # A background workspace keeps its Agent UI on the workspace, so its turn starts and finishes are recorded there.
+  # Without this, a return shows the finished turn as running and the next turn counts the old turn's tools.
+  @spec record_turn_status(TabBar.t(), pid(), Tab.agent_status()) :: TabBar.t()
+  defp record_turn_status(tab_bar, session_pid, status) do
+    case TabBar.find_workspace_by_session(tab_bar, session_pid) do
+      %Workspace{payload: %WorkspaceAgent{agent_ui: %UIState{} = ui}} = owner ->
+        ui = UIState.replace_activity(ui, Activity.apply_status(ui.view.activity, status))
+        TabBar.accept_workspace(tab_bar, Workspace.set_agent_ui(owner, ui))
+
+      _unowned_or_active ->
+        tab_bar
+    end
   end
 
   @impl true

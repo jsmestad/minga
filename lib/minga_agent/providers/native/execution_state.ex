@@ -6,6 +6,8 @@ defmodule MingaAgent.Providers.Native.ExecutionState do
   `active_request`, and `tool_workers` fields with one value whose tag
   determines which fields are populated. Transitions are exhaustive:
   every public function pattern-matches the valid source tag.
+
+  Admitted work is identified by its request and generation. `cancel/2` stops only the active work admitted for the named request, so a delayed or repeated cancellation cannot stop a replacement. `register_workers/3` accepts workers only for the active generation, so a stale turn loop cannot attach work to its replacement.
   """
 
   alias MingaAgent.Session.Request
@@ -41,6 +43,11 @@ defmodule MingaAgent.Providers.Native.ExecutionState do
     %__MODULE__{tag: :active, generation: gen + 1, task: task, request: request}
   end
 
+  @doc "Returns the generation that `start/3` admits next. Only idle and interrupted states can start."
+  @spec next_generation(t()) :: pos_integer()
+  def next_generation(%__MODULE__{tag: tag, generation: gen}) when tag in [:idle, :interrupted],
+    do: gen + 1
+
   @doc "Transitions from active to idle on successful completion."
   @spec complete(t()) :: t()
   def complete(%__MODULE__{tag: :active, generation: gen}) do
@@ -70,12 +77,37 @@ defmodule MingaAgent.Providers.Native.ExecutionState do
     {%__MODULE__{tag: :idle, generation: gen}, nil, MapSet.new()}
   end
 
-  @doc "Registers worker PIDs. Valid in active and idle states. The caller owns linking."
-  @spec register_workers(t(), [pid()]) :: t()
-  def register_workers(%__MODULE__{workers: workers} = state, pids)
-      when state.tag in [:active, :idle] and is_list(pids) do
-    %{state | workers: Enum.reduce(pids, workers, &MapSet.put(&2, &1))}
+  @doc """
+  Prepares a cancellation of the work admitted for `request_id`.
+
+  Returns `{:cancelled, idle, task, workers}` with the task and workers the caller must stop, or `:stale` when no active work belongs to that request (already finished, interrupted, or replaced). No side effects.
+  """
+  @spec cancel(t(), String.t()) :: {:cancelled, t(), Task.t(), MapSet.t(pid())} | :stale
+  def cancel(
+        %__MODULE__{tag: :active, request: %Request{request_id: request_id}} = state,
+        request_id
+      ) do
+    {:cancelled, %__MODULE__{tag: :idle, generation: state.generation}, state.task, state.workers}
   end
+
+  def cancel(%__MODULE__{tag: :active}, request_id) when is_binary(request_id), do: :stale
+  def cancel(%__MODULE__{tag: :idle}, request_id) when is_binary(request_id), do: :stale
+  def cancel(%__MODULE__{tag: :interrupted}, request_id) when is_binary(request_id), do: :stale
+
+  @doc "Registers worker PIDs for the active generation that admitted them. The caller owns linking."
+  @spec register_workers(t(), pos_integer(), [pid()]) :: {:ok, t()} | {:error, :stale_generation}
+  def register_workers(
+        %__MODULE__{tag: :active, generation: generation} = state,
+        generation,
+        pids
+      )
+      when is_list(pids) do
+    {:ok, %{state | workers: Enum.reduce(pids, state.workers, &MapSet.put(&2, &1))}}
+  end
+
+  def register_workers(%__MODULE__{}, generation, pids)
+      when is_integer(generation) and is_list(pids),
+      do: {:error, :stale_generation}
 
   @doc "Unregisters worker PIDs from the active state. No-op if not active. The caller owns unlinking."
   @spec unregister_workers(t(), [pid()]) :: t()

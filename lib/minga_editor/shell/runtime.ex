@@ -69,6 +69,15 @@ defmodule MingaEditor.Shell.Runtime do
 
   def traditional_tab_bar(%__MODULE__{}), do: nil
 
+  @doc "Tells whether the Traditional shell shows the workspace `workspace_id` in front."
+  @spec active_workspace?(t(), non_neg_integer()) :: boolean()
+  def active_workspace?(%__MODULE__{} = runtime, workspace_id) do
+    case traditional_tab_bar(runtime) do
+      %TabBar{} = tabs -> TabBar.active_workspace_id(tabs) == workspace_id
+      nil -> false
+    end
+  end
+
   @doc "Returns the identity-keyed shell-state stash."
   @spec stash(t()) :: stash()
   def stash(%__MODULE__{stash: stash}), do: stash

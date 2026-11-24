@@ -67,8 +67,12 @@ defmodule MingaAgent.Provider do
   @doc "Starts work from an immutable, versioned request snapshot."
   @callback send_prompt(provider(), MingaAgent.Session.Request.t()) :: :ok | {:error, term()}
 
-  @doc "Aborts the current agent operation."
-  @callback abort(provider()) :: :ok
+  @doc """
+  Cancels the work admitted for the request named by `request_id`.
+
+  The cancellation is bound to that request: when the provider is idle, or is running a different (replacement) request, the call does nothing and returns `:ok`. A delayed or repeated cancellation therefore cannot stop newer work.
+  """
+  @callback abort(provider(), request_id :: String.t()) :: :ok
 
   @doc "Resets provider runtime state for a fresh Session-owned conversation."
   @callback new_session(provider()) :: :ok | {:error, term()}

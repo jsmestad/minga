@@ -374,6 +374,39 @@ defmodule MingaAgent.SessionManagerTest do
     end
   end
 
+  describe "abort/3" do
+    test "an abort naming a finished turn cannot stop the turn that replaced it", %{
+      manager: manager
+    } do
+      {:ok, session_id, _pid} =
+        SessionManager.start_session(manager,
+          provider: Minga.Test.SessionSlowMockProvider,
+          provider_opts: [],
+          persist?: false
+        )
+
+      assert :ok = SessionManager.send_prompt(manager, session_id, "first turn")
+      first = active_request_id(manager, session_id)
+      assert is_binary(first)
+      assert :ok = SessionManager.abort(manager, session_id, first)
+      assert active_request_id(manager, session_id) == nil
+
+      assert :ok = SessionManager.send_prompt(manager, session_id, "replacement turn")
+      replacement = active_request_id(manager, session_id)
+      refute replacement in [nil, first]
+
+      # The Stop meant for the first turn arrives late and must leave the replacement running.
+      assert {:error, :stale_turn} = SessionManager.abort(manager, session_id, first)
+      # The listing reports a request only while its turn is running.
+      assert active_request_id(manager, session_id) == replacement
+
+      # Without a request id, the abort stops whatever is running.
+      assert :ok = SessionManager.abort(manager, session_id, nil)
+      assert active_request_id(manager, session_id) == nil
+      assert {:error, :not_found} = SessionManager.abort(manager, "unknown", replacement)
+    end
+  end
+
   describe "stop_session_by_pid/2" do
     test "stops a session by its PID", %{manager: manager} do
       {:ok, session_id, pid} = SessionManager.start_session(manager, [])
@@ -1479,5 +1512,11 @@ defmodule MingaAgent.SessionManagerTest do
           10 -> wait_until_restarted_session(manager, session_id, old_pid, attempts - 1)
         end
     end
+  end
+
+  defp active_request_id(manager, session_id) do
+    listing = Enum.find(SessionManager.list_sessions(manager), &(&1.id == session_id))
+    {:available, metadata} = listing.details
+    metadata.active_request_id
   end
 end

@@ -12,6 +12,10 @@ defmodule MingaAgent.Gateway.JsonRpc do
     * `session.*` for session lifecycle (start, stop, prompt, abort, list)
     * `tool.*` for tool operations (execute, list)
 
+  ## Aborting a turn
+
+  `session.abort` takes `session_id` and an optional `request_id`. `session.list` reports each session's running turn as `active_request_id`. Pass it back as `request_id` to stop only that turn: if the turn already ended and another started, the call returns an error and the newer turn keeps running. Without `request_id`, the call stops whatever the session is running.
+
   ## Error codes
 
   Standard JSON-RPC 2.0 error codes:
@@ -90,6 +94,17 @@ defmodule MingaAgent.Gateway.JsonRpc do
 
   defp call_method("session.prompt", _params) do
     {:error, {:invalid_params, "missing required params: session_id, prompt"}}
+  end
+
+  # `request_id` is optional. With it, only the turn running that request stops.
+  # Without it, whatever the session is running stops.
+  defp call_method("session.abort", %{"session_id" => id, "request_id" => request_id})
+       when is_binary(request_id) do
+    wrap_ok_error(Runtime.abort(id, request_id))
+  end
+
+  defp call_method("session.abort", %{"session_id" => _id, "request_id" => _request_id}) do
+    {:error, {:invalid_params, "request_id must be a string"}}
   end
 
   defp call_method("session.abort", %{"session_id" => id}) do

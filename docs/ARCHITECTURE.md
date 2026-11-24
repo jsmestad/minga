@@ -533,7 +533,7 @@ Recovery responses are never hand-typed. `mix conformance.gen --check` generates
 
 The approved recovery mutation check changes only the pure keyframe-generation decision from `lease.generation + 1` to `+ 2` inside a disposable committed-HEAD worktree. `scripts/check_conformance_recovery` requires focused decision-test and corpus-check failures for that generation mismatch, then replays actual mutant renderer bytes against unchanged baseline consumer expectations through the production Swift dispatcher. Explicit replay-directory injection and byte-for-byte `loadSteps` receipts prevent cached original fixtures from masquerading as a native kill. Passing native controls and a named `lastCommittedGeneration` failure in a real `.xcresult` are mandatory; build, launch, zero-test, missing-result, and unrelated failures remain inconclusive.
 
-The literal force-intent-setter inverse remains a wire-equivalent survivor because frontend reset independently produces the same keyframe bytes. It has no claimed native kill. The native job collects the approved replacement evidence after ordinary unit tests, preserves its existing aggregate CI gate, and uploads commands, captured data, receipts, results, and actual generic-suite timing. See the [recovery evidence runbook](../test/conformance/corpus/README.md#recovery-mutation-evidence) for prerequisites and Linux producer-only collection.
+The literal force-intent-setter inverse remains a wire-equivalent survivor because frontend reset independently produces the same keyframe bytes. It has no claimed native kill. The native job collects the approved replacement evidence after ordinary unit tests, preserves its existing aggregate CI gate, and uploads commands, captured data, receipts, results, and actual generic-suite timing. See the [recovery evidence runbook](https://github.com/jsmestad/minga/blob/main/test/conformance/corpus/README.md#recovery-mutation-evidence) for prerequisites and Linux producer-only collection.
 
 ---
 
@@ -1091,6 +1091,12 @@ The gateway starts on-demand via `MingaAgent.Runtime.start_gateway/1` (or automa
 ```
 
 Available methods: `runtime.capabilities`, `runtime.describe_tools`, `runtime.describe_sessions`, `session.start`, `session.stop`, `session.prompt`, `session.abort`, `session.list`, `tool.execute`, `tool.list`.
+
+A client that stops a turn should name the turn it means. A Stop pressed for one turn can arrive after that turn ended and a queued prompt started the next one, and an unnamed abort would stop the newer turn. `session.list` reports each session's running turn as `active_request_id`; pass it to `session.abort` as `request_id` and only that turn stops. If the turn already ended, the call returns an error and the newer turn keeps running. Without `request_id`, `session.abort` stops whatever the session is running:
+
+```json
+{"jsonrpc": "2.0", "method": "session.abort", "params": {"session_id": "session-1", "request_id": "kq3...Zf"}, "id": 2}
+```
 
 **Event streaming** pushes domain events as JSON-RPC notifications (no `id` field). When something happens in the runtime (session stopped, buffer saved, log message), connected clients receive it immediately:
 

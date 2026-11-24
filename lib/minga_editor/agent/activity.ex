@@ -58,6 +58,19 @@ defmodule MingaEditor.Agent.Activity do
     %{activity | active_action: "", started_at: nil, running_tools: %{}, active_tool_id: nil}
   end
 
+  @doc "Applies a Session status to the turn: a working status starts it, idle finishes it, and an error or plan finishes it unless a tool still runs."
+  @spec apply_status(t(), TurnExecution.display_status()) :: t()
+  def apply_status(%__MODULE__{} = activity, status) when status in [:thinking, :tool_executing],
+    do: start_turn(activity)
+
+  def apply_status(%__MODULE__{} = activity, :idle), do: finish_turn(activity)
+
+  def apply_status(%__MODULE__{active_tool_id: nil} = activity, status)
+      when status in [:error, :plan],
+      do: finish_turn(activity)
+
+  def apply_status(%__MODULE__{} = activity, _status), do: activity
+
   @doc "Seeds the first visible timestamp without resetting the turn state."
   @spec ensure_started_at(t()) :: t()
   def ensure_started_at(%__MODULE__{started_at: nil} = activity) do

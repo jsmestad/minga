@@ -62,7 +62,8 @@ defmodule MingaEditor.Handlers.EventDispatcher do
     :buffer_saved,
     :buffer_changed,
     :file_written,
-    :project_rebuilt
+    :project_rebuilt,
+    :project_rebuild_failed
   ]
 
   @spec dispatch(EditorState.t(), atom(), term(), term()) :: EditorState.t()

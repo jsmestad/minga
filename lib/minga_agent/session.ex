@@ -39,6 +39,8 @@ defmodule MingaAgent.Session do
   alias MingaAgent.Hooks.Result, as: HookResult
   alias MingaAgent.Hooks.StopPayload
   alias MingaAgent.Hooks.UserPromptSubmitPayload
+  alias MingaAgent.InferenceRouteRegistry
+  alias MingaAgent.InferenceRouteRegistry.UsageLimits
   alias MingaAgent.Memory
   alias MingaAgent.ArtifactStores
   alias MingaAgent.ArtifactStore
@@ -75,7 +77,6 @@ defmodule MingaAgent.Session do
   alias MingaAgent.Session.Transcript
   alias MingaAgent.Session.QueuedInputSummary
   alias MingaAgent.Session.TurnExecution
-  alias MingaAgent.Session.UsageLimits
   require ProviderLifecycle
   alias MingaAgent.SessionManager
   alias MingaAgent.SessionStore
@@ -159,7 +160,6 @@ defmodule MingaAgent.Session do
              ModelResolver.apple_availability() | nil}
             | nil,
           model_discovery_request: reference() | nil,
-          usage_limits: UsageLimits.t(),
           apple_selection_probe:
             {reference(), pid(), ConnectionTarget.t(), ModelResolver.intent()} | nil,
           pending_model_change: ModelSelection.t() | String.t() | nil,
@@ -284,6 +284,18 @@ defmodule MingaAgent.Session do
     GenServer.call(session, {:abort_for_id, expected_session_id})
   end
 
+  @doc """
+  Aborts only the turn running the named request in the Session with the expected identity.
+
+  Returns `{:error, :stale_turn}` when that request is no longer running, so a late abort cannot stop a later turn.
+  """
+  @spec abort_for_id(GenServer.server(), String.t(), String.t()) ::
+          :ok | {:error, :session_id_changed | :stale_turn}
+  def abort_for_id(session, expected_session_id, request_id)
+      when is_binary(expected_session_id) and is_binary(request_id) do
+    GenServer.call(session, {:abort_for_id, expected_session_id, request_id})
+  end
+
   @doc "Stops the matching turn; volatile inputs return to the caller, saved inputs stay recoverable."
   @spec stop_turn(GenServer.server(), {String.t(), String.t()}) ::
           {:ok, [TurnExecution.content()] | :queue_kept} | {:error, :stale_turn}
@@ -311,6 +323,13 @@ defmodule MingaAgent.Session do
   @spec seed_messages(GenServer.server(), [Message.t()]) :: :ok | {:error, term()}
   def seed_messages(session, messages) when is_list(messages) do
     GenServer.call(session, {:seed_messages, messages})
+  end
+
+  @doc "Starts a transcript seed without waiting; the reply is `seed_messages/2`'s result."
+  @spec request_seed_messages(pid(), [Message.t()]) :: :gen_server.request_id()
+  def request_seed_messages(session, messages)
+      when is_pid(session) and node(session) == node() and is_list(messages) do
+    :gen_server.send_request(session, {:seed_messages, messages})
   end
 
   @doc "Returns the current session status."
@@ -788,6 +807,13 @@ defmodule MingaAgent.Session do
     GenServer.call(session, {:load_session, session_id, origin_id})
   end
 
+  @doc "Starts loading a saved session without waiting; the reply is `load_session/3`'s result."
+  @spec request_load_session(pid(), String.t(), String.t() | nil) :: :gen_server.request_id()
+  def request_load_session(session, session_id, origin_id \\ nil)
+      when is_pid(session) and node(session) == node() and is_binary(session_id) do
+    :gen_server.send_request(session, {:load_session, session_id, origin_id})
+  end
+
   @doc """
   Explicitly imports an unversioned display-only session into a new portable record.
 
@@ -799,6 +825,14 @@ defmodule MingaAgent.Session do
           :ok | {:error, term()}
   def import_legacy_session(session, session_id, origin_id \\ nil) when is_binary(session_id) do
     GenServer.call(session, {:import_legacy_session, session_id, origin_id})
+  end
+
+  @doc "Starts a legacy import without waiting; the reply is `import_legacy_session/3`'s result."
+  @spec request_import_legacy_session(pid(), String.t(), String.t() | nil) ::
+          :gen_server.request_id()
+  def request_import_legacy_session(session, session_id, origin_id)
+      when is_pid(session) and node(session) == node() and is_binary(session_id) do
+    :gen_server.send_request(session, {:import_legacy_session, session_id, origin_id})
   end
 
   @doc "Returns lightweight metadata about this session (for the picker)."
@@ -947,6 +981,12 @@ defmodule MingaAgent.Session do
   @spec model_selection(GenServer.server()) :: ModelSelection.t() | nil
   def model_selection(session) do
     GenServer.call(session, :model_selection)
+  end
+
+  @doc "Starts a model selection read without waiting; the reply is `model_selection/1`'s result."
+  @spec request_model_selection(pid()) :: :gen_server.request_id()
+  def request_model_selection(session) when is_pid(session) and node(session) == node() do
+    :gen_server.send_request(session, :model_selection)
   end
 
   @doc "Fetches available models from the provider."
@@ -1522,7 +1562,6 @@ defmodule MingaAgent.Session do
       unresolved_route: nil,
       model_discovery: nil,
       model_discovery_request: nil,
-      usage_limits: UsageLimits.new(),
       apple_selection_probe: nil,
       pending_model_change: nil,
       pending_thinking_level: if(model_selection, do: nil, else: initial_thinking_level),
@@ -1730,6 +1769,22 @@ defmodule MingaAgent.Session do
 
   def handle_call({:abort_for_id, _expected_session_id}, _from, state) do
     {:reply, :ok, abort_turn(state)}
+  end
+
+  def handle_call(
+        {:abort_for_id, expected_session_id, _request_id},
+        _from,
+        %{session_id: current_session_id} = state
+      )
+      when expected_session_id != current_session_id do
+    {:reply, {:error, :session_id_changed}, state}
+  end
+
+  def handle_call({:abort_for_id, session_id, request_id}, _from, state) do
+    case active_turn_target(state) do
+      {^session_id, ^request_id} -> {:reply, :ok, abort_turn(state)}
+      _other -> {:reply, {:error, :stale_turn}, state}
+    end
   end
 
   def handle_call({:stop_turn, {_, _} = target}, _from, state) do
@@ -2098,7 +2153,8 @@ defmodule MingaAgent.Session do
       first_prompt: first_prompt,
       cost: Transcript.usage(state.transcript).cost,
       status: TurnExecution.status(state.turn_execution),
-      workdir: state.workdir
+      workdir: state.workdir,
+      active_request_id: active_turn_request_id(state)
     }
 
     {:reply, meta, state}
@@ -4217,6 +4273,14 @@ defmodule MingaAgent.Session do
 
   defp active_turn_target(_state), do: nil
 
+  @spec active_turn_request_id(state()) :: String.t() | nil
+  defp active_turn_request_id(state) do
+    case active_turn_target(state) do
+      {_session_id, request_id} -> request_id
+      nil -> nil
+    end
+  end
+
   @spec stop_active_turn(state()) ::
           {:reply, {:ok, [TurnExecution.content()] | :queue_kept}, state()}
   defp stop_active_turn(state) do
@@ -4314,9 +4378,8 @@ defmodule MingaAgent.Session do
 
         case {outcome_result, boundary_result} do
           {:accepted, :ok} ->
-            state
-            |> usage_limit_lifted()
-            |> finish_provider_turn(completing)
+            lift_usage_limit(state)
+            finish_provider_turn(state, completing)
 
           {:accepted, {:error, _reason}} ->
             fail_completed_turn(
@@ -4772,13 +4835,10 @@ defmodule MingaAgent.Session do
     end
   end
 
-  @spec usage_limit_lifted(state()) :: state()
-  defp usage_limit_lifted(state) do
-    %{
-      state
-      | usage_limits: UsageLimits.request_succeeded(state.usage_limits, state.model_selection)
-    }
-  end
+  # A request that succeeds on a route lifts its usage limit for every session on that route.
+  @spec lift_usage_limit(state()) :: :ok
+  defp lift_usage_limit(state),
+    do: InferenceRouteRegistry.usage_limit_lifted(route_registry(state), state.model_selection)
 
   @spec report_turn_error(state(), String.t()) :: state()
   defp report_turn_error(state, message) do
@@ -5073,15 +5133,21 @@ defmodule MingaAgent.Session do
     {[Context.user(content)], [display]}
   end
 
+  # Cancels only the provider work admitted for the active request.
+  # Without an active request the provider holds no Session-owned work, so there is nothing to cancel.
   @spec abort_provider(state()) :: state()
-  defp abort_provider(state) do
+  defp abort_provider(
+         %{continuation: %Continuation{active_request: %Request{request_id: request_id}}} = state
+       ) do
     case ProviderLifecycle.pid(state.provider) do
-      pid when is_pid(pid) -> state.provider.module.abort(pid)
+      pid when is_pid(pid) -> state.provider.module.abort(pid, request_id)
       nil -> :ok
     end
 
     state
   end
+
+  defp abort_provider(state), do: state
 
   @spec abort_active_tools(state(), TurnExecution.t(), boolean()) :: state()
   defp abort_active_tools(state, execution, notify?) do
@@ -5804,7 +5870,8 @@ defmodule MingaAgent.Session do
   end
 
   defp handle_provider_event(%Event.Error{} = event, state) do
-    state = state |> retain_connection_error(event) |> observe_usage_limit(event)
+    state = retain_connection_error(state, event)
+    observe_usage_limit(state, event)
     message = humanize_error(event, state)
 
     state
@@ -5812,16 +5879,18 @@ defmodule MingaAgent.Session do
     |> announce_model_limit(event, message)
   end
 
-  # `/model` shows the route as limit-reached until the reset passes or a later request on it succeeds.
-  @spec observe_usage_limit(state(), Event.Error.t()) :: state()
+  # `/model` in every session shows the route as limit-reached until the reset passes or a later
+  # request on it succeeds.
+  @spec observe_usage_limit(state(), Event.Error.t()) :: :ok
   defp observe_usage_limit(state, %Event.Error{kind: :usage_limit_reached, usage_limit: limit}) do
-    %{
-      state
-      | usage_limits: UsageLimits.observed(state.usage_limits, state.model_selection, limit)
-    }
+    InferenceRouteRegistry.usage_limit_observed(
+      route_registry(state),
+      state.model_selection,
+      limit
+    )
   end
 
-  defp observe_usage_limit(state, %Event.Error{}), do: state
+  defp observe_usage_limit(_state, %Event.Error{}), do: :ok
 
   # Only a usage-limit error offers a model switch; the draft stays as it is.
   @spec announce_model_limit(state(), Event.Error.t(), String.t()) :: state()
@@ -8350,7 +8419,24 @@ defmodule MingaAgent.Session do
         )
       )
 
-    UsageLimits.annotate(state.usage_limits, candidates, DateTime.utc_now())
+    state
+    |> observed_usage_limits()
+    |> UsageLimits.annotate(candidates, DateTime.utc_now())
+  end
+
+  # The limits every session observed on catalog routes. Without the registry, no limit is known.
+  @spec observed_usage_limits(state()) :: UsageLimits.t()
+  defp observed_usage_limits(state) do
+    InferenceRouteRegistry.usage_limits(route_registry(state))
+  catch
+    :exit, _reason -> UsageLimits.new()
+  end
+
+  @spec route_registry(state()) :: GenServer.server()
+  defp route_registry(state) do
+    state.provider.opts
+    |> Keyword.get(:model_resolver_opts, [])
+    |> inference_route_registry()
   end
 
   @spec model_resolution_opts(state(), keyword()) :: keyword()

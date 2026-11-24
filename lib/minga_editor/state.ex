@@ -187,6 +187,20 @@ defmodule MingaEditor.State do
     }
   end
 
+  @doc "Keeps the Editor-owned follow-up request to a newly started Session."
+  @spec track_agent_session_follow_up(t(), MingaEditor.Agent.SessionFollowUp.t()) :: t()
+  def track_agent_session_follow_up(%__MODULE__{} = state, follow_up) do
+    connection = AgentConnection.track_session_follow_up(state.agent_connection, follow_up)
+    %{state | agent_connection: connection}
+  end
+
+  @doc "Forgets a settled follow-up request."
+  @spec finish_agent_session_follow_up(t(), reference()) :: t()
+  def finish_agent_session_follow_up(%__MODULE__{} = state, token) do
+    connection = AgentConnection.finish_session_follow_up(state.agent_connection, token)
+    %{state | agent_connection: connection}
+  end
+
   @doc "Records a contributed model route's reported status from its change event."
   @spec record_inference_route_status(t(), MingaAgent.InferenceRoute.StatusChangedEvent.t()) ::
           t()

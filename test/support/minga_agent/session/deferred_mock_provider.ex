@@ -17,7 +17,7 @@ defmodule Minga.Test.SessionDeferredMockProvider do
   end
 
   @impl MingaAgent.Provider
-  def abort(pid), do: GenServer.cast(pid, :abort)
+  def abort(pid, _request_id), do: GenServer.cast(pid, :abort)
 
   @impl MingaAgent.Provider
   def new_session(pid), do: GenServer.cast(pid, :new_session)

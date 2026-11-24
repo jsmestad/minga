@@ -40,6 +40,7 @@ defmodule MingaAgent.Introspection do
             session_id: String.t(),
             model_name: String.t(),
             status: atom(),
+            active_request_id: String.t() | nil,
             created_at: String.t()
           }
           | %{
@@ -98,6 +99,7 @@ defmodule MingaAgent.Introspection do
       session_id: id,
       model_name: metadata.model_name,
       status: metadata.status,
+      active_request_id: metadata.active_request_id,
       created_at: DateTime.to_iso8601(metadata.created_at)
     }
   end

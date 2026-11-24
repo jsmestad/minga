@@ -939,6 +939,30 @@ defmodule MingaEditor.Commands.WorkspaceTest do
       assert {:ok, []} = ProjectView.diff(new_view)
     end
 
+    # #3787 AC2: no agent event recorded the edit, so the review state alone reads :clean.
+    test "closing a workspace with staged edits keeps it open and offers Publish and Discard",
+         %{tmp_dir: dir} do
+      %{state: state, path: path} = staged_edit_state(dir)
+      assert TabBar.get_workspace(state.shell_runtime.state.tab_bar, 1).review.state == :clean
+
+      blocked = Workspace.workspace_close(state)
+
+      assert %{review: %{state: :needs_review}} =
+               TabBar.get_workspace(blocked.shell_runtime.state.tab_bar, 1)
+
+      assert MingaEditor.Shell.Traditional.NoticeWorkflow.message(blocked) =~
+               "1 agent-edited file is not on disk. Publish or discard them before closing"
+
+      card =
+        MingaEditor.UI.NotificationCenter.find(
+          blocked.feedback.notifications,
+          "agent:unpublished_edits:1"
+        )
+
+      assert [%{id: "publish"}, %{id: "discard"}] = card.actions
+      assert File.read!(path) == "one\ntwo\n"
+    end
+
     test "refuses to publish while the agent turn is running", %{tmp_dir: dir} do
       %{state: state, path: path, view: view} = staged_edit_state(dir, status: :tool_executing)
 

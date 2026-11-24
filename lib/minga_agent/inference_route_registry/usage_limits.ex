@@ -1,8 +1,8 @@
-defmodule MingaAgent.Session.UsageLimits do
+defmodule MingaAgent.InferenceRouteRegistry.UsageLimits do
   @moduledoc """
-  The subscription usage limits a Session observed on catalog model routes, such as a ChatGPT plan's weekly limit.
+  The subscription usage limits sessions observed on catalog model routes, such as a ChatGPT plan's weekly limit.
 
-  A limit applies to every model one route serves with one credential, so it is keyed by request provider and credential. It stays until its reset time passes or a later request on that route succeeds. Contributed routes are not recorded here: their own route reports plan windows to `MingaAgent.InferenceRouteRegistry`, which owns their limit state.
+  A limit applies to every model one route serves with one credential, so it is keyed by request provider and credential. `MingaAgent.InferenceRouteRegistry` holds the one shared record, so every session on a route sees the limit another session hit. A limit stays until its reset time passes or a later request on that route succeeds. Contributed routes are not recorded here: their own route reports plan windows to the registry, which owns their limit state.
   """
 
   alias MingaAgent.ModelCandidate

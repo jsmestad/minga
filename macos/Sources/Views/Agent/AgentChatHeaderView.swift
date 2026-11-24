@@ -260,6 +260,18 @@ public struct AgentChatHeaderView: View {
             }
         } label: {
             HStack(spacing: Spacing.xs) {
+                if !state.displayProvider.isEmpty {
+                    // The provider truncates before the model name in a narrow pane.
+                    Text(state.displayProvider)
+                        .font(Typography.font(.small))
+                        .foregroundStyle(theme.agentMutedFg)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .layoutPriority(-1)
+                    Text("/")
+                        .font(Typography.font(.small))
+                        .foregroundStyle(theme.agentDisabledFg)
+                }
                 Text(state.displayModel.isEmpty ? "Agent" : state.displayModel)
                     .font(Typography.font(.body, weight: .medium))
                     .lineLimit(1)
@@ -276,11 +288,17 @@ public struct AgentChatHeaderView: View {
         .allowsHitTesting(!state.hasActiveTurn)
         .help("Pick model (SPC a S m)")
         .accessibilityLabel("Agent model")
-        .accessibilityValue(state.displayModel.isEmpty ? "Agent" : state.displayModel)
+        .accessibilityValue(modelAccessibilityValue)
         .accessibilityHint(state.hasActiveTurn ? "Disabled while the agent turn is active" : "Opens the model picker")
         .accessibilityAddTraits(.isButton)
         .onHover { isModelHovered = $0 }
         .modifier(HeaderControlPointingHandModifier(isEnabled: !state.hasActiveTurn))
+    }
+
+    /// Names the provider with the model, in the order a listener needs them.
+    private var modelAccessibilityValue: String {
+        let model = state.displayModel.isEmpty ? "Agent" : state.displayModel
+        return state.displayProvider.isEmpty ? model : "\(model), \(state.displayProvider)"
     }
 
     // MARK: - Thinking level

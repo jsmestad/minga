@@ -271,6 +271,21 @@ defmodule MingaAgent.InferenceRouteTest do
       assert PlanWindow.percent(plan_window(utilization: 0.829)) == 82
     end
 
+    test "a window stops limiting once its reset time passes; a window without one stays" do
+      now = ~U[2026-11-24 12:00:00Z]
+
+      passed =
+        plan_window(utilization: 1.0, status: :rejected, resets_at: ~U[2026-11-24 11:59:59Z])
+
+      at_reset = plan_window(utilization: 1.0, status: :rejected, resets_at: now)
+      pending = plan_window(kind: "seven_day", resets_at: ~U[2026-11-24 12:00:01Z])
+      unknown = plan_window(kind: "one_day", status: :rejected, resets_at: nil)
+
+      assert PlanWindow.in_force([passed, at_reset, pending, unknown], now) == [pending, unknown]
+      assert PlanWindow.in_force([passed], now) == []
+      assert PlanWindow.in_force(nil, now) == nil
+    end
+
     test "reset times read as a clock time in the caller's zone, with the weekday on other days" do
       utc = fn at -> at |> DateTime.to_naive() |> NaiveDateTime.to_erl() end
       now = ~U[2026-11-21 09:00:00Z]

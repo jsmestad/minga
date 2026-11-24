@@ -245,7 +245,9 @@ Every picker (find file, project search, the switcher) and every minibuffer prom
 | `⌃K` | Move up where there is a list; delete to the end of the line in a prompt without one | shipped |
 | `⌃T`, `⌃Q` | Pin, send to quickfix (below) | new; arrive with pins and quickfix |
 
-## File switcher (`SPC ,`)
+## File switcher
+
+`SPC ,` opens the switcher.
 
 | Keys | Action |
 |---|---|
