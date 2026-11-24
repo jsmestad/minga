@@ -417,14 +417,14 @@ defmodule Minga.Language.TreeSitter do
     # Register in the highlight grammar mapping
     HLGrammar.register_language(filetype_atom, name)
 
-    # Register file extensions
+    # Register file extensions as runtime overrides in Language.Registry
     for ext <- Keyword.get(opts, :filetype_extensions, []) do
-      Minga.Language.Filetype.Registry.register(ext, filetype_atom)
+      Minga.Language.Registry.register_override(ext, filetype_atom)
     end
 
-    # Register exact filenames
+    # Register exact filenames as runtime overrides in Language.Registry
     for filename <- Keyword.get(opts, :filetype_filenames, []) do
-      Minga.Language.Filetype.Registry.register(filename, filetype_atom)
+      Minga.Language.Registry.register_override(filename, filetype_atom)
     end
 
     :ok

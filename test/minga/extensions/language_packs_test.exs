@@ -11,7 +11,7 @@ defmodule Minga.Extensions.LanguagePacksTest do
 
   setup do
     on_exit(fn ->
-      Minga.Language.Filetype.Registry.register("config.json", nil)
+      Registry.register_override("config.json", nil)
       Registry.unregister_source({:extension, :language_pack_cleanup_existing})
       LanguagePacks.reload_pack(Bundled)
     end)
@@ -86,7 +86,7 @@ defmodule Minga.Extensions.LanguagePacksTest do
   end
 
   test "runtime filename override takes precedence over bundled extension lookup" do
-    Minga.Language.Filetype.Registry.register("config.json", :json_custom)
+    Registry.register_override("config.json", :json_custom)
 
     assert Language.detect_filetype("config.json") == :json_custom
     assert Language.detect_filetype("data.json") == :json

@@ -1,76 +1,139 @@
 defmodule Minga.Language.Filetype.RegistryTest do
-  @moduledoc "Tests for Minga.Language.Filetype.Registry — runtime-extensible filetype lookup."
-  use ExUnit.Case, async: true
+  @moduledoc "Tests for Language.Registry runtime override API — extension, filename, and shebang overrides."
+  # Mutates global Language.Registry ETS for override entries.
+  use ExUnit.Case, async: false
 
-  alias Minga.Language.Filetype.Registry
-
-  # Each test gets its own named Registry to avoid interference.
+  alias Minga.Language.Registry
 
   setup do
-    name = :"registry_#{:erlang.unique_integer([:positive])}"
-    {:ok, _pid} = Registry.start_link(name: name)
-    %{name: name}
-  end
-
-  # Helper to call Registry functions on the test-specific agent.
-  defp lookup_ext(name, ext), do: Agent.get(name, fn s -> Map.get(s.extensions, ext) end)
-  defp lookup_fname(name, f), do: Agent.get(name, fn s -> Map.get(s.filenames, f) end)
-
-  defp lookup_shebang(name, i),
-    do: Agent.get(name, fn s -> Map.get(s.shebang_interpreters, i) end)
-
-  defp register_ext(name, ext, ft) do
-    "." <> bare = ext
-
-    Agent.update(name, fn s ->
-      %{s | extensions: Map.put(s.extensions, String.downcase(bare), ft)}
+    on_exit(fn ->
+      Registry.register_override(".test_ext_a", nil)
+      Registry.register_override(".test_ext_b", nil)
+      Registry.register_override("TestFile", nil)
+      Registry.register_override("TestFile2", nil)
+      Registry.register_shebang_override("test_interp", nil)
     end)
+
+    :ok
   end
 
-  defp register_fname(name, filename, ft) do
-    Agent.update(name, fn s -> %{s | filenames: Map.put(s.filenames, filename, ft)} end)
-  end
+  describe "register_override/2 — extensions" do
+    test "registers a new extension override" do
+      assert Registry.lookup_override_extension("test_ext_a") == nil
+      Registry.register_override(".test_ext_a", :custom_lang)
+      assert Registry.lookup_override_extension("test_ext_a") == :custom_lang
+    end
 
-  defp register_shebang(name, interpreter, ft) do
-    Agent.update(name, fn s ->
-      %{s | shebang_interpreters: Map.put(s.shebang_interpreters, interpreter, ft)}
-    end)
-  end
+    test "is case-insensitive for extension storage" do
+      Registry.register_override(".Test_Ext_A", :custom_lang)
+      assert Registry.lookup_override_extension("test_ext_a") == :custom_lang
+    end
 
-  describe "defaults" do
-    test "starts empty because bundled defaults come from language packs", %{name: name} do
-      assert lookup_ext(name, "ex") == nil
-      assert lookup_fname(name, "Makefile") == nil
-      assert lookup_shebang(name, "python3") == nil
+    test "updates an existing extension override" do
+      Registry.register_override(".test_ext_a", :lang_one)
+      assert Registry.lookup_override_extension("test_ext_a") == :lang_one
+
+      Registry.register_override(".test_ext_a", :lang_two)
+      assert Registry.lookup_override_extension("test_ext_a") == :lang_two
+    end
+
+    test "removes an extension override with nil" do
+      Registry.register_override(".test_ext_a", :custom_lang)
+      assert Registry.lookup_override_extension("test_ext_a") == :custom_lang
+
+      Registry.register_override(".test_ext_a", nil)
+      assert Registry.lookup_override_extension("test_ext_a") == nil
     end
   end
 
-  describe "register/2" do
-    test "registers a new extension", %{name: name} do
-      assert lookup_ext(name, "astro") == nil
-      register_ext(name, ".astro", :astro)
-      assert lookup_ext(name, "astro") == :astro
+  describe "register_override/2 — filenames" do
+    test "registers a new filename override" do
+      assert Registry.lookup_override_filename("TestFile") == nil
+      Registry.register_override("TestFile", :custom_lang)
+      assert Registry.lookup_override_filename("TestFile") == :custom_lang
     end
 
-    test "registers a new filename", %{name: name} do
-      assert lookup_fname(name, "Justfile") == nil
-      register_fname(name, "Justfile", :just)
-      assert lookup_fname(name, "Justfile") == :just
-    end
-
-    test "updates an existing runtime extension", %{name: name} do
-      register_ext(name, ".h", :c)
-      assert lookup_ext(name, "h") == :c
-      register_ext(name, ".h", :cpp)
-      assert lookup_ext(name, "h") == :cpp
+    test "removes a filename override with nil" do
+      Registry.register_override("TestFile", :custom_lang)
+      Registry.register_override("TestFile", nil)
+      assert Registry.lookup_override_filename("TestFile") == nil
     end
   end
 
-  describe "register_shebang/2" do
-    test "registers a new shebang interpreter", %{name: name} do
-      assert lookup_shebang(name, "deno") == nil
-      register_shebang(name, "deno", :typescript)
-      assert lookup_shebang(name, "deno") == :typescript
+  describe "register_shebang_override/2" do
+    test "registers a new shebang interpreter override" do
+      assert Registry.lookup_override_shebang("test_interp") == nil
+      Registry.register_shebang_override("test_interp", :custom_lang)
+      assert Registry.lookup_override_shebang("test_interp") == :custom_lang
+    end
+
+    test "removes a shebang override with nil" do
+      Registry.register_shebang_override("test_interp", :custom_lang)
+      Registry.register_shebang_override("test_interp", nil)
+      assert Registry.lookup_override_shebang("test_interp") == nil
+    end
+  end
+
+  describe "override_path_entries/0" do
+    test "returns all extension and filename overrides in one read" do
+      Registry.register_override(".test_ext_a", :lang_a)
+      Registry.register_override(".test_ext_b", :lang_b)
+      Registry.register_override("TestFile", :lang_c)
+
+      entries = Registry.override_path_entries()
+      assert entries.extensions["test_ext_a"] == :lang_a
+      assert entries.extensions["test_ext_b"] == :lang_b
+      assert entries.filenames["TestFile"] == :lang_c
+    end
+  end
+
+  describe "source-tagged overrides" do
+    test "overrides are tagged with the given source" do
+      source = {:extension, :test_override_source}
+      Registry.register_override(".test_ext_a", :custom_lang, source)
+      assert Registry.source_for({:override_ext, "test_ext_a"}) == source
+    end
+
+    test "unregister_source removes overrides from that source" do
+      source = {:extension, :test_override_unregister}
+
+      Registry.register_override(".test_ext_a", :custom_lang, source)
+      Registry.register_override("TestFile", :custom_lang, source)
+      Registry.register_shebang_override("test_interp", :custom_lang, source)
+
+      assert Registry.lookup_override_extension("test_ext_a") == :custom_lang
+
+      Registry.unregister_source(source)
+
+      assert Registry.lookup_override_extension("test_ext_a") == nil
+      assert Registry.lookup_override_filename("TestFile") == nil
+      assert Registry.lookup_override_shebang("test_interp") == nil
+    end
+
+    test "unregister_source does not disturb overrides from other sources" do
+      source_a = {:extension, :test_override_a}
+      source_b = {:extension, :test_override_b}
+
+      Registry.register_override(".test_ext_a", :lang_a, source_a)
+      Registry.register_override(".test_ext_b", :lang_b, source_b)
+
+      Registry.unregister_source(source_a)
+
+      assert Registry.lookup_override_extension("test_ext_a") == nil
+      assert Registry.lookup_override_extension("test_ext_b") == :lang_b
+
+      # Cleanup
+      Registry.unregister_source(source_b)
+    end
+
+    test "language-pack unload does not disturb runtime overrides" do
+      Registry.register_override(".test_ext_a", :custom_lang, :runtime)
+
+      # Simulate a language-pack unload: unregister_source for a pack
+      # should leave :runtime overrides alone.
+      Registry.unregister_source({:extension, :nonexistent_pack})
+
+      assert Registry.lookup_override_extension("test_ext_a") == :custom_lang
     end
   end
 end

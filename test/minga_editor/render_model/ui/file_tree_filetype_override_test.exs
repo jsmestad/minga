@@ -5,11 +5,11 @@ defmodule MingaEditor.RenderModel.UI.FileTreeFiletypeOverrideTest do
   File-tree icons come from one filetype registry read per frame. This test proves that read is not retained across frames: registering and removing an override changes the next frame's icons.
   """
 
-  # Registers runtime overrides in the global Minga.Language.Filetype.Registry Agent.
+  # Registers runtime overrides in the global Language.Registry ETS.
   use ExUnit.Case, async: false
 
   alias Minga.Language.Devicon
-  alias Minga.Language.Filetype.Registry
+  alias Minga.Language.Registry
   alias Minga.Project.FileTree
   alias MingaEditor.Frontend.Emit.Context
   alias MingaEditor.RenderModel.UI.FileTreeBuilder
@@ -19,7 +19,7 @@ defmodule MingaEditor.RenderModel.UI.FileTreeFiletypeOverrideTest do
   @moduletag :tmp_dir
 
   setup do
-    on_exit(fn -> Registry.register(".minga_bench_ext", nil) end)
+    on_exit(fn -> Registry.register_override(".minga_bench_ext", nil) end)
   end
 
   test "registering and removing an extension override changes the next frame's icon", %{
@@ -30,10 +30,10 @@ defmodule MingaEditor.RenderModel.UI.FileTreeFiletypeOverrideTest do
 
     assert icon(ctx) == Devicon.icon(:text)
 
-    Registry.register(".minga_bench_ext", :elixir)
+    Registry.register_override(".minga_bench_ext", :elixir)
     assert icon(ctx) == Devicon.icon(:elixir)
 
-    Registry.register(".minga_bench_ext", nil)
+    Registry.register_override(".minga_bench_ext", nil)
     assert icon(ctx) == Devicon.icon(:text)
   end
 

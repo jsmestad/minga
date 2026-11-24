@@ -29,10 +29,9 @@ defmodule Minga.Foundation.Supervisor do
       ├── Minga.Extension.Badge          Extension badge registry (ETS)
       ├── MingaAgent.Tool.Registry       Agent tool specs (ETS)
       ├── MingaAgent.ToolPacks.ReadOnly  Bundled read-only agent tools
-      ├── MingaAgent.ToolPacks.LSP       Bundled LSP agent tools
-      └── Minga.Language.Filetype.Registry Filetype detection
+      └── MingaAgent.ToolPacks.LSP       Bundled LSP agent tools
 
-  Language.Registry is first because it owns the ETS table. Bundled packs (language, theme, recipe) start next so consumers see the default catalogs before services, LSP, syntax highlighting, or filetype detection query them. ThemeRegistry precedes ThemePacks so bundled theme registrations find their writer running; it adopts the published snapshot when it restarts. Recipe.Registry precedes RecipePacks and Tool.Registry precedes ToolPacks so the ETS tables exist before packs register into them. Events follows so everything after it re-subscribes on Events restart. Scope.Registry precedes Keymap.Active, Services, and extension startup so every scope registration finds its writer running; it adopts the published snapshot when it restarts.
+  Language.Registry is first because it owns the ETS table that serves both language definitions and runtime filetype overrides. Bundled packs (language, theme, recipe) start next so consumers see the default catalogs before services, LSP, syntax highlighting, or filetype detection query them. ThemeRegistry precedes ThemePacks so bundled theme registrations find their writer running; it adopts the published snapshot when it restarts. Recipe.Registry precedes RecipePacks and Tool.Registry precedes ToolPacks so the ETS tables exist before packs register into them. Events follows so everything after it re-subscribes on Events restart. Scope.Registry precedes Keymap.Active, Services, and extension startup so every scope registration finds its writer running; it adopts the published snapshot when it restarts.
   """
 
   use Supervisor
@@ -68,8 +67,7 @@ defmodule Minga.Foundation.Supervisor do
       StartupTimer.timed_child_spec(:fnd_badge, Minga.Extension.Badge),
       StartupTimer.timed_child_spec(:fnd_tool_registry, MingaAgent.Tool.Registry),
       StartupTimer.timed_child_spec(:fnd_tool_packs_ro, MingaAgent.ToolPacks.ReadOnly),
-      StartupTimer.timed_child_spec(:fnd_tool_packs_lsp, MingaAgent.ToolPacks.LSP),
-      StartupTimer.timed_child_spec(:fnd_filetype, Minga.Language.Filetype.Registry)
+      StartupTimer.timed_child_spec(:fnd_tool_packs_lsp, MingaAgent.ToolPacks.LSP)
     ]
 
     Supervisor.init(children, strategy: :rest_for_one)
