@@ -666,6 +666,16 @@ defmodule Minga.Core.Unicode do
   # Everything else is 1 column
   defp codepoint_width(_), do: 1
 
+  @doc "Returns `{byte_offset, byte_size}` of the last grapheme in `text`, starting from `current_point`."
+  @spec final_character(String.t(), non_neg_integer()) :: {non_neg_integer(), non_neg_integer()}
+  def final_character(text, current_point) when is_binary(text) and is_integer(current_point) do
+    case String.next_grapheme_size(text) do
+      {size, ""} -> {current_point, size}
+      {size, rest} -> final_character(rest, current_point + size)
+      nil -> {current_point, 0}
+    end
+  end
+
   @doc """
   Converts a grapheme (display) column to a byte column.
 

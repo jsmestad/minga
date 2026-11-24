@@ -4,6 +4,7 @@ defmodule Minga.Buffer.Cursor do
   """
 
   alias Minga.Buffer.{Document, Lines}
+  alias Minga.Core.Unicode
 
   @type direction :: :left | :right | :up | :down
 
@@ -120,7 +121,7 @@ defmodule Minga.Buffer.Cursor do
     {character_start, _size} =
       text
       |> binary_part(search_start, text_size - search_start)
-      |> final_character(search_start)
+      |> Unicode.final_character(search_start)
 
     rest = binary_part(text, 0, character_start)
     character = binary_part(text, character_start, text_size - character_start)
@@ -142,15 +143,6 @@ defmodule Minga.Buffer.Cursor do
 
       nil ->
         current_column
-    end
-  end
-
-  @spec final_character(String.t(), non_neg_integer()) :: {non_neg_integer(), non_neg_integer()}
-  defp final_character(text, current_point) do
-    case String.next_grapheme_size(text) do
-      {size, ""} -> {current_point, size}
-      {size, rest} -> final_character(rest, current_point + size)
-      nil -> {current_point, 0}
     end
   end
 

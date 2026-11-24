@@ -6,6 +6,7 @@ defmodule Minga.Buffer.Position do
   """
 
   alias Minga.Buffer.{Document, Lines}
+  alias Minga.Core.Unicode
 
   @typedoc "A zero-indexed editor position."
   @type t :: {line :: non_neg_integer(), column :: non_neg_integer()}
@@ -76,7 +77,7 @@ defmodule Minga.Buffer.Position do
   def last_character_on_line(""), do: 0
 
   def last_character_on_line(text) when is_binary(text) do
-    {point, _size} = final_character(text, 0)
+    {point, _size} = Unicode.final_character(text, 0)
     point
   end
 
@@ -112,15 +113,6 @@ defmodule Minga.Buffer.Position do
 
       nil ->
         visible_steps
-    end
-  end
-
-  @spec final_character(String.t(), non_neg_integer()) :: {non_neg_integer(), non_neg_integer()}
-  defp final_character(text, current_point) do
-    case String.next_grapheme_size(text) do
-      {size, ""} -> {current_point, size}
-      {size, rest} -> final_character(rest, current_point + size)
-      nil -> {current_point, 0}
     end
   end
 end

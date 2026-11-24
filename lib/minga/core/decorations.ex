@@ -626,12 +626,6 @@ defmodule Minga.Core.Decorations do
   def has_block_decorations?(%__MODULE__{block_decorations: []}), do: false
   def has_block_decorations?(%__MODULE__{}), do: true
 
-  @doc "Returns the block decoration with the given ID, or nil."
-  @spec block_decoration_by_id(t(), reference()) :: BlockDecoration.t() | nil
-  def block_decoration_by_id(%__MODULE__{block_decorations: blocks}, id) do
-    Enum.find(blocks, fn b -> b.id == id end)
-  end
-
   # ── Conceal range API ─────────────────────────────────────────────────────
 
   @doc """
