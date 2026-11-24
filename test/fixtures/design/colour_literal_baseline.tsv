@@ -118,3 +118,53 @@ macos/Sources/Views/Sidebar/FileTreeState.swift	let warm = Color(red: 0.95, gree
 go/tui/internal/ui/model.go	Background(lipgloss.Color("#1f2335")).
 go/tui/internal/ui/model.go	Foreground(lipgloss.Color("#7aa2f7")).
 go/tui/internal/ui/overlay_stack.go	line := lipgloss.NewStyle().Background(lipgloss.Color("#000000")).Render(strings.Repeat(" ", w))
+# Literals below already existed on main when the pattern learned .white, .black, .gray, Color(white:, NSColor(white: and leading-dot named colours such as `return .red`; they were newly detected, not newly written.
+macos/Sources/Views/Agent/AgentChatHeaderView.swift	case .idle: return Color.gray
+macos/Sources/Views/Agent/AgentChatHeaderView.swift	case .unknown: return Color.gray
+macos/Sources/Views/Agent/AgentPromptView.swift	.shadow(color: .black.opacity(0.2), radius: 8, y: -4)
+macos/Sources/Views/Agent/AgentToolCallCard.swift	case .running, .denied, .approvalExpired: .orange
+macos/Sources/Views/Agent/AgentToolCallCard.swift	case .complete: .green
+macos/Sources/Views/Agent/AgentToolCallCard.swift	case .error: .red
+macos/Sources/Views/Agent/AgentToolCallCard.swift	case .unknown: isError ? .red : theme.agentToolHeader
+macos/Sources/Views/EditorChrome/WorkspaceHeaderView.swift	badge("⚠︎\(workspace.conflictCount)", help: "Workspace conflicts need resolution", color: .orange)
+macos/Sources/Views/EditorChrome/WorkspaceHeaderView.swift	badge("!", help: "Workspace needs attention", color: .red)
+macos/Sources/Views/EditorChrome/WorkspaceHeaderView.swift	badge("bg ⚠︎\(workspaceState.backgroundConflictCount)", help: "Background workspace conflicts need resolution", color: .orange)
+macos/Sources/Views/EditorChrome/WorkspaceHeaderView.swift	badge("bg !\(workspaceState.backgroundAttentionCount)", help: "Background workspaces need attention", color: .red)
+macos/Sources/Views/EditorChrome/WorkspaceHeaderView.swift	badge("bg ✕\(workspaceState.backgroundErrorCount)", help: "Background workspace agents have errors", color: .red)
+macos/Sources/Views/Extensions/ExtensionOverlayView.swift	.foregroundStyle(.white)
+macos/Sources/Views/Overlays/CompletionOverlay.swift	.shadow(color: .black.opacity(0.4), radius: 12, y: overlayContext.shadowYOffset)
+macos/Sources/Views/Overlays/FloatPopupOverlay.swift	.shadow(color: .black.opacity(0.5), radius: 16, y: 4)
+macos/Sources/Views/Overlays/HoverPopupOverlay.swift	.shadow(color: .black.opacity(0.4), radius: 12, y: overlayContext.shadowYOffset)
+macos/Sources/Views/Overlays/LatencyHUDOverlay.swift	.shadow(color: .black.opacity(0.25), radius: 4, y: 1)
+macos/Sources/Views/Overlays/MessagesContentState.swift	case .debug: return .gray
+macos/Sources/Views/Overlays/MessagesContentState.swift	case .info: return .green
+macos/Sources/Views/Overlays/MessagesContentState.swift	case .warning: return .yellow
+macos/Sources/Views/Overlays/MessagesContentState.swift	case .error: return .red
+macos/Sources/Views/Overlays/MessagesContentState.swift	case .unknown: return .gray
+macos/Sources/Views/Overlays/MessagesContentState.swift	case .debug: return .gray
+macos/Sources/Views/Overlays/MessagesContentState.swift	case .info: return .green
+macos/Sources/Views/Overlays/MessagesContentState.swift	case .warning: return .yellow
+macos/Sources/Views/Overlays/MessagesContentState.swift	case .error: return .red
+macos/Sources/Views/Overlays/MessagesContentState.swift	case .unknown: return .gray
+macos/Sources/Views/Overlays/MessagesContentState.swift	case .editor: return .blue
+macos/Sources/Views/Overlays/MessagesContentState.swift	case .lsp: return .purple
+macos/Sources/Views/Overlays/MessagesContentState.swift	case .parser: return .orange
+macos/Sources/Views/Overlays/MessagesContentState.swift	case .git: return .green
+macos/Sources/Views/Overlays/MessagesContentState.swift	case .render: return .cyan
+macos/Sources/Views/Overlays/MessagesContentState.swift	case .agent: return .indigo
+macos/Sources/Views/Overlays/MessagesContentState.swift	case .zig: return .teal
+macos/Sources/Views/Overlays/MessagesContentState.swift	case .gui: return .pink
+macos/Sources/Views/Overlays/MessagesContentState.swift	case .unknown: return .gray
+macos/Sources/Views/Overlays/MessagesContentView.swift	.foregroundStyle(.white)
+macos/Sources/Views/Overlays/NotificationCenterView.swift	.shadow(color: .black.opacity(0.32), radius: 16, x: 0, y: 8)
+macos/Sources/Views/Overlays/PickerOverlay.swift	.shadow(color: .black.opacity(0.35), radius: 12, y: 4)
+macos/Sources/Views/Overlays/PickerOverlay.swift	.shadow(color: .black.opacity(0.4), radius: 12, y: 4)
+macos/Sources/Views/Overlays/SignatureHelpOverlay.swift	.shadow(color: .black.opacity(0.4), radius: 12, y: overlayContext.shadowYOffset)
+macos/Sources/Views/Overlays/WhichKeyOverlay.swift	.shadow(color: .black.opacity(0.4), radius: 12, y: -4)
+macos/Sources/Views/Sidebar/ObservatoryView.swift	if node.messageQueueLen == 0 { return .green }
+macos/Sources/Views/Sidebar/ObservatoryView.swift	if node.messageQueueLen <= 10 { return .orange }
+macos/Sources/Views/Sidebar/ObservatoryView.swift	return .red
+macos/Sources/Views/Sidebar/ObservatoryView.swift	case .supervisor: return .blue
+macos/Sources/Views/Sidebar/ObservatoryView.swift	case .buffer: return .cyan
+macos/Sources/Views/Sidebar/ObservatoryView.swift	case .agentSession: return .purple
+macos/Sources/Views/Sidebar/ObservatoryView.swift	case .lsp: return .indigo

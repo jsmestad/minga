@@ -1,6 +1,8 @@
 package ui
 
 import (
+	"image/color"
+	"io"
 	"strings"
 
 	"charm.land/bubbles/v2/list"
@@ -11,6 +13,27 @@ import (
 type componentItem struct {
 	title       string
 	description string
+	// titleColor draws the title in a colour of its own, such as a state's colour role.
+	// Nil or lipgloss.NoColor, such as a role the theme has not sent yet, keeps the list's title colour.
+	titleColor color.Color
+}
+
+// componentDelegate is the list's default delegate, drawing each item's title in the item's titleColor when it has one.
+type componentDelegate struct {
+	list.DefaultDelegate
+}
+
+func (d componentDelegate) Render(w io.Writer, m list.Model, index int, item list.Item) {
+	if component, ok := item.(componentItem); ok && hasColor(component.titleColor) {
+		d.Styles.NormalTitle = d.Styles.NormalTitle.Foreground(component.titleColor)
+		d.Styles.SelectedTitle = d.Styles.SelectedTitle.Foreground(component.titleColor)
+	}
+	d.DefaultDelegate.Render(w, m, index, item)
+}
+
+func hasColor(c color.Color) bool {
+	_, none := c.(lipgloss.NoColor)
+	return c != nil && !none
 }
 
 func (i componentItem) Title() string {
@@ -45,7 +68,7 @@ func (m Model) charmList(title string, items []componentItem, selected int, heig
 	for _, item := range items {
 		listItems = append(listItems, item)
 	}
-	component := list.New(listItems, delegate, max(m.width, 1), max(height, 1))
+	component := list.New(listItems, componentDelegate{delegate}, max(m.width, 1), max(height, 1))
 	component.Title = title
 	component.Styles.Title = lipgloss.NewStyle().Bold(true).Foreground(theme.Accent()).Background(theme.PopupSurface())
 	component.Styles.TitleBar = lipgloss.NewStyle().Background(theme.PopupSurface()).Width(m.width)

@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/x/ansi"
+	"github.com/jsmestad/minga/go/tui/internal/generated"
 	"github.com/jsmestad/minga/go/tui/internal/protocol"
 )
 
@@ -43,23 +44,45 @@ func agentMessagePrefix(kind byte) string {
 	}
 }
 
-func statusName(status byte) string {
+// cardSpineState returns the design token state an agent context-card status shows, matching macOS CardStatus.spineState.
+// Idle and unknown statuses show no state; iterating shows the working state.
+func cardSpineState(status byte) (generated.SpineState, bool) {
+	switch status {
+	case 1, 2:
+		return generated.StateWorking, true
+	case 3:
+		return generated.StateNeedsYou, true
+	case 4:
+		return generated.StateDone, true
+	case 5:
+		return generated.StateFailed, true
+	default:
+		return 0, false
+	}
+}
+
+// cardStatusLabel returns the word an agent context-card status is shown with, matching macOS CardStatus.label.
+// States use their design token word; idle, iterating and unknown statuses are not states and keep their own words.
+func cardStatusLabel(status byte) string {
 	switch status {
 	case 0:
-		return "idle"
-	case 1:
-		return "working"
+		return "Idle"
 	case 2:
-		return "iterating"
-	case 3:
-		return "needs you"
-	case 4:
-		return "done"
-	case 5:
-		return "error"
-	default:
-		return "unknown"
+		return "Iterating"
 	}
+	if state, ok := cardSpineState(status); ok {
+		return state.Token().Word
+	}
+	return "Unknown"
+}
+
+// cardStatusRole returns the colour role an agent context-card status is drawn in, matching macOS CardStatus.role.
+// Idle and unknown statuses use the waiting role.
+func cardStatusRole(status byte) generated.ColorRole {
+	if state, ok := cardSpineState(status); ok {
+		return state.Token().Role
+	}
+	return generated.ColorRoleWaiting
 }
 
 func levelName(level byte) string {

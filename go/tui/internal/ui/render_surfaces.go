@@ -269,7 +269,11 @@ func (m Model) renderFloat(float protocol.FloatPopup) []string {
 }
 
 func (m Model) renderAgentContext(context protocol.AgentContext) []string {
-	items := []componentItem{{title: statusName(context.Status), description: context.Task}}
+	items := []componentItem{{
+		title:       cardStatusLabel(context.Status),
+		description: context.Task,
+		titleColor:  m.palette().Role(cardStatusRole(context.Status)),
+	}}
 	if context.Progress.ToolCount > 0 || context.Progress.FileCount > 0 || context.Progress.ActiveAction != "" {
 		items = append(items, componentItem{
 			title:       "progress",

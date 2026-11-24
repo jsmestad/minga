@@ -212,7 +212,7 @@ func (f feedbackState) presentation() (string, generated.OperationStatus, bool) 
 	case generated.OperationStatusPending:
 		text = message
 		if f.deadlineReached(f.onset.Add(waitingDelay)) {
-			text = "Waiting · " + message
+			text = generated.StateWaiting.Token().Word + " · " + message
 		}
 	case generated.OperationStatusQueued:
 		if operation.Flags&operationQueueFlag != 0 {
