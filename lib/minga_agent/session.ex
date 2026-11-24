@@ -284,6 +284,18 @@ defmodule MingaAgent.Session do
     GenServer.call(session, {:abort_for_id, expected_session_id})
   end
 
+  @doc """
+  Aborts only the turn running the named request in the Session with the expected identity.
+
+  Returns `{:error, :stale_turn}` when that request is no longer running, so a late abort cannot stop a later turn.
+  """
+  @spec abort_for_id(GenServer.server(), String.t(), String.t()) ::
+          :ok | {:error, :session_id_changed | :stale_turn}
+  def abort_for_id(session, expected_session_id, request_id)
+      when is_binary(expected_session_id) and is_binary(request_id) do
+    GenServer.call(session, {:abort_for_id, expected_session_id, request_id})
+  end
+
   @doc "Stops the matching turn; volatile inputs return to the caller, saved inputs stay recoverable."
   @spec stop_turn(GenServer.server(), {String.t(), String.t()}) ::
           {:ok, [TurnExecution.content()] | :queue_kept} | {:error, :stale_turn}
@@ -1732,6 +1744,22 @@ defmodule MingaAgent.Session do
     {:reply, :ok, abort_turn(state)}
   end
 
+  def handle_call(
+        {:abort_for_id, expected_session_id, _request_id},
+        _from,
+        %{session_id: current_session_id} = state
+      )
+      when expected_session_id != current_session_id do
+    {:reply, {:error, :session_id_changed}, state}
+  end
+
+  def handle_call({:abort_for_id, session_id, request_id}, _from, state) do
+    case active_turn_target(state) do
+      {^session_id, ^request_id} -> {:reply, :ok, abort_turn(state)}
+      _other -> {:reply, {:error, :stale_turn}, state}
+    end
+  end
+
   def handle_call({:stop_turn, {_, _} = target}, _from, state) do
     case active_turn_target(state) do
       ^target -> stop_active_turn(state)
@@ -2098,7 +2126,8 @@ defmodule MingaAgent.Session do
       first_prompt: first_prompt,
       cost: Transcript.usage(state.transcript).cost,
       status: TurnExecution.status(state.turn_execution),
-      workdir: state.workdir
+      workdir: state.workdir,
+      active_request_id: active_turn_request_id(state)
     }
 
     {:reply, meta, state}
@@ -4216,6 +4245,14 @@ defmodule MingaAgent.Session do
   end
 
   defp active_turn_target(_state), do: nil
+
+  @spec active_turn_request_id(state()) :: String.t() | nil
+  defp active_turn_request_id(state) do
+    case active_turn_target(state) do
+      {_session_id, request_id} -> request_id
+      nil -> nil
+    end
+  end
 
   @spec stop_active_turn(state()) ::
           {:reply, {:ok, [TurnExecution.content()] | :queue_kept}, state()}

@@ -3,180 +3,79 @@ defmodule MingaAgent.Tool.SpecEffectTest do
 
   alias MingaAgent.Tool.Spec
 
-  describe "derive_effect/2" do
-    test "ask approval level produces :approval_required" do
-      assert Spec.derive_effect(:ask, []) == :approval_required
-      assert Spec.derive_effect(:ask, [:read_project]) == :approval_required
-      assert Spec.derive_effect(:ask, [:mutate_project]) == :approval_required
-    end
+  defp spec(attrs) do
+    [name: "tool", description: "A tool", parameter_schema: %{}, callback: fn _args -> :ok end]
+    |> Keyword.merge(attrs)
+    |> Spec.new()
+  end
 
-    test "deny approval level produces :approval_required" do
-      assert Spec.derive_effect(:deny, []) == :approval_required
-    end
-
-    test "auto with mutating capabilities produces :mutating" do
-      assert Spec.derive_effect(:auto, [:mutate_project]) == :mutating
-      assert Spec.derive_effect(:auto, [:run_shell]) == :mutating
-      assert Spec.derive_effect(:auto, [:git_mutate]) == :mutating
-      assert Spec.derive_effect(:auto, [:lsp_mutate]) == :mutating
-      assert Spec.derive_effect(:auto, [:memory_write]) == :mutating
-      assert Spec.derive_effect(:auto, [:spawn_agent]) == :mutating
-    end
-
-    test "auto with mixed capabilities including mutating produces :mutating" do
-      assert Spec.derive_effect(:auto, [:read_project, :mutate_project]) == :mutating
-    end
-
-    test "auto with read-only capabilities produces :read_only" do
-      assert Spec.derive_effect(:auto, []) == :read_only
-      assert Spec.derive_effect(:auto, [:read_project]) == :read_only
-      assert Spec.derive_effect(:auto, [:git_read]) == :read_only
-      assert Spec.derive_effect(:auto, [:lsp_read]) == :read_only
+  describe "derive_effect/1" do
+    test "an undeclared effect is never read-only" do
+      assert Spec.derive_effect(:ask) == :approval_required
+      assert Spec.derive_effect(:deny) == :approval_required
+      assert Spec.derive_effect(:auto) == :mutating
     end
   end
 
   describe "effect field on Spec.new/1" do
-    test "derived from capabilities when not explicitly provided" do
-      {:ok, read_spec} =
-        Spec.new(
-          name: "reader",
-          description: "Reads things",
-          parameter_schema: %{},
-          callback: fn _args -> :ok end,
-          capabilities: [:read_project]
-        )
+    test "a spec without an effect declaration is scheduled sequentially, whatever its capabilities" do
+      for capabilities <- [[], [:read_project], [:git_read], [:lsp_read], [:network]] do
+        assert {:ok, %Spec{effect: :mutating} = undeclared} = spec(capabilities: capabilities)
+        assert Spec.sequential?(undeclared)
+      end
 
-      assert read_spec.effect == :read_only
-
-      {:ok, mutating_spec} =
-        Spec.new(
-          name: "writer",
-          description: "Writes things",
-          parameter_schema: %{},
-          callback: fn _args -> :ok end,
-          capabilities: [:mutate_project],
-          context_requirements: [:tool_context]
-        )
-
-      assert mutating_spec.effect == :mutating
-
-      {:ok, approval_spec} =
-        Spec.new(
-          name: "dangerous",
-          description: "Needs approval",
-          parameter_schema: %{},
-          callback: fn _args -> :ok end,
-          approval_level: :ask
-        )
-
-      assert approval_spec.effect == :approval_required
+      assert {:ok, %Spec{effect: :approval_required}} = spec(approval_level: :ask)
     end
 
-    test "explicit effect overrides derivation" do
-      {:ok, spec} =
-        Spec.new(
-          name: "forced_mutating",
-          description: "Explicitly mutating despite read-only capabilities",
-          parameter_schema: %{},
-          callback: fn _args -> :ok end,
-          capabilities: [:read_project],
-          effect: :mutating
-        )
+    test "an explicit read-only declaration makes a spec concurrent" do
+      assert {:ok, %Spec{effect: :read_only} = reader} =
+               spec(capabilities: [:read_project], effect: :read_only)
 
-      assert spec.effect == :mutating
+      assert Spec.read_only?(reader)
+      refute Spec.sequential?(reader)
+    end
+
+    test "a read-only declaration cannot claim a mutating capability" do
+      assert {:error, {:read_only_with_mutating_capabilities, [:mutate_project]}} =
+               spec(
+                 capabilities: [:read_project, :mutate_project],
+                 context_requirements: [:tool_context],
+                 effect: :read_only
+               )
+    end
+
+    test "an explicit mutating declaration is kept" do
+      assert {:ok, %Spec{effect: :mutating}} =
+               spec(capabilities: [:read_project], effect: :mutating)
     end
 
     test "invalid effect is rejected" do
-      assert {:error, {:invalid_effect, :unknown}} =
-               Spec.new(
-                 name: "bad",
-                 description: "Bad effect",
-                 parameter_schema: %{},
-                 callback: fn _args -> :ok end,
-                 effect: :unknown
-               )
-    end
-  end
-
-  describe "read_only?/1" do
-    test "returns true for read-only effect" do
-      {:ok, spec} =
-        Spec.new(
-          name: "reader",
-          description: "Reads",
-          parameter_schema: %{},
-          callback: fn _args -> :ok end,
-          capabilities: [:read_project]
-        )
-
-      assert Spec.read_only?(spec)
-    end
-
-    test "returns false for mutating effect" do
-      {:ok, spec} =
-        Spec.new(
-          name: "writer",
-          description: "Writes",
-          parameter_schema: %{},
-          callback: fn _args -> :ok end,
-          capabilities: [:mutate_project],
-          context_requirements: [:tool_context]
-        )
-
-      refute Spec.read_only?(spec)
-    end
-  end
-
-  describe "sequential?/1" do
-    test "returns true for mutating and approval_required effects" do
-      {:ok, mutating} =
-        Spec.new(
-          name: "writer",
-          description: "Writes",
-          parameter_schema: %{},
-          callback: fn _args -> :ok end,
-          capabilities: [:mutate_project],
-          context_requirements: [:tool_context]
-        )
-
-      {:ok, approval} =
-        Spec.new(
-          name: "dangerous",
-          description: "Needs approval",
-          parameter_schema: %{},
-          callback: fn _args -> :ok end,
-          approval_level: :ask
-        )
-
-      assert Spec.sequential?(mutating)
-      assert Spec.sequential?(approval)
-    end
-
-    test "returns false for read_only effect" do
-      {:ok, reader} =
-        Spec.new(
-          name: "reader",
-          description: "Reads",
-          parameter_schema: %{},
-          callback: fn _args -> :ok end,
-          capabilities: [:read_project]
-        )
-
-      refute Spec.sequential?(reader)
+      assert {:error, {:invalid_effect, :unknown}} = spec(effect: :unknown)
     end
   end
 
   describe "built-in declarations" do
-    test "every built-in that changes state is scheduled sequentially" do
-      # A side-effecting tool classified read-only would run concurrently and break model order.
-      side_effecting =
-        ~w(todo_write subagent shell write_file edit_file delete_file git_stage git_commit rename)
+    # Every canonical built-in and bundled tool by scheduling class. Add a new tool here deliberately.
+    @concurrent ~w(
+      definition describe_runtime describe_tools diagnostics document_symbols fetch_output fetch_url
+      find git_diff git_log git_status grep hover job_output job_status list_directory memory_read
+      read_file references todo_read workspace_symbols
+    )
 
-      for spec <- MingaAgent.Tools.specs(), spec.name in side_effecting do
-        assert {spec.name, Spec.sequential?(spec)} == {spec.name, true}
+    @sequential ~w(
+      ask_user code_actions delete_file edit_file git_commit git_stage job_cancel rename shell
+      subagent todo_write write_file
+    )
+
+    test "only built-ins declared read-only run concurrently; every other built-in is sequential" do
+      specs = MingaAgent.Tools.specs()
+      assert Enum.sort(Enum.map(specs, & &1.name)) == Enum.sort(@concurrent ++ @sequential)
+
+      for spec <- specs do
+        expected = if spec.name in @concurrent, do: :concurrent, else: :sequential
+        actual = if Spec.sequential?(spec), do: :sequential, else: :concurrent
+        assert {spec.name, actual} == {spec.name, expected}
       end
-
-      refute Spec.sequential?(MingaAgent.Tools.Checklist.read_spec())
     end
   end
 end
