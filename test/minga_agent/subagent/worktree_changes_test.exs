@@ -18,12 +18,14 @@ defmodule MingaAgent.Subagent.WorktreeChangesTest do
     tmp = Path.join(System.tmp_dir!(), "minga-wt-test-#{System.unique_integer([:positive])}")
     File.mkdir_p!(tmp)
 
-    # Initialize a git repo; use the system identity to satisfy git-identity hooks
     git!(tmp, ["init"])
-    {name, 0} = System.cmd("git", ["config", "--global", "user.name"])
-    {email, 0} = System.cmd("git", ["config", "--global", "user.email"])
-    git!(tmp, ["config", "user.name", String.trim(name)])
-    git!(tmp, ["config", "user.email", String.trim(email)])
+    # Disable inherited hooks and signing so the fixture does not depend on the host's git setup.
+    hooks_dir = Path.join(tmp, ".git/hooks-disabled")
+    File.mkdir_p!(hooks_dir)
+    git!(tmp, ["config", "core.hooksPath", hooks_dir])
+    git!(tmp, ["config", "user.name", "Minga Test"])
+    git!(tmp, ["config", "user.email", "test@example.com"])
+    git!(tmp, ["config", "commit.gpgsign", "false"])
 
     File.write!(Path.join(tmp, "existing.ex"), "original content")
     git!(tmp, ["add", "existing.ex"])
