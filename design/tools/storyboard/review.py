@@ -247,6 +247,8 @@ def comment_body(record):
              f"Changed scenarios reviewed: **{len(record['scenarios'])}** (the cost cap: reviewers and the critic see only these).",
              "", "Two reviewers checked structure against each scenario's board and polish against `docs/design/anatomy.md`, "
              "using `docs/design/visual_rubric.md`, without seeing each other's verdicts.", ""]
+    if record.get("note"):
+        lines += [flat(record["note"]), ""]
     lines += verdict_table(record)
     lines += ["", f"### Polish critic: {len(rounds)} round(s), {fixed} item(s) fixed"]
     for round_ in rounds:
