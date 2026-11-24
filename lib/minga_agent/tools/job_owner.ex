@@ -93,12 +93,6 @@ defmodule MingaAgent.Tools.JobOwner do
     GenServer.call(owner, {:cancel, job_id})
   end
 
-  @doc "Drains pending completion notifications."
-  @spec drain_completions(GenServer.server()) :: [completion()]
-  def drain_completions(owner) do
-    GenServer.call(owner, :drain_completions)
-  end
-
   @doc "Reaps all running jobs and marks them interrupted. Called during session teardown."
   @spec reap_all(GenServer.server()) :: :ok
   def reap_all(owner) do
@@ -121,12 +115,15 @@ defmodule MingaAgent.Tools.JobOwner do
            live: %{Job.id() => live_entry()},
            retained: %{Job.id() => Job.t()},
            retained_order: [Job.id()],
-           completions: [completion()]
+           tasks: MapSet.t(pid())
          }
 
   @impl GenServer
   @spec init(init_opts()) :: {:ok, state()}
   def init(opts) do
+    # Job tasks are linked so they die with the owner; trapping keeps a task exit from stopping it.
+    Process.flag(:trap_exit, true)
+
     state = %{
       session_id: Keyword.fetch!(opts, :session_id),
       notify: Keyword.fetch!(opts, :notify),
@@ -134,7 +131,7 @@ defmodule MingaAgent.Tools.JobOwner do
       live: %{},
       retained: %{},
       retained_order: [],
-      completions: []
+      tasks: MapSet.new()
     }
 
     {:ok, state}
@@ -200,10 +197,6 @@ defmodule MingaAgent.Tools.JobOwner do
     end
   end
 
-  def handle_call(:drain_completions, _from, state) do
-    {:reply, Enum.reverse(state.completions), %{state | completions: []}}
-  end
-
   def handle_call(:reap_all, _from, state) do
     state =
       Enum.reduce(state.live, state, fn {job_id, entry}, acc ->
@@ -231,10 +224,10 @@ defmodule MingaAgent.Tools.JobOwner do
     end
   end
 
-  def handle_info({:job_result, job_id, result}, state) do
+  def handle_info({:job_result, job_id, result, exit_code}, state) do
     case Map.fetch(state.live, job_id) do
       {:ok, entry} ->
-        {job, shell_result} = process_shell_result(entry.job, result)
+        {job, shell_result} = process_shell_result(entry.job, result, exit_code)
         state = finish_job(state, job_id, entry, job, shell_result)
         {:noreply, state}
 
@@ -243,7 +236,21 @@ defmodule MingaAgent.Tools.JobOwner do
     end
   end
 
+  def handle_info({:EXIT, pid, reason}, state) do
+    if MapSet.member?(state.tasks, pid) do
+      {:noreply, %{state | tasks: MapSet.delete(state.tasks, pid)}}
+    else
+      {:stop, reason, state}
+    end
+  end
+
   def handle_info(_msg, state), do: {:noreply, state}
+
+  @impl GenServer
+  @spec terminate(term(), state()) :: :ok
+  def terminate(_reason, state) do
+    Enum.each(state.live, fn {_job_id, entry} -> Process.exit(entry.task_pid, :kill) end)
+  end
 
   # ── Private ─────────────────────────────────────────────────────────────────
 
@@ -281,9 +288,18 @@ defmodule MingaAgent.Tools.JobOwner do
     timeout_secs = job.timeout_secs
 
     task_pid =
-      spawn(fn ->
-        result = run_shell(command, cwd, timeout_secs, opts)
-        send(owner, {:job_result, job_id, result})
+      spawn_link(fn ->
+        task = self()
+
+        report_exit = fn code ->
+          send(task, {:job_exit_status, code})
+          :ok
+        end
+
+        result =
+          run_shell(command, cwd, timeout_secs, Keyword.put(opts, :on_exit_status, report_exit))
+
+        send(owner, {:job_result, job_id, result, received_exit_status()})
       end)
 
     ref = Process.monitor(task_pid)
@@ -296,7 +312,17 @@ defmodule MingaAgent.Tools.JobOwner do
       from: from
     }
 
-    %{state | live: Map.put(state.live, job.id, entry)}
+    %{state | live: Map.put(state.live, job.id, entry), tasks: MapSet.put(state.tasks, task_pid)}
+  end
+
+  # Shell reports the exit code through its callback in this same process before it returns.
+  @spec received_exit_status() :: integer() | nil
+  defp received_exit_status do
+    receive do
+      {:job_exit_status, code} -> code
+    after
+      0 -> nil
+    end
   end
 
   @spec run_shell(String.t(), String.t(), pos_integer(), start_opts()) :: Shell.result()
@@ -324,26 +350,27 @@ defmodule MingaAgent.Tools.JobOwner do
     end
   end
 
-  @spec process_shell_result(Job.t(), Shell.result()) :: {Job.t(), Shell.result()}
-  defp process_shell_result(job, {:ok, text} = result) when is_binary(text) do
+  @spec process_shell_result(Job.t(), Shell.result(), integer() | nil) ::
+          {Job.t(), Shell.result()}
+  defp process_shell_result(job, {:ok, text} = result, exit_code) when is_binary(text) do
     job =
       job
-      |> Job.terminate(:completed, 0)
+      |> Job.terminate(exit_outcome(exit_code), exit_code)
       |> Job.set_output(nil, text)
 
     {job, result}
   end
 
-  defp process_shell_result(job, {:ok, %MingaAgent.Tool.Output{} = output} = result) do
+  defp process_shell_result(job, {:ok, %MingaAgent.Tool.Output{} = output} = result, exit_code) do
     job =
       job
-      |> Job.terminate(:completed, 0)
+      |> Job.terminate(exit_outcome(exit_code), exit_code)
       |> Job.set_output(output.reference, output.view)
 
     {job, result}
   end
 
-  defp process_shell_result(job, {:error, {:incomplete, :timeout, text}} = result) do
+  defp process_shell_result(job, {:error, {:incomplete, :timeout, text}} = result, _exit_code) do
     job =
       job
       |> Job.terminate(:timeout, nil)
@@ -352,10 +379,29 @@ defmodule MingaAgent.Tools.JobOwner do
     {job, result}
   end
 
-  defp process_shell_result(job, {:error, _reason} = result) do
+  defp process_shell_result(
+         job,
+         {:error, %MingaAgent.Tool.Output{capture: {:incomplete, reason}} = output} = result,
+         _exit_code
+       ) do
+    outcome = if reason == :timeout, do: :timeout, else: :failed
+
+    job =
+      job
+      |> Job.terminate(outcome, nil)
+      |> Job.set_output(output.reference, output.view)
+
+    {job, result}
+  end
+
+  defp process_shell_result(job, {:error, _reason} = result, _exit_code) do
     job = Job.terminate(job, :failed, nil)
     {job, result}
   end
+
+  @spec exit_outcome(integer() | nil) :: :completed | :failed
+  defp exit_outcome(0), do: :completed
+  defp exit_outcome(_nonzero_or_unknown), do: :failed
 
   @spec finish_job(state(), Job.id(), live_entry(), Job.t()) :: state()
   defp finish_job(state, job_id, entry, job) do
@@ -375,12 +421,10 @@ defmodule MingaAgent.Tools.JobOwner do
     state = retain_job(state, job)
 
     if job.background? do
-      completion = {job.id, job.generation, Job.outcome(job), job.exit_code}
-      notify_completion(state.notify, completion)
-      %{state | completions: [completion | state.completions]}
-    else
-      state
+      notify_completion(state.notify, {job.id, job.generation, Job.outcome(job), job.exit_code})
     end
+
+    state
   end
 
   @spec retain_job(state(), Job.t()) :: state()

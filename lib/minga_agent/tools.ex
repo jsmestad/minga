@@ -743,11 +743,11 @@ defmodule MingaAgent.Tools do
 
             shell_opts = [
               env: env,
-              on_output: shell_output_callback,
               artifact_store: context.artifact_store,
               capture_key: context.capture_key
             ]
 
+            # A background job outlives this tool call, so it must not stream into the call's output.
             if background? and job_owner != nil do
               execute_background_shell(
                 job_owner,
@@ -757,6 +757,8 @@ defmodule MingaAgent.Tools do
                 shell_opts
               )
             else
+              shell_opts = Keyword.put(shell_opts, :on_output, shell_output_callback)
+
               process_backend.shell(args["command"], shell_root, timeout_secs, shell_opts)
               |> retained_process_result(context)
             end

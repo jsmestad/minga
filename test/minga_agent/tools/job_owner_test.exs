@@ -41,20 +41,16 @@ defmodule MingaAgent.Tools.JobOwnerTest do
       assert byte_size(job_id) > 0
     end
 
-    test "sends a completion notification to the notify pid", %{owner: owner} do
+    test "sends a completion notification with exit code 0 to the notify pid", %{owner: owner} do
       {:ok, job_id} = JobOwner.start_background(owner, "echo hello", "/tmp", 10)
 
-      assert_receive {:job_completion, {^job_id, _gen, :completed, _code}}, 5_000
+      assert_receive {:job_completion, {^job_id, _gen, :completed, 0}}, 5_000
     end
 
-    test "reports completion for nonzero exit since Shell.execute wraps exit code in text", %{
-      owner: owner
-    } do
-      {:ok, job_id} = JobOwner.start_background(owner, "exit 42", "/tmp", 10)
+    test "a nonzero exit fails the job and records the real exit code", %{owner: owner} do
+      {:ok, job_id} = JobOwner.start_background(owner, "echo PASS; exit 42", "/tmp", 10)
 
-      # Shell.execute returns {:ok, text} for all exits; exit code is in the text.
-      # The job outcome treats {:ok, _} as :completed.
-      assert_receive {:job_completion, {^job_id, _gen, :completed, _code}}, 5_000
+      assert_receive {:job_completion, {^job_id, _gen, :failed, 42}}, 5_000
     end
 
     test "rejects when too many concurrent jobs", %{owner: owner} do
@@ -144,19 +140,48 @@ defmodule MingaAgent.Tools.JobOwnerTest do
     end
   end
 
-  describe "drain_completions/1" do
-    test "returns and clears pending completions", %{owner: owner} do
-      {:ok, job_id} = JobOwner.start_background(owner, "echo one", "/tmp", 10)
-      assert_receive {:job_completion, {^job_id, _gen, :completed, _code}}, 5_000
+  describe "owner death" do
+    @tag :tmp_dir
+    test "a killed owner takes its running job's OS process with it", %{
+      owner: owner,
+      tmp_dir: dir
+    } do
+      dir = Path.expand(dir)
+      pid_file = Path.join(dir, "job.pid")
 
-      completions = JobOwner.drain_completions(owner)
-      assert [_ | _] = completions
-      assert Enum.any?(completions, fn {id, _gen, _outcome, _code} -> id == job_id end)
+      {:ok, _job_id} =
+        JobOwner.start_background(owner, "echo $$ > job.pid; exec sleep 60", dir, 60)
 
-      # Second drain should be empty
-      assert [] = JobOwner.drain_completions(owner)
+      os_pid = await(fn -> File.read(pid_file) end) |> String.trim()
+      assert os_alive?(os_pid)
+
+      ref = Process.monitor(owner)
+      Process.exit(owner, :kill)
+      assert_receive {:DOWN, ^ref, :process, ^owner, :killed}, 1_000
+
+      assert await(fn -> if os_alive?(os_pid), do: :error, else: {:ok, :gone} end) == :gone
     end
   end
+
+  # The OS process ends asynchronously after its port closes, so poll its observable state.
+  @spec await((-> {:ok, term()} | term()), non_neg_integer()) :: term()
+  defp await(check, attempts \\ 100) do
+    case check.() do
+      {:ok, value} ->
+        value
+
+      _not_yet when attempts > 0 ->
+        Process.sleep(50)
+        await(check, attempts - 1)
+
+      other ->
+        flunk("condition not met: #{inspect(other)}")
+    end
+  end
+
+  @spec os_alive?(String.t()) :: boolean()
+  defp os_alive?(os_pid),
+    do: match?({_, 0}, System.cmd("kill", ["-0", os_pid], stderr_to_stdout: true))
 
   describe "reap_all/1" do
     test "interrupts all running jobs", %{owner: owner} do
