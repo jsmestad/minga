@@ -17,9 +17,9 @@ defmodule Minga.Buffer.Provenance.Run do
   @typedoc """
   Who wrote a run: you, Minga in a task, or nobody we know of.
 
-  `:unattributed` is text that predates tracking (the file as it was loaded) or text written by an agent edit that carries no task.
+  `:unattributed` is text that predates tracking: the file as it was loaded, text appended to a log buffer, or text changed on disk. `{:minga, :untasked}` is text an agent edit wrote without a task.
   """
-  @type author :: :you | :unattributed | Minga.Buffer.Author.t()
+  @type author :: :you | :unattributed | Minga.Buffer.Author.t() | {:minga, :untasked}
 
   @typedoc "A history group, as numbered by `Minga.Buffer.Provenance`."
   @type group_id :: pos_integer()

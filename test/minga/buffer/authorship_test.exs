@@ -11,15 +11,33 @@ defmodule Minga.Buffer.AuthorshipTest do
   @minga EditSource.minga("task-1", "call-1")
   @task {:minga, "task-1"}
 
-  defp start(content), do: start_supervised!({BufferProcess, content: content})
+  defp start(content),
+    do: start_supervised!({BufferProcess, content: content}, id: make_ref())
 
-  defp minga_replace(buffer, content) do
+  # Replaces `length` bytes at `position` as one edit by `source`, the way a tool's byte-range edit does.
+  defp replace_at(buffer, position, length, text, source \\ EditSource.user()) do
+    version = BufferProcess.version(buffer)
+
+    assert {:ok, _version} =
+             BufferProcess.replace_byte_range_if_version(
+               buffer,
+               version,
+               position,
+               length,
+               text,
+               source
+             )
+  end
+
+  defp step(task, step), do: EditSource.minga(task, step)
+
+  defp minga_replace(buffer, content, source \\ @minga) do
     assert {:ok, _version} =
              BufferProcess.replace_content_if_version(
                buffer,
                BufferProcess.version(buffer),
                content,
-               @minga
+               source
              )
   end
 
@@ -43,12 +61,12 @@ defmodule Minga.Buffer.AuthorshipTest do
 
     assert BufferProcess.line_authors(buffer, 0, 10) == [
              [:unattributed],
-             [@task],
+             [@task, :unattributed],
              [:you, :unattributed],
              []
            ]
 
-    assert BufferProcess.line_authors(buffer, 1, 1) == [[@task]]
+    assert BufferProcess.line_authors(buffer, 1, 1) == [[@task, :unattributed]]
   end
 
   test "Minga edits line 10 and you edit line 12: undo and reject each touch only their own text" do
@@ -95,7 +113,13 @@ defmodule Minga.Buffer.AuthorshipTest do
     minga_replace(buffer, "foo\nAGENT\nfoo\n")
     assert :ok = BufferProcess.replace_content(buffer, "bar\nAGENT\nbar\n")
 
-    assert BufferProcess.line_authors(buffer, 0, 3) == [[:you], [@task], [:you]]
+    # Only the changed bytes change author; each newline stays as the file had it.
+    assert BufferProcess.line_authors(buffer, 0, 3) == [
+             [:you, :unattributed],
+             [@task, :unattributed],
+             [:you, :unattributed]
+           ]
+
     assert {:ok, 1} = BufferProcess.undo_agent_session(buffer)
     assert BufferProcess.content(buffer) == "bar\nline\nbar\n"
   end
@@ -123,10 +147,226 @@ defmodule Minga.Buffer.AuthorshipTest do
     assert BufferProcess.line_authors(buffer, 0, 2) == [[:unattributed], [:unattributed]]
   end
 
+  describe "rejecting a task after you rewrote its replacement" do
+    test "your replacement of exactly Minga's text keeps what Minga replaced deleted" do
+      buffer = start("axb")
+      replace_at(buffer, {0, 1}, 1, "y", step("t1", "s1"))
+      replace_at(buffer, {0, 1}, 1, "z")
+
+      assert {:ok, 1} = BufferProcess.undo_agent_session(buffer)
+      assert BufferProcess.content(buffer) == "azb"
+      assert :ok = BufferProcess.undo(buffer)
+      assert BufferProcess.content(buffer) == "axb"
+    end
+
+    test "a replacement one byte wider on either side also keeps it deleted" do
+      for {position, length, expected} <- [{{0, 1}, 2, "az"}, {{0, 0}, 2, "zb"}] do
+        buffer = start("axb")
+        replace_at(buffer, {0, 1}, 1, "y", step("t1", "s1"))
+        replace_at(buffer, position, length, "z")
+
+        assert {:ok, 1} = BufferProcess.undo_agent_session(buffer)
+        assert BufferProcess.content(buffer) == expected
+      end
+    end
+
+    test "your :s on a line Minga extended does not duplicate the line on reject" do
+      buffer = start("x = 1\ny = 2\n")
+      minga_replace(buffer, "x = 1 # TODO\ny = 2\n")
+      assert :ok = BufferProcess.replace_content(buffer, "z = 1 # TODO\ny = 2\n")
+
+      assert BufferProcess.author_at(buffer, {0, 8}) == @task
+      assert {:ok, 1} = BufferProcess.undo_agent_session(buffer)
+      assert BufferProcess.content(buffer) == "z = 1\ny = 2\n"
+    end
+
+    test "a task whose text a newer task rewrote is blocked until the newer one is reverted" do
+      buffer = start("axb\nq")
+      replace_at(buffer, {0, 1}, 1, "y", step("t1", "s1"))
+      replace_at(buffer, {0, 1}, 1, "w", step("t2", "s1"))
+      replace_at(buffer, {1, 0}, 1, "Q", step("t1", "s2"))
+
+      assert BufferProcess.undo_agent_session(buffer) ==
+               {:blocked, {:overlaps, {:minga, "t2", "s1"}}}
+
+      assert BufferProcess.content(buffer) == "awb\nQ"
+    end
+
+    test "deleting all of Minga's insertion leaves nothing for the reject to bring back" do
+      buffer = start("a b")
+      replace_at(buffer, {0, 1}, 0, "XYZ", step("t1", "s1"))
+      replace_at(buffer, {0, 1}, 3, "")
+
+      assert {:ok, 1} = BufferProcess.undo_agent_session(buffer)
+      assert BufferProcess.content(buffer) == "a b"
+      assert :ok = BufferProcess.undo(buffer)
+      assert BufferProcess.content(buffer) == "a b"
+    end
+  end
+
+  describe "only bytes that changed change author" do
+    test "Minga's edit elsewhere on your line leaves your text yours and your undo free" do
+      buffer = start("def run(x), do: x\nend\n")
+      assert :ok = BufferProcess.move_to(buffer, {0, 17})
+      assert :ok = BufferProcess.insert_text(buffer, " # keep me")
+      content = BufferProcess.content(buffer)
+      identity = {:buffer, "/edit"}
+
+      expected =
+        Minga.Buffer.FileMutation.revision(content, BufferProcess.version(buffer), identity)
+
+      assert {:ok, _receipt} =
+               BufferProcess.conditional_mutate(
+                 buffer,
+                 expected,
+                 {:edit, [{"run(x)", "run(y)"}]},
+                 identity,
+                 step("t", "call-1")
+               )
+
+      assert BufferProcess.author_at(buffer, {0, 20}) == :you
+      assert BufferProcess.author_at(buffer, {0, 4}) == :unattributed
+      assert BufferProcess.author_at(buffer, {0, 8}) == {:minga, "t"}
+      assert :ok = BufferProcess.undo(buffer)
+      assert BufferProcess.content(buffer) == "def run(y), do: x\nend\n"
+    end
+
+    test "indenting lines Minga changed keeps Minga's text Minga's, so the reject still removes it" do
+      buffer = start("a\nb\nc\n")
+      replace_at(buffer, {1, 0}, 1, "B", step("t", "s"))
+      assert :ok = BufferProcess.shift_lines(buffer, 0, 2, {:indent, "  "})
+
+      assert BufferProcess.line_authors(buffer, 0, 3) == [
+               [:you, :unattributed],
+               [:you, {:minga, "t"}, :unattributed],
+               [:you, :unattributed]
+             ]
+
+      assert {:ok, 1} = BufferProcess.undo_agent_session(buffer)
+      assert BufferProcess.content(buffer) == "  a\n  b\n  c\n"
+    end
+
+    test "a large :%s past the line diff budget leaves Minga's line Minga's" do
+      lines = 1_200
+
+      base =
+        Enum.map_join(1..lines, fn i ->
+          if rem(i, 2) == 0, do: "foo #{i}\n", else: "bar #{i}\n"
+        end)
+
+      buffer = start(base)
+      replace_at(buffer, {600, 0}, 3, "MINGA", step("t", "s"))
+
+      assert :ok =
+               BufferProcess.replace_content(
+                 buffer,
+                 String.replace(BufferProcess.content(buffer), "foo", "qux")
+               )
+
+      assert BufferProcess.author_at(buffer, {600, 0}) == {:minga, "t"}
+      assert {:ok, 1} = BufferProcess.undo_agent_session(buffer)
+      content = BufferProcess.content(buffer)
+      assert content =~ "bar 601\n"
+      refute content =~ "MINGA"
+      assert length(String.split(content, "\n")) == lines + 1
+    end
+  end
+
+  describe "SPC a u" do
+    test "reverts the task that edited most recently, not the one that opened its step last" do
+      buffer = start("a\nb\nc\n")
+      minga_replace(buffer, "A\nb\nc\n", step("t1", "s1"))
+      minga_replace(buffer, "A\nB\nc\n", step("t2", "s1"))
+      minga_replace(buffer, "A\nB\nC\n", step("t1", "s1"))
+
+      assert {:ok, 1} = BufferProcess.undo_agent_session(buffer)
+      assert BufferProcess.content(buffer) == "a\nB\nc\n"
+    end
+  end
+
+  describe "positions" do
+    test "author_at returns nil for a line or column past the end" do
+      buffer = start("ab\ncd")
+
+      assert BufferProcess.author_at(buffer, {0, 2}) == :unattributed
+      assert BufferProcess.author_at(buffer, {0, 3}) == nil
+      assert BufferProcess.author_at(buffer, {1, 2}) == nil
+      assert BufferProcess.author_at(buffer, {99, 0}) == nil
+    end
+  end
+
+  describe "version after an interleaved undo" do
+    test "undoing your edit after a Minga edit takes a new version instead of an old one" do
+      buffer = start("one\n")
+      assert :ok = BufferProcess.insert_text(buffer, "x")
+      minga_replace(buffer, "xone\ntwo\n")
+      before = BufferProcess.version(buffer)
+
+      assert :ok = BufferProcess.undo(buffer)
+      assert BufferProcess.content(buffer) == "one\ntwo\n"
+      assert BufferProcess.version(buffer) > before
+    end
+  end
+
+  describe "reload" do
+    @describetag :tmp_dir
+
+    test "reloading keeps Minga's unreviewed steps and their authorship", %{tmp_dir: dir} do
+      path = Path.join(dir, "file.txt")
+      File.write!(path, "one\ntwo\nthree\n")
+      buffer = start_supervised!({BufferProcess, file_path: path}, id: make_ref())
+      replace_at(buffer, {1, 0}, 3, "TWO", step("t", "s"))
+      assert :ok = BufferProcess.save(buffer)
+      changes = BufferProcess.minga_changes(buffer, "t")
+
+      assert :ok = BufferProcess.reload(buffer)
+      assert BufferProcess.minga_changes(buffer, "t") == changes
+
+      File.write!(path, "ONE\nTWO\nthree\n")
+      assert :ok = BufferProcess.reload(buffer)
+      assert BufferProcess.content(buffer) == "ONE\nTWO\nthree\n"
+      assert BufferProcess.author_at(buffer, {1, 0}) == {:minga, "t"}
+      assert BufferProcess.author_at(buffer, {0, 0}) == :unattributed
+      assert {:ok, 1} = BufferProcess.undo_agent_session(buffer)
+      assert BufferProcess.content(buffer) == "ONE\ntwo\nthree\n"
+    end
+  end
+
+  describe "a history out of step with its document" do
+    test "resets authorship, says so in *Messages*, and keeps the buffer and its text" do
+      registry = Module.concat(__MODULE__, "Events#{System.unique_integer([:positive])}")
+      start_supervised!({Registry, keys: :duplicate, name: registry})
+      :ok = Minga.Events.subscribe(:log_message, registry)
+
+      buffer =
+        start_supervised!({BufferProcess, content: "hello", events_registry: registry},
+          id: make_ref()
+        )
+
+      :sys.replace_state(buffer, fn state ->
+        %{
+          state
+          | undo_history: Minga.Buffer.UndoHistory.new(Minga.Buffer.Document.new("wrong size"))
+        }
+      end)
+
+      assert :ok = BufferProcess.insert_text(buffer, "x")
+      assert BufferProcess.content(buffer) == "xhello"
+      assert BufferProcess.author_at(buffer, {0, 1}) == :unattributed
+
+      assert_receive {:minga_event, :log_message, %{level: :error, text: text}}
+      assert text =~ "were reset after an internal error"
+    end
+  end
+
   property "authorship stays in step with the document through the public edit paths" do
+    registry = Module.concat(__MODULE__, "Events#{System.unique_integer([:positive])}")
+    start_supervised!({Registry, keys: :duplicate, name: registry})
+    :ok = Minga.Events.subscribe(:log_message, registry)
+
     check all(commands <- StreamData.list_of(command(), max_length: 30), max_runs: 40) do
       buffer =
-        start_supervised!({BufferProcess, content: "abc\ndef\n"},
+        start_supervised!({BufferProcess, content: "abc\nd\u00e9f\n", events_registry: registry},
           id: {:authorship, System.unique_integer([:positive])}
         )
 
@@ -134,6 +374,9 @@ defmodule Minga.Buffer.AuthorshipTest do
         run(buffer, command)
         assert_in_step(buffer)
       end
+
+      # The history never had to be rebuilt: the safety net stays unused in normal use.
+      refute_received {:minga_event, :log_message, %{level: :error}}
     end
   end
 

@@ -28,12 +28,15 @@ defmodule Minga.Buffer.Provenance do
   alias Minga.Buffer.Provenance.RunTree
   alias Minga.Core.Unicode
 
-  defstruct tree: nil, groups: %{}, next_group: 1
+  defstruct tree: nil, groups: %{}, next_group: 1, deep: false, recent: [], fresh: []
 
   @opaque t :: %__MODULE__{
             tree: RunTree.t(),
             groups: %{Run.group_id() => Group.t()},
-            next_group: pos_integer()
+            next_group: pos_integer(),
+            deep: boolean(),
+            recent: [Locator.t()],
+            fresh: [Locator.t()]
           }
 
   @type author :: Run.author()
@@ -115,8 +118,14 @@ defmodule Minga.Buffer.Provenance do
         prov = prov |> split_at(start) |> split_at(start + removed_bytes)
         following = run_starting_at(prov.tree, start)
         preceding = preceding_run(prov.tree, following)
-        prov = delete_from(prov, group_id, following, removed, 0)
-        insert_between(prov, group_id, author, preceding, following, inserted_bytes)
+        left = live_before(prov.tree, start)
+        {prov, last} = delete_from(prov, group_id, following, removed, 0, nil)
+
+        prov
+        |> cover_replaced(group_id, last, left)
+        |> insert_between(group_id, author, preceding, following, inserted_bytes)
+        |> renumber_when_deep()
+        |> remember_fresh()
     end
   end
 
@@ -132,6 +141,12 @@ defmodule Minga.Buffer.Provenance do
   def revert(%__MODULE__{} = prov, id, %Document{} = document),
     do: set_applied(prov, id, false, document)
 
+  @doc "Unapplies every group in `ids` together, in one pass over the document. See `revert/3`."
+  @spec revert_all(t(), [group_id()], Document.t()) ::
+          {:ok, Document.t(), non_neg_integer() | nil, t()} | {:error, :invalid_utf8}
+  def revert_all(%__MODULE__{} = prov, ids, %Document{} = document) when is_list(ids),
+    do: set_applied_all(prov, ids, false, document)
+
   @doc "Applies a reverted group again and returns the document with its text. See `revert/3`."
   @spec reapply(t(), group_id(), Document.t()) ::
           {:ok, Document.t(), non_neg_integer() | nil, t()} | {:error, :invalid_utf8}
@@ -146,12 +161,22 @@ defmodule Minga.Buffer.Provenance do
   When it returns a key, flipping this group would change text that the other group rewrote, so your undo or redo must not happen.
   """
   @spec blocker(t(), group_id()) :: group_key() | nil
-  def blocker(%__MODULE__{groups: groups, tree: tree}, id) do
+  def blocker(%__MODULE__{} = prov, id),
+    do: blocker(prov, id, fn author, _key -> author != :you end)
+
+  @doc """
+  Returns the key of an applied group that `blocks?` accepts and that deleted text this group wrote or removed after this group did, or `nil`.
+
+  `blocks?` receives the deleting group's author and key. `blocker/2` counts every group that is not yours; a reject counts the groups of other tasks.
+  """
+  @spec blocker(t(), group_id(), (author(), group_key() -> boolean())) :: group_key() | nil
+  def blocker(%__MODULE__{groups: groups, tree: tree}, id, blocks?)
+      when is_function(blocks?, 2) do
     Map.fetch!(groups, id).runs
     |> :gb_sets.to_list()
     |> Enum.find_value(fn run_id ->
       {:ok, run, _offset} = RunTree.fetch(tree, run_id)
-      run |> later_deleters(id) |> Enum.find_value(&foreign_key(groups, &1, id))
+      run |> later_deleters(id) |> Enum.find_value(&blocking_key(groups, &1, id, blocks?))
     end)
   end
 
@@ -285,7 +310,7 @@ defmodule Minga.Buffer.Provenance do
     case RunTree.at_offset(prov.tree, offset) do
       {run, run_start} when run_start < offset ->
         following = RunTree.next(prov.tree, run.id)
-        right_id = Locator.between(run.id, following && following.id)
+        {right_id, prov} = allocate(prov, run, following)
         left = %{run | bytes: offset - run_start}
         right = %{run | id: right_id, bytes: run_start + run.bytes - offset}
         tree = prov.tree |> RunTree.update(left) |> RunTree.insert(right)
@@ -310,25 +335,118 @@ defmodule Minga.Buffer.Provenance do
   defp preceding_run(tree, %Run{id: id}), do: RunTree.previous(tree, id)
 
   # Kills the live runs that hold `removed`, starting at `run`, and marks the tombstones between them.
-  @spec delete_from(t(), group_id() | nil, Run.t() | nil, binary(), non_neg_integer()) :: t()
-  defp delete_from(prov, _group_id, _run, removed, consumed) when consumed == byte_size(removed),
-    do: prov
+  # Returns the last live run it killed, as it was before.
+  @spec delete_from(
+          t(),
+          group_id() | nil,
+          Run.t() | nil,
+          binary(),
+          non_neg_integer(),
+          Run.t() | nil
+        ) ::
+          {t(), Run.t() | nil}
+  defp delete_from(prov, _group_id, _run, removed, consumed, last)
+       when consumed == byte_size(removed),
+       do: {prov, last}
 
-  defp delete_from(prov, group_id, %Run{live: true} = run, removed, consumed) do
+  defp delete_from(prov, group_id, %Run{live: true} = run, removed, consumed, _last) do
     following = RunTree.next(prov.tree, run.id)
     text = binary_part(removed, consumed, run.bytes)
 
     prov
     |> mark_deleted(group_id, run, text)
-    |> delete_from(group_id, following, removed, consumed + run.bytes)
+    |> delete_from(group_id, following, removed, consumed + run.bytes, run)
   end
 
-  defp delete_from(prov, group_id, %Run{} = run, removed, consumed) do
+  defp delete_from(prov, group_id, %Run{} = run, removed, consumed, last) do
     following = RunTree.next(prov.tree, run.id)
 
     prov
     |> mark_deleted(group_id, run, run.text)
-    |> delete_from(group_id, following, removed, consumed)
+    |> delete_from(group_id, following, removed, consumed, last)
+  end
+
+  # A deletion that consumes another group's replacement also deletes the text that replacement replaced.
+  # A replacement's tombstones follow its inserted text.
+  # So when the deletion ends with that group's text and does not start inside it, it also marks the tombstones of that
+  # group right after it.
+  @spec cover_replaced(t(), group_id() | nil, Run.t() | nil, Run.t() | nil) :: t()
+  defp cover_replaced(prov, _group_id, nil, _left), do: prov
+  defp cover_replaced(prov, _group_id, %Run{group: nil}, _left), do: prov
+  defp cover_replaced(prov, _group_id, %Run{group: owner}, %Run{group: owner}), do: prov
+
+  defp cover_replaced(prov, group_id, %Run{group: owner} = last, _left),
+    do: cover_tombstones(prov, group_id, owner, RunTree.next(prov.tree, last.id))
+
+  @spec cover_tombstones(t(), group_id() | nil, group_id(), Run.t() | nil) :: t()
+  defp cover_tombstones(prov, group_id, owner, %Run{live: false} = run) do
+    following = RunTree.next(prov.tree, run.id)
+    prov = if owner in run.deletions, do: mark_deleted(prov, group_id, run, run.text), else: prov
+    cover_tombstones(prov, group_id, owner, following)
+  end
+
+  defp cover_tombstones(prov, _group_id, _owner, _live_or_end), do: prov
+
+  # A new locator between two runs hugs whichever neighbour the previous edit or this one just created.
+  # Insertions that keep landing beside the last one, as in typing forward or replaying a batch from the end, then take
+  # small steps away from it and leave the rest of the gap free. Any other insertion takes the middle of the gap.
+  @spec allocate(t(), Run.t() | nil, Run.t() | nil) :: {Locator.t(), t()}
+  defp allocate(prov, lower, upper) do
+    bias =
+      cond do
+        upper != nil and recent?(prov, upper.id) -> :high
+        lower != nil and recent?(prov, lower.id) -> :low
+        true -> :middle
+      end
+
+    id = Locator.between(lower && lower.id, upper && upper.id, bias)
+    {id, %{prov | fresh: [id | prov.fresh], deep: prov.deep or deep?(id)}}
+  end
+
+  @spec recent?(t(), Locator.t()) :: boolean()
+  defp recent?(prov, id), do: id in prov.fresh or id in prov.recent
+
+  @spec remember_fresh(t()) :: t()
+  defp remember_fresh(%__MODULE__{fresh: []} = prov), do: prov
+  defp remember_fresh(prov), do: %{prov | recent: prov.fresh, fresh: []}
+
+  # A locator longer than four digits makes the edit that created it renumber every run.
+  @spec deep?(Locator.t()) :: boolean()
+  defp deep?(id), do: match?([_, _, _, _, _ | _], id)
+
+  # Insertions packed into one place deepen locators by one digit about every 56 insertions.
+  # Renumbering every run evenly, and every group's references with it, keeps locators short for any insertion order.
+  # It costs O(n log n) and happens at most once per many insertions at one place.
+  @spec renumber_when_deep(t()) :: t()
+  defp renumber_when_deep(%__MODULE__{deep: false} = prov), do: prov
+
+  defp renumber_when_deep(prov) do
+    runs = RunTree.to_list(prov.tree)
+    ids = Locator.even(length(runs))
+    renamed = Map.new(Enum.zip(Enum.map(runs, & &1.id), ids))
+
+    tree =
+      runs
+      |> Enum.zip(ids)
+      |> Enum.map(fn {run, id} -> %{run | id: id} end)
+      |> RunTree.from_list()
+
+    # Renumbering keeps order, so each group's sorted locators stay sorted.
+    groups =
+      Map.new(prov.groups, fn {id, group} ->
+        locators = group.runs |> :gb_sets.to_list() |> Enum.map(&Map.fetch!(renamed, &1))
+        {id, %{group | runs: :gb_sets.from_ordset(locators)}}
+      end)
+
+    %{prov | tree: tree, groups: groups, deep: false, recent: [], fresh: []}
+  end
+
+  @spec live_before(RunTree.t(), non_neg_integer()) :: Run.t() | nil
+  defp live_before(_tree, 0), do: nil
+
+  defp live_before(tree, offset) do
+    {run, _start} = RunTree.at_offset(tree, offset - 1)
+    run
   end
 
   # An untracked deletion forgets the text.
@@ -368,7 +486,7 @@ defmodule Minga.Buffer.Provenance do
     if extendable?(preceding, group_id, author) do
       %{prov | tree: RunTree.update(prov.tree, %{preceding | bytes: preceding.bytes + bytes})}
     else
-      id = Locator.between(preceding && preceding.id, following && following.id)
+      {id, prov} = allocate(prov, preceding, following)
       run = %Run{id: id, bytes: bytes, author: author, group: group_id}
       groups = if group_id, do: add_run(prov.groups, group_id, id), else: prov.groups
       %{prov | tree: RunTree.insert(prov.tree, run), groups: groups}
@@ -379,23 +497,37 @@ defmodule Minga.Buffer.Provenance do
 
   @spec set_applied(t(), group_id(), boolean(), Document.t()) ::
           {:ok, Document.t(), non_neg_integer() | nil, t()} | {:error, :invalid_utf8}
-  defp set_applied(prov, id, applied, document) do
-    group = Map.fetch!(prov.groups, id)
+  defp set_applied(prov, id, applied, document),
+    do: set_applied_all(prov, [id], applied, document)
 
-    if group.applied == applied do
+  # Flips every group in `ids` at once and applies all their changes in one pass over the document.
+  @spec set_applied_all(t(), [group_id()], boolean(), Document.t()) ::
+          {:ok, Document.t(), non_neg_integer() | nil, t()} | {:error, :invalid_utf8}
+  defp set_applied_all(prov, ids, applied, document) do
+    flipping = Enum.reject(ids, &(Map.fetch!(prov.groups, &1).applied == applied))
+
+    if flipping == [] do
       {:ok, document, nil, prov}
     else
-      prov = %{prov | groups: Map.put(prov.groups, id, %{group | applied: applied})}
+      groups =
+        Enum.reduce(flipping, prov.groups, fn id, groups ->
+          Map.update!(groups, id, &%{&1 | applied: applied})
+        end)
+
       content = Document.content(document)
 
       # Visit runs from the end of the document to its start.
       # A run's offset never depends on the runs after it, so every change is located in the original document.
       # Prepending each change then leaves the list in document order.
       {changes, flipped} =
-        group.runs
+        flipping
+        |> Enum.map(&Map.fetch!(prov.groups, &1).runs)
+        |> Enum.reduce(&:gb_sets.union/2)
         |> :gb_sets.to_list()
         |> Enum.reverse()
-        |> Enum.reduce({[], prov}, fn run_id, acc -> flip_run(acc, run_id, content) end)
+        |> Enum.reduce({[], %{prov | groups: groups}}, fn run_id, acc ->
+          flip_run(acc, run_id, content)
+        end)
 
       with {:ok, new_document} <- apply_changes(changes, content, document) do
         {:ok, new_document, first_offset(changes), flipped}
@@ -471,12 +603,17 @@ defmodule Minga.Buffer.Provenance do
     end
   end
 
-  @spec foreign_key(%{group_id() => Group.t()}, group_id(), group_id()) :: group_key() | nil
-  defp foreign_key(_groups, id, id), do: nil
+  @spec blocking_key(
+          %{group_id() => Group.t()},
+          group_id(),
+          group_id(),
+          (author(), group_key() -> boolean())
+        ) :: group_key() | nil
+  defp blocking_key(_groups, id, id, _blocks?), do: nil
 
-  defp foreign_key(groups, deleter, _id) do
+  defp blocking_key(groups, deleter, _id, blocks?) do
     case Map.fetch!(groups, deleter) do
-      %Group{applied: true, author: author, key: key} when author != :you -> key
+      %Group{applied: true, author: author, key: key} -> if blocks?.(author, key), do: key
       %Group{} -> nil
     end
   end

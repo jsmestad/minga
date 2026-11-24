@@ -11,31 +11,53 @@ defmodule Minga.Buffer.Provenance.Locator do
 
   # Digits stay below 2^56, so every digit is a small integer on a 64-bit BEAM.
   @max_digit (1 <<< 56) - 1
-  @gap_shift 16
+
+  # A biased step takes 1/65536 of the gap, so a sequence of insertions shrinks the free gap slowly.
+  @step_shift 16
 
   @typedoc "A run identifier. Locators sort in document order."
   @type t :: nonempty_list(non_neg_integer())
 
+  @typedoc """
+  Where in the gap a new locator goes: at the middle, or close to one side.
+
+  Insertions that keep landing next to the locator made just before them should take a small step away from it, so the rest of the gap stays free for the next one: `:low` for a sequence that moves forward, `:high` for one that moves backward.
+  """
+  @type bias :: :low | :middle | :high
+
   @doc """
-  Returns a locator strictly between `lower` and `upper`.
+  Returns a locator strictly between `lower` and `upper`, placed in the gap as `bias` says.
 
   `nil` stands for the open end on either side. `lower` must sort before `upper`.
   """
-  @spec between(t() | nil, t() | nil) :: t()
-  def between(lower, upper), do: digits(lower || [], upper || [], [])
+  @spec between(t() | nil, t() | nil, bias()) :: t()
+  def between(lower, upper, bias \\ :middle) when bias in [:low, :middle, :high],
+    do: digits(lower || [], upper || [], bias, [])
 
-  @spec digits([non_neg_integer()], [non_neg_integer()], [non_neg_integer()]) :: t()
-  defp digits(lower, upper, acc) do
+  @spec digits([non_neg_integer()], [non_neg_integer()], bias(), [non_neg_integer()]) :: t()
+  defp digits(lower, upper, bias, acc) do
     {low, lower_rest} = first_digit(lower, 0)
     {high, upper_rest} = first_digit(upper, @max_digit)
-    mid = low + (max(high - low, 0) >>> @gap_shift)
+    candidate = candidate(low, high, bias)
 
     cond do
-      mid > low -> Enum.reverse([mid | acc])
+      candidate > low and candidate < high -> Enum.reverse([candidate | acc])
       # Already below `upper` at this digit, so every later digit is free up to the maximum.
-      mid < high -> digits(lower_rest, [], [mid | acc])
-      true -> digits(lower_rest, upper_rest, [mid | acc])
+      low < high -> digits(lower_rest, [], bias, [low | acc])
+      true -> digits(lower_rest, upper_rest, bias, [low | acc])
     end
+  end
+
+  @spec candidate(non_neg_integer(), non_neg_integer(), bias()) :: non_neg_integer()
+  defp candidate(low, high, :middle), do: low + ((high - low) >>> 1)
+  defp candidate(low, high, :low), do: low + max((high - low) >>> @step_shift, 1)
+  defp candidate(low, high, :high), do: high - max((high - low) >>> @step_shift, 1)
+
+  @doc "Returns `count` one-digit locators in increasing order, spread evenly over the digit range."
+  @spec even(non_neg_integer()) :: [t()]
+  def even(count) when is_integer(count) and count >= 0 do
+    spacing = div(@max_digit, count + 1)
+    for index <- 1..count//1, do: [index * spacing]
   end
 
   @spec first_digit([non_neg_integer()], non_neg_integer()) ::

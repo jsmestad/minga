@@ -120,7 +120,7 @@ defmodule Minga.Buffer.AttributedEditsTest do
     assert :ok = Fork.replace_content(fork, @new)
 
     assert {:ok, @new} = Fork.publish(fork)
-    assert BufferProcess.author_at(parent, {0, 0}) == :unattributed
+    assert BufferProcess.author_at(parent, {0, 0}) == {:minga, :untasked}
 
     # The publication is not yours to undo, and it reverts as an agent edit.
     assert :ok = BufferProcess.undo(parent)

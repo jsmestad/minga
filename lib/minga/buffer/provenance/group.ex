@@ -14,9 +14,9 @@ defmodule Minga.Buffer.Provenance.Group do
   defstruct [:author, :key, applied: true, runs: :gb_sets.new()]
 
   @typedoc """
-  How a group names itself to callers: Minga's author key for a Minga step, `:agent` for an agent edit with no task, and `nil` for your groups.
+  How a group names itself to callers: Minga's author key for a Minga step, `{:untasked, n}` for the `n`th agent edit with no task, and `nil` for your groups.
   """
-  @type key :: Minga.Buffer.Author.key() | :agent | nil
+  @type key :: Minga.Buffer.Author.key() | {:untasked, pos_integer()} | nil
 
   @type t :: %__MODULE__{
           author: Run.author(),

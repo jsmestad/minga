@@ -118,6 +118,32 @@ defmodule Minga.Buffer.ProvenanceTest do
     end
   end
 
+  describe "a deletion that consumes a replacement" do
+    test "also deletes the text the replacement replaced, so a reject cannot bring it back" do
+      document = Document.new("axb")
+      {step, prov} = Provenance.open_group(Provenance.new(3), @task, @step_one)
+      {document, prov} = edit(document, prov, step, 1, "x", "y")
+      {you, prov} = Provenance.open_group(prov, :you, nil)
+      {document, prov} = edit(document, prov, you, 1, "y", "z")
+
+      assert {:ok, rejected, _first, prov} = Provenance.revert(prov, step, document)
+      assert Document.content(rejected) == "azb"
+      assert {:ok, undone, _first, _prov} = Provenance.revert(prov, you, rejected)
+      assert Document.content(undone) == "axb"
+    end
+
+    test "does not cover the replaced text when part of the replacement survives on the left" do
+      document = Document.new("axb")
+      {step, prov} = Provenance.open_group(Provenance.new(3), @task, @step_one)
+      {document, prov} = edit(document, prov, step, 1, "x", "yy")
+      {you, prov} = Provenance.open_group(prov, :you, nil)
+      {document, prov} = edit(document, prov, you, 2, "y", "")
+
+      assert {:ok, rejected, _first, _prov} = Provenance.revert(prov, step, document)
+      assert Document.content(rejected) == "axb"
+    end
+  end
+
   describe "blocker/2" do
     test "names the Minga step that later deleted text you wrote" do
       {you, prov} = Provenance.open_group(Provenance.new(0), :you, nil)
@@ -207,12 +233,19 @@ defmodule Minga.Buffer.ProvenanceTest do
         assert Locator.between(high, nil) > high
       end
     end
+  end
 
-    test "appending ten thousand times keeps locators short" do
-      id =
-        Enum.reduce(1..10_000, Locator.between(nil, nil), fn _, id -> Locator.between(id, nil) end)
+  describe "locator length" do
+    # A 6000-line file edited at the start of every line, bottom-up or top-down, or at one place over and over.
+    # Each insertion is its own group, so no run grows in place and every insertion needs a new locator.
+    for place <- [:bottom_up, :top_down, :same_place] do
+      test "#{place} insertions keep locators at most five digits and stay fast" do
+        {micros, prov} = :timer.tc(fn -> insert_many(unquote(place), 6_000) end)
 
-      assert [_one_digit] = id
+        assert Provenance.size(prov) == 6_000 * 3
+        assert prov |> Provenance.runs() |> Enum.map(&length(&1.id)) |> Enum.max() <= 5
+        assert micros < 3_000_000
+      end
     end
   end
 
@@ -230,6 +263,32 @@ defmodule Minga.Buffer.ProvenanceTest do
           assert_matches(state)
           state
         end)
+      end
+    end
+
+    property "an edit across a fresh replacement agrees with the model, before and after the reject" do
+      check all(
+              original <- StreamData.string([?a..?e, ?\n], min_length: 1, max_length: 12),
+              replaced <- StreamData.string([?a..?e], max_length: 3),
+              {a, b, c, d} <-
+                StreamData.tuple({integer(0..20), integer(0..4), integer(0..20), integer(0..6)}),
+              mine <- StreamData.string([?x..?z], max_length: 3),
+              max_runs: 2_000
+            ) do
+        state = {Provenance.new(byte_size(original)), ProvenanceModel.new(original), original}
+        {prov, model, text} = state
+        {step, prov, model} = open(prov, model, @task, @step_one)
+        {start, removed} = range(text, a, b, 11)
+        state = replace({prov, model, text}, step, start, removed, replaced)
+
+        # Your edit starts near Minga's replacement, so it often covers it exactly, partly, or with a margin.
+        {prov, model, text} = state
+        {you, prov, model} = open(prov, model, :you, nil)
+        your_start = min(max(start + rem(c, 5) - 2, 0), byte_size(text))
+        your_removed = min(d, byte_size(text) - your_start)
+        state = replace({prov, model, text}, you, your_start, your_removed, mine)
+        assert_matches(state)
+        state |> revert(step) |> assert_matches()
       end
     end
 
@@ -266,6 +325,21 @@ defmodule Minga.Buffer.ProvenanceTest do
                |> Enum.any?(&match?({:minga, _task}, elem(&1, 2)))
       end
     end
+  end
+
+  defp insert_many(place, lines) do
+    Enum.reduce(1..lines, Provenance.new(lines * 2), fn n, prov ->
+      {group, prov} = Provenance.open_group(prov, :you, nil)
+
+      offset =
+        case place do
+          :bottom_up -> (lines - n) * 2
+          :top_down -> (n - 1) * 3
+          :same_place -> 0
+        end
+
+      Provenance.edit(prov, group, offset, "", "y")
+    end)
   end
 
   # ── Model-based helpers ─────────────────────────────────────────────
@@ -402,6 +476,8 @@ defmodule Minga.Buffer.ProvenanceTest do
 
     runs = Provenance.runs(prov)
     assert Enum.all?(runs, &(&1.bytes > 0))
+    assert Enum.all?(runs, &match?([_ | _], &1.id))
+    refute Enum.any?(runs, &match?([_, _, _, _, _ | _], &1.id))
     assert ids_sorted?(Enum.map(runs, & &1.id))
     assert balanced?(prov, length(runs))
   end

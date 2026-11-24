@@ -7,6 +7,7 @@ defmodule MingaEditor.Commands.Editing do
   use MingaEditor.Commands.Provider
 
   alias Minga.Buffer
+  alias Minga.Log
   alias Minga.Buffer.Document
   alias Minga.Buffer.Operation
   alias Minga.Language
@@ -38,7 +39,7 @@ defmodule MingaEditor.Commands.Editing do
     {:replace_restore, "Restore replaced character", true},
     {:undo, "Undo the last change", true},
     {:redo, "Redo the last undone change", true},
-    {:undo_agent_session, "Undo all agent edits from last session", true},
+    {:undo_agent_session, "Revert the newest Minga task's edits in this buffer", true},
     {:paste_before, "Paste before cursor", true},
     {:paste_after, "Paste after cursor", true},
     {:indent_line, "Indent line", true},
@@ -319,11 +320,23 @@ defmodule MingaEditor.Commands.Editing do
   def execute(%{workspace: %{buffers: %{active: buf}}} = state, :undo_agent_session) do
     case Buffer.undo_agent_session(buf) do
       {:ok, count} ->
-        Minga.Log.info(:editor, "Reverted #{count} agent edit(s)")
+        Log.info(
+          :editor,
+          "Reverted the newest Minga task in this buffer (#{count} step(s))"
+        )
+
         state
 
       :empty ->
-        Minga.Log.info(:editor, "No agent edits to undo")
+        Log.info(:editor, "No Minga task edits to revert in this buffer")
+        state
+
+      {:blocked, {:overlaps, minga_group}} ->
+        Log.info(
+          :editor,
+          "Revert blocked: a newer Minga task rewrote this task's text (#{inspect(minga_group)})"
+        )
+
         state
 
       # The buffer logs the refused undo; nothing changed.
@@ -1249,7 +1262,7 @@ defmodule MingaEditor.Commands.Editing do
   # Your undo or redo never changes text a later Minga step rewrote; the buffer refused it and nothing changed.
   @spec log_blocked_history(term(), :undo | :redo) :: :ok
   defp log_blocked_history({:blocked, {:overlaps, minga_group}}, action) do
-    Minga.Log.info(
+    Log.info(
       :editor,
       "#{action} blocked: a later Minga change rewrote this text (#{inspect(minga_group)})"
     )

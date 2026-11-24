@@ -14,6 +14,62 @@ defmodule Minga.Buffer.UndoPatchTest do
     applied
   end
 
+  describe "precise_changes/1" do
+    test "a changed region keeps only the bytes that changed" do
+      patch = UndoPatch.replacement(10, "def run(x), do: x\n", "def run(y), do: x\n", {0, 0})
+      assert UndoPatch.precise_changes(patch) == [{18, "x", "y"}]
+    end
+
+    test "lines paired one to one are compared one by one" do
+      patch = UndoPatch.replacement(0, "a\nb\nc\n", "  a\n  b\n  c\n", {0, 0})
+      assert UndoPatch.precise_changes(patch) == [{0, "", "  "}, {2, "", "  "}, {4, "", "  "}]
+    end
+
+    test "trimming keeps whole code points" do
+      patch = UndoPatch.replacement(0, "é", "è", {0, 0})
+      assert UndoPatch.precise_changes(patch) == [{0, "é", "è"}]
+    end
+
+    test "an unchanged patch has no changes" do
+      assert UndoPatch.precise_changes(UndoPatch.replacement(3, "same", "same", {0, 0})) == []
+    end
+
+    property "applying the changes from the last to the first rebuilds the patch's result" do
+      check all(
+              old <- StreamData.string([?a..?c, ?\n, ?é], max_length: 30),
+              new <- StreamData.string([?a..?c, ?\n, ?é], max_length: 30),
+              prefix <- StreamData.string([?a..?c, ?\n], max_length: 5),
+              max_runs: 2_000
+            ) do
+        start = byte_size(prefix)
+        patch = UndoPatch.replacement(start, old, new, {0, 0})
+        changes = UndoPatch.precise_changes(patch)
+
+        rebuilt =
+          changes
+          |> Enum.reverse()
+          |> Enum.reduce(prefix <> old, fn {at, removed, inserted}, text ->
+            assert binary_part(text, at, byte_size(removed)) == removed
+
+            binary_part(text, 0, at) <>
+              inserted <>
+              binary_part(
+                text,
+                at + byte_size(removed),
+                byte_size(text) - at - byte_size(removed)
+              )
+          end)
+
+        assert rebuilt == prefix <> new
+        assert Enum.all?(changes, fn {_at, removed, inserted} -> removed != inserted end)
+
+        assert Enum.all?(changes, fn {_at, removed, inserted} ->
+                 String.valid?(removed) and String.valid?(inserted)
+               end)
+      end
+    end
+  end
+
   describe "changes/2" do
     test "three separated changed regions become three whole-line patches, nearest the start first" do
       old = Document.move_to(doc("a\nkeep 1\nb\nkeep 2\nc\n"), {1, 2})

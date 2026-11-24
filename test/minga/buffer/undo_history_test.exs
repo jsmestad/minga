@@ -261,15 +261,15 @@ defmodule Minga.Buffer.UndoHistoryTest do
       assert restore.version == :advance
     end
 
-    test "agent edits without a task are unattributed, not yours, and revert together" do
+    test "agent edits without a task are Minga's untasked text, not yours, and revert together" do
       world = world("") |> edit(:agent, 0, 0, "agent") |> edit(:agent, 5, 0, " more")
 
-      assert author_at(world, 0) == :unattributed
+      assert author_at(world, 0) == {:minga, :untasked}
       assert step(world, :undo) == :empty
       assert text(reject_newest_task(world)) == ""
     end
 
-    test "untasked agent edits keep their last 1000 groups, and older ones stay as unattributed text" do
+    test "untasked agent edits keep their last 1000 groups, and older ones stay as permanent text" do
       world = edit(world(""), @step_one, 0, 0, "task\n")
 
       world =
@@ -279,7 +279,7 @@ defmodule Minga.Buffer.UndoHistoryTest do
 
       provenance = UndoHistory.provenance(world.history)
       assert provenance |> Provenance.runs() |> Enum.count() <= 1002
-      assert Provenance.author_at(provenance, 5) == :unattributed
+      assert Provenance.author_at(provenance, 5) == {:minga, :untasked}
 
       {:ok, restore, history, 1000} =
         UndoHistory.undo_agent_session(world.history, world.version, world.doc)
@@ -287,7 +287,9 @@ defmodule Minga.Buffer.UndoHistoryTest do
       assert restore.version == :advance
       assert Document.content(restore.document) == "task\n" <> String.duplicate("x", 100)
       assert [{@step_one, [{0, 5}]}] = UndoHistory.minga_changes(history, "task-1")
-      assert history |> UndoHistory.provenance() |> Provenance.author_at(104) == :unattributed
+
+      assert history |> UndoHistory.provenance() |> Provenance.author_at(104) ==
+               {:minga, :untasked}
 
       # The tasked step is never evicted and still reverts on its own.
       assert {:ok, _restore, _history, 1} =
@@ -299,7 +301,7 @@ defmodule Minga.Buffer.UndoHistoryTest do
         world("foo\n") |> edit(:user, 0, 3, "bar") |> edit(:user, 3, 0, "!", at: @t0 + @window)
 
       world = world |> undo!() |> edit(:agent, 0, 3, "baz")
-      assert step(world, :undo) == {:blocked, {:overlaps, :agent}}
+      assert step(world, :undo) == {:blocked, {:overlaps, {:untasked, 1}}}
 
       world =
         Enum.reduce(1..1000, world, fn n, world ->
@@ -315,7 +317,7 @@ defmodule Minga.Buffer.UndoHistoryTest do
 
     test "evicting an agent edit that rewrote your undone text removes your blocked redo" do
       world = world("foo\n") |> edit(:user, 0, 3, "bar") |> undo!() |> edit(:agent, 0, 3, "qux")
-      assert step(world, :redo) == {:blocked, {:overlaps, :agent}}
+      assert step(world, :redo) == {:blocked, {:overlaps, {:untasked, 1}}}
 
       world =
         Enum.reduce(1..1000, world, fn n, world ->
@@ -324,6 +326,50 @@ defmodule Minga.Buffer.UndoHistoryTest do
 
       assert step(world, :redo) == :empty
       assert text(world) == "qux\n" <> String.duplicate("x", 1000)
+    end
+
+    test "a Minga step outlives more than 1000 of your groups" do
+      world = edit(world("base\n"), @step_one, 0, 0, "minga ")
+
+      world =
+        Enum.reduce(1..1100, world, fn n, world ->
+          edit(world, :user, byte_size(text(world)), 0, "x", at: @t0 + n * @window)
+        end)
+
+      assert UndoHistory.undo_count(world.history) == 1000
+      assert [{@step_one, [{0, 6}]}] = UndoHistory.minga_changes(world.history, "task-1")
+      assert text(reject_newest_task(world)) == "base\n" <> String.duplicate("x", 1100)
+    end
+
+    test "a task is blocked by a newer task that rewrote its text, and reverts after it" do
+      world =
+        world("axb\nq")
+        |> edit(@step_one, 1, 1, "y")
+        |> edit(@other_task, 1, 1, "w")
+        |> edit(@step_two, 4, 1, "Q")
+
+      assert UndoHistory.undo_agent_session(world.history, world.version, world.doc) ==
+               {:blocked, {:overlaps, @other_task}}
+
+      {:ok, restore, history, 1} =
+        UndoHistory.reject_task(world.history, {:minga, "task-2"}, world.version, world.doc)
+
+      world = install(world, restore, history)
+      assert text(world) == "ayb\nQ"
+      assert text(reject_newest_task(world)) == "axb\nq"
+    end
+
+    test "reload keeps Minga's steps and records the disk change as unattributed" do
+      world = world("one\ntwo\n") |> edit(:user, 0, 0, "my ") |> edit(@step_one, 7, 3, "TWO")
+      disk = Document.new("my one\nTWO\nthree\n")
+      history = UndoHistory.reload(world.history, world.doc, disk)
+
+      assert UndoHistory.undo_count(history) == 0
+      assert [{@step_one, [{7, 10}]}] = UndoHistory.minga_changes(history, "task-1")
+      provenance = UndoHistory.provenance(history)
+      assert Provenance.author_at(provenance, 0) == :you
+      assert Provenance.author_at(provenance, 7) == {:minga, "task-1"}
+      assert Provenance.author_at(provenance, 11) == :unattributed
     end
 
     test "undo_agent_session is :empty without Minga steps" do
@@ -470,11 +516,11 @@ defmodule Minga.Buffer.UndoHistoryTest do
     end
   end
 
-  # Undoes everything you did, rejecting Minga's newest task whenever it blocks you.
+  # Undoes everything you did, rejecting the task that blocks you whenever one does.
   defp unwind(world) do
     case step(world, :undo) do
       {:ok, world, _restore} -> unwind(world)
-      {:blocked, _overlap} -> unwind(reject_newest_task(world))
+      {:blocked, {:overlaps, key}} -> world |> reject!(task_of(key)) |> unwind()
       :empty -> reject_all(world)
     end
   end
@@ -483,8 +529,20 @@ defmodule Minga.Buffer.UndoHistoryTest do
     case UndoHistory.undo_agent_session(world.history, world.version, world.doc) do
       :empty -> world
       {:ok, restore, history, _count} -> reject_all(install(world, restore, history))
+      {:blocked, {:overlaps, key}} -> world |> reject!(task_of(key)) |> reject_all()
     end
   end
+
+  # Rejects a task, first rejecting any newer task that blocks it.
+  defp reject!(world, task) do
+    case UndoHistory.reject_task(world.history, task, world.version, world.doc) do
+      {:ok, restore, history, _count} -> install(world, restore, history)
+      {:blocked, {:overlaps, key}} -> world |> reject!(task_of(key)) |> reject!(task)
+    end
+  end
+
+  defp task_of({:untasked, _n}), do: {:minga, :untasked}
+  defp task_of({:minga, task, _step}), do: {:minga, task}
 
   defp deleted_by_you?(world, {id, _bytes}) do
     provenance = UndoHistory.provenance(world.history)

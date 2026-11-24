@@ -2,7 +2,7 @@ defmodule Minga.Test.ProvenanceModel do
   @moduledoc """
   A byte-by-byte reference for `Minga.Buffer.Provenance`.
 
-  The model keeps one entry for every byte ever written, in document order, each with its author, the group that inserted it, and the groups that deleted it. It applies the same rules as the provenance tree with plain list scans, so property tests can compare the tree against it: an insertion goes immediately before the live byte at its offset, a deletion marks every entry from the first to the last deleted live byte (and removes the ones its own group wrote, which can never be live again), and a byte is live when its inserting group is applied and none of its deleting groups is.
+  The model keeps one entry for every byte ever written, in document order, each with its author, the group that inserted it, and the groups that deleted it. It applies the same rules as the provenance tree with plain list scans, so property tests can compare the tree against it: an insertion goes immediately before the live byte at its offset, a deletion marks every entry from the first to the last deleted live byte and the text a replacement it consumed had replaced (and removes the ones its own group wrote, which can never be live again), and a byte is live when its inserting group is applied and none of its deleting groups is.
   """
 
   alias Minga.Buffer.Provenance
@@ -46,11 +46,13 @@ defmodule Minga.Test.ProvenanceModel do
       if removed_bytes > 0 do
         first = Enum.at(live, start)
         last = Enum.at(live, start + removed_bytes - 1)
+        left = if start > 0, do: Enum.at(model.entries, Enum.at(live, start - 1))
+        marked = MapSet.union(MapSet.new(first..last//1), covered(model, live, last, left))
 
         model.entries
         |> Enum.with_index()
         |> Enum.flat_map(fn {entry, index} ->
-          if index in first..last//1, do: mark(entry, group), else: [entry]
+          if MapSet.member?(marked, index), do: mark(entry, group), else: [entry]
         end)
       else
         model.entries
@@ -116,6 +118,25 @@ defmodule Minga.Test.ProvenanceModel do
   # Deletions are prepended, so the groups that deleted an entry after `id` did come before it.
   defp later_deleters(%{group: id, deletions: deletions}, id), do: deletions
   defp later_deleters(entry, id), do: Enum.take_while(entry.deletions, &(&1 != id))
+
+  # A deletion that ends with a group's text, and does not start inside it, also covers the dead bytes right after it
+  # that the same group deleted: the text that group's replacement replaced.
+  defp covered(model, live, last, left) do
+    owner = Enum.at(model.entries, last).group
+
+    if owner == nil or (left != nil and left.group == owner) do
+      MapSet.new()
+    else
+      live = MapSet.new(live)
+
+      model.entries
+      |> Enum.with_index()
+      |> Enum.drop(last + 1)
+      |> Enum.take_while(fn {_entry, index} -> not MapSet.member?(live, index) end)
+      |> Enum.filter(fn {entry, _index} -> owner in entry.deletions end)
+      |> MapSet.new(fn {_entry, index} -> index end)
+    end
+  end
 
   @spec mark(entry(), pos_integer() | :untracked) :: [entry()]
   defp mark(_entry, :untracked), do: []

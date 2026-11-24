@@ -5,7 +5,7 @@ defmodule Minga.Buffer.UndoHistory do
   Every change to the document is recorded in a `Minga.Buffer.Provenance` value, which knows the author of every byte and keeps deleted text as tombstones. This module decides which history group each change belongs to:
 
   * **Yours.** Edits from you (`:user`), from a language server or formatter you invoked (`:lsp`), and from swap recovery (`:recovery`) form your undo stack. Rapid edits from the same source coalesce into one group within `coalesce_ms/0`. The stack keeps your last 1000 groups; an older group becomes permanent text that keeps its author.
-  * **Minga's.** Each step of a Minga task (an author key, `Minga.Buffer.Author.key/0`) is its own group, never coalesced with another step or task and never evicted. An agent edit without a task (`:agent`) is a group of its own whose text is unattributed; the last 1000 such groups stay revertable, and an older one becomes permanent unattributed text. Before it does, any undo or redo step of yours it blocks leaves your stacks, with everything below it, so no flip can rebuild text that never existed. Minga's groups never enter your stacks.
+  * **Minga's.** Each step of a Minga task (an author key, `Minga.Buffer.Author.key/0`) is its own group, never coalesced with another step or task and never evicted. An agent edit without a task (`:agent`) is a group of its own, written by `{:minga, :untasked}` and named `{:untasked, n}`; the last 1000 such groups stay revertable, and an older one becomes permanent unattributed text. Before it does, any undo or redo step of yours it blocks leaves your stacks, with everything below it, so no flip can rebuild text that never existed. Minga's groups never enter your stacks.
 
   `undo/3` and `redo/3` move only your groups. They find a group's text by its runs, not by byte offsets, so they stay exact when Minga edited above, below, or inside your text since. When flipping your group would change text that a later Minga step rewrote, they change nothing and return `{:blocked, {:overlaps, minga_group}}`. Minga's edits never clear your redo stack.
 
@@ -39,10 +39,13 @@ defmodule Minga.Buffer.UndoHistory do
   @typedoc "A change applied to the document: start byte, removed bytes, inserted bytes."
   @type change :: {non_neg_integer(), binary(), binary()}
 
-  @typedoc "The Minga step whose later edit blocks your undo or redo; `:agent` for an agent edit without a task."
-  @type minga_group :: Author.key() | :agent
+  @typedoc "A Minga step, or `{:untasked, n}` for the `n`th agent edit without a task."
+  @type minga_group :: Author.key() | {:untasked, pos_integer()}
 
-  @typedoc "Why your undo or redo did not happen: a later Minga step rewrote the same text."
+  @typedoc "A task whose steps revert together: Minga in a task, or Minga's agent edits without a task."
+  @type task :: Author.t() | {:minga, :untasked}
+
+  @typedoc "Why an undo, redo or revert did not happen: a later Minga step rewrote the same text."
   @type blocked :: {:blocked, {:overlaps, minga_group()}}
 
   @typedoc "A Minga step and the byte ranges it touched, as `Minga.Buffer.Provenance.regions/2` reports them."
@@ -52,7 +55,7 @@ defmodule Minga.Buffer.UndoHistory do
   # It keeps the version and tick before it, the tick after it, and whether the task had no steps when it began.
   # Reverting that task while the history is still at `tick_after` returns exactly to `version`.
   @typep task_run :: %{
-           task: Author.t() | :agent,
+           task: task(),
            version: version(),
            tick_before: Entry.tick(),
            tick_after: Entry.tick(),
@@ -73,6 +76,8 @@ defmodule Minga.Buffer.UndoHistory do
             untasked_size: 0,
             steps: %{},
             task_run: nil,
+            task_ticks: %{},
+            next_untasked: 1,
             tick: 0,
             next_tick: 1,
             last_recorded_at: 0
@@ -87,6 +92,8 @@ defmodule Minga.Buffer.UndoHistory do
             untasked_size: non_neg_integer(),
             steps: %{Author.key() => Provenance.group_id()},
             task_run: task_run() | nil,
+            task_ticks: %{task() => Entry.tick()},
+            next_untasked: pos_integer(),
             tick: Entry.tick(),
             next_tick: Entry.tick(),
             last_recorded_at: integer()
@@ -104,6 +111,38 @@ defmodule Minga.Buffer.UndoHistory do
   @doc "Returns the coalescing window in milliseconds."
   @spec coalesce_ms() :: pos_integer()
   def coalesce_ms, do: @coalesce_ms
+
+  @doc "Returns the document size in bytes that the history describes, in O(1)."
+  @spec size(t()) :: non_neg_integer()
+  def size(%__MODULE__{provenance: provenance}), do: Provenance.size(provenance)
+
+  @doc """
+  Takes in content read from disk, keeping Minga's steps.
+
+  Your undo and redo groups end, as when you reopen a file: their text stays and keeps its author. Minga's tasked and untasked groups stay, so unreviewed work survives a reload. The difference from `old_document` to `new_document` is recorded as untracked, byte-precise changes, so unchanged text keeps its author.
+  """
+  @spec reload(t(), Document.t(), Document.t()) :: t()
+  def reload(%__MODULE__{} = history, %Document{} = old_document, %Document{} = new_document) do
+    provenance =
+      Enum.reduce(history.undo_entries ++ history.redo_entries, history.provenance, fn entry,
+                                                                                       acc ->
+        Provenance.discard(acc, entry.group)
+      end)
+
+    provenance = replay(provenance, :untracked, UndoPatch.changes(old_document, new_document))
+    {tick, history} = advance(history)
+
+    %{
+      history
+      | provenance: provenance,
+        undo_entries: [],
+        undo_size: 0,
+        redo_entries: [],
+        tick: tick,
+        task_run: nil,
+        last_recorded_at: 0
+    }
+  end
 
   @doc "Returns who wrote each byte of the document."
   @spec provenance(t()) :: Provenance.t()
@@ -158,7 +197,8 @@ defmodule Minga.Buffer.UndoHistory do
 
   def record_edit_batch(%__MODULE__{} = history, version, [_ | _] = patches, source, at)
       when is_undo_source(source) and is_integer(at) do
-    task_run = extend_task_run(history, task_of(source), version)
+    task = task_of(source)
+    task_run = extend_task_run(history, task, version)
     {group, history} = minga_group(history, source)
     {tick, history} = advance(history)
 
@@ -166,7 +206,8 @@ defmodule Minga.Buffer.UndoHistory do
       history
       | provenance: replay(history.provenance, group, patches),
         tick: tick,
-        task_run: %{task_run | tick_after: tick}
+        task_run: %{task_run | tick_after: tick},
+        task_ticks: Map.put(history.task_ticks, task, tick)
     })
   end
 
@@ -236,16 +277,36 @@ defmodule Minga.Buffer.UndoHistory do
   end
 
   @doc """
-  Reverts every remaining step of the task that edited most recently, and forgets those steps.
-
-  Agent edits without a task count as one task. Your text survives, including text you typed inside Minga's. When the task's steps are the newest changes and nothing else changed the document since they began, the restore returns the version from before them, so a buffer that was clean is clean again. Returns `{:ok, restore, history, reverted_steps}`, or `:empty` when Minga has no remaining steps in this buffer. When the steps' text does not fit `current_document`, returns `{:error, reason}` and the caller keeps its history and document unchanged.
+  Reverts every remaining step of the task that edited this buffer most recently, and forgets those steps. See `reject_task/4`.
   """
   @spec undo_agent_session(t(), version(), Document.t()) ::
-          {:ok, Restore.t(), t(), pos_integer()} | :empty | {:error, UndoPatch.apply_error()}
-  def undo_agent_session(%__MODULE__{} = history, _version, %Document{} = document) do
+          {:ok, Restore.t(), t(), pos_integer()}
+          | :empty
+          | blocked()
+          | {:error, UndoPatch.apply_error()}
+  def undo_agent_session(%__MODULE__{} = history, version, %Document{} = document) do
     case newest_task(history) do
       nil -> :empty
-      task -> revert_task(history, task, document)
+      task -> reject_task(history, task, version, document)
+    end
+  end
+
+  @doc """
+  Reverts every remaining step of `task` and forgets those steps.
+
+  Your text survives, including text you typed inside Minga's, and text the task replaced comes back unless someone deleted the replacement since. When a task that started after this one rewrote this task's text, the revert could not be exact: it changes nothing and returns `{:blocked, {:overlaps, minga_group}}` naming that task's step, which must be reverted first. Your edits never block a revert.
+
+  When the task's steps are the newest changes and nothing else changed the document since they began, the restore returns the version from before them, so a buffer that was clean is clean again. Returns `{:ok, restore, history, reverted_steps}`, or `:empty` when the task has no remaining steps. When the steps' text does not fit `current_document`, returns `{:error, reason}` and the caller keeps its history and document unchanged.
+  """
+  @spec reject_task(t(), task(), version(), Document.t()) ::
+          {:ok, Restore.t(), t(), pos_integer()}
+          | :empty
+          | blocked()
+          | {:error, UndoPatch.apply_error()}
+  def reject_task(%__MODULE__{} = history, task, _version, %Document{} = document) do
+    case take_task(history, task) do
+      {[], _rest} -> :empty
+      {steps, rest} -> revert_task(history, rest, task, steps, document)
     end
   end
 
@@ -278,46 +339,80 @@ defmodule Minga.Buffer.UndoHistory do
   @spec redo_count(t()) :: non_neg_integer()
   def redo_count(%__MODULE__{redo_entries: entries}), do: length(entries)
 
-  # The task of the newest remaining Minga-side group: group ids grow, so the larger id is newer.
-  @spec newest_task(t()) :: Author.t() | :agent | nil
+  # The task whose step edited the document most recently.
+  @spec newest_task(t()) :: task() | nil
+  defp newest_task(%__MODULE__{task_ticks: ticks}) when map_size(ticks) == 0, do: nil
+
   defp newest_task(history) do
-    tasked =
-      case history.minga do
-        [{group, key} | _] -> [{group, Author.author(key)}]
-        [] -> []
-      end
-
-    untasked =
-      case :queue.peek_r(history.untasked) do
-        {:value, group} -> [{group, :agent}]
-        :empty -> []
-      end
-
-    case Enum.max_by(tasked ++ untasked, &elem(&1, 0), fn -> nil end) do
-      {_group, task} -> task
-      nil -> nil
-    end
+    {task, _tick} = Enum.max_by(history.task_ticks, &elem(&1, 1))
+    task
   end
 
-  @spec revert_task(t(), Author.t() | :agent, Document.t()) ::
-          {:ok, Restore.t(), t(), pos_integer()} | {:error, UndoPatch.apply_error()}
-  defp revert_task(history, task, document) do
-    {steps, rest} = take_task(history, task)
-
-    with {:ok, reverted, first, provenance} <-
-           revert_steps(steps, history.provenance, document, nil) do
+  @spec revert_task(t(), t(), task(), [{Provenance.group_id(), minga_group()}], Document.t()) ::
+          {:ok, Restore.t(), t(), pos_integer()} | blocked() | {:error, UndoPatch.apply_error()}
+  defp revert_task(history, rest, task, steps, document) do
+    with :ok <- unblocked_task(history, task, steps),
+         {:ok, reverted, first, provenance} <-
+           revert_steps(steps, history.provenance, document) do
       provenance = Enum.reduce(steps, provenance, &Provenance.discard(&2, elem(&1, 0)))
       {version, tick, rest} = settle_task(rest, task)
-      rest = %{rest | provenance: provenance, tick: tick, task_run: nil}
+
+      rest = %{
+        rest
+        | provenance: provenance,
+          tick: tick,
+          task_run: nil,
+          task_ticks: Map.delete(rest.task_ticks, task)
+      }
+
       document = place_cursor(reverted, first, Document.cursor(document))
       {:ok, Restore.new(version, document, :agent), rest, length(steps)}
     end
   end
 
+  # A task that started after this one and rewrote its text blocks the revert, as Minga's later steps block your undo.
+  # Only newer tasks count, so tasks that rewrote each other can always be reverted newest first.
+  @spec unblocked_task(t(), task(), [{Provenance.group_id(), minga_group()}]) :: :ok | blocked()
+  defp unblocked_task(history, task, steps) do
+    starts = task_starts(history)
+    start = Map.fetch!(starts, task)
+
+    blocks? = fn
+      :you, _key -> false
+      _author, key -> task_of(key) != task and Map.get(starts, task_of(key), 0) > start
+    end
+
+    Enum.find_value(steps, :ok, fn {group, _key} ->
+      case Provenance.blocker(history.provenance, group, blocks?) do
+        nil -> nil
+        minga_group -> {:blocked, {:overlaps, minga_group}}
+      end
+    end)
+  end
+
+  # The oldest remaining group of each task, which orders tasks by when they started.
+  @spec task_starts(t()) :: %{task() => Provenance.group_id()}
+  defp task_starts(history) do
+    starts =
+      Enum.reduce(history.minga, %{}, fn {group, key}, acc ->
+        Map.update(acc, Author.author(key), group, &min(&1, group))
+      end)
+
+    case :queue.peek(history.untasked) do
+      {:value, group} -> Map.put(starts, {:minga, :untasked}, group)
+      :empty -> starts
+    end
+  end
+
   # Returns the task's remaining groups, newest first, and the history without them.
-  @spec take_task(t(), Author.t() | :agent) :: {[{Provenance.group_id(), minga_group()}], t()}
-  defp take_task(history, :agent) do
-    steps = history.untasked |> :queue.to_list() |> Enum.reverse() |> Enum.map(&{&1, :agent})
+  @spec take_task(t(), task()) :: {[{Provenance.group_id(), minga_group()}], t()}
+  defp take_task(history, {:minga, :untasked}) do
+    steps =
+      history.untasked
+      |> :queue.to_list()
+      |> Enum.reverse()
+      |> Enum.map(&{&1, Provenance.group_key(history.provenance, &1)})
+
     {steps, %{history | untasked: :queue.new(), untasked_size: 0}}
   end
 
@@ -359,7 +454,7 @@ defmodule Minga.Buffer.UndoHistory do
 
   # A task's step continues the newest stretch of its steps when nothing else changed the document since.
   # Otherwise it starts a new stretch at the current version and tick.
-  @spec extend_task_run(t(), Author.t() | :agent, version()) :: task_run()
+  @spec extend_task_run(t(), task(), version()) :: task_run()
   defp extend_task_run(
          %__MODULE__{task_run: %{task: task, tick_after: tick} = run, tick: tick},
          task,
@@ -377,8 +472,8 @@ defmodule Minga.Buffer.UndoHistory do
     }
   end
 
-  @spec has_steps?(t(), Author.t() | :agent) :: boolean()
-  defp has_steps?(history, :agent), do: history.untasked_size > 0
+  @spec has_steps?(t(), task()) :: boolean()
+  defp has_steps?(history, {:minga, :untasked}), do: history.untasked_size > 0
 
   defp has_steps?(history, task),
     do: Enum.any?(history.minga, fn {_group, key} -> Author.author(key) == task end)
@@ -395,7 +490,7 @@ defmodule Minga.Buffer.UndoHistory do
 
     task_run =
       case history.task_run do
-        %{task: :agent} = run -> %{run | fresh: false}
+        %{task: {:minga, :untasked}} = run -> %{run | fresh: false}
         run -> run
       end
 
@@ -444,7 +539,7 @@ defmodule Minga.Buffer.UndoHistory do
 
   # A task reverted right after its only stretch of steps returns to the version and tick before that stretch.
   # A buffer that was clean is then clean again.
-  @spec settle_task(t(), Author.t() | :agent) :: {version() | :advance, Entry.tick(), t()}
+  @spec settle_task(t(), task()) :: {version() | :advance, Entry.tick(), t()}
   defp settle_task(
          %__MODULE__{task_run: %{task: task, tick_after: tick, fresh: true} = run, tick: tick} =
            history,
@@ -458,8 +553,8 @@ defmodule Minga.Buffer.UndoHistory do
   end
 
   # A Minga step reuses its group; an agent edit without a task always opens one.
-  @spec minga_group(t(), minga_group()) :: {Provenance.group_id(), t()}
-  defp minga_group(history, :agent), do: open_minga_group(history, :unattributed, :agent)
+  @spec minga_group(t(), Author.key() | :agent) :: {Provenance.group_id(), t()}
+  defp minga_group(history, :agent), do: open_minga_group(history, {:minga, :untasked}, :agent)
 
   defp minga_group(history, key) when Author.is_key(key) do
     case history.steps do
@@ -468,16 +563,19 @@ defmodule Minga.Buffer.UndoHistory do
     end
   end
 
-  @spec open_minga_group(t(), Provenance.author(), minga_group()) :: {Provenance.group_id(), t()}
+  @spec open_minga_group(t(), Provenance.author(), Author.key() | :agent) ::
+          {Provenance.group_id(), t()}
   defp open_minga_group(history, author, :agent) do
-    {group, provenance} = Provenance.open_group(history.provenance, author, :agent)
+    key = {:untasked, history.next_untasked}
+    {group, provenance} = Provenance.open_group(history.provenance, author, key)
 
     {group,
      %{
        history
        | provenance: provenance,
          untasked: :queue.in(group, history.untasked),
-         untasked_size: history.untasked_size + 1
+         untasked_size: history.untasked_size + 1,
+         next_untasked: history.next_untasked + 1
      }}
   end
 
@@ -494,13 +592,19 @@ defmodule Minga.Buffer.UndoHistory do
   end
 
   # Patches are in undo order, so the document saw them last to first.
-  @spec replay(Provenance.t(), Provenance.group_id(), patches()) :: Provenance.t()
+  # Each patch is recorded as its smallest byte changes, from the last to the first so their offsets stay valid.
+  @spec replay(Provenance.t(), Provenance.group_id() | :untracked, [UndoPatch.t()]) ::
+          Provenance.t()
   defp replay(provenance, group, patches) do
     patches
     |> Enum.reverse()
     |> Enum.reduce(provenance, fn patch, acc ->
-      {start, removed, inserted} = UndoPatch.change(patch)
-      Provenance.edit(acc, group, start, removed, inserted)
+      patch
+      |> UndoPatch.precise_changes()
+      |> Enum.reverse()
+      |> Enum.reduce(acc, fn {start, removed, inserted}, inner ->
+        Provenance.edit(inner, group, start, removed, inserted)
+      end)
     end)
   end
 
@@ -587,23 +691,12 @@ defmodule Minga.Buffer.UndoHistory do
   @spec revert_steps(
           [{Provenance.group_id(), minga_group()}],
           Provenance.t(),
-          Document.t(),
-          non_neg_integer() | nil
+          Document.t()
         ) ::
           {:ok, Document.t(), non_neg_integer() | nil, Provenance.t()}
           | {:error, UndoPatch.apply_error()}
-  defp revert_steps([], provenance, document, first), do: {:ok, document, first, provenance}
-
-  defp revert_steps([{group, _key} | rest], provenance, document, first) do
-    with {:ok, document, changed, provenance} <- Provenance.revert(provenance, group, document) do
-      revert_steps(rest, provenance, document, lowest(first, changed))
-    end
-  end
-
-  @spec lowest(non_neg_integer() | nil, non_neg_integer() | nil) :: non_neg_integer() | nil
-  defp lowest(nil, offset), do: offset
-  defp lowest(offset, nil), do: offset
-  defp lowest(a, b), do: min(a, b)
+  defp revert_steps(steps, provenance, document),
+    do: Provenance.revert_all(provenance, Enum.map(steps, &elem(&1, 0)), document)
 
   # Puts the cursor at the first change, or at `fallback` when nothing changed.
   @spec place_cursor(Document.t(), non_neg_integer() | nil, Document.position()) :: Document.t()
@@ -612,7 +705,8 @@ defmodule Minga.Buffer.UndoHistory do
   defp place_cursor(document, offset, _fallback),
     do: Document.move_to(document, Position.from_point(document, offset))
 
-  @spec task_of(minga_group()) :: Author.t() | :agent
-  defp task_of(:agent), do: :agent
+  @spec task_of(Author.key() | minga_group() | :agent) :: task()
+  defp task_of(:agent), do: {:minga, :untasked}
+  defp task_of({:untasked, _n}), do: {:minga, :untasked}
   defp task_of(key), do: Author.author(key)
 end

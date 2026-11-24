@@ -15,6 +15,9 @@ defmodule Minga.Buffer.UndoPatch do
 
   @affix_chunk_bytes 4096
 
+  # One region pairs its lines for precise changes only up to this many changed lines.
+  @max_line_changes 4096
+
   @typedoc "A byte fragment captured from a document diff. It may not be valid standalone UTF-8."
   @type byte_fragment :: binary()
 
@@ -252,6 +255,101 @@ defmodule Minga.Buffer.UndoPatch do
   @spec change(t()) :: {non_neg_integer(), byte_fragment(), byte_fragment()}
   def change(%__MODULE__{start_byte: start_byte, old_text: removed, new_text: inserted}),
     do: {start_byte, removed, inserted}
+
+  @doc """
+  Returns the smallest byte changes a forward patch makes, in document order, as `{start, removed, inserted}`.
+
+  Each changed region loses the bytes its old and new text share at the start and the end, on code point boundaries. When the old and new text have the same number of lines, each pair of lines is compared on its own, so a region that changes the start of one line and the end of another leaves the bytes between them out. A rewrite that changes more than 4096 lines of one region at once is one change, which bounds the cost of recording it. Offsets are in the document the patch applies to, so applying the changes from the last to the first gives the patch's result.
+
+  `Minga.Buffer.UndoHistory` records changes this precise, so an edit that rewrites whole lines only takes authorship of the bytes it changed.
+  """
+  @spec precise_changes(t()) :: [{non_neg_integer(), byte_fragment(), byte_fragment()}]
+  def precise_changes(%__MODULE__{start_byte: start, old_text: removed, new_text: inserted}) do
+    removed_lines = lines_with_newlines(removed)
+    inserted_lines = lines_with_newlines(inserted)
+
+    pairs = line_pairs(removed_lines, inserted_lines)
+
+    if pairs != [] and Enum.count(pairs, fn {old, new} -> old != new end) <= @max_line_changes do
+      pairs
+      |> Enum.flat_map_reduce(start, fn {old_line, new_line}, offset ->
+        {trimmed_change(offset, old_line, new_line), offset + byte_size(old_line)}
+      end)
+      |> elem(0)
+    else
+      trimmed_change(start, removed, inserted)
+    end
+  end
+
+  # Lines pair one to one only when both sides have the same number of lines, more than one.
+  @spec line_pairs([binary()], [binary()]) :: [{binary(), binary()}]
+  defp line_pairs([_, _ | _] = removed_lines, inserted_lines) do
+    if length(removed_lines) == length(inserted_lines),
+      do: Enum.zip(removed_lines, inserted_lines),
+      else: []
+  end
+
+  defp line_pairs(_removed_lines, _inserted_lines), do: []
+
+  @spec lines_with_newlines(binary()) :: [binary()]
+  defp lines_with_newlines(""), do: []
+
+  defp lines_with_newlines(text) do
+    {lines, from} =
+      text
+      |> :binary.matches("\n")
+      |> Enum.reduce({[], 0}, fn {position, 1}, {lines, from} ->
+        {[binary_part(text, from, position + 1 - from) | lines], position + 1}
+      end)
+
+    lines =
+      if from < byte_size(text),
+        do: [binary_part(text, from, byte_size(text) - from) | lines],
+        else: lines
+
+    Enum.reverse(lines)
+  end
+
+  # Drops the bytes both sides share at the start and at the end, keeping whole code points.
+  @spec trimmed_change(non_neg_integer(), binary(), binary()) :: [
+          {non_neg_integer(), byte_fragment(), byte_fragment()}
+        ]
+  defp trimmed_change(_start, same, same), do: []
+
+  defp trimmed_change(start, old, new) do
+    prefix = shared_prefix(old, new, :binary.longest_common_prefix([old, new]))
+    old_rest = binary_part(old, prefix, byte_size(old) - prefix)
+    new_rest = binary_part(new, prefix, byte_size(new) - prefix)
+
+    suffix =
+      shared_suffix(old_rest, new_rest, :binary.longest_common_suffix([old_rest, new_rest]))
+
+    [
+      {start + prefix, binary_part(old_rest, 0, byte_size(old_rest) - suffix),
+       binary_part(new_rest, 0, byte_size(new_rest) - suffix)}
+    ]
+  end
+
+  @spec shared_prefix(binary(), binary(), non_neg_integer()) :: non_neg_integer()
+  defp shared_prefix(old, new, length) do
+    if length == 0 or (code_point_start?(old, length) and code_point_start?(new, length)),
+      do: length,
+      else: shared_prefix(old, new, length - 1)
+  end
+
+  @spec shared_suffix(binary(), binary(), non_neg_integer()) :: non_neg_integer()
+  defp shared_suffix(old, new, length) do
+    if length == 0 or
+         (code_point_start?(old, byte_size(old) - length) and
+            code_point_start?(new, byte_size(new) - length)),
+       do: length,
+       else: shared_suffix(old, new, length - 1)
+  end
+
+  @spec code_point_start?(binary(), non_neg_integer()) :: boolean()
+  defp code_point_start?(text, position) do
+    position >= byte_size(text) or Bitwise.band(:binary.at(text, position), 0xC0) != 0x80
+  end
 
   @doc "Returns the cursor the patch restores when applied."
   @spec cursor(t()) :: Document.position()

@@ -22,6 +22,23 @@ defmodule Minga.Buffer.Provenance.RunTree do
   def size(nil), do: 0
   def size({_left, _run, _right, _height, bytes}), do: bytes
 
+  @doc "Builds a balanced tree from runs already in locator order, in O(n)."
+  @spec from_list([Run.t()]) :: t()
+  def from_list(runs) when is_list(runs) do
+    {tree, []} = build(runs, length(runs))
+    tree
+  end
+
+  @spec build([Run.t()], non_neg_integer()) :: {t(), [Run.t()]}
+  defp build(runs, 0), do: {nil, runs}
+
+  defp build(runs, count) do
+    left_count = div(count - 1, 2)
+    {left, [run | rest]} = build(runs, left_count)
+    {right, rest} = build(rest, count - 1 - left_count)
+    {branch(left, run, right), rest}
+  end
+
   @doc "Inserts a run whose locator is not in the tree."
   @spec insert(t(), Run.t()) :: t()
   def insert(nil, %Run{} = run), do: branch(nil, run, nil)
@@ -131,7 +148,7 @@ defmodule Minga.Buffer.Provenance.RunTree do
   @doc """
   Returns the live runs that overlap the byte range `from` up to `to`, in document order, each with its start offset.
 
-  Visits only the subtrees that overlap the range, so the cost is O(log n + k) for k returned runs.
+  Visits only the subtrees that overlap the range and hold live bytes, so tombstones in the window cost nothing and the cost is O(log n + k) for k returned runs.
   """
   @spec live_between(t(), non_neg_integer(), non_neg_integer()) ::
           [{Run.t(), non_neg_integer()}]
@@ -144,6 +161,7 @@ defmodule Minga.Buffer.Provenance.RunTree do
           {Run.t(), non_neg_integer()}
         ]) :: [{Run.t(), non_neg_integer()}]
   defp collect(nil, _from, _to, _base, acc), do: acc
+  defp collect({_left, _run, _right, _height, 0}, _from, _to, _base, acc), do: acc
 
   defp collect({left, run, right, _height, _bytes}, from, to, base, acc) do
     run_start = base + size(left)

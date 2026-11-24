@@ -572,7 +572,10 @@ defmodule Minga.Buffer do
 
   @doc "Revert every remaining step of the Minga task that edited this buffer most recently, keeping your edits."
   @spec undo_agent_session(t()) ::
-          {:ok, non_neg_integer()} | :empty | {:error, Minga.Buffer.UndoPatch.apply_error()}
+          {:ok, non_neg_integer()}
+          | :empty
+          | Minga.Buffer.UndoHistory.blocked()
+          | {:error, Minga.Buffer.UndoPatch.apply_error()}
   defdelegate undo_agent_session(server), to: BufferProcess
 
   # ── Authorship ─────────────────────────────────────────────────────
