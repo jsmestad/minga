@@ -132,7 +132,9 @@ defmodule Minga.Test.ProvenanceModel do
       model.entries
       |> Enum.with_index()
       |> Enum.drop(last + 1)
-      |> Enum.take_while(fn {_entry, index} -> not MapSet.member?(live, index) end)
+      |> Enum.take_while(fn {entry, index} ->
+        not MapSet.member?(live, index) and entry.group != owner
+      end)
       |> Enum.filter(fn {entry, _index} -> owner in entry.deletions end)
       |> MapSet.new(fn {_entry, index} -> index end)
     end

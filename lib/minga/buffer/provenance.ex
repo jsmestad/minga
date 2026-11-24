@@ -378,7 +378,10 @@ defmodule Minga.Buffer.Provenance do
   defp cover_replaced(prov, group_id, %Run{group: owner} = last, _left),
     do: cover_tombstones(prov, group_id, owner, RunTree.next(prov.tree, last.id))
 
+  # The walk ends at the next live run, or at text the same group inserted, which starts its next replacement.
   @spec cover_tombstones(t(), group_id() | nil, group_id(), Run.t() | nil) :: t()
+  defp cover_tombstones(prov, _group_id, owner, %Run{group: owner}), do: prov
+
   defp cover_tombstones(prov, group_id, owner, %Run{live: false} = run) do
     following = RunTree.next(prov.tree, run.id)
     prov = if owner in run.deletions, do: mark_deleted(prov, group_id, run, run.text), else: prov
