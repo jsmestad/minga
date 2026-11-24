@@ -83,9 +83,12 @@ defmodule MingaAgent.Tools.Shell.OutputReader do
     close_port(helper)
   end
 
+  # Always cancel the operation regardless of exit status. Even after the shell
+  # exits, orphaned background children may remain in the process group. The
+  # cancel path sends the cleanup signal to the hook runner (or is a no-op if
+  # the hook runner already exited after its own group cleanup).
   @spec close_producer(port(), non_neg_integer() | nil) :: :ok
-  defp close_producer(producer, nil), do: Operation.cancel(producer)
-  defp close_producer(producer, status) when is_integer(status), do: close_port(producer)
+  defp close_producer(producer, _status), do: Operation.cancel(producer)
 
   @spec open_helper(String.t()) :: {:ok, port()} | {:error, term()}
   defp open_helper(path) do

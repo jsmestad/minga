@@ -217,6 +217,14 @@ fn runOwnedShell(args: []const [:0]const u8) !u8 {
         if (output_drained and @intFromEnum(info.signo) != 0) break;
     }
 
+    // Ensure the entire process group is dead before reaping the leader.
+    // On the cancel path this repeats the SIGKILL already sent above.
+    // On a normal exit it kills orphaned background children that survived
+    // the shell's exit but remained in the same process group. The leader
+    // is still a zombie (WNOWAIT kept it waitable), so its PGID is safe
+    // from reuse.
+    killProcessGroup(pid, posix.SIG.KILL);
+
     var status: c_int = 0;
     while (c.waitpid(pid, &status, 0) < 0) {
         if (posix.errno(-1) != .INTR) return error.ShellWaitFailed;
