@@ -1,125 +1,96 @@
-/* Architecture interactive demos:
-   1. Live side-by-side typing fault simulator (Single-Loop Editor vs Minga BEAM Isolation).
-   2. Airy, syntax-highlighted 4-step Staged Overlay & 3-Way Merge visualizer. */
+/* Architecture demos. All visible copy lives in site/architecture.html; this file holds state, ids and code rows only.
+   1. Fault simulation: the same keys in a same-loop editor and in Minga while a tool is slow or crashes.
+   2. Staged edit stepper: one edit from read to publish, with a clean and a same-line outcome. */
 
-import { highlightElixirLine, renderElixirLineDom } from "./highlight.ts";
+import { renderElixirLineDom } from "./highlight.ts";
 
-export type FaultKind = "none" | "lsp_hang" | "parser_crash" | "hook_error";
+export type FaultKind = "slow_server" | "parser_crash";
+
+/** Names the caption, badges and footers the page shows. Each value matches a `data-step` and `data-iso-show` key in the page. */
+export type IsolationView = "rest" | "slow-during" | "slow-after" | "crash-during" | "crash-after";
+
+export type FaultButtonLabel = "start" | "next" | "again";
 
 export interface IsolationSimState {
-  readonly fault: FaultKind;
+  readonly fault: FaultKind | null;
+  readonly view: IsolationView;
   readonly remainingMs: number;
   readonly mingaText: string;
   readonly legacyText: string;
-  readonly legacyQueued: string;
+  readonly legacyQueued: number;
   readonly legacyDead: boolean;
-  readonly mingaParserPlain: boolean;
-  readonly notice: string;
 }
 
-const DEFAULT_LINE = 'def retry_after(429), do: {:backoff, 250}';
+export const ISOLATION_BASE_LINE = "def retry_after(429), do: 250";
+export const ISOLATION_TYPED = " # retry";
+
+const SLOW_SERVER_MS = 3000;
+const PARSER_RESTART_MS = 2700;
+const TYPE_INTERVAL_MS = 300;
+const TICK_MS = 100;
 
 export function createIsolationSimState(): IsolationSimState {
   return {
-    fault: "none",
+    fault: null,
+    view: "rest",
     remainingMs: 0,
-    mingaText: DEFAULT_LINE,
-    legacyText: DEFAULT_LINE,
-    legacyQueued: "",
+    mingaText: ISOLATION_BASE_LINE,
+    legacyText: ISOLATION_BASE_LINE,
+    legacyQueued: 0,
     legacyDead: false,
-    mingaParserPlain: false,
-    notice: "Type below or click a fault trigger to feel how BEAM isolation protects keystrokes.",
   };
 }
 
-export function triggerIsolationFault(state: IsolationSimState, fault: FaultKind): IsolationSimState {
-  if (fault === "none") {
-    return createIsolationSimState();
+/** Starts a fault from a fresh line, so a second run never inherits text from the first. */
+export function triggerIsolationFault(kind: FaultKind): IsolationSimState {
+  const fresh = createIsolationSimState();
+  if (kind === "slow_server") {
+    return { ...fresh, fault: kind, view: "slow-during", remainingMs: SLOW_SERVER_MS };
   }
-  if (fault === "lsp_hang") {
-    return {
-      ...state,
-      fault: "lsp_hang",
-      remainingMs: 3000,
-      legacyDead: false,
-      mingaParserPlain: false,
-      notice: "A synchronous plugin blocked for 3.0s. Keep typing: the shared-loop editor freezes while Minga keeps typing isolated in its own BEAM process.",
-    };
-  }
-  if (fault === "parser_crash") {
-    return {
-      ...state,
-      fault: "parser_crash",
-      remainingMs: 700,
-      legacyDead: true,
-      legacyQueued: "",
-      mingaParserPlain: true,
-      notice: "Malformed grammar segfaulted the C parser. In-process editor crashed; Minga respawned its Zig parser port cleanly with zero text lost.",
-    };
-  }
-  return {
-    ...state,
-    fault: "hook_error",
-    remainingMs: 2200,
-    legacyDead: false,
-    mingaParserPlain: false,
-    notice: "User :after_save hook raised MatchError. Shared-loop post-save chain broke; Minga isolated the exception in a background Task.",
-  };
+  return { ...fresh, fault: kind, view: "crash-during", remainingMs: PARSER_RESTART_MS, legacyText: "", legacyDead: true };
 }
 
-export function applyTypedChar(state: IsolationSimState, nextText: string): IsolationSimState {
-  const mingaText = nextText;
-  if (state.legacyDead) {
-    return { ...state, mingaText };
+/** One key reaches both editors. Minga always draws it; the same-loop editor queues it while frozen and drops it once dead. */
+export function applyTypedChar(state: IsolationSimState, ch: string): IsolationSimState {
+  const mingaText = state.mingaText + ch;
+  if (state.legacyDead) return { ...state, mingaText };
+  if (state.view === "slow-during") {
+    return { ...state, mingaText, legacyQueued: state.legacyQueued + ch.length };
   }
-  if (state.fault === "lsp_hang" && state.remainingMs > 0) {
-    const added = nextText.length >= state.mingaText.length ? nextText.slice(state.mingaText.length) : "⌫";
-    return {
-      ...state,
-      mingaText,
-      legacyQueued: state.legacyQueued + added,
-    };
-  }
-  return {
-    ...state,
-    mingaText,
-    legacyText: nextText,
-  };
+  return { ...state, mingaText, legacyText: state.legacyText + ch };
+}
+
+export function applyTypedText(state: IsolationSimState, text: string): IsolationSimState {
+  let next = state;
+  for (const ch of text) next = applyTypedChar(next, ch);
+  return next;
 }
 
 export function tickIsolationSim(state: IsolationSimState, deltaMs: number): IsolationSimState {
   if (state.remainingMs <= 0) return state;
-  const nextRem = Math.max(0, state.remainingMs - deltaMs);
-  if (nextRem > 0) {
-    return { ...state, remainingMs: nextRem };
+  const remainingMs = Math.max(0, state.remainingMs - deltaMs);
+  if (remainingMs > 0) return { ...state, remainingMs };
+  if (state.fault === "slow_server") {
+    return { ...state, view: "slow-after", remainingMs: 0, legacyText: state.mingaText, legacyQueued: 0 };
   }
-  if (state.fault === "lsp_hang") {
-    return {
-      ...state,
-      fault: "none",
-      remainingMs: 0,
-      legacyText: state.mingaText,
-      legacyQueued: "",
-      notice: "Plugin unblocked after 3.0s. Shared-loop editor flushed its stalled keystrokes; Minga never missed a frame.",
-    };
-  }
-  if (state.fault === "parser_crash") {
-    return {
-      ...state,
-      remainingMs: 0,
-      mingaParserPlain: false,
-      notice: "Minga's Zig parser port respawned cleanly and restored syntax highlighting; the in-process editor is still dead until restart.",
-    };
-  }
-  return {
-    ...state,
-    fault: "none",
-    remainingMs: 0,
-    notice: "Hook error cleared. Minga saved cleanly without blocking typing.",
-  };
+  return { ...state, view: "crash-after", remainingMs: 0 };
+}
+
+/** Jumps to the end of the running fault. The reduced-motion path uses this instead of timers. */
+export function finishIsolationFault(state: IsolationSimState): IsolationSimState {
+  return tickIsolationSim(state, state.remainingMs);
+}
+
+export function faultButtonLabel(state: IsolationSimState, kind: FaultKind, reducedMotion: boolean): FaultButtonLabel {
+  if (state.fault !== kind) return "start";
+  if (state.remainingMs > 0) return reducedMotion ? "next" : "start";
+  return "again";
 }
 
 export type StagedStep = 1 | 2 | 3 | 4;
+
+/** Matches a `data-step` and `data-st-show` key in the page. */
+export type StagedViewKey = "1" | "2" | "3-clean" | "3-conflict" | "4-clean" | "4-conflict";
 
 export interface StagedPipelineState {
   readonly step: StagedStep;
@@ -127,429 +98,249 @@ export interface StagedPipelineState {
 }
 
 export interface StagedCodeRow {
-  readonly ln: string;
-  readonly kind: "normal" | "add" | "you" | "conflict";
+  readonly ln: number;
+  readonly kind: "normal" | "add" | "del" | "you";
   readonly code: string;
 }
 
 export interface StagedViewSnapshot {
-  readonly title: string;
-  readonly summary: string;
-  readonly editorHeader: string;
+  readonly view: StagedViewKey;
   readonly rows: readonly StagedCodeRow[];
-  readonly diskStatus: { readonly label: string; readonly tone: "ok" | "warn" };
-  readonly bufferStatus: { readonly label: string; readonly tone: "ok" | "warn" };
-  readonly overlayStatus: { readonly label: string; readonly tone: "ok" | "warn" | "fail" };
 }
+
+const BASE_12 = "def classify(status) when status >= 500, do: :retry";
+const MINGA_12 = "def classify(status) when status == 429 or status >= 500, do: :retry";
+const YOUR_12 = "def classify(status) when status >= 500, do: :backoff";
+const BASE_13 = "def classify(_status), do: :fatal";
+const BASE_15 = "def timeout_ms, do: 5_000";
+const YOUR_15 = "def timeout_ms, do: 15_000";
 
 export function createStagedPipelineState(): StagedPipelineState {
   return { step: 1, conflictMode: false };
 }
 
-export function computeStagedSnapshot(state: StagedPipelineState): StagedViewSnapshot {
-  if (state.step === 1) {
-    return {
-      title: "1. Revision check before any edit",
-      summary: "The agent reads retry.ex at rev 42 and attaches that token to its edit call. Stale proposals reject before touching a byte.",
-      editorHeader: "retry.ex · rev 42 (read verified)",
-      rows: [
-        { ln: "238", kind: "normal", code: "def classify(status) do" },
-        { ln: "239", kind: "normal", code: "  if status >= 500, do: :retry, else: :fatal" },
-        { ln: "240", kind: "normal", code: "end" },
-        { ln: "241", kind: "normal", code: "def timeout_ms, do: 5_000" },
-      ],
-      diskStatus: { label: "Clean (0 modified)", tone: "ok" },
-      bufferStatus: { label: "rev 42 · untouched", tone: "ok" },
-      overlayStatus: { label: "Token rev 42 matched", tone: "ok" },
-    };
-  }
-
-  if (state.step === 2) {
-    return {
-      title: "2. Agent stages off disk in an isolated overlay",
-      summary: "Approved agent edits land in memory + ~/.local/share/minga/staged_drafts. Your Git working tree stays completely clean.",
-      editorHeader: "Staged overlay fork · base rev 42",
-      rows: [
-        { ln: "238", kind: "normal", code: "def classify(status) do" },
-        { ln: "+239", kind: "add", code: "  case status do" },
-        { ln: "+240", kind: "add", code: "    429 -> :rate_limited" },
-        { ln: "+241", kind: "add", code: "    code when code >= 500 -> :retry" },
-        { ln: "242", kind: "normal", code: "  end" },
-        { ln: "243", kind: "normal", code: "def timeout_ms, do: 5_000" },
-      ],
-      diskStatus: { label: "Clean (untouched)", tone: "ok" },
-      bufferStatus: { label: "rev 42 · cursor free", tone: "ok" },
-      overlayStatus: { label: "+3 staged · draft saved", tone: "warn" },
-    };
-  }
-
-  if (state.step === 3) {
-    const rows: readonly StagedCodeRow[] = state.conflictMode
-      ? [
-          { ln: "238", kind: "normal", code: "def classify(status) do" },
-          { ln: "239", kind: "you", code: "  if status >= 500, do: :backoff, else: :fatal  # your edit" },
-          { ln: "240", kind: "normal", code: "end" },
-          { ln: "241", kind: "normal", code: "def timeout_ms, do: 5_000" },
-        ]
-      : [
-          { ln: "238", kind: "normal", code: "def classify(status) do" },
-          { ln: "239", kind: "normal", code: "  if status >= 500, do: :retry, else: :fatal" },
-          { ln: "240", kind: "normal", code: "end" },
-          { ln: "241", kind: "you", code: "def timeout_ms, do: 15_000  # your concurrent edit" },
-        ];
-    return {
-      title: state.conflictMode ? "3. You edit the same line (line 239)" : "3. You keep editing another line (line 241)",
-      summary: state.conflictMode
-        ? "Your open buffer moves to rev 43 on line 239 while the agent's overlay stays safely isolated at base rev 42."
-        : "Your open buffer advances to rev 43 on line 241. The overlay stays separate and survives editor restarts.",
-      editorHeader: "Your open buffer · rev 43 (overlay isolated)",
-      rows,
-      diskStatus: { label: "Clean (untouched)", tone: "ok" },
-      bufferStatus: { label: "rev 43 · your edit live", tone: "ok" },
-      overlayStatus: { label: state.conflictMode ? "Overlaps line 239" : "Persisted · ready", tone: state.conflictMode ? "fail" : "warn" },
-    };
-  }
-
-  if (state.conflictMode) {
-    return {
-      title: "4. Publish pauses for safe conflict review",
-      summary: "Both you and the agent edited line 239. 3-way merge refuses to overwrite your edit and opens explicit conflict review.",
-      editorHeader: "Conflict review · line 239 protected",
-      rows: [
-        { ln: "238", kind: "normal", code: "def classify(status) do" },
-        { ln: "<<<", kind: "conflict", code: "<<<<<<< your buffer (rev 43)" },
-        { ln: "239", kind: "you", code: "  if status >= 500, do: :backoff, else: :fatal" },
-        { ln: "===", kind: "conflict", code: "=======" },
-        { ln: "+239", kind: "add", code: "  case status do 429 -> :rate_limited; _ -> :retry end" },
-        { ln: ">>>", kind: "conflict", code: ">>>>>>> agent overlay (base rev 42)" },
-      ],
-      diskStatus: { label: "Clean (publish paused)", tone: "ok" },
-      bufferStatus: { label: "rev 43 · never clobbered", tone: "ok" },
-      overlayStatus: { label: "Conflict review open", tone: "fail" },
-    };
-  }
-
-  return {
-    title: "4. Clean 3-way merge via SPC a p",
-    summary: "Non-overlapping edits merge cleanly into your buffer and disk in one undoable step, keeping your line 243 edit intact.",
-    editorHeader: "retry.ex · rev 44 (published cleanly)",
-    rows: [
-      { ln: "238", kind: "normal", code: "def classify(status) do" },
-      { ln: "239", kind: "add", code: "  case status do" },
-      { ln: "240", kind: "add", code: "    429 -> :rate_limited" },
-      { ln: "241", kind: "add", code: "    code when code >= 500 -> :retry" },
-      { ln: "242", kind: "normal", code: "  end" },
-      { ln: "243", kind: "you", code: "def timeout_ms, do: 15_000  # preserved!" },
-    ],
-    diskStatus: { label: "Modified retry.ex", tone: "warn" },
-    bufferStatus: { label: "rev 44 · 1 undo step", tone: "ok" },
-    overlayStatus: { label: "Cleared cleanly", tone: "ok" },
-  };
+export function stagedViewKey(state: StagedPipelineState): StagedViewKey {
+  if (state.step === 1) return "1";
+  if (state.step === 2) return "2";
+  const outcome = state.conflictMode ? "conflict" : "clean";
+  return state.step === 3 ? `3-${outcome}` : `4-${outcome}`;
 }
 
-function esc(value: string): string {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;");
+/** Next from the last step starts over with the default outcome; Back from the first step stays put. */
+export function stepStagedPipeline(state: StagedPipelineState, direction: "next" | "back"): StagedPipelineState {
+  if (direction === "next") {
+    if (state.step === 4) return createStagedPipelineState();
+    return { ...state, step: (state.step + 1) as StagedStep };
+  }
+  if (state.step === 1) return state;
+  return { ...state, step: (state.step - 1) as StagedStep };
+}
+
+function stagedRows(view: StagedViewKey): readonly StagedCodeRow[] {
+  const tail: readonly StagedCodeRow[] = [
+    { ln: 13, kind: "normal", code: BASE_13 },
+    { ln: 14, kind: "normal", code: "" },
+  ];
+  const base15: StagedCodeRow = { ln: 15, kind: "normal", code: BASE_15 };
+  const your15: StagedCodeRow = { ln: 15, kind: "you", code: YOUR_15 };
+
+  switch (view) {
+    case "1":
+      return [{ ln: 12, kind: "normal", code: BASE_12 }, ...tail, base15];
+    case "2":
+      return [{ ln: 12, kind: "del", code: BASE_12 }, { ln: 12, kind: "add", code: MINGA_12 }, ...tail, base15];
+    case "3-clean":
+      return [{ ln: 12, kind: "normal", code: BASE_12 }, ...tail, your15];
+    case "3-conflict":
+      return [{ ln: 12, kind: "you", code: YOUR_12 }, ...tail, base15];
+    case "4-clean":
+      return [{ ln: 12, kind: "add", code: MINGA_12 }, ...tail, your15];
+    case "4-conflict":
+      return [{ ln: 12, kind: "you", code: YOUR_12 }, { ln: 12, kind: "add", code: MINGA_12 }, ...tail, base15];
+  }
+}
+
+export function computeStagedSnapshot(state: StagedPipelineState): StagedViewSnapshot {
+  const view = stagedViewKey(state);
+  return { view, rows: stagedRows(view) };
+}
+
+function prefersReducedMotion(): boolean {
+  return typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
+/** Shows the elements whose space-separated `attr` list names `key` and hides the rest. Elements stay in the document, so a focused control is never replaced. */
+function showOnly(root: HTMLElement, attr: string, key: string): void {
+  for (const el of root.querySelectorAll<HTMLElement>(`[${attr}]`)) {
+    const keys = (el.getAttribute(attr) ?? "").split(/\s+/);
+    el.hidden = !keys.includes(key);
+  }
+}
+
+/** Copies one step's page copy into the live caption. Returns false when the page has no such step. */
+function copyStep(steps: HTMLElement | null, caption: HTMLElement | null, key: string): boolean {
+  const source = steps?.querySelector<HTMLElement>(`[data-step="${key}"]`);
+  if (!source || !caption) return false;
+  caption.replaceChildren(...Array.from(source.childNodes, (node) => node.cloneNode(true)));
+  caption.hidden = false;
+  return true;
 }
 
 export function mountArchFaultMap(root: HTMLElement): void {
+  const caption = root.querySelector<HTMLElement>("[data-iso-caption]");
+  const steps = root.querySelector<HTMLElement>("[data-iso-steps]");
+  const legacyPane = root.querySelector<HTMLElement>("[data-iso-legacy]");
+  const legacyCode = root.querySelector<HTMLElement>("[data-iso-lcode]");
+  const mingaCode = root.querySelector<HTMLElement>("[data-iso-mcode]");
+  const queued = root.querySelector<HTMLElement>("[data-iso-queued]");
+  const timer = root.querySelector<HTMLElement>("[data-iso-timer]");
+  const buttons = Array.from(root.querySelectorAll<HTMLButtonElement>("[data-iso-fault]"));
+
   let state = createIsolationSimState();
+  let shownView: IsolationView | null = null;
   let tickTimer: number | null = null;
-  let autoTypeTimer: number | null = null;
+  let typeTimer: number | null = null;
 
   function stopTimers(): void {
-    if (tickTimer !== null) {
-      window.clearInterval(tickTimer);
-      tickTimer = null;
+    if (tickTimer !== null) window.clearInterval(tickTimer);
+    if (typeTimer !== null) window.clearInterval(typeTimer);
+    tickTimer = null;
+    typeTimer = null;
+  }
+
+  function render(): void {
+    const reduced = prefersReducedMotion();
+
+    if (state.view !== shownView) {
+      shownView = state.view;
+      showOnly(root, "data-iso-show", state.view);
+      if (copyStep(steps, caption, state.view)) steps?.classList.add("is-enhanced");
+      legacyPane?.classList.toggle("is-broken", state.view === "slow-during" || state.legacyDead);
+      legacyPane?.classList.toggle("is-frozen", state.view === "slow-during");
     }
-    if (autoTypeTimer !== null) {
-      window.clearInterval(autoTypeTimer);
-      autoTypeTimer = null;
+
+    if (legacyCode) renderElixirLineDom(legacyCode, state.legacyText);
+    if (mingaCode) renderElixirLineDom(mingaCode, state.mingaText);
+    if (queued) queued.textContent = String(state.legacyQueued);
+    if (timer) {
+      const counting = !reduced && state.view === "slow-during";
+      timer.textContent = counting ? `${(state.remainingMs / 1000).toFixed(1)} s` : "";
+    }
+
+    for (const btn of buttons) {
+      const kind = btn.getAttribute("data-iso-fault") as FaultKind;
+      const label = faultButtonLabel(state, kind, reduced);
+      btn.setAttribute("aria-pressed", state.fault === kind && state.remainingMs > 0 ? "true" : "false");
+      for (const span of btn.querySelectorAll<HTMLElement>("[data-iso-label]")) {
+        span.hidden = span.getAttribute("data-iso-label") !== label;
+      }
     }
   }
 
-  function startAutoTypeBurst(): void {
-    if (autoTypeTimer !== null) {
-      window.clearInterval(autoTypeTimer);
-      autoTypeTimer = null;
+  function start(kind: FaultKind): void {
+    stopTimers();
+    state = triggerIsolationFault(kind);
+
+    if (prefersReducedMotion()) {
+      state = applyTypedText(state, ISOLATION_TYPED);
+      render();
+      return;
     }
-    const phrase = " # fast!";
-    let idx = 0;
-    autoTypeTimer = window.setInterval(() => {
-      if (idx >= phrase.length) {
-        if (autoTypeTimer !== null) window.clearInterval(autoTypeTimer);
-        autoTypeTimer = null;
+
+    render();
+    let typed = 0;
+    typeTimer = window.setInterval(() => {
+      const ch = ISOLATION_TYPED[typed];
+      if (ch === undefined) {
+        if (typeTimer !== null) window.clearInterval(typeTimer);
+        typeTimer = null;
         return;
       }
-      state = applyTypedChar(state, state.mingaText + phrase[idx]!);
-      idx += 1;
-      syncLivePanels();
-    }, 190);
-  }
-
-  function startFault(kind: FaultKind): void {
-    stopTimers();
-    state = triggerIsolationFault(state, kind);
-    renderFull();
-    if (kind === "none") return;
-
-    if (kind === "lsp_hang") {
-      startAutoTypeBurst();
-    }
-
+      typed += 1;
+      state = applyTypedChar(state, ch);
+      render();
+    }, TYPE_INTERVAL_MS);
     tickTimer = window.setInterval(() => {
-      state = tickIsolationSim(state, 100);
-      syncLivePanels();
-      if (state.remainingMs <= 0 && tickTimer !== null) {
-        window.clearInterval(tickTimer);
-        tickTimer = null;
-      }
-    }, 100);
-  }
-
-  function syncLivePanels(): void {
-    const input = root.querySelector<HTMLInputElement>("[data-iso-input]");
-    if (input && document.activeElement !== input) {
-      input.value = state.mingaText;
-    }
-
-    const legacyPane = root.querySelector<HTMLElement>("[data-iso-legacy]");
-    const mingaPane = root.querySelector<HTMLElement>("[data-iso-minga]");
-    const noticeEl = root.querySelector<HTMLElement>("[data-iso-notice]");
-
-    if (noticeEl) noticeEl.textContent = state.notice;
-
-    const secs = (state.remainingMs / 1000).toFixed(1);
-    const frozen = state.fault === "lsp_hang" && state.remainingMs > 0;
-    const hookErr = state.fault === "hook_error" && state.remainingMs > 0;
-
-    if (legacyPane) {
-      let badgeText = "READY";
-      let badgeCls = "is-ok";
-      let foot = "Shared scripting loop: editor UI and synchronous plugins share one thread.";
-      let stallText = "";
-
-      if (state.legacyDead) {
-        badgeText = "CRASHED · SIGSEGV";
-        badgeCls = "is-fail";
-        foot = "In-process C parser took down the entire editor process.";
-      } else if (frozen) {
-        badgeText = `FROZEN · ${secs}s LEFT`;
-        badgeCls = "is-fail";
-        stallText = `Scripting thread blocked · ${state.legacyQueued.length} keystroke${state.legacyQueued.length === 1 ? "" : "s"} stalled in queue...`;
-        foot = "Cursor stopped responding until the synchronous plugin finishes.";
-      } else if (hookErr) {
-        badgeText = "HOOK CHAIN FAILED";
-        badgeCls = "is-fail";
-        stallText = "Unhandled MatchError in :after_save interrupted downstream hooks.";
-        foot = "Uncaught hook exception surfaced directly on the editor loop.";
-      }
-
-      legacyPane.className = `iso-editor ${state.legacyDead || frozen || hookErr ? "is-broken" : ""}`;
-      legacyPane.innerHTML = `
-        <div class="iso-ed-head"><strong>Shared-Loop Editor</strong><span class="topo-pill ${badgeCls}" data-iso-lbadge></span></div>
-        <div class="iso-ed-body" data-iso-lbody></div>
-        <div class="iso-ed-foot" data-iso-lfoot></div>
-      `;
-      const lBadge = legacyPane.querySelector<HTMLElement>("[data-iso-lbadge]");
-      const lBody = legacyPane.querySelector<HTMLElement>("[data-iso-lbody]");
-      const lFoot = legacyPane.querySelector<HTMLElement>("[data-iso-lfoot]");
-      if (lBadge) lBadge.textContent = badgeText;
-      if (lFoot) lFoot.textContent = foot;
-      if (lBody) {
-        if (state.legacyDead) {
-          const deadEl = document.createElement("div");
-          deadEl.className = "iso-dead";
-          deadEl.textContent = "Process terminated (signal 11). Unsaved buffer changes lost.";
-          lBody.appendChild(deadEl);
-        } else {
-          const codeEl = document.createElement("div");
-          codeEl.className = frozen ? "iso-code-line is-frozen" : "iso-code-line";
-          renderElixirLineDom(codeEl, state.legacyText);
-          if (!frozen) {
-            const caret = document.createElement("span");
-            caret.className = "iso-caret";
-            codeEl.appendChild(caret);
-          }
-          lBody.appendChild(codeEl);
-          if (stallText) {
-            const stallEl = document.createElement("div");
-            stallEl.className = "iso-stall";
-            stallEl.textContent = stallText;
-            lBody.appendChild(stallEl);
-          }
-        }
-      }
-    }
-
-    if (mingaPane) {
-      let badgeText = "RESPONSIVE";
-      let badgeCls = "is-ok";
-      let sideStatus = "All BEAM supervisors healthy";
-      if (frozen) {
-        sideStatus = `Heavy extension running in separate process (${secs}s) · typing unaffected`;
-      } else if (state.mingaParserPlain) {
-        badgeText = "RESPAWNING ZIG PORT";
-        badgeCls = "is-warn";
-        sideStatus = "Brief plain-text fallback while Zig port respawns · buffer 100% intact";
-      } else if (state.fault === "parser_crash" && !state.mingaParserPlain) {
-        badgeText = "PORT RESPAWNED";
-        sideStatus = "Syntax colors restored automatically · zero characters lost";
-      } else if (hookErr) {
-        badgeText = "HOOK ISOLATED";
-        sideStatus = "Hook MatchError caught in async BEAM Task · other hooks & typing unaffected";
-      }
-
-      mingaPane.innerHTML = `
-        <div class="iso-ed-head"><strong>Minga (BEAM Isolated)</strong><span class="topo-pill ${badgeCls}" data-iso-mbadge></span></div>
-        <div class="iso-ed-body" data-iso-mbody></div>
-        <div class="iso-ed-foot" data-iso-mfoot></div>
-      `;
-      const mBadge = mingaPane.querySelector<HTMLElement>("[data-iso-mbadge]");
-      const mBody = mingaPane.querySelector<HTMLElement>("[data-iso-mbody]");
-      const mFoot = mingaPane.querySelector<HTMLElement>("[data-iso-mfoot]");
-      if (mBadge) mBadge.textContent = badgeText;
-      if (mFoot) mFoot.textContent = sideStatus;
-      if (mBody) {
-        const codeEl = document.createElement("div");
-        codeEl.className = "iso-code-line";
-        renderElixirLineDom(codeEl, state.mingaText, state.mingaParserPlain);
-        const caret = document.createElement("span");
-        caret.className = "iso-caret is-alive";
-        codeEl.appendChild(caret);
-        mBody.appendChild(codeEl);
-      }
-    }
-  }
-
-  function renderFull(): void {
-    root.innerHTML = `
-      <div class="story-box iso-box">
-        <div class="story-bar">
-          <span>LIVE ISOLATION DEMO · FIRE A FAULT &amp; TYPE BELOW</span>
-          <div class="seg-group" role="group" aria-label="Inject real-time faults">
-            <button type="button" class="seg-btn ${state.fault === "lsp_hang" ? "is-active" : ""}" data-iso-fault="lsp_hang">Block Plugin (3s)</button>
-            <button type="button" class="seg-btn ${state.fault === "parser_crash" ? "is-active" : ""}" data-iso-fault="parser_crash">Crash Parser</button>
-            <button type="button" class="seg-btn ${state.fault === "hook_error" ? "is-active" : ""}" data-iso-fault="hook_error">Crash :after_save</button>
-            <button type="button" class="seg-btn" data-iso-fault="none">Reset</button>
-          </div>
-        </div>
-        <div class="iso-input-bar">
-          <label for="iso-live-input">Type here while faults run:</label>
-          <input id="iso-live-input" class="iso-input" type="text" data-iso-input spellcheck="false" autocomplete="off">
-        </div>
-        <div class="iso-compare">
-          <div class="iso-editor" data-iso-legacy></div>
-          <div class="iso-editor is-minga" data-iso-minga></div>
-        </div>
-        <div class="iso-notice" data-iso-notice aria-live="polite"></div>
-      </div>
-    `;
-    syncLivePanels();
+      state = tickIsolationSim(state, TICK_MS);
+      if (state.remainingMs <= 0) stopTimers();
+      render();
+    }, TICK_MS);
   }
 
   root.addEventListener("click", (event) => {
     const btn = (event.target as HTMLElement | null)?.closest<HTMLElement>("[data-iso-fault]");
     if (!btn) return;
-    const f = btn.getAttribute("data-iso-fault") as FaultKind | null;
-    if (f === "none" || f === "lsp_hang" || f === "parser_crash" || f === "hook_error") {
-      startFault(f);
+    const kind = btn.getAttribute("data-iso-fault");
+    if (kind !== "slow_server" && kind !== "parser_crash") return;
+
+    if (faultButtonLabel(state, kind, prefersReducedMotion()) === "next") {
+      stopTimers();
+      state = finishIsolationFault(state);
+      render();
+      return;
     }
+    start(kind);
   });
 
-  root.addEventListener("input", (event) => {
-    const target = event.target as HTMLInputElement | null;
-    if (target?.matches("[data-iso-input]")) {
-      state = applyTypedChar(state, target.value);
-      syncLivePanels();
-    }
-  });
-
-  renderFull();
+  render();
 }
 
+const ROW_MARK: Readonly<Record<StagedCodeRow["kind"], string>> = { normal: "", add: "+", del: "-", you: "~" };
+
 export function mountStagedStepper(root: HTMLElement): void {
+  const caption = root.querySelector<HTMLElement>("[data-st-caption]");
+  const steps = root.querySelector<HTMLElement>("[data-st-steps]");
+  const rowsEl = root.querySelector<HTMLElement>("[data-st-rows]");
+  const count = root.querySelector<HTMLElement>("[data-st-count]");
+  const back = root.querySelector<HTMLElement>('[data-st-nav="back"]');
+
   let state = createStagedPipelineState();
+
+  function renderRows(rows: readonly StagedCodeRow[]): void {
+    if (!rowsEl) return;
+    const nodes = rows.map((row) => {
+      const line = document.createElement("div");
+      line.className = `st-row is-${row.kind}`;
+      const ln = document.createElement("span");
+      ln.className = "st-ln";
+      ln.textContent = `${ROW_MARK[row.kind]}${row.ln}`;
+      const code = document.createElement("span");
+      code.className = "st-code";
+      renderElixirLineDom(code, row.code);
+      line.append(ln, code);
+      return line;
+    });
+    rowsEl.replaceChildren(...nodes);
+  }
 
   function render(): void {
     const snap = computeStagedSnapshot(state);
-    const steps: readonly { readonly n: StagedStep; readonly label: string }[] = [
-      { n: 1, label: "1. Revision check" },
-      { n: 2, label: "2. Stage off disk" },
-      { n: 3, label: "3. Your edit" },
-      { n: 4, label: "4. Publish (SPC a p)" },
-    ];
-
-    const stepBtns = steps
-      .map(
-        (s) =>
-          `<button type="button" class="seg-btn ${state.step === s.n ? "is-active" : ""}" data-st-step="${s.n}">${s.label}</button>`,
-      )
-      .join("");
-
-    const codeRows = snap.rows
-      .map((r) => {
-        const html = r.kind === "conflict" ? `<span class="st-cmark">${esc(r.code)}</span>` : highlightElixirLine(r.code);
-        return `<div class="st-row is-${r.kind}"><span class="st-ln">${esc(r.ln)}</span><span class="st-code">${html}</span></div>`;
-      })
-      .join("");
-
-    root.innerHTML = `
-      <div class="story-box">
-        <div class="story-bar">
-          <span>STAGED OVERLAY PIPELINE</span>
-          <div class="seg-group" role="group" aria-label="Merge scenario">
-            <button type="button" class="seg-btn ${!state.conflictMode ? "is-active" : ""}" data-st-conflict-mode="clean">Clean 3-way merge</button>
-            <button type="button" class="seg-btn ${state.conflictMode ? "is-active" : ""}" data-st-conflict-mode="conflict">Same-line conflict</button>
-          </div>
-        </div>
-        <div class="st-step-row" role="group" aria-label="Staged overlay steps">${stepBtns}</div>
-        <div class="st-clean-layout">
-          <div class="st-editor">
-            <div class="st-ed-bar"><span>${esc(snap.editorHeader)}</span><span>Elixir</span></div>
-            <div class="st-ed-body">${codeRows}</div>
-          </div>
-          <div class="st-ledger">
-            <div class="st-stat">
-              <span class="lens-k">GIT ON DISK</span>
-              <span class="topo-pill is-${snap.diskStatus.tone}">${esc(snap.diskStatus.label)}</span>
-            </div>
-            <div class="st-stat">
-              <span class="lens-k">OPEN BUFFER</span>
-              <span class="topo-pill is-${snap.bufferStatus.tone}">${esc(snap.bufferStatus.label)}</span>
-            </div>
-            <div class="st-stat">
-              <span class="lens-k">STAGED OVERLAY</span>
-              <span class="topo-pill is-${snap.overlayStatus.tone}">${esc(snap.overlayStatus.label)}</span>
-            </div>
-          </div>
-        </div>
-        <div class="st-foot"><strong>${esc(snap.title)}:</strong> ${esc(snap.summary)}</div>
-      </div>
-    `;
+    showOnly(root, "data-st-show", snap.view);
+    if (copyStep(steps, caption, snap.view)) steps?.classList.add("is-enhanced");
+    renderRows(snap.rows);
+    if (count) count.textContent = String(state.step);
+    back?.setAttribute("aria-disabled", state.step === 1 ? "true" : "false");
+    for (const btn of root.querySelectorAll<HTMLElement>("[data-st-conflict-mode]")) {
+      const conflict = btn.getAttribute("data-st-conflict-mode") === "conflict";
+      btn.setAttribute("aria-pressed", conflict === state.conflictMode ? "true" : "false");
+      btn.classList.toggle("is-active", conflict === state.conflictMode);
+    }
   }
 
   root.addEventListener("click", (event) => {
     const target = event.target as HTMLElement | null;
     if (!target) return;
 
-    const stepBtn = target.closest<HTMLElement>("[data-st-step]");
-    if (stepBtn) {
-      const n = Number(stepBtn.getAttribute("data-st-step"));
-      if (n === 1 || n === 2 || n === 3 || n === 4) {
-        state = { ...state, step: n };
-        render();
-      }
+    const nav = target.closest<HTMLElement>("[data-st-nav]");
+    if (nav) {
+      state = stepStagedPipeline(state, nav.getAttribute("data-st-nav") === "back" ? "back" : "next");
+      render();
       return;
     }
 
-    const modeBtn = target.closest<HTMLElement>("[data-st-conflict-mode]");
-    if (modeBtn) {
-      const m = modeBtn.getAttribute("data-st-conflict-mode");
-      state = { ...state, conflictMode: m === "conflict" };
+    const mode = target.closest<HTMLElement>("[data-st-conflict-mode]");
+    if (mode) {
+      state = { ...state, conflictMode: mode.getAttribute("data-st-conflict-mode") === "conflict" };
       render();
     }
   });
