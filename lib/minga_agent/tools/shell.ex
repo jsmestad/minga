@@ -49,7 +49,8 @@ defmodule MingaAgent.Tools.Shell do
       produces no output for #{@running_indicator_ms}ms, a "running..."
       indicator is sent.
     - `:on_exit_status` — callback invoked once with the command's exit code when it
-      finishes before the deadline. Not invoked on timeout or start failure.
+      finishes before the deadline. Not invoked on timeout, start failure, or when
+      uncaptured output reaches the byte limit and the command is stopped.
     - `:running_indicator_ms` — override the silence threshold before sending
       a "running..." indicator (default: #{@running_indicator_ms})
     - `:env` — additional environment variables to include in the command process.
