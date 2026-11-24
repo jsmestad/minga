@@ -13,7 +13,14 @@ defmodule Minga.Keymap.GrammarTest do
 
   use ExUnit.Case, async: true
 
+  import Bitwise
+
   alias Minga.Test.KeyGrammar
+
+  @shift 0x01
+  @ctrl 0x02
+  @alt 0x04
+  @cmd 0x08
 
   @fixtures Path.expand("../../fixtures/keymap", __DIR__)
   @baseline_path Path.join(@fixtures, "grammar_baseline.tsv")
@@ -78,6 +85,57 @@ defmodule Minga.Keymap.GrammarTest do
 
     Run MINGA_WRITE_KEY_GRAMMAR_BASELINE=1 mix test #{Path.relative_to_cwd(__ENV__.file)}
     """
+  end
+
+  describe "the CUA profile (ADR-0007)" do
+    # Classifies one synthetic binding; a live prompt is mapped explicitly because no built-in scope declares one yet.
+    defp rules_for(scope, state, keys, command) do
+      binding = %{scope: scope, state: state, keys: keys, command: command, origin: :effective}
+
+      contexts = %{
+        {:editor, :cua} => :typing,
+        {:git_status, :cua} => :special_cua,
+        {:agent, :insert} => :typing,
+        {:picker, :cua} => :picker
+      }
+
+      [binding]
+      |> KeyGrammar.violations([], contexts)
+      |> Enum.map(& &1.rule)
+    end
+
+    test "listed desktop conventions pass in CUA states" do
+      for {scope, keys, command} <- [
+            {:editor, [{?c, @cmd}], :yank_visual_selection},
+            {:editor, [{?z, @cmd ||| @shift}], :redo},
+            {:editor, [{?a, @ctrl}], :select_all},
+            {:editor, [{?p, @ctrl ||| @shift}], :command_palette},
+            {:git_status, [{?y, @ctrl}], :redo}
+          ] do
+        assert rules_for(scope, :cua, keys, command) == [], "#{inspect(keys)} #{command}"
+      end
+    end
+
+    test "violations the profile does not cover still fail" do
+      for {label, scope, state, keys, command, rule} <- [
+            {"unlisted ⌘ key", :editor, :cua, [{?b, @cmd}], :toggle_bold, :platform_key},
+            {"unlisted ⌃ key", :editor, :cua, [{?b, @ctrl}], :toggle_bold,
+             :unconventional_modifier},
+            {"listed key with another meaning", :git_status, :cua, [{?c, @cmd}], :git_commit_open,
+             :platform_key},
+            {"listed key outside a CUA state", :agent, :insert, [{?a, @ctrl}], :select_all,
+             :editing_collision},
+            {"three-modifier chord", :editor, :cua, [{?z, @ctrl ||| @alt ||| @shift}], :redo,
+             :forbidden_chord},
+            {"⌃⌘ chord", :editor, :cua, [{?c, @ctrl ||| @cmd}], :yank_visual_selection,
+             :forbidden_chord},
+            {"⌥⌘ chord", :editor, :cua, [{?z, @alt ||| @cmd}], :undo, :forbidden_chord},
+            {"editing collision in a live prompt", :picker, :cua, [{?a, @ctrl}], :select_all,
+             :editing_collision}
+          ] do
+        assert rules_for(scope, state, keys, command) == [rule], label
+      end
+    end
   end
 
   defp format(violations) do
