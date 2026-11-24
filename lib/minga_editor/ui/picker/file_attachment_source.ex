@@ -52,7 +52,7 @@ defmodule MingaEditor.UI.Picker.FileAttachmentSource do
   def fetch_identity(context), do: FileSource.fetch_identity(context)
 
   @doc "Refreshes inventory only for the project that launched the file list."
-  @spec refresh_inventory?(map() | nil, String.t()) :: boolean()
+  @spec refresh_inventory?(map() | nil, String.t() | nil) :: boolean()
   def refresh_inventory?(
         %{
           find_file_session: %FindFileSession{

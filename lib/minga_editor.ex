@@ -348,6 +348,7 @@ defmodule MingaEditor do
     EventBus.subscribe(:buffer_changed, events_registry)
     EventBus.subscribe(:file_written, events_registry)
     EventBus.subscribe(:project_rebuilt, events_registry)
+    EventBus.subscribe(:project_rebuild_failed, events_registry)
     EventBus.subscribe(:git_status_changed, events_registry)
     EventBus.subscribe(:command_done, events_registry)
 
