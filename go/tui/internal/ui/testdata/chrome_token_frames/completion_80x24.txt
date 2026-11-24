@@ -1,0 +1,8 @@
+╭──────────────────────────────────────────────────────────╮
+│ Completion                                               │
+│▌ fmt.Println  func(a ...any)                             │
+│  fmt.Printf  func(format string, a ...any)               │
+│ Documentation                                            │
+│ Println formats using the default formats for its        │
+│ operands and writes to standard output.                  │
+╰──────────────────────────────────────────────────────────╯

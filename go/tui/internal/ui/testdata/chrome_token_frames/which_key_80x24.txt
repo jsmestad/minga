@@ -1,0 +1,14 @@
+Keys SPC  1/2
+ f
+ +file
+b
++buffer
+w
++window
+╭──────────────────────────────────────────────╮
+│  Keys SPC                               1/2  │
+│ f   › +file ›        │  b   › +buffer ›      │
+│ w   › +window ›      │  a   › +agent ›       │
+│ g   › +git ›         │  q   󰩈 quit           │
+│  6 bindings           Tab next  •  Esc close │
+╰──────────────────────────────────────────────╯

@@ -1,0 +1,4 @@
+╭ Running...                                                                   ╮
+│ ❯ NORMAL                                                                     │
+│Send · Steer · Queue Next · Stop · Attachments · Shift+Enter newline          │
+╰──────────────────────────────────────────────────────────────────────────────╯

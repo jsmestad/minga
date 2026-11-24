@@ -1,0 +1,4 @@
+◉ Agent session stopped
+  provider unavailable
+   Retry  r
+  Your draft is saved. SPC a n starts a new session.

@@ -1,0 +1,22 @@
+
+
+
+                              ◆  m i n g a   v0.9
+
+            ╭ Session ─────────────────────────────────────────────╮
+            │ ▸  r   resume last session                   4 files │
+            ╰──────────────────────────────────────────────────────╯
+
+              ─── RECENT ───────────────────────────────────────────
+                1      startup.ex                  lib/minga_editor
+                2      render_content.go         go/tui/internal/ui
+
+              ─── START ────────────────────────────────────────────
+                     open file                         SPC   f   f
+                     tutorial                                :Tutor
+
+                             i  write  ·  :q  quit
+
+
+
+

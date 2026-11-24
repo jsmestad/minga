@@ -137,6 +137,12 @@ func chromeLiteralViolations(filename string, source []byte) ([]string, error) {
 				if lit := spacingLiteral(node.Args[1]); lit != nil {
 					report(node, "spacing literal "+lit.Value+" in a run of spaces")
 				}
+			default:
+				if index, ok := chromeWidthArgument(node); ok {
+					if lit := spacingLiteral(node.Args[index]); lit != nil {
+						report(node, "spacing literal "+lit.Value+" in a width budget")
+					}
+				}
 			}
 		case *ast.BasicLit:
 			if node.Kind == token.STRING && !tags[node] {
@@ -170,7 +176,40 @@ func isPackageName(name string) bool {
 	return false
 }
 
-// isSpaceRepeat matches strings.Repeat(" ", n).
+// chromeWidthFunctions are the fitting and placement calls whose width argument is a chrome budget, keyed by package (empty for this package) and name, with the index of that argument.
+var chromeWidthFunctions = map[[2]string]int{
+	{"", "fit"}:                     1,
+	{"", "renderPadded"}:            2,
+	{"", "firstCompactLine"}:        1,
+	{"ansi", "Truncate"}:            1,
+	{"ansi", "TruncateWc"}:          1,
+	{"ansi", "Wrap"}:                1,
+	{"lipgloss", "PlaceHorizontal"}: 0,
+}
+
+// chromeWidthArgument returns the index of the width argument when call is one of chromeWidthFunctions.
+func chromeWidthArgument(call *ast.CallExpr) (int, bool) {
+	var key [2]string
+	switch fun := call.Fun.(type) {
+	case *ast.Ident:
+		key = [2]string{"", fun.Name}
+	case *ast.SelectorExpr:
+		pkg, ok := fun.X.(*ast.Ident)
+		if !ok {
+			return 0, false
+		}
+		key = [2]string{pkg.Name, fun.Sel.Name}
+	default:
+		return 0, false
+	}
+	index, ok := chromeWidthFunctions[key]
+	if !ok || index >= len(call.Args) {
+		return 0, false
+	}
+	return index, true
+}
+
+// isSpaceRepeat matches strings.Repeat(" ", n), comparing the unquoted value so a raw-string space matches too.
 func isSpaceRepeat(call *ast.CallExpr) bool {
 	selector, ok := call.Fun.(*ast.SelectorExpr)
 	if !ok || selector.Sel.Name != "Repeat" || len(call.Args) != 2 {
@@ -180,7 +219,11 @@ func isSpaceRepeat(call *ast.CallExpr) bool {
 		return false
 	}
 	lit, ok := call.Args[0].(*ast.BasicLit)
-	return ok && lit.Kind == token.STRING && lit.Value == `" "`
+	if !ok || lit.Kind != token.STRING {
+		return false
+	}
+	value, err := strconv.Unquote(lit.Value)
+	return err == nil && value != "" && strings.Trim(value, " ") == ""
 }
 
 // spacingLiteral returns the first non-zero integer literal in expr that is a spacing amount rather than layout arithmetic.
@@ -276,6 +319,17 @@ func TestChromeTokenGuardrailRejectsSpacingLiterals(t *testing.T) {
 		`strings.Repeat(" ", indent+2)`,
 		`strings.Repeat(" ", width-lipgloss.Width(left)-1)`,
 		`strings.Repeat(" ", max(width-2, 0))`,
+		"strings.Repeat(` `, 2)",
+		`strings.Repeat("\x20", width-1)`,
+		`fit(text, width-2)`,
+		`fit(text, 12)`,
+		`fit(text, max(width-lipgloss.Width(label)-9, 8))`,
+		`renderPadded(style, text, width-2)`,
+		`firstCompactLine(text, max(width-6, 8))`,
+		`ansi.Truncate(text, width-3, "…")`,
+		`ansi.TruncateWc(group, max(width-3, 1), "…")`,
+		`ansi.Wrap(text, width-3, "")`,
+		`lipgloss.PlaceHorizontal(width-2, lipgloss.Left, text)`,
 		`"  "`,
 		`"label  value"`,
 		"`a  b`",
@@ -313,6 +367,17 @@ func TestChromeTokenGuardrailAcceptsLayoutArithmetic(t *testing.T) {
 		`strings.Repeat(" ", available/2)`,
 		`strings.Repeat(" ", spaceMD.cols())`,
 		`strings.Repeat("─", width-2)`,
+		`strings.Repeat("ab", 2)`,
+		`fit(text, max(width, 1))`,
+		`fit(text, width/2)`,
+		`fit(text, width-lipgloss.Width(label))`,
+		`renderPadded(style, text, width)`,
+		`firstCompactLine(text, max(width-spaceXL.cols(), 8))`,
+		`ansi.Truncate(text, width-lipgloss.Width(tail), "…")`,
+		`ansi.TruncateWc(text, min(width, 40), "…")`,
+		`ansi.Wrap(text, width*3/4, "")`,
+		`lipgloss.PlaceHorizontal(width, lipgloss.Center, text)`,
+		`m.fit(text, 2)`,
 		`gap(spaceXL)`,
 		`" "`,
 		`"a b c"`,

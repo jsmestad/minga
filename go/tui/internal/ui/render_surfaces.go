@@ -656,21 +656,18 @@ func tableCellsText(cells []tableCell) string {
 // notifications = 1 + 2*items); an item with inline actions adds one actions
 // row, and the border frame adds two rows, all of which the BEAM band counts.
 //
-// The content is wrapped in a rounded border with drop shadow matching the
-// picker/which-key popup styling (#2538). The border adds 2 to height and 4 to
-// width (2 border chars + 2 padding chars); the BEAM placement rect must
-// account for this overhead so overlayLayer does not clip the border frame.
+// The content sits in the popover frame shared with the picker (#2538). The
+// frame's border and padding come from the popover tokens, and contentWidth
+// and contentHeight take them out of the outer size, so the BEAM placement
+// rect must count the same frame: one border row above and below, and no
+// padding rows while popoverVerticalPadding is under one row.
 func (m Model) renderNotifications(notes protocol.Notifications) []string {
 	height := m.maxOverlayHeight()
 	width := max(m.width, 1)
 	theme := m.palette()
-
-	// Content dimensions account for the rounded border frame. The border adds
-	// 1 column on each side (2 total) and Padding(0,1) adds 1 column on each
-	// side (2 more), for 4 columns of width overhead. Height adds 1 row for the
-	// top border and 1 for the bottom border (2 total).
-	contentWidth := max(width-4, 1)
-	contentHeight := max(height-2, 1)
+	frame := m.popoverFrame()
+	contentWidth := frame.contentWidth(width)
+	contentHeight := frame.contentHeight(height)
 
 	titleStyle := lipgloss.NewStyle().Bold(true).Foreground(theme.Accent()).Background(theme.PopupChrome()).Width(contentWidth).ColorWhitespace(true)
 	lines := []string{renderPadded(titleStyle, " Notifications", contentWidth)}
@@ -684,23 +681,12 @@ func (m Model) renderNotifications(notes protocol.Notifications) []string {
 	}
 	lines = takeLines(lines, contentHeight)
 
-	// Wrap in rounded border matching picker/which-key popup styling. The style
-	// width is the outer width, border and padding included, so pass the full
-	// width: passing contentWidth leaves contentWidth-4 for rows that are already
-	// contentWidth wide, and the header row wraps its dismiss "x" onto an extra
-	// line that pushes the actions row out of the BEAM band (#3806).
-	content := strings.Join(lines, "\n")
-	bordered := lipgloss.NewStyle().
-		Width(width).
-		Padding(padding(popoverVerticalPadding, popoverRowInset)).
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(theme.PopupBorder()).
-		BorderBackground(theme.PopupSurface()).
-		Background(theme.PopupSurface()).
-		ColorWhitespace(true).
-		Render(content)
-
-	return strings.Split(bordered, "\n")
+	// The frame width is the outer width, border and padding included, so pass
+	// the full width: passing contentWidth would leave less than contentWidth
+	// for rows that are already contentWidth wide, and the header row would wrap
+	// its dismiss "x" onto an extra line that pushes the actions row out of the
+	// BEAM band (#3806).
+	return strings.Split(frame.render(width, strings.Join(lines, "\n")), "\n")
 }
 
 // renderNotificationHeaderRow draws a notification's title and, when the

@@ -813,7 +813,7 @@ func (m Model) renderPickerItemRow(title string, item protocol.PickerItem, selec
 	}
 	text := markerText + labelStyle.Render(" ")
 	if item.Active {
-		text += lipgloss.NewStyle().Foreground(theme.Accent()).Background(rowBackground).ColorWhitespace(true).Render(pickerActiveGlyph) + labelStyle.Render(" ")
+		text += lipgloss.NewStyle().Foreground(theme.Accent()).Background(rowBackground).ColorWhitespace(true).Render(pickerActiveGlyph) + labelStyle.Render(gap(listRowGlyphToTitle))
 	} else if activeSlot {
 		text += labelStyle.Render(strings.Repeat(" ", pickerActiveSlotWidth))
 	}

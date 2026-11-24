@@ -47,16 +47,15 @@ func (m Model) floatingPickerLayer() *lipgloss.Layer {
 
 func (m Model) renderFloatingPicker(picker protocol.Picker, preview protocol.PickerPreview) string {
 	popupWidth := m.floatingPickerWidth()
-	contentWidth := max(popupWidth-4, 1)
+	frame := m.popoverFrame()
+	contentWidth := frame.contentWidth(popupWidth)
 	popupModel := m
 	popupModel.width = contentWidth
 	lines := popupModel.renderPicker(picker, preview)
 	if len(lines) == 0 {
 		return ""
 	}
-	content := strings.Join(lines, "\n")
-	// The outer width includes both padding and border. Pass it intact to avoid wrapping fitted rows.
-	return lipgloss.NewStyle().Width(popupWidth).Padding(padding(popoverVerticalPadding, popoverRowInset)).Border(lipgloss.RoundedBorder()).BorderForeground(m.palette().PopupBorder()).BorderBackground(m.palette().PopupSurface()).Background(m.palette().PopupSurface()).ColorWhitespace(true).Render(content)
+	return frame.render(popupWidth, strings.Join(lines, "\n"))
 }
 
 func (m Model) floatingPickerWidth() int {

@@ -1,0 +1,3 @@
+Println(a ...any)
+Println formats.
+> a  values

@@ -1,0 +1,6 @@
+ Panel                                                            2 messages  ↑2
+  INF  messages             LSP: elixir-ls connected
+  ERR  messages             format failed
+
+
+

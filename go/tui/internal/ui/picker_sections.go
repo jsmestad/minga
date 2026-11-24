@@ -59,5 +59,5 @@ func pickerStartsSection(items []protocol.PickerItem, index int, start int) bool
 func (m Model) renderPickerSectionHeader(group string, width int) string {
 	theme := m.palette()
 	style := lipgloss.NewStyle().Bold(true).Foreground(theme.PopupMutedText()).Background(theme.PopupSurface()).Width(width).ColorWhitespace(true)
-	return renderPadded(style, gap(spaceXL)+ansi.TruncateWc(group, max(width-3, 1), "…"), width)
+	return renderPadded(style, gap(spaceXL)+ansi.TruncateWc(group, max(width-spaceXL.cols()-listRowTrailingInset.cols(), 1), "…"), width)
 }
