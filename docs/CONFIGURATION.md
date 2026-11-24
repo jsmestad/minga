@@ -970,14 +970,15 @@ Four phases are supported, matching Emacs's advice system:
 # errors, formatting often makes things worse.
 advise :around, :format_buffer, fn execute, state ->
   errors =
-    state.buffers.active
+    state
+    |> MingaEditor.Extension.EditorAPI.active_buffer()
     |> Minga.Diagnostics.for_buffer()
     |> Enum.count(fn d -> d.severity == :error end)
 
   if errors == 0 do
     execute.(state)
   else
-    %{state | status_msg: "Format skipped: #{errors} error(s)"}
+    MingaEditor.Extension.EditorAPI.notice(state, "Format skipped: #{errors} error(s)")
   end
 end
 ```
@@ -985,17 +986,25 @@ end
 `:override` replaces a command entirely. `:before` and `:after` still run around an overridden command, so you can override the core behavior while keeping other advice intact:
 
 ```elixir
-# Replace the built-in save with one that also stages the file in git
-advise :override, :save, fn state ->
-  # Run the original save logic
-  state = Minga.API.save()
+# Turn formatting off for this project: the command now only says so
+advise :override, :format_buffer, fn state ->
+  MingaEditor.Extension.EditorAPI.notice(state, "Formatting is off in this project")
+end
+```
 
-  # Then auto-stage
-  case Minga.Buffer.file_path(state.buffers.active) do
-    nil -> state
-    path ->
-      System.cmd("git", ["add", path], stderr_to_stdout: true)
-      %{state | status_msg: "Saved and staged: #{Path.basename(path)}"}
+To add behavior to a command instead of replacing it, use `:after`. Advice runs inside the editor, so call helpers that take `state` rather than `Minga.API` functions, which message the editor and would wait on themselves:
+
+```elixir
+# Stage the file in git after every save
+advise :after, :save, fn state ->
+  alias MingaEditor.Extension.EditorAPI
+
+  with buffer when is_pid(buffer) <- EditorAPI.active_buffer(state),
+       path when is_binary(path) <- Minga.Buffer.file_path(buffer),
+       {_output, 0} <- System.cmd("git", ["add", path], stderr_to_stdout: true) do
+    EditorAPI.notice(state, "Saved and staged: #{Path.basename(path)}")
+  else
+    _not_staged -> state
   end
 end
 ```
@@ -1451,7 +1460,8 @@ end
 # Skip formatting if the buffer has errors
 advise :around, :format_buffer, fn execute, state ->
   errors =
-    state.buffers.active
+    state
+    |> MingaEditor.Extension.EditorAPI.active_buffer()
     |> Minga.Diagnostics.for_buffer()
     |> Enum.count(fn d -> d.severity == :error end)
 
