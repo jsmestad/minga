@@ -34,6 +34,7 @@ defmodule Minga.Telemetry.DevHandler do
   """
 
   @handler_id "minga-dev-handler"
+  @slow_command_threshold_ms 100
 
   @agent_session_start_spans [
     :catalog_load,
@@ -159,7 +160,16 @@ defmodule Minga.Telemetry.DevHandler do
   def handle_event([:minga, :command, :execute, :stop], measurements, metadata, _config) do
     duration = measurements.duration
     command = Map.get(metadata, :command, :unknown)
-    Minga.Log.debug(:editor, fn -> "[command:#{command}] #{to_microseconds(duration)}µs" end)
+    ms = System.convert_time_unit(duration, :native, :millisecond)
+
+    if ms >= @slow_command_threshold_ms do
+      Minga.Log.warning(
+        :editor,
+        "[command:#{command}] took #{ms}ms (threshold: #{@slow_command_threshold_ms}ms)"
+      )
+    else
+      Minga.Log.debug(:editor, fn -> "[command:#{command}] #{to_microseconds(duration)}µs" end)
+    end
   end
 
   def handle_event(

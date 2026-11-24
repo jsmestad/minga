@@ -104,7 +104,7 @@ In a traditional editor, two things modifying the same buffer is a concurrency h
 
 ### True preemptive concurrency
 
-This is the strongest technical differentiator. The BEAM runs a preemptive scheduler with reduction counting that guarantees every process gets fair CPU time. Your keystroke handling is a process. LSP communication is a process. An AI agent is a process. The scheduler ensures none of them can starve the others.
+This is the strongest technical differentiator. The BEAM runs a preemptive scheduler with reduction counting that guarantees every process gets fair CPU time. Your keystroke handling is a process. LSP communication is a process. An AI agent is a process. The scheduler ensures none of them can starve the others. But the Editor is a single mailbox: a synchronous call or long-running callback inside it delays every later key and frame until it returns. The Watchdog's stall sampler (`MingaEditor.Watchdog`) reports these waits at runtime.
 
 This is qualitatively different from async/await or event loops. In Neovim, VS Code's extension host, or Emacs, "async" means cooperative multitasking: one thing runs at a time, and if it takes too long, everything else waits. The BEAM's scheduler preempts processes after a fixed number of reductions (roughly, function calls) regardless of whether they yield voluntarily.
 
@@ -857,7 +857,7 @@ Minga's architecture was *designed* for exactly this kind of workload:
 
 - **Each agent session runs as its own supervised process tree.** ✅ Agents are isolated from your buffers, from each other, and from the editor core. They communicate through the same message-passing interface the editor itself uses.
 
-- **The BEAM's preemptive scheduler prevents starvation.** ✅ A long-running agent can't cause UI jank. The scheduler guarantees every process gets CPU time, regardless of what any single process is doing. You keep editing while the agent works in the background, not because of careful async engineering, but because the VM enforces it at the scheduler level.
+- **The BEAM's preemptive scheduler prevents CPU starvation across processes.** ✅ The scheduler guarantees every process gets CPU time. But the Editor is a single mailbox: a synchronous call or long-running callback inside it delays every later key and frame until it returns. The Watchdog's stall sampler reports these waits at runtime.
 
 - **Process monitoring enables real-time observability.** ✅ The editor monitors agent processes and reflects their status in the UI: running, waiting for API response, applying changes, failed. You can inspect an agent's state with `:sys.get_state(agent_pid)` without stopping it.
 
@@ -873,7 +873,7 @@ Most editors are trying to retrofit agent support onto architectures that assume
 
 ### Concurrent background work
 
-LSP communication, file indexing, git operations: these can run as separate BEAM processes without blocking the editor. The BEAM's preemptive scheduler ensures no single process can starve the UI, even under heavy load. This is qualitatively different from async/await in single-threaded runtimes. It's true preemptive concurrency with fairness guarantees.
+LSP communication, file indexing, git operations: these run as separate BEAM processes without blocking the editor. The BEAM's preemptive scheduler ensures no single process can starve another of CPU, even under heavy load. This is qualitatively different from async/await in single-threaded runtimes. However, the Editor GenServer is still a single sequential mailbox; a blocking call inside it stalls input until it returns. The Watchdog's stall sampler detects and reports these cases.
 
 ---
 
