@@ -22,6 +22,8 @@ defmodule MingaEditor.Agent.SessionFollowUpTest do
   alias MingaEditor.State.Tab
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Workspace
+  alias MingaEditor.UI.Picker.AgentSessionSource
+  alias MingaEditor.UI.Picker.Item
 
   # The Editor's reply handling for a held session must finish well inside a
   # GenServer call timeout; a blocking call would take the full 5 s.
@@ -47,7 +49,7 @@ defmodule MingaEditor.Agent.SessionFollowUpTest do
       assert is_pid(session)
 
       HeldStartProvider.release(provider)
-      restored = handle_follow_up_reply(bound)
+      restored = settle_through_editor(bound)
 
       assert inspect(Session.messages(session)) =~ "saved question"
       assert Runtime.active_tab_kind(restored.shell_runtime) == :agent
@@ -78,22 +80,108 @@ defmodule MingaEditor.Agent.SessionFollowUpTest do
       assert is_pid(session)
 
       HeldStartProvider.release(provider)
-      settled = handle_follow_up_reply(away)
+      settled = settle_through_editor(away)
 
       assert inspect(Session.messages(session)) =~ "restored while away"
       assert TabBar.active_workspace_id(settled.shell_runtime.state.tab_bar) == 0
     end
   end
 
+  describe "a Restore or reopen into a tab whose provider is still starting" do
+    test "Restore does not wait for provider start and shows the conversation once the session answers",
+         %{state: state, dir: dir} do
+      saved = save_record(dir, "restored into a starting tab")
+      bound = state |> AgentCommands.new_agent_session() |> AgentSessionStart.settle()
+      provider = assert_provider_held()
+      session = Runtime.active_session(bound.shell_runtime)
+      assert is_pid(session)
+
+      {elapsed, opened} = :timer.tc(fn -> AgentCommands.open_session(bound, saved) end)
+      assert elapsed < @editor_budget_us
+
+      HeldStartProvider.release(provider)
+      restored = settle_through_editor(opened)
+
+      assert inspect(Session.messages(session)) =~ "restored into a starting tab"
+
+      # The restored view records the tab the user restored from, for the return trip.
+      agent_tab = Runtime.active_tab(bound.shell_runtime).id
+
+      assert %{active_tab_id: ^agent_tab} =
+               Presentation.return_target(restored.workspace.agent_ui.view.presentation)
+    end
+
+    test "a Sessions picker reopen does not wait for provider start", %{state: state, dir: dir} do
+      saved = save_record(dir, "picked while starting")
+      bound = state |> AgentCommands.new_agent_session() |> AgentSessionStart.settle()
+      provider = assert_provider_held()
+      session = Runtime.active_session(bound.shell_runtime)
+      owner = TabBar.active_workspace_id(bound.shell_runtime.state.tab_bar)
+
+      choice = %Item{
+        id: {saved, {:disk, {owner, session, displayed_session_id(session)}}},
+        label: "saved"
+      }
+
+      {elapsed, picked} = :timer.tc(fn -> AgentSessionSource.on_select(choice, bound) end)
+      assert elapsed < @editor_budget_us
+
+      HeldStartProvider.release(provider)
+      reopened = settle_through_editor(picked)
+
+      assert inspect(Session.messages(session)) =~ "picked while starting"
+      assert reopened.agent_connection.session_follow_ups == %{}
+    end
+
+    test "a Sessions picker reopen of a conversation the tab no longer shows is refused", %{
+      state: state,
+      dir: dir
+    } do
+      saved = save_record(dir, "stale choice")
+      bound = state |> AgentCommands.new_agent_session() |> AgentSessionStart.settle()
+      provider = assert_provider_held()
+      session = Runtime.active_session(bound.shell_runtime)
+      owner = TabBar.active_workspace_id(bound.shell_runtime.state.tab_bar)
+
+      choice = %Item{
+        id: {saved, {:disk, {owner, session, "an-earlier-conversation"}}},
+        label: "saved"
+      }
+
+      picked = AgentSessionSource.on_select(choice, bound)
+      HeldStartProvider.release(provider)
+      refused = settle_through_editor(picked)
+
+      assert refused.shell_runtime.state.notice.message == "Session changed. Reopen Sessions."
+      refute inspect(Session.messages(session)) =~ "stale choice"
+    end
+  end
+
   describe "a follow-up that does not succeed" do
-    test "an error answer is shown in the tab's conversation", %{state: state} do
+    test "a failed Restore in front is reported in a notice", %{state: state} do
       opened = AgentCommands.open_session(state, "no-such-saved-session")
       provider = assert_provider_held()
       bound = AgentSessionStart.settle(opened)
       session = Runtime.active_session(bound.shell_runtime)
 
       HeldStartProvider.release(provider)
-      failed = handle_follow_up_reply(bound)
+      failed = settle_through_editor(bound)
+
+      assert failed.shell_runtime.state.notice.message =~ "Could not restore the saved session."
+      assert Runtime.active_session(failed.shell_runtime) == session
+    end
+
+    test "a failed Restore in the background is shown in that tab's conversation", %{state: state} do
+      opened = AgentCommands.open_session(state, "no-such-saved-session")
+      [%Workspace{id: agent_workspace}] = agent_workspaces(opened)
+      provider = assert_provider_held()
+      away = opened |> MingaEditor.TabWorkflow.switch(1) |> AgentSessionStart.settle()
+
+      assert %Workspace{payload: %{session: session}} =
+               TabBar.get_workspace(away.shell_runtime.state.tab_bar, agent_workspace)
+
+      HeldStartProvider.release(provider)
+      failed = settle_through_editor(away)
 
       assert Enum.any?(Session.messages(session), fn
                {:system, "Could not restore the saved session." <> _, :error} -> true
@@ -101,7 +189,6 @@ defmodule MingaEditor.Agent.SessionFollowUpTest do
              end)
 
       assert failed.agent_connection.session_follow_ups == %{}
-      assert Runtime.active_session(failed.shell_runtime) == session
     end
 
     test "a session that has not answered by the deadline is reported, and its late answer still restores",
@@ -119,7 +206,7 @@ defmodule MingaEditor.Agent.SessionFollowUpTest do
       assert overdue.shell_runtime.state.notice.message =~ "has not loaded after 15 seconds"
 
       HeldStartProvider.release(provider)
-      restored = handle_follow_up_reply(overdue)
+      restored = settle_through_editor(overdue)
 
       assert inspect(Session.messages(session)) =~ "answered late"
       assert restored.agent_connection.session_follow_ups == %{}
@@ -166,7 +253,7 @@ defmodule MingaEditor.Agent.SessionFollowUpTest do
       assert is_pid(session)
 
       HeldStartProvider.release(provider)
-      _seeded = handle_follow_up_reply(bound)
+      _seeded = settle_through_editor(bound)
 
       assert inspect(Session.messages(session)) =~ "It authenticates users."
     end
@@ -219,16 +306,30 @@ defmodule MingaEditor.Agent.SessionFollowUpTest do
     provider
   end
 
-  # Delivers the follow-up's reply through the Editor's message handling.
-  @spec handle_follow_up_reply(MingaEditor.State.t()) :: MingaEditor.State.t()
-  defp handle_follow_up_reply(state) do
+  # Delivers the session's replies through the Editor's message handling until no follow-up is outstanding.
+  @spec settle_through_editor(MingaEditor.State.t()) :: MingaEditor.State.t()
+  defp settle_through_editor(%{agent_connection: %{session_follow_ups: pending}} = state)
+       when map_size(pending) == 0,
+       do: state
+
+  defp settle_through_editor(state) do
     receive do
       {[:alias | _ref], _reply} = reply ->
         {:noreply, state} = MingaEditor.handle_info(reply, state)
-        state
+        settle_through_editor(state)
     after
       5_000 -> flunk("expected the session's follow-up reply")
     end
+  end
+
+  # The session's first connection event names the conversation it shows, without a call that waits.
+  @spec displayed_session_id(pid()) :: String.t()
+  defp displayed_session_id(session) do
+    assert_receive {:agent_event, ^session,
+                    {:connection_changed, %{target: %{session_id: session_id}}}},
+                   2_000
+
+    session_id
   end
 
   @spec agent_workspaces(MingaEditor.State.t()) :: [Workspace.t()]

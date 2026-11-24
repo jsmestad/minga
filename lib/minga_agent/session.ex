@@ -795,11 +795,11 @@ defmodule MingaAgent.Session do
     GenServer.call(session, {:load_session, session_id, origin_id})
   end
 
-  @doc "Starts loading a saved session without waiting; the reply is `load_session/2`'s result."
-  @spec request_load_session(pid(), String.t()) :: :gen_server.request_id()
-  def request_load_session(session, session_id)
+  @doc "Starts loading a saved session without waiting; the reply is `load_session/3`'s result."
+  @spec request_load_session(pid(), String.t(), String.t() | nil) :: :gen_server.request_id()
+  def request_load_session(session, session_id, origin_id \\ nil)
       when is_pid(session) and node(session) == node() and is_binary(session_id) do
-    :gen_server.send_request(session, {:load_session, session_id, nil})
+    :gen_server.send_request(session, {:load_session, session_id, origin_id})
   end
 
   @doc """
@@ -813,6 +813,14 @@ defmodule MingaAgent.Session do
           :ok | {:error, term()}
   def import_legacy_session(session, session_id, origin_id \\ nil) when is_binary(session_id) do
     GenServer.call(session, {:import_legacy_session, session_id, origin_id})
+  end
+
+  @doc "Starts a legacy import without waiting; the reply is `import_legacy_session/3`'s result."
+  @spec request_import_legacy_session(pid(), String.t(), String.t() | nil) ::
+          :gen_server.request_id()
+  def request_import_legacy_session(session, session_id, origin_id)
+      when is_pid(session) and node(session) == node() and is_binary(session_id) do
+    :gen_server.send_request(session, {:import_legacy_session, session_id, origin_id})
   end
 
   @doc "Returns lightweight metadata about this session (for the picker)."
@@ -961,6 +969,12 @@ defmodule MingaAgent.Session do
   @spec model_selection(GenServer.server()) :: ModelSelection.t() | nil
   def model_selection(session) do
     GenServer.call(session, :model_selection)
+  end
+
+  @doc "Starts a model selection read without waiting; the reply is `model_selection/1`'s result."
+  @spec request_model_selection(pid()) :: :gen_server.request_id()
+  def request_model_selection(session) when is_pid(session) and node(session) == node() do
+    :gen_server.send_request(session, :model_selection)
   end
 
   @doc "Fetches available models from the provider."

@@ -1,14 +1,15 @@
 defmodule MingaEditor.Agent.SessionFollowUp do
   @moduledoc """
-  Work the Editor sent to a newly started Agent session and has not seen answered.
+  Work the Editor sent to an Agent session and has not seen answered.
 
-  A start can carry a follow-up: Restore loads a saved conversation, and an Inline Ask promote seeds its answered history. The follow-up runs once the session binds to its workspace, and the session handles it only after provider start, so the Editor never waits for the session to do it. It sends one `:gen_server.send_request/2` and keeps this record until the reply arrives. The request monitors the session, so a session that exits answers with its exit.
+  Three kinds of work restore or seed a conversation: Restore loads a saved conversation into the Agent tab, the Sessions picker reopens one, and an Inline Ask promote seeds its answered history into the session that started for it. A session may still be starting its provider and handles a call only after that, so the Editor never calls the session for this work. It sends one `:gen_server.send_request/2` and keeps this record until the reply arrives. The request monitors the session, so a session that exits answers with its exit.
 
-  A Restore runs whether or not its workspace is in front. Its draft guard and its view changes apply only when the workspace is in front; a workspace in the background shows the restored conversation through its arrival when the user returns.
+  A Restore that loaded is shown with the session's model selection, read by a second request. A Restore or reopen runs whether or not its workspace is in front. Its view changes apply only when the workspace is in front with the same session; a workspace in the background shows the conversation through its arrival when the user returns.
 
-  An error reply is shown in the session's own conversation. A session that exits, or does not answer before the deadline, is reported in a notice because the session cannot show it. A reply after the deadline still settles the follow-up. These functions return the next state; the Editor schedules the render.
+  A Restore failure is shown in a notice while its workspace is in front, and in that session's conversation while it is in the background. A session that exits, or does not answer before the deadline, is reported in a notice because the session cannot show it. A reply after the deadline still settles the work. These functions return the next state; the Editor schedules the render.
   """
 
+  alias MingaAgent.ModelSelection
   alias MingaAgent.Session
   alias MingaEditor.Agent.ProvenanceJump
   alias MingaEditor.Agent.SessionStart
@@ -21,14 +22,24 @@ defmodule MingaEditor.Agent.SessionFollowUp do
   alias MingaEditor.State.TabBar
   alias MingaEditor.State.Workspace
   alias MingaEditor.State.Workspace.Agent, as: WorkspaceAgent
+  alias MingaEditor.UI.Picker.AgentSessionSource
 
   @timeout_ms 15_000
 
-  @typedoc "The follow-up work itself, as the start request carried it."
-  @type work ::
+  @typedoc "Restore loads a saved conversation; it is shown with its view and provenance jump."
+  @type restore ::
           {:restore, String.t(), String.t() | nil, ProvenanceJump.origin() | nil,
            UIState.View.return_target()}
-          | {:seed, [{:user | :assistant, String.t()}]}
+
+  @typedoc "Work a session start can carry until the session binds."
+  @type work :: restore() | {:seed, [{:user | :assistant, String.t()}]}
+
+  @typedoc "A Sessions picker reopen of a saved record, guarded by the conversation the picker showed."
+  @type reopen ::
+          {:reopen, String.t(), String.t(), AgentSessionSource.saved_kind()}
+
+  @typedoc "Work in flight: started work, a picker reopen, or a loaded Restore reading its model selection."
+  @type pending :: work() | reopen() | {:restored, restore()}
 
   @typedoc "`{:awaiting, timer}` until the reply or the deadline; `:overdue` after the deadline reported it."
   @type phase :: {:awaiting, reference()} | :overdue
@@ -38,15 +49,19 @@ defmodule MingaEditor.Agent.SessionFollowUp do
           request: :gen_server.request_id(),
           workspace: non_neg_integer(),
           session: pid(),
-          work: work(),
+          work: pending(),
           phase: phase()
         }
 
   @enforce_keys [:token, :request, :workspace, :session, :work, :phase]
   defstruct @enforce_keys
 
-  @doc "Sends the follow-up for `session`, now bound to the agent workspace `workspace_id`, and returns at once."
-  @spec run(EditorState.t(), non_neg_integer(), pid(), SessionStart.follow_up()) ::
+  @doc """
+  Sends `work` to `session`, bound to the agent workspace `workspace_id`, and returns at once.
+
+  A Restore first checks the draft of a workspace in front. A picker reopen arrives already checked.
+  """
+  @spec run(EditorState.t(), non_neg_integer(), pid(), SessionStart.follow_up() | reopen()) ::
           EditorState.t()
   def run(state, _workspace_id, _session, nil), do: state
 
@@ -64,6 +79,23 @@ defmodule MingaEditor.Agent.SessionFollowUp do
   def run(state, workspace_id, session, {:seed, messages} = work) when is_pid(session),
     do:
       track(state, workspace_id, session, work, Session.request_seed_messages(session, messages))
+
+  def run(state, workspace_id, session, {:reopen, saved_id, origin_id, :legacy_import} = work)
+      when is_pid(session) do
+    request = Session.request_import_legacy_session(session, saved_id, origin_id)
+    track(state, workspace_id, session, work, request)
+  end
+
+  def run(state, workspace_id, session, {:reopen, saved_id, origin_id, _kind} = work)
+      when is_pid(session),
+      do:
+        track(
+          state,
+          workspace_id,
+          session,
+          work,
+          Session.request_load_session(session, saved_id, origin_id)
+        )
 
   @doc "Handles a follow-up reply or request monitor without intercepting unrelated messages."
   @spec response(EditorState.t(), term()) :: {:handled, EditorState.t()} | :unrelated
@@ -99,7 +131,7 @@ defmodule MingaEditor.Agent.SessionFollowUp do
       else: :ok
   end
 
-  @spec track(EditorState.t(), non_neg_integer(), pid(), work(), :gen_server.request_id()) ::
+  @spec track(EditorState.t(), non_neg_integer(), pid(), pending(), :gen_server.request_id()) ::
           EditorState.t()
   defp track(state, workspace_id, session, work, request) do
     token = make_ref()
@@ -126,33 +158,68 @@ defmodule MingaEditor.Agent.SessionFollowUp do
         answered(state, follow_up, result)
 
       {:error, {_reason, _session}} ->
-        NoticeWorkflow.publish(state, exited_message(follow_up.work))
+        exited(state, follow_up)
     end
   end
 
-  @spec answered(EditorState.t(), t(), :ok | {:error, term()}) :: EditorState.t()
+  @spec exited(EditorState.t(), t()) :: EditorState.t()
+  defp exited(state, %__MODULE__{work: {:reopen, saved_id, _origin_id, kind}} = follow_up),
+    do:
+      AgentSessionSource.reopened(
+        state,
+        follow_up.session,
+        saved_id,
+        kind,
+        {:error, :stale_session}
+      )
+
+  defp exited(state, %__MODULE__{work: work}),
+    do: NoticeWorkflow.publish(state, exited_message(work))
+
+  @spec answered(EditorState.t(), t(), term()) :: EditorState.t()
   defp answered(
          state,
-         %__MODULE__{work: {:restore, saved_id, tool_call, origin, return}} = follow_up,
+         %__MODULE__{work: {:restore, saved_id, _, _, _} = restore} = follow_up,
          result
        ) do
     case AgentCommands.restore_outcome(result, saved_id) do
       :ok ->
         if shown?(state, follow_up),
           do:
-            AgentCommands.show_restored_session(
+            track(
               state,
+              follow_up.workspace,
               follow_up.session,
-              saved_id,
-              tool_call,
-              origin,
-              return
+              {:restored, restore},
+              Session.request_model_selection(follow_up.session)
             ),
           else: state
 
       {:error, reason} ->
-        report_in_session(state, follow_up.session, AgentCommands.restore_failure_message(reason))
+        report_restore_failure(state, follow_up, AgentCommands.restore_failure_message(reason))
     end
+  end
+
+  defp answered(state, %__MODULE__{work: {:restored, restore}} = follow_up, selection) do
+    if shown?(state, follow_up),
+      do:
+        AgentCommands.show_restored_session(
+          state,
+          follow_up.session,
+          restore,
+          model_selection(selection)
+        ),
+      else: state
+  end
+
+  defp answered(
+         state,
+         %__MODULE__{work: {:reopen, saved_id, _origin_id, kind}} = follow_up,
+         result
+       ) do
+    if result == :ok and not shown?(state, follow_up),
+      do: state,
+      else: AgentSessionSource.reopened(state, follow_up.session, saved_id, kind, result)
   end
 
   defp answered(state, %__MODULE__{work: {:seed, _messages}} = follow_up, :ok),
@@ -161,7 +228,19 @@ defmodule MingaEditor.Agent.SessionFollowUp do
   defp answered(state, %__MODULE__{work: {:seed, _messages}} = follow_up, {:error, reason}),
     do: report_in_session(state, follow_up.session, InlineAsk.seed_failure_message(reason))
 
-  # The failure appears in the conversation of the tab that asked for the work, in front or not.
+  # A workspace in front shows the failure at once; one in the background keeps it in its conversation.
+  @spec report_restore_failure(EditorState.t(), t(), String.t()) :: EditorState.t()
+  defp report_restore_failure(state, follow_up, message) do
+    if shown?(state, follow_up),
+      do: NoticeWorkflow.publish(state, message),
+      else: report_in_session(state, follow_up.session, message)
+  end
+
+  @spec model_selection(term()) :: ModelSelection.t() | nil
+  defp model_selection(%ModelSelection{} = selection), do: selection
+  defp model_selection(_none), do: nil
+
+  # The failure appears in the conversation of the tab that asked for the work.
   @spec report_in_session(EditorState.t(), pid(), String.t()) :: EditorState.t()
   defp report_in_session(state, session, message) do
     Minga.Log.warning(:agent, "[Agent] #{message}")
@@ -185,15 +264,24 @@ defmodule MingaEditor.Agent.SessionFollowUp do
     end
   end
 
-  @spec overdue_message(work()) :: String.t()
+  @spec overdue_message(pending()) :: String.t()
   defp overdue_message({:restore, _id, _tool_call, _origin, _return}),
     do: "The saved Agent session has not loaded after 15 seconds."
+
+  defp overdue_message({:restored, _restore}),
+    do: "The saved Agent session has not loaded after 15 seconds."
+
+  defp overdue_message({:reopen, _id, _origin_id, _kind}),
+    do: "Could not confirm that the saved Agent session opened."
 
   defp overdue_message({:seed, _messages}),
     do: "Inline Ask history has not been added to the agent session after 15 seconds."
 
-  @spec exited_message(work()) :: String.t()
+  @spec exited_message(work() | {:restored, restore()}) :: String.t()
   defp exited_message({:restore, _id, _tool_call, _origin, _return}),
+    do: AgentCommands.restore_failure_message(:session_unavailable)
+
+  defp exited_message({:restored, _restore}),
     do: AgentCommands.restore_failure_message(:session_unavailable)
 
   defp exited_message({:seed, _messages}),

@@ -5,6 +5,7 @@ defmodule MingaEditor.Commands.AgentSplitToggleTest do
   alias MingaEditor.Agent.UIState
   alias MingaEditor.Agent.UIState.Panel
   alias Minga.Buffer.Process, as: BufferProcess
+  alias Minga.Test.AgentSessionStart
   alias MingaEditor.Commands.Agent, as: AgentCommands
   alias MingaEditor.Shell.Runtime
   alias MingaEditor.Shell.Traditional.State, as: TraditionalState
@@ -425,7 +426,8 @@ defmodule MingaEditor.Commands.AgentSplitToggleTest do
       state = base_state(session: session)
       assert MingaEditor.Shell.Runtime.active_tab_kind(state.shell_runtime) == :file
 
-      new_state = AgentCommands.open_session(state, "sess-42")
+      new_state =
+        state |> AgentCommands.open_session("sess-42") |> AgentSessionStart.settle_follow_ups()
 
       assert MingaEditor.Shell.Runtime.active_tab_kind(new_state.shell_runtime) == :agent
       assert_receive {:stub_loaded_session, "sess-42"}
@@ -435,7 +437,10 @@ defmodule MingaEditor.Commands.AgentSplitToggleTest do
       {:ok, session} = StubServer.start_link(load_result: {:error, :legacy_import_required})
       state = base_state(session: session)
 
-      new_state = AgentCommands.open_session(state, "sess-legacy", "tc1")
+      new_state =
+        state
+        |> AgentCommands.open_session("sess-legacy", "tc1")
+        |> AgentSessionStart.settle_follow_ups()
 
       assert new_state.workspace.agent_ui.panel.transcript.provenance_jump == nil
       refute new_state.workspace.agent_ui.panel.visible
@@ -449,7 +454,9 @@ defmodule MingaEditor.Commands.AgentSplitToggleTest do
       assert_receive {:DOWN, ^ref, :process, ^dead, _}
 
       state = base_state(session: dead)
-      new_state = AgentCommands.open_session(state, "sess-1")
+
+      new_state =
+        state |> AgentCommands.open_session("sess-1") |> AgentSessionStart.settle_follow_ups()
 
       assert %EditorState{} = new_state
     end
@@ -464,7 +471,10 @@ defmodule MingaEditor.Commands.AgentSplitToggleTest do
       {:ok, session} = StubServer.start_link(notify: self(), messages: messages)
       state = base_state(session: session)
 
-      new_state = AgentCommands.open_session(state, "sess-42", "tc_auth")
+      new_state =
+        state
+        |> AgentCommands.open_session("sess-42", "tc_auth")
+        |> AgentSessionStart.settle_follow_ups()
 
       jump = new_state.workspace.agent_ui.panel.transcript.provenance_jump
       assert jump != nil
@@ -477,7 +487,8 @@ defmodule MingaEditor.Commands.AgentSplitToggleTest do
       {:ok, session} = StubServer.start_link(notify: self(), messages: [{:user, "hi"}])
       state = base_state(session: session)
 
-      new_state = AgentCommands.open_session(state, "sess-1")
+      new_state =
+        state |> AgentCommands.open_session("sess-1") |> AgentSessionStart.settle_follow_ups()
 
       assert new_state.workspace.agent_ui.panel.transcript.provenance_jump == nil
     end

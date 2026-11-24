@@ -177,27 +177,31 @@ defmodule MingaEditor.Commands.Agent do
   @doc """
   Shows a saved conversation that `session` has loaded in the Agent workspace in front.
 
-  `MingaEditor.Agent.SessionFollowUp` runs this when a session that started for a Restore answers its load.
+  `MingaEditor.Agent.SessionFollowUp` runs this once the session has answered the load and its model selection read.
   """
   @spec show_restored_session(
           state(),
           pid(),
-          String.t(),
-          String.t() | nil,
-          ProvenanceJump.origin() | nil,
-          UIState.View.return_target()
+          MingaEditor.Agent.SessionFollowUp.restore(),
+          ModelSelection.t() | nil
         ) :: state()
-  def show_restored_session(state, session, session_id, tool_call_id, origin, return_target)
+  def show_restored_session(
+        state,
+        session,
+        {:restore, session_id, tool_call_id, origin, return_target},
+        selection
+      )
       when is_pid(session) do
     state
     |> MingaEditor.Agent.Arrival.retire(session)
     |> update_agent_ui(&UIState.reset_edit_timeline/1)
     |> DraftWorkflow.after_reopen(session, session_id)
-    |> sync_restored_model_selection(session)
+    |> apply_restored_model_selection(selection)
     |> arm_provenance_jump(tool_call_id, origin)
     |> activate_agent_view(return_target)
   end
 
+  # The bound session may still be starting its provider, so the load is sent without waiting for it.
   @spec open_session_in_tab(
           state(),
           String.t(),
@@ -211,48 +215,13 @@ defmodule MingaEditor.Commands.Agent do
         NoticeWorkflow.publish(state, "No agent session available")
 
       session_pid ->
-        resume_persisted_session(
+        MingaEditor.Agent.SessionFollowUp.run(
           state,
+          TabBar.active_workspace_id(state.shell_runtime.state.tab_bar),
           session_pid,
-          session_id,
-          tool_call_id,
-          origin,
-          return_target
+          {:restore, session_id, tool_call_id, origin, return_target}
         )
     end
-  end
-
-  @spec resume_persisted_session(
-          state(),
-          pid(),
-          String.t(),
-          String.t() | nil,
-          ProvenanceJump.origin() | nil,
-          UIState.View.return_target()
-        ) :: state()
-  defp resume_persisted_session(
-         state,
-         session_pid,
-         session_id,
-         tool_call_id,
-         origin,
-         return_target
-       ) do
-    with :ok <- DraftWorkflow.before_reopen(state, session_id),
-         :ok <- load_persisted_session(session_pid, session_id) do
-      show_restored_session(state, session_pid, session_id, tool_call_id, origin, return_target)
-    else
-      {:error, %EditorState{} = preserved} -> preserved
-      {:error, reason} -> NoticeWorkflow.publish(state, restore_failure_message(reason))
-    end
-  end
-
-  @spec load_persisted_session(pid(), String.t()) :: :ok | {:error, atom()}
-  defp load_persisted_session(session_pid, session_id) do
-    # minga:allow-blocking — Editor, user-initiated resume of a persisted session; one-shot restore (#2450 inventory)
-    session_pid |> Session.load_session(session_id) |> restore_outcome(session_id)
-  catch
-    :exit, _reason -> {:error, :session_unavailable}
   end
 
   @doc "Turns a session's answer to a saved-session load into a reason the user may see; raw reasons are logged."
@@ -1738,25 +1707,11 @@ defmodule MingaEditor.Commands.Agent do
     MingaEditor.Agent.ConnectionAction.schedule_current(state, {:model, model_or_selection})
   end
 
-  @spec sync_restored_model_selection(state(), pid()) :: state()
-  defp sync_restored_model_selection(state, session) do
-    # minga:allow-blocking — Editor, once after a user-initiated session resume
-    case Session.model_selection(session) do
-      %ModelSelection{} = selection ->
-        apply_model_selection_to_ui(state, selection)
+  @spec apply_restored_model_selection(state(), ModelSelection.t() | nil) :: state()
+  defp apply_restored_model_selection(state, %ModelSelection{} = selection),
+    do: apply_model_selection_to_ui(state, selection)
 
-      nil ->
-        state
-    end
-  catch
-    :exit, reason ->
-      Minga.Log.warning(
-        :agent,
-        "[Agent.Commands] restored model selection unavailable: #{inspect(reason)}"
-      )
-
-      state
-  end
+  defp apply_restored_model_selection(state, nil), do: state
 
   @spec apply_model_selection_to_ui(state(), ModelSelection.t()) :: state()
   defp apply_model_selection_to_ui(state, %ModelSelection{} = selection) do
