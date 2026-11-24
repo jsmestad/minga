@@ -118,8 +118,7 @@ public struct AgentContextBar: View {
     }
 
     private var statusColor: Color {
-        let c = state.status.color
-        return Color(red: c.r, green: c.g, blue: c.b)
+        theme.roleColor(state.status.role)
     }
 
     // MARK: - Action Buttons

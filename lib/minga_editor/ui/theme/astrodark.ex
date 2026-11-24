@@ -64,6 +64,11 @@ defmodule MingaEditor.UI.Theme.AstroDark do
       warning: @ui_yellow,
       info: @ui_blue,
       success: @ui_green,
+      minga: @syn_purple,
+      needs_you: @syn_orange,
+      done: @ui_green,
+      # One step up the neutral ramp from muted, so the waiting glyph reaches 3:1.
+      waiting: @syn_comment,
       match: @syn_yellow,
       link: @ui_blue,
       border: @ui_border,

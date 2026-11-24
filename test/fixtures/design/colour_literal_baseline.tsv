@@ -1,0 +1,120 @@
+# Colour literals in view and render code when the design token guardrail landed. One row per literal.
+# Delete rows as literals move to theme slots or design token colour roles; never add rows.
+# File	Trimmed source line
+macos/Sources/ContentView.swift	Color(red: 0.12, green: 0.12, blue: 0.14)
+macos/Sources/MingaApp.swift	Color(red: 0.12, green: 0.12, blue: 0.14)
+macos/Sources/MingaApp.swift	let bgColor = NSColor(red: r, green: g, blue: b, alpha: 1)
+macos/Sources/Renderer/CoreTextMetalRenderer.swift	private let ctBgClearColorDefault = MTLClearColor(red: 0.01298, green: 0.01298, blue: 0.01681, alpha: 1.0)
+macos/Sources/Renderer/CoreTextMetalRenderer.swift	clearColor = MTLClearColor(red: srgbToLinear(r), green: srgbToLinear(g), blue: srgbToLinear(b), alpha: 1.0)
+macos/Sources/Renderer/CoreTextMetalRenderer.swift	? MTLClearColor(red: 0, green: 0, blue: 0, alpha: 0)
+macos/Sources/Renderer/FrameState.swift	var fg: UInt32 = 0x555555
+macos/Sources/Renderer/FrameState.swift	var currentFg: UInt32 = 0xBBC2CF
+macos/Sources/Renderer/FrameState.swift	var errorFg: UInt32 = 0xFF6C6B
+macos/Sources/Renderer/FrameState.swift	var warningFg: UInt32 = 0xECBE7B
+macos/Sources/Renderer/FrameState.swift	var infoFg: UInt32 = 0x51AFEF
+macos/Sources/Renderer/FrameState.swift	var hintFg: UInt32 = 0x555555
+macos/Sources/Renderer/FrameState.swift	var foldFg: UInt32 = 0x555555
+macos/Sources/Renderer/FrameState.swift	var gitAddedFg: UInt32 = 0x98BE65
+macos/Sources/Renderer/FrameState.swift	var gitModifiedFg: UInt32 = 0x51AFEF
+macos/Sources/Renderer/FrameState.swift	var gitDeletedFg: UInt32 = 0xFF6C6B
+macos/Sources/Renderer/FrameState.swift	var scrollIndicatorColor: UInt32 = 0x555555
+macos/Sources/Renderer/WindowContentRenderer.swift	var defaultFgRGB: UInt32 = 0xBBC2CF
+macos/Sources/Renderer/WindowContentRenderer.swift	let color = NSColor(red: r, green: g, blue: b, alpha: 1.0)
+macos/Sources/Views/Agent/AgentApprovalCard.swift	.foregroundStyle(Color.orange)
+macos/Sources/Views/Agent/AgentApprovalCard.swift	return Color.green.opacity(0.75)
+macos/Sources/Views/Agent/AgentApprovalCard.swift	return Color.red.opacity(0.75)
+macos/Sources/Views/Agent/AgentApprovalCard.swift	RoundedRectangle(cornerRadius: Radius.lg).stroke(Color.orange.opacity(0.5), lineWidth: 1)
+macos/Sources/Views/Agent/AgentChatHeaderView.swift	case .executingTool: return Color.orange
+macos/Sources/Views/Agent/AgentChatHeaderView.swift	case .error: return Color.red
+macos/Sources/Views/Agent/AgentChatView.swift	.foregroundStyle(isError ? Color.red.opacity(0.7) : theme.agentTextFg.opacity(0.4))
+macos/Sources/Views/Agent/AgentContextBar.swift	color: Color(red: 0.2, green: 0.8, blue: 0.4),
+macos/Sources/Views/Agent/AgentContextBar.swift	color: Color(red: 1.0, green: 0.75, blue: 0.2),
+macos/Sources/Views/Agent/AgentContextBar.swift	color: Color(red: 0.6, green: 0.3, blue: 0.3),
+macos/Sources/Views/Agent/AgentToolCallCard.swift	return Color.green.opacity(0.75)
+macos/Sources/Views/Agent/AgentToolCallCard.swift	return Color.red.opacity(0.75)
+macos/Sources/Views/EditorChrome/StatusBarView.swift	.fill(Color.red)
+macos/Sources/Views/EditorChrome/StatusBarView.swift	(value >= 0x100000 && value <= 0x10FFFD)
+macos/Sources/Views/EditorChrome/StatusBarView.swift	(value >= 0x100000 && value <= 0x10FFFD)
+macos/Sources/Views/EditorChrome/TabIconColors.swift	"ex": 0x9B59B6,
+macos/Sources/Views/EditorChrome/TabIconColors.swift	"exs": 0x9B59B6,
+macos/Sources/Views/EditorChrome/TabIconColors.swift	"eex": 0x9B59B6,
+macos/Sources/Views/EditorChrome/TabIconColors.swift	"heex": 0x9B59B6,
+macos/Sources/Views/EditorChrome/TabIconColors.swift	"rs": 0xDEA584,
+macos/Sources/Views/EditorChrome/TabIconColors.swift	"go": 0x00ADD8,
+macos/Sources/Views/EditorChrome/TabIconColors.swift	"swift": 0xF05138,
+macos/Sources/Views/EditorChrome/TabIconColors.swift	"py": 0x3776AB,
+macos/Sources/Views/EditorChrome/TabIconColors.swift	"js": 0xF7DF1E,
+macos/Sources/Views/EditorChrome/TabIconColors.swift	"jsx": 0xF7DF1E,
+macos/Sources/Views/EditorChrome/TabIconColors.swift	"ts": 0x3178C6,
+macos/Sources/Views/EditorChrome/TabIconColors.swift	"tsx": 0x3178C6,
+macos/Sources/Views/EditorChrome/TabIconColors.swift	"rb": 0xCC342D,
+macos/Sources/Views/EditorChrome/TabIconColors.swift	"md": 0x519ABA,
+macos/Sources/Views/EditorChrome/TabIconColors.swift	"json": 0xCBCB41,
+macos/Sources/Views/EditorChrome/TabIconColors.swift	"yaml": 0xCB171E,
+macos/Sources/Views/EditorChrome/TabIconColors.swift	"yml": 0xCB171E,
+macos/Sources/Views/EditorChrome/TabIconColors.swift	"toml": 0x9C4221,
+macos/Sources/Views/EditorChrome/TabIconColors.swift	"html": 0xE34C26,
+macos/Sources/Views/EditorChrome/TabIconColors.swift	"css": 0x563D7C,
+macos/Sources/Views/EditorChrome/TabIconColors.swift	"scss": 0xC6538C,
+macos/Sources/Views/EditorChrome/TabIconColors.swift	"lua": 0x000080,
+macos/Sources/Views/EditorChrome/TabIconColors.swift	"zig": 0xF69A1B,
+macos/Sources/Views/EditorChrome/TabIconColors.swift	"c": 0x555555,
+macos/Sources/Views/EditorChrome/TabIconColors.swift	"h": 0x555555,
+macos/Sources/Views/EditorChrome/TabIconColors.swift	"cpp": 0xF34B7D,
+macos/Sources/Views/EditorChrome/TabIconColors.swift	"hpp": 0xF34B7D,
+macos/Sources/Views/EditorChrome/TabIconColors.swift	"java": 0xB07219,
+macos/Sources/Views/EditorChrome/TabIconColors.swift	"kt": 0xA97BFF,
+macos/Sources/Views/EditorChrome/TabIconColors.swift	"sh": 0x89E051,
+macos/Sources/Views/EditorChrome/TabIconColors.swift	"bash": 0x89E051,
+macos/Sources/Views/EditorChrome/TabIconColors.swift	"zsh": 0x89E051,
+macos/Sources/Views/EditorChrome/TabIconColors.swift	"vim": 0x019833,
+macos/Sources/Views/EditorChrome/TabIconColors.swift	"sql": 0xE38C00,
+macos/Sources/Views/EditorChrome/TabIconColors.swift	"graphql": 0xE10098,
+macos/Sources/Views/EditorChrome/TabIconColors.swift	"xml": 0x0060AC,
+macos/Sources/Views/EditorChrome/TabIconColors.swift	"txt": 0x6D8086,
+macos/Sources/Views/EditorChrome/TabIconColors.swift	"log": 0x6D8086,
+macos/Sources/Views/EditorChrome/TabIconColors.swift	"lock": 0x6D8086,
+macos/Sources/Views/EditorChrome/TabIconColors.swift	"dockerfile": 0x384D54,
+macos/Sources/Views/EditorChrome/TabIconColors.swift	"proto": 0x6D8086,
+macos/Sources/Views/EditorChrome/TabIconColors.swift	"erl": 0xB83998,
+macos/Sources/Views/EditorChrome/TabIconColors.swift	"hrl": 0xB83998,
+macos/Sources/Views/EditorChrome/WorkspaceIndicatorView.swift	case .error: return Color.red
+macos/Sources/Views/Extensions/ExtensionOverlayView.swift	let color = Color(red: r, green: g, blue: b)
+macos/Sources/Views/Overlays/HoverPopupOverlay.swift	Wire.HoverSegment(style: .syntaxHighlighted, fgColor: 0xC678DD, flags: 1, text: "@spec "),
+macos/Sources/Views/Overlays/HoverPopupOverlay.swift	Wire.HoverSegment(style: .syntaxHighlighted, fgColor: 0x61AFEF, flags: 0, text: "open"),
+macos/Sources/Views/Overlays/HoverPopupOverlay.swift	Wire.HoverSegment(style: .syntaxHighlighted, fgColor: 0xBBC2CF, flags: 0, text: "("),
+macos/Sources/Views/Overlays/HoverPopupOverlay.swift	Wire.HoverSegment(style: .syntaxHighlighted, fgColor: 0xE5C07B, flags: 0, text: "String.t()"),
+macos/Sources/Views/Overlays/HoverPopupOverlay.swift	Wire.HoverSegment(style: .syntaxHighlighted, fgColor: 0xBBC2CF, flags: 0, text: ") :: "),
+macos/Sources/Views/Overlays/HoverPopupOverlay.swift	Wire.HoverSegment(style: .syntaxHighlighted, fgColor: 0xE5C07B, flags: 0, text: "{:ok, pid()}"),
+macos/Sources/Views/Overlays/MessagesContentView.swift	Color.red.opacity(0.06)
+macos/Sources/Views/Overlays/MessagesContentView.swift	Color.yellow.opacity(0.045)
+macos/Sources/Views/Overlays/PickerOverlay.swift	Wire.PickerItem(iconColor: 0x98BE65, flags: 0, label: "\u{f0e7}editor.ex", description: "lib/minga/editor.ex", annotation: "", matchPositions: [1, 2, 3, 4]),
+macos/Sources/Views/Overlays/PickerOverlay.swift	Wire.PickerItem(iconColor: 0x98BE65, flags: 0, label: "\u{f0e7}editor_test.exs", description: "test/minga/editor_test.exs", annotation: "test", matchPositions: [1, 2, 3, 4]),
+macos/Sources/Views/Overlays/PickerOverlay.swift	Wire.PickerItem(iconColor: 0x51AFEF, flags: 0, label: "\u{f0e7}EditorNSView.swift", description: "macos/Sources/EditorNSView.swift", annotation: "swift", matchPositions: [1, 2, 3, 4]),
+macos/Sources/Views/Overlays/PickerOverlay.swift	Wire.PickerItem(iconColor: 0xECBE7B, flags: 0, label: "\u{f085}edit_mode.ex", description: "lib/minga/mode/edit_mode.ex", annotation: "", matchPositions: [1, 2, 3, 4]),
+macos/Sources/Views/Overlays/PickerOverlay.swift	Wire.PickerItem(iconColor: 0xC678DD, flags: 0, label: "\u{f0e7}editor_config.ex", description: "lib/minga/editor/config.ex", annotation: "", matchPositions: [1, 2, 3, 4]),
+macos/Sources/Views/Overlays/PickerState.swift	(value >= 0x100000 && value <= 0x10FFFD)
+macos/Sources/Views/Overlays/PickerState.swift	(value >= 0x100000 && value <= 0x10FFFD)
+macos/Sources/Views/Settings/AppearanceSettingsView.swift	Wire.ThemePreview(name: "Doom One", atom: "doom_one", editorBg: 0x282C34, editorFg: 0xBBC2CF, accent: 0x51AFEF),
+macos/Sources/Views/Settings/AppearanceSettingsView.swift	Wire.ThemePreview(name: "Doom One", atom: "doom_one", editorBg: 0x282C34, editorFg: 0xBBC2CF, accent: 0x51AFEF),
+macos/Sources/Views/Settings/AppearanceSettingsView.swift	Wire.ThemePreview(name: "Doom One", atom: "doom_one", editorBg: 0x282C34, editorFg: 0xBBC2CF, accent: 0x51AFEF),
+macos/Sources/Views/Settings/AppearanceSettingsView.swift	Wire.ThemePreview(name: "Tokyo Night", atom: "tokyo_night", editorBg: 0x1A1B26, editorFg: 0xC0CAF5, accent: 0x7AA2F7),
+macos/Sources/Views/Settings/AppearanceSettingsView.swift	Wire.ThemePreview(name: "Tokyo Night", atom: "tokyo_night", editorBg: 0x1A1B26, editorFg: 0xC0CAF5, accent: 0x7AA2F7),
+macos/Sources/Views/Settings/AppearanceSettingsView.swift	Wire.ThemePreview(name: "Tokyo Night", atom: "tokyo_night", editorBg: 0x1A1B26, editorFg: 0xC0CAF5, accent: 0x7AA2F7),
+macos/Sources/Views/Settings/AppearanceSettingsView.swift	Wire.ThemePreview(name: "Catppuccin Mocha", atom: "catppuccin_mocha", editorBg: 0x1E1E2E, editorFg: 0xCDD6F4, accent: 0x89B4FA),
+macos/Sources/Views/Settings/AppearanceSettingsView.swift	Wire.ThemePreview(name: "Catppuccin Mocha", atom: "catppuccin_mocha", editorBg: 0x1E1E2E, editorFg: 0xCDD6F4, accent: 0x89B4FA),
+macos/Sources/Views/Settings/AppearanceSettingsView.swift	Wire.ThemePreview(name: "Catppuccin Mocha", atom: "catppuccin_mocha", editorBg: 0x1E1E2E, editorFg: 0xCDD6F4, accent: 0x89B4FA),
+macos/Sources/Views/Settings/AppearanceSettingsView.swift	Wire.ThemePreview(name: "Solarized Dark", atom: "solarized_dark", editorBg: 0x002B36, editorFg: 0x839496, accent: 0x268BD2),
+macos/Sources/Views/Settings/AppearanceSettingsView.swift	Wire.ThemePreview(name: "Solarized Dark", atom: "solarized_dark", editorBg: 0x002B36, editorFg: 0x839496, accent: 0x268BD2),
+macos/Sources/Views/Settings/AppearanceSettingsView.swift	Wire.ThemePreview(name: "Solarized Dark", atom: "solarized_dark", editorBg: 0x002B36, editorFg: 0x839496, accent: 0x268BD2),
+macos/Sources/Views/Settings/AppearanceSettingsView.swift	Wire.ThemePreview(name: "Gruvbox Dark", atom: "gruvbox_dark", editorBg: 0x282828, editorFg: 0xEBDBB2, accent: 0xFE8019),
+macos/Sources/Views/Settings/AppearanceSettingsView.swift	Wire.ThemePreview(name: "Gruvbox Dark", atom: "gruvbox_dark", editorBg: 0x282828, editorFg: 0xEBDBB2, accent: 0xFE8019),
+macos/Sources/Views/Settings/AppearanceSettingsView.swift	Wire.ThemePreview(name: "Gruvbox Dark", atom: "gruvbox_dark", editorBg: 0x282828, editorFg: 0xEBDBB2, accent: 0xFE8019),
+macos/Sources/Views/Settings/AppearanceSettingsView.swift	Wire.ThemePreview(name: "Nord", atom: "nord", editorBg: 0x2E3440, editorFg: 0xD8DEE9, accent: 0x88C0D0),
+macos/Sources/Views/Settings/AppearanceSettingsView.swift	Wire.ThemePreview(name: "Nord", atom: "nord", editorBg: 0x2E3440, editorFg: 0xD8DEE9, accent: 0x88C0D0),
+macos/Sources/Views/Settings/AppearanceSettingsView.swift	Wire.ThemePreview(name: "Nord", atom: "nord", editorBg: 0x2E3440, editorFg: 0xD8DEE9, accent: 0x88C0D0),
+macos/Sources/Views/Sidebar/FileTreeState.swift	let cool = Color(red: 0.36, green: 0.54, blue: 0.92)
+macos/Sources/Views/Sidebar/FileTreeState.swift	let warm = Color(red: 0.95, green: 0.70, blue: 0.30)
+go/tui/internal/ui/model.go	Background(lipgloss.Color("#1f2335")).
+go/tui/internal/ui/model.go	Foreground(lipgloss.Color("#7aa2f7")).
+go/tui/internal/ui/overlay_stack.go	line := lipgloss.NewStyle().Background(lipgloss.Color("#000000")).Render(strings.Repeat(" ", w))

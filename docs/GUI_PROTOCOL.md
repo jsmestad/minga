@@ -1458,6 +1458,43 @@ Mode color slots fall back to `modeline.bar_fg` / `modeline.bar_bg` when a mode 
 | 0x5B | selection_bg | `editor.selection_bg` | Selection background and text highlight fallback |
 | 0x62 | gutter_fold_fg | `gutter.fold_fg` | Fold indicator color |
 
+### Agent status (0x5C-0x61)
+
+Each agent status slot carries the colour of the design token state it shows, resolved through the state's colour role (see `docs/design_tokens.toml`).
+
+| Slot | Name | Source | Usage |
+|------|------|--------|-------|
+| 0x5C | agent_status_idle | waiting state, `waiting` role | Idle status |
+| 0x5D | agent_status_working | working state, `minga` role | Thinking and tool execution |
+| 0x5E | agent_status_iterating | working state, `minga` role | Iterating |
+| 0x5F | agent_status_needs_you | needs_you state, `needs_you` role | Approval, questions, failed start |
+| 0x60 | agent_status_done | done state, `done` role | Completed |
+| 0x61 | agent_status_errored | failed state, `failure` role | Errors |
+
+### Design token colour roles (0x70-0x8F)
+
+One slot per colour role in `docs/design_tokens.toml`. The slot IDs, role names and sources are generated: `Minga.Design.Tokens.color_role_slot/1` on the BEAM, `ColorRole` raw values in Swift, and `generated.ColorRole` in Go. Frontends draw a role through these slots instead of a colour literal. The Go TUI requires every role slot in each `gui_theme`.
+
+| Slot | Role | Source |
+|------|------|--------|
+| 0x70 | you | `agent.user_label` |
+| 0x71 | minga | `agent.minga_fg` |
+| 0x72 | minga_shade | minga mixed over surface at 45% |
+| 0x73 | needs_you | `agent.attention_fg` |
+| 0x74 | failure | `gutter.error_fg` |
+| 0x75 | done | `agent.status_done` |
+| 0x76 | warning | `gutter.warning_fg` |
+| 0x77 | waiting | `agent.status_idle` |
+| 0x78 | info | `gutter.info_fg` |
+| 0x79 | group | `popup.group_fg` |
+| 0x7A | text | `editor.fg` |
+| 0x7B | text_muted | `gutter.fg` |
+| 0x7C | surface | `editor.bg` |
+| 0x7D | surface_raised | `popup.bg` |
+| 0x7E | surface_bar | `modeline.bar_bg` |
+| 0x7F | border | `popup.border_fg` |
+| 0x80 | focus | `popup.title_fg` |
+
 ## Forward-Compatibility: Skip-Length for Unknown Opcodes
 
 Standard new opcodes >= 0x90 use a 2-byte big-endian length prefix after the opcode byte:

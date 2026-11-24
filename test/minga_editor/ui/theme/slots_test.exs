@@ -1,6 +1,8 @@
 defmodule MingaEditor.UI.Theme.SlotsTest do
   use ExUnit.Case, async: true
 
+  alias Minga.Design.Tokens
+  alias MingaEditor.UI.Theme
   alias MingaEditor.UI.Theme.Slots
 
   describe "to_color_pairs/1" do
@@ -131,26 +133,41 @@ defmodule MingaEditor.UI.Theme.SlotsTest do
       end
     end
 
-    test "agent status slots map to expected theme colors" do
+    test "agent status slots carry the colour role of the state they show" do
       theme = MingaEditor.UI.Theme.get!(:doom_one)
       pair_map = Map.new(Slots.to_color_pairs(theme))
 
-      assert pair_map[0x5C] == theme.gutter.fg
-      assert pair_map[0x5D] == theme.git.added_fg
-      assert pair_map[0x5E] == theme.git.added_fg
-      assert pair_map[0x5F] == theme.tab_bar.modified_fg
-      assert pair_map[0x60] == theme.tree.active_fg
-      assert pair_map[0x61] == theme.gutter.error_fg
+      for {slot, state} <- [
+            {0x5C, :waiting},
+            {0x5D, :working},
+            {0x5E, :working},
+            {0x5F, :needs_you},
+            {0x60, :done},
+            {0x61, :failed}
+          ] do
+        assert pair_map[slot] == Theme.role_color(theme, Tokens.state_role(state))
+      end
     end
 
-    test "agent status needs_you is nil when tab_bar is nil" do
+    test "agent status needs_you keeps the needs_you role when tab_bar is nil" do
       theme = %{MingaEditor.UI.Theme.get!(:doom_one) | tab_bar: nil}
       pair_map = Map.new(Slots.to_color_pairs(theme))
 
-      assert is_nil(pair_map[0x5F])
-      # Other agent status slots should still have values
-      assert pair_map[0x5C] != nil
-      assert pair_map[0x5D] != nil
+      assert pair_map[0x5F] == Theme.role_color(theme, :needs_you)
+    end
+
+    test "every design token colour role has its slot, carrying the theme's role colour" do
+      for theme_name <- [:catppuccin_frappe, :astrodark, :catppuccin_latte] do
+        theme = MingaEditor.UI.Theme.get!(theme_name)
+        pair_map = Map.new(Slots.to_color_pairs(theme))
+
+        for role <- Tokens.color_roles() do
+          slot = Tokens.color_role_slot(role)
+          assert slot in 0x70..0x8F
+          assert pair_map[slot] == Theme.role_color(theme, role), "#{theme_name} #{role}"
+          assert is_integer(pair_map[slot]), "#{theme_name} sends no colour for #{role}"
+        end
+      end
     end
 
     test "all slot IDs are unique" do

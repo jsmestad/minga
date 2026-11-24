@@ -156,7 +156,7 @@ defmodule MingaEditor.UI.Theme.Builder do
       title_fg: p.semantic.highlight,
       key_fg: p.semantic.info,
       separator_fg: p.semantic.border,
-      group_fg: p.semantic.highlight
+      group_fg: p.semantic.group
     }
   end
 
@@ -187,7 +187,7 @@ defmodule MingaEditor.UI.Theme.Builder do
       user_border: p.semantic.highlight,
       user_label: p.semantic.highlight,
       assistant_border: p.semantic.success,
-      assistant_label: p.semantic.success,
+      assistant_label: p.semantic.minga,
       tool_border: p.semantic.warning,
       tool_header: p.semantic.warning,
       code_bg: p.base.surface,
@@ -196,10 +196,13 @@ defmodule MingaEditor.UI.Theme.Builder do
       input_bg: p.base.bg,
       input_placeholder: p.base.muted,
       thinking_fg: p.semantic.warning,
-      status_thinking: p.semantic.warning,
+      status_thinking: p.semantic.minga,
       status_tool: p.semantic.info,
       status_error: p.semantic.error,
-      status_idle: p.base.muted,
+      status_idle: p.semantic.waiting,
+      status_done: p.semantic.done,
+      minga_fg: p.semantic.minga,
+      attention_fg: p.semantic.needs_you,
       text_fg: p.base.fg,
       context_low: p.semantic.success,
       context_mid: p.semantic.warning,

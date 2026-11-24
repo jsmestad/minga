@@ -1,0 +1,243 @@
+# Minga design tokens: the one source for colour roles, state words and shapes, twist variants and voice lines.
+#
+# `mix codegen` reads this file and writes:
+#   - generated/elixir/design_tokens.ex                  (Minga.Design.Tokens)
+#   - macos/Sources/Protocol/DesignTokens.generated.swift (MingaProtocol)
+#   - go/tui/internal/generated/design_tokens.go          (package generated)
+#
+# Tokens name roles, never colour values. Themes supply the values (see docs/design/themes.md).
+# Spacing, radius and text steps are not here: macOS has ChromeTokens.swift and the TUI scale is its own ticket.
+
+# Contrast targets from docs/design/themes.md, as ratios against the surface a role sits on.
+[contrast]
+text = 4.5
+glyph = 3.0
+
+# Colour roles.
+#
+# - `slot` is the gui_theme (0x74) slot ID the BEAM sends the role's colour in. Role slots occupy 0x70-0x8F.
+# - `source` is the `MingaEditor.UI.Theme` field that supplies the value, as `section.field`.
+# - `mix`, `over` and `percent` describe a derived role: `mix` blended over `over` at `percent` percent.
+# - `contrast` is the target class (`text` or `glyph`) and `on` is the role it is measured against.
+#   Roles without `contrast` are surfaces or derived tints and carry no target.
+
+[[color_roles]]
+id = "you"
+slot = 0x70
+source = "agent.user_label"
+contrast = "glyph"
+on = "surface"
+means = "Your edits, cursor, messages, and your strand in the gutter"
+
+[[color_roles]]
+id = "minga"
+slot = 0x71
+source = "agent.minga_fg"
+contrast = "glyph"
+on = "surface"
+means = "Minga, its cursor tag, its changes, the light twist strand, the working orbit"
+
+[[color_roles]]
+id = "minga_shade"
+slot = 0x72
+mix = "minga"
+over = "surface"
+percent = 45
+means = "The twist's shade strand and Minga's tinted lines"
+
+[[color_roles]]
+id = "needs_you"
+slot = 0x73
+source = "agent.attention_fg"
+contrast = "glyph"
+on = "surface"
+means = "Only \"Minga needs you\": the modeline chip and the needs-you state"
+
+[[color_roles]]
+id = "failure"
+slot = 0x74
+source = "gutter.error_fg"
+contrast = "glyph"
+on = "surface"
+means = "Errors, failed states, red diagnostics"
+
+[[color_roles]]
+id = "done"
+slot = 0x75
+source = "agent.status_done"
+contrast = "glyph"
+on = "surface"
+means = "Completed states"
+
+[[color_roles]]
+id = "warning"
+slot = 0x76
+source = "gutter.warning_fg"
+contrast = "glyph"
+on = "surface"
+means = "Diagnostic warnings only"
+
+[[color_roles]]
+id = "waiting"
+slot = 0x77
+source = "agent.status_idle"
+contrast = "glyph"
+on = "surface"
+means = "The hollow waiting and stopped dot and its words"
+
+[[color_roles]]
+id = "info"
+slot = 0x78
+source = "gutter.info_fg"
+contrast = "glyph"
+on = "surface"
+means = "Diagnostic info and hints"
+
+[[color_roles]]
+id = "group"
+slot = 0x79
+source = "popup.group_fg"
+contrast = "text"
+on = "surface_raised"
+means = "Which-key and menu group labels, always paired with a trailing chevron"
+
+[[color_roles]]
+id = "text"
+slot = 0x7A
+source = "editor.fg"
+contrast = "text"
+on = "surface"
+means = "Primary text"
+
+[[color_roles]]
+id = "text_muted"
+slot = 0x7B
+source = "gutter.fg"
+means = "Secondary text, line numbers, hints"
+
+[[color_roles]]
+id = "surface"
+slot = 0x7C
+source = "editor.bg"
+means = "Editor background"
+
+[[color_roles]]
+id = "surface_raised"
+slot = 0x7D
+source = "popup.bg"
+means = "Drawers, which-key, menus, popups"
+
+[[color_roles]]
+id = "surface_bar"
+slot = 0x7E
+source = "modeline.bar_bg"
+means = "The modeline"
+
+[[color_roles]]
+id = "border"
+slot = 0x7F
+source = "popup.border_fg"
+means = "Quiet pane and popup borders"
+
+[[color_roles]]
+id = "focus"
+slot = 0x80
+source = "popup.title_fg"
+contrast = "glyph"
+on = "surface"
+means = "The focused pane's border and the global accent"
+
+# States: six words, five shapes. Waiting and Stopped share the hollow dot; the word tells them apart.
+# `tui_glyph` is the TUI's static glyph; `tui_frames` is the animation cycle where the state moves.
+
+[[states]]
+id = "working"
+word = "Working"
+shape = "orbit"
+role = "minga"
+tui_glyph = "◐"
+tui_frames = ["◐", "◓", "◑", "◒"]
+accessibility_label = "Minga is working"
+
+[[states]]
+id = "needs_you"
+word = "Needs you"
+shape = "halo_dot"
+role = "needs_you"
+tui_glyph = "◉"
+accessibility_label = "Minga needs you"
+
+[[states]]
+id = "waiting"
+word = "Waiting"
+shape = "hollow_dot"
+role = "waiting"
+tui_glyph = "○"
+accessibility_label = "Minga is waiting"
+
+[[states]]
+id = "stopped"
+word = "Stopped"
+shape = "hollow_dot"
+role = "waiting"
+tui_glyph = "○"
+accessibility_label = "Minga stopped"
+
+[[states]]
+id = "failed"
+word = "Failed"
+shape = "diamond"
+role = "failure"
+tui_glyph = "◆"
+accessibility_label = "Minga failed"
+
+[[states]]
+id = "done"
+word = "Done"
+shape = "solid_dot"
+role = "done"
+tui_glyph = "●"
+accessibility_label = "Minga is done"
+
+# Twist variants. `strand` is the light strand's role and `shade` the shade strand's role.
+# In the TUI the strand is the cell's foreground and the shade its background; a variant without `shade` draws on the gutter background.
+
+[[twist]]
+id = "head"
+mark = "docs/design/marks/twist-head.svg"
+tui_glyph = "▚"
+strand = "minga"
+shade = "minga_shade"
+
+[[twist]]
+id = "body"
+mark = "docs/design/marks/twist-body.svg"
+tui_glyph = "▐"
+strand = "minga"
+shade = "minga_shade"
+
+[[twist]]
+id = "last"
+mark = "docs/design/marks/twist-last.svg"
+tui_glyph = "▐"
+strand = "minga"
+shade = "minga_shade"
+
+[[twist]]
+id = "kept"
+mark = "docs/design/marks/twist-kept.svg"
+tui_glyph = "│"
+strand = "minga_shade"
+
+[[twist]]
+id = "shared"
+mark = "docs/design/marks/twist-shared-body.svg"
+tui_glyph = "▐"
+strand = "minga"
+shade = "you"
+
+# Voice: three lines and no more (docs/design/principles.md).
+[voice]
+welcome = "Servus."
+done = "Passt."
+farewell = "Ciao."

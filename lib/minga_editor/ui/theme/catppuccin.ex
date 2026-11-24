@@ -20,7 +20,7 @@ defmodule MingaEditor.UI.Theme.Catppuccin do
 
   @spec palette(atom(), map()) :: Palette.t()
   defp palette(name, p) do
-    Palette.new(%{
+    %{
       variant: variant(name),
       bg: p.base,
       fg: p.text,
@@ -49,9 +49,30 @@ defmodule MingaEditor.UI.Theme.Catppuccin do
       numbers: p.peach,
       type: p.yellow,
       variables: p.text,
-      comments: p.overlay2
-    })
+      comments: p.overlay2,
+      minga: p.mauve,
+      needs_you: p.peach,
+      done: p.green,
+      waiting: p.overlay1,
+      group: p.lavender
+    }
+    |> Map.merge(contrast_fixes(name))
+    |> Palette.new()
   end
+
+  # Latte is the light flavour, where several Catppuccin hues miss the contrast targets in docs/design/themes.md against `base`. These darker values keep each hue and reach 3:1 for glyphs (needs_you, warning, waiting, done) and 4.5:1 for group labels on popups.
+  @spec contrast_fixes(atom()) :: map()
+  defp contrast_fixes(:catppuccin_latte) do
+    %{
+      needs_you: 0xD35400,
+      warning: 0xA86D10,
+      waiting: 0x7C7F93,
+      done: 0x388E25,
+      group: 0x1650C0
+    }
+  end
+
+  defp contrast_fixes(_name), do: %{}
 
   @spec variant(atom()) :: Palette.variant()
   defp variant(:catppuccin_latte), do: :light

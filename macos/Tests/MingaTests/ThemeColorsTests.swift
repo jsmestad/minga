@@ -292,6 +292,38 @@ struct ThemeColorsSlotMappingTests {
     @Test("Slot 0x61 maps to agentStatusErrored")
     @MainActor func agentStatusErrored() { #expect(applySlot(GUI_COLOR_AGENT_STATUS_ERRORED).agentStatusErrored == expectedColor()) }
 
+    // MARK: - Design token colour roles
+
+    @Test("Every design token role slot fills its role colour")
+    @MainActor func designTokenRoles() {
+        for role in ColorRole.allCases {
+            #expect(applySlot(role.rawValue).roleColor(role) == expectedColor())
+        }
+    }
+
+    @Test("A state draws in its design token colour role")
+    @MainActor func stateUsesRole() {
+        let theme = ThemeColors()
+        theme.applySlots([
+            (ColorRole.needsYou.rawValue, 0xEF, 0x9F, 0x76),
+            (ColorRole.minga.rawValue, 0xCA, 0x9E, 0xE6),
+        ])
+
+        #expect(theme.stateColor(SpineState.needsYou) == theme.roleColor(ColorRole.needsYou))
+        #expect(theme.stateColor(SpineState.working) == theme.roleColor(ColorRole.minga))
+        #expect(theme.stateColor(SpineState.needsYou) != theme.stateColor(SpineState.working))
+    }
+
+    @Test("Context-card statuses show design token state words and roles")
+    func cardStatusTokens() {
+        #expect(CardStatus.needsYou.label == SpineState.needsYou.word)
+        #expect(CardStatus.errored.label == SpineState.failed.word)
+        #expect(CardStatus.done.role == SpineState.done.role)
+        #expect(CardStatus.iterating.spineState == .working)
+        #expect(CardStatus.idle.spineState == nil)
+        #expect(CardStatus.idle.role == .waiting)
+    }
+
     // MARK: - Batch application
 
     @Test("Multiple slots applied in one call all take effect")

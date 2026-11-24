@@ -77,6 +77,7 @@ defmodule Minga.Credo.DependencyDirectionCheck do
     "Minga.Diagnostics.Diagnostic",
     "Minga.Git.MergeConflict.Entry",
     "Minga.Language.Highlight.InjectionRange",
+    "Minga.Design.Tokens",
     "Minga.Command.Parser",
     "Minga.Keymap.Bindings",
     "Minga.Keymap.SharedGroups",
