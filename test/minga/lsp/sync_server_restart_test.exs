@@ -208,11 +208,7 @@ defmodule Minga.LSP.SyncServerRestartTest do
   # The queue then outlives the client failure, as it does when the failure beats the debounce.
   defp hold_queued_change(sync, buffer, attempts \\ 200) do
     if Map.has_key?(:sys.get_state(sync.name).pending_changes, buffer) do
-      :sys.replace_state(sync.name, fn state ->
-        {timer, timers} = Map.pop(state.debounce_timers, buffer)
-        if timer, do: Process.cancel_timer(timer)
-        %{state | debounce_timers: timers}
-      end)
+      :sys.replace_state(sync.name, &cancel_debounce(&1, buffer))
 
       assert Map.has_key?(:sys.get_state(sync.name).pending_changes, buffer)
     else
@@ -223,6 +219,12 @@ defmodule Minga.LSP.SyncServerRestartTest do
         5 -> hold_queued_change(sync, buffer, attempts - 1)
       end
     end
+  end
+
+  defp cancel_debounce(state, buffer) do
+    {timer, timers} = Map.pop(state.debounce_timers, buffer)
+    if timer, do: Process.cancel_timer(timer)
+    %{state | debounce_timers: timers}
   end
 
   defp start_sync_server(sync) do
