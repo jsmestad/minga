@@ -1,7 +1,42 @@
-/* Minimal progressive enhancement for theme preference and install copy buttons. */
+/* Minimal progressive enhancement for theme preference, mobile nav, tabs, and copy buttons. */
 (() => {
   const root = document.documentElement;
   root.classList.add("js-enabled");
+
+  const header = document.querySelector(".site-header");
+  const navToggle = document.querySelector("[data-nav-toggle]");
+  const navEl = document.getElementById("site-nav");
+  if (header && navToggle && navEl) {
+    function setNavOpen(open) {
+      header.classList.toggle("nav-open", open);
+      navToggle.setAttribute("aria-expanded", String(open));
+      navToggle.textContent = open ? "Close" : "Menu";
+    }
+
+    navToggle.addEventListener("click", () => {
+      setNavOpen(!header.classList.contains("nav-open"));
+    });
+
+    for (const link of navEl.querySelectorAll("a")) {
+      link.addEventListener("click", () => setNavOpen(false));
+    }
+
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && header.classList.contains("nav-open")) {
+        setNavOpen(false);
+        navToggle.focus();
+      }
+    });
+
+    const desktopMedia = window.matchMedia("(min-width: 861px)");
+    if (typeof desktopMedia.addEventListener === "function") {
+      desktopMedia.addEventListener("change", (event) => {
+        if (event.matches) {
+          setNavOpen(false);
+        }
+      });
+    }
+  }
 
   const storageKey = "minga-theme";
   const media = window.matchMedia("(prefers-color-scheme: light)");

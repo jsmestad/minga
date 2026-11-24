@@ -36,15 +36,18 @@
         <span class="brand-wordmark">minga</span>
         <span class="brand-version">/ v0.1.0-pre</span>
       </a>
-      <nav class="site-nav" aria-label="Primary">
+      <nav class="site-nav" id="site-nav" aria-label="Primary">
         <a href="/why-minga">Why Minga</a>
         <a href="/getting-started">Getting Started</a>
         <a href="/architecture" aria-current="page">Architecture</a>
         <a href="/extending">Extending</a>
         <a href="/docs/">Reference</a>
         <a href="https://github.com/jsmestad/minga">GitHub</a>
-        <button type="button" class="theme-toggle" data-theme-toggle aria-label="Toggle color theme">Light</button>
       </nav>
+      <div class="header-controls">
+        <button type="button" class="theme-toggle" data-theme-toggle aria-label="Toggle color theme">Light</button>
+        <button type="button" class="nav-toggle" data-nav-toggle aria-expanded="false" aria-controls="site-nav" aria-label="Toggle navigation menu">Menu</button>
+      </div>
     </div>
   </header>
 
@@ -75,6 +78,7 @@
               <span>Figure 1 · Process isolation &amp; client boundaries</span>
               <span>Erlang VM &lt;-&gt; Native OS processes</span>
             </div>
+            <div class="scroll-hint" aria-hidden="true">Scroll diagram horizontally -&gt;</div>
             <div class="diagram-canvas">
               <svg class="diagram-svg" viewBox="0 0 880 412" role="img" aria-labelledby="fig1-title fig1-desc" xmlns="http://www.w3.org/2000/svg">
                 <title id="fig1-title">Minga architecture: Erlang VM core connected over pipes to macOS, terminal, and parser OS processes</title>
@@ -169,6 +173,7 @@
               <span>Figure 2 · Staged edit, review, and recovery pipeline</span>
               <span>Revision Check -&gt; Staging Overlay -&gt; 3-Way Merge</span>
             </div>
+            <div class="scroll-hint" aria-hidden="true">Scroll diagram horizontally -&gt;</div>
             <div class="diagram-canvas">
               <svg class="diagram-svg" viewBox="0 0 880 318" role="img" aria-labelledby="fig2-title fig2-desc" xmlns="http://www.w3.org/2000/svg">
                 <title id="fig2-title">Staged agent edit pipeline with revision checks, diff review, three-way merge, and crash recovery</title>
