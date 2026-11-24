@@ -104,7 +104,8 @@ defmodule Minga.Buffer.HistoryPerfTest do
     :ok = BufferProcess.move_to(buffer, {6000, 10})
     {first_key, :ok} = ms(fn -> BufferProcess.insert_text(buffer, "h") end)
 
-    # The same keystroke in a buffer with no history, so the bound separates history cost from document and load cost.
+    # The same keystroke in a buffer with no history, reported beside it. The first keystroke after a full collection
+    # also copies the history's heap once, so on a heavily loaded machine this bound can fail without a regression.
     fresh = start_supervised!({BufferProcess, content: file(12_000)}, id: make_ref())
     :erlang.garbage_collect(fresh)
     :ok = BufferProcess.move_to(fresh, {6000, 10})
