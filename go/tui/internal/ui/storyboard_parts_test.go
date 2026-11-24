@@ -9,6 +9,7 @@ package ui
 
 import (
 	"strings"
+	"testing"
 
 	uv "github.com/charmbracelet/ultraviolet"
 	"github.com/jsmestad/minga/go/tui/internal/protocol"
@@ -21,6 +22,9 @@ type storyboardPart struct {
 	Text      string `json:"text,omitempty"`
 	Truncated bool   `json:"truncated,omitempty"`
 	Ellipsis  bool   `json:"ellipsis,omitempty"`
+	// Missing marks a part the semantic model says is on screen but the locator could not find in the cells, so
+	// the audit fails it instead of skipping the rules it would have measured.
+	Missing bool `json:"missing,omitempty"`
 }
 
 // cellGrid is the drawn buffer as one cell per column: wide glyphs keep their first cell and leave an empty one after.
@@ -103,7 +107,7 @@ func storyboardParts(model Model, grid cellGrid) []storyboardPart {
 func whichKeyParts(which protocol.WhichKey, grid cellGrid) []storyboardPart {
 	panel, ok := grid.box()
 	if !ok {
-		return nil
+		return []storyboardPart{{Part: "whichKey.panel", Missing: true}}
 	}
 	parts := []storyboardPart{{Part: "whichKey.panel", Frame: panel}}
 	left, right := panel[0]+1, panel[0]+panel[2]-1
@@ -118,7 +122,8 @@ func whichKeyParts(which protocol.WhichKey, grid cellGrid) []storyboardPart {
 	for _, binding := range which.Bindings {
 		description := strings.TrimSpace(binding.Description)
 		key := strings.TrimSpace(binding.Key)
-		for y := top; y < bottom; y++ {
+		found := false
+		for y := top; y < bottom && !found; y++ {
 			x, shown, truncated := findLabel(grid, y, left, right, description, used)
 			if x < 0 {
 				continue
@@ -135,7 +140,10 @@ func whichKeyParts(which protocol.WhichKey, grid cellGrid) []storyboardPart {
 				storyboardPart{Part: "whichKey.entryLabel", Frame: [4]int{labelStart, y, x + shown - labelStart, 1}, Text: description,
 					Truncated: truncated, Ellipsis: ellipsis},
 			)
-			break
+			found = true
+		}
+		if !found {
+			parts = append(parts, storyboardPart{Part: "whichKey.entry", Text: key + " " + description, Missing: true})
 		}
 	}
 	return parts
@@ -183,40 +191,79 @@ func firstInk(grid cellGrid, y, from, to int) int {
 	return to
 }
 
-// modelineParts finds each segment's visible words on the modeline row, left segments from the leading edge and right
-// segments back from the trailing edge, in the order the BEAM sent them.
+// modelineParts finds each segment's visible words on the modeline row, in the order the BEAM sent them. The row is
+// the one near the bottom that shows the first left segment. A left segment that is not there is reported missing; a
+// right segment may be dropped on purpose (the TUI drops the lowest-priority right segments to fit), so it is not.
 func modelineParts(status protocol.StatusBar, grid cellGrid) []storyboardPart {
-	for y := len(grid) - 1; y >= max(len(grid)-3, 0); y-- {
-		row := grid[y]
-		var parts []storyboardPart
-		x := 0
-		for _, segment := range status.Left {
-			text := strings.TrimSpace(segment.Text)
-			if text == "" {
-				continue
-			}
-			at := grid.find(y, x, len(row), text)
-			if at < 0 {
-				parts = nil
-				break
-			}
+	var left []protocol.StatusSegment
+	for _, segment := range status.Left {
+		if strings.TrimSpace(segment.Text) != "" {
+			left = append(left, segment)
+		}
+	}
+	if len(left) == 0 {
+		return nil
+	}
+	first := strings.TrimSpace(left[0].Text)
+	y := -1
+	for row := len(grid) - 1; row >= max(len(grid)-3, 0) && y < 0; row-- {
+		if grid.find(row, 0, len(grid[row]), first) >= 0 {
+			y = row
+		}
+	}
+	if y < 0 {
+		return []storyboardPart{{Part: "modeline", Text: first, Missing: true}}
+	}
+	parts := []storyboardPart{{Part: "modeline", Frame: [4]int{0, y, len(grid[y]), 1}}}
+	x := 0
+	for _, segment := range left {
+		text := strings.TrimSpace(segment.Text)
+		at := grid.find(y, x, len(grid[y]), text)
+		if at < 0 {
+			parts = append(parts, storyboardPart{Part: "modeline.segment", Text: segment.Name + ": " + text, Missing: true})
+			continue
+		}
+		parts = append(parts, storyboardPart{Part: "modeline.segment", Frame: [4]int{at, y, len([]rune(text)), 1}, Text: segment.Name + ": " + text})
+		x = at + len([]rune(text))
+	}
+	for _, segment := range status.Right {
+		text := strings.TrimSpace(segment.Text)
+		if text == "" {
+			continue
+		}
+		if at := grid.find(y, x, len(grid[y]), text); at >= 0 {
 			parts = append(parts, storyboardPart{Part: "modeline.segment", Frame: [4]int{at, y, len([]rune(text)), 1}, Text: segment.Name + ": " + text})
 			x = at + len([]rune(text))
 		}
-		if len(parts) == 0 {
-			continue
-		}
-		for _, segment := range status.Right {
-			text := strings.TrimSpace(segment.Text)
-			if text == "" {
-				continue
-			}
-			if at := grid.find(y, x, len(row), text); at >= 0 {
-				parts = append(parts, storyboardPart{Part: "modeline.segment", Frame: [4]int{at, y, len([]rune(text)), 1}, Text: segment.Name + ": " + text})
-				x = at + len([]rune(text))
-			}
-		}
-		return append([]storyboardPart{{Part: "modeline", Frame: [4]int{0, y, len(row), 1}}}, parts...)
 	}
-	return nil
+	return parts
+}
+
+// A surface the semantic model says is on screen but the locator cannot find is reported missing, so the audit fails
+// the frame instead of skipping the rules it would have measured.
+func TestStoryboardPartsReportWhatTheyCannotFind(t *testing.T) {
+	grid := cellGrid{
+		strings.Split("hello     ", ""),
+		strings.Split(" NORMAL  x", ""),
+	}
+	which := protocol.WhichKey{Visible: true, Bindings: []protocol.WhichKeyBinding{{Key: "f", Description: "Find file"}}}
+	if parts := whichKeyParts(which, grid); len(parts) != 1 || parts[0].Part != "whichKey.panel" || !parts[0].Missing {
+		t.Fatalf("a which-key panel without its border is missing, got %+v", parts)
+	}
+
+	status := protocol.StatusBar{Left: []protocol.StatusSegment{{Name: "mode", Text: "NORMAL"}, {Name: "file", Text: "a.ex"}}}
+	parts := modelineParts(status, grid)
+	missing := []string{}
+	for _, part := range parts {
+		if part.Missing {
+			missing = append(missing, part.Text)
+		}
+	}
+	if len(missing) != 1 || missing[0] != "file: a.ex" {
+		t.Fatalf("a left segment that is not drawn is missing, got %+v", parts)
+	}
+
+	if parts := modelineParts(protocol.StatusBar{Left: []protocol.StatusSegment{{Name: "mode", Text: "INSERT"}}}, grid); len(parts) != 1 || !parts[0].Missing {
+		t.Fatalf("a modeline whose first segment is not drawn is missing, got %+v", parts)
+	}
 }

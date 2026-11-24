@@ -30,12 +30,20 @@ struct StoryboardPixels {
         rgb = pixels
     }
 
-    /// The surface and ink under a frame given in window points, or nil for an empty frame.
-    func sample(_ frame: CGRect) -> (ink: String, bg: String)? {
+    /// The surface and the inks under a part given in window points, or nil for an empty frame. The surface is the
+    /// most common colour; each ink is the farthest colour in its direction from the surface that covers a few pixels,
+    /// so an icon and the words beside it come out as two inks and their antialiased edges as none.
+    func sample(_ frame: CGRect) -> (inks: [String], bg: String)? {
         guard let counts = histogram(frame), let bg = counts.max(by: { $0.value < $1.value })?.key else { return nil }
-        let ink = counts.filter { $0.key != bg && $0.value >= 3 }
-            .max { Self.distance($0.key, bg) < Self.distance($1.key, bg) }?.key
-        return ink.map { (Self.hex($0), Self.hex(bg)) }
+        let visible = counts.filter { $0.key != bg && Self.distance($0.key, bg) > 24 }
+        let floor = max(3, (visible.values.max() ?? 0) / 20)
+        let candidates = visible.filter { $0.value >= floor }
+            .sorted { Self.distance($0.key, bg) > Self.distance($1.key, bg) }
+        var kept: [UInt32] = []
+        for (color, _) in candidates where !kept.contains(where: { Self.sameDirection(color, $0, from: bg) }) {
+            kept.append(color)
+        }
+        return kept.isEmpty ? nil : (kept.map(Self.hex).sorted(), Self.hex(bg))
     }
 
     /// The surface and every distinct ink in a frame: per direction away from a surface, the farthest colour that

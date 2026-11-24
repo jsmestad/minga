@@ -92,6 +92,34 @@ class RuleTest(unittest.TestCase):
                              "0 0-1 #777777 #888888 -\n1 0-0 #000000 #ffffff -\n")
             audit.tui_contrast(self.audit, {**FRAME, "frontend": "tui"}, frame)
         self.assertEqual(self.rules(), {("text", "contrast")})
+        self.assertEqual(self.audit.findings[0]["pair"], "#777777 on #888888")
+
+    def test_faint_cells_are_judged_halfway_to_their_surface(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            frame = Path(tmp) / "tui-t-4x1.txt"
+            frame.write_text("# size: 4x1\n## text\nab\n## styles (row start-end fg bg attrs)\n0 0-1 #000000 #ffffff faint\n")
+            audit.tui_contrast(self.audit, {**FRAME, "frontend": "tui"}, frame)
+        self.assertEqual(self.audit.findings[0]["pair"], "#7f7f7f on #ffffff")
+
+    def test_a_wide_character_takes_two_cells(self):
+        self.assertEqual(audit.cells("a漢b"), ["a", "漢", "", "b"])
+
+    def test_every_ink_under_a_macos_part_is_judged_and_the_cursor_is_left_out(self):
+        export = {"samples": [{"part": "modeline.segment", "text": "main", "bg": "#ffffff", "inks": ["#000000", "#aaaaaa"]}],
+                  "code": {"bg": "#ffffff", "inks": ["#0479ff"], "cursor": "#007aff"}}
+        audit.mac_contrast(self.audit, FRAME, export)
+        self.assertEqual([f["pair"] for f in self.audit.findings], ["#aaaaaa on #ffffff"])
+
+    def test_a_part_the_locator_could_not_find_is_a_finding(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp)
+            (out / "manifest.json").write_text(json.dumps({"scenarios": [{"id": "s", "status": "built"}]}))
+            (out / "renders/s").mkdir(parents=True)
+            (out / "renders/s/tui-t-4x1.parts.json").write_text(json.dumps(
+                {"frontend": "tui", "theme": "t", "size": "4x1", "parts": [{"part": "modeline", "text": "NORMAL", "missing": True}]}))
+            (out / "renders/s/tui-t-4x1.txt").write_text("# size: 4x1\n## text\n\n## styles (row start-end fg bg attrs)\n")
+            findings = audit.run_audit(out, ["tui"])
+        self.assertEqual([(f["part"], f["rule"]) for f in findings], [("modeline", "part located")])
 
 
 class ExceptionTest(unittest.TestCase):
@@ -104,6 +132,21 @@ class ExceptionTest(unittest.TestCase):
         self.assertTrue(audit.matches({**base, "scenario": "*", "theme": "t"}, self.FINDING))
         self.assertFalse(audit.matches({**base, "scenario": "other"}, self.FINDING))
         self.assertFalse(audit.matches({**base, "scenario": "s", "theme": "latte"}, self.FINDING))
+
+    def test_a_contrast_exception_excuses_only_its_colour_pairs(self):
+        exception = {"scenario": "s", "frontend": "macos", "part": "text", "rule": "contrast", "theme": "t",
+                     "pairs": ["#777777 on #888888"]}
+        finding = {**FRAME, "part": "text", "rule": "contrast"}
+        self.assertTrue(audit.matches(exception, {**finding, "pair": "#787878 on #888888"}))
+        self.assertFalse(audit.matches(exception, {**finding, "pair": "#555555 on #888888"}))
+
+    def test_each_listed_scenario_and_pair_that_excuses_nothing_is_stale(self):
+        exception = {"scenario": ["s", "fixed"], "frontend": "macos", "part": "text", "rule": "contrast", "theme": "t",
+                     "pairs": ["#777777 on #888888", "#111111 on #888888"]}
+        finding = {**FRAME, "part": "text", "rule": "contrast", "pair": "#777777 on #888888"}
+        stale = audit.stale_entries([exception], {0: [finding]}, ["macos"])
+        self.assertEqual((stale[0]["unused_scenarios"], stale[0]["unused_pairs"]), (["fixed"], ["#111111 on #888888"]))
+        self.assertEqual(audit.stale_entries([exception], {}, ["tui"]), [])
 
     def test_an_exception_without_a_reason_or_an_issue_is_rejected(self):
         with tempfile.TemporaryDirectory() as tmp:

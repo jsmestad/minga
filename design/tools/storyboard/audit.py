@@ -24,10 +24,13 @@ import json
 import re
 import sys
 import tomllib
+import unicodedata
 from collections import defaultdict
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
+# A colour sampled from pixels can move by a step or two through Metal, capture and colour conversion.
+PIXEL_STEP = 6
 DEFAULT_OUT = ROOT / "_build" / "storyboard"
 SWIFT_TOKENS = ROOT / "macos/Sources/Views/Shared/ChromeTokens.swift"
 GO_TOKENS = ROOT / "go/tui/internal/ui/chrome_tokens.go"
@@ -106,6 +109,31 @@ def contrast(fg, bg):
     return round((high + 0.05) / (low + 0.05), 2)
 
 
+def rgb(hex_color):
+    value = int(hex_color.lstrip("#"), 16)
+    return (value >> 16 & 255, value >> 8 & 255, value & 255)
+
+
+def near(a, b, step=PIXEL_STEP):
+    """True when two colours differ by at most `step` in every channel: the same colour sampled on another runner."""
+    return all(abs(x - y) <= step for x, y in zip(rgb(a), rgb(b)))
+
+
+def faint(fg, bg):
+    """A faint cell's ink, which terminals draw about halfway toward the surface."""
+    return "#%02x%02x%02x" % tuple((x + y) // 2 for x, y in zip(rgb(fg), rgb(bg)))
+
+
+def cells(text):
+    """A TUI text row as cells: a wide character takes two, and the frame file leaves out its continuation cell."""
+    out = []
+    for char in text:
+        out.append(char)
+        if unicodedata.east_asian_width(char) in ("W", "F"):
+            out.append("")
+    return out
+
+
 # Box drawing, block and geometric shapes, arrows, dingbats, bullets and Nerd Font private-use icons are glyphs (3:1).
 GLYPH = re.compile("[\\u2500-\\u25ff\\u2190-\\u21ff\\u2700-\\u27bf\\u2022\\u203a\\u2039\\u00b7~\\ue000-\\uf8ff\\U000f0000-\\U000fffff]")
 
@@ -124,12 +152,14 @@ class Audit:
         if actual is not None and abs(actual - expected) > tolerance:
             self.flag(frame, part, rule, expected, actual)
 
-    def flag(self, frame, part, rule, expected, actual):
-        """One finding per frame, part and rule; every distinct value it measured is kept."""
-        key = (frame["scenario"], frame["frontend"], frame["theme"], frame["size"], part, rule)
+    def flag(self, frame, part, rule, expected, actual, pair=None):
+        """One finding per frame, part and rule (and colour pair, for contrast); every distinct value it measured is kept."""
+        key = (frame["scenario"], frame["frontend"], frame["theme"], frame["size"], part, rule, pair)
         finding = self.index.get(key)
         if finding is None:
             finding = {**frame, "part": part, "rule": rule, "expected": expected, "actual": [], "count": 0}
+            if pair:
+                finding["pair"] = pair
             self.index[key] = finding
             self.findings.append(finding)
         finding["count"] += 1
@@ -240,35 +270,37 @@ def tui_contrast(audit, frame, path):
     from renders import parse_tui  # noqa: E402
 
     (_, _), rows, styles = parse_tui(path)
-    seen = set()
     for row, runs in styles.items():
-        text = rows[row] if row < len(rows) else ""
+        row_cells = cells(rows[row]) if row < len(rows) else []
         for start, end, fg, bg, attrs in runs:
-            chars = text[start:end + 1].strip()
+            chars = "".join(row_cells[start:end + 1]).strip()
             if not chars:
                 continue
+            ink = faint(fg, bg) if "faint" in attrs.split(",") else fg
             glyph_only = all(GLYPH.match(c) for c in chars)
             target = audit.scale.glyph_contrast if glyph_only else audit.scale.text_contrast
-            ratio = contrast(fg, bg)
-            key = (fg, bg, glyph_only)
-            if ratio < target and key not in seen:
-                seen.add(key)
+            ratio = contrast(ink, bg)
+            if ratio < target:
                 audit.flag(frame, "text" if not glyph_only else "glyph", "contrast", target,
-                           f"{ratio} ({fg} on {bg}, '{chars[:12]}' at row {row})")
+                           f"{ratio} ('{chars[:12]}' at row {row})", pair=f"{ink} on {bg}")
 
 
 def mac_contrast(audit, frame, export):
     """Text parts against the 4.5:1 text target; every syntax ink in the editor against the same target."""
     for sample in export.get("samples", []):
-        ratio = contrast(sample["ink"], sample["bg"])
-        if ratio < audit.scale.text_contrast:
-            audit.flag(frame, sample["part"], "contrast", audit.scale.text_contrast,
-                       f"{ratio} ({sample['ink']} on {sample['bg']}, '{sample['text'][:16]}')")
+        for ink in sample["inks"]:
+            ratio = contrast(ink, sample["bg"])
+            if ratio < audit.scale.text_contrast:
+                audit.flag(frame, sample["part"], "contrast", audit.scale.text_contrast,
+                           f"{ratio} ('{sample['text'][:16]}')", pair=f"{ink} on {sample['bg']}")
     code = export.get("code") or {}
+    cursor = code.get("cursor")
     for ink in code.get("inks", []):
+        if cursor and near(ink, cursor):
+            continue
         ratio = contrast(ink, code["bg"])
         if ratio < audit.scale.text_contrast:
-            audit.flag(frame, "editor.code", "contrast", audit.scale.text_contrast, f"{ratio} ({ink} on {code['bg']})")
+            audit.flag(frame, "editor.code", "contrast", audit.scale.text_contrast, ratio, pair=f"{ink} on {code['bg']}")
 
 
 def same_component(audit):
@@ -288,20 +320,55 @@ def load_exceptions():
     exceptions = tomllib.loads(EXCEPTIONS.read_text()).get("exception", [])
     for exception in exceptions:
         missing = [key for key in ("scenario", "frontend", "part", "rule", "reason", "issue") if not exception.get(key)]
+        if exception.get("rule") == "contrast" and not (exception.get("theme") and exception.get("pairs")):
+            missing += ["theme", "pairs"]
         if missing:
             raise Failure(f"an audit exception needs {', '.join(missing)}: {exception}")
     return exceptions
 
 
+def listed(value):
+    return value if isinstance(value, list) else [value]
+
+
+def same_pair(a, b):
+    """Colour pairs "#fg on #bg", equal within a sampling step."""
+    (fa, ba), (fb, bb) = a.split(" on "), b.split(" on ")
+    return near(fa, fb) and near(ba, bb)
+
+
 def matches(exception, finding):
-    """An exception names its scenarios (one id, a list, or "*"), frontend, part and rule, and optionally a theme."""
+    """An exception names its scenarios (one id, a list, or "*"), frontend, part and rule, and optionally a theme.
+
+    A contrast exception also lists the colour pairs it excuses, so a new failing colour is a new finding."""
     for key in ("scenario", "frontend", "part", "rule", "theme"):
         wanted = exception.get(key, "*")
         if wanted == "*":
             continue
-        if finding[key] not in (wanted if isinstance(wanted, list) else [wanted]):
+        if finding[key] not in listed(wanted):
             return False
+    if "pairs" in exception:
+        return "pair" in finding and any(same_pair(finding["pair"], pair) for pair in exception["pairs"])
     return True
+
+
+def stale_entries(exceptions, used, frontends):
+    """Each listed scenario and colour pair of an exception that excused nothing, so a partial fix shrinks the list.
+
+    An exception for a frontend this run did not audit (macOS skipped because none of its inputs changed) is not stale."""
+    stale = []
+    for index, exception in enumerate(exceptions):
+        if exception["frontend"] not in list(frontends) + ["*"]:
+            continue
+        hits = used.get(index, [])
+        scenarios = [] if exception["scenario"] == "*" else listed(exception["scenario"])
+        unused = [s for s in scenarios if not any(f["scenario"] == s for f in hits)]
+        if exception["scenario"] == "*" and not hits:
+            unused = ["*"]
+        pairs = [p for p in exception.get("pairs", []) if not any(same_pair(f["pair"], p) for f in hits)]
+        if unused or pairs:
+            stale.append({**exception, "unused_scenarios": unused, "unused_pairs": pairs})
+    return stale
 
 
 def run_audit(out, frontends):
@@ -323,6 +390,9 @@ def run_audit(out, frontends):
             frame = {"scenario": sid, "frontend": frontend, "theme": export["theme"], "size": export["size"]}
             parts = export.get("parts", [])
             mac = frontend == "macos"
+            for part in parts:
+                if part.get("missing"):
+                    audit.flag(frame, part["part"], "part located", "located in the frame", part.get("text", ""))
             which_key(audit, frame, parts, mac)
             modeline(audit, frame, parts, mac)
             if mac:
@@ -337,17 +407,15 @@ def evaluate(out, frontends):
     """Runs the audit and applies the exceptions: every finding with its exception or None, and the stale exceptions."""
     findings = run_audit(out, frontends)
     exceptions = load_exceptions()
-    used = set()
+    used = defaultdict(list)
     for finding in findings:
         finding["exception"] = None
         for index, exception in enumerate(exceptions):
             if matches(exception, finding):
                 finding["exception"] = f"#{exception['issue']}: {exception['reason']}"
-                used.add(index)
+                used[index].append(finding)
                 break
-    # An exception for a frontend this run did not audit (macOS skipped because none of its inputs changed) is not stale.
-    stale = [e for i, e in enumerate(exceptions) if i not in used and e["frontend"] in list(frontends) + ["*"]]
-    return findings, stale
+    return findings, stale_entries(exceptions, used, frontends)
 
 
 def main(argv=None):
@@ -370,7 +438,9 @@ def main(argv=None):
         lines.append(f"- `{finding['scenario']}` {finding['frontend']} {finding['theme']} {finding['size']} "
                      f"{finding['part']}: {finding['rule']}: expected {finding['expected']}, got {finding['actual']}")
     for exception in stale:
-        lines.append(f"- stale exception (remove it): {exception}")
+        lines.append(f"- stale exception #{exception['issue']} {exception['frontend']} {exception['part']} "
+                     f"{exception['rule']}: remove scenarios {exception['unused_scenarios']} and colour pairs "
+                     f"{exception['unused_pairs']} (all of them: remove the entry)")
     summary = "\n".join(lines) + "\n"
     (out / "audit.md").write_text(summary)
     print(summary)

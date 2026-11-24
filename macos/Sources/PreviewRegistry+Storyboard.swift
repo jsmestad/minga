@@ -265,13 +265,14 @@ enum StoryboardCapture {
             contentFilter: SCContentFilter(desktopIndependentWindow: window), configuration: configuration)
     }
 
-    /// The ink and surface colour under every part that shows text.
+    /// The surface and every ink under each part that shows text. A part can hold an icon and words; each ink is
+    /// judged, so a strong icon cannot pass weak words.
     private static func samples(_ parts: [AnatomyPartFrame], pixels: StoryboardPixels?) -> [[String: Any]] {
         guard let pixels else { return [] }
         return parts.compactMap { part in
             guard let text = part.text, !text.trimmingCharacters(in: .whitespaces).isEmpty,
                   let sample = pixels.sample(part.frame) else { return nil }
-            return ["part": part.name, "text": text, "ink": sample.ink, "bg": sample.bg]
+            return ["part": part.name, "text": text, "inks": sample.inks, "bg": sample.bg]
         }
     }
 
@@ -281,12 +282,13 @@ enum StoryboardCapture {
               let editor = elements.first(where: { $0["role"] as? String == "AXTextArea" }),
               let frame = editor["frame"] as? [Double], frame.count == 4,
               let found = pixels.inks(CGRect(x: frame[0], y: frame[1], width: frame[2], height: frame[3])) else { return [:] }
-        // The block cursor is the system accent colour, a glyph rather than text; it is reported, not judged as an ink.
+        // The block cursor is the system accent colour, a glyph rather than text. The audit leaves out inks near it:
+        // a sampled colour can move by a step through Metal, capture and colour conversion, so not by equality.
         let accent = NSColor.controlAccentColor.usingColorSpace(.sRGB).map {
             String(format: "#%02x%02x%02x", Int(($0.redComponent * 255).rounded()),
                    Int(($0.greenComponent * 255).rounded()), Int(($0.blueComponent * 255).rounded()))
         } ?? ""
-        return ["bg": found.bg, "inks": found.inks.filter { $0 != accent }, "cursor": accent]
+        return ["bg": found.bg, "inks": found.inks, "cursor": accent]
     }
 
     /// The accessibility tree as a flat list in document order, frames in window points with a top-left origin, rounded to half a point.

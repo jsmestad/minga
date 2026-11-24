@@ -1,8 +1,9 @@
 # Layout-audit findings that a later ticket fixes (#4036, AC 5). See docs/design/anatomy.md, "The layout audit".
 #
 # Each exception names its scenarios (an id, a list, or "*"), frontend, anatomy part and rule, optionally a theme,
-# and must give the reason and the issue that removes it. design/tools/storyboard/audit.py fails when an exception
-# no longer matches any finding, so remove an entry in the pull request that fixes it. Never add one to make a new
+# and must give the reason and the issue that removes it. A contrast exception also names its theme and lists the
+# colour pairs it excuses. design/tools/storyboard/audit.py fails when a listed scenario or colour pair no longer
+# matches any finding, so remove it in the pull request that fixes it. Never add one to make a new
 # regression pass: fix the surface, or change docs/design/anatomy.md and the token scales first.
 
 # ---- TUI -----------------------------------------------------------------------------------------------------
@@ -50,9 +51,16 @@ issue = 4043
 [[exception]]
 scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey"]
 frontend = "tui"
-part = "text"
+part = "glyph"
 rule = "contrast"
-reason = "Syntax colours in Latte, muted comment and gutter text, breadcrumb separators and modeline chips miss 4.5:1."
+theme = "astrodark"
+pairs = [
+  "#3a3e47 on #1a1d23",
+  "#595c66 on #111317",
+  "#595c66 on #1a1d23",
+  "#595c66 on #1e222a",
+]
+reason = "Empty-line tildes, fold marks, separators and icon colours miss 3:1 in this theme."
 issue = 4137
 
 [[exception]]
@@ -60,5 +68,83 @@ scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey
 frontend = "tui"
 part = "glyph"
 rule = "contrast"
-reason = "Empty-line tildes, fold marks, separators and the which-key icons' One Dark colours in Latte miss 3:1."
+theme = "catppuccin_frappe"
+pairs = [
+  "#838ba7 on #414559",
+  "#9b59b6 on #292c3c",
+]
+reason = "Empty-line tildes, fold marks, separators and icon colours miss 3:1 in this theme."
+issue = 4137
+
+[[exception]]
+scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey"]
+frontend = "tui"
+part = "glyph"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = [
+  "#51afef on #ccd0da",
+  "#61afef on #ccd0da",
+  "#7c7f93 on #ccd0da",
+  "#8c8fa1 on #ccd0da",
+  "#8c8fa1 on #e6e9ef",
+  "#8c8fa1 on #eff1f5",
+  "#98c379 on #ccd0da",
+  "#a074c4 on #e6e9ef",
+  "#c678dd on #ccd0da",
+  "#e5c07b on #ccd0da",
+]
+reason = "Empty-line tildes, fold marks, separators and icon colours miss 3:1 in this theme."
+issue = 4137
+
+[[exception]]
+scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey"]
+frontend = "tui"
+part = "text"
+rule = "contrast"
+theme = "astrodark"
+pairs = [
+  "#595c66 on #1a1d23",
+  "#696c76 on #1a1d23",
+]
+reason = "Syntax colours, muted comment and gutter text, separators and chips miss 4.5:1 in this theme."
+issue = 4137
+
+[[exception]]
+scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey"]
+frontend = "tui"
+part = "text"
+rule = "contrast"
+theme = "catppuccin_frappe"
+pairs = [
+  "#81c8be on #626880",
+  "#838ba7 on #303446",
+  "#c6d0f5 on #838ba7",
+  "#ca9ee6 on #626880",
+]
+reason = "Syntax colours, muted comment and gutter text, separators and chips miss 4.5:1 in this theme."
+issue = 4137
+
+[[exception]]
+scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey"]
+frontend = "tui"
+part = "text"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = [
+  "#04a5e5 on #eff1f5",
+  "#179299 on #acb0be",
+  "#1e66f5 on #e6e9ef",
+  "#1e66f5 on #eff1f5",
+  "#40a02b on #e6e9ef",
+  "#40a02b on #eff1f5",
+  "#4c4f69 on #8c8fa1",
+  "#7287fd on #ccd0da",
+  "#7c7f93 on #eff1f5",
+  "#8839ef on #acb0be",
+  "#8c8fa1 on #eff1f5",
+  "#df8e1d on #eff1f5",
+  "#eff1f5 on #1e66f5",
+]
+reason = "Syntax colours, muted comment and gutter text, separators and chips miss 4.5:1 in this theme."
 issue = 4137
