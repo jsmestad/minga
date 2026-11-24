@@ -24,9 +24,9 @@ defmodule Minga.Test.Storyboard.Render do
   @themes [:catppuccin_frappe, :astrodark, :catppuccin_latte]
   @strip_theme :catppuccin_frappe
   @tui_sizes [{80, 24}, {120, 40}, {150, 38}]
-  # The TUI draws its header above the grid it reports to the BEAM (`Model.reportGridResize` in go/tui/internal/ui/model.go):
-  # the tab bar, and the breadcrumb from 100 columns up (`headerChrome` in render_chrome.go). Sessions lay out for that
-  # grid. The Go renderer checks its own grid against the transcript's `grid_rows` and fails when they differ.
+  # The TUI draws its header above the grid it reports to the BEAM (`Model.reportGridResize` in go/tui/internal/ui/model.go): the tab bar, and the breadcrumb from 100 columns up (`headerChrome` in render_chrome.go).
+  # Sessions lay out for that grid.
+  # The Go renderer checks its own grid against the transcript's `grid_rows` and fails when they differ.
   @tui_breadcrumb_min_cols 100
   @strip_tui_size "120x40"
   @strip_macos_size "1440"

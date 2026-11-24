@@ -222,6 +222,10 @@ defmodule Minga.Config do
   @spec load_error() :: term() | nil
   defdelegate load_error(), to: Loader
 
+  @doc "Returns why the global config file did not evaluate, leaving the editor on its defaults, or nil."
+  @spec config_eval_error() :: String.t() | nil
+  defdelegate config_eval_error(), to: Loader
+
   # ── Completion ─────────────────────────────────────────────────────
 
   @doc "Completion items for `:set` option names."

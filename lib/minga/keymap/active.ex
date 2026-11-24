@@ -463,30 +463,31 @@ defmodule Minga.Keymap.Active do
     :ok
   end
 
-  # The trie and its lookup index change together: one row per bound sequence, and one per command naming its
-  # shortest sequence. A reader between the delete and the insert misses for that moment and sees no binding.
-  @spec put_leader_trie(:ets.table(), Bindings.node_t()) :: true
+  # The trie and its index change together: a row per bound sequence, and a row per command with its shortest one.
+  # New rows go in before stale rows come out, so a reader mid-update sees the old or the new binding, never none.
+  @spec put_leader_trie(:ets.table(), Bindings.node_t()) :: :ok
   defp put_leader_trie(table, trie) do
     commands = Bindings.commands(trie)
 
+    # The first sequence of each command is its shortest: `Bindings.commands/1` sorts by length.
     shortest =
-      commands
-      |> Enum.reverse()
-      |> Map.new(fn {keys, command} -> {command, keys} end)
+      Enum.reduce(commands, %{}, fn {keys, command}, acc -> Map.put_new(acc, command, keys) end)
 
-    :ets.insert(table, {@leader_trie_key, trie})
-    :ets.match_delete(table, {{:leader_command_at, :_}, :_})
-    :ets.match_delete(table, {{:leader_keys_for, :_}, :_})
+    rows =
+      Enum.map(commands, fn {keys, command} -> {{:leader_command_at, keys}, command} end) ++
+        Enum.map(shortest, fn {command, keys} -> {{:leader_keys_for, command}, keys} end)
 
-    :ets.insert(
-      table,
-      Enum.map(commands, fn {keys, command} -> {{:leader_command_at, keys}, command} end)
-    )
+    current = MapSet.new(rows, &elem(&1, 0))
 
-    :ets.insert(
-      table,
-      Enum.map(shortest, fn {command, keys} -> {{:leader_keys_for, command}, keys} end)
-    )
+    stale =
+      for {key, _value} <-
+            :ets.match_object(table, {{:leader_command_at, :_}, :_}) ++
+              :ets.match_object(table, {{:leader_keys_for, :_}, :_}),
+          not MapSet.member?(current, key),
+          do: key
+
+    :ets.insert(table, [{@leader_trie_key, trie} | rows])
+    Enum.each(stale, &:ets.delete(table, &1))
   end
 
   @spec ets_update(GenServer.server(), atom(), term(), (term() -> term())) :: :ok

@@ -578,10 +578,10 @@ defmodule MingaEditor.Startup do
     theme = MingaEditor.UI.Theme.get!(theme_name)
     state = state |> EditorState.apply_theme(theme) |> AgentLifecycle.restyle_transcript()
 
-    error = Config.load_error()
-    state = %{state | feedback: Feedback.report_config_load(state.feedback, error)}
+    feedback = Feedback.report_config_load(state.feedback, Config.config_eval_error())
+    state = %{state | feedback: feedback}
 
-    case error do
+    case Config.load_error() do
       nil -> state
       error -> MingaEditor.Shell.Traditional.NoticeWorkflow.publish(state, error)
     end

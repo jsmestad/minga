@@ -32,9 +32,9 @@ defmodule MingaEditor.Agent.ActivityTest do
         |> Activity.set_todos([todo])
         |> Activity.start_turn(started_at)
         |> Activity.start_tool("call-1", "shell")
-        |> Activity.record_file(nil, "lib/a.ex")
-        |> Activity.record_file(nil, "lib/a.ex")
-        |> Activity.record_file(nil, "lib/b.ex")
+        |> Activity.record_file(nil, "lib/a.ex", "/p/lib/a.ex")
+        |> Activity.record_file(nil, "lib/a.ex", "/p/lib/a.ex")
+        |> Activity.record_file(nil, "lib/b.ex", "/p/lib/b.ex")
 
       assert activity.todos == [todo]
       assert activity.started_at == started_at
@@ -47,7 +47,7 @@ defmodule MingaEditor.Agent.ActivityTest do
       activity =
         Activity.new()
         |> Activity.start_tool("call-1", "read_file")
-        |> Activity.record_file(nil, "lib/a.ex")
+        |> Activity.record_file(nil, "lib/a.ex", "/p/lib/a.ex")
         |> Activity.finish_turn()
 
       assert activity.started_at == nil

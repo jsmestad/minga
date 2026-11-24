@@ -125,6 +125,7 @@ defmodule MingaEditor.StatusBar.Data do
     git_degraded? = git_degraded?(file_path)
     diagnostic_counts = diagnostic_modeline_data_from_path(file_path)
     diagnostic_hint = cursor_line_diagnostic_hint_from_path(file_path, line)
+    {minga_path, minga_here?} = minga_file(state, buf)
 
     mode = Minga.Editing.mode(state)
     mode_state = Editing.mode_state(state)
@@ -181,8 +182,8 @@ defmodule MingaEditor.StatusBar.Data do
       plan_limit: plan_limit(state),
       needs_you_count: ChromeState.needs_you_count(chrome_state, agent_status),
       minga_progress: minga_progress(state),
-      minga_file: minga_file(state),
-      minga_here?: file_path != nil and minga_file(state) == file_path,
+      minga_file: minga_path,
+      minga_here?: minga_here?,
       failed_language_servers: failed_language_servers(state),
       config_problem: config_problem(state),
       keymap_server: keymap_server(state),
@@ -199,12 +200,20 @@ defmodule MingaEditor.StatusBar.Data do
 
   defp minga_progress(_state), do: nil
 
-  # The file Minga's task edited last, from the same projection.
-  @spec minga_file(EditorState.t() | map()) :: String.t() | nil
-  defp minga_file(%{workspace: %{agent_ui: %UIState{view: %{activity: %Activity{} = activity}}}}),
-    do: Activity.current_file(activity)
+  # The file the connected task edited last, from the same projection, and whether it is the file the active buffer
+  # visits. Both sides are file identities, so a symlinked or differently spelled path is still "here".
+  @spec minga_file(EditorState.t() | map(), pid() | nil) :: {String.t() | nil, boolean()}
+  defp minga_file(
+         %{workspace: %{agent_ui: %UIState{view: %{activity: %Activity{} = activity}} = ui}},
+         buf
+       ) do
+    case Activity.current_file(activity, Activity.task_author(UIState.task_id(ui))) do
+      {identity, path} -> {path, is_pid(buf) and identity in Minga.Buffer.file_identities(buf)}
+      nil -> {nil, false}
+    end
+  end
 
-  defp minga_file(_state), do: nil
+  defp minga_file(_state, _buf), do: {nil, false}
 
   @spec config_problem(EditorState.t() | map()) :: String.t() | nil
   defp config_problem(%{feedback: %{config_problem: problem}}), do: problem

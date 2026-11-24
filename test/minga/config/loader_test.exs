@@ -104,6 +104,7 @@ defmodule Minga.Config.LoaderTest do
       pid = start_supervised!({Loader, name: nil, config_home: config_home})
 
       assert Loader.load_error(pid) =~ "later config error"
+      assert Loader.config_eval_error(pid) =~ "later config error"
 
       assert Loader.migration_notice(pid) ==
                ~s(Some configured keybindings need optional extensions. Add to config.exs and restart: extension :minga_knowledge_graph, git: "https://github.com/jsmestad/minga-knowledge-graph")
@@ -668,6 +669,8 @@ defmodule Minga.Config.LoaderTest do
       {:ok, pid} = Loader.start_link(name: name, config_home: config_home)
 
       assert Loader.load_error(pid) =~ ".minga/mcp.json mcpServers.github must be a map, got: 42"
+      # The global config evaluated: a bad project MCP file does not leave the editor on defaults.
+      assert Loader.config_eval_error(pid) == nil
       assert Options.get(test_options_server(), :agent_mcp_servers) == []
     end
 
@@ -1300,6 +1303,8 @@ defmodule Minga.Config.LoaderTest do
       assert {:error, message} = Loader.reload(loader)
       assert message == "Extension declarations changed; restart Minga before config reload"
       assert Loader.load_error(loader) == message
+      # A rejected reload keeps the last loaded config, which evaluated.
+      assert Loader.config_eval_error(loader) == nil
       assert {:ok, %{module: Minga.Extensions.MCP}} = ExtRegistry.get(:minga_mcp)
     end
 

@@ -56,6 +56,14 @@ defmodule Minga.Buffer do
   @spec pid_for_file(String.t()) :: {:ok, pid()} | :not_found
   defdelegate pid_for_file(path), to: BufferProcess
 
+  @doc "Returns the identity of the file at `path`, the same for every spelling of it. Reads the file system."
+  @spec file_identity(String.t()) :: String.t()
+  defdelegate file_identity(path), to: BufferProcess
+
+  @doc "Returns the file identities `buffer` is registered under, without calling it. Compare with `file_identity/1`."
+  @spec file_identities(pid()) :: [String.t()]
+  defdelegate file_identities(buffer), to: BufferProcess
+
   @doc """
   Returns the pid for a buffer at `path`, starting one if it doesn't exist.
 

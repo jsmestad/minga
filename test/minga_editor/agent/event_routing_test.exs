@@ -604,10 +604,26 @@ defmodule MingaEditor.Agent.EventRoutingTest do
         |> Events.dispatch(pid, {:file_changed, "/tmp/agent-a.ex", "a0", "a1", "t1", "edit"})
         |> Events.dispatch(pid, {:file_changed, "/tmp/agent-b.ex", "b0", "b1", "t2", "edit"})
 
+      task = Minga.Buffer.Author.minga("task-7")
       activity = state.workspace.agent_ui.view.activity
-      assert Activity.current_file(activity) == "/tmp/agent-b.ex"
-      assert activity.task_files.author == Minga.Buffer.Author.minga("task-7")
+      identity = Minga.Buffer.file_identity("/tmp/agent-b.ex")
+      assert Activity.current_file(activity, task) == {identity, "/tmp/agent-b.ex"}
+      assert activity.task_files.author == task
       assert MingaEditor.StatusBar.Data.from_state(state).common.minga_file == "/tmp/agent-b.ex"
+
+      # A new task on the same Session process names nothing until it edits a file of its own.
+      next = %{
+        connection
+        | target: MingaAgent.Session.ConnectionTarget.new(pid, "task-8", nil, make_ref())
+      }
+
+      state =
+        TraditionalWorkflow.install_agent_ui(
+          state,
+          UIState.project_connection(state.workspace.agent_ui, next)
+        )
+
+      assert MingaEditor.StatusBar.Data.from_state(state).common.minga_file == nil
     end
 
     test "same-process conversation restore clears the old review and ignores a queued file change" do

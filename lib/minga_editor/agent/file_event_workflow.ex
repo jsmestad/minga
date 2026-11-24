@@ -258,17 +258,18 @@ defmodule MingaEditor.Agent.FileEventWorkflow do
   @spec record_file_activity(EditorState.t(), String.t()) :: EditorState.t()
   defp record_file_activity(state, path) do
     ui = state.workspace.agent_ui
-    activity = Activity.record_file(ui.view.activity, task_author(ui), path)
+    identity = Minga.Buffer.file_identity(path)
+
+    activity =
+      Activity.record_file(
+        ui.view.activity,
+        Activity.task_author(UIState.task_id(ui)),
+        path,
+        identity
+      )
+
     TraditionalWorkflow.install_agent_ui(state, UIState.replace_activity(ui, activity))
   end
-
-  # The task is the connected Session; its id is the task id its edits carry (#4047).
-  @spec task_author(UIState.t()) :: Minga.Buffer.Author.t() | nil
-  defp task_author(%UIState{connection: %{target: %{session_id: session_id}}})
-       when is_binary(session_id),
-       do: Minga.Buffer.Author.minga(session_id)
-
-  defp task_author(%UIState{}), do: nil
 
   @spec track_active_shell_agent_file(EditorState.t(), String.t()) :: EditorState.t()
   defp track_active_shell_agent_file(state, path) do

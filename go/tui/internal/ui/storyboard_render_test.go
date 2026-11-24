@@ -115,9 +115,8 @@ func renderStoryboardTranscript(t *testing.T, transcript storyboardTranscript) (
 	if model.lastFrameOutcome != frameOutcomeApplied {
 		t.Fatalf("%s: the last frame was not applied (outcome %v)", transcript.Scenario, model.lastFrameOutcome)
 	}
-	// The BEAM laid the scenario out for the grid the TUI reports below its header; a different grid means the frame
-	// would place BEAM surfaces (overlay bands, which-key) over the header or the modeline. Fix tui_header_rows/1 in
-	// test/support/storyboard/render.ex.
+	// The BEAM laid the scenario out for the grid the TUI reports below its header; a different grid means the frame would place BEAM surfaces (overlay bands, which-key) over the header or the modeline.
+	// Fix tui_header_rows/1 in test/support/storyboard/render.ex.
 	if grid := int(model.layout.gridSize().rows); transcript.GridRows > 0 && grid != transcript.GridRows {
 		t.Fatalf("%s: the TUI reports a %d-row grid at %s, but the transcript was laid out for %d rows", transcript.Scenario, grid, transcript.Size, transcript.GridRows)
 	}

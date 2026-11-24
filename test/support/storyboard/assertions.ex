@@ -224,13 +224,16 @@ defmodule Minga.Test.Storyboard.Assertions do
         flunk("expected a modeline segment in the #{state} state, segments: #{summary(segments)}")
 
       segment ->
-        # The words may say where Minga works ("Minga here"); the label always names the state.
-        spoken = Tokens.state(state).accessibility_label
+        # The label always names the state. The words name it too, except that working Minga may say where it works
+        # instead ("Minga here", "Minga editing retry.ex").
+        text = String.downcase(segment.text)
+        says_where? = state == :working and Regex.match?(~r/\b(here|editing )/, text)
 
-        assert String.contains?(String.downcase(segment.text), String.downcase(word)) or
-                 String.starts_with?(segment.label, spoken),
-               "modeline #{segment.id} is #{state} but says #{inspect(segment.text)} " <>
-                 "(#{inspect(segment.label)}), not #{inspect(word)} or #{inspect(spoken)}"
+        assert String.contains?(text, String.downcase(word)) or says_where?,
+               "modeline #{segment.id} is #{state} but says #{inspect(segment.text)}, not #{inspect(word)}"
+
+        assert String.contains?(String.downcase(segment.label), String.downcase(word)),
+               "modeline #{segment.id} is #{state} but its label #{inspect(segment.label)} does not say #{inspect(word)}"
 
         expected = Theme.state_color(theme!(model), state)
 

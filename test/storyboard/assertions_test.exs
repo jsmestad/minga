@@ -83,7 +83,17 @@ defmodule Minga.Storyboard.AssertionsTest do
     test "state words come from the tokens and draw in the state's colour role" do
       working = String.downcase(Tokens.state_word(:working))
       fg = Theme.state_color(@theme, :working)
-      minga = %Segment{id: :minga, text: "Minga #{working} 2/3", fg: fg, bg: 0, state: :working}
+      spoken = Tokens.state(:working).accessibility_label
+
+      minga = %Segment{
+        id: :minga,
+        text: "Minga #{working} 2/3",
+        fg: fg,
+        bg: 0,
+        state: :working,
+        label: spoken
+      }
+
       ok = model(colored: [minga])
       assert_state(ok, :modeline, :working)
 
@@ -93,8 +103,14 @@ defmodule Minga.Storyboard.AssertionsTest do
         assert_state(wrong, :modeline, :working)
       end
 
-      here = %{minga | text: "Minga here 2/3", label: "Minga is working, in this file"}
+      here = %{minga | text: "Minga here 2/3", label: spoken <> ", in this file"}
       assert_state(model(colored: [here]), :modeline, :working)
+
+      unlabelled = model(colored: [%{minga | label: ""}])
+
+      assert_raise ExUnit.AssertionError, ~r/label/, fn ->
+        assert_state(unlabelled, :modeline, :working)
+      end
 
       wordless = model(colored: [%{minga | text: "Minga 2/3"}])
 

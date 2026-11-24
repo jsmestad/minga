@@ -8,6 +8,8 @@ defmodule MingaEditor.StatusBar.DataTest do
   alias Minga.Config.Options
   alias Minga.Mode.VisualState
   alias MingaAgent.Subagent.Handle
+  alias MingaEditor.Agent.Activity
+  alias MingaEditor.Agent.UIState
   alias MingaEditor.Shell.Traditional.WhichKeyWorkflow
   alias MingaEditor.StatusBar.Data
   alias Minga.RenderModel.UI.StatusBar.Cursor, as: StatusCursor
@@ -583,6 +585,46 @@ defmodule MingaEditor.StatusBar.DataTest do
       assert idle.common.needs_you_count == 0
     end
 
+    @tag :tmp_dir
+    test "Minga is here when its file is the active buffer's file, however each path is spelled",
+         %{tmp_dir: dir} do
+      real = Path.join(dir, "real")
+      File.mkdir_p!(real)
+      File.write!(Path.join(real, "retry.ex"), "")
+      File.ln_s!(real, Path.join(dir, "link"))
+
+      buf =
+        start_supervised!(
+          {BufferProcess,
+           [
+             file_path: Path.join([dir, "link", "retry.ex"]),
+             events_registry: :"data_test_events_#{System.unique_integer([:positive])}"
+           ]},
+          id: :symlinked_buffer
+        )
+
+      task = Minga.Buffer.Author.minga("task-1")
+      tool_path = Path.join(real, "retry.ex")
+
+      activity =
+        Activity.record_file(%Activity{}, task, tool_path, Minga.Buffer.file_identity(tool_path))
+
+      ui =
+        %SessionState{}.agent_ui
+        |> UIState.project_connection(connection("task-1"))
+        |> UIState.replace_activity(activity)
+
+      state = %EditorState{
+        frontend: %MingaEditor.State.Frontend{port_manager: self()},
+        workspace: %{workspace_with_buffer(buf) | agent_ui: ui},
+        shell_runtime:
+          Runtime.new(Registry.get(:traditional), %MingaEditor.Shell.Traditional.State{})
+      }
+
+      common = Data.from_state(state).common
+      assert {common.minga_file, common.minga_here?} == {tool_path, true}
+    end
+
     test "a config that did not load is carried to the problem segment until a load succeeds" do
       state = state_with_tab_bar(TabBar.new(Tab.new_file(1, "main.ex")))
       assert Data.from_state(state).common.config_problem == nil
@@ -598,6 +640,22 @@ defmodule MingaEditor.StatusBar.DataTest do
       assert Data.from_state(cleared).common.config_problem == nil
     end
 
+    test "a failed reload reports the global config's state, and a rejected or crashed one keeps the last" do
+      state = state_with_tab_bar(TabBar.new(Tab.new_file(1, "main.ex")))
+      error = {:error, "Config reload error"}
+
+      eval_failed = MingaEditor.ConfigReloadEffect.finish(state, error, {:loaded, "bad config"})
+      assert Data.from_state(eval_failed).common.config_problem == "bad config"
+
+      rejected = MingaEditor.ConfigReloadEffect.finish(eval_failed, error, :unchanged)
+      assert Data.from_state(rejected).common.config_problem == "bad config"
+
+      # A project or extension error after the global config evaluated is not "defaults".
+      evaluated = MingaEditor.ConfigReloadEffect.finish(eval_failed, error, {:loaded, nil})
+      assert Data.from_state(evaluated).common.config_problem == nil
+      assert MingaEditor.ConfigReloadEffect.finish(state, error).feedback.config_problem == nil
+    end
+
     test "a crashed language server is named for the problem segment" do
       state = state_with_tab_bar(TabBar.new(Tab.new_file(1, "main.ex")))
 
@@ -608,6 +666,18 @@ defmodule MingaEditor.StatusBar.DataTest do
 
       assert Data.from_state(state).common.failed_language_servers == ["elixir_ls"]
     end
+  end
+
+  defp connection(session_id) do
+    %MingaAgent.Session.ConnectionSnapshot{
+      target: MingaAgent.Session.ConnectionTarget.new(self(), session_id, nil, make_ref()),
+      conversation: make_ref(),
+      credential_readiness: :checking,
+      model_selection: nil,
+      provider_phase: :running,
+      operation: :idle,
+      problem: nil
+    }
   end
 
   defp state_with_tab_bar(tab_bar) do
