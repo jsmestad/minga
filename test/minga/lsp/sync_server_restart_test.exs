@@ -21,7 +21,7 @@ defmodule Minga.LSP.SyncServerRestartTest do
 
   # Each test owns its LSP supervisor, diagnostics store, event bus, options and SyncServer.
   # A restart or a client crash here never touches the application's singletons.
-  setup %{tmp_dir: dir} do
+  setup %{tmp_dir: dir} = context do
     id = System.unique_integer([:positive])
     events = :"sync_restart_events_#{id}"
     start_supervised!(Events.child_spec(name: events))
@@ -31,7 +31,9 @@ defmodule Minga.LSP.SyncServerRestartTest do
     start_supervised!({LSPSupervisor, name: lsp_supervisor})
 
     File.write!(Path.join(dir, @root_marker), "")
-    config = %{MockLSPServer.server_config() | root_markers: [@root_marker]}
+    incremental_sync = Map.get(context, :incremental_sync, false)
+    server_config = MockLSPServer.server_config(incremental_sync: incremental_sync)
+    config = %{server_config | root_markers: [@root_marker]}
     path = Path.join(dir, "document.txt")
     File.write!(path, "hello")
     root = RootDetector.find_root(path, config.root_markers)
@@ -167,6 +169,62 @@ defmodule Minga.LSP.SyncServerRestartTest do
 
       assert server_text(replacement, uri) == BufferProcess.content(buffer)
     end
+
+    @tag :capture_log
+    @tag incremental_sync: true
+    test "edits queued before the failure are not sent twice to the replacement", ctx do
+      %{sync: sync, client: client, buffer: buffer, uri: uri} = ctx
+
+      :ok = BufferProcess.insert_text(buffer, "a")
+      hold_queued_change(sync, buffer)
+
+      ref = Process.monitor(client)
+      _request = Client.request(client, "mock/oversized_frame", %{})
+
+      assert_receive {:DOWN, ^ref, :process, ^client,
+                      {:framing_error, {:body_too_large, 60_000_000}}},
+                     @response_timeout
+
+      replacement = await_replacement(sync, buffer, client)
+      await_ready(replacement)
+
+      :ok = BufferProcess.insert_text(buffer, "b")
+      flush_changes(sync, buffer, replacement)
+
+      events =
+        for %{"uri" => ^uri} = event <- transcript(replacement)["events"],
+            do: {event["method"], event["version"], event["changeKind"]}
+
+      assert events == [
+               {"textDocument/didOpen", 1, nil},
+               {"textDocument/didChange", 2, "incremental"}
+             ]
+
+      assert server_text(replacement, uri) == BufferProcess.content(buffer)
+    end
+  end
+
+  # Keeps the buffer's latest change queued in SyncServer by canceling its debounce timer.
+  # The queue then outlives the client failure, as it does when the failure beats the debounce.
+  defp hold_queued_change(sync, buffer, attempts \\ 200) do
+    if Map.has_key?(:sys.get_state(sync.name).pending_changes, buffer) do
+      :sys.replace_state(sync.name, &cancel_debounce(&1, buffer))
+
+      assert Map.has_key?(:sys.get_state(sync.name).pending_changes, buffer)
+    else
+      assert attempts > 0, "the edit never reached SyncServer"
+
+      receive do
+      after
+        5 -> hold_queued_change(sync, buffer, attempts - 1)
+      end
+    end
+  end
+
+  defp cancel_debounce(state, buffer) do
+    {timer, timers} = Map.pop(state.debounce_timers, buffer)
+    if timer, do: Process.cancel_timer(timer)
+    %{state | debounce_timers: timers}
   end
 
   defp start_sync_server(sync) do
