@@ -417,7 +417,7 @@ export function mountHeroTour(root: HTMLElement): void {
           <div class="specimen-row"><span class="ml-done">●</span> Read retry.ex and split work across 4 subagents</div>
           <div class="specimen-row"><span class="ml-minga">◐</span> Inspecting ${esc(worker.name)} in right split</div>
           <label class="tour-draft-label" for="ht-parent-draft">Your unsent draft (stays preserved while stepping siblings):</label>
-          <input id="ht-parent-draft" class="tour-draft-input" type="text" data-ht-draft value="${esc(state.parentDraft)}">
+          <input id="ht-parent-draft" class="tour-draft-input" type="text" data-ht-draft>
         </div>
         <div class="specimen-pane">
           <div class="specimen-pane-head">
@@ -442,6 +442,8 @@ export function mountHeroTour(root: HTMLElement): void {
         </div>
       </div>
     `;
+    const draftInput = specimen.querySelector<HTMLInputElement>("[data-ht-draft]");
+    if (draftInput) draftInput.value = state.parentDraft;
   }
 
   function renderTasks(): void {

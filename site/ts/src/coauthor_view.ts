@@ -148,7 +148,7 @@ export function mountCoAuthorSim(root: HTMLElement): void {
             </div>
             <div class="specimen-row"><span class="ml-dim">Unsent draft stays untouched while you inspect siblings:</span></div>
             <label class="sr-only" for="ca-draft-input">Parent composer draft</label>
-            <input id="ca-draft-input" class="ca-draft-input" type="text" data-ca-draft value="${esc(state.parentDraft)}">
+            <input id="ca-draft-input" class="ca-draft-input" type="text" data-ca-draft>
           </div>
           <div class="ca-peek-worker">
             <div class="specimen-pane-head">
@@ -289,6 +289,8 @@ export function mountCoAuthorSim(root: HTMLElement): void {
           <ul class="mission-list">${missionsHtml}</ul>
         </aside>
       </div>`;
+    const draftInput = root.querySelector<HTMLInputElement>("[data-ca-draft]");
+    if (draftInput) draftInput.value = state.parentDraft;
   }
 
   root.addEventListener("click", (event) => {

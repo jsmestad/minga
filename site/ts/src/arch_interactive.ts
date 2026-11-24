@@ -2,7 +2,7 @@
    1. Live side-by-side typing fault simulator (Single-Loop Editor vs Minga BEAM Isolation).
    2. Airy, syntax-highlighted 4-step Staged Overlay & 3-Way Merge visualizer. */
 
-import { highlightElixirLine } from "./highlight.ts";
+import { highlightElixirLine, renderElixirLineDom } from "./highlight.ts";
 
 export type FaultKind = "none" | "lsp_hang" | "parser_crash" | "hook_error";
 
@@ -327,55 +327,101 @@ export function mountArchFaultMap(root: HTMLElement): void {
     const hookErr = state.fault === "hook_error" && state.remainingMs > 0;
 
     if (legacyPane) {
-      let badge = '<span class="topo-pill is-ok">0.6ms · Ready</span>';
-      let body = `<div class="iso-code-line">${highlightElixirLine(state.legacyText)}<span class="iso-caret"></span></div>`;
+      let badgeText = "0.6ms · Ready";
+      let badgeCls = "is-ok";
       let foot = "Shared main loop: editor, plugins, and LSP share one thread.";
+      let stallText = "";
 
       if (state.legacyDead) {
-        badge = '<span class="topo-pill is-fail">CRASHED · SIGSEGV</span>';
-        body = `<div class="iso-dead">Process terminated (signal 11). Unsaved buffer changes lost.</div>`;
+        badgeText = "CRASHED · SIGSEGV";
+        badgeCls = "is-fail";
         foot = "In-process C parser took down the entire editor process.";
       } else if (frozen) {
-        badge = `<span class="topo-pill is-fail">FROZEN · ${secs}s LEFT</span>`;
-        body = `<div class="iso-code-line is-frozen">${highlightElixirLine(state.legacyText)}</div><div class="iso-stall">UI thread blocked · ${state.legacyQueued.length} keystroke${state.legacyQueued.length === 1 ? "" : "s"} stalled in queue...</div>`;
+        badgeText = `FROZEN · ${secs}s LEFT`;
+        badgeCls = "is-fail";
+        stallText = `UI thread blocked · ${state.legacyQueued.length} keystroke${state.legacyQueued.length === 1 ? "" : "s"} stalled in queue...`;
         foot = "Cursor stopped responding until LSP finishes blocking.";
       } else if (hookErr) {
-        badge = '<span class="topo-pill is-fail">SAVE ABORTED</span>';
-        body = `<div class="iso-code-line">${highlightElixirLine(state.legacyText)}</div><div class="iso-stall">Unhandled MatchError in :after_save interrupted buffer save.</div>`;
+        badgeText = "SAVE ABORTED";
+        badgeCls = "is-fail";
+        stallText = "Unhandled MatchError in :after_save interrupted buffer save.";
         foot = "Uncaught hook exception surfaced directly on the editor loop.";
       }
 
       legacyPane.className = `iso-editor ${state.legacyDead || frozen || hookErr ? "is-broken" : ""}`;
       legacyPane.innerHTML = `
-        <div class="iso-ed-head"><strong>Single-Loop Editor</strong>${badge}</div>
-        <div class="iso-ed-body">${body}</div>
-        <div class="iso-ed-foot">${foot}</div>
+        <div class="iso-ed-head"><strong>Single-Loop Editor</strong><span class="topo-pill ${badgeCls}" data-iso-lbadge></span></div>
+        <div class="iso-ed-body" data-iso-lbody></div>
+        <div class="iso-ed-foot" data-iso-lfoot></div>
       `;
+      const lBadge = legacyPane.querySelector<HTMLElement>("[data-iso-lbadge]");
+      const lBody = legacyPane.querySelector<HTMLElement>("[data-iso-lbody]");
+      const lFoot = legacyPane.querySelector<HTMLElement>("[data-iso-lfoot]");
+      if (lBadge) lBadge.textContent = badgeText;
+      if (lFoot) lFoot.textContent = foot;
+      if (lBody) {
+        if (state.legacyDead) {
+          const deadEl = document.createElement("div");
+          deadEl.className = "iso-dead";
+          deadEl.textContent = "Process terminated (signal 11). Unsaved buffer changes lost.";
+          lBody.appendChild(deadEl);
+        } else {
+          const codeEl = document.createElement("div");
+          codeEl.className = frozen ? "iso-code-line is-frozen" : "iso-code-line";
+          renderElixirLineDom(codeEl, state.legacyText);
+          if (!frozen) {
+            const caret = document.createElement("span");
+            caret.className = "iso-caret";
+            codeEl.appendChild(caret);
+          }
+          lBody.appendChild(codeEl);
+          if (stallText) {
+            const stallEl = document.createElement("div");
+            stallEl.className = "iso-stall";
+            stallEl.textContent = stallText;
+            lBody.appendChild(stallEl);
+          }
+        }
+      }
     }
 
     if (mingaPane) {
-      let badge = '<span class="topo-pill is-ok">0.4ms · INSTANT</span>';
+      let badgeText = "0.4ms · INSTANT";
+      let badgeCls = "is-ok";
       let sideStatus = "All BEAM supervisors healthy";
       if (frozen) {
-        badge = '<span class="topo-pill is-ok">0.4ms · INSTANT</span>';
         sideStatus = `ElixirLS reindexing in separate process (${secs}s) · typing unaffected`;
       } else if (state.mingaParserPlain) {
-        badge = '<span class="topo-pill is-warn">RESPAWNING ZIG PORT</span>';
+        badgeText = "RESPAWNING ZIG PORT";
+        badgeCls = "is-warn";
         sideStatus = "Highlighting paused for 14ms while Zig port respawns · buffer 100% intact";
       } else if (state.fault === "parser_crash" && !state.mingaParserPlain) {
-        badge = '<span class="topo-pill is-ok">PORT RESPAWNED (14ms)</span>';
+        badgeText = "PORT RESPAWNED (14ms)";
         sideStatus = "Syntax colors restored automatically · 0 characters lost";
       } else if (hookErr) {
-        badge = '<span class="topo-pill is-ok">SAVED ✓ · TASK ISOLATED</span>';
+        badgeText = "SAVED ✓ · TASK ISOLATED";
         sideStatus = "Hook MatchError caught in async BEAM Task · typing unaffected";
       }
 
-      const renderedCode = state.mingaParserPlain ? esc(state.mingaText) : highlightElixirLine(state.mingaText);
       mingaPane.innerHTML = `
-        <div class="iso-ed-head"><strong>Minga (BEAM Isolated)</strong>${badge}</div>
-        <div class="iso-ed-body"><div class="iso-code-line">${renderedCode}<span class="iso-caret is-alive"></span></div></div>
-        <div class="iso-ed-foot">${esc(sideStatus)}</div>
+        <div class="iso-ed-head"><strong>Minga (BEAM Isolated)</strong><span class="topo-pill ${badgeCls}" data-iso-mbadge></span></div>
+        <div class="iso-ed-body" data-iso-mbody></div>
+        <div class="iso-ed-foot" data-iso-mfoot></div>
       `;
+      const mBadge = mingaPane.querySelector<HTMLElement>("[data-iso-mbadge]");
+      const mBody = mingaPane.querySelector<HTMLElement>("[data-iso-mbody]");
+      const mFoot = mingaPane.querySelector<HTMLElement>("[data-iso-mfoot]");
+      if (mBadge) mBadge.textContent = badgeText;
+      if (mFoot) mFoot.textContent = sideStatus;
+      if (mBody) {
+        const codeEl = document.createElement("div");
+        codeEl.className = "iso-code-line";
+        renderElixirLineDom(codeEl, state.mingaText, state.mingaParserPlain);
+        const caret = document.createElement("span");
+        caret.className = "iso-caret is-alive";
+        codeEl.appendChild(caret);
+        mBody.appendChild(codeEl);
+      }
     }
   }
 
@@ -393,13 +439,13 @@ export function mountArchFaultMap(root: HTMLElement): void {
         </div>
         <div class="iso-input-bar">
           <label for="iso-live-input">Type here while faults run:</label>
-          <input id="iso-live-input" class="iso-input" type="text" data-iso-input value="${esc(state.mingaText)}" spellcheck="false" autocomplete="off">
+          <input id="iso-live-input" class="iso-input" type="text" data-iso-input spellcheck="false" autocomplete="off">
         </div>
         <div class="iso-compare">
           <div class="iso-editor" data-iso-legacy></div>
           <div class="iso-editor is-minga" data-iso-minga></div>
         </div>
-        <div class="iso-notice" data-iso-notice aria-live="polite">${esc(state.notice)}</div>
+        <div class="iso-notice" data-iso-notice aria-live="polite"></div>
       </div>
     `;
     syncLivePanels();
