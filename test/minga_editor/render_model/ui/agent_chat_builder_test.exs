@@ -165,6 +165,41 @@ defmodule MingaEditor.RenderModel.UI.AgentChatBuilderTest do
       end
     end
 
+    test "the notice headline is the lifecycle's own and the draft note names the bound new-session key" do
+      session = fake_session_pid()
+      request = StartRequest.default()
+      saved = "Your draft is saved. SPC a n starts a new session."
+
+      for editing_model <- [:vim, :cua],
+          {lifecycle, headline, note} <- [
+            {{:conversation, session}, "", ""},
+            {:starting, "Starting Agent", ""},
+            {:unavailable, "No active Agent session", saved},
+            {{:failed, StartFailure.timed_out(request)}, "Agent could not start", saved},
+            {{:failed, StartFailure.session_crashed(self())}, "Agent session stopped", saved},
+            {{:failed, StartFailure.session_crashed(remote_pid())}, "Agent session stopped",
+             saved},
+            {{:failed, StartFailure.missing_credentials()}, "Agent needs setup", saved}
+          ] do
+        ctx = context(session, synced_panel([]), lifecycle: lifecycle)
+        ctx = put_in(ctx.intent.frame.editing_model, editing_model)
+
+        assert %{lifecycle_headline: ^headline, draft_note: ^note} = AgentChatBuilder.build(ctx),
+               "#{editing_model} #{inspect(lifecycle)}"
+      end
+    end
+
+    test "the draft note is shown only where a composer is visible" do
+      session = fake_session_pid()
+      ctx = context(session, synced_panel([]), lifecycle: :unavailable)
+      no_rows = put_in(ctx.prompt.projection.visible_rows, 0)
+
+      assert %{draft_note: ""} = AgentChatBuilder.build(no_rows)
+
+      assert %{lifecycle_headline: "Agent unavailable", draft_note: ""} =
+               AgentChatBuilder.build(%{ctx | prompt: nil})
+    end
+
     test "chat status needs the user only after a failed start" do
       session = fake_session_pid()
       failure = StartFailure.timed_out(StartRequest.default())

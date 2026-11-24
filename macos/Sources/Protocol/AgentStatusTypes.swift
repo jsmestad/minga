@@ -1,10 +1,31 @@
 /// Availability of the chat surface, independent of the current turn.
+/// Every non-conversation lifecycle carries the BEAM's notice copy; this frontend authors none of it.
 public enum AgentChatLifecycle: Equatable, Sendable {
     case conversation
-    case starting
+    case starting(notice: AgentLifecycleNotice)
     /// A failed start: one plain sentence about the cause and the one action that can fix it, if any.
-    case failed(reason: String, remedy: AgentStartRemedy?)
-    case unavailable
+    case failed(reason: String, remedy: AgentStartRemedy?, notice: AgentLifecycleNotice)
+    case unavailable(notice: AgentLifecycleNotice)
+
+    /// The notice shown instead of a live conversation, or nil during a conversation.
+    public var notice: AgentLifecycleNotice? {
+        switch self {
+        case .conversation: nil
+        case .starting(let notice), .failed(_, _, let notice), .unavailable(let notice): notice
+        }
+    }
+}
+
+/// The BEAM-authored copy of a non-conversation chat notice: what happened to the tab, and the draft note shown under it.
+/// An empty note means no note line; the BEAM sends one only when the composer is visible.
+public struct AgentLifecycleNotice: Equatable, Sendable {
+    public let headline: String
+    public let note: String
+
+    public init(headline: String, note: String) {
+        self.headline = headline
+        self.note = note
+    }
 }
 
 /// The one action a failed Agent start offers. The label and key hint come from the BEAM; the frontend never authors remedy copy.

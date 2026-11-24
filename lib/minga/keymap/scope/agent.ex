@@ -22,6 +22,7 @@ defmodule Minga.Keymap.Scope.Agent do
 
   alias Minga.Keymap.Bindings
   alias Minga.Keymap.CUADefaults
+  alias Minga.Keymap.Defaults
 
   import Minga.Keymap.Sigil
 
@@ -101,6 +102,21 @@ defmodule Minga.Keymap.Scope.Agent do
 
       _none ->
         Bindings.new()
+    end
+  end
+
+  @doc """
+  The leader sequence that starts a new local Agent session, read from the given leader trie, or nil when the editing model cannot reach it.
+
+  Vim reaches the leader from chat navigation. CUA reaches it only through the SPC chord, so with `space_leader: :off` CUA has no key for it. A user who rebinds or unbinds `:agent_new_session` changes the hint with the binding.
+  """
+  @spec new_session_key_hint(Bindings.node_t(), :vim | :cua, :chord | :off) :: String.t() | nil
+  def new_session_key_hint(_leader_trie, :cua, :off), do: nil
+
+  def new_session_key_hint(leader_trie, _editing_model, _space_leader) do
+    case Bindings.sequences_for_command(leader_trie, :agent_new_session) do
+      [keys | _longer] -> Bindings.format_sequence([Defaults.leader_key() | keys])
+      [] -> nil
     end
   end
 

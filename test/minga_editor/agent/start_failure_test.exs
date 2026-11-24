@@ -24,22 +24,31 @@ defmodule MingaEditor.Agent.StartFailureTest do
     }
   end
 
-  test "each cause offers one remedy and a plain sentence without Elixir terms" do
-    for {failure, remedy} <- [
-          {StartFailure.catalog_unavailable(@request), {:retry, @request}},
-          {StartFailure.timed_out(@request), {:retry, @request}},
+  test "each cause has a headline, one remedy and a plain sentence without Elixir terms" do
+    could_not_start = "Agent could not start"
+    stopped = "Agent session stopped"
+    setup = "Agent needs setup"
+
+    for {failure, headline, remedy} <- [
+          {StartFailure.catalog_unavailable(@request), could_not_start, {:retry, @request}},
+          {StartFailure.timed_out(@request), could_not_start, {:retry, @request}},
           {StartFailure.session_error({:noproc, {GenServer, :call, []}}, @request),
+           could_not_start, {:retry, @request}},
+          {StartFailure.session_error(:noproc, @request), could_not_start, {:retry, @request}},
+          {StartFailure.session_error({:badmatch, %{a: 1}}, @request), could_not_start,
            {:retry, @request}},
-          {StartFailure.session_error(:noproc, @request), {:retry, @request}},
-          {StartFailure.session_error({:badmatch, %{a: 1}}, @request), {:retry, @request}},
-          {StartFailure.no_workspace(@request), {:retry, @request}},
-          {StartFailure.session_crashed(self()), {:retry, StartRequest.default()}},
-          {StartFailure.session_crashed(remote_pid()), nil},
-          {StartFailure.provider_startup_failed(connection(:configured)), {:retry, :provider}},
-          {StartFailure.provider_startup_failed(connection(:checking)), {:retry, :provider}},
-          {StartFailure.provider_startup_failed(connection(:unconfigured)), :set_up_provider},
-          {StartFailure.missing_credentials(), :set_up_provider}
+          {StartFailure.no_workspace(@request), could_not_start, {:retry, @request}},
+          {StartFailure.session_crashed(self()), stopped, {:retry, StartRequest.default()}},
+          {StartFailure.session_crashed(remote_pid()), stopped, nil},
+          {StartFailure.provider_startup_failed(connection(:configured)), could_not_start,
+           {:retry, :provider}},
+          {StartFailure.provider_startup_failed(connection(:checking)), could_not_start,
+           {:retry, :provider}},
+          {StartFailure.provider_startup_failed(connection(:unconfigured)), setup,
+           :set_up_provider},
+          {StartFailure.missing_credentials(), setup, :set_up_provider}
         ] do
+      assert failure.headline == headline
       assert failure.remedy == remedy
       assert failure.message =~ ~r/^[A-Z][^{}%:#<>]*\.$/
     end

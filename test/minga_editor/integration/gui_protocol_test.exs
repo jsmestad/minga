@@ -345,6 +345,8 @@ defmodule Minga.Integration.GUIProtocolTest do
           %AgentChat{
             visible?: true,
             lifecycle: Map.get(d, :lifecycle, :conversation),
+            lifecycle_headline: Map.get(d, :lifecycle_headline, ""),
+            draft_note: Map.get(d, :draft_note, ""),
             status: Map.get(d, :status, :idle),
             model_name: Map.get(d, :model, ""),
             thinking_level: Map.get(d, :thinking_level, ""),
@@ -397,7 +399,15 @@ defmodule Minga.Integration.GUIProtocolTest do
             {:unavailable, "unavailable", "", 0, "", ""}
           ] do
         command =
-          encode_gui_agent_chat(%{visible: true, prompt: "unfinished", lifecycle: lifecycle})
+          encode_gui_agent_chat(%{
+            visible: true,
+            prompt: "unfinished",
+            lifecycle: lifecycle,
+            lifecycle_headline: "Agent héadline",
+            draft_note: "Your draft is saved. SPC a n starts a new session."
+          })
+
+        decoded = round_trip(harness, command, "gui_agent_chat")
 
         assert %{
                  "visible" => true,
@@ -407,7 +417,15 @@ defmodule Minga.Integration.GUIProtocolTest do
                  "lifecycle_remedy" => ^remedy,
                  "lifecycle_action_label" => ^action,
                  "lifecycle_key_hint" => ^key
-               } = round_trip(harness, command, "gui_agent_chat")
+               } = decoded
+
+        # A live conversation sends no lifecycle section, so no notice copy.
+        {headline, note} =
+          if lifecycle == :conversation,
+            do: {"", ""},
+            else: {"Agent héadline", "Your draft is saved. SPC a n starts a new session."}
+
+        assert %{"lifecycle_headline" => ^headline, "lifecycle_note" => ^note} = decoded
       end
     end
 

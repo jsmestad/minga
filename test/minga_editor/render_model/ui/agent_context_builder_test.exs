@@ -121,7 +121,8 @@ defmodule MingaEditor.RenderModel.UI.AgentContextBuilderTest do
 
       for {failure, task} <- [
             {MingaEditor.Agent.StartFailure.timed_out(request), "Agent could not start"},
-            {MingaEditor.Agent.StartFailure.missing_credentials(), "Agent needs setup"}
+            {MingaEditor.Agent.StartFailure.missing_credentials(), "Agent needs setup"},
+            {MingaEditor.Agent.StartFailure.session_crashed(self()), "Agent session stopped"}
           ] do
         ui = UIState.fail_start(UIState.new(), failure)
 
@@ -132,7 +133,9 @@ defmodule MingaEditor.RenderModel.UI.AgentContextBuilderTest do
                  progress: %{active_action: action}
                } = AgentContextBuilder.build(context(ui, shell))
 
-        # The card reads headline then cause, never the headline twice.
+        # The card reads the failure's own headline, the same one the chat
+        # notice shows, then its cause, never the headline twice.
+        assert task == failure.headline
         assert action == failure.message
       end
     end

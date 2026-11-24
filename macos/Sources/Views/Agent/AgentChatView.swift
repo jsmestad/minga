@@ -67,7 +67,7 @@ public struct AgentChatView: View {
             .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { headerHeight = $0 }
 
             if state.lifecycle != .conversation {
-                lifecycleNotice
+                lifecycleNoticeView
             }
             AgentConversationList(state: state, sendAction: state.lifecycle == .conversation ? sendAction : nil)
 
@@ -111,13 +111,13 @@ public struct AgentChatView: View {
         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { availableHeight = $0 }
     }
 
-    /// A non-conversation chat: a glyph, a headline, the BEAM's sentence about the cause, and the one action it offers.
-    /// The action label and key hint are rendered exactly as sent; this view authors no remedy copy.
-    private var lifecycleNotice: some View {
+    /// A non-conversation chat: a glyph, a headline, the BEAM's sentence about the cause, the one action it offers, and the draft note.
+    /// The headline, action label, key hint and note are rendered exactly as sent; this view authors no notice copy.
+    private var lifecycleNoticeView: some View {
         HStack(alignment: .firstTextBaseline, spacing: Spacing.md) {
             lifecycleGlyph
             VStack(alignment: .leading, spacing: Spacing.xs) {
-                Text(lifecycleHeadline)
+                Text(lifecycleCopy?.headline ?? "")
                     .font(Typography.font(.emphasis, weight: .semibold))
                     .foregroundStyle(theme.agentTextFg)
                 if let reason = lifecycleReason, !reason.isEmpty {
@@ -140,8 +140,8 @@ public struct AgentChatView: View {
                     }
                     .padding(.top, Spacing.xs)
                 }
-                if showsDraftNote {
-                    Text("Your draft is saved. SPC a n starts a new session.")
+                if let note = lifecycleCopy?.note, !note.isEmpty {
+                    Text(note)
                         .font(Typography.font(.small))
                         .foregroundStyle(theme.agentMutedFg)
                 }
@@ -174,33 +174,16 @@ public struct AgentChatView: View {
         }
     }
 
-    private var lifecycleHeadline: String {
-        switch state.lifecycle {
-        case .conversation: ""
-        case .starting: "Starting Agent"
-        case .failed(_, let remedy?) where remedy.kind == .setUpProvider: "Agent needs setup"
-        case .failed(_, .some): "Agent could not start"
-        case .failed(_, .none): "Agent unavailable"
-        case .unavailable: "No active Agent session"
-        }
-    }
+    private var lifecycleCopy: AgentLifecycleNotice? { state.lifecycle.notice }
 
     private var lifecycleReason: String? {
-        if case .failed(let reason, _) = state.lifecycle { return reason }
+        if case .failed(let reason, _, _) = state.lifecycle { return reason }
         return nil
     }
 
     private var lifecycleRemedy: AgentStartRemedy? {
-        if case .failed(_, let remedy) = state.lifecycle { return remedy }
+        if case .failed(_, let remedy, _) = state.lifecycle { return remedy }
         return nil
-    }
-
-    /// The draft survives a failed or missing session; say so where a composer is shown.
-    private var showsDraftNote: Bool {
-        switch state.lifecycle {
-        case .failed, .unavailable: state.promptVisibleRows > 0
-        case .conversation, .starting: false
-        }
     }
 
     private func childAction<ChildAction: Sendable>(_ translate: @escaping @Sendable (ChildAction) -> Action) -> ViewActionHandler<ChildAction>? {

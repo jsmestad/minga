@@ -66,4 +66,30 @@ defmodule Minga.Keymap.Scope.AgentStartRemedyTest do
       assert Bindings.lookup(trie, bound) == {:command, command}
     end
   end
+
+  describe "new_session_key_hint/3" do
+    test "names the leader sequence bound to a new session wherever the leader is reachable" do
+      defaults = Minga.Keymap.Defaults.leader_trie()
+
+      for {model, space_leader, hint} <- [
+            {:vim, :chord, "SPC a n"},
+            {:vim, :off, "SPC a n"},
+            {:cua, :chord, "SPC a n"},
+            {:cua, :off, nil}
+          ] do
+        assert AgentScope.new_session_key_hint(defaults, model, space_leader) == hint,
+               "#{model} with space_leader #{space_leader}"
+      end
+    end
+
+    test "follows a rebinding and omits the key when nothing is bound" do
+      rebound =
+        Minga.Keymap.Defaults.leader_trie()
+        |> Bindings.unbind(KeyParser.parse!("a n"))
+        |> Bindings.bind(KeyParser.parse!("o a"), :agent_new_session, "New session")
+
+      assert AgentScope.new_session_key_hint(rebound, :vim, :chord) == "SPC o a"
+      assert AgentScope.new_session_key_hint(Bindings.new(), :vim, :chord) == nil
+    end
+  end
 end
