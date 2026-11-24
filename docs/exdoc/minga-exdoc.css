@@ -1,0 +1,639 @@
+/* Stark Systems ExDoc theme: aligns /docs/ with mingacode.dev in light and dark mode. */
+
+@font-face {
+  font-family: "Instrument Serif";
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/fonts/instrument-serif-italic.woff2") format("woff2");
+}
+
+:root {
+  --minga-topbar-h: 3.75rem;
+  --minga-bg: #ffffff;
+  --minga-bg-subtle: #f6f7f9;
+  --minga-border: #e2e5ec;
+  --minga-border-strong: #111317;
+  --minga-text: #0b0c0f;
+  --minga-text-secondary: #3c424d;
+  --minga-text-muted: #6b7382;
+  --minga-accent: #6b3fa3;
+  --minga-accent-hover: #532e85;
+  --minga-accent-soft: rgba(107, 63, 163, 0.06);
+
+  /* Override ExDoc 0.40.5 tokens for Stark Systems Light */
+  --sansFontFamily: "Helvetica Neue", -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Arial, sans-serif;
+  --monoFontFamily: "SF Mono", ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace;
+  --borderRadius-lg: 0px;
+  --borderRadius-base: 0px;
+  --borderRadius-sm: 0px;
+  --borderWidth: 1px;
+
+  --main: #6b3fa3;
+  --mainDark: #532e85;
+  --mainDarkest: #432270;
+  --mainLight: #a463e6;
+  --mainLightest: #ca9ee6;
+  --link-color: #6b3fa3;
+  --link-visited-color: #532e85;
+
+  --background: #ffffff;
+  --contrast: #0b0c0f;
+  --textBody: #3c424d;
+  --textHeaders: #0b0c0f;
+  --textDetailAccent: #6b3fa3;
+  --textDetailBackground: #f6f7f9;
+  --blockquoteBackground: #f6f7f9;
+  --blockquoteBorder: #a463e6;
+  --tableHeadBorder: #e2e5ec;
+  --tableBodyBorder: #e2e5ec;
+
+  --codeBackground: #f3f4f7;
+  --codeBorder: #e2e5ec;
+
+  --sidebarBackground: #f6f7f9;
+  --sidebarHeader: #ffffff;
+  --sidebarAccentMain: #0b0c0f;
+  --sidebarItem: #3c424d;
+  --sidebarMuted: #6b7382;
+  --sidebarSubheadings: #6b7382;
+  --sidebarHover: #0b0c0f;
+  --sidebarActiveItem: #6b3fa3;
+  --sidebarLanguageAccentBar: #6b3fa3;
+  --sidebarInactiveItemBorder: #c3c9d4;
+  --sidebarInactiveItemMarker: #c3c9d4;
+
+  --searchSearch: #f6f7f9;
+  --searchBarBorder: #e2e5ec;
+  --searchBarFocusColor: #6b3fa3;
+  --searchBarBorderColor: rgba(107, 63, 163, 0.25);
+  --searchAccentMain: #0b0c0f;
+}
+
+body.dark {
+  --minga-bg: #090a0d;
+  --minga-bg-subtle: #14171f;
+  --minga-border: #212530;
+  --minga-border-strong: #464e61;
+  --minga-text: #f2f4f8;
+  --minga-text-secondary: #a4acb9;
+  --minga-text-muted: #6c7485;
+  --minga-accent: #ca9ee6;
+  --minga-accent-hover: #dcb8f2;
+  --minga-accent-soft: rgba(202, 158, 230, 0.08);
+
+  /* Override ExDoc 0.40.5 tokens for Stark Systems Dark */
+  --main: #ca9ee6;
+  --mainDark: #b584d6;
+  --mainDarkest: #9b73b8;
+  --mainLight: #ca9ee6;
+  --mainLightest: #dcb8f2;
+  --link-color: #ca9ee6;
+  --link-visited-color: #dcb8f2;
+
+  --background: #090a0d;
+  --contrast: #f2f4f8;
+  --textBody: #d0d5e0;
+  --textHeaders: #f2f4f8;
+  --textDetailAccent: #ca9ee6;
+  --textDetailBackground: #14171f;
+  --blockquoteBackground: #14171f;
+  --blockquoteBorder: #ca9ee6;
+  --tableHeadBorder: #212530;
+  --tableBodyBorder: #212530;
+
+  --codeBackground: #14171f;
+  --codeBorder: #242936;
+
+  --sidebarBackground: #0e1015;
+  --sidebarHeader: #090a0d;
+  --sidebarAccentMain: #f2f4f8;
+  --sidebarItem: #a4acb9;
+  --sidebarMuted: #6c7485;
+  --sidebarSubheadings: #6c7485;
+  --sidebarHover: #f2f4f8;
+  --sidebarActiveItem: #ca9ee6;
+  --sidebarLanguageAccentBar: #ca9ee6;
+  --sidebarInactiveItemBorder: #394052;
+  --sidebarInactiveItemMarker: #242936;
+
+  --searchSearch: #14171f;
+  --searchBarBorder: #212530;
+  --searchBarFocusColor: #ca9ee6;
+  --searchBarBorderColor: rgba(202, 158, 230, 0.25);
+  --searchAccentMain: #f2f4f8;
+
+  --modalBackground: #0e1015;
+  --settingsInputBackground: #14171f;
+  --settingsInputBorder: #212530;
+  --settingsSectionBorder: #212530;
+  --autocompleteBackground: #0e1015;
+  --autocompleteHover: #14171f;
+  --autocompleteSelected: #14171f;
+  --autocompletePreview: #14171f;
+  --autocompleteBorder: #212530;
+}
+
+/* Shared mingacode.dev fixed top bar */
+
+.minga-topbar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 300;
+  min-height: var(--minga-topbar-h);
+  background: color-mix(in srgb, var(--minga-bg) 92%, transparent);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--minga-border);
+  font-family: var(--sansFontFamily);
+  box-sizing: border-box;
+}
+
+.minga-topbar *,
+.minga-topbar *::before,
+.minga-topbar *::after {
+  box-sizing: border-box;
+}
+
+.minga-topbar-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  min-height: var(--minga-topbar-h);
+  max-width: 100%;
+  margin: 0 auto;
+  padding: 0 1.5rem;
+}
+
+.minga-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  flex-shrink: 0;
+  text-decoration: none;
+  color: var(--minga-text);
+}
+
+.minga-brand:hover {
+  color: var(--minga-text);
+  text-decoration: none;
+}
+
+.minga-brand img {
+  width: 24px;
+  height: 24px;
+  display: block;
+}
+
+.minga-brand-wordmark {
+  font-family: "Instrument Serif", ui-serif, Georgia, serif;
+  font-style: italic;
+  font-weight: 400;
+  font-size: 1.55rem;
+  line-height: 1;
+  letter-spacing: 0.005em;
+  color: var(--minga-text);
+}
+
+.minga-brand-version {
+  font-family: var(--monoFontFamily);
+  font-size: 0.72rem;
+  font-weight: 400;
+  letter-spacing: 0.02em;
+  color: var(--minga-text-muted);
+  margin-left: 0.15rem;
+}
+
+.minga-nav {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.35rem 1.35rem;
+}
+
+.minga-nav a {
+  text-decoration: none;
+  font-family: var(--monoFontFamily);
+  font-size: 0.78rem;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: var(--minga-text-secondary);
+  padding: 0.2rem 0;
+  border-bottom: 2px solid transparent;
+  transition: color 120ms ease, border-color 120ms ease;
+}
+
+.minga-nav a:hover,
+.minga-nav a[aria-current="page"] {
+  color: var(--minga-text);
+  text-decoration: none;
+}
+
+.minga-nav a[aria-current="page"] {
+  border-bottom-color: var(--minga-accent);
+}
+
+.minga-topbar-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  flex-shrink: 0;
+}
+
+.minga-theme-btn,
+.minga-nav-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  color: var(--minga-text-secondary);
+  border: 1px solid var(--minga-border);
+  border-radius: 0;
+  padding: 0.38rem 0.68rem;
+  font-family: var(--monoFontFamily);
+  font-size: 0.74rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: border-color 120ms ease, color 120ms ease;
+}
+
+.minga-nav-btn {
+  display: none;
+}
+
+.minga-theme-btn:hover,
+.minga-nav-btn:hover {
+  color: var(--minga-text);
+  border-color: var(--minga-border-strong);
+}
+
+/* Offset ExDoc layout below the fixed top bar */
+
+body {
+  background-color: var(--background);
+  color: var(--textBody);
+  -webkit-font-smoothing: antialiased;
+}
+
+.body-wrapper {
+  padding-top: var(--minga-topbar-h);
+}
+
+.sidebar {
+  top: var(--minga-topbar-h);
+  height: calc(100vh - var(--minga-topbar-h));
+  border-right: 1px solid var(--minga-border);
+}
+
+.sidebar-button {
+  top: var(--minga-topbar-h) !important;
+  color: var(--minga-text-secondary);
+}
+
+.top-search {
+  position: sticky;
+  top: var(--minga-topbar-h);
+  border-bottom: 1px solid var(--minga-border);
+  margin-bottom: 1.25rem;
+}
+
+[id] {
+  scroll-margin-top: calc(var(--minga-topbar-h) + 3.75rem);
+}
+
+/* Streamline ExDoc sidebar header so the brand isn't duplicated */
+
+.sidebar-header {
+  border-bottom: 1px solid var(--minga-border);
+  padding-top: 0.35rem;
+}
+
+.sidebar-projectInfo {
+  padding: 0.75rem 1.25rem 0.45rem;
+  gap: 0.5rem;
+}
+
+.sidebar-projectImage {
+  display: none;
+}
+
+.sidebar-projectName {
+  font-family: var(--monoFontFamily);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--minga-text-muted);
+  line-height: 1.3;
+}
+
+.sidebar-projectName:hover {
+  color: var(--minga-accent);
+}
+
+.sidebar-projectVersion {
+  font-family: var(--monoFontFamily);
+  font-size: 0.7rem;
+  color: var(--minga-text-muted);
+  margin-top: 0.1rem;
+}
+
+.sidebar-list-nav button {
+  font-family: var(--monoFontFamily);
+  font-size: 0.74rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+/* Stark Systems typography & surfaces inside ExDoc content */
+
+.content-inner h1 {
+  font-weight: 600;
+  letter-spacing: -0.025em;
+  color: var(--textHeaders);
+  border-bottom: 1px solid var(--minga-border);
+  padding-bottom: 0.6rem;
+}
+
+.content-inner h2 {
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  color: var(--textHeaders);
+  border-bottom: 1px solid var(--minga-border);
+  padding-bottom: 0.35rem;
+}
+
+.content-inner h3,
+.content-inner h4 {
+  color: var(--textHeaders);
+  font-weight: 600;
+}
+
+.content-inner a {
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.18em;
+}
+
+.content-inner blockquote {
+  border-left: 2px solid var(--blockquoteBorder);
+  background: var(--blockquoteBackground);
+  padding: 0.75rem 1rem;
+}
+
+/* Inline code */
+
+.content-inner :not(pre) > code {
+  background: var(--codeBackground);
+  border: 1px solid var(--codeBorder);
+  border-radius: 0;
+  padding: 0.1em 0.35em;
+  font-size: 0.88em;
+}
+
+/* Catppuccin Frappé fenced code blocks (matches mingacode.dev in both light & dark modes) */
+
+.content-inner pre {
+  background: #303446 !important;
+  border: 1px solid #414559 !important;
+  border-radius: 0 !important;
+  color: #c6d0f5 !important;
+}
+
+.content-inner pre code,
+.content-inner pre code.makeup {
+  background: transparent !important;
+  border: 0 !important;
+  color: #c6d0f5 !important;
+  font-family: var(--monoFontFamily);
+}
+
+.content-inner pre .copy-button {
+  color: #a5adce;
+  border-radius: 0;
+}
+
+.content-inner pre .copy-button:hover {
+  color: #c6d0f5;
+}
+
+/* Catppuccin Frappé Makeup syntax palette */
+
+.content-inner pre code.makeup .c,
+.content-inner pre code.makeup .c1,
+.content-inner pre code.makeup .ch,
+.content-inner pre code.makeup .cm,
+.content-inner pre code.makeup .cp,
+.content-inner pre code.makeup .cpf,
+.content-inner pre code.makeup .cs {
+  color: #838ba7;
+  font-style: italic;
+}
+
+.content-inner pre code.makeup .k,
+.content-inner pre code.makeup .kc,
+.content-inner pre code.makeup .kd,
+.content-inner pre code.makeup .kn,
+.content-inner pre code.makeup .kp,
+.content-inner pre code.makeup .kr,
+.content-inner pre code.makeup .kt,
+.content-inner pre code.makeup .ow {
+  color: #ca9ee6;
+}
+
+.content-inner pre code.makeup .s,
+.content-inner pre code.makeup .s1,
+.content-inner pre code.makeup .s2,
+.content-inner pre code.makeup .sa,
+.content-inner pre code.makeup .sb,
+.content-inner pre code.makeup .sc,
+.content-inner pre code.makeup .dl,
+.content-inner pre code.makeup .sh,
+.content-inner pre code.makeup .sx {
+  color: #a6d189;
+}
+
+.content-inner pre code.makeup .sd {
+  color: #a6d189;
+  font-style: italic;
+}
+
+.content-inner pre code.makeup .se,
+.content-inner pre code.makeup .si {
+  color: #f4b8e4;
+}
+
+.content-inner pre code.makeup .sr {
+  color: #81c8be;
+}
+
+.content-inner pre code.makeup .ss {
+  color: #8caaee;
+}
+
+.content-inner pre code.makeup .nc,
+.content-inner pre code.makeup .nn,
+.content-inner pre code.makeup .nd {
+  color: #e5c890;
+}
+
+.content-inner pre code.makeup .nf,
+.content-inner pre code.makeup .fm {
+  color: #8caaee;
+}
+
+.content-inner pre code.makeup .na,
+.content-inner pre code.makeup .no,
+.content-inner pre code.makeup .nb,
+.content-inner pre code.makeup .nt {
+  color: #99d1db;
+}
+
+.content-inner pre code.makeup .m,
+.content-inner pre code.makeup .mb,
+.content-inner pre code.makeup .mf,
+.content-inner pre code.makeup .mh,
+.content-inner pre code.makeup .mi,
+.content-inner pre code.makeup .mo,
+.content-inner pre code.makeup .il {
+  color: #ef9f76;
+}
+
+.content-inner pre code.makeup .o {
+  color: #99d1db;
+}
+
+.content-inner pre code.makeup .p,
+.content-inner pre code.makeup .py,
+.content-inner pre code.makeup .n,
+.content-inner pre code.makeup .nv,
+.content-inner pre code.makeup .nx,
+.content-inner pre code.makeup .vc,
+.content-inner pre code.makeup .vg,
+.content-inner pre code.makeup .vi,
+.content-inner pre code.makeup .vm,
+.content-inner pre code.makeup .x,
+.content-inner pre code.makeup .bp {
+  color: #c6d0f5;
+}
+
+.content-inner pre code.makeup .gd,
+.content-inner pre code.makeup .gr,
+.content-inner pre code.makeup .gt,
+.content-inner pre code.makeup .ne {
+  color: #e78284;
+}
+
+.content-inner pre code.makeup .gi {
+  color: #a6d189;
+}
+
+/* Tables and detail cards */
+
+.content-inner table {
+  border: 1px solid var(--minga-border);
+}
+
+@media (min-width: 861px) {
+  .content-inner table {
+    display: table;
+    width: 100%;
+  }
+}
+
+.content-inner th {
+  font-family: var(--monoFontFamily);
+  font-size: 0.78rem;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--minga-text-muted);
+  background: var(--minga-bg-subtle);
+  padding: 0.6rem 0.85rem;
+}
+
+.content-inner td {
+  padding: 0.55rem 0.85rem;
+}
+
+.detail-header {
+  background: var(--textDetailBackground);
+  border-left: 2px solid var(--minga-accent);
+  border-radius: 0;
+}
+
+.search-bar .search-input {
+  border: 1px solid var(--searchBarBorder) !important;
+  border-radius: 0 !important;
+  font-family: var(--monoFontFamily);
+  font-size: 0.84rem;
+}
+
+.search-bar .search-input:focus {
+  border-color: var(--searchBarFocusColor) !important;
+  box-shadow: none !important;
+}
+
+/* Mobile responsive top bar (matches mingacode.dev 860px breakpoint) */
+
+@media (max-width: 860px) {
+  :root {
+    --minga-topbar-h: 3.35rem;
+  }
+
+  .minga-topbar-inner {
+    flex-wrap: wrap;
+    min-height: var(--minga-topbar-h);
+    padding: 0.45rem 1rem;
+    gap: 0.5rem 0.75rem;
+  }
+
+  .minga-nav-btn {
+    display: inline-flex;
+  }
+
+  .minga-theme-btn,
+  .minga-nav-btn {
+    min-height: 2.1rem;
+    padding: 0.35rem 0.65rem;
+  }
+
+  .minga-nav {
+    display: none;
+    order: 3;
+    flex: 1 0 100%;
+    margin-left: 0;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0;
+    padding: 0.25rem 0 0.4rem;
+    border-top: 1px solid var(--minga-border);
+  }
+
+  .minga-topbar.nav-open .minga-nav {
+    display: flex;
+  }
+
+  .minga-nav a {
+    padding: 0.65rem 0.2rem;
+    font-size: 0.84rem;
+    border-bottom: 1px solid var(--minga-border);
+  }
+
+  .minga-nav a:last-child {
+    border-bottom: 0;
+  }
+
+  .minga-nav a[aria-current="page"] {
+    border-bottom-color: var(--minga-border);
+    border-left: 2px solid var(--minga-accent);
+    padding-left: 0.75rem;
+  }
+
+  .minga-topbar.nav-open .minga-nav-btn {
+    border-color: var(--minga-accent);
+    color: var(--minga-text);
+  }
+}

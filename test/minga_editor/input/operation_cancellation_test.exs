@@ -43,6 +43,19 @@ defmodule MingaEditor.Input.OperationCancellationTest do
     assert dismissed.shell_runtime.state.whichkey.show == false
   end
 
+  test "Escape on which-key also cancels the editing model's pending leader (#4078)" do
+    state = base_state()
+    initial = %{Minga.Mode.initial_state() | leader_trie: Minga.Keymap.Defaults.leader_trie()}
+    {:normal, _commands, pending} = Minga.Mode.process(:normal, {32, 0}, initial)
+    vim = MingaEditor.VimState.set_mode_state(state.workspace.editing, pending)
+    state = %{state | workspace: MingaEditor.Session.State.set_editing(state.workspace, vim)}
+    state = WhichKeyWorkflow.begin(state, %{}, ["SPC"])
+    assert Minga.Editing.in_leader?(state)
+
+    assert {:handled, dismissed} = WhichKeyInput.handle_key(state, 27, 0)
+    refute Minga.Editing.in_leader?(dismissed)
+  end
+
   test "Editor reveal messages cannot reveal a replacement which-key generation" do
     first =
       base_state(rendering: :disabled)

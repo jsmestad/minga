@@ -12,10 +12,10 @@ SHA = "0123456789abcdef0123456789abcdef01234567"
 X86_64, AARCH64, LICENSE = "a" * 64, "b" * 64, "c" * 64
 
 
-def render(version="0.1.0-dev.42", source_sha=SHA, x86_64=X86_64, aarch64=AARCH64, license_sha=LICENSE):
+def render(version="0.1.0-dev.42", source_sha=SHA, x86_64=X86_64, aarch64=AARCH64, license_sha=LICENSE, *extra):
     return subprocess.run(
         [sys.executable, SCRIPT, "--version", version, "--source-sha", source_sha, "--x86-64-sha256", x86_64,
-         "--aarch64-sha256", aarch64, "--license-sha256", license_sha],
+         "--aarch64-sha256", aarch64, "--license-sha256", license_sha, *extra],
         capture_output=True, text=True, timeout=20,
     )
 
@@ -35,6 +35,16 @@ class RenderAurPkgbuildTest(unittest.TestCase):
         ):
             with self.subTest(line=line):
                 self.assertIn(line + "\n", pkgbuild)
+
+    def test_repository_package_is_named_minga_and_excludes_the_aur_package(self):
+        result = render("0.1.0-dev.42", SHA, X86_64, AARCH64, LICENSE, "--pkgname", "minga")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("\npkgname=minga\n", result.stdout)
+        self.assertIn("\nconflicts=('minga-bin')\n", result.stdout)
+        self.assertNotIn("provides=", result.stdout)
+        rejected = render("0.1.0-dev.42", SHA, X86_64, AARCH64, LICENSE, "--pkgname", "minga-git")
+        self.assertNotEqual(rejected.returncode, 0)
+        self.assertEqual(rejected.stdout, "")
 
     def test_stable_versions_keep_their_number(self):
         result = render(version="0.1.0")

@@ -113,6 +113,17 @@ defmodule Minga.Mode do
   def initial_state, do: %Minga.Mode.State{}
 
   @doc """
+  Cancels a pending leader sequence in any mode state that can hold one.
+
+  The next `SPC` then starts a new sequence instead of continuing the old one. A state without a pending leader is returned unchanged.
+  """
+  @spec cancel_leader(state()) :: state()
+  def cancel_leader(%{leader_node: node, leader_keys: _keys} = state) when node != nil,
+    do: %{state | leader_node: nil, leader_keys: []}
+
+  def cancel_leader(state), do: state
+
+  @doc """
   Processes a key event for the given `mode`.
 
   Returns `{new_mode, commands, new_state}`. `commands` is the (possibly

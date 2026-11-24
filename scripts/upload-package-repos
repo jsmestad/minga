@@ -1,0 +1,160 @@
+#!/usr/bin/env python3
+"""Publish a built repository tree to the R2 bucket behind packages.mingacode.dev.
+
+Uploads run in three waves so a client never reads an index that names a file
+the bucket does not have yet: package files first, then secondary indexes and
+configuration, then the signed top-level indexes. repo.json records every
+file of the published version. Files from older versions are deleted, except
+files of the previous version and anything uploaded within the last hour, so a
+client that read the previous indexes can still finish its download.
+
+Credentials come from R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY and
+CLOUDFLARE_ACCOUNT_ID. Requires the AWS CLI.
+"""
+
+import argparse
+from datetime import datetime, timedelta, timezone
+import json
+import os
+from pathlib import Path
+import re
+import subprocess
+import sys
+import urllib.error
+import urllib.request
+
+BUCKET = "minga-packages"
+PUBLIC_URL = "https://packages.mingacode.dev"
+GRACE = timedelta(hours=1)
+# Everything revalidates. A rerun for the same version re-signs, so even package bytes can change.
+REVALIDATE = "no-cache"
+CONTENT_TYPES = {
+    ".asc": "text/plain", ".sig": "application/pgp-signature", ".gpg": "application/pgp-signature",
+    ".json": "application/json", ".xml": "application/xml", ".repo": "text/plain", ".sources": "text/plain",
+    ".conf": "text/plain", ".gz": "application/gzip", ".bz2": "application/x-bzip2", ".zst": "application/zstd",
+    ".deb": "application/vnd.debian.binary-package", ".rpm": "application/x-rpm",
+}
+# Signed entry points that name every other index; they go last.
+TOP_LEVEL = re.compile(r"(^|/)(InRelease|Release|Release\.gpg|repomd\.xml|repomd\.xml\.asc|minga\.(db|files)(\.tar\.gz)?(\.sig)?)$")
+# repo.json marks the version as published; later runs read it to skip or prune, so it goes after everything.
+MANIFEST = "repo.json"
+PACKAGE = re.compile(r"\.(deb|rpm|pkg\.tar\.zst|pkg\.tar\.zst\.sig)$")
+
+
+def wave(key):
+    if key == MANIFEST:
+        return 3
+    if PACKAGE.search(key):
+        return 0
+    return 2 if TOP_LEVEL.search(key) else 1
+
+
+def release_order(version):
+    """Sort key for X.Y.Z and X.Y.Z-dev.N: every rolling build precedes its stable release."""
+    match = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)(?:-dev\.([1-9]\d*))?", version)
+    if not match:
+        raise ValueError(f"invalid version: {version!r}")
+    major, minor, patch, build = match.groups()
+    return (int(major), int(minor), int(patch), float("inf") if build is None else int(build))
+
+
+def published_manifest():
+    try:
+        with urllib.request.urlopen(f"{PUBLIC_URL}/repo.json", timeout=30) as response:
+            return json.load(response)
+    except urllib.error.HTTPError as error:
+        if error.code == 404:
+            return None
+        raise
+
+
+def aws(*args, capture=False):
+    account = os.environ["CLOUDFLARE_ACCOUNT_ID"]
+    environment = {
+        **os.environ,
+        "AWS_ACCESS_KEY_ID": os.environ["R2_ACCESS_KEY_ID"],
+        "AWS_SECRET_ACCESS_KEY": os.environ["R2_SECRET_ACCESS_KEY"],
+        "AWS_DEFAULT_REGION": "auto",
+        # R2 rejects the default CRC checksums of newer AWS CLI releases.
+        "AWS_REQUEST_CHECKSUM_CALCULATION": "when_required",
+        "AWS_RESPONSE_CHECKSUM_VALIDATION": "when_required",
+    }
+    command = ["aws", *args, "--endpoint-url", f"https://{account}.r2.cloudflarestorage.com"]
+    result = subprocess.run(command, env=environment, check=True, text=True,
+                            stdout=subprocess.PIPE if capture else None)
+    return result.stdout
+
+
+def upload(tree, key):
+    path = tree / key
+    content_type = next((value for suffix, value in CONTENT_TYPES.items() if key.endswith(suffix)),
+                        "application/octet-stream")
+    aws("s3api", "put-object", "--bucket", BUCKET, "--key", key, "--body", str(path),
+        "--content-type", content_type, "--cache-control", REVALIDATE,
+        capture=True)
+
+
+def remote_objects():
+    listing = aws("s3api", "list-objects-v2", "--bucket", BUCKET, "--output", "json", capture=True)
+    return json.loads(listing or "{}").get("Contents", [])
+
+
+def publish(tree, now):
+    manifest = json.loads((tree / "repo.json").read_text())
+    previous = published_manifest()
+    if previous is not None and release_order(previous["version"]) >= release_order(manifest["version"]):
+        print(f"Skipped: {PUBLIC_URL} already serves {previous['version']}.")
+        return False
+    keys = sorted(str(path.relative_to(tree)) for path in tree.rglob("*") if path.is_file())
+    manifest["files"] = keys
+    (tree / "repo.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+    keep = set(keys) | set(previous.get("files", []) if previous else [])
+    for number in range(4):
+        for key in keys:
+            if wave(key) == number:
+                upload(tree, key)
+    stale = []
+    for item in remote_objects():
+        modified = datetime.fromisoformat(item["LastModified"].replace("Z", "+00:00"))
+        if item["Key"] not in keep and now - modified > GRACE:
+            stale.append(item["Key"])
+    for key in stale:
+        aws("s3api", "delete-object", "--bucket", BUCKET, "--key", key, capture=True)
+    print(f"Published {manifest['version']} to {PUBLIC_URL}: {len(keys)} files, {len(stale)} stale removed.")
+    return True
+
+
+def serves_at_least(version):
+    manifest = published_manifest()
+    return manifest is not None and release_order(manifest["version"]) >= release_order(version), manifest
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("tree", type=Path, nargs="?")
+    parser.add_argument("--check-served", metavar="VERSION",
+                        help=f"exit 0 if {PUBLIC_URL} serves VERSION or newer, 1 otherwise; uploads nothing")
+    args = parser.parse_args()
+    if args.check_served:
+        try:
+            current, manifest = serves_at_least(args.check_served)
+        except (OSError, ValueError, KeyError, urllib.error.URLError) as error:
+            print(f"{parser.prog}: {error}", file=sys.stderr)
+            return 1
+        print(f"{PUBLIC_URL} serves {manifest['version'] if manifest else 'nothing'}")
+        return 0 if current else 1
+    if args.tree is None:
+        parser.error("TREE is required unless --check-served is given")
+    try:
+        published = publish(args.tree, datetime.now(timezone.utc))
+        if "GITHUB_OUTPUT" in os.environ:
+            with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+                output.write(f"published={'true' if published else 'false'}\n")
+    except (OSError, ValueError, KeyError, subprocess.CalledProcessError, urllib.error.URLError) as error:
+        print(f"{parser.prog}: {error}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

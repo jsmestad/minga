@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"strings"
 	"testing"
 
 	"charm.land/lipgloss/v2"
@@ -59,5 +60,54 @@ func TestAgentStatusWordsComeFromStateTokens(t *testing.T) {
 		if got := panel.spinner(); got != want {
 			t.Fatalf("spinner frame %d = %q, want working orbit frame %q", i, got, want)
 		}
+	}
+}
+
+func TestAgentContextCardStatusMatchesMacOSCardStatus(t *testing.T) {
+	cases := []struct {
+		status byte
+		label  string
+		role   generated.ColorRole
+	}{
+		{0, "Idle", generated.ColorRoleWaiting},
+		{1, generated.StateWorking.Token().Word, generated.ColorRoleMinga},
+		{2, "Iterating", generated.ColorRoleMinga},
+		{3, generated.StateNeedsYou.Token().Word, generated.ColorRoleNeedsYou},
+		{4, generated.StateDone.Token().Word, generated.ColorRoleDone},
+		{5, generated.StateFailed.Token().Word, generated.ColorRoleFailure},
+		{9, "Unknown", generated.ColorRoleWaiting},
+	}
+	for _, tc := range cases {
+		if got := cardStatusLabel(tc.status); got != tc.label {
+			t.Errorf("status %d label = %q, want %q", tc.status, got, tc.label)
+		}
+		if got := cardStatusRole(tc.status); got != tc.role {
+			t.Errorf("status %d role = %s, want %s", tc.status, got.ID(), tc.role.ID())
+		}
+	}
+}
+
+func TestAgentContextCardDrawsStatusInItsStateRole(t *testing.T) {
+	model := New(60, 12, nil)
+	model.activePalette = paletteFromTheme(protocol.Theme{Colors: map[byte]uint32{byte(generated.ColorRoleNeedsYou): 0xEF9F76}})
+	lines := model.renderAgentContext(protocol.AgentContext{Visible: true, Status: 3, Task: "Review diff"})
+	rendered := strings.Join(lines, "\n")
+	word := generated.StateNeedsYou.Token().Word
+	at := strings.Index(rendered, word)
+	if at < 0 {
+		t.Fatalf("agent context card missing %q: %q", word, rendered)
+	}
+	if colour := "38;2;239;159;118"; !strings.Contains(rendered[:at], colour) {
+		t.Fatalf("agent context status should be drawn in the needs_you role %s: %q", colour, rendered)
+	}
+}
+
+func TestAgentContextCardKeepsListTitleColourWithoutRoleSlot(t *testing.T) {
+	// The bootstrap palette, drawn before the BEAM sends a theme, has popup slots but no colour roles.
+	model := New(60, 12, nil)
+	themed := strings.Join(model.renderAgentContext(protocol.AgentContext{Visible: true, Status: 0, Task: "Review diff"}), "\n")
+	plain := strings.Join(model.charmList("Agent context", []componentItem{{title: "Idle", description: "Review diff"}}, 0, model.maxOverlayHeight(), true), "\n")
+	if themed != plain {
+		t.Fatalf("a missing waiting role should keep the list title colour:\n%q\nwant\n%q", themed, plain)
 	}
 }

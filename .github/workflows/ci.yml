@@ -109,6 +109,12 @@ jobs:
               "test/scripts/render_aur_pkgbuild_test.py",
               "scripts/smoke-linux-packages",
               "scripts/linux-packaging-toolchain",
+              "scripts/build-package-repos",
+              "scripts/test-package-repos",
+              "scripts/upload-package-repos",
+              "test/scripts/upload_package_repos_test.py",
+              "test/scripts/package_repo_fixtures.py",
+              "test/scripts/package_repos_e2e.sh",
           ]
 
           def changed_paths(revision_range):
@@ -238,10 +244,46 @@ jobs:
       - name: Check cross-language golden manifest is committed
         run: MIX_ENV="test" mix protocol.golden --check
       - run: mix native.build.support
-      - name: Run Elixir tests except the isolated compile-cache suite
-        run: mix test --warnings-as-errors --max-cases 4 --timeout 120000 --exclude system_clipboard --exclude conformance --exclude extension_compile_cache
+      - name: Run Elixir tests except the isolated compile-cache suite and the storyboard
+        run: mix test --warnings-as-errors --max-cases 4 --timeout 120000 --exclude system_clipboard --exclude conformance --exclude extension_compile_cache --exclude storyboard
       - name: Run extension compile-cache tests in an isolated BEAM
         run: mix test --warnings-as-errors test/minga/extension/compile_cache_test.exs
+
+  storyboard:
+    # The storyboard factory (#4035): every designed scenario is reachable,
+    # checkable and escapable in the real editor. Runs on its own so it is a
+    # separately required check; the main Elixir job excludes the tag.
+    name: Storyboard (Elixir)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      MINGA_SKIP_GO_TUI_BUILD: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: erlef/setup-beam@v1
+        with:
+          version-file: .tool-versions
+          version-type: strict
+
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+
+      - name: Cache deps
+        uses: actions/cache@v4
+        with:
+          path: |
+            deps
+            _build
+          key: deps-${{ runner.os }}-${{ hashFiles('.tool-versions') }}-${{ hashFiles('mix.lock') }}
+          restore-keys: deps-${{ runner.os }}-${{ hashFiles('.tool-versions') }}-
+
+      - run: mix deps.get
+      - run: mix deps.compile
+      - run: mix native.build.support
+      - name: Run the storyboard suite
+        run: mix test --warnings-as-errors --only storyboard test/storyboard
 
   test-sdk:
     name: Test (Extension SDK)
@@ -809,7 +851,8 @@ jobs:
     needs: changes
     if: needs.changes.outputs.release == 'true'
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 15
+    # The Linux x86_64 runner also builds package repositories and installs from them in four containers.
+    timeout-minutes: 30
     permissions:
       contents: read
     strategy:
@@ -849,15 +892,20 @@ jobs:
           python3 test/scripts/release_candidate_test.py
           python3 -B test/scripts/render_tui_formula_test.py
           python3 -B test/scripts/render_aur_pkgbuild_test.py
+          python3 -B test/scripts/upload_package_repos_test.py
           bash -n scripts/qualify-homebrew-upgrade
           bash -n scripts/smoke-linux-packages
           bash -n scripts/linux-packaging-toolchain
+          bash -n scripts/build-package-repos scripts/test-package-repos test/scripts/package_repos_e2e.sh
       - name: Verify Debian and RPM package assembly
         if: runner.os == 'Linux'
         run: |
           set -euo pipefail
           sudo apt-get install -y --no-install-recommends rpm rpm2cpio cpio
           python3 -B test/scripts/build_tui_packages_test.py
+      - name: Build signed package repositories and install from them
+        if: runner.os == 'Linux' && runner.arch == 'X64'
+        run: test/scripts/package_repos_e2e.sh
       - name: Verify Homebrew promotion without publication credentials
         if: runner.os == 'Linux'
         run: python3 -B -m unittest discover -s test/scripts -p '*homebrew*test.py'
@@ -873,6 +921,7 @@ jobs:
       - changes
       - lint
       - test
+      - storyboard
       - test-sdk
       - test-git-extended
       - keystroke-latency-baseline
@@ -913,19 +962,14 @@ jobs:
           print("Every substantive CI job succeeded.")
           PY
 
+  # Build and deploy run as separate jobs, as in GitHub's Pages starter workflow. Deploying in the job
+  # that uploaded the artifact fails intermittently: the artifact lookup can miss an upload made a second earlier.
   docs:
-    name: Deploy Docs
+    name: Build Docs
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
-    concurrency:
-      group: pages
-      cancel-in-progress: true
     permissions:
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+      contents: read
     steps:
       - uses: actions/checkout@v4
 
@@ -948,5 +992,21 @@ jobs:
       - uses: actions/upload-pages-artifact@v3
         with:
           path: doc/
+
+  docs-deploy:
+    name: Deploy Docs
+    needs: docs
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    concurrency:
+      group: pages
+      cancel-in-progress: true
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
       - id: deployment
         uses: actions/deploy-pages@v4

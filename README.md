@@ -35,15 +35,16 @@ brew install --cask jsmestad/minga/minga-mac && open -a Minga
 brew install jsmestad/minga/minga && minga .
 ```
 
-**Linux Terminal Client (x86_64 and ARM64, glibc 2.39 or newer):**
+**Linux Terminal Client (x86_64 and ARM64, glibc 2.39 or newer):** add the signed package repository once, then your system updates keep Minga current. On Arch and Omarchy:
 
 ```bash
-yay -S minga-bin                                # Arch Linux, from the AUR
-sudo apt install ./minga_<version>_amd64.deb    # Ubuntu 24.04+ and Debian 13+
-sudo dnf install ./minga-<version>.x86_64.rpm   # Fedora
+curl -fsSL https://packages.mingacode.dev/minga.asc | sudo pacman-key --add -
+sudo pacman-key --lsign-key 2C5D2396B82C1278D4596A0965711C0C3853857B
+curl -fsSL https://packages.mingacode.dev/arch/minga.conf | sudo tee -a /etc/pacman.conf > /dev/null
+sudo pacman -Syu minga
 ```
 
-Download the `.deb` or `.rpm` for your architecture from the newest [release](https://github.com/jsmestad/minga/releases).
+Ubuntu, Debian, and Fedora steps are in [docs/GETTING-STARTED.md](docs/GETTING-STARTED.md#linux-packages).
 
 **Build from source (older Linux or Intel Mac):**
 

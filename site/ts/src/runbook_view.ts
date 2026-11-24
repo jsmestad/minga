@@ -3,15 +3,13 @@
 import { completeMission } from "./progress.ts";
 
 export function mountRunbookFilter(root: HTMLElement): void {
-  let platform: "apple-silicon" | "source" = "apple-silicon";
+  let platform: "apple-silicon" | "linux" | "source" = "apple-silicon";
   let client: "mac" | "cli" = "mac";
   let keys: "vim" | "cua" = "vim";
 
   function sync(): void {
-    const brewTab = document.getElementById("tab-gs-brew");
-    const sourceTab = document.getElementById("tab-gs-source");
-    if (platform === "apple-silicon") brewTab?.click();
-    else sourceTab?.click();
+    const tabs = { "apple-silicon": "tab-gs-brew", linux: "tab-gs-linux", source: "tab-gs-source" } as const;
+    document.getElementById(tabs[platform])?.click();
 
     const summaryEl = root.querySelector<HTMLElement>("[data-rb-summary]");
     if (summaryEl) {
@@ -20,9 +18,13 @@ export function mountRunbookFilter(root: HTMLElement): void {
           ? client === "mac"
             ? "brew install --cask jsmestad/minga/minga-mac && open -a Minga"
             : "brew install jsmestad/minga/minga && minga path/to/project"
-          : client === "mac"
-            ? "Build from source (requires Xcode) and launch bin/minga-mac"
-            : "Build from source with mise/asdf and launch bin/minga";
+          : platform === "linux"
+            ? client === "mac"
+              ? "The desktop app is macOS only; add packages.mingacode.dev and install the minga terminal client"
+              : "Add packages.mingacode.dev, then install minga with pacman, apt or dnf"
+            : client === "mac"
+              ? "Build from source (requires Xcode) and launch bin/minga-mac"
+              : "Build from source with mise/asdf and launch bin/minga";
       const keyPart =
         keys === "cua"
           ? "Add `set :editing_model, :cua` in ~/.config/minga/config.exs for desktop shortcuts."
@@ -46,7 +48,8 @@ export function mountRunbookFilter(root: HTMLElement): void {
     if (!target) return;
     const pBtn = target.closest<HTMLElement>("[data-rb-platform]");
     if (pBtn) {
-      platform = pBtn.getAttribute("data-rb-platform") === "source" ? "source" : "apple-silicon";
+      const chosen = pBtn.getAttribute("data-rb-platform");
+      platform = chosen === "linux" || chosen === "source" ? chosen : "apple-silicon";
       completeMission("getting-started", "configured");
       sync();
       return;

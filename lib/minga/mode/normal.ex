@@ -797,8 +797,9 @@ defmodule Minga.Mode.Normal do
     {:continue, %{state | pending: nil, count: nil}}
   end
 
+  # Escape also cancels a chosen register (`"a`), as in Vim, so its echo clears (#4097).
   def handle_key({@escape, _mods}, %ModeState{} = state) do
-    {:continue, %{state | count: nil}}
+    {:execute, {:select_register, "\""}, %{state | count: nil}}
   end
 
   # ── Search ──────────────────────────────────────────────────────────────────

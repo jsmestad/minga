@@ -1924,7 +1924,7 @@ func TestOverlayLinesRenderRemainingSemanticSurfaces(t *testing.T) {
 	model.surfacePlacements = []generated.SurfacePlacement{
 		{SurfaceID: surfaceIDAgentContext, Z: 260, HitKind: 8},
 	}
-	if got := strings.Join(model.overlayLines(), "\n"); !strings.Contains(got, "needs you") || !strings.Contains(got, "Review diff") {
+	if got := strings.Join(model.overlayLines(), "\n"); !strings.Contains(got, generated.StateNeedsYou.Token().Word) || !strings.Contains(got, "Review diff") {
 		t.Fatalf("agent context overlay missing content: %q", got)
 	}
 
