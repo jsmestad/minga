@@ -1,11 +1,19 @@
 defmodule Minga.Config.Hooks do
   @moduledoc """
-  Registry for lifecycle hooks.
+  Registry for lifecycle hooks with sequential effect ordering.
 
   Hooks are functions registered for specific editor events (save, open,
-  mode change). When an event fires, all registered hooks run asynchronously
-  under `Minga.Eval.TaskSupervisor`, so a slow or crashing hook never blocks
-  editing.
+  mode change). When an event fires, all registered hooks execute their
+  observable effects in registration order inside a single supervised runner
+  task. A crashing hook is logged and isolated; later hooks for the same
+  event continue in order.
+
+  Each event type has at most one active runner at a time. When an event
+  fires while a runner is already active for that type, the invocation is
+  queued. The queue depth per event type is bounded by `max_pending`
+  (default #{64}). When the queue is full, the new invocation is dropped
+  and a warning is logged. Different event types run their runners
+  concurrently since they have independent ordering contracts.
 
   Hooks subscribes to the `Minga.Events` bus on startup. When a bus event
   arrives (e.g. `:buffer_saved`), it maps the topic to the corresponding
@@ -20,6 +28,12 @@ defmodule Minga.Config.Hooks do
   | `:after_open`    | `[buffer_pid, file_path]`  | After opening a file      |
   | `:on_mode_change`| `[old_mode, new_mode]`     | When the editor mode changes |
 
+  ## Admission policy
+
+  Each event type admits at most `max_pending` queued invocations while a
+  runner is active. When the queue is full, the newest invocation is dropped.
+  Already-admitted invocations are honored in FIFO order.
+
   ## Example
 
       Minga.Config.Hooks.register(:after_save, fn _buf, path ->
@@ -30,6 +44,8 @@ defmodule Minga.Config.Hooks do
   use GenServer
 
   @valid_events [:after_save, :after_open, :on_mode_change]
+  @default_max_pending 64
+  @default_task_supervisor Minga.Eval.TaskSupervisor
 
   # Maps event bus topics to hook event names.
   @topic_to_event %{
@@ -47,7 +63,11 @@ defmodule Minga.Config.Hooks do
   @typedoc "Hook server state."
   @type state :: %{
           hooks: hooks(),
-          events_registry: Minga.Events.registry()
+          events_registry: Minga.Events.registry(),
+          task_supervisor: atom(),
+          max_pending: pos_integer(),
+          runners: %{event() => reference()},
+          queues: %{event() => :queue.queue([term()])}
         }
 
   # ── Client API ──────────────────────────────────────────────────────────────
@@ -78,11 +98,16 @@ defmodule Minga.Config.Hooks do
   end
 
   @doc """
-  Fires all hooks for an event asynchronously.
+  Fires all hooks for an event with sequential effect ordering.
 
-  Each hook runs in a separate Task under `Minga.Eval.TaskSupervisor`.
-  Crashes are logged but don't propagate. This is a fire-and-forget cast:
-  it returns `:ok` immediately before hooks are dispatched. Prefer
+  Each admitted event starts at most one runner task per event type under
+  the configured TaskSupervisor. Hooks execute sequentially in registration
+  order inside the runner. A crashing hook is logged but does not prevent
+  later hooks from running. If a runner is already active for this event
+  type, the invocation is queued up to `max_pending` depth; excess
+  invocations are dropped.
+
+  This is a fire-and-forget cast: it returns `:ok` immediately. Prefer
   broadcasting through `Minga.Events` over calling this directly.
   """
   @spec run(event(), [term()]) :: :ok
@@ -98,7 +123,7 @@ defmodule Minga.Config.Hooks do
   @spec valid_events() :: [event()]
   def valid_events, do: @valid_events
 
-  @doc "Removes all registered hooks."
+  @doc "Removes all registered hooks and drains pending queues."
   @spec reset() :: :ok
   @spec reset(GenServer.server()) :: :ok
   def reset, do: reset(__MODULE__)
@@ -113,7 +138,9 @@ defmodule Minga.Config.Hooks do
   @spec init(keyword()) :: {:ok, state()}
   def init(opts) do
     events_registry = Keyword.get(opts, :events_registry, Minga.Events.default_registry())
-    state = initial_state(events_registry)
+    task_supervisor = Keyword.get(opts, :task_supervisor, @default_task_supervisor)
+    max_pending = Keyword.get(opts, :max_pending, @default_max_pending)
+    state = initial_state(events_registry, task_supervisor, max_pending)
     subscribe_to_events(state)
     {:ok, state}
   end
@@ -125,13 +152,13 @@ defmodule Minga.Config.Hooks do
   end
 
   def handle_call(:reset, _from, state) do
-    {:reply, :ok, initial_state(state.events_registry)}
+    demonitor_all_runners(state.runners)
+    {:reply, :ok, initial_state(state.events_registry, state.task_supervisor, state.max_pending)}
   end
 
   @impl true
   def handle_cast({:run, event, args}, state) do
-    do_run(state, event, args)
-    {:noreply, state}
+    {:noreply, dispatch_event(state, event, args)}
   end
 
   @impl true
@@ -139,18 +166,131 @@ defmodule Minga.Config.Hooks do
     case Map.fetch(@topic_to_event, topic) do
       {:ok, event} ->
         args = payload_to_args(topic, payload)
-        do_run(state, event, args)
+        {:noreply, dispatch_event(state, event, args)}
 
       :error ->
-        :ok
+        {:noreply, state}
     end
+  end
 
-    {:noreply, state}
+  def handle_info({:DOWN, ref, :process, _pid, reason}, state) do
+    case find_event_for_runner(state.runners, ref) do
+      {:ok, event} ->
+        if reason not in [:normal, :shutdown] do
+          Minga.Log.warning(:config, "Hook runner for #{event} exited: #{inspect(reason)}")
+        end
+
+        state = %{state | runners: Map.delete(state.runners, event)}
+        {:noreply, maybe_drain_queue(state, event)}
+
+      :error ->
+        {:noreply, state}
+    end
   end
 
   def handle_info(_msg, state), do: {:noreply, state}
 
   # ── Private ─────────────────────────────────────────────────────────────────
+
+  @spec dispatch_event(state(), event(), [term()]) :: state()
+  defp dispatch_event(state, event, args) do
+    hooks = state.hooks |> Map.get(event, []) |> Enum.reverse()
+
+    if hooks == [] do
+      state
+    else
+      if Map.has_key?(state.runners, event) do
+        enqueue_or_drop(state, event, args)
+      else
+        start_runner(state, event, hooks, args)
+      end
+    end
+  end
+
+  @spec enqueue_or_drop(state(), event(), [term()]) :: state()
+  defp enqueue_or_drop(state, event, args) do
+    queue = Map.fetch!(state.queues, event)
+
+    if :queue.len(queue) >= state.max_pending do
+      Minga.Log.warning(
+        :config,
+        "Hook queue for #{event} full (#{state.max_pending}), dropping event"
+      )
+
+      state
+    else
+      %{state | queues: Map.put(state.queues, event, :queue.in(args, queue))}
+    end
+  end
+
+  @spec start_runner(state(), event(), [function()], [term()]) :: state()
+  defp start_runner(state, event, hooks, args) do
+    {:ok, pid} =
+      Task.Supervisor.start_child(state.task_supervisor, fn ->
+        run_hooks_sequentially(hooks, event, args)
+      end)
+
+    ref = Process.monitor(pid)
+    %{state | runners: Map.put(state.runners, event, ref)}
+  end
+
+  @spec run_hooks_sequentially([function()], event(), [term()]) :: :ok
+  defp run_hooks_sequentially(hooks, event, args) do
+    for hook <- hooks do
+      try do
+        apply(hook, args)
+      rescue
+        e ->
+          Minga.Log.warning(:config, "Hook #{event} failed: #{Exception.message(e)}")
+      catch
+        kind, reason ->
+          Minga.Log.warning(
+            :config,
+            "Hook #{event} crashed: #{inspect(kind)} #{inspect(reason)}"
+          )
+      end
+    end
+
+    :ok
+  end
+
+  @spec maybe_drain_queue(state(), event()) :: state()
+  defp maybe_drain_queue(state, event) do
+    queue = Map.fetch!(state.queues, event)
+
+    case :queue.out(queue) do
+      {{:value, args}, rest} ->
+        hooks = state.hooks |> Map.get(event, []) |> Enum.reverse()
+        state = %{state | queues: Map.put(state.queues, event, rest)}
+
+        if hooks == [] do
+          maybe_drain_queue(state, event)
+        else
+          start_runner(state, event, hooks, args)
+        end
+
+      {:empty, _} ->
+        state
+    end
+  end
+
+  @spec find_event_for_runner(%{event() => reference()}, reference()) ::
+          {:ok, event()} | :error
+  defp find_event_for_runner(runners, ref) do
+    case Enum.find(runners, fn {_event, r} -> r == ref end) do
+      {event, _ref} -> {:ok, event}
+      nil -> :error
+    end
+  end
+
+  @spec demonitor_all_runners(%{event() => reference()}) :: :ok
+  defp demonitor_all_runners(runners) do
+    for {_event, ref} <- runners do
+      Process.demonitor(ref, [:flush])
+    end
+
+    :ok
+  end
 
   @spec subscribe_to_events(state()) :: :ok
   defp subscribe_to_events(state) do
@@ -168,32 +308,15 @@ defmodule Minga.Config.Hooks do
   defp payload_to_args(_topic, %Minga.Events.ModeEvent{old: old_mode, new: new_mode}),
     do: [old_mode, new_mode]
 
-  @spec do_run(state(), event(), [term()]) :: :ok
-  defp do_run(state, event, args) do
-    hooks = Map.get(state.hooks, event, []) |> Enum.reverse()
-
-    for hook <- hooks do
-      Task.Supervisor.start_child(Minga.Eval.TaskSupervisor, fn ->
-        try do
-          apply(hook, args)
-        rescue
-          e ->
-            Minga.Log.warning(:config, "Hook #{event} failed: #{Exception.message(e)}")
-        catch
-          kind, reason ->
-            Minga.Log.warning(
-              :config,
-              "Hook #{event} crashed: #{inspect(kind)} #{inspect(reason)}"
-            )
-        end
-      end)
-    end
-
-    :ok
-  end
-
-  @spec initial_state(Minga.Events.registry()) :: state()
-  defp initial_state(events_registry) do
-    %{hooks: Map.new(@valid_events, &{&1, []}), events_registry: events_registry}
+  @spec initial_state(Minga.Events.registry(), atom(), pos_integer()) :: state()
+  defp initial_state(events_registry, task_supervisor, max_pending) do
+    %{
+      hooks: Map.new(@valid_events, &{&1, []}),
+      events_registry: events_registry,
+      task_supervisor: task_supervisor,
+      max_pending: max_pending,
+      runners: %{},
+      queues: Map.new(@valid_events, &{&1, :queue.new()})
+    }
   end
 end

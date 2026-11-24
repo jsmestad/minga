@@ -6,7 +6,7 @@ defmodule Minga.Config.HooksRegistryTest do
 
   defp start_registry(label) do
     name = :"#{label}_#{System.unique_integer([:positive])}"
-    start_supervised!({Events, name: name})
+    start_supervised!({Events, name: name}, id: name)
     name
   end
 
@@ -23,8 +23,15 @@ defmodule Minga.Config.HooksRegistryTest do
   test "hooks receive events from their configured registry only" do
     registry_a = start_registry(:hooks_events_a)
     registry_b = start_registry(:hooks_events_b)
+    task_sup = :"hooks_task_sup_#{System.unique_integer([:positive])}"
+    start_supervised!({Task.Supervisor, name: task_sup}, id: task_sup)
     hooks_name = :"hooks_#{System.unique_integer([:positive])}"
-    {:ok, hooks} = start_supervised({Hooks, name: hooks_name, events_registry: registry_a})
+
+    {:ok, hooks} =
+      start_supervised(
+        {Hooks, name: hooks_name, events_registry: registry_a, task_supervisor: task_sup}
+      )
+
     test_pid = self()
     buf = fake_buffer()
 

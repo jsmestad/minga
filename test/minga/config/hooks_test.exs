@@ -7,9 +7,12 @@ defmodule Minga.Config.HooksTest do
   setup context do
     registry = Module.concat([context.module, context.test, Events])
     hooks = Module.concat([context.module, context.test, Hooks])
+    task_sup = Module.concat([context.module, context.test, TaskSupervisor])
 
     start_supervised!({Events, name: registry})
-    start_supervised!({Hooks, name: hooks, events_registry: registry})
+    start_supervised!({Task.Supervisor, name: task_sup})
+
+    start_supervised!({Hooks, name: hooks, events_registry: registry, task_supervisor: task_sup})
 
     {:ok, registry: registry, hooks: hooks}
   end
@@ -80,11 +83,243 @@ defmodule Minga.Config.HooksTest do
     end
   end
 
+  describe "sequential effect ordering" do
+    test "hooks produce effects in registration order", %{hooks: hooks} do
+      test_pid = self()
+      ref = make_ref()
+
+      for i <- 1..5 do
+        Hooks.register(hooks, :after_save, fn _, _ ->
+          send(test_pid, {ref, :effect, i})
+        end)
+      end
+
+      Hooks.run(hooks, :after_save, [:buf, "/path"])
+
+      for i <- 1..5 do
+        assert_receive {^ref, :effect, ^i}, 500
+      end
+    end
+
+    test "blocking hook delays later hooks in the same event", %{hooks: hooks} do
+      test_pid = self()
+      gate = make_ref()
+
+      Hooks.register(hooks, :after_save, fn _, _ ->
+        send(test_pid, {gate, :started, 1, self()})
+
+        receive do
+          {^gate, :release, 1} -> :ok
+        end
+
+        send(test_pid, {gate, :completed, 1})
+      end)
+
+      Hooks.register(hooks, :after_save, fn _, _ ->
+        send(test_pid, {gate, :started, 2, self()})
+        send(test_pid, {gate, :completed, 2})
+      end)
+
+      Hooks.run(hooks, :after_save, [:buf, "/path"])
+
+      # Hook 1 starts; hook 2 has not started yet.
+      assert_receive {^gate, :started, 1, runner_pid}, 500
+      refute_receive {^gate, :started, 2, _}, 50
+
+      # Release hook 1; both complete in order.
+      send(runner_pid, {gate, :release, 1})
+      assert_receive {^gate, :completed, 1}, 500
+      assert_receive {^gate, :started, 2, _}, 500
+      assert_receive {^gate, :completed, 2}, 500
+    end
+
+    test "queued event firings execute in FIFO order", %{hooks: hooks} do
+      test_pid = self()
+      gate = make_ref()
+      counter = :counters.new(1, [])
+
+      Hooks.register(hooks, :after_save, fn _buf, path ->
+        invocation = :counters.get(counter, 1)
+        :counters.add(counter, 1, 1)
+
+        if invocation == 0 do
+          send(test_pid, {gate, :first_started, self()})
+
+          receive do
+            {^gate, :release} -> :ok
+          end
+        end
+
+        send(test_pid, {gate, :completed, path})
+      end)
+
+      # First invocation starts the runner and blocks.
+      Hooks.run(hooks, :after_save, [:buf, "/path/1"])
+      assert_receive {^gate, :first_started, runner_pid}, 500
+
+      # Queue two more while the runner is blocked.
+      Hooks.run(hooks, :after_save, [:buf, "/path/2"])
+      Hooks.run(hooks, :after_save, [:buf, "/path/3"])
+      :sys.get_state(hooks)
+
+      # Release the first runner.
+      send(runner_pid, {gate, :release})
+
+      # All three complete in FIFO order.
+      assert_receive {^gate, :completed, "/path/1"}, 500
+      assert_receive {^gate, :completed, "/path/2"}, 500
+      assert_receive {^gate, :completed, "/path/3"}, 500
+    end
+  end
+
+  describe "failure isolation with ordering" do
+    test "hook failure is isolated and later hooks still run in order", %{hooks: hooks} do
+      test_pid = self()
+      ref = make_ref()
+
+      Hooks.register(hooks, :after_save, fn _, _ -> send(test_pid, {ref, :effect, 1}) end)
+      Hooks.register(hooks, :after_save, fn _, _ -> raise "hook 2 explodes" end)
+      Hooks.register(hooks, :after_save, fn _, _ -> send(test_pid, {ref, :effect, 3}) end)
+
+      Hooks.run(hooks, :after_save, [:buf, "/path"])
+
+      assert_receive {^ref, :effect, 1}, 500
+      assert_receive {^ref, :effect, 3}, 500
+    end
+
+    test "throw in a hook is isolated", %{hooks: hooks} do
+      test_pid = self()
+      ref = make_ref()
+
+      Hooks.register(hooks, :after_save, fn _, _ -> throw(:kaboom) end)
+      Hooks.register(hooks, :after_save, fn _, _ -> send(test_pid, {ref, :survived}) end)
+
+      Hooks.run(hooks, :after_save, [:buf, "/path"])
+
+      assert_receive {^ref, :survived}, 500
+    end
+
+    test "exit in a hook is isolated", %{hooks: hooks} do
+      test_pid = self()
+      ref = make_ref()
+
+      Hooks.register(hooks, :after_save, fn _, _ -> exit(:deliberate) end)
+      Hooks.register(hooks, :after_save, fn _, _ -> send(test_pid, {ref, :survived}) end)
+
+      Hooks.run(hooks, :after_save, [:buf, "/path"])
+
+      assert_receive {^ref, :survived}, 500
+    end
+  end
+
+  describe "admission bounds" do
+    setup context do
+      registry = Module.concat([context.module, context.test, :Bounded, Events])
+      hooks = Module.concat([context.module, context.test, :Bounded, Hooks])
+      task_sup = Module.concat([context.module, context.test, :Bounded, TaskSupervisor])
+
+      start_supervised!({Events, name: registry}, id: :bounded_events)
+      start_supervised!({Task.Supervisor, name: task_sup}, id: :bounded_task_sup)
+
+      start_supervised!(
+        {Hooks,
+         name: hooks, events_registry: registry, task_supervisor: task_sup, max_pending: 2},
+        id: :bounded_hooks
+      )
+
+      {:ok, bounded_hooks: hooks}
+    end
+
+    test "drops events when queue is full", %{bounded_hooks: hooks} do
+      test_pid = self()
+      gate = make_ref()
+      counter = :counters.new(1, [])
+
+      Hooks.register(hooks, :after_save, fn _buf, path ->
+        invocation = :counters.get(counter, 1)
+        :counters.add(counter, 1, 1)
+
+        if invocation == 0 do
+          send(test_pid, {gate, :first_started, self()})
+
+          receive do
+            {^gate, :release} -> :ok
+          end
+        end
+
+        send(test_pid, {gate, :completed, path})
+      end)
+
+      # Invocation 1: starts runner, blocks.
+      Hooks.run(hooks, :after_save, [:buf, "/path/1"])
+      assert_receive {^gate, :first_started, runner_pid}, 500
+
+      # Invocations 2 and 3: queued (max_pending = 2).
+      # Invocation 4: dropped.
+      Hooks.run(hooks, :after_save, [:buf, "/path/2"])
+      Hooks.run(hooks, :after_save, [:buf, "/path/3"])
+      Hooks.run(hooks, :after_save, [:buf, "/path/4"])
+      :sys.get_state(hooks)
+
+      send(runner_pid, {gate, :release})
+
+      assert_receive {^gate, :completed, "/path/1"}, 500
+      assert_receive {^gate, :completed, "/path/2"}, 500
+      assert_receive {^gate, :completed, "/path/3"}, 500
+      refute_receive {^gate, :completed, "/path/4"}, 200
+    end
+  end
+
+  describe "cross-event concurrency" do
+    test "different event types run concurrently", %{hooks: hooks} do
+      test_pid = self()
+      gate = make_ref()
+
+      Hooks.register(hooks, :after_save, fn _, _ ->
+        send(test_pid, {gate, :save_started, self()})
+
+        receive do
+          {^gate, :release_save} -> :ok
+        end
+
+        send(test_pid, {gate, :save_done})
+      end)
+
+      Hooks.register(hooks, :after_open, fn _, _ ->
+        send(test_pid, {gate, :open_started, self()})
+
+        receive do
+          {^gate, :release_open} -> :ok
+        end
+
+        send(test_pid, {gate, :open_done})
+      end)
+
+      Hooks.run(hooks, :after_save, [:buf, "/path"])
+      Hooks.run(hooks, :after_open, [:buf, "/path"])
+
+      # Both event types start their runners concurrently.
+      assert_receive {^gate, :save_started, save_pid}, 500
+      assert_receive {^gate, :open_started, open_pid}, 500
+      assert save_pid != open_pid
+
+      send(open_pid, {gate, :release_open})
+      assert_receive {^gate, :open_done}, 500
+
+      send(save_pid, {gate, :release_save})
+      assert_receive {^gate, :save_done}, 500
+    end
+  end
+
   describe "reset/1" do
     test "removes all hooks", %{hooks: hooks} do
       test_pid = self()
       ref = make_ref()
-      Hooks.register(hooks, :after_save, fn _, _ -> send(test_pid, {ref, :should_not_fire}) end)
+
+      Hooks.register(hooks, :after_save, fn _, _ ->
+        send(test_pid, {ref, :should_not_fire})
+      end)
+
       Hooks.reset(hooks)
 
       Hooks.run(hooks, :after_save, [:buf, "/path"])
