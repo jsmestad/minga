@@ -27,7 +27,7 @@ defmodule Minga.Test.Storyboard.Scenarios.Minga do
             4028,
             &assert_keys_shown(&1, ["v", "r", "i", "w"])
           ),
-          Check.pending("Queue ›, Context › and Session › are groups", 4028, fn model ->
+          Check.new("Queue ›, Context › and Session › are groups", fn model ->
             model
             |> assert_group("q", "Queue")
             |> assert_group("x", "Context")
