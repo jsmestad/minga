@@ -1,5 +1,9 @@
 # Charm TUI Renderer
 
+When you run Minga in a terminal, this is the program that draws it. It shows the same tabs, file tree, pickers and agent conversation as the macOS app, because both frontends draw the same description of the screen that the editor core sends them. For you that means the terminal client, the one you use on Linux and over SSH, shows the same surfaces as the desktop app.
+
+This page is for readers who build, debug or change the terminal frontend.
+
 The Charm renderer is the maintained Go/Bubble Tea frontend for Minga's Semantic UI protocol and the only production terminal frontend. Rust remains research, not a promised successor. A replacement requires a separately authorized complete-cutover decision with demonstrated benefit, BEAM protocol/input/presentation conformance, all required surfaces, terminal lifecycle evidence and deletion of the Go implementation. Zig provides parser/tree-sitter infrastructure and the agent-hook process-group helper; its legacy terminal renderer was removed in #2223.
 
 ## Build

@@ -1,6 +1,8 @@
 # Buffer-Aware Agents
 
-How AI agents edit in-memory buffers instead of the filesystem, and why the BEAM makes multi-agent concurrent editing surprisingly tractable.
+When an agent edits a file in Minga, the edit does not go straight to disk. The agent reads what is in your editor, including changes you have not saved. An edit you approve is staged: the agent sees it and **Review files** lists it, while the file on disk and your open buffer keep the old text. In a session you start from the editor, staged edits land only when you publish them. If you changed the same lines in the meantime, Minga keeps both versions and opens a conflict review; it does not overwrite your work. [Publishing Approved Edits](AGENTIC-KEYMAP.md#publishing-approved-edits) is the guide to that flow.
+
+This page is for readers who want to know how that works: how AI agents edit in-memory buffers instead of the filesystem, and why the BEAM makes multi-agent concurrent editing surprisingly tractable. You do not need it to use the agent.
 
 ---
 

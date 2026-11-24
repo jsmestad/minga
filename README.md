@@ -86,10 +86,11 @@ Read in this order:
 1. **[Get Started](https://mingacode.dev/getting-started):** install Minga, connect a model, and review your first staged edit.
 2. **[Learn](https://mingacode.dev/learn/):** hands-on lessons that pick up where Get Started ends.
 3. **Reference, by task:** look up what you need when you need it. The [reference index](docs/REFERENCE.md) lists every published doc.
-   - **Configure:** [Configuration](docs/CONFIGURATION.md) · [Projects](docs/PROJECTS.md)
-   - **Run agents:** [Model Selection](docs/AGENT-MODEL-SELECTION.md) · [Buffer-Aware Agents](docs/BUFFER-AWARE-AGENTS.md) · [Session Recovery](docs/SESSION-RECOVERY.md) · [Remote Agents](docs/REMOTE_AGENTS.md) · [Hooks](docs/HOOKS.md) · [MCP Servers](docs/MCP.md)
-   - **Extend Minga:** [Extension API](docs/EXTENSION_API.md) · [Keymap Scopes](docs/KEYMAP-SCOPES.md) · [Agentic View Keymap](docs/AGENTIC-KEYMAP.md)
-   - **Understand the runtime:** [Architecture](docs/ARCHITECTURE.md) · [Port Protocol](docs/PROTOCOL.md) · [GUI Protocol](docs/GUI_PROTOCOL.md) · [Go TUI Renderer](docs/CHARM_TUI.md) · [Architecture Decisions (ADRs)](https://github.com/jsmestad/minga/tree/main/docs/adr) · [Design System](docs/design/README.md)
+   - **Use Minga:** [Configuration](docs/CONFIGURATION.md) · [Projects](docs/PROJECTS.md) · [Model Selection](docs/AGENT-MODEL-SELECTION.md) · [Agentic View Keymap](docs/AGENTIC-KEYMAP.md)
+   - **Run agents unattended:** [Hooks](docs/HOOKS.md) · [MCP Servers](docs/MCP.md) · [Remote Agents](docs/REMOTE_AGENTS.md)
+   - **Extend Minga:** [Extension API](docs/EXTENSION_API.md)
+   - **How it works:** [Architecture](docs/ARCHITECTURE.md) · [Buffer-Aware Agents](docs/BUFFER-AWARE-AGENTS.md) · [Session Recovery](docs/SESSION-RECOVERY.md) · [Keymap Scopes](docs/KEYMAP-SCOPES.md) · [Port Protocol](docs/PROTOCOL.md) · [GUI Protocol](docs/GUI_PROTOCOL.md) · [Go TUI Renderer](docs/CHARM_TUI.md)
+   - **Design and decisions:** [Design System](docs/design/README.md) · [Architecture Decisions (ADRs)](https://github.com/jsmestad/minga/tree/main/docs/adr)
 
 Working on Minga itself? [Contributing](CONTRIBUTING.md) is the index for contributor docs: testing, performance gates, releasing, and the step-by-step recipes.
 

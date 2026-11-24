@@ -74,36 +74,28 @@ defmodule Minga.MixProject do
         "docs/design/marks" => "marks"
       },
       extras: [
-        # Overview
+        # Start
         {"docs/REFERENCE.md", title: "Reference"},
         {"CHANGELOG.md", title: "Changelog"},
-        # Configuration & Agents
+        # Use Minga
         "docs/CONFIGURATION.md",
         "docs/PROJECTS.md",
+        "docs/AGENT-MODEL-SELECTION.md",
+        "docs/AGENTIC-KEYMAP.md",
+        # Run Agents Unattended
         "docs/HOOKS.md",
         "docs/MCP.md",
         "docs/REMOTE_AGENTS.md",
-        "docs/AGENT-MODEL-SELECTION.md",
+        # Extend Minga
+        "docs/EXTENSION_API.md",
+        # How It Works
+        "docs/ARCHITECTURE.md",
         "docs/BUFFER-AWARE-AGENTS.md",
         "docs/SESSION-RECOVERY.md",
-        # Extensions & Keymaps
-        "docs/EXTENSION_API.md",
         "docs/KEYMAP-SCOPES.md",
-        "docs/AGENTIC-KEYMAP.md",
-        # Architecture & Protocols
-        "docs/ARCHITECTURE.md",
         "docs/PROTOCOL.md",
         "docs/GUI_PROTOCOL.md",
         "docs/CHARM_TUI.md",
-        # Architecture Decisions
-        "docs/adr/0001-frontend-owns-row-fit.md",
-        "docs/adr/0002-editor-state-transitions-have-explicit-owners.md",
-        "docs/adr/0003-extension-code-updates-require-a-new-vm-generation.md",
-        "docs/adr/0004-products-are-root-applets-over-a-fixed-engine.md",
-        "docs/adr/0005-frontend-owns-immediate-ui-feedback.md",
-        "docs/adr/0006-the-spine.md",
-        "docs/adr/0007-cua-is-a-key-profile.md",
-        "docs/adr/0008-terminal-engine.md",
         # Design System. ExDoc writes every extra to one flat directory, so each page gets a design- prefix.
         {"docs/design/README.md", filename: "design"},
         {"docs/design/principles.md", filename: "design-principles"},
@@ -115,39 +107,45 @@ defmodule Minga.MixProject do
         {"docs/design/terminal.md", filename: "design-terminal"},
         {"docs/design/tui.md", filename: "design-tui"},
         {"docs/design/storyboard.md", filename: "design-storyboard"},
-        {"docs/design/visual_rubric.md", filename: "design-visual-rubric"}
+        {"docs/design/visual_rubric.md", filename: "design-visual-rubric"},
+        # Decisions
+        "docs/adr/0001-frontend-owns-row-fit.md",
+        "docs/adr/0002-editor-state-transitions-have-explicit-owners.md",
+        "docs/adr/0003-extension-code-updates-require-a-new-vm-generation.md",
+        "docs/adr/0004-products-are-root-applets-over-a-fixed-engine.md",
+        "docs/adr/0005-frontend-owns-immediate-ui-feedback.md",
+        "docs/adr/0006-the-spine.md",
+        "docs/adr/0007-cua-is-a-key-profile.md",
+        "docs/adr/0008-terminal-engine.md"
       ],
+      # The sidebar reads in task order. docs/REFERENCE.md lists the same groups in the same order.
       groups_for_extras: [
-        "Configuration & Agents": [
+        Start: [
+          "docs/REFERENCE.md",
+          "CHANGELOG.md"
+        ],
+        "Use Minga": [
           "docs/CONFIGURATION.md",
           "docs/PROJECTS.md",
-          "docs/HOOKS.md",
-          "docs/MCP.md",
-          "docs/REMOTE_AGENTS.md",
           "docs/AGENT-MODEL-SELECTION.md",
-          "docs/BUFFER-AWARE-AGENTS.md",
-          "docs/SESSION-RECOVERY.md"
-        ],
-        "Extensions & Keymaps": [
-          "docs/EXTENSION_API.md",
-          "docs/KEYMAP-SCOPES.md",
           "docs/AGENTIC-KEYMAP.md"
         ],
-        "Architecture & Protocols": [
+        "Run Agents Unattended": [
+          "docs/HOOKS.md",
+          "docs/MCP.md",
+          "docs/REMOTE_AGENTS.md"
+        ],
+        "Extend Minga": [
+          "docs/EXTENSION_API.md"
+        ],
+        "How It Works": [
           "docs/ARCHITECTURE.md",
+          "docs/BUFFER-AWARE-AGENTS.md",
+          "docs/SESSION-RECOVERY.md",
+          "docs/KEYMAP-SCOPES.md",
           "docs/PROTOCOL.md",
           "docs/GUI_PROTOCOL.md",
           "docs/CHARM_TUI.md"
-        ],
-        "Architecture Decisions": [
-          "docs/adr/0001-frontend-owns-row-fit.md",
-          "docs/adr/0002-editor-state-transitions-have-explicit-owners.md",
-          "docs/adr/0003-extension-code-updates-require-a-new-vm-generation.md",
-          "docs/adr/0004-products-are-root-applets-over-a-fixed-engine.md",
-          "docs/adr/0005-frontend-owns-immediate-ui-feedback.md",
-          "docs/adr/0006-the-spine.md",
-          "docs/adr/0007-cua-is-a-key-profile.md",
-          "docs/adr/0008-terminal-engine.md"
         ],
         "Design System": [
           "docs/design/README.md",
@@ -161,6 +159,16 @@ defmodule Minga.MixProject do
           "docs/design/tui.md",
           "docs/design/storyboard.md",
           "docs/design/visual_rubric.md"
+        ],
+        Decisions: [
+          "docs/adr/0001-frontend-owns-row-fit.md",
+          "docs/adr/0002-editor-state-transitions-have-explicit-owners.md",
+          "docs/adr/0003-extension-code-updates-require-a-new-vm-generation.md",
+          "docs/adr/0004-products-are-root-applets-over-a-fixed-engine.md",
+          "docs/adr/0005-frontend-owns-immediate-ui-feedback.md",
+          "docs/adr/0006-the-spine.md",
+          "docs/adr/0007-cua-is-a-key-profile.md",
+          "docs/adr/0008-terminal-engine.md"
         ]
       ],
       before_closing_head_tag: %{
