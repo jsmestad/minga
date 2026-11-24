@@ -373,7 +373,7 @@ defmodule MingaAgent.Changeset.OverlayTest do
       assert File.read!(source_bin) == "#!/bin/sh\nexec node ../left-pad/cli.js\n"
     end
 
-    test "re-materialization keeps an existing link when a package-manager source directory replaced a link",
+    test "re-materialization owns a package-manager directory whose project link became a real directory",
          %{project: project} do
       write_package(project, "packages/util")
       File.mkdir_p!(Path.join(project, "node_modules"))
@@ -391,8 +391,33 @@ defmodule MingaAgent.Changeset.OverlayTest do
       write_package(project, "node_modules/@scope/util")
 
       assert {:ok, _stats} = Overlay.materialize_project(overlay)
-      assert File.read_link!(scope_path) == Path.expand(source_scope)
+      assert File.lstat!(scope_path).type == :directory
+
+      assert File.read_link!(Path.join(scope_path, "util")) ==
+               Path.expand(Path.join(source_scope, "util"))
+
+      # A package installed into the scope now lands in the overlay.
+      write_package(overlay.overlay_dir, "node_modules/@scope/other")
+      assert File.ls!(source_scope) == ["util"]
       assert File.ls!(Path.join(project, "packages")) == ["util"]
+    end
+
+    test "re-materialization keeps a package-manager directory link that a command made",
+         %{project: project} do
+      write_package(project, "node_modules/@scope/util")
+      elsewhere = Path.join(project, "vendor-scope")
+      File.mkdir_p!(elsewhere)
+
+      {:ok, overlay} = Overlay.create(project)
+      on_exit(fn -> Overlay.cleanup(overlay) end)
+
+      File.mkdir_p!(Path.join(overlay.overlay_dir, "node_modules"))
+      scope_path = Path.join(overlay.overlay_dir, "node_modules/@scope")
+      File.ln_s!(elsewhere, scope_path)
+
+      assert {:ok, _stats} = Overlay.materialize_project(overlay)
+      assert File.read_link!(scope_path) == elsewhere
+      assert File.ls!(elsewhere) == []
     end
   end
 

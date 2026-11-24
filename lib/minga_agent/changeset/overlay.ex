@@ -637,9 +637,10 @@ defmodule MingaAgent.Changeset.Overlay do
 
   # An existing overlay entry wins whatever the source entry is now, so a
   # source that changed type between materializations never fails a command.
-  # Only an owned directory that is still a real overlay directory is entered.
-  # A kept symlink is never written through, because nothing is copied or
-  # created at its path.
+  # One exception: an owned directory must be a real overlay directory, so a
+  # link that materialization made to the project's entry is replaced once that
+  # entry is a real directory. A link a command made is kept. A kept symlink is
+  # never written through, because nothing is copied or created at its path.
   @spec place_link_farm_entry(
           t(),
           :link | {:own, link_farm_kind()},
@@ -656,6 +657,9 @@ defmodule MingaAgent.Changeset.Overlay do
       {{:own, child_kind}, :directory, {:error, :enoent}} ->
         build_link_farm(overlay, child_kind, source_path, target_path, stats)
 
+      {{:own, child_kind}, :directory, {:ok, %{type: :symlink}}} ->
+        own_linked_directory(overlay, child_kind, source_path, target_path, stats)
+
       {_disposition, _source_type, {:ok, _existing}} ->
         {:ok, stats}
 
@@ -667,6 +671,23 @@ defmodule MingaAgent.Changeset.Overlay do
 
       {_disposition, _source_type, {:error, reason}} ->
         {:error, reason}
+    end
+  end
+
+  @spec own_linked_directory(
+          t(),
+          link_farm_kind(),
+          String.t(),
+          String.t(),
+          materialization_stats()
+        ) :: {:ok, materialization_stats()} | {:error, term()}
+  defp own_linked_directory(overlay, kind, source_path, target_path, stats) do
+    if File.read_link(target_path) == {:ok, Path.expand(source_path)} do
+      with :ok <- File.rm(target_path) do
+        build_link_farm(overlay, kind, source_path, target_path, stats)
+      end
+    else
+      {:ok, stats}
     end
   end
 
