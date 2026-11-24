@@ -123,6 +123,50 @@ func (s SpineState) Token() StateToken {
 	}
 }
 
+// SpineStateFromWire returns the state a GUI section's state byte names; ok is false for 0 (no state) and unknown bytes.
+func SpineStateFromWire(wire byte) (state SpineState, ok bool) {
+	switch wire {
+	case 1:
+		return StateWorking, true
+	case 2:
+		return StateNeedsYou, true
+	case 3:
+		return StateWaiting, true
+	case 4:
+		return StateStopped, true
+	case 5:
+		return StateFailed, true
+	case 6:
+		return StateDone, true
+	default:
+		return 0, false
+	}
+}
+
+// SpineStateForAgentStatus returns the state an Agent status byte (gui_status_bar and gui_workspaces) speaks as; ok is false when it shows none.
+func SpineStateForAgentStatus(wire byte) (state SpineState, ok bool) {
+	switch wire {
+	case 1: // thinking
+		return StateWorking, true
+	case 2: // tool_executing
+		return StateWorking, true
+	case 3: // error
+		return StateFailed, true
+	case 5: // approval_waiting
+		return StateNeedsYou, true
+	case 6: // needs_you
+		return StateNeedsYou, true
+	case 7: // stopped
+		return StateStopped, true
+	case 8: // needs_review
+		return StateNeedsYou, true
+	case 9: // done
+		return StateDone, true
+	default:
+		return 0, false
+	}
+}
+
 // TwistVariant is a variant of the twist mark in the code gutter.
 type TwistVariant uint8
 

@@ -12,8 +12,8 @@ defmodule Minga.ReleaseERTSTest do
 
   @repo Path.expand("../..", __DIR__)
   @moduletag :tmp_dir
-  @executables ~w(Install erts-17.1.1/bin/erl erts-17.1.1/bin/erlexec erts-17.1.1/bin/beam.smp)
-  @files ~w(usr/include/ei.h usr/include/erl_nif.h usr/lib/libei.a erts-17.1.1/include/erl_nif.h lib/kernel-1/ebin/kernel.app lib/stdlib-1/ebin/stdlib.app lib/crypto-1/ebin/crypto.app lib/crypto-1/priv/lib/crypto.so)
+  @executables ~w(Install erts-17.1.2/bin/erl erts-17.1.2/bin/erlexec erts-17.1.2/bin/beam.smp)
+  @files ~w(usr/include/ei.h usr/include/erl_nif.h usr/lib/libei.a erts-17.1.2/include/erl_nif.h lib/kernel-1/ebin/kernel.app lib/stdlib-1/ebin/stdlib.app lib/crypto-1/ebin/crypto.app lib/crypto-1/priv/lib/crypto.so)
 
   setup_all do
     # Synthetic runtime files below prove only the consumer filesystem boundary.
@@ -33,7 +33,7 @@ defmodule Minga.ReleaseERTSTest do
     System.put_env("MINGA_RELEASE_ERTS_RECEIPT", path)
     on_exit(fn -> restore_env("MINGA_RELEASE_ERTS_RECEIPT", previous) end)
     target = native_target()
-    root = "otp-29.1.2-#{target.os}-#{target.arch}"
+    root = "otp-29.1.3-#{target.os}-#{target.arch}"
     tree = Path.join(context.tmp_dir, "tree")
     for dir <- ~w(releases misc), do: File.mkdir_p!(Path.join([tree, root, dir]))
 
@@ -60,7 +60,7 @@ defmodule Minga.ReleaseERTSTest do
         otp = Path.dirname(erts)
         parent = Path.dirname(otp)
         assert Path.type(erts) == :absolute
-        assert Path.basename(erts) == "erts-17.1.1"
+        assert Path.basename(erts) == "erts-17.1.2"
         assert File.ls!(parent) == [context.root]
         assert band(File.stat!(parent).mode, 0o777) == 0o700
         assert File.stat!(parent).uid == File.stat!(context.tmp_dir).uid
@@ -227,7 +227,7 @@ defmodule Minga.ReleaseERTSTest do
       File.chmod!(full, if(file in @executables, do: 0o755, else: 0o644))
     end
 
-    File.chmod!(Path.join([context.tree, context.root, "erts-17.1.1/bin/beam.smp"]), 0o644)
+    File.chmod!(Path.join([context.tree, context.root, "erts-17.1.2/bin/beam.smp"]), 0o644)
     archive!(context)
     assert_invalid_runtime()
   end
@@ -286,7 +286,7 @@ defmodule Minga.ReleaseERTSTest do
     otp_root = Path.join(context.tree, context.root)
 
     release = %Mix.Release{
-      erts_source: String.to_charlist(Path.join(otp_root, "erts-17.1.1")),
+      erts_source: String.to_charlist(Path.join(otp_root, "erts-17.1.2")),
       applications: %{
         crypto: [path: Path.join(otp_root, "lib/crypto-1")],
         elixir: [path: :code.lib_dir(:elixir)],
@@ -317,7 +317,7 @@ defmodule Minga.ReleaseERTSTest do
 
     dependencies =
       for name <- ~w(beam.smp erlexec) do
-        %{"file" => "erts-17.1.1/bin/#{name}", "libraries" => ["libc.so.6"]}
+        %{"file" => "erts-17.1.2/bin/#{name}", "libraries" => ["libc.so.6"]}
       end
 
     %{
@@ -325,8 +325,8 @@ defmodule Minga.ReleaseERTSTest do
       "kind" => "local-source-build",
       "os" => target.os,
       "arch" => target.arch,
-      "otp_version" => "29.1.2",
-      "erts_version" => "17.1.1",
+      "otp_version" => "29.1.3",
+      "erts_version" => "17.1.2",
       "openssl_version" => "3.5.9",
       "minimum_macos" => if(linux?, do: nil, else: "15.0"),
       "archive" => %{

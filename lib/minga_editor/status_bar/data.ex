@@ -374,22 +374,13 @@ defmodule MingaEditor.StatusBar.Data do
   end
 
   # The status bar shows the same Agent status as the workspace pill and the
-  # activity strip; statuses it has no indicator for read as idle.
-  @spec agent_session_status(EditorState.t() | map()) :: StatusAgent.session_status()
+  # activity strip, named through the same token table.
+  @spec agent_session_status(EditorState.t() | map()) :: WorkspaceStatus.t()
   defp agent_session_status(state) do
     state
     |> shell_state()
     |> WorkspaceStatus.active(state.workspace.agent_ui)
-    |> status_bar_status()
   end
-
-  @spec status_bar_status(WorkspaceStatus.t()) :: StatusAgent.session_status()
-  defp status_bar_status(status)
-       when status in [:idle, :thinking, :tool_executing, :error, :plan, :approval_waiting] or
-              status in [:needs_you, nil],
-       do: status
-
-  defp status_bar_status(_status_without_indicator), do: :idle
 
   @spec shell_state(EditorState.t() | map()) :: term()
   defp shell_state(%EditorState{shell_runtime: %{state: shell_state}}), do: shell_state

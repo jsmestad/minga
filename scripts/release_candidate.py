@@ -265,7 +265,7 @@ def validate_build(build, context, filename, target, schema, pins):
                 "missing actual wrapper_zig version")
     else:
         require("wrapper_zig" not in tools, "unexpected wrapper toolchain for native tarball")
-        require(tools.get("python") == "3.14.10" and tools.get("erts") == "17.1.1", "wrong Python or ERTS pin")
+        require(tools.get("python") == "3.14.10" and tools.get("erts") == "17.1.2", "wrong Python or ERTS pin")
         host = tools.get("host_erts_arch")
         require(isinstance(host, str) and host.startswith(target["arch"] + "-"), "wrong native host ERTS architecture")
         receipt = tools.get("erts_source")

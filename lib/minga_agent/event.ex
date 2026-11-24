@@ -92,10 +92,12 @@ defmodule MingaAgent.Event do
   @typedoc "The agent's current todo plan."
   @type todo_plan :: MingaAgent.Event.TodoPlan.t()
 
-  @typedoc "Pre-send estimated context usage."
+  @typedoc "Pre-send estimated or post-response reported context usage."
   @type context_usage :: %__MODULE__.ContextUsage{
           estimated_tokens: non_neg_integer(),
-          context_limit: non_neg_integer() | nil
+          context_limit: non_neg_integer() | nil,
+          reported_tokens: non_neg_integer() | nil,
+          estimation_method: :estimated | :reported | :unknown
         }
 
   @typedoc "The agent reached its per-prompt turn limit."
@@ -216,11 +218,13 @@ defmodule MingaAgent.Event do
   defmodule ContextUsage do
     @moduledoc false
     @enforce_keys [:estimated_tokens]
-    defstruct [:estimated_tokens, :context_limit]
+    defstruct [:estimated_tokens, :context_limit, :reported_tokens, estimation_method: :estimated]
 
     @type t :: %__MODULE__{
             estimated_tokens: non_neg_integer(),
-            context_limit: non_neg_integer() | nil
+            context_limit: non_neg_integer() | nil,
+            reported_tokens: non_neg_integer() | nil,
+            estimation_method: :estimated | :reported | :unknown
           }
   end
 

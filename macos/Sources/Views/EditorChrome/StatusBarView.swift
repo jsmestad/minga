@@ -414,29 +414,11 @@ public struct StatusBarView: View {
     }
 
     private var agentStatusText: String? {
-        switch state.agentStatus {
-        case .idle: return "Idle"
-        case .thinking: return "Thinking"
-        case .executingTool: return state.activeToolName.isEmpty ? "Running" : "Running \(state.activeToolName)"
-        case .error: return SpineState.failed.word
-        case .planning: return "PLAN"
-        case .approvalWaiting: return state.activeToolName.isEmpty ? "Awaiting approval" : "Awaiting approval for \(state.activeToolName)"
-        case .needsYou: return SpineState.needsYou.word
-        case .unknown: return nil
-        }
+        state.agentStatus.label
     }
 
     private var agentStatusHelpText: String {
-        switch state.agentStatus {
-        case .idle: return "Agent idle"
-        case .thinking: return "Agent thinking"
-        case .executingTool: return state.activeToolName.isEmpty ? "Agent executing tools" : "Agent running \(state.activeToolName)"
-        case .error: return "Agent error"
-        case .planning: return "Agent plan mode"
-        case .approvalWaiting: return state.activeToolName.isEmpty ? "Agent awaiting approval" : "Agent awaiting approval for \(state.activeToolName)"
-        case .needsYou: return "Agent needs you"
-        case .unknown: return "Agent status"
-        }
+        state.agentStatus.spineState?.accessibilityLabel ?? "Agent status: \(state.agentStatus.label)"
     }
 
     @ViewBuilder
@@ -457,45 +439,24 @@ public struct StatusBarView: View {
         }
     }
 
+    /// The status's mark, chosen and coloured by the state it speaks as, so the mark never contradicts the word beside it.
     @ViewBuilder
     private var agentStatusGlyph: some View {
-        switch state.agentStatus {
-        case .idle:
-            Text("◯")
-                .font(Typography.font(.small))
-                .foregroundStyle(theme.modelineBarFg.opacity(0.55))
-        case .thinking:
+        switch state.agentStatus.spineState {
+        case .working:
             ProgressView()
                 .scaleEffect(0.45)
                 .frame(width: 14, height: barHeight)
-                .tint(theme.statusbarAccentFg)
-        case .executingTool:
-            Image(systemName: "bolt.fill")
-                .font(Typography.font(.micro))
-                .foregroundStyle(theme.statusbarAccentFg)
+                .tint(theme.stateColor(.working))
+        case .some(let spineState):
+            Text(spineState.tuiGlyph)
+                .font(Typography.font(.small))
+                .foregroundStyle(theme.stateColor(spineState))
                 .frame(width: 14, height: barHeight)
-        case .error:
-            Image(systemName: "exclamationmark.circle.fill")
-                .font(Typography.font(.micro))
-                .foregroundStyle(theme.gutterErrorFg)
-                .frame(width: 14, height: barHeight)
-        case .planning:
-            Image(systemName: "pencil.and.outline")
-                .font(Typography.font(.micro))
-                .foregroundStyle(theme.agentStatusNeedsYou)
-                .frame(width: 14, height: barHeight)
-        case .approvalWaiting:
-            Image(systemName: "hand.raised.fill")
-                .font(Typography.font(.micro))
-                .foregroundStyle(theme.agentStatusNeedsYou)
-                .frame(width: 14, height: barHeight)
-        case .needsYou:
-            Image(systemName: "exclamationmark.triangle.fill")
-                .font(Typography.font(.micro))
-                .foregroundStyle(theme.agentStatusNeedsYou)
-                .frame(width: 14, height: barHeight)
-        case .unknown:
-            EmptyView()
+        case .none:
+            Text("◯")
+                .font(Typography.font(.small))
+                .foregroundStyle(theme.modelineBarFg.opacity(0.55))
         }
     }
 

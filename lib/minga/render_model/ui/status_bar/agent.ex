@@ -9,6 +9,9 @@ defmodule Minga.RenderModel.UI.StatusBar.Agent do
           | :plan
           | :approval_waiting
           | :needs_you
+          | :stopped
+          | :needs_review
+          | :done
           | :inactive
           | nil
 

@@ -10,8 +10,8 @@ defmodule Minga.ReleaseERTS do
   import Bitwise, only: [band: 2]
 
   @repo Path.expand("..", __DIR__)
-  @otp "29.1.2"
-  @erts "17.1.1"
+  @otp "29.1.3"
+  @erts "17.1.2"
   @openssl "3.5.9"
   @minimum_macos "15.0"
   @checks ~w(otp-version erts-version native-architecture crypto-result native-library-closure)

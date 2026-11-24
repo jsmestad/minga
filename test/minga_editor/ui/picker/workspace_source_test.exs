@@ -134,8 +134,8 @@ defmodule MingaEditor.UI.Picker.WorkspaceSourceTest do
       ctx = %{fake_context(tb) | live_agent: live, live_agent_ui: UIState.new()}
 
       row = status_row(ctx, group.id)
-      assert row.annotation == "! needs you"
-      assert row.description =~ "! needs you"
+      assert row.annotation == "◉ Needs you"
+      assert row.description =~ "◉ Needs you"
     end
 
     test "active workspace shows a live error over its stale stored status", %{
@@ -146,8 +146,8 @@ defmodule MingaEditor.UI.Picker.WorkspaceSourceTest do
       ctx = %{fake_context(tb) | live_agent: live, live_agent_ui: UIState.new()}
 
       row = status_row(ctx, group.id)
-      assert row.annotation == "⚠ error"
-      assert row.description =~ "⚠ error"
+      assert row.annotation == "◆ Failed"
+      assert row.description =~ "◆ Failed"
     end
 
     test "active workspace with a failed start needs you", %{tb: tb, group: group} do
@@ -157,7 +157,7 @@ defmodule MingaEditor.UI.Picker.WorkspaceSourceTest do
       ctx = %{fake_context(tb) | live_agent: nil, live_agent_ui: failed_ui}
 
       row = status_row(ctx, group.id)
-      assert row.annotation == "! needs you"
+      assert row.annotation == "◉ Needs you"
     end
 
     test "background workspace keeps its stored status even when a live cache is set", %{
@@ -170,8 +170,8 @@ defmodule MingaEditor.UI.Picker.WorkspaceSourceTest do
       ctx = %{fake_context(tb) | live_agent: live, live_agent_ui: UIState.new()}
 
       row = status_row(ctx, group.id)
-      assert row.annotation == "↻ thinking"
-      assert row.description =~ "↻ thinking"
+      assert row.annotation == "◐ Working"
+      assert row.description =~ "◐ Working"
     end
 
     test "background workspace with a failed start needs you from its stored UI", %{
@@ -186,7 +186,7 @@ defmodule MingaEditor.UI.Picker.WorkspaceSourceTest do
       ctx = %{fake_context(tb) | live_agent: nil, live_agent_ui: UIState.new()}
 
       row = status_row(ctx, group.id)
-      assert row.annotation == "! needs you"
+      assert row.annotation == "◉ Needs you"
     end
   end
 

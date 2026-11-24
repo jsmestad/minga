@@ -269,28 +269,15 @@ public struct WorkspaceHeaderView: View {
     }
 
     private func agentStatusLabel(_ status: AgentStatus) -> String {
-        switch status {
-        case .thinking: return "Thinking"
-        case .executingTool: return "Using tools"
-        case .error: return SpineState.failed.word
-        case .planning: return "Planning"
-        case .approvalWaiting: return "Awaiting approval"
-        case .needsYou: return SpineState.needsYou.word
-        case .idle: return "Idle"
-        case .unknown: return "Unknown"
-        }
+        status.label
     }
 
     private func agentStatusHelp(_ status: AgentStatus) -> String {
         "Agent status: \(agentStatusLabel(status))"
     }
 
+    /// The colour of the state the status speaks as, from the same table as its word; no state draws in the waiting role.
     private func agentStatusColor(_ status: AgentStatus) -> Color {
-        switch status {
-        case .thinking, .executingTool: return theme.stateColor(SpineState.working)
-        case .error: return theme.stateColor(SpineState.failed)
-        case .planning, .approvalWaiting, .needsYou: return theme.stateColor(SpineState.needsYou)
-        case .idle, .unknown: return theme.stateColor(SpineState.waiting)
-        }
+        theme.stateColor(status.spineState ?? .waiting)
     }
 }

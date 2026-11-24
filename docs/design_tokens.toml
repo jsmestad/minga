@@ -1,4 +1,4 @@
-# Minga design tokens: the one source for colour roles, state words and shapes, twist variants and voice lines.
+# Minga design tokens: the one source for colour roles, state words and shapes, the state each Agent status speaks as, twist variants and voice lines.
 #
 # `mix codegen` reads this file and writes:
 #   - generated/elixir/design_tokens.ex                  (Minga.Design.Tokens)
@@ -155,9 +155,11 @@ means = "The focused pane's border and the global accent"
 
 # States: six words, five shapes. Waiting and Stopped share the hollow dot; the word tells them apart.
 # `tui_glyph` is the TUI's static glyph; `tui_frames` is the animation cycle where the state moves.
+# `wire` is the state's byte in GUI sections that carry a state; 0 means no state, so it is never a state's byte.
 
 [[states]]
 id = "working"
+wire = 1
 word = "Working"
 shape = "orbit"
 role = "minga"
@@ -167,6 +169,7 @@ accessibility_label = "Minga is working"
 
 [[states]]
 id = "needs_you"
+wire = 2
 word = "Needs you"
 shape = "halo_dot"
 role = "needs_you"
@@ -175,6 +178,7 @@ accessibility_label = "Minga needs you"
 
 [[states]]
 id = "waiting"
+wire = 3
 word = "Waiting"
 shape = "hollow_dot"
 role = "waiting"
@@ -183,6 +187,7 @@ accessibility_label = "Minga is waiting"
 
 [[states]]
 id = "stopped"
+wire = 4
 word = "Stopped"
 shape = "hollow_dot"
 role = "waiting"
@@ -191,6 +196,7 @@ accessibility_label = "Minga stopped"
 
 [[states]]
 id = "failed"
+wire = 5
 word = "Failed"
 shape = "diamond"
 role = "failure"
@@ -199,11 +205,64 @@ accessibility_label = "Minga failed"
 
 [[states]]
 id = "done"
+wire = 6
 word = "Done"
 shape = "solid_dot"
 role = "done"
 tui_glyph = "●"
 accessibility_label = "Minga is done"
+
+# Agent statuses: the state each status the BEAM reports speaks as, so every surface that shows Minga's state uses the same word.
+# `wire` is the status byte in gui_status_bar (0x76), gui_workspaces and gui_agent_chat. A status without `state` shows no state, and a status the table does not name shows none either.
+
+[[agent_statuses]]
+id = "idle"
+wire = 0
+
+[[agent_statuses]]
+id = "thinking"
+wire = 1
+state = "working"
+
+[[agent_statuses]]
+id = "tool_executing"
+wire = 2
+state = "working"
+
+[[agent_statuses]]
+id = "error"
+wire = 3
+state = "failed"
+
+# A session in plan mode reports plan whether or not a turn is running, so plan claims no state: the orbit appears only while Minga is moving.
+[[agent_statuses]]
+id = "plan"
+wire = 4
+
+[[agent_statuses]]
+id = "approval_waiting"
+wire = 5
+state = "needs_you"
+
+[[agent_statuses]]
+id = "needs_you"
+wire = 6
+state = "needs_you"
+
+[[agent_statuses]]
+id = "stopped"
+wire = 7
+state = "stopped"
+
+[[agent_statuses]]
+id = "needs_review"
+wire = 8
+state = "needs_you"
+
+[[agent_statuses]]
+id = "done"
+wire = 9
+state = "done"
 
 # Twist variants. `strand` is the light strand's role and `shade` the shade strand's role.
 # In the TUI the strand is the cell's foreground and the shade its background; a variant without `shade` draws on the gutter background.

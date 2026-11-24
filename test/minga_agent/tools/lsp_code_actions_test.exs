@@ -9,12 +9,6 @@ defmodule MingaAgent.Tools.LspCodeActionsTest do
   alias MingaAgent.Tool.Context, as: ToolContext
   alias MingaAgent.Tools.LspCodeActions
 
-  setup do
-    SyncServer.clear_registry()
-    on_exit(&SyncServer.clear_registry/0)
-    :ok
-  end
-
   describe "execute/3 without LSP client" do
     test "returns error when no buffer exists" do
       {:error, result} =
@@ -46,7 +40,7 @@ defmodule MingaAgent.Tools.LspCodeActionsTest do
       }
 
       client = start_fake_client(%{"textDocument/codeAction" => {:ok, [action]}})
-      SyncServer.put_clients(buffer, [client])
+      attach_clients(buffer, [client])
 
       assert {:error, result} =
                LspCodeActions.execute(direct_context(tmp_dir), path, 0, apply: 1)
@@ -73,7 +67,7 @@ defmodule MingaAgent.Tools.LspCodeActionsTest do
       }
 
       client = start_fake_client(%{"textDocument/codeAction" => {:ok, [action]}})
-      SyncServer.put_clients(buffer, [client])
+      attach_clients(buffer, [client])
 
       assert {:error, result} =
                LspCodeActions.execute(direct_context(tmp_dir), path, 0, apply: 1)
@@ -92,7 +86,7 @@ defmodule MingaAgent.Tools.LspCodeActionsTest do
       source = start_supervised!({BufferProcess, file_path: source_path, content: "source\n"})
       action = %{"title" => "Replace name", "edit" => workspace_edit(target_path, "new_name")}
       client = start_fake_client(%{"textDocument/codeAction" => {:ok, [action]}})
-      SyncServer.put_clients(source, [client])
+      attach_clients(source, [client])
       context = context(tmp_dir)
 
       assert {:ok, result} = LspCodeActions.execute(context, source_path, 0, apply: 1)
@@ -121,7 +115,7 @@ defmodule MingaAgent.Tools.LspCodeActionsTest do
       }
 
       client = start_fake_client(responses)
-      SyncServer.put_clients(buffer, [client])
+      attach_clients(buffer, [client])
 
       context = context(tmp_dir)
 
@@ -149,7 +143,7 @@ defmodule MingaAgent.Tools.LspCodeActionsTest do
       }
 
       client = start_fake_client(%{"textDocument/codeAction" => {:ok, [action]}})
-      SyncServer.put_clients(source, [client])
+      attach_clients(source, [client])
 
       assert {:error, result} = LspCodeActions.execute(context(tmp_dir), source_path, 0, apply: 1)
       assert result =~ "cannot verify document version"
@@ -167,7 +161,7 @@ defmodule MingaAgent.Tools.LspCodeActionsTest do
 
       action = %{"title" => "Empty edit", "edit" => empty_workspace_edit(target_path)}
       client = start_fake_client(%{"textDocument/codeAction" => {:ok, [action]}})
-      SyncServer.put_clients(source, [client])
+      attach_clients(source, [client])
 
       assert {:ok, "Code action \"Empty edit\": no edits to apply"} =
                LspCodeActions.execute(context(tmp_dir), source_path, 0, apply: 1)
@@ -193,7 +187,7 @@ defmodule MingaAgent.Tools.LspCodeActionsTest do
       }
 
       client = start_fake_client(%{"textDocument/codeAction" => {:ok, [action]}})
-      SyncServer.put_clients(buffer, [client])
+      attach_clients(buffer, [client])
 
       assert {:error, result} = LspCodeActions.execute(context(tmp_dir), path, 0, apply: 1)
       assert result =~ "version_mismatch"
@@ -220,7 +214,7 @@ defmodule MingaAgent.Tools.LspCodeActionsTest do
       }
 
       client = start_fake_client(%{"textDocument/codeAction" => {:ok, [action]}})
-      SyncServer.put_clients(source, [client])
+      attach_clients(source, [client])
 
       assert {:error, result} = LspCodeActions.execute(context(tmp_dir), source_path, 0, apply: 1)
       assert result =~ "cannot verify document version"
@@ -243,7 +237,7 @@ defmodule MingaAgent.Tools.LspCodeActionsTest do
       }
 
       client = start_fake_client(%{"textDocument/codeAction" => {:ok, [action]}})
-      SyncServer.put_clients(source, [client])
+      attach_clients(source, [client])
 
       context = context(tmp_dir)
 
@@ -365,5 +359,11 @@ defmodule MingaAgent.Tools.LspCodeActionsTest do
         send(caller, {:lsp_response, ref, Map.fetch!(responses, method)})
         fake_client_loop(responses, owner)
     end
+  end
+
+  # Registers fake clients in the shared SyncServer registry and removes only this buffer's entry.
+  defp attach_clients(buffer, clients) do
+    SyncServer.put_clients(buffer, clients)
+    on_exit(fn -> SyncServer.remove_buffer(buffer) end)
   end
 end

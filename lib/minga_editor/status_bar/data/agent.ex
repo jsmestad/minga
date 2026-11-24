@@ -1,10 +1,8 @@
 defmodule MingaEditor.StatusBar.Data.Agent do
   @moduledoc false
 
-  alias MingaEditor.State.Agent, as: AgentState
-
-  @typedoc "The session's display status, or `:needs_you` when its start failed."
-  @type session_status :: AgentState.display_status() | :needs_you
+  @typedoc "The active workspace's Agent status, as `MingaEditor.Agent.WorkspaceStatus` resolves it."
+  @type session_status :: MingaEditor.Agent.WorkspaceStatus.t()
 
   @type t :: %__MODULE__{
           model_name: String.t(),

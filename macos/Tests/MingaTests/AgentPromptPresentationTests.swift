@@ -716,7 +716,7 @@ struct AgentPromptPresentationTests {
         #expect(state.prompt == draft)
         #expect(state.promptMode == mode)
         #expect(state.promptCursorLine == 1 && state.promptCursorCol == 4)
-        #expect(state.statusLabel == "Awaiting approval")
+        #expect(state.statusLabel == SpineState.needsYou.word)
         #expect(state.hasActiveTurn && !state.isThinking)
         state.prompt = ""
         #expect(try !control.inspect().findAll(ViewType.Button.self)[3].isDisabled())

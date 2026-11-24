@@ -56,7 +56,7 @@ Each line draws its own segment, so the ribbon stays aligned at any line height.
 
 ## The orbit
 
-The orbit appears only while Minga is moving. When Minga stops, the orbit goes and the satellite remains, shaped by why it stopped. There are six state words and five shapes. The shapes differ without colour, so they work for colour-blind users and in 16-colour terminals. A state is always followed by its word, and the word is what tells Waiting and Stopped apart: they share the hollow dot.
+The orbit appears only while Minga is moving. When Minga stops, the orbit goes and the satellite remains, shaped by why it stopped. There are six state words and five shapes. The shapes differ without colour, so they work for colour-blind users and in 16-colour terminals. A state is always followed by its word, and the word is what tells Waiting and Stopped apart: they share the hollow dot. Which state an Agent status speaks as (thinking and running a tool are Working, a pending approval Needs you, an error Failed) is one table in `docs/design_tokens.toml`, generated for Elixir, Swift and Go, so every surface names a status with the same word.
 
 | State | Shape | Word | File | TUI |
 |---|---|---|---|---|

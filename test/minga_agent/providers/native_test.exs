@@ -1043,6 +1043,44 @@ defmodule MingaAgent.Providers.NativeTest do
     end
   end
 
+  describe "reported context usage" do
+    for {name, usage, expected} <- [
+          {"adds cache reads and writes when input excludes them",
+           %{
+             input_tokens: 2_000,
+             cache_read_tokens: 70_000,
+             cache_write_tokens: 8_000,
+             input_includes_cached: false,
+             output_tokens: 5
+           }, 80_000},
+          {"uses input alone when it already includes the cache",
+           %{
+             input_tokens: 80_000,
+             cache_read_tokens: 70_000,
+             input_includes_cached: true,
+             output_tokens: 5
+           }, 80_000}
+        ] do
+      @usage usage
+      @expected expected
+
+      test "#{name}", %{tmp_dir: dir} do
+        chunks = [ReqLLM.StreamChunk.text("ok"), ReqLLM.StreamChunk.meta(%{finish_reason: :stop})]
+        {:ok, pid} = start_provider(tmp_dir: dir, llm_client: fake_llm_client(chunks, @usage))
+
+        assert :ok = send_prompt(pid, "Hi")
+
+        assert [%Event.ContextUsage{reported_tokens: tokens, estimated_tokens: tokens}] =
+                 Enum.filter(
+                   collect_run_events(),
+                   &match?(%Event.ContextUsage{estimation_method: :reported}, &1)
+                 )
+
+        assert tokens == @expected
+      end
+    end
+  end
+
   describe "send_prompt with tool calls" do
     @tag :tmp_dir
     test "Session owner death terminates an admitted effect worker", %{tmp_dir: dir} do

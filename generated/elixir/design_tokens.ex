@@ -35,6 +35,19 @@ defmodule Minga.Design.Tokens do
   @typedoc "A state's shape. Waiting and Stopped share the hollow dot."
   @type state_shape :: :orbit | :halo_dot | :hollow_dot | :diamond | :solid_dot
 
+  @typedoc "An Agent status the BEAM reports, as `MingaEditor.Agent.WorkspaceStatus` resolves it or a workspace stores it."
+  @type agent_status ::
+          :idle
+          | :thinking
+          | :tool_executing
+          | :error
+          | :plan
+          | :approval_waiting
+          | :needs_you
+          | :stopped
+          | :needs_review
+          | :done
+
   @typedoc "A twist variant id."
   @type twist_variant :: :head | :body | :last | :kept | :shared
 
@@ -301,6 +314,64 @@ defmodule Minga.Design.Tokens do
   @doc "The colour role a state is drawn in."
   @spec state_role(state_id()) :: color_role()
   def state_role(state), do: state(state).role
+
+  @doc "The byte a GUI section carries for a state; 0 means no state."
+  @spec state_wire(state_id() | nil) :: byte()
+  def state_wire(:working), do: 1
+  def state_wire(:needs_you), do: 2
+  def state_wire(:waiting), do: 3
+  def state_wire(:stopped), do: 4
+  def state_wire(:failed), do: 5
+  def state_wire(:done), do: 6
+  def state_wire(nil), do: 0
+
+  @doc "Every Agent status, in token-file order."
+  @spec agent_statuses() :: [agent_status()]
+  def agent_statuses,
+    do: [
+      :idle,
+      :thinking,
+      :tool_executing,
+      :error,
+      :plan,
+      :approval_waiting,
+      :needs_you,
+      :stopped,
+      :needs_review,
+      :done
+    ]
+
+  @doc "The Agent status byte gui_status_bar and gui_workspaces carry; unknown statuses and nil encode as idle."
+  @spec agent_status_wire(agent_status() | atom() | nil) :: byte()
+  def agent_status_wire(:idle), do: 0
+  def agent_status_wire(:thinking), do: 1
+  def agent_status_wire(:tool_executing), do: 2
+  def agent_status_wire(:error), do: 3
+  def agent_status_wire(:plan), do: 4
+  def agent_status_wire(:approval_waiting), do: 5
+  def agent_status_wire(:needs_you), do: 6
+  def agent_status_wire(:stopped), do: 7
+  def agent_status_wire(:needs_review), do: 8
+  def agent_status_wire(:done), do: 9
+  def agent_status_wire(_status), do: 0
+
+  @doc """
+  The state an Agent status speaks as, or nil when it shows none.
+
+  Every surface that shows Minga's state reads it through this table, in Elixir, Swift and Go, so no two surfaces name the same status differently.
+  """
+  @spec agent_status_state(agent_status() | atom() | nil) :: state_id() | nil
+  def agent_status_state(:idle), do: nil
+  def agent_status_state(:thinking), do: :working
+  def agent_status_state(:tool_executing), do: :working
+  def agent_status_state(:error), do: :failed
+  def agent_status_state(:plan), do: nil
+  def agent_status_state(:approval_waiting), do: :needs_you
+  def agent_status_state(:needs_you), do: :needs_you
+  def agent_status_state(:stopped), do: :stopped
+  def agent_status_state(:needs_review), do: :needs_you
+  def agent_status_state(:done), do: :done
+  def agent_status_state(_status), do: nil
 
   @doc "Every twist variant id, in token-file order."
   @spec twist_variants() :: [twist_variant()]

@@ -54,13 +54,8 @@ public enum CardStatus: Equatable, Sendable {
         spineState?.role ?? .waiting
     }
 
-    /// Human-readable label for the status badge. States use their design token word; iterating says what the working state is doing.
+    /// Human-readable label for the status badge: the state's design token word, so the card names a status the way the modeline does. Iterating is the working state.
     public var label: String {
-        switch self {
-        case .idle: "Idle"
-        case .iterating: "Iterating"
-        case .unknown: "Unknown"
-        case .working, .needsYou, .done, .errored: spineState?.word ?? "Unknown"
-        }
+        spineState?.word ?? "Idle"
     }
 }

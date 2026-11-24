@@ -17,6 +17,7 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatEncoder do
   `AgentChat.Usage`.
   """
 
+  alias Minga.Design.Tokens
   alias Minga.Frontend.Adapter.GUI.Caches
   alias Minga.Frontend.Adapter.GUI.Wire.VimMode
   alias Minga.Frontend.Adapter.GUI.Wire.Writer
@@ -76,7 +77,7 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatEncoder do
         @section_chat_header,
         Writer.new(@command)
         |> Writer.uint8(:version, 1)
-        |> Writer.uint8(:status, encode_agent_chat_status(model.status))
+        |> Writer.uint8(:status, Tokens.agent_status_wire(model.status))
         |> Writer.finish()
       ),
       encode_section(
@@ -287,16 +288,6 @@ defmodule Minga.Frontend.Adapter.GUI.AgentChatEncoder do
   end
 
   # ── Enum byte helpers ──
-
-  @spec encode_agent_chat_status(atom()) :: non_neg_integer()
-  defp encode_agent_chat_status(:idle), do: 0
-  defp encode_agent_chat_status(:thinking), do: 1
-  defp encode_agent_chat_status(:tool_executing), do: 2
-  defp encode_agent_chat_status(:error), do: 3
-  defp encode_agent_chat_status(:plan), do: 4
-  defp encode_agent_chat_status(:approval_waiting), do: 5
-  defp encode_agent_chat_status(:needs_you), do: 6
-  defp encode_agent_chat_status(_), do: 0
 
   @spec bool_byte(boolean() | nil) :: 0 | 1
   defp bool_byte(true), do: 1
