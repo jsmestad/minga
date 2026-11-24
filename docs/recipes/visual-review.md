@@ -37,9 +37,11 @@ For each item, the implementer either fixes it, re-renders and re-runs the hard 
 Write the review record (the format is at the top of `review.py`), then post it and file what is left:
 
 ```bash
-python3 design/tools/storyboard/review.py comment --pr <number> --record record.json
-python3 design/tools/storyboard/review.py followups --pr <number> --record record.json --comment <comment-url>
+python3 design/tools/storyboard/review.py comment --pr <number> --record record.json --review /tmp/visual-review/review.json
+python3 design/tools/storyboard/review.py followups --pr <number> --record record.json --comment <comment-url> --review /tmp/visual-review/review.json
 ```
+
+Both commands refuse a record that misses a changed scenario or one of the two verdicts, or that has more than three critic rounds. Running the review again after a later push replaces the pull request's comment and its section of the follow-ups issue instead of adding new ones. When no macOS input changed, CI renders no macOS frames; `review.json` says so, and the reviewers judge the TUI frames alone.
 
 `comment` posts one "Visual review" comment with both reviewers' verdicts side by side, the critic's rounds and what happened to each item, and the number of changed scenarios reviewed. `followups` appends every concern, every disagreement between the reviewers, and every critic item that is open or declined to the visual follow-ups issue ([#4071](https://github.com/jsmestad/minga/issues/4071)), each entry naming the scenario, the pull request and a link to the notes.
 

@@ -390,10 +390,11 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Test the render gate and the layout audit
+      - name: Test the render gate, the layout audit and the visual review records
         run: |
           python3 -m unittest discover -s test/scripts -p 'storyboard_renders_test.py'
           python3 -m unittest discover -s test/scripts -p 'storyboard_audit_test.py'
+          python3 -m unittest discover -s test/scripts -p 'storyboard_review_test.py'
 
       - name: Require the renders this change needs
         env:

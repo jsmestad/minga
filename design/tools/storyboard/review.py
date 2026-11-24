@@ -8,10 +8,16 @@ the storyboard; see docs/recipes/visual-review.md. This script does the mechanic
       a PNG (TUI frames drawn from their text grid and colours, macOS frames as rendered), the scenario's boards
       rendered with headless Chrome, and DIR/review.json listing them. --all reviews every built scenario, for first
       renders. Without changed scenarios there is nothing to review.
-  python3 design/tools/storyboard/review.py comment --pr N --record FILE [--dry-run]
-      Posts the "Visual review" comment on the pull request from a review record (format below).
-  python3 design/tools/storyboard/review.py followups --pr N --record FILE --comment URL [--issue 4071] [--dry-run]
-      Appends every concern, reviewer disagreement and open critic item to the visual follow-ups issue.
+  python3 design/tools/storyboard/review.py comment --pr N --record FILE [--review review.json] [--dry-run]
+      Posts the "Visual review" comment on the pull request from a review record (format below), or replaces the
+      one an earlier run posted.
+  python3 design/tools/storyboard/review.py followups --pr N --record FILE --comment URL [--review review.json]
+                                                      [--issue 4071] [--dry-run]
+      Writes every concern, reviewer disagreement and open critic item to the visual follow-ups issue, in one section
+      per pull request that a rerun replaces.
+
+Both refuse a record that misses a changed scenario or a reviewer's verdict, or has more than three critic rounds.
+When the run has no macOS renders (no macOS input changed), review.json says so and the inputs are TUI only.
 
 A review record is JSON ("note" is optional and heads the follow-up section, for example items fixed before filing):
 
@@ -27,6 +33,7 @@ import argparse
 import html
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -41,6 +48,9 @@ CHROME = os.environ.get("CHROME", "/Applications/Google Chrome.app/Contents/MacO
 DEFAULT_OUT = ROOT / "_build" / "visual-review"
 FOLLOWUPS_ISSUE = 4071
 COMMENT_MARKER = "<!-- minga-visual-review -->"
+# GitHub rejects an issue or comment body over 65536 characters.
+BODY_LIMIT = 65536
+SCENARIO_ID = re.compile(r"^[a-z0-9_]+(\.[a-z0-9_]+)*$")
 
 
 class Failure(Exception):
@@ -94,23 +104,42 @@ def tui_png(frame, png_path):
         screenshot(source, png_path, cols * CELL_WIDTH, rows * CELL_HEIGHT)
 
 
+def macos_job(run_id):
+    """The conclusion of the run's macOS render job: "success", "skipped" (no macOS input changed) or another state."""
+    jobs = json.loads(run(["gh", "run", "view", str(run_id), "--json", "jobs"]))["jobs"]
+    return next((j.get("conclusion") or j.get("status") for j in jobs if j["name"] == "Storyboard renders (macOS)"), "absent")
+
+
 def cmd_inputs(args):
     out = args.out
     if out.exists():
+        # Only ever replace a folder this command wrote, never a directory named by mistake.
+        if any(out.iterdir()) and not (out / "review.json").is_file():
+            raise Failure(f"{out} exists and is not a visual review folder; pass an empty or new --out")
         shutil.rmtree(out)
     artifacts = out / "artifacts"
+    macos = "rendered"
     for name in ("storyboard-tui", "storyboard-macos", "storyboard-page"):
         target = artifacts / name
         result = subprocess.run(["gh", "run", "download", str(args.run), "-n", name, "-D", str(target)],
                                 capture_output=True, text=True)
-        if result.returncode != 0 and name != "storyboard-macos":
+        if result.returncode == 0:
+            continue
+        if name != "storyboard-macos":
             raise Failure(f"cannot download {name} from run {args.run}: {result.stderr.strip()}")
+        conclusion = macos_job(args.run)
+        if conclusion == "success":
+            raise Failure(f"the macOS renders of run {args.run} exist but did not download: {result.stderr.strip()}")
+        macos = f"not rendered in run {args.run} (macOS render job: {conclusion})"
+        print(f"warning: {macos}; reviewers see TUI frames only", file=sys.stderr)
     manifest = json.loads((artifacts / "storyboard-tui" / "manifest.json").read_text())
     report = json.loads((artifacts / "storyboard-page" / "diff.json").read_text())
     built = {s["id"]: s for s in manifest["scenarios"] if s["status"] == "built"}
     changed = sorted(built) if args.all else [entry["scenario"] for entry in report["changed"]]
-    review = {"run": args.run, "base": report.get("base"), "count": len(changed), "scenarios": []}
+    review = {"run": args.run, "base": report.get("base"), "count": len(changed), "macos": macos, "scenarios": []}
     for sid in changed:
+        if not SCENARIO_ID.match(sid):
+            raise Failure(f"unexpected scenario id {sid!r} in the run's artifacts")
         scenario = built[sid]
         folder = out / sid
         folder.mkdir(parents=True)
@@ -124,15 +153,53 @@ def cmd_inputs(args):
             frames.append({"frontend": "macos", "file": str(folder / png.name)})
         boards = []
         for frontend, board in sorted((scenario.get("boards") or {}).items()):
-            source = renders.BOARDS / board
+            source = (renders.BOARDS / board).resolve()
+            if not source.is_relative_to(renders.BOARDS.resolve()):
+                raise Failure(f"board {board!r} of {sid} is outside design/boards")
             png = folder / f"board-{frontend}-{Path(board).stem}.png"
             if source.is_file() and not png.exists():
                 screenshot(source, png, 1460, 920)
             boards.append({"frontend": frontend, "board": f"design/boards/{board}", "file": str(png)})
-        review["scenarios"].append({"id": sid, "title": scenario["title"], "frames": frames, "boards": boards})
+        review["scenarios"].append({"id": sid, "title": scenario["title"], "macos": macos, "frames": frames,
+                                    "boards": boards})
     (out / "review.json").write_text(json.dumps(review, indent=2) + "\n")
     print(f"{len(changed)} scenarios to review; inputs in {out}")
     return 0
+
+
+def flat(text):
+    """Model-written notes on one line, so they cannot end a list item or start a heading."""
+    return " ".join(str(text).split())
+
+
+def validate(record, review=None):
+    """A review record is model output; refuse one that would post or file less than the review found."""
+    problems = []
+    scenarios = record.get("scenarios") or []
+    if not scenarios:
+        problems.append("no scenarios")
+    if review is not None and sorted(scenarios) != sorted(s["id"] for s in review["scenarios"]):
+        problems.append(f"scenarios {sorted(scenarios)} differ from review.json {sorted(s['id'] for s in review['scenarios'])}")
+    for sid in scenarios:
+        verdicts = [v for v in record.get("verdicts", []) if v.get("scenario") == sid]
+        if len({v.get("reviewer") for v in verdicts}) != 2 or len(verdicts) != 2:
+            problems.append(f"{sid} needs one verdict from each of two reviewers, has {len(verdicts)}")
+        problems += [f"{sid}: verdict {v.get('verdict')!r} is not pass or concern" for v in verdicts
+                     if v.get("verdict") not in ("pass", "concern")]
+    rounds = record.get("critic", [])
+    if len(rounds) > 3:
+        problems.append(f"{len(rounds)} critic rounds; the loop stops after three")
+    problems += [f"critic item status {i.get('status')!r} is not fixed, declined or open"
+                 for r in rounds for i in r.get("items", []) if i.get("status") not in ("fixed", "declined", "open")]
+    if problems:
+        raise Failure("the review record is incomplete: " + "; ".join(problems))
+    return record
+
+
+def load_record(args):
+    record = json.loads(Path(args.record).read_text())
+    review = json.loads(Path(args.review).read_text()) if getattr(args, "review", None) else None
+    return validate(record, review)
 
 
 def verdict_table(record):
@@ -146,7 +213,7 @@ def verdict_table(record):
                 cells.append("missing")
                 continue
             verdict = found[0]
-            note = verdict.get("notes", "").replace("|", "\\|").replace("\n", " ")
+            note = flat(verdict.get("notes", "")).replace("|", "\\|")
             cells.append(f"**{verdict['verdict']}**: {note}" if note else f"**{verdict['verdict']}**")
         lines.append(f"| `{sid}` | " + " | ".join(cells) + " |")
     return lines
@@ -162,14 +229,14 @@ def open_items(record):
                           "note": "; ".join(f"{v['reviewer']}: {v['verdict']}" for v in verdicts)})
         for verdict in verdicts:
             if verdict["verdict"] == "concern":
-                items.append({"scenario": sid, "source": verdict["reviewer"], "note": verdict.get("notes", "")})
+                items.append({"scenario": sid, "source": verdict["reviewer"], "note": flat(verdict.get("notes", ""))})
     for round_ in record.get("critic", []):
         for item in round_["items"]:
             if item.get("status") in ("open", "declined"):
                 note = f"{item.get('part', '')}: {item['issue']}"
                 if item.get("status") == "declined":
                     note += f" (declined: {item.get('reason', 'no reason given')})"
-                items.append({"scenario": item["scenario"], "source": f"critic round {round_['round']}", "note": note})
+                items.append({"scenario": item["scenario"], "source": f"critic round {round_['round']}", "note": flat(note)})
     return items
 
 
@@ -185,9 +252,9 @@ def comment_body(record):
     for round_ in rounds:
         lines.append(f"**Round {round_['round']}**: {len(round_['items'])} item(s)")
         for item in round_["items"]:
-            reason = f" ({item['reason']})" if item.get("reason") else ""
-            suggested = item.get("suggested", "").rstrip(".")
-            lines.append(f"- `{item['scenario']}` {item.get('part', '')}: {item['issue']} Suggested: {suggested}. "
+            reason = f" ({flat(item['reason'])})" if item.get("reason") else ""
+            suggested = flat(item.get("suggested", "")).rstrip(".")
+            lines.append(f"- `{item['scenario']}` {item.get('part', '')}: {flat(item['issue'])} Suggested: {suggested}. "
                          f"**{item.get('status', 'open')}**{reason}")
     items = open_items(record)
     lines += ["", f"Appended to the visual follow-ups issue (#{FOLLOWUPS_ISSUE}): {len(items)} item(s). "
@@ -196,12 +263,21 @@ def comment_body(record):
 
 
 def cmd_comment(args):
-    record = json.loads(Path(args.record).read_text())
-    body = comment_body(record)
+    """Posts the one Visual review comment, or replaces it when the review runs again."""
+    body = comment_body(load_record(args))
+    if len(body) > BODY_LIMIT:
+        raise Failure(f"the comment is {len(body)} characters, over GitHub's {BODY_LIMIT}; shorten the notes")
     if args.dry_run:
         print(body)
         return 0
-    url = run(["gh", "pr", "comment", str(args.pr), "--body-file", "-"], input=body).strip()
+    existing = run(["gh", "api", "--paginate", f"repos/{{owner}}/{{repo}}/issues/{args.pr}/comments",
+                    "-q", f'.[] | select(.body | contains("{COMMENT_MARKER}")) | .id']).split()
+    if existing:
+        payload = json.dumps({"body": body})
+        url = json.loads(run(["gh", "api", "-X", "PATCH", f"repos/{{owner}}/{{repo}}/issues/comments/{existing[0]}",
+                              "--input", "-"], input=payload))["html_url"]
+    else:
+        url = run(["gh", "pr", "comment", str(args.pr), "--body-file", "-"], input=body).strip()
     print(url)
     return 0
 
@@ -213,23 +289,43 @@ def followup_entries(record, pr, comment):
     return lines
 
 
+def replace_section(body, heading, section):
+    """The issue body with this pull request's section replaced, or appended when it has none, so a rerun of the
+    review never files the same entries twice."""
+    lines = body.rstrip().split("\n")
+    if heading in lines:
+        start = lines.index(heading)
+        end = next((i for i in range(start + 1, len(lines)) if lines[i].startswith("## ")), len(lines))
+        lines = lines[:start] + section + ([""] + lines[end:] if end < len(lines) else [])
+        return "\n".join(lines).rstrip() + "\n"
+    return "\n".join(lines) + "\n\n" + "\n".join(section) + "\n"
+
+
 def cmd_followups(args):
-    record = json.loads(Path(args.record).read_text())
+    record = load_record(args)
     entries = followup_entries(record, args.pr, args.comment)
     if not entries:
         print("nothing to append")
         return 0
-    section = [f"## From #{args.pr} (visual review)", f"Reasoning: {args.comment}"]
+    heading = f"## From #{args.pr} (visual review)"
+    section = [heading, f"Reasoning: {args.comment}"]
     if record.get("note"):
-        section.append(record["note"])
+        section.append(flat(record["note"]))
     section += entries
     if args.dry_run:
         print("\n".join(section))
         return 0
     body = run(["gh", "issue", "view", str(args.issue), "--json", "body", "-q", ".body"])
-    updated = body.rstrip() + "\n\n" + "\n".join(section) + "\n"
+    updated = replace_section(body, heading, section)
+    if len(updated) > BODY_LIMIT:
+        raise Failure(f"#{args.issue} would be {len(updated)} characters, over GitHub's {BODY_LIMIT}; "
+                      "close the done entries or start a new follow-ups issue")
     run(["gh", "issue", "edit", str(args.issue), "--body-file", "-"], input=updated)
-    print(f"appended {len(entries)} entries to #{args.issue}")
+    # Another review can edit the issue at the same time; check that this section survived.
+    after = run(["gh", "issue", "view", str(args.issue), "--json", "body", "-q", ".body"])
+    if heading not in after.split("\n"):
+        raise Failure(f"#{args.issue} changed while this review wrote to it; run followups again")
+    print(f"wrote {len(entries)} entries to #{args.issue}")
     return 0
 
 
@@ -243,11 +339,13 @@ def main(argv=None):
     comment = sub.add_parser("comment")
     comment.add_argument("--pr", required=True)
     comment.add_argument("--record", required=True)
+    comment.add_argument("--review", help="review.json from inputs, to check the record covers every changed scenario")
     comment.add_argument("--dry-run", action="store_true")
     followups = sub.add_parser("followups")
     followups.add_argument("--pr", required=True)
     followups.add_argument("--record", required=True)
     followups.add_argument("--comment", required=True)
+    followups.add_argument("--review", help="review.json from inputs, to check the record covers every changed scenario")
     followups.add_argument("--issue", default=FOLLOWUPS_ISSUE)
     followups.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(argv)

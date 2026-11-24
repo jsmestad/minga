@@ -54,6 +54,30 @@ class ReviewRecordTest(unittest.TestCase):
                  "critic": [{"round": 1, "items": []}]}
         self.assertEqual(review.followup_entries(clean, 1, "url"), [])
 
+    def test_a_note_cannot_break_a_follow_up_entry(self):
+        record = {**RECORD, "verdicts": [dict(v) for v in RECORD["verdicts"]]}
+        record["verdicts"][2]["notes"] = "first\n\n## heading\n- bullet"
+        entries = review.followup_entries(record, 1, "url")
+        self.assertTrue(all("\n" not in e for e in entries))
+
+    def test_a_record_missing_a_verdict_or_a_scenario_is_refused(self):
+        review.validate(RECORD)
+        missing = {**RECORD, "verdicts": RECORD["verdicts"][:3]}
+        with self.assertRaisesRegex(review.Failure, "edit.whichkey.leader needs one verdict"):
+            review.validate(missing)
+        with self.assertRaisesRegex(review.Failure, "differ from review.json"):
+            review.validate(RECORD, {"scenarios": [{"id": "edit.plain"}]})
+        too_many = {**RECORD, "critic": [{"round": n, "items": []} for n in (1, 2, 3, 4)]}
+        with self.assertRaisesRegex(review.Failure, "stops after three"):
+            review.validate(too_many)
+
+    def test_a_rerun_replaces_its_own_follow_up_section(self):
+        body = "intro\n\n## From #1 (visual review)\n- [ ] old\n\n## From #2 (visual review)\n- [ ] keep"
+        updated = review.replace_section(body, "## From #1 (visual review)", ["## From #1 (visual review)", "- [ ] new"])
+        self.assertEqual(updated, "intro\n\n## From #1 (visual review)\n- [ ] new\n\n## From #2 (visual review)\n- [ ] keep\n")
+        appended = review.replace_section("intro", "## From #3 (visual review)", ["## From #3 (visual review)", "- [ ] x"])
+        self.assertEqual(appended, "intro\n\n## From #3 (visual review)\n- [ ] x\n")
+
 
 if __name__ == "__main__":
     unittest.main()
