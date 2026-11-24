@@ -165,7 +165,7 @@ defmodule Minga.Test.Storyboard.Render do
     body_size = byte_size(rest) - 9
 
     case rest do
-      <<body::binary-size(body_size), @commit_frame, _seqs::binary-size(8)>>
+      <<body::binary-size(^body_size), @commit_frame, _seqs::binary-size(8)>>
       when body_size >= 0 ->
         <<@begin_frame, 0::96, body::binary, @commit_frame, 0::64>>
 
