@@ -148,37 +148,76 @@ defmodule MingaAgent.OAuth.FlowTest do
     end
   end
 
-  test "cancelling while the browser launcher blocks releases the listener and registration" do
-    parent = self()
-    operation = make_ref()
+  describe "callback server" do
+    test "cancelling while the browser launcher blocks releases the listener and registration" do
+      [port, fallback_port] = free_ports(2)
+      ports = [port: port, fallback_port: fallback_port]
+      launch = blocking_launcher(self())
+      operation = make_ref()
 
-    launch = fn url ->
-      query = URI.decode_query(URI.parse(url).query)
-      port = URI.parse(query["redirect_uri"]).port
-      send(parent, {:launching, self(), port})
+      first =
+        Task.async(fn -> Flow.run([operation_ref: operation, launch_fun: launch] ++ ports) end)
 
-      receive do
-        :release -> :ok
-      end
+      assert_receive {:launching, helper, ^port}, 1_000
+      monitor = Process.monitor(helper)
+      send(first.pid, {:connection_cancelled, operation})
+      assert {:error, :cancelled} = Task.await(first, 1_000)
+
+      # The launcher can exit before it processes the monitor signal from this test process.
+      assert_receive {:DOWN, ^monitor, :process, ^helper, reason}
+      assert reason in [:killed, :noproc]
+      refute Process.whereis(:minga_oauth_flow)
+
+      replacement = make_ref()
+      # A new flow must bind the same callback port, not silently fall back to the other port.
+      second =
+        Task.async(fn -> Flow.run([operation_ref: replacement, launch_fun: launch] ++ ports) end)
+
+      assert_receive {:launching, _helper, ^port}, 1_000
+      send(second.pid, {:connection_cancelled, replacement})
+      assert {:error, :cancelled} = Task.await(second, 1_000)
     end
 
-    first = Task.async(fn -> Flow.run(operation_ref: operation, launch_fun: launch) end)
-    assert_receive {:launching, helper, port}, 1_000
-    monitor = Process.monitor(helper)
-    send(first.pid, {:connection_cancelled, operation})
-    assert {:error, :cancelled} = Task.await(first, 1_000)
+    test "a busy callback port falls back to the second port" do
+      {_socket, busy_port} = busy_port()
+      [fallback_port] = free_ports(1)
+      launch = blocking_launcher(self())
+      operation = make_ref()
 
-    # The launcher can exit before it processes the monitor signal from this test process.
-    assert_receive {:DOWN, ^monitor, :process, ^helper, reason}
-    assert reason in [:killed, :noproc]
-    refute Process.whereis(:minga_oauth_flow)
+      flow =
+        Task.async(fn ->
+          Flow.run(
+            operation_ref: operation,
+            launch_fun: launch,
+            port: busy_port,
+            fallback_port: fallback_port
+          )
+        end)
 
-    replacement = make_ref()
-    # A new flow must bind the same callback port, not silently fall back to the other port.
-    second = Task.async(fn -> Flow.run(operation_ref: replacement, launch_fun: launch) end)
-    assert_receive {:launching, _helper, ^port}, 1_000
-    send(second.pid, {:connection_cancelled, replacement})
-    assert {:error, :cancelled} = Task.await(second, 1_000)
+      assert_receive {:launching, _helper, ^fallback_port}, 1_000
+      send(flow.pid, {:connection_cancelled, operation})
+      assert {:error, :cancelled} = Task.await(flow, 1_000)
+    end
+
+    test "busy callback and fallback ports return an error without exiting the flow process" do
+      {_first, port} = busy_port()
+      {_second, fallback_port} = busy_port()
+      parent = self()
+
+      assert {:error, message} =
+               Flow.run(
+                 port: port,
+                 fallback_port: fallback_port,
+                 launch_fun: fn url -> send(parent, {:launched, url}) end
+               )
+
+      assert message ==
+               "Ports #{port} and #{fallback_port} are already in use. Free one of those ports or use /auth with an API key instead."
+
+      refute_received {:launched, _url}
+      assert Process.info(self(), :trap_exit) == {:trap_exit, false}
+      refute Process.whereis(:minga_oauth_flow)
+    end
   end
 
   describe "registration" do
@@ -202,6 +241,37 @@ defmodule MingaAgent.OAuth.FlowTest do
         ArgumentError -> :ok
       end
     end
+  end
+
+  # Reports the callback port and blocks until the flow kills the launcher.
+  # A test can then cancel the flow while the callback server is listening.
+  @spec blocking_launcher(pid()) :: (String.t() -> :ok)
+  defp blocking_launcher(parent) do
+    fn url ->
+      query = URI.decode_query(URI.parse(url).query)
+      send(parent, {:launching, self(), URI.parse(query["redirect_uri"]).port})
+
+      receive do
+        :release -> :ok
+      end
+    end
+  end
+
+  # Reserves distinct ephemeral ports from the OS and releases them for the flow to bind.
+  # No test then depends on the fixed OAuth callback ports being free.
+  @spec free_ports(pos_integer()) :: [:inet.port_number()]
+  defp free_ports(count) do
+    reserved = Enum.map(1..count, fn _ -> busy_port() end)
+    Enum.each(reserved, fn {socket, _port} -> :ok = :gen_tcp.close(socket) end)
+    Enum.map(reserved, fn {_socket, port} -> port end)
+  end
+
+  # Holds an ephemeral loopback port open for the rest of the test process.
+  @spec busy_port() :: {:gen_tcp.socket(), :inet.port_number()}
+  defp busy_port do
+    {:ok, socket} = :gen_tcp.listen(0, ip: {127, 0, 0, 1})
+    {:ok, port} = :inet.port(socket)
+    {socket, port}
   end
 
   @spec assert_manual_blob_complete(String.t()) :: :ok
