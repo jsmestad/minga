@@ -28,6 +28,11 @@ TARGETS = {
 }
 CHECKER = Path(__file__).resolve().with_name("check-release-contents")
 LICENSE = CHECKER.parent.parent / "LICENSE"
+# Desktop launcher entry and its icon, shared with the Arch PKGBUILD.
+DESKTOP_ENTRY = CHECKER.parent.parent / "packaging/linux/minga.desktop"
+ICON = CHECKER.parent.parent / "packaging/linux/minga.png"
+DESKTOP_PATH = "usr/share/applications/minga.desktop"
+ICON_PATH = "usr/share/icons/hicolor/512x512/apps/minga.png"
 SUMMARY = "Minga modal editor (terminal interface)"
 HOMEPAGE = "https://github.com/jsmestad/minga"
 
@@ -69,6 +74,8 @@ cp -a "%{{minga_stage}}/." "%{{buildroot}}/"
 /usr/bin/minga
 /usr/lib/minga
 /usr/share/licenses/minga/LICENSE
+/usr/share/applications/minga.desktop
+/usr/share/icons/hicolor/512x512/apps/minga.png
 """
 
 RPM_DEFINES = {
@@ -161,6 +168,10 @@ def stage_tree(source, release_version, checker_target, root):
     license_file = root / "usr/share/licenses/minga/LICENSE"
     license_file.parent.mkdir(parents=True)
     copyfile(LICENSE, license_file)
+    # Desktop launchers (such as Omarchy's) list Minga and open it in the user's terminal.
+    for source, path in ((DESKTOP_ENTRY, DESKTOP_PATH), (ICON, ICON_PATH)):
+        (root / path).parent.mkdir(parents=True, exist_ok=True)
+        copyfile(source, root / path)
     return epoch
 
 
