@@ -1,6 +1,6 @@
 # Minga Port Protocol Specification
 
-Minga's editor core and the window or terminal you look at are separate programs that exchange messages. For a user that means a frontend crash does not take your buffers with it, and the macOS app and the terminal client behave the same, because both are told the same things. This page specifies those messages. It is for people building or debugging a frontend; you do not need it to use or configure Minga.
+Minga's editor core and the window or terminal you look at are separate programs that exchange messages. For a user that means the macOS app and the terminal client behave the same, because both are told the same things. This page specifies those messages. It is for people building or debugging a frontend; you do not need it to use or configure Minga.
 
 The BEAM editor core and rendering frontends communicate over a binary protocol on stdin/stdout of each frontend process. All frontends speak the same base transport, input, parser, and diagnostic protocol. Shared visible UI is carried as Semantic UI opcodes documented in [GUI_PROTOCOL.md](GUI_PROTOCOL.md); the `GUI` name is historical wire terminology, not a product split between GUI and terminal clients. This document is the authoritative reference for implementing a Minga frontend. You should be able to build a working frontend by reading this file plus GUI_PROTOCOL.md for Semantic UI surfaces.
 

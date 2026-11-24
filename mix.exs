@@ -118,7 +118,7 @@ defmodule Minga.MixProject do
         "docs/adr/0007-cua-is-a-key-profile.md",
         "docs/adr/0008-terminal-engine.md"
       ],
-      # The sidebar reads in task order. docs/REFERENCE.md lists the same groups in the same order.
+      # The sidebar reads in task order. docs/REFERENCE.md lists the same groups, with the Changelog at the end.
       groups_for_extras: [
         Start: [
           "docs/REFERENCE.md",

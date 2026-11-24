@@ -16,7 +16,7 @@ set :line_numbers, :relative
 set :scroll_margin, 8
 ```
 
-That's it. Save the file and press `SPC h r`. The status bar shows "Config reloaded" and your options are live. Minga also reads the file every time it starts. [Config reload](#config-reload) lists the few changes that need a restart.
+That's it. Save the file and press `SPC h r`. The status bar shows "Config reloaded". Buffers you open after the reload use the new options, and `:tab_width` and `:line_numbers` also change in buffers that are already open. Minga also reads the file every time it starts. [Config reload](#config-reload) lists the few changes that need a restart.
 
 ## Options
 

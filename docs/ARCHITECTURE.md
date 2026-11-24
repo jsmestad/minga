@@ -1,6 +1,6 @@
 # Minga Architecture
 
-What this design means when you use Minga: a slow language server, a busy agent or a broken extension does not freeze your typing, and a crash in one part restarts that part and leaves your buffers alone. Every frontend shows the same editor because one core decides what is on screen.
+What this design means when you use Minga: a slow language server or a busy agent does not freeze your typing, and when a language server, an agent session, an extension or the editor process crashes, Minga restarts it and your buffers stay as they were. Every frontend shows the same editor because one core decides what is on screen.
 
 This page is for readers who want to know how a text editor built on process isolation and preemptive concurrency actually works. For the short tour, read [Architecture](https://mingacode.dev/architecture) on the site. This page is the full reference.
 
