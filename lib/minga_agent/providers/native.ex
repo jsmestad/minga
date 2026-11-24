@@ -3842,19 +3842,20 @@ defmodule MingaAgent.Providers.Native do
     {kind, message} = contributed_error(lctx.inference_routes, route_id, route_failure(reason))
     now = DateTime.utc_now()
 
-    case contributed_usage_limit(kind, lctx.inference_routes, route_id) do
+    case contributed_usage_limit(kind, lctx.inference_routes, route_id, now) do
       {:window, limit} -> usage_limit_event(limit, route_id, now)
       {:unreported, limit} -> Event.Error.usage_limit(limit, message, route_id)
       :none -> %Event.Error{kind: kind, message: message, provider: route_id}
     end
   end
 
-  # A route refusing requests through a `:rejected` plan window is at its usage limit. Without
+  # A route refusing requests through a `:rejected` plan window is at its usage limit. A window
+  # whose reset has passed refuses nothing, so a rate limit beside it stays transient. Without
   # such a window, only a route that classifies the failure as a usage limit itself is one, and
   # its own sentence stays.
-  @spec contributed_usage_limit(Event.Error.kind(), GenServer.server(), String.t()) ::
+  @spec contributed_usage_limit(Event.Error.kind(), GenServer.server(), String.t(), DateTime.t()) ::
           {:window | :unreported, UsageLimit.t()} | :none
-  defp contributed_usage_limit(kind, registry, route_id)
+  defp contributed_usage_limit(kind, registry, route_id, now)
        when kind in [:rate_limited, :usage_limit_reached] do
     case InferenceRouteRegistry.lookup(registry, route_id) do
       {:ok, entry} ->
@@ -3862,6 +3863,7 @@ defmodule MingaAgent.Providers.Native do
 
         entry.status
         |> InferenceRouteStatus.plan_windows()
+        |> PlanWindow.in_force(now)
         |> PlanWindow.rejected()
         |> route_usage_limit(kind, service)
 
@@ -3872,7 +3874,7 @@ defmodule MingaAgent.Providers.Native do
     :exit, _reason -> :none
   end
 
-  defp contributed_usage_limit(_kind, _registry, _route_id), do: :none
+  defp contributed_usage_limit(_kind, _registry, _route_id, _now), do: :none
 
   @spec route_usage_limit(PlanWindow.t() | nil, Event.Error.kind(), String.t()) ::
           {:window | :unreported, UsageLimit.t()} | :none

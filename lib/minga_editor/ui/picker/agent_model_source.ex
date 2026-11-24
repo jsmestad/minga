@@ -166,8 +166,13 @@ defmodule MingaEditor.UI.Picker.AgentModelSource do
       }) do
     case fetch_models(Map.get(origin, :catalog, :discover), target.session) do
       {:ok, models, notice, validity} when is_list(models) ->
+        now = DateTime.utc_now()
+
         items =
-          Enum.map(models, &with_origin(format_candidate(&1), origin, {:model, &1.selection}))
+          Enum.map(
+            models,
+            &with_origin(format_candidate(&1, now), origin, {:model, &1.selection})
+          )
 
         {:ok, items ++ connection_items(origin, models),
          discovery_meta(target.session, notice, validity, origin.connection)}
@@ -360,20 +365,22 @@ defmodule MingaEditor.UI.Picker.AgentModelSource do
   defp status_label(_status), do: "Connection needs attention. Connect a provider or retry."
 
   # A contributed route's readiness and plan usage live in the status chip, and its name is the row's
-  # group. The description names the account, remedy or plan reset, then the model's details.
-  @spec format_candidate(ModelCandidate.t()) :: Item.t()
+  # group. The description names the account, remedy or plan reset, then the model's details. `now`
+  # decides which plan windows still apply and how their reset times read.
+  @spec format_candidate(ModelCandidate.t(), DateTime.t()) :: Item.t()
   defp format_candidate(
          %ModelCandidate{
            selection: %ModelSelection{route: %{request_provider: :contributed}} = selection,
            inference_route: %{display_name: route_name, status: status}
-         } = candidate
+         } = candidate,
+         now
        ) do
     route = selection.route
     policy = selection.policy
 
     description =
       [
-        route_detail(status, policy),
+        route_detail(status, policy, now),
         metered_cost(policy),
         format_context(policy.limits.context),
         compact_thinking(selection),
@@ -388,7 +395,7 @@ defmodule MingaEditor.UI.Picker.AgentModelSource do
       label: route.display_name,
       description: description,
       annotation: if(candidate.favorite, do: "★ favorite", else: nil),
-      status: route_status(status, policy),
+      status: route_status(status, policy, now),
       group: route_name,
       search_text: "#{route_name} #{route.model_provider} #{route.model_id}",
       active: candidate.current
@@ -399,7 +406,7 @@ defmodule MingaEditor.UI.Picker.AgentModelSource do
   # ready, or that its plan's usage limit was reached, with the reset first in the description. The
   # route is the row's group. The description shows the price and context; only a capability the
   # model lacks is named.
-  defp format_candidate(%ModelCandidate{selection: selection} = candidate) do
+  defp format_candidate(%ModelCandidate{selection: selection} = candidate, now) do
     route = selection.route
     policy = selection.policy
     endpoint = endpoint_label(route.execution.base_url, route.execution.path)
@@ -408,7 +415,7 @@ defmodule MingaEditor.UI.Picker.AgentModelSource do
 
     description =
       [
-        usage_limit_detail(candidate.usage_limit),
+        usage_limit_detail(candidate.usage_limit, now),
         metered_cost(policy),
         format_context(policy.limits.context),
         catalog_thinking(selection),
@@ -436,9 +443,11 @@ defmodule MingaEditor.UI.Picker.AgentModelSource do
   defp catalog_status(nil), do: Status.new(:ready, "Ready")
   defp catalog_status(%UsageLimit{}), do: limit_reached_status()
 
-  @spec usage_limit_detail(UsageLimit.t() | nil) :: String.t()
-  defp usage_limit_detail(nil), do: ""
-  defp usage_limit_detail(limit), do: limit |> UsageLimit.plan_window() |> window_reset_label()
+  @spec usage_limit_detail(UsageLimit.t() | nil, DateTime.t()) :: String.t()
+  defp usage_limit_detail(nil, _now), do: ""
+
+  defp usage_limit_detail(limit, now),
+    do: limit |> UsageLimit.plan_window() |> window_reset_label(now)
 
   @spec catalog_route_name(ModelSelection.Route.request_provider()) :: String.t()
   defp catalog_route_name(:apple), do: "On device"
@@ -497,9 +506,10 @@ defmodule MingaEditor.UI.Picker.AgentModelSource do
   # subscription route measures its plan beside the availability check, so until its first usage
   # report the chip says the check is under way. Metered routes have no plan to report. A reached
   # limit is an error, but the row stays selectable.
-  @spec route_status(InferenceRouteStatus.t(), ModelSelection.Policy.t()) :: Status.t()
-  defp route_status(%InferenceRouteStatus{availability: {:ready, _account}} = status, policy) do
-    case plan_state(status, policy) do
+  @spec route_status(InferenceRouteStatus.t(), ModelSelection.Policy.t(), DateTime.t()) ::
+          Status.t()
+  defp route_status(%InferenceRouteStatus{availability: {:ready, _account}} = status, policy, now) do
+    case plan_state(status, policy, now) do
       :checking -> Status.new(:checking, "Checking…")
       :unreported -> Status.new(:ready, "Ready")
       {:limit_reached, _window} -> limit_reached_status()
@@ -508,34 +518,38 @@ defmodule MingaEditor.UI.Picker.AgentModelSource do
     end
   end
 
-  defp route_status(status, _policy), do: AgentConnectionSource.availability_status(status)
+  defp route_status(status, _policy, _now),
+    do: AgentConnectionSource.availability_status(status)
 
   @spec limit_reached_status() :: Status.t()
   defp limit_reached_status, do: Status.new(:error, "Limit reached")
 
   # The account with the plan detail the chip leaves out, the remedy, or only the plan detail when
   # unchecked.
-  @spec route_detail(InferenceRouteStatus.t(), ModelSelection.Policy.t()) :: [String.t()]
-  defp route_detail(%InferenceRouteStatus{availability: {:ready, account}} = status, policy),
-    do: [account, plan_detail(plan_state(status, policy))]
+  @spec route_detail(InferenceRouteStatus.t(), ModelSelection.Policy.t(), DateTime.t()) ::
+          [String.t()]
+  defp route_detail(%InferenceRouteStatus{availability: {:ready, account}} = status, policy, now),
+    do: [account, plan_detail(plan_state(status, policy, now), now)]
 
-  defp route_detail(%{availability: {:unavailable, _reason, remedy}}, _policy), do: [remedy]
+  defp route_detail(%{availability: {:unavailable, _reason, remedy}}, _policy, _now), do: [remedy]
 
-  defp route_detail(%InferenceRouteStatus{availability: :unknown} = status, policy),
-    do: [plan_detail(plan_state(status, policy))]
+  defp route_detail(%InferenceRouteStatus{availability: :unknown} = status, policy, now),
+    do: [plan_detail(plan_state(status, policy, now), now)]
 
-  @spec plan_detail(plan_state()) :: String.t()
-  defp plan_detail(:checking), do: "checking plan usage"
-  defp plan_detail(:unreported), do: ""
-  defp plan_detail({_state, window}), do: window_reset_label(window)
+  @spec plan_detail(plan_state(), DateTime.t()) :: String.t()
+  defp plan_detail(:checking, _now), do: "checking plan usage"
+  defp plan_detail(:unreported, _now), do: ""
+  defp plan_detail({_state, window}, now), do: window_reset_label(window, now)
 
-  @spec plan_state(InferenceRouteStatus.t(), ModelSelection.Policy.t()) :: plan_state()
-  defp plan_state(%InferenceRouteStatus{plan_usage: :unreported} = status, policy) do
+  # Only windows still in force at `now` count: a window whose reset passed limits nothing.
+  @spec plan_state(InferenceRouteStatus.t(), ModelSelection.Policy.t(), DateTime.t()) ::
+          plan_state()
+  defp plan_state(%InferenceRouteStatus{plan_usage: :unreported} = status, policy, _now) do
     if awaits_plan_usage?(status, policy), do: :checking, else: :unreported
   end
 
-  defp plan_state(status, _policy) do
-    windows = InferenceRouteStatus.plan_windows(status)
+  defp plan_state(status, _policy, now) do
+    windows = status |> InferenceRouteStatus.plan_windows() |> PlanWindow.in_force(now)
 
     case {PlanWindow.rejected(windows), PlanWindow.busiest(windows)} do
       {nil, nil} -> :unreported
@@ -556,11 +570,11 @@ defmodule MingaEditor.UI.Picker.AgentModelSource do
   defp awaits_plan_usage?(_status, _policy), do: false
 
   # "5h limit resets 3:40 PM", or "5h limit" when the route does not know the reset time.
-  @spec window_reset_label(PlanWindow.t()) :: String.t()
-  defp window_reset_label(window) do
+  @spec window_reset_label(PlanWindow.t(), DateTime.t()) :: String.t()
+  defp window_reset_label(window, now) do
     limit = "#{PlanWindow.kind_label(window.kind)} limit"
 
-    case MingaAgent.InferenceRouteRegistry.reset_label(window) do
+    case PlanWindow.reset_label(window, now, &MingaAgent.InferenceRouteRegistry.local_time/1) do
       nil -> limit
       reset -> "#{limit} resets #{reset}"
     end

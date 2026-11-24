@@ -25,7 +25,7 @@ defmodule MingaEditor.StatusBar.PlanLimit do
   def from_usage(short_name, windows, %DateTime{} = now, to_local)
       when is_binary(short_name) and is_list(windows) and is_function(to_local, 1) do
     windows
-    |> Enum.reject(&reset_passed?(&1, now))
+    |> PlanWindow.in_force(now)
     |> indicator(short_name, now, to_local)
   end
 
@@ -61,8 +61,4 @@ defmodule MingaEditor.StatusBar.PlanLimit do
       }
     end
   end
-
-  @spec reset_passed?(PlanWindow.t(), DateTime.t()) :: boolean()
-  defp reset_passed?(%PlanWindow{resets_at: nil}, _now), do: false
-  defp reset_passed?(%PlanWindow{resets_at: at}, now), do: DateTime.compare(at, now) != :gt
 end

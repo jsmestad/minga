@@ -1,9 +1,9 @@
-defmodule MingaAgent.Session.UsageLimitsTest do
+defmodule MingaAgent.InferenceRouteRegistry.UsageLimitsTest do
   use ExUnit.Case, async: true
 
   alias MingaAgent.ModelCandidate
   alias MingaAgent.ModelSelection.Credential.ApiKey
-  alias MingaAgent.Session.UsageLimits
+  alias MingaAgent.InferenceRouteRegistry.UsageLimits
   alias MingaAgent.Test.ModelSelectionFixture
   alias MingaAgent.UsageLimit
 

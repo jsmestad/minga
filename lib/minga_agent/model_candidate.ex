@@ -4,7 +4,7 @@ defmodule MingaAgent.ModelCandidate do
 
   Contributed route candidates also carry the route's display name and last known status, so the picker can show the route's own readiness and remedy text. A contributed candidate can be unavailable; selecting it is rejected by the resolver.
 
-  A catalog route candidate carries the subscription usage limit its Session last observed on that route, while the limit is in force. It stays selectable.
+  A catalog route candidate carries the subscription usage limit any session last observed on that route, while the limit is in force. It stays selectable.
   """
 
   alias MingaAgent.InferenceRoute.Status

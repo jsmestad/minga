@@ -39,6 +39,8 @@ defmodule MingaAgent.Session do
   alias MingaAgent.Hooks.Result, as: HookResult
   alias MingaAgent.Hooks.StopPayload
   alias MingaAgent.Hooks.UserPromptSubmitPayload
+  alias MingaAgent.InferenceRouteRegistry
+  alias MingaAgent.InferenceRouteRegistry.UsageLimits
   alias MingaAgent.Memory
   alias MingaAgent.ArtifactStores
   alias MingaAgent.ArtifactStore
@@ -75,7 +77,6 @@ defmodule MingaAgent.Session do
   alias MingaAgent.Session.Transcript
   alias MingaAgent.Session.QueuedInputSummary
   alias MingaAgent.Session.TurnExecution
-  alias MingaAgent.Session.UsageLimits
   require ProviderLifecycle
   alias MingaAgent.SessionManager
   alias MingaAgent.SessionStore
@@ -159,7 +160,6 @@ defmodule MingaAgent.Session do
              ModelResolver.apple_availability() | nil}
             | nil,
           model_discovery_request: reference() | nil,
-          usage_limits: UsageLimits.t(),
           apple_selection_probe:
             {reference(), pid(), ConnectionTarget.t(), ModelResolver.intent()} | nil,
           pending_model_change: ModelSelection.t() | String.t() | nil,
@@ -1522,7 +1522,6 @@ defmodule MingaAgent.Session do
       unresolved_route: nil,
       model_discovery: nil,
       model_discovery_request: nil,
-      usage_limits: UsageLimits.new(),
       apple_selection_probe: nil,
       pending_model_change: nil,
       pending_thinking_level: if(model_selection, do: nil, else: initial_thinking_level),
@@ -4314,9 +4313,8 @@ defmodule MingaAgent.Session do
 
         case {outcome_result, boundary_result} do
           {:accepted, :ok} ->
-            state
-            |> usage_limit_lifted()
-            |> finish_provider_turn(completing)
+            lift_usage_limit(state)
+            finish_provider_turn(state, completing)
 
           {:accepted, {:error, _reason}} ->
             fail_completed_turn(
@@ -4772,13 +4770,10 @@ defmodule MingaAgent.Session do
     end
   end
 
-  @spec usage_limit_lifted(state()) :: state()
-  defp usage_limit_lifted(state) do
-    %{
-      state
-      | usage_limits: UsageLimits.request_succeeded(state.usage_limits, state.model_selection)
-    }
-  end
+  # A request that succeeds on a route lifts its usage limit for every session on that route.
+  @spec lift_usage_limit(state()) :: :ok
+  defp lift_usage_limit(state),
+    do: InferenceRouteRegistry.usage_limit_lifted(route_registry(state), state.model_selection)
 
   @spec report_turn_error(state(), String.t()) :: state()
   defp report_turn_error(state, message) do
@@ -5804,7 +5799,8 @@ defmodule MingaAgent.Session do
   end
 
   defp handle_provider_event(%Event.Error{} = event, state) do
-    state = state |> retain_connection_error(event) |> observe_usage_limit(event)
+    state = retain_connection_error(state, event)
+    observe_usage_limit(state, event)
     message = humanize_error(event, state)
 
     state
@@ -5812,16 +5808,18 @@ defmodule MingaAgent.Session do
     |> announce_model_limit(event, message)
   end
 
-  # `/model` shows the route as limit-reached until the reset passes or a later request on it succeeds.
-  @spec observe_usage_limit(state(), Event.Error.t()) :: state()
+  # `/model` in every session shows the route as limit-reached until the reset passes or a later
+  # request on it succeeds.
+  @spec observe_usage_limit(state(), Event.Error.t()) :: :ok
   defp observe_usage_limit(state, %Event.Error{kind: :usage_limit_reached, usage_limit: limit}) do
-    %{
-      state
-      | usage_limits: UsageLimits.observed(state.usage_limits, state.model_selection, limit)
-    }
+    InferenceRouteRegistry.usage_limit_observed(
+      route_registry(state),
+      state.model_selection,
+      limit
+    )
   end
 
-  defp observe_usage_limit(state, %Event.Error{}), do: state
+  defp observe_usage_limit(_state, %Event.Error{}), do: :ok
 
   # Only a usage-limit error offers a model switch; the draft stays as it is.
   @spec announce_model_limit(state(), Event.Error.t(), String.t()) :: state()
@@ -8350,7 +8348,24 @@ defmodule MingaAgent.Session do
         )
       )
 
-    UsageLimits.annotate(state.usage_limits, candidates, DateTime.utc_now())
+    state
+    |> observed_usage_limits()
+    |> UsageLimits.annotate(candidates, DateTime.utc_now())
+  end
+
+  # The limits every session observed on catalog routes. Without the registry, no limit is known.
+  @spec observed_usage_limits(state()) :: UsageLimits.t()
+  defp observed_usage_limits(state) do
+    InferenceRouteRegistry.usage_limits(route_registry(state))
+  catch
+    :exit, _reason -> UsageLimits.new()
+  end
+
+  @spec route_registry(state()) :: GenServer.server()
+  defp route_registry(state) do
+    state.provider.opts
+    |> Keyword.get(:model_resolver_opts, [])
+    |> inference_route_registry()
   end
 
   @spec model_resolution_opts(state(), keyword()) :: keyword()
