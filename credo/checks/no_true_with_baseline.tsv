@@ -99,7 +99,6 @@ lib/minga_agent/session/continuation.ex	4c614a91e4a05a8cec19d67cd28838a0f7f9d039
 lib/minga_agent/session/continuation.ex	549e075702c856041d0e556956b7db26224cc5c46b3d67f93259afc54ce59a2d	"(call.name == name and call.arguments == arguments) or {:error, :tool_call_identity_mismatch}"
 lib/minga_agent/session/continuation.ex	6be52ab40ad7fab4e36e35c2184537c04a46e42a61583774afc9ed5837fcce78	"(epoch_matches?(prefixes.selected, checkpoint) and epoch_matches?(prefixes.selected, request) and\n   epoch_matches?(prefixes.selected, List.last(boundaries))) or\n  {:error, :inconsistent_prefix_epoch}"
 lib/minga_agent/session/continuation.ex	9db5b688ab6d80d8aebe85f563ec5f3b69e4835d01287b27f75d93581bf1384d	"Enum.all?(roots, &PrefixStore.known?(prefixes, &1)) or {:error, :dangling_prefix_epoch}"
-lib/minga_agent/session/continuation.ex	c829fd0ba09cdcc19035ccb91aa0248193fa4f6a97ddd6d8941a7a857b012c25	"valid_steering?(steering)"
 lib/minga_agent/session/continuation.ex	c9ad0c715a79600feb851a4b42b2a3774ab6fcab4acba901fab9631ecf8dc607	"Prefix.requalifies?(captured, candidate)"
 lib/minga_agent/session/continuation.ex	d0175e26652835bda1f192548a4e1eecd5b67d5efbb5ab2f95fa7556334aaf43	"Enum.all?(branches, fn {_name, snapshot} ->\n  epoch_matches?(epoch_reference(snapshot), List.last(snapshot.boundaries))\nend) or {:error, :inconsistent_prefix_epoch}"
 lib/minga_agent/session/continuation_codec.ex	1838fede5aefb9d03bcf2eddcde1ee5769135bec0e8451e369b8d24bd0c36e31	"TurnExecution.valid_pending_inputs?(inputs)"

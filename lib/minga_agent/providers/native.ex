@@ -308,7 +308,7 @@ defmodule MingaAgent.Providers.Native do
       shell_output_callback: Keyword.get(opts, :shell_output_callback),
       process_backend: Keyword.get(opts, :process_backend, SystemProcessBackend),
       tool_registry: Keyword.get(opts, :tool_registry, ToolRegistry),
-      job_owner: Keyword.get(opts, :job_owner)
+      session_jobs?: Keyword.get(opts, :session_jobs?, false)
     }
 
     custom_tools = Keyword.get(opts, :tools)

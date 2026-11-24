@@ -817,6 +817,12 @@ defmodule MingaAgent.Tools.ProjectViewRoutingTest do
       opts
       |> Keyword.take([:project_root, :project_view, :fork_store, :changeset])
       |> Keyword.put(:artifact_store, retained.artifact_store)
+      |> Keyword.put(
+        :metadata,
+        MingaAgent.Test.JobSessionStub.metadata(
+          start_supervised!({MingaAgent.Test.JobSessionStub, []}, id: make_ref())
+        )
+      )
       |> ToolContext.new()
 
     Enum.map(Tools.all(), fn spec ->
