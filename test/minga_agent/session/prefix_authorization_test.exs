@@ -1623,8 +1623,18 @@ defmodule MingaAgent.Session.PrefixAuthorizationTest do
       stream_response(model, chunks)
     end
 
+    # The maximal checklist payload is ~300KB of JSON. Raise the fixture model's
+    # context ceiling so the hosted admission gate does not refuse it.
+    resolver_opts =
+      Keyword.update!(context.resolver_opts, :models, fn [model | rest] ->
+        [%{model | limits: Map.put(model.limits, "context", 1_000_000)} | rest]
+      end)
+
     session =
-      start_session(context, provider_opts: [llm_client: client], session_opts: [session_id: id])
+      start_session(context,
+        provider_opts: [llm_client: client, model_resolver_opts: resolver_opts],
+        session_opts: [session_id: id]
+      )
 
     assert :ok = Session.send_prompt(session, "Read and verify every task")
     assert_receive {:checklist_write, %{"revision" => 1, "task_count" => 100}}, @timeout
