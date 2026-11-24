@@ -57,7 +57,7 @@ defmodule MingaEditor.FocusOwner do
   # The editor view keeps the keyboard, so its list keys reach the picker.
   defp modal_owner(:picker, {:picker, %{picker_ui: picker}}, _state) do
     responder =
-      if MingaEditor.UI.Picker.list_keys?(picker.picker), do: :editor_view, else: :picker_query
+      if MingaEditor.State.Picker.list_keys?(picker), do: :editor_view, else: :picker_query
 
     {responder, :picker, picker.activation_offer.generation}
   end

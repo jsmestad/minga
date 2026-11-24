@@ -475,7 +475,7 @@ defmodule MingaEditor.PickerUI do
       when is_binary(query) do
     # A picker with nothing to filter takes no text, so a late native edit changes nothing.
     if PickerState.current_query_edit?(picker_state, generation, edit_seq) and
-         not Picker.list_keys?(picker_state.picker) do
+         not PickerState.list_keys?(picker_state) do
       replace_current_query(state, picker_state, query, edit_seq)
     else
       state
@@ -845,7 +845,7 @@ defmodule MingaEditor.PickerUI do
         codepoint,
         mods
       ) do
-    vim_state = if Picker.list_keys?(picker_state.picker), do: :normal, else: :insert
+    vim_state = if PickerState.list_keys?(picker_state), do: :normal, else: :insert
 
     case Keymap.resolve_scoped_key(
            :picker,

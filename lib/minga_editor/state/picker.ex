@@ -95,6 +95,11 @@ defmodule MingaEditor.State.Picker do
             activation_offer: %ActivationOffer{generation: 1},
             parent: nil
 
+  @doc "True while the open picker has nothing to filter, so it takes list keys instead of text (`MingaEditor.UI.Picker.list_keys?/1`)."
+  @spec list_keys?(t()) :: boolean()
+  def list_keys?(%__MODULE__{picker: %Picker{} = picker}), do: Picker.list_keys?(picker)
+  def list_keys?(%__MODULE__{}), do: false
+
   @doc "Builds the semantic state for an asynchronous picker before fetching starts."
   @spec loading(
           MingaEditor.UI.Picker.t(),
