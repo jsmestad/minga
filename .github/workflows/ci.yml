@@ -666,7 +666,8 @@ jobs:
   swift:
     # Preserve the required check name and require both macOS jobs to pass, or to be skipped because the change cannot affect them.
     name: Swift (macOS GUI)
-    if: ${{ always() }}
+    # !cancelled(), not always(): a run cancelled by a newer push must finish at once. always() queued this job for a runner after cancellation, and the newer run waited for it.
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     permissions: {}
     needs: [changes, swift-tests, swift-performance]
@@ -853,7 +854,8 @@ jobs:
 
   ci-gate:
     name: CI gate
-    if: ${{ always() }}
+    # !cancelled(), not always(): a run cancelled by a newer push must finish at once. always() queued this job for a runner after cancellation, and the newer run waited for it.
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     permissions: {}
     # Swift's required check aggregates both macOS jobs; docs deploys only on main.
