@@ -19,6 +19,8 @@ Keys are chords and mnemonics, not shortcuts. This is [principle 11](principles.
 
 **Doom first.** Where Doom Emacs has a binding, Minga matches it. Neovim and LazyVim conventions come second. A deliberate divergence is written down with its reason. The key-grammar test (`test/minga/keymap/grammar_test.exs`, with a baseline of today's violations that only ever shrinks) enforces all of this.
 
+**The CUA profile.** With `:editing_model :cua`, an explicit list of desktop conventions (⌘C, ⌘V, ⌘X, ⌘Z, ⌃Z and the like) is exempt from rules 4 and 5; one meaning per key, the prompt rules and rule 6 still apply. See [ADR-0007](../adr/0007-cua-is-a-key-profile.md).
+
 ## Rules
 
 - **One key, one meaning.** Within a context, a key does one thing on every row and every surface.
