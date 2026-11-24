@@ -446,7 +446,7 @@ defmodule Minga.Keymap.Active do
   defp table_name(name) when is_atom(name), do: :"#{name}_ets"
   defp table_name(pid) when is_pid(pid), do: GenServer.call(pid, :table_name)
 
-  @spec ets_get(GenServer.server(), atom(), term()) :: term()
+  @spec ets_get(GenServer.server(), atom() | {atom(), term()}, term()) :: term()
   defp ets_get(server, key, default) do
     table = table_name(server)
 
