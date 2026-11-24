@@ -1,0 +1,175 @@
+# minga storyboard frame v1
+# scenario: edit.visual
+# frontend: tui
+# theme: catppuccin_latte
+# size: 150x38
+# cursor: 2,6
+## text
+ ▌  storyboard.ex
+  / ❯ tmp ❯ minga-storyboard ❯ tui-150x38 ❯ edit.visual ❯ lib ❯ storyboard.ex
+▾  1  defmodule Storyboard do
+   1    @moduledoc "A small file every storyboard scenario starts in."
+   2
+▾  3    def greet(name) do
+   4    │ "Hello, " <> name
+   5    end
+   6  end
+   7
+      ~
+      ~
+      ~
+      ~
+      ~
+      ~
+      ~
+      ~
+      ~
+      ~
+      ~
+      ~
+      ~
+      ~
+      ~
+      ~
+      ~
+      ~
+      ~
+      ~
+      ~
+      ~
+      ~
+      ~
+      ~
+      ~
+      ~
+ 󰈈 VISUAL │ storyboard.ex                                                                                       Spaces:2 │ │ Elixir │ 1 chars │ 0%%
+## styles (row start-end fg bg attrs)
+0 0-0 #4c4f69 #eff1f5 -
+0 1-1 #1e66f5 #eff1f5 bold
+0 2-149 #4c4f69 #eff1f5 -
+1 0-2 #4c4f69 #eff1f5 -
+1 3-5 #8c8fa1 #eff1f5 -
+1 6-8 #4c4f69 #eff1f5 -
+1 9-11 #8c8fa1 #eff1f5 -
+1 12-27 #4c4f69 #eff1f5 -
+1 28-30 #8c8fa1 #eff1f5 -
+1 31-40 #4c4f69 #eff1f5 -
+1 41-43 #8c8fa1 #eff1f5 -
+1 44-54 #4c4f69 #eff1f5 -
+1 55-57 #8c8fa1 #eff1f5 -
+1 58-60 #4c4f69 #eff1f5 -
+1 61-63 #8c8fa1 #eff1f5 -
+1 64-149 #4c4f69 #eff1f5 -
+2 0-1 #8c8fa1 #ccd0da bold
+2 2-5 #4c4f69 #eff1f5 -
+2 6-6 #8839ef #acb0be bold
+2 7-14 #8839ef #eff1f5 bold
+2 15-15 #4c4f69 #ccd0da -
+2 16-25 #df8e1d #eff1f5 -
+2 26-26 #4c4f69 #ccd0da -
+2 27-28 #8839ef #eff1f5 bold
+2 29-149 #4c4f69 #eff1f5 -
+3 0-5 #5c5f77 #eff1f5 -
+3 6-7 #4c4f69 #eff1f5 -
+3 8-17 #7c7f93 #eff1f5 italic
+3 18-18 #fe640b #eff1f5 -
+3 19-69 #7c7f93 #eff1f5 italic
+3 70-149 #4c4f69 #eff1f5 -
+4 0-5 #5c5f77 #eff1f5 -
+4 6-149 #4c4f69 #eff1f5 -
+5 0-1 #8c8fa1 #eff1f5 -
+5 2-7 #4c4f69 #eff1f5 -
+5 8-10 #8839ef #eff1f5 bold
+5 11-11 #4c4f69 #eff1f5 -
+5 12-16 #1e66f5 #eff1f5 -
+5 17-17 #8c8fa1 #eff1f5 -
+5 18-21 #4c4f69 #eff1f5 -
+5 22-22 #8c8fa1 #eff1f5 -
+5 23-23 #4c4f69 #eff1f5 -
+5 24-25 #8839ef #eff1f5 bold
+5 26-149 #4c4f69 #eff1f5 -
+6 0-5 #5c5f77 #eff1f5 -
+6 6-7 #4c4f69 #eff1f5 -
+6 8-8 #5c5f77 #eff1f5 -
+6 9-9 #4c4f69 #eff1f5 -
+6 10-18 #40a02b #eff1f5 -
+6 19-19 #4c4f69 #eff1f5 -
+6 20-21 #04a5e5 #eff1f5 -
+6 22-149 #4c4f69 #eff1f5 -
+7 0-5 #5c5f77 #eff1f5 -
+7 6-7 #4c4f69 #eff1f5 -
+7 8-10 #8839ef #eff1f5 bold
+7 11-149 #4c4f69 #eff1f5 -
+8 0-5 #5c5f77 #eff1f5 -
+8 6-8 #8839ef #eff1f5 bold
+8 9-149 #4c4f69 #eff1f5 -
+9 0-5 #5c5f77 #eff1f5 -
+9 6-149 #4c4f69 #eff1f5 -
+10 0-5 #5c5f77 #eff1f5 -
+10 6-149 #8c8fa1 #eff1f5 -
+11 0-5 #5c5f77 #eff1f5 -
+11 6-149 #8c8fa1 #eff1f5 -
+12 0-5 #5c5f77 #eff1f5 -
+12 6-149 #8c8fa1 #eff1f5 -
+13 0-5 #5c5f77 #eff1f5 -
+13 6-149 #8c8fa1 #eff1f5 -
+14 0-5 #5c5f77 #eff1f5 -
+14 6-149 #8c8fa1 #eff1f5 -
+15 0-5 #5c5f77 #eff1f5 -
+15 6-149 #8c8fa1 #eff1f5 -
+16 0-5 #5c5f77 #eff1f5 -
+16 6-149 #8c8fa1 #eff1f5 -
+17 0-5 #5c5f77 #eff1f5 -
+17 6-149 #8c8fa1 #eff1f5 -
+18 0-5 #5c5f77 #eff1f5 -
+18 6-149 #8c8fa1 #eff1f5 -
+19 0-5 #5c5f77 #eff1f5 -
+19 6-149 #8c8fa1 #eff1f5 -
+20 0-5 #5c5f77 #eff1f5 -
+20 6-149 #8c8fa1 #eff1f5 -
+21 0-5 #5c5f77 #eff1f5 -
+21 6-149 #8c8fa1 #eff1f5 -
+22 0-5 #5c5f77 #eff1f5 -
+22 6-149 #8c8fa1 #eff1f5 -
+23 0-5 #5c5f77 #eff1f5 -
+23 6-149 #8c8fa1 #eff1f5 -
+24 0-5 #5c5f77 #eff1f5 -
+24 6-149 #8c8fa1 #eff1f5 -
+25 0-5 #5c5f77 #eff1f5 -
+25 6-149 #8c8fa1 #eff1f5 -
+26 0-5 #5c5f77 #eff1f5 -
+26 6-149 #8c8fa1 #eff1f5 -
+27 0-5 #5c5f77 #eff1f5 -
+27 6-149 #8c8fa1 #eff1f5 -
+28 0-5 #5c5f77 #eff1f5 -
+28 6-149 #8c8fa1 #eff1f5 -
+29 0-5 #5c5f77 #eff1f5 -
+29 6-149 #8c8fa1 #eff1f5 -
+30 0-5 #5c5f77 #eff1f5 -
+30 6-149 #8c8fa1 #eff1f5 -
+31 0-5 #5c5f77 #eff1f5 -
+31 6-149 #8c8fa1 #eff1f5 -
+32 0-5 #5c5f77 #eff1f5 -
+32 6-149 #8c8fa1 #eff1f5 -
+33 0-5 #5c5f77 #eff1f5 -
+33 6-149 #8c8fa1 #eff1f5 -
+34 0-5 #5c5f77 #eff1f5 -
+34 6-149 #8c8fa1 #eff1f5 -
+35 0-5 #5c5f77 #eff1f5 -
+35 6-149 #8c8fa1 #eff1f5 -
+36 0-5 #5c5f77 #eff1f5 -
+36 6-149 #8c8fa1 #eff1f5 -
+37 0-9 #eff1f5 #1e66f5 bold
+37 10-10 #8c8fa1 #e6e9ef -
+37 11-25 #4c4f69 #8c8fa1 -
+37 26-109 #4c4f69 #e6e9ef -
+37 110-111 #a074c4 #e6e9ef -
+37 112-121 #4c4f69 #8c8fa1 -
+37 122-122 #8c8fa1 #e6e9ef -
+37 123-124 #9b59b6 #e6e9ef -
+37 125-125 #8c8fa1 #e6e9ef -
+37 126-133 #40a02b #e6e9ef -
+37 134-134 #8c8fa1 #e6e9ef -
+37 135-143 #4c4f69 #8c8fa1 -
+37 144-144 #8c8fa1 #e6e9ef -
+37 145-149 #eff1f5 #1e66f5 bold

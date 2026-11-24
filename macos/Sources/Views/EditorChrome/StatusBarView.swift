@@ -97,6 +97,7 @@ public struct StatusBarView: View {
             }
         }
         .frame(height: barHeight)
+        .anatomyPart("modeline")
         .background(theme.modelineBarBg)
         .focusable(false)
         .focusEffectDisabled()
@@ -840,12 +841,14 @@ public struct StatusBarView: View {
             Text(state.modeName)
                 .font(Typography.font(.caption, weight: .semibold))
                 .foregroundStyle(fg)
+                .anatomyPart("modeline.modeText", text: state.modeName, font: .caption)
                 .padding(.horizontal, Spacing.md)
                 .padding(.vertical, Spacing.hairline)
                 .background(
                     RoundedRectangle(cornerRadius: Radius.sm)
                         .fill(bg)
                 )
+                .anatomyPart("modeline.modePill", text: state.modeName)
         }
         .help(state.isSafeMode ? "Safe mode enabled, \(state.modeName) mode" : "\(state.modeName) mode")
     }
@@ -988,6 +991,7 @@ public struct StatusBarView: View {
         HStack(spacing: Spacing.md) {
             ForEach(groups) { group in
                 nativeModelineGroup(group)
+                    .anatomyPart("modeline.segment", text: "\(group.kind): \(group.segments.map(\.text).joined())")
             }
         }
         .contentShape(Rectangle())

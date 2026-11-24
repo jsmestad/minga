@@ -53,6 +53,7 @@ public struct BreadcrumbBar: View {
 
                     Text(segment)
                         .font(Typography.font(.body))
+                        .anatomyPart("breadcrumb.segment", text: segment, font: .body)
                         .foregroundStyle(
                             index == state.segments.count - 1
                                 ? theme.breadcrumbFg
