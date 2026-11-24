@@ -51,7 +51,16 @@ defmodule MingaAgent.Tools.RetainedShellTimeoutTest do
         project_root: root,
         artifact_store: store,
         capture_key: delivery_key,
-        metadata: %{process_backend: TimeoutBackend}
+        metadata: %{
+          process_backend: TimeoutBackend,
+          job_owner:
+            start_supervised!(
+              Supervisor.child_spec(
+                {MingaAgent.Tools.JobOwner, session_id: "test", notify: self()},
+                id: make_ref()
+              )
+            )
+        }
       )
 
     shell = Enum.find(Tools.all(), &(&1.name == "shell"))

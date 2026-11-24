@@ -742,32 +742,57 @@ defmodule MingaAgent.Tools do
             end
 
             shell_opts = [
+              process_backend: process_backend,
               env: env,
               artifact_store: context.artifact_store,
               capture_key: context.capture_key
             ]
 
-            # A background job outlives this tool call, so it must not stream into the call's output.
-            if background? and job_owner != nil do
-              execute_background_shell(
-                job_owner,
-                args["command"],
-                shell_root,
-                timeout_secs,
-                shell_opts
-              )
-            else
-              shell_opts = Keyword.put(shell_opts, :on_output, shell_output_callback)
-
-              process_backend.shell(args["command"], shell_root, timeout_secs, shell_opts)
-              |> retained_process_result(context)
-            end
+            run_shell_job(job_owner, background?, args["command"], shell_root, timeout_secs,
+              shell_opts: shell_opts,
+              on_output: shell_output_callback,
+              context: context
+            )
           else
             {:error, reason} -> {:error, inspect(reason)}
           end
         end
       end
     )
+  end
+
+  # Every shell command is a job of the session's JobOwner: background returns its handle,
+  # foreground waits for the same job's outcome.
+  @spec run_shell_job(
+          GenServer.server() | nil,
+          boolean(),
+          String.t(),
+          String.t(),
+          pos_integer(),
+          keyword()
+        ) :: {:ok, term()} | {:error, term()}
+  defp run_shell_job(nil, _background?, _command, _cwd, _timeout_secs, _opts),
+    do: {:error, "Shell is unavailable: this session has no job owner."}
+
+  defp run_shell_job(job_owner, true, command, cwd, timeout_secs, opts) do
+    # A background job outlives this tool call, so it must not stream into the call's output.
+    execute_background_shell(
+      job_owner,
+      command,
+      cwd,
+      timeout_secs,
+      Keyword.fetch!(opts, :shell_opts)
+    )
+  end
+
+  defp run_shell_job(job_owner, false, command, cwd, timeout_secs, opts) do
+    shell_opts = Keyword.put(Keyword.fetch!(opts, :shell_opts), :on_output, opts[:on_output])
+
+    job_owner
+    |> MingaAgent.Tools.JobOwner.start_foreground(command, cwd, timeout_secs, shell_opts)
+    |> retained_process_result(Keyword.fetch!(opts, :context))
+  catch
+    :exit, reason -> {:error, "Shell job owner is unavailable: #{inspect(reason)}"}
   end
 
   @spec execute_background_shell(

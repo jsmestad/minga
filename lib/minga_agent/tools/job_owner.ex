@@ -14,6 +14,7 @@ defmodule MingaAgent.Tools.JobOwner do
   use GenServer
 
   alias MingaAgent.Tools.Job
+  alias MingaAgent.Tools.ProcessBackend.System, as: SystemProcessBackend
   alias MingaAgent.Tools.Shell
 
   @max_concurrent 8
@@ -21,6 +22,7 @@ defmodule MingaAgent.Tools.JobOwner do
 
   @typedoc "Options for starting a job."
   @type start_opts :: [
+          process_backend: module(),
           on_output: (String.t() -> :ok),
           env: [{String.t(), String.t()}],
           artifact_store: GenServer.server() | nil,
@@ -78,6 +80,10 @@ defmodule MingaAgent.Tools.JobOwner do
   def job_status(owner, job_id) when is_binary(job_id) do
     GenServer.call(owner, {:job_status, job_id})
   end
+
+  @doc "Returns every live and retained job, ordered by generation."
+  @spec list_jobs(GenServer.server()) :: [Job.t()]
+  def list_jobs(owner), do: GenServer.call(owner, :list_jobs)
 
   @doc "Returns the retained output text for a terminal job."
   @spec job_output(GenServer.server(), Job.id()) ::
@@ -158,6 +164,11 @@ defmodule MingaAgent.Tools.JobOwner do
       {:error, reason} ->
         {:reply, {:error, reason}, state}
     end
+  end
+
+  def handle_call(:list_jobs, _from, state) do
+    jobs = Enum.map(state.live, fn {_id, entry} -> entry.job end) ++ Map.values(state.retained)
+    {:reply, Enum.sort_by(jobs, & &1.generation), state}
   end
 
   def handle_call({:job_status, job_id}, _from, state) do
@@ -327,11 +338,8 @@ defmodule MingaAgent.Tools.JobOwner do
 
   @spec run_shell(String.t(), String.t(), pos_integer(), start_opts()) :: Shell.result()
   defp run_shell(command, cwd, timeout_secs, opts) do
-    if Keyword.has_key?(opts, :artifact_store) and Keyword.get(opts, :artifact_store) != nil do
-      Shell.capture(command, cwd, timeout_secs, opts)
-    else
-      Shell.execute(command, cwd, timeout_secs, opts)
-    end
+    {backend, opts} = Keyword.pop(opts, :process_backend, SystemProcessBackend)
+    backend.shell(command, cwd, timeout_secs, opts)
   end
 
   @spec handle_job_exit(state(), Job.id(), live_entry(), term()) :: state()

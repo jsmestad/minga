@@ -36,6 +36,13 @@ defmodule MingaAgent.Tools.RetainedShellCaptureTest do
         artifact_store: store,
         capture_key: {:delivery, "checkpoint", "large-output"},
         metadata: %{
+          job_owner:
+            start_supervised!(
+              Supervisor.child_spec(
+                {MingaAgent.Tools.JobOwner, session_id: "test", notify: self()},
+                id: make_ref()
+              )
+            ),
           shell_output_callback: fn chunk ->
             send(parent, {:chunk, chunk})
             :ok
@@ -529,7 +536,15 @@ defmodule MingaAgent.Tools.RetainedShellCaptureTest do
     Context.new(
       project_root: root,
       artifact_store: store,
-      capture_key: {:delivery, "checkpoint", id}
+      capture_key: {:delivery, "checkpoint", id},
+      metadata: %{
+        job_owner:
+          start_supervised!(
+            Supervisor.child_spec({MingaAgent.Tools.JobOwner, session_id: "test", notify: self()},
+              id: make_ref()
+            )
+          )
+      }
     )
   end
 
