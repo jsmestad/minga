@@ -13,8 +13,8 @@ defmodule MingaAgent.RecoveryGateTest do
 
   @event_timeout 5_000
 
-  describe "tool group completes across compaction" do
-    test "compacted history preserves coherent continuation after a multi-tool turn" do
+  describe "compaction after a multi-tool turn" do
+    test "the next request is built from the compacted history" do
       compacted = [
         ReqLLM.Context.system("You are a helpful assistant."),
         ReqLLM.Context.user("[Compacted summary of prior conversation]"),
@@ -53,34 +53,34 @@ defmodule MingaAgent.RecoveryGateTest do
       assert Enum.any?(messages_before, &match?({:user, "read and write the file"}, &1))
       assert Enum.any?(messages_before, &match?({:assistant, _text}, &1))
 
-      # Compact: the provider returns a predetermined compacted history
+      assert_receive {:recovery_provider_request, _, %{messages: turn_one_messages}}
+      assert Enum.any?(turn_one_messages, &(message_text(&1) =~ "read and write the file"))
+
       assert {:ok, _summary} = Session.compact(session)
 
-      # Turn 2: send another prompt after compaction
       assert :ok = Session.send_prompt(session, "what happened?")
+
+      assert_receive {:recovery_provider_request, _, %{messages: turn_two_messages}},
+                     @event_timeout
+
       assert_receive {:agent_event, _, {:status_changed, :idle}}, @event_timeout
 
-      messages_after = Session.messages(session)
+      texts = Enum.map(turn_two_messages, &message_text/1)
+      assert "[Compacted summary of prior conversation]" in texts
+      refute Enum.any?(texts, &(&1 =~ "read and write the file"))
+      assert List.last(texts) =~ "what happened?"
 
-      # The compacted summary should not have duplicated tool results as display messages.
-      # We verify no duplicate assistant messages from turn 1 remain alongside
-      # the new turn 2 response.
-      post_compaction_assistants =
-        Enum.filter(messages_after, &match?({:assistant, _}, &1))
+      assert Enum.any?(
+               Session.messages(session),
+               &match?({:assistant, "Post-compaction answer."}, &1)
+             )
 
-      # Turn 2's response should be present
-      assert Enum.any?(post_compaction_assistants, fn
-               {:assistant, text} -> String.contains?(text, "Post-compaction")
-               _ -> false
-             end)
-
-      # Session should be idle and coherent
       assert Session.status(session) == :idle
     end
   end
 
   describe "cancellation during tool execution" do
-    test "abort during a pending tool call marks the turn cancelled and returns to idle" do
+    test "abort during a pending tool call returns to idle and ignores the aborted request's late events" do
       provider_opts =
         CorpusProvider.script([
           {:event, %Event.AgentStart{}},
@@ -88,6 +88,7 @@ defmodule MingaAgent.RecoveryGateTest do
           {:tool_start, "tc-long", "shell"},
           # Barrier: test controls timing here
           :barrier,
+          {:text, "late output"},
           {:tool_end, "tc-long", "shell", "done"},
           {:complete, ""}
         ])
@@ -105,21 +106,19 @@ defmodule MingaAgent.RecoveryGateTest do
       snapshot = Session.editor_snapshot(session)
       assert snapshot.status in [:thinking, :tool_executing]
 
-      # Abort while the tool is pending
       assert :ok = Session.abort(session)
-
-      # Session should return to a non-active state. The abort cancels the
-      # current turn; the exact final status depends on whether partial
-      # text was recorded.
+      assert_receive {:recovery_provider_abort, ^provider}, @event_timeout
       :sys.get_state(session)
-      status = Session.status(session)
-      assert status in [:idle, :error]
+      status_after_abort = Session.status(session)
+      assert status_after_abort == :idle
 
-      # No duplicate work: releasing the barrier after abort should not
-      # crash or reactivate the turn.
+      # The provider now emits the rest of the aborted turn, still tagged with its request.
       CorpusProvider.release(provider)
+      :sys.get_state(provider)
       :sys.get_state(session)
-      assert Session.status(session) in [:idle, :error]
+
+      assert Session.status(session) == status_after_abort
+      refute Enum.any?(Session.messages(session), &(inspect(&1) =~ "late output"))
     end
   end
 
@@ -246,8 +245,7 @@ defmodule MingaAgent.RecoveryGateTest do
       # Release the first turn. It completes and the queued steering fires turn 2.
       CorpusProvider.release(provider)
 
-      # The queued steering prompt is sent to the provider for the second turn.
-      assert_receive {:recovery_provider_prompt, _, _text}, @event_timeout
+      assert_receive {:recovery_provider_prompt, _, "also do this"}, @event_timeout
 
       # Wait for both turns to settle. The second turn's idle event is what
       # proves the queued follow-up was drained.
@@ -264,29 +262,7 @@ defmodule MingaAgent.RecoveryGateTest do
     end
   end
 
-  describe "continuation checkpoint integrity" do
-    test "sending a prompt while a tool checkpoint is pending returns effect_reconciliation_required" do
-      # This test manually injects events to create a tool checkpoint state,
-      # then verifies the Session correctly rejects new prompts.
-      session = start_subscribed_session()
-
-      # Use continue/1 to begin a turn for manual event injection
-      assert :ok = Session.continue(session)
-
-      send_provider_event(session, %Event.AgentStart{})
-      send_provider_event(session, %Event.ToolStart{tool_call_id: "tc1", name: "write_file"})
-
-      # The session has an active tool. Send a tool end to transition properly,
-      # but the continuation checkpoint must still be pending.
-      # Actually, sending ToolEnd completes the tool but the turn is still active.
-      # The checkpoint is set by the provider's outcome, not by individual tool events.
-      # Instead, verify that prompt rejection works while a turn is active.
-
-      # While a turn is active, new prompts queue or are rejected
-      result = Session.send_prompt(session, "interrupt attempt")
-      assert match?({:queued, _}, result) or match?({:error, _}, result)
-    end
-
+  describe "continuation revisions" do
     test "the continuation revision advances across completed turns" do
       provider_opts =
         CorpusProvider.scripts([
@@ -326,4 +302,10 @@ defmodule MingaAgent.RecoveryGateTest do
       assert state_after.continuation.tool_checkpoint == nil
     end
   end
+
+  @spec message_text(ReqLLM.Message.t()) :: String.t()
+  defp message_text(%ReqLLM.Message{content: parts}) when is_list(parts),
+    do: Enum.map_join(parts, "", &(Map.get(&1, :text) || ""))
+
+  defp message_text(%ReqLLM.Message{content: text}) when is_binary(text), do: text
 end

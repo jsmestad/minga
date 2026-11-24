@@ -118,6 +118,7 @@ defmodule Minga.Test.RecoveryCorpusProvider do
   def handle_cast({:prompt, request}, state) do
     text = ProviderRequest.text(request)
     send(state.test_pid, {:recovery_provider_prompt, self(), text})
+    send(state.test_pid, {:recovery_provider_request, self(), request})
     {script, scripts} = pop_script(state.scripts)
 
     state = %{
@@ -131,9 +132,11 @@ defmodule Minga.Test.RecoveryCorpusProvider do
     {:noreply, run_steps(script, state)}
   end
 
+  # Abort leaves the request and any script past a barrier in place, so a test can release
+  # late events tagged with the aborted request and prove the Session ignores them.
   def handle_cast(:abort, state) do
     send(state.test_pid, {:recovery_provider_abort, self()})
-    {:noreply, %{state | pending_script: [], active_request: nil, response_text: ""}}
+    {:noreply, state}
   end
 
   def handle_cast(:new_session, state) do
