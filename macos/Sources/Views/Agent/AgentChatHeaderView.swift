@@ -355,17 +355,9 @@ public struct AgentChatHeaderView: View {
 
     // MARK: - Helpers
 
+    /// The colour of the state the status speaks as, from the same table as its word; no state draws in the waiting role.
     private var statusColor: Color {
-        switch state.status {
-        case .idle: return Color.gray
-        case .thinking: return theme.agentHeaderFg
-        case .executingTool: return Color.orange
-        case .error: return Color.red
-        case .planning: return theme.agentStatusNeedsYou
-        case .approvalWaiting: return theme.agentStatusNeedsYou
-        case .needsYou: return theme.agentStatusNeedsYou
-        case .unknown: return Color.gray
-        }
+        theme.stateColor(state.status.spineState ?? .waiting)
     }
 
     private struct HeaderControlPointingHandModifier: ViewModifier {

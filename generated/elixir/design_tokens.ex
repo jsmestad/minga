@@ -35,9 +35,18 @@ defmodule Minga.Design.Tokens do
   @typedoc "A state's shape. Waiting and Stopped share the hollow dot."
   @type state_shape :: :orbit | :halo_dot | :hollow_dot | :diamond | :solid_dot
 
-  @typedoc "An Agent status the BEAM reports, as `MingaEditor.Agent.WorkspaceStatus` resolves it."
+  @typedoc "An Agent status the BEAM reports, as `MingaEditor.Agent.WorkspaceStatus` resolves it or a workspace stores it."
   @type agent_status ::
-          :idle | :thinking | :tool_executing | :error | :plan | :approval_waiting | :needs_you
+          :idle
+          | :thinking
+          | :tool_executing
+          | :error
+          | :plan
+          | :approval_waiting
+          | :needs_you
+          | :stopped
+          | :needs_review
+          | :done
 
   @typedoc "A twist variant id."
   @type twist_variant :: :head | :body | :last | :kept | :shared
@@ -319,7 +328,18 @@ defmodule Minga.Design.Tokens do
   @doc "Every Agent status, in token-file order."
   @spec agent_statuses() :: [agent_status()]
   def agent_statuses,
-    do: [:idle, :thinking, :tool_executing, :error, :plan, :approval_waiting, :needs_you]
+    do: [
+      :idle,
+      :thinking,
+      :tool_executing,
+      :error,
+      :plan,
+      :approval_waiting,
+      :needs_you,
+      :stopped,
+      :needs_review,
+      :done
+    ]
 
   @doc "The Agent status byte gui_status_bar and gui_workspaces carry; unknown statuses and nil encode as idle."
   @spec agent_status_wire(agent_status() | atom() | nil) :: byte()
@@ -330,6 +350,9 @@ defmodule Minga.Design.Tokens do
   def agent_status_wire(:plan), do: 4
   def agent_status_wire(:approval_waiting), do: 5
   def agent_status_wire(:needs_you), do: 6
+  def agent_status_wire(:stopped), do: 7
+  def agent_status_wire(:needs_review), do: 8
+  def agent_status_wire(:done), do: 9
   def agent_status_wire(_status), do: 0
 
   @doc """
@@ -337,7 +360,7 @@ defmodule Minga.Design.Tokens do
 
   Every surface that shows Minga's state reads it through this table, in Elixir, Swift and Go, so no two surfaces name the same status differently.
   """
-  @spec agent_status_state(agent_status() | nil) :: state_id() | nil
+  @spec agent_status_state(agent_status() | atom() | nil) :: state_id() | nil
   def agent_status_state(:idle), do: nil
   def agent_status_state(:thinking), do: :working
   def agent_status_state(:tool_executing), do: :working
@@ -345,7 +368,10 @@ defmodule Minga.Design.Tokens do
   def agent_status_state(:plan), do: :working
   def agent_status_state(:approval_waiting), do: :needs_you
   def agent_status_state(:needs_you), do: :needs_you
-  def agent_status_state(nil), do: nil
+  def agent_status_state(:stopped), do: :stopped
+  def agent_status_state(:needs_review), do: :needs_you
+  def agent_status_state(:done), do: :done
+  def agent_status_state(_status), do: nil
 
   @doc "Every twist variant id, in token-file order."
   @spec twist_variants() :: [twist_variant()]

@@ -213,7 +213,7 @@ tui_glyph = "●"
 accessibility_label = "Minga is done"
 
 # Agent statuses: the state each status the BEAM reports speaks as, so every surface that shows Minga's state uses the same word.
-# `wire` is the status byte in gui_status_bar (0x76) and gui_workspaces. A status without `state` shows no state.
+# `wire` is the status byte in gui_status_bar (0x76), gui_workspaces and gui_agent_chat. A status without `state` shows no state, and a status the table does not name shows none either.
 
 [[agent_statuses]]
 id = "idle"
@@ -248,6 +248,21 @@ state = "needs_you"
 id = "needs_you"
 wire = 6
 state = "needs_you"
+
+[[agent_statuses]]
+id = "stopped"
+wire = 7
+state = "stopped"
+
+[[agent_statuses]]
+id = "needs_review"
+wire = 8
+state = "needs_you"
+
+[[agent_statuses]]
+id = "done"
+wire = 9
+state = "done"
 
 # Twist variants. `strand` is the light strand's role and `shade` the shade strand's role.
 # In the TUI the strand is the cell's foreground and the shade its background; a variant without `shade` draws on the gutter background.

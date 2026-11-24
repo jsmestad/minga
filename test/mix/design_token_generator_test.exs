@@ -100,16 +100,15 @@ defmodule Minga.Mix.DesignTokenGeneratorTest do
   end
 
   test "every Agent status speaks as a state, or none, and the encoders send its wire byte" do
-    assert Tokens.agent_statuses() ==
-             [:idle, :thinking, :tool_executing, :error, :plan, :approval_waiting, :needs_you]
-
     assert for(status <- Tokens.agent_statuses(), do: Tokens.agent_status_state(status)) ==
-             [nil, :working, :working, :failed, :working, :needs_you, :needs_you]
+             [nil, :working, :working, :failed, :working, :needs_you, :needs_you] ++
+               [:stopped, :needs_you, :done]
 
     assert for(status <- Tokens.agent_statuses(), do: Tokens.agent_status_wire(status)) ==
-             [0, 1, 2, 3, 4, 5, 6]
+             Enum.to_list(0..9)
 
     assert Tokens.agent_status_wire(:unknown_status) == Tokens.agent_status_wire(:idle)
+    assert Tokens.agent_status_state(:unknown_status) == nil
     assert Tokens.state_wire(nil) == 0
     assert Enum.map(Tokens.state_ids(), &Tokens.state_wire/1) == [1, 2, 3, 4, 5, 6]
   end

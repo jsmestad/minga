@@ -228,21 +228,36 @@ defmodule MingaEditor.RenderModel.UI.AgentContextBuilderTest do
     end
 
     test "speak, with the status bar and chat header, the state the token table gives each status" do
-      # The card names a running tool iterating only to say what the working state is doing.
+      # The card names a running tool iterating only to say what the working state is doing,
+      # and has no stopped status, so a stopped session reads idle there.
       card_states = %{
-        working: :working,
-        iterating: :working,
-        needs_you: :needs_you,
-        errored: :failed,
-        idle: nil
+        working: [:working],
+        iterating: [:working],
+        needs_you: [:needs_you],
+        errored: [:failed],
+        done: [:done],
+        idle: [nil, :stopped]
       }
 
-      for status <- [:idle, :thinking, :tool_executing, :error, :plan] do
+      # Live statuses come from an attached session; stored ones from a detached workspace,
+      # such as one restored from a saved session.
+      live = [:idle, :thinking, :tool_executing, :error, :plan]
+      stored = [:approval_waiting, :stopped, :needs_review, :done]
+
+      for status <- live ++ stored do
         ctx =
-          agent_workspace_context(AgentState.set_status(%AgentState{}, status), UIState.new(),
-            active_tab: 2,
-            stored_status: status
-          )
+          if status in live do
+            agent_workspace_context(AgentState.set_status(%AgentState{}, status), UIState.new(),
+              active_tab: 2,
+              stored_status: status
+            )
+          else
+            agent_workspace_context(%AgentState{}, UIState.new(),
+              active_tab: 2,
+              stored_status: status,
+              session: nil
+            )
+          end
 
         # The workspace pill, the status bar and the chat header read one status and
         # name it through the token table, in Elixir, Swift and Go alike.
@@ -252,8 +267,15 @@ defmodule MingaEditor.RenderModel.UI.AgentContextBuilderTest do
                  status
 
         expected = Tokens.agent_status_state(status)
-        card = AgentContextBuilder.build(ctx).status
-        assert Map.fetch!(card_states, card) == expected, "#{status} shows #{card} on the card"
+        # A hidden card shows no status at all.
+        case AgentContextBuilder.build(ctx) do
+          %AgentContext{visible: true, status: card} ->
+            assert expected in Map.fetch!(card_states, card),
+                   "#{status} shows #{card} on the card"
+
+          %AgentContext{visible: false} ->
+            :ok
+        end
       end
     end
 
@@ -272,7 +294,7 @@ defmodule MingaEditor.RenderModel.UI.AgentContextBuilderTest do
   # Tabs: 1 is a manual file, 2 the Agent chat and 3 a file, both in Agent workspace 1.
   defp agent_workspace_context(agent, agent_ui, opts) do
     workspace =
-      Workspace.new_agent(1, "Agent", self())
+      Workspace.new_agent(1, "Agent", Keyword.get(opts, :session, self()))
       |> Workspace.set_agent_status(Keyword.fetch!(opts, :stored_status))
 
     tab_bar = %TabBar{

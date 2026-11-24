@@ -213,12 +213,12 @@ public struct AgentStatusDot: View {
             .frame(width: 6, height: 6)
     }
 
+    /// A working workspace keeps its own colour; any other state draws in its state's role, from the same table as its word.
     private var dotColor: Color {
-        switch status {
-        case .thinking, .executingTool: return color
-        case .error: return Color.red
-        case .planning, .approvalWaiting, .needsYou: return theme.agentStatusNeedsYou
-        case .idle, .unknown: return theme.tabInactiveFg
+        switch status.spineState {
+        case .working: return color
+        case .some(let state): return theme.stateColor(state)
+        case .none: return theme.tabInactiveFg
         }
     }
 }

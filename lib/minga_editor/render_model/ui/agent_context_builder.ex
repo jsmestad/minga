@@ -143,7 +143,9 @@ defmodule MingaEditor.RenderModel.UI.AgentContextBuilder do
   defp card_status(:working), do: :working
   defp card_status(:needs_you), do: :needs_you
   defp card_status(:failed), do: :errored
-  defp card_status(nil), do: :idle
+  defp card_status(:done), do: :done
+  # The card has no stopped status; a stopped session reads as idle there.
+  defp card_status(state) when state in [:stopped, :waiting, nil], do: :idle
 
   @spec active_action(Activity.t(), MingaAgent.ToolApproval.Public.t() | nil) :: String.t() | nil
   defp active_action(_activity, %MingaAgent.ToolApproval.Public{name: name}),

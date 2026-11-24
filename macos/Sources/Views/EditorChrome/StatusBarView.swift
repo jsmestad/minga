@@ -414,10 +414,7 @@ public struct StatusBarView: View {
     }
 
     private var agentStatusText: String? {
-        switch state.agentStatus {
-        case .unknown: return nil
-        default: return state.agentStatus.label
-        }
+        state.agentStatus.label
     }
 
     private var agentStatusHelpText: String {
@@ -442,45 +439,24 @@ public struct StatusBarView: View {
         }
     }
 
+    /// The status's mark, chosen and coloured by the state it speaks as, so the mark never contradicts the word beside it.
     @ViewBuilder
     private var agentStatusGlyph: some View {
-        switch state.agentStatus {
-        case .idle:
-            Text("◯")
-                .font(Typography.font(.small))
-                .foregroundStyle(theme.modelineBarFg.opacity(0.55))
-        case .thinking:
+        switch state.agentStatus.spineState {
+        case .working:
             ProgressView()
                 .scaleEffect(0.45)
                 .frame(width: 14, height: barHeight)
-                .tint(theme.statusbarAccentFg)
-        case .executingTool:
-            Image(systemName: "bolt.fill")
-                .font(Typography.font(.micro))
-                .foregroundStyle(theme.statusbarAccentFg)
+                .tint(theme.stateColor(.working))
+        case .some(let spineState):
+            Text(spineState.tuiGlyph)
+                .font(Typography.font(.small))
+                .foregroundStyle(theme.stateColor(spineState))
                 .frame(width: 14, height: barHeight)
-        case .error:
-            Image(systemName: "exclamationmark.circle.fill")
-                .font(Typography.font(.micro))
-                .foregroundStyle(theme.gutterErrorFg)
-                .frame(width: 14, height: barHeight)
-        case .planning:
-            Image(systemName: "pencil.and.outline")
-                .font(Typography.font(.micro))
-                .foregroundStyle(theme.agentStatusNeedsYou)
-                .frame(width: 14, height: barHeight)
-        case .approvalWaiting:
-            Image(systemName: "hand.raised.fill")
-                .font(Typography.font(.micro))
-                .foregroundStyle(theme.agentStatusNeedsYou)
-                .frame(width: 14, height: barHeight)
-        case .needsYou:
-            Image(systemName: "exclamationmark.triangle.fill")
-                .font(Typography.font(.micro))
-                .foregroundStyle(theme.agentStatusNeedsYou)
-                .frame(width: 14, height: barHeight)
-        case .unknown:
-            EmptyView()
+        case .none:
+            Text("◯")
+                .font(Typography.font(.small))
+                .foregroundStyle(theme.modelineBarFg.opacity(0.55))
         }
     }
 

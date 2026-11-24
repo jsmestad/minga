@@ -598,25 +598,22 @@ func nonEmpty(value string, fallback string) string {
 	return value
 }
 
+// renderAgentStatusBadge draws the status's word on its state's colour role, both from the shared token table, so the colour never contradicts the word.
 func (m Model) renderAgentStatusBadge(status byte) string {
 	p := m.palette()
 	label := agentChatStatusLabel(status)
 	style := lipgloss.NewStyle().Bold(true).Padding(padding(spaceHairline, spaceSM))
-	switch status {
-	case 1: // working
-		label = m.agentSpinner() + " " + label
-		style = style.Foreground(p.SelectionText()).Background(p.AgentStatusWorking())
-	case 2: // iterating
-		label = m.agentSpinner() + " " + label
-		style = style.Foreground(p.SelectionText()).Background(p.AgentStatusIterating())
-	case 3: // error
-		style = style.Foreground(p.SelectionText()).Background(p.AgentStatusErrored())
-	case 4, 5, agentStatusNeedsYou, agentStatusQuestionWaiting: // planning, awaiting input, failed start
-		style = style.Foreground(p.SelectionText()).Background(p.AgentStatusNeedsYou())
-	default: // idle
-		style = style.Foreground(p.AgentStatusIdle()).Background(p.SurfaceAlt())
+	state, ok := generated.SpineStateForAgentStatus(status)
+	if status == agentStatusQuestionWaiting {
+		state, ok = generated.StateNeedsYou, true
 	}
-	return style.Render(label)
+	if !ok {
+		return style.Foreground(p.AgentStatusIdle()).Background(p.SurfaceAlt()).Render(label)
+	}
+	if state == generated.StateWorking {
+		label = m.agentSpinner() + " " + label
+	}
+	return style.Foreground(p.SelectionText()).Background(p.Role(state.Token().Role)).Render(label)
 }
 
 func (m Model) agentSpinner() string {

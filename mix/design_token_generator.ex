@@ -450,7 +450,7 @@ defmodule Minga.Mix.DesignTokenGenerator do
       @typedoc "A state's shape. Waiting and Stopped share the hollow dot."
       @type state_shape :: #{atom_union(@shapes)}
 
-      @typedoc "An Agent status the BEAM reports, as `MingaEditor.Agent.WorkspaceStatus` resolves it."
+      @typedoc "An Agent status the BEAM reports, as `MingaEditor.Agent.WorkspaceStatus` resolves it or a workspace stores it."
       @type agent_status :: #{atom_union(agent_status_ids)}
 
       @typedoc "A twist variant id."
@@ -546,9 +546,9 @@ defmodule Minga.Mix.DesignTokenGenerator do
 
       Every surface that shows Minga's state reads it through this table, in Elixir, Swift and Go, so no two surfaces name the same status differently.
       \"\"\"
-      @spec agent_status_state(agent_status() | nil) :: state_id() | nil
+      @spec agent_status_state(agent_status() | atom() | nil) :: state_id() | nil
     #{Enum.map_join(tokens.agent_statuses, "\n", &"  def agent_status_state(:#{&1.id}), do: #{elixir_optional_atom(&1.state)}")}
-      def agent_status_state(nil), do: nil
+      def agent_status_state(_status), do: nil
 
       @doc "Every twist variant id, in token-file order."
       @spec twist_variants() :: [twist_variant()]

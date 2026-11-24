@@ -158,6 +158,12 @@ func SpineStateForAgentStatus(wire byte) (state SpineState, ok bool) {
 		return StateNeedsYou, true
 	case 6: // needs_you
 		return StateNeedsYou, true
+	case 7: // stopped
+		return StateStopped, true
+	case 8: // needs_review
+		return StateNeedsYou, true
+	case 9: // done
+		return StateDone, true
 	default:
 		return 0, false
 	}
