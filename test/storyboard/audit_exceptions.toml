@@ -148,3 +148,346 @@ pairs = [
 ]
 reason = "Syntax colours, muted comment and gutter text, separators and chips miss 4.5:1 in this theme."
 issue = 4137
+
+# ---- macOS ---------------------------------------------------------------------------------------------------
+
+[[exception]]
+scenario = ["edit.whichkey.leader", "minga.whichkey"]
+frontend = "macos"
+part = "whichKey.entry"
+rule = "entry pitch"
+reason = "WhichKeyOverlay rows are 22 pt; anatomy wants every clickable row at the 24 pt row pitch."
+issue = 4044
+
+[[exception]]
+scenario = ["edit.whichkey.leader", "minga.whichkey"]
+frontend = "macos"
+part = "whichKey.entry"
+rule = "key to label"
+reason = "WhichKeyOverlay puts Spacing.sm between key and label in a fixed key slot; anatomy wants the key-to-label token."
+issue = 4044
+
+[[exception]]
+scenario = ["edit.whichkey.leader", "minga.whichkey"]
+frontend = "macos"
+part = "whichKey.column"
+rule = "column gap"
+reason = "WhichKeyOverlay lays entries in fixed 220 pt columns, so the gap after the widest entry varies; anatomy wants the column-gap token."
+issue = 4044
+
+[[exception]]
+scenario = ["edit.whichkey.leader", "minga.whichkey"]
+frontend = "macos"
+part = "whichKey.panel"
+rule = "inset"
+reason = "The entry block is centred in the panel, so its inset is not the panel inset token."
+issue = 4044
+
+[[exception]]
+scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey"]
+frontend = "macos"
+part = "modeline"
+rule = "leading inset"
+reason = "The modeline's leading controls start at the window edge with no inset."
+issue = 4043
+
+[[exception]]
+scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey"]
+frontend = "macos"
+part = "breadcrumb.segment"
+rule = "contrast"
+theme = "astrodark"
+pairs = [
+  "#6f7179 on #111317",
+]
+reason = "The breadcrumb.segment text misses 4.5:1 in this theme."
+issue = 4137
+
+[[exception]]
+scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey"]
+frontend = "macos"
+part = "breadcrumb.segment"
+rule = "contrast"
+theme = "catppuccin_frappe"
+pairs = [
+  "#878eab on #292c3c",
+]
+reason = "The breadcrumb.segment text misses 4.5:1 in this theme."
+issue = 4137
+
+[[exception]]
+scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey"]
+frontend = "macos"
+part = "breadcrumb.segment"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = [
+  "#8a8d9f on #e6e9ef",
+]
+reason = "The breadcrumb.segment text misses 4.5:1 in this theme."
+issue = 4137
+
+[[exception]]
+scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey"]
+frontend = "macos"
+part = "editor.code"
+rule = "contrast"
+theme = "catppuccin_frappe"
+pairs = [
+  "#242735 on #303446",
+  "#414559 on #303446",
+  "#665c50 on #303446",
+]
+reason = "Syntax colours, comments and line numbers in the editor miss 4.5:1 in this theme (a thin band such as the cursor line can sample as an ink; it is listed so the pair stays visible)."
+issue = 4137
+
+[[exception]]
+scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey"]
+frontend = "macos"
+part = "editor.code"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = [
+  "#179299 on #eff1f5",
+  "#40a02b on #eff1f5",
+  "#72758b on #eff1f5",
+  "#a28dd5 on #eff1f5",
+  "#ccd0da on #eff1f5",
+  "#df8e1d on #eff1f5",
+]
+reason = "Syntax colours, comments and line numbers in the editor miss 4.5:1 in this theme (a thin band such as the cursor line can sample as an ink; it is listed so the pair stays visible)."
+issue = 4137
+
+[[exception]]
+scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey"]
+frontend = "macos"
+part = "modeline.modePill"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = [
+  "#eff1f5 on #1e66f5",
+]
+reason = "The modeline.modePill text misses 4.5:1 in this theme."
+issue = 4137
+
+[[exception]]
+scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey"]
+frontend = "macos"
+part = "modeline.modeText"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = [
+  "#eff1f5 on #1e66f5",
+]
+reason = "The modeline.modeText text misses 4.5:1 in this theme."
+issue = 4137
+
+[[exception]]
+scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey"]
+frontend = "macos"
+part = "modeline.segment"
+rule = "contrast"
+theme = "astrodark"
+pairs = [
+  "#676971 on #111317",
+  "#6f7179 on #111317",
+  "#767982 on #111317",
+  "#9b59b6 on #111317",
+]
+reason = "The modeline.segment text misses 4.5:1 in this theme."
+issue = 4137
+
+[[exception]]
+scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey"]
+frontend = "macos"
+part = "modeline.segment"
+rule = "contrast"
+theme = "catppuccin_frappe"
+pairs = [
+  "#7f86a1 on #292c3c",
+  "#878eab on #292c3c",
+  "#9b59b6 on #292c3c",
+]
+reason = "The modeline.segment text misses 4.5:1 in this theme."
+issue = 4137
+
+[[exception]]
+scenario = ["edit.plain", "edit.visual", "edit.whichkey.leader", "minga.whichkey"]
+frontend = "macos"
+part = "modeline.segment"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = [
+  "#7a7d91 on #e6e9ef",
+  "#828598 on #e6e9ef",
+  "#8a8d9f on #e6e9ef",
+  "#9194a5 on #e6e9ef",
+  "#9b59b6 on #e6e9ef",
+  "#eff1f5 on #1e66f5",
+]
+reason = "The modeline.segment text misses 4.5:1 in this theme."
+issue = 4137
+
+[[exception]]
+scenario = ["edit.whichkey.leader", "minga.whichkey"]
+frontend = "macos"
+part = "whichKey.breadcrumb"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = [
+  "#179299 on #ccd0da",
+]
+reason = "The whichKey.breadcrumb text misses 4.5:1 in this theme."
+issue = 4137
+
+[[exception]]
+scenario = ["edit.whichkey.leader"]
+frontend = "macos"
+part = "whichKey.count"
+rule = "contrast"
+theme = "astrodark"
+pairs = [
+  "#51545b on #14161b",
+]
+reason = "The whichKey.count text misses 4.5:1 in this theme."
+issue = 4137
+
+[[exception]]
+scenario = ["edit.whichkey.leader"]
+frontend = "macos"
+part = "whichKey.count"
+rule = "contrast"
+theme = "catppuccin_frappe"
+pairs = [
+  "#767d97 on #414559",
+]
+reason = "The whichKey.count text misses 4.5:1 in this theme."
+issue = 4137
+
+[[exception]]
+scenario = ["edit.whichkey.leader"]
+frontend = "macos"
+part = "whichKey.count"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = [
+  "#9b9faf on #ccd0da",
+]
+reason = "The whichKey.count text misses 4.5:1 in this theme."
+issue = 4137
+
+[[exception]]
+scenario = ["edit.whichkey.leader", "minga.whichkey"]
+frontend = "macos"
+part = "whichKey.entry"
+rule = "contrast"
+theme = "astrodark"
+pairs = [
+  "#2e5475 on #14161b",
+  "#3e7aac on #14161b",
+]
+reason = "The whichKey.entry text misses 4.5:1 in this theme."
+issue = 4137
+
+[[exception]]
+scenario = ["edit.whichkey.leader", "minga.whichkey"]
+frontend = "macos"
+part = "whichKey.entry"
+rule = "contrast"
+theme = "catppuccin_frappe"
+pairs = [
+  "#5e8086 on #414559",
+  "#70a5a3 on #414559",
+  "#78b7b1 on #414559",
+  "#9ea7c7 on #414559",
+]
+reason = "The whichKey.entry text misses 4.5:1 in this theme."
+issue = 4137
+
+[[exception]]
+scenario = ["edit.whichkey.leader", "minga.whichkey"]
+frontend = "macos"
+part = "whichKey.entry"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = [
+  "#179299 on #ccd0da",
+  "#1c54c1 on #ccd0da",
+  "#22969d on #ccd0da",
+  "#2f9aa2 on #ccd0da",
+  "#4ca4ac on #ccd0da",
+  "#72758b on #ccd0da",
+  "#75788d on #ccd0da",
+  "#7db5be on #ccd0da",
+]
+reason = "The whichKey.entry text misses 4.5:1 in this theme."
+issue = 4137
+
+[[exception]]
+scenario = ["edit.whichkey.leader", "minga.whichkey"]
+frontend = "macos"
+part = "whichKey.entryKey"
+rule = "contrast"
+theme = "astrodark"
+pairs = [
+  "#2e5475 on #14161b",
+  "#3e7aac on #14161b",
+]
+reason = "The whichKey.entryKey text misses 4.5:1 in this theme."
+issue = 4137
+
+[[exception]]
+scenario = ["edit.whichkey.leader", "minga.whichkey"]
+frontend = "macos"
+part = "whichKey.entryKey"
+rule = "contrast"
+theme = "catppuccin_frappe"
+pairs = [
+  "#5e8086 on #414559",
+  "#70a5a3 on #414559",
+  "#78b7b1 on #414559",
+]
+reason = "The whichKey.entryKey text misses 4.5:1 in this theme."
+issue = 4137
+
+[[exception]]
+scenario = ["edit.whichkey.leader", "minga.whichkey"]
+frontend = "macos"
+part = "whichKey.entryKey"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = [
+  "#179299 on #ccd0da",
+  "#22969d on #ccd0da",
+  "#2f9aa2 on #ccd0da",
+  "#4ca4ac on #ccd0da",
+  "#7db5be on #ccd0da",
+]
+reason = "The whichKey.entryKey text misses 4.5:1 in this theme."
+issue = 4137
+
+[[exception]]
+scenario = ["edit.whichkey.leader", "minga.whichkey"]
+frontend = "macos"
+part = "whichKey.entryLabel"
+rule = "contrast"
+theme = "catppuccin_frappe"
+pairs = [
+  "#9ea7c7 on #414559",
+]
+reason = "The whichKey.entryLabel text misses 4.5:1 in this theme."
+issue = 4137
+
+[[exception]]
+scenario = ["edit.whichkey.leader", "minga.whichkey"]
+frontend = "macos"
+part = "whichKey.entryLabel"
+rule = "contrast"
+theme = "catppuccin_latte"
+pairs = [
+  "#1c54c1 on #ccd0da",
+  "#72758b on #ccd0da",
+  "#75788d on #ccd0da",
+]
+reason = "The whichKey.entryLabel text misses 4.5:1 in this theme."
+issue = 4137
