@@ -22,44 +22,70 @@ defmodule MingaEditor.Input.CUA.SpaceLeaderRetractFocusTest do
 
   @moduletag :tmp_dir
 
-  test "on the focused file buffer, SPC held into f retracts the space and opens the f leader group",
-       %{
-         tmp_dir: dir
-       } do
+  test "on the focused file buffer, SPC held into f f retracts the space and opens find-file",
+       %{tmp_dir: dir} do
     ctx = cua_gui_editor(dir)
 
     held_space_then(ctx, ?f)
-
-    assert buffer_content(ctx) == "focus"
     assert leader_prefix_open?(ctx)
+    send_keys_sync(ctx, "f")
+
+    assert picker_open?(ctx)
+    refute leader_prefix_open?(ctx)
+    assert buffer_content(ctx) == "focus"
+  end
+
+  test "a clean SPC f chord followed by f opens find-file without typing into the file", %{
+    tmp_dir: dir
+  } do
+    ctx = cua_gui_editor(dir)
+
+    send_gui_action(ctx, {:space_leader_chord, ?f, 0})
+    send_keys_sync(ctx, "f")
+
+    assert picker_open?(ctx)
+    assert buffer_content(ctx) == "focus"
+  end
+
+  test "a key outside the open leader group closes it and reaches the file", %{tmp_dir: dir} do
+    ctx = cua_gui_editor(dir)
+
+    held_space_then(ctx, ?f)
+    send_keys_sync(ctx, "z")
+
+    refute leader_prefix_open?(ctx)
+    refute picker_open?(ctx)
+    assert buffer_content(ctx) == "focusz"
   end
 
   for {surface, focus} <- [
         agent_chat: &__MODULE__.focus_agent_chat/1,
         bottom_panel: &__MODULE__.focus_bottom_panel/1
       ] do
-    test "on a focused #{surface}, SPC held into f opens the f leader group and leaves the hidden file unchanged",
+    test "on a focused #{surface}, SPC held into f f opens find-file and leaves the hidden file unchanged",
          %{tmp_dir: dir} do
       ctx = cua_gui_editor(dir)
       :sys.replace_state(ctx.editor, unquote(focus))
 
       held_space_then(ctx, ?f)
+      send_keys_sync(ctx, "f")
 
+      assert picker_open?(ctx)
       assert buffer_content(ctx) == "focus"
-      assert leader_prefix_open?(ctx)
     end
   end
 
-  test "on a focused composer, SPC held into f removes the space from the draft, not the file",
+  test "on a focused composer, SPC held into f f removes the space from the draft and opens find-file",
        %{tmp_dir: dir} do
     ctx = cua_gui_editor(dir)
     :sys.replace_state(ctx.editor, &focus_composer/1)
 
     held_space_then(ctx, ?f)
+    send_keys_sync(ctx, "f")
 
+    assert picker_open?(ctx)
     assert buffer_content(ctx) == "focus"
     assert PromptBuffer.prompt_text(editor_state(ctx).workspace.agent_ui) == ""
-    assert leader_prefix_open?(ctx)
   end
 
   test "focus that moves back to the file between the space and the retract leaves the file unchanged",
@@ -74,9 +100,10 @@ defmodule MingaEditor.Input.CUA.SpaceLeaderRetractFocusTest do
     end)
 
     send_gui_action(ctx, {:space_leader_retract, ?f, 0})
+    send_keys_sync(ctx, "f")
 
+    assert picker_open?(ctx)
     assert buffer_content(ctx) == "focus"
-    assert leader_prefix_open?(ctx)
   end
 
   test "on a focused BEAM Observatory sidebar, SPC held into f leaves the file unchanged", %{

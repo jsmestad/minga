@@ -34,6 +34,13 @@ defmodule MingaAgent.Session.PrefixAuthorizationTest do
   @timeout 5_000
   @source {:extension, :prefix_authority_fixture}
 
+  setup_all do
+    # Native stream fixtures and cost calculation use the real catalog before tool events arrive.
+    # Load it before tests start their event deadlines.
+    assert [_ | _] = LLMDB.models()
+    :ok
+  end
+
   setup %{tmp_dir: dir} do
     Advice.reset()
     on_exit(&Advice.reset/0)
@@ -2685,6 +2692,50 @@ defmodule MingaAgent.Session.PrefixAuthorizationTest do
     await_done(session)
     assert File.read!(target(context)) == "written\n"
     assert saved_tool_result(context, session).metadata.is_error == false
+  end
+
+  test "a read the provider config would run at once still waits for live Session approval",
+       context do
+    owner = self()
+
+    spec =
+      Spec.new!(
+        source: @source,
+        name: "gated_read",
+        description: "Read one fixture value",
+        parameter_schema: %{"type" => "object", "properties" => %{}},
+        category: :filesystem,
+        effect: :read_only,
+        capabilities: [:read_project],
+        build: fn _tool_context ->
+          fn _args ->
+            send(owner, :gated_read_ran)
+            {:ok, "read"}
+          end
+        end
+      )
+
+    assert :ok = ToolRegistry.register(context.registry, spec)
+    assert {:ok, _} = Options.set(context.options_name, :agent_tool_approval, :all)
+
+    # The provider schedules the read as a concurrent batch; the Session's live policy still gates it.
+    session =
+      start_session(context,
+        tool_calls: [{"gated_read", %{}, "read-call"}],
+        provider_opts: [config: approval_config(context, tool_approval: :none)]
+      )
+
+    assert :ok = Session.send_prompt(session, "read")
+
+    assert_receive {:agent_event, ^session,
+                    {:approval_pending, %Public{target: approval_target}}},
+                   @timeout
+
+    refute_received :gated_read_ran
+    assert :ok = Session.respond_to_approval(session, approval_target, :approve)
+    await_done(session, "gated_read")
+    assert_received :gated_read_ran
+    assert saved_tool_result(context, session, "read-call").metadata.is_error == false
   end
 
   test "a rejected approval settles before a later allowed write runs",

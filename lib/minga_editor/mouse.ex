@@ -2045,9 +2045,16 @@ defmodule MingaEditor.Mouse do
     }
   end
 
+  # A click abandons a pending leader sequence in every mode and editing model: close which-key and
+  # clear the mode's leader, so the next key is never read inside a group the user clicked away from.
   @spec cancel_mode_for_mouse(state()) :: state()
-  defp cancel_mode_for_mouse(%{workspace: %{editing: %{mode: :command}}} = state) do
-    MingaEditor.Shell.Traditional.WhichKeyWorkflow.dismiss(state)
+  defp cancel_mode_for_mouse(
+         %{shell_runtime: %{state: %TraditionalState{whichkey: %{node: node}}}} = state
+       )
+       when node != nil do
+    state
+    |> MingaEditor.Shell.Traditional.WhichKeyWorkflow.dismiss()
+    |> MingaEditor.Editing.update_mode_state(&Minga.Mode.cancel_leader/1)
   end
 
   defp cancel_mode_for_mouse(state), do: state
