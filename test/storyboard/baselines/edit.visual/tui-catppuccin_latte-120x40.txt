@@ -44,7 +44,7 @@
       ~
       ~
       ~
- 󰈈 VISUAL │ storyboard.ex                                                         Spaces:2 │ │ Elixir │ 1 chars │ 0%%
+ 󰈈 VISUAL │ storyboard.ex                                                           Spaces:2 │ │ Elixir │ 1 char │ 0%
 ## styles (row start-end fg bg attrs)
 0 0-0 #4c4f69 #eff1f5 -
 0 1-1 #1e66f5 #eff1f5 bold
@@ -168,14 +168,14 @@
 39 0-9 #eff1f5 #1e66f5 bold
 39 10-10 #8c8fa1 #e6e9ef -
 39 11-25 #4c4f69 #8c8fa1 -
-39 26-79 #4c4f69 #e6e9ef -
-39 80-81 #a074c4 #e6e9ef -
-39 82-91 #4c4f69 #8c8fa1 -
-39 92-92 #8c8fa1 #e6e9ef -
-39 93-94 #9b59b6 #e6e9ef -
-39 95-95 #8c8fa1 #e6e9ef -
-39 96-103 #40a02b #e6e9ef -
-39 104-104 #8c8fa1 #e6e9ef -
-39 105-113 #4c4f69 #8c8fa1 -
-39 114-114 #8c8fa1 #e6e9ef -
-39 115-119 #eff1f5 #1e66f5 bold
+39 26-81 #4c4f69 #e6e9ef -
+39 82-83 #a074c4 #e6e9ef -
+39 84-93 #4c4f69 #8c8fa1 -
+39 94-94 #8c8fa1 #e6e9ef -
+39 95-96 #9b59b6 #e6e9ef -
+39 97-97 #8c8fa1 #e6e9ef -
+39 98-105 #40a02b #e6e9ef -
+39 106-106 #8c8fa1 #e6e9ef -
+39 107-114 #4c4f69 #8c8fa1 -
+39 115-115 #8c8fa1 #e6e9ef -
+39 116-119 #eff1f5 #1e66f5 bold
