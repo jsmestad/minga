@@ -861,3 +861,94 @@ jobs:
             commit -m "Update to $VERSION" -m "Built from https://github.com/$GITHUB_REPOSITORY/commit/$SOURCE_SHA"
           git push origin HEAD:master
           echo "Published minga-bin $pkgver to the AUR." >> "$GITHUB_STEP_SUMMARY"
+
+  # Like the AUR job, the repository job trusts only the public release. It downloads the Linux assets,
+  # checks them against the release's digests, builds signed repositories, installs from them on clean
+  # distributions, and only then uploads to packages.mingacode.dev.
+  publish-package-repos:
+    name: Publish the apt, dnf and pacman repositories
+    # A stale tap means a newer build already published its own release; this version has none.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && github.repository == 'jsmestad/minga' && needs.require-ci.outputs.publish == 'true' && needs.publish-homebrew.outputs.tap_state != 'stale'
+    needs: [validate, require-ci, publish-homebrew]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    concurrency:
+      group: rolling-package-repositories
+      cancel-in-progress: false
+      queue: max
+    permissions:
+      contents: read
+    env:
+      VERSION: ${{ needs.validate.outputs.version }}
+      SOURCE_SHA: ${{ needs.validate.outputs.source_sha }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - name: Check for the signing key and R2 credentials
+        id: credentials
+        env:
+          PACKAGE_SIGNING_KEY: ${{ secrets.PACKAGE_SIGNING_KEY }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          missing=()
+          for name in PACKAGE_SIGNING_KEY R2_ACCESS_KEY_ID R2_SECRET_ACCESS_KEY CLOUDFLARE_ACCOUNT_ID; do
+            [ -n "${!name}" ] || missing+=("$name")
+          done
+          if [ ${#missing[@]} -eq 0 ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::Skipping package repositories; missing secrets: ${missing[*]}"
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Download the public release's Linux assets and check their digests
+        if: steps.credentials.outputs.configured == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/v$VERSION" > release.json
+          jq -e --arg sha "$SOURCE_SHA" '.draft == false and .prerelease == true and .target_commitish == $sha' release.json
+          mkdir assets
+          for name in "minga_${VERSION}_amd64.deb" "minga_${VERSION}_arm64.deb" \
+            "minga-$VERSION.x86_64.rpm" "minga-$VERSION.aarch64.rpm" \
+            "minga_${VERSION}_linux_x86_64.tar.gz" "minga_${VERSION}_linux_aarch64.tar.gz"; do
+            digest=$(jq -er --arg name "$name" '[.assets[] | select(.name == $name and .state == "uploaded")] | select(length == 1) | .[0].digest | select(test("^sha256:[0-9a-f]{64}$")) | ltrimstr("sha256:")' release.json)
+            gh release download "v$VERSION" --repo "$GITHUB_REPOSITORY" --pattern "$name" --dir assets
+            printf '%s  assets/%s\n' "$digest" "$name" | sha256sum --check --strict
+          done
+      - name: Build the signed repositories
+        if: steps.credentials.outputs.configured == 'true'
+        env:
+          PACKAGE_SIGNING_KEY: ${{ secrets.PACKAGE_SIGNING_KEY }}
+        run: |
+          set -euo pipefail
+          key="$RUNNER_TEMP/package-signing-key.asc"
+          trap 'rm -f "$key"' EXIT
+          (umask 077 && printf '%s\n' "$PACKAGE_SIGNING_KEY" > "$key")
+          scripts/build-package-repos assets "$VERSION" "$SOURCE_SHA" "$key" repo-tree
+      - name: Install from the built repositories on clean distributions
+        if: steps.credentials.outputs.configured == 'true'
+        run: scripts/test-package-repos repo-tree "$VERSION"
+      - name: Upload to packages.mingacode.dev
+        if: steps.credentials.outputs.configured == 'true'
+        env:
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: scripts/upload-package-repos repo-tree | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Check that packages.mingacode.dev serves what was uploaded
+        if: steps.credentials.outputs.configured == 'true'
+        run: |
+          set -euo pipefail
+          served=$(curl -fsSL https://packages.mingacode.dev/repo.json | jq -er .version)
+          if [ "$served" != "$VERSION" ]; then
+            echo "::notice::packages.mingacode.dev serves $served, so this run did not replace it."
+            exit 0
+          fi
+          for path in apt/dists/stable/InRelease rpm/x86_64/repodata/repomd.xml arch/x86_64/minga.db; do
+            curl -fsSL "https://packages.mingacode.dev/$path" | cmp - "repo-tree/$path"
+          done

@@ -86,7 +86,8 @@
           <div class="runbook-groups">
             <div class="seg-group" role="group" aria-label="Platform">
               <button type="button" class="seg-btn is-active" data-rb-platform="apple-silicon">Apple Silicon macOS</button>
-              <button type="button" class="seg-btn" data-rb-platform="source">Linux / Intel Mac</button>
+              <button type="button" class="seg-btn" data-rb-platform="linux">Linux</button>
+              <button type="button" class="seg-btn" data-rb-platform="source">From source</button>
             </div>
             <div class="seg-group" role="group" aria-label="Client">
               <button type="button" class="seg-btn is-active" data-rb-client="mac">macOS App</button>
@@ -103,12 +104,14 @@
         <section class="essay-section" id="install">
           <h2>1. Install Minga</h2>
           <p>On <strong>Apple Silicon macOS</strong>, Homebrew installs signed, notarized rolling prereleases. The desktop app (<code>minga-mac</code>) and terminal client (<code>minga</code>) are independent; install whichever you want, or both.</p>
+          <p>On <strong>Linux</strong> (x86_64 or ARM64, glibc 2.39 or newer: Arch and Omarchy, Ubuntu 24.04+, Debian 13+, Fedora), add Minga's signed package repository once and your system updates keep the terminal client current. The key fingerprint is <code>2C5D 2396 B82C 1278 D459 6A09 6571 1C0C 3853 857B</code>.</p>
 
           <div class="code-tabs" data-code-tabs>
             <div class="code-tabs-header">
               <div class="code-tab-list" role="tablist" aria-label="Install method">
                 <button type="button" class="code-tab" role="tab" id="tab-gs-brew" aria-selected="true" aria-controls="panel-gs-brew">Apple Silicon macOS · Homebrew</button>
-                <button type="button" class="code-tab" role="tab" id="tab-gs-source" aria-selected="false" aria-controls="panel-gs-source" tabindex="-1">From source · Linux &amp; Intel macOS</button>
+                <button type="button" class="code-tab" role="tab" id="tab-gs-linux" aria-selected="false" aria-controls="panel-gs-linux" tabindex="-1">Linux · package repository</button>
+                <button type="button" class="code-tab" role="tab" id="tab-gs-source" aria-selected="false" aria-controls="panel-gs-source" tabindex="-1">From source · older Linux &amp; Intel macOS</button>
               </div>
               <div class="code-tabs-actions">
                 <button type="button" class="copy-btn" data-copy-target="gs-brew">Copy</button>
@@ -126,8 +129,27 @@ brew install jsmestad/minga/minga
 minga path/to/project</code></pre>
             </div>
 
+            <div class="code-tab-panel" role="tabpanel" id="panel-gs-linux" aria-labelledby="tab-gs-linux" data-copy-id="gs-linux">
+              <div class="code-tab-noscript">Linux · package repository</div>
+              <pre><code id="gs-linux"># Arch and Omarchy
+curl -fsSL https://packages.mingacode.dev/minga.asc | sudo pacman-key --add -
+sudo pacman-key --lsign-key 2C5D2396B82C1278D4596A0965711C0C3853857B
+curl -fsSL https://packages.mingacode.dev/arch/minga.conf | sudo tee -a /etc/pacman.conf &gt; /dev/null
+sudo pacman -Syu minga
+
+# Ubuntu and Debian
+sudo install -d -m 0755 /etc/apt/keyrings
+curl -fsSL https://packages.mingacode.dev/minga.asc | sudo tee /etc/apt/keyrings/minga.asc &gt; /dev/null
+curl -fsSL https://packages.mingacode.dev/apt/minga.sources | sudo tee /etc/apt/sources.list.d/minga.sources &gt; /dev/null
+sudo apt update &amp;&amp; sudo apt install minga
+
+# Fedora
+sudo curl -fsSLo /etc/yum.repos.d/minga.repo https://packages.mingacode.dev/rpm/minga.repo
+sudo dnf install minga</code></pre>
+            </div>
+
             <div class="code-tab-panel" role="tabpanel" id="panel-gs-source" aria-labelledby="tab-gs-source" data-copy-id="gs-source">
-              <div class="code-tab-noscript">From source · Linux &amp; Intel macOS</div>
+              <div class="code-tab-noscript">From source · older Linux &amp; Intel macOS</div>
               <pre><code id="gs-source">git clone https://github.com/jsmestad/minga.git
 cd minga
 mise install          # or: asdf install
@@ -137,7 +159,7 @@ bin/minga             # builds and starts terminal client</code></pre>
             </div>
           </div>
 
-          <p>Building from source requires the toolchains pinned in <code>.tool-versions</code> (Erlang, Elixir, Go, and Zig; prefer <code>mise</code> or prebuilt OTP packages to avoid compiling Erlang from scratch). Building the macOS desktop app from source (<code>bin/minga-mac</code>) additionally requires Xcode (<code>make</code> installs pinned <code>xcodegen</code> automatically). The first build takes several minutes while syntax grammars compile; incremental rebuilds after that are fast. Update Homebrew installs with <code>brew upgrade minga</code> or <code>brew upgrade --cask minga-mac</code>.</p>
+          <p>Building from source requires the toolchains pinned in <code>.tool-versions</code> (Erlang, Elixir, Go, and Zig; prefer <code>mise</code> or prebuilt OTP packages to avoid compiling Erlang from scratch). Building the macOS desktop app from source (<code>bin/minga-mac</code>) additionally requires Xcode (<code>make</code> installs pinned <code>xcodegen</code> automatically). The first build takes several minutes while syntax grammars compile; incremental rebuilds after that are fast. Update Homebrew installs with <code>brew upgrade minga</code> or <code>brew upgrade --cask minga-mac</code>; Linux package installs update with the rest of your system.</p>
 
           <div class="callout">
             <span class="callout-title">Prerelease build note</span>
