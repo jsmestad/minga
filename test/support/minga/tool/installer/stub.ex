@@ -18,6 +18,12 @@ defmodule Minga.Tool.Installer.Stub do
         Stub.set_install_result({:error, "simulated failure"})
         # ... test code that triggers install ...
       end
+
+  ## Latest-version gating
+
+  `gate_latest_versions/1` activates a gate: every `latest_version/1` call
+  blocks and sends `{:latest_version_blocked, ref, worker_pid}` to the
+  test process. Release individual workers with `release_latest_version/2`.
   """
 
   @behaviour Minga.Tool.Installer
@@ -50,6 +56,8 @@ defmodule Minga.Tool.Installer.Stub do
     :ets.insert(@table, {:installed_version, {:ok, "1.0.0-stub"}})
     :ets.insert(@table, {:latest_version, {:ok, "2.0.0-stub"}})
     :ets.insert(@table, {:install_gate, nil})
+    :ets.insert(@table, {:latest_version_gate, nil})
+    :ets.insert(@table, {:latest_version_crash, false})
     :ets.insert(@table, {:installs, []})
     :ets.insert(@table, {:uninstalls, []})
     :ok
@@ -95,6 +103,39 @@ defmodule Minga.Tool.Installer.Stub do
   @spec release_install(pid(), reference()) :: :ok
   def release_install(installer_pid, ref) when is_pid(installer_pid) and is_reference(ref) do
     send(installer_pid, {ref, :continue})
+    :ok
+  end
+
+  @doc """
+  Activates a gate on `latest_version/1`. Every subsequent call blocks
+  and sends `{:latest_version_blocked, ref, worker_pid}` to `test_pid`.
+  Release individual workers with `release_latest_version/2`.
+  """
+  @spec gate_latest_versions(pid()) :: reference()
+  def gate_latest_versions(test_pid \\ self()) when is_pid(test_pid) do
+    ref = make_ref()
+    :ets.insert(@table, {:latest_version_gate, {:active, test_pid, ref}})
+    ref
+  end
+
+  @doc "Deactivates the latest-version gate. Already-blocked workers stay blocked."
+  @spec ungate_latest_versions() :: :ok
+  def ungate_latest_versions do
+    :ets.insert(@table, {:latest_version_gate, nil})
+    :ok
+  end
+
+  @doc "Releases a single blocked `latest_version` worker."
+  @spec release_latest_version(pid(), reference()) :: :ok
+  def release_latest_version(worker_pid, ref) when is_pid(worker_pid) and is_reference(ref) do
+    send(worker_pid, {:latest_version_release, ref})
+    :ok
+  end
+
+  @doc "When true, `latest_version/1` raises instead of returning a result."
+  @spec set_latest_version_crash(boolean()) :: :ok
+  def set_latest_version_crash(crash?) when is_boolean(crash?) do
+    :ets.insert(@table, {:latest_version_crash, crash?})
     :ok
   end
 
@@ -157,6 +198,11 @@ defmodule Minga.Tool.Installer.Stub do
   @impl true
   @spec latest_version(Recipe.t()) :: {:ok, String.t()} | {:error, term()}
   def latest_version(_recipe) do
+    if get_value(:latest_version_crash, false) do
+      raise "simulated crash in latest_version"
+    end
+
+    maybe_gate_latest_version()
     get_value(:latest_version, {:ok, "2.0.0-stub"})
   end
 
@@ -172,6 +218,27 @@ defmodule Minga.Tool.Installer.Stub do
 
         receive do
           {^ref, :continue} ->
+            Process.demonitor(monitor_ref, [:flush])
+            :ok
+
+          {:DOWN, ^monitor_ref, :process, ^test_pid, _reason} ->
+            :ok
+        end
+
+      _ ->
+        :ok
+    end
+  end
+
+  @spec maybe_gate_latest_version() :: :ok
+  defp maybe_gate_latest_version do
+    case get_value(:latest_version_gate, nil) do
+      {:active, test_pid, ref} when is_pid(test_pid) and is_reference(ref) ->
+        monitor_ref = Process.monitor(test_pid)
+        send(test_pid, {:latest_version_blocked, ref, self()})
+
+        receive do
+          {:latest_version_release, ^ref} ->
             Process.demonitor(monitor_ref, [:flush])
             :ok
 

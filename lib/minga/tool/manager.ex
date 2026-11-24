@@ -26,6 +26,8 @@ defmodule Minga.Tool.Manager do
   - `:tool_install_complete` — `%{name: atom(), version: String.t()}`
   - `:tool_install_failed` — `%{name: atom(), reason: term()}`
   - `:tool_uninstall_complete` — `%{name: atom()}`
+  - `:tool_update_check_started` — `%{count: non_neg_integer()}`
+  - `:tool_update_check_complete` — `%{updates: [update_result()], errors: [update_error()]}`
   """
 
   use GenServer
@@ -35,8 +37,12 @@ defmodule Minga.Tool.Manager do
 
   @table __MODULE__
   @tools_dir_name "tools"
+  @max_update_concurrency 4
+  @default_update_check_timeout 15_000
 
   @type tool_status :: :installed | :installing | :not_installed | :update_available | :failed
+  @type update_result :: {atom(), String.t(), String.t()}
+  @type update_error :: {atom(), String.t()}
 
   defmodule State do
     @moduledoc false
@@ -46,14 +52,29 @@ defmodule Minga.Tool.Manager do
       :table,
       installing: MapSet.new(),
       failed: %{},
-      task_refs: %{}
+      task_refs: %{},
+      # Update check orchestration
+      update_gen: 0,
+      update_tasks: %{},
+      update_timers: %{},
+      update_queue: [],
+      update_results: [],
+      update_errors: [],
+      cached_updates: []
     ]
 
     @type t :: %__MODULE__{
             table: :ets.tid(),
             installing: MapSet.t(atom()),
             failed: %{atom() => String.t()},
-            task_refs: %{reference() => atom()}
+            task_refs: %{reference() => atom()},
+            update_gen: non_neg_integer(),
+            update_tasks: %{reference() => {atom(), String.t(), non_neg_integer(), pid()}},
+            update_timers: %{reference() => reference()},
+            update_queue: [{Minga.Tool.Recipe.t(), String.t()}],
+            update_results: [Minga.Tool.Manager.update_result()],
+            update_errors: [Minga.Tool.Manager.update_error()],
+            cached_updates: [Minga.Tool.Manager.update_result()]
           }
   end
 
@@ -140,10 +161,35 @@ defmodule Minga.Tool.Manager do
     GenServer.call(__MODULE__, :tool_status_list)
   end
 
-  @doc "Checks for updates across all installed tools. Returns a list of updatable tools."
-  @spec check_updates() :: [{atom(), String.t(), String.t()}]
+  @doc """
+  Starts an asynchronous update check for all installed tools.
+
+  Returns `:ok` immediately. At most #{@max_update_concurrency} checks run
+  concurrently; the rest queue. Each check has a per-tool timeout. A new
+  call cancels any in-flight check. Results are broadcast as
+  `:tool_update_check_complete` and cached for `cached_updates/0`.
+  """
+  @spec check_updates() :: :ok
   def check_updates do
-    GenServer.call(__MODULE__, :check_updates, 30_000)
+    GenServer.call(__MODULE__, :check_updates)
+  end
+
+  @doc "Returns cached results from the last completed update check."
+  @spec cached_updates() :: [update_result()]
+  def cached_updates do
+    GenServer.call(__MODULE__, :cached_updates)
+  end
+
+  @doc "Cancels any in-flight update check. Already-cached results are preserved."
+  @spec cancel_update_check() :: :ok
+  def cancel_update_check do
+    GenServer.call(__MODULE__, :cancel_update_check)
+  end
+
+  @doc "Returns true while an update check is in progress."
+  @spec update_check_active?() :: boolean()
+  def update_check_active? do
+    GenServer.call(__MODULE__, :update_check_active?)
   end
 
   # ── GenServer ───────────────────────────────────────────────────────────────
@@ -238,17 +284,74 @@ defmodule Minga.Tool.Manager do
   end
 
   def handle_call(:check_updates, _from, state) do
-    updates =
-      all_installed()
-      |> Enum.map(&check_tool_update/1)
-      |> Enum.reject(&is_nil/1)
+    state = begin_update_check(state)
+    {:reply, :ok, state}
+  end
 
-    {:reply, updates, state}
+  def handle_call(:cached_updates, _from, state) do
+    {:reply, state.cached_updates, state}
+  end
+
+  def handle_call(:cancel_update_check, _from, state) do
+    state = cancel_in_flight_updates(state)
+    {:reply, :ok, state}
+  end
+
+  def handle_call(:update_check_active?, _from, state) do
+    active? = state.update_tasks != %{} or state.update_queue != []
+    {:reply, active?, state}
   end
 
   @impl true
   def handle_info({ref, result}, state) when is_reference(ref) do
-    # Task completed
+    cond do
+      Map.has_key?(state.task_refs, ref) ->
+        handle_install_complete(ref, result, state)
+
+      Map.has_key?(state.update_tasks, ref) ->
+        handle_update_check_result(ref, result, state)
+
+      true ->
+        {:noreply, state}
+    end
+  end
+
+  def handle_info({:DOWN, ref, :process, _pid, reason}, state) when reason != :normal do
+    cond do
+      Map.has_key?(state.task_refs, ref) ->
+        handle_install_down(ref, reason, state)
+
+      Map.has_key?(state.update_tasks, ref) ->
+        handle_update_check_down(ref, reason, state)
+
+      true ->
+        {:noreply, state}
+    end
+  end
+
+  def handle_info({:update_check_timeout, ref, gen}, state) do
+    case Map.get(state.update_tasks, ref) do
+      {name, _version, ^gen, pid} ->
+        Process.demonitor(ref, [:flush])
+        Process.exit(pid, :kill)
+        state = remove_update_task(state, ref)
+        state = %{state | update_errors: [{name, "timeout"} | state.update_errors]}
+        Minga.Log.warning(:editor, "[Tool.Manager] Update check timed out: #{name}")
+        state = maybe_advance_update_check(state)
+        {:noreply, state}
+
+      _ ->
+        # Stale timer (task already completed or generation changed)
+        {:noreply, state}
+    end
+  end
+
+  def handle_info(_msg, state), do: {:noreply, state}
+
+  # ── Install task handling ──────────────────────────────────────────────────
+
+  @spec handle_install_complete(reference(), term(), State.t()) :: {:noreply, State.t()}
+  defp handle_install_complete(ref, result, state) do
     case Map.pop(state.task_refs, ref) do
       {nil, _} ->
         {:noreply, state}
@@ -276,7 +379,8 @@ defmodule Minga.Tool.Manager do
     end
   end
 
-  def handle_info({:DOWN, ref, :process, _pid, reason}, state) when reason != :normal do
+  @spec handle_install_down(reference(), term(), State.t()) :: {:noreply, State.t()}
+  defp handle_install_down(ref, reason, state) do
     case Map.pop(state.task_refs, ref) do
       {nil, _} ->
         {:noreply, state}
@@ -291,22 +395,205 @@ defmodule Minga.Tool.Manager do
     end
   end
 
-  def handle_info(_msg, state), do: {:noreply, state}
+  # ── Update check orchestration ─────────────────────────────────────────────
 
-  # ── Private ─────────────────────────────────────────────────────────────────
+  @spec begin_update_check(State.t()) :: State.t()
+  defp begin_update_check(state) do
+    state = cancel_in_flight_updates(state)
+    gen = state.update_gen + 1
+    installed = all_installed()
 
-  @spec check_tool_update(Installation.t()) :: {atom(), String.t(), String.t()} | nil
-  defp check_tool_update(inst) do
-    with %Recipe{} = recipe <- RecipeRegistry.get(inst.name),
-         installer = Installer.for_method(recipe.method),
-         {:ok, latest} when latest != inst.version <- installer.latest_version(recipe) do
-      {inst.name, inst.version, latest}
+    snapshots =
+      for inst <- installed,
+          recipe = RecipeRegistry.get(inst.name),
+          recipe != nil,
+          do: {recipe, inst.version}
+
+    state = %{state | update_gen: gen, update_results: [], update_errors: []}
+    broadcast(:tool_update_check_started, %{count: length(snapshots)})
+
+    if snapshots == [] do
+      finalize_update_check(state)
     else
-      _ -> nil
+      dispatch_update_batch(snapshots, gen, state)
     end
   end
 
-  @spec tool_status(atom(), map()) :: {tool_status(), String.t() | nil, String.t() | nil}
+  @spec dispatch_update_batch([{Recipe.t(), String.t()}], non_neg_integer(), State.t()) ::
+          State.t()
+  defp dispatch_update_batch(snapshots, gen, state) do
+    {batch, queue} = Enum.split(snapshots, @max_update_concurrency)
+    state = %{state | update_queue: queue}
+
+    Enum.reduce(batch, state, fn {recipe, version}, acc ->
+      start_single_update_task(recipe, version, gen, acc)
+    end)
+  end
+
+  @spec start_single_update_task(Recipe.t(), String.t(), non_neg_integer(), State.t()) ::
+          State.t()
+  defp start_single_update_task(recipe, installed_version, gen, state) do
+    task =
+      Task.Supervisor.async_nolink(Minga.Eval.TaskSupervisor, fn ->
+        installer = Installer.for_method(recipe.method)
+
+        case installer.latest_version(recipe) do
+          {:ok, latest} -> {:ok, recipe.name, installed_version, latest}
+          {:error, reason} -> {:error, recipe.name, reason}
+        end
+      end)
+
+    timeout = update_check_timeout()
+    timer_ref = Process.send_after(self(), {:update_check_timeout, task.ref, gen}, timeout)
+
+    %{
+      state
+      | update_tasks:
+          Map.put(state.update_tasks, task.ref, {recipe.name, installed_version, gen, task.pid}),
+        update_timers: Map.put(state.update_timers, task.ref, timer_ref)
+    }
+  end
+
+  @spec handle_update_check_result(reference(), term(), State.t()) :: {:noreply, State.t()}
+  defp handle_update_check_result(ref, result, state) do
+    case Map.get(state.update_tasks, ref) do
+      nil ->
+        {:noreply, state}
+
+      {_name, _version, gen, _pid} when gen != state.update_gen ->
+        # Stale result from a previous generation; discard
+        Process.demonitor(ref, [:flush])
+        state = remove_update_task(state, ref)
+        {:noreply, state}
+
+      {name, _version, _gen, _pid} ->
+        Process.demonitor(ref, [:flush])
+        state = remove_update_task(state, ref)
+
+        state =
+          case result do
+            {:ok, ^name, installed, latest} when latest != installed ->
+              %{state | update_results: [{name, installed, latest} | state.update_results]}
+
+            {:ok, _, _, _} ->
+              # Same version, no update needed
+              state
+
+            {:error, err_name, reason} ->
+              reason_str = format_error_reason(reason)
+
+              Minga.Log.warning(
+                :editor,
+                "[Tool.Manager] Update check failed: #{err_name} - #{reason_str}"
+              )
+
+              %{state | update_errors: [{err_name, reason_str} | state.update_errors]}
+          end
+
+        state = maybe_advance_update_check(state)
+        {:noreply, state}
+    end
+  end
+
+  @spec handle_update_check_down(reference(), term(), State.t()) :: {:noreply, State.t()}
+  defp handle_update_check_down(ref, reason, state) do
+    case Map.get(state.update_tasks, ref) do
+      nil ->
+        {:noreply, state}
+
+      {_name, _version, gen, _pid} when gen != state.update_gen ->
+        state = remove_update_task(state, ref)
+        {:noreply, state}
+
+      {name, _version, _gen, _pid} ->
+        state = remove_update_task(state, ref)
+        reason_str = format_error_reason(reason)
+        state = %{state | update_errors: [{name, reason_str} | state.update_errors]}
+        Minga.Log.warning(:editor, "[Tool.Manager] Update check crashed: #{name} - #{reason_str}")
+        state = maybe_advance_update_check(state)
+        {:noreply, state}
+    end
+  end
+
+  @spec maybe_advance_update_check(State.t()) :: State.t()
+  defp maybe_advance_update_check(state) do
+    case state.update_queue do
+      [] when map_size(state.update_tasks) == 0 ->
+        finalize_update_check(state)
+
+      [{recipe, version} | rest] ->
+        state = %{state | update_queue: rest}
+        start_single_update_task(recipe, version, state.update_gen, state)
+
+      _ ->
+        # Queue empty but tasks still in flight; wait for them
+        state
+    end
+  end
+
+  @spec finalize_update_check(State.t()) :: State.t()
+  defp finalize_update_check(state) do
+    results = Enum.reverse(state.update_results)
+    errors = Enum.reverse(state.update_errors)
+    broadcast(:tool_update_check_complete, %{updates: results, errors: errors})
+
+    count = length(results)
+    error_count = length(errors)
+
+    if error_count > 0 do
+      log_message(
+        "Update check complete: #{count} update(s) available, #{error_count} check(s) failed"
+      )
+    else
+      log_message("Update check complete: #{count} update(s) available")
+    end
+
+    %{state | cached_updates: results, update_results: [], update_errors: []}
+  end
+
+  @spec cancel_in_flight_updates(State.t()) :: State.t()
+  defp cancel_in_flight_updates(state) do
+    for {ref, {_name, _version, _gen, pid}} <- state.update_tasks do
+      Process.demonitor(ref, [:flush])
+      Process.exit(pid, :kill)
+    end
+
+    for {_ref, timer} <- state.update_timers do
+      Process.cancel_timer(timer)
+    end
+
+    %{
+      state
+      | update_tasks: %{},
+        update_timers: %{},
+        update_queue: [],
+        update_results: [],
+        update_errors: []
+    }
+  end
+
+  @spec remove_update_task(State.t(), reference()) :: State.t()
+  defp remove_update_task(state, ref) do
+    case Map.get(state.update_timers, ref) do
+      nil -> :ok
+      timer -> Process.cancel_timer(timer)
+    end
+
+    %{
+      state
+      | update_tasks: Map.delete(state.update_tasks, ref),
+        update_timers: Map.delete(state.update_timers, ref)
+    }
+  end
+
+  @spec update_check_timeout() :: non_neg_integer()
+  defp update_check_timeout do
+    Application.get_env(:minga, :update_check_timeout, @default_update_check_timeout)
+  end
+
+  # ── Private ─────────────────────────────────────────────────────────────────
+
+  @spec tool_status(atom(), State.t()) :: {tool_status(), String.t() | nil, String.t() | nil}
   defp tool_status(name, state) do
     tool_status_for(name, state.installing, state.failed)
   end
@@ -332,7 +619,7 @@ defmodule Minga.Tool.Manager do
     end
   end
 
-  @spec validate_install(atom(), map()) :: {:ok, Recipe.t()} | {:error, atom()}
+  @spec validate_install(atom(), State.t()) :: {:ok, Recipe.t()} | {:error, atom()}
   defp validate_install(name, state) do
     if MapSet.member?(state.installing, name) do
       {:error, :already_installing}
@@ -350,7 +637,7 @@ defmodule Minga.Tool.Manager do
     end
   end
 
-  @spec start_install_task(Recipe.t(), map()) :: map()
+  @spec start_install_task(Recipe.t(), State.t()) :: State.t()
   defp start_install_task(recipe, state) do
     name = recipe.name
     broadcast(:tool_install_started, %{name: name})
